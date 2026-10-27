@@ -52,12 +52,13 @@ describe('creator-side anonymisation', () => {
       {
         id: '__peers__',
         // Even if a caller messes up the label here, the component
-        // replaces it with "Other creator N" via displayLabel().
+        // names it from `peerCount` via displayLabel(), never `label`.
         label: 'Other creators (2)',
         percent: 4000,
         color: 'var(--color-info-600)',
         locked: true,
         anonymous: true,
+        peerCount: 2,
       },
     ];
 
@@ -65,7 +66,6 @@ describe('creator-side anonymisation', () => {
       target: document.body,
       props: {
         mode: 'creator',
-        platformFeePercent: 1000,
         slices,
         readOnly: true,
       },
@@ -104,7 +104,6 @@ describe('creator-side anonymisation', () => {
       target: document.body,
       props: {
         mode: 'creator',
-        platformFeePercent: 1000,
         slices,
         readOnly: true,
       },
@@ -136,7 +135,6 @@ describe('creator-side anonymisation', () => {
       target: document.body,
       props: {
         mode: 'owner',
-        platformFeePercent: 1000,
         slices,
         readOnly: true,
       },

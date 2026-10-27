@@ -53,7 +53,6 @@ describe('buildOwnerAgreementFocusItems', () => {
           id: 'agr-1',
           creatorId: 'creator-1',
           revenueType: 'subscription',
-          organizationFeePercentage: 7000,
           effectiveUntil: null,
         },
       ],
@@ -98,7 +97,6 @@ describe('buildOwnerAgreementFocusItems', () => {
           id: 'agr-1',
           creatorId: 'creator-1',
           revenueType: 'content_purchase',
-          organizationFeePercentage: 7000,
           effectiveUntil: null,
         },
       ],
@@ -128,7 +126,6 @@ describe('buildOwnerAgreementFocusItems', () => {
           id: 'agr-1',
           creatorId: 'creator-1',
           revenueType: 'subscription',
-          organizationFeePercentage: 7000,
           effectiveUntil: null,
         },
       ],
@@ -172,7 +169,6 @@ describe('buildOwnerAgreementFocusItems', () => {
           id: 'agr-1',
           creatorId: 'creator-1',
           revenueType: 'subscription',
-          organizationFeePercentage: 7000,
           effectiveUntil: null,
         },
       ],
@@ -193,7 +189,7 @@ describe('buildOwnerAgreementFocusItems', () => {
     ).toBeUndefined();
   });
 
-  it('emits an expiring warning when effectiveUntil is within the 30-day window', () => {
+  it('emits a review prompt when the review date is within the 30-day window', () => {
     const items = buildOwnerAgreementFocusItems({
       teamMembers: [
         {
@@ -208,7 +204,6 @@ describe('buildOwnerAgreementFocusItems', () => {
           id: 'agr-1',
           creatorId: 'creator-1',
           revenueType: 'subscription',
-          organizationFeePercentage: 7000,
           effectiveUntil: daysFromNow(25),
         },
       ],
@@ -220,10 +215,10 @@ describe('buildOwnerAgreementFocusItems', () => {
     expect(expiring).toBeDefined();
     expect(expiring?.tone).toBe('warning');
     expect(expiring?.dismissable).toBe(true);
-    expect(expiring?.title).toMatch(/expires in 25 days/);
+    expect(expiring?.title).toMatch(/is due for review in 25 days/);
   });
 
-  it('does NOT emit an expiring warning when effectiveUntil is beyond the 30-day window', () => {
+  it('does NOT emit a review prompt when the review date is beyond the 30-day window', () => {
     const items = buildOwnerAgreementFocusItems({
       teamMembers: [
         {
@@ -238,7 +233,6 @@ describe('buildOwnerAgreementFocusItems', () => {
           id: 'agr-1',
           creatorId: 'creator-1',
           revenueType: 'subscription',
-          organizationFeePercentage: 7000,
           effectiveUntil: daysFromNow(35),
         },
       ],
@@ -251,7 +245,7 @@ describe('buildOwnerAgreementFocusItems', () => {
     ).toBeUndefined();
   });
 
-  it('does NOT emit an expiring warning for indefinite agreements (effectiveUntil = null)', () => {
+  it('does NOT emit a review prompt for indefinite agreements (effectiveUntil = null)', () => {
     const items = buildOwnerAgreementFocusItems({
       teamMembers: [
         {
@@ -266,7 +260,6 @@ describe('buildOwnerAgreementFocusItems', () => {
           id: 'agr-1',
           creatorId: 'creator-1',
           revenueType: 'subscription',
-          organizationFeePercentage: 7000,
           effectiveUntil: null,
         },
       ],
@@ -326,7 +319,6 @@ describe('buildOwnerAgreementFocusItems', () => {
           id: 'agr-1',
           creatorId: 'creator-1',
           revenueType: 'subscription',
-          organizationFeePercentage: 7000,
           effectiveUntil: daysFromNow(10).toISOString(),
         },
       ],
@@ -384,7 +376,7 @@ describe('buildCreatorAgreementFocusItems', () => {
     expect(items[0]?.title).toContain('An organisation');
   });
 
-  it('emits a dismissable warning when an active agreement is expiring in 30d', () => {
+  it('emits a dismissable prompt when an active agreement is due for review in 30d', () => {
     const items = buildCreatorAgreementFocusItems({
       pendingProposalsFromOrg: [],
       activeAgreements: [
@@ -403,7 +395,7 @@ describe('buildCreatorAgreementFocusItems', () => {
     expect(expiring?.tone).toBe('warning');
     expect(expiring?.dismissable).toBe(true);
     expect(expiring?.title).toMatch(
-      /Your agreement with Studio Alpha expires in 20 days/
+      /Your agreement with Studio Alpha is due for review in 20 days/
     );
   });
 

@@ -32,10 +32,32 @@ A **gap** marker means the code does not behave this way yet; see
 **Storage.** Proposals live in `agreement_proposals`, an append-only negotiation
 log. An accepted proposal produces a `creator_organization_agreements` row,
 which points at it through `current_proposal_id`. The share is read from the
-accepted proposal (`proposed_creator_share_percent`). The legacy column
-`organization_fee_percentage` holds `10000 − share` and is still written; new
-code must not read it — **gap**: `Codex-2hxff.19`, `Codex-2hxff.20` (several
-readers still do).
+accepted proposal (`proposed_creator_share_percent`). Every server path reads
+it there: the payment resolver, the 100% check, the termination and
+review-reminder emails, the creator's `/agreements/me` views and the admin
+revenue-by-creator view. The agreement rows the API returns carry the share as
+`creatorSharePercent`.
+
+An agreement whose proposal link is gone pays nothing. It is shown and counted
+as 0, and every read that meets one logs it at error with the agreement's id.
+The payment resolver (`agreementsInForce`) logs "agreement has no current
+proposal; skipped" at each sale, with an errorId and the sale's moment. These log "agreement
+has no current proposal; it pays nothing", each with an errorId:
+
+- the 100% check, on every propose, counter and accept in that pool;
+- the termination email;
+- the agreement lists behind `GET /agreements`, `/agreements/me` and
+  `/agreements/me/portfolio` (`getActiveAgreements`,
+  `getActiveAgreementsForCreator`, `getTerminatedAgreementsForCreator`);
+- the review-reminder scan (`findExpiringAgreements`);
+- the admin revenue-by-creator view.
+
+The legacy column `organization_fee_percentage` holds `10000 − share` and is
+still written; new code must not read it. The web app reads only
+`creatorSharePercent` (`agreement-share.ts`): a missing share shows "—", never
+0%, and adds nothing to a total (owner decision 2026-10-25, "Show '—'";
+`Codex-fazy6`). Nothing on the web reads the legacy column any more, so the
+dual-write can stop once nothing on the server needs it.
 
 ## Negotiating
 
@@ -47,11 +69,30 @@ readers still do).
 | **Decline** | The other side | `declined`, with a reason; both sides are emailed |
 | **Withdraw** | The side that made the proposal | `withdrawn`; no email |
 
-Only one thread can be open per organisation, creator and revenue type. Every
-action locks the row it changes, including a new proposal, so two people acting
-at once cannot both succeed — **gap**: `Codex-2hxff.19` (proposing takes no
-lock). Admins can see an organisation's agreements but only the owner can act;
-the screen shows admins only what they can do — **gap**: `Codex-2hxff.20`.
+Only one thread can be open per organisation, creator and revenue type. A
+thread is open while one of its proposals is `open`. Once its last proposal is
+declined or withdrawn, by hand or because the creator left, the thread is over
+and the owner can propose again; the `countered` rows behind it do not hold it
+open. Every
+action locks the row it changes, so two people acting on one proposal at once
+cannot both succeed. Proposing, countering and accepting also take one lock
+per organisation and revenue type before they look for an open thread and add
+up the shares. So two proposals for the same creator made at once open one
+thread, and two acceptances for different creators that together pass 100%
+cannot both succeed: the second waits, sees the first, and is refused.
+Admins can see an organisation's agreements, but only the owner can act.
+Admins get a read-only Revenue share page that says: "You can see every
+agreement and negotiation here. Only the owner can propose, change or end an
+agreement." Its group of open threads is "Waiting on the owner", and it has
+no actions.
+
+An agreement takes effect from its proposal's start date: the moment it was
+proposed, unless an API caller sends an earlier one (the Studio never sends
+one). **A start date in the future is refused** (`FutureStartNotAllowedError`,
+422), both when the proposal is made and again when it is accepted (owner
+decision 2026-10-21, "Refuse a future start", `Codex-2hxff.63`). Accepting
+ends the creator's current agreement at once, so a later start would leave
+them unpaid in between.
 
 A round-1 proposal exists **only** as a proposal row. There is no agreement row
 until acceptance, so anything that lists "this creator's agreements" must also
@@ -68,11 +109,12 @@ Owner decision AGR-01, "Keeps paying", clarified as "Yes, any time".
   or a renegotiated agreement replaces it.
 - Thirty days before the review date both sides are emailed a reminder
   (`agreement-expiring-soon`, notifications-api cron `0 8 * * *`, production
-  only), worded as a review reminder.
+  only), worded as a review reminder. Migration 0106 rewrote the live
+  templates, unless an organisation had edited its own copy.
 
-— **gap**: `Codex-2hxff.17`. Today the review date acts as a hard cutoff: the
-creator silently drops to £0 on subscriptions while Studio still shows the
-agreement as active, and lapsed agreements still count against the 100% limit.
+`effective_until` stores the review date. Only the reminder scan
+(`findExpiringAgreements`) reads it. Payments, Studio, the 100% limit and the
+admin revenue view all treat an agreement past its review date as active.
 
 ## Ending an agreement
 
@@ -86,10 +128,63 @@ agreement as active, and lapsed agreements still count against the 100% limit.
 ### Leaving an organisation
 
 Owner decision AGR-09, "End on removal". When a creator is removed from an
-organisation, or leaves it, their agreements there are **terminated at that
-moment**. Money earned before then is still paid to them. The payout lookup also
-requires the creator to be an active member, as a safeguard — **gap**:
-`Codex-2hxff.18`.
+organisation, their agreements there are **terminated at that moment**
+(`terminateAgreementsOnDeparture`, in the same transaction as the membership
+change). Their agreements in other organisations are untouched. After the
+commit the creator gets one `removed-from-organisation` email listing
+everything that ended (owner decision: "Yes, one email"). On removal it takes
+the place of `agreement-terminated`.
+
+Nothing new can start for them either. Their open proposals there are
+withdrawn in the same transaction (`withdrawProposalsOnDeparture`), and
+accepting or countering any proposal requires the creator to still be an
+active member. That check takes a share lock on the membership row, so a
+removal and an acceptance at the same moment serialise: either the removal
+also ends the new agreement, or the acceptance is refused.
+
+Money earned before the removal is still paid to them. The resolver reads the
+termination time, not the membership. A webhook for an earlier invoice that
+lands, or is retried, after the removal still finds the agreement. A check on
+the membership as it is *now* would wrongly drop that share, so there is none.
+A creator who deletes their own account is treated the same way, in every
+organisation at once (owner decision: "End them like a removal"). Their
+agreements end and their open proposals are withdrawn in the same transaction
+as the deletion, with the reason "The creator deleted their account". No email
+is sent, because the address is scrubbed by the deletion.
+
+#### What comes off sale
+
+Owner decision, `Codex-2hxff.64`: when a creator is removed, nothing of theirs
+stays on sale there. In the same transaction as the removal
+(`withdrawCatalogueOnDeparture`), their **published** content and courses in
+that organisation become `archived`, together with each course's landing
+page. Each archived item is stamped with `off_sale_at`. Drafts, deleted rows,
+personal content, other creators' items and other organisations are left
+alone.
+
+| Who | What happens |
+|---|---|
+| One-off buyers, entitlement holders, course owners | Keep it for good. |
+| Organisation tier subscribers | Keep it until their next renewal: access needs `off_sale_at >= current_period_start` ([access](access.md#when-access-ends)). Tier-derived course access ends the same way. |
+| Course subscribers | Their subscription is cancelled at period end, and each subscriber gets a `course-no-longer-offered` email. Up to 50 are cancelled right after the removal; the hourly ecom-api sweep cancels the rest, up to 200 an hour. |
+| Followers and everyone else | Lose it immediately. |
+| Another creator's course that uses one of their practices | Keeps it, for existing and new buyers alike (owner decision: "Stays for everyone"). |
+
+A checkout that was already open when the removal happened still completes,
+at the old split. A purchase resolves its agreement when its checkout
+**started** ([purchases](purchases.md#completing-the-purchase)).
+
+Nothing comes back by itself if the creator rejoins. Republishing an item by
+hand clears `off_sale_at`. The owner sees all of this before confirming: the
+remove dialog loads a preview of what stops now, what ends later and what is
+kept (`GET /api/organizations/:id/members/:userId/departure-preview`).
+
+Account deletion never reaches this step: an account that still has content
+cannot be deleted.
+
+`removeMember` and account deletion are the only ways a creator leaves today.
+Any new way out must call `withdrawProposalsOnDeparture` and
+`terminateAgreementsOnDeparture` too.
 
 ## How a share applies
 
@@ -101,20 +196,28 @@ requires the creator to be an active member, as a safeguard — **gap**:
 | Course subscription invoice | The course creator's `subscription` agreement | The default subscription organisation fee; the creator gets the rest |
 | Orgless sale | None | No organisation slice |
 
-One resolver decides which agreements apply, for every path — **gap**:
-`Codex-2hxff.19`:
+One resolver decides which agreements apply, for every path
+(`agreementsInForce` in `@codex/agreements`):
 
-- it uses the sale's own time: the invoice's creation time for subscriptions and
-  the payment time for purchases (today purchases use the time the webhook is
-  processed);
+- it uses the sale's own time: the invoice's creation time for subscriptions,
+  and the checkout session's creation time for purchases (`offerAt`), so a
+  buyer pays the split that was on offer when they started;
 - an agreement counts if it is active at that time, or was terminated after it,
-  and its effective dates cover it;
-- a missing proposal link is logged and skipped, never silently dropped (today
-  the purchase path's inner join hides it);
+  and it had taken effect by then (the review date is not read);
+- a missing proposal link is logged and skipped, never silently dropped, and
+  that creator gets no share rather than a newer agreement's;
 - results are ordered deterministically and counted once per creator, even
-  mid-renegotiation;
-- the purchase or invoice records which agreement it used (today
-  `creator_org_agreement_id` is always empty).
+  mid-renegotiation: the older agreement was the one in force;
+- an organisation subscription invoice is split once. A redelivery keeps the
+  first split, even when an agreement accepted since is backdated to before
+  the invoice (owner decision 2026-10-21, "Keep its first split",
+  `Codex-2hxff.62`). The creator's share starts with the next invoice;
+- the sale records which agreement it used, in `creator_org_agreement_id`: a
+  purchase (content or course) on its `purchases` row and its creator slice,
+  and a subscription invoice, which has no row of its own, on its creator
+  slices in `payouts`. It is empty when no agreement applied.
+  `platform_agreement_id` stays empty: fee configuration replaced platform
+  agreements.
 
 ## Who sees what
 
@@ -146,13 +249,22 @@ also require the caller to be an active owner.
 | `agreement-proposed-by-owner` | The creator |
 | `agreement-countered-by-creator` / `agreement-countered-by-owner` | The other side |
 | `agreement-accepted`, `agreement-declined` | Both sides |
-| `agreement-terminated` | The side that did not terminate |
+| `agreement-terminated` | The side that did not terminate (not sent on removal) |
+| `removed-from-organisation` | A removed creator: their agreements ended, items taken off sale, course subscriptions ending |
+| `course-no-longer-offered` | A course subscriber whose course was taken off sale |
 | `agreement-expiring-soon` | Both sides, 30 days before the review date |
 
 Every link in these emails opens a page that exists for that recipient — the
-owner's organisation Studio or the creator's negotiations page — **gap**:
-`Codex-2hxff.20` (today every link is dead). Copy always says "post-platform"
-revenue.
+owner's organisation Studio or the creator's negotiations page. The links are
+built with `buildOrgUrlFromEnv`.
+- The owner's links go to the organisation's Revenue share page.
+- The creator's links go to the thread.
+- A decline sends the creator to their negotiations list, because a thread
+  declined in its first round has no page.
+- **Gap**: a recipient whose platform role is `member` is refused by the
+  creators' Studio (`Codex-2hxff.76`).
+
+Copy always says "post-platform" revenue.
 
 ## Not planned yet
 

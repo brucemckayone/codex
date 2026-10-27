@@ -41,7 +41,7 @@ import {
   MAX_IMAGE_SIZE_BYTES,
   SUPPORTED_IMAGE_MIME_TYPES,
 } from '@codex/image-processing';
-import type { Logger } from '@codex/observability';
+import type { Logger, ObservabilityClient } from '@codex/observability';
 import type { CheckSlugResponse, HonoEnv } from '@codex/shared-types';
 import { createIdParamsSchema } from '@codex/validation';
 import {
@@ -52,32 +52,48 @@ import {
 } from '@codex/worker-utils';
 import { Hono } from 'hono';
 import { cleanupContentThumbnailOnDelete } from './content-cleanup';
+import { resolveR2PublicBases, toPublicItems } from './r2-public-urls';
 
 /**
  * Bump the org content version in KV after publish/unpublish/delete.
- * Also invalidates the slug-keyed cache (public org info, stats, creators)
- * since content changes affect creator contentCount and org stats.
- * Fire-and-forget via waitUntil — does not block the response.
+ * Also invalidates the org's public caches (info, stats, creators) since
+ * content changes affect creator contentCount and org stats.
+ * Fire-and-forget via waitUntil — does not block the response, and never
+ * throws: the thumbnail route calls it from a `.finally()`, where a throw
+ * would replace the upload's own error.
  */
 function bumpOrgContentVersion(
   env: HonoEnv['Bindings'],
   executionCtx: ExecutionContext,
   organizationId: string | null | undefined,
-  obs?: Logger
+  obs?: ObservabilityClient
 ): void {
   if (!organizationId || !env.CACHE_KV) return;
+  // Given `obs`, because the cache swallows a failed invalidation and logs it
+  // only through its own client: the `.catch` below never sees one.
   const cache = new VersionedCache({
     kv: env.CACHE_KV,
     waitUntil: (promise) => executionCtx.waitUntil(promise),
+    obs,
   });
-  const db = createDbClient(env);
+  // Invalidate slug-keyed cache (stats, creators, public info) — shared
+  // helper resolves orgId → slug and swallows transient failures. Started in
+  // a promise of its own, so a client that cannot be built (missing config)
+  // lands in the `.catch` below instead of throwing to the caller, and the
+  // other bumps still run.
+  const bySlug = Promise.resolve().then(() =>
+    invalidateOrgSlugCache({
+      db: createDbClient(env),
+      cache,
+      orgId: organizationId,
+      logger: obs,
+    })
+  );
   executionCtx.waitUntil(
     Promise.all([
       // Invalidate org content collection version
       cache.invalidate(CacheType.COLLECTION_ORG_CONTENT(organizationId)),
-      // Invalidate slug-keyed cache (stats, creators, public info) — shared
-      // helper resolves orgId → slug and swallows transient failures.
-      invalidateOrgSlugCache({ db, cache, orgId: organizationId, logger: obs }),
+      bySlug,
       // Invalidate the public topic list: publish/unpublish/delete changes the
       // set of categories with ≥1 published item, so a cached "Browse by topic"
       // list could otherwise show empty or missing topics until TTL.
@@ -235,12 +251,25 @@ app.get(
     policy: { auth: 'required' },
     input: { query: contentBrowseQuerySchema },
     handler: async (ctx) => {
+      // page and limit go in their own argument: list() pages only from that
+      // one, so left inside the filters they were ignored and every page
+      // returned the first 20 items (Codex-uuj1g).
+      const { page, limit, ...filters } = ctx.input.query;
       const result = await ctx.services.content.list(
         ctx.user.id,
-        ctx.input.query,
+        filters,
+        { page, limit },
         { scope: 'browse' }
       );
-      return new PaginatedResult(result.items, result.pagination);
+      // The public list's item, not the row (Codex-1bdx0): this route is any
+      // signed-in account, and it used to send whole media_items rows (raw R2
+      // keys, RunPod job id, transcoding error) and the whole organizations
+      // row, with no URL resolved. The cards read the poster as
+      // `mediaItem.thumbnailUrl`, which this resolves.
+      return new PaginatedResult(
+        toPublicItems(result.items, resolveR2PublicBases(ctx.env), ctx.obs),
+        result.pagination
+      );
     },
   })
 );
@@ -289,11 +318,22 @@ app.patch(
       body: updateContentSchema,
     },
     handler: async (ctx): Promise<UpdateContentResponse['data']> => {
-      const result = await ctx.services.content.update(
-        ctx.input.params.id,
-        ctx.input.body,
-        ctx.user.id
-      );
+      const { content: result, droppedThumbnailUrl } =
+        await ctx.services.content.updateReportingDroppedThumbnail(
+          ctx.input.params.id,
+          ctx.input.body,
+          ctx.user.id
+        );
+      // The editor's "use media thumbnail" moves the row off an uploaded
+      // thumbnail without the DELETE route; its folder goes here instead
+      // (Codex-kk9nv.5). Only this content's own folder is ever deleted.
+      if (droppedThumbnailUrl) {
+        await ctx.services.imageProcessing.deleteDroppedContentThumbnail(
+          result.id,
+          result.creatorId,
+          droppedThumbnailUrl
+        );
+      }
       // Fan per-user library invalidation (Codex-c01do). Covers access-config
       // edits — the most common cause of stale accessType flags in library UI.
       fanContentInvalidation(
@@ -336,9 +376,12 @@ app.get(
     handler: async (ctx) => {
       // Studio-scope: returns the signed-in creator's content across all
       // their orgs (drafts list, dashboard). organizationId is optional.
+      // Paged from its own argument, as /browse is (Codex-uuj1g).
+      const { page, limit, ...filters } = ctx.input.query;
       const result = await ctx.services.content.list(
         ctx.user.id,
-        ctx.input.query,
+        filters,
+        { page, limit },
         { scope: 'studio' }
       );
       return new PaginatedResult(result.items, result.pagination);
@@ -525,23 +568,26 @@ app.post(
         throw new ContentNotFoundError(ctx.input.params.id);
       }
 
-      // Process image via service registry
-      const result = await ctx.services.imageProcessing.processContentThumbnail(
-        ctx.input.params.id,
-        ctx.user.id,
-        new File([ctx.files.thumbnail.buffer], ctx.files.thumbnail.name, {
-          type: ctx.files.thumbnail.type,
-        })
-      );
-
       // Thumbnail is part of the public content payload, so cached list/detail
-      // pages must pick up the new image. Bump the org content version.
-      bumpOrgContentVersion(
-        ctx.env,
-        ctx.executionCtx,
-        content.organizationId,
-        ctx.obs
-      );
+      // pages must pick up the new image: bump the org content version. Also
+      // when it throws: a write can commit and still report failure, and the
+      // thumbnail it replaced is then deleted (Codex-kk9nv.16).
+      const result = await ctx.services.imageProcessing
+        .processContentThumbnail(
+          ctx.input.params.id,
+          ctx.user.id,
+          new File([ctx.files.thumbnail.buffer], ctx.files.thumbnail.name, {
+            type: ctx.files.thumbnail.type,
+          })
+        )
+        .finally(() =>
+          bumpOrgContentVersion(
+            ctx.env,
+            ctx.executionCtx,
+            content.organizationId,
+            ctx.obs
+          )
+        );
 
       return {
         thumbnailUrl: result.url,

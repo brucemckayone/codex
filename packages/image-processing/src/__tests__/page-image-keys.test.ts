@@ -18,7 +18,7 @@ describe('page-image keys', () => {
     expect(pageImageKey(PAGE, IMAGE)).toBe(BASE);
   });
 
-  it('names the four objects that actually hold the bytes, xl included (Codex-61zsk.13)', () => {
+  it('names the four objects that actually hold the bytes, xl included (Codex-61zsk.13, Codex-kk9nv.5)', () => {
     // The upload records this list and the save nominates it, so an object
     // missing here is written and never swept.
     expect(pageImageObjectKeys(BASE)).toEqual([
@@ -66,6 +66,7 @@ describe('page-image keys', () => {
     ['the base key itself', BASE],
     ['a size no upload writes', `${BASE}/xxl.webp`],
     ['a size in another format', `${BASE}/xl.png`],
+    ['a raw upload, which no still keeps (Codex-kk9nv.5)', `${BASE}/original`],
     ['a course still variant', `courses/${PAGE}/hero/lg.webp`],
   ])('refuses %s as an object key', (_label, value) => {
     expect(pageImageKeyOfObject(value)).toBeNull();

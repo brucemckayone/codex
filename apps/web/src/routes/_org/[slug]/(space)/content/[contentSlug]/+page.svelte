@@ -156,7 +156,8 @@
     });
   });
 
-  const creatorName = $derived(content.creator?.name ?? content.creator?.email ?? '');
+  // Name only: the public list carries no email (it is anonymous).
+  const creatorName = $derived(content.creator?.name ?? '');
   const titleSuffix = $derived(data.org?.name ?? 'Codex');
   const priceCents = $derived(content.priceCents ?? null);
 
@@ -195,6 +196,8 @@
   streamingExpiresAt={accessState.streamingExpiresAt}
   revocationReason={accessState.revocationReason}
   accessCheckFailed={accessState.accessCheckFailed}
+  withdrawnHeld={data.withdrawnHeld ?? null}
+  contentBodyUnavailable={data.contentBodyUnavailable ?? false}
   onaccessrestored={() => {
     // Clear the reason optimistically, then force a server-load re-run
     // so the next streaming URL request can succeed. `app:auth` is the
@@ -261,7 +264,12 @@
     <RelatedContent
       items={filtered}
       {creatorName}
-      hrefBuilder={(item) => buildContentUrl(page.url, item)}
+      hrefBuilder={(item) =>
+        buildContentUrl(page.url, {
+          slug: item.slug,
+          id: item.id,
+          organizationSlug: item.organization?.slug,
+        })}
       class="content-detail__related--streamed"
     />
   {/if}

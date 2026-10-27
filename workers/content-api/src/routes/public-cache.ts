@@ -52,6 +52,54 @@ import { CacheType, type VersionedCache } from '@codex/cache';
 const PUBLIC_CONTENT_CACHE_TTL = 7200;
 
 /**
+ * The shape of a cached row. Bump it whenever listPublic's SELECT changes.
+ * The data-slot key encodes the query, not the payload, so without a bump
+ * every slot written by the old code stays a valid hit after deploy for up to
+ * the TTL. A NARROWED select (a column or relation dropped, a field stripped)
+ * keeps serving what was removed: the content row's own columns go on the
+ * wire as cached. A WIDENED one that the wire item reads (a column added to
+ * PUBLIC_MEDIA_ITEM_COLUMNS, say) is missing from the old slots, and the wire
+ * omits it, while `satisfies` tells TypeScript the row has it.
+ *
+ * v2 (Codex-osuqt): no creator email, and no body on a catalogue read.
+ * v3 (Codex-039vo): no body on a by-slug read of a gated row, which a
+ * course-only practice flagged free used to keep. v4 (Codex-ve5eh,
+ * Codex-567de, one bump for both): the slot holds listPublic's narrowed row,
+ * the media item three columns (durationSeconds, thumbnailKey, hlsPreviewKey)
+ * where it held the whole media_items row with its raw R2 keys, RunPod job id
+ * and transcoding error, and the org four (id, name, slug, logoUrl) where it
+ * held the whole organizations row; the content row has no `purchaseCount`.
+ *
+ * The wire item (`toPublicItems`) is built AFTER the cache, so a change to it
+ * alone needs no bump here. apps/web's /explore caches the browse route's
+ * response (`content:auth:vN`), so a change to the shared column lists
+ * (`PUBLIC_*_COLUMNS`, `CATALOGUE_CONTENT_COLUMNS`, which listPublic and
+ * browse both select) or a field removed from the builder needs a bump THERE
+ * too.
+ *
+ * THE RULE WHEN TWO BRANCHES BUMP AT ONCE, whatever order they merge in: the
+ * one that merges SECOND takes a version no deployed build has ever written.
+ * A value a shipped build wrote names slots full of THAT build's shape, so
+ * reusing it serves them as hits. If v4 has already shipped when a later
+ * narrowing lands, the later one takes v5, not v4.
+ *
+ * Old slots are never read again and age out. A bump also
+ * renames the cache-stats series (`cacheStatsLabel` keeps four segments, so
+ * `content:public:newest` became `content:public:v2:newest`, now
+ * `content:public:v4:newest`).
+ */
+const PUBLIC_CONTENT_SHAPE_VERSION = 'v4';
+
+/**
+ * KV refuses a key over 512 bytes. A data-slot key is this type plus about 70
+ * bytes (its prefix, the org's version id and a version stamp), so a type past
+ * this budget, which only a long slug reaches, made every such read a KV error:
+ * an error-level log any visitor could raise with a URL (Codex-osuqt). A read
+ * that long skips KV; a real slug is far shorter.
+ */
+const MAX_CACHED_TYPE_BYTES = 400;
+
+/**
  * Public content list query shape accepted by the cache wiring.
  * Kept narrow so callers can pass the worker's validated input directly.
  *
@@ -85,7 +133,7 @@ export function buildPublicContentCacheType(
     'sort' | 'limit' | 'page' | 'contentType' | 'slug' | 'category' | 'featured'
   >
 ): string {
-  const base = `content:public:${query.sort ?? 'newest'}:${query.limit ?? 20}:${query.page ?? 1}:${query.contentType ?? 'all'}`;
+  const base = `content:public:${PUBLIC_CONTENT_SHAPE_VERSION}:${query.sort ?? 'newest'}:${query.limit ?? 20}:${query.page ?? 1}:${query.contentType ?? 'all'}`;
   let type = base;
   // Category (topic slug) and featured are LIVE filter dimensions that select a
   // strict subset of the catalogue. Each distinct value MUST occupy its own
@@ -93,8 +141,8 @@ export function buildPublicContentCacheType(
   // org version key. `featured` in particular was the latent bug: it is already
   // a live query param, but the prior key omitted it — so `?featured=true`
   // (Editor's picks) and the unfiltered list shared one slot and served each
-  // other's content. Both are appended ONLY when present so existing
-  // (category/featured-free) keys keep their exact shape and stay hit-compatible.
+  // other's content. Both are appended ONLY when present, so an absent
+  // dimension adds nothing to the key.
   if (query.category) {
     type += `:cat:${query.category}`;
   }
@@ -117,8 +165,10 @@ export function buildPublicContentCacheType(
  *
  * Search and creatorId are bypassed:
  * - search: unbounded variant space, would pollute KV
- * - creatorId: lower-volume per-creator filter; skipping avoids key
- *   explosion
+ * - creatorId: a correctness rule, not tuning. The data-slot key carries no
+ *   creator, so a creator-filtered org read cached here would collide with
+ *   the org-wide slot and serve the whole org's list (or seed that slot with
+ *   one creator's pieces).
  *
  * Slug lookups (content-detail pages) ARE cached now that
  * `buildPublicContentCacheType` folds the slug into the data-slot key
@@ -144,6 +194,7 @@ export function shouldCachePublicContentQuery(
  *
  * On cache hit: returns cached result.
  * On cache miss: calls `fetcher`, caches the result, returns it.
+ * A type over MAX_CACHED_TYPE_BYTES skips KV entirely and returns `fetcher()`.
  *
  * Every filter combo for `orgId` shares one version key
  * (`cache:version:org:{orgId}:content`) so a single publish-side
@@ -157,10 +208,11 @@ export async function getCachedPublicContent<T>(
   fetcher: () => Promise<T>,
   opts: { ttl?: number } = {}
 ): Promise<T> {
-  return cache.get(
-    CacheType.COLLECTION_ORG_CONTENT(orgId),
-    buildPublicContentCacheType(query),
-    fetcher,
-    { ttl: opts.ttl ?? PUBLIC_CONTENT_CACHE_TTL }
-  );
+  const type = buildPublicContentCacheType(query);
+  if (new TextEncoder().encode(type).length > MAX_CACHED_TYPE_BYTES) {
+    return fetcher();
+  }
+  return cache.get(CacheType.COLLECTION_ORG_CONTENT(orgId), type, fetcher, {
+    ttl: opts.ttl ?? PUBLIC_CONTENT_CACHE_TTL,
+  });
 }

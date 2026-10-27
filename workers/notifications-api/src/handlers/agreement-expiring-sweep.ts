@@ -18,16 +18,17 @@
  * returned tally.
  */
 
-import type { CreatorOrganizationAgreement } from '@codex/agreements';
 import {
   AgreementService,
-  creatorShareFromLegacyOrgFee,
+  type AgreementWithShare,
+  buildAgreementEmailLink,
+  isEnvName,
 } from '@codex/agreements';
 import { createDbClient, type Database } from '@codex/database';
 import { ObservabilityClient } from '@codex/observability';
 import { workerFetch } from '@codex/security';
 import type { Bindings } from '@codex/shared-types';
-import { buildServiceUrl as getServiceUrl } from '@codex/urls';
+import { type EnvName, buildServiceUrl as getServiceUrl } from '@codex/urls';
 
 /**
  * Default warning lead time — fire the email when an agreement is within
@@ -42,15 +43,12 @@ export interface RunAgreementExpiringSweepDeps {
   db: Database;
   /** Observability client (PII-redacted) */
   obs: ObservabilityClient;
-  /** Environment label for service config */
-  environment: string;
   /**
-   * Web app URL for deep link in email body. Required because
-   * `AgreementService` (Codex-0omga / PR #222) throws at construction
-   * when this is unset — the scheduled handler skips the sweep gracefully
-   * when `env.WEB_APP_URL` is missing instead of crashing the cron.
+   * The env name. It builds each recipient's email link (the owner's org
+   * Studio, the creator's negotiation), so the scheduled handler skips the
+   * sweep when `env.ENVIRONMENT` is not one `@codex/urls` can route.
    */
-  webAppUrl: string;
+  environment: EnvName;
   /** HMAC secret for worker-to-worker /internal/send call */
   workerSecret: string;
   /** Notifications-api base URL (resolved via getServiceUrl) */
@@ -127,21 +125,6 @@ function formatDate(d: Date): string {
 }
 
 /**
- * Build the negotiation deep link. Mirrors
- * AgreementService.buildNegotiationDeepLink — the agreement row
- * doesn't carry a `currentProposalId`-driven thread id we can address,
- * so we point at the org's negotiations index where the creator can
- * file a renewal proposal.
- */
-function buildExpiryDeepLink(
-  organizationId: string,
-  webAppUrl: string | undefined
-): string {
-  const path = `/studio/negotiations?orgId=${organizationId}`;
-  return webAppUrl ? `${webAppUrl}${path}` : path;
-}
-
-/**
  * Build the email data payload for the agreement-expiring-soon template.
  * Centralised so both recipients (creator + owner) receive a
  * consistent payload; only `recipientName` and `otherPartyName` swap.
@@ -150,14 +133,17 @@ function buildEmailPayload(args: {
   recipientName: string;
   otherPartyName: string;
   orgName: string;
-  agreement: CreatorOrganizationAgreement;
+  agreement: AgreementWithShare;
   deepLinkUrl: string;
 }): Record<string, string | number | boolean> {
   const { recipientName, otherPartyName, orgName, agreement, deepLinkUrl } =
     args;
-  const sharePercent = creatorShareFromLegacyOrgFee(
-    agreement.organizationFeePercentage
-  );
+  // The accepted proposal's share, as every payment path reads it
+  // (Codex-2hxff.19 AGR-08), never the legacy org-fee column. A missing
+  // proposal pays nothing, so it is quoted as 0;
+  // `AgreementService.findExpiringAgreements` has already logged that row at
+  // error, with an errorId.
+  const sharePercent = agreement.creatorSharePercent ?? 0;
   return {
     recipientName,
     orgName,
@@ -227,14 +213,7 @@ function makeDefaultMailer(deps: {
 export async function runAgreementExpiringSweep(
   deps: RunAgreementExpiringSweepDeps
 ): Promise<ExpiringSweepResult> {
-  const {
-    db,
-    obs,
-    environment,
-    webAppUrl,
-    daysAhead = DEFAULT_DAYS_AHEAD,
-    now,
-  } = deps;
+  const { db, obs, environment, daysAhead = DEFAULT_DAYS_AHEAD, now } = deps;
 
   const result: ExpiringSweepResult = {
     agreementsScanned: 0,
@@ -244,7 +223,7 @@ export async function runAgreementExpiringSweep(
   };
 
   try {
-    const service = new AgreementService({ db, environment, webAppUrl });
+    const service = new AgreementService({ db, environment });
     const candidates = await service.findExpiringAgreements({
       daysAhead,
       now,
@@ -264,11 +243,6 @@ export async function runAgreementExpiringSweep(
         const ownerContact = await service.getFirstActiveOwnerContact(
           row.agreement.organizationId
         );
-        const deepLinkUrl = buildExpiryDeepLink(
-          row.agreement.organizationId,
-          webAppUrl
-        );
-
         // Creator-side email: counterparty is the owner (or a placeholder
         // when the org is orphaned).
         await mailer({
@@ -283,7 +257,12 @@ export async function runAgreementExpiringSweep(
             otherPartyName: ownerContact?.name ?? 'The other party',
             orgName: row.orgName,
             agreement: row.agreement,
-            deepLinkUrl,
+            // The agreement's thread, by its accepted proposal; the list
+            // when that link is missing (Codex-2hxff.20 AGR-10).
+            deepLinkUrl: buildAgreementEmailLink(environment, {
+              side: 'creator',
+              proposalId: row.agreement.currentProposalId,
+            }),
           }),
         });
         result.emailsSent += 1;
@@ -304,7 +283,10 @@ export async function runAgreementExpiringSweep(
               otherPartyName: row.creator.name,
               orgName: row.orgName,
               agreement: row.agreement,
-              deepLinkUrl,
+              deepLinkUrl: buildAgreementEmailLink(environment, {
+                side: 'owner',
+                orgSlug: row.orgSlug,
+              }),
             }),
           });
           result.emailsSent += 1;
@@ -364,13 +346,17 @@ async function runScheduledAgreementExpiringSweep(
       env.ENVIRONMENT ?? 'development'
     );
 
-  const webAppUrl = deps?.webAppUrl ?? env.WEB_APP_URL;
+  const environment = deps?.environment ?? env.ENVIRONMENT ?? 'development';
 
-  if (!env.DATABASE_URL || !env.WORKER_SHARED_SECRET || !webAppUrl) {
+  if (
+    !env.DATABASE_URL ||
+    !env.WORKER_SHARED_SECRET ||
+    !isEnvName(environment)
+  ) {
     obs.error('agreement-expiring sweep: missing required env vars, skipping', {
       hasDatabaseUrl: Boolean(env.DATABASE_URL),
       hasWorkerSecret: Boolean(env.WORKER_SHARED_SECRET),
-      hasWebAppUrl: Boolean(webAppUrl),
+      hasKnownEnvironment: isEnvName(environment),
     });
     return null;
   }
@@ -382,8 +368,7 @@ async function runScheduledAgreementExpiringSweep(
   return await runAgreementExpiringSweep({
     db,
     obs,
-    environment: env.ENVIRONMENT ?? 'development',
-    webAppUrl,
+    environment,
     workerSecret: deps?.workerSecret ?? env.WORKER_SHARED_SECRET,
     notificationsUrl,
     daysAhead: deps?.daysAhead,

@@ -216,6 +216,12 @@ describe('OrphanedFileService', () => {
   });
 
   describe('recordFailedAttempt()', () => {
+    const warnOf = (target: OrphanedFileService) =>
+      vi.spyOn(
+        (target as unknown as { obs: { warn: (m: string) => void } }).obs,
+        'warn'
+      );
+
     it('should increment cleanupAttempts and record error', async () => {
       // First update returns record with attempts < MAX
       mockDb._mocks.updateReturning.mockResolvedValueOnce([
@@ -290,6 +296,88 @@ describe('OrphanedFileService', () => {
       // Only one update call (no second call to mark as failed)
       expect(mockDb.update).toHaveBeenCalledTimes(1);
     });
+    describe("a failed query: the row keeps it whole with the driver's reason, the log only the reason (Codex-kk9nv.13)", () => {
+      const QUERY_TEXT =
+        'Failed query: select …\nparams: avatars/u/300x300-aaaaaaaa/';
+      const ROW_TEXT = `${QUERY_TEXT}\ncause: connection terminated`;
+      const failed = () =>
+        Object.assign(new Error(QUERY_TEXT), {
+          cause: new Error('connection terminated'),
+        });
+      it('on an attempt that will be retried', async () => {
+        mockDb._mocks.updateReturning.mockResolvedValueOnce([
+          { id: 'orphan-1', cleanupAttempts: 1 },
+        ]);
+        const warn = warnOf(service);
+
+        await service.recordFailedAttempt('orphan-1', failed());
+
+        expect(mockDb._mocks.set).toHaveBeenCalledWith(
+          expect.objectContaining({ errorMessage: ROW_TEXT })
+        );
+        expect(warn).toHaveBeenCalledWith(
+          'Orphaned file cleanup attempt failed',
+          { orphanId: 'orphan-1', attempts: 1, error: 'connection terminated' }
+        );
+      });
+
+      it('on the last attempt, which marks the row failed', async () => {
+        const firstSet = vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            returning: vi
+              .fn()
+              .mockResolvedValueOnce([{ id: 'orphan-1', cleanupAttempts: 3 }]),
+          }),
+        });
+        const secondSet = vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValueOnce([{ id: 'orphan-1' }]),
+        });
+        const update = vi
+          .fn()
+          .mockReturnValueOnce({ set: firstSet })
+          .mockReturnValueOnce({ set: secondSet });
+        const lastTry = new OrphanedFileService({
+          db: {
+            update,
+            insert: vi.fn(),
+            select: vi.fn(),
+          } as unknown as Database,
+          environment: 'test',
+        });
+        const warn = warnOf(lastTry);
+
+        await lastTry.recordFailedAttempt('orphan-1', failed());
+
+        expect(firstSet).toHaveBeenCalledWith(
+          expect.objectContaining({ errorMessage: ROW_TEXT })
+        );
+        expect(warn).toHaveBeenCalledWith(
+          'Orphaned file cleanup failed permanently',
+          { orphanId: 'orphan-1', attempts: 3, error: 'connection terminated' }
+        );
+      });
+    });
+
+    it('records any other error as it logs it, with no cause line', async () => {
+      mockDb._mocks.updateReturning.mockResolvedValueOnce([
+        { id: 'orphan-1', cleanupAttempts: 1 },
+      ]);
+      const warn = warnOf(service);
+
+      await service.recordFailedAttempt('orphan-1', new TypeError(''));
+
+      expect(mockDb._mocks.set).toHaveBeenCalledWith(
+        expect.objectContaining({ errorMessage: 'TypeError' })
+      );
+      expect(warn).toHaveBeenCalledWith(
+        'Orphaned file cleanup attempt failed',
+        {
+          orphanId: 'orphan-1',
+          attempts: 1,
+          error: 'TypeError',
+        }
+      );
+    });
   });
 
   describe('getStats()', () => {
@@ -311,6 +399,7 @@ describe('OrphanedFileService', () => {
         processed: 12, // deleted + failed
         deleted: 10,
         failed: 2,
+        retained: 1,
         remaining: 5,
       });
     });
@@ -324,6 +413,7 @@ describe('OrphanedFileService', () => {
         processed: 0,
         deleted: 0,
         failed: 0,
+        retained: 0,
         remaining: 0,
       });
     });

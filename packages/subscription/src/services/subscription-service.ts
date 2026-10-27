@@ -28,18 +28,25 @@
  * - Webhook handlers check-before-insert (same pattern as PurchaseService)
  */
 
+import { agreementsInForce } from '@codex/agreements';
 import type { VersionedCache } from '@codex/cache';
 import {
   BILLING_INTERVAL,
+  CHECKOUT_SESSION_KIND,
   CURRENCY,
   FEES,
+  STRIPE_ENV_METADATA_KEY,
   SUBSCRIPTION_STATUS,
   stripeEnvMetadata,
+  TIER_CHANGE_PREVIEW_TTL_MS,
 } from '@codex/constants';
-import { dateWindow, isUniqueViolation, toIso } from '@codex/database';
 import {
-  agreementProposals,
-  creatorOrganizationAgreements,
+  dateWindow,
+  isForeignKeyViolation,
+  isUniqueViolation,
+  toIso,
+} from '@codex/database';
+import {
   organizationFollowers,
   organizationMemberships,
   type PayoutType,
@@ -50,30 +57,44 @@ import {
   users,
 } from '@codex/database/schema';
 import {
+  assertGbpOnly,
   type ClawbackCharge,
   claimPayoutAttempts,
   findTransfersForPayouts,
   isDrainablePayout,
+  issueRefund,
   type LedgerDeps,
   listClawableRefunds,
-  markPayoutFailed,
   type OrganisationPayee,
+  type PayeeAccounts,
+  type PlatformFailureTally,
+  payeeAccountIds,
   pendingReductionsFor,
+  platformFailureTally,
+  type RecordSliceInput,
+  type RecordSliceOutcome,
   recordPlatformFee,
-  recordSlice,
+  recordSplitOnce,
+  recordTransferFailure,
   renewPayoutAttempt,
+  reportPlatformFailures,
   resolveInvoiceCharge,
   resolveOrganisationPayee,
   retryFailedClawbacks,
   reverseCharge,
+  reverseEarlierRefundsAfterCommit,
   settlePayoutPaid,
   settleTransfer,
 } from '@codex/payments';
 import {
   applyMinPlatformFeeFloor,
+  CheckoutReservations,
+  checkoutIdempotencyKey,
   type FeeConfig,
   type FeeConfigService,
   type FeeContext,
+  stripeErrorCode,
+  toStripeTime,
   withStaleCustomerRecovery,
 } from '@codex/purchase';
 import {
@@ -81,7 +102,7 @@ import {
   InternalServiceError,
   NotFoundError,
   type ServiceConfig,
-  UnsupportedCurrencyError,
+  ServiceUnavailableError,
 } from '@codex/service-errors';
 import type { PaginatedListResponse } from '@codex/shared-types';
 import {
@@ -89,23 +110,24 @@ import {
   and,
   desc,
   eq,
-  gt,
   inArray,
   isNotNull,
   isNull,
   lt,
-  lte,
+  ne,
   or,
   sql,
 } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
   AlreadySubscribedError,
+  ConflictError,
   ConnectAccountNotReadyError,
   ForbiddenError,
   SubscriptionCheckoutError,
   SubscriptionNotFoundError,
   SubscriptionPaymentRequiredError,
+  TierChangePreviewExpiredError,
   TierNotFoundError,
 } from '../errors';
 import {
@@ -113,7 +135,10 @@ import {
   schedulePriceChange,
 } from './pending-price-change';
 import { calculateRevenueSplit } from './revenue-split';
-import { mapStripeSubscriptionStatus } from './stripe-status-mapper';
+import {
+  mapStripeSubscriptionStatus,
+  resolveStatus,
+} from './stripe-status-mapper';
 import {
   cancelLostDisputeSubscription,
   type DisputedSubscription,
@@ -123,13 +148,67 @@ import {
   restoreDisputedSubscription,
 } from './subscription-dispute';
 import {
+  cancelAndRefundDuplicate,
+  isDuplicateSubscription,
+} from './subscription-duplicates';
+import {
   type InvalidationReason,
   invalidateForUser,
   type WaitUntilFn,
 } from './subscription-invalidation';
+import {
+  cancelForFullRefund,
+  type RefundCancellation,
+  type RefundedCharge,
+} from './subscription-refund';
 
 type Subscription = typeof subscriptions.$inferSelect;
 type SubscriptionTier = typeof subscriptionTiers.$inferSelect;
+type Tx = Parameters<
+  Parameters<typeof import('@codex/database')['dbWs']['transaction']>[0]
+>[0];
+
+/**
+ * The statuses of a user's one live subscription to an org: the ones
+ * `uq_active_subscription_per_user_org` allows once per user and org.
+ */
+const LIVE_STATUSES = [
+  SUBSCRIPTION_STATUS.ACTIVE,
+  SUBSCRIPTION_STATUS.PAST_DUE,
+  SUBSCRIPTION_STATUS.CANCELLING,
+];
+
+/**
+ * A write from `from` to `to` would bring a row back to live: an old
+ * subscription revived (an `unpaid` one paid), or a first payment completing.
+ */
+function revives(from: string, to: string): boolean {
+  return !isLiveStatus(from) && isLiveStatus(to);
+}
+
+function isLiveStatus(status: string): boolean {
+  const live: readonly string[] = LIVE_STATUSES;
+  return live.includes(status);
+}
+
+/** A tier-change preview's `prorationDate` may run ahead of our clock by this much. */
+const PRORATION_DATE_CLOCK_SKEW_MS = 60 * 1000;
+
+/**
+ * Payees one payouts sweep claims (Codex-2hxff.13). Each costs an
+ * `accounts.retrieve` and, when payable, a drain; the rest wait for the next
+ * run, least recently checked first.
+ */
+const SWEEP_PAYEE_LIMIT = 50;
+
+/**
+ * The subscription has ended at Stripe: `canceled` is terminal
+ * (https://docs.stripe.com/billing/subscriptions/overview#subscription-statuses),
+ * and an `incomplete_expired` one never started and never will.
+ */
+function endedAtStripeStatus(status: Stripe.Subscription.Status): boolean {
+  return status === 'canceled' || status === 'incomplete_expired';
+}
 
 interface SubscriptionWithTier extends Subscription {
   tier: SubscriptionTier;
@@ -381,6 +460,15 @@ const CREATOR_EARNING_PAYOUT_TYPES = [
 ] as const satisfies readonly PayoutType[];
 
 /**
+ * "Needs attention" counts stuck charges, not ledger rows (Codex-2hxff.15,
+ * SUB-20): a charge's slices share its id, so one stuck sale reads 1, and two
+ * stuck renewals of one subscription (one transfer group) read 2 — in both
+ * summaries and the by-creator table alike. A row with no charge id falls
+ * back to its transfer group, then to itself.
+ */
+const NEEDS_ATTENTION_CHARGES = sql<number>`count(DISTINCT COALESCE(${payouts.stripeChargeId}, ${payouts.transferGroup}, ${payouts.id}::text))::int`;
+
+/**
  * Map the persisted `payouts.status` column to the UI display vocabulary.
  *
  * Storage column: `'paid' | 'pending' | 'failed'` (CHECK-enforced).
@@ -486,6 +574,30 @@ export interface WebhookHandlerResult {
   orgId?: string;
   /** Composed email payload ready for sendEmailToWorker() */
   email?: WebhookEmailPayload;
+}
+
+/**
+ * Result of `verifyCheckoutSession()` — what the /subscription/success page
+ * reads. `subscription` appears once our row for the session exists.
+ */
+export interface SubscriptionCheckoutVerifyResult {
+  sessionStatus: 'complete' | 'expired' | 'open';
+  subscription?: {
+    id: string;
+    organizationId: string;
+    tierId: string;
+    tierName: string;
+    organizationName: string;
+    organizationSlug: string;
+    startedAt: string;
+    /**
+     * Set when this subscription is a duplicate (Codex-2hxff.15): the
+     * subscription it repeats, which the user keeps. This one is cancelled
+     * and refunded, so the page says so instead of confirming it
+     * (Codex-o4jvw).
+     */
+    duplicateOf?: { id: string; tierId: string; tierName: string };
+  };
 }
 
 /**
@@ -599,7 +711,8 @@ interface SubscriptionServiceConfig extends ServiceConfig {
 export type TierPriceChangeMailer = (params: {
   to: string;
   toName?: string;
-  templateName: 'subscription-tier-price-change';
+  /** `course-no-longer-offered`: a course taken off sale (Codex-2hxff.64). */
+  templateName: 'subscription-tier-price-change' | 'course-no-longer-offered';
   category: 'transactional';
   userId?: string;
   organizationId?: string | null;
@@ -630,6 +743,7 @@ export class SubscriptionService extends BaseService {
   private readonly payoutMailer: PayoutReleasedMailer | undefined;
   private readonly webAppUrl: string | undefined;
   private readonly feeConfig: FeeConfigService | undefined;
+  private readonly checkoutReservations: CheckoutReservations;
 
   constructor(config: SubscriptionServiceConfig, stripe: Stripe) {
     super(config);
@@ -640,6 +754,11 @@ export class SubscriptionService extends BaseService {
     this.payoutMailer = config.payoutMailer;
     this.webAppUrl = config.webAppUrl;
     this.feeConfig = config.feeConfig;
+    this.checkoutReservations = new CheckoutReservations(
+      this.db,
+      stripe,
+      this.obs
+    );
   }
 
   /**
@@ -872,6 +991,28 @@ export class SubscriptionService extends BaseService {
         });
       }
 
+      // One open checkout per buyer and org, as for purchases (Codex-2hxff.15,
+      // owner decision "Block early"): a second tab gets the first tab's
+      // Stripe page back; another tier or interval replaces it. A payment
+      // that slips past this anyway is a duplicate, cancelled and refunded
+      // when it completes.
+      const reserved = await this.checkoutReservations.reserve({
+        kind: CHECKOUT_SESSION_KIND.SUBSCRIPTION,
+        customerId: userId,
+        organizationId: orgId,
+        stripePriceId,
+        amountCents:
+          billingInterval === BILLING_INTERVAL.MONTH
+            ? tier.priceMonthly
+            : tier.priceAnnual,
+      });
+      if (reserved.url && reserved.stripeSessionId) {
+        return {
+          sessionUrl: reserved.url,
+          sessionId: reserved.stripeSessionId,
+        };
+      }
+
       // `withStaleCustomerRecovery` resolves the unified Stripe Customer id
       // and self-heals when `users.stripe_customer_id` is stale. Two
       // real-world causes for the stale state:
@@ -879,60 +1020,86 @@ export class SubscriptionService extends BaseService {
       //   2. (Dev only) A seed wrote a synthetic id that never existed.
       // The helper clears the cache, mints a fresh customer, and retries the
       // session create exactly once. A second `resource_missing` propagates.
-      const session = await withStaleCustomerRecovery(
-        { db: this.db, stripe: this.stripe },
-        { userId, email: user.email, environment: this.environment },
-        (stripeCustomerId) =>
-          this.stripe.checkout.sessions.create({
-            mode: 'subscription',
-            customer: stripeCustomerId,
-            line_items: [{ price: stripePriceId, quantity: 1 }],
-            success_url: successUrl,
-            cancel_url: cancelUrl,
-            metadata: {
-              codex_user_id: userId,
-              codex_organization_id: orgId,
-              codex_tier_id: tierId,
-              codex_billing_interval: billingInterval,
-              ...stripeEnvMetadata(this.environment),
-            },
-            // Every invoice snapshots these into
-            // parent.subscription_details.metadata — the tag the webhook guard
-            // reads on renewals (Codex-2hxff.5).
-            subscription_data: {
-              metadata: {
-                codex_user_id: userId,
-                codex_organization_id: orgId,
-                codex_tier_id: tierId,
-                ...stripeEnvMetadata(this.environment),
+      const session = await this.checkoutReservations.create(reserved, () =>
+        withStaleCustomerRecovery(
+          { db: this.db, stripe: this.stripe, obs: this.obs },
+          { userId, email: user.email, environment: this.environment },
+          (stripeCustomerId) =>
+            this.stripe.checkout.sessions.create(
+              {
+                mode: 'subscription',
+                customer: stripeCustomerId,
+                line_items: [{ price: stripePriceId, quantity: 1 }],
+                success_url: successUrl,
+                cancel_url: cancelUrl,
+                metadata: {
+                  codex_user_id: userId,
+                  codex_organization_id: orgId,
+                  codex_tier_id: tierId,
+                  codex_billing_interval: billingInterval,
+                  ...stripeEnvMetadata(this.environment),
+                },
+                // Every invoice snapshots these into
+                // parent.subscription_details.metadata — the tag the webhook
+                // guard reads on renewals (Codex-2hxff.5).
+                subscription_data: {
+                  metadata: {
+                    codex_user_id: userId,
+                    codex_organization_id: orgId,
+                    codex_tier_id: tierId,
+                    ...stripeEnvMetadata(this.environment),
+                  },
+                },
+                expires_at: toStripeTime(reserved.expiresAt),
               },
-            },
-          }),
-        {
-          onStaleRecovery: (info) =>
-            this.obs.warn(
-              'Stale users.stripe_customer_id detected; clearing and retrying',
-              { ...info, orgId, tierId, billingInterval }
+              {
+                idempotencyKey: checkoutIdempotencyKey(
+                  reserved,
+                  stripeCustomerId
+                ),
+              }
             ),
-        }
+          {
+            onStaleRecovery: (info) =>
+              this.obs.warn(
+                'Stale users.stripe_customer_id detected; clearing and retrying',
+                { ...info, orgId, tierId, billingInterval }
+              ),
+          }
+        )
       );
 
-      if (!session.url) {
-        throw new SubscriptionCheckoutError(
-          'Failed to create checkout session URL'
-        );
-      }
-
       this.obs.info('Subscription checkout session created', {
-        sessionId: session.id,
+        sessionId: session.sessionId,
         organizationId: orgId,
         tierId,
         billingInterval,
       });
 
-      return { sessionUrl: session.url, sessionId: session.id };
+      return session;
     } catch (error) {
       this.handleError(error, 'createCheckoutSession');
+    }
+  }
+
+  /**
+   * The webhook: this subscription checkout was paid (Codex-2hxff.15). The
+   * buyer's next checkout for the org is refused because they subscribe, so
+   * this is a record, not a gate: a failure is logged and swallowed, never
+   * failing the event (a redelivery would resend the welcome email).
+   */
+  async markCheckoutSessionCompleted(stripeSessionId: string): Promise<void> {
+    try {
+      await this.checkoutReservations.markCompleted(stripeSessionId);
+    } catch (error) {
+      this.obs.error(
+        'Paid subscription checkout could not be marked completed',
+        {
+          errorId: crypto.randomUUID(),
+          stripeSessionId,
+          error: error instanceof Error ? error.message : String(error),
+        }
+      );
     }
   }
 
@@ -952,22 +1119,13 @@ export class SubscriptionService extends BaseService {
    * - Ownership enforced via `metadata.codex_user_id`
    * - Returns a `subscription` object only when the row actually exists in
    *   our DB (caller treats its absence as "still processing" and retries)
+   * - A duplicate's `subscription` carries `duplicateOf`, the subscription
+   *   the user keeps (Codex-o4jvw)
    */
   async verifyCheckoutSession(
     sessionId: string,
     userId: string
-  ): Promise<{
-    sessionStatus: 'complete' | 'expired' | 'open';
-    subscription?: {
-      id: string;
-      organizationId: string;
-      tierId: string;
-      tierName: string;
-      organizationName: string;
-      organizationSlug: string;
-      startedAt: string;
-    };
-  }> {
+  ): Promise<SubscriptionCheckoutVerifyResult> {
     try {
       const session = await this.stripe.checkout.sessions.retrieve(sessionId);
 
@@ -981,18 +1139,7 @@ export class SubscriptionService extends BaseService {
         );
       }
 
-      const result: {
-        sessionStatus: 'complete' | 'expired' | 'open';
-        subscription?: {
-          id: string;
-          organizationId: string;
-          tierId: string;
-          tierName: string;
-          organizationName: string;
-          organizationSlug: string;
-          startedAt: string;
-        };
-      } = {
+      const result: SubscriptionCheckoutVerifyResult = {
         sessionStatus:
           (session.status as 'complete' | 'expired' | 'open') ?? 'open',
       };
@@ -1010,7 +1157,10 @@ export class SubscriptionService extends BaseService {
       // response to the webhook. Callers poll this endpoint until the row
       // appears, so an absent row here is expected, not an error.
       const row = await this.db.query.subscriptions.findFirst({
-        where: eq(subscriptions.stripeSubscriptionId, stripeSubId),
+        where: and(
+          eq(subscriptions.stripeSubscriptionId, stripeSubId),
+          eq(subscriptions.userId, userId)
+        ),
         with: {
           tier: { columns: { name: true } },
           organization: { columns: { name: true, slug: true } },
@@ -1027,6 +1177,14 @@ export class SubscriptionService extends BaseService {
           organizationSlug: row.organization.slug,
           startedAt: row.createdAt.toISOString(),
         };
+        // A duplicate (isDuplicateSubscription) names the subscription the
+        // user keeps; the page shows that one's tier.
+        if (row.duplicateOfSubscriptionId) {
+          result.subscription.duplicateOf = await this.keptSubscriptionOf(
+            row.duplicateOfSubscriptionId,
+            userId
+          );
+        }
       }
 
       return result;
@@ -1038,14 +1196,49 @@ export class SubscriptionService extends BaseService {
         'type' in error &&
         (error as { type?: string }).type === 'StripeInvalidRequestError'
       ) {
-        throw new SubscriptionCheckoutError('Checkout session not found', {
-          stripeError: error.message,
+        // A stale or made-up session_id: the client's mistake, so a warning.
+        // The context goes to the client, so it carries the errorId and
+        // Stripe's message is logged instead (Codex-2hxff.23, SEC-02).
+        const errorId = crypto.randomUUID();
+        this.obs.warn('Stripe refused the checkout session lookup', {
+          errorId,
           sessionId,
+          code: stripeErrorCode(error),
+          error: error.message,
+        });
+        throw new SubscriptionCheckoutError('Checkout session not found', {
+          sessionId,
+          errorId,
         });
       }
 
+      // A connection or API failure: handleError logs it at error.
       this.handleError(error, 'verifyCheckoutSession');
     }
+  }
+
+  /**
+   * The subscription a duplicate repeats, which the user keeps. The column is
+   * a foreign key, so a missing row is a broken invariant, not "not found".
+   */
+  private async keptSubscriptionOf(
+    keptSubscriptionId: string,
+    userId: string
+  ): Promise<{ id: string; tierId: string; tierName: string }> {
+    const kept = await this.db.query.subscriptions.findFirst({
+      where: and(
+        eq(subscriptions.id, keptSubscriptionId),
+        eq(subscriptions.userId, userId)
+      ),
+      columns: { id: true, tierId: true },
+      with: { tier: { columns: { name: true } } },
+    });
+    if (!kept) {
+      throw new InternalServiceError('Kept subscription missing', {
+        subscriptionId: keptSubscriptionId,
+      });
+    }
+    return { id: kept.id, tierId: kept.tierId, tierName: kept.tier.name };
   }
 
   // ─── Webhook Handlers ──────────────────────────────────────────────────────
@@ -1061,9 +1254,14 @@ export class SubscriptionService extends BaseService {
    * would log "Invoice for unknown subscription" and drop the first payout.
    *
    * If the row is missing, retrieves the subscription from Stripe and
-   * inserts subscription + follower + membership in one transaction. The
-   * unique constraint on `stripe_subscription_id` makes this safe under
-   * concurrent self-heal + create-event delivery.
+   * inserts subscription + follower + membership in one transaction, under
+   * the per-user, per-org lock (`lockForSubscriber`), so concurrent
+   * self-heal + create-event delivery yields one row.
+   *
+   * A second subscription to an org the user already holds a live one for
+   * is inserted as its duplicate (Codex-2hxff.15, "Keep the first"):
+   * `cancelled`, `duplicateOfSubscriptionId` set, no follower or membership.
+   * The caller settles it (`settleDuplicate`) and returns an inert result.
    *
    * Does NOT fire side effects (welcome email, cache invalidation) — those
    * remain the create-event handler's responsibility so they run once per
@@ -1139,32 +1337,51 @@ export class SubscriptionService extends BaseService {
       return null;
     }
 
-    // Initial amount: latest_invoice.amount_paid — matches handleInvoicePaymentSucceeded.
-    // Subsequent invoice.payment_succeeded writes overwrite this with the actual
-    // charged amount, so a 0 from a trial-only sub heals to the real amount on first bill.
-    let amountCents = 0;
-    const latestInvoice = stripeSub.latest_invoice;
-    if (latestInvoice && typeof latestInvoice === 'object') {
-      amountCents = latestInvoice.amount_paid;
-    } else if (typeof latestInvoice === 'string') {
-      const invoice = await this.stripe.invoices.retrieve(latestInvoice);
-      amountCents = invoice.amount_paid;
-    }
-
+    // The row's amount is the price billed each period, not what one invoice
+    // took: an upgrade's proration invoice is a one-off (Codex-2hxff.15,
+    // SUB-11). A price without a unit amount falls back to the latest invoice.
     const item = stripeSub.items.data[0];
+    const amountCents =
+      item?.price?.unit_amount ??
+      (await this.latestInvoiceAmountPaid(stripeSub));
     const billingInterval =
       item?.price?.recurring?.interval === 'year'
         ? BILLING_INTERVAL.YEAR
         : BILLING_INTERVAL.MONTH;
     const periodStart = item?.current_period_start ?? 0;
     const periodEnd = item?.current_period_end ?? 0;
+    // Stripe's `canceled` is final: one first seen ended is a tombstone, and
+    // grants nothing (no follower, no membership).
+    const ended = endedAtStripeStatus(stripeSub.status);
 
     const split = await this.computeSubscriptionSplit(orgId, amountCents);
 
+    let outcome: { subscription: Subscription; justInserted: boolean };
     try {
-      await (this.db as typeof import('@codex/database').dbWs).transaction(
-        async (tx) => {
-          await tx.insert(subscriptions).values({
+      outcome = await (
+        this.db as typeof import('@codex/database').dbWs
+      ).transaction(async (tx) => {
+        const { replay, liveId } = await this.lockForSubscriber(tx, {
+          userId,
+          orgId,
+          stripeSubId,
+        });
+        if (replay) return { subscription: replay, justInserted: false };
+
+        // The membership comes FIRST, before any row that names the user
+        // takes a KEY SHARE on it through its foreign key: the lock order
+        // every path keeps (packages/organization/CLAUDE.md, Lock order). An
+        // account deletion locks the user's memberships, then the user row;
+        // a webhook holding that KEY SHARE while waiting on the membership
+        // deadlocked with it (Codex-kk9nv.20). A duplicate or an ended
+        // subscription grants nothing, so it writes no membership.
+        if (!liveId && !ended) {
+          await this.upsertSubscriberMembership(tx, orgId, userId);
+        }
+
+        const [row] = await tx
+          .insert(subscriptions)
+          .values({
             userId,
             organizationId: orgId,
             tierId,
@@ -1173,7 +1390,19 @@ export class SubscriptionService extends BaseService {
               typeof stripeSub.customer === 'string'
                 ? stripeSub.customer
                 : stripeSub.customer.id,
-            status: SUBSCRIPTION_STATUS.ACTIVE,
+            // Stripe's own status, not a blanket ACTIVE: a FIRST invoice that
+            // failed (invoice.payment_failed before .created) leaves the
+            // subscription `incomplete`, which must not grant access. A
+            // duplicate is `cancelled`, outside the one-live-per-user index.
+            status: liveId
+              ? SUBSCRIPTION_STATUS.CANCELLED
+              : resolveStatus(
+                  stripeSub.status,
+                  stripeSub.cancel_at_period_end ?? false,
+                  SUBSCRIPTION_STATUS.ACTIVE
+                ),
+            duplicateOfSubscriptionId: liveId ?? null,
+            endedAt: ended ? new Date() : null,
             billingInterval,
             currentPeriodStart: new Date(periodStart * 1000),
             currentPeriodEnd: new Date(periodEnd * 1000),
@@ -1181,49 +1410,30 @@ export class SubscriptionService extends BaseService {
             platformFeeCents: split.platformFeeCents,
             organizationFeeCents: split.organizationFeeCents,
             creatorPayoutCents: split.creatorPayoutCents,
-          });
-
-          // Auto-follow: subscribers implicitly follow the org. Follower
-          // persists after cancellation; user must explicitly unfollow.
-          await tx
-            .insert(organizationFollowers)
-            .values({ organizationId: orgId, userId })
-            .onConflictDoNothing();
-
-          // BUG-016: Upsert membership with role=subscriber (backward compat).
-          // Preserve higher roles (owner/admin/creator) on conflict — but
-          // only on a row that is ACTIVE. A removed member's inactive row
-          // re-enters as a subscriber: re-activating a removed owner would
-          // break uq_org_memberships_one_active_owner (aborting this insert
-          // after the customer has paid) or, in an org with no active owner,
-          // hand them ownership and its money (Codex-2hxff.2). Both column
-          // refs read the EXISTING row; SET expressions never see each other.
-          await tx
-            .insert(organizationMemberships)
-            .values({
-              organizationId: orgId,
-              userId,
-              role: 'subscriber',
-              status: 'active',
-            })
-            .onConflictDoUpdate({
-              target: [
-                organizationMemberships.organizationId,
-                organizationMemberships.userId,
-              ],
-              set: {
-                status: 'active',
-                role: sql`CASE WHEN ${organizationMemberships.status} = 'active' AND ${organizationMemberships.role} IN ('owner', 'admin', 'creator') THEN ${organizationMemberships.role} ELSE 'subscriber' END`,
-                updatedAt: new Date(),
-              },
-            });
+          })
+          .returning();
+        if (!row) {
+          throw new InternalServiceError(
+            'ensureSubscriptionDataPresent: insert returned no row',
+            { stripeSubscriptionId: stripeSubId }
+          );
         }
-      );
+        if (liveId || ended) return { subscription: row, justInserted: true };
+
+        // Auto-follow: subscribers implicitly follow the org. Follower
+        // persists after cancellation; user must explicitly unfollow.
+        await tx
+          .insert(organizationFollowers)
+          .values({ organizationId: orgId, userId })
+          .onConflictDoNothing();
+
+        return { subscription: row, justInserted: true };
+      });
     } catch (error) {
       if (isUniqueViolation(error)) {
-        // Concurrent self-heal or create-event raced us to insert. Re-select
-        // and return justInserted=false so caller skips the "just inserted"
-        // log line — the row is now present either way.
+        // A row written outside the lock raced us. Re-select and return
+        // justInserted=false so caller skips the "just inserted" log line —
+        // the row is now present either way.
         const [raced] = await this.db
           .select()
           .from(subscriptions)
@@ -1232,26 +1442,34 @@ export class SubscriptionService extends BaseService {
         if (raced) {
           return { subscription: raced, justInserted: false };
         }
-        throw error;
+        // The one-live-per-user index, by a live row written outside the
+        // lock. Retryable rather than a quiet 200: the retry runs under the
+        // lock and records this one as its duplicate (review T6).
+        this.obs.error('Subscription insert hit the one-live index', {
+          errorId: crypto.randomUUID(),
+          stripeSubscriptionId: stripeSubId,
+          organizationId: orgId,
+          eventType: context.eventType,
+        });
+        throw new ServiceUnavailableError(
+          'Subscription could not be recorded; it will be retried',
+          { stripeSubscriptionId: stripeSubId }
+        );
       }
       throw error;
     }
+    if (!outcome.justInserted) return outcome;
+    const inserted = outcome.subscription;
 
-    const [inserted] = await this.db
-      .select()
-      .from(subscriptions)
-      .where(eq(subscriptions.stripeSubscriptionId, stripeSubId))
-      .limit(1);
-    if (!inserted) {
-      // Should be unreachable — INSERT just succeeded. Defensive throw so a
-      // truly impossible state surfaces as 5xx (Stripe retry) instead of NPE.
-      throw new InternalServiceError(
-        'ensureSubscriptionDataPresent: row missing after successful insert',
-        { stripeSubscriptionId: stripeSubId }
-      );
-    }
-
-    if (context.knownStripeSub) {
+    if (isDuplicateSubscription(inserted)) {
+      this.obs.warn('Second subscription to an org recorded as a duplicate', {
+        subscriptionId: inserted.id,
+        duplicateOfSubscriptionId: inserted.duplicateOfSubscriptionId,
+        stripeSubscriptionId: stripeSubId,
+        organizationId: orgId,
+        eventType: context.eventType,
+      });
+    } else if (context.knownStripeSub) {
       this.obs.info('Subscription created from webhook', {
         stripeSubscriptionId: stripeSubId,
         organizationId: orgId,
@@ -1272,6 +1490,410 @@ export class SubscriptionService extends BaseService {
     }
 
     return { subscription: inserted, justInserted: true };
+  }
+
+  /**
+   * Take the per-user, per-org advisory lock, then look again (as
+   * `PurchaseService.lockForItem`). It serialises the first events of two
+   * subscriptions to one org landing at once, so exactly one becomes the
+   * live one; `uq_active_subscription_per_user_org` backs it.
+   *
+   * - `replay`: this Stripe subscription's own row, written by a concurrent
+   *   event while this one waited for the lock.
+   * - `liveId`: the user's live subscription to the org under another Stripe
+   *   id, which this one duplicates.
+   */
+  private async lockForSubscriber(
+    tx: Tx,
+    target: { userId: string; orgId: string; stripeSubId: string }
+  ): Promise<{ replay?: Subscription; liveId?: string }> {
+    const { userId, orgId, stripeSubId } = target;
+    await this.lockSubscriber(tx, userId, orgId);
+    const [replay] = await tx
+      .select()
+      .from(subscriptions)
+      .where(eq(subscriptions.stripeSubscriptionId, stripeSubId))
+      .limit(1);
+    if (replay) return { replay };
+    const [live] = await tx
+      .select({ id: subscriptions.id })
+      .from(subscriptions)
+      .where(
+        and(
+          eq(subscriptions.userId, userId),
+          eq(subscriptions.organizationId, orgId),
+          inArray(subscriptions.status, LIVE_STATUSES)
+        )
+      )
+      .limit(1);
+    return { liveId: live?.id };
+  }
+
+  /** The lock every write that can make a user's row for an org live takes. */
+  private async lockSubscriber(
+    tx: Tx,
+    userId: string,
+    orgId: string
+  ): Promise<void> {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`subscription:${userId}:${orgId}`}))`
+    );
+  }
+
+  /**
+   * The subscriber's membership: role `subscriber`, unless an ACTIVE row
+   * already holds a team role (owner/admin/creator/member), which is kept
+   * (BUG-016). An invited `member` who subscribes stays a member, so the
+   * subscription ending (which deactivates `subscriber` rows only) never
+   * drops them from the team (Codex-2hxff.15, owner decision 2026-10-22). A
+   * removed member's inactive row re-enters as a subscriber: re-activating a
+   * removed owner would break uq_org_memberships_one_active_owner (aborting
+   * this insert after the customer has paid) or, in an org with no active
+   * owner, hand them ownership and its money (Codex-2hxff.2). Both column
+   * refs read the EXISTING row; SET expressions never see each other.
+   */
+  private async upsertSubscriberMembership(
+    tx: Tx,
+    orgId: string,
+    userId: string
+  ): Promise<void> {
+    await tx
+      .insert(organizationMemberships)
+      .values({
+        organizationId: orgId,
+        userId,
+        role: 'subscriber',
+        status: 'active',
+      })
+      .onConflictDoUpdate({
+        target: [
+          organizationMemberships.organizationId,
+          organizationMemberships.userId,
+        ],
+        set: {
+          status: 'active',
+          role: sql`CASE WHEN ${organizationMemberships.status} = 'active' AND ${organizationMemberships.role} IN ('owner', 'admin', 'creator', 'member') THEN ${organizationMemberships.role} ELSE 'subscriber' END`,
+          updatedAt: new Date(),
+        },
+      });
+  }
+
+  /**
+   * Bring a row back to live under the per-user, per-org lock — unless the
+   * user has subscribed again meanwhile and holds another live subscription
+   * to the org (owner decision 7): then nothing is written, and that one's id
+   * is returned for `retireRevived`. Under the lock, so a new subscription
+   * landing at once cannot also become live.
+   */
+  private async writeRevival(
+    row: Subscription,
+    write: (tx: Tx) => Promise<unknown>
+  ): Promise<string | undefined> {
+    return (this.db as typeof import('@codex/database').dbWs).transaction(
+      async (tx) => {
+        await this.lockSubscriber(tx, row.userId, row.organizationId);
+        const otherId = await this.otherLiveId(tx, row);
+        if (otherId) return otherId;
+        await write(tx);
+        return undefined;
+      }
+    );
+  }
+
+  /** The user's live subscription to the row's org other than this row. */
+  private async otherLiveId(
+    db: Pick<Tx, 'select'>,
+    row: Pick<Subscription, 'id' | 'userId' | 'organizationId'>
+  ): Promise<string | undefined> {
+    const [other] = await db
+      .select({ id: subscriptions.id })
+      .from(subscriptions)
+      .where(
+        and(
+          eq(subscriptions.userId, row.userId),
+          eq(subscriptions.organizationId, row.organizationId),
+          ne(subscriptions.id, row.id),
+          inArray(subscriptions.status, LIVE_STATUSES)
+        )
+      )
+      .limit(1);
+    return other?.id;
+  }
+
+  /**
+   * An old subscription Stripe brought back to life (its open invoice paid
+   * after `unpaid`) while the user had subscribed again (Codex-2hxff.15, owner
+   * decision 7: "Cancel old, refund it"). The newer one is kept. ONLY the
+   * invoice that revived this one is refunded (earlier invoices bought real
+   * access), and it is cancelled at Stripe at once.
+   *
+   * Stripe first, both calls idempotent, and the REFUND before the cancel: a
+   * cancel that went through ahead of a refused refund would end it at
+   * Stripe, so the retry would no longer see a revival and the refund would
+   * be lost. A refund refused leaves Stripe as it was; a cancel refused
+   * after a good refund repeats that refund under its key. Then the row
+   * becomes a tombstone. Any Stripe failure leaves the row as it was and is
+   * retryable. The reviving invoice pays no one; the refund's own
+   * `charge.refunded` emails the buyer.
+   */
+  private async retireRevived(
+    row: Subscription,
+    keptSubscriptionId: string,
+    reviving?: { invoiceId: string; chargeId: string },
+    live?: Stripe.Subscription
+  ): Promise<void> {
+    const context = {
+      subscriptionId: row.id,
+      stripeSubscriptionId: row.stripeSubscriptionId,
+      keptSubscriptionId,
+    };
+    let refunded: { invoiceId: string; chargeId: string } | undefined;
+    try {
+      const atStripe =
+        live ??
+        (await this.stripe.subscriptions.retrieve(row.stripeSubscriptionId));
+      // On `updated` the reviving payment is the latest invoice, if paid.
+      refunded = reviving ?? (await this.paidLatestInvoice(atStripe));
+      if (refunded) {
+        await issueRefund(this.stripe, {
+          chargeId: refunded.chargeId,
+          reason: 'requested_by_customer',
+          idempotencyKey: `refund_revived_${refunded.invoiceId}`,
+          environment: this.environment,
+        });
+      }
+      if (!endedAtStripeStatus(atStripe.status)) {
+        await this.stripe.subscriptions.cancel(
+          row.stripeSubscriptionId,
+          {
+            prorate: false,
+            cancellation_details: {
+              comment: 'Revived next to a newer subscription to the same org',
+            },
+          },
+          { idempotencyKey: `revived_cancel_${row.stripeSubscriptionId}` }
+        );
+      }
+    } catch (error) {
+      this.obs.error(
+        'Revived old subscription could not be cancelled and refunded',
+        {
+          errorId: crypto.randomUUID(),
+          ...context,
+          code: stripeErrorCode(error),
+          error: error instanceof Error ? error.message : String(error),
+        }
+      );
+      throw new ServiceUnavailableError(
+        'Revived subscription refund failed; it will be retried',
+        { subscriptionId: row.id }
+      );
+    }
+    // Under the lock, so an invoice event re-reading the row before paying
+    // out sees it ended.
+    const at = new Date();
+    await (this.db as typeof import('@codex/database').dbWs).transaction(
+      async (tx) => {
+        await this.lockSubscriber(tx, row.userId, row.organizationId);
+        await tx
+          .update(subscriptions)
+          .set({
+            status: SUBSCRIPTION_STATUS.CANCELLED,
+            cancelledAt: sql`COALESCE(${subscriptions.cancelledAt}, ${at})`,
+            endedAt: sql`COALESCE(${subscriptions.endedAt}, ${at})`,
+            updatedAt: at,
+          })
+          .where(eq(subscriptions.id, row.id));
+      }
+    );
+    this.obs.warn(
+      'Old subscription revived next to a newer one: cancelled, its reviving payment refunded',
+      { ...context, refundedInvoiceId: refunded?.invoiceId }
+    );
+  }
+
+  /** The row as it stands now, read under the per-user, per-org lock. */
+  private async rereadUnderLock(
+    row: Subscription
+  ): Promise<Subscription | undefined> {
+    return (this.db as typeof import('@codex/database').dbWs).transaction(
+      async (tx) => {
+        await this.lockSubscriber(tx, row.userId, row.organizationId);
+        const [current] = await tx
+          .select()
+          .from(subscriptions)
+          .where(eq(subscriptions.id, row.id))
+          .limit(1);
+        return current;
+      }
+    );
+  }
+
+  /**
+   * A duplicate's invoice paid after it was settled — a delayed method such
+   * as Bacs Direct Debit clears days later, and subscription checkouts don't
+   * restrict the methods — is refunded too: always THAT invoice, under the
+   * key `cancelAndRefundDuplicate` uses for it, so it is never refunded
+   * twice (review T4).
+   */
+  private async refundDuplicateInvoice(
+    row: Subscription,
+    invoiceId: string,
+    chargeId: string
+  ): Promise<void> {
+    try {
+      await issueRefund(this.stripe, {
+        chargeId,
+        reason: 'duplicate',
+        idempotencyKey: `refund_duplicate_${invoiceId}`,
+        environment: this.environment,
+      });
+    } catch (error) {
+      this.obs.error('Duplicate subscription invoice could not be refunded', {
+        errorId: crypto.randomUUID(),
+        subscriptionId: row.id,
+        stripeSubscriptionId: row.stripeSubscriptionId,
+        invoiceId,
+        code: stripeErrorCode(error),
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw new ServiceUnavailableError(
+        'Duplicate subscription refund failed; it will be retried',
+        { subscriptionId: row.id }
+      );
+    }
+  }
+
+  /** Whether Stripe has handed the whole charge back. */
+  private async refundedInFull(chargeId: string): Promise<boolean> {
+    const charge = await this.stripe.charges.retrieve(chargeId);
+    return (
+      charge.refunded ||
+      (charge.amount > 0 && charge.amount_refunded >= charge.amount)
+    );
+  }
+
+  /** The id of the subscription's latest invoice, expanded or not. */
+  private latestInvoiceId(stripeSub: Stripe.Subscription): string | undefined {
+    const latest = stripeSub.latest_invoice;
+    return typeof latest === 'string' ? latest : (latest?.id ?? undefined);
+  }
+
+  /** The subscription's latest invoice with its charge, when it is paid. */
+  private async paidLatestInvoice(
+    stripeSub: Stripe.Subscription
+  ): Promise<{ invoiceId: string; chargeId: string } | undefined> {
+    const latest = stripeSub.latest_invoice;
+    const invoice =
+      typeof latest === 'string'
+        ? await this.stripe.invoices.retrieve(latest)
+        : latest;
+    if (!invoice?.id || invoice.status !== 'paid' || invoice.amount_paid <= 0) {
+      return undefined;
+    }
+    const chargeId = await resolveInvoiceCharge(this.stripe, invoice);
+    if (!chargeId) {
+      throw new InternalServiceError(
+        'A paid invoice that revived a subscription has no charge to refund',
+        { invoiceId: invoice.id }
+      );
+    }
+    return { invoiceId: invoice.id, chargeId };
+  }
+
+  /** Our row for a Stripe subscription, if we hold one. */
+  private async findByStripeId(
+    stripeSubId: string
+  ): Promise<Subscription | undefined> {
+    const [row] = await this.db
+      .select()
+      .from(subscriptions)
+      .where(eq(subscriptions.stripeSubscriptionId, stripeSubId))
+      .limit(1);
+    return row;
+  }
+
+  /**
+   * Whether a later event must leave this row alone (Codex-2hxff.15): a
+   * duplicate, settled first if it is still owed, or a tombstone. The handler
+   * then returns an inert result: no status change, and no userId, orgId or
+   * email, so the webhook writes no streaming block, clears none and sends
+   * nothing.
+   */
+  private async isInert(row: Subscription): Promise<boolean> {
+    if (isDuplicateSubscription(row)) {
+      await this.settleDuplicate(row);
+      return true;
+    }
+    return row.endedAt != null;
+  }
+
+  /** What the subscription's latest invoice took, in pence; 0 without one. */
+  private async latestInvoiceAmountPaid(
+    stripeSub: Stripe.Subscription
+  ): Promise<number> {
+    const latestInvoice = stripeSub.latest_invoice;
+    if (latestInvoice && typeof latestInvoice === 'object') {
+      return latestInvoice.amount_paid;
+    }
+    if (typeof latestInvoice === 'string') {
+      const invoice = await this.stripe.invoices.retrieve(latestInvoice);
+      return invoice.amount_paid;
+    }
+    return 0;
+  }
+
+  /**
+   * After the commit: a duplicate subscription is cancelled at Stripe and
+   * every payment it took refunded in full, unless that is done already
+   * (Codex-2hxff.15, "Keep the first"). Each refund's `charge.refunded` sends
+   * the buyer the one email ("you were already subscribed").
+   *
+   * If Stripe refuses, the row stays unsettled: the buyer is owed the money,
+   * held for support. The failure is logged with Stripe's code and thrown as
+   * retryable, so Stripe redelivers the event through its retry window, as
+   * `PurchaseService.refundDuplicatePayment` does.
+   */
+  private async settleDuplicate(row: Subscription): Promise<void> {
+    if (row.duplicateSettledAt) return;
+    let refundedInvoices: number;
+    try {
+      ({ refundedInvoices } = await cancelAndRefundDuplicate(this.stripe, {
+        stripeSubscriptionId: row.stripeSubscriptionId,
+        environment: this.environment,
+      }));
+    } catch (error) {
+      this.obs.error(
+        'Duplicate subscription could not be cancelled and refunded',
+        {
+          errorId: crypto.randomUUID(),
+          subscriptionId: row.id,
+          duplicateOfSubscriptionId: row.duplicateOfSubscriptionId,
+          stripeSubscriptionId: row.stripeSubscriptionId,
+          code: stripeErrorCode(error),
+          error: error instanceof Error ? error.message : String(error),
+        }
+      );
+      throw new ServiceUnavailableError(
+        'Duplicate subscription refund failed; it will be retried',
+        { subscriptionId: row.id }
+      );
+    }
+    await this.db
+      .update(subscriptions)
+      .set({ duplicateSettledAt: new Date(), updatedAt: new Date() })
+      .where(
+        and(
+          eq(subscriptions.id, row.id),
+          isNull(subscriptions.duplicateSettledAt)
+        )
+      );
+    this.obs.warn('Duplicate subscription cancelled and refunded', {
+      subscriptionId: row.id,
+      duplicateOfSubscriptionId: row.duplicateOfSubscriptionId,
+      stripeSubscriptionId: row.stripeSubscriptionId,
+      refundedInvoices,
+    });
   }
 
   /**
@@ -1315,6 +1937,10 @@ export class SubscriptionService extends BaseService {
     });
     if (!result) return;
 
+    // A duplicate, first delivery or replay, is cancelled and refunded, and
+    // one ended at Stripe has nothing to welcome: no email, no cache bump.
+    if (await this.isInert(result.subscription)) return {};
+
     if (!result.justInserted) {
       // Row was pre-inserted by an earlier self-heal or a prior delivery
       // attempt that 5xx'd after INSERT. Fire side effects anyway — the
@@ -1328,14 +1954,7 @@ export class SubscriptionService extends BaseService {
     // Compute the amount actually charged for the welcome-email payload.
     // Matches handleInvoicePaymentSucceeded — use amount_paid, not unit_amount,
     // so trials/coupons/prorations show the correct figure.
-    let amountCents = 0;
-    const latestInvoice = stripeSubscription.latest_invoice;
-    if (latestInvoice && typeof latestInvoice === 'object') {
-      amountCents = latestInvoice.amount_paid;
-    } else if (typeof latestInvoice === 'string') {
-      const invoice = await this.stripe.invoices.retrieve(latestInvoice);
-      amountCents = invoice.amount_paid;
-    }
+    const amountCents = await this.latestInvoiceAmountPaid(stripeSubscription);
 
     const email = await this.buildSubscriptionCreatedEmail(
       userId,
@@ -1434,7 +2053,7 @@ export class SubscriptionService extends BaseService {
     // period UPDATE (as this did until Codex-2hxff.6) left a rewritten row with
     // no transfer or ledger row to match. Cross-currency support is a tracked
     // future feature.
-    this.assertGbpOnly(stripeInvoice.currency, {
+    assertGbpOnly(stripeInvoice.currency, {
       invoiceId: stripeInvoice.id,
       stripeSubscriptionId: stripeSubId,
     });
@@ -1468,32 +2087,115 @@ export class SubscriptionService extends BaseService {
     if (!presence) return;
     const { subscription: sub } = presence;
 
+    // A duplicate pays no one and restores nothing: every payment it took is
+    // refunded (Codex-2hxff.15) — this one too, though it cleared after the
+    // duplicate was settled.
+    if (isDuplicateSubscription(sub)) {
+      await this.settleDuplicate(sub);
+      await this.refundDuplicateInvoice(
+        sub,
+        stripeInvoice.id,
+        sourceTransaction
+      );
+      return {};
+    }
+
     // Fetch the Stripe subscription for period dates (v19+: on items)
     const stripeSub = await this.stripe.subscriptions.retrieve(stripeSubId);
     const subItem = stripeSub.items.data[0];
     const periodStart = subItem?.current_period_start ?? 0;
     const periodEnd = subItem?.current_period_end ?? 0;
 
-    // Update period dates and recalculate split (DB-configurable fees, Codex-m644n).
+    // The charge's split feeds the transfers (DB-configurable fees,
+    // Codex-m644n). The row keeps the price billed each period, not this
+    // invoice's amount: an upgrade's proration invoice is a one-off
+    // (Codex-2hxff.15, SUB-11).
     const amountCents = stripeInvoice.amount_paid;
     const split = await this.computeSubscriptionSplit(
       sub.organizationId,
       amountCents
     );
 
-    await this.db
-      .update(subscriptions)
-      .set({
+    // The live subscription's status, not a blanket ACTIVE: a late or
+    // replayed invoice never revives one Stripe has cancelled (a refund, a
+    // lost dispute), and a renewal keeps `cancel_at_period_end`.
+    const status = resolveStatus(
+      stripeSub.status,
+      stripeSub.cancel_at_period_end ?? false,
+      SUBSCRIPTION_STATUS.ACTIVE
+    );
+
+    // An ended subscription is a tombstone: a late or replayed invoice
+    // changes nothing on the row and restores no access. Its charge is real,
+    // so it is still split below, unless it was refunded in full.
+    if (!sub.endedAt) {
+      const priceCents = subItem?.price?.unit_amount ?? sub.amountCents;
+      const rowSplit =
+        priceCents === amountCents
+          ? split
+          : await this.computeSubscriptionSplit(sub.organizationId, priceCents);
+      const values = {
         currentPeriodStart: new Date(periodStart * 1000),
         currentPeriodEnd: new Date(periodEnd * 1000),
-        status: SUBSCRIPTION_STATUS.ACTIVE,
-        amountCents,
-        platformFeeCents: split.platformFeeCents,
-        organizationFeeCents: split.organizationFeeCents,
-        creatorPayoutCents: split.creatorPayoutCents,
+        status,
+        amountCents: priceCents,
+        platformFeeCents: rowSplit.platformFeeCents,
+        organizationFeeCents: rowSplit.organizationFeeCents,
+        creatorPayoutCents: rowSplit.creatorPayoutCents,
         updatedAt: new Date(),
-      })
-      .where(eq(subscriptions.id, sub.id));
+      };
+      if (revives(sub.status, status)) {
+        const keptId = await this.writeRevival(sub, (tx) =>
+          tx
+            .update(subscriptions)
+            .set(values)
+            .where(eq(subscriptions.id, sub.id))
+        );
+        if (keptId) {
+          // Revived next to a newer subscription (owner decision 7). Only the
+          // invoice that revived it — its latest — is refunded, and pays no
+          // one. An older invoice redelivered now is not refunded and pays
+          // out as usual, while the revival is retired all the same.
+          const reviving = this.latestInvoiceId(stripeSub) === stripeInvoice.id;
+          await this.retireRevived(
+            sub,
+            keptId,
+            reviving
+              ? { invoiceId: stripeInvoice.id, chargeId: sourceTransaction }
+              : undefined,
+            stripeSub
+          );
+          if (reviving) return {};
+        }
+      } else {
+        await this.db
+          .update(subscriptions)
+          .set(values)
+          .where(
+            and(eq(subscriptions.id, sub.id), isNull(subscriptions.endedAt))
+          );
+      }
+    }
+
+    // Before paying out, the row as it stands now, read under the lock: a
+    // revival another event is retiring at once may have ended it. Ended, or
+    // not live at Stripe, the charge is checked too, and one refunded in full
+    // pays no one rather than paying out only to be reversed. Stripe is asked
+    // because the refund may be that revival's, made a moment ago and not
+    // recorded yet. Every other refund before the payout is clawed back once
+    // the slices exist (reverseEarlierRefunds, below).
+    const current = (await this.rereadUnderLock(sub)) ?? sub;
+    const ended = current.endedAt != null;
+    if (
+      (ended || !isLiveStatus(status)) &&
+      (await this.refundedInFull(sourceTransaction))
+    ) {
+      this.obs.info('Invoice refunded in full before its payout; no payout', {
+        subscriptionId: sub.id,
+        invoiceId: stripeInvoice.id,
+      });
+      return {};
+    }
 
     // Execute revenue transfers.
     //
@@ -1515,12 +2217,24 @@ export class SubscriptionService extends BaseService {
       split.creatorPayoutCents,
       invoiceCreatedAt
     );
+    // A refund or chargeback handled before this invoice found no slices to
+    // claw back (Codex-2hxff.67): it is clawed back now, as if it had come
+    // after. A redelivery runs it too, so a delivery that died in between
+    // catches up. Its failure is raised at the end, with the result
+    // (`AfterCommitError`), so the renewal's side effects still happen.
+    const finish = await reverseEarlierRefundsAfterCommit(
+      { ...this.ledger(), obs: this.obs },
+      { chargeId: sourceTransaction, source: { sourceType: 'subscription' } }
+    );
 
     this.obs.info('Invoice payment processed', {
       subscriptionId: sub.id,
       invoiceId: stripeInvoice.id,
       amountCents,
     });
+
+    // No renewal email and no access cleared for an ended subscription.
+    if (ended) return finish({});
 
     // Build renewal email only for recurring invoices (not first payment)
     let email: WebhookEmailPayload | undefined;
@@ -1561,7 +2275,7 @@ export class SubscriptionService extends BaseService {
       'payment_succeeded'
     );
 
-    return { userId: sub.userId, orgId: sub.organizationId, email };
+    return finish({ userId: sub.userId, orgId: sub.organizationId, email });
   }
 
   /**
@@ -1597,20 +2311,46 @@ export class SubscriptionService extends BaseService {
       });
       if (presence) {
         const { subscription: sub } = presence;
+        // A duplicate is refunded, and an ended subscription has nothing left
+        // to retry: neither is asked to update a card.
+        if (await this.isInert(sub)) return {};
         userId = sub.userId;
         orgId = sub.organizationId;
 
-        await this.db
+        // past_due GRANTS access while Stripe retries (owner decision P-3),
+        // so only a subscription that was paid up may move to it. A failed
+        // FIRST payment stays `incomplete`, and a late event never revives a
+        // cancelled or paused row.
+        const [moved] = await this.db
           .update(subscriptions)
           .set({
             status: SUBSCRIPTION_STATUS.PAST_DUE,
             updatedAt: new Date(),
           })
-          .where(eq(subscriptions.id, sub.id));
+          .where(
+            and(
+              eq(subscriptions.id, sub.id),
+              inArray(subscriptions.status, [
+                SUBSCRIPTION_STATUS.ACTIVE,
+                SUBSCRIPTION_STATUS.PAST_DUE,
+              ])
+            )
+          )
+          .returning();
 
-        this.obs.info('Subscription status updated to past_due', {
-          stripeSubscriptionId: stripeSubId,
-        });
+        if (moved) {
+          this.obs.info('Subscription status updated to past_due', {
+            stripeSubscriptionId: stripeSubId,
+          });
+        } else {
+          this.obs.info(
+            'Payment failed on a subscription not paid up; status kept',
+            {
+              stripeSubscriptionId: stripeSubId,
+              status: sub.status,
+            }
+          );
+        }
       }
     }
 
@@ -1684,6 +2424,10 @@ export class SubscriptionService extends BaseService {
       });
       return undefined;
     }
+
+    // A duplicate or an ended subscription has no trial to end for anyone.
+    const row = await this.findByStripeId(stripeSubId);
+    if (row && (await this.isInert(row))) return undefined;
 
     // Stripe exposes the trial boundary as `trial_end` (unix seconds).
     // Fall back to `current_period_end` on the item when `trial_end` is
@@ -1771,6 +2515,12 @@ export class SubscriptionService extends BaseService {
    * webhook route can bump COLLECTION_USER_LIBRARY and
    * COLLECTION_USER_SUBSCRIPTION. Returns `void` when the subscription
    * row isn't found locally (early stripe event before our record exists).
+   *
+   * An update reporting `canceled` moves the row to `cancelled`, so access
+   * ends at once, but leaves the tombstone to `customer.subscription.deleted`
+   * (Codex-2hxff.15, lead decision): that first end is what deactivates the
+   * membership, writes the streaming block and sends the email, none of which
+   * the webhook does for an update.
    */
   async handleSubscriptionUpdated(
     stripeSubscription: Stripe.Subscription
@@ -1793,6 +2543,9 @@ export class SubscriptionService extends BaseService {
     // with 200 exactly as the previous drop branch did.
     if (!presence) return;
     const sub = presence.subscription;
+    // A duplicate is refunded and an ended subscription stays ended: a stale
+    // payload saying `active` brings neither back (Codex-2hxff.15).
+    if (await this.isInert(sub)) return undefined;
 
     // Shared mapper prevents field drift (V1/V2/V5 in the audit). Passing
     // `sub.status` as the fallback preserves DB state if Stripe reports a
@@ -1804,27 +2557,60 @@ export class SubscriptionService extends BaseService {
     );
     const newTierId = mapped.tierId;
 
-    await this.db
-      .update(subscriptions)
-      .set({
-        status: mapped.status,
-        cancelAtPeriodEnd: mapped.cancelAtPeriodEnd,
-        ...(newTierId && newTierId !== sub.tierId && { tierId: newTierId }),
-        ...(mapped.billingInterval && {
-          billingInterval: mapped.billingInterval,
-        }),
-        ...(mapped.amountCents !== null && {
-          amountCents: mapped.amountCents,
-        }),
-        ...(mapped.currentPeriodStart && {
-          currentPeriodStart: mapped.currentPeriodStart,
-        }),
-        ...(mapped.currentPeriodEnd && {
-          currentPeriodEnd: mapped.currentPeriodEnd,
-        }),
-        updatedAt: new Date(),
-      })
-      .where(eq(subscriptions.id, sub.id));
+    if (await this.endedAtStripe(sub, mapped.status)) {
+      this.obs.warn('Late subscription event ignored: cancelled at Stripe', {
+        subscriptionId: sub.id,
+        stripeSubscriptionId: stripeSubId,
+        eventStatus: stripeSubscription.status,
+      });
+      return undefined;
+    }
+
+    // The price's amount, with the reporting split recomputed from it: the
+    // row's CHECK requires amount = platform + org + creator (SUB-11).
+    const amountChange =
+      mapped.amountCents !== null && mapped.amountCents !== sub.amountCents
+        ? {
+            amountCents: mapped.amountCents,
+            ...(await this.computeSubscriptionSplit(
+              sub.organizationId,
+              mapped.amountCents
+            )),
+          }
+        : {};
+
+    const values = {
+      status: mapped.status,
+      cancelAtPeriodEnd: mapped.cancelAtPeriodEnd,
+      ...(newTierId && newTierId !== sub.tierId && { tierId: newTierId }),
+      ...(mapped.billingInterval && {
+        billingInterval: mapped.billingInterval,
+      }),
+      ...amountChange,
+      ...(mapped.currentPeriodStart && {
+        currentPeriodStart: mapped.currentPeriodStart,
+      }),
+      ...(mapped.currentPeriodEnd && {
+        currentPeriodEnd: mapped.currentPeriodEnd,
+      }),
+      updatedAt: new Date(),
+    };
+    if (revives(sub.status, mapped.status)) {
+      const keptId = await this.writeRevival(sub, (tx) =>
+        tx.update(subscriptions).set(values).where(eq(subscriptions.id, sub.id))
+      );
+      // Revived next to a newer subscription: retired, and inert here — the
+      // webhook clears no streaming block (owner decision 7).
+      if (keptId) {
+        await this.retireRevived(sub, keptId);
+        return undefined;
+      }
+    } else {
+      await this.db
+        .update(subscriptions)
+        .set(values)
+        .where(eq(subscriptions.id, sub.id));
+    }
 
     this.obs.info('Subscription updated from webhook', {
       subscriptionId: sub.id,
@@ -1841,15 +2627,36 @@ export class SubscriptionService extends BaseService {
       'subscription_updated'
     );
 
+    // The ids drive the webhook's streaming block (on `unpaid`) and clear,
+    // which are per user and org: an OLD row's update must not block or
+    // clear the user's live subscription (review T5).
+    if (
+      !isLiveStatus(mapped.status) &&
+      (await this.otherLiveId(
+        this.db as typeof import('@codex/database').dbWs,
+        sub
+      ))
+    ) {
+      return {};
+    }
     return { userId: sub.userId, orgId: sub.organizationId };
   }
 
   /**
    * Handle customer.subscription.deleted — subscription cancelled/expired.
    *
-   * Returns a result object with:
-   * - userId for cache invalidation
-   * - email payload for the subscription-cancelled notification
+   * Final (Codex-2hxff.15, SUB-09): the row becomes a tombstone (`endedAt`)
+   * that no later or replayed event changes. With no row yet, the tombstone
+   * is written from the payload, so a stale `updated` (its payload still
+   * `active`) or a late invoice cannot insert the subscription live; next to
+   * another live subscription it is that one's duplicate, and refunded.
+   *
+   * Side effects follow the subscription, not the user: the `subscriber`
+   * membership is deactivated, and the result carries userId + orgId (the
+   * streaming block) and the cancellation email, only when this ends the
+   * subscription for the first time and the user holds no other live one for
+   * the org. A late deletion of an old subscription, a duplicate's, or a
+   * redelivery returns an inert `{}`.
    *
    * @param stripeSubscription The Stripe subscription object
    * @param webAppUrl The web app base URL for email links (optional)
@@ -1858,74 +2665,208 @@ export class SubscriptionService extends BaseService {
     stripeSubscription: Stripe.Subscription,
     webAppUrl?: string
   ): Promise<WebhookHandlerResult> {
-    const stripeSubId = stripeSubscription.id;
-    const metadata = stripeSubscription.metadata ?? {};
-    const userId = metadata.codex_user_id;
-    const orgId = metadata.codex_organization_id;
+    const row =
+      (await this.findByStripeId(stripeSubscription.id)) ??
+      (await this.writeTombstone(stripeSubscription));
+    if (!row) return {};
 
-    // Atomic: subscription cancel + membership demotion commit together.
+    if (isDuplicateSubscription(row)) {
+      await this.settleDuplicate(row);
+      const at = new Date();
+      await this.db
+        .update(subscriptions)
+        .set({
+          endedAt: sql`COALESCE(${subscriptions.endedAt}, ${at})`,
+          updatedAt: at,
+        })
+        .where(eq(subscriptions.id, row.id));
+      return {};
+    }
+
+    return this.endSubscription(row, stripeSubscription, webAppUrl);
+  }
+
+  /**
+   * End a subscription Stripe has deleted: the row becomes a tombstone.
+   *
+   * Only the first end, and only while the user holds no other live
+   * subscription to the org, deactivates the `subscriber` membership and
+   * returns userId + orgId (the streaming block) and the cancellation email.
+   * Otherwise `{}`.
+   */
+  private async endSubscription(
+    row: Subscription,
+    stripeSubscription: Stripe.Subscription,
+    webAppUrl?: string
+  ): Promise<WebhookHandlerResult> {
+    const { userId, organizationId: orgId } = row;
+
+    // Atomic: subscription end + membership demotion commit together.
     // A DB hiccup between these two writes previously left the
     // subscription cancelled but the user still listed as an active
     // `subscriber` role — inconsistent state the access layer can't
     // reason about.
-    await (this.db as typeof import('@codex/database').dbWs).transaction(
-      async (tx) => {
-        await tx
-          .update(subscriptions)
-          .set({
-            status: SUBSCRIPTION_STATUS.CANCELLED,
-            cancelledAt: new Date(),
-            updatedAt: new Date(),
-          })
-          .where(eq(subscriptions.stripeSubscriptionId, stripeSubId));
+    const endsAccess = await (
+      this.db as typeof import('@codex/database').dbWs
+    ).transaction(async (tx) => {
+      const [ended] = await tx
+        .update(subscriptions)
+        .set({
+          status: SUBSCRIPTION_STATUS.CANCELLED,
+          cancelledAt: new Date(),
+          endedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(and(eq(subscriptions.id, row.id), isNull(subscriptions.endedAt)))
+        .returning({ id: subscriptions.id });
+      // Ended already: a redelivery, or the refund path ended it first.
+      if (!ended) return false;
 
-        // BUG-016: Deactivate membership only when the role is 'subscriber'
-        // — preserves higher roles (owner/admin/creator).
-        if (userId && orgId) {
-          await tx
-            .update(organizationMemberships)
-            .set({
-              status: 'inactive',
-              updatedAt: new Date(),
-            })
-            .where(
-              and(
-                eq(organizationMemberships.organizationId, orgId),
-                eq(organizationMemberships.userId, userId),
-                eq(organizationMemberships.role, 'subscriber')
-              )
-            );
-        }
-      }
-    );
+      if (await this.otherLiveId(tx, row)) return false;
 
-    this.obs.info('Subscription deleted/cancelled from webhook', {
-      stripeSubscriptionId: stripeSubId,
+      // BUG-016: Deactivate membership only when the role is 'subscriber'
+      // — preserves the team roles (owner/admin/creator/member).
+      await tx
+        .update(organizationMemberships)
+        .set({
+          status: 'inactive',
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(organizationMemberships.organizationId, orgId),
+            eq(organizationMemberships.userId, userId),
+            eq(organizationMemberships.role, 'subscriber')
+          )
+        );
+      return true;
     });
 
+    this.obs.info('Subscription ended at Stripe', {
+      stripeSubscriptionId: row.stripeSubscriptionId,
+      subscriptionId: row.id,
+      endsAccess,
+    });
+    if (!endsAccess) return {};
+
     // Build cancellation email
-    const email = userId
-      ? await this.buildSubscriptionCancelledEmail(
-          userId,
-          stripeSubscription,
-          webAppUrl
-        )
-      : undefined;
+    const email = await this.buildSubscriptionCancelledEmail(
+      userId,
+      stripeSubscription,
+      webAppUrl
+    );
 
     // Orchestrator hook: deletion is access-reducing — bump both caches
     // so other devices flip off library entries + subscription badge
-    // within one visibility tick. Skipped when metadata missing userId.
-    this.invalidateIfConfigured(
-      userId || undefined,
-      orgId || undefined,
-      'subscription_deleted'
-    );
+    // within one visibility tick.
+    this.invalidateIfConfigured(userId, orgId, 'subscription_deleted');
 
-    return {
-      userId: userId || undefined,
-      orgId: orgId || undefined,
-      email: email ?? undefined,
+    return { userId, orgId, email: email ?? undefined };
+  }
+
+  /**
+   * `customer.subscription.deleted` before we hold a row: write it as a
+   * tombstone from the payload. Only for a subscription of ours, tagged with
+   * this environment and carrying the codex ids; anything else is logged and
+   * skipped (undefined).
+   *
+   * It never had a row, so it never gave access. When the user holds another
+   * live subscription to the org, it is that one's duplicate (owner decision
+   * 2026-10-22, "refund every payment"): the caller settles it, refunding
+   * what it took. Returns the row written, or the one recorded for it while
+   * this waited for the lock (the caller ends that as usual).
+   */
+  private async writeTombstone(
+    stripeSub: Stripe.Subscription
+  ): Promise<Subscription | undefined> {
+    const metadata = stripeSub.metadata ?? {};
+    const userId = metadata.codex_user_id;
+    const orgId = metadata.codex_organization_id;
+    const tierId = metadata.codex_tier_id;
+    const context = {
+      stripeSubscriptionId: stripeSub.id,
+      environment: metadata[STRIPE_ENV_METADATA_KEY],
     };
+    if (
+      metadata[STRIPE_ENV_METADATA_KEY] !== this.environment ||
+      !userId ||
+      !orgId ||
+      !tierId
+    ) {
+      this.obs.warn(
+        'Deleted subscription we hold no row for; no tombstone written',
+        context
+      );
+      return undefined;
+    }
+
+    const item = stripeSub.items?.data?.[0];
+    const amountCents = item?.price?.unit_amount ?? 0;
+    const split = await this.computeSubscriptionSplit(orgId, amountCents);
+    const now = new Date();
+    try {
+      return await (
+        this.db as typeof import('@codex/database').dbWs
+      ).transaction(async (tx) => {
+        const { replay, liveId } = await this.lockForSubscriber(tx, {
+          userId,
+          orgId,
+          stripeSubId: stripeSub.id,
+        });
+        if (replay) return replay;
+        const [row] = await tx
+          .insert(subscriptions)
+          .values({
+            userId,
+            organizationId: orgId,
+            tierId,
+            stripeSubscriptionId: stripeSub.id,
+            stripeCustomerId:
+              typeof stripeSub.customer === 'string'
+                ? stripeSub.customer
+                : stripeSub.customer.id,
+            status: SUBSCRIPTION_STATUS.CANCELLED,
+            duplicateOfSubscriptionId: liveId ?? null,
+            cancelledAt: now,
+            endedAt: now,
+            billingInterval:
+              item?.price?.recurring?.interval === 'year'
+                ? BILLING_INTERVAL.YEAR
+                : BILLING_INTERVAL.MONTH,
+            currentPeriodStart: item?.current_period_start
+              ? new Date(item.current_period_start * 1000)
+              : now,
+            currentPeriodEnd: item?.current_period_end
+              ? new Date(item.current_period_end * 1000)
+              : now,
+            amountCents,
+            platformFeeCents: split.platformFeeCents,
+            organizationFeeCents: split.organizationFeeCents,
+            creatorPayoutCents: split.creatorPayoutCents,
+          })
+          .returning();
+        this.obs.info(
+          liveId
+            ? 'Deleted subscription recorded as a duplicate'
+            : 'Deleted subscription recorded as a tombstone',
+          { ...context, duplicateOfSubscriptionId: liveId }
+        );
+        return row;
+      });
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        return this.findByStripeId(stripeSub.id);
+      }
+      if (isForeignKeyViolation(error)) {
+        // Its user, org or tier is not one we hold: nothing to keep ended.
+        this.obs.warn(
+          'Deleted subscription names ids we do not hold; no tombstone written',
+          context
+        );
+        return undefined;
+      }
+      throw error;
+    }
   }
 
   /**
@@ -1961,6 +2902,11 @@ export class SubscriptionService extends BaseService {
     const metadata = stripeSubscription.metadata ?? {};
     const userId = metadata.codex_user_id;
     const orgId = metadata.codex_organization_id;
+
+    // A duplicate is refunded and an ended subscription stays ended: neither
+    // is paused, and neither gets a streaming block (Codex-2hxff.15).
+    const row = await this.findByStripeId(stripeSubId);
+    if (row && (await this.isInert(row))) return {};
 
     await this.db
       .update(subscriptions)
@@ -2029,6 +2975,12 @@ export class SubscriptionService extends BaseService {
     const userId = metadata.codex_user_id;
     const orgId = metadata.codex_organization_id;
 
+    // A late `resumed` never revives a duplicate or an ended subscription,
+    // and its inert result leaves the streaming block in place
+    // (Codex-2hxff.15).
+    const row = await this.findByStripeId(stripeSubId);
+    if (row && (await this.isInert(row))) return {};
+
     // Use the shared mapper with ACTIVE as the fallback — resume's
     // expected outcome is that the subscription is active, even if Stripe
     // reports an unmapped status like 'trialing'.
@@ -2038,14 +2990,38 @@ export class SubscriptionService extends BaseService {
     );
     const nextStatus = mapped.status;
 
-    await this.db
-      .update(subscriptions)
-      .set({
-        status: nextStatus,
-        cancelAtPeriodEnd: mapped.cancelAtPeriodEnd,
-        updatedAt: new Date(),
-      })
-      .where(eq(subscriptions.stripeSubscriptionId, stripeSubId));
+    // A cancelled row whose deletion has not landed yet: back only if Stripe
+    // has it live again.
+    if (row && (await this.endedAtStripe(row, nextStatus))) {
+      this.obs.warn('Late subscription event ignored: cancelled at Stripe', {
+        subscriptionId: row.id,
+        stripeSubscriptionId: stripeSubId,
+        eventStatus: stripeSubscription.status,
+      });
+      return {};
+    }
+
+    const values = {
+      status: nextStatus,
+      cancelAtPeriodEnd: mapped.cancelAtPeriodEnd,
+      updatedAt: new Date(),
+    };
+    if (row && revives(row.status, nextStatus)) {
+      // Resumed next to a newer subscription: retired as any revival is
+      // (owner decision 7), and inert, so no streaming block is cleared.
+      const keptId = await this.writeRevival(row, (tx) =>
+        tx.update(subscriptions).set(values).where(eq(subscriptions.id, row.id))
+      );
+      if (keptId) {
+        await this.retireRevived(row, keptId);
+        return {};
+      }
+    } else {
+      await this.db
+        .update(subscriptions)
+        .set(values)
+        .where(eq(subscriptions.stripeSubscriptionId, stripeSubId));
+    }
 
     this.obs.info('Subscription resumed from webhook', {
       stripeSubscriptionId: stripeSubId,
@@ -2128,7 +3104,9 @@ export class SubscriptionService extends BaseService {
    * charged a different amount than they confirmed.
    *
    * Reuses the same tier-existence + price-configured guards as `changeTier()`
-   * so a preview that succeeds is a strong signal the commit will too.
+   * so a preview that succeeds is a strong signal the commit will too,
+   * including its refusal while the subscription is disputed
+   * (`assertNotDisputed`, Codex-2hxff.60).
    */
   async previewTierChange(
     userId: string,
@@ -2138,6 +3116,7 @@ export class SubscriptionService extends BaseService {
   ): Promise<TierChangePreview> {
     try {
       const sub = await this.getSubscriptionOrThrow(userId, orgId);
+      this.assertNotDisputed(sub, orgId);
 
       const [newTier] = await this.db
         .select()
@@ -2239,7 +3218,15 @@ export class SubscriptionService extends BaseService {
    * `prorationDate` should be the Unix timestamp returned by
    * `previewTierChange()` so the commit-time charge matches the preview to
    * the penny. Stripe re-runs the proration calculation against
-   * `Date.now()` if omitted.
+   * `Date.now()` if omitted. A preview's date stands for
+   * `TIER_CHANGE_PREVIEW_TTL_MS`; an older one, one from the future, or one
+   * before the current period throws `TierChangePreviewExpiredError` before
+   * Stripe is touched (Codex-2hxff.15, SUB-12).
+   *
+   * Refused with a `ConflictError` (409) while a chargeback on one of the
+   * subscription's invoices is open (`assertNotDisputed`): its access and its
+   * billing are paused until the dispute ends, and an upgrade would invoice
+   * at once (owner decision, Codex-2hxff.60). Stripe is not touched.
    */
   async changeTier(
     userId: string,
@@ -2250,6 +3237,7 @@ export class SubscriptionService extends BaseService {
   ): Promise<{ userId: string; orgId: string; subscription: Subscription }> {
     try {
       const sub = await this.getSubscriptionOrThrow(userId, orgId);
+      this.assertNotDisputed(sub, orgId);
 
       // Validate new tier
       const [newTier] = await this.db
@@ -2279,6 +3267,10 @@ export class SubscriptionService extends BaseService {
           tierId: newTierId,
           billingInterval,
         });
+      }
+
+      if (prorationDate !== undefined) {
+        this.assertPreviewCurrent(prorationDate, sub, newTierId);
       }
 
       // Update Stripe subscription with new price
@@ -2327,11 +3319,12 @@ export class SubscriptionService extends BaseService {
               ...CLEAR_PENDING_PRICE_METADATA,
             },
           },
-          isUpgrade
-            ? {
-                idempotencyKey: `upgrade_${sub.id}_${effectiveProrationDate}`,
-              }
-            : undefined
+          // One key per subscription, target price and preview: a double
+          // click replays, while upgrade → downgrade → the same upgrade with
+          // a fresh preview makes three changes (Codex-2hxff.15, SUB-12).
+          {
+            idempotencyKey: `${isUpgrade ? 'upgrade' : 'downgrade'}_${sub.id}_${newPriceId}_${effectiveProrationDate}`,
+          }
         );
       } catch (stripeError) {
         const statusCode = (stripeError as { statusCode?: number })?.statusCode;
@@ -2340,7 +3333,21 @@ export class SubscriptionService extends BaseService {
           // reverted on Stripe's side — the subscription stays on the
           // old tier. Throw the typed 402 so the route returns a clean
           // "payment required" response and the UI prompts the user to
-          // update their payment method.
+          // update their payment method. The error's context is sent to
+          // the client, so Stripe's own message is logged, not returned
+          // (Codex-2hxff.23, SEC-02); the errorId in both ties them.
+          const errorId = crypto.randomUUID();
+          this.obs.warn('Tier upgrade payment declined by Stripe', {
+            errorId,
+            userId,
+            organizationId: orgId,
+            newTierId,
+            code: stripeErrorCode(stripeError),
+            error:
+              stripeError instanceof Error
+                ? stripeError.message
+                : String(stripeError),
+          });
           throw new SubscriptionPaymentRequiredError(
             'Payment for the upgrade was declined. Update your payment method and try again.',
             {
@@ -2348,7 +3355,7 @@ export class SubscriptionService extends BaseService {
               organizationId: orgId,
               newTierId,
               billingInterval,
-              stripeMessage: (stripeError as Error).message,
+              errorId,
               // Surface the prorationDate the failed commit pinned to
               // Stripe so the pricing dialog can branch "needs fresh
               // preview" vs "transient payment failure" by comparing
@@ -2441,6 +3448,30 @@ export class SubscriptionService extends BaseService {
   }
 
   /**
+   * The preview's price still stands (owner decision 2026-10-22: 10 minutes,
+   * then "Prices changed, review again"). The date is the client's, so it is
+   * bounded before Stripe sees it: within the preview's lifetime, at most a
+   * little ahead of our clock, and inside the current billing period. Stripe
+   * documents no bound of its own, and an unbounded date could buy an upgrade
+   * for pennies or farm downgrade credit.
+   */
+  private assertPreviewCurrent(
+    prorationDate: number,
+    sub: Subscription,
+    newTierId: string
+  ): void {
+    const now = Date.now();
+    const at = prorationDate * 1000;
+    if (
+      at < now - TIER_CHANGE_PREVIEW_TTL_MS ||
+      at > now + PRORATION_DATE_CLOCK_SKEW_MS ||
+      prorationDate < Math.floor(sub.currentPeriodStart.getTime() / 1000)
+    ) {
+      throw new TierChangePreviewExpiredError({ prorationDate, newTierId });
+    }
+  }
+
+  /**
    * Cancel subscription at period end.
    * Access retained until currentPeriodEnd.
    *
@@ -2514,7 +3545,8 @@ export class SubscriptionService extends BaseService {
    * On success:
    *   - Stripe call with `billing_cycle_anchor: 'unchanged'` keeps the
    *     existing cycle so the user isn't silently re-billed.
-   *   - DB: `status` flipped to 'active', `updatedAt` bumped.
+   *   - DB: `status` set to what Stripe's response reports (normally
+   *     'active'), `updatedAt` bumped.
    *   - Orchestrator hook fires with reason `'subscription_resumed'` —
    *     same reason as the webhook handler so observability groups
    *     webhook-driven + user-initiated resumes under one tag.
@@ -2522,10 +3554,7 @@ export class SubscriptionService extends BaseService {
    * Revocation CLEAR is owned by the route layer (mirrors reactivate —
    * see `workers/ecom-api/src/routes/subscriptions.ts`).
    *
-   * Idempotency: Stripe resume is idempotent on the subscription id (a
-   * second call on an already-active sub is a no-op upstream), so an
-   * idempotency key is defensive rather than strictly required. We pass
-   * one anyway per `packages/subscription/CLAUDE.md`.
+   * Idempotency: the key is per pause, not per subscription — see the call.
    */
   async resumeSubscription(
     userId: string,
@@ -2556,16 +3585,43 @@ export class SubscriptionService extends BaseService {
         });
       }
 
-      await this.stripe.subscriptions.resume(
+      // Resuming would make it a second live subscription to the org if the
+      // user has subscribed again since: refused before Stripe is asked, so
+      // nothing resumes there either (review T6).
+      const otherLive = await (
+        this.db as typeof import('@codex/database').dbWs
+      ).transaction(async (tx) => {
+        await this.lockSubscriber(tx, userId, organizationId);
+        return this.otherLiveId(tx, sub);
+      });
+      if (otherLive) {
+        throw new AlreadySubscribedError(userId, organizationId);
+      }
+
+      // One key per pause (Codex-2hxff.15, SUB-13): the row's `updatedAt`
+      // moves when it is paused and again when it resumes, so a double click
+      // replays while the next pause's resume is a new request. A key per
+      // subscription made a second resume within Stripe's 24 hours replay the
+      // first, and do nothing.
+      const resumed = await this.stripe.subscriptions.resume(
         sub.stripeSubscriptionId,
         { billing_cycle_anchor: 'unchanged' },
-        { idempotencyKey: `resume_${sub.stripeSubscriptionId}` }
+        {
+          idempotencyKey: `resume_${sub.stripeSubscriptionId}_${sub.updatedAt.getTime()}`,
+        }
       );
 
+      // Stripe's own answer, not a blanket ACTIVE: a resume can leave it
+      // paused or past due until an invoice is paid.
+      const status = resolveStatus(
+        resumed.status,
+        resumed.cancel_at_period_end ?? false,
+        SUBSCRIPTION_STATUS.ACTIVE
+      );
       await this.db
         .update(subscriptions)
         .set({
-          status: SUBSCRIPTION_STATUS.ACTIVE,
+          status,
           updatedAt: new Date(),
         })
         .where(eq(subscriptions.id, sub.id));
@@ -2573,6 +3629,7 @@ export class SubscriptionService extends BaseService {
       this.obs.info('Subscription resumed by user', {
         subscriptionId: sub.id,
         organizationId,
+        status,
       });
 
       // Orchestrator hook: resume is access-RESTORING — bump both caches
@@ -2682,12 +3739,18 @@ export class SubscriptionService extends BaseService {
       ),
       with: {
         tier: true,
-        organization: true,
+        // The four fields the account page shows, never the row: a
+        // subscriber is not a member, and the row carried the payee's user id
+        // (Codex-kk6zx). The `as SubscriptionWithOrg[]` cast this replaced
+        // let the whole row pass for these four.
+        organization: {
+          columns: { id: true, name: true, slug: true, logoUrl: true },
+        },
       },
       orderBy: [desc(subscriptions.createdAt)],
     });
 
-    return results as SubscriptionWithOrg[];
+    return results;
   }
 
   /**
@@ -2722,7 +3785,12 @@ export class SubscriptionService extends BaseService {
     const { page, limit, tierId, status, includeCancelled, search } = options;
     const offset = (page - 1) * limit;
 
-    const conditions = [eq(subscriptions.organizationId, orgId)];
+    // A duplicate subscription was refunded and never subscribed anyone
+    // (Codex-2hxff.15): it is no subscriber, cancelled or not.
+    const conditions = [
+      eq(subscriptions.organizationId, orgId),
+      isNull(subscriptions.duplicateOfSubscriptionId),
+    ];
     if (tierId) conditions.push(eq(subscriptions.tierId, tierId));
     if (status) {
       conditions.push(eq(subscriptions.status, status));
@@ -3123,6 +4191,13 @@ export class SubscriptionService extends BaseService {
     //    column collapses to the lifetime aggregate.
     // 2. In-transit (status='pending') sum.
     // 3. Needs-attention (pending OR failed) count.
+    //
+    // The platform's own fee rows carry the org id but are not the org's
+    // money, so every total leaves them out (Codex-2hxff.15, SUB-20).
+    const orgScope = [
+      eq(payouts.organizationId, orgId),
+      ne(payouts.payoutType, 'platform_fee'),
+    ];
     const dateConditions = dateWindow(payouts.createdAt, fromDate, toDate);
     const inPeriodSum =
       dateConditions.length === 0
@@ -3136,25 +4211,18 @@ export class SubscriptionService extends BaseService {
           total: sql<number>`COALESCE(SUM(${payouts.amountCents}),0)::int`,
         })
         .from(payouts)
-        .where(
-          and(eq(payouts.organizationId, orgId), eq(payouts.status, 'paid'))
-        ),
+        .where(and(...orgScope, eq(payouts.status, 'paid'))),
       this.db
         .select({
           sum: sql<number>`COALESCE(SUM(${payouts.amountCents}),0)::int`,
         })
         .from(payouts)
-        .where(
-          and(eq(payouts.organizationId, orgId), eq(payouts.status, 'pending'))
-        ),
+        .where(and(...orgScope, eq(payouts.status, 'pending'))),
       this.db
-        .select({ count: sql<number>`count(*)::int` })
+        .select({ count: NEEDS_ATTENTION_CHARGES })
         .from(payouts)
         .where(
-          and(
-            eq(payouts.organizationId, orgId),
-            inArray(payouts.status, ['pending', 'failed'])
-          )
+          and(...orgScope, inArray(payouts.status, ['pending', 'failed']))
         ),
     ]);
 
@@ -3286,7 +4354,7 @@ export class SubscriptionService extends BaseService {
         .from(payouts)
         .where(and(...creatorScope, eq(payouts.status, 'pending'))),
       this.db
-        .select({ count: sql<number>`count(*)::int` })
+        .select({ count: NEEDS_ATTENTION_CHARGES })
         .from(payouts)
         .where(
           and(...creatorScope, inArray(payouts.status, ['pending', 'failed']))
@@ -3348,6 +4416,7 @@ export class SubscriptionService extends BaseService {
         payoutType: payouts.payoutType,
         reason: payouts.reason,
         transferGroup: payouts.transferGroup,
+        stripeChargeId: payouts.stripeChargeId,
         resolvedAt: payouts.resolvedAt,
       })
       .from(payouts)
@@ -3429,17 +4498,19 @@ export class SubscriptionService extends BaseService {
         }
       }
 
-      // Pre-h69cg historical rows have no `transferGroup`. Falling back to
-      // the row id keeps the dedup correct (1 row = 1 transaction) rather
-      // than collapsing all ungrouped rows into a single bucket.
-      const groupKey = row.transferGroup ?? row.payoutId;
-      acc._transferGroups.add(groupKey);
+      // One transaction is one charge (Codex-2hxff.15): a subscription's
+      // transfer group spans every renewal, so two renewals are two. A row
+      // with no charge id falls back to its transfer group, and a pre-h69cg
+      // row with neither to its own id (1 row = 1 transaction) rather than
+      // collapsing all ungrouped rows into a single bucket.
+      const chargeKey = row.stripeChargeId ?? row.transferGroup ?? row.payoutId;
+      acc._transferGroups.add(chargeKey);
 
-      // `needsAttentionCount` dedupes by the SAME key as `transactionCount`
-      // — under h69cg's 3-sibling-row model, one failed charge produces 3
-      // pending/failed rows that share a transferGroup. Counting per-row
-      // would render "1 transaction · 3 needs attention" for one stuck
-      // payout, which reads as 3 separate problems.
+      // `needsAttentionCount` counts stuck charges by the SAME key as
+      // `transactionCount`, as the summaries' NEEDS_ATTENTION_CHARGES does,
+      // so all three agree — under h69cg's 3-sibling-row model, one failed
+      // charge produces 3 pending/failed rows, which per-row would read as 3
+      // separate problems.
       //
       // `min_transfer_floor` is excluded: rows below Stripe's minimum
       // transfer threshold are held as pending until aggregate-and-sweep
@@ -3449,7 +4520,7 @@ export class SubscriptionService extends BaseService {
         (row.status === 'pending' || row.status === 'failed') &&
         row.reason !== 'min_transfer_floor'
       ) {
-        acc._needsAttentionGroups.add(groupKey);
+        acc._needsAttentionGroups.add(chargeKey);
       }
     }
 
@@ -3487,12 +4558,6 @@ export class SubscriptionService extends BaseService {
   /**
    * BUG-014: Resolve accumulated pending payouts for a user within an org.
    *
-   * Called when a Connect account transitions to chargesEnabled + payoutsEnabled.
-   * For each unresolved payout:
-   *   - Attempts stripe.transfers.create()
-   *   - On success: sets resolvedAt and stripeTransferId
-   *   - On failure: logs and continues to the next payout (batch is best-effort)
-   *
    * Codex-69t7c WP5: `orgId` is `string | null`. Regardless of which value the
    * caller passes, the recipient is identified by the Connect account's
    * userId, and BOTH that user's org-scoped (organizationId = orgId) AND
@@ -3500,21 +4565,71 @@ export class SubscriptionService extends BaseService {
    * SQL `col = value` never matches NULL, so the orgless leg would otherwise
    * be stranded. A `null` orgId resolves ONLY the orgless leg.
    *
-   * Returns the count of successfully resolved payouts.
+   * Every trigger now drains the whole payee instead
+   * (`resolvePendingPayoutsForAccount`); this narrower form drains the same
+   * way, within its scope.
    */
   async resolvePendingPayouts(
     orgId: string | null,
     stripeAccountId: string
   ): Promise<{ resolved: number; failed: number }> {
+    return this.drainPayee(stripeAccountId, { orgId });
+  }
+
+  /**
+   * Pay a payee everything they are owed and can be paid now
+   * (Codex-2hxff.13; docs/payments/connect-and-payouts.md, "Releasing pending
+   * money"): every drainable row in the name of the account's owner, in
+   * every organisation, and their orgless rows. Called when their account
+   * becomes payable (`account.updated`, `/connect/me/sync`) and by the hourly
+   * sweep.
+   *
+   * Safe to call at any time and more than once: each row is claimed for one
+   * attempt before it is sent, so a concurrent drain skips it, and a row
+   * already paid is not drainable. Sends at most one payout-released email,
+   * from what was actually paid.
+   *
+   * `platformFailures` is the hourly sweep's tally, so a short platform
+   * balance is one error per sweep, not one per payee (Codex-r094t). Any
+   * other caller leaves it out, and the drain reports its own run.
+   */
+  async resolvePendingPayoutsForAccount(
+    stripeAccountId: string,
+    platformFailures?: PlatformFailureTally
+  ): Promise<{ resolved: number; failed: number }> {
+    return this.drainPayee(stripeAccountId, 'all', platformFailures);
+  }
+
+  /**
+   * The drain behind both entry points. For each payout:
+   *   - attempts stripe.transfers.create();
+   *   - on success: marks it paid with its transfer;
+   *   - on failure: records why and continues (`recordTransferFailure`).
+   *
+   * `scope` is `'all'` for the payee-wide drain, or `{ orgId }` for that
+   * organisation plus the payee's orgless rows (`null`: orgless only).
+   *
+   * Platform-side failures (a short balance, a bad key) are each a warning
+   * and ONE error for the run, raised at its first (Codex-r094t): this
+   * drain's run, or the sweep's when it passes `sweepFailures`, which then
+   * logs the run's summary itself.
+   */
+  private async drainPayee(
+    stripeAccountId: string,
+    scope: 'all' | { orgId: string | null },
+    sweepFailures?: PlatformFailureTally
+  ): Promise<{ resolved: number; failed: number }> {
+    const scopeOrgId = scope === 'all' ? null : scope.orgId;
+    const platformFailures = sweepFailures ?? platformFailureTally();
     let resolved = 0;
     let failed = 0;
     // What transferPendingGroup ACTUALLY paid to this user's creator slices —
     // the payout-released email must report this, not the pre-loop snapshot.
     let creatorPaidCents = 0;
     let creatorPaidCount = 0;
+    // The organisations whose creator slices were paid, for the email.
+    const creatorPaidOrgs = new Set<string | null>();
 
-    // Query all unresolved payouts for this org that belong to the user
-    // whose Connect account just became active.
     // stripeAccountId is globally unique, so it alone identifies the account
     // (one account per user, Codex-69t7c — the org condition is dropped).
     const [connectAccount] = await this.db
@@ -3525,7 +4640,8 @@ export class SubscriptionService extends BaseService {
 
     if (!connectAccount) {
       this.obs.warn('resolvePendingPayouts: Connect account not found', {
-        organizationId: orgId,
+        organizationId: scopeOrgId,
+        payeeWide: scope === 'all',
         stripeAccountId,
       });
       return { resolved: 0, failed: 0 };
@@ -3533,12 +4649,18 @@ export class SubscriptionService extends BaseService {
 
     // Codex-69t7c WP5: a single Connect account belongs to ONE creator
     // (routed by userId), but that creator can accrue BOTH org-scoped
-    // (tri-party) pending rows (organizationId = orgId) AND orgless
-    // (bi-party) pending rows (organizationId IS NULL). SQL `col = value`
-    // never matches NULL, so the original `eq(payouts.organizationId, orgId)`
-    // filter rendered every orgless `creator_payout` row invisible to this
-    // primary webhook drain — stranding the creator's money indefinitely.
-    // Match BOTH shapes for this user so both legs resolve in one pass.
+    // (tri-party) pending rows AND orgless (bi-party) rows (organizationId
+    // IS NULL). SQL `col = value` never matches NULL, so an org filter alone
+    // left every orgless `creator_payout` row invisible to the drain.
+    const orgFilter =
+      scope === 'all'
+        ? undefined
+        : scope.orgId === null
+          ? isNull(payouts.organizationId)
+          : or(
+              eq(payouts.organizationId, scope.orgId),
+              isNull(payouts.organizationId)
+            );
     const unresolvedPayouts = await this.db
       .select()
       .from(payouts)
@@ -3547,18 +4669,9 @@ export class SubscriptionService extends BaseService {
           eq(payouts.userId, connectAccount.userId),
           // Failed transfers are retried too (Codex-2hxff.11): a `failed` row
           // keeps its charge id and stays payable — unless an old write path
-          // failed it (see isDrainablePayout).
+          // failed it, or it waits for support (see isDrainablePayout).
           isDrainablePayout(),
-          // A non-null orgId resolves BOTH that org's rows AND the creator's
-          // orgless rows in one pass; a null orgId (orgless-only caller, e.g.
-          // the sweep's orgless group) resolves ONLY the orgless rows. `eq`
-          // cannot take a null comparand, so branch on it.
-          orgId === null
-            ? isNull(payouts.organizationId)
-            : or(
-                eq(payouts.organizationId, orgId),
-                isNull(payouts.organizationId)
-              )
+          ...(orgFilter ? [orgFilter] : [])
         )
       );
 
@@ -3567,48 +4680,50 @@ export class SubscriptionService extends BaseService {
     }
 
     this.obs.info('Resolving pending payouts', {
-      organizationId: orgId,
+      organizationId: scopeOrgId,
+      payeeWide: scope === 'all',
       stripeAccountId,
       userId: connectAccount.userId,
       count: unresolvedPayouts.length,
     });
 
-    // Codex-iivne + Codex-69t7c WP5: group pending rows by (orgScope,
-    // sourceType) so a creator with many sub-threshold pending rows
-    // (multi-creator split scenarios) gets resolved when the SUM clears the
-    // min-transfer floor — rather than every row failing the per-row floor
-    // check and piling up indefinitely. Fee policy depends on BOTH the
-    // org-scope (orgless → platform-only fees; org-scoped → per-creator
-    // fees) AND the sourceType, so the group key reflects both. The org
-    // attached to each group drives fee resolution in transferPendingGroup:
-    // orgless rows carry `null` and resolve fees via getFeesPlatform().
-    type PendingGroupKey =
-      `${'org' | 'orgless'}:${'purchase' | 'subscription'}`;
+    // Where an earlier attempt's transfer can be: this account, or one the
+    // payee has since replaced (Codex-2hxff.47). Read once per payee.
+    const accounts = await payeeAccountIds(this.db, connectAccount.userId);
+
+    // Codex-iivne + Codex-69t7c WP5 + Codex-2hxff.13: group pending rows by
+    // (organisation, sourceType) so a creator with many sub-threshold pending
+    // rows gets resolved when the SUM clears the min-transfer floor, rather
+    // than every row failing the per-row floor check and piling up. Fees
+    // depend on the organisation (orgless → platform-only fees; an org → its
+    // own and the creator's config) AND the sourceType, so each group is one
+    // organisation's: a payee-wide drain spans several, and must never pay
+    // one organisation's rows at another's fees.
     const groups = new Map<
-      PendingGroupKey,
-      { orgId: string | null; rows: typeof unresolvedPayouts }
+      string,
+      {
+        orgId: string | null;
+        sourceType: 'purchase' | 'subscription';
+        rows: typeof unresolvedPayouts;
+      }
     >();
     for (const payout of unresolvedPayouts) {
-      const orgScope = payout.organizationId === null ? 'orgless' : 'org';
-      const source =
+      const sourceType =
         payout.sourceType === 'purchase' ? 'purchase' : 'subscription';
-      const key: PendingGroupKey = `${orgScope}:${source}`;
+      const key = `${payout.organizationId ?? 'orgless'}:${sourceType}`;
       const existing = groups.get(key);
       if (existing) {
         existing.rows.push(payout);
       } else {
         groups.set(key, {
           orgId: payout.organizationId,
+          sourceType,
           rows: [payout],
         });
       }
     }
 
-    for (const [key, { orgId: groupOrgId, rows }] of groups) {
-      if (rows.length === 0) continue;
-      const sourceType: 'purchase' | 'subscription' = key.endsWith('purchase')
-        ? 'purchase'
-        : 'subscription';
+    for (const [key, { orgId: groupOrgId, sourceType, rows }] of groups) {
       // One group's failure (a Stripe lookup, a fee read) never blocks the
       // next. Its claimed rows come free when the lease runs out.
       const groupResult = await this.transferPendingGroup(
@@ -3616,7 +4731,9 @@ export class SubscriptionService extends BaseService {
         sourceType,
         groupOrgId,
         stripeAccountId,
-        connectAccount.userId
+        connectAccount.userId,
+        accounts,
+        platformFailures
       ).catch((error: unknown) => {
         this.obs.error('resolvePendingPayouts: group failed', {
           errorId: crypto.randomUUID(),
@@ -3636,10 +4753,21 @@ export class SubscriptionService extends BaseService {
       failed += groupResult.failed;
       creatorPaidCents += groupResult.creatorPaidCents;
       creatorPaidCount += groupResult.creatorPaidCount;
+      if (groupResult.creatorPaidCount > 0) creatorPaidOrgs.add(groupOrgId);
+    }
+
+    if (!sweepFailures) {
+      reportPlatformFailures(this.ledger(), platformFailures, {
+        organizationId: scopeOrgId,
+        payeeWide: scope === 'all',
+        stripeAccountId,
+        userId: connectAccount.userId,
+      });
     }
 
     this.obs.info('Pending payout resolution complete', {
-      organizationId: orgId,
+      organizationId: scopeOrgId,
+      payeeWide: scope === 'all',
       stripeAccountId,
       resolved,
       failed,
@@ -3647,10 +4775,10 @@ export class SubscriptionService extends BaseService {
     });
 
     // WP-10 (Codex-69t7c.10): fire payout-released notification when at least
-    // one creator_payout transitioned pending→paid. Fires ONCE per
-    // resolvePendingPayouts invocation (one notification per activation event,
-    // not per-row). Fire-and-forget post-loop — notification failure MUST NOT
-    // roll back or block the already-committed transfers.
+    // one creator_payout transitioned pending→paid. Fires ONCE per drain
+    // (one notification per activation event, not per-row or per
+    // organisation). Fire-and-forget post-loop — notification failure MUST
+    // NOT roll back or block the already-committed transfers.
     //
     // Gate on creator_payout rows ONLY — organization_fee rows are the org
     // admin's slice, not the creator's personal earnings. Counted from what
@@ -3671,13 +4799,17 @@ export class SubscriptionService extends BaseService {
           const dashboardUrl = this.webAppUrl
             ? `${this.webAppUrl}/studio/earnings`
             : '/studio/earnings';
+          // The email names an organisation only when every creator slice
+          // it reports is that organisation's.
+          const [onlyOrg] = creatorPaidOrgs;
+          const emailOrgId = creatorPaidOrgs.size === 1 ? onlyOrg : null;
 
           void this.payoutMailer({
             to: creatorRow.email,
             templateName: 'payout-released',
             category: 'transactional',
             userId: connectAccount.userId,
-            organizationId: orgId,
+            organizationId: emailOrgId ?? null,
             data: {
               creatorName: creatorRow.email, // fallback; template can resolve display name
               amountFormatted,
@@ -3689,7 +4821,7 @@ export class SubscriptionService extends BaseService {
       } catch (err) {
         // Swallow — notification failure must not surface after committed transfers.
         this.obs.warn('payout-released notification dispatch failed', {
-          organizationId: orgId,
+          organizationId: scopeOrgId,
           stripeAccountId,
           creatorPaidCount,
           error: err instanceof Error ? err.message : String(err),
@@ -3701,8 +4833,8 @@ export class SubscriptionService extends BaseService {
   }
 
   /**
-   * Codex-iivne: resolve one (userId, orgScope, sourceType) group of pending
-   * payouts. Caller has already filtered by Connect account userId, so
+   * Codex-iivne: resolve one (userId, organisation, sourceType) group of
+   * pending payouts. Caller has already filtered by Connect account userId, so
    * every row in `group` shares one recipient. Fee policy is looked up
    * once per call (was: per-row); floor evaluates against the SUM
    * (was: each row individually).
@@ -3723,7 +4855,9 @@ export class SubscriptionService extends BaseService {
     sourceType: 'purchase' | 'subscription',
     orgId: string | null,
     stripeAccountId: string,
-    userId: string
+    userId: string,
+    accounts: PayeeAccounts,
+    platformFailures: PlatformFailureTally
   ): Promise<{
     resolved: number;
     failed: number;
@@ -3790,9 +4924,12 @@ export class SubscriptionService extends BaseService {
     );
     const payable = (payout: (typeof group)[number]) =>
       payout.amountCents - (reductions.get(payout.id) ?? 0);
+    // On the payee's current account, and on a replaced one for a row with
+    // an attempt on record (Codex-2hxff.47). `claimed` holds the rows as read
+    // BEFORE the claim, so `lastRetryAt` is an earlier attempt's, not this one.
     const alreadySent = await findTransfersForPayouts(
       this.stripe,
-      stripeAccountId,
+      accounts,
       claimed,
       this.obs
     );
@@ -3856,13 +4993,15 @@ export class SubscriptionService extends BaseService {
         continue;
       }
 
+      const idempotencyKey = `payout_${payout.id}_${attempt}`;
       let transfer: Stripe.Transfer;
       try {
         // GBP-only enforcement (Codex-yv18n) lives INSIDE the per-row
         // try/catch so a non-GBP row counts as a per-row failure (not a
         // group abort) — keeps mixed-currency batches partially recoverable.
+        // It can never succeed, so the row is flagged for support at once.
         const payoutCurrency = (payout.currency || CURRENCY.GBP).toLowerCase();
-        this.assertGbpOnly(payoutCurrency, {
+        assertGbpOnly(payoutCurrency, {
           pendingPayoutId: payout.id,
           subscriptionId: payout.subscriptionId,
           organizationId: orgId,
@@ -3887,25 +5026,35 @@ export class SubscriptionService extends BaseService {
               ...stripeEnvMetadata(this.environment),
             },
           },
-          { idempotencyKey: `payout_${payout.id}_${attempt}` }
+          { idempotencyKey }
         );
       } catch (error) {
         failed++;
-        this.obs.error('Failed to resolve pending payout', {
-          pendingPayoutId: payout.id,
-          subscriptionId: payout.subscriptionId,
-          amountCents,
-          sourceType,
-          error: (error as Error).message,
-        });
         // Codex-vv77x: per-row error isolation — one Stripe failure never
-        // blocks the remaining rows. The row stays payable for the next drain.
-        await markPayoutFailed(this.db, payout.id).catch((updateError) => {
-          this.obs.error('Could not mark the payout failed', {
-            pendingPayoutId: payout.id,
-            error: (updateError as Error).message,
-          });
-        });
+        // blocks the remaining rows. The row stays payable for the next
+        // drain, unless Stripe has refused it for good or too often: then it
+        // waits for support, logged once (Codex-2hxff.48). A platform-side
+        // failure goes on the run's tally (Codex-r094t). A refund that
+        // cancelled the row meanwhile gets any transfer that landed reversed.
+        await recordTransferFailure(
+          this.ledger(),
+          {
+            payoutId: payout.id,
+            destination: stripeAccountId,
+            amountCents,
+            idempotencyKey,
+          },
+          error,
+          {
+            organizationId: orgId,
+            subscriptionId: payout.subscriptionId,
+            purchaseId: payout.purchaseId,
+            payoutType: payout.payoutType,
+            sourceType,
+            attempt,
+          },
+          platformFailures
+        );
         continue;
       }
 
@@ -3942,27 +5091,18 @@ export class SubscriptionService extends BaseService {
   // ─── Private Helpers ─────────────────────────────────────────────────────
 
   /**
-   * Throw `UnsupportedCurrencyError` unless `currency` is GBP (or absent).
-   *
-   * Centralises the GBP-only guard shared by `handleInvoicePaymentSucceeded`
-   * and `resolvePendingPayouts`. Both downstream paths feed
-   * `stripe.transfers.create()` which is hardcoded to `CURRENCY.GBP`; this
-   * guard prevents silent currency mismatch. Cross-currency support is a
-   * tracked future feature (Codex-yv18n).
-   *
-   * Passing `null`/`undefined` is treated as "no currency on this Stripe
-   * object" and skipped — preserves the prior behaviour of letting Stripe
-   * payloads without a `currency` field through (the schema default for
-   * payouts is 'gbp', so the row branch normalises before calling).
+   * Refuse a tier change, and its preview, while a chargeback on one of the
+   * subscription's invoices is open (`disputedAt` set): its access and billing
+   * are paused until the dispute ends (Codex-2hxff.60). Called before any
+   * Stripe call. The context is sent to the client: nothing about the dispute
+   * itself.
    */
-  private assertGbpOnly(
-    currency: string | null | undefined,
-    context: Record<string, unknown>
-  ): void {
-    if (!currency) return;
-    const normalised = currency.toLowerCase();
-    if (normalised === CURRENCY.GBP) return;
-    throw new UnsupportedCurrencyError(normalised, [CURRENCY.GBP], context);
+  private assertNotDisputed(sub: Subscription, orgId: string): void {
+    if (!sub.disputedAt) return;
+    throw new ConflictError(
+      'The plan cannot be changed while a payment dispute on this subscription is open.',
+      { code: 'SUBSCRIPTION_DISPUTED', organizationId: orgId }
+    );
   }
 
   private async getSubscriptionOrThrow(
@@ -4267,7 +5407,7 @@ export class SubscriptionService extends BaseService {
   }
 
   /**
-   * The payouts-ledger dependencies for `recordSlice` / `recordPlatformFee`
+   * The payouts-ledger dependencies for `recordSplitOnce` / `recordPlatformFee`
    * (Codex-2hxff.11).
    */
   private ledger(): LedgerDeps {
@@ -4286,21 +5426,21 @@ export class SubscriptionService extends BaseService {
    * charge, whichever branch fires, under one idempotency key
    * (`${chargeId}_creator_pool_owner`).
    *
-   * Through `recordSlice` (Codex-2hxff.11): pending in the payee's name until
+   * Through the ledger (Codex-2hxff.11): pending in the payee's name until
    * they can be paid (Codex-2hxff.2 review — an ownership transfer may land
    * on someone who has not onboarded), and held as `no_owner` when the
    * organisation had no owner at the invoice's time (Codex-2hxff.37; it used
    * to be logged and dropped).
    */
-  private async transferCreatorPoolToOwner(
+  private creatorPoolToOwnerSlice(
     subscriptionId: string,
     orgId: string,
     chargeId: string,
     transferGroup: string,
     creatorPayoutCents: number,
     orgPayee: OrganisationPayee | undefined
-  ): Promise<void> {
-    await recordSlice(this.ledger(), {
+  ): RecordSliceInput {
+    return {
       payoutType: 'creator_payout_to_owner',
       amountCents: creatorPayoutCents,
       organizationId: orgId,
@@ -4313,7 +5453,81 @@ export class SubscriptionService extends BaseService {
         : null,
       idempotencyKey: `${chargeId}_creator_pool_owner`,
       metadata: { subscription_id: subscriptionId },
+    };
+  }
+
+  /**
+   * Record an invoice charge's split once (Codex-2hxff.62; owner decision
+   * 2026-10-21, "Keep its first split"): see `recordSplitOnce`. Returns, in
+   * `slices` order, each slice recorded now (its outcome and the amount it
+   * was recorded at) or `null`; `null` for the whole when an earlier delivery
+   * already split the charge. Then the replay adds nothing, even if an
+   * agreement accepted since is backdated to before the invoice — only a
+   * slice missing entirely, from what is left of the charge's `grossCents`
+   * (Codex-2hxff.49).
+   */
+  private async recordInvoiceSplit(
+    subscriptionId: string,
+    orgId: string,
+    chargeId: string,
+    grossCents: number,
+    slices: RecordSliceInput[]
+  ): Promise<Array<{
+    outcome: RecordSliceOutcome;
+    amountCents: number;
+  } | null> | null> {
+    const result = await recordSplitOnce(
+      this.ledger(),
+      { id: chargeId, grossCents },
+      slices
+    );
+    if (result.kind !== 'recorded') {
+      this.obs.info(
+        result.kind === 'completed'
+          ? 'Invoice already split by an earlier delivery that died part-way; the replay recorded only the slices it lacked'
+          : 'Invoice already split by an earlier delivery; the replay keeps that split',
+        { subscriptionId, organizationId: orgId, stripeChargeId: chargeId }
+      );
+      if (result.kind === 'already_split') return null;
+    }
+    return result.outcomes.map((outcome, index) => {
+      const slice = result.slices[index];
+      return outcome && slice
+        ? { outcome, amountCents: slice.amountCents }
+        : null;
     });
+  }
+
+  /**
+   * The post-platform pool of an invoice charge whose recorded platform fee
+   * differs from the one computed now: the fees changed between deliveries.
+   * The recorded fee wins, and the pool is the gross minus it, split by the
+   * organisation's fee-config share as a first delivery's is
+   * (`calculateRevenueSplit`), so the slices sum to the gross (owner decision
+   * 2026-10-23, "Keep recorded fee"; Codex-2hxff.49).
+   */
+  private async poolAfterRecordedFee(
+    ids: { subscriptionId: string; orgId: string; chargeId: string },
+    grossCents: number,
+    computedFeeCents: number,
+    recordedFeeCents: number
+  ): Promise<{ organizationFeeCents: number; creatorPayoutCents: number }> {
+    this.obs.warn(
+      'A replay found a different platform fee on record; the rest of the charge is split from it',
+      {
+        subscriptionId: ids.subscriptionId,
+        organizationId: ids.orgId,
+        stripeChargeId: ids.chargeId,
+        recordedFeeCents,
+        computedFeeCents,
+      }
+    );
+    const fees = await this.resolvePayoutFees(ids.orgId, 'subscription');
+    return calculateRevenueSplit(
+      Math.max(grossCents - recordedFeeCents, 0),
+      0,
+      fees.orgFeePercent
+    );
   }
 
   /**
@@ -4353,12 +5567,66 @@ export class SubscriptionService extends BaseService {
     charges: number;
     retried: number;
     stillFailing: number;
-    lostDisputesApplied: number;
   }> {
     return retryFailedClawbacks(
       { ...this.ledger(), obs: this.obs },
       { olderThanMinutes }
     );
+  }
+
+  /**
+   * The hourly retry of duplicate subscriptions still owed their refund
+   * (Codex-2hxff.15, review T8): a settle Stripe refused, and every retry of
+   * its event refused too, leaves the duplicate unsettled once Stripe stops
+   * redelivering. Settles the ones recorded more than `olderThanMs` ago, up to
+   * `limit`. One row's failure never stops the batch: `settleDuplicate` logs
+   * it (errorId, Stripe code) and it is returned in `stillOwed`.
+   */
+  async settleOwedDuplicates(options: {
+    olderThanMs: number;
+    limit: number;
+  }): Promise<{
+    settled: number;
+    stillOwed: Array<{ id: string; stripeSubscriptionId: string }>;
+  }> {
+    const recordedBefore = new Date(Date.now() - options.olderThanMs);
+    const owed = await this.db
+      .select()
+      .from(subscriptions)
+      .where(
+        and(
+          isNotNull(subscriptions.duplicateOfSubscriptionId),
+          isNull(subscriptions.duplicateSettledAt),
+          lt(subscriptions.createdAt, recordedBefore)
+        )
+      )
+      .orderBy(subscriptions.createdAt)
+      .limit(options.limit);
+
+    let settled = 0;
+    const stillOwed: Array<{ id: string; stripeSubscriptionId: string }> = [];
+    for (const row of owed) {
+      try {
+        await this.settleDuplicate(row);
+        settled++;
+      } catch (error) {
+        // A Stripe refusal is logged inside settleDuplicate; anything else
+        // (the settle write) is logged here.
+        if (!(error instanceof ServiceUnavailableError)) {
+          this.obs.error('Owed duplicate subscription could not be settled', {
+            errorId: crypto.randomUUID(),
+            subscriptionId: row.id,
+            stripeSubscriptionId: row.stripeSubscriptionId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+        stillOwed.push({
+          id: row.id,
+          stripeSubscriptionId: row.stripeSubscriptionId,
+        });
+      }
+    }
+    return { settled, stillOwed };
   }
 
   // ── Disputes (Codex-2hxff.9; docs/payments/subscription-disputes.md) ──
@@ -4424,8 +5692,48 @@ export class SubscriptionService extends BaseService {
     return ended;
   }
 
+  // ── Refunds (Codex-2hxff.10; docs/payments/subscriptions.md#refunds) ──
+
+  /**
+   * A full refund of the latest payment: the subscription cancelled at Stripe
+   * (owner decision P-4). The caller then applies the cancellation as for
+   * `customer.subscription.deleted`, so access ends now rather than when that
+   * event lands. Undefined for a partial refund, a purchase, or an earlier
+   * payment. Tier and course subscriptions alike.
+   */
+  async cancelForFullRefund(
+    charge: RefundedCharge
+  ): Promise<RefundCancellation | undefined> {
+    return cancelForFullRefund(this.disputeDeps(), charge);
+  }
+
   private disputeDeps() {
     return { db: this.db, stripe: this.stripe, obs: this.obs };
+  }
+
+  /**
+   * Whether an event that would bring a CANCELLED row back is stale: the
+   * subscription has ended at Stripe, where `canceled` is final
+   * (docs/payments/subscriptions.md#lifecycle-and-access: a late or replayed
+   * event never brings back a subscription that has ended). Asked only in
+   * that case, so it costs a Stripe call only then. A subscription Stripe
+   * marked `unpaid` and the customer later paid is live again, and returns.
+   */
+  private async endedAtStripe(
+    sub: Subscription,
+    wouldBecome: string
+  ): Promise<boolean> {
+    if (
+      sub.status !== SUBSCRIPTION_STATUS.CANCELLED ||
+      wouldBecome === SUBSCRIPTION_STATUS.CANCELLED ||
+      !sub.stripeSubscriptionId
+    ) {
+      return false;
+    }
+    const live = await this.stripe.subscriptions.retrieve(
+      sub.stripeSubscriptionId
+    );
+    return endedAtStripeStatus(live.status);
   }
 
   /**
@@ -4454,21 +5762,36 @@ export class SubscriptionService extends BaseService {
     const transferGroup = `sub_${subscriptionId}`;
 
     // Every slice goes through the payouts ledger (Codex-2hxff.11): its row is
-    // reserved by a per-charge unique key BEFORE any transfer, so a redelivered
-    // invoice.payment_succeeded re-runs this safely — slices already recorded
-    // are skipped, a missing one is added, nothing is transferred twice.
+    // reserved by a per-charge unique key BEFORE any transfer, so nothing is
+    // transferred twice. The split past the platform fee is reserved in one
+    // go and only once (Codex-2hxff.62): a redelivered
+    // invoice.payment_succeeded keeps the first delivery's split, even when
+    // an agreement accepted since is in force at the invoice's time.
     const ledger = this.ledger();
     const source = { sourceType: 'subscription', subscriptionId } as const;
 
     // Platform fee — retained in the platform Stripe balance at charge time;
-    // no transfer. One paid row per charge (Codex-h69cg, Codex-g9owu).
-    await recordPlatformFee(ledger, {
+    // no transfer. One paid row per charge (Codex-h69cg, Codex-g9owu). A
+    // replay keeps the fee an earlier delivery recorded, and the rest of the
+    // charge is split from it (Codex-2hxff.49).
+    const grossCents = platformFeeCents + orgFeeCents + creatorPayoutCents;
+    const recordedFeeCents = await recordPlatformFee(ledger, {
       amountCents: platformFeeCents,
       organizationId: orgId,
       source,
       stripeChargeId: chargeId,
       transferGroup,
+      unlessSplit: true,
     });
+    const pool =
+      recordedFeeCents === platformFeeCents
+        ? { organizationFeeCents: orgFeeCents, creatorPayoutCents }
+        : await this.poolAfterRecordedFee(
+            { subscriptionId, orgId, chargeId },
+            grossCents,
+            platformFeeCents,
+            recordedFeeCents
+          );
 
     // Codex-2hxff.2: the org slice and the no-agreement creator pool go to
     // whoever owned the org when the invoice was created — the same instant
@@ -4489,133 +5812,45 @@ export class SubscriptionService extends BaseService {
     // gets the post-platform pool minus what the creators take, rounding
     // pennies included (Codex-2hxff.12).
     //
-    // Codex-rzfjw (WP-4): query the agreements model with all four
-    // WP-1 filters pinned at invoice fire time, and JOIN to the
-    // accepted proposal to read `proposed_creator_share_percent` as
-    // the authoritative share — NOT the legacy `organization_fee_percentage`
-    // column. The legacy column is dual-written by WP-2 (Discovery 2
-    // of project_revenue_share_wp1_discoveries) and will be dropped in a
-    // follow-up migration once this read path lands.
-    //
-    // Filters:
-    //   status='active'                         — only live agreements
-    //   revenueType='subscription'              — subscription pool
-    //   terminatedAt IS NULL OR > invoiceAt     — Q3 no pro-rating
-    //   effectiveFrom <= invoiceAt              — not-yet-active excluded
-    //   effectiveUntil IS NULL OR > invoiceAt   — legacy time-slice safety
-    //
-    // Backfilled legacy rows (migration 0072) have `current_proposal_id`
-    // pointing at a synthesised round-1 'accepted' proposal whose
-    // `proposed_creator_share_percent = 10000 - organization_fee_percentage`,
-    // so this JOIN handles both pre-WP-1 and post-WP-1 rows uniformly.
-    //
-    // Codex-ez3tl (I3): leftJoin + NULL skip. `current_proposal_id` is
-    // FK `onDelete: 'set null'`, so a proposal delete nulls the link.
-    // The pre-fix `innerJoin` silently dropped such rows. The leftJoin
-    // surfaces them; rows with NULL share are skipped with a warn log
-    // so misconfigurations don't go undetected.
-    const creatorAgreementsRaw = await this.db
-      .select({
-        agreementId: creatorOrganizationAgreements.id,
-        creatorId: creatorOrganizationAgreements.creatorId,
-        sharePercent: agreementProposals.proposedCreatorSharePercent,
-      })
-      .from(creatorOrganizationAgreements)
-      .leftJoin(
-        agreementProposals,
-        eq(
-          agreementProposals.id,
-          creatorOrganizationAgreements.currentProposalId
-        )
-      )
-      .where(
-        and(
-          eq(creatorOrganizationAgreements.organizationId, orgId),
-          eq(creatorOrganizationAgreements.revenueType, 'subscription'),
-          // Per Decision Q3: an agreement is active at invoice time if
-          // EITHER it is currently status='active' (never terminated), OR
-          // it was terminated AFTER the invoice fired. The schema's
-          // check_creator_org_agreement_terminated_shape enforces
-          // `(status='terminated') = (terminated_at IS NOT NULL)`, so
-          // status='active' guarantees terminatedAt IS NULL.
-          or(
-            eq(creatorOrganizationAgreements.status, 'active'),
-            and(
-              eq(creatorOrganizationAgreements.status, 'terminated'),
-              gt(creatorOrganizationAgreements.terminatedAt, invoiceCreatedAt)
-            )
-          ),
-          lte(creatorOrganizationAgreements.effectiveFrom, invoiceCreatedAt),
-          or(
-            isNull(creatorOrganizationAgreements.effectiveUntil),
-            gt(creatorOrganizationAgreements.effectiveUntil, invoiceCreatedAt)
-          )
-        )
-      );
+    // The agreements in force at invoice fire time: one rule for every
+    // payment path (`agreementsInForce`, @codex/agreements). It reads the
+    // accepted proposal's `proposed_creator_share_percent`, never the legacy
+    // `organization_fee_percentage` column; keeps paying past the review date
+    // (owner decision AGR-01); and returns one agreement per creator,
+    // deterministically — a creator has one slice per charge
+    // (uq_payouts_creator_slice_per_charge). It does NOT read membership: a
+    // removal terminates the agreements at that moment (AGR-09), so an
+    // invoice raised before it is still paid when this webhook lands after.
+    const creatorAgreements = await agreementsInForce(this.db, {
+      organizationId: orgId,
+      revenueType: 'subscription',
+      at: invoiceCreatedAt,
+      obs: this.obs,
+    });
 
-    const creatorAgreements: Array<{
-      creatorId: string;
-      sharePercent: number;
-    }> = [];
-    for (const row of creatorAgreementsRaw) {
-      // A creator has one slice per charge (uq_payouts_creator_slice_per_charge).
-      // Two agreements matching the same instant — corrupted data — would
-      // take two shares off the organisation's slice and record only one,
-      // so the second share would go nowhere. Count the first; flag the rest.
-      if (creatorAgreements.some((a) => a.creatorId === row.creatorId)) {
-        this.obs.error(
-          'payout: creator matches more than one agreement; using the first',
-          {
-            errorId: crypto.randomUUID(),
-            agreementId: row.agreementId,
-            organizationId: orgId,
-            creatorId: row.creatorId,
-            subscriptionId,
-          }
-        );
-        continue;
-      }
-      if (row.sharePercent === null) {
-        this.obs.warn(
-          'payout: agreement has no current_proposal_id; skipping',
-          {
-            agreementId: row.agreementId,
-            organizationId: orgId,
-            creatorId: row.creatorId,
-            subscriptionId,
-          }
-        );
-        continue;
-      }
-      creatorAgreements.push({
-        creatorId: row.creatorId,
-        sharePercent: row.sharePercent,
-      });
-    }
-
-    const postPlatformCents = orgFeeCents + creatorPayoutCents;
+    const postPlatformCents =
+      pool.organizationFeeCents + pool.creatorPayoutCents;
     const totalShareBps = creatorAgreements.reduce(
       (sum, a) => sum + a.sharePercent,
       0
     );
-    const orgSlice = (amountCents: number) =>
-      recordSlice(ledger, {
-        payoutType: 'organization_fee',
-        amountCents,
-        organizationId: orgId,
-        source,
-        stripeChargeId: chargeId,
-        transferGroup,
-        sendTransferGroup: true,
-        // Pending in the payee's name until they can be paid, so it drains
-        // to them even if ownership changes before they onboard; `no_owner`
-        // if the organisation had none (Codex-2hxff.37).
-        payee: orgPayee
-          ? { userId: orgPayee.userId, account: orgPayee.account }
-          : null,
-        idempotencyKey: `${chargeId}_org_fee`,
-        metadata: { subscription_id: subscriptionId },
-      });
+    const orgSlice = (amountCents: number): RecordSliceInput => ({
+      payoutType: 'organization_fee',
+      amountCents,
+      organizationId: orgId,
+      source,
+      stripeChargeId: chargeId,
+      transferGroup,
+      sendTransferGroup: true,
+      // Pending in the payee's name until they can be paid, so it drains
+      // to them even if ownership changes before they onboard; `no_owner`
+      // if the organisation had none (Codex-2hxff.37).
+      payee: orgPayee
+        ? { userId: orgPayee.userId, account: orgPayee.account }
+        : null,
+      idempotencyKey: `${chargeId}_org_fee`,
+      metadata: { subscription_id: subscriptionId },
+    });
 
     // No creator is paid — no agreement matched, or every one carries a zero
     // share (e.g. legacy rows backfilled with org_fee=10000): the org keeps
@@ -4631,14 +5866,22 @@ export class SubscriptionService extends BaseService {
           }
         );
       }
-      await orgSlice(orgFeeCents);
-      await this.transferCreatorPoolToOwner(
+      await this.recordInvoiceSplit(
         subscriptionId,
         orgId,
         chargeId,
-        transferGroup,
-        creatorPayoutCents,
-        orgPayee
+        grossCents,
+        [
+          orgSlice(pool.organizationFeeCents),
+          this.creatorPoolToOwnerSlice(
+            subscriptionId,
+            orgId,
+            chargeId,
+            transferGroup,
+            pool.creatorPayoutCents,
+            orgPayee
+          ),
+        ]
       );
       return;
     }
@@ -4667,8 +5910,6 @@ export class SubscriptionService extends BaseService {
       creatorShares.reduce((sum, c) => sum + c.amountCents, 0);
     const effectiveCreatorPoolCents = postPlatformCents - effectiveOrgFeeCents;
 
-    await orgSlice(effectiveOrgFeeCents);
-
     // Batch-fetch all creator Connect accounts to avoid N+1 queries. Each
     // creator has one account keyed by userId (Codex-69t7c), independent of
     // which org this subscription belongs to.
@@ -4683,8 +5924,16 @@ export class SubscriptionService extends BaseService {
       );
     const connectByCreator = new Map(creatorConnects.map((c) => [c.userId, c]));
 
+    // The whole split is planned first and recorded once (Codex-2hxff.62),
+    // so every creator's slice is built before any row is written.
+    const creatorSlices: Array<{
+      creator: (typeof creatorShares)[number];
+      minTransferCents: number;
+      belowFloor: boolean;
+      slice: RecordSliceInput;
+    }> = [];
     for (const creator of creatorShares) {
-      // Codex-xz61z (I4): exactly one log line per iteration whose shape
+      // Codex-xz61z (I4): exactly one log line per creator whose shape
       // matches its terminal state.
       if (creator.amountCents <= 0) {
         this.obs.info('payout_split_skipped', {
@@ -4710,50 +5959,78 @@ export class SubscriptionService extends BaseService {
       );
       const belowFloor = creator.amountCents < creatorFees.minTransferCents;
 
-      const outcome = await recordSlice(ledger, {
-        payoutType: 'creator_payout',
-        amountCents: creator.amountCents,
-        organizationId: orgId,
-        source,
-        stripeChargeId: chargeId,
-        transferGroup,
-        sendTransferGroup: true,
-        payee: {
-          userId: creator.creatorId,
-          account: connectByCreator.get(creator.creatorId),
-        },
-        ...(belowFloor ? { hold: 'min_transfer_floor' as const } : {}),
-        idempotencyKey: `${chargeId}_creator_${creator.creatorId}`,
-        metadata: {
-          subscription_id: subscriptionId,
-          creator_id: creator.creatorId,
+      creatorSlices.push({
+        creator,
+        minTransferCents: creatorFees.minTransferCents,
+        belowFloor,
+        slice: {
+          payoutType: 'creator_payout',
+          amountCents: creator.amountCents,
+          organizationId: orgId,
+          source,
+          stripeChargeId: chargeId,
+          transferGroup,
+          sendTransferGroup: true,
+          payee: {
+            userId: creator.creatorId,
+            account: connectByCreator.get(creator.creatorId),
+          },
+          ...(belowFloor ? { hold: 'min_transfer_floor' as const } : {}),
+          // The agreement this slice was split by, on its row: an invoice has
+          // no row of its own (Codex-2hxff.19).
+          creatorOrgAgreementId: creator.agreementId,
+          idempotencyKey: `${chargeId}_creator_${creator.creatorId}`,
+          metadata: {
+            subscription_id: subscriptionId,
+            creator_id: creator.creatorId,
+          },
         },
       });
+    }
 
+    const outcomes = await this.recordInvoiceSplit(
+      subscriptionId,
+      orgId,
+      chargeId,
+      grossCents,
+      [orgSlice(effectiveOrgFeeCents), ...creatorSlices.map((c) => c.slice)]
+    );
+    if (!outcomes) return;
+
+    for (const [index, entry] of creatorSlices.entries()) {
+      const { creator, belowFloor, minTransferCents } = entry;
+      // The organisation's slice is first, so creator i is outcome i + 1.
+      // None: a replay completing the split found this slice recorded.
+      const recorded = outcomes[index + 1];
+      if (!recorded) continue;
+      const { outcome } = recorded;
       this.obs.info(
         belowFloor ? 'payout_split_skipped' : 'payout_split_computed',
         {
           subscriptionId,
           organizationId: orgId,
           creatorId: creator.creatorId,
-          amountCents: creator.amountCents,
+          amountCents: recorded.amountCents,
           sharePercent: creator.sharePercent,
           totalShareBps,
           postPlatformCents,
           effectiveOrgFeeCents,
           effectiveCreatorPoolCents,
-          ...(belowFloor
-            ? { minTransferCents: creatorFees.minTransferCents }
-            : {}),
-          outcome: outcome?.kind,
+          ...(belowFloor ? { minTransferCents } : {}),
+          ...(recorded.amountCents === creator.amountCents
+            ? {}
+            : { computedAmountCents: creator.amountCents }),
+          outcome: outcome.kind,
           actuallyTransferred:
-            outcome?.kind === 'paid' || outcome?.kind === 'unsettled',
+            outcome.kind === 'paid' || outcome.kind === 'unsettled',
           pendingReason:
-            outcome?.kind === 'pending'
+            outcome.kind === 'pending'
               ? outcome.reason
-              : outcome?.kind === 'failed'
+              : outcome.kind === 'failed'
                 ? 'transfer_failed'
-                : undefined,
+                : outcome.kind === 'held'
+                  ? 'dispute_hold'
+                  : undefined,
         }
       );
     }
@@ -4762,16 +6039,17 @@ export class SubscriptionService extends BaseService {
   // ─── Pending Payout Sweep (Codex-vv77x) ─────────────────────────────────
   //
   // Hybrid event+sweep resolution pattern per Stripe docs:
-  //   1. account.updated webhook is the primary trigger (connect-webhook.ts:73)
+  //   1. account.updated and /connect/me/sync are the primary triggers
   //   2. Webhooks retry for 3 days then drop — this sweep is the safety net
-  //   3. Periodic sweep groups payouts by (orgId, userId) — each unique
-  //      pair maps to one Connect account — and asks Stripe for current state
-  //   4. If the Connect account is now charges_enabled && payouts_enabled,
-  //      delegate to resolvePendingPayouts(orgId, stripeAccountId) which owns
-  //      the actual transfer loop.
+  //   3. Each run CLAIMS a bounded batch of payees (Codex-2hxff.13): one
+  //      UPDATE stamps `attempted_at` on their rows, so overlapping runs take
+  //      disjoint payees and a payee who is not ready yet goes to the back
+  //   4. For each, it asks Stripe for the account's current state and, if it
+  //      is charges_enabled && payouts_enabled, drains the whole payee
+  //      (resolvePendingPayoutsForAccount)
   //   5. olderThanMinutes guards against racing the webhook on freshly inserted
   //      rows — only sweep rows old enough that the webhook would already have
-  //      fired by now if it was going to.
+  //      fired by now if it was going to — and spaces out a payee's checks.
 
   /**
    * Give an ownerless organisation's held slices to their next owner, now
@@ -4834,45 +6112,129 @@ export class SubscriptionService extends BaseService {
   }
 
   /**
-   * Sweep pending payouts rows older than `olderThanMinutes`,
-   * group by (organizationId, userId), and attempt resolution for each
-   * group whose Connect account now reports charges_enabled && payouts_enabled.
+   * Claim up to `limit` payees whose drainable rows were last checked before
+   * `threshold`, least recently checked first (Codex-2hxff.13). A payee is a
+   * user with a Connect account row (onboarded, or onboarding), or an
+   * ownerless organisation for its held `no_owner` rows. A user who never
+   * started onboarding has nothing to check at Stripe, so their rows are left
+   * pending and untouched rather than take a place in the batch. A drainable
+   * row with neither payee nor organisation can be claimed by no one; those
+   * are counted and logged at error.
    *
-   * Returns aggregate counters for observability; never throws on a
-   * per-group failure — failures are isolated and counted.
+   * One UPDATE: it stamps `attempted_at = now` on the claimed rows, under
+   * `FOR UPDATE SKIP LOCKED`. So the run is bounded; a run that starts while
+   * another is claiming skips the rows it holds, and one that starts after
+   * finds them checked; and a payee who cannot be paid yet goes to the back
+   * of the queue. No session lock: the pooler may hand each statement a
+   * different connection. Two runs that start at the same instant can split
+   * one payee's rows between them; both then drain that payee, and the
+   * per-row attempt claims keep that to a repeated check, never a second
+   * transfer.
    */
-  async sweepUnresolvedPayouts(olderThanMinutes = 15): Promise<{
+  private async claimSweepPayees(
+    threshold: Date,
+    limit: number,
+    now: Date = new Date()
+  ): Promise<Array<{ userId: string | null; organizationId: string | null }>> {
+    const payeeKey = sql`CASE WHEN ${payouts.userId} IS NULL THEN 'org:' || ${payouts.organizationId}::text ELSE 'user:' || ${payouts.userId} END`;
+    // Failed transfers are retried too (Codex-2hxff.11), unless an old write
+    // path failed them or they wait for support (see isDrainablePayout).
+    const drainable = and(
+      isDrainablePayout(),
+      lt(payouts.attemptedAt, threshold)
+    );
+    const due = and(
+      drainable,
+      sql`((${payouts.userId} IS NULL AND ${payouts.organizationId} IS NOT NULL) OR EXISTS (SELECT 1 FROM ${stripeConnectAccounts} WHERE ${stripeConnectAccounts.userId} = ${payouts.userId}))`
+    );
+
+    const [unroutable] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(payouts)
+      .where(
+        and(drainable, isNull(payouts.userId), isNull(payouts.organizationId))
+      );
+    if (unroutable && unroutable.count > 0) {
+      this.obs.error(
+        'sweepUnresolvedPayouts: owed rows with neither payee nor organisation; nobody can be paid them',
+        { errorId: crypto.randomUUID(), rowCount: unroutable.count }
+      );
+    }
+
+    const duePayees = this.db
+      .select({ payeeKey })
+      .from(payouts)
+      .where(due)
+      .groupBy(payeeKey)
+      .orderBy(sql`min(${payouts.attemptedAt})`)
+      .limit(limit);
+    const claimable = this.db
+      .select({ id: payouts.id })
+      .from(payouts)
+      .where(and(due, inArray(payeeKey, duePayees)))
+      .for('update', { skipLocked: true });
+    const claimed = await this.db
+      .update(payouts)
+      .set({ attemptedAt: now })
+      .where(inArray(payouts.id, claimable))
+      // Bare `.returning()`: the client union collapses the projected overload.
+      .returning();
+
+    const payees = new Map<
+      string,
+      { userId: string | null; organizationId: string | null }
+    >();
+    for (const row of claimed) {
+      const key = row.userId
+        ? `user:${row.userId}`
+        : `org:${row.organizationId}`;
+      if (!payees.has(key)) {
+        payees.set(key, {
+          userId: row.userId,
+          organizationId: row.userId ? null : row.organizationId,
+        });
+      }
+    }
+    return [...payees.values()];
+  }
+
+  /**
+   * The hourly safety net (Codex-vv77x, Codex-2hxff.13): claim a bounded
+   * batch of payees with rows older than `olderThanMinutes`
+   * (`claimSweepPayees`), and drain each one whose Connect account Stripe
+   * now reports charges_enabled && payouts_enabled — all of their rows, in
+   * every organisation (`resolvePendingPayoutsForAccount`). An ownerless
+   * organisation's held rows are re-homed to its new owner, if it has one.
+   *
+   * A "group" in the counters is one claimed payee. Returns aggregate
+   * counters for observability; never throws on a per-payee failure —
+   * failures are isolated and counted.
+   */
+  async sweepUnresolvedPayouts(
+    olderThanMinutes = 15,
+    limit = SWEEP_PAYEE_LIMIT
+  ): Promise<{
     groupsScanned: number;
     groupsResolved: number;
     groupsSkipped: number;
     errors: number;
   }> {
-    const threshold = new Date(Date.now() - olderThanMinutes * 60 * 1000);
+    const now = new Date();
+    const threshold = new Date(now.getTime() - olderThanMinutes * 60 * 1000);
 
-    // Distinct (orgId, userId) pairs with at least one unresolved row older
-    // than the threshold. We deliberately do NOT join to stripeConnectAccounts
-    // here — we want the sweep to surface orphan pending rows whose Connect
-    // account row may have been re-keyed, and the per-group lookup below
-    // handles the missing-account case (logs warn + returns 0).
-    const groups = await this.db
-      .selectDistinct({
-        organizationId: payouts.organizationId,
-        userId: payouts.userId,
-      })
-      .from(payouts)
-      .where(
-        and(
-          // Failed transfers are retried too (Codex-2hxff.11), unless an old
-          // write path failed them (see isDrainablePayout).
-          isDrainablePayout(),
-          lt(payouts.attemptedAt, threshold)
-        )
-      );
+    // claimSweepPayees takes only payees with a Connect account row (plus
+    // organisations with no owner): a payee who never onboarded cannot be
+    // paid, and must not take a batch slot from one who can. Rows with no
+    // payee and no organisation are counted and logged there.
+    const groups = await this.claimSweepPayees(threshold, limit, now);
 
     const groupsScanned = groups.length;
     let groupsResolved = 0;
     let groupsSkipped = 0;
     let errors = 0;
+    // A short platform balance fails every payee's rows alike: one error for
+    // the sweep, at its first failure, not one per payee (Codex-r094t).
+    const platformFailures = platformFailureTally();
 
     if (groupsScanned === 0) {
       this.obs.info('sweepUnresolvedPayouts: no pending groups', {
@@ -4940,10 +6302,7 @@ export class SubscriptionService extends BaseService {
         if (!connect) {
           this.obs.warn(
             'sweepUnresolvedPayouts: connect row missing for pending group',
-            {
-              organizationId: group.organizationId,
-              userId: group.userId,
-            }
+            { userId: group.userId }
           );
           groupsSkipped++;
           continue;
@@ -4963,24 +6322,32 @@ export class SubscriptionService extends BaseService {
           continue;
         }
 
-        await this.resolvePendingPayouts(
-          group.organizationId,
-          connect.stripeAccountId
+        // The whole payee, every organisation (Codex-2hxff.13).
+        await this.resolvePendingPayoutsForAccount(
+          connect.stripeAccountId,
+          platformFailures
         );
         groupsResolved++;
       } catch (error) {
         errors++;
         this.obs.error('sweepUnresolvedPayouts: per-group failure', {
-          organizationId: group.organizationId,
+          errorId: crypto.randomUUID(),
           userId: group.userId,
-          error: (error as Error).message,
+          error: error instanceof Error ? error.message : String(error),
         });
         // Continue to next group — don't fail the whole sweep
       }
     }
 
+    reportPlatformFailures(this.ledger(), platformFailures, {
+      sweep: true,
+      olderThanMinutes,
+      groupsResolved,
+    });
+
     this.obs.info('sweepUnresolvedPayouts: complete', {
       olderThanMinutes,
+      limit,
       groupsScanned,
       groupsResolved,
       groupsSkipped,

@@ -86,8 +86,9 @@ def test_transcode_function():
         print("Running transcode_video_hls...")
         hls_dir = os.path.join(OUTPUT_DIR, "hls")
         os.makedirs(hls_dir, exist_ok=True)
+        # The dummy source is 1280x720: the ladder keys on the short side.
         handler_module.transcode_video_hls(
-            input_path, hls_dir, source_height=720, use_gpu=False
+            input_path, hls_dir, source_short_side=720, use_gpu=False
         )
 
         if not os.path.exists(os.path.join(hls_dir, "master.m3u8")):

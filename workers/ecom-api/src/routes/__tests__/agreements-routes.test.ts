@@ -370,6 +370,7 @@ function createAgreementServiceMock(): AgreementServiceMock {
         revenueType: 'subscription',
         status: 'active',
         organizationFeePercentage: 7000, // share = 3000
+        creatorSharePercent: 3000,
         currentProposalId: PROPOSAL_ID,
         terminatedAt: null,
         effectiveFrom: new Date('2026-01-01'),
@@ -382,6 +383,7 @@ function createAgreementServiceMock(): AgreementServiceMock {
         revenueType: 'subscription',
         status: 'active',
         organizationFeePercentage: 8000, // share = 2000
+        creatorSharePercent: 2000,
         currentProposalId: 'prop_b',
         terminatedAt: null,
         effectiveFrom: new Date('2026-01-02'),
@@ -394,6 +396,7 @@ function createAgreementServiceMock(): AgreementServiceMock {
         revenueType: 'content_purchase',
         status: 'active',
         organizationFeePercentage: 9000, // share = 1000
+        creatorSharePercent: 1000,
         currentProposalId: 'prop_c',
         terminatedAt: null,
         effectiveFrom: new Date('2026-01-03'),
@@ -408,6 +411,7 @@ function createAgreementServiceMock(): AgreementServiceMock {
         revenueType: 'subscription',
         status: 'active',
         organizationFeePercentage: 7000, // share = 3000
+        creatorSharePercent: 3000,
         currentProposalId: PROPOSAL_ID,
         terminatedAt: null,
         effectiveFrom: new Date('2026-01-01'),
@@ -1140,6 +1144,7 @@ describe('GET /agreements/me — creator-view portfolio (ANONYMISATION CONTRACT)
         revenueType: 'subscription',
         status: 'active',
         organizationFeePercentage: 7000, // share = 3000
+        creatorSharePercent: 3000,
         currentProposalId: PROPOSAL_ID,
         terminatedAt: null,
         effectiveFrom: new Date('2026-01-01'),
@@ -1152,6 +1157,7 @@ describe('GET /agreements/me — creator-view portfolio (ANONYMISATION CONTRACT)
         revenueType: 'content_purchase',
         status: 'active',
         organizationFeePercentage: 6000, // share = 4000
+        creatorSharePercent: 4000,
         currentProposalId: 'prop_caller_cp',
         terminatedAt: null,
         effectiveFrom: new Date('2026-01-02'),
@@ -1167,6 +1173,7 @@ describe('GET /agreements/me — creator-view portfolio (ANONYMISATION CONTRACT)
         revenueType: 'subscription',
         status: 'active',
         organizationFeePercentage: 7000,
+        creatorSharePercent: 3000,
         currentProposalId: PROPOSAL_ID,
         terminatedAt: null,
         effectiveFrom: new Date('2026-01-01'),
@@ -1179,6 +1186,7 @@ describe('GET /agreements/me — creator-view portfolio (ANONYMISATION CONTRACT)
         revenueType: 'content_purchase',
         status: 'active',
         organizationFeePercentage: 6000,
+        creatorSharePercent: 4000,
         currentProposalId: 'prop_caller_cp',
         terminatedAt: null,
         effectiveFrom: new Date('2026-01-02'),
@@ -1191,6 +1199,7 @@ describe('GET /agreements/me — creator-view portfolio (ANONYMISATION CONTRACT)
         revenueType: 'subscription',
         status: 'active',
         organizationFeePercentage: 8000, // share = 2000
+        creatorSharePercent: 2000,
         currentProposalId: 'prop_peer_sub',
         terminatedAt: null,
         effectiveFrom: new Date('2026-01-03'),
@@ -1203,6 +1212,7 @@ describe('GET /agreements/me — creator-view portfolio (ANONYMISATION CONTRACT)
         revenueType: 'content_purchase',
         status: 'active',
         organizationFeePercentage: 9000, // share = 1000
+        creatorSharePercent: 1000,
         currentProposalId: 'prop_peer_cp',
         terminatedAt: null,
         effectiveFrom: new Date('2026-01-04'),
@@ -1254,6 +1264,7 @@ describe('GET /agreements/me — creator-view portfolio (ANONYMISATION CONTRACT)
         revenueType: 'subscription',
         status: 'active',
         organizationFeePercentage: 7000,
+        creatorSharePercent: 3000,
         currentProposalId: PROPOSAL_ID,
         terminatedAt: null,
         effectiveFrom: new Date(),
@@ -1294,6 +1305,121 @@ describe('GET /agreements/me — creator-view portfolio (ANONYMISATION CONTRACT)
     expect(
       services.agreements.getActiveAgreementsForCreator
     ).not.toHaveBeenCalled();
+  });
+});
+
+// ─── The creator's shares come from the proposal (Codex-2hxff.19 AGR-08) ────
+
+describe("GET /agreements/me and /me/portfolio — shares are the proposals', not the legacy column", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  /**
+   * Agreement rows whose legacy `organizationFeePercentage` is deliberately
+   * WRONG: the service's `creatorSharePercent` (from the accepted proposal)
+   * is the only right number.
+   */
+  function rowsWithDriftedLegacyColumn() {
+    const base = {
+      organizationId: MANAGED_ORG_ID,
+      revenueType: 'subscription',
+      status: 'active',
+      terminatedAt: null,
+      effectiveFrom: new Date('2026-01-01'),
+      effectiveUntil: null,
+    };
+    return {
+      own: {
+        ...base,
+        id: 'agr_own',
+        creatorId: CALLER_CREATOR_ID,
+        organizationFeePercentage: 1000, // legacy says 90%
+        creatorSharePercent: 3000,
+        currentProposalId: PROPOSAL_ID,
+      },
+      peers: [
+        {
+          ...base,
+          id: 'agr_peer_1',
+          creatorId: PEER_CREATOR_ID_1,
+          organizationFeePercentage: 9500, // legacy says 5%
+          creatorSharePercent: 2000,
+          currentProposalId: 'prop_peer_1',
+        },
+        {
+          ...base,
+          id: 'agr_peer_2',
+          creatorId: PEER_CREATOR_ID_2,
+          organizationFeePercentage: 5000, // legacy says 50%
+          creatorSharePercent: null, // no proposal: it pays nothing
+          currentProposalId: null,
+        },
+      ],
+    };
+  }
+
+  it("/me sums the peers' proposal shares and returns the caller's", async () => {
+    const services = { agreements: createAgreementServiceMock() };
+    const { own, peers } = rowsWithDriftedLegacyColumn();
+    services.agreements.getActiveAgreementsForCreator.mockResolvedValue([own]);
+    services.agreements.getActiveAgreements.mockResolvedValue([own, ...peers]);
+    const bundle = buildApp({ services, user: { id: CALLER_CREATOR_ID } });
+
+    const res = await bundle.app.request(getReq('/agreements/me'));
+
+    expect(res.status).toBe(200);
+    const payload = (await res.json()) as {
+      items: Array<{
+        creatorSharePercent: number | null;
+        peers: { count: number; aggregateSharePercent: number };
+      }>;
+    };
+    expect(payload.items[0]?.creatorSharePercent).toBe(3000);
+    expect(payload.items[0]?.peers).toEqual({
+      count: 2,
+      aggregateSharePercent: 2000,
+    });
+  });
+
+  it("/me/portfolio uses the proposal share for peers and for a terminated agreement's past row", async () => {
+    const services = { agreements: createAgreementServiceMock() };
+    const { own, peers } = rowsWithDriftedLegacyColumn();
+    services.agreements.getActiveAgreementsForCreator.mockResolvedValue([own]);
+    services.agreements.getActiveAgreements.mockResolvedValue([own, ...peers]);
+    services.agreements.getProposalsForCreator.mockResolvedValue([]);
+    services.agreements.getTerminatedAgreementsForCreator.mockResolvedValue([
+      {
+        ...own,
+        id: 'agr_ended',
+        status: 'terminated',
+        terminatedAt: new Date('2026-03-01'),
+        terminationReason: null,
+        organizationFeePercentage: 2500, // legacy says 75%
+        creatorSharePercent: 4000,
+        currentProposalId: 'prop_ended',
+      },
+    ]);
+    const bundle = buildApp({ services, user: { id: CALLER_CREATOR_ID } });
+
+    const res = await bundle.app.request(getReq('/agreements/me/portfolio'));
+
+    expect(res.status).toBe(200);
+    const { data } = (await res.json()) as {
+      data: {
+        active: Array<{
+          creatorSharePercent: number | null;
+          peers: { count: number; aggregateSharePercent: number };
+        }>;
+        past: Array<{ proposalId: string; proposedSharePercent: number }>;
+      };
+    };
+    expect(data.active[0]?.creatorSharePercent).toBe(3000);
+    expect(data.active[0]?.peers.aggregateSharePercent).toBe(2000);
+    expect(data.past).toEqual([
+      expect.objectContaining({
+        proposalId: 'prop_ended',
+        proposedSharePercent: 4000,
+      }),
+    ]);
   });
 });
 
@@ -1502,6 +1628,7 @@ describe('GET /agreements/me/portfolio (ANONYMISATION CONTRACT)', () => {
         revenueType: 'subscription',
         status: 'active',
         organizationFeePercentage: 7000, // share = 3000
+        creatorSharePercent: 3000,
         currentProposalId: PROPOSAL_ID,
         terminatedAt: null,
         effectiveFrom: new Date('2026-01-01'),
@@ -1517,6 +1644,7 @@ describe('GET /agreements/me/portfolio (ANONYMISATION CONTRACT)', () => {
         revenueType: 'subscription',
         status: 'active',
         organizationFeePercentage: 7000,
+        creatorSharePercent: 3000,
         currentProposalId: PROPOSAL_ID,
         terminatedAt: null,
         effectiveFrom: new Date('2026-01-01'),
@@ -1604,6 +1732,7 @@ describe('GET /agreements/me/portfolio (ANONYMISATION CONTRACT)', () => {
         revenueType: 'subscription',
         status: 'active',
         organizationFeePercentage: 7000,
+        creatorSharePercent: 3000,
         currentProposalId: PROPOSAL_ID,
         terminatedAt: null,
         effectiveFrom: new Date('2026-01-01'),
@@ -1618,6 +1747,7 @@ describe('GET /agreements/me/portfolio (ANONYMISATION CONTRACT)', () => {
         revenueType: 'subscription',
         status: 'active',
         organizationFeePercentage: 7000,
+        creatorSharePercent: 3000,
         currentProposalId: PROPOSAL_ID,
         terminatedAt: null,
         effectiveFrom: new Date('2026-01-01'),
@@ -1630,6 +1760,7 @@ describe('GET /agreements/me/portfolio (ANONYMISATION CONTRACT)', () => {
         revenueType: 'subscription',
         status: 'active',
         organizationFeePercentage: 8000, // peer share = 2000
+        creatorSharePercent: 2000,
         currentProposalId: 'prop_peer',
         terminatedAt: null,
         effectiveFrom: new Date('2026-01-02'),
@@ -1671,6 +1802,7 @@ describe('GET /agreements/me/portfolio (ANONYMISATION CONTRACT)', () => {
         revenueType: 'subscription',
         status: 'active',
         organizationFeePercentage: 7000, // share = 3000
+        creatorSharePercent: 3000,
         currentProposalId: PROPOSAL_ID,
         terminatedAt: null,
         effectiveFrom: new Date('2026-01-01'),
@@ -1686,6 +1818,7 @@ describe('GET /agreements/me/portfolio (ANONYMISATION CONTRACT)', () => {
         revenueType: 'subscription',
         status: 'active',
         organizationFeePercentage: 7000,
+        creatorSharePercent: 3000,
         currentProposalId: PROPOSAL_ID,
         terminatedAt: null,
         effectiveFrom: new Date('2026-01-01'),
@@ -1699,6 +1832,7 @@ describe('GET /agreements/me/portfolio (ANONYMISATION CONTRACT)', () => {
         revenueType: 'subscription',
         status: 'active',
         organizationFeePercentage: 8000, // share = 2000
+        creatorSharePercent: 2000,
         currentProposalId: 'prop_peer_sub',
         terminatedAt: null,
         effectiveFrom: new Date('2026-01-02'),
@@ -1712,6 +1846,7 @@ describe('GET /agreements/me/portfolio (ANONYMISATION CONTRACT)', () => {
         revenueType: 'content_purchase',
         status: 'active',
         organizationFeePercentage: 9000, // share = 1000
+        creatorSharePercent: 1000,
         currentProposalId: 'prop_peer_cp',
         terminatedAt: null,
         effectiveFrom: new Date('2026-01-03'),

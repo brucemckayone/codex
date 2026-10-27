@@ -183,7 +183,7 @@ happened to grow the method.
 | `issueRefund` | platform-initiated refunds (one function; its webhook runs `clawback`) | nothing today (none exists) | C5 |
 | `splitCalculator` | pure arithmetic: platform fee, floor, org, creators, rounding to the org | both `calculateRevenueSplit` copies and the fan-out in `executeTransfers` | C2 |
 | `feeResolver(at)` | the fee in force at `at` (time-versioned once Codex-2hxff.33 lands) | three fallbacks, "now" lookups | C2 |
-| `agreementResolver(at)` | the agreements in force at `at`: deterministic, deduped, live membership | 3 pasted queries | C3 |
+| `agreementResolver(at)` | the agreements in force at `at`: deterministic, deduped; removal ends them at that moment (`agreementsInForce`, exists) | 3 pasted queries | C3 |
 | `payeeResolver(at)` | organisation payee (exists) + creator payee + "payable" | 6 inline lookups and definitions | — |
 | `subscriptionLifecycle` | one event reducer for org tiers and course plans: Stripe status mirroring, tombstones, "at next renewal" changes | per-kind branches spread over a 500-line handler (.52) | C7 |
 | `accessPolicy` | which statuses and entitlements grant access | 4 copies of the status predicate | C7, C9 |
@@ -248,7 +248,7 @@ The rejected alternative was to keep everything in
 | **WP6** | behaviour | **`issueRefund`** (C5), the only platform refund; its webhook runs WP3. | .9 (early-fraud refund), .14 (duplicate purchase), .15 (duplicate subscription), .28 |
 | **WP7** | extraction → behaviour | **Subscription lifecycle + access policy** (C7, C9): one reducer for both kinds; one status predicate. | .15, .10, .16, .52, Codex-sing6, -8ntg0, -3wzpl, .21 |
 | **WP8** | behaviour | **Purchasability** (C8): one `canBeSold`. | .14, .32, Codex-1g5lh.23, legal L1 if needed |
-| **WP9** | extraction → behaviour | **Revenue read model over the ledger** (C10). | .20, .21 (reporting half), Codex-dox8r, -cvx4s, -y76g2, -nm5mb |
+| **WP9** | extraction → behaviour | **Revenue read model over the ledger** (C10). Its first slice, the organisation revenue read, shipped with `Codex-2hxff.20`; the creator-side and platform-side read models are still to do. | .20, .21 (reporting half), Codex-dox8r, -cvx4s, -y76g2, -nm5mb |
 | **WP10** | behaviour | **Money notices** (C11) + event dedupe (Codex-257ia). | .34, .40, .43, .8 (PAY-19), .46(k) |
 
 **Independent of the seams, any time:**
@@ -291,7 +291,7 @@ From [work §1], plus .50–.52. A bead that names two WPs needs both.
 | Codex-2hxff.19 | One agreement resolver for every path | WP4 |
 | Codex-2hxff.20 | Revenue screens and agreement emails show real numbers | WP9 |
 | Codex-2hxff.21 | Support grants give access; orgless entitlements; course purchases in history | WP7 (access) + WP9 |
-| Codex-2hxff.22 | Success pages wait for our record | independent (web; mockup first) |
+| Codex-2hxff.22 | Success pages wait for our record | independent (web + one ecom-api route) |
 | Codex-2hxff.23 | Financial records permanent; one Customer per user; GBP everywhere | cross-cutting (decision D-P4) |
 | Codex-2hxff.24 | Dev and CI Stripe setup mirrors production | independent (config) |
 | Codex-2hxff.25 | CI exercises real signed webhook round trips | independent, **early** |

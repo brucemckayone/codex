@@ -60,6 +60,16 @@ export const CacheType = {
    */
   USERNAME_TO_ID: 'user:username-to-id',
 
+  /**
+   * Server KV only — the id the `USERNAME_TO_ID` slot is read and invalidated
+   * under, for a lowercased username. Prefixed because version ids share one
+   * namespace and a username and an org slug use the same characters: bare, a
+   * user taking an org's slug as their username bumped that org's config and
+   * stats, and an org renamed to a username bumped that user's lookup
+   * (Codex-kk9nv.9). Neither can contain `:`, so this never collides.
+   */
+  USERNAME_LOOKUP: (username: string): string => `username:${username}`,
+
   /** User notification preferences */
   USER_PREFERENCES: 'user:preferences',
 
@@ -69,8 +79,14 @@ export const CacheType = {
   /** Organization public aggregate statistics (content counts, creators, duration) */
   ORG_STATS: 'org:stats:v2',
 
-  /** Organization public creators (paginated, includes content counts + recent content) */
-  ORG_CREATORS: 'org:creators',
+  /**
+   * Organization public creators (paginated, includes content counts + recent
+   * content). v2 (Codex-ot6vj): course-only practices no longer counted or
+   * listed; the bump keeps old slots, which still show them, from being read.
+   * It also renames the cache-stats series: the label is now `org:creators:v2`
+   * (`cacheStatsLabel` keeps a `vN` segment, which is not a number).
+   */
+  ORG_CREATORS: 'org:creators:v2',
 
   /** Organization member lists */
   ORG_MEMBERS: 'org:members',
@@ -143,6 +159,15 @@ export const CacheType = {
    * Not tracked in client manifest.
    */
   COLLECTION_ORG_CONTENT: (orgId: string): string => `org:${orgId}:content`,
+
+  /**
+   * Server KV only — the id an org's public creators list (`ORG_CREATORS`) is
+   * cached under. Its own, not the org's slug: the list changes on every
+   * listed member's profile write, and bumping the slug for those evicted the
+   * org's config and stats with it (Codex-kk9nv.9). Anything that changes the
+   * org or its membership bumps both, through `invalidateOrgPublicCaches`.
+   */
+  COLLECTION_ORG_CREATORS: (slug: string): string => `org:${slug}:creators`,
 
   /**
    * Client manifest + server KV — user-scoped library.

@@ -5,6 +5,10 @@
   - Profile section: name, email (with copy button), joined date (relative)
   - Stats section: total spent (with spend trend), purchase count
   - Purchase history table: date, content title (linked), amount
+  - Access grants (Codex-2hxff.21): this organisation's support grants, live
+    ones with a Revoke button (confirmed in ConfirmDialog) and revoked ones
+    muted, as a record. Loaded by its own query as the drawer opens, in
+    parallel with the details, and reloaded after a grant or a revoke.
   - "Grant Access" button to open GrantAccessDialog
 
   @prop {boolean} open - Whether the drawer is open (bindable)
@@ -16,12 +20,18 @@
   import type { CustomerDetails } from '@codex/admin';
   import * as Dialog from '$lib/components/ui/Dialog';
   import { Button, Skeleton } from '$lib/components/ui';
+  import ConfirmDialog from '$lib/components/ui/Feedback/ConfirmDialog.svelte';
   import * as Table from '$lib/components/ui/Table';
   import { CheckIcon, TrendingUpIcon } from '$lib/components/ui/Icon';
   import { formatDate, formatPrice, formatRelativeTime, getInitials } from '$lib/utils/format';
   import { toast } from '$lib/components/ui/Toast/toast-store';
   import * as m from '$paraglide/messages';
-  import { getCustomerDetail } from '$lib/remote/admin.remote';
+  import {
+    getCustomerDetail,
+    getCustomerGrants,
+    revokeCustomerGrant,
+  } from '$lib/remote/admin.remote';
+  import type { CustomerGrant } from '$lib/types';
   import GrantAccessDialog from './GrantAccessDialog.svelte';
 
   interface Props {
@@ -44,9 +54,20 @@
   let grantDialogOpen = $state(false);
   let emailCopied = $state(false);
 
+  // Access grants. Started in the same effect as the details so the two load
+  // side by side. Not a `$derived`: that would only run once the markup reads
+  // it, and the markup reaches the grants after the details have loaded.
+  let grantsQuery = $state.raw<ReturnType<typeof getCustomerGrants> | null>(
+    null
+  );
+  let revokeTarget = $state.raw<CustomerGrant | null>(null);
+  let revokeDialogOpen = $state(false);
+  let revokeFailedId = $state<string | null>(null);
+
   $effect(() => {
     if (open && customerId) {
       loadCustomer(customerId);
+      grantsQuery = getCustomerGrants({ customerId, organizationId: orgId });
     }
   });
 
@@ -72,6 +93,10 @@
       error = null;
       grantDialogOpen = false;
       emailCopied = false;
+      grantsQuery = null;
+      revokeTarget = null;
+      revokeDialogOpen = false;
+      revokeFailedId = null;
     }
   }
 
@@ -79,6 +104,38 @@
     if (customerId) {
       loadCustomer(customerId);
     }
+    refreshGrants();
+  }
+
+  function refreshGrants() {
+    // A failed reload lands on the query's own `error`, which the section
+    // renders in place of the list, so there is nothing more to do here.
+    return grantsQuery?.refresh().catch(() => {});
+  }
+
+  function askRevoke(grant: CustomerGrant) {
+    revokeTarget = grant;
+    revokeFailedId = null;
+    revokeDialogOpen = true;
+  }
+
+  // Returns the revoke's promise, so the confirm stays open and busy until it
+  // settles. It never rejects: a refusal marks the row, which stays live,
+  // once the dialog has closed.
+  async function confirmRevoke() {
+    const grant = revokeTarget;
+    if (!grant || !customerId) return;
+    try {
+      await revokeCustomerGrant({
+        customerId,
+        entitlementId: grant.id,
+        organizationId: orgId,
+      });
+    } catch {
+      revokeFailedId = grant.id;
+      return;
+    }
+    await refreshGrants();
   }
 
   async function handleCopyEmail() {
@@ -94,6 +151,30 @@
 
   const displayName = $derived(customer?.name ?? '--');
   const initials = $derived(getInitials(customer?.name));
+
+  // Live grants first, then revoked ones; each keeps the API's newest-first
+  // order. `undefined` until the first load lands.
+  const grants = $derived.by((): CustomerGrant[] | undefined => {
+    const items = grantsQuery?.current?.items;
+    if (!items) return undefined;
+    return [
+      ...items.filter((g) => !g.revokedAt),
+      ...items.filter((g) => g.revokedAt),
+    ];
+  });
+  // A rejected load leaves `current` undefined with `loading` false, so the
+  // error must be read on its own, or the section would show the empty line
+  // to someone whose grants simply failed to load.
+  const grantsFailed = $derived(grantsQuery?.error != null);
+
+  // The confirm names the customer, or their email when they have no name.
+  const customerLabel = $derived(customer?.name?.trim() || customer?.email || '');
+
+  /** Two placeholder rows, sized like a title and its "Granted…" line. */
+  const grantSkeletonRows = [
+    { key: 'a', title: '58%', meta: '42%' },
+    { key: 'b', title: '46%', meta: '50%' },
+  ];
 
   // Spending trend: compare avg of last 3 purchases vs older
   const spendTrend = $derived.by((): 'up' | 'down' | 'neutral' => {
@@ -227,6 +308,73 @@
         {/if}
       </section>
 
+      <!-- Access Grants (Codex-2hxff.21) -->
+      <section class="history-section">
+        <h4 class="section-heading">{m.studio_customers_grants_heading()}</h4>
+        {#if grantsFailed}
+          <div class="grants-error" role="alert">
+            <p class="error-text">{m.studio_customers_grants_load_error()}</p>
+            <Button variant="secondary" size="sm" onclick={refreshGrants}>
+              {m.studio_customers_grants_retry()}
+            </Button>
+          </div>
+        {:else if !grants}
+          <p class="sr-only" aria-live="polite">{m.studio_customers_grants_loading()}</p>
+          <ul class="grant-list" aria-hidden="true">
+            {#each grantSkeletonRows as row (row.key)}
+              <li class="grant-row">
+                <div class="grant-text grant-text--skeleton">
+                  <Skeleton width={row.title} height="var(--space-4)" />
+                  <Skeleton width={row.meta} height="var(--space-3)" />
+                </div>
+              </li>
+            {/each}
+          </ul>
+        {:else if grants.length === 0}
+          <p class="no-purchases">{m.studio_customers_grants_empty()}</p>
+        {:else}
+          <ul class="grant-list">
+            {#each grants as grant (grant.id)}
+              <li class="grant-row" data-state={grant.revokedAt ? 'revoked' : 'live'}>
+                <div class="grant-text">
+                  <a href="/content/{grant.contentSlug}" class="content-link grant-title">
+                    {grant.contentTitle}
+                  </a>
+                  <span class="grant-meta">
+                    {#if grant.revokedAt}
+                      {m.studio_customers_grants_revoked({ date: formatDate(grant.revokedAt) })}
+                    {:else if grant.grantedByName}
+                      {m.studio_customers_grants_granted_by({
+                        date: formatDate(grant.grantedAt),
+                        name: grant.grantedByName,
+                      })}
+                    {:else}
+                      {m.studio_customers_grants_granted({ date: formatDate(grant.grantedAt) })}
+                    {/if}
+                  </span>
+                  {#if revokeFailedId === grant.id}
+                    <span class="grant-error" role="alert">
+                      {m.studio_customers_grants_revoke_error()}
+                    </span>
+                  {/if}
+                </div>
+                {#if !grant.revokedAt}
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    class="grant-revoke"
+                    aria-label={m.studio_customers_grants_revoke_label({ title: grant.contentTitle })}
+                    onclick={() => askRevoke(grant)}
+                  >
+                    {m.studio_customers_grants_revoke()}
+                  </Button>
+                {/if}
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </section>
+
       <!-- Actions -->
       <Dialog.Footer>
         <Button variant="secondary" onclick={() => handleOpenChange(false)}>
@@ -246,6 +394,18 @@
           onSuccess={handleGrantSuccess}
         />
       {/if}
+
+      <!-- Revoke confirm: the A2 copy, body as the description, no children -->
+      <ConfirmDialog
+        bind:open={revokeDialogOpen}
+        title={m.studio_customers_grants_revoke_title({ title: revokeTarget?.contentTitle ?? '' })}
+        description={m.studio_customers_grants_revoke_description({ name: customerLabel })}
+        confirmText={m.studio_customers_grants_revoke_confirm()}
+        cancelText={m.common_cancel()}
+        variant="destructive"
+        awaitConfirm
+        onConfirm={confirmRevoke}
+      />
     {/if}
   </Dialog.Content>
 </Dialog.Root>
@@ -485,6 +645,73 @@
     color: var(--color-text-secondary);
     margin: 0;
     padding: var(--space-4) 0;
+  }
+
+  /* Access Grants */
+  .grant-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    border-top: var(--border-width) var(--border-style) var(--color-border);
+  }
+
+  .grant-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    /* The history table's cell inset, so the titles line up with its
+       Content column. */
+    padding: var(--space-3) var(--space-4);
+    border-bottom: var(--border-width) var(--border-style) var(--color-border);
+  }
+
+  .grant-text {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-0-5);
+    min-width: 0;
+  }
+
+  .grant-text--skeleton {
+    flex: 1;
+    gap: var(--space-2);
+  }
+
+  .grant-title {
+    font-size: var(--text-sm);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .grant-meta {
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Revoked rows stay as a record: muted, and the words carry the state. */
+  .grant-row[data-state='revoked'] .content-link {
+    color: var(--color-text-secondary);
+  }
+
+  .grant-error {
+    font-size: var(--text-xs);
+    color: var(--color-status-error-text);
+  }
+
+  .grant-row :global(.grant-revoke) {
+    flex-shrink: 0;
+  }
+
+  .grants-error {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-3);
   }
 
   :global(.drawer-content .dialog-footer) {

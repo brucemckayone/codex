@@ -11,6 +11,7 @@
   import { browser } from '$app/environment';
   import { goto } from '$app/navigation';
   import * as m from '$paraglide/messages';
+  import LoadFailedAlert from '$lib/components/studio/LoadFailedAlert.svelte';
   import MemberTable from '$lib/components/studio/MemberTable.svelte';
   import InviteMemberDialog from '$lib/components/studio/InviteMemberDialog.svelte';
   import { Alert, Button, PageHeader } from '$lib/components/ui';
@@ -18,13 +19,21 @@
   import { UserPlusIcon } from '$lib/components/ui/Icon';
   import { ownershipErrorMessage } from '$lib/components/studio/ownership/ownership-errors';
   import {
+    getDeparturePreview,
     getOrgMembers,
     inviteMember,
     updateMemberRole,
     removeMember,
   } from '$lib/remote/org.remote';
   import { listActiveAgreements } from '$lib/remote/agreements.remote';
-  import type { CreatorOrganizationAgreement } from '@codex/agreements';
+  import {
+    formatAgreementShare,
+    spokenAgreementShare,
+  } from '$lib/components/agreements/agreement-share';
+  import type { AgreementWithShare } from '@codex/agreements';
+  import { logger } from '$lib/observability';
+  import { queryErrorMessage } from '$lib/remote/query-result';
+  import { connectQueryState } from '$lib/utils/connect-readiness';
 
   let { data } = $props();
 
@@ -48,11 +57,26 @@
     isAuthorized ? getOrgMembers({ orgId: data.org.id, limit: 50 }) : null
   );
 
+  // A failed members read is not "no members" (Codex-2hxff.74): it used to
+  // show "No team members yet" with Invite, to an owner or admin who is a
+  // member themselves. The alert stands in for the table, and Invite waits.
+  const membersState = $derived(connectQueryState(membersQuery));
+  $effect(() => {
+    if (membersState.kind === 'failed') {
+      logger.error('studio/team: members failed to load', {
+        organizationId: data.org.id,
+        reason: queryErrorMessage(membersQuery?.error),
+      });
+    }
+  });
+
   // Subscribers are not team members — the table filters them out, so the
   // header count must too. Named `member` rather than `m` so it does not
   // shadow the paraglide namespace inside the callback.
   const teamMembers = $derived(
-    (membersQuery?.current?.items ?? []).filter((member) => member.role !== 'subscriber')
+    (membersState.kind === 'ok' ? membersState.status.items : []).filter(
+      (member) => member.role !== 'subscriber'
+    )
   );
 
   // Revenue-share lives in the owner-only Monetisation hub, so the per-member
@@ -63,25 +87,52 @@
     isOwner ? listActiveAgreements({ organizationId: data.org.id }) : null
   );
 
-  // Map userId → compact active-agreement summary for the table column. Share
-  // derives from the legacy org-fee column (10000 - fee, in basis points),
-  // matching the revenue-share page. Both revenue types fold into one label,
-  // e.g. "30% subs · 20% sales". Undefined when not owner → column hidden.
+  // A failed agreements read is not "no agreements" (Codex-2hxff.74): every
+  // member's cell used to read "Set up", including creators with an
+  // agreement, and clicking it sent the owner off to propose one again. The
+  // column now waits for the read; a failure shows the alert above the table
+  // and the column stays hidden. Members, roles and Remove do not depend on
+  // it, so they stay.
+  const agreementsState = $derived(connectQueryState(agreementsQuery));
+
+  // The real error goes to the logger (which redacts), never into the DOM.
+  $effect(() => {
+    if (agreementsState.kind === 'failed') {
+      logger.error('studio/team: agreements failed to load', {
+        organizationId: data.org.id,
+        reason: queryErrorMessage(agreementsQuery?.error),
+      });
+    }
+  });
+
+  // Map userId → compact active-agreement summary for the table column. The
+  // share is the agreement's own `creatorSharePercent`, matching the
+  // revenue-share page; a missing one reads "— subs" (Codex-fazy6). Both
+  // revenue types fold into one label, e.g. "30% subs · 20% sales". Undefined
+  // (column hidden) when not owner, and until the agreements have loaded. A
+  // label with a missing share also gets `srLabel`, the same words with "No
+  // share recorded" for the dash, which says nothing to a screen reader.
   const revenueShareByUser = $derived.by(() => {
-    if (!isOwner) return undefined;
-    const rows = (agreementsQuery?.current?.items ??
-      []) as CreatorOrganizationAgreement[];
-    const map = new Map<string, { label: string; active: boolean }>();
+    if (!isOwner || agreementsState.kind !== 'ok') return undefined;
+    const rows = (agreementsState.status.items ?? []) as AgreementWithShare[];
+    const map = new Map<
+      string,
+      { label: string; srLabel?: string; active: boolean }
+    >();
+    const partOf = (share: string, revenueType: string) =>
+      revenueType === 'subscription' ? `${share} subs` : `${share} sales`;
     for (const a of rows) {
-      const sharePercent = (10000 - a.organizationFeePercentage) / 100;
-      const part =
-        a.revenueType === 'subscription'
-          ? `${sharePercent}% subs`
-          : `${sharePercent}% sales`;
+      const part = partOf(formatAgreementShare(a.creatorSharePercent), a.revenueType);
+      const spoken = partOf(spokenAgreementShare(a.creatorSharePercent), a.revenueType);
       const existing = map.get(a.creatorId);
+      const label = existing ? `${existing.label} · ${part}` : part;
+      const srLabel = existing
+        ? `${existing.srLabel ?? existing.label} · ${spoken}`
+        : spoken;
       map.set(a.creatorId, {
         active: true,
-        label: existing ? `${existing.label} · ${part}` : part,
+        label,
+        ...(srLabel !== label && { srLabel }),
       });
     }
     return map;
@@ -127,6 +178,9 @@
     );
   }
 
+  // Returns the command's promise, so the Remove dialog stays open and busy
+  // until the removal settles. It never rejects: a refusal lands in
+  // `memberError` once the dialog has closed.
   function handleRemove(userId: string) {
     return runMemberCommand(() =>
       removeMember({
@@ -134,6 +188,12 @@
         userId,
       })
     );
+  }
+
+  // What the removal would unwind, read when the Remove dialog opens
+  // (Codex-2hxff.64).
+  function loadDeparturePreview(userId: string) {
+    return getDeparturePreview({ orgId: data.org.id, userId });
   }
 
   const ownerAction = $derived({
@@ -156,7 +216,7 @@
     description={m.team_description()}
   >
     {#snippet meta()}
-      {#if !membersQuery?.loading && teamMembers.length > 0}
+      {#if membersState.kind === 'ok' && teamMembers.length > 0}
         <!-- Labelled stat, not "{n} members": paraglide-js 1.x has no plural
              form (zero ICU plurals repo-wide), so an interpolated noun would
              read "1 members". Matches the customers header's shape. -->
@@ -172,10 +232,12 @@
           Manage revenue share
         </a>
       {/if}
-      <Button onclick={() => (inviteDialogOpen = true)}>
-        <UserPlusIcon size={16} />
-        {m.team_invite()}
-      </Button>
+      {#if membersState.kind !== 'failed'}
+        <Button onclick={() => (inviteDialogOpen = true)}>
+          <UserPlusIcon size={16} />
+          {m.team_invite()}
+        </Button>
+      {/if}
     {/snippet}
   </PageHeader>
 
@@ -183,8 +245,27 @@
     <Alert variant="error">{memberError}</Alert>
   {/if}
 
+  <LoadFailedAlert
+    query={membersQuery}
+    message={m.team_load_failed()}
+    againMessage={m.team_load_failed_again()}
+    loadedMessage={m.team_load_retry_ok()}
+    data-testid="team-members-load-error"
+  />
+
+  {#if isOwner}
+    <LoadFailedAlert
+      query={agreementsQuery}
+      message={m.agreement_load_failed()}
+      againMessage={m.agreement_load_failed_again()}
+      loadedMessage={m.agreement_load_retry_ok()}
+      data-testid="team-agreements-load-error"
+    />
+  {/if}
+
+  {#if membersState.kind !== 'failed'}
   <section class="members-section">
-    {#if membersQuery?.loading}
+    {#if membersState.kind === 'loading'}
       <div class="table-skeleton">
         <Skeleton class="table-skeleton-header" width="100%" height="var(--space-10)" />
         {#each Array(5) as _, i (i)}
@@ -201,12 +282,15 @@
         members={teamMembers}
         onChangeRole={handleChangeRole}
         onRemove={handleRemove}
+        orgName={data.org.name}
+        {loadDeparturePreview}
         onInvite={() => (inviteDialogOpen = true)}
         {revenueShareByUser}
         {ownerAction}
       />
     {/if}
   </section>
+  {/if}
 
   {#if browser}
     <InviteMemberDialog

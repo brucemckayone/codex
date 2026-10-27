@@ -76,8 +76,9 @@ export interface AuditLogEntry {
   scopeOrgId: string | null;
   scopeCreatorId: string | null;
   columnName: string;
+  /** `null` on either side: unset, inheriting the tier above. */
   oldValue: string | null;
-  newValue: string;
+  newValue: string | null;
   changedBy: string;
   changedAt: Date;
 }
@@ -116,12 +117,19 @@ function codeDefault(ctx: FeeContext): FeeConfig {
 type DiffEntry = {
   columnName: string;
   oldValue: string | null;
-  newValue: string;
+  newValue: string | null;
 };
+
+/** A stored or requested value as the audit log records it: SQL NULL for unset. */
+function auditValue(value: unknown): string | null {
+  return value === null || value === undefined ? null : String(value);
+}
 
 /**
  * Diff a partial update against the existing row, producing one diff entry per
- * column the caller actually wants to change. Skips no-op writes (same value).
+ * column the caller actually wants to change. `undefined` leaves a column
+ * alone; `null` clears it back to inherit and is recorded as a real NULL
+ * (Codex-2hxff.23 PAY-16). Skips no-op writes (same value, or null on null).
  */
 function diffUpdate(
   existing: Record<string, unknown> | null,
@@ -130,15 +138,26 @@ function diffUpdate(
   const entries: DiffEntry[] = [];
   for (const [key, value] of Object.entries(updates)) {
     if (value === undefined) continue;
-    const old = existing?.[key] ?? null;
-    if (String(old) === String(value)) continue;
-    entries.push({
-      columnName: key,
-      oldValue: old === null || old === undefined ? null : String(old),
-      newValue: String(value),
-    });
+    const oldValue = auditValue(existing?.[key]);
+    const newValue = auditValue(value);
+    if (oldValue === newValue) continue;
+    entries.push({ columnName: key, oldValue, newValue });
   }
   return entries;
+}
+
+/**
+ * The value an org or override write stores: the update's when it names the
+ * column, `null` included (clear back to inherit, as the zod schemas'
+ * `.nullable()` means it), else the stored one. Not `??`, which would read a
+ * clear as "leave alone" and keep the old value while the audit log recorded
+ * the clear (Codex-2hxff.23 PAY-16).
+ */
+function mergedValue<T>(
+  update: T | null | undefined,
+  stored: T | null | undefined
+): T | null {
+  return update !== undefined ? update : (stored ?? null);
 }
 
 // ─── Cache key builders ─────────────────────────────────────────────────────
@@ -294,13 +313,22 @@ export class FeeConfigService extends BaseService {
       if (diff.length === 0) return;
 
       const merged = {
-        platformFeePercent:
-          updates.platformFeePercent ?? existing?.platformFeePercent ?? null,
-        orgFeePercent: updates.orgFeePercent ?? existing?.orgFeePercent ?? null,
-        minPlatformFeeCents:
-          updates.minPlatformFeeCents ?? existing?.minPlatformFeeCents ?? null,
-        minTransferCents:
-          updates.minTransferCents ?? existing?.minTransferCents ?? null,
+        platformFeePercent: mergedValue(
+          updates.platformFeePercent,
+          existing?.platformFeePercent
+        ),
+        orgFeePercent: mergedValue(
+          updates.orgFeePercent,
+          existing?.orgFeePercent
+        ),
+        minPlatformFeeCents: mergedValue(
+          updates.minPlatformFeeCents,
+          existing?.minPlatformFeeCents
+        ),
+        minTransferCents: mergedValue(
+          updates.minTransferCents,
+          existing?.minTransferCents
+        ),
       };
 
       await (this.db as Database)
@@ -374,14 +402,23 @@ export class FeeConfigService extends BaseService {
       if (diff.length === 0) return;
 
       const merged = {
-        platformFeePercent:
-          updates.platformFeePercent ?? existing?.platformFeePercent ?? null,
-        orgFeePercent: updates.orgFeePercent ?? existing?.orgFeePercent ?? null,
-        minPlatformFeeCents:
-          updates.minPlatformFeeCents ?? existing?.minPlatformFeeCents ?? null,
-        minTransferCents:
-          updates.minTransferCents ?? existing?.minTransferCents ?? null,
-        notes: updates.notes ?? existing?.notes ?? null,
+        platformFeePercent: mergedValue(
+          updates.platformFeePercent,
+          existing?.platformFeePercent
+        ),
+        orgFeePercent: mergedValue(
+          updates.orgFeePercent,
+          existing?.orgFeePercent
+        ),
+        minPlatformFeeCents: mergedValue(
+          updates.minPlatformFeeCents,
+          existing?.minPlatformFeeCents
+        ),
+        minTransferCents: mergedValue(
+          updates.minTransferCents,
+          existing?.minTransferCents
+        ),
+        notes: mergedValue(updates.notes, existing?.notes),
       };
 
       await (this.db as Database)

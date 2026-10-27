@@ -9,24 +9,35 @@
  *   Phase 1: Personal content purchase is blocked by the backend — returns
  *   a friendly error message instead of a generic 500.
  */
-import { error } from '@sveltejs/kit';
-import { renderContentBody } from '$lib/editor/render';
-import { getPublicContent } from '$lib/remote/content.remote';
+import { publicContentSlugSchema } from '@codex/validation';
+import { error, isHttpError, redirect } from '@sveltejs/kit';
+import { hasStoredText, renderContentBody } from '$lib/editor/render';
+import { logger } from '$lib/observability';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import {
   ACCESS_CHECK_FAILED_RESULT,
+  detailPageCacheHeaders,
   EMPTY_SUB_CONTEXT,
   handlePurchaseAction,
   isPublicContent,
   loadAccessAndProgress,
+  loadAccessWithBody,
+  loadRelatedContent,
   loadSubscriptionContext,
+  loadWithdrawnDetail,
+  logAccessCheckFault,
+  subscriptionContextFault,
+  withoutRawBody,
 } from '$lib/server/content-detail';
-import type { ContentWithRelations } from '$lib/types';
+import { logReadFailure } from '$lib/server/read-failure';
+import { buildContentUrl } from '$lib/utils/subdomain';
+import { creatorHandle } from '../../creator-handle';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({
   params,
+  url,
   locals,
   setHeaders,
   platform,
@@ -35,8 +46,8 @@ export const load: PageServerLoad = async ({
 }) => {
   depends('app:auth');
   const { contentSlug } = params;
-  // Strip leading @ from username (URL convention: /@alex-creator)
-  const username = params.username.replace(/^@/, '');
+  // The handle without its leading @ (URL convention: /@alex-creator).
+  const username = creatorHandle(params.username);
   const api = createServerApi(platform, cookies);
 
   // Fetch creator profile to get creatorId
@@ -57,23 +68,97 @@ export const load: PageServerLoad = async ({
   }
 
   // Fetch content by creatorId + slug
+  // The PUBLIC list scoped by creator and slug, not the studio list, which
+  // needs a session and lists the signed-in user's own content: a visitor
+  // got a 404 here for every real piece (Codex-osuqt). No result is a 404.
+  // A failed request is not, so it propagates as a 500, as the profile
+  // lookup above does.
+  //
+  // A slug the public list refuses (too long, or with a NUL, which Postgres
+  // refuses in text) names nothing, so it is a 404 here rather than the API's
+  // 400 surfacing as a 500. The rule is the API's own.
+  if (!publicContentSlugSchema.safeParse(contentSlug).success) {
+    error(404, 'Content not found');
+  }
+  // One creator can hold this slug once in their personal space AND once per
+  // org (slugs are unique per org and per creator's personal space, not per
+  // creator), so a single newest match could be the wrong piece. This URL is
+  // the PERSONAL piece's (buildCreatorContentUrl): prefer it, and send an org
+  // piece to its canonical page on the org's subdomain, where its brand,
+  // access and checkout live. A 302, not a 301: a personal piece published
+  // later under this slug takes the URL back.
   const contentParams = new URLSearchParams();
   contentParams.set('creatorId', creatorProfile.id);
   contentParams.set('slug', contentSlug);
-  contentParams.set('status', 'published');
-  contentParams.set('limit', '1');
+  contentParams.set('limit', '50');
 
-  let content: ContentWithRelations | null = null;
-  try {
-    const contentResult = await api.content.list(contentParams);
-    content = (contentResult?.items?.[0] as ContentWithRelations) ?? null;
-  } catch {
-    content = null;
-  }
+  const contentResult = await api.content.getPublicContent(contentParams);
+  const matches = contentResult.items;
+  const personalPiece =
+    matches.find((item) => item.organizationId == null) ?? null;
+
+  // No personal piece on the storefront. For a signed-in reader it may be one
+  // withdrawn from sale that they still have (Codex-ov2ii). Asked before the
+  // org redirect below: this URL is the personal piece's, so a reader who
+  // still has it keeps it even when an org piece shares the slug. If that read
+  // fails while an org piece is there to send them to, the redirect stands,
+  // as it did before this read existed; with none, the failure propagates (an
+  // outage is not "not found"). An HttpError always propagates: it is the
+  // helper's own answer AFTER it found the reader's piece (the 503 of a failed
+  // access check), and redirecting then would send them to another item.
+  const hasOrgPiece = matches.some((item) => item.organization?.slug);
+  const withdrawn =
+    personalPiece || !locals.user
+      ? null
+      : await loadWithdrawnDetail(
+          { creatorId: creatorProfile.id, slug: contentSlug },
+          platform,
+          cookies
+        ).catch((err: unknown) => {
+          if (!hasOrgPiece || isHttpError(err)) throw err;
+          logReadFailure(
+            'Withdrawn read failed; redirecting to the org piece',
+            { creatorId: creatorProfile.id, contentSlug },
+            err
+          );
+          return null;
+        });
+  const content = personalPiece ?? withdrawn?.content ?? null;
 
   if (!content) {
+    const orgPiece = matches.find((item) => item.organization?.slug);
+    if (orgPiece?.organization?.slug) {
+      redirect(
+        302,
+        buildContentUrl(url, {
+          slug: orgPiece.slug,
+          id: orgPiece.id,
+          organizationSlug: orgPiece.organization.slug,
+        })
+      );
+    }
+    // Rows matched but none is personal or names its org: the org relation
+    // failed to load (listPublic hides a deleted org's pieces), not a missing
+    // piece. Still a 404 for the visitor, but logged, or a regression that
+    // broke every redirect would look like mistyped URLs.
+    if (matches.length > 0) {
+      logger.error('Creator content slug matched no personal or org piece', {
+        creatorId: creatorProfile.id,
+        contentSlug,
+        matches: matches.map(({ id, organizationId }) => ({
+          id,
+          organizationId,
+        })),
+      });
+    }
     error(404, 'Content not found');
   }
+
+  // What the browser receives: the row without its raw body. The body is
+  // rendered below into contentBodyHtml, only once access allows it: from
+  // `content` when the piece is public, from the access check's body when it
+  // is gated (a gated public row carries none, Codex-039vo).
+  const pageContent = withoutRawBody(content);
 
   // Cache header is applied ONLY on the success path right before each return.
   // This page renders auth-aware HTML (the creator layout injects `user` and
@@ -81,8 +166,10 @@ export const load: PageServerLoad = async ({
   // markup per auth state. Shared caches (Cloudflare edge, miniflare) key by
   // URL, NOT by Cookie, so any `public` response cached for an anonymous
   // visitor is served to signed-in users too. PRIVATE keeps it out of shared
-  // caches; the public content list (incl. this slug lookup) is KV-cached in
-  // content-api so the DB stays shielded. See docs/caching-strategy.md.
+  // caches. This creator-scoped lookup is NOT KV-cached in content-api
+  // (shouldCachePublicContentQuery skips any query naming a creator), so each
+  // render reads the DB. See docs/caching-strategy.md. A response carrying a
+  // gated body is stored nowhere at all (`detailPageCacheHeaders`).
   const successCacheHeaders = CACHE_HEADERS.PRIVATE;
 
   // Body gating: only render the body once access is confirmed. Free content
@@ -91,22 +178,54 @@ export const load: PageServerLoad = async ({
   // — this is what prevents a non-follower from reading the article text
   // through view-source or the SvelteKit load payload.
   const isPublic = isPublicContent(content);
-  const publicBodyHtml = isPublic ? await renderContentBody(content) : null;
+  const renderContext = {
+    contentId: content.id,
+    surface: 'content-detail' as const,
+  };
+  const publicBodyHtml = isPublic
+    ? await renderContentBody(content, renderContext)
+    : null;
+  // Stored text that rendered to nothing is a failure the reader is told
+  // about, never "no body" (Codex-uuz1g); the view shows a note.
+  const publicBodyUnavailable =
+    isPublic && hasStoredText(content) && publicBodyHtml == null;
 
-  // Fetch related content — returned as a bare promise (streamed, below fold)
-  const relatedPromise = content.organization?.id
-    ? getPublicContent({
-        orgId: content.organization.id,
-        sort: 'newest',
-        limit: 5,
-      })
-        .then((r) => r?.items ?? [])
-        .catch(
-          () => [] as Awaited<ReturnType<typeof getPublicContent>>['items']
-        )
-    : Promise.resolve(
-        [] as Awaited<ReturnType<typeof getPublicContent>>['items']
-      );
+  // "More from this creator", streamed below the fold. By creator, not org:
+  // this page only ever shows a personal piece (an org piece redirects), so an
+  // org-scoped strip never made a request and always rendered empty.
+  const relatedPromise = loadRelatedContent(api, {
+    creatorId: creatorProfile.id,
+  });
+
+  // Withdrawn from sale: the access check already ran and granted, so the page
+  // renders the body and player that check returned, with the note in place
+  // of any offer (there is nothing left to buy or subscribe to).
+  if (withdrawn) {
+    // Always a gated grant: a public piece never takes this path, and the
+    // withdrawn read answered only because access was granted.
+    const withdrawnBodyHtml = withdrawn.body
+      ? await renderContentBody(withdrawn.body, renderContext)
+      : null;
+    const withdrawnBodyUnavailable =
+      withdrawn.body != null &&
+      hasStoredText(withdrawn.body) &&
+      withdrawnBodyHtml == null;
+    setHeaders(detailPageCacheHeaders(true));
+    return {
+      content: pageContent,
+      contentBodyHtml: withdrawnBodyHtml,
+      contentBodyUnavailable: withdrawnBodyUnavailable,
+      hasAccess: null,
+      streamingUrl: null,
+      progress: null,
+      accessAndProgress: Promise.resolve(withdrawn.access),
+      withdrawnHeld: withdrawn.held,
+      subscriptionContext: Promise.resolve(EMPTY_SUB_CONTEXT),
+      creatorProfile,
+      username,
+      relatedContent: relatedPromise,
+    };
+  }
 
   // Subscription context (org-scoped content may have tier gating).
   // Skip the round-trip entirely for content that can't require a
@@ -123,11 +242,9 @@ export const load: PageServerLoad = async ({
         gatingOrgId,
         content.includedInTierId ?? null,
         platform,
-        cookies
-      ).catch(() => ({
-        ...EMPTY_SUB_CONTEXT,
-        requiresSubscription: content.includedInTierId != null,
-      }))
+        cookies,
+        locals.user != null
+      ).catch((error) => subscriptionContextFault(content.id, error))
     : Promise.resolve(EMPTY_SUB_CONTEXT);
 
   // For unauthenticated visitors — body unlocks for public (free) content
@@ -135,8 +252,9 @@ export const load: PageServerLoad = async ({
   if (!locals.user) {
     setHeaders(successCacheHeaders);
     return {
-      content,
+      content: pageContent,
       contentBodyHtml: publicBodyHtml,
+      contentBodyUnavailable: publicBodyUnavailable,
       hasAccess: isPublic,
       streamingUrl: null,
       progress: null,
@@ -153,17 +271,23 @@ export const load: PageServerLoad = async ({
   if (isPublic) {
     setHeaders(successCacheHeaders);
     return {
-      content,
+      content: pageContent,
       contentBodyHtml: publicBodyHtml,
+      contentBodyUnavailable: publicBodyUnavailable,
       hasAccess: null,
       streamingUrl: null,
       progress: null,
+      // fetchAccess catches a failed request itself, so this sees only a
+      // fault in our own code; it fails closed, and logs (Codex-uuz1g).
       accessAndProgress: loadAccessAndProgress(
         content.id,
         platform,
         cookies,
         content
-      ).catch(() => ({ ...ACCESS_CHECK_FAILED_RESULT, hasAccess: isPublic })),
+      ).catch((err: unknown) => {
+        logAccessCheckFault(content.id, err);
+        return { ...ACCESS_CHECK_FAILED_RESULT, hasAccess: isPublic };
+      }),
       subscriptionContext: subContextPromise,
       creatorProfile,
       username,
@@ -172,23 +296,34 @@ export const load: PageServerLoad = async ({
   }
 
   // Gated content + authenticated user: await the access check so we can
-  // render the body conditionally. Non-followers never receive the text via
-  // the load payload.
-  const accessResult = await loadAccessAndProgress(
+  // render the body conditionally. The body comes from that check, not from
+  // `content`, whose public row carries none for a gated piece (Codex-039vo).
+  // Non-followers never receive the text via the load payload.
+  const { access: accessResult, body } = await loadAccessWithBody(
     content.id,
     platform,
     cookies,
     content
-  ).catch(() => ACCESS_CHECK_FAILED_RESULT);
+  ).catch((err: unknown) => {
+    logAccessCheckFault(content.id, err);
+    return { access: ACCESS_CHECK_FAILED_RESULT, body: null };
+  });
 
-  const gatedBodyHtml = accessResult.hasAccess
-    ? await renderContentBody(content)
-    : null;
+  const gatedBodyHtml =
+    accessResult.hasAccess && body
+      ? await renderContentBody(body, renderContext)
+      : null;
+  const gatedBodyUnavailable =
+    accessResult.hasAccess &&
+    body != null &&
+    hasStoredText(body) &&
+    gatedBodyHtml == null;
 
-  setHeaders(successCacheHeaders);
+  setHeaders(detailPageCacheHeaders(accessResult.hasAccess));
   return {
-    content,
+    content: pageContent,
     contentBodyHtml: gatedBodyHtml,
+    contentBodyUnavailable: gatedBodyUnavailable,
     hasAccess: null,
     streamingUrl: null,
     progress: null,

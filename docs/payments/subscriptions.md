@@ -65,10 +65,26 @@ the tier's Price for the chosen interval. Metadata on the session and on
 the course and plan ids) and `codex_env`. There are
 no trials. No `application_fee_percent` or `transfer_data` is passed.
 
-**One live subscription per buyer per organisation** is enforced twice: at
-checkout, and again when the subscription is recorded. If a second Stripe
-subscription completes anyway (two tabs), it is cancelled and refunded
-automatically and nobody is billed for it — **gap**: `Codex-2hxff.15`.
+**One live subscription per buyer per organisation** (and per course plan) is
+enforced twice: at checkout, and again when the subscription is recorded.
+
+- **At checkout**, as for purchases: one open payment page per buyer per
+  organisation or course plan. A second tab gets the same page; another tier or
+  billing interval replaces it; a page expires after 30 minutes.
+- **If a second Stripe subscription completes anyway** (two pages paid before
+  either subscription existed), the first one recorded stays (owner decision
+  2026-10-22, "Keep the first"). The newcomer is recorded as a duplicate
+  (`duplicate_of_subscription_id`, or `duplicate_of_course_subscription_id`),
+  `cancelled`, and grants, pays and emails nothing. It is cancelled at Stripe at
+  once, without proration, and every payment it took is refunded in full.
+- **The buyer gets one email**, the refund's: "You were already subscribed to
+  {org}. We cancelled the second subscription and refunded it.", plus "You can
+  switch to {tier} with Change plan." when the tiers differ. There is no
+  "subscription cancelled" email and no streaming block for it.
+- A refund Stripe refuses leaves `duplicate_settled_at` NULL, and the event is
+  retried. What never settles is held for support:
+  `duplicate_of_subscription_id IS NOT NULL AND duplicate_settled_at IS NULL`
+  (likewise on `course_subscriptions`).
 
 ### Recording the subscription
 
@@ -76,15 +92,17 @@ Stripe sends `checkout.session.completed` (subscription mode) to
 `/webhooks/stripe/subscription`.
 
 - **Organisation tier:** a `subscriptions` row is written with the status Stripe
-  reports (not assumed active) — **gap**: `Codex-2hxff.15`. The buyer becomes a
-  `subscriber` member (an existing owner, admin or creator role is kept) and a
-  follower. A welcome email is sent and the buyer's library and subscription
+  reports (not assumed active). The buyer becomes a `subscriber` member (an
+  existing owner, admin, creator or `member` role is kept, owner decision
+  2026-10-22) and a follower. A welcome email is sent and the buyer's library and subscription
   caches are bumped.
 - **Course plan:** a `course_subscriptions` row and a `course_subscription`
   entitlement that expires at the end of the paid period.
 
 The success page waits for our row before confirming
-([purchases.md](purchases.md#after-payment)).
+([purchases.md](purchases.md#after-payment)). For a duplicate it confirms
+nothing: it names the subscription the user keeps and says the second one is
+cancelled and refunded, with Change plan when the tiers differ (Codex-o4jvw).
 
 ---
 
@@ -94,26 +112,38 @@ The success page waits for our row before confirming
 |---|---|---|
 | `active` | `active` | Yes, until the end of the paid period |
 | `cancelling` | `active` with `cancel_at_period_end` | Yes, until the end of the paid period |
-| `past_due` | `past_due` | **Yes, while Stripe retries the payment** — **gap**: `Codex-2hxff.10` (org tiers cut access immediately; course plans already keep it) |
+| `past_due` | `past_due` | **Yes, while Stripe retries the payment** |
 | `paused` | `paused` | No |
-| `cancelled` | `canceled` (or `unpaid`) | No |
+| `cancelled` | `canceled` (or `unpaid`, which the status mapper turns into `cancelled`) | No |
 | `incomplete` | `incomplete` | No |
 
 Our row always follows Stripe's status, in Stripe's order. A late or replayed
-event never brings back a subscription that has ended: deletion leaves a
-tombstone that later events respect — **gap**: `Codex-2hxff.15`. The recorded
-amount is the subscription's price, never a one-off proration invoice —
-**gap**: `Codex-2hxff.15`.
+event never brings back a subscription that has ended:
+
+- **Deletion leaves a tombstone** (`ended_at`), written even when the deletion
+  arrives before the subscription was recorded. No later event changes an ended
+  row or its access. A late invoice for a real charge is still paid out.
+- **Ending is per subscription.** The membership change, the streaming block
+  and the "subscription cancelled" email follow only the first end of the
+  buyer's current subscription. A course plan's grant is revoked by its own
+  subscription, so ending an old one never touches a new one.
+- **`unpaid`, then paid, is not an end.** Paying the open invoice restores
+  access, for tiers and course plans alike (owner decision 2026-10-22, "Yes,
+  like tiers").
+- **The recorded amount is the subscription's price**, never a one-off
+  proration invoice; transfers still use each invoice's own amount.
 
 | Event | Effect |
 |---|---|
 | `checkout.session.completed` | Record the subscription (above) |
 | `invoice.payment_succeeded` | Update the period and status; split and pay out the invoice; renewal email on a cycle renewal; clear any streaming block |
-| `invoice.payment_failed` | `past_due`; payment-failed email with the next retry date; **access continues** — **gap**: `Codex-2hxff.10` (today the streaming block is written) |
-| `customer.subscription.updated` | Mirror status, tier, interval and period |
-| `customer.subscription.deleted` | `cancelled`; access ends; streaming block written; tombstone |
-| `customer.subscription.paused` / `resumed` | `paused` with access withdrawn / back to `active` |
+| `invoice.payment_failed` | `past_due` (only from `active`: a failed first payment stays `incomplete`); payment-failed email with the next retry date; **access continues**, no streaming block |
+| `customer.subscription.updated` | Mirror status, tier, interval, period and price. Stripe `canceled` withdraws access at once; the end (tombstone, cancelled email) is recorded by deletion, or at once for a course plan, which has no email to send |
+| `customer.subscription.deleted` | `cancelled` with a tombstone (`ended_at`); on the first end of the buyer's current subscription, access ends, the streaming block is written and the cancelled email goes |
+| `customer.subscription.paused` / `resumed` | `paused` with access withdrawn / back to the status Stripe reports; never for an ended row |
 | `customer.subscription.trial_will_end` | Email only (no trials are configured) |
+
+Every event for a duplicate settles it (cancel and refund, if not done yet) and does nothing else.
 
 `customer.subscription.created` and `invoice.paid` are not used: creation is
 driven by `checkout.session.completed`, and payment by `invoice.payment_succeeded`.
@@ -137,20 +167,29 @@ split and paid out exactly like a sale ([fees-and-splits.md](fees-and-splits.md#
 There is no immediate cancellation, except that a full refund ends a
 subscription (see [refunds](#refunds)).
 
+When a course is taken off sale because its creator was removed, each live
+course subscription to it is set to cancel at period end, with Stripe
+idempotency key `course_off_sale_cancel_{id}`. Up to 50 are cancelled at once
+and the rest by the hourly ecom-api sweep (see
+[agreements](agreements.md#what-comes-off-sale)).
+
 ---
 
 ## Changing tier
 
 `POST /subscriptions/preview-tier-change` shows the cost of a change (Stripe's
 invoice preview); `POST /subscriptions/change-tier` makes it. The proration date
-is issued by the server with the preview and checked when the change is made —
-**gap**: `Codex-2hxff.15` (today the client supplies it unchecked).
+is issued by the server with the preview and checked when the change is made:
+it must be at most 10 minutes old and inside the current period (owner decision
+2026-10-22, "10 min, then review again"). An older one is refused with
+`TIER_CHANGE_PREVIEW_EXPIRED` (409), and the subscriber is shown a fresh
+preview to confirm.
 
 - **Upgrade** (higher recurring price): takes effect immediately and the
   prorated difference is charged now. If that payment fails, Stripe keeps the
   old tier and the API returns 402 with a plain message — never Stripe's raw
-  error text (**gap**: `Codex-2hxff.23`). The idempotency key includes the
-  target price — **gap**: `Codex-2hxff.15`.
+  error text, which is logged with an errorId instead. The idempotency key includes the
+  target price and the proration date; a downgrade's does too.
 - **Downgrade** (lower recurring price): takes effect at the **end of the paid
   period**; the subscriber keeps the higher tier until then (owner decision
   P-5, "At period end") — **gap**: `Codex-2hxff.16` (today it is immediate).
@@ -197,7 +236,10 @@ subscribers on that interval are then each handled by `schedulePriceChange`
 - A tier change clears a pending price change; cancelling and reactivating
   keep it.
 - Each subscriber is emailed (`subscription-tier-price-change`) with the date
-  of the renewal that first bills the new price.
+  of the renewal that first bills the new price. The "from" figure is what that
+  subscriber is billed today, not the previous list price: a tier quotes the
+  subscription's own snapshot, a course plan its live Stripe item
+  (`Codex-2hxff.40`).
 - A Price created in the Stripe Dashboard is logged as drift
   (`TierService.recordStripePriceDrift`); the tier keeps its own Price and no
   subscriber moves.
@@ -215,22 +257,48 @@ Owner decision P-3, "After retries fail".
   Dashboard, sees the existing "update your card" banner, and is emailed.
 - When the retries are exhausted, Stripe cancels the subscription and access
   ends. An `unpaid` status is treated the same way.
-
-— **gap**: `Codex-2hxff.10`.
+- This relies on the Stripe Dashboard: "If all retries for a payment fail"
+  must be set to **cancel the subscription** (or mark it unpaid). If Stripe
+  leaves it past-due, access never ends — see
+  [operations.md](operations.md#stripe-dashboard-settings).
 
 ## Refunds
 
 Owner decision P-4, "Cancel + end access".
 
-- A **full** refund of the latest subscription payment cancels the subscription
-  immediately, ends access and writes the streaming block.
+- A **full** refund of the payment for the **current billing period** cancels
+  the subscription immediately and ends access.
 - A **partial** refund leaves the subscription running.
+- A full refund of an **earlier** period's payment, or of a payment that
+  bought no period (an upgrade's proration invoice), leaves it running too
+  (owner decision 2026-10-20, "Current period's payment").
 - Either way, the creator and organisation slices are reversed in proportion,
   exactly as for one-off purchases ([purchases.md](purchases.md#refunds)). A
   shortfall on the payee's balance goes to `refund_reviews`, which holds
   subscription debts as well as purchase ones (one row per reversal).
+- The order of Stripe's events does not change that. A refund handled before
+  its invoice's payout reverses nothing then, and is clawed back as soon as
+  the invoice's slices are recorded, so the payees net the same either way
+  (`Codex-2hxff.67`).
 
-— **gap**: `Codex-2hxff.10` (today a refund moves money only).
+The current period's payment is the newest **paid** invoice Stripe raised to
+buy a period (`billing_reason` `subscription_create` or `subscription_cycle`),
+compared with the invoice the refunded charge paid. Stripe's `latest_invoice`
+is not used: after an upgrade it is the proration invoice, and while a renewal
+is retried it is the unpaid one. The cancel is applied here at once, as for
+`customer.subscription.deleted` (which re-applies it when it lands). Tier and
+course subscriptions are handled alike, except for the streaming block: a
+tier subscription's is written, while a course plan's grant is revoked
+instead, as on deletion — the org-wide block would also stop the subscriber's
+purchases and tier content (owner decision 2026-10-20).
+
+If the cancel fails, the webhook raises an alert with an `errorId` (check the
+subscription at Stripe and the subscriber's access by hand) and Stripe
+redelivers the event when the failure is transient.
+
+Known limit: a full refund that later **fails** has still cancelled the
+subscription; the customer subscribes again, and support settles the failed
+refund as for a purchase (the failed-refund alert says so).
 
 ## Disputes
 
@@ -251,8 +319,11 @@ Q-B):
   cancellation email.
 - **Inquiry:** nothing changes for the subscriber.
 
-The subscriber is not told why access is paused: the account page still says
-Active (Q-B). A notice is planned, to be mocked up first: `Codex-2hxff.60`.
+The subscriber is told why access is paused (`Codex-2hxff.60`): the content
+page says "Access paused" with no Buy button, and the account page shows a
+"Paused: payment dispute" badge and hides Change Plan. A course lesson paused
+by a dispute shows the same notice (owner decision 2026-10-24, "Notice for
+courses too"). The detail is in [subscription disputes](subscription-disputes.md).
 
 ## Billing portal
 
@@ -275,4 +346,5 @@ configuration, which allows cancelling.
 | `payment-failed` | A renewal fails (with the next retry date) |
 | `subscription-tier-price-change` | A price changes — sent at least 30 days before the new price applies. Says the subscription "renews at the new price from {{effectiveDate}}"; migration `0098` rewrote the old "on the next billing cycle" sentence on existing rows (`Codex-2hxff.35`) |
 | `subscription-cancelled` | The subscription ends |
+| `course-no-longer-offered` | A course subscription is cancelled because the course was taken off sale; gives the date access ends |
 | `trial-ending-soon` | A trial is about to end (no trials are configured today) |

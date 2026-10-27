@@ -105,7 +105,10 @@ describe('CategoryList', () => {
 
     const img = document.querySelector<HTMLImageElement>('.cover-image');
     expect(img).toBeTruthy();
-    expect(img?.getAttribute('src')).toBe(sample[0].coverImageUrl);
+    // The 5rem tile draws the sm file of the cover's folder (Codex-kk9nv.3).
+    expect(img?.getAttribute('src')).toBe(
+      'https://cdn.example.test/categories/aaaa/cover/sm.webp'
+    );
     // No badge on the row whose image can actually render.
     const firstRow = document.querySelectorAll('.category-row')[0];
     expect(firstRow?.querySelectorAll('.category-badge').length).toBe(0);

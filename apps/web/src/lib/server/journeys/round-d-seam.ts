@@ -16,11 +16,13 @@
  *  MAPPING (seam fn → real call)
  * ═══════════════════════════════════════════════════════════════════════════
  *   resolveCourseBySlug   → resolve org from host → api.access.courseBySlug(orgId, slug)
- *   resolveCanEnterCourse → api.access.canEnterCourse(courseId)              [WP-2]
+ *   resolveCourseEntry    → api.access.courseEntry(courseId)                 [WP-2]
+ *   resolveCanEnterCourse → resolveCourseEntry(…).canEnter
  *   resolveCanView        → api.access.canView(contentId)                   [WP-2]
  *   fetchCourseDashboard  → api.access.courseDashboard(courseId)
  *   fetchInCoursePractice → api.access.inCoursePractice(courseId, contentSlug)
- *                           (+ server-side sanitise of written bodyHtml)
+ *                           (+ server-side render + sanitise of the stored
+ *                           written body)
  *   persistPracticeCompletion → api.access.persistCompletion(input)
  *
  * The worker derives the user from the FORWARDED SESSION COOKIE, so the
@@ -32,6 +34,7 @@
  * server-only ($lib/server/*): never bundled to the client.
  */
 
+import type { CourseEntryResponse } from '@codex/access';
 import type { RequestEvent } from '@sveltejs/kit';
 import type {
   CompletionSource,
@@ -40,6 +43,7 @@ import type {
   JourneyCourseSummary,
   PracticeCompletionRecord,
 } from '$lib/journeys/types';
+import { logger } from '$lib/observability';
 import { createServerApi } from '$lib/server/api';
 import { getSubdomainContext } from '$lib/utils/subdomain';
 
@@ -81,13 +85,27 @@ export async function resolveCourseBySlug(
   return api.access.courseBySlug(org.id, slug);
 }
 
-/** `api.access.canEnterCourse` (WP-2 resolver; worker derives the user). */
-export async function resolveCanEnterCourse(
+/**
+ * `api.access.courseEntry` (WP-2 resolver; worker derives the user): whether
+ * the user may enter, and on a refusal the open payment dispute that explains
+ * it (Codex-2hxff.60). For the surfaces that must not sell the course again
+ * to a disputed owner: the sales page and the in-course player.
+ */
+export async function resolveCourseEntry(
   ctx: SeamContext,
   _userId: string | null,
   courseId: string
+): Promise<CourseEntryResponse> {
+  return apiFor(ctx).access.courseEntry(courseId);
+}
+
+/** The boolean half of {@link resolveCourseEntry}, for gates that need only that. */
+export async function resolveCanEnterCourse(
+  ctx: SeamContext,
+  userId: string | null,
+  courseId: string
 ): Promise<boolean> {
-  return apiFor(ctx).access.canEnterCourse(courseId);
+  return (await resolveCourseEntry(ctx, userId, courseId)).canEnter;
 }
 
 /** `api.access.canView` (gates the signed stream; works unauthenticated). */
@@ -114,12 +132,22 @@ export async function fetchCourseDashboard(
 /**
  * In-course player payload (practice + SIGNED stream URL + playlist).
  *
- * SECURITY: a written practice's `bodyHtml` is stored content rendered by the
- * worker and arrives here UNSANITISED — a stored-XSS vector, since the player
- * emits it via `{@html}`. We sanitise it HERE, the earliest server-only point
- * (before the value leaves the server), with the SAME isomorphic-dompurify pass
- * the standalone content page applies in `renderContentBody` — so the player's
- * `{@html}` receives the identical safe treatment as the standalone page.
+ * A written practice's body arrives AS STORED (TipTap JSON or legacy
+ * markdown) and is rendered HERE with the standalone content page's
+ * `renderContentBody`: the same TipTap/markdown render and the same
+ * isomorphic-dompurify pass, so the player's `{@html}` gets exactly the page's
+ * safe HTML, and an editor-written practice is no longer empty (Codex-woj7k).
+ * Server-only, so the stored body never reaches the browser.
+ *
+ * Two failures are said out loud rather than shown as "no written guidance":
+ * - a content-api older than this web (a rollback) sends only the markdown
+ *   column, as `bodyHtml`: rendered as markdown, and logged as deploy skew
+ *   (an empty column is `bodyUnavailable`: the text may be editor JSON). So
+ *   during a rollback a reflection with no text at all also reads as "didn't
+ *   load" and offers no Mark complete; accepted for that logged window, since
+ *   this web cannot tell it from JSON it was not sent;
+ * - stored text that rendered to nothing (renderContentBody failed and logged
+ *   why): `bodyUnavailable`, so the pane says it did not load.
  */
 export async function fetchInCoursePractice(
   ctx: SeamContext,
@@ -130,19 +158,44 @@ export async function fetchInCoursePractice(
   const data = await apiFor(ctx).access.inCoursePractice(courseId, contentSlug);
   if (!data) return null;
 
-  // Sanitise written bodies server-side (stored-XSS guard). Imported LAZILY so
-  // this seam's module-eval doesn't eagerly pull the heavy editor render chain
-  // ($lib/editor/render → ./extensions), which is CJS-interop-hostile to
-  // vitest's SSR eval and — via progress.ts → journeys.remote → round-d-seam —
-  // was breaking the collections/access-context unit suites. The real build is
-  // unaffected (SvelteKit strips the remote body from the client bundle).
-  // [[feedback_vite_ssr_module_load_cascade]]
-  let bodyHtml: string | null = null;
-  if (data.bodyHtml) {
-    const { sanitizeContentHtml } = await import('$lib/editor/render');
-    bodyHtml = await sanitizeContentHtml(data.bodyHtml);
+  const { body, bodyHtml: legacyBodyHtml, ...rest } = data;
+  const contentId = data.practice.contentId;
+
+  let stored = body ?? null;
+  let bodyUnavailable = false;
+  if (body === undefined && data.practice.contentType === 'written') {
+    logger.error('In-course practice arrived without its stored body', {
+      courseId,
+      contentId,
+    });
+    if (legacyBodyHtml) {
+      stored = { contentBody: legacyBodyHtml, contentBodyJson: null };
+    } else {
+      // The older worker sent only the markdown column, and it is empty: the
+      // text may well be editor JSON this web cannot see. "Didn't load" is the
+      // honest copy, never "no written guidance".
+      bodyUnavailable = true;
+    }
   }
-  return { ...data, bodyHtml };
+
+  // Imported LAZILY so this seam's module-eval doesn't eagerly pull the heavy
+  // editor render chain ($lib/editor/render → ./extensions), which is
+  // CJS-interop-hostile to vitest's SSR eval and — via progress.ts →
+  // journeys.remote → round-d-seam — was breaking the collections/access-context
+  // unit suites. The real build is unaffected (SvelteKit strips the remote body
+  // from the client bundle). [[feedback_vite_ssr_module_load_cascade]]
+  let bodyHtml: string | null = null;
+  if (stored) {
+    const { hasStoredText, renderContentBody } = await import(
+      '$lib/editor/render'
+    );
+    bodyHtml = await renderContentBody(stored, {
+      contentId,
+      surface: 'course-player',
+    });
+    bodyUnavailable = hasStoredText(stored) && bodyHtml == null;
+  }
+  return { ...rest, bodyHtml, bodyUnavailable };
 }
 
 /**

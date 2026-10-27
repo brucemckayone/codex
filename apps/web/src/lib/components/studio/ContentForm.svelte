@@ -17,6 +17,7 @@
   @prop {MediaItemOption[]} [mediaItems] - Available media items for picker
 -->
 <script lang="ts">
+  import { PRICE_LIMITS } from '@codex/constants';
   import { onDestroy, tick, untrack } from 'svelte';
   import { beforeNavigate } from '$app/navigation';
   import { browser } from '$app/environment';
@@ -158,6 +159,10 @@
   const contentBodyVal = $derived(form.fields.contentBody?.value() ?? '');
   const accessTypeVal = $derived(form.fields.accessType?.value() ?? 'free');
   const priceVal = $derived(form.fields.price?.value() ?? '0.00');
+  // Paid content is ready at the £1.00 minimum the worker enforces (Codex-2hxff.32).
+  const priceMeetsMinimum = $derived(
+    Math.round((parseFloat(priceVal || '0') || 0) * 100) >= PRICE_LIMITS.MIN_CENTS
+  );
 
   // ── Layout refs ─────────────────────────────────────────────────────────
   let layoutEl: HTMLFormElement | undefined = $state();
@@ -408,7 +413,7 @@
       checks.push({ label: 'Content body written', met: !!contentBodyVal.trim() });
     }
     if (accessTypeVal === 'paid') {
-      checks.push({ label: 'Price set for paid content', met: parseFloat(priceVal || '0') > 0 });
+      checks.push({ label: 'Price set for paid content', met: priceMeetsMinimum });
     }
     if (accessTypeVal === 'subscribers') {
       checks.push({ label: 'Subscription tier selected', met: !!selectedMinimumTierId });
@@ -430,7 +435,7 @@
   const bodyReady = $derived(!!contentBodyVal.trim());
   const accessReady = $derived(
     accessTypeVal === 'paid'
-      ? parseFloat(priceVal || '0') > 0
+      ? priceMeetsMinimum
       : accessTypeVal === 'subscribers'
         ? !!selectedMinimumTierId
         : true

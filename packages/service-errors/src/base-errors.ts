@@ -188,6 +188,22 @@ export class InternalServiceError extends ServiceError {
 }
 
 /**
+ * A step after an operation's commit failed (500). The commit stands, so
+ * `completed` is what the operation returns when everything succeeds: a
+ * caller can still run what follows from the commit alone, then handle the
+ * failure. The failure is the `cause`, which says whether a retry can fix it
+ * (Codex-2hxff.67).
+ */
+export class AfterCommitError<T = unknown> extends InternalServiceError {
+  readonly completed: T;
+
+  constructor(message: string, completed: T, cause: unknown) {
+    super(message, undefined, { cause });
+    this.completed = completed;
+  }
+}
+
+/**
  * Service unavailable (503)
  * Thrown on purpose when the work could not be done YET and a retry will
  * succeed: another worker holds the row, say. Unlike a ServiceError thrown on
@@ -195,8 +211,12 @@ export class InternalServiceError extends ServiceError {
  * (Codex-2hxff.8).
  */
 export class ServiceUnavailableError extends ServiceError {
-  constructor(message: string, context?: Record<string, unknown>) {
-    super(message, 'SERVICE_UNAVAILABLE', 503, context);
+  constructor(
+    message: string,
+    context?: Record<string, unknown>,
+    options?: ErrorOptions
+  ) {
+    super(message, 'SERVICE_UNAVAILABLE', 503, context, options);
   }
 }
 

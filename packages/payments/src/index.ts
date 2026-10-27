@@ -13,16 +13,30 @@ export {
   type ClawbackCharge,
   type ClawbackDeps,
   type ClawbackDispute,
+  type ClawbackPlan,
+  type ClawbackPlanInput,
+  type ClawbackPlanLine,
+  type ClawbackPlanMethod,
   type ClawbackRefund,
   type ClawbackSource,
+  failedRefundRepayBlock,
   listChargeRefunds,
   listClawableRefunds,
+  loadClawbackCauses,
+  loadClawbackPlanInput,
   MAX_CLAWBACK_ATTEMPTS,
   pendingReductionsFor,
+  planClawback,
+  type RepayBlockReason,
   refundShare,
   retryFailedClawbacks,
   reverseCharge,
+  reverseEarlierRefunds,
+  reverseEarlierRefundsAfterCommit,
 } from './clawback';
+// GBP in, GBP out: the guard every path runs before it records a split
+// (Codex-2hxff.23 PAY-25)
+export { assertGbpOnly, isGbpOrUnset } from './currency';
 // The charge an invoice payment settled on: the key every invoice payout
 // uses (Codex-2hxff.50)
 export { resolveInvoiceCharge } from './invoice-charge';
@@ -32,20 +46,54 @@ export {
   cancelUnpaidPayout,
   claimPayoutAttempt,
   claimPayoutAttempts,
+  classifyTransferFailure,
   findTransfersForPayouts,
   isDrainablePayout,
   type LedgerDeps,
+  MAX_PAYOUT_FAILURES,
   markPayoutFailed,
+  type PayeeAccounts,
+  type PayoutFailureRecord,
+  type PlatformFailureTally,
+  payeeAccountIds,
+  platformFailureTally,
+  type RecordSliceInput,
+  type RecordSliceOutcome,
   recordPlatformFee,
   recordSlice,
+  recordSplitOnce,
+  recordTransferFailure,
   renewPayoutAttempt,
+  reportPlatformFailures,
   settlePayoutPaid,
   settleTransfer,
+  type TransferFailure,
+  type TransferFailureKind,
   type UnpaidCancelOutcome,
 } from './payout-ledger';
-// A won dispute's clawback paid back by new pending payout rows the sweep
-// pays (Codex-2hxff.9)
-export { type DisputeRepayResult, repayDispute } from './repay';
+// Refund a payment the platform decides to give back, in part or in full; the
+// charge.refunded webhook then does the rest (architecture C5, Codex-2hxff.14).
+// Support refunds only inside the 14-day window (Codex-2hxff.28)
+export {
+  type IssueRefundInput,
+  type IssueRefundResult,
+  issueRefund,
+  type RefundWindow,
+  refundWindow,
+} from './refund';
+// A won dispute's clawback, or a failed refund's that support settles as
+// creators_repaid, paid back by new pending payout rows the sweep pays
+// (Codex-2hxff.9, .28)
+export {
+  type DisputeRepayResult,
+  type FailedRefundRepay,
+  repayBlockedError,
+  repayDispute,
+  repayFailedRefund,
+  type StrandedStep,
+  settleUnfinishedRefundSteps,
+  type UnfinishedRefundSteps,
+} from './repay';
 // Who is paid the organisation's part of a sale (Codex-2hxff.2)
 export {
   type OrganisationPayee,

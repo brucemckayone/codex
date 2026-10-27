@@ -17,6 +17,11 @@
   @prop {ContentPerformanceItem[]} [topPerformance]  Per-content engagement rows.
   @prop {boolean} hasCompareWindow        True when both compareFrom/compareTo are set.
   @prop {boolean} [loading]               Shimmer skeleton state.
+  @prop {Unavailable[]} [unavailable]     Reads that failed: no sentence from them.
+
+  A failed read says nothing (review N-3, M4): no sentence from it, and not
+  "Still early days" either, since an unread total is not a zero one. The
+  page shows "We couldn't load your …" beneath.
 -->
 <script lang="ts">
   import type {
@@ -29,6 +34,8 @@
   import * as m from '$paraglide/messages';
   import { formatPriceCompact } from '$lib/utils/format';
 
+  type Unavailable = 'revenue' | 'subscribers' | 'followers' | 'topContent';
+
   interface Props {
     revenue: RevenueStats;
     subscribers: SubscriberStats;
@@ -37,6 +44,7 @@
     topPerformance?: ContentPerformanceItem[];
     hasCompareWindow: boolean;
     loading?: boolean;
+    unavailable?: readonly Unavailable[];
   }
 
   const {
@@ -47,6 +55,7 @@
     topPerformance,
     hasCompareWindow,
     loading = false,
+    unavailable = [],
   }: Props = $props();
 
   // ─── Thresholds ────────────────────────────────────────────────────────
@@ -76,7 +85,7 @@
 
   // ─── Revenue sentence ─────────────────────────────────────────────────
   const revenueSentence = $derived.by<Sentence | null>(() => {
-    if (!hasCompareWindow) return null;
+    if (unavailable.includes('revenue') || !hasCompareWindow) return null;
     const prev = revenue.previous;
     if (!prev) return null;
 
@@ -128,7 +137,7 @@
 
   // ─── Subscriber sentence ─────────────────────────────────────────────
   const subscriberSentence = $derived.by<Sentence | null>(() => {
-    if (!hasCompareWindow) return null;
+    if (unavailable.includes('subscribers') || !hasCompareWindow) return null;
     const prev = subscribers.previous;
     if (!prev) return null;
 
@@ -171,7 +180,7 @@
 
   // ─── Follower sentence ───────────────────────────────────────────────
   const followerSentence = $derived.by<Sentence | null>(() => {
-    if (!hasCompareWindow) return null;
+    if (unavailable.includes('followers') || !hasCompareWindow) return null;
     const prev = followers.previous;
     if (!prev) return null;
 
@@ -195,6 +204,7 @@
 
   // ─── Top performer (revenue leader) ──────────────────────────────────
   const topPerformerSentence = $derived.by<Sentence | null>(() => {
+    if (unavailable.includes('topContent')) return null;
     const top = topContent?.[0];
     if (!top || top.revenueCents <= 0) return null;
 
@@ -240,8 +250,10 @@
   // ─── Zero-data detection ────────────────────────────────────────────
   // An org with no revenue, subscribers, followers, and no top content is
   // genuinely brand-new. Render a friendly placeholder instead of silence.
+  // Not when a read failed: what it would have said is unknown, not zero.
   const hasAnyData = $derived(
-    revenue.totalRevenueCents > 0 ||
+    unavailable.length > 0 ||
+      revenue.totalRevenueCents > 0 ||
       subscribers.activeSubscribers > 0 ||
       subscribers.newSubscribers > 0 ||
       followers.totalFollowers > 0 ||

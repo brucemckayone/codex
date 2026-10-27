@@ -5,25 +5,35 @@
  * pending) and that action callbacks fire with the correct revenue-type
  * + share arguments. Covers the post-platform copy alignment + the
  * narrowing of the RowState union.
+ *
+ * The share is the agreement's own `creatorSharePercent` (Codex-fazy6). Every
+ * fixture sets the legacy `organizationFeePercentage` to DISAGREE with it, so
+ * a card that rebuilt the share as `10000 - organizationFeePercentage` would
+ * show a different number and fail.
  */
 
-import type { CreatorOrganizationAgreement } from '@codex/agreements';
+import type { AgreementWithShare } from '@codex/agreements';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
   flushSync,
   mount,
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
+import {
+  MISSING_SHARE_PARTS,
+  missingShareParts,
+} from './__fixtures__/missing-share';
 import AgreementCard from './AgreementCard.svelte';
 
 function makeActiveAgreement(
-  overrides: Partial<CreatorOrganizationAgreement> = {}
-): CreatorOrganizationAgreement {
+  overrides: Partial<AgreementWithShare> = {}
+): AgreementWithShare {
   return {
     id: '11111111-1111-1111-1111-111111111111',
     creatorId: '22222222-2222-2222-2222-222222222222',
     organizationId: '33333333-3333-3333-3333-333333333333',
-    organizationFeePercentage: 6000, // → creator share 4000 bp = 40%
+    creatorSharePercent: 4000, // 40%, from the accepted proposal
+    organizationFeePercentage: 3000, // legacy: would rebuild as 70%
     revenueType: 'subscription',
     status: 'active',
     currentProposalId: null,
@@ -35,7 +45,7 @@ function makeActiveAgreement(
     createdAt: new Date('2026-01-01T00:00:00Z'),
     updatedAt: new Date('2026-01-01T00:00:00Z'),
     ...overrides,
-  } as CreatorOrganizationAgreement;
+  } as AgreementWithShare;
 }
 
 describe('AgreementCard', () => {
@@ -98,7 +108,8 @@ describe('AgreementCard', () => {
       props: {
         creator: { id: 'c1', name: 'Alex', avatarUrl: null },
         subscriptionAgreement: makeActiveAgreement({
-          organizationFeePercentage: 7000, // share = 30%
+          creatorSharePercent: 3000, // share = 30%
+          organizationFeePercentage: 4000, // legacy would say 60%
         }),
         onPropose: vi.fn(),
         onAmend: vi.fn(),
@@ -106,6 +117,7 @@ describe('AgreementCard', () => {
       },
     });
     expect(document.body.textContent).toContain('30%');
+    expect(document.body.textContent).not.toContain('60%');
     expect(document.body.textContent).toContain(
       'post-platform subscription revenue'
     );
@@ -119,7 +131,8 @@ describe('AgreementCard', () => {
       props: {
         creator: { id: 'c1', name: 'Alex', avatarUrl: null },
         subscriptionAgreement: makeActiveAgreement({
-          organizationFeePercentage: 6500, // share = 35%
+          creatorSharePercent: 3500, // share = 35%
+          organizationFeePercentage: 7000, // legacy would say 30%
         }),
         onPropose: vi.fn(),
         onAmend,
@@ -132,7 +145,45 @@ describe('AgreementCard', () => {
     expect(amend).toBeDefined();
     amend.click();
     flushSync();
-    expect(onAmend).toHaveBeenCalledWith('subscription', 3500); // 10000 - 6500
+    expect(onAmend).toHaveBeenCalledWith('subscription', 3500);
+  });
+
+  // The accepted-proposal link is gone: the resolver pays this agreement
+  // nothing. It is still an agreement, so the row stays Active; the share it
+  // cannot name is an em dash, never "0%" and never the legacy column's 70%.
+  test('a missing share shows an em dash on a row that stays Active', () => {
+    const onAmend = vi.fn();
+    component = mount(AgreementCard, {
+      target: document.body,
+      props: {
+        creator: { id: 'c1', name: 'Alex', avatarUrl: null },
+        subscriptionAgreement: makeActiveAgreement({
+          creatorSharePercent: null,
+        }),
+        onPropose: vi.fn(),
+        onAmend,
+        onViewThread: vi.fn(),
+      },
+    });
+    const row = document.body.querySelector(
+      '[aria-label="Subscription agreement"]'
+    ) as HTMLElement;
+    expect(row.dataset.state).toBe('active');
+    // The dash, and words for a screen reader, which reads nothing for it.
+    expect(missingShareParts(row.querySelector('dd strong'))).toEqual(
+      MISSING_SHARE_PARTS
+    );
+    expect(row.textContent).not.toContain('0%');
+    expect(row.textContent).not.toContain('70%');
+    expect(row.textContent).not.toContain('No agreement');
+
+    // Amend opens on the parent's default: no share to seed it with.
+    const amend = Array.from(row.querySelectorAll('button')).find(
+      (b) => b.textContent?.trim() === 'Amend'
+    ) as HTMLButtonElement;
+    amend.click();
+    flushSync();
+    expect(onAmend).toHaveBeenCalledWith('subscription', null);
   });
 
   test('renders Counter-received state and review button when pending counter waits on owner', () => {

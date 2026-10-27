@@ -1,3 +1,7 @@
+import { MAX_IMAGE_PIXELS, MAX_IMAGE_WIDTH } from '@codex/validation';
+import { InvalidImageError, UNREADABLE_IMAGE_MESSAGE } from './errors';
+import { readJpegOrientation } from './exif-orientation';
+import { readImageDimensions } from './image-dimensions';
 import { SafePhotonImage } from './photon-wrapper';
 
 interface ImageVariants {
@@ -13,15 +17,14 @@ export const VARIANT_WIDTHS = {
 } as const;
 
 /**
- * The largest page-image variant (Codex-61zsk.13, -61zsk.53): a full-bleed
- * picture across a 1440 window, and the column's 720px cap at 2x. Page images
- * ONLY: every other still shares {@link VARIANT_WIDTHS} and is drawn far
- * smaller, so it is not added there.
+ * Every still's largest variant (Codex-61zsk.13 for page images, then every
+ * still in Codex-kk9nv.5): a full-bleed picture across a 1440 window, and a
+ * 720px column at 2x.
  */
-export const PAGE_IMAGE_XL_WIDTH = 1600;
+export const XL_WIDTH = 1600;
 
-/** A page image's four variants, and the size of the picture they came from. */
-export interface PageImageVariants {
+/** A still's four variants, and the size of the picture they came from. */
+export interface StillVariants {
   variants: ImageVariants & { xl: Uint8Array };
   /** The source picture's own width and height, in pixels. */
   width: number;
@@ -29,46 +32,107 @@ export interface PageImageVariants {
 }
 
 /**
- * Decode one image and hand `build` a function that resizes it to a target
- * width as WebP, never upscaling and always keeping its shape.
- *
- * Memory Safety:
- * - All Wasm allocations are tracked in an array
- * - Single finally block frees all in reverse order
- * - Individual free() failures are logged but don't prevent other frees
- * - Prevents memory leaks even if inner operations throw
+ * Refuse a picture whose decode cannot fit, from its header alone
+ * (Codex-kk9nv.12). The decode is the one step that cannot be stopped part
+ * way, and over a Worker's 128 MB it kills the isolate (error 1102), where no
+ * handler or log ever sees it.
  */
-function withVariants<T>(
+function assertDecodable(inputBuffer: Uint8Array): void {
+  const size = readImageDimensions(inputBuffer);
+  if (!size) throw new InvalidImageError(UNREADABLE_IMAGE_MESSAGE);
+  if (size.width * size.height > MAX_IMAGE_PIXELS) {
+    throw new InvalidImageError(
+      `This image is ${size.width} × ${size.height} pixels, more than the ${MAX_IMAGE_WIDTH} × ${MAX_IMAGE_WIDTH} we can take. Upload it through the studio, which shrinks it for you, or choose a smaller one.`
+    );
+  }
+}
+
+/**
+ * Decode one image and make a WebP of it at each width in `widths`, never
+ * upscaling and always keeping its shape. The variants come back in `widths`'
+ * own key order, with the picture's size.
+ *
+ * Upright (Codex-kk9nv.11): a camera stores the sensor's pixels plus an EXIF
+ * tag saying how to turn them, Photon ignores the tag, and the WebP variants
+ * carry no EXIF, so a portrait phone photo was stored, measured and served
+ * sideways. Every size here is the UPRIGHT picture's. Each variant is resized
+ * in the stored orientation to the upright size's mirror image, and only that
+ * small output is turned: a quarter turn is a pixel remap into a new image,
+ * so turning the decode itself would cost full-size copies.
+ *
+ * Memory (Codex-kk9nv.12): a Worker has 128 MB for the JS heap and Wasm
+ * together, and Photon's `resize` clones its source and builds a float
+ * intermediate as wide as the source, at 16 bytes a pixel. So the LARGEST
+ * variant is made from the decode, the decode is freed at once, and every
+ * smaller variant is made from that largest one and freed as soon as it is
+ * encoded. Making all of them from the decode and holding them to the end
+ * peaked at 81 MB of Wasm on a 2000x1280 page image; this order peaks at 65.
+ *
+ * Every Wasm allocation is tracked, and the `finally` frees whatever is still
+ * held (`free()` is idempotent), so a throw part way leaks nothing.
+ */
+function withVariants<K extends string>(
   inputBuffer: Uint8Array,
-  build: (
-    variant: (targetWidth: number) => Uint8Array,
-    width: number,
-    height: number
-  ) => T
-): T {
-  const image = SafePhotonImage.fromBuffer(inputBuffer);
-  // Track all Wasm allocations for guaranteed cleanup
-  const allocated: SafePhotonImage[] = [image];
+  widths: Readonly<Record<K, number>>
+): { variants: Record<K, Uint8Array>; width: number; height: number } {
+  assertDecodable(inputBuffer);
+  const orientation = readJpegOrientation(inputBuffer);
+  // 5 to 8 include a quarter turn: the stored pixels are the picture on its side.
+  const sideways = orientation >= 5;
+  const allocated: SafePhotonImage[] = [];
+  const track = (image: SafePhotonImage): SafePhotonImage => {
+    allocated.push(image);
+    return image;
+  };
 
   try {
-    const originalWidth = image.get_width();
-    const originalHeight = image.get_height();
-    const aspectRatio = originalWidth / originalHeight;
+    const decoded = track(SafePhotonImage.fromBuffer(inputBuffer));
+    const width = sideways ? decoded.get_height() : decoded.get_width();
+    const height = sideways ? decoded.get_width() : decoded.get_height();
 
-    const generateVariant = (targetWidth: number): Uint8Array => {
-      // Don't upscale: use original dimension if smaller than target
-      const finalWidth = Math.min(targetWidth, originalWidth);
-      const finalHeight = Math.round(finalWidth / aspectRatio);
-
+    /** `source` resized, still in the stored orientation, to the upright target. */
+    const resized = (source: SafePhotonImage, targetWidth: number) => {
+      const finalWidth = Math.min(targetWidth, width);
+      const finalHeight = Math.round(finalWidth / (width / height));
       // `resize` creates a new instance even at the original size, so every
       // variant is re-encoded with the same WebP settings.
-      const resized = image.resize(finalWidth, finalHeight, 1); // 1 = Lanczos3
-      allocated.push(resized); // Track for cleanup
-      return resized.getBytesWebP();
+      return track(
+        sideways
+          ? source.resize(finalHeight, finalWidth, 1) // 1 = Lanczos3
+          : source.resize(finalWidth, finalHeight, 1)
+      );
     };
 
-    // Serial generation (Wasm is synchronous anyway)
-    return build(generateVariant, originalWidth, originalHeight);
+    /** `image` turned upright and encoded; a turned copy is freed at once. */
+    const upright = (image: SafePhotonImage): Uint8Array => {
+      const turned = image.orient(orientation);
+      if (turned === image) return image.getBytesWebP();
+      track(turned);
+      const bytes = turned.getBytesWebP();
+      turned.free();
+      return bytes;
+    };
+
+    const names = Object.keys(widths) as K[];
+    const [largestName, ...smaller] = [...names].sort(
+      (a, b) => widths[b] - widths[a]
+    ) as [K, ...K[]];
+    const largest = resized(decoded, widths[largestName]);
+    decoded.free();
+
+    const encoded = new Map<K, Uint8Array>();
+    for (const name of smaller) {
+      const variant = resized(largest, widths[name]);
+      encoded.set(name, upright(variant));
+      variant.free();
+    }
+    // Turned last: 2, 3 and 4 flip in place, and every smaller variant was
+    // made from it unturned.
+    encoded.set(largestName, upright(largest));
+
+    const variants = {} as Record<K, Uint8Array>;
+    for (const name of names) variants[name] = encoded.get(name) as Uint8Array;
+    return { variants, width, height };
   } finally {
     // Free all allocations in reverse order, catching individual failures
     // to ensure all get freed even if one throws
@@ -85,44 +149,21 @@ function withVariants<T>(
 }
 
 /**
- * Process an input image buffer into multiple WebP size variants.
+ * A still's variants (every raster still, Codex-kk9nv.5): sm/md/lg, plus `xl`
+ * at `min(1600, width)`, and the upright picture's own size. A page image
+ * stores that size on its reference (`ImageRef.w` / `.h`); every other still
+ * stores it in its row's width/height columns. Either way it is how the web
+ * knows the picture has an `xl` to offer, and how much room to keep for it
+ * before it loads.
  *
  * Logic:
- * 1. Load image into Wasm.
- * 2. Calculate dimensions for sm, md, lg.
- * 3. Resize (Lanczos3) - Never upscale, preserve aspect ratio.
+ * 1. Read the size from the header; refuse it over `MAX_IMAGE_PIXELS`.
+ * 2. Load image into Wasm.
+ * 3. Resize (Lanczos3) to xl from the decode, then lg, md and sm from xl,
+ *    each turned upright. Never upscale, preserve aspect ratio.
  * 4. Convert to WebP.
- * 5. Free Wasm memory (all allocations tracked and freed in single finally block).
- *
- * @param inputBuffer - Raw image buffer (JPEG, PNG, etc.)
- * @returns Object containing WebP buffers for each variant
+ * 5. Free Wasm memory as each step finishes, and anything left in `finally`.
  */
-export function processImageVariants(inputBuffer: Uint8Array): ImageVariants {
-  return withVariants(inputBuffer, (variant) => ({
-    sm: variant(VARIANT_WIDTHS.sm),
-    md: variant(VARIANT_WIDTHS.md),
-    lg: variant(VARIANT_WIDTHS.lg),
-  }));
-}
-
-/**
- * A PAGE image's variants: the three every still has, plus `xl` at
- * `min(1600, width)` for a picture drawn across the band (Codex-61zsk.13),
- * and the source's own size. The page stores that size on its reference
- * (`ImageRef.w` / `.h`), which is how the renderer knows the reference has an
- * `xl` to offer, and how much room to keep for the picture before it loads.
- */
-export function processPageImageVariants(
-  inputBuffer: Uint8Array
-): PageImageVariants {
-  return withVariants(inputBuffer, (variant, width, height) => ({
-    variants: {
-      sm: variant(VARIANT_WIDTHS.sm),
-      md: variant(VARIANT_WIDTHS.md),
-      lg: variant(VARIANT_WIDTHS.lg),
-      xl: variant(PAGE_IMAGE_XL_WIDTH),
-    },
-    width,
-    height,
-  }));
+export function processStillVariants(inputBuffer: Uint8Array): StillVariants {
+  return withVariants(inputBuffer, { ...VARIANT_WIDTHS, xl: XL_WIDTH });
 }

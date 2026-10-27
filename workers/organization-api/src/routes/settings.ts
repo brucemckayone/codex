@@ -19,7 +19,7 @@
 import { VersionedCache, type WaitUntilFn } from '@codex/cache';
 import { createDbClient } from '@codex/database';
 
-import type { Logger } from '@codex/observability';
+import type { ObservabilityClient } from '@codex/observability';
 import { InternalServiceError } from '@codex/service-errors';
 import type {
   AllSettingsResponse,
@@ -68,7 +68,7 @@ async function invalidateBrandAndCache(
     executionCtx: { waitUntil: WaitUntilFn };
   },
   orgId: string,
-  obs?: Logger
+  obs?: ObservabilityClient
 ): Promise<void> {
   if (!ctx.env.CACHE_KV) return;
 
@@ -80,6 +80,8 @@ async function invalidateBrandAndCache(
   const cache = new VersionedCache({
     kv: ctx.env.CACHE_KV,
     waitUntil: (promise) => ctx.executionCtx.waitUntil(promise),
+    // The cache logs a failed invalidation only through its own obs.
+    obs,
   });
   await invalidateOrgSlugCache({ db, cache, orgId, logger: obs });
 

@@ -12,8 +12,9 @@
  * therefore seeds an alarm first and asserts what the poke did TO it.
  *
  * `scheduled()` is driven with `DATABASE_URL` removed, so its other job
- * (`runRecoverStuckTranscoding`) takes its missing-env early return and never
- * touches a database.
+ * (`runTranscodingMaintenance`) takes its missing-env early return and never
+ * touches a database. The poke running after it also proves a skipped
+ * maintenance run never stops the poke.
  */
 import {
   createExecutionContext,

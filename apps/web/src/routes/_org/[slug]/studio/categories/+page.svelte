@@ -52,6 +52,7 @@
   import { PlusIcon, UploadIcon } from '$lib/components/ui/Icon';
   import { toast } from '$lib/components/ui/Toast/toast-store';
   import { keepValuesOnSave } from '$lib/utils/remote-form';
+  import { shrinkPhotoInput } from '$lib/utils/shrink-photo';
 
   let { data } = $props();
 
@@ -125,10 +126,10 @@
     coverInput?.click();
   }
 
-  function onCoverSelected() {
-    if (coverInput?.files?.length && coverFormEl) {
-      coverFormEl.requestSubmit();
-    }
+  async function onCoverSelected() {
+    if (!coverInput?.files?.length) return;
+    await shrinkPhotoInput(coverInput);
+    coverFormEl?.requestSubmit();
   }
 
   // Session upload URL (freshest) wins over the persisted list URL.
@@ -367,12 +368,16 @@
             <!-- Live preview of the real public card -->
             <div class="preview">
               <div class="preview__frame" aria-hidden="true">
+                <!-- From lg the inspector pane is at most 26rem less the
+                     card's 1.5rem padding; below it, the full width less the
+                     shell's and the card's padding. -->
                 <TopicCard
                   name={previewName}
                   slug={previewSlug}
                   href="/explore?category={encodeURIComponent(previewSlug)}"
                   coverImageUrl={previewCover}
                   description={previewDescription}
+                  sizes="(max-width: 63.9375rem) calc(100vw - 5rem), 23rem"
                 />
               </div>
               <p class="preview__caption">

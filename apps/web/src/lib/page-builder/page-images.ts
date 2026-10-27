@@ -179,3 +179,19 @@ export function pageImageSrcset(
   }
   return entries.join(', ');
 }
+
+/** The widest content column any Style draws (Bold's `--lp-container`). */
+const WIDEST_COLUMN_REM = 82;
+
+/**
+ * A `sizes` length for a picture drawn across `fraction` of the kit's content
+ * column, for choosing from {@link pageImageSrcset} (Codex-61zsk.66). The
+ * column is the window less its gutters, up to the Style's container, so the
+ * window capped at the widest Style's column never declares less than a
+ * Style draws; a narrower Style fetches a file one step larger at most.
+ */
+export function columnSize(fraction = 1): string {
+  const vw = Math.round(fraction * 10000) / 100;
+  const rem = Math.round(fraction * WIDEST_COLUMN_REM * 100) / 100;
+  return `min(${vw}vw, ${rem}rem)`;
+}

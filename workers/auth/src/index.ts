@@ -186,11 +186,11 @@ app.post('/api/test/fast-register', async (c) => {
             c.req.header('Origin') ||
             'http://localhost:42069',
         },
+        // No role: sign-up never accepts one (Codex-cslai). It is set below.
         body: JSON.stringify({
           email,
           password,
           name: userName,
-          role: userRole,
         }),
       }
     );
@@ -202,10 +202,11 @@ app.post('/api/test/fast-register', async (c) => {
       return c.json({ error: 'Sign-up failed', details: body }, 500);
     }
 
-    // Mark email as verified directly in the database
+    // Mark email as verified, and give the requested role, directly in the
+    // database: the role is server-side only, even here.
     await db
       .update(schema.users)
-      .set({ emailVerified: true })
+      .set({ emailVerified: true, role: userRole })
       .where(eq(schema.users.email, email));
 
     // The sign-up response has NO Set-Cookie when requireEmailVerification:true,

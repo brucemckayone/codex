@@ -82,11 +82,19 @@ export interface JourneyEntryCardProps {
   accessLabel?: string | null;
   /** CTA verb. */
   cta?: string;
+  /**
+   * Listed, but it will not open yet: a payment dispute pauses the purchase
+   * (Codex-2hxff.60). The cover, text and CTA dim, as a paused `ContentCard`
+   * does; `accessLabel` stays at full strength, because it says why.
+   */
+  dimmed?: boolean;
 }
 
 /** Extras a call site layers on top of a DTO projection. */
 interface EntryExtras {
   accessLabel?: string | null;
+  /** A paused entry (a payment dispute, Codex-2hxff.60); see the card prop. */
+  dimmed?: boolean;
 }
 
 /**
@@ -315,6 +323,7 @@ export function enrolledCoursePortalStripEntry(
     },
     accessLabel: extras.accessLabel ?? null,
     cta: enrolledCta(course.progress.status),
+    dimmed: extras.dimmed ?? false,
   };
 }
 
@@ -342,10 +351,15 @@ export function enrolledCoursePortalStripEntry(
  * poetic fragment ("A TWELVE-PRACTICE…") reads as breakage. Tiles keep the
  * editorial kicker: they have a full-width text block that can hold two lines of
  * it, and no sibling card labelling itself differently.
+ *
+ * No access chip, except the one the practice rows carry too: a course paused
+ * by a payment dispute passes `extras` with the pause label and `dimmed`
+ * (Codex-2hxff.60).
  */
 export function enrolledCourseRowEntry(
   course: EnrolledCourseSummary,
-  href: string
+  href: string,
+  extras: EntryExtras = {}
 ): JourneyEntryCardProps {
   return {
     href,
@@ -358,6 +372,8 @@ export function enrolledCourseRowEntry(
       percent: course.progress.percent,
       label: null,
     },
+    accessLabel: extras.accessLabel ?? null,
     cta: 'Resume',
+    dimmed: extras.dimmed ?? false,
   };
 }

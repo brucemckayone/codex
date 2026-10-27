@@ -114,6 +114,10 @@ export class SubscriptionCheckoutError extends BusinessLogicError {
  * — exposed so the dialog can correlate the error to the specific row
  * the user clicked (defensive: the dialog could in principle be open on
  * a different tier by the time the error returns).
+ *
+ * The context is sent to the client verbatim as `details`, so it never carries
+ * Stripe's raw message (Codex-2hxff.23, SEC-02). The thrower logs that through
+ * obs with an errorId instead.
  */
 export interface SubscriptionPaymentRequiredErrorContext
   extends Record<string, unknown> {
@@ -121,7 +125,10 @@ export interface SubscriptionPaymentRequiredErrorContext
   organizationId: string;
   newTierId: string;
   billingInterval: 'month' | 'year';
-  stripeMessage: string;
+  /** Matches the log line that holds Stripe's own message. */
+  errorId?: string;
+  /** Banned: the index signature would otherwise accept it again. */
+  stripeMessage?: never;
   prorationDate?: number;
   tierIdAtCommit?: string;
 }
@@ -132,6 +139,28 @@ export class SubscriptionPaymentRequiredError extends ServiceError {
     context?: SubscriptionPaymentRequiredErrorContext
   ) {
     super(message, 'PAYMENT_REQUIRED', 402, context);
+  }
+}
+
+/**
+ * A tier change confirmed with a preview's `prorationDate` the server no
+ * longer honours (Codex-2hxff.15, SUB-12; owner decision 2026-10-22): older
+ * than `TIER_CHANGE_PREVIEW_TTL_MS`, in the future, or before the current
+ * billing period. Nothing was changed at Stripe.
+ *
+ * Maps to HTTP 409 with its own top-level code, as
+ * `SubscriptionPaymentRequiredError` does, so the pricing dialog can tell it
+ * apart: it shows "Prices changed, review again" and fetches a fresh preview
+ * for the subscriber to confirm.
+ */
+export class TierChangePreviewExpiredError extends ServiceError {
+  constructor(context: { prorationDate: number; newTierId: string }) {
+    super(
+      'Prices changed. Review the change again.',
+      'TIER_CHANGE_PREVIEW_EXPIRED',
+      409,
+      context
+    );
   }
 }
 
@@ -190,10 +219,16 @@ export class ConnectAccountNotReadyError extends BusinessLogicError {
   }
 }
 
+/**
+ * A live course's creator can't be paid yet, so it can't take a new way to
+ * pay: a course plan, or one put back on sale (Codex-2hxff.14, owner decision
+ * "Yes, same rule"). Same code and message as `@codex/content`'s
+ * `CreatorPayoutsRequiredError`, so the Studio shows one message for all.
+ */
 export class CreatorConnectRequiredError extends BusinessLogicError {
   constructor(creatorId: string) {
     super(
-      'Creator must have an active Stripe Connect account to assign subscription-gated content',
+      'Set up payouts before publishing paid or subscriber content. Complete Stripe Connect onboarding to receive payments.',
       {
         creatorId,
         code: 'CREATOR_CONNECT_REQUIRED',

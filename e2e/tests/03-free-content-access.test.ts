@@ -18,6 +18,7 @@ import {
   unwrapApiResponse,
 } from '@codex/test-utils/e2e';
 import { afterAll, describe, expect, test } from 'vitest';
+import { markVideoReady } from '../helpers/media';
 import { WORKER_URLS } from '../helpers/worker-urls';
 
 describe('Free Content Access Flow', () => {
@@ -33,8 +34,9 @@ describe('Free Content Access Flow', () => {
       role: 'creator',
     });
 
-    // Create media item (using test files uploaded to R2 in global setup)
-    // R2 structure: {creatorId}/originals/{mediaId}/original.mp4
+    // Create media item. The server names the original's key in the
+    // creator's own folder (Codex-58h6c); the HLS and thumbnail keys set below
+    // point at the fixtures global setup uploaded to R2.
     const testCreatorId = 'e2e-test-creator';
     const testMediaId = 'e2e-test-video-001';
     const mediaResponse = await httpClient.post(
@@ -48,7 +50,6 @@ describe('Free Content Access Flow', () => {
           title: 'Free Video Media',
           description: 'Media for free content',
           mediaType: 'video',
-          r2Key: `${testCreatorId}/originals/${testMediaId}/original.mp4`,
           fileSizeBytes: 1048576,
           mimeType: 'video/mp4',
         },
@@ -58,24 +59,13 @@ describe('Free Content Access Flow', () => {
     const media = unwrapApiResponse(await mediaResponse.json());
 
     // Mark media as ready (using test HLS and thumbnail uploaded to R2)
-    const readyMediaResponse = await httpClient.patch(
-      `${WORKER_URLS.content}/api/media/${media.id}`,
-      {
-        headers: {
-          Cookie: creatorCookie,
-          Origin: WORKER_URLS.content,
-        },
-        data: {
-          status: 'ready',
-          hlsMasterPlaylistKey: `${testCreatorId}/hls/${testMediaId}/master.m3u8`,
-          thumbnailKey: `${testCreatorId}/thumbnails/${testMediaId}/thumb.jpg`,
-          durationSeconds: 300,
-          width: 1920,
-          height: 1080,
-        },
-      }
-    );
-    await expectSuccessResponse(readyMediaResponse);
+    await markVideoReady(media.id, {
+      hlsMasterPlaylistKey: `${testCreatorId}/hls/${testMediaId}/master.m3u8`,
+      thumbnailKey: `${testCreatorId}/thumbnails/${testMediaId}/thumb.jpg`,
+      durationSeconds: 300,
+      width: 1920,
+      height: 1080,
+    });
 
     // Create free content (priceCents = 0)
     const contentResponse = await httpClient.post(
@@ -274,7 +264,6 @@ describe('Free Content Access Flow', () => {
           title: 'Popular Video Media',
           description: 'Media for popular content',
           mediaType: 'video',
-          r2Key: `${testCreatorId}/originals/${testMediaId}/original.mp4`,
           fileSizeBytes: 1048576,
           mimeType: 'video/mp4',
         },
@@ -284,24 +273,13 @@ describe('Free Content Access Flow', () => {
     const media = unwrapApiResponse(await mediaResponse.json());
 
     // Update media to ready status
-    const updateMediaResponse = await httpClient.patch(
-      `${WORKER_URLS.content}/api/media/${media.id}`,
-      {
-        headers: {
-          Cookie: creatorCookie,
-          Origin: WORKER_URLS.content,
-        },
-        data: {
-          status: 'ready',
-          hlsMasterPlaylistKey: `${testCreatorId}/hls/${testMediaId}/master.m3u8`,
-          thumbnailKey: `${testCreatorId}/thumbnails/${testMediaId}/thumb.jpg`,
-          durationSeconds: 300,
-          width: 1920,
-          height: 1080,
-        },
-      }
-    );
-    await expectSuccessResponse(updateMediaResponse);
+    await markVideoReady(media.id, {
+      hlsMasterPlaylistKey: `${testCreatorId}/hls/${testMediaId}/master.m3u8`,
+      thumbnailKey: `${testCreatorId}/thumbnails/${testMediaId}/thumb.jpg`,
+      durationSeconds: 300,
+      width: 1920,
+      height: 1080,
+    });
 
     // Create and publish free video content
     const contentResponse = await httpClient.post(

@@ -11,16 +11,40 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CACHE_HEADERS } from '$lib/server/cache';
+import { ApiError } from '$lib/server/errors';
 
 const COURSE_ID = '408f94d0-5442-43d3-a56a-3491110962eb';
 
-const { offerMock, resolveCourseBySlugMock } = vi.hoisted(() => ({
+const {
+  offerMock,
+  resolveCourseBySlugMock,
+  purchaseVerifyMock,
+  purchaseCompleteMock,
+  courseSubscriptionVerifyMock,
+  tierVerifyMock,
+  warnMock,
+} = vi.hoisted(() => ({
   offerMock: vi.fn(),
   resolveCourseBySlugMock: vi.fn(),
+  purchaseVerifyMock: vi.fn(),
+  purchaseCompleteMock: vi.fn(),
+  courseSubscriptionVerifyMock: vi.fn(),
+  tierVerifyMock: vi.fn(),
+  warnMock: vi.fn(),
 }));
 
+vi.mock('$lib/observability', () => ({ logger: { warn: warnMock } }));
+
 vi.mock('$lib/server/api', () => ({
-  createServerApi: () => ({ courses: { offer: offerMock } }),
+  createServerApi: () => ({
+    courses: { offer: offerMock },
+    checkout: {
+      verify: purchaseVerifyMock,
+      complete: purchaseCompleteMock,
+      verifyCourseSubscription: courseSubscriptionVerifyMock,
+    },
+    subscription: { verify: tierVerifyMock },
+  }),
 }));
 
 vi.mock('$lib/server/journeys/round-d-seam', () => ({
@@ -36,15 +60,19 @@ type LoadData = Extract<
 function makeEvent({
   user = { id: 'user-1' },
   sessionId = 'cs_test_abc',
+  kind = null,
 }: {
   user?: { id: string } | null;
   sessionId?: string | null;
+  /** The checkout path `startJourneyCheckout` puts on the success URL. */
+  kind?: string | null;
 } = {}) {
   const setHeaders = vi.fn();
   const depends = vi.fn();
   const url = new URL(
     'http://of-blood-and-bones.lvh.me:3000/journeys/pricing-smoke-test/checkout/success'
   );
+  if (kind) url.searchParams.set('kind', kind);
   if (sessionId) url.searchParams.set('session_id', sessionId);
   const event = {
     params: { slug: 'of-blood-and-bones', journeySlug: 'pricing-smoke-test' },
@@ -115,6 +143,11 @@ describe('journey checkout success load', () => {
     const data = (await load(event)) as LoadData;
 
     expect(data.arrivedFromStripe).toBe(true);
+    // The offer is the only gate that forwards: a failed read is logged.
+    expect(warnMock).toHaveBeenCalledWith(
+      'journey-checkout-success: offer read failed',
+      { courseId: COURSE_ID, status: undefined, error: 'ecom down' }
+    );
   });
 
   it('distinguishes a direct visit from a return from Stripe', async () => {
@@ -160,5 +193,336 @@ describe('journey checkout success load', () => {
     const [[headers]] = setHeaders.mock.calls;
     expect(headers['Cache-Control']).toBe('private, no-cache');
     expect(headers['Cache-Control']).not.toMatch(/public|s-maxage/);
+  });
+
+  /**
+   * A second payment for access the buyer already held (Codex-o4jvw). They are
+   * entitled before this payment's own row exists, so the load reads our record
+   * of THIS session (by its `kind`) before forwarding, and shows the notice for
+   * a duplicate.
+   */
+  describe('a second payment', () => {
+    const DASHBOARD = '/journeys/pricing-smoke-test/dashboard';
+    const COURSE = { id: COURSE_ID, title: 'Rootwork' };
+
+    it('shows the notice for a duplicate course purchase, though entitled', async () => {
+      offerMock.mockResolvedValueOnce({ ...OFFER, entitled: true });
+      purchaseVerifyMock.mockResolvedValueOnce({
+        sessionStatus: 'complete',
+        state: 'duplicate',
+        course: COURSE,
+        duplicatePayment: true,
+      });
+      const { load } = await import('../+page.server');
+
+      const data = (await load(
+        makeEvent({ kind: 'purchase' }).event
+      )) as LoadData;
+
+      expect(purchaseVerifyMock).toHaveBeenCalledWith('cs_test_abc');
+      expect(data.duplicate).toEqual({ kind: 'purchase' });
+      expect(data.courseTitle).toBe('Rootwork');
+      expect(data.dashboardPath).toBe(DASHBOARD);
+    });
+
+    it("waits for this payment's own row before forwarding an entitled buyer", async () => {
+      offerMock.mockResolvedValueOnce({ ...OFFER, entitled: true });
+      // Stripe is done; our webhook has not written the row yet, and the
+      // completion asked for on arrival could not record it either.
+      purchaseVerifyMock.mockResolvedValueOnce({
+        sessionStatus: 'complete',
+        state: 'recording',
+      });
+      purchaseCompleteMock.mockResolvedValueOnce({
+        sessionStatus: 'complete',
+        state: 'recording',
+      });
+      const { load } = await import('../+page.server');
+
+      const data = (await load(
+        makeEvent({ kind: 'purchase' }).event
+      )) as LoadData;
+
+      expect(data.duplicate).toBeNull();
+      expect(data.arrivedFromStripe).toBe(true);
+    });
+
+    it("forwards once this payment's row exists and is not a duplicate", async () => {
+      offerMock.mockResolvedValueOnce({ ...OFFER, entitled: true });
+      purchaseVerifyMock.mockResolvedValueOnce({
+        sessionStatus: 'complete',
+        state: 'unlocked',
+        course: COURSE,
+      });
+      const { load } = await import('../+page.server');
+
+      await expect(
+        load(makeEvent({ kind: 'purchase' }).event)
+      ).rejects.toMatchObject({
+        status: 303,
+        location: DASHBOARD,
+      });
+    });
+
+    it('shows the notice for a duplicate course plan subscription', async () => {
+      offerMock.mockResolvedValueOnce({ ...OFFER, entitled: true });
+      courseSubscriptionVerifyMock.mockResolvedValueOnce({
+        sessionStatus: 'complete',
+        subscription: {
+          id: 'cs-dup',
+          courseId: COURSE_ID,
+          courseTitle: 'Rootwork',
+          startedAt: '2026-10-22T10:00:00.000Z',
+          duplicateOf: { id: 'cs-kept' },
+        },
+      });
+      const { load } = await import('../+page.server');
+
+      const data = (await load(
+        makeEvent({ kind: 'subscription' }).event
+      )) as LoadData;
+
+      expect(courseSubscriptionVerifyMock).toHaveBeenCalledWith('cs_test_abc');
+      expect(data.duplicate).toEqual({ kind: 'subscription' });
+    });
+
+    it('names the kept tier for a duplicate tier subscription, entitled or not', async () => {
+      // The kept tier need not include this course: not entitled, still told.
+      const tierSubscription = {
+        id: 'sub-dup',
+        organizationId: OFFER.organizationId,
+        tierId: 'tier-pro',
+        tierName: 'Pro',
+        organizationName: 'Of Blood and Bones',
+        organizationSlug: 'of-blood-and-bones',
+        startedAt: '2026-10-22T10:00:00.000Z',
+      };
+      tierVerifyMock.mockResolvedValueOnce({
+        sessionStatus: 'complete',
+        subscription: {
+          ...tierSubscription,
+          duplicateOf: {
+            id: 'sub-kept',
+            tierId: 'tier-basic',
+            tierName: 'Basic',
+          },
+        },
+      });
+      const { load } = await import('../+page.server');
+
+      const other = (await load(makeEvent({ kind: 'tier' }).event)) as LoadData;
+      expect(other.duplicate).toEqual({
+        kind: 'tier',
+        organizationName: 'Of Blood and Bones',
+        keptTierName: 'Basic',
+        otherTierName: 'Pro',
+      });
+
+      tierVerifyMock.mockResolvedValueOnce({
+        sessionStatus: 'complete',
+        subscription: {
+          ...tierSubscription,
+          duplicateOf: { id: 'sub-kept', tierId: 'tier-pro', tierName: 'Pro' },
+        },
+      });
+      const same = (await load(makeEvent({ kind: 'tier' }).event)) as LoadData;
+      expect(same.duplicate).toMatchObject({
+        keptTierName: 'Pro',
+        otherTierName: null,
+      });
+    });
+
+    it('reports nothing for a duplicate recorded against another course', async () => {
+      offerMock.mockResolvedValueOnce({ ...OFFER, entitled: true });
+      purchaseVerifyMock.mockResolvedValueOnce({
+        sessionStatus: 'complete',
+        state: 'duplicate',
+        course: { id: 'another-course', title: 'Elsewhere' },
+        duplicatePayment: true,
+      });
+      const { load } = await import('../+page.server');
+
+      await expect(
+        load(makeEvent({ kind: 'purchase' }).event)
+      ).rejects.toMatchObject({
+        status: 303,
+        location: DASHBOARD,
+      });
+    });
+
+    it('falls back to the entitlement alone without a kind, or an unknown one', async () => {
+      const { load } = await import('../+page.server');
+
+      for (const kind of [null, 'refund-me']) {
+        offerMock.mockResolvedValueOnce({ ...OFFER, entitled: true });
+        await expect(load(makeEvent({ kind }).event)).rejects.toMatchObject({
+          status: 303,
+          location: DASHBOARD,
+        });
+      }
+      expect(purchaseVerifyMock).not.toHaveBeenCalled();
+      expect(courseSubscriptionVerifyMock).not.toHaveBeenCalled();
+      expect(tierVerifyMock).not.toHaveBeenCalled();
+    });
+
+    it('a failed read is logged and not settled: the buyer waits, the next poll shows the notice', async () => {
+      const { load } = await import('../+page.server');
+
+      // Poll 1: entitled already, the verify fails. Forwarding here would send
+      // a duplicate buyer to the dashboard as if this were a new purchase.
+      offerMock.mockResolvedValueOnce({ ...OFFER, entitled: true });
+      purchaseVerifyMock.mockRejectedValueOnce(
+        new ApiError(503, 'Service unavailable')
+      );
+      const first = (await load(
+        makeEvent({ kind: 'purchase' }).event
+      )) as LoadData;
+      expect(first.duplicate).toBeNull();
+      expect(first.arrivedFromStripe).toBe(true);
+      expect(warnMock).toHaveBeenCalledWith(
+        'journey-checkout-success: session verify failed',
+        {
+          kind: 'purchase',
+          sessionId: 'cs_test_abc',
+          status: 503,
+          error: 'Service unavailable',
+        }
+      );
+
+      // Poll 2: the read succeeds and the record is a duplicate.
+      offerMock.mockResolvedValueOnce({ ...OFFER, entitled: true });
+      purchaseVerifyMock.mockResolvedValueOnce({
+        sessionStatus: 'complete',
+        state: 'duplicate',
+        course: COURSE,
+        duplicatePayment: true,
+      });
+      const second = (await load(
+        makeEvent({ kind: 'purchase' }).event
+      )) as LoadData;
+      expect(second.duplicate).toEqual({ kind: 'purchase' });
+    });
+  });
+
+  /**
+   * Unlock on arrival (Codex-2hxff.22; owner decision 2026-10-26, Q-A "Yes,
+   * same call"): a course purchase Stripe says is paid, with no record of
+   * ours, is recorded by the load, which then forwards as usual.
+   */
+  describe('unlock on arrival (Codex-2hxff.22)', () => {
+    const DASHBOARD = '/journeys/pricing-smoke-test/dashboard';
+    const COURSE = { id: COURSE_ID, title: 'Rootwork' };
+
+    it('paid with no record: recorded, the grant read again, and the buyer forwarded at once', async () => {
+      // Read beside the session read, before the grant; then after it.
+      offerMock.mockResolvedValueOnce(OFFER);
+      offerMock.mockResolvedValueOnce({ ...OFFER, entitled: true });
+      purchaseVerifyMock.mockResolvedValueOnce({
+        sessionStatus: 'complete',
+        state: 'recording',
+      });
+      purchaseCompleteMock.mockResolvedValueOnce({
+        sessionStatus: 'complete',
+        state: 'unlocked',
+        course: COURSE,
+      });
+      const { load } = await import('../+page.server');
+
+      await expect(
+        load(makeEvent({ kind: 'purchase' }).event)
+      ).rejects.toMatchObject({ status: 303, location: DASHBOARD });
+      expect(purchaseCompleteMock).toHaveBeenCalledOnce();
+      expect(purchaseCompleteMock).toHaveBeenCalledWith('cs_test_abc');
+      expect(offerMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('a record already there asks for no completion', async () => {
+      offerMock.mockResolvedValueOnce({ ...OFFER, entitled: true });
+      purchaseVerifyMock.mockResolvedValueOnce({
+        sessionStatus: 'complete',
+        state: 'unlocked',
+        course: COURSE,
+      });
+      const { load } = await import('../+page.server');
+
+      await expect(
+        load(makeEvent({ kind: 'purchase' }).event)
+      ).rejects.toMatchObject({ status: 303, location: DASHBOARD });
+      expect(purchaseCompleteMock).not.toHaveBeenCalled();
+      expect(offerMock).toHaveBeenCalledOnce();
+    });
+
+    // The verify succeeded; only the completion failed, and the log says so.
+    // It used to reject the whole read and log "session verify failed".
+    it('a failed completion is not settled: the buyer waits, and it is logged as a completion', async () => {
+      offerMock.mockResolvedValueOnce({ ...OFFER, entitled: true });
+      purchaseVerifyMock.mockResolvedValueOnce({
+        sessionStatus: 'complete',
+        state: 'recording',
+      });
+      purchaseCompleteMock.mockRejectedValueOnce(new ApiError(503, 'Not yet'));
+      const { load } = await import('../+page.server');
+
+      const data = (await load(
+        makeEvent({ kind: 'purchase' }).event
+      )) as LoadData;
+
+      expect(data.duplicate).toBeNull();
+      expect(data.inactive).toBe(false);
+      expect(warnMock).toHaveBeenCalledWith(
+        'journey-checkout-success: completion on arrival failed',
+        expect.objectContaining({ sessionId: 'cs_test_abc', status: 503 })
+      );
+      expect(warnMock).not.toHaveBeenCalledWith(
+        'journey-checkout-success: session verify failed',
+        expect.anything()
+      );
+    });
+
+    it('recorded, but the grant read after fails: logged, and the buyer waits for the next check', async () => {
+      offerMock.mockResolvedValueOnce(OFFER);
+      offerMock.mockRejectedValueOnce(new ApiError(502, 'Bad gateway'));
+      purchaseVerifyMock.mockResolvedValueOnce({
+        sessionStatus: 'complete',
+        state: 'recording',
+      });
+      purchaseCompleteMock.mockResolvedValueOnce({
+        sessionStatus: 'complete',
+        state: 'unlocked',
+        course: COURSE,
+      });
+      const { load } = await import('../+page.server');
+
+      const data = (await load(
+        makeEvent({ kind: 'purchase' }).event
+      )) as LoadData;
+
+      expect(data.arrivedFromStripe).toBe(true);
+      expect(offerMock).toHaveBeenCalledTimes(2);
+      expect(warnMock).toHaveBeenCalledWith(
+        'journey-checkout-success: offer read failed',
+        expect.objectContaining({ courseId: COURSE_ID, status: 502 })
+      );
+    });
+
+    it.each([
+      'refunded',
+      'paused',
+    ])('a course purchase %s gets the notice, not a wait', async (state) => {
+      purchaseVerifyMock.mockResolvedValueOnce({
+        sessionStatus: 'complete',
+        state,
+        course: COURSE,
+      });
+      const { load } = await import('../+page.server');
+
+      const data = (await load(
+        makeEvent({ kind: 'purchase' }).event
+      )) as LoadData;
+
+      expect(data.inactive).toBe(true);
+      expect(data.duplicate).toBeNull();
+      expect(purchaseCompleteMock).not.toHaveBeenCalled();
+    });
   });
 });

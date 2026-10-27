@@ -13,6 +13,7 @@ permissions:
   contents: read
   deployments: write
   issues: write # For failure notifications
+  packages: read # To check the transcoder image runpod-ci.yml published
 
 concurrency:
   group: production-deployment
@@ -255,6 +256,11 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           WORKER_SHARED_SECRET: ${{ secrets.WORKER_SHARED_SECRET }}
+          # The account-deletion CDN purge (Codex-kk9nv.15): the zone serving
+          # R2_PUBLIC_URL_BASE, and a token with ONLY that zone's Cache Purge
+          # permission. Unset, deletions log the skipped purge at error.
+          CF_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_CACHE_PURGE_TOKEN }}
           R2_BUCKET_MEDIA: ${{ vars.R2_BUCKET_MEDIA }}
           R2_BUCKET_ASSETS: ${{ vars.R2_BUCKET_ASSETS }}
           R2_BUCKET_PLATFORM: ${{ vars.R2_BUCKET_PLATFORM }}
@@ -280,6 +286,9 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # Support refunds' restricted key (Codex-2hxff.28). Optional: unset,
+          # the script skips it and admin-api keeps the key it has.
+          ADMIN_API_STRIPE_RESTRICTED_KEY: ${{ secrets.ADMIN_API_STRIPE_RESTRICTED_KEY }}
           R2_BUCKET_MEDIA: ${{ vars.R2_BUCKET_MEDIA }}
           R2_BUCKET_ASSETS: ${{ vars.R2_BUCKET_ASSETS }}
           R2_BUCKET_PLATFORM: ${{ vars.R2_BUCKET_PLATFORM }}
@@ -469,6 +478,83 @@ jobs:
             # Fail the deploy so on-call sees the alert immediately
             exit 1
           fi
+
+      # --- TRANSCODER (RunPod) ---
+      # Last, so a RunPod problem can never block a worker deploy. runpod-ci.yml
+      # publishes the image once under a tag named from the image's inputs
+      # (.github/scripts/runpod-image-tag.sh); this points the endpoint at the
+      # tag for THIS commit, so a deploy that did not touch the transcoder finds
+      # it current and changes nothing. It runs here, not in runpod-ci, to use
+      # this environment's RunPod key and the approval this job already needs
+      # (Codex-l2c48.2). The swap runs only when every earlier step passed (the
+      # next green deploy catches up); the health check runs on every deploy.
+      - uses: actions/setup-python@v6
+        if: ${{ !cancelled() }}
+        with:
+          python-version: "3.10"
+
+      - name: Install the transcoder deploy script's dependencies
+        if: ${{ !cancelled() }}
+        run: pip install --quiet requests
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # runpod-ci builds on the same push and can still be running.
+      - name: Wait for the transcoder image
+        id: transcoder
+        timeout-minutes: 25
+        run: |
+          tag=$(.github/scripts/runpod-image-tag.sh)
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/codex-transcoder:$tag"
+          deadline=$((SECONDS + 20 * 60))
+          while :; do
+            # Kept, not discarded: only the message tells "not built yet"
+            # from a registry or auth failure.
+            if answer=$(timeout 20 docker manifest inspect "$image" 2>&1); then
+              echo "✅ $image is published"
+              exit 0
+            fi
+            last=${answer##*$'\n'}
+            case "$answer" in
+              *"manifest unknown"* | *[Nn]"o such manifest"*) state="not published yet" ;;
+              *denied* | *unauthorized* | *"invalid reference"*)
+                echo "::error title=Transcoder registry check failed::$image: $last"
+                exit 1
+                ;;
+              *) state="registry check failed, retrying: ${last:-timed out}" ;;
+            esac
+            if ((SECONDS >= deadline)); then
+              break
+            fi
+            echo "⏳ $image $state"
+            sleep 30
+          done
+          echo "::error title=Transcoder image missing::$image is not published (last answer: ${last:-timed out}). The tag is named from the transcoder's inputs, so it may be due from an EARLIER commit: re-run that commit's RunPod Transcoder CI/CD push run, or run the workflow on main (Actions > RunPod Transcoder CI/CD > Run workflow)."
+          exit 1
+
+      - name: Point RunPod at the transcoder image
+        env:
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+          RUNPOD_ENDPOINT_ID: ${{ secrets.RUNPOD_ENDPOINT_ID }}
+          DOCKER_IMAGE: ghcr.io/${{ github.repository_owner }}/codex-transcoder
+          IMAGE_TAG: ${{ steps.transcoder.outputs.tag }}
+        run: python infrastructure/runpod/scripts/update_runpod_endpoint.py
+
+      # Its own step, and run whatever failed before it: red when the endpoint
+      # is paused or its settings cannot be read, while the step above, which
+      # deployed the image, keeps its own result.
+      - name: Transcoder endpoint health
+        if: ${{ !cancelled() }}
+        env:
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+          RUNPOD_ENDPOINT_ID: ${{ secrets.RUNPOD_ENDPOINT_ID }}
+        run: python infrastructure/runpod/scripts/update_runpod_endpoint.py --health
 
       - name: Deployment summary
         if: always()

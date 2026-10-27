@@ -4,20 +4,33 @@
  * Manages media transcoding lifecycle via RunPod integration.
  *
  * Key Responsibilities:
- * - Trigger transcoding jobs on RunPod
+ * - Claim media for dispatch, once (claimForDispatch)
+ * - Send jobs to RunPod and record what its answer means (dispatch)
  * - Handle webhook callbacks from RunPod
- * - Manage retry logic (max 3 retries)
- * - Update media item status and metadata
+ * - Creator retries, within MAX_TRANSCODING_ATTEMPTS
  *
  * Key Principles:
  * - All R2 paths come from paths.ts (SINGLE SOURCE OF TRUTH)
- * - Creator scoping on all queries
- * - Transaction safety for multi-step operations
+ * - Creator scoping on all queries, except the maintenance run's
+   (MAINTENANCE_SCOPE, cron only), which sweeps every creator's rows
+ * - Every state change is ONE guarded UPDATE: its WHERE names the state it
+ *   moves from, so two writers can never both apply
  * - Proper error handling with custom error classes
  */
 
-import { HEADERS, MEDIA_STATUS, MIME_TYPES } from '@codex/constants';
-import { scopedNotDeleted } from '@codex/database';
+import {
+  HEADERS,
+  MAX_TRANSCODING_ATTEMPTS,
+  MEDIA_STATUS,
+  MIME_TYPES,
+  RUNPOD_WORKERS_MAX_DEFAULT,
+  RUNPOD_WORKERS_MAX_LIMIT,
+  TRANSCODING_ERROR_CODES,
+  TRANSCODING_JOB_CONTRACT,
+  type TranscodingErrorCode,
+  transcodingErrorInfo,
+} from '@codex/constants';
+import { messageForLog, scopedNotDeleted } from '@codex/database';
 
 import { mediaItems } from '@codex/database/schema';
 import {
@@ -29,23 +42,76 @@ import type {
   RunPodProgressWebhookPayload,
   RunPodWebhookPayload,
 } from '@codex/validation';
-import { and, eq, isNull, lt, or } from 'drizzle-orm';
-
+import {
+  and,
+  eq,
+  inArray,
+  isNull,
+  lt,
+  notInArray,
+  or,
+  type SQL,
+  sql,
+} from 'drizzle-orm';
+import {
+  classifyRunPodAnswer,
+  jobFailureFromWebhook,
+  type RunPodDispatchOutcome,
+  transcodingJobPolicy,
+} from '../dispatch';
 import {
   InvalidMediaStateError,
   MaxRetriesExceededError,
-  MediaOwnershipError,
-  RunPodApiError,
   TranscodingJobNotFoundError,
   TranscodingMediaNotFoundError,
+  TranscodingNotRetryableError,
 } from '../errors';
+import { type MediaStatusFeed, publishMediaStatus } from '../media-status';
+import {
+  isPassingFailure,
+  RUNPOD_SERVERLESS_API_URL,
+  RunPodApi,
+} from '../runpod-api';
 import type {
-  HlsVariant,
+  MediaStatus,
   RunPodJobRequest,
-  RunPodJobResponse,
   TranscodingMediaItem,
-  TranscodingStatusResponse,
 } from '../types';
+import { failedFields, NO_PROGRESS, waitingFields } from './media-state';
+import type { TranscodingAlerts } from './transcoding-alerts';
+
+/**
+ * The columns both media reads select. `satisfies` makes it name every
+ * TranscodingMediaItem field: a field added to the type but not selected is a
+ * compile error, not an `undefined` that the `as TranscodingMediaItem` casts
+ * below would hide (a missing error code would read as "nothing went
+ * wrong").
+ */
+const TRANSCODING_MEDIA_COLUMNS = {
+  id: true,
+  creatorId: true,
+  mediaType: true,
+  status: true,
+  r2Key: true,
+  transcodingAttempts: true,
+  runpodJobId: true,
+  transcodingError: true,
+  transcodingErrorCode: true,
+  transcodingPriority: true,
+  hlsMasterPlaylistKey: true,
+  hlsPreviewKey: true,
+  thumbnailKey: true,
+  waveformKey: true,
+  waveformImageKey: true,
+  durationSeconds: true,
+  width: true,
+  height: true,
+  readyVariants: true,
+  mezzanineKey: true,
+  mezzanineStatus: true,
+  transcodingProgress: true,
+  transcodingStep: true,
+} as const satisfies Record<keyof TranscodingMediaItem, true>;
 
 /**
  * Extended service config for TranscodingService
@@ -60,7 +126,18 @@ export interface TranscodingServiceConfig {
   webhookBaseUrl: string; // Required for callbacks
   runpodApiBaseUrl?: string; // Optional: Override base RunPod API URL
   runpodDirectUrl?: string; // Optional: Use this URL as-is (skips path construction, for local container)
-  runpodTimeout?: number; // Configurable timeout, defaults to 30000ms
+  runpodTimeout?: number; // /run answer timeout, defaults to 10000ms
+  /** The max workers the endpoint should have; a lower value is RunPod scaling it down. Default RUNPOD_WORKERS_MAX_DEFAULT. */
+  runpodWorkersMax?: number;
+  /** Tests inject one; by default it is built from the fields above. */
+  runpodApi?: RunPodApi;
+  /** Failure and setup-fault emails (Codex-l2c48.6). Absent: none sent. */
+  alerts?: TranscodingAlerts;
+  /**
+   * The studio's live status (Codex-l2c48.9): every write that returned a
+   * row is published, and progress goes there only. Absent: nothing is.
+   */
+  mediaStatus?: MediaStatusFeed;
 }
 
 export interface TranscodingServiceFullConfig
@@ -68,25 +145,123 @@ export interface TranscodingServiceFullConfig
     TranscodingServiceConfig {}
 
 /**
+ * The longest one dispatch takes: /run, then waking a paused endpoint. The
+ * maintenance run starts no retry with less than this left.
+ */
+export const DISPATCH_BUDGET_MS = 22_000;
+
+/**
+ * A webhook for job `jobId` may change the row only when the row holds that
+ * job, or no job yet (the completion can beat the job-id write). A webhook
+ * from an earlier attempt's job is stale and changes nothing.
+ */
+function heldJobIs(jobId: string) {
+  return or(isNull(mediaItems.runpodJobId), eq(mediaItems.runpodJobId, jobId));
+}
+
+/**
+ * An outcome someone must look at: a job we cannot account for, or a refusal
+ * every upload will hit until the setup is fixed (bad key, endpoint, body).
+ */
+function needsAttention(outcome: RunPodDispatchOutcome): boolean {
+  return (
+    outcome.kind === 'ambiguous' ||
+    (outcome.kind === 'rejected' &&
+      transcodingErrorInfo(outcome.code).alertOwnerOnEntry)
+  );
+}
+
+/** Where a creator's Retry may claim from: failed, or waiting for the transcoder. */
+const RETRYABLE_FROM: readonly MediaStatus[] = [
+  MEDIA_STATUS.FAILED,
+  MEDIA_STATUS.UPLOADED,
+];
+
+const MAINTENANCE: unique symbol = Symbol('transcoding-maintenance');
+
+/**
+ * The hourly maintenance run's claim scope: every creator's media. NOT
+ * exported from the package, so no route or other worker can pass it, and a
+ * look-alike object is not it (claimForDispatch compares identity).
+ */
+export const MAINTENANCE_SCOPE: Readonly<{ trusted: typeof MAINTENANCE }> =
+  Object.freeze({ trusted: MAINTENANCE });
+
+/**
+ * Whose media a claim may take. A route always names the creator; an omitted
+ * creator must never mean "anyone's", so a scope that is neither throws.
+ */
+export type ClaimScope = { creatorId: string } | typeof MAINTENANCE_SCOPE;
+
+/**
+ * The claim's scope filter. Identity, not shape: only the package's own
+ * MAINTENANCE_SCOPE sweeps across creators, and anything else without a
+ * creator fails closed.
+ */
+function claimScopeFilter(scope: ClaimScope): SQL {
+  if (scope === MAINTENANCE_SCOPE) return isNull(mediaItems.deletedAt);
+  if ('creatorId' in scope && scope.creatorId) {
+    return scopedNotDeleted(mediaItems, scope.creatorId);
+  }
+  throw new ValidationError('claimForDispatch: a creator scope is required');
+}
+
+/**
+ * Where /run is. A direct URL (a local container) is used as-is; otherwise
+ * the base URL plus the endpoint id (RunPod cloud).
+ */
+function runpodRunUrl(config: TranscodingServiceConfig): string {
+  if (config.runpodDirectUrl) return config.runpodDirectUrl;
+  const apiBaseUrl = config.runpodApiBaseUrl || RUNPOD_SERVERLESS_API_URL;
+  return `${apiBaseUrl}/${config.runpodEndpointId}/run`;
+}
+
+/** 0 would read a paused endpoint as awake for ever. */
+function isSaneWorkersMax(value: number): boolean {
+  return (
+    Number.isInteger(value) && value >= 1 && value <= RUNPOD_WORKERS_MAX_LIMIT
+  );
+}
+
+/** What ensureEndpointAwake found and did. */
+export type EndpointWakeOutcome =
+  | { kind: 'awake'; max: number }
+  | { kind: 'raised'; from: number; to: number }
+  | { kind: 'not_raised'; from: number; reason: string }
+  | { kind: 'unknown'; reason: string };
+
+/** What triggerJobInternal did; the route runs `dispatchPromise` after replying. */
+export type InternalTriggerResult =
+  | { alreadyQueued: true }
+  | { alreadyQueued: false; dispatchPromise: Promise<RunPodDispatchOutcome> };
+
+/**
  * Transcoding Service Class
  *
- * Manages transcoding lifecycle for video and audio media via RunPod integration.
+ * ## The dispatch state machine (Codex-l2c48.4)
  *
- * ## RunPod Async Pattern
+ * ```
+ * uploaded --claim--> transcoding --webhook ok--> ready
+ *    ^  |                 |  \--webhook failed--> failed --retry (claim)--+
+ *    |  |                 |                                                |
+ *    |  +- RunPod refuses (409/429/4xx/5xx): back to uploaded + code,      |
+ *    |     attempt given back ("waiting"; the cron re-claims it)           |
+ *    +---------------------------------------------------------------------+
+ * ```
  *
- * RunPod's /run endpoint is asynchronous (fire-and-forget):
- * 1. triggerJob() calls POST /v2/{endpoint_id}/run
- * 2. RunPod returns immediately with { id: "job-xxx", status: "IN_QUEUE" }
- * 3. The actual transcoding runs on a GPU worker in the background
- * 4. On completion, RunPod POSTs results to our webhook URL
- * 5. handleWebhook() processes the callback and updates the database
- *
- * This means triggerJob() returns quickly - it doesn't wait for transcoding.
- * Status tracking relies on webhook callbacks, not polling.
+ * - claimForDispatch is the ONLY way into `transcoding`, and the only place
+ *   an attempt is counted.
+ * - A timeout or network error leaves the row `transcoding`: RunPod may have
+ *   queued the job. The maintenance cron asks RunPod (Codex-l2c48.5).
+ * - RunPod's /run is asynchronous: it queues the job and answers at once; the
+ *   handler POSTs the result to our webhook later.
  */
 export class TranscodingService extends BaseService {
+  private readonly runpodApi: RunPodApi;
+  private readonly alerts?: TranscodingAlerts;
+  private readonly mediaStatus?: MediaStatusFeed;
+  private readonly runpodWorkersMax: number;
   private readonly runpodApiKey: string;
-  private readonly runpodEndpointId: string;
   private readonly runpodApiUrl: string;
   private readonly webhookUrl: string;
   private readonly runpodTimeout: number;
@@ -115,178 +290,341 @@ export class TranscodingService extends BaseService {
     }
 
     this.runpodApiKey = config.runpodApiKey;
-    this.runpodEndpointId = config.runpodEndpointId;
-    this.runpodTimeout = config.runpodTimeout ?? 30000;
+    // /run answers in under a second when RunPod is healthy. The dispatch runs
+    // after the response, inside the worker's background budget, so a hung
+    // call must give up well before that budget does.
+    this.runpodTimeout = config.runpodTimeout ?? 10000;
 
-    // Pre-construct URLs (won't change during service lifetime)
-    // If a direct URL is provided (local container), use it as-is.
-    // Otherwise construct from base URL + endpoint ID (RunPod cloud API).
-    if (config.runpodDirectUrl) {
-      this.runpodApiUrl = config.runpodDirectUrl;
-    } else {
-      const apiBaseUrl = config.runpodApiBaseUrl || 'https://api.runpod.ai/v2';
-      this.runpodApiUrl = `${apiBaseUrl}/${config.runpodEndpointId}/run`;
-    }
+    this.runpodApiUrl = runpodRunUrl(config);
     this.webhookUrl = `${config.webhookBaseUrl}/api/transcoding/webhook`;
+
+    // A bad value falls back to the default rather than stopping every
+    // upload, and says so.
+    const workersMax = config.runpodWorkersMax ?? RUNPOD_WORKERS_MAX_DEFAULT;
+    if (!isSaneWorkersMax(workersMax)) {
+      this.obs.error('transcoding.workers_max_invalid', {
+        value: String(workersMax),
+        using: RUNPOD_WORKERS_MAX_DEFAULT,
+      });
+    }
+    this.runpodWorkersMax = isSaneWorkersMax(workersMax)
+      ? workersMax
+      : RUNPOD_WORKERS_MAX_DEFAULT;
+    this.alerts = config.alerts;
+    this.mediaStatus = config.mediaStatus;
+    this.runpodApi =
+      config.runpodApi ??
+      new RunPodApi({
+        apiKey: config.runpodApiKey,
+        endpointId: config.runpodEndpointId,
+        serverlessBaseUrl: config.runpodApiBaseUrl,
+        directUrl: config.runpodDirectUrl,
+      });
   }
 
   /**
-   * Trigger a new transcoding job on RunPod
+   * Claim a media item for dispatch: move it to `transcoding` and count the
+   * attempt, in ONE statement.
    *
-   * @param mediaId - Media item UUID
-   * @param creatorId - Creator ID for authorization
-   * @param priority - Optional priority (0=urgent, 2=normal, 4=backlog)
-   * @returns void
+   * The WHERE is the whole guard: the row must be in scope (the creator's,
+   * unless the maintenance run says otherwise), not deleted, in one of
+   * `allowedFrom`, with attempts left, and not stopped by
+   * a failure a retry cannot fix (the file itself). Two concurrent claims
+   * cannot both match, so a job is dispatched once. The claim also clears the
+   * last run's error, code, job id and progress, and restarts the upload's
+   * 24 h clock when the item comes back from `failed` (a new submission; SET
+   * reads the OLD status). A row that was only waiting keeps its clock.
    *
-   * @throws {TranscodingMediaNotFoundError} If media doesn't exist or not owned
-   * @throws {InvalidMediaStateError} If media is not in 'uploaded' status
-   * @throws {RunPodApiError} If RunPod API call fails
+   * @returns The claimed row, or null when nothing matched.
    */
-  async triggerJob(
+  async claimForDispatch(
     mediaId: string,
-    creatorId: string,
-    priority?: number
-  ): Promise<void> {
-    this.obs.info('Triggering transcoding job', {
-      mediaId,
-      creatorId,
-      priority,
-    });
+    allowedFrom: readonly MediaStatus[],
+    scope: ClaimScope,
+    options: { priority?: number } = {}
+  ): Promise<TranscodingMediaItem | null> {
+    const inScope = claimScopeFilter(scope);
+    const nonRetryableCodes = Object.values(TRANSCODING_ERROR_CODES).filter(
+      (code) => !transcodingErrorInfo(code).retryable
+    );
+    // A bound instant, not the SQL clock: the query text stays the same on
+    // every request, so Hyperdrive can cache it (data-access contract rule 6).
+    const now = new Date();
+    const [claimed] = await this.db
+      .update(mediaItems)
+      .set({
+        ...NO_PROGRESS,
+        status: MEDIA_STATUS.TRANSCODING,
+        transcodingAttempts: sql`${mediaItems.transcodingAttempts} + 1`,
+        transcodingError: null,
+        transcodingErrorCode: null,
+        runpodJobId: null,
+        ...(options.priority !== undefined && {
+          transcodingPriority: options.priority,
+        }),
+        uploadedAt: sql`CASE WHEN ${mediaItems.status} = ${MEDIA_STATUS.FAILED} THEN ${now} ELSE ${mediaItems.uploadedAt} END`,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(mediaItems.id, mediaId),
+          inScope,
+          inArray(mediaItems.status, [...allowedFrom]),
+          lt(mediaItems.transcodingAttempts, MAX_TRANSCODING_ATTEMPTS),
+          or(
+            isNull(mediaItems.transcodingErrorCode),
+            notInArray(mediaItems.transcodingErrorCode, nonRetryableCodes)
+          )
+        )
+      )
+      .returning();
 
-    // Step 1: Fetch and validate media
-    const media = await this.getMediaForTranscoding(mediaId, creatorId);
+    if (!claimed) return null;
+    this.publish(claimed);
+    return claimed as TranscodingMediaItem;
+  }
 
-    // Verify media is in correct state
-    if (media.status !== MEDIA_STATUS.UPLOADED) {
-      throw new InvalidMediaStateError(
-        mediaId,
-        media.status,
-        MEDIA_STATUS.UPLOADED,
-        {
-          operation: 'triggerJob',
-        }
-      );
-    }
+  /** Tell the studio what a guarded write returned. Never throws. */
+  publish(row: typeof mediaItems.$inferSelect): void {
+    publishMediaStatus(this.mediaStatus, row, this.obs);
+  }
 
-    // Verify input file exists
-    if (!media.r2Key) {
-      throw new ValidationError('Input file not uploaded (r2Key missing)', {
-        mediaId,
-      });
-    }
-
-    // Step 2: Construct job request
-    // SECURITY: Storage credentials are NOT passed in job payload.
-    // - B2 and R2 credentials are configured in RunPod's secret manager
-    // - Job payload only includes paths (inputKey, output paths) for the handler
-    // - This avoids logging credentials in RunPod's system
-    const jobRequest: RunPodJobRequest = {
+  /**
+   * Send a claimed item to RunPod and record what the answer means (see
+   * RunPodDispatchOutcome; recordDispatchOutcome writes it). A refusal gives
+   * the attempt back: RunPod transcoded nothing, so it must not use up the
+   * creator's budget.
+   *
+   * NEVER THROWS: it runs after the HTTP response (ctx.background), where a
+   * rejection would only be lost. Every outcome is logged and returned. A
+   * setup fault it reveals goes to the alerts, which mail it once a day.
+   */
+  async dispatch(media: TranscodingMediaItem): Promise<RunPodDispatchOutcome> {
+    const request: RunPodJobRequest = {
       input: {
         mediaId: media.id,
         type: media.mediaType,
         creatorId: media.creatorId,
         inputKey: media.r2Key,
         webhookUrl: this.webhookUrl,
-        priority: priority ?? media.transcodingPriority,
+        priority: media.transcodingPriority,
+        contract: TRANSCODING_JOB_CONTRACT,
       },
+      policy: transcodingJobPolicy(media.durationSeconds),
     };
 
-    // Step 3: Set status to 'transcoding' BEFORE calling RunPod
-    // This must happen before the API call because in local dev the
-    // container runs synchronously — the completion webhook arrives
-    // before the fetch returns. The webhook handler requires
-    // status='transcoding' to update the media, so we must set it first.
-    // If the RunPod call fails, we revert to 'uploaded'.
-    await this.db
-      .update(mediaItems)
-      .set({
-        status: MEDIA_STATUS.TRANSCODING,
-        transcodingPriority: priority ?? media.transcodingPriority,
-        updatedAt: new Date(),
-      })
-      .where(eq(mediaItems.id, mediaId));
-
-    // Step 4: Call RunPod /run API (async in cloud, sync in local dev)
-    let runpodJobId: string;
-
+    const startedAt = Date.now();
+    let refusedWith409 = false;
+    let outcome: RunPodDispatchOutcome;
     try {
-      // Call RunPod API with configurable timeout
       const response = await fetch(this.runpodApiUrl, {
         method: 'POST',
         headers: {
           [HEADERS.CONTENT_TYPE]: MIME_TYPES.APPLICATION.JSON,
           [HEADERS.AUTHORIZATION]: `Bearer ${this.runpodApiKey}`,
         },
-        body: JSON.stringify(jobRequest),
+        body: JSON.stringify(request),
         signal: AbortSignal.timeout(this.runpodTimeout),
       });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        this.obs.error('RunPod API error', {
-          mediaId,
-          statusCode: response.status,
-          errorText,
-        });
-        // No `responseBody` in the context: RunPodApiError extends
-        // InternalServiceError, and mapErrorToResponse copies `context`
-        // straight into the client-visible `details` field — so this would
-        // forward a third-party upstream body to an API caller. It is already
-        // captured in the obs.error above, which is where it belongs.
-        throw new RunPodApiError('triggerJob', response.status);
+      const body = await response.text();
+      outcome = classifyRunPodAnswer(response.status, body);
+      refusedWith409 = response.status === 409;
+      if (outcome.kind !== 'accepted') {
+        this.logNotAccepted(media.id, response.status, outcome, body);
       }
-
-      const result = (await response.json()) as RunPodJobResponse;
-      runpodJobId = result.id;
     } catch (error) {
-      // Revert status on failure — media should remain uploadable
-      await this.db
-        .update(mediaItems)
-        .set({
-          status: MEDIA_STATUS.UPLOADED,
-          updatedAt: new Date(),
-        })
-        .where(
-          and(
-            eq(mediaItems.id, mediaId),
-            eq(mediaItems.status, MEDIA_STATUS.TRANSCODING)
-          )
-        );
-
-      if (error instanceof RunPodApiError) {
-        throw error;
-      }
-      // Timeout/abort and transport errors. Log the cause here — this branch
-      // had no log at all — and keep it OUT of the error context, which
-      // mapErrorToResponse would surface to the caller as `details`.
-      this.obs.error('RunPod dispatch failed', {
-        mediaId,
+      const timedOut = error instanceof Error && error.name === 'TimeoutError';
+      outcome = {
+        kind: 'ambiguous',
+        detail: timedOut
+          ? `RunPod did not answer within ${this.runpodTimeout / 1000} s`
+          : 'RunPod could not be reached',
+      };
+      this.obs.error('transcoding.dispatch_ambiguous', {
+        mediaId: media.id,
         error: error instanceof Error ? error.message : String(error),
       });
-      throw new RunPodApiError('triggerJob');
     }
 
-    // Step 5: Store the RunPod job ID for webhook matching
-    // In local dev the webhook may have already completed by this point
-    // (status already 'ready'), so we use an atomic WHERE guard.
-    await this.db
-      .update(mediaItems)
-      .set({
-        runpodJobId,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(mediaItems.id, mediaId),
-          eq(mediaItems.status, MEDIA_STATUS.TRANSCODING)
-        )
-      );
+    try {
+      await this.recordDispatchOutcome(media.id, outcome);
+    } catch (error) {
+      // The whole outcome: an accepted job's id is otherwise in neither the
+      // row nor the logs, and reconciling with RunPod needs it.
+      this.obs.error('transcoding.dispatch_outcome_not_recorded', {
+        mediaId: media.id,
+        ...outcome,
+        outcome: outcome.kind,
+        error: messageForLog(error),
+      });
+    }
 
-    this.obs.info('Transcoding job started', {
+    // A 409 is how a paused endpoint answers (the body's code is
+    // undocumented, so the endpoint's max workers is read to be sure). The
+    // waiting state is already written; waking RunPod is all that is left,
+    // inside the background budget. The retry comes from the scheduler.
+    const woke = refusedWith409
+      ? await this.ensureEndpointAwake(startedAt + DISPATCH_BUDGET_MS)
+      : undefined;
+    this.alerts?.dispatchRefused(media.id, outcome);
+    if (woke) this.alerts?.endpointStuck(woke);
+    return outcome;
+  }
+
+  /**
+   * A wait (paused, busy, down) clears up by itself. A job we cannot account
+   * for, or a refusal that every upload will hit until the setup is fixed,
+   * needs someone to look.
+   */
+  private logNotAccepted(
+    mediaId: string,
+    statusCode: number,
+    outcome: Exclude<RunPodDispatchOutcome, { kind: 'accepted' }>,
+    body: string
+  ): void {
+    const context = {
       mediaId,
-      runpodJobId,
-      mediaType: media.mediaType,
+      statusCode,
+      outcome: outcome.kind,
+      code: outcome.kind === 'rejected' ? outcome.code : undefined,
+      // RunPod's body, for the logs only: the detail the creator sees names
+      // the status and RunPod's code, nothing else.
+      body: body.slice(0, 500),
+    };
+    if (needsAttention(outcome)) {
+      this.obs.error('transcoding.dispatch_not_accepted', context);
+    } else {
+      this.obs.warn('transcoding.dispatch_not_accepted', context);
+    }
+  }
+
+  /**
+   * Write what a /run answer means. Both writes are guarded on the state the
+   * claim left (`transcoding`, no job id yet), so a webhook or a second
+   * dispatch that got there first is never overwritten.
+   */
+  private async recordDispatchOutcome(
+    mediaId: string,
+    outcome: RunPodDispatchOutcome
+  ): Promise<void> {
+    const claimStillHeld = and(
+      eq(mediaItems.id, mediaId),
+      eq(mediaItems.status, MEDIA_STATUS.TRANSCODING),
+      isNull(mediaItems.runpodJobId)
+    );
+
+    if (outcome.kind === 'accepted') {
+      const stored = await this.db
+        .update(mediaItems)
+        .set({ runpodJobId: outcome.jobId, updatedAt: new Date() })
+        .where(claimStillHeld)
+        .returning();
+      for (const row of stored) this.publish(row);
+      this.obs.info('transcoding.dispatched', {
+        mediaId,
+        runpodJobId: outcome.jobId,
+        // false: the webhook already moved the row on (fast local jobs).
+        jobIdStored: stored.length > 0,
+      });
+      return;
+    }
+
+    if (outcome.kind === 'rejected') {
+      const waiting = await this.db
+        .update(mediaItems)
+        .set(waitingFields(outcome.code, outcome.detail))
+        .where(claimStillHeld)
+        .returning();
+      for (const row of waiting) this.publish(row);
+      const context = {
+        mediaId,
+        code: outcome.code,
+        recorded: waiting.length > 0,
+      };
+      if (needsAttention(outcome)) {
+        this.obs.error('transcoding.waiting_for_transcoder', context);
+      } else {
+        this.obs.warn('transcoding.waiting_for_transcoder', context);
+      }
+    }
+    // ambiguous: nothing to write; the row stays `transcoding`.
+  }
+
+  /**
+   * The RunPod calls the maintenance run makes itself. Changing the endpoint
+   * stays behind ensureEndpointAwake.
+   */
+  get runpodJobs(): Pick<RunPodApi, 'jobStatus' | 'ping'> {
+    return this.runpodApi;
+  }
+
+  /**
+   * Raise the endpoint's max workers when RunPod has scaled it down (paused:
+   * 0; after three idle days: 2). Reads first, so an awake endpoint costs one
+   * GET. NEVER THROWS.
+   *
+   * A key that may not read or change the endpoint (`not_permitted`) is
+   * logged at error as `auto_unpause_not_permitted`: auto-unpause is
+   * unavailable until the owner gives the key Serverless write access, and a
+   * paused endpoint then needs raising by hand. Every other failure that is
+   * not passing (an unreadable answer, a raise RunPod did not apply) is an
+   * error too.
+   */
+  async ensureEndpointAwake(deadline: number): Promise<EndpointWakeOutcome> {
+    const current = await this.runpodApi.endpointWorkers(deadline);
+    if (!current.ok) {
+      // Anything but a passing failure means auto-unpause cannot work until
+      // someone fixes the key or the setup: a paused endpoint would then stay
+      // paused, every upload waiting, so it is an error.
+      const context = { reason: current.reason, statusCode: current.status };
+      if (current.reason === 'not_permitted') {
+        this.obs.error('transcoding.auto_unpause_not_permitted', context);
+      } else if (isPassingFailure(current.reason)) {
+        this.obs.warn('transcoding.endpoint_workers_unread', context);
+      } else {
+        this.obs.error('transcoding.endpoint_workers_unread', context);
+      }
+      return { kind: 'unknown', reason: current.reason };
+    }
+    if (current.max >= this.runpodWorkersMax) {
+      return { kind: 'awake', max: current.max };
+    }
+
+    const raised = await this.runpodApi.setWorkersMax(
+      this.runpodWorkersMax,
+      deadline
+    );
+    if (!raised.ok) {
+      const context = {
+        from: current.max,
+        wanted: this.runpodWorkersMax,
+        reason: raised.reason,
+        statusCode: raised.status,
+      };
+      if (raised.reason === 'not_permitted') {
+        this.obs.error('transcoding.auto_unpause_not_permitted', context);
+      } else if (isPassingFailure(raised.reason)) {
+        this.obs.warn('transcoding.endpoint_workers_not_raised', context);
+      } else {
+        this.obs.error('transcoding.endpoint_workers_not_raised', context);
+      }
+      return { kind: 'not_raised', from: current.max, reason: raised.reason };
+    }
+    // A 2xx is not a raise: RunPod must confirm the new value.
+    if (raised.max < this.runpodWorkersMax) {
+      this.obs.error('transcoding.endpoint_workers_not_raised', {
+        from: current.max,
+        wanted: this.runpodWorkersMax,
+        confirmed: raised.max,
+        reason: 'not_applied',
+      });
+      return { kind: 'not_raised', from: current.max, reason: 'not_applied' };
+    }
+    this.obs.warn('transcoding.endpoint_workers_raised', {
+      from: current.max,
+      to: raised.max,
     });
+    return { kind: 'raised', from: current.max, to: raised.max };
   }
 
   /**
@@ -295,6 +633,10 @@ export class TranscodingService extends BaseService {
    * Called asynchronously when transcoding job completes (success or failure).
    * This is the second half of the RunPod async pattern - the completion callback.
    * Updates media_items atomically with all transcoding outputs.
+   *
+   * Every write is guarded on `transcoding` AND the job (heldJobIs): a late
+   * webhook from an earlier attempt's job changes nothing. Attempts are NOT
+   * counted here; the claim counted this job.
    *
    * NOTE: Webhook signature verification (HMAC-SHA256) must be performed by
    * the calling worker before invoking this method. This service trusts
@@ -306,9 +648,9 @@ export class TranscodingService extends BaseService {
    * @throws {TranscodingJobNotFoundError} If no media matches the jobId
    */
   async handleWebhook(
-    payload: RunPodWebhookPayload & { mediaId?: string }
+    payload: RunPodWebhookPayload & { mediaId?: string | null }
   ): Promise<void> {
-    const { jobId, status, output, error: errorMessage } = payload;
+    const { jobId, status, output, error: errorMessage, errorCode } = payload;
     // Top-level mediaId sent by Python handler on failure (fallback when
     // runpodJobId hasn't been stored yet, common in local /runsync flow)
     const fallbackMediaId = payload.mediaId;
@@ -325,6 +667,7 @@ export class TranscodingService extends BaseService {
         ),
         isNull(mediaItems.deletedAt)
       ),
+      columns: { id: true, runpodJobId: true },
     });
 
     if (!media) {
@@ -332,429 +675,328 @@ export class TranscodingService extends BaseService {
       throw new TranscodingJobNotFoundError(jobId);
     }
 
-    // NOTE: We rely on the atomic WHERE clause (status='transcoding') to prevent
-    // race conditions. A previous early-return check was removed because it created
-    // a TOCTOU vulnerability where:
-    // 1. Check passes (status is 'transcoding')
-    // 2. Concurrent request updates status to 'ready'
-    // 3. This request continues and could overwrite with stale data
-    // The atomic WHERE check handles this correctly.
-
-    if (status === 'completed' && output) {
-      // Defense in depth: readyVariants must be non-empty for completed jobs.
-      // Schema validation (min(1)) catches this at the route level, but guard
-      // here too in case handleWebhook is called from other paths.
-      if (!output.readyVariants || output.readyVariants.length === 0) {
-        this.obs.error('Completed webhook has no ready variants', {
-          jobId,
-          mediaId: media.id,
-        });
-        await this.db
-          .update(mediaItems)
-          .set({
-            status: MEDIA_STATUS.FAILED,
-            transcodingError:
-              'Transcoding completed but produced no playable variants',
-            transcodingAttempts: media.transcodingAttempts + 1,
-            transcodingProgress: null,
-            transcodingStep: null,
-            updatedAt: new Date(),
-          })
-          .where(
-            and(
-              eq(mediaItems.id, media.id),
-              eq(mediaItems.status, MEDIA_STATUS.TRANSCODING)
-            )
-          );
-        return;
-      }
-
-      // Success: Update atomically with all transcoding outputs
-      // Only updates if status='transcoding' to prevent race conditions
-      const result = await this.db
-        .update(mediaItems)
-        .set({
-          status: MEDIA_STATUS.READY,
-          hlsMasterPlaylistKey: output.hlsMasterKey,
-          hlsPreviewKey: output.hlsPreviewKey,
-          // Store 'lg' variant as canonical thumbnailKey
-          // (sm/md variants reconstructed via getMediaThumbnailKey helper)
-          thumbnailKey: output.thumbnailKey,
-          waveformKey: output.waveformKey,
-          waveformImageKey: output.waveformImageKey,
-          mezzanineKey: output.mezzanineKey ?? null,
-          mezzanineStatus: output.mezzanineKey ? 'ready' : null,
-          durationSeconds: output.durationSeconds,
-          width: output.width,
-          height: output.height,
-          readyVariants: output.readyVariants,
-          loudnessIntegrated: output.loudnessIntegrated,
-          loudnessPeak: output.loudnessPeak,
-          loudnessRange: output.loudnessRange,
-          transcodingError: null, // Clear any previous error
-          transcodingProgress: null,
-          transcodingStep: null,
-          updatedAt: new Date(),
-        })
-        .where(
-          and(
-            eq(mediaItems.id, media.id),
-            eq(mediaItems.status, MEDIA_STATUS.TRANSCODING)
-          )
-        )
-        .returning();
-
-      if (result.length === 0) {
-        this.obs.warn(
-          'Media no longer in transcoding state (concurrent update)',
-          {
-            jobId,
-            mediaId: media.id,
-          }
-        );
-        return;
-      }
-
-      // NOTE: thumbnailVariants (sm/md/lg) are NOT stored in DB - by design.
-      // Only thumbnailKey ('lg' variant) is persisted. The sm/md variants are
-      // reconstructed on-demand using getMediaThumbnailKey(creatorId, mediaId, size).
-      // This avoids schema changes and keeps the DB lean since paths are deterministic.
-      this.obs.info('Transcoding completed successfully', {
-        mediaId: media.id,
-        jobId,
-        durationSeconds: output.durationSeconds,
-        thumbnailVariants: output.thumbnailVariants, // Logged for debugging, not stored
-      });
+    if (status === 'completed') {
+      await this.completeFromWebhook(media, jobId, output);
     } else {
-      // Failure: Store error message atomically, increment retry counter
-      const result = await this.db
-        .update(mediaItems)
-        .set({
-          status: MEDIA_STATUS.FAILED,
-          // Truncate error message to fit varchar(2000) DB constraint
-          transcodingError: (
-            errorMessage || 'Unknown transcoding error'
-          ).substring(0, 2000),
-          transcodingAttempts: media.transcodingAttempts + 1,
-          transcodingProgress: null,
-          transcodingStep: null,
-          updatedAt: new Date(),
-        })
-        .where(
-          and(
-            eq(mediaItems.id, media.id),
-            eq(mediaItems.status, MEDIA_STATUS.TRANSCODING)
-          )
-        )
-        .returning();
+      await this.recordJobFailure(media.id, jobId, errorCode, errorMessage);
+    }
+  }
 
-      if (result.length === 0) {
-        this.obs.warn(
-          'Media no longer in transcoding state (concurrent update)',
-          {
-            jobId,
-            mediaId: media.id,
-          }
-        );
-        return;
-      }
-
-      this.obs.error('Transcoding failed', {
-        mediaId: media.id,
+  /** A completion: `ready` with every output, for the held job only. */
+  private async completeFromWebhook(
+    media: { id: string; runpodJobId: string | null },
+    jobId: string,
+    output: RunPodWebhookPayload['output']
+  ): Promise<void> {
+    // Defense in depth: readyVariants must be non-empty for completed jobs.
+    // Schema validation (min(1)) catches this at the route level, but guard
+    // here too in case handleWebhook is called from other paths.
+    if (!output?.readyVariants || output.readyVariants.length === 0) {
+      this.obs.error('Completed webhook has no ready variants', {
         jobId,
+        mediaId: media.id,
+      });
+      await this.failFromWebhook(
+        media.id,
+        jobId,
+        TRANSCODING_ERROR_CODES.OUTPUT_REJECTED,
+        'Transcoding completed but produced no playable variants'
+      );
+      return;
+    }
+
+    // Success: Update atomically with all transcoding outputs
+    const applied = await this.writeIfJobHeld(
+      media.id,
+      jobId,
+      {
+        ...NO_PROGRESS,
+        status: MEDIA_STATUS.READY,
+        hlsMasterPlaylistKey: output.hlsMasterKey,
+        hlsPreviewKey: output.hlsPreviewKey,
+        // The 'lg' poster. Every other size sits beside it in the same
+        // folder (the web derives each from this key): sm/md/lg/xl in the
+        // sized layout `{w}x{h}-{nonce}/` when the job is contract 2 and the
+        // picture's size is known; otherwise sm/md/lg in the flat layout
+        // (an older handler always writes that).
+        thumbnailKey: output.thumbnailKey,
+        waveformKey: output.waveformKey,
+        waveformImageKey: output.waveformImageKey,
+        mezzanineKey: output.mezzanineKey ?? null,
+        mezzanineStatus: output.mezzanineKey ? 'ready' : null,
+        durationSeconds: output.durationSeconds,
+        width: output.width,
+        height: output.height,
+        readyVariants: output.readyVariants,
+        loudnessIntegrated: output.loudnessIntegrated,
+        loudnessPeak: output.loudnessPeak,
+        loudnessRange: output.loudnessRange,
+        transcodingError: null, // Clear any previous error
+        transcodingErrorCode: null,
+        updatedAt: new Date(),
+      },
+      { heldJobId: media.runpodJobId }
+    );
+    if (!applied) return;
+    this.publish(applied);
+
+    // thumbnailVariants is logged, not stored: every size is beside
+    // thumbnailKey, in the folder it names.
+    this.obs.info('Transcoding completed successfully', {
+      mediaId: media.id,
+      jobId,
+      durationSeconds: output.durationSeconds,
+      thumbnailVariants: output.thumbnailVariants, // Logged for debugging, not stored
+    });
+  }
+
+  /** A failure: the job ran and failed. Only job-side codes are accepted. */
+  private async recordJobFailure(
+    mediaId: string,
+    jobId: string,
+    errorCode: RunPodWebhookPayload['errorCode'],
+    errorMessage: RunPodWebhookPayload['error']
+  ): Promise<void> {
+    const failure = jobFailureFromWebhook(errorCode, errorMessage);
+    if (failure.unrecognisedCode) {
+      this.obs.warn('transcoding.unknown_error_code', {
+        jobId,
+        mediaId,
+        rawErrorCode: failure.unrecognisedCode,
+      });
+    } else if (errorCode === undefined || errorCode === null) {
+      this.obs.info('transcoding.webhook_without_error_code', {
+        jobId,
+        mediaId,
+        note: 'handler predates errorCode',
+      });
+    }
+    const applied = await this.failFromWebhook(
+      mediaId,
+      jobId,
+      failure.code,
+      failure.detail
+    );
+    if (applied) {
+      this.obs.error('Transcoding failed', {
+        mediaId,
+        jobId,
+        code: failure.code,
         errorMessage: errorMessage || 'Unknown',
       });
     }
   }
 
   /**
-   * Handle a progress webhook from the transcoding handler.
-   * Updates progress percentage and current step in the database.
-   * Fire-and-forget: silently ignores updates for completed/failed jobs.
+   * A webhook's write: it applies only while the row is `transcoding` and
+   * holds this job (heldJobIs). Returns the row written, or undefined when
+   * nothing was (which is logged).
    */
-  async handleProgressWebhook(
-    payload: RunPodProgressWebhookPayload
-  ): Promise<void> {
-    const { jobId, progress, step, mediaId } = payload;
-
-    // Match by jobId OR mediaId (jobId may not be stored yet if /runsync is still blocking)
-    try {
-      await this.db
-        .update(mediaItems)
-        .set({
-          transcodingProgress: progress,
-          transcodingStep: step,
-          updatedAt: new Date(),
-        })
-        .where(
-          and(
-            or(
-              eq(mediaItems.runpodJobId, jobId),
-              mediaId ? eq(mediaItems.id, mediaId) : undefined
-            ),
-            eq(mediaItems.status, MEDIA_STATUS.TRANSCODING),
-            isNull(mediaItems.deletedAt)
-          )
-        );
-    } catch (error) {
-      this.obs.warn('Progress webhook DB update failed', {
-        jobId,
-        mediaId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      throw error;
-    }
-  }
-
-  /**
-   * Retry a failed transcoding job
-   *
-   * Only 3 retries are allowed per media item.
-   * Uses atomic conditional update to prevent race conditions.
-   *
-   * @param mediaId - Media item UUID
-   * @param creatorId - Creator ID for authorization
-   * @returns void
-   *
-   * @throws {TranscodingMediaNotFoundError} If media doesn't exist
-   * @throws {MediaOwnershipError} If creator doesn't own the media
-   * @throws {InvalidMediaStateError} If media is not in 'failed' status
-   * @throws {MaxRetriesExceededError} If retry limit (3) reached
-   */
-  async retryTranscoding(mediaId: string, creatorId: string): Promise<void> {
-    this.obs.info('Retrying transcoding', { mediaId, creatorId });
-
-    // Step 1: Verify ownership first (separate from atomic update for clear error messages)
-    const media = await this.getMediaForTranscoding(mediaId, creatorId);
-
-    // Step 2: Atomic conditional update - prevents TOCTOU race
-    // Only updates if status='failed' AND attempts < 3
+  private async writeIfJobHeld(
+    mediaId: string,
+    jobId: string,
+    set: Partial<typeof mediaItems.$inferInsert>,
+    logContext: Record<string, unknown>
+  ): Promise<typeof mediaItems.$inferSelect | undefined> {
     const result = await this.db
       .update(mediaItems)
-      .set({
-        status: MEDIA_STATUS.UPLOADED,
-        transcodingAttempts: media.transcodingAttempts + 1,
-        transcodingError: null,
-        runpodJobId: null,
-        updatedAt: new Date(),
-      })
+      .set(set)
       .where(
         and(
           eq(mediaItems.id, mediaId),
-          eq(mediaItems.status, MEDIA_STATUS.FAILED),
-          lt(mediaItems.transcodingAttempts, 3) // Allow up to 3 retries
+          eq(mediaItems.status, MEDIA_STATUS.TRANSCODING),
+          isNull(mediaItems.deletedAt),
+          heldJobIs(jobId)
         )
       )
       .returning();
 
     if (result.length === 0) {
-      // Determine which condition failed for appropriate error
-      if (media.status !== MEDIA_STATUS.FAILED) {
-        throw new InvalidMediaStateError(
-          mediaId,
-          media.status,
-          MEDIA_STATUS.FAILED,
-          {
-            operation: 'retryTranscoding',
-          }
-        );
-      }
-      // Must be max retries exceeded
-      throw new MaxRetriesExceededError(mediaId, media.transcodingAttempts);
+      this.obs.warn('transcoding.webhook_not_applied', {
+        jobId,
+        mediaId,
+        ...logContext,
+        reason: 'row not transcoding, deleted, or holds another job',
+      });
+      return undefined;
     }
+    return result[0];
+  }
 
-    // Step 3: Trigger new job.
-    //
-    // THE CLAIM IN STEP 2 IS ALREADY COMMITTED, so a dispatch failure here
-    // leaves the row in `uploaded` with no RunPod job attached to it. Nothing
-    // ever moves that row again: the webhook needs a job that was never
-    // created, and a second retry re-reads `status !== 'failed'` and throws
-    // InvalidMediaStateError. The retry path closes PERMANENTLY on a
-    // transient upstream blip, and the creator's media is stranded.
-    //
-    // triggerJob() is an external HTTP call, so it cannot live inside
-    // db.transaction() — a committed remote side effect has no rollback. The
-    // compensating write below is the saga equivalent: undo the claim, keep
-    // the row retryable, and let the error propagate so the caller sees it.
-    try {
-      await this.triggerJob(mediaId, creatorId);
-    } catch (error) {
-      await this.revertRetryClaim(mediaId, media);
-      throw error;
-    }
-
-    this.obs.info('Transcoding retry triggered', {
+  /**
+   * Fail the row from a webhook. The emails go only when this delivery's
+   * write applied: a retried delivery finds the row already failed.
+   */
+  private async failFromWebhook(
+    mediaId: string,
+    jobId: string,
+    code: TranscodingErrorCode,
+    detail: string
+  ): Promise<boolean> {
+    const failed = await this.writeIfJobHeld(
       mediaId,
-      attempt: media.transcodingAttempts + 1,
-    });
-  }
-
-  /**
-   * Undo the retry claim written by {@link retryTranscoding} step 2.
-   *
-   * Restores the four columns the claim overwrote to the values read BEFORE
-   * it, so the row is exactly as retryable as it was — including the original
-   * `transcodingError`, which the claim had cleared. `transcodingAttempts` is
-   * restored too: the budget exists to stop us re-transcoding media that is
-   * itself broken, and a dispatch that never reached RunPod transcoded
-   * nothing. Burning a retry for it would let three upstream blips exhaust a
-   * creator's budget on a file that was never actually attempted.
-   *
-   * CONDITIONAL ON THE CLAIM STILL BEING THERE. Between the claim and this
-   * revert a webhook for an earlier job could have landed and legitimately
-   * moved the row. The `where` therefore matches the exact shape step 2 left
-   * behind; if anything else has written since, this is a no-op rather than a
-   * clobber.
-   *
-   * NEVER THROWS. It runs on an error path, and the caller re-throws the
-   * original failure immediately after. An exception raised here would
-   * replace the real cause — a dispatch failure — with a database error and
-   * destroy the diagnosis.
-   */
-  private async revertRetryClaim(
-    mediaId: string,
-    previous: {
-      status: string;
-      transcodingAttempts: number;
-      transcodingError: string | null;
-      runpodJobId: string | null;
+      jobId,
+      failedFields(code, detail),
+      { code }
+    );
+    if (failed) {
+      this.publish(failed);
+      this.alerts?.mediaFailed(failed);
     }
-  ): Promise<void> {
-    try {
-      const reverted = await this.db
-        .update(mediaItems)
-        .set({
-          status: previous.status,
-          transcodingAttempts: previous.transcodingAttempts,
-          transcodingError: previous.transcodingError,
-          runpodJobId: previous.runpodJobId,
-          updatedAt: new Date(),
-        })
-        .where(
-          and(
-            eq(mediaItems.id, mediaId),
-            eq(mediaItems.status, MEDIA_STATUS.UPLOADED),
-            eq(mediaItems.transcodingAttempts, previous.transcodingAttempts + 1)
-          )
-        )
-        .returning();
+    return failed !== undefined;
+  }
 
-      if (reverted.length === 0) {
-        // Something wrote between the claim and here. Say so: the row is not
-        // in the state this method assumes, and that is worth knowing when
-        // diagnosing a stranded item.
-        this.obs.warn('Retry claim not reverted — row changed underneath', {
-          mediaId,
-          expectedAttempts: previous.transcodingAttempts + 1,
-        });
-        return;
-      }
-
-      this.obs.info('Retry claim reverted after dispatch failure', {
-        mediaId,
-        restoredStatus: previous.status,
-        restoredAttempts: previous.transcodingAttempts,
+  /**
+   * A signed completion or failure webhook that our schema rejected. The job
+   * is over, so the row fails now (OUTPUT_REJECTED) instead of sitting in
+   * `transcoding` until the cron gives up on it. Uses the ids the raw payload
+   * carried. Without a job id it fails only a row that holds no job, since
+   * nothing else proves the webhook is for the current attempt.
+   *
+   * @returns true when a row was failed.
+   */
+  async rejectWebhookOutput(
+    ids: { jobId: string | null; mediaId: string | null },
+    detail: string
+  ): Promise<boolean> {
+    const { jobId, mediaId } = ids;
+    // Built and checked here, never inline: and() silently DROPS an undefined
+    // argument, so a missing match would fail every transcoding row. or() of
+    // nothing is undefined.
+    const row = or(
+      jobId ? eq(mediaItems.runpodJobId, jobId) : undefined,
+      mediaId ? eq(mediaItems.id, mediaId) : undefined
+    );
+    if (!row) {
+      this.obs.warn('transcoding.rejected_webhook_unmatched', {
+        reason: 'no job id or media id in the payload',
       });
-    } catch (revertError) {
-      this.obs.error('Failed to revert retry claim — media may be stranded', {
-        mediaId,
-        error:
-          revertError instanceof Error
-            ? revertError.message
-            : String(revertError),
-      });
+      return false;
     }
-  }
-
-  /**
-   * Get current transcoding status for a media item
-   *
-   * @param mediaId - Media item UUID
-   * @param creatorId - Creator ID for authorization
-   * @returns Transcoding status response
-   *
-   * @throws {TranscodingMediaNotFoundError} If media doesn't exist
-   * @throws {MediaOwnershipError} If creator doesn't own the media
-   */
-  async getTranscodingStatus(
-    mediaId: string,
-    creatorId: string
-  ): Promise<TranscodingStatusResponse> {
-    const media = await this.getMediaForTranscoding(mediaId, creatorId);
-
-    return {
-      status: media.status,
-      transcodingAttempts: media.transcodingAttempts,
-      transcodingError: media.transcodingError,
-      runpodJobId: media.runpodJobId,
-      transcodingPriority: media.transcodingPriority,
-      transcodingProgress: media.transcodingProgress ?? null,
-      // Cast from varchar to TranscodingStep - DB stores as text, validated on write
-      transcodingStep: media.transcodingStep ?? null,
-      // Cast from string[] to HlsVariant[] - DB stores as text[], validated on write
-      readyVariants: media.readyVariants as HlsVariant[] | null,
-    };
-  }
-
-  /**
-   * Recover media items stuck in 'transcoding' status.
-   *
-   * If a webhook never arrives (network failure, RunPod outage), media
-   * stays in 'transcoding' indefinitely. This method finds items stuck
-   * longer than `maxAgeMinutes` and marks them as 'failed' so they can
-   * be retried.
-   *
-   * Intended for scheduled/cron invocation, not user-facing.
-   *
-   * @param maxAgeMinutes - How long to wait before considering stuck (default: 120)
-   * @returns Number of media items recovered
-   *
-   * Reachable only through the media-api hourly cron, which is why dead-code
-   * detection flags it. Proven chain: workers/media-api/wrangler.jsonc
-   * `crons: ["0 * * * *"]` -> src/index.ts:284 `export default { scheduled }`
-   * -> :293 `ctx.waitUntil(runRecoverStuckTranscoding(env, ctx))` -> :261
-   * `service.recoverStuckTranscoding(STUCK_MAX_AGE_MINUTES)`. Verify the chain
-   * before deleting; a cron NAME is not evidence of a wired cron.
-   */
-  // fallow-ignore-next-line unused-class-member
-  async recoverStuckTranscoding(maxAgeMinutes: number = 120): Promise<number> {
-    const cutoff = new Date(Date.now() - maxAgeMinutes * 60 * 1000);
 
     const result = await this.db
       .update(mediaItems)
-      .set({
-        status: MEDIA_STATUS.FAILED,
-        transcodingError: `Stuck in transcoding for over ${maxAgeMinutes} minutes — no webhook received`,
-        updatedAt: new Date(),
-      })
+      .set(failedFields(TRANSCODING_ERROR_CODES.OUTPUT_REJECTED, detail))
       .where(
         and(
+          row,
           eq(mediaItems.status, MEDIA_STATUS.TRANSCODING),
-          lt(mediaItems.updatedAt, cutoff),
-          isNull(mediaItems.deletedAt)
+          isNull(mediaItems.deletedAt),
+          jobId ? heldJobIs(jobId) : isNull(mediaItems.runpodJobId)
         )
       )
       .returning();
 
-    if (result.length > 0) {
-      this.obs.warn(`Recovered ${result.length} stuck transcoding jobs`, {
-        maxAgeMinutes,
-        mediaIds: result.map((m) => m.id),
-      });
+    this.obs.warn('transcoding.webhook_output_rejected', {
+      jobId,
+      mediaId,
+      failedRows: result.length,
+    });
+    for (const failed of result) {
+      this.publish(failed);
+      this.alerts?.mediaFailed(failed);
     }
-
-    return result.length;
+    return result.length > 0;
   }
 
   /**
-   * Internal helper to fetch and validate media for transcoding operations
+   * A progress webhook from the transcoding handler: it goes to the studio's
+   * live status only, never Postgres (Codex-l2c48.9; about nine writes a job
+   * removed). The object applies a tick only while the row is `transcoding`
+   * and holds this job (or none yet), the rule the SQL WHERE used to be.
+   * Advisory: a tick that cannot be delivered is logged by the feed.
+   */
+  async handleProgressWebhook(
+    payload: RunPodProgressWebhookPayload
+  ): Promise<void> {
+    const { jobId, progress, step, mediaId, creatorId } = payload;
+    // Every handler since the first sends mediaId when it has one; without
+    // it there is no item to show the tick on. Without the feed (an env with
+    // no MEDIA_STATUS binding) there is nowhere to keep it.
+    if (!mediaId || !this.mediaStatus) {
+      this.obs.warn('transcoding.progress_dropped', {
+        jobId,
+        reason: mediaId ? 'no_feed' : 'no_media_id',
+      });
+      return;
+    }
+    await this.mediaStatus.progress(
+      { mediaId, jobId, step, progress },
+      creatorId ?? null
+    );
+  }
+
+  /**
+   * Retry transcoding: the creator's Retry button.
    *
-   * @param mediaId - Media item UUID
-   * @param creatorId - Creator ID for authorization
-   * @returns Media item data
+   * Allowed from `failed`, and from `uploaded` (an item waiting for the
+   * transcoder: a retry while RunPod is paused just waits again). Refused
+   * when the last failure was the file itself (a retry would fail the same
+   * way; the creator re-uploads), and past MAX_TRANSCODING_ATTEMPTS.
    *
-   * @throws {TranscodingMediaNotFoundError} If media doesn't exist
-   * @throws {MediaOwnershipError} If creator doesn't own the media
+   * Returns the running dispatch: the route hands it to ctx.background, so
+   * the creator is answered without waiting on RunPod.
+   *
+   * @throws {TranscodingMediaNotFoundError} If the media isn't the creator's
+   * @throws {InvalidMediaStateError} If it is transcoding, ready, or uploading
+   * @throws {TranscodingNotRetryableError} If the file itself failed
+   * @throws {MaxRetriesExceededError} If no attempts are left
+   */
+  async retryTranscoding(
+    mediaId: string,
+    creatorId: string
+  ): Promise<{ dispatchPromise: Promise<RunPodDispatchOutcome> }> {
+    this.obs.info('Retrying transcoding', { mediaId, creatorId });
+
+    const media = await this.getMediaForTranscoding(mediaId, creatorId);
+    this.assertRetryable(media);
+
+    const claimed = await this.claimForDispatch(mediaId, RETRYABLE_FROM, {
+      creatorId,
+    });
+    if (!claimed) {
+      // Something moved the row between the read and the claim; say what.
+      const now = await this.getMediaForTranscoding(mediaId, creatorId);
+      this.assertRetryable(now);
+      throw new InvalidMediaStateError(mediaId, now.status, [
+        ...RETRYABLE_FROM,
+      ]);
+    }
+
+    this.obs.info('Transcoding retry claimed', {
+      mediaId,
+      attempt: claimed.transcodingAttempts,
+    });
+    return { dispatchPromise: this.dispatch(claimed) };
+  }
+
+  private assertRetryable(media: TranscodingMediaItem): void {
+    if (!RETRYABLE_FROM.includes(media.status)) {
+      throw new InvalidMediaStateError(media.id, media.status, [
+        ...RETRYABLE_FROM,
+      ]);
+    }
+    if (
+      media.transcodingErrorCode &&
+      !transcodingErrorInfo(media.transcodingErrorCode).retryable
+    ) {
+      throw new TranscodingNotRetryableError(
+        media.id,
+        media.transcodingErrorCode
+      );
+    }
+    if (media.transcodingAttempts >= MAX_TRANSCODING_ATTEMPTS) {
+      throw new MaxRetriesExceededError(media.id, media.transcodingAttempts);
+    }
+  }
+
+  /**
+   * Internal helper to fetch media for a creator's transcoding operation.
+   *
+   * One answer for "missing" and "someone else's" (Codex-jxvg8): telling them
+   * apart would let any account probe whether a media id exists.
+   *
+   * @throws {TranscodingMediaNotFoundError} If it doesn't exist or isn't the creator's
    */
   private async getMediaForTranscoding(
     mediaId: string,
@@ -766,50 +1008,16 @@ export class TranscodingService extends BaseService {
           eq(mediaItems.id, mediaId),
           scopedNotDeleted(mediaItems, creatorId)
         ),
-        columns: {
-          id: true,
-          creatorId: true,
-          mediaType: true,
-          status: true,
-          r2Key: true,
-          transcodingAttempts: true,
-          runpodJobId: true,
-          transcodingError: true,
-          transcodingPriority: true,
-          transcodingProgress: true,
-          transcodingStep: true,
-          hlsMasterPlaylistKey: true,
-          hlsPreviewKey: true,
-          thumbnailKey: true,
-          waveformKey: true,
-          waveformImageKey: true,
-          durationSeconds: true,
-          width: true,
-          height: true,
-          readyVariants: true,
-        },
+        columns: TRANSCODING_MEDIA_COLUMNS,
       });
 
       if (!media) {
-        // Check if media exists but belongs to different creator
-        const exists = await this.db.query.mediaItems.findFirst({
-          where: eq(mediaItems.id, mediaId),
-          columns: { id: true, creatorId: true },
-        });
-
-        if (exists && exists.creatorId !== creatorId) {
-          throw new MediaOwnershipError(mediaId, creatorId);
-        }
-
         throw new TranscodingMediaNotFoundError(mediaId);
       }
 
       return media as TranscodingMediaItem;
     } catch (error) {
-      if (
-        error instanceof TranscodingMediaNotFoundError ||
-        error instanceof MediaOwnershipError
-      ) {
+      if (error instanceof TranscodingMediaNotFoundError) {
         throw error;
       }
       this.handleError(error, 'getMedia');
@@ -817,214 +1025,63 @@ export class TranscodingService extends BaseService {
   }
 
   /**
-   * Get media item for transcoding without authorization check
+   * Trigger transcoding after an upload completes (content-api, worker HMAC).
+   * content-api names the uploader, so the claim is creator-scoped like any
+   * other.
    *
-   * INTERNAL USE ONLY: Used by triggerJobInternal for worker-to-worker calls
-   * where authentication is done via HMAC instead of user session.
-   */
-  private async getMediaForTranscodingInternal(
-    mediaId: string
-  ): Promise<TranscodingMediaItem> {
-    const media = await this.db.query.mediaItems.findFirst({
-      where: and(eq(mediaItems.id, mediaId), isNull(mediaItems.deletedAt)),
-      columns: {
-        id: true,
-        creatorId: true,
-        mediaType: true,
-        status: true,
-        r2Key: true,
-        transcodingAttempts: true,
-        runpodJobId: true,
-        transcodingError: true,
-        transcodingPriority: true,
-        transcodingProgress: true,
-        transcodingStep: true,
-        hlsMasterPlaylistKey: true,
-        hlsPreviewKey: true,
-        thumbnailKey: true,
-        waveformKey: true,
-        waveformImageKey: true,
-        durationSeconds: true,
-        width: true,
-        height: true,
-        readyVariants: true,
-      },
-    });
-
-    if (!media) {
-      throw new TranscodingMediaNotFoundError(mediaId);
-    }
-
-    return media as TranscodingMediaItem;
-  }
-
-  /**
-   * Trigger transcoding job for internal worker-to-worker calls
-   *
-   * INTERNAL USE ONLY: Called by media-api internal route after content-api
-   * triggers transcoding post-upload. Authentication is via HMAC workerAuth,
-   * not user session, so no creatorId authorization check is needed.
+   * Claims from `uploaded` only. A claim that matches nothing because the
+   * item is already transcoding, ready or failed is NOT an error: content-api
+   * re-POSTs upload-complete to recover, and two triggers for one upload must
+   * dispatch once. That answers `alreadyQueued`.
    *
    * @param mediaId - Media item UUID
+   * @param creatorId - The uploader, as content-api authenticated them
    * @param priority - Optional priority (0=urgent, 2=normal, 4=backlog)
-   * @returns Object containing a dispatchPromise that the caller should pass to waitUntil()
+   * @throws {TranscodingMediaNotFoundError} If it doesn't exist or isn't the creator's
+   * @throws {InvalidMediaStateError} If it is still uploading
+   * @throws {MaxRetriesExceededError} If it waits with no attempts left
    */
   async triggerJobInternal(
     mediaId: string,
+    creatorId: string,
     priority?: number
-  ): Promise<{ dispatchPromise: Promise<void> }> {
+  ): Promise<InternalTriggerResult> {
     this.obs.info('Triggering transcoding job (internal)', {
       mediaId,
       priority,
     });
 
-    // Fetch media without authorization check (workerAuth is the auth layer)
-    const media = await this.getMediaForTranscodingInternal(mediaId);
-
-    // Verify media is in correct state
-    if (media.status !== MEDIA_STATUS.UPLOADED) {
-      throw new InvalidMediaStateError(
-        mediaId,
-        media.status,
-        MEDIA_STATUS.UPLOADED,
-        {
-          operation: 'triggerJobInternal',
-        }
-      );
-    }
-
-    // Update DB status BEFORE calling RunPod — ensures webhooks can find the
-    // media item immediately, and the frontend sees 'transcoding' status.
-    const finalPriority = priority ?? media.transcodingPriority ?? 2;
-
-    await this.db
-      .update(mediaItems)
-      .set({
-        status: MEDIA_STATUS.TRANSCODING,
-        transcodingPriority: finalPriority,
-        transcodingProgress: 0,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(mediaItems.id, mediaId),
-          eq(mediaItems.status, MEDIA_STATUS.UPLOADED)
-        )
-      );
-
-    // Construct job request
-    const jobRequest: RunPodJobRequest = {
-      input: {
-        mediaId: media.id,
-        type: media.mediaType,
-        creatorId: media.creatorId,
-        inputKey: media.r2Key,
-        webhookUrl: this.webhookUrl,
-        priority: finalPriority,
-      },
-    };
-
-    this.obs.info('Transcoding job triggered (internal)', {
+    const claimed = await this.claimForDispatch(
       mediaId,
-      runpodJobId: null,
-    });
+      [MEDIA_STATUS.UPLOADED],
+      { creatorId },
+      { priority }
+    );
 
-    // Return the RunPod dispatch as an unresolved promise.
-    // The caller should use waitUntil() to keep the worker alive.
-    // In production, RunPod /run returns in <1s. Locally, /runsync blocks for minutes.
-    const dispatchPromise = this.dispatchRunPodJob(mediaId, jobRequest);
-
-    return { dispatchPromise };
-  }
-
-  /**
-   * Fire the RunPod API call and update DB with jobId on success.
-   * Designed to be called via waitUntil() — does not throw on failure,
-   * logs errors and marks media as failed instead.
-   */
-  private async dispatchRunPodJob(
-    mediaId: string,
-    jobRequest: RunPodJobRequest
-  ): Promise<void> {
-    try {
-      const response = await fetch(this.runpodApiUrl, {
-        method: 'POST',
-        headers: {
-          [HEADERS.CONTENT_TYPE]: MIME_TYPES.APPLICATION.JSON,
-          [HEADERS.AUTHORIZATION]: `Bearer ${this.runpodApiKey}`,
-        },
-        body: JSON.stringify(jobRequest),
-        signal: AbortSignal.timeout(this.runpodTimeout),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        this.obs.error('RunPod dispatch failed', {
+    if (!claimed) {
+      const media = await this.getMediaForTranscoding(mediaId, creatorId);
+      if (media.status === MEDIA_STATUS.UPLOADING) {
+        // Not uploaded yet, so not queued either: say so rather than "queued".
+        throw new InvalidMediaStateError(
           mediaId,
-          statusCode: response.status,
-          error: errorText,
-        });
-        await this.markTranscodingFailed(
-          mediaId,
-          `RunPod API error: ${response.status}`
+          media.status,
+          MEDIA_STATUS.UPLOADED,
+          { operation: 'triggerJobInternal' }
         );
-        return;
       }
-
-      const result = (await response.json()) as RunPodJobResponse;
-
-      // Store job ID for tracking (webhook uses mediaId as primary lookup)
-      await this.db
-        .update(mediaItems)
-        .set({ runpodJobId: result.id, updatedAt: new Date() })
-        .where(eq(mediaItems.id, mediaId));
-
-      this.obs.info('RunPod job dispatched', {
+      if (
+        media.status === MEDIA_STATUS.UPLOADED &&
+        media.transcodingAttempts >= MAX_TRANSCODING_ATTEMPTS
+      ) {
+        throw new MaxRetriesExceededError(mediaId, media.transcodingAttempts);
+      }
+      this.obs.info('transcoding.already_queued', {
         mediaId,
-        runpodJobId: result.id,
+        status: media.status,
       });
-    } catch (error) {
-      this.obs.error('RunPod dispatch error', {
-        mediaId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      await this.markTranscodingFailed(
-        mediaId,
-        error instanceof Error ? error.message : 'RunPod dispatch failed'
-      );
+      return { alreadyQueued: true };
     }
-  }
 
-  /**
-   * Mark a media item as failed (used by background dispatch on error)
-   */
-  private async markTranscodingFailed(
-    mediaId: string,
-    errorMessage: string
-  ): Promise<void> {
-    try {
-      await this.db
-        .update(mediaItems)
-        .set({
-          status: MEDIA_STATUS.FAILED,
-          transcodingError: errorMessage.substring(0, 2000),
-          transcodingProgress: null,
-          transcodingStep: null,
-          updatedAt: new Date(),
-        })
-        .where(
-          and(
-            eq(mediaItems.id, mediaId),
-            eq(mediaItems.status, MEDIA_STATUS.TRANSCODING)
-          )
-        );
-    } catch (markError) {
-      this.obs.error('Double failure: could not mark media as failed', {
-        mediaId,
-        originalError: errorMessage,
-        markError:
-          markError instanceof Error ? markError.message : String(markError),
-      });
-    }
+    return { alreadyQueued: false, dispatchPromise: this.dispatch(claimed) };
   }
 }

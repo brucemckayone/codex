@@ -4,14 +4,15 @@
  *
  * Every `recordOrphanedFiles` call in this package runs on a failure path:
  *
- *   1. `withDbUpdateOrphanCleanup` — a DB write just rejected. The orphan
- *      insert is ALSO a DB write, so the two failures are correlated (any Neon
- *      incident). Unguarded, the insert's rejection replaced the original error
- *      and `throw error` never ran: the caller saw the bookkeeping fault, not
- *      the cause.
+ *   1. A still's row write just rejected, so its new folder is being deleted
+ *      (`deleteStillFiles`). The orphan insert is ALSO a DB write, so the two
+ *      failures are correlated (any Neon incident). Unguarded, the insert's
+ *      rejection replaced the original error and `throw error` never ran: the
+ *      caller saw the bookkeeping fault, not the cause.
  *   2. `deleteContentThumbnail` / `deleteUserAvatar` — R2 deletes just
- *      rejected. Unguarded, the insert's rejection skipped the DB clear, so the
- *      row kept pointing at objects the call had just tried to remove.
+ *      rejected. Unguarded, the insert's rejection failed a call whose row had
+ *      already been cleared (and, before Codex-kk9nv.5 moved the clear first,
+ *      skipped the clear, so the row kept pointing at the removed objects).
  *
  * All three were latent only because no production ImageProcessingService was
  * ever given an `orphanedFileService`. Wiring it (the rest of this bead) makes
@@ -27,7 +28,7 @@ import * as processor from '../../processor';
 import { ImageProcessingService } from '../../service';
 
 vi.mock('../../processor', () => ({
-  processImageVariants: vi.fn(),
+  processStillVariants: vi.fn(),
 }));
 
 const ORIGINAL_DB_ERROR = 'Database connection lost';
@@ -69,14 +70,30 @@ function dbWithUpdate(where: ReturnType<typeof vi.fn>): Database {
       set: vi.fn().mockReturnValue({ where }),
     }),
     query: {
-      // FIRST uploads: nothing referenced the keys, so cleanup (and therefore
-      // orphan recording) is the path that runs.
-      content: { findFirst: vi.fn().mockResolvedValue({ thumbnailUrl: null }) },
-      users: {
-        findFirst: vi
-          .fn()
-          .mockResolvedValue({ avatarUrl: 'https://test.r2.dev/a.webp' }),
+      // Each row holds one of its own uploads (a folder from before
+      // Codex-kk9nv.5), so the delete paths have files to delete.
+      content: {
+        findFirst: vi.fn().mockResolvedValue({
+          thumbnailUrl:
+            'https://test.r2.dev/user-1/content-thumbnails/content-1/lg.webp',
+        }),
       },
+    },
+    // deleteUserAvatar reads the avatar under a row lock, in the transaction
+    // that clears it (Codex-kk9nv.17); the callback runs on this same db.
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          for: vi
+            .fn()
+            .mockResolvedValue([
+              { avatarUrl: 'https://test.r2.dev/avatars/user-1/lg.webp' },
+            ]),
+        }),
+      }),
+    }),
+    transaction(fn: (tx: unknown) => unknown) {
+      return fn(this);
     },
   } as unknown as Database;
 }
@@ -85,10 +102,15 @@ describe('Codex-r85jo.3 F7: orphan-record failure keeps the original outcome', (
   let errorSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    vi.mocked(processor.processImageVariants).mockReturnValue({
-      sm: new Uint8Array([1]),
-      md: new Uint8Array([2]),
-      lg: new Uint8Array([3]),
+    vi.mocked(processor.processStillVariants).mockReturnValue({
+      variants: {
+        sm: new Uint8Array([1]),
+        md: new Uint8Array([2]),
+        lg: new Uint8Array([3]),
+        xl: new Uint8Array([4]),
+      },
+      width: 1200,
+      height: 800,
     });
     errorSpy = vi.spyOn(ObservabilityClient.prototype, 'error');
   });
@@ -97,7 +119,7 @@ describe('Codex-r85jo.3 F7: orphan-record failure keeps the original outcome', (
     vi.restoreAllMocks();
   });
 
-  it('withDbUpdateOrphanCleanup rethrows the ORIGINAL DB error, not the insert error', async () => {
+  it('a failed row write rethrows the ORIGINAL DB error, not the insert error', async () => {
     const orphans = rejectingOrphanService();
     const service = new ImageProcessingService({
       db: dbWithUpdate(vi.fn().mockRejectedValue(new Error(ORIGINAL_DB_ERROR))),
@@ -122,9 +144,15 @@ describe('Codex-r85jo.3 F7: orphan-record failure keeps the original outcome', (
     expect(errorSpy).toHaveBeenCalledWith(
       'Failed to record orphaned R2 files; keys are untracked',
       expect.objectContaining({
-        context: 'content-thumbnail',
+        context: 'content_thumbnail-write-failed',
         r2Keys: expect.arrayContaining([
-          'user-1/content-thumbnails/content-1/lg.webp',
+          expect.stringMatching(
+            /^user-1\/content-thumbnails\/content-1\/1200x800-[0-9a-f]{8}\/lg\.webp$/
+          ),
+          // xl is written too, so it must be logged too.
+          expect.stringMatching(
+            /^user-1\/content-thumbnails\/content-1\/1200x800-[0-9a-f]{8}\/xl\.webp$/
+          ),
         ]),
       })
     );
@@ -163,12 +191,43 @@ describe('Codex-r85jo.3 F7: orphan-record failure keeps the original outcome', (
       orphanedFileService: orphans.svc,
     });
 
-    await expect(service.deleteUserAvatar('user-1')).resolves.toBeUndefined();
+    await expect(service.deleteUserAvatar('user-1')).resolves.toBe(true);
     expect(orphans.recordOrphanedFiles).toHaveBeenCalledTimes(1);
     expect(where).toHaveBeenCalledTimes(1);
     expect(errorSpy).toHaveBeenCalledWith(
       'Failed to record orphaned R2 files; keys are untracked',
       expect.objectContaining({ context: 'user-avatar-delete' })
+    );
+  });
+  it("logs a failed insert by its driver's reason, not the query and its keys (Codex-kk9nv.13)", async () => {
+    // drizzle's failed-query message carries the insert's params: every key,
+    // each with the user id production redaction hashes the whole line for.
+    // The keys are logged as their own field; the error says why.
+    const recordOrphanedFiles = vi
+      .fn()
+      .mockRejectedValue(
+        Object.assign(
+          new Error(
+            'Failed query: insert into "orphaned_image_files" …\nparams: avatars/user-1/lg.webp,…'
+          ),
+          { cause: new Error('connection terminated') }
+        )
+      );
+    const service = new ImageProcessingService({
+      db: dbWithUpdate(vi.fn().mockResolvedValue(undefined)),
+      environment: 'test',
+      r2Service: r2DeletesReject(),
+      r2PublicUrlBase: 'https://test.r2.dev',
+      orphanedFileService: {
+        recordOrphanedFiles,
+      } as unknown as OrphanedFileService,
+    });
+
+    await service.deleteUserAvatar('user-1');
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      'Failed to record orphaned R2 files; keys are untracked',
+      expect.objectContaining({ error: 'connection terminated' })
     );
   });
 });

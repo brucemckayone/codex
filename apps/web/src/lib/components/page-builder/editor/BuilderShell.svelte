@@ -65,6 +65,15 @@
 
   /** The inspector's width, in rem — shared by the grid and the placement rule. */
   const INSPECTOR_REM = 20;
+  /**
+   * The side panel's width, in rem: the outline on the Page tab, the wider
+   * panels on the others. Set on the shell as `--_side` AND read by the
+   * placement rule, so the inspector docks in the same frame the Page tab
+   * opens. Measuring the panel instead lagged a ResizeObserver delivery: the
+   * inspector docked after the frame's layout, and the canvas laid the whole
+   * page out a second time (~110ms on a 28-section page, Codex-61zsk.70).
+   */
+  const SIDE_REM = { page: 16, panel: 23.75 } as const;
 
   const TAB_LABELS: Record<EditorTab, () => string> = {
     page: () => m.studio_page_editor_tab_page(),
@@ -89,7 +98,6 @@
     index: number;
   } | null>(null);
   let shellWidth = $state(0);
-  let sideWidth = $state(0);
   let canvas = $state<ReturnType<typeof Canvas>>();
 
   const remPx =
@@ -102,10 +110,11 @@
   const pageStyle = $derived(resolveStyle(session.page?.design));
   const styleLabel = $derived(STYLES[pageStyle].label);
   const theme = $derived(previewTheme ?? themeState.theme);
+  const sideRem = $derived(!sideOpen ? 0 : tab === 'page' ? SIDE_REM.page : SIDE_REM.panel);
   const placement = $derived(
     inspectorPlacement({
       shellWidth,
-      outlineWidth: sideWidth,
+      outlineWidth: sideRem * remPx,
       inspectorWidth: INSPECTOR_REM * remPx,
       device,
     })
@@ -314,6 +323,7 @@
   data-side={sideOpen ? 'open' : 'closed'}
   data-inspector={tab !== 'page' ? 'none' : placement}
   data-inspector-shown={inspectorShown ? '' : undefined}
+  style:--_side="{sideRem}rem"
   style:--_inspector="{INSPECTOR_REM}rem"
   bind:clientWidth={shellWidth}
 >
@@ -342,7 +352,7 @@
   />
 
   <Tabs.Root bind:value={tab} defaultValue="page" class="shell__workspace">
-    <aside class="shell__side" hidden={!sideOpen} bind:clientWidth={sideWidth}>
+    <aside class="shell__side" hidden={!sideOpen}>
       <div class="shell__side-head">
         <Tabs.List class="shell__tabs" aria-label={m.studio_page_editor_tabs_label()}>
           {#each EDITOR_TABS as option (option)}
@@ -444,6 +454,7 @@
           bind:this={canvas}
           page={session.page}
           context={session.context}
+          contextSettled={session.contextSettled}
           brandOverrides={pageBuilder.pending?.brandOverrides ?? null}
           {device}
           {theme}
@@ -513,8 +524,8 @@
 </div>
 
 <style>
+  /* `--_side` is set by the script (SIDE_REM), which the placement rule reads. */
   .shell {
-    --_side: 16rem;
     --_bar: var(--space-10);
     display: grid;
     grid-template-rows: auto minmax(0, 1fr);
@@ -522,16 +533,6 @@
     background: var(--color-background);
     color: var(--color-text);
     font-family: var(--font-sans);
-  }
-
-  .shell[data-tab='style'],
-  .shell[data-tab='offer'],
-  .shell[data-tab='settings'] {
-    --_side: 23.75rem;
-  }
-
-  .shell[data-side='closed'] {
-    --_side: 0rem;
   }
 
   .shell :global(.shell__workspace) {

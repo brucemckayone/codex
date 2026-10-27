@@ -274,3 +274,43 @@ describe('GalleryBlock', () => {
     expect(galleryDefinition.sample).not.toHaveProperty('items');
   });
 });
+
+describe('GalleryBlock: every size a picture has (Codex-61zsk.66)', () => {
+  // Three pictures: a grid in thirds; a mosaic of one large tile and two small
+  // ones; a strip of wide, tall, wide.
+  const DRAWN: Record<string, string[]> = {
+    grid: [
+      '(min-width: 60rem) min(33.33vw, 27.33rem), (min-width: 36rem) min(50vw, 41rem), min(100vw, 82rem)',
+      '(min-width: 60rem) min(33.33vw, 27.33rem), (min-width: 36rem) min(50vw, 41rem), min(100vw, 82rem)',
+      '(min-width: 60rem) min(33.33vw, 27.33rem), (min-width: 36rem) min(50vw, 41rem), min(100vw, 82rem)',
+    ],
+    mosaic: [
+      '(min-width: 53rem) min(75vw, 61.5rem), min(100vw, 82rem)',
+      '(min-width: 53rem) min(25vw, 20.5rem), min(50vw, 41rem)',
+      '(min-width: 53rem) min(25vw, 20.5rem), min(50vw, 41rem)',
+    ],
+    strip: [
+      'clamp(19.5rem, calc(12rem + 24vw), 39rem)',
+      'clamp(10.4rem, calc(6.4rem + 12.8vw), 20.8rem)',
+      'clamp(19.5rem, calc(12rem + 24vw), 39rem)',
+    ],
+  };
+  it.each([
+    'grid',
+    'mosaic',
+    'strip',
+  ])("%s: each picture offers its set, at its tile's width", async (layout) => {
+    await render({ items: pictures(3) }, { layout });
+    const imgs = [...document.body.querySelectorAll('img')];
+    expect(imgs).toHaveLength(3);
+    imgs.forEach((img, index) => {
+      const key = `landing-pages/p1/images/g${index + 1}`;
+      expect(img.getAttribute('srcset')).toBe(
+        ['sm.webp 200w', 'md.webp 400w', 'lg.webp 800w']
+          .map((size) => `${CDN}/${key}/${size}`)
+          .join(', ')
+      );
+      expect(img.getAttribute('sizes')).toBe(DRAWN[layout][index]);
+    });
+  });
+});

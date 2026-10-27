@@ -9,6 +9,7 @@
   show its films, which wait for it without holding the page.
 -->
 <script lang="ts">
+  import { getShareImage } from '$lib/utils/image';
   import { page } from '$app/state';
   import { brandEditor } from '$lib/brand-editor';
   import DraftPreviewBanner from '$lib/components/journeys/DraftPreviewBanner.svelte';
@@ -124,6 +125,8 @@
       coursePage: data.coursePage,
       sellPreview: data.sellPreview,
       enrolled: renderEnrolled,
+      // A visitor's page under `?preview`, like `enrolled` (Codex-2hxff.60).
+      disputeHold: previewing ? null : (data.disputeHold ?? null),
       offer: previewing ? offerAsVisitor(data.offer) : data.offer,
       mediaBaseUrl: data.coursePage.mediaBaseUrl ?? null,
       url: page.url,
@@ -135,7 +138,14 @@
   // hero's `heroImageUrl` could not be used here because it arrives on the
   // STREAMED `sellPreview` promise, which the head has structurally already
   // flushed past. Null → a text-only share card, same as today.
-  const shareImageUrl = $derived(course.coverImageUrl ?? null);
+  //
+  // The cover URL names its md (400px), and a large share card wants about
+  // 1200x630: the largest file there is, xl when the address records the
+  // picture's size, else lg (Codex-kk9nv.2; owner: "xl when known, else lg").
+  const shareImage = $derived(
+    course.coverImageUrl ? getShareImage(course.coverImageUrl) : null
+  );
+  const shareImageUrl = $derived(shareImage?.url ?? null);
 
   // ── PRICE: ONE SOURCE OF TRUTH, AND IT IS THE OFFER ─────────────────────────
   // Everything below used to price itself from `course.priceCents` while the
@@ -302,6 +312,10 @@
   <meta property="og:url" content={canonicalUrl} />
   {#if shareImageUrl}
     <meta property="og:image" content={shareImageUrl} />
+    {#if shareImage?.width && shareImage.height}
+      <meta property="og:image:width" content={String(shareImage.width)} />
+      <meta property="og:image:height" content={String(shareImage.height)} />
+    {/if}
   {/if}
   {#if oneOffPath}
     <!-- GBP, in major units — the same convention the JSON-LD Offers use. -->

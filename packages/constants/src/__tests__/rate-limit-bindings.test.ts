@@ -103,6 +103,29 @@ function collectBindings(): RateLimitBinding[] {
 }
 
 /**
+ * Source with its comments removed, so the probes below see code only. A
+ * comment that merely names `procedure()` (workers/auth/src/user-fields.ts
+ * does) made a worker with no procedure route "need" the api binding. A
+ * block comment must open a line or follow whitespace: a route glob such as
+ * `'/api/*'` holds a comment opener that would otherwise swallow the code up
+ * to the next comment's close. The `[^:]` keeps a URL's `//` (https://…) from
+ * reading as a line comment.
+ */
+function withoutComments(source: string): string {
+  return source
+    .replace(/(^|\s)\/\*[\s\S]*?\*\//gm, '$1')
+    .replace(/(^|[^:])\/\/.*$/gm, '$1');
+}
+
+/**
+ * A file that imports `procedure` (not as a type) from @codex/worker-utils
+ * declares procedure routes. Keyed on the import, not on `procedure(`, which
+ * a string or a comment can contain without any route behind it.
+ */
+const PROCEDURE_IMPORT =
+  /import\s*\{[^}]*(?<!type\s)\bprocedure\b[^}]*\}\s*from\s*['"]@codex\/worker-utils['"]/;
+
+/**
  * Presets a worker's own source declares on a `procedure()` policy, plus the
  * `api` fallback whenever that worker has any procedure route at all — an
  * omitted `rateLimit` is enforced as `api`, not as "unlimited".
@@ -132,11 +155,11 @@ function declaredPresets(worker: string): Set<string> {
       if (!entry.name.endsWith('.ts') || entry.name.includes('.test.'))
         continue;
 
-      const source = readFileSync(full, 'utf-8');
+      const source = withoutComments(readFileSync(full, 'utf-8'));
       for (const match of source.matchAll(/rateLimit:\s*'([a-z]+)'/g)) {
         presets.add(match[1] as string);
       }
-      if (/\bprocedure\s*\(/.test(source)) hasProcedureRoute = true;
+      if (PROCEDURE_IMPORT.test(source)) hasProcedureRoute = true;
     }
   };
 

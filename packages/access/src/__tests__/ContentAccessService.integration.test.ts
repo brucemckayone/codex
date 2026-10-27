@@ -1118,6 +1118,33 @@ describe('ContentAccessService Integration', () => {
         expect(result.items.some((i) => i.content.id === item.id)).toBe(true);
       });
 
+      it('includes subscription content while a failed renewal is retried (past_due, Codex-2hxff.10)', async () => {
+        const { creatorUserId, subscriberUserId, orgId, tierId } =
+          await seedOrgWithTierAndSubscriber();
+        const item = await createSubscriberContent(creatorUserId, orgId, {
+          slugPrefix: 'sub-past-due',
+          accessType: 'subscribers',
+          minimumTierId: tierId,
+          priceCents: 0,
+        });
+        await db
+          .update(subscriptions)
+          .set({ status: 'past_due' })
+          .where(eq(subscriptions.userId, subscriberUserId));
+
+        const result = await accessService.listUserLibrary(subscriberUserId, {
+          page: 1,
+          limit: 20,
+          filter: 'all',
+          sortBy: 'recent',
+          contentType: 'all',
+          accessType: 'all',
+          search: '',
+        });
+
+        expect(result.items.some((i) => i.content.id === item.id)).toBe(true);
+      });
+
       it('excludes subscription content while the subscription is disputed (Codex-2hxff.9)', async () => {
         const { creatorUserId, subscriberUserId, orgId, tierId } =
           await seedOrgWithTierAndSubscriber();
@@ -1178,6 +1205,44 @@ describe('ContentAccessService Integration', () => {
           .set({ disputedAt: new Date() })
           .where(eq(subscriptions.userId, subscriberUserId));
 
+        expect(await listed()).toBe(false);
+      });
+
+      it('a past_due subscriber, not a follower, still sees followers-only content; a cancelled one does not (Codex-2hxff.10)', async () => {
+        const { creatorUserId, subscriberUserId, orgId } =
+          await seedOrgWithTierAndSubscriber();
+        const item = await createSubscriberContent(creatorUserId, orgId, {
+          slugPrefix: 'followers-past-due',
+          accessType: 'subscribers',
+          minimumTierId: null,
+          priceCents: 0,
+        });
+        await db
+          .update(content)
+          .set({ isFollowerGated: true })
+          .where(eq(content.id, item.id));
+        const listed = async () =>
+          (
+            await accessService.listUserLibrary(subscriberUserId, {
+              page: 1,
+              limit: 20,
+              filter: 'all',
+              sortBy: 'recent',
+              contentType: 'all',
+              accessType: 'all',
+              search: '',
+            })
+          ).items.some((i) => i.content.id === item.id);
+        const setStatus = (status: 'past_due' | 'cancelled') =>
+          db
+            .update(subscriptions)
+            .set({ status })
+            .where(eq(subscriptions.userId, subscriberUserId));
+
+        await setStatus('past_due');
+        expect(await listed()).toBe(true);
+
+        await setStatus('cancelled');
         expect(await listed()).toBe(false);
       });
 
@@ -2217,6 +2282,39 @@ describe('ContentAccessService Integration', () => {
             expirySeconds: 3600,
           })
         ).rejects.toThrow(AccessDeniedError);
+      });
+
+      // Codex-2hxff.10 (owner decision P-3): a failed renewal keeps access
+      // while Stripe retries the card; access ends when Stripe gives up.
+      it.each([
+        ['past_due', true],
+        ['cancelled', false],
+        ['paused', false],
+      ] as const)('a subscriber at the minimum tier in status %s: access %s', async (status, granted) => {
+        mockPurchaseService.verifyPurchase.mockClear();
+        mockPurchaseService.verifyPurchase.mockResolvedValue(false);
+
+        const slug = `hybrid-${status.replace('_', '-')}`;
+        const { org, proTier } = await createHybridOrgWithTiers(slug);
+        const item = await createHybridContent(org.id, proTier.id, slug);
+        const [subUserId] = await seedTestUsers(db, 1);
+        await db.insert(subscriptions).values(
+          createTestSubscriptionInput(subUserId, org.id, proTier.id, {
+            status,
+          })
+        );
+
+        const attempt = accessService.getStreamingUrl(subUserId, {
+          contentId: item.id,
+          expirySeconds: 3600,
+        });
+        if (granted) {
+          expect((await attempt).streamingUrl).toContain(
+            '/hls/master.m3u8?token='
+          );
+        } else {
+          await expect(attempt).rejects.toThrow(AccessDeniedError);
+        }
       });
 
       it('should grant hybrid content to subscriber above minimum tier (subscription path)', async () => {

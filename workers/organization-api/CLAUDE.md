@@ -10,16 +10,16 @@ Organization CRUD, membership management, subscription tiers, follower relations
 |---|---|---|---|---|---|
 | POST | `/api/organizations` | `required`, roles: creator/admin/platform_owner | body: `createOrganizationSchema` | 201 | Warms brand KV cache via `waitUntil` |
 | GET | `/api/organizations/check-slug/:slug` | `required` | params: `slug` | 200 `{ available }` | Checks against reserved subdomains |
-| GET | `/api/organizations/slug/:slug` | `required` | params: `slug` | 200 | Get org by slug |
+| GET | `/api/organizations/slug/:slug` | `required` | params: `slug` | 200 | Get org by slug, without the payee's `primaryConnectAccountUserId` (Codex-kk6zx) |
 | GET | `/api/organizations/my-organizations` | `required` | — | 200 | User's orgs with their role |
 | GET | `/api/organizations/public/:slug` | `none` | params: `slug` | 200 | Public branding fields only (legacy) |
-| GET | `/api/organizations/public/:slug/info` | `none` | params: `slug` | 200 | Full public org identity + branding; KV-cached 30 min |
+| GET | `/api/organizations/public/:slug/info` | `none` | params: `slug` | 200 | Full public org identity + branding; KV-cached 4h |
 | GET | `/api/organizations/public/:slug/stats` | `none` | params: `slug` | 200 | Content counts, duration, creator count, views; KV-cached |
 | GET | `/api/organizations/public/:slug/creators` | `none` | params + query: page/limit | 200 | Paginated public creator profiles; KV-cached |
-| GET | `/api/organizations/public/:slug/members` | `none` | params + query: page/limit/role | 200 | Paginated public member profiles; KV-cached |
-| GET | `/api/organizations/:id` | `required` | params: `id` | 200 | Get org by ID |
+| GET | `/api/organizations/public/:slug/members` | `none` | params + query: page/limit/role | 200 | Paginated public member profiles; not KV-cached |
+| GET | `/api/organizations/:id` | `required` | params: `id` | 200 | Get org by ID, without the payee's user id |
 | PATCH | `/api/organizations/:id` | `required`, `requireOrgManagement` | body: `updateOrganizationSchema` | 200 | Invalidates brand KV + VersionedCache on slug change |
-| GET | `/api/organizations` | `required` | query: pagination + filters | 200 | List orgs scoped to user |
+| GET | `/api/organizations` | `required` | query: pagination + filters | 200 | List EVERY live org (not scoped to the user), each without the payee's user id |
 | DELETE | `/api/organizations/:id` | `required`, `requireOrgManagement`, `rateLimit: 'strict'` | params: `id` | 204 | Soft delete; invalidates KV |
 
 ### Member Routes (`/api/organizations/:id/members/*`)
@@ -41,7 +41,7 @@ One owner per organisation; it moves only by the owner's offer being accepted. W
 | GET | `/api/organizations/:id/ownership` | `required`, `requireOrgMembership` | params | 200 | Owner/admin/creator. Composes `activeAgreements` (+ owner's `ownerHasSubscriptionAgreement`) from `ctx.services.agreements` for the owner and the recipient |
 | POST | `/api/organizations/:id/ownership/offers` | same, `rateLimit: 'strict'` | body: `offerOwnershipSchema` | 201 | Owner only. Emails the recipient |
 | POST | `/api/organizations/:id/ownership/offers/:offerId/withdraw` | same, `strict` | params | 200 | Owner only |
-| POST | `/api/organizations/:id/ownership/offers/:offerId/accept` | same, `strict` | params | 200 | Recipient only. Busts BOTH users' membership caches (`utils/membership-invalidation.ts`) |
+| POST | `/api/organizations/:id/ownership/offers/:offerId/accept` | same, `strict` | params | 200 | Recipient only. Busts BOTH users' membership caches (`invalidateMemberCaches`, `@codex/worker-utils` cache-fanout.ts) |
 | POST | `/api/organizations/:id/ownership/offers/:offerId/decline` | same, `strict` | params | 200 | Recipient only. Emails the owner |
 
 ### Settings Routes (`/api/organizations/:id/settings/*`)
@@ -116,9 +116,12 @@ Branding and org-info reads go through a single cache layer (`CACHE_KV` via `Ver
 
 | Layer | Key Pattern | Invalidated By |
 |---|---|---|
-| **`CACHE_KV` (VersionedCache)** | org slug or org ID | `cache.invalidate(slug)` / `cache.invalidate(orgId)` |
+| **`CACHE_KV` (VersionedCache)** | org slug or org ID | `invalidateOrgPublicCaches(cache, slug)` / `cache.invalidate(orgId)` |
+| **`CACHE_KV`, the public creators list** | `CacheType.COLLECTION_ORG_CREATORS(slug)` (`org:{slug}:creators`) | `invalidateOrgPublicCaches(cache, slug)`; a listed member's own profile write (identity-api) bumps only this id |
 
 `invalidateBrandAndCache()` in `settings.ts` runs the slug-keyed invalidation INLINE (awaited) — that is the read-critical path. The orgId-keyed version bump is fire-and-forget via `ctx.executionCtx.waitUntil(...)`. The PATCH /:id and DELETE /:id handlers in `organizations.ts` invalidate the slug cache via `waitUntil`.
+
+`GET /public/:slug/creators` reads under its own id, not the slug (Codex-kk9nv.9). The list changes on every listed member's profile write, and sharing the slug's version made each of those writes evict the org's config and stats too. So anything that changes the org or its membership must bump BOTH ids, through `invalidateOrgPublicCaches` (`invalidateOrgSlugCache` in worker-utils does). A bare `cache.invalidate(slug)` leaves the creators list stale for its 4h TTL. `organizations-creators-cache-id.test.ts` pins the read id.
 
 > **Removed (Codex-fopbo):** A second KV namespace `BRAND_KV` (`brand:{slug}` keys) was previously written on every branding mutation by `updateBrandCache()` and `BRAND_KV.delete()` calls. The `apps/web` reader (`brand-cache.ts`) was never wired to a real consumer — only its own tests imported it. The binding, the writer, and the dead reader module were removed because nothing read the cache.
 

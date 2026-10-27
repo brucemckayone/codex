@@ -255,8 +255,75 @@ describe('SubscriptionService', () => {
           subscription_data: expect.objectContaining({
             metadata: expect.objectContaining({ codex_env: 'test' }),
           }),
+          // One open checkout per buyer and org (Codex-2hxff.15): the
+          // reservation's 30-minute expiry and its key.
+          expires_at: expect.any(Number),
+        }),
+        expect.objectContaining({
+          idempotencyKey: expect.stringMatching(/^checkout_/),
         })
       );
+    });
+
+    it('gives a second tab the same Stripe page, and another interval a new one', async () => {
+      const { org, tier1 } = await createFullOrg('checkout-reserve');
+      const open = (interval: 'month' | 'year') =>
+        service.createCheckoutSession(
+          otherCreatorId,
+          org.id,
+          tier1.id,
+          interval,
+          'https://example.com/success',
+          'https://example.com/cancel'
+        );
+
+      const first = await open('month');
+      const secondTab = await open('month');
+      expect(secondTab).toEqual(first);
+      expect(stripe.checkout.sessions.create).toHaveBeenCalledTimes(1);
+
+      const annual = await open('year');
+      expect(annual.sessionId).not.toBe(first.sessionId);
+      // The monthly page is closed at Stripe so it cannot take payment too.
+      expect(stripe.checkout.sessions.expire).toHaveBeenCalledWith(
+        first.sessionId
+      );
+    });
+
+    it('marks a paid checkout completed, and never throws when it cannot', async () => {
+      const { org, tier1 } = await createFullOrg('checkout-complete');
+      const { sessionId } = await service.createCheckoutSession(
+        otherCreatorId,
+        org.id,
+        tier1.id,
+        'month',
+        'https://example.com/success',
+        'https://example.com/cancel'
+      );
+
+      await service.markCheckoutSessionCompleted(sessionId);
+      const { checkoutSessions } = await import('@codex/database/schema');
+      const { eq } = await import('drizzle-orm');
+      const [row] = await db
+        .select({ status: checkoutSessions.status })
+        .from(checkoutSessions)
+        .where(eq(checkoutSessions.stripeSessionId, sessionId));
+      expect(row?.status).toBe('completed');
+
+      const broken = new SubscriptionService(
+        {
+          db: {
+            update: () => {
+              throw new Error('database unreachable');
+            },
+          } as unknown as typeof db,
+          environment: 'test',
+        },
+        stripe
+      );
+      await expect(
+        broken.markCheckoutSessionCompleted(sessionId)
+      ).resolves.toBeUndefined();
     });
 
     // Codex-ssfes: Checkout Session MUST be created with `customer: cus_...`,
@@ -333,7 +400,10 @@ describe('SubscriptionService', () => {
       );
 
       expect(stripe.checkout.sessions.create).toHaveBeenCalledWith(
-        expect.objectContaining({ customer: cachedId })
+        expect.objectContaining({ customer: cachedId }),
+        expect.objectContaining({
+          idempotencyKey: expect.stringContaining(cachedId),
+        })
       );
       // Cache-hit path: no Stripe customer lookup or creation.
       expect(customersMock.list).not.toHaveBeenCalled();
@@ -472,6 +542,68 @@ describe('SubscriptionService', () => {
   // per-case so we can assert against specific Stripe responses.
 
   describe('verifyCheckoutSession', () => {
+    // Codex-2hxff.23 review (M3, L2): a session_id Stripe does not know is the
+    // client's mistake (warn, errorId returned); an outage is ours (error).
+    function sessionLookupFails(error: Error) {
+      (
+        stripe.checkout.sessions as unknown as {
+          retrieve: ReturnType<typeof vi.fn>;
+        }
+      ).retrieve = vi.fn().mockRejectedValue(error);
+      const obs = (
+        service as unknown as {
+          obs: {
+            warn: (...a: unknown[]) => void;
+            error: (...a: unknown[]) => void;
+          };
+        }
+      ).obs;
+      return { warn: vi.spyOn(obs, 'warn'), error: vi.spyOn(obs, 'error') };
+    }
+
+    it("a session Stripe does not know: a warning, and the client gets its errorId, not Stripe's message", async () => {
+      const logged = sessionLookupFails(
+        Object.assign(new Error('No such checkout.session: cs_madeup'), {
+          type: 'StripeInvalidRequestError',
+          code: 'resource_missing',
+          statusCode: 404,
+        })
+      );
+
+      const err = await service
+        .verifyCheckoutSession('cs_madeup', otherCreatorId)
+        .catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(SubscriptionCheckoutError);
+      const context = (err as SubscriptionCheckoutError).context;
+      expect(logged.error).not.toHaveBeenCalled();
+      expect(logged.warn).toHaveBeenCalledWith(
+        'Stripe refused the checkout session lookup',
+        expect.objectContaining({ errorId: context?.errorId })
+      );
+      expect(typeof context?.errorId).toBe('string');
+      expect(JSON.stringify(context)).not.toContain('No such');
+    });
+
+    it('a connection failure on the session lookup is an error, not a warning', async () => {
+      const logged = sessionLookupFails(
+        Object.assign(new Error('socket hang up'), {
+          type: 'StripeConnectionError',
+        })
+      );
+
+      const err = await service
+        .verifyCheckoutSession('cs_outage', otherCreatorId)
+        .catch((e: unknown) => e);
+
+      expect(err).not.toBeInstanceOf(SubscriptionCheckoutError);
+      expect(logged.error).toHaveBeenCalled();
+      expect(logged.warn).not.toHaveBeenCalledWith(
+        'Stripe refused the checkout session lookup',
+        expect.anything()
+      );
+    });
+
     it('returns complete + subscription row when webhook has landed', async () => {
       const { org, tier1 } = await createFullOrg('verify-complete');
 
@@ -1101,6 +1233,80 @@ describe('SubscriptionService', () => {
   // ─── handleSubscriptionUpdated ────────────────────────────────────
 
   describe('handleSubscriptionUpdated', () => {
+    // Codex-2hxff.10: past_due now grants access, so a late or replayed event
+    // reviving a cancelled row would hand access back. Stripe's `canceled` is
+    // final; the live subscription decides.
+    describe('a cancelled row and a reviving event', () => {
+      async function cancelledSub(label: string) {
+        const { org, tier1 } = await createFullOrg(label);
+        return takeFirst(
+          await db
+            .insert(subscriptions)
+            .values(
+              createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+                status: 'cancelled',
+              })
+            )
+            .returning()
+        );
+      }
+      const snapshot = (id: string | null, status: string) =>
+        ({
+          id,
+          status,
+          cancel_at_period_end: false,
+          metadata: {},
+          items: {
+            data: [
+              {
+                current_period_start: Math.floor(Date.now() / 1000),
+                current_period_end: Math.floor(Date.now() / 1000) + 86400,
+              },
+            ],
+          },
+        }) as unknown as Stripe.Subscription;
+      const statusOf = async (id: string) => {
+        const { eq } = await import('drizzle-orm');
+        return takeFirst(
+          await db.select().from(subscriptions).where(eq(subscriptions.id, id))
+        ).status;
+      };
+
+      it.each([
+        'past_due',
+        'active',
+      ])('a stale %s event stays ignored while Stripe has it cancelled', async (eventStatus) => {
+        const sub = await cancelledSub(
+          `wh-stale-${eventStatus.replace('_', '-')}`
+        );
+        vi.mocked(stripe.subscriptions.retrieve).mockResolvedValueOnce({
+          id: sub.stripeSubscriptionId,
+          status: 'canceled',
+        } as never);
+
+        const result = await service.handleSubscriptionUpdated(
+          snapshot(sub.stripeSubscriptionId, eventStatus)
+        );
+
+        expect(result).toBeUndefined();
+        expect(await statusOf(sub.id)).toBe('cancelled');
+      });
+
+      it('comes back when Stripe has it live again (unpaid, then paid)', async () => {
+        const sub = await cancelledSub('wh-unpaid-paid');
+        vi.mocked(stripe.subscriptions.retrieve).mockResolvedValueOnce({
+          id: sub.stripeSubscriptionId,
+          status: 'active',
+        } as never);
+
+        await service.handleSubscriptionUpdated(
+          snapshot(sub.stripeSubscriptionId, 'active')
+        );
+
+        expect(await statusOf(sub.id)).toBe('active');
+      });
+    });
+
     it('should map active status (cancel_at_period_end=false)', async () => {
       const { org, tier1 } = await createFullOrg('wh-active');
       const sub = takeFirst(
@@ -1565,11 +1771,12 @@ describe('SubscriptionService', () => {
       expect(result.orgId).toBe(org.id);
     });
 
-    it('should return { userId: undefined, orgId: undefined } when metadata is absent (negative path)', async () => {
-      // Negative path — subscription was created before metadata was stamped
-      // (legacy data). Handler must still update the DB row and return an
-      // object so the route code paths remain uniform; ids are undefined so
-      // invalidateForUser skips the cache bump per its documented contract.
+    it('takes { userId, orgId } from our row when metadata is absent', async () => {
+      // Subscription created before metadata was stamped (legacy data). The
+      // side effects follow the subscription, not the payload
+      // (Codex-2hxff.15, SUB-09): its access still ends, so the ids come from
+      // the row. Until then this asserted undefined ids, which left a legacy
+      // subscriber streaming for 20 minutes after their subscription ended.
       const { org, tier1 } = await createFullOrg('wh-deleted-no-metadata');
       const sub = takeFirst(
         await db
@@ -1587,8 +1794,8 @@ describe('SubscriptionService', () => {
         metadata: {},
       } as unknown as Stripe.Subscription);
 
-      expect(result.userId).toBeUndefined();
-      expect(result.orgId).toBeUndefined();
+      expect(result.userId).toBe(otherCreatorId);
+      expect(result.orgId).toBe(org.id);
     });
   });
 
@@ -2041,16 +2248,21 @@ describe('SubscriptionService', () => {
       ).toBe(updated.amountCents);
     });
 
-    it('downgrade (Phase 1 fallback): keeps create_prorations, NO payment_behavior, NO idempotency key', async () => {
+    it('downgrade (Phase 1 fallback): keeps create_prorations, NO payment_behavior, its own idempotency key', async () => {
       const { org, tier1, tier2 } = await createFullOrg('change-tier-down');
       // Subscribe on tier2 (priceMonthly=999) — split must sum to 999.
-      await db.insert(subscriptions).values(
-        createTestSubscriptionInput(otherCreatorId, org.id, tier2.id, {
-          amountCents: tier2.priceMonthly,
-          platformFeeCents: 100,
-          organizationFeeCents: 134,
-          creatorPayoutCents: 765,
-        })
+      const sub = takeFirst(
+        await db
+          .insert(subscriptions)
+          .values(
+            createTestSubscriptionInput(otherCreatorId, org.id, tier2.id, {
+              amountCents: tier2.priceMonthly,
+              platformFeeCents: 100,
+              organizationFeeCents: 134,
+              creatorPayoutCents: 765,
+            })
+          )
+          .returning()
       );
 
       // tier2 (999) → tier1 (499) is a DOWNGRADE.
@@ -2067,9 +2279,11 @@ describe('SubscriptionService', () => {
       // Phase 1 downgrade still updates the local row immediately —
       // Phase 2 replaces this with a scheduled change.
       expect(params.proration_date).toEqual(expect.any(Number));
-      // No options arg (idempotency key) for downgrade — proration is
-      // deferred to the next invoice, no risk of double-charging on retry.
-      expect(updateCall[2]).toBeUndefined();
+      // A downgrade has a key too (Codex-2hxff.15, SUB-12): a retried one
+      // must not credit the customer twice.
+      expect(updateCall[2]).toEqual({
+        idempotencyKey: `downgrade_${sub.id}_${tier1.stripePriceMonthlyId}_${params.proration_date}`,
+      });
     });
 
     it('upgrade payment failure: maps Stripe 402 to SubscriptionPaymentRequiredError, leaves DB untouched', async () => {
@@ -2133,7 +2347,9 @@ describe('SubscriptionService', () => {
           .returning()
       );
 
-      const previewProrationDate = 1700000000;
+      // A preview's date stands for 10 minutes (Codex-2hxff.15, SUB-12); the
+      // fixed 2023 date this used is now refused as expired.
+      const previewProrationDate = Math.floor(Date.now() / 1000);
       await service.changeTier(
         otherCreatorId,
         org.id,
@@ -2146,7 +2362,7 @@ describe('SubscriptionService', () => {
         expect.any(String),
         expect.objectContaining({ proration_date: previewProrationDate }),
         expect.objectContaining({
-          idempotencyKey: `upgrade_${insertedSub.id}_${previewProrationDate}`,
+          idempotencyKey: `upgrade_${insertedSub.id}_${tier2.stripePriceMonthlyId}_${previewProrationDate}`,
         })
       );
     });
@@ -2182,7 +2398,7 @@ describe('SubscriptionService', () => {
       // Preview was generated against tier2 at its current £9.99/month
       // price (priceMonthly=999 from createFullOrg). Capture the prorationDate
       // the dialog would have held.
-      const previewProrationDate = 1700000000;
+      const previewProrationDate = Math.floor(Date.now() / 1000);
       const previewSnapshotMonthly = tier2.priceMonthly; // 999
 
       // Dashboard sync-back arrives: tier2's monthly price is bumped to
@@ -2275,7 +2491,7 @@ describe('SubscriptionService', () => {
         .insert(subscriptions)
         .values(createTestSubscriptionInput(otherCreatorId, org.id, tier1.id));
 
-      const previewProrationDate = 1700000001;
+      const previewProrationDate = Math.floor(Date.now() / 1000);
 
       // Stripe rejects the proration invoice with HTTP 402.
       const stripeError = Object.assign(new Error('Your card was declined.'), {
@@ -2311,11 +2527,17 @@ describe('SubscriptionService', () => {
       expect(err.code).toBe('PAYMENT_REQUIRED');
       expect(err.statusCode).toBe(402);
       // Context carries newTierId + billingInterval so the dialog can
-      // re-open the correct row, and stripeMessage so the toast can show
-      // the upstream message verbatim.
+      // re-open the correct row.
       expect(err.context?.newTierId).toBe(tier2.id);
       expect(err.context?.billingInterval).toBe('month');
-      expect(err.context?.stripeMessage).toBe('Your card was declined.');
+      // The context is sent to the client as `details`: Stripe's own
+      // message is logged, never returned (Codex-2hxff.23, SEC-02).
+      expect(JSON.stringify(err.context)).not.toContain(
+        'Your card was declined.'
+      );
+      expect(err.context).not.toHaveProperty('stripeMessage');
+      // The errorId of the log line that holds it (L2).
+      expect(typeof err.context?.errorId).toBe('string');
       // Codex-w87s4: prorationDate echoes the pinned preview timestamp
       // — this is what lets the dialog branch "stale preview" from
       // "transient payment failure" without needing a second round-trip.
@@ -2921,6 +3143,30 @@ describe('SubscriptionService', () => {
       const results = await service.getUserSubscriptions(thirdUserId);
       expect(results.length).toBeGreaterThanOrEqual(2);
     });
+
+    it("sends the org's four display fields, never its payee id (Codex-kk6zx)", async () => {
+      const { org, tier1 } = await createFullOrg('mine-org-fields');
+      const payee = takeFirst(await seedTestUsers(db, 1), 'payee id');
+      await db
+        .update(organizations)
+        .set({ primaryConnectAccountUserId: payee })
+        .where(eq(organizations.id, org.id));
+      const subscriber = takeFirst(await seedTestUsers(db, 1), 'subscriber');
+      await db
+        .insert(subscriptions)
+        .values(createTestSubscriptionInput(subscriber, org.id, tier1.id));
+
+      const [mine] = await service.getUserSubscriptions(subscriber);
+
+      expect(mine).toBeDefined();
+      expect(Object.keys(mine!.organization).sort()).toEqual([
+        'id',
+        'logoUrl',
+        'name',
+        'slug',
+      ]);
+      expect(mine!.organization.id).toBe(org.id);
+    });
   });
 
   // ─── listSubscribers ──────────────────────────────────────────────
@@ -3087,6 +3333,57 @@ describe('SubscriptionService', () => {
   // ─── handleInvoicePaymentSucceeded ────────────────────────────────
 
   describe('handleInvoicePaymentSucceeded', () => {
+    // Codex-2hxff.10: the status written is the live subscription's, not a
+    // blanket ACTIVE — so a late invoice never revives one Stripe cancelled
+    // (a full refund, a lost dispute), and a renewal keeps cancelling.
+    it.each([
+      ['cancelled', 'canceled', false, 'cancelled'],
+      ['active', 'active', true, 'cancelling'],
+      ['past_due', 'active', false, 'active'],
+    ] as const)('a %s row, live Stripe %s (cancel_at_period_end=%s) → %s', async (rowStatus, liveStatus, cancelAtPeriodEnd, expected) => {
+      const { org, tier1 } = await createFullOrg(
+        `invoice-live-${rowStatus.replace('_', '-')}-${expected}`
+      );
+      const sub = takeFirst(
+        await db
+          .insert(subscriptions)
+          .values(
+            createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+              status: rowStatus,
+            })
+          )
+          .returning()
+      );
+      const now = Math.floor(Date.now() / 1000);
+      vi.mocked(stripe.subscriptions.retrieve).mockResolvedValueOnce({
+        id: sub.stripeSubscriptionId,
+        status: liveStatus,
+        cancel_at_period_end: cancelAtPeriodEnd,
+        items: {
+          data: [
+            { current_period_start: now, current_period_end: now + 86400 },
+          ],
+        },
+      } as never);
+
+      await service.handleInvoicePaymentSucceeded(
+        createMockStripeInvoice({
+          amount_paid: 499,
+          parent: {
+            subscription_details: { subscription: sub.stripeSubscriptionId },
+          },
+        }) as unknown as Stripe.Invoice
+      );
+
+      const after = takeFirst(
+        await db
+          .select()
+          .from(subscriptions)
+          .where(eq(subscriptions.id, sub.id))
+      );
+      expect(after.status).toBe(expected);
+    });
+
     it('should update period dates and execute revenue transfers', async () => {
       const { org, tier1 } = await createFullOrg('invoice-success');
       const sub = takeFirst(
@@ -3730,7 +4027,9 @@ describe('SubscriptionService', () => {
               id: 'si_test_noop',
               price: {
                 id: 'price_test_monthly',
-                unit_amount: 499,
+                // The row keeps the live price (Codex-2hxff.15, SUB-11): the
+                // same price as the first call's retrieve.
+                unit_amount: afterFirst.amountCents,
                 currency: 'gbp',
                 recurring: { interval: 'month' },
               },
@@ -3804,8 +4103,9 @@ describe('SubscriptionService', () => {
   //   - The "no agreements" branch (line 2894) routes the entire creator
   //     pool to the org owner — distinct from the "agreements with
   //     undersum" branch (which keeps the pool inside the creator fan-out).
-  //   - effectiveUntil > now() filters out soft-deleted/expired rows from
-  //     the next cycle (line 2890).
+  //   - effectiveUntil is a REVIEW date and is NOT read (AGR-01,
+  //     Codex-2hxff.17); a removed creator's agreement is terminated
+  //     instead, and the next cycle skips it (AGR-09, Codex-2hxff.18).
   //
   // Schema note: creator_organization_agreements already has a unique
   // index on (creator_id, organization_id, effective_from) — see
@@ -3813,8 +4113,8 @@ describe('SubscriptionService', () => {
   // are by design (a creator can renegotiate their share over time), so
   // we do NOT add a stricter (creator_id, organization_id) unique
   // constraint — that would break the historical-record use case. The
-  // application layer is responsible for ensuring only one row has
-  // `effective_until IS NULL OR > now()` per pair at any time. The
+  // application layer is responsible for ensuring only one row is
+  // `status = 'active'` per pair at any time (a partial unique index). The
   // duplicate-row test below covers the cheap schema case (same
   // effective_from), which IS rejected.
   describe('executeTransfers multi-creator split invariants', () => {
@@ -3927,6 +4227,113 @@ describe('SubscriptionService', () => {
           idempotencyKey,
         }));
     }
+
+    // ─── Codex-2hxff.62: an invoice keeps its first split ───
+    // Owner decision 2026-10-21, "Keep its first split": an invoice paid out
+    // once is never re-split. An accepted agreement takes effect from when it
+    // was proposed, so a redelivery after the acceptance used to find it in
+    // force at the invoice's time and ADD a creator slice on top of the
+    // owner's: the charge paid out more than it took in.
+    describe('an invoice keeps its first split (Codex-2hxff.62)', () => {
+      async function subscribedOrg(label: string) {
+        const { org, tier1 } = await createFullOrg(label);
+        const sub = takeFirst(
+          await db
+            .insert(subscriptions)
+            .values(
+              createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+                status: 'active',
+              })
+            )
+            .returning()
+        );
+        const createTransfer = vi
+          .fn()
+          .mockImplementation(
+            (args: { metadata?: { type?: string; creator_id?: string } }) =>
+              Promise.resolve({
+                id: `tr_${args?.metadata?.type ?? 'x'}_${Math.random().toString(36).slice(2, 10)}`,
+              })
+          );
+        (stripe as unknown as { transfers: unknown }).transfers = {
+          create: createTransfer,
+        };
+        const chargeId = `ch_first_split_${crypto.randomUUID().slice(0, 12)}`;
+        const invoice = createMockStripeInvoice({
+          amount_paid: 1000,
+          parent: {
+            subscription_details: { subscription: sub.stripeSubscriptionId },
+          },
+          payments: {
+            data: [
+              {
+                payment: { charge: chargeId, payment_intent: `pi_${chargeId}` },
+              },
+            ],
+          },
+        }) as unknown as Stripe.Invoice;
+        const slices = () =>
+          db
+            .select()
+            .from(payoutsTable)
+            .where(eq(payoutsTable.stripeChargeId, chargeId));
+        return { org, sub, chargeId, invoice, createTransfer, slices };
+      }
+
+      it('a redelivery after a backdated agreement is accepted adds no creator slice', async () => {
+        const { org, invoice, createTransfer, slices } = await subscribedOrg(
+          'first-split-backdated'
+        );
+        const creatorId = await seedCreatorWithConnect(org.id);
+
+        // No agreement yet: the creator pool goes to the owner.
+        await service.handleInvoicePaymentSucceeded(invoice);
+        const first = await slices();
+
+        // The creator accepts a proposal made before the invoice.
+        await seedAgreement(org.id, creatorId, 5000, {
+          effectiveFrom: new Date(Date.now() - 2 * 60 * 60 * 1000),
+        });
+        await service.handleInvoicePaymentSucceeded(invoice);
+        const after = await slices();
+
+        expect(after.map((r) => r.id).sort()).toEqual(
+          first.map((r) => r.id).sort()
+        );
+        expect(after.some((r) => r.payoutType === 'creator_payout')).toBe(
+          false
+        );
+        expect(after.reduce((sum, r) => sum + r.amountCents, 0)).toBe(1000);
+        expect(perCreatorTransferCalls(createTransfer)).toEqual([]);
+      });
+
+      it('a delivery that died after the platform fee: the redelivery still splits it', async () => {
+        const { org, sub, chargeId, invoice, slices } =
+          await subscribedOrg('first-split-died');
+        // What the dead delivery left: the platform fee row and nothing else.
+        await db.insert(payoutsTable).values({
+          userId: null,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          sourceType: 'subscription',
+          amountCents: 100,
+          payoutType: 'platform_fee',
+          status: 'paid',
+          stripeChargeId: chargeId,
+          transferGroup: `sub_${sub.id}`,
+          resolvedAt: new Date(),
+        });
+
+        await service.handleInvoicePaymentSucceeded(invoice);
+
+        const rows = await slices();
+        expect(rows.map((r) => r.payoutType).sort()).toEqual([
+          'creator_payout_to_owner',
+          'organization_fee',
+          'platform_fee',
+        ]);
+      });
+    });
 
     // ─── Codex-69t7c WP4 (D2/D4): single-account routing invariant ───
     // A creator has exactly ONE Connect account (uq_stripe_connect_user) that
@@ -4481,8 +4888,7 @@ describe('SubscriptionService', () => {
       // effective_from values are allowed by design (time-sliced
       // agreements — a creator can renegotiate). This test pins the
       // narrow schema-level dedupe; the broader "only one active row"
-      // invariant is an application-layer concern (see effectiveUntil
-      // filter in subscription-service.ts:2890).
+      // invariant is the partial unique index on status = 'active'.
       const { org } = await createFullOrg('split-duplicate');
       const c1 = await seedCreatorWithConnect(org.id);
 
@@ -4504,24 +4910,68 @@ describe('SubscriptionService', () => {
       ).rejects.toThrow();
     });
 
-    it('mid-period creator removal: expired agreement (effective_until in the past) is excluded from next-cycle transfers', async () => {
+    it("a review date passing mid-period does NOT stop the creator's cut (AGR-01)", async () => {
+      // Owner decision AGR-01 (Codex-2hxff.17): the term's end is a review
+      // date. This test used to pin the opposite: an `effective_until` in
+      // the past silently routed the creator's share to the owner.
+      const { org, tier1 } = await createFullOrg('split-review-date');
+      const c1 = await seedCreatorWithConnect(org.id);
+      const { agreementId } = await seedAgreement(org.id, c1, 10000, {
+        effectiveFrom: new Date(Date.now() - 60_000),
+        effectiveUntil: new Date(Date.now() - 1000),
+      });
+      expect(agreementId).toBeDefined();
+
+      const sub = takeFirst(
+        await db
+          .insert(subscriptions)
+          .values(
+            createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+              status: 'active',
+            })
+          )
+          .returning()
+      );
+      const chargeId = 'ch_review_date_passed';
+      await service.handleInvoicePaymentSucceeded(
+        createMockStripeInvoice({
+          amount_paid: 1000,
+          parent: {
+            subscription_details: { subscription: sub.stripeSubscriptionId },
+          },
+          payments: {
+            data: [
+              { payment: { charge: chargeId, payment_intent: 'pi_review_1' } },
+            ],
+          },
+        }) as unknown as Stripe.Invoice
+      );
+
+      const transfersMock = stripe.transfers.create as ReturnType<typeof vi.fn>;
+      expect(
+        perCreatorTransferCalls(transfersMock).filter(
+          (c) => c.idempotencyKey === `${chargeId}_creator_${c1}`
+        )
+      ).toHaveLength(1);
+    });
+
+    it('mid-period creator removal: the terminated agreement is excluded from next-cycle transfers (AGR-09)', async () => {
       // Setup: creator + agreement, fire one invoice → 1 transfer to creator.
-      // Then expire the agreement (set effective_until to the past) and
-      // fire the next invoice → executeTransfers' SELECT (line 2890)
-      // filters by `effective_until IS NULL OR > now()` and skips the
-      // expired row. With no other agreements, the loop has zero rows
-      // and the "no agreements" branch routes the entire creator pool
-      // to the org owner (`creator_payout_to_owner`).
+      // Then remove the creator the way removeMember does (membership
+      // inactive + agreements terminated at that moment) and fire the next
+      // invoice → the resolver skips the agreement terminated before it.
+      // With no other agreements, the "no agreements" branch routes the
+      // entire creator pool to the org owner (`creator_payout_to_owner`).
       const { org, tier1 } = await createFullOrg('split-mid-removal');
       const c1 = await seedCreatorWithConnect(org.id);
 
       // Codex-rzfjw (WP-4): seed via seedAgreement so the payout
       // pipeline's JOIN against agreement_proposals resolves the share.
       // 100% share to c1 — org owner takes zero residual on the first
-      // invoice. effective_until is updated below to simulate mid-period
-      // termination.
-      const { agreementId } = await seedAgreement(org.id, c1, 10000);
-      const agreementRow = { id: agreementId };
+      // invoice.
+      await seedAgreement(org.id, c1, 10000, {
+        effectiveFrom: new Date(Date.now() - 120_000),
+      });
 
       const sub = takeFirst(
         await db
@@ -4556,14 +5006,16 @@ describe('SubscriptionService', () => {
       );
       expect(firstCreatorCalls).toHaveLength(1);
 
-      // Expire the agreement (mid-period removal): effective_until set
-      // to one second ago. The next-cycle SELECT must skip this row.
-      const { eq } = await import('drizzle-orm');
-      const oneSecondAgo = new Date(Date.now() - 1000);
-      await db
-        .update(creatorOrganizationAgreements)
-        .set({ effectiveUntil: oneSecondAgo })
-        .where(eq(creatorOrganizationAgreements.id, agreementRow.id));
+      // Remove the creator a minute ago, as removeMember does.
+      const { terminateAgreementsOnDeparture } = await import(
+        '@codex/agreements'
+      );
+      const ended = await terminateAgreementsOnDeparture(db, {
+        organizationId: org.id,
+        creatorId: c1,
+        at: new Date(Date.now() - 60_000),
+      });
+      expect(ended).toHaveLength(1);
 
       // Second invoice: creator must NOT receive a transfer; the org
       // owner gets the full creator pool via the "no agreements" branch.
@@ -5214,6 +5666,42 @@ describe('SubscriptionService', () => {
       expect(updated.status).toBe('past_due');
     });
 
+    // Codex-2hxff.10: past_due GRANTS access while Stripe retries, so only a
+    // paid-up subscription may move to it.
+    it.each([
+      'incomplete',
+      'cancelled',
+      'paused',
+    ] as const)('leaves a %s subscription as it is (past_due would grant access)', async (status) => {
+      const { org, tier1 } = await createFullOrg(`invoice-failed-${status}`);
+      const sub = takeFirst(
+        await db
+          .insert(subscriptions)
+          .values(
+            createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+              status,
+            })
+          )
+          .returning()
+      );
+      const mockInvoice = createMockStripeInvoice({
+        parent: {
+          subscription_details: { subscription: sub.stripeSubscriptionId },
+        },
+      }) as unknown as Stripe.Invoice;
+
+      await service.handleInvoicePaymentFailed(mockInvoice);
+
+      const { eq } = await import('drizzle-orm');
+      const after = takeFirst(
+        await db
+          .select()
+          .from(subscriptions)
+          .where(eq(subscriptions.id, sub.id))
+      );
+      expect(after.status).toBe(status);
+    });
+
     it('should return { userId: undefined, orgId: undefined } for an unknown subscription', async () => {
       // Negative path — webhook for a subscription that never reached our DB.
       // Handler must not crash; userId/orgId are undefined so the route
@@ -5401,6 +5889,47 @@ describe('SubscriptionService', () => {
       expect(row.status).toBe('past_due');
       expect(result?.userId).toBe(otherCreatorId);
       expect(result?.orgId).toBe(org.id);
+    });
+
+    // Codex-2hxff.10: a FIRST invoice that failed leaves the Stripe
+    // subscription `incomplete`. The self-healed row takes that status, and
+    // stays there: past_due would grant access that was never paid for.
+    it('race #2, first invoice failed: the self-healed row is incomplete, not past_due', async () => {
+      const { org, tier1 } = await createFullOrg('selfheal-race2-incomplete');
+      const stripeSubId = uniqueStripeSubId('race2inc');
+      const stripeCustomerId = `cus_${stripeSubId}`;
+
+      (
+        stripe.subscriptions.retrieve as ReturnType<typeof vi.fn>
+      ).mockResolvedValueOnce({
+        ...buildStripeSubMock({
+          stripeSubId,
+          stripeCustomerId,
+          userId: otherCreatorId,
+          orgId: org.id,
+          tierId: tier1.id,
+        }),
+        status: 'incomplete',
+      });
+
+      const mockInvoice = createMockStripeInvoice({
+        billing_reason: 'subscription_create',
+        parent: {
+          subscription_details: { subscription: stripeSubId },
+        },
+      }) as unknown as Stripe.Invoice;
+
+      await service.handleInvoicePaymentFailed(mockInvoice);
+
+      const { eq } = await import('drizzle-orm');
+      const row = takeFirst(
+        await db
+          .select()
+          .from(subscriptions)
+          .where(eq(subscriptions.stripeSubscriptionId, stripeSubId))
+          .limit(1)
+      );
+      expect(row.status).toBe('incomplete');
     });
 
     it('Stripe 404 on retrieve: handler returns cleanly, no transfer, no row inserted', async () => {
@@ -9327,18 +9856,29 @@ describe('SubscriptionService', () => {
       const retrieveSpy = stubAccountsRetrieve(true);
       const transferSpy = vi.mocked(stripe.transfers.create);
       transferSpy.mockClear();
+      const errorSpy = vi.spyOn(
+        (service as unknown as { obs: { error: (...a: unknown[]) => void } })
+          .obs,
+        'error'
+      );
 
       const result = await service.sweepUnresolvedPayouts(15);
 
+      // No payee and no organisation: nobody to claim it for, so the sweep
+      // never takes it (Codex-2hxff.13 claims payees, not rows), nor gives
+      // it a place in the batch, and says how many such rows there are.
       expect(result).toEqual({
-        groupsScanned: 1,
+        groupsScanned: 0,
         groupsResolved: 0,
-        groupsSkipped: 1,
+        groupsSkipped: 0,
         errors: 0,
       });
-      // userId-null group is skipped BEFORE any Stripe call.
       expect(retrieveSpy).not.toHaveBeenCalled();
       expect(transferSpy).not.toHaveBeenCalled();
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('neither payee nor organisation'),
+        expect.objectContaining({ errorId: expect.any(String), rowCount: 1 })
+      );
     });
 
     // Codex-2hxff.37: the ownership hand-over moves an org's held no_owner
@@ -9674,7 +10214,7 @@ describe('SubscriptionService', () => {
       expect(transferSpy).not.toHaveBeenCalled();
     });
 
-    it('groups by (orgId, userId) — N rows for one Connect account → one accounts.retrieve, one resolvePendingPayouts', async () => {
+    it('claims by payee — N rows for one Connect account → one accounts.retrieve, one payee-wide drain', async () => {
       await clearPayoutsLedger(db);
 
       const { org, sub, stripeAccountId } =
@@ -9721,7 +10261,7 @@ describe('SubscriptionService', () => {
       const retrieveSpy = stubAccountsRetrieve(true);
       const transferSpy = vi.mocked(stripe.transfers.create);
       transferSpy.mockClear();
-      const resolveSpy = vi.spyOn(service, 'resolvePendingPayouts');
+      const resolveSpy = vi.spyOn(service, 'resolvePendingPayoutsForAccount');
 
       const result = await service.sweepUnresolvedPayouts(15);
 
@@ -9730,10 +10270,14 @@ describe('SubscriptionService', () => {
       // One Stripe accounts.retrieve per Connect account, not per row
       expect(retrieveSpy).toHaveBeenCalledTimes(1);
       expect(retrieveSpy).toHaveBeenCalledWith(stripeAccountId);
-      // One resolvePendingPayouts per group, not per row
+      // One drain per payee, not per row, and for every organisation, on the
+      // sweep's one platform-failure tally (Codex-r094t)
       expect(resolveSpy).toHaveBeenCalledTimes(1);
-      expect(resolveSpy).toHaveBeenCalledWith(org.id, stripeAccountId);
-      // Three transfers because resolvePendingPayouts processes 3 rows
+      expect(resolveSpy).toHaveBeenCalledWith(
+        stripeAccountId,
+        expect.objectContaining({ errorId: expect.any(String), count: 0 })
+      );
+      // Three transfers because the drain processes 3 rows
       expect(transferSpy).toHaveBeenCalledTimes(3);
 
       resolveSpy.mockRestore();
@@ -9863,7 +10407,7 @@ describe('SubscriptionService', () => {
      * Mint a removed-creator scenario: a fresh org, a connect account for the
      * creator (with a deterministic stripeAccountId), an active subscription
      * for FK references, and an OPTIONAL agreement row that the caller can
-     * end-date / leave-missing to drive the "removed from org" semantics.
+     * terminate / leave-missing to drive the "removed from org" semantics.
      */
     async function seedOrgWithCreatorConnect(
       slug: string,
@@ -9921,24 +10465,26 @@ describe('SubscriptionService', () => {
       return { org, tier, sub, stripeAccountId };
     }
 
-    it('pays out a removed creator whose agreement is end-dated (effectiveUntil in the past)', async () => {
-      // Setup: creator + agreement + accrued pendingPayout, then end-date the
-      // agreement to simulate "removed from org". The Connect account stays
+    it('pays out a removed creator whose agreement was terminated on removal', async () => {
+      // Setup: creator + agreement + accrued pendingPayout, with the agreement
+      // terminated the way removeMember ends it (AGR-09, Codex-2hxff.18).
+      // The Connect account stays
       // active (the creator still owns their Stripe Connect), so the next
       // sweep MUST disburse the owed money.
       const { org, sub, stripeAccountId } = await seedOrgWithCreatorConnect(
-        'aq58x-end-dated',
+        'aq58x-terminated',
         creatorId
       );
 
-      // Insert + end-date an agreement for the creator-org pair.
+      // Insert a terminated agreement for the creator-org pair.
       const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
       await db.insert(creatorOrganizationAgreements).values({
         creatorId,
         organizationId: org.id,
         organizationFeePercentage: 1500,
         effectiveFrom: new Date(Date.now() - 48 * 60 * 60 * 1000),
-        effectiveUntil: yesterday,
+        status: 'terminated',
+        terminatedAt: yesterday,
       });
 
       const payout = takeFirst(
@@ -9965,7 +10511,7 @@ describe('SubscriptionService', () => {
         stripeAccountId
       );
 
-      // Removed-creator orphan still resolves — agreement end-date does NOT
+      // Removed-creator orphan still resolves — the termination does NOT
       // block the payout.
       expect(result).toEqual({ resolved: 1, failed: 0 });
       expect(transferSpy).toHaveBeenCalledTimes(1);
@@ -10063,9 +10609,9 @@ describe('SubscriptionService', () => {
       expect(after.stripeTransferId).toMatch(/^tr_/);
     });
 
-    it('resolves each removed creator independently across multiple end-dated agreements', async () => {
+    it('resolves each removed creator independently across multiple terminated agreements', async () => {
       // Setup: ONE org, THREE creators each with their own Connect account,
-      // each with their own pendingPayout row, each with an end-dated
+      // each with their own pendingPayout row, each with a terminated
       // agreement. resolvePendingPayouts takes one (orgId, stripeAccountId)
       // pair at a time — each call MUST only touch its own user's rows and
       // never disturb the others.
@@ -10101,7 +10647,7 @@ describe('SubscriptionService', () => {
         creators.every((id) => typeof id === 'string' && id.length > 0)
       ).toBe(true);
 
-      // Per-creator: connect account + end-dated agreement + subscription FK
+      // Per-creator: connect account + terminated agreement + subscription FK
       // + pendingPayout row.
       const seeded: {
         userId: string;
@@ -10130,7 +10676,8 @@ describe('SubscriptionService', () => {
           organizationId: org.id,
           organizationFeePercentage: 1500,
           effectiveFrom: new Date(Date.now() - 48 * 60 * 60 * 1000),
-          effectiveUntil: yesterday,
+          status: 'terminated',
+          terminatedAt: yesterday,
         });
 
         // Each pendingPayout needs a subscription FK. Use a unique subscriber
@@ -11881,12 +12428,14 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
           })
           .returning()
       );
+      // Unique per run: the row now records it, and stripe_transfer_id is.
+      const lateTransfer = `tr_drain_late_${createUniqueSlug('t')}`;
       vi.mocked(stripe.transfers.create).mockImplementationOnce(async () => {
         await db
           .update(payoutsTable)
           .set({ status: 'cancelled_by_refund', resolvedAt: new Date() })
           .where(eq(payoutsTable.id, pending.id));
-        return { id: 'tr_drain_late', amount: 1750 } as never;
+        return { id: lateTransfer, amount: 1750 } as never;
       });
 
       const result = await service.resolvePendingPayouts(
@@ -11896,9 +12445,9 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
 
       expect(result).toEqual({ resolved: 0, failed: 0 });
       expect(stripe.transfers.createReversal).toHaveBeenCalledWith(
-        'tr_drain_late',
+        lateTransfer,
         expect.anything(),
-        { idempotencyKey: 'tr_drain_late_reversal_surplus' }
+        { idempotencyKey: `${lateTransfer}_reversal_surplus` }
       );
       const after = takeFirst(
         await db
@@ -11906,7 +12455,12 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
           .from(payoutsTable)
           .where(eq(payoutsTable.id, pending.id))
       );
-      expect(after.status).toBe('cancelled_by_refund');
+      // The money moved and is back: the row records its transfer, reversed
+      // (Codex-pqsfg).
+      expect(after).toMatchObject({
+        status: 'reversed',
+        stripeTransferId: lateTransfer,
+      });
     });
 
     // Codex-2hxff.11 (PAY-07): this test used to pin "failed rows are left
@@ -12123,7 +12677,6 @@ describe('SubscriptionPaymentRequiredError', () => {
       organizationId: 'org_456',
       newTierId: 'tier_789',
       billingInterval: 'month',
-      stripeMessage: 'Your card was declined.',
       prorationDate: 1_700_000_000,
       tierIdAtCommit: 'tier_789',
     });
@@ -12137,7 +12690,6 @@ describe('SubscriptionPaymentRequiredError', () => {
       organizationId: 'org_456',
       newTierId: 'tier_789',
       billingInterval: 'month',
-      stripeMessage: 'Your card was declined.',
       prorationDate: 1_700_000_000,
       tierIdAtCommit: 'tier_789',
     });
@@ -12149,7 +12701,6 @@ describe('SubscriptionPaymentRequiredError', () => {
       organizationId: 'org_456',
       newTierId: 'tier_789',
       billingInterval: 'year',
-      stripeMessage: 'Insufficient funds.',
     });
 
     expect(err.context).toMatchObject({
@@ -12157,7 +12708,6 @@ describe('SubscriptionPaymentRequiredError', () => {
       organizationId: 'org_456',
       newTierId: 'tier_789',
       billingInterval: 'year',
-      stripeMessage: 'Insufficient funds.',
     });
     expect(err.context?.prorationDate).toBeUndefined();
     expect(err.context?.tierIdAtCommit).toBeUndefined();

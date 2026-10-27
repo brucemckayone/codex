@@ -13,6 +13,7 @@
 
 import type { ObservabilityClient } from '@codex/observability';
 import type { Bindings } from '@codex/shared-types';
+import type { MediaStatusFeed } from '@codex/transcoding';
 import type Stripe from 'stripe';
 import { createServiceRegistry } from './procedure/service-registry';
 import type { ServiceRegistry } from './procedure/types';
@@ -42,7 +43,12 @@ export interface WebhookServices {
 export async function createWebhookServices(
   env: Bindings,
   executionCtx: ExecutionContext,
-  options: { obs?: ObservabilityClient; stripe?: Stripe } = {}
+  options: {
+    obs?: ObservabilityClient;
+    stripe?: Stripe;
+    /** See ServiceRegistryOverrides.mediaStatus. */
+    mediaStatus?: MediaStatusFeed;
+  } = {}
 ): Promise<WebhookServices> {
   const tracker = createBackgroundTracker();
   const { registry, cleanup } = await createServiceRegistry(
@@ -52,7 +58,11 @@ export async function createWebhookServices(
     executionCtx,
     undefined,
     tracker.background,
-    { stripe: options.stripe, skipHyperdrive: true }
+    {
+      stripe: options.stripe,
+      skipHyperdrive: true,
+      mediaStatus: options.mediaStatus,
+    }
   );
 
   return {

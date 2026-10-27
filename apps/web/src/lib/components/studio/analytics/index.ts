@@ -10,4 +10,5 @@ export { default as CreatorRevenueTable } from './CreatorRevenueTable.svelte';
 export { default as HeroAnalyticsChart } from './HeroAnalyticsChart.svelte';
 export { default as KPICard } from './KPICard.svelte';
 export { default as NarrativeSummary } from './NarrativeSummary.svelte';
+export { default as RevenueKindsLine } from './RevenueKindsLine.svelte';
 export { default as TopContentLeaderboard } from './TopContentLeaderboard.svelte';

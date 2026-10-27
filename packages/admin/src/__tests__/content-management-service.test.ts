@@ -19,11 +19,15 @@ import {
   content as contentTable,
   mediaItems,
   organizations,
+  stripeConnectAccounts,
+  subscriptionTiers,
 } from '@codex/database/schema';
 import { BusinessLogicError, NotFoundError } from '@codex/service-errors';
 import {
+  createTestConnectAccountInput,
   createTestMediaItemInput,
   createTestOrganizationInput,
+  createTestTierInput,
   createUniqueSlug,
   type Database,
   seedTestUsers,
@@ -31,7 +35,9 @@ import {
   takeFirst,
   teardownTestDatabase,
 } from '@codex/test-utils';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { eq, inArray } from 'drizzle-orm';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { CreatorPayoutsRequiredError } from '../errors';
 import { AdminContentManagementService } from '../services/content-management-service';
 
 describe('AdminContentManagementService', () => {
@@ -452,6 +458,39 @@ describe('AdminContentManagementService', () => {
       expect(published.status).toBe(CONTENT_STATUS.PUBLISHED);
     });
 
+    it('republishing an item taken off sale on a departure clears the stamp (Codex-2hxff.64)', async () => {
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
+      // What a removal leaves (withdrawCatalogueOnDeparture).
+      const content = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            title: 'Taken off sale',
+            slug: createUniqueSlug('off-sale-republish'),
+            contentType: 'written',
+            contentBody: 'Body',
+            status: CONTENT_STATUS.ARCHIVED,
+            publishedAt: new Date(),
+            offSaleAt: new Date(),
+            priceCents: 0,
+          })
+          .returning()
+      );
+
+      const published = await service.publishContent(testOrg.id, content.id);
+
+      // Without the clear, tier access would still end at the next renewal.
+      expect(published.status).toBe(CONTENT_STATUS.PUBLISHED);
+      expect(published.offSaleAt).toBeNull();
+    });
+
     it('should throw NotFoundError for content from different organization', async () => {
       const org1 = takeFirst(
         await db
@@ -498,6 +537,146 @@ describe('AdminContentManagementService', () => {
       await expect(service.publishContent(org2.id, content.id)).rejects.toThrow(
         NotFoundError
       );
+    });
+
+    describe('payout gate — an admin publish is held to the creator rule (Codex-2hxff.14)', () => {
+      let gateOrgId: string;
+      let tierId: string;
+      const contentIds: string[] = [];
+
+      beforeAll(async () => {
+        gateOrgId = takeFirst(
+          await db
+            .insert(organizations)
+            .values(createTestOrganizationInput())
+            .returning()
+        ).id;
+        tierId = takeFirst(
+          await db
+            .insert(subscriptionTiers)
+            .values(createTestTierInput(gateOrgId, { sortOrder: 1 }))
+            .returning()
+        ).id;
+      });
+
+      afterEach(async () => {
+        await db
+          .delete(stripeConnectAccounts)
+          .where(eq(stripeConnectAccounts.userId, creatorId));
+      });
+
+      afterAll(async () => {
+        if (contentIds.length > 0) {
+          await db
+            .delete(contentTable)
+            .where(inArray(contentTable.id, contentIds));
+        }
+        await db
+          .delete(subscriptionTiers)
+          .where(eq(subscriptionTiers.organizationId, gateOrgId));
+        await db.delete(organizations).where(eq(organizations.id, gateOrgId));
+      });
+
+      async function seedDraft(
+        flags: Partial<typeof contentTable.$inferInsert>
+      ): Promise<string> {
+        const row = takeFirst(
+          await db
+            .insert(contentTable)
+            .values({
+              creatorId,
+              organizationId: gateOrgId,
+              title: 'Gated Draft',
+              slug: createUniqueSlug('admin-payout-gate'),
+              contentType: 'written',
+              contentBody: 'Body',
+              status: CONTENT_STATUS.DRAFT,
+              ...flags,
+            })
+            .returning()
+        );
+        contentIds.push(row.id);
+        return row.id;
+      }
+
+      it('refuses priced content (purchasable or not) when the creator has no Connect account', async () => {
+        const purchasable = await seedDraft({
+          isFree: false,
+          isPurchasable: true,
+          priceCents: 900,
+        });
+        const notPurchasable = await seedDraft({
+          isFree: false,
+          isPurchasable: false,
+          priceCents: 900,
+        });
+
+        await expect(
+          service.publishContent(gateOrgId, purchasable)
+        ).rejects.toBeInstanceOf(CreatorPayoutsRequiredError);
+        await expect(
+          service.publishContent(gateOrgId, notPurchasable)
+        ).rejects.toBeInstanceOf(CreatorPayoutsRequiredError);
+
+        const [row] = await db
+          .select({ status: contentTable.status })
+          .from(contentTable)
+          .where(eq(contentTable.id, purchasable));
+        expect(row?.status).toBe(CONTENT_STATUS.DRAFT);
+      });
+
+      it('refuses tier-only content, and a Connect account with payouts still disabled', async () => {
+        await db.insert(stripeConnectAccounts).values(
+          createTestConnectAccountInput(null, creatorId, {
+            status: 'restricted',
+            chargesEnabled: true,
+            payoutsEnabled: false,
+          })
+        );
+        const tiered = await seedDraft({
+          isFree: false,
+          includedInTierId: tierId,
+        });
+
+        const refusal = service.publishContent(gateOrgId, tiered);
+        await expect(refusal).rejects.toBeInstanceOf(
+          CreatorPayoutsRequiredError
+        );
+        // The Studio recognises the condition by this code, whichever route
+        // refused (the content-api twin carries the same one).
+        await expect(refusal).rejects.toMatchObject({
+          context: expect.objectContaining({
+            code: 'CREATOR_CONNECT_REQUIRED',
+          }),
+        });
+      });
+
+      it('publishes priced and tier content once the creator is payout-ready, and free content without an account', async () => {
+        const free = await seedDraft({ isFree: true, priceCents: 0 });
+        expect((await service.publishContent(gateOrgId, free)).status).toBe(
+          CONTENT_STATUS.PUBLISHED
+        );
+
+        await db
+          .insert(stripeConnectAccounts)
+          .values(createTestConnectAccountInput(null, creatorId));
+        const priced = await seedDraft({
+          isFree: false,
+          isPurchasable: false,
+          priceCents: 900,
+        });
+        const tiered = await seedDraft({
+          isFree: false,
+          includedInTierId: tierId,
+        });
+
+        expect((await service.publishContent(gateOrgId, priced)).status).toBe(
+          CONTENT_STATUS.PUBLISHED
+        );
+        expect((await service.publishContent(gateOrgId, tiered)).status).toBe(
+          CONTENT_STATUS.PUBLISHED
+        );
+      });
     });
   });
 

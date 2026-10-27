@@ -1,12 +1,37 @@
 # Admin-API Worker (port 42073)
 
-Org management dashboard: analytics, content management, and customer support. All endpoints are restricted to org owners and admins.
+Org management dashboard (analytics, content management, customer support grants) for org owners and admins, plus platform support's own routes: fee configuration, owner reassignment and support refunds.
 
 ## Endpoints
 
-All endpoints EXCEPT `/api/admin/fees/*` require `auth: 'required'` + `requireOrgMembership: true` + `requireOrgManagement: true`, scoped by `ctx.organizationId` (resolved from org membership). The 9 `/api/admin/fees/*` endpoints (Codex-m644n, no web UI consumer) instead require `policy: { auth: 'platform_owner' }` with no org policy. Rate limited via `api` preset (100/min) on `/api/*`.
+Two kinds of route, never mixed:
+
+- **Org management** (analytics, content, customers, grants, status): `auth: 'required'` + `requireOrgMembership: true` + `requireOrgManagement: true`, scoped by `ctx.organizationId` (resolved from org membership).
+- **Platform support**: the 9 `/api/admin/fees/*` endpoints (Codex-m644n, no web UI consumer), `/api/admin/organizations/:orgId/owner` and the 9 `/api/admin/support/*` endpoints. They take `policy: { auth: 'platform_owner' }` with NO org policy: platform-wide on purpose, gated by the role.
+
+All are rate limited via the `api` preset (100/min) on `/api/*`, and by their own policy's preset.
 
 `POST /api/admin/organizations/:orgId/owner` `{ userId, reason }` (Codex-2hxff.2) is also `platform_owner`-only, on the `strict` preset (`RATE_LIMIT_STRICT`, namespaces 1051/2051/3051): platform support assigns a new owner when a transfer is impossible. It withdraws any open offer, busts both users' membership caches, and logs `reason`. No screen yet (Codex-xyb7v).
+
+### Support refunds (Codex-2hxff.28)
+
+Platform support's refund screen and queue (the `/admin` pages in apps/web). Design: `docs/handover/phase3-sources/support-refunds/data-design.md`. Service: `ctx.services.support` (`SupportService`, `@codex/admin`). Every route is `{ auth: 'platform_owner', cache: 'fresh' }`; reads take the `api` preset, writes `strict`. Nothing is cached: every number changes with a refund, a webhook or a payout run.
+
+| # | Method | Path | Input (`@codex/validation`) | Response |
+|---|---|---|---|---|
+| 1 | GET | `/api/admin/support/charges` | query `supportChargeSearchQuerySchema` (`lookup` matched exactly, never free text: email, purchase or subscription id, `sub_`/`pi_`/`ch_`/`py_`; limit ≤ 50) | `{ items: ChargeSummary[], pagination }` |
+| 2 | GET | `/api/admin/support/charges/:chargeId` | params `supportChargeParamsSchema` | `{ data: ChargeDetail }` |
+| 3 | GET | `/api/admin/support/charges/:chargeId/refund-preview` | + query `supportRefundPreviewQuerySchema` (`amountCents`) | `{ data: RefundPreview }` |
+| 4 | POST | `/api/admin/support/charges/:chargeId/refunds` | body `supportIssueRefundSchema` (`amountCents`, `reason`, `expectedRefundCount`) | **200** `{ data: { refund, replayed } }` |
+| 5 | GET | `/api/admin/support/queue/counts` | — | `{ data: { failedRefunds, creatorDebts } }` |
+| 6 | GET | `/api/admin/support/queue/failed-refunds` | query `supportQueueQuerySchema` | `{ items: FailedRefundItem[], pagination }` |
+| 7 | GET | `/api/admin/support/queue/creator-debts` | query `supportQueueQuerySchema` | `{ items: CreatorDebtItem[], pagination }` |
+| 8 | POST | `/api/admin/support/refunds/:refundId/resolve` | body `supportResolveFailedRefundSchema` (a note is required for `creators_repaid`) | `{ data: ResolvedFailedRefund }` |
+| 9 | POST | `/api/admin/support/creator-debts/:reviewId/resolve` | body `supportResolveCreatorDebtSchema` (never `dispute_won`; a note is required for `manually_reversed`) | `{ data: ResolvedCreatorDebt }` |
+
+- **Route 4 writes nothing.** It only asks Stripe, in a fixed order: list the charge's refunds; one carrying this decision's key is answered `replayed: true`; a moved count is `CHARGE_CHANGED` (412); then the 14-day window, an open or lost chargeback, and the amount cap; then `refunds.create` with the key and `codex_requested_by`. `charge.refunded` records the refund and claws back the shares. 200, not 201: a repeat creates nothing. A spent key (Stripe holds an earlier refusal or 500 for it, 24 h) is `REFUND_KEY_SPENT` (409): change the amount or use the Dashboard.
+- **Route 8**, `creators_repaid`, re-pays the payees in one transaction and, for a failed full purchase refund, gives the buyer access back. It is refused, `REPAY_BLOCKED_BY_LATER_CAUSE` (422), when a chargeback or a later refund was shared against the failed one (owner decision 2026-10-25). The route then bumps the buyer's library (`invalidateUserLibrary`) and clears their streaming block, as a won dispute's restore does.
+- Every Stripe call `SupportService` makes is listed in its file header: the restricted key (Codex-5vvwj.2) is built from that list.
 
 ### Analytics
 
@@ -33,7 +58,9 @@ All endpoints EXCEPT `/api/admin/fees/*` require `auth: 'required'` + `requireOr
 |---|---|---|---|---|
 | GET | `/api/admin/customers` | query: `adminCustomerListQuerySchema` | 200 | `{ items, pagination }` |
 | GET | `/api/admin/customers/:id` | params: id | 200 | `{ data: CustomerDetails }` |
-| POST | `/api/admin/customers/:customerId/grant-access/:contentId` | params: customerId + contentId | 200 | `{ success: true }` |
+| POST | `/api/admin/customers/:customerId/grant-access/:contentId` | params: customerId + contentId | 200 | `{ success: true }` — writes a `grant` entitlement |
+| GET | `/api/admin/customers/:customerId/grants` | params: customerId; query: `adminCustomerGrantsQuerySchema` (limit default 50) | 200 | `{ items: CustomerGrant[], pagination }` — live and revoked |
+| DELETE | `/api/admin/customers/:customerId/grants/:entitlementId` | params: `adminRevokeGrantParamsSchema` | 204 | — (404 unless this org's `grant` for this customer) |
 
 ### Status
 
@@ -47,11 +74,12 @@ All endpoints EXCEPT `/api/admin/fees/*` require `auth: 'required'` + `requireOr
 |---|---|---|
 | `AdminAnalyticsService` (`adminAnalytics`) | `@codex/admin` | Revenue, customer, top-content, dashboard, activity feed |
 | `AdminContentManagementService` (`adminContent`) | `@codex/admin` | List, publish, unpublish, delete content (admin scope) |
-| `AdminCustomerManagementService` (`adminCustomer`) | `@codex/admin` | List customers, get details, grant access |
+| `AdminCustomerManagementService` (`adminCustomer`) | `@codex/admin` | List customers, get details, grant, list and revoke support grants |
+| `SupportService` (`support`) | `@codex/admin` | Support refunds: search, charge detail, refund preview, refund, the queue and settling it |
 
 ## Auth Pattern
 
-`requireOrgManagement: true` enforces org owner or admin role — not `platform_owner`. The resolved `ctx.organizationId` is used to scope all queries. The CLAUDE.md description "platform owner" is legacy; the current pattern checks org-level management role, not a global platform role.
+`requireOrgManagement: true` enforces org owner or admin role — not `platform_owner` — and the resolved `ctx.organizationId` scopes those routes' queries. The platform support routes take `auth: 'platform_owner'` instead, which an organisation owner does not pass: org management is not platform support.
 
 ## Bindings / Env
 
@@ -59,13 +87,18 @@ All endpoints EXCEPT `/api/admin/fees/*` require `auth: 'required'` + `requireOr
 |---|---|---|
 | `DATABASE_URL` | Yes | Neon PostgreSQL |
 | `AUTH_SESSION_KV` | Yes | Session validation |
+| `CACHE_KV` | Yes | Library version bumps and the streaming block a settlement clears |
 | `RATE_LIMIT_API` | Yes | Native rate-limit binding the `/api/*` limiter counts in — `RATE_LIMIT_KV` was removed (Codex-kgrdp.17) |
-| `ENVIRONMENT` | No | `development` / `test` / `production` (dev-webhook + guards) |
+| `RATE_LIMIT_STRICT` | Yes | The `strict` preset the platform support writes take (namespaces 1051/2051/3051) |
+| `STRIPE_SECRET_KEY` | For support refunds | admin-api's OWN restricted key (owner decision Q4, Codex-5vvwj.2), never ecom-api's: read charges, refunds, disputes, invoices and payment intents; write refunds. Test mode for dev and test, live for production. The registry resolves it lazily, so only a Stripe call needs it |
+| `ENVIRONMENT` | No | `development` / `test` / `production` (dev-webhook + guards; tags every refund with `codex_env`) |
 
 ## Strict Rules
 
-- **MUST** use `requireOrgManagement: true` for ALL endpoints — never expose cross-org data
-- **MUST** scope all queries via `ctx.organizationId` from resolved org context
+- **MUST** give an org-management route `requireOrgManagement: true` and scope it by `ctx.organizationId` — never expose cross-org data there
+- **MUST** give a platform support route `auth: 'platform_owner'` and no org policy; it is the only kind allowed to read across organisations
+- **MUST** declare `cache: 'fresh'` on a support route, and `rateLimit: 'strict'` on a support write
+- **NEVER** send a connected account id (`acct_`), card data beyond brand and last four, `refund_reviews.error_message`, or a raw Stripe error from a support route
 - **NEVER** expose raw DB queries or internal metrics
 - Admin publish/unpublish/delete bypass the normal creator ownership check (org-scoped instead)
 

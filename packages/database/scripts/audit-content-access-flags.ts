@@ -157,7 +157,8 @@ async function checkResetSignature(): Promise<number> {
  * It is produced deliberately: `course-journey-service.ts:3188-3230` gates
  * default-policy practices by setting `courseOnly` and leaving `isFree`
  * untouched, reasoning that `isFree` "can no longer grant access once
- * `courseOnly` wins" — true of the resolver, false of the body-render path.
+ * `courseOnly` wins" — true of the resolver, and false of the body-render
+ * path until Codex-039vo (both body paths now read `isPublicContent`).
  *
  * So this now asserts the whole invariant `isPublicContent()` encodes, rather
  * than the one instance of it that happened to get filed.
@@ -176,8 +177,9 @@ async function checkFreeWithAGate(): Promise<number> {
       and(eq(schema.content.isFree, true), isNull(schema.content.deletedAt))
     );
 
-  // Mirrors isPublicContent() in apps/web/src/lib/server/content-detail.ts —
-  // keep the two in step, and keep both in step with decideContentAccess.
+  // Mirrors isPublicContent() in @codex/constants (packages/constants/src/
+  // content.ts) — keep the two in step, and keep both in step with
+  // decideContentAccess.
   const gateOf = (r: (typeof free)[number]): string | null => {
     if (r.isPurchasable) return 'isPurchasable';
     if ((r.priceCents ?? 0) > 0) return `priceCents=${r.priceCents}`;

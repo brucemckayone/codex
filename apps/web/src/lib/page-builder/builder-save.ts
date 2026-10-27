@@ -32,6 +32,8 @@ import type {
   PageOffer,
   PageSection,
 } from '@codex/shared-types';
+import { formatLocalClockTime } from '$lib/utils/format';
+import * as m from '$paraglide/messages';
 
 /**
  * The offer bag the write path persists: TOTAL — every path explicitly on or
@@ -288,6 +290,39 @@ export function remoteErrorMessage(err: unknown): string | undefined {
   return err instanceof Error && err.message ? err.message : undefined;
 }
 
+/**
+ * A course plan's refusals that hold until the hour turns (Codex-2hxff.66).
+ * The plan's Stripe keys carry the UTC hour, and Stripe replays a failure it
+ * stored under a key (503) and refuses a key reused with other values (409),
+ * so a retry within the hour fails the same way.
+ */
+const PLAN_REFUSALS_UNTIL_THE_HOUR = new Set([
+  'STRIPE_UNAVAILABLE',
+  'COURSE_PLAN_KEY_REUSED',
+]);
+
+/**
+ * The creator's copy for a course plan refused until the hour turns: when
+ * they can try again, in THEIR local time. `updateCourseMonetisation`
+ * forwards the worker's `code` and `retryAfter` (an ISO instant, the start of
+ * the key's next hour) in the error body. Undefined when it is not one of
+ * those refusals or `retryAfter` does not parse; the server's own text ("…
+ * after the top of the hour") is then shown instead.
+ */
+export function coursePlanRetryMessage(err: unknown): string | undefined {
+  const body =
+    err && typeof err === 'object' ? (err as { body?: unknown }).body : null;
+  if (!body || typeof body !== 'object') return undefined;
+  const { code, retryAfter } = body as { code?: unknown; retryAfter?: unknown };
+  if (typeof code !== 'string' || !PLAN_REFUSALS_UNTIL_THE_HOUR.has(code)) {
+    return undefined;
+  }
+  if (typeof retryAfter !== 'string') return undefined;
+  const at = new Date(retryAfter);
+  if (Number.isNaN(at.getTime())) return undefined;
+  return m.course_plan_retry_after({ time: formatLocalClockTime(at) });
+}
+
 /** Normalise the render-side {@link PageOffer} into the total persisted bag. */
 export function toPersistedOffer(offer: PageOffer): PersistedPageOffer {
   return {
@@ -408,7 +443,7 @@ export async function saveBuilderDraft(
       await deps.monetisation.save();
       monetisationSaved = true;
     } catch (err) {
-      const why = remoteErrorMessage(err);
+      const why = coursePlanRetryMessage(err) ?? remoteErrorMessage(err);
       return {
         outcome: 'failed',
         stage: 'monetisation',

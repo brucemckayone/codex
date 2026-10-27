@@ -15,6 +15,7 @@
  * against the WP-0 freeze — every field is optional and the renderer falls back
  * to the awaited course/stage/testimonial data when a prop is absent.
  */
+import type { CourseDisputeHold } from '$lib/journeys/types';
 import type {
   CourseOffer,
   JourneyCoursePage,
@@ -142,6 +143,15 @@ export interface JourneySalesContext {
    * so the studio builder's live preview always shows the pre-purchase state.
    */
   enrolled: boolean;
+  /**
+   * Set while an open payment dispute on this viewer's course purchase or
+   * course subscription holds back their entry (Codex-2hxff.60), from the
+   * refused can-enter read. Every Buy and Join slot then shows the dispute
+   * notice instead (`'paused'`, `kit/model/cta.ts`): the owner's "no Buy
+   * while disputed". `null` for anyone else, for an anonymous visitor, under
+   * `?preview`, and on the studio canvas.
+   */
+  disputeHold: CourseDisputeHold | null;
   /**
    * The AUTHORITATIVE monetization offer for this course (SPEC §7) — which ways
    * in exist and what each charges, composed from real plan/tier/price rows by

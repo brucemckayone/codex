@@ -19,12 +19,15 @@ import {
   CONTENT_ACCESS_TYPE,
   CONTENT_STATUS,
   CONTENT_TYPES,
+  isPublicContent,
   MEDIA_STATUS,
   MEDIA_TYPES,
   PAGINATION,
+  requiresPayoutsToPublish,
 } from '@codex/constants';
 import {
   isUniqueViolation,
+  MEDIA_ITEM_RESPONSE_COLUMNS,
   paginatedQuery,
   scopedNotDeleted,
   withCreatorScope,
@@ -34,12 +37,15 @@ import {
   content,
   contentCategories,
   mediaItems,
+  organizations,
   stripeConnectAccounts,
 } from '@codex/database/schema';
 import {
   type ImageProcessingResult,
   ImageProcessingService,
+  ownContentThumbnailFolder,
 } from '@codex/image-processing';
+import { READABLE_ORGANIZATION_COLUMNS } from '@codex/organization';
 import type { ServiceConfig } from '@codex/service-errors';
 import { BaseService, ValidationError } from '@codex/service-errors';
 import type { PaginatedListResponse } from '@codex/shared-types';
@@ -60,7 +66,9 @@ import {
   isNotNull,
   isNull,
   ne,
+  notExists,
   or,
+  type SQL,
   sql,
 } from 'drizzle-orm';
 import {
@@ -74,12 +82,74 @@ import {
   SlugConflictError,
 } from '../errors';
 import type {
+  CatalogueContentRow,
   Content,
   ContentFilters,
   ContentWithRelations,
   DatabaseTransaction,
   PaginationParams,
+  PublicContentCreator,
+  PublicContentOrganization,
+  PublicContentRow,
+  PublicMediaItemSource,
 } from '../types';
+
+/**
+ * The media_items columns `listPublic` selects (Codex-ve5eh). It used to load
+ * `mediaItem: true`, every column, into an anonymous, KV-cached list that each
+ * public page serialises into its HTML. `satisfies` ties this to
+ * `PublicMediaItemSource`, so the type and the SELECT cannot drift apart.
+ *
+ * Exported for the public list's twin, `ContentAccessService.
+ * getWithdrawnContent` (@codex/access), which serves the same item to a reader
+ * who still has a piece withdrawn from sale: one column list, so the two reads
+ * cannot drift apart either. The same holds for the lists below.
+ *
+ * A change to ANY of these lists changes two cached payloads, so it needs two
+ * bumps: `PUBLIC_CONTENT_SHAPE_VERSION` (content-api public-cache.ts, which
+ * caches `listPublic`'s rows) and apps/web /explore's `content:auth:vN` (which
+ * caches the browse route's response).
+ */
+export const PUBLIC_MEDIA_ITEM_COLUMNS = {
+  durationSeconds: true,
+  thumbnailKey: true,
+  hlsPreviewKey: true,
+} as const satisfies Record<keyof PublicMediaItemSource, true>;
+
+/**
+ * The organizations columns `listPublic` selects (Codex-567de). It used to
+ * load `organization: true`, which put every column on the anonymous list,
+ * the payee's `primaryConnectAccountUserId` among them. Tied to
+ * `PublicContentOrganization` the same way.
+ */
+export const PUBLIC_ORGANIZATION_COLUMNS = {
+  id: true,
+  name: true,
+  slug: true,
+  logoUrl: true,
+} as const satisfies Record<keyof PublicContentOrganization, true>;
+
+/** The users columns a catalogue row's creator carries: never the email. */
+export const PUBLIC_CREATOR_COLUMNS = {
+  id: true,
+  name: true,
+} as const satisfies Record<keyof PublicContentCreator, true>;
+
+/**
+ * The content columns a catalogue row leaves out: every column but these.
+ * The route spreads the content row's own columns onto the wire, so this is
+ * where one is kept off it. `purchaseCount` is each piece's sales: on the
+ * anonymous list anyone could rank an org's catalogue by them without signing
+ * in. Owner, 2026-10-26: "Hide it from lists (Recommended)". Sorting by it
+ * still works, because ORDER BY reads the table, not the select. `viewCount`
+ * stays: the public Spotlight shows it.
+ *
+ * Exported for the withdrawn read (@codex/access), as the lists above are,
+ * and a change to it needs the same two cache bumps.
+ */
+export const CATALOGUE_CONTENT_COLUMNS = {
+  purchaseCount: false,
+} as const satisfies Partial<Record<keyof Content, false>>;
 
 /**
  * Content Service Class
@@ -108,6 +178,7 @@ export interface ContentServiceConfig extends ServiceConfig {
 
 export class ContentService extends BaseService {
   private cache?: VersionedCache;
+  private readonly r2PublicUrlBase?: string;
 
   /**
    * Narrowed `thumbnailUrl` schema, bound to this worker's asset CDN base.
@@ -119,6 +190,7 @@ export class ContentService extends BaseService {
 
   constructor(config: ContentServiceConfig) {
     super(config);
+    this.r2PublicUrlBase = config.r2PublicUrlBase;
     this.thumbnailUrlSchema = createPlatformImageUrlSchema(
       config.r2PublicUrlBase
     );
@@ -206,6 +278,29 @@ export class ContentService extends BaseService {
   }
 
   /**
+   * Refuse to put content that earns money on sale while its creator can't be
+   * paid. `requiresPayoutsToPublish` decides what earns money — any price or
+   * any tier, whether or not the row is marked purchasable (owner rule,
+   * Codex-2hxff.14) — so publish() and update() both ask here. Free, followers
+   * and team content passes without a lookup.
+   *
+   * @throws {CreatorPayoutsRequiredError} When the row needs payouts and the
+   *   creator's Connect account is not charges + payouts enabled
+   */
+  private async assertCreatorCanBePaid(
+    tx: DatabaseTransaction,
+    creatorId: string,
+    row: { priceCents: number | null; includedInTierId: string | null }
+  ): Promise<void> {
+    if (!requiresPayoutsToPublish(row)) return;
+    if (await this.isCreatorConnectReady(tx, creatorId)) return;
+    throw new CreatorPayoutsRequiredError(
+      creatorId,
+      (row.priceCents ?? 0) > 0 ? 'paid' : 'included_in_tier'
+    );
+  }
+
+  /**
    * Replace a content item's category (topic) memberships inside a transaction.
    *
    * REPLACE semantics: existing `content_categories` join rows for this content
@@ -217,9 +312,10 @@ export class ContentService extends BaseService {
    * IDOR guard: every `categoryId` MUST resolve to a live category in the
    * CONTENT'S OWN SPACE — same `organizationId` for org content, or the
    * creator's own personal space (`organizationId IS NULL AND creatorId` match)
-   * for orgless content — mirroring the `listPublic` space scoping. A foreign
-   * or unknown id fails loudly with a `ValidationError`; ids are never silently
-   * dropped.
+   * for orgless content. (The public read side is narrower: `listPublic`
+   * matches an org's topics only, and refuses a category with no org.) A
+   * foreign or unknown id fails loudly with a `ValidationError`; ids are never
+   * silently dropped.
    *
    * @throws {ValidationError} If any id is out-of-space, unknown, or soft-deleted
    */
@@ -456,8 +552,8 @@ export class ContentService extends BaseService {
       const result = await this.db.query.content.findFirst({
         where: and(eq(content.id, id), scopedNotDeleted(content, creatorId)),
         with: {
-          mediaItem: true,
-          organization: true,
+          mediaItem: { columns: MEDIA_ITEM_RESPONSE_COLUMNS },
+          organization: { columns: READABLE_ORGANIZATION_COLUMNS },
           creator: {
             columns: {
               id: true,
@@ -506,12 +602,33 @@ export class ContentService extends BaseService {
    * @returns Updated content
    * @throws {ContentNotFoundError} If content doesn't exist
    * @throws {ForbiddenError} If content doesn't belong to creator
+   * @throws {CreatorPayoutsRequiredError} If the update sets or changes a
+   *   price or tier on published content whose creator can't be paid
    */
   async update(
     id: string,
     input: UpdateContentInput,
     creatorId: string
   ): Promise<Content> {
+    const { content: updated } = await this.updateReportingDroppedThumbnail(
+      id,
+      input,
+      creatorId
+    );
+    return updated;
+  }
+
+  /**
+   * {@link update}, also returning the thumbnail URL the update moved the row
+   * off, or null. Each upload goes to a new folder (Codex-kk9nv.5), so nothing
+   * would ever overwrite the old one; this service has no R2 binding, so the
+   * content-api PATCH route deletes it.
+   */
+  async updateReportingDroppedThumbnail(
+    id: string,
+    input: UpdateContentInput,
+    creatorId: string
+  ): Promise<{ content: Content; droppedThumbnailUrl: string | null }> {
     // Validate input
     const validated = updateContentSchema.parse(input);
 
@@ -519,6 +636,9 @@ export class ContentService extends BaseService {
     // is a partial, so an absent `thumbnailUrl` is a no-op and an explicit
     // null clears it; only a string is checked.
     this.assertPlatformThumbnailUrl(validated.thumbnailUrl);
+
+    // Read inside the transaction; only meaningful once it has committed.
+    let previousThumbnailUrl: string | null = null;
 
     try {
       const result = await this.db.transaction(async (tx) => {
@@ -542,6 +662,22 @@ export class ContentService extends BaseService {
         } = validated;
         const bodyFields =
           _rawBody !== undefined ? this.parseContentBody(_rawBody) : {};
+        previousThumbnailUrl = existing.thumbnailUrl;
+
+        // A URL in this content's own thumbnail folders is written only by an
+        // upload. One the payload sends that differs from the row's names an
+        // upload since replaced, whose files are deleted, so a stale form
+        // re-sending it would point the row at a 404. The stored thumbnail
+        // stays (Codex-kk9nv.5).
+        const sentThumbnailUrl = restValidated.thumbnailUrl;
+        const keepStoredThumbnail =
+          sentThumbnailUrl != null &&
+          sentThumbnailUrl !== existing.thumbnailUrl &&
+          ownContentThumbnailFolder(
+            sentThumbnailUrl,
+            { creatorId, contentId: id },
+            this.r2PublicUrlBase
+          ) !== null;
 
         // Codex-up7bx: `includedInTierId` (the subscriber gate) is only valid
         // on org-scoped content — subscription_tiers is org-scoped. Determine
@@ -591,6 +727,31 @@ export class ContentService extends BaseService {
           (restValidated.courseOnly ?? existing.courseOnly) ||
           effIncludedInTierId != null;
 
+        // Codex-2hxff.14: publish() refuses priced or tier content whose
+        // creator can't be paid, so a LIVE row must not be priced or tiered
+        // past that gate here. Only a change that opens a way to pay is
+        // checked — a price or tier set or changed, or the row turned
+        // purchasable — and it is compared by VALUE, not by key presence,
+        // because the studio form resends the whole flag set on every save and
+        // a title edit must never fail on payouts. Removing a price or tier is
+        // never refused. Drafts are left to publish().
+        if (existing.status === CONTENT_STATUS.PUBLISHED) {
+          const nextPriceCents = effPriceCents ?? null;
+          const nextTierId = effIncludedInTierId ?? null;
+          const opensAWayToPay =
+            ((nextPriceCents ?? 0) > 0 &&
+              nextPriceCents !== existing.priceCents) ||
+            (nextTierId != null && nextTierId !== existing.includedInTierId) ||
+            (!existing.isPurchasable && restValidated.isPurchasable === true);
+          if (opensAWayToPay) {
+            await this.assertCreatorCanBePaid(
+              tx as DatabaseTransaction,
+              creatorId,
+              { priceCents: nextPriceCents, includedInTierId: nextTierId }
+            );
+          }
+        }
+
         // Update content
         const [updated] = await tx
           .update(content)
@@ -617,6 +778,9 @@ export class ContentService extends BaseService {
             // check whether the update path needs the same override.
             ...('shaderPreset' in restValidated
               ? { shaderPreset: restValidated.shaderPreset || null }
+              : {}),
+            ...(keepStoredThumbnail
+              ? { thumbnailUrl: existing.thumbnailUrl }
               : {}),
             ...(clearTier ? { includedInTierId: null } : {}),
             // Clamp AFTER the spread so it overrides a stale `isFree:false` the
@@ -673,7 +837,11 @@ export class ContentService extends BaseService {
         }
       }
 
-      return result;
+      const thumbnailMoved = previousThumbnailUrl !== result.thumbnailUrl;
+      return {
+        content: result,
+        droppedThumbnailUrl: thumbnailMoved ? previousThumbnailUrl : null,
+      };
     } catch (error) {
       if (error instanceof ContentNotFoundError) {
         throw error;
@@ -796,7 +964,7 @@ export class ContentService extends BaseService {
         const existing = await tx.query.content.findFirst({
           where: and(eq(content.id, id), scopedNotDeleted(content, creatorId)),
           with: {
-            mediaItem: true,
+            mediaItem: { columns: MEDIA_ITEM_RESPONSE_COLUMNS },
           },
         });
 
@@ -831,26 +999,16 @@ export class ContentService extends BaseService {
           }
         }
 
-        // Monetised content requires a payout-ready Connect account before it
-        // can go live. Paid (with a price) and subscriber-gated content both
-        // collect money; publishing without a payout destination strands buyer
-        // funds in a pending payout indefinitely. Free / followers / team
-        // content is unaffected.
-        const isMonetised =
-          (existing.isPurchasable && (existing.priceCents ?? 0) > 0) ||
-          existing.includedInTierId != null;
-        if (isMonetised) {
-          const connectReady = await this.isCreatorConnectReady(
-            tx as DatabaseTransaction,
-            creatorId
-          );
-          if (!connectReady) {
-            throw new CreatorPayoutsRequiredError(
-              creatorId,
-              existing.isPurchasable ? 'purchasable' : 'included_in_tier'
-            );
-          }
-        }
+        // Content that earns money needs a payout-ready Connect account before
+        // it can go live: publishing without a payout destination strands
+        // buyer funds in a pending payout indefinitely. Any price or tier
+        // counts, purchasable or not (Codex-2hxff.14 — the old gate only saw
+        // a price on a row marked purchasable).
+        await this.assertCreatorCanBePaid(
+          tx as DatabaseTransaction,
+          creatorId,
+          existing
+        );
 
         // Publish content
         const [published] = await tx
@@ -858,6 +1016,9 @@ export class ContentService extends BaseService {
           .set({
             status: CONTENT_STATUS.PUBLISHED,
             publishedAt: new Date(),
+            // Back on sale: no longer "taken off sale on departure"
+            // (Codex-2hxff.64), so tier access follows the normal rule.
+            offSaleAt: null,
             updatedAt: new Date(),
           })
           .where(and(eq(content.id, id), withCreatorScope(content, creatorId)))
@@ -990,6 +1151,28 @@ export class ContentService extends BaseService {
   }
 
   /**
+   * Content whose org is live (Codex-osuqt), for every public read. Deleting an
+   * org soft-deletes only the org row, so its content stays published: without
+   * this a deleted org's pieces went on being listed, with cards into an org
+   * that 404s. Personal content has no org, so it has no deleted org to match
+   * and is kept. One correlated anti-join on the org's primary key; no or(), so
+   * no undefined branch for and() to drop silently.
+   */
+  private orgIsLive(): SQL {
+    return notExists(
+      this.db
+        .select({ one: sql`1` })
+        .from(organizations)
+        .where(
+          and(
+            eq(organizations.id, content.organizationId),
+            isNotNull(organizations.deletedAt)
+          )
+        )
+    );
+  }
+
+  /**
    * List content with filtering and pagination.
    *
    * **Scope is required** to make the multi-tenant boundary explicit:
@@ -1012,7 +1195,23 @@ export class ContentService extends BaseService {
    * @param options.scope - 'studio' (default) | 'browse'
    * @returns Paginated content list with metadata
    * @throws ValidationError when scope='browse' and organizationId is missing
+   *
+   * The two scopes return different rows, so each has its own signature: a
+   * browse row is a {@link CatalogueContentRow} (Codex-1bdx0), a studio row
+   * the creator's own whole row.
    */
+  list(
+    creatorId: string,
+    filters: ContentFilters,
+    pagination: PaginationParams,
+    options: { scope: 'browse' }
+  ): Promise<PaginatedListResponse<CatalogueContentRow>>;
+  list(
+    creatorId: string,
+    filters?: ContentFilters,
+    paginationOrOptions?: PaginationParams | { scope?: 'studio' },
+    maybeOptions?: { scope?: 'studio' }
+  ): Promise<PaginatedListResponse<ContentWithRelations>>;
   async list(
     creatorId: string,
     filters: ContentFilters = {},
@@ -1021,7 +1220,9 @@ export class ContentService extends BaseService {
       limit: PAGINATION.DEFAULT,
     },
     maybeOptions?: { scope?: 'studio' | 'browse' }
-  ): Promise<PaginatedListResponse<ContentWithRelations>> {
+  ): Promise<
+    PaginatedListResponse<ContentWithRelations | CatalogueContentRow>
+  > {
     // Backwards-compatible argument handling: callers may pass either
     // (creatorId, filters, options) — new shape — or
     // (creatorId, filters, pagination, options?) — extended shape.
@@ -1062,6 +1263,9 @@ export class ContentService extends BaseService {
               // scope deliberately still shows them — a creator must be able to
               // see and manage their own gated practices.
               eq(content.courseOnly, false),
+              // A deleted org's catalogue is not browsable either; its content
+              // stays published when the org is deleted.
+              this.orgIsLive(),
             ]
           : [scopedNotDeleted(content, creatorId)];
 
@@ -1132,25 +1336,55 @@ export class ContentService extends BaseService {
       return await paginatedQuery({
         page: pagination.page,
         limit: pagination.limit,
-        fetchItems: (limit, offset) =>
-          this.db.query.content.findMany({
-            where,
-            limit,
-            offset,
-            orderBy: [orderByClause],
-            with: {
-              mediaItem: true,
-              organization: true,
-              creator: {
-                columns: {
-                  id: true,
-                  email: true,
-                  name: true,
+        // Two reads, not one with conditional relations: drizzle types a
+        // `true | { columns }` relation as the narrow shape for BOTH scopes.
+        fetchItems: (
+          limit,
+          offset
+        ): Promise<Array<ContentWithRelations | CatalogueContentRow>> =>
+          scope === 'browse'
+            ? this.db.query.content.findMany({
+                where,
+                limit,
+                offset,
+                orderBy: [orderByClause],
+                // Browse spans every creator in an org for ANY signed-in
+                // viewer, so it selects what the anonymous public list
+                // selects: no creator email, and (Codex-1bdx0) no raw R2 key,
+                // RunPod job id or transcoding error on the media item, no
+                // payee id on the org, no sales count on the row.
+                columns: CATALOGUE_CONTENT_COLUMNS,
+                with: {
+                  mediaItem: { columns: PUBLIC_MEDIA_ITEM_COLUMNS },
+                  organization: { columns: PUBLIC_ORGANIZATION_COLUMNS },
+                  creator: { columns: PUBLIC_CREATOR_COLUMNS },
                 },
-              },
-            },
-          }),
+              })
+            : this.db.query.content.findMany({
+                where,
+                limit,
+                offset,
+                orderBy: [orderByClause],
+                // The studio scope is the signed-in creator's own rows, whole
+                // and with their email. The org is not theirs: no payee id.
+                with: {
+                  mediaItem: { columns: MEDIA_ITEM_RESPONSE_COLUMNS },
+                  organization: { columns: READABLE_ORGANIZATION_COLUMNS },
+                  creator: { columns: { id: true, email: true, name: true } },
+                },
+              }),
         countQuery: { db: this.db, table: content, where },
+        // Browse is a catalogue for any signed-in viewer (its route checks
+        // sign-in, not entitlement), so it never carries a body. It used to
+        // return the full text of every published paid, tier, follower and
+        // team-only article in the org, and /explore's signed-in sorts put
+        // it in the page: a free account could read them all. Its consumers
+        // (/explore's cards, the studio grant picker) read metadata only.
+        // The studio scope is the creator's own rows and keeps them.
+        mapItem: (item) =>
+          scope === 'browse'
+            ? { ...item, contentBody: null, contentBodyJson: null }
+            : item,
       });
     } catch (error) {
       this.handleError(error, 'list');
@@ -1162,8 +1396,13 @@ export class ContentService extends BaseService {
    *
    * Security:
    * - No authentication required
-   * - Only returns published, non-deleted content
-   * - Scoped to a specific organization
+   * - Only returns published, non-deleted content whose org (if any) is live
+   * - Scoped by an org, a creator (their public profile) or a slug; with none
+   *   it is /discover's platform-wide catalogue. The route schemas decide
+   *   which a caller may send.
+   * - The creator relation carries no email: this list is anonymous
+   * - The media item carries only PUBLIC_MEDIA_ITEM_COLUMNS, and the org only
+   *   PUBLIC_ORGANIZATION_COLUMNS, never the row
    *
    * Features:
    * - Optional contentType filter
@@ -1186,9 +1425,17 @@ export class ContentService extends BaseService {
     creatorId?: string;
     featured?: boolean;
     category?: string;
-  }): Promise<
-    PaginatedListResponse<ContentWithRelations & { categorySlugs: string[] }>
-  > {
+  }): Promise<PaginatedListResponse<PublicContentRow>> {
+    // A topic is an org's, so only an org-scoped read can filter by one. The
+    // public route refuses this already (publicContentQuerySchema); this is the
+    // service-level seatbelt, as in list()'s browse scope. Without an org there
+    // is no right answer: a creatorId read is cross-org (their public profile),
+    // where a personal-topic match silently dropped their org content, and a
+    // bare category returned the list unfiltered.
+    if (params.category && !params.orgId) {
+      throw new ValidationError('category requires orgId');
+    }
+
     try {
       // Build WHERE conditions — published, not deleted, optionally scoped to org
       const whereConditions = [
@@ -1199,6 +1446,12 @@ export class ContentService extends BaseService {
       if (params.orgId) {
         whereConditions.push(eq(content.organizationId, params.orgId));
       }
+
+      // Only content whose org is live, on every path: a creator's profile,
+      // /discover, and an org-scoped read of a deleted org by a direct API
+      // client (a KV-cached org list is also invalidated on delete, by
+      // organization-api).
+      whereConditions.push(this.orgIsLive());
 
       // Optional slug filter (exact match for content detail page)
       if (params.slug) {
@@ -1224,7 +1477,9 @@ export class ContentService extends BaseService {
         whereConditions.push(eq(content.contentType, params.contentType));
       }
 
-      // Optional creator filter — scopes to a single creator's content within the org
+      // Optional creator filter: one creator's content within the org, or, with
+      // no orgId, across their orgs and personal space (their public profile,
+      // Codex-osuqt)
       if (params.creatorId) {
         whereConditions.push(eq(content.creatorId, params.creatorId));
       }
@@ -1241,39 +1496,24 @@ export class ContentService extends BaseService {
       // ids and we match via `IN`, so the relational `findMany` below (with its
       // media/creator/org relations) stays intact — no join reshaping needed.
       //
-      // Space scoping: org listing → org categories; personal listing → the
-      // creator's OWN personal categories (scope by creatorId, NOT merely
-      // `organizationId IS NULL`, which would match personal categories across
-      // ALL creators). A bare category slug with neither orgId nor creatorId
-      // can't be space-scoped, so we SKIP the filter rather than perform a
-      // cross-creator personal match. Soft-deleted categories are excluded.
-      if (params.category) {
-        const categorySpaceScope = params.orgId
-          ? eq(categories.organizationId, params.orgId)
-          : params.creatorId
-            ? and(
-                isNull(categories.organizationId),
-                eq(categories.creatorId, params.creatorId)
-              )
-            : undefined;
-
-        if (categorySpaceScope) {
-          const categoryContentIds = this.db
-            .select({ contentId: contentCategories.contentId })
-            .from(contentCategories)
-            .innerJoin(
-              categories,
-              eq(contentCategories.categoryId, categories.id)
+      // The org's own topics only (the guard above refuses a category with no
+      // org). Soft-deleted categories are excluded.
+      if (params.category && params.orgId) {
+        const categoryContentIds = this.db
+          .select({ contentId: contentCategories.contentId })
+          .from(contentCategories)
+          .innerJoin(
+            categories,
+            eq(contentCategories.categoryId, categories.id)
+          )
+          .where(
+            and(
+              eq(categories.slug, params.category),
+              isNull(categories.deletedAt),
+              eq(categories.organizationId, params.orgId)
             )
-            .where(
-              and(
-                eq(categories.slug, params.category),
-                isNull(categories.deletedAt),
-                categorySpaceScope
-              )
-            );
-          whereConditions.push(inArray(content.id, categoryContentIds));
-        }
+          );
+        whereConditions.push(inArray(content.id, categoryContentIds));
       }
 
       // Optional search on title/description
@@ -1308,50 +1548,50 @@ export class ContentService extends BaseService {
             limit,
             offset,
             orderBy: [orderByClause],
+            // No sales count: see CATALOGUE_CONTENT_COLUMNS.
+            columns: CATALOGUE_CONTENT_COLUMNS,
             with: {
-              mediaItem: true,
-              creator: {
-                columns: {
-                  id: true,
-                  email: true,
-                  name: true,
-                },
-              },
-              organization: true,
+              // Three columns, not the row: see PUBLIC_MEDIA_ITEM_COLUMNS.
+              mediaItem: { columns: PUBLIC_MEDIA_ITEM_COLUMNS },
+              // No email: this list is anonymous, and every public page that
+              // lists content (creator pages, /discover, the org landing,
+              // /explore, the related strips) serialises each item into its HTML.
+              creator: { columns: PUBLIC_CREATOR_COLUMNS },
+              // Four columns, not the row: see PUBLIC_ORGANIZATION_COLUMNS.
+              organization: { columns: PUBLIC_ORGANIZATION_COLUMNS },
             },
           }),
         countQuery: { db: this.db, table: content, where },
-        // Strip body columns for any non-free content. The public endpoint is
-        // unauthenticated and KV-cached, so it must never return the text of
-        // gated articles (followers / subscribers / team / paid). Metadata —
-        // title, description, thumbnail, access-policy flags, priceCents,
-        // creator, org, mediaItem — stays so cards and the detail page shell
-        // still render. Authorized callers fetch full rows through the
-        // authenticated `/api/content` endpoint (creator-scoped).
+        // The body ships only on a by-slug read (a detail page) of a PUBLIC
+        // row, by the whole policy (`isPublicContent`). The public endpoint is
+        // unauthenticated and KV-cached, so it must never return the text of a
+        // gated piece (followers / subscribers / team / paid / course-only).
+        // It used to read `isFree` alone, and a course-only practice is
+        // flagged free on purpose (the course service leaves `isFree` as it
+        // was), so anyone could read one by its slug (Codex-039vo). An
+        // entitled reader gets a gated body from the access check instead
+        // (`/stream?include=body`). A catalogue read (no slug: an org's list,
+        // /discover, a creator's profile) never needs a body, so it never
+        // carries one. Metadata (title, description, thumbnail, access-policy
+        // flags, priceCents, creator, org, mediaItem) stays so cards and the
+        // detail page shell render.
         mapItem: (item) =>
-          item.isFree
+          params.slug && isPublicContent(item)
             ? item
             : { ...item, contentBody: null, contentBodyJson: null },
       });
 
       // Enrich each item with its category (topic) slugs so the landing
       // "Browse by topic" filter can match items to the active topic without a
-      // second round-trip. One extra query keyed on the returned content ids;
-      // space-scoped (org listing → org categories; personal → the creator's
-      // own) and excluding soft-deleted categories — mirrors the category
-      // FILTER scope above. Items with no membership get an empty array.
+      // second round-trip. One extra query keyed on the returned content ids,
+      // for an org-scoped read only: a topic is an org's, the same scope as
+      // the category filter above, and only the org landing reads the slugs. A
+      // creatorId-only read (a creator's profile, never KV-cached) skips the
+      // query, so its items get an empty array. Soft-deleted categories are
+      // excluded.
       const itemIds = result.items.map((item) => item.id);
-      const categorySpaceScope = params.orgId
-        ? eq(categories.organizationId, params.orgId)
-        : params.creatorId
-          ? and(
-              isNull(categories.organizationId),
-              eq(categories.creatorId, params.creatorId)
-            )
-          : undefined;
-
       const slugsByContentId = new Map<string, string[]>();
-      if (itemIds.length > 0 && categorySpaceScope) {
+      if (itemIds.length > 0 && params.orgId) {
         const slugRows = await this.db
           .select({
             contentId: contentCategories.contentId,
@@ -1366,7 +1606,7 @@ export class ContentService extends BaseService {
             and(
               inArray(contentCategories.contentId, itemIds),
               isNull(categories.deletedAt),
-              categorySpaceScope
+              eq(categories.organizationId, params.orgId)
             )
           );
         for (const row of slugRows) {

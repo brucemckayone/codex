@@ -8,8 +8,11 @@
   @prop {string | number} value - The metric value to display
   @prop {number} [change] - Percentage change (positive = green, negative = red)
   @prop {boolean} [loading=false] - Whether the card is in loading state
+  @prop {Snippet} [detail] - Optional line under the value, such as what the
+    figure is made of. Absent, the card renders exactly as before.
 -->
 <script lang="ts">
+  import type { Snippet } from 'svelte';
   import { Card, CardContent } from '$lib/components/ui/Card';
   import Badge from '$lib/components/ui/Badge/Badge.svelte';
   import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
@@ -19,9 +22,10 @@
     value: string | number;
     change?: number;
     loading?: boolean;
+    detail?: Snippet;
   }
 
-  const { label, value, change, loading = false }: Props = $props();
+  const { label, value, change, loading = false, detail }: Props = $props();
 
   const changeVariant = $derived(
     change !== undefined && change > 0
@@ -53,6 +57,9 @@
           <Badge variant={changeVariant}>{changeText}</Badge>
         {/if}
       </div>
+      {#if detail}
+        {@render detail()}
+      {/if}
     {/if}
   </CardContent>
 </Card>

@@ -15,8 +15,8 @@ export type {
 
 import type {
   Content,
-  MediaItem,
   Organization,
+  ServedMediaItem,
   Subscription,
   SubscriptionTier,
 } from '@codex/database/schema';
@@ -26,14 +26,16 @@ import type { HeroLayout } from '@codex/validation';
 export interface ContentWithRelations extends Content {
   creator?: {
     id: string;
-    email: string;
+    /** Absent on the anonymous public list, which never selects it. */
+    email?: string;
     name: string | null;
   };
   organization?: Organization | null;
-  mediaItem?: MediaItem | null;
+  mediaItem?: ServedMediaItem | null;
 }
 
-export interface MediaItemWithRelations extends MediaItem {
+/** As content-api serves it: never the transcoder's raw detail. */
+export interface MediaItemWithRelations extends ServedMediaItem {
   creator?: {
     id: string;
     email: string;
@@ -317,6 +319,76 @@ export interface OrgMemberItem {
   role: string;
   status: string;
   joinedAt: string;
+}
+
+/**
+ * What removing a member would unwind (Codex-2hxff.64): counts from
+ * `GET /api/organizations/:id/members/:userId/departure-preview`, scoped to the
+ * organisation and that member as creator. Mirrors `DeparturePreview` in
+ * `@codex/organization`.
+ */
+export interface DeparturePreview {
+  /** Active revenue-share agreements, which end at removal. */
+  agreements: number;
+  /** Published content, which comes off sale at removal. */
+  contentOnSale: number;
+  /** Published courses, which come off sale at removal. */
+  coursesOnSale: number;
+  /** Live course subscriptions to those courses, cancelled at period end. */
+  courseSubscriptions: number;
+  /** Tier subscribers who keep the member's work until their next renewal. */
+  tierSubscribersAffected: number;
+}
+
+// ─── Access grants and purchase history (Codex-2hxff.21) ──────────────────
+//
+// Mirrors the fixed API contract for the access-gaps change. Defined here
+// (not in $lib/server/api) because the studio drawer and the account page
+// read them.
+
+/**
+ * A support grant of one item to one customer, from
+ * `GET /api/admin/customers/:customerId/grants`. Live and revoked grants are
+ * both listed (newest `grantedAt` first), so the drawer keeps a record.
+ */
+export interface CustomerGrant {
+  /** The entitlement id, which the revoke route takes. */
+  id: string;
+  contentId: string;
+  contentTitle: string;
+  contentSlug: string;
+  /** ISO 8601. */
+  grantedAt: string;
+  /** The studio member who made the grant, when still known. */
+  grantedByName: string | null;
+  /** ISO 8601; `null` while the grant is live. */
+  revokedAt: string | null;
+  revokedByName: string | null;
+}
+
+/**
+ * One row of the buyer's purchase history (`GET /purchases`). Content and
+ * course purchases share the list; `kind` says which, and only that kind's
+ * id and title are set.
+ */
+export interface PurchaseListItem {
+  id: string;
+  customerId: string;
+  /** ISO 8601. */
+  createdAt: string;
+  kind: 'content' | 'course';
+  contentId: string | null;
+  contentTitle: string | null;
+  courseId: string | null;
+  courseTitle: string | null;
+  amountCents: number;
+  status: string;
+  /**
+   * ISO 8601; set when a chargeback opened on the payment. A won dispute
+   * clears it. A lost one refunds the row and leaves it set, so the dispute
+   * is open only while `status` is still `'completed'` (Codex-2hxff.60).
+   */
+  disputedAt: string | null;
 }
 
 // ─── Ownership Transfer Types (Codex-2hxff.2) ──────────────────────────────

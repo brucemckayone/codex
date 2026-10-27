@@ -16,6 +16,7 @@
   @prop {boolean} [loading]          Shimmer skeleton state.
   @prop {string}  [unit]             Optional suffix for `format='number'` (e.g. "followers").
   @prop {Snippet} [valueContent]     Bespoke value rendering for advanced callers.
+  @prop {Snippet} [detail]           Optional line under the value, such as what the figure is made of. Absent, the card renders exactly as before.
 -->
 <script lang="ts">
   import type { Snippet } from 'svelte';
@@ -37,6 +38,7 @@
     loading?: boolean;
     unit?: string;
     valueContent?: Snippet;
+    detail?: Snippet;
   }
 
   const {
@@ -48,6 +50,7 @@
     loading = false,
     unit,
     valueContent,
+    detail,
     class: className,
     ...restProps
   }: Props = $props();
@@ -185,6 +188,10 @@
         {/if}
       {/if}
     </div>
+
+    {#if detail}
+      {@render detail()}
+    {/if}
 
     {#if showDelta}
       <div class="kpi-card__delta" data-direction={deltaDirection}>

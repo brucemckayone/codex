@@ -14,14 +14,21 @@ import { getRenderExtensions } from './extensions.js';
  * Works for any content type — not restricted to written content.
  *
  * Runs during SSR on the Cloudflare Workers runtime (workerd). A render
- * failure is soft-degraded to `null` (no body) rather than allowed to throw:
- * the loaders that call this treat a null body as "no body to show", so a
+ * failure is soft-degraded to `null` rather than allowed to throw, so a
  * single malformed doc can never take down the whole content page with a 500.
+ * But `null` also means "nothing stored": a caller holding one asks
+ * {@link hasStoredText} and, for stored text, tells the reader it did not
+ * load, never shows nothing (Codex-uuz1g; every current caller does). The
+ * failure is logged with `context`; the content id is required for that
+ * reason, and `surface` says which page failed.
  */
-export async function renderContentBody(content: {
-  contentBodyJson?: Record<string, unknown> | null;
-  contentBody?: string | null;
-}): Promise<string | null> {
+export async function renderContentBody(
+  content: {
+    contentBodyJson?: Record<string, unknown> | null;
+    contentBody?: string | null;
+  },
+  context: { contentId: string; surface?: 'content-detail' | 'course-player' }
+): Promise<string | null> {
   try {
     if (content.contentBodyJson) {
       // MUST use the `/server` entry, not `@tiptap/html`: the browser build
@@ -52,7 +59,10 @@ export async function renderContentBody(content: {
   } catch (error) {
     // Defense-in-depth: never let a body-render failure crash the page.
     logger.error('Failed to render content body', {
+      contentId: context.contentId,
+      surface: context.surface,
       error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
     });
     return null;
   }
@@ -61,25 +71,16 @@ export async function renderContentBody(content: {
 }
 
 /**
- * Sanitize an ALREADY-RENDERED HTML string with the exact same
- * `isomorphic-dompurify` pass `renderContentBody` applies to freshly-generated
- * markup. Use this when trusted-shaped HTML arrives pre-rendered from another
- * source (e.g. a content-api journey payload) and needs the XSS scrub WITHOUT
- * the TipTap/markdown render step — so the value can safely reach an `{@html}`.
- *
- * Soft-degrades to `''` on failure (never throws, never returns the input): a
- * sanitize error must not surface unsanitized HTML to the client, and must not
- * 500 the caller. An empty string renders as "no body", matching how the
- * loaders treat a null body.
+ * Does this stored body hold any text to render? `renderContentBody` answers
+ * null both for "nothing stored" and for a render that FAILED, so a caller
+ * holding a null result asks this to tell them apart: stored text with no
+ * HTML is a failure the reader must be told about, never "no body"
+ * (Codex-uuz1g). The rule is renderContentBody's own: JSON first, then
+ * markdown.
  */
-export async function sanitizeContentHtml(html: string): Promise<string> {
-  try {
-    const DOMPurify = (await import('isomorphic-dompurify')).default;
-    return DOMPurify.sanitize(html);
-  } catch (error) {
-    logger.error('Failed to sanitize content HTML', {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return '';
-  }
+export function hasStoredText(content: {
+  contentBodyJson?: Record<string, unknown> | null;
+  contentBody?: string | null;
+}): boolean {
+  return content.contentBodyJson != null || Boolean(content.contentBody);
 }

@@ -6,7 +6,7 @@
 -->
 <script lang="ts">
   import { page } from '$app/state';
-  import { buildContentUrl } from '$lib/utils/subdomain';
+  import { buildContentUrl, buildPlatformUrl } from '$lib/utils/subdomain';
   import { CheckoutSuccess } from '$lib/components/ui/CheckoutSuccess';
   import type { PageData } from './$types';
 
@@ -22,20 +22,27 @@
   // and it's a more useful destination than /library. buildContentUrl uses
   // `slug ?? id` for the path so we pass the slug in both slots when the
   // verified id isn't available yet (typed fallback, not a real navigation id).
+  // The player paywall's return carries no slug (Codex-2hxff.22 WEB-03): the
+  // verified content id is the way there instead.
   const contentUrl = $derived(
     data.contentSlug
       ? buildContentUrl(page.url, {
           slug: data.contentSlug,
           id: data.verification?.content?.id ?? data.contentSlug
         })
-      : '/library'
+      : data.verification?.content
+        ? buildContentUrl(page.url, { id: data.verification.content.id })
+        : '/library'
   );
 </script>
 
 <CheckoutSuccess
   verification={data.verification}
+  verifyFailed={data.verifyFailed}
+  unlock={data.unlock}
   {contentUrl}
   browseUrl="/explore"
   libraryUrl="/library"
+  paymentHistoryUrl={buildPlatformUrl(page.url, '/account/payment')}
   titleSuffix={data.org?.name ?? 'Codex'}
 />

@@ -40,20 +40,26 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DEFAULT_TOP_CONTENT_LIMIT } from '../constants';
 import { AdminAnalyticsService } from '../services/analytics-service';
+import { ledgerFixtures } from './helpers/revenue-ledger-fixtures';
 
 describe('AdminAnalyticsService', () => {
   let db: Database;
   let service: AdminAnalyticsService;
+  // Revenue reads the payouts ledger (Codex-2hxff.20): a sale is its slices.
+  let ledger: ReturnType<typeof ledgerFixtures>;
   let creatorId: string;
   let customerId: string;
+  // A buyer holds at most one completed purchase per item (Codex-2hxff.14).
+  let secondCustomerId: string;
 
   beforeAll(async () => {
     db = setupTestDatabase();
     service = new AdminAnalyticsService({ db, environment: 'test' });
+    ledger = ledgerFixtures(db);
 
     // Create test users
-    const userIds = await seedTestUsers(db, 2);
-    [creatorId, customerId] = userIds;
+    const userIds = await seedTestUsers(db, 3);
+    [creatorId, customerId, secondCustomerId] = userIds;
 
     // Create organization (result not needed beyond creation)
     await db
@@ -63,586 +69,12 @@ describe('AdminAnalyticsService', () => {
   });
 
   afterAll(async () => {
+    await ledger.cleanup();
     await teardownTestDatabase();
   });
 
-  describe('getRevenueStats', () => {
-    it('should return zero stats for organization with no purchases', async () => {
-      // Create a new org with no purchases
-      const emptyOrg = takeFirst(
-        await db
-          .insert(organizations)
-          .values(createTestOrganizationInput())
-          .returning()
-      );
-
-      const stats = await service.getRevenueStats(emptyOrg.id);
-
-      expect(stats.totalRevenueCents).toBe(0);
-      expect(stats.totalPurchases).toBe(0);
-      expect(stats.averageOrderValueCents).toBe(0);
-      expect(stats.platformFeeCents).toBe(0);
-      expect(stats.organizationFeeCents).toBe(0);
-      expect(stats.creatorPayoutCents).toBe(0);
-      expect(stats.revenueByDay).toEqual([]);
-    });
-
-    it('should calculate revenue stats with completed purchases', async () => {
-      // Create test org with purchases
-      const testOrg = takeFirst(
-        await db
-          .insert(organizations)
-          .values(createTestOrganizationInput())
-          .returning()
-      );
-
-      // Create media and content
-      const media = takeFirst(
-        await db
-          .insert(mediaItems)
-          .values(
-            createTestMediaItemInput(creatorId, {
-              mediaType: 'video',
-              status: 'ready',
-            })
-          )
-          .returning()
-      );
-
-      const testContent = takeFirst(
-        await db
-          .insert(contentTable)
-          .values({
-            creatorId,
-            organizationId: testOrg.id,
-            mediaItemId: media.id,
-            title: 'Test Content',
-            slug: createUniqueSlug('revenue-test'),
-            contentType: 'video',
-            status: 'published',
-            priceCents: 2999,
-          })
-          .returning()
-      );
-
-      // Create completed purchases
-      await db.insert(purchases).values([
-        {
-          customerId,
-          contentId: testContent.id,
-          organizationId: testOrg.id,
-          amountPaidCents: 2999,
-          platformFeeCents: 300,
-          organizationFeeCents: 0,
-          creatorPayoutCents: 2699,
-          stripePaymentIntentId: `pi_test_${Date.now()}_1`,
-          status: PURCHASE_STATUS.COMPLETED,
-          purchasedAt: new Date(),
-        },
-        {
-          customerId,
-          contentId: testContent.id,
-          organizationId: testOrg.id,
-          amountPaidCents: 2999,
-          platformFeeCents: 300,
-          organizationFeeCents: 0,
-          creatorPayoutCents: 2699,
-          stripePaymentIntentId: `pi_test_${Date.now()}_2`,
-          status: PURCHASE_STATUS.COMPLETED,
-          purchasedAt: new Date(),
-        },
-      ]);
-
-      const stats = await service.getRevenueStats(testOrg.id);
-
-      expect(stats.totalRevenueCents).toBe(5998);
-      expect(stats.totalPurchases).toBe(2);
-      expect(stats.averageOrderValueCents).toBe(2999);
-      expect(stats.platformFeeCents).toBe(600);
-      expect(stats.organizationFeeCents).toBe(0);
-      expect(stats.creatorPayoutCents).toBe(5398);
-    });
-
-    it('should exclude pending/failed/refunded purchases from revenue', async () => {
-      const testOrg = takeFirst(
-        await db
-          .insert(organizations)
-          .values(createTestOrganizationInput())
-          .returning()
-      );
-
-      const media = takeFirst(
-        await db
-          .insert(mediaItems)
-          .values(
-            createTestMediaItemInput(creatorId, {
-              mediaType: 'video',
-              status: 'ready',
-            })
-          )
-          .returning()
-      );
-
-      const testContent = takeFirst(
-        await db
-          .insert(contentTable)
-          .values({
-            creatorId,
-            organizationId: testOrg.id,
-            mediaItemId: media.id,
-            title: 'Test Content',
-            slug: createUniqueSlug('exclude-test'),
-            contentType: 'video',
-            status: 'published',
-            priceCents: 1000,
-          })
-          .returning()
-      );
-
-      // Create mixed status purchases
-      await db.insert(purchases).values([
-        {
-          customerId,
-          contentId: testContent.id,
-          organizationId: testOrg.id,
-          amountPaidCents: 1000,
-          platformFeeCents: 100,
-          organizationFeeCents: 0,
-          creatorPayoutCents: 900,
-          stripePaymentIntentId: `pi_completed_${Date.now()}`,
-          status: PURCHASE_STATUS.COMPLETED,
-          purchasedAt: new Date(),
-        },
-        {
-          customerId,
-          contentId: testContent.id,
-          organizationId: testOrg.id,
-          amountPaidCents: 1000,
-          platformFeeCents: 100,
-          organizationFeeCents: 0,
-          creatorPayoutCents: 900,
-          stripePaymentIntentId: `pi_pending_${Date.now()}`,
-          status: PURCHASE_STATUS.PENDING,
-        },
-        {
-          customerId,
-          contentId: testContent.id,
-          organizationId: testOrg.id,
-          amountPaidCents: 1000,
-          platformFeeCents: 100,
-          organizationFeeCents: 0,
-          creatorPayoutCents: 900,
-          stripePaymentIntentId: `pi_failed_${Date.now()}`,
-          status: PURCHASE_STATUS.FAILED,
-        },
-      ]);
-
-      const stats = await service.getRevenueStats(testOrg.id);
-
-      // Only completed purchase should be counted
-      expect(stats.totalRevenueCents).toBe(1000);
-      expect(stats.totalPurchases).toBe(1);
-    });
-
-    it('should filter by date range', async () => {
-      const testOrg = takeFirst(
-        await db
-          .insert(organizations)
-          .values(createTestOrganizationInput())
-          .returning()
-      );
-
-      const media = takeFirst(
-        await db
-          .insert(mediaItems)
-          .values(
-            createTestMediaItemInput(creatorId, {
-              mediaType: 'video',
-              status: 'ready',
-            })
-          )
-          .returning()
-      );
-
-      const testContent = takeFirst(
-        await db
-          .insert(contentTable)
-          .values({
-            creatorId,
-            organizationId: testOrg.id,
-            mediaItemId: media.id,
-            title: 'Date Range Test',
-            slug: createUniqueSlug('date-range'),
-            contentType: 'video',
-            status: 'published',
-            priceCents: 500,
-          })
-          .returning()
-      );
-
-      const now = new Date();
-      const yesterday = new Date(now);
-      yesterday.setDate(yesterday.getDate() - 1);
-      const lastWeek = new Date(now);
-      lastWeek.setDate(lastWeek.getDate() - 7);
-
-      // Create purchases at different times
-      await db.insert(purchases).values([
-        {
-          customerId,
-          contentId: testContent.id,
-          organizationId: testOrg.id,
-          amountPaidCents: 500,
-          platformFeeCents: 50,
-          organizationFeeCents: 0,
-          creatorPayoutCents: 450,
-          stripePaymentIntentId: `pi_today_${Date.now()}`,
-          status: PURCHASE_STATUS.COMPLETED,
-          purchasedAt: now,
-        },
-        {
-          customerId,
-          contentId: testContent.id,
-          organizationId: testOrg.id,
-          amountPaidCents: 500,
-          platformFeeCents: 50,
-          organizationFeeCents: 0,
-          creatorPayoutCents: 450,
-          stripePaymentIntentId: `pi_lastweek_${Date.now()}`,
-          status: PURCHASE_STATUS.COMPLETED,
-          purchasedAt: lastWeek,
-        },
-      ]);
-
-      // Filter to only yesterday and today
-      const stats = await service.getRevenueStats(testOrg.id, {
-        startDate: yesterday,
-        endDate: now,
-      });
-
-      expect(stats.totalRevenueCents).toBe(500); // Only today's purchase
-      expect(stats.totalPurchases).toBe(1);
-    });
-
-    // Note: Organization existence validation is handled by middleware (requirePlatformOwner)
-    // Service trusts that organizationId is valid when passed from authenticated context
-
-    it('should scope revenue to specific organization only', async () => {
-      // Create two organizations
-      const org1 = takeFirst(
-        await db
-          .insert(organizations)
-          .values(createTestOrganizationInput())
-          .returning()
-      );
-      const org2 = takeFirst(
-        await db
-          .insert(organizations)
-          .values(createTestOrganizationInput())
-          .returning()
-      );
-
-      const media = takeFirst(
-        await db
-          .insert(mediaItems)
-          .values(
-            createTestMediaItemInput(creatorId, {
-              mediaType: 'video',
-              status: 'ready',
-            })
-          )
-          .returning()
-      );
-
-      // Content for org1
-      const content1 = takeFirst(
-        await db
-          .insert(contentTable)
-          .values({
-            creatorId,
-            organizationId: org1.id,
-            mediaItemId: media.id,
-            title: 'Org1 Content',
-            slug: createUniqueSlug('org1'),
-            contentType: 'video',
-            status: 'published',
-            priceCents: 1000,
-          })
-          .returning()
-      );
-
-      // Content for org2
-      const content2 = takeFirst(
-        await db
-          .insert(contentTable)
-          .values({
-            creatorId,
-            organizationId: org2.id,
-            mediaItemId: media.id,
-            title: 'Org2 Content',
-            slug: createUniqueSlug('org2'),
-            contentType: 'video',
-            status: 'published',
-            priceCents: 2000,
-          })
-          .returning()
-      );
-
-      // Purchases for different orgs
-      await db.insert(purchases).values([
-        {
-          customerId,
-          contentId: content1.id,
-          organizationId: org1.id,
-          amountPaidCents: 1000,
-          platformFeeCents: 100,
-          organizationFeeCents: 0,
-          creatorPayoutCents: 900,
-          stripePaymentIntentId: `pi_org1_${Date.now()}`,
-          status: PURCHASE_STATUS.COMPLETED,
-          purchasedAt: new Date(),
-        },
-        {
-          customerId,
-          contentId: content2.id,
-          organizationId: org2.id,
-          amountPaidCents: 2000,
-          platformFeeCents: 200,
-          organizationFeeCents: 0,
-          creatorPayoutCents: 1800,
-          stripePaymentIntentId: `pi_org2_${Date.now()}`,
-          status: PURCHASE_STATUS.COMPLETED,
-          purchasedAt: new Date(),
-        },
-      ]);
-
-      // Check org1 stats
-      const org1Stats = await service.getRevenueStats(org1.id);
-      expect(org1Stats.totalRevenueCents).toBe(1000);
-      expect(org1Stats.totalPurchases).toBe(1);
-
-      // Check org2 stats
-      const org2Stats = await service.getRevenueStats(org2.id);
-      expect(org2Stats.totalRevenueCents).toBe(2000);
-      expect(org2Stats.totalPurchases).toBe(1);
-    });
-
-    it('should restrict daily breakdown to the requested date range', async () => {
-      // Regression: previously the daily breakdown always ran against the
-      // last TREND_DAYS_DEFAULT (30 days) and ignored options.startDate/endDate,
-      // so aggregate totals and the daily rows drifted apart. After the fix
-      // both must reflect the same window.
-      const testOrg = takeFirst(
-        await db
-          .insert(organizations)
-          .values(createTestOrganizationInput())
-          .returning()
-      );
-
-      const media = takeFirst(
-        await db
-          .insert(mediaItems)
-          .values(
-            createTestMediaItemInput(creatorId, {
-              mediaType: 'video',
-              status: 'ready',
-            })
-          )
-          .returning()
-      );
-
-      const testContent = takeFirst(
-        await db
-          .insert(contentTable)
-          .values({
-            creatorId,
-            organizationId: testOrg.id,
-            mediaItemId: media.id,
-            title: 'Daily Range',
-            slug: createUniqueSlug('daily-range'),
-            contentType: 'video',
-            status: 'published',
-            priceCents: 1500,
-          })
-          .returning()
-      );
-
-      const today = new Date();
-      const tenDaysAgo = new Date(today);
-      tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
-      const twoDaysAgo = new Date(today);
-      twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
-
-      await db.insert(purchases).values([
-        {
-          customerId,
-          contentId: testContent.id,
-          organizationId: testOrg.id,
-          amountPaidCents: 1500,
-          platformFeeCents: 150,
-          organizationFeeCents: 0,
-          creatorPayoutCents: 1350,
-          stripePaymentIntentId: `pi_in_${Date.now()}`,
-          status: PURCHASE_STATUS.COMPLETED,
-          purchasedAt: twoDaysAgo,
-        },
-        {
-          customerId,
-          contentId: testContent.id,
-          organizationId: testOrg.id,
-          amountPaidCents: 1500,
-          platformFeeCents: 150,
-          organizationFeeCents: 0,
-          creatorPayoutCents: 1350,
-          stripePaymentIntentId: `pi_out_${Date.now()}`,
-          status: PURCHASE_STATUS.COMPLETED,
-          purchasedAt: tenDaysAgo,
-        },
-      ]);
-
-      const fiveDaysAgo = new Date(today);
-      fiveDaysAgo.setDate(fiveDaysAgo.getDate() - 5);
-
-      const stats = await service.getRevenueStats(testOrg.id, {
-        startDate: fiveDaysAgo,
-        endDate: today,
-      });
-
-      // Aggregate only sees the recent purchase
-      expect(stats.totalRevenueCents).toBe(1500);
-      expect(stats.totalPurchases).toBe(1);
-      // Daily rows must reflect the same window — no row older than start
-      expect(stats.revenueByDay.length).toBe(1);
-      expect(
-        new Date(stats.revenueByDay[0]!.date).getTime()
-      ).toBeGreaterThanOrEqual(
-        new Date(fiveDaysAgo.toISOString().split('T')[0]!).getTime()
-      );
-    });
-
-    it('should include a previous block when compareFrom and compareTo are provided', async () => {
-      const testOrg = takeFirst(
-        await db
-          .insert(organizations)
-          .values(createTestOrganizationInput())
-          .returning()
-      );
-
-      const media = takeFirst(
-        await db
-          .insert(mediaItems)
-          .values(
-            createTestMediaItemInput(creatorId, {
-              mediaType: 'video',
-              status: 'ready',
-            })
-          )
-          .returning()
-      );
-
-      const testContent = takeFirst(
-        await db
-          .insert(contentTable)
-          .values({
-            creatorId,
-            organizationId: testOrg.id,
-            mediaItemId: media.id,
-            title: 'Compare',
-            slug: createUniqueSlug('compare-range'),
-            contentType: 'video',
-            status: 'published',
-            priceCents: 2000,
-          })
-          .returning()
-      );
-
-      const now = new Date();
-      const sevenDaysAgo = new Date(now);
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-      const fourteenDaysAgo = new Date(now);
-      fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
-
-      // Two purchases in current window (last 7d), one in previous window (7-14d ago)
-      await db.insert(purchases).values([
-        {
-          customerId,
-          contentId: testContent.id,
-          organizationId: testOrg.id,
-          amountPaidCents: 2000,
-          platformFeeCents: 200,
-          organizationFeeCents: 0,
-          creatorPayoutCents: 1800,
-          stripePaymentIntentId: `pi_cur1_${Date.now()}`,
-          status: PURCHASE_STATUS.COMPLETED,
-          purchasedAt: now,
-        },
-        {
-          customerId,
-          contentId: testContent.id,
-          organizationId: testOrg.id,
-          amountPaidCents: 2000,
-          platformFeeCents: 200,
-          organizationFeeCents: 0,
-          creatorPayoutCents: 1800,
-          stripePaymentIntentId: `pi_cur2_${Date.now()}`,
-          status: PURCHASE_STATUS.COMPLETED,
-          purchasedAt: now,
-        },
-        {
-          customerId,
-          contentId: testContent.id,
-          organizationId: testOrg.id,
-          amountPaidCents: 2000,
-          platformFeeCents: 200,
-          organizationFeeCents: 0,
-          creatorPayoutCents: 1800,
-          stripePaymentIntentId: `pi_prev_${Date.now()}`,
-          status: PURCHASE_STATUS.COMPLETED,
-          purchasedAt: new Date(fourteenDaysAgo.getTime() + 60_000), // just inside previous window
-        },
-      ]);
-
-      const stats = await service.getRevenueStats(testOrg.id, {
-        startDate: sevenDaysAgo,
-        endDate: now,
-        compareFrom: fourteenDaysAgo,
-        compareTo: sevenDaysAgo,
-      });
-
-      expect(stats.totalRevenueCents).toBe(4000);
-      expect(stats.totalPurchases).toBe(2);
-      expect(stats.previous).toBeDefined();
-      expect(stats.previous?.totalRevenueCents).toBe(2000);
-      expect(stats.previous?.totalPurchases).toBe(1);
-      // previous block must not itself carry a nested previous
-      expect(
-        (stats.previous as unknown as { previous?: unknown })?.previous
-      ).toBeUndefined();
-    });
-
-    it('should omit previous block when compareFrom or compareTo is missing', async () => {
-      // Backward-compat: callers that don't opt into comparison should see the
-      // original RevenueStats shape (no `previous` key).
-      const testOrg = takeFirst(
-        await db
-          .insert(organizations)
-          .values(createTestOrganizationInput())
-          .returning()
-      );
-
-      const onlyFrom = await service.getRevenueStats(testOrg.id, {
-        compareFrom: new Date(),
-      });
-      const onlyTo = await service.getRevenueStats(testOrg.id, {
-        compareTo: new Date(),
-      });
-      const neither = await service.getRevenueStats(testOrg.id);
-
-      expect(onlyFrom.previous).toBeUndefined();
-      expect(onlyTo.previous).toBeUndefined();
-      expect(neither.previous).toBeUndefined();
-    });
-  });
+  // getRevenueStats reads the payouts ledger (Codex-2hxff.20): its tests are in
+  // analytics-revenue-ledger.integration.test.ts, which seeds ledger rows.
 
   describe('getSubscriberStats', () => {
     // Helper: insert a tier for a given org
@@ -694,6 +126,79 @@ describe('AdminAnalyticsService', () => {
       };
     }
 
+    it('leaves a duplicate subscription out of new, daily-new and churn; a tombstone still churns (Codex-2hxff.15)', async () => {
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
+      const tier = await insertTier(testOrg.id, 'dup');
+      const [u1, u2] = await seedTestUsers(db, 2);
+      const now = new Date();
+      const fiveDaysAgo = new Date(now);
+      fiveDaysAgo.setDate(fiveDaysAgo.getDate() - 5);
+      const twoDaysAgo = new Date(now);
+      twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+
+      const kept = takeFirst(
+        await db
+          .insert(subscriptions)
+          .values(
+            subRow({
+              orgId: testOrg.id,
+              userId: u1,
+              tierId: tier.id,
+              label: 'kept',
+              status: 'active',
+              createdAt: fiveDaysAgo,
+            })
+          )
+          .returning()
+      );
+      await db.insert(subscriptions).values([
+        // The same user's second subscription, refunded as a duplicate.
+        {
+          ...subRow({
+            orgId: testOrg.id,
+            userId: u1,
+            tierId: tier.id,
+            label: 'duplicate',
+            status: 'cancelled',
+            createdAt: twoDaysAgo,
+            cancelledAt: twoDaysAgo,
+          }),
+          duplicateOfSubscriptionId: kept.id,
+          endedAt: twoDaysAgo,
+        },
+        // A real subscription that ended: a tombstone, and a churn.
+        {
+          ...subRow({
+            orgId: testOrg.id,
+            userId: u2,
+            tierId: tier.id,
+            label: 'ended',
+            status: 'cancelled',
+            createdAt: twoDaysAgo,
+            cancelledAt: twoDaysAgo,
+          }),
+          endedAt: twoDaysAgo,
+        },
+      ]);
+
+      const stats = await service.getSubscriberStats(testOrg.id, {
+        startDate: fiveDaysAgo,
+        endDate: now,
+      });
+
+      expect(stats.newSubscribers).toBe(2); // kept + ended
+      expect(stats.churnedSubscribers).toBe(1); // ended
+      expect(stats.activeSubscribers).toBe(1); // kept
+      expect(
+        stats.subscribersByDay.reduce((sum, day) => sum + day.newSubscribers, 0)
+      ).toBe(2);
+    });
+
     it('should return zero stats for organization with no subscriptions', async () => {
       const emptyOrg = takeFirst(
         await db
@@ -707,7 +212,11 @@ describe('AdminAnalyticsService', () => {
       expect(stats.activeSubscribers).toBe(0);
       expect(stats.newSubscribers).toBe(0);
       expect(stats.churnedSubscribers).toBe(0);
-      expect(stats.subscribersByDay).toEqual([]);
+      // One zero entry per calendar day of the default window (Codex-2hxff.75).
+      expect(stats.subscribersByDay).toHaveLength(30);
+      expect(stats.subscribersByDay.every((d) => d.newSubscribers === 0)).toBe(
+        true
+      );
       expect(stats.previous).toBeUndefined();
     });
 
@@ -801,8 +310,11 @@ describe('AdminAnalyticsService', () => {
       expect(stats.churnedSubscribers).toBe(2);
       // Active at end of window = u1 (alive) + u2 (alive). u3, u4 cancelled before end, u5 too old.
       expect(stats.activeSubscribers).toBe(2);
-      // Daily breakdown should only contain new-sub rows inside the window (u1 on twoDaysAgo, u4 on fiveDaysAgo)
-      expect(stats.subscribersByDay).toHaveLength(2);
+      // Daily breakdown counts only new subs inside the window (u1 on
+      // twoDaysAgo, u4 on fiveDaysAgo); the other days are zero-filled.
+      expect(
+        stats.subscribersByDay.filter((d) => d.newSubscribers > 0)
+      ).toHaveLength(2);
       expect(
         stats.subscribersByDay.reduce((acc, d) => acc + d.newSubscribers, 0)
       ).toBe(2);
@@ -984,13 +496,21 @@ describe('AdminAnalyticsService', () => {
 
       // Aggregates respect the window
       expect(stats.newSubscribers).toBe(1);
-      // Daily rows reflect the same window — no row older than start
-      expect(stats.subscribersByDay).toHaveLength(1);
+      // Daily rows reflect the same window, one per UTC calendar day, oldest
+      // first, zero-filled (Codex-2hxff.75): nothing from before the start.
+      const days = stats.subscribersByDay.map((d) => d.date);
+      expect(days[0]).toBe(fiveDaysAgo.toISOString().slice(0, 10));
+      expect(days.at(-1)).toBe(today.toISOString().slice(0, 10));
+      expect(days).toHaveLength(6);
+      expect([...days].sort()).toEqual(days);
       expect(
-        new Date(stats.subscribersByDay[0]!.date).getTime()
-      ).toBeGreaterThanOrEqual(
-        new Date(fiveDaysAgo.toISOString().split('T')[0]!).getTime()
-      );
+        stats.subscribersByDay.find(
+          (d) => d.date === twoDaysAgo.toISOString().slice(0, 10)
+        )?.newSubscribers
+      ).toBe(1);
+      expect(
+        stats.subscribersByDay.reduce((sum, d) => sum + d.newSubscribers, 0)
+      ).toBe(1);
     });
   });
 
@@ -1007,7 +527,11 @@ describe('AdminAnalyticsService', () => {
 
       expect(stats.totalFollowers).toBe(0);
       expect(stats.newFollowers).toBe(0);
-      expect(stats.followersByDay).toEqual([]);
+      // One zero entry per calendar day of the default window (Codex-2hxff.75).
+      expect(stats.followersByDay).toHaveLength(30);
+      expect(stats.followersByDay.every((d) => d.newFollowers === 0)).toBe(
+        true
+      );
       expect(stats.previous).toBeUndefined();
     });
 
@@ -1059,8 +583,10 @@ describe('AdminAnalyticsService', () => {
 
       expect(stats.newFollowers).toBe(1);
       expect(stats.totalFollowers).toBe(2);
-      expect(stats.followersByDay).toHaveLength(1);
-      expect(stats.followersByDay[0]!.newFollowers).toBe(1);
+      // One day carries the new follow; the others are zero-filled.
+      const followDays = stats.followersByDay.filter((d) => d.newFollowers > 0);
+      expect(followDays).toHaveLength(1);
+      expect(followDays[0]!.newFollowers).toBe(1);
     });
 
     it('should scope follower stats to the given organization only', async () => {
@@ -1213,13 +739,21 @@ describe('AdminAnalyticsService', () => {
 
       // Aggregates respect the window
       expect(stats.newFollowers).toBe(1);
-      // Daily rows reflect the same window — no row older than start
-      expect(stats.followersByDay).toHaveLength(1);
+      // Daily rows reflect the same window, one per UTC calendar day, oldest
+      // first, zero-filled (Codex-2hxff.75): nothing from before the start.
+      const days = stats.followersByDay.map((d) => d.date);
+      expect(days[0]).toBe(fiveDaysAgo.toISOString().slice(0, 10));
+      expect(days.at(-1)).toBe(today.toISOString().slice(0, 10));
+      expect(days).toHaveLength(6);
+      expect([...days].sort()).toEqual(days);
       expect(
-        new Date(stats.followersByDay[0]!.date).getTime()
-      ).toBeGreaterThanOrEqual(
-        new Date(fiveDaysAgo.toISOString().split('T')[0]!).getTime()
-      );
+        stats.followersByDay.find(
+          (d) => d.date === twoDaysAgo.toISOString().slice(0, 10)
+        )?.newFollowers
+      ).toBe(1);
+      expect(
+        stats.followersByDay.reduce((sum, d) => sum + d.newFollowers, 0)
+      ).toBe(1);
     });
   });
 
@@ -1236,6 +770,65 @@ describe('AdminAnalyticsService', () => {
 
       expect(stats.totalCustomers).toBe(0);
       expect(stats.newCustomersLast30Days).toBe(0);
+      expect(stats.newCustomersLast7Days).toBe(0);
+    });
+
+    it('counts a customer as new this week by the date of their FIRST purchase', async () => {
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
+      const [thisWeek, earlierThisMonth, returning] = await seedTestUsers(
+        db,
+        3
+      );
+      const contentIds: string[] = [];
+      for (const label of ['a', 'b', 'c', 'd']) {
+        const row = takeFirst(
+          await db
+            .insert(contentTable)
+            .values({
+              creatorId,
+              organizationId: testOrg.id,
+              title: `New customers ${label}`,
+              slug: createUniqueSlug(`new-customers-${label}`),
+              contentType: 'written',
+              contentBody: 'Body',
+              status: 'published',
+              priceCents: 500,
+            })
+            .returning()
+        );
+        contentIds.push(row.id);
+      }
+      const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000);
+      const sale = (customer: string, contentId: string, at: Date) => ({
+        customerId: customer,
+        contentId,
+        organizationId: testOrg.id,
+        amountPaidCents: 500,
+        platformFeeCents: 50,
+        organizationFeeCents: 0,
+        creatorPayoutCents: 450,
+        stripePaymentIntentId: `pi_week_${createUniqueSlug('c')}`,
+        status: PURCHASE_STATUS.COMPLETED,
+        purchasedAt: at,
+      });
+      await db.insert(purchases).values([
+        sale(thisWeek, contentIds[0]!, daysAgo(2)),
+        sale(earlierThisMonth, contentIds[1]!, daysAgo(12)),
+        // First bought 40 days ago, bought again this week: not new.
+        sale(returning, contentIds[2]!, daysAgo(40)),
+        sale(returning, contentIds[3]!, daysAgo(1)),
+      ]);
+
+      const stats = await service.getCustomerStats(testOrg.id);
+
+      expect(stats.totalCustomers).toBe(3);
+      expect(stats.newCustomersLast30Days).toBe(2);
+      expect(stats.newCustomersLast7Days).toBe(1);
     });
 
     it('should count distinct customers with completed purchases', async () => {
@@ -1277,6 +870,24 @@ describe('AdminAnalyticsService', () => {
           .returning()
       );
 
+      // customer1's second purchase is of another item: a buyer holds at most
+      // one completed purchase per item (Codex-2hxff.14).
+      const otherContent = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            title: 'Customer Stats Test 2',
+            slug: createUniqueSlug('customer-stats-2'),
+            contentType: 'written',
+            contentBody: 'Body',
+            status: 'published',
+            priceCents: 500,
+          })
+          .returning()
+      );
+
       // Multiple purchases from two customers
       await db.insert(purchases).values([
         {
@@ -1293,7 +904,7 @@ describe('AdminAnalyticsService', () => {
         },
         {
           customerId: customer1,
-          contentId: testContent.id,
+          contentId: otherContent.id,
           organizationId: testOrg.id,
           amountPaidCents: 500,
           platformFeeCents: 50,
@@ -1682,7 +1293,8 @@ describe('AdminAnalyticsService', () => {
           purchasedAt: threeDaysAgo,
         },
         {
-          customerId,
+          // One completed purchase per buyer per item (Codex-2hxff.14).
+          customerId: secondCustomerId,
           contentId: growing.id,
           organizationId: testOrg.id,
           amountPaidCents: 1000,
@@ -2326,38 +1938,53 @@ describe('AdminAnalyticsService', () => {
       );
 
       // Create purchases
-      await db.insert(purchases).values([
-        {
-          customerId,
-          contentId: testContent.id,
-          organizationId: testOrg.id,
-          amountPaidCents: 1000,
-          platformFeeCents: 100,
-          organizationFeeCents: 0,
-          creatorPayoutCents: 900,
-          stripePaymentIntentId: `pi_dashboard_${Date.now()}_1`,
-          status: PURCHASE_STATUS.COMPLETED,
-          purchasedAt: new Date(),
-        },
-        {
-          customerId,
-          contentId: testContent.id,
-          organizationId: testOrg.id,
-          amountPaidCents: 1000,
-          platformFeeCents: 100,
-          organizationFeeCents: 0,
-          creatorPayoutCents: 900,
-          stripePaymentIntentId: `pi_dashboard_${Date.now()}_2`,
-          status: PURCHASE_STATUS.COMPLETED,
-          purchasedAt: new Date(),
-        },
-      ]);
+      const [completed] = await db
+        .insert(purchases)
+        .values([
+          {
+            customerId,
+            contentId: testContent.id,
+            organizationId: testOrg.id,
+            amountPaidCents: 1000,
+            platformFeeCents: 100,
+            organizationFeeCents: 0,
+            creatorPayoutCents: 900,
+            stripePaymentIntentId: `pi_dashboard_${Date.now()}_1`,
+            status: PURCHASE_STATUS.COMPLETED,
+            purchasedAt: new Date(),
+          },
+          {
+            // A second payment for an owned item is recorded refunded
+            // (Codex-2hxff.14: one completed purchase per buyer per item).
+            // A duplicate writes no ledger slices, so it never counts.
+            customerId,
+            contentId: testContent.id,
+            organizationId: testOrg.id,
+            amountPaidCents: 1000,
+            platformFeeCents: 100,
+            organizationFeeCents: 0,
+            creatorPayoutCents: 900,
+            stripePaymentIntentId: `pi_dashboard_${Date.now()}_2`,
+            status: PURCHASE_STATUS.REFUNDED,
+            refundReason: 'duplicate_payment',
+            purchasedAt: new Date(),
+          },
+        ])
+        .returning({ id: purchases.id });
+      await ledger.charge({
+        orgId: testOrg.id,
+        source: { purchaseId: completed!.id },
+        slices: [
+          { type: 'platform_fee', userId: null, cents: 100 },
+          { type: 'creator_payout', userId: creatorId, cents: 900 },
+        ],
+      });
 
       const stats = await service.getDashboardStats(testOrg.id);
 
       // Verify all three data sections are present
-      expect(stats.revenue.totalRevenueCents).toBe(2000);
-      expect(stats.revenue.totalPurchases).toBe(2);
+      expect(stats.revenue.totalRevenueCents).toBe(1000);
+      expect(stats.revenue.totalPurchases).toBe(1);
       expect(stats.customers.totalCustomers).toBe(1);
       expect(stats.customers.newCustomersLast30Days).toBe(1);
       expect(stats.topContent.items).toHaveLength(1);
@@ -2404,18 +2031,37 @@ describe('AdminAnalyticsService', () => {
       const yesterday = new Date(now);
       yesterday.setDate(yesterday.getDate() - 1);
 
-      // Create purchase today
-      await db.insert(purchases).values({
-        customerId,
-        contentId: testContent.id,
-        organizationId: testOrg.id,
-        amountPaidCents: 500,
-        platformFeeCents: 50,
-        organizationFeeCents: 0,
-        creatorPayoutCents: 450,
-        stripePaymentIntentId: `pi_dashboard_date_${Date.now()}`,
-        status: PURCHASE_STATUS.COMPLETED,
-        purchasedAt: now,
+      // Create purchase today, with the ledger slices its sale writes
+      const [sale] = await db
+        .insert(purchases)
+        .values({
+          customerId,
+          contentId: testContent.id,
+          organizationId: testOrg.id,
+          amountPaidCents: 500,
+          platformFeeCents: 50,
+          organizationFeeCents: 0,
+          creatorPayoutCents: 450,
+          stripePaymentIntentId: `pi_dashboard_date_${Date.now()}`,
+          status: PURCHASE_STATUS.COMPLETED,
+          purchasedAt: now,
+        })
+        .returning({ id: purchases.id });
+      await ledger.charge({
+        orgId: testOrg.id,
+        source: { purchaseId: sale!.id },
+        createdAt: now,
+        slices: [
+          { type: 'platform_fee', userId: null, cents: 50 },
+          { type: 'creator_payout', userId: creatorId, cents: 450 },
+        ],
+      });
+      // An older sale, outside the filter
+      await ledger.charge({
+        orgId: testOrg.id,
+        source: { purchaseId: sale!.id },
+        createdAt: new Date(now.getTime() - 5 * 86_400_000),
+        slices: [{ type: 'platform_fee', userId: null, cents: 70 }],
       });
 
       // Filter from yesterday to today

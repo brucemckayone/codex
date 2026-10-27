@@ -411,3 +411,38 @@ describe('a mark for each item (Codex-61zsk.58)', () => {
       );
   });
 });
+
+describe('BenefitsBlock: every size a tile picture has (Codex-61zsk.66)', () => {
+  const CDN = 'https://cdn.test';
+  const image = {
+    key: 'landing-pages/p1/images/b1',
+    alt: 'The printed journal',
+  };
+  const SET = ['sm.webp 200w', 'md.webp 400w', 'lg.webp 800w']
+    .map((size) => `${CDN}/${image.key}/${size}`)
+    .join(', ');
+  const [first, ...rest] = SAMPLE.items ?? [];
+  const three = {
+    ...SAMPLE,
+    items: [{ ...first, image }, ...rest].slice(0, 3),
+  };
+
+  it('grid: a card is a third of the column from 60rem, a half from 36rem', async () => {
+    await render(three, { mediaBaseUrl: CDN });
+    const img = document.body.querySelector('.benefits-grid li img');
+    expect(img?.getAttribute('srcset')).toBe(SET);
+    expect(img?.getAttribute('sizes')).toBe(
+      '(min-width: 60rem) min(33.33vw, 27.33rem), (min-width: 36rem) min(50vw, 41rem), min(100vw, 82rem)'
+    );
+  });
+
+  it('bento: the lead tile is drawn at its span', async () => {
+    await render(three, { layout: 'bento', mediaBaseUrl: CDN });
+    const img = document.body.querySelector('img');
+    expect(img?.getAttribute('srcset')).toBe(SET);
+    // The lead tile: four of six columns from 56rem, both of two from 36rem.
+    expect(img?.getAttribute('sizes')).toBe(
+      '(min-width: 56rem) min(66.67vw, 54.67rem), (min-width: 36rem) min(100vw, 82rem), min(100vw, 82rem)'
+    );
+  });
+});

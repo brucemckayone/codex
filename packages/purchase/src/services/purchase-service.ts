@@ -23,13 +23,25 @@
 
 import {
   ACCESS_TYPES,
+  CHECKOUT_SESSION_KIND,
   CONTENT_STATUS,
   CURRENCY,
+  canBeSold,
+  DISPUTE_CHARGEBACK_OPEN_STATUSES,
+  DISPUTE_CLOSED_STATUSES,
   FEES,
+  isForeignStripeEnvironment,
+  PRICE_LIMITS,
   PURCHASE_STATUS,
+  STRIPE_REQUESTED_BY_METADATA_KEY,
   stripeEnvMetadata,
 } from '@codex/constants';
-import { isUniqueViolation, toIso } from '@codex/database';
+import {
+  type DatabaseClient,
+  isUniqueViolation,
+  toIso,
+  withPagination,
+} from '@codex/database';
 import {
   content,
   contentAccess,
@@ -37,6 +49,7 @@ import {
   type Dispute,
   disputes,
   entitlements,
+  payoutReversals,
   purchases,
   type RefundStatus,
   refunds,
@@ -44,7 +57,9 @@ import {
   users,
 } from '@codex/database/schema';
 import {
+  assertGbpOnly,
   type ClawbackCharge,
+  issueRefund,
   type LedgerDeps,
   listChargeRefunds,
   listClawableRefunds,
@@ -53,10 +68,14 @@ import {
   repayDispute,
   resolveOrganisationPayee,
   reverseCharge,
+  reverseEarlierRefunds,
 } from '@codex/payments';
 import {
+  AfterCommitError,
   BaseService,
+  InternalServiceError,
   type ServiceConfig,
+  ServiceUnavailableError,
   StripeNotConfiguredError,
 } from '@codex/service-errors';
 import type {
@@ -68,6 +87,7 @@ import type {
 } from '@codex/validation';
 import {
   checkoutSessionMetadataSchema,
+  courseCheckoutSessionMetadataSchema,
   createCheckoutSchema,
   createCourseCheckoutSchema,
   createPortalSessionSchema,
@@ -76,9 +96,11 @@ import {
   purchaseQuerySchema,
   salesQuerySchema,
   salesStatsQuerySchema,
+  uuidSchema,
 } from '@codex/validation';
 import {
   and,
+  asc,
   count,
   desc,
   eq,
@@ -88,6 +110,7 @@ import {
   isNull,
   lt,
   lte,
+  ne,
   or,
   type SQL,
   sql,
@@ -103,7 +126,16 @@ import {
   PaymentProcessingError,
   PurchaseNotFoundError,
 } from '../errors';
-import { findActiveCreatorAgreementShare } from './agreement-share';
+import {
+  type CreatorAgreementShare,
+  findActiveCreatorAgreementShare,
+} from './agreement-share';
+import {
+  CheckoutReservations,
+  checkoutIdempotencyKey,
+  stripeErrorCode,
+  toStripeTime,
+} from './checkout-reservations';
 import {
   writeContentPurchaseEntitlement,
   writeCoursePurchaseEntitlement,
@@ -137,6 +169,17 @@ function isRefundStatus(status: string | null): status is RefundStatus {
 }
 
 /**
+ * The refunds that count against what was paid: made and not undone. A failed
+ * or canceled refund gave the buyer nothing (Codex-2hxff.28): support may
+ * refund that amount again, and a failed full refund gives access back.
+ */
+export const STANDING_REFUND_STATUSES: readonly RefundStatus[] = [
+  'pending',
+  'requires_action',
+  'succeeded',
+];
+
+/**
  * How far along a dispute is: an inquiry, then a chargeback, then final. A
  * dispute's row only moves to a higher rank (`recordDispute`).
  */
@@ -152,6 +195,42 @@ const DISPUTE_STATUS_RANK: ReadonlyMap<string, number> = new Map([
 ]);
 const FINAL_DISPUTE_RANK = 4;
 
+/** A chargeback that took the money and was not won: open, or lost. */
+const HOLDING_DISPUTE_STATUSES: readonly string[] = [
+  ...DISPUTE_CHARGEBACK_OPEN_STATUSES,
+  'lost',
+];
+
+/**
+ * `or()` of two conditions, never undefined: `and()` drops an undefined
+ * argument without a word, which here would widen a scope.
+ */
+function either(first: SQL, second: SQL | undefined): SQL {
+  const condition = or(first, second);
+  if (!condition) {
+    throw new InternalServiceError('A refund scope could not be built');
+  }
+  return condition;
+}
+
+/**
+ * Whether the dispute still holds its sale, read under a share lock on its
+ * row (a win's record then waits for the caller's commit). A dispute with no
+ * row holds: nothing has closed it.
+ */
+async function disputeStillHolds(
+  tx: Tx,
+  stripeDisputeId: string
+): Promise<boolean> {
+  const [dispute] = await tx
+    .select({ status: disputes.status })
+    .from(disputes)
+    .where(eq(disputes.stripeDisputeId, stripeDisputeId))
+    .limit(1)
+    .for('share');
+  return !dispute || HOLDING_DISPUTE_STATUSES.includes(dispute.status);
+}
+
 /** `DISPUTE_STATUS_RANK` in SQL, for the upsert's guard. */
 function disputeRank(status: SQL): SQL {
   // The ranks are literals: a bound THEN parameter would be typed text.
@@ -164,12 +243,14 @@ function disputeRank(status: SQL): SQL {
 import type { PaginatedListResponse } from '@codex/shared-types';
 import type {
   CheckoutSessionResult,
+  CheckoutSessionState,
   CheckoutSessionVerifyResult,
   CompleteCoursePurchaseMetadata,
   CompletePurchaseMetadata,
+  PaymentIntentCharge,
   Purchase,
   PurchaseListItem,
-  PurchaseWithContent,
+  PurchaseWithItem,
   SaleListItem,
   SalesStats,
 } from '../types';
@@ -179,6 +260,7 @@ import {
   calculateRevenueSplit,
   DEFAULT_ORG_FEE_PERCENTAGE,
   DEFAULT_PLATFORM_FEE_PERCENTAGE,
+  type RevenueSplit,
 } from './revenue-calculator';
 
 /**
@@ -276,10 +358,132 @@ const PURCHASE_LIST_STATUSES = [
 
 type PurchaseListStatus = (typeof PURCHASE_LIST_STATUSES)[number];
 
+type Tx = Parameters<Parameters<DatabaseClient['transaction']>[0]>[0];
+
+/**
+ * A new purchase row's outcome: completed, or, for a second payment for an
+ * item the buyer owns, a duplicate of that purchase (Codex-2hxff.14). A
+ * duplicate stays `pending` until Stripe has refunded it, so no reader counts
+ * money as returned that is not. Its split columns keep what the sale would
+ * have paid; no slice is ever recorded for it.
+ */
+function purchaseOutcomeFields(duplicateOfPurchaseId: string | undefined) {
+  return duplicateOfPurchaseId
+    ? { status: PURCHASE_STATUS.PENDING, duplicateOfPurchaseId }
+    : { status: PURCHASE_STATUS.COMPLETED };
+}
+
+/**
+ * A second payment for an item the buyer already owned (Codex-2hxff.14):
+ * `pending` while its refund is owed, `refunded` once Stripe has made it.
+ */
+export function isDuplicatePayment(
+  purchase: Pick<Purchase, 'duplicateOfPurchaseId'>
+): boolean {
+  return purchase.duplicateOfPurchaseId != null;
+}
+
+/**
+ * Where a checkout session stands (Codex-2hxff.22). Our row, once there is
+ * one, is the truth; until then Stripe's session is. A completed purchase
+ * with an open bank dispute grants no access, as in `verifyPurchase`.
+ */
+function checkoutSessionState(
+  session: Pick<Stripe.Checkout.Session, 'payment_status'>,
+  sessionStatus: CheckoutSessionVerifyResult['sessionStatus'],
+  purchase:
+    | Pick<Purchase, 'status' | 'disputedAt' | 'duplicateOfPurchaseId'>
+    | undefined
+): CheckoutSessionState {
+  if (purchase) {
+    if (isDuplicatePayment(purchase)) return 'duplicate';
+    if (purchase.status === PURCHASE_STATUS.COMPLETED) {
+      return purchase.disputedAt ? 'paused' : 'unlocked';
+    }
+    if (purchase.status === PURCHASE_STATUS.REFUNDED) return 'refunded';
+    return 'recording';
+  }
+  if (sessionStatus !== 'complete') return sessionStatus;
+  return session.payment_status === 'paid' ? 'recording' : 'unpaid';
+}
+
+/**
+ * Who in support issued a refund (Codex-2hxff.28, Q3), from its metadata;
+ * null for one made in the Stripe Dashboard or by the platform. Metadata can
+ * be edited in the Dashboard, so it is only a candidate: `recordRefund`
+ * writes it only if a user has that id, and a value no id could be (empty,
+ * too long, or holding a NUL Postgres refuses) is dropped here.
+ */
+export function supportRequesterOf(
+  refund: Pick<Stripe.Refund, 'metadata'>
+): string | null {
+  const value = refund.metadata?.[STRIPE_REQUESTED_BY_METADATA_KEY];
+  return typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= 255 &&
+    !value.includes('\0')
+    ? value
+    : null;
+}
+
+/** What `restoreAfterFailedRefund` did, and whose caches it touches. */
+/**
+ * Why settling a failed refund as `creators_repaid` left the buyer's access
+ * as it was (`restoreAfterFailedRefund`).
+ */
+export type RefundAccessKept =
+  | 'partial'
+  | 'not_refunded'
+  | 'dispute_holds'
+  | 'duplicate'
+  | 'rebought'
+  | 'still_refunded';
+
+export interface RestoredRefundAccess {
+  /** Access came back: the caller bumps the buyer's library. */
+  restored: boolean;
+  /** Why not, when `restored` is false; null when it came back. */
+  reason: RefundAccessKept | null;
+  userId: string;
+  organizationId: string | null;
+}
+
 function coercePurchaseStatus(s: string): PurchaseListStatus {
   return (PURCHASE_LIST_STATUSES as readonly string[]).includes(s)
     ? (s as PurchaseListStatus)
     : PURCHASE_STATUS.PENDING;
+}
+
+/**
+ * What a checkout session sold, read from its metadata with the booking
+ * webhook's own schemas: a course session (`kind: 'course'`; PAY-11) or a
+ * content one. Null when it parses as neither.
+ */
+function selfHealedSale(metadata: Stripe.Metadata): {
+  customerId: string;
+  target:
+    | { contentId: string; organizationId: string | null }
+    | { courseId: string };
+} | null {
+  if (metadata.kind === 'course') {
+    const course = courseCheckoutSessionMetadataSchema.safeParse(metadata);
+    return course.success
+      ? {
+          customerId: course.data.customerId,
+          target: { courseId: course.data.courseId },
+        }
+      : null;
+  }
+  const item = checkoutSessionMetadataSchema.safeParse(metadata);
+  return item.success
+    ? {
+        customerId: item.data.customerId,
+        target: {
+          contentId: item.data.contentId,
+          organizationId: item.data.organizationId,
+        },
+      }
+    : null;
 }
 
 /**
@@ -293,6 +497,7 @@ export class PurchaseService extends BaseService {
   private readonly mailer: PurchaseMailer | undefined;
   private readonly webAppUrl: string | undefined;
   private readonly portalConfigurationId: string | undefined;
+  private readonly checkoutReservations: CheckoutReservations;
 
   /**
    * Initialize purchase service
@@ -307,6 +512,11 @@ export class PurchaseService extends BaseService {
     this.mailer = config.mailer;
     this.webAppUrl = config.webAppUrl;
     this.portalConfigurationId = config.portalConfigurationId;
+    this.checkoutReservations = new CheckoutReservations(
+      this.db,
+      stripe,
+      this.obs
+    );
   }
 
   /**
@@ -384,6 +594,24 @@ export class PurchaseService extends BaseService {
         throw new ContentNotPurchasableError(validated.contentId, 'free', {
           priceCents: contentRecord.priceCents,
         });
+      }
+      // Validation refuses 1p–99p (Codex-2hxff.32). This catches a row priced
+      // before that rule, rather than letting Stripe refuse it at Checkout.
+      if (contentRecord.priceCents < PRICE_LIMITS.MIN_CENTS) {
+        throw new ContentNotPurchasableError(
+          validated.contentId,
+          'below_minimum_price',
+          { priceCents: contentRecord.priceCents }
+        );
+      }
+      // Only what a purchase would open is sold (Codex-2hxff.14): marked
+      // purchasable, and not course-only, team-only, followers-only or orgless
+      // with a tier. Before this a buyer could pay and then be refused access.
+      if (!canBeSold(contentRecord)) {
+        throw new ContentNotPurchasableError(
+          validated.contentId,
+          'not_sold_separately'
+        );
       }
 
       // Step 2: Check for existing purchase
@@ -464,87 +692,102 @@ export class PurchaseService extends BaseService {
         });
       }
 
+      // One open session per buyer and item (Codex-2hxff.14): a second tab
+      // gets the first tab's Stripe page back.
+      const reserved = await this.checkoutReservations.reserve({
+        kind: CHECKOUT_SESSION_KIND.PURCHASE,
+        customerId,
+        contentId: validated.contentId,
+        amountCents: priceCents,
+      });
+      if (reserved.url && reserved.stripeSessionId) {
+        return {
+          sessionUrl: reserved.url,
+          sessionId: reserved.stripeSessionId,
+        };
+      }
+
       // `withStaleCustomerRecovery` resolves a customer id and self-heals
       // a stale `users.stripe_customer_id` (deleted-in-Stripe or seed-only
       // synthetic) by clearing the cache and recreating once. Same pattern
       // as `SubscriptionService.createCheckoutSession`.
-      const session = await withStaleCustomerRecovery(
-        { db: this.db, stripe: this.stripe },
-        {
-          userId: customerId,
-          email: user.email,
-          environment: this.environment,
-        },
-        (resolvedCustomerId) =>
-          this.stripe.checkout.sessions.create({
-            mode: 'payment',
-            payment_method_types: ['card'],
-            customer: resolvedCustomerId,
-            line_items: [
+      return await this.checkoutReservations.create(reserved, () =>
+        withStaleCustomerRecovery(
+          { db: this.db, stripe: this.stripe, obs: this.obs },
+          {
+            userId: customerId,
+            email: user.email,
+            environment: this.environment,
+          },
+          (resolvedCustomerId) =>
+            this.stripe.checkout.sessions.create(
               {
-                price_data: {
-                  currency: CURRENCY.GBP,
-                  unit_amount: priceCents,
-                  product_data: {
-                    name: contentRecord.title,
-                    description: plainDescription
-                      ? plainDescription.slice(0, 500)
-                      : undefined,
-                    images: contentRecord.thumbnailUrl
-                      ? [contentRecord.thumbnailUrl]
-                      : undefined,
+                mode: 'payment',
+                payment_method_types: ['card'],
+                customer: resolvedCustomerId,
+                line_items: [
+                  {
+                    price_data: {
+                      currency: CURRENCY.GBP,
+                      unit_amount: priceCents,
+                      product_data: {
+                        name: contentRecord.title,
+                        description: plainDescription
+                          ? plainDescription.slice(0, 500)
+                          : undefined,
+                        images: contentRecord.thumbnailUrl
+                          ? [contentRecord.thumbnailUrl]
+                          : undefined,
+                      },
+                    },
+                    quantity: 1,
                   },
+                ],
+                // Codex-h69cg Option B: platform charge — no transfer_data,
+                // no application_fee_amount. Funds land on the platform's
+                // balance and are split via secondary transfers in
+                // `writePurchasePayouts` (creator + org), each linked to the
+                // charge via `source_transaction`.
+                success_url: validated.successUrl,
+                cancel_url: validated.cancelUrl,
+                // Codex-69t7c WP5: `organizationId` is OMITTED for orgless
+                // (bi-party) content. Stripe metadata values must be strings, so
+                // we cannot pass `null`; and an empty string would fail the
+                // webhook's `uuidSchema` round-trip in checkoutSessionMetadataSchema.
+                // Omitting the key lets that schema's `.default(null)` re-derive
+                // `null` on the completePurchase side.
+                metadata: {
+                  contentId: validated.contentId,
+                  customerId,
+                  ...(organizationId !== null ? { organizationId } : {}),
+                  creatorId: contentRecord.creatorId,
+                  contentTitle: contentRecord.title,
+                  ...stripeEnvMetadata(this.environment),
                 },
-                quantity: 1,
+                // Onto the PaymentIntent, from which Stripe snapshots it onto the
+                // Charge — so charge.refunded and friends carry the tag too.
+                payment_intent_data: {
+                  metadata: stripeEnvMetadata(this.environment),
+                },
+                client_reference_id: customerId,
+                expires_at: toStripeTime(reserved.expiresAt),
               },
-            ],
-            // Codex-h69cg Option B: platform charge — no transfer_data,
-            // no application_fee_amount. Funds land on the platform's
-            // balance and are split via secondary transfers in
-            // `writePurchasePayouts` (creator + org), each linked to the
-            // charge via `source_transaction`.
-            success_url: validated.successUrl,
-            cancel_url: validated.cancelUrl,
-            // Codex-69t7c WP5: `organizationId` is OMITTED for orgless
-            // (bi-party) content. Stripe metadata values must be strings, so
-            // we cannot pass `null`; and an empty string would fail the
-            // webhook's `uuidSchema` round-trip in checkoutSessionMetadataSchema.
-            // Omitting the key lets that schema's `.default(null)` re-derive
-            // `null` on the completePurchase side.
-            metadata: {
-              contentId: validated.contentId,
-              customerId,
-              ...(organizationId !== null ? { organizationId } : {}),
-              creatorId: contentRecord.creatorId,
-              contentTitle: contentRecord.title,
-              ...stripeEnvMetadata(this.environment),
-            },
-            // Onto the PaymentIntent, from which Stripe snapshots it onto the
-            // Charge — so charge.refunded and friends carry the tag too.
-            payment_intent_data: {
-              metadata: stripeEnvMetadata(this.environment),
-            },
-            client_reference_id: customerId,
-          }),
-        {
-          onStaleRecovery: (info) =>
-            this.obs.warn(
-              'Stale users.stripe_customer_id detected; clearing and retrying',
-              { ...info, contentId: validated.contentId }
+              {
+                idempotencyKey: checkoutIdempotencyKey(
+                  reserved,
+                  resolvedCustomerId
+                ),
+              }
             ),
-        }
+          {
+            onStaleRecovery: (info) =>
+              this.obs.warn(
+                'Stale users.stripe_customer_id detected; clearing and retrying',
+                { ...info, contentId: validated.contentId }
+              ),
+          }
+        )
       );
-
-      if (!session.url) {
-        throw new PaymentProcessingError('Checkout session URL not generated', {
-          sessionId: session.id,
-        });
-      }
-
-      return {
-        sessionUrl: session.url,
-        sessionId: session.id,
-      };
     } catch (error) {
       if (
         error instanceof ContentNotPurchasableError ||
@@ -555,16 +798,277 @@ export class PurchaseService extends BaseService {
         throw error;
       }
 
-      // Wrap Stripe errors
+      // Wrap Stripe errors. Its message is logged, never sent (SEC-02).
       if (isStripeError(error)) {
+        const context = { contentId: validated.contentId };
         throw new PaymentProcessingError('Failed to create checkout session', {
-          stripeError: error.message,
-          contentId: validated.contentId,
+          ...context,
+          errorId: this.logStripeFailure(
+            'Stripe failed to create a checkout session',
+            error,
+            context
+          ),
         });
       }
 
       this.handleError(error, 'createCheckoutSession');
     }
+  }
+
+  // ─── One open checkout per buyer and item (Codex-2hxff.14) ─────────────────
+
+  /**
+   * The booking webhook: this session was paid (Codex-2hxff.14). The buyer's
+   * next checkout for the item is refused because they own it, so this is a
+   * record, not a gate.
+   */
+  async markCheckoutSessionCompleted(stripeSessionId: string): Promise<void> {
+    try {
+      await this.checkoutReservations.markCompleted(stripeSessionId);
+    } catch (error) {
+      this.handleError(error, 'markCheckoutSessionCompleted');
+    }
+  }
+
+  /**
+   * Claim the purchase's receipt email: one per purchase, not one per checkout
+   * delivery (Codex-mat01; owner decision 2026-10-25). True for exactly one
+   * caller, the first to find the purchase live (`completed`) and unclaimed;
+   * every later delivery gets false. A purchase refunded in full before its
+   * checkout landed gets none, and one partly refunded first is still
+   * completed and gets one. The claim is made before the email is sent, so a
+   * send that then fails is not retried, as for refund emails.
+   */
+  async claimReceipt(purchaseId: string): Promise<boolean> {
+    try {
+      const claimed = await this.db
+        .update(purchases)
+        .set({ receiptSentAt: new Date() })
+        .where(
+          and(
+            eq(purchases.id, purchaseId),
+            eq(purchases.status, PURCHASE_STATUS.COMPLETED),
+            isNull(purchases.receiptSentAt)
+          )
+        )
+        .returning();
+      return claimed.length > 0;
+    } catch (error) {
+      this.handleError(error, 'claimReceipt');
+    }
+  }
+
+  // ─── A second payment for an owned item (Codex-2hxff.14) ───────────────────
+
+  /**
+   * Take the per-buyer, per-item advisory lock, then look again. The lock
+   * serialises payments for the same buyer and item landing at once, so
+   * exactly one completes; the partial unique index on completed purchases
+   * backs it.
+   *
+   * - `replay`: this PaymentIntent's own row, written by a concurrent delivery
+   *   of the same event while this one waited for the lock.
+   * - `ownerId`: the buyer's completed purchase of the item, if they own it.
+   */
+  private async lockForItem(
+    tx: Tx,
+    customerId: string,
+    target: { contentId: string } | { courseId: string },
+    paymentIntentId: string
+  ): Promise<{ replay?: Purchase; ownerId?: string }> {
+    const [item, itemId] =
+      'contentId' in target
+        ? [eq(purchases.contentId, target.contentId), target.contentId]
+        : [eq(purchases.courseId, target.courseId), target.courseId];
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`purchase:${customerId}:${itemId}`}))`
+    );
+    const replay = await tx.query.purchases.findFirst({
+      where: eq(purchases.stripePaymentIntentId, paymentIntentId),
+    });
+    if (replay) return { replay };
+    const owner = await tx.query.purchases.findFirst({
+      where: and(
+        eq(purchases.customerId, customerId),
+        item,
+        eq(purchases.status, PURCHASE_STATUS.COMPLETED)
+      ),
+      columns: { id: true },
+    });
+    return { ownerId: owner?.id };
+  }
+
+  /**
+   * Refund a duplicate payment in full (owner decision "Block, then refund")
+   * and mark it `refunded`. Safe to repeat: a replayed webhook asks Stripe
+   * again under the same key, and a charge already refunded counts as done.
+   * Its `charge.refunded` then records the refund and emails the buyer that
+   * they keep the item.
+   *
+   * If Stripe refuses, the row stays `pending`: the buyer is owed the money,
+   * and nothing reports it as returned. The failure is logged with Stripe's
+   * code and thrown as retryable whatever its cause, so Stripe redelivers the
+   * event through its retry window: a refusal such as a low platform balance
+   * can clear. One that never clears (a disputed charge) ends with the
+   * dispute, or with support (owner decision: a failed refund is held for
+   * support).
+   */
+  private async refundDuplicatePayment(purchase: Purchase): Promise<Purchase> {
+    let refundId: string | null;
+    try {
+      ({ refundId } = await issueRefund(this.stripe, {
+        paymentIntentId: purchase.stripePaymentIntentId,
+        reason: 'duplicate',
+        idempotencyKey: `refund_duplicate_${purchase.stripePaymentIntentId}`,
+        environment: this.environment,
+      }));
+    } catch (error) {
+      this.obs.error('Duplicate payment could not be refunded', {
+        errorId: crypto.randomUUID(),
+        purchaseId: purchase.id,
+        stripePaymentIntentId: purchase.stripePaymentIntentId,
+        code: stripeErrorCode(error),
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw new ServiceUnavailableError(
+        'Duplicate payment refund failed; it will be retried',
+        { purchaseId: purchase.id }
+      );
+    }
+    // A bound instant, not now(): the query text stays the same on every
+    // request, so Hyperdrive can cache it (data-access contract, rule 6).
+    const refundedAt = new Date();
+    const [refunded] = await this.db
+      .update(purchases)
+      .set({
+        status: PURCHASE_STATUS.REFUNDED,
+        refundedAt: sql`COALESCE(${purchases.refundedAt}, ${refundedAt})`,
+        refundAmountCents: sql`COALESCE(${purchases.refundAmountCents}, ${purchases.amountPaidCents})`,
+        stripeRefundId: sql`COALESCE(${purchases.stripeRefundId}, ${refundId})`,
+      })
+      .where(eq(purchases.id, purchase.id))
+      .returning();
+    this.obs.warn('Duplicate payment refunded', {
+      purchaseId: purchase.id,
+      stripePaymentIntentId: purchase.stripePaymentIntentId,
+      contentId: purchase.contentId,
+      courseId: purchase.courseId,
+      alreadyRefunded: refundId === null,
+    });
+    return refunded ?? purchase;
+  }
+
+  /**
+   * After the commit: a duplicate payment is refunded unless it already has
+   * been, and pays no one, so it never reaches the payout slices.
+   */
+  private async settleDuplicatePayment(purchase: Purchase): Promise<Purchase> {
+    return purchase.status === PURCHASE_STATUS.REFUNDED
+      ? purchase
+      : this.refundDuplicatePayment(purchase);
+  }
+
+  /**
+   * The hourly sweep's retry of duplicate refunds still owed (Codex-2hxff.15).
+   * The webhook retries a refused one only while Stripe redelivers; after that
+   * a `pending` duplicate would sit unseen. Each is tried once and one failure
+   * never stops the rest (`refundDuplicatePayment` has logged it). What stays
+   * owed is returned for the sweep to alert on and support to settle.
+   */
+  async settleOwedDuplicates(params: {
+    olderThanMs: number;
+    limit: number;
+  }): Promise<{
+    settled: number;
+    stillOwed: Array<{ id: string; stripePaymentIntentId: string }>;
+  }> {
+    const owed = await this.db
+      .select()
+      .from(purchases)
+      .where(
+        and(
+          isNotNull(purchases.duplicateOfPurchaseId),
+          eq(purchases.status, PURCHASE_STATUS.PENDING),
+          lt(purchases.createdAt, new Date(Date.now() - params.olderThanMs))
+        )
+      )
+      .orderBy(purchases.createdAt)
+      .limit(params.limit);
+
+    let settled = 0;
+    const stillOwed: Array<{ id: string; stripePaymentIntentId: string }> = [];
+    for (const purchase of owed) {
+      try {
+        await this.refundDuplicatePayment(purchase);
+        settled++;
+      } catch (error) {
+        // A refused refund was logged as it was thrown; anything else (the
+        // row update after a refund Stripe made) is logged here.
+        if (!(error instanceof ServiceUnavailableError)) {
+          this.obs.error('Owed duplicate refund could not be settled', {
+            errorId: crypto.randomUUID(),
+            purchaseId: purchase.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+        stillOwed.push({
+          id: purchase.id,
+          stripePaymentIntentId: purchase.stripePaymentIntentId,
+        });
+      }
+    }
+    return { settled, stillOwed };
+  }
+
+  /** The title of the content or course a purchase is for. */
+  private async itemTitle(
+    purchase: Pick<Purchase, 'contentId' | 'courseId'>
+  ): Promise<string | null> {
+    if (purchase.contentId) {
+      const row = await this.db.query.content.findFirst({
+        where: eq(content.id, purchase.contentId),
+        columns: { title: true },
+      });
+      return row?.title ?? null;
+    }
+    if (purchase.courseId) {
+      const row = await this.db.query.courses.findFirst({
+        where: eq(courses.id, purchase.courseId),
+        columns: { title: true },
+      });
+      return row?.title ?? null;
+    }
+    return null;
+  }
+
+  /**
+   * Does the buyer hold another completed purchase of this purchase's item?
+   * Then a refund or dispute of this one leaves their access alone: the
+   * shared `content_access` row and the item are still theirs.
+   */
+  private async keepsItemElsewhere(
+    db: Tx | DatabaseClient,
+    purchase: Pick<Purchase, 'id' | 'customerId' | 'contentId' | 'courseId'>
+  ): Promise<boolean> {
+    const item = purchase.contentId
+      ? eq(purchases.contentId, purchase.contentId)
+      : purchase.courseId
+        ? eq(purchases.courseId, purchase.courseId)
+        : undefined;
+    if (!item) return false;
+    const [other] = await db
+      .select({ id: purchases.id })
+      .from(purchases)
+      .where(
+        and(
+          eq(purchases.customerId, purchase.customerId),
+          item,
+          eq(purchases.status, PURCHASE_STATUS.COMPLETED),
+          ne(purchases.id, purchase.id)
+        )
+      )
+      .limit(1);
+    return other !== undefined;
   }
 
   /**
@@ -607,6 +1111,14 @@ export class PurchaseService extends BaseService {
     metadata: CompletePurchaseMetadata
   ): Promise<Purchase> {
     try {
+      // GBP in, GBP out (Codex-2hxff.23 PAY-25): every slice is transferred in
+      // pounds, so a sale in another currency is refused before its purchase
+      // or any slice is written. A 400: the webhook acknowledges it and Stripe
+      // does not redeliver.
+      assertGbpOnly(metadata.currency, {
+        stripePaymentIntentId,
+        contentId: metadata.contentId,
+      });
       const txResult = await this.db.transaction(async (tx) => {
         // Step 1: Check for existing purchase (idempotency)
         const existing = await tx.query.purchases.findFirst({
@@ -620,183 +1132,34 @@ export class PurchaseService extends BaseService {
           return { purchase: existing, isNew: false } as const;
         }
 
-        // Step 2: Fetch content for org + creator scope (needed for fee resolution).
-        // Codex-m644n moved this above the fee lookup so the FeeConfigService
-        // fallback chain can walk creator-override → org-default → platform
-        // → constants. The org/creator pair anchors all three lookups.
-        const contentRecord = await tx.query.content.findFirst({
-          where: eq(content.id, metadata.contentId),
-          columns: { organizationId: true, creatorId: true },
-        });
+        // A second payment for content the buyer already owns is recorded
+        // refunded and grants nothing; it is refunded after the commit
+        // (Codex-2hxff.14, "Block, then refund").
+        const { replay, ownerId: duplicateOf } = await this.lockForItem(
+          tx,
+          metadata.customerId,
+          { contentId: metadata.contentId },
+          stripePaymentIntentId
+        );
+        if (replay) return { purchase: replay, isNew: false } as const;
+        const isDuplicate = duplicateOf !== undefined;
 
-        if (!contentRecord) {
-          throw new PaymentProcessingError(
-            'Content not found during purchase completion',
-            {
-              contentId: metadata.contentId,
-              stripePaymentIntentId,
-            }
-          );
-        }
-
-        // Codex-69t7c WP5: `organizationId` is legitimately nullable now.
-        // Org-scoped purchases populate it (from metadata or the content row);
-        // orgless creator-direct (bi-party) purchases have `null`. The Phase-1
-        // "personal content cannot be purchased" throw is removed.
-        const organizationId =
-          metadata.organizationId ?? contentRecord.organizationId;
-
-        // Step 3: Resolve fees via FeeConfigService when available (Codex-m644n).
-        //
-        // Codex-69t7c WP5: branch on org presence.
-        //   - org-scoped → getFeesForCreator(orgId, creatorId) — platform leg
-        //     PLUS the org's per-creator override (unchanged tri-party path).
-        //   - orgless (bi-party) → getFeesPlatform() — platform-only fees; there
-        //     is no organization to carve a slice for, so the org leg is forced
-        //     to ZERO below regardless of any default `orgFeePercent`.
-        // Falls back to legacy constants when no resolver is injected — preserves
-        // the pre-m644n behaviour covered by existing tests.
-        const fees = this.feeConfig
-          ? organizationId
-            ? await this.feeConfig.getFeesForCreator(
-                organizationId,
-                contentRecord.creatorId,
-                'one_off'
-              )
-            : await this.feeConfig.getFeesPlatform('one_off')
-          : {
-              platformFeePercent: DEFAULT_PLATFORM_FEE_PERCENTAGE,
-              orgFeePercent: DEFAULT_ORG_FEE_PERCENTAGE,
-              minPlatformFeeCents: FEES.MIN_PLATFORM_FEE_CENTS,
-              minTransferCents: 0,
-            };
-
-        // Step 3a (Codex-rzfjw / WP-4): override `orgFeePercent` with the
-        // uploader's content_purchase agreement when one exists.
-        //
-        // Decision Q1: content-purchase revenue is attributed to the
-        // uploader (`content.creatorId`), and THAT creator's
-        // revenue_type='content_purchase' agreement determines the split.
-        // Per-content overrides are out of scope (future epic).
-        //
-        // Decision Q2: creator share is snapshotted on the proposal;
-        // platform fee is read fresh (we keep `fees.platformFeePercent`
-        // from FeeConfigService above).
-        //
-        // The agreement's share is read from `agreementProposals
-        // .proposedCreatorSharePercent` via `current_proposal_id` so
-        // this read works for both pre-WP-1 backfilled rows (migration
-        // 0072 synthesised a proposal) and new agreements.
-        //
-        // Codex-xz61z (I5): pin `purchasedAt` once and reuse in all
-        // three Q3 predicates. Previously three `new Date()` calls
-        // could produce slightly different millisecond values when
-        // executed back-to-back, which is harmless in practice but
-        // makes the predicate non-deterministic — webhook replays
-        // can land on the wrong side of an agreement boundary that
-        // occurred mid-millisecond.
-        // Codex-69t7c WP5: the creator-org agreement lookup is org-scoped, so
-        // it only runs for org-scoped purchases. Orgless (bi-party) content has
-        // no organization and therefore no `creator_organization_agreements`
-        // row — skip the query entirely (it would also fail to typecheck
-        // against the nullable `organizationId`).
+        // Codex-xz61z (I5): pin `purchasedAt` once, so a replay cannot land
+        // on the other side of an agreement boundary mid-millisecond.
         const purchasedAt = metadata.paidAt ?? new Date();
-        // Codex-2pryk WP-6: agreement lookup hoisted to the shared
-        // `findActiveCreatorAgreementShare` (reused by the course-purchase +
-        // course-subscription payout paths so all three apply IDENTICAL
-        // Decision-Q3 agreement math). Returns the creator's share in basis
-        // points, or null when no active agreement brackets `purchasedAt`.
-        const agreementSharePercent = organizationId
-          ? await findActiveCreatorAgreementShare(tx, {
-              organizationId,
-              creatorId: contentRecord.creatorId,
-              revenueType: 'content_purchase',
-              at: purchasedAt,
-            })
-          : null;
-
-        // Codex-69t7c WP5: for orgless (bi-party) purchases the org leg is
-        // ALWAYS zero — there is no organization to pay, so the creator keeps
-        // 100% of the post-platform amount. We force `0` here rather than
-        // trusting `fees.orgFeePercent`, which for the platform-fee config can
-        // carry a non-zero default that would otherwise strand a slice with no
-        // recipient. For org-scoped purchases: if an agreement is present,
-        // derive the org's cut from 10000 - creator_share; otherwise fall
-        // through to the FeeConfigService-resolved value (the Q1 fallback —
-        // "org keeps 100% of post-platform" unless an admin overrode it).
-        const effectiveOrgFeePercent = !organizationId
-          ? 0
-          : agreementSharePercent != null
-            ? 10_000 - agreementSharePercent
-            : fees.orgFeePercent;
-
-        // Codex-69t7c WP5 hardening (d): record the orgless org-fee-zero
-        // override decision explicitly. For a bi-party (orgless) purchase the
-        // org fee leg is forced to 0 regardless of the platform-fee config's
-        // default `orgFeePercent`; log that override so the decision is
-        // auditable rather than silently folded into the split below.
-        if (!organizationId) {
-          this.obs.info('orgless_org_fee_override', {
-            contentId: metadata.contentId,
-            creatorId: contentRecord.creatorId,
-            stripePaymentIntentId,
-            configOrgFeePercent: fees.orgFeePercent,
-            effectiveOrgFeePercent: 0,
-            reason: 'bi_party_no_org_recipient',
-          });
-        }
-
-        // Step 4: Calculate revenue split, then apply min-platform-fee floor.
-        // The floor is enforced in the caller (not in calculateRevenueSplit)
-        // to keep the math pure. When (amount * pct / 10000) < minFee, we
-        // override the platform component to the floor and subtract from the
-        // creator pool, then from the org fee if the pool can't cover it. The
-        // DB CHECK constraint `amount = platform + org + creator` is preserved
-        // by construction.
-        const rawSplit = calculateRevenueSplit(
-          metadata.amountPaidCents,
-          fees.platformFeePercent,
-          effectiveOrgFeePercent
-        );
-        const revenueSplit = applyMinPlatformFeeFloor(
-          metadata.amountPaidCents,
-          rawSplit,
-          fees.minPlatformFeeCents
-        );
-
-        // Codex-rzfjw: emit one observability event per purchase split
-        // for end-to-end auditability of the agreements payout pipeline.
-        this.obs.info('payout_split_computed', {
-          purchaseId: undefined,
-          contentId: metadata.contentId,
-          organizationId,
-          creatorId: contentRecord.creatorId,
-          amountPaidCents: metadata.amountPaidCents,
-          platformFeeCents: revenueSplit.platformFeeCents,
-          organizationFeeCents: revenueSplit.organizationFeeCents,
-          creatorPayoutCents: revenueSplit.creatorPayoutCents,
-          agreementApplied: agreementSharePercent != null,
-          source: 'content_purchase',
-        });
-
-        // Step 4a: Reconcile Stripe-collected fee against calculated split.
-        // If the application fee Stripe actually charged differs from what
-        // calculateRevenueSplit() produces, something drifted — log but don't throw.
-        if (
-          metadata.stripeApplicationFeeCents != null &&
-          metadata.stripeApplicationFeeCents !== revenueSplit.platformFeeCents
-        ) {
-          this.obs.warn(
-            'Platform fee mismatch: Stripe-collected application fee differs from calculated split',
-            {
-              stripeApplicationFeeCents: metadata.stripeApplicationFeeCents,
-              calculatedPlatformFeeCents: revenueSplit.platformFeeCents,
-              amountPaidCents: metadata.amountPaidCents,
-              stripePaymentIntentId,
+        const { creatorId, organizationId, revenueSplit, agreement } =
+          await this.resolvePurchaseSplit(tx, {
+            target: {
               contentId: metadata.contentId,
-            }
-          );
-        }
+              organizationId: metadata.organizationId,
+            },
+            amountCents: metadata.amountPaidCents,
+            // At the checkout's start (Codex-2hxff.64 Q1).
+            at: metadata.offerAt ?? purchasedAt,
+            stripePaymentIntentId,
+            stripeApplicationFeeCents: metadata.stripeApplicationFeeCents,
+            duplicatePayment: isDuplicate,
+          });
 
         // Step 4: Create purchase record
         const [purchase] = await tx
@@ -808,14 +1171,17 @@ export class PurchaseService extends BaseService {
             amountPaidCents: metadata.amountPaidCents,
             currency: metadata.currency || CURRENCY.GBP,
             stripePaymentIntentId,
-            status: PURCHASE_STATUS.COMPLETED,
             purchasedAt,
             platformFeeCents: revenueSplit.platformFeeCents,
             organizationFeeCents: revenueSplit.organizationFeeCents,
             creatorPayoutCents: revenueSplit.creatorPayoutCents,
-            // Phase 1: No agreement IDs (using defaults)
+            // Fee configuration replaced platform agreements: the platform
+            // fee has no agreement row to point at, so this stays null.
             platformAgreementId: null,
-            creatorOrgAgreementId: null,
+            // The creator agreement this sale was split by, if any
+            // (Codex-2hxff.19 AGR-06).
+            creatorOrgAgreementId: agreement?.agreementId ?? null,
+            ...purchaseOutcomeFields(duplicateOf),
           })
           .returning();
 
@@ -825,47 +1191,29 @@ export class PurchaseService extends BaseService {
           });
         }
 
-        // Step 5: Grant content access atomically (upsert handles re-purchase after refund)
-        await tx
-          .insert(contentAccess)
-          .values({
-            userId: metadata.customerId,
-            contentId: metadata.contentId,
-            organizationId: organizationId, // Use same fetched value
-            accessType: ACCESS_TYPES.PURCHASED,
-            expiresAt: null, // Permanent access for purchases
-          })
-          .onConflictDoUpdate({
-            target: [contentAccess.userId, contentAccess.contentId],
-            set: {
-              deletedAt: null, // Un-delete the soft-deleted row
-              accessType: ACCESS_TYPES.PURCHASED,
-              updatedAt: new Date(),
-            },
-          });
-
-        // Step 5a (Codex-2pryk WP-6): write the greenfield `entitlements` grant
-        // the resolver reads. Additive to `contentAccess` + `verifyPurchase`
-        // (the resolver unions all three). Org-scoped ONLY — `entitlements`
-        // requires a non-null org, so orgless (bi-party) content writes no grant
-        // row and stays covered by `verifyPurchase` alone. Idempotent on replay.
-        if (organizationId) {
-          await writeContentPurchaseEntitlement(tx, {
-            userId: metadata.customerId,
-            organizationId,
-            contentId: metadata.contentId,
-            purchaseId: purchase.id,
-          });
+        // A duplicate grants nothing (the first purchase did) and pays no
+        // one; the post-commit step refunds it, as for a replay of it.
+        if (isDuplicate) {
+          return { purchase, isNew: false } as const;
         }
+
+        // Step 5: grant access atomically with the purchase.
+        await this.grantPurchaseAccess(tx, purchase);
 
         return {
           purchase,
           isNew: true,
           revenueSplit,
-          creatorId: contentRecord.creatorId,
+          creatorId,
           organizationId,
         } as const;
       });
+
+      // A duplicate payment, first delivery or replay, is refunded and pays
+      // no one: no slices, and no repair of slices it never had.
+      if (isDuplicatePayment(txResult.purchase)) {
+        return this.settleDuplicatePayment(txResult.purchase);
+      }
 
       // Step 6 (post-commit): record the slices in the payouts ledger and
       // transfer the payable ones. Out-of-transaction so a Stripe API failure
@@ -914,13 +1262,16 @@ export class PurchaseService extends BaseService {
 
       return txResult.purchase;
     } catch (error) {
-      this.obs.error('Failed to complete purchase', {
-        error: error instanceof Error ? error.message : String(error),
-        stripePaymentIntentId,
-        customerId: metadata.customerId,
-        contentId: metadata.contentId,
-        amountPaidCents: metadata.amountPaidCents,
-      });
+      // An AfterCommitError's purchase did complete; its own step logged it.
+      if (!(error instanceof AfterCommitError)) {
+        this.obs.error('Failed to complete purchase', {
+          error: error instanceof Error ? error.message : String(error),
+          stripePaymentIntentId,
+          customerId: metadata.customerId,
+          contentId: metadata.contentId,
+          amountPaidCents: metadata.amountPaidCents,
+        });
+      }
       this.handleError(error, 'completePurchase');
     }
   }
@@ -969,18 +1320,39 @@ export class PurchaseService extends BaseService {
           priceCents: course.priceCents,
         });
       }
+      // Mirrors the content path: a course priced before the £1.00 rule.
+      if (course.priceCents < PRICE_LIMITS.MIN_CENTS) {
+        throw new CourseNotPurchasableError(
+          validated.courseId,
+          'below_minimum_price',
+          { priceCents: course.priceCents }
+        );
+      }
 
-      // Double-purchase guard: a completed course purchase already grants a
-      // permanent entitlement, so block a second checkout (mirrors the content
-      // path's AlreadyPurchasedError guard).
-      const existing = await this.db.query.purchases.findFirst({
-        where: and(
-          eq(purchases.customerId, customerId),
-          eq(purchases.courseId, validated.courseId),
-          eq(purchases.status, PURCHASE_STATUS.COMPLETED)
-        ),
-      });
-      if (existing) {
+      // Double-purchase guard: a buyer who owns the course cannot check out
+      // for it again (purchases.md; Codex-2hxff.14). Owning is a completed
+      // purchase or a live purchase or support-grant entitlement. A course
+      // plan subscriber rents it, so they may still buy it outright.
+      const [existing, liveEntitlement] = await Promise.all([
+        this.db.query.purchases.findFirst({
+          where: and(
+            eq(purchases.customerId, customerId),
+            eq(purchases.courseId, validated.courseId),
+            eq(purchases.status, PURCHASE_STATUS.COMPLETED)
+          ),
+          columns: { id: true },
+        }),
+        this.db.query.entitlements.findFirst({
+          where: and(
+            eq(entitlements.userId, customerId),
+            eq(entitlements.courseId, validated.courseId),
+            inArray(entitlements.source, ['course_purchase', 'grant']),
+            isNull(entitlements.revokedAt)
+          ),
+          columns: { id: true },
+        }),
+      ]);
+      if (existing || liveEntitlement) {
         throw new CourseAlreadyOwnedError(validated.courseId, customerId);
       }
 
@@ -1000,66 +1372,82 @@ export class PurchaseService extends BaseService {
       // property narrowing inside the callback — same reason as the content path).
       const priceCents = course.priceCents;
 
-      const session = await withStaleCustomerRecovery(
-        { db: this.db, stripe: this.stripe },
-        {
-          userId: customerId,
-          email: user.email,
-          environment: this.environment,
-        },
-        (resolvedCustomerId) =>
-          this.stripe.checkout.sessions.create({
-            mode: 'payment',
-            payment_method_types: ['card'],
-            customer: resolvedCustomerId,
-            line_items: [
-              {
-                price_data: {
-                  currency: CURRENCY.GBP,
-                  unit_amount: priceCents,
-                  product_data: {
-                    name: course.title,
-                    description: course.lede
-                      ? course.lede.slice(0, 500)
-                      : undefined,
-                  },
-                },
-                quantity: 1,
-              },
-            ],
-            success_url: validated.successUrl,
-            cancel_url: validated.cancelUrl,
-            // `kind: 'course'` discriminates this from a content purchase at the
-            // webhook. organizationId is deliberately omitted (re-derived server
-            // side from the course row).
-            metadata: {
-              kind: 'course',
-              courseId: validated.courseId,
-              customerId,
-              courseTitle: course.title,
-              ...stripeEnvMetadata(this.environment),
-            },
-            payment_intent_data: {
-              metadata: stripeEnvMetadata(this.environment),
-            },
-            client_reference_id: customerId,
-          }),
-        {
-          onStaleRecovery: (info) =>
-            this.obs.warn(
-              'Stale users.stripe_customer_id detected; clearing and retrying',
-              { ...info, courseId: validated.courseId }
-            ),
-        }
-      );
-
-      if (!session.url) {
-        throw new PaymentProcessingError('Checkout session URL not generated', {
-          sessionId: session.id,
-        });
+      const reserved = await this.checkoutReservations.reserve({
+        kind: CHECKOUT_SESSION_KIND.PURCHASE,
+        customerId,
+        courseId: validated.courseId,
+        amountCents: priceCents,
+      });
+      if (reserved.url && reserved.stripeSessionId) {
+        return {
+          sessionUrl: reserved.url,
+          sessionId: reserved.stripeSessionId,
+        };
       }
 
-      return { sessionUrl: session.url, sessionId: session.id };
+      return await this.checkoutReservations.create(reserved, () =>
+        withStaleCustomerRecovery(
+          { db: this.db, stripe: this.stripe, obs: this.obs },
+          {
+            userId: customerId,
+            email: user.email,
+            environment: this.environment,
+          },
+          (resolvedCustomerId) =>
+            this.stripe.checkout.sessions.create(
+              {
+                mode: 'payment',
+                payment_method_types: ['card'],
+                customer: resolvedCustomerId,
+                line_items: [
+                  {
+                    price_data: {
+                      currency: CURRENCY.GBP,
+                      unit_amount: priceCents,
+                      product_data: {
+                        name: course.title,
+                        description: course.lede
+                          ? course.lede.slice(0, 500)
+                          : undefined,
+                      },
+                    },
+                    quantity: 1,
+                  },
+                ],
+                success_url: validated.successUrl,
+                cancel_url: validated.cancelUrl,
+                // `kind: 'course'` discriminates this from a content purchase at the
+                // webhook. organizationId is deliberately omitted (re-derived server
+                // side from the course row).
+                metadata: {
+                  kind: 'course',
+                  courseId: validated.courseId,
+                  customerId,
+                  courseTitle: course.title,
+                  ...stripeEnvMetadata(this.environment),
+                },
+                payment_intent_data: {
+                  metadata: stripeEnvMetadata(this.environment),
+                },
+                client_reference_id: customerId,
+                expires_at: toStripeTime(reserved.expiresAt),
+              },
+              {
+                idempotencyKey: checkoutIdempotencyKey(
+                  reserved,
+                  resolvedCustomerId
+                ),
+              }
+            ),
+          {
+            onStaleRecovery: (info) =>
+              this.obs.warn(
+                'Stale users.stripe_customer_id detected; clearing and retrying',
+                { ...info, courseId: validated.courseId }
+              ),
+          }
+        )
+      );
     } catch (error) {
       if (
         error instanceof CourseNotPurchasableError ||
@@ -1070,9 +1458,17 @@ export class PurchaseService extends BaseService {
         throw error;
       }
       if (isStripeError(error)) {
+        const context = { courseId: validated.courseId };
         throw new PaymentProcessingError(
           'Failed to create course checkout session',
-          { stripeError: error.message, courseId: validated.courseId }
+          {
+            ...context,
+            errorId: this.logStripeFailure(
+              'Stripe failed to create a course checkout session',
+              error,
+              context
+            ),
+          }
         );
       }
       this.handleError(error, 'createCourseCheckoutSession');
@@ -1097,6 +1493,11 @@ export class PurchaseService extends BaseService {
     metadata: CompleteCoursePurchaseMetadata
   ): Promise<Purchase> {
     try {
+      // GBP only, before anything is written (PAY-25; see completePurchase).
+      assertGbpOnly(metadata.currency, {
+        stripePaymentIntentId,
+        courseId: metadata.courseId,
+      });
       const txResult = await this.db.transaction(async (tx) => {
         // Idempotency — a webhook replay returns the existing purchase and skips
         // payouts (the first-write path already ran; transfer idempotency keys
@@ -1108,89 +1509,31 @@ export class PurchaseService extends BaseService {
           return { purchase: existing, isNew: false } as const;
         }
 
-        const course = await tx.query.courses.findFirst({
-          where: eq(courses.id, metadata.courseId),
-          columns: { organizationId: true, creatorId: true },
-        });
-        if (!course) {
-          throw new PaymentProcessingError(
-            'Course not found during purchase completion',
-            { courseId: metadata.courseId, stripePaymentIntentId }
-          );
-        }
-
-        // Courses are ALWAYS org-owned — the org is authoritative from the row.
-        const organizationId = course.organizationId;
-
-        const fees = this.feeConfig
-          ? await this.feeConfig.getFeesForCreator(
-              organizationId,
-              course.creatorId,
-              'one_off'
-            )
-          : {
-              platformFeePercent: DEFAULT_PLATFORM_FEE_PERCENTAGE,
-              orgFeePercent: DEFAULT_ORG_FEE_PERCENTAGE,
-              minPlatformFeeCents: FEES.MIN_PLATFORM_FEE_CENTS,
-              minTransferCents: 0,
-            };
-
-        // HARDENING §H4(a): course purchases reuse the creator's
-        // `content_purchase` revenue-share agreement terms.
-        const purchasedAt = metadata.paidAt ?? new Date();
-        const agreementSharePercent = await findActiveCreatorAgreementShare(
+        // A second payment for a course the buyer already bought is recorded
+        // refunded and grants nothing (Codex-2hxff.14, "Block, then refund").
+        const { replay, ownerId: duplicateOf } = await this.lockForItem(
           tx,
-          {
-            organizationId,
-            creatorId: course.creatorId,
-            revenueType: 'content_purchase',
-            at: purchasedAt,
-          }
+          metadata.customerId,
+          { courseId: metadata.courseId },
+          stripePaymentIntentId
         );
-        const effectiveOrgFeePercent =
-          agreementSharePercent != null
-            ? 10_000 - agreementSharePercent
-            : fees.orgFeePercent;
+        if (replay) return { purchase: replay, isNew: false } as const;
+        const isDuplicate = duplicateOf !== undefined;
 
-        const rawSplit = calculateRevenueSplit(
-          metadata.amountPaidCents,
-          fees.platformFeePercent,
-          effectiveOrgFeePercent
-        );
-        const revenueSplit = applyMinPlatformFeeFloor(
-          metadata.amountPaidCents,
-          rawSplit,
-          fees.minPlatformFeeCents
-        );
-
-        this.obs.info('payout_split_computed', {
-          purchaseId: undefined,
-          courseId: metadata.courseId,
-          organizationId,
-          creatorId: course.creatorId,
-          amountPaidCents: metadata.amountPaidCents,
-          platformFeeCents: revenueSplit.platformFeeCents,
-          organizationFeeCents: revenueSplit.organizationFeeCents,
-          creatorPayoutCents: revenueSplit.creatorPayoutCents,
-          agreementApplied: agreementSharePercent != null,
-          source: 'course_purchase',
-        });
-
-        if (
-          metadata.stripeApplicationFeeCents != null &&
-          metadata.stripeApplicationFeeCents !== revenueSplit.platformFeeCents
-        ) {
-          this.obs.warn(
-            'Platform fee mismatch: Stripe-collected application fee differs from calculated split',
-            {
-              stripeApplicationFeeCents: metadata.stripeApplicationFeeCents,
-              calculatedPlatformFeeCents: revenueSplit.platformFeeCents,
-              amountPaidCents: metadata.amountPaidCents,
-              stripePaymentIntentId,
-              courseId: metadata.courseId,
-            }
-          );
-        }
+        const purchasedAt = metadata.paidAt ?? new Date();
+        // Courses are ALWAYS org-owned: the org is authoritative from the row.
+        // HARDENING §H4(a): the split reuses the creator's `content_purchase`
+        // agreement terms.
+        const { creatorId, organizationId, revenueSplit, agreement } =
+          await this.resolvePurchaseSplit(tx, {
+            target: { courseId: metadata.courseId },
+            amountCents: metadata.amountPaidCents,
+            // At the checkout's start (Codex-2hxff.64 Q1).
+            at: metadata.offerAt ?? purchasedAt,
+            stripePaymentIntentId,
+            stripeApplicationFeeCents: metadata.stripeApplicationFeeCents,
+            duplicatePayment: isDuplicate,
+          });
 
         const [purchase] = await tx
           .insert(purchases)
@@ -1202,13 +1545,14 @@ export class PurchaseService extends BaseService {
             amountPaidCents: metadata.amountPaidCents,
             currency: metadata.currency || CURRENCY.GBP,
             stripePaymentIntentId,
-            status: PURCHASE_STATUS.COMPLETED,
             purchasedAt,
             platformFeeCents: revenueSplit.platformFeeCents,
             organizationFeeCents: revenueSplit.organizationFeeCents,
             creatorPayoutCents: revenueSplit.creatorPayoutCents,
+            // Fee configuration replaced platform agreements (as above).
             platformAgreementId: null,
-            creatorOrgAgreementId: null,
+            creatorOrgAgreementId: agreement?.agreementId ?? null,
+            ...purchaseOutcomeFields(duplicateOf),
           })
           .returning();
 
@@ -1218,23 +1562,28 @@ export class PurchaseService extends BaseService {
           });
         }
 
+        // A duplicate grants nothing and pays no one; refunded post-commit.
+        if (isDuplicate) {
+          return { purchase, isNew: false } as const;
+        }
+
         // Grant the course entitlement (the resolver's READ target) + auto-enroll,
         // atomically with the purchase row. Idempotent on replay.
-        await writeCoursePurchaseEntitlement(tx, {
-          userId: metadata.customerId,
-          organizationId,
-          courseId: metadata.courseId,
-          purchaseId: purchase.id,
-        });
+        await this.grantPurchaseAccess(tx, purchase);
 
         return {
           purchase,
           isNew: true,
           revenueSplit,
-          creatorId: course.creatorId,
+          creatorId,
           organizationId,
         } as const;
       });
+
+      // A duplicate payment, first delivery or replay: refund it, pay no one.
+      if (isDuplicatePayment(txResult.purchase)) {
+        return this.settleDuplicatePayment(txResult.purchase);
+      }
 
       // Post-commit payouts — REUSE the Option-B fan-out verbatim. A course
       // purchase row carries a `courseId` target; `writePurchasePayouts` only
@@ -1277,15 +1626,243 @@ export class PurchaseService extends BaseService {
 
       return txResult.purchase;
     } catch (error) {
-      this.obs.error('Failed to complete course purchase', {
-        error: error instanceof Error ? error.message : String(error),
-        stripePaymentIntentId,
-        customerId: metadata.customerId,
-        courseId: metadata.courseId,
-        amountPaidCents: metadata.amountPaidCents,
-      });
+      if (!(error instanceof AfterCommitError)) {
+        this.obs.error('Failed to complete course purchase', {
+          error: error instanceof Error ? error.message : String(error),
+          stripePaymentIntentId,
+          customerId: metadata.customerId,
+          courseId: metadata.courseId,
+          amountPaidCents: metadata.amountPaidCents,
+        });
+      }
       this.handleError(error, 'completeCoursePurchase');
     }
+  }
+
+  /**
+   * How a sale is split (Codex-2hxff.68): the item's creator and
+   * organisation, the fees configured for them, and the creator's agreement in
+   * force at `at`. Completion and the self-heal (a refund that beat its
+   * checkout) both store exactly this, so a self-healed purchase is paid from
+   * its real split, not a default one.
+   *
+   * - **Organisation.** A content sale's comes from its session metadata, else
+   *   the content row; it is legitimately null for orgless creator-direct
+   *   (bi-party) content (Codex-69t7c WP5). A course's is always the course
+   *   row's: courses are org-owned.
+   * - **Fees** (Codex-m644n) come from `FeeConfigService` when injected,
+   *   else the legacy constants. Org-scoped sales read the platform leg PLUS
+   *   the org's per-creator override (`getFeesForCreator`); orgless ones read
+   *   platform-only fees.
+   * - **The agreement** (Codex-rzfjw, Decisions Q1–Q3): the uploader's
+   *   `content_purchase` agreement, which course purchases reuse too
+   *   (HARDENING §H4(a)). Its creator share is snapshotted on the proposal;
+   *   the platform fee is read fresh. The lookup is org-scoped, so orgless
+   *   content has none.
+   * - **The organisation's cut** is `10000 - creator share` under an
+   *   agreement, else the configured `orgFeePercent`. For orgless content it
+   *   is ALWAYS zero: there is no organisation to pay, and a non-zero default
+   *   would strand a slice with no recipient. That override is logged.
+   * - **The split** is `calculateRevenueSplit`, then the min-platform-fee
+   *   floor, applied here rather than in the calculator to keep its math pure.
+   *   The DB CHECK `amount = platform + org + creator` holds by construction.
+   *
+   * A Stripe application fee that differs from the computed platform fee is
+   * logged, never thrown.
+   */
+  private async resolvePurchaseSplit(
+    tx: Tx,
+    params: {
+      target:
+        | { contentId: string; organizationId: string | null }
+        | { courseId: string };
+      amountCents: number;
+      at: Date;
+      stripePaymentIntentId: string;
+      stripeApplicationFeeCents?: number | null;
+      /** Computed for the record; a duplicate is refunded, never paid out. */
+      duplicatePayment: boolean;
+    }
+  ): Promise<{
+    creatorId: string;
+    organizationId: string | null;
+    revenueSplit: RevenueSplit;
+    agreement: CreatorAgreementShare | null;
+  }> {
+    const { target, amountCents, stripePaymentIntentId } = params;
+    const itemIds =
+      'contentId' in target
+        ? { contentId: target.contentId }
+        : { courseId: target.courseId };
+    let creatorId: string;
+    let organizationId: string | null;
+    if ('contentId' in target) {
+      const row = await tx.query.content.findFirst({
+        where: eq(content.id, target.contentId),
+        columns: { organizationId: true, creatorId: true },
+      });
+      if (!row) {
+        throw new PaymentProcessingError(
+          'Content not found during purchase completion',
+          { contentId: target.contentId, stripePaymentIntentId }
+        );
+      }
+      creatorId = row.creatorId;
+      organizationId = target.organizationId ?? row.organizationId;
+    } else {
+      const row = await tx.query.courses.findFirst({
+        where: eq(courses.id, target.courseId),
+        columns: { organizationId: true, creatorId: true },
+      });
+      if (!row) {
+        throw new PaymentProcessingError(
+          'Course not found during purchase completion',
+          { courseId: target.courseId, stripePaymentIntentId }
+        );
+      }
+      creatorId = row.creatorId;
+      organizationId = row.organizationId;
+    }
+
+    const fees = this.feeConfig
+      ? organizationId
+        ? await this.feeConfig.getFeesForCreator(
+            organizationId,
+            creatorId,
+            'one_off'
+          )
+        : await this.feeConfig.getFeesPlatform('one_off')
+      : {
+          platformFeePercent: DEFAULT_PLATFORM_FEE_PERCENTAGE,
+          orgFeePercent: DEFAULT_ORG_FEE_PERCENTAGE,
+          minPlatformFeeCents: FEES.MIN_PLATFORM_FEE_CENTS,
+          minTransferCents: 0,
+        };
+
+    const agreement = organizationId
+      ? await findActiveCreatorAgreementShare(tx, {
+          organizationId,
+          creatorId,
+          revenueType: 'content_purchase',
+          at: params.at,
+          obs: this.obs,
+        })
+      : null;
+
+    const effectiveOrgFeePercent = !organizationId
+      ? 0
+      : agreement
+        ? 10_000 - agreement.sharePercent
+        : fees.orgFeePercent;
+    if (!organizationId) {
+      this.obs.info('orgless_org_fee_override', {
+        ...itemIds,
+        creatorId,
+        stripePaymentIntentId,
+        configOrgFeePercent: fees.orgFeePercent,
+        effectiveOrgFeePercent: 0,
+        reason: 'bi_party_no_org_recipient',
+      });
+    }
+
+    const revenueSplit = applyMinPlatformFeeFloor(
+      amountCents,
+      calculateRevenueSplit(
+        amountCents,
+        fees.platformFeePercent,
+        effectiveOrgFeePercent
+      ),
+      fees.minPlatformFeeCents
+    );
+
+    // Codex-rzfjw: one event per purchase split, for end-to-end
+    // auditability of the agreements payout pipeline.
+    this.obs.info('payout_split_computed', {
+      purchaseId: undefined,
+      ...itemIds,
+      organizationId,
+      creatorId,
+      amountPaidCents: amountCents,
+      platformFeeCents: revenueSplit.platformFeeCents,
+      organizationFeeCents: revenueSplit.organizationFeeCents,
+      creatorPayoutCents: revenueSplit.creatorPayoutCents,
+      agreementApplied: agreement !== null,
+      source: 'contentId' in target ? 'content_purchase' : 'course_purchase',
+      duplicatePayment: params.duplicatePayment,
+    });
+
+    const { stripeApplicationFeeCents } = params;
+    if (
+      stripeApplicationFeeCents != null &&
+      stripeApplicationFeeCents !== revenueSplit.platformFeeCents
+    ) {
+      this.obs.warn(
+        'Platform fee mismatch: Stripe-collected application fee differs from calculated split',
+        {
+          stripeApplicationFeeCents,
+          calculatedPlatformFeeCents: revenueSplit.platformFeeCents,
+          amountPaidCents: amountCents,
+          stripePaymentIntentId,
+          ...itemIds,
+        }
+      );
+    }
+
+    return { creatorId, organizationId, revenueSplit, agreement };
+  }
+
+  /**
+   * Grant what a completed purchase buys, in its transaction. Idempotent, so
+   * a replay or a self-healed purchase (Codex-2hxff.68) writes the same rows.
+   *
+   * - Content: the `contentAccess` row (an upsert, so a re-purchase after a
+   *   refund un-deletes it) and the `content_purchase` entitlement the
+   *   resolver reads (Codex-2pryk WP-6), additive to `contentAccess` and
+   *   `verifyPurchase`. An orgless sale's grant has no organisation
+   *   (Codex-2hxff.21).
+   * - Course: the `course_purchase` entitlement, plus enrolment.
+   */
+  private async grantPurchaseAccess(tx: Tx, purchase: Purchase): Promise<void> {
+    if (purchase.contentId) {
+      await tx
+        .insert(contentAccess)
+        .values({
+          userId: purchase.customerId,
+          contentId: purchase.contentId,
+          organizationId: purchase.organizationId,
+          accessType: ACCESS_TYPES.PURCHASED,
+          expiresAt: null, // Permanent access for purchases
+        })
+        .onConflictDoUpdate({
+          target: [contentAccess.userId, contentAccess.contentId],
+          set: {
+            deletedAt: null, // Un-delete the soft-deleted row
+            accessType: ACCESS_TYPES.PURCHASED,
+            updatedAt: new Date(),
+          },
+        });
+      await writeContentPurchaseEntitlement(tx, {
+        userId: purchase.customerId,
+        organizationId: purchase.organizationId,
+        contentId: purchase.contentId,
+        purchaseId: purchase.id,
+      });
+      return;
+    }
+    if (!purchase.courseId || !purchase.organizationId) {
+      // The CHECK gives every purchase one target, and a course always has an
+      // organisation: unreachable unless the schema drifted.
+      throw new PaymentProcessingError(
+        'Purchase has no item to grant access to',
+        { purchaseId: purchase.id }
+      );
+    }
+    await writeCoursePurchaseEntitlement(tx, {
+      userId: purchase.customerId,
+      organizationId: purchase.organizationId,
+      courseId: purchase.courseId,
+      purchaseId: purchase.id,
+    });
   }
 
   /**
@@ -1364,6 +1941,8 @@ export class PurchaseService extends BaseService {
         payee: { userId: creatorId, account: creatorConnect },
         idempotencyKey: `${stripeChargeId}_creator`,
         metadata: { purchase_id: purchase.id },
+        // The agreement the purchase was split by (Codex-2hxff.19 AGR-06).
+        creatorOrgAgreementId: purchase.creatorOrgAgreementId,
       });
       // Only a freshly reserved row: a replay ('exists') never re-sends it.
       if (outcome?.kind === 'pending') {
@@ -1409,6 +1988,13 @@ export class PurchaseService extends BaseService {
    * webhook answers by its cause, and a redelivery's replay re-records the
    * missing slices. Acknowledged (a permanent cause), the slices stay
    * missing until someone replays the event, so the errorId is the handle.
+   *
+   * Then any refund or chargeback of the charge is clawed back from them
+   * (Codex-2hxff.67): one handled between the purchase's commit and this
+   * write found no slices to claw back. Its failure is logged once, by the
+   * clawback (with its purchase, charge and an errorId), and rethrown as an
+   * `AfterCommitError` carrying the purchase, so the webhook still does what
+   * follows from the purchase alone.
    */
   private async recordPayoutsAfterCommit(
     purchase: Purchase,
@@ -1429,6 +2015,21 @@ export class PurchaseService extends BaseService {
       );
       throw error;
     }
+    try {
+      await reverseEarlierRefunds(
+        { ...this.ledger(), obs: this.obs },
+        {
+          chargeId: stripeChargeId,
+          source: { sourceType: 'purchase', purchaseId: purchase.id },
+        }
+      );
+    } catch (error) {
+      throw new AfterCommitError(
+        'The purchase completed, but a refund or chargeback before its payout was not clawed back',
+        purchase,
+        error
+      );
+    }
   }
 
   private ledger(): LedgerDeps {
@@ -1441,6 +2042,30 @@ export class PurchaseService extends BaseService {
   }
 
   /**
+   * Log a Stripe failure for support and return the errorId the client gets
+   * instead (Codex-2hxff.23 SEC-02). A ServiceError's context is sent to the
+   * client verbatim as `details`, so Stripe's own message never goes in it.
+   * `warn` is for a failure the caller caused, such as a session id that
+   * does not exist; anything else is an error.
+   */
+  private logStripeFailure(
+    message: string,
+    error: Error & { type: string },
+    context: Record<string, unknown>,
+    level: 'error' | 'warn' = 'error'
+  ): string {
+    const errorId = crypto.randomUUID();
+    this.obs[level](message, {
+      errorId,
+      ...context,
+      stripeType: error.type,
+      code: stripeErrorCode(error),
+      error: error.message,
+    });
+    return errorId;
+  }
+
+  /**
    * A replayed webhook re-records an existing purchase's slices from the split
    * stored on it. The ledger skips every slice already there, so this only
    * adds one the first delivery never wrote — the worker died between
@@ -1448,8 +2073,14 @@ export class PurchaseService extends BaseService {
    * the webhook was retried (Codex-2hxff.11). Until this, a replay skipped the
    * ledger entirely and such a slice was never paid.
    *
-   * A purchase refunded or disputed since is left alone: adding a slice now
-   * would pay out money the buyer has been given back.
+   * A PARTLY refunded purchase is re-recorded too (Codex-2hxff.68): the
+   * refund is clawed back from the added slices straight after
+   * (`recordPayoutsAfterCommit` runs `reverseEarlierRefunds`), so each payee
+   * nets what a refund after the payout leaves. That is also how a purchase
+   * rebuilt by a refund that beat its checkout is first paid.
+   *
+   * A purchase refunded in full or disputed since is left alone: it owes no
+   * one, or its dispute decides what it owes.
    */
   private async repairPurchasePayouts(
     purchase: Purchase,
@@ -1458,13 +2089,8 @@ export class PurchaseService extends BaseService {
     if (
       purchase.status !== PURCHASE_STATUS.COMPLETED ||
       purchase.refundedAt ||
-      // A partial refund keeps the purchase completed (P-1), so its amount,
-      // not its status, says it was refunded.
-      (purchase.refundAmountCents ?? 0) > 0 ||
       purchase.disputedAt
     ) {
-      // Said out loud: if the first delivery lost a slice, a PARTIAL refund
-      // leaves part of it owed, and only a person can settle that.
       this.obs.warn('Replay left a refunded or disputed purchase unrepaired', {
         purchaseId: purchase.id,
         status: purchase.status,
@@ -1617,12 +2243,12 @@ export class PurchaseService extends BaseService {
    * - Pagination (page, limit)
    * - Filter by status
    * - Filter by contentId
-   * - Join with content for details
+   * - Content AND course purchases, each joined with its item
    * - Sort by purchasedAt DESC
    *
    * @param customerId - Customer ID
    * @param filters - Query filters
-   * @returns Paginated purchase history with content details
+   * @returns Paginated purchase history with the bought item's details
    *
    * @example
    * const history = await purchaseService.getPurchaseHistory('customer-123', {
@@ -1635,18 +2261,13 @@ export class PurchaseService extends BaseService {
   async getPurchaseHistory(
     customerId: string,
     filters: PurchaseQueryInput
-  ): Promise<PaginatedListResponse<PurchaseWithContent>> {
+  ): Promise<PaginatedListResponse<PurchaseWithItem>> {
     const validated = purchaseQuerySchema.parse(filters);
 
     try {
-      // Build WHERE conditions. Codex-2pryk WP-6: this is the CONTENT purchase
-      // history (joins + returns content). Course purchases (contentId NULL) are
-      // a distinct shape surfaced via the library/enrollments shelf, not here —
-      // scope them out so the `content` join is always present.
-      const conditions = [
-        eq(purchases.customerId, customerId),
-        isNotNull(purchases.contentId),
-      ];
+      // Both kinds (Codex-2hxff.21). A row targets exactly one of content or a
+      // course (the split-FK CHECK), so exactly one of the two joins is filled.
+      const conditions = [eq(purchases.customerId, customerId)];
 
       if (validated.status) {
         conditions.push(eq(purchases.status, validated.status));
@@ -1656,14 +2277,16 @@ export class PurchaseService extends BaseService {
         conditions.push(eq(purchases.contentId, validated.contentId));
       }
 
-      // Calculate offset
-      const offset = (validated.page - 1) * validated.limit;
+      const { limit, offset } = withPagination({
+        page: validated.page,
+        limit: validated.limit,
+      });
 
       // Run paginated SELECT and COUNT in parallel to cut one DB round-trip
       const [items, countResult] = await Promise.all([
         this.db.query.purchases.findMany({
           where: and(...conditions),
-          limit: validated.limit,
+          limit,
           offset,
           orderBy: [desc(purchases.purchasedAt)],
           with: {
@@ -1676,6 +2299,9 @@ export class PurchaseService extends BaseService {
                 contentType: true,
               },
             },
+            course: {
+              columns: { id: true, title: true, slug: true },
+            },
           },
         }),
         this.db
@@ -1686,12 +2312,12 @@ export class PurchaseService extends BaseService {
       const total = countResult[0]?.total ?? 0;
 
       return {
-        items: items as PurchaseWithContent[],
+        items,
         pagination: {
           page: validated.page,
-          limit: validated.limit,
+          limit,
           total,
-          totalPages: Math.ceil(total / validated.limit),
+          totalPages: Math.ceil(total / limit),
         },
       };
     } catch (error) {
@@ -1702,14 +2328,14 @@ export class PurchaseService extends BaseService {
   /**
    * Format purchase history for client consumption
    *
-   * Maps raw PurchaseWithContent records into PurchaseListItem DTOs
+   * Maps raw PurchaseWithItem records into PurchaseListItem DTOs
    * with validated status values and ISO date strings.
    *
    * @param result - Raw purchase history from getPurchaseHistory()
    * @returns Paginated response with formatted PurchaseListItem items
    */
   formatPurchasesForClient(
-    result: PaginatedListResponse<PurchaseWithContent>
+    result: PaginatedListResponse<PurchaseWithItem>
   ): PaginatedListResponse<PurchaseListItem> {
     return {
       items: result.items.map(
@@ -1717,12 +2343,14 @@ export class PurchaseService extends BaseService {
           id: p.id,
           customerId: p.customerId,
           createdAt: toIso(p.createdAt),
-          // `content` is guaranteed present — getPurchaseHistory scopes to
-          // content purchases (contentId NOT NULL) — so its id is the target.
-          contentId: p.content.id,
-          contentTitle: p.content.title,
+          kind: p.courseId !== null ? 'course' : 'content',
+          contentId: p.contentId,
+          contentTitle: p.content?.title ?? null,
+          courseId: p.courseId,
+          courseTitle: p.course?.title ?? null,
           amountCents: p.amountPaidCents,
           status: coercePurchaseStatus(p.status),
+          disputedAt: toIso(p.disputedAt),
         })
       ),
       pagination: result.pagination,
@@ -1783,27 +2411,41 @@ export class PurchaseService extends BaseService {
    * Fast path: row already present (normal ordering / replay) → return it.
    *
    * Slow path: rebuild from the Stripe checkout session. The PaymentIntent does
-   * not carry our metadata, so we list sessions by `payment_intent`; the session
-   * carries { customerId, contentId, organizationId } (validated against the
-   * SAME `checkoutSessionMetadataSchema` the booking webhook uses) + amount_total.
+   * not carry our metadata, so we list sessions by `payment_intent`. The
+   * session's metadata is validated against the SAME schemas the booking
+   * webhook uses: a content session's `{ customerId, contentId,
+   * organizationId }`, or a course session's `{ kind: 'course', customerId,
+   * courseId }` (PAY-11), plus `amount_total`.
    *
-   * MINIMAL by design (Codex-aa08z decision): we INSERT only the purchase row —
-   * we deliberately do NOT run `writePurchasePayouts`. A refund arriving before
-   * completion means NO funds were ever transferred to Connect accounts, so there
-   * is nothing to pay out and nothing to claw back. The fee columns carry a
-   * default split purely to satisfy the `amount = platform + org + creator` CHECK
-   * (bookkeeping — no payout executes). The later `checkout.session.completed`
-   * no-ops via `completePurchase`'s idempotency check, so no transfer ever fires
-   * for this refunded sale. The after-transfer clawback case (refund AFTER
-   * transfers settled) is the separate, still-open policy decision Codex-13v21 —
-   * intentionally NOT touched here.
+   * The row is the one completion would write (Codex-2hxff.68): the REAL split
+   * (`resolvePurchaseSplit`, with the agreement in force when the checkout
+   * session was created, as completion resolves it), after the same GBP check
+   * (PAY-25). `purchasedAt` is the payment time the caller passes (the
+   * charge's `created`). No slice is written here: the later
+   * `checkout.session.completed` replays into `repairPurchasePayouts`.
+   * - **Refunded in full** (`refundedInFull`): the row is written `refunded`,
+   *   with the refund, in the same transaction, and grants nothing. The
+   *   replay then pays no one.
+   * - **Otherwise** it is written `completed` with its access grant, and the
+   *   caller records the partial refund on it (P-1: access is kept). The
+   *   replay records the slices and claws the refund back from them, so each
+   *   payee nets what a refund after the payout leaves.
    *
    * Returns the purchase, or `null` when the session/metadata cannot be resolved
    * (caller then exits cleanly with 200, exactly as the old drop branch did).
    * Bubbles transient Stripe/DB errors so the webhook 5xx's and Stripe retries.
    */
   async ensurePurchaseDataPresent(
-    paymentIntentId: string
+    paymentIntentId: string,
+    options: {
+      paidAt?: Date;
+      /** The charge is refunded in full: what to record on a rebuilt row. */
+      refundedInFull?: {
+        refundAmountCents: number;
+        stripeRefundId: string | null;
+        refundReason: string | null;
+      };
+    } = {}
   ): Promise<Purchase | null> {
     // Fast path: row already exists (normal delivery order, or a replay).
     const existing = await this.db.query.purchases.findFirst({
@@ -1827,51 +2469,93 @@ export class PurchaseService extends BaseService {
       return null;
     }
 
-    const parsed = checkoutSessionMetadataSchema.safeParse(
-      session.metadata ?? {}
-    );
+    const sold = selfHealedSale(session.metadata ?? {});
     const amountPaidCents = session.amount_total;
-    if (!parsed.success || amountPaidCents === null) {
+    if (!sold || amountPaidCents === null) {
       this.obs.warn(
         'Purchase self-heal: checkout session missing/invalid metadata or amount',
         { paymentIntentId, sessionId: session.id }
       );
       return null;
     }
-    const { customerId, contentId, organizationId } = parsed.data;
-
-    // The purchases CHECK constraint requires
-    // amount = platformFee + organizationFee + creatorPayout, so we cannot leave
-    // the fee columns at 0. Compute a split with DEFAULT percentages (org leg 0
-    // for orgless content). This is bookkeeping only: the row is refunded
-    // immediately and writePurchasePayouts is NEVER called, so no funds move and
-    // the exact per-org fee config is immaterial — the split just has to balance.
-    const split = calculateRevenueSplit(
-      amountPaidCents,
-      DEFAULT_PLATFORM_FEE_PERCENTAGE,
-      organizationId ? DEFAULT_ORG_FEE_PERCENTAGE : 0
-    );
+    const { customerId, target } = sold;
+    const itemIds =
+      'contentId' in target
+        ? { contentId: target.contentId }
+        : { courseId: target.courseId };
+    // GBP only, before a split is computed (PAY-25), as completion refuses it.
+    assertGbpOnly(session.currency, {
+      stripePaymentIntentId: paymentIntentId,
+      ...itemIds,
+    });
+    const { refundedInFull } = options;
+    const purchasedAt = options.paidAt ?? new Date();
+    // The checkout's start, as completion takes it (Codex-2hxff.64 Q1).
+    const offerAt = Number.isFinite(session.created)
+      ? new Date(session.created * 1000)
+      : purchasedAt;
 
     try {
-      const [inserted] = await this.db
-        .insert(purchases)
-        .values({
+      // Under the same lock as completion (Codex-2hxff.14), so a rebuild and
+      // a completion of the buyer's other payment for the item cannot both
+      // write a completed purchase. A buyer who already owns the item paid
+      // twice: this one is rebuilt as the duplicate it is, granting nothing.
+      return await this.db.transaction(async (tx) => {
+        const { replay, ownerId } = await this.lockForItem(
+          tx,
           customerId,
-          contentId,
-          organizationId,
-          amountPaidCents,
-          currency: CURRENCY.GBP,
+          itemIds,
+          paymentIntentId
+        );
+        if (replay) return replay;
+        const split = await this.resolvePurchaseSplit(tx, {
+          target,
+          amountCents: amountPaidCents,
+          at: offerAt,
           stripePaymentIntentId: paymentIntentId,
-          status: PURCHASE_STATUS.COMPLETED,
-          purchasedAt: new Date(),
-          platformFeeCents: split.platformFeeCents,
-          organizationFeeCents: split.organizationFeeCents,
-          creatorPayoutCents: split.creatorPayoutCents,
-        })
-        .returning();
-      // `.returning()` always yields the inserted row here; `?? null` only
-      // satisfies the array-index `| undefined` that TS infers.
-      return inserted ?? null;
+          duplicatePayment: ownerId !== undefined,
+        });
+        const [inserted] = await tx
+          .insert(purchases)
+          .values({
+            customerId,
+            ...itemIds,
+            organizationId: split.organizationId,
+            amountPaidCents,
+            currency: session.currency || CURRENCY.GBP,
+            stripePaymentIntentId: paymentIntentId,
+            purchasedAt,
+            platformFeeCents: split.revenueSplit.platformFeeCents,
+            organizationFeeCents: split.revenueSplit.organizationFeeCents,
+            creatorPayoutCents: split.revenueSplit.creatorPayoutCents,
+            platformAgreementId: null,
+            creatorOrgAgreementId: split.agreement?.agreementId ?? null,
+            ...purchaseOutcomeFields(ownerId),
+            // Refunded already: never granted, so nothing is left to revoke.
+            ...(refundedInFull && {
+              ...refundedInFull,
+              status: PURCHASE_STATUS.REFUNDED,
+              refundedAt: new Date(),
+            }),
+          })
+          .returning();
+        if (!inserted) {
+          throw new PaymentProcessingError('Failed to create purchase record', {
+            stripePaymentIntentId: paymentIntentId,
+          });
+        }
+        if (ownerId === undefined && !refundedInFull) {
+          await this.grantPurchaseAccess(tx, inserted);
+        }
+        this.obs.info('Purchase self-heal: rebuilt from its checkout session', {
+          purchaseId: inserted.id,
+          paymentIntentId,
+          ...itemIds,
+          duplicatePayment: ownerId !== undefined,
+          refundedInFull: refundedInFull !== undefined,
+        });
+        return inserted;
+      });
     } catch (error) {
       if (isUniqueViolation(error)) {
         // Concurrent completePurchase / self-heal raced us to insert — re-select.
@@ -1916,18 +2600,65 @@ export class PurchaseService extends BaseService {
        */
       refundAmountCents?: number;
       refundReason?: string;
+      /**
+       * When the charge was paid (its `created`): the purchase date of a
+       * purchase the refund rebuilds because it beat the checkout.
+       */
+      paidAt?: Date;
     }
-  ): Promise<{ userId: string; accessEnded: boolean } | undefined> {
+  ): Promise<
+    | {
+        userId: string;
+        accessEnded: boolean;
+        duplicatePayment: boolean;
+        /** The item's title, for the refund email (charges carry none). */
+        itemTitle: string | null;
+      }
+    | undefined
+  > {
     try {
       // Self-heal ordering race #4 (Codex-aa08z): if charge.refunded beat
       // checkout.session.completed, the row won't exist yet — rebuild it from
-      // the Stripe checkout session so the refund is recorded (no transfers).
-      const purchase = await this.ensurePurchaseDataPresent(paymentIntentId);
+      // the Stripe checkout session so the refund is recorded (no transfers
+      // yet: completion records them, Codex-2hxff.68).
+      const refundedCents =
+        refundDetails.refundAmountCents ?? refundDetails.charge.amountCents;
+      const isFull = refundedCents >= refundDetails.charge.amountCents;
+      const refundFields = {
+        updatedAt: new Date(),
+        refundAmountCents: refundedCents,
+        stripeRefundId: refundDetails.stripeRefundId ?? null,
+        refundReason: refundDetails.refundReason ?? null,
+      };
+      const purchase = await this.ensurePurchaseDataPresent(paymentIntentId, {
+        paidAt: refundDetails.paidAt,
+        // A purchase rebuilt for a full refund is written refunded, granting
+        // nothing (below, it takes the already-refunded path).
+        refundedInFull: isFull
+          ? {
+              refundAmountCents: refundedCents,
+              stripeRefundId: refundFields.stripeRefundId,
+              refundReason: refundFields.refundReason,
+            }
+          : undefined,
+      });
 
       if (!purchase) {
         this.obs.warn('Refund for unknown purchase', { paymentIntentId });
         return;
       }
+
+      // The charge's refunds recorded before this purchase existed
+      // (Codex-aa08z) are its own: link them, so what stands is counted.
+      await this.db
+        .update(refunds)
+        .set({ purchaseId: purchase.id })
+        .where(
+          and(
+            eq(refunds.stripeChargeId, refundDetails.charge.id),
+            isNull(refunds.purchaseId)
+          )
+        );
 
       // Idempotent: already refunded — still return the userId so the caller
       // can re-bump the library cache (KV version increments are monotonic
@@ -1939,22 +2670,20 @@ export class PurchaseService extends BaseService {
         });
         // The purchase is recorded; the clawback is not gated by it.
         await this.clawBackRefunds(purchase.id, refundDetails.charge);
-        return { userId: purchase.customerId, accessEnded: true };
+        // A duplicate payment's buyer keeps the item through their first
+        // purchase, and so does anyone who bought it again (Codex-2hxff.14).
+        return {
+          userId: purchase.customerId,
+          accessEnded: !(await this.keepsItemElsewhere(this.db, purchase)),
+          duplicatePayment: isDuplicatePayment(purchase),
+          itemTitle: await this.itemTitle(purchase),
+        };
       }
 
-      const refundedCents =
-        refundDetails.refundAmountCents ?? refundDetails.charge.amountCents;
-      const isFull = refundedCents >= refundDetails.charge.amountCents;
-      const refundFields = {
-        updatedAt: new Date(),
-        refundAmountCents: refundedCents,
-        stripeRefundId: refundDetails.stripeRefundId ?? null,
-        refundReason: refundDetails.refundReason ?? null,
-      };
-
-      if (!isFull) {
+      if (!isFull && refundedCents > 0) {
         // P-1: the buyer keeps access. The amount only grows, so a stale
-        // redelivery never lowers it.
+        // redelivery never lowers it. Nothing standing writes nothing: the
+        // restatement owns a refund that failed (MED-2).
         await this.db
           .update(purchases)
           .set(refundFields)
@@ -1968,7 +2697,9 @@ export class PurchaseService extends BaseService {
               )
             )
           );
-      } else {
+      }
+      let keptElsewhere = false;
+      if (isFull) {
         // Atomically update purchase status AND revoke content access
         await this.db.transaction(async (tx) => {
           // Update purchase status to refunded with tracking fields
@@ -1982,8 +2713,12 @@ export class PurchaseService extends BaseService {
             .where(eq(purchases.id, purchase.id));
 
           // Revoke content access (soft delete) — content purchases only. Course
-          // purchases grant no contentAccess row (they use entitlements).
-          if (purchase.contentId) {
+          // purchases grant no contentAccess row (they use entitlements). The
+          // row is per buyer and item, shared by every purchase of it, so it
+          // stays while another completed purchase still grants it
+          // (Codex-2hxff.14).
+          keptElsewhere = await this.keepsItemElsewhere(tx, purchase);
+          if (purchase.contentId && !keptElsewhere) {
             await tx
               .update(contentAccess)
               .set({ deletedAt: new Date() })
@@ -2025,14 +2760,19 @@ export class PurchaseService extends BaseService {
         customerId: purchase.customerId,
         paymentIntentId,
         refundedCents,
-        accessEnded: isFull,
+        accessEnded: isFull && !keptElsewhere,
       });
 
       // Return the purchaser's userId so the webhook route can bump
       // COLLECTION_USER_LIBRARY — refunded content disappears from the
       // user's library on their next fetch. No orgId: one-time purchases
       // are content-scoped, not org-scoped, so only the library cache bumps.
-      return { userId: purchase.customerId, accessEnded: isFull };
+      return {
+        userId: purchase.customerId,
+        accessEnded: isFull && !keptElsewhere,
+        duplicatePayment: isDuplicatePayment(purchase),
+        itemTitle: await this.itemTitle(purchase),
+      };
     } catch (error) {
       this.handleError(error, 'processRefund');
     }
@@ -2069,6 +2809,10 @@ export class PurchaseService extends BaseService {
    * call wrote the refund's status (a new row, or a newer status), so a
    * redelivered event does not raise an alert again. A status Stripe has
    * added since is logged and not written.
+   *
+   * `requestedByUserId` is who in support issued it (Codex-2hxff.28, Q3).
+   * It is written once, whichever event records the refund first, and only
+   * if it names a user: refund metadata can be edited in the Dashboard.
    */
   async recordRefund(refund: {
     stripeRefundId: string;
@@ -2081,6 +2825,8 @@ export class PurchaseService extends BaseService {
     reason: string | null;
     failureReason: string | null;
     stripeCreatedAt: Date;
+    /** The refund's `metadata.codex_requested_by` (`supportRequesterOf`). */
+    requestedByUserId?: string | null;
   }): Promise<boolean> {
     try {
       const { status } = refund;
@@ -2098,6 +2844,11 @@ export class PurchaseService extends BaseService {
             .where(eq(purchases.stripePaymentIntentId, refund.paymentIntentId))
             .limit(1)
         : [];
+      // The user, if one has that id; else NULL, never a foreign-key failure
+      // the webhook would retry for ever.
+      const requester = refund.requestedByUserId
+        ? sql`(SELECT ${users.id} FROM ${users} WHERE ${users.id} = ${refund.requestedByUserId})`
+        : null;
       const written = await this.db
         .insert(refunds)
         .values({
@@ -2110,6 +2861,7 @@ export class PurchaseService extends BaseService {
           reason: refund.reason,
           failureReason: refund.failureReason,
           stripeCreatedAt: refund.stripeCreatedAt,
+          requestedByUserId: requester,
         })
         .onConflictDoUpdate({
           target: refunds.stripeRefundId,
@@ -2118,6 +2870,33 @@ export class PurchaseService extends BaseService {
           setWhere: sql`${refunds.status} <> excluded.status AND ${refunds.status} NOT IN ('failed', 'canceled') AND NOT (${refunds.status} = 'succeeded' AND excluded.status IN ('pending', 'requires_action'))`,
         })
         .returning();
+      // An event that names no requester (refund.updated) may have recorded
+      // the row first; the forward-only guard above skips a repeat status, so
+      // the requester is filled in on its own.
+      if (requester && !written[0]?.requestedByUserId) {
+        await this.db
+          .update(refunds)
+          .set({ requestedByUserId: requester })
+          .where(
+            and(
+              eq(refunds.stripeRefundId, refund.stripeRefundId),
+              isNull(refunds.requestedByUserId)
+            )
+          );
+      }
+      // The same for the purchase: an event that beat the purchase's own
+      // (Codex-aa08z) recorded it without one (LOW-3, F4).
+      if (purchase && !written[0]?.purchaseId) {
+        await this.db
+          .update(refunds)
+          .set({ purchaseId: purchase.id })
+          .where(
+            and(
+              eq(refunds.stripeRefundId, refund.stripeRefundId),
+              isNull(refunds.purchaseId)
+            )
+          );
+      }
       return written.length > 0;
     } catch (error) {
       this.handleError(error, 'recordRefund');
@@ -2147,6 +2926,7 @@ export class PurchaseService extends BaseService {
           reason: refund.reason ?? null,
           failureReason: refund.failure_reason ?? null,
           stripeCreatedAt: new Date(refund.created * 1000),
+          requestedByUserId: supportRequesterOf(refund),
         });
       }
       return [...listed].sort(
@@ -2203,8 +2983,11 @@ export class PurchaseService extends BaseService {
    *   until the dispute resolves — this keeps the purchase_status CHECK
    *   constraint happy and matches Stripe's semantics where a disputed
    *   charge is still a completed payment until it is evaluated)
-   * - Soft-delete matching `contentAccess` rows (the content disappears
-   *   from the user's library on the next fetch — same as refund)
+   * - Soft-delete matching `contentAccess` rows. Unlike a refund, the
+   *   purchase stays in the library while the dispute is open: the
+   *   library's purchased arm reads `status = 'completed'`, and shows it
+   *   paused unless something else still grants it. Opening it is refused,
+   *   because every access check reads `disputedAt` (Codex-2hxff.60)
    *
    * Idempotent: if the purchase already has `disputedAt` set, this is a
    * near-no-op — we still return `{ userId, orgId }` so the webhook
@@ -2212,13 +2995,12 @@ export class PurchaseService extends BaseService {
    * AccessRevocation KV key (both are monotonic / idempotent at their
    * respective layers).
    *
-   * Purchases are org-scoped (`organizationId` is NOT NULL on the
-   * `purchases` table), so unlike `processRefund` we can always return
-   * `orgId`. The webhook handler then writes
-   * `AccessRevocation.revoke(userId, orgId, 'refund')` — the revocation
-   * reason enum intentionally doesn't include 'dispute' because it's
-   * observability-only and disputes are the same access-reducing class
-   * as refunds.
+   * `orgId` is null for an orgless creator-direct purchase
+   * (`purchases.organizationId` is nullable, Codex-69t7c), and the webhook
+   * then skips the org-scoped revocation. Otherwise it writes
+   * `AccessRevocation.revoke(userId, orgId, 'purchase_dispute')`, so the
+   * content page shows the dispute notice. After the block's 20 minutes the
+   * access check's own `disputeHold` gives the same reason (Codex-2hxff.60).
    *
    * @param paymentIntentId - The payment intent ID from the disputed charge
    * @param disputeDetails - Optional Stripe dispute metadata
@@ -2230,7 +3012,19 @@ export class PurchaseService extends BaseService {
       stripeDisputeId?: string;
       disputeReason?: string;
     }
-  ): Promise<{ userId: string; orgId: string | null } | undefined> {
+  ): Promise<
+    | {
+        userId: string;
+        orgId: string | null;
+        /**
+         * False when the buyer keeps the item through another purchase (a
+         * dispute of a duplicate payment, say): the caller then writes no
+         * org-wide streaming block (Codex-2hxff.14).
+         */
+        accessEnded: boolean;
+      }
+    | undefined
+  > {
     try {
       const purchase = await this.db.query.purchases.findFirst({
         where: eq(purchases.stripePaymentIntentId, paymentIntentId),
@@ -2251,11 +3045,24 @@ export class PurchaseService extends BaseService {
         return {
           userId: purchase.customerId,
           orgId: purchase.organizationId,
+          accessEnded: !(await this.keepsItemElsewhere(this.db, purchase)),
         };
       }
 
       // Atomically mark the purchase as disputed AND revoke content access.
-      await this.db.transaction(async (tx) => {
+      let keptElsewhere = false;
+      const stillHolds = await this.db.transaction(async (tx) => {
+        // Only while the dispute still holds the sale: the hourly reconcile
+        // re-runs an open chargeback (Codex-2hxff.58), and a win recorded
+        // meanwhile must not be undone. Under a share lock on its row, that
+        // win is either seen here, or waits for this commit and its restore
+        // runs after.
+        if (
+          disputeDetails?.stripeDisputeId &&
+          !(await disputeStillHolds(tx, disputeDetails.stripeDisputeId))
+        ) {
+          return false;
+        }
         await tx
           .update(purchases)
           .set({
@@ -2267,7 +3074,10 @@ export class PurchaseService extends BaseService {
           .where(eq(purchases.id, purchase.id));
 
         // Content purchases only — course purchases grant no contentAccess row.
-        if (purchase.contentId) {
+        // The row is shared by every purchase of the item, so it stays while
+        // another completed purchase still grants it (Codex-2hxff.14).
+        keptElsewhere = await this.keepsItemElsewhere(tx, purchase);
+        if (purchase.contentId && !keptElsewhere) {
           await tx
             .update(contentAccess)
             .set({ deletedAt: new Date() })
@@ -2292,7 +3102,20 @@ export class PurchaseService extends BaseService {
               isNull(entitlements.revokedAt)
             )
           );
+        return true;
       });
+      if (!stillHolds) {
+        this.obs.info('Dispute no longer holds the sale; access not paused', {
+          purchaseId: purchase.id,
+          paymentIntentId,
+          stripeDisputeId: disputeDetails?.stripeDisputeId,
+        });
+        return {
+          userId: purchase.customerId,
+          orgId: purchase.organizationId,
+          accessEnded: false,
+        };
+      }
 
       this.obs.info('Dispute processed', {
         purchaseId: purchase.id,
@@ -2301,11 +3124,13 @@ export class PurchaseService extends BaseService {
         organizationId: purchase.organizationId,
         paymentIntentId,
         stripeDisputeId: disputeDetails?.stripeDisputeId,
+        accessEnded: !keptElsewhere,
       });
 
       return {
         userId: purchase.customerId,
         orgId: purchase.organizationId,
+        accessEnded: !keptElsewhere,
       };
     } catch (error) {
       this.handleError(error, 'processDispute');
@@ -2320,9 +3145,13 @@ export class PurchaseService extends BaseService {
    *
    * Forward only, because Stripe does not deliver events in order: an inquiry
    * may become a chargeback, and a final status (`won`, `lost`,
-   * `warning_closed`, `prevented`) never changes. Returns the row as it now
-   * stands, which is what the caller acts on, not the event's snapshot. A
-   * status Stripe adds later is logged and not written.
+   * `warning_closed`, `prevented`) never changes. Stripe can turn `lost`
+   * into `won` (a late win): that event is only alerted, once per event, and
+   * the row stays `lost` (owner decision 2026-10-25, "alert only"), so the
+   * loss's refund, reversals and ended access stand until a person undoes
+   * them. Codex-2hxff.70 will record the win together with the undo. Returns
+   * the row as it now stands, which is what the caller acts on, not the
+   * event's snapshot. A status Stripe adds later is logged and not written.
    */
   async recordDispute(dispute: {
     stripeDisputeId: string;
@@ -2350,6 +3179,11 @@ export class PurchaseService extends BaseService {
             .where(eq(purchases.stripePaymentIntentId, dispute.paymentIntentId))
             .limit(1)
         : [];
+      const [prior] = await this.db
+        .select({ status: disputes.status })
+        .from(disputes)
+        .where(eq(disputes.stripeDisputeId, dispute.stripeDisputeId))
+        .limit(1);
       await this.db
         .insert(disputes)
         .values({
@@ -2373,6 +3207,20 @@ export class PurchaseService extends BaseService {
         .from(disputes)
         .where(eq(disputes.stripeDisputeId, dispute.stripeDisputeId))
         .limit(1);
+      // A late win: the upsert above refused it, so the row is still lost.
+      if (prior?.status === 'lost' && status === 'won' && current) {
+        this.obs.error(
+          'late win on a lost dispute: re-pay creators and restore the buyer by hand',
+          {
+            errorId: crypto.randomUUID(),
+            disputeId: current.stripeDisputeId,
+            chargeId: current.stripeChargeId,
+            purchaseId: current.purchaseId,
+            subscriptionId: current.subscriptionId,
+            courseSubscriptionId: current.courseSubscriptionId,
+          }
+        );
+      }
       return current;
     } catch (error) {
       this.handleError(error, 'recordDispute');
@@ -2460,6 +3308,292 @@ export class PurchaseService extends BaseService {
   }
 
   /**
+   * A FAILED full refund that support settles as `creators_repaid` gives the
+   * buyer access back (Codex-2hxff.28, owner decision Q5d): the buyer was
+   * never refunded, and the payees are paid back. It undoes exactly what
+   * `processRefund` did for the full refund: the purchase is `completed`
+   * again, with `refunded_at` cleared and the refund fields naming the
+   * refunds that still stand; the content access row it soft-deleted and the
+   * entitlement it revoked are restored. The caller bumps the buyer's library.
+   *
+   * It runs INSIDE the caller's transaction, which locks the refund row and
+   * records the settlement, so all of it commits or none does. The purchase
+   * row is locked here. Access is not given back, and `reason` says why
+   * (logged at info, ids only), when:
+   *
+   * - `partial`: the purchase is still `completed`, so a part refund never
+   *   ended its access (P-1); `not_refunded`: it is in another status;
+   * - `dispute_holds`: a chargeback is open or was lost on it, found by the
+   *   purchase or by the charge (`disputedAt` stays set after a loss, which
+   *   also makes it `refunded`): the dispute decides the access;
+   * - `duplicate`: a duplicate payment, which never granted anything;
+   * - `rebought`: the buyer bought the item again since, and that purchase
+   *   grants it: a buyer holds one completed purchase per item
+   *   (`uq_purchases_completed_customer_content`);
+   * - `still_refunded`: the refunds that still stand cover what was paid.
+   *
+   * After `rebought` and `still_refunded` the purchase stays `refunded`, but
+   * its refund fields are restated, so Sales stops counting the failed one.
+   * `chargeId` is the failed refund's charge: it finds a dispute, and a
+   * standing refund, recorded before the purchase existed.
+   */
+  async restoreAfterFailedRefund(
+    tx: Tx,
+    purchaseId: string,
+    chargeId: string
+  ): Promise<RestoredRefundAccess | undefined> {
+    try {
+      const [purchase] = await tx
+        .select()
+        .from(purchases)
+        .where(eq(purchases.id, purchaseId))
+        .for('update');
+      if (!purchase) return undefined;
+      const scope = {
+        userId: purchase.customerId,
+        organizationId: purchase.organizationId,
+      };
+      const kept = (reason: RefundAccessKept): RestoredRefundAccess => {
+        this.obs.info('Failed refund settled: access not given back', {
+          purchaseId: purchase.id,
+          chargeId,
+          reason,
+        });
+        return { ...scope, restored: false, reason };
+      };
+      const now = new Date();
+      const { reason, standing } = await this.accessKeptReason(
+        tx,
+        purchase,
+        chargeId
+      );
+      if (reason) {
+        if (reason === 'rebought' || reason === 'still_refunded') {
+          // Still refunded, but the failed refund no longer counts (LOW-2).
+          await tx
+            .update(purchases)
+            .set({ ...standing, updatedAt: now })
+            .where(eq(purchases.id, purchase.id));
+        }
+        return kept(reason);
+      }
+
+      await tx
+        .update(purchases)
+        .set({
+          ...standing,
+          status: PURCHASE_STATUS.COMPLETED,
+          refundedAt: null,
+          updatedAt: now,
+        })
+        .where(eq(purchases.id, purchase.id));
+      if (purchase.contentId) {
+        await tx
+          .update(contentAccess)
+          .set({ deletedAt: null })
+          .where(
+            and(
+              eq(contentAccess.userId, purchase.customerId),
+              eq(contentAccess.contentId, purchase.contentId),
+              isNotNull(contentAccess.deletedAt)
+            )
+          );
+      }
+      await tx
+        .update(entitlements)
+        .set({ revokedAt: null })
+        .where(
+          and(
+            eq(entitlements.sourceRef, purchase.id),
+            isNotNull(entitlements.revokedAt)
+          )
+        );
+      this.obs.info('Failed refund settled: purchase access restored', {
+        purchaseId: purchase.id,
+        customerId: purchase.customerId,
+      });
+      return { ...scope, restored: true, reason: null };
+    } catch (error) {
+      this.handleError(error, 'restoreAfterFailedRefund');
+    }
+  }
+
+  /**
+   * Would settling this purchase's failed refund `creators_repaid` give the
+   * buyer access back? Read only, by the restore's own rule
+   * (`accessKeptReason`): the reason it would not, or null when it would;
+   * undefined for no such purchase. Support's queue shows it before the
+   * settle. Nothing is locked, so the settle can still answer otherwise.
+   */
+  async failedRefundRestoreBlock(
+    purchaseId: string,
+    chargeId: string
+  ): Promise<RefundAccessKept | null | undefined> {
+    try {
+      const [purchase] = await this.db
+        .select()
+        .from(purchases)
+        .where(eq(purchases.id, purchaseId))
+        .limit(1);
+      if (!purchase) return undefined;
+      return (await this.accessKeptReason(this.db, purchase, chargeId)).reason;
+    } catch (error) {
+      this.handleError(error, 'failedRefundRestoreBlock');
+    }
+  }
+
+  /**
+   * The restore's rule, shared by the restore and the queue's prediction:
+   * why access would stay as it is (see `restoreAfterFailedRefund`), or null,
+   * with the refund fields the refunds still standing make whenever those
+   * are read (from `rebought` on). It writes nothing.
+   */
+  private async accessKeptReason(
+    db: Tx | DatabaseClient,
+    purchase: Purchase,
+    chargeId: string
+  ): Promise<{
+    reason: RefundAccessKept | null;
+    standing: Pick<
+      Purchase,
+      'refundAmountCents' | 'stripeRefundId' | 'refundReason'
+    >;
+  }> {
+    const none = {
+      refundAmountCents: purchase.refundAmountCents,
+      stripeRefundId: purchase.stripeRefundId,
+      refundReason: purchase.refundReason,
+    };
+    if (purchase.status === PURCHASE_STATUS.COMPLETED) {
+      return { reason: 'partial', standing: none };
+    }
+    if (purchase.status !== PURCHASE_STATUS.REFUNDED) {
+      return { reason: 'not_refunded', standing: none };
+    }
+    if (purchase.disputedAt) return { reason: 'dispute_holds', standing: none };
+    if (isDuplicatePayment(purchase)) {
+      return { reason: 'duplicate', standing: none };
+    }
+    const [holding] = await db
+      .select({ id: disputes.id })
+      .from(disputes)
+      .where(
+        and(
+          either(
+            eq(disputes.purchaseId, purchase.id),
+            eq(disputes.stripeChargeId, chargeId)
+          ),
+          inArray(disputes.status, HOLDING_DISPUTE_STATUSES)
+        )
+      )
+      .limit(1);
+    if (holding) return { reason: 'dispute_holds', standing: none };
+
+    const standing = await this.standingRefundFields(db, purchase.id, chargeId);
+    if (await this.keepsItemElsewhere(db, purchase)) {
+      return { reason: 'rebought', standing };
+    }
+    if ((standing.refundAmountCents ?? 0) >= purchase.amountPaidCents) {
+      return { reason: 'still_refunded', standing };
+    }
+    return { reason: null, standing };
+  }
+
+  /**
+   * A refund that FAILED or was CANCELED returned nothing to the buyer
+   * (Codex-2hxff.28, owner decisions 2026-10-24 and, for canceled,
+   * 2026-10-25, "same as failed"). A purchase it refunded in part is still
+   * `completed` (P-1), and `processRefund` only ever raises its refunded
+   * amount, so the amount is restated here from the refunds that still stand,
+   * with the newest one's id and reason: the restatement support's settlement
+   * makes (`restoreAfterFailedRefund`). Studio Sales and `getSalesStats` read
+   * it. A `refunded` purchase is left as it is: a failed full refund is
+   * support's to settle. Idempotent; the caller runs it after `processRefund`.
+   * `chargeId` is the refund's charge, as for the restore.
+   */
+  async restateStandingRefunds(
+    paymentIntentId: string,
+    chargeId: string
+  ): Promise<void> {
+    try {
+      const restated = await this.db.transaction(async (tx) => {
+        const [purchase] = await tx
+          .select({ id: purchases.id, status: purchases.status })
+          .from(purchases)
+          .where(eq(purchases.stripePaymentIntentId, paymentIntentId))
+          .for('update');
+        if (purchase?.status !== PURCHASE_STATUS.COMPLETED) return undefined;
+        const standing = await this.standingRefundFields(
+          tx,
+          purchase.id,
+          chargeId
+        );
+        await tx
+          .update(purchases)
+          .set({ ...standing, updatedAt: new Date() })
+          .where(eq(purchases.id, purchase.id));
+        return { purchaseId: purchase.id, ...standing };
+      });
+      if (restated) {
+        this.obs.info(
+          'A refund returned nothing: purchase refund amount restated',
+          {
+            purchaseId: restated.purchaseId,
+            refundAmountCents: restated.refundAmountCents,
+          }
+        );
+      }
+    } catch (error) {
+      this.handleError(error, 'restateStandingRefunds');
+    }
+  }
+
+  /**
+   * A purchase's refund fields as the refunds that still stand
+   * (`STANDING_REFUND_STATUSES`) make them: their total, and the newest one's
+   * id and reason; all null when none stands. A failed or canceled refund
+   * returned nothing, so it never counts. A refund of the purchase's charge
+   * still without a `purchase_id` (recorded before the purchase existed,
+   * Codex-aa08z) counts too, so the restatement and the restore always count
+   * the same refunds.
+   */
+  private async standingRefundFields(
+    db: Tx | DatabaseClient,
+    purchaseId: string,
+    chargeId: string
+  ): Promise<
+    Pick<Purchase, 'refundAmountCents' | 'stripeRefundId' | 'refundReason'>
+  > {
+    const standing = await db
+      .select({
+        stripeRefundId: refunds.stripeRefundId,
+        amountCents: refunds.amountCents,
+        reason: refunds.reason,
+      })
+      .from(refunds)
+      .where(
+        and(
+          either(
+            eq(refunds.purchaseId, purchaseId),
+            and(
+              isNull(refunds.purchaseId),
+              eq(refunds.stripeChargeId, chargeId)
+            )
+          ),
+          inArray(refunds.status, STANDING_REFUND_STATUSES)
+        )
+      )
+      .orderBy(desc(refunds.stripeCreatedAt), desc(refunds.stripeRefundId));
+    const cents = standing.reduce((sum, refund) => sum + refund.amountCents, 0);
+    const [newest] = standing;
+    return {
+      refundAmountCents: cents > 0 ? cents : null,
+      stripeRefundId: newest?.stripeRefundId ?? null,
+      refundReason: newest?.reason ?? null,
+    };
+  }
+
+  /**
    * A LOST dispute: the buyer keeps the money, so the purchase becomes
    * `refunded` and its access stays ended (owner decision Q3). The amount
    * refunded so far gains the disputed amount, capped at what was paid.
@@ -2468,15 +3602,22 @@ export class PurchaseService extends BaseService {
   async processLostDispute(
     paymentIntentId: string,
     disputedCents: number
-  ): Promise<{ userId: string; orgId: string | null } | undefined> {
+  ): Promise<
+    { userId: string; orgId: string | null; accessEnded: boolean } | undefined
+  > {
     try {
       const purchase = await this.db.query.purchases.findFirst({
         where: eq(purchases.stripePaymentIntentId, paymentIntentId),
       });
       if (!purchase) return undefined;
+      // A buyer who keeps the item through another purchase (the lost dispute
+      // was of a duplicate payment) keeps its access row and gets no
+      // org-wide streaming block (Codex-2hxff.14).
+      const keptElsewhere = await this.keepsItemElsewhere(this.db, purchase);
       const scope = {
         userId: purchase.customerId,
         orgId: purchase.organizationId,
+        accessEnded: !keptElsewhere,
       };
       if (purchase.status === PURCHASE_STATUS.REFUNDED) return scope;
 
@@ -2495,7 +3636,8 @@ export class PurchaseService extends BaseService {
           })
           .where(eq(purchases.id, purchase.id));
         // Revoked when the dispute opened; again here, in case it never was.
-        if (purchase.contentId) {
+        // Not while another completed purchase still grants it.
+        if (purchase.contentId && !keptElsewhere) {
           await tx
             .update(contentAccess)
             .set({ deletedAt: now })
@@ -2564,42 +3706,114 @@ export class PurchaseService extends BaseService {
   }
 
   /**
-   * Verify Stripe checkout session status
-   *
-   * Queries Stripe API for session details and checks for completed purchase.
-   * Used by success page to show purchase confirmation.
-   *
-   * Stripe API Best Practices (2025):
-   * - Use stripe.checkout.sessions.retrieve() with session ID
-   * - Session.status can be: 'open' | 'complete' | 'expired'
-   * - Session.payment_intent contains payment intent ID when complete
-   * - Session.metadata.customer_id contains our customerId (set during createCheckoutSession)
-   * - Handle StripeInvalidRequestError for invalid session IDs (404)
-   *
-   * Security:
-   * - Validates session belongs to authenticated user (metadata.customer_id)
-   * - Returns 403 if session exists but belongs to different user
-   *
-   * @param sessionId - Stripe checkout session ID (cs_xxx format)
-   * @param customerId - Authenticated user ID (for ownership check)
-   * @returns Session status with optional purchase and content details
-   * @throws {PaymentProcessingError} If Stripe API fails
-   * @throws {ForbiddenError} If session belongs to different user
-   *
-   * @example
-   * const result = await purchaseService.verifyCheckoutSession('cs_xxx', 'user-123');
-   * // Returns: { sessionStatus: 'complete', purchase: {...}, content: {...} }
+   * The hourly dispute reconcile's second source (Codex-2hxff.58): disputes
+   * that reached a final status whose outcome was never applied (a won
+   * dispute not re-paid, a lost one whose held slices were never cut, an
+   * inquiry whose close never released them), of any age but last updated
+   * before `updatedBefore`: a row written in the last minutes is still the
+   * webhook's, mid-way through its outcome. Oldest first. The reconcile skips
+   * any its event source already handled in the same run.
    */
-  async verifyCheckoutSession(
+  async findDisputesToReconcile(
+    limit: number,
+    updatedBefore: Date
+  ): Promise<Array<Pick<Dispute, 'stripeDisputeId' | 'status'>>> {
+    try {
+      return await this.db
+        .select({
+          stripeDisputeId: disputes.stripeDisputeId,
+          status: disputes.status,
+        })
+        .from(disputes)
+        .where(
+          and(
+            inArray(disputes.status, [...DISPUTE_CLOSED_STATUSES]),
+            isNull(disputes.outcomeAppliedAt),
+            lt(disputes.updatedAt, updatedBefore)
+          )
+        )
+        .orderBy(asc(disputes.updatedAt), asc(disputes.stripeDisputeId))
+        .limit(limit);
+    } catch (error) {
+      this.handleError(error, 'findDisputesToReconcile');
+    }
+  }
+
+  /**
+   * The recorded state of these disputes, for the reconcile to compare with
+   * Stripe's (Codex-2hxff.58). A dispute with no row is simply absent.
+   */
+  async findDisputeRecords(
+    stripeDisputeIds: string[]
+  ): Promise<
+    Array<Pick<Dispute, 'stripeDisputeId' | 'status' | 'outcomeAppliedAt'>>
+  > {
+    if (stripeDisputeIds.length === 0) return [];
+    try {
+      return await this.db
+        .select({
+          stripeDisputeId: disputes.stripeDisputeId,
+          status: disputes.status,
+          outcomeAppliedAt: disputes.outcomeAppliedAt,
+        })
+        .from(disputes)
+        .where(inArray(disputes.stripeDisputeId, stripeDisputeIds));
+    } catch (error) {
+      this.handleError(error, 'findDisputeRecords');
+    }
+  }
+
+  /**
+   * How many clawback steps this dispute wrote, of any kind or status. A
+   * `prevented` dispute should have none (Codex-2hxff.59 item 5).
+   */
+  async countDisputeReversalSteps(stripeDisputeId: string): Promise<number> {
+    try {
+      const [row] = await this.db
+        .select({ steps: count() })
+        .from(payoutReversals)
+        .where(
+          and(
+            eq(payoutReversals.causeType, 'dispute'),
+            eq(payoutReversals.causeId, stripeDisputeId)
+          )
+        );
+      return row?.steps ?? 0;
+    } catch (error) {
+      this.handleError(error, 'countDisputeReversalSteps');
+    }
+  }
+
+  /**
+   * Retrieve the signed-in buyer's own Checkout Session from Stripe: the
+   * check both success-page routes make before they read or write anything
+   * (`GET /checkout/verify`, `POST /checkout/complete`; Codex-2hxff.22). Only
+   * the id comes from the client. The item, the amount and the payment status
+   * are read from Stripe's own session.
+   *
+   * - Another environment's session is not found. Local development and
+   *   production share one Stripe sandbox, so its buyer id means nothing
+   *   here (Codex-2hxff.5).
+   * - Another buyer's session is refused. Our server wrote `customerId` into
+   *   its metadata when it created the session, and the buyer cannot change
+   *   it.
+   *
+   * @throws {NotFoundError} Stripe does not know the session, or another
+   *   environment created it
+   * @throws {ForbiddenError} The session belongs to another buyer
+   * @throws {PaymentProcessingError} Stripe failed or could not be reached
+   */
+  async retrieveCheckoutSession(
     sessionId: string,
     customerId: string
-  ): Promise<CheckoutSessionVerifyResult> {
+  ): Promise<Stripe.Checkout.Session> {
     try {
-      // Query Stripe API for session details
       const session = await this.stripe.checkout.sessions.retrieve(sessionId);
 
-      // Verify session belongs to user (metadata.customerId)
-      // Note: We set customerId in metadata during createCheckoutSession (line 227)
+      if (isForeignStripeEnvironment(session.metadata, this.environment)) {
+        throw new NotFoundError('Checkout session not found', { sessionId });
+      }
+      // We set customerId in metadata during createCheckoutSession.
       if (session.metadata?.customerId !== customerId) {
         throw new ForbiddenError(
           'Checkout session does not belong to authenticated user',
@@ -2608,94 +3822,235 @@ export class PurchaseService extends BaseService {
           }
         );
       }
+      return session;
+    } catch (error) {
+      // Stripe's own message is logged, never sent (SEC-02). A session id
+      // Stripe does not know came from the client (a stale or invented
+      // success URL), so it is a warning and a 404: retrying will not find
+      // it. An outage or API failure is an error.
+      if (isStripeError(error)) {
+        if (error.type === 'StripeInvalidRequestError') {
+          throw new NotFoundError('Checkout session not found', {
+            sessionId,
+            errorId: this.logStripeFailure(
+              'Stripe checkout session verify failed: Checkout session not found',
+              error,
+              { sessionId, customerId },
+              'warn'
+            ),
+          });
+        }
+        const message =
+          error.type === 'StripeConnectionError'
+            ? 'Failed to connect to Stripe API'
+            : 'Failed to verify checkout session';
+        throw new PaymentProcessingError(message, {
+          sessionId,
+          errorId: this.logStripeFailure(
+            `Stripe checkout session verify failed: ${message}`,
+            error,
+            { sessionId, customerId }
+          ),
+        });
+      }
 
-      const result: CheckoutSessionVerifyResult = {
-        // Stripe API may return null for status, default to 'open' for safety
-        sessionStatus:
-          (session.status as 'complete' | 'expired' | 'open') ?? 'open',
-      };
+      this.handleError(error, 'retrieveCheckoutSession');
+    }
+  }
+
+  /**
+   * What a buyer's checkout session stands for: Stripe's session, read with
+   * our purchase row for its PaymentIntent, and `state`, the one field the
+   * success page acts on (Codex-2hxff.22). `recorded` says whether we hold a
+   * row for it at all. The success page's completion runs only while we
+   * don't.
+   *
+   * Takes a session {@link retrieveCheckoutSession} returned; the row is read
+   * for this buyer only all the same.
+   */
+  async readCheckoutSession(
+    session: Stripe.Checkout.Session,
+    customerId: string
+  ): Promise<{ result: CheckoutSessionVerifyResult; recorded: boolean }> {
+    try {
+      // Stripe API may return null for status, default to 'open' for safety
+      const sessionStatus =
+        (session.status as 'complete' | 'expired' | 'open') ?? 'open';
+      const paymentIntentId =
+        typeof session.payment_intent === 'string'
+          ? session.payment_intent
+          : session.payment_intent?.id;
 
       // If payment complete, query purchase record with content join
       // payment_intent is only present when session status is 'complete'
-      if (result.sessionStatus === 'complete' && session.payment_intent) {
-        const purchase = await this.db.query.purchases.findFirst({
-          where: eq(
-            purchases.stripePaymentIntentId,
-            session.payment_intent as string
-          ),
-          with: {
-            content: {
-              columns: {
-                id: true,
-                title: true,
-                thumbnailUrl: true,
-                contentType: true,
+      const purchase =
+        sessionStatus === 'complete' && paymentIntentId
+          ? await this.db.query.purchases.findFirst({
+              where: and(
+                eq(purchases.stripePaymentIntentId, paymentIntentId),
+                eq(purchases.customerId, customerId)
+              ),
+              with: {
+                content: {
+                  columns: {
+                    id: true,
+                    title: true,
+                    thumbnailUrl: true,
+                    contentType: true,
+                  },
+                },
+                course: { columns: { id: true, title: true } },
               },
-            },
-          },
-        });
+            })
+          : undefined;
 
-        // Content-purchase sessions populate the purchase + content blocks.
-        // Course-purchase sessions (content join null) return sessionStatus only
-        // — the course success surface reads its own offer, not this shape.
-        if (purchase?.purchasedAt && purchase.content) {
-          result.purchase = {
-            id: purchase.id,
-            contentId: purchase.content.id,
-            amountPaidCents: purchase.amountPaidCents,
-            purchasedAt: purchase.purchasedAt.toISOString(),
-          };
+      const result: CheckoutSessionVerifyResult = {
+        sessionStatus,
+        state: checkoutSessionState(session, sessionStatus, purchase),
+      };
+      if (sessionStatus === 'complete' && session.amount_total !== null) {
+        result.amountTotalCents = session.amount_total;
+      }
+
+      // Paid, and our row not there yet: the page says "Payment received"
+      // and shows the item meanwhile, the one our server named in the
+      // session's metadata when it created it.
+      if (!purchase && result.state === 'recording') {
+        const named = uuidSchema.safeParse(session.metadata?.contentId);
+        const item =
+          named.success && session.metadata?.kind !== 'course'
+            ? await this.db.query.content.findFirst({
+                where: and(
+                  eq(content.id, named.data),
+                  isNull(content.deletedAt)
+                ),
+                columns: {
+                  id: true,
+                  title: true,
+                  thumbnailUrl: true,
+                  contentType: true,
+                },
+              })
+            : undefined;
+        if (item) {
           result.content = {
-            id: purchase.content.id,
-            title: purchase.content.title,
-            thumbnailUrl: purchase.content.thumbnailUrl ?? undefined,
-            contentType: purchase.content.contentType,
+            id: item.id,
+            title: item.title,
+            thumbnailUrl: item.thumbnailUrl ?? undefined,
+            contentType: item.contentType,
           };
         }
       }
 
-      return result;
+      // A second payment for an item the buyer owns: the page says it is
+      // being refunded rather than confirming a purchase (Codex-o4jvw).
+      if (purchase && isDuplicatePayment(purchase)) {
+        result.duplicatePayment = true;
+      }
+
+      // Course-purchase sessions populate the course block only: the
+      // journey success page needs to know our row exists, not a receipt.
+      if (purchase?.course) {
+        result.course = {
+          id: purchase.course.id,
+          title: purchase.course.title,
+        };
+      }
+
+      // Content-purchase sessions populate the purchase + content blocks.
+      if (purchase?.purchasedAt && purchase.content) {
+        result.purchase = {
+          id: purchase.id,
+          contentId: purchase.content.id,
+          amountPaidCents: purchase.amountPaidCents,
+          purchasedAt: purchase.purchasedAt.toISOString(),
+        };
+        result.content = {
+          id: purchase.content.id,
+          title: purchase.content.title,
+          thumbnailUrl: purchase.content.thumbnailUrl ?? undefined,
+          contentType: purchase.content.contentType,
+        };
+      }
+
+      if (purchase && result.state === 'recording') {
+        // Nothing writes a `pending` or `failed` row that is not a duplicate
+        // today, so one is an old row. The page keeps checking; this says why.
+        // The buyer has paid and will be told to wait for something that
+        // won't come, so it is an error. Only the verify and the success
+        // page's completion read here, never the webhook.
+        this.obs.error('Checkout session has a purchase it cannot confirm', {
+          errorId: crypto.randomUUID(),
+          sessionId: session.id,
+          purchaseId: purchase.id,
+          status: purchase.status,
+        });
+      }
+
+      return { result, recorded: purchase !== undefined };
     } catch (error) {
-      // Re-throw ForbiddenError
-      if (error instanceof ForbiddenError) {
-        throw error;
-      }
+      this.handleError(error, 'readCheckoutSession');
+    }
+  }
 
-      // Stripe-specific error handling (2025 patterns)
-      // StripeInvalidRequestError: Invalid session ID (404)
-      // StripeConnectionError: Network failure (500)
-      // StripeAPIError: Other Stripe errors
-      if (
-        error instanceof Error &&
-        'type' in error &&
-        error.type === 'StripeInvalidRequestError'
-      ) {
-        throw new PaymentProcessingError('Checkout session not found', {
-          stripeError: error.message,
-          sessionId,
-        });
-      }
+  /**
+   * Verify Stripe checkout session status: the success page's read
+   * (`GET /checkout/verify`). Stripe's session for this buyer, with our
+   * purchase row for it and the `state` the page acts on.
+   *
+   * @param sessionId - Stripe checkout session ID (cs_xxx format)
+   * @param customerId - Authenticated user ID (for ownership check)
+   * @returns Session status with optional purchase and content details
+   * @throws {NotFoundError} Stripe does not know the session, or another
+   *   environment created it
+   * @throws {ForbiddenError} If session belongs to different user
+   * @throws {PaymentProcessingError} If Stripe API fails
+   *
+   * @example
+   * const result = await purchaseService.verifyCheckoutSession('cs_xxx', 'user-123');
+   * // Returns: { sessionStatus: 'complete', state: 'unlocked', purchase: {...}, content: {...} }
+   */
+  async verifyCheckoutSession(
+    sessionId: string,
+    customerId: string
+  ): Promise<CheckoutSessionVerifyResult> {
+    const session = await this.retrieveCheckoutSession(sessionId, customerId);
+    const { result } = await this.readCheckoutSession(session, customerId);
+    return result;
+  }
 
-      if (
-        error instanceof Error &&
-        'type' in error &&
-        error.type === 'StripeConnectionError'
-      ) {
-        throw new PaymentProcessingError('Failed to connect to Stripe API', {
-          stripeError: error.message,
-          sessionId,
-        });
-      }
-
-      // Wrap other Stripe errors
-      if (isStripeError(error)) {
-        throw new PaymentProcessingError('Failed to verify checkout session', {
-          stripeError: error.message,
-          sessionId,
-        });
-      }
-
-      this.handleError(error, 'verifyCheckoutSession');
+  /**
+   * The charge behind a PaymentIntent, for the payouts ledger: its id (every
+   * slice's `source_transaction`), the application fee Stripe was told to
+   * collect, and when the charge was made, which is the payment time on the
+   * success page's path (Codex-2hxff.22). The webhook reads the same with its
+   * own verified Stripe client; a route has no client of its own.
+   *
+   * A failure is thrown, with Stripe's error as its cause, and the caller
+   * judges whether a retry can fix it.
+   */
+  async retrievePaymentIntentCharge(
+    paymentIntentId: string
+  ): Promise<PaymentIntentCharge> {
+    try {
+      const paymentIntent = await this.stripe.paymentIntents.retrieve(
+        paymentIntentId,
+        { expand: ['latest_charge'] }
+      );
+      const charge = paymentIntent.latest_charge;
+      return {
+        stripeApplicationFeeCents: paymentIntent.application_fee_amount ?? null,
+        stripeChargeId:
+          typeof charge === 'string' ? charge : (charge?.id ?? null),
+        chargedAt:
+          charge &&
+          typeof charge !== 'string' &&
+          Number.isFinite(charge.created)
+            ? new Date(charge.created * 1000)
+            : undefined,
+      };
+    } catch (error) {
+      this.handleError(error, 'retrievePaymentIntentCharge');
     }
   }
 
@@ -2746,7 +4101,7 @@ export class PurchaseService extends BaseService {
       // resolution step propagate untouched — the catch below only wraps
       // raw Stripe errors from billingPortal.sessions.create.
       const session = await withStaleCustomerRecovery(
-        { db: this.db, stripe: this.stripe },
+        { db: this.db, stripe: this.stripe, obs: this.obs },
         { userId, email, environment: this.environment },
         (stripeCustomerId) =>
           this.stripe.billingPortal.sessions.create({
@@ -2776,8 +4131,12 @@ export class PurchaseService extends BaseService {
         throw new PaymentProcessingError(
           'Failed to create billing portal session',
           {
-            stripeError: error.message,
             userId,
+            errorId: this.logStripeFailure(
+              'Stripe failed to create a billing portal session',
+              error,
+              { userId }
+            ),
           }
         );
       }
@@ -2797,10 +4156,6 @@ export class PurchaseService extends BaseService {
    * (orgId, status, purchasedAt) access pattern; date-range filters use the
    * `idx_purchases_org_status_created` fallback when only `createdAt` is
    * meaningful (pending rows have no `purchasedAt`).
-   *
-   * `status: 'disputed'` is a query convenience — it's not a DB status, so we
-   * map it to `disputedAt IS NOT NULL` regardless of the underlying status
-   * (a row can be both completed AND disputed).
    */
   async listSales(
     orgId: string,
@@ -2809,108 +4164,33 @@ export class PurchaseService extends BaseService {
     const validated = salesQuerySchema.parse(filters);
 
     try {
-      // Codex-2pryk WP-6: the Sales ledger's SaleListItem shape is content-
-      // shaped (contentTitle/contentSlug). Scope to content purchases so the
-      // `content` join is always present; course sales get their own reporting
-      // surface (WP-7) rather than being force-fit into the content columns.
-      const conditions = [
-        eq(purchases.organizationId, orgId),
-        isNotNull(purchases.contentId),
-      ];
-
-      if (validated.status === 'disputed') {
-        conditions.push(isNotNull(purchases.disputedAt));
-      } else if (validated.status) {
-        conditions.push(eq(purchases.status, validated.status));
-      }
-
-      if (validated.contentId) {
-        conditions.push(eq(purchases.contentId, validated.contentId));
-      }
-      if (validated.customerId) {
-        conditions.push(eq(purchases.customerId, validated.customerId));
-      }
-
-      // Date range applies to `purchasedAt` for completed rows. We OR against
-      // `createdAt` so pending/failed rows (which never set `purchasedAt`)
-      // still surface inside the window — useful for support triage where the
-      // operator is looking for a row by the date the customer attempted to pay.
-      conditions.push(
-        ...purchaseDateWindow(validated.fromDate, validated.toDate)
+      return await this.querySalesLedger(
+        [eq(purchases.organizationId, orgId)],
+        validated
       );
-
-      const offset = (validated.page - 1) * validated.limit;
-
-      const [items, countResult] = await Promise.all([
-        this.db.query.purchases.findMany({
-          where: and(...conditions),
-          limit: validated.limit,
-          offset,
-          // Completed rows sort by purchasedAt; pending/failed rows fall back
-          // to createdAt via coalesce so the most-recent row is always first.
-          orderBy: [
-            desc(
-              sql`COALESCE(${purchases.purchasedAt}, ${purchases.createdAt})`
-            ),
-          ],
-          with: {
-            content: {
-              columns: { id: true, title: true, slug: true },
-            },
-            customer: {
-              columns: { id: true, name: true, email: true },
-            },
-          },
-        }),
-        this.db
-          .select({ total: count() })
-          .from(purchases)
-          .where(and(...conditions)),
-      ]);
-      const total = countResult[0]?.total ?? 0;
-
-      // `content` is guaranteed present (conditions filter contentId NOT NULL);
-      // the type predicate narrows the relation to non-null without an `as` cast.
-      const formatted: SaleListItem[] = items
-        .filter(
-          (p): p is typeof p & { content: NonNullable<typeof p.content> } =>
-            p.content !== null
-        )
-        .map((p) => ({
-          id: p.id,
-          purchasedAt: toIso(p.purchasedAt),
-          createdAt: toIso(p.createdAt),
-          customerId: p.customerId,
-          customerName: p.customer.name,
-          customerEmail: p.customer.email,
-          contentId: p.content.id,
-          contentTitle: p.content.title,
-          contentSlug: p.content.slug,
-          amountPaidCents: p.amountPaidCents,
-          currency: p.currency,
-          status: coercePurchaseStatus(p.status) as SaleListItem['status'],
-          platformFeeCents: p.platformFeeCents,
-          organizationFeeCents: p.organizationFeeCents,
-          creatorPayoutCents: p.creatorPayoutCents,
-          refundedAt: toIso(p.refundedAt),
-          refundAmountCents: p.refundAmountCents,
-          refundReason: p.refundReason,
-          disputedAt: toIso(p.disputedAt),
-          disputeReason: p.disputeReason,
-          stripePaymentIntentId: p.stripePaymentIntentId,
-        }));
-
-      return {
-        items: formatted,
-        pagination: {
-          page: validated.page,
-          limit: validated.limit,
-          total,
-          totalPages: Math.ceil(total / validated.limit),
-        },
-      };
     } catch (error) {
       this.handleError(error, 'listSales');
+    }
+  }
+
+  /**
+   * List a solo creator's own sales: their content sold outside any
+   * organisation (Codex-2hxff.21). The same rows, filters and shape as
+   * {@link listSales}, so the creator's Sales page reuses the org page's code.
+   */
+  async listMySales(
+    creatorId: string,
+    filters: SalesQueryInput
+  ): Promise<PaginatedListResponse<SaleListItem>> {
+    const validated = salesQuerySchema.parse(filters);
+
+    try {
+      return await this.querySalesLedger(
+        this.soloSalesScope(creatorId),
+        validated
+      );
+    } catch (error) {
+      this.handleError(error, 'listMySales');
     }
   }
 
@@ -2933,41 +4213,212 @@ export class PurchaseService extends BaseService {
     const validated = salesStatsQuerySchema.parse(filters);
 
     try {
-      // Content-only, to match `listSales` (course sales report separately, WP-7)
-      // so the header tiles and the table below them agree.
-      const conditions = [
-        eq(purchases.organizationId, orgId),
-        isNotNull(purchases.contentId),
-      ];
-
-      conditions.push(
-        ...purchaseDateWindow(validated.fromDate, validated.toDate)
+      return await this.aggregateSalesStats(
+        [eq(purchases.organizationId, orgId)],
+        validated
       );
-
-      const [agg] = await this.db
-        .select({
-          // Gross: amount collected on completed OR refunded rows (refunded
-          // rows reflect money that *was* collected before being given back).
-          grossCents: sql<number>`COALESCE(SUM(${purchases.amountPaidCents}) FILTER (WHERE ${purchases.status} IN ('completed','refunded')), 0)::int`,
-          // Net to org: their share on completed rows only. Refunded rows
-          // already returned the customer's money so they zero out for net.
-          netCents: sql<number>`COALESCE(SUM(${purchases.creatorPayoutCents} + ${purchases.organizationFeeCents}) FILTER (WHERE ${purchases.status} = 'completed'), 0)::int`,
-          // Partial refunds too: they leave the purchase completed (P-1).
-          refundedCents: sql<number>`COALESCE(SUM(${purchases.refundAmountCents}), 0)::int`,
-          count: sql<number>`COUNT(*) FILTER (WHERE ${purchases.status} = 'completed')::int`,
-        })
-        .from(purchases)
-        .where(and(...conditions));
-
-      return {
-        grossCents: agg?.grossCents ?? 0,
-        netCents: agg?.netCents ?? 0,
-        refundedCents: agg?.refundedCents ?? 0,
-        count: agg?.count ?? 0,
-        currency: CURRENCY.GBP,
-      };
     } catch (error) {
       this.handleError(error, 'getSalesStats');
     }
+  }
+
+  /**
+   * The header KPIs for a solo creator's own sales, under the scope of
+   * {@link listMySales}. An orgless sale has no organisation fee, so the net
+   * is the creator's payout.
+   */
+  async getMySalesStats(
+    creatorId: string,
+    filters: SalesStatsQueryInput
+  ): Promise<SalesStats> {
+    const validated = salesStatsQuerySchema.parse(filters);
+
+    try {
+      return await this.aggregateSalesStats(
+        this.soloSalesScope(creatorId),
+        validated
+      );
+    } catch (error) {
+      this.handleError(error, 'getMySalesStats');
+    }
+  }
+
+  /**
+   * Which purchases are a solo creator's sales: orgless, and of content they
+   * created. `organization_id IS NULL` is what keeps an organisation's sale of
+   * the same creator's content out — that sale is on the organisation's ledger.
+   */
+  private soloSalesScope(creatorId: string): SQL[] {
+    return [
+      isNull(purchases.organizationId),
+      inArray(
+        purchases.contentId,
+        this.db
+          .select({ id: content.id })
+          .from(content)
+          .where(eq(content.creatorId, creatorId))
+      ),
+    ];
+  }
+
+  /**
+   * The Sales ledger rows under one seller's `scope`: an organisation's, or a
+   * solo creator's. Shared by {@link listSales} and {@link listMySales}, so
+   * the filters, ordering and row shape cannot drift apart.
+   *
+   * `status: 'disputed'` is a query convenience — it's not a DB status, so we
+   * map it to `disputedAt IS NOT NULL` regardless of the underlying status
+   * (a row can be both completed AND disputed).
+   */
+  private async querySalesLedger(
+    scope: SQL[],
+    validated: SalesQueryInput
+  ): Promise<PaginatedListResponse<SaleListItem>> {
+    // Codex-2pryk WP-6: the Sales ledger's SaleListItem shape is content-
+    // shaped (contentTitle/contentSlug). Scope to content purchases so the
+    // `content` join is always present; course sales get their own reporting
+    // surface (WP-7) rather than being force-fit into the content columns.
+    // A duplicate payment is no sale: it is refunded and pays no one
+    // (Codex-2hxff.14).
+    const conditions = [
+      ...scope,
+      isNotNull(purchases.contentId),
+      isNull(purchases.duplicateOfPurchaseId),
+    ];
+
+    if (validated.status === 'disputed') {
+      conditions.push(isNotNull(purchases.disputedAt));
+    } else if (validated.status) {
+      conditions.push(eq(purchases.status, validated.status));
+    }
+
+    if (validated.contentId) {
+      conditions.push(eq(purchases.contentId, validated.contentId));
+    }
+    if (validated.customerId) {
+      conditions.push(eq(purchases.customerId, validated.customerId));
+    }
+
+    // Date range applies to `purchasedAt` for completed rows. We OR against
+    // `createdAt` so pending/failed rows (which never set `purchasedAt`)
+    // still surface inside the window — useful for support triage where the
+    // operator is looking for a row by the date the customer attempted to pay.
+    conditions.push(
+      ...purchaseDateWindow(validated.fromDate, validated.toDate)
+    );
+
+    const { limit, offset } = withPagination({
+      page: validated.page,
+      limit: validated.limit,
+    });
+
+    const [items, countResult] = await Promise.all([
+      this.db.query.purchases.findMany({
+        where: and(...conditions),
+        limit,
+        offset,
+        // Completed rows sort by purchasedAt; pending/failed rows fall back
+        // to createdAt via coalesce so the most-recent row is always first.
+        orderBy: [
+          desc(sql`COALESCE(${purchases.purchasedAt}, ${purchases.createdAt})`),
+        ],
+        with: {
+          content: {
+            columns: { id: true, title: true, slug: true },
+          },
+          customer: {
+            columns: { id: true, name: true, email: true },
+          },
+        },
+      }),
+      this.db
+        .select({ total: count() })
+        .from(purchases)
+        .where(and(...conditions)),
+    ]);
+    const total = countResult[0]?.total ?? 0;
+
+    // `content` is guaranteed present (conditions filter contentId NOT NULL);
+    // the type predicate narrows the relation to non-null without an `as` cast.
+    const formatted: SaleListItem[] = items
+      .filter(
+        (p): p is typeof p & { content: NonNullable<typeof p.content> } =>
+          p.content !== null
+      )
+      .map((p) => ({
+        id: p.id,
+        purchasedAt: toIso(p.purchasedAt),
+        createdAt: toIso(p.createdAt),
+        customerId: p.customerId,
+        customerName: p.customer.name,
+        customerEmail: p.customer.email,
+        contentId: p.content.id,
+        contentTitle: p.content.title,
+        contentSlug: p.content.slug,
+        amountPaidCents: p.amountPaidCents,
+        currency: p.currency,
+        status: coercePurchaseStatus(p.status) as SaleListItem['status'],
+        platformFeeCents: p.platformFeeCents,
+        organizationFeeCents: p.organizationFeeCents,
+        creatorPayoutCents: p.creatorPayoutCents,
+        refundedAt: toIso(p.refundedAt),
+        refundAmountCents: p.refundAmountCents,
+        refundReason: p.refundReason,
+        disputedAt: toIso(p.disputedAt),
+        disputeReason: p.disputeReason,
+        stripePaymentIntentId: p.stripePaymentIntentId,
+      }));
+
+    return {
+      items: formatted,
+      pagination: {
+        page: validated.page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  /**
+   * The Sales header KPIs under one seller's `scope`. Shared by
+   * {@link getSalesStats} and {@link getMySalesStats}.
+   */
+  private async aggregateSalesStats(
+    scope: SQL[],
+    validated: SalesStatsQueryInput
+  ): Promise<SalesStats> {
+    // Content-only, to match the ledger (course sales report separately, WP-7)
+    // so the header tiles and the table below them agree. Duplicate payments
+    // are excluded there too: refunded, they would inflate gross and refunds.
+    const conditions = [
+      ...scope,
+      isNotNull(purchases.contentId),
+      isNull(purchases.duplicateOfPurchaseId),
+      ...purchaseDateWindow(validated.fromDate, validated.toDate),
+    ];
+
+    const [agg] = await this.db
+      .select({
+        // Gross: amount collected on completed OR refunded rows (refunded
+        // rows reflect money that *was* collected before being given back).
+        grossCents: sql<number>`COALESCE(SUM(${purchases.amountPaidCents}) FILTER (WHERE ${purchases.status} IN ('completed','refunded')), 0)::int`,
+        // Net to the seller: their share on completed rows only. Refunded rows
+        // already returned the customer's money so they zero out for net.
+        netCents: sql<number>`COALESCE(SUM(${purchases.creatorPayoutCents} + ${purchases.organizationFeeCents}) FILTER (WHERE ${purchases.status} = 'completed'), 0)::int`,
+        // Partial refunds too: they leave the purchase completed (P-1).
+        refundedCents: sql<number>`COALESCE(SUM(${purchases.refundAmountCents}), 0)::int`,
+        count: sql<number>`COUNT(*) FILTER (WHERE ${purchases.status} = 'completed')::int`,
+      })
+      .from(purchases)
+      .where(and(...conditions));
+
+    return {
+      grossCents: agg?.grossCents ?? 0,
+      netCents: agg?.netCents ?? 0,
+      refundedCents: agg?.refundedCents ?? 0,
+      count: agg?.count ?? 0,
+      currency: CURRENCY.GBP,
+    };
   }
 }

@@ -21,6 +21,7 @@
   import type { BlockEdit } from '../../model/types';
   import { editAttrs } from '../../primitives/edit';
   import { initials } from '../../model/initials';
+  import { getThumbnailSrcset } from '$lib/utils/image';
   import Signature from './Signature.svelte';
 
   interface Props {
@@ -53,7 +54,17 @@
     {:then preview}
       {@const src = photo(preview)}
       {#if src}
-        <img class="signoff__face" {src} alt="" loading="lazy" decoding="async" />
+        <!-- A round face 3.5rem across (more at a looser density): the
+             smallest file the still has, not its 800px one (Codex-61zsk.66). -->
+        <img
+          class="signoff__face"
+          {src}
+          srcset={getThumbnailSrcset(src) || undefined}
+          sizes={getThumbnailSrcset(src) ? '4.5rem' : undefined}
+          alt=""
+          loading="lazy"
+          decoding="async"
+        />
       {:else if letters}
         <span class="signoff__face" data-initials aria-hidden="true">{letters}</span>
       {/if}

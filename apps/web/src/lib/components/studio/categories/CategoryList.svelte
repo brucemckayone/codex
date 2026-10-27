@@ -31,6 +31,7 @@
     TagIcon,
     TrashIcon,
   } from '$lib/components/ui/Icon';
+  import { getThumbnailUrl } from '$lib/utils/image';
 
   interface Props {
     categories: StudioCategory[];
@@ -85,6 +86,7 @@
   <ul class="category-list" role="list">
     {#each categories as cat, index (cat.id)}
       {@const isActive = activeId === cat.id}
+      {@const cover = coverUrl(cat)}
       <li class="category-row" class:category-row--active={isActive}>
         <!-- Reorder (accessible up/down around the 1-based position) -->
         <div class="reorder-controls">
@@ -117,8 +119,9 @@
           onclick={() => onselect(cat)}
         >
           <span class="cover-tile">
-            {#if coverUrl(cat)}
-              <img src={coverUrl(cat)} alt="" class="cover-image" />
+            {#if cover}
+              <!-- The tile is 5rem wide: the 200px sm file covers it at 2x. -->
+              <img src={getThumbnailUrl(cover, 'sm')} alt="" class="cover-image" />
             {:else if initial(cat)}
               <span class="cover-initial" aria-hidden="true">{initial(cat)}</span>
             {:else}

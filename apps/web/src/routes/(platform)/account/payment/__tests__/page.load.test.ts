@@ -1,11 +1,14 @@
 /**
  * Payment Page Server Load Tests
  *
- * Tests for account payment page load function.
+ * Tests for account payment page load function. A failed purchase-history
+ * read is not "no purchases" (Codex-2hxff.22 WEB-05): it is logged and
+ * reported as `loadFailed`, and the page says it could not load them.
  */
 
 import { redirect } from '@sveltejs/kit';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiError } from '$lib/server/errors';
 import type { load } from '../+page.server';
 
 // Mock SvelteKit modules before importing
@@ -14,7 +17,12 @@ vi.mock('@sveltejs/kit', () => ({
 }));
 
 // Create mock functions that we can configure before each test
-const mockGetPurchaseHistory = vi.fn();
+const { mockGetPurchaseHistory, warnMock } = vi.hoisted(() => ({
+  mockGetPurchaseHistory: vi.fn(),
+  warnMock: vi.fn(),
+}));
+
+vi.mock('$lib/observability', () => ({ logger: { warn: warnMock } }));
 
 vi.mock('$lib/server/api', () => ({
   createServerApi: vi.fn(() => ({
@@ -59,6 +67,7 @@ describe('Payment Page Load', () => {
       url: mockUrl,
       platform: mockPlatform,
       cookies: mockCookies,
+      depends: vi.fn(),
     } as unknown as Parameters<typeof load>[0]);
 
     expect(redirect).toHaveBeenCalledWith(
@@ -81,11 +90,13 @@ describe('Payment Page Load', () => {
       url: mockUrl,
       platform: mockPlatform,
       cookies: mockCookies,
+      depends: vi.fn(),
     } as unknown as Parameters<typeof load>[0]);
 
     expect(result).toEqual({
       purchases: purchasesData,
       filters: { status: null },
+      loadFailed: false,
     });
     // Default params (page 1, limit 20) create empty URLSearchParams
     expect(mockGetPurchaseHistory).toHaveBeenCalledWith(new URLSearchParams());
@@ -106,11 +117,13 @@ describe('Payment Page Load', () => {
       url: mockUrl,
       platform: mockPlatform,
       cookies: mockCookies,
+      depends: vi.fn(),
     } as unknown as Parameters<typeof load>[0]);
 
     expect(result).toEqual({
       purchases: purchasesData,
       filters: { status: null },
+      loadFailed: false,
     });
     const expectedParams = new URLSearchParams();
     expectedParams.set('page', '3');
@@ -132,6 +145,7 @@ describe('Payment Page Load', () => {
       url: mockUrl,
       platform: mockPlatform,
       cookies: mockCookies,
+      depends: vi.fn(),
     } as unknown as Parameters<typeof load>[0]);
 
     const expectedParams = new URLSearchParams();
@@ -154,11 +168,13 @@ describe('Payment Page Load', () => {
       url: mockUrl,
       platform: mockPlatform,
       cookies: mockCookies,
+      depends: vi.fn(),
     } as unknown as Parameters<typeof load>[0]);
 
     expect(result).toEqual({
       purchases: purchasesData,
       filters: { status: 'completed' },
+      loadFailed: false,
     });
     const expectedParams = new URLSearchParams();
     expectedParams.set('status', 'completed');
@@ -182,11 +198,13 @@ describe('Payment Page Load', () => {
       url: mockUrl,
       platform: mockPlatform,
       cookies: mockCookies,
+      depends: vi.fn(),
     } as unknown as Parameters<typeof load>[0]);
 
     expect(result).toEqual({
       purchases: purchasesData,
       filters: { status: 'pending' },
+      loadFailed: false,
     });
     const expectedParams = new URLSearchParams();
     expectedParams.set('page', '2');
@@ -195,8 +213,10 @@ describe('Payment Page Load', () => {
     expect(mockGetPurchaseHistory).toHaveBeenCalledWith(expectedParams);
   });
 
-  it('handles API failure gracefully with empty state', async () => {
-    mockGetPurchaseHistory.mockRejectedValue(new Error('API Error'));
+  // It used to return the empty list alone, so the page said "No purchases
+  // yet" to a buyer whose read had failed (WEB-05).
+  it('a failed read is reported as failed, not as no purchases, and logged', async () => {
+    mockGetPurchaseHistory.mockRejectedValue(new ApiError(503, 'API Error'));
 
     const { load } = await import('../+page.server');
 
@@ -205,6 +225,7 @@ describe('Payment Page Load', () => {
       url: mockUrl,
       platform: mockPlatform,
       cookies: mockCookies,
+      depends: vi.fn(),
     } as unknown as Parameters<typeof load>[0]);
 
     expect(result).toEqual({
@@ -218,7 +239,31 @@ describe('Payment Page Load', () => {
         },
       },
       filters: { status: null },
+      loadFailed: true,
     });
+    expect(warnMock).toHaveBeenCalledWith(
+      'account-payment: purchase history failed',
+      { status: 503, error: 'API Error' }
+    );
+  });
+
+  it('Retry re-runs this load: it depends on account:purchases', async () => {
+    mockGetPurchaseHistory.mockResolvedValue({
+      items: [],
+      pagination: { page: 1, limit: 20, total: 0, totalPages: 0 },
+    });
+    const depends = vi.fn();
+
+    const { load } = await import('../+page.server');
+    await load({
+      locals: mockLocals,
+      url: mockUrl,
+      platform: mockPlatform,
+      cookies: mockCookies,
+      depends,
+    } as unknown as Parameters<typeof load>[0]);
+
+    expect(depends).toHaveBeenCalledWith('account:purchases');
   });
 
   it('handles API timeout gracefully', async () => {
@@ -231,13 +276,16 @@ describe('Payment Page Load', () => {
       url: mockUrl,
       platform: mockPlatform,
       cookies: mockCookies,
+      depends: vi.fn(),
     } as unknown as Parameters<typeof load>[0]);
 
     const typedResult = result as {
       purchases: { items: unknown[]; pagination: { total: number } };
+      loadFailed: boolean;
     };
     expect(typedResult.purchases.items).toEqual([]);
     expect(typedResult.purchases.pagination.total).toBe(0);
+    expect(typedResult.loadFailed).toBe(true);
   });
 
   it('handles invalid page param by defaulting to 1', async () => {
@@ -255,6 +303,7 @@ describe('Payment Page Load', () => {
       url: mockUrl,
       platform: mockPlatform,
       cookies: mockCookies,
+      depends: vi.fn(),
     } as unknown as Parameters<typeof load>[0]);
 
     // parseInt('invalid', 10) returns NaN, which is falsy, so page defaults to 1
@@ -275,6 +324,7 @@ describe('Payment Page Load', () => {
       url: mockUrl,
       platform: mockPlatform,
       cookies: mockCookies,
+      depends: vi.fn(),
     } as unknown as Parameters<typeof load>[0]);
 
     const typedResult = result as {

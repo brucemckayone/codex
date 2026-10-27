@@ -7,13 +7,19 @@
  */
 import type { KVNamespace } from '@cloudflare/workers-types';
 import { CacheType, logCacheStats, VersionedCache } from '@codex/cache';
+import {
+  boundSearchParam,
+  clampPageParam,
+  topicSlugSchema,
+} from '@codex/validation';
 import type { CourseCardSummary } from '$lib/journeys/types';
 import { logger } from '$lib/observability';
 import { getPublicCategories } from '$lib/remote/categories.remote';
 import { getPublicContent } from '$lib/remote/content.remote';
 import { getPublicCreators } from '$lib/remote/org.remote';
-import { createServerApi } from '$lib/server/api';
+import { type BrowseContentItem, createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
+import { logReadFailure } from '$lib/server/read-failure';
 import type { PageServerLoad } from './$types';
 
 const VALID_TYPES = ['video', 'audio', 'written'] as const;
@@ -73,19 +79,27 @@ export const load: PageServerLoad = async ({
 }) => {
   const { org } = await parent();
 
-  // Extract and validate URL search params
-  const q = url.searchParams.get('q') ?? undefined;
+  // Extract and validate URL search params. `q` and `category` are bounded to
+  // what BOTH branches' schemas accept, once, before either uses them
+  // (Codex-osuqt): the signed-in sorts send them straight to the browse API,
+  // whose 400 this load let through as a 500 with an error-level "contract
+  // bug" log that any visitor could raise by editing a URL.
+  const searchText = boundSearchParam(url.searchParams.get('q'));
+  const q = searchText === '' ? undefined : searchText;
   const typeParam = url.searchParams.get('type');
   const sortParam = url.searchParams.get('sort');
   const pageParam = url.searchParams.get('page');
-  // `?category=` carries a category SLUG, never a display name. Both filter
-  // paths match `categories.slug` (content-service's membership subquery), and
-  // `publicContentQueryParamsSchema.category` only accepts the slug charset
-  // `^[\p{L}\p{N}-]+$` — a display name with a space or `&` ("Ancestral
-  // Medicine", "Sound & Vibration") makes the whole page 400. The category
-  // strip renders `categoryOptions` below, which carries name+slug pairs, so
-  // the label the user reads and the value the URL carries stay separate.
-  const category = url.searchParams.get('category') ?? undefined;
+  // `?category=` carries a category SLUG, never a display name. A value that is
+  // not a topic slug (topicSlugSchema: the slug charset, at most 120) names no
+  // topic, so it is dropped rather than sent: a display name with a space or
+  // `&` ("Sound & Vibration") used to 400 the page, and past browse's old cap
+  // a long one was a 500. The category strip renders `categoryOptions` below,
+  // which carries name+slug pairs, so the label the user reads and the value
+  // the URL carries stay separate.
+  const categoryParam = url.searchParams.get('category') ?? undefined;
+  const category = topicSlugSchema.safeParse(categoryParam).success
+    ? categoryParam
+    : undefined;
   const creatorUsername = url.searchParams.get('creator') ?? undefined;
   const featuredParam = url.searchParams.get('featured');
   const featured = featuredParam === 'true' ? true : undefined;
@@ -130,9 +144,15 @@ export const load: PageServerLoad = async ({
           contentCount: match.contentCount,
         };
       }
-    } catch {
+    } catch (err) {
       // Degrade gracefully — unknown creator just means we don't render the banner
       // and don't filter the content (defensive: avoids an empty-grid dead-end).
+      // Logged, so a broken creator filter is not mistaken for "no such creator".
+      logReadFailure(
+        'Explore creator filter not resolved',
+        { orgId: org.id },
+        err
+      );
       creator = null;
     }
   }
@@ -164,7 +184,9 @@ export const load: PageServerLoad = async ({
     sort = 'newest';
   }
 
-  const page = pageParam ? Math.max(1, parseInt(pageParam, 10) || 1) : 1;
+  // Bounded to what the list schemas accept: a hand-edited `?page=1001` was a
+  // content-api 400 that this load let through as a 500.
+  const page = clampPageParam(pageParam);
 
   // ── Category strip options ────────────────────────────────────────
   // The org's TAXONOMY, deliberately NOT scraped from the loaded items. Three
@@ -173,7 +195,7 @@ export const load: PageServerLoad = async ({
   //      filter paths match `categories.slug`. Writing the display name to
   //      `?category=` returned zero results for every single-word category and
   //      a full HTTP 400 error page for every one containing a space or `&`,
-  //      since `publicContentQueryParamsSchema.category` only accepts the slug
+  //      since `publicContentArgsSchema.category` only accepts the slug
   //      charset `^[\p{L}\p{N}-]+$`.
   //   2. `items` is server-filtered BY category, so options derived from it
   //      collapsed to just the active one on selection — moving from Ceremony
@@ -196,11 +218,16 @@ export const load: PageServerLoad = async ({
       .then((rows) =>
         (rows ?? []).map((row) => ({ name: row.name, slug: row.slug }))
       )
-      .catch(() => []);
+      .catch((err) => {
+        logReadFailure('Explore topics not loaded', { orgId: org.id }, err);
+        return [];
+      });
 
   // Fork API call: authenticated endpoint for popularity/sales sort, public otherwise
+  // Both reads send the same catalogue item (a public-list item carries its
+  // topic slugs as well), so the page's cast to its own item type is checked.
   let contentResult: {
-    items?: unknown[];
+    items?: BrowseContentItem[];
     pagination?: { total?: number };
   } | null = null;
   if (AUTH_ONLY_SORTS.has(sort) && locals.user) {
@@ -229,8 +256,21 @@ export const load: PageServerLoad = async ({
         obs: logger,
       });
       // Every param that varies the RESULT must vary the key, or two filter
-      // combinations read each other's cached payload.
-      const dataType = `content:auth:${sort}:${contentType ?? 'all'}:${category ?? 'all'}:${page}`;
+      // combinations read each other's cached payload. `v3` is the item shape:
+      // bump it whenever the browse list CHANGES SHAPE, or slots the old code
+      // wrote keep serving removed fields, or lack a field a reader needs,
+      // until their TTL (v2, Codex-osuqt: no
+      // body, no creator email; v3, Codex-1bdx0: the public list's media item
+      // and org, no longer the whole media_items and organizations rows, and no
+      // purchaseCount, owner 2026-10-26). The browse select (the shared
+      // PUBLIC_*_COLUMNS and CATALOGUE_CONTENT_COLUMNS in @codex/content) and
+      // content-api's item builder both shape this payload.
+      // The category is a `:cat:` suffix only when set, as in public-cache.ts.
+      // An `all` placeholder let `?category=all` (a filter that matches
+      // nothing) share the unfiltered slot, so one signed-in visitor blanked
+      // that sort's grid for every viewer until the TTL.
+      const categoryKey = category ? `:cat:${category}` : '';
+      const dataType = `content:auth:v3:${sort}:${contentType ?? 'all'}:${page}${categoryKey}`;
       contentResult = await cache.get(
         CacheType.COLLECTION_ORG_CONTENT(org.id),
         dataType,
@@ -247,7 +287,9 @@ export const load: PageServerLoad = async ({
           ),
         { ttl: 180 }
       );
-      logCacheStats(cache, logger, { cacheType: dataType });
+      // A constant label, never the key: the key carries a visitor-chosen
+      // topic and page, and one stats series per combination is unbounded.
+      logCacheStats(cache, logger, { cacheType: 'explore:auth-sort' });
     } else {
       contentResult = await fetchAuthContent(
         api,
@@ -290,7 +332,8 @@ export const load: PageServerLoad = async ({
   try {
     const journeysApi = createServerApi(platform, cookies);
     journeys = (await journeysApi.access.listPublishedCourses(org.id)) ?? [];
-  } catch {
+  } catch (err) {
+    logReadFailure('Explore journeys rail not loaded', { orgId: org.id }, err);
     journeys = [];
   }
 

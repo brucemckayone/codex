@@ -1,7 +1,16 @@
 import type { KVNamespace, R2Bucket } from '@cloudflare/workers-types';
 import { R2Service, type R2SigningConfig } from '@codex/cloudflare-clients';
-import { ENV_NAMES, type Env } from '@codex/constants';
-import { createPerRequestDbClient } from '@codex/database';
+import { CONTENT_STATUS, ENV_NAMES, type Env } from '@codex/constants';
+import {
+  CATALOGUE_CONTENT_COLUMNS,
+  PUBLIC_CREATOR_COLUMNS,
+  PUBLIC_MEDIA_ITEM_COLUMNS,
+  PUBLIC_ORGANIZATION_COLUMNS,
+} from '@codex/content';
+import {
+  createPerRequestDbClient,
+  MEDIA_ITEM_RESPONSE_COLUMNS,
+} from '@codex/database';
 import { content } from '@codex/database/schema';
 import {
   createLazyStripeClient,
@@ -20,14 +29,28 @@ import type {
   GetStreamingUrlInput,
   ListUserLibraryInput,
   SavePlaybackProgressInput,
+  WithdrawnContentQuery,
 } from '@codex/validation';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNotNull, isNull, ne } from 'drizzle-orm';
 import { LOG_EVENTS, LOG_SEVERITY } from '../constants';
 import { AccessDeniedError, ContentNotFoundError } from '../errors';
+import type {
+  ContentBodySource,
+  ContentHeld,
+  ContentHeldBy,
+  CourseEntryResponse,
+  WithdrawnContent,
+} from '../types';
 import { AccessRevocation } from './access-revocation';
 import {
+  type AccessGrant,
   assertStreamingAccess,
+  type GrantVia,
+  isOfDeletedOrg,
+  resolveContentGrant,
+  resolveCourseDisputePauses,
   resolveHasContentAccess,
+  type SubscriptionGrantVia,
 } from './content-access/access-decision';
 import {
   hasCourseEntitlement,
@@ -104,6 +127,53 @@ export interface ContentAccessServiceConfig extends ServiceConfig {
    * reason as `contentApiBaseUrl`.
    */
   hlsTokenSecret?: string;
+  /**
+   * The env-owned public CDN base (`R2_PUBLIC_URL_BASE`). The library turns a
+   * video poster's bare R2 key into a URL with it (Codex-kk9nv.6). Optional:
+   * without it, an item with no custom thumbnail has no picture, never a key.
+   */
+  r2PublicUrlBase?: string;
+}
+
+/**
+ * How the arm that granted a withdrawn item holds it, for the note the detail
+ * page shows (Codex-ov2ii). Exhaustive over every arm but the two subscription
+ * ones, so a new arm cannot ship without a note. A subscription grant carries
+ * its period, so {@link heldFrom} reads it from the grant itself: those arms
+ * reach here only through the departed-creator rule, until the next renewal.
+ *
+ * The nulls are the arms the decision never grants an unpublished row
+ * (`GRANT_SURVIVES_UNPUBLICATION`): `free`, a follow, and every staff arm.
+ * Staff preview their own drafts in the studio, so the team keeps the 404 on
+ * a public URL.
+ */
+const HELD_BY: Record<
+  Exclude<GrantVia, SubscriptionGrantVia>,
+  Exclude<ContentHeldBy, 'subscription'> | null
+> = {
+  paid_purchase: 'purchase',
+  subscribers_purchase: 'purchase',
+  paid_entitlement: 'entitlement',
+  subscribers_entitlement: 'entitlement',
+  course: 'course',
+  paid_course: 'course',
+  subscribers_course: 'course',
+  free: null,
+  followers_follower: null,
+  management: null,
+  team_management: null,
+  followers_management: null,
+  subscribers_management: null,
+  paid_management: null,
+};
+
+/** How a grant holds a withdrawn item, or null for an arm with no note. */
+function heldFrom(grant: AccessGrant): ContentHeld | null {
+  if ('periodEnd' in grant) {
+    return { by: 'subscription', until: grant.periodEnd.toISOString() };
+  }
+  const by = HELD_BY[grant.via];
+  return by == null ? null : { by, until: null };
 }
 
 /**
@@ -141,6 +211,7 @@ export class ContentAccessService
   private readonly revocation: AccessRevocation | undefined;
   private readonly contentApiBaseUrl: string | undefined;
   private readonly hlsTokenSecret: string | undefined;
+  private readonly r2PublicUrlBase: string | undefined;
 
   constructor(config: ContentAccessServiceConfig) {
     super(config);
@@ -149,6 +220,7 @@ export class ContentAccessService
     this.revocation = config.revocation;
     this.contentApiBaseUrl = config.contentApiBaseUrl;
     this.hlsTokenSecret = config.hlsTokenSecret;
+    this.r2PublicUrlBase = config.r2PublicUrlBase;
   }
 
   /**
@@ -199,6 +271,37 @@ export class ContentAccessService
   }
 
   /**
+   * The course page's can-enter answer (Codex-2hxff.60): {@link canEnterCourse},
+   * unchanged, and on a refusal the dispute that holds the user's grant back,
+   * by the course shelf's predicate (`resolveCourseDisputePauses`), so the
+   * page shows the dispute notice instead of Buy or Join. A granted call costs
+   * nothing more.
+   *
+   * The hold only picks the copy: if its lookup fails, the failure is logged
+   * at error and the refusal stands with no hold, never a 500.
+   */
+  async getCourseEntry(
+    userId: string,
+    courseId: string
+  ): Promise<CourseEntryResponse> {
+    const canEnter = await this.canEnterCourse(userId, courseId);
+    if (canEnter) return { canEnter, disputeHold: null };
+    try {
+      const pauses = await resolveCourseDisputePauses(this.db, userId, [
+        courseId,
+      ]);
+      return { canEnter, disputeHold: pauses.get(courseId) ?? null };
+    } catch (error) {
+      this.obs.error('Course entry: the dispute lookup failed; no hold shown', {
+        userId,
+        courseId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { canEnter, disputeHold: null };
+    }
+  }
+
+  /**
    * `EntitlementResolver.canEnterCoursesBatch` (frozen contract) — resolve MANY
    * courses in a BOUNDED number of queries (two `SELECT`s, independent of N) so a
    * dashboard/library grid avoids N+1 on Neon HTTP (HARDENING §D/§E/§12). Returns
@@ -234,16 +337,27 @@ export class ContentAccessService
    * Transaction safety: access verification + media resolution share one
    * read-committed, read-only snapshot.
    *
+   * With `options.includeBody`, the result also carries the content's body,
+   * taken from the row the access decision just read, only once that decision
+   * granted. A draft never published is granted to no one (Codex-nacky), so
+   * its text never leaves here. It is how an entitled reader gets a gated
+   * piece's body: the public content API returns a body only for fully public
+   * rows (Codex-039vo). The detail pages ask for it; the player's URL
+   * refreshes do not, so they never carry it.
+   *
    * @param userId - Authenticated user ID
    * @param input - Content ID and optional expiry
+   * @param options.includeBody - Also return the body (after access is granted)
    * @returns Streaming URL and expiration timestamp
-   * @throws {ContentNotFoundError} Content doesn't exist, is draft, or is deleted
+   * @throws {ContentNotFoundError} Content doesn't exist, is deleted, or its
+   *   organisation is deleted
    * @throws {AccessDeniedError} User hasn't purchased content and isn't org member
    * @throws {R2SigningError} Failed to generate signed URL
    */
   async getStreamingUrl(
     userId: string,
-    input: GetStreamingUrlInput
+    input: GetStreamingUrlInput,
+    options: { includeBody?: boolean } = {}
   ): Promise<{
     streamingUrl: string | null;
     waveformUrl: string | null;
@@ -255,6 +369,11 @@ export class ContentAccessService
      * when the media item has no recorded variants, or for written content.
      */
     readyVariants?: string[];
+    /**
+     * The content's body. Present only when `options.includeBody` was set and
+     * access was granted.
+     */
+    body?: ContentBodySource;
   }> {
     // Resolve the TTL once. The Zod schema already applies a default when
     // input flows through `procedure()`, but programmatic callers that
@@ -290,14 +409,20 @@ export class ContentAccessService
             isNull(content.deletedAt)
           ),
           columns: { organizationId: true },
+          with: { organization: { columns: { deletedAt: true } } },
         });
 
         // Personal content (no organizationId) can't be revoked at the org
         // scope — fall through to the transaction below. The content row
-        // may also be missing entirely (not found / deleted); let the
-        // transaction surface `ContentNotFoundError` with consistent
-        // context rather than duplicating the 404 path here.
-        const orgId = contentRow?.organizationId ?? null;
+        // may also be missing entirely (not found / deleted), or belong to a
+        // deleted org (Codex-7ncbh); let the transaction surface
+        // `ContentNotFoundError` with consistent context rather than
+        // duplicating the 404 path here. A revocation answered first would
+        // name its reason, a paused dispute included, for an item that is
+        // gone.
+        const orgId = isOfDeletedOrg(contentRow)
+          ? null
+          : (contentRow?.organizationId ?? null);
         if (orgId) {
           const revocation = await this.revocation.isRevoked(userId, orgId);
           if (revocation) {
@@ -321,7 +446,7 @@ export class ContentAccessService
 
       // Step 1 & 2: Verify access and fetch content/media data within a
       // read-only transaction (consistent snapshot for access verification).
-      const target = await this.db.transaction(
+      const { target, body } = await this.db.transaction(
         async (tx) => {
           // Get content with media details (any organization)
           // No `status` predicate (Codex-p3m5j). `assertStreamingAccess` runs
@@ -333,20 +458,25 @@ export class ContentAccessService
           // Filtering here would 404 the buyer before their purchase was
           // considered, and a 404 is also the WRONG shape: the item exists and
           // they own it. `deletedAt` STAYS — deleted is gone, not withdrawn.
+          // So is an item of a deleted organisation, to every arm (Codex-7ncbh),
+          // decided here, before the access decision, so its refusal is never
+          // named a paused payment dispute.
           const contentRecord = await tx.query.content.findFirst({
             where: and(
               eq(content.id, input.contentId),
               isNull(content.deletedAt)
             ),
             with: {
-              mediaItem: true, // Includes r2_key, content_type, duration
+              mediaItem: { columns: MEDIA_ITEM_RESPONSE_COLUMNS }, // Includes r2_key, content_type, duration
+              organization: { columns: { deletedAt: true } },
             },
           });
 
-          if (!contentRecord) {
+          if (!contentRecord || isOfDeletedOrg(contentRecord)) {
             this.obs.warn('Content not found or not accessible', {
               contentId: input.contentId,
               userId,
+              organizationDeleted: isOfDeletedOrg(contentRecord),
             });
 
             throw new ContentNotFoundError(input.contentId);
@@ -363,12 +493,24 @@ export class ContentAccessService
           );
 
           // Access check passed — resolve the streamable media target
-          // (written article → null-URL, else validated HLS descriptor).
-          return resolveStreamableMedia(
-            this.obs,
-            input.contentId,
-            contentRecord
-          );
+          // (written article → null-URL, else validated HLS descriptor). The
+          // body, when asked for, is this same row's: read under the snapshot
+          // that granted access, after the decision, never before it. A row
+          // never released got this far for no arm (Codex-nacky), so a grant
+          // here is a grant to its text too.
+          return {
+            target: resolveStreamableMedia(
+              this.obs,
+              input.contentId,
+              contentRecord
+            ),
+            body: options.includeBody
+              ? {
+                  contentBody: contentRecord.contentBody,
+                  contentBodyJson: contentRecord.contentBodyJson,
+                }
+              : undefined,
+          };
         },
         {
           isolationLevel: 'read committed', // Consistent snapshot for access verification
@@ -378,7 +520,7 @@ export class ContentAccessService
 
       // Step 3: Build the streaming response (written null-URL, or mint the
       // HLS token + master-playlist proxy URL and presign the waveform).
-      return await buildStreamingResponse(
+      const response = await buildStreamingResponse(
         target,
         {
           r2: this.r2,
@@ -390,8 +532,149 @@ export class ContentAccessService
         input.contentId,
         expirySeconds
       );
+      return body ? { ...response, body } : response;
     } catch (error) {
       this.handleError(error, 'getStreamingUrl');
+    }
+  }
+
+  /**
+   * An item that was published once, is not now, and that this reader still
+   * has access to, by its detail URL's key (Codex-ov2ii).
+   *
+   * An item leaves the storefront when its creator unpublishes it, or when the
+   * creator leaves the organisation (archived, stamped `offSaleAt`). The access
+   * decision keeps granting some readers (a buyer, a course owner, a
+   * subscriber until their next renewal; never staff, who preview in the
+   * studio), but the detail pages found rows only through the published-only
+   * public list, so those readers got "Content not found".
+   *
+   * Narrow on purpose: a published row is the public list's, and a row never
+   * released (`publishedAt` null) is a draft that was never offered. The
+   * decision is the streaming path's (same revocation check, same read-only
+   * snapshot, same `decideContentAccess`), so this is not a second access rule.
+   *
+   * Every miss is the SAME 404, keyed on the slug the caller sent: no row,
+   * deleted, a deleted org, revoked, or denied. A reader without access must
+   * not learn that a withdrawn item exists, and `ContentNotFoundError`'s
+   * context is serialised to the client.
+   *
+   * Revoked is a 404 too, by choice. On a published item a revoked reader
+   * sees why (`AccessRevokedOverlay`, e.g. "payment failed"); here they see
+   * "not found" for as long as the revocation key lives (its KV TTL, minutes).
+   * Telling them why would need the row looked up first, for a reader the
+   * gate has just refused, and a withdrawn item is the rarer page.
+   *
+   * @returns The public row's shape with no body, and how the reader holds it
+   * @throws {ContentNotFoundError} In every case but a grant
+   */
+  async getWithdrawnContent(
+    userId: string,
+    query: WithdrawnContentQuery
+  ): Promise<WithdrawnContent> {
+    const notFound = () => new ContentNotFoundError(query.slug);
+
+    try {
+      if (this.revocation && 'orgId' in query) {
+        const revocation = await this.revocation.isRevoked(userId, query.orgId);
+        if (revocation) {
+          // As getStreamingUrl logs it, so monitoring sees revoked attempts
+          // on this path too.
+          this.obs.warn('getWithdrawnContent blocked — access revoked', {
+            userId,
+            organizationId: query.orgId,
+            reason: revocation.reason,
+            securityEvent: LOG_EVENTS.UNAUTHORIZED_ACCESS,
+            severity: LOG_SEVERITY.MEDIUM,
+            eventType: LOG_EVENTS.ACCESS_CONTROL,
+          });
+          throw notFound();
+        }
+      }
+
+      const conditions = [
+        eq(content.slug, query.slug),
+        ne(content.status, CONTENT_STATUS.PUBLISHED),
+        isNotNull(content.publishedAt),
+        isNull(content.deletedAt),
+      ];
+      if ('orgId' in query) {
+        conditions.push(eq(content.organizationId, query.orgId));
+      } else {
+        conditions.push(
+          eq(content.creatorId, query.creatorId),
+          isNull(content.organizationId)
+        );
+      }
+
+      const { row, grant } = await this.db.transaction(
+        async (tx) => {
+          const found = await tx.query.content.findFirst({
+            where: and(...conditions),
+            // The public list's projection, not whole rows (Codex-ve5eh,
+            // Codex-567de): the route builds the same wire item from it. The
+            // policy check below reads none of the excluded columns.
+            columns: CATALOGUE_CONTENT_COLUMNS,
+            with: {
+              mediaItem: { columns: PUBLIC_MEDIA_ITEM_COLUMNS },
+              creator: { columns: PUBLIC_CREATOR_COLUMNS },
+              // `deletedAt` is read by the check below, never sent: the
+              // route builds the org from its four public fields.
+              organization: {
+                columns: { ...PUBLIC_ORGANIZATION_COLUMNS, deletedAt: true },
+              },
+            },
+          });
+          // A deleted org's pieces are gone with it, as on the public list.
+          if (!found || isOfDeletedOrg(found)) {
+            throw notFound();
+          }
+
+          const decision = await resolveContentGrant(
+            tx,
+            { purchaseService: this.purchaseService, obs: this.obs },
+            userId,
+            found.id,
+            found
+          );
+          if ('reason' in decision) {
+            this.obs.info('Withdrawn content: no access', {
+              userId,
+              contentId: found.id,
+              reason: decision.reason,
+            });
+            throw notFound();
+          }
+          return { row: found, grant: decision.grant };
+        },
+        { isolationLevel: 'read committed', accessMode: 'read only' }
+      );
+
+      const held = heldFrom(grant);
+      // The decision never grants these arms an unpublished row; if it ever
+      // does, say so and fail closed rather than invent a reason for the note.
+      if (held == null) {
+        this.obs.error('Withdrawn content granted by an arm with no note', {
+          userId,
+          contentId: row.id,
+          via: grant.via,
+        });
+        throw notFound();
+      }
+
+      return {
+        // No body: it comes from `/stream?include=body`, as for any gated
+        // piece. No topic slugs: only the org landing reads them.
+        content: {
+          ...row,
+          contentBody: null,
+          contentBodyJson: null,
+          categorySlugs: [],
+        },
+        held,
+      };
+    } catch (error) {
+      this.handleError(error, 'getWithdrawnContent');
     }
   }
 
@@ -495,7 +778,16 @@ export class ContentAccessService
     userId: string,
     input: ListUserLibraryInput
   ): Promise<UserLibraryResponse> {
-    return buildUserLibrary({ db: this.db, obs: this.obs }, userId, input);
+    return buildUserLibrary(
+      {
+        db: this.db,
+        obs: this.obs,
+        r2PublicUrlBase: this.r2PublicUrlBase,
+        purchaseService: this.purchaseService,
+      },
+      userId,
+      input
+    );
   }
 }
 
@@ -637,6 +929,7 @@ export function createContentAccessService(env: ContentAccessEnv): {
     revocation,
     contentApiBaseUrl,
     hlsTokenSecret: env.WORKER_SHARED_SECRET,
+    r2PublicUrlBase: env.R2_PUBLIC_URL_BASE,
   });
 
   // Return service with cleanup function

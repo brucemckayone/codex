@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   type ConnectReadinessStatus,
+  connectQueryState,
   isConnectReady,
   moneyReadiness,
 } from './connect-readiness';
@@ -50,6 +51,58 @@ describe('isConnectReady', () => {
         status: null,
       })
     ).toBe(false);
+  });
+});
+
+describe('connectQueryState', () => {
+  // SvelteKit rejects a remote query with HttpError: { status, body: { message } }.
+  const httpError = { status: 500, body: { message: 'Internal Error' } };
+
+  it('is loading before the query exists or while its first read is in flight', () => {
+    expect(connectQueryState(null).kind).toBe('loading');
+    expect(connectQueryState({ current: undefined, loading: true }).kind).toBe(
+      'loading'
+    );
+  });
+
+  it('is failed, not "no account", when the read rejected', () => {
+    const state = connectQueryState<ConnectReadinessStatus>({
+      current: undefined,
+      loading: false,
+      error: httpError,
+    });
+    expect(state.kind).toBe('failed');
+  });
+
+  it('is failed for a plain Error rejection too (the batched path)', () => {
+    expect(
+      connectQueryState({
+        current: undefined,
+        error: new Error('Failed to execute batch query'),
+      }).kind
+    ).toBe('failed');
+  });
+
+  it('stays failed while a Retry is in flight (error clears only on success)', () => {
+    expect(
+      connectQueryState({ current: undefined, loading: true, error: httpError })
+        .kind
+    ).toBe('failed');
+  });
+
+  it('is ok with the status once it resolves, including a real "no account"', () => {
+    const none = ready({ isConnected: false, status: null });
+    const state = connectQueryState({ current: none, loading: false });
+    expect(state).toEqual({ kind: 'ok', status: none });
+  });
+
+  it('keeps the last good status when a later refresh fails', () => {
+    const state = connectQueryState({
+      current: ready(),
+      loading: false,
+      error: httpError,
+    });
+    expect(state).toEqual({ kind: 'ok', status: ready() });
   });
 });
 

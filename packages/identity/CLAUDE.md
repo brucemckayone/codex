@@ -21,6 +21,9 @@ const service = new IdentityService({
   r2Service,        // R2Service instance
   r2PublicUrlBase,  // Base URL for R2 public assets
   cache?,           // Optional VersionedCache — enables cache-aside pattern
+  orphanedFileService?, // Records R2 files a failed cleanup left, for the media-api sweep
+  cdnPurger?,       // Optional CdnCachePurger — purges a deleted account's avatars from the CDN edge
+  waitUntil?,       // Optional — keeps the purge alive after the response; absent, it is awaited
 });
 ```
 
@@ -30,11 +33,13 @@ Requires `R2Service` and `r2PublicUrlBase` for avatar uploads. `cache` is option
 
 | Method | Signature | Notes |
 |---|---|---|
-| `getProfile` | `(userId: string): Promise<UserProfile>` | Cache-aside: `CacheType.USER_PROFILE`, 10min TTL. Throws `UserNotFoundError` if not found. |
-| `getPublicProfileByUsername` | `(username: string): Promise<PublicCreatorProfile \| null>` | **ANONYMOUS-READABLE.** Two-hop cache-aside: `USERNAME_TO_ID` (1h) -> `USER_PUBLIC_PROFILE` (10min). Returns only `{ id, name, image, bio, socialLinks }` from an explicit column allowlist — never `email`. Returns `null` for an unknown username rather than throwing. |
-| `updateProfile` | `(userId: string, input)` | Updates name/email/username/bio/socialLinks. Email change sets `emailVerified: false`. Validates username uniqueness. Invalidates cache. |
-| `upgradeToCreator` | `(userId: string, input: { username, bio?, socialLinks? })` | Atomically sets `role: 'creator'` + username. Only works if current role is `'customer'`. Validates username availability. Invalidates cache. |
-| `uploadAvatar` | `(userId: string, file: File)` | Processes via `ImageProcessingService` (WebP, 3 sizes). Uploads to R2. Invalidates cache. Returns `ImageProcessingResult`. |
+| `getProfile` | `(userId: string): Promise<UserProfile>` | Cache-aside: `CacheType.USER_PROFILE`, 10min TTL. `image` is the upload if there is one, else the sign-in provider's picture; `hasCustomAvatar` says which, since only an upload can be removed (Codex-kk9nv.10). Throws `UserNotFoundError` if not found. |
+| `getPublicProfileByUsername` | `(username: string): Promise<PublicCreatorProfile \| null>` | **ANONYMOUS-READABLE.** Two-hop cache-aside: `USERNAME_TO_ID` (1h, under `CacheType.USERNAME_LOOKUP(username)`) -> `USER_PUBLIC_PROFILE` (10min). Returns only `{ id, name, image, bio, socialLinks }` from an explicit column allowlist — never `email`. Returns `null` for an unknown username rather than throwing. |
+| `updateProfile` | `(userId: string, input)` | Updates name/email/username/bio/socialLinks. Email change sets `emailVerified: false`. Validates username uniqueness. Invalidates the user's surfaces (see Cache Behaviour). |
+| `upgradeToCreator` | `(userId: string, input: { username, bio?, socialLinks? })` | Atomically sets `role: 'creator'` + username. Only works if current role is `'customer'`. Validates username availability. Invalidates the user's surfaces. |
+| `uploadAvatar` | `(userId: string, file: File)` | Processes via `ImageProcessingService` (WebP, four variants in a new folder). Uploads to R2. Invalidates the user's surfaces, also when the write throws: a write can commit and still report failure (Codex-kk9nv.16). Returns `ImageProcessingResult`. |
+| `deleteAvatar` | `(userId: string)` | Deletes the avatar's R2 files and clears `avatarUrl` via `ImageProcessingService`, then invalidates the user's surfaces, whatever the outcome. When the delete throws, the clear may have committed. When there was no upload to remove, the cause is usually a surface left stale by an earlier removal: Remove is offered only for an upload, and this retry heals the surface. `DELETE /api/user/avatar` calls this, never the image service directly. |
+| `deleteAccount` | `(userId: string): Promise<readonly string[]>` | Self-service soft delete. Refused while the user owns an org (`AccountOwnsOrganizationError`) or has content (`AccountHasContentError`). One transaction. It first locks, in the order every path keeps (lock order in `packages/organization/CLAUDE.md`): the user's row (`NO KEY UPDATE`, so other transactions' foreign-key checks pass), their open proposals, open ownership offers to them, every membership row they hold, and their active agreements. It then scrubs PII. The scrub's email change takes the user's row exclusively, so whatever made them an owner or a member since (a transfer, a new org, an invite) has committed by then. The owner question is asked again (a refusal rolls the scrub back), and the orgs whose creators list shows the user are read, by their memberships alone since the account is now marked deleted. It then ends their agreements and proposals, ends their live NON-owner memberships (`inactive`), and withdraws open ownership offers to them (`recipient_ineligible`; the owner is not emailed yet, Codex-kk9nv.18). A failed read of the listing orgs aborts the deletion. After the commit: invalidates those orgs' public caches, deletes the avatar files, starts the purge of `{cdn host}/avatars/{userId}` from the edge (skipped and logged without `cdnPurger`, at error in production) and hands it to `waitUntil` (awaited after the token read if there is none or the hook throws), then returns every session token so the route can drop the cached sessions. The token read never waits on the purge; the return does only when the purge could not be handed to `waitUntil`. The file delete and the purge never fail the request. A failed token read does: the deletion has committed, and a retry finds no live user (Codex-blom6). |
 | `getMyMembership` | `(orgId: string, userId: string)` | Returns `{ role, status, joinedAt }` or nulls if not a member. Never throws. |
 | `getNotificationPreferences` | `(userId: string)` | Cache-aside: `CacheType.USER_PREFERENCES`, 10min TTL. Upserts defaults on first access. |
 | `updateNotificationPreferences` | `(userId: string, input)` | Upserts `emailMarketing`, `emailTransactional`, `emailDigest`. Invalidates cache. |
@@ -55,7 +60,27 @@ Requires `R2Service` and `r2PublicUrlBase` for avatar uploads. `cache` is option
 
 - `getProfile()` uses `CacheType.USER_PROFILE` (10min TTL)
 - `getNotificationPreferences()` uses `CacheType.USER_PREFERENCES` (10min TTL)
-- All mutation methods call `this.cache.invalidate(userId)` after success
+- Every mutation calls `this.cache.invalidate(userId)` after success;
+  `uploadAvatar` and `deleteAvatar` also call it when their write throws
+- A write to the user's public card (`uploadAvatar`, `deleteAvatar`,
+  `updateProfile`, `upgradeToCreator`) goes through the private
+  `invalidateUserSurfaces`. It invalidates the user id, plus the creators-list
+  id, `CacheType.COLLECTION_ORG_CREATORS(slug)`, of every org whose public
+  creators list shows the user (`ORG_CREATORS`, 4h). That list carries name,
+  username, avatar, bio and social links. It has its own id so these writes
+  leave the org's config and stats, keyed by the bare slug, alone
+  (Codex-kk9nv.9). Which orgs is `listedCreatorConditions` from
+  `@codex/database`, the same conditions the list is read with
+  (Codex-kk9nv.7). It is best-effort: a failed org lookup is logged as a
+  warning, and the lists expire with their TTL. A committed write is never
+  reported as failed.
+- `deleteAccount` is the exception. It reads the listing orgs inside its
+  transaction, after the scrub (so an invite that committed meanwhile is
+  included) and before its memberships end (after that no query can find
+  them). It reads them by the membership conditions alone
+  (`listedMembershipConditions`), since the account is already marked
+  deleted. It also ends the memberships, so it invalidates both the slug and
+  the creators id (`invalidateOrgPublicCaches` from `@codex/cache`).
 - If `cache` is not injected, methods fall back to direct DB queries
 
 ### Why the public profile is keyed by USER ID, not username

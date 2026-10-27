@@ -158,8 +158,8 @@ export const CACHE_HEADERS = {
    * For a body that is not merely per-viewer but per-REQUEST — one that embeds a
    * short-lived credential, so a copy on the browser's own disk outlives the
    * credential in it (the HLS playlists content-api serves are the reference
-   * case). Zero callers in apps/web; it completes the vocabulary so the next
-   * such response does not get a hand-written string.
+   * case), or a gated body a reader may lose access to: the content detail
+   * pages send it with one (`detailPageCacheHeaders`, Codex-hyz1c).
    */
   FRESH: { 'Cache-Control': CACHE_PRESETS.fresh },
 } as const;

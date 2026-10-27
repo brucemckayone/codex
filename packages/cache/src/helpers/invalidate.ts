@@ -10,11 +10,14 @@
  * `@codex/database` lives in `@codex/worker-utils` (which already depends on
  * the database package) so the cache package stays thin/standalone.
  *
- * Helper here:
+ * Helpers here:
  *
  *   `invalidateUserLibrary` — fire-and-forget bump of the per-user
  *   `COLLECTION_USER_LIBRARY(userId)` version key. Used by membership and
  *   follower mutations (organization-api) and purchase webhooks (ecom-api).
+ *
+ *   `invalidateOrgPublicCaches` — bump everything an org's public pages read
+ *   under its slug: its config and stats, and its creators list.
  *
  * The DB-touching `invalidateOrgSlugCache` lives in `@codex/worker-utils`.
  */
@@ -39,6 +42,23 @@ export type WaitUntilFn = (promise: Promise<unknown>) => void;
 // `@codex/observability` — no helper-level re-export needed here. The type
 // is still imported above so the `logger?: InvalidationLogger` parameter
 // keeps its symbolic name in IDE tooling.
+
+/**
+ * Invalidate every cache an org's public pages read for `slug`: its config
+ * and stats, versioned by the slug itself, and its creators list, versioned
+ * by `CacheType.COLLECTION_ORG_CREATORS(slug)` (Codex-kk9nv.9). A change to
+ * the org or to who is in it calls this; a member's own profile write changes
+ * only their card, so it invalidates only the creators list.
+ */
+export async function invalidateOrgPublicCaches(
+  cache: VersionedCache,
+  slug: string
+): Promise<void> {
+  await Promise.all([
+    cache.invalidate(slug),
+    cache.invalidate(CacheType.COLLECTION_ORG_CREATORS(slug)),
+  ]);
+}
 
 /**
  * Arguments for {@link invalidateUserLibrary}.

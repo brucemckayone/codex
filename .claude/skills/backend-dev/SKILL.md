@@ -161,7 +161,7 @@ What are you doing?
 │        • `workers/media-api/src/middleware/verify-runpod-signature.ts` — reference impl (mirror of Stripe verifier)
 │        • §6 Webhooks checklist applies identically (raw body, .catch on waitUntil, transient/permanent)
 │        • Payload → Zod via `runpodWebhookSchema` (in `@codex/validation`)
-│        • Pair with a cron recovery path (e.g. `recoverStuckTranscoding`) — the webhook may never fire
+│        • Pair with a cron recovery path (e.g. `TranscodingMaintenance`'s reconcile step) — the webhook may never fire
 │
 ├─ Worker-to-worker internal call
 │    → 04 (HMAC signing, workerFetch)

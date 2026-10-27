@@ -16,8 +16,8 @@
  *   `pending` with no reason while its transfer is in flight. If the transfer
  *   succeeds but the row cannot be marked paid, it stays that way; before a
  *   drain re-sends any row it looks the transfer up in Stripe by the
- *   `payout_id` metadata (`findTransfersForPayouts`), so it settles the row
- *   instead of paying twice.
+ *   `payout_id` metadata (`findTransfersForPayouts`), on every Connect account
+ *   the payee has had, so it settles the row instead of paying twice.
  * - **A refund freezes the row, then asks Stripe.** It cancels a pending or
  *   failed row first, so nothing can settle it afterwards, then looks for a
  *   transfer that went out anyway and reverses it
@@ -29,10 +29,17 @@
  *   paths marked failed has no attempt on record (`last_retry_at` NULL) and
  *   its transfer may have landed under metadata no lookup can match, so it
  *   is left for a person to reconcile (release checklist R6).
+ * - **A transfer Stripe keeps refusing waits for support** (Codex-2hxff.48).
+ *   The row records Stripe's code and type. A refusal that cannot succeed on
+ *   a retry, or the `MAX_PAYOUT_FAILURES`th refusal, flags it
+ *   (`needs_review_at`) and the drains stop; an outage never uses an attempt.
+ *   It stays `failed`, so it is still owed (`markPayoutFailed`).
  * - **Nothing is dropped.** A slice whose payee cannot be paid yet is a
  *   pending row in their name; the organisation's slices while it has no
  *   owner are pending `no_owner` rows with no payee, handed to the next owner
- *   (owner decision 2026-10-18).
+ *   (owner decision 2026-10-18). A slice recorded while a dispute holds its
+ *   sale is pending too, and is paid by the drains once the dispute is won or
+ *   closed (`isDrainablePayout`).
  *
  * Errors: a failed INSERT is thrown, not logged and swallowed — the webhook
  * answers by its cause (a database outage → 500, Stripe retries, and the
@@ -49,12 +56,18 @@ import type { DatabaseClient } from '@codex/database';
 import {
   disputes,
   type Payout,
+  payoutReversals,
   payouts,
+  stripeConnectAccountHistory,
   stripeConnectAccounts,
 } from '@codex/database/schema';
-import { InternalServiceError } from '@codex/service-errors';
+import {
+  InternalServiceError,
+  UnsupportedCurrencyError,
+} from '@codex/service-errors';
 import {
   and,
+  desc,
   eq,
   inArray,
   isNotNull,
@@ -70,6 +83,7 @@ import type Stripe from 'stripe';
 /** The subset of `ObservabilityClient` the ledger logs through. */
 interface LedgerLogger {
   error(message: string, metadata?: Record<string, unknown>): void;
+  warn(message: string, metadata?: Record<string, unknown>): void;
 }
 
 export interface LedgerDeps {
@@ -134,12 +148,24 @@ export interface RecordSliceInput {
   idempotencyKey: string;
   /** Extra transfer metadata (source ids for support). */
   metadata: Record<string, string>;
+  /**
+   * The creator agreement this slice was split by, recorded on the row
+   * (Codex-2hxff.19: "the purchase or invoice records which agreement it
+   * used"). Creator slices only; absent for every other slice.
+   */
+  creatorOrgAgreementId?: string | null;
 }
 
 export type RecordSliceOutcome =
   /** A replay: the slice is already in the ledger. Nothing was sent. */
   | { kind: 'exists' }
   | { kind: 'pending'; payoutId: string; reason: PendingReason }
+  /**
+   * Payable, but its sale is held by a dispute or inquiry (`isDrainablePayout`):
+   * the row is pending and nothing was sent. The drains pay it once the
+   * dispute is won or closed (owner decision Q1, Codex-2hxff.59).
+   */
+  | { kind: 'held'; payoutId: string }
   | { kind: 'paid'; payoutId: string; transferId: string }
   /** The transfer failed; the row is `failed` and the drains retry it. */
   | { kind: 'failed'; payoutId: string }
@@ -178,9 +204,62 @@ const DRAINABLE: Array<'pending' | 'failed'> = ['pending', 'failed'];
  * keeps holding it until the loss is applied (`outcome_applied_at`), which
  * cancels it (`cancelled_by_dispute`) or reduces it: released any earlier, a
  * drain could pay a slice the buyer's bank has already taken back.
+ *
+ * A re-pay row (a won dispute paying a reversal back) has no charge id, so it
+ * is held through the slice it re-pays: while THAT slice's charge has a
+ * dispute holding it — a second dispute of the same charge, which Stripe
+ * allows (Codex-2hxff.59). It is also held while the dispute that re-paid it
+ * is `won` but its outcome is not applied yet (`outcome_applied_at`): the
+ * win's follow-up, a refund's share taken off the re-pay row, may have failed
+ * and be waiting for its retry, and a drain must not pay the row in full
+ * first. `repaid_by_payout_id` is unique-indexed, so this costs one index
+ * probe per row.
+ *
+ * A row flagged for support (`needs_review_at`, Codex-2hxff.48) is skipped
+ * until support releases it. It is still `failed`, so a refund still cancels
+ * it and earnings still count it as owed: they key on the status, not this.
  */
 export function isDrainablePayout(): SQL {
-  return sql`((${payouts.status} = 'pending' OR (${payouts.status} = 'failed' AND ${payouts.lastRetryAt} IS NOT NULL)) AND NOT EXISTS (SELECT 1 FROM ${disputes} WHERE (${notInArray(disputes.status, [...DISPUTE_CLOSED_STATUSES])} OR (${disputes.status} = 'lost' AND ${disputes.outcomeAppliedAt} IS NULL)) AND (${disputes.stripeChargeId} = ${payouts.stripeChargeId} OR ${disputes.purchaseId} = ${payouts.purchaseId})))`;
+  // In the second subquery the slice re-paid is aliased, so `payouts` there
+  // still names the outer row.
+  return sql`((${payouts.status} = 'pending' OR (${payouts.status} = 'failed' AND ${payouts.lastRetryAt} IS NOT NULL)) AND ${payouts.needsReviewAt} IS NULL AND NOT EXISTS (SELECT 1 FROM ${disputes} WHERE ${holdsItsSale()} AND (${disputes.stripeChargeId} = ${payouts.stripeChargeId} OR ${disputes.purchaseId} = ${payouts.purchaseId})) AND NOT EXISTS (SELECT 1 FROM ${payoutReversals} JOIN ${payouts} AS repaid_slice ON repaid_slice.id = ${payoutReversals.payoutId} JOIN ${disputes} ON (${disputes.stripeChargeId} = repaid_slice.stripe_charge_id OR ${disputes.stripeDisputeId} = ${payoutReversals.causeId}) WHERE ${payoutReversals.repaidByPayoutId} = ${payouts.id} AND (${holdsItsSale()} OR (${disputes.stripeDisputeId} = ${payoutReversals.causeId} AND ${disputes.status} = 'won' AND ${disputes.outcomeAppliedAt} IS NULL))))`;
+}
+
+/**
+ * A dispute that holds its sale's unpaid slices: open, an inquiry included,
+ * or lost with its loss not yet applied. See `isDrainablePayout`.
+ */
+function holdsItsSale(): SQL {
+  return sql`(${notInArray(disputes.status, [...DISPUTE_CLOSED_STATUSES])} OR (${disputes.status} = 'lost' AND ${disputes.outcomeAppliedAt} IS NULL))`;
+}
+
+/**
+ * Whether a dispute holds this sale now, by the drains' own rule: a slice
+ * recorded while it does is left pending, not sent (owner decision Q1, "the
+ * sale's pending slices held"; Codex-2hxff.59). Sent, an inquiry's slice
+ * would be paid at once, and a chargeback's sent at gross only to be
+ * reversed. Asked only when one of `inputs` could be sent at once; they are
+ * one sale's slices.
+ */
+async function saleIsHeld(
+  db: DatabaseClient | Tx,
+  inputs: readonly RecordSliceInput[]
+): Promise<boolean> {
+  const sendable = inputs.find(
+    (input) => input.amountCents > 0 && pendingReasonFor(input) === null
+  );
+  if (!sendable) return false;
+  const { stripeChargeId, source } = sendable;
+  const sameSale =
+    'purchaseId' in source
+      ? sql`(${disputes.stripeChargeId} = ${stripeChargeId} OR ${disputes.purchaseId} = ${source.purchaseId})`
+      : eq(disputes.stripeChargeId, stripeChargeId);
+  const [holding] = await db
+    .select({ id: disputes.id })
+    .from(disputes)
+    .where(and(holdsItsSale(), sameSale))
+    .limit(1);
+  return holding !== undefined;
 }
 
 /**
@@ -217,6 +296,8 @@ function pendingReasonFor(input: RecordSliceInput): PendingReason | null {
   return null;
 }
 
+type Tx = Parameters<Parameters<DatabaseClient['transaction']>[0]>[0];
+
 /**
  * Record one slice of a sale in the ledger and, when its payee can be paid,
  * transfer it. Returns `null` for a zero amount (nothing to record).
@@ -225,6 +306,196 @@ export async function recordSlice(
   deps: LedgerDeps,
   input: RecordSliceInput
 ): Promise<RecordSliceOutcome | null> {
+  const held = await saleIsHeld(deps.db, [input]);
+  const reserved = await reserveSlice(deps.db, input, held);
+  if (reserved === null) return null;
+  if (reserved === 'exists') {
+    await reportReplayMismatch(deps, input);
+    return { kind: 'exists' };
+  }
+  return sendReservedSlice(deps, reserved, input, held);
+}
+
+/**
+ * Record a sale's whole split ONCE: every slice but the platform fee
+ * (Codex-2hxff.62; owner decision 2026-10-21, "Keep its first split").
+ *
+ * The slices are reserved together, in one transaction that holds a lock on
+ * the charge. If the charge already has any slice, an earlier delivery
+ * decided its split: a slice it recorded stands, and nothing is added on top
+ * of it. That covers a redelivery after an agreement is accepted and
+ * backdated to its proposal, which would otherwise find a creator in force
+ * who was not paid the first time, and pay them on top of the owner. A row
+ * that was reserved but never sent (the delivery died) is left to the drains,
+ * as for `recordSlice`. A replay that computed a different split is logged,
+ * slice by slice (`reportReplayMismatch`).
+ *
+ * A slice the split defines that is MISSING entirely is recorded from what
+ * the charge has left (`completingSlices`): `completed`. Only a delivery that
+ * died between slices, under the per-slice writers before this, leaves one.
+ * With nothing left, the charge is `already_split`.
+ *
+ * Returns each slice's outcome in `inputs` order (`null` for a slice not
+ * recorded now), and the slice as recorded (`slices`: a completed one's
+ * amount is what the charge had left, not the one computed).
+ */
+export async function recordSplitOnce(
+  deps: LedgerDeps,
+  charge: { id: string; grossCents: number },
+  inputs: readonly RecordSliceInput[]
+): Promise<
+  | { kind: 'already_split' }
+  | {
+      kind: 'recorded' | 'completed';
+      outcomes: Array<RecordSliceOutcome | null>;
+      slices: Array<RecordSliceInput | null>;
+    }
+> {
+  const split = await deps.db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`payout_split:${charge.id}`}))`
+    );
+    const onCharge = await tx
+      .select({
+        payoutType: payouts.payoutType,
+        userId: payouts.userId,
+        amountCents: payouts.amountCents,
+      })
+      .from(payouts)
+      .where(eq(payouts.stripeChargeId, charge.id));
+    const decided = onCharge.some((row) =>
+      SPLIT_SLICE_TYPES.some((type) => type === row.payoutType)
+    );
+    const toRecord = decided
+      ? completingSlices(inputs, onCharge, charge.grossCents)
+      : [...inputs];
+    if (decided && toRecord.every((input) => input === null)) return null;
+    const held = await saleIsHeld(
+      tx,
+      toRecord.filter((input): input is RecordSliceInput => input !== null)
+    );
+    const rows: Array<Payout | 'exists' | null> = [];
+    for (const input of toRecord) {
+      rows.push(input ? await reserveSlice(tx, input, held) : null);
+    }
+    return {
+      kind: decided ? ('completed' as const) : ('recorded' as const),
+      toRecord,
+      rows,
+      held,
+    };
+  });
+  if (split === null) {
+    for (const input of inputs) await reportReplayMismatch(deps, input);
+    return { kind: 'already_split' };
+  }
+  if (split.kind === 'completed') {
+    for (const [index, input] of inputs.entries()) {
+      const added = split.toRecord[index];
+      if (!added) {
+        await reportReplayMismatch(deps, input);
+        continue;
+      }
+      deps.obs.warn(
+        'A replay found a slice its first split never recorded; recorded it from what is left of the charge',
+        {
+          stripeChargeId: charge.id,
+          payoutType: added.payoutType,
+          amountCents: added.amountCents,
+          computedAmountCents: input.amountCents,
+        }
+      );
+    }
+  }
+
+  const outcomes: Array<RecordSliceOutcome | null> = [];
+  for (const [index, row] of split.rows.entries()) {
+    const input = split.toRecord[index];
+    if (row === null || !input) {
+      outcomes.push(null);
+    } else if (row === 'exists') {
+      // Unreachable under the lock: the slice was missing when it was taken.
+      outcomes.push({ kind: 'exists' });
+    } else {
+      outcomes.push(await sendReservedSlice(deps, row, input, split.held));
+    }
+  }
+  return { kind: split.kind, outcomes, slices: split.toRecord };
+}
+
+/** The slices a split decides; the platform fee is recorded on its own. */
+const SPLIT_SLICE_TYPES: readonly SlicePayoutType[] = [
+  'organization_fee',
+  'creator_payout_to_owner',
+  'creator_payout',
+];
+
+/**
+ * What a replay records on a charge already split, in `inputs` order: `null`
+ * for a slice already recorded (it stands, whatever its amount) and for one
+ * there is nothing left for; a missing slice from what the charge has left,
+ * the gross less every row recorded on it, platform fee included (owner
+ * decision 2026-10-23, "Keep recorded fee"; Codex-2hxff.49). So the slices
+ * sum to the gross.
+ *
+ * The rest goes to the organisation's slice (`organization_fee` or
+ * `creator_payout_to_owner`) when it is among the missing: what a creator's
+ * share leaves is the organisation's, as with rounding (Codex-2hxff.12), and
+ * a creator in force only since the first split must not take the owner's
+ * part of it (Codex-2hxff.62). The other missing slices take their computed
+ * amounts first, as far as it goes. With no organisation slice missing, the
+ * last missing slice takes the rest.
+ */
+function completingSlices(
+  inputs: readonly RecordSliceInput[],
+  recorded: ReadonlyArray<{
+    payoutType: string;
+    userId: string | null;
+    amountCents: number;
+  }>,
+  grossCents: number
+): Array<RecordSliceInput | null> {
+  const missing = inputs.map((input) =>
+    recorded.some(
+      (row) =>
+        row.payoutType === input.payoutType &&
+        (input.payoutType !== 'creator_payout' ||
+          row.userId === input.payee?.userId)
+    )
+      ? null
+      : input
+  );
+  let takesRest = -1;
+  for (const [index, input] of missing.entries()) {
+    if (!input) continue;
+    const isOrg = input.payoutType !== 'creator_payout';
+    const restIsOrg =
+      takesRest >= 0 && missing[takesRest]?.payoutType !== 'creator_payout';
+    if (isOrg || !restIsOrg) takesRest = index;
+  }
+  let left =
+    grossCents - recorded.reduce((sum, row) => sum + row.amountCents, 0);
+  const completed = missing.map((input, index) => {
+    if (!input || index === takesRest || left <= 0) return null;
+    const amountCents = Math.min(input.amountCents, left);
+    left -= amountCents;
+    return amountCents > 0 ? { ...input, amountCents } : null;
+  });
+  const rest = missing[takesRest];
+  if (rest && left > 0) completed[takesRest] = { ...rest, amountCents: left };
+  return completed;
+}
+
+/**
+ * Reserve one slice's row, pending, before any money moves. `null` for a
+ * zero amount; `exists` when the charge already holds this slice (a replay).
+ * `held`: a dispute holds the sale (`saleIsHeld`), so it will not be sent.
+ */
+async function reserveSlice(
+  db: DatabaseClient | Tx,
+  input: RecordSliceInput,
+  held: boolean
+): Promise<Payout | 'exists' | null> {
   if (input.amountCents <= 0) return null;
   if (input.payee === null && input.payoutType === 'creator_payout') {
     // A creator slice always has its creator; only the owner can be missing.
@@ -238,7 +509,7 @@ export async function recordSlice(
   }
 
   const reason = pendingReasonFor(input);
-  const [reserved] = await deps.db
+  const [reserved] = await db
     .insert(payouts)
     .values({
       userId: input.payee?.userId ?? null,
@@ -251,18 +522,29 @@ export async function recordSlice(
       reason,
       stripeChargeId: input.stripeChargeId,
       transferGroup: input.transferGroup,
+      creatorOrgAgreementId: input.creatorOrgAgreementId ?? null,
       // About to transfer: this opens the attempt lease, so no drain sends
-      // the row while its first transfer is still in flight.
-      ...(reason === null ? { lastRetryAt: new Date() } : {}),
+      // the row while its first transfer is still in flight. A held row is
+      // not about to transfer, so it records no attempt.
+      ...(reason === null && !held ? { lastRetryAt: new Date() } : {}),
     })
     .onConflictDoNothing(sliceConflictTarget(input.payoutType))
     // Bare `.returning()`: the client union collapses the projected overload.
     .returning();
-  if (!reserved) {
-    await reportReplayMismatch(deps, input);
-    return { kind: 'exists' };
-  }
+  return reserved ?? 'exists';
+}
 
+/**
+ * Transfer a reserved slice when its payee can be paid and no dispute holds
+ * its sale (`held`); otherwise it stays pending in their name for the drains.
+ */
+async function sendReservedSlice(
+  deps: LedgerDeps,
+  reserved: Payout,
+  input: RecordSliceInput,
+  held: boolean
+): Promise<RecordSliceOutcome> {
+  const reason = pendingReasonFor(input);
   if (reason === 'no_owner') {
     deps.obs.error(
       'Organisation has no owner: its slice is held for the next one. Support must assign an owner to release it',
@@ -284,6 +566,18 @@ export async function recordSlice(
       payoutId: reserved.id,
       reason: reason ?? 'connect_not_ready',
     };
+  }
+  if (held) {
+    deps.obs.warn(
+      'A slice was recorded while a dispute holds its sale; it waits until the dispute is won or closed',
+      {
+        payoutId: reserved.id,
+        payoutType: input.payoutType,
+        amountCents: input.amountCents,
+        stripeChargeId: input.stripeChargeId,
+      }
+    );
+    return { kind: 'held', payoutId: reserved.id };
   }
 
   let transfer: Stripe.Transfer;
@@ -308,26 +602,34 @@ export async function recordSlice(
       { idempotencyKey: input.idempotencyKey }
     );
   } catch (error) {
-    deps.obs.error(`${input.payoutType} transfer failed; the drains retry it`, {
-      payoutId: reserved.id,
-      organizationId: input.organizationId,
-      amountCents: input.amountCents,
-      idempotencyKey: input.idempotencyKey,
-      destination: account.stripeAccountId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    try {
-      await markPayoutFailed(deps.db, reserved.id);
-    } catch (updateError) {
-      // Left pending with no reason: the sweep picks it up and, finding no
-      // transfer in Stripe, sends it.
-      deps.obs.error('Could not mark the payout failed; it stays pending', {
+    // If the row cannot be marked failed it is left pending with no reason:
+    // the sweep picks it up and, finding no transfer in Stripe, sends it.
+    const landed = await recordTransferFailure(
+      deps,
+      {
         payoutId: reserved.id,
-        error:
-          updateError instanceof Error
-            ? updateError.message
-            : String(updateError),
-      });
+        destination: account.stripeAccountId,
+        amountCents: input.amountCents,
+        idempotencyKey: input.idempotencyKey,
+      },
+      error,
+      {
+        payoutType: input.payoutType,
+        organizationId: input.organizationId,
+      }
+    );
+    if (
+      landed?.outcome === 'surplus_reversed' ||
+      landed?.outcome === 'surplus_unreversed'
+    ) {
+      // A refund cancelled the row while the transfer was in flight, and the
+      // transfer landed after all.
+      return {
+        kind: 'surplus',
+        payoutId: reserved.id,
+        transferId: landed.transferId,
+        reversed: landed.outcome === 'surplus_reversed',
+      };
     }
     return { kind: 'failed', payoutId: reserved.id };
   }
@@ -427,11 +729,82 @@ export type SettleOutcome =
   | 'surplus_unreversed';
 
 /**
+ * Whether Stripe has reversed this transfer in full, under any key. A refund's
+ * own lookup and the late transfer's settle can both find a transfer that
+ * landed for a cancelled row, and both reverse it in full: Stripe refuses
+ * whichever is second, though the money is back (Codex-pqsfg). False when
+ * Stripe cannot be asked, so the caller reports the refusal as before.
+ */
+export async function isTransferFullyReversed(
+  deps: Pick<LedgerDeps, 'stripe' | 'obs'>,
+  transferId: string
+): Promise<boolean> {
+  try {
+    const transfer = await deps.stripe.transfers.retrieve(transferId);
+    return transfer.reversed === true;
+  } catch (error) {
+    deps.obs.warn('Stripe could not say whether a transfer is reversed', {
+      stripeTransferId: transferId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
+}
+
+/**
+ * A cancelled row whose transfer went out anyway and is now back in full: the
+ * row is `reversed`, with its transfer recorded, as the refund's own reversal
+ * leaves it (clawback.ts `reverseTransfer`). Never a row another transfer
+ * paid, nor one that records a transfer already.
+ *
+ * Only the record is behind if this fails, not the money: logged, not thrown.
+ */
+async function recordCancelledRowReversed(
+  deps: LedgerDeps,
+  payoutId: string,
+  transferId: string,
+  now: Date
+): Promise<void> {
+  try {
+    await deps.db
+      .update(payouts)
+      .set({
+        status: 'reversed',
+        stripeTransferId: transferId,
+        resolvedAt: sql`coalesce(${payouts.resolvedAt}, ${now.toISOString()}::timestamptz)`,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(payouts.id, payoutId),
+          inArray(payouts.status, [
+            'cancelled_by_refund',
+            'cancelled_by_dispute',
+          ]),
+          isNull(payouts.stripeTransferId)
+        )
+      );
+  } catch (error) {
+    deps.obs.error(
+      'A transfer for a cancelled payout was reversed, but its row could not record it',
+      {
+        errorId: crypto.randomUUID(),
+        payoutId,
+        stripeTransferId: transferId,
+        error: error instanceof Error ? error.message : String(error),
+      }
+    );
+  }
+}
+
+/**
  * Record a transfer that has just been made against its row. If the row has
  * moved on while the transfer was in flight — a refund cancelled it, or a
  * concurrent attempt paid it — nothing will ever account for this money, so
  * it is taken back with a full reversal. Its key is deterministic, so a
- * retry never reverses twice.
+ * retry never reverses twice. If Stripe refuses because the transfer is
+ * already reversed in full (the refund found it too), that is the same
+ * outcome. A cancelled row then records the transfer, `reversed`.
  *
  * Throws only if the database does: the caller treats that as unsettled.
  */
@@ -474,15 +847,22 @@ export async function settleTransfer(
       { idempotencyKey: `${transferId}_reversal_surplus` }
     );
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (await isTransferFullyReversed(deps, transferId)) {
+      await recordCancelledRowReversed(deps, payoutId, transferId, now);
+      deps.obs.warn(
+        'A transfer landed on a payout that no longer wanted it; it was already reversed in full',
+        { ...context, error: message }
+      );
+      return 'surplus_reversed';
+    }
     deps.obs.error(
       'A transfer landed on a payout that no longer wanted it, and could NOT be reversed. Reverse it by hand',
-      {
-        ...context,
-        error: error instanceof Error ? error.message : String(error),
-      }
+      { ...context, error: message }
     );
     return 'surplus_unreversed';
   }
+  await recordCancelledRowReversed(deps, payoutId, transferId, now);
   deps.obs.error(
     'A transfer landed on a payout that no longer wanted it; reversed it',
     context
@@ -493,6 +873,17 @@ export async function settleTransfer(
 /**
  * Record the platform's slice: retained on the platform balance, so no
  * transfer — the charge id proves the money. One row per charge.
+ *
+ * Returns the platform fee ON RECORD for the charge: this amount when it is
+ * the first, or the amount an earlier delivery recorded (0 if none). Fees can
+ * change between deliveries, and a replay must split the rest of the charge
+ * from the fee recorded, so the slices sum to the gross (owner decision
+ * 2026-10-23, "Keep recorded fee"; Codex-2hxff.49).
+ *
+ * `unlessSplit`: record no fee on a charge already split with no fee row.
+ * The fee is written before the split and a 0 fee writes no row, so that
+ * charge's first fee was 0, and a replay must not add one on top of its
+ * split (`feeStillOpen`).
  */
 export async function recordPlatformFee(
   deps: Pick<LedgerDeps, 'db'>,
@@ -502,27 +893,71 @@ export async function recordPlatformFee(
     source: SliceSource;
     stripeChargeId: string;
     transferGroup: string;
+    unlessSplit?: boolean;
   }
-): Promise<void> {
-  if (input.amountCents <= 0) return;
-  await deps.db
-    .insert(payouts)
-    .values({
-      userId: null,
-      organizationId: input.organizationId,
-      ...sourceColumns(input.source),
-      sourceType: input.source.sourceType,
-      amountCents: input.amountCents,
-      payoutType: 'platform_fee',
-      status: 'paid',
-      stripeChargeId: input.stripeChargeId,
-      transferGroup: input.transferGroup,
-      resolvedAt: new Date(),
-    })
-    .onConflictDoNothing({
-      target: payouts.stripeChargeId,
-      where: sql`${payouts.payoutType} = 'platform_fee'`,
-    });
+): Promise<number> {
+  const amountCents =
+    input.unlessSplit && input.amountCents > 0
+      ? (await feeStillOpen(deps.db, input.stripeChargeId))
+        ? input.amountCents
+        : 0
+      : input.amountCents;
+  if (amountCents > 0) {
+    const [inserted] = await deps.db
+      .insert(payouts)
+      .values({
+        userId: null,
+        organizationId: input.organizationId,
+        ...sourceColumns(input.source),
+        sourceType: input.source.sourceType,
+        amountCents,
+        payoutType: 'platform_fee',
+        status: 'paid',
+        stripeChargeId: input.stripeChargeId,
+        transferGroup: input.transferGroup,
+        resolvedAt: new Date(),
+      })
+      .onConflictDoNothing({
+        target: payouts.stripeChargeId,
+        where: sql`${payouts.payoutType} = 'platform_fee'`,
+      })
+      // Bare `.returning()`: the client union collapses the projected overload.
+      .returning();
+    if (inserted) return inserted.amountCents;
+  }
+  const [recorded] = await deps.db
+    .select({ amountCents: payouts.amountCents })
+    .from(payouts)
+    .where(
+      and(
+        eq(payouts.stripeChargeId, input.stripeChargeId),
+        eq(payouts.payoutType, 'platform_fee')
+      )
+    )
+    .limit(1);
+  return recorded?.amountCents ?? 0;
+}
+
+/**
+ * Whether a charge's platform fee can still be recorded: it is not split yet,
+ * or it has a fee row (which then wins through the insert's conflict). A
+ * charge split with no fee row had a fee of 0 (money review LOW-1 and r2 L2,
+ * Codex-2hxff.49).
+ */
+async function feeStillOpen(
+  db: DatabaseClient,
+  stripeChargeId: string
+): Promise<boolean> {
+  const onCharge = await db
+    .select({ payoutType: payouts.payoutType })
+    .from(payouts)
+    .where(eq(payouts.stripeChargeId, stripeChargeId));
+  return (
+    onCharge.some((row) => row.payoutType === 'platform_fee') ||
+    !onCharge.some((row) =>
+      SPLIT_SLICE_TYPES.some((type) => type === row.payoutType)
+    )
+  );
 }
 
 /**
@@ -550,17 +985,456 @@ export async function settlePayoutPaid(
 }
 
 /**
- * Mark a row's transfer failed. Never overwrites a row already paid — a
- * concurrent drain that settled it wins.
+ * Stripe refusals after which a payout waits for support instead of being
+ * retried: the refund-clawback cap (`MAX_CLAWBACK_ATTEMPTS`), owner decision
+ * D-P2 (Codex-2hxff.48). Only refusals count; see `classifyTransferFailure`.
+ */
+export const MAX_PAYOUT_FAILURES = 5;
+
+/**
+ * Stripe refusals of a transfer that no retry can fix, so the row is flagged
+ * at the first one. Kept deliberately short: a code missing here still flags
+ * the row, after `MAX_PAYOUT_FAILURES` refusals. Each is from Stripe's error
+ * codes reference (docs.stripe.com/error-codes, checked 2026-10-23):
+ *
+ * - `transfers_not_allowed`: "The requested transfer can't be created.
+ *   Contact us if you're receiving this error." Only Stripe can lift it.
+ * - `resource_missing` on the `destination` parameter: "The ID provided isn't
+ *   valid. Either the resource doesn't exist, or an ID for a different
+ *   resource has been provided." The payee's Connect account is gone or
+ *   belongs to the other mode. On any other parameter it is an ordinary
+ *   refusal.
+ *
+ * A destination without the `transfers` capability is NOT listed: Stripe's
+ * reference documents no code for it, and the account can still gain it.
+ */
+const PERMANENT_REFUSALS: ReadonlyArray<{ code: string; param?: string }> = [
+  { code: 'transfers_not_allowed' },
+  { code: 'resource_missing', param: 'destination' },
+];
+
+/**
+ * Refusals that are about the platform's own Stripe account, not the row: its
+ * balance (a person may need to top it up), its keys, or its Connect setup.
+ * They are retried without using an attempt. A drain reports them once per
+ * run (`PlatformFailureTally`); the write path's own attempt, at error.
+ */
+const PLATFORM_REFUSAL_CODES: ReadonlySet<string> = new Set([
+  'balance_insufficient',
+  'api_key_expired',
+  'platform_account_required',
+  'platform_api_key_expired',
+  'secret_key_required',
+]);
+
+/** How a failed transfer is treated (Codex-2hxff.48). */
+export type TransferFailureKind =
+  /** Stripe refused it and no retry can fix that: flagged at once. */
+  | 'permanent'
+  /** Stripe refused it: counts toward `MAX_PAYOUT_FAILURES`. */
+  | 'refusal'
+  /** Stripe could not answer (connection, 5xx, rate limit, lock): retried, no attempt used. */
+  | 'outage'
+  /**
+   * The platform's side: its balance, keys or Connect setup, or a fault
+   * that is not Stripe's at all. Retried, no attempt used, and a person is
+   * told: once per drain run, or at once for the write path's own attempt.
+   */
+  | 'platform';
+
+export interface TransferFailure {
+  kind: TransferFailureKind;
+  /** Stripe's `code` (`balance_insufficient`, …), or `unknown`. */
+  code: string;
+  /** Stripe's error class (`StripeInvalidRequestError`, …), or the error's name. */
+  type: string;
+}
+
+function stringField(error: unknown, field: string): string | undefined {
+  const value = (error as Record<string, unknown> | null)?.[field];
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+/**
+ * Sort a failed `transfers.create` the way the refund clawbacks do: only
+ * Stripe answering "no" uses an attempt, so an outage can never flag a
+ * payout (owner decision, Codex-2hxff.48).
+ */
+export function classifyTransferFailure(error: unknown): TransferFailure {
+  const type = (
+    stringField(error, 'type') ??
+    (error instanceof Error ? error.name : 'unknown')
+  ).slice(0, 64);
+  const code = (stringField(error, 'code') ?? 'unknown').slice(0, 64);
+
+  // Our own GBP guard (assertGbpOnly): the row's currency never changes.
+  if (error instanceof UnsupportedCurrencyError) {
+    return { kind: 'permanent', code, type };
+  }
+  if (!type.startsWith('Stripe')) return { kind: 'platform', code, type };
+
+  const rawStatus = (error as { statusCode?: unknown }).statusCode;
+  const status = typeof rawStatus === 'number' ? rawStatus : undefined;
+  if (
+    type === 'StripeConnectionError' ||
+    type === 'StripeAPIError' ||
+    type === 'StripeRateLimitError' ||
+    code === 'rate_limit' ||
+    code === 'lock_timeout' ||
+    status === undefined ||
+    status === 409 ||
+    status === 429 ||
+    status >= 500
+  ) {
+    return { kind: 'outage', code, type };
+  }
+  if (
+    type === 'StripeAuthenticationError' ||
+    type === 'StripePermissionError' ||
+    PLATFORM_REFUSAL_CODES.has(code)
+  ) {
+    return { kind: 'platform', code, type };
+  }
+  const param = stringField(error, 'param');
+  const permanent = PERMANENT_REFUSALS.some(
+    (refusal) =>
+      refusal.code === code &&
+      (refusal.param === undefined || refusal.param === param)
+  );
+  return { kind: permanent ? 'permanent' : 'refusal', code, type };
+}
+
+/** What `markPayoutFailed` recorded. */
+export interface PayoutFailureRecord {
+  failure: TransferFailure;
+  /** Refusals on record now, this one included if it counted. */
+  failureCount: number;
+  /** THIS call flagged the row for support. */
+  flagged: boolean;
+}
+
+/**
+ * Mark a row's transfer failed and record why (Codex-2hxff.48). Never
+ * overwrites a row already paid — a concurrent drain that settled it wins.
+ *
+ * Records Stripe's code and type. A refusal adds one to `failure_count`; an
+ * outage or a platform fault does not. A permanent refusal, or the refusal
+ * that brings the count to `MAX_PAYOUT_FAILURES`, sets `needs_review_at`, and
+ * the drains skip the row from then on. The status stays `failed`.
+ *
+ * One UPDATE, and it never touches a row already flagged, so the row it
+ * returns flagged was flagged by THIS call: exactly one caller reports it.
+ * Returns `null` when no row was updated (paid, cancelled or flagged since).
  */
 export async function markPayoutFailed(
   db: DatabaseClient,
-  payoutId: string
-): Promise<void> {
-  await db
+  payoutId: string,
+  error: unknown,
+  now: Date = new Date()
+): Promise<PayoutFailureRecord | null> {
+  const failure = classifyTransferFailure(error);
+  const counts = failure.kind === 'refusal';
+  const [row] = await db
     .update(payouts)
-    .set({ status: 'failed', reason: 'transfer_failed' })
-    .where(and(eq(payouts.id, payoutId), inArray(payouts.status, DRAINABLE)));
+    .set({
+      status: 'failed',
+      reason: 'transfer_failed',
+      lastErrorCode: failure.code,
+      lastErrorType: failure.type,
+      ...(counts ? { failureCount: sql`${payouts.failureCount} + 1` } : {}),
+      ...(failure.kind === 'permanent'
+        ? { needsReviewAt: now }
+        : counts
+          ? {
+              // SET reads the row as it was: this is the count before +1.
+              needsReviewAt: sql`CASE WHEN ${payouts.failureCount} + 1 >= ${MAX_PAYOUT_FAILURES} THEN ${now.toISOString()}::timestamptz END`,
+            }
+          : {}),
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(payouts.id, payoutId),
+        inArray(payouts.status, DRAINABLE),
+        isNull(payouts.needsReviewAt)
+      )
+    )
+    // Bare `.returning()`: the client union collapses the projected overload.
+    .returning();
+  if (!row) return null;
+  return {
+    failure,
+    failureCount: row.failureCount,
+    flagged: row.needsReviewAt !== null,
+  };
+}
+
+/** The transfer attempt that failed: its row, where it went, how much, and its key. */
+export interface TransferAttempt {
+  payoutId: string;
+  destination: string;
+  amountCents: number;
+  idempotencyKey: string;
+}
+
+/**
+ * A drain run's platform-side failures (Codex-r094t). A short platform
+ * balance fails every owed row on every drain: logged at error per row, 200
+ * rows made 200 error lines an hour and buried the one a person needs. Given
+ * a tally, `recordTransferFailure` logs the run's ONE error at its first
+ * platform failure and each row at warn, all with the run's errorId, and the
+ * drain ends with a summary at warn (`reportPlatformFailures`).
+ *
+ * The error comes at the first failure, not the end: a run the runtime cuts
+ * short (a CPU limit, an eviction, a deploy) would otherwise leave only warns.
+ */
+export interface PlatformFailureTally {
+  /** The run's errorId: on its one error, each row's warning and the summary. */
+  readonly errorId: string;
+  count: number;
+  totalCents: number;
+  codes: Set<string>;
+  /**
+   * The first row's error message. A `platform` failure also covers a fault
+   * that is not Stripe's (code `unknown`), and only the message says which.
+   */
+  firstError: string | undefined;
+}
+
+export function platformFailureTally(): PlatformFailureTally {
+  return {
+    errorId: crypto.randomUUID(),
+    count: 0,
+    totalCents: 0,
+    codes: new Set(),
+    firstError: undefined,
+  };
+}
+
+/**
+ * The summary of a drain run's platform-side failures, if it had any: at
+ * warn, under the errorId of the error its first failure raised.
+ */
+export function reportPlatformFailures(
+  deps: Pick<LedgerDeps, 'obs'>,
+  tally: PlatformFailureTally,
+  context: Record<string, unknown>
+): void {
+  if (tally.count === 0) return;
+  deps.obs.warn(
+    'Payout transfers failed on the platform side this run; they are retried, and its first failure raised the error',
+    {
+      errorId: tally.errorId,
+      ...context,
+      count: tally.count,
+      totalCents: tally.totalCents,
+      codes: [...tally.codes].sort(),
+      error: tally.firstError,
+    }
+  );
+}
+
+/** A transfer that landed for a row a refund cancelled while it was in flight. */
+export interface LandedAfterCancel {
+  transferId: string;
+  outcome: SettleOutcome;
+}
+
+/**
+ * Stripe may have made the transfer: it never answered (an outage), or the
+ * call failed outside Stripe's own error types. A refusal means it did not,
+ * and so does our own GBP guard, which refuses before Stripe is called.
+ */
+function mayHaveLanded(failure: TransferFailure): boolean {
+  if (failure.code === 'UNSUPPORTED_CURRENCY') return false;
+  return failure.kind === 'outage' || !failure.type.startsWith('Stripe');
+}
+
+/**
+ * Record a failed transfer on its row and log it at the level it deserves:
+ * - flagged for support by this failure: ONE error, with an errorId;
+ * - the platform's side (`balance_insufficient`, keys, setup, or a fault of
+ *   ours), as a person must act: given a drain's `platformFailures`, a
+ *   warning with the run's errorId, added to its tally, and the run's one
+ *   error if it is the run's first; without one (the write path's own
+ *   attempt), an error with an errorId;
+ * - anything else (an outage, a refusal below the cap): a warning, as the
+ *   drains retry it.
+ *
+ * If the row was no longer failable — a refund or a lost dispute cancelled it
+ * while the transfer was in flight — and Stripe may have made the transfer
+ * after all, it is looked up by its `payout_id` and reversed, as any transfer
+ * that lands after the cancel is (`settleTransfer`). The refund's own lookup
+ * ran before it landed, so nothing else would ever take that money back.
+ * Returns what became of such a transfer, or `null`.
+ *
+ * Never throws. A row that cannot be updated keeps its state for the drains,
+ * and that is logged at error.
+ */
+export async function recordTransferFailure(
+  deps: LedgerDeps,
+  attempt: TransferAttempt,
+  error: unknown,
+  context: Record<string, unknown>,
+  platformFailures?: PlatformFailureTally
+): Promise<LandedAfterCancel | null> {
+  const { payoutId } = attempt;
+  const message = error instanceof Error ? error.message : String(error);
+  let recorded: PayoutFailureRecord | null;
+  try {
+    recorded = await markPayoutFailed(deps.db, payoutId, error);
+  } catch (updateError) {
+    deps.obs.error(
+      'A payout transfer failed and its row could not be marked failed; the drains retry it',
+      {
+        errorId: crypto.randomUUID(),
+        ...attempt,
+        ...context,
+        error: message,
+        updateError:
+          updateError instanceof Error
+            ? updateError.message
+            : String(updateError),
+      }
+    );
+    return null;
+  }
+
+  const failure = recorded?.failure ?? classifyTransferFailure(error);
+  const fields = {
+    ...attempt,
+    ...context,
+    kind: failure.kind,
+    code: failure.code,
+    type: failure.type,
+    failureCount: recorded?.failureCount,
+    maxFailures: MAX_PAYOUT_FAILURES,
+    error: message,
+  };
+  if (!recorded) {
+    return handleFailureOnMovedRow(deps, attempt, failure, fields);
+  }
+  if (recorded.flagged) {
+    deps.obs.error(
+      failure.kind === 'permanent'
+        ? 'Stripe refused a payout transfer for good; it waits for support'
+        : `Stripe refused a payout transfer ${MAX_PAYOUT_FAILURES} times; it waits for support`,
+      { errorId: crypto.randomUUID(), ...fields }
+    );
+    return null;
+  }
+  if (failure.kind === 'platform' && platformFailures) {
+    platformFailures.count++;
+    platformFailures.totalCents += attempt.amountCents;
+    platformFailures.codes.add(failure.code);
+    if (platformFailures.count === 1) {
+      platformFailures.firstError = message;
+      deps.obs.error(
+        'Payout transfers are failing on the platform side; they are retried, but a person must act',
+        { errorId: platformFailures.errorId, ...fields }
+      );
+    }
+    deps.obs.warn(
+      'A payout transfer failed on the platform side; it is retried, under the one error of its run',
+      { errorId: platformFailures.errorId, ...fields }
+    );
+    return null;
+  }
+  if (failure.kind === 'platform') {
+    deps.obs.error(
+      'A payout transfer failed on the platform side; it is retried, but a person must act',
+      { errorId: crypto.randomUUID(), ...fields }
+    );
+    return null;
+  }
+  deps.obs.warn('A payout transfer failed; the drains retry it', fields);
+  return null;
+}
+
+/**
+ * A transfer failed on a row `markPayoutFailed` could not touch: it was paid,
+ * cancelled or flagged meanwhile. Only a cancelled row can be owed a
+ * reversal, and only if Stripe may have made the transfer.
+ */
+async function handleFailureOnMovedRow(
+  deps: LedgerDeps,
+  attempt: TransferAttempt,
+  failure: TransferFailure,
+  fields: Record<string, unknown>
+): Promise<LandedAfterCancel | null> {
+  let row: Payout | undefined;
+  try {
+    [row] = await deps.db
+      .select()
+      .from(payouts)
+      .where(eq(payouts.id, attempt.payoutId))
+      .limit(1);
+  } catch (readError) {
+    deps.obs.error(
+      'A payout transfer failed and its row could not be read; check Stripe for the idempotency key',
+      {
+        errorId: crypto.randomUUID(),
+        ...fields,
+        readError:
+          readError instanceof Error ? readError.message : String(readError),
+      }
+    );
+    return null;
+  }
+
+  const cancelled =
+    row?.status === 'cancelled_by_refund' ||
+    row?.status === 'cancelled_by_dispute';
+  if (!row || !cancelled) {
+    // Paid by another drain, or already waiting for support: nothing to do.
+    deps.obs.warn(
+      'A payout transfer failed, but its row had already moved on',
+      {
+        ...fields,
+        rowStatus: row?.status ?? null,
+        waitsForSupport: row ? row.needsReviewAt !== null : null,
+      }
+    );
+    return null;
+  }
+  if (!mayHaveLanded(failure)) {
+    deps.obs.warn(
+      'A payout was cancelled while Stripe refused its transfer; nothing was sent',
+      { ...fields, rowStatus: row.status }
+    );
+    return null;
+  }
+
+  let transferId: string | undefined;
+  let lookupError: string | undefined;
+  try {
+    // The attempt's own destination: the one account it could have reached.
+    const found = await findTransfersForPayouts(
+      deps.stripe,
+      { current: attempt.destination, replaced: [] },
+      [row],
+      deps.obs
+    );
+    transferId = found.get(row.id);
+    if (transferId) {
+      // Reversed in full, and logged, by the path every late transfer takes.
+      const outcome = await settleTransfer(deps, row.id, transferId);
+      return { transferId, outcome };
+    }
+  } catch (cause) {
+    lookupError = cause instanceof Error ? cause.message : String(cause);
+  }
+  deps.obs.error(
+    'A payout was cancelled while its transfer was in flight, and Stripe did not answer: the transfer may have landed. Find it by its idempotency key and reverse it by hand',
+    {
+      errorId: crypto.randomUUID(),
+      ...fields,
+      rowStatus: row.status,
+      ...(transferId ? { stripeTransferId: transferId } : {}),
+      ...(lookupError ? { lookupError } : {}),
+    }
+  );
+  return null;
 }
 
 /** How long an attempt holds a row against every other drain. */
@@ -701,15 +1575,11 @@ export async function cancelUnpaidPayout(
   if (!row.userId) return { kind: 'cancelled', transferId: undefined };
 
   try {
-    const [account] = await deps.db
-      .select({ stripeAccountId: stripeConnectAccounts.stripeAccountId })
-      .from(stripeConnectAccounts)
-      .where(eq(stripeConnectAccounts.userId, row.userId))
-      .limit(1);
-    if (!account) return { kind: 'cancelled', transferId: undefined };
+    // Every account the payee has had: the transfer may have gone to one
+    // they have since replaced (Codex-2hxff.47).
     const found = await findTransfersForPayouts(
       deps.stripe,
-      account.stripeAccountId,
+      await payeeAccountIds(deps.db, row.userId),
       [row],
       deps.obs
     );
@@ -731,21 +1601,114 @@ export async function cancelUnpaidPayout(
 }
 
 /**
- * The transfers Stripe has already made to `destination` for any of these
- * rows, by row id. A drain calls this BEFORE re-sending: a row whose transfer
- * went through but whose update failed must be settled, not paid twice —
- * Stripe forgets an idempotency key after ~24h, so the key alone cannot
- * prevent it.
+ * Where a payee's transfers can have gone: their Connect account now, if they
+ * have one, and every account they have had and replaced, newest first.
+ */
+export interface PayeeAccounts {
+  current: string | null;
+  replaced: string[];
+}
+
+/**
+ * A payee's Connect accounts, current and replaced (Codex-2hxff.47; owner
+ * decision 2026-10-23, "Keep account history"). The history is written by a
+ * database trigger whenever a `stripe_connect_accounts` row is deleted or
+ * re-keyed, so a manual support edit is in it too. An account re-attached
+ * after its row was deleted is listed once, as current.
+ */
+export async function payeeAccountIds(
+  db: DatabaseClient,
+  userId: string
+): Promise<PayeeAccounts> {
+  const [[account], history] = await Promise.all([
+    db
+      .select({ stripeAccountId: stripeConnectAccounts.stripeAccountId })
+      .from(stripeConnectAccounts)
+      .where(eq(stripeConnectAccounts.userId, userId))
+      .limit(1),
+    db
+      .select({ stripeAccountId: stripeConnectAccountHistory.stripeAccountId })
+      .from(stripeConnectAccountHistory)
+      .where(eq(stripeConnectAccountHistory.userId, userId))
+      .orderBy(desc(stripeConnectAccountHistory.replacedAt)),
+  ]);
+  const current = account?.stripeAccountId ?? null;
+  return {
+    current,
+    replaced: history
+      .map((row) => row.stripeAccountId)
+      .filter((id) => id !== current),
+  };
+}
+
+/**
+ * The transfers Stripe has already made to the payee for any of these rows,
+ * by row id. A drain calls this BEFORE re-sending: a row whose transfer went
+ * through but whose update failed must be settled, not paid twice — Stripe
+ * forgets an idempotency key after ~24h, so the key alone cannot prevent it.
+ *
+ * The current account is searched for every row. An account the payee has
+ * replaced is searched only for the rows that have an attempt on record
+ * (`lastRetryAt`, as it stood BEFORE any claim the caller made): a row never
+ * attempted has no transfer anywhere. So a payee with no history, or no
+ * attempted row, costs the one Stripe search it always did (Codex-2hxff.47).
  *
  * Matches the `payout_id` metadata every writer sets, and `pending_payout_id`
  * from drains before Codex-2hxff.11. A row that matches more than one
- * transfer was paid twice; that is logged (with `log`) for a person to
- * reverse, and the newest is returned.
- *
- * Only the payee's CURRENT account is searched: a transfer to an account
- * they have since replaced is not found (Codex-2hxff.47).
+ * transfer was paid twice, on one account or on two; that is logged (with
+ * `log`) for a person to reverse. On one account the newest is returned; on
+ * two, the one found first (the current account's).
  */
 export async function findTransfersForPayouts(
+  stripe: Stripe,
+  accounts: PayeeAccounts,
+  rows: ReadonlyArray<{
+    id: string;
+    createdAt: Date;
+    lastRetryAt?: Date | null;
+  }>,
+  log?: LedgerLogger
+): Promise<Map<string, string>> {
+  const found = new Map<string, { transferId: string; destination: string }>();
+  const attempted = rows.filter((row) => row.lastRetryAt != null);
+  const searches = [
+    ...(accounts.current ? [{ destination: accounts.current, rows }] : []),
+    ...(attempted.length > 0
+      ? accounts.replaced.map((destination) => ({
+          destination,
+          rows: attempted,
+        }))
+      : []),
+  ];
+  for (const search of searches) {
+    const on = await findTransfersTo(
+      stripe,
+      search.destination,
+      search.rows,
+      log
+    );
+    for (const [id, transferId] of on) {
+      const first = found.get(id);
+      if (!first) {
+        found.set(id, { transferId, destination: search.destination });
+        continue;
+      }
+      log?.error(
+        "A payout matches Stripe transfers on two of the payee's accounts: it was paid twice",
+        {
+          errorId: crypto.randomUUID(),
+          payoutId: id,
+          destinations: [first.destination, search.destination],
+          stripeTransferIds: [first.transferId, transferId],
+        }
+      );
+    }
+  }
+  return new Map([...found].map(([id, { transferId }]) => [id, transferId]));
+}
+
+/** `findTransfersForPayouts` for one destination. */
+async function findTransfersTo(
   stripe: Stripe,
   destination: string,
   rows: ReadonlyArray<{ id: string; createdAt: Date }>,

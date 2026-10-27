@@ -14,10 +14,15 @@ export {
 export { createBodyParsingMiddleware } from './body-parsing-middleware';
 // Cache-fanout helpers (R14: cache helpers belong in @codex/cache OR
 // @codex/worker-utils — DB-touching ones live here so @codex/cache stays
-// thin/standalone)
+// thin/standalone). The membership fan-out is shared by organization-api and
+// admin-api (Codex-2hxff.44).
 export {
+  dispatchOrgSlugInvalidation,
   type InvalidateOrgSlugCacheArgs,
+  invalidateMemberCaches,
+  invalidateMembershipCache,
   invalidateOrgSlugCache,
+  type MemberCacheCtx,
 } from './cache-fanout';
 // Email sending helper (worker-to-worker)
 export {
@@ -34,6 +39,18 @@ export {
   type HealthCheckResult,
   standardDatabaseCheck,
 } from './health-checks';
+// Live media status (Codex-l2c48.9): reaching media-api's MediaStatusObject.
+export {
+  DurableObjectMediaStatusFeed,
+  deliverMediaStatusEvent,
+  MEDIA_STATUS_CONNECT_HEADERS,
+  MEDIA_STATUS_INTERNAL_ROUTE,
+  MEDIA_STATUS_OBJECT_PATHS,
+  MEDIA_STATUS_SHARD_COUNT,
+  mediaStatusShardOf,
+  statusObjectFor,
+  WorkerMediaStatusPublisher,
+} from './media-status';
 // Middleware factories
 export {
   createAuthMiddleware,
@@ -50,6 +67,7 @@ export {
   createSecurityHeadersMiddleware,
   createSecurityHeadersWrapper,
   ERROR_CODES,
+  isAllowedOrigin,
   type MiddlewareConfig,
   sequence,
 } from './middleware';

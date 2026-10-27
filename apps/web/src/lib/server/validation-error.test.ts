@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validationErrorFor } from './validation-error';
+import { issuePaths, validationErrorFor } from './validation-error';
 
 describe('validationErrorFor', () => {
   it('names the section a page save was refused over, and why', () => {
@@ -35,5 +35,31 @@ describe('validationErrorFor', () => {
 
   it('falls back to the default when there is no issue to describe', () => {
     expect(validationErrorFor([]).message).toBe('Bad Request');
+  });
+});
+
+// What a log may say about refused input (Codex-osuqt): the schema's own
+// field names and array indices, never a key the caller chose.
+describe('issuePaths', () => {
+  it('names fields and indices', () => {
+    expect(
+      issuePaths([
+        { message: 'x', path: ['sections', 2, { key: 'title' }] },
+        { message: 'x', path: [] },
+      ])
+    ).toEqual(['sections.2.title', '']);
+  });
+
+  it('masks a record key the caller chose, such as an email', () => {
+    expect(
+      issuePaths([
+        {
+          message: 'x',
+          path: ['brandOverrides', 'tokenOverrides', 'jane@example.com'],
+        },
+        { message: 'x', path: ['shaderConfig', 'a'.repeat(5000)] },
+        { message: 'x', path: [Symbol('s')] },
+      ])
+    ).toEqual(['brandOverrides.tokenOverrides.*', 'shaderConfig.*', '*']);
   });
 });

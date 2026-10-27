@@ -63,6 +63,7 @@ async function createCourse(
     status?: string;
     priceCents?: number | null;
     deletedAt?: Date | null;
+    publishedAt?: Date | null;
   } = {}
 ): Promise<{ id: string; slug: string }> {
   const [row] = await db
@@ -75,6 +76,7 @@ async function createCourse(
       status: overrides.status ?? 'published',
       priceCents: overrides.priceCents ?? 5000,
       deletedAt: overrides.deletedAt ?? null,
+      publishedAt: overrides.publishedAt ?? null,
     })
     .returning({ id: courses.id, slug: courses.slug });
   if (!row) throw new Error('failed to create course');
@@ -237,6 +239,13 @@ async function addPractice(
     sortOrder: number;
     status?: string;
     deletedAt?: Date | null;
+    /** Set to model a practice released and later taken off sale. */
+    publishedAt?: Date | null;
+    /** A written practice, with its body as the editor stores it. */
+    written?: {
+      contentBody: string | null;
+      contentBodyJson: Record<string, unknown> | null;
+    };
   }
 ): Promise<{ contentId: string; slug: string }> {
   const [row] = await db
@@ -246,6 +255,10 @@ async function addPractice(
         organizationId: opts.organizationId,
         status: opts.status ?? 'published',
         deletedAt: opts.deletedAt ?? null,
+        ...(opts.publishedAt !== undefined
+          ? { publishedAt: opts.publishedAt }
+          : {}),
+        ...(opts.written ? { contentType: 'written', ...opts.written } : {}),
       })
     )
     .returning({ id: content.id, slug: content.slug });
@@ -413,6 +426,8 @@ describe('Round-D read services (Codex-776gg)', () => {
         priceCents: null,
       });
 
+      // One buyer per purchase: a buyer holds at most one completed purchase per
+      // course (Codex-2hxff.14, `uq_purchases_completed_customer_course`).
       // current window [now-30d, now)
       await insertCoursePurchase(db, {
         customerId: u4,
@@ -423,7 +438,7 @@ describe('Round-D read services (Codex-776gg)', () => {
       });
       // previous window [now-60d, now-30d)
       await insertCoursePurchase(db, {
-        customerId: u4,
+        customerId: u5,
         courseId: course.id,
         organizationId: orgAId,
         amountPaidCents: 1000,
@@ -431,7 +446,7 @@ describe('Round-D read services (Codex-776gg)', () => {
       });
       // outside both windows — must never count
       await insertCoursePurchase(db, {
-        customerId: u4,
+        customerId: u6,
         courseId: course.id,
         organizationId: orgAId,
         amountPaidCents: 9999,
@@ -546,7 +561,7 @@ describe('Round-D read services (Codex-776gg)', () => {
       expect(await journey.getCourseBySlug(orgAId, deleted.slug)).toBeNull();
     });
 
-    it('getCourseDashboard: published-only; draft/deleted → null; synthesises a transient enrollment', async () => {
+    it('getCourseDashboard: a never-released draft or a deleted course → null; synthesises a transient enrollment', async () => {
       const journey = new CourseJourneyService({ db, environment: 'test' });
       const course = await createCourse(db, orgAId, creatorId, {
         status: 'published',
@@ -576,6 +591,60 @@ describe('Round-D read services (Codex-776gg)', () => {
       });
       expect(await journey.getCourseDashboard(u1, draft.id)).toBeNull();
       expect(await journey.getCourseDashboard(u1, deleted.id)).toBeNull();
+    });
+
+    // Codex-2hxff.65: Codex-yo4px kept a course on its buyer's shelf after it
+    // was taken off sale, but the player then refused to open it. Every caller
+    // is gated on canEnterCourse, so a RELEASED course (publishedAt set; never
+    // cleared by unpublishing) opens with its released practices, while a
+    // never-released draft course or practice still does not appear.
+    it('a course taken off sale after release still opens for its buyer, with every released practice', async () => {
+      const journey = new CourseJourneyService({ db, environment: 'test' });
+      const released = daysAgo(30);
+      const course = await createCourse(db, orgAId, creatorId, {
+        status: 'draft',
+        publishedAt: released,
+      });
+      const stageId = await createStage(db, course.id, 1);
+      const live = await addPractice(db, {
+        creatorId,
+        organizationId: orgAId,
+        stageId,
+        sortOrder: 1,
+      });
+      const offSale = await addPractice(db, {
+        creatorId,
+        organizationId: orgAId,
+        stageId,
+        sortOrder: 2,
+        status: 'archived',
+        publishedAt: released,
+      });
+      const neverReleased = await addPractice(db, {
+        creatorId,
+        organizationId: orgAId,
+        stageId,
+        sortOrder: 3,
+        status: 'draft',
+        publishedAt: null,
+      });
+
+      const dash = await journey.getCourseDashboard(u1, course.id);
+      expect(dash?.course.id).toBe(course.id);
+      expect(dash?.stages[0]?.practices.map((p) => p.contentId)).toEqual([
+        live.contentId,
+        offSale.contentId,
+      ]);
+
+      const practice = await journey.getInCoursePractice(
+        u1,
+        course.id,
+        offSale.slug
+      );
+      expect(practice?.practice.contentId).toBe(offSale.contentId);
+      expect(
+        await journey.getInCoursePractice(u1, course.id, neverReleased.slug)
+      ).toBeNull();
     });
 
     it('getInCoursePractice: resolves a slug ONLY within the given course (IDOR guard)', async () => {
@@ -624,6 +693,113 @@ describe('Round-D read services (Codex-776gg)', () => {
       expect(
         await journey.getInCoursePractice(u1, c1.id, draftPractice.slug)
       ).toBeNull();
+    });
+
+    // The editor writes TipTap JSON to contentBodyJson and leaves contentBody
+    // null; the player read only contentBody, so it rendered empty.
+    it('getInCoursePractice: a written practice carries its stored body, editor JSON included (Codex-woj7k)', async () => {
+      const journey = new CourseJourneyService({ db, environment: 'test' });
+      const course = await createCourse(db, orgAId, creatorId, {
+        status: 'published',
+      });
+      const stage = await createStage(db, course.id, 1);
+      const doc = {
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [{ type: 'text', text: 'Set your intention.' }],
+          },
+        ],
+      };
+      const editorWritten = await addPractice(db, {
+        creatorId,
+        organizationId: orgAId,
+        stageId: stage,
+        sortOrder: 1,
+        written: { contentBody: null, contentBodyJson: doc },
+      });
+      const markdownWritten = await addPractice(db, {
+        creatorId,
+        organizationId: orgAId,
+        stageId: stage,
+        sortOrder: 2,
+        written: { contentBody: '# Breathe', contentBodyJson: null },
+      });
+      const media = await addPractice(db, {
+        creatorId,
+        organizationId: orgAId,
+        stageId: stage,
+        sortOrder: 3,
+      });
+
+      const fromEditor = await journey.getInCoursePractice(
+        u1,
+        course.id,
+        editorWritten.slug
+      );
+      expect(fromEditor?.body).toEqual({
+        contentBody: null,
+        contentBodyJson: doc,
+      });
+      // The one-release legacy field (Codex-sb3sr): the markdown column only,
+      // as an older web read it. Remove these with the field.
+      expect(fromEditor?.bodyHtml).toBeNull();
+
+      const fromMarkdown = await journey.getInCoursePractice(
+        u1,
+        course.id,
+        markdownWritten.slug
+      );
+      expect(fromMarkdown?.body).toEqual({
+        contentBody: '# Breathe',
+        contentBodyJson: null,
+      });
+      expect(fromMarkdown?.bodyHtml).toBe('# Breathe');
+
+      const fromMedia = await journey.getInCoursePractice(
+        u1,
+        course.id,
+        media.slug
+      );
+      expect(fromMedia?.body).toBeNull();
+    });
+
+    // Owner decision, 2026-10-25: "Nobody" (Codex-7ncbh). A written practice
+    // reaches its reader through this read alone, so a deleted org's course
+    // must stop here, for the dashboard and the player both.
+    it("a deleted organisation's course opens for no one: dashboard and player both null", async () => {
+      const journey = new CourseJourneyService({ db, environment: 'test' });
+      const [doomedOrg] = await db
+        .insert(organizations)
+        .values({ name: 'Doomed Org', slug: createUniqueSlug('doomed') })
+        .returning({ id: organizations.id });
+      if (!doomedOrg) throw new Error('failed to create org');
+      const course = await createCourse(db, doomedOrg.id, creatorId, {
+        status: 'published',
+      });
+      const stage = await createStage(db, course.id, 1);
+      const written = await addPractice(db, {
+        creatorId,
+        organizationId: doomedOrg.id,
+        stageId: stage,
+        sortOrder: 1,
+        written: { contentBody: 'the paid text', contentBodyJson: null },
+      });
+      // The control: it opens while the org is live.
+      expect(
+        await journey.getInCoursePractice(u1, course.id, written.slug)
+      ).not.toBeNull();
+
+      await db
+        .update(organizations)
+        .set({ deletedAt: new Date() })
+        .where(eq(organizations.id, doomedOrg.id));
+
+      expect(
+        await journey.getInCoursePractice(u1, course.id, written.slug)
+      ).toBeNull();
+      expect(await journey.getCourseDashboard(u1, course.id)).toBeNull();
     });
 
     it('listEnrolledCourses: strictly scoped to the caller — user A never sees user B enrollments (IDOR)', async () => {

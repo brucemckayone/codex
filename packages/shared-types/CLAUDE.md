@@ -36,6 +36,7 @@ type Bindings = {
   STRIPE_WEBHOOK_SECRET_PAYMENT?: string;
   RESEND_API_KEY?: string;
   RUNPOD_API_KEY?: string;
+  CF_ZONE_ID?: string;   // + CF_API_TOKEN: CDN cache purge; identity-api purges a deleted account's avatars (Codex-kk9nv.15)
   // ... (see worker-types.ts for full list)
 }
 ```
@@ -100,7 +101,7 @@ type EnrichedAuthContext<TEnv = HonoEnv> = AuthenticatedContext & {
 ### User & Session Types
 
 ```ts
-type UserProfile = { id, email, name, emailVerified, image, username, bio, socialLinks }
+type UserProfile = { id, email, name, emailVerified, image, hasCustomAvatar, username, bio, socialLinks }  // image = upload ?? provider picture; hasCustomAvatar = it is the upload (Codex-kk9nv.10)
 type UserData = { id, email, name: string | null, emailVerified, image, role: string, createdAt, updatedAt }  // standalone — username/bio/socialLinks live ONLY on UserProfile
 type SessionData = { id, userId, token, expiresAt, ipAddress, userAgent, createdAt, updatedAt }
 type ProgressData = { positionSeconds, durationSeconds, completed, updatedAt }

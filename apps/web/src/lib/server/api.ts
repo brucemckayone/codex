@@ -9,6 +9,9 @@
  */
 
 import type {
+  ContentBodySource,
+  ContentHeld,
+  CourseEntryResponse,
   PlaybackProgressResponse,
   StreamingUrlResponse,
   UpdatePlaybackProgressResponse,
@@ -16,30 +19,40 @@ import type {
 } from '@codex/access';
 import type {
   ActivityFeedResponse,
+  ChargeDetail,
+  ChargeSummary,
   ContentPerformanceItem,
+  CreatorDebtItem,
   CreatorRevenueSplitItem,
   CustomerDetails,
   CustomerListItem,
   DashboardStats,
+  FailedRefundItem,
   FollowerStats,
+  RefundPreview,
+  ResolvedCreatorDebt,
+  ResolvedFailedRefund,
   RevenueStats,
   SubscriberStats,
+  SupportQueueCounts,
+  SupportRefundResult,
   TopContentItem,
 } from '@codex/admin';
 import type {
   AgreementProposal,
+  AgreementWithShare,
   CreatorOrganizationAgreement,
 } from '@codex/agreements';
 import { COOKIES, HEADERS, MIME_TYPES } from '@codex/constants';
 import type {
   Category,
   CourseSubscriptionPlan,
-  MediaItem,
+  ServedMediaItem,
 } from '@codex/database/schema';
 import type { AvatarUploadResponse } from '@codex/identity';
 import type { NotificationPreferencesResponse } from '@codex/notifications';
 import type {
-  PurchaseListItem,
+  CheckoutSessionVerifyResult,
   SaleListItem,
   SalesStats,
 } from '@codex/purchase';
@@ -56,16 +69,22 @@ import type {
   OrganizationWithRole,
   PaginatedListResponse,
   PublicBrandingResponse,
+  PublicContentCreator,
+  PublicContentOrganization,
   PublicCreatorProfile,
+  PublicMediaItem,
   SessionData,
   UserData,
+  UserProfile,
 } from '@codex/shared-types';
 import type {
+  CourseSubscriptionCheckoutVerifyResult,
   CreatorEarningsSummary,
   CreatorPayoutBreakdown,
   PayoutSummary,
   PayoutWithCreator,
   SubscriberListItem,
+  SubscriptionCheckoutVerifyResult,
 } from '@codex/subscription';
 import {
   buildServiceUrl as getServiceUrl,
@@ -80,8 +99,14 @@ import type {
   CreatePortalSessionInput,
   CreateSubscriptionCheckoutInput,
   CreateTierInput,
+  MediaStatusTicket,
   ReactivateSubscriptionInput,
   ResumeSubscriptionInput,
+  SupportChargeSearchQuery,
+  SupportIssueRefundInput,
+  SupportQueueQuery,
+  SupportResolveCreatorDebtInput,
+  SupportResolveFailedRefundInput,
   UpdateBrandingInput,
   UpdateCategoryInput,
   UpdateContactInput,
@@ -101,6 +126,8 @@ import type { JourneyInsightsData } from '$lib/components/studio/journey-insight
 // Journey member-surface view shapes (Codex-2pryk Round-D). Structurally
 // identical to @codex/shared-types' cross-worker mirror the content-api routes
 // serialise; imported from the FE $lib bag so callers get the exact FE types.
+// One exception: InCoursePracticeData is the PAGE shape, whose wire form is
+// InCoursePracticeResponse below (Codex-woj7k).
 import type {
   CompletionSource,
   ContentCourseLinks,
@@ -139,6 +166,8 @@ import type {
   ConnectOnboardResponse,
   ContentWithRelations,
   CurrentSubscription,
+  CustomerGrant,
+  DeparturePreview,
   MediaItemWithRelations,
   MyMembershipWithOwnership,
   OrganizationData,
@@ -147,6 +176,7 @@ import type {
   OwnershipAccepted,
   OwnershipOffer,
   OwnershipView,
+  PurchaseListItem,
   SubscriptionCheckoutResponse,
   SubscriptionStats,
   SubscriptionTier,
@@ -158,8 +188,14 @@ import { ApiError } from './errors';
 /**
  * One item from `GET /api/content/public`, typed to match what the endpoint
  * ACTUALLY returns — not the raw DB row. The worker resolves R2 keys to CDN
- * URLs (`resolveR2Urls` adds `thumbnailUrl` + `hlsPreviewUrl` to `mediaItem`)
- * and `listPublic` attaches `categorySlugs`; `content_type` is a `varchar`
+ * URLs and sends `mediaItem` as three fields, never the media_items row: no
+ * raw key, job id or transcoding error reaches a page (Codex-ve5eh). The org
+ * is four fields, never the organizations row (Codex-567de), and the creator
+ * is its id and name. All three are the `@codex/shared-types` contract the
+ * worker's mapper is typed against; reading anything else off them needs a
+ * worker change. The row carries no sales count (`purchaseCount`): the lists
+ * leave it out (owner, 2026-10-26). `listPublic` attaches
+ * `categorySlugs`; `content_type` is a `varchar`
  * column (so `ContentWithRelations` widens it to `string`) but is constrained
  * to its enum, so we narrow it here. The SPEC §6.1 access-policy flags
  * (`isFree` / `isPurchasable` + `priceCents` / `includedInTierId` /
@@ -169,17 +205,52 @@ import { ApiError } from './errors';
  */
 export type PublicContentListItem = Omit<
   ContentWithRelations,
-  'mediaItem' | 'contentType'
+  'mediaItem' | 'organization' | 'creator' | 'contentType' | 'purchaseCount'
 > & {
-  mediaItem:
-    | (MediaItem & {
-        thumbnailUrl: string | null;
-        hlsPreviewUrl: string | null;
-      })
-    | null;
+  mediaItem: PublicMediaItem | null;
+  organization: PublicContentOrganization | null;
+  creator: PublicContentCreator;
   contentType: 'video' | 'audio' | 'written';
   categorySlugs: string[];
 };
+
+/**
+ * `GET /api/access/content/withdrawn` (Codex-ov2ii), typed to what it ACTUALLY
+ * returns, as {@link PublicContentListItem} is: the worker resolves the row's
+ * R2 keys the way the public list does, so the page draws an item withdrawn
+ * from sale exactly as it drew it on the storefront.
+ */
+interface WithdrawnContentItem {
+  content: PublicContentListItem;
+  held: ContentHeld;
+}
+
+/**
+ * `GET /api/journeys/courses/:courseId/practices/:contentSlug`: the player's
+ * {@link InCoursePracticeData} with a written practice's body AS STORED in
+ * place of its HTML. `fetchInCoursePractice` renders it (Codex-woj7k), so the
+ * page only ever sees `bodyHtml`.
+ *
+ * `body` is optional on the wire because a content-api older than this web
+ * (a rollback) sends only `bodyHtml`, the markdown column, which the seam
+ * then renders and logs. Drop both halves with the worker's legacy field
+ * (Codex-sb3sr).
+ */
+export type InCoursePracticeResponse = Omit<
+  InCoursePracticeData,
+  'bodyHtml' | 'bodyUnavailable'
+> & {
+  body?: ContentBodySource | null;
+  /** @deprecated The pre-Codex-woj7k markdown column; read `body`. */
+  bodyHtml?: string | null;
+};
+
+/**
+ * One item from `GET /api/content/browse` (the signed-in /explore sorts, the
+ * studio grant picker): the public list's item without its topic slugs. It
+ * was the whole row, media_items and organizations included (Codex-1bdx0).
+ */
+export type BrowseContentItem = Omit<PublicContentListItem, 'categorySlugs'>;
 
 /**
  * Resolve API URL for a worker
@@ -361,6 +432,9 @@ export function createServerApi(
     options?: RequestInit
   ): Promise<T> {
     const url = `${serverApiUrl(platform, worker)}${path}`;
+    // Logs name the route, never its query: a visitor's search text (and any
+    // other query value) must not reach a perf line or an error message.
+    const logPath = path.split('?')[0];
     const headers: HeadersInit = {
       [HEADERS.CONTENT_TYPE]: MIME_TYPES.APPLICATION.JSON,
       ...options?.headers,
@@ -378,7 +452,7 @@ export function createServerApi(
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-    const timer = logger.startTimer(`api:${worker}${path}`);
+    const timer = logger.startTimer(`api:${worker}${logPath}`);
     let response: Response;
     try {
       response = await fetch(url, {
@@ -392,7 +466,7 @@ export function createServerApi(
         timer.end({ method: options?.method ?? 'GET', status: 408 });
         throw new ApiError(
           408,
-          `Request to ${worker}${path} timed out`,
+          `Request to ${worker}${logPath} timed out`,
           'REQUEST_TIMEOUT'
         );
       }
@@ -484,6 +558,9 @@ export function createServerApi(
       options?: RequestInit
     ): Promise<T> {
       const url = `${serverApiUrl(platform, worker)}${path}`;
+      // Logs name the route, never its query: a visitor's search text (and any
+      // other query value) must not reach a perf line or an error message.
+      const logPath = path.split('?')[0];
       const headers: HeadersInit = {
         [HEADERS.CONTENT_TYPE]: MIME_TYPES.APPLICATION.JSON,
         ...options?.headers,
@@ -499,7 +576,7 @@ export function createServerApi(
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-      const timer = logger.startTimer(`api.fetch:${worker}${path}`);
+      const timer = logger.startTimer(`api.fetch:${worker}${logPath}`);
       let response: Response;
       try {
         response = await fetch(url, {
@@ -513,7 +590,7 @@ export function createServerApi(
           timer.end({ method: options?.method ?? 'GET', status: 408 });
           throw new ApiError(
             408,
-            `Request to ${worker}${path} timed out`,
+            `Request to ${worker}${logPath} timed out`,
             'REQUEST_TIMEOUT'
           );
         }
@@ -581,9 +658,11 @@ export function createServerApi(
      */
     account: {
       /**
-       * Get user profile
+       * Get user profile. `UserProfile`, not the session's `UserData`: this is
+       * what identity-api returns, and `hasCustomAvatar` decides whether the
+       * account forms offer Remove (Codex-kk9nv.10).
        */
-      getProfile: () => request<UserData>('identity', '/api/user/profile'),
+      getProfile: () => request<UserProfile>('identity', '/api/user/profile'),
 
       /**
        * Public creator profile by username — anonymous, no session needed.
@@ -610,10 +689,11 @@ export function createServerApi(
       },
 
       /**
-       * Update user profile
+       * Update user profile. Answers with the updated `UserProfile`, as
+       * `getProfile` does.
        */
       updateProfile: (data: UpdateProfileInput) =>
-        request<UserData>('identity', '/api/user/profile', {
+        request<UserProfile>('identity', '/api/user/profile', {
           method: 'PATCH',
           body: JSON.stringify(data),
         }),
@@ -755,9 +835,9 @@ export function createServerApi(
        * - status: 'draft' | 'published' | 'archived' (optional)
        * - contentType: 'video' | 'audio' | 'written' (optional)
        * - accessType: 'free' | 'paid' | 'followers' | 'subscribers' | 'team' | 'course' (optional list filter — a query KIND label, not the stored flags)
-       * - category: string filter (max 100 chars, optional)
+       * - category: string filter (max 120 chars, no NUL, optional)
        * - organizationId: UUID filter (optional)
-       * - creatorId: UUID filter (optional)
+       * - creatorId: user id filter (BetterAuth text, not a UUID; optional)
        * - search: text search (max 255 chars, optional)
        * - sortBy: 'createdAt' | 'updatedAt' | 'publishedAt' | 'title' | 'viewCount' | 'purchaseCount' (default: 'createdAt')
        * - sortOrder: 'asc' | 'desc' (default: 'desc')
@@ -793,7 +873,7 @@ export function createServerApi(
        * dropping orgId and leaking another org's data.
        */
       browse: (params: URLSearchParams) =>
-        request<PaginatedListResponse<ContentWithRelations>>(
+        request<PaginatedListResponse<BrowseContentItem>>(
           'content',
           `/api/content/browse?${params}`
         ),
@@ -880,10 +960,14 @@ export function createServerApi(
         }),
 
       /**
-       * List public content for an organization (no auth required)
+       * List public content for an organization or a creator (no auth required)
        *
-       * Query parameters (from PublicContentQueryInput):
-       * - orgId: UUID (required) - organization to scope content
+       * Query parameters (from PublicContentQueryInput). One of orgId,
+       * creatorId or slug is required:
+       * - orgId: UUID - organization to scope content
+       * - creatorId: user id (BetterAuth text) - one creator's content across
+       *   their orgs and personal space (their public profile, Codex-osuqt)
+       * - slug: exact content slug (a detail-page lookup)
        * - page: number (default: 1)
        * - limit: number (1-50, default: 20)
        * - contentType: 'video' | 'audio' | 'written' (optional)
@@ -932,7 +1016,7 @@ export function createServerApi(
        * No org scoping — returns content from all organizations.
        */
       getDiscoverContent: (params?: URLSearchParams) =>
-        request<PaginatedListResponse<ContentWithRelations>>(
+        request<PaginatedListResponse<PublicContentListItem>>(
           'content',
           `/api/content/public/discover${params ? `?${params}` : ''}`
         ),
@@ -1049,12 +1133,32 @@ export function createServerApi(
      */
     access: {
       /**
-       * Get streaming URL for content
+       * Get streaming URL for content. `includeBody` also returns the body
+       * once access is granted (a row never released is granted to no one):
+       * the detail pages' body source for a gated piece (Codex-039vo). Never
+       * set it from a remote query, whose result SvelteKit ships to the
+       * browser.
        */
-      getStreamingUrl: (contentId: string) =>
+      getStreamingUrl: (
+        contentId: string,
+        options: { includeBody?: boolean } = {}
+      ) =>
         request<StreamingUrlResponse>(
           'access',
-          `/api/access/content/${contentId}/stream`
+          `/api/access/content/${contentId}/stream${options.includeBody ? '?include=body' : ''}`
+        ),
+
+      /**
+       * An item withdrawn from sale that this reader still has, by its detail
+       * URL's key: an org piece's `orgId` or a personal piece's `creatorId`,
+       * plus its slug (Codex-ov2ii). A 404 for anyone without access.
+       */
+      getWithdrawnContent: (
+        key: ({ orgId: string } | { creatorId: string }) & { slug: string }
+      ) =>
+        request<WithdrawnContentItem>(
+          'access',
+          `/api/access/content/withdrawn?${new URLSearchParams(key)}`
         ),
 
       /**
@@ -1102,14 +1206,16 @@ export function createServerApi(
       // function the Phase-2 FE swaps its mock body for.
 
       /**
-       * Entitlement gate for a course dashboard/journey (SPEC §6.3). Unwraps the
-       * `{ canEnter }` envelope to the bare boolean the seam expects.
+       * Entitlement gate for a course dashboard/journey (SPEC §6.3), whole:
+       * `canEnter`, and on a refusal the `disputeHold` that explains it
+       * (Codex-2hxff.60). The seam's `resolveCanEnterCourse` keeps the bare
+       * boolean for the gates that need only that.
        */
-      canEnterCourse: (courseId: string) =>
-        request<{ canEnter: boolean }>(
+      courseEntry: (courseId: string) =>
+        request<CourseEntryResponse>(
           'access',
           `/api/access/courses/${courseId}/can-enter`
-        ).then((r) => r.canEnter),
+        ),
 
       /**
        * Entitlement check gating a signed stream (SPEC §6.3). Works
@@ -1231,7 +1337,7 @@ export function createServerApi(
 
       /** In-course player payload (practice + playlist + signed stream URL). */
       inCoursePractice: (courseId: string, contentSlug: string) =>
-        request<InCoursePracticeData | null>(
+        request<InCoursePracticeResponse | null>(
           'access',
           `/api/journeys/courses/${courseId}/practices/${encodeURIComponent(
             contentSlug
@@ -1780,7 +1886,10 @@ export function createServerApi(
        * Get organization by slug
        */
       getBySlug: (slug: string) =>
-        request<OrganizationData>('org', `/api/organizations/slug/${slug}`),
+        request<OrganizationData>(
+          'org',
+          `/api/organizations/slug/${encodeURIComponent(slug)}`
+        ),
 
       /**
        * Get organization settings
@@ -1868,7 +1977,7 @@ export function createServerApi(
             | 'failed';
           introVideoUrl: string | null;
           progress: number | null;
-          error: string | null;
+          errorCode: string | null;
         }>(
           'org',
           `/api/organizations/${id}/settings/branding/intro-video/status`
@@ -1903,7 +2012,7 @@ export function createServerApi(
       getPublicBranding: (slug: string) =>
         request<PublicBrandingResponse>(
           'org',
-          `/api/organizations/public/${slug}`
+          `/api/organizations/public/${encodeURIComponent(slug)}`
         ),
 
       /**
@@ -1915,7 +2024,7 @@ export function createServerApi(
       getPublicInfo: (slug: string) =>
         request<OrganizationData>(
           'org',
-          `/api/organizations/public/${slug}/info`
+          `/api/organizations/public/${encodeURIComponent(slug)}/info`
         ),
 
       /**
@@ -1959,7 +2068,7 @@ export function createServerApi(
           }>
         >(
           'org',
-          `/api/organizations/public/${slug}/creators${params ? `?${params}` : ''}`
+          `/api/organizations/public/${encodeURIComponent(slug)}/creators${params ? `?${params}` : ''}`
         ),
 
       /**
@@ -1969,7 +2078,7 @@ export function createServerApi(
       getPublicStats: (slug: string) =>
         request<OrganizationPublicStatsResponse>(
           'org',
-          `/api/organizations/public/${slug}/stats`
+          `/api/organizations/public/${encodeURIComponent(slug)}/stats`
         ),
 
       /**
@@ -2071,6 +2180,19 @@ export function createServerApi(
         request<void>('org', `/api/organizations/${id}/members/${userId}`, {
           method: 'DELETE',
         }),
+
+      /**
+       * What removing a member would unwind, as counts (Codex-2hxff.64).
+       * Owner/admin only, like the removal itself. Not cached by the worker.
+       *
+       * @param id - Organization UUID
+       * @param userId - Member's user ID
+       */
+      getDeparturePreview: (id: string, userId: string) =>
+        request<DeparturePreview>(
+          'org',
+          `/api/organizations/${id}/members/${userId}/departure-preview`
+        ),
 
       /**
        * Follow an organization (idempotent)
@@ -2222,28 +2344,42 @@ export function createServerApi(
        * Verify Stripe checkout session status
        *
        * Called on the checkout success page to confirm payment.
-       * Returns session status, purchase record, and content details.
+       * Returns session status, purchase record, and content details (or
+       * the course, for a course purchase), and `duplicatePayment` for a
+       * second payment that is being refunded.
        *
        * @param sessionId - Stripe checkout session ID (cs_xxx)
        */
       verify: (sessionId: string) =>
-        request<{
-          sessionStatus: 'complete' | 'expired' | 'open';
-          purchase?: {
-            id: string;
-            contentId: string;
-            amountPaidCents: number;
-            purchasedAt: string;
-          };
-          content?: {
-            id: string;
-            title: string;
-            thumbnailUrl?: string;
-            contentType: string;
-          };
-        }>(
+        request<CheckoutSessionVerifyResult>(
           'ecom',
           `/checkout/verify?session_id=${encodeURIComponent(sessionId)}`
+        ),
+
+      /**
+       * Record the purchase a paid Checkout session stands for, on arrival
+       * (`POST /checkout/complete`; Codex-2hxff.22, "Unlock on arrival").
+       * It runs the webhook's own completion, so whichever comes second finds
+       * it done. Answers as `verify` does, read after.
+       *
+       * @param sessionId - Stripe checkout session ID (cs_xxx)
+       */
+      complete: (sessionId: string) =>
+        request<CheckoutSessionVerifyResult>('ecom', '/checkout/complete', {
+          method: 'POST',
+          body: JSON.stringify({ sessionId }),
+        }),
+
+      /**
+       * Verify a course-plan Checkout session
+       * (`GET /checkout/course-subscription/verify`). The journey success
+       * page reads `subscription` once our row exists, and its `duplicateOf`
+       * for a second subscription that is being refunded.
+       */
+      verifyCourseSubscription: (sessionId: string) =>
+        request<CourseSubscriptionCheckoutVerifyResult>(
+          'ecom',
+          `/checkout/course-subscription/verify?session_id=${encodeURIComponent(sessionId)}`
         ),
     },
 
@@ -2451,25 +2587,24 @@ export function createServerApi(
         ),
 
       /**
-       * Get per-creator revenue split rows for org-owner visibility on the
-       * studio analytics page (Codex-mtv05).
+       * Get "Revenue by creator" for Studio > Analytics (Codex-zsh2p, owner
+       * decisions 2026-10-26).
        *
-       * One row per ACTIVE creator-organization agreement, annotated with:
-       *  - `totalRevenueCents` — SUM of purchase `creatorPayoutCents` joined
-       *    via `content.creatorId`. Subscription invoice revenue is NOT
-       *    included in Phase 1 (no per-creator immutable invoice row).
-       *  - `splitPercent` — CURRENT creator share as a display percentage
-       *    (0..100), already converted from basis points by the service.
+       * One row per creator who holds an active agreement in the
+       * organisation, earned a slice in the window, or is still owed money:
+       *  - `earnedCents` — their cut of the window's sales, every kind, sent
+       *    or not, after refunds. The owner pool is not a creator's cut.
+       *  - `subscriptionShare` / `salesShare` — an `AgreementShare`: `none`
+       *    (no agreement, shown "None"), `unreadable` (shown "—") or a
+       *    display percentage.
        *  - `lastPayoutAt` — ISO string or null.
-       *  - `pendingPayoutCents` — SUM of unresolved pending-payout amounts
-       *    scoped by BOTH userId AND organizationId (multi-org safety).
+       *  - `pendingPayoutCents` — owed from this organisation, not yet sent.
        *
-       * Single-creator orgs receive `items: []` and the page hides the
-       * section entirely.
+       * An organisation with no such creator receives `items: []`.
        *
        * Query parameters (from `adminRevenueByCreatorQuerySchema`):
-       * - `startDate` / `endDate` — ISO strings (optional, both-or-neither
-       *   for chronological order; max 365-day range)
+       * - `startDate` / `endDate` — ISO strings (optional, both-or-neither;
+       *   without them, the last 30 days; max 365-day range)
        */
       getRevenueByCreator: (params?: URLSearchParams) =>
         request<PaginatedListResponse<CreatorRevenueSplitItem>>(
@@ -2489,10 +2624,14 @@ export function createServerApi(
        * @returns Created media item
        */
       create: (data: Record<string, unknown>) =>
-        request<MediaItem>('content', '/api/media', {
-          method: 'POST',
-          body: JSON.stringify(data),
-        }),
+        request<ServedMediaItem & { presignedUrl: string | null }>(
+          'content',
+          '/api/media',
+          {
+            method: 'POST',
+            body: JSON.stringify(data),
+          }
+        ),
 
       /**
        * List media items with filters and pagination
@@ -2521,7 +2660,7 @@ export function createServerApi(
        * Update media item metadata
        */
       update: (id: string, data: unknown) =>
-        request<MediaItem>('content', `/api/media/${id}`, {
+        request<ServedMediaItem>('content', `/api/media/${id}`, {
           method: 'PATCH',
           body: JSON.stringify(data),
         }),
@@ -2535,17 +2674,25 @@ export function createServerApi(
         }),
 
       /**
-       * Get transcoding status and progress for a media item
-       * Calls media-api worker (not content-api)
+       * A one-minute ticket for the studio's live status socket, and the URL
+       * to open it on (media-api's own public origin). Single-use: every
+       * connect needs a fresh one.
        */
-      transcodingStatus: (id: string) =>
-        request<{
-          status: string;
-          transcodingProgress: number | null;
-          transcodingStep: string | null;
-          transcodingAttempts: number;
-          transcodingError: string | null;
-        }>('media', `/api/transcoding/status/${id}`),
+      statusTicket: () =>
+        request<MediaStatusTicket>('media', '/api/media-status/ticket', {
+          method: 'POST',
+        }),
+
+      /**
+       * The creator's Try again: claims the item for one more attempt. The
+       * RunPod call runs after the reply; the live channel reports how it went.
+       */
+      retryTranscoding: (id: string) =>
+        request<{ message: string; mediaId: string }>(
+          'media',
+          `/api/transcoding/retry/${id}`,
+          { method: 'POST' }
+        ),
 
       /**
        * Mark upload as complete and trigger transcoding
@@ -2669,7 +2816,8 @@ export function createServerApi(
        * Grant complimentary content access to a customer
        *
        * Used for refunds, promotions, and support.
-       * Creates a contentAccess record (not a purchase), so revenue analytics stay accurate.
+       * Writes a `grant` entitlement (not a purchase), so revenue analytics stay
+       * accurate. Content a grant cannot open is refused with a 422.
        *
        * @param customerId - Customer's user UUID
        * @param contentId - Content UUID to grant access to
@@ -2684,6 +2832,147 @@ export function createServerApi(
           'admin',
           `/api/admin/customers/${customerId}/grant-access/${contentId}${params ? `?${params}` : ''}`,
           { method: 'POST' }
+        ),
+
+      /**
+       * List this organisation's support grants for one customer, newest
+       * first, live and revoked both (Codex-2hxff.21). Backs the "Access
+       * grants" section of the Studio customer drawer.
+       *
+       * @param customerId - Customer's user UUID
+       * @param organizationId - The studio's organisation (resolves the policy)
+       */
+      listCustomerGrants: (
+        customerId: string,
+        organizationId: string,
+        { page, limit }: { page: number; limit: number }
+      ) =>
+        request<PaginatedListResponse<CustomerGrant>>(
+          'admin',
+          withOrg(
+            `/api/admin/customers/${customerId}/grants`,
+            organizationId,
+            new URLSearchParams({ page: String(page), limit: String(limit) })
+          )
+        ),
+
+      /**
+       * Revoke one support grant (Codex-2hxff.21). 204 with no body, so it
+       * resolves to `null`; revoking an already revoked grant is the same 204.
+       * A purchase entitlement or another organisation's grant is a 404.
+       *
+       * @param customerId - Customer's user UUID
+       * @param entitlementId - The grant's id, from `listCustomerGrants`
+       * @param organizationId - The studio's organisation (resolves the policy)
+       */
+      revokeCustomerGrant: (
+        customerId: string,
+        entitlementId: string,
+        organizationId: string
+      ) =>
+        request<null>(
+          'admin',
+          withOrg(
+            `/api/admin/customers/${customerId}/grants/${entitlementId}`,
+            organizationId
+          ),
+          { method: 'DELETE' }
+        ),
+    },
+
+    /**
+     * Support refunds (admin-api, `platform_owner` only; Codex-2hxff.28).
+     * The /admin pages: find a charge, refund it, settle the queue. Nothing
+     * here is cached on either side: every number moves with a refund, a
+     * webhook or a payout run. Amounts are pence; the currency is GBP.
+     */
+    support: {
+      /**
+       * Charges found by an exact key: an email, a purchase or subscription
+       * id, or a Stripe `sub_`, `pi_`, `ch_` or `py_` id. `lookup` travels in
+       * the query string; `request()` logs the path without it.
+       */
+      searchCharges: ({ lookup, page, limit }: SupportChargeSearchQuery) =>
+        request<PaginatedListResponse<ChargeSummary>>(
+          'admin',
+          `/api/admin/support/charges?${new URLSearchParams({
+            lookup,
+            page: String(page),
+            limit: String(limit),
+          })}`
+        ),
+
+      /** The charge, its split and history, its refunds and chargebacks: one answer. */
+      getCharge: (chargeId: string) =>
+        request<ChargeDetail>(
+          'admin',
+          `/api/admin/support/charges/${encodeURIComponent(chargeId)}`
+        ),
+
+      /** What refunding `amountCents` would take from each slice. Writes nothing. */
+      previewRefund: (chargeId: string, amountCents: number) =>
+        request<RefundPreview>(
+          'admin',
+          `/api/admin/support/charges/${encodeURIComponent(chargeId)}/refund-preview?${new URLSearchParams(
+            { amountCents: String(amountCents) }
+          )}`
+        ),
+
+      /**
+       * Refund the charge. A repeat of the same decision answers
+       * `replayed: true` and makes no second refund.
+       */
+      issueRefund: (chargeId: string, body: SupportIssueRefundInput) =>
+        request<SupportRefundResult>(
+          'admin',
+          `/api/admin/support/charges/${encodeURIComponent(chargeId)}/refunds`,
+          { method: 'POST', body: JSON.stringify(body) }
+        ),
+
+      /** The queue's two counts, for the nav badge. */
+      getQueueCounts: () =>
+        request<SupportQueueCounts>('admin', '/api/admin/support/queue/counts'),
+
+      /** Failed refunds waiting for a person, oldest first. */
+      listFailedRefunds: ({ page, limit }: SupportQueueQuery) =>
+        request<PaginatedListResponse<FailedRefundItem>>(
+          'admin',
+          `/api/admin/support/queue/failed-refunds?${new URLSearchParams({
+            page: String(page),
+            limit: String(limit),
+          })}`
+        ),
+
+      /** Creator debts waiting for a person, oldest first. */
+      listCreatorDebts: ({ page, limit }: SupportQueueQuery) =>
+        request<PaginatedListResponse<CreatorDebtItem>>(
+          'admin',
+          `/api/admin/support/queue/creator-debts?${new URLSearchParams({
+            page: String(page),
+            limit: String(limit),
+          })}`
+        ),
+
+      /** Settle a failed refund (`refundId` is our row's uuid, not Stripe's `re_`). */
+      resolveFailedRefund: (
+        refundId: string,
+        body: SupportResolveFailedRefundInput
+      ) =>
+        request<ResolvedFailedRefund>(
+          'admin',
+          `/api/admin/support/refunds/${encodeURIComponent(refundId)}/resolve`,
+          { method: 'POST', body: JSON.stringify(body) }
+        ),
+
+      /** Settle a creator debt. `dispute_won` is never accepted. */
+      resolveCreatorDebt: (
+        reviewId: string,
+        body: SupportResolveCreatorDebtInput
+      ) =>
+        request<ResolvedCreatorDebt>(
+          'admin',
+          `/api/admin/support/creator-debts/${encodeURIComponent(reviewId)}/resolve`,
+          { method: 'POST', body: JSON.stringify(body) }
         ),
     },
 
@@ -2758,20 +3047,10 @@ export function createServerApi(
        * Verify a Stripe subscription-mode Checkout session.
        * Called by the /subscription/success page to poll until the webhook
        * has written the subscription row. Mirrors `checkout.verify` above.
+       * A duplicate's `subscription.duplicateOf` names the one the user keeps.
        */
       verify: (sessionId: string) =>
-        request<{
-          sessionStatus: 'complete' | 'expired' | 'open';
-          subscription?: {
-            id: string;
-            organizationId: string;
-            tierId: string;
-            tierName: string;
-            organizationName: string;
-            organizationSlug: string;
-            startedAt: string;
-          };
-        }>(
+        request<SubscriptionCheckoutVerifyResult>(
           'ecom',
           `/subscriptions/verify?session_id=${encodeURIComponent(sessionId)}`
         ),
@@ -2882,6 +3161,29 @@ export function createServerApi(
         request<SalesStats>(
           'ecom',
           withOrg('/sales/stats', organizationId, params)
+        ),
+
+      /**
+       * The signed-in creator's own sales outside any organisation
+       * (Codex-2hxff.21): `GET /sales/me`. The same `SaleListItem` and the
+       * same filters as `listSales`, but no org context — the worker scopes
+       * to orgless purchases of the caller's content.
+       */
+      listMySales: (params?: URLSearchParams) =>
+        request<PaginatedListResponse<SaleListItem>>(
+          'ecom',
+          `/sales/me${params?.toString() ? `?${params.toString()}` : ''}`
+        ),
+
+      /**
+       * KPI tiles for the solo-creator Sales page (Codex-2hxff.21):
+       * `GET /sales/me/stats`, the `getSalesStats` shape under the
+       * `listMySales` scope.
+       */
+      getMySalesStats: (params?: URLSearchParams) =>
+        request<SalesStats>(
+          'ecom',
+          `/sales/me/stats${params?.toString() ? `?${params.toString()}` : ''}`
         ),
 
       /**
@@ -3024,6 +3326,10 @@ export function createServerApi(
        * Owner-view list of active agreements for an org. Worker re-derives
        * scope from authenticated membership — `organizationId` in the
        * query is used only to resolve the `procedure()` membership gate.
+       *
+       * Each row carries `creatorSharePercent`, its accepted proposal's
+       * share (`null` when that link is missing). Display reads that, never
+       * the legacy `organizationFeePercentage` (Codex-fazy6).
        */
       list: (
         organizationId: string,
@@ -3031,7 +3337,7 @@ export function createServerApi(
       ) => {
         const search = new URLSearchParams();
         if (params?.revenueType) search.set('revenueType', params.revenueType);
-        return request<PaginatedListResponse<CreatorOrganizationAgreement>>(
+        return request<PaginatedListResponse<AgreementWithShare>>(
           'ecom',
           withOrg('/agreements', organizationId, search)
         );
@@ -3080,6 +3386,10 @@ export function createServerApi(
       /**
        * Creator-view: my agreements across every org, with anonymised peer
        * aggregates. Worker scopes on `ctx.user.id`.
+       *
+       * The worker also still sends the legacy `organizationFeePercentage`.
+       * It is left out of this type, and of `getCreatorPortfolio`'s, so
+       * nothing here can rebuild a share from it (Codex-fazy6).
        */
       listForCreator: () =>
         request<
@@ -3091,7 +3401,8 @@ export function createServerApi(
             status: string;
             effectiveFrom: string | Date;
             effectiveUntil: string | Date | null;
-            organizationFeePercentage: number;
+            /** Basis points, from the accepted proposal; `null` = missing. */
+            creatorSharePercent: number | null;
             currentProposalId: string | null;
             terminatedAt: string | Date | null;
             peers: { count: number; aggregateSharePercent: number };
@@ -3115,7 +3426,8 @@ export function createServerApi(
             status: string;
             effectiveFrom: string | Date;
             effectiveUntil: string | Date | null;
-            organizationFeePercentage: number;
+            /** Basis points, from the accepted proposal; `null` = missing. */
+            creatorSharePercent: number | null;
             currentProposalId: string | null;
             terminatedAt: string | Date | null;
             peers: { count: number; aggregateSharePercent: number };

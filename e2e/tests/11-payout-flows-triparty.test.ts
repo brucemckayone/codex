@@ -42,6 +42,7 @@ import {
 } from '@codex/test-utils/e2e';
 import { and, eq } from 'drizzle-orm';
 import { afterAll, describe, expect, test } from 'vitest';
+import { markVideoReady } from '../helpers/media';
 import {
   createCheckoutCompletedEvent,
   generateStripeSignature,
@@ -325,7 +326,6 @@ describe('Tri-party (in-org agreement) payout flows', () => {
         data: {
           title: ctx.name('Test Media'),
           mediaType: 'video',
-          r2Key: `e2e/originals/${testMediaId}/original.mp4`,
           fileSizeBytes: 2097152,
           mimeType: 'video/mp4',
         },
@@ -334,18 +334,10 @@ describe('Tri-party (in-org agreement) payout flows', () => {
     await expectSuccessResponse(mediaResponse, 201);
     const media = unwrapApiResponse(await mediaResponse.json());
 
-    await httpClient.patch(`${WORKER_URLS.content}/api/media/${media.id}`, {
-      headers: {
-        Cookie: creatorCookie,
-        'Content-Type': 'application/json',
-        Origin: WORKER_URLS.content,
-      },
-      data: {
-        status: 'ready',
-        hlsMasterPlaylistKey: `e2e/hls/${testMediaId}/master.m3u8`,
-        thumbnailKey: `e2e/thumbnails/${testMediaId}/thumb.jpg`,
-        durationSeconds: 600,
-      },
+    await markVideoReady(media.id, {
+      hlsMasterPlaylistKey: `e2e/hls/${testMediaId}/master.m3u8`,
+      thumbnailKey: `e2e/thumbnails/${testMediaId}/thumb.jpg`,
+      durationSeconds: 600,
     });
 
     const contentResponse = await httpClient.post(

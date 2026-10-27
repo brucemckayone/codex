@@ -58,6 +58,8 @@ describe('resolveOrCreateCustomer', () => {
   let mockStripe: Stripe;
   let customersList: Mock;
   let customersCreate: Mock;
+  /** The deps' required logger; these tests assert nothing on it. */
+  const obs = { warn: vi.fn(), error: vi.fn() };
 
   beforeAll(() => {
     db = setupTestDatabase();
@@ -88,7 +90,7 @@ describe('resolveOrCreateCustomer', () => {
     });
 
     const result = await resolveOrCreateCustomer(
-      { db, stripe: mockStripe },
+      { db, stripe: mockStripe, obs },
       { userId, email: 'cached@example.com', environment: ENV }
     );
 
@@ -114,7 +116,7 @@ describe('resolveOrCreateCustomer', () => {
     });
 
     const result = await resolveOrCreateCustomer(
-      { db, stripe: mockStripe },
+      { db, stripe: mockStripe, obs },
       { userId, email: user.email, environment: ENV }
     );
 
@@ -159,7 +161,7 @@ describe('resolveOrCreateCustomer', () => {
     });
 
     const result = await resolveOrCreateCustomer(
-      { db, stripe: mockStripe },
+      { db, stripe: mockStripe, obs },
       { userId, email: user.email, environment: ENV }
     );
 
@@ -184,7 +186,7 @@ describe('resolveOrCreateCustomer', () => {
     );
 
     const result = await resolveOrCreateCustomer(
-      { db, stripe: mockStripe },
+      { db, stripe: mockStripe, obs },
       {
         userId,
         email: user.email,
@@ -235,7 +237,7 @@ describe('resolveOrCreateCustomer', () => {
     );
 
     await resolveOrCreateCustomer(
-      { db, stripe: mockStripe },
+      { db, stripe: mockStripe, obs },
       { userId, email: user.email, environment: ENV }
     );
 
@@ -271,7 +273,7 @@ describe('resolveOrCreateCustomer', () => {
     });
 
     const result = await resolveOrCreateCustomer(
-      { db, stripe: mockStripe },
+      { db, stripe: mockStripe, obs },
       { userId, email: user.email, environment: ENV }
     );
 
@@ -304,7 +306,7 @@ describe('resolveOrCreateCustomer', () => {
     );
 
     const result = await resolveOrCreateCustomer(
-      { db, stripe: mockStripe },
+      { db, stripe: mockStripe, obs },
       { userId, email: user.email, environment: ENV }
     );
 
@@ -328,7 +330,7 @@ describe('resolveOrCreateCustomer', () => {
     });
 
     const result = await resolveOrCreateCustomer(
-      { db, stripe: mockStripe },
+      { db, stripe: mockStripe, obs },
       { userId, email: user.email, environment: ENV }
     );
 
@@ -376,7 +378,7 @@ describe('resolveOrCreateCustomer', () => {
     });
 
     const result = await resolveOrCreateCustomer(
-      { db, stripe: mockStripe },
+      { db, stripe: mockStripe, obs },
       { userId, email: user.email, environment: ENV }
     );
 
@@ -398,7 +400,7 @@ describe('resolveOrCreateCustomer', () => {
   it('throws NotFoundError when user does not exist', async () => {
     await expect(
       resolveOrCreateCustomer(
-        { db, stripe: mockStripe },
+        { db, stripe: mockStripe, obs },
         {
           userId: 'nonexistent-user-id',
           email: 'nobody@example.com',
@@ -417,7 +419,7 @@ describe('resolveOrCreateCustomer', () => {
 
     await expect(
       resolveOrCreateCustomer(
-        { db, stripe: mockStripe },
+        { db, stripe: mockStripe, obs },
         { userId, email: 'deleted@example.com', environment: ENV }
       )
     ).rejects.toBeInstanceOf(NotFoundError);
@@ -441,7 +443,7 @@ describe('resolveOrCreateCustomer', () => {
 
     await expect(
       resolveOrCreateCustomer(
-        { db, stripe: mockStripe },
+        { db, stripe: mockStripe, obs },
         { userId, email: user.email, environment: ENV }
       )
     ).rejects.toBeInstanceOf(PaymentProcessingError);
@@ -467,7 +469,7 @@ describe('resolveOrCreateCustomer', () => {
 
     await expect(
       resolveOrCreateCustomer(
-        { db, stripe: mockStripe },
+        { db, stripe: mockStripe, obs },
         { userId, email: user.email, environment: ENV }
       )
     ).rejects.toBeInstanceOf(PaymentProcessingError);
@@ -487,7 +489,7 @@ describe('resolveOrCreateCustomer', () => {
 
     await expect(
       resolveOrCreateCustomer(
-        { db, stripe: mockStripe },
+        { db, stripe: mockStripe, obs },
         { userId, email: user.email, environment: ENV }
       )
     ).rejects.toBe(plainErr);

@@ -6,3 +6,9 @@
 
 # Database (LOCAL_PROXY mode)
 DATABASE_URL_LOCAL_PROXY=postgres://postgres:postgres@db.localtest.me:5432/main
+
+# Stripe: admin-api's OWN restricted key for support refunds (Codex-2hxff.28,
+# owner decision Q4; create it per Codex-5vvwj.2), never ecom-api's full key.
+# Read charges, refunds, disputes, invoices and payment intents; write refunds.
+# A test-mode key here. Only a support refund route asks for it.
+STRIPE_SECRET_KEY=rk_test_YOUR_RESTRICTED_KEY_HERE

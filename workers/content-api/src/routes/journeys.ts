@@ -306,7 +306,7 @@ app.get(
  * show either). Fully PUBLIC (`auth: 'optional'`,
  * NO `canView`). Clips reuse the SAME public preview path the org-landing hero
  * consumes — `mediaItems.hlsPreviewKey` → a CDN URL via `R2_PUBLIC_URL_BASE`,
- * NO R2 signing (mirrors `public.ts` `resolveR2Urls`). The URL base is supplied
+ * NO R2 signing (mirrors `r2-public-urls.ts` `toPublicItem`). The URL base is supplied
  * by the route (env-owned) and resolved inside the service. Returns `null` when
  * the course is not published/non-deleted; a clip is `null` when its media has
  * no transcoded preview.
@@ -418,7 +418,7 @@ app.get(
  * In-course player payload (SPEC §14): the practice + ordered playlist +
  * server-known completions + resume position, plus a SIGNED streaming URL for
  * media (minted by `ContentAccessService.getStreamingUrl`, which enforces
- * `canView` + signs — the single authority). Written practices carry `bodyHtml`
+ * `canView` + signs — the single authority). Written practices carry `body`
  * and null stream URLs. Gated on `canEnterCourse` — deny → `null`.
  * @returns {InCoursePracticeData | null}
  */
@@ -428,6 +428,9 @@ app.get(
     policy: {
       auth: 'required',
       rateLimit: 'api', // 100 req/min
+      // `private, no-store`, as /stream: this carries a written practice's
+      // stored body or a per-user HLS token (Codex-hyz1c).
+      cache: 'fresh',
     },
     input: {
       params: inCoursePracticeParamsSchema,
@@ -452,7 +455,7 @@ app.get(
 
       // Media practices get a signed HLS URL from the SAME signing authority the
       // /stream route uses (getStreamingUrl also re-checks canView). Written
-      // practices render from bodyHtml — no stream, URLs stay null.
+      // practices render from body — no stream, URLs stay null.
       if (data.practice.contentType !== 'written') {
         const stream = await ctx.services.access.getStreamingUrl(userId, {
           contentId: data.practice.contentId,
@@ -1087,9 +1090,9 @@ app.patch(
  *
  * The cover is NOT a `media_items` ref: `media_items` is CHECK-constrained to
  * ('video','audio'), so a still image cannot live there. It reuses the category
- * cover pipeline instead — sm/md/lg WebP variants under a deterministic
- * per-course key, so a re-upload overwrites in place and never orphans an
- * object. The page is resolved (and org-scoped) BEFORE R2 is written, so an
+ * cover pipeline instead — sm/md/lg/xl WebP variants in a new folder per
+ * upload under `courses/{id}/cover`, and the write deletes the cover it
+ * replaces (Codex-kk9nv.5). The page is resolved (and org-scoped) BEFORE R2 is written, so an
  * out-of-org id can never seed an orphaned cover.
  * @returns {{ coverImageUrl: string }}
  */
@@ -1115,8 +1118,8 @@ app.post(
     handler: async (ctx): Promise<{ coverImageUrl: string }> => {
       // Resolve (and org-scope) the subject course FIRST — a foreign or
       // non-course page must 404 before any R2 object exists. The stored keys
-      // come back with it: the write below needs to know whether the row
-      // already addressed these deterministic keys (Codex-29fs0).
+      // come back with it: the write below deletes the cover it replaces
+      // (Codex-29fs0, Codex-kk9nv.5).
       const course = await ctx.services.courseJourney.getCourseStillImageKeys(
         ctx.organizationId,
         ctx.input.params.pageId
@@ -1132,31 +1135,36 @@ app.post(
 
       // The org-aware service owns the DB write (same split as categories).
       // Wrapped so a failed write cannot strand the variants (Codex-29fs0).
-      await ctx.services.imageProcessing.persistStillWithOrphanCleanup(
-        {
-          baseKey: processed.coverImageKey,
-          imageType: 'course_cover',
-          entityType: 'course',
-          entityId: courseId,
-          storedBaseKey: course.coverImageKey,
-        },
-        () =>
-          ctx.services.courseJourney.setCourseCoverImageKey(
-            ctx.organizationId,
-            ctx.input.params.pageId,
-            processed.coverImageKey
-          )
-      );
-
-      // `coverImageUrl` is on every portal card — without this bump a creator
+      //
+      // `coverImageUrl` is on every portal card — without the bump a creator
       // uploads a cover, sees it in the builder, and the rails keep rendering the
-      // typographic fallback until the TTL lapses.
-      bumpOrgJourneysVersion(
-        ctx.env,
-        ctx.executionCtx,
-        ctx.organizationId,
-        ctx.obs
-      );
+      // typographic fallback until the TTL lapses. Bumped even when the write
+      // throws: it can commit and still report failure, and the cover it
+      // replaced is then deleted (Codex-kk9nv.16).
+      await ctx.services.imageProcessing
+        .persistStillWithOrphanCleanup(
+          {
+            key: processed.coverImageKey,
+            imageType: 'course_cover',
+            entityType: 'course',
+            entityId: courseId,
+            storedKey: course.coverImageKey,
+          },
+          () =>
+            ctx.services.courseJourney.setCourseCoverImageKey(
+              ctx.organizationId,
+              ctx.input.params.pageId,
+              processed.coverImageKey
+            )
+        )
+        .finally(() =>
+          bumpOrgJourneysVersion(
+            ctx.env,
+            ctx.executionCtx,
+            ctx.organizationId,
+            ctx.obs
+          )
+        );
 
       return { coverImageUrl: processed.url };
     },
@@ -1168,10 +1176,8 @@ app.post(
  *
  * Clear the journey's cover — the card falls back to its typographic form.
  *
- * Clears the DB key only; the R2 variants are left in place. Keys are
- * deterministic per course id, so a later re-upload overwrites them rather than
- * accumulating orphans, and the objects are unreachable in the meantime (no
- * client is ever handed a raw key).
+ * Clears the DB key, then deletes the folder it named. Each upload goes to a
+ * new folder (Codex-kk9nv.5), so nothing would ever overwrite this one.
  * @returns {null} 204
  */
 app.delete(
@@ -1188,11 +1194,22 @@ app.delete(
     },
     successStatus: 204,
     handler: async (ctx): Promise<null> => {
+      // The stored key first: once it is cleared, nothing names the folder.
+      const course = await ctx.services.courseJourney.getCourseStillImageKeys(
+        ctx.organizationId,
+        ctx.input.params.pageId
+      );
       await ctx.services.courseJourney.setCourseCoverImageKey(
         ctx.organizationId,
         ctx.input.params.pageId,
         null
       );
+      await ctx.services.imageProcessing.deleteDroppedStill({
+        imageType: 'course_cover',
+        entityType: 'course',
+        entityId: course.courseId,
+        droppedKey: course.coverImageKey,
+      });
       bumpOrgJourneysVersion(
         ctx.env,
         ctx.executionCtx,
@@ -1223,7 +1240,7 @@ app.delete(
  * non-course page 404s and can never seed an orphaned object. The hero is NOT a
  * `media_items` ref — that table is CHECK-constrained to ('video','audio'), which
  * is precisely why this endpoint had to exist for a creator to use a photograph.
- * Keys are deterministic per course, so a re-upload overwrites in place.
+ * A new folder per upload, and the write deletes the hero it replaces.
  * @returns {{ heroImageUrl: string }}
  */
 app.post(
@@ -1263,25 +1280,10 @@ app.post(
       );
 
       // The org-aware service owns the DB write (same split as the cover).
-      await ctx.services.imageProcessing.persistStillWithOrphanCleanup(
-        {
-          baseKey: processed.heroImageKey,
-          imageType: 'course_hero',
-          entityType: 'course',
-          entityId: courseId,
-          storedBaseKey: course.heroImageKey,
-        },
-        () =>
-          ctx.services.courseJourney.setCourseHeroImageKey(
-            ctx.organizationId,
-            ctx.input.params.pageId,
-            processed.heroImageKey
-          )
-      );
-
-      // BELT AND BRACES, and stated honestly rather than copied from the cover.
-      // I checked what the org journeys version actually keys: only the two
-      // CACHED list reads (`getCachedPublishedCourses` :134,
+      //
+      // The bump is BELT AND BRACES, and stated honestly rather than copied
+      // from the cover. I checked what the org journeys version actually keys:
+      // only the two CACHED list reads (`getCachedPublishedCourses` :134,
       // `getCachedPublishedJourneys` :477). The hero image reaches a visitor
       // through `/courses/:courseId/sell-preview`, which is an UNCACHED read, and
       // no card carries a hero today — so unlike the cover, this bump changes
@@ -1291,13 +1293,32 @@ app.post(
       // in their cache story for a reader to have to work out which one bumps,
       // and the moment a card does render a hero the omission would be a stale
       // rail with no obvious cause. The cost is one KV write on an
-      // org-manager-only, rate-limited route.
-      bumpOrgJourneysVersion(
-        ctx.env,
-        ctx.executionCtx,
-        ctx.organizationId,
-        ctx.obs
-      );
+      // org-manager-only, rate-limited route. Like the cover's, it runs even
+      // when the write throws (Codex-kk9nv.16).
+      await ctx.services.imageProcessing
+        .persistStillWithOrphanCleanup(
+          {
+            key: processed.heroImageKey,
+            imageType: 'course_hero',
+            entityType: 'course',
+            entityId: courseId,
+            storedKey: course.heroImageKey,
+          },
+          () =>
+            ctx.services.courseJourney.setCourseHeroImageKey(
+              ctx.organizationId,
+              ctx.input.params.pageId,
+              processed.heroImageKey
+            )
+        )
+        .finally(() =>
+          bumpOrgJourneysVersion(
+            ctx.env,
+            ctx.executionCtx,
+            ctx.organizationId,
+            ctx.obs
+          )
+        );
 
       return { heroImageUrl: processed.url };
     },
@@ -1314,10 +1335,8 @@ app.post(
  * plate. That graceful degradation is why the uploaded image is its own column
  * rather than a replacement for the media ref.
  *
- * Clears the DB key only; the R2 variants are left in place. Keys are
- * deterministic per course id, so a later re-upload overwrites them rather than
- * accumulating orphans, and the objects are unreachable in the meantime (no
- * client is ever handed a raw key).
+ * Clears the DB key, then deletes the folder it named, as the cover's DELETE
+ * does.
  * @returns {null} 204
  */
 app.delete(
@@ -1334,11 +1353,21 @@ app.delete(
     },
     successStatus: 204,
     handler: async (ctx): Promise<null> => {
+      const course = await ctx.services.courseJourney.getCourseStillImageKeys(
+        ctx.organizationId,
+        ctx.input.params.pageId
+      );
       await ctx.services.courseJourney.setCourseHeroImageKey(
         ctx.organizationId,
         ctx.input.params.pageId,
         null
       );
+      await ctx.services.imageProcessing.deleteDroppedStill({
+        imageType: 'course_hero',
+        entityType: 'course',
+        entityId: course.courseId,
+        droppedKey: course.heroImageKey,
+      });
       bumpOrgJourneysVersion(
         ctx.env,
         ctx.executionCtx,
@@ -1403,11 +1432,11 @@ app.post(
 
       await ctx.services.imageProcessing.persistStillWithOrphanCleanup(
         {
-          baseKey: processed.signatureImageKey,
+          key: processed.signatureImageKey,
           imageType: 'course_signature',
           entityType: 'course',
           entityId: courseId,
-          storedBaseKey: course.signatureImageKey,
+          storedKey: course.signatureImageKey,
         },
         () =>
           ctx.services.courseJourney.setCourseSignatureImageKey(
@@ -1440,10 +1469,8 @@ app.post(
  * `courses.signatureMediaId` poster still used to, which is why the uploaded image
  * is its own column rather than a replacement for the media ref.
  *
- * Clears the DB key only; the R2 variants are left in place. The key is
- * deterministic per course id, so a later re-upload overwrites them rather than
- * accumulating orphans, and the objects are unreachable in the meantime (no
- * client is ever handed a raw key).
+ * Clears the DB key, then deletes the folder it named, as the cover's DELETE
+ * does.
  * @returns {null} 204
  */
 app.delete(
@@ -1460,11 +1487,21 @@ app.delete(
     },
     successStatus: 204,
     handler: async (ctx): Promise<null> => {
+      const course = await ctx.services.courseJourney.getCourseStillImageKeys(
+        ctx.organizationId,
+        ctx.input.params.pageId
+      );
       await ctx.services.courseJourney.setCourseSignatureImageKey(
         ctx.organizationId,
         ctx.input.params.pageId,
         null
       );
+      await ctx.services.imageProcessing.deleteDroppedStill({
+        imageType: 'course_signature',
+        entityType: 'course',
+        entityId: course.courseId,
+        droppedKey: course.signatureImageKey,
+      });
       return null;
     },
   })
@@ -1490,8 +1527,9 @@ app.delete(
  * an image for as long as a page references it and reclaims it once none does.
  *
  * `rateLimit: 'strict'` (20/min) rather than the siblings' `'api'`: those
- * overwrite one deterministic key per course, so their storage is bounded,
- * while every call here mints a new key and writes three new objects.
+ * keep one folder per course slot (each write deletes the one it replaces),
+ * so their storage is bounded, while every call here mints a new key and
+ * writes four new objects that only the sweep reclaims.
  *
  * The page is resolved (and org-scoped) BEFORE any R2 write, exactly like
  * the cover/hero/signature routes above, so a foreign or missing page 404s
@@ -1501,7 +1539,7 @@ app.delete(
  * works for every `pageType`.
  *
  * `imageId` is minted HERE, not accepted from the client: every upload gets
- * a fresh uuid rather than a slot-deterministic key, so two uploads for the
+ * a fresh uuid, so two uploads for the
  * same page never collide and neither ever overwrites the other (see
  * `ImageProcessingService.processPageImage`).
  * @returns {{ key: string; url: string; width: number; height: number }}

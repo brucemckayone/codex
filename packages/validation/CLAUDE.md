@@ -37,7 +37,9 @@ app.get('/content/:id',
 - `publishContentSchema` — publish with optional publishedAt date
 - `contentQuerySchema` — paginated list (status, type, creatorId, visibility filters)
 - `publicContentQuerySchema` — public-facing list (published only)
-- `discoverContentQuerySchema` — discover/browse with category filter
+- `publicContentArgsSchema` — the web `getPublicContent` remote query's args, built from the same field rules as `publicContentQuerySchema`
+- `publicContentSlugSchema` (`PUBLIC_CONTENT_SLUG_MAX`), `topicSlugSchema` (`TOPIC_SLUG_MAX`), `orgIdQuerySchema` (lowercased, for KV keys), `PUBLIC_LIST_MAX_LIMIT` (50: the API caps to it, the remote refuses past it) — field rules shared by the API, the remote query and the web pages that 404 before calling
+- `discoverContentQuerySchema` — platform-wide published list (type, search, sort)
 - `uploadRequestSchema` — presigned upload request (filename, mimeType, fileSize)
 - `createMediaItemSchema` — register media upload
 - `updateMediaItemSchema` — update media metadata
@@ -54,6 +56,8 @@ app.get('/content/:id',
 
 ### Access & Playback (`schemas/access.ts`)
 - `getStreamingUrlSchema` — request signed streaming URL (`contentId`)
+- `streamingUrlQuerySchema` — the `/stream` route's query: `expirySeconds`, and `include: 'body'` to also return the body once access is granted (Codex-039vo; a row never released is granted to no one, Codex-nacky)
+- `withdrawnContentQuerySchema` — the withdrawn read's query (Codex-ov2ii): `slug` plus exactly one of `orgId` (uuid) or `creatorId` (`userIdSchema`, text); a strict union, so naming both or neither is a 400
 - `savePlaybackProgressSchema` — save position (`contentId`, `positionSeconds`, `durationSeconds`, `completed`)
 - `getPlaybackProgressSchema` — get progress for content
 - `listUserLibrarySchema` — paginated library with filters
@@ -66,6 +70,14 @@ app.get('/content/:id',
 - `verifyCheckoutSessionSchema` — verify session after redirect
 - `checkoutSessionMetadataSchema` — internal Stripe metadata shape
 - `purchaseStatusEnum` — purchase statuses
+
+### Support refunds (`schemas/support.ts`)
+admin-api's `/api/admin/support/*` routes (Codex-2hxff.28), all platform-owner only.
+- `supportChargeSearchQuerySchema` — `lookup` (never `q`: it is not a free-text search) is an exact identifier (email, purchase/subscription id, `sub_`/`pi_`/`ch_`/`py_`), never free text, so a NUL is REFUSED, not dropped; limit capped at `SUPPORT_LIST_MAX_LIMIT` (50)
+- `stripeChargeIdSchema`, `supportChargeParamsSchema` — `ch_…` or `py_…`
+- `supportRefundPreviewQuerySchema`, `supportIssueRefundSchema` — whole pence ≥ 1; `expectedRefundCount` is the count the page showed, part of the refund's idempotency key
+- `supportResolveFailedRefundSchema`, `supportResolveCreatorDebtSchema` — the note is free text (NUL dropped, trimmed, ≤ `SUPPORT_NOTE_MAX_LENGTH`), REQUIRED for `creators_repaid` and `manually_reversed`; `dispute_won` is never accepted (only the won-chargeback code writes it)
+- `supportRefundIdParamsSchema` (our `refunds.id`, not Stripe's `re_`), `supportReviewIdParamsSchema`, `supportQueueQuerySchema`
 
 ### Settings (`schemas/settings.ts`)
 - `updateBrandingSchema` — org branding (colors, fonts, radius, density, logo, intro video, hero layout)
@@ -83,7 +95,7 @@ app.get('/content/:id',
 ### Transcoding (`schemas/transcoding.ts`)
 - `runpodWebhookSchema`, `runpodWebhookUnionSchema` — RunPod webhook payloads
 - `runpodWebhookOutputSchema` — transcoding output (HLS variants, thumbnails)
-- `retryTranscodingSchema`, `getTranscodingStatusSchema`
+- `retryTranscodingSchema`
 - Enums: `runpodJobStatusEnum`, `transcodingStepEnum`, `hlsVariantSchema`, `thumbnailSizeSchema`, `mezzanineStatusEnum`
 - Types: `RunPodWebhookPayload`, `RunPodWebhookOutput`, `TranscodingStep`
 
@@ -103,8 +115,15 @@ app.get('/content/:id',
 - Admin-only operation schemas
 
 ### Pagination (`shared/pagination-schema.ts`)
-- `paginationSchema` — `{ page: number (≥1), limit: number (1–100) }`
+- `paginationSchema` — `{ page, limit }`: page 1 to `PAGINATION_MAX_PAGE` (1000), limit 1 to `PAGINATION_MAX_LIMIT` (100)
 - `PaginationInput` — inferred type
+- `clampPageParam(raw)` — a `?page=` URL param clamped to a page every list accepts, for a server load that forwards it
+
+### Search (`shared/search-schema.ts`)
+- `createSearchQuerySchema(max = SEARCH_MAX_QUERY_LENGTH)` — the ONLY free-text `search` schema: drops NUL, trims, caps
+- `boundSearchParam(raw)` — the same normalisation for a server load that forwards a URL param, cutting rather than refusing
+- `gateSearchQuery` / `isSearchQueryBelowFloor` — the client-side 3-character floor
+- `stripNul` / `hasNoNul` — see the NUL rule below
 
 ## Primitives (`primitives.ts`)
 
@@ -166,6 +185,13 @@ const safeSvg = await sanitizeSvgContent(userUploadedSvg);
 - **NEVER** tighten `urlSchema` itself, or any non-image URL field — `websiteUrl`, social links, contact URLs and
   rich-text hyperlinks are legitimately external
 - **NEVER** define ad-hoc schemas in route handlers — add them to this package
+- **MUST** handle NUL (U+0000) in every string from a URL (Codex-osuqt). Postgres refuses NUL in text (22021), so one
+  that reaches a query is a 500 any visitor can raise. FREE TEXT drops it (`createSearchQuerySchema`, `stripNul`). An
+  EXACT-MATCH IDENTIFIER (a slug, a topic) refuses it with `.refine(hasNoNul, …)`: rewritten, `a\0b` names a different
+  row and `\0` becomes `''`, which drops the filter. A plain `z.string().max(n)` does neither
+- **NEVER** hand-copy an API schema for a web remote query or a page's pre-call guard — build it from the shared field
+  rules here (`publicContentArgsSchema`). A remote query is a public endpoint: an argument it accepts and the API
+  refuses comes back as a 500 logged at error level, where one it refuses is a clean 400
 
 ## Reference Files
 

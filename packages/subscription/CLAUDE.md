@@ -22,6 +22,11 @@ place the code does not match yet with its bead.
 - **`calculateRevenueSplit(amountCents, platformFeeBps, orgFeeBps)`** — integer
   three-way split; the platform and organisation round up, the creator pool takes
   the remainder
+- **`isCurrentPeriodPayment(deps, paymentIntentId)`** — the test
+  `cancelForFullRefund` makes: the payment is the subscription's newest paid
+  period invoice. Support's refund preview reads it to say whether a full refund
+  cancels (Codex-2hxff.28). Reads Stripe only; false for a one-off purchase, a
+  proration invoice or an earlier period
 
 Errors (`src/errors.ts`): `TierNotFoundError`, `TierHasSubscribersError`,
 `TierSortOrderConflictError`, `SubscriptionNotFoundError`,
@@ -60,7 +65,14 @@ payout-released email — the open defects `Codex-2hxff.7` and `Codex-2hxff.13`.
   `subscriptions.update` on a price change — go through `schedulePriceChange`
   (`pending-price-change.ts`): same interval only, no proration, first renewal
   ≥ 30 days after the email (`Codex-2hxff.3`).
-- If the DB insert fails, the new Stripe Product is archived (orphan prevention).
+- If the DB insert fails, the new Stripe Product is archived (orphan prevention),
+  unless a live row already uses it. Create keys survive a retry — a tier keys
+  on the environment + the dialog's `submissionId`, a course plan on environment
+  + course + generation + UTC hour (production, dev and CI share one Stripe
+  sandbox) — and a repeat returns the row the first attempt made; the same key
+  with different values is a typed 409 (`Codex-2hxff.66`). A create puts its
+  Product back on sale after its row commits, and a clean-up that archived
+  re-checks for a live row, so a live row's Product always ends on sale.
 - One `isRecommended` tier per organisation (enforced in a transaction).
 - `sortOrder` **is** the access hierarchy. Soft delete only; a tier with
   subscribers who have not cancelled cannot be deleted (`TierHasSubscribersError`).

@@ -11,11 +11,13 @@
 
 import { randomUUID } from 'node:crypto';
 import {
+  agreementProposals,
   type CourseSubscriptionPlan,
   courseEnrollments,
   courseSubscriptionPlans,
   courseSubscriptions,
   courses,
+  creatorOrganizationAgreements,
   entitlements,
   organizationMemberships,
   organizations,
@@ -29,6 +31,7 @@ import {
   createTestConnectAccountInput,
   createUniqueSlug,
   type Database,
+  paidByCard,
   seedTestUsers,
   setupTestDatabase,
   teardownTestDatabase,
@@ -36,44 +39,14 @@ import {
 import { and, eq } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { ConnectAccountNotReadyError } from '../../errors';
+import {
+  ConnectAccountNotReadyError,
+  SubscriptionCheckoutError,
+} from '../../errors';
 import {
   COURSE_SUBSCRIPTION_METADATA_TYPE,
   CourseSubscriptionService,
 } from '../course-subscription-service';
-
-/**
- * A card-paid invoice's payment as Stripe sends it: the PaymentIntent and NO
- * `charge`. Stripe surfaces `charge` only for a charge without a PaymentIntent
- * (sandbox invoice in_1USC217wyGmo4sh63iTqUPkW, 2026-10-19). These fixtures
- * used to set both, which hid Codex-2hxff.50: the course path read only
- * `charge`, so a real invoice recorded no payouts.
- */
-function paidByCard(chargeId: string) {
-  return {
-    data: [
-      {
-        payment: {
-          type: 'payment_intent',
-          payment_intent: chargeId.replace(/^ch_/, 'pi_'),
-        },
-      },
-    ],
-  };
-}
-
-/**
- * createMockStripe's paymentIntents.retrieve mints a fresh `latest_charge` on
- * every call. Real Stripe returns the same one, so a redelivered invoice
- * resolves the same charge: pi_<x> → ch_<x>.
- */
-function stripeWithStableCharges(): Stripe {
-  const stripe = createMockStripe();
-  vi.mocked(stripe.paymentIntents.retrieve).mockImplementation((async (
-    id: string
-  ) => ({ id, latest_charge: id.replace(/^pi_/, 'ch_') })) as never);
-  return stripe;
-}
 
 describe('CourseSubscriptionService lifecycle (WP-6)', () => {
   let db: Database;
@@ -136,7 +109,7 @@ describe('CourseSubscriptionService lifecycle (WP-6)', () => {
 
     service = new CourseSubscriptionService(
       { db, environment: 'test' },
-      stripeWithStableCharges()
+      createMockStripe()
     );
   });
 
@@ -246,6 +219,52 @@ describe('CourseSubscriptionService lifecycle (WP-6)', () => {
     expect(enrolls).toHaveLength(1);
   });
 
+  // Codex-2hxff.10 (owner decision P-3): a failed renewal keeps access while
+  // Stripe retries. Only a PAID renewal used to move the stored grant on, so a
+  // past_due course plan lost access at the old period end.
+  it('a past_due update moves the course grant to the new period end; a paused one does not', async () => {
+    const { cId, pId } = await makeCourseWithPlan();
+    const stripeSubId = `sub_${randomUUID().slice(0, 8)}`;
+    const created = courseSubStripeObject(stripeSubId, cId, pId);
+    await service.handleCourseSubscriptionCreated(created);
+    const grantExpiry = async () => {
+      const [grant] = await db
+        .select({ expiresAt: entitlements.expiresAt })
+        .from(entitlements)
+        .where(
+          and(
+            eq(entitlements.userId, subscriberId),
+            eq(entitlements.courseId, cId),
+            eq(entitlements.source, 'course_subscription')
+          )
+        );
+      return grant?.expiresAt?.getTime();
+    };
+    const renewedTo = (seconds: number, status: string) =>
+      ({
+        ...created,
+        status,
+        items: {
+          ...created.items,
+          data: created.items.data.map((item) => ({
+            ...item,
+            current_period_end: seconds,
+          })),
+        },
+      }) as Stripe.Subscription;
+
+    const nextPeriodEnd = Math.floor(Date.now() / 1000) + 62 * 24 * 3600;
+    await service.handleCourseSubscriptionUpdated(
+      renewedTo(nextPeriodEnd, 'past_due')
+    );
+    expect(await grantExpiry()).toBe(nextPeriodEnd * 1000);
+
+    await service.handleCourseSubscriptionUpdated(
+      renewedTo(nextPeriodEnd + 30 * 24 * 3600, 'paused')
+    );
+    expect(await grantExpiry()).toBe(nextPeriodEnd * 1000);
+  });
+
   it('invoice payment fans out payouts once; redelivery is idempotent', async () => {
     const { cId, pId } = await makeCourseWithPlan();
     const stripeSubId = `sub_${randomUUID().slice(0, 8)}`;
@@ -300,6 +319,100 @@ describe('CourseSubscriptionService lifecycle (WP-6)', () => {
     expect(payoutRowsAfter).toHaveLength(payoutRows.length);
   });
 
+  // Owner decision AGR-01 "Keeps paying" (Codex-2hxff.17): the course
+  // creator's subscription agreement applies past its review date.
+  it("an invoice pays the course creator their agreed share past the agreement's review date", async () => {
+    // A fresh creator, so the agreement cannot reach the file's other tests.
+    const [agreedCreatorId] = await seedTestUsers(db, 1);
+    if (!agreedCreatorId) throw new Error('creator not seeded');
+    const [c] = await db
+      .insert(courses)
+      .values({
+        organizationId: orgId,
+        creatorId: agreedCreatorId,
+        slug: createUniqueSlug('cs-agreed'),
+        title: 'Agreed Course',
+        status: 'published',
+        priceCents: null,
+      })
+      .returning({ id: courses.id });
+    if (!c) throw new Error('failed course');
+    const [p] = await db
+      .insert(courseSubscriptionPlans)
+      .values({
+        courseId: c.id,
+        priceMonthly: 5000,
+        priceAnnual: 50000,
+        stripeProductId: `prod_${randomUUID().slice(0, 8)}`,
+        stripePriceMonthlyId: `price_m_${randomUUID().slice(0, 8)}`,
+        stripePriceAnnualId: `price_a_${randomUUID().slice(0, 8)}`,
+      })
+      .returning({ id: courseSubscriptionPlans.id });
+    if (!p) throw new Error('failed plan');
+    const day = 86_400_000;
+    const [proposal] = await db
+      .insert(agreementProposals)
+      .values({
+        organizationId: orgId,
+        creatorId: agreedCreatorId,
+        revenueType: 'subscription',
+        roundNumber: 1,
+        proposedByUserId: creatorId,
+        proposedByRole: 'owner',
+        proposedCreatorSharePercent: 7000,
+        proposedEffectiveFrom: new Date(Date.now() - 60 * day),
+        status: 'accepted',
+      })
+      .returning({ id: agreementProposals.id });
+    if (!proposal) throw new Error('proposal not inserted');
+    await db.insert(creatorOrganizationAgreements).values({
+      organizationId: orgId,
+      creatorId: agreedCreatorId,
+      organizationFeePercentage: 3000,
+      revenueType: 'subscription',
+      status: 'active',
+      effectiveFrom: new Date(Date.now() - 60 * day),
+      effectiveUntil: new Date(Date.now() - day), // review date passed
+      currentProposalId: proposal.id,
+    });
+
+    const stripeSubId = `sub_${randomUUID().slice(0, 8)}`;
+    const sub = courseSubStripeObject(stripeSubId, c.id, p.id);
+    await service.handleCourseSubscriptionCreated(sub);
+    const [row] = await db
+      .select({ id: courseSubscriptions.id })
+      .from(courseSubscriptions)
+      .where(eq(courseSubscriptions.stripeSubscriptionId, stripeSubId));
+    if (!row) throw new Error('course subscription not written');
+
+    const invoice = createMockStripeInvoice({
+      amount_paid: 5000,
+      currency: 'gbp',
+      parent: {
+        subscription_details: {
+          subscription: stripeSubId,
+          metadata: { type: COURSE_SUBSCRIPTION_METADATA_TYPE },
+        },
+      },
+      payments: paidByCard(`ch_${randomUUID().slice(0, 8)}`),
+    }) as unknown as Stripe.Invoice;
+    await service.handleCourseInvoicePaymentSucceeded(invoice, sub);
+
+    const rows = await db
+      .select({
+        payoutType: payouts.payoutType,
+        amountCents: payouts.amountCents,
+      })
+      .from(payouts)
+      .where(eq(payouts.courseSubscriptionId, row.id));
+    const amountOf = (type: string) =>
+      rows.find((r) => r.payoutType === type)?.amountCents;
+    // 10% platform; the creator takes 70% of the 4500 left, not the default.
+    expect(amountOf('platform_fee')).toBe(500);
+    expect(amountOf('organization_fee')).toBe(1350);
+    expect(amountOf('creator_payout')).toBe(3150);
+  });
+
   // Codex-2hxff.50, the production shape end to end: the webhook's invoice
   // carries no payments (Stripe omits them unless expanded), and the expanded
   // payment names only the PaymentIntent. The course path read `charge` from
@@ -316,7 +429,7 @@ describe('CourseSubscriptionService lifecycle (WP-6)', () => {
     if (!row) throw new Error('course sub not recorded');
 
     const chargeId = `ch_${randomUUID().slice(0, 8)}`;
-    const stripe = stripeWithStableCharges();
+    const stripe = createMockStripe();
     vi.mocked(stripe.invoices.retrieve).mockImplementation((async (
       id: string
     ) => ({ id, payments: paidByCard(chargeId) })) as never);
@@ -388,32 +501,41 @@ describe('CourseSubscriptionService lifecycle (WP-6)', () => {
     const { cId, pId } = await makeCourseWithPlan();
     const { sub, invoice, slices } = await paidCourseInvoice(cId, pId);
 
-    // First delivery: the database drops while the creator slice is reserved.
-    const failing = new Proxy(db, {
-      get(target, prop, receiver) {
-        if (prop === 'insert') {
-          // biome-ignore lint/suspicious/noExplicitAny: Drizzle builder shape
-          return (table: any) => {
-            const builder = target.insert(table);
-            const realValues = builder.values.bind(builder);
-            // biome-ignore lint/suspicious/noExplicitAny: row payload
-            (builder as any).values = (rows: any) => {
-              const row = Array.isArray(rows) ? rows[0] : rows;
-              if (row?.payoutType === 'creator_payout') {
-                throw new Error('Connection terminated unexpectedly');
-              }
-              return realValues(rows);
+    // First delivery: the database drops while the creator slice is reserved,
+    // inside the split's transaction (recordSplitOnce, Codex-2hxff.49).
+    const dropsOnCreatorSlice = (client: Database): Database =>
+      new Proxy(client, {
+        get(target, prop, receiver) {
+          if (prop === 'transaction') {
+            return (run: (tx: Database) => Promise<unknown>) =>
+              target.transaction((tx) =>
+                run(dropsOnCreatorSlice(tx as unknown as Database))
+              );
+          }
+          if (prop === 'insert') {
+            // biome-ignore lint/suspicious/noExplicitAny: Drizzle builder shape
+            return (table: any) => {
+              const builder = target.insert(table);
+              const realValues = builder.values.bind(builder);
+              // biome-ignore lint/suspicious/noExplicitAny: row payload
+              (builder as any).values = (rows: any) => {
+                const row = Array.isArray(rows) ? rows[0] : rows;
+                if (row?.payoutType === 'creator_payout') {
+                  throw new Error('Connection terminated unexpectedly');
+                }
+                return realValues(rows);
+              };
+              return builder;
             };
-            return builder;
-          };
-        }
-        const value = Reflect.get(target, prop, receiver);
-        return typeof value === 'function' ? value.bind(target) : value;
-      },
-    });
+          }
+          const value = Reflect.get(target, prop, receiver);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+    const failing = dropsOnCreatorSlice(db);
     const dying = new CourseSubscriptionService(
       { db: failing, environment: 'test' },
-      stripeWithStableCharges()
+      createMockStripe()
     );
     await expect(
       dying.handleCourseInvoicePaymentSucceeded(invoice, sub)
@@ -589,6 +711,190 @@ describe('CourseSubscriptionService lifecycle (WP-6)', () => {
         })
       ).rejects.toThrow(ConnectAccountNotReadyError);
       expect(stripe.checkout.sessions.create).not.toHaveBeenCalled();
+    });
+
+    // Codex-2hxff.64: a creator's removal archives their courses, and only
+    // this status gate stops a new subscription to one.
+    it('a course taken off sale on a departure: refused before Stripe is asked', async () => {
+      const { cId } = await makeCourseWithPlan();
+      await db
+        .update(courses)
+        .set({ status: 'archived', offSaleAt: new Date() })
+        .where(eq(courses.id, cId));
+      const stripe = createMockStripe();
+      const checkout = new CourseSubscriptionService(
+        { db, environment: 'test' },
+        stripe
+      );
+
+      await expect(
+        checkout.createCheckoutSession(subscriberId, {
+          courseId: cId,
+          billingInterval: 'month',
+          successUrl: 'http://lvh.me:3000/ok',
+          cancelUrl: 'http://lvh.me:3000/cancel',
+        })
+      ).rejects.toThrow(SubscriptionCheckoutError);
+      expect(stripe.checkout.sessions.create).not.toHaveBeenCalled();
+    });
+  });
+
+  // Owner decision 2026-10-21 (Codex-2hxff.64): a course taken off sale when
+  // its creator left has its live subscriptions cancelled at period end,
+  // 50 at once and the rest hourly. These pass `courseIds` (the removal's own
+  // call): the sweep's no-`courseIds` form is global, and a shared DB holds
+  // other runs' rows.
+  describe('cancelForCoursesOffSale', () => {
+    async function subscribedCourse(offSale: boolean) {
+      const { cId, pId } = await makeCourseWithPlan();
+      const stripeSubId = `sub_${randomUUID().slice(0, 8)}`;
+      await service.handleCourseSubscriptionCreated(
+        courseSubStripeObject(stripeSubId, cId, pId)
+      );
+      if (offSale) {
+        await db
+          .update(courses)
+          .set({ status: 'archived', offSaleAt: new Date() })
+          .where(eq(courses.id, cId));
+      }
+      const [row] = await db
+        .select()
+        .from(courseSubscriptions)
+        .where(eq(courseSubscriptions.stripeSubscriptionId, stripeSubId));
+      if (!row) throw new Error('course subscription not written');
+      return { courseId: cId, sub: row };
+    }
+
+    function serviceWithMailer() {
+      const stripe = createMockStripe();
+      const mailer = vi.fn();
+      const svc = new CourseSubscriptionService(
+        {
+          db,
+          environment: 'test',
+          mailer,
+          webAppUrl: 'https://app.example.test',
+        },
+        stripe
+      );
+      return { svc, stripe, mailer };
+    }
+
+    it('cancels a live subscription to an off-sale course at period end, once, and tells the subscriber', async () => {
+      const offSale = await subscribedCourse(true);
+      const onSale = await subscribedCourse(false);
+      const { svc, stripe, mailer } = serviceWithMailer();
+
+      const result = await svc.cancelForCoursesOffSale({
+        courseIds: [offSale.courseId, onSale.courseId],
+        limit: 50,
+      });
+
+      expect(result).toEqual({ cancelled: 1, failed: 0, remaining: 0 });
+      expect(stripe.subscriptions.update).toHaveBeenCalledTimes(1);
+      expect(stripe.subscriptions.update).toHaveBeenCalledWith(
+        offSale.sub.stripeSubscriptionId,
+        { cancel_at_period_end: true },
+        { idempotencyKey: `course_off_sale_cancel_${offSale.sub.id}` }
+      );
+      const [after] = await db
+        .select()
+        .from(courseSubscriptions)
+        .where(eq(courseSubscriptions.id, offSale.sub.id));
+      expect(after?.cancelAtPeriodEnd).toBe(true);
+      expect(after?.status).toBe('cancelling');
+      expect(mailer).toHaveBeenCalledTimes(1);
+      expect(mailer.mock.calls[0]?.[0]).toMatchObject({
+        templateName: 'course-no-longer-offered',
+        userId: subscriberId,
+      });
+
+      // A second run finds nothing: already cancelling.
+      const again = await svc.cancelForCoursesOffSale({
+        courseIds: [offSale.courseId],
+        limit: 50,
+      });
+      expect(again).toEqual({ cancelled: 0, failed: 0, remaining: 0 });
+    });
+
+    // A paused (or past_due) row keeps its status when cancelled, so only
+    // `cancel_at_period_end` stops the next run re-sending it to Stripe.
+    it('cancels a paused subscription once: it stays paused, and the next run leaves it', async () => {
+      const offSale = await subscribedCourse(true);
+      await db
+        .update(courseSubscriptions)
+        .set({ status: 'paused' })
+        .where(eq(courseSubscriptions.id, offSale.sub.id));
+      const { svc, stripe } = serviceWithMailer();
+
+      const first = await svc.cancelForCoursesOffSale({
+        courseIds: [offSale.courseId],
+        limit: 50,
+      });
+      const [after] = await db
+        .select()
+        .from(courseSubscriptions)
+        .where(eq(courseSubscriptions.id, offSale.sub.id));
+      const again = await svc.cancelForCoursesOffSale({
+        courseIds: [offSale.courseId],
+        limit: 50,
+      });
+
+      expect(first).toEqual({ cancelled: 1, failed: 0, remaining: 0 });
+      expect(after).toMatchObject({
+        status: 'paused',
+        cancelAtPeriodEnd: true,
+      });
+      expect(again).toEqual({ cancelled: 0, failed: 0, remaining: 0 });
+      expect(stripe.subscriptions.update).toHaveBeenCalledTimes(1);
+    });
+
+    it('stops at the limit and reports what is left for the hourly sweep', async () => {
+      const first = await subscribedCourse(true);
+      const second = await subscribedCourse(true);
+      const { svc } = serviceWithMailer();
+
+      const result = await svc.cancelForCoursesOffSale({
+        courseIds: [first.courseId, second.courseId],
+        limit: 1,
+      });
+
+      expect(result).toEqual({ cancelled: 1, failed: 0, remaining: 1 });
+    });
+
+    it('a Stripe failure is counted, logged, and left for the next run', async () => {
+      const offSale = await subscribedCourse(true);
+      const { svc, stripe, mailer } = serviceWithMailer();
+      vi.mocked(stripe.subscriptions.update).mockRejectedValueOnce(
+        new Error('Stripe is down')
+      );
+
+      const result = await svc.cancelForCoursesOffSale({
+        courseIds: [offSale.courseId],
+        limit: 50,
+      });
+
+      expect(result).toEqual({ cancelled: 0, failed: 1, remaining: 1 });
+      const [after] = await db
+        .select()
+        .from(courseSubscriptions)
+        .where(eq(courseSubscriptions.id, offSale.sub.id));
+      expect(after?.cancelAtPeriodEnd).toBe(false);
+      expect(after?.status).toBe('active');
+      expect(mailer).not.toHaveBeenCalled();
+    });
+
+    it('the hourly sweep (no courseIds) cancels what the removal left', async () => {
+      const offSale = await subscribedCourse(true);
+      const { svc } = serviceWithMailer();
+
+      await svc.cancelForCoursesOffSale({ limit: 50 });
+
+      const [after] = await db
+        .select()
+        .from(courseSubscriptions)
+        .where(eq(courseSubscriptions.id, offSale.sub.id));
+      expect(after?.cancelAtPeriodEnd).toBe(true);
     });
   });
 });

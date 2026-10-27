@@ -22,9 +22,9 @@
  * that signed in to set something up and then measured the CTA would be
  * measuring the wrong page and the wrong button.
  *
- * HTTP status is never used as evidence: a load-thrown 404 on this surface
- * returns 200 (Codex-nqop3, an upstream SvelteKit bug root-caused in round 3).
- * `expectSellPageRendered` asserts the rendered sections instead.
+ * A 200 is not evidence the sell page rendered (the entitlement redirect ends
+ * on one too), so `expectSellPageRendered` asserts the rendered sections. A
+ * missing page's status is held by `org-error-status.spec.ts` (Codex-nqop3).
  */
 
 import { expect, test } from '@playwright/test';

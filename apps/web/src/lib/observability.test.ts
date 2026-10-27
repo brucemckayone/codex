@@ -152,6 +152,28 @@ describe('$lib/observability logger', () => {
       expect(output).toContain(SECRET_ORG);
       expect(output).toContain('"service":"web-app"');
     });
+
+    it('forwards warnings and errors to /api/client-log, never info or debug (Codex-l2c48.7)', async () => {
+      const fetchSpy = vi
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValue(new Response(null, { status: 204 }));
+      const logger = await loadLogger({ browser: true, dev: false });
+
+      logger.info('info message');
+      logger.debug('debug message');
+      logger.warn('warn message', { step: 'a' });
+      logger.error('error message', { step: 'b' });
+
+      const bodies = fetchSpy.mock.calls.map(([url, init]) => {
+        expect(url).toBe('/api/client-log');
+        return JSON.parse(String((init as RequestInit).body));
+      });
+      expect(bodies.map((b) => [b.level, b.message])).toEqual([
+        ['warn', 'warn message'],
+        ['error', 'error message'],
+      ]);
+      expect(totalConsoleCalls(spies)).toBe(0);
+    });
   });
 
   describe('development browser (must be unchanged)', () => {

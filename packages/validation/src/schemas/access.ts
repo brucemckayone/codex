@@ -1,7 +1,9 @@
 import { z } from 'zod';
+import { publicContentSlugSchema } from '../content/content-schemas';
 import {
   nonNegativeIntSchema,
   positiveIntSchema,
+  userIdSchema,
   uuidSchema,
 } from '../primitives';
 import { paginationSchema } from '../shared/pagination-schema';
@@ -32,6 +34,32 @@ export const getStreamingUrlSchema = z.object({
   // presigned URLs cannot be invalidated once issued, so this is the maximum
   // window during which a cancelled/revoked user can still stream.
 });
+
+/**
+ * Query for GET /api/access/content/:id/stream. `include=body` also returns the
+ * content's body once access is granted (a row never released is granted to no
+ * one, Codex-nacky): the body source for an entitled reader of a gated piece
+ * (Codex-039vo). The detail pages send it; the player's URL refreshes do not,
+ * so they never carry a body.
+ */
+export const streamingUrlQuerySchema = getStreamingUrlSchema
+  .pick({ expirySeconds: true })
+  .extend({ include: z.literal('body').optional() });
+
+const withdrawnSlugSchema = z.string().min(1).pipe(publicContentSlugSchema);
+
+/**
+ * Query for GET /api/access/content/withdrawn (Codex-ov2ii): the detail URL's
+ * own key, exactly one of an org piece's `(orgId, slug)` or a personal piece's
+ * `(creatorId, slug)`. Both slug keys are unique (per org, and per creator's
+ * personal space). Strict, so a request naming both is a 400, never a guess.
+ */
+export const withdrawnContentQuerySchema = z.union([
+  z.object({ orgId: uuidSchema, slug: withdrawnSlugSchema }).strict(),
+  z.object({ creatorId: userIdSchema, slug: withdrawnSlugSchema }).strict(),
+]);
+
+export type WithdrawnContentQuery = z.infer<typeof withdrawnContentQuerySchema>;
 
 export const savePlaybackProgressSchema = z.object({
   contentId: uuidSchema,
@@ -95,6 +123,14 @@ export const streamingUrlResponseSchema = z.object({
   expiresAt: z.string(),
   contentType: z.string(),
   readyVariants: z.array(hlsVariantSchema).optional(),
+  // Only with `?include=body`, after access is granted (Codex-039vo; a row
+  // never released is granted to no one, Codex-nacky). Both or neither: absent means not returned, never "no body".
+  body: z
+    .object({
+      contentBody: z.string().nullable(),
+      contentBodyJson: z.record(z.string(), z.unknown()).nullable(),
+    })
+    .optional(),
 });
 
 export type StreamingUrlResponseSchema = z.infer<

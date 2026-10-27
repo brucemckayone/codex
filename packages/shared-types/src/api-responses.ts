@@ -179,6 +179,43 @@ export interface OrganizationWithRole {
 }
 
 // ============================================================================
+// Public Content Catalogue Types
+// ============================================================================
+
+/**
+ * The media item on a catalogue row (`GET /api/content/public`, `/discover`,
+ * `/api/content/browse`). Built field by field at the content-api boundary
+ * (Codex-ve5eh): R2 keys are resolved to CDN URLs there, and no other
+ * media_items column (raw keys, RunPod job id, transcoding error) is sent.
+ */
+export interface PublicMediaItem {
+  durationSeconds: number | null;
+  /** Resolved CDN URL for the transcoded poster frame */
+  thumbnailUrl: string | null;
+  /** Resolved CDN URL for the 30-second HLS preview clip */
+  hlsPreviewUrl: string | null;
+}
+
+/**
+ * The org on a catalogue row (Codex-567de): what the web reads, which is a
+ * link (`slug`) and the creator profile's org cards (`id`, `name`,
+ * `logoUrl`). The rest of the organizations row, the payee's
+ * `primaryConnectAccountUserId` among it, is not sent.
+ */
+export interface PublicContentOrganization {
+  id: string;
+  name: string;
+  slug: string;
+  logoUrl: string | null;
+}
+
+/** The creator on a catalogue row: never an email. */
+export interface PublicContentCreator {
+  id: string;
+  name: string | null;
+}
+
+// ============================================================================
 // Settings Response Types
 // ============================================================================
 

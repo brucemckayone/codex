@@ -17,17 +17,24 @@
     - Pending proposal waiting on creator → "View thread" + status pill
     - Pending counter received → "View thread" with action emphasis
 
+  `readOnly` (an admin on the owner's page, Codex-2hxff.20 AGR-14): every
+  agreement action is owner-only, so the card offers "View thread" alone and
+  never Propose, Amend or Review counter, each of which an admin was shown and
+  then refused with a 403.
+
   All share % copy explicitly says "of post-platform [type] revenue" so the
   user understands the math. Currency GBP throughout.
 
   Props mirror the WP-7 spec in Codex-s80r6.
 -->
 <script lang="ts">
+  import { getThumbnailUrl } from '$lib/utils/image';
   import {
     type AgreementProposal,
-    type CreatorOrganizationAgreement,
+    type AgreementWithShare,
     formatRevenueTypeLabel,
   } from '@codex/agreements';
+  import AgreementShare from './AgreementShare.svelte';
 
   interface Creator {
     id: string;
@@ -47,19 +54,20 @@
   interface Props {
     creator: Creator;
     /** Active agreement for subscription, if any. */
-    subscriptionAgreement?: CreatorOrganizationAgreement | null;
+    subscriptionAgreement?: AgreementWithShare | null;
     /** Active agreement for content_purchase, if any. */
-    contentPurchaseAgreement?: CreatorOrganizationAgreement | null;
+    contentPurchaseAgreement?: AgreementWithShare | null;
     /** Open / countered proposal for subscription, if any. */
     pendingSubscriptionProposal?: PendingProposalSummary | null;
     /** Open / countered proposal for content_purchase, if any. */
     pendingContentPurchaseProposal?: PendingProposalSummary | null;
     /** Triggers ProposeAgreementDialog at the parent. */
     onPropose: (revenueType: 'subscription' | 'content_purchase') => void;
-    /** Triggers amend flow (a fresh round-1) at the parent. */
+    /** Triggers amend flow (a fresh round-1) at the parent. `null` when the
+      * agreement's share is missing: the parent opens on its own default. */
     onAmend: (
       revenueType: 'subscription' | 'content_purchase',
-      currentShareBp: number
+      currentShareBp: number | null
     ) => void;
     /** Opens the negotiation thread drawer. */
     onViewThread: (
@@ -70,6 +78,8 @@
       * creator names SIBLINGS of the heading that contains them and flattened
       * the document outline. Mirrors `ui/PageHeader`'s `headingLevel`. */
     headingLevel?: 3 | 4 | 5;
+    /** The viewer can see but not act: "View thread" is the only action. */
+    readOnly?: boolean;
     /** Optional composition seam — forwarded to the root element. */
     class?: string;
   }
@@ -84,30 +94,13 @@
     onAmend,
     onViewThread,
     headingLevel = 4,
+    readOnly = false,
     class: className,
   }: Props = $props();
 
   const nameTag = $derived(`h${headingLevel}` as 'h3' | 'h4' | 'h5');
 
   // ─── Helpers ──────────────────────────────────────────────────────────────
-
-  function formatPercent(bp: number): string {
-    const pct = bp / 100;
-    return Number.isInteger(pct) ? `${pct}%` : `${pct.toFixed(1)}%`;
-  }
-
-  /**
-   * Reconstruct the creator share from the legacy `organization_fee_percentage`
-   * column. WP-4 introduced the via-proposal read path for the payout
-   * pipeline; the active agreement row still carries the legacy dual-write
-   * for narrow consumers (this card included).
-   */
-  function shareFromAgreement(
-    a: CreatorOrganizationAgreement | null | undefined
-  ): number | null {
-    if (!a) return null;
-    return 10000 - a.organizationFeePercentage;
-  }
 
   function formatDate(date: Date | string | null | undefined): string {
     if (!date) return '—';
@@ -125,30 +118,33 @@
 
   // ─── Row state derivation ─────────────────────────────────────────────────
 
+  // An active row's share is the agreement's own `creatorSharePercent`, never
+  // `10000 - organizationFeePercentage` (Codex-fazy6). `null` = the accepted
+  // proposal link is missing: the row is still Active (it IS an agreement)
+  // and shows "—" for the share.
   type RowState =
     | { kind: 'none' }
-    | { kind: 'active'; sharePercent: number; effectiveFrom: Date | string; effectiveUntil: Date | string | null }
+    | { kind: 'active'; sharePercent: number | null; effectiveFrom: Date | string; effectiveUntil: Date | string | null }
     | { kind: 'pending-owner-waiting'; sharePercent: number; roundNumber: number }
     | { kind: 'pending-counter-received'; sharePercent: number; roundNumber: number }
-    | { kind: 'active-with-pending'; sharePercent: number; pendingShare: number; pendingWaitingOnCreator: boolean };
+    | { kind: 'active-with-pending'; sharePercent: number | null; pendingShare: number; pendingWaitingOnCreator: boolean };
 
   function deriveRowState(
-    active: CreatorOrganizationAgreement | null,
+    active: AgreementWithShare | null,
     pending: PendingProposalSummary | null
   ): RowState {
-    const activeShare = shareFromAgreement(active);
-    if (active && activeShare != null && pending) {
+    if (active && pending) {
       return {
         kind: 'active-with-pending',
-        sharePercent: activeShare,
+        sharePercent: active.creatorSharePercent,
         pendingShare: pending.sharePercent,
         pendingWaitingOnCreator: pending.waitingOnRole === 'creator',
       };
     }
-    if (active && activeShare != null) {
+    if (active) {
       return {
         kind: 'active',
-        sharePercent: activeShare,
+        sharePercent: active.creatorSharePercent,
         effectiveFrom: active.effectiveFrom,
         effectiveUntil: active.effectiveUntil,
       };
@@ -184,7 +180,7 @@
     <div class="agreement-card__identity">
       <div class="agreement-card__avatar" aria-hidden="true">
         {#if creator.avatarUrl}
-          <img src={creator.avatarUrl} alt="" loading="lazy" />
+          <img src={getThumbnailUrl(creator.avatarUrl, 'sm')} alt="" loading="lazy" />
         {:else}
           <span class="agreement-card__avatar-fallback">{getInitials(creator.name)}</span>
         {/if}
@@ -249,7 +245,7 @@
               <div class="agreement-card__row-detail-cell">
                 <dt>Share</dt>
                 <dd>
-                  <strong>{formatPercent(row.state.sharePercent)}</strong>
+                  <strong><AgreementShare bps={row.state.sharePercent} /></strong>
                   <span class="agreement-card__row-detail-hint">
                     of post-platform {row.copyLabel} revenue
                   </span>
@@ -262,7 +258,7 @@
                 </div>
                 {#if row.state.effectiveUntil}
                   <div class="agreement-card__row-detail-cell">
-                    <dt>Effective until</dt>
+                    <dt>Review by</dt>
                     <dd>{formatDate(row.state.effectiveUntil)}</dd>
                   </div>
                 {/if}
@@ -271,7 +267,7 @@
                 <div class="agreement-card__row-detail-cell">
                   <dt>Pending share</dt>
                   <dd>
-                    <strong>{formatPercent(row.state.pendingShare)}</strong>
+                    <strong><AgreementShare bps={row.state.pendingShare} /></strong>
                     <span class="agreement-card__row-detail-hint">
                       of post-platform {row.copyLabel} revenue
                     </span>
@@ -284,7 +280,7 @@
               <div class="agreement-card__row-detail-cell">
                 <dt>Proposed share</dt>
                 <dd>
-                  <strong>{formatPercent(row.state.sharePercent)}</strong>
+                  <strong><AgreementShare bps={row.state.sharePercent} /></strong>
                   <span class="agreement-card__row-detail-hint">
                     of post-platform {row.copyLabel} revenue
                   </span>
@@ -301,8 +297,17 @@
           {/if}
         </div>
 
+        {#if !(readOnly && row.state.kind === 'none')}
         <div class="agreement-card__row-actions">
-          {#if row.state.kind === 'none'}
+          {#if readOnly}
+            <button
+              type="button"
+              class="agreement-card__btn agreement-card__btn--ghost"
+              onclick={() => onViewThread(row.revType)}
+            >
+              View thread
+            </button>
+          {:else if row.state.kind === 'none'}
             <!-- SECONDARY, not primary. 32 filled brand-coloured buttons on one
                  page made nothing a decision because everything was equally
                  loud. Primary emphasis is reserved below for the rows that
@@ -343,6 +348,7 @@
             </button>
           {/if}
         </div>
+        {/if}
       </section>
     {/each}
   </div>

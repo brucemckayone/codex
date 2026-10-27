@@ -26,6 +26,7 @@
     resolvePageImageUrl,
   } from '$lib/page-builder/page-images';
   import { uploadPageImageForm } from '$lib/remote/page-images.remote';
+  import { shrinkPhotoAndSubmit } from '$lib/utils/shrink-photo';
   import * as m from '$paraglide/messages';
 
   interface Props {
@@ -189,7 +190,7 @@
         accept="image/png,image/jpeg,image/webp,image/gif"
         {...upload.fields.image.as('file')}
         tabindex="-1"
-        onchange={(event) => event.currentTarget.form?.requestSubmit()}
+        onchange={shrinkPhotoAndSubmit}
       />
       <button
         type="button"

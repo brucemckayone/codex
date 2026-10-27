@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { uuidSchema } from '../primitives';
+import { salePriceCentsSchema, uuidSchema } from '../primitives';
 import { paginationSchema } from '../shared/pagination-schema';
 import { createSearchQuerySchema } from '../shared/search-schema';
 import { checkoutRedirectUrlSchema } from './purchase';
@@ -55,26 +55,26 @@ const baseTierSchema = z.object({
     .trim()
     .max(500, 'Description must be 500 characters or less')
     .optional(),
-  priceMonthly: z
-    .number()
-    .int('Price must be a whole number (pence)')
-    .min(100, 'Minimum price is £1.00 (100 pence)')
-    .max(10000000, 'Maximum price is £100,000'),
-  priceAnnual: z
-    .number()
-    .int('Price must be a whole number (pence)')
-    .min(100, 'Minimum price is £1.00 (100 pence)')
-    .max(10000000, 'Maximum price is £100,000'),
+  priceMonthly: salePriceCentsSchema,
+  priceAnnual: salePriceCentsSchema,
   isRecommended: z.boolean().optional(),
 });
 
-export const createTierSchema = baseTierSchema.refine(
-  (data) => data.priceAnnual <= data.priceMonthly * 12,
-  {
+export const createTierSchema = baseTierSchema
+  .extend({
+    /**
+     * One id per create attempt, minted by the dialog when it opens
+     * (Codex-2hxff.66). The Stripe keys are built from it, so a retry or a
+     * double submit with the same id gets back the tier the first attempt made.
+     * The dialog mints a new one when the values change after a failed submit:
+     * Stripe refuses a reused key with different parameters.
+     */
+    submissionId: uuidSchema,
+  })
+  .refine((data) => data.priceAnnual <= data.priceMonthly * 12, {
     message: 'Annual price must offer equal or better value than monthly',
     path: ['priceAnnual'],
-  }
-);
+  });
 
 export const updateTierSchema = baseTierSchema.partial().refine(
   (data) => {

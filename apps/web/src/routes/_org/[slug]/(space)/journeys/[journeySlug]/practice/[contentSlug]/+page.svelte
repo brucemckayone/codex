@@ -177,6 +177,7 @@
         streamingUrl={practiceData.streamingUrl}
         waveformUrl={practiceData.waveformUrl}
         bodyHtml={practiceData.bodyHtml}
+        bodyUnavailable={practiceData.bodyUnavailable}
         initialProgressSeconds={practiceData.initialProgressSeconds}
         {isComplete}
         {playbackPercent}

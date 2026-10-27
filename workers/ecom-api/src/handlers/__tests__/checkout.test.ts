@@ -12,7 +12,13 @@
  * - Idempotency (duplicate events handled safely)
  */
 
+import type { KVNamespace } from '@cloudflare/workers-types';
 import { CURRENCY } from '@codex/constants';
+import {
+  AfterCommitError,
+  UnsupportedCurrencyError,
+  wrapError,
+} from '@codex/service-errors';
 import {
   createMockHonoContext,
   createMockStripeCheckoutEvent,
@@ -33,6 +39,8 @@ vi.mock('@codex/worker-utils', async (importOriginal) => {
   return {
     ...actual,
     createWebhookServices: vi.fn(),
+    // The receipt: observed, never sent.
+    sendEmailToWorker: vi.fn(),
   };
 });
 
@@ -60,7 +68,8 @@ vi.mock('@codex/validation', () => ({
 }));
 
 import { checkoutSessionMetadataSchema } from '@codex/validation';
-import { createWebhookServices } from '@codex/worker-utils';
+import { createWebhookServices, sendEmailToWorker } from '@codex/worker-utils';
+import { isTransientError } from '../../utils/error-classification';
 // Import after mocks
 import { handleCheckoutCompleted } from '../checkout';
 
@@ -105,6 +114,8 @@ function attachExecutionCtx(
 describe('handleCheckoutCompleted', () => {
   let mockStripe: Stripe;
   let mockCompletePurchase: ReturnType<typeof vi.fn>;
+  let mockMarkCheckoutSessionCompleted: ReturnType<typeof vi.fn>;
+  let mockClaimReceipt: ReturnType<typeof vi.fn>;
   let mockRelease: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
@@ -115,6 +126,18 @@ describe('handleCheckoutCompleted', () => {
       id: 'purchase_123',
       customerId: 'user_123',
       contentId: 'content_456',
+      status: 'completed',
+      duplicateOfPurchaseId: null,
+    });
+    mockMarkCheckoutSessionCompleted = vi.fn().mockResolvedValue(undefined);
+    // As the database claim answers for a live purchase: true once per
+    // purchase, false after (Codex-mat01). Its SQL has its own test in
+    // @codex/purchase (purchase-receipt-claim.integration.test.ts).
+    const receiptsClaimed = new Set<string>();
+    mockClaimReceipt = vi.fn(async (purchaseId: string) => {
+      if (receiptsClaimed.has(purchaseId)) return false;
+      receiptsClaimed.add(purchaseId);
+      return true;
     });
     mockRelease = vi.fn();
 
@@ -124,6 +147,8 @@ describe('handleCheckoutCompleted', () => {
         purchase: {
           completePurchase: mockCompletePurchase,
           completeCoursePurchase: mockCompletePurchase,
+          markCheckoutSessionCompleted: mockMarkCheckoutSessionCompleted,
+          claimReceipt: mockClaimReceipt,
         },
       } as unknown as WebhookServices['services'],
       background: (promise) => promise,
@@ -197,6 +222,32 @@ describe('handleCheckoutCompleted', () => {
       );
     });
 
+    // Codex-2hxff.64 Q1: the agreement resolves when the checkout STARTED, so
+    // a checkout opened before a creator's removal completes at the old split.
+    it.each([
+      ['content', { customerId: 'user_123', contentId: 'content_456' }],
+      ['course', { kind: 'course', customerId: 'user_123', courseId: 'c_1' }],
+    ])("passes the %s session's own created time as offerAt, apart from paidAt", async (_kind, metadata) => {
+      const event = createMockStripeCheckoutEvent({
+        paymentIntentId: 'pi_test_offer_at',
+        metadata,
+      }) as unknown as Stripe.Event;
+      const sessionCreated = 1_759_999_000;
+      const paid = 1_760_000_000;
+      (event as { created: number }).created = paid;
+      (event.data.object as { created?: number }).created = sessionCreated;
+
+      await handleCheckoutCompleted(event, mockStripe, createContext().context);
+
+      expect(mockCompletePurchase).toHaveBeenCalledWith(
+        'pi_test_offer_at',
+        expect.objectContaining({
+          offerAt: new Date(sessionCreated * 1000),
+          paidAt: new Date(paid * 1000),
+        })
+      );
+    });
+
     it('should handle payment_intent as string', async () => {
       const event = createMockStripeCheckoutEvent({
         paymentIntentId: 'pi_string_123',
@@ -217,34 +268,107 @@ describe('handleCheckoutCompleted', () => {
     });
   });
 
-  describe('payment status handling', () => {
-    /**
-     * NOTE: The handler does NOT validate payment_status because:
-     * 1. Stripe only sends checkout.session.completed AFTER payment succeeds
-     * 2. The payment_status field can be 'paid' or 'no_payment_required' (for free trials)
-     * 3. For paid checkouts, payment_status is always 'paid' when this event fires
-     *
-     * If we wanted to add validation, we would check payment_status === 'paid'
-     * and early return otherwise. But this is defensive programming not required
-     * per Stripe's documentation.
-     */
-    it('should process events regardless of payment_status field', async () => {
-      // This tests the ACTUAL behavior - handler processes all events
-      // Stripe guarantees checkout.session.completed only fires after payment
+  // Only a paid session completes a purchase (owner decision, Codex-2hxff.14).
+  // A session completes `unpaid` when a delayed method is used: it is paid
+  // later, if at all, so completing it now would grant what was not paid for.
+  describe('payment status', () => {
+    const metadata = {
+      customerId: 'user_123',
+      contentId: 'content_456',
+      organizationId: 'org_789',
+    };
+
+    it('completes a paid session and marks its checkout completed', async () => {
       const event = createMockStripeCheckoutEvent({
+        sessionId: 'cs_paid',
         paymentStatus: 'paid',
-        metadata: {
-          customerId: 'user_123',
-          contentId: 'content_456',
-          organizationId: 'org_789',
-        },
+        metadata,
       }) as unknown as Stripe.Event;
       const { context, mock } = createContext();
 
       await handleCheckoutCompleted(event, mockStripe, context);
 
       expect(mockCompletePurchase).toHaveBeenCalled();
+      expect(mockMarkCheckoutSessionCompleted).toHaveBeenCalledWith('cs_paid');
       expect(mock._obs.error).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      'unpaid',
+      'no_payment_required',
+    ])('skips a %s session: nothing is completed or marked', async (paymentStatus) => {
+      const event = createMockStripeCheckoutEvent({
+        sessionId: 'cs_not_paid',
+        paymentStatus,
+        metadata,
+      }) as unknown as Stripe.Event;
+      const { context, mock } = createContext();
+
+      await handleCheckoutCompleted(event, mockStripe, context);
+
+      expect(mockCompletePurchase).not.toHaveBeenCalled();
+      expect(mockMarkCheckoutSessionCompleted).not.toHaveBeenCalled();
+      expect(mock._obs.error).toHaveBeenCalledWith(
+        'Skipping unpaid checkout session',
+        expect.objectContaining({ sessionId: 'cs_not_paid', paymentStatus })
+      );
+    });
+
+    it('a failure to record the session paid is logged, not thrown: the purchase stands and the receipt still goes', async () => {
+      mockMarkCheckoutSessionCompleted.mockRejectedValueOnce(
+        new Error('connection reset')
+      );
+      const event = createMockStripeCheckoutEvent({
+        sessionId: 'cs_mark_fails',
+        paymentStatus: 'paid',
+        metadata,
+      }) as unknown as Stripe.Event;
+      const { context, mock } = createContext();
+
+      await expect(
+        handleCheckoutCompleted(event, mockStripe, context)
+      ).resolves.toBeUndefined();
+
+      expect(mockCompletePurchase).toHaveBeenCalled();
+      expect(mock._obs.error).toHaveBeenCalledWith(
+        'Paid checkout session could not be marked completed',
+        expect.objectContaining({ sessionId: 'cs_mark_fails' })
+      );
+      // The handler carries on to the library bump and the receipt.
+      expect(mock._obs.info).toHaveBeenCalledWith(
+        'Purchase completed successfully',
+        expect.anything()
+      );
+    });
+
+    it('a duplicate payment sends no receipt and bumps no library: its refund email says why', async () => {
+      mockCompletePurchase.mockResolvedValueOnce({
+        id: 'purchase_dup',
+        customerId: 'user_123',
+        contentId: 'content_456',
+        status: 'refunded',
+        duplicateOfPurchaseId: 'purchase_first',
+      });
+      const event = createMockStripeCheckoutEvent({
+        sessionId: 'cs_dup',
+        paymentStatus: 'paid',
+        metadata,
+      }) as unknown as Stripe.Event;
+      const { context, mock } = createContext();
+      const executionCtx = attachExecutionCtx(mock);
+
+      await handleCheckoutCompleted(event, mockStripe, context);
+
+      expect(mockMarkCheckoutSessionCompleted).toHaveBeenCalledWith('cs_dup');
+      expect(executionCtx.waitUntil).not.toHaveBeenCalled();
+      expect(mock._obs.warn).toHaveBeenCalledWith(
+        'Duplicate payment refunded instead of completed',
+        expect.objectContaining({ purchaseId: 'purchase_dup' })
+      );
+      expect(mock._obs.info).not.toHaveBeenCalledWith(
+        'Purchase completed successfully',
+        expect.anything()
+      );
     });
   });
 
@@ -638,118 +762,73 @@ describe('handleCheckoutCompleted', () => {
     });
   });
 
+  // Codex-2hxff.23 PAY-25: the handler passes the currency the buyer actually
+  // paid in, and completePurchase refuses anything but GBP before it writes.
+  // It used to pass a GBP literal, so a non-GBP sale was recorded, and its
+  // slices transferred, as pounds.
   describe('currency handling', () => {
-    /**
-     * Platform default currency is GBP (see root CLAUDE.md "Currency" rule).
-     * The handler hardcodes `CURRENCY.GBP` when calling `completePurchase`,
-     * ignoring `session.currency`. This is intentional for the single-currency
-     * MVP — Stripe Checkout sessions are created with GBP upstream.
-     *
-     * If multi-currency support is added later, the handler must read
-     * `session.currency` and these tests must be updated together.
-     */
-    it('passes GBP through to completePurchase for a GBP session', async () => {
+    const sessions = [
+      ['content', { customerId: 'user_123', contentId: 'content_456' }],
+      ['course', { kind: 'course', customerId: 'user_123', courseId: 'c_1' }],
+    ] as const;
+
+    function eventIn(
+      currency: string,
+      metadata: (typeof sessions)[number][1]
+    ): Stripe.Event {
       const event = createMockStripeCheckoutEvent({
-        metadata: {
-          customerId: 'user_123',
-          contentId: 'content_456',
-          organizationId: 'org_789',
-        },
+        metadata: { ...metadata },
       }) as unknown as Stripe.Event;
-      (event.data.object as Stripe.Checkout.Session).currency = 'gbp';
+      (event.data.object as Stripe.Checkout.Session).currency = currency;
+      return event;
+    }
 
-      const { context } = createContext();
-
-      await handleCheckoutCompleted(event, mockStripe, context);
+    it.each(
+      sessions
+    )('passes a GBP %s session through as GBP', async (_kind, metadata) => {
+      await handleCheckoutCompleted(
+        eventIn('gbp', metadata),
+        mockStripe,
+        createContext().context
+      );
 
       expect(mockCompletePurchase).toHaveBeenCalledWith(
         expect.anything(),
-        expect.objectContaining({
-          currency: CURRENCY.GBP,
-        })
+        expect.objectContaining({ currency: CURRENCY.GBP })
       );
     });
 
-    it('still records GBP even when session.currency drifts (defends platform default)', async () => {
-      const event = createMockStripeCheckoutEvent({
-        metadata: {
-          customerId: 'user_123',
-          contentId: 'content_456',
-          organizationId: 'org_789',
-        },
-      }) as unknown as Stripe.Event;
-      // Defence-in-depth: even if a session leaks through with a non-GBP
-      // currency, the handler must persist GBP until multi-currency lands.
-      (event.data.object as Stripe.Checkout.Session).currency = 'eur';
+    it.each(
+      sessions
+    )('a usd %s session is refused, permanently, with no transfer and no receipt', async (_kind, metadata) => {
+      // As purchase-service does (its own tests run the real guard): refuse
+      // anything but GBP before writing.
+      mockCompletePurchase.mockImplementation(
+        async (_pi: string, sale: { currency?: string }) => {
+          if (sale.currency && sale.currency.toLowerCase() !== CURRENCY.GBP) {
+            throw new UnsupportedCurrencyError(sale.currency, [CURRENCY.GBP]);
+          }
+          return { id: 'purchase_123', duplicateOfPurchaseId: null };
+        }
+      );
+      const transfers = vi.fn();
+      const stripe = { transfers: { create: transfers } } as unknown as Stripe;
 
-      const { context } = createContext();
-
-      await handleCheckoutCompleted(event, mockStripe, context);
+      const error = await handleCheckoutCompleted(
+        eventIn('usd', metadata),
+        stripe,
+        createContext().context
+      ).catch((e: unknown) => e);
 
       expect(mockCompletePurchase).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.objectContaining({
-          currency: CURRENCY.GBP,
-        })
-      );
-      expect(mockCompletePurchase).not.toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({ currency: 'usd' })
       );
-      expect(mockCompletePurchase).not.toHaveBeenCalledWith(
-        expect.anything(),
-        expect.objectContaining({ currency: 'eur' })
-      );
-    });
-  });
-
-  describe('payment_status edge cases', () => {
-    /**
-     * Stripe checkout.session.completed fires when:
-     * - payment_status = 'paid' for successful payments
-     * - payment_status = 'no_payment_required' for free trials or $0 checkouts
-     *
-     * Current behavior: Handler processes ALL events regardless of payment_status
-     * because Stripe guarantees the event only fires after successful payment.
-     *
-     * These tests document the current behavior.
-     */
-    it('should process no_payment_required status (free trials/zero-amount)', async () => {
-      const event = createMockStripeCheckoutEvent({
-        paymentStatus: 'no_payment_required',
-        amountTotal: 0,
-        metadata: {
-          customerId: 'user_123',
-          contentId: 'content_456',
-          organizationId: 'org_789',
-        },
-      }) as unknown as Stripe.Event;
-      const { context, mock } = createContext();
-
-      await handleCheckoutCompleted(event, mockStripe, context);
-
-      // Handler processes the event (current behavior)
-      expect(mockCompletePurchase).toHaveBeenCalled();
-      expect(mock._obs.error).not.toHaveBeenCalled();
-    });
-
-    it('should process unpaid status if Stripe sends it', async () => {
-      // This shouldn't happen per Stripe docs, but test defensive behavior
-      const event = createMockStripeCheckoutEvent({
-        paymentStatus: 'unpaid',
-        metadata: {
-          customerId: 'user_123',
-          contentId: 'content_456',
-          organizationId: 'org_789',
-        },
-      }) as unknown as Stripe.Event;
-      const { context } = createContext();
-
-      await handleCheckoutCompleted(event, mockStripe, context);
-
-      // Current behavior: processes anyway
-      // If we want to reject unpaid, add validation in handler
-      expect(mockCompletePurchase).toHaveBeenCalled();
+      expect(error).toBeInstanceOf(UnsupportedCurrencyError);
+      // Permanent: the webhook answers 200 and Stripe does not redeliver.
+      expect(isTransientError(error)).toBe(false);
+      expect(transfers).not.toHaveBeenCalled();
+      expect(sendEmailToWorker).not.toHaveBeenCalled();
     });
   });
 
@@ -820,6 +899,286 @@ describe('handleCheckoutCompleted', () => {
       expect(mockCompletePurchase).toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({ stripeChargeId: null })
+      );
+    });
+  });
+
+  // Codex-2hxff.67: the purchase committed, then the clawback of a refund that
+  // preceded its payout failed (`AfterCommitError`, carrying the purchase).
+  // That must not cancel what follows from the purchase alone.
+  describe('a clawback that fails after the purchase committed', () => {
+    // The refund that came first was partial, so the purchase is still live
+    // and its buyer is owed one receipt (Codex-mat01). One refunded in full
+    // gets none: see "one receipt per purchase" below.
+    const purchase = {
+      id: 'purchase_123',
+      customerId: 'user_123',
+      contentId: 'content_456',
+      status: 'completed',
+      duplicateOfPurchaseId: null,
+    };
+    const afterCommit = (cause: Error) =>
+      new AfterCommitError('clawback failed', purchase, cause);
+    const permanent = () =>
+      Object.assign(new Error('No such charge'), {
+        type: 'StripeInvalidRequestError',
+        statusCode: 404,
+      });
+    const transient = () =>
+      Object.assign(new Error('Connection to Stripe failed'), {
+        type: 'StripeConnectionError',
+      });
+    const kv = () =>
+      ({
+        get: vi.fn().mockResolvedValue(null),
+        put: vi.fn().mockResolvedValue(undefined),
+      }) as unknown as KVNamespace;
+
+    it.each([
+      ['content', { customerId: 'user_123', contentId: 'content_456' }],
+      ['course', { kind: 'course', customerId: 'user_123', courseId: 'c_1' }],
+    ])('permanent (%s) → the session is marked and the library bumped, then it rejects', async (_kind, metadata) => {
+      const failure = afterCommit(permanent());
+      mockCompletePurchase.mockRejectedValueOnce(failure);
+      const event = createMockStripeCheckoutEvent({
+        sessionId: 'cs_after_commit',
+        metadata,
+      }) as unknown as Stripe.Event;
+      const { context, mock } = createContext({ CACHE_KV: kv() });
+      const executionCtx = attachExecutionCtx(mock);
+
+      await expect(
+        handleCheckoutCompleted(event, mockStripe, context)
+      ).rejects.toBe(failure);
+
+      expect(mockMarkCheckoutSessionCompleted).toHaveBeenCalledWith(
+        'cs_after_commit'
+      );
+      expect(mock._obs.info).toHaveBeenCalledWith(
+        expect.stringContaining('completed successfully'),
+        expect.objectContaining({ purchaseId: 'purchase_123' })
+      );
+      expect(executionCtx.waitUntil).toHaveBeenCalled();
+      expect(mockRelease).toHaveBeenCalledOnce();
+    });
+
+    it.each([
+      ['content', { customerId: 'user_123', contentId: 'content_456' }],
+      ['course', { kind: 'course', customerId: 'user_123', courseId: 'c_1' }],
+    ])('transient (%s) → the session record and the library bump run, the receipt waits; the redelivery sends it once', async (_kind, metadata) => {
+      const failure = afterCommit(transient());
+      mockCompletePurchase.mockRejectedValueOnce(failure);
+      const event = createMockStripeCheckoutEvent({
+        sessionId: 'cs_after_commit_transient',
+        metadata,
+      }) as unknown as Stripe.Event;
+      (event.data.object as Stripe.Checkout.Session).customer_details = {
+        email: 'buyer@example.com',
+        name: 'Buyer',
+      } as Stripe.Checkout.Session.CustomerDetails;
+      const { context, mock } = createContext({ CACHE_KV: kv() });
+      const executionCtx = attachExecutionCtx(mock);
+
+      await expect(
+        handleCheckoutCompleted(event, mockStripe, context)
+      ).rejects.toBe(failure);
+
+      expect(mockMarkCheckoutSessionCompleted).toHaveBeenCalledWith(
+        'cs_after_commit_transient'
+      );
+      expect(executionCtx.waitUntil).toHaveBeenCalled();
+      expect(sendEmailToWorker).not.toHaveBeenCalled();
+
+      // The redelivery: the clawback finishes, and the receipt goes once. It
+      // did not create the purchase, and still sends: the claim decides, not
+      // which delivery made the row.
+      await handleCheckoutCompleted(event, mockStripe, context);
+      // A third delivery finds the receipt claimed.
+      await handleCheckoutCompleted(event, mockStripe, context);
+
+      expect(sendEmailToWorker).toHaveBeenCalledTimes(1);
+      expect(sendEmailToWorker).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.objectContaining({ templateName: 'purchase-receipt' })
+      );
+    });
+  });
+
+  // Codex-mat01 (owner decision 2026-10-25): ONE receipt per purchase,
+  // claimed on `purchases.receipt_sent_at` by whichever delivery first finds
+  // the purchase live. Not "only the delivery that created it".
+  describe('one receipt per purchase', () => {
+    const sessions = [
+      ['content', { customerId: 'user_123', contentId: 'content_456' }],
+      ['course', { kind: 'course', customerId: 'user_123', courseId: 'c_1' }],
+    ] as const;
+
+    function paidBy(
+      metadata: (typeof sessions)[number][1],
+      email: string | null = 'buyer@example.com'
+    ): Stripe.Event {
+      const event = createMockStripeCheckoutEvent({
+        sessionId: 'cs_receipt',
+        paymentIntentId: 'pi_receipt',
+        metadata: { ...metadata },
+      }) as unknown as Stripe.Event;
+      (event.data.object as Stripe.Checkout.Session).customer_details = {
+        email,
+        name: 'Buyer',
+      } as Stripe.Checkout.Session.CustomerDetails;
+      return event;
+    }
+
+    const receipts = () =>
+      vi
+        .mocked(sendEmailToWorker)
+        .mock.calls.filter(
+          ([, , email]) => email.templateName === 'purchase-receipt'
+        );
+
+    it.each(
+      sessions
+    )('the same %s checkout delivered twice sends one receipt', async (_kind, metadata) => {
+      const event = paidBy(metadata);
+
+      await handleCheckoutCompleted(event, mockStripe, createContext().context);
+      await handleCheckoutCompleted(event, mockStripe, createContext().context);
+
+      expect(mockCompletePurchase).toHaveBeenCalledTimes(2);
+      expect(mockClaimReceipt).toHaveBeenCalledTimes(2);
+      expect(mockClaimReceipt).toHaveBeenCalledWith('purchase_123');
+      expect(receipts()).toHaveLength(1);
+      expect(receipts()[0]?.[2]).toMatchObject({
+        to: 'buyer@example.com',
+        data: expect.objectContaining({ priceFormatted: '£29.99' }),
+      });
+    });
+
+    it.each(
+      sessions
+    )('a %s purchase refunded in full before its checkout landed sends none', async (_kind, metadata) => {
+      // Rebuilt `refunded` by the refund (ensurePurchaseDataPresent): the
+      // claim finds no live purchase, as the database answers for it.
+      mockCompletePurchase.mockResolvedValueOnce({
+        id: 'purchase_refunded_first',
+        status: 'refunded',
+        duplicateOfPurchaseId: null,
+      });
+      mockClaimReceipt.mockResolvedValueOnce(false);
+      const { context, mock } = createContext();
+
+      await handleCheckoutCompleted(paidBy(metadata), mockStripe, context);
+
+      expect(mockClaimReceipt).toHaveBeenCalledWith('purchase_refunded_first');
+      expect(receipts()).toHaveLength(0);
+      expect(mock._obs.info).toHaveBeenCalledWith(
+        'Purchase receipt already sent or not due',
+        { purchaseId: 'purchase_refunded_first' }
+      );
+    });
+
+    it.each(
+      sessions
+    )('a %s purchase partly refunded first is still live and gets one receipt', async (_kind, metadata) => {
+      // The refund rebuilt it `completed`, so this delivery did not create
+      // it; under "only the creating delivery" this buyer got no receipt.
+      mockCompletePurchase.mockResolvedValue({
+        id: 'purchase_partly_refunded',
+        status: 'completed',
+        duplicateOfPurchaseId: null,
+      });
+      const event = paidBy(metadata);
+
+      await handleCheckoutCompleted(event, mockStripe, createContext().context);
+      await handleCheckoutCompleted(event, mockStripe, createContext().context);
+
+      expect(receipts()).toHaveLength(1);
+    });
+
+    it('with no buyer email, nothing is claimed, so nothing is used up', async () => {
+      await handleCheckoutCompleted(
+        paidBy(sessions[0][1], null),
+        mockStripe,
+        createContext().context
+      );
+
+      expect(mockClaimReceipt).not.toHaveBeenCalled();
+      expect(sendEmailToWorker).not.toHaveBeenCalled();
+    });
+
+    it('a claim a retry can fix rejects with no receipt, so the redelivery claims and sends it', async () => {
+      const outage = Object.assign(new Error('Connection terminated'), {
+        code: 'ECONNRESET',
+      });
+      mockClaimReceipt.mockRejectedValueOnce(outage);
+      const event = paidBy(sessions[0][1]);
+
+      await expect(
+        handleCheckoutCompleted(event, mockStripe, createContext().context)
+      ).rejects.toBe(outage);
+      expect(isTransientError(outage)).toBe(true);
+      expect(receipts()).toHaveLength(0);
+
+      await handleCheckoutCompleted(event, mockStripe, createContext().context);
+      expect(receipts()).toHaveLength(1);
+    });
+
+    it('any other failed claim is logged and the receipt is not sent; the delivery still succeeds', async () => {
+      mockClaimReceipt.mockRejectedValueOnce(
+        new Error('column does not exist')
+      );
+      const { context, mock } = createContext();
+
+      await expect(
+        handleCheckoutCompleted(paidBy(sessions[0][1]), mockStripe, context)
+      ).resolves.toBeUndefined();
+
+      expect(receipts()).toHaveLength(0);
+      expect(mock._obs.error).toHaveBeenCalledWith(
+        'Purchase receipt could not be claimed, so it was not sent',
+        expect.objectContaining({ purchaseId: 'purchase_123' })
+      );
+    });
+
+    // The receipt is lost by design here, so this line is its only trace.
+    // The service's handleError wraps the failure as "An unexpected error
+    // occurred", and drizzle's own message is the SQL and its bound values.
+    it("a failed claim's log carries an errorId and the driver's root cause, never the query", async () => {
+      const missingColumn = Object.assign(
+        new Error('column "receipt_sent_at" does not exist'),
+        { code: '42703' }
+      );
+      mockClaimReceipt.mockRejectedValueOnce(
+        wrapError(
+          Object.assign(
+            new Error('Failed query: update "purchases"\nparams: purchase_123'),
+            { cause: missingColumn }
+          )
+        )
+      );
+      const { context, mock } = createContext();
+
+      await handleCheckoutCompleted(
+        paidBy(sessions[0][1]),
+        mockStripe,
+        context
+      );
+
+      expect(mock._obs.error).toHaveBeenCalledWith(
+        'Purchase receipt could not be claimed, so it was not sent',
+        expect.objectContaining({
+          errorId: expect.any(String),
+          purchaseId: 'purchase_123',
+          cause: {
+            name: 'Error',
+            message: 'column "receipt_sent_at" does not exist',
+            code: '42703',
+          },
+        })
+      );
+      expect(JSON.stringify(mock._obs.error.mock.calls)).not.toContain(
+        'Failed query'
       );
     });
   });

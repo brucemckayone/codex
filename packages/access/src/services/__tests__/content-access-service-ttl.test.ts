@@ -36,9 +36,10 @@ interface TxReturn {
 
 /**
  * Construct a ContentAccessService with db.transaction stubbed to return
- * a fixed access-verified payload. This skips the access-decision logic
- * entirely — covered by the integration suite — and lets us observe the
- * argument passed to the R2 signer in isolation.
+ * a fixed access-verified payload, in the callback's `{ target, body }`
+ * shape (no body: these calls never ask for one). This skips the
+ * access-decision logic entirely — covered by the integration suite — and
+ * lets us observe the argument passed to the R2 signer in isolation.
  *
  * The stub deliberately does not invoke the callback; a real transaction
  * callback would issue many queries against `tx.query.*` which have no
@@ -54,7 +55,7 @@ function buildService(tx: TxReturn) {
   };
 
   const stubDb = {
-    transaction: vi.fn(async (_fn: unknown) => tx),
+    transaction: vi.fn(async (_fn: unknown) => ({ target: tx })),
   } as unknown as StubDb;
 
   // PurchaseService is not exercised because access-decision logic is

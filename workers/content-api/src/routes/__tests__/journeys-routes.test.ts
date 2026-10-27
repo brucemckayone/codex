@@ -40,6 +40,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const accessSpies = {
   canEnterCourse: vi.fn(),
+  getCourseEntry: vi.fn(),
   canView: vi.fn(),
   getStreamingUrl: vi.fn(),
 };
@@ -163,6 +164,7 @@ const ENROLLMENTS = [
       nextPracticeSlug: 'where-am-i-holding',
       nextPracticeTitle: 'Where am I holding?',
     },
+    disputeHold: null,
   },
 ];
 
@@ -180,6 +182,7 @@ const MEDIA_PRACTICE = {
   },
   streamingUrl: null,
   waveformUrl: null,
+  body: null,
   bodyHtml: null,
   initialProgressSeconds: 0,
   playlist: [],
@@ -196,7 +199,7 @@ const WRITTEN_PRACTICE = {
     contentType: 'written' as const,
     durationSeconds: null,
   },
-  bodyHtml: '<p>Set your intention.</p>',
+  body: { contentBody: null, contentBodyJson: { type: 'doc', content: [] } },
 };
 
 const PAGE_ID = '2c000000-0000-4000-8000-0000000000f0';
@@ -365,6 +368,10 @@ beforeEach(() => {
   // uncalled, and a "service called with …" assertion would fail for a reason
   // that has nothing to do with the route.
   accessSpies.canEnterCourse.mockResolvedValue(true);
+  accessSpies.getCourseEntry.mockResolvedValue({
+    canEnter: true,
+    disputeHold: null,
+  });
   accessSpies.canView.mockResolvedValue(true);
   accessSpies.getStreamingUrl.mockResolvedValue(STREAM_RESULT);
   journeySpies.listPublishedCourses.mockResolvedValue(COURSE_CARDS);
@@ -453,24 +460,46 @@ describe('GET /api/journeys/user/enrollments — member journeys shelf', () => {
 // ─── GET /api/access/courses/:courseId/can-enter ─────────────────────────────
 
 describe('GET /api/access/courses/:courseId/can-enter — entitlement gate', () => {
-  it('authenticated → 200 { data: { canEnter } }, resolver called with session id + courseId', async () => {
+  it('authenticated → 200 { data: { canEnter, disputeHold } }, resolver called with session id + courseId', async () => {
     const res = await dispatch(
       buildApp(USER),
       getReq(`/api/access/courses/${COURSE_ID}/can-enter`)
     );
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ data: { canEnter: true } });
-    expect(accessSpies.canEnterCourse).toHaveBeenCalledWith(USER.id, COURSE_ID);
+    expect(await res.json()).toEqual({
+      data: { canEnter: true, disputeHold: null },
+    });
+    expect(accessSpies.getCourseEntry).toHaveBeenCalledWith(USER.id, COURSE_ID);
   });
 
   it('resolver denies → 200 { canEnter: false } (no throw, no leak)', async () => {
-    accessSpies.canEnterCourse.mockResolvedValue(false);
+    accessSpies.getCourseEntry.mockResolvedValue({
+      canEnter: false,
+      disputeHold: null,
+    });
     const res = await dispatch(
       buildApp(USER),
       getReq(`/api/access/courses/${COURSE_ID}/can-enter`)
     );
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ data: { canEnter: false } });
+    expect(await res.json()).toEqual({
+      data: { canEnter: false, disputeHold: null },
+    });
+  });
+
+  it('a refusal a payment dispute explains carries its kind (Codex-2hxff.60)', async () => {
+    accessSpies.getCourseEntry.mockResolvedValue({
+      canEnter: false,
+      disputeHold: 'purchase_dispute',
+    });
+    const res = await dispatch(
+      buildApp(USER),
+      getReq(`/api/access/courses/${COURSE_ID}/can-enter`)
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      data: { canEnter: false, disputeHold: 'purchase_dispute' },
+    });
   });
 
   it('unauthenticated → 401, resolver NOT called', async () => {
@@ -479,7 +508,7 @@ describe('GET /api/access/courses/:courseId/can-enter — entitlement gate', () 
       getReq(`/api/access/courses/${COURSE_ID}/can-enter`)
     );
     expect(res.status).toBe(401);
-    expect(accessSpies.canEnterCourse).not.toHaveBeenCalled();
+    expect(accessSpies.getCourseEntry).not.toHaveBeenCalled();
   });
 
   it('non-uuid courseId → 400, resolver NOT called', async () => {
@@ -488,7 +517,7 @@ describe('GET /api/access/courses/:courseId/can-enter — entitlement gate', () 
       getReq('/api/access/courses/not-a-uuid/can-enter')
     );
     expect(res.status).toBe(400);
-    expect(accessSpies.canEnterCourse).not.toHaveBeenCalled();
+    expect(accessSpies.getCourseEntry).not.toHaveBeenCalled();
   });
 });
 
@@ -1451,7 +1480,7 @@ describe('GET /api/journeys/courses/:courseId/practices/:contentSlug — in-cour
     );
   });
 
-  it('written practice → 200 with bodyHtml and NO stream signing', async () => {
+  it('written practice → 200 with its stored body and NO stream signing', async () => {
     journeySpies.getInCoursePractice.mockResolvedValue(WRITTEN_PRACTICE);
     const res = await dispatch(
       buildApp(USER),
@@ -1459,11 +1488,14 @@ describe('GET /api/journeys/courses/:courseId/practices/:contentSlug — in-cour
     );
     expect(res.status).toBe(200);
     const payload = (await res.json()) as {
-      data: { streamingUrl: string | null; bodyHtml: string | null };
+      data: { streamingUrl: string | null; body: unknown };
     };
     expect(payload.data.streamingUrl).toBeNull();
-    expect(payload.data.bodyHtml).toBe(WRITTEN_PRACTICE.bodyHtml);
+    expect(payload.data.body).toEqual(WRITTEN_PRACTICE.body);
     expect(accessSpies.getStreamingUrl).not.toHaveBeenCalled();
+    // A stored body (or, for media, an HLS token) is stored nowhere, as
+    // /stream's (Codex-hyz1c).
+    expect(res.headers.get('Cache-Control')).toBe('private, no-store');
   });
 
   it('NOT entitled → 200 { data: null }, practice read NEVER called', async () => {

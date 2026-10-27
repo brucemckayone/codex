@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'vitest';
+import * as m from '$paraglide/messages';
 import { mount, unmount } from '$tests/utils/component-test-utils.svelte';
 import ContentCard from './ContentCard.svelte';
 
@@ -218,5 +219,48 @@ describe('ContentCard — article title-in-cover', () => {
     });
     expect(document.querySelector('.cc__cover--brand')).toBeTruthy();
     expect(document.querySelector('img.cc__image')).toBeTruthy();
+  });
+});
+
+// A purchase paused by an open payment dispute stays in the library, dimmed
+// and labelled (Codex-2hxff.60). The label is always shown (the CSS keys on
+// `data-access-cta="disputed"`; jsdom applies no component styles) and goes
+// to the item's own page, which explains and offers Contact support.
+describe('ContentCard — access state', () => {
+  let component: ReturnType<typeof mount> | null = null;
+  const HREF = '/content/breathwork-for-deep-sleep';
+  const cta = () =>
+    document.querySelector<HTMLAnchorElement>('.cc__access-cta');
+
+  afterEach(() => {
+    if (component) {
+      unmount(component);
+      component = null;
+    }
+    document.body.innerHTML = '';
+  });
+
+  test("'disputed' dims the card and labels it, linking to the card's own page", () => {
+    component = render({ href: HREF, accessState: 'disputed' });
+    expect(card()?.classList.contains('cc--access-dimmed')).toBe(true);
+    expect(card()?.getAttribute('data-access-state')).toBe('disputed');
+    expect(cta()?.textContent?.trim()).toBe(m.access_paused_dispute_label());
+    expect(cta()?.getAttribute('data-access-cta')).toBe('disputed');
+    expect(cta()?.getAttribute('href')).toBe(HREF);
+  });
+
+  test("'revoked' keeps its reactivate label and the subscriptions link", () => {
+    component = render({ href: HREF, accessState: 'revoked' });
+    expect(card()?.classList.contains('cc--access-dimmed')).toBe(true);
+    expect(cta()?.textContent?.trim()).toBe(
+      m.library_access_subscription_ended()
+    );
+    expect(cta()?.getAttribute('href')).toBe('/account/subscriptions');
+  });
+
+  test("'active' draws no label and no dim", () => {
+    component = render({ href: HREF, accessState: 'active' });
+    expect(card()?.classList.contains('cc--access-dimmed')).toBe(false);
+    expect(cta()).toBeNull();
   });
 });

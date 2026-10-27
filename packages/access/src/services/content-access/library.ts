@@ -2,23 +2,24 @@
  * User content-library aggregation for ContentAccessService.
  *
  * Extracted from ContentAccessService (Codex-2pryk.1.1) — behaviour-preserving.
- * Builds a user's library across five source arms (purchased, membership,
- * subscription, engaged-free, engaged-followers), then merges, dedupes, sorts,
- * and paginates.
+ * Builds a user's library across five source arms (purchased — purchases and
+ * support grants — membership, subscription, engaged-free, engaged-followers),
+ * then merges, dedupes, sorts, and paginates.
  */
 
 import {
+  ACCESS_GRANTING_SUBSCRIPTION_STATUSES,
   CONTENT_ACCESS_TYPE,
   CONTENT_STATUS,
   ORGANIZATION_ROLES,
   PURCHASE_STATUS,
-  SUBSCRIPTION_STATUS,
 } from '@codex/constants';
 import { type DatabaseClient, toIso } from '@codex/database';
 import {
   content,
   courseStages,
   courses,
+  entitlements,
   mediaItems,
   organizationFollowers,
   organizationMemberships,
@@ -30,6 +31,7 @@ import {
   videoPlayback,
 } from '@codex/database/schema';
 import type { ObservabilityClient } from '@codex/observability';
+import type { PurchaseService } from '@codex/purchase';
 import type { ListUserLibraryInput } from '@codex/validation';
 import {
   and,
@@ -38,10 +40,30 @@ import {
   gt,
   ilike,
   inArray,
+  isNotNull,
   isNull,
+  notExists,
   or,
+  type SQL,
   sql,
 } from 'drizzle-orm';
+import { resolvePracticeThumbnail } from '../practice-thumbnail';
+import { resolveDisputePause } from './access-decision';
+
+/**
+ * Is this content on offer to a subscription whose current period began at
+ * `periodStart`? Published content always is. Content taken off sale because
+ * its creator left the organisation (Codex-2hxff.64) stays on offer until the
+ * subscriber's next renewal — while `off_sale_at >= periodStart` — the rule
+ * `decideContentAccess` applies to the subscription arms. Anything else that
+ * is unpublished (an ordinary draft has no `off_sale_at`) is not.
+ *
+ * Raw `sql`, never drizzle's `or()`, which is typed `SQL | undefined`: `and()`
+ * drops an undefined argument silently, and losing this would list drafts.
+ */
+function onOfferToSubscriptionPeriod(periodStart: Date): SQL {
+  return sql`(${content.status} = ${CONTENT_STATUS.PUBLISHED} OR (${content.offSaleAt} IS NOT NULL AND ${content.offSaleAt} >= ${periodStart}))`;
+}
 
 /**
  * User library item with content, access type, purchase, and progress
@@ -69,7 +91,8 @@ export type UserLibraryItem = {
   };
   /**
    * How the user has access:
-   * - `'purchased'`     — completed (or pending-webhook) purchase row exists
+   * - `'purchased'`     — completed purchase row exists, or a live support
+   *                       grant (`entitlements.source = 'grant'`)
    * - `'membership'`    — user holds an org management role (owner/admin/creator)
    * - `'subscription'`  — active subscription gates `subscribers`/tier-paid content
    * - `'free'`          — `accessType='free'` content the user has *engaged with*
@@ -86,6 +109,18 @@ export type UserLibraryItem = {
   purchase: {
     purchasedAt: string;
     priceCents: number;
+    /**
+     * When a chargeback on this purchase opened; set while it is open AND a
+     * dispute is why the item is refused (`resolveDisputePause`,
+     * Codex-2hxff.60), so the content page shows the dispute notice. The
+     * item stays on the shelf, paused: a win clears the mark, and a loss
+     * refunds the purchase, which then leaves the shelf. `null` for a
+     * support grant, while a subscription, a grant or a staff role still
+     * opens the item, and while it is refused for a reason no dispute
+     * explains. Decided at fetch time: the client keeps the row until the
+     * next library version bump.
+     */
+    disputedAt: string | null;
   } | null;
   progress: {
     positionSeconds: number;
@@ -131,11 +166,30 @@ export interface UserLibraryResponse {
  * @returns Paginated list of content with progress
  */
 export async function listUserLibrary(
-  deps: { db: DatabaseClient; obs: ObservabilityClient },
+  deps: {
+    db: DatabaseClient;
+    obs: ObservabilityClient;
+    /**
+     * The env-owned CDN base. An item with no custom thumbnail carries only
+     * its video poster's R2 KEY, which needs this in front to be a URL
+     * (Codex-kk9nv.6). Absent, that item draws its no-picture state.
+     */
+    r2PublicUrlBase?: string;
+    /** For the access decision a disputed purchase's row is checked against. */
+    purchaseService: PurchaseService;
+  },
   userId: string,
   input: ListUserLibraryInput
 ): Promise<UserLibraryResponse> {
-  const { db, obs } = deps;
+  const { db, obs, r2PublicUrlBase, purchaseService } = deps;
+
+  // Without the CDN base, every tile that has only a video poster draws its
+  // no-picture state. Say so, or a config regression blanks them unnoticed.
+  if (!r2PublicUrlBase) {
+    obs.warn('Library poster thumbnails suppressed: no R2_PUBLIC_URL_BASE', {
+      userId,
+    });
+  }
 
   obs.info('Listing user library', {
     userId,
@@ -148,6 +202,10 @@ export async function listUserLibrary(
   });
 
   const offset = (input.page - 1) * input.limit;
+
+  // One clock for the whole request, passed as a parameter rather than
+  // `NOW()` — Step 4c/4d below explains why.
+  const asOf = new Date();
 
   // ── Step 1: Resolve active membership org IDs ─────────────────────
   const membershipConditions = [
@@ -202,8 +260,7 @@ export async function listUserLibrary(
           where: and(
             eq(subscriptions.userId, userId),
             inArray(subscriptions.status, [
-              SUBSCRIPTION_STATUS.ACTIVE,
-              SUBSCRIPTION_STATUS.CANCELLING,
+              ...ACCESS_GRANTING_SUBSCRIPTION_STATUSES,
             ]),
             // Paused while a chargeback on one of its invoices is open.
             isNull(subscriptions.disputedAt),
@@ -217,7 +274,24 @@ export async function listUserLibrary(
 
   // ── Step 2: Build shared filter conditions ────────────────────────
   const buildContentFilters = () => {
-    const conditions: ReturnType<typeof eq>[] = [];
+    // A deleted organisation's content is gone to every arm (owner decision,
+    // 2026-10-25: "Nobody"; Codex-7ncbh), so it leaves the shelf too rather
+    // than linger as a card that 404s. An anti-join, as content-service's
+    // orgIsLive, so it holds whatever each union branch joins; orgless
+    // content has no org row to match and stays.
+    const conditions: SQL[] = [
+      notExists(
+        db
+          .select({ one: sql`1` })
+          .from(organizations)
+          .where(
+            and(
+              eq(organizations.id, content.organizationId),
+              isNotNull(organizations.deletedAt)
+            )
+          )
+      ),
+    ];
     if (input.contentType && input.contentType !== 'all') {
       conditions.push(eq(content.contentType, input.contentType));
     }
@@ -233,7 +307,7 @@ export async function listUserLibrary(
   };
 
   const buildProgressFilters = () => {
-    const conditions: ReturnType<typeof eq>[] = [];
+    const conditions: SQL[] = [];
     if (input.filter === 'completed') {
       conditions.push(eq(videoPlayback.completed, true));
     } else if (input.filter === 'in_progress') {
@@ -261,12 +335,18 @@ export async function listUserLibrary(
   const contentFilters = buildContentFilters();
   const progressFilters = buildProgressFilters();
 
-  // ── Shared cross-arm exclusion: "not already acquired by purchase" ──
+  // A support grant is live while not revoked and not past an optional
+  // expiry — the access resolver's `liveGrant`. Raw `sql`, not drizzle's
+  // `or()`, which is typed `SQL | undefined`.
+  const liveGrantAsOf = sql`(${entitlements.revokedAt} IS NULL AND (${entitlements.expiresAt} IS NULL OR ${entitlements.expiresAt} > ${asOf}))`;
+
+  // ── Shared cross-arm exclusion: "not already acquired" ─────────────
   //
   // Every non-purchase arm excludes content the user has bought (or is
-  // mid-buying) so `queryPurchased` stays the single owner of those rows and
-  // the accessType tag is never wrong. Both `completed` (webhook landed) and
-  // `pending` (Stripe redirect beat the webhook) count as "already owned".
+  // mid-buying), or holds a live support grant for, so `queryPurchased` stays
+  // the single owner of those rows and the accessType tag is never wrong.
+  // Both `completed` (webhook landed) and `pending` (Stripe redirect beat the
+  // webhook) count as "already owned".
   //
   // MUST be NOT EXISTS, never `id NOT IN (SELECT content_id ...)`.
   // `purchases.content_id` is NULL for COURSE purchases (those rows carry
@@ -277,12 +357,18 @@ export async function listUserLibrary(
   // across the membership, subscription, free, and followers arms at once.
   // The correlated NOT EXISTS below is null-safe: a NULL `content_id` simply
   // never equals `content.id`, so it matches nothing and the row survives.
-  const notAcquiredByPurchase = sql`NOT EXISTS (
+  const notAcquired = sql`(NOT EXISTS (
     SELECT 1 FROM ${purchases}
     WHERE ${purchases.customerId} = ${userId}
       AND ${purchases.contentId} = ${content.id}
       AND ${purchases.status} IN (${PURCHASE_STATUS.COMPLETED}, ${PURCHASE_STATUS.PENDING})
-  )`;
+  ) AND NOT EXISTS (
+    SELECT 1 FROM ${entitlements}
+    WHERE ${entitlements.userId} = ${userId}
+      AND ${entitlements.contentId} = ${content.id}
+      AND ${entitlements.source} = 'grant'
+      AND ${liveGrantAsOf}
+  ))`;
 
   // ── Helper: map a row to UserLibraryItem ──────────────────────────
   const mapProgress = (row: {
@@ -303,7 +389,41 @@ export async function listUserLibrary(
     };
   };
 
+  /**
+   * Is the item paused by a payment dispute? The predicate the stream names
+   * its refusal with answers, so the card is dimmed exactly when the content
+   * page shows the dispute notice. If it fails, the row keeps its mark (the
+   * purchase IS disputed) and the page still loads; the failure is logged.
+   */
+  const pausedByDispute = async (contentId: string): Promise<boolean> => {
+    try {
+      return (
+        (await resolveDisputePause(
+          { db, purchaseService },
+          userId,
+          contentId
+        )) != null
+      );
+    } catch (error) {
+      obs.error(
+        'Library: access check failed for a disputed purchase; shown paused',
+        {
+          userId,
+          contentId,
+          error: error instanceof Error ? error.message : String(error),
+        }
+      );
+      return true;
+    }
+  };
+
   // ── Step 3: Query purchased items ─────────────────────────────────
+  // "Purchased" is what the user acquired one-off: completed purchases AND
+  // live support grants (`entitlements.source = 'grant'`, Codex-2hxff.21),
+  // which stand in for a purchase. One UNION ALL feeds one paginated query, so
+  // `accessType = 'purchased'` pages over both. A grant on an item the user
+  // also bought is dropped inside the union — the purchase row carries the
+  // price paid — so the arm's count is honest.
   const queryPurchased = async () => {
     if (
       input.accessType === 'membership' ||
@@ -314,22 +434,64 @@ export async function listUserLibrary(
       return { items: [] as UserLibraryItem[], count: 0 };
     }
 
-    const conditions = [
-      eq(purchases.customerId, userId),
-      eq(purchases.status, PURCHASE_STATUS.COMPLETED),
-      ...contentFilters,
-      ...progressFilters,
-    ];
-    if (input.organizationId) {
-      conditions.push(eq(purchases.organizationId, input.organizationId));
-    }
+    // One completed purchase per item (uq_purchases_completed_customer_content): no second-copy check.
+    const purchasedRows = db
+      .select({
+        contentId: purchases.contentId,
+        acquiredAt: purchases.createdAt,
+        amountPaidCents: purchases.amountPaidCents,
+        disputedAt: purchases.disputedAt,
+      })
+      .from(purchases)
+      .where(
+        and(
+          eq(purchases.customerId, userId),
+          eq(purchases.status, PURCHASE_STATUS.COMPLETED),
+          ...(input.organizationId
+            ? [eq(purchases.organizationId, input.organizationId)]
+            : [])
+        )
+      );
+
+    // Deleted content leaves the shelf.
+    const grantedRows = db
+      .select({
+        contentId: entitlements.contentId,
+        acquiredAt: entitlements.grantedAt,
+        amountPaidCents: sql<number>`0`,
+        // A grant is never disputed.
+        disputedAt: sql<Date | null>`NULL`,
+      })
+      .from(entitlements)
+      .innerJoin(content, eq(content.id, entitlements.contentId))
+      .where(
+        and(
+          eq(entitlements.userId, userId),
+          eq(entitlements.source, 'grant'),
+          liveGrantAsOf,
+          isNull(content.deletedAt),
+          ...(input.organizationId
+            ? [eq(entitlements.organizationId, input.organizationId)]
+            : []),
+          sql`NOT EXISTS (
+            SELECT 1 FROM ${purchases}
+            WHERE ${purchases.customerId} = ${userId}
+              AND ${purchases.contentId} = ${entitlements.contentId}
+              AND ${purchases.status} = ${PURCHASE_STATUS.COMPLETED}
+          )`
+        )
+      );
+
+    const acquired = purchasedRows.unionAll(grantedRows).as('acquired');
+
+    const conditions = [...contentFilters, ...progressFilters];
 
     const sortClause =
       input.sortBy === 'title'
         ? content.title
         : input.sortBy === 'duration'
           ? sql`COALESCE(${mediaItems.durationSeconds}, 0)`
-          : purchases.createdAt;
+          : acquired.acquiredAt;
 
     const baseFrom = db
       .select({
@@ -343,15 +505,16 @@ export async function listUserLibrary(
         mediaDurationSeconds: mediaItems.durationSeconds,
         orgId: content.organizationId,
         orgSlug: organizations.slug,
-        purchasedAt: purchases.createdAt,
-        amountPaidCents: purchases.amountPaidCents,
+        purchasedAt: acquired.acquiredAt,
+        amountPaidCents: acquired.amountPaidCents,
+        disputedAt: acquired.disputedAt,
         progressPositionSeconds: videoPlayback.positionSeconds,
         progressDurationSeconds: videoPlayback.durationSeconds,
         progressCompleted: videoPlayback.completed,
         progressUpdatedAt: videoPlayback.updatedAt,
       })
-      .from(purchases)
-      .innerJoin(content, eq(content.id, purchases.contentId))
+      .from(acquired)
+      .innerJoin(content, eq(content.id, acquired.contentId))
       .leftJoin(mediaItems, eq(mediaItems.id, content.mediaItemId))
       .leftJoin(organizations, eq(organizations.id, content.organizationId))
       .leftJoin(
@@ -364,8 +527,8 @@ export async function listUserLibrary(
 
     const countQuery = db
       .select({ count: sql<number>`count(*)::int` })
-      .from(purchases)
-      .innerJoin(content, eq(content.id, purchases.contentId))
+      .from(acquired)
+      .innerJoin(content, eq(content.id, acquired.contentId))
       .leftJoin(mediaItems, eq(mediaItems.id, content.mediaItemId))
       .leftJoin(
         videoPlayback,
@@ -390,22 +553,41 @@ export async function listUserLibrary(
         slug: row.contentSlug,
         title: row.contentTitle,
         description: row.contentDescription || '',
-        thumbnailUrl: row.contentThumbnailUrl ?? row.mediaThumbnailKey ?? null,
+        thumbnailUrl: resolvePracticeThumbnail(
+          row.contentThumbnailUrl,
+          row.mediaThumbnailKey,
+          r2PublicUrlBase
+        ),
         contentType: row.contentType ?? 'video',
         durationSeconds: row.mediaDurationSeconds ?? 0,
         organizationId: row.orgId,
         organizationSlug: row.orgSlug ?? null,
       },
       accessType: 'purchased' as const,
+      // A grant reads as a £0 purchase made when it was granted.
       purchase: {
         purchasedAt: row.purchasedAt.toISOString(),
         priceCents: row.amountPaidCents,
+        disputedAt: toIso(row.disputedAt),
       },
       progress: mapProgress(row),
       // Populated by `attachJourneyProvenance` once the page is final — one
       // lookup for the page beats one per arm.
       journeys: [],
     }));
+
+    // A disputed purchase is paused only while a dispute is why the item is
+    // refused (Codex-2hxff.60): a covering subscription, a support grant or a
+    // staff role keeps it playing, and a refusal no dispute explains (say the
+    // item became course-only) shows its own gate, so neither card may say
+    // "paused". Disputed rows only, in parallel.
+    await Promise.all(
+      items.map(async ({ content: item, purchase }) => {
+        if (purchase?.disputedAt && !(await pausedByDispute(item.id))) {
+          purchase.disputedAt = null;
+        }
+      })
+    );
 
     return { items, count: countResult[0]?.count ?? 0 };
   };
@@ -438,9 +620,9 @@ export async function listUserLibrary(
       membershipContentFilter,
       eq(content.status, CONTENT_STATUS.PUBLISHED),
       isNull(content.deletedAt),
-      // Cross-arm exclusion — see `notAcquiredByPurchase`. Without it a
+      // Cross-arm exclusion — see `notAcquired`. Without it a
       // mid-flight purchase leaks into membership with the wrong accessType.
-      notAcquiredByPurchase,
+      notAcquired,
       ...contentFilters,
       ...progressFilters,
     ];
@@ -508,7 +690,11 @@ export async function listUserLibrary(
         slug: row.contentSlug,
         title: row.contentTitle,
         description: row.contentDescription || '',
-        thumbnailUrl: row.contentThumbnailUrl ?? row.mediaThumbnailKey ?? null,
+        thumbnailUrl: resolvePracticeThumbnail(
+          row.contentThumbnailUrl,
+          row.mediaThumbnailKey,
+          r2PublicUrlBase
+        ),
         contentType: row.contentType ?? 'video',
         durationSeconds: row.mediaDurationSeconds ?? 0,
         organizationId: row.orgId,
@@ -548,6 +734,12 @@ export async function listUserLibrary(
     //
     // Since each subscription may be to a different org with a different tier,
     // we build an OR of per-subscription conditions.
+    //
+    // Publication is decided PER SUBSCRIPTION too, because it depends on the
+    // subscription's period (Codex-2hxff.64): an item taken off sale when its
+    // creator left the org stays in the library until this subscription's next
+    // renewal — the same rule `decideContentAccess` applies, so the shelf never
+    // lists an item the player would refuse, nor hides one it would play.
     const subConditions = activeSubscriptions.map((sub) => {
       const tierSortOrder = sub.tier.sortOrder;
       return and(
@@ -561,7 +753,8 @@ export async function listUserLibrary(
               AND ${subscriptionTiers.organizationId} = ${sub.organizationId}
               AND ${subscriptionTiers.deletedAt} IS NULL
           )`
-        )
+        ),
+        onOfferToSubscriptionPeriod(sub.currentPeriodStart)
       );
     });
 
@@ -584,15 +777,16 @@ export async function listUserLibrary(
       // Per-org tier-sortOrder check below (subConditions) decides whether this
       // user's tier is high enough for any given item.
       sql`${content.includedInTierId} IS NOT NULL`,
-      eq(content.status, CONTENT_STATUS.PUBLISHED),
       isNull(content.deletedAt),
-      // Must belong to one of the user's subscribed orgs (with tier check)
+      // Must belong to one of the user's subscribed orgs (with tier check),
+      // and be on offer to that subscription — published, or off sale within
+      // its current period (see `subConditions`).
       subscribedOrgScope,
-      // Cross-arm exclusion — see `notAcquiredByPurchase`. Matters most in
+      // Cross-arm exclusion — see `notAcquired`. Matters most in
       // this arm: paid + tier-gated content qualifies for BOTH it and the
       // purchased arm (see 1b6f14a0), so without the exclusion a mid-flight
       // purchase surfaces with the wrong accessType until the webhook lands.
-      notAcquiredByPurchase,
+      notAcquired,
       // Exclude content from management orgs (owner/admin/creator see
       // all their org's content via the membership query).
       ...(managementOrgIds.length > 0
@@ -670,7 +864,11 @@ export async function listUserLibrary(
         slug: row.contentSlug,
         title: row.contentTitle,
         description: row.contentDescription || '',
-        thumbnailUrl: row.contentThumbnailUrl ?? row.mediaThumbnailKey ?? null,
+        thumbnailUrl: resolvePracticeThumbnail(
+          row.contentThumbnailUrl,
+          row.mediaThumbnailKey,
+          r2PublicUrlBase
+        ),
         contentType: row.contentType ?? 'video',
         durationSeconds: row.mediaDurationSeconds ?? 0,
         organizationId: row.orgId,
@@ -724,9 +922,13 @@ export async function listUserLibrary(
   // where it is NOT immaterial must not copy the pattern blindly.
   //
   // Correct on the current neon-http driver too, so it does not wait for
-  // Hyperdrive (Codex-s1i7h).
-  const asOf = new Date();
+  // Hyperdrive (Codex-s1i7h). `asOf` is declared at the top of the function:
+  // the grant liveness in Step 3 and `notAcquired` read it too.
 
+  const grantingStatusList = sql.join(
+    ACCESS_GRANTING_SUBSCRIPTION_STATUSES.map((status) => sql`${status}`),
+    sql`, `
+  );
   const relationshipPredicate = or(
     sql`EXISTS (SELECT 1 FROM ${organizationFollowers}
                 WHERE ${organizationFollowers.organizationId} = ${content.organizationId}
@@ -734,7 +936,7 @@ export async function listUserLibrary(
     sql`EXISTS (SELECT 1 FROM ${subscriptions}
                 WHERE ${subscriptions.userId} = ${userId}
                   AND ${subscriptions.organizationId} = ${content.organizationId}
-                  AND ${subscriptions.status} IN (${SUBSCRIPTION_STATUS.ACTIVE}, ${SUBSCRIPTION_STATUS.CANCELLING})
+                  AND ${subscriptions.status} IN (${grantingStatusList})
                   AND ${subscriptions.disputedAt} IS NULL
                   AND ${subscriptions.currentPeriodEnd} > ${asOf})`
   );
@@ -748,6 +950,20 @@ export async function listUserLibrary(
     throw new Error('[library] relationship predicate collapsed to undefined');
   }
 
+  // Follower-gated content taken off sale when its creator left the org
+  // (Codex-2hxff.64) stays for a SUBSCRIBER until their next renewal — the
+  // `followers_subscription` arm of `decideContentAccess`. A follow alone is
+  // not a payment, so a non-subscribed follower does not keep it. Same
+  // subscription predicate as `relationshipPredicate`, plus the period test.
+  const offSaleWithinSubscribedPeriod = sql`(${content.offSaleAt} IS NOT NULL
+    AND EXISTS (SELECT 1 FROM ${subscriptions}
+                WHERE ${subscriptions.userId} = ${userId}
+                  AND ${subscriptions.organizationId} = ${content.organizationId}
+                  AND ${subscriptions.status} IN (${grantingStatusList})
+                  AND ${subscriptions.disputedAt} IS NULL
+                  AND ${subscriptions.currentPeriodEnd} > ${asOf}
+                  AND ${content.offSaleAt} >= ${subscriptions.currentPeriodStart}))`;
+
   const buildRelationshipQuery = async (
     bucketAccessType:
       | typeof CONTENT_ACCESS_TYPE.FREE
@@ -758,15 +974,19 @@ export async function listUserLibrary(
       bucketAccessType === CONTENT_ACCESS_TYPE.FREE
         ? eq(content.isFree, true)
         : eq(content.isFollowerGated, true),
-      eq(content.status, CONTENT_STATUS.PUBLISHED),
+      // Free content is on offer only while published. Follower-gated content
+      // is also on offer to a subscriber while it is off sale within their
+      // period (see `offSaleWithinSubscribedPeriod`).
+      bucketAccessType === CONTENT_ACCESS_TYPE.FREE
+        ? sql`(${content.status} = ${CONTENT_STATUS.PUBLISHED} AND ${relationshipPredicate})`
+        : sql`((${content.status} = ${CONTENT_STATUS.PUBLISHED} AND ${relationshipPredicate}) OR ${offSaleWithinSubscribedPeriod})`,
       isNull(content.deletedAt),
       sql`${content.organizationId} IS NOT NULL`,
-      relationshipPredicate,
-      // Cross-arm exclusion — see `notAcquiredByPurchase`. Defensive here:
+      // Cross-arm exclusion — see `notAcquired`. Defensive here:
       // free/followers items shouldn't be priced, but a flag-flip
       // (paid → free) could create overlap. Keeps the priority contract
       // explicit rather than relying on the flags staying clean.
-      notAcquiredByPurchase,
+      notAcquired,
       // Cross-arm exclusion: management orgs are surfaced by queryMembership
       // which returns ALL of an org's content for owners/admins/creators.
       ...(managementOrgIds.length > 0
@@ -846,7 +1066,11 @@ export async function listUserLibrary(
         slug: row.contentSlug,
         title: row.contentTitle,
         description: row.contentDescription || '',
-        thumbnailUrl: row.contentThumbnailUrl ?? row.mediaThumbnailKey ?? null,
+        thumbnailUrl: resolvePracticeThumbnail(
+          row.contentThumbnailUrl,
+          row.mediaThumbnailKey,
+          r2PublicUrlBase
+        ),
         contentType: row.contentType ?? 'video',
         durationSeconds: row.mediaDurationSeconds ?? 0,
         organizationId: row.orgId,

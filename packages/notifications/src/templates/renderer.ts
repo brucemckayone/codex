@@ -245,6 +245,7 @@ const TEMPLATE_TOKENS: Record<string, string[]> = {
     'errorSummary',
     'retryUrl',
   ],
+  'transcoding-owner-alert': ['headline', 'summary', 'details'],
 
   // Creator
   'new-sale': [
@@ -336,6 +337,23 @@ const TEMPLATE_TOKENS: Record<string, string[]> = {
     'deepLinkUrl',
     'note',
   ],
+  // Removal from an organisation (Codex-2hxff.64).
+  'removed-from-organisation': [
+    'recipientName',
+    'orgName',
+    'removedOn',
+    'agreementsEnded',
+    'contentOffSale',
+    'coursesOffSale',
+    'courseSubscriptionsEnding',
+  ],
+  'course-no-longer-offered': [
+    'userName',
+    'courseTitle',
+    'orgName',
+    'accessUntil',
+    'manageUrl',
+  ],
   'agreement-terminated': [
     'recipientName',
     'orgName',
@@ -410,6 +428,8 @@ const TRANSACTIONAL_TEMPLATES = new Set([
   'member-removed',
   'transcoding-complete',
   'transcoding-failed',
+  // To the platform owner about the pipeline itself (Codex-l2c48.6).
+  'transcoding-owner-alert',
   'connect-account-status',
   // Payout notifications (WP-10 — Codex-69t7c.10): touch billing state.
   'creator-connect-needed',
@@ -423,6 +443,9 @@ const TRANSACTIONAL_TEMPLATES = new Set([
   'agreement-declined',
   'agreement-terminated',
   'agreement-expiring-soon',
+  // Removal from an organisation (Codex-2hxff.64): what it ended.
+  'removed-from-organisation',
+  'course-no-longer-offered',
   // Ownership transfer (Codex-2hxff.2): who receives the org's money.
   'ownership-offered',
   'ownership-transferred',

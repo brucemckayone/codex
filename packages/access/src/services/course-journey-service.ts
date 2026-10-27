@@ -93,7 +93,26 @@ import type {
   SectionDesign,
 } from '@codex/shared-types';
 import { PAGE_STYLE_IDS } from '@codex/validation';
-import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  ne,
+  or,
+  sql,
+} from 'drizzle-orm';
+import {
+  type DisputeHold,
+  resolveCourseDisputePauses,
+} from './content-access/access-decision';
+import {
+  assertCourseCreatorCanBePaid,
+  courseEarnsMoney,
+} from './course-payouts';
 import { pageRevision } from './page-revision';
 import { resolvePracticeThumbnail } from './practice-thumbnail';
 
@@ -748,8 +767,8 @@ export class CourseJourneyService extends BaseService {
    * off-critical-path payload of the sales page. PUBLIC: NO auth, NO `canView` (HARDENING §E). The clips reuse the
    * SAME public preview path the org-landing hero consumes —
    * `mediaItems.hlsPreviewKey` resolved to a CDN URL by plain concatenation with
-   * `R2_PUBLIC_URL_BASE` (mirrors `content-api/routes/public.ts` `resolveR2Urls`);
-   * NO R2 signing is ever involved. A clip is `null` when the course has no such
+   * `R2_PUBLIC_URL_BASE` (mirrors `toPublicItem` in
+   * `content-api/routes/r2-public-urls.ts`); NO R2 signing is ever involved. A clip is `null` when the course has no such
    * media, its preview has not transcoded (`hlsPreviewKey` null), or no CDN base
    * is configured. Returns `null` when the course is not published/non-deleted.
    */
@@ -902,8 +921,8 @@ export class CourseJourneyService extends BaseService {
   }
 
   /**
-   * Build the dashboard payload (SPEC §11). Returns `null` when the course is not
-   * a published, non-deleted course. The route has already confirmed the caller
+   * Build the dashboard payload (SPEC §11). Returns `null` when the course is
+   * deleted or was never released (see {@link loadCourseSummaryById}). The route has already confirmed the caller
    * `canEnterCourse` (entitlement gate), so this only projects the data.
    *
    * NOTE (Round-D): if the entitled user has no `course_enrollments` row yet, a
@@ -966,10 +985,10 @@ export class CourseJourneyService extends BaseService {
    * ordered playlist, the user's course-wide completions, and the resume
    * position. `streamingUrl` / `waveformUrl` are left `null` — the route fills
    * them for media via `ContentAccessService.getStreamingUrl` (the single
-   * signing + `canView` authority). `bodyHtml` carries the stored body for
-   * `written` practices.
+   * signing + `canView` authority). `body` carries the stored body for
+   * `written` practices, both columns, for the web to render.
    *
-   * Returns `null` when the practice is not a published, non-deleted practice of
+   * Returns `null` when the practice is not a released, non-deleted practice of
    * the course.
    */
   async getInCoursePractice(
@@ -998,13 +1017,18 @@ export class CourseJourneyService extends BaseService {
       }
       if (!stageMatch || !practiceMatch) return null;
 
-      const [completions, progressSeconds, bodyHtml] = await Promise.all([
+      const [completions, progressSeconds, body] = await Promise.all([
         this.loadCompletions(userId, stages),
         this.loadResumeSeconds(userId, practiceMatch.contentId),
         practiceMatch.contentType === 'written'
           ? this.loadContentBody(practiceMatch.contentId)
           : Promise.resolve(null),
       ]);
+      // A written practice's row deleted between the curriculum read and this
+      // one is gone, not "a practice with no text": the player 404s.
+      if (practiceMatch.contentType === 'written' && body === null) {
+        return null;
+      }
 
       return {
         course,
@@ -1013,7 +1037,9 @@ export class CourseJourneyService extends BaseService {
         // Signed URLs are minted by the route via ContentAccessService.
         streamingUrl: null,
         waveformUrl: null,
-        bodyHtml,
+        body,
+        // For one release only, for a web older than this worker (Codex-sb3sr).
+        bodyHtml: body?.contentBody ?? null,
         initialProgressSeconds: progressSeconds,
         playlist: flattenPlaylist(stages),
         completions,
@@ -1159,11 +1185,13 @@ export class CourseJourneyService extends BaseService {
       // THREE queries for the whole shelf, not three PER COURSE. The Neon HTTP
       // driver makes one round trip per statement, so the old per-row
       // `loadStages` + `loadCompletions` pair was O(N) round trips in
-      // catalogue size (Codex-kgrdp.23 defect 2).
-      const stagesByCourse = await this.loadStagesForCourses(
-        rows.map((row) => row.courseId),
-        r2PublicUrlBase
-      );
+      // catalogue size (Codex-kgrdp.23 defect 2). The dispute pause is
+      // batched the same way, and runs beside them.
+      const courseIds = rows.map((row) => row.courseId);
+      const [stagesByCourse, pauses] = await Promise.all([
+        this.loadStagesForCourses(courseIds, r2PublicUrlBase),
+        this.disputePausesForShelf(userId, organizationId, courseIds),
+      ]);
       const allCompletions = await this.loadCompletions(
         userId,
         [...stagesByCourse.values()].flat()
@@ -1204,11 +1232,38 @@ export class CourseJourneyService extends BaseService {
           },
           enrollmentSource: row.source,
           progress: rollUpEnrollment(stages, completions),
+          disputeHold: pauses.get(row.courseId) ?? null,
         });
       }
       return summaries;
     } catch (error) {
       this.handleError(error, 'listEnrolledCourses');
+    }
+  }
+
+  /**
+   * The shelf's paused courses ({@link resolveCourseDisputePauses}). A failed
+   * read must not blank the shelf: it is logged at error, and every card
+   * then reads unpaused, while each lesson's own page still says why it is
+   * refused.
+   */
+  private async disputePausesForShelf(
+    userId: string,
+    organizationId: string,
+    courseIds: readonly string[]
+  ): Promise<ReadonlyMap<string, DisputeHold>> {
+    try {
+      return await resolveCourseDisputePauses(this.db, userId, courseIds);
+    } catch (error) {
+      this.obs.error(
+        'Course shelf: dispute pause check failed; shown unpaused',
+        {
+          userId,
+          organizationId,
+          error: error instanceof Error ? error.message : String(error),
+        }
+      );
+      return new Map();
     }
   }
 
@@ -2360,6 +2415,15 @@ export class CourseJourneyService extends BaseService {
    * page would then claim a subject whose status/slug it cannot govern, which is
    * the divergence this method exists to close, so it throws (mirrors
    * {@link updateJourneyOffer}'s zero-row guard) and rolls the save back.
+   *
+   * PAYOUTS (Codex-2hxff.14) — this is the one place a course goes live, so a
+   * course that earns money (`courseEarnsMoney`) is refused here with
+   * `CreatorPayoutsRequiredError` unless its creator can be paid, rolling the
+   * page save back with it. Only the move INTO published is checked: every
+   * autosave of a live page re-sends `published`, and it must not start failing
+   * because the creator's payouts lapsed afterwards. A price or tier added to a
+   * course that is already live is refused where it is written
+   * ({@link updateJourneyOffer}, `CourseAccessService.setTierAccess`).
    */
   private async cascadeCourseFromPage(
     tx: Parameters<Parameters<typeof this.txDb.transaction>[0]>[0],
@@ -2393,6 +2457,35 @@ export class CourseJourneyService extends BaseService {
       if (otherLivePage) courseStatus = CONTENT_STATUS.PUBLISHED;
     }
 
+    if (courseStatus === CONTENT_STATUS.PUBLISHED) {
+      const [course] = await tx
+        .select({
+          status: courses.status,
+          creatorId: courses.creatorId,
+          priceCents: courses.priceCents,
+        })
+        .from(courses)
+        .where(
+          and(
+            eq(courses.id, input.courseId),
+            eq(courses.organizationId, input.organizationId),
+            isNull(courses.deletedAt)
+          )
+        )
+        .limit(1);
+      // A missing course falls through to the zero-row guard below.
+      if (
+        course &&
+        course.status !== CONTENT_STATUS.PUBLISHED &&
+        (await courseEarnsMoney(tx, input.organizationId, {
+          id: input.courseId,
+          priceCents: course.priceCents,
+        }))
+      ) {
+        await assertCourseCreatorCanBePaid(tx, course.creatorId);
+      }
+    }
+
     const updated = await tx
       .update(courses)
       .set({
@@ -2400,6 +2493,10 @@ export class CourseJourneyService extends BaseService {
         title: input.title,
         status: courseStatus,
         ...(input.publishedAt ? { publishedAt: input.publishedAt } : {}),
+        // Back on sale: clears the departure stamp (Codex-2hxff.64).
+        ...(courseStatus === CONTENT_STATUS.PUBLISHED
+          ? { offSaleAt: null }
+          : {}),
       })
       .where(
         and(
@@ -2437,6 +2534,12 @@ export class CourseJourneyService extends BaseService {
    * match zero rows, re-opening the very divergence this method closes, so it
    * throws instead.
    *
+   * A one-off price set or changed on a course that is already LIVE needs its
+   * creator to be payable (Codex-2hxff.14), as publishing a priced course does
+   * ({@link cascadeCourseFromPage}) — else the whole write is refused with
+   * `CreatorPayoutsRequiredError`. Turning the price off, or leaving it as it
+   * is, is never refused, and a draft is left to the publish check.
+   *
    * @returns the persisted offer (the caller's saved baseline).
    */
   async updateJourneyOffer(
@@ -2457,12 +2560,14 @@ export class CourseJourneyService extends BaseService {
       // An ENABLED path with no price is the silent-failure shape: the sales page
       // advertises a way in that the checkout cannot price, so it shows nothing.
       // Reject it at the boundary rather than persisting an unsellable offer.
-      if (offer.oneOffEnabled && offer.oneOffPriceCents === null) {
+      // `0` counts as no price: `priceCentsSchema` lets it through as "not
+      // sold", and a £0 course is one the checkout refuses as `no_price`.
+      if (offer.oneOffEnabled && !offer.oneOffPriceCents) {
         throw new ValidationError(
           'Set a one-off price, or turn the one-off path off'
         );
       }
-      if (offer.subscriptionEnabled && offer.subscriptionPriceCents === null) {
+      if (offer.subscriptionEnabled && !offer.subscriptionPriceCents) {
         throw new ValidationError(
           'Set a monthly price, or turn the course subscription off'
         );
@@ -2512,11 +2617,37 @@ export class CourseJourneyService extends BaseService {
           );
 
         if (isCoursePage && existing.subjectId) {
+          const nextPriceCents = offer.oneOffEnabled
+            ? offer.oneOffPriceCents
+            : null;
+
+          const [course] = await tx
+            .select({
+              status: courses.status,
+              creatorId: courses.creatorId,
+              priceCents: courses.priceCents,
+            })
+            .from(courses)
+            .where(
+              and(
+                eq(courses.id, existing.subjectId),
+                eq(courses.organizationId, organizationId),
+                isNull(courses.deletedAt)
+              )
+            )
+            .limit(1);
+          // A missing course falls through to the zero-row guard below.
+          if (
+            course?.status === CONTENT_STATUS.PUBLISHED &&
+            (nextPriceCents ?? 0) > 0 &&
+            nextPriceCents !== course.priceCents
+          ) {
+            await assertCourseCreatorCanBePaid(tx, course.creatorId);
+          }
+
           const updated = await tx
             .update(courses)
-            .set({
-              priceCents: offer.oneOffEnabled ? offer.oneOffPriceCents : null,
-            })
+            .set({ priceCents: nextPriceCents })
             .where(
               and(
                 eq(courses.id, existing.subjectId),
@@ -3146,8 +3277,9 @@ export class CourseJourneyService extends BaseService {
    * The DB half of the cover upload: `ImageProcessingService.processCourseCover`
    * owns the R2 variants and returns the base key, and this owns the scoped
    * write — the same split `categories` uses, so no scope logic is duplicated in
-   * the image layer. Pass `null` to clear (the R2 objects are left in place;
-   * keys are deterministic per course, so a later re-upload overwrites them).
+   * the image layer. Pass `null` to clear; the caller then deletes the folder
+   * the key named (`ImageProcessingService.deleteDroppedStill`), because each
+   * upload goes to a new folder and nothing would overwrite it (Codex-kk9nv.5).
    *
    * @returns the persisted key (null when cleared).
    */
@@ -3195,10 +3327,8 @@ export class CourseJourneyService extends BaseService {
    * owns the R2 variants and returns the base key, this owns the scoped write.
    * Same split, same reason — no scope logic in the image layer.
    *
-   * Pass `null` to clear. The R2 objects are left in place: keys are
-   * deterministic per course, so a later re-upload overwrites them rather than
-   * accumulating orphans, and no client is ever handed a raw key so the
-   * unreferenced variants are unreachable in the meantime.
+   * Pass `null` to clear; the caller then deletes the folder the key named,
+   * as {@link setCourseCoverImageKey} describes.
    *
    * Clearing does NOT leave the hero empty — it drops the page back to A32's next
    * link, `heroMediaId`'s poster frame, and then to the synthetic plate. That is
@@ -3253,10 +3383,8 @@ export class CourseJourneyService extends BaseService {
    * returns the base key, this owns the scoped write. Same split, same reason —
    * no scope logic in the image layer.
    *
-   * Pass `null` to clear. The R2 objects are left in place: keys are
-   * deterministic per course, so a later re-upload overwrites them rather than
-   * accumulating orphans, and no client is ever handed a raw key so the
-   * unreferenced variants are unreachable in the meantime.
+   * Pass `null` to clear; the caller then deletes the folder the key named,
+   * as {@link setCourseCoverImageKey} describes.
    *
    * Clearing leaves the letter signed with the typeset name alone: the upload is
    * the signature's only source (Codex-61zsk.47). `signatureMediaId`'s poster
@@ -3421,11 +3549,10 @@ export class CourseJourneyService extends BaseService {
    * {@link resolveCourseIdForPage}) AND read the three still keys it holds
    * right now.
    *
-   * The still-upload routes call this BEFORE writing R2, for two reasons: a
-   * foreign or non-course page must 404 before any object exists, and the
-   * failure cleanup around the later key write has to know whether the row
-   * ALREADY addressed the deterministic keys (Codex-29fs0). A replacement must
-   * not delete them; a first upload, or one after a clear, must.
+   * The still routes call this BEFORE writing R2 or clearing a key, for two
+   * reasons: a foreign or non-course page must 404 before any object exists,
+   * and the folder the row names now is the one to delete once the row has
+   * moved off it (Codex-29fs0, Codex-kk9nv.5).
    */
   async getCourseStillImageKeys(
     organizationId: string,
@@ -4128,7 +4255,21 @@ export class CourseJourneyService extends BaseService {
   }
 
   /**
-   * Course summary + org slug for a PUBLISHED, non-deleted course id.
+   * Course summary + org slug for a non-deleted course that has been released.
+   *
+   * Only entitled readers reach this: every caller's route gates on
+   * `canEnterCourse` first. So a course taken off sale after someone bought it
+   * still opens for them (Codex-2hxff.65; Codex-yo4px kept it on their shelf,
+   * but the player then refused to open it). "Released" is `publishedAt` set
+   * (it is never cleared when a course goes back to draft), or `published` for
+   * a legacy row without one. A course that was never released does not open.
+   *
+   * Nor does a course of a deleted organisation, to anyone (owner decision,
+   * 2026-10-25: "Nobody"; Codex-7ncbh). Soft-deleting an org leaves its
+   * courses and their entitlements in place, and a written practice reaches
+   * its reader through this read alone (no stream), so the dashboard and the
+   * player both stop here. `courses.organization_id` is NOT NULL, so the join
+   * always finds the org row.
    */
   private async loadCourseSummaryById(
     courseId: string
@@ -4146,8 +4287,12 @@ export class CourseJourneyService extends BaseService {
       .where(
         and(
           eq(courses.id, courseId),
-          eq(courses.status, CONTENT_STATUS.PUBLISHED),
-          isNull(courses.deletedAt)
+          or(
+            eq(courses.status, CONTENT_STATUS.PUBLISHED),
+            isNotNull(courses.publishedAt)
+          ),
+          isNull(courses.deletedAt),
+          isNull(organizations.deletedAt)
         )
       )
       .limit(1);
@@ -4164,7 +4309,11 @@ export class CourseJourneyService extends BaseService {
 
   /**
    * Load the ordered curriculum: non-deleted stages (by `sortOrder`) each with
-   * their PUBLISHED, non-deleted practice content (by `stage_practices.sortOrder`).
+   * their released, non-deleted practice content (by `stage_practices.sortOrder`).
+   * "Released" as in {@link loadCourseSummaryById}: a practice taken off sale
+   * stays in a buyer's course, while a never-released draft does not appear.
+   * Only entitled readers reach this (dashboard, in-course player, library);
+   * the public sell page reads {@link loadPublicStages}, published only.
    * Two bounded queries (stages, then practices) so a stage with no practices
    * still appears. `durationSeconds` / `thumbnailUrl` fall back to the media item
    * (the picture resolved against `r2PublicUrlBase`, never a bare key).
@@ -4255,7 +4404,10 @@ export class CourseJourneyService extends BaseService {
       .where(
         and(
           inArray(stagePractices.stageId, stageIds),
-          eq(content.status, CONTENT_STATUS.PUBLISHED),
+          or(
+            eq(content.status, CONTENT_STATUS.PUBLISHED),
+            isNotNull(content.publishedAt)
+          ),
           isNull(content.deletedAt)
         )
       )
@@ -4482,16 +4634,24 @@ export class CourseJourneyService extends BaseService {
   }
 
   /**
-   * Stored body for a `written` practice. Returned verbatim — HTML sanitisation
-   * for the rendered body is deferred to Phase 2 (the FE renderer / a
-   * server-side sanitizer); there is no content-body renderer to reuse today.
+   * Stored body for a `written` practice: BOTH columns, because the editor
+   * writes TipTap JSON to `contentBodyJson` and leaves `contentBody` null, so
+   * the markdown column alone rendered an editor-written practice empty
+   * (Codex-woj7k). Returned as stored; the web renders and sanitises it with
+   * the standalone content page's `renderContentBody`.
    */
-  private async loadContentBody(contentId: string): Promise<string | null> {
+  private async loadContentBody(
+    contentId: string
+  ): Promise<InCoursePracticeData['body']> {
     const row = await this.db.query.content.findFirst({
-      where: eq(content.id, contentId),
-      columns: { contentBody: true },
+      where: and(eq(content.id, contentId), isNull(content.deletedAt)),
+      columns: { contentBody: true, contentBodyJson: true },
     });
-    return row?.contentBody ?? null;
+    if (!row) return null;
+    return {
+      contentBody: row.contentBody,
+      contentBodyJson: row.contentBodyJson,
+    };
   }
 }
 

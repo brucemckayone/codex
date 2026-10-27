@@ -13,11 +13,14 @@
 import {
   checkContentSlugSchema,
   contentQuerySchema,
-  createSearchQuerySchema,
+  PAGINATION_MAX_LIMIT,
+  PAGINATION_MAX_PAGE,
+  publicContentArgsSchema,
 } from '@codex/validation';
 import { z } from 'zod';
 import { command, form, getRequestEvent, query } from '$app/server';
 import { createServerApi } from '$lib/server/api';
+import { forwardClientErrors } from '$lib/server/forward-client-errors';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Content List Query
@@ -52,6 +55,50 @@ export const listContent = query(
     if (params?.sortOrder) searchParams.set('sortOrder', params.sortOrder);
 
     return api.content.list(searchParams.toString() ? searchParams : undefined);
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Org Browse Query
+// ─────────────────────────────────────────────────────────────────────────────
+
+const browseContentSchema = z.object({
+  organizationId: z.string().uuid(),
+  page: z.coerce.number().int().min(1).max(PAGINATION_MAX_PAGE).default(1),
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(PAGINATION_MAX_LIMIT)
+    .default(PAGINATION_MAX_LIMIT),
+});
+
+/**
+ * One page of an organisation's published content, from every creator
+ * (`GET /api/content/browse`, the read behind /explore's signed-in sorts).
+ * Unlike `listContent`, which is scoped to the signed-in creator, this spans
+ * the whole org catalogue; course-only content is never in it. Backs the
+ * Studio grant picker (Codex-2hxff.21).
+ *
+ * Usage in Svelte:
+ * ```svelte
+ * <script>
+ *   const page1 = browseContent({ organizationId: orgId, page: 1 });
+ * </script>
+ * ```
+ */
+export const browseContent = query(
+  browseContentSchema,
+  async ({ organizationId, page, limit }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    return api.content.browse(
+      new URLSearchParams({
+        organizationId,
+        page: String(page),
+        limit: String(limit),
+      })
+    );
   }
 );
 
@@ -152,30 +199,12 @@ export const checkContentSlug = query(
 // Public Content List Query (no auth required)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const publicContentQueryParamsSchema = z.object({
-  orgId: z.string().uuid(),
-  slug: z.string().max(500).optional(),
-  page: z.number().min(1).default(1).optional(),
-  limit: z.number().min(1).max(50).default(20).optional(),
-  contentType: z.enum(['video', 'audio', 'written']).optional(),
-  // Mirror the worker's slug-charset guard: forbids the public-cache-key
-  // delimiter ':' so a crafted value can't poison the public content cache.
-  // Unicode-aware to match `slugify` (accented slugs like `café-del-mar`).
-  category: z
-    .string()
-    .max(120)
-    .regex(/^[\p{L}\p{N}-]+$/u)
-    .optional(),
-  search: createSearchQuerySchema(255),
-  sort: z.enum(['newest', 'oldest', 'title']).default('newest').optional(),
-  creatorId: z.string().uuid().optional(),
-  featured: z.boolean().optional(),
-});
-
 /**
  * List published content for an organization (public, no auth required)
  *
  * Used by org landing and explore pages to display content to unauthenticated visitors.
+ * Its arguments are `publicContentArgsSchema`, built from the API's own field
+ * rules so that an argument the API would refuse is refused here as a 400.
  *
  * Usage in Svelte:
  * ```svelte
@@ -185,7 +214,7 @@ const publicContentQueryParamsSchema = z.object({
  * ```
  */
 export const getPublicContent = query(
-  publicContentQueryParamsSchema,
+  publicContentArgsSchema,
   async (params) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
@@ -296,11 +325,15 @@ export const deleteContent = command(z.string().uuid(), async (id) => {
  *
  * Calls POST /api/content/:id/publish. The backend enforces business rules
  * (e.g., media must be ready for video/audio content before publishing).
+ *
+ * A refusal the creator can act on keeps its message, such as "Set up payouts
+ * before publishing…" (Codex-2hxff.14): a bare `ApiError` would read "An
+ * unexpected error occurred" in production. A 5xx stays sanitised.
  */
 export const publishContent = command(z.string().uuid(), async (id) => {
   const { platform, cookies } = getRequestEvent();
   const api = createServerApi(platform, cookies);
-  return api.content.publish(id);
+  return forwardClientErrors(() => api.content.publish(id));
 });
 
 /**
@@ -311,7 +344,7 @@ export const publishContent = command(z.string().uuid(), async (id) => {
 export const unpublishContent = command(z.string().uuid(), async (id) => {
   const { platform, cookies } = getRequestEvent();
   const api = createServerApi(platform, cookies);
-  return api.content.unpublish(id);
+  return forwardClientErrors(() => api.content.unpublish(id));
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

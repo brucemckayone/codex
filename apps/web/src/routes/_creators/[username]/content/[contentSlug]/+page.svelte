@@ -12,10 +12,12 @@
   import { untrack } from 'svelte';
   import { enhance } from '$app/forms';
   import { invalidate } from '$app/navigation';
+  import { page } from '$app/state';
   import * as m from '$paraglide/messages';
   import { ContentDetailView, RelatedContent } from '$lib/components/content';
   import { formatPrice } from '$lib/utils/format';
   import { useSubscriptionContext } from '$lib/utils/subscription-context.svelte';
+  import { buildCreatorContentUrl } from '$lib/utils/subdomain';
   import type { AccessRevocationReason } from '$lib/server/content-detail';
   import type { PageData } from './$types';
 
@@ -154,6 +156,8 @@
   streamingExpiresAt={accessState.streamingExpiresAt}
   revocationReason={accessState.revocationReason}
   accessCheckFailed={accessState.accessCheckFailed}
+  withdrawnHeld={data.withdrawnHeld ?? null}
+  contentBodyUnavailable={data.contentBodyUnavailable ?? false}
   onaccessrestored={() => {
     accessState.revocationReason = null;
     void invalidate('app:auth');
@@ -224,7 +228,7 @@
     <RelatedContent
       items={filtered}
       {creatorName}
-      hrefBuilder={(item) => `/${data.username}/content/${item.slug ?? item.id}`}
+      hrefBuilder={(item) => buildCreatorContentUrl(page.url, data.username, item)}
       class="content-detail__related--streamed"
     />
   {/if}

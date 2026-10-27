@@ -4,18 +4,17 @@
  * Unauthenticated endpoints for browsing published content.
  *
  * Endpoints:
- * - GET /api/content/public - List published content for an organization (requires orgId or slug)
+ * - GET /api/content/public - List published content for an organization or a creator (requires orgId, creatorId or slug)
  * - GET /api/content/public/discover - Browse all published content platform-wide (discover page)
  */
 
 import { CacheType, logCacheStats, VersionedCache } from '@codex/cache';
-import type { ContentWithRelations } from '@codex/content';
 import {
   discoverContentQuerySchema,
   publicContentQuerySchema,
 } from '@codex/content';
 import type { HonoEnv } from '@codex/shared-types';
-import { uuidSchema, z } from '@codex/validation';
+import { orgIdQuerySchema, z } from '@codex/validation';
 import { cachedRead, PaginatedResult, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 import { resolveCategoryCoverUrl } from './category-cover-url';
@@ -23,6 +22,7 @@ import {
   getCachedPublicContent,
   shouldCachePublicContentQuery,
 } from './public-cache';
+import { resolveR2PublicBases, toPublicItems } from './r2-public-urls';
 
 /**
  * TTL for the public topic-categories list (seconds). Invalidated on category
@@ -37,80 +37,11 @@ import {
  */
 const PUBLIC_CATEGORIES_CACHE_TTL = 7200;
 
-const publicCategoriesQuerySchema = z.object({ orgId: uuidSchema });
+// Lowercased: the id keys the topics cache, which org delete invalidates under
+// the lowercase DB id (see orgIdQuerySchema).
+const publicCategoriesQuerySchema = z.object({ orgId: orgIdQuerySchema });
 
 const app = new Hono<HonoEnv>();
-
-/**
- * The two public hosts this route resolves keys against.
- *
- * TWO, NOT ONE, and that split is the point of the type (Codex-1g5lh.13).
- * `thumbnailKey` genuinely lives in the PUBLIC assets bucket. `hlsPreviewKey`
- * is `{creatorId}/hls/{mediaId}/preview/preview.m3u8` and lives in the PRIVATE
- * media bucket — packages/transcoding/src/paths.ts:7 documents the whole HLS
- * tree as "a single MEDIA_BUCKET", and the RunPod handler proves it by
- * uploading the entire hls_dir (preview included) to R2_BUCKET_NAME
- * (= codex-media-*) while sending only thumbnails to the assets bucket.
- *
- * Building BOTH fields from `R2_PUBLIC_URL_BASE` is what broke every public HLS
- * preview in production: that base is the assets host, served by apps/web's
- * cdn-proxy from ASSETS_BUCKET alone, so `ASSETS_BUCKET.get(previewKey)`
- * returned null and the manifest 404'd while the poster loaded fine — a play
- * affordance that does nothing, on the highest-traffic public surface.
- */
-type R2PublicBases = {
-  /** Public assets host — thumbnails, logos. `R2_PUBLIC_URL_BASE`. */
-  assets: string | undefined;
-  /** Host that serves the public 30s HLS preview prefix. */
-  mediaPreview: string | undefined;
-};
-
-/**
- * Resolve the two bases from the worker bindings.
- *
- * DEFAULT, and what production runs: both are `R2_PUBLIC_URL_BASE`, because
- * apps/web's cdn-proxy now serves `{creatorId}/hls/{mediaId}/preview/` — and
- * ONLY that prefix — from a read-only media binding, so the assets host finally
- * answers for previews.
- *
- * `R2_PUBLIC_MEDIA_URL_BASE` is the seam for the other shape: a preview-only
- * host or worker route, for if the owner declines to bind the private bucket
- * into apps/web. Set it and previews move with no code change, while thumbnails
- * stay on the assets host. NEVER point both at a media host — that would 404
- * every thumbnail platform-wide, which is the trap this signature exists to
- * make hard to fall into.
- *
- * The parameter type is declared locally because `R2_PUBLIC_MEDIA_URL_BASE` is
- * not yet on `Bindings` in packages/shared-types/src/worker-types.ts (outside
- * this change); the canonical declaration belongs there, by `R2_PUBLIC_URL_BASE`.
- */
-function resolveR2PublicBases(env: {
-  R2_PUBLIC_URL_BASE?: string;
-  R2_PUBLIC_MEDIA_URL_BASE?: string;
-}): R2PublicBases {
-  const assets = env.R2_PUBLIC_URL_BASE;
-  return { assets, mediaPreview: env.R2_PUBLIC_MEDIA_URL_BASE ?? assets };
-}
-
-/** Resolve raw R2 keys to full CDN URLs — clients must never see raw keys */
-function resolveR2Urls(items: ContentWithRelations[], bases: R2PublicBases) {
-  return items.map((item) => ({
-    ...item,
-    mediaItem: item.mediaItem
-      ? {
-          ...item.mediaItem,
-          thumbnailUrl:
-            item.mediaItem.thumbnailKey && bases.assets
-              ? `${bases.assets}/${item.mediaItem.thumbnailKey}`
-              : null,
-          hlsPreviewUrl:
-            item.mediaItem.hlsPreviewKey && bases.mediaPreview
-              ? `${bases.mediaPreview}/${item.mediaItem.hlsPreviewKey}`
-              : null,
-        }
-      : null,
-  }));
-}
 
 /**
  * WHY EVERY ROUTE BELOW DECLARES `cache: 'public'` RATHER THAN THIS ROUTER
@@ -141,13 +72,20 @@ function resolveR2Urls(items: ContentWithRelations[], bases: R2PublicBases) {
 
 /**
  * GET /api/content/public
- * List published content for an organization (requires orgId or slug)
+ * List published content for an organization, or for one creator across
+ * every org they publish in and their personal space (requires orgId,
+ * creatorId or slug). The creator form backs their public profile
+ * (Codex-osuqt).
  *
- * Security: Public endpoint, API rate limit. Schema enforces org scoping.
- * Cache: `public` — the body is the org's PUBLISHED catalogue page, identical
+ * Security: Public endpoint, API rate limit. Schema enforces an org, creator
+ * or slug scope.
+ * Cache: `public` — the body is a PUBLISHED catalogue page, identical
  * for every viewer (no session is read; `auth: 'none'` means none is even
  * resolved), so any shared cache may serve one visitor's copy to the next. 60s
- * browser + CDN, bounded by the KV invalidation window above. The docstring
+ * browser + CDN, bounded by the KV invalidation window above. A query naming a
+ * creator is never KV-cached (`shouldCachePublicContentQuery` skips it), so
+ * its 60s CDN window is its only cache, as for /discover, and a publish shows
+ * on the profile within 60s. The docstring
  * used to say "5 minute public cache"; the header it sat over has emitted 60s
  * since the KV layer's event-driven invalidation landed, and now says so.
  * @returns {PublicContentListResponse}
@@ -171,13 +109,19 @@ app.get(
       // the data slot never landed, so there was never a hit. Cache the plain
       // shape and re-wrap AFTER the cache, exactly as
       // `organization-api /public/:slug/creators` already does.
+      //
+      // The cache holds the narrowed ROWS, and the wire items are built after
+      // it: a URL built inside the fetcher froze a missing CDN base into the
+      // slot as a null poster for its whole TTL, warned about only on a miss.
       const fetchContent = async () => {
         const result = await ctx.services.content.listPublic(ctx.input.query);
-        return {
-          items: resolveR2Urls(result.items, resolveR2PublicBases(ctx.env)),
-          pagination: result.pagination,
-        };
+        return { items: result.items, pagination: result.pagination };
       };
+      const toWire = (rows: Awaited<ReturnType<typeof fetchContent>>) =>
+        new PaginatedResult(
+          toPublicItems(rows.items, resolveR2PublicBases(ctx.env), ctx.obs),
+          rows.pagination
+        );
 
       // KV cache-aside for org-scoped browse queries only.
       // getCachedPublicContent keys every filter combo under a shared
@@ -212,11 +156,10 @@ app.get(
         if (ctx.obs) {
           logCacheStats(cache, ctx.obs, { cacheType: 'public:content' });
         }
-        return new PaginatedResult(cached.items, cached.pagination);
+        return toWire(cached);
       }
 
-      const uncached = await fetchContent();
-      return new PaginatedResult(uncached.items, uncached.pagination);
+      return toWire(await fetchContent());
     },
   })
 );
@@ -291,7 +234,7 @@ app.get(
     handler: async (ctx) => {
       const result = await ctx.services.content.listPublic(ctx.input.query);
       return new PaginatedResult(
-        resolveR2Urls(result.items, resolveR2PublicBases(ctx.env)),
+        toPublicItems(result.items, resolveR2PublicBases(ctx.env), ctx.obs),
         result.pagination
       );
     },

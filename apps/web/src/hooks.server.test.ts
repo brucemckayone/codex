@@ -1,5 +1,8 @@
 /**
- * Tests for the junk-host short-circuit hook (measured 2026-08-31).
+ * Tests for the server hooks: the junk-host short-circuit (measured
+ * 2026-08-31), the unservable-form-action refusal, the assembled `handle`
+ * sequence, the body of `handleError`, and the body and log of
+ * `handleValidationError` (Codex-osuqt). The junk-host contract:
  *
  * Reserved-but-unmatched subdomains (cdn, cdn-dev, cdn-resources*, preview, …)
  * used to fall through the whole SSR pipeline and render a full 404 page —
@@ -13,8 +16,8 @@
  *     them; it runs right after junkHostHook in the sequence), the frontend
  *     aliases codex and creators with any suffix, the platform frontends app
  *     and platform, and the staging/tunnel apexes;
- *   - the 404 is a constant edge-cacheable body, written into the Cache API
- *     on GET, and a cache failure never breaks the response;
+ *   - the 404 is a constant edge-cacheable body, never written to the Cache
+ *     API;
  *   - the assembled `handle` sequence terminates junk hosts before any
  *     session work and carries real traffic through to the router.
  *
@@ -33,8 +36,16 @@ import {
 } from '@codex/constants';
 import type { Handle } from '@sveltejs/kit';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { logger } from '$lib/observability';
 import { isPublicCdnHost } from '$lib/server/cdn-proxy';
-import { handle, junkHostHook, shouldShortCircuitHost } from './hooks.server';
+import {
+  handle,
+  handleError,
+  handleValidationError,
+  junkHostHook,
+  shouldShortCircuitHost,
+  unservableActionHook,
+} from './hooks.server';
 
 // The real `sequence()` enters SvelteKit's per-request tracing store, which
 // only exists inside a live request — `handle` cannot be driven from vitest
@@ -80,17 +91,25 @@ function makeHookEvent(opts: { host: string; method?: string }) {
 /** Minimal input for driving the real `handle` sequence end to end: the
  * resolve stand-in for the router plus the event pieces sessionHook and
  * securityHook touch (cookies.get returning undefined skips the auth call). */
-function makeSequenceInput(opts: { host: string }) {
-  const url = new URL(`https://${opts.host}/some/probe/path`);
+function makeSequenceInput(opts: {
+  host: string;
+  path?: string;
+  method?: string;
+  isRemoteRequest?: boolean;
+  routed?: () => Response;
+}) {
+  const url = new URL(`https://${opts.host}${opts.path ?? '/some/probe/path'}`);
   const event = {
     url,
-    request: new Request(url),
+    request: new Request(url, { method: opts.method ?? 'GET' }),
     cookies: { get: vi.fn(() => undefined) },
     // Loosely typed: the assertions below read locals.requestId, which only
     // exists once the real sessionHook has run.
     locals: {} as Record<string, unknown>,
+    isRemoteRequest: opts.isRemoteRequest ?? false,
   };
-  const resolve = vi.fn(async () => new Response('rendered page'));
+  const routed = opts.routed ?? (() => new Response('rendered page'));
+  const resolve = vi.fn(async () => routed());
   const input = {
     event,
     resolve,
@@ -369,5 +388,205 @@ describe('handle — the assembled sequence', () => {
     expect(resolve).toHaveBeenCalledTimes(1);
     // The full chain really ran — sessionHook stamped the request ID.
     expect(event.locals.requestId).toEqual(expect.any(String));
+  });
+});
+
+// A remote function cannot set a header (Kit's `setHeaders` throws inside
+// one), and Kit marks only a remote call's error `no-store`: a successful one,
+// such as a refreshed signed stream URL, carried no Cache-Control at all.
+describe('handle — a remote function response is never stored (Codex-877bi)', () => {
+  // As Kit's `json()` sends a successful remote query: no Cache-Control.
+  const remoteResult = () =>
+    Response.json({ type: 'result', result: '{"streamingUrl":"…"}' });
+
+  it('a successful remote call is sent no-store', async () => {
+    const { input } = makeSequenceInput({
+      host: 'studio-alpha.revelations.studio',
+      path: '/_app/remote/abc123/refreshStreamingUrl',
+      isRemoteRequest: true,
+      routed: remoteResult,
+    });
+
+    const response = await handle(input);
+
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
+    expect(CACHE_PRESETS.fresh).toBe('private, no-store');
+  });
+
+  it('a page keeps its own header', async () => {
+    const { input } = makeSequenceInput({
+      host: 'studio-alpha.revelations.studio',
+      path: '/content/practice',
+      routed: () =>
+        new Response('rendered page', {
+          headers: { 'cache-control': CACHE_PRESETS.private },
+        }),
+    });
+
+    const response = await handle(input);
+
+    expect(response.headers.get('cache-control')).toBe(CACHE_PRESETS.private);
+  });
+});
+
+// A status below 500 is SvelteKit's own refusal, so its message is safe to show:
+// "An unexpected error occurred" told a visitor with a mistyped URL the
+// opposite of what happened (Codex-osuqt). 500 and above keep the sanitised body.
+describe('handleError — the body a visitor sees', () => {
+  const errorEvent = {
+    url: new URL('http://lvh.me:3000/nope'),
+    request: new Request('http://lvh.me:3000/nope'),
+    locals: { requestId: 'req-1' },
+  };
+
+  it("shows SvelteKit's own message for a 404", async () => {
+    expect(
+      await handleError({
+        error: new Error('Not found: /nope'),
+        event: errorEvent,
+        status: 404,
+        message: 'Not Found',
+      } as never)
+    ).toEqual({ message: 'Not Found', code: 'NOT_FOUND' });
+  });
+
+  it('keeps the sanitised body at 500', async () => {
+    expect(
+      await handleError({
+        error: new Error('database password in a stack'),
+        event: errorEvent,
+        status: 500,
+        message: 'Internal Error',
+      } as never)
+    ).toEqual({
+      message: 'An unexpected error occurred',
+      code: 'INTERNAL_ERROR',
+    });
+  });
+});
+
+// Kit refuses a remote function's input with an HttpError, which never reaches
+// handleError: this hook is the only place the refusal can be logged.
+describe('handleValidationError — a refused remote input', () => {
+  it('logs the refused fields and still tells the caller which part failed', async () => {
+    const warn = vi.spyOn(logger, 'warn');
+
+    const body = await handleValidationError({
+      issues: [{ message: 'Slug must not contain NUL', path: ['slug'] }],
+      event: {
+        url: new URL('http://lvh.me:3000/_app/remote/abc/getPublicContent'),
+        request: new Request(
+          'http://lvh.me:3000/_app/remote/abc/getPublicContent'
+        ),
+        locals: { requestId: 'req-1' },
+        isRemoteRequest: true,
+      },
+    } as never);
+
+    expect(body).toEqual({
+      message: 'Slug must not contain NUL',
+      code: 'VALIDATION_ERROR',
+    });
+    expect(warn).toHaveBeenCalledWith(
+      'Remote function input refused',
+      expect.objectContaining({ issues: ['slug'] })
+    );
+    warn.mockRestore();
+  });
+});
+
+// Kit looks a form action up on a plain object and refuses an explicit
+// `?/default` by throwing, so most of these POSTs were tracked 500s any client
+// could cause. The hook answers them with a 404 before Kit dispatches them.
+describe('unservableActionHook', () => {
+  const hookInput = (href: string, method: string, accept?: string) => {
+    const resolve = vi.fn(async () => new Response('rendered page'));
+    const request = new Request(href, {
+      method,
+      headers: accept ? { accept } : undefined,
+    });
+    const input = {
+      event: { url: new URL(href), request },
+      resolve,
+    } as unknown as Parameters<typeof unservableActionHook>[0];
+    return { input, resolve };
+  };
+
+  it.each([
+    'default',
+    'valueOf',
+    '__proto__',
+    'constructor',
+    'toString',
+  ])('answers a POST naming ?/%s with a 404, before Kit sees it', async (name) => {
+    const warn = vi.spyOn(logger, 'warn');
+    const { input, resolve } = hookInput(
+      `http://lvh.me:3000/content/first?/${name}`,
+      'POST',
+      'text/html,application/xhtml+xml'
+    );
+
+    const response = await unservableActionHook(input);
+
+    expect(response.status).toBe(404);
+    expect(await response.text()).toBe('Not Found');
+    expect(resolve).not.toHaveBeenCalled();
+    // The action is one of a closed set, so naming it is safe to log.
+    expect(warn).toHaveBeenCalledWith(
+      'Form action refused before dispatch',
+      expect.objectContaining({ refusedAction: name, url: '/content/first' })
+    );
+    warn.mockRestore();
+  });
+
+  // `use:enhance` asks for JSON and runs Kit's `deserialize` on the body,
+  // which would throw on plain text.
+  it('answers a use:enhance submit with an ActionResult it can read', async () => {
+    const { input } = hookInput(
+      'http://lvh.me:3000/content/first?/valueOf',
+      'POST',
+      'application/json'
+    );
+
+    const response = await unservableActionHook(input);
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({
+      type: 'error',
+      error: { message: 'Not Found', code: 'NOT_FOUND' },
+    });
+  });
+
+  it.each([
+    ['a real action', 'POST', 'http://lvh.me:3000/content/first?/purchase'],
+    ['the default action (no ?/)', 'POST', 'http://lvh.me:3000/login'],
+    [
+      'a remote form submit',
+      'POST',
+      'http://lvh.me:3000/forgot-password?/remote=a1b2c3/requestReset',
+    ],
+    ['a GET naming ?/valueOf', 'GET', 'http://lvh.me:3000/explore?/valueOf'],
+  ])('passes %s through', async (_label, method, href) => {
+    const { input, resolve } = hookInput(href, method);
+
+    await unservableActionHook(input);
+
+    expect(resolve).toHaveBeenCalled();
+  });
+
+  // Driven through the real sequence: the refusal comes before any session
+  // work, observable as locals.requestId, sessionHook's first write.
+  it('refuses before the session hook runs in the real sequence', async () => {
+    const { input, resolve, event } = makeSequenceInput({
+      host: 'studio-alpha.lvh.me',
+      path: '/content/first?/valueOf',
+      method: 'POST',
+    });
+
+    const response = await handle(input);
+
+    expect(response.status).toBe(404);
+    expect(resolve).not.toHaveBeenCalled();
+    expect(event.locals.requestId).toBeUndefined();
   });
 });

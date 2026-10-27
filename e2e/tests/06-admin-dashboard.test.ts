@@ -28,11 +28,85 @@ import {
 import { and, eq } from 'drizzle-orm';
 import { afterAll, describe, expect, test } from 'vitest';
 import { adminFixture } from '../fixtures';
+import { markVideoReady } from '../helpers/media';
 import {
   createCheckoutCompletedEvent,
   sendSignedWebhook,
 } from '../helpers/stripe-webhook';
 import { WORKER_URLS } from '../helpers/worker-urls';
+
+/**
+ * The ledger rows a sale writes. Studio revenue reads the payouts ledger
+ * (Codex-2hxff.20), and these tests complete a purchase with a fake
+ * PaymentIntent, so the webhook's charge lookup fails and it records no
+ * slices. Seed them as a real sale would, unless the webhook wrote some.
+ */
+async function recordSaleSlices(opts: {
+  organizationId: string;
+  customerId: string;
+  contentId: string;
+  ownerId: string;
+  creatorId: string;
+  split: {
+    platformFeeCents: number;
+    organizationFeeCents: number;
+    creatorPayoutCents: number;
+  };
+}): Promise<void> {
+  const [purchase] = await dbWs
+    .select({ id: schema.purchases.id })
+    .from(schema.purchases)
+    .where(
+      and(
+        eq(schema.purchases.customerId, opts.customerId),
+        eq(schema.purchases.contentId, opts.contentId),
+        eq(schema.purchases.status, 'completed')
+      )
+    )
+    .limit(1);
+  if (!purchase) {
+    throw new Error('The webhook recorded no completed purchase');
+  }
+  const [recorded] = await dbWs
+    .select({ id: schema.payouts.id })
+    .from(schema.payouts)
+    .where(eq(schema.payouts.purchaseId, purchase.id))
+    .limit(1);
+  if (recorded) return;
+
+  const stripeChargeId = `ch_e2e_${purchase.id}`;
+  const resolvedAt = new Date();
+  const slices = [
+    {
+      payoutType: 'platform_fee',
+      userId: null,
+      amountCents: opts.split.platformFeeCents,
+    },
+    {
+      payoutType: 'organization_fee',
+      userId: opts.ownerId,
+      amountCents: opts.split.organizationFeeCents,
+    },
+    {
+      payoutType: 'creator_payout',
+      userId: opts.creatorId,
+      amountCents: opts.split.creatorPayoutCents,
+    },
+  ].filter((slice) => slice.amountCents > 0);
+  await dbWs.insert(schema.payouts).values(
+    slices.map((slice) => ({
+      ...slice,
+      organizationId: opts.organizationId,
+      purchaseId: purchase.id,
+      sourceType: 'purchase',
+      stripeChargeId,
+      transferGroup: `tg_${stripeChargeId}`,
+      // Sent, so no drain picks the row up.
+      status: 'paid',
+      resolvedAt,
+    }))
+  );
+}
 
 describe('Admin Dashboard', () => {
   // ============================================================================
@@ -137,7 +211,13 @@ describe('Admin Dashboard', () => {
       expect(stats.averageOrderValueCents).toBe(0);
       expect(stats.platformFeeCents).toBe(0);
       expect(stats.creatorPayoutCents).toBe(0);
-      expect(stats.revenueByDay).toEqual([]);
+      // One zero entry per calendar day of the last 30 (Codex-2hxff.75).
+      expect(stats.revenueByDay).toHaveLength(30);
+      expect(
+        stats.revenueByDay.every(
+          (day: { revenueCents: number }) => day.revenueCents === 0
+        )
+      ).toBe(true);
     }, 60000);
     test(
       'should calculate revenue from completed purchases',
@@ -171,7 +251,6 @@ describe('Admin Dashboard', () => {
             data: {
               title: 'Revenue Test Media',
               mediaType: 'video',
-              r2Key: `e2e/originals/${testMediaId}/original.mp4`,
               fileSizeBytes: 1048576,
               mimeType: 'video/mp4',
             },
@@ -179,17 +258,10 @@ describe('Admin Dashboard', () => {
         );
         const media = unwrapApiResponse(await mediaResponse.json());
 
-        await httpClient.patch(`${WORKER_URLS.content}/api/media/${media.id}`, {
-          headers: {
-            Cookie: creatorCookie,
-            'Content-Type': 'application/json',
-          },
-          data: {
-            status: 'ready',
-            hlsMasterPlaylistKey: `e2e/hls/${testMediaId}/master.m3u8`,
-            thumbnailKey: `e2e/thumbnails/${testMediaId}/thumb.jpg`,
-            durationSeconds: 300,
-          },
+        await markVideoReady(media.id, {
+          hlsMasterPlaylistKey: `e2e/hls/${testMediaId}/master.m3u8`,
+          thumbnailKey: `e2e/thumbnails/${testMediaId}/thumb.jpg`,
+          durationSeconds: 300,
         });
 
         // Create paid content under admin's organization
@@ -208,6 +280,7 @@ describe('Admin Dashboard', () => {
               organizationId: admin.organization.id,
               accessType: 'paid',
               priceCents: 2999, // $29.99
+              isPurchasable: true,
             },
           }
         );
@@ -279,18 +352,27 @@ describe('Admin Dashboard', () => {
           process.env.STRIPE_WEBHOOK_SECRET_BOOKING as string
         );
 
-        // 4. Verify revenue stats
-        const stats = await adminFixture.getRevenueStats(admin);
-
-        expect(stats.totalRevenueCents).toBe(2999);
-        expect(stats.totalPurchases).toBe(1);
-        expect(stats.averageOrderValueCents).toBe(2999);
         // Three-bucket revenue split: platform → org → creator (Codex-h69cg)
         const expectedSplit = calculateRevenueSplit(
           2999,
           DEFAULT_PLATFORM_FEE_PERCENTAGE,
           DEFAULT_ORG_FEE_PERCENTAGE
         );
+        await recordSaleSlices({
+          organizationId: admin.organization.id,
+          customerId: buyer.id,
+          contentId: content.id,
+          ownerId: admin.user.id,
+          creatorId: creator.id,
+          split: expectedSplit,
+        });
+
+        // 4. Verify revenue stats
+        const stats = await adminFixture.getRevenueStats(admin);
+
+        expect(stats.totalRevenueCents).toBe(2999);
+        expect(stats.totalPurchases).toBe(1);
+        expect(stats.averageOrderValueCents).toBe(2999);
         expect(stats.platformFeeCents).toBe(expectedSplit.platformFeeCents);
         expect(stats.creatorPayoutCents).toBe(expectedSplit.creatorPayoutCents);
       },
@@ -334,7 +416,6 @@ describe('Admin Dashboard', () => {
             data: {
               title: 'Scope Test Media',
               mediaType: 'video',
-              r2Key: `e2e/originals/${testMediaId}/original.mp4`,
               fileSizeBytes: 1048576,
               mimeType: 'video/mp4',
             },
@@ -342,16 +423,10 @@ describe('Admin Dashboard', () => {
         );
         const media = unwrapApiResponse(await mediaResponse.json());
 
-        await httpClient.patch(`${WORKER_URLS.content}/api/media/${media.id}`, {
-          headers: {
-            Cookie: creatorCookie,
-            'Content-Type': 'application/json',
-          },
-          data: {
-            status: 'ready',
-            hlsMasterPlaylistKey: `e2e/hls/${testMediaId}/master.m3u8`,
-            durationSeconds: 300,
-          },
+        await markVideoReady(media.id, {
+          hlsMasterPlaylistKey: `e2e/hls/${testMediaId}/master.m3u8`,
+          thumbnailKey: `e2e/thumbnails/${testMediaId}/thumb.jpg`,
+          durationSeconds: 300,
         });
 
         // Content in admin1's org
@@ -370,6 +445,7 @@ describe('Admin Dashboard', () => {
               organizationId: admin1.organization.id, // Admin1's org
               accessType: 'paid',
               priceCents: 1999,
+              isPurchasable: true,
             },
           }
         );
@@ -435,6 +511,18 @@ describe('Admin Dashboard', () => {
           webhookEvent,
           process.env.STRIPE_WEBHOOK_SECRET_BOOKING as string
         );
+        await recordSaleSlices({
+          organizationId: admin1.organization.id,
+          customerId: buyer.id,
+          contentId: content.id,
+          ownerId: admin1.user.id,
+          creatorId: creator.id,
+          split: calculateRevenueSplit(
+            1999,
+            DEFAULT_PLATFORM_FEE_PERCENTAGE,
+            DEFAULT_ORG_FEE_PERCENTAGE
+          ),
+        });
 
         // Admin1 should see the purchase
         const admin1Stats = await adminFixture.getRevenueStats(admin1);
@@ -484,7 +572,6 @@ describe('Admin Dashboard', () => {
             data: {
               title: 'Distinct Test Media',
               mediaType: 'video',
-              r2Key: `e2e/originals/${testMediaId}/original.mp4`,
               fileSizeBytes: 1048576,
               mimeType: 'video/mp4',
             },
@@ -492,16 +579,10 @@ describe('Admin Dashboard', () => {
         );
         const media = unwrapApiResponse(await mediaResponse.json());
 
-        await httpClient.patch(`${WORKER_URLS.content}/api/media/${media.id}`, {
-          headers: {
-            Cookie: creatorCookie,
-            'Content-Type': 'application/json',
-          },
-          data: {
-            status: 'ready',
-            hlsMasterPlaylistKey: `e2e/hls/${testMediaId}/master.m3u8`,
-            durationSeconds: 300,
-          },
+        await markVideoReady(media.id, {
+          hlsMasterPlaylistKey: `e2e/hls/${testMediaId}/master.m3u8`,
+          thumbnailKey: `e2e/thumbnails/${testMediaId}/thumb.jpg`,
+          durationSeconds: 300,
         });
 
         // Create two content items
@@ -520,6 +601,7 @@ describe('Admin Dashboard', () => {
               organizationId: admin.organization.id,
               accessType: 'paid',
               priceCents: 999,
+              isPurchasable: true,
             },
           }
         );
@@ -536,7 +618,6 @@ describe('Admin Dashboard', () => {
             data: {
               title: 'Distinct Test Media 2',
               mediaType: 'video',
-              r2Key: `e2e/originals/${testMediaId2}/original.mp4`,
               fileSizeBytes: 1048576,
               mimeType: 'video/mp4',
             },
@@ -544,20 +625,11 @@ describe('Admin Dashboard', () => {
         );
         const media2 = unwrapApiResponse(await media2Response.json());
 
-        await httpClient.patch(
-          `${WORKER_URLS.content}/api/media/${media2.id}`,
-          {
-            headers: {
-              Cookie: creatorCookie,
-              'Content-Type': 'application/json',
-            },
-            data: {
-              status: 'ready',
-              hlsMasterPlaylistKey: `e2e/hls/${testMediaId2}/master.m3u8`,
-              durationSeconds: 300,
-            },
-          }
-        );
+        await markVideoReady(media2.id, {
+          hlsMasterPlaylistKey: `e2e/hls/${testMediaId2}/master.m3u8`,
+          thumbnailKey: `e2e/thumbnails/${testMediaId2}/thumb.jpg`,
+          durationSeconds: 300,
+        });
 
         const content2Response = await httpClient.post(
           `${WORKER_URLS.content}/api/content`,
@@ -574,6 +646,7 @@ describe('Admin Dashboard', () => {
               organizationId: admin.organization.id,
               accessType: 'paid',
               priceCents: 999,
+              isPurchasable: true,
             },
           }
         );
@@ -1119,7 +1192,6 @@ describe('Admin Dashboard', () => {
             data: {
               title: 'Customers Test Media',
               mediaType: 'video',
-              r2Key: `e2e/originals/${testMediaId}/original.mp4`,
               fileSizeBytes: 1048576,
               mimeType: 'video/mp4',
             },
@@ -1127,16 +1199,10 @@ describe('Admin Dashboard', () => {
         );
         const media = unwrapApiResponse(await mediaResponse.json());
 
-        await httpClient.patch(`${WORKER_URLS.content}/api/media/${media.id}`, {
-          headers: {
-            Cookie: creatorCookie,
-            'Content-Type': 'application/json',
-          },
-          data: {
-            status: 'ready',
-            hlsMasterPlaylistKey: `e2e/hls/${testMediaId}/master.m3u8`,
-            durationSeconds: 300,
-          },
+        await markVideoReady(media.id, {
+          hlsMasterPlaylistKey: `e2e/hls/${testMediaId}/master.m3u8`,
+          thumbnailKey: `e2e/thumbnails/${testMediaId}/thumb.jpg`,
+          durationSeconds: 300,
         });
 
         const contentResponse = await httpClient.post(
@@ -1154,6 +1220,7 @@ describe('Admin Dashboard', () => {
               organizationId: admin.organization.id,
               accessType: 'paid',
               priceCents: 1999,
+              isPurchasable: true,
             },
           }
         );
@@ -1258,7 +1325,6 @@ describe('Admin Dashboard', () => {
             data: {
               title: 'Details Test Media',
               mediaType: 'video',
-              r2Key: `e2e/originals/${testMediaId}/original.mp4`,
               fileSizeBytes: 1048576,
               mimeType: 'video/mp4',
             },
@@ -1266,16 +1332,10 @@ describe('Admin Dashboard', () => {
         );
         const media = unwrapApiResponse(await mediaResponse.json());
 
-        await httpClient.patch(`${WORKER_URLS.content}/api/media/${media.id}`, {
-          headers: {
-            Cookie: creatorCookie,
-            'Content-Type': 'application/json',
-          },
-          data: {
-            status: 'ready',
-            hlsMasterPlaylistKey: `e2e/hls/${testMediaId}/master.m3u8`,
-            durationSeconds: 300,
-          },
+        await markVideoReady(media.id, {
+          hlsMasterPlaylistKey: `e2e/hls/${testMediaId}/master.m3u8`,
+          thumbnailKey: `e2e/thumbnails/${testMediaId}/thumb.jpg`,
+          durationSeconds: 300,
         });
 
         const contentResponse = await httpClient.post(
@@ -1293,6 +1353,7 @@ describe('Admin Dashboard', () => {
               organizationId: admin.organization.id,
               accessType: 'paid',
               priceCents: 2499,
+              isPurchasable: true,
             },
           }
         );
@@ -1397,7 +1458,6 @@ describe('Admin Dashboard', () => {
           data: {
             title: 'Grant Test Media 1',
             mediaType: 'video',
-            r2Key: `e2e/originals/${testMediaId1}/original.mp4`,
             fileSizeBytes: 1048576,
             mimeType: 'video/mp4',
           },
@@ -1405,16 +1465,10 @@ describe('Admin Dashboard', () => {
       );
       const media1 = unwrapApiResponse(await media1Response.json());
 
-      await httpClient.patch(`${WORKER_URLS.content}/api/media/${media1.id}`, {
-        headers: {
-          Cookie: creatorCookie,
-          'Content-Type': 'application/json',
-        },
-        data: {
-          status: 'ready',
-          hlsMasterPlaylistKey: `e2e/hls/${testMediaId1}/master.m3u8`,
-          durationSeconds: 300,
-        },
+      await markVideoReady(media1.id, {
+        hlsMasterPlaylistKey: `e2e/hls/${testMediaId1}/master.m3u8`,
+        thumbnailKey: `e2e/thumbnails/${testMediaId1}/thumb.jpg`,
+        durationSeconds: 300,
       });
 
       const content1Response = await httpClient.post(
@@ -1432,6 +1486,7 @@ describe('Admin Dashboard', () => {
             organizationId: admin.organization.id,
             accessType: 'paid',
             priceCents: 999,
+            isPurchasable: true,
           },
         }
       );
@@ -1473,7 +1528,6 @@ describe('Admin Dashboard', () => {
           data: {
             title: 'Grant Test Media 2',
             mediaType: 'video',
-            r2Key: `e2e/originals/${testMediaId2}/original.mp4`,
             fileSizeBytes: 1048576,
             mimeType: 'video/mp4',
           },
@@ -1481,16 +1535,10 @@ describe('Admin Dashboard', () => {
       );
       const media2 = unwrapApiResponse(await media2Response.json());
 
-      await httpClient.patch(`${WORKER_URLS.content}/api/media/${media2.id}`, {
-        headers: {
-          Cookie: creatorCookie,
-          'Content-Type': 'application/json',
-        },
-        data: {
-          status: 'ready',
-          hlsMasterPlaylistKey: `e2e/hls/${testMediaId2}/master.m3u8`,
-          durationSeconds: 300,
-        },
+      await markVideoReady(media2.id, {
+        hlsMasterPlaylistKey: `e2e/hls/${testMediaId2}/master.m3u8`,
+        thumbnailKey: `e2e/thumbnails/${testMediaId2}/thumb.jpg`,
+        durationSeconds: 300,
       });
 
       const content2Response = await httpClient.post(
@@ -1567,8 +1615,27 @@ describe('Admin Dashboard', () => {
       );
       expect(granted).toBe(true);
 
-      // Verify access was granted in database
-      const accessRecords = await dbHttp
+      // A grant is a live `grant` entitlement, the record the access decision
+      // and the library read (Codex-2hxff.21). It used to be a content_access
+      // 'complimentary' row that nothing read, so the grant did nothing.
+      const grants = await dbHttp
+        .select()
+        .from(schema.entitlements)
+        .where(
+          and(
+            eq(schema.entitlements.userId, buyer.id),
+            eq(schema.entitlements.contentId, content2.id),
+            eq(schema.entitlements.source, 'grant')
+          )
+        );
+
+      expect(grants).toHaveLength(1);
+      expect(grants[0]?.organizationId).toBe(admin.organization.id);
+      expect(grants[0]?.grantedByUserId).toBe(admin.user.id);
+      expect(grants[0]?.revokedAt).toBeNull();
+
+      // The dead table is no longer written.
+      const legacyRows = await dbHttp
         .select()
         .from(schema.contentAccess)
         .where(
@@ -1577,9 +1644,7 @@ describe('Admin Dashboard', () => {
             eq(schema.contentAccess.contentId, content2.id)
           )
         );
-
-      expect(accessRecords).toHaveLength(1);
-      expect(accessRecords[0].accessType).toBe('complimentary');
+      expect(legacyRows).toHaveLength(0);
     }, 180000);
 
     test('should handle duplicate access grant (idempotent)', async () => {
@@ -1609,7 +1674,6 @@ describe('Admin Dashboard', () => {
           data: {
             title: 'Idem Test Media',
             mediaType: 'video',
-            r2Key: `e2e/originals/${testMediaId}/original.mp4`,
             fileSizeBytes: 1048576,
             mimeType: 'video/mp4',
           },
@@ -1617,16 +1681,10 @@ describe('Admin Dashboard', () => {
       );
       const media = unwrapApiResponse(await mediaResponse.json());
 
-      await httpClient.patch(`${WORKER_URLS.content}/api/media/${media.id}`, {
-        headers: {
-          Cookie: creatorCookie,
-          'Content-Type': 'application/json',
-        },
-        data: {
-          status: 'ready',
-          hlsMasterPlaylistKey: `e2e/hls/${testMediaId}/master.m3u8`,
-          durationSeconds: 300,
-        },
+      await markVideoReady(media.id, {
+        hlsMasterPlaylistKey: `e2e/hls/${testMediaId}/master.m3u8`,
+        thumbnailKey: `e2e/thumbnails/${testMediaId}/thumb.jpg`,
+        durationSeconds: 300,
       });
 
       const contentResponse = await httpClient.post(
@@ -1644,6 +1702,7 @@ describe('Admin Dashboard', () => {
             organizationId: admin.organization.id,
             accessType: 'paid',
             priceCents: 1999,
+            isPurchasable: true,
           },
         }
       );
@@ -1722,18 +1781,19 @@ describe('Admin Dashboard', () => {
       );
       expect(second).toBe(true);
 
-      // Should still have only one access record
-      const accessRecords = await dbHttp
+      // Still exactly one live grant: a re-grant is a no-op (Codex-2hxff.21).
+      const grants = await dbHttp
         .select()
-        .from(schema.contentAccess)
+        .from(schema.entitlements)
         .where(
           and(
-            eq(schema.contentAccess.userId, buyer.id),
-            eq(schema.contentAccess.contentId, content.id)
+            eq(schema.entitlements.userId, buyer.id),
+            eq(schema.entitlements.contentId, content.id),
+            eq(schema.entitlements.source, 'grant')
           )
         );
 
-      expect(accessRecords).toHaveLength(1);
+      expect(grants).toHaveLength(1);
     }, 180000);
   });
 

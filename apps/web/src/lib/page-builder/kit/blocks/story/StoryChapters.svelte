@@ -20,10 +20,14 @@
   interface Props {
     steps: readonly StoryStep[];
     images: readonly (string | null)[];
+    /** Each picture's stored sizes (`pageImageSrcset`), by step. */
+    srcsets?: readonly string[];
+    /** How wide this layout draws a picture, for choosing from them. */
+    sizes?: string;
     level: 1 | 2 | 3;
   }
 
-  const { steps, images, level }: Props = $props();
+  const { steps, images, srcsets = [], sizes, level }: Props = $props();
 </script>
 
 <ol class="story-chapters">
@@ -31,7 +35,13 @@
     <li class="story-chapter" data-lp-on-media data-pictured={images[index] ? '' : undefined}>
       {#if images[index]}
         <div class="story-chapter__media" data-lp-parallax="1">
-          <Media image={images[index]} alt={step.image?.alt ?? ''} focus={storedFocus(step.image)} />
+          <Media
+            image={images[index]}
+            srcset={srcsets[index]}
+            {sizes}
+            alt={step.image?.alt ?? ''}
+            focus={storedFocus(step.image)}
+          />
         </div>
       {:else}
         <span class="lp-atmos story-chapter__glow" aria-hidden="true"></span>

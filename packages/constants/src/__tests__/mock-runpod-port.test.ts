@@ -4,10 +4,10 @@
  * `RUNPOD_DIRECT_URL` has to carry a literal port in five places that cannot
  * import TypeScript — two workflow env blocks, an e2e-debug block, and two
  * shell generators. A literal that drifts from the constant does not fail
- * loudly: TranscodingService would post to a dead port, `triggerJob()` would
- * throw `RunPodApiError`, and the log line reads `RunPod API error` — which
- * looks like a third-party outage, not a config bug. That exact confusion
- * cost the 2026-09-02 production deploy (CI run 33667762392).
+ * loudly: TranscodingService would post to a dead port, and the log line
+ * reads `RunPod could not be reached` — which looks like a third-party
+ * outage, not a config bug. That exact confusion (then logged as `RunPod API
+ * error`) cost the 2026-09-02 production deploy (CI run 33667762392).
  *
  * So the number is FORBIDDEN from being stated independently: this test
  * derives the only legal value and rejects every other spelling.

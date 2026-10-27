@@ -8,6 +8,7 @@
  * User subscription data comes from subscriptionCollection (localStorage-backed)
  * instead of a server stream, saving ~567ms on authenticated page loads.
  */
+import { subscriptionStatusGrantsAccess } from '@codex/constants';
 import { browser } from '$app/environment';
 import {
   type SubscriptionItem,
@@ -42,16 +43,16 @@ interface ContentAccessItem {
 type AccessGrantingSubscription = Pick<SubscriptionItem, 'status' | 'tier'>;
 
 /**
- * Whether a subscription is in an access-granting state. Mirrors the backend
- * rule in `@codex/access` ContentAccessService — only `active` and
- * `cancelling` count as access-granting; `past_due`, `paused`, `cancelled`,
- * and `incomplete` do NOT. Filtering here keeps the badge consistent with
- * what the streaming gate would actually allow.
+ * Whether a subscription is in an access-granting state. The backend's own
+ * list (`ACCESS_GRANTING_SUBSCRIPTION_STATUSES`): `active`, `cancelling`, and
+ * `past_due` while Stripe retries a failed renewal; `paused`, `cancelled` and
+ * `incomplete` do NOT. Filtering here keeps the badge consistent with what
+ * the streaming gate would actually allow.
  */
 export function isAccessGrantingSubscription(
   sub: { status: string } | null | undefined
 ): sub is AccessGrantingSubscription {
-  return !!sub && (sub.status === 'active' || sub.status === 'cancelling');
+  return !!sub && subscriptionStatusGrantsAccess(sub.status);
 }
 
 /**

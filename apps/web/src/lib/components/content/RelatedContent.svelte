@@ -14,20 +14,25 @@
   @prop {string} [className] - Optional extra class on the root section
 -->
 <script lang="ts">
+  import { getDisplayThumbnail } from '$lib/utils/thumbnail';
   import * as m from '$paraglide/messages';
   import { ContentCard } from '$lib/components/ui/ContentCard';
   import { deriveContentAccessKind } from '$lib/utils/content-access';
   import type { ContentWithRelations } from '$lib/types';
 
-  // Same "mediaItem with resolved URLs" shape used by ContentDetailView — the
-  // public content API resolves R2 keys to full CDN URLs (thumbnailUrl) that
-  // aren't on the base MediaItem schema type.
-  type RelatedItem = ContentWithRelations & {
-    mediaItem?:
-      | (NonNullable<ContentWithRelations['mediaItem']> & {
-          thumbnailUrl?: string | null;
-        })
-      | null;
+  // The media item and org fields a card and its link read. The public content
+  // API sends the media fields with the R2 keys already resolved to CDN URLs
+  // (Codex-ve5eh) and the org as four fields (Codex-567de).
+  // No `purchaseCount`: the public and browse lists never send it.
+  type RelatedItem = Omit<
+    ContentWithRelations,
+    'mediaItem' | 'organization' | 'purchaseCount'
+  > & {
+    mediaItem?: {
+      durationSeconds?: number | null;
+      thumbnailUrl?: string | null;
+    } | null;
+    organization?: { slug: string } | null;
   };
 
   interface Props {
@@ -47,10 +52,14 @@
     </h2>
     <div class="related-content__grid">
       {#each items as item (item.id)}
+        <!-- 1, 2, then 4 columns. The section caps at --container-max (80rem)
+             beside the 4rem rail, which it reaches at 84rem, less its 1.5rem
+             padding and three 1rem gaps. -->
         <ContentCard
+          sizes="(min-width: 84rem) calc((80rem - 6rem) / 4), (min-width: 64rem) calc((100vw - 4rem - 6rem) / 4), (min-width: 40rem) calc((100vw - 4rem) / 2), calc(100vw - 2rem)"
           id={item.id}
           title={item.title}
-          thumbnail={item.mediaItem?.thumbnailUrl ?? null}
+          thumbnail={getDisplayThumbnail(item)}
           description={item.description}
           contentType={item.contentType === 'written'
             ? 'article'

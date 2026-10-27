@@ -41,10 +41,22 @@
   <div class="gallery-picture__frame">
     {#if drift}
       <div class="gallery-picture__drift" data-lp-parallax="1">
-        <Media image={picture.url} alt={picture.alt} focus={picture.focus} />
+        <Media
+          image={picture.url}
+          srcset={picture.srcset}
+          sizes={picture.sizes}
+          alt={picture.alt}
+          focus={picture.focus}
+        />
       </div>
     {:else}
-      <Media image={picture.url} alt={picture.alt} focus={picture.focus} />
+      <Media
+        image={picture.url}
+        srcset={picture.srcset}
+        sizes={picture.sizes}
+        alt={picture.alt}
+        focus={picture.focus}
+      />
     {/if}
   </div>
   {#if picture.caption}

@@ -5,7 +5,12 @@
  * Previously in @codex/shared-types — moved here for domain ownership.
  */
 
-import type { ProgressData } from '@codex/shared-types';
+import type { PublicContentRow } from '@codex/content';
+import type { ContentBodySource, ProgressData } from '@codex/shared-types';
+
+// Defined in @codex/shared-types, which the in-course payload also carries it
+// through; re-exported so this package's consumers keep one import.
+export type { ContentBodySource };
 
 /**
  * Response for GET /api/access/content/:id/stream
@@ -29,6 +34,65 @@ export interface StreamingUrlResponse {
    * playlist, so this array is purely a menu-population signal.
    */
   readyVariants?: string[];
+  /**
+   * The content's body, present only when the request asked for it
+   * (`?include=body`), access was granted, and the row is released (published
+   * now, or once). It is the body source for an entitled reader of a gated
+   * piece, whose public row carries none (Codex-039vo). Absent means it was
+   * not returned; a piece with no body comes back as
+   * `{ contentBody: null, contentBodyJson: null }`.
+   */
+  body?: ContentBodySource;
+}
+
+/**
+ * How a reader still holds an item that has left the storefront: it decides
+ * the note the detail page shows them (Codex-ov2ii). Mapped from the arm of
+ * the access decision that granted, so the note can never give a reason the
+ * gate did not use.
+ */
+export type ContentHeld =
+  | { by: 'purchase' | 'entitlement' | 'course'; until: null }
+  | {
+      by: 'subscription';
+      /**
+       * ISO 8601 end of the granting subscription's current period, when the
+       * item stops being covered. Always set: the date is the note's point.
+       */
+      until: string;
+    };
+
+export type ContentHeldBy = ContentHeld['by'];
+
+/**
+ * What `getWithdrawnContent` returns (Codex-ov2ii): an item that was published
+ * once, is not now, and that this reader still has access to. `content` is the
+ * public row's shape with no body (the body comes from `/stream?include=body`,
+ * as for any gated piece). Every other case is a 404.
+ *
+ * The public list's row (`PublicContentRow`, Codex-ve5eh): the same media and
+ * org columns, never the whole rows. NOT the wire shape: the route builds the
+ * public list's wire item from it (`toPublicItem`), resolving the media's R2
+ * keys to CDN URLs. The response is typed where it is read, in the web's
+ * `WithdrawnContentItem`, as `PublicContentListItem` is.
+ */
+export interface WithdrawnContent {
+  content: PublicContentRow;
+  held: ContentHeld;
+}
+
+/**
+ * Response for GET /api/access/courses/:courseId/can-enter.
+ *
+ * `disputeHold` is set only when `canEnter` is false and an open payment
+ * dispute holds back the user's grant to the course while nothing else
+ * opens it (Codex-2hxff.60), so the course page shows the dispute notice
+ * instead of Buy or Join. The same predicate as the course shelf's
+ * `EnrolledCourseSummary.disputeHold`. The kind only, never a date.
+ */
+export interface CourseEntryResponse {
+  canEnter: boolean;
+  disputeHold: 'purchase_dispute' | 'subscription_dispute' | null;
 }
 
 /**

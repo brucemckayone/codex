@@ -24,6 +24,7 @@
     getLibraryAccessState,
     indexSubscriptionsBySlug,
   } from '$lib/subscription/library-access';
+  import { cappedSizes } from '$lib/utils/image';
 
   interface Props {
     items: LibraryItem[];
@@ -67,11 +68,13 @@
     {
       accessType: item.accessType,
       organizationSlug: item.content.organizationSlug ?? null,
+      purchaseDisputedAt: item.purchase?.disputedAt ?? null,
     },
     subsBySlug
   )}
   <ContentCard
     variant="resume"
+    sizes={cappedSizes(82, itemMinWidth)}
     id={item.content.id}
     title={item.content.title}
     thumbnail={item.content.thumbnailUrl}

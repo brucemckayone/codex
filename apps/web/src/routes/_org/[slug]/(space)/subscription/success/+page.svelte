@@ -3,14 +3,25 @@
 
   Subscription-mode counterpart to /checkout/success.
 
-  Three visual states, driven by `data.verification`:
+  Visual states, driven by `data.verification`:
   - Complete (subscription row exists in our DB): animated checkmark + "Go to
-    Library" CTA. The webhook has landed — library will populate immediately.
+    Library" CTA. It refreshes the subscription and library collections once
+    (Codex-2hxff.22 WEB-04).
   - Pending (verification null or status !== 'complete', subscription missing):
-    spinner + auto-retry via `invalidate('subscription:verify')` up to 10 times
-    at 3s intervals (~30s total window). Handles the Stripe webhook race
-    where the redirect beats `checkout.session.completed`.
-  - Expired / fallback: honest "didn't land in time" message with a library CTA.
+    spinner, and capped checks via `invalidate('subscription:verify')`: about
+    six over the first minute, only while the tab is visible, then they stop
+    (owner decision 2026-10-26, "Capped, then a button"). Handles the Stripe
+    webhook race where the redirect beats `checkout.session.completed`.
+  - Late (the checks ran out): "Your payment went through. We're still
+    finishing up; check again in a minute." with Check again (one check per
+    click) and Go to library, when Stripe says the session is complete;
+    "Almost there…" with the same buttons when no answer ever came.
+  - Duplicate (the row is a second subscription to this org, Codex-o4jvw):
+    a calm notice naming the tier the user keeps, that this one is cancelled
+    and refunded, and Change plan when it was for another tier.
+  - Expired: "start over", with a pricing CTA.
+  - Error (`verifyFailed`: a 4xx other than 408/429, which a retry will not
+    change): "couldn't verify" with a library CTA, at once, without polling.
 
   See the shared CheckoutSuccess component for the equivalent purchase flow
   — intentionally kept separate so each flow can evolve independently.
@@ -18,7 +29,16 @@
 <script lang="ts">
   import { invalidate } from '$app/navigation';
   import * as m from '$paraglide/messages';
-  import { ClockIcon } from '$lib/components/ui/Icon';
+  import {
+    invalidateCollection,
+    loadSubscriptionFromServer
+  } from '$lib/collections';
+  import {
+    AlertCircleIcon,
+    CheckCircleIcon,
+    ClockIcon
+  } from '$lib/components/ui/Icon';
+  import { CappedChecks } from '$lib/utils/capped-checks.svelte';
   import type { PageData } from './$types';
 
   interface Props {
@@ -33,39 +53,104 @@
   );
   const isExpired = $derived(verification?.sessionStatus === 'expired');
 
-  // Auto-retry loop — mirrors the checkout/success pattern. We retry until
-  // either the subscription row appears (webhook landed) OR Stripe says the
-  // session expired. A null `verification` is treated as still-pending
-  // (transient ecom-api failure) so the user doesn't get stuck on an error.
-  let retryCount = $state(0);
-  const MAX_RETRIES = 10;
-  const RETRY_INTERVAL_MS = 3000;
-  const shouldRetry = $derived(
-    !isComplete && !isExpired && retryCount < MAX_RETRIES
-  );
+  // Capped checks — as the checkout/success page. We check until either the
+  // subscription row appears (webhook landed) OR Stripe says the session
+  // expired, about six times over the first minute, then stop and offer
+  // Check again. A null `verification` is treated as still-pending
+  // (transient ecom-api failure) so the user doesn't get stuck on an error,
+  // unless the load says the failure is one a retry will not change.
+  const waiting = $derived(!isComplete && !isExpired && !data.verifyFailed);
+  const checks = new CappedChecks(() => invalidate('subscription:verify'));
 
   $effect(() => {
-    if (!shouldRetry) return;
-    const t = setTimeout(() => {
-      retryCount++;
-      invalidate('subscription:verify');
-    }, RETRY_INTERVAL_MS);
-    return () => clearTimeout(t);
+    if (!waiting) return;
+    return checks.start();
   });
 
+  const shouldRetry = $derived(waiting && !checks.exhausted);
+  /** The checks ran out with Stripe saying paid: our record is late. */
+  const paidButLate = $derived(verification?.sessionStatus === 'complete');
+
   const subscription = $derived(verification?.subscription);
+
+  // Once, when it lands (WEB-04): a first subscription is in no collection
+  // yet, so its org is loaded by id; the library gains what the tier opens.
+  // A duplicate changes neither.
+  let collectionsRefreshed = false;
+  $effect(() => {
+    if (!isComplete || !subscription || subscription.duplicateOf) return;
+    if (collectionsRefreshed) return;
+    collectionsRefreshed = true;
+    void loadSubscriptionFromServer(
+      subscription.organizationId,
+      subscription.organizationSlug
+    );
+    void invalidateCollection('library');
+  });
   const orgName = $derived(data.org?.name ?? 'Codex');
   const libraryUrl = '/library';
+
+  // A second subscription to this org: it names the one the user keeps.
+  const kept = $derived(subscription?.duplicateOf);
+  // Paid for another tier than the one kept: point at Change plan.
+  const otherTierName = $derived(
+    kept && subscription && kept.tierId !== subscription.tierId
+      ? subscription.tierName
+      : null
+  );
+  const duplicateTitle = $derived(
+    kept && subscription
+      ? m.subscription_duplicate_title({
+          org: subscription.organizationName,
+          tier: kept.tierName
+        })
+      : null
+  );
 </script>
 
 <svelte:head>
-  <title>{m.subscription_success_title()} | {orgName}</title>
+  <title>{duplicateTitle ?? m.subscription_success_title()} | {orgName}</title>
   <meta name="robots" content="noindex, nofollow" />
 </svelte:head>
 
 <div class="subscription-success">
   <div class="subscription-success__card" aria-live="polite">
-    {#if isComplete}
+    {#if duplicateTitle && subscription}
+      <div
+        class="subscription-success__icon subscription-success__icon--notice"
+        aria-hidden="true"
+      >
+        <CheckCircleIcon size={48} />
+      </div>
+
+      <h1 class="subscription-success__title">{duplicateTitle}</h1>
+      <p class="subscription-success__description">
+        {m.subscription_duplicate_description()}
+      </p>
+      {#if otherTierName}
+        <p class="subscription-success__description">
+          {m.subscription_duplicate_change_plan_hint({ tier: otherTierName })}
+        </p>
+      {/if}
+
+      <div class="subscription-success__actions">
+        <a
+          href="/"
+          class="subscription-success__btn subscription-success__btn--primary"
+        >
+          {m.checkout_duplicate_go_to({ name: subscription.organizationName })}
+        </a>
+        {#if otherTierName}
+          <a
+            href="/pricing"
+            class="subscription-success__btn subscription-success__btn--secondary"
+          >
+            {m.subscription_duplicate_change_plan()}
+          </a>
+        {/if}
+      </div>
+
+    {:else if isComplete}
       <div class="subscription-success__icon">
         <svg
           class="checkmark"
@@ -128,23 +213,62 @@
         </a>
       </div>
 
-    {:else}
-      <!-- Retries exhausted, webhook hasn't landed. Let the user into their
-           library — the webhook will catch up shortly and the next library
-           refresh will reconcile. -->
+    {:else if data.verifyFailed}
+      <!-- The verify failed in a way a retry will not change (a 4xx): say we
+           could not verify it, rather than implying it is still processing. -->
       <div
         class="subscription-success__icon subscription-success__icon--pending"
+        aria-hidden="true"
       >
-        <ClockIcon size={48} />
+        <AlertCircleIcon size={48} />
       </div>
-      <h1 class="subscription-success__title">{m.checkout_success_almost_there()}</h1>
+      <h1 class="subscription-success__title">{m.common_error()}</h1>
       <p class="subscription-success__description">
-        {m.checkout_success_almost_there_description()}
+        {m.checkout_success_error()}
       </p>
       <div class="subscription-success__actions">
         <a
           href={libraryUrl}
           class="subscription-success__btn subscription-success__btn--primary"
+        >
+          {m.checkout_success_go_to_library()}
+        </a>
+      </div>
+
+    {:else}
+      <!-- The checks ran out and the webhook hasn't landed. Offer one more
+           check per click, and the library — the webhook will catch up
+           shortly and the next library refresh will reconcile. -->
+      <div
+        class="subscription-success__icon subscription-success__icon--pending"
+      >
+        <ClockIcon size={48} />
+      </div>
+      {#if paidButLate}
+        <h1 class="subscription-success__title">{m.checkout_late_title()}</h1>
+        <p class="subscription-success__description">
+          {m.checkout_late_description()}
+        </p>
+      {:else}
+        <h1 class="subscription-success__title">{m.checkout_success_almost_there()}</h1>
+        <p class="subscription-success__description">
+          {m.checkout_success_almost_there_description()}
+        </p>
+      {/if}
+      <div class="subscription-success__actions">
+        <!-- No `disabled` while it runs: that would drop focus to <body>. The
+             label says so, and a second click sends nothing (CappedChecks). -->
+        <button
+          type="button"
+          class="subscription-success__btn subscription-success__btn--primary"
+          aria-busy={checks.checking}
+          onclick={() => checks.checkOnce()}
+        >
+          {checks.checking ? m.checkout_checking() : m.checkout_check_again()}
+        </button>
+        <a
+          href={libraryUrl}
+          class="subscription-success__btn subscription-success__btn--secondary"
         >
           {m.checkout_success_go_to_library()}
         </a>
@@ -181,7 +305,8 @@
     margin-bottom: var(--space-2);
   }
 
-  .subscription-success__icon--pending {
+  .subscription-success__icon--pending,
+  .subscription-success__icon--notice {
     color: var(--color-text-secondary);
   }
 
@@ -278,11 +403,18 @@
     align-items: center;
     justify-content: center;
     padding: var(--space-3) var(--space-6);
+    font-family: inherit;
     font-size: var(--text-base);
     font-weight: var(--font-medium);
+    border: none;
     border-radius: var(--radius-md);
     text-decoration: none;
+    cursor: pointer;
     transition: var(--transition-colors);
+  }
+
+  .subscription-success__btn[aria-busy='true'] {
+    cursor: progress;
   }
 
   .subscription-success__btn:focus-visible {
@@ -298,6 +430,17 @@
 
   .subscription-success__btn--primary:hover {
     background: var(--color-interactive-hover);
+  }
+
+  .subscription-success__btn--secondary {
+    background: transparent;
+    color: var(--color-text-secondary);
+    border: var(--border-width) solid var(--color-border);
+  }
+
+  .subscription-success__btn--secondary:hover {
+    background: var(--color-surface-secondary);
+    color: var(--color-text);
   }
 
   @media (--breakpoint-sm) {

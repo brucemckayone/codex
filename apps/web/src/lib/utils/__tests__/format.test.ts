@@ -1,5 +1,29 @@
-import { describe, expect, it } from 'vitest';
-import { getInitials } from '../format';
+import { afterEach, describe, expect, it } from 'vitest';
+import {
+  formatLocalClockTime,
+  formatSentenceDate,
+  getInitials,
+} from '../format';
+
+describe('formatSentenceDate', () => {
+  const now = new Date('2026-10-24T12:00:00.000Z');
+
+  it('drops the year when it is this year', () => {
+    expect(formatSentenceDate('2026-11-12T09:00:00.000Z', now)).toBe(
+      '12 November'
+    );
+  });
+
+  it('keeps the year when it is not', () => {
+    expect(formatSentenceDate('2027-01-03T09:00:00.000Z', now)).toBe(
+      '3 January 2027'
+    );
+  });
+
+  it('reads the day in London, not UTC: 23:30 UTC in summer is tomorrow', () => {
+    expect(formatSentenceDate('2026-07-11T23:30:00.000Z', now)).toBe('12 July');
+  });
+});
 
 describe('getInitials', () => {
   describe('name-only', () => {
@@ -90,5 +114,30 @@ describe('getInitials', () => {
     it('accepts undefined fallback', () => {
       expect(getInitials('Alex Bob', undefined)).toBe('AB');
     });
+  });
+});
+
+describe('formatLocalClockTime', () => {
+  const realTz = process.env.TZ;
+  afterEach(() => {
+    process.env.TZ = realTz;
+  });
+
+  it("reads in the runtime's zone, as a 24-hour HH:MM", () => {
+    process.env.TZ = 'Asia/Kolkata';
+    expect(formatLocalClockTime(new Date('2026-10-26T15:00:00.000Z'))).toBe(
+      '20:30'
+    );
+  });
+
+  it('reads the zone at call time, not at import', () => {
+    process.env.TZ = 'UTC';
+    expect(formatLocalClockTime(new Date('2026-10-26T15:00:00.000Z'))).toBe(
+      '15:00'
+    );
+    process.env.TZ = 'America/New_York';
+    expect(formatLocalClockTime(new Date('2026-10-26T15:00:00.000Z'))).toBe(
+      '11:00'
+    );
   });
 });

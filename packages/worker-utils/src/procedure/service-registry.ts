@@ -18,6 +18,7 @@ import {
   AdminAnalyticsService,
   AdminContentManagementService,
   AdminCustomerManagementService,
+  SupportService,
 } from '@codex/admin';
 import { AgreementService } from '@codex/agreements';
 import {
@@ -25,7 +26,11 @@ import {
   VersionedCache,
   type VersionedCacheConfig,
 } from '@codex/cache';
-import { R2Service, type R2SigningConfig } from '@codex/cloudflare-clients';
+import {
+  CdnCachePurger,
+  R2Service,
+  type R2SigningConfig,
+} from '@codex/cloudflare-clients';
 import type { CachePresetName } from '@codex/constants';
 // Service imports
 import {
@@ -49,7 +54,7 @@ import {
   NotificationsService,
   TemplateService,
 } from '@codex/notifications';
-import type { ObservabilityClient } from '@codex/observability';
+import { ObservabilityClient } from '@codex/observability';
 import { DevDomainService, OrganizationService } from '@codex/organization';
 import {
   BrandingSettingsService,
@@ -69,9 +74,21 @@ import {
   SubscriptionService,
   TierService,
 } from '@codex/subscription';
-import { TranscodingService } from '@codex/transcoding';
+import {
+  type AlertLedger,
+  type MediaStatusFeed,
+  type MediaStatusPublisher,
+  TranscodingAlerts,
+  TranscodingMaintenance,
+  TranscodingService,
+} from '@codex/transcoding';
 import { buildServiceUrl } from '@codex/urls';
 import { sendEmailToWorker } from '../email/send-email';
+import {
+  DurableObjectMediaStatusFeed,
+  WorkerMediaStatusPublisher,
+} from '../media-status';
+import { followUpMemberDeparture } from './member-departure';
 import type { ServiceRegistry } from './types';
 import type { BackgroundTracker } from './upload-shared';
 
@@ -257,6 +274,27 @@ export interface ServiceRegistryOverrides {
    * change, verified on its own.
    */
   skipHyperdrive?: boolean;
+  /**
+   * Where media lifecycle changes go (Codex-l2c48.9). MediaStatusObject's
+   * alarm passes a feed into itself, so a retry it runs reports straight
+   * back to it rather than through a stub to itself.
+   */
+  mediaStatus?: MediaStatusFeed;
+}
+
+/**
+ * Setup-fault alerts go once per fault per UTC day (Codex-l2c48.6): a KV key
+ * that outlives its day. Not atomic, so two first reports racing may both
+ * mail, which beats losing one.
+ */
+function kvAlertLedger(kv: NonNullable<Bindings['CACHE_KV']>): AlertLedger {
+  return {
+    async claim(key) {
+      if ((await kv.get(key)) !== null) return false;
+      await kv.put(key, '1', { expirationTtl: 36 * 60 * 60 });
+      return true;
+    },
+  };
 }
 
 export async function createServiceRegistry(
@@ -397,9 +435,11 @@ export async function createServiceRegistry(
   let _purchase: PurchaseService | undefined;
   let _feeConfig: FeeConfigService | undefined;
   let _transcoding: TranscodingService | undefined;
+  let _transcodingMaintenance: TranscodingMaintenance | undefined;
   let _adminAnalytics: AdminAnalyticsService | undefined;
   let _adminContent: AdminContentManagementService | undefined;
   let _adminCustomer: AdminCustomerManagementService | undefined;
+  let _support: SupportService | undefined;
   let _templates: TemplateService | undefined;
   let _notifications: NotificationsService | undefined;
   let _preferences: NotificationPreferencesService | undefined;
@@ -434,6 +474,66 @@ export async function createServiceRegistry(
     return _sharedDbClient.db;
   }
 
+  // Not a `ctx.services` entry: shared by the two transcoding getters.
+  let _transcodingAlerts: TranscodingAlerts | undefined;
+  /**
+   * Transcoding's failure and setup-fault emails (Codex-l2c48.6), one shared
+   * by the transcoding and transcodingMaintenance getters. None without an
+   * execution context to send from. The lookups run after the response on
+   * dbWaitUntil, which a webhook's pool waits for before closing.
+   */
+  function getTranscodingAlerts(): TranscodingAlerts | undefined {
+    const ctx = executionCtx;
+    if (!ctx || !dbWaitUntil) return undefined;
+    if (!_transcodingAlerts) {
+      _transcodingAlerts = new TranscodingAlerts({
+        db: getSharedDb(),
+        environment: getEnvironment(),
+        mailer: (params) => {
+          sendEmailToWorker(env, ctx, params);
+        },
+        webAppUrl: env.WEB_APP_URL,
+        waitUntil: dbWaitUntil,
+        ledger: env.CACHE_KV ? kvAlertLedger(env.CACHE_KV) : undefined,
+      });
+    }
+    return _transcodingAlerts;
+  }
+
+  // Not a `ctx.services` entry: shared by the media and transcoding getters.
+  let _mediaStatusFeed: MediaStatusFeed | undefined;
+  /**
+   * The status object's feed (Codex-l2c48.9): media-api binds MEDIA_STATUS.
+   * None without an execution context to send from. A publish touches no
+   * pool, so it rides plain waitUntil (`cacheWaitUntil`), as a KV put does.
+   */
+  function getMediaStatusFeed(): MediaStatusFeed | undefined {
+    if (overrides?.mediaStatus) return overrides.mediaStatus;
+    if (!env.MEDIA_STATUS || !cacheWaitUntil) return undefined;
+    _mediaStatusFeed ??= new DurableObjectMediaStatusFeed(
+      env.MEDIA_STATUS,
+      cacheWaitUntil,
+      _obs
+    );
+    return _mediaStatusFeed;
+  }
+
+  /**
+   * MediaItemService's publisher. A worker without the binding (content-api,
+   * organization-api's intro video) publishes through media-api.
+   */
+  function getMediaStatusPublisher(): MediaStatusPublisher | undefined {
+    const feed = getMediaStatusFeed();
+    if (feed) return feed;
+    if (!env.WORKER_SHARED_SECRET || !cacheWaitUntil) return undefined;
+    return new WorkerMediaStatusPublisher(
+      buildServiceUrl('media', env),
+      env.WORKER_SHARED_SECRET,
+      cacheWaitUntil,
+      _obs
+    );
+  }
+
   /**
    * Get environment (defaults to 'development')
    */
@@ -443,8 +543,9 @@ export async function createServiceRegistry(
 
   // Orphan-record PRODUCER for the media-api OrphanedFileCleanupDO sweep
   // (Codex-r85jo.3). Every ImageProcessingService built here — directly, or
-  // inside IdentityService.uploadAvatar — must receive it: without it the
-  // orphan-recording branch in upload-pipeline.ts can only take its warn path,
+  // inside IdentityService.uploadAvatar / deleteAvatar — must receive it:
+  // without it the orphan-recording branch in upload-pipeline.ts can only take
+  // its warn path,
   // and the DO drains a table nothing writes. Private to the registry, not a
   // `ctx.services.*` entry: no route has a reason to call it directly.
   let _orphanedFiles: OrphanedFileService | undefined;
@@ -574,6 +675,7 @@ export async function createServiceRegistry(
           db: getSharedDb(),
           environment: getEnvironment(),
           r2: mediaR2,
+          mediaStatus: getMediaStatusPublisher(),
         });
       }
       return _media;
@@ -658,6 +760,9 @@ export async function createServiceRegistry(
           // verify the short-lived token signed with WORKER_SHARED_SECRET.
           contentApiBaseUrl: buildServiceUrl('content', env),
           hlsTokenSecret: env.WORKER_SHARED_SECRET,
+          // Library tiles resolve a video poster's R2 key to a URL with it
+          // (Codex-kk9nv.6).
+          r2PublicUrlBase: env.R2_PUBLIC_URL_BASE,
         });
       }
       return _access;
@@ -727,6 +832,34 @@ export async function createServiceRegistry(
                 sendEmailToWorker(env, executionCtx, params);
               }
             : undefined,
+          // Codex-2hxff.18 / .64: what a removal ended goes to the follow-up
+          // (course subscriptions cancelled at period end, caches cleared, one
+          // email to the creator). `async`, so even a throw while building a
+          // service becomes a rejection the caller logs.
+          onMemberRemoved: async (departure) => {
+            await followUpMemberDeparture(
+              {
+                // Reads and KV only, so the stateless HTTP client, as
+                // content-api's cache bump uses.
+                db: createDbClient(env),
+                cache: env.CACHE_KV
+                  ? buildTrackedCache(env.CACHE_KV)
+                  : undefined,
+                waitUntil: (promise) => dbWaitUntil?.(promise),
+                cancelCourseSubscriptions: (params) =>
+                  registry.courseSubscription.cancelForCoursesOffSale(params),
+                sendEmail: executionCtx
+                  ? (params) => {
+                      sendEmailToWorker(env, executionCtx, params);
+                    }
+                  : undefined,
+                obs:
+                  _obs ??
+                  new ObservabilityClient('member-departure', getEnvironment()),
+              },
+              departure
+            );
+          },
           webAppUrl: env.WEB_APP_URL,
           // The email task looks its recipients up in the DB first.
           waitUntil: dbWaitUntil,
@@ -899,20 +1032,11 @@ export async function createServiceRegistry(
             }
           : undefined;
 
-        // Web-app base URL powers the deep link embedded inside every
-        // agreement-lifecycle email. Codex-0omga (WP-5 polish): the
-        // value is now MANDATORY at AgreementService construction; the
-        // service itself throws if unset. We surface a more specific
-        // error here so a misconfigured worker fails at boot rather
-        // than at the first agreement mutation.
-        const webAppUrl = env.WEB_APP_URL;
-        if (!webAppUrl) {
-          throw new Error(
-            'AgreementService requires `env.WEB_APP_URL` to be set ' +
-              'for notification deep-links. Check wrangler.jsonc.'
-          );
-        }
-
+        // The email links come from the env name, not `WEB_APP_URL`: the
+        // apex host it names has no Studio, so every link built on it was
+        // dead (Codex-2hxff.20 AGR-10). The service throws at construction
+        // on an env name it cannot route.
+        //
         // Codex-0omga (WP-5 polish): thread `executionCtx.waitUntil`
         // through so the lifecycle notification dispatch (3 DB lookups
         // + mailer fire) is offloaded from the API request critical
@@ -925,7 +1049,6 @@ export async function createServiceRegistry(
           db: getSharedDb(),
           environment: getEnvironment(),
           mailer,
-          webAppUrl,
           waitUntil: dbWaitUntil,
         });
       }
@@ -970,7 +1093,9 @@ export async function createServiceRegistry(
           ? (params: {
               to: string;
               toName?: string;
-              templateName: 'subscription-tier-price-change';
+              templateName:
+                | 'subscription-tier-price-change'
+                | 'course-no-longer-offered';
               category: 'transactional';
               userId?: string;
               organizationId?: string | null;
@@ -988,8 +1113,10 @@ export async function createServiceRegistry(
         // without needing to re-send.
         const webAppUrl = env.WEB_APP_URL;
 
-        // WP-10 (Codex-69t7c.10): wire payout-released mailer so
-        // resolvePendingPayouts fires a notification after pending→paid.
+        // WP-10 (Codex-69t7c.10): wire payout-released mailer so the
+        // drains (resolvePendingPayouts, and the payee-wide
+        // resolvePendingPayoutsForAccount, Codex-2hxff.13) send one
+        // notification after pending→paid.
         // Same pattern as `mailer` above — service stays unaware of
         // Bindings / ExecutionContext.
         const payoutMailer = executionCtx
@@ -1224,9 +1351,36 @@ export async function createServiceRegistry(
           webhookBaseUrl: transcodingWebhookUrl,
           runpodApiBaseUrl: env.RUNPOD_API_URL,
           runpodDirectUrl: env.RUNPOD_DIRECT_URL,
+          // Unset means the default; a bad value is the service's to
+          // report (it logs at error and uses the default).
+          runpodWorkersMax: env.RUNPOD_WORKERS_MAX
+            ? Number(env.RUNPOD_WORKERS_MAX)
+            : undefined,
+          alerts: getTranscodingAlerts(),
+          mediaStatus: getMediaStatusFeed(),
         });
       }
       return _transcoding;
+    },
+
+    get transcodingMaintenance() {
+      if (!_transcodingMaintenance) {
+        // Originals live in MEDIA_BUCKET. A HEAD needs no signing config.
+        const originals = env.MEDIA_BUCKET
+          ? new R2Service(env.MEDIA_BUCKET)
+          : undefined;
+        _transcodingMaintenance = new TranscodingMaintenance({
+          db: getSharedDb(),
+          environment: getEnvironment(),
+          transcoding: this.transcoding,
+          originalExists: originals
+            ? async (key) => (await originals.head(key)) !== null
+            : undefined,
+          alerts: getTranscodingAlerts(),
+          mediaStatus: getMediaStatusFeed(),
+        });
+      }
+      return _transcodingMaintenance;
     },
 
     get images() {
@@ -1271,6 +1425,24 @@ export async function createServiceRegistry(
         });
       }
       return _adminCustomer;
+    },
+
+    /**
+     * Codex-2hxff.28: platform support's refunds. The shared per-request
+     * client, because settling a failed refund is one transaction; the lazy
+     * Stripe proxy, so the queue's DB-only reads never need the key. The
+     * purchase service gives a re-paid failed refund's access back (Q5d).
+     */
+    get support() {
+      if (!_support) {
+        _support = new SupportService({
+          db: getSharedDb(),
+          environment: getEnvironment(),
+          stripe: getLazyStripeClient(),
+          purchase: registry.purchase,
+        });
+      }
+      return _support;
     },
 
     // ========================================================================
@@ -1385,6 +1557,16 @@ export async function createServiceRegistry(
           r2PublicUrlBase: env.R2_PUBLIC_URL_BASE,
           cache,
           orphanedFileService: getOrphanedFileService(),
+          // The CDN purge runs after the response (a fetch, no DB pool).
+          waitUntil: cacheWaitUntil,
+          // A deleted account's avatars leave the CDN edge (Codex-kk9nv.15).
+          cdnPurger:
+            env.CF_ZONE_ID && env.CF_API_TOKEN
+              ? new CdnCachePurger({
+                  zoneId: env.CF_ZONE_ID,
+                  apiToken: env.CF_API_TOKEN,
+                })
+              : undefined,
         });
       }
       return _identity;

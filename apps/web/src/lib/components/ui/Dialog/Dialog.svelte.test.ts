@@ -94,6 +94,71 @@ describe('Dialog', () => {
   });
 });
 
+describe('Dialog dismissible', () => {
+  let component: ReturnType<typeof mount> | null = null;
+
+  afterEach(() => {
+    if (component) {
+      unmount(component);
+      component = null;
+    }
+    document.body.innerHTML = '';
+  });
+
+  // Melt debounces its outside-press handlers by 10 ms.
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 25));
+  async function pressOutside() {
+    document.body.dispatchEvent(
+      new MouseEvent('pointerdown', { bubbles: true })
+    );
+    await settle();
+    document.body.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+    await settle();
+    flushSync();
+  }
+  const isOpen = () => document.querySelector('.dialog-content') !== null;
+
+  test('while not dismissible, a press outside leaves it open; once dismissible, one closes it', async () => {
+    const props = $state({ open: true, dismissible: false });
+    component = mount(DialogHarness, { target: document.body, props });
+    flushSync();
+    await settle();
+
+    await pressOutside();
+    expect(isOpen()).toBe(true);
+
+    props.dismissible = true;
+    flushSync();
+    await pressOutside();
+    expect(isOpen()).toBe(false);
+  });
+
+  test('turning it off and on again moves no focus: Melt’s focus trap is not rebuilt', async () => {
+    const props = $state({ open: true, dismissible: true });
+    component = mount(DialogHarness, { target: document.body, props });
+    flushSync();
+    await settle();
+    // A browser blurs a button that disables itself (Submit, while busy), so
+    // focus is on the page when the request ends. A rebuilt trap would then
+    // take it to the first tabbable element, over whatever the dialog moves
+    // it to (R2-L3).
+    const second = document.querySelector<HTMLButtonElement>(
+      '[data-testid="second-focusable"]'
+    );
+    second?.focus();
+    second?.blur();
+    expect(document.activeElement).toBe(document.body);
+
+    props.dismissible = false;
+    flushSync();
+    await settle();
+    props.dismissible = true;
+    flushSync();
+    await settle();
+    expect(document.activeElement).toBe(document.body);
+  });
+});
+
 describe('DialogContent', () => {
   let component: ReturnType<typeof mount> | null = null;
 

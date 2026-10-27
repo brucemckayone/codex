@@ -64,12 +64,23 @@ every change applies to the next sale and nobody is told).
 | `GET` | `/api/admin/fees/audit-log` | Paginated change history |
 
 There is no web screen; a local desktop admin app is planned (`Codex-xyb7v`).
-Every write bumps the row's `version`, writes one `fee_config_audit_log` row per
-column that **actually changed** (**gap**: `Codex-2hxff.23` — today it logs
-changes that never happened), and invalidates the cache. Writes are atomic —
+On an organisation or override write, a value left out is kept, and `null`
+clears it back to inheriting the level above. Every write bumps the row's
+`version`, writes one `fee_config_audit_log` row per column that **actually
+changed** (a clear is recorded as old value → `NULL`, and so is each set
+value when an organisation's values or an override are removed; setting a
+value it already has, or clearing one already clear, records nothing and
+writes nothing), and invalidates the cache. In the log, `NULL` on either side
+means unset, inheriting the level above. Rows written before migration 0112
+hold the string `'null'` instead: from an update, that was a clear that never
+took effect (the old merge kept the value, `Codex-2hxff.23`); from removing an
+organisation's values or an override, the removal did happen. The current fee
+row tells the two apart. Writes are atomic —
 **gap**: `Codex-rtwpv`. Fee values are cached in KV with no TTL: a write
 invalidates them, and they change too rarely for a TTL to be worth the misses.
-A fee is read at the time of each sale; it is never snapshotted on an agreement.
+A fee is read when each sale is processed; it is never snapshotted on an
+agreement. A replayed invoice keeps the platform fee its first delivery
+recorded ([below](#a-replayed-invoice)).
 
 ## Minimum platform fee
 
@@ -92,9 +103,9 @@ while Stripe's published UK card price is 1.5% + 20p, about 21.5p.
   shortfall comes from the creator, giving **platform 25p, organisation 9p,
   creator 66p**.
 
-— **gap**: `Codex-2hxff.32` (prices of 1p–29p pass validation and then fail
-at Stripe Checkout). The floor reaches every sale path since #597 (fee config in
-webhooks and the cron; `Codex-2hxff.7`, closed).
+The £1.00 minimum price is enforced by validation on every price and
+re-checked at checkout (`Codex-2hxff.32`). The floor reaches every sale path
+since #597 (fee config in webhooks and the cron; `Codex-2hxff.7`, closed).
 
 ## Minimum transfer
 
@@ -182,17 +193,84 @@ added to the organisation slice and recorded with it, so every penny of the
 invoice is in the ledger: the organisation's slice is the post-platform pool
 minus what the creators take.
 
+### A replayed invoice
+
+Owner decision 2026-10-23, "Keep recorded fee" (`Codex-2hxff.49`). Stripe can
+deliver an invoice's payment more than once, and the fees may change in
+between. Each slice is recorded once per charge
+([the payouts ledger](connect-and-payouts.md#the-payouts-ledger)), and:
+
+- **The platform fee on record wins.** A redelivery that computes a different
+  platform fee keeps the one recorded, and logs the difference at warn. A
+  charge split with no fee row had a fee of 0 (the fee is written before the
+  split, and a 0 fee writes no row), so a redelivery records no fee on it.
+- **The rest is split from it.** If no other slice was recorded yet (the first
+  delivery died after the platform fee), the pool is the gross minus the
+  recorded fee, divided by the rules above with the fees in force now. So the
+  slices always sum exactly to the gross, and no transfer exceeds the charge.
+- **A split already recorded stands.** If any creator or organisation slice
+  exists, every recorded slice is kept, for organisation and course-plan
+  invoices alike. Each one the redelivery would have computed differently is
+  logged at error for a person to check.
+- **A slice missing entirely gets what is left.** A slice the split defines
+  but the charge has no row for (a delivery that died between slices) is
+  recorded from the gross less every row on the charge, so the slices sum to
+  the gross. With nothing left, as after a complete first split, it is not
+  added. The rest goes to the organisation's slice when it is among the
+  missing, as rounding remainders do: the other missing slices take their
+  computed amounts first, as far as it goes. With no organisation slice
+  missing, the last missing slice takes the rest. If a first split died
+  before writing its owner-pool slice and a replay computes a different payee
+  (a backdated agreement), the rest goes to the replay's payee; the first
+  split's full shape cannot be known.
+
+| £10.00 invoice, no agreements | Platform | Organisation | Owner pool |
+|---|---|---|---|
+| First delivery at 10% / 15% | 100 | 135 | 765 |
+| It died after the platform fee; the replay runs at 20% / 15% | 100 (recorded) | 135 | 765 |
+| The same replay split afresh (what the rule prevents) | 100 (recorded) | 120 | 680, £1.00 short of the gross |
+
+Using the fees in force at the invoice's own time instead waits for fee
+effective dates (`Codex-2hxff.33`).
+
 ---
 
 ## Reporting
 
-Every screen that shows revenue uses the same rules as the split:
+Every screen that shows revenue uses the same rules as the split. The owner
+decided these on 2026-10-26: "Count everything now", "After refunds", "UTC,
+like the rest", "Only what's left" and "One row, real earnings".
 
-- the revenue headline includes every kind of revenue — one-off, course,
-  organisation subscriptions, course subscriptions and orgless sales — **gap**:
-  `Codex-2hxff.20` (Studio Billing counts one-off sales only);
-- a creator's share is shown as the share they actually have — **gap**:
-  `Codex-2hxff.20` (revenue by creator shows it inverted);
-- charts plot shares of the post-platform pool, using the fee actually
-  configured rather than a hard-coded 10% — **gap**: `Codex-2hxff.20`;
-- payout totals exclude the platform's own fee rows — **gap**: `Codex-2hxff.15`.
+- **The headline counts every kind of revenue.**
+  - It reads from the payouts ledger, so it covers one-off sales, courses,
+    organisation subscriptions and course plans.
+  - A per-kind line splits it: One-off · Courses · Subscriptions · Course
+    plans. The four sum to the headline.
+  - Each payment counts what the organisation keeps, after its standing
+    refunds and lost chargebacks.
+  - Each payment counts on the UTC day it was first recorded.
+- **Billing's "What Codex charged"** is the platform fee on every kind,
+  subscriptions included, less its share of those refunds. Purchases and
+  Average order stay sales-only (One-off and Courses), because a subscription
+  payment isn't an order.
+- **Charts** plot one point per UTC calendar day, oldest first, with empty
+  days as zero. This holds for the revenue, subscriber and follower series
+  alike.
+  - A "last N days" window covers exactly N days, today included.
+  - "Earned today" is today's UTC date.
+  - The dashboard's week-on-week change compares the last 7 days with the
+    7 before them.
+- **Revenue by creator** has one row per creator: Creator · Earned ·
+  Subscription share · Sales share · Last payout · Pending.
+  - **Earned** is their cut of the period's sales, sent or not, after refunds.
+    The Payouts page's "Earned" stays the money already sent, so the two can
+    differ.
+  - A creator with no agreement shows "None" for the shares, and a missing
+    share shows "—", never 0%.
+- **The share bar** plots only what's left after Codex's fee, with no fee
+  slice. It warns only when shares pass 100%: "Shares add up to 105% of
+  what's left after Codex's fee, 5% more than there is. Amend one or more
+  agreements." The creator's page shows the first sentence only.
+- **A read that fails says so.** It shows "We couldn't load …" with Retry, and
+  never £0 or an empty list.
+- Payout totals exclude the platform's own fee rows.

@@ -20,6 +20,8 @@
 <script lang="ts">
   import * as m from '$paraglide/messages';
   import { UploadIcon, SearchIcon, XIcon } from '$lib/components/ui/Icon';
+  import Badge from '$lib/components/ui/Badge/Badge.svelte';
+  import type { MediaStatusConnection } from '$lib/client/media-status.svelte';
 
   type MediaTypeFilter = 'all' | 'video' | 'audio';
   type StatusFilter = 'all' | 'ready' | 'transcoding' | 'failed';
@@ -29,6 +31,11 @@
     total: number;
     /** Whether the list is currently loading (dims the count) */
     loading?: boolean;
+    /**
+     * The live status socket (Codex-l2c48.7). Shown while it is live, or
+     * while the tiles may lag (reconnecting, polling); hidden otherwise.
+     */
+    live?: MediaStatusConnection;
     /** Active media-type filter */
     mediaType: MediaTypeFilter;
     /** Active status filter */
@@ -50,6 +57,7 @@
   const {
     total,
     loading = false,
+    live = 'idle',
     mediaType,
     status,
     searchValue,
@@ -83,6 +91,16 @@
   const ordinalText = $derived(
     Math.max(0, Math.min(total, 999)).toString().padStart(3, '0')
   );
+  const LIVE_LABELS: Partial<Record<MediaStatusConnection, () => string>> = {
+    live: () => m.media_live_live(),
+    reconnecting: () => m.media_live_reconnecting(),
+    polling: () => m.media_live_polling(),
+    // The session ended, or the ticket was refused twice in a row: nothing
+    // reconnects until the page loads again.
+    stopped: () => m.media_live_stopped(),
+  };
+  const liveLabel = $derived(LIVE_LABELS[live]);
+
   // TODO i18n — studio_media_count_label = "items"
   const countLabel = 'items';
   // TODO i18n — studio_media_search_placeholder = "Search library..."
@@ -106,6 +124,11 @@
       <span class="count-num">{ordinalText}</span>
       <span class="count-label">{countLabel}</span>
     </span>
+    {#if liveLabel}
+      <Badge class="live-chip" variant={live === 'live' ? 'success' : 'warning'} data-state={live}>
+        {liveLabel()}
+      </Badge>
+    {/if}
   </div>
 
   <div class="bar-filters" aria-label="Filter media">
@@ -225,10 +248,15 @@
   }
 
   /* ── Identity (breadcrumb + count) ──────────────────────── */
+  /* Wraps rather than overflows: at 390px a longer live chip ("Updates every
+     minute", "Reload for live updates") squeezed the breadcrumb to 0 and ran
+     under the upload button. Lines break on natural widths, so the chip
+     drops to its own line and nothing shrinks. */
   .bar-identity {
     display: inline-flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: var(--space-3);
+    gap: var(--space-2) var(--space-3);
     min-width: 0;
   }
 
@@ -300,6 +328,26 @@
     font-family: var(--font-sans);
     text-transform: uppercase;
     letter-spacing: var(--tracking-wider);
+  }
+
+  /* The live chip is a Badge (its colours); this adds the dot and the blink. */
+  .bar-identity :global(.live-chip)::before {
+    content: '';
+    width: var(--space-1-5);
+    height: var(--space-1-5);
+    margin-right: var(--space-1-5);
+    border-radius: var(--radius-full);
+    background: currentColor;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .bar-identity :global(.live-chip[data-state='reconnecting'])::before {
+      animation: live-chip-blink 1s steps(2) infinite;
+    }
+  }
+
+  @keyframes live-chip-blink {
+    50% { opacity: 0.2; }
   }
 
   /* ── Dual segmented filters ─────────────────────────────── */

@@ -8,19 +8,24 @@
  *   2. call `PurchaseService.processRefund(paymentIntentId, …)`
  *   3. on success: bump COLLECTION_USER_LIBRARY via `invalidateForUser`
  *      (requires CACHE_KV + userId)
- *   4. on success: write `AccessRevocation.revoke(userId, orgId, 'refund')`
- *      ONLY when the refund is subscription-linked (orgId returned by the
- *      service). One-time-purchase refunds deliberately skip revocation —
- *      see the inline rationale in the handler.
+ *   4. `SubscriptionService.cancelForFullRefund` — a FULL refund of the
+ *      LATEST subscription payment cancels the subscription (owner decision
+ *      P-4, Codex-2hxff.10). The handler then ends it here as
+ *      `customer.subscription.deleted` would, and writes
+ *      `AccessRevocation.revoke(userId, orgId, 'refund')`. A one-time
+ *      purchase's access ends through its entitlement: no revocation. A
+ *      duplicate subscription's refund ends nothing (Codex-2hxff.15).
  *   5. send `refund-processed` email when billing_details.email or
- *      receipt_email is present on the charge
+ *      receipt_email is present on the charge, worded for a duplicate
+ *      subscription when step 4 found one; a step-4 failure is rethrown
+ *      after the email
  *
  * Coverage matrix (positive + negative + idempotent — feedback_security_deep_test):
  *
  * | Scenario                                                      | processRefund | invalidateForUser | revoke | sendEmail |
  * | ------------------------------------------------------------- | :-----------: | :---------------: | :----: | :-------: |
  * | positive one-time: { userId } only → cache bump, NO revocation|      yes      |        yes        |   no   |    yes    |
- * | positive subscription-linked: { userId, orgId } → all three   |      yes      |        yes        |   yes  |    yes    |
+ * | positive full refund of latest sub payment → cancel + revoke  |      yes      |      yes x 2      |   yes  |    yes    |
  * | negative: unknown charge (processRefund returns void)         |      yes      |        no         |   no   |    yes*   |
  * | negative: missing payment_intent → no service call            |      no       |        no         |   no   |    no     |
  * | negative: no CACHE_KV binding → service runs, no KV writes    |      yes      |        no         |   no   |    yes    |
@@ -37,6 +42,7 @@
  */
 
 import { STRIPE_EVENTS } from '@codex/constants';
+import { ServiceUnavailableError } from '@codex/service-errors';
 import { createMockHonoContext, type MockHonoContext } from '@codex/test-utils';
 import type { WebhookServices } from '@codex/worker-utils';
 import type { Context } from 'hono';
@@ -179,9 +185,13 @@ describe('handlePaymentWebhook — charge.refunded', () => {
   let mockRelease: ReturnType<typeof vi.fn>;
   let mockProcessRefund: ReturnType<typeof vi.fn>;
   let mockReverseSubscription: ReturnType<typeof vi.fn>;
+  let mockCancelForFullRefund: ReturnType<typeof vi.fn>;
+  let mockTierDeleted: ReturnType<typeof vi.fn>;
+  let mockCourseDeleted: ReturnType<typeof vi.fn>;
   let mockRecordRefund: ReturnType<typeof vi.fn>;
   let mockRecordChargeRefunds: ReturnType<typeof vi.fn>;
   let mockClaimRefundEmails: ReturnType<typeof vi.fn>;
+  let mockRestateStandingRefunds: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -194,19 +204,27 @@ describe('handlePaymentWebhook — charge.refunded', () => {
 
     mockProcessRefund = vi.fn().mockResolvedValue(undefined);
     mockReverseSubscription = vi.fn().mockResolvedValue(undefined);
+    mockCancelForFullRefund = vi.fn().mockResolvedValue(undefined);
+    mockTierDeleted = vi.fn().mockResolvedValue(undefined);
+    mockCourseDeleted = vi.fn().mockResolvedValue(undefined);
     mockRecordRefund = vi.fn().mockResolvedValue(true);
     // The charge's refunds as Stripe lists them, newest first, and the ones
     // not emailed yet (Codex-2hxff.8: one email per refund).
-    mockRecordChargeRefunds = vi
-      .fn()
-      .mockResolvedValue([
-        { id: 're_test_refund', reason: 'requested_by_customer', created: 1 },
-      ]);
+    mockRecordChargeRefunds = vi.fn().mockResolvedValue([
+      {
+        id: 're_test_refund',
+        reason: 'requested_by_customer',
+        created: 1,
+        status: 'succeeded',
+        amount: 1999,
+      },
+    ]);
     mockClaimRefundEmails = vi
       .fn()
       .mockResolvedValue([
         { stripeRefundId: 're_test_refund', amountCents: 1999 },
       ]);
+    mockRestateStandingRefunds = vi.fn().mockResolvedValue(undefined);
     mockRelease = vi.fn();
     mockStripe = {} as Stripe;
 
@@ -219,10 +237,17 @@ describe('handlePaymentWebhook — charge.refunded', () => {
           recordRefund: mockRecordRefund,
           recordChargeRefunds: mockRecordChargeRefunds,
           claimRefundEmails: mockClaimRefundEmails,
+          restateStandingRefunds: mockRestateStandingRefunds,
         },
-        // charge.refunded reverses subscription payouts first (Codex-13v21).
+        // charge.refunded reverses subscription payouts first (Codex-13v21),
+        // and last cancels on a full refund of the latest payment (P-4).
         subscription: {
           reverseSubscriptionPayoutsForCharge: mockReverseSubscription,
+          cancelForFullRefund: mockCancelForFullRefund,
+          handleSubscriptionDeleted: mockTierDeleted,
+        },
+        courseSubscription: {
+          handleCourseSubscriptionDeleted: mockCourseDeleted,
         },
       } as unknown as WebhookServices['services'],
       background: (promise) => promise,
@@ -257,11 +282,23 @@ describe('handlePaymentWebhook — charge.refunded', () => {
     expect(mockRevoke).not.toHaveBeenCalled();
   });
 
-  it('positive subscription-linked: processRefund returns { userId, orgId } → library bump + revocation written', async () => {
-    // Forward-compatibility path: when subscription-linked refunds start
-    // returning orgId, revocation must fire without another round of
-    // plumbing (see the inline comment in the handler).
-    mockProcessRefund.mockResolvedValueOnce({
+  it('positive full refund of the latest subscription payment: cancelled, ended here, library bump + revocation written', async () => {
+    // processRefund finds no purchase for a subscription charge.
+    mockProcessRefund.mockResolvedValueOnce(undefined);
+    const cancelled = { id: 'sub_refunded', status: 'canceled' };
+    mockCancelForFullRefund.mockResolvedValueOnce({
+      subscription: {
+        kind: 'tier',
+        id: 'local_sub',
+        stripeSubscriptionId: 'sub_refunded',
+        userId: 'user_sub',
+        organizationId: 'org_sub',
+        status: 'active',
+      },
+      cancelled,
+    });
+    // The deletion names the user's current subscription for the org ended.
+    mockTierDeleted.mockResolvedValueOnce({
       userId: 'user_sub',
       orgId: 'org_sub',
     });
@@ -272,10 +309,31 @@ describe('handlePaymentWebhook — charge.refunded', () => {
     await handlePaymentWebhook(event, mockStripe, bundle.context);
     await drainWaitUntil(bundle);
 
+    expect(mockTierDeleted).toHaveBeenCalledWith(cancelled, expect.any(String));
     expect(invalidateForUser).toHaveBeenCalledTimes(1);
     expect(AccessRevocation).toHaveBeenCalledTimes(1);
     expect(mockRevoke).toHaveBeenCalledTimes(1);
     expect(mockRevoke).toHaveBeenCalledWith('user_sub', 'org_sub', 'refund');
+  });
+
+  // A permanent error would otherwise end as a quiet 200 from the webhook
+  // wrapper, leaving a customer refunded in full still billed.
+  it('a full-refund cancel that fails is alerted with an errorId for support, then rethrown', async () => {
+    mockCancelForFullRefund.mockRejectedValueOnce(new Error('Stripe said no'));
+    const bundle = buildContext();
+
+    await expect(
+      handlePaymentWebhook(createRefundEvent(), mockStripe, bundle.context)
+    ).rejects.toThrow('Stripe said no');
+
+    expect(bundle.mock._obs.error).toHaveBeenCalledWith(
+      expect.stringContaining('could not be ended'),
+      expect.objectContaining({
+        errorId: expect.any(String),
+        error: 'Stripe said no',
+      })
+    );
+    expect(mockRevoke).not.toHaveBeenCalled();
   });
 
   it('negative: processRefund returns void (unknown charge) → no cache bump, no revocation, email still sent', async () => {
@@ -312,9 +370,17 @@ describe('handlePaymentWebhook — charge.refunded', () => {
   });
 
   it('negative: no CACHE_KV binding → service runs, no KV side-effects, email still sent', async () => {
-    mockProcessRefund.mockResolvedValueOnce({
-      userId: 'user_nokv',
-      orgId: 'org_nokv',
+    mockProcessRefund.mockResolvedValueOnce({ userId: 'user_nokv' });
+    mockCancelForFullRefund.mockResolvedValueOnce({
+      subscription: {
+        kind: 'tier',
+        id: 'local_sub',
+        stripeSubscriptionId: 'sub_nokv',
+        userId: 'user_nokv',
+        organizationId: 'org_nokv',
+        status: 'active',
+      },
+      cancelled: { id: 'sub_nokv', status: 'canceled' },
     });
     const bundle = buildContext({ CACHE_KV: undefined });
     const event = createRefundEvent();
@@ -354,7 +420,18 @@ describe('handlePaymentWebhook — charge.refunded', () => {
   });
 
   it('fire-and-forget: AccessRevocation.revoke rejection does NOT surface, handler resolves', async () => {
-    mockProcessRefund.mockResolvedValueOnce({
+    mockCancelForFullRefund.mockResolvedValueOnce({
+      subscription: {
+        kind: 'tier',
+        id: 'local_sub',
+        stripeSubscriptionId: 'sub_fire',
+        userId: 'user_fire',
+        organizationId: 'org_fire',
+        status: 'active',
+      },
+      cancelled: { id: 'sub_fire', status: 'canceled' },
+    });
+    mockTierDeleted.mockResolvedValueOnce({
       userId: 'user_fire',
       orgId: 'org_fire',
     });
@@ -407,8 +484,20 @@ describe('handlePaymentWebhook — charge.refunded', () => {
     // The newest refund Stripe lists names the purchase's refund; the event
     // names none (charge.refunds is no longer sent).
     mockRecordChargeRefunds.mockResolvedValueOnce([
-      { id: 're_meta', reason: 'fraudulent', created: 2 },
-      { id: 're_older', reason: 'duplicate', created: 1 },
+      {
+        id: 're_meta',
+        reason: 'fraudulent',
+        created: 2,
+        status: 'succeeded',
+        amount: 300,
+      },
+      {
+        id: 're_older',
+        reason: 'duplicate',
+        created: 1,
+        status: 'succeeded',
+        amount: 200,
+      },
     ]);
     const event = createRefundEvent({
       payment_intent: 'pi_meta',
@@ -431,6 +520,43 @@ describe('handlePaymentWebhook — charge.refunded', () => {
       refundAmountCents: 500,
       refundReason: 'fraudulent',
     });
+  });
+
+  it('a stale charge.refunded counts what stands now, never its snapshot: a refund that failed since re-applies nothing (MED-2)', async () => {
+    const bundle = buildContext();
+    // The event still says refunded in full; Stripe's list now says the
+    // £14.99 refund failed and only £5 stands.
+    mockRecordChargeRefunds.mockResolvedValueOnce([
+      {
+        id: 're_failed_since',
+        reason: 'requested_by_customer',
+        created: 3,
+        status: 'failed',
+        amount: 1499,
+      },
+      {
+        id: 're_part',
+        reason: 'duplicate',
+        created: 2,
+        status: 'succeeded',
+        amount: 500,
+      },
+    ]);
+
+    await handlePaymentWebhook(
+      createRefundEvent({ amount_refunded: 1999 }),
+      mockStripe,
+      bundle.context
+    );
+
+    expect(mockProcessRefund).toHaveBeenCalledWith(
+      'pi_test_refund',
+      expect.objectContaining({
+        stripeRefundId: 're_part',
+        refundAmountCents: 500,
+        refundReason: 'duplicate',
+      })
+    );
   });
 
   // ── one email per refund, saying whether access is kept (Codex-2hxff.8)
@@ -486,6 +612,27 @@ describe('handlePaymentWebhook — charge.refunded', () => {
     );
   });
 
+  it('a duplicate payment’s refund email says the buyer still has the item, and why (Codex-2hxff.14)', async () => {
+    mockProcessRefund.mockResolvedValueOnce({
+      userId: 'u',
+      accessEnded: false,
+      duplicatePayment: true,
+      // The purchase's own title: a charge carries none of ours.
+      itemTitle: 'Breathwork Basics',
+    });
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(createRefundEvent(), mockStripe, bundle.context);
+
+    expect(emails()).toEqual([
+      expect.objectContaining({
+        contentTitle: 'Breathwork Basics',
+        accessNote:
+          'You still have Breathwork Basics. This refunds a second payment for it.',
+      }),
+    ]);
+  });
+
   it("a subscription charge's refund email says nothing about access", async () => {
     // No purchase: processRefund finds none for the PaymentIntent.
     mockProcessRefund.mockResolvedValueOnce(undefined);
@@ -494,6 +641,221 @@ describe('handlePaymentWebhook — charge.refunded', () => {
     await handlePaymentWebhook(createRefundEvent(), mockStripe, bundle.context);
 
     expect(emails()).toEqual([expect.objectContaining({ accessNote: '' })]);
+  });
+
+  // ── a second subscription the buyer already had (Codex-2hxff.15) ─────
+  // Owner decision 2026-10-22: one plain email, and nothing of theirs ends:
+  // no cancellation applied, no streaming block, no library bump.
+
+  function duplicateRefunded(
+    duplicate:
+      | {
+          kind: 'tier';
+          organizationName: string;
+          tierName: string;
+          survivingTierName: string;
+          otherTier: boolean;
+        }
+      | { kind: 'course'; courseTitle: string }
+  ) {
+    mockProcessRefund.mockResolvedValueOnce(undefined);
+    mockCancelForFullRefund.mockResolvedValueOnce({ duplicate });
+  }
+
+  it('a duplicate tier subscription’s refund email says the buyer was already subscribed, and ends nothing', async () => {
+    duplicateRefunded({
+      kind: 'tier',
+      organizationName: 'Acme Studio',
+      tierName: 'Gold',
+      survivingTierName: 'Gold',
+      otherTier: false,
+    });
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(createRefundEvent(), mockStripe, bundle.context);
+    await drainWaitUntil(bundle);
+
+    expect(emails()).toEqual([
+      expect.objectContaining({
+        contentTitle: 'Gold subscription to Acme Studio',
+        accessNote:
+          'You were already subscribed to Acme Studio. We cancelled the second subscription and refunded it.',
+      }),
+    ]);
+    expect(mockTierDeleted).not.toHaveBeenCalled();
+    expect(invalidateForUser).not.toHaveBeenCalled();
+    expect(AccessRevocation).not.toHaveBeenCalled();
+    expect(mockRevoke).not.toHaveBeenCalled();
+  });
+
+  it('a duplicate for another tier adds that Change plan switches to it', async () => {
+    duplicateRefunded({
+      kind: 'tier',
+      organizationName: 'Acme Studio',
+      tierName: 'Platinum',
+      survivingTierName: 'Gold',
+      otherTier: true,
+    });
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(createRefundEvent(), mockStripe, bundle.context);
+
+    expect(emails()).toEqual([
+      expect.objectContaining({
+        contentTitle: 'Platinum subscription to Acme Studio',
+        accessNote:
+          'You were already subscribed to Acme Studio. We cancelled the second subscription and refunded it. You can switch to Platinum with Change plan.',
+      }),
+    ]);
+  });
+
+  it('a duplicate course plan’s refund email names the course, and revokes nothing', async () => {
+    duplicateRefunded({ kind: 'course', courseTitle: 'Breathwork Basics' });
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(createRefundEvent(), mockStripe, bundle.context);
+
+    expect(emails()).toEqual([
+      expect.objectContaining({
+        contentTitle: 'Breathwork Basics subscription',
+        accessNote:
+          'You were already subscribed to Breathwork Basics. We cancelled the second subscription and refunded it.',
+      }),
+    ]);
+    expect(mockCourseDeleted).not.toHaveBeenCalled();
+    expect(invalidateForUser).not.toHaveBeenCalled();
+    expect(mockRevoke).not.toHaveBeenCalled();
+  });
+
+  // ── an old subscription revived beside a newer one (owner decision 7) ──
+  // It was ended and only the payment that revived it refunded: the buyer
+  // still subscribes, and nothing of theirs ends.
+
+  it('an ended old subscription’s refund email says the buyer still subscribes, and ends nothing', async () => {
+    mockProcessRefund.mockResolvedValueOnce(undefined);
+    mockCancelForFullRefund.mockResolvedValueOnce({
+      superseded: {
+        kind: 'tier',
+        organizationName: 'Acme Studio',
+        tierName: 'Silver',
+      },
+    });
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(createRefundEvent(), mockStripe, bundle.context);
+    await drainWaitUntil(bundle);
+
+    expect(emails()).toEqual([
+      expect.objectContaining({
+        contentTitle: 'Silver subscription to Acme Studio',
+        accessNote:
+          'You still subscribe to Acme Studio. This refunds a payment on your old subscription, which has ended.',
+      }),
+    ]);
+    expect(mockTierDeleted).not.toHaveBeenCalled();
+    expect(invalidateForUser).not.toHaveBeenCalled();
+    expect(mockRevoke).not.toHaveBeenCalled();
+  });
+
+  it('an ended old course plan’s refund email names the course, and revokes nothing', async () => {
+    mockProcessRefund.mockResolvedValueOnce(undefined);
+    mockCancelForFullRefund.mockResolvedValueOnce({
+      superseded: { kind: 'course', courseTitle: 'Breathwork Basics' },
+    });
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(createRefundEvent(), mockStripe, bundle.context);
+
+    expect(emails()).toEqual([
+      expect.objectContaining({
+        contentTitle: 'Breathwork Basics subscription',
+        accessNote:
+          'You still subscribe to Breathwork Basics. This refunds a payment on your old subscription, which has ended.',
+      }),
+    ]);
+    expect(mockCourseDeleted).not.toHaveBeenCalled();
+    expect(mockRevoke).not.toHaveBeenCalled();
+  });
+
+  it('a full-refund cancel that fails for good still lets the generic refund email go, then is rethrown', async () => {
+    // Permanent: no retry would send it.
+    mockCancelForFullRefund.mockRejectedValueOnce(new Error('Stripe is down'));
+    const bundle = buildContext();
+
+    await expect(
+      handlePaymentWebhook(createRefundEvent(), mockStripe, bundle.context)
+    ).rejects.toThrow('Stripe is down');
+
+    expect(mockClaimRefundEmails).toHaveBeenCalledOnce();
+    expect(emails()).toEqual([expect.objectContaining({ accessNote: '' })]);
+    expect(mockRelease).toHaveBeenCalledOnce();
+  });
+
+  // Codex-2hxff.15 (review R2): the redelivery sends the one email, worded
+  // for what it refunds; claiming it now would send the generic one.
+  it('a full-refund step that fails transiently is rethrown before any email is claimed or sent', async () => {
+    mockCancelForFullRefund.mockRejectedValueOnce(
+      new ServiceUnavailableError('Stripe timed out')
+    );
+    const bundle = buildContext();
+
+    await expect(
+      handlePaymentWebhook(createRefundEvent(), mockStripe, bundle.context)
+    ).rejects.toThrow('Stripe timed out');
+
+    expect(mockClaimRefundEmails).not.toHaveBeenCalled();
+    expect(sendEmailToWorker).not.toHaveBeenCalled();
+    expect(mockRelease).toHaveBeenCalledOnce();
+  });
+
+  // Review R4: the cancellation email's links are built from WEB_APP_URL.
+  it('a full refund with WEB_APP_URL unset is alerted once, and still ends the subscription', async () => {
+    mockCancelForFullRefund.mockResolvedValueOnce({
+      subscription: {
+        kind: 'tier',
+        id: 'local_sub',
+        stripeSubscriptionId: 'sub_no_url',
+        userId: 'user_no_url',
+        organizationId: 'org_no_url',
+        status: 'active',
+      },
+      cancelled: { id: 'sub_no_url', status: 'canceled' },
+    });
+    const bundle = buildContext({ WEB_APP_URL: undefined });
+
+    await handlePaymentWebhook(createRefundEvent(), mockStripe, bundle.context);
+
+    expect(mockTierDeleted).toHaveBeenCalledWith(
+      { id: 'sub_no_url', status: 'canceled' },
+      ''
+    );
+    expect(bundle.mock._obs.error).toHaveBeenCalledExactlyOnceWith(
+      expect.stringContaining('WEB_APP_URL is not set'),
+      expect.objectContaining({ errorId: expect.any(String) })
+    );
+  });
+
+  it('a full refund with WEB_APP_URL set raises no alert', async () => {
+    mockCancelForFullRefund.mockResolvedValueOnce({
+      subscription: {
+        kind: 'tier',
+        id: 'local_sub',
+        stripeSubscriptionId: 'sub_url',
+        userId: 'user_url',
+        organizationId: 'org_url',
+        status: 'active',
+      },
+      cancelled: { id: 'sub_url', status: 'canceled' },
+    });
+    const bundle = buildContext({ WEB_APP_URL: 'https://revelations.studio' });
+
+    await handlePaymentWebhook(createRefundEvent(), mockStripe, bundle.context);
+
+    expect(mockTierDeleted).toHaveBeenCalledWith(
+      { id: 'sub_url', status: 'canceled' },
+      'https://revelations.studio'
+    );
+    expect(bundle.mock._obs.error).not.toHaveBeenCalled();
   });
 
   // ── refund.updated / refund.failed (Codex-2hxff.8) ───────────────────
@@ -557,6 +919,8 @@ describe('handlePaymentWebhook — charge.refunded', () => {
       refundReason: 'requested_by_customer',
     });
     expect(sendEmailToWorker).not.toHaveBeenCalled();
+    // A refund that succeeded still stands: nothing to restate.
+    expect(mockRestateStandingRefunds).not.toHaveBeenCalled();
     expect(mockRelease).toHaveBeenCalledOnce();
   });
 
@@ -586,6 +950,29 @@ describe('handlePaymentWebhook — charge.refunded', () => {
     ]);
   });
 
+  it('refund.updated for a support refund passes its requester on, so support sees who issued it', async () => {
+    // Codex-2hxff.28: a support refund that settles late reaches recordRefund
+    // here, not at charge.refunded, so this is the path that names its sender.
+    const bundle = buildContext();
+    const { stripe } = stripeWithCharge();
+
+    await handlePaymentWebhook(
+      refundUpdatedEvent({
+        status: 'pending',
+        metadata: { codex_requested_by: 'support_user_1' },
+      }),
+      stripe,
+      bundle.context
+    );
+
+    expect(mockRecordRefund).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stripeRefundId: 're_pending_then_paid',
+        requestedByUserId: 'support_user_1',
+      })
+    );
+  });
+
   it('refund.updated still pending: its status is recorded and nothing is clawed back', async () => {
     const bundle = buildContext();
     const { stripe } = stripeWithCharge();
@@ -598,6 +985,33 @@ describe('handlePaymentWebhook — charge.refunded', () => {
 
     expect(mockRecordRefund).toHaveBeenCalledWith(
       expect.objectContaining({ status: 'pending' })
+    );
+    expect(mockReverseSubscription).not.toHaveBeenCalled();
+    expect(mockProcessRefund).not.toHaveBeenCalled();
+    expect(mockRestateStandingRefunds).not.toHaveBeenCalled();
+  });
+
+  it('refund.updated canceled: alerted for a person, nothing clawed back, and a part-refunded purchase stops counting it', async () => {
+    // Owner decision 2026-10-25, "same as failed": it returned nothing.
+    const bundle = buildContext();
+    const { stripe } = stripeWithCharge();
+
+    await handlePaymentWebhook(
+      refundUpdatedEvent({ status: 'canceled' }),
+      stripe,
+      bundle.context
+    );
+
+    expect(mockRecordRefund).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'canceled' })
+    );
+    expect(bundle.mock._obs.error).toHaveBeenCalledWith(
+      expect.stringContaining('A refund was canceled'),
+      expect.objectContaining({ refundId: 're_pending_then_paid' })
+    );
+    expect(mockRestateStandingRefunds).toHaveBeenCalledWith(
+      'pi_updated',
+      'ch_updated'
     );
     expect(mockReverseSubscription).not.toHaveBeenCalled();
     expect(mockProcessRefund).not.toHaveBeenCalled();
@@ -628,6 +1042,8 @@ describe('handlePaymentWebhook — charge.refunded', () => {
       reason: 'requested_by_customer',
       failureReason: 'expired_or_canceled_card',
       stripeCreatedAt: new Date(1_790_000_000 * 1000),
+      // A Dashboard refund carries no codex_requested_by.
+      requestedByUserId: null,
     });
     expect(bundle.mock._obs.error).toHaveBeenCalledWith(
       expect.stringContaining('support must refund the customer another way'),
@@ -649,6 +1065,16 @@ describe('handlePaymentWebhook — charge.refunded', () => {
     // Recorded before the clawback, so support sees it while a step retries.
     expect(mockRecordRefund.mock.invocationCallOrder[0]).toBeLessThan(
       mockReverseSubscription.mock.invocationCallOrder[0] ?? 0
+    );
+    // It returned nothing: a part-refunded purchase stops counting it, after
+    // processRefund, which may raise the amount from the charge's
+    // (owner decision 2026-10-24).
+    expect(mockRestateStandingRefunds).toHaveBeenCalledWith(
+      'pi_updated',
+      'ch_updated'
+    );
+    expect(mockProcessRefund.mock.invocationCallOrder[0]).toBeLessThan(
+      mockRestateStandingRefunds.mock.invocationCallOrder[0] ?? 0
     );
   });
 

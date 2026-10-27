@@ -11,10 +11,11 @@
  *   2. creator content — `routes/_creators/[username]/content/[contentSlug]/+page.server.ts`
  *
  * Each route calls `loadAccessAndProgress(content.id, platform, cookies,
- * content)` in both of its branches — streamed on the free fast-path, awaited
- * on the gated path — so there are four call sites but a single signature.
- * Neither `+page.server.ts` may add its own grant/deny logic; keeping the
- * decision here is what stops the two routes diverging.
+ * content)` on the free fast-path (streamed) and `loadAccessWithBody` with the
+ * same arguments on the gated path (awaited, since the body depends on it).
+ * Both run one fetch and one grant decision. Neither `+page.server.ts` may add
+ * its own grant/deny logic; keeping the decision here is what stops the two
+ * routes diverging.
  *
  * The fourth argument is the whole policy ROW, not a bare `isFree` boolean:
  * passing one derived flag let a priced row read as public and served its body
@@ -30,19 +31,38 @@
  *
  * This module extracts the shared logic:
  * - `loadAccessAndProgress` — parallel fetch of streaming URL + playback progress
+ * - `loadAccessWithBody`    — the same, plus the body once access is granted
+ *                             (a row never released is granted to no one)
+ * - `loadWithdrawnDetail`   — the public lookup missed: an item withdrawn from
+ *                             sale, for a reader who still has it
  * - `resolveAccessGranted`  — THE access-grant seam (WP-2 swap point)
  * - `handlePurchaseAction`  — Stripe checkout session creation with error handling
  */
+
+import type {
+  ContentBodySource,
+  ContentHeld,
+  PlaybackProgressResponse,
+} from '@codex/access';
+import {
+  type ContentPublicnessPolicy,
+  isPublicContent,
+  subscriptionStatusGrantsAccess,
+} from '@codex/constants';
 import type { Cookies } from '@sveltejs/kit';
-import { fail } from '@sveltejs/kit';
+import { error, fail } from '@sveltejs/kit';
+import { logger } from '$lib/observability';
 import type { SubscriptionContext, SubscriptionTier } from '$lib/types';
-import { createServerApi } from './api';
+import { createServerApi, type PublicContentListItem } from './api';
+import { CACHE_HEADERS } from './cache';
 import { ApiError } from './errors';
+import { logReadFailure } from './read-failure';
 
 /**
  * Revocation reasons surfaced from `AccessDeniedError` when a previously-
  * authorised user lost access (subscription cancelled, payment failed,
- * refund, admin revoke). Mirrors the union in
+ * refund, admin revoke), or has it paused while a payment dispute on the
+ * purchase or the subscription is open (Codex-2hxff.60). Mirrors the union in
  * `packages/access/src/services/access-revocation.ts` — kept inline here
  * rather than importing so the web app doesn't pull the server-only
  * `@codex/access` package through the SSR bundle.
@@ -51,7 +71,9 @@ export type AccessRevocationReason =
   | 'subscription_deleted'
   | 'payment_failed'
   | 'refund'
-  | 'admin_revoke';
+  | 'admin_revoke'
+  | 'purchase_dispute'
+  | 'subscription_dispute';
 
 interface AccessAndProgress {
   hasAccess: boolean;
@@ -101,6 +123,8 @@ const REVOCATION_REASONS: ReadonlySet<AccessRevocationReason> = new Set([
   'payment_failed',
   'refund',
   'admin_revoke',
+  'purchase_dispute',
+  'subscription_dispute',
 ]);
 
 function extractRevocationReason(
@@ -125,9 +149,9 @@ function extractRevocationReason(
  * shape can only drift in one place. Truth-source for the field set is
  * `SubscriptionContext` in `$lib/types`.
  *
- * The `.catch` branch of the gated `loadSubscriptionContext()` call computes
- * `requiresSubscription` from content state, so it stays inline rather than
- * sharing this constant.
+ * The `.catch` on the gated `loadSubscriptionContext()` call is
+ * `subscriptionContextFault`: this shape with `requiresSubscription` true,
+ * since only tier-gated content makes that call.
  *
  * Shape pinned by `content-detail.test.ts` so the field set can only drift in
  * one place (originally the removed iter-027 F3 denoise proof).
@@ -165,62 +189,127 @@ export const ACCESS_CHECK_FAILED_RESULT: AccessAndProgress = {
 };
 
 /**
- * The policy fields publicness depends on. Structural subset, every field
- * optional/nullable, so a full `ContentWithRelations` row satisfies it without
- * a cast. Mirrors `ContentAccessPolicyRow` in
- * `packages/access/src/services/content-access/access-decision.ts` — the two
- * MUST recognise the same gates.
+ * Public content is readable by everyone, signed in or not: its body renders
+ * unauthenticated (SEO, first paint). The media stream still needs a signed-in
+ * user, because signed R2 URLs are issued per user, but the page shell is not
+ * gated behind that. Gated content keeps its body behind the authenticated
+ * access check: a visitor sees the paywall teaser, and a signed-in user gets
+ * the body from {@link loadAccessWithBody}, which asks the worker.
+ *
+ * The rule itself is `@codex/constants`' (re-exported here for both detail
+ * routes), shared with the public content API, which returns a body only for
+ * the rows it passes (Codex-039vo). It reads the whole policy, never `isFree`
+ * alone (Codex-al9ft).
  */
-export interface ContentPublicnessPolicy {
-  isFree?: boolean | null;
-  isPurchasable?: boolean | null;
-  priceCents?: number | null;
-  includedInTierId?: string | null;
-  isFollowerGated?: boolean | null;
-  isTeamOnly?: boolean | null;
-  courseOnly?: boolean | null;
+export { type ContentPublicnessPolicy, isPublicContent };
+
+/**
+ * The content row a detail page returns to the browser, without its raw body.
+ *
+ * Both detail pages render the body server-side into `contentBodyHtml`, and
+ * only once access is confirmed; nothing on the page reads `contentBody` or
+ * `contentBodyJson`. The row comes from the public list, which used to strip
+ * the body only when `isFree` was false, so a row flagged free that also
+ * carries a gate (which the course service writes on purpose: `isFree` +
+ * `courseOnly`) kept its full body, and returning the row as-is put that body
+ * in the load payload, readable through view-source while the page showed it
+ * locked. The public list now strips by the whole policy (Codex-039vo), so a
+ * public row is the only one that carries a body; this stays as defence in
+ * depth, and a public body still never needs to ride the payload.
+ *
+ * This only covers what the load RETURNS. Read the row through the server API,
+ * never the `getPublicContent` remote query: SvelteKit serialises each remote
+ * query's SSR result into the page for hydration, body included.
+ */
+export function withoutRawBody<
+  T extends { contentBody?: string | null; contentBodyJson?: unknown },
+>(content: T): T {
+  return { ...content, contentBody: null, contentBodyJson: null };
 }
 
 /**
- * Free content is publicly readable — the body and metadata render for
- * everyone regardless of auth. The media stream still requires an
- * authenticated user (because signed R2 URLs are issued per-user), but the
- * page shell should not be gated behind that.
- *
- * Gated content keeps the body behind the authenticated access check:
- * anonymous visitors see the paywall teaser, signed-in users fall through to
- * `loadAccessAndProgress` which asks the backend authoritatively.
- *
- * # Why this reads the WHOLE policy and not just `isFree` (Codex-al9ft)
- *
- * This predicate decides whether `renderContentBody()` runs UNAUTHENTICATED, so
- * a false positive puts the full article body in the anonymous SSR payload and
- * in view-source. It used to be `isFree === true` alone, which trusted a single
- * derived boolean to summarise six gates. It did not: `@codex/access`'s paid arm
- * is `(priceCents ?? 0) > 0` and never reads `isFree`, while
- * `ContentService.create`/`update` derived `isFree` from the FLAG gates only —
- * omitting `priceCents`. A price-only row therefore came back `isFree: true`
- * and its body was served publicly while the gate denied every stream request.
- *
- * Those derivations are fixed, but this predicate deliberately does NOT rely on
- * that: it requires `isFree` to be true AND no gate to be present, so a row
- * already in the database with the divergent shape — which a code fix upstream
- * cannot reach — still reads as non-public here. Fail CLOSED on disagreement.
+ * A detail page's cache headers once it knows whether it carries a GATED
+ * grant. Always private: the page varies by viewer. And stored nowhere when
+ * access to a gated piece was granted, so a reader who later loses it (a
+ * refund, a lapsed subscription, an unfollow) keeps no copy on their own disk
+ * or in the back/forward cache (owner decision, 2026-10-25: "Yes, don't store
+ * paid pages"; Codex-hyz1c). Keyed on the grant, not the text: a paid video
+ * page carries no body but a signed stream URL whose token outlives a refund.
+ * A free, denied or failed page keeps `private, no-cache`, so Back still
+ * restores it. `setHeaders` covers the page's `__data.json` too: the same load
+ * answers both.
  */
-export function isPublicContent(policy: ContentPublicnessPolicy): boolean {
-  if (policy.isFree !== true) return false;
-  return !(
-    policy.isPurchasable === true ||
-    (policy.priceCents ?? 0) > 0 ||
-    policy.includedInTierId != null ||
-    policy.isFollowerGated === true ||
-    policy.isTeamOnly === true ||
-    policy.courseOnly === true
-  );
+export function detailPageCacheHeaders(gatedAccessGranted: boolean) {
+  return gatedAccessGranted ? CACHE_HEADERS.FRESH : CACHE_HEADERS.PRIVATE;
+}
+
+/**
+ * The detail pages' page-level catch on their access load. `fetchAccess`
+ * catches a failed request itself, so what reaches here is a fault in our own
+ * code: logged at error with its stack, never at the warn an outage gets, or
+ * a code bug would read as a flaky worker (Codex-uuz1g).
+ */
+export function logAccessCheckFault(contentId: string, error: unknown): void {
+  logger.error('Content access check threw', {
+    contentId,
+    ...faultFields(error),
+  });
+}
+
+/**
+ * The detail pages' catch on `loadSubscriptionContext`. Its two reads catch
+ * and log their own failures, so what reaches here is a fault in our own
+ * code: logged at error with its stack (Codex-7ms7h). The page still offers
+ * the tier, as it did before.
+ */
+export function subscriptionContextFault(
+  contentId: string,
+  error: unknown
+): SubscriptionContext {
+  logger.error('Subscription context threw', {
+    contentId,
+    ...faultFields(error),
+  });
+  return { ...EMPTY_SUB_CONTEXT, requiresSubscription: true };
+}
+
+function faultFields(error: unknown): { error: string; stack?: string } {
+  return {
+    error: error instanceof Error ? error.message : String(error),
+    stack: error instanceof Error ? error.stack : undefined,
+  };
 }
 
 /** The server-side API surface returned by `createServerApi`. */
 type ServerApi = ReturnType<typeof createServerApi>;
+
+/**
+ * A detail page's "more from" strip: the newest pieces of an org (the org
+ * page) or of a creator (the creator page, whose piece has no org), each
+ * without its raw body, as a streamed promise that never rejects (the strip
+ * stays empty, and the failure is logged).
+ *
+ * Through the server API, not the `getPublicContent` remote query, whose SSR
+ * result SvelteKit serialises into the page whatever the load returns. This
+ * is a catalogue read, which listPublic already returns without bodies; the
+ * strip here is defence in depth, so no body reaches the page even if that
+ * changes (see {@link withoutRawBody}). The cards render metadata only.
+ */
+export function loadRelatedContent(
+  api: ServerApi,
+  scope: { orgId: string } | { creatorId: string }
+): Promise<PublicContentListItem[]> {
+  const params = new URLSearchParams(scope);
+  params.set('sort', 'newest');
+  params.set('limit', '5');
+  return api.content
+    .getPublicContent(params)
+    .then((result) => result.items.map(withoutRawBody))
+    .catch((error: unknown): PublicContentListItem[] => {
+      logReadFailure('Related content not loaded', scope, error);
+      return [];
+    });
+}
 
 /**
  * Resolved payload of the access worker's `/stream` endpoint
@@ -315,8 +404,153 @@ export async function loadAccessAndProgress(
   contentId: string,
   platform: App.Platform | undefined,
   cookies: Cookies,
-  policy?: ContentPublicnessPolicy
+  policy: ContentPublicnessPolicy
 ): Promise<AccessAndProgress> {
+  const { access } = await fetchAccess(contentId, platform, cookies, policy, {
+    includeBody: false,
+  });
+  return access;
+}
+
+/**
+ * {@link loadAccessAndProgress} plus the content's body: the gated path of both
+ * detail pages. A gated piece's public row carries no body, so an entitled
+ * reader's comes from the worker's access check (`/stream?include=body`), and
+ * only once it granted (Codex-039vo). Before that, the gated path rendered the
+ * stripped public row and every entitled reader got an empty page.
+ *
+ * `body` is null unless the worker granted access and returned the body. It is
+ * kept apart from `access` because `access` is returned to the browser
+ * (`accessAndProgress`), which needs only the rendered HTML, never the raw
+ * body.
+ *
+ * Two grants come back without a body:
+ * - A granted response with no `body` at all, which is logged as an error and
+ *   never read as "the piece has no body" (that is `body` with both fields
+ *   null). One cause: the worker didn't honour the flag (a content-api rolled
+ *   back behind this web build drops the unknown query key), so this would be
+ *   the empty page again. The reader gets no note, by choice: it takes a
+ *   worker older than this flag (a window of one deploy after it ships), and a
+ *   broken flag on either side fails `api-stream-include.test.ts` first. A row
+ *   never released is no longer a cause: no one is granted it (Codex-nacky).
+ * - Media not ready (a 422 the worker raises after access passed). The call
+ *   threw, so it carried nothing: the page reads as granted, with no body
+ *   until the media is ready. Narrow, since publishing needs ready media.
+ */
+export async function loadAccessWithBody(
+  contentId: string,
+  platform: App.Platform | undefined,
+  cookies: Cookies,
+  policy: ContentPublicnessPolicy
+): Promise<{ access: AccessAndProgress; body: ContentBodySource | null }> {
+  const { access, stream } = await fetchAccess(
+    contentId,
+    platform,
+    cookies,
+    policy,
+    { includeBody: true }
+  );
+  if (stream && !stream.body) {
+    logger.error('Access granted but /stream returned no body', { contentId });
+  }
+  return { access, body: stream?.body ?? null };
+}
+
+/**
+ * How a reader holds an item withdrawn from sale (Codex-ov2ii). Type-only, so
+ * the view can name it without `@codex/access` entering the client bundle.
+ */
+export type { ContentHeld };
+
+/** An item withdrawn from sale, opened for a reader who still has it. */
+export interface WithdrawnDetail {
+  content: PublicContentListItem;
+  /** How the reader holds it: the note the page shows them. */
+  held: ContentHeld;
+  access: AccessAndProgress;
+  body: ContentBodySource | null;
+}
+
+/**
+ * Both detail pages' answer when the public lookup misses for a signed-in
+ * reader (Codex-ov2ii). An item leaves the storefront when its creator
+ * unpublishes it or leaves the organisation, but the access decision keeps
+ * granting a buyer, a course owner, and a subscriber until their next renewal,
+ * and they used to get "Content not found".
+ *
+ * Two reads, both the worker's: the withdrawn row (a 404 unless this reader
+ * still has it), then the gated path's `/stream?include=body`, so the body and
+ * the player come from the same access check as any paid piece. Null means
+ * the page's own 404:
+ * - no withdrawn row, or one the reader has no access to (the worker's 404
+ *   never says which);
+ * - a row that passes {@link isPublicContent}, which no arm that outlives
+ *   unpublication can grant. Its policy would force `hasAccess` open
+ *   (`fetchAccess`), so it is refused here and logged, never rendered;
+ * - a `/stream` denial after the row was found (a refund or a renewal landing
+ *   between the two reads). Never the purchase gate: the item is off sale.
+ *
+ * A `/stream` call that FAILED is a 503, not a 404: nothing is known, and
+ * "not found" would tell a buyer their item is gone. Any other failure of the
+ * withdrawn read propagates, as the public lookup's does.
+ */
+export async function loadWithdrawnDetail(
+  key: ({ orgId: string } | { creatorId: string }) & { slug: string },
+  platform: App.Platform | undefined,
+  cookies: Cookies
+): Promise<WithdrawnDetail | null> {
+  const withdrawn = await createServerApi(platform, cookies)
+    .access.getWithdrawnContent(key)
+    .catch((err: unknown) => {
+      if (!ApiError.isApiError(err) || err.status !== 404) throw err;
+      // The worker's miss names the content. Any other 404 (a content-api
+      // without this route, behind this web build) is a fault: still the
+      // page's 404, but logged, or every holder of a withdrawn item would be
+      // back to "Content not found" with nothing said.
+      const details = err.details as { code?: unknown } | null | undefined;
+      if (details?.code !== 'CONTENT_NOT_FOUND') {
+        logger.error('Withdrawn read 404 without CONTENT_NOT_FOUND', {
+          key,
+          code: err.code,
+        });
+      }
+      return null;
+    });
+  if (!withdrawn) return null;
+
+  const { content, held } = withdrawn;
+  if (isPublicContent(content)) {
+    logger.error('Withdrawn content passed the public policy', {
+      contentId: content.id,
+    });
+    return null;
+  }
+
+  const { access, body } = await loadAccessWithBody(
+    content.id,
+    platform,
+    cookies,
+    content
+  );
+  if (access.hasAccess) return { content, held, access, body };
+  if (access.accessCheckFailed) {
+    error(503, 'We could not check your access. Please try again.');
+  }
+  return null;
+}
+
+/**
+ * The fetch both loaders share: the `/stream` access check and the playback
+ * progress, in parallel. `stream` is the resolved `/stream` response, null
+ * when the call threw.
+ */
+async function fetchAccess(
+  contentId: string,
+  platform: App.Platform | undefined,
+  cookies: Cookies,
+  policy: ContentPublicnessPolicy,
+  options: { includeBody: boolean }
+): Promise<{ access: AccessAndProgress; stream: StreamResult | null }> {
   const api = createServerApi(platform, cookies);
 
   // Capture the stream rejection separately so we can extract the
@@ -326,16 +560,28 @@ export async function loadAccessAndProgress(
   let streamResult: StreamResult | null = null;
   let streamError: unknown = null;
 
+  // Typed explicitly: inside the tuple below this read came back as `any`, so
+  // the mapping that read `positionSeconds` off the ENVELOPE, not off its
+  // `progress`, compiled, and every reader resumed at 0.
+  const progressRead: Promise<PlaybackProgressResponse | null> = api.access
+    .getProgress(contentId)
+    // No progress is `{ progress: null }`, not a rejection, so a rejection is
+    // a failed read: the player starts at 0, which must not pass unlogged
+    // (Codex-uuz1g).
+    .catch((err: unknown) => {
+      logReadFailure('Playback progress not loaded', { contentId }, err);
+      return null;
+    });
   const [, progressResult] = await Promise.all([
     api.access
-      .getStreamingUrl(contentId)
+      .getStreamingUrl(contentId, options)
       .then((r) => {
         streamResult = r;
       })
       .catch((err: unknown) => {
         streamError = err;
       }),
-    api.access.getProgress(contentId).catch(() => null),
+    progressRead,
   ]);
 
   // A successful response from /stream means the access check passed,
@@ -346,7 +592,18 @@ export async function loadAccessAndProgress(
   const accessGranted = resolveAccessGranted(streamResult, streamError);
   const accessCheckFailed =
     !accessGranted && classifyStreamFailure(streamError) === 'unknown';
-  const hasAccess = isPublicContent(policy ?? {}) || accessGranted;
+  // The only trace of a check that failed without a verdict (a timeout, a
+  // network failure, a 5xx): the view asks for a refresh, or the withdrawn
+  // path answers a 503, and neither logs why.
+  if (accessCheckFailed) {
+    logReadFailure(
+      '/stream access check failed',
+      // includeBody tells the free fast path from a gated or withdrawn one.
+      { contentId, includeBody: options.includeBody },
+      streamError
+    );
+  }
+  const hasAccess = isPublicContent(policy) || accessGranted;
   const streamingUrl =
     (streamResult as StreamResult | null)?.streamingUrl ?? null;
   const waveformUrl =
@@ -362,23 +619,27 @@ export async function loadAccessAndProgress(
   const revocationReason = accessGranted
     ? null
     : extractRevocationReason(streamError);
-  const progress = progressResult
+  const saved = progressResult?.progress ?? null;
+  const progress = saved
     ? {
-        positionSeconds: progressResult.positionSeconds,
-        durationSeconds: progressResult.durationSeconds,
-        completed: progressResult.completed,
+        positionSeconds: saved.positionSeconds,
+        durationSeconds: saved.durationSeconds,
+        completed: saved.completed,
       }
     : null;
 
   return {
-    hasAccess,
-    streamingUrl,
-    waveformUrl,
-    readyVariants,
-    expiresAt,
-    revocationReason,
-    accessCheckFailed,
-    progress,
+    access: {
+      hasAccess,
+      streamingUrl,
+      waveformUrl,
+      readyVariants,
+      expiresAt,
+      revocationReason,
+      accessCheckFailed,
+      progress,
+    },
+    stream: streamResult,
   };
 }
 
@@ -387,12 +648,19 @@ export async function loadAccessAndProgress(
  *
  * Fetches the user's current subscription + org tiers in parallel.
  * Compares tier sortOrder to determine if subscription covers the content.
+ *
+ * A visitor who is not signed in has no subscription, so it is not asked for:
+ * the route is auth-required, and its certain 401 was a wasted round-trip that
+ * would now be logged. With that gone, a failed read is a real failure, logged
+ * (Codex-7ms7h): without the log, a subscriber below the tier saw Subscribe
+ * instead of Upgrade and nobody knew why.
  */
 export async function loadSubscriptionContext(
   orgId: string,
   includedInTierId: string | null,
   platform: App.Platform | undefined,
-  cookies: Cookies
+  cookies: Cookies,
+  signedIn: boolean
 ): Promise<SubscriptionContext> {
   // Content requires a subscription when it is tier-gated — the WP-1
   // successor of accessType 'subscribers' is a non-null includedInTierId.
@@ -412,19 +680,27 @@ export async function loadSubscriptionContext(
   const api = createServerApi(platform, cookies);
 
   const [currentSubscription, tiers] = await Promise.all([
-    api.subscription.getCurrent(orgId).catch(() => null),
-    api.tiers.list(orgId).catch(() => [] as SubscriptionTier[]),
+    signedIn
+      ? api.subscription.getCurrent(orgId).catch((error) => {
+          logReadFailure('Current subscription not loaded', { orgId }, error);
+          return null;
+        })
+      : null,
+    api.tiers.list(orgId).catch((error) => {
+      logReadFailure('Subscription tiers not loaded', { orgId }, error);
+      return [] as SubscriptionTier[];
+    }),
   ]);
 
   // hasSubscription must mirror the backend access filter: the @codex/access
-  // streaming check only grants access for status IN (active, cancelling).
-  // paused / past_due / cancelled / incomplete are correctly denied by the
-  // DB filter but were previously flagged as "has subscription" here, so
-  // the UI showed a Play button that 403s on click.
+  // streaming check grants access for ACCESS_GRANTING_SUBSCRIPTION_STATUSES
+  // (active, cancelling, and past_due while Stripe retries). paused /
+  // cancelled / incomplete are denied by the DB filter but were previously
+  // flagged as "has subscription" here, so the UI showed a Play button that
+  // 403s on click.
   const isAccessGranting =
     !!currentSubscription &&
-    (currentSubscription.status === 'active' ||
-      currentSubscription.status === 'cancelling');
+    subscriptionStatusGrantsAccess(currentSubscription.status);
   const hasSubscription = isAccessGranting;
   let subscriptionCoversContent = false;
 

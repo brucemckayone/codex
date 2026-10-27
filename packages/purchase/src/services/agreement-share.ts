@@ -2,39 +2,46 @@
  * Creator revenue-share agreement lookup (Codex-nk4km WP-4, extracted for reuse
  * by Codex-2pryk WP-6).
  *
- * Resolves the creator's slice of the post-platform pool from their ACTIVE
- * `creator_organization_agreements` row (via the accepted proposal it points
- * at). Returns the share in basis points, or `null` when no agreement applies
- * (caller falls back to the FeeConfigService-resolved org fee).
- *
- * This is the exact query `PurchaseService.completePurchase` ran inline for
- * content purchases; hoisted so the one-off COURSE purchase (which reuses
+ * The creator's slice of the post-platform pool, from the agreement in force at
+ * `at` — the content purchase, the one-off COURSE purchase (which reuses
  * `content_purchase` share terms per HARDENING §H4(a)) and the course-
- * subscription payout (`subscription` terms) apply IDENTICAL agreement math
- * without duplicating the subtle Decision-Q3 date predicates.
+ * subscription payout (`subscription` terms) all read it here. Returns the
+ * agreement and its share in basis points, or `null` when no agreement applies
+ * (the caller falls back to the FeeConfigService-resolved org fee).
  *
- * Decision Q3 (active-as-of-`at`): an agreement counts when it is `active`, OR
- * `terminated` after `at`; and its effective window brackets `at`. `at` is the
- * pinned purchase/invoice timestamp so a webhook replay lands on the same side
- * of any agreement boundary.
+ * The agreement's id is what the sale records as the agreement it used:
+ * `purchases.creator_org_agreement_id` and, for a course-subscription invoice,
+ * the creator slice's `payouts.creator_org_agreement_id` (Codex-2hxff.19
+ * AGR-06).
+ *
+ * Which agreements are in force is `agreementsInForce` in @codex/agreements,
+ * the one rule every payment path reads (docs/payments/architecture.md WP4).
+ * `at` is the pinned purchase/invoice timestamp so a webhook replay lands on
+ * the same side of any agreement boundary.
  */
 
-import type { DatabaseClient } from '@codex/database';
 import {
-  agreementProposals,
-  creatorOrganizationAgreements,
-} from '@codex/database/schema';
-import { and, eq, gt, isNull, lte, or } from 'drizzle-orm';
+  type AgreementInForce,
+  type AgreementRevenueType,
+  agreementsInForce,
+  type ResolverLogger,
+} from '@codex/agreements';
+import type { DatabaseClient } from '@codex/database';
 
 type Tx = Parameters<Parameters<DatabaseClient['transaction']>[0]>[0];
 type QueryClient = DatabaseClient | Tx;
 
-/** Revenue types an agreement can be scoped to (`creator_organization_agreements`). */
-export type AgreementRevenueType = 'subscription' | 'content_purchase';
+export type { AgreementRevenueType };
+
+/** The agreement a sale is split by, and the creator's share under it. */
+export type CreatorAgreementShare = Pick<
+  AgreementInForce,
+  'agreementId' | 'sharePercent'
+>;
 
 /**
- * The creator's agreed share of the post-platform pool in basis points, or
- * `null` when no active agreement brackets `at`.
+ * The creator's agreement in force at `at`, with their share of the
+ * post-platform pool in basis points, or `null` when none is.
  */
 export async function findActiveCreatorAgreementShare(
   client: QueryClient,
@@ -43,40 +50,13 @@ export async function findActiveCreatorAgreementShare(
     creatorId: string;
     revenueType: AgreementRevenueType;
     at: Date;
+    obs: ResolverLogger;
   }
-): Promise<number | null> {
-  const [row] = await client
-    .select({
-      sharePercent: agreementProposals.proposedCreatorSharePercent,
-    })
-    .from(creatorOrganizationAgreements)
-    .innerJoin(
-      agreementProposals,
-      eq(agreementProposals.id, creatorOrganizationAgreements.currentProposalId)
-    )
-    .where(
-      and(
-        eq(creatorOrganizationAgreements.organizationId, params.organizationId),
-        eq(creatorOrganizationAgreements.creatorId, params.creatorId),
-        eq(creatorOrganizationAgreements.revenueType, params.revenueType),
-        // Q3: active, or terminated after `at`. The schema CHECK enforces
-        // status='terminated' ⇔ terminatedAt IS NOT NULL, so status='active'
-        // implies terminatedAt IS NULL.
-        or(
-          eq(creatorOrganizationAgreements.status, 'active'),
-          and(
-            eq(creatorOrganizationAgreements.status, 'terminated'),
-            gt(creatorOrganizationAgreements.terminatedAt, params.at)
-          )
-        ),
-        lte(creatorOrganizationAgreements.effectiveFrom, params.at),
-        or(
-          isNull(creatorOrganizationAgreements.effectiveUntil),
-          gt(creatorOrganizationAgreements.effectiveUntil, params.at)
-        )
-      )
-    )
-    .limit(1);
-
-  return row?.sharePercent ?? null;
+): Promise<CreatorAgreementShare | null> {
+  const [agreement] = await agreementsInForce(client, params);
+  if (!agreement) return null;
+  return {
+    agreementId: agreement.agreementId,
+    sharePercent: agreement.sharePercent,
+  };
 }

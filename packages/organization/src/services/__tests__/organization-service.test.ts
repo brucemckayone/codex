@@ -20,6 +20,7 @@
 
 import * as schema from '@codex/database/schema';
 import {
+  createTestContentInput,
   createUniqueSlug,
   type Database,
   seedTestUsers,
@@ -28,7 +29,16 @@ import {
   validateDatabaseConnection,
 } from '@codex/test-utils';
 import type { CreateOrganizationInput } from '@codex/validation';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { eq } from 'drizzle-orm';
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
 import {
   ConflictError,
   MemberNotFoundError,
@@ -36,7 +46,10 @@ import {
   OrganizationNotFoundError,
   OwnershipTransferRequiredError,
 } from '../../errors';
-import { OrganizationService } from '../organization-service';
+import {
+  type MemberDeparture,
+  OrganizationService,
+} from '../organization-service';
 
 /**
  * Stands in for the `R2_PUBLIC_URL_BASE` binding (Codex-8so68). Mirrors the
@@ -221,6 +234,35 @@ describe('OrganizationService', () => {
       const result = await service.get(created.id);
 
       expect(result).toBeNull();
+    });
+  });
+
+  // Their routes check sign-in, not membership, so a whole row let any free
+  // account list every org's payee.
+  describe("get, getBySlug and list never return the payee's user id (Codex-kk6zx)", () => {
+    it('leaves primaryConnectAccountUserId out and keeps the other columns', async () => {
+      const slug = createUniqueSlug('payee');
+      const created = await service.create(
+        { name: `Payee ${slug}`, slug, description: 'Our studio' },
+        defaultTestUserId
+      );
+      await db
+        .update(schema.organizations)
+        .set({ primaryConnectAccountUserId: defaultTestUserId })
+        .where(eq(schema.organizations.id, created.id));
+
+      const byId = await service.get(created.id);
+      const bySlug = await service.getBySlug(slug);
+      const listed = await service.list({ search: slug });
+
+      expect(listed.items).toHaveLength(1);
+      for (const org of [byId, bySlug, listed.items[0]]) {
+        expect(org).not.toHaveProperty('primaryConnectAccountUserId');
+        expect(org).toMatchObject({
+          id: created.id,
+          description: 'Our studio',
+        });
+      }
     });
   });
 
@@ -1052,6 +1094,346 @@ describe('OrganizationService', () => {
         ).rejects.toThrow(OwnershipTransferRequiredError);
       });
 
+      // Owner decision AGR-09, "End on removal" (Codex-2hxff.18).
+      it("ends the member's agreements in that organisation, and only theirs, then hands the follow-up what it ended", async () => {
+        const removed = memberMgmtTestUserIds[1];
+        const stays = memberMgmtTestUserIds[2];
+        const otherOrg = await service.create(
+          { name: `Other Org ${Date.now()}`, slug: createUniqueSlug('other') },
+          memberMgmtTestUserIds[3]
+        );
+        await db.insert(schema.organizationMemberships).values({
+          organizationId: otherOrg.id,
+          userId: removed,
+          role: 'creator',
+          status: 'active',
+        });
+        const agreementRow = (
+          organizationId: string,
+          creatorId: string,
+          revenueType: 'subscription' | 'content_purchase' = 'subscription'
+        ) => ({
+          organizationId,
+          creatorId,
+          revenueType,
+          organizationFeePercentage: 7000,
+          status: 'active' as const,
+          effectiveFrom: new Date(Date.now() - 86_400_000),
+        });
+        const [subscriptionShare, purchaseShare, colleague, elsewhere] =
+          await db
+            .insert(schema.creatorOrganizationAgreements)
+            .values([
+              agreementRow(memberMgmtTestOrgId, removed),
+              agreementRow(memberMgmtTestOrgId, removed, 'content_purchase'),
+              agreementRow(memberMgmtTestOrgId, stays),
+              agreementRow(otherOrg.id, removed),
+            ])
+            .returning();
+        if (!subscriptionShare || !purchaseShare || !colleague || !elsewhere) {
+          throw new Error('agreements not inserted');
+        }
+        // Open offers: the removed creator's must not survive to be accepted.
+        const openProposal = (creatorId: string) => ({
+          organizationId: memberMgmtTestOrgId,
+          creatorId,
+          revenueType: 'subscription',
+          roundNumber: 1,
+          proposedByUserId: memberMgmtInviterUserId,
+          proposedByRole: 'owner',
+          proposedCreatorSharePercent: 2000,
+          proposedEffectiveFrom: new Date(),
+          status: 'open',
+        });
+        const [leavingOffer, colleagueOffer] = await db
+          .insert(schema.agreementProposals)
+          .values([openProposal(removed), openProposal(stays)])
+          .returning();
+        if (!leavingOffer || !colleagueOffer) {
+          throw new Error('proposals not inserted');
+        }
+
+        const notified: MemberDeparture[] = [];
+        const sent: Promise<unknown>[] = [];
+        const removing = new OrganizationService({
+          db,
+          environment: 'test',
+          r2PublicUrlBase: ASSET_CDN_BASE,
+          onMemberRemoved: async (departure) => {
+            notified.push(departure);
+          },
+          waitUntil: (promise) => sent.push(promise),
+        });
+
+        await removing.removeMember(memberMgmtTestOrgId, removed);
+        await Promise.all(sent);
+
+        const rows = await db.query.creatorOrganizationAgreements.findMany({
+          where: (agreements, { inArray }) =>
+            inArray(agreements.id, [
+              subscriptionShare.id,
+              purchaseShare.id,
+              colleague.id,
+              elsewhere.id,
+            ]),
+        });
+        const byId = new Map(rows.map((row) => [row.id, row]));
+        const membership = await db.query.organizationMemberships.findFirst({
+          where: (memberships, { and, eq }) =>
+            and(
+              eq(memberships.organizationId, memberMgmtTestOrgId),
+              eq(memberships.userId, removed)
+            ),
+        });
+        for (const ended of [subscriptionShare, purchaseShare]) {
+          const row = byId.get(ended.id);
+          expect(row?.status).toBe('terminated');
+          // Ended at the removal moment itself, the membership's own stamp.
+          expect(row?.terminatedAt?.getTime()).toBe(
+            membership?.updatedAt.getTime()
+          );
+          expect(row?.terminatedByUserId).toBeNull();
+          expect(row?.terminationReason).toBe(
+            'No longer a member of the organisation'
+          );
+        }
+        expect(byId.get(colleague.id)?.status).toBe('active');
+        expect(byId.get(elsewhere.id)?.status).toBe('active');
+
+        const offers = await db.query.agreementProposals.findMany({
+          where: (proposals, { inArray }) =>
+            inArray(proposals.id, [leavingOffer.id, colleagueOffer.id]),
+        });
+        const offerStatus = new Map(offers.map((o) => [o.id, o.status]));
+        expect(offerStatus.get(leavingOffer.id)).toBe('withdrawn');
+        expect(offerStatus.get(colleagueOffer.id)).toBe('open');
+
+        expect(notified).toHaveLength(1);
+        expect(
+          notified[0]?.endedAgreements.map((agreement) => agreement.id).sort()
+        ).toEqual([subscriptionShare.id, purchaseShare.id].sort());
+      });
+
+      // Owner decision 2026-10-21 (Codex-2hxff.64): nothing of the removed
+      // creator's in that organisation stays on sale.
+      it("takes the member's published content and courses there off sale, and nothing else", async () => {
+        const removed = memberMgmtTestUserIds[1];
+        const stays = memberMgmtTestUserIds[2];
+        const otherOrg = await service.create(
+          { name: `Other Org ${Date.now()}`, slug: createUniqueSlug('other') },
+          memberMgmtTestUserIds[3]
+        );
+        const item = async (
+          creatorId: string,
+          organizationId: string | null,
+          overrides: { status?: string; deletedAt?: Date } = {}
+        ) => {
+          const [row] = await db
+            .insert(schema.content)
+            .values(
+              createTestContentInput(creatorId, {
+                organizationId,
+                status: overrides.status ?? 'published',
+                publishedAt:
+                  (overrides.status ?? 'published') === 'published'
+                    ? new Date(Date.now() - 86_400_000)
+                    : null,
+                deletedAt: overrides.deletedAt ?? null,
+              })
+            )
+            .returning({ id: schema.content.id });
+          if (!row) throw new Error('content not inserted');
+          return row.id;
+        };
+        const onSale = await item(removed, memberMgmtTestOrgId);
+        const draft = await item(removed, memberMgmtTestOrgId, {
+          status: 'draft',
+        });
+        const deleted = await item(removed, memberMgmtTestOrgId, {
+          deletedAt: new Date(),
+        });
+        const colleagues = await item(stays, memberMgmtTestOrgId);
+        const elsewhere = await item(removed, otherOrg.id);
+        const personal = await item(removed, null);
+
+        const course = async (
+          creatorId: string,
+          organizationId = memberMgmtTestOrgId
+        ) => {
+          const [row] = await db
+            .insert(schema.courses)
+            .values({
+              organizationId,
+              creatorId,
+              slug: createUniqueSlug('course'),
+              title: 'A course',
+              status: 'published',
+              publishedAt: new Date(Date.now() - 86_400_000),
+            })
+            .returning({ id: schema.courses.id });
+          if (!row) throw new Error('course not inserted');
+          return row.id;
+        };
+        const theirCourse = await course(removed);
+        const colleaguesCourse = await course(stays);
+        const theirCourseElsewhere = await course(removed, otherOrg.id);
+        const page = async (courseId: string, status: string) => {
+          const [row] = await db
+            .insert(schema.landingPages)
+            .values({
+              organizationId: memberMgmtTestOrgId,
+              creatorId: memberMgmtInviterUserId,
+              pageType: 'course',
+              slug: createUniqueSlug('page'),
+              title: 'A page',
+              status,
+              subjectType: 'course',
+              subjectId: courseId,
+            })
+            .returning({ id: schema.landingPages.id });
+          if (!row) throw new Error('page not inserted');
+          return row.id;
+        };
+        const sellingPage = await page(theirCourse, 'published');
+        const draftPage = await page(theirCourse, 'draft');
+        const colleaguesPage = await page(colleaguesCourse, 'published');
+
+        const notified: MemberDeparture[] = [];
+        const sent: Promise<unknown>[] = [];
+        const removing = new OrganizationService({
+          db,
+          environment: 'test',
+          r2PublicUrlBase: ASSET_CDN_BASE,
+          onMemberRemoved: async (departure) => {
+            notified.push(departure);
+          },
+          waitUntil: (promise) => sent.push(promise),
+        });
+        await removing.removeMember(memberMgmtTestOrgId, removed);
+        await Promise.all(sent);
+
+        const contentRows = await db.query.content.findMany({
+          where: (c, { inArray }) =>
+            inArray(c.id, [
+              onSale,
+              draft,
+              deleted,
+              colleagues,
+              elsewhere,
+              personal,
+            ]),
+        });
+        const contentById = new Map(contentRows.map((row) => [row.id, row]));
+        const at = notified[0]?.at.getTime();
+        expect(contentById.get(onSale)?.status).toBe('archived');
+        expect(contentById.get(onSale)?.offSaleAt?.getTime()).toBe(at);
+        for (const id of [colleagues, elsewhere, personal, deleted]) {
+          expect(contentById.get(id)?.status).toBe('published');
+          expect(contentById.get(id)?.offSaleAt).toBeNull();
+        }
+        expect(contentById.get(draft)?.status).toBe('draft');
+
+        const courseRows = await db.query.courses.findMany({
+          where: (c, { inArray }) =>
+            inArray(c.id, [
+              theirCourse,
+              colleaguesCourse,
+              theirCourseElsewhere,
+            ]),
+        });
+        const courseById = new Map(courseRows.map((row) => [row.id, row]));
+        expect(courseById.get(theirCourse)?.status).toBe('archived');
+        expect(courseById.get(theirCourse)?.offSaleAt?.getTime()).toBe(at);
+        expect(courseById.get(colleaguesCourse)?.status).toBe('published');
+        expect(courseById.get(theirCourseElsewhere)?.status).toBe('published');
+        expect(courseById.get(theirCourseElsewhere)?.offSaleAt).toBeNull();
+
+        // The course and the page that sold it move together.
+        const pageRows = await db.query.landingPages.findMany({
+          where: (p, { inArray }) =>
+            inArray(p.id, [sellingPage, draftPage, colleaguesPage]),
+        });
+        const pageStatus = new Map(pageRows.map((row) => [row.id, row.status]));
+        expect(pageStatus.get(sellingPage)).toBe('archived');
+        expect(pageStatus.get(draftPage)).toBe('draft');
+        expect(pageStatus.get(colleaguesPage)).toBe('published');
+
+        expect(notified[0]?.catalogue).toEqual({
+          contentIds: [onSale],
+          courseIds: [theirCourse],
+        });
+      });
+
+      it('a refused removal of the owner ends nothing and sends nothing', async () => {
+        await db.insert(schema.creatorOrganizationAgreements).values({
+          organizationId: memberMgmtTestOrgId,
+          creatorId: memberMgmtInviterUserId,
+          revenueType: 'subscription',
+          organizationFeePercentage: 7000,
+          status: 'active',
+          effectiveFrom: new Date(Date.now() - 86_400_000),
+        });
+        const notify = vi.fn(async () => {});
+        const removing = new OrganizationService({
+          db,
+          environment: 'test',
+          r2PublicUrlBase: ASSET_CDN_BASE,
+          onMemberRemoved: notify,
+        });
+
+        await expect(
+          removing.removeMember(memberMgmtTestOrgId, memberMgmtInviterUserId)
+        ).rejects.toThrow(OwnershipTransferRequiredError);
+
+        const agreements =
+          await db.query.creatorOrganizationAgreements.findMany({
+            where: (a, { and, eq }) =>
+              and(
+                eq(a.organizationId, memberMgmtTestOrgId),
+                eq(a.creatorId, memberMgmtInviterUserId)
+              ),
+          });
+        expect(agreements.map((a) => a.status)).toEqual(['active']);
+        expect(notify).not.toHaveBeenCalled();
+      });
+
+      it('a removal still succeeds when its follow-up fails', async () => {
+        const removed = memberMgmtTestUserIds[1];
+        await db.insert(schema.creatorOrganizationAgreements).values({
+          organizationId: memberMgmtTestOrgId,
+          creatorId: removed,
+          revenueType: 'subscription',
+          organizationFeePercentage: 7000,
+          status: 'active',
+          effectiveFrom: new Date(Date.now() - 86_400_000),
+        });
+        const sent: Promise<unknown>[] = [];
+        const removing = new OrganizationService({
+          db,
+          environment: 'test',
+          r2PublicUrlBase: ASSET_CDN_BASE,
+          onMemberRemoved: async () => {
+            throw new Error('mail service down');
+          },
+          waitUntil: (promise) => sent.push(promise),
+        });
+
+        await expect(
+          removing.removeMember(memberMgmtTestOrgId, removed)
+        ).resolves.toBeUndefined();
+        // The failure is caught and logged, never an unhandled rejection.
+        await expect(Promise.all(sent)).resolves.toBeDefined();
+
+        const membership = await db.query.organizationMemberships.findFirst({
+          where: (memberships, { and, eq }) =>
+            and(
+              eq(memberships.organizationId, memberMgmtTestOrgId),
+              eq(memberships.userId, removed)
+            ),
+        });
+        expect(membership?.status).toBe('inactive');
+      });
+
       it('should allow removing non-owner members', async () => {
         await service.removeMember(
           memberMgmtTestOrgId,
@@ -1230,7 +1612,31 @@ describe('OrganizationService', () => {
           contentType: 'video',
           status: 'draft',
         },
+        // A published course-only practice must neither count nor show
+        // (Codex-ot6vj): it lives only inside its course. The owner's count
+        // below stays 2 only while the filter holds.
+        {
+          creatorId: creatorsTestUserIds[0]!,
+          organizationId: creatorsTestOrgId,
+          title: 'Course-only Practice',
+          slug: `course-only-${Date.now()}`,
+          contentType: 'written',
+          status: 'published',
+          courseOnly: true,
+        },
       ]);
+    });
+
+    it('never counts or lists a course-only practice (Codex-ot6vj)', async () => {
+      const result = await service.getPublicCreators(creatorsTestOrgSlug);
+
+      const owner = result.items.find((m) => m.role === 'owner');
+      expect(owner?.contentCount).toBe(2);
+      // The calibration: the owner's recent content is listed at all.
+      expect(owner?.recentContent.length).toBe(2);
+      expect(
+        owner?.recentContent.some((c) => c.title === 'Course-only Practice')
+      ).toBe(false);
     });
 
     it('should return paginated creators for organization', async () => {
@@ -1350,6 +1756,64 @@ describe('OrganizationService', () => {
       );
       const sortedDates = [...joinedAtDates].sort((a, b) => a - b);
       expect(joinedAtDates).toEqual(sortedDates);
+    });
+  });
+
+  // Codex-kk9nv.8: deleteAccount soft-deletes and scrubs the user. A
+  // membership it did not end (every one before the fix) kept them on the
+  // public creators list as a "Deleted User" card with no avatar.
+  describe('a deleted account on the creators list', () => {
+    let slug: string;
+    let liveCreatorId: string;
+
+    beforeAll(async () => {
+      const [ownerId, liveId, deletedId] = await seedTestUsers(db, 3);
+      liveCreatorId = liveId!;
+      const org = await service.create(
+        {
+          name: 'Deleted Creator Org',
+          slug: createUniqueSlug('deleted-creator'),
+        },
+        ownerId!
+      );
+      slug = org.slug;
+      await db.insert(schema.organizationMemberships).values([
+        {
+          organizationId: org.id,
+          userId: liveId!,
+          role: 'creator',
+          status: 'active',
+        },
+        {
+          organizationId: org.id,
+          userId: deletedId!,
+          role: 'creator',
+          status: 'active',
+        },
+      ]);
+      // The membership stays active: the row shape a deletion left behind.
+      await db
+        .update(schema.users)
+        .set({ deletedAt: new Date(), name: 'Deleted User' })
+        .where(eq(schema.users.id, deletedId!));
+    });
+
+    it('is not listed, and the total counts only live accounts', async () => {
+      const result = await service.getPublicCreators(slug);
+
+      expect(result.items.map((item) => item.name)).not.toContain(
+        'Deleted User'
+      );
+      // The owner and the live creator.
+      expect(result.items).toHaveLength(2);
+      expect(result.items.some((item) => item.id === liveCreatorId)).toBe(true);
+      expect(result.pagination.total).toBe(2);
+    });
+
+    it("is not counted in the org's public creator count", async () => {
+      const stats = await service.getPublicStats(slug);
+
+      expect(stats.creators).toBe(2);
     });
   });
 

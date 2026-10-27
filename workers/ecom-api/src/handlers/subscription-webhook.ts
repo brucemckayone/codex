@@ -2,7 +2,8 @@
  * Subscription Webhook Handlers
  *
  * Processes Stripe subscription lifecycle events:
- * - checkout.session.completed (mode=subscription) → create subscription record
+ * - checkout.session.completed (mode=subscription) → create subscription record,
+ *   then mark the buyer's open checkout session completed
  * - customer.subscription.updated → handle tier changes, status changes
  * - customer.subscription.deleted → mark cancelled
  * - invoice.payment_succeeded → extend period, execute revenue transfers
@@ -43,7 +44,11 @@ import { createWebhookServices, sendEmailToWorker } from '@codex/worker-utils';
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import type { StripeWebhookEnv } from '../types';
-import { isTransientError } from '../utils/error-classification';
+import {
+  isTransientError,
+  rethrowIfTransient,
+  settleAfterCommit,
+} from '../utils/error-classification';
 
 /**
  * Swap a due pending price in (Codex-2hxff.3) without letting a permanent
@@ -78,9 +83,10 @@ async function applyPendingPriceChangeOrReport(
 
 /**
  * Fire-and-forget write of a per-user, per-org KV revocation key after a
- * Stripe event that REDUCES access (subscription deleted, payment failed,
- * refund). Checked by `ContentAccessService.getStreamingUrl()` to close the
- * window where a presigned R2 URL issued before revocation is still usable.
+ * Stripe event that REDUCES access (subscription deleted or paused, status
+ * `unpaid`). `ContentAccessService.getStreamingUrl()` reads it, so no NEW
+ * stream link is issued; a link already issued plays to its expiry. The DB
+ * access check is the authority.
  *
  * See packages/access/src/services/access-revocation.ts and
  * docs/payments/access.md ("Streaming revocation") for the design.
@@ -147,7 +153,9 @@ function revokeAccess(
  *     without both identifiers there is no key to clear
  *
  * Errors are swallowed inside the `waitUntil` promise so a KV hiccup never
- * surfaces as a webhook 500 (Stripe would retry unnecessarily).
+ * surfaces as a webhook 500 (Stripe would retry unnecessarily). They are
+ * logged at error, not warn: the key keeps refusing a subscriber whose
+ * access was restored, for up to its TTL (Codex-2hxff.60).
  *
  * See bead Codex-13ml3 and docs/payments/access.md ("Streaming revocation").
  */
@@ -166,7 +174,7 @@ function clearAccess(
   try {
     c.executionCtx.waitUntil(
       revocation.clear(userId, orgId).catch((error) => {
-        obs?.warn('subscription-webhook: AccessRevocation.clear failed', {
+        obs?.error('subscription-webhook: AccessRevocation.clear failed', {
           userId,
           orgId,
           error: error instanceof Error ? error.message : String(error),
@@ -176,7 +184,7 @@ function clearAccess(
   } catch (error) {
     // Defensive: waitUntil itself throwing synchronously (e.g. mock harness
     // or a future runtime change) must not crash the webhook.
-    obs?.warn('subscription-webhook: waitUntil threw synchronously (clear)', {
+    obs?.error('subscription-webhook: waitUntil threw synchronously (clear)', {
       userId,
       orgId,
       error: error instanceof Error ? error.message : String(error),
@@ -333,6 +341,8 @@ export async function handleSubscriptionWebhook(
               subscription
             );
           invalidateCourseBuyer(courseResult);
+          // The open checkout is paid, as for an org subscription below.
+          await service.markCheckoutSessionCompleted(session.id);
           obs?.info('Course subscription created from checkout', {
             sessionId: session.id,
             subscriptionId,
@@ -348,6 +358,10 @@ export async function handleSubscriptionWebhook(
         );
 
         dispatchEmail(c, result);
+        // The buyer's open checkout for the org is paid, so a new one is
+        // never handed this session again (Codex-2hxff.15). After the row, as
+        // for a purchase: the reservation is a record, not a gate.
+        await service.markCheckoutSessionCompleted(session.id);
 
         obs?.info('Subscription created from checkout', {
           sessionId: session.id,
@@ -398,19 +412,31 @@ export async function handleSubscriptionWebhook(
 
         // Access-RESTORING transition: Stripe reports status=active. The
         // user may have been in a non-active state before this event (e.g.
-        // `unpaid` → `active` after a dispute resolution, or `past_due` →
-        // `active` outside of the invoice.payment_succeeded path). We take
-        // the conservative approach: always clear on status=active. KV
-        // delete is idempotent — if no revocation key exists, it's a free
-        // no-op; if one does, this restores access within the KV TTL.
+        // `unpaid` → `active`, or `past_due` → `active` outside of the
+        // invoice.payment_succeeded path), so the clear runs on every
+        // status=active. KV delete is idempotent — if no revocation key
+        // exists, it's a free no-op; if one does, new stream links are issued
+        // again at once.
         //
         // `cancel_at_period_end=true` also reports status=active; the user
         // never had access revoked in that case (see the comment above on
         // the non-write path) so the clear is still safe — there's simply
         // no key to delete.
         //
+        // Not while billing is paused (`pause_collection` set). That is a
+        // dispute hold: when a chargeback opens, payment-webhook writes the
+        // block and then pauses billing, and the pause fires this event with
+        // status still `active`. Clearing here would undo the block seconds
+        // after it was written (Codex-2hxff.61). The won dispute clears it
+        // itself (payment-webhook `clearRevocation`); so does the
+        // `updated(active)` that resuming billing fires, with
+        // `pause_collection` back to null.
+        //
         // See bead Codex-13ml3 (clear counterpart to Codex-usgf7 writes).
-        if (subscription.status === 'active') {
+        if (
+          subscription.status === 'active' &&
+          !subscription.pause_collection
+        ) {
           clearAccess(c, result);
         }
 
@@ -451,10 +477,10 @@ export async function handleSubscriptionWebhook(
           webAppUrl
         );
 
-        // Revocation list write: close the presigned-URL window. Paired
-        // with a shortened streaming URL TTL in ContentAccessService, this
-        // limits post-cancellation stream access to the URL TTL rather
-        // than the (longer) cache invalidation propagation window.
+        // Revocation list write: no new stream link from now on. A link
+        // already issued plays to its expiry (DEFAULT_STREAMING_URL_TTL_SECONDS
+        // in @codex/access), so post-cancellation playback is bounded by that
+        // TTL rather than by cache invalidation propagating.
         revokeAccess(c, result, 'subscription_deleted');
         dispatchEmail(c, result);
 
@@ -497,12 +523,11 @@ export async function handleSubscriptionWebhook(
         const result = await service.handleSubscriptionResumed(subscription);
 
         // Revocation CLEAR: the paused event wrote a revocation key; the
-        // resume must clear it so already-minted presigned URLs (issued
-        // before the pause) do not stay gated beyond the resume. KV delete
-        // is idempotent — if no key exists (e.g. paused event never landed,
-        // or TTL already expired), the clear is a free no-op. Mirror of
-        // the clear paths in SUBSCRIPTION_UPDATED(status=active) and
-        // INVOICE_PAYMENT_SUCCEEDED.
+        // resume must clear it so new stream links are not refused beyond
+        // the resume. KV delete is idempotent — if no key exists (e.g.
+        // paused event never landed, or TTL already expired), the clear is a
+        // free no-op. Mirror of the clear paths in
+        // SUBSCRIPTION_UPDATED(status=active) and INVOICE_PAYMENT_SUCCEEDED.
         clearAccess(c, result);
 
         obs?.info('Subscription resumed', {
@@ -527,15 +552,21 @@ export async function handleSubscriptionWebhook(
               : (subDetails?.subscription?.id ?? null);
           if (stripeSubId) {
             const courseSub = await stripe.subscriptions.retrieve(stripeSubId);
-            const courseResult =
-              await courseSubService.handleCourseInvoicePaymentSucceeded(
-                invoice,
-                courseSub
-              );
+            // A clawback that failed after the payout committed
+            // (Codex-2hxff.67) is rethrown after the library bump, which is
+            // safe to repeat; nothing here must not be: see settleAfterCommit.
+            const { value: courseResult, failure } = await settleAfterCommit(
+              () =>
+                courseSubService.handleCourseInvoicePaymentSucceeded(
+                  invoice,
+                  courseSub
+                )
+            );
             invalidateCourseBuyer(courseResult);
             obs?.info('Course subscription invoice payment succeeded', {
               invoiceId: invoice.id,
             });
+            if (failure) throw failure;
           }
           break;
         }
@@ -543,25 +574,29 @@ export async function handleSubscriptionWebhook(
         // `handleInvoicePaymentSucceeded` owns its own cache invalidation
         // via the orchestrator hook inside SubscriptionService. Renewal
         // continues access — both per-user version keys are bumped from
-        // inside the service.
-        const result = await service.handleInvoicePaymentSucceeded(
-          invoice,
-          webAppUrl
+        // inside the service. A clawback that failed after the payout
+        // committed (Codex-2hxff.67) never holds back the access clear; a
+        // transient one is rethrown before the renewal email, which the
+        // redelivery sends once, any other after it: see settleAfterCommit.
+        const { value: result, failure } = await settleAfterCommit(() =>
+          service.handleInvoicePaymentSucceeded(invoice, webAppUrl)
         );
 
         // Access-RESTORING: a successful payment confirms the invoice is
-        // settled. If the subscription was previously PAST_DUE, its
-        // revocation key still lives in KV (TTL = 1200s, 2× the max
-        // presigned URL TTL). Clear it unconditionally — the payment
-        // succeeded, so access should be unblocked. KV delete is
-        // idempotent: a clear on a subscription that never went past_due
-        // is a free no-op. See bead Codex-13ml3.
+        // settled. If an earlier event blocked the subscriber (status
+        // `unpaid`, say), the key may still live in KV
+        // (REVOCATION_TTL_SECONDS in @codex/access). Clear it
+        // unconditionally — the payment succeeded, so access should be
+        // unblocked. KV delete is idempotent: a clear with no block is a
+        // free no-op. See bead Codex-13ml3.
         clearAccess(c, result);
+        rethrowIfTransient(failure);
         dispatchEmail(c, result);
 
         obs?.info('Invoice payment succeeded', {
           invoiceId: invoice.id,
         });
+        if (failure) throw failure;
         break;
       }
 
@@ -652,11 +687,10 @@ export async function handleSubscriptionWebhook(
           webAppUrl
         );
 
-        // PAST_DUE is access-reducing: `handleInvoicePaymentFailed` only
-        // returns userId+orgId once the local subscription record has been
-        // flipped to PAST_DUE, so revokeAccess's guard (requires both ids)
-        // naturally gates on that transition.
-        revokeAccess(c, result, 'payment_failed');
+        // No streaming block: a failed renewal KEEPS access while Stripe
+        // retries the card (owner decision P-3). Access ends when Stripe
+        // gives up — `customer.subscription.deleted`, or `unpaid` on
+        // `customer.subscription.updated` — and those paths revoke.
         dispatchEmail(c, result);
         break;
       }

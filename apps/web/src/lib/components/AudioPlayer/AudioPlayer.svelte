@@ -25,6 +25,7 @@
   import { createAudioAnalyser } from './audio-analyser';
   import Waveform from './Waveform.svelte';
   import WaveformShader from './WaveformShader.svelte';
+  import { getThumbnailUrl } from '$lib/utils/image';
   import ImmersiveShaderPlayer from './ImmersiveShaderPlayer.svelte';
 
   import type Hls from 'hls.js';
@@ -914,7 +915,8 @@
       <WaveformShader {audioAnalysis} {poster} class="audio-mini-player__shader">
         <div class="audio-mini-player__inner">
           {#if poster}
-            <img src={poster} alt="" class="audio-mini-player__art" />
+            <!-- 3rem art: sm, whichever size the caller passed. -->
+            <img src={getThumbnailUrl(poster, 'sm')} alt="" class="audio-mini-player__art" />
           {/if}
 
           <div class="audio-mini-player__body">

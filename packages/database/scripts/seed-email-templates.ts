@@ -327,6 +327,16 @@ If you have any questions, please contact our support team at {{supportEmail}}.
     status: 'active' as const,
     description: 'Sent to creator when video transcoding fails',
   },
+  {
+    name: 'transcoding-owner-alert',
+    scope: 'global' as const,
+    subject: '[Transcoding] {{headline}}',
+    htmlBody: `<!DOCTYPE html><html><head><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#333}.container{max-width:600px;margin:0 auto;padding:20px;border:1px solid #eee;border-radius:8px}.logo{max-height:40px;margin-bottom:20px}.footer{margin-top:30px;padding-top:20px;border-top:1px solid #eee;color:#666;font-size:12px}.details{background:#f6f6f6;padding:16px;border-radius:6px;white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px}</style></head><body><div class="container"><img src="{{logoUrl}}" alt="{{platformName}}" class="logo"/><h1>{{headline}}</h1><p>{{summary}}</p><pre class="details">{{details}}</pre><div class="footer"><p>{{platformName}}</p></div></div></body></html>`,
+    textBody: `{{headline}}\n\n{{summary}}\n\n{{details}}\n\n{{platformName}}`,
+    status: 'active' as const,
+    description:
+      'Sent to every platform owner when a transcode fails for good, or a setup fault stops every upload (Codex-l2c48.6)',
+  },
   // ============ Creator (P2) ============
   {
     name: 'new-sale',
@@ -458,13 +468,35 @@ If you have any questions, please contact our support team at {{supportEmail}}.
   {
     name: 'agreement-expiring-soon',
     scope: 'global' as const,
-    subject: 'Revenue-share agreement with {{orgName}} expires soon',
-    htmlBody: `<!DOCTYPE html><html><head><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#333}.container{max-width:600px;margin:0 auto;padding:20px;border:1px solid #eee;border-radius:8px}.button{background-color:{{primaryColor}};color:white;padding:12px 24px;text-decoration:none;border-radius:4px;display:inline-block;font-weight:bold}.logo{max-height:40px;margin-bottom:20px}.footer{margin-top:30px;padding-top:20px;border-top:1px solid #eee;color:#666;font-size:12px}.details{background:#fef9c3;padding:20px;border-radius:8px;margin:20px 0;border:1px solid #fde68a}</style></head><body><div class="container"><img src="{{logoUrl}}" alt="{{platformName}}" class="logo"/><h1>Agreement expiring soon</h1><p>Hi {{recipientName}},</p><p>Your revenue-share agreement with <strong>{{orgName}}</strong> (counterparty <strong>{{otherPartyName}}</strong>) is approaching its expiry date.</p><div class="details"><p style="margin:5px 0;"><strong>Current share:</strong> {{sharePercentDisplay}} of post-platform {{revenueTypeLabel}} revenue</p><p style="margin:5px 0;"><strong>Original term:</strong> {{termMonthsDisplay}}</p><p style="margin:5px 0;"><strong>Expires on:</strong> {{expiryDate}}</p></div><p>If you wish to extend or renegotiate, open a new proposal before the expiry date. After expiry the org reverts to keeping 100% of post-platform {{revenueTypeLabel}} revenue.</p><p style="text-align:center;margin:30px 0;"><a href="{{deepLinkUrl}}" class="button" style="color:white;">Open new proposal</a></p><div class="footer"><p>{{platformName}} - <a href="mailto:{{supportEmail}}">{{supportEmail}}</a></p></div></div></body></html>`,
-    textBody: `Hi {{recipientName}},\n\nYour revenue-share agreement with {{orgName}} (counterparty {{otherPartyName}}) is approaching its expiry date.\n\nCurrent share: {{sharePercentDisplay}} of post-platform {{revenueTypeLabel}} revenue\nOriginal term: {{termMonthsDisplay}}\nExpires on: {{expiryDate}}\n\nIf you wish to extend or renegotiate, open a new proposal before the expiry date. After expiry the org reverts to keeping 100% of post-platform {{revenueTypeLabel}} revenue.\n\nOpen new proposal: {{deepLinkUrl}}\n\n{{platformName}}`,
+    subject: 'Time to review your revenue-share agreement with {{orgName}}',
+    htmlBody: `<!DOCTYPE html><html><head><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#333}.container{max-width:600px;margin:0 auto;padding:20px;border:1px solid #eee;border-radius:8px}.button{background-color:{{primaryColor}};color:white;padding:12px 24px;text-decoration:none;border-radius:4px;display:inline-block;font-weight:bold}.logo{max-height:40px;margin-bottom:20px}.footer{margin-top:30px;padding-top:20px;border-top:1px solid #eee;color:#666;font-size:12px}.details{background:#fef9c3;padding:20px;border-radius:8px;margin:20px 0;border:1px solid #fde68a}</style></head><body><div class="container"><img src="{{logoUrl}}" alt="{{platformName}}" class="logo"/><h1>Agreement review due</h1><p>Hi {{recipientName}},</p><p>Your revenue-share agreement with <strong>{{orgName}}</strong> (counterparty <strong>{{otherPartyName}}</strong>) reaches its review date soon.</p><div class="details"><p style="margin:5px 0;"><strong>Current share:</strong> {{sharePercentDisplay}} of post-platform {{revenueTypeLabel}} revenue</p><p style="margin:5px 0;"><strong>Original term:</strong> {{termMonthsDisplay}}</p><p style="margin:5px 0;"><strong>Review by:</strong> {{expiryDate}}</p></div><p>Nothing changes on that date: the agreement keeps paying until either of you ends it, or a new agreement replaces it. To agree different terms, open a new proposal.</p><p style="text-align:center;margin:30px 0;"><a href="{{deepLinkUrl}}" class="button" style="color:white;">Open new proposal</a></p><div class="footer"><p>{{platformName}} - <a href="mailto:{{supportEmail}}">{{supportEmail}}</a></p></div></div></body></html>`,
+    textBody: `Hi {{recipientName}},\n\nYour revenue-share agreement with {{orgName}} (counterparty {{otherPartyName}}) reaches its review date soon.\n\nCurrent share: {{sharePercentDisplay}} of post-platform {{revenueTypeLabel}} revenue\nOriginal term: {{termMonthsDisplay}}\nReview by: {{expiryDate}}\n\nNothing changes on that date: the agreement keeps paying until either of you ends it, or a new agreement replaces it. To agree different terms, open a new proposal.\n\nOpen new proposal: {{deepLinkUrl}}\n\n{{platformName}}`,
     status: 'active' as const,
     description:
-      'Sent to both parties roughly 30 days before agreement expiry. Cron trigger is deferred to a follow-up bead; template lands now so the registry has one source of truth (WP-5).',
-  }, // ============ Ownership transfer (Codex-2hxff.2) ============
+      "Sent to both parties 30 days before the agreement's review date. The review date is not an expiry: the agreement keeps paying (owner decision AGR-01; migration 0106 rewords existing rows).",
+  },
+  // ============ Removal from an organisation (Codex-2hxff.64) ============
+  {
+    name: 'removed-from-organisation',
+    scope: 'global' as const,
+    subject: "You've been removed from {{orgName}}",
+    htmlBody: `<!DOCTYPE html><html><head><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#333}.container{max-width:600px;margin:0 auto;padding:20px;border:1px solid #eee;border-radius:8px}.button{background-color:{{primaryColor}};color:white;padding:12px 24px;text-decoration:none;border-radius:4px;display:inline-block;font-weight:bold}.logo{max-height:40px;margin-bottom:20px}.footer{margin-top:30px;padding-top:20px;border-top:1px solid #eee;color:#666;font-size:12px}.details{background:#f8fafc;padding:20px;border-radius:8px;margin:20px 0;border:1px solid #e2e8f0}</style></head><body><div class="container"><img src="{{logoUrl}}" alt="{{platformName}}" class="logo"/><h1>You've been removed from {{orgName}}</h1><p>Hi {{recipientName}},</p><p>You are no longer a member of <strong>{{orgName}}</strong> as of {{removedOn}}. This is what that ended:</p><div class="details"><p style="margin:5px 0;"><strong>Revenue-share agreements ended:</strong> {{agreementsEnded}}</p><p style="margin:5px 0;"><strong>Items taken off sale:</strong> {{contentOffSale}}</p><p style="margin:5px 0;"><strong>Courses taken off sale:</strong> {{coursesOffSale}}</p><p style="margin:5px 0;"><strong>Course subscriptions ending at their period end:</strong> {{courseSubscriptionsEnding}}</p></div><p>Money you earned before {{removedOn}} is still paid to you. People who already bought your work keep it.</p><div class="footer"><p>{{platformName}} - <a href="mailto:{{supportEmail}}">{{supportEmail}}</a></p></div></div></body></html>`,
+    textBody: `Hi {{recipientName}},\n\nYou are no longer a member of {{orgName}} as of {{removedOn}}. This is what that ended:\n\nRevenue-share agreements ended: {{agreementsEnded}}\nItems taken off sale: {{contentOffSale}}\nCourses taken off sale: {{coursesOffSale}}\nCourse subscriptions ending at their period end: {{courseSubscriptionsEnding}}\n\nMoney you earned before {{removedOn}} is still paid to you. People who already bought your work keep it.\n\n{{platformName}}`,
+    status: 'active' as const,
+    description:
+      'Sent to a creator removed from an organisation, listing what the removal ended (Codex-2hxff.64, owner decision Q5). Replaces the agreement-terminated email on removal.',
+  },
+  {
+    name: 'course-no-longer-offered',
+    scope: 'global' as const,
+    subject: '{{courseTitle}} is no longer offered',
+    htmlBody: `<!DOCTYPE html><html><head><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#333}.container{max-width:600px;margin:0 auto;padding:20px;border:1px solid #eee;border-radius:8px}.button{background-color:{{primaryColor}};color:white;padding:12px 24px;text-decoration:none;border-radius:4px;display:inline-block;font-weight:bold}.logo{max-height:40px;margin-bottom:20px}.footer{margin-top:30px;padding-top:20px;border-top:1px solid #eee;color:#666;font-size:12px}.details{background:#f8fafc;padding:20px;border-radius:8px;margin:20px 0;border:1px solid #e2e8f0}</style></head><body><div class="container"><img src="{{logoUrl}}" alt="{{platformName}}" class="logo"/><h1>{{courseTitle}} is no longer offered</h1><p>Hi {{userName}},</p><p><strong>{{courseTitle}}</strong> is no longer offered by <strong>{{orgName}}</strong>, so your subscription to it will end.</p><div class="details"><p style="margin:5px 0;"><strong>You keep access until:</strong> {{accessUntil}}</p><p style="margin:5px 0;">You won't be charged for it again.</p></div><p style="text-align:center;margin:30px 0;"><a href="{{manageUrl}}" class="button" style="color:white;">Manage subscriptions</a></p><div class="footer"><p>{{platformName}} - <a href="mailto:{{supportEmail}}">{{supportEmail}}</a></p></div></div></body></html>`,
+    textBody: `Hi {{userName}},\n\n{{courseTitle}} is no longer offered by {{orgName}}, so your subscription to it will end.\n\nYou keep access until: {{accessUntil}}\nYou won't be charged for it again.\n\nManage subscriptions: {{manageUrl}}\n\n{{platformName}}`,
+    status: 'active' as const,
+    description:
+      'Sent to each course subscriber when the course is taken off sale because its creator left the organisation; the subscription cancels at period end (Codex-2hxff.64, owner decision D4).',
+  },
+  // ============ Ownership transfer (Codex-2hxff.2) ============
   //
   // Copy is the owner-reviewed mockup's state 10.
   {

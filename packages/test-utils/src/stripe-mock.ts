@@ -148,6 +148,11 @@ export function createMockStripe(): Stripe {
             url: `https://checkout.stripe.com/pay/${id}`,
           };
         }),
+        // An open session replaced by a new one (Codex-2hxff.14).
+        expire: vi.fn().mockImplementation(async (id: string) => ({
+          id,
+          status: 'expired',
+        })),
       },
     },
 
@@ -223,6 +228,24 @@ export function createMockStripe(): Stripe {
             return transfer;
           }
         ),
+      // With what its reversals here took back: `reversed` once they cover
+      // it, as Stripe reports a transfer reversed in full (Codex-pqsfg). An
+      // id this mock never made is a transfer nothing has reversed.
+      retrieve: vi.fn().mockImplementation(async (transferId: string) => {
+        const transfer = createdTransfers.find((t) => t.id === transferId);
+        const amountReversed = createdReversals
+          .filter((r) => r.transfer === transferId)
+          .reduce((sum, r) => sum + r.amount, 0);
+        return {
+          object: 'transfer',
+          ...transfer,
+          id: transferId,
+          amount_reversed: amountReversed,
+          reversed:
+            transfer !== undefined &&
+            amountReversed >= Number(transfer.amount ?? 0),
+        };
+      }),
       // Newest first, like Stripe; honours destination, created.gte, limit
       // (Stripe's default 10) and starting_after.
       list: vi
@@ -307,10 +330,13 @@ export function createMockStripe(): Stripe {
         ),
     },
 
+    // One charge per PaymentIntent, as at Stripe (pi_x → ch_x): a redelivered
+    // invoice must resolve the charge its first delivery did, or its payouts
+    // are keyed twice. `paidByCard` names its PaymentIntent to match.
     paymentIntents: {
-      retrieve: vi.fn().mockImplementation(async (_piId: string) => ({
-        id: _piId,
-        latest_charge: nextId('ch'),
+      retrieve: vi.fn().mockImplementation(async (piId: string) => ({
+        id: piId,
+        latest_charge: `ch_${piId.replace(/^pi_/, '')}`,
       })),
     },
 
@@ -322,6 +348,13 @@ export function createMockStripe(): Stripe {
       retrieve: vi.fn().mockImplementation(async (_id: string) => ({
         id: _id,
         payments: { data: [] },
+      })),
+      // A full refund of a subscription's current-period payment cancels it
+      // (Codex-2hxff.10); the period's invoice is found here. Tests override.
+      list: vi.fn().mockImplementation(async () => ({
+        object: 'list',
+        data: [],
+        has_more: false,
       })),
     },
 
@@ -349,6 +382,12 @@ export function createMockStripe(): Stripe {
         object: 'list',
         data: [],
         has_more: false,
+      })),
+      // issueRefund (@codex/payments, Codex-2hxff.14): a refund Stripe made.
+      create: vi.fn().mockImplementation(async () => ({
+        id: nextId('re'),
+        object: 'refund',
+        status: 'succeeded',
       })),
     },
   };

@@ -6,3 +6,4 @@ packages:
 
 patchedDependencies:
   '@inlang/paraglide-js@1.11.8': patches/@inlang__paraglide-js@1.11.8.patch
+  '@sveltejs/kit@2.55.0': patches/@sveltejs__kit@2.55.0.patch

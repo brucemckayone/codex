@@ -12,13 +12,16 @@
  * - Rate limiting for all endpoints
  * - Session-based authentication with platform owner role verification
  *
- * All endpoints require:
+ * Most endpoints require:
  * 1. Valid session (authenticated user)
  * 2. Organization membership with 'owner' or 'admin' role
+ * The fee, ownership-support and support-refund routes are `platform_owner`
+ * instead, with no org policy.
  *
  * Uses the procedure() pattern for unified policy, validation, and error handling.
  */
 
+import { AccessRevocation } from '@codex/access';
 import { invalidateUserLibrary } from '@codex/cache';
 import type { CONTENT_STATUS } from '@codex/constants';
 import {
@@ -32,6 +35,7 @@ import {
   adminContentIdParamsSchema,
   adminContentListQuerySchema,
   adminContentPerformanceQuerySchema,
+  adminCustomerGrantsQuerySchema,
   adminCustomerIdParamsSchema,
   adminCustomerListQuerySchema,
   adminDashboardStatsQuerySchema,
@@ -39,12 +43,22 @@ import {
   adminGrantAccessParamsSchema,
   adminRevenueByCreatorQuerySchema,
   adminRevenueQuerySchema,
+  adminRevokeGrantParamsSchema,
   adminSubscribersQuerySchema,
   adminTopContentQuerySchema,
   feeAuditLogQuerySchema,
   orgCreatorParamsSchema,
   orgIdParamsSchema,
   reassignOwnerSchema,
+  supportChargeParamsSchema,
+  supportChargeSearchQuerySchema,
+  supportIssueRefundSchema,
+  supportQueueQuerySchema,
+  supportRefundIdParamsSchema,
+  supportRefundPreviewQuerySchema,
+  supportResolveCreatorDebtSchema,
+  supportResolveFailedRefundSchema,
+  supportReviewIdParamsSchema,
   updateOrgFeesSchema,
   updatePlatformFeesSchema,
   upsertCreatorOverrideSchema,
@@ -52,7 +66,7 @@ import {
 import {
   createKvCheck,
   createWorker,
-  membershipCacheKey,
+  invalidateMemberCaches,
   PaginatedResult,
   procedure,
   standardDatabaseCheck,
@@ -230,16 +244,18 @@ app.get(
 
 /**
  * GET /api/admin/analytics/revenue-by-creator
- * Per-creator revenue split visibility (Codex-mtv05).
+ * Studio > Analytics "Revenue by creator" (Codex-mtv05; Codex-zsh2p).
  *
- * Returns one row per ACTIVE creator-organization agreement for the
- * org-owner's organization, annotated with totalRevenueCents (purchases
- * only in Phase 1), CURRENT splitPercent (display %, not basis points),
- * lastPayoutAt, and pendingPayoutCents.
+ * Returns one row per CREATOR who holds an active agreement in the
+ * organisation, earned in the window, or is still owed money by it:
+ * earnedCents (their cut of every kind from the payouts ledger, sent or not,
+ * after refunds), subscriptionShare and salesShare (`none`, `unreadable` or a
+ * display percentage, never basis points), lastPayoutAt, and
+ * pendingPayoutCents (money owed them and not yet sent: pending and failed
+ * rows, held ones included, less partial refunds).
  *
- * Section is hidden in the UI for single-creator orgs; this endpoint returns
- * the same shape regardless and the client renders conditionally on
- * `items.length > 1`.
+ * The UI shows the section when more than one creator is listed; this
+ * endpoint returns the same shape regardless.
  */
 app.get(
   '/api/admin/analytics/revenue-by-creator',
@@ -497,6 +513,9 @@ app.get(
 /**
  * POST /api/admin/customers/:customerId/grant-access/:contentId
  * Grant complimentary content access (for refunds/support)
+ *
+ * Writes a `grant` entitlement recording the acting user; a re-grant is a
+ * no-op. Rules: docs/payments/access.md#support-grants.
  */
 app.post(
   '/api/admin/customers/:customerId/grant-access/:contentId',
@@ -508,12 +527,92 @@ app.post(
     },
     input: { params: adminGrantAccessParamsSchema },
     handler: async (ctx) => {
+      const { customerId, contentId } = ctx.input.params;
       await ctx.services.adminCustomer.grantContentAccess(
         ctx.organizationId,
-        ctx.input.params.customerId,
-        ctx.input.params.contentId
+        customerId,
+        contentId,
+        ctx.user.id
       );
+      // The item joins the customer's library shelf. The access decision
+      // itself is read live, so nothing else is cached.
+      invalidateUserLibrary({
+        kv: ctx.env.CACHE_KV,
+        waitUntil: ctx.executionCtx.waitUntil.bind(ctx.executionCtx),
+        userId: customerId,
+        logger: ctx.obs,
+      });
       return { success: true };
+    },
+  })
+);
+
+/**
+ * GET /api/admin/customers/:customerId/grants
+ * This organization's support grants for the customer, newest first, live and
+ * revoked (the drawer's audit trail). Not cached: a support view must be
+ * current.
+ */
+app.get(
+  '/api/admin/customers/:customerId/grants',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgMembership: true,
+      requireOrgManagement: true,
+    },
+    input: {
+      params: adminCustomerIdParamsSchema,
+      query: adminCustomerGrantsQuerySchema,
+    },
+    handler: async (ctx) => {
+      const result = await ctx.services.adminCustomer.listCustomerGrants(
+        ctx.organizationId,
+        ctx.input.params.customerId,
+        ctx.input.query
+      );
+      return new PaginatedResult(result.items, result.pagination);
+    },
+  })
+);
+
+/**
+ * DELETE /api/admin/customers/:customerId/grants/:entitlementId
+ * Revoke one support grant. 404 unless it is this organization's `grant` for
+ * this customer; 204 when revoked, and again when it already was.
+ *
+ * It does NOT write the org-wide `revoked:user:` streaming block — that would
+ * also cut the customer off from everything else they hold here. A stream URL
+ * already issued plays out its expiry. No email: support tells the customer.
+ */
+app.delete(
+  '/api/admin/customers/:customerId/grants/:entitlementId',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgMembership: true,
+      requireOrgManagement: true,
+    },
+    input: { params: adminRevokeGrantParamsSchema },
+    successStatus: 204,
+    handler: async (ctx) => {
+      const { customerId, entitlementId } = ctx.input.params;
+      const { revoked } = await ctx.services.adminCustomer.revokeGrant(
+        ctx.organizationId,
+        customerId,
+        entitlementId,
+        ctx.user.id
+      );
+      if (revoked) {
+        // The item leaves the customer's library shelf.
+        invalidateUserLibrary({
+          kv: ctx.env.CACHE_KV,
+          waitUntil: ctx.executionCtx.waitUntil.bind(ctx.executionCtx),
+          userId: customerId,
+          logger: ctx.obs,
+        });
+      }
+      return null;
     },
   })
 );
@@ -726,25 +825,231 @@ app.post(
         reason: ctx.input.body.reason,
       });
 
-      // Both users' roles changed. Delete the membership entry the policy
-      // reads (a bare `kv.get` with no version check — a bump would be dead)
-      // and their library caches, as organization-api's role change does.
-      const kv = ctx.env.CACHE_KV;
+      // Both users' roles changed. Bust what organization-api's accept path
+      // busts for each: the membership entry the policy reads (deleted — a
+      // version bump would be dead), the org's slug-keyed public caches and
+      // the user's library. One shared helper, so the two cannot drift again
+      // (Codex-2hxff.44).
       for (const userId of [change.ownerUserId, change.previousOwnerUserId]) {
         if (!userId) continue;
-        if (kv) {
-          ctx.executionCtx.waitUntil(
-            kv.delete(membershipCacheKey(orgId, userId)).catch(() => {})
-          );
-        }
-        invalidateUserLibrary({
-          kv,
-          waitUntil: ctx.executionCtx.waitUntil.bind(ctx.executionCtx),
-          userId,
-          logger: ctx.obs,
-        });
+        invalidateMemberCaches(ctx, orgId, userId, ctx.obs);
       }
       return change;
+    },
+  })
+);
+
+// ============================================================================
+// Support refunds (Codex-2hxff.28) — platform support only
+//
+// The /admin pages in apps/web: find a charge, see its split and what was
+// taken back, refund it in full or in part inside the 14-day window, and
+// settle the queue of failed refunds and creator debts. Design:
+// docs/handover/phase3-sources/support-refunds/data-design.md (owner
+// decisions 2026-10-24).
+//
+// Every route is `platform_owner` with no org policy: these reads are
+// platform-wide on purpose, and the scope is the charge. `cache: 'fresh'`:
+// every number changes with a refund, a webhook or a payout run, and support
+// must see it now, so nothing here is cached. Reads take the default `api`
+// preset; writes take `strict` (RATE_LIMIT_STRICT, already bound).
+// ============================================================================
+
+/**
+ * GET /api/admin/support/charges?lookup=
+ * Charges found by an exact key: an email, a purchase or subscription id, or
+ * a Stripe `sub_`, `pi_`, `ch_` or `py_` id. Anything else finds nothing.
+ */
+app.get(
+  '/api/admin/support/charges',
+  procedure({
+    policy: { auth: 'platform_owner', cache: 'fresh' },
+    input: { query: supportChargeSearchQuerySchema },
+    handler: async (ctx) => {
+      const result = await ctx.services.support.searchCharges(ctx.input.query);
+      return new PaginatedResult(result.items, result.pagination);
+    },
+  })
+);
+
+/**
+ * GET /api/admin/support/charges/:chargeId
+ * The charge, its split with each slice's history, its refunds and
+ * chargebacks, the window and what is left to refund: one answer, so the
+ * form never works from half-loaded data.
+ */
+app.get(
+  '/api/admin/support/charges/:chargeId',
+  procedure({
+    policy: { auth: 'platform_owner', cache: 'fresh' },
+    input: { params: supportChargeParamsSchema },
+    handler: async (ctx) => {
+      return await ctx.services.support.getChargeDetail(
+        ctx.input.params.chargeId
+      );
+    },
+  })
+);
+
+/**
+ * GET /api/admin/support/charges/:chargeId/refund-preview?amountCents=
+ * What a refund of that amount takes from each slice, worked out by the
+ * clawback engine's own rules. Writes nothing.
+ */
+app.get(
+  '/api/admin/support/charges/:chargeId/refund-preview',
+  procedure({
+    policy: { auth: 'platform_owner', cache: 'fresh' },
+    input: {
+      params: supportChargeParamsSchema,
+      query: supportRefundPreviewQuerySchema,
+    },
+    handler: async (ctx) => {
+      return await ctx.services.support.previewRefund(
+        ctx.input.params.chargeId,
+        ctx.input.query.amountCents
+      );
+    },
+  })
+);
+
+/**
+ * POST /api/admin/support/charges/:chargeId/refunds
+ * Refund the charge. 200, not 201: a repeat of the same submit creates
+ * nothing and answers `replayed: true`. Nothing is written here; the
+ * `charge.refunded` webhook records the refund and claws back the shares.
+ */
+app.post(
+  '/api/admin/support/charges/:chargeId/refunds',
+  procedure({
+    policy: { auth: 'platform_owner', cache: 'fresh', rateLimit: 'strict' },
+    input: {
+      params: supportChargeParamsSchema,
+      body: supportIssueRefundSchema,
+    },
+    handler: async (ctx) => {
+      return await ctx.services.support.issueRefund(
+        ctx.input.params.chargeId,
+        ctx.input.body,
+        ctx.user.id
+      );
+    },
+  })
+);
+
+/** GET /api/admin/support/queue/counts — the nav badge. */
+app.get(
+  '/api/admin/support/queue/counts',
+  procedure({
+    policy: { auth: 'platform_owner', cache: 'fresh' },
+    handler: async (ctx) => {
+      return await ctx.services.support.getQueueCounts();
+    },
+  })
+);
+
+/** GET /api/admin/support/queue/failed-refunds — oldest first. */
+app.get(
+  '/api/admin/support/queue/failed-refunds',
+  procedure({
+    policy: { auth: 'platform_owner', cache: 'fresh' },
+    input: { query: supportQueueQuerySchema },
+    handler: async (ctx) => {
+      const result = await ctx.services.support.listFailedRefunds(
+        ctx.input.query
+      );
+      return new PaginatedResult(result.items, result.pagination);
+    },
+  })
+);
+
+/** GET /api/admin/support/queue/creator-debts — oldest first. */
+app.get(
+  '/api/admin/support/queue/creator-debts',
+  procedure({
+    policy: { auth: 'platform_owner', cache: 'fresh' },
+    input: { query: supportQueueQuerySchema },
+    handler: async (ctx) => {
+      const result = await ctx.services.support.listCreatorDebts(
+        ctx.input.query
+      );
+      return new PaginatedResult(result.items, result.pagination);
+    },
+  })
+);
+
+/**
+ * POST /api/admin/support/refunds/:refundId/resolve
+ * Settle a failed refund: `refunded_elsewhere`, or `creators_repaid` (with a
+ * note), which pays back what its clawback took and, for a failed full
+ * purchase refund, gives the buyer access back.
+ */
+app.post(
+  '/api/admin/support/refunds/:refundId/resolve',
+  procedure({
+    policy: { auth: 'platform_owner', cache: 'fresh', rateLimit: 'strict' },
+    input: {
+      params: supportRefundIdParamsSchema,
+      body: supportResolveFailedRefundSchema,
+    },
+    handler: async (ctx) => {
+      const { settled, restoredAccess } =
+        await ctx.services.support.resolveFailedRefund(
+          ctx.input.params.refundId,
+          ctx.input.body,
+          ctx.user.id
+        );
+      if (restoredAccess) {
+        // The item is back on the buyer's library shelf, as after a grant.
+        invalidateUserLibrary({
+          kv: ctx.env.CACHE_KV,
+          waitUntil: ctx.executionCtx.waitUntil.bind(ctx.executionCtx),
+          userId: restoredAccess.userId,
+          logger: ctx.obs,
+        });
+        // As a won dispute's restore does. The stream endpoint still checks
+        // access before it signs, so a clear never grants anything; it only
+        // lets the restored item stream before a block's TTL runs out.
+        const kv = ctx.env.CACHE_KV;
+        const { organizationId, userId } = restoredAccess;
+        if (kv && organizationId) {
+          ctx.executionCtx.waitUntil(
+            new AccessRevocation(kv, ctx.obs)
+              .clear(userId, organizationId)
+              .catch((error: unknown) => {
+                ctx.obs?.warn('support: AccessRevocation.clear failed', {
+                  userId,
+                  organizationId,
+                  error: error instanceof Error ? error.message : String(error),
+                });
+              })
+          );
+        }
+      }
+      return settled;
+    },
+  })
+);
+
+/**
+ * POST /api/admin/support/creator-debts/:reviewId/resolve
+ * Settle a creator debt. `dispute_won` is never accepted: the won-chargeback
+ * code writes it, with its re-pay.
+ */
+app.post(
+  '/api/admin/support/creator-debts/:reviewId/resolve',
+  procedure({
+    policy: { auth: 'platform_owner', cache: 'fresh', rateLimit: 'strict' },
+    input: {
+      params: supportReviewIdParamsSchema,
+      body: supportResolveCreatorDebtSchema,
+    },
+    handler: async (ctx) => {
+      return await ctx.services.support.resolveCreatorDebt(
+        ctx.input.params.reviewId,
+        ctx.input.body,
+        ctx.user.id
+      );
     },
   })
 );

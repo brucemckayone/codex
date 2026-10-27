@@ -6,32 +6,52 @@
  */
 
 import type { R2Service } from '@codex/cloudflare-clients';
-import { and, eq, schema } from '@codex/database';
+import {
+  and,
+  eq,
+  messageForLog,
+  schema,
+  whereNotDeleted,
+} from '@codex/database';
 import {
   BaseService,
+  InternalServiceError,
+  NotFoundError,
   type ServiceConfig,
   ValidationError,
 } from '@codex/service-errors';
-import { getContentThumbnailKey, getUserAvatarKey } from '@codex/transcoding';
+import {
+  getContentThumbnailBaseKey,
+  getUserAvatarBaseKey,
+} from '@codex/transcoding';
 import {
   extractMimeType,
   MAX_IMAGE_SIZE_BYTES,
+  readStillFolderName,
   SUPPORTED_IMAGE_MIME_TYPES,
   validateImageSignature,
 } from '@codex/validation';
-import type { OrphanedFileService } from './orphaned-file-service';
+import {
+  isStillFolderReferenced,
+  type OrphanedFileService,
+} from './orphaned-file-service';
 import {
   pageImageKey,
   pageImageObjectKeys,
   pageImageVariantKeys,
 } from './page-image-keys';
-import { processImageVariants, processPageImageVariants } from './processor';
+import { processStillVariants, type StillVariants } from './processor';
+import { CALLER_OWNED_STILL_BASE } from './still-bases';
 import {
+  deleteStillFiles,
+  newStillFolder,
+  ownedStillFolder,
   recordOrphansOrLog,
+  type StillKeys,
+  type StillOrphanTarget,
   stillVariantKeys,
   uploadImageVariants,
-  type VariantKeys,
-  withDbUpdateOrphanCleanup,
+  variantKeyList,
 } from './utils/upload-pipeline';
 
 export interface ImageProcessingResult {
@@ -51,7 +71,7 @@ interface ImageProcessingServiceConfig extends ServiceConfig {
  *
  * RASTER ONLY, with no opt-out. This took an `allowSvg` flag until Codex-z520h
  * removed `processOrgLogo`, the only caller that ever passed `true`; every
- * other caller feeds `processImageVariants`, which decodes via Photon and
+ * other caller feeds `processStillVariants`, which decodes via Photon and
  * cannot rasterise SVG, so an SVG would have failed inside the Wasm decoder
  * rather than at this boundary. A flag no caller can set is an unreachable
  * branch in a security validator, so it is gone rather than defaulted. SVG
@@ -108,9 +128,18 @@ async function validateImageFile(
   return { buffer, mimeType };
 }
 
-/** Helper: collect a `VariantKeys` object as a flat `string[]` in sm/md/lg order. */
-function variantKeyList(keys: VariantKeys): string[] {
-  return [keys.sm, keys.md, keys.lg];
+/**
+ * A still ready to store (Codex-kk9nv.5): decoded once and upright, its sizes
+ * made up to `xl` = min(1600, width), and its own size measured. The upload
+ * itself is not kept (owner, 2026-10-21: "Defer originals"): in the public
+ * assets bucket it would serve the photo's raw EXIF, GPS included.
+ */
+type PreparedStill = StillVariants;
+
+/** Validate (MIME type, size, magic bytes; raster only) and prepare a still. */
+async function prepareStill(file: File): Promise<PreparedStill> {
+  const { buffer } = await validateImageFile(file);
+  return processStillVariants(new Uint8Array(buffer));
 }
 
 /** Orphan classification for the four stills whose DB write the caller owns. */
@@ -120,6 +149,30 @@ type CallerOwnedStill =
       imageType: 'course_cover' | 'course_hero' | 'course_signature';
       entityType: 'course';
     };
+
+/** The log/orphan context of a dropped avatar, by why it was dropped. */
+const AVATAR_DROP_CONTEXT = {
+  'avatar-removed': 'user-avatar-delete',
+  'account-deleted': 'user-avatar-account-deleted',
+} as const;
+
+/**
+ * The folder a content thumbnail URL names, if it is one of that content's own
+ * uploads (Codex-kk9nv.5). Null for a poster frame, another content's picture,
+ * a URL on another host, or when no CDN base is configured.
+ */
+export function ownContentThumbnailFolder(
+  url: string | null | undefined,
+  content: { creatorId: string; contentId: string },
+  publicBase: string | undefined
+): string | null {
+  if (!publicBase) return null;
+  return ownedStillFolder(
+    url,
+    getContentThumbnailBaseKey(content.creatorId, content.contentId),
+    publicBase
+  );
+}
 
 /**
  * Image Processing Service
@@ -138,19 +191,213 @@ export class ImageProcessingService extends BaseService {
   }
 
   /**
+   * Put a still's four files into a NEW folder under `base` (Codex-kk9nv.5).
+   * Nothing references the folder yet, so a put that fails part way deletes
+   * whatever landed and rethrows; the picture the row addresses is untouched.
+   */
+  private async putNewStill(
+    base: string,
+    still: PreparedStill,
+    target: StillOrphanTarget,
+    failureLabel: string
+  ): Promise<{ folder: string; keys: StillKeys }> {
+    const folder = newStillFolder(base, still);
+    const keys = stillVariantKeys(folder);
+    try {
+      await uploadImageVariants({
+        keys,
+        variants: still.variants,
+        r2: this.r2Service,
+        failureLabel,
+        obs: this.obs,
+      });
+    } catch (error) {
+      await this.deleteStill(folder, target, `${target.imageType}-put-failed`);
+      throw error;
+    }
+    return { folder, keys };
+  }
+
+  /** Delete a folder's four files; a failed delete is recorded, never thrown. */
+  private deleteStill(
+    folder: string,
+    target: StillOrphanTarget,
+    context: string
+  ): Promise<void> {
+    return deleteStillFiles({
+      keys: variantKeyList(stillVariantKeys(folder)),
+      target,
+      r2: this.r2Service,
+      obs: this.obs,
+      orphanedFileService: this.orphanedFileService,
+      context,
+    });
+  }
+
+  /**
+   * Run the write that points the row at a new folder, then delete the folder
+   * it used to address, in the same request (owner, 2026-10-21: "Inline, same
+   * request"). A failed write deletes the NEW folder instead, unless its row
+   * names it after all ({@link discardUnlessAddressed}), and rethrows.
+   *
+   * `replaced` is the old address as {@link ownedStillFolder} read it, so it is
+   * null unless the folder is this entity's own: a poster frame, another
+   * entity's picture or a URL on another host is never deleted.
+   */
+  private async writeNewStill<T>(
+    params: {
+      folder: string;
+      replaced: string | null;
+      target: StillOrphanTarget;
+    },
+    write: () => Promise<T>
+  ): Promise<T> {
+    const { folder, replaced, target } = params;
+    let result: T;
+    try {
+      result = await write();
+    } catch (error) {
+      // Committed after all: the folder it replaced is dropped, as on success.
+      if (await this.discardUnlessAddressed(folder, replaced, target)) {
+        await this.deleteReplaced(replaced, folder, target);
+      }
+      throw error;
+    }
+    await this.deleteReplaced(replaced, folder, target);
+    return result;
+  }
+
+  private async deleteReplaced(
+    replaced: string | null,
+    folder: string,
+    target: StillOrphanTarget
+  ): Promise<void> {
+    if (replaced && replaced !== folder) {
+      await this.deleteStill(replaced, target, `${target.imageType}-replaced`);
+    }
+  }
+
+  /**
+   * After a write that reported failure, delete the new folder unless its row
+   * addresses it after all (Codex-kk9nv.16). A write can commit and still
+   * report failure (a COMMIT whose ack was lost, a timeout after the commit),
+   * and deleting then breaks the picture the row now names.
+   *
+   * When the row cannot be read either, the write may or may not have landed,
+   * so either folder may be the dropped one: the new folder if it did not,
+   * the one it replaced if it did. Both are recorded for the sweep, which
+   * asks the row again before it deletes anything. A replaced folder from
+   * before Codex-kk9nv.5 (files directly under the base) is only named in the
+   * log: the sweep decides an unsized folder by its re-upload check alone,
+   * and would delete it while the row still uses it.
+   *
+   * @returns Whether the row addresses the new folder: the write landed
+   */
+  private async discardUnlessAddressed(
+    folder: string,
+    replaced: string | null,
+    target: StillOrphanTarget
+  ): Promise<boolean> {
+    const context = `${target.imageType}-write-failed`;
+    let addressed: boolean | null;
+    try {
+      addressed = await isStillFolderReferenced(
+        this.db,
+        { imageType: target.imageType, originalEntityId: target.entityId },
+        folder
+      );
+    } catch (probeError) {
+      // It may have landed or not, so either folder may be the dropped one.
+      const folders =
+        replaced && replaced !== folder ? [folder, replaced] : [folder];
+      await this.leaveToTheSweep(folders, target, context, probeError);
+      return false;
+    }
+    if (addressed === null) {
+      // Unreachable while every type writeNewStill serves is in STILL_OWNER.
+      // A type that is not has this check switched off, so say so.
+      this.obs.error(
+        'Still write failed and its folder cannot be placed; discarded',
+        { context, resourceId: target.entityId }
+      );
+    }
+    if (addressed) {
+      this.obs.warn(
+        'Still write reported failure, but its row addresses the new folder; kept',
+        { context, resourceId: target.entityId }
+      );
+      return true;
+    }
+    await this.deleteStill(folder, target, context);
+    return false;
+  }
+
+  /**
+   * Hand folders that may or may not still be in use to the sweep, which asks
+   * their row before it deletes anything (`isStillFolderReferenced`): the
+   * outcome of a failed write that could not be read back. An unsized folder
+   * (files directly under the base, from before Codex-kk9nv.5) is only
+   * logged, at error: the sweep decides those by its re-upload check alone,
+   * and would delete one that is still in use.
+   *
+   * Logged by each folder's name under its base (`{w}x{h}-{nonce}`): a whole
+   * key holds the user's or creator's id, which production redaction hashes,
+   * and the folder with it.
+   */
+  private async leaveToTheSweep(
+    folders: string[],
+    target: StillOrphanTarget,
+    context: string,
+    cause: unknown
+  ): Promise<void> {
+    const nameOf = (folder: string) => folder.split('/').at(-1) ?? '';
+    const sized = folders.filter((f) => readStillFolderName(nameOf(f)));
+    const unsizedKept = sized.length < folders.length;
+    if (!this.orphanedFileService) {
+      // Nothing records them, so this line is their only trace.
+      this.obs.error(
+        'Still change failed and its outcome is unknown; no orphan service, folders untracked',
+        {
+          context,
+          resourceId: target.entityId,
+          folders: folders.map(nameOf),
+          error: messageForLog(cause),
+        }
+      );
+      return;
+    }
+    this.obs[unsizedKept ? 'error' : 'warn'](
+      'Still change failed and its outcome is unknown; folders kept for the sweep',
+      {
+        context,
+        resourceId: target.entityId,
+        folders: sized.map(nameOf),
+        ...(unsizedKept && { unsizedBaseKept: true }),
+        error: messageForLog(cause),
+      }
+    );
+    if (sized.length > 0) {
+      await recordOrphansOrLog(
+        this.orphanedFileService,
+        sized
+          .flatMap((f) => variantKeyList(stillVariantKeys(f)))
+          .map((r2Key) => ({ r2Key, ...target })),
+        this.obs,
+        context
+      );
+    }
+  }
+
+  /**
    * Process and store content thumbnail.
    *
-   * Replacement semantics — important invariant:
-   *   The R2 keys (sm/md/lg) are deterministic per `(creatorId, contentId)`,
-   *   so re-uploading a thumbnail OVERWRITES at the same keys. This means:
-   *     • the previous custom thumbnail is replaced atomically (no orphan);
-   *     • transcoding output (`media-thumbnails/{mediaId}/...`,
-   *       `waveforms/{mediaId}/...`) lives under different prefixes and is
-   *       NEVER touched by this method — those are owned by the transcoding
-   *       pipeline and serve as the immutable fallback.
-   *   Do NOT change the key shape to be timestamped or content-hashed without
-   *   adding an explicit "delete previous keys" step here, or the storage
-   *   layer will start accumulating orphans.
+   * Each upload goes to a new folder under `(creatorId, contentId)`'s base key,
+   * named for the picture's size (Codex-kk9nv.5), and the row's `thumbnailUrl`
+   * is that folder's `lg`. Once the row points at it, the folder it addressed
+   * before is deleted, if it was this content's own. Transcoding output
+   * (`media-thumbnails/{mediaId}/...`, `waveforms/{mediaId}/...`) lives under
+   * other prefixes and is NEVER touched: it is the transcoding pipeline's, and
+   * a row that points at a poster frame has nothing of its own to delete.
    *
    * Uploads to R2 and updates content record.
    */
@@ -159,34 +406,17 @@ export class ImageProcessingService extends BaseService {
     creatorId: string,
     file: File
   ): Promise<ImageProcessingResult> {
-    // Validate image (MIME type, size, magic bytes)
-    const { buffer } = await validateImageFile(file);
+    const still = await prepareStill(file);
+    const base = getContentThumbnailBaseKey(creatorId, contentId);
+    const target = {
+      imageType: 'content_thumbnail',
+      entityType: 'content',
+      entityId: contentId,
+    } as const;
 
-    // Process variants (HEAD logic)
-    const inputBuffer = new Uint8Array(buffer);
-    const variants = processImageVariants(inputBuffer);
-
-    const keys: VariantKeys = {
-      sm: getContentThumbnailKey(creatorId, contentId, 'sm'),
-      md: getContentThumbnailKey(creatorId, contentId, 'md'),
-      lg: getContentThumbnailKey(creatorId, contentId, 'lg'),
-    };
-
-    // Use LG variant as determining URL for DB
-    const url = `${this.r2PublicUrlBase}/${keys.lg}`;
-
-    // Did the row ALREADY address these exact keys? Decides whether a failed
-    // DB update may clean up the objects about to be written (Codex-r85jo.2).
-    //
-    // Compared against the URL rather than tested for mere presence: a row
-    // holding a legacy EXTERNAL thumbnail URL has a prior image but does NOT
-    // reference these keys, so the new objects would be unreferenced orphans
-    // and the cleanup is correct there. The predicate mirrors the update's own
-    // WHERE clause so the read describes exactly the row the write targets.
-    //
-    // Read BEFORE the puts, so a failing read costs nothing: reading after
-    // would leave three freshly-written objects with no decision recorded
-    // about whether anything may reclaim them.
+    // The thumbnail this upload replaces. Read BEFORE the puts, so a failing
+    // read costs nothing, and with the update's own WHERE clause, so it
+    // describes exactly the row the write targets.
     const existing = await this.db.query.content.findFirst({
       where: and(
         eq(schema.content.id, contentId),
@@ -195,27 +425,24 @@ export class ImageProcessingService extends BaseService {
       columns: { thumbnailUrl: true },
     });
 
-    await uploadImageVariants({
-      keys,
-      variants,
-      r2: this.r2Service,
-      failureLabel: 'Thumbnail',
-      obs: this.obs,
-    });
+    const { folder, keys } = await this.putNewStill(
+      base,
+      still,
+      target,
+      'Thumbnail'
+    );
+    // The lg variant is the URL the row stores.
+    const url = `${this.r2PublicUrlBase}/${keys.lg}`;
 
-    // Update content record — cleanup R2 if DB fails
-    await withDbUpdateOrphanCleanup(
+    await this.writeNewStill(
       {
-        keys: variantKeyList(keys),
-        imageType: 'content_thumbnail',
-        entityId: contentId,
-        entityType: 'content',
-        r2: this.r2Service,
-        obs: this.obs,
-        orphanedFileService: this.orphanedFileService,
-        warnContext: 'content-thumbnail',
-        keysAlreadyReferenced: existing?.thumbnailUrl === url,
-        warnExtras: { creatorId },
+        folder,
+        target,
+        replaced: ownContentThumbnailFolder(
+          existing?.thumbnailUrl,
+          { creatorId, contentId },
+          this.r2PublicUrlBase
+        ),
       },
       async () => {
         await this.db
@@ -232,7 +459,7 @@ export class ImageProcessingService extends BaseService {
 
     return {
       url,
-      size: variants.lg.byteLength,
+      size: still.variants.lg.byteLength,
       mimeType: 'image/webp',
     };
   }
@@ -240,64 +467,92 @@ export class ImageProcessingService extends BaseService {
   /**
    * Run the CALLER's DB write for a still produced by `processCategoryCover` /
    * `processCourseCover` / `processCourseHero` / `processCourseSignature`, with
-   * the same failure cleanup `processContentThumbnail` gets (Codex-29fs0).
+   * the same cleanup `processContentThumbnail` gets (Codex-29fs0).
    *
    * Those four methods only upload: the scoped DB write lives in the
    * space/org-aware service that owns the row, so this cannot be done inside
-   * them. Without it, a write that fails after the puts strands sm/md/lg with
-   * nothing able to name them.
+   * them. A write that fails deletes the new folder, which nothing references;
+   * one that succeeds deletes `storedKey`'s folder, the picture it replaced.
    *
-   * `storedBaseKey` is the key column as read BEFORE the upload, and it is
-   * what decides `withDbUpdateOrphanCleanup`'s `keysAlreadyReferenced`
-   * (Codex-r85jo.2): equal to `baseKey` means a REPLACEMENT (the deterministic
-   * keys are still addressed and now hold the new bytes, so deleting them would
-   * 404 a live image and nothing is cleaned); `null`, or anything else, means
-   * nothing addresses the new objects and they are cleaned up. Taking the
-   * stored value rather than a boolean keeps that one comparison here, instead
-   * of re-derived at four call sites.
+   * `key` is the folder the `process*` method returned, and `storedKey` the key
+   * column as read BEFORE the upload. Only a folder of this entity's own is
+   * ever deleted ({@link ownedStillFolder}), so a key set by hand to another
+   * category's or course's picture is left alone.
    */
   async persistStillWithOrphanCleanup<T>(
     params: CallerOwnedStill & {
-      baseKey: string;
-      storedBaseKey: string | null;
+      key: string;
+      storedKey: string | null;
       entityId: string;
     },
     dbWrite: () => Promise<T>
   ): Promise<T> {
-    return withDbUpdateOrphanCleanup(
+    const { imageType, entityType, entityId } = params;
+    const base = CALLER_OWNED_STILL_BASE[imageType](entityId);
+    const folder = ownedStillFolder(params.key, base);
+    if (!folder || folder === base) {
+      // Only a folder a `process*` method just made for this entity may be
+      // written here, because a failed write deletes it.
+      throw new InternalServiceError(
+        `${imageType} key is not a new upload of this ${entityType}`
+      );
+    }
+    return this.writeNewStill(
       {
-        keys: variantKeyList(stillVariantKeys(params.baseKey)),
-        imageType: params.imageType,
-        entityId: params.entityId,
-        entityType: params.entityType,
-        r2: this.r2Service,
-        obs: this.obs,
-        orphanedFileService: this.orphanedFileService,
-        warnContext: params.imageType,
-        keysAlreadyReferenced: params.storedBaseKey === params.baseKey,
+        folder,
+        replaced: ownedStillFolder(params.storedKey, base),
+        target: { imageType, entityType, entityId },
       },
       dbWrite
     );
   }
 
   /**
+   * Delete the files of a caller-owned still that its row no longer
+   * references, or whose row was deleted: a cleared course still, a category
+   * cover a PATCH changed by hand, or a deleted category's cover
+   * (Codex-kk9nv.14). Call it AFTER the write that dropped the reference or
+   * the row. A later upload goes to a new folder, so nothing would ever
+   * overwrite these files.
+   *
+   * Only a folder of this entity's own is deleted ({@link ownedStillFolder}),
+   * and a failed delete is recorded for the sweep, never thrown.
+   */
+  async deleteDroppedStill(
+    params: CallerOwnedStill & { entityId: string; droppedKey: string | null }
+  ): Promise<void> {
+    const { imageType, entityType, entityId } = params;
+    const folder = ownedStillFolder(
+      params.droppedKey,
+      CALLER_OWNED_STILL_BASE[imageType](entityId)
+    );
+    if (!folder) return;
+    await this.deleteStill(
+      folder,
+      { imageType, entityType, entityId },
+      `${imageType}-dropped`
+    );
+  }
+
+  /**
    * Process and store a category cover image (org landing "Browse by topic").
    *
-   * Mirrors {@link processContentThumbnail}'s variant pipeline (sm/md/lg WebP →
+   * Mirrors {@link processContentThumbnail}'s variant pipeline (sm/md/lg/xl WebP →
    * R2) with two deliberate differences:
    *   • It does NOT touch the database. Category ownership (the resolved space)
    *     lives in `CategoriesService`, not here, so the caller persists the
    *     returned `coverImageKey` via `categories.update(id, { coverImageKey },
    *     space)`. Keeping the DB write in the space-aware service avoids
    *     duplicating scope logic in the image layer.
-   *   • Keys are namespaced by `categoryId` (`categories/{id}/cover/{size}.webp`)
-   *     and therefore deterministic, so a re-upload OVERWRITES the previous
-   *     cover in place — no orphaned objects on replace.
+   *   • Each upload goes to a new folder under `categories/{id}/cover`, named
+   *     for the picture's size (Codex-kk9nv.5). The caller writes it through
+   *     {@link persistStillWithOrphanCleanup}, which deletes the cover it
+   *     replaced.
    *
    * @param categoryId - Owning category (keys are namespaced under it)
    * @param file - Uploaded image (validated: MIME allowlist, size, magic bytes)
-   * @returns The base R2 key plus the lg CDN URL, size, and mime type. Append
-   *   `/{sm|md|lg}.webp` to `coverImageKey` to address a specific variant.
+   * @returns The folder's R2 key plus the md CDN URL, size, and mime type.
+   *   Append `/{sm|md|lg|xl}.webp` to `coverImageKey` to address a variant.
    */
   async processCategoryCover(
     categoryId: string,
@@ -309,28 +564,25 @@ export class ImageProcessingService extends BaseService {
     mimeType: string;
   }> {
     // Validate image (MIME type, size, magic bytes) — no SVG (raster only).
-    const { buffer } = await validateImageFile(file);
+    const still = await prepareStill(file);
 
-    const inputBuffer = new Uint8Array(buffer);
-    const variants = processImageVariants(inputBuffer);
-
-    const coverImageKey = `categories/${categoryId}/cover`;
-    const keys = stillVariantKeys(coverImageKey);
-
-    await uploadImageVariants({
-      keys,
-      variants,
-      r2: this.r2Service,
-      failureLabel: 'Category cover',
-      obs: this.obs,
-    });
+    const { folder, keys } = await this.putNewStill(
+      CALLER_OWNED_STILL_BASE.category_cover(categoryId),
+      still,
+      {
+        imageType: 'category_cover',
+        entityType: 'category',
+        entityId: categoryId,
+      },
+      'Category cover'
+    );
 
     return {
-      coverImageKey,
+      coverImageKey: folder,
       // Return the md variant — the public topic list serves `${key}/md.webp`,
       // so the immediately-usable URL stays consistent with what renders.
       url: `${this.r2PublicUrlBase}/${keys.md}`,
-      size: variants.md.byteLength,
+      size: still.variants.md.byteLength,
       mimeType: 'image/webp',
     };
   }
@@ -342,18 +594,18 @@ export class ImageProcessingService extends BaseService {
    * Identical in shape to {@link processCategoryCover}, and deliberately so: a
    * course cover is a still image, and `media_items` is CHECK-constrained to
    * ('video','audio'), so the cover cannot be a media-item ref. It reuses the
-   * same sm/md/lg WebP → R2 pipeline and the same "caller owns the DB write"
+   * same sm/md/lg/xl WebP → R2 pipeline and the same "caller owns the DB write"
    * split — `CourseJourneyService.setCourseCoverImageKey` persists the returned
    * key org-scoped, so no scope logic is duplicated in the image layer.
    *
-   * Keys are namespaced by `courseId` (`courses/{id}/cover/{size}.webp`) and are
-   * therefore deterministic: re-uploading OVERWRITES in place, so replacing a
-   * cover never orphans an R2 object.
+   * Each upload goes to a new folder under `courses/{id}/cover`, named for the
+   * picture's size (Codex-kk9nv.5); {@link persistStillWithOrphanCleanup}
+   * deletes the cover it replaced once the row points at the new one.
    *
    * @param courseId - Owning course (keys are namespaced under it)
    * @param file - Uploaded image (validated: MIME allowlist, size, magic bytes)
-   * @returns The base R2 key plus the md CDN URL, size, and mime type. Append
-   *   `/{sm|md|lg}.webp` to `coverImageKey` to address a specific variant.
+   * @returns The folder's R2 key plus the md CDN URL, size, and mime type.
+   *   Append `/{sm|md|lg|xl}.webp` to `coverImageKey` to address a variant.
    */
   async processCourseCover(
     courseId: string,
@@ -365,28 +617,21 @@ export class ImageProcessingService extends BaseService {
     mimeType: string;
   }> {
     // Validate image (MIME type, size, magic bytes) — no SVG (raster only).
-    const { buffer } = await validateImageFile(file);
+    const still = await prepareStill(file);
 
-    const inputBuffer = new Uint8Array(buffer);
-    const variants = processImageVariants(inputBuffer);
-
-    const coverImageKey = `courses/${courseId}/cover`;
-    const keys = stillVariantKeys(coverImageKey);
-
-    await uploadImageVariants({
-      keys,
-      variants,
-      r2: this.r2Service,
-      failureLabel: 'Course cover',
-      obs: this.obs,
-    });
+    const { folder, keys } = await this.putNewStill(
+      CALLER_OWNED_STILL_BASE.course_cover(courseId),
+      still,
+      { imageType: 'course_cover', entityType: 'course', entityId: courseId },
+      'Course cover'
+    );
 
     return {
-      coverImageKey,
+      coverImageKey: folder,
       // The md variant — journey cards serve `${key}/md.webp`, so the
       // immediately-usable URL matches what renders.
       url: `${this.r2PublicUrlBase}/${keys.md}`,
-      size: variants.md.byteLength,
+      size: still.variants.md.byteLength,
       mimeType: 'image/webp',
     };
   }
@@ -402,7 +647,7 @@ export class ImageProcessingService extends BaseService {
    * hero. A32's chain is therefore `heroImageKey ?? heroMediaId's poster ??
    * synthetic plate`, and this method produces the first link.
    *
-   * Deliberately the same shape as {@link processCourseCover} — same sm/md/lg
+   * Deliberately the same shape as {@link processCourseCover} — same sm/md/lg/xl
    * WebP → R2 pipeline, same "the caller owns the DB write" split
    * (`CourseJourneyService.setCourseHeroImageKey` persists the returned key
    * org-scoped, so no scope logic is duplicated in the image layer), and the same
@@ -412,21 +657,19 @@ export class ImageProcessingService extends BaseService {
    *   • The returned `url` is the **lg** variant, not `md`. A cover fills a card;
    *     a hero paints edge to edge, and handing back the 400px variant would show
    *     the creator a soft preview of the image the page will not use.
-   *   • `lg` is 800px wide (`VARIANT_WIDTHS`), which is the widest this pipeline
-   *     produces. On a 1440px viewport a full-bleed hero upscales it. That is a
-   *     known limit of the shared variant ladder, NOT of this key: the ladder is
-   *     the same one every other still in the product rides, and widening it
-   *     would re-encode every existing image. Recorded here so the next reader
-   *     does not mistake the softness for a bug in the hero path.
+   *   • Since Codex-kk9nv.5 every still also gets `xl` at min(1600, width), so
+   *     a full-bleed hero has a file to draw at 1440 instead of stretching the
+   *     800px `lg`. A hero uploaded before that has no `xl` and no recorded
+   *     size, and the web draws it from sm/md/lg as before. The returned `url`
+   *     stays `lg`, the one size every hero, old or new, has.
    *
-   * Keys are namespaced by `courseId` (`courses/{id}/hero/{size}.webp`) and are
-   * therefore deterministic: re-uploading OVERWRITES in place, so replacing a
-   * hero never orphans an R2 object — the same property the cover relies on.
+   * Each upload goes to a new folder under `courses/{id}/hero`, named for the
+   * picture's size (Codex-kk9nv.5), exactly as the cover does.
    *
    * @param courseId - Owning course (keys are namespaced under it)
    * @param file - Uploaded image (validated: MIME allowlist, size, magic bytes)
-   * @returns The base R2 key plus the lg CDN URL, size, and mime type. Append
-   *   `/{sm|md|lg}.webp` to `heroImageKey` to address a specific variant.
+   * @returns The folder's R2 key plus the lg CDN URL, size, and mime type.
+   *   Append `/{sm|md|lg|xl}.webp` to `heroImageKey` to address a variant.
    */
   async processCourseHero(
     courseId: string,
@@ -439,34 +682,27 @@ export class ImageProcessingService extends BaseService {
   }> {
     // Validate image (MIME type, size, magic bytes) — no SVG (raster only).
     //
-    // Raster-only is not an oversight: `processImageVariants` decodes through
+    // Raster-only is not an oversight: `processStillVariants` decodes through
     // Photon, which cannot rasterise SVG, so an SVG here would fail in the Wasm
     // decoder rather than at the boundary. The one path on this platform that
     // DOES accept SVG — `BrandingSettingsService.uploadLogo` in
     // `@codex/platform-settings` — stores the sanitized markup verbatim instead
     // of producing variants.
-    const { buffer } = await validateImageFile(file);
+    const still = await prepareStill(file);
 
-    const inputBuffer = new Uint8Array(buffer);
-    const variants = processImageVariants(inputBuffer);
-
-    const heroImageKey = `courses/${courseId}/hero`;
-    const keys = stillVariantKeys(heroImageKey);
-
-    await uploadImageVariants({
-      keys,
-      variants,
-      r2: this.r2Service,
-      failureLabel: 'Course hero',
-      obs: this.obs,
-    });
+    const { folder, keys } = await this.putNewStill(
+      CALLER_OWNED_STILL_BASE.course_hero(courseId),
+      still,
+      { imageType: 'course_hero', entityType: 'course', entityId: courseId },
+      'Course hero'
+    );
 
     return {
-      heroImageKey,
+      heroImageKey: folder,
       // The lg variant — the hero serves `${key}/lg.webp`, so the
       // immediately-usable URL matches what renders (see the doc comment).
       url: `${this.r2PublicUrlBase}/${keys.lg}`,
-      size: variants.lg.byteLength,
+      size: still.variants.lg.byteLength,
       mimeType: 'image/webp',
     };
   }
@@ -485,7 +721,7 @@ export class ImageProcessingService extends BaseService {
    * since it shipped, and rendered typeset text alone.
    *
    * Deliberately the same shape as {@link processCourseHero} and
-   * {@link processCourseCover} — same sm/md/lg WebP → R2 pipeline, same "the
+   * {@link processCourseCover} — same sm/md/lg/xl WebP → R2 pipeline, same "the
    * caller owns the DB write" split (`CourseJourneyService.
    * setCourseSignatureImageKey` persists the returned key org-scoped), and the
    * same `courses/{id}/…` namespace so every still a course owns lives together.
@@ -506,14 +742,13 @@ export class ImageProcessingService extends BaseService {
    * is a property of the source file, not of this pipeline, so the panel's hint
    * says so rather than this method trying to key out a background.
    *
-   * Keys are namespaced by `courseId` (`courses/{id}/signature/{size}.webp`) and
-   * are therefore deterministic: re-uploading OVERWRITES in place, so replacing a
-   * signature never orphans an R2 object.
+   * Each upload goes to a new folder under `courses/{id}/signature`, named for
+   * the picture's size (Codex-kk9nv.5), exactly as the cover does.
    *
    * @param courseId - Owning course (keys are namespaced under it)
    * @param file - Uploaded image (validated: MIME allowlist, size, magic bytes)
-   * @returns The base R2 key plus the md CDN URL, size, and mime type. Append
-   *   `/{sm|md|lg}.webp` to `signatureImageKey` to address a specific variant.
+   * @returns The folder's R2 key plus the md CDN URL, size, and mime type.
+   *   Append `/{sm|md|lg|xl}.webp` to `signatureImageKey` to address a variant.
    */
   async processCourseSignature(
     courseId: string,
@@ -528,34 +763,31 @@ export class ImageProcessingService extends BaseService {
     //
     // Raster-only costs something real worth naming here: a signature is exactly
     // the kind of mark that is often an SVG. It still cannot come through this
-    // path, because `processImageVariants` decodes via Photon, which cannot
+    // path, because `processStillVariants` decodes via Photon, which cannot
     // rasterise SVG — an SVG would fail inside the Wasm decoder rather than at
     // this boundary. The one path on this platform that DOES accept SVG —
     // `BrandingSettingsService.uploadLogo` in `@codex/platform-settings` —
     // stores the sanitized markup verbatim instead of producing variants, and
     // that is the shape a future vector signature would have to take.
-    const { buffer } = await validateImageFile(file);
+    const still = await prepareStill(file);
 
-    const inputBuffer = new Uint8Array(buffer);
-    const variants = processImageVariants(inputBuffer);
-
-    const signatureImageKey = `courses/${courseId}/signature`;
-    const keys = stillVariantKeys(signatureImageKey);
-
-    await uploadImageVariants({
-      keys,
-      variants,
-      r2: this.r2Service,
-      failureLabel: 'Course signature',
-      obs: this.obs,
-    });
+    const { folder, keys } = await this.putNewStill(
+      CALLER_OWNED_STILL_BASE.course_signature(courseId),
+      still,
+      {
+        imageType: 'course_signature',
+        entityType: 'course',
+        entityId: courseId,
+      },
+      'Course signature'
+    );
 
     return {
-      signatureImageKey,
+      signatureImageKey: folder,
       // The md variant — the letter serves `${key}/md.webp`, so the
       // immediately-usable URL matches what renders (see the doc comment).
       url: `${this.r2PublicUrlBase}/${keys.md}`,
-      size: variants.md.byteLength,
+      size: still.variants.md.byteLength,
       mimeType: 'image/webp',
     };
   }
@@ -563,71 +795,107 @@ export class ImageProcessingService extends BaseService {
   /**
    * Process and store user avatar
    * Uploads to R2 and updates user record
+   *
+   * A new folder per upload, and the avatar it replaced deleted once the row
+   * points at the new one, exactly as {@link processContentThumbnail}.
    */
   async processUserAvatar(
     userId: string,
     file: File
   ): Promise<ImageProcessingResult> {
-    // Validate image (MIME type, size, magic bytes)
-    const { buffer } = await validateImageFile(file);
+    const still = await prepareStill(file);
+    const base = getUserAvatarBaseKey(userId);
+    const target = {
+      imageType: 'avatar',
+      entityType: 'user',
+      entityId: userId,
+    } as const;
 
-    const inputBuffer = new Uint8Array(buffer);
-    const variants = processImageVariants(inputBuffer);
-
-    const keys: VariantKeys = {
-      sm: getUserAvatarKey(userId, 'sm'),
-      md: getUserAvatarKey(userId, 'md'),
-      lg: getUserAvatarKey(userId, 'lg'),
-    };
-
-    const url = `${this.r2PublicUrlBase}/${keys.lg}`;
-
-    // See processContentThumbnail for why this compares the URL rather than
-    // testing for presence, and why it reads before the puts (Codex-r85jo.2).
+    // The avatar this upload replaces, read before the puts.
     const existing = await this.db.query.users.findFirst({
       where: eq(schema.users.id, userId),
       columns: { avatarUrl: true },
     });
 
-    await uploadImageVariants({
-      keys,
-      variants,
-      r2: this.r2Service,
-      failureLabel: 'Avatar',
-      obs: this.obs,
-    });
+    const { folder, keys } = await this.putNewStill(
+      base,
+      still,
+      target,
+      'Avatar'
+    );
+    const url = `${this.r2PublicUrlBase}/${keys.lg}`;
 
-    // Update user record — cleanup R2 if DB fails
-    await withDbUpdateOrphanCleanup(
+    await this.writeNewStill(
       {
-        keys: variantKeyList(keys),
-        imageType: 'avatar',
-        entityId: userId,
-        entityType: 'user',
-        r2: this.r2Service,
-        obs: this.obs,
-        orphanedFileService: this.orphanedFileService,
-        warnContext: 'user-avatar',
-        keysAlreadyReferenced: existing?.avatarUrl === url,
+        folder,
+        target,
+        replaced: ownedStillFolder(
+          existing?.avatarUrl,
+          base,
+          this.r2PublicUrlBase
+        ),
       },
       async () => {
-        await this.db
+        // Never onto a deleted account: an upload still in flight when the
+        // account is deleted would put the photo back on the scrubbed row
+        // (Codex-kk9nv.14). Matching no row throws, so the new folder is
+        // discarded like any failed write.
+        const [written] = await this.db
           .update(schema.users)
           .set({ avatarUrl: url })
-          .where(eq(schema.users.id, userId));
+          .where(
+            and(eq(schema.users.id, userId), whereNotDeleted(schema.users))
+          )
+          // Whole rows: on the http|ws union `returning` takes no field map.
+          .returning();
+        if (!written) throw new NotFoundError('User not found', { userId });
       }
     );
 
     return {
       url,
-      size: variants.lg.byteLength,
+      size: still.variants.lg.byteLength,
       mimeType: 'image/webp',
     };
   }
 
   /**
+   * Delete a content thumbnail's files after the row moved `thumbnailUrl` off
+   * them: cleared, or pointed at a poster frame (Codex-kk9nv.5). A later
+   * upload goes to a new folder, so nothing would ever overwrite these.
+   *
+   * Only a folder of this content's own is deleted ({@link ownedStillFolder}):
+   * a poster frame or another content's picture is left alone. A failed delete
+   * is recorded for the sweep, never thrown.
+   */
+  async deleteDroppedContentThumbnail(
+    contentId: string,
+    creatorId: string,
+    droppedUrl: string | null
+  ): Promise<void> {
+    const folder = ownContentThumbnailFolder(
+      droppedUrl,
+      { creatorId, contentId },
+      this.r2PublicUrlBase
+    );
+    if (!folder) return;
+    await this.deleteStill(
+      folder,
+      {
+        imageType: 'content_thumbnail',
+        entityType: 'content',
+        entityId: contentId,
+      },
+      'content-thumbnail-delete'
+    );
+  }
+
+  /**
    * Delete all size variants for a content thumbnail
    * Called by DELETE endpoint
+   *
+   * The row is cleared first and the files deleted after, so a failed clear
+   * leaves the row pointing at files that still exist.
    *
    * On R2 failure: Records orphans for deferred cleanup instead of throwing
    */
@@ -635,117 +903,152 @@ export class ImageProcessingService extends BaseService {
     contentId: string,
     creatorId: string
   ): Promise<void> {
-    const keys = [
-      getContentThumbnailKey(creatorId, contentId, 'sm'),
-      getContentThumbnailKey(creatorId, contentId, 'md'),
-      getContentThumbnailKey(creatorId, contentId, 'lg'),
-    ];
-
-    // Try to delete from R2, track failures as orphans
-    const deleteResults = await Promise.allSettled(
-      keys.map((key) => this.r2Service.delete(key))
+    const where = and(
+      eq(schema.content.id, contentId),
+      eq(schema.content.creatorId, creatorId)
     );
+    const existing = await this.db.query.content.findFirst({
+      where,
+      columns: { thumbnailUrl: true },
+    });
 
-    // Record any failed deletions as orphans
-    const failedKeys = keys.filter(
-      (_, i) => deleteResults[i]?.status === 'rejected'
-    );
-    if (failedKeys.length > 0 && this.orphanedFileService) {
-      // Guarded (Codex-r85jo.3 F7): a failed orphan insert must not stop the
-      // DB field being cleared below, or the row keeps pointing at objects
-      // this call just tried to remove.
-      await recordOrphansOrLog(
-        this.orphanedFileService,
-        failedKeys.map((r2Key) => ({
-          r2Key,
-          imageType: 'content_thumbnail' as const,
-          entityId: contentId,
-          entityType: 'content' as const,
-        })),
-        this.obs,
-        'content-thumbnail-delete'
-      );
-    } else if (failedKeys.length > 0) {
-      this.obs.warn('R2 thumbnail deletion failed, no orphan service', {
-        context: 'content-thumbnail-delete',
-        contentId,
-        creatorId,
-        failedKeys,
-      });
-    }
-
-    // Clear database field regardless of R2 result
     await this.db
       .update(schema.content)
       .set({ thumbnailUrl: null })
-      .where(
-        and(
-          eq(schema.content.id, contentId),
-          eq(schema.content.creatorId, creatorId)
-        )
-      );
+      .where(where);
+
+    await this.deleteDroppedContentThumbnail(
+      contentId,
+      creatorId,
+      existing?.thumbnailUrl ?? null
+    );
   }
 
   /**
    * Delete all size variants for a user avatar
    * Called by DELETE endpoint
    *
+   * The row is cleared first and the files deleted after, as
+   * {@link deleteContentThumbnail} does.
+   *
+   * The URL is read under a row lock and cleared in the same transaction
+   * (Codex-kk9nv.17). Read and cleared apart, an upload committing in between
+   * had its new URL nulled here while this deleted the folder it replaced, so
+   * the new photo stayed public with nothing pointing at it. Locked, an
+   * upload either commits first, and its photo is the one removed, or waits
+   * and lands on the cleared row.
+   *
    * On R2 failure: Records orphans for deferred cleanup instead of throwing
+   *
+   * @returns Whether there was an uploaded avatar to remove. A user whose only
+   *   picture is their sign-in provider's has none (Codex-kk9nv.10).
    */
-  async deleteUserAvatar(userId: string): Promise<void> {
-    // Get current avatar URL
-    const user = await this.db.query.users.findFirst({
-      where: eq(schema.users.id, userId),
-      columns: { avatarUrl: true },
-    });
+  async deleteUserAvatar(userId: string): Promise<boolean> {
+    // What the locked read found, kept for the failure path below.
+    let read: string | null = null;
+    let droppedUrl: string | null;
+    try {
+      droppedUrl = await this.db.transaction(async (tx) => {
+        const [user] = await tx
+          .select({ avatarUrl: schema.users.avatarUrl })
+          .from(schema.users)
+          .where(eq(schema.users.id, userId))
+          .for('update');
+        if (!user?.avatarUrl) return null;
+        read = user.avatarUrl;
 
-    if (!user?.avatarUrl) {
-      return; // Nothing to delete
-    }
-
-    // Delete all size variants using key helpers
-    const keys = [
-      getUserAvatarKey(userId, 'sm'),
-      getUserAvatarKey(userId, 'md'),
-      getUserAvatarKey(userId, 'lg'),
-    ];
-
-    // Try to delete from R2, track failures as orphans
-    const deleteResults = await Promise.allSettled(
-      keys.map((key) => this.r2Service.delete(key))
-    );
-
-    // Record any failed deletions as orphans
-    const failedKeys = keys.filter(
-      (_, i) => deleteResults[i]?.status === 'rejected'
-    );
-
-    if (failedKeys.length > 0 && this.orphanedFileService) {
-      // Guarded (Codex-r85jo.3 F7) — see deleteContentThumbnail.
-      await recordOrphansOrLog(
-        this.orphanedFileService,
-        failedKeys.map((r2Key) => ({
-          r2Key,
-          imageType: 'avatar' as const,
-          entityId: userId,
-          entityType: 'user' as const,
-        })),
-        this.obs,
-        'user-avatar-delete'
-      );
-    } else if (failedKeys.length > 0) {
-      this.obs.warn('R2 avatar deletion failed, no orphan service', {
-        context: 'user-avatar-delete',
-        userId,
-        failedKeys,
+        await tx
+          .update(schema.users)
+          .set({ avatarUrl: null, updatedAt: new Date() })
+          .where(eq(schema.users.id, userId));
+        return user.avatarUrl;
       });
+    } catch (error) {
+      // The clear may have committed with its ack lost: the photo the user
+      // removed would then stay public with nothing naming it. Its folder goes
+      // to the sweep, which keeps it if the row still names it (a rollback).
+      const folder = ownedStillFolder(
+        read,
+        getUserAvatarBaseKey(userId),
+        this.r2PublicUrlBase
+      );
+      if (folder) {
+        await this.leaveToTheSweep(
+          [folder],
+          { imageType: 'avatar', entityType: 'user', entityId: userId },
+          'avatar-remove-failed',
+          error
+        );
+      }
+      throw error;
     }
+    if (!droppedUrl) return false;
 
-    // Clear database field regardless of R2 result
-    await this.db
-      .update(schema.users)
-      .set({ avatarUrl: null, updatedAt: new Date() })
-      .where(eq(schema.users.id, userId));
+    await this.deleteDroppedAvatar(userId, droppedUrl, 'avatar-removed');
+    return true;
+  }
+
+  /**
+   * The CDN cache prefix every avatar of this user is served under, current
+   * and replaced: `{host}{path}/avatars/{userId}` with no scheme, the form a
+   * prefix purge takes (Codex-kk9nv.15).
+   */
+  avatarCachePrefix(userId: string): string {
+    const { host, pathname } = new URL(this.r2PublicUrlBase);
+    return `${host}${pathname.replace(/\/+$/, '')}/${getUserAvatarBaseKey(userId)}`;
+  }
+
+  /**
+   * Delete an avatar's files after the row dropped `avatarUrl`: a removed
+   * avatar, or a deleted account's scrub (Codex-kk9nv.14). A later upload goes
+   * to a new folder, so nothing would ever overwrite these.
+   *
+   * Only this user's own folder is deleted ({@link ownedStillFolder}), so a
+   * provider's picture is left alone. A URL that names this user's avatar
+   * folder but is not one of its own folders here (an older CDN host, or a
+   * file or subfolder this service never writes) cannot be deleted from here,
+   * and is logged so it is not lost silently. A failed delete is recorded for
+   * the sweep, never thrown.
+   *
+   * @param cause - Why the avatar was dropped, which labels the logs
+   */
+  async deleteDroppedAvatar(
+    userId: string,
+    droppedUrl: string | null,
+    cause: keyof typeof AVATAR_DROP_CONTEXT
+  ): Promise<void> {
+    const base = getUserAvatarBaseKey(userId);
+    const folder = ownedStillFolder(droppedUrl, base, this.r2PublicUrlBase);
+    if (!folder) {
+      const at = droppedUrl?.indexOf(`/${base}/`) ?? -1;
+      if (droppedUrl && at >= 0) {
+        // A deleted account's photo left public is worth an alert. The host
+        // and the path under the user's base go as their own fields: a whole
+        // folder holds the 32-character user id, which production redaction
+        // hashes, and the nonce with it. `userId` arrives hashed too, but the
+        // hash is deterministic: hashing the accounts deleted (or changed) at
+        // the log's time finds the one, and with it the folder to purge.
+        const level = cause === 'account-deleted' ? 'error' : 'warn';
+        this.obs[level](
+          "Avatar files not deleted: the URL is not one of this user's own folders",
+          {
+            userId,
+            cause,
+            host: /^[a-z]+:\/\/([^/]+)/i.exec(droppedUrl)?.[1],
+            underBase: droppedUrl.slice(
+              at + base.length + 2,
+              droppedUrl.lastIndexOf('/')
+            ),
+          }
+        );
+      }
+      return;
+    }
+    await this.deleteStill(
+      folder,
+      { imageType: 'avatar', entityType: 'user', entityId: userId },
+      AVATAR_DROP_CONTEXT[cause]
+    );
   }
 
   /**
@@ -753,11 +1056,11 @@ export class ImageProcessingService extends BaseService {
    * landing-page builder's blocks (Codex-61zsk.10, contract amendment A3).
    *
    * DELIBERATELY NOT ANOTHER STILL SLOT. `processCourseCover` /
-   * `processCourseHero` / `processCourseSignature` above each own exactly one
-   * deterministic key per course, so a re-upload overwrites in place and the
-   * caller persists the key to one named column. A page image has no column
-   * and no 1:1 slot: `imageId` is a FRESH uuid the caller mints per upload, so
-   * every call produces its own key and nothing is ever overwritten. A page
+   * `processCourseHero` / `processCourseSignature` above each fill exactly one
+   * named column per course, and the write that replaces it deletes the folder
+   * it replaced. A page image has no column and no 1:1 slot: `imageId` is a
+   * FRESH uuid the caller mints per upload, so every call produces its own key
+   * and nothing is ever overwritten. A page
    * may hold arbitrarily many, referenced from anywhere in its `sections`
    * jsonb as an `ImageRef = { key, alt? }` (`props.image`, `props.background`,
    * `items[].image`, ...) — this method has no idea which prop, or even which
@@ -774,20 +1077,20 @@ export class ImageProcessingService extends BaseService {
    * deleted. `CourseJourneyService.saveJourneyPage` nominates the images a
    * save drops the same way.
    *
-   * Keys are namespaced by `pageId` AND `imageId` (`page-image-keys.ts`), so
-   * unlike every still above, replacing a value in a block means uploading a
-   * NEW image and writing its (different) key over the old one — the old
-   * key's bytes are untouched here and become the save-time diff's job to
-   * notice.
+   * Keys are namespaced by `pageId` AND `imageId` (`page-image-keys.ts`).
+   * Replacing a value in a block means uploading a NEW image and writing its
+   * (different) key over the old one. No column says which key a page dropped,
+   * so the old key's bytes are untouched here and become the save-time diff's
+   * job to notice, where a still's are deleted by the write that replaces it.
    *
    * @param pageId - Owning landing page (keys are namespaced under it)
    * @param imageId - Caller-minted uuid; unique per upload, never reused or
    *   overwritten
    * @param file - Uploaded image (validated: MIME allowlist, size, magic bytes)
-   * FOUR variants, not three: `xl` (`min(1600, width)`, Codex-61zsk.13) is
-   * written for page images alone, so a picture drawn across the band is
-   * never an 800px file stretched. Every object is in `pageImageObjectKeys`,
-   * so the upload records all four and the sweep can delete all four.
+   * FOUR variants, like every still: `xl` (`min(1600, width)`, Codex-61zsk.13)
+   * means a picture drawn across the band is never an 800px file stretched.
+   * Every object is in `pageImageObjectKeys`, so the upload records all four
+   * and the sweep can delete all four.
    *
    * @returns The base R2 key plus the md CDN URL, size, mime type, and the
    *   source picture's own `width` and `height`, which the page stores on its
@@ -811,10 +1114,8 @@ export class ImageProcessingService extends BaseService {
     // Validate image (MIME type, size, magic bytes) — no SVG (raster only),
     // same posture and same reason as every still above: the processor
     // decodes via Photon, which cannot rasterise SVG.
-    const { buffer } = await validateImageFile(file);
-
-    const inputBuffer = new Uint8Array(buffer);
-    const { variants, width, height } = processPageImageVariants(inputBuffer);
+    const still = await prepareStill(file);
+    const { variants, width, height } = still;
 
     const key = pageImageKey(pageId, imageId);
     const keys = pageImageVariantKeys(key);
@@ -829,11 +1130,10 @@ export class ImageProcessingService extends BaseService {
         obs: this.obs,
       });
     } catch (error) {
-      // `uploadImageVariants` deletes nothing on a partial failure, which is
-      // right for a deterministic key: a retry re-puts the same objects and
-      // converges. This key never converges. It is a fresh uuid nothing
-      // references, and a retry mints another, so whatever did land is
-      // removed here and anything that cannot be removed is queued.
+      // A fresh uuid nothing references, and a retry mints another, so
+      // whatever did land is removed here and anything that cannot be removed
+      // is queued. Recorded as `page_image` orphans, not via `putNewStill`,
+      // because the sweep treats page images by their own grace rule.
       await this.discardPageImageObjects(pageId, objectKeys);
       throw error;
     }

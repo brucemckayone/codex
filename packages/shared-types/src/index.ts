@@ -27,6 +27,9 @@ export type {
   PaginationMetadata,
   PaginationParams,
   PublicBrandingResponse,
+  PublicContentCreator,
+  PublicContentOrganization,
+  PublicMediaItem,
   SingleItemResponse,
   SortOrder,
 } from './api-responses';
@@ -102,6 +105,7 @@ export type {
   AuthenticatedContext,
   Bindings,
   CheckoutResponse,
+  ContentBodySource,
   EnrichedAuthContext,
   ErrorResponse,
   HonoEnv,

@@ -16,7 +16,11 @@
  * Permanent errors return 200 → Stripe considers the webhook delivered.
  */
 
-import { ServiceError, ServiceUnavailableError } from '@codex/service-errors';
+import {
+  AfterCommitError,
+  ServiceError,
+  ServiceUnavailableError,
+} from '@codex/service-errors';
 
 /**
  * Stripe error type strings (from stripe-node SDK). Authentication and
@@ -66,6 +70,21 @@ const TRANSIENT_NETWORK_CODES = new Set([
 
 /** How far down a cause chain to look (and the guard against a cycle). */
 const MAX_CAUSE_DEPTH = 5;
+
+/**
+ * drizzle's wrapper for a failed query: a plain Error whose message is
+ * `Failed query: <sql>\nparams: <params>`, with the driver's error on
+ * `cause`. drizzle-orm 0.44's DrizzleQueryError sets no `name`, so a real one
+ * is named 'Error' and only its shape tells (Codex-56l13). This is the rule
+ * `isFailedQuery` in @codex/database applies; it is not imported, so a test
+ * that mocks @codex/database cannot break the classifier every webhook uses.
+ */
+function isFailedQuery(error: Error): boolean {
+  return (
+    typeof error.message === 'string' &&
+    error.message.startsWith('Failed query:')
+  );
+}
 
 /** Network/DB error message patterns indicating transient failures */
 const TRANSIENT_MESSAGE_PATTERNS = [
@@ -148,7 +167,7 @@ function isTransientAt(error: unknown, depth: number): boolean {
     // driver error it wraps.
     const inner =
       error.cause ?? (error as { sourceError?: unknown }).sourceError;
-    if (error.name === 'DrizzleQueryError') {
+    if (isFailedQuery(error)) {
       return inner !== undefined && isTransientAt(inner, depth + 1);
     }
 
@@ -194,12 +213,46 @@ export function describeRootCause(
       current.cause ?? (current as { sourceError?: unknown }).sourceError;
     if (!(inner instanceof Error)) {
       if (current === error) return undefined;
-      if (current.name === 'DrizzleQueryError') {
-        return { name: current.name, message: '(query omitted)', code };
+      if (isFailedQuery(current)) {
+        return { name: 'DrizzleQueryError', message: '(query omitted)', code };
       }
       return { name: current.name, message: current.message, code };
     }
     current = inner;
   }
   return undefined;
+}
+
+/**
+ * Run a handler whose commit stands even when a step after it failed
+ * (`AfterCommitError`; the clawback of a refund that preceded the payout,
+ * Codex-2hxff.67). The handler's result comes back with the failure, so the
+ * caller still does what follows from the commit:
+ *
+ * 1. the effects that are safe to repeat (an access clear, a cache bump, a
+ *    record of the paid session), at once;
+ * 2. `rethrowIfTransient(failure)`: a retry can fix it, so the redelivery
+ *    does the rest, once;
+ * 3. the effects that must not repeat (an email), then `throw failure`.
+ *
+ * The step logged the failure already. Any other error is rethrown as it is.
+ */
+export async function settleAfterCommit<T>(
+  handler: () => Promise<T>
+): Promise<{ value: T; failure?: AfterCommitError }> {
+  try {
+    return { value: await handler() };
+  } catch (error) {
+    if (!(error instanceof AfterCommitError)) throw error;
+    // The handler raised it with its own result.
+    return { value: error.completed as T, failure: error };
+  }
+}
+
+/**
+ * Rethrow a failure a retry can fix, before the effects that must not repeat:
+ * Stripe redelivers, and the redelivery sends them once.
+ */
+export function rethrowIfTransient(failure: unknown): void {
+  if (failure !== undefined && isTransientError(failure)) throw failure;
 }

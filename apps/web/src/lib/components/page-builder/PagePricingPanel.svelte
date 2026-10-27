@@ -31,6 +31,7 @@
   course/content policy (SPEC §6.1) — this panel owns what the journey COSTS.
 -->
 <script lang="ts">
+  import { PRICE_LIMITS } from '@codex/constants';
   import * as m from '$paraglide/messages';
   import { monetisation } from '$lib/page-builder/monetisation-store.svelte';
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
@@ -111,9 +112,11 @@
   /**
    * Everything that would make the save fail, checked here so the creator sees it
    * before spending a rate-limited commerce mutation. Each rule MIRRORS a server
-   * rule (the worker remains the authority): `min(100)` and
-   * `priceAnnual <= priceMonthly * 12` come from `upsertCourseSubscriptionPlanSchema`,
-   * the enabled-needs-a-price rule from the monetisation command.
+   * rule (the worker remains the authority): the £1.00 minimum (`PRICE_LIMITS`;
+   * `salePriceCentsSchema` for the plan, `priceCentsSchema` for the one-off),
+   * `priceAnnual <= priceMonthly * 12` from `upsertCourseSubscriptionPlanSchema`,
+   * and the enabled-needs-a-price rule from the monetisation command and
+   * `updateJourneyOffer`.
    */
   const problems = $derived.by<string[]>(() => {
     const out: string[] = [];
@@ -122,9 +125,9 @@
         out.push(m.studio_builder_pricing_problem_monthly_required());
       if (draft.priceAnnualCents == null)
         out.push(m.studio_builder_pricing_problem_annual_required());
-      if (draft.priceMonthlyCents != null && draft.priceMonthlyCents < 100)
+      if (draft.priceMonthlyCents != null && draft.priceMonthlyCents < PRICE_LIMITS.MIN_CENTS)
         out.push(m.studio_builder_pricing_problem_monthly_min());
-      if (draft.priceAnnualCents != null && draft.priceAnnualCents < 100)
+      if (draft.priceAnnualCents != null && draft.priceAnnualCents < PRICE_LIMITS.MIN_CENTS)
         out.push(m.studio_builder_pricing_problem_annual_min());
       if (
         draft.priceMonthlyCents != null &&
@@ -135,6 +138,8 @@
     }
     if (offer.oneOffEnabled && offer.oneOffPriceCents == null)
       out.push(m.studio_builder_pricing_problem_oneoff_required());
+    else if (offer.oneOffEnabled && (offer.oneOffPriceCents ?? 0) < PRICE_LIMITS.MIN_CENTS)
+      out.push(m.studio_builder_pricing_problem_oneoff_min());
     return out;
   });
 </script>
@@ -419,11 +424,19 @@
     border-color: color-mix(in oklab, var(--color-interactive) 40%, var(--color-border));
   }
 
+  /* At least 24px tall (WCAG 2.2 AA 2.5.8, Codex-61zsk.71) at ANY density:
+     the space tokens scale with the org's density (0.75 makes --space-6 18px),
+     so each size keeps a rem floor, as --tap-target-min does. The colours
+     stay the panel's own: they were measured for 1.4.11 on this surface
+     (Codex-6nb7i; off reads 6.2:1 knob to track). */
   .way__sw {
+    --sw-h: max(1.5rem, var(--space-6));
+    --sw-w: max(2.75rem, var(--space-11));
+    --sw-inset: max(0.125rem, var(--space-0-5));
     position: relative;
     flex: none;
-    width: 34px;
-    height: 20px;
+    width: var(--sw-w);
+    height: var(--sw-h);
     border: 0;
     border-radius: var(--radius-full);
     background-color: var(--color-surface-tertiary, var(--color-surface-secondary));
@@ -439,10 +452,10 @@
   .way__sw::after {
     content: '';
     position: absolute;
-    top: 2px;
-    left: 2px;
-    width: 16px;
-    height: 16px;
+    top: var(--sw-inset);
+    left: var(--sw-inset);
+    width: calc(var(--sw-h) - 2 * var(--sw-inset));
+    height: calc(var(--sw-h) - 2 * var(--sw-inset));
     border-radius: 50%;
     background-color: var(--color-text-secondary);
     transition: transform var(--duration-fast) var(--ease-default), background-color var(--duration-fast) var(--ease-default);
@@ -453,13 +466,22 @@
   }
 
   .way--on .way__sw::after {
-    transform: translateX(14px);
+    transform: translateX(calc(var(--sw-w) - var(--sw-h)));
     background-color: var(--color-interactive);
   }
 
   .way__sw:focus-visible {
     outline: none;
     box-shadow: var(--shadow-focus-ring);
+  }
+
+  /* A finger gets the full tap target; the drawn switch keeps its size. */
+  @media (pointer: coarse) {
+    .way__sw::before {
+      content: '';
+      position: absolute;
+      inset: calc((var(--sw-h) - var(--tap-target-min)) / 2) 0;
+    }
   }
 
   .way__copy {

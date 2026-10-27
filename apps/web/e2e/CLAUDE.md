@@ -99,7 +99,7 @@ them as a helper:
 | Trap | What it does to you | Helper |
 |---|---|---|
 | Entitlement redirect | An entitled viewer — the org owner always is one — is redirected off `/journeys/<slug>` to `/dashboard`, and `?preview=1` bypasses the redirect but still resolves the CTA against the CREATOR's entitlement. Measure a visitor SIGNED OUT. | `expectSellPageRendered()` |
-| Soft 404 | A load-thrown 404 here returns **HTTP 200** (Codex-nqop3, upstream SvelteKit). The status code is not evidence; assert the rendered sections. | `expectSellPageRendered()` |
+| A 200 is not a render | A 200 proves something rendered, not that the sell page did: the entitlement redirect ends on one too. Assert the rendered sections. (A load-thrown 404 used to return 200 here, Codex-nqop3. It is fixed by `patches/@sveltejs__kit@2.55.0.patch` and held by `org-error-status.spec.ts`.) | `expectSellPageRendered()` |
 
 The studio canvas-vs-public parity spec was deleted with the legacy canvas; its
 rewrite for the new editor is Codex-61zsk.15. Whoever writes it: the editor

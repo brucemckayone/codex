@@ -242,6 +242,24 @@ export type VerifyCheckoutSessionInput = z.infer<
   typeof verifyCheckoutSessionSchema
 >;
 
+/**
+ * Complete Checkout Session Schema
+ *
+ * Used for POST /checkout/complete: the success page asks for the purchase
+ * its session stands for to be recorded on arrival (Codex-2hxff.22). Only the
+ * id comes from the client; everything else is read from Stripe's session.
+ *
+ * Validates:
+ * - sessionId: Stripe checkout session ID (non-empty, at most 255 characters)
+ */
+export const completeCheckoutSessionSchema = z.object({
+  sessionId: z.string().min(1).max(255),
+});
+
+export type CompleteCheckoutSessionInput = z.infer<
+  typeof completeCheckoutSessionSchema
+>;
+
 // ============================================================================
 // Org-scoped Sales schemas (studio Sales ledger — Codex-1csms)
 // ============================================================================

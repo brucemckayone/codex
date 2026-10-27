@@ -1,5 +1,6 @@
 import { type LogEvent, ObservabilityClient } from '@codex/observability';
 import { browser, dev } from '$app/environment';
+import { clientLogSink } from './client-log';
 
 /**
  * Web-app logger.
@@ -41,22 +42,15 @@ class WebObservabilityClient extends ObservabilityClient {
   override log(event: LogEvent): void {
     if (browser && !dev) {
       // ── CLIENT SINK SEAM ─────────────────────────────────────────────────
-      // Nothing is emitted here yet, deliberately. This repo has no
-      // client→server diagnostic channel to route to: no Sentry, no `/api/log`,
-      // no `reportError` remote function (`routes/api/progress-beacon` is
-      // progress sync, not error reporting). Standing one up is a separate
-      // piece of work, not part of closing the console leak.
-      //
-      // This branch is the single place such a sink attaches. When one exists,
-      // forward `event` from here: it arrives already shaped as
-      // `{ level, message, timestamp, metadata }`, and `redactSensitiveData`
-      // (exported by `@codex/observability`) should be applied to
-      // `event.metadata` before anything leaves the browser, because
-      // `super.log()`'s own redaction pass is being bypassed on this path.
+      // Warn and error records go to POST /api/client-log (`$lib/client-log`,
+      // Codex-l2c48.7), which redacts `event.metadata` before anything leaves
+      // the browser: `super.log()`'s own redaction pass is bypassed on this
+      // path. Info and debug stay in the browser, unprinted.
       //
       // Do NOT satisfy "it should go somewhere" by restoring `console` output
       // here — printing to the user's devtools is precisely the defect this
       // class exists to prevent.
+      clientLogSink.forward(event);
       return;
     }
 

@@ -19,6 +19,7 @@ import type {
   AdminAnalyticsService,
   AdminContentManagementService,
   AdminCustomerManagementService,
+  SupportService,
 } from '@codex/admin';
 import type { AgreementService } from '@codex/agreements';
 import type { CachePresetName } from '@codex/constants';
@@ -55,7 +56,10 @@ import type {
   SubscriptionService,
   TierService,
 } from '@codex/subscription';
-import type { TranscodingService } from '@codex/transcoding';
+import type {
+  TranscodingMaintenance,
+  TranscodingService,
+} from '@codex/transcoding';
 import type { ExecutionContext, MiddlewareHandler } from 'hono';
 import type { ZodSchema, z } from 'zod';
 
@@ -207,12 +211,21 @@ export interface ServiceRegistry {
 
   // Media & Processing domain
   transcoding: TranscodingService;
+  /** The hourly transcoding maintenance run (media-api's cron). */
+  transcodingMaintenance: TranscodingMaintenance;
   images: ImageProcessingService;
 
   // Admin domain
   adminAnalytics: AdminAnalyticsService;
   adminContent: AdminContentManagementService;
   adminCustomer: AdminCustomerManagementService;
+  /**
+   * Platform support's refund screen and queue (Codex-2hxff.28): search,
+   * charge detail, refund preview, refunds, and settling failed refunds and
+   * creator debts. Platform-wide, gated by `platform_owner` at the route.
+   * Stripe-backed, on admin-api's own restricted key.
+   */
+  support: SupportService;
 
   // Notification domain
   templates: TemplateService;

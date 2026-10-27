@@ -419,9 +419,11 @@ export const purchases = pgTable(
   'purchases',
   {
     id: uuid('id').primaryKey().defaultRandom(),
+    // RESTRICT, never cascade: money history outlives its user (Codex-2hxff.23,
+    // docs/payments/README.md). Account deletion anonymises; it never deletes.
     customerId: text('customer_id')
       .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
+      .references(() => users.id, { onDelete: 'restrict' }),
     // Split purchase target (Codex-2pryk WP-6): a purchase pays for EITHER a
     // piece of `content` OR a `course` — exactly one is set (CHECK below),
     // mirroring the `entitlements` split-FK. `contentId` became nullable so a
@@ -478,11 +480,29 @@ export const purchases = pgTable(
     // Purchase completion timestamp (when status became 'completed')
     purchasedAt: timestamp('purchased_at', { withTimezone: true }),
 
+    // When the buyer's receipt was claimed: one receipt per purchase, not one
+    // per checkout delivery (Codex-mat01). The first delivery to find the
+    // purchase `completed` claims it (`PurchaseService.claimReceipt`); later
+    // ones find it set. A purchase refunded in full before its checkout
+    // landed is never claimed. Rows before migration 0115 were backfilled.
+    receiptSentAt: timestamp('receipt_sent_at', { withTimezone: true }),
+
     // Refund tracking
     refundedAt: timestamp('refunded_at', { withTimezone: true }),
     refundReason: text('refund_reason'),
     refundAmountCents: integer('refund_amount_cents'),
     stripeRefundId: varchar('stripe_refund_id', { length: 255 }),
+
+    // A second payment for an item the buyer already owned (Codex-2hxff.14,
+    // "Block, then refund"): the purchase it duplicated. Such a row grants
+    // and pays nothing. It is `pending` until Stripe has refunded it, then
+    // `refunded`; a refund Stripe refuses leaves it `pending`, held for
+    // support. The marker is this column, not `refund_reason`, which a
+    // refund webhook overwrites with Stripe's own reason.
+    duplicateOfPurchaseId: uuid('duplicate_of_purchase_id').references(
+      (): AnyPgColumn => purchases.id,
+      { onDelete: 'restrict' }
+    ),
 
     // Dispute tracking (charge.dispute.created). Disputes don't mutate
     // `status` (still 'completed' or 'refunded'), but `disputedAt` flips
@@ -574,9 +594,108 @@ export const purchases = pgTable(
       sql`${table.amountPaidCents} = ${table.platformFeeCents} + ${table.organizationFeeCents} + ${table.creatorPayoutCents}`
     ),
 
-    // NOTE: No unique constraint on (customerId, contentId)
-    // Idempotency is enforced by stripePaymentIntentId unique constraint only
-    // This allows users to retry failed payments or repurchase after refund
+    // At most one COMPLETED purchase per buyer and item (Codex-2hxff.14,
+    // "Block, then refund"). Partial on `completed`, so a buyer can still
+    // retry a failed payment or buy again after a refund: those rows are
+    // `failed` / `refunded` and no longer count. A second payment that lands
+    // anyway is recorded as a duplicate (`duplicate_of_purchase_id`) and
+    // refunded. Migration 0006 once added a full unique here and 0007 dropped
+    // it for exactly the refund case; the partial index keeps that.
+    uniqueIndex('uq_purchases_completed_customer_content')
+      .on(table.customerId, table.contentId)
+      .where(
+        sql`${table.status} = 'completed' AND ${table.contentId} IS NOT NULL`
+      ),
+    uniqueIndex('uq_purchases_completed_customer_course')
+      .on(table.customerId, table.courseId)
+      .where(
+        sql`${table.status} = 'completed' AND ${table.courseId} IS NOT NULL`
+      ),
+  ]
+);
+
+/**
+ * A buyer's Stripe Checkout Session for one item (Codex-2hxff.14).
+ *
+ * At most one is `open` per buyer and item, so a second tab or a double click
+ * is sent to the SAME Stripe page instead of a second one that could also take
+ * payment (owner decision "Block, then refund"). Each session expires 30
+ * minutes after it is made (owner decision): `expires_at` is stored here and
+ * sent to Stripe as is, so two callers creating the same row send identical
+ * parameters under one idempotency key (`checkout_<id>_<customer>`) and get
+ * the same session back.
+ *
+ * An `open` row past (or close to) its expiry is marked `expired` the next
+ * time that buyer starts a checkout for the item; nothing sweeps them. The
+ * booking webhook marks the paid session's row `completed`.
+ */
+export const checkoutSessions = pgTable(
+  'checkout_sessions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    customerId: text('customer_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    // A one-off `purchase` of content or a course, or a `subscription` to
+    // an org's tiers or a course plan (Codex-2hxff.15).
+    kind: varchar('kind', { length: 20 }).notNull().default('purchase'),
+    // Exactly one target (CHECK below): content or course for a purchase;
+    // the organisation (tiers) or the course (its plan) for a subscription.
+    contentId: uuid('content_id').references(() => content.id, {
+      onDelete: 'cascade',
+    }),
+    courseId: uuid('course_id').references(() => courses.id, {
+      onDelete: 'cascade',
+    }),
+    organizationId: uuid('organization_id').references(() => organizations.id, {
+      onDelete: 'cascade',
+    }),
+    // The price the session was made at. A price change since means the
+    // open session is replaced rather than reused.
+    amountCents: integer('amount_cents').notNull(),
+    // A subscription session's Stripe price: another tier or billing
+    // interval is another item at the same amount, so it replaces too.
+    stripePriceId: varchar('stripe_price_id', { length: 255 }),
+    // Filled once Stripe answers; NULL while the first caller is creating it.
+    stripeSessionId: varchar('stripe_session_id', { length: 255 }).unique(),
+    url: text('url'),
+    status: varchar('status', { length: 20 }).notNull().default('open'),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => [
+    index('idx_checkout_sessions_customer_id').on(table.customerId),
+    uniqueIndex('uq_checkout_sessions_open_customer_content')
+      .on(table.customerId, table.contentId)
+      .where(sql`${table.status} = 'open' AND ${table.contentId} IS NOT NULL`),
+    // A course's one-off purchase and its plan are different items.
+    uniqueIndex('uq_checkout_sessions_open_customer_course')
+      .on(table.customerId, table.courseId, table.kind)
+      .where(sql`${table.status} = 'open' AND ${table.courseId} IS NOT NULL`),
+    uniqueIndex('uq_checkout_sessions_open_customer_org')
+      .on(table.customerId, table.organizationId)
+      .where(
+        sql`${table.status} = 'open' AND ${table.organizationId} IS NOT NULL`
+      ),
+    check(
+      'check_checkout_session_target_one',
+      sql`(CASE WHEN ${table.contentId} IS NULL THEN 0 ELSE 1 END) + (CASE WHEN ${table.courseId} IS NULL THEN 0 ELSE 1 END) + (CASE WHEN ${table.organizationId} IS NULL THEN 0 ELSE 1 END) = 1`
+    ),
+    check(
+      'check_checkout_session_kind',
+      sql`(${table.kind} = 'purchase' AND ${table.organizationId} IS NULL AND ${table.stripePriceId} IS NULL) OR (${table.kind} = 'subscription' AND ${table.contentId} IS NULL AND ${table.stripePriceId} IS NOT NULL)`
+    ),
+    check(
+      'check_checkout_session_status',
+      sql`${table.status} IN ('open', 'completed', 'expired')`
+    ),
+    check('check_checkout_session_amount', sql`${table.amountCents} > 0`),
   ]
 );
 
@@ -693,6 +812,8 @@ export type NewContentAccess = typeof contentAccess.$inferInsert;
 
 export type Purchase = typeof purchases.$inferSelect;
 export type NewPurchase = typeof purchases.$inferInsert;
+
+export type CheckoutSession = typeof checkoutSessions.$inferSelect;
 
 export type PlatformFeeConfig = typeof platformFeeConfig.$inferSelect;
 export type NewPlatformFeeConfig = typeof platformFeeConfig.$inferInsert;

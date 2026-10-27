@@ -22,7 +22,14 @@
 
   @prop {OrgMemberItem[]} members - Array of members to display
   @prop {(userId: string, role: string) => void} onChangeRole - Callback when role is changed
-  @prop {(userId: string) => void} onRemove - Callback when member is removed
+  @prop {(userId: string) => void | Promise<unknown>} onRemove - Callback when
+    member is removed. A returned promise keeps the Remove dialog open and busy
+    until it settles.
+  @prop {string} [orgName] - Named in the Remove dialog's title.
+  @prop {(userId: string) => PromiseLike<DeparturePreview>} [loadDeparturePreview]
+    What removing that member would unwind (Codex-2hxff.64). Called in the
+    click that opens the Remove dialog; omitted → the dialog says only who
+    loses access.
   @prop {() => void} [onInvite] - Opens the invite flow from the empty state.
     Omitted → the empty state renders without a call to action.
   @prop {{ href: string; label: string }} [ownerAction] - The owner row's link
@@ -31,20 +38,25 @@
   @prop {string} [class] - Optional class forwarded to the root element of each conditional branch
 -->
 <script lang="ts">
-  import type { OrgMemberItem } from '$lib/types';
+  import { getThumbnailUrl } from '$lib/utils/image';
+  import type { DeparturePreview, OrgMemberItem } from '$lib/types';
   import * as Table from '$lib/components/ui/Table';
   import Badge from '$lib/components/ui/Badge/Badge.svelte';
   import Select from '$lib/components/ui/Select/Select.svelte';
-  import { Button, ConfirmDialog } from '$lib/components/ui';
+  import { Button } from '$lib/components/ui';
   import { UsersIcon } from '$lib/components/ui/Icon';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import { formatDate, getInitials } from '$lib/utils/format';
   import * as m from '$paraglide/messages';
+  import RemoveMemberDialog from './RemoveMemberDialog.svelte';
+  import type { DepartureImpact } from './departure-impact';
 
   interface Props {
     members: OrgMemberItem[];
     onChangeRole?: (userId: string, role: string) => void;
-    onRemove?: (userId: string) => void;
+    onRemove?: (userId: string) => void | Promise<unknown>;
+    orgName?: string;
+    loadDeparturePreview?: (userId: string) => PromiseLike<DeparturePreview>;
     onInvite?: () => void;
     loading?: boolean;
     class?: string;
@@ -52,9 +64,14 @@
      * Optional per-member active revenue-share summary, keyed by userId.
      * When provided, a "Revenue share" column is rendered with a deep-link
      * into the Monetisation > Revenue share tab. Owner-only (Codex-dhxjz);
-     * callers pass undefined to hide the column entirely.
+     * callers pass undefined to hide the column entirely. `srLabel`, when
+     * set, is what a screen reader reads in place of `label` (a missing
+     * share's "—" reads as "No share recorded").
      */
-    revenueShareByUser?: Map<string, { label: string; active: boolean }>;
+    revenueShareByUser?: Map<
+      string,
+      { label: string; srLabel?: string; active: boolean }
+    >;
     ownerAction?: { href: string; label: string };
   }
 
@@ -62,6 +79,8 @@
     members,
     onChangeRole,
     onRemove,
+    orgName,
+    loadDeparturePreview,
     onInvite,
     loading = false,
     class: className = '',
@@ -73,9 +92,14 @@
 
   const showRevenueShare = $derived(revenueShareByUser !== undefined);
 
-  // Confirm dialog state for member removal
+  // Confirm dialog state for member removal. `pendingRemove` is kept after the
+  // dialog closes, so its title does not blank out while it animates away;
+  // the next Remove replaces it.
   let showRemoveConfirm = $state(false);
-  let pendingRemoveUserId = $state<string | null>(null);
+  let pendingRemove = $state<OrgMemberItem | null>(null);
+  let removalImpact = $state<DepartureImpact>({ status: 'idle' });
+  /** The latest preview request; an answer to an older one is dropped. */
+  let previewRequest = 0;
 
   /**
    * Get localized role text
@@ -105,20 +129,43 @@
     if (value) onChangeRole?.(userId, value);
   }
 
-  function handleRemove(userId: string) {
-    pendingRemoveUserId = userId;
-    showRemoveConfirm = true;
+  /**
+   * Fetch what removing `userId` would unwind. Fresh on every open — the
+   * preview is not cached anywhere — and a failure only costs the dialog its
+   * list (it says so, and offers Try again); the removal does not depend on it.
+   */
+  async function loadRemovalImpact(userId: string) {
+    const mine = ++previewRequest;
+    if (!loadDeparturePreview) {
+      removalImpact = { status: 'idle' };
+      return;
+    }
+    removalImpact = { status: 'loading' };
+    try {
+      const preview = await loadDeparturePreview(userId);
+      if (mine === previewRequest) removalImpact = { status: 'ready', preview };
+    } catch {
+      if (mine === previewRequest) removalImpact = { status: 'error' };
+    }
   }
 
-  function confirmRemove() {
-    if (pendingRemoveUserId) {
-      onRemove?.(pendingRemoveUserId);
-    }
-    pendingRemoveUserId = null;
+  function handleRemove(member: OrgMemberItem) {
+    pendingRemove = member;
+    showRemoveConfirm = true;
+    void loadRemovalImpact(member.userId);
+  }
+
+  function retryRemovalImpact() {
+    if (pendingRemove) void loadRemovalImpact(pendingRemove.userId);
+  }
+
+  function confirmRemove(userId: string) {
+    return onRemove?.(userId);
   }
 
   function cancelRemove() {
-    pendingRemoveUserId = null;
+    // Drops a preview still in flight for the dialog just cancelled.
+    previewRequest += 1;
   }
 </script>
 
@@ -177,7 +224,7 @@
                 <div class="avatar" aria-hidden="true">
                   {#if member.avatarUrl}
                     <img
-                      src={member.avatarUrl}
+                      src={getThumbnailUrl(member.avatarUrl, 'sm')}
                       alt=""
                       class="avatar-img"
                       loading="lazy"
@@ -245,7 +292,14 @@
                        for {name}". Listed for the orchestrator; en.json belongs
                        to another worktree this round. -->
                   {#if rs?.active}
-                    <Badge variant="success">{rs.label}</Badge>
+                    <Badge variant="success">
+                      {#if rs.srLabel}
+                        <span aria-hidden="true">{rs.label}</span>
+                        <span class="sr-only">{rs.srLabel}</span>
+                      {:else}
+                        {rs.label}
+                      {/if}
+                    </Badge>
                     <a
                       class="rev-link"
                       href={`/studio/monetisation/revenue-share?focus=${member.userId}`}
@@ -275,7 +329,7 @@
               {#if member.role !== 'owner'}
                 <button
                   class="remove-btn"
-                  onclick={() => handleRemove(member.userId)}
+                  onclick={() => handleRemove(member)}
                   aria-label="{m.team_remove()} {memberLabel}"
                 >
                   {m.team_remove()}
@@ -291,12 +345,12 @@
   </div>
 {/if}
 
-<ConfirmDialog
+<RemoveMemberDialog
   bind:open={showRemoveConfirm}
-  title={m.team_remove()}
-  description={m.team_remove_confirm()}
-  confirmText={m.team_remove()}
-  variant="destructive"
+  member={pendingRemove}
+  {orgName}
+  impact={removalImpact}
+  onRetry={retryRemovalImpact}
   onConfirm={confirmRemove}
   onCancel={cancelRemove}
 />

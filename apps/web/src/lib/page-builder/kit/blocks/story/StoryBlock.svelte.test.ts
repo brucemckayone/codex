@@ -503,3 +503,26 @@ describe('StoryBlock — strip', () => {
     expect(all('.story-strip__card img')).toHaveLength(1);
   });
 });
+
+describe('StoryBlock: every size a picture has (Codex-61zsk.66)', () => {
+  const SET = ['sm.webp 200w', 'md.webp 400w', 'lg.webp 800w']
+    .map((size) => `${CDN}/img/1/${size}`)
+    .join(', ');
+
+  it.each([
+    ['chapters', '100vw'],
+    ['strip', 'clamp(16rem, 34vw, 28rem)'],
+    ['scroll', '(min-width: 48rem) min(50vw, 41rem), min(100vw, 82rem)'],
+  ])('%s: offers the set, at the width its layout draws it', async (layout, sizes) => {
+    await render({ steps: moments(3) }, { layout });
+    const first = all('img').filter((img) =>
+      img.getAttribute('src')?.includes('/img/1/')
+    );
+    // The scroll layout draws a picture twice: in its moment and in the frame.
+    expect(first.length).toBe(layout === 'scroll' ? 2 : 1);
+    for (const img of first) {
+      expect(img.getAttribute('srcset')).toBe(SET);
+      expect(img.getAttribute('sizes')).toBe(sizes);
+    }
+  });
+});

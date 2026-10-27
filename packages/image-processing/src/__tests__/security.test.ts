@@ -41,14 +41,25 @@ function createTestImageFile(mimeType: string, filename: string): File {
   return new File([new Uint8Array(jpegBuffer)], filename, { type: mimeType });
 }
 
-// Mock processor
+// Mock processor: every still goes through the page-image pipeline
+// (Codex-kk9nv.5), which returns four sizes and the source's size.
 vi.mock('../processor', () => ({
-  processImageVariants: vi.fn().mockReturnValue({
-    sm: new Uint8Array([0x52, 0x49, 0x46, 0x46]),
-    md: new Uint8Array([0x52, 0x49, 0x46, 0x46]),
-    lg: new Uint8Array([0x52, 0x49, 0x46, 0x46]),
+  processStillVariants: vi.fn().mockReturnValue({
+    variants: {
+      sm: new Uint8Array([0x52, 0x49, 0x46, 0x46]),
+      md: new Uint8Array([0x52, 0x49, 0x46, 0x46]),
+      lg: new Uint8Array([0x52, 0x49, 0x46, 0x46]),
+      xl: new Uint8Array([0x52, 0x49, 0x46, 0x46]),
+    },
+    width: 1200,
+    height: 800,
   }),
 }));
+
+/** Every key handed to `R2Service.put` so far. */
+function putKeys(r2: R2Service): string[] {
+  return (r2.put as Mock).mock.calls.map((call) => call[0] as string);
+}
 
 describe('ImageProcessingService - Security', () => {
   let service: ImageProcessingService;
@@ -57,15 +68,31 @@ describe('ImageProcessingService - Security', () => {
   let updateMock: Mock;
   let setMock: Mock;
   let whereMock: Mock;
+  let lockedAvatarRead: Mock;
 
   beforeEach(() => {
     // Track update chain calls to verify scoping
-    whereMock = vi.fn().mockResolvedValue([{ id: 'test-1' }]);
+    // Awaited, the matched rows; `.returning()` on it resolves them too, as
+    // drizzle's builder does (the avatar write checks a row matched).
+    whereMock = vi.fn(() =>
+      Object.assign(Promise.resolve([{ id: 'test-1' }]), {
+        returning: vi.fn().mockResolvedValue([{ id: 'test-1' }]),
+      })
+    );
     setMock = vi.fn().mockReturnValue({ where: whereMock });
     updateMock = vi.fn().mockReturnValue({ set: setMock });
 
+    // deleteUserAvatar's read of the avatar, under a row lock in the
+    // transaction that clears it (Codex-kk9nv.17).
+    lockedAvatarRead = vi.fn();
     mockDb = {
       update: updateMock,
+      select: vi.fn(() => ({
+        from: () => ({ where: () => ({ for: lockedAvatarRead }) }),
+      })),
+      transaction(fn: (tx: unknown) => unknown) {
+        return fn(this);
+      },
       query: {
         content: { findFirst: vi.fn() },
         users: { findFirst: vi.fn() },
@@ -99,6 +126,21 @@ describe('ImageProcessingService - Security', () => {
         expect.anything(),
         expect.anything()
       );
+      // Every object, xl included, sits in ONE new sized folder under the
+      // creator's prefix (Codex-kk9nv.5) — none escapes the tenant boundary.
+      const keys = putKeys(mockR2Service);
+      expect(keys).toHaveLength(4);
+      expect(new Set(keys.map((key) => key.replace(/\/[^/]+$/, ''))).size).toBe(
+        1
+      );
+      for (const key of keys) {
+        expect(key).toMatch(
+          /^user-owner\/content-thumbnails\/content-1\/\d+x\d+-[0-9a-f]{8}\/(sm|md|lg|xl)\.webp$/
+        );
+        expect(key.startsWith('user-owner/content-thumbnails/content-1/')).toBe(
+          true
+        );
+      }
     });
 
     it('should include userId in R2 key path for avatars', async () => {
@@ -112,6 +154,16 @@ describe('ImageProcessingService - Security', () => {
         expect.anything(),
         expect.anything()
       );
+      // Every object, xl included, sits in one new folder under the user's own
+      // avatar prefix (Codex-kk9nv.5).
+      const keys = putKeys(mockR2Service);
+      expect(keys).toHaveLength(4);
+      for (const key of keys) {
+        expect(key).toMatch(
+          /^avatars\/user-123\/\d+x\d+-[0-9a-f]{8}\/(sm|md|lg|xl)\.webp$/
+        );
+        expect(key.startsWith('avatars/user-123/')).toBe(true);
+      }
     });
   });
 
@@ -134,12 +186,42 @@ describe('ImageProcessingService - Security', () => {
     });
 
     it('should use creatorId prefix in R2 delete keys', async () => {
+      (mockDb.query.content.findFirst as Mock).mockResolvedValueOnce({
+        thumbnailUrl:
+          'https://cdn.test.com/user-owner/content-thumbnails/content-1/1200x800-0a1b2c3d/lg.webp',
+      });
       await service.deleteContentThumbnail('content-1', 'user-owner');
 
       // Verify R2 delete uses creatorId-prefixed keys
       expect(mockR2Service.delete).toHaveBeenCalledWith(
         expect.stringContaining('user-owner/content-thumbnails/content-1/')
       );
+    });
+
+    it("never deletes another creator's files named by a hand-set thumbnail URL", async () => {
+      // `thumbnailUrl` is accepted from a PATCH body as any URL on the CDN
+      // (Codex-8so68), so it can name ANOTHER creator's upload. Every cleanup
+      // derives what it may delete from THIS content's own base key, so
+      // replacing, dropping or deleting that URL touches none of their files.
+      const foreign =
+        'https://cdn.test.com/user-victim/content-thumbnails/content-9/1200x800-0a1b2c3d/lg.webp';
+      (mockDb.query.content.findFirst as Mock).mockResolvedValue({
+        thumbnailUrl: foreign,
+      });
+
+      await service.deleteContentThumbnail('content-1', 'user-owner');
+      await service.deleteDroppedContentThumbnail(
+        'content-1',
+        'user-owner',
+        foreign
+      );
+      await service.processContentThumbnail(
+        'content-1',
+        'user-owner',
+        createTestImageFile('image/png', 'thumbnail.png')
+      );
+
+      expect(mockR2Service.delete).not.toHaveBeenCalled();
     });
   });
 
@@ -155,23 +237,21 @@ describe('ImageProcessingService - Security', () => {
 
     it('should check user exists before deleting avatar', async () => {
       // Mock user exists with avatar
-      (mockDb.query.users.findFirst as Mock).mockResolvedValueOnce({
-        avatarUrl: 'https://cdn.test.com/avatars/user-1/lg.webp',
-      });
+      lockedAvatarRead.mockResolvedValueOnce([
+        { avatarUrl: 'https://cdn.test.com/avatars/user-1/lg.webp' },
+      ]);
 
       await service.deleteUserAvatar('user-1');
 
       // Verify user lookup was performed
-      expect(mockDb.query.users.findFirst).toHaveBeenCalled();
+      expect(lockedAvatarRead).toHaveBeenCalledWith('update');
       // Verify R2 delete was called
       expect(mockR2Service.delete).toHaveBeenCalled();
     });
 
     it('should skip R2 delete when user has no avatar', async () => {
       // Mock user exists but no avatar
-      (mockDb.query.users.findFirst as Mock).mockResolvedValueOnce({
-        avatarUrl: null,
-      });
+      lockedAvatarRead.mockResolvedValueOnce([{ avatarUrl: null }]);
 
       await service.deleteUserAvatar('user-1');
 

@@ -29,7 +29,7 @@
 import type { DatabaseClient } from '@codex/database';
 import { courseEnrollments, entitlements } from '@codex/database/schema';
 import type { StoredEntitlementSource } from '@codex/shared-types';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 
 /**
  * A write-capable query client. Both the base `DatabaseClient` and a transaction
@@ -45,16 +45,15 @@ export type EntitlementWriteClient = DatabaseClient | Tx;
  * row + `verifyPurchase` — the resolver unions the two, so this is the
  * forward-compatible grant the resolver reads directly.
  *
- * `organizationId` is REQUIRED (the `entitlements` table's org FK is NOT NULL,
- * and the frozen `Entitlement.organizationId` is non-nullable). Orgless
- * (bi-party) content purchases therefore write NO entitlement row and rely on
- * `verifyPurchase` alone — the caller must skip this write when org is null.
+ * `organizationId` is `null` for an orgless (bi-party) sale: a creator selling
+ * their own content outside any organisation. It still writes its entitlement
+ * (migration 0108 made the column nullable, Codex-2hxff.21).
  */
 export async function writeContentPurchaseEntitlement(
   client: EntitlementWriteClient,
   params: {
     userId: string;
-    organizationId: string;
+    organizationId: string | null;
     contentId: string;
     purchaseId: string;
   }
@@ -102,35 +101,72 @@ export async function writeCoursePurchaseEntitlement(
 }
 
 /**
- * Grant a COURSE entitlement for an active course-specific subscription
- * (`source='course_subscription'`) and auto-enroll (D-G).
+ * Grant a COURSE entitlement for a course-specific subscription that grants
+ * access (`source='course_subscription'`), or extend the one it holds, and
+ * auto-enroll (D-G). Keyed by the subscription (`sourceRef`, Codex-2hxff.15):
+ *
+ * - Its live grant is extended to `expiresAt`, never shortened: Stripe does
+ *   not order events, and a stale one carries an earlier period end.
+ * - With none (a first activation, or an `unpaid` subscription paid again), a
+ *   fresh grant is written. A live grant another of the buyer's subscriptions
+ *   to the course left behind is revoked first: only one is live at a time and
+ *   a duplicate never holds a grant, so that one has ended. Left in place, it
+ *   would block this insert (one live grant per buyer, course and source) and
+ *   take this buyer's access with it when its own late deletion arrives.
  *
  * `expiresAt` is the subscription's `currentPeriodEnd`: the stored grant is
  * fail-closed — if a renewal is missed the grant lapses on its own (the resolver
  * filters `expiresAt > now`), even before a `customer.subscription.deleted`
- * webhook lands. Renewals bump it via {@link refreshCourseSubscriptionEntitlementExpiry}.
+ * webhook lands.
  */
 export async function writeCourseSubscriptionEntitlement(
   client: EntitlementWriteClient,
   params: {
     userId: string;
-    organizationId: string;
+    organizationId: string | null;
     courseId: string;
     courseSubscriptionId: string;
     expiresAt: Date;
   }
 ): Promise<void> {
-  await client
-    .insert(entitlements)
-    .values({
-      userId: params.userId,
-      organizationId: params.organizationId,
-      courseId: params.courseId,
-      source: 'course_subscription',
-      sourceRef: params.courseSubscriptionId,
-      expiresAt: params.expiresAt,
+  const [extended] = await client
+    .update(entitlements)
+    .set({
+      expiresAt: sql`GREATEST(${entitlements.expiresAt}, ${params.expiresAt.toISOString()}::timestamptz)`,
     })
-    .onConflictDoNothing();
+    .where(
+      and(
+        eq(entitlements.source, 'course_subscription'),
+        eq(entitlements.sourceRef, params.courseSubscriptionId),
+        isNull(entitlements.revokedAt)
+      )
+    )
+    .returning();
+  if (!extended) {
+    await client
+      .update(entitlements)
+      .set({ revokedAt: new Date() })
+      .where(
+        and(
+          eq(entitlements.userId, params.userId),
+          eq(entitlements.courseId, params.courseId),
+          eq(entitlements.source, 'course_subscription'),
+          isNull(entitlements.revokedAt),
+          sql`${entitlements.sourceRef} IS DISTINCT FROM ${params.courseSubscriptionId}`
+        )
+      );
+    await client
+      .insert(entitlements)
+      .values({
+        userId: params.userId,
+        organizationId: params.organizationId,
+        courseId: params.courseId,
+        source: 'course_subscription',
+        sourceRef: params.courseSubscriptionId,
+        expiresAt: params.expiresAt,
+      })
+      .onConflictDoNothing();
+  }
   await autoEnroll(client, {
     userId: params.userId,
     courseId: params.courseId,
@@ -139,10 +175,10 @@ export async function writeCourseSubscriptionEntitlement(
 }
 
 /**
- * Extend the live course-subscription grant's `expiresAt` on a renewal
- * (`invoice.payment_succeeded`). No-op when no live grant exists (self-heal
- * writes it first). Idempotent — replaying the same invoice just re-sets the
- * same period end.
+ * Move the buyer's live course-subscription grant on to `expiresAt` (a won
+ * dispute, whose paused billing voided the renewals that would have). No-op
+ * when no live grant exists. Idempotent. The webhooks write or extend through
+ * {@link writeCourseSubscriptionEntitlement}, keyed by the subscription.
  */
 export async function refreshCourseSubscriptionEntitlementExpiry(
   client: EntitlementWriteClient,
@@ -162,23 +198,26 @@ export async function refreshCourseSubscriptionEntitlementExpiry(
 }
 
 /**
- * Revoke the live course-subscription grant immediately (subscription deleted /
+ * Revoke a course subscription's live grant immediately (subscription deleted /
  * unpaid). Sets `revokedAt` so the resolver stops granting on the next read —
  * this is the hard cut-off for an access-reducing lifecycle event, distinct from
  * the soft `expiresAt` lapse used for missed renewals. Idempotent.
+ *
+ * Keyed by the subscription (`sourceRef`), not the buyer and course
+ * (Codex-2hxff.15): a late deletion of an old subscription must leave the
+ * grant of the buyer's new one alone.
  */
 export async function revokeCourseSubscriptionEntitlement(
   client: EntitlementWriteClient,
-  params: { userId: string; courseId: string }
+  params: { courseSubscriptionId: string }
 ): Promise<void> {
   await client
     .update(entitlements)
     .set({ revokedAt: new Date() })
     .where(
       and(
-        eq(entitlements.userId, params.userId),
-        eq(entitlements.courseId, params.courseId),
         eq(entitlements.source, 'course_subscription'),
+        eq(entitlements.sourceRef, params.courseSubscriptionId),
         isNull(entitlements.revokedAt)
       )
     );

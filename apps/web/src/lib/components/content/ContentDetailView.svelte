@@ -22,6 +22,13 @@
   @prop {Snippet} [purchaseForm] - Purchase form with use:enhance
 -->
 <script lang="ts">
+  import {
+    getShareImage,
+    getThumbnailDimensions,
+    getThumbnailSrcset,
+    getThumbnailUrl,
+  } from '$lib/utils/image';
+  import { getDisplayThumbnail } from '$lib/utils/thumbnail';
   import type { Snippet } from 'svelte';
   import { page } from '$app/state';
   import { browser } from '$app/environment';
@@ -35,11 +42,26 @@
   // files, so they're dynamically loaded further down.
   import { PreviewPlayer, deriveAccessState } from '$lib/components/player';
   import SubscribeButton from '$lib/components/subscription/SubscribeButton.svelte';
-  import { formatPrice, formatDurationHuman } from '$lib/utils/format';
+  import {
+    formatPrice,
+    formatDurationHuman,
+    formatSentenceDate,
+  } from '$lib/utils/format';
+  import { supportMailto } from '$lib/utils/support-mailto';
   import { PriceBadge } from '$lib/components/ui/PriceBadge';
-  import { LockIcon, CheckIcon, XIcon, PlayIcon } from '$lib/components/ui/Icon';
+  import {
+    LockIcon,
+    CheckIcon,
+    XIcon,
+    PlayIcon,
+    LibraryIcon,
+  } from '$lib/components/ui/Icon';
+  import { Alert } from '$lib/components/ui';
   import { AccessRevokedOverlay } from '$lib/components/AccessRevokedOverlay';
-  import type { AccessRevocationReason } from '$lib/server/content-detail';
+  import type {
+    AccessRevocationReason,
+    ContentHeld,
+  } from '$lib/server/content-detail';
   import ProseContent from '$lib/components/editor/ProseContent.svelte';
   import { StructuredData } from '$lib/components/seo';
   import { toast } from '$lib/components/ui/Toast';
@@ -47,13 +69,14 @@
   import { followOrganization } from '$lib/remote/org.remote';
   import { MediaLiveRegion } from '$lib/components/media-a11y';
   import { extractPlainText } from '@codex/validation';
+  import { canBeSold } from '@codex/constants';
   import { updateLocalProgress } from '$lib/collections/progress';
   import type { ContentWithRelations } from '$lib/types';
 
   /**
-   * Extended content type that includes runtime-resolved media fields.
-   * The public content API resolves R2 keys to full CDN URLs (thumbnailUrl,
-   * hlsPreviewUrl) that don't exist on the base MediaItem schema type.
+   * The media item fields this view reads. The public content API sends the
+   * first three and nothing else (Codex-ve5eh): R2 keys are resolved to CDN
+   * URLs on the server, and the rest of the media_items row stays there.
    *
    * `captions` is the list of `<track>` entries forwarded to VideoPlayer (Ref 05 §Media
    * Elements §2). Back-end delivery is pending but the prop wiring + empty-array default
@@ -65,16 +88,20 @@
     label: string;
     default?: boolean;
   };
-  type ContentDetail = ContentWithRelations & {
-    mediaItem?: (ContentWithRelations['mediaItem'] extends infer M
-      ? M extends object
-        ? M & {
-            thumbnailUrl?: string | null;
-            hlsPreviewUrl?: string | null;
-            captions?: CaptionTrack[] | null;
-          }
-        : M
-      : never) | null;
+  type ContentDetailMedia = {
+    durationSeconds?: number | null;
+    thumbnailUrl?: string | null;
+    hlsPreviewUrl?: string | null;
+    captions?: CaptionTrack[] | null;
+  };
+  // No `organization`: this view never reads it, and the public API sends
+  // only four of its fields (Codex-567de).
+  // No `purchaseCount`: the public and browse lists never send it.
+  type ContentDetail = Omit<
+    ContentWithRelations,
+    'mediaItem' | 'organization' | 'purchaseCount'
+  > & {
+    mediaItem?: ContentDetailMedia | null;
   };
 
   /**
@@ -154,6 +181,18 @@
      * the creator content page (which never passes it) is unaffected.
      */
     journeyLink?: { title: string; salesHref: string } | null;
+    /**
+     * Set when this item is no longer on sale but the reader still has it
+     * (Codex-ov2ii): how they hold it. Drives the note above the item, the
+     * badge, and keeps every purchase offer off the page.
+     */
+    withdrawnHeld?: ContentHeld | null;
+    /**
+     * The piece has stored text that failed to render (logged server-side).
+     * Shown as a note in the body's place, never as a page with no body
+     * (Codex-uuz1g).
+     */
+    contentBodyUnavailable?: boolean;
     creatorAttribution?: Snippet;
     purchaseForm?: Snippet;
   }
@@ -179,6 +218,8 @@
     accessCheckFailed = false,
     onaccessrestored,
     journeyLink = null,
+    withdrawnHeld = null,
+    contentBodyUnavailable = false,
     creatorAttribution,
     purchaseForm,
   }: Props = $props();
@@ -187,6 +228,15 @@
   // never for first-time paywall encounters (those render the purchase /
   // subscribe gates below). A non-null revocation reason is the signal.
   const showRevokedOverlay = $derived(!hasAccess && !!revocationReason);
+  // An open payment dispute pauses access (Codex-2hxff.60). There is nothing
+  // to buy or subscribe to until it is settled, so it takes the gate slot.
+  const disputeReason = $derived(
+    !hasAccess &&
+      (revocationReason === 'purchase_dispute' ||
+        revocationReason === 'subscription_dispute')
+      ? revocationReason
+      : null
+  );
 
   // Checkout-error dismiss state (Codex-8aibi). Resets whenever a fresh
   // formResult identity lands, so a new error shows even if the previous
@@ -241,12 +291,99 @@
     !!description && description.length <= 160
   );
 
-  const thumbnailUrl = $derived(content.mediaItem?.thumbnailUrl ?? undefined);
+  const thumbnailUrl = $derived(getDisplayThumbnail(content) ?? undefined);
+
+  const thumbnailSrcset = $derived(
+    thumbnailUrl ? getThumbnailSrcset(thumbnailUrl) : ''
+  );
+  const thumbnailSize = $derived(getThumbnailDimensions(thumbnailUrl));
+  /**
+   * The thumbnail is this page's picture, drawn across the column: 960px less
+   * its 1rem gutters (Codex-kk9nv.3). The audio card offers every stored file
+   * so the browser fetches the one the column needs. The card is also at least
+   * 12rem tall (`--player-height-audio`) and the picture covers it, so where
+   * the column is narrower than the picture's shape (a phone, a wide picture)
+   * it is drawn as wide as that height times its ratio. A picture whose size
+   * is unknown is taken as 16:9, as FeatureCarousel's slides are. The wider
+   * of the two is written as the viewport width where they meet, since
+   * Safari before 26.4 ignores max() in `sizes`.
+   */
+  const previewSizes = $derived.by(() => {
+    const ratio = thumbnailSize
+      ? thumbnailSize.width / thumbnailSize.height
+      : 16 / 9;
+    const covered = Math.round(12 * ratio * 100) / 100;
+    const meet = Math.round((covered + 2) * 100) / 100;
+    return `(min-width: 60rem) ${Math.max(58, covered)}rem, (min-width: ${meet}rem) calc(100vw - 2rem), ${covered}rem`;
+  });
+  /**
+   * The largest file there is: xl when the address records the picture's
+   * size, else lg. A `<video poster>` takes ONE URL and the preview player
+   * renders on the server, so a video page draws this one file everywhere
+   * (poster, preview images, preload) and never fetches two.
+   */
+  const largestThumbnailUrl = $derived(
+    thumbnailUrl ? getThumbnailUrl(thumbnailUrl, 'xl') : undefined
+  );
+  const isVideo = $derived(content.contentType === 'video');
+  /** og:image: the largest file, with its size when the address records it. */
+  const shareImage = $derived(thumbnailUrl ? getShareImage(thumbnailUrl) : null);
+  /** The audio player draws its poster blurred, or at 48px: `sm` covers both. */
+  const audioPosterUrl = $derived(
+    thumbnailUrl ? getThumbnailUrl(thumbnailUrl, 'sm') : undefined
+  );
+  /**
+   * The file the head preloads (LCP): the one this page will certainly draw,
+   * or nothing. An article draws no thumbnail, and an audio page whose access
+   * is still loading may become either the player (sm) or the card (srcset).
+   */
+  const heroPreload = $derived.by(():
+    | { href: string | undefined; srcset?: string; sizes?: string }
+    | null => {
+    if (!thumbnailUrl) return null;
+    if (isVideo) return { href: largestThumbnailUrl };
+    if (content.contentType !== 'audio' || accessLoading) return null;
+    if (hasAccess && streamingUrl) return { href: audioPosterUrl };
+    return {
+      href: thumbnailUrl,
+      srcset: thumbnailSrcset || undefined,
+      sizes: thumbnailSrcset ? previewSizes : undefined,
+    };
+  });
   const duration = $derived(content.mediaItem?.durationSeconds ?? 0);
   const priceCents = $derived(content.priceCents ?? null);
   const isPaid = $derived(!!priceCents && priceCents > 0);
   const isFree = $derived(!priceCents || priceCents === 0);
-  const needsPurchase = $derived(!hasAccess && isPaid && !requiresSubscription);
+  // Buy is offered only when a purchase would open the content
+  // (Codex-2hxff.14). A price alone is not enough: course-only, team-only and
+  // followers-only content ignore a purchase, so the buyer paid and got nothing.
+  // Nor is an item withdrawn from sale (Codex-ov2ii), even if a later access
+  // refresh comes back denied.
+  const isSellable = $derived(!withdrawnHeld && canBeSold(content));
+
+  /** The second sentence of the withdrawn note: how the reader holds it. */
+  function withdrawnNoteDetail(held: ContentHeld): string {
+    switch (held.by) {
+      case 'purchase':
+        return m.content_detail_withdrawn_purchase();
+      case 'course':
+        return m.content_detail_withdrawn_course();
+      case 'subscription':
+        return m.content_detail_withdrawn_subscription({
+          date: formatSentenceDate(held.until),
+        });
+      case 'entitlement':
+        return m.content_detail_withdrawn_entitlement();
+    }
+  }
+  const needsPurchase = $derived(
+    !hasAccess && isSellable && !requiresSubscription
+  );
+  // A priced practice that only opens inside its course gets a plain note in
+  // place of Buy, like the team-only one.
+  const isCourseOnly = $derived(
+    !hasAccess && content.courseOnly === true && isPaid
+  );
   const needsSubscription = $derived(
     !hasAccess && requiresSubscription && !subscriptionCoversContent
   );
@@ -312,12 +449,14 @@
    */
   const accessAnnouncement = $derived.by<string>(() => {
     if (accessLoading) return '';
+    if (disputeReason) return 'Access paused.';
     if (accessState.status === 'unlocked') return 'Content unlocked.';
     if (accessState.status === 'preview') return 'Preview playing.';
     if (accessState.status === 'locked') {
       if (accessCheckFailed) return 'Could not check access.';
       if (isFollowersOnly) return 'Follow to unlock this content.';
       if (isTeamOnly) return 'Team-only content.';
+      if (isCourseOnly) return 'Part of a course.';
       if (needsSubscription) return 'Subscription required.';
       if (!isAuthenticated) return 'Sign in required.';
       return needsPurchase ? 'Purchase required.' : 'Access required.';
@@ -343,13 +482,15 @@
 
   /**
    * Media-lock copy, branched by the real reason in the gate chain's order
-   * (team, followers, subscription, then purchase). "Purchase to watch" only
-   * when there is something to buy; a lock with no named reason says access
-   * is required. A failed check names no reason at all (Codex-h3ipg).
+   * (team, course, followers, subscription, then purchase). "Purchase to
+   * watch" only when there is something to buy; a lock with no named reason
+   * says access is required. A failed check names no reason at all
+   * (Codex-h3ipg).
    */
   const lockCtaText = $derived.by<string>(() => {
     if (accessCheckFailed) return m.content_detail_access_check_failed_cta();
     if (isTeamOnly) return m.team_only_cta_title();
+    if (isCourseOnly) return m.course_only_cta_title();
     if (isFollowersOnly) return m.followers_only_cta_title();
     if (needsSubscription) {
       return hasSubscription ? m.upgrade_cta_title() : m.subscribe_cta_title();
@@ -366,6 +507,7 @@
   const lockCtaSubtext = $derived.by<string>(() => {
     if (accessCheckFailed) return m.content_detail_refresh_description();
     if (isTeamOnly) return m.team_only_cta_description();
+    if (isCourseOnly) return m.course_only_cta_description();
     if (isFollowersOnly) {
       return isAudio
         ? m.content_detail_followers_listen_description()
@@ -415,9 +557,11 @@
    * Codex-jdmp6 — previously generic purchase copy for every gate.
    */
   const bodyLockText = $derived.by<string>(() => {
+    if (disputeReason) return m.access_paused_dispute_title();
     if (accessCheckFailed) return m.content_detail_refresh_description();
     if (isFollowersOnly) return m.followers_only_cta_description();
     if (isTeamOnly) return m.team_only_cta_description();
+    if (isCourseOnly) return m.course_only_cta_description();
     if (needsSubscription) {
       return hasSubscription
         ? m.upgrade_cta_description()
@@ -634,7 +778,11 @@
       name: content.title,
       url: canonicalUrl,
       ...(description && { description }),
-      ...(thumbnailUrl && { thumbnailUrl, image: thumbnailUrl }),
+      // The same file og:image names: the largest the still has.
+      ...(shareImage && {
+        thumbnailUrl: shareImage.url,
+        image: shareImage.url,
+      }),
       ...(publishedDate && { uploadDate: publishedDate, datePublished: publishedDate }),
       ...(creatorName && {
         author: { '@type': 'Person', name: creatorName },
@@ -664,11 +812,23 @@
   <meta property="og:type" content={ogType} />
   <meta property="og:url" content={canonicalUrl} />
   {#if thumbnailUrl}
-    <meta property="og:image" content={thumbnailUrl} />
-    <!-- LCP: thumbnail is the hero on content pages (video poster,
-         audio cover, or article header image). Preload prioritises
-         it in the critical chain so the above-fold paint is faster. -->
-    <link rel="preload" as="image" href={thumbnailUrl} fetchpriority="high" />
+    <meta property="og:image" content={shareImage?.url} />
+    {#if shareImage?.width && shareImage.height}
+      <meta property="og:image:width" content={String(shareImage.width)} />
+      <meta property="og:image:height" content={String(shareImage.height)} />
+    {/if}
+  {/if}
+  {#if heroPreload}
+    <!-- LCP: the video poster or the audio picture, preloaded so the
+         above-fold paint is faster (heroPreload says which file). -->
+    <link
+      rel="preload"
+      as="image"
+      href={heroPreload.href}
+      imagesrcset={heroPreload.srcset}
+      imagesizes={heroPreload.sizes}
+      fetchpriority="high"
+    />
   {/if}
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content={content.title} />
@@ -678,6 +838,24 @@
 </svelte:head>
 
 <StructuredData data={contentSchema} />
+
+<!--
+  The thumbnail where it is the page's picture. Over a video it is the one
+  file the poster also uses (largestThumbnailUrl); in the audio card it offers
+  every stored file (previewSizes).
+-->
+{#snippet thumbnailImage(audio: boolean)}
+  <img
+    class:content-detail__preview-image={!audio}
+    class:content-detail__audio-locked-image={audio}
+    src={audio ? thumbnailUrl : largestThumbnailUrl}
+    srcset={audio && thumbnailSrcset ? thumbnailSrcset : undefined}
+    sizes={audio && thumbnailSrcset ? previewSizes : undefined}
+    width={thumbnailSize?.width}
+    height={thumbnailSize?.height}
+    alt={m.content_thumbnail_alt({ title: content.title })}
+  />
+{/snippet}
 
 <!--
   Root is an <article> (Codex-jo819 O1) — this is the semantic owner of the
@@ -709,6 +887,20 @@
     </nav>
   {/if}
 
+  <!--
+    Withdrawn from sale, still the reader's (Codex-ov2ii): a note, not a lock.
+    Above the player, or above an article's title.
+  -->
+  {#if withdrawnHeld}
+    <Alert variant="info" role="note" class="content-detail__access-note">
+      <LibraryIcon size={16} class="content-detail__access-note-icon" />
+      <p class="content-detail__access-note-text">
+        <strong>{m.content_detail_withdrawn_lead()}</strong>
+        {withdrawnNoteDetail(withdrawnHeld)}
+      </p>
+    </Alert>
+  {/if}
+
   <!-- Video Player / Preview — renders FIRST (hero position) -->
   {#if content.contentType === 'video'}
   <div class="content-detail__player" class:content-detail__player--cinema={cinemaMode} data-content-type="video" tabindex="-1">
@@ -716,11 +908,7 @@
       <!-- Revoked overlay sits over the poster / preview so the user sees
            "why" without losing the thumbnail context (Codex-zdf2u). -->
       {#if thumbnailUrl}
-        <img
-          class="content-detail__preview-image"
-          src={thumbnailUrl}
-          alt={m.content_thumbnail_alt({ title: content.title })}
-        />
+        {@render thumbnailImage(false)}
       {/if}
       <AccessRevokedOverlay
         reason={revocationReason}
@@ -733,7 +921,7 @@
           src={streamingUrl}
           contentId={content.id}
           initialProgress={progress?.positionSeconds ?? 0}
-          poster={thumbnailUrl}
+          poster={largestThumbnailUrl}
           captions={content.mediaItem?.captions ?? []}
           expiresAt={streamingExpiresAt ?? null}
           readyVariants={readyVariants ?? null}
@@ -749,20 +937,17 @@
       <svelte:boundary>
         <PreviewPlayer
           previewUrl={previewUrl}
-          poster={thumbnailUrl}
+          poster={largestThumbnailUrl}
           contentId={content.id}
           contentTitle={content.title}
           {accessState}
+          canPurchase={isSellable}
           autoplay={true}
         />
         {#snippet failed(_error, _reset)}
           <div class="content-detail__preview">
             {#if thumbnailUrl}
-              <img
-                class="content-detail__preview-image"
-                src={thumbnailUrl}
-                alt={m.content_thumbnail_alt({ title: content.title })}
-              />
+              {@render thumbnailImage(false)}
             {/if}
             <div class="content-detail__preview-overlay">
               <div class="content-detail__preview-cta">
@@ -782,11 +967,7 @@
            and no paywall copy (Codex-h3ipg). -->
       <div class="content-detail__preview content-detail__preview--unplayable">
         {#if thumbnailUrl}
-          <img
-            class="content-detail__preview-image"
-            src={thumbnailUrl}
-            alt={m.content_thumbnail_alt({ title: content.title })}
-          />
+          {@render thumbnailImage(false)}
         {/if}
         <div class="content-detail__preview-overlay">
           <div class="content-detail__preview-cta">
@@ -798,11 +979,7 @@
     {:else}
       <div class="content-detail__preview">
         {#if thumbnailUrl}
-          <img
-            class="content-detail__preview-image"
-            src={thumbnailUrl}
-            alt={m.content_thumbnail_alt({ title: content.title })}
-          />
+          {@render thumbnailImage(false)}
         {/if}
         <div class="content-detail__preview-overlay">
           <div class="content-detail__preview-cta">
@@ -827,7 +1004,15 @@
             {m.content_duration()}: {formatDurationHuman(duration)}
           </span>
         {/if}
-        {#if hasAccess && isPaid}
+        {#if withdrawnHeld}
+          <!-- Bought: Purchased. Any other hold (subscription, course, a
+               grant): Included, never "Purchased". -->
+          <PriceBadge
+            amount={priceCents}
+            purchased={withdrawnHeld.by === 'purchase'}
+            included={withdrawnHeld.by !== 'purchase'}
+          />
+        {:else if hasAccess && isPaid}
           <PriceBadge amount={priceCents} purchased={true} />
         {/if}
       </div>
@@ -864,11 +1049,7 @@
         {#if showRevokedOverlay}
           <div class="content-detail__audio-locked">
             {#if thumbnailUrl}
-              <img
-                class="content-detail__audio-locked-image"
-                src={thumbnailUrl}
-                alt={m.content_thumbnail_alt({ title: content.title })}
-              />
+              {@render thumbnailImage(true)}
             {/if}
             <AccessRevokedOverlay
               reason={revocationReason}
@@ -883,7 +1064,7 @@
               contentId={content.id}
               initialProgress={progress?.positionSeconds ?? 0}
               waveformUrl={waveformUrl}
-              poster={thumbnailUrl}
+              poster={audioPosterUrl}
               title={content.title}
               shaderPreset={content.shaderPreset ?? null}
               expiresAt={streamingExpiresAt ?? null}
@@ -902,11 +1083,7 @@
                frame without the lock or the paywall copy. -->
           <div class="content-detail__audio-locked content-detail__audio-locked--unplayable">
             {#if thumbnailUrl}
-              <img
-                class="content-detail__audio-locked-image"
-                src={thumbnailUrl}
-                alt={m.content_thumbnail_alt({ title: content.title })}
-              />
+              {@render thumbnailImage(true)}
             {/if}
             <div class="content-detail__audio-locked-overlay">
               <p class="content-detail__cta-text">{unplayableText}</p>
@@ -917,11 +1094,7 @@
           <!-- Locked audio preview card (Codex-066ye) -->
           <div class="content-detail__audio-locked">
             {#if thumbnailUrl}
-              <img
-                class="content-detail__audio-locked-image"
-                src={thumbnailUrl}
-                alt={m.content_thumbnail_alt({ title: content.title })}
-              />
+              {@render thumbnailImage(true)}
             {/if}
             <div class="content-detail__audio-locked-overlay">
               <LockIcon size={32} class="content-detail__lock-icon" stroke-width="1.5" />
@@ -941,7 +1114,26 @@
       price amount span (Codex-jo819 O2).
     -->
     {#if !accessLoading}
-      {#if accessCheckFailed && !hasAccess}
+      {#if disputeReason}
+        <!-- Paused by a payment dispute: no Buy, Subscribe or Upgrade. Video
+             and audio say why in the player's overlay; a written item has
+             no player, so the notice sits here (Codex-2hxff.60). -->
+        {#if content.contentType !== 'video' && content.contentType !== 'audio'}
+          <section class="content-detail__purchase" aria-labelledby="purchase-label-dispute">
+            <div class="content-detail__price">
+              <span id="purchase-label-dispute" class="content-detail__price-amount">{m.access_paused_dispute_title()}</span>
+              <span class="content-detail__price-label">
+                {disputeReason === 'purchase_dispute'
+                  ? m.access_paused_dispute_purchase()
+                  : m.access_paused_dispute_subscription()}
+              </span>
+            </div>
+            <a href={supportMailto('Access issue')} class="content-detail__purchase-btn content-detail__purchase-btn--link">
+              {m.access_contact_support()}
+            </a>
+          </section>
+        {/if}
+      {:else if accessCheckFailed && !hasAccess}
         <!-- No verdict, so no gate: a purchase CTA here would ask an
              entitled viewer to pay again (Codex-h3ipg). -->
         <section class="content-detail__purchase" aria-labelledby="purchase-label-check">
@@ -955,6 +1147,13 @@
           <div class="content-detail__price">
             <span id="purchase-label-team" class="content-detail__price-amount">{m.team_only_cta_title()}</span>
             <span class="content-detail__price-label">{m.team_only_cta_description()}</span>
+          </div>
+        </section>
+      {:else if isCourseOnly}
+        <section class="content-detail__purchase" aria-labelledby="purchase-label-course">
+          <div class="content-detail__price">
+            <span id="purchase-label-course" class="content-detail__price-amount">{m.course_only_cta_title()}</span>
+            <span class="content-detail__price-label">{m.course_only_cta_description()}</span>
           </div>
         </section>
       {:else if isFollowersOnly}
@@ -1013,7 +1212,7 @@
             </a>
           {/if}
 
-          {#if isPaid}
+          {#if isSellable}
             <span class="content-detail__or-divider">or purchase for {displayPrice(priceCents)}</span>
             {#if isAuthenticated && purchaseForm}
               {@render purchaseForm()}
@@ -1058,7 +1257,7 @@
                   <p class="content-detail__purchase-error-text">{formResult.checkoutError}</p>
                   {#if (formResult?.retryCount ?? 0) >= 3}
                     <p class="content-detail__purchase-error-escalation">
-                      Still stuck? <a href="mailto:support@codex.example?subject=Checkout%20help">Contact support</a>.
+                      Still stuck? <a href={supportMailto('Checkout help')}>Contact support</a>.
                     </p>
                   {/if}
                 </div>
@@ -1227,6 +1426,11 @@
           </div>
         </div>
       {/if}
+    {:else if contentBodyUnavailable}
+      <!-- Stored text that failed to render (Codex-uuz1g): said, not blank. -->
+      <Alert variant="warning" class="content-detail__body-unavailable">
+        <p>{m.content_detail_body_unavailable()}</p>
+      </Alert>
     {/if}
   </div>
 </article>
@@ -1666,6 +1870,30 @@
   .content-detail__purchase-error-dismiss:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: var(--space-0-5);
+  }
+
+  /* Withdrawn from sale, still the reader's (Codex-ov2ii). The Alert supplies
+     the info surface; this lays the icon and text out on one line. */
+  :global(.content-detail__access-note) {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2);
+    margin-bottom: var(--space-4);
+    line-height: var(--leading-normal);
+  }
+
+  :global(.content-detail__access-note-icon) {
+    flex-shrink: 0;
+    margin-top: var(--space-0-5);
+  }
+
+  .content-detail__access-note-text {
+    flex: 1 1 auto;
+    margin: 0;
+  }
+
+  .content-detail__access-note-text strong {
+    font-weight: var(--font-semibold);
   }
 
   /* Info banner (409 "already owned" happy-path — Codex-mmju5) */

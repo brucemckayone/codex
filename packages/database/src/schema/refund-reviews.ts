@@ -68,6 +68,8 @@ export const refundReviews = pgTable(
     resolvedByUserId: text('resolved_by_user_id').references(() => users.id, {
       onDelete: 'set null',
     }),
+    /** Support's note on the settlement: a money record, not a log line (Q6). */
+    resolutionNote: text('resolution_note'),
 
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()
@@ -89,7 +91,7 @@ export const refundReviews = pgTable(
     ),
     check(
       'check_refund_reviews_resolution',
-      sql`${table.resolution} IS NULL OR ${table.resolution} IN ('creator_absorbed', 'platform_absorbed', 'manually_reversed', 'dispute_won')`
+      sql`${table.resolution} IS NULL OR ${table.resolution} IN ('creator_absorbed', 'platform_absorbed', 'manually_reversed', 'dispute_won', 'refund_failed')`
     ),
     check(
       'check_refund_reviews_resolved_pair',
@@ -132,4 +134,7 @@ export type RefundReviewResolution =
   // Support reversed the transfer by hand, so the payee paid it.
   | 'manually_reversed'
   // A dispute's debt, closed because the dispute was won (Codex-2hxff.9).
-  | 'dispute_won';
+  | 'dispute_won'
+  // A refund's debt, closed because the refund failed and support re-paid
+  // the payees (Codex-2hxff.28, Q5b). The payee paid nothing.
+  | 'refund_failed';

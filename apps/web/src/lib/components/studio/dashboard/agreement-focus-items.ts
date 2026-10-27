@@ -13,8 +13,7 @@
  *
  * Unit semantics:
  *  - `sharePercent` (a.k.a. `proposed_creator_share_percent` on the
- *    proposals table; `10000 - organizationFeePercentage` on the
- *    legacy active-agreement row) is BASIS POINTS of post-platform
+ *    proposals table) is BASIS POINTS of post-platform
  *    revenue (0–10000). All copy says "of post-platform
  *    [revenueType] revenue" per the C1 math semantic
  *    (`project_revenue_share_decisions.md`).
@@ -51,17 +50,15 @@ export interface TeamMemberInput {
 }
 
 /**
- * Subset of `CreatorOrganizationAgreement` this aggregator consumes.
- * The legacy `organizationFeePercentage` column is the dual-write source
- * of truth for active rows today (per WP-1 discoveries); we accept it as
- * a number and translate to display % at render time.
+ * Subset of an active agreement row this aggregator consumes. No share: no
+ * active-agreement item states one. It used to take the legacy
+ * `organizationFeePercentage` and never read it (Codex-fazy6). An item that
+ * ever shows the share must read the row's own `creatorSharePercent`.
  */
 export interface ActiveAgreementInput {
   id: string;
   creatorId: string;
   revenueType: string;
-  /** Basis points (0–10000) of the org's slice; share = 10000 - this. */
-  organizationFeePercentage: number;
   /** ISO string or Date. `null` = indefinite. */
   effectiveUntil: string | Date | null;
 }
@@ -135,9 +132,10 @@ function memberDisplayName(member: TeamMemberInput): string {
 const EXPIRING_SOON_WINDOW_DAYS = 30;
 
 /**
- * Compute whole days until `effectiveUntil`. Returns `null` for
- * indefinite agreements (no `effectiveUntil`) and for already-expired
- * windows (negative — the FocusRail does not surface past-expiry).
+ * Compute whole days until the review date (`effectiveUntil`). Returns
+ * `null` for indefinite agreements (no `effectiveUntil`) and once the date
+ * has passed (negative — the FocusRail stops prompting a review then; the
+ * agreement keeps paying).
  *
  * @param now Injected for deterministic tests. Defaults to `new Date()`.
  */
@@ -281,8 +279,11 @@ export function buildOwnerAgreementFocusItems(
     items.push({
       id: `agreement-expiring-${agreement.id}`,
       eyebrow: 'Revenue share',
-      title: `Agreement with ${name} expires in ${days} day${days === 1 ? '' : 's'}`,
-      description: 'Renew or terminate before it auto-expires.',
+      // The review date is not an expiry: the agreement keeps paying past it
+      // (owner decision AGR-01, Codex-2hxff.17).
+      title: `Agreement with ${name} is due for review in ${days} day${days === 1 ? '' : 's'}`,
+      description:
+        'It keeps paying after that date. Renegotiate or end it if the terms should change.',
       href: `/studio/monetisation/revenue-share?focus=${encodeURIComponent(agreement.creatorId)}`,
       tone: 'warning',
       dismissable: true,
@@ -369,8 +370,9 @@ export function buildCreatorAgreementFocusItems(
     items.push({
       id: `agreement-expiring-${agreement.id}`,
       eyebrow: 'Revenue share',
-      title: `Your agreement with ${orgName} expires in ${days} day${days === 1 ? '' : 's'}`,
-      description: 'Renew with the org or it auto-expires.',
+      title: `Your agreement with ${orgName} is due for review in ${days} day${days === 1 ? '' : 's'}`,
+      description:
+        'It keeps paying after that date. Renegotiate with the organisation if the terms should change.',
       href: `/studio/negotiations/${encodeURIComponent(agreement.id)}`,
       tone: 'warning',
       dismissable: true,

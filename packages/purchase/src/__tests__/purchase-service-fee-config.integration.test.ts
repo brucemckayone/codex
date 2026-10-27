@@ -174,8 +174,9 @@ describe('PurchaseService × FeeConfigService integration', () => {
   });
 
   it('min-platform-fee floor wins when percentage gives a smaller cut (creator reduction first)', async () => {
-    // Gross 50p, 10% percent → 5p platform naive. Floor=30 → platform takes 30,
-    // creator pool absorbs the shortfall first then org.
+    // Gross 100p (the £1 minimum price, Codex-2hxff.32), 10% percent → 10p
+    // platform naive. Floor=30 → platform takes 30, creator pool absorbs the
+    // shortfall first then org.
     const feeConfig = makeFeeConfigStub({
       platformFeePercent: 1000,
       orgFeePercent: 0,
@@ -187,14 +188,14 @@ describe('PurchaseService × FeeConfigService integration', () => {
       mockStripe
     );
 
-    const content = await makePaidContent(50, 'fee-floor');
+    const content = await makePaidContent(100, 'fee-floor');
     const piId = `pi_fee_floor_${Date.now()}`;
 
     const purchase = await svc.completePurchase(piId, {
       customerId,
       contentId: content.id,
       organizationId,
-      amountPaidCents: 50,
+      amountPaidCents: 100,
       currency: 'gbp',
     });
 
@@ -204,14 +205,15 @@ describe('PurchaseService × FeeConfigService integration', () => {
       purchase.platformFeeCents +
         purchase.organizationFeeCents +
         purchase.creatorPayoutCents
-    ).toBe(50);
+    ).toBe(100);
     // Creator absorbs first; org was already 0.
     expect(purchase.organizationFeeCents).toBe(0);
-    expect(purchase.creatorPayoutCents).toBe(20);
+    expect(purchase.creatorPayoutCents).toBe(70);
   });
 
   it('floor clamps at amountPaidCents — platform never takes more than gross', async () => {
-    // Floor=200 but gross is only 50. Platform takes 50, everything else = 0.
+    // Floor=200 but gross is only 100 (the £1 minimum). Platform takes 100,
+    // everything else = 0.
     const feeConfig = makeFeeConfigStub({
       platformFeePercent: 1000,
       orgFeePercent: 0,
@@ -223,18 +225,18 @@ describe('PurchaseService × FeeConfigService integration', () => {
       mockStripe
     );
 
-    const content = await makePaidContent(50, 'fee-floor-clamp');
+    const content = await makePaidContent(100, 'fee-floor-clamp');
     const piId = `pi_fee_floor_clamp_${Date.now()}`;
 
     const purchase = await svc.completePurchase(piId, {
       customerId,
       contentId: content.id,
       organizationId,
-      amountPaidCents: 50,
+      amountPaidCents: 100,
       currency: 'gbp',
     });
 
-    expect(purchase.platformFeeCents).toBe(50);
+    expect(purchase.platformFeeCents).toBe(100);
     expect(purchase.organizationFeeCents).toBe(0);
     expect(purchase.creatorPayoutCents).toBe(0);
   });

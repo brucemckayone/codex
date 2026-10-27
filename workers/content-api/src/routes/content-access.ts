@@ -1,4 +1,5 @@
 import {
+  type CourseEntryResponse,
   createContentAccessService,
   type PlaybackProgressResponse,
   type StreamingUrlResponse,
@@ -17,15 +18,17 @@ import {
   canEnterCourseParamsSchema,
   canViewParamsSchema,
   createIdParamsSchema,
-  getStreamingUrlSchema,
   hlsProxyQuerySchema,
   hlsVariantParamsSchema,
   listUserLibrarySchema,
   savePlaybackProgressSchema,
+  streamingUrlQuerySchema,
+  withdrawnContentQuerySchema,
 } from '@codex/validation';
 import { PaginatedResult, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 import { createMiddleware } from 'hono/factory';
+import { resolveR2PublicBases, toPublicItem } from './r2-public-urls';
 
 const app = new Hono<HonoEnv>();
 
@@ -96,7 +99,11 @@ const hlsStreamingRateLimit = createMiddleware<HonoEnv>((c, next) =>
  * grant OR a derived tier grant, never a stale `course_enrollments` row — so a
  * lapsed tier loses entry instantly (instant-revocation). Delegates to the
  * frozen `EntitlementResolver.canEnterCourse` on the access service.
- * @returns {{ canEnter: boolean }}
+ *
+ * On a refusal it also names an open payment dispute that holds the user's
+ * grant back (`disputeHold`, Codex-2hxff.60), so the course page shows the
+ * dispute notice instead of Buy or Join.
+ * @returns {CourseEntryResponse}
  */
 app.get(
   '/courses/:courseId/can-enter',
@@ -108,13 +115,11 @@ app.get(
     input: {
       params: canEnterCourseParamsSchema,
     },
-    handler: async (ctx): Promise<{ canEnter: boolean }> => {
-      const canEnter = await ctx.services.access.canEnterCourse(
+    handler: async (ctx): Promise<CourseEntryResponse> =>
+      ctx.services.access.getCourseEntry(
         ctx.user.id,
         ctx.input.params.courseId
-      );
-      return { canEnter };
-    },
+      ),
   })
 );
 
@@ -157,8 +162,14 @@ app.get(
  *
  * Access verification done at service layer:
  * - Content's organizationId is fetched from database
- * - User access verified via purchase OR organization membership
+ * - Access is decided by `decideContentAccess` (price, tier, followers, team,
+ *   course-only), as for every other content read
  * - Works from both org subdomains and root domain (revelations.studio)
+ *
+ * `?include=body` also returns the content's body once access is granted (a row
+ * never released is granted to no one, Codex-nacky): the body source for an entitled
+ * reader of a gated piece, whose public row carries none (Codex-039vo). Only
+ * the detail pages send it.
  * @returns {StreamingUrlResponse}
  */
 app.get(
@@ -167,26 +178,73 @@ app.get(
     policy: {
       auth: 'required',
       rateLimit: 'streaming', // 60 req/min - allows HLS segment refreshes
+      // `private, no-store`, as the HLS playlist routes: this response carries
+      // a per-user HLS token, and with `include=body` a gated piece's body, so
+      // no copy of IT may outlive the request on any disk. That covers this
+      // response only: the detail page that renders the body sends its own
+      // header, `private, no-store` too when it carries a gated body
+      // (`detailPageCacheHeaders`, Codex-hyz1c).
+      cache: 'fresh',
     },
     input: {
       params: createIdParamsSchema(),
-      query: getStreamingUrlSchema.pick({ expirySeconds: true }),
+      query: streamingUrlQuerySchema,
     },
     handler: async (ctx): Promise<StreamingUrlResponse> => {
       const { params, query } = ctx.input;
 
       // Service fetches content's organizationId and verifies access
-      const result = await ctx.services.access.getStreamingUrl(ctx.user.id, {
-        contentId: params.id,
-        expirySeconds: query?.expirySeconds,
-      });
+      const result = await ctx.services.access.getStreamingUrl(
+        ctx.user.id,
+        { contentId: params.id, expirySeconds: query?.expirySeconds },
+        { includeBody: query?.include === 'body' }
+      );
 
+      // `body` is undefined unless asked for, granted, and released; JSON
+      // drops it.
       return {
         streamingUrl: result.streamingUrl,
         waveformUrl: result.waveformUrl,
         expiresAt: result.expiresAt.toISOString(),
         contentType: result.contentType,
         readyVariants: result.readyVariants,
+        body: result.body,
+      };
+    },
+  })
+);
+
+/**
+ * GET /api/access/content/withdrawn?slug=…&(orgId=…|creatorId=…)
+ *
+ * An item that was published once, is not now, and that this reader still
+ * has access to (a buyer, a course owner, a subscriber until their next
+ * renewal), by its detail URL's key (Codex-ov2ii). The detail pages ask for it
+ * when the public lookup misses for a signed-in reader, so an item withdrawn
+ * from sale opens for whoever still has it instead of "Content not found".
+ *
+ * Every other case is a 404, the same one whether or not the item exists.
+ * `private, no-store`: the answer is per reader, and nothing caches it.
+ * @returns `{ content, held }`, `content` the public list's wire item
+ *   (`toPublicItem`), never the row: the same three media fields and four org
+ *   fields (Codex-ve5eh, Codex-567de). Typed on the web as
+ *   `WithdrawnContentItem`.
+ */
+app.get(
+  '/content/withdrawn',
+  procedure({
+    policy: { auth: 'required', cache: 'fresh' },
+    input: { query: withdrawnContentQuerySchema },
+    handler: async (ctx) => {
+      const { content, held } = await ctx.services.access.getWithdrawnContent(
+        ctx.user.id,
+        ctx.input.query
+      );
+      // The public list's item, built the same way, so the page draws the
+      // thumbnail and preview it drew on the storefront.
+      return {
+        content: toPublicItem(content, resolveR2PublicBases(ctx.env), ctx.obs),
+        held,
       };
     },
   })

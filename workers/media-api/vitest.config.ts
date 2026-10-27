@@ -1,5 +1,7 @@
 import { defineWorkersConfig } from '@cloudflare/vitest-pool-workers/config';
+import { configDefaults } from 'vitest/config';
 import { assertWorkerTestDatabase } from '../../config/vitest/worker-test-database';
+import { SOCKET_TEST_FILES } from './vitest.sockets.config';
 
 assertWorkerTestDatabase(import.meta.dirname);
 
@@ -18,6 +20,8 @@ export default defineWorkersConfig({
       },
     },
     include: ['src/**/*.{test,spec}.ts'],
+    // Run by vitest.sockets.config.ts, on shared storage.
+    exclude: [...configDefaults.exclude, ...SOCKET_TEST_FILES],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],

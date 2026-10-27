@@ -147,6 +147,15 @@ export const mediaItems = pgTable(
     transcodingPriority: integer('transcoding_priority').default(2).notNull(), // 0=urgent, 2=normal, 4=backlog
     transcodingProgress: integer('transcoding_progress'), // 0-100, null when not transcoding
     transcodingStep: varchar('transcoding_step', { length: 50 }), // Current step label, null when not transcoding
+    // Why the transcoder is not running this item, as a TRANSCODING_ERROR_CODES
+    // code (@codex/constants): on `uploaded`, it is waiting for the transcoder;
+    // on `failed`, why it failed (rows that failed before codes existed carry
+    // INFRA_ERROR). `transcodingError` holds the detail. Null when nothing has
+    // gone wrong. Length = TRANSCODING_ERROR_CODE_MAX_LENGTH, kept a literal:
+    // drizzle-kit loads this file through a CJS shim that reads a missing
+    // export from a stale constants dist as undefined, i.e. an unsized varchar.
+    // A transcoding test pins the two together.
+    transcodingErrorCode: varchar('transcoding_error_code', { length: 50 }),
 
     // Mezzanine/Archive (extensibility)
     mezzanineKey: varchar('mezzanine_key', { length: 500 }), // Archive-quality intermediate
@@ -300,6 +309,11 @@ export const content = pgTable(
     status: varchar('status', { length: 50 }).default('draft').notNull(),
     // 'draft' | 'published' | 'archived'
     publishedAt: timestamp('published_at', { withTimezone: true }),
+    // When the item was taken off sale because its creator left the
+    // organisation (status -> 'archived'; Codex-2hxff.64). Tier subscribers
+    // keep it until their next renewal: access while off_sale_at >= their
+    // current period start. Cleared when the item is republished.
+    offSaleAt: timestamp('off_sale_at', { withTimezone: true }),
 
     // Creator-flagged feature — promotes the item to a full-width editorial
     // card on the org homepage feed. Orthogonal to status: only published
@@ -431,6 +445,11 @@ export type OrganizationMembership =
 export type NewOrganizationMembership =
   typeof organizationMemberships.$inferInsert;
 export type MediaItem = typeof mediaItems.$inferSelect;
+/**
+ * A media row as a response carries it: without the transcoder's raw detail
+ * (MEDIA_ITEM_RESPONSE_COLUMNS, utils/media-item-columns.ts, Codex-l2c48).
+ */
+export type ServedMediaItem = Omit<MediaItem, 'transcodingError'>;
 export type NewMediaItem = typeof mediaItems.$inferInsert;
 export type Content = typeof content.$inferSelect;
 export type NewContent = typeof content.$inferInsert;

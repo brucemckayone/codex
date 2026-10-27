@@ -22,18 +22,20 @@
 -->
 <script lang="ts">
   import { hasHead } from '../../model/read';
-  import { resolvePageImageUrl, storedFocus } from '../../../page-images';
+  import { pageImageSrcset, resolvePageImageUrl, storedFocus } from '../../../page-images';
   import type { BlockProps } from '../../model/types';
+  import { getKitPage } from '../../page-context';
   import Eyebrow from '../../primitives/Eyebrow.svelte';
   import Heading from '../../primitives/Heading.svelte';
   import Text from '../../primitives/Text.svelte';
-  import { type Picture, pictureVariant } from './arrange';
+  import { type Picture, pictureSizes, pictureVariant } from './arrange';
   import { GALLERY_EMPTY, galleryDefinition } from './definition';
   import GalleryGrid from './GalleryGrid.svelte';
   import GalleryMosaic from './GalleryMosaic.svelte';
   import GalleryStrip from './GalleryStrip.svelte';
 
   const { props, section, context, edit }: BlockProps = $props();
+  const page = getKitPage();
 
   /** How many plates each layout's empty preview draws: enough to show its shape. */
   const PLATES = { mosaic: 5, strip: 5, grid: 6 } as const;
@@ -49,6 +51,9 @@
         pictureVariant(layout, index, all.length),
         context.mediaBaseUrl
       ),
+      // Every size it has, chosen at its tile's width (Codex-61zsk.66).
+      srcset: pageImageSrcset(item.image, context.mediaBaseUrl),
+      sizes: pictureSizes(layout, index, all.length, page.style),
       alt: item.image.alt ?? '',
       caption: item.caption,
       focus: storedFocus(item.image),

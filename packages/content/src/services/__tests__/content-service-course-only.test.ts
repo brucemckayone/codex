@@ -71,10 +71,15 @@ describe('ContentService — courseOnly catalogue exclusion (Codex-0biug)', () =
     await teardownTestDatabase();
   });
 
-  /** A published content row, gated or not. Returns its id AND slug. */
+  /**
+   * A published content row, gated or not. Returns its id AND slug. `isFree` is
+   * left at its column default (true), so a course-only row has the shape the
+   * course service writes: flagged free AND course-only.
+   */
   async function seedPractice(opts: {
     title: string;
     courseOnly: boolean;
+    contentBody?: string;
   }): Promise<{ id: string; slug: string }> {
     const slug = createUniqueSlug('practice');
     const [row] = await db
@@ -88,6 +93,7 @@ describe('ContentService — courseOnly catalogue exclusion (Codex-0biug)', () =
         status: 'published',
         publishedAt: new Date(),
         courseOnly: opts.courseOnly,
+        contentBody: opts.contentBody ?? null,
       })
       .returning({ id: content.id, slug: content.slug });
     if (!row) throw new Error('failed to seed practice');
@@ -135,6 +141,36 @@ describe('ContentService — courseOnly catalogue exclusion (Codex-0biug)', () =
     });
 
     expect(result.items.map((i) => i.id)).toContain(gated.id);
+  });
+
+  // The public endpoint is unauthenticated and KV-cached. It used to keep the
+  // body of any by-slug row flagged free, so anyone could read a course-only
+  // practice's full text by its slug (Codex-039vo). An entitled reader gets the
+  // body from the access check instead.
+  it('listPublic BY SLUG returns a free-flagged course-only practice WITHOUT its body, and a public one with it', async () => {
+    const token = uniqueToken();
+    const gated = await seedPractice({
+      title: `Body gated ${token}`,
+      courseOnly: true,
+      contentBody: `the curriculum text ${token}`,
+    });
+    const open = await seedPractice({
+      title: `Body open ${token}`,
+      courseOnly: false,
+      contentBody: `the public text ${token}`,
+    });
+
+    const bySlug = (slug: string) =>
+      service.listPublic({ orgId, page: 1, limit: 1, sort: 'newest', slug });
+    const [gatedRow] = (await bySlug(gated.slug)).items;
+    const [openRow] = (await bySlug(open.slug)).items;
+
+    // The calibration: the gated row is still returned, flagged free.
+    expect(gatedRow).toMatchObject({ id: gated.id, isFree: true });
+    expect(gatedRow?.contentBody).toBeNull();
+    expect(gatedRow?.contentBodyJson).toBeNull();
+    // And the strip is not blanket: a public row keeps its body.
+    expect(openRow?.contentBody).toBe(`the public text ${token}`);
   });
 
   it("list(scope:'browse') EXCLUDES a gated practice", async () => {

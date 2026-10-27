@@ -43,9 +43,28 @@ import { z } from 'zod';
  */
 export const SEARCH_MIN_QUERY_LENGTH = 3;
 
+/**
+ * The default search cap, after NUL is dropped and the value trimmed: the
+ * content lists take 255. Some facets pass a smaller one.
+ */
+export const SEARCH_MAX_QUERY_LENGTH = 255;
+
 // ============================================================================
 // The server schema
 // ============================================================================
+
+/**
+ * Drops NUL (U+0000) from a text value (Codex-osuqt). Postgres refuses NUL in
+ * text (22021), so one in a search, slug or topic from a URL was a 500 and an
+ * error-level log any visitor could raise. For FREE TEXT only: dropping it
+ * changes no legitimate search. An exact-match identifier (a slug, a topic)
+ * refuses one instead ({@link hasNoNul}), because a rewritten identifier can
+ * name a different row, or none at all.
+ */
+export const stripNul = (value: string): string => value.replaceAll('\0', '');
+
+/** True when a value carries no NUL: the refine for an exact-match identifier. */
+export const hasNoNul = (value: string): boolean => !value.includes('\0');
 
 /**
  * Build the schema for an optional free-text `search` query parameter.
@@ -67,7 +86,10 @@ export const SEARCH_MIN_QUERY_LENGTH = 3;
  * here and return 200 (with a scan); the client is what declines to issue
  * them. See {@link gateSearchQuery}.
  *
- * @param maxLength - Maximum accepted length after trimming (default 255)
+ * Drops a NUL first ({@link stripNul}), then trims and caps.
+ *
+ * @param maxLength - Maximum accepted length after NUL is dropped and the value
+ *   trimmed (default {@link SEARCH_MAX_QUERY_LENGTH})
  *
  * @example
  * ```typescript
@@ -76,12 +98,35 @@ export const SEARCH_MIN_QUERY_LENGTH = 3;
  * });
  * ```
  */
-export const createSearchQuerySchema = (maxLength: number = 255) =>
+export const createSearchQuerySchema = (
+  maxLength: number = SEARCH_MAX_QUERY_LENGTH
+) =>
   z
     .string()
-    .trim()
-    .max(maxLength, `Search query must be ${maxLength} characters or less`)
+    .transform(stripNul)
+    .pipe(
+      z
+        .string()
+        .trim()
+        .max(maxLength, `Search query must be ${maxLength} characters or less`)
+    )
     .optional();
+
+/**
+ * A search URL param normalised the way {@link createSearchQuerySchema} does
+ * (NUL dropped, trimmed), then cut to `maxLength` rather than refused, for a
+ * server load that forwards it (Codex-osuqt). An over-long `?q=` would
+ * otherwise reach the API as a 400, which a page logs at error level as its
+ * own contract bug. Returns `''` for no search.
+ */
+export function boundSearchParam(
+  raw: string | null | undefined,
+  maxLength: number = SEARCH_MAX_QUERY_LENGTH
+): string {
+  return stripNul(raw ?? '')
+    .trim()
+    .slice(0, maxLength);
+}
 
 // ============================================================================
 // The client gate

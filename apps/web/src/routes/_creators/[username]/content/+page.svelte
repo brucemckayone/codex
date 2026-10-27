@@ -5,6 +5,7 @@
   and SEO-friendly pagination. Uses ContentCard grid and Pagination component.
 -->
 <script lang="ts">
+  import { getDisplayThumbnail } from '$lib/utils/thumbnail';
   import { gateSearchQuery, isSearchQueryBelowFloor } from '@codex/validation';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
@@ -12,9 +13,10 @@
   import { ContentCard } from '$lib/components/ui/ContentCard';
   import { deriveContentAccessKind } from '$lib/utils/content-access';
   import { Pagination } from '$lib/components/ui/Pagination';
-  import { buildContentUrl } from '$lib/utils/subdomain';
+  import { buildCreatorContentUrl } from '$lib/utils/subdomain';
   import { ArrowLeftIcon, SearchIcon, FileIcon } from '$lib/components/ui/Icon';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
+  import ErrorBanner from '$lib/components/ui/Feedback/ErrorBanner.svelte';
   import type { PageData } from './$types';
 
   const { data }: { data: PageData } = $props();
@@ -112,7 +114,7 @@
       <input
         type="search"
         id="creator-content-search"
-        name="q"
+        name="search"
         autocomplete="off"
         class="search-input"
         placeholder={m.creator_content_search_placeholder()}
@@ -136,18 +138,21 @@
     </div>
   </div>
 
-  <!-- Content Grid -->
-  {#if hasContent && contentItems.length > 0}
+  <!-- Content Grid. A failed read is an error, ahead of both empty states:
+       neither "no results" nor "hasn't published" may stand in for it. -->
+  {#if data.contentError}
+    <ErrorBanner title={m.creator_content_error_title()} description={m.creator_content_error_description()} />
+  {:else if hasContent && contentItems.length > 0}
     <div class="content-grid">
       {#each contentItems as item (item.id)}
         <ContentCard
           id={item.id}
           title={item.title}
-          thumbnail={item.mediaItem?.thumbnailUrl ?? item.thumbnailUrl ?? null}
+          thumbnail={getDisplayThumbnail(item)}
           description={item.description}
           contentType={item.contentType === 'written' ? 'article' : item.contentType}
           duration={item.mediaItem?.durationSeconds ?? null}
-          href={buildContentUrl(page.url, item)}
+          href={buildCreatorContentUrl(page.url, username, item)}
           price={item.priceCents != null ? {
             amount: item.priceCents,
             currency: 'GBP',

@@ -20,7 +20,7 @@
 
 import type { DurableObjectState } from '@cloudflare/workers-types';
 import { R2Service } from '@codex/cloudflare-clients';
-import { createDbClient } from '@codex/database';
+import { createDbClient, messageForLog } from '@codex/database';
 import {
   type OrphanedFileRecord,
   OrphanedFileService,
@@ -28,6 +28,7 @@ import {
 } from '@codex/image-processing';
 import { ObservabilityClient } from '@codex/observability';
 import { InternalServiceError } from '@codex/service-errors';
+import { readStillFolderName } from '@codex/validation';
 
 /**
  * Cleanup interval: 1 hour in milliseconds
@@ -67,11 +68,11 @@ const REUPLOAD_CLOCK_SKEW_MS = 5 * 60 * 1000;
  * orphaned, which means it holds new bytes rather than the orphan
  * (Codex-r85jo.6).
  *
- * Every image key except a page image's is a pure function of an entity id
- * and is overwritten in place: a content thumbnail, avatar, cover or logo is
- * re-uploaded to the SAME key it was deleted from. So an orphan recorded when
- * a delete failed can be re-occupied by the next upload before the sweep
- * runs, and deleting it then destroys the image the row now points at.
+ * An org logo's key, and a still's key stored before Codex-kk9nv.5, is a pure
+ * function of an entity id and is overwritten in place: it is re-uploaded to
+ * the SAME key it was deleted from. So an orphan recorded when a delete failed
+ * can be re-occupied by the next upload before the sweep runs, and deleting it
+ * then destroys the image the row now points at.
  */
 export function wasRewrittenAfterOrphaning(
   uploaded: Date,
@@ -79,6 +80,28 @@ export function wasRewrittenAfterOrphaning(
 ): boolean {
   return uploaded.getTime() > orphanedAt.getTime() - REUPLOAD_CLOCK_SKEW_MS;
 }
+
+/**
+ * Whether an object sits in a still folder named for its picture's size
+ * (`{base}/{w}x{h}-{nonce}/{size}.webp`, Codex-kk9nv.5). Each upload mints a
+ * new folder, so nothing ever re-writes one.
+ */
+export function isFreshStillObject(r2Key: string): boolean {
+  const folder = r2Key.split('/').at(-2);
+  return folder !== undefined && readStillFolderName(folder) !== null;
+}
+
+/**
+ * The reasons a person has to act on: the sweep could not decide the key, so
+ * it keeps the object rather than guess. A run reports each one.
+ */
+const LEFT_FOR_REVIEW = {
+  notPageImage: 'not a page-image object key; left for review',
+  unplacedFolder: 'sized folder with no owning row to check; left for review',
+} as const;
+const REVIEW_REASONS: ReadonlySet<string> = new Set(
+  Object.values(LEFT_FOR_REVIEW)
+);
 
 /**
  * Why the object at an orphan's key must stay, or `null` to delete it.
@@ -89,6 +112,13 @@ export function wasRewrittenAfterOrphaning(
  * for good. What decides a page image is whether a page still shows it, and
  * the row that queued it cannot say: undo, duplicated pages and overlapping
  * saves all put a reference back after the save that dropped it.
+ *
+ * A sized still folder is never re-written either, so the re-upload check can
+ * only misfire on it (Codex-kk9nv.13). It misfired on every upload whose row
+ * write and discard both failed: orphaned seconds after its put, the object
+ * read as a re-upload and was kept for good. What decides it instead is
+ * whether its own row, live, still addresses the folder. One the service
+ * cannot place is left for review: the re-upload check would only misfire.
  */
 export async function reasonToKeep(
   orphan: OrphanedFileRecord,
@@ -97,10 +127,19 @@ export async function reasonToKeep(
 ): Promise<string | null> {
   if (orphan.imageType === 'page_image') {
     const baseKey = pageImageKeyOfObject(orphan.r2Key);
-    if (!baseKey) return 'not a page-image object key; left for review';
+    if (!baseKey) return LEFT_FOR_REVIEW.notPageImage;
     return (await orphanedFileService.isPageImageReferenced(baseKey))
       ? 'still referenced by a landing page'
       : null;
+  }
+  if (isFreshStillObject(orphan.r2Key)) {
+    const folder = orphan.r2Key.slice(0, orphan.r2Key.lastIndexOf('/'));
+    const referenced = await orphanedFileService.isStillFolderReferenced(
+      orphan,
+      folder
+    );
+    if (referenced === null) return LEFT_FOR_REVIEW.unplacedFolder;
+    return referenced ? 'its row still addresses this folder' : null;
   }
 
   const current = await r2Service.head(orphan.r2Key);
@@ -110,17 +149,34 @@ export async function reasonToKeep(
     : null;
 }
 
+/**
+ * One orphan the run could not finish or decide. Logged as fields, not as one
+ * `key: message` string: a key holds a 32-character user id, and the
+ * production redactor would hash the whole string, message and all. A
+ * `detail` that still carries such an id arrives hashed on its own; the row's
+ * `error_message` keeps the full text, found by `orphanId`.
+ */
+interface OrphanOutcome {
+  orphanId: string;
+  imageType: OrphanedFileRecord['imageType'];
+  detail: string;
+}
+
 interface CleanupRunResult {
   success: boolean;
   processed: number;
   deleted: number;
   /**
-   * Keys kept because a later upload re-occupied them (Codex-r85jo.6), or
-   * because a page still references them (page images, Codex-61zsk.10).
+   * Keys kept because a later upload re-occupied them (Codex-r85jo.6),
+   * because a page still references them (page images, Codex-61zsk.10),
+   * because their own live row still addresses the sized folder
+   * (Codex-kk9nv.13), or because the sweep cannot decide them
+   * (`LEFT_FOR_REVIEW`, listed in `leftForReview`).
    */
   retained: number;
+  leftForReview: OrphanOutcome[];
   failed: number;
-  errors: string[];
+  errors: OrphanOutcome[];
   durationMs: number;
 }
 
@@ -149,10 +205,16 @@ interface Env {
 export class OrphanedFileCleanupDO implements DurableObject {
   private state: DurableObjectState;
   private env: Env;
+  /** One logger for the alarm and every run it or `/trigger` starts. */
+  private readonly obs: ObservabilityClient;
 
   constructor(state: DurableObjectState, env: Env) {
     this.state = state;
     this.env = env;
+    this.obs = new ObservabilityClient(
+      'OrphanedFileCleanupDO',
+      env.ENVIRONMENT ?? 'development'
+    );
 
     // Schedule first alarm on construction if not already scheduled
     this.state.blockConcurrencyWhile(async () => {
@@ -201,7 +263,13 @@ export class OrphanedFileCleanupDO implements DurableObject {
 
       return new Response('Not Found', { status: 404 });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
+      // An internal caller's 500, still never a failed query's params. Logged
+      // here too: the cron's poke reports only the status, not this body.
+      const message = messageForLog(error);
+      this.obs.error('Orphan cleanup DO request failed', {
+        path,
+        error: message,
+      });
       return new Response(JSON.stringify({ error: message }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' },
@@ -217,31 +285,30 @@ export class OrphanedFileCleanupDO implements DurableObject {
    */
   // fallow-ignore-next-line unused-class-member
   async alarm(): Promise<void> {
-    const obs = new ObservabilityClient(
-      'OrphanedFileCleanupDO',
-      this.env.ENVIRONMENT ?? 'development'
-    );
-
-    obs.info('Orphan cleanup alarm triggered');
+    this.obs.info('Orphan cleanup alarm triggered');
 
     try {
       const result = await this.runCleanup();
 
-      obs.info('Orphan cleanup completed', {
+      this.obs.info('Orphan cleanup completed', {
         processed: result.processed,
         deleted: result.deleted,
         retained: result.retained,
         failed: result.failed,
         durationMs: result.durationMs,
       });
-
+      // A failure is otherwise only a count here and an entry in DO storage.
+      if (result.failed > 0) {
+        this.obs.error('Orphan cleanup had failures', {
+          failed: result.failed,
+          errors: result.errors.slice(0, 10),
+        });
+      }
       // Store last run result
       await this.state.storage.put('lastRunResult', result);
       await this.state.storage.put('lastRunAt', new Date().toISOString());
     } catch (error) {
-      obs.error('Orphan cleanup failed', {
-        error: error instanceof Error ? error.message : String(error),
-      });
+      this.obs.error('Orphan cleanup failed', { error: messageForLog(error) });
     } finally {
       // Always reschedule next alarm
       await this.state.storage.setAlarm(Date.now() + CLEANUP_INTERVAL_MS);
@@ -253,7 +320,8 @@ export class OrphanedFileCleanupDO implements DurableObject {
    */
   private async runCleanup(): Promise<CleanupRunResult> {
     const startTime = Date.now();
-    const errors: string[] = [];
+    const errors: OrphanOutcome[] = [];
+    const leftForReview: OrphanOutcome[] = [];
 
     if (!this.env.ASSETS_BUCKET) {
       // Checked before any orphan is read, so nothing is marked deleted.
@@ -291,6 +359,18 @@ export class OrphanedFileCleanupDO implements DurableObject {
         if (keep) {
           await orphanedFileService.markRetained(orphan.id, keep);
           retained++;
+          if (REVIEW_REASONS.has(keep)) {
+            const outcome = {
+              orphanId: orphan.id,
+              imageType: orphan.imageType,
+              detail: keep,
+            };
+            leftForReview.push(outcome);
+            // Retained is terminal, so this is the one time the orphan is
+            // named: now, as it is kept, not when the run ends, which a run
+            // that stops early never reaches.
+            this.obs.warn('Orphan left for review', outcome);
+          }
           continue;
         }
 
@@ -302,13 +382,16 @@ export class OrphanedFileCleanupDO implements DurableObject {
         await orphanedFileService.markDeleted(orphan.id);
         deleted++;
       } catch (error) {
-        const errorMessage =
-          error instanceof Error ? error.message : String(error);
-
-        // Record failed attempt
-        await orphanedFileService.recordFailedAttempt(orphan.id, errorMessage);
+        // The service keeps a failed query whole on the row, with the
+        // driver's reason after it, and logs only messageForLog's, as this
+        // run's own record does.
+        await orphanedFileService.recordFailedAttempt(orphan.id, error);
         failed++;
-        errors.push(`${orphan.r2Key}: ${errorMessage}`);
+        errors.push({
+          orphanId: orphan.id,
+          imageType: orphan.imageType,
+          detail: messageForLog(error),
+        });
       }
     }
 
@@ -317,6 +400,7 @@ export class OrphanedFileCleanupDO implements DurableObject {
       processed: orphans.length,
       deleted,
       retained,
+      leftForReview,
       failed,
       errors,
       durationMs: Date.now() - startTime,

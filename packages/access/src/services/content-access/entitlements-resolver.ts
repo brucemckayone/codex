@@ -30,17 +30,32 @@
  * revocation is instant.
  */
 
-import { SUBSCRIPTION_STATUS } from '@codex/constants';
+import {
+  ACCESS_GRANTING_SUBSCRIPTION_STATUSES,
+  PURCHASE_STATUS,
+} from '@codex/constants';
 import type { DatabaseClient } from '@codex/database';
 import {
   courseStages,
   courseSubscriptions,
+  courses,
   courseTierAccess,
   entitlements,
+  purchases,
   stagePractices,
   subscriptions,
 } from '@codex/database/schema';
-import { and, eq, gt, inArray, isNull, or, type SQL, sql } from 'drizzle-orm';
+import {
+  and,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  isNull,
+  or,
+  type SQL,
+  sql,
+} from 'drizzle-orm';
 
 /**
  * Read-only query client. Both the base `DatabaseClient` and the transaction
@@ -49,12 +64,6 @@ import { and, eq, gt, inArray, isNull, or, type SQL, sql } from 'drizzle-orm';
  */
 type Tx = Parameters<Parameters<DatabaseClient['transaction']>[0]>[0];
 export type AccessQueryClient = DatabaseClient | Tx;
-
-/** Subscription statuses that currently grant access (mirrors access-decision.ts). */
-const GRANTING_SUBSCRIPTION_STATUSES: string[] = [
-  SUBSCRIPTION_STATUS.ACTIVE,
-  SUBSCRIPTION_STATUS.CANCELLING,
-];
 
 /**
  * `entitlements.source` values that grant a CONTENT resource (SPEC §6.2). Course
@@ -79,21 +88,76 @@ const COURSE_GRANT_SOURCES: string[] = [
  * invoices is open (`course_subscriptions.disputed_at`). Read here rather than
  * revoking the grant: the subscription's own lifecycle rewrites the grant, and
  * would re-grant it (Codex-2hxff.9, docs/payments/subscription-disputes.md).
+ *
+ * Matched by buyer and course, not by the grant's `source_ref`
+ * (Codex-2hxff.59): a grant that outlived its subscription can be carried on
+ * by the next one without its `source_ref` changing. Only a subscription that
+ * has not ended pauses it, so a re-subscription after a lost dispute (whose
+ * ended row keeps `disputed_at`) is not paused. A duplicate subscription
+ * grants nothing (Codex-2hxff.15), so its dispute pauses nothing either.
  */
 export function grantNotPausedByDispute(): SQL {
-  return sql`NOT EXISTS (SELECT 1 FROM ${courseSubscriptions} WHERE ${entitlements.source} = 'course_subscription' AND ${courseSubscriptions.id} = ${entitlements.sourceRef} AND ${courseSubscriptions.disputedAt} IS NOT NULL)`;
+  return sql`NOT ${grantPausedByDispute()}`;
+}
+
+/**
+ * The pause itself: a disputed, unended, non-duplicate course subscription of
+ * the grant's buyer to the grant's course. {@link courseGrantHeldByDispute}
+ * reads it positively, to say why a course-only item is refused.
+ */
+function grantPausedByDispute(): SQL {
+  return sql`EXISTS (SELECT 1 FROM ${courseSubscriptions} WHERE ${entitlements.source} = 'course_subscription' AND ${courseSubscriptions.userId} = ${entitlements.userId} AND ${courseSubscriptions.courseId} = ${entitlements.courseId} AND ${courseSubscriptions.disputedAt} IS NOT NULL AND ${courseSubscriptions.endedAt} IS NULL AND ${courseSubscriptions.duplicateOfCourseSubscriptionId} IS NULL)`;
+}
+
+/**
+ * A tier subscription still reaches a course that was taken off sale only
+ * until the subscriber's next renewal (Codex-2hxff.64, owner decision
+ * 2026-10-21). When a creator leaves an organisation their courses there are
+ * archived and stamped `off_sale_at`; the subscriber already paid for the
+ * period in which that happened, so the derived grant holds while
+ * `off_sale_at >= current_period_start` and ends when a renewal moves the
+ * period start past the stamp. A course with no stamp is unaffected — this
+ * adds no status condition of its own.
+ *
+ * Raw `sql` rather than drizzle's `or()`, which is typed `SQL | undefined`:
+ * `and()` drops an undefined argument without complaint, and losing this
+ * predicate would silently keep every off-sale course open.
+ */
+function courseStillCoveredBySubscription(): SQL {
+  return sql`(${courses.offSaleAt} IS NULL OR ${courses.offSaleAt} >= ${subscriptions.currentPeriodStart})`;
 }
 
 /**
  * A stored grant is live when not revoked, not past its optional expiry, and
- * not paused by a dispute.
+ * not paused by a dispute. `disputed` picks the side of the dispute pause:
+ * the access reads `false`; {@link courseGrantHeldByDispute} reads `true`,
+ * the grants a dispute holds back.
  */
-function liveGrant(now: Date) {
+function liveGrant(now: Date, disputed = false) {
   return and(
     isNull(entitlements.revokedAt),
     or(isNull(entitlements.expiresAt), gt(entitlements.expiresAt, now)),
-    grantNotPausedByDispute()
+    disputed ? grantPausedByDispute() : grantNotPausedByDispute()
   );
+}
+
+/**
+ * The derived tier grant: an access-granting, unexpired subscription of this
+ * user whose tier has explicit access to the course (joined by the caller),
+ * still covering it if it went off sale. Paused while a chargeback on one of
+ * its invoices is open; `disputed` picks the side of that pause, as in
+ * {@link liveGrant}.
+ */
+function derivedTierGrant(userId: string, now: Date, disputed = false): SQL[] {
+  return [
+    eq(subscriptions.userId, userId),
+    inArray(subscriptions.status, [...ACCESS_GRANTING_SUBSCRIPTION_STATUSES]),
+    disputed
+      ? isNotNull(subscriptions.disputedAt)
+      : isNull(subscriptions.disputedAt),
+    gt(subscriptions.currentPeriodEnd, now),
+    courseStillCoveredBySubscription(),
+  ];
 }
 
 /**
@@ -156,14 +220,11 @@ async function hasDerivedCourseTierAccess(
     .select({ courseId: courseTierAccess.courseId })
     .from(courseTierAccess)
     .innerJoin(subscriptions, eq(subscriptions.tierId, courseTierAccess.tierId))
+    .innerJoin(courses, eq(courses.id, courseTierAccess.courseId))
     .where(
       and(
         eq(courseTierAccess.courseId, courseId),
-        eq(subscriptions.userId, userId),
-        inArray(subscriptions.status, GRANTING_SUBSCRIPTION_STATUSES),
-        // Paused while a chargeback on one of its invoices is open.
-        isNull(subscriptions.disputedAt),
-        gt(subscriptions.currentPeriodEnd, new Date())
+        ...derivedTierGrant(userId, new Date())
       )
     )
     .limit(1);
@@ -227,14 +288,11 @@ export async function resolveCourseEntitlementsBatch(
     .select({ courseId: courseTierAccess.courseId })
     .from(courseTierAccess)
     .innerJoin(subscriptions, eq(subscriptions.tierId, courseTierAccess.tierId))
+    .innerJoin(courses, eq(courses.id, courseTierAccess.courseId))
     .where(
       and(
         inArray(courseTierAccess.courseId, ids),
-        eq(subscriptions.userId, userId),
-        inArray(subscriptions.status, GRANTING_SUBSCRIPTION_STATUSES),
-        // Paused while a chargeback on one of its invoices is open.
-        isNull(subscriptions.disputedAt),
-        gt(subscriptions.currentPeriodEnd, now)
+        ...derivedTierGrant(userId, now)
       )
     );
   for (const row of derived) {
@@ -258,6 +316,18 @@ export async function contentReachableViaOwnedCourse(
   userId: string,
   contentId: string
 ): Promise<boolean> {
+  const courseIds = await coursesContaining(db, contentId);
+  if (courseIds.length === 0) return false;
+
+  const entitled = await resolveCourseEntitlementsBatch(db, userId, courseIds);
+  return entitled.size > 0;
+}
+
+/** The courses whose live stages hold this content. */
+async function coursesContaining(
+  db: AccessQueryClient,
+  contentId: string
+): Promise<string[]> {
   const courseRows = await db
     .select({ courseId: courseStages.courseId })
     .from(stagePractices)
@@ -268,12 +338,111 @@ export async function contentReachableViaOwnedCourse(
         isNull(courseStages.deletedAt)
       )
     );
+  return [...new Set(courseRows.map((row) => row.courseId).filter(Boolean))];
+}
 
-  const courseIds = [
-    ...new Set(courseRows.map((row) => row.courseId).filter(Boolean)),
+/** The kind of course grant an open payment dispute holds back. */
+export type HeldCourseGrant =
+  | 'course_purchase'
+  | 'course_subscription'
+  | 'tier_subscription';
+
+/**
+ * Which of the user's course grants over a course holding this content does
+ * an open payment dispute hold back? (Codex-2hxff.60, owner decision
+ * 2026-10-24: "Notice for courses too".) Read on the access decision's deny
+ * path only, so it mirrors the course arm above. `null` when the content is
+ * in no course, or no dispute holds a grant back; a purchase answers before a
+ * subscription.
+ */
+export async function courseGrantHeldByDispute(
+  db: AccessQueryClient,
+  userId: string,
+  contentId: string
+): Promise<HeldCourseGrant | null> {
+  const courseIds = await coursesContaining(db, contentId);
+  const held = [
+    ...(await courseGrantsHeldByDispute(db, userId, courseIds)).values(),
   ];
-  if (courseIds.length === 0) return false;
+  return held.includes('course_purchase')
+    ? 'course_purchase'
+    : (held[0] ?? null);
+}
 
-  const entitled = await resolveCourseEntitlementsBatch(db, userId, courseIds);
-  return entitled.size > 0;
+/**
+ * For each of `courseIds`, the user's grant to it that an open payment
+ * dispute holds back, by kind (Codex-2hxff.60). Backs the lesson's dispute
+ * notice ({@link courseGrantHeldByDispute}) and the course shelf's paused
+ * state, so the two cannot disagree.
+ *
+ * - `'course_purchase'`: a `completed` purchase of the course carrying
+ *   `disputed_at`. Its grant was revoked when the chargeback opened; a win
+ *   restores both, and a loss refunds the purchase, which then holds nothing.
+ * - `'course_subscription'`: a stored course-subscription grant, live but for
+ *   {@link grantPausedByDispute}. A duplicate subscription pauses nothing, so
+ *   it explains nothing.
+ * - `'tier_subscription'`: the derived tier grant of a disputed subscription.
+ *
+ * Three reads in parallel, independent of N. Whether the user holds the
+ * course some other way is the caller's question. A course with more than
+ * one held grant reads as its purchase first.
+ */
+export async function courseGrantsHeldByDispute(
+  db: AccessQueryClient,
+  userId: string,
+  courseIds: readonly string[]
+): Promise<ReadonlyMap<string, HeldCourseGrant>> {
+  const held = new Map<string, HeldCourseGrant>();
+  if (courseIds.length === 0) return held;
+  const ids = [...courseIds];
+  const now = new Date();
+
+  const [purchased, stored, derived] = await Promise.all([
+    db
+      .select({ courseId: purchases.courseId })
+      .from(purchases)
+      .where(
+        and(
+          eq(purchases.customerId, userId),
+          inArray(purchases.courseId, ids),
+          eq(purchases.status, PURCHASE_STATUS.COMPLETED),
+          isNotNull(purchases.disputedAt)
+        )
+      ),
+    db
+      .select({ courseId: entitlements.courseId })
+      .from(entitlements)
+      .where(
+        and(
+          eq(entitlements.userId, userId),
+          inArray(entitlements.courseId, ids),
+          eq(entitlements.source, 'course_subscription'),
+          liveGrant(now, true)
+        )
+      ),
+    db
+      .select({ courseId: courseTierAccess.courseId })
+      .from(courseTierAccess)
+      .innerJoin(
+        subscriptions,
+        eq(subscriptions.tierId, courseTierAccess.tierId)
+      )
+      .innerJoin(courses, eq(courses.id, courseTierAccess.courseId))
+      .where(
+        and(
+          inArray(courseTierAccess.courseId, ids),
+          ...derivedTierGrant(userId, now, true)
+        )
+      ),
+  ]);
+
+  // Lowest precedence first: a later kind overwrites an earlier one.
+  for (const row of derived) held.set(row.courseId, 'tier_subscription');
+  for (const row of stored) {
+    if (row.courseId) held.set(row.courseId, 'course_subscription');
+  }
+  for (const row of purchased) {
+    if (row.courseId) held.set(row.courseId, 'course_purchase');
+  }
+  return held;
 }

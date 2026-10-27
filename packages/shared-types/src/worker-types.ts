@@ -116,6 +116,13 @@ export type Bindings = {
   RATE_LIMIT_DO?: import('@cloudflare/workers-types').DurableObjectNamespace;
 
   /**
+   * media-api's MediaStatusObject namespace (Codex-l2c48.9): live media
+   * status for studio tabs. Bound on media-api only; reach it through
+   * statusObjectFor() in @codex/worker-utils, never directly.
+   */
+  MEDIA_STATUS?: import('@cloudflare/workers-types').DurableObjectNamespace;
+
+  /**
    * Session caching KV namespace
    * Used for caching authenticated sessions to reduce database load
    */
@@ -292,6 +299,13 @@ export type Bindings = {
   RUNPOD_ENDPOINT_ID?: string;
 
   /**
+   * The max workers the RunPod endpoint should have (default 5). RunPod
+   * scales an idle endpoint down (2 after 3 days, 0 = paused after 7);
+   * media-api raises it back to this.
+   */
+  RUNPOD_WORKERS_MAX?: string;
+
+  /**
    * RunPod webhook signing secret (HMAC-SHA256)
    * Used to verify incoming webhook callbacks from RunPod
    */
@@ -337,14 +351,15 @@ export type Bindings = {
   // ==========================================================================
 
   /**
-   * Cloudflare Zone ID for cache purge operations
-   * Only needed by workers that purge CDN cache
+   * Cloudflare Zone ID of the zone serving `R2_PUBLIC_URL_BASE`, for cache
+   * purges. identity-api purges a deleted account's avatars with it
+   * (Codex-kk9nv.15); unset there, the purge is skipped and logged.
    */
   CF_ZONE_ID?: string;
 
   /**
-   * Cloudflare API token with cache purge permissions
-   * Only needed by workers that purge CDN cache
+   * Cloudflare API token with that zone's Cache Purge permission and nothing
+   * else. A secret, set beside `CF_ZONE_ID`.
    */
   CF_API_TOKEN?: string;
 };
@@ -466,6 +481,11 @@ export type UserProfile = {
   emailVerified: boolean;
   /** Profile image URL (also aliased as avatarUrl in some contexts) */
   image: string | null;
+  /**
+   * Whether `image` is the user's own upload, not their sign-in provider's
+   * picture. Only an upload can be removed (Codex-kk9nv.10).
+   */
+  hasCustomAvatar: boolean;
   /** Username handle */
   username: string | null;
   /** User bio/description */
@@ -541,6 +561,19 @@ export type ProgressData = {
   completed: boolean;
   updatedAt: string;
 };
+
+/**
+ * A content body as it is stored: TipTap JSON, or legacy markdown. Either may
+ * be null, and a piece may have neither. One shape from the service through
+ * the wire to the web, so "the body was not returned" (no `body`) never reads
+ * as "the piece has no body" (both null). Defined here, not in @codex/access,
+ * because the in-course payload in ./journeys carries it too; @codex/access
+ * re-exports it.
+ */
+export interface ContentBodySource {
+  contentBody: string | null;
+  contentBodyJson: Record<string, unknown> | null;
+}
 
 /**
  * Stripe checkout session response

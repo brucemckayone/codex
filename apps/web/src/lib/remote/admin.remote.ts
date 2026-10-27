@@ -13,26 +13,41 @@
 import { createSearchQuerySchema } from '@codex/validation';
 import { z } from 'zod';
 import { command, getRequestEvent, query } from '$app/server';
+import {
+  customerGrowth,
+  revenueOnDay,
+  utcDay,
+  weekOverWeekChange,
+} from '$lib/components/studio/dashboard/dashboard-figures';
 import { logger } from '$lib/observability';
 import { createServerApi } from '$lib/server/api';
+import { forwardClientErrors } from '$lib/server/forward-client-errors';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Dashboard Stats (Combined)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Dashboard statistics combining revenue, customers, and content metrics
+ * The Studio dashboard's figures: revenue (every kind, from the payouts
+ * ledger, Codex-2hxff.20), customers, content and views. Owners and admins
+ * only: the route requires org management.
  *
- * Uses Promise.allSettled() for graceful degradation - if one endpoint fails,
- * others still return data. Errors are logged for monitoring.
+ * `revenue.revenueByDay` is one entry per UTC calendar day of the last 30,
+ * oldest first, zero-filled (Codex-2hxff.75), so "today", the sparkline and
+ * the weekly change are read by date and calendar position. A change is
+ * `null` when there is nothing to compare with: no badge, never "0%".
+ *
+ * A failed read REJECTS, after logging. It used to come back as zeros, which
+ * the dashboard showed as "£0.00" in silence; the page shows "We couldn't
+ * load your revenue." with Retry instead (the .74 pattern).
  *
  * Usage in Svelte:
  * ```svelte
  * <script>
- *   const stats = await getDashboardStats(orgId);
+ *   const stats = getDashboardStats(orgId);
  * </script>
  *
- * <StatCard label="Revenue" value={stats.revenue.value} change={stats.revenue.change} />
+ * <TodayStat label="Revenue" value={formatPrice(stats.current.revenue.value)} />
  * ```
  */
 export const getDashboardStats = query(z.string().uuid(), async (orgId) => {
@@ -42,55 +57,48 @@ export const getDashboardStats = query(z.string().uuid(), async (orgId) => {
   const searchParams = new URLSearchParams();
   searchParams.set('organizationId', orgId);
 
+  let stats: Awaited<ReturnType<typeof api.analytics.getDashboardStats>>;
   try {
-    const stats = await api.analytics.getDashboardStats(searchParams);
-
-    // Derive week-over-week revenue change (same logic as before)
-    const revenueByDay = stats.revenue.revenueByDay ?? [];
-    const recentRevenue = revenueByDay
-      .slice(0, 7)
-      .reduce((sum, day) => sum + day.revenueCents, 0);
-    const previousRevenue = revenueByDay
-      .slice(7, 14)
-      .reduce((sum, day) => sum + day.revenueCents, 0);
-    const revenueChange =
-      previousRevenue > 0
-        ? Math.round(
-            ((recentRevenue - previousRevenue) / previousRevenue) * 100
-          )
-        : 0;
-
-    return {
-      revenue: {
-        value: stats.revenue.totalRevenueCents,
-        change: revenueChange,
-        revenueByDay: stats.revenue.revenueByDay,
-      },
-      customers: {
-        value: stats.customers.totalCustomers,
-        change: 0, // Change % not provided by backend
-      },
-      contentCount: {
-        value: stats.topContent?.pagination?.total ?? 0,
-        change: 0,
-      },
-      views: {
-        value: 0, // Views not tracked by current backend
-        change: 0,
-      },
-    };
+    stats = await api.analytics.getDashboardStats(searchParams);
   } catch (error) {
     logger.error('[Dashboard] Failed to fetch dashboard stats', {
       reason: String(error),
     });
-
-    return {
-      revenue: { value: 0, change: 0, revenueByDay: [] },
-      customers: { value: 0, change: 0 },
-      contentCount: { value: 0, change: 0 },
-      views: { value: 0, change: 0 },
-    };
+    throw error;
   }
+
+  const revenueByDay = stats.revenue.revenueByDay;
+  const today = utcDay();
+  const todayCents = revenueOnDay(revenueByDay, today);
+  if (todayCents === null) {
+    // Unknown, not £0: the dashboard makes no claim about today.
+    logger.warn('[Dashboard] Revenue series has no entry for today', {
+      today,
+      lastDay: revenueByDay.at(-1)?.date ?? null,
+    });
+  }
+  return {
+    revenue: {
+      value: stats.revenue.totalRevenueCents,
+      byKind: stats.revenue.revenueByKind,
+      change: weekOverWeekChange(revenueByDay),
+      todayCents,
+      revenueByDay,
+    },
+    customers: {
+      value: stats.customers.totalCustomers,
+      change: customerGrowth(stats.customers),
+      newThisWeek: stats.customers.newCustomersLast7Days,
+    },
+    contentCount: {
+      value: stats.topContent?.pagination?.total ?? 0,
+      change: 0,
+    },
+    views: {
+      value: 0, // Views not tracked by current backend
+      change: 0,
+    },
+  };
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -119,6 +127,23 @@ function setDateRangeParams(
   if (params.endDate) searchParams.set('endDate', params.endDate);
   if (params.compareFrom) searchParams.set('compareFrom', params.compareFrom);
   if (params.compareTo) searchParams.set('compareTo', params.compareTo);
+}
+
+/**
+ * Run a read that the page shows as "We couldn't load …" when it fails: log
+ * the raw error here, because the alert never shows it, then reject (the .74
+ * pattern). Never a fallback value: a read that failed is not an empty one.
+ */
+async function loggedRead<T>(
+  label: string,
+  read: () => Promise<T>
+): Promise<T> {
+  try {
+    return await read();
+  } catch (error) {
+    logger.error(label, { reason: String(error) });
+    throw error;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -155,7 +180,9 @@ export const getAnalyticsRevenue = query(revenueQuerySchema, async (params) => {
   searchParams.set('organizationId', params.organizationId);
   setDateRangeParams(searchParams, params);
 
-  return api.analytics.getRevenue(searchParams);
+  return loggedRead('[Analytics] Failed to fetch revenue', () =>
+    api.analytics.getRevenue(searchParams)
+  );
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -192,7 +219,9 @@ export const getAnalyticsTopContent = query(
     searchParams.set('limit', String(params.limit));
     setDateRangeParams(searchParams, params);
 
-    return api.analytics.getTopContent(searchParams);
+    return loggedRead('[Analytics] Failed to fetch top content', () =>
+      api.analytics.getTopContent(searchParams)
+    );
   }
 );
 
@@ -219,7 +248,9 @@ export const getAnalyticsSubscribers = query(
     searchParams.set('organizationId', params.organizationId);
     setDateRangeParams(searchParams, params);
 
-    return api.analytics.getSubscribers(searchParams);
+    return loggedRead('[Analytics] Failed to fetch subscribers', () =>
+      api.analytics.getSubscribers(searchParams)
+    );
   }
 );
 
@@ -249,7 +280,9 @@ export const getAnalyticsFollowers = query(
     searchParams.set('organizationId', params.organizationId);
     setDateRangeParams(searchParams, params);
 
-    return api.analytics.getFollowers(searchParams);
+    return loggedRead('[Analytics] Failed to fetch followers', () =>
+      api.analytics.getFollowers(searchParams)
+    );
   }
 );
 
@@ -298,17 +331,12 @@ const revenueByCreatorQuerySchema = z.object({
 });
 
 /**
- * Per-creator revenue split rows for the studio analytics page. One row per
- * ACTIVE creator-organization agreement for the org, annotated with
- * purchase-derived revenue, current split % (display, not basis points),
- * last drained payout date, and unresolved pending payout amount.
- *
- * Single-creator orgs receive `items: []` — the page hides the section.
- *
- * Subscription invoice revenue is NOT included in Phase 1 — there is no
- * per-creator immutable invoice row today (only dynamic transfer-time
- * fan-out via `SubscriptionService.executeTransfers`). A future revenue
- * ledger will close that gap.
+ * Studio > Analytics "Revenue by creator" (Codex-zsh2p): one row per creator
+ * who holds an active agreement, earned in the window, or is still owed
+ * money. Earned is their cut of every kind from the payouts ledger, after
+ * refunds; each share is `none`, `unreadable` or a display percentage, never
+ * basis points. The page shows the section when more than one creator is
+ * listed.
  */
 export const getAnalyticsRevenueByCreator = query(
   revenueByCreatorQuerySchema,
@@ -321,7 +349,9 @@ export const getAnalyticsRevenueByCreator = query(
     if (params.startDate) searchParams.set('startDate', params.startDate);
     if (params.endDate) searchParams.set('endDate', params.endDate);
 
-    return api.analytics.getRevenueByCreator(searchParams);
+    return loggedRead('[Analytics] Failed to fetch revenue by creator', () =>
+      api.analytics.getRevenueByCreator(searchParams)
+    );
   }
 );
 
@@ -453,8 +483,8 @@ export const getActivityFeed = query(
       searchParams.set('organizationId', params.organizationId);
     if (params.type !== 'all') searchParams.set('type', params.type);
 
-    return api.admin.getActivity(
-      searchParams.toString() ? searchParams : undefined
+    return loggedRead('[Dashboard] Failed to fetch activity feed', () =>
+      api.admin.getActivity(searchParams.toString() ? searchParams : undefined)
     );
   }
 );
@@ -507,8 +537,13 @@ const grantAccessSchema = z.object({
 /**
  * Grant complimentary content access to a customer
  *
- * Creates a contentAccess record (not a purchase) so revenue analytics
- * remain accurate. Idempotent — returns success if access already exists.
+ * Writes a `grant` entitlement (not a purchase) so revenue analytics remain
+ * accurate. Idempotent — a re-grant of a live grant is a no-op.
+ *
+ * Only content a grant can open (`isGrantableContent`) is accepted; anything
+ * else is a 422 whose message is meant for the person granting. A 4xx is
+ * forwarded with its message and code so the dialog can show it — otherwise
+ * `handleError` would turn it into a generic 500 (Codex-2hxff.21).
  *
  * Usage:
  * ```typescript
@@ -522,6 +557,73 @@ export const grantContentAccess = command(
     const api = createServerApi(platform, cookies);
     const searchParams = new URLSearchParams();
     searchParams.set('organizationId', organizationId);
-    return api.admin.grantContentAccess(customerId, contentId, searchParams);
+    return forwardClientErrors(() =>
+      api.admin.grantContentAccess(customerId, contentId, searchParams)
+    );
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Customer Access Grants (Codex-2hxff.21)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const customerGrantsSchema = z.object({
+  customerId: z.string(),
+  organizationId: z.string().uuid(),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+
+/**
+ * This organisation's support grants for one customer, newest first, live
+ * and revoked both. Not cached anywhere: it is a support view and must be
+ * current.
+ *
+ * Usage:
+ * ```svelte
+ * <script>
+ *   const grants = getCustomerGrants({ customerId, organizationId: orgId });
+ * </script>
+ *
+ * {#each grants.current?.items ?? [] as grant (grant.id)}…{/each}
+ * ```
+ */
+export const getCustomerGrants = query(
+  customerGrantsSchema,
+  async ({ customerId, organizationId, page, limit }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    return api.admin.listCustomerGrants(customerId, organizationId, {
+      page,
+      limit,
+    });
+  }
+);
+
+const revokeGrantSchema = z.object({
+  customerId: z.string(),
+  entitlementId: z.string().uuid(),
+  organizationId: z.string().uuid(),
+});
+
+/**
+ * Revoke one support grant. The customer's purchases are untouched, and
+ * revoking twice is a no-op. The caller refreshes `getCustomerGrants`.
+ *
+ * Usage:
+ * ```typescript
+ * await revokeCustomerGrant({ customerId, entitlementId, organizationId });
+ * ```
+ */
+export const revokeCustomerGrant = command(
+  revokeGrantSchema,
+  async ({ customerId, entitlementId, organizationId }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    return api.admin.revokeCustomerGrant(
+      customerId,
+      entitlementId,
+      organizationId
+    );
   }
 );

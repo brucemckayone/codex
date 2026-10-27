@@ -152,9 +152,12 @@ function invalidateCategories(
   obs: ObservabilityClient | undefined
 ): void {
   if (!env.CACHE_KV) return;
+  // Given `obs`: the cache logs a failed invalidation only through its own
+  // client, so the `.catch` below never sees one.
   const cache = new VersionedCache({
     kv: env.CACHE_KV,
     waitUntil: (promise) => executionCtx.waitUntil(promise),
+    obs,
   });
   executionCtx.waitUntil(
     cache
@@ -295,11 +298,29 @@ app.patch(
         ctx.obs,
         ctx.cacheWrite
       );
+      // A body that sets `coverImageKey` by hand moves the row off its cover,
+      // and each upload goes to a new folder, so nothing would ever overwrite
+      // the old one (Codex-kk9nv.5). Read only then: a rename costs nothing.
+      const before =
+        ctx.input.body.coverImageKey === undefined
+          ? null
+          : await ctx.services.categories.get(
+              ctx.input.params.categoryId,
+              space
+            );
       const category = await ctx.services.categories.update(
         ctx.input.params.categoryId,
         ctx.input.body,
         space
       );
+      if (before && before.coverImageKey !== category.coverImageKey) {
+        await ctx.services.imageProcessing.deleteDroppedStill({
+          imageType: 'category_cover',
+          entityType: 'category',
+          entityId: category.id,
+          droppedKey: before.coverImageKey,
+        });
+      }
       invalidateCategories(ctx.env, ctx.executionCtx, space, ctx.obs);
       return category;
     },
@@ -309,6 +330,12 @@ app.patch(
 /**
  * DELETE /api/categories/:categoryId
  * Soft delete a category (its content_categories join rows are left in place).
+ * Its cover's files are deleted in the same request (Codex-kk9nv.14, owner:
+ * "Delete in the same request").
+ *
+ * The image service is resolved before the write, so a missing binding fails
+ * before anything commits. The cache is invalidated before the file delete,
+ * so the public list drops the category whatever happens to its files.
  */
 app.delete(
   '/:categoryId',
@@ -328,11 +355,18 @@ app.delete(
         ctx.obs,
         ctx.cacheWrite
       );
-      await ctx.services.categories.softDelete(
+      const images = ctx.services.imageProcessing;
+      const { droppedCoverImageKey } = await ctx.services.categories.softDelete(
         ctx.input.params.categoryId,
         space
       );
       invalidateCategories(ctx.env, ctx.executionCtx, space, ctx.obs);
+      await images.deleteDroppedStill({
+        imageType: 'category_cover',
+        entityType: 'category',
+        entityId: ctx.input.params.categoryId,
+        droppedKey: droppedCoverImageKey,
+      });
       return null;
     },
   })
@@ -387,18 +421,20 @@ app.post(
         })
       );
 
-      // Persist the base key on the row — the space-aware service owns the
-      // write. Wrapped so a failed write cannot strand the three variants just
-      // uploaded (Codex-29fs0). `existing` was read BEFORE the upload, so its
-      // key says whether the row already addressed these deterministic keys.
-      const updated =
-        await ctx.services.imageProcessing.persistStillWithOrphanCleanup(
+      // Persist the folder's key on the row — the space-aware service owns the
+      // write. Wrapped so a failed write deletes the files just uploaded
+      // (Codex-29fs0), and a successful one deletes the cover `existing` (read
+      // BEFORE the upload) still names (Codex-kk9nv.5). The categories are
+      // invalidated even when it throws: a write can commit and still report
+      // failure, and the cover it replaced is then deleted (Codex-kk9nv.16).
+      const updated = await ctx.services.imageProcessing
+        .persistStillWithOrphanCleanup(
           {
-            baseKey: processed.coverImageKey,
+            key: processed.coverImageKey,
             imageType: 'category_cover',
             entityType: 'category',
             entityId: ctx.input.params.categoryId,
-            storedBaseKey: existing.coverImageKey,
+            storedKey: existing.coverImageKey,
           },
           () =>
             ctx.services.categories.update(
@@ -406,9 +442,10 @@ app.post(
               { coverImageKey: processed.coverImageKey },
               space
             )
+        )
+        .finally(() =>
+          invalidateCategories(ctx.env, ctx.executionCtx, space, ctx.obs)
         );
-
-      invalidateCategories(ctx.env, ctx.executionCtx, space, ctx.obs);
 
       return {
         coverImageKey: updated.coverImageKey,

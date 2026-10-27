@@ -8,7 +8,9 @@
  *   refund that was pending at charge.refunded; a failed one is support's
  * - charge.dispute.* → record the dispute; a chargeback pauses access and
  *   claws back paid slices, won pays them back, lost refunds the purchase
- *   (Codex-sxu5a, Codex-2hxff.9)
+ *   (Codex-sxu5a, Codex-2hxff.9). `processDispute` is shared with the hourly
+ *   reconcile, which settles disputes whose events were missed
+ *   (./dispute-reconcile.ts, Codex-2hxff.58)
  *
  * Cache invalidation uses the shared `invalidateForUser` helper from
  * `@codex/subscription` so a refund/dispute bumps COLLECTION_USER_LIBRARY
@@ -22,7 +24,7 @@
  * - Idempotent: processRefund / processDispute check state before mutating
  */
 
-import { AccessRevocation } from '@codex/access';
+import { AccessRevocation, type RevocationReason } from '@codex/access';
 import { VersionedCache } from '@codex/cache';
 import {
   DISPUTE_CHARGEBACK_OPEN_STATUSES,
@@ -30,8 +32,15 @@ import {
   isForeignStripeEnvironment,
   STRIPE_EVENTS,
 } from '@codex/constants';
-import type { PurchaseService } from '@codex/purchase';
+import type { ObservabilityClient } from '@codex/observability';
 import {
+  type PurchaseService,
+  STANDING_REFUND_STATUSES,
+  supportRequesterOf,
+} from '@codex/purchase';
+import type { Bindings } from '@codex/shared-types';
+import {
+  type CourseSubscriptionService,
   invalidateForUser,
   type SubscriptionService,
 } from '@codex/subscription';
@@ -39,148 +48,190 @@ import { createWebhookServices, sendEmailToWorker } from '@codex/worker-utils';
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import type { StripeWebhookEnv } from '../types';
+import { isTransientError } from '../utils/error-classification';
+
+/** The reasons a refund or a dispute writes into the streaming block. */
+type PaymentBlockReason = Extract<
+  RevocationReason,
+  'refund' | 'purchase_dispute' | 'subscription_dispute'
+>;
 
 /**
- * Fire-and-forget bump of the user's library collection version. Called
- * after a successful refund or dispute so the next library fetch omits
- * the newly-revoked content.
- *
- * Guards: no-op without CACHE_KV (dev stub / misconfigured env) or userId.
- * Errors are caught on both the synchronous `waitUntil` path (via
- * `invalidateForUser`'s internal wiring) and the defensive try/catch
- * around the helper itself — a KV hiccup must never surface as a 500.
+ * What a refund or dispute does outside the database: the buyer's library
+ * cache and the per-org streaming block. Every effect is fire-and-forget and a
+ * no-op without `CACHE_KV` (dev stub / misconfigured env), so a KV hiccup never
+ * surfaces as a 500. Built from the webhook's context (`accessEffectsFor`), or
+ * by the hourly dispute reconcile from the scheduled handler's bindings
+ * (Codex-2hxff.58).
  */
-function invalidateLibrary(
-  c: Context<StripeWebhookEnv>,
-  userId: string | undefined
-): void {
-  if (!userId || !c.env.CACHE_KV) return;
+export interface AccessEffects {
+  /**
+   * Bump the user's library collection version, so the next library fetch
+   * omits the newly-revoked content. A no-op without a userId.
+   */
+  invalidateLibrary(userId: string | undefined): void;
+  /**
+   * Write the per-user, per-org KV revocation key. Only for an event that
+   * reduces access AND names both: one-time purchase refunds return
+   * `{ userId }` only and deliberately skip it (the library bump is enough,
+   * because `processRefund` soft-deletes `contentAccess`). Mirror of
+   * `revokeAccess` in `subscription-webhook.ts`.
+   *
+   * `reason` is what the content page shows while the key lives: an opened
+   * chargeback pauses access (`'purchase_dispute'`, `'subscription_dispute'`,
+   * Codex-2hxff.60); a refund or a lost dispute ends it (`'refund'`).
+   */
+  revokeAccess(userId: string, orgId: string, reason: PaymentBlockReason): void;
+  /**
+   * Clear that key once a won dispute has restored the access the chargeback
+   * paused (Codex-2hxff.9). The stream endpoint still checks access before
+   * signing, so over-clearing never grants anything; it only lets the
+   * restored access stream again before the key's TTL. Mirror of
+   * `clearAccess` in `subscription-webhook.ts`.
+   */
+  clearRevocation(userId: string, orgId: string): void;
+}
 
-  const obs = c.get('obs');
-  // `waitUntil` goes into the CONFIG, not only to `invalidateForUser` below.
-  // The helper's copy sinks the invalidation; only the instance's own copy can
-  // sink a data-slot put from `get`/`getWithResult`. Nothing reads through this
-  // cache today, which is exactly how Codex-03uh3 stayed invisible next door.
-  const cache = new VersionedCache({
+export function createAccessEffects(deps: {
+  kv: Bindings['CACHE_KV'];
+  waitUntil: (promise: Promise<unknown>) => void;
+  obs: ObservabilityClient | undefined;
+}): AccessEffects {
+  const { kv, waitUntil, obs } = deps;
+
+  /**
+   * Errors are swallowed inside the promise, and around `waitUntil` too, and
+   * logged at `level`.
+   */
+  function inBackground(
+    run: () => Promise<unknown>,
+    failure: string,
+    fields: Record<string, unknown>,
+    level: 'warn' | 'error'
+  ): void {
+    const log = (message: string, error: unknown) =>
+      obs?.[level](message, {
+        ...fields,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    try {
+      waitUntil(run().catch((error: unknown) => log(failure, error)));
+    } catch (error) {
+      log(`${failure}: waitUntil threw synchronously`, error);
+    }
+  }
+
+  return {
+    invalidateLibrary(userId) {
+      if (!userId || !kv) return;
+      // `waitUntil` goes into the CONFIG, not only to `invalidateForUser`
+      // below. The helper's copy sinks the invalidation; only the instance's
+      // own copy can sink a data-slot put from `get`/`getWithResult`. Nothing
+      // reads through this cache today, which is exactly how Codex-03uh3
+      // stayed invisible next door.
+      const cache = new VersionedCache({ kv, waitUntil, obs });
+      try {
+        invalidateForUser(
+          cache,
+          waitUntil,
+          { userId, reason: 'refund' },
+          obs ? { logger: obs } : undefined
+        );
+      } catch (error) {
+        obs?.warn('payment-webhook: invalidateForUser threw synchronously', {
+          userId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    },
+    // A failed revoke is a warning: the database mark still refuses the
+    // stream, and `disputeHold` rebuilds the same reason from it.
+    revokeAccess(userId, orgId, reason) {
+      if (!kv) return;
+      const revocation = new AccessRevocation(kv, obs);
+      inBackground(
+        () => revocation.revoke(userId, orgId, reason),
+        'payment-webhook: AccessRevocation.revoke failed',
+        { userId, orgId, reason },
+        'warn'
+      );
+    },
+    // A failed clear is an error: the key keeps refusing a buyer whose
+    // dispute was won, for up to its TTL, while the library and the database
+    // say it is settled.
+    clearRevocation(userId, orgId) {
+      if (!kv) return;
+      const revocation = new AccessRevocation(kv, obs);
+      inBackground(
+        () => revocation.clear(userId, orgId),
+        'payment-webhook: AccessRevocation.clear failed',
+        { userId, orgId },
+        'error'
+      );
+    },
+  };
+}
+
+/** The webhook's effects: its bindings, and its request's `waitUntil`. */
+function accessEffectsFor(c: Context<StripeWebhookEnv>): AccessEffects {
+  return createAccessEffects({
     kv: c.env.CACHE_KV,
+    // Read when an effect runs, as before: one without CACHE_KV never does.
     waitUntil: (promise) => c.executionCtx.waitUntil(promise),
-    obs,
+    obs: c.get('obs'),
   });
-  try {
-    invalidateForUser(
-      cache,
-      c.executionCtx.waitUntil.bind(c.executionCtx),
-      { userId, reason: 'refund' },
-      obs ? { logger: obs } : undefined
-    );
-  } catch (error) {
-    obs?.warn('payment-webhook: invalidateForUser threw synchronously', {
-      userId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
 }
+
+/** A refunded purchase, as `processRefund` returns it. */
+interface RefundedPurchase {
+  accessEnded: boolean;
+  duplicatePayment?: boolean;
+  itemTitle?: string | null;
+}
+
+type RefundCancellation = NonNullable<
+  Awaited<ReturnType<SubscriptionService['cancelForFullRefund']>>
+>;
+/** A duplicate subscription's refund, as `cancelForFullRefund` describes it. */
+type DuplicateSubscriptionRefund = NonNullable<RefundCancellation['duplicate']>;
+/** An ended old subscription's refund beside the one that stands, likewise. */
+type SupersededSubscriptionRefund = NonNullable<
+  RefundCancellation['superseded']
+>;
 
 /**
- * Fire-and-forget write of a per-user, per-org KV revocation key. Only
- * called when the Stripe event reduces access AND the caller has both
- * userId + orgId — one-time purchase refunds return `{ userId }` only
- * and deliberately skip this path (library invalidation above is
- * sufficient because `processRefund` soft-deletes `contentAccess`).
- *
- * Mirror of `revokeAccess` in `subscription-webhook.ts` — kept local here
- * to avoid a cross-handler import while the helper surface stabilises.
- * Errors are swallowed inside the `waitUntil` promise so a KV failure
- * never surfaces as a webhook 500 (Stripe would retry unnecessarily).
+ * A subscription charge's refund that ends nothing of the buyer's, and what
+ * its email says instead (Codex-2hxff.15).
  */
-function revokeAccess(
-  c: Context<StripeWebhookEnv>,
-  userId: string,
-  orgId: string
-): void {
-  if (!c.env.CACHE_KV) return;
-
-  const obs = c.get('obs');
-  const revocation = new AccessRevocation(c.env.CACHE_KV, obs);
-
-  try {
-    c.executionCtx.waitUntil(
-      revocation.revoke(userId, orgId, 'refund').catch((error) => {
-        obs?.warn('payment-webhook: AccessRevocation.revoke failed', {
-          userId,
-          orgId,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      })
-    );
-  } catch (error) {
-    obs?.warn('payment-webhook: waitUntil threw synchronously', {
-      userId,
-      orgId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-}
-
-/**
- * Fire-and-forget clear of the per-user, per-org KV revocation key, once a won
- * dispute has restored the access the chargeback paused (Codex-2hxff.9). The
- * stream endpoint still checks access before signing, so over-clearing never
- * grants anything; it only lets the restored access stream again before the
- * key's TTL. Mirror of `clearAccess` in `subscription-webhook.ts`.
- */
-function clearRevocation(
-  c: Context<StripeWebhookEnv>,
-  userId: string,
-  orgId: string
-): void {
-  if (!c.env.CACHE_KV) return;
-
-  const obs = c.get('obs');
-  const revocation = new AccessRevocation(c.env.CACHE_KV, obs);
-
-  try {
-    c.executionCtx.waitUntil(
-      revocation.clear(userId, orgId).catch((error) => {
-        obs?.warn('payment-webhook: AccessRevocation.clear failed', {
-          userId,
-          orgId,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      })
-    );
-  } catch (error) {
-    obs?.warn('payment-webhook: waitUntil threw synchronously (clear)', {
-      userId,
-      orgId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-}
+type SubscriptionRefundNote =
+  | { duplicate: DuplicateSubscriptionRefund; superseded?: never }
+  | { superseded: SupersededSubscriptionRefund; duplicate?: never };
 
 /**
  * Email the payer about each refund of the charge not yet emailed, once per
  * refund, with that refund's amount (owner decision 2026-10-19, "One per
  * refund"). `claimRefundEmails` marks them first, so a redelivery sends
  * nothing. For a purchase, the email says whether the buyer keeps access
- * (P-1); a subscription charge's says neither.
+ * (P-1); a subscription charge's says neither, unless it paid for a second
+ * subscription the buyer already had, or for an old one ended beside the one
+ * that stands (Codex-2hxff.15).
  */
 async function sendRefundEmails(
   c: Context<StripeWebhookEnv>,
   service: PurchaseService,
   charge: Stripe.Charge,
-  purchase: { accessEnded: boolean } | undefined
+  purchase: RefundedPurchase | undefined,
+  subscriptionNote?: SubscriptionRefundNote
 ): Promise<void> {
   const to = charge.billing_details?.email || charge.receipt_email;
   if (!to) return;
 
   const claimed = await service.claimRefundEmails(charge.id);
-  const contentTitle = charge.metadata?.contentTitle || 'Content';
-  const accessNote = !purchase
-    ? ''
-    : purchase.accessEnded
-      ? `Your access to ${contentTitle} has ended.`
-      : `You keep access to ${contentTitle}.`;
+  const { contentTitle, accessNote } = subscriptionNote?.duplicate
+    ? duplicateSubscriptionNote(subscriptionNote.duplicate)
+    : subscriptionNote?.superseded
+      ? supersededSubscriptionNote(subscriptionNote.superseded)
+      : purchaseNote(charge, purchase);
   for (const refund of claimed) {
     sendEmailToWorker(c.env, c.executionCtx, {
       to,
@@ -198,6 +249,73 @@ async function sendRefundEmails(
   }
 }
 
+function purchaseNote(
+  charge: Stripe.Charge,
+  purchase: RefundedPurchase | undefined
+): { contentTitle: string; accessNote: string } {
+  // The purchase's own title: a charge carries none of ours.
+  const contentTitle =
+    purchase?.itemTitle || charge.metadata?.contentTitle || 'Content';
+  // A second payment for an item the buyer owned was refunded automatically
+  // (Codex-2hxff.14): say why, and that the first purchase stands.
+  const accessNote = !purchase
+    ? ''
+    : purchase.duplicatePayment
+      ? `You still have ${contentTitle}. This refunds a second payment for it.`
+      : purchase.accessEnded
+        ? `Your access to ${contentTitle} has ended.`
+        : `You keep access to ${contentTitle}.`;
+  return { contentTitle, accessNote };
+}
+
+/**
+ * A second subscription the buyer already had was cancelled and refunded
+ * (owner decision 2026-10-22): say so, and for another tier than the one that
+ * stands, that Change plan switches to it.
+ */
+function duplicateSubscriptionNote(duplicate: DuplicateSubscriptionRefund): {
+  contentTitle: string;
+  accessNote: string;
+} {
+  const settled = 'We cancelled the second subscription and refunded it.';
+  if (duplicate.kind === 'course') {
+    return {
+      contentTitle: `${duplicate.courseTitle} subscription`,
+      accessNote: `You were already subscribed to ${duplicate.courseTitle}. ${settled}`,
+    };
+  }
+  const switchTo = duplicate.otherTier
+    ? ` You can switch to ${duplicate.tierName} with Change plan.`
+    : '';
+  return {
+    contentTitle: `${duplicate.tierName} subscription to ${duplicate.organizationName}`,
+    accessNote: `You were already subscribed to ${duplicate.organizationName}. ${settled}${switchTo}`,
+  };
+}
+
+/**
+ * An old subscription, revived next to the newer one that stands, was ended
+ * and the payment that revived it refunded (owner decision 7): say the buyer
+ * still subscribes, and what this refunds.
+ */
+function supersededSubscriptionNote(superseded: SupersededSubscriptionRefund): {
+  contentTitle: string;
+  accessNote: string;
+} {
+  const refunds =
+    'This refunds a payment on your old subscription, which has ended.';
+  if (superseded.kind === 'course') {
+    return {
+      contentTitle: `${superseded.courseTitle} subscription`,
+      accessNote: `You still subscribe to ${superseded.courseTitle}. ${refunds}`,
+    };
+  }
+  return {
+    contentTitle: `${superseded.tierName} subscription to ${superseded.organizationName}`,
+    accessNote: `You still subscribe to ${superseded.organizationName}. ${refunds}`,
+  };
+}
+
 function extractPaymentIntentId(
   ref: string | Stripe.PaymentIntent | null | undefined
 ): string | undefined {
@@ -205,10 +323,22 @@ function extractPaymentIntentId(
   return typeof ref === 'string' ? ref : ref.id;
 }
 
+/**
+ * A Stripe `created` (seconds) as a Date. A charge's is the payment time: a
+ * purchase rebuilt by a refund that beat its checkout is dated by it
+ * (Codex-2hxff.68), so its organisation slice goes to the owner at the sale.
+ */
+function stripeTime(seconds: number | undefined): Date | undefined {
+  return seconds !== undefined && Number.isFinite(seconds)
+    ? new Date(seconds * 1000)
+    : undefined;
+}
+
 async function handleChargeRefunded(
   event: Stripe.Event,
   service: PurchaseService,
   subscriptionService: SubscriptionService,
+  courseSubscriptionService: CourseSubscriptionService,
   c: Context<StripeWebhookEnv>
 ): Promise<void> {
   const obs = c.get('obs');
@@ -218,10 +348,27 @@ async function handleChargeRefunded(
   // Every refund of the charge, recorded first (owner decision 2026-10-19,
   // "One refunds table"). The event names none: charge.refunds is no longer
   // sent (API 2022-11-15).
-  const [latestRefund] = await service.recordChargeRefunds({
+  const listed = await service.recordChargeRefunds({
     id: charge.id,
     paymentIntentId: paymentIntentId ?? null,
   });
+  // What the purchase counts as refunded NOW, from that fresh list, never the
+  // event's snapshot `amount_refunded`: a late or retried event must not
+  // re-apply a refund that failed and was settled since (MED-2). Newest
+  // first. The subscription's full-refund cancel below still reads Stripe's
+  // snapshot, safely: a late or retried event can only cancel what its own
+  // on-time delivery, with the same snapshot, would have cancelled, and a
+  // settlement never un-cancels a subscription (owner, 2026-10-24).
+  const standing = listed.filter((refund) =>
+    (STANDING_REFUND_STATUSES as readonly string[]).includes(
+      refund.status ?? ''
+    )
+  );
+  const refundedCents = standing.reduce(
+    (sum, refund) => sum + refund.amount,
+    0
+  );
+  const [latestRefund] = standing;
 
   // The charge's amount is every source's clawback denominator (D1); each
   // refund's share is read from Stripe (Codex-2hxff.8).
@@ -245,30 +392,129 @@ async function handleChargeRefunded(
   const refundResult = await service.processRefund(paymentIntentId, {
     charge: clawbackCharge,
     stripeRefundId: latestRefund?.id,
-    refundAmountCents: charge.amount_refunded,
+    refundAmountCents: refundedCents,
     refundReason: latestRefund?.reason ?? undefined,
+    paidAt: stripeTime(charge.created),
   });
   obs?.info('Charge refund processed', {
     chargeId: charge.id,
     paymentIntentId,
-    amountRefunded: charge.amount_refunded,
+    amountRefunded: refundedCents,
     stripeRefundId: latestRefund?.id,
     accessEnded: refundResult?.accessEnded ?? null,
   });
 
-  // Library cache bump is always safe once we have a userId. Revocation
-  // is org-scoped and only fires when the refund is subscription-linked
-  // (service returns `{ userId, orgId }`). This conditional is wired ahead
-  // of time so that when subscription-linked refunds start returning orgId
-  // (see Codex-sxu5a for dispute work), revocation fires without another
-  // round of plumbing.
-  invalidateLibrary(c, refundResult?.userId);
-  const result = refundResult as { userId: string; orgId?: string } | undefined;
-  if (result?.userId && result.orgId) {
-    revokeAccess(c, result.userId, result.orgId);
+  // Library cache bump is always safe once we have a userId. A purchase's
+  // access ends through its entitlement; the streaming block is written for
+  // a cancelled subscription below.
+  accessEffectsFor(c).invalidateLibrary(refundResult?.userId);
+
+  // After the clawback and the purchase, so a Stripe failure here never holds
+  // those up, and before the emails, so a refund that ends nothing of the
+  // buyer's says why it was made (Codex-2hxff.15). A transient failure is
+  // rethrown before any email: the redelivery sends the one email, worded
+  // right. A permanent one still lets the generic email go, then is rethrown.
+  // A redelivery repeats only steps that are safe to repeat.
+  let subscriptionNote: SubscriptionRefundNote | undefined;
+  let endFailure: unknown;
+  try {
+    subscriptionNote = await endSubscriptionForFullRefund(
+      c,
+      subscriptionService,
+      courseSubscriptionService,
+      {
+        chargeId: charge.id,
+        paymentIntentId,
+        amountCents: charge.amount,
+        amountRefundedCents: charge.amount_refunded,
+      }
+    );
+  } catch (error) {
+    if (isTransientError(error)) throw error;
+    endFailure = error;
   }
 
-  await sendRefundEmails(c, service, charge, refundResult);
+  await sendRefundEmails(c, service, charge, refundResult, subscriptionNote);
+  if (endFailure) throw endFailure;
+}
+
+/**
+ * A full refund of the current period's subscription payment cancels the
+ * subscription and ends access now (owner decision P-4; a partial refund, or
+ * one of another payment, leaves it running). It is cancelled at Stripe, then
+ * ended here as `customer.subscription.deleted` would end it, cancellation
+ * email included: this is its first end, so that event finds it already ended
+ * when it lands and sends nothing (Codex-2hxff.15).
+ *
+ * A tier subscription's streaming block is written too, from the deletion's
+ * own result: only when this was the user's current subscription for the
+ * org, so an old one ending never blocks the one they still pay for. A
+ * course plan's grant is revoked instead, as on deletion: the org-wide block
+ * would also stop the subscriber's purchases and tier content (owner
+ * decision 2026-10-20).
+ *
+ * A refund of a second subscription the user already had, or of an old one
+ * ended beside the one that stands (owner decision 7), ends nothing of
+ * theirs (Codex-2hxff.15): no block, no ending. What its email says is
+ * returned.
+ *
+ * A failure is alerted with what support needs, then rethrown: a transient one
+ * makes Stripe redeliver, and a permanent one would otherwise end as a quiet
+ * 200 while the customer, refunded in full, goes on being billed.
+ */
+async function endSubscriptionForFullRefund(
+  c: Context<StripeWebhookEnv>,
+  subscriptionService: SubscriptionService,
+  courseSubscriptionService: CourseSubscriptionService,
+  charge: Parameters<SubscriptionService['cancelForFullRefund']>[0]
+): Promise<SubscriptionRefundNote | undefined> {
+  try {
+    const ended = await subscriptionService.cancelForFullRefund(charge);
+    if (!ended) return undefined;
+    if (ended.duplicate) return { duplicate: ended.duplicate };
+    if (ended.superseded) return { superseded: ended.superseded };
+    const { subscription, cancelled } = ended;
+    if (subscription.kind === 'course') {
+      await courseSubscriptionService.handleCourseSubscriptionDeleted(
+        cancelled
+      );
+      accessEffectsFor(c).invalidateLibrary(subscription.userId);
+      return undefined;
+    }
+    const webAppUrl = c.env.WEB_APP_URL;
+    if (!webAppUrl) {
+      // The cancellation email's links are built from it: without it they
+      // point nowhere, or the email is refused.
+      c.get('obs')?.error(
+        'WEB_APP_URL is not set: the cancellation email after a full refund has no working links',
+        { errorId: crypto.randomUUID(), chargeId: charge.chargeId }
+      );
+    }
+    const deleted = await subscriptionService.handleSubscriptionDeleted(
+      cancelled,
+      webAppUrl || ''
+    );
+    const effects = accessEffectsFor(c);
+    effects.invalidateLibrary(subscription.userId);
+    if (deleted?.userId && deleted.orgId) {
+      effects.revokeAccess(deleted.userId, deleted.orgId, 'refund');
+    }
+    if (deleted?.email) {
+      sendEmailToWorker(c.env, c.executionCtx, deleted.email);
+    }
+    return undefined;
+  } catch (error) {
+    c.get('obs')?.error(
+      "A subscription payment was refunded in full but the subscription could not be ended: check it at Stripe and the subscriber's access by hand",
+      {
+        errorId: crypto.randomUUID(),
+        chargeId: charge.chargeId,
+        paymentIntentId: charge.paymentIntentId,
+        error: error instanceof Error ? error.message : String(error),
+      }
+    );
+    throw error;
+  }
 }
 
 /**
@@ -282,8 +528,10 @@ async function handleChargeRefunded(
  *   customer must still be refunded some other way, so the clawback stands
  *   (one that failed straight from pending is clawed back now). The row is
  *   support's to settle: they refund the customer elsewhere or re-pay the
- *   creators (owner decision 2026-10-19, "Hold it for support").
- * - `canceled`: nothing was paid out and nothing is clawed back.
+ *   creators (owner decision 2026-10-19, "Hold it for support"). A purchase
+ *   it refunded in part no longer counts it as refunded (2026-10-24).
+ * - `canceled`: nothing was paid out and nothing is clawed back. A purchase
+ *   it refunded in part no longer counts it, as for `failed` (2026-10-25).
  */
 async function handleRefundUpdated(
   event: Stripe.Event,
@@ -327,6 +575,9 @@ async function handleRefundUpdated(
     reason: refund.reason ?? null,
     failureReason: refund.failure_reason ?? null,
     stripeCreatedAt: new Date(refund.created * 1000),
+    // A support refund names its requester (Codex-2hxff.28); one made in the
+    // Stripe Dashboard has none.
+    requestedByUserId: supportRequesterOf(refund),
   });
 
   if (refund.status === 'canceled') {
@@ -337,11 +588,15 @@ async function handleRefundUpdated(
         { errorId: crypto.randomUUID(), refundId: refund.id, chargeId }
       );
     }
+    // It returned nothing, as a failed one (owner decision 2026-10-25): a
+    // purchase it refunded in part counts only the refunds that still stand.
+    if (paymentIntentId)
+      await service.restateStandingRefunds(paymentIntentId, charge.id);
     return;
   }
   if (refund.status === 'failed' && changed) {
     obs?.error(
-      'A refund failed at Stripe: support must refund the customer another way, or re-pay the creators',
+      "A refund failed at Stripe: support must refund the customer another way, or re-pay the creators. A subscription whose current period's payment it refunded in full has already been cancelled",
       {
         errorId: crypto.randomUUID(),
         refundId: refund.id,
@@ -362,8 +617,15 @@ async function handleRefundUpdated(
         stripeRefundId: refund.id,
         refundAmountCents: charge.amount_refunded,
         refundReason: refund.reason ?? undefined,
+        paidAt: stripeTime(charge.created),
       })
     : undefined;
+  if (refund.status === 'failed' && paymentIntentId) {
+    // It returned nothing (owner decision 2026-10-24): a purchase it refunded
+    // in part counts only the refunds that still stand. After processRefund,
+    // which may raise the amount from the charge's.
+    await service.restateStandingRefunds(paymentIntentId, charge.id);
+  }
   // Usually emailed at charge.refunded already; one that was waiting on the
   // customer then is emailed now. A failed refund is never emailed.
   if (refund.status === 'succeeded') {
@@ -371,12 +633,57 @@ async function handleRefundUpdated(
   }
 }
 
+/** What a dispute's handling acts through (Codex-2hxff.58). */
+export interface DisputeDeps {
+  stripe: Stripe;
+  purchase: PurchaseService;
+  subscription: SubscriptionService;
+  /** The worker's `ENVIRONMENT`: another environment's dispute is ignored. */
+  environment: string;
+  obs: ObservabilityClient | undefined;
+  effects: AccessEffects;
+}
+
+/** What `processDispute` did with a dispute. */
+export type DisputeOutcome =
+  /** It names no charge, or the charge is another environment's. */
+  | 'ignored'
+  /** Recorded only: its outcome was applied already, or Stripe added its status since. */
+  | 'recorded'
+  /** Recorded, then acted on. */
+  | 'acted';
+
 /**
  * A dispute's status changed (`charge.dispute.created`, `.updated`, `.closed`,
  * `.funds_withdrawn`, `.funds_reinstated`; Codex-2hxff.9, design in
- * docs/payments/dispute-record.md). Each event records the dispute, forward
- * only, then acts on the status the record now has, not the event's: Stripe
- * does not deliver events in order. Owner decisions P-2 and Q1–Q3.
+ * docs/payments/dispute-record.md). The webhook passes the event's dispute;
+ * the hourly reconcile passes one whose events were missed (Codex-2hxff.58).
+ */
+async function handleDispute(
+  event: Stripe.Event,
+  stripe: Stripe,
+  service: PurchaseService,
+  subscriptionService: SubscriptionService,
+  c: Context<StripeWebhookEnv>
+): Promise<void> {
+  await processDispute(
+    event.data.object as Stripe.Dispute,
+    {
+      stripe,
+      purchase: service,
+      subscription: subscriptionService,
+      environment: c.env.ENVIRONMENT || 'development',
+      obs: c.get('obs'),
+      effects: accessEffectsFor(c),
+    },
+    event.type
+  );
+}
+
+/**
+ * Record a dispute, forward only, then act on the status the record now has,
+ * not the one passed in: Stripe does not deliver events in order. Owner
+ * decisions P-2 and Q1–Q3.
  *
  * - **Inquiry** (`warning_*`): no money taken. The open record holds the
  *   sale's unpaid payouts; the buyer keeps access.
@@ -386,6 +693,10 @@ async function handleRefundUpdated(
  *   payouts; held slices released.
  * - **Lost**: the purchase becomes refunded; reversals stand; held slices are
  *   cancelled (`cancelled_by_dispute`).
+ * - **Closed inquiry** (`warning_closed`, and `prevented`, which Stripe
+ *   defines as a dispute "prevented from becoming a formal chargeback"):
+ *   nothing to undo; the held slices are released. A `prevented` dispute that
+ *   has a reversal step anyway is alerted (Codex-2hxff.59).
  *
  * A subscription invoice's dispute moves the same money (the clawback acts on
  * both sources), and acts on its subscription (docs/payments/
@@ -395,41 +706,39 @@ async function handleRefundUpdated(
  * a Stripe failure cannot stop the money moving. (Finding the subscription can
  * ask Stripe first, but only for a charge with no payout rows: nothing to
  * claw back.)
+ *
+ * `trigger` names the caller in the log: the event type, or the reconcile.
  */
-async function handleDispute(
-  event: Stripe.Event,
-  stripe: Stripe,
-  service: PurchaseService,
-  subscriptionService: SubscriptionService,
-  c: Context<StripeWebhookEnv>
-): Promise<void> {
-  const obs = c.get('obs');
-  const dispute = event.data.object as Stripe.Dispute;
+export async function processDispute(
+  dispute: Stripe.Dispute,
+  deps: DisputeDeps,
+  trigger: string
+): Promise<DisputeOutcome> {
+  const { stripe, purchase, subscription, environment, obs, effects } = deps;
   const chargeId =
     typeof dispute.charge === 'string' ? dispute.charge : dispute.charge?.id;
   if (!chargeId) {
     obs?.warn('Dispute event names no charge', { disputeId: dispute.id });
-    return;
+    return 'ignored';
   }
 
   // A dispute carries no codex_env tag; its charge does. Production and local
   // development share one Stripe sandbox (Codex-2hxff.5).
   const charge = await stripe.charges.retrieve(chargeId);
-  const environment = c.env.ENVIRONMENT || 'development';
   if (isForeignStripeEnvironment(charge.metadata, environment)) {
-    obs?.info(`${event.type} ignored: another environment's charge`, {
+    obs?.info(`${trigger} ignored: another environment's charge`, {
       disputeId: dispute.id,
       chargeId,
       objectEnvironment: charge.metadata?.codex_env,
       environment,
     });
-    return;
+    return 'ignored';
   }
   const paymentIntentId =
     extractPaymentIntentId(charge.payment_intent) ??
     extractPaymentIntentId(dispute.payment_intent);
 
-  const recorded = await service.recordDispute({
+  const recorded = await purchase.recordDispute({
     stripeDisputeId: dispute.id,
     stripeChargeId: charge.id,
     paymentIntentId: paymentIntentId ?? null,
@@ -439,7 +748,7 @@ async function handleDispute(
     reason: dispute.reason ?? null,
     stripeCreatedAt: new Date(dispute.created * 1000),
   });
-  if (!recorded || recorded.outcomeAppliedAt) return;
+  if (!recorded || recorded.outcomeAppliedAt) return 'recorded';
 
   const status = recorded.status;
   const disputeInput = {
@@ -449,40 +758,61 @@ async function handleDispute(
   };
   const clawbackCharge = { id: charge.id, amountCents: charge.amount };
   const clawBack = async () => {
-    await subscriptionService.reverseSubscriptionPayoutsForCharge(
-      clawbackCharge
-    );
+    await subscription.reverseSubscriptionPayoutsForCharge(clawbackCharge);
     if (paymentIntentId) {
-      await service.clawBackPurchaseCharge(paymentIntentId, clawbackCharge);
+      await purchase.clawBackPurchaseCharge(paymentIntentId, clawbackCharge);
     }
   };
-
-  if (isOneOf(status, DISPUTE_CHARGEBACK_OPEN_STATUSES)) {
+  // Every step is idempotent, so a redelivery or the reconcile can run it again.
+  const openChargeback = async () => {
     if (paymentIntentId) {
       // Org-scoped purchases revoke access within their org; orgless
       // creator-direct purchases (`purchases.organizationId` nullable,
       // Codex-69t7c) have no org, so the guard below skips org-scoped
-      // revocation. Revocation reason reuses 'refund' because the
-      // AccessRevocation reason enum is observability-only and disputes are
-      // the same access-reducing class.
-      const paused = await service.processDispute(paymentIntentId, {
+      // revocation. The reason says access is paused, not ended, so the
+      // content page shows the dispute notice (Codex-2hxff.60).
+      const paused = await purchase.processDispute(paymentIntentId, {
         stripeDisputeId: dispute.id,
         disputeReason: dispute.reason ?? undefined,
       });
-      invalidateLibrary(c, paused?.userId);
-      if (paused?.userId && paused.orgId) {
-        revokeAccess(c, paused.userId, paused.orgId);
+      effects.invalidateLibrary(paused?.userId);
+      // Not when the buyer keeps the item through another purchase (a dispute
+      // of a duplicate payment): the block would stop every stream in the
+      // org, including the copy they own (Codex-2hxff.14).
+      if (paused?.userId && paused.orgId && paused.accessEnded) {
+        effects.revokeAccess(paused.userId, paused.orgId, 'purchase_dispute');
       }
     }
-    const pausedSubscription =
-      await subscriptionService.pauseForDispute(disputeInput);
-    blockSubscriber(c, pausedSubscription);
+    const pausedSubscription = await subscription.pauseForDispute(disputeInput);
+    blockSubscriber(effects, pausedSubscription, 'subscription_dispute');
     await clawBack();
     if (pausedSubscription) {
-      await subscriptionService.pauseBillingForDispute(
-        pausedSubscription,
-        dispute.id
+      await subscription.pauseBillingForDispute(pausedSubscription, dispute.id);
+    }
+  };
+
+  if (isOneOf(status, DISPUTE_CHARGEBACK_OPEN_STATUSES)) {
+    try {
+      await openChargeback();
+    } catch (error) {
+      // Nothing marks an open chargeback done, so this is the signal: the
+      // buyer may still have access, the subscription may still bill them,
+      // and paid slices may not be reversed. A transient failure is
+      // redelivered by Stripe, and the hourly reconcile re-runs an open
+      // chargeback while its events are in its window (Codex-2hxff.58).
+      obs?.error(
+        'A chargeback was recorded but opening it failed: access may not be paused, billing may not be paused, or paid slices may not be clawed back. It is retried; if this repeats, check them by hand',
+        {
+          errorId: crypto.randomUUID(),
+          disputeId: dispute.id,
+          chargeId,
+          purchaseId: recorded.purchaseId,
+          subscriptionId: recorded.subscriptionId,
+          courseSubscriptionId: recorded.courseSubscriptionId,
+          error: error instanceof Error ? error.message : String(error),
+        }
       );
+      throw error;
     }
     obs?.info('Chargeback opened: access paused, paid slices clawed back', {
       disputeId: dispute.id,
@@ -490,87 +820,132 @@ async function handleDispute(
       status,
       amountCents: recorded.amountCents,
     });
-    return;
+    return 'acted';
   }
 
   if (status === 'won') {
     if (paymentIntentId) {
-      const restored = await service.restoreDisputedPurchase(paymentIntentId);
-      invalidateLibrary(c, restored?.userId);
+      const restored = await purchase.restoreDisputedPurchase(paymentIntentId);
+      effects.invalidateLibrary(restored?.userId);
       if (restored?.userId && restored.orgId) {
-        clearRevocation(c, restored.userId, restored.orgId);
+        effects.clearRevocation(restored.userId, restored.orgId);
       }
     }
     // Before the outcome is marked: a Stripe failure here is redelivered.
-    const subscription =
-      await subscriptionService.restoreAfterDispute(disputeInput);
-    if (subscription?.restored) {
-      const { userId, organizationId } = subscription.subscription;
-      invalidateLibrary(c, userId);
-      if (organizationId) clearRevocation(c, userId, organizationId);
+    const restoredSubscription =
+      await subscription.restoreAfterDispute(disputeInput);
+    if (restoredSubscription?.restored) {
+      const { userId, organizationId } = restoredSubscription.subscription;
+      effects.invalidateLibrary(userId);
+      if (organizationId) effects.clearRevocation(userId, organizationId);
     }
-    await service.settleWonDispute(dispute.id);
+    await purchase.settleWonDispute(dispute.id);
     obs?.info('Dispute won: access restored, the clawback paid back', {
       disputeId: dispute.id,
       chargeId,
     });
-    return;
+    return 'acted';
   }
 
   if (status === 'lost') {
     if (paymentIntentId) {
-      const ended = await service.processLostDispute(
+      const ended = await purchase.processLostDispute(
         paymentIntentId,
         recorded.amountCents
       );
-      invalidateLibrary(c, ended?.userId);
+      effects.invalidateLibrary(ended?.userId);
       // Written when it opened, unless it opened already lost: again here.
-      if (ended?.userId && ended.orgId) {
-        revokeAccess(c, ended.userId, ended.orgId);
+      // Not when the buyer keeps the item through another purchase.
+      if (ended?.userId && ended.orgId && ended.accessEnded) {
+        effects.revokeAccess(ended.userId, ended.orgId, 'refund');
       }
     }
     // A subscription's access ends now; it is cancelled at Stripe after the
     // clawback, so the cancel cannot keep the held slices from being cut.
-    const endedSubscription =
-      await subscriptionService.pauseForDispute(disputeInput);
-    blockSubscriber(c, endedSubscription);
+    // `customer.subscription.deleted` then overwrites the reason with
+    // `'subscription_deleted'`: the later reason wins.
+    const endedSubscription = await subscription.pauseForDispute(disputeInput);
+    blockSubscriber(effects, endedSubscription, 'refund');
     // The clawback now cancels or reduces the held slices like a refund.
     await clawBack();
     if (endedSubscription) {
-      await subscriptionService.cancelForLostDispute(disputeInput);
+      await subscription.cancelForLostDispute(disputeInput);
     }
-    await service.markDisputeOutcomeApplied(dispute.id);
+    await purchase.markDisputeOutcomeApplied(dispute.id);
     obs?.info('Dispute lost: purchase refunded, held slices cancelled', {
       disputeId: dispute.id,
       chargeId,
     });
-    return;
+    return 'acted';
   }
 
   // An inquiry, open or closed: no money moved. Its record holds or releases
   // the sale's unpaid payouts.
   if (isOneOf(status, DISPUTE_CLOSED_STATUSES)) {
-    await service.markDisputeOutcomeApplied(dispute.id);
+    if (status === 'prevented') {
+      await alertPreventedAfterClawback(purchase, obs, {
+        disputeId: dispute.id,
+        chargeId,
+        purchaseId: recorded.purchaseId,
+        subscriptionId: recorded.subscriptionId,
+        courseSubscriptionId: recorded.courseSubscriptionId,
+      });
+    }
+    await purchase.markDisputeOutcomeApplied(dispute.id);
   }
   obs?.info('Dispute inquiry recorded', {
     disputeId: dispute.id,
     chargeId,
     status,
   });
+  return 'acted';
+}
+
+/**
+ * A `prevented` dispute never became a chargeback, so nothing should have
+ * been clawed back for it, and nothing is paid back (Codex-2hxff.59 item 5).
+ * Stripe's own definition rules it out. A reversal step means the chargeback
+ * handling ran too, so its money stays with the platform, and the buyer's
+ * access and the subscription's billing may still be paused, until a person
+ * settles them.
+ */
+async function alertPreventedAfterClawback(
+  purchase: PurchaseService,
+  obs: ObservabilityClient | undefined,
+  ids: {
+    disputeId: string;
+    chargeId: string;
+    purchaseId: string | null;
+    subscriptionId: string | null;
+    courseSubscriptionId: string | null;
+  }
+): Promise<void> {
+  const steps = await purchase.countDisputeReversalSteps(ids.disputeId);
+  if (steps === 0) return;
+  obs?.error(
+    "A dispute ended 'prevented' after money was clawed back for it: its reversals stand and nothing pays them back, and the buyer's access and the subscription's billing may still be paused. Re-pay the creators and restore access and billing by hand",
+    { errorId: crypto.randomUUID(), ...ids, reversalSteps: steps }
+  );
 }
 
 /**
  * A subscription a dispute paused or ended: its library caches cleared, and
- * the streaming block written for its organisation.
+ * the streaming block written for its organisation, with `reason`
+ * (`'subscription_dispute'` while paused, `'refund'` once lost).
  */
 function blockSubscriber(
-  c: Context<StripeWebhookEnv>,
-  subscription: { userId: string; organizationId: string | null } | undefined
+  effects: AccessEffects,
+  subscription: { userId: string; organizationId: string | null } | undefined,
+  reason: PaymentBlockReason
 ): void {
   if (!subscription) return;
-  invalidateLibrary(c, subscription.userId);
+  effects.invalidateLibrary(subscription.userId);
   if (subscription.organizationId) {
-    revokeAccess(c, subscription.userId, subscription.organizationId);
+    effects.revokeAccess(
+      subscription.userId,
+      subscription.organizationId,
+      reason
+    );
   }
 }
 
@@ -598,7 +973,13 @@ export async function handlePaymentWebhook(
 
     switch (event.type) {
       case STRIPE_EVENTS.CHARGE_REFUNDED:
-        await handleChargeRefunded(event, service, subscriptionService, c);
+        await handleChargeRefunded(
+          event,
+          service,
+          subscriptionService,
+          services.courseSubscription,
+          c
+        );
         break;
 
       case STRIPE_EVENTS.REFUND_UPDATED:

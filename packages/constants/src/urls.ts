@@ -10,7 +10,7 @@ export const SERVICE_PORTS = {
   MEDIA: 4002, // Media API worker port
   MAILHOG: 8025,
   // Standalone RunPod stub for the e2e API suite. NOT a worker: it exists so
-  // TranscodingService.triggerJob() dispatches to a separate process instead
+  // TranscodingService.dispatch() posts to a separate process instead
   // of to media-api's own /internal/mock-runpod on port 4002. A worker
   // fetching its own dev server races wrangler's reload and returns
   // "Your worker restarted mid-request" as a 503, which surfaces as a
@@ -25,6 +25,15 @@ export const DOMAINS = {
   DEV: 'lvh.me', // *.lvh.me → 127.0.0.1, supports cross-subdomain cookie sharing
   LOCAL: 'localhost',
 } as const;
+
+/**
+ * The address every "Contact support" link mails (owner decision 2026-10-24,
+ * Codex-2hxff.60). One constant, so a change is one edit. A literal rather
+ * than built from `DOMAINS.PROD`: the platform domain may change, and the
+ * mailbox does not move with it. Confirming that the mailbox exists and is
+ * read before production is Codex-5vvwj.1.
+ */
+export const PLATFORM_SUPPORT_EMAIL = 'support@revelations.studio';
 
 // ---------------------------------------------------------------------------
 // Infrastructure hostname axes

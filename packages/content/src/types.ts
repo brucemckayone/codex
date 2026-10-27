@@ -11,8 +11,9 @@ import type {
   MediaItem,
   NewContent,
   NewMediaItem,
+  ServedMediaItem,
 } from '@codex/database/schema';
-import type { Organization } from '@codex/organization';
+import type { ReadableOrganization } from '@codex/organization';
 
 /**
  * Database client type — re-exported from `@codex/database` so consumers
@@ -32,9 +33,20 @@ export type DatabaseTransaction = Parameters<
 import type {
   PaginatedListResponse,
   PaginationParams,
+  PublicContentCreator,
+  PublicContentOrganization,
+  PublicMediaItem,
   SingleItemResponse,
   SortOrder,
 } from '@codex/shared-types';
+
+// The catalogue's wire types live in shared-types, so content-api, this
+// package and apps/web compile against one contract (Codex-ve5eh).
+export type {
+  PublicContentCreator,
+  PublicContentOrganization,
+  PublicMediaItem,
+};
 
 /**
  * Content query filters
@@ -79,11 +91,13 @@ export interface MediaItemFilters {
 export interface ContentWithRelations extends Content {
   creator?: {
     id: string;
-    email: string;
+    /** Absent on the anonymous public list (`listPublic`), which never selects it. */
+    email?: string;
     name: string | null;
   };
-  organization?: Organization | null;
-  mediaItem?: MediaItem | null;
+  /** Never the payee's user id: every read leaves it out (Codex-kk6zx). */
+  organization?: ReadableOrganization | null;
+  mediaItem?: ServedMediaItem | null;
   /**
    * Ids of the `categories` (topic taxonomy) this content belongs to (WP-5).
    * Populated by `ContentService.get` so the studio edit form can pre-select
@@ -92,10 +106,12 @@ export interface ContentWithRelations extends Content {
   categoryIds?: string[];
 }
 
+export type { ServedMediaItem };
+
 /**
  * Media item with populated relations
  */
-export interface MediaItemWithRelations extends MediaItem {
+export interface MediaItemWithRelations extends ServedMediaItem {
   creator?: {
     id: string;
     email: string;
@@ -127,19 +143,53 @@ export type ContentResponse = SingleItemResponse<ContentWithRelations>;
 export type ContentListResponse = PaginatedListResponse<ContentWithRelations>;
 
 /**
- * Public content item with resolved media URLs.
- * The API boundary resolves raw R2 keys (hlsPreviewKey) into
- * full CDN URLs (hlsPreviewUrl) so clients never see raw keys.
+ * The media_items columns the anonymous public list (`listPublic`) selects
+ * (Codex-ve5eh). `durationSeconds` is the one field the web reads directly;
+ * the two keys are read on the server only, to build `thumbnailUrl` and
+ * `hlsPreviewUrl`, and never go on the wire. Anything else on the row (r2Key,
+ * hlsMasterPlaylistKey, runpodJobId, transcodingError, ...) is internal.
  */
-export interface PublicContentItem
-  extends Omit<ContentWithRelations, 'mediaItem'> {
-  mediaItem:
-    | (MediaItem & {
-        /** Resolved CDN URL for the 30-second HLS preview clip */
-        hlsPreviewUrl: string | null;
-      })
-    | null;
-}
+export type PublicMediaItemSource = Pick<
+  MediaItem,
+  'durationSeconds' | 'thumbnailKey' | 'hlsPreviewKey'
+>;
+
+/**
+ * A catalogue row any viewer may read: the content row without its sales count
+ * (`CATALOGUE_CONTENT_COLUMNS`), its creator without an email, and the
+ * projected org and media item. `list({ scope: 'browse' })` returns these
+ * (Codex-1bdx0); `listPublic` adds the topic slugs. The org and creator are
+ * already their wire shapes (`@codex/shared-types`); the media item still holds
+ * the two keys the route resolves to URLs.
+ */
+export type CatalogueContentRow = Omit<
+  ContentWithRelations,
+  'mediaItem' | 'organization' | 'creator' | 'purchaseCount'
+> & {
+  mediaItem: PublicMediaItemSource | null;
+  organization: PublicContentOrganization | null;
+  creator: PublicContentCreator;
+};
+
+/**
+ * One `listPublic` row: a catalogue row and its org-scoped topic slugs.
+ */
+export type PublicContentRow = CatalogueContentRow & {
+  categorySlugs: string[];
+};
+
+/**
+ * One item of `GET /api/content/public` as content-api sends it: a
+ * `listPublic` row with its media item's keys resolved to URLs. It is what the
+ * worker's builder (`toPublicItems`, r2-public-urls.ts) returns for a
+ * `PublicContentRow`, checked there at compile time. apps/web keeps its own
+ * copy, `PublicContentListItem` (api.ts), on its own row types. It stays here, not in
+ * `@codex/shared-types`: it is built on the content row type from
+ * `@codex/database`, and shared-types sits below the database.
+ */
+export type PublicContentItem = Omit<PublicContentRow, 'mediaItem'> & {
+  mediaItem: PublicMediaItem | null;
+};
 
 /**
  * Response for GET /api/content/public
@@ -194,13 +244,13 @@ export type MediaListResponse = PaginatedListResponse<MediaItemWithRelations>;
  * Response for POST /api/media
  * Returns newly created media item
  */
-export type CreateMediaResponse = SingleItemResponse<MediaItem>;
+export type CreateMediaResponse = SingleItemResponse<ServedMediaItem>;
 
 /**
  * Response for PATCH /api/media/:id
  * Returns updated media item
  */
-export type UpdateMediaResponse = SingleItemResponse<MediaItem>;
+export type UpdateMediaResponse = SingleItemResponse<ServedMediaItem>;
 
 /**
  * Response for DELETE /api/media/:id

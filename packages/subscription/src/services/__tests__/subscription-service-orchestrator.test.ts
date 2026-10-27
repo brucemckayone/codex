@@ -172,7 +172,13 @@ function makeDb(overrides: Record<string, unknown> = {}): DbSpy {
       calls.push('update');
       return {
         set: vi.fn(() => ({
-          where: vi.fn(() => Promise.resolve()),
+          // Awaitable as-is, and `.returning()` for a conditional update
+          // that reads back whether it moved a row (handleInvoicePaymentFailed).
+          where: vi.fn(() =>
+            Object.assign(Promise.resolve(), {
+              returning: vi.fn(() => Promise.resolve([{ id: 'moved' }])),
+            })
+          ),
         })),
       };
     }),
@@ -183,6 +189,9 @@ function makeDb(overrides: Record<string, unknown> = {}): DbSpy {
         ),
       },
     },
+    // Raw SQL: the per-charge lock an invoice's split is recorded under
+    // (Codex-2hxff.62).
+    execute: vi.fn(() => Promise.resolve()),
     // Webhook handlers now wrap multi-step writes in a transaction — the
     // mock exposes the same insert/update surface as the top-level db so
     // the handler can call `tx.insert(...)` / `tx.update(...)` inside the
@@ -193,10 +202,16 @@ function makeDb(overrides: Record<string, unknown> = {}): DbSpy {
           insert: typeof db.insert;
           update: typeof db.update;
           select: typeof db.select;
+          execute: typeof db.execute;
         }) => Promise<unknown>
       ) => {
         calls.push('transaction');
-        return cb({ insert: db.insert, update: db.update, select: db.select });
+        return cb({
+          insert: db.insert,
+          update: db.update,
+          select: db.select,
+          execute: db.execute,
+        });
       }
     ),
   };
@@ -657,6 +672,7 @@ describe('SubscriptionService orchestrator hook — resumeSubscription', () => {
       organizationId: 'org_rs',
       stripeSubscriptionId: 'stripe_sub_rs',
       status: SUBSCRIPTION_STATUS.PAUSED,
+      updatedAt: new Date(),
     };
     const bundle = buildService({
       selectResult: [sub],
@@ -685,6 +701,7 @@ describe('SubscriptionService orchestrator hook — resumeSubscription', () => {
       organizationId: 'org_rs_ord',
       stripeSubscriptionId: 'stripe_sub_rs_ord',
       status: SUBSCRIPTION_STATUS.PAUSED,
+      updatedAt: new Date(),
     };
     const bundle = buildService({
       selectResult: [sub],
@@ -709,6 +726,7 @@ describe('SubscriptionService orchestrator hook — resumeSubscription', () => {
       organizationId: 'org_rs_fail',
       stripeSubscriptionId: 'stripe_sub_rs_fail',
       status: SUBSCRIPTION_STATUS.PAUSED,
+      updatedAt: new Date(),
     };
     const bundle = buildService({
       selectResult: [sub],
@@ -749,6 +767,7 @@ describe('SubscriptionService orchestrator hook — resumeSubscription', () => {
       organizationId: 'org_rs_nc',
       stripeSubscriptionId: 'stripe_sub_rs_nc',
       status: SUBSCRIPTION_STATUS.PAUSED,
+      updatedAt: new Date(),
     };
     const bundle = buildService({
       selectResult: [sub],
@@ -1010,10 +1029,23 @@ describe('SubscriptionService orchestrator hook — handleSubscriptionDeleted', 
     } as unknown as Stripe.Subscription;
   }
 
+  // The row the deletion ends: its ids drive the side effects, not the
+  // payload's metadata (Codex-2hxff.15).
+  const liveRow = {
+    id: 'sub_del',
+    userId: 'user_del',
+    organizationId: 'org_del',
+    stripeSubscriptionId: 'stripe_sub_del',
+    status: SUBSCRIPTION_STATUS.ACTIVE,
+    endedAt: null,
+    duplicateOfSubscriptionId: null,
+  };
+
   it('positive: calls invalidateForUser with reason "subscription_deleted"', async () => {
     let sel = 0;
-    // service does a user + tier select when building the email
+    // service reads our row, then a user + tier select when building the email
     const pages: unknown[][] = [
+      [liveRow],
       [{ email: 'u@example.com', name: 'U' }],
       [{ name: 'Pro' }],
     ];
@@ -1072,6 +1104,7 @@ describe('SubscriptionService orchestrator hook — handleSubscriptionDeleted', 
   it('no-cache: succeeds without cache + waitUntil', async () => {
     let sel = 0;
     const pages: unknown[][] = [
+      [liveRow],
       [{ email: 'u@example.com', name: 'U' }],
       [{ name: 'Pro' }],
     ];
@@ -1411,6 +1444,7 @@ describe('SubscriptionService orchestrator hook — handleInvoicePaymentSucceede
                 data: [
                   {
                     id: 'si_paid',
+                    price: { unit_amount: 999 },
                     current_period_start: 1_700_000_000,
                     current_period_end: 1_702_500_000,
                   },
@@ -1476,6 +1510,7 @@ describe('SubscriptionService orchestrator hook — handleInvoicePaymentSucceede
                 data: [
                   {
                     id: 'si_pnc',
+                    price: { unit_amount: 999 },
                     current_period_start: 1_700_000_000,
                     current_period_end: 1_702_500_000,
                   },

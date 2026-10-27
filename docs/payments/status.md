@@ -3,7 +3,7 @@
 Where the code does not yet meet this specification, the decisions the
 specification rests on, and what is still undecided.
 
-Last reviewed: 2026-10-19.
+Last reviewed: 2026-10-20.
 
 How the remaining work should be organised in the code, and in what order, is
 in [architecture.md](architecture.md) (agreed by the owner 2026-10-19).
@@ -28,38 +28,113 @@ lockdown (`.4`) and environment tagging (`.5`) ("Include both"). Follow-ups:
 pre-merge review's findings, `Codex-2hxff.37`–`.46`. Of those, `.37` (an
 organisation with no active owner had no payee, so its slice was dropped) was
 fixed by PR 2 below. The production checks to run around these releases
-(R1–R6) are in [release-checklist.md](release-checklist.md).
+(R1–R7) are in [release-checklist.md](release-checklist.md).
 
 | Bead | P | What is not true yet | Spec |
 |---|---|---|---|
-| `Codex-2hxff.7` | P1 | Every sale path uses fee configuration, including the minimum platform fee | [fees-and-splits](fees-and-splits.md#fee-configuration) |
-| `Codex-2hxff.8` | P1 | Partial refunds keep access and claw back each increment; failed reversals are retried | [purchases](purchases.md#refunds) |
-| `Codex-2hxff.9` | P1 | Disputes pause access, reverse slices, hold pending money, and restore on a win | [purchases](purchases.md#disputes) |
-| `Codex-2hxff.10` | P2 | Access continues while a failed renewal is retried; a full refund cancels the subscription | [subscriptions](subscriptions.md#failed-payments) |
-| `Codex-2hxff.13` | P2 | Pending money is released as soon as the payee becomes payable | [connect-and-payouts](connect-and-payouts.md#releasing-pending-money) |
-| `Codex-2hxff.14` | P1 | Checkout only for content a purchase can unlock; no double purchases | [purchases](purchases.md#checkout) |
-| `Codex-2hxff.15` | P1 | Our subscription row always follows Stripe; duplicates are cancelled and refunded | [subscriptions](subscriptions.md#lifecycle-and-access) |
 | `Codex-2hxff.16` | P2 | Downgrades at period end; tier reorders warn first | [subscriptions](subscriptions.md#changing-tier) |
-| `Codex-2hxff.17` | P1 | An agreement keeps paying after its review date | [agreements](agreements.md#term-and-review-date) |
-| `Codex-2hxff.18` | P1 | Removing a creator ends their agreements | [agreements](agreements.md#leaving-an-organisation) |
-| `Codex-2hxff.19` | P2 | One agreement resolver for every payment path | [agreements](agreements.md#how-a-share-applies) |
-| `Codex-2hxff.20` | P2 | Revenue screens and agreement emails show the real numbers and working links | [fees-and-splits](fees-and-splits.md#reporting) |
-| `Codex-2hxff.21` | P1 | Support grants give access; orgless sales get entitlements; course purchases appear in history | [access](access.md#support-grants) |
-| `Codex-2hxff.22` | P2 | Success pages wait for our record | [purchases](purchases.md#after-payment) |
-| `Codex-2hxff.23` | P2 | Financial records are permanent; one Customer per user; GBP asserted everywhere | [README](README.md#rules-that-always-hold) |
 | `Codex-2hxff.24` | P3 | Dev and CI Stripe setup mirrors production; customer stub removed | [operations](operations.md#local-development) |
 | `Codex-2hxff.25` | P2 | CI exercises real webhook round trips | [operations](operations.md#testing) |
-| `Codex-2hxff.26` | P1 | This documentation (in progress) | — |
-| `Codex-2hxff.28` | P2 | Support issues refunds from an admin screen, not the Stripe Dashboard, within 14 days | [purchases](purchases.md#refunds) |
 | `Codex-2hxff.29` | P2 | Creators' bank payouts are held for the 14-day refund window | [connect-and-payouts](connect-and-payouts.md#payout-timing) |
 | `Codex-2hxff.30` | P2 | A clawback shortfall is recovered from the creator's future earnings | [connect-and-payouts](connect-and-payouts.md#reversals) |
-| `Codex-2hxff.31` | P2 | Customer refund policy and creator payout terms drafted for legal review | [policy drafts](policy-drafts/README.md) |
-| `Codex-2hxff.32` | P1 | Every one-off content and course price is at least £1.00 (tiers and course plans already are) | [purchases](purchases.md#what-can-be-bought) |
 | `Codex-2hxff.33` | P2 | A fee increase applies 30 days after an email; a decrease at once | [fees-and-splits](fees-and-splits.md#fee-configuration) |
 | `Codex-2hxff.34` | P3 | Creators are reminded monthly about money waiting for them | [connect-and-payouts](connect-and-payouts.md#releasing-pending-money) |
 | `Codex-2hxff.52` | P2 | Pausing, resuming, a failed payment and a trial ending work for course subscriptions as for tiers | [subscriptions](subscriptions.md#lifecycle-and-access) |
+| `Codex-2hxff.55` | P2 | A service built without its money dependencies (fee configuration) cannot compile | [architecture](architecture.md) |
 
 `Codex-2hxff.27` (closed) records the 2026-10-13 repair of production's webhooks.
+
+`Codex-2hxff.13`, `.19`, `.23`, `.48` and `.61` (the money fixes) are fixed in
+one pull request with migrations `0111` and `0112`, and so are not listed above:
+- the database refuses to delete a user, organisation or course with money
+  history, and account deletion keeps anonymising (owner, "Keep them,
+  anonymise");
+- a Customer is never adopted from another user;
+- every payment path asserts GBP;
+- no raw Stripe text reaches a client;
+- a cleared fee is really cleared, and its audit row says so;
+- one lock and one share source for every agreement path, with the agreement
+  recorded on the purchase or slice;
+- pending money is released across all of a payee's organisations as soon as
+  they are payable, and on a manual sync;
+- a payout Stripe keeps refusing stops after a permanent refusal or the fifth
+  and waits for support (owner, "Stop, flag for support"; only refusals count;
+  release by a documented step, R7);
+- our own dispute pause no longer clears the streaming block, and the docs say
+  plainly that a link already issued plays to its expiry (owner, option c).
+`Codex-2hxff.47`, `.49`, `.58`, `.59` and `.68` (the ledger edges) are fixed in
+one pull request with migration `0113`, and so are not listed above:
+- a transfer to a creator's replaced Connect account is still found: a trigger
+  keeps every account a user had (owner, "Keep account history");
+- a replay keeps the platform fee already recorded and splits the rest so the
+  slices sum to what was paid, a missing slice included (owner, "Keep recorded
+  fee"); course plans split once, as tiers do;
+- missed dispute events are settled by an hourly reconcile (owner, "Retry
+  hourly, alert");
+- the dispute edge cases: a later refund on re-paid money, a refund under a
+  full chargeback, a slice cut to nothing, an inherited course grant, and a
+  slice recorded while its sale is disputed (held, not sent);
+- an early partial refund no longer under-pays the creator, and a course refund
+  that arrives before its purchase is recorded too.
+
+`Codex-2hxff.28` (support refunds) and `.60` (the dispute notice) are fixed in
+one pull request, #644, with migration `0114`, and so are not listed above:
+- support refunds from the admin Refunds screen within 14 days, and settles a
+  refund Stripe failed there: re-pay the creators, or mark it refunded
+  elsewhere (owner decisions 2026-10-24 and 2026-10-25);
+- a subscriber, or a learner whose course access is paused, is told a dispute
+  paused it (owner, "Notice for courses too").
+
+`Codex-mat01`, `Codex-fazy6`, `Codex-r094t`, `Codex-pqsfg` and
+`Codex-2hxff.40`, `.41`, `.42`, `.44`, `.45`, `.53` and `.66` (the bug sweep)
+are fixed in one pull request with migration `0115`, and so are not listed
+above:
+- one receipt per purchase (owner, "One receipt per purchase");
+- the web reads an agreement's own share, and a missing one shows "—" (owner,
+  "Show '—'");
+- a repeated tier or course-plan create returns what the first made (owner,
+  "Quietly return the first"; a plan's key changes hourly, "Hourly key");
+- the price-change email quotes what each subscriber is billed today;
+- a failed payout-account read says so, with Retry (owner, "'Couldn't load' +
+  Retry");
+- a failed ownership-offer read no longer keeps an owner out of the studio
+  (owner, "Let them in, no banner");
+- the deploy keeps the working portal configuration id (owner, "Keep old
+  value + warn");
+- a refused platform-side payout raises one error per drain, not one per row;
+  a transfer both sides reversed ends `reversed`.
+
+`Codex-2hxff.20`, `.22`, `.69`, `.74`, `.75` and `Codex-zsh2p` (the
+owner-facing numbers) are fixed in one pull request, with no migration, and so
+are not listed above:
+- revenue counts every kind from the payouts ledger, after refunds, by UTC
+  calendar day, with a per-kind line (owner, "Count everything now"); revenue
+  by creator is one row per creator with their real earnings (owner, "One row,
+  real earnings");
+- the share bar shows only what's left after Codex's fee (owner, "Only what's
+  left"); admins get a read-only Revenue share page, and agreement emails link
+  to pages that exist;
+- the success page records the purchase the moment the buyer lands (owner,
+  "Unlock on arrival"); a late record gets a few capped checks, then a Check
+  again button, and no page polls open-endedly (owner, "Capped, then a
+  button");
+- pricing refusals say plainly what happened and offer the action that helps
+  (owner, "Plain message + right action");
+- a list that fails to load says so, with Retry, never an empty state (owner,
+  "Same as payout read").
+
+`Codex-2hxff.7` (fee configuration on every sale path, including the 25p
+minimum), `.8` (partial refunds) and `.9` (disputes) were merged to `dev` and
+released to production on 2026-10-20 (#617), so are not listed above; the
+dispute follow-ups are `.58`–`.61`. `Codex-2hxff.32` (every one-off price at
+least £1.00) and `.10` (a failed renewal keeps access while Stripe retries; a
+full refund of the latest payment cancels) are fixed together in one pull
+request. `.26` (this documentation) and `.31` (the policy drafts) are done.
+`.17` (an agreement keeps paying after its review date), `.18` (removing a
+creator ends their agreements) and `.65` (a buyer still opens a course taken
+off sale) are merged to `dev`. `.64` (removing a creator takes everything of
+theirs off sale; see [agreements](agreements.md#what-comes-off-sale)) is fixed
+in its own pull request.
 
 `Codex-2hxff.6`, `.11`, `.12` and `.37` (label `payments-fix-pr-2`) are fixed in
 payments fix PR 2 and so are not listed above: webhooks answer 500 for a
@@ -134,6 +209,8 @@ option chosen. All dated 2026-10-13 unless noted.
 | Agreements (2026-05-17) | One-off sales use only the uploading creator's agreement; the creator's share is fixed at acceptance while the platform fee is read at each sale; no pro-rating — whoever is active at the invoice gets its full share |
 | Cancellation (2026-04-21) | Cancelling keeps access until the end of the paid period |
 | Free offers | "We don't do free journeys." — a £0 price is refused |
+| Subscription drift (2026-10-22, `Codex-2hxff.15`) | A second subscription: "Keep the first", cancel the newcomer at once and refund its whole payment, one plain email, no cancelled email or streaming block. Checkout blocks early "same as purchases". Course plan unpaid then paid: "Yes, like tiers". Tier-change preview: "10 min, then review again". An invited `member` who subscribes: "Yes, keep the role" |
+| Checkout (2026-10-21/22, `Codex-2hxff.14`) | Paying twice: "Block, then refund". Session expiry: "30 minutes". Checkout only for items a purchase opens; any priced item, courses included ("Yes, same rule"), needs payouts to publish; only a paid session completes. A priced course-only item shows a "Part of a course" note instead of Buy |
 
 The customer webhook endpoint was disabled on 2026-10-13 after the owner asked
 whether it had a purpose: it has no handler, and stale customers already

@@ -47,6 +47,60 @@ export function formatDate(dateStr: string | Date): string {
   return shortDateFormatter.format(new Date(dateStr));
 }
 
+/**
+ * London, not the runtime's zone: a sentence date renders on the server (UTC)
+ * and again in the browser, and two zones a day apart near midnight would
+ * print two different days for one page.
+ */
+const SENTENCE_DATE_TIME_ZONE = 'Europe/London';
+
+const dayMonthFormatter = new Intl.DateTimeFormat(LOCALE, {
+  day: 'numeric',
+  month: 'long',
+  timeZone: SENTENCE_DATE_TIME_ZONE,
+});
+
+const dayMonthYearFormatter = new Intl.DateTimeFormat(LOCALE, {
+  day: 'numeric',
+  month: 'long',
+  year: 'numeric',
+  timeZone: SENTENCE_DATE_TIME_ZONE,
+});
+
+const yearFormatter = new Intl.DateTimeFormat(LOCALE, {
+  year: 'numeric',
+  timeZone: SENTENCE_DATE_TIME_ZONE,
+});
+
+/**
+ * Format a date to sit inside a sentence: `12 November`, with the year only
+ * when it is not this year's (`12 November 2027`).
+ */
+export function formatSentenceDate(
+  dateStr: string | Date,
+  now: Date = new Date()
+): string {
+  const date = new Date(dateStr);
+  return yearFormatter.format(date) === yearFormatter.format(now)
+    ? dayMonthFormatter.format(date)
+    : dayMonthYearFormatter.format(date);
+}
+
+/**
+ * Format an instant as a 24-hour clock time in the RUNTIME's zone: `16:00`.
+ *
+ * For copy built in the browser about a moment the reader acts on ("try again
+ * after 16:00"), so it reads in their local time. Unlike the sentence dates
+ * above it is not pinned to London, so never render it on the server. The
+ * formatter is made per call, so it reads the zone at call time.
+ */
+export function formatLocalClockTime(date: Date): string {
+  return new Intl.DateTimeFormat(LOCALE, {
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
+}
+
 const rtf = new Intl.RelativeTimeFormat(LOCALE, { numeric: 'auto' });
 
 /**

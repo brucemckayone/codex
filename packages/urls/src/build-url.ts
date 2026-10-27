@@ -260,6 +260,43 @@ export function buildContentUrl(
 }
 
 /**
+ * A content card's link on a creator's public pages (Codex-osuqt).
+ *
+ * Org content opens on its org's subdomain. Personal content (no org) opens
+ * on the creator's own detail page, `/@{username}/content/{slug}`:
+ * {@link buildContentUrl}'s bare `/content/{slug}` matches no route on the
+ * creators host, so passing it a public-list item 404'd every card. The item
+ * carries its org as a nested `organization`, not the flat `organizationSlug`
+ * that `buildContentUrl` reads.
+ *
+ * @example
+ * buildCreatorContentUrl(new URL('http://creators.lvh.me:3000/@alex'), 'alex', { id: 'c2', slug: 'notes' })
+ * // → '/@alex/content/notes'
+ */
+export function buildCreatorContentUrl(
+  currentUrl: URL,
+  username: string,
+  content: {
+    slug?: string | null;
+    id: string;
+    organization?: { slug?: string | null } | null;
+  }
+): string {
+  const organizationSlug = content.organization?.slug;
+  if (organizationSlug) {
+    return buildContentUrl(currentUrl, {
+      slug: content.slug,
+      id: content.id,
+      organizationSlug,
+    });
+  }
+  const path = `/@${username}/content/${content.slug ?? content.id}`;
+  return parseHost(currentUrl.hostname).subdomain === 'creators'
+    ? path
+    : buildCreatorsUrl(currentUrl, path);
+}
+
+/**
  * A journey (course landing page) URL target. Mirrors {@link buildContentUrl}'s
  * `content` shape: prefer the slug, fall back to the id, and carry the owning
  * org's slug so a cross-org link resolves to a full URL.

@@ -26,6 +26,7 @@
     membership counts server-side.
 -->
 <script lang="ts">
+  import { coverCropSizes, getThumbnailSrcset } from '$lib/utils/image';
   import SubscribeButton from '$lib/components/subscription/SubscribeButton.svelte';
   import {
     Avatar,
@@ -368,8 +369,18 @@
                 >
                   <span class="subscribe-cta__preview-thumb">
                     {#if item.thumbnail}
+                      <!-- 16:9, 144px from 48rem and 7.3rem (117px) below,
+                           where the tile is 7.8rem less its padding
+                           (Codex-kk9nv.3). At brand density 1: the tile is
+                           spacing tokens, which a sizes value cannot read. -->
                       <img
                         src={item.thumbnail}
+                        srcset={getThumbnailSrcset(item.thumbnail) || undefined}
+                        sizes={coverCropSizes(
+                          '(max-width: 47.9375rem) 7.3rem, 9rem',
+                          16 / 9,
+                          item.thumbnail
+                        )}
                         alt=""
                         loading="lazy"
                         decoding="async"

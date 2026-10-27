@@ -11,6 +11,7 @@
  * - POST   /invite          - Invite a member by email
  * - PATCH  /:userId         - Update member role
  * - DELETE /:userId         - Remove member
+ * - GET    /:userId/departure-preview - What removing them would unwind
  */
 
 import { invalidateUserLibrary as invalidateUserLibraryShared } from '@codex/cache';
@@ -23,16 +24,14 @@ import {
   uuidSchema,
 } from '@codex/validation';
 import {
+  dispatchOrgSlugInvalidation,
+  invalidateMembershipCache,
   PaginatedResult,
   procedure,
   sendEmailToWorker,
 } from '@codex/worker-utils';
 import { Hono } from 'hono';
 import { z } from 'zod';
-import {
-  dispatchOrgSlugInvalidation,
-  invalidateMembershipCache,
-} from '../utils/membership-invalidation';
 
 const app = new Hono<HonoEnv>();
 
@@ -89,7 +88,12 @@ app.post(
       // Bust the per-user membership cache so the new member's next
       // `requireOrgMembership` check sees them, then invalidate public
       // org caches (creators / stats) that reflect membership.
-      invalidateMembershipCache(ctx, ctx.input.params.id, result.userId);
+      invalidateMembershipCache(
+        ctx,
+        ctx.input.params.id,
+        result.userId,
+        ctx.obs
+      );
       dispatchOrgSlugInvalidation(ctx, ctx.input.params.id, ctx.obs);
       // Invalidate invited user's library cache (Codex-c01do) — gaining a
       // management role unlocks team-only content in their library UI.
@@ -147,7 +151,8 @@ app.patch(
       invalidateMembershipCache(
         ctx,
         ctx.input.params.id,
-        ctx.input.params.userId
+        ctx.input.params.userId,
+        ctx.obs
       );
       dispatchOrgSlugInvalidation(ctx, ctx.input.params.id, ctx.obs);
       // Invalidate the role-target user's library cache (Codex-c01do) — role
@@ -196,7 +201,8 @@ app.delete(
       invalidateMembershipCache(
         ctx,
         ctx.input.params.id,
-        ctx.input.params.userId
+        ctx.input.params.userId,
+        ctx.obs
       );
       dispatchOrgSlugInvalidation(ctx, ctx.input.params.id, ctx.obs);
       // Invalidate the removed user's library cache (Codex-c01do) — they
@@ -208,6 +214,34 @@ app.delete(
         logger: ctx.obs,
       });
       return null;
+    },
+  })
+);
+
+/**
+ * GET /api/organizations/:id/members/:userId/departure-preview
+ * What removing this member would unwind, shown in the Studio's Remove dialog
+ * before the owner confirms (Codex-2hxff.64)
+ *
+ * Returns: { data: { agreements, contentOnSale, coursesOnSale,
+ *   courseSubscriptions, tierSubscribersAffected } } — counts only, scoped to
+ *   this organisation and this member as creator; 404 MEMBER_NOT_FOUND if they
+ *   are not a member. Not cached: read once, when the dialog opens.
+ * Security: the same policy as DELETE /:userId — whoever may remove a member
+ * may see what the removal does, and no one else.
+ */
+app.get(
+  '/:userId/departure-preview',
+  procedure({
+    policy: { auth: 'required', requireOrgManagement: true },
+    input: {
+      params: z.object({ id: uuidSchema, userId: userIdSchema }),
+    },
+    handler: async (ctx) => {
+      return await ctx.services.organization.getDeparturePreview(
+        ctx.input.params.id,
+        ctx.input.params.userId
+      );
     },
   })
 );

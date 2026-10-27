@@ -37,6 +37,10 @@ type InProgressLibraryItem = LibraryItem & { progress: LibraryProgress };
  * (subdomain routing). The caller (WP-11) finishes the link at render time
  * with `buildContentUrl(page.url, item)`. `progress` is passed through intact
  * so the card can render the resume bar without a second lookup.
+ *
+ * `accessType` and `purchaseDisputedAt` are the library row's own, carried so
+ * the card can ask `getLibraryAccessState` whether a payment dispute pauses
+ * the item, exactly as the platform library does (Codex-2hxff.60).
  */
 export interface ContinueWatchingItem {
   id: string;
@@ -47,6 +51,9 @@ export interface ContinueWatchingItem {
   contentType: 'video' | 'audio' | 'article';
   duration: number;
   progress: LibraryProgress;
+  accessType: LibraryItem['accessType'];
+  /** `purchase.disputedAt`: set while a chargeback on the purchase is open. */
+  purchaseDisputedAt: string | null;
 }
 
 export interface SelectContinueWatchingOptions {
@@ -95,6 +102,8 @@ function toResumeItem(item: InProgressLibraryItem): ContinueWatchingItem {
     contentType: toCardContentType(item.content.contentType),
     duration: item.content.durationSeconds,
     progress: item.progress,
+    accessType: item.accessType,
+    purchaseDisputedAt: item.purchase?.disputedAt ?? null,
   };
 }
 

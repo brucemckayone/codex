@@ -27,6 +27,8 @@ interface ItemOverrides {
   thumbnailUrl?: string | null;
   durationSeconds?: number;
   progress?: LibraryProgress | null;
+  accessType?: LibraryItem['accessType'];
+  purchase?: LibraryItem['purchase'];
 }
 
 /** Build a fully-shaped library item; `progress` is explicit (default: null). */
@@ -40,6 +42,8 @@ function makeItem(overrides: ItemOverrides = {}): LibraryItem {
     thumbnailUrl = 'https://cdn/thumb.webp',
     durationSeconds = 600,
     progress = null,
+    accessType = 'purchased',
+    purchase = null,
   } = overrides;
 
   return {
@@ -54,8 +58,8 @@ function makeItem(overrides: ItemOverrides = {}): LibraryItem {
       organizationId: 'org-1',
       organizationSlug,
     },
-    accessType: 'purchased',
-    purchase: null,
+    accessType,
+    purchase,
     progress,
     // Stands alone (in no portal) — the default these tests care about, since
     // continue-watching is about resumable MEDIA, not portal membership.
@@ -198,6 +202,38 @@ describe('selectContinueWatching', () => {
       contentType: 'audio',
       duration: 600,
       progress,
+      accessType: 'purchased',
+      purchaseDisputedAt: null,
+    });
+  });
+
+  // The org landing's "Jump back in" rail reads these to dim a purchase that a
+  // payment dispute pauses (Codex-2hxff.60).
+  it('carries the access type and an open dispute on the purchase', () => {
+    const items = [
+      makeItem({
+        id: 'disputed',
+        purchase: {
+          purchasedAt: '2026-10-02T10:00:00.000Z',
+          priceCents: 1200,
+          disputedAt: '2026-10-20T09:00:00.000Z',
+        },
+        progress: makeProgress({ updatedAt: '2026-07-16T10:00:00.000Z' }),
+      }),
+      makeItem({
+        id: 'subscribed',
+        accessType: 'subscription',
+        progress: makeProgress({ updatedAt: '2026-07-15T10:00:00.000Z' }),
+      }),
+    ];
+    const [disputed, subscribed] = selectContinueWatching(items);
+    expect(disputed).toMatchObject({
+      accessType: 'purchased',
+      purchaseDisputedAt: '2026-10-20T09:00:00.000Z',
+    });
+    expect(subscribed).toMatchObject({
+      accessType: 'subscription',
+      purchaseDisputedAt: null,
     });
   });
 

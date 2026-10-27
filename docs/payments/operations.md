@@ -50,7 +50,7 @@ signing secret.
 
 | Path | Events | Secret | Handler | Endpoint |
 |---|---|---|---|---|
-| `/webhooks/stripe/booking` | `checkout.session.completed` | `STRIPE_WEBHOOK_SECRET_BOOKING` | `handleCheckoutCompleted` (payment mode only) | `we_1UQ7HY7wyGmo4sh6BYwlrb80` |
+| `/webhooks/stripe/booking` | `checkout.session.completed` | `STRIPE_WEBHOOK_SECRET_BOOKING` | `handleCheckoutCompleted` (payment mode only), through `completeCheckoutSession`, which the success page's `POST /checkout/complete` also runs | `we_1UQ7HY7wyGmo4sh6BYwlrb80` |
 | `/webhooks/stripe/payment` | `charge.refunded`, `refund.updated`, `refund.failed` | `STRIPE_WEBHOOK_SECRET_PAYMENT` | `handlePaymentWebhook` | `we_1UQ7HZ7wyGmo4sh6x477bv6C` |
 | `/webhooks/stripe/dispute` | `charge.dispute.created`, `.updated`, `.closed`, `.funds_withdrawn`, `.funds_reinstated`, `radar.early_fraud_warning.created` | `STRIPE_WEBHOOK_SECRET_DISPUTE` | `handlePaymentWebhook` | `we_1UQ7Ha7wyGmo4sh6CuTHPE8O` |
 | `/webhooks/stripe/subscription` | `checkout.session.completed`, `customer.subscription.updated`, `.deleted`, `.paused`, `.resumed`, `.trial_will_end`, `invoice.payment_succeeded`, `invoice.payment_failed`, `product.updated`, `price.created`, `price.updated` | `STRIPE_WEBHOOK_SECRET_SUBSCRIPTION` | `handleSubscriptionWebhook` (subscription mode only) | `we_1UQ75i7wyGmo4sh6e12nck3K` |
@@ -105,7 +105,7 @@ There is no event-id table; safety on redelivery comes from unique keys
 | `STRIPE_SECRET_KEY` | secret | Also needed by organization-api, which creates tier Products and Prices |
 | `STRIPE_WEBHOOK_SECRET_BOOKING`, `_PAYMENT`, `_DISPUTE`, `_SUBSCRIPTION`, `_CONNECT` | secret | One per endpoint |
 | `STRIPE_WEBHOOK_SECRET_CUSTOMER` | secret | To be removed — **gap**: `Codex-2hxff.24` |
-| `STRIPE_PORTAL_CONFIGURATION_ID` | secret | The locked billing-portal configuration — `bpc_1UQ9QH7wyGmo4sh6hXwkCS1s` in the sandbox. Optional at boot; without it the billing portal refuses to open |
+| `STRIPE_PORTAL_CONFIGURATION_ID` | secret | The locked billing-portal configuration — `bpc_1UQ9QH7wyGmo4sh6hXwkCS1s` in the sandbox. Optional at boot; without it the billing portal refuses to open. The deploy uploads it only when it is set and is a `bpc_` id; otherwise the run warns (unset) or errors (wrong shape) and keeps the current value (`Codex-2hxff.41`) |
 | `ENVIRONMENT` | var | `production` disables the dev webhook route |
 | `WEB_APP_URL` | var | Required — agreement emails need it — **gap**: `Codex-2hxff.7` (declared optional) |
 | `API_URL` | var | Must be declared under `env.production` — **gap**: `Codex-2hxff.24` |
@@ -188,7 +188,7 @@ and again when moving to live mode.
 | Webhook endpoints | Exactly the endpoints and events above; connect as a connected-accounts endpoint |
 | Billing customer portal | A configuration with cancelling, plan switching, pausing and profile edits **off**: `bpc_1UQ9QH7wyGmo4sh6hXwkCS1s` (created 2026-10-13; deliberately not the account default). Its id goes in `STRIPE_PORTAL_CONFIGURATION_ID`. The account default still allows cancelling, so every portal session passes the id |
 | Billing → Subscriptions → Manage disputed payments | **Do nothing** (Stripe's default). Our dispute webhook pauses billing while a chargeback is open and cancels on a loss; if Stripe cancelled on a dispute instead, a won dispute could not restore the subscription ([subscription-disputes.md](subscription-disputes.md)) |
-| Billing failed-payment retries | The retry schedule Stripe follows while a subscriber is `past_due`, with **cancel the subscription** as the action when all retries fail, so access ends when retries run out (owner decision P-3) |
+| Billing → Subscriptions and emails → Manage failed payments | The retry schedule Stripe follows while a subscriber is `past_due`, with "If all retries for a payment fail" set to **cancel the subscription**, so access ends when retries run out (owner decision P-3). `past_due` keeps access, so "leave as past-due" would keep it for ever. Found set to "leave as past-due" on 2026-10-20; the owner set it to "cancel the subscription" the same day. Check each test-mode account matches |
 | Connect Express Dashboard features | Creators can change their payout bank account (Stripe's default) but **not** their payout schedule — schedule editing turned off (owner decision "Bank account only"). The schedule itself (a 14-day delay) is set per account by our code — **gap**: `Codex-2hxff.29` |
 | Connect branding | Platform name and icon shown during onboarding and in the Express Dashboard |
 

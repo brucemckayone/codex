@@ -34,7 +34,12 @@ import {
   withOrgScope,
 } from '@codex/database';
 import type { Category } from '@codex/database/schema';
-import { categories, content, contentCategories } from '@codex/database/schema';
+import {
+  categories,
+  content,
+  contentCategories,
+  organizations,
+} from '@codex/database/schema';
 import { BaseService, ValidationError } from '@codex/service-errors';
 import type { PaginatedListResponse } from '@codex/shared-types';
 import type {
@@ -229,11 +234,21 @@ export class CategoriesService extends BaseService {
     try {
       // Category ids that have ≥1 published, non-deleted content item in this
       // org. DISTINCT keeps the IN-list bounded by the topic count, not the
-      // membership-row count.
+      // membership-row count. The join on a LIVE org is the same rule as
+      // listPublic's: deleting an org soft-deletes only the org row, so its
+      // content stays published, and without it a deleted org's topics went
+      // on being served (and re-cached after the org-delete bump).
       const activeCategoryIds = this.db
         .selectDistinct({ categoryId: contentCategories.categoryId })
         .from(contentCategories)
         .innerJoin(content, eq(contentCategories.contentId, content.id))
+        .innerJoin(
+          organizations,
+          and(
+            eq(organizations.id, content.organizationId),
+            isNull(organizations.deletedAt)
+          )
+        )
         .where(
           and(
             eq(content.organizationId, organizationId),
@@ -333,26 +348,34 @@ export class CategoriesService extends BaseService {
    * listings via the `deletedAt IS NULL` filter, and its slug frees up for
    * reuse.
    *
+   * The cover key comes from the UPDATE's own RETURNING, not from a read
+   * before it: a cover upload committing in between would otherwise report
+   * the folder it replaced and leave the new one in place (Codex-kk9nv.14).
+   * The soft delete never writes `coverImageKey`, so RETURNING gives the key
+   * the deleted row held.
+   *
    * @param id - Category ID
    * @param space - Resolved space (org → any org actor; personal → creator)
+   * @returns The cover key the category held, so the caller can delete its
+   *   files (Codex-kk9nv.14)
    * @throws {CategoryNotFoundError} If absent / out of space
    */
-  async softDelete(id: string, space: CategorySpace): Promise<void> {
+  async softDelete(
+    id: string,
+    space: CategorySpace
+  ): Promise<{ droppedCoverImageKey: string | null }> {
     try {
-      await this.db.transaction(async (tx) => {
-        const existing = await tx.query.categories.findFirst({
-          where: and(eq(categories.id, id), ...this.spaceWhere(space)),
-        });
+      const [deleted] = await this.db
+        .update(categories)
+        .set({ deletedAt: new Date(), updatedAt: new Date() })
+        .where(and(eq(categories.id, id), ...this.spaceWhere(space)))
+        // Whole rows: on the http|ws union `returning` takes no field map.
+        .returning();
 
-        if (!existing) {
-          throw new CategoryNotFoundError(id);
-        }
-
-        await tx
-          .update(categories)
-          .set({ deletedAt: new Date(), updatedAt: new Date() })
-          .where(and(eq(categories.id, id), ...this.spaceWhere(space)));
-      });
+      if (!deleted) {
+        throw new CategoryNotFoundError(id);
+      }
+      return { droppedCoverImageKey: deleted.coverImageKey };
     } catch (error) {
       if (error instanceof CategoryNotFoundError) {
         throw error;

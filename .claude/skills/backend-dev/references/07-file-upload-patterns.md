@@ -573,7 +573,7 @@ reach the dev CDN.
 | Mounting `binaryUploadProcedure` fallback route unconditionally | Lets any caller stream 5GB through the worker in prod | Gate with `env.ENVIRONMENT !== 'production'` inside the handler, or mount route conditionally |
 | Idempotent-completion endpoint returning 409 on already-advanced state | Breaks legitimate retries on flaky networks | Return 200 `{ alreadyCompleted: true, status }` for already-finished states; 409 only for truly invalid transitions |
 | Skipping magic-byte validation on media/binary uploads | Text renamed to `.mp4` eats RunPod budget + R2 quota | Add container signature check (`ftyp`, `RIFF`, `OggS`, etc.) before `r2.put` |
-| No cron recovery path paired with async dispatch flow | Stuck-in-`transcoding` if the webhook never fires | Add `recoverStuckTranscoding`-style scheduled cleanup that transitions past a max-age threshold |
+| No cron recovery path paired with async dispatch flow | Stuck-in-`transcoding` if the webhook never fires | Add a scheduled reconcile like `TranscodingMaintenance`'s: past the job's own timeout, ask the provider, then fail or re-queue |
 
 ---
 

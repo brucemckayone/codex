@@ -12,6 +12,12 @@ import { isEnrolled } from './cta';
 export type PricingState =
   /** The viewer already holds the course: no prices, a way back in. */
   | 'enrolled'
+  /**
+   * The viewer owns it, but an open payment dispute holds their entry back
+   * (Codex-2hxff.60): no prices and no path to buy, the dispute notice in
+   * their place (`ButtonRow`).
+   */
+  | 'paused'
   /** The offer resolved with no way in: say so where the price would be. */
   | 'unavailable'
   /** The offer could not be read: a price-less button, never a guessed price. */
@@ -36,6 +42,7 @@ export function pricingView(
   props: Record<string, unknown>
 ): PricingView {
   if (isEnrolled(context)) return { state: 'enrolled', ...NONE };
+  if (context.disputeHold) return { state: 'paused', ...NONE };
   if (context.purchasable === false) return { state: 'unavailable', ...NONE };
   const paths = deriveOfferPaths(context.offer, context.course, props);
   if (paths.length === 0) return { state: 'unpriced', ...NONE };

@@ -73,6 +73,14 @@ export {
   type AgreementRevenueType,
   findActiveCreatorAgreementShare,
 } from './services/agreement-share';
+// One open checkout per buyer and item (Codex-2hxff.14, .15)
+export {
+  CheckoutReservations,
+  type CheckoutReservationTarget,
+  checkoutIdempotencyKey,
+  stripeErrorCode,
+  toStripeTime,
+} from './services/checkout-reservations';
 // Entitlement + auto-enrollment write seam (Codex-2pryk WP-6)
 export {
   autoEnroll,
@@ -96,8 +104,13 @@ export {
 } from './services/fee-config-service';
 // Service
 export {
+  isDuplicatePayment,
   type PurchaseMailer,
   PurchaseService,
+  type RefundAccessKept,
+  type RestoredRefundAccess,
+  STANDING_REFUND_STATUSES,
+  supportRequesterOf,
 } from './services/purchase-service';
 // Customer resolution (Codex-49gev)
 export {
@@ -133,13 +146,15 @@ export {
 // Types
 export type {
   CheckoutSessionResult,
+  CheckoutSessionState,
   CheckoutSessionVerifyResult,
   CompleteCoursePurchaseMetadata,
   CompletePurchaseMetadata,
   NewPurchaseInput,
+  PaymentIntentCharge,
   Purchase,
   PurchaseListItem,
-  PurchaseWithContent,
+  PurchaseWithItem,
   SaleListItem,
   SalesStats,
 } from './types';

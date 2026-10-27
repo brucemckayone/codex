@@ -19,32 +19,36 @@
  *
  * Durable Objects:
  * - OrphanedFileCleanupDO: Periodic cleanup of orphaned R2 files
+ * - MediaStatusObject: live media status for studio tabs (Codex-l2c48.9)
  *
  * Routes:
  * - /health - Health check endpoint (public)
  * - /internal/media/:id/transcode - Trigger transcoding (worker auth)
  * - /api/transcoding/webhook - RunPod webhook callback (HMAC verified)
  * - /api/transcoding/retry/:id - Retry failed transcoding (authenticated)
- * - /api/transcoding/status/:id - Get transcoding status (authenticated)
  * - /internal/orphan-cleanup/* - Orphan cleanup DO management (internal)
+ * - /api/media-status/ticket, /api/media-status/live - live media status
+ * - /internal/media-status - a lifecycle change from content-api (worker auth)
  */
 
-import { createDbClient } from '@codex/database';
+import { messageForLog } from '@codex/database';
 import { ObservabilityClient } from '@codex/observability';
 import { workerAuth as createWorkerAuth } from '@codex/security';
 import type { Bindings } from '@codex/shared-types';
-import { TranscodingService } from '@codex/transcoding';
 import {
   createEnvValidationMiddleware,
   createKvCheck,
+  createWebhookServices,
   createWorker,
   standardDatabaseCheck,
 } from '@codex/worker-utils';
 // Import route modules
+import mediaStatusRoutes from './routes/media-status';
 import transcodingRoutes from './routes/transcoding';
 import webhookRoutes from './routes/webhook';
 
-// Export Durable Object class for Cloudflare binding
+// Export Durable Object classes for Cloudflare bindings
+export { MediaStatusObject } from './durable-objects/media-status-object';
 export { OrphanedFileCleanupDO } from './durable-objects/orphaned-file-cleanup-do';
 
 // ============================================================================
@@ -95,7 +99,6 @@ app.use(
  * Mount transcoding routes
  * - /internal/media/:id/transcode (workerAuth)
  * - /api/transcoding/retry/:id (authenticated)
- * - /api/transcoding/status/:id (authenticated)
  */
 app.route('/', transcodingRoutes);
 
@@ -105,6 +108,14 @@ app.route('/', transcodingRoutes);
  */
 app.route('/', webhookRoutes);
 
+/**
+ * Mount live media status routes (Codex-l2c48.9)
+ * - /api/media-status/ticket (authenticated)
+ * - /api/media-status/live (ticket, WebSocket)
+ * - /internal/media-status (workerAuth)
+ */
+app.route('/', mediaStatusRoutes);
+
 // ============================================================================
 // Mock RunPod /run endpoint (test/dev only)
 // ============================================================================
@@ -112,14 +123,15 @@ app.route('/', webhookRoutes);
 /**
  * POST /internal/mock-runpod
  *
- * Stands in for RunPod's `/v2/<endpoint>/run` API, so `triggerJob()` can
+ * Stands in for RunPod's `/v2/<endpoint>/run` API, so `dispatch()` can
  * dispatch without a real RunPod account.
  *
  * NOT USED BY CI — do not point `RUNPOD_DIRECT_URL` back at this route.
  * Doing so makes media-api fetch its OWN dev server: the dispatch re-enters
  * the wrangler instance that is serving the request, and a request landing
  * during an isolate reload comes back as HTTP 503 "Your worker restarted
- * mid-request". TranscodingService logs that as `RunPod API error`, so the
+ * mid-request". TranscodingService records that as RunPod refusing ("RunPod
+ * answered 503"), so the
  * failure reads as a third-party outage rather than a harness problem. That
  * flake failed `should allow retrying failed transcoding` in CI run
  * 33667762392 and, because deploy-production.yml gates on
@@ -213,20 +225,18 @@ app.all(
 // ============================================================================
 
 /**
- * Recover media items stuck in 'transcoding' status.
+ * The hourly transcoding maintenance run (Codex-l2c48.5): keep-alive ping,
+ * endpoint wake, lost-job reconcile, waiting retries and stalled-upload
+ * checks. See TranscodingMaintenance.
  *
- * Runs on the cron schedule defined in wrangler.jsonc (`triggers.crons`).
- * If a RunPod webhook is lost (network failure, RunPod outage), the media
- * row stays in 'transcoding' indefinitely — this handler finds rows older
- * than STUCK_MAX_AGE_MINUTES and marks them 'failed' so they become
- * retryable by the creator.
- *
- * Error handling: NEVER throws. Scheduled handlers that throw uncaught
- * errors crash the invocation; we log and exit cleanly instead.
+ * Services come from the registry (createWebhookServices), so the cron gets
+ * the same TRANSCODING_WEBHOOK_URL, RUNPOD_DIRECT_URL and RUNPOD_WORKERS_MAX
+ * wiring as the routes. NEVER throws: a scheduled handler that throws
+ * crashes the invocation; this logs and returns.
  */
-const STUCK_MAX_AGE_MINUTES = 120;
+const MAINTENANCE_BUDGET_MS = 10 * 60 * 1000; // the cron's wall limit is 15 min
 
-async function runRecoverStuckTranscoding(
+async function runTranscodingMaintenance(
   env: Bindings,
   ctx: ExecutionContext
 ): Promise<void> {
@@ -235,49 +245,38 @@ async function runRecoverStuckTranscoding(
     env.ENVIRONMENT ?? 'development'
   );
 
-  // Guard against missing env vars — don't throw, log and exit.
-  const runpodApiKey = env.RUNPOD_API_KEY;
-  const runpodEndpointId = env.RUNPOD_ENDPOINT_ID;
-  if (!env.DATABASE_URL || !runpodApiKey || !runpodEndpointId) {
-    obs.error(
-      'Cron recoverStuckTranscoding: missing required env vars, skipping',
-      {
-        hasDatabaseUrl: Boolean(env.DATABASE_URL),
-        hasRunpodApiKey: Boolean(runpodApiKey),
-        hasRunpodEndpointId: Boolean(runpodEndpointId),
-      }
-    );
+  if (!env.DATABASE_URL || !env.RUNPOD_API_KEY || !env.RUNPOD_ENDPOINT_ID) {
+    obs.error('transcoding.maintenance_skipped', {
+      reason: 'missing required env vars',
+      hasDatabaseUrl: Boolean(env.DATABASE_URL),
+      hasRunpodApiKey: Boolean(env.RUNPOD_API_KEY),
+      hasRunpodEndpointId: Boolean(env.RUNPOD_ENDPOINT_ID),
+    });
     return;
   }
 
-  try {
-    const db = createDbClient(env);
-
-    const service = new TranscodingService({
-      db,
-      environment: env.ENVIRONMENT ?? 'development',
-      runpodApiKey,
-      runpodEndpointId,
-      webhookBaseUrl: env.API_URL ?? 'http://localhost:4002',
-    });
-
-    const recovered = await service.recoverStuckTranscoding(
-      STUCK_MAX_AGE_MINUTES
-    );
-
-    obs.info('Cron recoverStuckTranscoding completed', {
-      recovered,
-      maxAgeMinutes: STUCK_MAX_AGE_MINUTES,
-    });
-  } catch (error) {
-    obs.error('Cron recoverStuckTranscoding failed', {
-      error: error instanceof Error ? error.message : String(error),
+  if (!env.MEDIA_STATUS) {
+    // Progress has no other store, and the resync step cannot run.
+    obs.error('media_status.feed_unavailable', {
+      reason: 'MEDIA_STATUS not bound',
     });
   }
 
-  // Reference ctx to satisfy lint — reserved for future waitUntil usage
-  // (recoverStuckTranscoding is a single DB UPDATE; no post-response work).
-  void ctx;
+  let release: (() => void) | undefined;
+  try {
+    const webhook = await createWebhookServices(env, ctx, { obs });
+    release = webhook.release;
+    const report = await webhook.services.transcodingMaintenance.run({
+      deadline: Date.now() + MAINTENANCE_BUDGET_MS,
+    });
+    obs.info('transcoding.maintenance_completed', { ...report });
+  } catch (error) {
+    obs.error('transcoding.maintenance_failed', {
+      error: messageForLog(error),
+    });
+  } finally {
+    release?.();
+  }
 }
 
 /**
@@ -291,7 +290,7 @@ async function runRecoverStuckTranscoding(
  * Rides the EXISTING hourly production cron rather than adding one: Cloudflare
  * caps cron triggers per account, and a separate schedule would wake Neon on
  * its own cadence. `/ensure-scheduled` puts the run ~60s after this cron, inside
- * the Neon wake that `runRecoverStuckTranscoding` already pays for.
+ * the Neon wake that `runTranscodingMaintenance` already pays for.
  *
  * NEVER throws, the same contract as the other scheduled job.
  */
@@ -344,9 +343,15 @@ export default {
     env: Bindings,
     ctx: ExecutionContext
   ): Promise<void> {
-    // Wrap in waitUntil so the cron invocation isn't killed before
-    // logging/DB work settles, even if the promise is slow.
-    ctx.waitUntil(runRecoverStuckTranscoding(env, ctx));
-    ctx.waitUntil(runEnsureOrphanCleanupScheduled(env));
+    // One waitUntil, in order. The poke goes first: it takes a second, and
+    // a maintenance run that hangs until the wall limit must not take it
+    // down too. Its sweep runs ~60 s on, inside the Neon wake the
+    // maintenance run pays for.
+    ctx.waitUntil(
+      (async () => {
+        await runEnsureOrphanCleanupScheduled(env);
+        await runTranscodingMaintenance(env, ctx);
+      })()
+    );
   },
 };

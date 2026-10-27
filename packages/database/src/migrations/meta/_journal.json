@@ -743,6 +743,83 @@
       "when": 1792496476884,
       "tag": "0105_handy_corsair",
       "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "7",
+      "when": 1792531579488,
+      "tag": "0106_agreement_review_reminder_copy",
+      "breakpoints": true
+    },
+    {
+      "idx": 107,
+      "version": "7",
+      "when": 1792587815699,
+      "tag": "0107_removal_off_sale_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 108,
+      "version": "7",
+      "when": 1792607999181,
+      "tag": "0108_entitlement_orgless_and_grant_audit",
+      "breakpoints": true
+    },
+    {
+      "idx": 109,
+      "version": "7",
+      "when": 1792693074946,
+      "tag": "0109_checkout_sessions_one_completed_purchase",
+      "breakpoints": true
+    },
+    {
+      "idx": 110,
+      "version": "7",
+      "when": 1792698000229,
+      "tag": "0110_subscription_duplicates_tombstones",
+      "breakpoints": true
+    },
+    {
+      "idx": 111,
+      "version": "7",
+      "when": 1792766184658,
+      "tag": "0111_money_history_restrict_and_payout_review",
+      "breakpoints": true
+    },
+    {
+      "idx": 112,
+      "version": "7",
+      "when": 1792766803594,
+      "tag": "0112_fee_audit_new_value_nullable",
+      "breakpoints": true
+    },
+    {
+      "idx": 113,
+      "version": "7",
+      "when": 1792790281139,
+      "tag": "0113_refunds_charge_index_and_connect_history",
+      "breakpoints": true
+    },
+    {
+      "idx": 114,
+      "version": "7",
+      "when": 1792867233237,
+      "tag": "0114_refunds_support_settlement",
+      "breakpoints": true
+    },
+    {
+      "idx": 115,
+      "version": "7",
+      "when": 1792969853907,
+      "tag": "0115_purchase_receipt_sent_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 116,
+      "version": "7",
+      "when": 1793027519691,
+      "tag": "0116_media_transcoding_error_code",
+      "breakpoints": true
     }
   ]
 }

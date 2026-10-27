@@ -293,6 +293,7 @@ export function sampleContext(
     checkoutUrl: `/journeys/${course.slug}/checkout`,
     dashboardUrl: `/journeys/${course.slug}/dashboard`,
     enrolled: state === 'enrolled',
+    disputeHold: null,
     offer: courseOffer,
     // Derived exactly as the public renderer derives it: a failed read is TRUE.
     purchasable:

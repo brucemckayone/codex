@@ -220,6 +220,26 @@ describe('TextBlock', () => {
       expect(document.body.querySelector('h2')).toBeNull();
     });
 
+    // Codex-61zsk.66: every size it has, at the width each form draws it, so
+    // a statement across a 1440 band takes the 1600px file, not the 800.
+    it.each([
+      ['statement', 'min(100vw, 82rem)'],
+      ['centered', 'min(100vw, 52rem)'],
+      ['columns', '(min-width: 56rem) min(50vw, 41rem), min(100vw, 82rem)'],
+    ])('%s: offers every size the picture has, at its drawn width', async (layout, sizes) => {
+      await render(
+        { ...SAMPLE, image: { ...image, w: 2400, h: 1600 } },
+        { layout, mediaBaseUrl: CDN }
+      );
+      const img = document.body.querySelector('.text__media img');
+      expect(img?.getAttribute('srcset')).toBe(
+        ['sm.webp 200w', 'md.webp 400w', 'lg.webp 800w', 'xl.webp 1600w']
+          .map((size) => `${CDN}/${image.key}/${size}`)
+          .join(', ')
+      );
+      expect(img?.getAttribute('sizes')).toBe(sizes);
+    });
+
     it.each([
       'statement',
       'centered',
@@ -294,5 +314,22 @@ describe('TextBlock', () => {
         document.body.querySelector('img, .text__media, .text__head')
       ).toBeNull();
     });
+  });
+});
+
+describe('TextBlock: columns without a body (Codex-61zsk.66)', () => {
+  // The heading and its picture span the column when there is no body to sit
+  // beside (`.text__head` takes 1 / -1), so the picture is declared full width.
+  it('declares the picture across the column', async () => {
+    await render(
+      {
+        heading: 'Alone',
+        image: { key: 'landing-pages/p1/images/t1', alt: '', w: 2400, h: 1600 },
+      },
+      { layout: 'columns', mediaBaseUrl: 'https://cdn.test' }
+    );
+    expect(
+      document.body.querySelector('.text__media img')?.getAttribute('sizes')
+    ).toBe('min(100vw, 82rem)');
   });
 });

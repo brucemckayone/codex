@@ -4,7 +4,7 @@
  * Comprehensive test suite for AdminCustomerManagementService covering:
  * - List customers with pagination and aggregated stats
  * - Get customer details with purchase history
- * - Grant complimentary content access (idempotent)
+ * - Grant complimentary content access (idempotent), list and revoke grants
  * - Organization scoping enforcement
  * - Error handling
  *
@@ -16,15 +16,19 @@
 import {
   contentAccess,
   content as contentTable,
+  entitlements,
   mediaItems,
   organizationMemberships,
   organizations,
   purchases,
+  subscriptionTiers,
+  users,
 } from '@codex/database/schema';
 import { NotFoundError } from '@codex/service-errors';
 import {
   createTestMediaItemInput,
   createTestOrganizationInput,
+  createTestTierInput,
   createUniqueSlug,
   type Database,
   seedTestUsers,
@@ -32,14 +36,17 @@ import {
   takeFirst,
   teardownTestDatabase,
 } from '@codex/test-utils';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { ContentNotGrantableError } from '../errors';
 import { AdminCustomerManagementService } from '../services/customer-management-service';
 
 describe('AdminCustomerManagementService', () => {
   let db: Database;
   let service: AdminCustomerManagementService;
   let creatorId: string;
+  /** The Studio user who grants (and, in the revoke tests, the other actor). */
+  let supportUserId: string;
   let orgId: string;
 
   beforeAll(async () => {
@@ -48,7 +55,7 @@ describe('AdminCustomerManagementService', () => {
 
     // Create test users
     const userIds = await seedTestUsers(db, 2);
-    [creatorId] = userIds;
+    [creatorId, supportUserId] = userIds;
 
     // Create organization
     const org = takeFirst(
@@ -121,6 +128,24 @@ describe('AdminCustomerManagementService', () => {
           .returning()
       );
 
+      // Customer 1's second purchase is of another item: a buyer holds at
+      // most one completed purchase per item (Codex-2hxff.14).
+      const otherContent = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            title: 'Customer Test Content 2',
+            slug: createUniqueSlug('customer-list-test-2'),
+            contentType: 'written',
+            contentBody: 'Body',
+            status: 'published',
+            priceCents: 1000,
+          })
+          .returning()
+      );
+
       // Customer 1: 2 purchases totaling $20
       await db.insert(purchases).values([
         {
@@ -137,7 +162,7 @@ describe('AdminCustomerManagementService', () => {
         },
         {
           customerId: customer1,
-          contentId: testContent.id,
+          contentId: otherContent.id,
           organizationId: testOrg.id,
           amountPaidCents: 1000,
           platformFeeCents: 100,
@@ -643,195 +668,66 @@ describe('AdminCustomerManagementService', () => {
     });
   });
 
+  // Codex-2hxff.21: a grant is a `grant` entitlement — the row the access
+  // decision and the library read. It used to be a `content_access` row that
+  // nothing reads, so a granted customer got nothing.
   describe('grantContentAccess', () => {
-    it('should grant complimentary access successfully', async () => {
-      const testOrg = takeFirst(
-        await db
-          .insert(organizations)
-          .values(createTestOrganizationInput())
-          .returning()
-      );
-
-      const [customer] = await seedTestUsers(db, 1);
-
-      const media = takeFirst(
-        await db
-          .insert(mediaItems)
-          .values(
-            createTestMediaItemInput(creatorId, {
-              mediaType: 'video',
-              status: 'ready',
-            })
-          )
-          .returning()
-      );
-
-      const testContent = takeFirst(
-        await db
-          .insert(contentTable)
-          .values({
-            creatorId,
-            organizationId: testOrg.id,
-            mediaItemId: media.id,
-            title: 'Grant Access Content',
-            slug: createUniqueSlug('grant-access'),
-            contentType: 'video',
-            status: 'published',
-            priceCents: 1000,
-          })
-          .returning()
-      );
-
-      // Create a purchase to establish relationship with org
-      await db.insert(purchases).values({
-        customerId: customer,
-        contentId: testContent.id,
-        organizationId: testOrg.id,
-        amountPaidCents: 1000,
-        platformFeeCents: 100,
-        organizationFeeCents: 0,
-        creatorPayoutCents: 900,
-        stripePaymentIntentId: `pi_grant_${Date.now()}`,
-        status: 'completed',
-        purchasedAt: new Date(),
-      });
-
-      // Create another content to grant access to
-      const newContent = takeFirst(
-        await db
-          .insert(contentTable)
-          .values({
-            creatorId,
-            organizationId: testOrg.id,
-            mediaItemId: media.id,
-            title: 'New Content for Access',
-            slug: createUniqueSlug('new-access'),
-            contentType: 'video',
-            status: 'published',
-            priceCents: 2000,
-          })
-          .returning()
-      );
+    it('writes a live grant entitlement recording who granted it, and no content_access row', async () => {
+      const { testOrg, customer, newContent } = await setupGrantable();
 
       const result = await service.grantContentAccess(
         testOrg.id,
         customer,
-        newContent.id
+        newContent.id,
+        supportUserId
       );
 
       expect(result).toBe(true);
 
-      // Verify access record was created
-      const accessRecord = await db.query.contentAccess.findFirst({
+      const rows = await liveGrantsFor(customer, newContent.id);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        userId: customer,
+        organizationId: testOrg.id,
+        contentId: newContent.id,
+        courseId: null,
+        source: 'grant',
+        sourceRef: null,
+        expiresAt: null,
+        grantedByUserId: supportUserId,
+        revokedByUserId: null,
+      });
+
+      const legacy = await db.query.contentAccess.findFirst({
         where: and(
           eq(contentAccess.userId, customer),
           eq(contentAccess.contentId, newContent.id)
         ),
       });
-
-      expect(accessRecord).toBeDefined();
-      expect(accessRecord?.accessType).toBe('complimentary');
-      expect(accessRecord?.organizationId).toBe(testOrg.id);
+      expect(legacy).toBeUndefined();
     });
 
-    it('should be idempotent (return success if access already exists)', async () => {
-      const testOrg = takeFirst(
-        await db
-          .insert(organizations)
-          .values(createTestOrganizationInput())
-          .returning()
-      );
+    it('is idempotent: a re-grant of a live grant writes no second row', async () => {
+      const { testOrg, customer, newContent } = await setupGrantable();
 
-      const [customer] = await seedTestUsers(db, 1);
-
-      const media = takeFirst(
-        await db
-          .insert(mediaItems)
-          .values(
-            createTestMediaItemInput(creatorId, {
-              mediaType: 'video',
-              status: 'ready',
-            })
-          )
-          .returning()
-      );
-
-      const testContent = takeFirst(
-        await db
-          .insert(contentTable)
-          .values({
-            creatorId,
-            organizationId: testOrg.id,
-            mediaItemId: media.id,
-            title: 'Idempotent Content',
-            slug: createUniqueSlug('idempotent-access'),
-            contentType: 'video',
-            status: 'published',
-            priceCents: 1000,
-          })
-          .returning()
-      );
-
-      // Create relationship via purchase
-      await db.insert(purchases).values({
-        customerId: customer,
-        contentId: testContent.id,
-        organizationId: testOrg.id,
-        amountPaidCents: 1000,
-        platformFeeCents: 100,
-        organizationFeeCents: 0,
-        creatorPayoutCents: 900,
-        stripePaymentIntentId: `pi_idemp_${Date.now()}`,
-        status: 'completed',
-        purchasedAt: new Date(),
-      });
-
-      // Create another content and pre-create access
-      const newContent = takeFirst(
-        await db
-          .insert(contentTable)
-          .values({
-            creatorId,
-            organizationId: testOrg.id,
-            mediaItemId: media.id,
-            title: 'Pre-existing Access Content',
-            slug: createUniqueSlug('pre-existing'),
-            contentType: 'video',
-            status: 'published',
-            priceCents: 2000,
-          })
-          .returning()
-      );
-
-      // Pre-create access record
-      await db.insert(contentAccess).values({
-        userId: customer,
-        contentId: newContent.id,
-        organizationId: testOrg.id,
-        accessType: 'purchased',
-      });
-
-      // Should succeed (idempotent)
-      const result = await service.grantContentAccess(
+      await service.grantContentAccess(
         testOrg.id,
         customer,
-        newContent.id
+        newContent.id,
+        supportUserId
+      );
+      const again = await service.grantContentAccess(
+        testOrg.id,
+        customer,
+        newContent.id,
+        creatorId
       );
 
-      expect(result).toBe(true);
-
-      // Should still only have one access record
-      const records = await db
-        .select()
-        .from(contentAccess)
-        .where(
-          and(
-            eq(contentAccess.userId, customer),
-            eq(contentAccess.contentId, newContent.id)
-          )
-        );
-
-      expect(records).toHaveLength(1);
+      expect(again).toBe(true);
+      const rows = await liveGrantsFor(customer, newContent.id);
+      expect(rows).toHaveLength(1);
+      // The first grant stands; the no-op did not overwrite who gave it.
+      expect(rows[0]?.grantedByUserId).toBe(supportUserId);
     });
 
     it('should grant access to users with org membership (no purchase required)', async () => {
@@ -852,52 +748,17 @@ describe('AdminCustomerManagementService', () => {
         status: 'active',
       });
 
-      const media = takeFirst(
-        await db
-          .insert(mediaItems)
-          .values(
-            createTestMediaItemInput(creatorId, {
-              mediaType: 'video',
-              status: 'ready',
-            })
-          )
-          .returning()
-      );
-
-      const testContent = takeFirst(
-        await db
-          .insert(contentTable)
-          .values({
-            creatorId,
-            organizationId: testOrg.id,
-            mediaItemId: media.id,
-            title: 'Member Access Content',
-            slug: createUniqueSlug('member-access'),
-            contentType: 'video',
-            status: 'published',
-            priceCents: 0,
-          })
-          .returning()
-      );
+      const testContent = await insertContent(testOrg.id, 'member-access');
 
       const result = await service.grantContentAccess(
         testOrg.id,
         customer,
-        testContent.id
+        testContent.id,
+        supportUserId
       );
 
       expect(result).toBe(true);
-
-      // Verify access record was created with complimentary type
-      const accessRecord = await db.query.contentAccess.findFirst({
-        where: and(
-          eq(contentAccess.userId, customer),
-          eq(contentAccess.contentId, testContent.id)
-        ),
-      });
-
-      expect(accessRecord).toBeDefined();
-      expect(accessRecord?.accessType).toBe('complimentary');
+      expect(await liveGrantsFor(customer, testContent.id)).toHaveLength(1);
     });
 
     // Note: Organization existence validation is handled by middleware (requirePlatformOwner)
@@ -911,39 +772,14 @@ describe('AdminCustomerManagementService', () => {
           .returning()
       );
 
-      const media = takeFirst(
-        await db
-          .insert(mediaItems)
-          .values(
-            createTestMediaItemInput(creatorId, {
-              mediaType: 'video',
-              status: 'ready',
-            })
-          )
-          .returning()
-      );
-
-      const testContent = takeFirst(
-        await db
-          .insert(contentTable)
-          .values({
-            creatorId,
-            organizationId: testOrg.id,
-            mediaItemId: media.id,
-            title: 'No Customer Content',
-            slug: createUniqueSlug('no-customer'),
-            contentType: 'video',
-            status: 'published',
-            priceCents: 1000,
-          })
-          .returning()
-      );
+      const testContent = await insertContent(testOrg.id, 'no-customer');
 
       await expect(
         service.grantContentAccess(
           testOrg.id,
           '00000000-0000-0000-0000-000000000000',
-          testContent.id
+          testContent.id,
+          supportUserId
         )
       ).rejects.toThrow(NotFoundError);
     });
@@ -959,119 +795,443 @@ describe('AdminCustomerManagementService', () => {
       // Customer exists but has no purchases or membership with org
       const [customer] = await seedTestUsers(db, 1);
 
-      const media = takeFirst(
-        await db
-          .insert(mediaItems)
-          .values(
-            createTestMediaItemInput(creatorId, {
-              mediaType: 'video',
-              status: 'ready',
-            })
-          )
-          .returning()
-      );
-
-      const testContent = takeFirst(
-        await db
-          .insert(contentTable)
-          .values({
-            creatorId,
-            organizationId: testOrg.id,
-            mediaItemId: media.id,
-            title: 'No Relationship Content',
-            slug: createUniqueSlug('no-relationship'),
-            contentType: 'video',
-            status: 'published',
-            priceCents: 1000,
-          })
-          .returning()
-      );
+      const testContent = await insertContent(testOrg.id, 'no-relationship');
 
       await expect(
-        service.grantContentAccess(testOrg.id, customer, testContent.id)
+        service.grantContentAccess(
+          testOrg.id,
+          customer,
+          testContent.id,
+          supportUserId
+        )
       ).rejects.toThrow(NotFoundError);
     });
 
     it('should throw NotFoundError for content not in this organization', async () => {
-      const org1 = takeFirst(
-        await db
-          .insert(organizations)
-          .values(createTestOrganizationInput())
-          .returning()
-      );
+      const { testOrg, customer } = await setupGrantable();
       const org2 = takeFirst(
         await db
           .insert(organizations)
           .values(createTestOrganizationInput())
           .returning()
       );
-
-      const [customer] = await seedTestUsers(db, 1);
-
-      const media = takeFirst(
-        await db
-          .insert(mediaItems)
-          .values(
-            createTestMediaItemInput(creatorId, {
-              mediaType: 'video',
-              status: 'ready',
-            })
-          )
-          .returning()
-      );
-
-      // Content in org1
-      const org1Content = takeFirst(
-        await db
-          .insert(contentTable)
-          .values({
-            creatorId,
-            organizationId: org1.id,
-            mediaItemId: media.id,
-            title: 'Org1 Content',
-            slug: createUniqueSlug('org1-content'),
-            contentType: 'video',
-            status: 'published',
-            priceCents: 1000,
-          })
-          .returning()
-      );
-
-      // Content in org2
-      const org2Content = takeFirst(
-        await db
-          .insert(contentTable)
-          .values({
-            creatorId,
-            organizationId: org2.id,
-            mediaItemId: media.id,
-            title: 'Org2 Content',
-            slug: createUniqueSlug('org2-content'),
-            contentType: 'video',
-            status: 'published',
-            priceCents: 2000,
-          })
-          .returning()
-      );
-
-      // Create relationship with org1 via purchase
-      await db.insert(purchases).values({
-        customerId: customer,
-        contentId: org1Content.id,
-        organizationId: org1.id,
-        amountPaidCents: 1000,
-        platformFeeCents: 100,
-        organizationFeeCents: 0,
-        creatorPayoutCents: 900,
-        stripePaymentIntentId: `pi_cross_org_${Date.now()}`,
-        status: 'completed',
-        purchasedAt: new Date(),
-      });
+      const org2Content = await insertContent(org2.id, 'org2-content');
 
       // Try to grant access to org2's content via org1 - should fail
       await expect(
-        service.grantContentAccess(org1.id, customer, org2Content.id)
+        service.grantContentAccess(
+          testOrg.id,
+          customer,
+          org2Content.id,
+          supportUserId
+        )
+      ).rejects.toThrow(NotFoundError);
+      expect(await liveGrantsFor(customer, org2Content.id)).toHaveLength(0);
+    });
+
+    // Owner decision: "only items it can open". The access decision reads an
+    // entitlement only on its tier and paid arms (`isGrantableContent`).
+    it.each([
+      ['followers-only', { isFollowerGated: true, priceCents: null }],
+      ['team-only', { isTeamOnly: true, priceCents: null }],
+      ['course-only', { courseOnly: true, priceCents: null }],
+      ['free', { isFree: true, priceCents: 0 }],
+    ])('refuses %s content with a 422 that names only the content', async (_shape, flags) => {
+      const { testOrg, customer } = await setupGrantable();
+      const item = await insertContent(testOrg.id, 'not-grantable', flags);
+
+      const attempt = service.grantContentAccess(
+        testOrg.id,
+        customer,
+        item.id,
+        supportUserId
+      );
+
+      await expect(attempt).rejects.toThrow(ContentNotGrantableError);
+      await attempt.catch((error: ContentNotGrantableError) => {
+        expect(error.statusCode).toBe(422);
+        expect(error.message).toBe(
+          "This item can't be granted: a grant only opens paid or subscriber content."
+        );
+        expect(error.context).toEqual({ contentId: item.id });
+      });
+      expect(await liveGrantsFor(customer, item.id)).toHaveLength(0);
+    });
+
+    it.each([
+      ['paid', 'paid'],
+      ['tier (subscriber)', 'tier'],
+    ])('grants %s content', async (_shape, kind) => {
+      const { testOrg, customer } = await setupGrantable();
+      const flags =
+        kind === 'tier'
+          ? {
+              priceCents: null,
+              includedInTierId: takeFirst(
+                await db
+                  .insert(subscriptionTiers)
+                  .values(createTestTierInput(testOrg.id))
+                  .returning()
+              ).id,
+            }
+          : { priceCents: 1500 };
+      const item = await insertContent(testOrg.id, `grantable-${kind}`, flags);
+
+      await service.grantContentAccess(
+        testOrg.id,
+        customer,
+        item.id,
+        supportUserId
+      );
+
+      expect(await liveGrantsFor(customer, item.id)).toHaveLength(1);
+    });
+
+    it('should throw NotFoundError for deleted content', async () => {
+      const { testOrg, customer, newContent } = await setupGrantable();
+      await db
+        .update(contentTable)
+        .set({ deletedAt: new Date() })
+        .where(eq(contentTable.id, newContent.id));
+
+      await expect(
+        service.grantContentAccess(
+          testOrg.id,
+          customer,
+          newContent.id,
+          supportUserId
+        )
       ).rejects.toThrow(NotFoundError);
     });
   });
+
+  describe('revokeGrant', () => {
+    it('revokes a live grant, recording who revoked it', async () => {
+      const { testOrg, customer, newContent } = await setupGrantable();
+      const grant = await grantNow(testOrg.id, customer, newContent.id);
+
+      const result = await service.revokeGrant(
+        testOrg.id,
+        customer,
+        grant.id,
+        creatorId
+      );
+
+      expect(result).toEqual({ contentId: newContent.id, revoked: true });
+      const row = await entitlementById(grant.id);
+      expect(row?.revokedAt).toBeInstanceOf(Date);
+      expect(row?.revokedByUserId).toBe(creatorId);
+      expect(await liveGrantsFor(customer, newContent.id)).toHaveLength(0);
+    });
+
+    it('is idempotent: revoking a revoked grant changes nothing', async () => {
+      const { testOrg, customer, newContent } = await setupGrantable();
+      const grant = await grantNow(testOrg.id, customer, newContent.id);
+      await service.revokeGrant(testOrg.id, customer, grant.id, creatorId);
+      const first = await entitlementById(grant.id);
+
+      const again = await service.revokeGrant(
+        testOrg.id,
+        customer,
+        grant.id,
+        supportUserId
+      );
+
+      expect(again).toEqual({ contentId: newContent.id, revoked: false });
+      const row = await entitlementById(grant.id);
+      expect(row?.revokedAt).toEqual(first?.revokedAt);
+      expect(row?.revokedByUserId).toBe(creatorId);
+    });
+
+    it("404s another organization's grant and leaves it live", async () => {
+      const { testOrg, customer, newContent } = await setupGrantable();
+      const grant = await grantNow(testOrg.id, customer, newContent.id);
+      const otherOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
+
+      await expect(
+        service.revokeGrant(otherOrg.id, customer, grant.id, creatorId)
+      ).rejects.toThrow(NotFoundError);
+      expect((await entitlementById(grant.id))?.revokedAt).toBeNull();
+    });
+
+    it("404s another customer's grant and leaves it live", async () => {
+      const { testOrg, customer, newContent } = await setupGrantable();
+      const grant = await grantNow(testOrg.id, customer, newContent.id);
+      const [someoneElse] = await seedTestUsers(db, 1);
+
+      await expect(
+        service.revokeGrant(testOrg.id, someoneElse, grant.id, creatorId)
+      ).rejects.toThrow(NotFoundError);
+      expect((await entitlementById(grant.id))?.revokedAt).toBeNull();
+    });
+
+    it('404s a purchase entitlement and leaves it live', async () => {
+      const { testOrg, customer, newContent } = await setupGrantable();
+      const [purchaseEntitlement] = await db
+        .insert(entitlements)
+        .values({
+          userId: customer,
+          organizationId: testOrg.id,
+          contentId: newContent.id,
+          source: 'content_purchase',
+        })
+        .returning();
+      if (!purchaseEntitlement) throw new Error('Failed to seed entitlement');
+
+      await expect(
+        service.revokeGrant(
+          testOrg.id,
+          customer,
+          purchaseEntitlement.id,
+          creatorId
+        )
+      ).rejects.toThrow(NotFoundError);
+      expect(
+        (await entitlementById(purchaseEntitlement.id))?.revokedAt
+      ).toBeNull();
+    });
+
+    it('404s an unknown id', async () => {
+      const { testOrg, customer } = await setupGrantable();
+      await expect(
+        service.revokeGrant(
+          testOrg.id,
+          customer,
+          crypto.randomUUID(),
+          creatorId
+        )
+      ).rejects.toThrow(NotFoundError);
+    });
+
+    it('a re-grant after a revoke writes a fresh live row and keeps the revoked one', async () => {
+      const { testOrg, customer, newContent } = await setupGrantable();
+      const grant = await grantNow(testOrg.id, customer, newContent.id);
+      await service.revokeGrant(testOrg.id, customer, grant.id, creatorId);
+
+      await service.grantContentAccess(
+        testOrg.id,
+        customer,
+        newContent.id,
+        supportUserId
+      );
+
+      const live = await liveGrantsFor(customer, newContent.id);
+      expect(live).toHaveLength(1);
+      expect(live[0]?.id).not.toBe(grant.id);
+      expect((await entitlementById(grant.id))?.revokedAt).toBeInstanceOf(Date);
+    });
+  });
+
+  describe('listCustomerGrants', () => {
+    it("lists this organization's grants for the customer, live and revoked, newest first, with names", async () => {
+      const { testOrg, customer, newContent } = await setupGrantable();
+      const second = await insertContent(testOrg.id, 'second-grant');
+      await db
+        .update(users)
+        .set({ name: 'Sam Support' })
+        .where(eq(users.id, supportUserId));
+      await db
+        .update(users)
+        .set({ name: 'Riley Revoker' })
+        .where(eq(users.id, creatorId));
+
+      const older = await grantNow(
+        testOrg.id,
+        customer,
+        newContent.id,
+        new Date(Date.now() - 60_000)
+      );
+      const newer = await grantNow(testOrg.id, customer, second.id);
+      await service.revokeGrant(testOrg.id, customer, older.id, creatorId);
+
+      // Out of scope: another org's grant, and a purchase entitlement.
+      const otherOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
+      const otherContent = await insertContent(otherOrg.id, 'other-org-grant');
+      await grantNow(otherOrg.id, customer, otherContent.id);
+      await db.insert(entitlements).values({
+        userId: customer,
+        organizationId: testOrg.id,
+        contentId: newContent.id,
+        source: 'content_purchase',
+      });
+
+      const result = await service.listCustomerGrants(testOrg.id, customer, {
+        page: 1,
+        limit: 50,
+      });
+
+      expect(result.pagination).toEqual({
+        page: 1,
+        limit: 50,
+        total: 2,
+        totalPages: 1,
+      });
+      expect(result.items.map((g) => g.id)).toEqual([newer.id, older.id]);
+      expect(result.items[0]).toEqual({
+        id: newer.id,
+        contentId: second.id,
+        contentTitle: second.title,
+        contentSlug: second.slug,
+        grantedAt: expect.any(String),
+        grantedByName: 'Sam Support',
+        revokedAt: null,
+        revokedByName: null,
+      });
+      expect(result.items[1]).toMatchObject({
+        id: older.id,
+        contentId: newContent.id,
+        grantedByName: 'Sam Support',
+        revokedAt: expect.any(String),
+        revokedByName: 'Riley Revoker',
+      });
+      expect(Date.parse(result.items[0]?.grantedAt ?? '')).toBeGreaterThan(
+        Date.parse(result.items[1]?.grantedAt ?? '')
+      );
+    });
+
+    it('paginates', async () => {
+      const { testOrg, customer, newContent } = await setupGrantable();
+      const second = await insertContent(testOrg.id, 'paged-grant');
+      await grantNow(testOrg.id, customer, newContent.id);
+      await grantNow(testOrg.id, customer, second.id);
+
+      const page2 = await service.listCustomerGrants(testOrg.id, customer, {
+        page: 2,
+        limit: 1,
+      });
+
+      expect(page2.items).toHaveLength(1);
+      expect(page2.pagination).toEqual({
+        page: 2,
+        limit: 1,
+        total: 2,
+        totalPages: 2,
+      });
+    });
+
+    it('is empty for a customer with no grants here', async () => {
+      const { testOrg, customer } = await setupGrantable();
+      const result = await service.listCustomerGrants(testOrg.id, customer);
+      expect(result.items).toEqual([]);
+      expect(result.pagination.total).toBe(0);
+    });
+  });
+
+  // ── Helpers ────────────────────────────────────────────────────────────
+
+  /** Paid (£10) unless `flags` say otherwise. */
+  async function insertContent(
+    organizationId: string,
+    slugPrefix: string,
+    flags: Partial<typeof contentTable.$inferInsert> = {}
+  ) {
+    const media = takeFirst(
+      await db
+        .insert(mediaItems)
+        .values(
+          createTestMediaItemInput(creatorId, {
+            mediaType: 'video',
+            status: 'ready',
+          })
+        )
+        .returning()
+    );
+    return takeFirst(
+      await db
+        .insert(contentTable)
+        .values({
+          creatorId,
+          organizationId,
+          mediaItemId: media.id,
+          title: `Grant ${slugPrefix}`,
+          slug: createUniqueSlug(slugPrefix),
+          contentType: 'video',
+          status: 'published',
+          priceCents: 1000,
+          ...flags,
+        })
+        .returning()
+    );
+  }
+
+  /**
+   * An org, a customer with a completed purchase there (the relationship a
+   * grant requires), and a second item in the org to grant.
+   */
+  async function setupGrantable() {
+    const testOrg = takeFirst(
+      await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning()
+    );
+    const [customer] = await seedTestUsers(db, 1);
+    const bought = await insertContent(testOrg.id, 'bought');
+    await db.insert(purchases).values({
+      customerId: customer,
+      contentId: bought.id,
+      organizationId: testOrg.id,
+      amountPaidCents: 1000,
+      platformFeeCents: 100,
+      organizationFeeCents: 0,
+      creatorPayoutCents: 900,
+      stripePaymentIntentId: `pi_grant_${crypto.randomUUID()}`,
+      status: 'completed',
+      purchasedAt: new Date(),
+    });
+    const newContent = await insertContent(testOrg.id, 'to-grant', {
+      priceCents: 2000,
+    });
+    return { testOrg, customer, newContent };
+  }
+
+  /** A grant row as `grantContentAccess` writes it, at `grantedAt`. */
+  async function grantNow(
+    organizationId: string,
+    customerId: string,
+    contentId: string,
+    grantedAt = new Date()
+  ) {
+    return takeFirst(
+      await db
+        .insert(entitlements)
+        .values({
+          userId: customerId,
+          organizationId,
+          contentId,
+          source: 'grant',
+          grantedByUserId: supportUserId,
+          grantedAt,
+        })
+        .returning()
+    );
+  }
+
+  async function liveGrantsFor(customerId: string, contentId: string) {
+    return db
+      .select()
+      .from(entitlements)
+      .where(
+        and(
+          eq(entitlements.userId, customerId),
+          eq(entitlements.contentId, contentId),
+          eq(entitlements.source, 'grant'),
+          isNull(entitlements.revokedAt)
+        )
+      );
+  }
+
+  async function entitlementById(id: string) {
+    return db.query.entitlements.findFirst({ where: eq(entitlements.id, id) });
+  }
 });

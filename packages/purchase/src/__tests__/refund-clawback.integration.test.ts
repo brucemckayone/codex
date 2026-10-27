@@ -41,7 +41,7 @@ import {
   takeFirst,
   teardownTestDatabase,
 } from '@codex/test-utils';
-import { and, eq, inArray, isNotNull } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, or } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
   afterAll,
@@ -89,6 +89,10 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
   afterAll(async () => {
     if (createdPayoutIds.length > 0) {
       // A won dispute's re-pay rows are live pending payouts: delete them too.
+      // A reversal references a payout twice (payout_id, and
+      // repaid_by_payout_id), and a later refund records its own step ON a
+      // re-pay row (Codex-2hxff.59 item 1a), so every reversal touching any of
+      // these rows goes before the rows.
       const repays = await db
         .select({ id: payoutReversals.repaidByPayoutId })
         .from(payoutReversals)
@@ -98,20 +102,22 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
             isNotNull(payoutReversals.repaidByPayoutId)
           )
         );
+      const all = [
+        ...createdPayoutIds,
+        ...repays.flatMap((r) => (r.id ? [r.id] : [])),
+      ];
       await db
         .delete(refundReviews)
-        .where(inArray(refundReviews.payoutId, createdPayoutIds));
+        .where(inArray(refundReviews.payoutId, all));
       await db
         .delete(payoutReversals)
-        .where(inArray(payoutReversals.payoutId, createdPayoutIds));
-      await db
-        .delete(payouts)
         .where(
-          inArray(payouts.id, [
-            ...createdPayoutIds,
-            ...repays.flatMap((r) => (r.id ? [r.id] : [])),
-          ])
+          or(
+            inArray(payoutReversals.payoutId, all),
+            inArray(payoutReversals.repaidByPayoutId, all)
+          )
         );
+      await db.delete(payouts).where(inArray(payouts.id, all));
     }
     if (createdDisputeIds.length > 0) {
       await db
@@ -295,7 +301,12 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
 
     const result = await refundEvent(seeded, `re_part_${seeded.tag}`, 300);
 
-    expect(result).toEqual({ userId: buyerId, accessEnded: false });
+    expect(result).toEqual({
+      userId: buyerId,
+      accessEnded: false,
+      duplicatePayment: false,
+      itemTitle: expect.any(String),
+    });
     expect(stripe.refunds.list).toHaveBeenCalledWith(
       expect.objectContaining({ charge: seeded.charge.id })
     );
@@ -419,7 +430,12 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
 
     await expect(
       refundEvent(seeded, `re_refused_${seeded.tag}`, 1000)
-    ).resolves.toEqual({ userId: buyerId, accessEnded: true });
+    ).resolves.toEqual({
+      userId: buyerId,
+      accessEnded: true,
+      duplicatePayment: false,
+      itemTitle: expect.any(String),
+    });
   });
 
   it("a debt's refund_reviews row carries the purchase id and the reversal it is for", async () => {
@@ -746,6 +762,111 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
     ).toBeUndefined();
   });
 
+  // ── a late win (owner decision 2026-10-25, "alert only") ──────────────
+
+  /** The service, with its error log watched. */
+  function watchedService() {
+    const service = makeService();
+    const alert = vi.spyOn(
+      (service as unknown as { obs: { error: (...args: unknown[]) => void } })
+        .obs,
+      'error'
+    );
+    const lateWinAlerts = () =>
+      alert.mock.calls.filter(([message]) =>
+        String(message).startsWith('late win on a lost dispute')
+      );
+    return { service, alert, lateWinAlerts };
+  }
+
+  it('a late win (lost → won) is only alerted, with ids only: the record stays lost and applied, nothing is re-paid and nothing restored', async () => {
+    const seeded = await seedPurchase(1000);
+    const access = await grantAccess(seeded);
+    const disputeId = `dp_late_${seeded.tag}`;
+    createdDisputeIds.push(disputeId);
+    const { service, alert, lateWinAlerts } = watchedService();
+    const record = (status: string) =>
+      service.recordDispute(disputeFor(seeded, disputeId, status));
+    await record('needs_response');
+    await record('lost');
+    await service.processLostDispute(seeded.paymentIntentId, 1000);
+    await service.markDisputeOutcomeApplied(disputeId);
+    const applied = (await record('lost'))?.outcomeAppliedAt;
+    expect(applied).not.toBeNull();
+    const payoutsBefore = await db
+      .select({ id: payouts.id })
+      .from(payouts)
+      .where(eq(payouts.purchaseId, seeded.purchase.id));
+
+    const after = await record('won');
+
+    expect(after?.status).toBe('lost');
+    expect(after?.outcomeAppliedAt).toEqual(applied);
+    expect(alert).toHaveBeenCalledWith(
+      'late win on a lost dispute: re-pay creators and restore the buyer by hand',
+      {
+        errorId: expect.any(String),
+        disputeId,
+        chargeId: seeded.charge.id,
+        purchaseId: seeded.purchase.id,
+        subscriptionId: null,
+        courseSubscriptionId: null,
+      }
+    );
+    expect(lateWinAlerts()).toHaveLength(1);
+    // The loss stands: still refunded, access still ended, no re-pay rows.
+    expect(
+      takeFirst(
+        await db
+          .select({ status: purchases.status })
+          .from(purchases)
+          .where(eq(purchases.id, seeded.purchase.id))
+      ).status
+    ).toBe('refunded');
+    expect((await access()).deletedAt).not.toBeNull();
+    expect(
+      await db
+        .select({ id: payouts.id })
+        .from(payouts)
+        .where(eq(payouts.purchaseId, seeded.purchase.id))
+    ).toEqual(payoutsBefore);
+  });
+
+  it('a late win on a loss whose handling never finished leaves it unapplied, for the loss to finish', async () => {
+    const seeded = await seedPurchase(1000);
+    const disputeId = `dp_late_unapplied_${seeded.tag}`;
+    createdDisputeIds.push(disputeId);
+    const { service, lateWinAlerts } = watchedService();
+    const record = (status: string) =>
+      service.recordDispute(disputeFor(seeded, disputeId, status));
+    await record('lost');
+
+    const after = await record('won');
+
+    expect(after).toMatchObject({ status: 'lost', outcomeAppliedAt: null });
+    expect(lateWinAlerts()).toHaveLength(1);
+  });
+
+  it('every other move out of a final status is still refused, and a plain win alerts nothing', async () => {
+    const seeded = await seedPurchase(1000);
+    const wonId = `dp_won_${seeded.tag}`;
+    const closedId = `dp_closed_${seeded.tag}`;
+    createdDisputeIds.push(wonId, closedId);
+    const { service, lateWinAlerts } = watchedService();
+    const record = (disputeId: string, status: string) =>
+      service.recordDispute(disputeFor(seeded, disputeId, status));
+
+    await record(wonId, 'needs_response');
+    expect((await record(wonId, 'won'))?.status).toBe('won');
+    expect((await record(wonId, 'lost'))?.status).toBe('won');
+    expect((await record(wonId, 'prevented'))?.status).toBe('won');
+    // Only `lost` may become `won`: a closed inquiry may not.
+    await record(closedId, 'warning_closed');
+    expect((await record(closedId, 'won'))?.status).toBe('warning_closed');
+    expect((await record(closedId, 'lost'))?.status).toBe('warning_closed');
+    expect(lateWinAlerts()).toHaveLength(0);
+  });
+
   it('an open dispute holds a purchase row recorded before charge ids, by its purchase', async () => {
     const seeded = await seedPurchase(1000);
     const legacy = takeFirst(
@@ -827,7 +948,12 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
       stripeChargeId: null,
     });
 
-    // …but a later refund never claws it back as a slice of the charge.
+    // …but is never clawed back as a slice of the charge. Codex-2hxff.59 item
+    // 1a: a later refund takes the CREATOR SLICE's share,
+    // floor(765 × 300/1000) = 229, off the still-unpaid re-pay row, by a
+    // reduction recorded on that row. It is not a share of the re-pay row's
+    // own 382, no transfer is reversed, and no person is needed: the
+    // `slice_repaid` review is only for a re-pay row already paid.
     vi.mocked(stripe.transfers.createReversal).mockClear();
     stripeRefunds([{ id: `re_after_${seeded.tag}`, amount: 300 }]);
     await refundEvent(seeded, `re_after_${seeded.tag}`, 300);
@@ -836,8 +962,23 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
         .select()
         .from(payoutReversals)
         .where(eq(payoutReversals.payoutId, repay.id))
-    ).toHaveLength(0);
+    ).toMatchObject([
+      {
+        causeType: 'refund',
+        causeId: `re_after_${seeded.tag}`,
+        kind: 'pending_reduction',
+        amountCents: 229,
+        status: 'done',
+      },
+    ]);
+    expect(stripe.transfers.createReversal).not.toHaveBeenCalled();
     expect((await readRow(repay.id)).status).toBe('pending');
+    expect(
+      await db
+        .select()
+        .from(refundReviews)
+        .where(inArray(refundReviews.payoutId, [creator.id, repay.id]))
+    ).toHaveLength(0);
   });
 
   it('restoreDisputedPurchase: a won dispute restores the access a chargeback paused, and clears the mark', async () => {

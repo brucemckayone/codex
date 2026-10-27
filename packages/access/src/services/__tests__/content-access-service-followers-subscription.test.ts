@@ -21,7 +21,7 @@
  *
  *   NEGATIVE (deny):
  *     6. Subscriber with status=paused → deny (PR #5 filter drops this row)
- *     7. Subscriber with status=past_due → deny (PR #5 filter drops this row)
+ *     7. Subscriber with status=cancelled → deny (the status filter drops this row)
  *     8. Non-subscriber, non-follower, non-management → deny
  *     9. Anonymous/guest (no subscription, no follower) → deny
  *    10. Tier-gated content (accessType=subscribers) with subscriber → existing
@@ -57,6 +57,8 @@ interface QueryMocks {
   organizationFollowers: { findFirst: FindFirstFn };
   subscriptions: { findFirst: FindFirstFn };
   subscriptionTiers: { findFirst: FindFirstFn };
+  /** Read on the deny path only, by `disputeHold` (Codex-2hxff.60). */
+  purchases: { findFirst: FindFirstFn };
 }
 
 interface StubDb {
@@ -97,6 +99,7 @@ function createStubDb(): StubDb {
     organizationFollowers: { findFirst: vi.fn() },
     subscriptions: { findFirst: vi.fn() },
     subscriptionTiers: { findFirst: vi.fn() },
+    purchases: { findFirst: vi.fn() },
   };
 
   const tx = { query: mocks, select: emptySelect };
@@ -353,7 +356,9 @@ describe('ContentAccessService.getStreamingUrl — followers-only content (Codex
       });
     });
 
-    it('denies a subscriber whose status=past_due (PR #5 filter drops this row)', async () => {
+    // past_due GRANTS (Codex-2hxff.10), proven against the DB in
+    // the access integration suite; cancelled is still dropped.
+    it('denies a subscriber whose status=cancelled (the status filter drops this row)', async () => {
       stub.mocks.content.findFirst.mockResolvedValue(followersContentRow);
       stub.mocks.subscriptions.findFirst.mockResolvedValue(undefined);
       stub.mocks.organizationFollowers.findFirst.mockResolvedValue(undefined);
@@ -509,6 +514,112 @@ describe('ContentAccessService.getStreamingUrl — followers-only content (Codex
       expect(err).toBeInstanceOf(AccessDeniedError);
       expect((err as AccessDeniedError).context).toMatchObject({
         reason: 'subscribers_only',
+      });
+    });
+  });
+
+  // The detail pages' body source for a gated piece, whose public row carries
+  // none (Codex-039vo). The body is the row the access decision read, returned
+  // only on request and only after that decision granted.
+  describe('includeBody — the body only after a grant, only on request (Codex-039vo)', () => {
+    const rowWithBody = {
+      ...followersContentRow,
+      contentBody: 'the followers-only text',
+      contentBodyJson: null,
+    };
+
+    it('returns the body to a granted reader who asked for it', async () => {
+      stub.mocks.content.findFirst.mockResolvedValue(rowWithBody);
+      stub.mocks.subscriptions.findFirst.mockResolvedValue(undefined);
+      stub.mocks.organizationFollowers.findFirst.mockResolvedValue({
+        id: 'follower_row',
+      });
+
+      const { service } = buildService(stub);
+      const result = await service.getStreamingUrl(userId, streamingInput, {
+        includeBody: true,
+      });
+
+      expect(result.body).toEqual({
+        contentBody: 'the followers-only text',
+        contentBodyJson: null,
+      });
+      // The stream result is unchanged by the option.
+      expect(result.streamingUrl).toContain('/hls/master.m3u8?token=');
+    });
+
+    it('returns no body when not asked (the player refresh path)', async () => {
+      stub.mocks.content.findFirst.mockResolvedValue(rowWithBody);
+      stub.mocks.subscriptions.findFirst.mockResolvedValue(undefined);
+      stub.mocks.organizationFollowers.findFirst.mockResolvedValue({
+        id: 'follower_row',
+      });
+
+      const { service } = buildService(stub);
+      const result = await service.getStreamingUrl(userId, streamingInput);
+
+      expect(result).not.toHaveProperty('body');
+    });
+
+    it('a denied reader who asked for the body gets AccessDeniedError, never the body', async () => {
+      stub.mocks.content.findFirst.mockResolvedValue(rowWithBody);
+      stub.mocks.subscriptions.findFirst.mockResolvedValue(undefined);
+      stub.mocks.organizationFollowers.findFirst.mockResolvedValue(undefined);
+      stub.mocks.organizationMemberships.findFirst.mockResolvedValue(undefined);
+
+      const { service } = buildService(stub);
+      const outcome = await service
+        .getStreamingUrl(userId, streamingInput, { includeBody: true })
+        .catch((e: unknown) => e);
+
+      expect(outcome).toBeInstanceOf(AccessDeniedError);
+      expect(JSON.stringify(outcome)).not.toContain('the followers-only text');
+    });
+
+    // A purchase grant outlives unpublication (an item withdrawn after it was
+    // sold), but a row never published was never offered: no arm reaches it,
+    // so neither its stream nor its text leaves (Codex-nacky).
+    const paidRow = (publishedAt: Date | null) => ({
+      ...followersContentRow,
+      isFollowerGated: false,
+      isPurchasable: true,
+      priceCents: 900,
+      status: 'draft',
+      publishedAt,
+      contentBody: 'the paid text',
+      contentBodyJson: null,
+    });
+
+    it('a buyer of an item never published is refused, and never gets the body', async () => {
+      stub.mocks.content.findFirst.mockResolvedValue(paidRow(null));
+
+      const { service, verifyPurchase } = buildService(stub);
+      verifyPurchase.mockResolvedValue(true);
+      const outcome = await service
+        .getStreamingUrl(userId, streamingInput, { includeBody: true })
+        .catch((e: unknown) => e);
+
+      expect(outcome).toBeInstanceOf(AccessDeniedError);
+      expect((outcome as AccessDeniedError).context?.reason).toBe(
+        'never_released'
+      );
+      expect(JSON.stringify(outcome)).not.toContain('the paid text');
+    });
+
+    it('a buyer of an item withdrawn after release keeps the body', async () => {
+      stub.mocks.content.findFirst.mockResolvedValue(
+        paidRow(new Date('2026-01-01T00:00:00.000Z'))
+      );
+
+      const { service, verifyPurchase } = buildService(stub);
+      verifyPurchase.mockResolvedValue(true);
+      const result = await service.getStreamingUrl(userId, streamingInput, {
+        includeBody: true,
+      });
+
+      expect(result.body).toEqual({
+        contentBody: 'the paid text',
+        contentBodyJson: null,
       });
     });
   });

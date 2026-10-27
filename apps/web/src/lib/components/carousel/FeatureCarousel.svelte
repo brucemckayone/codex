@@ -32,6 +32,10 @@
     MusicIcon,
     PlayIcon,
   } from '$lib/components/ui/Icon';
+  import {
+    getThumbnailDimensions,
+    getThumbnailSrcset,
+  } from '$lib/utils/image';
   import type { FeatureItem } from './feature-carousel.types';
 
   interface Props {
@@ -40,6 +44,35 @@
   }
 
   const { items, ariaLabel = "Editor's picks" }: Props = $props();
+
+  /** The tallest a slide stands: `clamp(20rem, 44vh, 28.75rem)` at its cap. */
+  const SLIDE_MAX_HEIGHT_REM = 28.75;
+
+  /**
+   * How wide a slide's picture is drawn (Codex-kk9nv.3). The slide spans the
+   * section, up to 77rem, and the picture covers it: where the slide is
+   * narrower than the picture's shape (a phone), the picture is drawn as wide
+   * as the slide's height times its ratio. A picture whose size is unknown is
+   * taken as 16:9.
+   *
+   * The slide's height follows the viewport's height, which a `sizes` cannot
+   * weigh against its width without max() and clamp(), and Safari before 26.4
+   * ignores those. So its min-height is taken at its tallest: at most about
+   * 1.45x over on a short phone. Copy long enough to grow a slide past that,
+   * which stretches every slide in the track with it, is under-declared: a
+   * height set by the copy is one no `sizes` can know. It costs at most one
+   * file size, and only for a picture narrower than 16:9 (square, portrait,
+   * 4:3) beside very long copy; a wider one is declared wide enough for the
+   * 1600w file.
+   */
+  function slideSizes(image: string): string {
+    const size = getThumbnailDimensions(image);
+    const ratio = size ? size.width / size.height : 16 / 9;
+    const covered = Math.round(SLIDE_MAX_HEIGHT_REM * ratio * 100) / 100;
+    if (covered >= 77) return `${covered}rem`;
+    const meet = Math.round((covered + 2) * 100) / 100;
+    return `(min-width: 79rem) 77rem, (min-width: ${meet}rem) calc(100vw - 2rem), ${covered}rem`;
+  }
 
   // Per-type presentation: the top-left badge glyph/label + the CTA verb. The
   // CTA replaces the old generic "Explore" so the pick reads as its medium
@@ -168,7 +201,14 @@
             class:feature-carousel__media--fallback={!item.image}
           >
             {#if item.image}
-              <img src={item.image} alt="" loading="lazy" />
+              {@const srcset = getThumbnailSrcset(item.image)}
+              <img
+                src={item.image}
+                srcset={srcset || undefined}
+                sizes={srcset ? slideSizes(item.image) : undefined}
+                alt=""
+                loading="lazy"
+              />
             {/if}
           </div>
           <div class="feature-carousel__scrim" aria-hidden="true"></div>

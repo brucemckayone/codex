@@ -101,12 +101,70 @@ export function isForeignStripeEnvironment(
   return typeof tag === 'string' && tag !== '' && tag !== environment;
 }
 
+/**
+ * The metadata key on a support refund naming its decision: the idempotency
+ * key `support_refund_{charge}_{refundCount}_{amount}` (Codex-2hxff.28 §5).
+ * A repeat of the same submit finds the refund by it and answers `replayed`.
+ * Written by `SupportService.issueRefund` (@codex/admin).
+ */
+export const STRIPE_SUPPORT_KEY_METADATA_KEY = 'codex_support_key';
+
+/**
+ * The metadata key on a support refund naming who in support issued it
+ * (Codex-2hxff.28, Q3). Written by `SupportService.issueRefund`; read back by
+ * the refund webhook (`supportRequesterOf`, @codex/purchase) into
+ * `refunds.requested_by_user_id`. A Dashboard refund carries none.
+ */
+export const STRIPE_REQUESTED_BY_METADATA_KEY = 'codex_requested_by';
+
 export const PURCHASE_STATUS = {
   PENDING: 'pending',
   COMPLETED: 'completed',
   FAILED: 'failed',
   REFUNDED: 'refunded',
 } as const;
+
+/** `checkout_sessions.status` (Codex-2hxff.14). */
+export const CHECKOUT_SESSION_STATUS = {
+  OPEN: 'open',
+  COMPLETED: 'completed',
+  EXPIRED: 'expired',
+} as const;
+
+export const CHECKOUT_SESSION_TIMING = {
+  /** How long a buyer has to pay (owner decision 2026-10-21, "30 minutes"). */
+  TTL_MS: 30 * 60 * 1000,
+  /**
+   * Added to the expiry sent to Stripe, which must be at least 30 minutes
+   * after ITS creation time; ours is computed a moment earlier.
+   */
+  STRIPE_FLOOR_SLACK_MS: 60 * 1000,
+  /** An open session with less left than this is replaced, not reused. */
+  MIN_REMAINING_TO_REUSE_MS: 5 * 60 * 1000,
+} as const;
+
+/** What a reserved checkout session sells (Codex-2hxff.15). */
+export const CHECKOUT_SESSION_KIND = {
+  PURCHASE: 'purchase',
+  SUBSCRIPTION: 'subscription',
+} as const;
+
+/**
+ * How long a tier-change preview's price stands (owner decision 2026-10-22,
+ * "10 min, then review again"). An older one is refused and the subscriber
+ * is shown a fresh preview, so they pay what they were shown.
+ */
+export const TIER_CHANGE_PREVIEW_TTL_MS = 10 * 60 * 1000;
+
+/**
+ * How long support can refund a payment: 14 × 24 hours from Stripe's
+ * `charge.created`, so a renewal's window runs from that renewal (owner
+ * decisions 2026-10-13 and 2026-10-24, Q1; Codex-2hxff.28). Only the support
+ * refund route enforces it: Dashboard refunds and the platform's own
+ * (duplicates, early cancels) are not support decisions. `refundWindow` in
+ * @codex/payments is the one reader.
+ */
+export const REFUND_WINDOW_DAYS = 14;
 
 export const SUBSCRIPTION_STATUS = {
   ACTIVE: 'active',
@@ -116,6 +174,44 @@ export const SUBSCRIPTION_STATUS = {
   INCOMPLETE: 'incomplete',
   PAUSED: 'paused',
 } as const;
+
+/**
+ * The statuses under which a subscription (org tier or course plan) grants
+ * access. `past_due` is one of them: a failed renewal keeps access while
+ * Stripe retries the card, and access ends when Stripe cancels (owner
+ * decision P-3, docs/payments/subscriptions.md#failed-payments). Every access
+ * gate reads this one list, so the two subscription kinds cannot drift apart.
+ */
+export const ACCESS_GRANTING_SUBSCRIPTION_STATUSES = [
+  SUBSCRIPTION_STATUS.ACTIVE,
+  SUBSCRIPTION_STATUS.CANCELLING,
+  SUBSCRIPTION_STATUS.PAST_DUE,
+] as const;
+
+/** Whether a subscription in `status` grants access (see the list above). */
+export function subscriptionStatusGrantsAccess(
+  status: string | null | undefined
+): boolean {
+  return (
+    status != null &&
+    (ACCESS_GRANTING_SUBSCRIPTION_STATUSES as readonly string[]).includes(
+      status
+    )
+  );
+}
+
+/**
+ * The course subscription statuses a creator's removal cancels at period end
+ * (Codex-2hxff.64). `paused` is included: it still renews when resumed.
+ * `cancelling` is not: it already ends. The cancel
+ * (`cancelForCoursesOffSale`) and the Remove dialog's preview count both read
+ * this list, so the owner is shown exactly what will be cancelled.
+ */
+export const OFF_SALE_CANCELLABLE_COURSE_SUBSCRIPTION_STATUSES = [
+  SUBSCRIPTION_STATUS.ACTIVE,
+  SUBSCRIPTION_STATUS.PAST_DUE,
+  SUBSCRIPTION_STATUS.PAUSED,
+] as const;
 
 /**
  * Structured churn-reason taxonomy for subscription cancellation (Q7).
@@ -169,6 +265,17 @@ export const FEES = {
   // it; fee_config_platform.min_platform_fee_cents overrides it when a row
   // exists. docs/payments/fees-and-splits.md.
   MIN_PLATFORM_FEE_CENTS: 25,
+} as const;
+
+/**
+ * The range every price must sit in, in pence: content, courses, tiers and
+ * course subscription plans alike (owner decision 2026-10-13). Stripe refuses
+ * card charges under £0.30, and at £1.00 the 25p minimum platform fee still
+ * covers a UK card fee (about 1.5% + 20p). docs/payments/purchases.md.
+ */
+export const PRICE_LIMITS = {
+  MIN_CENTS: 100, // £1.00
+  MAX_CENTS: 10_000_000, // £100,000
 } as const;
 
 export const CURRENCY = {

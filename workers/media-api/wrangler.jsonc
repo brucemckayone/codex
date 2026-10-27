@@ -27,6 +27,12 @@
       {
         "name": "ORPHAN_CLEANUP_DO",
         "class_name": "OrphanedFileCleanupDO"
+      },
+      // Live media status for studio tabs (Codex-l2c48.9). Reached only
+      // through statusObjectFor() in @codex/worker-utils.
+      {
+        "name": "MEDIA_STATUS",
+        "class_name": "MediaStatusObject"
       }
     ]
   },
@@ -37,6 +43,10 @@
     {
       "tag": "v1",
       "new_sqlite_classes": ["OrphanedFileCleanupDO"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["MediaStatusObject"]
     }
   ],
 
@@ -88,6 +98,12 @@
     {
       "binding": "AUTH_SESSION_KV",
       "id": "82d04a4236df4aac8e9d87793344f0ed"
+    },
+    // Codex-l2c48.6: one setup-fault email per fault per UTC day. The same
+    // namespace the other workers cache in, under transcoding-alert:*.
+    {
+      "binding": "CACHE_KV",
+      "id": "8bde7d718cff4bfa99e29cd8e0aa7353"
     }
   ],
 
@@ -133,6 +149,10 @@
           {
             "name": "ORPHAN_CLEANUP_DO",
             "class_name": "OrphanedFileCleanupDO"
+          },
+          {
+            "name": "MEDIA_STATUS",
+            "class_name": "MediaStatusObject"
           }
         ]
       },
@@ -173,6 +193,10 @@
         {
           "binding": "AUTH_SESSION_KV",
           "id": "82d04a4236df4aac8e9d87793344f0ed"
+        },
+        {
+          "binding": "CACHE_KV",
+          "id": "8bde7d718cff4bfa99e29cd8e0aa7353"
         }
       ],
       "r2_buckets": [
@@ -221,6 +245,10 @@
           {
             "name": "ORPHAN_CLEANUP_DO",
             "class_name": "OrphanedFileCleanupDO"
+          },
+          {
+            "name": "MEDIA_STATUS",
+            "class_name": "MediaStatusObject"
           }
         ]
       },
@@ -244,7 +272,10 @@
         // NO worker, so callbacks were black-holed and media never reached
         // `ready`. media-api.revelations.studio has a custom_domain route + DNS
         // (below) and owns the /api/transcoding/webhook handler.
-        "API_URL": "https://media-api.revelations.studio"
+        "API_URL": "https://media-api.revelations.studio",
+        // The endpoint's max workers; RunPod scales an idle endpoint down to
+        // 0 (paused) and media-api raises it back to this (Codex-l2c48.5).
+        "RUNPOD_WORKERS_MAX": "5"
       },
       // Bindings are not inherited into a named env — see the default env.
       "ratelimits": [
@@ -270,6 +301,10 @@
         {
           "binding": "AUTH_SESSION_KV",
           "id": "aab4025dcb5c44ad8d1156bcfda055d2"
+        },
+        {
+          "binding": "CACHE_KV",
+          "id": "499d67770dc2405ab80cba5629b16511"
         }
       ],
       "r2_buckets": [

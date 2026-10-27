@@ -4,7 +4,7 @@
  *
  * Codex-ko8ko: soft-deleting a content row must not strand its thumbnail's
  * R2 objects. `ImageProcessingService.deleteContentThumbnail` already deletes
- * the three deterministic variant keys and records orphans for the hourly
+ * the folder the row's thumbnail URL names and records orphans for the hourly
  * `OrphanedFileCleanupDO` sweep on R2 failure — but it was only wired to the
  * standalone "remove thumbnail" endpoint, never to content deletion. This
  * helper bridges that gap while guaranteeing a cleanup hiccup can never fail

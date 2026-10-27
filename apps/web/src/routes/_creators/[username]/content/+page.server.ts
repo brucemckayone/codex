@@ -2,16 +2,32 @@
  * Creator Content Catalog - server load
  *
  * Fetches a creator's published content with search, type filtering, and pagination.
- * Reuses the creator profile lookup from the parent page, then queries content
- * scoped by creatorId with URL-driven filters.
+ * Resolves the creator itself (`getPublicProfile`; no such creator is a 404),
+ * then queries the public list scoped by creatorId with URL-driven filters.
  * Sets PRIVATE cache headers — the page is auth-varying (creator layout
  * injects `user`), so it must not be shared-cached.
  */
+import { boundSearchParam, clampPageParam } from '@codex/validation';
+import { error } from '@sveltejs/kit';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
+import { withoutRawBody } from '$lib/server/content-detail';
+import { logReadFailure } from '$lib/server/read-failure';
+import { creatorHandle } from '../creator-handle';
 import type { PageServerLoad } from './$types';
 
 const CONTENT_LIMIT = 12;
+
+/**
+ * `?type=` to the API's content type. A Map, not an object literal: an object
+ * answers `constructor` or `toString` from its prototype, so `?type=constructor`
+ * sent a content type the API refused with a 400.
+ */
+const CONTENT_TYPE_BY_FILTER = new Map([
+  ['video', 'video'],
+  ['audio', 'audio'],
+  ['article', 'written'],
+]);
 
 export const load: PageServerLoad = async ({
   params,
@@ -20,29 +36,39 @@ export const load: PageServerLoad = async ({
   cookies,
   setHeaders,
 }) => {
-  // Strip leading @ from username (URL convention: /@alex-creator)
-  const username = params.username.replace(/^@/, '');
+  // The handle without its leading @ (URL convention: /@alex-creator).
+  const username = creatorHandle(params.username);
   const api = createServerApi(platform, cookies);
 
-  // Parse URL search params for filtering and pagination
-  const search = url.searchParams.get('search') ?? '';
-  const typeFilter = url.searchParams.get('type') ?? 'all';
-  const page = Math.max(
-    1,
-    parseInt(url.searchParams.get('page') || '1', 10) || 1
-  );
+  // Parse URL search params for filtering and pagination. Bounded to what the
+  // public list accepts (a page it lists, a search with no NUL, which Postgres
+  // refuses in text and so was a content-api 500), so a hand-edited URL never
+  // reaches content-api as a 400: logReadFailure logs a 4xx at error level as
+  // OUR contract bug, and a visitor must not be able to raise that alarm with
+  // a URL.
+  const search = boundSearchParam(url.searchParams.get('search'));
+  // The filter the page states is the one it applied: an unknown `?type=`
+  // applies none, so it reads as "all" (no tab lit, no bogus `type=` carried
+  // into the pagination links).
+  const typeParam = url.searchParams.get('type');
+  const typeFilter =
+    typeParam !== null && CONTENT_TYPE_BY_FILTER.has(typeParam)
+      ? typeParam
+      : 'all';
+  const page = clampPageParam(url.searchParams.get('page'));
 
-  // Attempt to fetch the creator's profile from identity API
-  let creatorId: string | null = null;
-  let creatorName: string | null = null;
-
-  // Note this used to read `profileResult?.data?.id` off a raw `api.fetch`,
-  // i.e. it expected the un-unwrapped procedure envelope. `getPublicProfile`
-  // goes through `request()`, which unwraps `{ data: T }` to `T`, so the
-  // fields are read directly.
+  // The creator's public profile from identity-api. Note this used to read
+  // `profileResult?.data?.id` off a raw `api.fetch`, i.e. it expected the
+  // un-unwrapped procedure envelope. `getPublicProfile` goes through
+  // `request()`, which unwraps `{ data: T }` to `T`, so the fields are read
+  // directly.
   const profile = await api.account.getPublicProfile(username);
-  creatorId = profile?.id ?? null;
-  creatorName = profile?.name ?? null;
+  // No such creator is a 404, as on the detail page, not a 200 "no content".
+  if (!profile?.id) {
+    error(404, 'Creator not found');
+  }
+  const creatorId = profile.id;
+  const creatorName = profile.name ?? null;
 
   // Fetch creator's published content with filters
   let contentItems: Array<{
@@ -50,51 +76,47 @@ export const load: PageServerLoad = async ({
     title: string;
     slug: string;
     description: string | null;
-    contentType: string;
+    contentType: 'video' | 'audio' | 'written';
     thumbnailUrl?: string | null;
     priceCents?: number | null;
     mediaItem?: {
       thumbnailUrl?: string | null;
       durationSeconds?: number | null;
     } | null;
+    organization?: { slug?: string | null } | null;
   }> = [];
   let totalPages = 1;
   let total = 0;
+  // A failed read renders an error state, never "hasn't published" or "no
+  // content matches your search", which would blame the visitor's query.
+  let contentError = false;
 
-  if (creatorId) {
-    try {
-      const contentParams = new URLSearchParams();
-      contentParams.set('creatorId', creatorId);
-      contentParams.set('status', 'published');
-      contentParams.set('limit', String(CONTENT_LIMIT));
-      contentParams.set('page', String(page));
-      contentParams.set('sortBy', 'publishedAt');
-      contentParams.set('sortOrder', 'desc');
+  // The PUBLIC list scoped by creator, not the studio list, which needs a
+  // session and lists the signed-in user's own content (Codex-osuqt).
+  try {
+    const contentParams = new URLSearchParams();
+    contentParams.set('creatorId', creatorId);
+    contentParams.set('limit', String(CONTENT_LIMIT));
+    contentParams.set('page', String(page));
+    contentParams.set('sort', 'newest');
 
-      if (search) {
-        contentParams.set('search', search);
-      }
-
-      if (typeFilter && typeFilter !== 'all') {
-        const typeMap: Record<string, string> = {
-          video: 'video',
-          audio: 'audio',
-          article: 'written',
-        };
-        const mappedType = typeMap[typeFilter];
-        if (mappedType) {
-          contentParams.set('contentType', mappedType);
-        }
-      }
-
-      const contentResult = await api.content.list(contentParams);
-      contentItems = contentResult?.items ?? [];
-      totalPages = contentResult?.pagination?.totalPages ?? 1;
-      total = contentResult?.pagination?.total ?? 0;
-    } catch {
-      // Content fetch failed - show empty state
-      contentItems = [];
+    if (search) {
+      contentParams.set('search', search);
     }
+
+    const contentType = CONTENT_TYPE_BY_FILTER.get(typeFilter);
+    if (contentType) {
+      contentParams.set('contentType', contentType);
+    }
+
+    const contentResult = await api.content.getPublicContent(contentParams);
+    // Cards draw metadata only; no body reaches this page's HTML.
+    contentItems = contentResult.items.map(withoutRawBody);
+    totalPages = contentResult.pagination.totalPages;
+    total = contentResult.pagination.total;
+  } catch (err) {
+    logReadFailure('Creator catalogue content not loaded', { creatorId }, err);
+    contentError = true;
   }
 
   // Auth-varying HTML — the creator layout injects the auth-aware `user`
@@ -108,6 +130,7 @@ export const load: PageServerLoad = async ({
     username,
     creatorName,
     contentItems,
+    contentError,
     search,
     typeFilter,
     pagination: {

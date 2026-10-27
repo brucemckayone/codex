@@ -15,7 +15,7 @@ import {
   wrapError,
 } from '@codex/service-errors';
 import { describe, expect, it } from 'vitest';
-import { isTransientError } from '../error-classification';
+import { describeRootCause, isTransientError } from '../error-classification';
 
 /** Helper to create a Stripe-shaped error */
 function createStripeError(type: string, statusCode?: number): Error {
@@ -315,10 +315,11 @@ describe('isTransientError', () => {
 
   describe("drizzle's query error", () => {
     // drizzle 0.44: message = the SQL plus every bound value; cause = the
-    // driver's error.
-    const drizzle = (params: string, cause: Error) =>
+    // driver's error. Its DrizzleQueryError sets no name, so a real one is
+    // named 'Error' (Codex-56l13): the fixture must be too, or it proves
+    // nothing about what drizzle throws.
+    const drizzle = (params: string, cause: unknown) =>
       Object.assign(new Error(`Failed query: select 1\nparams: ${params}`), {
-        name: 'DrizzleQueryError',
         cause,
       });
 
@@ -338,6 +339,20 @@ describe('isTransientError', () => {
         code: '08006',
       });
       expect(isTransientError(wrapError(drizzle('x', dropped)))).toBe(true);
+    });
+
+    it('is named Error, as drizzle throws it', () => {
+      expect(drizzle('x', new Error('y')).name).toBe('Error');
+    });
+
+    it('its SQL and bound values never reach the root-cause description', () => {
+      expect(
+        describeRootCause(wrapError(drizzle('buyer@example.com', 'gone')))
+      ).toEqual({
+        name: 'DrizzleQueryError',
+        message: '(query omitted)',
+        code: 'INTERNAL_ERROR',
+      });
     });
   });
 

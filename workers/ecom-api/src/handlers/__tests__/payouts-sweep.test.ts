@@ -8,12 +8,20 @@
  *   - forwards `olderThanMinutes` override to the service
  *   - then retries failed refund clawbacks, isolated from the sweep
  *     (Codex-2hxff.8)
+ *   - then cancels course subscriptions a creator's removal left, before
+ *     the pool is released (Codex-2hxff.64)
+ *   - first settles disputes whose webhook events were missed, before the
+ *     drain; a reconcile that fails never fails the cron (Codex-2hxff.58)
  *
  * Consolidated into workers/ecom-api 2026-05-13. Lives alongside the Stripe
  * webhook handlers because the cron + the Stripe webhooks share an owner.
  */
 
-import { SubscriptionService } from '@codex/subscription';
+import { createStripeClient, PurchaseService } from '@codex/purchase';
+import {
+  CourseSubscriptionService,
+  SubscriptionService,
+} from '@codex/subscription';
 import {
   afterEach,
   beforeEach,
@@ -24,7 +32,21 @@ import {
   vi,
 } from 'vitest';
 
-import { runPayoutsSweep, runScheduledPayoutsSweep } from '../payouts-sweep';
+// The real client, unless a test makes building it fail.
+vi.mock('@codex/purchase', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@codex/purchase')>();
+  return { ...actual, createStripeClient: vi.fn(actual.createStripeClient) };
+});
+
+import { COURSE_OFF_SALE_SWEEP_LIMIT } from '../course-off-sale-sweep';
+import {
+  OWED_DUPLICATES_OLDER_THAN_MS,
+  OWED_DUPLICATES_SWEEP_LIMIT,
+  PAYOUTS_SWEEP_PAYEE_LIMIT,
+  runOwedDuplicatesSweep,
+  runPayoutsSweep,
+  runScheduledPayoutsSweep,
+} from '../payouts-sweep';
 
 /** A real instance whose sweep each test stubs on the prototype. */
 function sweepService(): SubscriptionService {
@@ -56,6 +78,13 @@ function makeEnv(
   };
 }
 
+/** A Stripe stub listing no dispute events (the reconcile's first source). */
+function disputeEventsStripe(
+  list = vi.fn().mockResolvedValue({ data: [], has_more: false })
+) {
+  return { events: { list } };
+}
+
 function makeObs(): {
   obs: {
     info: ReturnType<typeof vi.fn>;
@@ -76,18 +105,33 @@ describe('ecom-api payouts-sweep handler', () => {
   // The cron also retries failed clawbacks after the sweep. These tests are
   // about the sweep, so the retry is a no-op here; its own tests are below.
   let clawbackRetry: MockInstance<SubscriptionService['retryFailedClawbacks']>;
+  // So is the course off-sale sweep (Codex-2hxff.64), pinned in the
+  // "invokes sweepUnresolvedPayouts" test below.
+  let offSaleCancel: MockInstance<
+    CourseSubscriptionService['cancelForCoursesOffSale']
+  >;
+  // And the dispute reconcile's second source (Codex-2hxff.58): no row of
+  // ours is final and unapplied.
+  let disputeRows: MockInstance<PurchaseService['findDisputesToReconcile']>;
   beforeEach(() => {
+    disputeRows = vi
+      .spyOn(PurchaseService.prototype, 'findDisputesToReconcile')
+      .mockResolvedValue([]);
+    offSaleCancel = vi
+      .spyOn(CourseSubscriptionService.prototype, 'cancelForCoursesOffSale')
+      .mockResolvedValue({ cancelled: 0, failed: 0, remaining: 0 });
     clawbackRetry = vi
       .spyOn(SubscriptionService.prototype, 'retryFailedClawbacks')
       .mockResolvedValue({
         charges: 0,
         retried: 0,
         stillFailing: 0,
-        lostDisputesApplied: 0,
       });
   });
   afterEach(() => {
     clawbackRetry.mockRestore();
+    offSaleCancel.mockRestore();
+    disputeRows.mockRestore();
   });
 
   it('runPayoutsSweep delegates to SubscriptionService.sweepUnresolvedPayouts and logs the result', async () => {
@@ -120,11 +164,13 @@ describe('ecom-api payouts-sweep handler', () => {
       groupsSkipped: 1,
       errors: 0,
     });
-    expect(spy).toHaveBeenCalledWith(30);
+    // The run is bounded: the default payee limit is passed through.
+    expect(spy).toHaveBeenCalledWith(30, PAYOUTS_SWEEP_PAYEE_LIMIT);
     expect(obs.info).toHaveBeenCalledWith(
       'payouts-sweep cron completed',
       expect.objectContaining({
         olderThanMinutes: 30,
+        payeeLimit: PAYOUTS_SWEEP_PAYEE_LIMIT,
         groupsScanned: 3,
         groupsResolved: 2,
         groupsSkipped: 1,
@@ -133,6 +179,29 @@ describe('ecom-api payouts-sweep handler', () => {
     );
     expect(obs.error).not.toHaveBeenCalled();
 
+    spy.mockRestore();
+  });
+
+  it('runPayoutsSweep passes a payee limit override to the service (Codex-2hxff.13)', async () => {
+    const { SubscriptionService } = await import('@codex/subscription');
+    const spy = vi
+      .spyOn(SubscriptionService.prototype, 'sweepUnresolvedPayouts')
+      .mockResolvedValue({
+        groupsScanned: 2,
+        groupsResolved: 0,
+        groupsSkipped: 2,
+        errors: 0,
+      });
+    const { obs } = makeObs();
+
+    await runPayoutsSweep({
+      subscription: sweepService(),
+      obs: obs as never,
+      olderThanMinutes: 15,
+      payeeLimit: 2,
+    });
+
+    expect(spy).toHaveBeenCalledWith(15, 2);
     spy.mockRestore();
   });
 
@@ -189,6 +258,33 @@ describe('ecom-api payouts-sweep handler', () => {
     spy.mockRestore();
   });
 
+  it('a Stripe client that cannot be built is logged through obs with an errorId, and the run ends cleanly', async () => {
+    const sweep = vi.spyOn(
+      SubscriptionService.prototype,
+      'sweepUnresolvedPayouts'
+    );
+    vi.mocked(createStripeClient).mockImplementationOnce(() => {
+      throw new Error('Stripe client failed (test)');
+    });
+    const { obs } = makeObs();
+
+    await expect(
+      runScheduledPayoutsSweep(makeEnv() as never, fakeCtx(), {
+        obs: obs as never,
+      })
+    ).resolves.toBeUndefined();
+
+    expect(obs.error).toHaveBeenCalledWith(
+      'payouts-sweep: could not build services, skipping',
+      {
+        errorId: expect.any(String),
+        error: 'Stripe client failed (test)',
+      }
+    );
+    expect(sweep).not.toHaveBeenCalled();
+    sweep.mockRestore();
+  });
+
   it('runScheduledPayoutsSweep invokes sweepUnresolvedPayouts when env is configured', async () => {
     const { SubscriptionService } = await import('@codex/subscription');
     const spy = vi
@@ -199,16 +295,52 @@ describe('ecom-api payouts-sweep handler', () => {
         groupsSkipped: 0,
         errors: 0,
       });
+    // The owed-duplicates retry (Codex-2hxff.15), on all three services.
+    const nothingOwed = { settled: 0, stillOwed: [] };
+    const owedSettlers = [
+      vi
+        .spyOn(PurchaseService.prototype, 'settleOwedDuplicates')
+        .mockResolvedValue(nothingOwed),
+      vi
+        .spyOn(SubscriptionService.prototype, 'settleOwedDuplicates')
+        .mockResolvedValue(nothingOwed),
+      vi
+        .spyOn(CourseSubscriptionService.prototype, 'settleOwedDuplicates')
+        .mockResolvedValue(nothingOwed),
+    ];
 
     const { obs } = makeObs();
 
     // A Stripe stub so no real client is built; the pool is constructed by
     // the composition root but never queried (the sweep is stubbed).
     const ctx = fakeCtx();
+    const stripe = disputeEventsStripe();
     await runScheduledPayoutsSweep(makeEnv() as never, ctx, {
-      stripe: {} as never,
+      stripe: stripe as never,
       obs: obs as never,
     });
+
+    // Disputes whose events were missed are settled first, so a hold they
+    // need is in place before the drain (Codex-2hxff.58).
+    expect(stripe.events.list).toHaveBeenCalledOnce();
+    expect(disputeRows).toHaveBeenCalledOnce();
+    expect(stripe.events.list.mock.invocationCallOrder[0] ?? 0).toBeLessThan(
+      spy.mock.invocationCallOrder[0] ?? 0
+    );
+
+    // Each owed duplicate retried once, an hour old or more, before the pool
+    // goes back.
+    for (const settler of owedSettlers) {
+      expect(settler).toHaveBeenCalledExactlyOnceWith({
+        olderThanMs: OWED_DUPLICATES_OLDER_THAN_MS,
+        limit: OWED_DUPLICATES_SWEEP_LIMIT,
+      });
+      expect(settler.mock.invocationCallOrder[0]).toBeLessThan(
+        ctx.waitUntil.mock.invocationCallOrder[0] ?? 0
+      );
+      settler.mockRestore();
+    }
+    expect(OWED_DUPLICATES_OLDER_THAN_MS).toBe(60 * 60 * 1000);
 
     expect(spy).toHaveBeenCalledTimes(1);
     // Codex-2hxff.54: the sweep runs on the registry's SubscriptionService,
@@ -223,8 +355,110 @@ describe('ecom-api payouts-sweep handler', () => {
     expect(sweptBy.payoutMailer).toBeTypeOf('function');
     // The pool is handed back after the sweep, on waitUntil.
     expect(ctx.waitUntil).toHaveBeenCalledOnce();
+    // The same wake cancels what a creator's removal left (Codex-2hxff.64),
+    // every off-sale course, before the pool goes back.
+    expect(offSaleCancel).toHaveBeenCalledWith({
+      limit: COURSE_OFF_SALE_SWEEP_LIMIT,
+    });
+    expect(offSaleCancel.mock.invocationCallOrder[0]).toBeLessThan(
+      ctx.waitUntil.mock.invocationCallOrder[0] ?? 0
+    );
+    expect(obs.error).not.toHaveBeenCalled();
 
     spy.mockRestore();
+  });
+
+  /** The cron with every sweep but the dispute reconcile stubbed. */
+  async function cronWithStubbedSweeps(
+    stripe: unknown,
+    obs: ReturnType<typeof makeObs>['obs']
+  ) {
+    const sweep = vi
+      .spyOn(SubscriptionService.prototype, 'sweepUnresolvedPayouts')
+      .mockResolvedValue({
+        groupsScanned: 0,
+        groupsResolved: 0,
+        groupsSkipped: 0,
+        errors: 0,
+      });
+    const nothingOwed = { settled: 0, stillOwed: [] };
+    const owed = [
+      vi
+        .spyOn(PurchaseService.prototype, 'settleOwedDuplicates')
+        .mockResolvedValue(nothingOwed),
+      vi
+        .spyOn(SubscriptionService.prototype, 'settleOwedDuplicates')
+        .mockResolvedValue(nothingOwed),
+      vi
+        .spyOn(CourseSubscriptionService.prototype, 'settleOwedDuplicates')
+        .mockResolvedValue(nothingOwed),
+    ];
+    const ctx = fakeCtx();
+    const run = runScheduledPayoutsSweep(makeEnv() as never, ctx, {
+      stripe: stripe as never,
+      obs: obs as never,
+    });
+    await expect(run).resolves.toBeUndefined();
+    const ran = {
+      drain: sweep.mock.calls.length,
+      offSale: offSaleCancel.mock.calls.length,
+      owed: owed.map((settler) => settler.mock.calls.length),
+      released: ctx.waitUntil.mock.calls.length,
+    };
+    sweep.mockRestore();
+    for (const settler of owed) settler.mockRestore();
+    return ran;
+  }
+
+  it('a dispute reconcile whose sources both fail is logged with errorIds, and the drain and the other sweeps still run (Codex-2hxff.58)', async () => {
+    disputeRows.mockRejectedValue(new Error('database unavailable (test)'));
+    const { obs } = makeObs();
+
+    const ran = await cronWithStubbedSweeps(
+      disputeEventsStripe(
+        vi.fn().mockRejectedValue(new Error('Stripe unavailable (test)'))
+      ),
+      obs
+    );
+
+    expect(ran).toEqual({ drain: 1, offSale: 1, owed: [1, 1, 1], released: 1 });
+    expect(obs.error).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "could not read a page of Stripe's dispute events"
+      ),
+      expect.objectContaining({
+        errorId: expect.any(String),
+        error: 'Stripe unavailable (test)',
+      })
+    );
+    expect(obs.error).toHaveBeenCalledWith(
+      expect.stringContaining('could not list unapplied disputes'),
+      expect.objectContaining({
+        errorId: expect.any(String),
+        error: 'database unavailable (test)',
+      })
+    );
+  });
+
+  it('a dispute reconcile that throws outright is logged and never fails the cron (Codex-2hxff.58)', async () => {
+    const { obs } = makeObs();
+    // The reconcile's own summary log throwing: past every catch inside it.
+    obs.info.mockImplementation((message: string) => {
+      if (message === 'dispute reconcile completed') {
+        throw new Error('logger unavailable (test)');
+      }
+    });
+
+    const ran = await cronWithStubbedSweeps(disputeEventsStripe(), obs);
+
+    expect(ran).toEqual({ drain: 1, offSale: 1, owed: [1, 1, 1], released: 1 });
+    expect(obs.error).toHaveBeenCalledWith(
+      'payouts-sweep cron could not reconcile disputes',
+      expect.objectContaining({
+        errorId: expect.any(String),
+        error: 'logger unavailable (test)',
+      })
+    );
   });
 
   // ─────────────────────────────────────────────────────────────────────
@@ -380,7 +614,6 @@ describe('ecom-api payouts-sweep handler', () => {
       charges: 2,
       retried: 1,
       stillFailing: 1,
-      lostDisputesApplied: 0,
     });
     const { obs } = makeObs();
 
@@ -429,5 +662,104 @@ describe('ecom-api payouts-sweep handler', () => {
       expect.anything()
     );
     sweep.mockRestore();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// Owed duplicate refunds (Codex-2hxff.15, review R5)
+//
+// A duplicate whose refund was refused while Stripe redelivered its event is
+// left owed once the redeliveries stop. The hourly wake retries the purchase,
+// tier and course-plan ones, each on its own, and alerts what is still owed.
+// ─────────────────────────────────────────────────────────────────────────
+
+describe('runOwedDuplicatesSweep', () => {
+  function settlers(
+    overrides: Partial<
+      Record<
+        'purchase' | 'subscription' | 'courseSubscription',
+        ReturnType<typeof vi.fn>
+      >
+    > = {}
+  ) {
+    const nothingOwed = () =>
+      vi.fn().mockResolvedValue({ settled: 0, stillOwed: [] });
+    const mocks = {
+      purchase: overrides.purchase ?? nothingOwed(),
+      subscription: overrides.subscription ?? nothingOwed(),
+      courseSubscription: overrides.courseSubscription ?? nothingOwed(),
+    };
+    return {
+      mocks,
+      services: {
+        purchase: { settleOwedDuplicates: mocks.purchase },
+        subscription: { settleOwedDuplicates: mocks.subscription },
+        courseSubscription: { settleOwedDuplicates: mocks.courseSubscription },
+      },
+    };
+  }
+
+  it('retries every kind an hour old or more, and alerts what is still owed with its ids', async () => {
+    const { mocks, services } = settlers({
+      purchase: vi.fn().mockResolvedValue({ settled: 2, stillOwed: [] }),
+      subscription: vi.fn().mockResolvedValue({
+        settled: 1,
+        stillOwed: [{ id: 'sub_row_1', stripeSubscriptionId: 'sub_dup_1' }],
+      }),
+    });
+    const { obs } = makeObs();
+
+    await runOwedDuplicatesSweep(services, obs);
+
+    for (const settle of Object.values(mocks)) {
+      expect(settle).toHaveBeenCalledExactlyOnceWith({
+        olderThanMs: 60 * 60 * 1000,
+        limit: OWED_DUPLICATES_SWEEP_LIMIT,
+      });
+    }
+    expect(obs.info).toHaveBeenCalledWith('owed duplicate refunds settled', {
+      kind: 'purchase',
+      settled: 2,
+    });
+    expect(obs.error).toHaveBeenCalledExactlyOnceWith(
+      expect.stringContaining('still owed'),
+      {
+        errorId: expect.any(String),
+        kind: 'subscription',
+        stillOwed: [{ id: 'sub_row_1', stripeSubscriptionId: 'sub_dup_1' }],
+      }
+    );
+  });
+
+  it('one kind failing never stops the others, and never throws', async () => {
+    const { mocks, services } = settlers({
+      purchase: vi.fn().mockRejectedValue(new Error('database unavailable')),
+    });
+    const { obs } = makeObs();
+
+    await expect(
+      runOwedDuplicatesSweep(services, obs)
+    ).resolves.toBeUndefined();
+
+    expect(mocks.subscription).toHaveBeenCalledOnce();
+    expect(mocks.courseSubscription).toHaveBeenCalledOnce();
+    expect(obs.error).toHaveBeenCalledExactlyOnceWith(
+      'owed duplicate refunds could not be retried',
+      expect.objectContaining({
+        errorId: expect.any(String),
+        kind: 'purchase',
+        error: 'database unavailable',
+      })
+    );
+  });
+
+  it('nothing settled and nothing owed logs nothing', async () => {
+    const { services } = settlers();
+    const { obs } = makeObs();
+
+    await runOwedDuplicatesSweep(services, obs);
+
+    expect(obs.info).not.toHaveBeenCalled();
+    expect(obs.error).not.toHaveBeenCalled();
   });
 });

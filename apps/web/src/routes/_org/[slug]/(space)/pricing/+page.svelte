@@ -36,6 +36,7 @@
   import type { PricingFaqItem } from '@codex/validation';
   import { formatDate, formatPrice } from '$lib/utils/format';
   import { buildJourneyUrl, buildPlatformUrl } from '$lib/utils/subdomain';
+  import { logger } from '$lib/observability';
   import {
     getEffectiveStatus,
     type SubscriptionStatus,
@@ -43,31 +44,101 @@
 
   let { data } = $props();
 
-  function mapSubscriptionErrorMessage(
-    code: string | undefined,
-    message: string
-  ): string {
-    switch (code) {
+  /**
+   * What a subscriber is told when Subscribe or Change plan is refused
+   * (Codex-2hxff.69; owner decision 2026-10-26, "Plain message + right
+   * action").
+   */
+  interface Refusal {
+    message: string;
+    /** A real failure, headed "Something went wrong"; a refusal is not. */
+    failed: boolean;
+    /** A retry can work: no answer, a server error or too many requests. */
+    retryable: boolean;
+    /** Already subscribed: the way to manage it. */
+    manage: boolean;
+    /** The plan has gone: the page refreshes its plans. */
+    refreshPlans: boolean;
+  }
+
+  /**
+   * Keyed on `details.code` first: most subscription errors put their own
+   * code there, under a class code (NOT_FOUND, CONFLICT,
+   * BUSINESS_LOGIC_ERROR) at the top level. The worker's own message is
+   * shown for one case only, PAYMENT_REQUIRED, whose text the subscription
+   * service writes for subscribers. Every other one is written for
+   * developers ("Stripe Price not configured for this tier and interval").
+   */
+  function describeRefusal(
+    failure: {
+      code?: string;
+      detailsCode?: string;
+      status?: number;
+      message?: string;
+    },
+    action: 'checkout' | 'change'
+  ): Refusal {
+    const status = failure.status ?? 500;
+    const retryable =
+      failure.code === undefined ||
+      status >= 500 ||
+      status === 408 ||
+      status === 429;
+    const refusal = {
+      failed: false,
+      retryable: false,
+      manage: false,
+      refreshPlans: false,
+    };
+    switch (failure.detailsCode ?? failure.code) {
+      // A plan with an open chargeback is refused under a top-level
+      // CONFLICT (Codex-2hxff.60). Retrying can't help.
+      case 'SUBSCRIPTION_DISPUTED':
+        return { ...refusal, message: m.subscription_tier_change_disputed() };
       case 'ALREADY_SUBSCRIBED':
-        return 'You already have an active subscription to this organisation. Manage it from your account.';
+        return {
+          ...refusal,
+          message: m.pricing_refusal_already_subscribed({ org: data.org.name }),
+          manage: true,
+        };
+      case 'TIER_NOT_FOUND':
+        return {
+          ...refusal,
+          message: m.pricing_refusal_plan_gone(),
+          refreshPlans: true,
+        };
       case 'CONNECT_ACCOUNT_NOT_READY':
       case 'CONNECT_ACCOUNT_NOT_FOUND':
-        return "This creator hasn't finished setting up payments yet. Please try again later.";
-      case 'TIER_NOT_FOUND':
-        return 'This plan is no longer available. Please refresh the page to see current options.';
+        return {
+          ...refusal,
+          message: m.pricing_refusal_not_taking_subscriptions({
+            org: data.org.name,
+          }),
+        };
+      // Stripe declined the proration invoice during an upgrade. The price
+      // update was reverted on Stripe's side — the user is still on their
+      // existing tier, and a retry fails until the card is updated.
       case 'PAYMENT_REQUIRED':
-        // Stripe declined the proration invoice during an upgrade. The
-        // price update was reverted on Stripe's side — the user is still
-        // on their existing tier. Prompt them to update their payment
-        // method and try again.
-        return (
-          message ||
-          'Payment was declined. Update your payment method and try again.'
-        );
-      case 'SUBSCRIPTION_CHECKOUT_ERROR':
-        return message || m.subscription_checkout_error();
+        return {
+          ...refusal,
+          failed: true,
+          message: failure.message || m.pricing_refusal_payment_declined(),
+        };
+      // "Please try again" only where Try again is offered.
       default:
-        return m.subscription_checkout_error();
+        return {
+          ...refusal,
+          failed: true,
+          retryable,
+          message:
+            action === 'checkout'
+              ? retryable
+                ? m.pricing_refusal_checkout_problem()
+                : m.pricing_refusal_checkout_refused()
+              : retryable
+                ? m.subscription_checkout_error()
+                : m.pricing_refusal_change_refused(),
+        };
     }
   }
 
@@ -79,7 +150,7 @@
 
   // ── Checkout Flow ─────────────────────────────────────────────────
   let checkoutLoading = $state<string | null>(null);
-  let checkoutError = $state('');
+  let checkoutRefusal = $state<Refusal | null>(null);
   // Remembered tier ID for the error banner's "Try again" action so the
   // user can retry without scrolling back to the cards.
   let lastAttemptedTierId = $state<string | null>(null);
@@ -183,12 +254,25 @@
   // exactly what the dialog showed.
   let switchTierLoading = $state<string | null>(null);
   let switchTierError = $state('');
+  // A retry of the switch can work (Codex-2hxff.69): otherwise the dialog
+  // offers Close, not Confirm again.
+  let switchTierRetryable = $state(true);
   // Dialog state.
   let tierChangeDialogOpen = $state(false);
   let tierChangeDialogTier = $state<SubscriptionTier | null>(null);
   let tierChangePreview = $state<TierChangePreview | null>(null);
   let tierChangePreviewLoading = $state(false);
   let tierChangePreviewError = $state('');
+  // A retry of the preview can work; otherwise Close, not Try again.
+  let tierChangePreviewRetryable = $state(true);
+  // Shown above a preview fetched again because the confirmed one had
+  // expired (Codex-2hxff.15).
+  let tierChangeNotice = $state('');
+  /** Refused for a reason that won't change: the dialog offers Close only. */
+  const tierChangeRefusedForGood = $derived(
+    (tierChangePreviewError !== '' && !tierChangePreviewRetryable) ||
+      (switchTierError !== '' && !switchTierRetryable)
+  );
 
   // Re-sync when a genuinely NEW server payload arrives — an `invalidateAll()`
   // after TIER_NOT_FOUND, or a client-side navigation back to this route.
@@ -430,7 +514,13 @@
     // tell whether this user is already subscribed. Refuse the click rather
     // than race into an AlreadySubscribedError on the checkout worker.
     if (subscriptionLoadError) {
-      checkoutError = m.subscription_load_error();
+      checkoutRefusal = {
+        message: m.pricing_refusal_subscription_unknown(),
+        failed: true,
+        retryable: false,
+        manage: false,
+        refreshPlans: false,
+      };
       return;
     }
 
@@ -441,7 +531,7 @@
     }
     lastAttemptedTierId = tier.id;
     checkoutLoading = tier.id;
-    checkoutError = '';
+    checkoutRefusal = null;
     const result = await createSubscriptionCheckoutSession({
       tierId: tier.id,
       billingInterval,
@@ -449,9 +539,13 @@
     });
     if (!result.success) {
       retryCount += 1;
-      checkoutError = mapSubscriptionErrorMessage(result.code, result.message);
+      // `in` narrows to the failure: apps/web is not `strict`.
+      checkoutRefusal = describeRefusal(
+        'code' in result ? result : {},
+        'checkout'
+      );
       checkoutLoading = null;
-      if (result.code === 'TIER_NOT_FOUND') {
+      if (checkoutRefusal.refreshPlans) {
         invalidateAll();
       }
       // Scroll the error into view — the banner renders near the top of the
@@ -556,15 +650,18 @@
    * preview from Stripe. The dialog stays open while loading so the user
    * sees a skeleton instead of a flash; the preview's `prorationDate` is
    * pinned and threaded back into the commit so Stripe charges exactly
-   * the amount we display.
+   * the amount we display. `notice` says why the dialog is asking again.
    */
-  async function openTierChangeDialog(tier: SubscriptionTier) {
+  async function openTierChangeDialog(tier: SubscriptionTier, notice = '') {
     tierChangeDialogTier = tier;
     tierChangeDialogOpen = true;
     tierChangePreview = null;
     tierChangePreviewError = '';
+    tierChangePreviewRetryable = true;
     tierChangePreviewLoading = true;
     switchTierError = '';
+    switchTierRetryable = true;
+    tierChangeNotice = notice;
 
     try {
       const result = await previewSubscriptionTierChange({
@@ -578,21 +675,27 @@
         return;
       }
       if (!result.success) {
-        tierChangePreviewError = mapSubscriptionErrorMessage(
-          result.code,
-          result.message
+        const refusal = describeRefusal(
+          'code' in result ? result : {},
+          'change'
         );
+        tierChangePreviewError = refusal.message;
+        tierChangePreviewRetryable = refusal.retryable;
+        if (refusal.refreshPlans) invalidateAll();
         return;
       }
       tierChangePreview = result.data;
-    } catch (err) {
+    } catch (error) {
+      logger.warn('pricing: a plan-change preview got no answer', {
+        error: error instanceof Error ? error.message : String(error),
+      });
       if (!tierChangeDialogOpen || tierChangeDialogTier?.id !== tier.id) {
         return;
       }
-      tierChangePreviewError =
-        err instanceof Error
-          ? err.message
-          : 'Could not load price preview. Try again.';
+      // No answer (the network dropped): fixed copy, never the error's own
+      // text, and a retry can work: a preview changes nothing.
+      tierChangePreviewError = m.subscription_checkout_error();
+      tierChangePreviewRetryable = true;
     } finally {
       if (tierChangeDialogTier?.id === tier.id) {
         tierChangePreviewLoading = false;
@@ -605,7 +708,11 @@
     tierChangeDialogTier = null;
     tierChangePreview = null;
     tierChangePreviewError = '';
+    tierChangePreviewRetryable = true;
+    switchTierError = '';
+    switchTierRetryable = true;
     tierChangePreviewLoading = false;
+    tierChangeNotice = '';
   }
 
   async function handleSwitchTier(tier: SubscriptionTier) {
@@ -618,6 +725,7 @@
 
     switchTierLoading = tier.id;
     switchTierError = '';
+    switchTierRetryable = true;
 
     // Optimistic flip — both tier and interval may change in a single swap.
     currentTierId = tier.id;
@@ -643,11 +751,25 @@
         currentCancelAtPeriodEnd = previousCancelAtPeriodEnd;
         currentBillingInterval = previousBillingInterval;
         currentStatus = previousStatus;
-        switchTierError = mapSubscriptionErrorMessage(
-          result.code,
-          result.message
+        // `in` narrows to the failure: apps/web is not `strict`, so the
+        // `!result.success` above does not.
+        if ('code' in result && result.code === 'TIER_CHANGE_PREVIEW_EXPIRED') {
+          // The preview is only good for 10 minutes and nothing changed
+          // (Codex-2hxff.15): show a fresh one and ask again, so the
+          // subscriber pays what they confirmed.
+          await openTierChangeDialog(
+            tier,
+            m.subscription_tier_change_preview_expired()
+          );
+          return;
+        }
+        const refusal = describeRefusal(
+          'code' in result ? result : {},
+          'change'
         );
-        if (result.code === 'TIER_NOT_FOUND') {
+        switchTierError = refusal.message;
+        switchTierRetryable = refusal.retryable;
+        if (refusal.refreshPlans) {
           invalidateAll();
         }
         return;
@@ -658,14 +780,29 @@
         invalidateCollection('library'),
         invalidateCollection('subscription'),
       ]);
-    } catch (err) {
-      // Rollback all optimistic mutations.
-      currentTierId = previousTierId;
-      currentCancelAtPeriodEnd = previousCancelAtPeriodEnd;
-      currentBillingInterval = previousBillingInterval;
-      currentStatus = previousStatus;
-      switchTierError =
-        err instanceof Error ? err.message : 'Failed to switch plan';
+    } catch (error) {
+      logger.warn('pricing: a plan change got no answer', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      // No answer is not "it failed": the change, and its proration charge,
+      // may have gone through. So neither roll back nor offer a retry that
+      // could charge again: say so, and re-read the plan, which the page
+      // re-seeds from the fresh payload. Fixed copy (Codex-2hxff.69).
+      switchTierError = m.pricing_refusal_change_unconfirmed();
+      switchTierRetryable = false;
+      try {
+        await invalidateAll();
+      } catch (refreshError) {
+        // The re-read failed too: still "couldn't confirm", but the page was
+        // not refreshed, so the copy asks for a reload instead of saying so.
+        logger.warn('pricing: re-reading the plan after an unconfirmed change failed', {
+          error:
+            refreshError instanceof Error
+              ? refreshError.message
+              : String(refreshError),
+        });
+        switchTierError = m.pricing_refusal_change_unconfirmed_reload();
+      }
     } finally {
       switchTierLoading = null;
     }
@@ -905,24 +1042,31 @@
     </section>
 
     <!-- ═══ TIER CARDS ═══ -->
-    {#if checkoutError}
+    {#if checkoutRefusal}
       <!--
         No transition:fly — the element has role="alert", so AT announces
         regardless of visual motion. A 220ms fly would only delay the
         announcement and violates 04-motion.md §2 (Svelte transition
         directives bypass the reduced-motion token collapse). See Codex-mfl7.
+
+        A plain message per case, with the action that helps (Codex-2hxff.69):
+        "Something went wrong" heads a real failure only, and Try again shows
+        only where a retry can work.
       -->
       <div
         class="checkout-error"
         role="alert"
+        data-testid="checkout-refusal"
       >
         <span class="checkout-error__icon" aria-hidden="true">
           <AlertTriangleIcon size={18} />
         </span>
         <div class="checkout-error__body">
-          <p class="checkout-error__title">Something went wrong</p>
-          <p class="checkout-error__message">{checkoutError}</p>
-          {#if lastAttemptedTierId}
+          {#if checkoutRefusal.failed}
+            <p class="checkout-error__title">{m.common_error()}</p>
+          {/if}
+          <p class="checkout-error__message">{checkoutRefusal.message}</p>
+          {#if checkoutRefusal.retryable && lastAttemptedTierId}
             <button
               type="button"
               class="checkout-error__retry"
@@ -931,8 +1075,15 @@
             >
               {checkoutLoading !== null ? 'Retrying…' : 'Try again'}
             </button>
+          {:else if checkoutRefusal.manage}
+            <a
+              class="checkout-error__retry"
+              href={buildPlatformUrl(page.url, '/account/subscriptions')}
+            >
+              {m.pricing_refusal_manage_subscription()}
+            </a>
           {/if}
-          {#if retryCount >= 3}
+          {#if checkoutRefusal.failed && retryCount >= 3}
             <p class="checkout-error__escalation">
               If the issue persists, please refresh the page or try a
               different browser.
@@ -942,7 +1093,7 @@
         <button
           class="checkout-error__dismiss"
           type="button"
-          onclick={() => { checkoutError = ''; retryCount = 0; }}
+          onclick={() => { checkoutRefusal = null; retryCount = 0; }}
           aria-label="Dismiss error"
         >
           <XIcon size={14} />
@@ -1521,6 +1672,11 @@
     </Dialog.Header>
 
     <Dialog.Body>
+      {#if tierChangeNotice}
+        <Alert variant="warning" data-testid="tier-change-notice">
+          {tierChangeNotice}
+        </Alert>
+      {/if}
       {#if tierChangePreviewLoading}
         <div class="tier-change-skeleton" aria-busy="true">
           <div class="tier-change-skeleton__row"></div>
@@ -1572,6 +1728,18 @@
     </Dialog.Body>
 
     <Dialog.Footer>
+      {#if tierChangeRefusedForGood}
+        <!-- Refused for a reason a retry won't change (Codex-2hxff.69): the
+             reason above, and a single Close in place of Cancel and Try
+             again or Confirm. -->
+        <Button
+          variant="primary"
+          data-testid="tier-change-dialog-close"
+          onclick={closeTierChangeDialog}
+        >
+          {m.pricing_refusal_close()}
+        </Button>
+      {:else}
       <Button
         variant="ghost"
         data-testid="tier-change-dialog-cancel"
@@ -1598,6 +1766,7 @@
         >
           Try again
         </Button>
+      {/if}
       {/if}
     </Dialog.Footer>
   </Dialog.Content>

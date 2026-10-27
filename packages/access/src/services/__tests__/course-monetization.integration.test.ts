@@ -25,15 +25,19 @@
  *      case: a course_purchase grant is permanent and has NO verifyPurchase
  *      backstop, so the entitlement row is the sole access record.
  *  11. Dispute a one-off CONTENT purchase → the grant is revoked → canView DENIES.
+ *  12. A course purchase pays the creator's agreed share past the agreement's
+ *      review date (AGR-01, Codex-2hxff.17).
  */
 
 import { randomUUID } from 'node:crypto';
 import {
+  agreementProposals,
   content,
   courseSubscriptionPlans,
   courseSubscriptions,
   courses,
   courseTierAccess,
+  creatorOrganizationAgreements,
   entitlements,
   organizationMemberships,
   organizations,
@@ -240,21 +244,19 @@ describe('Course monetization round-trip (WP-6)', () => {
       priceCents: null,
     });
     const future = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    const courseSubscriptionId = randomUUID();
 
     await writeCourseSubscriptionEntitlement(db, {
       userId: buyerId,
       organizationId: orgAId,
       courseId,
-      courseSubscriptionId: randomUUID(),
+      courseSubscriptionId,
       expiresAt: future,
     });
     expect(await hasCourseEntitlement(db, buyerId, courseId)).toBe(true);
 
     // Revoke (subscription cancelled) → resolver stops granting.
-    await revokeCourseSubscriptionEntitlement(db, {
-      userId: buyerId,
-      courseId,
-    });
+    await revokeCourseSubscriptionEntitlement(db, { courseSubscriptionId });
     expect(await hasCourseEntitlement(db, buyerId, courseId)).toBe(false);
 
     // A grant already expired fails closed (never grants).
@@ -290,6 +292,32 @@ describe('Course monetization round-trip (WP-6)', () => {
 
     // Active subscription intersecting the exact tier grant → derived access.
     expect(await hasCourseEntitlement(db, tierSubUserId, courseId)).toBe(true);
+  });
+
+  it('3b. a past_due tier subscription keeps derived course access; cancelled ends it (Codex-2hxff.10)', async () => {
+    const courseId = await createCourse(db, orgAId, creatorId, {
+      priceCents: null,
+    });
+    const svc = new CourseAccessService({ db, environment: 'test' });
+    await svc.setTierAccess(orgAId, courseId, [tierAId]);
+    const [userId] = await seedTestUsers(db, 1);
+    const [sub] = await db
+      .insert(subscriptions)
+      .values(
+        createTestSubscriptionInput(userId ?? '', orgAId, tierAId, {
+          status: 'past_due',
+        })
+      )
+      .returning();
+
+    // A failed renewal keeps access while Stripe retries (owner decision P-3).
+    expect(await hasCourseEntitlement(db, userId ?? '', courseId)).toBe(true);
+
+    await db
+      .update(subscriptions)
+      .set({ status: 'cancelled' })
+      .where(eq(subscriptions.id, sub?.id ?? ''));
+    expect(await hasCourseEntitlement(db, userId ?? '', courseId)).toBe(false);
   });
 
   it('4. N1: a cross-org tier grant is rejected by the service guard AND the DB', async () => {
@@ -699,6 +727,69 @@ describe('Course monetization round-trip (WP-6)', () => {
     expect(await hasStoredContentEntitlement(db, buyer2Id, contentRow.id)).toBe(
       false
     );
+  });
+
+  // Owner decision AGR-01 "Keeps paying" (Codex-2hxff.17): the course creator's
+  // content_purchase agreement applies past its review date.
+  it('12. a course purchase pays the creator their agreed share past its review date', async () => {
+    // A fresh creator, so the agreement cannot reach the file's other tests.
+    const [agreedCreatorId] = await seedTestUsers(db, 1);
+    if (!agreedCreatorId) throw new Error('creator not seeded');
+    const courseId = await createCourse(db, orgAId, agreedCreatorId, {
+      priceCents: 10000,
+    });
+    const day = 86_400_000;
+    const [proposal] = await db
+      .insert(agreementProposals)
+      .values({
+        organizationId: orgAId,
+        creatorId: agreedCreatorId,
+        revenueType: 'content_purchase',
+        roundNumber: 1,
+        proposedByUserId: creatorId,
+        proposedByRole: 'owner',
+        proposedCreatorSharePercent: 7000,
+        proposedEffectiveFrom: new Date(Date.now() - 60 * day),
+        status: 'accepted',
+      })
+      .returning({ id: agreementProposals.id });
+    if (!proposal) throw new Error('proposal not inserted');
+    await db.insert(creatorOrganizationAgreements).values({
+      organizationId: orgAId,
+      creatorId: agreedCreatorId,
+      organizationFeePercentage: 3000,
+      revenueType: 'content_purchase',
+      status: 'active',
+      effectiveFrom: new Date(Date.now() - 60 * day),
+      effectiveUntil: new Date(Date.now() - day), // review date passed
+      currentProposalId: proposal.id,
+    });
+
+    const { stripe } = makeStripeStub();
+    const svc = new PurchaseService({ db, environment: 'test' }, stripe);
+    const pi = `pi_${randomUUID()}`;
+    await svc.completeCoursePurchase(pi, {
+      customerId: buyerId,
+      courseId,
+      amountPaidCents: 10000,
+      currency: 'gbp',
+      stripeChargeId: `ch_${randomUUID()}`,
+    });
+
+    const [row] = await db
+      .select({
+        platformFeeCents: purchases.platformFeeCents,
+        organizationFeeCents: purchases.organizationFeeCents,
+        creatorPayoutCents: purchases.creatorPayoutCents,
+      })
+      .from(purchases)
+      .where(eq(purchases.stripePaymentIntentId, pi));
+    // 10% platform; the creator takes 70% of the 9000 left, not the default.
+    expect(row).toEqual({
+      platformFeeCents: 1000,
+      organizationFeeCents: 2700,
+      creatorPayoutCents: 6300,
+    });
   });
 
   it('a disputed subscription pauses its course grants, stored and derived, until the dispute clears (Codex-2hxff.9)', async () => {

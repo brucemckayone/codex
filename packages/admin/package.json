@@ -37,10 +37,14 @@
     "@codex/cache": "workspace:*",
     "@codex/constants": "workspace:*",
     "@codex/database": "workspace:*",
+    "@codex/payments": "workspace:*",
+    "@codex/purchase": "workspace:*",
     "@codex/service-errors": "workspace:*",
     "@codex/shared-types": "workspace:*",
+    "@codex/subscription": "workspace:*",
     "@codex/validation": "workspace:*",
-    "drizzle-orm": "0.44.7"
+    "drizzle-orm": "0.44.7",
+    "stripe": "^19.2.0"
   },
   "devDependencies": {
     "@codex/test-utils": "workspace:*",

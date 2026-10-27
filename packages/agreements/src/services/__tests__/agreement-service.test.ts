@@ -28,7 +28,7 @@ import {
   teardownTestDatabase,
   validateDatabaseConnection,
 } from '@codex/test-utils';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import {
   afterAll,
   beforeAll,
@@ -40,9 +40,11 @@ import {
 } from 'vitest';
 import {
   AgreementNotFoundError,
+  FutureStartNotAllowedError,
   InvalidProposalStateError,
   ShareExceedsAvailableError,
 } from '../../errors';
+import { withdrawProposalsOnDeparture } from '../agreement-departure';
 import { AgreementService } from '../agreement-service';
 
 // ─── Fixture helpers ──────────────────────────────────────────────────────
@@ -114,6 +116,50 @@ async function seedOrgFixture(
   };
 }
 
+/**
+ * Seed an active subscription agreement as acceptance leaves one: an accepted
+ * proposal carrying the share, linked through `current_proposal_id`, with the
+ * legacy column dual-written. The service reads the share from the proposal
+ * (Codex-2hxff.19 AGR-08), so an agreement seeded without one shares nothing.
+ */
+async function seedActiveAgreement(
+  db: Database,
+  fx: OrgFixture,
+  params: {
+    creatorId: string;
+    share: number;
+    effectiveFrom?: Date;
+    effectiveUntil?: Date;
+  }
+): Promise<void> {
+  const effectiveFrom = params.effectiveFrom ?? new Date(Date.now() - 60_000);
+  const [proposal] = await db
+    .insert(schema.agreementProposals)
+    .values({
+      organizationId: fx.orgId,
+      creatorId: params.creatorId,
+      revenueType: 'subscription',
+      roundNumber: 1,
+      proposedByUserId: fx.ownerId,
+      proposedByRole: 'owner',
+      proposedCreatorSharePercent: params.share,
+      proposedEffectiveFrom: effectiveFrom,
+      status: 'accepted',
+    })
+    .returning();
+  if (!proposal) throw new Error('Failed to seed accepted proposal');
+  await db.insert(schema.creatorOrganizationAgreements).values({
+    organizationId: fx.orgId,
+    creatorId: params.creatorId,
+    organizationFeePercentage: 10_000 - params.share,
+    revenueType: 'subscription',
+    status: 'active',
+    currentProposalId: proposal.id,
+    effectiveFrom,
+    effectiveUntil: params.effectiveUntil ?? null,
+  });
+}
+
 // ─── Suite ────────────────────────────────────────────────────────────────
 
 describe('AgreementService', () => {
@@ -136,14 +182,9 @@ describe('AgreementService', () => {
     // FeeConfigService — share-validation reasons purely about the
     // post-platform pool. WP-4's payout pipeline reads the platform
     // fee fresh at invoice time elsewhere.
-    //
-    // Codex-0omga (WP-5 polish): `webAppUrl` is now mandatory at
-    // construction. Tests use a fixed sentinel so deep-link assertions
-    // are stable.
     service = new AgreementService({
       db,
       environment: 'test',
-      webAppUrl: 'https://app.example.test',
     });
   });
 
@@ -195,6 +236,50 @@ describe('AgreementService', () => {
       expect(proposal.parentProposalId).toBeNull();
     });
 
+    // Owner decision 2026-10-21, "Refuse a future start" (Codex-2hxff.63):
+    // accepting ends the current agreement at once, so a later start would
+    // leave the creator unpaid in between.
+    it('refuses a future start, and writes nothing', async () => {
+      const fx = await seedOrgFixture(db);
+      const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+      await expect(
+        service.proposeAgreement({
+          organizationId: fx.orgId,
+          creatorId: fx.creatorAId,
+          revenueType: 'subscription',
+          sharePercent: 3000,
+          termMonths: 6,
+          proposedByUserId: fx.ownerId,
+          effectiveFrom: tomorrow,
+        })
+      ).rejects.toBeInstanceOf(FutureStartNotAllowedError);
+      const written = await db.query.agreementProposals.findMany({
+        where: and(
+          eq(schema.agreementProposals.organizationId, fx.orgId),
+          eq(schema.agreementProposals.creatorId, fx.creatorAId)
+        ),
+      });
+      expect(written).toEqual([]);
+    });
+
+    it('allows a start in the past', async () => {
+      const fx = await seedOrgFixture(db);
+      const lastWeek = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+      const proposal = await service.proposeAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 3000,
+        termMonths: 6,
+        proposedByUserId: fx.ownerId,
+        effectiveFrom: lastWeek,
+      });
+
+      expect(proposal.proposedEffectiveFrom).toEqual(lastWeek);
+    });
+
     it('non-owner cannot propose (Forbidden)', async () => {
       const fx = await seedOrgFixture(db);
       try {
@@ -231,13 +316,10 @@ describe('AgreementService', () => {
 
     it('throws ShareExceedsAvailableError when proposal + active > 100% of post-platform pool', async () => {
       const fx = await seedOrgFixture(db);
-      // Active 70% subscription agreement to creator B (orgFee=3000).
-      await db.insert(schema.creatorOrganizationAgreements).values({
-        organizationId: fx.orgId,
+      // Active 70% subscription agreement to creator B.
+      await seedActiveAgreement(db, fx, {
         creatorId: fx.creatorBId,
-        organizationFeePercentage: 3000, // creator B has 70% share
-        revenueType: 'subscription',
-        status: 'active',
+        share: 7000,
       });
       // 70% existing + 31% proposed = 101% of post-platform pool → fail.
       try {
@@ -542,13 +624,10 @@ describe('AgreementService', () => {
 
     it('rejects when share exceeds available pool', async () => {
       const fx = await seedOrgFixture(db);
-      // Active 80% subscription agreement to creator B (orgFee=2000).
-      await db.insert(schema.creatorOrganizationAgreements).values({
-        organizationId: fx.orgId,
+      // Active 80% subscription agreement to creator B.
+      await seedActiveAgreement(db, fx, {
         creatorId: fx.creatorBId,
-        organizationFeePercentage: 2000,
-        revenueType: 'subscription',
-        status: 'active',
+        share: 8000,
       });
       const r1 = await service.proposeAgreement({
         organizationId: fx.orgId,
@@ -602,6 +681,54 @@ describe('AgreementService', () => {
       });
       expect(proposalAfter?.status).toBe('accepted');
       expect(proposalAfter?.respondedByUserId).toBe(fx.creatorAId);
+    });
+
+    // Codex-2hxff.63: a proposal made before the rule can still carry a
+    // future start. Accepting it would end the current agreement now.
+    it('refuses a proposal that starts in the future, and leaves the current agreement paying', async () => {
+      const fx = await seedOrgFixture(db);
+      const first = await service.proposeAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 3000,
+        termMonths: 6,
+        proposedByUserId: fx.ownerId,
+      });
+      const current = await service.acceptProposal({
+        proposalId: first.id,
+        acceptedByUserId: fx.creatorAId,
+      });
+      const next = await service.proposeAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 4000,
+        termMonths: 6,
+        proposedByUserId: fx.ownerId,
+      });
+      await db
+        .update(schema.agreementProposals)
+        .set({
+          proposedEffectiveFrom: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        })
+        .where(eq(schema.agreementProposals.id, next.id));
+
+      await expect(
+        service.acceptProposal({
+          proposalId: next.id,
+          acceptedByUserId: fx.creatorAId,
+        })
+      ).rejects.toBeInstanceOf(FutureStartNotAllowedError);
+
+      const after = await db.query.creatorOrganizationAgreements.findFirst({
+        where: eq(schema.creatorOrganizationAgreements.id, current.id),
+      });
+      expect(after?.status).toBe('active');
+      const nextAfter = await db.query.agreementProposals.findFirst({
+        where: eq(schema.agreementProposals.id, next.id),
+      });
+      expect(nextAfter?.status).toBe('open');
     });
 
     it('accepting supersedes any open/countered sibling proposals in the thread', async () => {
@@ -731,15 +858,12 @@ describe('AgreementService', () => {
         termMonths: 6,
         proposedByUserId: fx.ownerId,
       });
-      // Between propose and accept, a 50% agreement lands for creator B
-      // (orgFee=5000 → share=5000). Now 50% B + 60% A = 110% of the
-      // post-platform pool — accept-time re-validation must reject.
-      await db.insert(schema.creatorOrganizationAgreements).values({
-        organizationId: fx.orgId,
+      // Between propose and accept, a 50% agreement lands for creator B.
+      // Now 50% B + 60% A = 110% of the post-platform pool — accept-time
+      // re-validation must reject.
+      await seedActiveAgreement(db, fx, {
         creatorId: fx.creatorBId,
-        organizationFeePercentage: 5000,
-        revenueType: 'subscription',
-        status: 'active',
+        share: 5000,
       });
       try {
         await service.acceptProposal({
@@ -1545,9 +1669,10 @@ describe('AgreementService', () => {
       expect(results).toHaveLength(0);
     });
 
-    it('getActiveAgreements: effective_until <= activeAt does NOT surface (legacy time-slice)', async () => {
-      // Defence in depth: legacy `effective_until` filter still trims
-      // any rows whose explicit end-date is in the past.
+    it('getActiveAgreements: effective_until <= activeAt STILL surfaces (a review date, not an expiry)', async () => {
+      // Owner decision AGR-01 (Codex-2hxff.17): the agreement keeps paying
+      // past its review date until either side ends it. This test used to pin
+      // the opposite, a `effective_until` cutoff that silently stopped pay.
       const fx = await seedOrgFixture(db);
       const invoiceAt = new Date('2026-01-15T00:00:00Z');
       await db.insert(schema.creatorOrganizationAgreements).values({
@@ -1557,13 +1682,14 @@ describe('AgreementService', () => {
         revenueType: 'subscription',
         status: 'active',
         effectiveFrom: new Date('2025-12-01T00:00:00Z'),
-        effectiveUntil: new Date('2026-01-01T00:00:00Z'), // ended before invoice
+        effectiveUntil: new Date('2026-01-01T00:00:00Z'), // review date passed
       });
       const results = await service.getActiveAgreements({
         organizationId: fx.orgId,
         activeAt: invoiceAt,
       });
-      expect(results).toHaveLength(0);
+      expect(results).toHaveLength(1);
+      expect(results[0]?.creatorId).toBe(fx.creatorAId);
     });
 
     // Codex-xz61z (I6): `getActiveAgreement` (singular) was dropped —
@@ -1631,7 +1757,6 @@ describe('AgreementService', () => {
         db,
         environment: 'test',
         mailer,
-        webAppUrl: 'https://app.example.test',
       });
       return { serviceWithMailer, mailer };
     }
@@ -1639,7 +1764,7 @@ describe('AgreementService', () => {
     it('proposeAgreement triggers agreement-proposed-by-owner addressed to the creator', async () => {
       const fx = await seedOrgFixture(db);
       const { serviceWithMailer, mailer } = buildServiceWithMailer();
-      await serviceWithMailer.proposeAgreement({
+      const proposal = await serviceWithMailer.proposeAgreement({
         organizationId: fx.orgId,
         creatorId: fx.creatorAId,
         revenueType: 'subscription',
@@ -1660,11 +1785,11 @@ describe('AgreementService', () => {
       expect(data.termMonthsDisplay).toBe('6 months');
       expect(data.revenueTypeLabel).toBe('subscription');
       expect(data.note).toBe('A note for the recipient.');
-      // Deep link includes the absolute base + org id
-      expect(data.deepLinkUrl).toContain(
-        'https://app.example.test/studio/negotiations/'
+      // The creator's thread, on the creators subdomain (Codex-2hxff.20
+      // AGR-10). Built from the env name: 'test' is the lvh.me host.
+      expect(data.deepLinkUrl).toBe(
+        `http://creators.lvh.me:3000/studio/negotiations/${proposal.id}`
       );
-      expect(data.deepLinkUrl).toContain(`orgId=${fx.orgId}`);
     });
 
     it('counterPropose by creator triggers agreement-countered-by-creator addressed to the proposing owner', async () => {
@@ -1877,7 +2002,6 @@ describe('AgreementService', () => {
         db,
         environment: 'test',
         mailer: throwingMailer,
-        webAppUrl: 'https://app.example.test',
       });
       // Should NOT throw — the dispatcher catches + logs the mailer
       // failure. Returned proposal is the persisted row.
@@ -1951,28 +2075,13 @@ describe('AgreementService', () => {
 
     // ─── Construction-time guards (Codex-0omga WP-5 polish) ──────────────
 
-    it('throws at construction if webAppUrl is missing (mandatory)', () => {
-      // Codex-0omga: `webAppUrl` is mandatory at construction. Failing
-      // fast surfaces misconfigured workers at boot rather than at the
-      // first lifecycle notification.
+    it('throws at construction on an environment it cannot build links for', () => {
+      // The email links come from the env name (Codex-2hxff.20 AGR-10).
+      // Failing fast surfaces a misconfigured worker at wiring rather
+      // than at the first lifecycle notification.
       expect(() => {
-        new AgreementService({
-          db,
-          environment: 'test',
-          // @ts-expect-error — deliberately omitting required field
-          webAppUrl: undefined,
-        });
-      }).toThrow(/webAppUrl/i);
-    });
-
-    it('throws at construction if webAppUrl is the empty string', () => {
-      expect(() => {
-        new AgreementService({
-          db,
-          environment: 'test',
-          webAppUrl: '',
-        });
-      }).toThrow(/webAppUrl/i);
+        new AgreementService({ db, environment: 'prod-typo' });
+      }).toThrow(/environment/i);
     });
 
     // ─── Dispatcher latency offload (Codex-0omga WP-5 polish) ────────────
@@ -1993,7 +2102,6 @@ describe('AgreementService', () => {
         db,
         environment: 'test',
         mailer,
-        webAppUrl: 'https://app.example.test',
         waitUntil,
       });
 
@@ -2035,7 +2143,6 @@ describe('AgreementService', () => {
         db,
         environment: 'test',
         mailer,
-        webAppUrl: 'https://app.example.test',
       });
       await serviceWithoutWaitUntil.proposeAgreement({
         organizationId: fx.orgId,
@@ -2086,7 +2193,7 @@ describe('AgreementService', () => {
       return agreement.id;
     }
 
-    it('agreement expiring in 25 days IS returned (within 30-day window)', async () => {
+    it('agreement whose review date is in 25 days IS returned (within 30-day window)', async () => {
       const fx = await seedOrgFixture(db);
       // 6-month term placed 5 months and 5 days ago -> ~25 days remaining.
       // Easier: compute backwards — set effectiveFrom such that
@@ -2124,7 +2231,7 @@ describe('AgreementService', () => {
       expect(expiring[0]?.orgName).toBe('Test Org');
     });
 
-    it('agreement expiring in 35 days is NOT returned (outside window)', async () => {
+    it('agreement whose review date is in 35 days is NOT returned (outside window)', async () => {
       const fx = await seedOrgFixture(db);
       const desiredDaysUntilExpiry = 35;
       const termMs = 6 * 30 * 86_400_000;
@@ -2204,7 +2311,7 @@ describe('AgreementService', () => {
       expect(expiring).toHaveLength(0);
     });
 
-    it('agreement already past expiry (effectiveUntil <= now) is NOT returned', async () => {
+    it('agreement already past its review date (effectiveUntil <= now) is not reminded again', async () => {
       const fx = await seedOrgFixture(db);
       await db.insert(schema.creatorOrganizationAgreements).values({
         creatorId: fx.creatorAId,
@@ -2213,7 +2320,7 @@ describe('AgreementService', () => {
         revenueType: 'subscription',
         status: 'active',
         effectiveFrom: new Date(Date.now() - 200 * 86_400_000),
-        effectiveUntil: new Date(Date.now() - 10 * 86_400_000), // expired 10 days ago
+        effectiveUntil: new Date(Date.now() - 10 * 86_400_000), // review date passed 10 days ago
       });
 
       const expiring = await service.findExpiringAgreements({ daysAhead: 30 });
@@ -2302,6 +2409,190 @@ describe('AgreementService', () => {
         now: nearExpiry,
       });
       expect(withCustomNow).toHaveLength(1);
+    });
+  });
+
+  // ─── Review dates and removals (Codex-2hxff.17, Codex-2hxff.18) ────────
+  //
+  // AGR-01 "Keeps paying": past its review date an agreement is still in
+  // force everywhere it is read. AGR-09 "End on removal": once a creator has
+  // left, no new agreement can start for them.
+
+  describe('review dates and removals (AGR-01, AGR-09)', () => {
+    const yesterday = () => new Date(Date.now() - 86_400_000);
+
+    async function removeFromOrg(orgId: string, userId: string) {
+      await db
+        .update(schema.organizationMemberships)
+        .set({ status: 'inactive' })
+        .where(
+          and(
+            eq(schema.organizationMemberships.organizationId, orgId),
+            eq(schema.organizationMemberships.userId, userId)
+          )
+        );
+    }
+
+    it('an agreement past its review date still counts against the 100% limit', async () => {
+      const fx = await seedOrgFixture(db);
+      await seedActiveAgreement(db, fx, {
+        creatorId: fx.creatorBId,
+        share: 7000, // creator B has 70%
+        effectiveFrom: settledEffectiveFrom(),
+        effectiveUntil: yesterday(),
+      });
+
+      await expect(
+        service.proposeAgreement({
+          organizationId: fx.orgId,
+          creatorId: fx.creatorAId,
+          revenueType: 'subscription',
+          sharePercent: 3100,
+          termMonths: 6,
+          proposedByUserId: fx.ownerId,
+        })
+      ).rejects.toBeInstanceOf(ShareExceedsAvailableError);
+    });
+
+    it("the creator's portfolio and the organisation's summaries keep an agreement past its review date, and drop a terminated one", async () => {
+      const fx = await seedOrgFixture(db);
+      const proposal = await service.proposeAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 3000,
+        termMonths: 6,
+        proposedByUserId: fx.ownerId,
+      });
+      const kept = await service.acceptProposal({
+        proposalId: proposal.id,
+        acceptedByUserId: fx.creatorAId,
+      });
+      await db
+        .update(schema.creatorOrganizationAgreements)
+        .set({ effectiveUntil: yesterday() })
+        .where(eq(schema.creatorOrganizationAgreements.id, kept.id));
+      await db.insert(schema.creatorOrganizationAgreements).values({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorBId,
+        organizationFeePercentage: 8000,
+        revenueType: 'subscription',
+        status: 'terminated',
+        terminatedAt: yesterday(),
+        effectiveFrom: settledEffectiveFrom(),
+      });
+
+      const portfolio = await service.getActiveAgreementsForCreator({
+        creatorId: fx.creatorAId,
+      });
+      expect(portfolio.map((a) => a.id)).toEqual([kept.id]);
+
+      const summaries = await service.getActiveAgreementSummaries(fx.orgId);
+      expect(summaries).toEqual([
+        expect.objectContaining({ creatorId: fx.creatorAId, shareBps: 3000 }),
+      ]);
+    });
+
+    it('a creator who has left cannot accept an open proposal, and no agreement starts', async () => {
+      const fx = await seedOrgFixture(db);
+      const proposal = await service.proposeAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 3000,
+        termMonths: 6,
+        proposedByUserId: fx.ownerId,
+      });
+      await removeFromOrg(fx.orgId, fx.creatorAId);
+
+      await expect(
+        service.acceptProposal({
+          proposalId: proposal.id,
+          acceptedByUserId: fx.creatorAId,
+        })
+      ).rejects.toBeInstanceOf(ForbiddenError);
+      const agreements = await db
+        .select({ id: schema.creatorOrganizationAgreements.id })
+        .from(schema.creatorOrganizationAgreements)
+        .where(
+          eq(schema.creatorOrganizationAgreements.organizationId, fx.orgId)
+        );
+      expect(agreements).toEqual([]);
+    });
+
+    it('neither side can counter once the creator has left', async () => {
+      const fx = await seedOrgFixture(db);
+      const ownerOffer = await service.proposeAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 3000,
+        termMonths: 6,
+        proposedByUserId: fx.ownerId,
+      });
+      const creatorCounter = await service.counterPropose({
+        proposalId: ownerOffer.id,
+        sharePercent: 4000,
+        termMonths: 6,
+        counteredByUserId: fx.creatorAId,
+      });
+      await removeFromOrg(fx.orgId, fx.creatorAId);
+
+      // The owner answering the creator's counter.
+      await expect(
+        service.counterPropose({
+          proposalId: creatorCounter.id,
+          sharePercent: 3500,
+          termMonths: 6,
+          counteredByUserId: fx.ownerId,
+        })
+      ).rejects.toBeInstanceOf(ForbiddenError);
+    });
+
+    it("withdrawProposalsOnDeparture withdraws only that creator's open proposals in that organisation", async () => {
+      const fx = await seedOrgFixture(db);
+      const other = await seedOrgFixture(db);
+      const propose = (orgId: string, ownerId: string, creatorId: string) =>
+        service.proposeAgreement({
+          organizationId: orgId,
+          creatorId,
+          revenueType: 'subscription',
+          sharePercent: 2000,
+          termMonths: 6,
+          proposedByUserId: ownerId,
+        });
+      const leaving = await propose(fx.orgId, fx.ownerId, fx.creatorAId);
+      const colleague = await propose(fx.orgId, fx.ownerId, fx.creatorBId);
+      // The same creator in another organisation they still belong to.
+      await db.insert(schema.organizationMemberships).values({
+        organizationId: other.orgId,
+        userId: fx.creatorAId,
+        role: 'creator',
+        status: 'active',
+      });
+      const elsewhere = await propose(
+        other.orgId,
+        other.ownerId,
+        fx.creatorAId
+      );
+
+      const withdrawn = await withdrawProposalsOnDeparture(db, {
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        at: new Date(),
+      });
+
+      expect(withdrawn.map((p) => p.id)).toEqual([leaving.id]);
+      const statusOf = async (id: string) =>
+        (
+          await db
+            .select({ status: schema.agreementProposals.status })
+            .from(schema.agreementProposals)
+            .where(eq(schema.agreementProposals.id, id))
+        )[0]?.status;
+      expect(await statusOf(leaving.id)).toBe('withdrawn');
+      expect(await statusOf(colleague.id)).toBe('open');
+      expect(await statusOf(elsewhere.id)).toBe('open');
     });
   });
 });

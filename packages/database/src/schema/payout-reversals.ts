@@ -33,7 +33,9 @@ import { payouts } from './payouts';
  * `status`: `pending` (recorded, not yet acted on), `done`, `failed` (retried
  * by redelivery, then the hourly cron), `debt` (the payee's balance could not
  * cover it; a `refund_reviews` row records the debt), or `cancelled` (its
- * cause was undone before the step ran: a dispute won, Codex-2hxff.9).
+ * cause was undone before the step ran: a dispute won, Codex-2hxff.9; or the
+ * step was moved to its slice's re-pay row after the slice was reversed and
+ * re-paid, `last_error_code = 'moved_to_repay'`, Codex-2hxff.59).
  *
  * `repaid_by_payout_id`: a `done` reversal paid back to the payee by a new
  * pending `payouts` row (a won dispute; docs/payments/dispute-record.md §3).
@@ -95,6 +97,10 @@ export const payoutReversals = pgTable(
       .where(sql`${table.status} = 'failed'`),
     // The drain sums a pending row's reductions.
     index('idx_payout_reversals_payout').on(table.payoutId),
+    // The clawback's re-pay and support's charge history find a refund's or a
+    // dispute's steps by cause alone (Codex-2hxff.28); the per-cause unique
+    // index leads with payout_id, so it cannot serve that.
+    index('idx_payout_reversals_cause').on(table.causeType, table.causeId),
     // One re-pay per reversal; the clawback's row scope excludes re-pay rows.
     uniqueIndex('uq_payout_reversals_repaid_by')
       .on(table.repaidByPayoutId)

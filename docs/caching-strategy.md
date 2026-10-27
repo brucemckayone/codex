@@ -57,7 +57,7 @@ a stored copy**:
 |---|---|---|
 | `per-viewer` | `public, max-age=0, no-cache` | A shared cache may STORE it but must revalidate with the origin before serving it to anyone (RFC 9111). An anonymous burst is absorbed as 304s; a signed-in viewer always gets their own body. |
 | `private` | `private, no-cache` | The viewer's own browser only. **The default when nothing is declared.** Anything whose SSR output varies by auth. |
-| `fresh` | `private, no-store` | Not merely per-viewer but per-REQUEST: bodies that embed a credential, such as the HLS playlists in `content-api`'s `content-access.ts`, where a copy on the browser's own disk outlives the presigned URL inside it. |
+| `fresh` | `private, no-store` | Not merely per-viewer but per-REQUEST: bodies that embed a credential, such as the HLS playlists in `content-api`'s `content-access.ts`, where a copy on the browser's own disk outlives the presigned URL inside it. Also every paid page (owner decision 2026-10-25, "Yes, don't store paid pages"; Codex-hyz1c), so a reader who later loses access keeps no copy on disk or in the back/forward cache: a content detail page on a GATED grant, body or signed stream (`detailPageCacheHeaders` in `apps/web/src/lib/server/content-detail.ts`; a free, denied or failed one stays `private`), the in-course player's load, content-api's in-course practice route, and every remote function's response (`securityHook` in `apps/web/src/hooks.server.ts`, Codex-877bi): Kit marks only a remote call's error `no-store`, so a refreshed signed stream URL went out with no Cache-Control, and a remote function cannot set the header itself, because Kit's `setHeaders` throws inside one. |
 
 The apps/web view, `CACHE_HEADERS` name → preset name: `STATIC_PUBLIC` →
 `static`, `DYNAMIC_PUBLIC` → `public`, `PER_VIEWER` → `per-viewer`, `PRIVATE` →
@@ -238,7 +238,8 @@ the cache call.
 - `IdentityService.getProfile()` → `USER_PROFILE`, 10 min TTL
 - `IdentityService.getNotificationPreferences()` → `USER_PREFERENCES`, 10 min TTL
 - `IdentityService.getPublicProfileByUsername()` → two hops:
-  `USERNAME_TO_ID` (1 h, keyed by lowercased username) then
+  `USERNAME_TO_ID` (1 h, keyed by `USERNAME_LOOKUP(lowercased username)` =
+  `username:{name}`, prefixed so it cannot share a version with an org slug) then
   `USER_PUBLIC_PROFILE` (10 min, keyed by **user id**). The profile is keyed by
   id so the three existing `invalidate(userId)` calls clear it for free; only a
   username *rename* needs its own bump, which `updateProfile` does for the old
@@ -246,9 +247,17 @@ the cache call.
   that entry carries the user's `email` and this one feeds an unauthenticated
   endpoint.
 - Invalidated via `cache.invalidate(userId)` on profile/preferences update
+- organization-api's public org reads, all 4 h (`CACHE_TTL.ORG_PUBLIC_INFO_SECONDS`):
+  branding/info → `ORG_CONFIG` and stats → `ORG_STATS`, keyed by org **slug**;
+  the creators list → `ORG_CREATORS`, keyed by its own id
+  `COLLECTION_ORG_CREATORS(slug)` = `org:{slug}:creators` (Codex-kk9nv.9). A
+  listed member's profile write (identity-api) bumps only the creators id, so
+  it no longer evicts the org's config and stats. A change to the org or its
+  membership bumps both through `invalidateOrgPublicCaches(cache, slug)`;
+  a bare `invalidate(slug)` would leave the creators list stale.
+- Org tiers → `ORG_TIERS`, 24 h, keyed by org id
 
 **Natural next additions:**
-- `PlatformSettingsFacade` org branding → `ORG_CONFIG`, 30 min TTL
 - Published content metadata → `CONTENT_METADATA`, 5-10 min TTL
 - Content access checks → `CONTENT_ACCESS`, 1-5 min TTL
 
@@ -422,6 +431,45 @@ and organization-api routes (`workers/organization-api/src/routes/{members,follo
 
 **Why content keys are server-only:** Content availability is "server-authoritative always" — SSR renders the correct published list on every page load. There's no localStorage-backed `contentCollection` to invalidate. Bumping the key on the server means the next SSR request gets a fresh DB fetch instead of a stale KV list.
 
+### Org delete and shape versions (Codex-osuqt)
+
+On org delete (2026-10-23): `DELETE /api/organizations/:id`
+bumps content-api's `COLLECTION_ORG_CONTENT(orgId)` and `CATEGORIES(orgId)`
+alongside `invalidateOrgPublicCaches`. Deleting an org soft-deletes only the org
+row, so its content stays published: a bump only helps because the re-read
+drops a deleted org (`listPublic` and browse via `orgIsLive()`, and
+`listPublicForOrg` via a live-org join). Without that rule the bump just
+re-caches the same answer. Journeys (`COLLECTION_ORG_JOURNEYS`) are not bumped
+yet (Codex-62chf). The public `orgId` is lowercased at the schema
+(`orgIdQuerySchema`): Postgres matches an uppercase uuid, but the cache keyed
+the raw string, so an uppercase read cached under a key no invalidation
+reached.
+
+**Shape versions.** A data-slot key encodes the query, not the payload, so a
+read whose payload NARROWS needs a shape version in its `type`
+(`content:public:v4`, `content:auth:v3`, `org:creators:v2`) or old slots keep serving the removed
+fields until their TTL. See CLAUDE.md, Server-Side KV Caching. `content:public`
+v3 (Codex-039vo) dropped a gated row's body from a by-slug read. v4
+(Codex-ve5eh, Codex-567de) caches `listPublic`'s narrowed row: the media item
+`durationSeconds`, `thumbnailKey` and `hlsPreviewKey`, the org `id`, `name`,
+`slug` and `logoUrl`; both used to be the whole row. The row also leaves out
+`purchaseCount`, each piece's sales (owner, 2026-10-26). The wire item, with
+its CDN URLs, is built after the cache, so a missing CDN base is never frozen
+into a `content:public` slot. Because the wire is derived from the cached row,
+a `listPublic` select that WIDENS with a column the item reads needs a bump
+too, or old slots serve the item without it. `content:auth:v3` (Codex-1bdx0,
+apps/web /explore) is the signed-in browse list taking the same item, and no
+`purchaseCount`. It caches the worker's finished response, URLs included, for
+180s, so a change to the browse select (the shared `PUBLIC_*_COLUMNS` and
+`CATALOGUE_CONTENT_COLUMNS`) or a field removed from the item builder needs a
+`content:auth` bump.
+
+**Two branches bumping the same version.** Whichever merges SECOND takes a
+version no deployed build has ever written, whatever the merge order. A value
+a shipped build wrote names slots holding that build's shape, so reusing it
+serves them as hits for the full TTL. If v4 has already shipped when a later
+narrowing lands, the later one takes v5.
+
 ### `CacheType` constants (in `@codex/cache`)
 
 ```typescript
@@ -435,6 +483,7 @@ CacheType.ORG_CONFIG             // 'org:config'
 // Collection version identifiers (server KV only)
 CacheType.COLLECTION_CONTENT_PUBLISHED             // 'content:published'
 CacheType.COLLECTION_ORG_CONTENT(orgId)            // 'org:{orgId}:content'
+CacheType.COLLECTION_ORG_CREATORS(slug)            // 'org:{slug}:creators' (the creators list's read id)
 
 // Collection version identifiers (client manifest + server KV)
 CacheType.COLLECTION_USER_LIBRARY(userId)          // 'user:{userId}:library'

@@ -3,6 +3,7 @@ import {
   CompassIcon,
   HomeIcon,
   LibraryIcon,
+  LifeBuoyIcon,
   SearchIcon,
   TagIcon,
   UsersIcon,
@@ -17,4 +18,5 @@ export const RAIL_ICON_MAP: Record<RailIcon, Component> = {
   library: LibraryIcon,
   search: SearchIcon,
   users: UsersIcon,
+  'life-buoy': LifeBuoyIcon,
 };

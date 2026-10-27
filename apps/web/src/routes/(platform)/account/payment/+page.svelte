@@ -6,7 +6,8 @@
 	import Pagination from '$lib/components/ui/Pagination/Pagination.svelte';
 	import Button from '$lib/components/ui/Button/Button.svelte';
 	import { Alert, Card, EmptyState } from '$lib/components/ui';
-	import { goto } from '$app/navigation';
+	import { tick } from 'svelte';
+	import { goto, invalidate } from '$app/navigation';
 	import { page } from '$app/state';
 	import { portalSessionForm } from '$lib/remote/account.remote';
 	import { formatPrice, formatDate } from '$lib/utils/format';
@@ -23,12 +24,22 @@
 	let currentStatus = $derived(page.url.searchParams.get('status') || 'all');
 	let currentPage = $derived(Math.max(1, parseInt(page.url.searchParams.get('page') || '1', 10)));
 
+	// A completed payment with an open chargeback shows as 'disputed'
+	// (Codex-2hxff.60). A lost dispute refunds it, and the row says Refunded
+	// although `disputedAt` stays set; a won one clears the mark.
+	function displayStatus(purchase: PageData['purchases']['items'][number]): string {
+		return purchase.status === 'completed' && purchase.disputedAt != null
+			? 'disputed'
+			: purchase.status;
+	}
+
 	// Map purchase status to badge variant
 	function getStatusVariant(status: string): 'success' | 'warning' | 'error' | 'neutral' {
 		switch (status) {
 			case 'completed':
 				return 'success';
 			case 'pending':
+			case 'disputed':
 				return 'warning';
 			case 'failed':
 				return 'error';
@@ -50,6 +61,8 @@
 				return m.account_payments_status_failed();
 			case 'refunded':
 				return m.account_payments_status_refunded();
+			case 'disputed':
+				return m.account_payments_status_disputed();
 			default:
 				return m.account_payments_status_unknown();
 		}
@@ -95,6 +108,31 @@
 	];
 
 	// formatPrice (GBP) and formatDate (en-GB) imported from $lib/utils/format
+
+	// --- A failed read (Codex-2hxff.22 WEB-05) ---
+	// The .45 pattern (`money_setup_load_failed*`): "We couldn't load your
+	// purchases." with Retry in place of the list, never the empty state.
+	// - Retry keeps the alert, and its focused button, in place while it runs:
+	//   the label reads "Retrying…" and a second click sends nothing.
+	// - A Retry that fails again says "We still couldn't…" and puts focus on
+	//   the alert, so the repeated text is read out.
+	// - A Retry that loads them moves focus to a status line that says so,
+	//   because the alert unmounts with the focused button inside it.
+	// The raw error is never rendered: the load logs it.
+	let retrying = $state(false);
+	let retryOutcome = $state<'ok' | 'failed' | null>(null);
+	let alertNode = $state<HTMLElement | null>(null);
+	let statusNode = $state<HTMLElement | null>(null);
+
+	async function retryLoad() {
+		if (retrying) return;
+		retrying = true;
+		await invalidate('account:purchases');
+		retryOutcome = data.loadFailed ? 'failed' : 'ok';
+		retrying = false;
+		await tick();
+		(retryOutcome === 'ok' ? statusNode : alertNode)?.focus();
+	}
 </script>
 
 <svelte:head>
@@ -154,7 +192,33 @@
 		</Card.Header>
 
 		<Card.Content>
-		{#if data.purchases.items && data.purchases.items.length > 0}
+		<p
+			bind:this={statusNode}
+			class="sr-only"
+			role="status"
+			aria-live="polite"
+			tabindex="-1"
+		>
+			{retryOutcome === 'ok' && !data.loadFailed ? m.account_payments_load_retry_ok() : ''}
+		</p>
+		{#if data.loadFailed}
+			<div bind:this={alertNode} class="load-failed" tabindex="-1">
+				<Alert variant="error" data-testid="purchases-load-failed" aria-busy={retrying}>
+					<div class="load-failed__row">
+						<p class="load-failed__message">
+							{retryOutcome === 'failed'
+								? m.account_payments_load_failed_again()
+								: m.account_payments_load_failed()}
+						</p>
+						<Button variant="secondary" size="sm" onclick={retryLoad}>
+							{retrying
+								? m.money_setup_load_failed_retrying()
+								: m.money_setup_load_failed_retry()}
+						</Button>
+					</div>
+				</Alert>
+			</div>
+		{:else if data.purchases.items && data.purchases.items.length > 0}
 			<div class="table-wrapper">
 				<Table.Root>
 					<Table.Header>
@@ -167,19 +231,28 @@
 					</Table.Header>
 					<Table.Body>
 						{#each data.purchases.items as purchase (purchase.id)}
+							{@const title = purchase.contentTitle ?? purchase.courseTitle}
+							{@const status = displayStatus(purchase)}
 							<Table.Row>
 								<Table.Cell class="date-cell">
 									{formatDate(purchase.createdAt)}
 								</Table.Cell>
 								<Table.Cell class="content-cell">
-									<span class="content-title">{purchase.contentTitle}</span>
+									{#if purchase.kind === 'course'}
+										<span class="content-title-row">
+											<span class="content-title">{title}</span>
+											<Badge variant="neutral">{m.account_payments_kind_course()}</Badge>
+										</span>
+									{:else}
+										<span class="content-title">{title}</span>
+									{/if}
 								</Table.Cell>
 								<Table.Cell class="amount-cell">
 									{formatPrice(purchase.amountCents)}
 								</Table.Cell>
 								<Table.Cell class="status-cell">
-									<Badge variant={getStatusVariant(purchase.status)}>
-										{getStatusText(purchase.status)}
+									<Badge variant={getStatusVariant(status)}>
+										{getStatusText(status)}
 									</Badge>
 								</Table.Cell>
 							</Table.Row>
@@ -288,6 +361,18 @@
 		display: block;
 	}
 
+	/* A course title and its Course badge sit on one line and wrap together. */
+	.content-title-row {
+		display: inline-flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: var(--space-2);
+	}
+
+	.content-title-row .content-title {
+		display: inline;
+	}
+
 	:global(.amount-cell) {
 		font-weight: var(--font-medium);
 		font-variant-numeric: tabular-nums;
@@ -319,6 +404,37 @@
 	.discover-link:focus-visible {
 		outline: var(--border-width-thick) solid var(--color-focus);
 		outline-offset: var(--space-0-5);
+	}
+
+	/* A failed read: the alert stands in for the list. It takes focus after
+	   a Retry that failed again; shown for keyboard users. */
+	.load-failed:focus-visible {
+		outline: var(--border-width-thick) solid var(--color-focus);
+		outline-offset: var(--space-0-5);
+		border-radius: var(--radius-md);
+	}
+
+	.load-failed__row {
+		display: grid;
+		gap: var(--space-3);
+		align-items: start;
+	}
+
+	@media (--breakpoint-sm) {
+		.load-failed__row {
+			grid-template-columns: minmax(0, auto) auto;
+			justify-content: start;
+			align-items: center;
+			column-gap: var(--space-5);
+		}
+	}
+
+	.load-failed__message {
+		margin: 0;
+		font-size: var(--text-sm);
+		font-weight: var(--font-normal);
+		color: inherit;
+		text-wrap: pretty;
 	}
 
 	/* Pagination */

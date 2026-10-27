@@ -41,8 +41,15 @@
   @prop {string | null} [coverImageUrl] - md-variant CDN URL; null → gradient + initial.
   @prop {string | null} [description] - Optional short blurb under the name.
   @prop {(slug: string) => void} [onselect] - Optional inline-filter hook (WP-10).
+  @prop {string} [sizes] - How wide the card is drawn; the topic rail's by default.
 -->
 <script lang="ts">
+  import {
+    cappedSizes,
+    coverCropSizes,
+    getThumbnailSrcset,
+  } from '$lib/utils/image';
+
   interface Props {
     name: string;
     slug: string;
@@ -50,6 +57,8 @@
     coverImageUrl?: string | null;
     description?: string | null;
     onselect?: (slug: string) => void;
+    /** How wide the card is drawn. The topic rail's items by default. */
+    sizes?: string;
   }
 
   const {
@@ -59,6 +68,7 @@
     coverImageUrl = null,
     description = null,
     onselect,
+    sizes = cappedSizes(82, '21rem'),
   }: Props = $props();
 
   /**
@@ -67,6 +77,21 @@
    * the mark simply does not render rather than painting a stray box.
    */
   const markGlyph = $derived(name.trim().charAt(0).toUpperCase());
+
+  /**
+   * The cover's stored sizes, and how wide it is drawn: a 16:9 frame, in the
+   * topic rail's items, 82vw up to 21rem, unless the caller says otherwise
+   * (Codex-kk9nv.3). A picture wider than 16:9 is cropped, and so drawn wider
+   * than the card.
+   */
+  const coverSrcset = $derived(
+    coverImageUrl ? getThumbnailSrcset(coverImageUrl) : ''
+  );
+  const coverSizes = $derived(
+    coverSrcset
+      ? coverCropSizes(sizes, 16 / 9, coverImageUrl)
+      : undefined
+  );
 
   /**
    * Left-click with `onselect` set → filter inline instead of navigating.
@@ -95,7 +120,14 @@
     class:topic-card__media--fallback={!coverImageUrl}
   >
     {#if coverImageUrl}
-      <img src={coverImageUrl} alt="" loading="lazy" decoding="async" />
+      <img
+        src={coverImageUrl}
+        srcset={coverSrcset || undefined}
+        sizes={coverSizes}
+        alt=""
+        loading="lazy"
+        decoding="async"
+      />
     {/if}
   </div>
   {#if !coverImageUrl && markGlyph}

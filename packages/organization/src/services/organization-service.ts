@@ -11,9 +11,16 @@
  * - Slug uniqueness enforced
  */
 
+import {
+  type DepartureTerminatedAgreement,
+  lockProposalsOnDeparture,
+  terminateAgreementsOnDeparture,
+  withdrawProposalsOnDeparture,
+} from '@codex/agreements';
 import { isReservedSubdomain, PAGINATION } from '@codex/constants';
 import {
   isUniqueViolation,
+  listedCreatorConditions,
   toIso,
   whereNotDeleted,
   withPagination,
@@ -74,13 +81,23 @@ import type {
   Organization,
   OrganizationFilters,
   PaginationParams,
+  ReadableOrganization,
 } from '../types';
+import {
+  type WithdrawnCatalogue,
+  withdrawCatalogueOnDeparture,
+} from './catalogue-departure';
+import {
+  countDepartureEffects,
+  type DeparturePreview,
+} from './departure-preview';
 import {
   acceptOwnershipOffer,
   createOwnershipOffer,
   declineOwnershipOffer,
   getOwnershipView,
   getPendingOwnershipOffer,
+  lockOfferToRecipient,
   type OwnershipChange,
   type OwnershipOfferDto,
   type OwnershipViewCore,
@@ -89,6 +106,24 @@ import {
   withdrawOfferForIneligibleRecipient,
   withdrawOwnershipOffer,
 } from './ownership-transfer';
+
+/**
+ * The columns `get`, `getBySlug` and `list` select: every one but the payee's
+ * user id (Codex-kk6zx, see {@link ReadableOrganization}). A `false` entry
+ * excludes that column and keeps the rest, so a column added later is read.
+ *
+ * Exported for every other read that loads an org for someone who does not
+ * manage it (@codex/content's studio `get` and `list`), so they cannot drift
+ * apart. `satisfies` ties the keys to exactly what `ReadableOrganization`
+ * omits: a misspelt key would otherwise be dropped by drizzle without a word,
+ * and an empty exclusion selects EVERY column.
+ */
+export const READABLE_ORGANIZATION_COLUMNS = {
+  primaryConnectAccountUserId: false,
+} as const satisfies Record<
+  Exclude<keyof Organization, keyof ReadableOrganization>,
+  false
+>;
 
 /**
  * Organization Service Class
@@ -108,6 +143,16 @@ import {
  * absent the logo gate FAILS CLOSED (no base ⇒ no URL can be
  * platform-produced).
  */
+/** What a member's removal ended, for the post-commit follow-up. */
+export interface MemberDeparture {
+  organizationId: string;
+  creatorId: string;
+  /** The removal moment: every agreement and item it ended carries it. */
+  at: Date;
+  endedAgreements: DepartureTerminatedAgreement[];
+  catalogue: WithdrawnCatalogue;
+}
+
 export interface OrganizationServiceConfig extends ServiceConfig {
   /** Public asset CDN base — the `R2_PUBLIC_URL_BASE` worker binding. */
   r2PublicUrlBase?: string;
@@ -117,6 +162,14 @@ export interface OrganizationServiceConfig extends ServiceConfig {
    * the email is skipped.
    */
   ownershipMailer?: OwnershipMailer;
+  /**
+   * Told what a member's removal ended, after the removal commits: their
+   * agreements (Codex-2hxff.18) and the content and courses taken off sale
+   * (Codex-2hxff.64). The registry uses it to clear caches, cancel course
+   * subscriptions at period end, and email the creator once. When absent the
+   * removal still ends everything; only that follow-up work is skipped.
+   */
+  onMemberRemoved?: (departure: MemberDeparture) => Promise<void>;
   /** Absolute web-app base for the emails' Studio links (`WEB_APP_URL`). */
   webAppUrl?: string;
   /** `ExecutionContext.waitUntil`, to send the emails off the request path. */
@@ -156,6 +209,56 @@ const emailDate = new Intl.DateTimeFormat('en-GB', {
   timeZone: 'UTC',
 });
 
+/**
+ * A membership that is not its org's active owner, for the WHERE of a write
+ * that must never touch the owner (Codex-kk9nv.8). An earlier read is not
+ * enough: an accept or a support reassign can make the member the owner
+ * after that read, and an UPDATE that waited on the row re-checks only its
+ * own WHERE against the committed row. The DB caps active owners at one but
+ * cannot require one.
+ */
+const notTheActiveOwner = () =>
+  sql`not (${organizationMemberships.role} = 'owner' and ${organizationMemberships.status} = 'active')`;
+
+/** How far down a cause chain to look (and the guard against a cycle). */
+const MAX_CAUSE_DEPTH = 5;
+
+/**
+ * The innermost error under `error`, for a log line: its name, its message
+ * and the deepest string `code` on the way down (a SQLSTATE or socket code).
+ * Drizzle wraps a failed query in an error whose message is the SQL and its
+ * bound values; the driver's error under it says what went wrong. A
+ * `Failed query:` message is never logged. The same reading as payments'
+ * clawback `rootCauseOf` and ecom-api's `describeRootCause`.
+ */
+function rootCauseOf(error: unknown): {
+  errorName: string;
+  errorMessage: string;
+  code: string | undefined;
+} {
+  let current: unknown = error;
+  let code: string | undefined;
+  for (let depth = 0; depth <= MAX_CAUSE_DEPTH; depth++) {
+    if (!(current instanceof Error)) break;
+    const own = (current as { code?: unknown }).code;
+    if (typeof own === 'string') code = own;
+    const inner =
+      current.cause ?? (current as { sourceError?: unknown }).sourceError;
+    if (!(inner instanceof Error)) break;
+    current = inner;
+  }
+  if (!(current instanceof Error)) {
+    return { errorName: typeof current, errorMessage: String(current), code };
+  }
+  return {
+    errorName: current.name,
+    errorMessage: current.message.startsWith('Failed query:')
+      ? '(query omitted)'
+      : current.message,
+    code,
+  };
+}
+
 export class OrganizationService extends BaseService {
   /**
    * Narrowed `logoUrl` schema, bound to this worker's asset CDN base.
@@ -166,6 +269,9 @@ export class OrganizationService extends BaseService {
   >;
 
   private readonly ownershipMailer: OwnershipMailer | undefined;
+  private readonly onMemberRemoved:
+    | OrganizationServiceConfig['onMemberRemoved']
+    | undefined;
   private readonly webAppUrl: string | undefined;
   private readonly waitUntil: ((promise: Promise<unknown>) => void) | undefined;
 
@@ -173,6 +279,7 @@ export class OrganizationService extends BaseService {
     super(config);
     this.logoUrlSchema = createPlatformImageUrlSchema(config.r2PublicUrlBase);
     this.ownershipMailer = config.ownershipMailer;
+    this.onMemberRemoved = config.onMemberRemoved;
     this.webAppUrl = config.webAppUrl;
     this.waitUntil = config.waitUntil;
   }
@@ -227,6 +334,20 @@ export class OrganizationService extends BaseService {
 
     try {
       return await this.db.transaction(async (tx) => {
+        // A live creator, read under KEY SHARE (Codex-kk9nv.8). An account
+        // deletion holds the row exclusively from its scrub to its commit, so
+        // a create in that window waits, then finds no live user, instead of
+        // giving the org a deleted owner. One that reads first makes the scrub
+        // wait, and the deletion then sees this org and refuses.
+        const [creator] = await tx
+          .select({ id: users.id })
+          .from(users)
+          .where(and(eq(users.id, userId), whereNotDeleted(users)))
+          .for('key share');
+        if (!creator) {
+          throw new NotFoundError('User not found');
+        }
+
         const [newOrganization] = await tx
           .insert(organizations)
           .values({
@@ -286,11 +407,13 @@ export class OrganizationService extends BaseService {
    * Get organization by ID
    *
    * @param id - Organization ID
-   * @returns Organization or null if not found/deleted
+   * @returns Organization without the payee's user id, or null if not
+   *   found/deleted
    */
-  async get(id: string): Promise<Organization | null> {
+  async get(id: string): Promise<ReadableOrganization | null> {
     try {
       const result = await this.db.query.organizations.findFirst({
+        columns: READABLE_ORGANIZATION_COLUMNS,
         where: and(eq(organizations.id, id), whereNotDeleted(organizations)),
       });
 
@@ -304,11 +427,13 @@ export class OrganizationService extends BaseService {
    * Get organization by slug
    *
    * @param slug - Organization slug
-   * @returns Organization or null if not found/deleted
+   * @returns Organization without the payee's user id, or null if not
+   *   found/deleted
    */
-  async getBySlug(slug: string): Promise<Organization | null> {
+  async getBySlug(slug: string): Promise<ReadableOrganization | null> {
     try {
       const result = await this.db.query.organizations.findFirst({
+        columns: READABLE_ORGANIZATION_COLUMNS,
         where: and(
           eq(organizations.slug, slug.toLowerCase()),
           whereNotDeleted(organizations)
@@ -415,12 +540,13 @@ export class OrganizationService extends BaseService {
    *
    * @param filters - Query filters
    * @param pagination - Pagination parameters
-   * @returns Paginated organization list with metadata
+   * @returns Paginated organization list with metadata, each without the
+   *   payee's user id
    */
   async list(
     filters: OrganizationFilters = {},
     pagination: PaginationParams = { page: 1, limit: PAGINATION.DEFAULT }
-  ): Promise<PaginatedListResponse<Organization>> {
+  ): Promise<PaginatedListResponse<ReadableOrganization>> {
     try {
       const { limit, offset } = withPagination(pagination);
 
@@ -452,6 +578,7 @@ export class OrganizationService extends BaseService {
       // Run items + count queries concurrently (independent queries)
       const [items, countResult] = await Promise.all([
         this.db.query.organizations.findMany({
+          columns: READABLE_ORGANIZATION_COLUMNS,
           where: and(...whereConditions),
           limit,
           offset,
@@ -577,12 +704,16 @@ export class OrganizationService extends BaseService {
           })
           .from(organizationMemberships)
           .innerJoin(users, eq(organizationMemberships.userId, users.id))
+          // A course-only practice is reachable only inside its course, so a
+          // public listing never counts or shows one (Codex-ot6vj), as
+          // listPublic's catalogue read does not.
           .leftJoin(
             content,
             and(
               eq(content.creatorId, users.id),
               eq(content.organizationId, org.id),
               eq(content.status, 'published'),
+              eq(content.courseOnly, false),
               isNull(content.deletedAt)
             )
           )
@@ -645,6 +776,7 @@ export class OrganizationService extends BaseService {
             WHERE ${inArray(content.creatorId, creatorIdsWithContent)}
               AND ${content.organizationId} = ${org.id}
               AND ${content.status} = 'published'
+              AND ${content.courseOnly} = false
               AND ${content.deletedAt} IS NULL
           ) ranked
           WHERE rn <= 4
@@ -843,11 +975,44 @@ export class OrganizationService extends BaseService {
   }
 
   /**
+   * What removing this member would unwind, as counts: active agreements,
+   * content and courses on sale, live course subscriptions and affected tier
+   * subscribers — all scoped to this organisation and this member as creator
+   * (Codex-2hxff.64; see `./departure-preview.ts`). Read by the Studio's
+   * Remove dialog before the owner confirms. Not cached.
+   *
+   * @throws {MemberNotFoundError} If the user has no membership here
+   */
+  async getDeparturePreview(
+    organizationId: string,
+    userId: string
+  ): Promise<DeparturePreview> {
+    try {
+      const preview = await countDepartureEffects(this.db, {
+        organizationId,
+        creatorId: userId,
+      });
+      if (!preview) {
+        throw new MemberNotFoundError(userId);
+      }
+      return preview;
+    } catch (error) {
+      this.handleError(error, 'getDeparturePreview');
+    }
+  }
+
+  /**
    * Get the current user's membership in an organization
    *
    * Returns the user's role and joined date for the specified organization.
    * Returns null for role/joinedAt if not a member (graceful degradation).
    * Does not throw errors for "not found" - this is intentional for frontend convenience.
+   *
+   * The ownership-offer banner is read apart from the membership it decorates
+   * (Codex-2hxff.42): a failed offer read is logged and answered as "no
+   * offer", so the owner still gets their studio and the next load brings
+   * the banner back. A failed MEMBERSHIP read still throws: that is the
+   * access check, and the studio layout turns it into a retry page.
    *
    * @param organizationId - Organization ID
    * @param userId - User ID to check membership for
@@ -888,7 +1053,18 @@ export class OrganizationService extends BaseService {
               organizationId,
               userId,
               new Date()
-            )
+            ).catch((error: unknown) => {
+              this.obs.error(
+                'Ownership offer read failed; membership answered without it',
+                {
+                  errorId: crypto.randomUUID(),
+                  organizationId,
+                  userId,
+                  ...rootCauseOf(error),
+                }
+              );
+              return null;
+            })
           : null,
       };
     } catch (error) {
@@ -979,11 +1155,16 @@ export class OrganizationService extends BaseService {
   }> {
     try {
       return await this.db.transaction(async (tx) => {
-        // Find user by email
-        const user = await tx.query.users.findFirst({
-          where: eq(users.email, input.email),
-          columns: { id: true },
-        });
+        // Find the live user by email, under KEY SHARE (Codex-kk9nv.8). An
+        // account deletion holds the row exclusively from its scrub to its
+        // commit, so an invite reading in that window waits, then finds the
+        // address gone. One that reads first makes the scrub wait, and the
+        // deletion then ends this membership with the others.
+        const [user] = await tx
+          .select({ id: users.id })
+          .from(users)
+          .where(and(eq(users.email, input.email), whereNotDeleted(users)))
+          .for('key share');
 
         if (!user) {
           throw new NotFoundError('User not found by email', {
@@ -1081,30 +1262,40 @@ export class OrganizationService extends BaseService {
           throw new OwnershipTransferRequiredError({ organizationId });
         }
 
+        // Leaving admin and creator ends eligibility for an ownership offer.
+        // Lock, then write (see removeMember): the offer is locked before the
+        // membership, and withdrawn after it by a fresh read.
+        const leavesRecipientRoles = role !== 'admin' && role !== 'creator';
+        if (leavesRecipientRoles) {
+          await lockOfferToRecipient(tx, organizationId, userId);
+        }
+
         const [updated] = await tx
           .update(organizationMemberships)
           .set({ role, updatedAt: new Date() })
           .where(
             and(
               eq(organizationMemberships.organizationId, organizationId),
-              eq(organizationMemberships.userId, userId)
+              eq(organizationMemberships.userId, userId),
+              notTheActiveOwner()
             )
           )
           .returning();
 
+        // The row exists (read above), so none back means it was made the
+        // owner while this waited on it.
         if (!updated) {
-          throw new MemberNotFoundError(userId);
+          throw new OwnershipTransferRequiredError({ organizationId });
         }
 
-        const withdrawn =
-          role === 'admin' || role === 'creator'
-            ? null
-            : await withdrawOfferForIneligibleRecipient(
-                tx,
-                organizationId,
-                userId,
-                new Date()
-              );
+        const withdrawn = leavesRecipientRoles
+          ? await withdrawOfferForIneligibleRecipient(
+              tx,
+              organizationId,
+              userId,
+              new Date()
+            )
+          : null;
 
         return {
           membership: {
@@ -1135,14 +1326,18 @@ export class OrganizationService extends BaseService {
    *
    * The owner cannot be removed — they transfer ownership first
    * (Codex-2hxff.2). Removing the recipient of an open ownership offer
-   * withdraws it in the same transaction.
+   * withdraws it in the same transaction, and so does ending the member's
+   * revenue-share agreements in the organisation (owner decision AGR-09, "End
+   * on removal"): money earned before is still paid to them. Everything of
+   * theirs on sale there is taken off sale too (Codex-2hxff.64): buyers keep
+   * what they bought, tier subscribers keep it until their next renewal.
    *
    * @param organizationId - Organization ID
    * @param userId - User ID to remove
    */
   async removeMember(organizationId: string, userId: string): Promise<void> {
     try {
-      const withdrawn = await this.db.transaction(async (tx) => {
+      const { withdrawn, departure } = await this.db.transaction(async (tx) => {
         const membership = await this.findMembershipOrThrow(
           tx,
           organizationId,
@@ -1153,23 +1348,64 @@ export class OrganizationService extends BaseService {
           throw new OwnershipTransferRequiredError({ organizationId });
         }
 
-        await tx
+        const now = new Date();
+        const departing = { organizationId, creatorId: userId, at: now };
+        // LOCK, then write (Codex-kk9nv.8). The member's open proposals and
+        // ownership offer are locked before their membership, the order an
+        // accept or a counter takes them in. They are withdrawn after it, by
+        // fresh reads: an offer created while the membership change waited
+        // (createOwnershipOffer holds the membership while it inserts) is
+        // withdrawn too.
+        await lockProposalsOnDeparture(tx, departing);
+        await lockOfferToRecipient(tx, organizationId, userId);
+        const [ended] = await tx
           .update(organizationMemberships)
-          .set({ status: 'inactive', updatedAt: new Date() })
+          .set({ status: 'inactive', updatedAt: now })
           .where(
             and(
               eq(organizationMemberships.organizationId, organizationId),
-              eq(organizationMemberships.userId, userId)
+              eq(organizationMemberships.userId, userId),
+              notTheActiveOwner()
             )
-          );
+          )
+          // Bare `.returning()`: the client union collapses the projected
+          // overload. Only whether a row came back matters.
+          .returning();
+        // The row exists (read above), so none back means it was made the
+        // owner since, by an accept or a support reassign that committed while
+        // this waited.
+        // The throw rolls back the locks and nothing is ended.
+        if (!ended) {
+          throw new OwnershipTransferRequiredError({ organizationId });
+        }
 
-        return await withdrawOfferForIneligibleRecipient(
+        await withdrawProposalsOnDeparture(tx, departing);
+        const withdrawn = await withdrawOfferForIneligibleRecipient(
           tx,
           organizationId,
           userId,
-          new Date()
+          now
         );
+        const endedAgreements = await terminateAgreementsOnDeparture(tx, {
+          organizationId,
+          creatorId: userId,
+          at: now,
+        });
+        const catalogue = await withdrawCatalogueOnDeparture(tx, {
+          organizationId,
+          creatorId: userId,
+          at: now,
+        });
+        const departure: MemberDeparture = {
+          organizationId,
+          creatorId: userId,
+          at: now,
+          endedAgreements,
+          catalogue,
+        };
+        return { withdrawn, departure };
       });
+      this.notifyMemberRemoved(departure);
       if (withdrawn) {
         this.notifyOwnership({
           kind: 'closed',
@@ -1398,13 +1634,14 @@ export class OrganizationService extends BaseService {
 
   /**
    * SQL where-clause for active "creator" memberships (owner/admin/creator roles).
-   * Shared by public profile stats and creator listings.
+   * Shared by public profile stats and creator listings. The conditions are
+   * the same ones IdentityService uses to invalidate this list's cache
+   * (`listedCreatorConditions`, Codex-kk9nv.7).
    */
   private activeCreatorWhere(orgId: string) {
     return and(
       eq(organizationMemberships.organizationId, orgId),
-      eq(organizationMemberships.status, 'active'),
-      inArray(organizationMemberships.role, ['owner', 'admin', 'creator'])
+      ...listedCreatorConditions()
     );
   }
 
@@ -1566,6 +1803,32 @@ export class OrganizationService extends BaseService {
     } catch (error) {
       this.handleError(error, 'reassignOwner');
     }
+  }
+
+  /**
+   * Hand what a removal ended to the follow-up work (caches, course
+   * subscriptions, the creator's email), after the commit and through
+   * `waitUntil` when available. Never throws: the removal is the source of
+   * truth; a failure here is logged and the follow-up's own retries recover.
+   */
+  private notifyMemberRemoved(departure: MemberDeparture): void {
+    const notify = this.onMemberRemoved;
+    if (!notify) return;
+    // Deferred, so a callback that throws synchronously becomes a rejection
+    // here instead of a 500 for a removal that has already committed.
+    const task = Promise.resolve()
+      .then(() => notify(departure))
+      .catch((error: unknown) => {
+        this.obs.error('Member removal follow-up failed', {
+          organizationId: departure.organizationId,
+          creatorId: departure.creatorId,
+          agreementIds: departure.endedAgreements.map((a) => a.id),
+          contentIds: departure.catalogue.contentIds.length,
+          courseIds: departure.catalogue.courseIds.length,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    this.waitUntil?.(task);
   }
 
   /**

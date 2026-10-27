@@ -58,9 +58,9 @@
 
 import { CacheType, type VersionedCache } from '@codex/cache';
 import {
+  ACCESS_GRANTING_SUBSCRIPTION_STATUSES,
   ORGANIZATION_ROLES,
   PURCHASE_STATUS,
-  SUBSCRIPTION_STATUS,
 } from '@codex/constants';
 import type { Database } from '@codex/database';
 import {
@@ -178,7 +178,8 @@ export const DEFAULT_MAX_LIBRARY_FANOUT = 500;
  *    (fire-and-forget).
  * 3. Resolves the set of users with library-visibility:
  *    - Purchasers of the specific content (via `purchases.status='completed'`)
- *    - Active/cancelling subscribers to the org (subscription cache is keyed
+ *    - Subscribers to the org with access (active, cancelling, past_due —
+ *      `ACCESS_GRANTING_SUBSCRIPTION_STATUSES`; subscription cache is keyed
  *      per-user, not per-content, so any subscription-gated content mutation
  *      stales the whole library entry)
  *    - Management members (owner/admin/creator) of the org
@@ -366,8 +367,7 @@ async function resolveAffectedUsers(args: ResolveArgs): Promise<Set<string>> {
         where: and(
           eq(subscriptions.organizationId, organizationId),
           inArray(subscriptions.status, [
-            SUBSCRIPTION_STATUS.ACTIVE,
-            SUBSCRIPTION_STATUS.CANCELLING,
+            ...ACCESS_GRANTING_SUBSCRIPTION_STATUSES,
           ]),
           gt(subscriptions.currentPeriodEnd, new Date())
         ),

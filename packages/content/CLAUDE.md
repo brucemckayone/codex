@@ -7,6 +7,15 @@ Content and media lifecycle management. Core service package for content CRUD, m
 ```typescript
 import { ContentService, MediaItemService } from '@codex/content';
 import { SlugConflictError, MediaNotReadyError, ContentNotFoundError } from '@codex/content';
+// The catalogue projection, shared with @codex/access getWithdrawnContent so
+// the public list and the withdrawn read cannot drift apart:
+import {
+  CATALOGUE_CONTENT_COLUMNS, // content columns left out: purchaseCount
+  PUBLIC_CREATOR_COLUMNS, // id, name (never the email)
+  PUBLIC_MEDIA_ITEM_COLUMNS, // durationSeconds, thumbnailKey, hlsPreviewKey
+  PUBLIC_ORGANIZATION_COLUMNS, // id, name, slug, logoUrl
+} from '@codex/content';
+import type { CatalogueContentRow, PublicContentRow } from '@codex/content';
 ```
 
 All validation schemas are re-exported from `@codex/validation` for convenience.
@@ -16,15 +25,15 @@ All validation schemas are re-exported from `@codex/validation` for convenience.
 | Method | Signature | Notes |
 |---|---|---|
 | `create` | `(input: CreateContentInput, creatorId: string)` | Transaction. Media validated but not required to be ready for draft. Checks slug uniqueness. |
-| `get` | `(id: string, creatorId: string)` | Returns `ContentWithRelations` (includes mediaItem). Scoped by creatorId. |
-| `update` | `(id: string, input: UpdateContentInput, creatorId: string)` | Transaction. Checks slug conflict if slug changes. |
+| `get` | `(id: string, creatorId: string)` | Returns `ContentWithRelations` (includes mediaItem). Scoped by creatorId. The org leaves out the payee's user id (`ReadableOrganization`, Codex-kk6zx): the route checks content ownership, not org management. |
+| `update` | `(id: string, input: UpdateContentInput, creatorId: string)` | Transaction. Checks slug conflict if slug changes. On PUBLISHED content, a price or tier set or changed (or the row turned purchasable) needs a payout-ready creator — else `CreatorPayoutsRequiredError`. Compared by value, so a form resending unchanged flags never trips it; removing a price/tier never does. |
 | `uploadThumbnail` | `(id: string, creatorId: string, file: File, r2: R2Bucket, r2PublicUrlBase: string)` | Processes image via `@codex/image-processing`, returns `ImageProcessingResult`. |
 | `isSlugAvailable` | `(slug: string, creatorId: string, organizationId?: string \| null, excludeContentId?: string \| null)` | Slug uniqueness — org scope when `organizationId` is given, else creator-personal scope. |
-| `publish` | `(id: string, creatorId: string)` | Transaction. Video/audio content requires its media at `status === 'ready'`. Monetised content (priced or `includedInTierId` set) additionally requires a payout-ready Connect account — else `CreatorPayoutsRequiredError`. |
+| `publish` | `(id: string, creatorId: string)` | Transaction. Video/audio content requires its media at `status === 'ready'`. Content that earns money (`requiresPayoutsToPublish`: any price, or `includedInTierId` set — purchasable or not) additionally requires a payout-ready Connect account — else `CreatorPayoutsRequiredError`. |
 | `unpublish` | `(id: string, creatorId: string)` | Reverts published → draft. |
 | `delete` | `(id: string, creatorId: string)` | Soft delete via `deletedAt`. |
-| `list` | `(creatorId: string, filters: ContentFilters, pagination?)` | Paginated. Supports status/search/type filters. |
-| `listPublic` | `(params)` | Public-facing list — only published, non-deleted content. |
+| `list` | `(creatorId: string, filters: ContentFilters, pagination?, options?)` | Paginated. Supports status/search/type filters. Two scopes, two return types. `studio` (default): the creator's own rows, whole, with their email; the org without the payee id. `browse` (the 4-argument form, `{ scope: 'browse' }`): any signed-in viewer's catalogue, so `CatalogueContentRow`, projected as `listPublic` is and with no body (Codex-1bdx0). |
+| `listPublic` | `(params)` | Public-facing list: published, non-deleted content whose org is live (or personal). A catalogue read carries no body; only a by-slug read of a PUBLIC piece keeps it (`isPublicContent` from `@codex/constants`: free and no gate, so a free-flagged course-only practice has none; Codex-039vo). No creator email. Returns `PublicContentRow`: the media item, org and creator are `PUBLIC_*_COLUMNS` and the row leaves out `CATALOGUE_CONTENT_COLUMNS` (`purchaseCount`), the same projection as `@codex/access` `getWithdrawnContent`. content-api caches these rows and builds the wire item after the read, so any change to this select needs a `PUBLIC_CONTENT_SHAPE_VERSION` bump. `category` needs `orgId` (ValidationError). |
 | `setCache` | `(cache: VersionedCache)` | Inject `VersionedCache` for cache invalidation on mutations. |
 
 ### Constructor

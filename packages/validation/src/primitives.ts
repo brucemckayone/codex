@@ -1,3 +1,4 @@
+import { PRICE_LIMITS } from '@codex/constants';
 import { z } from 'zod';
 
 /**
@@ -49,6 +50,13 @@ export const userIdSchema = z
   .regex(/^[a-zA-Z0-9]+$/, {
     message: 'Invalid user ID format',
   });
+
+/**
+ * A creator's users.id as one service hands it to another: text up to 64.
+ * Looser than userIdSchema, which takes letters and digits only, because
+ * test users' ids are uuids; it only ever keys a lookup or a WHERE.
+ */
+export const creatorIdSchema = z.string().min(1).max(64);
 
 /**
  * Slug validation
@@ -218,18 +226,36 @@ export const createPlatformImageUrlSchema = (
 // Numbers
 // ============================================================================
 
+const MIN_PRICE_MESSAGE = 'Minimum price is £1.00 (100 pence)';
+const MAX_PRICE_MESSAGE = 'Maximum price is £100,000';
+
 /**
- * Price validation (integer cents)
- * - Non-negative integer only
- * - Max $100,000 (10,000,000 cents)
- * - Null = free content
+ * An optional price in pence (GBP).
+ * - `null` or `0` = no price (free content, or a path that is not sold)
+ * - otherwise £1.00–£100,000 ({@link PRICE_LIMITS}); 1p–99p is refused here
+ *   rather than at Stripe Checkout, which rejects anything under £0.30
+ *
+ * Whether a price is REQUIRED is the caller's rule (e.g. purchasable content).
  */
 export const priceCentsSchema = z
   .number()
-  .int('Price must be a whole number (in cents)')
+  .int('Price must be a whole number (pence)')
   .min(0, 'Price cannot be negative')
-  .max(10000000, 'Price cannot exceed $100,000')
+  .max(PRICE_LIMITS.MAX_CENTS, MAX_PRICE_MESSAGE)
+  .refine((cents) => cents === 0 || cents >= PRICE_LIMITS.MIN_CENTS, {
+    message: MIN_PRICE_MESSAGE,
+  })
   .nullable();
+
+/**
+ * A price something is always sold at, in pence: tier and course subscription
+ * plan prices. Never null or zero.
+ */
+export const salePriceCentsSchema = z
+  .number()
+  .int('Price must be a whole number (pence)')
+  .min(PRICE_LIMITS.MIN_CENTS, MIN_PRICE_MESSAGE)
+  .max(PRICE_LIMITS.MAX_CENTS, MAX_PRICE_MESSAGE);
 
 /**
  * Positive integer schema

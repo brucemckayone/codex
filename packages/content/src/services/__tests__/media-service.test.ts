@@ -19,6 +19,8 @@
  */
 
 import type { R2Service } from '@codex/cloudflare-clients';
+import { TRANSCODING_ERROR_MAX_LENGTH } from '@codex/constants';
+import { mediaItems } from '@codex/database/schema';
 import {
   type Database,
   seedTestUsers,
@@ -27,6 +29,7 @@ import {
 } from '@codex/test-utils';
 import { getHlsPrefix, getOriginalKey } from '@codex/transcoding';
 import type { CreateMediaItemInput } from '@codex/validation';
+import { eq } from 'drizzle-orm';
 import {
   afterAll,
   beforeAll,
@@ -112,6 +115,50 @@ describe('MediaItemService', () => {
       expect(result.uploadedAt).toBeNull();
       expect(result.durationSeconds).toBeNull();
     });
+
+    // Codex-58h6c: the key is the file a presigned PUT and the upload
+    // fallback overwrite, and the file transcoding reads.
+    describe('a storage key the caller names', () => {
+      const named = (r2Key: string): CreateMediaItemInput => ({
+        title: 'Named key',
+        mediaType: 'video',
+        mimeType: 'video/mp4',
+        r2Key,
+        fileSizeBytes: 1024,
+      });
+      const stored = (r2Key: string) =>
+        db.query.mediaItems.findFirst({
+          where: (media, { eq }) => eq(media.r2Key, r2Key),
+        });
+
+      it('is used when it is in the creator’s own originals folder', async () => {
+        const mine = getOriginalKey(creatorId, crypto.randomUUID(), 'mine.mp4');
+        const result = await service.create(named(mine), creatorId);
+        expect(result.r2Key).toBe(mine);
+      });
+
+      it.each([
+        [
+          'another creator’s original',
+          () =>
+            getOriginalKey(otherCreatorId, crypto.randomUUID(), 'theirs.mp4'),
+        ],
+        [
+          'a key in no creator’s folder',
+          () => `e2e/originals/${crypto.randomUUID()}/original.mp4`,
+        ],
+        [
+          'the creator’s own key outside originals',
+          () => `${creatorId}/hls/${crypto.randomUUID()}/master.m3u8`,
+        ],
+      ])('is refused, with nothing created: %s', async (_case, key) => {
+        const r2Key = key();
+        await expect(
+          service.create(named(r2Key), creatorId)
+        ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+        expect(await stored(r2Key)).toBeUndefined();
+      });
+    });
   });
 
   describe('get', () => {
@@ -184,7 +231,7 @@ describe('MediaItemService', () => {
   });
 
   describe('update', () => {
-    it('should update media metadata', async () => {
+    it('should update what the creator may edit', async () => {
       const created = await service.create(
         {
           title: 'Test',
@@ -198,24 +245,43 @@ describe('MediaItemService', () => {
 
       const updated = await service.update(
         created.id,
+        { title: 'Retitled', description: 'About it' },
+        creatorId
+      );
+
+      expect(updated.title).toBe('Retitled');
+      expect(updated.description).toBe('About it');
+    });
+
+    it('refuses a lifecycle field, writing nothing', async () => {
+      const created = await service.create(
         {
-          durationSeconds: 120,
-          width: 1920,
-          height: 1080,
+          title: 'Test',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          r2Key: getOriginalKey(creatorId, crypto.randomUUID(), 'test.mp4'),
+          fileSizeBytes: 1024,
         },
         creatorId
       );
 
-      expect(updated.durationSeconds).toBe(120);
-      expect(updated.width).toBe(1920);
-      expect(updated.height).toBe(1080);
+      // What a route hands over: JSON off the wire, typed only by its claim.
+      const fromTheWire: Parameters<typeof service.update>[1] = JSON.parse(
+        '{"title":"T","status":"ready"}'
+      );
+      await expect(
+        service.update(created.id, fromTheWire, creatorId)
+      ).rejects.toThrow();
+      const after = await service.get(created.id, creatorId);
+      expect(after?.status).toBe('uploading');
+      expect(after?.title).toBe('Test');
     });
 
     it('should throw MediaNotFoundError if media does not exist', async () => {
       await expect(
         service.update(
           '00000000-0000-0000-0000-000000000000',
-          { status: 'ready' },
+          { title: 'Missing' },
           creatorId
         )
       ).rejects.toThrow(MediaNotFoundError);
@@ -238,8 +304,48 @@ describe('MediaItemService', () => {
       );
 
       await expect(
-        service.update(created.id, { status: 'ready' }, creatorId)
+        service.update(created.id, { title: 'Not mine' }, creatorId)
       ).rejects.toThrow(MediaNotFoundError);
+    });
+  });
+
+  describe('recordClientDuration', () => {
+    async function created(owner = creatorId) {
+      return service.create(
+        {
+          title: 'Timed',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          r2Key: getOriginalKey(owner, crypto.randomUUID(), 'timed.mp4'),
+          fileSizeBytes: 1024,
+        },
+        owner
+      );
+    }
+
+    it('writes into an empty column', async () => {
+      const media = await created();
+      await service.recordClientDuration(media.id, creatorId, 137);
+      expect((await service.get(media.id, creatorId))?.durationSeconds).toBe(
+        137
+      );
+    });
+
+    it("never overwrites the transcoder's figure", async () => {
+      const media = await created();
+      await service.recordClientDuration(media.id, creatorId, 1800);
+      await service.recordClientDuration(media.id, creatorId, 137);
+      expect((await service.get(media.id, creatorId))?.durationSeconds).toBe(
+        1800
+      );
+    });
+
+    it("leaves another creator's item alone", async () => {
+      const media = await created(otherCreatorId);
+      await service.recordClientDuration(media.id, creatorId, 137);
+      expect(
+        (await service.get(media.id, otherCreatorId))?.durationSeconds
+      ).toBeNull();
     });
   });
 
@@ -357,6 +463,8 @@ describe('MediaItemService', () => {
         },
         creatorId
       );
+      await service.markUploaded(created.id, creatorId);
+      const uploadedAt = (await service.get(created.id, creatorId))?.uploadedAt;
 
       const metadata = {
         hlsMasterPlaylistKey: 'hls/test/master.m3u8',
@@ -374,7 +482,10 @@ describe('MediaItemService', () => {
       expect(ready.durationSeconds).toBe(metadata.durationSeconds);
       expect(ready.width).toBe(metadata.width);
       expect(ready.height).toBe(metadata.height);
-      expect(ready.uploadedAt).not.toBeNull();
+      // uploaded_at is when the FILE arrived (markUploaded), the maintenance
+      // cron's 24 h clock: finishing the transcode must not move it.
+      expect(uploadedAt).toBeInstanceOf(Date);
+      expect(ready.uploadedAt?.getTime()).toBe(uploadedAt?.getTime());
     });
   });
 
@@ -832,36 +943,121 @@ describe('MediaItemService', () => {
     });
   });
 
+  const makeUploadingMedia = () =>
+    service.create(
+      {
+        title: 'Trigger failure media',
+        mediaType: 'video',
+        mimeType: 'video/mp4',
+        r2Key: getOriginalKey(creatorId, crypto.randomUUID(), 'tf.mp4'),
+        fileSizeBytes: 1024,
+      },
+      creatorId
+    );
+
+  describe('markUploaded', () => {
+    it('moves an upload to uploaded and stamps when the file arrived', async () => {
+      const created = await makeUploadingMedia();
+
+      await service.markUploaded(created.id, creatorId);
+
+      const after = await service.get(created.id, creatorId);
+      expect(after?.status).toBe('uploaded');
+      expect(after?.uploadedAt).toBeInstanceOf(Date);
+    });
+
+    it('a repeat leaves the stamp: it is the 24 h clock', async () => {
+      const created = await makeUploadingMedia();
+      await service.markUploaded(created.id, creatorId);
+      const first = (await service.get(created.id, creatorId))?.uploadedAt;
+
+      await service.markUploaded(created.id, creatorId);
+
+      const again = (await service.get(created.id, creatorId))?.uploadedAt;
+      expect(again?.getTime()).toBe(first?.getTime());
+    });
+
+    it('is creator-scoped — never touches another creator’s upload', async () => {
+      const created = await makeUploadingMedia();
+
+      await service.markUploaded(created.id, otherCreatorId);
+
+      expect((await service.get(created.id, creatorId))?.status).toBe(
+        'uploading'
+      );
+    });
+  });
+
   describe('recordTranscodingTriggerFailure', () => {
-    const makeMedia = () =>
-      service.create(
-        {
-          title: 'Trigger failure media',
-          mediaType: 'video',
-          mimeType: 'video/mp4',
-          r2Key: getOriginalKey(creatorId, crypto.randomUUID(), 'tf.mp4'),
-          fileSizeBytes: 1024,
-        },
-        creatorId
+    const makeMedia = async () => {
+      const created = await makeUploadingMedia();
+      await service.markUploaded(created.id, creatorId);
+      return created;
+    };
+
+    // The detail lives in the row only: no response serves it (Codex-l2c48).
+    const stored = (id: string) =>
+      db.query.mediaItems.findFirst({ where: eq(mediaItems.id, id) });
+
+    it('keeps the detail in the row, and no read serves it', async () => {
+      const created = await makeMedia();
+      expect(created).not.toHaveProperty('transcodingError');
+      await service.recordTranscodingTriggerFailure(
+        created.id,
+        creatorId,
+        'botocore: endpoint https://internal.example returned 503'
       );
 
-    it('persists the error WITHOUT changing status so re-trigger still works', async () => {
+      expect((await stored(created.id))?.transcodingError).toContain(
+        'botocore'
+      );
+      const served = await service.get(created.id, creatorId);
+      expect(served?.transcodingErrorCode).toBe('TRANSCODER_UNAVAILABLE');
+      expect(served).not.toHaveProperty('transcodingError');
+      const listed = await service.list(creatorId, {}, { page: 1, limit: 50 });
+      const row = listed.items.find((item) => item.id === created.id);
+      expect(row).toBeDefined();
+      expect(row).not.toHaveProperty('transcodingError');
+      const updated = await service.update(
+        created.id,
+        { title: 'Retitled' },
+        creatorId
+      );
+      expect(updated).not.toHaveProperty('transcodingError');
+    });
+
+    it('marks the item waiting WITHOUT changing status so re-trigger still works', async () => {
       const created = await makeMedia();
 
       await service.recordTranscodingTriggerFailure(
         created.id,
         creatorId,
-        'media-api returned 503'
+        'Transcoding dispatch returned 503'
       );
 
-      const after = await service.get(created.id, creatorId);
-      expect(after?.transcodingError).toBe('media-api returned 503');
-      // Status stays 'uploaded'/'uploading' (not flipped to 'failed') so the
-      // idempotent /upload-complete re-POST remains a valid recovery path.
-      expect(after?.status).toBe('uploading');
+      const after = await stored(created.id);
+      expect(after?.transcodingError).toBe('Transcoding dispatch returned 503');
+      expect(after?.transcodingErrorCode).toBe('TRANSCODER_UNAVAILABLE');
+      // Status stays 'uploaded' (not flipped to 'failed') so the idempotent
+      // /upload-complete re-POST, and the maintenance cron, can re-dispatch.
+      expect(after?.status).toBe('uploaded');
     });
 
-    it('truncates the error message to the 2KB column limit', async () => {
+    it('never stamps a row that is not uploaded: media-api may have claimed it', async () => {
+      const created = await makeUploadingMedia();
+
+      await service.recordTranscodingTriggerFailure(
+        created.id,
+        creatorId,
+        'Transcoding dispatch returned 503'
+      );
+
+      const after = await stored(created.id);
+      expect(after?.transcodingError).toBeNull();
+      expect(after?.transcodingErrorCode).toBeNull();
+    });
+
+    it('truncates the error message to the column limit', async () => {
       const created = await makeMedia();
 
       await service.recordTranscodingTriggerFailure(
@@ -870,8 +1066,10 @@ describe('MediaItemService', () => {
         'x'.repeat(5000)
       );
 
-      const after = await service.get(created.id, creatorId);
-      expect(after?.transcodingError?.length).toBe(2000);
+      const after = await stored(created.id);
+      expect(after?.transcodingError?.length).toBe(
+        TRANSCODING_ERROR_MAX_LENGTH
+      );
     });
 
     it('is creator-scoped — never touches another creator’s media', async () => {
@@ -884,7 +1082,7 @@ describe('MediaItemService', () => {
         'should not be written'
       );
 
-      const after = await service.get(created.id, creatorId);
+      const after = await stored(created.id);
       expect(after?.transcodingError).toBeNull();
     });
   });

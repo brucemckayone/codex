@@ -50,7 +50,9 @@ import {
 import {
   AlreadyPurchasedError,
   ContentNotPurchasableError,
+  CourseNotPurchasableError,
   ForbiddenError,
+  NotFoundError,
   PaymentProcessingError,
   PurchaseNotFoundError,
 } from '../errors';
@@ -95,10 +97,13 @@ describe('PurchaseService Integration', () => {
     sessionId: string,
     paymentIntentId: string
   ): Stripe.Response<Stripe.Checkout.Session> {
+    // Unique per call, as Stripe's are: checkout_sessions keeps every session
+    // id it records (UNIQUE), across tests and runs (Codex-2hxff.14).
+    const id = `${sessionId}_${crypto.randomUUID()}`;
     return {
-      id: sessionId,
+      id,
       object: 'checkout.session',
-      url: `https://checkout.stripe.com/c/pay/${sessionId}`,
+      url: `https://checkout.stripe.com/c/pay/${id}`,
       payment_intent: paymentIntentId,
       amount_total: 2999,
       currency: 'gbp',
@@ -270,6 +275,7 @@ describe('PurchaseService Integration', () => {
           contentType: 'video',
           mediaItemId: media.id,
           priceCents: 2999,
+          isPurchasable: true,
           tags: [],
         },
         userId
@@ -325,7 +331,13 @@ describe('PurchaseService Integration', () => {
           payment_intent_data: {
             metadata: { codex_env: 'test' },
           },
-        })
+          // Expires with its reservation (Codex-2hxff.14).
+          expires_at: expect.any(Number),
+        }),
+        // One key per reservation and Stripe Customer (Codex-2hxff.14).
+        {
+          idempotencyKey: expect.stringMatching(/^checkout_[0-9a-f-]{36}_cus_/),
+        }
       );
     });
 
@@ -363,6 +375,7 @@ describe('PurchaseService Integration', () => {
           contentType: 'video',
           mediaItemId: media.id,
           priceCents: 1999,
+          isPurchasable: true,
           tags: [],
         },
         userId
@@ -407,7 +420,8 @@ describe('PurchaseService Integration', () => {
       expect(mockStripe.checkout.sessions.create).toHaveBeenCalledWith(
         expect.objectContaining({
           customer: createdCustomerId,
-        })
+        }),
+        expect.anything()
       );
 
       // Regression: customer_email must NOT appear on the session payload.
@@ -457,6 +471,7 @@ describe('PurchaseService Integration', () => {
           contentType: 'video',
           mediaItemId: media.id,
           priceCents: 1999,
+          isPurchasable: true,
           tags: [],
         },
         userId
@@ -490,7 +505,8 @@ describe('PurchaseService Integration', () => {
       );
 
       expect(mockStripe.checkout.sessions.create).toHaveBeenCalledWith(
-        expect.objectContaining({ customer: cachedCustomerId })
+        expect.objectContaining({ customer: cachedCustomerId }),
+        expect.anything()
       );
       expect(mockStripe.customers.list).not.toHaveBeenCalled();
       expect(mockStripe.customers.create).not.toHaveBeenCalled();
@@ -528,6 +544,7 @@ describe('PurchaseService Integration', () => {
           contentType: 'video',
           mediaItemId: media.id,
           priceCents: 1999,
+          isPurchasable: true,
           tags: [],
         },
         userId
@@ -591,6 +608,7 @@ describe('PurchaseService Integration', () => {
           contentType: 'video',
           mediaItemId: media.id,
           priceCents: 1999,
+          isPurchasable: true,
           tags: [],
         },
         userId
@@ -615,6 +633,67 @@ describe('PurchaseService Integration', () => {
       // (No assertion on checkout.sessions.create here because prior tests
       // may have called it; instead we assert above that NotFoundError is
       // thrown — that branch returns before session.create is reached.)
+    });
+
+    // Codex-2hxff.64: a creator's removal archives their catalogue, and that
+    // is what takes it off sale. Only this status gate stops a new checkout.
+    it('refuses content taken off sale on a departure', async () => {
+      const paidContent = await contentService.create(
+        {
+          organizationId,
+          title: 'Taken off sale',
+          slug: createUniqueSlug('off-sale-checkout'),
+          contentType: 'written',
+          contentBody: 'Body',
+          priceCents: 1999,
+          tags: [],
+        },
+        userId
+      );
+      await seedReadyConnect(userId);
+      await contentService.publish(paidContent.id, userId);
+      await db
+        .update(schema.content)
+        .set({ status: 'archived', offSaleAt: new Date() })
+        .where(eq(schema.content.id, paidContent.id));
+
+      await expect(
+        purchaseService.createCheckoutSession(
+          {
+            contentId: paidContent.id,
+            successUrl: 'http://localhost:3000/success',
+            cancelUrl: 'http://localhost:3000/cancel',
+          },
+          otherUserId
+        )
+      ).rejects.toThrow(ContentNotPurchasableError);
+    });
+
+    it('refuses a course taken off sale on a departure (course checkout)', async () => {
+      const [course] = await db
+        .insert(schema.courses)
+        .values({
+          organizationId,
+          creatorId: userId,
+          slug: createUniqueSlug('off-sale-course'),
+          title: 'Course taken off sale',
+          status: 'archived',
+          offSaleAt: new Date(),
+          priceCents: 4999,
+        })
+        .returning({ id: schema.courses.id });
+      if (!course) throw new Error('failed course');
+
+      await expect(
+        purchaseService.createCourseCheckoutSession(
+          {
+            courseId: course.id,
+            successUrl: 'http://localhost:3000/success',
+            cancelUrl: 'http://localhost:3000/cancel',
+          },
+          otherUserId
+        )
+      ).rejects.toThrow(CourseNotPurchasableError);
     });
 
     it('throws ContentNotPurchasableError for free content', async () => {
@@ -664,6 +743,60 @@ describe('PurchaseService Integration', () => {
           otherUserId
         )
       ).rejects.toThrow(ContentNotPurchasableError);
+    });
+
+    // Codex-2hxff.32: validation now refuses 1p–99p, so only a row priced
+    // before that rule can reach checkout this way — written straight to the DB.
+    it('refuses content priced under the £1.00 minimum before reaching Stripe', async () => {
+      const media = await mediaService.create(
+        {
+          title: 'Cheap Video',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          fileSizeBytes: 1024 * 1024,
+        },
+        userId
+      );
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: 'hls/cheap-video/master.m3u8',
+          thumbnailKey: 'thumbnails/cheap-video.jpg',
+          durationSeconds: 60,
+        },
+        userId
+      );
+      const cheap = await contentService.create(
+        {
+          organizationId,
+          title: 'Cheap Tutorial',
+          slug: createUniqueSlug('cheap-tutorial'),
+          contentType: 'video',
+          mediaItemId: media.id,
+          isFree: false,
+          isPurchasable: true,
+          priceCents: 100,
+          tags: [],
+        },
+        userId
+      );
+      // Publishing paid content needs payouts set up, so the legacy row's
+      // published state is written directly too.
+      await db
+        .update(schema.content)
+        .set({ priceCents: 50, status: 'published', publishedAt: new Date() })
+        .where(eq(schema.content.id, cheap.id));
+
+      const attempt = purchaseService.createCheckoutSession(
+        {
+          contentId: cheap.id,
+          successUrl: 'http://localhost:3000/success',
+          cancelUrl: 'http://localhost:3000/cancel',
+        },
+        otherUserId
+      );
+      await expect(attempt).rejects.toThrow(ContentNotPurchasableError);
+      await expect(attempt).rejects.toThrow('below the £1.00 minimum');
     });
 
     it('throws ContentNotPurchasableError for unpublished content', async () => {
@@ -744,6 +877,7 @@ describe('PurchaseService Integration', () => {
           contentType: 'video',
           mediaItemId: media.id,
           priceCents: 4999,
+          isPurchasable: true,
           tags: [],
         },
         userId
@@ -2233,8 +2367,11 @@ describe('PurchaseService Integration', () => {
         status?: 'active' | 'terminated';
         terminatedAt?: Date | null;
         revenueType?: 'subscription' | 'content_purchase';
+        effectiveFrom?: Date;
+        effectiveUntil?: Date | null;
       } = {}
     ) {
+      const effectiveFrom = options.effectiveFrom ?? new Date();
       const [proposal] = await db
         .insert(schema.agreementProposals)
         .values({
@@ -2246,7 +2383,7 @@ describe('PurchaseService Integration', () => {
           proposedByRole: 'owner',
           proposedCreatorSharePercent: sharePercent,
           proposedTermMonths: null,
-          proposedEffectiveFrom: new Date(),
+          proposedEffectiveFrom: effectiveFrom,
           status: 'accepted',
           respondedAt: new Date(),
           respondedByUserId: creatorId,
@@ -2261,6 +2398,8 @@ describe('PurchaseService Integration', () => {
         status: options.status ?? 'active',
         terminatedAt: options.terminatedAt ?? null,
         currentProposalId: proposal.id,
+        ...(options.effectiveFrom ? { effectiveFrom } : {}),
+        effectiveUntil: options.effectiveUntil ?? null,
       });
       return { proposalId: proposal.id };
     }
@@ -2396,6 +2535,142 @@ describe('PurchaseService Integration', () => {
       expect(purchase.platformFeeCents).toBe(1000);
       expect(purchase.organizationFeeCents).toBe(900);
       expect(purchase.creatorPayoutCents).toBe(8100);
+    });
+
+    // Owner decision AGR-01 "Keeps paying" (Codex-2hxff.17).
+    it('WP-4: an agreement past its review date still sets the split', async () => {
+      const { content } = await seedPaidContent({
+        title: 'WP-4 review date passed',
+        priceCents: 10000,
+      });
+      const day = 24 * 60 * 60 * 1000;
+      await seedContentPurchaseAgreement(organizationId, userId, 7000, {
+        effectiveFrom: new Date(Date.now() - 60 * day),
+        effectiveUntil: new Date(Date.now() - day),
+      });
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      (mockStripe as any).transfers = {
+        create: vi.fn().mockResolvedValue({ id: 'tr_test' }),
+      };
+
+      const purchase = await purchaseService.completePurchase(
+        `pi_wp4_review_${Date.now()}`,
+        {
+          customerId: otherUserId,
+          contentId: content.id,
+          organizationId,
+          amountPaidCents: 10000,
+          currency: 'gbp',
+        }
+      );
+
+      // The agreement split, not the 900 / 8100 default.
+      expect(purchase.platformFeeCents).toBe(1000);
+      expect(purchase.organizationFeeCents).toBe(2700);
+      expect(purchase.creatorPayoutCents).toBe(6300);
+    });
+
+    // AGR-09 / no pro-rating: the payment's own time decides, so a sale made
+    // before the agreement ended still pays it when its webhook lands after.
+    it('WP-4: a sale paid before the agreement ended keeps its split when processed after', async () => {
+      const { content } = await seedPaidContent({
+        title: 'WP-4 late webhook',
+        priceCents: 10000,
+      });
+      const hour = 60 * 60 * 1000;
+      await seedContentPurchaseAgreement(organizationId, userId, 7000, {
+        effectiveFrom: new Date(Date.now() - 48 * hour),
+        status: 'terminated',
+        terminatedAt: new Date(Date.now() - hour),
+      });
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      (mockStripe as any).transfers = {
+        create: vi.fn().mockResolvedValue({ id: 'tr_test' }),
+      };
+
+      const purchase = await purchaseService.completePurchase(
+        `pi_wp4_late_${Date.now()}`,
+        {
+          customerId: otherUserId,
+          contentId: content.id,
+          organizationId,
+          amountPaidCents: 10000,
+          currency: 'gbp',
+          paidAt: new Date(Date.now() - 2 * hour),
+        }
+      );
+
+      expect(purchase.organizationFeeCents).toBe(2700);
+      expect(purchase.creatorPayoutCents).toBe(6300);
+    });
+
+    // Owner decision 2026-10-21 (Codex-2hxff.64 Q1): a checkout opened before
+    // the creator's agreement ended, and paid after, keeps the old split.
+    it('WP-4: the agreement in force when the checkout STARTED sets the split, not the one at payment', async () => {
+      const { content } = await seedPaidContent({
+        title: 'WP-4 checkout start',
+        priceCents: 10000,
+      });
+      const hour = 60 * 60 * 1000;
+      await seedContentPurchaseAgreement(organizationId, userId, 7000, {
+        effectiveFrom: new Date(Date.now() - 48 * hour),
+        status: 'terminated',
+        terminatedAt: new Date(Date.now() - hour),
+      });
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      (mockStripe as any).transfers = {
+        create: vi.fn().mockResolvedValue({ id: 'tr_test' }),
+      };
+
+      const started = await purchaseService.completePurchase(
+        `pi_wp4_offer_${Date.now()}`,
+        {
+          customerId: otherUserId,
+          contentId: content.id,
+          organizationId,
+          amountPaidCents: 10000,
+          currency: 'gbp',
+          offerAt: new Date(Date.now() - 2 * hour), // before the termination
+          paidAt: new Date(), // after it
+        }
+      );
+      expect(started.organizationFeeCents).toBe(2700);
+      expect(started.creatorPayoutCents).toBe(6300);
+    });
+
+    it('Codex-2hxff.64 Q1: a course purchase splits by the agreement in force when its checkout STARTED', async () => {
+      const [course] = await db
+        .insert(schema.courses)
+        .values({
+          organizationId,
+          creatorId: userId,
+          slug: createUniqueSlug('q1-course'),
+          title: 'Q1 checkout start',
+          status: 'published',
+          priceCents: 10000,
+        })
+        .returning({ id: schema.courses.id });
+      if (!course) throw new Error('failed course');
+      const hour = 60 * 60 * 1000;
+      await seedContentPurchaseAgreement(organizationId, userId, 7000, {
+        effectiveFrom: new Date(Date.now() - 48 * hour),
+        status: 'terminated',
+        terminatedAt: new Date(Date.now() - hour),
+      });
+
+      const started = await purchaseService.completeCoursePurchase(
+        `pi_q1_course_${Date.now()}`,
+        {
+          customerId: otherUserId,
+          courseId: course.id,
+          amountPaidCents: 10000,
+          currency: 'gbp',
+          offerAt: new Date(Date.now() - 2 * hour), // before the termination
+          paidAt: new Date(), // after it
+        }
+      );
+      expect(started.organizationFeeCents).toBe(2700);
+      expect(started.creatorPayoutCents).toBe(6300);
     });
 
     it('WP-4: subscription-type agreement does NOT apply to content_purchase split', async () => {
@@ -3865,10 +4140,12 @@ describe('PurchaseService Integration', () => {
       });
       // A fourth sale on salesOrg that we mark refunded directly in the DB
       // (processRefund needs Stripe; we're testing the listing/aggregation).
+      // Another buyer: a second completed purchase of content A by the same
+      // buyer is a duplicate payment, refunded at completion (Codex-2hxff.14).
       saleRefunded = await purchaseService.completePurchase(
         `pi_sales_refunded_${Date.now()}`,
         {
-          customerId: otherUserId,
+          customerId: userId,
           contentId: contentAId,
           organizationId: salesOrgId,
           amountPaidCents: 1000,
@@ -3951,10 +4228,12 @@ describe('PurchaseService Integration', () => {
       // Seed a disputed sale: completePurchase produces a 'completed' row,
       // then we mark it disputed at the DB level (status stays 'completed'
       // by design — see purchase-service.ts:1217 comment).
+      // The refunded sale's buyer: theirs no longer counts as owned, so this
+      // is a sale, not a duplicate payment (Codex-2hxff.14).
       const saleDisputed = await purchaseService.completePurchase(
         `pi_sales_disputed_${Date.now()}`,
         {
-          customerId: otherUserId,
+          customerId: userId,
           contentId: contentAId,
           organizationId: salesOrgId,
           amountPaidCents: 1000,
@@ -4065,11 +4344,14 @@ describe('PurchaseService Integration', () => {
       statsContentId = c.id;
 
       // Three completed @ 1000p + one refunded @ 1000p (refund 500p partial).
+      // Four buyers: a second completed purchase of the item by one buyer is
+      // a duplicate payment, refunded at completion (Codex-2hxff.14).
+      const buyers = await seedTestUsers(db, 4);
       for (let i = 0; i < 3; i++) {
         await purchaseService.completePurchase(
           `pi_stats_${i}_${Date.now()}_${Math.random()}`,
           {
-            customerId: otherUserId,
+            customerId: takeFirst(buyers.slice(i, i + 1), `stats buyer ${i}`),
             contentId: statsContentId,
             organizationId: statsOrgId,
             amountPaidCents: 1000,
@@ -4080,7 +4362,7 @@ describe('PurchaseService Integration', () => {
       const refunded = await purchaseService.completePurchase(
         `pi_stats_refund_${Date.now()}`,
         {
-          customerId: otherUserId,
+          customerId: takeFirst(buyers.slice(3), 'stats refund buyer'),
           contentId: statsContentId,
           organizationId: statsOrgId,
           amountPaidCents: 1000,
@@ -4976,10 +5258,11 @@ describe('PurchaseService Integration', () => {
         disputeReason: 'fraudulent',
       });
 
-      // Return shape — handler needs both fields
+      // Return shape — the handler reads all three
       expect(result).toEqual({
         userId: otherUserId,
         orgId: organizationId,
+        accessEnded: true,
       });
 
       // Access revoked — library query will omit this content
@@ -5054,6 +5337,7 @@ describe('PurchaseService Integration', () => {
       expect(first).toEqual({
         userId: otherUserId,
         orgId: organizationId,
+        accessEnded: true,
       });
 
       // Second dispute — must NOT throw and must return same scope so the
@@ -5066,6 +5350,7 @@ describe('PurchaseService Integration', () => {
       expect(second).toEqual({
         userId: otherUserId,
         orgId: organizationId,
+        accessEnded: true,
       });
 
       // First-write-wins on metadata — stripeDisputeId stays 'dp_first'.
@@ -5155,6 +5440,7 @@ describe('PurchaseService Integration', () => {
       vi.mocked(mockStripe.checkout.sessions.retrieve).mockResolvedValue({
         id: sessionId,
         status: 'complete',
+        payment_status: 'paid',
         payment_intent: paymentIntentId,
         metadata: {
           contentId: verifyContentId,
@@ -5171,10 +5457,15 @@ describe('PurchaseService Integration', () => {
         verifyUserId
       );
 
-      expect(result).toEqual({
-        sessionStatus: 'complete',
-        purchase: undefined, // No purchase record yet
-        content: undefined,
+      // Paid, and no purchase record yet: the page records it, and shows the
+      // item the session names meanwhile (Codex-2hxff.22).
+      expect(result.sessionStatus).toBe('complete');
+      expect(result.state).toBe('recording');
+      expect(result.purchase).toBeUndefined();
+      expect(result.content).toMatchObject({
+        id: verifyContentId,
+        title: 'Verify Test Content',
+        contentType: 'video',
       });
     });
 
@@ -5194,6 +5485,7 @@ describe('PurchaseService Integration', () => {
       vi.mocked(mockStripe.checkout.sessions.retrieve).mockResolvedValue({
         id: sessionId,
         status: 'complete',
+        payment_status: 'paid',
         payment_intent: paymentIntentId,
         metadata: {
           contentId: verifyContentId,
@@ -5209,11 +5501,185 @@ describe('PurchaseService Integration', () => {
       );
 
       expect(result.sessionStatus).toBe('complete');
+      expect(result.state).toBe('unlocked');
       expect(result.purchase).toBeDefined();
       expect(result.purchase?.contentId).toBe(verifyContentId);
       expect(result.purchase?.amountPaidCents).toBe(999);
       expect(result.content).toBeDefined();
       expect(result.content?.id).toBe(verifyContentId);
+      expect(result.duplicatePayment).toBeUndefined();
+    });
+
+    /**
+     * A second payment for an item the buyer owns (Codex-o4jvw). Rows are
+     * written directly, as completion records them. Each duplicate is written
+     * already REFUNDED, so the global `settleOwedDuplicates` sweep (pending
+     * duplicates only) never picks it up, and both rows are deleted after.
+     */
+    describe('a duplicate payment (Codex-o4jvw)', () => {
+      async function insertPurchase(
+        values: Partial<typeof schema.purchases.$inferInsert> & {
+          customerId: string;
+        }
+      ) {
+        return takeFirst(
+          await db
+            .insert(schema.purchases)
+            .values({
+              organizationId: verifyOrgId,
+              amountPaidCents: 999,
+              creatorPayoutCents: 999,
+              currency: 'gbp',
+              stripePaymentIntentId: `pi_verify_dup_${crypto.randomUUID()}`,
+              status: 'completed',
+              purchasedAt: new Date(),
+              ...values,
+            })
+            .returning(),
+          'purchase'
+        );
+      }
+
+      /** The buyer's first purchase, and a refunded duplicate of it. */
+      async function purchaseAndDuplicate(
+        target: { contentId: string } | { courseId: string }
+      ) {
+        const original = await insertPurchase({
+          customerId: verifyOtherUserId,
+          ...target,
+        });
+        const duplicate = await insertPurchase({
+          customerId: verifyOtherUserId,
+          ...target,
+          status: 'refunded',
+          refundedAt: new Date(),
+          duplicateOfPurchaseId: original.id,
+        });
+        return { original, duplicate };
+      }
+
+      async function removePurchases(ids: {
+        duplicate: string;
+        original: string;
+      }) {
+        // The duplicate first: `duplicate_of_purchase_id` is ON DELETE RESTRICT.
+        await db
+          .delete(schema.purchases)
+          .where(eq(schema.purchases.id, ids.duplicate));
+        await db
+          .delete(schema.purchases)
+          .where(eq(schema.purchases.id, ids.original));
+      }
+
+      function sessionFor(paymentIntentId: string, customerId: string) {
+        vi.mocked(mockStripe.checkout.sessions.retrieve).mockResolvedValue({
+          id: 'cs_test_verify_duplicate',
+          status: 'complete',
+          payment_status: 'paid',
+          payment_intent: paymentIntentId,
+          metadata: { customerId },
+        } as unknown as Stripe.Response<Stripe.Checkout.Session>);
+      }
+
+      it('flags the duplicate, still naming the content; the first purchase is not flagged', async () => {
+        const { original, duplicate } = await purchaseAndDuplicate({
+          contentId: verifyContentId,
+        });
+
+        sessionFor(duplicate.stripePaymentIntentId, verifyOtherUserId);
+        const forDuplicate = await purchaseService.verifyCheckoutSession(
+          'cs_test_verify_duplicate',
+          verifyOtherUserId
+        );
+        expect(forDuplicate.duplicatePayment).toBe(true);
+        expect(forDuplicate.state).toBe('duplicate');
+        expect(forDuplicate.purchase?.id).toBe(duplicate.id);
+        expect(forDuplicate.content?.title).toBe('Verify Test Content');
+
+        sessionFor(original.stripePaymentIntentId, verifyOtherUserId);
+        const forOriginal = await purchaseService.verifyCheckoutSession(
+          'cs_test_verify_duplicate',
+          verifyOtherUserId
+        );
+        expect(forOriginal.duplicatePayment).toBeUndefined();
+        expect(forOriginal.state).toBe('unlocked');
+        expect(forOriginal.purchase?.id).toBe(original.id);
+
+        await removePurchases({
+          duplicate: duplicate.id,
+          original: original.id,
+        });
+      });
+
+      it('names the course for a course purchase, and flags its duplicate', async () => {
+        const course = takeFirst(
+          await db
+            .insert(schema.courses)
+            .values({
+              organizationId: verifyOrgId,
+              creatorId: verifyUserId,
+              slug: createUniqueSlug('verify-dup-course'),
+              title: 'Verify Test Course',
+              status: 'published',
+              priceCents: 999,
+            })
+            .returning(),
+          'course'
+        );
+        const { original, duplicate } = await purchaseAndDuplicate({
+          courseId: course.id,
+        });
+
+        sessionFor(duplicate.stripePaymentIntentId, verifyOtherUserId);
+        const forDuplicate = await purchaseService.verifyCheckoutSession(
+          'cs_test_verify_duplicate',
+          verifyOtherUserId
+        );
+        expect(forDuplicate).toEqual({
+          sessionStatus: 'complete',
+          state: 'duplicate',
+          course: { id: course.id, title: 'Verify Test Course' },
+          duplicatePayment: true,
+        });
+
+        sessionFor(original.stripePaymentIntentId, verifyOtherUserId);
+        const forOriginal = await purchaseService.verifyCheckoutSession(
+          'cs_test_verify_duplicate',
+          verifyOtherUserId
+        );
+        expect(forOriginal).toEqual({
+          sessionStatus: 'complete',
+          state: 'unlocked',
+          course: { id: course.id, title: 'Verify Test Course' },
+        });
+
+        await removePurchases({
+          duplicate: duplicate.id,
+          original: original.id,
+        });
+      });
+
+      it("does not read another buyer's purchase for the session", async () => {
+        const { original, duplicate } = await purchaseAndDuplicate({
+          contentId: verifyContentId,
+        });
+
+        // The session's metadata says it is verifyUserId's; the row is not.
+        sessionFor(duplicate.stripePaymentIntentId, verifyUserId);
+        const result = await purchaseService.verifyCheckoutSession(
+          'cs_test_verify_duplicate',
+          verifyUserId
+        );
+        expect(result).toEqual({
+          sessionStatus: 'complete',
+          state: 'recording',
+        });
+
+        await removePurchases({
+          duplicate: duplicate.id,
+          original: original.id,
+        });
+      });
     });
 
     it('should return open status for incomplete sessions', async () => {
@@ -5235,6 +5701,7 @@ describe('PurchaseService Integration', () => {
       );
 
       expect(result.sessionStatus).toBe('open');
+      expect(result.state).toBe('open');
       expect(result.purchase).toBeUndefined();
       expect(result.content).toBeUndefined();
     });
@@ -5258,6 +5725,7 @@ describe('PurchaseService Integration', () => {
       );
 
       expect(result.sessionStatus).toBe('expired');
+      expect(result.state).toBe('expired');
     });
 
     it('should throw ForbiddenError when session belongs to different user', async () => {
@@ -5284,10 +5752,13 @@ describe('PurchaseService Integration', () => {
       ).rejects.toThrow('does not belong to authenticated user');
     });
 
-    it('should throw PaymentProcessingError for invalid session ID', async () => {
+    // A 404, as the route always documented: it was a 500, which the
+    // success page read as "try again" for a session that will never exist
+    // (Codex-2hxff.22).
+    it('should throw NotFoundError for a session Stripe does not know', async () => {
       const invalidSessionId = 'cs_invalid_session';
 
-      const stripeError = new Error('Invalid API key') as Error & {
+      const stripeError = new Error('No such checkout.session') as Error & {
         type?: string;
       };
       stripeError.type = 'StripeInvalidRequestError';
@@ -5298,7 +5769,171 @@ describe('PurchaseService Integration', () => {
 
       await expect(
         purchaseService.verifyCheckoutSession(invalidSessionId, verifyUserId)
-      ).rejects.toThrow(PaymentProcessingError);
+      ).rejects.toThrow(NotFoundError);
+    });
+
+    // Local development and production share one Stripe sandbox, so a
+    // session tagged for another environment is not this one's (Codex-2hxff.5).
+    it("should treat another environment's session as not found", async () => {
+      vi.mocked(mockStripe.checkout.sessions.retrieve).mockResolvedValue({
+        id: 'cs_test_other_env',
+        status: 'complete',
+        payment_status: 'paid',
+        payment_intent: 'pi_other_env',
+        metadata: { customerId: verifyUserId, codex_env: 'production' },
+      } as unknown as Stripe.Response<Stripe.Checkout.Session>);
+
+      await expect(
+        purchaseService.verifyCheckoutSession('cs_test_other_env', verifyUserId)
+      ).rejects.toThrow(NotFoundError);
+    });
+
+    it('should accept a session tagged for its own environment', async () => {
+      vi.mocked(mockStripe.checkout.sessions.retrieve).mockResolvedValue({
+        id: 'cs_test_own_env',
+        status: 'open',
+        payment_intent: null,
+        metadata: { customerId: verifyUserId, codex_env: 'test' },
+      } as unknown as Stripe.Response<Stripe.Checkout.Session>);
+
+      const result = await purchaseService.verifyCheckoutSession(
+        'cs_test_own_env',
+        verifyUserId
+      );
+
+      expect(result).toEqual({ sessionStatus: 'open', state: 'open' });
+    });
+
+    /**
+     * The state the success page acts on (Codex-2hxff.22). Each row is
+     * written directly for the other buyer, read, and deleted at once.
+     */
+    describe('the state the page acts on (Codex-2hxff.22)', () => {
+      async function stateFor(
+        values: Partial<typeof schema.purchases.$inferInsert>
+      ) {
+        const row = takeFirst(
+          await db
+            .insert(schema.purchases)
+            .values({
+              customerId: verifyOtherUserId,
+              contentId: verifyContentId,
+              organizationId: verifyOrgId,
+              amountPaidCents: 999,
+              creatorPayoutCents: 999,
+              currency: 'gbp',
+              stripePaymentIntentId: `pi_verify_state_${crypto.randomUUID()}`,
+              status: 'completed',
+              purchasedAt: new Date(),
+              ...values,
+            })
+            .returning(),
+          'purchase'
+        );
+        try {
+          vi.mocked(mockStripe.checkout.sessions.retrieve).mockResolvedValue({
+            id: 'cs_test_verify_state',
+            status: 'complete',
+            payment_status: 'paid',
+            payment_intent: row.stripePaymentIntentId,
+            metadata: { customerId: verifyOtherUserId },
+          } as unknown as Stripe.Response<Stripe.Checkout.Session>);
+          return await purchaseService.verifyCheckoutSession(
+            'cs_test_verify_state',
+            verifyOtherUserId
+          );
+        } finally {
+          await db
+            .delete(schema.purchases)
+            .where(eq(schema.purchases.id, row.id));
+        }
+      }
+
+      it('a refunded purchase is refunded, never confirmed', async () => {
+        const result = await stateFor({
+          status: 'refunded',
+          refundedAt: new Date(),
+        });
+        expect(result.state).toBe('refunded');
+      });
+
+      it('a purchase an open bank dispute holds is paused', async () => {
+        const result = await stateFor({ disputedAt: new Date() });
+        expect(result.state).toBe('paused');
+      });
+
+      it('an old row neither completed nor refunded is still recording, logged at error with an errorId', async () => {
+        // biome-ignore lint/suspicious/noExplicitAny: spy protected obs.error
+        const errorSpy = vi.spyOn((purchaseService as any).obs, 'error');
+        try {
+          const result = await stateFor({ status: 'failed' });
+          expect(result.state).toBe('recording');
+          expect(errorSpy).toHaveBeenCalledWith(
+            'Checkout session has a purchase it cannot confirm',
+            expect.objectContaining({
+              errorId: expect.any(String),
+              sessionId: 'cs_test_verify_state',
+              status: 'failed',
+            })
+          );
+        } finally {
+          errorSpy.mockRestore();
+        }
+      });
+
+      it('a complete session that is not paid is unpaid, and reads no row', async () => {
+        vi.mocked(mockStripe.checkout.sessions.retrieve).mockResolvedValue({
+          id: 'cs_test_verify_unpaid',
+          status: 'complete',
+          payment_status: 'unpaid',
+          payment_intent: `pi_verify_unpaid_${crypto.randomUUID()}`,
+          metadata: { customerId: verifyUserId },
+        } as unknown as Stripe.Response<Stripe.Checkout.Session>);
+
+        const result = await purchaseService.verifyCheckoutSession(
+          'cs_test_verify_unpaid',
+          verifyUserId
+        );
+
+        expect(result).toEqual({ sessionStatus: 'complete', state: 'unpaid' });
+      });
+    });
+
+    describe('retrievePaymentIntentCharge (Codex-2hxff.22)', () => {
+      it('expands the charge, and returns its id, the fee and when it was made', async () => {
+        vi.mocked(mockStripe.paymentIntents.retrieve).mockResolvedValueOnce({
+          application_fee_amount: 120,
+          latest_charge: { id: 'ch_verify_charge', created: 1_793_000_000 },
+        } as unknown as Stripe.Response<Stripe.PaymentIntent>);
+
+        await expect(
+          purchaseService.retrievePaymentIntentCharge('pi_verify_charge')
+        ).resolves.toEqual({
+          stripeChargeId: 'ch_verify_charge',
+          stripeApplicationFeeCents: 120,
+          chargedAt: new Date(1_793_000_000_000),
+        });
+        expect(mockStripe.paymentIntents.retrieve).toHaveBeenCalledWith(
+          'pi_verify_charge',
+          { expand: ['latest_charge'] }
+        );
+      });
+
+      it("throws a failure with Stripe's error as its cause, for the caller to judge", async () => {
+        const stripeError = Object.assign(new Error('Connection error'), {
+          type: 'StripeConnectionError',
+        });
+        vi.mocked(mockStripe.paymentIntents.retrieve).mockRejectedValueOnce(
+          stripeError
+        );
+
+        const thrown = await purchaseService
+          .retrievePaymentIntentCharge('pi_verify_charge_down')
+          .catch((error: unknown) => error);
+
+        expect(thrown).toBeInstanceOf(InternalServiceError);
+        expect((thrown as Error).cause).toBe(stripeError);
+      });
     });
 
     it('should handle metadata key correctly - camelCase customerId', async () => {
@@ -5435,6 +6070,7 @@ describe('PurchaseService Integration', () => {
           contentType: 'video',
           mediaItemId: media.id,
           priceCents,
+          isPurchasable: true,
           tags: [],
         },
         creatorUserId
@@ -6397,8 +7033,9 @@ describe('PurchaseService Integration', () => {
   // charge.refunded can arrive BEFORE checkout.session.completed. processRefund
   // used to find no row, WARN + return 200 → refund lost. It now self-heals via
   // ensurePurchaseDataPresent, which rebuilds the row from the Stripe checkout
-  // session. MINIMAL by design: no transfers/payouts fire (no funds ever moved),
-  // so this is independent of the after-transfer clawback policy (Codex-13v21).
+  // session. No transfers/payouts fire here (no funds ever moved): the later
+  // completion records them, from the real split (Codex-2hxff.68; covered in
+  // refund-before-payout.integration.test.ts).
   describe('processRefund — self-heal ordering race #4 (Codex-aa08z)', () => {
     // The self-heal validates session metadata against the SAME
     // checkoutSessionMetadataSchema the production webhook uses, whose
@@ -6485,9 +7122,9 @@ describe('PurchaseService Integration', () => {
       expect(row.status).toBe('refunded');
       expect(row.refundAmountCents).toBe(2999);
       expect(row.stripeRefundId).toBe('re_race_1');
-      // Fee columns carry a balancing default split (satisfies the CHECK
-      // amount = platform + org + creator), but crucially NO transfer executed
-      // and NO payouts ledger rows were written — the money never moved.
+      // Fee columns carry the sale's split (the CHECK amount = platform + org
+      // + creator holds), but crucially NO transfer executed and NO payouts
+      // ledger rows were written — the money never moved.
       expect(
         row.platformFeeCents + row.organizationFeeCents + row.creatorPayoutCents
       ).toBe(2999);

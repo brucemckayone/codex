@@ -32,7 +32,13 @@ export {
   pageImageKeysIn,
   pageImageObjectKeys,
 } from './page-image-keys';
-export { type ImageProcessingResult, ImageProcessingService } from './service';
+export {
+  type ImageProcessingResult,
+  ImageProcessingService,
+  // `ContentService.update` needs it too (Codex-kk9nv.5): a thumbnail URL in
+  // this content's own folders can only be written by an upload.
+  ownContentThumbnailFolder,
+} from './service';
 // `recordOrphansOrLog` (Codex-61zsk.10): the one guarded, never-throwing way to
 // queue an orphan record from a failure/removal path. `CourseJourneyService`
 // needs it directly — a page image's orphan candidates surface from a

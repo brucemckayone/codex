@@ -152,6 +152,50 @@ describe('Media', () => {
     expect(plain?.hasAttribute('sizes')).toBe(false);
   });
 
+  // Codex-61zsk.66: under reduced motion the clip's still IS the hero, so it
+  // keeps the picture's stored sizes rather than one large file. A clip's own
+  // poster is not the picture the sizes describe, so it gets none.
+  it('keeps the picture’s sizes for the still that stands in for a clip', () => {
+    const original = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: query.includes('reduce'),
+      media: query,
+      onchange: null,
+      addEventListener() {},
+      removeEventListener() {},
+      addListener() {},
+      removeListener() {},
+      dispatchEvent: () => false,
+    })) as typeof window.matchMedia;
+    try {
+      const srcset = '/x/sm.webp 200w, /x/md.webp 400w, /x/lg.webp 800w';
+      const clip = { playlistUrl: '/p.m3u8', posterUrl: '/poster/lg.webp' };
+      app = mount(Media, {
+        target: document.body,
+        props: { image: '/x/lg.webp', clip, srcset, sizes: '100vw' },
+      });
+      flushSync();
+      flushSync();
+      const still = document.body.querySelector('.hero-loop__still');
+      expect(still?.getAttribute('src')).toBe('/x/lg.webp');
+      expect(still?.getAttribute('srcset')).toBe(srcset);
+      expect(still?.getAttribute('sizes')).toBe('100vw');
+      unmount(app);
+
+      app = mount(Media, {
+        target: document.body,
+        props: { image: null, clip, srcset, sizes: '100vw' },
+      });
+      flushSync();
+      flushSync();
+      const poster = document.body.querySelector('.hero-loop__still');
+      expect(poster?.getAttribute('src')).toBe('/poster/lg.webp');
+      expect(poster?.hasAttribute('srcset')).toBe(false);
+    } finally {
+      window.matchMedia = original;
+    }
+  });
+
   // Codex-61zsk.53: a crop steered by the picture's focal point, and its
   // shape known before it loads.
   it('crops around the focal point it is given, and the centre without one', () => {

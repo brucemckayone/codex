@@ -10,7 +10,11 @@
  * - Successful handling → 200 with { received: true }
  */
 
-import { BaseService, NotFoundError } from '@codex/service-errors';
+import {
+  BaseService,
+  NotFoundError,
+  UnsupportedCurrencyError,
+} from '@codex/service-errors';
 import { createMockHonoContext, type MockHonoContext } from '@codex/test-utils';
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
@@ -127,6 +131,51 @@ describe('createWebhookHandler', () => {
       expect(mock._obs.warn).toHaveBeenCalledWith(
         expect.stringContaining('permanent error'),
         expect.objectContaining({ error: 'Subscription not found' })
+      );
+    });
+
+    // Codex-2hxff.23 PAY-25: the buyer has paid and nothing records it, so
+    // a person must act. Acknowledged (a redelivery changes nothing), but
+    // at error with an id, never the generic warn.
+    it('a payment refused for its currency → 200, logged at error with an errorId and the ids', async () => {
+      const handler = createWebhookHandler('Test', async () => {
+        throw new UnsupportedCurrencyError('usd', ['gbp'], {
+          stripePaymentIntentId: 'pi_test_1',
+        });
+      });
+      const { context, mock } = createContext();
+
+      const response = await handler(context);
+
+      expect(response.status).toBe(200);
+      expect(mock._obs.error).toHaveBeenCalledWith(
+        expect.stringContaining('unsupported currency'),
+        expect.objectContaining({
+          errorId: expect.any(String),
+          currency: 'usd',
+          eventId: 'evt_test_1',
+          stripePaymentIntentId: 'pi_test_1',
+        })
+      );
+      expect(mock._obs.warn).not.toHaveBeenCalledWith(
+        expect.stringContaining('permanent error'),
+        expect.anything()
+      );
+    });
+
+    it('finds the currency refusal under a wrapping cause', async () => {
+      const handler = createWebhookHandler('Test', async () => {
+        throw new Error('wrapped', {
+          cause: new UnsupportedCurrencyError('eur', ['gbp']),
+        });
+      });
+      const { context, mock } = createContext();
+
+      await handler(context);
+
+      expect(mock._obs.error).toHaveBeenCalledWith(
+        expect.stringContaining('unsupported currency'),
+        expect.objectContaining({ currency: 'eur' })
       );
     });
   });
@@ -275,7 +324,8 @@ describe('createWebhookHandler', () => {
         new Error(
           'Failed query: insert into "payouts" values ($1)\nparams: buyer@example.com'
         ),
-        { name: 'DrizzleQueryError', cause: pgError }
+        // No name: drizzle 0.44's DrizzleQueryError sets none (Codex-56l13).
+        { cause: pgError }
       );
       const { context, mock } = createContext();
 

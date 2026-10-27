@@ -14,10 +14,18 @@ import {
   createSlugSchema,
   priceCentsSchema,
   urlSchema,
+  userIdSchema,
   uuidSchema,
 } from '../primitives';
-import { paginationSchema } from '../shared/pagination-schema';
-import { createSearchQuerySchema } from '../shared/search-schema';
+import {
+  PAGINATION_MAX_PAGE,
+  paginationSchema,
+} from '../shared/pagination-schema';
+import {
+  createSearchQuerySchema,
+  hasNoNul,
+  SEARCH_MAX_QUERY_LENGTH,
+} from '../shared/search-schema';
 
 /**
  * Content Management Validation Schemas
@@ -156,7 +164,9 @@ export const createMediaItemSchema = z.object({
     .max(5 * 1024 * 1024 * 1024, 'File size cannot exceed 5GB'), // 5GB max
 
   // R2 storage path — optional, generated server-side if not provided.
-  // When provided (e.g. tests), validated to prevent path traversal.
+  // When provided (e.g. tests), validated to prevent path traversal here, and
+  // MediaItemService.create refuses any key outside the caller's own
+  // `{creatorId}/originals/` folder (Codex-58h6c).
   r2Key: z
     .string()
     .min(1, 'R2 key cannot be empty')
@@ -175,21 +185,19 @@ export const createMediaItemSchema = z.object({
 export type CreateMediaItemInput = z.infer<typeof createMediaItemSchema>;
 
 /**
- * Update Media Item Input
- * Used by transcoding service to update status, metadata, etc.
- * Also supports user-editable fields (title, description) via the studio UI.
+ * Update Media Item Input: what a creator may edit (PATCH /api/media/:id).
+ *
+ * Strict, so a body naming anything else is refused, not quietly trimmed.
+ * Status, keys and dimensions are written only by the upload and transcoding
+ * paths (Codex-l2c48.9): a creator setting `status: 'ready'` skipped the
+ * transcode, and the live status object never heard of the change.
  */
-export const updateMediaItemSchema = z.object({
-  title: z.string().min(1).max(255).optional(),
-  description: z.string().max(2000).optional().nullable(),
-  status: mediaStatusEnum.optional(),
-  durationSeconds: z.number().int().min(0).max(86400).optional(), // Max 24 hours
-  width: z.number().int().min(1).max(7680).optional(), // Max 8K width
-  height: z.number().int().min(1).max(4320).optional(), // Max 8K height
-  hlsMasterPlaylistKey: z.string().max(500).optional().nullable(),
-  thumbnailKey: z.string().max(500).optional().nullable(),
-  uploadedAt: z.date().optional(),
-});
+export const updateMediaItemSchema = z
+  .object({
+    title: z.string().min(1).max(255).optional(),
+    description: z.string().max(2000).optional().nullable(),
+  })
+  .strict();
 
 export type UpdateMediaItemInput = z.infer<typeof updateMediaItemSchema>;
 
@@ -197,8 +205,8 @@ export type UpdateMediaItemInput = z.infer<typeof updateMediaItemSchema>;
  * Body of `POST /api/media/:id/upload-complete`.
  *
  * Carries the CLIENT's own `loadedmetadata` measurement of the file it just
- * uploaded. `media_items.duration_seconds` is otherwise written only by
- * `MediaService.markAsReady` from the RunPod webhook, so the column stayed NULL
+ * uploaded. `media_items.duration_seconds` is otherwise written only by the
+ * RunPod completion webhook (TranscodingService), so the column stayed NULL
  * for the minutes between a creator finishing an upload and transcoding
  * completing — which is exactly when they are building the page that shows the
  * runtime badge.
@@ -208,9 +216,8 @@ export type UpdateMediaItemInput = z.infer<typeof updateMediaItemSchema>;
  * duration" and let the upload complete. A 400 here would lose the creator's
  * file after its bytes are already in R2.
  *
- * `min(1)`, unlike `updateMediaItemSchema`'s `min(0)`: a zero-length runtime is
- * not a runtime. Storing 0 paints a `0:00` badge, which is a lie, where NULL
- * correctly paints nothing.
+ * `min(1)`: a zero-length runtime is not a runtime. Storing 0 paints a
+ * `0:00` badge, which is a lie, where NULL correctly paints nothing.
  */
 export const uploadCompleteSchema = z
   .object({
@@ -425,15 +432,16 @@ export const createContentSchema = baseContentSchema
   )
   .refine(
     (data) => {
-      // Purchasable content requires a positive price (SPEC §6.1 — priceCents
-      // pairs with isPurchasable).
+      // Purchasable content requires a price (SPEC §6.1 — priceCents pairs
+      // with isPurchasable). `priceCentsSchema` already refuses 1p–99p, so any
+      // positive price that reaches here is at least £1.00.
       if (data.isPurchasable) {
         return !!data.priceCents && data.priceCents > 0;
       }
       return true;
     },
     {
-      message: 'Purchasable content requires a price greater than £0',
+      message: 'Purchasable content requires a price of at least £1.00',
       path: ['priceCents'],
     }
   )
@@ -584,7 +592,7 @@ export const updateContentSchema = baseContentSchema
       return !!data.priceCents && data.priceCents > 0;
     },
     {
-      message: 'Purchasable content requires a price greater than £0',
+      message: 'Purchasable content requires a price of at least £1.00',
       path: ['priceCents'],
     }
   )
@@ -657,6 +665,9 @@ export type PublishContentInput = z.infer<typeof publishContentSchema>;
  */
 export const sortOrderEnum = z.enum(['asc', 'desc']);
 
+/** The longest topic (category) slug: the `categories.slug` column width. */
+export const TOPIC_SLUG_MAX = 120;
+
 /**
  * Content query/filter schema
  * Used for listing and searching content
@@ -667,12 +678,21 @@ export const contentQuerySchema = paginationSchema.extend({
   status: contentStatusEnum.optional(),
   contentType: contentTypeEnum.optional(),
   accessType: contentAccessTypeEnum.optional(),
-  category: z.string().max(100).optional(),
+  // Up to the topic slug width, so a topic the public list accepts is accepted
+  // here too (100 refused a real 101-120 character slug on /explore's
+  // signed-in sorts). A NUL is refused: Postgres refuses NUL in text.
+  category: z
+    .string()
+    .max(TOPIC_SLUG_MAX)
+    .refine(hasNoNul, 'Category must not contain NUL')
+    .optional(),
   organizationId: uuidSchema.optional(),
-  creatorId: uuidSchema.optional(),
+  // A user id (BetterAuth text), not a uuid: uuidSchema refused every real
+  // one, so /explore's creator filter 400'd (Codex-osuqt).
+  creatorId: userIdSchema.optional(),
 
   // Search
-  search: createSearchQuerySchema(255),
+  search: createSearchQuerySchema(SEARCH_MAX_QUERY_LENGTH),
 
   // Sorting
   sortBy: z
@@ -725,32 +745,75 @@ export const mediaQuerySchema = paginationSchema.extend({
 
 export type MediaQueryInput = z.infer<typeof mediaQuerySchema>;
 
+/** The longest content slug a public read accepts. */
+export const PUBLIC_CONTENT_SLUG_MAX = 500;
+
 /**
- * Public content query schema (org-scoped)
- * Used for unauthenticated listing of published content within an organization.
- * Requires orgId or slug to prevent unscoped platform-wide enumeration.
+ * A content slug as a public read matches it. An exact-match identifier, so a
+ * NUL is refused, never stripped: `a\0b` rewritten to `ab` resolved a different
+ * piece, and `\0` rewritten to '' dropped the slug filter and answered a
+ * by-slug lookup with the catalogue. The web detail pages 404 a slug this
+ * refuses before sending it, so the API's 400 never surfaces as a 500.
+ */
+export const publicContentSlugSchema = z
+  .string()
+  .max(PUBLIC_CONTENT_SLUG_MAX)
+  .refine(hasNoNul, 'Slug must not contain NUL');
+
+/**
+ * An org id that keys a KV cache (Codex-osuqt). Postgres compares uuids
+ * case-insensitively, so `?orgId=<UPPERCASE>` read the real rows, but the
+ * cache keyed on the raw string: the rows were cached under a key that no
+ * publish or org-delete invalidation (which use the lowercase DB id) ever
+ * bumped, and were served stale for the full TTL. Lowercasing gives reads and
+ * invalidations one id.
+ */
+export const orgIdQuerySchema = uuidSchema.transform((id) => id.toLowerCase());
+
+/**
+ * A topic (category) slug as `?category=` carries it: unicode letters, numbers
+ * and hyphens (matching `slugify`), at most the `categories.slug` column width.
+ * A SECURITY control, not just validation: it forbids the public-cache-key
+ * delimiter ':' so a value like `x:feat:true` can't forge a different filter
+ * combo's cache slot (within-org cache poisoning), and it can't carry a NUL.
+ * ASCII-only would wrongly reject legit unicode slugs like `café-del-mar`.
+ * /explore normalises its `?category=` with this too (Codex-osuqt).
+ */
+export const topicSlugSchema = z
+  .string()
+  .max(TOPIC_SLUG_MAX)
+  .regex(/^[\p{L}\p{N}-]+$/u, 'Invalid category slug');
+
+/** The orders a public list can sort by. */
+const publicContentSortSchema = z.enum(['newest', 'oldest', 'title']);
+
+/**
+ * The most items one page of a public list holds. The API caps a larger
+ * `limit` to it; the remote query refuses one, since only our pages call it.
+ */
+export const PUBLIC_LIST_MAX_LIMIT = 50;
+
+/**
+ * Public content query schema (org- or creator-scoped)
+ * Used for unauthenticated listing of published content: within an
+ * organization (orgId), or by one creator across every org they publish in
+ * and their personal space (creatorId, for their public profile, Codex-osuqt).
+ * Requires orgId, creatorId or slug to prevent unscoped platform-wide
+ * enumeration.
  */
 export const publicContentQuerySchema = paginationSchema
   .extend({
-    orgId: uuidSchema.optional(),
-    slug: z.string().max(500).optional(),
+    orgId: orgIdQuerySchema.optional(),
+    slug: publicContentSlugSchema.optional(),
     contentType: contentTypeEnum.optional(),
     // Topic-category filter — matches a category slug in the same space (org).
     // Powers the landing "Browse by topic" and the /explore ?category= deep
-    // link. Constrained to the slug charset (unicode letters/numbers + hyphen,
-    // matching `slugify`) — this is a SECURITY control, not just validation: it
-    // forbids the public-cache-key delimiter ':' so a value like `x:feat:true`
-    // can't forge a different filter combo's cache slot (within-org cache
-    // poisoning). ASCII-only would wrongly reject legit unicode slugs like
-    // `café-del-mar`. Max 120 mirrors the `categories.slug` column width.
-    category: z
-      .string()
-      .max(120)
-      .regex(/^[\p{L}\p{N}-]+$/u, 'Invalid category slug')
-      .optional(),
-    search: createSearchQuerySchema(255),
-    sort: z.enum(['newest', 'oldest', 'title']).default('newest'),
-    creatorId: uuidSchema.optional(),
+    // link. See topicSlugSchema for why its charset is a security control.
+    category: topicSlugSchema.optional(),
+    search: createSearchQuerySchema(SEARCH_MAX_QUERY_LENGTH),
+    sort: publicContentSortSchema.default('newest'),
+    // A user id (BetterAuth text), not a uuid (Codex-osuqt).
+    creatorId: userIdSchema.optional(),
     // Creator-flagged featured filter — true returns only featured items,
     // false excludes them. Undefined (default) returns all published items.
     // Accepts boolean or stringified boolean (URL query strings).
@@ -761,16 +824,52 @@ export const publicContentQuerySchema = paginationSchema
       ])
       .optional(),
   })
-  .refine((data) => data.orgId || data.slug, {
-    message: 'Either orgId or slug must be provided',
+  .refine((data) => data.orgId || data.creatorId || data.slug, {
+    message: 'One of orgId, creatorId or slug must be provided',
     path: ['orgId'],
+  })
+  // A category lives in one space. Without an org the read is cross-org (a
+  // creator's profile spans their orgs and personal space), and matching
+  // only their personal categories would silently drop all their org content.
+  .refine((data) => !data.category || data.orgId, {
+    message: 'category requires orgId',
+    path: ['category'],
   })
   .transform((data) => ({
     ...data,
-    limit: Math.min(data.limit, 50),
+    limit: Math.min(data.limit, PUBLIC_LIST_MAX_LIMIT),
   }));
 
 export type PublicContentQueryInput = z.infer<typeof publicContentQuerySchema>;
+
+/**
+ * The arguments of the web `getPublicContent` remote query: an org's public
+ * list, called with JS values (numbers, booleans) rather than URL strings.
+ *
+ * Built from the same field rules as {@link publicContentQuerySchema}, never a
+ * copy of them (Codex-osuqt). A remote query is a public HTTP endpoint. An
+ * argument this refuses is a clean 400, but one it accepts and the API refuses
+ * comes back as an API 400 that SvelteKit turns into a 500, logged at error
+ * level. A hand-copied schema had drifted to accept a NUL slug and any page.
+ */
+export const publicContentArgsSchema = z.object({
+  orgId: orgIdQuerySchema,
+  slug: publicContentSlugSchema.optional(),
+  page: z.number().int().min(1).max(PAGINATION_MAX_PAGE).default(1).optional(),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(PUBLIC_LIST_MAX_LIMIT)
+    .default(20)
+    .optional(),
+  contentType: contentTypeEnum.optional(),
+  category: topicSlugSchema.optional(),
+  search: createSearchQuerySchema(SEARCH_MAX_QUERY_LENGTH),
+  sort: publicContentSortSchema.default('newest').optional(),
+  creatorId: userIdSchema.optional(),
+  featured: z.boolean().optional(),
+});
 
 /**
  * Discover content query schema (platform-wide)
@@ -780,12 +879,12 @@ export type PublicContentQueryInput = z.infer<typeof publicContentQuerySchema>;
 export const discoverContentQuerySchema = paginationSchema
   .extend({
     contentType: contentTypeEnum.optional(),
-    search: createSearchQuerySchema(255),
-    sort: z.enum(['newest', 'oldest', 'title']).default('newest'),
+    search: createSearchQuerySchema(SEARCH_MAX_QUERY_LENGTH),
+    sort: publicContentSortSchema.default('newest'),
   })
   .transform((data) => ({
     ...data,
-    limit: Math.min(data.limit, 50),
+    limit: Math.min(data.limit, PUBLIC_LIST_MAX_LIMIT),
   }));
 
 export type DiscoverContentQueryInput = z.infer<

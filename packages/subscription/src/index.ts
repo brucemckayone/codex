@@ -61,6 +61,7 @@ export {
   SubscriptionCheckoutError,
   SubscriptionNotFoundError,
   type SubscriptionServiceError,
+  TierChangePreviewExpiredError,
   TierHasSubscribersError,
   TierNotFoundError,
   TierSortOrderConflictError,
@@ -71,6 +72,7 @@ export {
 export { ConnectAccountService } from './services/connect-account-service';
 export {
   COURSE_SUBSCRIPTION_METADATA_TYPE,
+  type CourseSubscriptionCheckoutVerifyResult,
   CourseSubscriptionService,
   type CourseSubscriptionWebhookResult,
 } from './services/course-subscription-service';
@@ -83,6 +85,11 @@ export {
   calculateRevenueSplit,
   type RevenueSplit,
 } from './services/revenue-split';
+// A second subscription the user already had (Codex-2hxff.15)
+export {
+  cancelAndRefundDuplicate,
+  isDuplicateSubscription,
+} from './services/subscription-duplicates';
 export {
   type InvalidateForUserArgs,
   type InvalidateForUserOptions,
@@ -91,6 +98,9 @@ export {
   invalidateForUser,
   type WaitUntilFn,
 } from './services/subscription-invalidation';
+// Whether a payment paid for the current billing period: support's refund
+// preview (Codex-2hxff.28)
+export { isCurrentPeriodPayment } from './services/subscription-refund';
 export type {
   CreatorEarningsSummary,
   CreatorPayoutBreakdown,
@@ -101,6 +111,7 @@ export type {
   PropagateTierPriceOptions,
   PropagateTierPriceResult,
   SubscriberListItem,
+  SubscriptionCheckoutVerifyResult,
   TierChangePreview,
   WebhookEmailPayload,
   WebhookHandlerResult,

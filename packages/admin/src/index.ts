@@ -7,9 +7,11 @@
  * - Revenue analytics and customer statistics
  * - Cross-creator content management
  * - Customer support tools (access grants)
+ * - Platform support refunds and their queue (SupportService, Codex-2hxff.28)
  *
  * Core Principles:
- * 1. Organization scoping on ALL queries (platform owner sees only their org)
+ * 1. Organization scoping on every org-admin query. SupportService is the one
+ *    platform-wide service, scoped by the charge, behind `platform_owner`
  * 2. SQL aggregation for analytics (not application-level)
  * 3. Complimentary access via contentAccess table (not purchases)
  * 4. Extends BaseService for consistent patterns
@@ -38,12 +40,46 @@ export {
   AdminAnalyticsService,
   AdminContentManagementService,
   AdminCustomerManagementService,
+  type FailedRefundSettlement,
+  SupportService,
+  type SupportServiceConfig,
 } from './services';
 
 // ============================================================================
 // Types
 // ============================================================================
 
+// Support refunds: the platform-owner refund screen and queue (Codex-2hxff.28)
+export type {
+  AccessNotRestoredReason,
+  AccessRestorePrediction,
+  ChargebackRow,
+  ChargebackState,
+  ChargeDetail,
+  ChargeDetailSource,
+  ChargeSummary,
+  CreatorDebtItem,
+  CreatorDebtResolution,
+  FailedRefundItem,
+  FailedRefundResolution,
+  HistoryLine,
+  HistoryOutcome,
+  RefundBlock,
+  RefundPreview,
+  RefundPreviewLine,
+  RefundPreviewMethod,
+  RefundRequester,
+  RefundRow,
+  ResolvedCreatorDebt,
+  ResolvedFailedRefund,
+  Slice,
+  SupportBuyer,
+  SupportChargeKind,
+  SupportPerson,
+  SupportQueueCounts,
+  SupportRefundResult,
+  SupportRefundWindow,
+} from './support-types';
 export type {
   ActivityFeedItem,
   ActivityFeedResponse,
@@ -52,11 +88,13 @@ export type {
   AdminContentItem,
   AdminContentListOptions,
   AdminContentStatus,
+  AgreementShare,
   ContentPerformanceItem,
   ContentPerformanceQueryOptions,
   CreatorRevenueQueryOptions,
   CreatorRevenueSplitItem,
   CustomerDetails,
+  CustomerGrant,
   CustomerListItem,
   CustomerStats,
   CustomerWithStats,
@@ -75,6 +113,7 @@ export type {
   RevenueAnalyticsResponse,
   RevenueBlock,
   RevenueByDay,
+  RevenueKind,
   RevenueQueryOptions,
   RevenueStats,
   ServiceConfig,
@@ -92,12 +131,23 @@ export type {
 
 export {
   AdminServiceError,
+  AlreadySettledError,
   BusinessLogicError,
+  ChargeChangedError,
+  ChargeHasChargebackError,
   ConflictError,
+  ContentNotGrantableError,
+  CreatorPayoutsRequiredError,
   ForbiddenError,
   InternalServiceError,
   isAdminServiceError,
   NotFoundError,
+  NothingLeftToRefundError,
+  RefundAmountTooLargeError,
+  RefundInFlightError,
+  RefundKeySpentError,
+  RefundWindowClosedError,
+  StripeRefusedRefundError,
   ValidationError,
   wrapError,
 } from './errors';

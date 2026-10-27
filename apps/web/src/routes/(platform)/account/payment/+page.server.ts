@@ -1,5 +1,14 @@
+/**
+ * Account → Payments: the buyer's purchase history.
+ *
+ * A failed read is not "no purchases" (Codex-2hxff.22 WEB-05): it is logged
+ * and reported as `loadFailed`, and the page says "We couldn't load your
+ * purchases." with Retry, which re-runs this load (`account:purchases`).
+ */
 import { redirect } from '@sveltejs/kit';
+import { logger } from '$lib/observability';
 import { createServerApi } from '$lib/server/api';
+import { ApiError } from '$lib/server/errors';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({
@@ -7,7 +16,10 @@ export const load: PageServerLoad = async ({
   url,
   platform,
   cookies,
+  depends,
 }) => {
+  depends('account:purchases');
+
   if (!locals.user) {
     redirect(303, '/login?redirect=/account/payment');
   }
@@ -47,8 +59,13 @@ export const load: PageServerLoad = async ({
       filters: {
         status: status || null,
       },
+      loadFailed: false,
     };
-  } catch {
+  } catch (err) {
+    logger.warn('account-payment: purchase history failed', {
+      status: err instanceof ApiError ? err.status : undefined,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return {
       purchases: {
         items: [],
@@ -62,6 +79,7 @@ export const load: PageServerLoad = async ({
       filters: {
         status: status || null,
       },
+      loadFailed: true,
     };
   }
 };

@@ -25,7 +25,7 @@
  */
 
 import { CacheType, VersionedCache } from '@codex/cache';
-import type { Logger } from '@codex/observability';
+import type { ObservabilityClient } from '@codex/observability';
 import type { HonoEnv } from '@codex/shared-types';
 
 /**
@@ -140,23 +140,30 @@ export async function getCachedPublishedCourses<T>(
  * write that already succeeded.
  *
  * Unlike `bumpOrgContentVersion` this does NOT touch the slug-keyed org caches
- * (public info / stats / creators). Those report `contentCount` and member
- * counts, which a portal write does not change — a portal is a course plus a
- * page, and neither is content. Invalidating them here would throw away a
- * 30-minute branding cache on every cover upload for no gain.
+ * (public info / stats / creators) or the org content collection. For a cover
+ * or page write that is right: a portal is a course plus a page, neither is
+ * content, and invalidating them would throw away a 4-hour branding cache on
+ * every cover upload for no gain. A CURRICULUM save is different: it sets
+ * `courseOnly` on the practices it links, and the creators list and public
+ * content reads exclude course-only practices (Codex-ot6vj, Codex-039vo), so
+ * it does change them. That save needs the content fan-out too (Codex-u3vil).
  *
- * Call AFTER the DB write has succeeded, never before (@codex/cache rules).
+ * Call after the DB write, also when it throws: a write can commit and still
+ * report failure (Codex-kk9nv.16). Never before it (@codex/cache rules).
  */
 export function bumpOrgJourneysVersion(
   env: HonoEnv['Bindings'],
   executionCtx: ExecutionContext,
   organizationId: string | null | undefined,
-  obs?: Logger
+  obs?: ObservabilityClient
 ): void {
   if (!organizationId || !env.CACHE_KV) return;
+  // Given `obs`: the cache logs a failed invalidation only through its own
+  // client, so the `.catch` below never sees one.
   const cache = new VersionedCache({
     kv: env.CACHE_KV,
     waitUntil: (promise) => executionCtx.waitUntil(promise),
+    obs,
   });
   executionCtx.waitUntil(
     cache
