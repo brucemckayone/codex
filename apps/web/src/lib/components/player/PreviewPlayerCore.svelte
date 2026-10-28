@@ -92,13 +92,19 @@
     src: string | Promise<string | SignedStream>;
     /** Ask again for a signed stream that is running out; `null` ends the film. */
     renew?: () => Promise<SignedStream | null>;
-    /** Shown, letterboxed like the film, until the first frame. */
+    /** Shown until the first frame, as `stillFit` sits it. */
     poster?: string | null;
     title: string;
     /** One per language; the CC button appears only when there is one. */
     captions?: CaptionTrack[];
     /** `contain` letterboxes the film inside its frame; `cover` fills it. */
     fit?: 'contain' | 'cover';
+    /**
+     * How the poster sits until the first frame; `fit` when unset.
+     * `InlineFilm` passes its frame's own (`cover`), so a press never
+     * redraws the full-bleed still as a letterboxed strip.
+     */
+    stillFit?: 'contain' | 'cover';
     /**
      * `sound`: a press, so `play()` runs unmuted as the core mounts — mount
      * it in the press's own tick. `muted`: plays muted once the stream is
@@ -149,6 +155,7 @@
     title,
     captions = [],
     fit = 'contain',
+    stillFit,
     start = 'paused',
     limit,
     badge = false,
@@ -756,6 +763,7 @@
   aria-label={m.player_named({ title })}
   tabindex="-1"
   data-fit={fit}
+  data-still-fit={ready ? undefined : (stillFit ?? fit)}
   onkeydown={handleRootKey}
 >
   <MediaLiveRegion loading={!ready && !error} {error} loadingLabel={m.player_loading()}>
@@ -910,6 +918,15 @@
 
   .player[data-fit='cover'] .player__video {
     object-fit: cover;
+  }
+
+  /* Until the first frame the poster sits as the frame's own still did. */
+  .player[data-still-fit='cover'] .player__video {
+    object-fit: cover;
+  }
+
+  .player[data-still-fit='contain'] .player__video {
+    object-fit: contain;
   }
 
   .player__badge {
@@ -1184,7 +1201,9 @@
     }
   }
 
-  @container (max-width: 17rem) {
+  /* Below 17rem, never at it: Soft's centred portrait is exactly 17rem, and
+     its time fits. */
+  @container (width < 17rem) {
     .player__time {
       display: none;
     }

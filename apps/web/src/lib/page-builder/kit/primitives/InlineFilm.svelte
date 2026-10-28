@@ -137,6 +137,7 @@
         src={source}
         {renew}
         poster={clip.posterUrl}
+        stillFit="cover"
         {title}
         start="sound"
         takeFocus

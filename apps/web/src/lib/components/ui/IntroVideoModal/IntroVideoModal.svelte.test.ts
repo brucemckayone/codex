@@ -95,6 +95,45 @@ describe('the theatre', () => {
     );
   });
 
+  test('carries a sales page’s own brand when it moves out to the org layout', () => {
+    // The org layout holds the org's brand; a sales page sets its own over
+    // it on a nested root, which the move to `.org-layout` would leave behind.
+    const layout = document.createElement('div');
+    layout.className = 'org-layout';
+    layout.dataset.orgBrand = '';
+    const page = document.createElement('div');
+    page.dataset.orgBrand = '';
+    page.setAttribute('style', '--brand-color: #E4572E');
+    layout.appendChild(page);
+    document.body.appendChild(layout);
+
+    app = mount(IntroVideoModal, {
+      target: page,
+      props: { open: true, src: SRC, onclose: vi.fn() },
+    });
+    flushSync();
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+    expect(dialog?.parentElement).toBe(layout);
+    expect(dialog?.dataset.orgBrand).toBe('');
+    expect(dialog?.getAttribute('style')).toBe('--brand-color: #E4572E');
+  });
+
+  test('takes no brand of its own on a page that sets none', () => {
+    const layout = document.createElement('div');
+    layout.className = 'org-layout';
+    layout.dataset.orgBrand = '';
+    document.body.appendChild(layout);
+
+    app = mount(IntroVideoModal, {
+      target: layout,
+      props: { open: true, src: SRC, onclose: vi.fn() },
+    });
+    flushSync();
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+    expect(dialog?.hasAttribute('data-org-brand')).toBe(false);
+    expect(dialog?.getAttribute('style')).toBeNull();
+  });
+
   test('Escape and the close button dismiss it', () => {
     const { dialog, onclose } = openFrom();
     key(dialog.querySelector('.player__play') ?? dialog, { key: 'Escape' });

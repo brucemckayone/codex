@@ -110,6 +110,19 @@ async function settle() {
   flushSync();
 }
 
+describe('the poster until the first frame', () => {
+  test('sits as stillFit says, then the film takes the frame as fit says', () => {
+    const { root, video } = film({ stillFit: 'cover' });
+    const player = root.querySelector<HTMLElement>('.player');
+    expect(player?.dataset.stillFit).toBe('cover');
+    expect(player?.dataset.fit).toBe('contain');
+
+    video.dispatchEvent(new Event('loadeddata'));
+    flushSync();
+    expect(player?.dataset.stillFit).toBeUndefined();
+  });
+});
+
 describe('captions (P11)', () => {
   test('no CC button for a film with no caption tracks', () => {
     const { root, video } = film();

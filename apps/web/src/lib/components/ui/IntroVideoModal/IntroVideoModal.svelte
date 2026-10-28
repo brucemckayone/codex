@@ -160,9 +160,20 @@
    *
    * Moving a node drops the focus inside it, and the player may already have
    * taken focus as it mounted: it is handed back after the move.
+   *
+   * A sales page can set its own brand over the org's: its renderer root is
+   * a nested `[data-org-brand]` carrying only the overridden `--brand-*`
+   * inputs. The move would leave those behind, and the theatre's play button
+   * would turn the org's colour beside the page's, so they travel with it.
    */
   function portal(node: HTMLElement) {
     const target = document.querySelector('.org-layout') ?? document.body;
+    const brand = node.parentElement?.closest<HTMLElement>('[data-org-brand]');
+    const inputs = brand && brand !== target ? brand.getAttribute('style') : null;
+    if (inputs) {
+      node.setAttribute('style', inputs);
+      node.setAttribute('data-org-brand', '');
+    }
     const focused = node.contains(document.activeElement) ? document.activeElement : null;
     target.appendChild(node);
     if (focused instanceof HTMLElement) focused.focus({ preventScroll: true });
