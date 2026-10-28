@@ -565,6 +565,7 @@ describe('Purchase History API', () => {
       expect(json.data).toBeDefined();
       const purchase = json.data;
 
+      // What the buyer gets: the purchase itself, and when it happened.
       expect(purchase.id).toBe(purchaseId);
       expect(purchase.customerId).toBe(buyer.id);
       expect(purchase.contentId).toBe(contentId);
@@ -572,15 +573,26 @@ describe('Purchase History API', () => {
       expect(purchase.amountPaidCents).toBe(2999);
       expect(purchase.currency).toBe('gbp');
       expect(purchase.status).toBe('completed');
+      expect(purchase.stripePaymentIntentId).toMatch(/^pi_history_1_/);
+      for (const key of ['purchasedAt', 'createdAt', 'updatedAt']) {
+        expect(Number.isFinite(Date.parse(purchase[key]))).toBe(true);
+      }
 
-      // Verify revenue split fields
-      expect(purchase.platformFeeCents).toBeDefined();
-      expect(purchase.creatorPayoutCents).toBeDefined();
-      expect(
-        purchase.platformFeeCents +
-          purchase.organizationFeeCents +
-          purchase.creatorPayoutCents
-      ).toBe(2999);
+      // What the buyer never gets: the org's fee split and the internal
+      // bookkeeping fields (Codex-kn94e; owner 2026-10-27, "Hide it, same as
+      // subs").
+      for (const key of [
+        'platformFeeCents',
+        'organizationFeeCents',
+        'creatorPayoutCents',
+        'platformAgreementId',
+        'creatorOrgAgreementId',
+        'duplicateOfPurchaseId',
+        'disputeReason',
+        'stripeDisputeId',
+      ]) {
+        expect(purchase).not.toHaveProperty(key);
+      }
     });
 
     test('should return 401 when not authenticated', async () => {

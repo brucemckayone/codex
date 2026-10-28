@@ -469,6 +469,8 @@ describe('journey checkout success load', () => {
 
       expect(data.duplicate).toBeNull();
       expect(data.inactive).toBe(false);
+      // A failure a retry can fix keeps today's slow path (Codex-2hxff.81).
+      expect(data.notRecorded).toBeNull();
       expect(warnMock).toHaveBeenCalledWith(
         'journey-checkout-success: completion on arrival failed',
         expect.objectContaining({ sessionId: 'cs_test_abc', status: 503 })
@@ -476,6 +478,48 @@ describe('journey checkout success load', () => {
       expect(warnMock).not.toHaveBeenCalledWith(
         'journey-checkout-success: session verify failed',
         expect.anything()
+      );
+    });
+
+    // Codex-2hxff.81: refused for good, so the page says support is on it.
+    // Never forwarded, though entitled some other way: this payment is not
+    // recorded, and the grant read is not repeated.
+    it('a completion refused for good: notRecorded, and never forwarded', async () => {
+      offerMock.mockResolvedValueOnce({ ...OFFER, entitled: true });
+      purchaseVerifyMock.mockResolvedValueOnce({
+        sessionStatus: 'complete',
+        state: 'recording',
+      });
+      purchaseCompleteMock.mockRejectedValueOnce(
+        new ApiError(
+          500,
+          'The purchase could not be recorded',
+          'CHECKOUT_NOT_RECORDED',
+          {
+            sessionId: 'cs_test_abc',
+            errorId: '3f2a9c1e-7b4d-4e8a-9c2f-1a2b3c4d5e6f',
+          }
+        )
+      );
+      const { load } = await import('../+page.server');
+
+      const data = (await load(
+        makeEvent({ kind: 'purchase' }).event
+      )) as LoadData;
+
+      expect(data.notRecorded).toEqual({
+        kind: 'not_recorded',
+        reference: 'cs_test_abc / 3f2a9c1e-7b4d-4e8a-9c2f-1a2b3c4d5e6f',
+      });
+      expect(data.duplicate).toBeNull();
+      expect(data.inactive).toBe(false);
+      expect(offerMock).toHaveBeenCalledOnce();
+      expect(warnMock).toHaveBeenCalledWith(
+        'journey-checkout-success: the purchase could not be recorded',
+        {
+          sessionId: 'cs_test_abc',
+          errorId: '3f2a9c1e-7b4d-4e8a-9c2f-1a2b3c4d5e6f',
+        }
       );
     });
 

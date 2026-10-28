@@ -80,6 +80,7 @@ export {
   applyDuePendingPriceChange,
   PENDING_PRICE_FROM_KEY,
   PENDING_PRICE_ID_KEY,
+  PRICE_NOTICE_TIMEOUT_MS,
 } from './services/pending-price-change';
 export {
   calculateRevenueSplit,
@@ -111,6 +112,7 @@ export type {
   PropagateTierPriceOptions,
   PropagateTierPriceResult,
   SubscriberListItem,
+  SubscriberSubscription,
   SubscriptionCheckoutVerifyResult,
   TierChangePreview,
   WebhookEmailPayload,
@@ -118,6 +120,7 @@ export type {
 } from './services/subscription-service';
 export {
   type PayoutReleasedMailer,
+  SUBSCRIBER_HIDDEN_COLUMNS,
   SubscriptionService,
 } from './services/subscription-service';
 export {

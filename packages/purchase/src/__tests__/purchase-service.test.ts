@@ -27,6 +27,7 @@ import {
   createMockStripe,
   createTestConnectAccountInput,
   createTestMembershipInput,
+  createTestMoneyDeps,
   createUniqueSlug,
   type Database,
   seedTestUsers,
@@ -143,7 +144,11 @@ describe('PurchaseService Integration', () => {
     } as unknown as Stripe;
 
     purchaseService = new PurchaseService(
-      { ...config, portalConfigurationId: PORTAL_CONFIG_ID },
+      {
+        ...config,
+        ...createTestMoneyDeps(),
+        portalConfigurationId: PORTAL_CONFIG_ID,
+      },
       mockStripe
     );
 
@@ -1476,8 +1481,13 @@ describe('PurchaseService Integration', () => {
         paymentIntents: { retrieve: vi.fn() },
       } as unknown as Stripe;
       const service = new PurchaseService(
-        // biome-ignore lint/suspicious/noExplicitAny: test stub
-        { db, environment: 'test', feeConfig: stubFeeConfig as any },
+        {
+          db,
+          environment: 'test',
+          ...createTestMoneyDeps(),
+          // biome-ignore lint/suspicious/noExplicitAny: test stub
+          feeConfig: stubFeeConfig as any,
+        },
         stubStripe
       );
 
@@ -1676,8 +1686,13 @@ describe('PurchaseService Integration', () => {
         paymentIntents: { retrieve: vi.fn() },
       } as unknown as Stripe;
       const service = new PurchaseService(
-        // biome-ignore lint/suspicious/noExplicitAny: test stub
-        { db, environment: 'test', feeConfig: stubFeeConfig as any },
+        {
+          db,
+          environment: 'test',
+          ...createTestMoneyDeps(),
+          // biome-ignore lint/suspicious/noExplicitAny: test stub
+          feeConfig: stubFeeConfig as any,
+        },
         stubStripe
       );
 
@@ -1848,7 +1863,7 @@ describe('PurchaseService Integration', () => {
         const mailer = vi.fn();
         const svc = new PurchaseService(
           // biome-ignore lint/suspicious/noExplicitAny: test stub
-          { db, environment: 'test', mailer } as any,
+          { db, environment: 'test', ...createTestMoneyDeps(), mailer } as any,
           ss
         );
 
@@ -1879,7 +1894,7 @@ describe('PurchaseService Integration', () => {
         } = await setupDisconnectedContent('no-mailer');
         const svc = new PurchaseService(
           // biome-ignore lint/suspicious/noExplicitAny: test stub
-          { db, environment: 'test' } as any,
+          { db, environment: 'test', ...createTestMoneyDeps() } as any,
           ss
         );
 
@@ -1915,6 +1930,7 @@ describe('PurchaseService Integration', () => {
           {
             db,
             environment: 'test',
+            ...createTestMoneyDeps(),
             feeConfig: stubFeeWithOrg,
             mailer,
           } as unknown as ConstructorParameters<typeof PurchaseService>[0],
@@ -1948,8 +1964,13 @@ describe('PurchaseService Integration', () => {
           throw new Error('smtp down');
         });
         const svc = new PurchaseService(
-          // biome-ignore lint/suspicious/noExplicitAny: test stub
-          { db, environment: 'test', mailer: throwingMailer } as any,
+          {
+            db,
+            environment: 'test',
+            ...createTestMoneyDeps(),
+            mailer: throwingMailer,
+            // biome-ignore lint/suspicious/noExplicitAny: test stub
+          } as any,
           ss
         );
 
@@ -1975,7 +1996,7 @@ describe('PurchaseService Integration', () => {
         const mailer = vi.fn();
         const svc = new PurchaseService(
           // biome-ignore lint/suspicious/noExplicitAny: test stub
-          { db, environment: 'test', mailer } as any,
+          { db, environment: 'test', ...createTestMoneyDeps(), mailer } as any,
           ss
         );
 
@@ -2123,8 +2144,13 @@ describe('PurchaseService Integration', () => {
       } as unknown as Stripe;
 
       const multiService = new PurchaseService(
-        // biome-ignore lint/suspicious/noExplicitAny: test stub
-        { db, environment: 'test', feeConfig: stubFeeConfig as any },
+        {
+          db,
+          environment: 'test',
+          ...createTestMoneyDeps(),
+          // biome-ignore lint/suspicious/noExplicitAny: test stub
+          feeConfig: stubFeeConfig as any,
+        },
         stubStripe
       );
 
@@ -2236,8 +2262,13 @@ describe('PurchaseService Integration', () => {
         }),
       };
       const service = new PurchaseService(
-        // biome-ignore lint/suspicious/noExplicitAny: test stub
-        { db, environment: 'test', feeConfig: fees as any },
+        {
+          db,
+          environment: 'test',
+          ...createTestMoneyDeps(),
+          // biome-ignore lint/suspicious/noExplicitAny: test stub
+          feeConfig: fees as any,
+        },
         stripe
       );
 
@@ -2835,8 +2866,13 @@ describe('PurchaseService Integration', () => {
         },
       } as unknown as Stripe;
       const service = new PurchaseService(
-        // biome-ignore lint/suspicious/noExplicitAny: test stub
-        { db, environment: 'test', feeConfig: stubFeeConfig as any },
+        {
+          db,
+          environment: 'test',
+          ...createTestMoneyDeps(),
+          // biome-ignore lint/suspicious/noExplicitAny: test stub
+          feeConfig: stubFeeConfig as any,
+        },
         stubStripe
       );
 
@@ -2988,8 +3024,13 @@ describe('PurchaseService Integration', () => {
         refunds: { list: listRefunds },
       } as unknown as Stripe;
       const service = new PurchaseService(
-        // biome-ignore lint/suspicious/noExplicitAny: test stub
-        { db, environment: 'test', feeConfig: stubFeeConfig as any },
+        {
+          db,
+          environment: 'test',
+          ...createTestMoneyDeps(),
+          // biome-ignore lint/suspicious/noExplicitAny: test stub
+          feeConfig: stubFeeConfig as any,
+        },
         stubStripe
       );
 
@@ -3130,8 +3171,13 @@ describe('PurchaseService Integration', () => {
         },
       } as unknown as Stripe;
       const partialService = new PurchaseService(
-        // biome-ignore lint/suspicious/noExplicitAny: test stub
-        { db, environment: 'test', feeConfig: stubFeeConfig as any },
+        {
+          db,
+          environment: 'test',
+          ...createTestMoneyDeps(),
+          // biome-ignore lint/suspicious/noExplicitAny: test stub
+          feeConfig: stubFeeConfig as any,
+        },
         stubStripe
       );
 
@@ -3343,8 +3389,13 @@ describe('PurchaseService Integration', () => {
         },
       } as unknown as Stripe;
       const sentinelService = new PurchaseService(
-        // biome-ignore lint/suspicious/noExplicitAny: test stub
-        { db, environment: 'test', feeConfig: stubFeeConfig as any },
+        {
+          db,
+          environment: 'test',
+          ...createTestMoneyDeps(),
+          // biome-ignore lint/suspicious/noExplicitAny: test stub
+          feeConfig: stubFeeConfig as any,
+        },
         stubStripe
       );
 
@@ -3511,8 +3562,13 @@ describe('PurchaseService Integration', () => {
         },
       } as unknown as Stripe;
       const pendingService = new PurchaseService(
-        // biome-ignore lint/suspicious/noExplicitAny: test stub
-        { db, environment: 'test', feeConfig: stubFeeConfig as any },
+        {
+          db,
+          environment: 'test',
+          ...createTestMoneyDeps(),
+          // biome-ignore lint/suspicious/noExplicitAny: test stub
+          feeConfig: stubFeeConfig as any,
+        },
         stubStripe
       );
 
@@ -3682,8 +3738,13 @@ describe('PurchaseService Integration', () => {
         refunds: { create: vi.fn(), list: vi.fn() },
       } as unknown as Stripe;
       const landedService = new PurchaseService(
-        // biome-ignore lint/suspicious/noExplicitAny: test stub
-        { db, environment: 'test', feeConfig: stubFeeConfig as any },
+        {
+          db,
+          environment: 'test',
+          ...createTestMoneyDeps(),
+          // biome-ignore lint/suspicious/noExplicitAny: test stub
+          feeConfig: stubFeeConfig as any,
+        },
         stubStripe
       );
 
@@ -4593,7 +4654,7 @@ describe('PurchaseService Integration', () => {
 
     it('refuses to open a portal without the locked configuration — never the account default', async () => {
       const unlocked = new PurchaseService(
-        { db, environment: 'test' },
+        { db, environment: 'test', ...createTestMoneyDeps() },
         mockStripe
       );
       const create = vi.mocked(
@@ -5007,7 +5068,7 @@ describe('PurchaseService Integration', () => {
       });
 
       const failingService = new PurchaseService(
-        { db: failingDb, environment: 'test' },
+        { db: failingDb, environment: 'test', ...createTestMoneyDeps() },
         mockStripe
       );
 
@@ -5270,10 +5331,14 @@ describe('PurchaseService Integration', () => {
         await purchaseService.verifyPurchase(content.id, otherUserId)
       ).toBe(false);
 
-      // disputedAt set; purchase.status unchanged (still 'completed')
-      const updated = await purchaseService.getPurchase(
-        purchase.id,
-        otherUserId
+      // disputedAt set; purchase.status unchanged (still 'completed'). The
+      // row itself: the buyer's getPurchase leaves the dispute's id and
+      // reason out (Codex-kn94e).
+      const updated = takeFirst(
+        await db
+          .select()
+          .from(schema.purchases)
+          .where(eq(schema.purchases.id, purchase.id))
       );
       expect(updated.disputedAt).not.toBeNull();
       expect(updated.stripeDisputeId).toBe('dp_test_123');
@@ -6138,8 +6203,13 @@ describe('PurchaseService Integration', () => {
         paymentIntents: { retrieve: vi.fn() },
       } as unknown as Stripe;
       const service = new PurchaseService(
-        // biome-ignore lint/suspicious/noExplicitAny: test stub
-        { db, environment: 'test', feeConfig: stubFeeConfig as any },
+        {
+          db,
+          environment: 'test',
+          ...createTestMoneyDeps(),
+          // biome-ignore lint/suspicious/noExplicitAny: test stub
+          feeConfig: stubFeeConfig as any,
+        },
         stubStripe
       );
 
@@ -6242,8 +6312,13 @@ describe('PurchaseService Integration', () => {
         paymentIntents: { retrieve: vi.fn() },
       } as unknown as Stripe;
       const service = new PurchaseService(
-        // biome-ignore lint/suspicious/noExplicitAny: test stub
-        { db, environment: 'test', feeConfig: stubFeeConfig as any },
+        {
+          db,
+          environment: 'test',
+          ...createTestMoneyDeps(),
+          // biome-ignore lint/suspicious/noExplicitAny: test stub
+          feeConfig: stubFeeConfig as any,
+        },
         stubStripe
       );
 
@@ -6359,8 +6434,13 @@ describe('PurchaseService Integration', () => {
         paymentIntents: { retrieve: vi.fn() },
       } as unknown as Stripe;
       const service = new PurchaseService(
-        // biome-ignore lint/suspicious/noExplicitAny: test stub
-        { db, environment: 'test', feeConfig: stubFeeConfig as any },
+        {
+          db,
+          environment: 'test',
+          ...createTestMoneyDeps(),
+          // biome-ignore lint/suspicious/noExplicitAny: test stub
+          feeConfig: stubFeeConfig as any,
+        },
         stubStripe
       );
 
@@ -6428,7 +6508,7 @@ describe('PurchaseService Integration', () => {
         },
       } as unknown as Stripe;
       const service = new PurchaseService(
-        { db, environment: 'test' },
+        { db, environment: 'test', ...createTestMoneyDeps() },
         stubStripe
       );
 
@@ -6492,8 +6572,13 @@ describe('PurchaseService Integration', () => {
         },
       } as unknown as Stripe;
       const service = new PurchaseService(
-        // biome-ignore lint/suspicious/noExplicitAny: test stub
-        { db, environment: 'test', feeConfig: stubFeeConfig as any },
+        {
+          db,
+          environment: 'test',
+          ...createTestMoneyDeps(),
+          // biome-ignore lint/suspicious/noExplicitAny: test stub
+          feeConfig: stubFeeConfig as any,
+        },
         stubStripe
       );
 
@@ -6652,8 +6737,13 @@ describe('PurchaseService Integration', () => {
         paymentIntents: { retrieve: vi.fn() },
       } as unknown as Stripe;
       const service = new PurchaseService(
-        // biome-ignore lint/suspicious/noExplicitAny: test stub
-        { db, environment: 'test', feeConfig: stubFeeConfig as any },
+        {
+          db,
+          environment: 'test',
+          ...createTestMoneyDeps(),
+          // biome-ignore lint/suspicious/noExplicitAny: test stub
+          feeConfig: stubFeeConfig as any,
+        },
         stubStripe
       );
 
@@ -6724,8 +6814,13 @@ describe('PurchaseService Integration', () => {
         paymentIntents: { retrieve: vi.fn() },
       } as unknown as Stripe;
       const service = new PurchaseService(
-        // biome-ignore lint/suspicious/noExplicitAny: test stub
-        { db, environment: 'test', feeConfig: stubFeeConfig as any },
+        {
+          db,
+          environment: 'test',
+          ...createTestMoneyDeps(),
+          // biome-ignore lint/suspicious/noExplicitAny: test stub
+          feeConfig: stubFeeConfig as any,
+        },
         stubStripe
       );
 
@@ -6855,8 +6950,13 @@ describe('PurchaseService Integration', () => {
 
       function serviceWith(stripe: Stripe) {
         return new PurchaseService(
-          // biome-ignore lint/suspicious/noExplicitAny: test stub
-          { db, environment: 'test', feeConfig: platformFees as any },
+          {
+            db,
+            environment: 'test',
+            ...createTestMoneyDeps(),
+            // biome-ignore lint/suspicious/noExplicitAny: test stub
+            feeConfig: platformFees as any,
+          },
           stripe
         );
       }

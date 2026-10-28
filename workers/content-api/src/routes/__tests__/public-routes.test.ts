@@ -300,6 +300,60 @@ describe('GET /api/content/public/categories — cache write survives', () => {
     expect(categorySpies.listPublicForOrg).toHaveBeenCalledTimes(1);
   });
 
+  // Codex-yjyju: a slot cached with no base kept its null covers for the 2h
+  // TTL after the binding was set.
+  it('builds the covers afresh once the CDN base is set, not after the TTL', async () => {
+    categorySpies.listPublicForOrg.mockResolvedValue([
+      {
+        id: '4d000000-0000-4000-8000-0000000000c2',
+        name: 'Breath',
+        slug: 'breath',
+        description: null,
+        icon: null,
+        sortOrder: 0,
+        coverImageKey: 'categories/c2/cover',
+      },
+    ]);
+    const path = `/api/content/public/categories?orgId=${ORG_ID}`;
+    const coverOf = async (res: Response) =>
+      ((await res.json()) as { data: Array<{ coverImageUrl: string | null }> })
+        .data[0]?.coverImageUrl;
+
+    const unset = await dispatch(path, { R2_PUBLIC_URL_BASE: undefined });
+    const set = await dispatch(path);
+
+    expect(await coverOf(unset)).toBeNull();
+    expect(await coverOf(set)).toBe(
+      `${R2_PUBLIC_URL_BASE}/categories/c2/cover/md.webp`
+    );
+    // The slot holds the key, so the fix is a cache HIT: the URL is built
+    // after the read, and the list is not read again.
+    expect(categorySpies.listPublicForOrg).toHaveBeenCalledTimes(1);
+  });
+
+  it('never sends the raw cover key', async () => {
+    categorySpies.listPublicForOrg.mockResolvedValue([
+      {
+        id: '4d000000-0000-4000-8000-0000000000c3',
+        name: 'Rest',
+        slug: 'rest',
+        description: null,
+        icon: null,
+        sortOrder: 0,
+        coverImageKey: 'categories/c3/cover',
+      },
+    ]);
+    const path = `/api/content/public/categories?orgId=${ORG_ID}`;
+
+    const miss = await dispatch(path);
+    const hit = await dispatch(path);
+
+    for (const res of [miss, hit]) {
+      const [category] = ((await res.json()) as { data: object[] }).data;
+      expect(category).not.toHaveProperty('coverImageKey');
+    }
+  });
+
   // Org delete invalidates under the lowercase DB id, so an uppercase read must
   // key the same slot, or it caches where no invalidation reaches.
   it('keys an uppercase org id as the lowercase one', async () => {

@@ -53,6 +53,7 @@ export {
 export {
   AlreadyPurchasedError,
   BusinessLogicError,
+  CheckoutNotRecordedError,
   ConflictError,
   ContentNotPurchasableError,
   CourseAlreadyOwnedError,
@@ -100,10 +101,12 @@ export {
   FeeConfigService,
   type FeeConfigUpdate,
   type FeeContext,
+  type FeeResolver,
   type PlatformFeeConfigUpdate,
 } from './services/fee-config-service';
 // Service
 export {
+  type BuyerPurchase,
   isDuplicatePayment,
   type PurchaseMailer,
   PurchaseService,
@@ -137,9 +140,10 @@ export {
   type StripeCustomerCollision,
   type UserCustomerMatch,
 } from './services/stripe-customer-integrity';
+// The content-purchase read other domains go through (rule A8, Codex-2hxff.55)
+export { verifyPurchase } from './services/verify-purchase';
 // Stripe client factory
 export {
-  createLazyStripeClient,
   createStripeClient,
   verifyWebhookSignature,
 } from './stripe-client';

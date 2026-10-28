@@ -16,6 +16,7 @@ import { randomUUID } from 'node:crypto';
 import { organizations, payouts as payoutsTable } from '@codex/database/schema';
 import {
   createMockStripe,
+  createTestMoneyDeps,
   createTestOrganizationInput,
   createUniqueSlug,
   seedTestUsers,
@@ -43,7 +44,10 @@ describe('SubscriptionService — creator earnings (WP7)', () => {
     [creatorId, otherCreatorId] = await seedTestUsers(db, 2);
 
     const stripe = createMockStripe() as unknown as Stripe;
-    service = new SubscriptionService({ db, environment: 'test' }, stripe);
+    service = new SubscriptionService(
+      { db, environment: 'test', ...createTestMoneyDeps() },
+      stripe
+    );
 
     const orgA = takeFirst(
       await db

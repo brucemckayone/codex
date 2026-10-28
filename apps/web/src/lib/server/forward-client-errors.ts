@@ -25,7 +25,14 @@ export async function forwardClientErrors<T>(
     return await run();
   } catch (err) {
     if (ApiError.isApiError(err) && err.status >= 400 && err.status < 500) {
-      error(err.status, { message: err.message, code: err.code });
+      // Only `details.reason`, and only a string, goes on: never the rest of
+      // `details`.
+      const reason = (err.details as { reason?: unknown } | undefined)?.reason;
+      error(err.status, {
+        message: err.message,
+        code: err.code,
+        ...(typeof reason === 'string' && { reason }),
+      });
     }
     throw err;
   }

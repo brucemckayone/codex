@@ -1,4 +1,8 @@
-import { createSlugSchema } from '@codex/validation';
+import {
+  boundSearchParam,
+  createSlugSchema,
+  gateSearchQuery,
+} from '@codex/validation';
 import { json } from '@sveltejs/kit';
 import { ApiError } from '$lib/api/errors';
 import { createServerApi } from '$lib/server/api';
@@ -19,7 +23,7 @@ type ServerApi = ReturnType<typeof createServerApi>;
  *   Answering with every org's content would put other orgs' work in this
  *   org's palette, so content is not searched. Creators are still fetched:
  *   the org worker scopes them by the slug itself, so they can only be this
- *   org's. (It does not filter them by the query yet: Codex-pd8m1.)
+ *   org's.
  */
 type SearchScope =
   | { kind: 'org'; orgId: string; slug: string }
@@ -81,8 +85,8 @@ function searchContent(
 }
 
 // Creators belong to an org: a slug no org has has none, and asking would
-// only 404. A slug whose lookup failed may still have them. (The worker does
-// not filter them by the query yet: Codex-pd8m1.)
+// only 404. A slug whose lookup failed may still have them. The worker
+// matches `search` against each creator's name and username (Codex-pd8m1).
 function searchCreators(
   api: ServerApi,
   scope: SearchScope,
@@ -93,7 +97,13 @@ function searchCreators(
 }
 
 export const GET: RequestHandler = async ({ url, platform, cookies }) => {
-  const q = url.searchParams.get('q')?.slice(0, 200) ?? '';
+  // The palette's own search floor, again here for a caller that skips it: a
+  // one- or two-character term gives every search a sequential scan
+  // (Codex-k618q), and the workers' rate limit cannot see a visitor behind
+  // this server's hop. So a short term answers empty and calls no worker.
+  // Normalised as the workers' schema does (NUL dropped, then trimmed) BEFORE
+  // the floor: `ab%00` is three characters here but `ab` there.
+  const q = gateSearchQuery(boundSearchParam(url.searchParams.get('q'), 200));
   const scopeSlug = parseScopeSlug(url.searchParams.get('scope'));
   const limit = 5;
 
@@ -144,6 +154,8 @@ export const GET: RequestHandler = async ({ url, platform, cookies }) => {
     creatorsRes.status === 'fulfilled'
       ? (creatorsRes.value?.items ?? []).map((c) => ({
           name: c.name,
+          // The palette links to the profile by it (Codex-ynktj).
+          username: c.username ?? null,
           avatarUrl: c.avatarUrl ?? null,
         }))
       : [];

@@ -16,7 +16,7 @@
  * - PurchaseService - Queries purchases from database
  */
 
-import type { Purchase } from '@codex/purchase';
+import type { BuyerPurchase } from '@codex/purchase';
 import type { HonoEnv } from '@codex/shared-types';
 import { createIdParamsSchema, purchaseQuerySchema } from '@codex/validation';
 import { PaginatedResult, procedure } from '@codex/worker-utils';
@@ -80,11 +80,13 @@ purchases.get(
  * {
  *   "data": { ...purchase }
  * }
+ * The purchase as its buyer reads it: never the fee split, the agreements it
+ * was paid under, `duplicateOfPurchaseId` or the dispute's Stripe id and
+ * reason (Codex-kn94e; `BuyerPurchase`).
  *
  * Error Responses:
  * - 401 Unauthorized: Not authenticated
- * - 403 Forbidden: Purchase belongs to another customer
- * - 404 Not Found: Purchase doesn't exist
+ * - 404 Not Found: Purchase doesn't exist, or belongs to another customer
  *
  * Security:
  * - Requires authentication
@@ -98,7 +100,7 @@ purchases.get(
   procedure({
     policy: { auth: 'required' },
     input: { params: createIdParamsSchema() },
-    handler: async (ctx): Promise<Purchase> => {
+    handler: async (ctx): Promise<BuyerPurchase> => {
       return await ctx.services.purchase.getPurchase(
         ctx.input.params.id,
         ctx.user.id

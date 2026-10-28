@@ -134,9 +134,15 @@ describe('Bi-party (orgless) payout flows', () => {
     // collection-time chained modifier; calling it inside a running test body
     // throws "Calling the test function inside another test function" and, with
     // CI bail:1, aborts the entire e2e:api suite (Codex-730tq.9).
+    //
+    // Skipped in CI until Codex-chh3e repairs it. It invents pi_test_* and
+    // ch_test_* ids, so the checkout writes no payout rows (paymentIntents
+    // .retrieve 404s) and the refund finds no charge at Stripe. The missing
+    // STRIPE_WEBHOOK_SECRET_PAYMENT used to skip it there; the job now sets
+    // it for 12-purchase-refund-round-trip, which uses real Stripe objects.
     const bookingSecret = process.env.STRIPE_WEBHOOK_SECRET_BOOKING;
     const paymentSecret = process.env.STRIPE_WEBHOOK_SECRET_PAYMENT;
-    if (!bookingSecret || !paymentSecret) {
+    if (!bookingSecret || !paymentSecret || process.env.CI === 'true') {
       skip();
       return;
     }

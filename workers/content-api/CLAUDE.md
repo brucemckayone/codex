@@ -46,6 +46,16 @@ the builder needs a bump there.
 A key with no CDN base is sent as a null URL and logged once per request as
 `r2_public_base.missing`, by `toPublicItems` and the single `toPublicItem`
 alike; both take `ctx.obs` as a required argument.
+Never cache a URL built from `R2_PUBLIC_URL_BASE` under a slot that is not
+keyed on it: a missing or wrong base then serves for the whole TTL after the
+binding is fixed (Codex-yjyju). Cache the KEY and build the URL after the
+read where the route sees the key (the org list's `toWire`; the topic
+categories, slot `public:topics:v2`). The journey card lists
+(`/api/journeys/courses`, `/api/journeys/published`) get URLs from
+`CourseJourneyService`, so their slot types end in `cdnBaseSlot(base)`
+(`cdn-base-slot.ts`), a required argument the cache helper also hands to the
+fetcher. All three log `r2_public_base.missing` on every request with no base
+(categories only when a cover key is present).
 `GET /api/content/browse` (signed-in) sends the same item (Codex-1bdx0).
 
 | Method | Path | Policy | Notes |

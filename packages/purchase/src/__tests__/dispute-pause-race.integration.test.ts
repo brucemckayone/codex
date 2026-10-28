@@ -31,6 +31,7 @@ import {
 import {
   createMockStripe,
   createTestContentInput,
+  createTestMoneyDeps,
   createUniqueSlug,
   type Database,
   seedTestUsers,
@@ -95,7 +96,7 @@ describe('a dispute pause racing a win', () => {
   beforeAll(async () => {
     db = setupTestDatabase();
     service = new PurchaseService(
-      { db, environment: 'test' },
+      { db, environment: 'test', ...createTestMoneyDeps() },
       createMockStripe()
     );
     [buyerId, creatorId] = await seedTestUsers(db, 2);
@@ -285,7 +286,7 @@ describe('a dispute pause racing a win', () => {
         // parks on the sale.
         pause = track(
           new PurchaseService(
-            { db: pauser.db, environment: 'test' },
+            { db: pauser.db, environment: 'test', ...createTestMoneyDeps() },
             createMockStripe()
           ).processDispute(sale.paymentIntentId, {
             stripeDisputeId: sale.stripeDisputeId,
@@ -294,7 +295,7 @@ describe('a dispute pause racing a win', () => {
         await untilWaiting(pauser.pid, holder, 'purchases', pause);
         // The webhook's win: its record waits on the pause's read.
         const winService = new PurchaseService(
-          { db: winner.db, environment: 'test' },
+          { db: winner.db, environment: 'test', ...createTestMoneyDeps() },
           createMockStripe()
         );
         win = track(

@@ -22,6 +22,7 @@ import {
 import { ConflictError } from '@codex/service-errors';
 import {
   createMockStripe,
+  createTestMoneyDeps,
   createTestOrganizationInput,
   createTestSubscriptionInput,
   createTestTierInput,
@@ -100,7 +101,10 @@ describe('changeTier while a payment dispute is open (Codex-2hxff.60)', () => {
 
   beforeEach(() => {
     stripe = createMockStripe();
-    service = new SubscriptionService({ db, environment: 'test' }, stripe);
+    service = new SubscriptionService(
+      { db, environment: 'test', ...createTestMoneyDeps() },
+      stripe
+    );
   });
 
   // Subscriptions restrict their user, organisation and tier, so go first.

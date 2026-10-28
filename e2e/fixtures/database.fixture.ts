@@ -17,6 +17,7 @@ import { closeDbPool, type DatabaseWs, dbWs } from '@codex/database';
 import { ObservabilityClient } from '@codex/observability';
 import { OrganizationService } from '@codex/organization';
 import { createStripeClient, PurchaseService } from '@codex/purchase';
+import { createTestMoneyDeps } from '@codex/test-utils';
 
 export interface DatabaseFixture {
   db: DatabaseWs;
@@ -62,7 +63,10 @@ export function createDatabaseFixture(): DatabaseFixture {
       db: db,
       r2: r2Client,
       obs,
-      purchaseService: new PurchaseService({ db, environment: 'test' }, stripe),
+      purchaseService: new PurchaseService(
+        { db, environment: 'test', ...createTestMoneyDeps() },
+        stripe
+      ),
     }),
   };
 }

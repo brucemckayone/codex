@@ -17,7 +17,11 @@ import {
   terminateAgreementsOnDeparture,
   withdrawProposalsOnDeparture,
 } from '@codex/agreements';
-import { isReservedSubdomain, PAGINATION } from '@codex/constants';
+import {
+  isReservedSubdomain,
+  PAGINATION,
+  STUDIO_ROLES,
+} from '@codex/constants';
 import {
   isUniqueViolation,
   listedCreatorConditions,
@@ -68,6 +72,7 @@ import {
   isNull,
   ne,
   or,
+  type SQL,
   sql,
 } from 'drizzle-orm';
 import {
@@ -124,6 +129,21 @@ export const READABLE_ORGANIZATION_COLUMNS = {
   Exclude<keyof Organization, keyof ReadableOrganization>,
   false
 >;
+
+/**
+ * Narrows an org's creators list to the members whose name or username
+ * contains `search`, case-insensitively (Codex-pd8m1). None when there is no
+ * search. A subquery, as `listedCreatorConditions`' account check is, so the
+ * count, which reads memberships alone, agrees with the list. `\`, `%` and `_`
+ * are escaped so they match themselves.
+ */
+function creatorNameMatches(search: string | undefined): SQL[] {
+  if (!search) return [];
+  const pattern = `%${search.replace(/[\\%_]/g, '\\$&')}%`;
+  return [
+    sql`exists (select 1 from ${users} where ${users.id} = ${organizationMemberships.userId} and (${users.name} ilike ${pattern} or ${users.username} ilike ${pattern}))`,
+  ];
+}
 
 /**
  * Organization Service Class
@@ -646,13 +666,15 @@ export class OrganizationService extends BaseService {
    * Only active members with owner/admin/creator roles are included.
    *
    * @param slug - Organization slug
-   * @param pagination - Optional pagination params { page, limit }
+   * @param query - Optional { page, limit, search }. `search` keeps only the
+   *   creators whose name or username contains it (case-insensitive), and the
+   *   total counts only those (Codex-pd8m1).
    * @returns Paginated list of public creator profiles with content counts
    * @throws {OrganizationNotFoundError} If organization doesn't exist
    */
   async getPublicCreators(
     slug: string,
-    pagination?: { page: number; limit: number }
+    query?: { page: number; limit: number; search?: string }
   ): Promise<
     PaginatedListResponse<{
       id: string;
@@ -677,18 +699,22 @@ export class OrganizationService extends BaseService {
       }[];
     }>
   > {
-    const { page = 1, limit = PAGINATION.DEFAULT } = pagination ?? {};
+    const { page = 1, limit = PAGINATION.DEFAULT, search } = query ?? {};
     const { limit: queryLimit, offset } = withPagination({ page, limit });
 
     try {
       const org = await this.findOrgIdBySlugOrThrow(slug);
+      const listedWhere = and(
+        this.activeCreatorWhere(org.id),
+        ...creatorNameMatches(search)
+      );
 
       // Run count + members queries concurrently (both depend on org.id but not each other)
       const [countResult, members] = await Promise.all([
         this.db
           .select({ totalCount: count() })
           .from(organizationMemberships)
-          .where(this.activeCreatorWhere(org.id)),
+          .where(listedWhere),
         this.db
           .select({
             userId: users.id,
@@ -717,7 +743,7 @@ export class OrganizationService extends BaseService {
               isNull(content.deletedAt)
             )
           )
-          .where(this.activeCreatorWhere(org.id))
+          .where(listedWhere)
           .groupBy(
             users.id,
             organizationMemberships.id,
@@ -889,6 +915,13 @@ export class OrganizationService extends BaseService {
       role: string;
       status: string;
       joinedAt: Date;
+      /**
+       * Their platform role can enter the creators' Studio (`STUDIO_ROLES`),
+       * so they can hold a revenue-share agreement (Codex-2hxff.76). A
+       * boolean, never the role itself: other members needn't learn who is a
+       * platform admin.
+       */
+      hasCreatorAccount: boolean;
     }>
   > {
     try {
@@ -928,6 +961,7 @@ export class OrganizationService extends BaseService {
           role: organizationMemberships.role,
           status: organizationMemberships.status,
           joinedAt: organizationMemberships.createdAt,
+          platformRole: users.role,
         })
         .from(organizationMemberships)
         .innerJoin(users, eq(organizationMemberships.userId, users.id))
@@ -961,6 +995,7 @@ export class OrganizationService extends BaseService {
           role: m.role,
           status: m.status,
           joinedAt: m.joinedAt,
+          hasCreatorAccount: STUDIO_ROLES.has(m.platformRole),
         })),
         pagination: {
           page: query.page,

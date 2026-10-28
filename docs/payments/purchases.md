@@ -76,7 +76,14 @@ still buy it outright.
      creation time, so 31 is sent;
    - an idempotency key per reservation (below) and Stripe Customer.
 3. Success and cancel URLs must be on an allow-listed host
-   (`checkoutRedirectUrlSchema`).
+   (`checkoutRedirectUrlSchema`). The schema is the same in every
+   environment, so it also accepts the development hosts (localhost,
+   127.0.0.1, lvh.me) and plain http, which e2e uses. **In production**,
+   ecom-api also refuses those, with a 400 naming the field, before it asks
+   Stripe for anything (`isProductionRedirectUrl`, `Codex-2hxff.79`). That
+   covers content, course and course-plan checkouts, and the billing portal's
+   return link. Any `ENVIRONMENT` other than `development`, `test`, `dev` or
+   `staging`, a missing one included, counts as production.
 
 ### One checkout at a time
 
@@ -206,6 +213,22 @@ committed is logged as exactly that, with an errorId; a transient one returns
 failure after the commit never reaches the buyer as an error. The purchase is
 recorded, the page unlocks it, and the webhook finishes what is left.
 
+On the page path, a failure **before** the commit is one of three kinds:
+- **One a retry can fix** is a 503, "not yet". The page checks again.
+- **One no retry changes** (an unsupported currency, an item gone), or a
+  skipped session (bad metadata, no amount), where the re-read finds no row
+  of ours: it is logged at error with an errorId, which alerts support. It is
+  answered as `500 CHECKOUT_NOT_RECORDED`, whose details are the session id
+  and that errorId and nothing of the refusal's (`Codex-2hxff.81`).
+- **One whose re-read fails** answers with the original error, because the
+  webhook's row may be there.
+
+The page path's charge lookup (`retrievePaymentIntentCharge`) logs a Stripe
+failure with an errorId. A blip (no connection, a rate limit, Stripe's 5xx)
+is logged at warn; anything else, a wrong key included, at error. The Stripe
+error stays the cause, so the 503-or-carry-on rule in step 3 is unchanged
+(`Codex-2hxff.80`).
+
 ### A second payment for an owned item
 
 One open checkout per item makes this rare. It can still happen: a session
@@ -293,6 +316,15 @@ the purchase is usually recorded before the buyer arrives.
     library.
   - **The page never polls open-endedly**, because every check is a billed
     request. This rule covers the content, course and subscription pages.
+- **When nothing will record the payment,** because the completion answered
+  `CHECKOUT_NOT_RECORDED` (above), the page says so at once (owner decision
+  2026-10-27, "Say we're on it"; `Codex-2hxff.81`): "Your payment went
+  through, but we couldn't finish setting up your purchase. We've been
+  alerted and will sort it out. You don't need to pay again." with Contact
+  support (`supportMailto`) and Go to library. It stops checking, because
+  each check would ask again and alert support again. This covers the
+  content pages (organisation and creator) and the course page. Any other
+  failed completion keeps the late copy above.
 - **No email is promised or sent** beyond the one receipt per purchase.
 - **A purchase that is no longer active,** refunded or paused by a bank
   dispute, gets one plain notice: "This purchase is no longer active.", with
@@ -329,7 +361,13 @@ alone.
   with `withPagination`; the total counts both. Each item says its `kind`
   (`content` or `course`) and carries that item's id and title; the other pair
   is `null`.
-- `GET /purchases/:id` returns 404 for someone else's purchase.
+- `GET /purchases/:id` returns 404 for someone else's purchase. It never
+  sends the buyer the fee split (platform, organisation and creator amounts),
+  either agreement id, `duplicateOfPurchaseId`, or the dispute's Stripe id and
+  reason (owner decision 2026-10-27, "Hide it, same as subs";
+  `Codex-kn94e`). `getPurchase` leaves those columns out
+  (`BUYER_HIDDEN_COLUMNS`), as subscriptions do. `disputedAt` stays, as on
+  the list.
 - `GET /checkout/verify` only reveals a session to the buyer who started it,
   and `POST /checkout/complete` acts only on the signed-in buyer's own
   session, in this environment.
@@ -410,8 +448,8 @@ Support then settles it one of two ways (owner decisions 2026-10-24, Q5):
      - **No retry will run it.** Its delivery died, or Stripe refused it on
        every try. It is checked with Stripe before the settlement's
        transaction opens (`settleUnfinishedRefundSteps`). If Stripe made its
-       reversal, it is recorded `done`, and so re-paid, since that is true
-       whatever support decides. If not, the settlement cancels it inside its
+       reversal, it is recorded `done` if the step has not moved since the
+       check, and so re-paid, since that is true whatever support decides. If not, the settlement cancels it inside its
        transaction, only if the step has not moved since the check. So a
        refused settlement leaves it for a redelivery to finish, and a step a
        redelivery tried again meanwhile is not cancelled unchecked.
@@ -426,7 +464,9 @@ Support then settles it one of two ways (owner decisions 2026-10-24, Q5):
        there is no tool yet for a person to settle it.
      - **Nothing starts after the settlement.** A clawback step cannot start
        once the refund is settled, because its claim reads the refund under a
-       lock.
+       lock. A delivery already running cannot change the step afterwards; a
+       reversal of it that lands is held for support
+       ([refund-reversal-record.md](refund-reversal-record.md) §4 step 7).
   3. **A debt the payee already paid** (`creator_absorbed`,
      `manually_reversed`) gets a re-pay row too; one the platform wrote off
      (`platform_absorbed`) gets nothing. The refund's open debts close as
@@ -631,6 +671,7 @@ The dispute endpoint needs `charge.dispute.funds_withdrawn` and
 | Database or Stripe outage during completion, refund or dispute | 500; Stripe retries; the handler is idempotent |
 | Webhook delivered twice | Second delivery is a no-op (unique payment intent; deterministic transfer keys; unique ledger rows) |
 | Webhook slow or failing when the buyer returns | The success page records the purchase; the webhook later records nothing twice |
+| Paid, and the completion is refused for good | Error line with an errorId (support alerted); the page says "we're on it" and stops checking (`CHECKOUT_NOT_RECORDED`) |
 | Payee not payable yet | Pending ledger row; drained when they become payable |
 | Transfer fails | Failed row with its charge id; retried by the drains |
 | Charge id lookup fails | 500 and retry; never complete without it |

@@ -37,6 +37,7 @@ import {
   cancelUnclaimedStep,
   chargebacksFor,
   failedRefundRepayBlock,
+  findLandedReversal,
   listClawableRefunds,
   MAX_CLAWBACK_ATTEMPTS,
   type RepayBlockReason,
@@ -143,7 +144,7 @@ export async function repayDispute(
           ? await findLandedReversal(deps, slice.stripeTransferId, record.id)
           : undefined;
       if (landed) {
-        const done = await recordLanded(deps, record, landed);
+        const done = await recordLanded(deps, record, version, landed);
         if (!done) {
           busy++;
           continue;
@@ -577,7 +578,9 @@ export async function settleUnfinishedRefundSteps(
         record.id
       );
       if (landed) {
-        if (await recordLanded(deps, record, landed)) {
+        // Not recorded if it moved since it was read: a delivery has it, so
+        // the settlement refuses it as still running.
+        if (await recordLanded(deps, record, version, landed)) {
           await settleIfFullyReversed(deps, payout.id);
           result.landed++;
         }
@@ -633,38 +636,16 @@ function unleased(now: Date): SQL | undefined {
 }
 
 /**
- * The reversal Stripe made for this step, if any: every reversal the engine
- * makes names its step in `payout_reversal_id`.
- */
-async function findLandedReversal(
-  deps: ClawbackDeps,
-  transferId: string,
-  payoutReversalId: string
-): Promise<{ id: string } | undefined> {
-  let startingAfter: string | undefined;
-  for (;;) {
-    const page = await deps.stripe.transfers.listReversals(transferId, {
-      limit: 100,
-      ...(startingAfter ? { starting_after: startingAfter } : {}),
-    });
-    const found = page.data.find(
-      (reversal) => reversal.metadata?.payout_reversal_id === payoutReversalId
-    );
-    if (found) return { id: found.id };
-    const last = page.data.at(-1);
-    if (!page.has_more || !last) return undefined;
-    startingAfter = last.id;
-  }
-}
-
-/**
- * Record the reversal Stripe made as the step's outcome. Returns the step if
- * it is now `done`, by this call or a concurrent one; undefined if it moved
- * to anything else, which the caller retries.
+ * Record the reversal Stripe made as the step's outcome, if the step is still
+ * the version that was read: the compare-and-set every path that settles a
+ * step uses (Codex-2hxff.72). Returns the step if it is now `done`, by this
+ * call or another; undefined if it moved to anything else (a delivery claimed
+ * it since), which the caller retries.
  */
 async function recordLanded(
   deps: ClawbackDeps,
   record: PayoutReversal,
+  version: string,
   landed: { id: string }
 ): Promise<PayoutReversal | undefined> {
   const [recorded] = await deps.db
@@ -679,7 +660,8 @@ async function recordLanded(
     .where(
       and(
         eq(payoutReversals.id, record.id),
-        inArray(payoutReversals.status, ['pending', 'failed'])
+        inArray(payoutReversals.status, ['pending', 'failed']),
+        atVersion(version)
       )
     )
     .returning();
@@ -775,6 +757,11 @@ function stepVersion() {
   return sql<string>`(extract(epoch from ${payoutReversals.updatedAt}) * 1000000)::bigint::text`;
 }
 
+/** The step is still the `stepVersion` that was read. */
+function atVersion(version: string): SQL {
+  return sql`(extract(epoch from ${payoutReversals.updatedAt}) * 1000000)::bigint = ${version}::bigint`;
+}
+
 /**
  * Cancel a step Stripe has no reversal for, if no delivery holds it and it is
  * still the version that was checked: compare-and-set (money LOW-B). A step
@@ -795,7 +782,7 @@ async function cancelUnfinished(
         eq(payoutReversals.id, stepId),
         inArray(payoutReversals.status, ['pending', 'failed']),
         unleased(now),
-        sql`(extract(epoch from ${payoutReversals.updatedAt}) * 1000000)::bigint = ${version}::bigint`
+        atVersion(version)
       )
     )
     .returning();

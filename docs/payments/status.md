@@ -27,8 +27,9 @@ lockdown (`.4`) and environment tagging (`.5`) ("Include both"). Follow-ups:
 `0098`), `Codex-2hxff.36` (dropping the retired Connect pin column), and the
 pre-merge review's findings, `Codex-2hxff.37`–`.46`. Of those, `.37` (an
 organisation with no active owner had no payee, so its slice was dropped) was
-fixed by PR 2 below. The production checks to run around these releases
-(R1–R7) are in [release-checklist.md](release-checklist.md).
+fixed by PR 2 below. The production check still open for these releases
+(R7) is in [release-checklist.md](release-checklist.md); R1–R6 are in its git
+history.
 
 | Bead | P | What is not true yet | Spec |
 |---|---|---|---|
@@ -40,7 +41,8 @@ fixed by PR 2 below. The production checks to run around these releases
 | `Codex-2hxff.33` | P2 | A fee increase applies 30 days after an email; a decrease at once | [fees-and-splits](fees-and-splits.md#fee-configuration) |
 | `Codex-2hxff.34` | P3 | Creators are reminded monthly about money waiting for them | [connect-and-payouts](connect-and-payouts.md#releasing-pending-money) |
 | `Codex-2hxff.52` | P2 | Pausing, resuming, a failed payment and a trial ending work for course subscriptions as for tiers | [subscriptions](subscriptions.md#lifecycle-and-access) |
-| `Codex-2hxff.55` | P2 | A service built without its money dependencies (fee configuration) cannot compile | [architecture](architecture.md) |
+| `Codex-2hxff.85` | P2 | Support can retry a subscriber's price move that was held because their notice wasn't sent; today the alert is the only record | [subscriptions](subscriptions.md#price-changes) |
+| `Codex-2hxff.86` | P2 | A price change reaches every subscriber, however many: the fan-out runs where it can finish, not in `waitUntil`'s 30 s | [subscriptions](subscriptions.md#price-changes) |
 
 `Codex-2hxff.27` (closed) records the 2026-10-13 repair of production's webhooks.
 

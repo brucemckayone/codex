@@ -9,8 +9,9 @@
  *      unresolved (resolvedAt null) and no transfer fires.
  *   2. Raising the row's amountCents (or lowering the floor) on a subsequent
  *      call causes the transfer to fire.
- *   3. Without a feeConfig injected, the legacy FEES.* fallback path still
- *      works (regression guard).
+ *
+ * There is no "without a feeConfig" case: the dependency is required and the
+ * FEES.* fallback is gone (Codex-2hxff.55).
  *
  * Real DB, mocked Stripe — same shape as the parent subscription-service
  * integration suite.
@@ -27,6 +28,7 @@ import type { FeeConfigService } from '@codex/purchase';
 import {
   createMockStripe,
   createTestConnectAccountInput,
+  createTestMoneyDeps,
   createTestOrganizationInput,
   createTestSubscriptionInput,
   createTestTierInput,
@@ -191,7 +193,7 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
       }
     );
     const service = new SubscriptionService(
-      { db, environment: 'test', feeConfig },
+      { db, environment: 'test', ...createTestMoneyDeps(), feeConfig },
       stripe
     );
 
@@ -254,7 +256,7 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
     } as unknown as FeeConfigService;
 
     const service = new SubscriptionService(
-      { db, environment: 'test', feeConfig },
+      { db, environment: 'test', ...createTestMoneyDeps(), feeConfig },
       stripe
     );
 
@@ -327,7 +329,7 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
       }
     );
     const service = new SubscriptionService(
-      { db, environment: 'test', feeConfig },
+      { db, environment: 'test', ...createTestMoneyDeps(), feeConfig },
       stripe
     );
 
@@ -420,7 +422,7 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
       }
     );
     const service = new SubscriptionService(
-      { db, environment: 'test', feeConfig },
+      { db, environment: 'test', ...createTestMoneyDeps(), feeConfig },
       stripe
     );
 
@@ -486,7 +488,7 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
       }
     );
     const service = new SubscriptionService(
-      { db, environment: 'test', feeConfig },
+      { db, environment: 'test', ...createTestMoneyDeps(), feeConfig },
       stripe
     );
 
@@ -527,37 +529,6 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
     expect(after.every((r) => r.resolvedAt === null)).toBe(true);
   });
 
-  it('without feeConfig injected, all payouts transfer (legacy FEES.* fallback — no floor)', async () => {
-    const { org, sub, stripeAccountId } = await seed('fc-no-injection');
-    // No feeConfig — service falls back to FEES.* constants with
-    // minTransferCents=0, so even tiny payouts fire.
-    const service = new SubscriptionService(
-      { db, environment: 'test' },
-      stripe
-    );
-
-    await db.insert(payoutsTable).values({
-      userId: payoutUserId,
-      organizationId: org.id,
-      subscriptionId: sub.id,
-      amountCents: 1, // pence
-      currency: 'gbp',
-      reason: 'connect_not_ready',
-      status: 'pending',
-      payoutType: 'creator_payout',
-    });
-
-    const transferSpy = vi.mocked(stripe.transfers.create);
-    transferSpy.mockClear();
-    transferSpy.mockResolvedValue({
-      id: `tr_fc_nofee_${RUN}`,
-    } as Stripe.Response<Stripe.Transfer>);
-
-    const result = await service.resolvePendingPayouts(org.id, stripeAccountId);
-    expect(result.resolved).toBe(1);
-    expect(transferSpy).toHaveBeenCalledTimes(1);
-  });
-
   // Codex-iivne: post-fix the fee policy is looked up ONCE per
   // (userId, sourceType) group rather than per-row, because the
   // floor evaluates against the group SUM. Rewritten from the
@@ -582,7 +553,7 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
       }
     );
     const service = new SubscriptionService(
-      { db, environment: 'test', feeConfig },
+      { db, environment: 'test', ...createTestMoneyDeps(), feeConfig },
       stripe
     );
 
@@ -662,7 +633,7 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
       }
     );
     const service = new SubscriptionService(
-      { db, environment: 'test', feeConfig },
+      { db, environment: 'test', ...createTestMoneyDeps(), feeConfig },
       stripe
     );
 
@@ -721,7 +692,7 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
     } as unknown as FeeConfigService;
 
     const service = new SubscriptionService(
-      { db, environment: 'test', feeConfig },
+      { db, environment: 'test', ...createTestMoneyDeps(), feeConfig },
       stripe
     );
 
@@ -787,7 +758,7 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
     } as unknown as FeeConfigService;
 
     const service = new SubscriptionService(
-      { db, environment: 'test', feeConfig },
+      { db, environment: 'test', ...createTestMoneyDeps(), feeConfig },
       stripe
     );
 

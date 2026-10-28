@@ -39,6 +39,7 @@ import {
   createMockStripeInvoice,
   createMockStripeSubscription,
   createTestConnectAccountInput,
+  createTestMoneyDeps,
   createTestOrganizationInput,
   createTestTierInput,
   createUniqueSlug,
@@ -206,7 +207,7 @@ describe('A refund handled before its invoice (Codex-2hxff.67)', () => {
     chargeId: string
   ): Promise<void> {
     await new PurchaseService(
-      { db, environment: 'test' },
+      { db, environment: 'test', ...createTestMoneyDeps() },
       stripe
     ).recordChargeRefunds({ id: chargeId, paymentIntentId: null });
     await service.reverseSubscriptionPayoutsForCharge({
@@ -227,7 +228,7 @@ describe('A refund handled before its invoice (Codex-2hxff.67)', () => {
     const id = `dp_early_${uid()}`;
     disputeIds.push(id);
     await new PurchaseService(
-      { db, environment: 'test' },
+      { db, environment: 'test', ...createTestMoneyDeps() },
       stripe
     ).recordDispute({
       stripeDisputeId: id,
@@ -373,7 +374,7 @@ describe('A refund handled before its invoice (Codex-2hxff.67)', () => {
       }) as unknown as Stripe.Subscription;
       stripeSubId = tierSub.id;
       await new SubscriptionService(
-        { db, environment: 'test' },
+        { db, environment: 'test', ...createTestMoneyDeps() },
         createMockStripe()
       ).handleSubscriptionCreated(tierSub);
     });
@@ -383,7 +384,10 @@ describe('A refund handled before its invoice (Codex-2hxff.67)', () => {
       vi.mocked(stripe.subscriptions.retrieve).mockResolvedValue(
         tierSub as never
       );
-      return new SubscriptionService({ db, environment: 'test' }, stripe);
+      return new SubscriptionService(
+        { db, environment: 'test', ...createTestMoneyDeps() },
+        stripe
+      );
     }
 
     function invoiceFor(chargeId: string): Stripe.Invoice {
@@ -660,7 +664,7 @@ describe('A refund handled before its invoice (Codex-2hxff.67)', () => {
         },
       }) as unknown as Stripe.Subscription;
       await new CourseSubscriptionService(
-        { db, environment: 'test' },
+        { db, environment: 'test', ...createTestMoneyDeps() },
         createMockStripe()
       ).handleCourseSubscriptionCreated(courseSub);
     });
@@ -669,10 +673,13 @@ describe('A refund handled before its invoice (Codex-2hxff.67)', () => {
     function subscribed() {
       return {
         course: new CourseSubscriptionService(
-          { db, environment: 'test' },
+          { db, environment: 'test', ...createTestMoneyDeps() },
           stripe
         ),
-        tiers: new SubscriptionService({ db, environment: 'test' }, stripe),
+        tiers: new SubscriptionService(
+          { db, environment: 'test', ...createTestMoneyDeps() },
+          stripe
+        ),
       };
     }
 

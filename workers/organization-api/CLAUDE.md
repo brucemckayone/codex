@@ -15,7 +15,7 @@ Organization CRUD, membership management, subscription tiers, follower relations
 | GET | `/api/organizations/public/:slug` | `none` | params: `slug` | 200 | Public branding fields only (legacy) |
 | GET | `/api/organizations/public/:slug/info` | `none` | params: `slug` | 200 | Full public org identity + branding; KV-cached 4h |
 | GET | `/api/organizations/public/:slug/stats` | `none` | params: `slug` | 200 | Content counts, duration, creator count, views; KV-cached |
-| GET | `/api/organizations/public/:slug/creators` | `none` | params + query: page/limit | 200 | Paginated public creator profiles; KV-cached |
+| GET | `/api/organizations/public/:slug/creators` | `none` | params + query: page/limit/search | 200 | Paginated public creator profiles; KV-cached, except a `search` (matched on name or username), which reads the DB as the content search does (Codex-pd8m1) |
 | GET | `/api/organizations/public/:slug/members` | `none` | params + query: page/limit/role | 200 | Paginated public member profiles; not KV-cached |
 | GET | `/api/organizations/:id` | `required` | params: `id` | 200 | Get org by ID, without the payee's user id |
 | PATCH | `/api/organizations/:id` | `required`, `requireOrgManagement` | body: `updateOrganizationSchema` | 200 | Invalidates brand KV + VersionedCache on slug change |
@@ -26,8 +26,8 @@ Organization CRUD, membership management, subscription tiers, follower relations
 
 | Method | Path | Auth | Input | Success | Notes |
 |---|---|---|---|---|---|
-| GET | `/api/organizations/:id/members` | `required`, `requireOrgMembership` | query: page/limit/role/status | 200 | |
-| POST | `/api/organizations/:id/members/invite` | `required`, `requireOrgManagement` | body: `inviteMemberSchema` | 201 | Sends invitation email fire-and-forget |
+| GET | `/api/organizations/:id/members` | `required`, `requireOrgManagement` | query: page/limit/role/status | 200 | Owner and admins only: items carry each member's email and `hasCreatorAccount` (Codex-2hxff.82) |
+| POST | `/api/organizations/:id/members/invite` | `required`, `requireOrgManagement` | body: `inviteMemberSchema` | 201 | The member is active at once. Sends the invitation email fire-and-forget: it names the org, with an "Open {org}" link to the Studio (admin, creator) or the org home page (member), built with `buildOrgUrlFromEnv` (Codex-bnxhw) |
 | PATCH | `/api/organizations/:id/members/:userId` | `required`, `requireOrgManagement` | body: `updateMemberRoleSchema` | 200 | `role` is admin/creator/member — never owner. 409 `OWNERSHIP_TRANSFER_REQUIRED` for the owner |
 | DELETE | `/api/organizations/:id/members/:userId` | `required`, `requireOrgManagement` | params | 204 | 409 `OWNERSHIP_TRANSFER_REQUIRED` for the owner |
 | GET | `/api/organizations/:id/members/my-membership` | `required` | params: `id` | 200 | No `requireOrgMembership` — non-members can check their status. Includes `pendingOwnershipOffer` (the Studio banner) |

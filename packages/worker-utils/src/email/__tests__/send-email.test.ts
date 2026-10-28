@@ -12,7 +12,7 @@ vi.mock('@codex/security', () => ({
 import { workerFetch } from '@codex/security';
 import type { Bindings } from '@codex/shared-types';
 import { buildServiceUrl as getServiceUrl } from '@codex/urls';
-import { sendEmailToWorker } from '../send-email';
+import { sendEmailToWorker, sendEmailToWorkerAwaited } from '../send-email';
 
 describe('sendEmailToWorker', () => {
   const mockEnv = {
@@ -159,6 +159,190 @@ describe('sendEmailToWorker', () => {
       const payload = JSON.stringify(errorSpy.mock.calls[0]);
       expect(payload).not.toContain('user@example.com');
       expect(payload).toContain('user_abc123');
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it.each([
+    400, 500,
+  ])('logs a %i from notifications-api with the status and template, never the address', async (status) => {
+    // workerFetch resolves on any status, so a refused send used to vanish:
+    // the catch only sees transport failures.
+    vi.mocked(workerFetch).mockResolvedValueOnce(
+      new Response('{}', { status })
+    );
+    const errorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+
+    try {
+      sendEmailToWorker(mockEnv, mockExecutionCtx, {
+        ...validParams,
+        userId: 'user_abc123',
+      });
+      await waitUntilPromise();
+
+      expect(errorSpy).toHaveBeenCalledWith('[sendEmailToWorker] refused', {
+        templateName: 'purchase-receipt',
+        userId: 'user_abc123',
+        status,
+      });
+      expect(JSON.stringify(errorSpy.mock.calls)).not.toContain(
+        'user@example.com'
+      );
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('logs nothing for an accepted send', async () => {
+    const errorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    try {
+      sendEmailToWorker(mockEnv, mockExecutionCtx, validParams);
+      await waitUntilPromise();
+      expect(errorSpy).not.toHaveBeenCalled();
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+});
+
+// The price-change notice waits for notifications-api's answer before the
+// price moves (owner decision D-P3, Codex-2hxff.43).
+describe('sendEmailToWorkerAwaited', () => {
+  const mockEnv = {
+    WORKER_SHARED_SECRET: 'test-secret',
+  } as unknown as Bindings;
+
+  const params = {
+    to: 'user@example.com',
+    templateName: 'subscription-tier-price-change',
+    category: 'transactional' as const,
+    userId: 'user_abc123',
+    data: { planName: 'Basic' },
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  /** notifications-api's answer, inside procedure()'s `{ data }` envelope. */
+  function sent(data: unknown, status = 200) {
+    return new Response(JSON.stringify({ data }), { status });
+  }
+
+  it('a 2xx saying success is accepted, and the send is signed to /internal/send with a timeout', async () => {
+    vi.mocked(workerFetch).mockResolvedValueOnce(
+      sent({ success: true, messageId: 'msg_1' })
+    );
+
+    await expect(sendEmailToWorkerAwaited(mockEnv, params)).resolves.toEqual({
+      accepted: true,
+    });
+    expect(workerFetch).toHaveBeenCalledWith(
+      'http://localhost:42075/internal/send',
+      {
+        method: 'POST',
+        body: JSON.stringify(params),
+        signal: expect.any(AbortSignal),
+      },
+      'test-secret'
+    );
+  });
+
+  // Review A, silent #9: a 2xx is accepted only when the body says it sent.
+  // The price fan-out passes its own wait (PRICE_NOTICE_TIMEOUT_MS, pinned in
+  // price-notice-timeout.test.ts); this is the default for any other caller.
+  it('waits at most 5 s by default', async () => {
+    vi.mocked(workerFetch).mockResolvedValueOnce(sent({ success: true }));
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    try {
+      await sendEmailToWorkerAwaited(mockEnv, params);
+      expect(timeout).toHaveBeenCalledWith(5_000);
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  it('a 2xx that skipped the send is not accepted, and says why', async () => {
+    vi.mocked(workerFetch).mockResolvedValueOnce(
+      sent({ success: false, skipped: 'opted_out' })
+    );
+
+    await expect(sendEmailToWorkerAwaited(mockEnv, params)).resolves.toEqual({
+      accepted: false,
+      skipped: 'opted_out',
+    });
+  });
+
+  it.each([
+    ['an empty body', new Response('{}', { status: 200 })],
+    ['a body that is not JSON', new Response('ok', { status: 200 })],
+    ['success that is not true', sent({ success: 'yes' })],
+  ])('a 2xx with %s is not accepted: its outcome is unknown', async (_label, response) => {
+    vi.mocked(workerFetch).mockResolvedValueOnce(response);
+
+    await expect(sendEmailToWorkerAwaited(mockEnv, params)).resolves.toEqual({
+      accepted: false,
+      error: '2xx without a send result',
+    });
+  });
+
+  it.each([
+    404, 422, 500,
+  ])('a %i is refused, with its status', async (status) => {
+    vi.mocked(workerFetch).mockResolvedValueOnce(
+      new Response('{}', { status })
+    );
+
+    await expect(sendEmailToWorkerAwaited(mockEnv, params)).resolves.toEqual({
+      accepted: false,
+      status,
+    });
+  });
+
+  it('a transport failure is not accepted, and never throws', async () => {
+    vi.mocked(workerFetch).mockRejectedValueOnce(new Error('Network timeout'));
+
+    await expect(sendEmailToWorkerAwaited(mockEnv, params)).resolves.toEqual({
+      accepted: false,
+      error: 'Network timeout',
+    });
+  });
+
+  it('a send with no answer within the timeout is not accepted', async () => {
+    vi.mocked(workerFetch).mockImplementationOnce(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () =>
+            reject(init.signal?.reason)
+          );
+        })
+    );
+
+    const result = await sendEmailToWorkerAwaited(mockEnv, params, {
+      timeoutMs: 10,
+    });
+
+    expect(result).toMatchObject({
+      accepted: false,
+      error: expect.any(String),
+    });
+  });
+
+  it('logs nothing itself: the caller reports the outcome, without the address', async () => {
+    vi.mocked(workerFetch).mockResolvedValueOnce(
+      new Response('{}', { status: 422 })
+    );
+    const errorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    try {
+      await sendEmailToWorkerAwaited(mockEnv, params);
+      expect(errorSpy).not.toHaveBeenCalled();
     } finally {
       errorSpy.mockRestore();
     }

@@ -34,6 +34,7 @@ import {
   createMockStripeInvoice,
   createMockStripeSubscription,
   createTestConnectAccountInput,
+  createTestMoneyDeps,
   createUniqueSlug,
   type Database,
   paidByCard,
@@ -192,7 +193,7 @@ describe('Course-plan subscription drift (Codex-2hxff.15)', () => {
       },
     });
     const service = new CourseSubscriptionService(
-      { db: racing, environment: 'test' },
+      { db: racing, environment: 'test', ...createTestMoneyDeps() },
       stripe
     );
     return { service, raced: () => raced };
@@ -202,7 +203,7 @@ describe('Course-plan subscription drift (Codex-2hxff.15)', () => {
     return {
       stripe,
       service: new CourseSubscriptionService(
-        { db, environment: 'test' },
+        { db, environment: 'test', ...createTestMoneyDeps() },
         stripe
       ),
     };

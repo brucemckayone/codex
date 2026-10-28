@@ -12,11 +12,7 @@ import {
   MEDIA_ITEM_RESPONSE_COLUMNS,
 } from '@codex/database';
 import { content } from '@codex/database/schema';
-import {
-  createLazyStripeClient,
-  createStripeClient,
-  PurchaseService,
-} from '@codex/purchase';
+import { verifyPurchase } from '@codex/purchase';
 import {
   BaseService,
   type ServiceConfig,
@@ -47,6 +43,7 @@ import {
   assertStreamingAccess,
   type GrantVia,
   isOfDeletedOrg,
+  type PurchaseVerifier,
   resolveContentGrant,
   resolveCourseDisputePauses,
   resolveHasContentAccess,
@@ -96,7 +93,11 @@ export const DEFAULT_STREAMING_URL_TTL_SECONDS = 600;
 
 export interface ContentAccessServiceConfig extends ServiceConfig {
   r2: R2Signer;
-  purchaseService: PurchaseService;
+  /**
+   * The purchase read (rule A8): the registry passes its PurchaseService, the
+   * factory below passes `verifyPurchase` from `@codex/purchase`.
+   */
+  purchaseService: PurchaseVerifier;
   /**
    * Optional access revocation helper — when provided, `savePlaybackProgress`
    * (and, in a follow-up, `getStreamingUrl`) short-circuits on a revocation
@@ -207,7 +208,7 @@ export class ContentAccessService
   implements EntitlementResolver
 {
   private readonly r2: R2Signer;
-  private readonly purchaseService: PurchaseService;
+  private readonly purchaseService: PurchaseVerifier;
   private readonly revocation: AccessRevocation | undefined;
   private readonly contentApiBaseUrl: string | undefined;
   private readonly hlsTokenSecret: string | undefined;
@@ -814,8 +815,6 @@ export interface ContentAccessEnv {
   R2_BUCKET_MEDIA?: string;
   /** Base URL for dev-cdn proxy (local development only, e.g. http://localhost:4100) */
   R2_PUBLIC_URL_BASE?: string;
-  /** Stripe secret key for purchase verification */
-  STRIPE_SECRET_KEY?: string;
   /** Database connection method (LOCAL_PROXY, NEON_BRANCH, PRODUCTION) */
   DB_METHOD?: string;
   /** Database URL for connections */
@@ -899,19 +898,15 @@ export function createContentAccessService(env: ContentAccessEnv): {
   // Create per-request database client with WebSocket support for transactions
   const { db, cleanup } = createPerRequestDbClient(env);
 
-  // Create Stripe client and PurchaseService.
-  //
-  // The streaming access path only calls PurchaseService.verifyPurchase (a DB
-  // read) and never touches the Stripe API. content-api is intentionally NOT
-  // provisioned with a STRIPE_SECRET_KEY (Stripe secrets are ecom-api only),
-  // so when the key is absent we build a lazy client that constructs freely
-  // but throws only if a Stripe call is ever attempted — otherwise every
-  // stream request would 500 with "Stripe API key is required" (Codex-eys81).
+  // The access decision's one purchase read goes through its owner,
+  // `@codex/purchase`, without building a PurchaseService and its money
+  // dependencies (rule A8, Codex-2hxff.55). No Stripe client is needed:
+  // content-api has no STRIPE_SECRET_KEY (Stripe secrets are ecom-api only).
   const environment = env.ENVIRONMENT ?? 'development';
-  const stripe = env.STRIPE_SECRET_KEY
-    ? createStripeClient(env.STRIPE_SECRET_KEY)
-    : createLazyStripeClient();
-  const purchaseService = new PurchaseService({ db, environment }, stripe);
+  const purchaseService: PurchaseVerifier = {
+    verifyPurchase: (contentId, customerId) =>
+      verifyPurchase(db, contentId, customerId),
+  };
   const revocation = env.CACHE_KV
     ? new AccessRevocation(env.CACHE_KV)
     : undefined;

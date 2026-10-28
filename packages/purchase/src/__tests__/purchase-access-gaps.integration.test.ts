@@ -20,6 +20,7 @@ import * as schema from '@codex/database/schema';
 import {
   createMockStripe,
   createTestMediaItemInput,
+  createTestMoneyDeps,
   createTestOrganizationInput,
   createUniqueSlug,
   type Database,
@@ -39,7 +40,7 @@ describe('PurchaseService — access gaps (Codex-2hxff.21)', () => {
   beforeAll(() => {
     db = setupTestDatabase();
     service = new PurchaseService(
-      { db, environment: 'test' },
+      { db, environment: 'test', ...createTestMoneyDeps() },
       createMockStripe()
     );
   });

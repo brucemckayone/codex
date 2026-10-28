@@ -58,8 +58,11 @@ interface RenderResult {
  * Security features:
  * - HTML escapes all injected values by default
  * - Only allows whitelisted tokens
- * - Missing tokens become empty strings (no error)
- * - Unknown tokens become empty strings (logged)
+ * - Missing tokens become empty strings, and are returned in
+ *   `missingTokens`: NotificationsService warns them once per send, except
+ *   those `getTokensThatMayRenderBlank` names
+ * - Unknown tokens become empty strings, and are returned in
+ *   `unknownTokens`: NotificationsService warns them once per render
  */
 export function renderTemplate(options: RenderOptions): RenderResult {
   const {
@@ -226,6 +229,11 @@ const TEMPLATE_TOKENS: Record<string, string[]> = {
     'inviterName',
     'orgName',
     'roleName',
+    'roleLabel',
+    'orgUrl',
+    // Transitional (Codex-2hxff.83): the stock row production has uses these
+    // until migration 0117 rewrites it (Codex-2hxff.84). Drop them with the
+    // sender's copies once it has.
     'acceptUrl',
     'expiryDays',
   ],
@@ -463,4 +471,29 @@ export function getAllowedTokens(templateName: string): string[] {
     ? []
     : TEMPLATE_TOKENS._unsubscribe || [];
   return [...brandTokens, ...unsubscribeTokens, ...templateTokens];
+}
+
+/**
+ * Tokens whose copy reads well when the data lacks them: a proposal sent
+ * with no note, a refund with no access note. Any OTHER allowed token the
+ * data lacks renders blank (an empty button link, "expires in  days"), and
+ * NotificationsService warns it. A field that is optional in its data schema
+ * is not enough on its own: `acceptUrl` is optional only so its sender can
+ * stop passing it before notifications-api deploys, and a row still using it
+ * would then ship a dead button (Codex-2hxff.83).
+ */
+const MAY_RENDER_BLANK: Record<string, readonly string[]> = {
+  'refund-processed': ['accessNote'],
+  'agreement-proposed-by-owner': ['note'],
+  'agreement-countered-by-creator': ['note'],
+  'agreement-countered-by-owner': ['note'],
+  'agreement-declined': ['declineReason'],
+  'agreement-terminated': ['terminationReason'],
+};
+
+/** The tokens of a template that may render as nothing (MAY_RENDER_BLANK). */
+export function getTokensThatMayRenderBlank(
+  templateName: string
+): readonly string[] {
+  return MAY_RENDER_BLANK[templateName] ?? [];
 }

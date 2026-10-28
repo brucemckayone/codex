@@ -47,6 +47,8 @@ export interface TeamMemberInput {
   name: string | null;
   email: string;
   role: string;
+  /** Can hold an agreement: a creator account (Codex-2hxff.76). */
+  hasCreatorAccount: boolean;
 }
 
 /**
@@ -246,6 +248,10 @@ export function buildOwnerAgreementFocusItems(
     // The settings page renders cards for every non-subscriber, so we
     // include role='creator' AND role='admin' here for parity.
     if (member.role !== 'creator' && member.role !== 'admin') continue;
+    // The roster offers no Propose to a member without a creator account,
+    // and the server refuses one (Codex-2hxff.76), so nudging would send
+    // the owner to a dead end.
+    if (!member.hasCreatorAccount) continue;
     if (creatorIdsWithSubAgreement.has(member.userId)) continue;
     const name = memberDisplayName(member);
     items.push({

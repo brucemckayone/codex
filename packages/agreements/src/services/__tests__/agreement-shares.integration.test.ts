@@ -106,6 +106,11 @@ describe('agreement shares (AGR-04, AGR-08, AGR-13)', () => {
         status: 'active',
       },
     ]);
+    // A new proposal goes only to a creator account (Codex-2hxff.76).
+    await db
+      .update(schema.users)
+      .set({ role: 'creator' })
+      .where(inArray(schema.users.id, [creatorA, creatorB]));
     return { orgId: org.id, ownerId, creatorA, creatorB };
   }
 

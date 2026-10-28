@@ -171,6 +171,56 @@ export function createCheckoutCompletedEvent(
 }
 
 /**
+ * Any Stripe event: the envelope Stripe delivers, around the object it is
+ * about.
+ */
+export interface StripeWebhookEvent<T = unknown> {
+  id: string;
+  object: 'event';
+  api_version: string;
+  created: number;
+  livemode: boolean;
+  type: string;
+  data: { object: T };
+  pending_webhooks: number;
+  request: { id: null; idempotency_key: null };
+}
+
+/**
+ * Wrap `object` in the event Stripe would send for it.
+ *
+ * Pass the object as Stripe holds it (retrieved with the test-mode client)
+ * so the handler reads what production would: the charge on
+ * `charge.refunded`, or the session on `checkout.session.completed`
+ * (`payCheckoutSession` in stripe-test-mode.ts).
+ *
+ * @example
+ * const charge = await stripe.charges.retrieve(chargeId);
+ * await sendSignedWebhook(
+ *   `${WORKER_URLS.ecom}/webhooks/stripe/payment`,
+ *   createStripeEvent('charge.refunded', charge),
+ *   process.env.STRIPE_WEBHOOK_SECRET_PAYMENT as string
+ * );
+ */
+export function createStripeEvent<T>(
+  type: string,
+  object: T
+): StripeWebhookEvent<T> {
+  const timestamp = Math.floor(Date.now() / 1000);
+  return {
+    id: `evt_test_${timestamp}_${Math.random().toString(36).slice(2)}`,
+    object: 'event',
+    api_version: '2025-10-29.clover', // Matches Stripe client API version
+    created: timestamp,
+    livemode: false,
+    type,
+    data: { object },
+    pending_webhooks: 1,
+    request: { id: null, idempotency_key: null },
+  };
+}
+
+/**
  * Send webhook request with valid HMAC-SHA256 signature
  *
  * Sends a webhook event to the specified URL with a cryptographically valid
@@ -198,7 +248,7 @@ export function createCheckoutCompletedEvent(
  */
 export async function sendSignedWebhook(
   webhookUrl: string,
-  event: StripeCheckoutWebhookEvent,
+  event: StripeCheckoutWebhookEvent | StripeWebhookEvent,
   webhookSecret: string
 ): Promise<Response> {
   // Serialize event to exact JSON string (critical for signature verification)

@@ -28,6 +28,7 @@ const MEMBERS: OrgMemberItem[] = [
     role: 'owner',
     status: 'active',
     joinedAt: '2026-03-02T00:00:00.000Z',
+    hasCreatorAccount: true,
   },
   {
     userId: 'sam',
@@ -37,6 +38,7 @@ const MEMBERS: OrgMemberItem[] = [
     role: 'creator',
     status: 'active',
     joinedAt: '2026-06-01T00:00:00.000Z',
+    hasCreatorAccount: true,
   },
 ];
 

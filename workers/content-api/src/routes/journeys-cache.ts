@@ -27,6 +27,7 @@
 import { CacheType, VersionedCache } from '@codex/cache';
 import type { ObservabilityClient } from '@codex/observability';
 import type { HonoEnv } from '@codex/shared-types';
+import { cdnBaseSlot } from './cdn-base-slot';
 
 /**
  * TTL for cached portal discovery lists (seconds).
@@ -78,31 +79,40 @@ const PUBLIC_JOURNEYS_CACHE_TTL = 7200;
  * portals rail — so a key omitting it would have the two rails serving each
  * other's rows (the exact latent bug `buildPublicContentCacheType` records for
  * content's `featured`).
+ *
+ * `cdnBase` is the base the cards' cover URLs are built with. Keyed on it, a
+ * fixed binding shows on the next read, not after the TTL (`cdnBaseSlot`,
+ * Codex-yjyju). It is required, though it may be undefined: a caller that
+ * leaves it out is a compile error, not a slot that freezes the URLs again.
  */
-export function buildPublishedJourneysCacheType(query: {
-  featured?: boolean | null;
-  limit?: number | null;
-}): string {
+export function buildPublishedJourneysCacheType(
+  query: { featured?: boolean | null; limit?: number | null },
+  cdnBase: string | undefined
+): string {
   return `journeys:published:${query.featured ? 'featured' : 'all'}:${
     query.limit ?? 'default'
-  }`;
+  }:${cdnBaseSlot(cdnBase)}`;
 }
 
 /**
  * Cache-aside wrapper for the public portal discovery list
  * (`GET /api/journeys/published`).
+ *
+ * The fetcher is handed the `cdnBase` the slot is keyed on, so the URLs it
+ * builds and the slot they land in come from one value and cannot disagree.
  */
 export async function getCachedPublishedJourneys<T>(
   cache: VersionedCache,
   orgId: string,
   query: { featured?: boolean | null; limit?: number | null },
-  fetcher: () => Promise<T>,
+  cdnBase: string | undefined,
+  fetcher: (cdnBase: string | undefined) => Promise<T>,
   opts: { ttl?: number } = {}
 ): Promise<T> {
   return cache.get(
     CacheType.COLLECTION_ORG_JOURNEYS(orgId),
-    buildPublishedJourneysCacheType(query),
-    fetcher,
+    buildPublishedJourneysCacheType(query, cdnBase),
+    () => fetcher(cdnBase),
     { ttl: opts.ttl ?? PUBLIC_JOURNEYS_CACHE_TTL }
   );
 }
@@ -117,17 +127,21 @@ export async function getCachedPublishedJourneys<T>(
  * landing rails and the explore rail together. Unifying the two endpoints is a
  * separate concern; sharing the key means they can never disagree about
  * freshness in the meantime.
+ *
+ * Keyed on `cdnBase`, and hands it to the fetcher, as
+ * {@link getCachedPublishedJourneys} does.
  */
 export async function getCachedPublishedCourses<T>(
   cache: VersionedCache,
   orgId: string,
-  fetcher: () => Promise<T>,
+  cdnBase: string | undefined,
+  fetcher: (cdnBase: string | undefined) => Promise<T>,
   opts: { ttl?: number } = {}
 ): Promise<T> {
   return cache.get(
     CacheType.COLLECTION_ORG_JOURNEYS(orgId),
-    'journeys:courses:published',
-    fetcher,
+    `journeys:courses:published:${cdnBaseSlot(cdnBase)}`,
+    () => fetcher(cdnBase),
     { ttl: opts.ttl ?? PUBLIC_JOURNEYS_CACHE_TTL }
   );
 }

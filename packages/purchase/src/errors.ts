@@ -10,6 +10,7 @@ import {
   ConflictError,
   InternalServiceError,
   NotFoundError,
+  ServiceError,
 } from '@codex/service-errors';
 
 // Re-export base error classes for convenience
@@ -138,14 +139,51 @@ export class CourseAlreadyOwnedError extends ConflictError {
 
 /**
  * Payment processing error
- * Thrown when Stripe checkout session creation or payment processing fails
+ * Thrown when Stripe checkout session creation or payment processing fails.
+ * `options.cause` keeps the Stripe error, never sent, for a caller that
+ * judges whether a retry can fix it (`isTransientError` in ecom-api).
  */
 export class PaymentProcessingError extends InternalServiceError {
-  constructor(message: string, context?: Record<string, unknown>) {
-    super(message, {
-      code: 'PAYMENT_PROCESSING_ERROR',
-      ...context,
-    });
+  constructor(
+    message: string,
+    context?: Record<string, unknown>,
+    options?: ErrorOptions
+  ) {
+    super(
+      message,
+      {
+        code: 'PAYMENT_PROCESSING_ERROR',
+        ...context,
+      },
+      options
+    );
+  }
+}
+
+/**
+ * A paid checkout session that nothing will record (Codex-2hxff.81). The
+ * success page's completion was refused before its commit, by a failure no
+ * retry changes (an unsupported currency, bad metadata, an item gone), and
+ * no row of ours records the session. Support was alerted under `errorId`.
+ * The page tells the buyer so and stops checking (owner decision 2026-10-27,
+ * "Say we're on it").
+ *
+ * It is a 500 with a code of its own: the buyer did nothing wrong, and the
+ * code is what the page acts on. Its context is the session id and the
+ * errorId, nothing more. The refusal stays on `cause`, which is never sent.
+ */
+export class CheckoutNotRecordedError extends ServiceError {
+  constructor(
+    context: { sessionId: string; errorId: string },
+    options?: ErrorOptions
+  ) {
+    super(
+      'The purchase could not be recorded',
+      'CHECKOUT_NOT_RECORDED',
+      500,
+      context,
+      options
+    );
   }
 }
 

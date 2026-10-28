@@ -29,6 +29,7 @@
     "@codex/service-errors": "workspace:*",
     "@codex/shared-types": "workspace:*",
     "@codex/subscription": "workspace:*",
+    "@codex/urls": "workspace:*",
     "@codex/validation": "workspace:*",
     "@codex/worker-utils": "workspace:*",
     "hono": "^4.7.8",

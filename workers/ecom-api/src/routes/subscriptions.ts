@@ -34,6 +34,7 @@ import {
 } from '@codex/validation';
 import { PaginatedResult, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
+import { refuseDevReturnUrls } from '../utils/return-urls';
 
 /**
  * Cache invalidation for subscription mutations is owned by
@@ -106,7 +107,9 @@ const subscriptions = new Hono<HonoEnv>();
 
 /**
  * POST /subscriptions/checkout
- * Create a Stripe Checkout session in subscription mode.
+ * Create a Stripe Checkout session in subscription mode. In production, a
+ * return link on a development host or over plain http is refused
+ * (Codex-2hxff.79).
  */
 subscriptions.post(
   '/checkout',
@@ -115,6 +118,12 @@ subscriptions.post(
     input: { body: createSubscriptionCheckoutSchema },
     successStatus: 201,
     handler: async (ctx) => {
+      const { successUrl, cancelUrl } = ctx.input.body;
+      refuseDevReturnUrls(
+        ctx.env.ENVIRONMENT,
+        { successUrl, cancelUrl },
+        ctx.obs
+      );
       return await ctx.services.subscription.createCheckoutSession(
         ctx.user.id,
         ctx.input.body.organizationId,

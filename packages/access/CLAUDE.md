@@ -20,7 +20,7 @@ const service = new ContentAccessService({
   db,
   environment,
   r2,              // R2Signer: R2Service (prod) or DevR2Signer (dev)
-  purchaseService, // PurchaseService instance
+  purchaseService, // the purchase read: the registry passes its PurchaseService; only verifyPurchase is called
 });
 ```
 
@@ -30,7 +30,8 @@ In dev, `DevR2Signer` returns unsigned dev-cdn URLs. In production, uses `R2Serv
 
 ```typescript
 const { service, cleanup } = createContentAccessService(env);
-// Builds DB, R2, PurchaseService (+ optional revocation, contentApiBaseUrl, hlsTokenSecret) from env bindings; await cleanup() to close the DB client
+// Builds DB, R2 and the purchase read (+ optional revocation, contentApiBaseUrl, hlsTokenSecret) from env bindings; await cleanup() to close the DB client.
+// The read is @codex/purchase's verifyPurchase(db, …), never a PurchaseService: its money dependencies (fees, mailers, Stripe) are required, and content-api has no Stripe secret (rule A8, Codex-2hxff.55).
 ```
 
 ### Methods

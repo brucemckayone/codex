@@ -77,6 +77,7 @@ export type {
 
 export {
   AgreementNotFoundError,
+  type AgreementRecipientRefusal,
   AgreementServiceError,
   BusinessLogicError,
   ConflictError,
@@ -86,6 +87,7 @@ export {
   InvalidProposalStateError,
   isAgreementServiceError,
   NotFoundError,
+  RecipientCannotHoldAgreementError,
   ShareExceedsAvailableError,
   ValidationError,
   wrapError,

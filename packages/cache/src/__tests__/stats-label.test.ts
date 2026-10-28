@@ -114,6 +114,17 @@ describe('cacheStatsLabel', () => {
     );
   });
 
+  it('labels a slot keyed on the CDN base as the read it was before (Codex-yjyju)', () => {
+    // The hash is a deployment's config. These are the production labels the
+    // two journey reads carried before their slots were keyed on it.
+    expect(cacheStatsLabel('journeys:courses:published:cdn:none')).toBe(
+      'journeys:courses:published'
+    );
+    expect(cacheStatsLabel('journeys:published:all:default:cdn:3f1d2a9c')).toBe(
+      'journeys:published:all'
+    );
+  });
+
   it('drops a uuid segment', () => {
     expect(
       cacheStatsLabel('org:6522de22-3923-498e-be24-5b0247bc7678:content')

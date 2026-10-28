@@ -34,18 +34,21 @@ describe('buildOwnerAgreementFocusItems', () => {
           name: 'Alice',
           email: 'alice@x.test',
           role: 'creator',
+          hasCreatorAccount: true,
         },
         {
           userId: 'creator-2',
           name: 'Bob',
           email: 'bob@x.test',
           role: 'creator',
+          hasCreatorAccount: true,
         },
         {
           userId: 'creator-3',
           name: 'Carol',
           email: 'carol@x.test',
           role: 'creator',
+          hasCreatorAccount: true,
         },
       ],
       activeAgreements: [
@@ -90,6 +93,7 @@ describe('buildOwnerAgreementFocusItems', () => {
           name: 'Alice',
           email: 'alice@x.test',
           role: 'creator',
+          hasCreatorAccount: true,
         },
       ],
       activeAgreements: [
@@ -119,6 +123,7 @@ describe('buildOwnerAgreementFocusItems', () => {
           name: 'Alice',
           email: 'alice@x.test',
           role: 'creator',
+          hasCreatorAccount: true,
         },
       ],
       activeAgreements: [
@@ -162,6 +167,7 @@ describe('buildOwnerAgreementFocusItems', () => {
           name: 'Alice',
           email: 'alice@x.test',
           role: 'creator',
+          hasCreatorAccount: true,
         },
       ],
       activeAgreements: [
@@ -197,6 +203,7 @@ describe('buildOwnerAgreementFocusItems', () => {
           name: 'Alice',
           email: 'alice@x.test',
           role: 'creator',
+          hasCreatorAccount: true,
         },
       ],
       activeAgreements: [
@@ -226,6 +233,7 @@ describe('buildOwnerAgreementFocusItems', () => {
           name: 'Alice',
           email: 'alice@x.test',
           role: 'creator',
+          hasCreatorAccount: true,
         },
       ],
       activeAgreements: [
@@ -253,6 +261,7 @@ describe('buildOwnerAgreementFocusItems', () => {
           name: 'Alice',
           email: 'alice@x.test',
           role: 'creator',
+          hasCreatorAccount: true,
         },
       ],
       activeAgreements: [
@@ -282,6 +291,7 @@ describe('buildOwnerAgreementFocusItems', () => {
           name: 'Sub',
           email: 'sub@x.test',
           role: 'subscriber',
+          hasCreatorAccount: true,
         },
       ],
       activeAgreements: [],
@@ -312,6 +322,7 @@ describe('buildOwnerAgreementFocusItems', () => {
           name: 'Alice',
           email: 'alice@x.test',
           role: 'creator',
+          hasCreatorAccount: true,
         },
       ],
       activeAgreements: [
@@ -328,6 +339,36 @@ describe('buildOwnerAgreementFocusItems', () => {
     expect(
       items.find((i) => i.id === 'agreement-expiring-agr-1')
     ).toBeDefined();
+  });
+
+  it('never nudges a proposal to a member without a creator account (Codex-2hxff.76)', () => {
+    // The roster offers them no Propose and the server refuses one, so a
+    // nudge would send the owner to a dead end.
+    const items = buildOwnerAgreementFocusItems({
+      teamMembers: [
+        {
+          userId: 'creator-1',
+          name: 'Alice',
+          email: 'alice@x.test',
+          role: 'creator',
+          hasCreatorAccount: true,
+        },
+        {
+          userId: 'customer-1',
+          name: 'Bob',
+          email: 'bob@x.test',
+          role: 'creator',
+          hasCreatorAccount: false,
+        },
+      ],
+      activeAgreements: [],
+      pendingCreatorCounters: [],
+      now: NOW,
+    });
+    const nudged = items
+      .filter((i) => i.id.startsWith('agreement-propose-'))
+      .map((i) => i.id);
+    expect(nudged).toEqual(['agreement-propose-creator-1']);
   });
 });
 

@@ -46,6 +46,7 @@ import type {
   PublicBrandingResponse,
 } from '@codex/shared-types';
 import {
+  createSearchQuerySchema,
   createSlugSchema,
   organizationQuerySchema,
   uuidSchema,
@@ -427,21 +428,30 @@ app.get(
  *
  * Returns paginated public creator profiles for an organization.
  * Includes name, username, avatar, bio, social links, role, joinedAt,
- * published content count, and the latest published content item.
+ * published content count, up to 4 recent published items, and the creator's
+ * other orgs.
  * Only active members with owner/admin/creator roles are included.
- * No emails or internal user IDs are exposed.
+ * No emails. Each creator's user id is sent as `id`, as on the org's
+ * creators page, which keys its cards on it.
  *
  * Query Params:
  * - page: Page number (default: 1, min: 1)
  * - limit: Items per page (default: 20, min: 1, max: 100)
+ * - search: Optional text a creator's name or username must contain (the
+ *   search palette's, Codex-pd8m1)
  *
- * Returns: PaginatedListResponse<{ name, username, avatarUrl, bio, socialLinks, role, joinedAt, contentCount, latestContent }> (200)
- * Security: No auth required, API rate limited
- * Cache: `public` — the published creator roster. `page` and `limit` ride the
- * QUERY STRING, which a shared cache keys on, so two pages cannot collide at the
- * edge (the same reason the KV data slot carries `:page:limit`). No emails or
- * internal user IDs are in the projection, which is what makes a shared copy
- * safe as well as identical.
+ * Returns: PaginatedListResponse<{ id, name, username, avatarUrl, bio, socialLinks, role, joinedAt, contentCount, recentContent, organizations }> (200)
+ * Security: No auth required, API rate limited (a direct caller, by IP; a
+ * read through apps/web's server hop has no client subject to limit, so
+ * /api/search gates a short term itself)
+ * Cache: `public` — the published creator roster. `page`, `limit` and `search`
+ * ride the QUERY STRING, which a shared cache keys on, so two pages or two
+ * searches cannot collide at the edge (the same reason the KV data slot
+ * carries `:page:limit`). A shared copy is safe because nothing in the
+ * response depends on who is asking: no session is read and every field is
+ * public.
+ * A search is NOT KV-cached: every typed term would be its own slot, which
+ * is why the content lists skip KV for one too.
  */
 app.get(
   '/public/:slug/creators',
@@ -453,12 +463,26 @@ app.get(
         .object({
           page: z.coerce.number().min(1).default(1),
           limit: z.coerce.number().min(1).max(100).default(20),
+          search: createSearchQuerySchema(),
         })
         .optional(),
     },
     handler: async (ctx) => {
       const slug = ctx.input.params.slug;
-      const { page, limit } = ctx.input.query ?? { page: 1, limit: 20 };
+      const { page, limit, search } = ctx.input.query ?? {
+        page: 1,
+        limit: 20,
+        search: undefined,
+      };
+
+      if (search) {
+        const result = await ctx.services.organization.getPublicCreators(slug, {
+          page,
+          limit,
+          search,
+        });
+        return new PaginatedResult(result.items, result.pagination);
+      }
 
       const fetcher = () =>
         ctx.services.organization.getPublicCreators(slug, { page, limit });

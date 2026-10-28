@@ -22,6 +22,10 @@
   never Propose, Amend or Review counter, each of which an admin was shown and
   then refused with a 403.
 
+  `canPropose` false (a member without a creator account, Codex-2hxff.76): no
+  Propose and no Amend, which is a fresh proposal, because the server refuses
+  both. An empty row says "Needs a creator account first" instead.
+
   All share % copy explicitly says "of post-platform [type] revenue" so the
   user understands the math. Currency GBP throughout.
 
@@ -34,6 +38,7 @@
     type AgreementWithShare,
     formatRevenueTypeLabel,
   } from '@codex/agreements';
+  import * as m from '$paraglide/messages';
   import AgreementShare from './AgreementShare.svelte';
 
   interface Creator {
@@ -80,6 +85,9 @@
     headingLevel?: 3 | 4 | 5;
     /** The viewer can see but not act: "View thread" is the only action. */
     readOnly?: boolean;
+    /** The creator can be sent a new proposal: false for a member without a
+      * creator account. Defaults to true. */
+    canPropose?: boolean;
     /** Optional composition seam — forwarded to the root element. */
     class?: string;
   }
@@ -95,6 +103,7 @@
     onViewThread,
     headingLevel = 4,
     readOnly = false,
+    canPropose = true,
     class: className,
   }: Props = $props();
 
@@ -307,6 +316,10 @@
             >
               View thread
             </button>
+          {:else if row.state.kind === 'none' && !canPropose}
+            <span class="agreement-card__row-empty">
+              {m.agreement_needs_creator_account()}
+            </span>
           {:else if row.state.kind === 'none'}
             <!-- SECONDARY, not primary. 32 filled brand-coloured buttons on one
                  page made nothing a decision because everything was equally
@@ -321,13 +334,15 @@
             </button>
           {:else if row.state.kind === 'active'}
             {@const activeShare = row.state.sharePercent}
-            <button
-              type="button"
-              class="agreement-card__btn agreement-card__btn--secondary"
-              onclick={() => onAmend(row.revType, activeShare)}
-            >
-              Amend
-            </button>
+            {#if canPropose}
+              <button
+                type="button"
+                class="agreement-card__btn agreement-card__btn--secondary"
+                onclick={() => onAmend(row.revType, activeShare)}
+              >
+                Amend
+              </button>
+            {/if}
             <button
               type="button"
               class="agreement-card__btn agreement-card__btn--ghost"

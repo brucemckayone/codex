@@ -10,13 +10,14 @@
  */
 
 import type { PaginatedListResponse } from '@codex/shared-types';
+import { createTestMoneyDeps } from '@codex/test-utils';
 import type Stripe from 'stripe';
 import { describe, expect, it } from 'vitest';
 import { PurchaseService } from '../services/purchase-service';
 import type { PurchaseWithItem } from '../types';
 
 const service = new PurchaseService(
-  { db: {} as never, environment: 'test' },
+  { db: {} as never, environment: 'test', ...createTestMoneyDeps() },
   {} as Stripe
 );
 

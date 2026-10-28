@@ -52,6 +52,7 @@ import { ObservabilityClient } from '@codex/observability';
 import { PurchaseService } from '@codex/purchase';
 import {
   createTestConnectAccountInput,
+  createTestMoneyDeps,
   createTestSubscriptionInput,
   createTestTierInput,
   createUniqueSlug,
@@ -93,7 +94,7 @@ describe('paused by a payment dispute (Codex-2hxff.60)', () => {
     mediaService = new MediaItemService(config);
 
     purchaseService = new PurchaseService(
-      { db, environment: 'test' },
+      { db, environment: 'test', ...createTestMoneyDeps() },
       {} as never
     );
     accessService = new ContentAccessService({
@@ -1216,7 +1217,7 @@ describe('paused by a payment dispute (Codex-2hxff.60)', () => {
       environment: 'test',
       r2: createR2SigningClientFromEnv(),
       purchaseService: new PurchaseService(
-        { db, environment: 'test' },
+        { db, environment: 'test', ...createTestMoneyDeps() },
         {} as never
       ),
       revocation,

@@ -19,6 +19,7 @@
 -->
 <script lang="ts">
   import { formatRevenueTypeLabel } from '@codex/agreements';
+  import { agreementErrorMessage } from './agreement-refusal';
   import BrandSliderField from '$lib/components/brand-editor/BrandSliderField.svelte';
   import { DialogForm } from '$lib/components/ui/DialogForm';
 
@@ -134,7 +135,7 @@
       // Parent will close on success; the form resets via the $effect above
       // when `open` flips next.
     } catch (err) {
-      error = err instanceof Error ? err.message : 'Failed to submit proposal';
+      error = agreementErrorMessage(err, 'Failed to submit proposal');
     } finally {
       submitting = false;
     }

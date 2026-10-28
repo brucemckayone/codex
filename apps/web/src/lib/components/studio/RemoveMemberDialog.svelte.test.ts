@@ -29,6 +29,7 @@ const OWNER: OrgMemberItem = {
   role: 'owner',
   status: 'active',
   joinedAt: '2026-01-04T00:00:00.000Z',
+  hasCreatorAccount: true,
 };
 const JANE: OrgMemberItem = {
   userId: 'jane',
@@ -38,6 +39,7 @@ const JANE: OrgMemberItem = {
   role: 'creator',
   status: 'active',
   joinedAt: '2026-03-12T00:00:00.000Z',
+  hasCreatorAccount: true,
 };
 const NAMELESS: OrgMemberItem = {
   userId: 'nameless',
@@ -47,6 +49,7 @@ const NAMELESS: OrgMemberItem = {
   role: 'member',
   status: 'active',
   joinedAt: '2026-08-19T00:00:00.000Z',
+  hasCreatorAccount: false,
 };
 
 const EVERYTHING: DeparturePreview = {

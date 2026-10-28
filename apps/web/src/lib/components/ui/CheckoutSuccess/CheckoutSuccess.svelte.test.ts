@@ -20,10 +20,16 @@
  * A verify the load reports as failed for good (`verifyFailed`, a 4xx) shows
  * the error state ("couldn't verify", not "still processing") and never
  * checks; a transient one stays pending and checks, capped.
+ *
+ * A completion refused for good (`unlock` resolves to a `NotRecorded`,
+ * Codex-2hxff.81; owner decision 2026-10-27, "Say we're on it") says support
+ * is on it, at once, with Contact support and Go to library, and runs no
+ * checks. Any other failed completion keeps today's slow path.
  */
 
 import type { CheckoutSessionVerifyResult } from '@codex/purchase';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { supportMailto } from '$lib/utils/support-mailto';
 import * as m from '$paraglide/messages';
 import {
   flushSync,
@@ -91,7 +97,11 @@ afterEach(() => {
 function mountWith(props: {
   verification: CheckoutSessionVerifyResult | null;
   verifyFailed?: boolean;
-  unlock?: Promise<CheckoutSessionVerifyResult | null> | null;
+  unlock?: Promise<
+    | CheckoutSessionVerifyResult
+    | { kind: 'not_recorded'; reference: string }
+    | null
+  > | null;
 }) {
   component = mount(CheckoutSuccess, {
     target: document.body,
@@ -220,6 +230,27 @@ describe('CheckoutSuccess — unlock on arrival', () => {
     expect(invalidateMock).not.toHaveBeenCalled();
   });
 
+  // Told apart by its literal: a `kind` the verify result gains later must
+  // not read as "we're on it" (Codex-2hxff.81).
+  test('a verify answer carrying some other kind is the session, not a refusal', async () => {
+    vi.useFakeTimers();
+    mountWith({
+      verification: RECORDING,
+      unlock: Promise.resolve({
+        ...UNLOCKED,
+        kind: 'content',
+      } as CheckoutSessionVerifyResult),
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+
+    expect(clean(document.querySelector('h1'))).toBe(
+      m.checkout_success_title()
+    );
+    expect(clean(document.body)).not.toContain(m.checkout_contact_support());
+  });
+
   test('the completion records it: Start watching, the library refreshed once, and no checks', async () => {
     vi.useFakeTimers();
     mountWith({ verification: RECORDING, unlock: Promise.resolve(UNLOCKED) });
@@ -300,6 +331,68 @@ describe('CheckoutSuccess — capped, then a button', () => {
     await vi.advanceTimersByTimeAsync(60 * 60_000);
 
     expect(invalidateMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('CheckoutSuccess — a payment nothing will record (Codex-2hxff.81)', () => {
+  test("refused for good: we're on it, at once, with Contact support and Go to library, and no checks", async () => {
+    vi.useFakeTimers();
+    mountWith({
+      verification: RECORDING,
+      unlock: Promise.resolve({
+        kind: 'not_recorded' as const,
+        reference: 'cs_test_abc / 3f2a9c1e-7b4d-4e8a-9c2f-1a2b3c4d5e6f',
+      }),
+    });
+    const checkmark = document.querySelector('.checkmark');
+
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+
+    expect(clean(document.querySelector('h1'))).toBe(
+      m.checkout_not_recorded_title()
+    );
+    expect(
+      clean(document.querySelector('.checkout-success__description'))
+    ).toBe(m.checkout_not_recorded_description());
+    expect(links()).toEqual([
+      // The subject quotes the reference support matches to the alert.
+      [
+        m.checkout_contact_support(),
+        supportMailto(
+          'Checkout help, reference cs_test_abc / 3f2a9c1e-7b4d-4e8a-9c2f-1a2b3c4d5e6f'
+        ),
+      ],
+      [m.checkout_success_go_to_library(), '/library'],
+    ]);
+    expect(button(m.checkout_check_again())).toBeUndefined();
+    // The payment went through: the same checkmark, and the item paid for.
+    expect(document.querySelector('.checkmark')).toBe(checkmark);
+    expect(
+      clean(document.querySelector('.checkout-success__content-title'))
+    ).toBe('Kettlebell Foundations');
+
+    // Each check would ask again and alert support again: none run.
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(invalidateMock).not.toHaveBeenCalled();
+    expect(invalidateCollectionMock).not.toHaveBeenCalled();
+  });
+
+  test("any other failed completion keeps today's slow path: checks, then Check again", async () => {
+    vi.useFakeTimers();
+    mountWith({ verification: RECORDING, unlock: Promise.resolve(null) });
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+    expect(clean(document.querySelector('h1'))).toBe(
+      m.checkout_arrival_title()
+    );
+
+    await runTheMinute();
+
+    expect(invalidateMock).toHaveBeenCalledTimes(6);
+    expect(clean(document.querySelector('h1'))).toBe(m.checkout_late_title());
+    expect(button(m.checkout_check_again())).toBeDefined();
+    expect(clean(document.body)).not.toContain(m.checkout_contact_support());
   });
 });
 

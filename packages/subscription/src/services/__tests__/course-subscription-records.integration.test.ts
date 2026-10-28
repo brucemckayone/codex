@@ -26,6 +26,7 @@ import {
   createMockStripeInvoice,
   createMockStripeSubscription,
   createTestConnectAccountInput,
+  createTestMoneyDeps,
   createUniqueSlug,
   type Database,
   seedTestUsers,
@@ -58,7 +59,7 @@ describe('course subscription records, currency and errors', () => {
     stripe = createMockStripe();
     Object.assign(stripe.checkout.sessions, { retrieve: vi.fn() });
     service = new CourseSubscriptionService(
-      { db, environment: 'test' },
+      { db, environment: 'test', ...createTestMoneyDeps() },
       stripe
     );
 
@@ -286,6 +287,7 @@ describe('course subscription records, currency and errors', () => {
         {
           db,
           environment: 'test',
+          ...createTestMoneyDeps(),
           feeConfig: {
             getFeesForCreator: vi.fn(async () => ({
               platformFeePercent,
