@@ -145,3 +145,32 @@ describe('createProgressTracker — save attribution', () => {
     expect(updateLocalProgress).toHaveBeenLastCalledWith('item-a', 3040, 5400);
   });
 });
+
+describe('createProgressTracker — a silent reset', () => {
+  test('stops the 30s saves when the element empties without a pause, and play starts them again', () => {
+    vi.useFakeTimers();
+    try {
+      const media = fakeMedia(600, 5400);
+      const tracker = createProgressTracker({
+        getContentId: () => 'item-a',
+        getMedia: () => media,
+      });
+      tracker.attach();
+      media.dispatchEvent(new Event('play'));
+      vi.advanceTimersByTime(30_000);
+      expect(updateLocalProgress).toHaveBeenCalledTimes(1);
+
+      // A destroy or an error: the element resets and fires no `pause`.
+      media.dispatchEvent(new Event('emptied'));
+      vi.advanceTimersByTime(60 * 60_000);
+      expect(updateLocalProgress).toHaveBeenCalledTimes(1);
+
+      media.dispatchEvent(new Event('play'));
+      vi.advanceTimersByTime(30_000);
+      expect(updateLocalProgress).toHaveBeenCalledTimes(2);
+      tracker.detach();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

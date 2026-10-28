@@ -31,8 +31,9 @@
   the owner's cost rule), at a press that resumes it once the links have run
   out, or when the stream answers 403 (`onUrlExpired`). The answer replaces
   the stream, and the film carries on from the same moment, playing or
-  paused as it was. No answer ends the film where it stands, as its own end
-  does ("Watch again" then asks afresh): it never drops to the 30-second
+  paused as it was, or as a press while it swapped said. No answer ends the
+  film where it stands, as its own end does ("Watch again" then asks
+  afresh): it never drops to the 30-second
   preview mid-film. A 403 BEFORE the stream's first frame is a refusal, not
   an expiry (a variant it will not serve, a token it will not take): asking
   again would loop, so a first stream says it could not play and a renewed
@@ -238,10 +239,15 @@
   /**
    * The visitor wants it playing: false at any pause (theirs, the page's
    * one-film rule, the end), so nothing resumes behind them. A stream swap
-   * fires no pause: the element's own reset is silent.
+   * fires no pause: the element's own reset is silent, so mid-swap the play
+   * button reads, and a press sets, this instead (`resuming`).
    */
-  let wanted = false;
+  let wanted = $state(false);
+  /** A silent reset waits on its resume (`suspend`, `resumeAt`). */
+  let resuming = $state(false);
 
+  /** The play button offers Play: mid-swap, unless the visitor wants it playing. */
+  const offerPlay = $derived(resuming ? !wanted : paused);
   const played = $derived(duration > 0 ? Math.min(1, time / duration) : 0);
   const fill = $derived(duration > 0 ? Math.min(1, loaded / duration) : 0);
   const muteLabel = $derived(
@@ -271,6 +277,7 @@
     if (error !== null) return;
     error = kind === 'unsupported' ? m.player_error_format() : m.player_error();
     waiting = false;
+    resuming = false;
     disarm();
     teardown();
     onfail?.(error);
@@ -278,6 +285,7 @@
 
   function finish() {
     finished = true;
+    resuming = false;
     disarm();
     onended?.();
   }
@@ -304,6 +312,10 @@
     if (!video || fixed || error !== null) return;
     if (finished) {
       replay();
+    } else if (resuming) {
+      // Mid-swap the element sits paused, silently, either way: a press is
+      // the visitor's say, and the resume honours it (`resumeAt`).
+      wanted = !wanted;
     } else if (video.paused) {
       wanted = true;
       // Paused past its links' end: renew first, and the answer plays it.
@@ -357,6 +369,8 @@
   function handlePlay() {
     paused = false;
     finished = false;
+    // Playing, whoever asked: the button reads the element again.
+    resuming = false;
     if (video) claim(video);
     arm();
     onplay?.();
@@ -380,12 +394,21 @@
   // The element's own error, which HLS.js does not always raise (a decode
   // failure). HLS.js recovers one on its next append, but the element says
   // so first, so each stream gets that recovery once; a second error is the
-  // film's. On Safari's own HLS a network error is the renewal signal,
-  // which the helper hands to `lapse`.
+  // film's. The recovery resets the element, silently, so a film that was
+  // playing picks up from its place once the stream is back; a paused one
+  // already says so. On Safari's own HLS a network error is the renewal
+  // signal, which the helper hands to `lapse`.
   function handleMediaError() {
-    if (hls && !recovered) {
+    if (hls && video && !recovered) {
       recovered = true;
+      const wasPlaying = !video.paused;
+      const from = video.currentTime;
+      const since = mark();
       hls.recoverMediaError();
+      if (wasPlaying) {
+        suspend();
+        resumeAt(video, from, since);
+      }
       return;
     }
     if (!hls && video?.error?.code === MediaError.MEDIA_ERR_NETWORK) return;
@@ -541,6 +564,18 @@
     renewTimer = null;
   }
 
+  /**
+   * The element has been reset, silently (a stream's destroy, HLS.js's
+   * recovery): paused at 0, and no `pause` fired. The mirror says so and the
+   * timer stops. Until the resume (`resumeAt`) the play button reads, and a
+   * press sets, the visitor's intent (`wanted`); after the end nothing resumes.
+   */
+  function suspend() {
+    paused = true;
+    disarm();
+    resuming = !finished;
+  }
+
   // The stream answered 403, and the helper has already destroyed its HLS.js
   // instance. Before the stream's first frame that is a refusal, never an
   // expiry: asking again would only loop (ask, attach, 403). A first stream
@@ -555,6 +590,7 @@
   // ends the film where it stands.
   function lapse() {
     hls = null;
+    suspend();
     if (!flowing) {
       teardown();
       if (stream?.renewal) endLapsed();
@@ -616,6 +652,7 @@
     // The timer's renewal ran while the film played on.
     const from = at ?? (expired ? stoppedAt : media.currentTime);
     teardown();
+    suspend();
     try {
       if (!(await attach(media, next, true))) return;
     } catch {
@@ -636,8 +673,11 @@
    * recorded a scroll away in `wanted`, and another film's start shows here.
    */
   function resumeAt(media: HTMLVideoElement, from: number, since: number) {
+    // One resume at a time: a later reset's replaces it.
+    unresume?.();
     const carryOn = () => {
       unresume = null;
+      resuming = false;
       media.currentTime = from;
       if (displaced(media, since)) wanted = false;
       if (!wanted) return;
@@ -687,6 +727,8 @@
         showing(box, entry.isIntersecting);
         if (!entry.isIntersecting) {
           wanted = false;
+          // Silently paused, it fires no pause to stop the timer.
+          disarm();
           if (!media.paused) media.pause();
         }
       }
@@ -767,10 +809,10 @@
         bind:this={playButton}
         type="button"
         class="player__button player__play"
-        aria-label={paused ? m.player_play() : m.player_pause()}
+        aria-label={offerPlay ? m.player_play() : m.player_pause()}
         onclick={toggle}
       >
-        {#if paused}
+        {#if offerPlay}
           <PlayIcon size={18} fill="currentColor" stroke="none" />
         {:else}
           <PauseIcon size={18} fill="currentColor" stroke="none" />

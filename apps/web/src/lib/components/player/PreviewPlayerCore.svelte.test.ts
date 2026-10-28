@@ -370,6 +370,69 @@ describe('renewal', () => {
   const loads = (video: HTMLVideoElement) =>
     video.dispatchEvent(new Event('loadeddata'));
 
+  /** A silent reset: the element is paused now, and said nothing. */
+  const silentlyPaused = (video: HTMLVideoElement) =>
+    Object.defineProperty(video, 'paused', {
+      configurable: true,
+      get: () => true,
+    });
+
+  /**
+   * An HLS.js 1.6 instance on `video` (with a `playhead`): its
+   * `recoverMediaError` detaches and re-attaches the element, and its
+   * `destroy` detaches it, so either way it is back at 0, paused, and fires
+   * no `pause`. Set it after `film()`, before `settle()`: the helper hands it
+   * over as the stream attaches.
+   */
+  function resetting(video: HTMLVideoElement) {
+    const reset = () => {
+      video.currentTime = 0;
+      silentlyPaused(video);
+    };
+    const hls = { destroy: vi.fn(reset), recoverMediaError: vi.fn(reset) };
+    instance = hls;
+    return hls;
+  }
+
+  /** An IntersectionObserver the test reports to, as scrolling would. */
+  function watchIntersections() {
+    const watchers: {
+      callback: IntersectionObserverCallback;
+      target?: Element;
+    }[] = [];
+    vi.stubGlobal(
+      'IntersectionObserver',
+      class {
+        readonly entry: (typeof watchers)[number];
+        constructor(callback: IntersectionObserverCallback) {
+          this.entry = { callback };
+          watchers.push(this.entry);
+        }
+        observe(target: Element) {
+          this.entry.target = target;
+        }
+        disconnect() {}
+        unobserve() {}
+        takeRecords() {
+          return [];
+        }
+      }
+    );
+    return (isIntersecting: boolean) => {
+      for (const watcher of watchers) {
+        watcher.callback(
+          [
+            {
+              isIntersecting,
+              target: watcher.target,
+            } as IntersectionObserverEntry,
+          ],
+          {} as IntersectionObserver
+        );
+      }
+    };
+  }
+
   const inTen = () => new Date(Date.now() + 600_000).toISOString();
 
   /**
@@ -535,6 +598,8 @@ describe('renewal', () => {
     video.dispatchEvent(new Event('loadedmetadata'));
     expect(video.currentTime).toBe(300);
     loads(video);
+    // The new stream plays, and says so: its own timer arms then.
+    state(video, true);
 
     vi.advanceTimersByTime(600_000);
     await settle();
@@ -969,7 +1034,9 @@ describe('renewal', () => {
       expect(renew).not.toHaveBeenCalled();
       vi.advanceTimersByTime(1);
       await settle();
+      video.dispatchEvent(new Event('loadedmetadata'));
       loads(video);
+      state(video, true);
       expect(renew).toHaveBeenCalledTimes(1);
       vi.advanceTimersByTime(120_000 - 1);
       await settle();
@@ -1042,52 +1109,6 @@ describe('renewal', () => {
   // that pauses it fires an event, so the core must look again before it
   // plays (`resumeAt`).
   describe('while the new stream loads', () => {
-    /** An IntersectionObserver the test reports to, as scrolling would. */
-    function watchIntersections() {
-      const watchers: {
-        callback: IntersectionObserverCallback;
-        target?: Element;
-      }[] = [];
-      vi.stubGlobal(
-        'IntersectionObserver',
-        class {
-          readonly entry: (typeof watchers)[number];
-          constructor(callback: IntersectionObserverCallback) {
-            this.entry = { callback };
-            watchers.push(this.entry);
-          }
-          observe(target: Element) {
-            this.entry.target = target;
-          }
-          disconnect() {}
-          unobserve() {}
-          takeRecords() {
-            return [];
-          }
-        }
-      );
-      return (isIntersecting: boolean) => {
-        for (const watcher of watchers) {
-          watcher.callback(
-            [
-              {
-                isIntersecting,
-                target: watcher.target,
-              } as IntersectionObserverEntry,
-            ],
-            {} as IntersectionObserver
-          );
-        }
-      };
-    }
-
-    /** The swap's reset: the element is paused now, and said nothing. */
-    const silentlyPaused = (video: HTMLVideoElement) =>
-      Object.defineProperty(video, 'paused', {
-        configurable: true,
-        get: () => true,
-      });
-
     test('scrolled away before it loads: it does not play off-screen', async () => {
       vi.useFakeTimers();
       const report = watchIntersections();
@@ -1154,6 +1175,46 @@ describe('renewal', () => {
       a.video.dispatchEvent(new Event('loadedmetadata'));
       expect(play).toHaveBeenCalledTimes(1);
     });
+
+    test('paused mid-swap: the button reads the visitor, and the film stays paused once the swap lands', async () => {
+      vi.useFakeTimers();
+      const renew = vi.fn(async () => ({
+        playlistUrl: RENEWED,
+        expiresAt: inTen(),
+      }));
+      const { root, video } = film({
+        src: signed(inTen()),
+        renew,
+        start: 'sound',
+      });
+      const hls = resetting(video);
+      await settle();
+      loads(video);
+      state(video, true);
+      playhead(video, 300);
+      // The timer's renewal: the old stream's destroy resets the element.
+      vi.advanceTimersByTime(570_000);
+      await settle();
+      expect(attached).toEqual([FULL, RENEWED]);
+      expect(hls.destroy).toHaveBeenCalledTimes(1);
+      expect(video.paused).toBe(true);
+      // The visitor still wants it playing, so the button offers Pause.
+      expect(button(root, m.player_pause())).not.toBeNull();
+      play.mockClear();
+
+      button(root, m.player_pause())?.click();
+      flushSync();
+      expect(button(root, m.player_play())).not.toBeNull();
+      expect(play).not.toHaveBeenCalled();
+
+      video.dispatchEvent(new Event('loadedmetadata'));
+      loads(video);
+      flushSync();
+      expect(video.currentTime).toBe(300);
+      expect(play).not.toHaveBeenCalled();
+      expect(button(root, m.player_play())).not.toBeNull();
+      expect(vi.getTimerCount()).toBe(0);
+    });
   });
 
   // HLS.js recovers a decode error on its next append, but the element
@@ -1185,6 +1246,81 @@ describe('renewal', () => {
       expect(instance.recoverMediaError).toHaveBeenCalledTimes(1);
       expect(errorText(root)).toBe(m.player_error());
       expect(instance.destroy).toHaveBeenCalledTimes(1);
+    });
+
+    // The recovery resets the element, silently: the film neither freezes
+    // under a Pause button nor keeps a timer that could start it later.
+    test('recovered while it plays: it picks up from its place, and no timer runs until it plays again', async () => {
+      vi.useFakeTimers();
+      const renew = vi.fn(async () => ({
+        playlistUrl: RENEWED,
+        expiresAt: inTen(),
+      }));
+      const { root, video } = film({
+        src: signed(inTen()),
+        renew,
+        start: 'sound',
+      });
+      const hls = resetting(video);
+      await settle();
+      loads(video);
+      state(video, true);
+      playhead(video, 200);
+      expect(vi.getTimerCount()).toBe(1);
+      play.mockClear();
+
+      decodeError(video);
+      expect(hls.recoverMediaError).toHaveBeenCalledTimes(1);
+      expect(video.currentTime).toBe(0);
+      expect(errorText(root)).toBeUndefined();
+      expect(vi.getTimerCount()).toBe(0);
+
+      video.dispatchEvent(new Event('loadedmetadata'));
+      expect(video.currentTime).toBe(200);
+      expect(play).toHaveBeenCalledTimes(1);
+      // Its frames are back, but it has not yet said it plays: still none.
+      loads(video);
+      expect(vi.getTimerCount()).toBe(0);
+      state(video, true);
+      expect(vi.getTimerCount()).toBe(1);
+      expect(renew).not.toHaveBeenCalled();
+    });
+
+    test('recovered, then scrolled away before it is back: no ask, and it stays paused', async () => {
+      vi.useFakeTimers();
+      const report = watchIntersections();
+      const renew = vi.fn(async () => ({
+        playlistUrl: RENEWED,
+        expiresAt: inTen(),
+      }));
+      const { video } = film({
+        src: signed(inTen()),
+        renew,
+        start: 'sound',
+      });
+      resetting(video);
+      await settle();
+      report(true);
+      loads(video);
+      state(video, true);
+      playhead(video, 200);
+      // Moments before the timer's renewal.
+      vi.advanceTimersByTime(560_000);
+      play.mockClear();
+
+      decodeError(video);
+      report(false);
+      vi.advanceTimersByTime(60_000);
+      await settle();
+      video.dispatchEvent(new Event('loadedmetadata'));
+      loads(video);
+      for (let lifetime = 0; lifetime < 3; lifetime++) {
+        vi.advanceTimersByTime(600_000);
+        await settle();
+      }
+      expect(renew).not.toHaveBeenCalled();
+      expect(play).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
     });
 
     test('behind an error, K plays nothing', async () => {

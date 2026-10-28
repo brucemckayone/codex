@@ -158,7 +158,7 @@ describe('createHlsPlayer — path selection', () => {
     await createHlsPlayer({ media, src: MANIFEST, onError });
 
     expect(onError).toHaveBeenCalledWith(
-      expect.stringContaining('cannot play this video format'),
+      expect.stringContaining('cannot play this format'),
       'unsupported',
       0
     );

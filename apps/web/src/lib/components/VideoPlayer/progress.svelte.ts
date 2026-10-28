@@ -92,6 +92,16 @@ export function createProgressTracker(options: ProgressTrackerOptions) {
     save();
   }
 
+  /**
+   * A destroy, a source swap or an error resets the element without a
+   * `pause` event, so the 30s saves would run on against a stopped element
+   * for as long as the tab stays open. Stop them; a rebuild's `play` starts
+   * them again. No save here: the element already reads the reset 0.
+   */
+  function handleEmptied(): void {
+    stopInterval();
+  }
+
   function attach(): void {
     const video = getMedia();
     if (!video) return;
@@ -99,6 +109,7 @@ export function createProgressTracker(options: ProgressTrackerOptions) {
     video.addEventListener('play', handlePlay);
     video.addEventListener('pause', handlePause);
     video.addEventListener('ended', handleEnded);
+    video.addEventListener('emptied', handleEmptied);
     if (browser) {
       document.addEventListener('visibilitychange', handleVisibilityChange);
       window.addEventListener('beforeunload', handleBeforeUnload);
@@ -123,6 +134,7 @@ export function createProgressTracker(options: ProgressTrackerOptions) {
       video.removeEventListener('play', handlePlay);
       video.removeEventListener('pause', handlePause);
       video.removeEventListener('ended', handleEnded);
+      video.removeEventListener('emptied', handleEmptied);
     }
 
     if (browser) {

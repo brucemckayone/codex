@@ -147,7 +147,7 @@ export async function createHlsPlayer(
     // correct for a plain mp4 URL, which most browsers play fine.
     if (!supportsNativeHls() && /\.m3u8(\?|$)/.test(src)) {
       onError?.(
-        'This browser cannot play this video format.',
+        'This browser cannot play this format.',
         'unsupported',
         media.currentTime
       );
@@ -215,6 +215,13 @@ export async function createHlsPlayer(
 
   let mediaErrorRecoveryAttempts = 0;
   let fragmentRetries = 0;
+  /**
+   * The playhead when the first media fault struck. Each `recoverMediaError()`
+   * detaches and re-attaches the element, which reads 0 until the recovered
+   * stream seeks back, and a fault that survives both recoveries usually
+   * recurs before it does.
+   */
+  let placeAtFault = 0;
 
   hls.on(HlsJs.Events.FRAG_LOADED, () => {
     fragmentRetries = 0;
@@ -226,7 +233,7 @@ export async function createHlsPlayer(
    * rebuilds resumes from here (a paid viewer's place in a long film).
    */
   const stop = () => {
-    const at = media.currentTime;
+    const at = media.currentTime || placeAtFault;
     hls.destroy();
     return at;
   };
@@ -265,17 +272,14 @@ export async function createHlsPlayer(
 
       case HlsJs.ErrorTypes.MEDIA_ERROR:
         if (mediaErrorRecoveryAttempts === 0) {
+          placeAtFault = media.currentTime;
           hls.recoverMediaError();
         } else if (mediaErrorRecoveryAttempts === 1) {
           hls.swapAudioCodec();
           hls.recoverMediaError();
         } else {
           const at = stop();
-          onError?.(
-            'Playback error. The video format may not be supported.',
-            'media',
-            at
-          );
+          onError?.('This could not be played. Please try again.', 'media', at);
         }
         mediaErrorRecoveryAttempts++;
         break;

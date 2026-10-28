@@ -322,22 +322,55 @@ describe('AudioPlayer — moving between course items', () => {
   });
 });
 
+/**
+ * The page's access load re-runs on every tab return and on the org version
+ * poll, signing the same item again. hls.js 1.6.15's `loadSource()` would
+ * restart the stream at 0:00, paused (mirrors VideoPlayer), so a live stream
+ * is left alone.
+ */
 describe('AudioPlayer — same item, freshly signed URL', () => {
-  test('swaps the manifest under the playhead instead of restarting', async () => {
+  test('leaves a live stream alone: no loadSource, no rebuild, no pause', async () => {
     hlsMode = 'mse';
     const { component, props } = await mountPlayer();
 
-    // Follow / subscribe unlock: the access flow re-runs and returns a new
-    // signed URL for the SAME content. This must NOT stop playback.
     props.src = 'https://cdn.test/item-a/resigned.m3u8';
     flushSync();
-    await vi.waitFor(() =>
-      expect(loadSourceCalls).toContain('https://cdn.test/item-a/resigned.m3u8')
-    );
+    await Promise.resolve();
 
-    expect(recorded).toHaveLength(1); // no rebuild
+    expect(loadSourceCalls).toHaveLength(0);
+    expect(recorded).toHaveLength(1);
     expect(destroyedInstances).toHaveLength(0);
     expect(pauseSpy).not.toHaveBeenCalled();
+
+    unmount(component);
+  });
+
+  test('rebuilds an errored player at the place it kept, not 0:00', async () => {
+    hlsMode = 'mse';
+    const { component, props } = await mountPlayer();
+    const el = audioElement();
+    Object.defineProperty(el, 'duration', { configurable: true, value: 3600 });
+    Object.defineProperty(el, 'currentTime', {
+      configurable: true,
+      writable: true,
+      value: 0,
+    });
+
+    recorded[0]?.onError?.(
+      'This could not be loaded. Please try again.',
+      'network',
+      2420
+    );
+    flushSync();
+    props.src = 'https://cdn.test/item-a/resigned.m3u8';
+    flushSync();
+    await vi.waitFor(() => expect(recorded).toHaveLength(2));
+    el.dispatchEvent(new Event('loadedmetadata'));
+
+    expect(el.currentTime).toBe(2420);
+    el.currentTime = 2500;
+    el.dispatchEvent(new Event('pause'));
+    expect(updateLocalProgress).toHaveBeenLastCalledWith('item-a', 2500, 3600);
 
     unmount(component);
   });
@@ -394,6 +427,31 @@ describe('AudioPlayer — a rebuilt stream keeps the listener’s place', () => 
     await vi.waitFor(() => expect(recorded).toHaveLength(2));
     el.dispatchEvent(new Event('loadedmetadata'));
     expect(el.currentTime).toBe(845);
+
+    unmount(component);
+  });
+
+  test('a renewal of PLAYING audio plays on once it lands; paused audio stays paused', async () => {
+    const play = vi.mocked(HTMLMediaElement.prototype.play);
+    const { component } = await mountPlayer();
+    const el = audioElement();
+    resetElement(el);
+
+    el.dispatchEvent(new Event('play'));
+    play.mockClear();
+    recorded[0]?.onUrlExpired?.(845);
+    await vi.waitFor(() => expect(recorded).toHaveLength(2));
+    el.dispatchEvent(new Event('loadedmetadata'));
+    expect(el.currentTime).toBe(845);
+    expect(play).toHaveBeenCalledTimes(1);
+
+    el.dispatchEvent(new Event('pause'));
+    play.mockClear();
+    recorded[1]?.onUrlExpired?.(900);
+    await vi.waitFor(() => expect(recorded).toHaveLength(3));
+    el.dispatchEvent(new Event('loadedmetadata'));
+    expect(el.currentTime).toBe(900);
+    expect(play).not.toHaveBeenCalled();
 
     unmount(component);
   });
