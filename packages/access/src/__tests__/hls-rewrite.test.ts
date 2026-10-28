@@ -288,11 +288,16 @@ describe('film token sign/verify (owner P10)', () => {
     mediaId: '22222222-2222-4222-8222-222222222222',
   };
   const inTenMinutes = () => Math.floor(Date.now() / 1000) + 600;
+  const SIGNATURE = { ok: false, reason: 'signature' };
+  const MALFORMED = { ok: false, reason: 'malformed' };
 
   it('verifies a freshly-signed film token', async () => {
     const exp = inTenMinutes();
     const token = await signFilmToken({ ...payload, exp }, SECRET);
-    expect(await verifyFilmToken(token, SECRET)).toEqual({ ...payload, exp });
+    expect(await verifyFilmToken(token, SECRET)).toEqual({
+      ok: true,
+      payload: { ...payload, exp },
+    });
   });
 
   it('a film token is NOT a content-stream token', async () => {
@@ -306,7 +311,8 @@ describe('film token sign/verify (owner P10)', () => {
   it('a content token (minted after a paid access decision) is NOT a film token', async () => {
     const { courseId: _courseId, ...media } = payload;
     const token = await signHlsToken({ ...media, exp: inTenMinutes() }, SECRET);
-    expect(await verifyFilmToken(token, SECRET)).toBeNull();
+    // Signed for the other domain: a signature refusal.
+    expect(await verifyFilmToken(token, SECRET)).toEqual(SIGNATURE);
     // Not even with a course id forged into its payload: the signature binds
     // the domain, and the payload with it.
     const [, sig] = token.split('.');
@@ -314,7 +320,9 @@ describe('film token sign/verify (owner P10)', () => {
       .replace(/\+/g, '-')
       .replace(/\//g, '_')
       .replace(/=+$/, '');
-    expect(await verifyFilmToken(`${forged}.${sig}`, SECRET)).toBeNull();
+    expect(await verifyFilmToken(`${forged}.${sig}`, SECRET)).toEqual(
+      SIGNATURE
+    );
   });
 
   it('rejects another secret, an expired token, a missing course and a malformed token', async () => {
@@ -322,21 +330,24 @@ describe('film token sign/verify (owner P10)', () => {
       { ...payload, exp: inTenMinutes() },
       SECRET
     );
-    expect(await verifyFilmToken(live, 'wrong-secret')).toBeNull();
+    expect(await verifyFilmToken(live, 'wrong-secret')).toEqual(SIGNATURE);
 
     const expired = await signFilmToken(
       { ...payload, exp: Math.floor(Date.now() / 1000) - 1 },
       SECRET
     );
-    expect(await verifyFilmToken(expired, SECRET)).toBeNull();
+    expect(await verifyFilmToken(expired, SECRET)).toEqual({
+      ok: false,
+      reason: 'expired',
+    });
 
     const { courseId: _courseId, ...media } = payload;
     const courseless = await signFilmToken(
       { ...media, exp: inTenMinutes() } as Parameters<typeof signFilmToken>[0],
       SECRET
     );
-    expect(await verifyFilmToken(courseless, SECRET)).toBeNull();
+    expect(await verifyFilmToken(courseless, SECRET)).toEqual(MALFORMED);
 
-    expect(await verifyFilmToken('not-a-token', SECRET)).toBeNull();
+    expect(await verifyFilmToken('not-a-token', SECRET)).toEqual(MALFORMED);
   });
 });

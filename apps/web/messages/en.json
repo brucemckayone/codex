@@ -1344,6 +1344,7 @@
   "player_named": "{title} player",
   "player_loading": "Loading the film",
   "player_error": "This film could not be played.",
+  "player_error_format": "This browser cannot play this film. Try another browser.",
   "player_watch_again": "Watch again",
   "player_close": "Close video",
   "player_intro_video": "Intro video",

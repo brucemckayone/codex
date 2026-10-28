@@ -15,9 +15,11 @@
 
   THE PRESS mounts the player in its own tick (`flushSync`), so its `play()`
   keeps the sound (`components/player/start.ts`); a player not fetched yet is
-  waited for, and may then start muted. A clip the server marked `fullFilm`
-  asks the page for the full film (`film-source.ts`), and asks again as its
-  links run out (`filmRenewal`).
+  waited for, and may then start muted. If its code never arrives (a deploy
+  replaced the chunk, the connection dropped), the button says so beside it
+  and a press tries again. A clip the server marked `fullFilm` asks the page
+  for the full film once the player is here to play it (`film-source.ts`),
+  and asks again as its links run out (`filmRenewal`).
 
   IN THE FRAME the player covers it edge to edge, the film letterboxed on its
   dark backdrop, so a 4/5 portrait or Bold's 21:9 screen keeps its shape and
@@ -72,30 +74,33 @@
   let layer: HTMLDivElement | undefined = $state();
   /** The player had focus when the film ended: "Watch again" takes it. */
   let refocus = $state(false);
+  /** The player's code did not arrive: the button says so, and a press tries again. */
+  let failed = $state(false);
 
   function press() {
     if (edit || phase === 'loading' || phase === 'up') return;
-    source = filmSource(clip, film, page.requestFilm);
     refocus = false;
+    failed = false;
     const ready = loadedPlayerCore();
     if (ready) {
-      Player = ready;
-      phase = 'up';
+      show(ready);
       // Mounted now, in the press's own tick: its play() keeps the sound.
       flushSync();
       return;
     }
     phase = 'loading';
-    loadPlayerCore().then(
-      (loaded) => {
-        Player = loaded;
-        phase = 'up';
-      },
-      () => {
-        // The player's code did not arrive: the poster again, to try once more.
-        phase = 'poster';
-      }
-    );
+    loadPlayerCore().then(show, () => {
+      failed = true;
+      phase = 'poster';
+    });
+  }
+
+  // The full film is asked for only once the player is here to play it: a
+  // press whose player never arrived asks for nothing.
+  function show(core: PlayerCore) {
+    source = filmSource(clip, film, page.requestFilm);
+    Player = core;
+    phase = 'up';
   }
 
   function finish() {
@@ -112,6 +117,7 @@
       onclick={press}
       preload={!edit && !page.still}
       takeFocus={refocus}
+      note={failed ? FILM_COPY.failed : null}
     />
   {/if}
 {/snippet}

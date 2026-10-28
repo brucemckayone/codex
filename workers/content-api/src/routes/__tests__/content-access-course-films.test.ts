@@ -18,6 +18,7 @@
 
 import { createExecutionContext, env } from 'cloudflare:test';
 import { signFilmToken, signHlsToken } from '@codex/access';
+import { InternalServiceError } from '@codex/service-errors';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -60,15 +61,33 @@ const testEnv = {
   WORKER_SHARED_SECRET: SECRET,
 } as unknown as typeof env;
 
-/** No user middleware: the sales page's visitor is anonymous. */
-function buildApp() {
-  const app = new Hono();
+/** What the observability middleware would have set, as spies. */
+function fakeObs() {
+  return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+}
+
+/**
+ * No user middleware: the sales page's visitor is anonymous. `obs` stands in
+ * for the worker's observability middleware, for the proxy tests that read
+ * what was logged.
+ */
+function buildApp(obs?: ReturnType<typeof fakeObs>) {
+  const app = new Hono<{ Variables: Record<string, unknown> }>();
+  if (obs) {
+    app.use('*', async (c, next) => {
+      c.set('obs', obs);
+      await next();
+    });
+  }
   app.route('/api/access', contentAccess);
   return app;
 }
 
-async function get(path: string): Promise<Response> {
-  return buildApp().fetch(
+async function get(
+  path: string,
+  obs?: ReturnType<typeof fakeObs>
+): Promise<Response> {
+  return buildApp(obs).fetch(
     new Request(`http://content-api.test/api/access${path}`),
     testEnv,
     createExecutionContext()
@@ -121,6 +140,19 @@ describe('GET /api/access/courses/:courseId/films/:film/stream — the public mi
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ data: null });
+  });
+
+  it('a failing mint is a 500 error, never a quiet null', async () => {
+    accessSpies.getCourseFilmStream.mockRejectedValue(
+      new InternalServiceError('Streaming is unavailable')
+    );
+
+    const res = await minter('intro');
+
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toHaveProperty('error');
+    expect(body).not.toHaveProperty('data');
   });
 
   it('refuses a film that is not one a press can ask for, and a missing org, before the service', async () => {
@@ -237,5 +269,177 @@ describe('the content proxies refuse a film token', () => {
     );
     expect(res.status).toBe(403);
     expect(proxySpies.getHlsMasterPlaylist).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The content proxies now share their tail (`servePlaylist`, `presignWindow`)
+ * with the film proxies, so their own behaviour is pinned here too: a content
+ * token still opens its media, under the content id in the path.
+ */
+describe('the content proxies, on their shared tail', () => {
+  const CONTENT_ID = '4d000000-0000-4000-8000-000000000005';
+  const contentToken = () =>
+    signHlsToken(
+      { creatorId: CREATOR_ID, mediaId: MEDIA_ID, exp: inTenMinutes() },
+      SECRET
+    );
+
+  it('serves the content master for a content token', async () => {
+    proxySpies.getHlsMasterPlaylist.mockResolvedValue('#EXTM3U\n');
+    const token = await contentToken();
+
+    const res = await get(
+      `/content/${CONTENT_ID}/hls/master.m3u8?token=${encodeURIComponent(token)}`
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe('#EXTM3U\n');
+    expect(proxySpies.getHlsMasterPlaylist).toHaveBeenCalledWith({
+      contentId: CONTENT_ID,
+      creatorId: CREATOR_ID,
+      mediaId: MEDIA_ID,
+      token,
+    });
+    expect(res.headers.get('cache-control')).toBe('private, no-store');
+  });
+
+  it('presigns the content variant for the token’s remaining life, and 404s a missing one', async () => {
+    proxySpies.getHlsVariantPlaylist.mockResolvedValueOnce('#EXTM3U\n');
+    const token = encodeURIComponent(await contentToken());
+
+    const res = await get(
+      `/content/${CONTENT_ID}/hls/480p/index.m3u8?token=${token}`
+    );
+    expect(res.status).toBe(200);
+    const [input] = proxySpies.getHlsVariantPlaylist.mock.calls[0] ?? [];
+    expect(input).toMatchObject({
+      creatorId: CREATOR_ID,
+      mediaId: MEDIA_ID,
+      variant: '480p',
+    });
+    expect(input.expirySeconds).toBeGreaterThan(590);
+    expect(input.expirySeconds).toBeLessThanOrEqual(600);
+
+    proxySpies.getHlsVariantPlaylist.mockResolvedValueOnce(null);
+    expect(
+      (await get(`/content/${CONTENT_ID}/hls/480p/index.m3u8?token=${token}`))
+        .status
+    ).toBe(404);
+  });
+
+  it('floors the presign window at 60s for a token about to expire', async () => {
+    proxySpies.getHlsVariantPlaylist.mockResolvedValue('#EXTM3U\n');
+    const nearlyGone = await signHlsToken(
+      {
+        creatorId: CREATOR_ID,
+        mediaId: MEDIA_ID,
+        exp: Math.floor(Date.now() / 1000) + 5,
+      },
+      SECRET
+    );
+
+    await get(
+      `/content/${CONTENT_ID}/hls/480p/index.m3u8?token=${encodeURIComponent(nearlyGone)}`
+    );
+    const [input] = proxySpies.getHlsVariantPlaylist.mock.calls[0] ?? [];
+    expect(input.expirySeconds).toBe(60);
+  });
+});
+
+/**
+ * Every film-proxy refusal is the same 403 to the caller, but the log says
+ * which: a broken or forged link warns, routine expiry is debug only.
+ */
+describe('the film proxies log why they refused', () => {
+  const master = (query: string, courseId: string = COURSE_ID) =>
+    `/courses/${courseId}/films/hls/master.m3u8${query}`;
+  const tokenQuery = async (token: Promise<string> | string) =>
+    `?token=${encodeURIComponent(await token)}`;
+
+  async function refusedWith(path: string) {
+    const obs = fakeObs();
+    const res = await get(path, obs);
+    expect(res.status).toBe(403);
+    return obs;
+  }
+
+  it.each([
+    ['malformed', async () => master('?token=not-a-token')],
+    [
+      'signature',
+      async () =>
+        master(
+          await tokenQuery(
+            signHlsToken(
+              { creatorId: CREATOR_ID, mediaId: MEDIA_ID, exp: inTenMinutes() },
+              SECRET
+            )
+          )
+        ),
+    ],
+    [
+      'course-mismatch',
+      async () => master(await tokenQuery(filmToken(OTHER_COURSE_ID))),
+    ],
+    ['no-token', async () => master('')],
+    [
+      'bad-path',
+      async () => master(await tokenQuery(filmToken()), 'not-a-course'),
+    ],
+    [
+      'bad-variant',
+      async () =>
+        `/courses/${COURSE_ID}/films/hls/originals/index.m3u8${await tokenQuery(filmToken())}`,
+    ],
+  ])('%s warns, with its reason', async (reason, path) => {
+    const obs = await refusedWith(await path());
+    expect(obs.warn).toHaveBeenCalledWith(
+      'course_film.token_refused',
+      expect.objectContaining({ reason })
+    );
+  });
+
+  it('a token signed with another secret is a signature refusal', async () => {
+    const forged = await signFilmToken(
+      {
+        courseId: COURSE_ID,
+        creatorId: CREATOR_ID,
+        mediaId: MEDIA_ID,
+        exp: inTenMinutes(),
+      },
+      'not-the-secret'
+    );
+    const obs = await refusedWith(master(await tokenQuery(forged)));
+    expect(obs.warn).toHaveBeenCalledWith('course_film.token_refused', {
+      reason: 'signature',
+      courseId: COURSE_ID,
+    });
+  });
+
+  it('an expired token is routine: debug, and no warning', async () => {
+    const expired = await signFilmToken(
+      {
+        courseId: COURSE_ID,
+        creatorId: CREATOR_ID,
+        mediaId: MEDIA_ID,
+        exp: Math.floor(Date.now() / 1000) - 1,
+      },
+      SECRET
+    );
+    const obs = await refusedWith(master(await tokenQuery(expired)));
+    expect(obs.warn).not.toHaveBeenCalled();
+    expect(obs.debug).toHaveBeenCalledWith('course_film.token_expired', {
+      courseId: COURSE_ID,
+    });
+  });
+
+  it('a good token logs no refusal', async () => {
+    proxySpies.getFilmMasterPlaylist.mockResolvedValue('#EXTM3U\n');
+    const obs = fakeObs();
+    const res = await get(master(await tokenQuery(filmToken())), obs);
+    expect(res.status).toBe(200);
+    expect(obs.warn).not.toHaveBeenCalled();
+    expect(obs.debug).not.toHaveBeenCalled();
   });
 });

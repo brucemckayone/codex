@@ -132,19 +132,27 @@ export async function signHlsToken(
   return `${encodedPayload}.${signature}`;
 }
 
+/** Why a token was refused, as the film proxies log it. */
+export type TokenRefusal = 'malformed' | 'signature' | 'expired';
+
 /**
  * Check a token's signature over `${domain}${encodedPayload}` and decode its
- * payload, or `null` when it is malformed or tampered. Field and expiry checks
- * are the caller's: each token kind names its own fields.
+ * payload: `malformed` when it is not `<payload>.<signature>` or its payload is
+ * not a JSON object, `signature` when it was tampered with or signed for
+ * another domain. Field and expiry checks are the caller's: each token kind
+ * names its own fields.
  */
 async function decodeSignedPayload(
   token: string,
   secret: string,
   domain: string
-): Promise<Record<string, unknown> | null> {
+): Promise<
+  | { ok: true; payload: Record<string, unknown> }
+  | { ok: false; reason: Exclude<TokenRefusal, 'expired'> }
+> {
   const dotIndex = token.indexOf('.');
   if (dotIndex <= 0 || dotIndex === token.length - 1) {
-    return null;
+    return { ok: false, reason: 'malformed' };
   }
 
   const encodedPayload = token.slice(0, dotIndex);
@@ -155,7 +163,7 @@ async function decodeSignedPayload(
     secret
   );
   if (!constantTimeEqual(providedSignature, expectedSignature)) {
-    return null;
+    return { ok: false, reason: 'signature' };
   }
 
   try {
@@ -163,10 +171,10 @@ async function decodeSignedPayload(
       base64UrlDecodeToString(encodedPayload)
     );
     return typeof payload === 'object' && payload !== null
-      ? (payload as Record<string, unknown>)
-      : null;
+      ? { ok: true, payload: payload as Record<string, unknown> }
+      : { ok: false, reason: 'malformed' };
   } catch {
-    return null;
+    return { ok: false, reason: 'malformed' };
   }
 }
 
@@ -186,7 +194,8 @@ export async function verifyHlsToken(
   nowSeconds: number = Math.floor(Date.now() / 1000)
 ): Promise<HlsTokenPayload | null> {
   // No domain: a content token signs the bare payload, as it always has.
-  const payload = await decodeSignedPayload(token, secret, '');
+  const decoded = await decodeSignedPayload(token, secret, '');
+  const payload = decoded.ok ? decoded.payload : null;
   if (
     typeof payload?.creatorId !== 'string' ||
     typeof payload?.mediaId !== 'string' ||
@@ -245,32 +254,45 @@ export async function signFilmToken(
 }
 
 /**
- * Verify a film token, or `null` when it is malformed, tampered, expired, or
- * a content token. Never throws — the routes map `null` to 403.
+ * A film token's verdict. The film proxies answer every refusal with the same
+ * 403, but log the reason, so a broken token is told apart from routine
+ * expiry. A content token presented here is a `signature` refusal: it was
+ * signed for the other domain.
  */
+export type FilmTokenCheck =
+  | { ok: true; payload: FilmTokenPayload }
+  | { ok: false; reason: TokenRefusal };
+
+/** Verify a film token. Never throws. */
 export async function verifyFilmToken(
   token: string,
   secret: string,
   nowSeconds: number = Math.floor(Date.now() / 1000)
-): Promise<FilmTokenPayload | null> {
-  const payload = await decodeSignedPayload(token, secret, FILM_TOKEN_DOMAIN);
+): Promise<FilmTokenCheck> {
+  const decoded = await decodeSignedPayload(token, secret, FILM_TOKEN_DOMAIN);
+  if (!decoded.ok) return decoded;
+
+  const { payload } = decoded;
   if (
-    typeof payload?.courseId !== 'string' ||
-    typeof payload?.creatorId !== 'string' ||
-    typeof payload?.mediaId !== 'string' ||
-    typeof payload?.exp !== 'number'
+    typeof payload.courseId !== 'string' ||
+    typeof payload.creatorId !== 'string' ||
+    typeof payload.mediaId !== 'string' ||
+    typeof payload.exp !== 'number'
   ) {
-    return null;
+    return { ok: false, reason: 'malformed' };
   }
 
   if (nowSeconds >= payload.exp) {
-    return null;
+    return { ok: false, reason: 'expired' };
   }
 
   return {
-    courseId: payload.courseId,
-    creatorId: payload.creatorId,
-    mediaId: payload.mediaId,
-    exp: payload.exp,
+    ok: true,
+    payload: {
+      courseId: payload.courseId,
+      creatorId: payload.creatorId,
+      mediaId: payload.mediaId,
+      exp: payload.exp,
+    },
   };
 }

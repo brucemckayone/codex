@@ -14,6 +14,7 @@
  * `resolveCourseBySlug`.
  */
 
+import type { CourseFilmStreamResponse } from '@codex/access';
 import {
   courseFilmParamsSchema,
   courseFilmQuerySchema,
@@ -113,6 +114,10 @@ const requestCourseFilmSchema = courseFilmParamsSchema.extend(
  * re-checks on every call, so this is the gate and the clip's `fullFilm` only
  * a hint.
  *
+ * `organizationId` comes from the browser: a CONSISTENCY filter, not an
+ * authorisation input. It can only narrow; the worker's course→org join is
+ * the check, so naming another org gets the same null as any refusal.
+ *
  * A `command()`, not a `query()`: every call mints a fresh 10-minute token,
  * which a query's per-argument cache would hand back after it had expired. No
  * `setHeaders` (it throws inside a remote function); the worker answers
@@ -124,7 +129,7 @@ export const requestCourseFilm = command(
     organizationId,
     courseId,
     film,
-  }): Promise<{ playlistUrl: string; expiresAt: string } | null> => {
+  }): Promise<CourseFilmStreamResponse | null> => {
     const { platform, cookies } = getRequestEvent();
     const stream = await createServerApi(
       platform,

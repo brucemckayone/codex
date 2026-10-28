@@ -326,15 +326,20 @@ export async function getHlsMasterPlaylist(
   });
 }
 
+/** The one message a film-stream failure gives its anonymous caller. */
+const FILM_STREAM_UNAVAILABLE = 'Streaming is unavailable';
+
 /**
  * Mint the signed FULL stream of a course sales film (owner P10): a film token
  * and the FILM master-proxy URL it opens. The caller has run the eligibility
  * check (`resolveCourseFilm`); this only signs, as
  * {@link buildStreamingResponse} does for a granted content stream.
  *
- * Its failures carry NO context, unlike that function's `R2SigningError`: a
- * ServiceError's context reaches the client verbatim, and this one answers an
- * anonymous caller, who must not be handed the R2 key.
+ * Its failures carry NO context and one generic message, unlike that
+ * function's `R2SigningError`: a ServiceError's message and context reach the
+ * client verbatim, and this one answers an anonymous caller, who must not be
+ * handed the R2 key or the names of internal config. The detail goes to the
+ * log instead.
  *
  * @throws {InternalServiceError} proxy misconfigured, or signing failed
  */
@@ -343,15 +348,25 @@ export async function buildFilmStreamResponse(
   deps: {
     contentApiBaseUrl: string | undefined;
     hlsTokenSecret: string | undefined;
+    obs: ObservabilityClient;
   },
   courseId: string,
   expirySeconds: number
 ): Promise<{ playlistUrl: string; expiresAt: Date }> {
-  const { contentApiBaseUrl, hlsTokenSecret } = deps;
+  const { contentApiBaseUrl, hlsTokenSecret, obs } = deps;
   if (!contentApiBaseUrl || !hlsTokenSecret) {
-    throw new InternalServiceError(
-      'HLS streaming proxy is not configured (contentApiBaseUrl / hlsTokenSecret missing)'
-    );
+    // Field NAMES only, never a value: one of them is the signing secret.
+    const missing = [
+      contentApiBaseUrl ? null : 'contentApiBaseUrl',
+      hlsTokenSecret ? null : 'hlsTokenSecret',
+    ].filter((name) => name !== null);
+    obs.error('Failed to mint course film stream', {
+      courseId,
+      mediaItemId: film.mediaId,
+      errorName: 'MisconfiguredStreamingProxy',
+      errorMessage: `missing ${missing.join('/')}`,
+    });
+    throw new InternalServiceError(FILM_STREAM_UNAVAILABLE);
   }
 
   try {
@@ -368,11 +383,15 @@ export async function buildFilmStreamResponse(
       expiresAt: new Date(exp * 1000),
     };
   } catch (err) {
-    throw new InternalServiceError(
-      'Failed to sign a course film stream',
-      undefined,
-      { cause: err }
-    );
+    obs.error('Failed to mint course film stream', {
+      courseId,
+      mediaItemId: film.mediaId,
+      errorName: err instanceof Error ? err.name : undefined,
+      errorMessage: err instanceof Error ? err.message : String(err),
+    });
+    throw new InternalServiceError(FILM_STREAM_UNAVAILABLE, undefined, {
+      cause: err,
+    });
   }
 }
 

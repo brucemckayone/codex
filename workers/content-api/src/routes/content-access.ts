@@ -2,8 +2,10 @@ import {
   type CourseEntryResponse,
   type CourseFilmStreamResponse,
   createContentAccessService,
+  type FilmTokenPayload,
   type PlaybackProgressResponse,
   type StreamingUrlResponse,
+  type TokenRefusal,
   type UpdatePlaybackProgressResponse,
   verifyFilmToken,
   verifyHlsToken,
@@ -32,7 +34,7 @@ import {
   withdrawnContentQuerySchema,
 } from '@codex/validation';
 import { PaginatedResult, procedure } from '@codex/worker-utils';
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 import { createMiddleware } from 'hono/factory';
 import { resolveR2PublicBases, toPublicItem } from './r2-public-urls';
 
@@ -96,6 +98,89 @@ const hlsStreamingRateLimit = createMiddleware<HonoEnv>((c, next) =>
     subject: combineSubjects(hlsTokenSubject(), trustedIpSubject()),
   })(c, next)
 );
+
+type PlaylistService = ReturnType<typeof createContentAccessService>['service'];
+
+/**
+ * The shared tail of the four HLS playlist proxies, once each has parsed and
+ * verified its own token (kept explicit in each route, because that is where
+ * they differ): a per-request access service, the read, a 404 for a playlist
+ * missing from R2, the playlist headers, and the DB cleanup after the response.
+ */
+async function servePlaylist(
+  c: Context<HonoEnv>,
+  read: (service: PlaylistService) => Promise<string | null>
+): Promise<Response> {
+  const { service, cleanup } = createContentAccessService(c.env);
+  try {
+    const playlist = await read(service);
+    if (playlist === null) {
+      return c.text('Playlist not found', 404);
+    }
+    return c.body(playlist, 200, HLS_PLAYLIST_HEADERS);
+  } finally {
+    c.executionCtx.waitUntil(cleanup());
+  }
+}
+
+/** Why a film proxy answered 403. */
+type FilmRefusal =
+  | TokenRefusal
+  | 'course-mismatch'
+  | 'no-token'
+  | 'bad-path'
+  | 'bad-variant';
+
+/**
+ * Log why a film proxy refused (owner P10). The caller always gets the same
+ * 403, so this line is the only place a broken link differs from an expired
+ * one. Expiry is routine (a paused film, a tab left open), so it is debug.
+ * Every other reason is a link no player builds from a minted token (forged or
+ * tampered, a content token, another course's, a path or rung that does not
+ * exist), so it warns.
+ */
+function logFilmRefusal(
+  c: Context<HonoEnv>,
+  reason: FilmRefusal,
+  courseId?: string
+): void {
+  const obs = c.get('obs');
+  if (reason === 'expired') {
+    obs?.debug('course_film.token_expired', { courseId });
+    return;
+  }
+  obs?.warn('course_film.token_refused', { reason, courseId });
+}
+
+/**
+ * A film token's payload when it verifies AND was minted for the course in the
+ * path, else `null` with the reason logged. The content token's domain never
+ * verifies here: it is a `signature` refusal.
+ */
+async function verifiedFilmToken(
+  c: Context<HonoEnv>,
+  courseId: string,
+  token: string
+): Promise<FilmTokenPayload | null> {
+  const check = await verifyFilmToken(token, c.env.WORKER_SHARED_SECRET);
+  if (!check.ok) {
+    logFilmRefusal(c, check.reason, courseId);
+    return null;
+  }
+  if (check.payload.courseId !== courseId) {
+    logFilmRefusal(c, 'course-mismatch', courseId);
+    return null;
+  }
+  return check.payload;
+}
+
+/**
+ * Presign segments for the token's remaining lifetime, bounded to a minimum
+ * floor so a near-expiry refresh still yields usable segment URLs.
+ */
+function presignWindow(exp: number): number {
+  return Math.max(exp - Math.floor(Date.now() / 1000), 60);
+}
 
 /**
  * GET /api/access/courses/:courseId/can-enter
@@ -289,21 +374,14 @@ app.get('/content/:id/hls/master.m3u8', hlsStreamingRateLimit, async (c) => {
     return c.text('Invalid or expired streaming token', 403);
   }
 
-  const { service, cleanup } = createContentAccessService(c.env);
-  try {
-    const playlist = await service.getHlsMasterPlaylist({
+  return servePlaylist(c, (service) =>
+    service.getHlsMasterPlaylist({
       contentId,
       creatorId: payload.creatorId,
       mediaId: payload.mediaId,
       token,
-    });
-    if (playlist === null) {
-      return c.text('Playlist not found', 404);
-    }
-    return c.body(playlist, 200, HLS_PLAYLIST_HEADERS);
-  } finally {
-    c.executionCtx.waitUntil(cleanup());
-  }
+    })
+  );
 });
 
 /**
@@ -341,26 +419,14 @@ app.get(
       return c.text('Invalid or expired streaming token', 403);
     }
 
-    // Presign segments for the remaining token lifetime (bounded to a minimum
-    // floor so a near-expiry refresh still yields usable segment URLs).
-    const remaining = payload.exp - Math.floor(Date.now() / 1000);
-    const expirySeconds = Math.max(remaining, 60);
-
-    const { service, cleanup } = createContentAccessService(c.env);
-    try {
-      const playlist = await service.getHlsVariantPlaylist({
+    return servePlaylist(c, (service) =>
+      service.getHlsVariantPlaylist({
         creatorId: payload.creatorId,
         mediaId: payload.mediaId,
         variant,
-        expirySeconds,
-      });
-      if (playlist === null) {
-        return c.text('Playlist not found', 404);
-      }
-      return c.body(playlist, 200, HLS_PLAYLIST_HEADERS);
-    } finally {
-      c.executionCtx.waitUntil(cleanup());
-    }
+        expirySeconds: presignWindow(payload.exp),
+      })
+    );
   }
 );
 
@@ -375,16 +441,22 @@ app.get(
  * `auth: 'none'`: the sales page is public, so nothing here may depend on who
  * asks. The gate is the film, re-checked on every call (`resolveCourseFilm`):
  * a published course of this org holds it, no content item that is anything
- * but plainly free uses it, and it is ready. Otherwise `{ data: null }`, the
+ * but plainly free uses it, it is ready, and its creator is still an active
+ * member of the org. Otherwise `{ data: null }`, the
  * same for every reason, and the page plays the 30-second preview. Null data,
  * not a 404, because that is how the public journey reads answer "nothing
  * here" (`sell-preview`, `pages/by-slug`), and a worker 4xx thrown through a
  * remote function surfaces in production as a 500.
  *
+ * `organizationId` arrives from the browser, so it is a CONSISTENCY filter,
+ * not an authorisation input: it can only narrow, and the course→org join in
+ * the service is the check. Naming another org gets the same null.
+ *
  * `streaming` (60/min), the `/stream` route's preset: each call signs a token.
  * Through the web's server hop there is no client address, so the limiter
  * counts nothing there; the film proxies' token-keyed limiter bounds the
- * playback itself. `fresh` (`private, no-store`): the body is a credential.
+ * playback itself. Tracked in Codex-i0gv7. `fresh` (`private, no-store`): the
+ * body is a credential.
  * @returns {CourseFilmStreamResponse | null}
  */
 app.get(
@@ -429,32 +501,30 @@ app.get(
     const queryResult = hlsProxyQuerySchema.safeParse({
       token: c.req.query('token'),
     });
-    if (!paramsResult.success || !queryResult.success) {
+    if (!paramsResult.success) {
+      logFilmRefusal(c, 'bad-path');
       return c.text('Invalid request', 403);
     }
     const { courseId } = paramsResult.data;
+    if (!queryResult.success) {
+      logFilmRefusal(c, 'no-token', courseId);
+      return c.text('Invalid request', 403);
+    }
     const { token } = queryResult.data;
 
-    const payload = await verifyFilmToken(token, c.env.WORKER_SHARED_SECRET);
-    if (!payload || payload.courseId !== courseId) {
+    const payload = await verifiedFilmToken(c, courseId, token);
+    if (!payload) {
       return c.text('Invalid or expired streaming token', 403);
     }
 
-    const { service, cleanup } = createContentAccessService(c.env);
-    try {
-      const playlist = await service.getFilmMasterPlaylist({
+    return servePlaylist(c, (service) =>
+      service.getFilmMasterPlaylist({
         courseId,
         creatorId: payload.creatorId,
         mediaId: payload.mediaId,
         token,
-      });
-      if (playlist === null) {
-        return c.text('Playlist not found', 404);
-      }
-      return c.body(playlist, 200, HLS_PLAYLIST_HEADERS);
-    } finally {
-      c.executionCtx.waitUntil(cleanup());
-    }
+      })
+    );
   }
 );
 
@@ -475,35 +545,35 @@ app.get(
     const queryResult = hlsProxyQuerySchema.safeParse({
       token: c.req.query('token'),
     });
-    if (!paramsResult.success || !queryResult.success) {
+    if (!paramsResult.success) {
+      // A rung the transcoder never writes is told apart from a bad course
+      // id: a player only ever follows the master's own variant lines.
+      const badVariant = paramsResult.error.issues.some(
+        (issue) => issue.path[0] === 'variant'
+      );
+      logFilmRefusal(c, badVariant ? 'bad-variant' : 'bad-path');
       return c.text('Invalid request', 403);
     }
     const { courseId, variant } = paramsResult.data;
+    if (!queryResult.success) {
+      logFilmRefusal(c, 'no-token', courseId);
+      return c.text('Invalid request', 403);
+    }
     const { token } = queryResult.data;
 
-    const payload = await verifyFilmToken(token, c.env.WORKER_SHARED_SECRET);
-    if (!payload || payload.courseId !== courseId) {
+    const payload = await verifiedFilmToken(c, courseId, token);
+    if (!payload) {
       return c.text('Invalid or expired streaming token', 403);
     }
 
-    const remaining = payload.exp - Math.floor(Date.now() / 1000);
-    const expirySeconds = Math.max(remaining, 60);
-
-    const { service, cleanup } = createContentAccessService(c.env);
-    try {
-      const playlist = await service.getHlsVariantPlaylist({
+    return servePlaylist(c, (service) =>
+      service.getHlsVariantPlaylist({
         creatorId: payload.creatorId,
         mediaId: payload.mediaId,
         variant,
-        expirySeconds,
-      });
-      if (playlist === null) {
-        return c.text('Playlist not found', 404);
-      }
-      return c.body(playlist, 200, HLS_PLAYLIST_HEADERS);
-    } finally {
-      c.executionCtx.waitUntil(cleanup());
-    }
+        expirySeconds: presignWindow(payload.exp),
+      })
+    );
   }
 );
 

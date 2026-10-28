@@ -5,10 +5,11 @@
  *
  * It ALWAYS SETTLES, and never rejects or throws. The player waits on it with
  * the film loading, so a refusal, a failure and a hang must all end as `null`,
- * which plays the 30-second preview. The server's own hop to the worker times
- * out at 10s (`createServerApi`), but the browser's request to the remote
- * function has no bound of its own; {@link FILM_REQUEST_TIMEOUT_MS} is that
- * bound. A late answer after it is dropped: the preview is already playing.
+ * which plays the 30-second preview. The server's own hop to the worker gives
+ * up first, at 6s (`COURSE_FILM_TIMEOUT_MS` in `createServerApi`), as a logged
+ * 408; the browser's request to the remote function has no bound of its own,
+ * and {@link FILM_REQUEST_TIMEOUT_MS} is that bound. A late answer after it is
+ * dropped: the preview is already playing.
  *
  * PURE: the remote call is passed in, so this is testable without SvelteKit
  * and imports nothing from the editor (CE-4).

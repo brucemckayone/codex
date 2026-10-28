@@ -371,10 +371,10 @@ export interface JourneySellMedia {
   signatureImageUrl?: string | null;
   /**
    * The media whose film a visitor sees only as the 30s preview, because a
-   * content item that is anything but plainly free uses it (owner P10). Every
-   * media the slots may hold, not only the attached ones, so the panel can say
-   * so the moment a film is picked. OPTIONAL-additive: an older worker, and
-   * the write's echo, omit it.
+   * content item that is anything but plainly free uses it (owner P10). This
+   * course's film slots and the viewer's own library (what the picker lists),
+   * so the panel can say so the moment a film is picked. OPTIONAL-additive: an
+   * older worker, and the write's echo, omit it.
    */
   previewOnlyMediaIds?: string[];
 }

@@ -9,6 +9,9 @@
   focus reaches it or it nears the screen (`preloadPlayer`), so the press can
   start the film with sound in its own tick. Never on the canvas, which
   plays nothing.
+
+  A `note` is said beside it as an alert, on the same fill: the press could
+  not start the film, and the button is there to try again.
 -->
 <script lang="ts">
   import { preloadPlayer } from '$lib/components/player/load-core';
@@ -23,9 +26,18 @@
     preload?: boolean;
     /** Take focus as it appears: it stands in for a player that had it. */
     takeFocus?: boolean;
+    /** Said beside the button, as an alert: why the last press did not play. */
+    note?: string | null;
   }
 
-  const { label, onclick, again = false, preload = false, takeFocus = false }: Props = $props();
+  const {
+    label,
+    onclick,
+    again = false,
+    preload = false,
+    takeFocus = false,
+    note = null,
+  }: Props = $props();
 </script>
 
 <span class="lp-watch" data-lp-on-media>
@@ -43,11 +55,26 @@
     </span>
     {label}
   </button>
+  {#if note}<span class="lp-watch__note" role="alert">{note}</span>{/if}
 </span>
 
 <style>
   .lp-watch {
     display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  /* Over imagery too, so on the button's own fill. */
+  .lp-watch__note {
+    padding: var(--space-2) var(--space-4);
+    border-radius: var(--radius-full);
+    background: var(--lp-bg);
+    color: var(--lp-ink);
+    font-family: var(--lp-font-body);
+    font-size: var(--lp-size-small);
+    white-space: normal;
   }
 
   .lp-watch__button {

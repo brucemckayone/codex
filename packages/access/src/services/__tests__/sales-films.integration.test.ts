@@ -2,18 +2,23 @@
  * Which course sales films may stream in FULL (owner P10, "Full film unless
  * it's paid"): `sales-films.ts` and its three readers.
  *
- * REAL Neon coverage on freshly-seeded, uniquely-slugged rows:
+ * REAL Neon coverage on freshly-seeded, uniquely-slugged rows, every case
+ * through the public minter's one statement (`resolveCourseFilm`):
  *   - every one of the seven gates on a content row that uses a film cuts it to
  *     the preview, each alone, and agrees with `isPublicContent`, the rule it
  *     mirrors; a plainly free use, a deleted use and no use leave it full;
  *   - a draft paid practice cuts it too, as does a paid use in another org;
- *   - a film that is not ready, deleted, or has no HLS master is never full;
- *   - the minter's course read (`resolveCourseFilm`): a draft course, a deleted
- *     course, a deleted org, another org's id and an empty slot all answer null;
- *   - the sell preview flags each film, and never the hero's loop;
+ *   - a film that is not ready, deleted, or has no HLS master is never full,
+ *     nor one whose creator has left the org or never joined it;
+ *   - a draft course, a deleted course, a deleted org and another org's id
+ *     refuse as `no-course`, an empty slot as `empty-slot`, a paid film as
+ *     `not-eligible`;
+ *   - the sell preview flags each film with the same predicate, and never the
+ *     hero's loop;
  *   - `getCourseFilmStream` signs a film token for that course and media that
  *     the content proxies would refuse;
- *   - the studio's set names an active member's paid-use media only.
+ *   - the studio's set names only what the pickers can hold: this course's
+ *     film slots and the viewer's own library.
  */
 
 import { isPublicContent } from '@codex/constants';
@@ -26,7 +31,9 @@ import {
   organizations,
   subscriptionTiers,
 } from '@codex/database/schema';
+import type { ObservabilityClient } from '@codex/observability';
 import { PurchaseService } from '@codex/purchase';
+import { InternalServiceError } from '@codex/service-errors';
 import {
   createTestContentInput,
   createTestMediaItemInput,
@@ -39,19 +46,24 @@ import {
 } from '@codex/test-utils';
 import { eq } from 'drizzle-orm';
 import type Stripe from 'stripe';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { verifyFilmToken, verifyHlsToken } from '../../hls-token';
 import { ContentAccessService } from '../ContentAccessService';
 import { CourseJourneyService } from '../course-journey-service';
 import {
-  findFullFilmMedia,
-  findPaidMediaInOrg,
+  type CourseFilmRefusal,
+  findPreviewOnlyMedia,
   resolveCourseFilm,
 } from '../sales-films';
 
 type R2 = ConstructorParameters<typeof ContentAccessService>[0]['r2'];
 type NewMedia = Parameters<typeof createTestMediaItemInput>[1];
 type NewContent = Parameters<typeof createTestContentInput>[1];
+type Films = { intro?: string; reel?: string; guide?: string; hero?: string };
+
+/** A service's own observability client, to spy on what it logs. */
+const obsOf = (service: ContentAccessService) =>
+  (service as unknown as { obs: ObservabilityClient }).obs;
 
 const CDN = 'https://cdn.example.test';
 const API = 'https://api.example.test';
@@ -61,7 +73,13 @@ describe('course sales films (owner P10)', () => {
   let db: Database;
   let journeys: CourseJourneyService;
   let access: ContentAccessService;
+  /** An active owner of `orgId`; the default creator of every film. */
   let creatorId: string;
+  /** An active member of `orgId` beside the creator. */
+  let colleagueId: string;
+  /** A member of `orgId` who has left (`inactive`). */
+  let leaverId: string;
+  /** Never a member of `orgId`. */
   let outsiderId: string;
   let orgId: string;
   let otherOrgId: string;
@@ -94,7 +112,7 @@ describe('course sales films (owner P10)', () => {
   }
 
   async function seedCourse(
-    films: { intro?: string; reel?: string; guide?: string; hero?: string },
+    films: Films,
     overrides: { status?: 'published' | 'draft'; organizationId?: string } = {}
   ) {
     const status = overrides.status ?? 'published';
@@ -126,6 +144,29 @@ describe('course sales films (owner P10)', () => {
     return org.id;
   }
 
+  async function join(
+    organizationId: string,
+    userId: string,
+    status: 'active' | 'inactive' = 'active'
+  ) {
+    await db
+      .insert(organizationMemberships)
+      .values({ organizationId, userId, role: 'creator', status });
+  }
+
+  const refused = (reason: CourseFilmRefusal) => ({ ok: false, reason });
+
+  /** Would the minter stream this film in full from a published intro slot? */
+  async function isFull(film: string): Promise<boolean> {
+    const courseId = await seedCourse({ intro: film });
+    const minted = await resolveCourseFilm(db, {
+      organizationId: orgId,
+      courseId,
+      film: 'intro',
+    });
+    return minted.ok;
+  }
+
   beforeAll(async () => {
     db = setupTestDatabase();
     journeys = new CourseJourneyService({ db, environment: 'test' });
@@ -149,19 +190,20 @@ describe('course sales films (owner P10)', () => {
       hlsTokenSecret: SECRET,
     });
 
-    const [creator, outsider] = await seedTestUsers(db, 2);
-    if (!creator || !outsider) throw new Error('failed to seed test users');
+    const [creator, colleague, leaver, outsider] = await seedTestUsers(db, 4);
+    if (!creator || !colleague || !leaver || !outsider) {
+      throw new Error('failed to seed test users');
+    }
     creatorId = creator;
+    colleagueId = colleague;
+    leaverId = leaver;
     outsiderId = outsider;
 
     orgId = await seedOrg('Films org');
     otherOrgId = await seedOrg('Other films org');
-    await db.insert(organizationMemberships).values({
-      organizationId: orgId,
-      userId: creatorId,
-      role: 'owner',
-      status: 'active',
-    });
+    await join(orgId, creatorId);
+    await join(orgId, colleagueId);
+    await join(orgId, leaverId, 'inactive');
 
     const [tier] = await db
       .insert(subscriptionTiers)
@@ -195,7 +237,6 @@ describe('course sales films (owner P10)', () => {
         const row = createTestContentInput(creatorId, policy());
         await useIn(film, policy());
 
-        const full = await findFullFilmMedia(db, [film]);
         const expected = isPublicContent({
           isFree: row.isFree ?? null,
           isPurchasable: row.isPurchasable ?? null,
@@ -205,7 +246,7 @@ describe('course sales films (owner P10)', () => {
           isTeamOnly: row.isTeamOnly ?? null,
           courseOnly: row.courseOnly ?? null,
         });
-        expect(full.has(film)).toBe(expected);
+        expect(await isFull(film)).toBe(expected);
         expect(expected).toBe(name === 'plainly free');
       });
     }
@@ -217,7 +258,7 @@ describe('course sales films (owner P10)', () => {
         priceCents: 900,
         status: 'draft',
       });
-      expect((await findFullFilmMedia(db, [film])).has(film)).toBe(false);
+      expect(await isFull(film)).toBe(false);
     });
 
     it('a paid use in ANOTHER org cuts it: a paid lesson anywhere is still paid', async () => {
@@ -230,7 +271,7 @@ describe('course sales films (owner P10)', () => {
           priceCents: 900,
         })
       );
-      expect((await findFullFilmMedia(db, [film])).has(film)).toBe(false);
+      expect(await isFull(film)).toBe(false);
     });
 
     it('a DELETED paid use does not cut it, and no use leaves it full', async () => {
@@ -240,17 +281,15 @@ describe('course sales films (owner P10)', () => {
         priceCents: 900,
         deletedAt: new Date(),
       });
-      const unused = await seedFilm();
-      const full = await findFullFilmMedia(db, [used, unused]);
-      expect(full.get(used)).toBe(creatorId);
-      expect(full.get(unused)).toBe(creatorId);
+      expect(await isFull(used)).toBe(true);
+      expect(await isFull(await seedFilm())).toBe(true);
     });
 
     it('one free use beside one paid use is still cut', async () => {
       const film = await seedFilm();
       await useIn(film);
       await useIn(film, { courseOnly: true });
-      expect((await findFullFilmMedia(db, [film])).has(film)).toBe(false);
+      expect(await isFull(film)).toBe(false);
     });
   });
 
@@ -266,23 +305,23 @@ describe('course sales films (owner P10)', () => {
         status: 'failed',
         hlsMasterPlaylistKey: null,
       });
-      const full = await findFullFilmMedia(db, [
-        transcoding,
-        deleted,
-        masterless,
-      ]);
-      expect(full.size).toBe(0);
+      expect(await isFull(transcoding)).toBe(false);
+      expect(await isFull(deleted)).toBe(false);
+      expect(await isFull(masterless)).toBe(false);
     });
 
-    it('answers an empty set for no ids without a query', async () => {
-      expect((await findFullFilmMedia(db, [])).size).toBe(0);
+    it("is never full once its creator has LEFT the course's org, or never joined it", async () => {
+      // Nothing clears a slot when a member leaves, so the read asks again.
+      expect(await isFull(await seedFilm({}, leaverId))).toBe(false);
+      expect(await isFull(await seedFilm({}, outsiderId))).toBe(false);
+      expect(await isFull(await seedFilm({}, colleagueId))).toBe(true);
     });
   });
 
-  describe('resolveCourseFilm: the minter reads the slot of a published course (rule a)', () => {
+  describe('resolveCourseFilm: the slot of a published course (rule a)', () => {
     it('names the slot film and its creator', async () => {
       const intro = await seedFilm();
-      const reel = await seedFilm();
+      const reel = await seedFilm({}, colleagueId);
       const courseId = await seedCourse({ intro, reel });
       expect(
         await resolveCourseFilm(db, {
@@ -290,7 +329,7 @@ describe('course sales films (owner P10)', () => {
           courseId,
           film: 'reel',
         })
-      ).toEqual({ creatorId, mediaId: reel });
+      ).toEqual({ ok: true, creatorId: colleagueId, mediaId: reel });
     });
 
     it('answers null for a draft course, another org, an empty slot or a paid film', async () => {
@@ -300,26 +339,20 @@ describe('course sales films (owner P10)', () => {
       const draft = await seedCourse({ intro: film }, { status: 'draft' });
       const live = await seedCourse({ intro: film, guide: paid });
 
-      const ask = (courseId: string, organizationId = orgId) =>
-        resolveCourseFilm(db, { organizationId, courseId, film: 'intro' });
+      const ask = (
+        courseId: string,
+        film: 'intro' | 'reel' | 'guide' = 'intro',
+        organizationId = orgId
+      ) => resolveCourseFilm(db, { organizationId, courseId, film });
 
-      expect(await ask(draft)).toBeNull();
-      expect(await ask(live, otherOrgId)).toBeNull();
-      expect(
-        await resolveCourseFilm(db, {
-          organizationId: orgId,
-          courseId: live,
-          film: 'reel',
-        })
-      ).toBeNull();
-      expect(
-        await resolveCourseFilm(db, {
-          organizationId: orgId,
-          courseId: live,
-          film: 'guide',
-        })
-      ).toBeNull();
-      expect(await ask(live)).toEqual({ creatorId, mediaId: film });
+      expect(await ask(draft)).toEqual(refused('no-course'));
+      // The browser's org id only narrows: naming another org finds nothing.
+      expect(await ask(live, 'intro', otherOrgId)).toEqual(
+        refused('no-course')
+      );
+      expect(await ask(live, 'reel')).toEqual(refused('empty-slot'));
+      expect(await ask(live, 'guide')).toEqual(refused('not-eligible'));
+      expect(await ask(live)).toEqual({ ok: true, creatorId, mediaId: film });
     });
 
     it('answers null for a deleted course and a deleted org', async () => {
@@ -330,11 +363,21 @@ describe('course sales films (owner P10)', () => {
         .set({ deletedAt: new Date() })
         .where(eq(courses.id, deletedCourse));
 
+      // The creator IS an active member there, so only the org's own deletion
+      // can refuse it.
       const goneOrgId = await seedOrg('Gone films org');
+      await join(goneOrgId, creatorId);
       const orphan = await seedCourse(
         { intro: film },
         { organizationId: goneOrgId }
       );
+      expect(
+        await resolveCourseFilm(db, {
+          organizationId: goneOrgId,
+          courseId: orphan,
+          film: 'intro',
+        })
+      ).toEqual({ ok: true, creatorId, mediaId: film });
       await db
         .update(organizations)
         .set({ deletedAt: new Date() })
@@ -346,33 +389,48 @@ describe('course sales films (owner P10)', () => {
           courseId: deletedCourse,
           film: 'intro',
         })
-      ).toBeNull();
+      ).toEqual(refused('no-course'));
       expect(
         await resolveCourseFilm(db, {
           organizationId: goneOrgId,
           courseId: orphan,
           film: 'intro',
         })
-      ).toBeNull();
+      ).toEqual(refused('no-course'));
     });
   });
 
-  describe('the sell preview flags each film (advisory)', () => {
-    it('full for a free film, preview for a paid one, and no flag on the hero loop', async () => {
+  describe('the sell preview flags each film with the same predicate (advisory)', () => {
+    it('full for a free film, preview for a paid one or a leaver’s, and no flag on the hero loop', async () => {
       const intro = await seedFilm();
       const reel = await seedFilm();
       await useIn(reel, { includedInTierId: tierId });
+      const guide = await seedFilm({}, leaverId);
       const hero = await seedFilm();
-      const courseId = await seedCourse({ intro, reel, guide: intro, hero });
+      const courseId = await seedCourse({ intro, reel, guide, hero });
 
       const preview = await journeys.getCourseSellPreview(courseId, CDN);
       expect(preview?.intro?.fullFilm).toBe(true);
       expect(preview?.reel?.fullFilm).toBe(false);
-      expect(preview?.guideClip?.fullFilm).toBe(true);
+      expect(preview?.guideClip?.fullFilm).toBe(false);
       expect(preview?.heroClip).not.toBeNull();
       expect(preview?.heroClip).not.toHaveProperty('fullFilm');
       // The clip itself is still the public 30s preview.
       expect(preview?.intro?.playlistUrl).toMatch(/preview\.m3u8$/);
+
+      // And the flag agrees with the gate, film for film.
+      for (const [film, clip] of [
+        ['intro', preview?.intro],
+        ['reel', preview?.reel],
+        ['guide', preview?.guideClip],
+      ] as const) {
+        const minted = await resolveCourseFilm(db, {
+          organizationId: orgId,
+          courseId,
+          film,
+        });
+        expect(minted.ok, film).toBe(clip?.fullFilm);
+      }
     });
   });
 
@@ -392,57 +450,129 @@ describe('course sales films (owner P10)', () => {
         `${API}/api/access/courses/${courseId}/films/hls/master.m3u8`
       );
       const token = url.searchParams.get('token') ?? '';
-      const payload = await verifyFilmToken(token, SECRET);
-      expect(payload).toMatchObject({ courseId, creatorId, mediaId: intro });
+      const check = await verifyFilmToken(token, SECRET);
+      expect(check).toMatchObject({
+        ok: true,
+        payload: { courseId, creatorId, mediaId: intro },
+      });
+      const exp = check.ok ? check.payload.exp : 0;
       // About ten minutes, and the response says when.
-      const lifetime = (payload?.exp ?? 0) - Math.floor(Date.now() / 1000);
+      const lifetime = exp - Math.floor(Date.now() / 1000);
       expect(lifetime).toBeGreaterThan(590);
       expect(lifetime).toBeLessThanOrEqual(600);
-      expect(stream?.expiresAt).toBe(
-        new Date((payload?.exp ?? 0) * 1000).toISOString()
-      );
+      expect(stream?.expiresAt).toBe(new Date(exp * 1000).toISOString());
       // Domain separation: a film token is not a content-stream credential.
       expect(await verifyHlsToken(token, SECRET)).toBeNull();
     });
 
-    it('answers null, never a URL, for a paid film', async () => {
+    it('answers null, never a URL, for a paid film, and logs why', async () => {
       const intro = await seedFilm();
       await useIn(intro, { isTeamOnly: true });
       const courseId = await seedCourse({ intro });
-      expect(
-        await access.getCourseFilmStream({
-          organizationId: orgId,
+      const info = vi.spyOn(obsOf(access), 'info');
+      try {
+        expect(
+          await access.getCourseFilmStream({
+            organizationId: orgId,
+            courseId,
+            film: 'intro',
+          })
+        ).toBeNull();
+        expect(info).toHaveBeenCalledWith('Course film stream refused', {
           courseId,
           film: 'intro',
+          reason: 'not-eligible',
+        });
+      } finally {
+        info.mockRestore();
+      }
+    });
+
+    it('a misconfigured minter fails LOUDLY: logged, and a generic 500, never a null', async () => {
+      const intro = await seedFilm();
+      const courseId = await seedCourse({ intro });
+      const unsigned = new ContentAccessService({
+        db,
+        environment: 'test',
+        r2: {} as R2,
+        purchaseService: new PurchaseService(
+          { db, environment: 'test' },
+          {} as Stripe
+        ),
+        contentApiBaseUrl: API,
+      });
+      const error = vi.spyOn(obsOf(unsigned), 'error');
+
+      const failure = await unsigned
+        .getCourseFilmStream({ organizationId: orgId, courseId, film: 'intro' })
+        .then(
+          () => null,
+          (err: unknown) => err
+        );
+      // The class name is minified in dist, so the type is asserted, not read.
+      expect(failure).toBeInstanceOf(InternalServiceError);
+      expect(failure).toMatchObject({
+        statusCode: 500,
+        message: 'Streaming is unavailable',
+        context: undefined,
+      });
+      expect(error).toHaveBeenCalledWith(
+        'Failed to mint course film stream',
+        expect.objectContaining({
+          courseId,
+          mediaItemId: intro,
+          errorMessage: 'missing hlsTokenSecret',
         })
-      ).toBeNull();
+      );
     });
   });
 
-  describe("findPaidMediaInOrg: the studio's note", () => {
-    it("names an active member's paid-use media, not their free films or an outsider's", async () => {
-      const paid = await seedFilm();
-      await useIn(paid, { isFollowerGated: true });
-      const free = await seedFilm();
-      await useIn(free);
-      const outsiders = await seedFilm({}, outsiderId);
-      await db.insert(content).values(
-        createTestContentInput(outsiderId, {
-          mediaItemId: outsiders,
-          isPurchasable: true,
-          priceCents: 900,
-        })
-      );
+  describe("findPreviewOnlyMedia: the studio's note", () => {
+    it("names only what the pickers can hold: this course's film slots and the viewer's own library", async () => {
+      const ownPaid = await seedFilm();
+      await useIn(ownPaid, { isFollowerGated: true });
+      const ownFree = await seedFilm();
+      await useIn(ownFree);
+      // A colleague's paid film in this course's reel slot: named.
+      const slotPaid = await seedFilm({}, colleagueId);
+      await useIn(slotPaid, { isPurchasable: true, priceCents: 900 });
+      // The same colleague's paid film nowhere in this course: not named.
+      const elsewherePaid = await seedFilm({}, colleagueId);
+      await useIn(elsewherePaid, { isPurchasable: true, priceCents: 900 });
+      // A paid film in the hero slot, which never plays in full: not named.
+      const heroPaid = await seedFilm({}, colleagueId);
+      await useIn(heroPaid, { courseOnly: true });
+      const courseId = await seedCourse({ reel: slotPaid, hero: heroPaid });
 
-      const ids = await findPaidMediaInOrg(db, orgId);
-      expect(ids).toContain(paid);
-      expect(ids).not.toContain(free);
-      expect(ids).not.toContain(outsiders);
+      const ids = await findPreviewOnlyMedia(db, {
+        organizationId: orgId,
+        courseId,
+        viewerId: creatorId,
+      });
+      expect(ids).toContain(ownPaid);
+      expect(ids).toContain(slotPaid);
+      expect(ids).not.toContain(ownFree);
+      expect(ids).not.toContain(elsewherePaid);
+      expect(ids).not.toContain(heroPaid);
+
+      // With no viewer, the slots alone.
+      const slotsOnly = await findPreviewOnlyMedia(db, {
+        organizationId: orgId,
+        courseId,
+      });
+      expect(slotsOnly).toEqual([slotPaid]);
+
+      // Another org's id finds no course, so names no slot.
+      expect(
+        await findPreviewOnlyMedia(db, { organizationId: otherOrgId, courseId })
+      ).toEqual([]);
     });
 
-    it('rides on the studio sell-media read', async () => {
+    it('rides on the studio sell-media read, with the viewer', async () => {
       const paid = await seedFilm();
       await useIn(paid, { courseOnly: true });
+      const ownPaid = await seedFilm();
+      await useIn(ownPaid, { isTeamOnly: true });
       const courseId = await seedCourse({ intro: paid });
       const [page] = await db
         .insert(landingPages)
@@ -460,8 +590,15 @@ describe('course sales films (owner P10)', () => {
         .returning({ id: landingPages.id });
       if (!page) throw new Error('failed to seed a page');
 
-      const media = await journeys.getJourneySellMedia(orgId, page.id, CDN);
-      expect(media.previewOnlyMediaIds).toContain(paid);
+      const media = await journeys.getJourneySellMedia(
+        orgId,
+        page.id,
+        CDN,
+        creatorId
+      );
+      expect(media.previewOnlyMediaIds).toEqual(
+        expect.arrayContaining([paid, ownPaid])
+      );
     });
   });
 });

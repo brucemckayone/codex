@@ -146,6 +146,8 @@ describe('which film a press plays (P10)', () => {
     await settle();
     const video = document.body.querySelector('video');
     if (!video) throw new Error('no player');
+    // It plays, ten minutes in: its links were good.
+    video.dispatchEvent(new Event('loadeddata'));
     Object.defineProperty(video, 'currentTime', {
       configurable: true,
       writable: true,
@@ -170,6 +172,9 @@ describe('which film a press plays (P10)', () => {
     render({ film: 'intro', requestFilm });
     press();
     await settle();
+    document.body
+      .querySelector('video')
+      ?.dispatchEvent(new Event('loadeddata'));
 
     expire?.();
     await settle();

@@ -971,7 +971,10 @@ app.get(
       return ctx.services.courseJourney.getJourneySellMedia(
         ctx.organizationId,
         ctx.input.params.pageId,
-        ctx.env.R2_PUBLIC_URL_BASE
+        ctx.env.R2_PUBLIC_URL_BASE,
+        // The picker lists this user's library, so the preview-only note
+        // covers it (owner P10).
+        ctx.user.id
       );
     },
   })

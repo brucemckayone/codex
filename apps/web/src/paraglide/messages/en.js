@@ -10775,6 +10775,14 @@ export const player_error = () => `This film could not be played.`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const player_error_format = () => `This browser cannot play this film. Try another browser.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const player_watch_again = () => `Watch again`
 
 

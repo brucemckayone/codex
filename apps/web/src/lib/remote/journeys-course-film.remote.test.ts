@@ -13,6 +13,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiError } from '$lib/api/errors';
 
 const courseFilmStream = vi.hoisted(() => vi.fn());
 
@@ -84,6 +85,22 @@ describe('requestCourseFilm', () => {
         film: 'intro',
       })
     ).toBeNull();
+  });
+
+  it('a worker 5xx stays an ERROR here, never a quiet null', async () => {
+    // The page's requester maps the rejection to the preview, by design; a
+    // null here would make a broken minter look exactly like a paid film.
+    courseFilmStream.mockRejectedValue(
+      new ApiError(500, 'Streaming is unavailable', 'INTERNAL_ERROR')
+    );
+
+    await expect(
+      requestCourseFilm({
+        organizationId: ORG_ID,
+        courseId: COURSE_ID,
+        film: 'reel',
+      })
+    ).rejects.toMatchObject({ status: 500 });
   });
 
   it('refuses the hero, which a press never asks for, before calling the worker', async () => {

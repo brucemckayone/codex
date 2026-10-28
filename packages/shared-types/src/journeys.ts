@@ -1186,11 +1186,11 @@ export interface JourneySellMedia {
    * the 30-second preview, because a content item that is anything but plainly
    * free uses it (owner P10). The panel says so under a film slot holding one.
    *
-   * The set covers every media item the slots may hold (that of the org's active
-   * members, `assertMediaItemsInOrg`'s boundary), not only the attached ones, so
-   * a film picked but not yet saved is named too. Read once with the panel; it
-   * is the same rule the public stream applies (`findPaidMediaUses`), so the
-   * note and the page agree.
+   * The set covers what the film pickers can hold: this course's film slots
+   * and the viewer's own library (what the picker lists), so a film picked but
+   * not yet saved is named too. Read once with the panel. The paid-use test is
+   * the one the public stream applies (`paidUse` in `@codex/access`
+   * `sales-films.ts`), so the note and the page agree.
    *
    * OPTIONAL-additive: an older worker omits it, and no note shows. The write's
    * echo omits it too; the panel keeps what it read.

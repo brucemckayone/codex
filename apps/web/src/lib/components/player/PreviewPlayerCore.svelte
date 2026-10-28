@@ -24,13 +24,19 @@
 
   RENEWAL. A full film is a signed stream (`src` resolving to `{ playlistUrl,
   expiresAt? }`) whose links run out in about ten minutes, so a longer film
-  would stall. With `renew`, the core asks again ONCE per stream: shortly
-  before `expiresAt` (a one-shot timer, when the time is known), or when the
-  stream answers 403 (`onUrlExpired`). The answer replaces the stream, and
-  the film carries on from the same moment, playing or paused as it was. No
-  answer ends the film where it stands, as its own end does ("Watch again"
-  then asks afresh): it never drops to the 30-second preview mid-film. A
-  plain string `src` (a preview) is public and never renewed.
+  would stall. With `renew`, the core asks again ONCE per stream, and only
+  for a stream that has played a frame: shortly before `expiresAt` while the
+  film PLAYS (a one-shot timer, armed on play and cleared on pause, at the
+  end, on an error and on destroy, so a paused or forgotten tab never asks:
+  the owner's cost rule), at a press that resumes it once the links have run
+  out, or when the stream answers 403 (`onUrlExpired`). The answer replaces
+  the stream, and the film carries on from the same moment, playing or
+  paused as it was. No answer ends the film where it stands, as its own end
+  does ("Watch again" then asks afresh): it never drops to the 30-second
+  preview mid-film. A 403 BEFORE the stream's first frame is a refusal, not
+  an expiry (a variant it will not serve, a token it will not take): asking
+  again would loop, so the film says it could not play. A plain string `src`
+  (a preview) is public and never renewed.
 
   KEYBOARD (`media-a11y`), from anywhere inside it: Space or K play and
   pause, M mutes, the arrows seek five seconds, F is full screen.
@@ -161,6 +167,9 @@
   /** A signed stream is renewed this long before its links run out. */
   const RENEW_LEAD_MS = 30_000;
 
+  /** The HLS helper's words for a format this browser cannot play (`VideoPlayer/hls.ts`). */
+  const UNSUPPORTED = /video format/i;
+
   let root: HTMLDivElement | undefined = $state();
   let video: HTMLVideoElement | undefined = $state();
   let playButton: HTMLButtonElement | undefined = $state();
@@ -170,11 +179,17 @@
 
   /** The stream attached now; a signed one may be renewed (RENEWAL above). */
   let stream: { url: string; signed: boolean } | null = null;
+  /** When its links run out (epoch ms), if the server said. */
+  let expiry: number | null = null;
   /** Its links have run out (it answered 403), at `stoppedAt` seconds in. */
   let expired = false;
   let stoppedAt = 0;
-  /** The signed stream a renewal was already asked for: once per expiry. */
-  let renewedFrom: string | null = null;
+  /** It has had its one renewal ask: once per expiry. */
+  let asked = false;
+  /** It has played a frame since it attached; a 403 before that is a refusal. */
+  let flowing = false;
+  /** Drops the last swap's resume, should that stream go before it loads. */
+  let unresume: (() => void) | null = null;
   let renewing = false;
   let renewTimer: ReturnType<typeof setTimeout> | null = null;
   /** The stream ran out and none came back: "Watch again" asks afresh. */
@@ -217,15 +232,24 @@
       hls.destroy();
       hls = null;
     }
+    unresume?.();
+    unresume = null;
   }
 
-  function fail() {
-    error ??= m.player_error();
+  /**
+   * The film cannot play: say so, and stop asking for it. `cause` is the HLS
+   * helper's own English; a format it names gets its own words, since another
+   * browser may play the film.
+   */
+  function fail(cause?: string) {
+    error ??= cause && UNSUPPORTED.test(cause) ? m.player_error_format() : m.player_error();
     waiting = false;
+    disarm();
   }
 
   function finish() {
     finished = true;
+    disarm();
     onended?.();
   }
 
@@ -233,10 +257,9 @@
     if (!video) return;
     finished = false;
     wanted = true;
-    if (lapsed) {
-      // The old stream's links are dead: ask afresh, from the start.
+    if (lapsed || stale()) {
+      // The old stream's links are dead, or nearly: ask afresh, from the start.
       lapsed = false;
-      renewedFrom = null;
       void refresh(0);
     } else {
       video.currentTime = 0;
@@ -253,7 +276,9 @@
       replay();
     } else if (video.paused) {
       wanted = true;
-      playNow(video).catch(() => {});
+      // Paused past its links' end: renew first, and the answer plays it.
+      if (stale()) void refresh();
+      else playNow(video).catch(() => {});
     } else {
       wanted = false;
       video.pause();
@@ -303,7 +328,20 @@
     paused = false;
     finished = false;
     if (video) claim(video);
+    arm();
     onplay?.();
+  }
+
+  function handlePause() {
+    paused = true;
+    disarm();
+  }
+
+  function handleLoaded() {
+    ready = true;
+    // A frame: the stream's links are good, so their end may be renewed.
+    flowing = true;
+    arm();
   }
 
   function handleTimeUpdate() {
@@ -362,7 +400,11 @@
   async function attach(media: HTMLVideoElement, source: string | SignedStream) {
     const signed = typeof source !== 'string';
     stream = { url: signed ? source.playlistUrl : source, signed };
+    const end = signed && source.expiresAt ? Date.parse(source.expiresAt) : Number.NaN;
+    expiry = Number.isFinite(end) ? end : null;
     expired = false;
+    asked = false;
+    flowing = false;
     const handle = await createHlsPlayer({
       media,
       src: stream.url,
@@ -375,7 +417,8 @@
       teardown();
       return false;
     }
-    if (signed) renewBefore(source.expiresAt);
+    // Already playing (a press plays before the stream attaches): arm now.
+    arm();
     return true;
   }
 
@@ -396,33 +439,65 @@
     }
   }
 
-  /** A one-shot renewal shortly before a signed stream's links run out. */
-  function renewBefore(expiresAt: string | undefined) {
-    if (renewTimer) clearTimeout(renewTimer);
-    renewTimer = null;
-    const end = expiresAt ? Date.parse(expiresAt) : Number.NaN;
-    if (!renew || !Number.isFinite(end)) return;
+  /**
+   * When this stream's one early renewal is due (epoch ms), or `null`: a
+   * preview, no `expiresAt`, its ask already made (once per expiry), no frame
+   * played yet (a stream stuck loading never asks), or an error on screen.
+   */
+  function renewalDue() {
+    if (!renew || expiry === null || asked || !flowing || error !== null) return null;
+    return expiry - RENEW_LEAD_MS;
+  }
+
+  /** Its links have run out, or nearly: a resume renews first. */
+  function stale() {
+    const due = renewalDue();
+    return due !== null && due <= Date.now();
+  }
+
+  /**
+   * The one-shot early renewal, armed only while the film plays: a paused,
+   * scrolled-away or forgotten film never asks (the owner's cost rule).
+   * Re-armed on every play, cleared on pause, at the end and on destroy.
+   */
+  function arm() {
+    disarm();
+    const due = renewalDue();
+    if (due === null || !wanted || paused || finished) return;
     renewTimer = setTimeout(
       () => {
         renewTimer = null;
         void refresh();
       },
-      Math.max(0, end - Date.now() - RENEW_LEAD_MS)
+      Math.max(0, due - Date.now())
     );
   }
 
-  // The stream answered 403: its links have run out. The helper has already
-  // destroyed its HLS.js instance, which detached the element and reset its
-  // `currentTime` to 0, so the film resumes from `time`, the last moment it
-  // reported (the reset's own `timeupdate` is still queued). A renewal under
-  // way decides; otherwise renew, unless this stream already had its one try
-  // (the timer's), which ends the film where it stands.
+  function disarm() {
+    if (renewTimer) clearTimeout(renewTimer);
+    renewTimer = null;
+  }
+
+  // The stream answered 403, and the helper has already destroyed its HLS.js
+  // instance. Before the stream's first frame that is a refusal, never an
+  // expiry: asking again would only loop (ask, attach, 403), so the film
+  // says it could not play. After it, the links have run out. The destroy
+  // detached the element and reset its `currentTime` to 0, so the film
+  // resumes from `time`, the last moment it reported (the reset's own
+  // `timeupdate` is still queued). A renewal under way decides; otherwise
+  // renew, unless this stream already had its one ask (the timer's), which
+  // ends the film where it stands.
   function lapse() {
     hls = null;
+    if (!flowing) {
+      teardown();
+      fail();
+      return;
+    }
     expired = true;
     stoppedAt = time;
     if (renewing) return;
-    if (stream && renewedFrom === stream.url) endLapsed();
+    if (asked) endLapsed();
     else void refresh();
   }
 
@@ -437,14 +512,16 @@
    * Ask `renew` for a fresh signed stream, swap it in, and carry on from the
    * same moment (`at`, by default where it stands once the answer is in),
    * playing if the visitor wants it. With no answer, a stream that has run
-   * out ends the film; one renewed early (the timer) plays on until it runs
-   * out, and ends then (`lapse`).
+   * out ends the film; one renewed early (the timer, or a press that
+   * resumes it) plays on until it runs out, and ends then (`lapse`).
    */
   async function refresh(at?: number) {
     const media = video;
-    if (!media || !renew || !stream?.signed || renewing || finished) return;
+    if (!media || !renew || !stream?.signed || renewing || finished || error !== null) {
+      return;
+    }
     renewing = true;
-    renewedFrom = stream.url;
+    asked = true;
     let next: SignedStream | null = null;
     try {
       next = await renew();
@@ -455,6 +532,7 @@
     if (destroyed) return;
     if (!next?.playlistUrl) {
       if (expired) endLapsed();
+      else if (wanted && paused) playNow(media).catch(() => {});
       return;
     }
     // The timer's renewal ran while the film played on.
@@ -469,9 +547,14 @@
     resumeAt(media, from);
   }
 
-  /** Seek the new stream to `from` once it knows its length, and play on if wanted. */
+  /**
+   * Seek the new stream to `from` once it knows its length, and play on if
+   * wanted. Its wait goes with the stream (`teardown`), so a stream refused
+   * before it loads leaves nothing to fire later.
+   */
   function resumeAt(media: HTMLVideoElement, from: number) {
     const carryOn = () => {
+      unresume = null;
       media.currentTime = from;
       if (!wanted) return;
       void settleStart(media, playNow(media), () => wanted && !destroyed).then(
@@ -480,8 +563,12 @@
         }
       );
     };
-    if (media.readyState >= HTMLMediaElement.HAVE_METADATA) carryOn();
-    else media.addEventListener('loadedmetadata', carryOn, { once: true });
+    if (media.readyState >= HTMLMediaElement.HAVE_METADATA) {
+      carryOn();
+      return;
+    }
+    media.addEventListener('loadedmetadata', carryOn, { once: true });
+    unresume = () => media.removeEventListener('loadedmetadata', carryOn);
   }
 
   onMount(() => {
@@ -523,7 +610,7 @@
 
     return () => {
       destroyed = true;
-      if (renewTimer) clearTimeout(renewTimer);
+      disarm();
       observer.disconnect();
       showing(box, false);
       release(media);
@@ -558,11 +645,11 @@
     aria-label={title}
     onclick={toggle}
     onplay={handlePlay}
-    onpause={() => (paused = true)}
+    onpause={handlePause}
     onwaiting={() => (waiting = true)}
     onplaying={() => (waiting = false)}
     oncanplay={() => (waiting = false)}
-    onloadeddata={() => (ready = true)}
+    onloadeddata={handleLoaded}
     ontimeupdate={handleTimeUpdate}
     onprogress={measure}
     ondurationchange={handleDuration}

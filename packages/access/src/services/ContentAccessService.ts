@@ -741,9 +741,13 @@ export class ContentAccessService
    * PUBLIC: there is no user, so the gate is the film itself, re-checked on
    * every press by `resolveCourseFilm`: the named slot of a published course in
    * this org holds the media, no content item that is anything but plainly free
-   * uses it, and it is ready. Every refusal is the same `null`, so a caller
-   * learns nothing about why, and the page plays the 30-second preview. The
-   * sell preview's `fullFilm` flag is only a hint; this is the check.
+   * uses it, it is ready, and its creator is still an active member of the
+   * org. Every refusal is the same `null`, so a caller learns nothing about
+   * why, and the page plays the 30-second preview. The sell preview's
+   * `fullFilm` flag is only a hint; this is the check.
+   *
+   * `organizationId` arrives from the browser: a CONSISTENCY filter, never an
+   * authorisation input. It can only narrow; the course→org join decides.
    *
    * The URL opens the FILM proxies with a film token bound to this course and
    * media for {@link DEFAULT_STREAMING_URL_TTL_SECONDS}. The content proxies
@@ -759,13 +763,22 @@ export class ContentAccessService
   }): Promise<CourseFilmStreamResponse | null> {
     try {
       const film = await resolveCourseFilm(this.db, input);
-      if (!film) return null;
+      if (!film.ok) {
+        // The reason is the log's alone: the caller gets one null for all.
+        this.obs.info('Course film stream refused', {
+          courseId: input.courseId,
+          film: input.film,
+          reason: film.reason,
+        });
+        return null;
+      }
 
       const { playlistUrl, expiresAt } = await buildFilmStreamResponse(
         film,
         {
           contentApiBaseUrl: this.contentApiBaseUrl,
           hlsTokenSecret: this.hlsTokenSecret,
+          obs: this.obs,
         },
         input.courseId,
         DEFAULT_STREAMING_URL_TTL_SECONDS

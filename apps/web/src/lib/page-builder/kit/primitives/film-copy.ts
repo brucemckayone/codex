@@ -6,4 +6,6 @@
  */
 export const FILM_COPY = {
   again: 'Watch again',
+  /** Beside the play button when the player's code did not arrive: a press tries again. */
+  failed: 'The film could not load. Try again.',
 } as const;

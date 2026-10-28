@@ -58,10 +58,12 @@ export {
   rewriteVariantPlaylist,
 } from './hls-rewrite';
 export {
+  type FilmTokenCheck,
   type FilmTokenPayload,
   type HlsTokenPayload,
   signFilmToken,
   signHlsToken,
+  type TokenRefusal,
   verifyFilmToken,
   verifyHlsToken,
 } from './hls-token';
