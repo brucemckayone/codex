@@ -172,11 +172,19 @@
   /** The element the one-time setup (`wireElement`) has run on. */
   let wiredEl: HTMLVideoElement | null = null;
   /**
-   * Guard against concurrent refresh attempts. If a 403 fires while we're
-   * already refreshing (e.g. races between multiple in-flight segments),
-   * we'd otherwise trigger a cascade of redundant server calls.
+   * Guard against concurrent refresh attempts: the item whose renewal or
+   * Retry ask is out (`asking`). If a 403 fires while it is already
+   * refreshing (e.g. races between multiple in-flight segments), we'd
+   * otherwise trigger a cascade of redundant server calls. Tied to the
+   * item: a slow ask for the item the viewer left must not swallow the
+   * next item's own 403 or Try Again.
    */
-  let refreshInFlight = false;
+  let refreshingFor: string | null = null;
+
+  /** This item's renewal or Retry ask is out. */
+  function asking() {
+    return refreshingFor !== null && refreshingFor === lastInitialisedContentId;
+  }
   /** Pre-emptive refresh timer (browser setTimeout handle). */
   let refreshTimer: ReturnType<typeof setTimeout> | null = null;
   let loading = $state(true);
@@ -916,7 +924,7 @@
   /**
    * Refresh the signed URL and rebuild the stream where it stood, playing
    * on if it was — the viewer should only see a brief buffering blip.
-   * Guarded by `refreshInFlight` so concurrent 403s don't stampede the
+   * Guarded by `asking` so concurrent 403s don't stampede the
    * access worker.
    *
    * @param at - Where the expired stream stood, as `hls.ts` read it before
@@ -928,7 +936,7 @@
     // a renewal's ask is out: the timer's renewal keeps the old stream until
     // its answer, and a laptop that wakes past the link's end hits both.
     if (at !== undefined) keepPlace(at);
-    if (refreshInFlight) {
+    if (asking()) {
       if (at !== undefined) lapsedMidAsk = true;
       return;
     }
@@ -937,7 +945,7 @@
       teardownHls();
       return;
     }
-    refreshInFlight = true;
+    refreshingFor = lastInitialisedContentId;
     lapsedMidAsk = false;
     const item = lastInitialisedContentId;
     let stopped = false;
@@ -959,7 +967,7 @@
       // nothing may play on under the error card.
       videoEl?.pause();
     } finally {
-      refreshInFlight = false;
+      if (refreshingFor === item) refreshingFor = null;
     }
   }
 
@@ -997,8 +1005,8 @@
     // Either way the rebuilt stream resumes where the failed one stopped
     // (`resumePoint`), never at 0, and plays on if the viewer was watching.
     // One at a time: a second press would spend the first one's play-on.
-    if (refreshInFlight) return;
-    refreshInFlight = true;
+    if (asking()) return;
+    refreshingFor = lastInitialisedContentId;
     const item = lastInitialisedContentId;
     const resume = stopForRebuild();
     try {
@@ -1011,7 +1019,7 @@
       // recovered. It lands the kept place too.
       await initPlayer(resume);
     } finally {
-      refreshInFlight = false;
+      if (refreshingFor === item) refreshingFor = null;
     }
   }
 
@@ -1065,7 +1073,7 @@
         lastInitialisedContentId !== null &&
         lastInitialisedContentId === nextContentId;
 
-      if (sameItem && (refreshInFlight || !errorMessage)) {
+      if (sameItem && (asking() || !errorMessage)) {
         lastInitialisedSrc = nextSrc;
         return;
       }

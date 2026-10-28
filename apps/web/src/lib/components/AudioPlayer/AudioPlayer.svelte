@@ -102,7 +102,17 @@
   let liveExpiresAt: string | null | undefined = null;
   /** `MediaError.MEDIA_ERR_NETWORK`, spelled out: jsdom has no `MediaError`. */
   const MEDIA_ERR_NETWORK = 2;
-  let refreshInFlight = false;
+  /**
+   * The item whose renewal or Retry ask is out (`asking`). Tied to the item:
+   * a slow ask for the item the viewer left must not swallow the next
+   * item's own 403 or Try Again.
+   */
+  let refreshingFor: string | null = null;
+
+  /** This item's renewal or Retry ask is out. */
+  function asking() {
+    return refreshingFor !== null && refreshingFor === initializedContentId;
+  }
   let refreshTimer: ReturnType<typeof setTimeout> | null = null;
   let loading = $state(true);
   let errorMessage = $state('');
@@ -598,7 +608,7 @@
     // A 403's stream is already dead, so its place is kept first, even while
     // a renewal's ask is out (mirrors VideoPlayer).
     if (at !== undefined) keepPlace(at);
-    if (refreshInFlight) {
+    if (asking()) {
       if (at !== undefined) lapsedMidAsk = true;
       return;
     }
@@ -607,7 +617,7 @@
       teardownHls();
       return;
     }
-    refreshInFlight = true;
+    refreshingFor = initializedContentId;
     lapsedMidAsk = false;
     const item = initializedContentId;
     let stopped = false;
@@ -629,7 +639,7 @@
       // nothing may play on under the error card.
       audioEl?.pause();
     } finally {
-      refreshInFlight = false;
+      if (refreshingFor === item) refreshingFor = null;
     }
   }
 
@@ -665,8 +675,8 @@
     // resumes where the failed one stopped (`resumePoint`), never at 0, and
     // plays on if the listener was listening.
     // One at a time: a second press would spend the first one's play-on.
-    if (refreshInFlight) return;
-    refreshInFlight = true;
+    if (asking()) return;
+    refreshingFor = initializedContentId;
     const item = initializedContentId;
     const resume = stopForRebuild();
     try {
@@ -680,7 +690,7 @@
       initializedSrc = null;
       await initPlayer(resume);
     } finally {
-      refreshInFlight = false;
+      if (refreshingFor === item) refreshingFor = null;
     }
   }
 
@@ -756,7 +766,7 @@
       const sameItem =
         initializedContentId !== null && initializedContentId === nextContentId;
 
-      if (sameItem && (refreshInFlight || !errorMessage)) {
+      if (sameItem && (asking() || !errorMessage)) {
         initializedSrc = nextSrc;
         return;
       }

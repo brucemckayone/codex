@@ -479,6 +479,37 @@ describe('VideoPlayer — a rebuilt stream keeps the viewer’s place', () => {
     unmount(component);
   });
 
+  test('a slow ask for the item the viewer left does not swallow the next item’s 403', async () => {
+    const refresh = vi.mocked(refreshStreamingUrl);
+    refresh.mockClear();
+    const { component, props } = await mountPlayer();
+    recorded[0]?.onError?.(
+      'This could not be loaded. Please try again.',
+      'network',
+      0
+    );
+    flushSync();
+    // Lesson A's Try Again asks, and the answer is slow.
+    refresh.mockImplementationOnce(
+      () => new Promise(() => {}) as ReturnType<typeof refreshStreamingUrl>
+    );
+    document.body
+      .querySelector<HTMLButtonElement>('.video-player-error-retry')
+      ?.click();
+    await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+
+    props.src = SRC_B;
+    props.contentId = 'lesson-b';
+    flushSync();
+    await vi.waitFor(() => expect(recorded).toHaveLength(2));
+    // Lesson B's own first link answers 403: it renews for itself.
+    recorded[1]?.onUrlExpired?.(0);
+    await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(2));
+    expect(refresh).toHaveBeenLastCalledWith('lesson-b');
+
+    unmount(component);
+  });
+
   test('an element error on a live hls.js stream destroys it and keeps the place for Retry', async () => {
     hlsMode = 'mse';
     const { component } = await mountPlayer();
@@ -614,6 +645,29 @@ describe('VideoPlayer — renewing the link', () => {
     await vi.waitFor(() => expect(recorded).toHaveLength(2));
     el.dispatchEvent(new Event('loadedmetadata'));
     expect(el.currentTime).toBe(540);
+    unmount(component);
+  });
+
+  test('a failed ask after the old stream lapsed mid-ask shows the card', async () => {
+    const { component } = await mountExpiring(10 * 60_000);
+    const el = videoElement();
+    let refuse: (reason: unknown) => void = () => {};
+    refresh.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          refuse = reject;
+        }) as ReturnType<typeof refreshStreamingUrl>
+    );
+
+    setPlaying(el, true);
+    await vi.advanceTimersByTimeAsync(9 * 60_000 + 1000);
+    recorded[0]?.onUrlExpired?.(540);
+    refuse(new Error('offline'));
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+    expect(
+      document.body.querySelector('.video-player-error-retry')
+    ).not.toBeNull();
     unmount(component);
   });
 

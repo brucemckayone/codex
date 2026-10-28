@@ -457,6 +457,40 @@ describe('AudioPlayer — a rebuilt stream keeps the listener’s place', () => 
     unmount(component);
   });
 
+  test('a play under the error card is refused, and the player keys stand aside', async () => {
+    const play = vi.mocked(HTMLMediaElement.prototype.play);
+    const { component } = await mountPlayer();
+    recorded[0]?.onError?.(
+      'This could not be loaded. Please try again.',
+      'network',
+      300
+    );
+    flushSync();
+    pauseSpy.mockClear();
+
+    // Media keys press play on the dead element.
+    audioElement().dispatchEvent(new Event('play'));
+    expect(pauseSpy).toHaveBeenCalled();
+
+    // Space on a focused Try Again is the button's, not the player's
+    // play/pause, which would call play() under the card.
+    const retry = document.body.querySelector<HTMLButtonElement>(
+      '.audio-player__error-retry'
+    );
+    retry?.focus();
+    play.mockClear();
+    const space = new KeyboardEvent('keydown', {
+      key: ' ',
+      bubbles: true,
+      cancelable: true,
+    });
+    retry?.dispatchEvent(space);
+    expect(space.defaultPrevented).toBe(false);
+    expect(play).not.toHaveBeenCalled();
+
+    unmount(component);
+  });
+
   test('a 403 on a renewed stream before it plays is a refusal: no second ask', async () => {
     const { component } = await mountPlayer();
     const el = audioElement();
