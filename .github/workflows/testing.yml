@@ -882,25 +882,31 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # Before any worker starts (Codex-7aqvr): move the kernel's ephemeral
-      # range, 32768-60999 by default, above every port this job binds.
-      # SERVICE_PORTS 42069-42075 sit inside the default, and while the
-      # workers start together workerd takes ports from it; a worker whose
-      # port it took cannot bind, and the job fails at "Failed to start
-      # workers" with no test run. Seen on notifications-api's 42075 (run
-      # 40322331140, PR #646) and ecom-api's 42072 (run 40567185447, PR #653).
-      # 49152-65535 is above them all, so SERVICE_PORTS stay where they are.
-      - name: Keep the worker ports out of the ephemeral range
-        run: sudo sysctl -w net.ipv4.ip_local_port_range="49152 65535"
+      # Before any worker starts (Codex-7aqvr): reserve the worker ports, as
+      # e2e-tests does. SERVICE_PORTS 42069-42075 sit inside the kernel's
+      # ephemeral range (32768-60999), and while the workers start together
+      # workerd takes ports from it; a worker whose port it took cannot bind,
+      # and the job fails at "Failed to start workers" with no test run. Seen
+      # here on notifications-api's 42075 (run 40322331140, PR #646) and
+      # ecom-api's 42072 (run 40567185447, PR #653), on [::1]: the ipv4
+      # setting covers IPv6 too. A reserved port is never handed out as an
+      # ephemeral one, and the range keeps its full size. Moving the range
+      # instead shrinks it to 16,384 ports, which e2e-tests' connection-heavy
+      # run does not need (Codex-j7x4u, run 40622100441).
+      - name: Reserve the worker ports
+        run: sudo sysctl -w net.ipv4.ip_local_reserved_ports=42069-42075
 
-      - name: Check the ephemeral port range
+      - name: Check the worker ports are reserved
         run: |
-          read -r low high < /proc/sys/net/ipv4/ip_local_port_range
-          echo "Ephemeral port range: $low-$high"
-          if [ "$low" -le 42075 ]; then
-            echo "::error::The ephemeral port range $low-$high still reaches the worker ports (Codex-7aqvr)"
-            exit 1
-          fi
+          reserved=$(cat /proc/sys/net/ipv4/ip_local_reserved_ports)
+          echo "Reserved ports: $reserved"
+          case ",$reserved," in
+            *,42069-42075,*) ;;
+            *)
+              echo "::error::The worker ports 42069-42075 are not reserved (got '$reserved', Codex-7aqvr)"
+              exit 1
+              ;;
+          esac
 
       - name: Start local Neon proxy
         run: bash .github/scripts/start-local-neon-proxy.sh "${{ job.services.neon-proxy.id }}"
@@ -1093,23 +1099,6 @@ jobs:
       # handed out as an ephemeral one.
       - name: Reserve the worker ports
         run: sudo sysctl -w net.ipv4.ip_local_reserved_ports=42069-42075
-
-      # And move the ephemeral range itself above every port this job binds,
-      # as e2e-api-tests does (Codex-7aqvr): there, workerd took 42075 (run
-      # 40322331140, PR #646) and 42072 (run 40567185447, PR #653) while the
-      # workers started together, and the job failed with no test run.
-      # SERVICE_PORTS stay where they are.
-      - name: Keep the worker ports out of the ephemeral range
-        run: sudo sysctl -w net.ipv4.ip_local_port_range="49152 65535"
-
-      - name: Check the ephemeral port range
-        run: |
-          read -r low high < /proc/sys/net/ipv4/ip_local_port_range
-          echo "Ephemeral port range: $low-$high"
-          if [ "$low" -le 42075 ]; then
-            echo "::error::The ephemeral port range $low-$high still reaches the worker ports (Codex-7aqvr)"
-            exit 1
-          fi
 
       - name: Start local Neon proxy
         run: bash .github/scripts/start-local-neon-proxy.sh "${{ job.services.neon-proxy.id }}"
