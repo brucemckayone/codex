@@ -574,7 +574,8 @@ export interface PropagateTierPriceResult {
   unnotified: number;
   /**
    * Not reached: the fan-out stopped starting batches at
-   * `PRICE_FAN_OUT_BUDGET_MS` (all named in one alert).
+   * `PRICE_FAN_OUT_BUDGET_MS` (counted, and named up to a cap, in one
+   * alert).
    */
   unhandled: number;
   /**
@@ -5166,9 +5167,10 @@ export class SubscriptionService extends BaseService {
    * - One failed subscriber never aborts the batch; failures are logged and
    *   counted. Callers run this fire-and-forget after the tier's DB commit.
    * - It runs on `waitUntil`, which the runtime cancels 30 s after the
-   *   response, so no batch starts after `PRICE_FAN_OUT_BUDGET_MS` (20 s).
-   *   Every subscriber not reached stays on today's price and is named in one
-   *   alert. A start line and an end summary bracket the run.
+   *   response, so no batch starts after `PRICE_FAN_OUT_BUDGET_MS` (17 s),
+   *   and every Stripe call gives up after 3 s. Every subscriber not reached
+   *   stays on today's price and is reported in one alert after the end
+   *   summary (`alertFanOutOutOfTime`). A start line opens the run.
    *
    * Called from `TierService.updateTier` (Studio — the only place a price is
    * set). A Price created in the Stripe Dashboard is never propagated.
@@ -5269,30 +5271,14 @@ export class SubscriptionService extends BaseService {
         total: rows.length,
       });
 
+      // Everyone the deadline leaves out, named after the end summary.
+      let unreached: typeof rows = [];
       for (let i = 0; i < rows.length; i += batchSize) {
         // The runtime cancels everything 30 s after the response: start no
         // batch it could cut off, and name every subscriber left (silent #1).
         if (Date.now() - startedAt >= PRICE_FAN_OUT_BUDGET_MS) {
-          const left = rows.slice(i);
-          counts.unhandled = left.length;
-          alertFanOutOutOfTime(
-            (message, data) => this.obs.error(message, data),
-            {
-              errorId: crypto.randomUUID(),
-              context: {
-                tierId,
-                interval,
-                newStripePriceId,
-                noticeAt: noticeAt.toISOString(),
-              },
-              subscribers: left.map((row) => ({
-                subscriptionId: row.id,
-                stripeSubscriptionId: row.stripeSubscriptionId,
-                userId: row.userId,
-                organizationId: row.organizationId,
-              })),
-            }
-          );
+          unreached = rows.slice(i);
+          counts.unhandled = unreached.length;
           break;
         }
         const batch = rows.slice(i, i + batchSize);
@@ -5344,21 +5330,17 @@ export class SubscriptionService extends BaseService {
             }
           } else {
             counts.failed++;
-            const message =
-              result.reason instanceof Error
-                ? result.reason.message
-                : String(result.reason);
-            errors.push({
-              subscriptionId: row.id,
-              stripeSubscriptionId: row.stripeSubscriptionId,
-              error: message,
-            });
             const alert = moveFailureAlert(
               prefix,
               result.reason,
               notified.get(row.id),
               noticeAt
             );
+            errors.push({
+              subscriptionId: row.id,
+              stripeSubscriptionId: row.stripeSubscriptionId,
+              error: String(alert.data.error),
+            });
             this.obs.error(alert.message, {
               errorId: crypto.randomUUID(),
               ...alert.data,
@@ -5401,6 +5383,23 @@ export class SubscriptionService extends BaseService {
           ...counts,
         });
       }
+      // After the summary, and count first: the per-invocation log cap
+      // drops whatever comes last (review A round 2, silent R1).
+      alertFanOutOutOfTime((message, data) => this.obs.error(message, data), {
+        errorId: crypto.randomUUID(),
+        context: {
+          tierId,
+          interval,
+          newStripePriceId,
+          noticeAt: noticeAt.toISOString(),
+        },
+        subscribers: unreached.map((row) => ({
+          subscriptionId: row.id,
+          stripeSubscriptionId: row.stripeSubscriptionId,
+          userId: row.userId,
+          organizationId: row.organizationId,
+        })),
+      });
 
       return counts;
     } catch (error) {

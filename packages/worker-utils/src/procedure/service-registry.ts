@@ -71,6 +71,7 @@ import type { Bindings } from '@codex/shared-types';
 import {
   ConnectAccountService,
   CourseSubscriptionService,
+  PRICE_NOTICE_TIMEOUT_MS,
   SubscriptionService,
   TierService,
 } from '@codex/subscription';
@@ -1103,7 +1104,10 @@ export async function createServiceRegistry(
           userId?: string;
           organizationId?: string | null;
           data: Record<string, string | number | boolean>;
-        }) => sendEmailToWorkerAwaited(env, params);
+        }) =>
+          sendEmailToWorkerAwaited(env, params, {
+            timeoutMs: PRICE_NOTICE_TIMEOUT_MS,
+          });
 
         // Web-app base URL powers the manage-subscription link inside
         // the price-change notice. `WEB_APP_URL` is the canonical
@@ -1242,7 +1246,10 @@ export async function createServiceRegistry(
             db: getSharedDb(),
             environment: getEnvironment(),
             feeConfig: registry.feeConfig,
-            mailer: (params) => sendEmailToWorkerAwaited(env, params),
+            mailer: (params) =>
+              sendEmailToWorkerAwaited(env, params, {
+                timeoutMs: PRICE_NOTICE_TIMEOUT_MS,
+              }),
             offSaleMailer: sendAfterResponse,
             webAppUrl: env.WEB_APP_URL,
             waitUntil: dbWaitUntil,

@@ -242,8 +242,15 @@ subscribers on that interval are then each handled by `schedulePriceChange`
   - A 5xx, a timeout (5 seconds), a transport failure or an unreadable 2xx is
     "outcome unknown": the email may have gone out, so check notifications'
     email audit log before re-sending.
-- A Stripe failure is alerted with the same ids.
-  - Before the notice (the read): not notified, not moved.
+- A Stripe failure is alerted with the same ids, naming the step that failed.
+  Every Stripe call in the fan-out gives up after 3 seconds, with no retry.
+  - The read fails: "could not read the Stripe subscription; not notified and
+    not moved".
+  - A same-amount write fails (the silent Price-id switch, or clearing a
+    pending change): "same-amount write failed". Nobody is notified, since the
+    amount does not change, but an earlier pending change may still land: the
+    alert names it, so check the Stripe subscription and clear it if it is
+    still there.
   - After an accepted notice: the alert adds the kind (`applied` or
     `pending`), the notice time and the date the email quoted.
     - A definite refusal (a 4xx other than 409 or 429) means the move was not
@@ -252,11 +259,17 @@ subscribers on that interval are then each handled by `schedulePriceChange`
       check the Stripe subscription before retrying.
 - **The 30-second limit.** The fan-out runs after the response, on
   `waitUntil`, which Cloudflare cancels 30 seconds after the response. So no
-  batch starts after 20 seconds (`PRICE_FAN_OUT_BUDGET_MS`). Every subscriber
-  not reached is named in ONE error alert, "ran out of time; these
-  subscribers were not notified or moved", with one errorId shared by lines of
-  at most 200 ids. A start line (with the total) and an end summary bracket
-  each run, for tiers and course plans alike.
+  batch starts after 17 seconds (`PRICE_FAN_OUT_BUDGET_MS`): the last one
+  then needs at most a 3-second read, the 5-second notice and a 3-second
+  write, so it is done by 28 seconds. A start line (with the total) and an end
+  summary bracket each run, for tiers and course plans alike.
+- Every subscriber not reached is reported in ONE error alert after the end
+  summary, with one errorId on every line ("ran out of time"):
+  - first, a line with how many were not reached;
+  - then up to 300 of them by id, at most 200 to a line;
+  - then, for any beyond 300, "and N more: find them with the Stripe query in
+    docs/payments/subscriptions.md". Cloudflare keeps at most 256 KB of logs
+    per request, and a tier's monthly and annual fan-outs share one request.
 - If their next renewal is already at least 30 days after the email, their
   subscription is switched to the new Price **now** with
   `proration_behavior: 'none'`. A same-interval switch keeps the billing dates
@@ -305,10 +318,20 @@ To list them:
    - course plans: the same columns on `course_subscription_plans`.
 2. List the subscriptions in Stripe with Search. Tier subscriptions carry
    `codex_tier_id` and course subscriptions `codex_plan_id`:
-   - `metadata['codex_tier_id']:'<tier id>' AND -status:'canceled'`
-   - `metadata['codex_plan_id']:'<plan id>' AND -status:'canceled'`
+   - `metadata['codex_tier_id']:'<tier id>' AND -status:'canceled' AND -status:'unpaid' AND -status:'incomplete_expired' AND -status:'incomplete'`
+   - `metadata['codex_plan_id']:'<plan id>' AND -status:'canceled' AND -status:'unpaid' AND -status:'incomplete_expired' AND -status:'incomplete'`
+
+   These are the subscriptions the fan-out moves. It selects our rows that are
+   `active`, `cancelling`, `past_due` or `paused`; Stripe's `canceled`,
+   `unpaid` and `incomplete_expired` are `cancelled` in our database, and
+   `incomplete` is `incomplete` (`resolveStatus`, stripe-status-mapper.ts).
 3. Keep the ones on the interval (`items.data[0].price.recurring.interval`)
    that meet the three conditions above.
+
+The list also includes anyone who opened checkout on the old Price and paid
+after the change. The fan-out never saw them, since their subscription did not
+exist yet. They need a notice and a move too, but they are neither held nor
+unreached, so no alert names them.
 
 The metadata keys are the ones `pending-price-change.ts` writes:
 `codex_pending_price_id` and `codex_pending_price_from` (unix seconds). A

@@ -88,14 +88,13 @@ export type EmailSendResult =
   | { accepted: false; error: string };
 
 /**
- * 5 s, so a price fan-out's last batch still finishes inside the runtime's
- * 30 s `waitUntil` budget: it starts by 20 s (`PRICE_FAN_OUT_BUDGET_MS` in
- * `@codex/subscription`), then needs its Stripe read (~1 s), this send (at
- * most 5 s) and its Stripe write (~1 s): 20 + 1 + 5 + 1 = ~27 s < 30 s.
+ * The default wait. The price fan-out passes its own,
+ * `PRICE_NOTICE_TIMEOUT_MS` from `@codex/subscription`, whose budget
+ * arithmetic (`PRICE_FAN_OUT_BUDGET_MS`) counts on it.
  *
  * notifications-api's worst case is longer (three provider attempts with 1 s
- * and 2 s backoff), so a send still running at 5 s is not accepted: the
- * caller treats its outcome as unknown and holds the move back.
+ * and 2 s backoff), so a send still running then is not accepted: the caller
+ * treats its outcome as unknown and holds the move back.
  */
 const AWAITED_SEND_TIMEOUT_MS = 5_000;
 

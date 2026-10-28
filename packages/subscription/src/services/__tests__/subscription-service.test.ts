@@ -71,7 +71,10 @@ import {
   SubscriptionPaymentRequiredError,
   TierNotFoundError,
 } from '../../errors';
-import { PRICE_FAN_OUT_BUDGET_MS } from '../pending-price-change';
+import {
+  FAN_OUT_STRIPE_REQUEST,
+  PRICE_FAN_OUT_BUDGET_MS,
+} from '../pending-price-change';
 import {
   SUBSCRIBER_HIDDEN_COLUMNS,
   SubscriptionService,
@@ -6539,7 +6542,10 @@ describe('SubscriptionService', () => {
 
       expect(result.total).toBe(1);
       expect(retrieveSpy).toHaveBeenCalledTimes(1);
-      expect(retrieveSpy).toHaveBeenCalledWith(annual.stripeSubscriptionId);
+      expect(retrieveSpy).toHaveBeenCalledWith(
+        annual.stripeSubscriptionId,
+        FAN_OUT_STRIPE_REQUEST
+      );
       expect(
         updateFor(updateSpy, monthly.stripeSubscriptionId)
       ).toBeUndefined();
@@ -6707,7 +6713,9 @@ describe('SubscriptionService', () => {
           metadata: { codex_pending_price_id: 'price_new_idem' },
         });
         // `from` moves with the notice time, so a key would collide on re-run.
-        expect(opts).toBeUndefined();
+        // Only the fan-out's timeout options (round 2): no idempotency key.
+        expect(opts).toEqual(FAN_OUT_STRIPE_REQUEST);
+        expect(opts).not.toHaveProperty('idempotencyKey');
       }
     });
 
@@ -7209,17 +7217,41 @@ describe('SubscriptionService', () => {
           const [left] = rows.filter(
             (row) => !read4.has(row.stripeSubscriptionId)
           );
+          const messages = errors.mock.calls.map(([message]) =>
+            String(message)
+          );
           const outOfTime = errors.mock.calls.filter(([message]) =>
             String(message).includes('ran out of time')
           );
-          expect(outOfTime).toHaveLength(1);
-          expect(outOfTime[0]?.[1]).toMatchObject({
+          // Round 2, silent R1: the log cap drops what comes last, so the
+          // end summary goes first, then the count, then the names.
+          expect(
+            messages.findIndex((m) => m.includes('ran out of time'))
+          ).toBeGreaterThan(
+            messages.findIndex((m) => m.includes('completed with failures'))
+          );
+          expect(
+            messages.findIndex((m) => m.includes('completed with failures'))
+          ).toBeGreaterThanOrEqual(0);
+          expect(outOfTime).toHaveLength(2);
+          const [count, names] = outOfTime;
+          const context = {
             errorId: expect.any(String),
             tierId: tier1.id,
             interval: 'year',
             newStripePriceId: 'price_new_dl',
             noticeAt: '2026-11-02T10:00:00.000Z',
+          };
+          expect(count?.[1]).toEqual({
+            ...context,
             unhandled: 1,
+            named: 1,
+            more: 0,
+            chunks: 1,
+          });
+          expect(names?.[1]).toMatchObject({
+            ...context,
+            errorId: (count?.[1] as { errorId?: string } | undefined)?.errorId,
             subscribers: [
               {
                 subscriptionId: left?.id,

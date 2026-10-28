@@ -8,6 +8,7 @@
 import {
   BusinessLogicError,
   ConflictError,
+  InternalServiceError,
   NotFoundError,
   ServiceError,
 } from '@codex/service-errors';
@@ -264,5 +265,45 @@ export class ConnectPlatformNotConfiguredError extends ServiceError {
       500,
       context
     );
+  }
+}
+
+// ============================================================================
+// Price-change fan-out errors
+// ============================================================================
+
+/**
+ * The Stripe call that threw on one subscriber's path through
+ * `schedulePriceChange` before any notice went out: the read, or one of the
+ * same-amount path's two writes (the item swap, or clearing the pending
+ * marker).
+ */
+export type PriceChangeStage =
+  | 'read'
+  | 'same_amount_swap'
+  | 'same_amount_clear';
+
+/**
+ * Stripe threw at `stage`, so the fan-out's alert can name the step that
+ * failed: a failed write is not a failed read (review A round 2, correctness
+ * #2). `cause` is Stripe's own error, and the refused-or-unknown judgement is
+ * made on it. `currentPending` is the earlier change the subscription carried,
+ * which a failed same-amount write may leave to land.
+ *
+ * It never reaches a client (the fan-out runs after the response). Its
+ * context holds the stage only: no Stripe message and no date.
+ */
+export class PriceChangeStageError extends InternalServiceError {
+  readonly stage: PriceChangeStage;
+  readonly currentPending: { priceId: string; from: Date } | null;
+
+  constructor(
+    stage: PriceChangeStage,
+    currentPending: { priceId: string; from: Date } | null,
+    cause: unknown
+  ) {
+    super(`Price change: Stripe failed at ${stage}`, { stage }, { cause });
+    this.stage = stage;
+    this.currentPending = currentPending;
   }
 }

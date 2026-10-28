@@ -4,20 +4,31 @@
  * pins the per-subscription decision, the notice-first order (D-P3,
  * Codex-2hxff.43) and the renewal-date arithmetic.
  */
-import type Stripe from 'stripe';
+import Stripe from 'stripe';
 import { describe, expect, it, vi } from 'vitest';
+import { PriceChangeStageError } from '../../errors';
 import {
   alertFanOutOutOfTime,
   applyDuePendingPriceChange,
   FAN_OUT_ALERT_CHUNK,
+  FAN_OUT_ALERT_MAX_NAMED,
+  FAN_OUT_ALERT_NAME_BYTES,
+  FAN_OUT_DEADLINE_MS,
+  FAN_OUT_STRIPE_CALLS_PER_SUBSCRIBER,
+  FAN_OUT_STRIPE_REQUEST,
+  FAN_OUT_STRIPE_TIMEOUT_MS,
   firstRenewalOnOrAfter,
   isDefinitiveStripeRefusal,
   moveFailureAlert,
   noticeFailureAlert,
   PRICE_CHANGE_NOTICE_SECONDS,
+  PRICE_FAN_OUT_BUDGET_MS,
+  PRICE_NOTICE_TIMEOUT_MS,
   type PriceChangeNotice,
   schedulePriceChange,
   sendPriceChangeNotice,
+  WAIT_UNTIL_LIMIT_MS,
+  WORKER_LOG_LIMIT_BYTES,
 } from '../pending-price-change';
 
 const DAY = 24 * 60 * 60;
@@ -94,7 +105,11 @@ describe('schedulePriceChange', () => {
         items: [{ id: 'si_1', price: 'price_new' }],
         proration_behavior: 'none',
       }),
-      { idempotencyKey: 'price-change-now:sub_1:price_new' }
+      {
+        timeout: 3_000,
+        maxNetworkRetries: 0,
+        idempotencyKey: 'price-change-now:sub_1:price_new',
+      }
     );
   });
 
@@ -299,6 +314,178 @@ describe('schedulePriceChange', () => {
       expect(notify).not.toHaveBeenCalled();
     });
   });
+
+  // Review A round 2, correctness #1 / silent R2: the SDK's defaults (80 s,
+  // two retries) let one slow call outlast the 30 s waitUntil budget, so
+  // every call on a subscriber's path carries its own timeout, and the path
+  // makes no more calls than the budget arithmetic counts.
+  describe('every Stripe call has a 3 s timeout and no retry', () => {
+    it.each([
+      ['a swap now', fakeSub({ renewal: NOTICE_SEC + 40 * DAY })],
+      ['a pending marker', fakeSub({ renewal: NOTICE_SEC + 10 * DAY })],
+      [
+        'a same-amount swap',
+        fakeSub({ renewal: NOTICE_SEC + 10 * DAY, unitAmount: 700 }),
+      ],
+      [
+        'a same-amount clear',
+        fakeSub({
+          renewal: NOTICE_SEC + 10 * DAY,
+          unitAmount: 700,
+          priceId: 'price_new',
+          metadata: {
+            codex_pending_price_id: 'price_earlier',
+            codex_pending_price_from: String(NOTICE_SEC + 5 * DAY),
+          },
+        }),
+      ],
+    ])('%s', async (_label, subscription) => {
+      const { stripe, update } = fakeStripe(subscription);
+      const retrieve = vi.mocked(stripe.subscriptions.retrieve);
+
+      await schedulePriceChange(stripe, target, accept);
+
+      expect(FAN_OUT_STRIPE_REQUEST).toEqual({
+        timeout: 3_000,
+        maxNetworkRetries: 0,
+      });
+      expect(retrieve).toHaveBeenCalledWith('sub_1', FAN_OUT_STRIPE_REQUEST);
+      expect(update).toHaveBeenCalledTimes(1);
+      expect(update.mock.calls[0]?.[2]).toMatchObject(FAN_OUT_STRIPE_REQUEST);
+      expect(retrieve.mock.calls.length + update.mock.calls.length).toBe(
+        FAN_OUT_STRIPE_CALLS_PER_SUBSCRIBER
+      );
+    });
+
+    it('the budget leaves the last batch its worst case inside 28 s', () => {
+      expect(FAN_OUT_STRIPE_TIMEOUT_MS).toBe(3_000);
+      expect(PRICE_NOTICE_TIMEOUT_MS).toBe(5_000);
+      expect(FAN_OUT_STRIPE_CALLS_PER_SUBSCRIBER).toBe(2);
+      expect(PRICE_FAN_OUT_BUDGET_MS).toBe(17_000);
+      // Latest start + a read and a write at their timeout + the notice.
+      expect(
+        PRICE_FAN_OUT_BUDGET_MS +
+          FAN_OUT_STRIPE_CALLS_PER_SUBSCRIBER * FAN_OUT_STRIPE_TIMEOUT_MS +
+          PRICE_NOTICE_TIMEOUT_MS
+      ).toBeLessThanOrEqual(FAN_OUT_DEADLINE_MS);
+      expect(FAN_OUT_DEADLINE_MS).toBe(28_000);
+      expect(FAN_OUT_DEADLINE_MS).toBeLessThan(WAIT_UNTIL_LIMIT_MS);
+    });
+
+    // What stripe-node throws when the timeout fires (RequestSender): a
+    // connection error with no status.
+    const timedOut = () =>
+      new Stripe.errors.StripeConnectionError({
+        type: 'api_error',
+        message: 'Request aborted due to timeout being reached (3000ms)',
+      });
+
+    it('a timed-out read: could not read; not notified, not moved', async () => {
+      const { stripe, update } = fakeStripe(fakeSub({ renewal: 0 }));
+      vi.mocked(stripe.subscriptions.retrieve).mockRejectedValue(timedOut());
+      const notify = vi.fn().mockResolvedValue(true);
+
+      const error = await schedulePriceChange(stripe, target, notify).catch(
+        (e: unknown) => e
+      );
+      const alert = moveFailureAlert('Tier: ', error, undefined, NOTICE);
+
+      expect(alert.message).toContain('could not read the Stripe subscription');
+      expect(alert.data).toMatchObject({
+        outcome: 'not_moved',
+        notified: false,
+        stage: 'read',
+        error: 'Request aborted due to timeout being reached (3000ms)',
+      });
+      expect(notify).not.toHaveBeenCalled();
+      expect(update).not.toHaveBeenCalled();
+    });
+
+    it('a timed-out write after an accepted notice: the move is "outcome unknown"', async () => {
+      const renewal = NOTICE_SEC + 40 * DAY;
+      const { stripe, update } = fakeStripe(fakeSub({ renewal }));
+      update.mockRejectedValue(timedOut());
+      let accepted: PriceChangeNotice | undefined;
+
+      const error = await schedulePriceChange(stripe, target, async (n) => {
+        accepted = n;
+        return true;
+      }).catch((e: unknown) => e);
+      const alert = moveFailureAlert('Tier: ', error, accepted, NOTICE);
+
+      expect(alert.message).toContain(
+        "notice sent; the move's outcome is unknown"
+      );
+      expect(alert.data).toMatchObject({
+        outcome: 'move_unknown',
+        notified: true,
+        kind: 'applied',
+      });
+    });
+  });
+
+  // Review A round 2, correctness #2: a failed same-amount WRITE was
+  // reported as "could not read the subscription". It names its stage, and
+  // carries the pending change it failed to clear.
+  describe('a failed same-amount write names its stage', () => {
+    const from = NOTICE_SEC + 5 * DAY;
+    const earlier = {
+      codex_pending_price_id: 'price_earlier',
+      codex_pending_price_from: String(from),
+    };
+
+    it.each([
+      [
+        'same_amount_swap',
+        fakeSub({
+          renewal: NOTICE_SEC + 10 * DAY,
+          unitAmount: 700,
+          metadata: earlier,
+        }),
+      ],
+      [
+        'same_amount_clear',
+        fakeSub({
+          renewal: NOTICE_SEC + 10 * DAY,
+          unitAmount: 700,
+          priceId: 'price_new',
+          metadata: earlier,
+        }),
+      ],
+    ] as const)('%s', async (stage, subscription) => {
+      const { stripe, update } = fakeStripe(subscription);
+      update.mockRejectedValue(
+        Object.assign(new Error('down'), { statusCode: 500 })
+      );
+
+      const error = await schedulePriceChange(stripe, target, accept).catch(
+        (e: unknown) => e
+      );
+      const alert = moveFailureAlert('Tier: ', error, undefined, NOTICE);
+
+      expect(error).toBeInstanceOf(PriceChangeStageError);
+      expect(error).toMatchObject({
+        stage,
+        currentPending: {
+          priceId: 'price_earlier',
+          from: new Date(from * 1000),
+        },
+      });
+      expect(alert.message).toContain(
+        'same-amount write failed; an earlier pending change may still land: price_earlier'
+      );
+      expect(alert.message).not.toContain('could not read');
+      expect(alert.data).toMatchObject({
+        outcome: 'same_amount_write_failed',
+        notified: false,
+        stage,
+        definitive: false,
+        currentPendingPriceId: 'price_earlier',
+        currentPendingFrom: new Date(from * 1000).toISOString(),
+        error: 'down',
+      });
+    });
+  });
 });
 
 describe('sendPriceChangeNotice', () => {
@@ -446,14 +633,86 @@ describe('the price-change alerts', () => {
     });
   });
 
-  it('a failed read (no notice) is not notified and not moved', () => {
+  // This test used to hand in ANY error without a notice and expect "not
+  // notified and not moved" from a failed read. That pinned the defect: a
+  // failed same-amount WRITE has no notice either, and was reported as a
+  // failed read, hiding the pending change it may leave to land (review A
+  // round 2, correctness #2). The read is now named by its stage, and a
+  // same-amount write gets its own alert.
+  it('a failed read (stage "read") is not notified and not moved', () => {
     const alert = moveFailureAlert(
       'Tier: ',
-      new Error('x'),
+      new PriceChangeStageError('read', null, new Error('x')),
       undefined,
       new Date()
     );
 
+    expect(alert.message).toContain('could not read the Stripe subscription');
+    expect(alert.data).toMatchObject({
+      outcome: 'not_moved',
+      notified: false,
+      stage: 'read',
+      error: 'x',
+    });
+  });
+
+  it.each([
+    [400, true, 'pending-marker clear, refused by Stripe'],
+    [500, false, 'pending-marker clear, outcome unknown'],
+  ])('a same-amount write failing with %s says whether Stripe refused it', (statusCode, definitive, says) => {
+    const pending = {
+      priceId: 'price_earlier',
+      from: new Date('2026-11-01T00:00:00Z'),
+    };
+    const alert = moveFailureAlert(
+      'Tier: ',
+      new PriceChangeStageError(
+        'same_amount_clear',
+        pending,
+        Object.assign(new Error('stripe says no'), { statusCode })
+      ),
+      undefined,
+      new Date()
+    );
+
+    expect(alert.message).toContain(
+      'same-amount write failed; an earlier pending change may still land: price_earlier, due from 2026-11-01T00:00:00.000Z'
+    );
+    expect(alert.message).toContain(says);
+    expect(alert.data).toMatchObject({
+      outcome: 'same_amount_write_failed',
+      stage: 'same_amount_clear',
+      definitive,
+      error: 'stripe says no',
+    });
+  });
+
+  it('a same-amount swap with no pending change says nothing is left to land', () => {
+    const alert = moveFailureAlert(
+      'Tier: ',
+      new PriceChangeStageError('same_amount_swap', null, new Error('down')),
+      undefined,
+      new Date()
+    );
+
+    expect(alert.message).toContain('same-amount write failed (item swap');
+    expect(alert.message).toContain('no earlier change is pending');
+    expect(alert.data).toMatchObject({
+      outcome: 'same_amount_write_failed',
+      currentPendingPriceId: null,
+    });
+  });
+
+  it('a failure that is not a Stripe call, before any notice, is not called a read', () => {
+    const alert = moveFailureAlert(
+      'Tier: ',
+      new Error('mailer blew up'),
+      undefined,
+      new Date()
+    );
+
+    expect(alert.message).toContain('failed before the notice was accepted');
+    expect(alert.message).not.toContain('could not read');
     expect(alert.data).toMatchObject({ outcome: 'not_moved', notified: false });
   });
 
@@ -470,12 +729,15 @@ describe('the price-change alerts', () => {
 });
 
 // Review A, silent #1: one alert, one errorId, at most 200 ids per line.
+// Round 2, silent R1: Cloudflare keeps 256 KB of logs per invocation and
+// drops the rest, so the count comes first and the names are capped.
 describe('alertFanOutOutOfTime', () => {
-  it('splits the subscribers into lines of at most 200 that share one errorId', () => {
+  const subscribersOf = (length: number) =>
+    Array.from({ length }, (_, n) => ({ subscriptionId: `sub_${n}` }));
+
+  it('counts first, names at most 300 in lines of 200, then points to the query', () => {
     const logError = vi.fn();
-    const subscribers = Array.from({ length: 450 }, (_, n) => ({
-      subscriptionId: `sub_${n}`,
-    }));
+    const subscribers = subscribersOf(1_234);
 
     alertFanOutOutOfTime(logError, {
       errorId: 'err_1',
@@ -484,24 +746,105 @@ describe('alertFanOutOutOfTime', () => {
     });
 
     expect(FAN_OUT_ALERT_CHUNK).toBe(200);
-    expect(logError).toHaveBeenCalledTimes(3);
-    const lines = logError.mock.calls.map(([, data]) => data);
-    expect(lines.map((data) => data.subscribers.length)).toEqual([
-      200, 200, 50,
-    ]);
-    for (const [n, data] of lines.entries()) {
+    expect(FAN_OUT_ALERT_MAX_NAMED).toBe(300);
+    const [first, ...rest] = logError.mock.calls;
+    const tail = rest.pop();
+    expect(String(first?.[0])).toContain(
+      'ran out of time; 1234 subscribers were not notified or moved'
+    );
+    expect(first?.[1]).toEqual({
+      errorId: 'err_1',
+      tierId: 'tier_1',
+      unhandled: 1_234,
+      named: 300,
+      more: 934,
+      chunks: 2,
+    });
+    expect(rest.map(([, data]) => data.subscribers.length)).toEqual([200, 100]);
+    for (const [n, [message, data]] of rest.entries()) {
+      expect(String(message)).toContain(
+        'ran out of time; these subscribers were not notified or moved'
+      );
       expect(data).toMatchObject({
         errorId: 'err_1',
         tierId: 'tier_1',
-        unhandled: 450,
         chunk: n + 1,
-        chunks: 3,
+        chunks: 2,
       });
     }
-    expect(lines.flatMap((data) => data.subscribers)).toEqual(subscribers);
-    expect(String(logError.mock.calls[0]?.[0])).toContain(
-      'ran out of time; these subscribers were not notified or moved'
+    expect(rest.flatMap(([, data]) => data.subscribers)).toEqual(
+      subscribers.slice(0, 300)
     );
+    expect(String(tail?.[0])).toContain(
+      'and 934 more: find them with the Stripe query in docs/payments/subscriptions.md'
+    );
+    expect(tail?.[1]).toEqual({
+      errorId: 'err_1',
+      tierId: 'tier_1',
+      more: 934,
+    });
+  });
+
+  it('names everyone, with no "more" line, when they fit', () => {
+    const logError = vi.fn();
+    const subscribers = subscribersOf(250);
+
+    alertFanOutOutOfTime(logError, {
+      errorId: 'err_2',
+      context: {},
+      subscribers,
+    });
+
+    expect(logError).toHaveBeenCalledTimes(3);
+    expect(logError.mock.calls[0]?.[1]).toMatchObject({
+      unhandled: 250,
+      named: 250,
+      more: 0,
+    });
+    expect(
+      logError.mock.calls.slice(1).flatMap(([, data]) => data.subscribers)
+    ).toEqual(subscribers);
+  });
+
+  it('logs nothing when everyone was reached', () => {
+    const logError = vi.fn();
+
+    alertFanOutOutOfTime(logError, {
+      errorId: 'err_3',
+      context: {},
+      subscribers: [],
+    });
+
+    expect(logError).not.toHaveBeenCalled();
+  });
+
+  it("a tier's two capped alerts fit the log limit with room to spare", () => {
+    // Real id shapes: a row uuid, a Stripe id, a 32-character user id and an
+    // organisation uuid; a course plan's entry adds its interval.
+    const uuid = '0b5c1f6e-2d4a-4c3b-9f1e-7a8d6c5b4e3f';
+    const tierName = {
+      subscriptionId: uuid,
+      stripeSubscriptionId: 'sub_1QabcdEFGHijklMNOPqrstuv',
+      userId: 'aB3dE5gH7jK9mN1pQ3sT5vW7yZ9bC1dF',
+      organizationId: uuid,
+    };
+    const courseName = {
+      courseSubscriptionId: uuid,
+      stripeSubscriptionId: tierName.stripeSubscriptionId,
+      userId: tierName.userId,
+      organizationId: uuid,
+      interval: 'month',
+    };
+    for (const name of [tierName, courseName]) {
+      // Each name plus the comma that joins it to the next.
+      expect(JSON.stringify(name).length + 1).toBeLessThanOrEqual(
+        FAN_OUT_ALERT_NAME_BYTES
+      );
+    }
+    // A tier's monthly and annual fan-outs share one invocation.
+    expect(
+      2 * FAN_OUT_ALERT_MAX_NAMED * FAN_OUT_ALERT_NAME_BYTES
+    ).toBeLessThanOrEqual(WORKER_LOG_LIMIT_BYTES * 0.6);
   });
 });
 

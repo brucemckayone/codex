@@ -72,8 +72,11 @@ on `SubscriptionService`; `feeConfig`, `mailer` and `offSaleMailer` on
   (the services' `mailer` is the awaited `PriceChangeNoticeMailer`); a notice
   not accepted keeps today's price and is alerted (`Codex-2hxff.43`). Both
   fan-outs run on `waitUntil` (30 s, then cancelled), so neither starts a batch
-  after `PRICE_FAN_OUT_BUDGET_MS` (20 s); everyone not reached is named in one
-  alert (`alertFanOutOutOfTime`).
+  after `PRICE_FAN_OUT_BUDGET_MS` (17 s), and every fan-out Stripe call passes
+  `FAN_OUT_STRIPE_REQUEST` (3 s, no retry). The budget is derived from those
+  named timeouts, so a new Stripe call on a subscriber's path must update
+  `FAN_OUT_STRIPE_CALLS_PER_SUBSCRIBER`. Everyone not reached is counted, and
+  named up to a cap, in one alert (`alertFanOutOutOfTime`).
 - If the DB insert fails, the new Stripe Product is archived (orphan prevention),
   unless a live row already uses it. Create keys survive a retry — a tier keys
   on the environment + the dialog's `submissionId`, a course plan on environment

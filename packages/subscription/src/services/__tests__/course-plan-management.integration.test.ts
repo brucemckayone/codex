@@ -61,7 +61,10 @@ import {
   CreatorConnectRequiredError,
 } from '../../errors';
 import { CourseSubscriptionService } from '../course-subscription-service';
-import { PRICE_FAN_OUT_BUDGET_MS } from '../pending-price-change';
+import {
+  FAN_OUT_STRIPE_REQUEST,
+  PRICE_FAN_OUT_BUDGET_MS,
+} from '../pending-price-change';
 
 /**
  * Inspectable handle on the Stripe mock's product/price calls.
@@ -310,7 +313,10 @@ describe('CourseSubscriptionService plan management (Codex-2pryk.2.4.1)', () => 
 
       // Only the monthly subscriber is read — the annual one is never touched.
       expect(retrieve).toHaveBeenCalledTimes(1);
-      expect(retrieve).toHaveBeenCalledWith(`sub_${ns}_m`);
+      expect(retrieve).toHaveBeenCalledWith(
+        `sub_${ns}_m`,
+        FAN_OUT_STRIPE_REQUEST
+      );
       // Renews in 10 days: too soon, so marked pending (no item swap yet).
       const [, params] = update.mock.calls[0] ?? [];
       expect(params).not.toHaveProperty('items');
@@ -722,23 +728,50 @@ describe('CourseSubscriptionService plan management (Codex-2pryk.2.4.1)', () => 
         ]);
         expect(update.mock.calls.map(([id]) => id)).toEqual([`sub_${ns}_m`]);
         const annual = takeFirst(seeded.filter((r) => r.userId === annualUser));
+        const messages = logError.mock.calls.map(([message]) =>
+          String(message)
+        );
         const outOfTime = logError.mock.calls.filter(([message]) =>
           String(message).includes('ran out of time')
         );
-        expect(outOfTime).toHaveLength(1);
-        expect(outOfTime[0]?.[1]).toMatchObject({
+        // Round 2, silent R1: the log cap drops what comes last, so the end
+        // summary goes first, then the count, then the names: one alert
+        // across both intervals.
+        expect(
+          messages.findIndex((m) => m.includes('completed with failures'))
+        ).toBeGreaterThanOrEqual(0);
+        expect(
+          messages.findIndex((m) => m.includes('ran out of time'))
+        ).toBeGreaterThan(
+          messages.findIndex((m) => m.includes('completed with failures'))
+        );
+        expect(outOfTime).toHaveLength(2);
+        const [count, names] = outOfTime;
+        const context = {
           errorId: expect.any(String),
           planId: plan.id,
-          interval: 'year',
-          newPriceId: expect.any(String),
           noticeAt: '2026-11-02T10:00:00.000Z',
+          moves: expect.arrayContaining([
+            expect.objectContaining({ interval: 'year', total: 1 }),
+            expect.objectContaining({ interval: 'month', total: 1 }),
+          ]),
+        };
+        expect(count?.[1]).toMatchObject({
+          ...context,
           unhandled: 1,
+          named: 1,
+          more: 0,
+        });
+        expect(names?.[1]).toMatchObject({
+          ...context,
+          errorId: (count?.[1] as { errorId?: string } | undefined)?.errorId,
           subscribers: [
             {
               courseSubscriptionId: annual.id,
               stripeSubscriptionId: `sub_${ns}_y`,
               userId: annualUser,
               organizationId: orgId,
+              interval: 'year',
             },
           ],
         });

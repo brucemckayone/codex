@@ -899,10 +899,11 @@ export class CourseSubscriptionService extends BaseService {
    * failed subscriber never stops the rest.
    *
    * It runs on `waitUntil`, which the runtime cancels 30 s after the response,
-   * so no batch starts after `PRICE_FAN_OUT_BUDGET_MS` (20 s), across both
-   * intervals. Both intervals' subscribers are read first, so every one not
-   * reached is named in one alert. A start line and an end summary bracket the
-   * run.
+   * so no batch starts after `PRICE_FAN_OUT_BUDGET_MS` (17 s), across both
+   * intervals, and every Stripe call gives up after 3 s. Both intervals'
+   * subscribers are read first, so every one not reached, on either interval,
+   * is reported in one alert after the end summary (`alertFanOutOutOfTime`).
+   * A start line opens the run.
    */
   private async movePlanSubscribers(
     planId: string,
@@ -962,37 +963,28 @@ export class CourseSubscriptionService extends BaseService {
       total: counts.total,
     });
 
-    // One errorId for every subscriber the fan-out does not reach.
-    let outOfTimeErrorId: string | undefined;
+    // Everyone the deadline leaves out, on either interval: one alert,
+    // after the end summary.
+    const unreached: Array<Record<string, unknown>> = [];
     const batchSize = 8;
     for (const { move, rows } of planned) {
       for (let i = 0; i < rows.length; i += batchSize) {
         // The runtime cancels everything 30 s after the response: start no
         // batch it could cut off, and name every subscriber left (silent #1).
         if (
-          outOfTimeErrorId ||
+          unreached.length > 0 ||
           Date.now() - startedAt >= PRICE_FAN_OUT_BUDGET_MS
         ) {
-          outOfTimeErrorId ??= crypto.randomUUID();
           const left = rows.slice(i);
           counts.unhandled += left.length;
-          alertFanOutOutOfTime(
-            (message, data) => this.obs.error(message, data),
-            {
-              errorId: outOfTimeErrorId,
-              context: {
-                planId,
-                interval: move.interval,
-                newPriceId: move.newPriceId,
-                noticeAt: noticeAt.toISOString(),
-              },
-              subscribers: left.map((row) => ({
-                courseSubscriptionId: row.id,
-                stripeSubscriptionId: row.stripeSubscriptionId,
-                userId: row.userId,
-                organizationId: row.organizationId,
-              })),
-            }
+          unreached.push(
+            ...left.map((row) => ({
+              courseSubscriptionId: row.id,
+              stripeSubscriptionId: row.stripeSubscriptionId,
+              userId: row.userId,
+              organizationId: row.organizationId,
+              interval: move.interval,
+            }))
           );
           break;
         }
@@ -1066,6 +1058,13 @@ export class CourseSubscriptionService extends BaseService {
         ...counts,
       });
     }
+    // After the summary, and count first: the per-invocation log cap drops
+    // whatever comes last (review A round 2, silent R1).
+    alertFanOutOutOfTime((message, data) => this.obs.error(message, data), {
+      errorId: crypto.randomUUID(),
+      context: summary,
+      subscribers: unreached,
+    });
   }
 
   /**

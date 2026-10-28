@@ -714,44 +714,44 @@ describe('a clawback delivery that outlives its lease (Codex-2hxff.72)', () => {
     expect(obs.error).not.toHaveBeenCalled();
   });
 
-  /** Resolve once a backend waits on a lock `holder` holds, or `done()`. */
-  async function untilBlockedBy(holder: number, done: () => boolean) {
-    for (let attempt = 0; attempt < 250 && !done(); attempt++) {
-      const { rows } = await db.execute(
-        sql`select 1 from pg_stat_activity
-            where ${holder}::int = any(pg_blocking_pids(pid))`
-      );
-      if (rows.length > 0) return;
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    }
-  }
-
-  it('the slice is cancelled under a renewed lease, in one transaction: a settlement racing it waits on the step, finds it moved, and refuses', async () => {
+  it('the lease is renewed before the slice is cancelled: a settlement while the cancel runs finds the step freshly leased and refuses', async () => {
     const charge = newCharge();
     const creator = await slice(charge, 765, 'pending');
     const refund = await failedRefund(charge, 1000);
     const deliverer = await ownConnection();
+    // The claim is made 11 minutes ago. Once the claim's transaction has
+    // committed the clock is real again, so the renewal is a fresh lease.
+    const claimsLate = new Proxy(deliverer.db, {
+      get(target, prop, receiver) {
+        const value = Reflect.get(target, prop, receiver);
+        if (prop === 'transaction') {
+          const transaction = value as (...a: unknown[]) => Promise<unknown>;
+          return (...a: unknown[]) =>
+            transaction.apply(target, a).finally(() => vi.useRealTimers());
+        }
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
     let run: Promise<void> = Promise.resolve();
-    let settled = false;
+    let unlanded: StrandedStep[] = [];
     let settling: Promise<unknown> = Promise.resolve();
     try {
       await db.transaction(async (tx) => {
         await tx.execute(sql`set local lock_timeout = '10s'`);
-        // A drain holds the slice, so the delivery's cancel waits inside its
-        // transaction, its lease renewal written and not yet committed.
+        // A drain holds the slice, so the delivery's cancel waits for it,
+        // after its renewal has committed.
         await tx
           .select({ id: payouts.id })
           .from(payouts)
           .where(eq(payouts.id, creator.id))
           .for('no key update');
         const holder = await backendPid(tx);
-        // The clock advances, so the renewal is a later lease than the claim.
-        vi.useFakeTimers({ toFake: ['Date'], shouldAdvanceTime: true });
+        vi.useFakeTimers({ toFake: ['Date'] });
         vi.setSystemTime(Date.now() - LATE_MS);
         try {
           let outcome: string | undefined;
           run = reverseCharge(
-            { ...deps, db: deliverer.db },
+            { ...deps, db: claimsLate },
             { charge, source: SOURCE, refunds: [refund] }
           );
           run.then(
@@ -769,23 +769,12 @@ describe('a clawback delivery that outlives its lease (Codex-2hxff.72)', () => {
           vi.useRealTimers();
         }
 
-        // Support settles meanwhile. It read the step before the renewal
-        // committed, as claimed 11 minutes ago, so it tries to cancel it.
-        const checked = await settleUnfinishedRefundSteps(deps, {
+        // Support settles while the cancel waits on the slice.
+        ({ unlanded } = await settleUnfinishedRefundSteps(deps, {
           stripeRefundId: refund.id,
-        });
-        expect(checked.unlanded).toHaveLength(1);
-        settling = settle(refund.id, checked.unlanded).then(
-          () => {
-            settled = true;
-            return 'settled';
-          },
-          (error: unknown) => {
-            settled = true;
-            return error;
-          }
-        );
-        await untilBlockedBy(deliverer.pid, () => settled);
+        }));
+        settling = settle(refund.id, unlanded).catch((error: unknown) => error);
+        await settling;
       });
       await run;
     } finally {
@@ -793,6 +782,8 @@ describe('a clawback delivery that outlives its lease (Codex-2hxff.72)', () => {
       await deliverer.cleanup();
     }
 
+    // The renewed lease is fresh: not a step no retry will run.
+    expect(unlanded).toEqual([]);
     expect(((await settling) as BusinessLogicError).context).toMatchObject({
       code: 'REFUND_CLAWBACK_UNFINISHED',
     });
@@ -801,6 +792,97 @@ describe('a clawback delivery that outlives its lease (Codex-2hxff.72)', () => {
     ]);
     expect((await readRow(creator.id)).status).toBe('cancelled_by_refund');
     expect(obs.error).not.toHaveBeenCalled();
+  });
+
+  /**
+   * `db`, but the `n`th cancel of an unpaid slice (`payouts` set to
+   * `cancelled_by_refund`) throws, inside a transaction or out, as
+   * subscription-refund-clawback's Codex-2hxff.51 suite injects it.
+   */
+  function failingCancel(n: number): Database {
+    let cancels = 0;
+    const wrap = <T extends object>(client: T): T =>
+      new Proxy(client, {
+        get(target, prop, receiver) {
+          const value = Reflect.get(target, prop, receiver);
+          if (prop === 'update') {
+            return (table: typeof payouts) => {
+              const builder = (
+                value as (t: typeof payouts) => {
+                  set: (values: Record<string, unknown>) => unknown;
+                }
+              ).call(target, table);
+              const realSet = builder.set.bind(builder);
+              builder.set = (values) => {
+                if (
+                  table === payouts &&
+                  values.status === 'cancelled_by_refund' &&
+                  ++cancels === n
+                ) {
+                  throw new Error('injected cancel failure');
+                }
+                return realSet(values);
+              };
+              return builder;
+            };
+          }
+          if (prop === 'transaction') {
+            const transaction = value as (
+              fn: (tx: unknown) => Promise<unknown>,
+              ...rest: unknown[]
+            ) => Promise<unknown>;
+            return (
+              fn: (tx: unknown) => Promise<unknown>,
+              ...rest: unknown[]
+            ) =>
+              transaction.call(
+                target,
+                (tx: unknown) => fn(wrap(tx as object)),
+                ...rest
+              );
+          }
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+    return wrap(db);
+  }
+
+  it('a cancel that throws: every other slice is still cancelled, then the call rejects with that failure as its cause (Codex-2hxff.51)', async () => {
+    const charge = newCharge();
+    // One slice per payee per charge (`uq_payouts_creator_slice_per_charge`).
+    const rows = [
+      await slice(charge, 300, 'pending', creatorId),
+      await slice(charge, 300, 'pending', payeeId),
+      await slice(charge, 100, 'pending', supportId),
+    ];
+    const refund = fullRefund();
+
+    const failure = await reverseCharge(
+      { ...deps, db: failingCancel(2) },
+      { charge, source: SOURCE, refunds: [refund] }
+    ).then(
+      () => undefined,
+      (error: unknown) => error
+    );
+
+    expect(failure).toBeInstanceOf(InternalServiceError);
+    expect((failure as Error).cause).toMatchObject({
+      message: 'injected cancel failure',
+    });
+    const statuses = await Promise.all(
+      rows.map(async (row) => (await readRow(row.id)).status)
+    );
+    expect([...statuses].sort()).toEqual([
+      'cancelled_by_refund',
+      'cancelled_by_refund',
+      'pending',
+    ]);
+    // The failed step is released for the retry, which cancels the last.
+    await reverseCharge(deps, { charge, source: SOURCE, refunds: [refund] });
+    const after = await Promise.all(rows.map((row) => readRow(row.id)));
+    expect(after.every((row) => row.status === 'cancelled_by_refund')).toBe(
+      true
+    );
   });
 
   // ── what a late write reports, and only once ────────────────────────
@@ -1017,8 +1099,11 @@ describe('a clawback delivery that outlives its lease (Codex-2hxff.72)', () => {
 
   // ── a cancelled slice's late transfer ───────────────────────────────
 
-  /** Stripe lists `transferId` (or none) as made for `slice`, once asked. */
-  function lateTransfer(slice: Payout, transferId: string | null) {
+  /**
+   * Stripe lists `transferId` (or none) as made for `slice`, once asked, or
+   * cannot be asked at all (`'fails'`).
+   */
+  function lateTransfer(slice: Payout, transferId: string | null | 'fails') {
     let answer: () => void = () => undefined;
     let reach: () => void = () => undefined;
     const reached = new Promise<void>((resolve) => {
@@ -1029,6 +1114,11 @@ describe('a clawback delivery that outlives its lease (Codex-2hxff.72)', () => {
       await new Promise<void>((resolve) => {
         answer = resolve;
       });
+      if (transferId === 'fails') {
+        throw Object.assign(new Error('Stripe is down'), {
+          code: 'api_connection_error',
+        });
+      }
       return {
         object: 'list',
         data: transferId
@@ -1086,6 +1176,80 @@ describe('a clawback delivery that outlives its lease (Codex-2hxff.72)', () => {
         .from(refundReviews)
         .where(eq(refundReviews.payoutReversalId, step?.id ?? ''))
     ).toEqual([]);
+  });
+
+  it('a cancelled slice whose transfer lookup FAILED, under a step settled meanwhile: the unconfirmed alert, never "took money"', async () => {
+    const charge = newCharge();
+    const pending = await slice(charge, 765, 'pending', payeeId);
+    const refund = fullRefund();
+    const list = lateTransfer(pending, 'fails');
+    const run = reverseCharge(deps, {
+      charge,
+      source: SOURCE,
+      refunds: [refund],
+    });
+    await list.reached;
+    await settleByHand(refund.id);
+    list.answer();
+    await run;
+
+    expect(errorsSaying('took money')).toEqual([]);
+    // The lookup's own alert, as `cancelUnpaidPayout` always raised it.
+    expect(
+      errorsSaying('could not be asked whether its transfer went out')
+    ).toHaveLength(1);
+    const unconfirmed = errorsSaying('outcome unconfirmed: check Stripe');
+    expect(unconfirmed).toEqual([
+      [
+        expect.stringContaining(
+          'Stripe could not say whether a transfer went out for it'
+        ),
+        expect.objectContaining({
+          errorId: expect.any(String),
+          creatorUserId: payeeId,
+          amountCents: 765,
+          settledAs: 'cancelled',
+          unconfirmed: true,
+        }),
+      ],
+    ]);
+    expect(String(unconfirmed[0]?.[0])).not.toContain('was NOT reversed');
+  });
+
+  it('a cancelled slice\'s late transfer whose reversal answer was LOST, with nothing at Stripe, under a settled step: check Stripe, never "was NOT reversed"', async () => {
+    const charge = newCharge();
+    const pending = await slice(charge, 765, 'pending', payeeId);
+    const refund = fullRefund();
+    const transferId = `tr_late_${uid()}`;
+    const list = lateTransfer(pending, transferId);
+    const hold = holdReversal('timeout');
+    const run = reverseCharge(deps, {
+      charge,
+      source: SOURCE,
+      refunds: [refund],
+    });
+    await list.reached;
+    list.answer();
+    await hold.reached;
+    await settleByHand(refund.id);
+    hold.answer();
+    await run.catch(() => undefined);
+
+    expect(errorsSaying('took money')).toEqual([]);
+    expect(errorsSaying('was NOT reversed')).toEqual([]);
+    expect(errorsSaying('outcome unconfirmed: check Stripe')).toEqual([
+      [
+        expect.stringContaining(
+          'outcome unconfirmed: check Stripe. If a reversal of this transfer exists, the payee is owed it back; if not, reconcile the slice and do not re-pay'
+        ),
+        expect.objectContaining({
+          stripeTransferId: transferId,
+          creatorUserId: payeeId,
+          unconfirmed: true,
+          code: 'ECONNRESET',
+        }),
+      ],
+    ]);
   });
 
   it('a cancelled slice with no transfer, under a step settled after the cancel: "took money", and the cancelled-slice query finds it', async () => {

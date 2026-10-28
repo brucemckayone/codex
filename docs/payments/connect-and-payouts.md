@@ -497,7 +497,9 @@ Nothing is re-paid automatically ([design](refund-reversal-record.md), §4 step 
 An unpaid slice cancelled under a settled step is alerted the same way, unless a
 transfer had gone out for it that Stripe refused to reverse: the payee still
 holds that transfer, so its alert says NOT to re-pay, and the slice is
-reconciled instead. **Gap:** that screen has no state for these yet. Until batch
+reconciled instead. When Stripe cannot confirm what went out, the alert says to
+check Stripe first, and what each answer means for the payee. **Gap:** that
+screen has no state for these yet. Until batch
 B's support view (`Codex-2hxff.73`), support finds them with the two queries in
 the design and the alerts.
 

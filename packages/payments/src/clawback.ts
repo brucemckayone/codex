@@ -1288,12 +1288,14 @@ async function reduceUnpaidSlice(
  * for it anyway is reversed in full (`cancelUnpaidPayout`'s halves,
  * Codex-2hxff.11).
  *
- * The cancel commits in one transaction with a renewal of the claim's lease,
- * and only while the claim holds (Codex-2hxff.72). A settlement then finds the
- * step leased, and its `unleased` check refuses it, so it cannot cancel the
- * step between the slice's cancel and the step's done. Only a delivery that
- * outlives the renewed lease too can meet a settled step after the cancel,
- * and `claimLost` alerts that. The Stripe lookup runs after the commit.
+ * The claim's lease is renewed FIRST, a compare-and-set on the claim, and the
+ * slice is cancelled only once that has committed (Codex-2hxff.72). Every
+ * settlement's write to a step needs it unleased, so from the renewal on, none
+ * can cancel the step before its done. One that came first makes the renewal
+ * miss, and nothing is cancelled. Only a delivery that outlives the renewed
+ * lease too can meet a settled step after the cancel, and `claimLost` alerts
+ * that. No transaction is needed, so a failed cancel is the step's failure
+ * like any write's (Codex-2hxff.51).
  */
 async function cancelUnpaidSlice(
   ctx: StepContext,
@@ -1302,34 +1304,35 @@ async function cancelUnpaidSlice(
 ): Promise<StepResult> {
   const { deps, cause } = ctx;
   const renewedAt = new Date();
-  const cancel = await deps.db.transaction(async (tx) => {
-    const [renewed] = await tx
-      .update(payoutReversals)
-      .set({ attemptedAt: renewedAt })
-      .where(claimHolds(record))
-      .returning();
-    if (!renewed) return 'lost' as const;
-    const cancelled = await cancelUnpaidRow(
-      tx,
-      row,
-      cause.type === 'dispute' ? 'cancelled_by_dispute' : 'cancelled_by_refund',
-      renewedAt
-    );
-    return cancelled ? ('cancelled' as const) : ('changed' as const);
-  });
-  if (cancel === 'lost') return claimLost(ctx, row, record);
-  // Committed, whatever the cancel found: the renewed lease is the claim's.
+  const [renewed] = await deps.db
+    .update(payoutReversals)
+    .set({ attemptedAt: renewedAt })
+    .where(claimHolds(record))
+    .returning();
+  if (!renewed) return claimLost(ctx, row, record);
   record.run.lease = renewedAt;
+  const cancelled = await cancelUnpaidRow(
+    deps.db,
+    row,
+    cause.type === 'dispute' ? 'cancelled_by_dispute' : 'cancelled_by_refund',
+    renewedAt
+  );
 
-  if (cancel === 'cancelled') {
-    const transferId = await lateTransferOf(deps, row);
-    if (transferId === undefined) {
-      if (!(await markDone(deps, record))) {
-        return claimLost(ctx, row, record, { cancelledSlice: true });
-      }
-      return {};
+  if (cancelled) {
+    const late = await lateTransferOf(deps, row);
+    if (late.kind === 'found') {
+      return reverseTransfer(ctx, row, record, late.transferId, undefined);
     }
-    return reverseTransfer(ctx, row, record, transferId, undefined);
+    // None, or Stripe could not say: the step is done as the ledger knows
+    // it, as `cancelUnpaidPayout` leaves it. Under a step settled meanwhile,
+    // a failed lookup is never read as "no transfer went out".
+    if (!(await markDone(deps, record))) {
+      return claimLost(ctx, row, record, {
+        cancelledSlice: true,
+        lateTransferUnknown: late.kind === 'unknown',
+      });
+    }
+    return {};
   }
 
   // Changed since it was read. Paid: claw back this share of the transfer.
@@ -2386,6 +2389,11 @@ interface Taken {
    * still with the payee.
    */
   refused?: boolean;
+  /**
+   * Stripe could not be asked whether a transfer went out for the cancelled
+   * slice (`lateTransferOf`, `unknown`).
+   */
+  lateTransferUnknown?: boolean;
   /** The error the step's last attempt got, for the logs. */
   error?: unknown;
 }
@@ -2412,7 +2420,12 @@ interface Taken {
  * - it is settled, the delivery cancelled the unpaid slice, and Stripe refused
  *   to reverse the transfer that went out for it: the payee still holds that
  *   transfer. A different error alert says so, and NOT to re-pay: the slice is
- *   reconciled instead.
+ *   reconciled instead;
+ * - it is settled, the delivery cancelled the unpaid slice, and what went out
+ *   for it is unconfirmed (the reversal's answer was lost and Stripe lists
+ *   none, or Stripe could not be asked about a transfer): that alert says to
+ *   check Stripe, and what each finding means. It never says outright not to
+ *   re-pay, since a late landing would then leave the payee short.
  *
  * When Stripe's answer was lost (`ask`), Stripe is asked whether the reversal
  * landed. If Stripe cannot be asked, or the step cannot be read when this
@@ -2533,26 +2546,31 @@ async function claimLost(
   }
   const unconfirmed = !reversal && taken.ask === true;
 
-  if (
-    !reversal &&
-    taken.cancelledSlice &&
-    transferId &&
-    (taken.refused || unconfirmed)
-  ) {
-    // Re-paying this would pay the payee twice: the transfer is still theirs.
-    deps.obs.error(
-      `${causeLabel(cause)} clawback: slice cancelled under a settled step; its transfer is still with the payee and was NOT reversed; do not re-pay; reconcile the slice`,
-      {
-        errorId: crypto.randomUUID(),
-        ...ids,
-        creatorUserId: row.userId,
-        amountCents: step.amountCents,
-        settledAs: settled.status,
-        stripeTransferId: transferId,
-        unconfirmed,
-        ...attemptError,
-      }
-    );
+  // A cancelled slice under a settled step, with no reversal of ours known:
+  // what the payee is owed turns on a transfer, so the alert says what is
+  // known, and never more. A late landing must not leave them short on our
+  // word, nor a re-pay pay them twice.
+  const heldMessage =
+    !reversal && taken.cancelledSlice
+      ? taken.refused && transferId
+        ? 'slice cancelled under a settled step; its transfer is still with the payee and was NOT reversed; do not re-pay; reconcile the slice'
+        : unconfirmed && transferId
+          ? 'slice cancelled under a settled step; its transfer reversal outcome unconfirmed: check Stripe. If a reversal of this transfer exists, the payee is owed it back; if not, reconcile the slice and do not re-pay'
+          : taken.lateTransferUnknown
+            ? 'slice cancelled under a settled step; Stripe could not say whether a transfer went out for it, outcome unconfirmed: check Stripe. If none went out, or one went out and was reversed, the payee is owed the slice back; if one went out and was not reversed, reconcile the slice and do not re-pay'
+            : undefined
+      : undefined;
+  if (heldMessage) {
+    deps.obs.error(`${causeLabel(cause)} clawback: ${heldMessage}`, {
+      errorId: crypto.randomUUID(),
+      ...ids,
+      creatorUserId: row.userId,
+      amountCents: step.amountCents,
+      settledAs: settled.status,
+      stripeTransferId: transferId,
+      unconfirmed: !(taken.refused && transferId),
+      ...attemptError,
+    });
     return {};
   }
   if (!reversal && !taken.cancelledSlice) return leftAsSettled(unconfirmed);

@@ -254,8 +254,8 @@ describe('sendEmailToWorkerAwaited', () => {
   });
 
   // Review A, silent #9: a 2xx is accepted only when the body says it sent.
-  // Review A, silent #1: the fan-out's last batch (started by 20 s) must
-  // finish its notice and its Stripe write inside the 30 s waitUntil budget.
+  // The price fan-out passes its own wait (PRICE_NOTICE_TIMEOUT_MS, pinned in
+  // price-notice-timeout.test.ts); this is the default for any other caller.
   it('waits at most 5 s by default', async () => {
     vi.mocked(workerFetch).mockResolvedValueOnce(sent({ success: true }));
     const timeout = vi.spyOn(AbortSignal, 'timeout');
