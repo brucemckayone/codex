@@ -39,6 +39,7 @@ import { InternalServiceError } from '@codex/service-errors';
 import {
   createTestContentInput,
   createTestMediaItemInput,
+  createTestMoneyDeps,
   createTestTierInput,
   createUniqueSlug,
   type Database,
@@ -196,7 +197,7 @@ describe('course sales films (owner P10)', () => {
       environment: 'test',
       r2,
       purchaseService: new PurchaseService(
-        { db, environment: 'test' },
+        { db, environment: 'test', ...createTestMoneyDeps() },
         {} as Stripe
       ),
       contentApiBaseUrl: API,
@@ -570,7 +571,7 @@ describe('course sales films (owner P10)', () => {
         environment: 'test',
         r2: {} as R2,
         purchaseService: new PurchaseService(
-          { db, environment: 'test' },
+          { db, environment: 'test', ...createTestMoneyDeps() },
           {} as Stripe
         ),
         contentApiBaseUrl: API,
