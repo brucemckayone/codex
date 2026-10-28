@@ -20,6 +20,7 @@ import { ServiceUnavailableError } from '@codex/service-errors';
 import {
   createMockStripe,
   createTestMediaItemInput,
+  createTestMoneyDeps,
   createTestOrganizationInput,
   createUniqueSlug,
   type Database,
@@ -83,7 +84,10 @@ describe('PurchaseService — checkout correctness (Codex-2hxff.14)', () => {
     const stripe = createMockStripe();
     return {
       stripe,
-      service: new PurchaseService({ db, environment: 'test' }, stripe),
+      service: new PurchaseService(
+        { db, environment: 'test', ...createTestMoneyDeps() },
+        stripe
+      ),
     };
   }
 

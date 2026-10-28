@@ -80,6 +80,7 @@ export {
   applyDuePendingPriceChange,
   PENDING_PRICE_FROM_KEY,
   PENDING_PRICE_ID_KEY,
+  PRICE_NOTICE_TIMEOUT_MS,
 } from './services/pending-price-change';
 export {
   calculateRevenueSplit,

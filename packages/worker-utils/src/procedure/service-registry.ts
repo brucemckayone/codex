@@ -71,6 +71,7 @@ import type { Bindings } from '@codex/shared-types';
 import {
   ConnectAccountService,
   CourseSubscriptionService,
+  PRICE_NOTICE_TIMEOUT_MS,
   SubscriptionService,
   TierService,
 } from '@codex/subscription';
@@ -83,7 +84,11 @@ import {
   TranscodingService,
 } from '@codex/transcoding';
 import { buildServiceUrl } from '@codex/urls';
-import { sendEmailToWorker } from '../email/send-email';
+import {
+  type SendEmailToWorkerParams,
+  sendEmailToWorker,
+  sendEmailToWorkerAwaited,
+} from '../email/send-email';
 import {
   DurableObjectMediaStatusFeed,
   WorkerMediaStatusPublisher,
@@ -461,6 +466,29 @@ export async function createServiceRegistry(
   // never touch a transactional service never pay for a Pool. (Both holders
   // are declared above, next to the eager resolution that writes the first
   // one.)
+  /**
+   * The fire-and-forget mailer the money services require (Codex-2hxff.55):
+   * `sendEmailToWorker` on the request's `waitUntil`. Every request path has
+   * an ExecutionContext; a registry built without one (a unit test) logs the
+   * email it could not send rather than drop it silently: through the
+   * ObservabilityClient, or `console.error` when there is none. Ids only,
+   * never the address (silent #10).
+   */
+  function sendAfterResponse(params: SendEmailToWorkerParams): void {
+    if (executionCtx) {
+      sendEmailToWorker(env, executionCtx, params);
+      return;
+    }
+    const message = 'Email not sent: the registry has no ExecutionContext';
+    const data = {
+      errorId: crypto.randomUUID(),
+      templateName: params.templateName,
+      ...(params.userId ? { userId: params.userId } : {}),
+    };
+    if (_obs) _obs.error(message, data);
+    else console.error(`[service-registry] ${message}`, data);
+  }
+
   /**
    * Get or create shared per-request DB client
    * Reuses single WebSocket connection for all services that need transactions
@@ -955,23 +983,6 @@ export async function createServiceRegistry(
 
     get purchase() {
       if (!_purchase) {
-        // WP-10 (Codex-69t7c.10): wire creator-connect-needed mailer so a
-        // parked creator_payout fires a notification fire-and-forget.
-        // Same pattern as the subscription mailer above.
-        const purchaseMailer = executionCtx
-          ? (params: {
-              to: string;
-              toName?: string;
-              templateName: 'creator-connect-needed';
-              category: 'transactional';
-              userId?: string;
-              organizationId?: string | null;
-              data: Record<string, string | number | boolean>;
-            }) => {
-              sendEmailToWorker(env, executionCtx, params);
-            }
-          : undefined;
-
         _purchase = new PurchaseService(
           {
             db: getSharedDb(),
@@ -979,7 +990,9 @@ export async function createServiceRegistry(
             // Codex-m644n: inject FeeConfigService so completePurchase walks
             // the 3-tier fallback chain instead of hardcoding DEFAULT_* consts.
             feeConfig: registry.feeConfig,
-            mailer: purchaseMailer,
+            // WP-10 (Codex-69t7c.10): a parked creator_payout sends
+            // creator-connect-needed, fire-and-forget.
+            mailer: sendAfterResponse,
             webAppUrl: env.WEB_APP_URL,
             portalConfigurationId: env.STRIPE_PORTAL_CONFIGURATION_ID,
           },
@@ -1078,32 +1091,23 @@ export async function createServiceRegistry(
           ? executionCtx.waitUntil.bind(executionCtx)
           : undefined;
 
-        // Q1.3 (Codex-7kc83): wire a mailer thunk so the price-change
-        // propagation path can notify affected subscribers fire-and-
-        // forget. The service stays unaware of Bindings /
-        // ExecutionContext — it just calls `mailer(params)` and
-        // `sendEmailToWorker` under the hood schedules the worker-to-
-        // worker fetch on `executionCtx.waitUntil`. When
-        // `executionCtx` is absent (shouldn't happen inside
-        // `procedure()` but be defensive) we skip the mailer rather
-        // than block — propagation still succeeds; the email side-
-        // effect is skipped with a `this.obs.warn` from
-        // SubscriptionService's dispatch guard.
-        const mailer = executionCtx
-          ? (params: {
-              to: string;
-              toName?: string;
-              templateName:
-                | 'subscription-tier-price-change'
-                | 'course-no-longer-offered';
-              category: 'transactional';
-              userId?: string;
-              organizationId?: string | null;
-              data: Record<string, string | number | boolean>;
-            }) => {
-              sendEmailToWorker(env, executionCtx, params);
-            }
-          : undefined;
+        // The price-change notice is AWAITED: a subscriber's price moves
+        // only once notifications-api accepts their notice (owner decision
+        // D-P3, Codex-2hxff.43). The fan-out already runs after the
+        // response (`dbWaitUntil`), so the send needs no ExecutionContext of
+        // its own.
+        const mailer = (params: {
+          to: string;
+          toName?: string;
+          templateName: 'subscription-tier-price-change';
+          category: 'transactional';
+          userId?: string;
+          organizationId?: string | null;
+          data: Record<string, string | number | boolean>;
+        }) =>
+          sendEmailToWorkerAwaited(env, params, {
+            timeoutMs: PRICE_NOTICE_TIMEOUT_MS,
+          });
 
         // Web-app base URL powers the manage-subscription link inside
         // the price-change notice. `WEB_APP_URL` is the canonical
@@ -1113,26 +1117,6 @@ export async function createServiceRegistry(
         // without needing to re-send.
         const webAppUrl = env.WEB_APP_URL;
 
-        // WP-10 (Codex-69t7c.10): wire payout-released mailer so the
-        // drains (resolvePendingPayouts, and the payee-wide
-        // resolvePendingPayoutsForAccount, Codex-2hxff.13) send one
-        // notification after pending→paid.
-        // Same pattern as `mailer` above — service stays unaware of
-        // Bindings / ExecutionContext.
-        const payoutMailer = executionCtx
-          ? (params: {
-              to: string;
-              toName?: string;
-              templateName: 'payout-released';
-              category: 'transactional';
-              userId?: string;
-              organizationId?: string | null;
-              data: Record<string, string | number | boolean>;
-            }) => {
-              sendEmailToWorker(env, executionCtx, params);
-            }
-          : undefined;
-
         _subscription = new SubscriptionService(
           {
             db: getSharedDb(),
@@ -1140,7 +1124,11 @@ export async function createServiceRegistry(
             cache,
             waitUntil,
             mailer,
-            payoutMailer,
+            // WP-10 (Codex-69t7c.10): the drains (resolvePendingPayouts, and
+            // the payee-wide resolvePendingPayoutsForAccount, Codex-2hxff.13)
+            // send one payout-released notification after pending→paid,
+            // fire-and-forget.
+            payoutMailer: sendAfterResponse,
             webAppUrl,
             // Codex-m644n: inject FeeConfigService so invoice + tier-change
             // flows resolve fees via the 3-tier fallback chain. Per-creator
@@ -1248,17 +1236,21 @@ export async function createServiceRegistry(
         // Course-sub payouts resolve fees via the same 3-tier fallback chain as
         // purchases/subscriptions; Stripe client is deferred (read-only course
         // pages never construct it) — same pattern as `subscription`/`tier`.
-        // A plan price change emails each moved subscriber and runs its
-        // fan-out after the response (Codex-2hxff.3). The fan-out reads
-        // subscribers per interval, so it goes on `dbWaitUntil`.
+        // A plan price change runs its fan-out after the response
+        // (Codex-2hxff.3). The fan-out reads subscribers per interval, so it
+        // goes on `dbWaitUntil`, and awaits each notice before that
+        // subscriber moves (D-P3, Codex-2hxff.43). The off-sale email stays
+        // fire-and-forget: the cancel never waits on it.
         _courseSubscription = new CourseSubscriptionService(
           {
             db: getSharedDb(),
             environment: getEnvironment(),
             feeConfig: registry.feeConfig,
-            mailer: executionCtx
-              ? (params) => sendEmailToWorker(env, executionCtx, params)
-              : undefined,
+            mailer: (params) =>
+              sendEmailToWorkerAwaited(env, params, {
+                timeoutMs: PRICE_NOTICE_TIMEOUT_MS,
+              }),
+            offSaleMailer: sendAfterResponse,
             webAppUrl: env.WEB_APP_URL,
             waitUntil: dbWaitUntil,
           },

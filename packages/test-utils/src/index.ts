@@ -24,6 +24,8 @@ export * from './factories';
 export * from './helpers';
 // Mock Factories (Observability, Context, DB, KV, R2)
 export * from './mocks';
+// Money dependencies for PurchaseService / SubscriptionService / CourseSubscriptionService (Codex-2hxff.55)
+export * from './money-deps';
 // Purchase Seeders (purchase + contentAccess atomic inserts)
 export * from './purchase-helpers';
 // Test Setup Helpers

@@ -23,6 +23,7 @@ import {
 } from '@codex/database/schema';
 import {
   createMockStripe,
+  createTestMoneyDeps,
   createTestOrganizationInput,
   createTestSubscriptionInput,
   createTestTierInput,
@@ -145,7 +146,10 @@ describe('SubscriptionService.cancelForFullRefund (Codex-2hxff.10)', () => {
 
   beforeEach(() => {
     stripe = createMockStripe();
-    service = new SubscriptionService({ db, environment: 'test' }, stripe);
+    service = new SubscriptionService(
+      { db, environment: 'test', ...createTestMoneyDeps() },
+      stripe
+    );
   });
 
   afterAll(async () => {

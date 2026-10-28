@@ -882,6 +882,32 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # Before any worker starts (Codex-7aqvr): reserve the worker ports, as
+      # e2e-tests does. SERVICE_PORTS 42069-42075 sit inside the kernel's
+      # ephemeral range (32768-60999), and while the workers start together
+      # workerd takes ports from it; a worker whose port it took cannot bind,
+      # and the job fails at "Failed to start workers" with no test run. Seen
+      # here on notifications-api's 42075 (run 40322331140, PR #646) and
+      # ecom-api's 42072 (run 40567185447, PR #653), on [::1]: the ipv4
+      # setting covers IPv6 too. A reserved port is never handed out as an
+      # ephemeral one, and the range keeps its full size. Moving the range
+      # instead shrinks it to 16,384 ports, which e2e-tests' connection-heavy
+      # run does not need (Codex-j7x4u, run 40622100441).
+      - name: Reserve the worker ports
+        run: sudo sysctl -w net.ipv4.ip_local_reserved_ports=42069-42075
+
+      - name: Check the worker ports are reserved
+        run: |
+          reserved=$(cat /proc/sys/net/ipv4/ip_local_reserved_ports)
+          echo "Reserved ports: $reserved"
+          case ",$reserved," in
+            *,42069-42075,*) ;;
+            *)
+              echo "::error::The worker ports 42069-42075 are not reserved (got '$reserved', Codex-7aqvr)"
+              exit 1
+              ;;
+          esac
+
       - name: Start local Neon proxy
         run: bash .github/scripts/start-local-neon-proxy.sh "${{ job.services.neon-proxy.id }}"
 
@@ -980,10 +1006,14 @@ jobs:
           R2_BUCKET_MEDIA: ${{ vars.R2_BUCKET_MEDIA }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           STRIPE_WEBHOOK_SECRET_BOOKING: ${{ secrets.STRIPE_WEBHOOK_SECRET_BOOKING }}
+          # 12-purchase-refund-round-trip signs charge.refunded with it, for
+          # /webhooks/stripe/payment (Codex-2hxff.25).
+          STRIPE_WEBHOOK_SECRET_PAYMENT: ${{ secrets.STRIPE_WEBHOOK_SECRET_PAYMENT }}
           TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
           TURBO_TEAM: ${{ vars.TURBO_TEAM }}
         run: |
           echo "::add-mask::$STRIPE_SECRET_KEY"
+          echo "::add-mask::$STRIPE_WEBHOOK_SECRET_PAYMENT"
           pnpm test:e2e:api
         continue-on-error: true
 

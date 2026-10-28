@@ -13,6 +13,7 @@ import { content, organizations, purchases } from '@codex/database/schema';
 import {
   createMockStripe,
   createTestContentInput,
+  createTestMoneyDeps,
   createUniqueSlug,
   type Database,
   seedTestUsers,
@@ -60,7 +61,7 @@ describe('PurchaseService.getPurchase: the buyer view (Codex-kn94e)', () => {
         .returning()
     ).id;
     service = new PurchaseService(
-      { db, environment: 'test' },
+      { db, environment: 'test', ...createTestMoneyDeps() },
       createMockStripe()
     );
   });

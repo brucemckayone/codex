@@ -31,6 +31,7 @@ import {
   createMockStripeInvoice,
   createMockStripeSubscription,
   createTestConnectAccountInput,
+  createTestMoneyDeps,
   createTestOrganizationInput,
   createTestSubscriptionInput,
   createTestTierInput,
@@ -122,7 +123,10 @@ describe('Subscription drift — tier subscriptions (Codex-2hxff.15)', () => {
         data: paidInvoicesBySub.get(params.subscription ?? '') ?? [],
       })
     );
-    service = new SubscriptionService({ db, environment: 'test' }, stripe);
+    service = new SubscriptionService(
+      { db, environment: 'test', ...createTestMoneyDeps() },
+      stripe
+    );
     await db
       .update(users)
       .set({ stripeCustomerId: null })
@@ -1037,7 +1041,7 @@ describe('Subscription drift — tier subscriptions (Codex-2hxff.15)', () => {
         },
       });
       const violating = new SubscriptionService(
-        { db: violatingDb, environment: 'test' },
+        { db: violatingDb, environment: 'test', ...createTestMoneyDeps() },
         stripe
       );
 

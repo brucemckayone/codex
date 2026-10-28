@@ -25,6 +25,7 @@ import {
 import { writeCourseSubscriptionEntitlement } from '@codex/purchase';
 import {
   createMockStripe,
+  createTestMoneyDeps,
   createTestOrganizationInput,
   createTestSubscriptionInput,
   createTestTierInput,
@@ -109,7 +110,10 @@ describe('SubscriptionService disputes (Codex-2hxff.9)', () => {
 
   beforeEach(() => {
     stripe = createMockStripe();
-    service = new SubscriptionService({ db, environment: 'test' }, stripe);
+    service = new SubscriptionService(
+      { db, environment: 'test', ...createTestMoneyDeps() },
+      stripe
+    );
   });
 
   // Payout rows feed global drains and sweeps; disputes hold them. Neither

@@ -40,6 +40,7 @@ import {
   createMockStripeInvoice,
   createMockStripeSubscription,
   createTestConnectAccountInput,
+  createTestMoneyDeps,
   createTestOrganizationInput,
   createTestSubscriptionInput,
   createTestTierInput,
@@ -70,6 +71,10 @@ import {
   SubscriptionPaymentRequiredError,
   TierNotFoundError,
 } from '../../errors';
+import {
+  FAN_OUT_STRIPE_REQUEST,
+  PRICE_FAN_OUT_BUDGET_MS,
+} from '../pending-price-change';
 import {
   SUBSCRIBER_HIDDEN_COLUMNS,
   SubscriptionService,
@@ -124,7 +129,10 @@ describe('SubscriptionService', () => {
       })),
     };
 
-    service = new SubscriptionService({ db, environment: 'test' }, stripe);
+    service = new SubscriptionService(
+      { db, environment: 'test', ...createTestMoneyDeps() },
+      stripe
+    );
 
     // Clear any cached Customer id from previous tests so resolution is
     // deterministic per-test.
@@ -321,6 +329,7 @@ describe('SubscriptionService', () => {
             },
           } as unknown as typeof db,
           environment: 'test',
+          ...createTestMoneyDeps(),
         },
         stripe
       );
@@ -6392,6 +6401,24 @@ describe('SubscriptionService', () => {
   describe('propagateTierPriceToActiveSubscriptions', () => {
     const DAY = 24 * 60 * 60;
 
+    /**
+     * A subscriber moves only once their notice is accepted (D-P3,
+     * Codex-2hxff.43), so the cases about the move itself run on a service
+     * whose every notice is accepted.
+     */
+    let notifying: SubscriptionService;
+    beforeEach(() => {
+      notifying = new SubscriptionService(
+        {
+          db,
+          environment: 'test',
+          ...createTestMoneyDeps(),
+          mailer: vi.fn().mockResolvedValue({ accepted: true }),
+        },
+        stripe
+      );
+    });
+
     interface FakeSub {
       /** Days from now to the subscription's next renewal. */
       renewsInDays: number;
@@ -6399,6 +6426,8 @@ describe('SubscriptionService', () => {
       interval?: 'month' | 'year';
       /** What the subscription bills today, in pence. */
       unitAmount?: number;
+      /** The subscription's Stripe metadata (an earlier pending change). */
+      metadata?: Record<string, string>;
     }
 
     /** Mock Stripe retrieve/update keyed by stripe subscription id. */
@@ -6414,7 +6443,7 @@ describe('SubscriptionService', () => {
           id,
           status: sub.status ?? 'active',
           billing_cycle_anchor: renewal,
-          metadata: {},
+          metadata: sub.metadata ?? {},
           items: {
             data: [
               {
@@ -6469,7 +6498,7 @@ describe('SubscriptionService', () => {
       const { org, tier1 } = await createFullOrg('propagate-empty');
       const { retrieveSpy, updateSpy } = wireStripeSubs(stripe, {});
 
-      const result = await service.propagateTierPriceToActiveSubscriptions(
+      const result = await notifying.propagateTierPriceToActiveSubscriptions(
         tier1.id,
         'price_new_abc',
         { organizationId: org.id, interval: 'month' }
@@ -6480,6 +6509,8 @@ describe('SubscriptionService', () => {
         updated: 0,
         applied: 0,
         pending: 0,
+        unnotified: 0,
+        unhandled: 0,
         failed: 0,
       });
       expect(retrieveSpy).not.toHaveBeenCalled();
@@ -6503,7 +6534,7 @@ describe('SubscriptionService', () => {
         [annual.stripeSubscriptionId]: { renewsInDays: 200, interval: 'year' },
       });
 
-      const result = await service.propagateTierPriceToActiveSubscriptions(
+      const result = await notifying.propagateTierPriceToActiveSubscriptions(
         tier1.id,
         'price_new_annual',
         { organizationId: org.id, interval: 'year', interBatchDelayMs: 0 }
@@ -6511,7 +6542,10 @@ describe('SubscriptionService', () => {
 
       expect(result.total).toBe(1);
       expect(retrieveSpy).toHaveBeenCalledTimes(1);
-      expect(retrieveSpy).toHaveBeenCalledWith(annual.stripeSubscriptionId);
+      expect(retrieveSpy).toHaveBeenCalledWith(
+        annual.stripeSubscriptionId,
+        FAN_OUT_STRIPE_REQUEST
+      );
       expect(
         updateFor(updateSpy, monthly.stripeSubscriptionId)
       ).toBeUndefined();
@@ -6527,7 +6561,7 @@ describe('SubscriptionService', () => {
         [sub.stripeSubscriptionId]: { renewsInDays: 200, interval: 'year' },
       });
 
-      const result = await service.propagateTierPriceToActiveSubscriptions(
+      const result = await notifying.propagateTierPriceToActiveSubscriptions(
         tier1.id,
         'price_new_now',
         { organizationId: org.id, interval: 'year' }
@@ -6554,7 +6588,7 @@ describe('SubscriptionService', () => {
       });
       const before = Math.floor(Date.now() / 1000);
 
-      const result = await service.propagateTierPriceToActiveSubscriptions(
+      const result = await notifying.propagateTierPriceToActiveSubscriptions(
         tier1.id,
         'price_new_later',
         { organizationId: org.id, interval: 'month' }
@@ -6597,7 +6631,7 @@ describe('SubscriptionService', () => {
       }
       const { retrieveSpy, updateSpy } = wireStripeSubs(stripe, stripeSubs);
 
-      await service.propagateTierPriceToActiveSubscriptions(
+      await notifying.propagateTierPriceToActiveSubscriptions(
         tier1.id,
         'price_new_status',
         { organizationId: org.id, interval: 'year', interBatchDelayMs: 0 }
@@ -6646,7 +6680,7 @@ describe('SubscriptionService', () => {
         return { id };
       });
 
-      const result = await service.propagateTierPriceToActiveSubscriptions(
+      const result = await notifying.propagateTierPriceToActiveSubscriptions(
         tier1.id,
         'price_new_partial',
         { organizationId: org.id, interval: 'year', interBatchDelayMs: 0 }
@@ -6666,7 +6700,7 @@ describe('SubscriptionService', () => {
       });
 
       for (let run = 0; run < 2; run++) {
-        await service.propagateTierPriceToActiveSubscriptions(
+        await notifying.propagateTierPriceToActiveSubscriptions(
           tier1.id,
           'price_new_idem',
           { organizationId: org.id, interval: 'month' }
@@ -6679,17 +6713,20 @@ describe('SubscriptionService', () => {
           metadata: { codex_pending_price_id: 'price_new_idem' },
         });
         // `from` moves with the notice time, so a key would collide on re-run.
-        expect(opts).toBeUndefined();
+        // Only the fan-out's timeout options (round 2): no idempotency key.
+        expect(opts).toEqual(FAN_OUT_STRIPE_REQUEST);
+        expect(opts).not.toHaveProperty('idempotencyKey');
       }
     });
 
     describe('price-change notice email', () => {
       function buildServiceWithMailer() {
-        const mailer = vi.fn();
+        const mailer = vi.fn().mockResolvedValue({ accepted: true });
         const serviceWithMailer = new SubscriptionService(
           {
             db,
             environment: 'test',
+            ...createTestMoneyDeps(),
             mailer,
             webAppUrl: 'https://app.example.test',
           },
@@ -6762,7 +6799,7 @@ describe('SubscriptionService', () => {
         expect(quoted).toBeGreaterThanOrEqual(Date.now() + 29 * DAY * 1000);
       });
 
-      it('no email when the amount is unchanged, or when scheduling failed', async () => {
+      it('no email when the amount is unchanged, or when the subscription cannot be read', async () => {
         const { org, tier1 } = await createFullOrg('propagate-email-none');
         const ns = createUniqueSlug('prop_mail_n');
         const same = await seedSub(org.id, tier1.id, {
@@ -6773,22 +6810,19 @@ describe('SubscriptionService', () => {
           billingInterval: 'year',
           stripeSubscriptionId: `sub_${ns}_fail`,
         });
-        const { updateSpy } = wireStripeSubs(stripe, {
+        const { retrieveSpy } = wireStripeSubs(stripe, {
           // Already billing tier1's annual amount: nothing they pay changes.
           [same.stripeSubscriptionId]: {
             renewsInDays: 200,
             interval: 'year',
             unitAmount: 4990,
           },
-          [failing.stripeSubscriptionId]: {
-            renewsInDays: 200,
-            interval: 'year',
-          },
         });
-        updateSpy.mockImplementation(async (id: string) => {
+        const read = retrieveSpy.getMockImplementation();
+        retrieveSpy.mockImplementation(async (id: string) => {
           if (id === failing.stripeSubscriptionId)
             throw new Error('stripe 500');
-          return { id };
+          return read?.(id);
         });
         const { serviceWithMailer, mailer } = buildServiceWithMailer();
 
@@ -6799,6 +6833,449 @@ describe('SubscriptionService', () => {
         );
 
         expect(mailer).not.toHaveBeenCalled();
+      });
+    });
+
+    // Owner decision D-P3 (Codex-2hxff.43), "Notice first, then move": a
+    // subscriber's price moves only once notifications-api has accepted their
+    // notice. Otherwise they stay on today's price and support is alerted.
+    describe('notice first, then move (D-P3)', () => {
+      /** The service's error log: where support's alerts go. */
+      function errorLogOf(svc: SubscriptionService) {
+        return vi.spyOn(
+          (
+            svc as unknown as {
+              obs: { error: (message: string, data?: unknown) => void };
+            }
+          ).obs,
+          'error'
+        );
+      }
+
+      it('every notice refused → nobody moves, and each subscriber is alerted with an errorId and their ids', async () => {
+        const { org, tier1 } = await createFullOrg('propagate-all-refused');
+        const ns = createUniqueSlug('prop_nm');
+        const now = await seedSub(org.id, tier1.id, {
+          billingInterval: 'year',
+          stripeSubscriptionId: `sub_${ns}_now`,
+        });
+        const later = await seedSub(org.id, tier1.id, {
+          billingInterval: 'year',
+          stripeSubscriptionId: `sub_${ns}_later`,
+        });
+        const { updateSpy } = wireStripeSubs(stripe, {
+          [now.stripeSubscriptionId]: { renewsInDays: 200, interval: 'year' },
+          [later.stripeSubscriptionId]: { renewsInDays: 10, interval: 'year' },
+        });
+        const refusing = new SubscriptionService(
+          {
+            db,
+            environment: 'test',
+            ...createTestMoneyDeps(),
+            mailer: vi.fn(async () => ({
+              accepted: false as const,
+              status: 422,
+            })),
+          },
+          stripe
+        );
+        const errors = errorLogOf(refusing);
+
+        const result = await refusing.propagateTierPriceToActiveSubscriptions(
+          tier1.id,
+          'price_new_nm',
+          { organizationId: org.id, interval: 'year', interBatchDelayMs: 0 }
+        );
+
+        expect(result).toMatchObject({ total: 2, updated: 0, unnotified: 2 });
+        expect(updateSpy).not.toHaveBeenCalled();
+        const alerts = errors.mock.calls.filter(([message]) =>
+          String(message).includes('price-change notice not sent')
+        );
+        expect(alerts).toHaveLength(2);
+        // The end summary is an alert too, with its own errorId (silent #10).
+        expect(
+          errors.mock.calls.find(([message]) =>
+            String(message).includes('completed with failures')
+          )?.[1]
+        ).toMatchObject({ errorId: expect.any(String), unnotified: 2 });
+        for (const row of [now, later]) {
+          expect(
+            alerts.find(
+              ([, data]) =>
+                (data as { subscriptionId?: string }).subscriptionId === row.id
+            )?.[1]
+          ).toMatchObject({
+            errorId: expect.any(String),
+            reason: 'refused',
+            status: 422,
+            tierId: tier1.id,
+            newStripePriceId: 'price_new_nm',
+            stripeSubscriptionId: row.stripeSubscriptionId,
+            userId: row.userId,
+            organizationId: org.id,
+          });
+        }
+      });
+
+      it.each([
+        [
+          'refused',
+          { accepted: false, status: 422 },
+          { reason: 'refused', status: 422 },
+          'price-change notice not sent',
+        ],
+        // May have been delivered: "outcome unknown", never "not sent" (silent #8).
+        [
+          'not answered',
+          { accepted: false, error: 'timeout' },
+          { reason: 'unknown', error: 'timeout' },
+          'price-change notice outcome unknown',
+        ],
+      ] as const)('a notice %s keeps that subscriber from moving; the others move', async (_label, delivery, failure, says) => {
+        const { org, tier1 } = await createFullOrg('propagate-refused');
+        const ns = createUniqueSlug('prop_ref');
+        const accepted = await seedSub(org.id, tier1.id, {
+          billingInterval: 'year',
+          stripeSubscriptionId: `sub_${ns}_ok`,
+        });
+        const refused = await seedSub(org.id, tier1.id, {
+          billingInterval: 'year',
+          stripeSubscriptionId: `sub_${ns}_no`,
+        });
+        const { updateSpy } = wireStripeSubs(stripe, {
+          [accepted.stripeSubscriptionId]: {
+            renewsInDays: 200,
+            interval: 'year',
+          },
+          [refused.stripeSubscriptionId]: {
+            renewsInDays: 200,
+            interval: 'year',
+          },
+        });
+        const mailer = vi.fn(async (params: { userId?: string }) =>
+          params.userId === refused.userId
+            ? delivery
+            : { accepted: true as const }
+        );
+        const svc = new SubscriptionService(
+          { db, environment: 'test', ...createTestMoneyDeps(), mailer },
+          stripe
+        );
+        const errors = errorLogOf(svc);
+
+        const result = await svc.propagateTierPriceToActiveSubscriptions(
+          tier1.id,
+          'price_new_ref',
+          { organizationId: org.id, interval: 'year', interBatchDelayMs: 0 }
+        );
+
+        expect(result).toMatchObject({
+          total: 2,
+          updated: 1,
+          applied: 1,
+          unnotified: 1,
+          failed: 0,
+        });
+        expect(mailer).toHaveBeenCalledTimes(2);
+        expect(
+          updateFor(updateSpy, accepted.stripeSubscriptionId)
+        ).toBeDefined();
+        expect(
+          updateFor(updateSpy, refused.stripeSubscriptionId)
+        ).toBeUndefined();
+        const alerts = errors.mock.calls.filter(([message]) =>
+          String(message).includes('price-change notice')
+        );
+        expect(alerts).toHaveLength(1);
+        expect(String(alerts[0]?.[0])).toContain(says);
+        expect(alerts[0]?.[1]).toMatchObject({
+          errorId: expect.any(String),
+          ...failure,
+          subscriptionId: refused.id,
+          stripeSubscriptionId: refused.stripeSubscriptionId,
+          userId: refused.userId,
+        });
+      });
+
+      it('the notice is accepted before the move is written', async () => {
+        const { org, tier1 } = await createFullOrg('propagate-order');
+        const sub = await seedSub(org.id, tier1.id, {
+          billingInterval: 'month',
+          stripeSubscriptionId: `sub_${createUniqueSlug('prop_ord')}`,
+        });
+        const { updateSpy } = wireStripeSubs(stripe, {
+          [sub.stripeSubscriptionId]: { renewsInDays: 10 },
+        });
+        const order: string[] = [];
+        updateSpy.mockImplementation(async (id: string) => {
+          order.push('move');
+          return { id };
+        });
+        const svc = new SubscriptionService(
+          {
+            db,
+            environment: 'test',
+            ...createTestMoneyDeps(),
+            mailer: vi.fn(async () => {
+              order.push('notice');
+              return { accepted: true as const };
+            }),
+          },
+          stripe
+        );
+
+        await svc.propagateTierPriceToActiveSubscriptions(
+          tier1.id,
+          'price_new_ord',
+          { organizationId: org.id, interval: 'month' }
+        );
+
+        expect(order).toEqual(['notice', 'move']);
+      });
+
+      it.each([
+        [
+          'refused by Stripe',
+          Object.assign(new Error('No such price'), { statusCode: 400 }),
+          'move_refused',
+          'Stripe refused the move; the subscriber is kept on the old price',
+        ],
+        // A 5xx may have applied it: "outcome unknown" (silent #8).
+        [
+          'an unknown outcome',
+          Object.assign(new Error('stripe 500'), { statusCode: 500 }),
+          'move_unknown',
+          "the move's outcome is unknown",
+        ],
+      ] as const)('a notified subscriber whose move then fails (%s) is alerted with what their notice said', async (_label, failure, outcome, says) => {
+        const { org, tier1 } = await createFullOrg('propagate-move-fails');
+        const sub = await seedSub(org.id, tier1.id, {
+          billingInterval: 'year',
+          stripeSubscriptionId: `sub_${createUniqueSlug('prop_mf')}`,
+        });
+        const { updateSpy } = wireStripeSubs(stripe, {
+          [sub.stripeSubscriptionId]: { renewsInDays: 200, interval: 'year' },
+        });
+        updateSpy.mockRejectedValue(failure);
+        const mailer = vi.fn().mockResolvedValue({ accepted: true });
+        const svc = new SubscriptionService(
+          { db, environment: 'test', ...createTestMoneyDeps(), mailer },
+          stripe
+        );
+        const errors = errorLogOf(svc);
+
+        const result = await svc.propagateTierPriceToActiveSubscriptions(
+          tier1.id,
+          'price_new_mf',
+          { organizationId: org.id, interval: 'year', interBatchDelayMs: 0 }
+        );
+
+        expect(result).toMatchObject({ total: 1, updated: 0, failed: 1 });
+        expect(mailer).toHaveBeenCalledTimes(1);
+        const alert = errors.mock.calls.find(([message]) =>
+          String(message).includes('notice sent')
+        );
+        expect(String(alert?.[0])).toContain(says);
+        // The kind, the notice time and the date the email quoted (silent #7).
+        expect(alert?.[1]).toMatchObject({
+          errorId: expect.any(String),
+          outcome,
+          notified: true,
+          kind: 'applied',
+          noticeAt: expect.any(String),
+          effectiveAt: expect.any(String),
+          tierId: tier1.id,
+          newStripePriceId: 'price_new_mf',
+          subscriptionId: sub.id,
+          stripeSubscriptionId: sub.stripeSubscriptionId,
+          userId: sub.userId,
+        });
+      });
+
+      // Review A, correctness #6: an earlier accepted change still lands.
+      it('a refused notice names the earlier pending change the subscriber lands on', async () => {
+        const { org, tier1 } = await createFullOrg('propagate-earlier');
+        const sub = await seedSub(org.id, tier1.id, {
+          billingInterval: 'month',
+          stripeSubscriptionId: `sub_${createUniqueSlug('prop_ear')}`,
+        });
+        const from = Math.floor(Date.now() / 1000) + 9 * DAY;
+        wireStripeSubs(stripe, {
+          [sub.stripeSubscriptionId]: {
+            renewsInDays: 10,
+            metadata: {
+              codex_pending_price_id: 'price_earlier',
+              codex_pending_price_from: String(from),
+            },
+          },
+        });
+        const svc = new SubscriptionService(
+          {
+            db,
+            environment: 'test',
+            ...createTestMoneyDeps(),
+            mailer: vi.fn(async () => ({
+              accepted: false as const,
+              status: 422,
+            })),
+          },
+          stripe
+        );
+        const errors = errorLogOf(svc);
+
+        await svc.propagateTierPriceToActiveSubscriptions(
+          tier1.id,
+          'price_new_ear',
+          { organizationId: org.id, interval: 'month' }
+        );
+
+        const alert = errors.mock.calls.find(([message]) =>
+          String(message).includes('price-change notice not sent')
+        );
+        expect(String(alert?.[0])).toContain(
+          'earlier accepted change to price_earlier'
+        );
+        expect(String(alert?.[0])).not.toContain('old price');
+        expect(alert?.[1]).toMatchObject({
+          currentPendingPriceId: 'price_earlier',
+          currentPendingFrom: new Date(from * 1000).toISOString(),
+        });
+      });
+
+      // Review A, silent #1: the runtime cancels waitUntil work 30 s after the
+      // response. No batch starts after PRICE_FAN_OUT_BUDGET_MS, and every
+      // subscriber not reached is named in one alert.
+      it('a fan-out past its deadline names the rest in one alert, and notifies nobody it does not try to move', async () => {
+        const { org, tier1 } = await createFullOrg('propagate-deadline');
+        const ns = createUniqueSlug('prop_dl');
+        const rows = [];
+        for (let n = 0; n < 5; n++) {
+          rows.push(
+            await seedSub(org.id, tier1.id, {
+              billingInterval: 'year',
+              stripeSubscriptionId: `sub_${ns}_${n}`,
+            })
+          );
+        }
+        vi.useFakeTimers({ toFake: ['Date'] });
+        try {
+          vi.setSystemTime(new Date('2026-11-02T10:00:00Z'));
+          const { retrieveSpy, updateSpy } = wireStripeSubs(
+            stripe,
+            Object.fromEntries(
+              rows.map((row) => [
+                row.stripeSubscriptionId,
+                { renewsInDays: 200, interval: 'year' as const },
+              ])
+            )
+          );
+          const read = retrieveSpy.getMockImplementation();
+          retrieveSpy.mockImplementation(async (id: string) => {
+            // The second batch runs past the deadline.
+            if (retrieveSpy.mock.calls.length === 3) {
+              vi.setSystemTime(Date.now() + PRICE_FAN_OUT_BUDGET_MS + 1_000);
+            }
+            return read?.(id);
+          });
+          const mailer = vi.fn(async (_params: { userId?: string }) => ({
+            accepted: true as const,
+          }));
+          const svc = new SubscriptionService(
+            { db, environment: 'test', ...createTestMoneyDeps(), mailer },
+            stripe
+          );
+          const errors = errorLogOf(svc);
+          const infos = vi.spyOn(
+            (
+              svc as unknown as {
+                obs: { info: (message: string, data?: unknown) => void };
+              }
+            ).obs,
+            'info'
+          );
+
+          const result = await svc.propagateTierPriceToActiveSubscriptions(
+            tier1.id,
+            'price_new_dl',
+            {
+              organizationId: org.id,
+              interval: 'year',
+              batchSize: 2,
+              interBatchDelayMs: 0,
+            }
+          );
+
+          expect(result).toMatchObject({ total: 5, updated: 4, unhandled: 1 });
+          expect(
+            infos.mock.calls.find(([message]) =>
+              String(message).includes('starting')
+            )?.[1]
+          ).toMatchObject({ total: 5, tierId: tier1.id });
+          const read4 = new Set(retrieveSpy.mock.calls.map(([id]) => id));
+          expect(read4.size).toBe(4);
+          const [left] = rows.filter(
+            (row) => !read4.has(row.stripeSubscriptionId)
+          );
+          const messages = errors.mock.calls.map(([message]) =>
+            String(message)
+          );
+          const outOfTime = errors.mock.calls.filter(([message]) =>
+            String(message).includes('ran out of time')
+          );
+          // Round 2, silent R1: the log cap drops what comes last, so the
+          // end summary goes first, then the count, then the names.
+          expect(
+            messages.findIndex((m) => m.includes('ran out of time'))
+          ).toBeGreaterThan(
+            messages.findIndex((m) => m.includes('completed with failures'))
+          );
+          expect(
+            messages.findIndex((m) => m.includes('completed with failures'))
+          ).toBeGreaterThanOrEqual(0);
+          expect(outOfTime).toHaveLength(2);
+          const [count, names] = outOfTime;
+          const context = {
+            errorId: expect.any(String),
+            tierId: tier1.id,
+            interval: 'year',
+            newStripePriceId: 'price_new_dl',
+            noticeAt: '2026-11-02T10:00:00.000Z',
+          };
+          expect(count?.[1]).toEqual({
+            ...context,
+            unhandled: 1,
+            named: 1,
+            more: 0,
+            chunks: 1,
+          });
+          expect(names?.[1]).toMatchObject({
+            ...context,
+            errorId: (count?.[1] as { errorId?: string } | undefined)?.errorId,
+            subscribers: [
+              {
+                subscriptionId: left?.id,
+                stripeSubscriptionId: left?.stripeSubscriptionId,
+                userId: left?.userId,
+                organizationId: org.id,
+              },
+            ],
+          });
+          // Everyone notified had their move attempted; the one left out was
+          // neither notified nor moved.
+          const notifiedUsers = new Set(
+            mailer.mock.calls.map(([params]) => params.userId)
+          );
+          expect(notifiedUsers.size).toBe(4);
+          for (const row of rows) {
+            expect(notifiedUsers.has(row.userId)).toBe(row !== left);
+            expect(
+              updateFor(updateSpy, row.stripeSubscriptionId) !== undefined
+            ).toBe(row !== left);
+          }
+        } finally {
+          vi.useRealTimers();
+        }
       });
     });
   });
@@ -9344,7 +9821,12 @@ describe('SubscriptionService', () => {
           await seedReducedRow('2hxff8-drain-net');
         const payoutMailer = vi.fn();
         const serviceWithMailer = new SubscriptionService(
-          { db, environment: 'test' as const, payoutMailer },
+          {
+            db,
+            environment: 'test' as const,
+            ...createTestMoneyDeps(),
+            payoutMailer,
+          },
           stripe
         );
         const transferSpy = vi.mocked(stripe.transfers.create);
@@ -9394,7 +9876,12 @@ describe('SubscriptionService', () => {
           getFeesPlatform: vi.fn(async () => floorStub),
         } as unknown as FeeConfigService;
         const serviceWithFloor = new SubscriptionService(
-          { db, environment: 'test' as const, feeConfig },
+          {
+            db,
+            environment: 'test' as const,
+            ...createTestMoneyDeps(),
+            feeConfig,
+          },
           stripe
         );
         const transferSpy = vi.mocked(stripe.transfers.create);
@@ -9429,6 +9916,7 @@ describe('SubscriptionService', () => {
           {
             db,
             environment: 'test' as const,
+            ...createTestMoneyDeps(),
             payoutMailer,
           },
           stripe
@@ -9518,7 +10006,13 @@ describe('SubscriptionService', () => {
         } as unknown as FeeConfigService;
         const payoutMailer = vi.fn();
         const serviceWithFloor = new SubscriptionService(
-          { db, environment: 'test' as const, payoutMailer, feeConfig },
+          {
+            db,
+            environment: 'test' as const,
+            ...createTestMoneyDeps(),
+            payoutMailer,
+            feeConfig,
+          },
           stripe
         );
 
@@ -9551,36 +10045,6 @@ describe('SubscriptionService', () => {
         expect(payoutMailer).not.toHaveBeenCalled();
       });
 
-      it('does NOT fire when payoutMailer is not injected (graceful degrade)', async () => {
-        const { org, sub, stripeAccountId } = await seedConnectAndSubscription(
-          'wp10-notif-no-mailer'
-        );
-
-        await db.insert(payoutsTable).values({
-          userId: creatorId,
-          organizationId: org.id,
-          subscriptionId: sub.id,
-          amountCents: 900,
-          currency: 'gbp',
-          reason: 'connect_not_ready',
-          status: 'pending',
-          payoutType: 'creator_payout',
-        });
-
-        const transferSpy = vi.mocked(stripe.transfers.create);
-        transferSpy.mockClear();
-
-        // Use the default `service` (no payoutMailer injected).
-        const result = await service.resolvePendingPayouts(
-          org.id,
-          stripeAccountId
-        );
-
-        // Payout must still succeed even without mailer.
-        expect(result.resolved).toBe(1);
-        // No mailer call since it wasn't injected.
-      });
-
       it('swallows notification failure — payout result is unaffected', async () => {
         const { org, sub, stripeAccountId } =
           await seedConnectAndSubscription('wp10-notif-throw');
@@ -9603,7 +10067,12 @@ describe('SubscriptionService', () => {
           throw new Error('network down');
         });
         const serviceWithThrowingMailer = new SubscriptionService(
-          { db, environment: 'test' as const, payoutMailer: throwingMailer },
+          {
+            db,
+            environment: 'test' as const,
+            ...createTestMoneyDeps(),
+            payoutMailer: throwingMailer,
+          },
           stripe
         );
 
@@ -11814,7 +12283,10 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
       .delete(stripeConnectAccounts)
       .where(inArray(stripeConnectAccounts.userId, [creatorId, subscriberId]));
     stripe = createMockStripe();
-    service = new SubscriptionService({ db, environment: 'test' }, stripe);
+    service = new SubscriptionService(
+      { db, environment: 'test', ...createTestMoneyDeps() },
+      stripe
+    );
   });
 
   afterAll(async () => {
@@ -12849,7 +13321,10 @@ describe('Currency GBP-only enforcement (Codex-yv18n)', () => {
       .delete(stripeConnectAccounts)
       .where(inArray(stripeConnectAccounts.userId, [creatorId, subscriberId]));
     stripe = createMockStripe();
-    service = new SubscriptionService({ db, environment: 'test' }, stripe);
+    service = new SubscriptionService(
+      { db, environment: 'test', ...createTestMoneyDeps() },
+      stripe
+    );
   });
 
   afterAll(async () => {

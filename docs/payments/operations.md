@@ -228,11 +228,34 @@ Both run at minute `0` so they share one database wake
 ## Testing
 
 Continuous integration should exercise the money paths end to end, delivering
-signed webhook events (the scheme above) so the handlers run for real — **gap**:
-`Codex-2hxff.25`:
+signed webhook events (the scheme above) so the handlers run for real.
 
-- one-off purchase completion → entitlement → payouts;
-- full and partial refunds; a dispute opened and closed;
+**What CI proves today** (`e2e/tests/12-purchase-refund-round-trip.test.ts`,
+in the E2E API job; owner decision 2026-10-27, "Purchases and refunds"). The
+PaymentIntent, its charge and the refunds are real test-mode objects, tagged
+`codex_env: test` so production ignores their events. Each event is signed
+with the secret of the route production uses. The expected amounts are this
+spec's, to the penny:
+
+- **one-off purchase completion → entitlement → payouts**:
+  `checkout.session.completed` on `/webhooks/stripe/booking` records the
+  purchase and its split and grants the entitlement. It writes one payout row
+  per slice, keyed on the charge (`latest_charge`), summing to the price;
+- **a full refund**: `charge.refunded` on `/webhooks/stripe/payment` makes the
+  purchase `refunded` and ends access. It cancels the unpaid slices and retains
+  the platform fee;
+- **a partial refund**: access stays, and each slice is reduced by its share,
+  rounded down, with the rounding left to the platform.
+
+The creator's Connect account cannot take charges, so the slices are pending:
+no transfer is made and none is reversed. A paid slice and its transfer
+reversal are still not exercised in CI. Tests 04, 05 and 06 still deliver
+invented PaymentIntent ids, so they prove the purchase and its access, and
+write no payout rows.
+
+Still **gap** (`Codex-2hxff.25`, later batches):
+
+- a dispute opened and closed;
 - subscription created, renewed, cancelled, and its payment failing;
 - pending payouts drained when a Connect account becomes payable;
 - an agreement changing a split;

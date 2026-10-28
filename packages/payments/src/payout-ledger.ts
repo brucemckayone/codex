@@ -1546,6 +1546,10 @@ export type UnpaidCancelOutcome =
  *
  * If the Stripe lookup itself fails the row stays cancelled — most cancelled
  * rows never had a transfer — and the miss is logged for a person to check.
+ *
+ * Its two halves, `cancelUnpaidRow` and `lateTransferOf`, are exported for
+ * the clawback, which renews its step's lease before the cancel, and tells a
+ * failed lookup from none (Codex-2hxff.72).
  */
 export async function cancelUnpaidPayout(
   deps: LedgerDeps,
@@ -1553,15 +1557,7 @@ export async function cancelUnpaidPayout(
   status: 'cancelled_by_refund' | 'cancelled_by_dispute',
   now: Date = new Date()
 ): Promise<UnpaidCancelOutcome> {
-  const [cancelled] = await deps.db
-    .update(payouts)
-    .set({
-      status,
-      resolvedAt: row.resolvedAt ?? now,
-      updatedAt: now,
-    })
-    .where(and(eq(payouts.id, row.id), inArray(payouts.status, DRAINABLE)))
-    .returning();
+  const cancelled = await cancelUnpaidRow(deps.db, row, status, now);
   if (!cancelled) {
     const [current] = await deps.db
       .select()
@@ -1570,9 +1566,52 @@ export async function cancelUnpaidPayout(
       .limit(1);
     return { kind: 'changed', row: current };
   }
+  const late = await lateTransferOf(deps, row);
+  return {
+    kind: 'cancelled',
+    transferId: late.kind === 'found' ? late.transferId : undefined,
+  };
+}
 
+/**
+ * `cancelUnpaidPayout`'s cancel: the row, if it is still pending or failed.
+ * Undefined if it is not.
+ */
+export async function cancelUnpaidRow(
+  db: DatabaseClient,
+  row: Payout,
+  status: 'cancelled_by_refund' | 'cancelled_by_dispute',
+  now: Date = new Date()
+): Promise<Payout | undefined> {
+  const [cancelled] = await db
+    .update(payouts)
+    .set({
+      status,
+      resolvedAt: row.resolvedAt ?? now,
+      updatedAt: now,
+    })
+    .where(and(eq(payouts.id, row.id), inArray(payouts.status, DRAINABLE)))
+    .returning();
+  return cancelled;
+}
+
+/** What Stripe says went out for a cancelled row (`lateTransferOf`). */
+export type LateTransfer =
+  | { kind: 'none' }
+  | { kind: 'found'; transferId: string }
+  /** Stripe could not be asked. Logged for a person; never read as none. */
+  | { kind: 'unknown' };
+
+/**
+ * `cancelUnpaidPayout`'s lookup, after the cancel: the transfer Stripe made
+ * for the row anyway, if any. A failed lookup is logged and is `unknown`.
+ */
+export async function lateTransferOf(
+  deps: LedgerDeps,
+  row: Payout
+): Promise<LateTransfer> {
   // No payee: a no_owner row, never sent.
-  if (!row.userId) return { kind: 'cancelled', transferId: undefined };
+  if (!row.userId) return { kind: 'none' };
 
   try {
     // Every account the payee has had: the transfer may have gone to one
@@ -1583,7 +1622,8 @@ export async function cancelUnpaidPayout(
       [row],
       deps.obs
     );
-    return { kind: 'cancelled', transferId: found.get(row.id) };
+    const transferId = found.get(row.id);
+    return transferId ? { kind: 'found', transferId } : { kind: 'none' };
   } catch (error) {
     deps.obs.error(
       'A payout was cancelled but Stripe could not be asked whether its transfer went out. Check it by hand',
@@ -1596,7 +1636,7 @@ export async function cancelUnpaidPayout(
         error: error instanceof Error ? error.message : String(error),
       }
     );
-    return { kind: 'cancelled', transferId: undefined };
+    return { kind: 'unknown' };
   }
 }
 

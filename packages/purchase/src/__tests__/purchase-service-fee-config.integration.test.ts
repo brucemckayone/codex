@@ -19,6 +19,7 @@ import { ContentService, MediaItemService } from '@codex/content';
 import { organizations, stripeConnectAccounts } from '@codex/database/schema';
 import {
   createTestConnectAccountInput,
+  createTestMoneyDeps,
   createUniqueSlug,
   type Database,
   seedTestUsers,
@@ -140,7 +141,7 @@ describe('PurchaseService × FeeConfigService integration', () => {
       minTransferCents: 0,
     });
     const svc = new PurchaseService(
-      { db, environment: 'test', feeConfig },
+      { db, environment: 'test', ...createTestMoneyDeps(), feeConfig },
       mockStripe
     );
 
@@ -184,7 +185,7 @@ describe('PurchaseService × FeeConfigService integration', () => {
       minTransferCents: 0,
     });
     const svc = new PurchaseService(
-      { db, environment: 'test', feeConfig },
+      { db, environment: 'test', ...createTestMoneyDeps(), feeConfig },
       mockStripe
     );
 
@@ -221,7 +222,7 @@ describe('PurchaseService × FeeConfigService integration', () => {
       minTransferCents: 0,
     });
     const svc = new PurchaseService(
-      { db, environment: 'test', feeConfig },
+      { db, environment: 'test', ...createTestMoneyDeps(), feeConfig },
       mockStripe
     );
 
@@ -242,7 +243,10 @@ describe('PurchaseService × FeeConfigService integration', () => {
   });
 
   it('without feeConfig injected, falls back to legacy DEFAULT_* constants (regression guard)', async () => {
-    const svc = new PurchaseService({ db, environment: 'test' }, mockStripe);
+    const svc = new PurchaseService(
+      { db, environment: 'test', ...createTestMoneyDeps() },
+      mockStripe
+    );
     // Default 10% platform / 10% org of post-platform / 81% creator of gross
     // (post-h69cg). On gross=1000:
     //   platform = ceil(1000 * 10%)    = 100

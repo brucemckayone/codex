@@ -37,6 +37,7 @@ import {
   createMockStripe,
   createTestConnectAccountInput,
   createTestContentInput,
+  createTestMoneyDeps,
   createUniqueSlug,
   type Database,
   seedTestUsers,
@@ -240,10 +241,13 @@ describe('The success page and the webhook complete one checkout at once (Codex-
     const webhookStripe = createMockStripe();
     const pageStripe = createMockStripe();
     const webhook = new PurchaseService(
-      { db, environment: 'test' },
+      { db, environment: 'test', ...createTestMoneyDeps() },
       webhookStripe
     );
-    const page = new PurchaseService({ db, environment: 'test' }, pageStripe);
+    const page = new PurchaseService(
+      { db, environment: 'test', ...createTestMoneyDeps() },
+      pageStripe
+    );
     const eventCreated = new Date(Date.now() - 2_000);
     const chargeCreated = new Date(Date.now() - 3_000);
 

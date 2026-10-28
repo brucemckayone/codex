@@ -65,6 +65,7 @@ function depsOf(service: object) {
     feeConfig?: unknown;
     mailer?: unknown;
     payoutMailer?: unknown;
+    offSaleMailer?: unknown;
     webAppUrl?: unknown;
     stripe: Stripe;
   };
@@ -85,6 +86,9 @@ describe('createWebhookServices', () => {
         expect(service.webAppUrl).toBe('https://app.example.test');
       }
       expect(subscription.payoutMailer).toBeTypeOf('function');
+      // The course's off-sale email is its own, fire-and-forget slot; its
+      // `mailer` is the awaited price-change notice (Codex-2hxff.43).
+      expect(courseSubscription.offSaleMailer).toBeTypeOf('function');
     } finally {
       release();
     }

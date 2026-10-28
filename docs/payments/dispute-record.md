@@ -73,7 +73,7 @@ This is the mechanism a won dispute needs. It is also what support's "re-pay the
   | Step | On a win |
   |---|---|
   | `done` reversal | Re-paid |
-  | `pending` or `failed` reversal | First checked with Stripe: its outcome may never have been recorded (a timeout, or a crash after Stripe answered). A reversal whose metadata names the step is recorded `done` and re-paid; otherwise the step is `cancelled`. A step another delivery still holds under its lease makes the webhook retry |
+  | `pending` or `failed` reversal | First checked with Stripe: its outcome may never have been recorded (a timeout, or a crash after Stripe answered). A reversal whose metadata names the step is recorded `done` and re-paid; otherwise the step is `cancelled`. A step another delivery still holds under its lease makes the webhook retry. A delivery whose lease ran out before the cancel cannot change the step afterwards; a reversal of it that lands is held for support ([refund-reversal-record.md](refund-reversal-record.md) §4 step 7) |
   | `debt` the payee settled (`manually_reversed`, `creator_absorbed`) | Re-paid: the payee paid it |
   | Any other `debt` | `cancelled`, with its review closed as `dispute_won`, in one transaction |
   | Platform fee's `retained_fee` | `cancelled`; a fee slice it marked `reversed` goes back to `paid` |

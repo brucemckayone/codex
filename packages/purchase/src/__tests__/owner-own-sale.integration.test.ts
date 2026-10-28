@@ -39,6 +39,7 @@ import {
   createMockStripe,
   createTestConnectAccountInput,
   createTestContentInput,
+  createTestMoneyDeps,
   createUniqueSlug,
   type Database,
   seedTestUsers,
@@ -80,7 +81,7 @@ describe("an owner's sale of their own work (Codex-2hxff.77)", () => {
 
   function service(): PurchaseService {
     return new PurchaseService(
-      { db, environment: 'test', feeConfig },
+      { db, environment: 'test', ...createTestMoneyDeps(), feeConfig },
       createMockStripe()
     );
   }

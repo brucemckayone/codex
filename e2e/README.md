@@ -31,7 +31,12 @@ R2_BUCKET_MEDIA=codex-test-media
 # Stripe (test mode keys)
 STRIPE_SECRET_KEY=sk_test_...
 STRIPE_WEBHOOK_SECRET_BOOKING=whsec_...
+# Signs charge.refunded for /webhooks/stripe/payment (test 12)
+STRIPE_WEBHOOK_SECRET_PAYMENT=whsec_...
 ```
+
+Each secret must match the one in `workers/ecom-api/.dev.vars.test`: the
+worker checks the signature against its own copy.
 
 ### 2. Workers will be started automatically
 
@@ -91,6 +96,22 @@ pnpm test tests/01-auth-flow.test.ts
 ### 7. Platform Settings (`07-platform-settings.test.ts`)
 - Platform configuration management
 
+### 12. Purchase and refund round trips (`12-purchase-refund-round-trip.test.ts`)
+Real Stripe test-mode objects, not invented ids (`Codex-2hxff.25`). Tests 04-06
+invent `pi_test_*` ids: the webhook's `paymentIntents.retrieve` 404s, the charge
+id is null and the payouts ledger is skipped, so they write no payout rows.
+- The app opens a Checkout Session; a real PaymentIntent pays it with
+  `pm_card_visa`; the signed `checkout.session.completed` records the purchase,
+  the entitlement and one payout row per slice, keyed on `latest_charge`
+- A full refund and a partial refund, each made in Stripe, each on its own
+  purchase, delivered as a signed `charge.refunded` to `/webhooks/stripe/payment`:
+  the purchase, the access and every slice's reversal step, to the penny
+- The expected amounts come from `docs/payments/` (fees-and-splits.md,
+  purchases.md "Refunds"), never from the code
+- Every Stripe object is tagged `codex_env: test`, so production, which shares
+  the sandbox, ignores its events. The creator's Connect account is real and
+  deleted in `afterAll`. Helpers: `helpers/stripe-test-mode.ts`
+
 ## Architecture
 
 ```
@@ -147,8 +168,23 @@ const response = await httpClient.post(url, { body, headers });
 ## Test Data Management
 
 - **Unique emails**: `test-${Date.now()}-${Math.random()}@example.com`
-- **No cleanup needed**: Unique emails ensure isolation
-- **Database**: Uses shared DATABASE_URL (not ephemeral branches for e2e)
+- **Rows are left behind**: the files do not delete what they create, and test
+  09 calls `cleanupDatabase`, which deletes every user, organisation and item
+  of content in the database. CI gives the job a fresh service database
+- **Database**: never run the suite, or a file that writes payouts (11, 12),
+  against a local database other sessions use. Give it a database of its own
+  on the local server instead: create it, migrate it with
+  `pnpm --filter @codex/database db:migrate` (with `DB_METHOD`,
+  `DATABASE_URL` and `DATABASE_URL_LOCAL_PROXY` set to it), and drop it after.
+  Point both sides at it. The test process reads `.env.test`, and outside CI
+  `worker-manager.ts` reloads it over your environment (`override: true`), so
+  run with `CI=true` and the variables set. The workers read their
+  `.dev.vars.test` unless `wrangler dev` is given `--env-file`, which replaces
+  it, so start them yourself with copies that name the database. Set
+  `SKIP_WORKER_<NAME>=true` for each one (`SKIP_WORKER_CONTENT_API`, and so
+  on). A worker the suite finds down, for example one reloading after a
+  package rebuild, is otherwise killed with whatever else holds its port, the
+  test runner included, and restarted on `.dev.vars.test`
 - **R2**: Test bucket configured via environment variables
 
 ## Debugging

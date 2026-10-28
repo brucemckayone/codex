@@ -29,6 +29,7 @@ import {
   createMockStripeInvoice,
   createMockStripeSubscription,
   createTestConnectAccountInput,
+  createTestMoneyDeps,
   createUniqueSlug,
   type Database,
   paidByCard,
@@ -108,7 +109,7 @@ describe('CourseSubscriptionService lifecycle (WP-6)', () => {
     plan = planRow;
 
     service = new CourseSubscriptionService(
-      { db, environment: 'test' },
+      { db, environment: 'test', ...createTestMoneyDeps() },
       createMockStripe()
     );
   });
@@ -434,7 +435,7 @@ describe('CourseSubscriptionService lifecycle (WP-6)', () => {
       id: string
     ) => ({ id, payments: paidByCard(chargeId) })) as never);
     const webhookService = new CourseSubscriptionService(
-      { db, environment: 'test' },
+      { db, environment: 'test', ...createTestMoneyDeps() },
       stripe
     );
     const invoice = createMockStripeInvoice({
@@ -534,7 +535,7 @@ describe('CourseSubscriptionService lifecycle (WP-6)', () => {
       });
     const failing = dropsOnCreatorSlice(db);
     const dying = new CourseSubscriptionService(
-      { db: failing, environment: 'test' },
+      { db: failing, environment: 'test', ...createTestMoneyDeps() },
       createMockStripe()
     );
     await expect(
@@ -650,7 +651,7 @@ describe('CourseSubscriptionService lifecycle (WP-6)', () => {
         })),
       };
       const checkout = new CourseSubscriptionService(
-        { db, environment: 'test' },
+        { db, environment: 'test', ...createTestMoneyDeps() },
         stripe
       );
       const result = await checkout.createCheckoutSession(subscriberId, {
@@ -698,7 +699,7 @@ describe('CourseSubscriptionService lifecycle (WP-6)', () => {
       });
       const stripe = createMockStripe();
       const gated = new CourseSubscriptionService(
-        { db, environment: 'test' },
+        { db, environment: 'test', ...createTestMoneyDeps() },
         stripe
       );
 
@@ -723,7 +724,7 @@ describe('CourseSubscriptionService lifecycle (WP-6)', () => {
         .where(eq(courses.id, cId));
       const stripe = createMockStripe();
       const checkout = new CourseSubscriptionService(
-        { db, environment: 'test' },
+        { db, environment: 'test', ...createTestMoneyDeps() },
         stripe
       );
 
@@ -772,7 +773,8 @@ describe('CourseSubscriptionService lifecycle (WP-6)', () => {
         {
           db,
           environment: 'test',
-          mailer,
+          ...createTestMoneyDeps(),
+          offSaleMailer: mailer,
           webAppUrl: 'https://app.example.test',
         },
         stripe

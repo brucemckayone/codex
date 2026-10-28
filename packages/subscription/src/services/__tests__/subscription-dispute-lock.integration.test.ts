@@ -30,6 +30,7 @@ import {
 import { PurchaseService } from '@codex/purchase';
 import {
   createMockStripe,
+  createTestMoneyDeps,
   createTestOrganizationInput,
   createTestSubscriptionInput,
   createTestTierInput,
@@ -97,7 +98,7 @@ describe('a subscription dispute pause racing a win, on two connections', () => 
   beforeAll(async () => {
     db = setupTestDatabase();
     service = new SubscriptionService(
-      { db, environment: 'test' },
+      { db, environment: 'test', ...createTestMoneyDeps() },
       createMockStripe()
     );
     [subscriberId] = await seedTestUsers(db, 1);
@@ -209,14 +210,14 @@ describe('a subscription dispute pause racing a win, on two connections', () => 
         // parks on the subscription.
         pause = track(
           new SubscriptionService(
-            { db: pauser.db, environment: 'test' },
+            { db: pauser.db, environment: 'test', ...createTestMoneyDeps() },
             createMockStripe()
           ).pauseForDispute(input)
         );
         await untilWaiting(pauser.pid, holder, 'subscriptions', pause);
         // The webhook's win: its record waits on the pause's read.
         const record = new PurchaseService(
-          { db: winner.db, environment: 'test' },
+          { db: winner.db, environment: 'test', ...createTestMoneyDeps() },
           createMockStripe()
         );
         win = track(

@@ -29,6 +29,7 @@ import {
 import {
   createMockStripe,
   createTestContentInput,
+  createTestMoneyDeps,
   createUniqueSlug,
   type Database,
   seedTestUsers,
@@ -69,7 +70,7 @@ describe('support refunds: the purchase side', () => {
         .returning()
     ).id;
     service = new PurchaseService(
-      { db, environment: 'test' },
+      { db, environment: 'test', ...createTestMoneyDeps() },
       createMockStripe()
     );
   });

@@ -50,6 +50,7 @@ import {
   createMockStripe,
   createTestConnectAccountInput,
   createTestContentInput,
+  createTestMoneyDeps,
   createUniqueSlug,
   type Database,
   seedTestUsers,
@@ -231,7 +232,7 @@ describe('A refund handled before a purchase is paid out (Codex-2hxff.67)', () =
 
   async function complete(sold: Sale, database: Database = db) {
     const purchase = await new PurchaseService(
-      { db: database, environment: 'test' },
+      { db: database, environment: 'test', ...createTestMoneyDeps() },
       stripe
     ).completePurchase(sold.paymentIntentId, sold.metadata);
     purchaseIds.push(purchase.id);
@@ -243,7 +244,10 @@ describe('A refund handled before a purchase is paid out (Codex-2hxff.67)', () =
    * refund recorded first, then the refund applied and clawed back.
    */
   async function chargeRefunded(sold: Sale): Promise<void> {
-    const service = new PurchaseService({ db, environment: 'test' }, stripe);
+    const service = new PurchaseService(
+      { db, environment: 'test', ...createTestMoneyDeps() },
+      stripe
+    );
     const [latest] = await service.recordChargeRefunds({
       id: sold.chargeId,
       paymentIntentId: sold.paymentIntentId,
@@ -468,6 +472,7 @@ describe('A refund handled before a purchase is paid out (Codex-2hxff.67)', () =
           vi.mocked(stripe.charges.retrieve).mockRejectedValueOnce(refusal);
         }),
         environment: 'test',
+        ...createTestMoneyDeps(),
       },
       stripe
     );
@@ -664,7 +669,7 @@ describe('A refund handled before a purchase is paid out (Codex-2hxff.67)', () =
 
     function service(): PurchaseService {
       return new PurchaseService(
-        { db, environment: 'test', feeConfig },
+        { db, environment: 'test', ...createTestMoneyDeps(), feeConfig },
         stripe
       );
     }

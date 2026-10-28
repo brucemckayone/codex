@@ -101,6 +101,25 @@ Stripe event factories:
 |---|---|
 | `createMockStripe()` | Returns a `Stripe`-shaped mock with vi.fn() methods |
 
+### `money-deps.ts` — Money Service Dependencies
+
+`PurchaseService`, `SubscriptionService` and `CourseSubscriptionService`
+REQUIRE fee configuration and their mailers (Codex-2hxff.55): there is no
+`FEES.*` fallback any more. Spread the helper into the config, then override a
+slot the test asserts on:
+
+```ts
+new SubscriptionService(
+  { db, environment: 'test', ...createTestMoneyDeps(), payoutMailer },
+  stripe
+);
+```
+
+| Export | Purpose |
+|---|---|
+| `createTestMoneyDeps({ fees? })` | `feeConfig`, `mailer` (the price-change notice, answering accepted), `payoutMailer`, `offSaleMailer`. The mailers are plain no-op functions (no vitest import, so the e2e fixtures can use it); a test that asserts on one passes its own `vi.fn` after the spread. A service ignores the slots it does not declare |
+| `createTestFeeConfig(overrides?)` | FeeConfigService's read side with no database: every org and creator gets the code defaults for the context (subscription 15% org fee, one-off 10%), what FeeConfigService returns with no fee rows |
+
 ## Integration Test Pattern
 
 ```ts

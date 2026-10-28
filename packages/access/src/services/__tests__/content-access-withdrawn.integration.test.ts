@@ -24,6 +24,7 @@ import {
 import { PurchaseService } from '@codex/purchase';
 import {
   createTestContentInput,
+  createTestMoneyDeps,
   createTestSubscriptionInput,
   createTestTierInput,
   createUniqueSlug,
@@ -122,7 +123,7 @@ describe('getWithdrawnContent: which rows the lookup can find (Codex-ov2ii)', ()
 
     // Real verifyPurchase against the purchases table; Stripe is never reached.
     const purchaseService = new PurchaseService(
-      { db, environment: 'test' },
+      { db, environment: 'test', ...createTestMoneyDeps() },
       {} as Stripe
     );
     const r2 = new Proxy(

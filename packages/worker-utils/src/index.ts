@@ -26,8 +26,10 @@ export {
 } from './cache-fanout';
 // Email sending helper (worker-to-worker)
 export {
+  type EmailSendResult,
   type SendEmailToWorkerParams,
   sendEmailToWorker,
+  sendEmailToWorkerAwaited,
 } from './email/send-email';
 // Environment validation
 export {
