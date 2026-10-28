@@ -32,6 +32,7 @@ import {
 import { InternalServiceError } from '@codex/service-errors';
 import {
   createMockStripe,
+  createTestMoneyDeps,
   createTestOrganizationInput,
   createTestSubscriptionInput,
   createTestTierInput,
@@ -161,7 +162,7 @@ describe('SubscriptionService refund clawback (Codex-2hxff.8)', () => {
 
   function makeService(database: Database = db): SubscriptionService {
     return new SubscriptionService(
-      { db: database, environment: 'test' },
+      { db: database, environment: 'test', ...createTestMoneyDeps() },
       stripe
     );
   }

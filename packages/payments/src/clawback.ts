@@ -53,9 +53,10 @@ import {
 import { alias } from 'drizzle-orm/pg-core';
 import type Stripe from 'stripe';
 import {
-  cancelUnpaidPayout,
+  cancelUnpaidRow,
   isTransferFullyReversed,
   type LedgerDeps,
+  lateTransferOf,
   PAYOUT_ATTEMPT_LEASE_MINUTES,
 } from './payout-ledger';
 
@@ -1086,7 +1087,7 @@ async function runRecord(
   // (open or lost): once it is won, its re-pay owns every step, and a step
   // this delivery read before the win must not reach Stripe after it. A
   // refund's, likewise, only until support settles it `creators_repaid`.
-  let claimed: PayoutReversal | undefined;
+  let claimed: ClaimedStep | undefined;
   if (cause.type === 'refund') {
     const outcome = await claimRefundStep(deps, record.id, cause.id);
     if (outcome === 'repaid') {
@@ -1122,10 +1123,45 @@ async function runRecord(
   try {
     return await runStep(ctx, row, claimed);
   } catch (error) {
-    // A database or unexpected error: the attempt did not happen at Stripe,
-    // or its outcome is unknown, so the key is kept for the retry.
-    await markFailed(deps, claimed, errorCodeOf(error), false);
+    // Logged first, so a failure of the recovery below never hides it.
     logStepFailure(ctx, row, claimed, error);
+    try {
+      // A database or unexpected error: the attempt did not happen at
+      // Stripe, or its outcome is unknown, so the key is kept for the retry.
+      if (!(await markFailed(deps, claimed, errorCodeOf(error), false))) {
+        // The claim is gone. If this run marked the step done and a later
+        // write failed, that write was the slice's settle: it is re-run
+        // here, since a done step is never run again. Otherwise, unless
+        // `claimLost` already reported it, it is any lost claim, and Stripe
+        // is asked whether the reversal landed.
+        if (!claimed.run.done && !claimed.run.reported) {
+          const slice = await readPayout(deps, row.id);
+          await claimLost(ctx, row, claimed, {
+            transferId: slice?.stripeTransferId ?? undefined,
+            ask: true,
+            error,
+          });
+        }
+        await settleIfFullyReversed(deps, row.id);
+      }
+    } catch (recoveryError) {
+      // Returned as the step's failure, as before the recovery existed: the
+      // webhook retries, and the other steps still run.
+      deps.obs.error(
+        `${causeLabel(cause)} clawback: recovering a failed step failed too; the step may still be leased, and the slice settle not re-run`,
+        {
+          errorId: crypto.randomUUID(),
+          chargeId: ctx.charge.id,
+          ...causeFields(cause),
+          payoutId: row.id,
+          payoutReversalId: claimed.id,
+          error:
+            recoveryError instanceof Error
+              ? recoveryError.message
+              : String(recoveryError),
+        }
+      );
+    }
     return { failure: error };
   }
 }
@@ -1133,12 +1169,12 @@ async function runRecord(
 async function runStep(
   ctx: StepContext,
   row: Payout,
-  record: PayoutReversal
+  record: ClaimedStep
 ): Promise<StepResult> {
   const { deps } = ctx;
   switch (record.kind) {
     case 'retained_fee':
-      await markDone(deps, record);
+      if (!(await markDone(deps, record))) return claimLost(ctx, row, record);
       await settleIfFullyReversed(deps, row.id);
       return {};
 
@@ -1172,12 +1208,14 @@ async function runStep(
  * A partial refund of an unpaid slice reduces what the drain will pay. The
  * drain sums a row's reductions only after claiming it, so the reduction must
  * commit while no drain holds the row: the row lock taken here, under the
- * drain's own lease condition, orders the two.
+ * drain's own lease condition, orders the two. The reduction is the step's
+ * `done` itself, written on the claim's version (`claimHolds`), so one that
+ * comes after another path settled the step never commits.
  */
 async function reduceUnpaidSlice(
   ctx: StepContext,
   row: Payout,
-  record: PayoutReversal
+  record: ClaimedStep
 ): Promise<StepResult> {
   const { deps } = ctx;
   const now = new Date();
@@ -1204,19 +1242,22 @@ async function reduceUnpaidSlice(
         )
       )
       .returning();
-    if (!locked) return false;
-    await tx
+    if (!locked) return 'held' as const;
+    const [done] = await tx
       .update(payoutReversals)
       .set(doneFields(now))
-      .where(eq(payoutReversals.id, record.id));
-    return true;
+      .where(claimHolds(record))
+      .returning();
+    return done ? ('reduced' as const) : ('lost' as const);
   });
-  if (reduced) return {};
+  if (reduced === 'reduced') return {};
+  if (reduced === 'lost') return claimLost(ctx, row, record);
 
   // The row is paid, or a drain is paying it now.
   const current = await readPayout(deps, row.id);
   if (current?.status === 'paid' && current.stripeTransferId) {
     const asReversal = await setKind(deps, record, 'transfer_reversal');
+    if (!asReversal) return claimLost(ctx, row, record);
     return reverseTransfer(
       ctx,
       current,
@@ -1226,7 +1267,9 @@ async function reduceUnpaidSlice(
     );
   }
   if (current?.status === 'pending' || current?.status === 'failed') {
-    await markFailed(deps, record, 'payout_in_flight', false);
+    if (!(await markFailed(deps, record, 'payout_in_flight', false))) {
+      return claimLost(ctx, row, record);
+    }
     return {
       failure: new ServiceUnavailableError(
         `A payout for this ${ctx.cause.type} is being paid; retry once it settles`,
@@ -1235,39 +1278,65 @@ async function reduceUnpaidSlice(
     };
   }
   // Reversed or cancelled meanwhile: nothing is left for this share.
-  await markDone(deps, record);
+  if (!(await markDone(deps, record))) return claimLost(ctx, row, record);
   return {};
 }
 
 /**
  * The refund (or lost chargeback) that completes a charge's refund cancels an
  * unpaid slice, FIRST, so nothing can pay it afterwards; a transfer Stripe made
- * for it anyway is reversed in full (`cancelUnpaidPayout`, Codex-2hxff.11).
+ * for it anyway is reversed in full (`cancelUnpaidPayout`'s halves,
+ * Codex-2hxff.11).
+ *
+ * The cancel commits in one transaction with a renewal of the claim's lease,
+ * and only while the claim holds (Codex-2hxff.72). A settlement then finds the
+ * step leased, and its `unleased` check refuses it, so it cannot cancel the
+ * step between the slice's cancel and the step's done. Only a delivery that
+ * outlives the renewed lease too can meet a settled step after the cancel,
+ * and `claimLost` alerts that. The Stripe lookup runs after the commit.
  */
 async function cancelUnpaidSlice(
   ctx: StepContext,
   row: Payout,
-  record: PayoutReversal
+  record: ClaimedStep
 ): Promise<StepResult> {
   const { deps, cause } = ctx;
-  const outcome = await cancelUnpaidPayout(
-    deps,
-    row,
-    cause.type === 'dispute' ? 'cancelled_by_dispute' : 'cancelled_by_refund'
-  );
+  const renewedAt = new Date();
+  const cancel = await deps.db.transaction(async (tx) => {
+    const [renewed] = await tx
+      .update(payoutReversals)
+      .set({ attemptedAt: renewedAt })
+      .where(claimHolds(record))
+      .returning();
+    if (!renewed) return 'lost' as const;
+    const cancelled = await cancelUnpaidRow(
+      tx,
+      row,
+      cause.type === 'dispute' ? 'cancelled_by_dispute' : 'cancelled_by_refund',
+      renewedAt
+    );
+    return cancelled ? ('cancelled' as const) : ('changed' as const);
+  });
+  if (cancel === 'lost') return claimLost(ctx, row, record);
+  // Committed, whatever the cancel found: the renewed lease is the claim's.
+  record.run.lease = renewedAt;
 
-  if (outcome.kind === 'cancelled') {
-    if (outcome.transferId === undefined) {
-      await markDone(deps, record);
+  if (cancel === 'cancelled') {
+    const transferId = await lateTransferOf(deps, row);
+    if (transferId === undefined) {
+      if (!(await markDone(deps, record))) {
+        return claimLost(ctx, row, record, { cancelledSlice: true });
+      }
       return {};
     }
-    return reverseTransfer(ctx, row, record, outcome.transferId, undefined);
+    return reverseTransfer(ctx, row, record, transferId, undefined);
   }
 
   // Changed since it was read. Paid: claw back this share of the transfer.
-  const current = outcome.row;
+  const current = await readPayout(deps, row.id);
   if (current?.status === 'paid' && current.stripeTransferId) {
     const asReversal = await setKind(deps, record, 'transfer_reversal');
+    if (!asReversal) return claimLost(ctx, row, record);
     return reverseTransfer(
       ctx,
       current,
@@ -1276,7 +1345,7 @@ async function cancelUnpaidSlice(
       asReversal.amountCents
     );
   }
-  await markDone(deps, record);
+  if (!(await markDone(deps, record))) return claimLost(ctx, row, record);
   return {};
 }
 
@@ -1291,11 +1360,14 @@ async function cancelUnpaidSlice(
 async function reverseTransfer(
   ctx: StepContext,
   row: Payout,
-  record: PayoutReversal,
+  record: ClaimedStep,
   transferId: string,
   amountCents: number | undefined
 ): Promise<StepResult> {
   const { deps, charge, cause } = ctx;
+  // The late transfer of a slice this delivery cancelled (`cancelUnpaidSlice`).
+  const cancelledSlice =
+    record.kind === 'cancellation' && amountCents === undefined;
   let reversal: Stripe.TransferReversal;
   try {
     reversal = await deps.stripe.transfers.createReversal(
@@ -1318,17 +1390,15 @@ async function reverseTransfer(
       }
     );
   } catch (error) {
-    if (
-      record.kind === 'cancellation' &&
-      amountCents === undefined &&
-      (await isTransferFullyReversed(deps, transferId))
-    ) {
+    if (cancelledSlice && (await isTransferFullyReversed(deps, transferId))) {
       // The late transfer's own settle found it too and reversed it first
       // (Codex-pqsfg). Stripe refuses a second full reversal, but the money is
       // back, so the step is done, whoever reversed it. Logged as
       // settleTransfer's twin branch is: the step records no reversal id, so
       // without this line it reads like a slice no transfer ever reached.
-      await markDone(deps, record);
+      if (!(await markDone(deps, record))) {
+        return claimLost(ctx, row, record, { transferId, cancelledSlice });
+      }
       await recordCancelledSliceReversed(deps, row, transferId);
       deps.obs.warn(
         `${causeLabel(cause)} clawback: the late transfer was already reversed in full, so the step is done`,
@@ -1345,7 +1415,15 @@ async function reverseTransfer(
     }
     const code = errorCodeOf(error);
     if (code === 'insufficient_funds' || code === 'balance_insufficient') {
-      await recordDebt(ctx, row, record, error);
+      if (!(await recordDebt(ctx, row, record, error))) {
+        // Refused: a cancelled slice's late transfer is still the payee's.
+        return claimLost(ctx, row, record, {
+          transferId,
+          cancelledSlice,
+          refused: true,
+          error,
+        });
+      }
       return {};
     }
     const definitive = isDefinitiveStripeError(error);
@@ -1355,7 +1433,16 @@ async function reverseTransfer(
         ? clawBackRepaidShare(ctx, slice, record.amountCents, record)
         : {};
     }
-    await markFailed(deps, record, code, definitive);
+    if (!(await markFailed(deps, record, code, definitive))) {
+      // Refused, nothing landed. Unconfirmed, it may have: Stripe is asked.
+      return claimLost(ctx, row, record, {
+        transferId,
+        ask: !definitive,
+        cancelledSlice,
+        refused: definitive,
+        error,
+      });
+    }
     logStepFailure(ctx, row, record, error);
     // Stripe refused. A redelivery would get the same answer, and rejecting
     // would end the webhook before the customer's refund email, so the step is
@@ -1363,7 +1450,14 @@ async function reverseTransfer(
     return definitive ? {} : { failure: error };
   }
 
-  await markDone(deps, record, reversal.id);
+  if (!(await markDone(deps, record, reversal.id))) {
+    // The reversal LANDED, and the claim is gone.
+    return claimLost(ctx, row, record, {
+      transferId,
+      reversal: { id: reversal.id, amount: reversal.amount },
+      cancelledSlice,
+    });
+  }
   if (record.kind === 'cancellation') {
     await recordCancelledSliceReversed(deps, row, transferId);
   } else {
@@ -1418,36 +1512,55 @@ async function belongsOnRepayRows(
  * The payee's balance could not cover the reversal. The slice stays paid (its
  * transfer did succeed) and the debt is recorded once per reversal, for every
  * source (D5). It is recovered from future earnings (Codex-2hxff.30).
+ *
+ * The step and its review are one transaction, on the claim's version: a
+ * delivery whose claim is gone queues no debt for a step another path
+ * settled. False if the claim no longer holds.
  */
 async function recordDebt(
   ctx: StepContext,
   row: Payout,
-  record: PayoutReversal,
+  record: ClaimedStep,
   error: unknown
-): Promise<void> {
+): Promise<boolean> {
   const { deps, charge, cause } = ctx;
   const code = errorCodeOf(error);
   const message = error instanceof Error ? error.message : null;
-  if (row.userId) {
-    // First, so that a crash before the status write retries into the same
-    // debt: Stripe replays the stored error for this key, and the insert
-    // collapses on the reversal's unique index.
-    await deps.db
-      .insert(refundReviews)
-      .values({
-        payoutReversalId: record.id,
-        payoutId: row.id,
-        purchaseId: row.purchaseId,
-        creatorUserId: row.userId,
-        attemptedReversalCents: record.amountCents,
-        errorCode: code,
-        errorMessage: message,
+  // A crash before the commit retries into the same debt: Stripe replays the
+  // stored error for this key.
+  const recorded = await deps.db.transaction(async (tx) => {
+    const [debt] = await tx
+      .update(payoutReversals)
+      .set({
+        status: 'debt',
+        lastErrorCode: code,
+        attemptedAt: null,
+        resolvedAt: new Date(),
       })
-      .onConflictDoNothing({
-        target: refundReviews.payoutReversalId,
-        where: sql`${refundReviews.payoutReversalId} IS NOT NULL`,
-      });
-  } else {
+      .where(claimHolds(record))
+      .returning();
+    if (!debt) return false;
+    if (row.userId) {
+      await tx
+        .insert(refundReviews)
+        .values({
+          payoutReversalId: record.id,
+          payoutId: row.id,
+          purchaseId: row.purchaseId,
+          creatorUserId: row.userId,
+          attemptedReversalCents: record.amountCents,
+          errorCode: code,
+          errorMessage: message,
+        })
+        .onConflictDoNothing({
+          target: refundReviews.payoutReversalId,
+          where: sql`${refundReviews.payoutReversalId} IS NOT NULL`,
+        });
+    }
+    return true;
+  });
+  if (!recorded) return false;
+  if (!row.userId) {
     deps.obs.error('A clawback debt has no payee to record it against', {
       errorId: crypto.randomUUID(),
       chargeId: charge.id,
@@ -1457,15 +1570,6 @@ async function recordDebt(
       amountCents: record.amountCents,
     });
   }
-  await deps.db
-    .update(payoutReversals)
-    .set({
-      status: 'debt',
-      lastErrorCode: code,
-      attemptedAt: null,
-      resolvedAt: new Date(),
-    })
-    .where(eq(payoutReversals.id, record.id));
   deps.obs.warn(
     `${causeLabel(cause)} clawback debt recorded: the payee balance could not cover it`,
     {
@@ -1478,6 +1582,7 @@ async function recordDebt(
       code,
     }
   );
+  return true;
 }
 
 /** Attempts after which a failed step is left for a person, not retried. */
@@ -1763,7 +1868,7 @@ async function clawBackRepaidShare(
   ctx: StepContext,
   slice: Payout,
   share: number,
-  moving?: PayoutReversal
+  moving?: ClaimedStep
 ): Promise<StepResult> {
   const { deps, cause } = ctx;
   await splitRepaidShare(ctx, slice, share, moving);
@@ -1803,13 +1908,14 @@ async function clawBackRepaidShare(
  *
  * A `moving` step leaves the slice in the same transaction: `cancelled`, code
  * `moved_to_repay`, and it becomes the debt if the re-pay rows cannot carry
- * the share. A failure rolls both back, so the step stays to be retried.
+ * the share. A failure rolls both back, so the step stays to be retried. It
+ * moves only while its delivery's claim holds (`claimHolds`).
  */
 async function splitRepaidShare(
   ctx: StepContext,
   slice: Payout,
   share: number,
-  moving?: PayoutReversal
+  moving?: ClaimedStep
 ): Promise<void> {
   const { deps, charge, cause } = ctx;
   const { debt, moved } = await deps.db.transaction(async (tx) => {
@@ -1827,14 +1933,9 @@ async function splitRepaidShare(
           attemptedAt: null,
           resolvedAt: new Date(),
         })
-        .where(
-          and(
-            eq(payoutReversals.id, moving.id),
-            inArray(payoutReversals.status, ['pending', 'failed'])
-          )
-        )
+        .where(claimHolds(moving))
         .returning();
-      // Settled by someone else meanwhile: nothing to move.
+      // Settled, or claimed by another delivery, meanwhile: nothing to move.
       if (!movedRow) return { debt: undefined, moved: false };
     }
     const repays = await repayRowsOf(tx, slice.id);
@@ -2122,7 +2223,7 @@ async function claimRefundStep(
   deps: ClawbackDeps,
   recordId: string,
   stripeRefundId: string
-): Promise<PayoutReversal | 'repaid' | undefined> {
+): Promise<ClaimedStep | 'repaid' | undefined> {
   return deps.db.transaction(async (tx) => {
     const [refund] = await tx
       .select({ resolution: refunds.resolution })
@@ -2136,6 +2237,30 @@ async function claimRefundStep(
 }
 
 /**
+ * One delivery's claim on a step, shared by every copy of the step the run
+ * makes (`setKind` copies the row, not this).
+ */
+interface ClaimRun {
+  /**
+   * The lease the claim wrote to `attempted_at`, renewed with the cancel of
+   * an unpaid slice (`cancelUnpaidSlice`). It is the claim's version. Only
+   * this claim wrote it, and every other writer clears or replaces it: a
+   * settlement (support's re-pay, a won dispute's), a release (`markFailed`),
+   * or another delivery's claim once the lease ran out. The run's own
+   * `setKind` keeps it, so the step stays this run's across a change of kind,
+   * which `updated_at` would not.
+   */
+  lease: Date;
+  /** This run marked the step done (`markDone`). */
+  done: boolean;
+  /** `claimLost` ran for this run: runRecord's catch never runs it again. */
+  reported: boolean;
+}
+
+/** A step a delivery's claim holds: its row, and the claim. */
+type ClaimedStep = PayoutReversal & { run: ClaimRun };
+
+/**
  * Take the step's lease, so one delivery works on it at a time. `guard`, when
  * given, must also hold at the moment of the claim.
  */
@@ -2143,7 +2268,7 @@ async function claimRecord(
   db: Client,
   recordId: string,
   guard?: SQL
-): Promise<PayoutReversal | undefined> {
+): Promise<ClaimedStep | undefined> {
   const now = new Date();
   const leaseStart = new Date(
     now.getTime() - PAYOUT_ATTEMPT_LEASE_MINUTES * 60_000
@@ -2163,7 +2288,20 @@ async function claimRecord(
       )
     )
     .returning();
-  return claimed;
+  return claimed
+    ? { ...claimed, run: { lease: now, done: false, reported: false } }
+    : undefined;
+}
+
+/**
+ * The step is still as the delivery's claim left it: the compare-and-set
+ * every write the delivery makes to its step carries (Codex-2hxff.72; owner
+ * decision 2026-10-27, "Never overwrite; hold for support"). A delivery that
+ * outlived its lease therefore never changes a step another path has settled,
+ * nor one another delivery has claimed since.
+ */
+function claimHolds(step: ClaimedStep): SQL {
+  return sql`${payoutReversals.id} = ${step.id} AND ${payoutReversals.attemptedAt} = ${step.run.lease} AND ${payoutReversals.status} IN ('pending', 'failed')`;
 }
 
 function doneFields(now: Date) {
@@ -2175,28 +2313,35 @@ function doneFields(now: Date) {
   };
 }
 
+/** Done, and the lease released. False if the claim no longer holds. */
 async function markDone(
   deps: ClawbackDeps,
-  record: PayoutReversal,
+  record: ClaimedStep,
   stripeReversalId?: string
-): Promise<void> {
-  await deps.db
+): Promise<boolean> {
+  const [done] = await deps.db
     .update(payoutReversals)
     .set({
       ...doneFields(new Date()),
       ...(stripeReversalId ? { stripeReversalId } : {}),
     })
-    .where(eq(payoutReversals.id, record.id));
+    .where(claimHolds(record))
+    .returning();
+  if (done) record.run.done = true;
+  return done !== undefined;
 }
 
-/** Failed, and the lease released. `advance` moves the key to a new attempt. */
+/**
+ * Failed, and the lease released. `advance` moves the key to a new attempt.
+ * False if the claim no longer holds.
+ */
 async function markFailed(
   deps: ClawbackDeps,
-  record: PayoutReversal,
+  record: ClaimedStep,
   code: string,
   advance: boolean
-): Promise<void> {
-  await deps.db
+): Promise<boolean> {
+  const [failed] = await deps.db
     .update(payoutReversals)
     .set({
       status: 'failed',
@@ -2204,19 +2349,290 @@ async function markFailed(
       attemptedAt: null,
       ...(advance ? { attempt: sql`${payoutReversals.attempt} + 1` } : {}),
     })
-    .where(eq(payoutReversals.id, record.id));
+    .where(claimHolds(record))
+    .returning();
+  return failed !== undefined;
 }
 
+/** The step, now of `kind`, still claimed; undefined if the claim no longer holds. */
 async function setKind(
   deps: ClawbackDeps,
-  record: PayoutReversal,
+  record: ClaimedStep,
   kind: PayoutReversalKind
-): Promise<PayoutReversal> {
-  await deps.db
+): Promise<ClaimedStep | undefined> {
+  const [changed] = await deps.db
     .update(payoutReversals)
     .set({ kind })
-    .where(eq(payoutReversals.id, record.id));
-  return { ...record, kind };
+    .where(claimHolds(record))
+    .returning();
+  return changed ? { ...record, kind } : undefined;
+}
+
+/**
+ * What a delivery had already done to the payee when a write found its claim
+ * gone (`claimLost`).
+ */
+interface Taken {
+  /** The transfer the step reversed, or tried to. */
+  transferId?: string;
+  /** The reversal Stripe made for the step. */
+  reversal?: { id: string; amount: number };
+  /** Stripe's answer was lost: ask it whether the step's reversal landed. */
+  ask?: boolean;
+  /** The delivery cancelled the unpaid slice (`cancelUnpaidSlice`). */
+  cancelledSlice?: boolean;
+  /**
+   * Stripe refused the reversal. A cancelled slice's late transfer is then
+   * still with the payee.
+   */
+  refused?: boolean;
+  /** The error the step's last attempt got, for the logs. */
+  error?: unknown;
+}
+
+/**
+ * A write the delivery made under its claim found the claim gone, because the
+ * delivery outlived its lease. The step is never overwritten (owner decision
+ * 2026-10-27, "Never overwrite; hold for support"):
+ *
+ * - another delivery holds it now, or a retry is due: that one runs on with
+ *   the same key, so Stripe gives it the answer it gave this one;
+ * - it is `done` with what this delivery took, or with nothing this delivery
+ *   knows of: `done` records the step's outcome. One attempt at most lands,
+ *   since the attempt advances only after Stripe refused one;
+ * - it is settled, and this delivery took nothing: left as it is. When
+ *   Stripe's answer was lost and Stripe lists no reversal yet, that outcome
+ *   is unconfirmed, and the warning says so;
+ * - it is settled, and this delivery took money from the payee anyway (a
+ *   reversal that LANDED, or the unpaid slice it cancelled, with no transfer
+ *   or one reversed in full): ONE error alert names the payee, the amount and
+ *   the cause, for support to re-pay, and the reversal's id is recorded on a
+ *   step that is not `done` and names none. Nothing else on the step changes,
+ *   and nothing is re-paid automatically;
+ * - it is settled, the delivery cancelled the unpaid slice, and Stripe refused
+ *   to reverse the transfer that went out for it: the payee still holds that
+ *   transfer. A different error alert says so, and NOT to re-pay: the slice is
+ *   reconciled instead.
+ *
+ * When Stripe's answer was lost (`ask`), Stripe is asked whether the reversal
+ * landed. If Stripe cannot be asked, or the step cannot be read when this
+ * delivery may have taken money, that is an error alert too. It runs once per
+ * run (`ClaimRun.reported`), so its alert is never raised twice.
+ */
+async function claimLost(
+  ctx: StepContext,
+  row: Payout,
+  step: ClaimedStep,
+  taken: Taken = {}
+): Promise<StepResult> {
+  const { deps, charge, cause } = ctx;
+  step.run.reported = true;
+  const ids = {
+    chargeId: charge.id,
+    ...causeFields(cause),
+    payoutId: row.id,
+    payoutReversalId: step.id,
+  };
+  const transferId = taken.transferId ?? row.stripeTransferId;
+  const attemptError =
+    taken.error === undefined
+      ? {}
+      : {
+          code: errorCodeOf(taken.error),
+          error:
+            taken.error instanceof Error
+              ? taken.error.message
+              : String(taken.error),
+        };
+
+  let current: PayoutReversal | undefined;
+  try {
+    [current] = await deps.db
+      .select()
+      .from(payoutReversals)
+      .where(eq(payoutReversals.id, step.id))
+      .limit(1);
+  } catch (readError) {
+    // The alert is raised here or not at all: runRecord's catch, which gets
+    // this error next, does not run this again.
+    if (taken.reversal || taken.ask || taken.cancelledSlice) {
+      deps.obs.error(
+        taken.reversal
+          ? `${causeLabel(cause)} clawback: a reversal landed under a lost claim; the step could not be read; check by hand`
+          : `${causeLabel(cause)} clawback: a step's claim was lost after it may have taken money; the step could not be read; check by hand`,
+        {
+          errorId: crypto.randomUUID(),
+          ...ids,
+          creatorUserId: row.userId,
+          amountCents: taken.reversal?.amount ?? step.amountCents,
+          stripeReversalId: taken.reversal?.id ?? null,
+          stripeTransferId: transferId,
+          cancelledSlice: taken.cancelledSlice === true,
+          error:
+            readError instanceof Error ? readError.message : String(readError),
+        }
+      );
+    }
+    throw readError;
+  }
+  if (!current || !isSettled(current)) {
+    deps.obs.warn(
+      `${causeLabel(cause)} clawback: another delivery took this step over after the lease ran out; left to it`,
+      {
+        ...ids,
+        status: current?.status ?? null,
+        stripeReversalId: taken.reversal?.id ?? null,
+        ...attemptError,
+      }
+    );
+    return {};
+  }
+  const settled = current;
+  const leftAsSettled = (unconfirmed = false) => {
+    deps.obs.warn(
+      unconfirmed
+        ? `${causeLabel(cause)} clawback: this step was settled while its delivery ran, and its reversal's outcome is unconfirmed: Stripe lists none for it yet, and one still in flight could land`
+        : `${causeLabel(cause)} clawback: this step was settled while its delivery ran; left as it is`,
+      {
+        ...ids,
+        status: settled.status,
+        stripeReversalId: taken.reversal?.id ?? null,
+        stripeTransferId: transferId,
+        ...attemptError,
+      }
+    );
+    return {};
+  };
+  if (
+    settled.status === 'done' &&
+    (!taken.reversal || settled.stripeReversalId === taken.reversal.id)
+  ) {
+    return leftAsSettled();
+  }
+
+  let reversal = taken.reversal;
+  if (!reversal && taken.ask && transferId) {
+    try {
+      reversal = await findLandedReversal(deps, transferId, step.id);
+    } catch (error) {
+      deps.obs.error(
+        `${causeLabel(cause)} clawback: a step was settled by another path while its reversal was at Stripe, and Stripe could not be asked whether it landed. Check it by hand`,
+        {
+          errorId: crypto.randomUUID(),
+          ...ids,
+          creatorUserId: row.userId,
+          amountCents: step.amountCents,
+          settledAs: settled.status,
+          stripeTransferId: transferId,
+          ...attemptError,
+          lookupError: error instanceof Error ? error.message : String(error),
+        }
+      );
+      return {};
+    }
+  }
+  const unconfirmed = !reversal && taken.ask === true;
+
+  if (
+    !reversal &&
+    taken.cancelledSlice &&
+    transferId &&
+    (taken.refused || unconfirmed)
+  ) {
+    // Re-paying this would pay the payee twice: the transfer is still theirs.
+    deps.obs.error(
+      `${causeLabel(cause)} clawback: slice cancelled under a settled step; its transfer is still with the payee and was NOT reversed; do not re-pay; reconcile the slice`,
+      {
+        errorId: crypto.randomUUID(),
+        ...ids,
+        creatorUserId: row.userId,
+        amountCents: step.amountCents,
+        settledAs: settled.status,
+        stripeTransferId: transferId,
+        unconfirmed,
+        ...attemptError,
+      }
+    );
+    return {};
+  }
+  if (!reversal && !taken.cancelledSlice) return leftAsSettled(unconfirmed);
+
+  const errorId = crypto.randomUUID();
+  deps.obs.error(
+    `${causeLabel(cause)} clawback took money from a payee under a step another path had already settled; held for support to re-pay`,
+    {
+      errorId,
+      ...ids,
+      creatorUserId: row.userId,
+      amountCents: reversal?.amount ?? step.amountCents,
+      settledAs: settled.status,
+      stripeReversalId: reversal?.id ?? null,
+      // What the step already names, if anything: never overwritten.
+      recordedReversalId: settled.stripeReversalId,
+      stripeTransferId: transferId,
+      cancelledSlice: taken.cancelledSlice === true,
+    }
+  );
+  if (reversal && settled.status !== 'done' && !settled.stripeReversalId) {
+    // The record that it landed: the case support finds by
+    // `status <> 'done' AND stripe_reversal_id IS NOT NULL`. Only that column
+    // is written; status, amount and the re-pay link stay as the other path
+    // left them. A `done` step is left alone, since the reversal would read
+    // as its own: the alert alone names it.
+    try {
+      await deps.db
+        .update(payoutReversals)
+        .set({ stripeReversalId: reversal.id })
+        .where(
+          and(
+            eq(payoutReversals.id, step.id),
+            ne(payoutReversals.status, 'done'),
+            isNull(payoutReversals.stripeReversalId)
+          )
+        );
+    } catch (recordError) {
+      // Under the alert's own errorId: one alert for one landing.
+      deps.obs.error(
+        `${causeLabel(cause)} clawback: the landed reversal could not be recorded on its step, so support's query will not find it; record it by hand`,
+        {
+          errorId,
+          ...ids,
+          stripeReversalId: reversal.id,
+          error:
+            recordError instanceof Error
+              ? recordError.message
+              : String(recordError),
+        }
+      );
+      throw recordError;
+    }
+  }
+  return {};
+}
+
+/**
+ * The reversal Stripe made for this step, if any: every reversal the engine
+ * makes names its step in `payout_reversal_id`, whatever its attempt.
+ */
+export async function findLandedReversal(
+  deps: ClawbackDeps,
+  transferId: string,
+  payoutReversalId: string
+): Promise<{ id: string; amount: number } | undefined> {
+  let startingAfter: string | undefined;
+  for (;;) {
+    const page = await deps.stripe.transfers.listReversals(transferId, {
+      limit: 100,
+      ...(startingAfter ? { starting_after: startingAfter } : {}),
+    });
+    const found = page.data.find(
+      (reversal) => reversal.metadata?.payout_reversal_id === payoutReversalId
+    );
+    if (found) return { id: found.id, amount: found.amount };
+    const last = page.data.at(-1);
+    if (!page.has_more || !last) return undefined;
+    startingAfter = last.id;
+  }
 }
 
 /**

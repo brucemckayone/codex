@@ -66,6 +66,7 @@ vi.mock('@codex/database', () => ({
 
 import type { VersionedCache } from '@codex/cache';
 import { SUBSCRIPTION_STATUS } from '@codex/constants';
+import { createTestMoneyDeps } from '@codex/test-utils';
 import { SubscriptionCheckoutError } from '../../errors';
 import {
   invalidateForUser,
@@ -277,6 +278,7 @@ function buildService(
         typeof SubscriptionService
       >[0]['db'],
       environment: 'test',
+      ...createTestMoneyDeps(),
       ...(options.noCache
         ? {}
         : { cache, waitUntil: waitUntil as WaitUntilFn }),
@@ -431,6 +433,7 @@ describe('SubscriptionService orchestrator hook — changeTier', () => {
           typeof SubscriptionService
         >[0]['db'],
         environment: 'test',
+        ...createTestMoneyDeps(),
         cache,
         waitUntil: waitUntil as WaitUntilFn,
       },
@@ -555,6 +558,7 @@ describe('SubscriptionService orchestrator hook — changeTier', () => {
           typeof SubscriptionService
         >[0]['db'],
         environment: 'test',
+        ...createTestMoneyDeps(),
       },
       stripeMock
     );
@@ -850,6 +854,7 @@ describe('SubscriptionService orchestrator hook — handleSubscriptionCreated', 
           typeof SubscriptionService
         >[0]['db'],
         environment: 'test',
+        ...createTestMoneyDeps(),
         cache,
         waitUntil: waitUntil as WaitUntilFn,
       },
@@ -909,6 +914,7 @@ describe('SubscriptionService orchestrator hook — handleSubscriptionCreated', 
           typeof SubscriptionService
         >[0]['db'],
         environment: 'test',
+        ...createTestMoneyDeps(),
       },
       {} as Stripe
     );
@@ -1072,6 +1078,7 @@ describe('SubscriptionService orchestrator hook — handleSubscriptionDeleted', 
           typeof SubscriptionService
         >[0]['db'],
         environment: 'test',
+        ...createTestMoneyDeps(),
         cache,
         waitUntil: waitUntil as WaitUntilFn,
       },
@@ -1129,6 +1136,7 @@ describe('SubscriptionService orchestrator hook — handleSubscriptionDeleted', 
           typeof SubscriptionService
         >[0]['db'],
         environment: 'test',
+        ...createTestMoneyDeps(),
       },
       {} as Stripe
     );
@@ -1221,6 +1229,7 @@ describe('SubscriptionService orchestrator hook — handleSubscriptionPaused', (
           typeof SubscriptionService
         >[0]['db'],
         environment: 'test',
+        ...createTestMoneyDeps(),
         cache,
         waitUntil: waitUntil as WaitUntilFn,
       },
@@ -1253,6 +1262,7 @@ describe('SubscriptionService orchestrator hook — handleSubscriptionPaused', (
           typeof SubscriptionService
         >[0]['db'],
         environment: 'test',
+        ...createTestMoneyDeps(),
       },
       {} as Stripe
     );
@@ -1351,6 +1361,7 @@ describe('SubscriptionService orchestrator hook — handleSubscriptionResumed', 
           typeof SubscriptionService
         >[0]['db'],
         environment: 'test',
+        ...createTestMoneyDeps(),
         cache,
         waitUntil: waitUntil as WaitUntilFn,
       },
@@ -1383,6 +1394,7 @@ describe('SubscriptionService orchestrator hook — handleSubscriptionResumed', 
           typeof SubscriptionService
         >[0]['db'],
         environment: 'test',
+        ...createTestMoneyDeps(),
       },
       {} as Stripe
     );

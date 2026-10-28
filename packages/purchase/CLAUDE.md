@@ -40,9 +40,12 @@ new PurchaseService(
 );
 ```
 
-Code outside `procedure()` (webhook handlers) must pass the **same** config.
-Building it with only `{ db, environment }` silently drops fee configuration and
-emails — the open defect `Codex-2hxff.7`.
+Code outside `procedure()` (webhooks, crons) gets the same graph from
+`createWebhookServices` (Codex-2hxff.54). `feeConfig` (a `FeeResolver`: the
+read side of `FeeConfigService`) and `mailer` are **required** in the types
+(Codex-2hxff.55, docs/payments/architecture.md rule A4), so a service built
+with only `{ db, environment }` does not compile. Tests spread
+`createTestMoneyDeps()` from `@codex/test-utils`.
 
 ## `PurchaseService` methods
 
@@ -68,7 +71,8 @@ emails — the open defect `Codex-2hxff.7`.
 - **MUST** keep completion idempotent: the unique `stripe_payment_intent_id`
   makes a redelivered webhook a no-op.
 - **MUST** resolve fees through `FeeConfigService`; never hard-code percentages.
-  `FEES` constants are only the last fallback.
+  `FEES` constants are only its last fallback, when no fee row exists; the
+  service itself has no constant fallback (Codex-2hxff.55).
 - **MUST** take the price from the database, never from the client; GBP only;
   never a £0 price.
 - **MUST** use a deterministic idempotency key on every money-moving Stripe call

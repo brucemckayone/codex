@@ -128,7 +128,9 @@ implementation, and every payment path calls it.
    - `@codex/organization` writes `payouts`;
    - `@codex/admin` aggregates revenue from raw tables;
    - `@codex/access` builds a whole `PurchaseService` to read one row
-     [inv §4.1].
+     [inv §4.1]. **Fixed in WP2b (Codex-2hxff.55):** access takes
+     `Pick<PurchaseService, 'verifyPurchase'>`, and its factory passes
+     `verifyPurchase(db, …)` from `@codex/purchase`.
 
 ---
 
@@ -241,7 +243,7 @@ The rejected alternative was to keep everything in
 |---|---|---|---|
 | **WP0** | decision | **Done 2026-10-19.** The owner decided §7 D1–D4, all as recommended. | everything |
 | **WP1** | fix | **Done 2026-10-19 (PR for Codex-2hxff.50).** One `invoiceCharge` resolver (now `@codex/payments` `invoice-charge.ts`, WP3a) used by both subscription kinds; fixtures send Stripe's real `payment_intent`-only shape. Sandbox checked: no course subscription exists, so there are no missed charges to replay. | P1 money bug; small |
-| **WP2** | extraction → behaviour | **Composition root** (C1), split 2026-10-19. **WP2a, done (Codex-2hxff.54):** `createWebhookServices` in `@codex/worker-utils` builds the registry's graph for every webhook and the cron. Not a pure extraction: configured fees and the money mailers now reach those paths (agreed in .7/.13; with empty fee config the split is unchanged). Webhooks stay on Neon, not Hyperdrive (Codex-tae55). **WP2b (Codex-2hxff.55):** money deps required at the type level. | .7 (wiring half), .13 (mailers), .43, CFG-06 |
+| **WP2** | extraction → behaviour | **Composition root** (C1), split 2026-10-19. **WP2a, done (Codex-2hxff.54):** `createWebhookServices` in `@codex/worker-utils` builds the registry's graph for every webhook and the cron. Not a pure extraction: configured fees and the money mailers now reach those paths (agreed in .7/.13; with empty fee config the split is unchanged). Webhooks stay on Neon, not Hyperdrive (Codex-tae55). **WP2b, done (Codex-2hxff.55):** the money dependencies are required in the types: `feeConfig` (a `FeeResolver`) and the money mailers on `PurchaseService`, `SubscriptionService` and `CourseSubscriptionService`, with the `FEES.*` / `DEFAULT_*` fallbacks deleted. Tests build them with `createTestMoneyDeps()` (`@codex/test-utils`). | .7 (wiring half), .13 (mailers), .43, CFG-06 |
 | **WP3** | extraction → behaviour | **In progress:** WP3a (package), WP3b-1 (characterisation tests) and WP3b-2 (extraction) are done, then .51 (every row attempted, then a retry). **The refund record** (Codex-2hxff.8 money half, [design](refund-reversal-record.md)): one `payout_reversals` row per slice per refund, settling D1–D5, D7 and D8, and replacing the per-source profile and the characterisation suites. Partial-refund access (P-1) and disputes follow. **Clawback engine** (C4): one `reverseCharge` over the ledger for every source, replacing both copies; `refund_reviews` for every source (Codex-in0g4's schema); the refund use case out of the worker. Absorbs .51. | .8 → .10 (refund half) → .9 → .30; .28 after WP6 |
 | **WP4** | extraction → behaviour | **Split and resolvers at one `at`** (C2 + C3): `splitCalculator`, `feeResolver(at)`, `agreementResolver(at)` in `@codex/agreements`; one `RecordSale`/`RecordInvoice` path for all four sale kinds. | .7 (floor everywhere), .19, .17, .18, .49, .33, Codex-rtwpv, -itvh8 |
 | **WP5** | extraction | **Every transfer through the ledger** (C6): the drain's send moves into `payoutLedger`, plus `no_owner` re-homing and one payability rule; the A1 scanning test. | .13, .48, .47, .34, Codex-k9qpd, -2f3wk, -4r55k/xjxw6 |
@@ -345,7 +347,7 @@ ship separately; WP3's clawback engine retires that code.
 |---|---|---|
 | D-P1 | .16, Codex-sing6 | Downgrades through the deferred swap that price changes use, or subscription schedules? |
 | D-P2 | .48 | The terminal state for a permanently failed payout, and who reviews it. |
-| D-P3 | .43 | May a price move go ahead when its 30-day notice was not sent? |
+| D-P3 | .43 | May a price move go ahead when its 30-day notice was not sent? **Decided 2026-10-27: no.** "Notice first, then move": the move is scheduled only once the notice is accepted; otherwise the subscriber keeps today's price and support is alerted ([subscriptions.md](subscriptions.md#price-changes)). |
 | D-P4 | .23, Codex-v1io7 | Financial records: block deletes, or anonymise the user? |
 | D-P5 | Codex-nm5mb | How portal revenue is attributed. |
 | D-P6 | .28, .16, .22, .30 | New UI: HTML mockup + data design reviewed before code. |

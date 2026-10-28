@@ -30,6 +30,7 @@ import {
   createMockStripe,
   createTestConnectAccountInput,
   createTestMediaItemInput,
+  createTestMoneyDeps,
   createUniqueSlug,
   type Database,
   seedTestUsers,
@@ -71,6 +72,7 @@ describe('purchase records, currency and client-facing errors', () => {
       {
         db,
         environment: 'test',
+        ...createTestMoneyDeps(),
         portalConfigurationId: 'bpc_test_locked_portal',
       },
       stripe

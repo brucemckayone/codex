@@ -34,6 +34,7 @@ import { InternalServiceError } from '@codex/service-errors';
 import {
   createMockStripe,
   createTestContentInput,
+  createTestMoneyDeps,
   createUniqueSlug,
   type Database,
   seedTestUsers,
@@ -135,7 +136,10 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
   // ── fixtures ──────────────────────────────────────────────────────────
 
   function makeService(): PurchaseService {
-    return new PurchaseService({ db, environment: 'test' }, stripe);
+    return new PurchaseService(
+      { db, environment: 'test', ...createTestMoneyDeps() },
+      stripe
+    );
   }
 
   /** A completed purchase (content target) with no payouts rows yet. */

@@ -28,6 +28,7 @@ import {
 import type { FeeConfigService } from '@codex/purchase';
 import {
   createMockStripe,
+  createTestMoneyDeps,
   createTestOrganizationInput,
   createUniqueSlug,
   type Database,
@@ -167,7 +168,13 @@ describe('platform-side payout failures, one error per drain run (Codex-r094t)',
       getFeesForOrg: vi.fn(noFees),
     } as unknown as FeeConfigService;
     const service = new SubscriptionService(
-      { db, environment: 'test', payoutMailer: vi.fn(), feeConfig },
+      {
+        db,
+        environment: 'test',
+        ...createTestMoneyDeps(),
+        payoutMailer: vi.fn(),
+        feeConfig,
+      },
       stripe
     );
     const { obs } = service as unknown as {

@@ -28,9 +28,11 @@ import {
   subscriptions,
   subscriptionTiers,
 } from '@codex/database/schema';
-import type { FeeConfig, FeeConfigService } from '@codex/purchase';
+import type { FeeConfig, FeeConfigService, FeeResolver } from '@codex/purchase';
 import {
   createMockStripe,
+  createTestFeeConfig,
+  createTestMoneyDeps,
   createTestOrganizationInput,
   createTestSubscriptionInput,
   createTestTierInput,
@@ -219,10 +221,16 @@ describe('payee-wide payout drain', () => {
     return { feeConfig, getFeesForCreator, getFeesPlatform };
   }
 
-  function serviceWith(feeConfig?: FeeConfigService) {
+  function serviceWith(feeConfig: FeeResolver = createTestFeeConfig()) {
     const payoutMailer = vi.fn();
     const service = new SubscriptionService(
-      { db, environment: 'test', payoutMailer, feeConfig },
+      {
+        db,
+        environment: 'test',
+        ...createTestMoneyDeps(),
+        payoutMailer,
+        feeConfig,
+      },
       stripe
     );
     return { service, payoutMailer };

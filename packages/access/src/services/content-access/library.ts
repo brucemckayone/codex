@@ -31,7 +31,6 @@ import {
   videoPlayback,
 } from '@codex/database/schema';
 import type { ObservabilityClient } from '@codex/observability';
-import type { PurchaseService } from '@codex/purchase';
 import type { ListUserLibraryInput } from '@codex/validation';
 import {
   and,
@@ -48,7 +47,7 @@ import {
   sql,
 } from 'drizzle-orm';
 import { resolvePracticeThumbnail } from '../practice-thumbnail';
-import { resolveDisputePause } from './access-decision';
+import { type PurchaseVerifier, resolveDisputePause } from './access-decision';
 
 /**
  * Is this content on offer to a subscription whose current period began at
@@ -176,7 +175,7 @@ export async function listUserLibrary(
      */
     r2PublicUrlBase?: string;
     /** For the access decision a disputed purchase's row is checked against. */
-    purchaseService: PurchaseService;
+    purchaseService: PurchaseVerifier;
   },
   userId: string,
   input: ListUserLibraryInput

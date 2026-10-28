@@ -38,6 +38,7 @@ vi.mock('@codex/purchase', async (importOriginal) => {
   return { ...actual, createStripeClient: vi.fn(actual.createStripeClient) };
 });
 
+import { createTestMoneyDeps } from '@codex/test-utils';
 import { COURSE_OFF_SALE_SWEEP_LIMIT } from '../course-off-sale-sweep';
 import {
   OWED_DUPLICATES_OLDER_THAN_MS,
@@ -51,7 +52,7 @@ import {
 /** A real instance whose sweep each test stubs on the prototype. */
 function sweepService(): SubscriptionService {
   return new SubscriptionService(
-    { db: {} as never, environment: 'test' },
+    { db: {} as never, environment: 'test', ...createTestMoneyDeps() },
     {} as never
   );
 }

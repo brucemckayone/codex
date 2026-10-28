@@ -26,6 +26,7 @@ import type { FeeConfig, FeeConfigService } from '@codex/purchase';
 import {
   createMockStripe,
   createTestConnectAccountInput,
+  createTestMoneyDeps,
   createTestOrganizationInput,
   createTestSubscriptionInput,
   createTestTierInput,
@@ -158,7 +159,12 @@ describe('ledger replay and account history', () => {
 
   function serviceWith(config: FeeConfig, database: Database = db) {
     const service = new SubscriptionService(
-      { db: database, environment: 'test', feeConfig: feeConfigOf(config) },
+      {
+        db: database,
+        environment: 'test',
+        ...createTestMoneyDeps(),
+        feeConfig: feeConfigOf(config),
+      },
       stripe
     );
     const executeTransfers = (

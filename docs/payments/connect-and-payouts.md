@@ -485,6 +485,22 @@ a payee's balance cannot cover a reversal, a `refund_reviews` row records the
 debt, and it is deducted from their next payouts until cleared — they are told,
 and the debt and each deduction show in their earnings.
 
+Each step of a clawback is claimed under a lease, so one delivery works on it
+at a time. A delivery that outlives its lease never changes a step another path
+has settled since: support's re-pay of a failed refund, or a won dispute's re-pay
+(owner decision 2026-10-27, "Never overwrite; hold for support",
+`Codex-2hxff.72`). If its reversal lands anyway, the payee has lost money nothing
+will re-pay. The reversal's id is recorded on the step, and nothing else on it
+changes. One error alert, with an `errorId`, names the payee, the amount, and the
+refund or dispute, for support to re-pay the payee from the admin Refunds screen.
+Nothing is re-paid automatically ([design](refund-reversal-record.md), §4 step 7).
+An unpaid slice cancelled under a settled step is alerted the same way, unless a
+transfer had gone out for it that Stripe refused to reverse: the payee still
+holds that transfer, so its alert says NOT to re-pay, and the slice is
+reconciled instead. **Gap:** that screen has no state for these yet. Until batch
+B's support view (`Codex-2hxff.73`), support finds them with the two queries in
+the design and the alerts.
+
 If it is never recovered (owner decisions 2026-10-13: "Write off after 12 months
 (Recommended)", then a cap of "£50 (Recommended)" with "All of it, after 90 days
 (Recommended)"):

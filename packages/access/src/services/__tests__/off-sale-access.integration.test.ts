@@ -35,6 +35,7 @@ import {
 import { PurchaseService } from '@codex/purchase';
 import {
   createTestContentInput,
+  createTestMoneyDeps,
   createTestSubscriptionInput,
   createTestTierInput,
   createUniqueSlug,
@@ -164,7 +165,7 @@ describe('a removed creator’s catalogue (Codex-2hxff.64)', () => {
 
     // Real verifyPurchase against the purchases table; Stripe is never reached.
     const purchaseService = new PurchaseService(
-      { db, environment: 'test' },
+      { db, environment: 'test', ...createTestMoneyDeps() },
       {} as Stripe
     );
     const r2 = new Proxy(

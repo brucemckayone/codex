@@ -58,6 +58,7 @@ import { NotFoundError } from '@codex/service-errors';
 import {
   createTestConnectAccountInput,
   createTestContentInput,
+  createTestMoneyDeps,
   createTestSubscriptionInput,
   createTestTierInput,
   createUniqueSlug,
@@ -178,7 +179,10 @@ describe('Course monetization round-trip (WP-6)', () => {
   it('1. course purchase writes entitlement + enrollment → canEnterCourse grants; replay is idempotent', async () => {
     const courseId = await createCourse(db, orgAId, creatorId);
     const { stripe } = makeStripeStub();
-    const svc = new PurchaseService({ db, environment: 'test' }, stripe);
+    const svc = new PurchaseService(
+      { db, environment: 'test', ...createTestMoneyDeps() },
+      stripe
+    );
 
     // Before: no access.
     expect(await hasCourseEntitlement(db, buyerId, courseId)).toBe(false);
@@ -393,7 +397,10 @@ describe('Course monetization round-trip (WP-6)', () => {
     if (!contentRow) throw new Error('failed to create content');
 
     const { stripe } = makeStripeStub();
-    const svc = new PurchaseService({ db, environment: 'test' }, stripe);
+    const svc = new PurchaseService(
+      { db, environment: 'test', ...createTestMoneyDeps() },
+      stripe
+    );
 
     expect(await hasStoredContentEntitlement(db, buyerId, contentRow.id)).toBe(
       false
@@ -428,7 +435,10 @@ describe('Course monetization round-trip (WP-6)', () => {
 
     // A buyer who purchases sees entitled=true.
     const { stripe } = makeStripeStub();
-    const purchase = new PurchaseService({ db, environment: 'test' }, stripe);
+    const purchase = new PurchaseService(
+      { db, environment: 'test', ...createTestMoneyDeps() },
+      stripe
+    );
     await purchase.completeCoursePurchase(`pi_${randomUUID()}`, {
       customerId: buyer2Id,
       courseId,
@@ -444,7 +454,10 @@ describe('Course monetization round-trip (WP-6)', () => {
       priceCents: 5000,
     });
     const { stripe, transferCreate } = makeStripeStub();
-    const svc = new PurchaseService({ db, environment: 'test' }, stripe);
+    const svc = new PurchaseService(
+      { db, environment: 'test', ...createTestMoneyDeps() },
+      stripe
+    );
 
     const pi = `pi_${randomUUID()}`;
     const chargeId = `ch_${randomUUID()}`;
@@ -496,7 +509,10 @@ describe('Course monetization round-trip (WP-6)', () => {
       priceCents: 5000,
     });
     const { stripe } = makeStripeStub();
-    const svc = new PurchaseService({ db, environment: 'test' }, stripe);
+    const svc = new PurchaseService(
+      { db, environment: 'test', ...createTestMoneyDeps() },
+      stripe
+    );
 
     // No stripeChargeId → payouts (and thus the refund's payout-reversal) are
     // skipped: this test isolates the access invariant, not the money movement
@@ -562,7 +578,10 @@ describe('Course monetization round-trip (WP-6)', () => {
     if (!contentRow) throw new Error('failed to create content');
 
     const { stripe } = makeStripeStub();
-    const svc = new PurchaseService({ db, environment: 'test' }, stripe);
+    const svc = new PurchaseService(
+      { db, environment: 'test', ...createTestMoneyDeps() },
+      stripe
+    );
 
     const pi = `pi_${randomUUID()}`;
     await svc.completePurchase(pi, {
@@ -622,7 +641,10 @@ describe('Course monetization round-trip (WP-6)', () => {
       priceCents: 5000,
     });
     const { stripe } = makeStripeStub();
-    const svc = new PurchaseService({ db, environment: 'test' }, stripe);
+    const svc = new PurchaseService(
+      { db, environment: 'test', ...createTestMoneyDeps() },
+      stripe
+    );
 
     const pi = `pi_${randomUUID()}`;
     await svc.completeCoursePurchase(pi, {
@@ -682,7 +704,10 @@ describe('Course monetization round-trip (WP-6)', () => {
     if (!contentRow) throw new Error('failed to create content');
 
     const { stripe } = makeStripeStub();
-    const svc = new PurchaseService({ db, environment: 'test' }, stripe);
+    const svc = new PurchaseService(
+      { db, environment: 'test', ...createTestMoneyDeps() },
+      stripe
+    );
 
     const pi = `pi_${randomUUID()}`;
     await svc.completePurchase(pi, {
@@ -766,7 +791,10 @@ describe('Course monetization round-trip (WP-6)', () => {
     });
 
     const { stripe } = makeStripeStub();
-    const svc = new PurchaseService({ db, environment: 'test' }, stripe);
+    const svc = new PurchaseService(
+      { db, environment: 'test', ...createTestMoneyDeps() },
+      stripe
+    );
     const pi = `pi_${randomUUID()}`;
     await svc.completeCoursePurchase(pi, {
       customerId: buyerId,

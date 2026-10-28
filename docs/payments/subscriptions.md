@@ -210,14 +210,53 @@ plans alike**.
   Annual subscribers move at their annual renewal.
 - There is no immediate charge and no proration. Increases and decreases are
   treated the same.
+- **Notice first, then move** (owner decision D-P3, 2026-10-27,
+  `Codex-2hxff.43`): a subscriber's move is scheduled only once the
+  notifications worker has accepted their notice. If it isn't accepted
+  (refused, skipped, no address, or an unknown outcome), they are not moved
+  and support gets an error alert with an errorId and their ids, then retries.
+  "No mailer" cannot happen: the services require one in their types
+  (`Codex-2hxff.55`). A notified subscriber whose move then fails is alerted
+  the same way.
+- "Not moved" means today's price, **unless** an earlier accepted change is
+  still pending on the subscription: that one still lands, and the alert says
+  so.
 - A price edited in the Stripe Dashboard is logged as drift and is **not**
   applied to any subscriber.
 
 **How it works.** Studio creates a new Stripe Price for the changed interval
 and points the tier (or plan) at it; new checkouts use it at once. Existing
 subscribers on that interval are then each handled by `schedulePriceChange`
-(`packages/subscription/src/services/pending-price-change.ts`):
+(`packages/subscription/src/services/pending-price-change.ts`), in batches of
+8 after the response, with one notice time for the whole fan-out:
 
+- It reads the live subscription and works out the move and the renewal that
+  first bills the new price. It then sends the notice and waits for the answer
+  (`sendEmailToWorkerAwaited` in `@codex/worker-utils`). Only a 2xx whose body
+  says `success: true` is accepted; anything else writes nothing to the
+  subscription.
+- The alert names the reason, the tier or plan, the interval, the new Price,
+  any earlier pending change, and the subscription, user and organisation ids.
+  - It says "not sent" only when that is certain: a 4xx refusal, a skip, or
+    no address.
+  - A 5xx, a timeout (5 seconds), a transport failure or an unreadable 2xx is
+    "outcome unknown": the email may have gone out, so check notifications'
+    email audit log before re-sending.
+- A Stripe failure is alerted with the same ids.
+  - Before the notice (the read): not notified, not moved.
+  - After an accepted notice: the alert adds the kind (`applied` or
+    `pending`), the notice time and the date the email quoted.
+    - A definite refusal (a 4xx other than 409 or 429) means the move was not
+      made.
+    - Anything else (a 5xx, a timeout, a 409 or a 429) is "outcome unknown":
+      check the Stripe subscription before retrying.
+- **The 30-second limit.** The fan-out runs after the response, on
+  `waitUntil`, which Cloudflare cancels 30 seconds after the response. So no
+  batch starts after 20 seconds (`PRICE_FAN_OUT_BUDGET_MS`). Every subscriber
+  not reached is named in ONE error alert, "ran out of time; these
+  subscribers were not notified or moved", with one errorId shared by lines of
+  at most 200 ids. A start line (with the total) and an end summary bracket
+  each run, for tiers and course plans alike.
 - If their next renewal is already at least 30 days after the email, their
   subscription is switched to the new Price **now** with
   `proration_behavior: 'none'`. A same-interval switch keeps the billing dates
@@ -235,14 +274,56 @@ subscribers on that interval are then each handled by `schedulePriceChange`
   renewal at least 30 days after the newest email.
 - A tier change clears a pending price change; cancelling and reactivating
   keep it.
-- Each subscriber is emailed (`subscription-tier-price-change`) with the date
-  of the renewal that first bills the new price. The "from" figure is what that
-  subscriber is billed today, not the previous list price: a tier quotes the
-  subscription's own snapshot, a course plan its live Stripe item
-  (`Codex-2hxff.40`).
+- The notice (`subscription-tier-price-change`) gives the date of the renewal
+  that first bills the new price. The "from" figure is what that subscriber is
+  billed today, not the previous list price: a tier quotes the subscription's
+  own snapshot, a course plan its live Stripe item (`Codex-2hxff.40`).
 - A Price created in the Stripe Dashboard is logged as drift
   (`TierService.recordStripePriceDrift`); the tier keeps its own Price and no
   subscriber moves.
+
+### Held and unreached subscribers
+
+The alerts are log lines, and Workers Logs keeps them for about 7 days. After
+that, Stripe is the record. No marker is written for a held subscriber, so the
+only way to find one is to compare each subscription with what it should be on.
+
+A subscriber on the repriced interval needs a move when **all** of these hold:
+
+- the item's Price is not the tier's (or plan's) current Price for that
+  interval;
+- `metadata.codex_pending_price_id` is absent, or names a different Price
+  (an earlier change that was superseded);
+- the item's `unit_amount` differs from the current price. A same amount needs
+  only the silent Price-id switch.
+
+To list them:
+
+1. Read the current Price ids and amounts from our database:
+   - tiers: `subscription_tiers.stripe_price_monthly_id` /
+     `stripe_price_annual_id`, with `price_monthly` / `price_annual`;
+   - course plans: the same columns on `course_subscription_plans`.
+2. List the subscriptions in Stripe with Search. Tier subscriptions carry
+   `codex_tier_id` and course subscriptions `codex_plan_id`:
+   - `metadata['codex_tier_id']:'<tier id>' AND -status:'canceled'`
+   - `metadata['codex_plan_id']:'<plan id>' AND -status:'canceled'`
+3. Keep the ones on the interval (`items.data[0].price.recurring.interval`)
+   that meet the three conditions above.
+
+The metadata keys are the ones `pending-price-change.ts` writes:
+`codex_pending_price_id` and `codex_pending_price_from` (unix seconds). A
+subscription with no `codex_pending_price_*` keys is not necessarily held: one
+moved "now" carries none either, but it is already on the current Price.
+
+**A retry needs an engineer today.** Propagation runs only when Studio creates
+a new Price (`TierService.updateTier`, tier-service.ts:647; the same in
+`savePlanPrices`), so re-saving the same price retries nothing. There is also no
+supported way to re-send one subscriber's notice. The fixes are filed:
+
+- `Codex-2hxff.85`: a support tool that re-sends the notice and moves one
+  subscription.
+- `Codex-2hxff.86`: move the fan-out off `waitUntil`, so the 30-second limit
+  no longer applies.
 
 The mechanism is this deferred switch, not Stripe subscription schedules (owner
 decision 2026-10-13): schedules would have had to take over cancel, reactivate
@@ -344,7 +425,7 @@ configuration, which allows cancelling.
 | `subscription-created` | The subscription is recorded |
 | `subscription-renewed` | A cycle renewal is paid |
 | `payment-failed` | A renewal fails (with the next retry date) |
-| `subscription-tier-price-change` | A price changes — sent at least 30 days before the new price applies. Says the subscription "renews at the new price from {{effectiveDate}}"; migration `0098` rewrote the old "on the next billing cycle" sentence on existing rows (`Codex-2hxff.35`) |
+| `subscription-tier-price-change` | A price changes — sent at least 30 days before the new price applies, and before the move is scheduled: no accepted notice, no move (`Codex-2hxff.43`). Says the subscription "renews at the new price from {{effectiveDate}}"; migration `0098` rewrote the old "on the next billing cycle" sentence on existing rows (`Codex-2hxff.35`) |
 | `subscription-cancelled` | The subscription ends |
 | `course-no-longer-offered` | A course subscription is cancelled because the course was taken off sale; gives the date access ends |
 | `trial-ending-soon` | A trial is about to end (no trials are configured today) |

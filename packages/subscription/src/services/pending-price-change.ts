@@ -22,6 +22,11 @@
  * Keeping the state on the Stripe subscription (not in our database) means
  * cancel, reactivate and the billing portal need no changes, and there is no
  * migration. `changeTier` clears it (a new tier supersedes the old tier's price).
+ *
+ * Notice first, then move (owner decision D-P3, Codex-2hxff.43): nothing is
+ * written to a subscription whose price changes until notifications-api has
+ * accepted its notice. A notice that is not accepted leaves the subscriber on
+ * today's price, and the caller raises an alert for support to retry.
  */
 
 import type Stripe from 'stripe';
@@ -52,21 +57,277 @@ export interface PriceChangeTarget {
 }
 
 /**
- * `currentAmountCents` on `applied` and `pending` is what the subscriber is
- * billed today: the live item's `unit_amount`, read before the swap. It is
- * the notice's "from" figure, because a grandfathered subscriber does not pay
- * the plan's previous list price (Codex-2hxff.40). Null only for a Price with
- * no unit amount (tiered or custom), which the platform never creates.
+ * The move a subscriber is about to be told about, and what their notice
+ * quotes. `currentAmountCents` is what they are billed today: the live item's
+ * `unit_amount`. It is the notice's "from" figure, because a grandfathered
+ * subscriber does not pay the plan's previous list price (Codex-2hxff.40). Null
+ * only for a Price with no unit amount (tiered or custom), which the platform
+ * never creates.
  */
+export interface PriceChangeNotice {
+  /** `applied`: the next renewal is already ≥ 30 days away, so the swap is made now. */
+  kind: 'applied' | 'pending';
+  /** The renewal that first bills the new price. Our estimate for `pending`. */
+  effectiveAt: Date;
+  currentAmountCents: number | null;
+  /**
+   * An earlier change this subscription already carries (its pending marker),
+   * or null. If this notice is not accepted, or the move then fails, that
+   * earlier change still lands: the subscriber is not simply "on the old
+   * price" (review A, correctness #6).
+   */
+  currentPending: { priceId: string; from: Date } | null;
+}
+
+/**
+ * Sends one subscriber's notice and resolves true only once notifications-api
+ * has accepted it. The caller raises the alert for a notice that was not.
+ */
+export type SendPriceChangeNotice = (
+  notice: PriceChangeNotice
+) => Promise<boolean>;
+
 export type PriceChangeOutcome =
-  /** Swapped now: the next renewal is already ≥ 30 days away and bills the new price. */
+  /** Notified, then swapped now: the next renewal bills the new price. */
   | { kind: 'applied'; effectiveAt: Date; currentAmountCents: number | null }
-  /** Marked pending: a later renewal swaps it. `effectiveAt` is our estimate, for the email. */
+  /** Notified, then marked pending: a later renewal swaps it. */
   | { kind: 'pending'; effectiveAt: Date; currentAmountCents: number | null }
+  /** The notice was not accepted: nothing written, today's price stays. */
+  | { kind: 'unnotified' }
   /** Same amount (e.g. a price set back): price id swapped silently, any pending change dropped. */
   | { kind: 'unchanged' }
   /** Not on the repriced interval, or nothing to bill. Left untouched. */
   | { kind: 'skipped'; reason: string };
+
+/** What became of a notice handed to the mailer. Matches worker-utils' `EmailSendResult`. */
+export type NoticeDelivery =
+  | { accepted: true }
+  | { accepted: false; status: number }
+  | { accepted: false; skipped: string }
+  | { accepted: false; error: string };
+
+/**
+ * Sends the `subscription-tier-price-change` notice (tiers and course plans)
+ * and reports notifications-api's answer. The registry wires
+ * `sendEmailToWorkerAwaited`, which never throws.
+ */
+export type PriceChangeNoticeMailer = (params: {
+  to: string;
+  toName?: string;
+  templateName: 'subscription-tier-price-change';
+  category: 'transactional';
+  userId?: string;
+  organizationId?: string | null;
+  data: Record<string, string | number | boolean>;
+}) => Promise<NoticeDelivery>;
+
+/**
+ * Why a notice was not accepted. Either way the move is not made, but only
+ * the first three are certain the email did not go out:
+ *
+ * - `no_address`, `refused` (a 4xx: notifications-api refused before sending)
+ *   and `skipped` (it answered 2xx without sending): NOT sent.
+ * - `unknown`: a 5xx (notifications-api can fail after the provider took the
+ *   email, writing its audit row), a timeout, a transport failure or a 2xx
+ *   without a readable result. The email MAY have gone out (review A,
+ *   silent #8): support checks notifications' email audit log before re-sending.
+ */
+export type NoticeFailure =
+  | { reason: 'no_address' }
+  | { reason: 'refused'; status: number }
+  | { reason: 'skipped'; skipped: string }
+  | { reason: 'unknown'; status?: number; error?: string };
+
+/**
+ * Hand one notice to the mailer and classify the answer. Resolves `null` when
+ * it was accepted, otherwise the failure for the caller's alert. Never
+ * throws: a mailer that throws or rejects counts as `unknown`.
+ */
+export async function sendPriceChangeNotice(
+  mailer: PriceChangeNoticeMailer,
+  params: Omit<Parameters<PriceChangeNoticeMailer>[0], 'to'> & {
+    to: string | null;
+  }
+): Promise<NoticeFailure | null> {
+  const { to, ...rest } = params;
+  if (!to) return { reason: 'no_address' };
+  try {
+    const delivery = await mailer({ ...rest, to });
+    if (delivery.accepted) return null;
+    if ('skipped' in delivery) {
+      return { reason: 'skipped', skipped: delivery.skipped };
+    }
+    if ('status' in delivery) {
+      return delivery.status < 500
+        ? { reason: 'refused', status: delivery.status }
+        : { reason: 'unknown', status: delivery.status };
+    }
+    return { reason: 'unknown', error: delivery.error };
+  } catch (error) {
+    return {
+      reason: 'unknown',
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Stripe answered and refused: a 4xx other than a conflict (409) or a rate
+ * limit (429), so the write did not happen. Anything else (a 5xx, a timeout, a
+ * connection failure, a 409 or a 429) may have applied it: the outcome is
+ * unknown (review A, silent #8). The same rule as `@codex/payments`'
+ * clawback.
+ */
+export function isDefinitiveStripeRefusal(error: unknown): boolean {
+  const status = (error as { statusCode?: unknown } | null)?.statusCode;
+  return (
+    typeof status === 'number' &&
+    status >= 400 &&
+    status < 500 &&
+    status !== 409 &&
+    status !== 429
+  );
+}
+
+/**
+ * Where a subscriber whose move was not made stands: on today's price, or on
+ * an earlier accepted change that is still pending, and still lands
+ * (correctness #6).
+ */
+function heldAt(currentPending: PriceChangeNotice['currentPending']): string {
+  return currentPending
+    ? `stays on their earlier accepted change to ${currentPending.priceId}, due from ${currentPending.from.toISOString()}`
+    : 'is kept on the old price';
+}
+
+/** The ids-only fields every price-change alert carries about a pending change. */
+function pendingFields(currentPending: PriceChangeNotice['currentPending']) {
+  return {
+    currentPendingPriceId: currentPending?.priceId ?? null,
+    currentPendingFrom: currentPending?.from.toISOString() ?? null,
+  };
+}
+
+/**
+ * The alert for a notice that was not accepted. The move was not made either
+ * way; only a definite refusal may say the notice was not sent (silent #8).
+ * `prefix` names the path ("Tier price propagation: ").
+ */
+export function noticeFailureAlert(
+  prefix: string,
+  failure: NoticeFailure,
+  notice: PriceChangeNotice
+): { message: string; data: Record<string, unknown> } {
+  const unknown = failure.reason === 'unknown';
+  return {
+    message: unknown
+      ? `${prefix}price-change notice outcome unknown (it may have been delivered); the move was not made (support: check the email audit log before retrying)`
+      : `${prefix}price-change notice not sent; the move was not made and the subscriber ${heldAt(notice.currentPending)} (support: retry)`,
+    data: {
+      ...failure,
+      outcome: unknown ? 'notice_unknown' : 'notice_not_sent',
+      kind: notice.kind,
+      effectiveAt: notice.effectiveAt.toISOString(),
+      ...pendingFields(notice.currentPending),
+    },
+  };
+}
+
+/**
+ * The alert for a Stripe failure during one subscriber's move. `notice` is set
+ * when their notice had been accepted: the failure is then the write, and a
+ * non-definitive one may have applied it (silent #7, #8).
+ */
+export function moveFailureAlert(
+  prefix: string,
+  error: unknown,
+  notice: PriceChangeNotice | undefined,
+  noticeAt: Date
+): { message: string; data: Record<string, unknown> } {
+  const errorText = error instanceof Error ? error.message : String(error);
+  if (!notice) {
+    return {
+      message: `${prefix}could not read the Stripe subscription; not notified and not moved (support: retry)`,
+      data: { outcome: 'not_moved', notified: false, error: errorText },
+    };
+  }
+  const definitive = isDefinitiveStripeRefusal(error);
+  return {
+    message: definitive
+      ? `${prefix}notice sent, but Stripe refused the move; the subscriber ${heldAt(notice.currentPending)} (support: retry the move)`
+      : `${prefix}notice sent; the move's outcome is unknown (support: check the Stripe subscription before retrying)`,
+    data: {
+      outcome: definitive ? 'move_refused' : 'move_unknown',
+      notified: true,
+      kind: notice.kind,
+      noticeAt: noticeAt.toISOString(),
+      effectiveAt: notice.effectiveAt.toISOString(),
+      ...pendingFields(notice.currentPending),
+      error: errorText,
+    },
+  };
+}
+
+/**
+ * How long a price fan-out keeps STARTING batches (review A, silent #1 /
+ * correctness #1).
+ *
+ * The fan-out runs after the response, on the request's `waitUntil`, and
+ * Cloudflare gives ALL of a request's `waitUntil` work 30 s, then cancels what
+ * is left with no record of which subscribers it reached. So a batch starts
+ * only while less than 20 s have passed. The last one then needs at most:
+ *
+ *   20 s  (latest start)
+ *  + ~1 s  Stripe read
+ *  +  5 s  the notice (`sendEmailToWorkerAwaited`'s timeout)
+ *  + ~1 s  Stripe write
+ *  = ~27 s, inside the 30 s budget with ~3 s to spare.
+ *
+ * Stripe's calls carry no tighter timeout (the SDK's is 80 s), so the margin
+ * assumes Stripe answers normally. Every subscriber not reached is named in
+ * ONE alert (`alertFanOutOutOfTime`). The durable fix is to move the fan-out
+ * off `waitUntil` (Codex-2hxff.86).
+ */
+export const PRICE_FAN_OUT_BUDGET_MS = 20_000;
+
+/** At most this many subscribers per line of the out-of-time alert. */
+export const FAN_OUT_ALERT_CHUNK = 200;
+
+/**
+ * Name every subscriber a fan-out did not reach in ONE error alert: one
+ * errorId, split into lines of at most `FAN_OUT_ALERT_CHUNK` subscribers that
+ * all carry it. Pass the same `errorId` for every move of one fan-out.
+ */
+export function alertFanOutOutOfTime(
+  logError: (message: string, data: Record<string, unknown>) => void,
+  args: {
+    errorId: string;
+    context: Record<string, unknown>;
+    subscribers: ReadonlyArray<Record<string, unknown>>;
+  }
+): void {
+  const { errorId, context, subscribers } = args;
+  const chunks = Math.max(
+    1,
+    Math.ceil(subscribers.length / FAN_OUT_ALERT_CHUNK)
+  );
+  for (let chunk = 0; chunk < chunks; chunk++) {
+    logError(
+      'Price fan-out ran out of time; these subscribers were not notified or moved (support: retry)',
+      {
+        errorId,
+        ...context,
+        unhandled: subscribers.length,
+        chunk: chunk + 1,
+        chunks,
+        subscribers: subscribers.slice(
+          chunk * FAN_OUT_ALERT_CHUNK,
+          (chunk + 1) * FAN_OUT_ALERT_CHUNK
+        ),
+      }
+    );
+  }
+}
 
 /**
  * Stripe statuses where an item swap is safe. A paused subscription is never
@@ -80,12 +341,18 @@ function canSwapNow(status: Stripe.Subscription.Status): boolean {
 /**
  * Schedule a subscription's move to `newPriceId` under the 30-day rule.
  *
+ * Reads the live subscription, works out the move, and calls `notify` with
+ * what the notice quotes. The move is written only once `notify` resolves
+ * true; otherwise nothing is written and the outcome is `unnotified`. A
+ * subscriber whose amount does not change is not notified (`unchanged`).
+ *
  * Idempotent: replaying the same target yields the same Stripe state (keys are
  * deterministic per subscription + price).
  */
 export async function schedulePriceChange(
   stripe: Stripe,
-  target: PriceChangeTarget
+  target: PriceChangeTarget,
+  notify: SendPriceChangeNotice
 ): Promise<PriceChangeOutcome> {
   const subscription = await stripe.subscriptions.retrieve(
     target.stripeSubscriptionId
@@ -134,8 +401,38 @@ export async function schedulePriceChange(
   const earliest =
     Math.floor(target.noticeAt.getTime() / 1000) + PRICE_CHANGE_NOTICE_SECONDS;
   const nextRenewal = item.current_period_end;
+  const pendingPriceId = subscription.metadata?.[PENDING_PRICE_ID_KEY];
+  const pendingFrom = Number(subscription.metadata?.[PENDING_PRICE_FROM_KEY]);
+  const currentPending =
+    pendingPriceId && Number.isFinite(pendingFrom) && pendingFrom > 0
+      ? { priceId: pendingPriceId, from: new Date(pendingFrom * 1000) }
+      : null;
+  const move =
+    nextRenewal >= earliest && canSwapNow(subscription.status)
+      ? {
+          kind: 'applied' as const,
+          effectiveAt: new Date(nextRenewal * 1000),
+          currentAmountCents: item.price.unit_amount,
+        }
+      : {
+          kind: 'pending' as const,
+          effectiveAt: new Date(
+            firstRenewalOnOrAfter({
+              nextRenewal,
+              anchor: subscription.billing_cycle_anchor,
+              interval: target.interval,
+              earliest,
+            }) * 1000
+          ),
+          currentAmountCents: item.price.unit_amount,
+        };
 
-  if (nextRenewal >= earliest && canSwapNow(subscription.status)) {
+  // Notice first, then move (D-P3): no write until the notice is accepted.
+  if (!(await notify({ ...move, currentPending }))) {
+    return { kind: 'unnotified' };
+  }
+
+  if (move.kind === 'applied') {
     await stripe.subscriptions.update(
       subscription.id,
       {
@@ -147,11 +444,7 @@ export async function schedulePriceChange(
         idempotencyKey: `price-change-now:${subscription.id}:${target.newPriceId}`,
       }
     );
-    return {
-      kind: 'applied',
-      effectiveAt: new Date(nextRenewal * 1000),
-      currentAmountCents: item.price.unit_amount,
-    };
+    return move;
   }
 
   // Latest wins: this overwrites any earlier pending change. No idempotency
@@ -164,18 +457,7 @@ export async function schedulePriceChange(
       [PENDING_PRICE_FROM_KEY]: String(earliest),
     },
   });
-  return {
-    kind: 'pending',
-    effectiveAt: new Date(
-      firstRenewalOnOrAfter({
-        nextRenewal,
-        anchor: subscription.billing_cycle_anchor,
-        interval: target.interval,
-        earliest,
-      }) * 1000
-    ),
-    currentAmountCents: item.price.unit_amount,
-  };
+  return move;
 }
 
 /**

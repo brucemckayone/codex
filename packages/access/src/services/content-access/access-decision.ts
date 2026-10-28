@@ -74,6 +74,13 @@ import {
 } from './entitlements-resolver';
 
 /**
+ * The one purchase read the access decision needs (rule A8, Codex-2hxff.55):
+ * `PurchaseService.verifyPurchase`, or `verifyPurchase(db, …)` from
+ * `@codex/purchase` where no service is built.
+ */
+export type PurchaseVerifier = Pick<PurchaseService, 'verifyPurchase'>;
+
+/**
  * Transaction client type — derived from the DB client's `transaction` method
  * so the streaming-access tree can run against a read-only snapshot without
  * an `as any` cast (`feedback_tx_callback_type_derivation`).
@@ -267,7 +274,7 @@ async function findGrantingSubscription(
  * in WP-1.
  */
 async function decidePolicyAccess(
-  deps: { db: AccessQueryClient; purchaseService: PurchaseService },
+  deps: { db: AccessQueryClient; purchaseService: PurchaseVerifier },
   userId: string | null,
   contentId: string,
   policy: ContentAccessPolicyRow
@@ -508,7 +515,7 @@ function subscriptionCoversOffSaleItem(
  * decided.
  */
 async function decideContentAccess(
-  deps: { db: AccessQueryClient; purchaseService: PurchaseService },
+  deps: { db: AccessQueryClient; purchaseService: PurchaseVerifier },
   userId: string | null,
   contentId: string,
   policy: ContentAccessPolicyRow
@@ -776,7 +783,7 @@ const POLICY_COLUMNS = {
 export async function resolveHasContentAccess(
   deps: {
     db: DatabaseClient;
-    purchaseService: PurchaseService;
+    purchaseService: PurchaseVerifier;
     obs: ObservabilityClient;
   },
   userId: string | null,
@@ -859,7 +866,7 @@ export function isOfDeletedOrg(
  * explains. A failed read throws: the caller decides what a failure shows.
  */
 export async function resolveDisputePause(
-  deps: { db: DatabaseClient; purchaseService: PurchaseService },
+  deps: { db: DatabaseClient; purchaseService: PurchaseVerifier },
   userId: string,
   contentId: string
 ): Promise<DisputeHold | null> {
@@ -888,7 +895,7 @@ export async function resolveDisputePause(
  */
 export async function resolveContentGrant(
   tx: Tx,
-  deps: { purchaseService: PurchaseService; obs: ObservabilityClient },
+  deps: { purchaseService: PurchaseVerifier; obs: ObservabilityClient },
   userId: string,
   contentId: string,
   contentRecord: StreamingAccessContent
@@ -926,7 +933,7 @@ export async function resolveContentGrant(
  */
 export async function assertStreamingAccess(
   tx: Tx,
-  deps: { purchaseService: PurchaseService; obs: ObservabilityClient },
+  deps: { purchaseService: PurchaseVerifier; obs: ObservabilityClient },
   userId: string,
   contentId: string,
   contentRecord: StreamingAccessContent

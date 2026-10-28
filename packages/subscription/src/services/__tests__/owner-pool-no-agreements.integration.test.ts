@@ -35,6 +35,7 @@ import {
   createMockStripe,
   createMockStripeInvoice,
   createTestConnectAccountInput,
+  createTestMoneyDeps,
   createTestOrganizationInput,
   createTestSubscriptionInput,
   createTestTierInput,
@@ -156,7 +157,7 @@ describe('an organisation invoice with no subscription agreements (Codex-2hxff.7
 
   it('pays the owner the organisation fee plus the whole pool, and the creator nothing', async () => {
     const service = new SubscriptionService(
-      { db, environment: 'test', feeConfig },
+      { db, environment: 'test', ...createTestMoneyDeps(), feeConfig },
       createMockStripe()
     );
     const chargeId = `ch_owner_pool_${randomUUID().slice(0, 8)}`;

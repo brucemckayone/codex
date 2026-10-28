@@ -177,6 +177,18 @@ interface FeeConfigServiceConfig extends ServiceConfig {
   waitUntil?: (promise: Promise<unknown>) => void;
 }
 
+/**
+ * What a money service resolves a sale's fees with: FeeConfigService's read
+ * side. PurchaseService, SubscriptionService and CourseSubscriptionService
+ * require one (Codex-2hxff.55, docs/payments/architecture.md rule A4) and take
+ * this rather than the class, so a test can give them
+ * `createTestFeeConfig()` from `@codex/test-utils` instead of a database.
+ */
+export type FeeResolver = Pick<
+  FeeConfigService,
+  'getFeesForCreator' | 'getFeesForOrg' | 'getFeesPlatform'
+>;
+
 export class FeeConfigService extends BaseService {
   private readonly cache?: VersionedCache;
   private readonly waitUntil?: (promise: Promise<unknown>) => void;

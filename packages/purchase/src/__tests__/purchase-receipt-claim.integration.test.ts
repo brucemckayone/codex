@@ -13,6 +13,7 @@ import { content, organizations, purchases } from '@codex/database/schema';
 import {
   createMockStripe,
   createTestContentInput,
+  createTestMoneyDeps,
   createUniqueSlug,
   type Database,
   seedTestUsers,
@@ -47,7 +48,7 @@ describe('PurchaseService.claimReceipt (Codex-mat01)', () => {
         .returning()
     ).id;
     service = new PurchaseService(
-      { db, environment: 'test' },
+      { db, environment: 'test', ...createTestMoneyDeps() },
       createMockStripe()
     );
   });

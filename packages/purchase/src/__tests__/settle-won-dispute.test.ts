@@ -16,11 +16,12 @@ vi.mock('@codex/payments', async (importOriginal) => {
 });
 
 import { repayDispute } from '@codex/payments';
+import { createTestMoneyDeps } from '@codex/test-utils';
 import { PurchaseService } from '../services/purchase-service';
 
 function serviceWith(db: Record<string, unknown>): PurchaseService {
   return new PurchaseService(
-    { db: db as never, environment: 'test' },
+    { db: db as never, environment: 'test', ...createTestMoneyDeps() },
     {} as Stripe
   );
 }

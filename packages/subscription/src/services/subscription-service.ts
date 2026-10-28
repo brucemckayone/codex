@@ -34,7 +34,6 @@ import {
   BILLING_INTERVAL,
   CHECKOUT_SESSION_KIND,
   CURRENCY,
-  FEES,
   STRIPE_ENV_METADATA_KEY,
   SUBSCRIPTION_STATUS,
   stripeEnvMetadata,
@@ -91,8 +90,8 @@ import {
   CheckoutReservations,
   checkoutIdempotencyKey,
   type FeeConfig,
-  type FeeConfigService,
   type FeeContext,
+  type FeeResolver,
   stripeErrorCode,
   toStripeTime,
   withStaleCustomerRecovery,
@@ -131,8 +130,15 @@ import {
   TierNotFoundError,
 } from '../errors';
 import {
+  alertFanOutOutOfTime,
   CLEAR_PENDING_PRICE_METADATA,
+  moveFailureAlert,
+  noticeFailureAlert,
+  PRICE_FAN_OUT_BUDGET_MS,
+  type PriceChangeNotice,
+  type PriceChangeNoticeMailer,
   schedulePriceChange,
+  sendPriceChangeNotice,
 } from './pending-price-change';
 import { calculateRevenueSplit } from './revenue-split';
 import {
@@ -558,13 +564,23 @@ export interface PropagateTierPriceOptions {
 export interface PropagateTierPriceResult {
   /** Subscriptions on the tier and interval that were considered. */
   total: number;
-  /** Swapped now or marked pending — every subscriber who was emailed. */
+  /** Notified, then swapped now or marked pending. */
   updated: number;
   /** Of `updated`: swapped now (next renewal already ≥ 30 days away). */
   applied: number;
   /** Of `updated`: marked pending, swapped at a later renewal. */
   pending: number;
-  /** Subscriptions whose scheduling failed (logged individually via obs.error). */
+  /** Not moved: the notice was not accepted (each alerted). */
+  unnotified: number;
+  /**
+   * Not reached: the fan-out stopped starting batches at
+   * `PRICE_FAN_OUT_BUDGET_MS` (all named in one alert).
+   */
+  unhandled: number;
+  /**
+   * A Stripe read or write failed, before the notice or after it was
+   * accepted (each alerted, saying whether the outcome is known).
+   */
   failed: number;
 }
 
@@ -685,16 +701,14 @@ interface SubscriptionServiceConfig extends ServiceConfig {
    */
   waitUntil?: WaitUntilFn;
   /**
-   * Optional mailer thunk used by `propagateTierPriceToActiveSubscriptions`
-   * (Codex-7kc83) to notify each affected subscriber that their Stripe
-   * Price is being swapped. Service stays unaware of the notifications-api
-   * transport — the registry wires this to `sendEmailToWorker(env, ctx,
-   * params)` so the service can call it synchronously inside the per-sub
-   * success branch without threading `Bindings` or `ExecutionContext`.
-   * When absent (narrow unit tests, legacy harnesses), price-change
-   * propagation still succeeds; only the email side-effect is skipped.
+   * Sends the 30-day price-change notice for
+   * `propagateTierPriceToActiveSubscriptions` and reports whether
+   * notifications-api accepted it. The registry wires
+   * `sendEmailToWorkerAwaited(env, params)`. A subscriber moves only after
+   * their notice is accepted (D-P3, Codex-2hxff.43). Required, like every
+   * money dependency (Codex-2hxff.55); a test uses `createTestMoneyDeps()`.
    */
-  mailer?: TierPriceChangeMailer;
+  mailer: PriceChangeNoticeMailer;
   /**
    * Optional base URL used to construct the subscription management link
    * embedded in the price-change notice. Webhook handlers already accept
@@ -707,52 +721,32 @@ interface SubscriptionServiceConfig extends ServiceConfig {
    */
   webAppUrl?: string;
   /**
-   * Optional DB-configurable fee resolver (Codex-m644n).
+   * DB-configurable fee resolver (Codex-m644n). Required (Codex-2hxff.55,
+   * docs/payments/architecture.md rule A4): there is no constant fallback.
    *
-   * When provided, the subscription invoice flows resolve platform/org fees
-   * via `feeConfig.getFeesForOrg(orgId, 'subscription')` instead of the
-   * `FEES.*` code constants. The per-creator fan-out inside `executeTransfers`
-   * additionally consults `getFeesForCreator(orgId, creatorId, 'subscription')`
-   * so two creators in the same invoice can receive different splits when one
-   * has a negotiated override.
-   *
-   * When absent (narrow unit tests, legacy harnesses), the service falls
-   * back to the `FEES.*` constants — bit-for-bit pre-Codex-m644n behaviour.
+   * The subscription invoice flows resolve platform/org fees via
+   * `feeConfig.getFeesForOrg(orgId, 'subscription')`. The per-creator fan-out
+   * inside `executeTransfers` additionally consults
+   * `getFeesForCreator(orgId, creatorId, 'subscription')` so two creators in
+   * the same invoice can receive different splits when one has a negotiated
+   * override.
    */
-  feeConfig?: FeeConfigService;
+  feeConfig: FeeResolver;
   /**
-   * Optional mailer thunk used by `resolvePendingPayouts` (WP-10 —
-   * Codex-69t7c.10) to fire a `payout-released` notification after pending
-   * payouts transition to paid. Same pattern as `mailer` — the service stays
-   * unaware of Bindings / ExecutionContext. When absent the notification is
-   * silently skipped; the payout still succeeds.
+   * Mailer thunk used by `resolvePendingPayouts` (WP-10 — Codex-69t7c.10) to
+   * fire a `payout-released` notification after pending payouts transition to
+   * paid. The service stays unaware of Bindings / ExecutionContext. Required
+   * (Codex-2hxff.55); a failed send never fails the payout.
    */
-  payoutMailer?: PayoutReleasedMailer;
+  payoutMailer: PayoutReleasedMailer;
 }
-
-/**
- * Fire-and-forget email dispatch used by price-change propagation.
- * Matches the shape of `SendEmailToWorkerParams` from `@codex/worker-utils`
- * so the registry can wire `sendEmailToWorker(env, ctx, params)` directly
- * into this slot. Returns `void` — failures are the mailer's concern
- * (notifications-api audit log on the remote side).
- */
-export type TierPriceChangeMailer = (params: {
-  to: string;
-  toName?: string;
-  /** `course-no-longer-offered`: a course taken off sale (Codex-2hxff.64). */
-  templateName: 'subscription-tier-price-change' | 'course-no-longer-offered';
-  category: 'transactional';
-  userId?: string;
-  organizationId?: string | null;
-  data: Record<string, string | number | boolean>;
-}) => void;
 
 /**
  * Fire-and-forget email dispatch used by the payout-released notification
  * (WP-10 — Codex-69t7c.10). Fires after pending payouts transition to paid
- * in `resolvePendingPayouts`. Same pattern as `TierPriceChangeMailer` — the
- * service stays unaware of Bindings / ExecutionContext.
+ * in `resolvePendingPayouts`. Matches `SendEmailToWorkerParams` so the
+ * registry wires `sendEmailToWorker(env, ctx, params)`; the service stays
+ * unaware of Bindings / ExecutionContext.
  */
 export type PayoutReleasedMailer = (params: {
   to: string;
@@ -768,10 +762,10 @@ export class SubscriptionService extends BaseService {
   private readonly stripe: Stripe;
   private readonly cache: VersionedCache | undefined;
   private readonly waitUntil: WaitUntilFn | undefined;
-  private readonly mailer: TierPriceChangeMailer | undefined;
-  private readonly payoutMailer: PayoutReleasedMailer | undefined;
+  private readonly mailer: PriceChangeNoticeMailer;
+  private readonly payoutMailer: PayoutReleasedMailer;
   private readonly webAppUrl: string | undefined;
-  private readonly feeConfig: FeeConfigService | undefined;
+  private readonly feeConfig: FeeResolver;
   private readonly checkoutReservations: CheckoutReservations;
 
   constructor(config: SubscriptionServiceConfig, stripe: Stripe) {
@@ -794,9 +788,7 @@ export class SubscriptionService extends BaseService {
    * Resolve fee config for a payout (Codex-m644n, Codex-5794i).
    *
    * `ctx` selects the policy: `'subscription'` carries SUBSCRIPTION_ORG_PERCENT
-   * (15%), `'one_off'` carries ORG_PERCENT (10%). The fallback path (no
-   * FeeConfigService injected) honours the same split via constants — so
-   * legacy unit tests don't accidentally drift between policies.
+   * (15%), `'one_off'` carries ORG_PERCENT (10%).
    *
    * Used by:
    * - subscription invoice path (per-org + per-creator) with `'subscription'`
@@ -810,23 +802,6 @@ export class SubscriptionService extends BaseService {
     ctx: FeeContext,
     creatorId?: string
   ): Promise<FeeConfig> {
-    if (!this.feeConfig) {
-      return {
-        platformFeePercent: FEES.PLATFORM_PERCENT,
-        // Codex-69t7c WP5: orgless (bi-party) payouts carry NO org fee leg —
-        // the creator keeps 100% of post-platform. Mirror that in the
-        // no-FeeConfigService fallback so unit tests on the orgless drain
-        // path see a zero org fee, not the org/subscription default.
-        orgFeePercent:
-          orgId === null
-            ? 0
-            : ctx === 'subscription'
-              ? FEES.SUBSCRIPTION_ORG_PERCENT
-              : FEES.ORG_PERCENT,
-        minPlatformFeeCents: FEES.MIN_PLATFORM_FEE_CENTS,
-        minTransferCents: 0,
-      };
-    }
     // Codex-69t7c WP5: orgless rows have no org to resolve per-creator or
     // per-org overrides against — use the platform-level fee policy, which
     // owns the same `minTransferCents` floor the org/creator configs carry.
@@ -3416,8 +3391,7 @@ export class SubscriptionService extends BaseService {
       // the row carries a CHECK constraint:
       //   amount_cents = platform_fee + org_fee + creator_payout
       // Updating amountCents alone would silently violate it.
-      // DB-configurable fees (Codex-m644n) — falls back to FEES.* constants
-      // when FeeConfigService is not injected (legacy tests).
+      // DB-configurable fees (Codex-m644n).
       const newSplit = await this.computeSubscriptionSplit(
         orgId,
         newRecurringAmount
@@ -4819,7 +4793,7 @@ export class SubscriptionService extends BaseService {
     // rows still under the aggregate min-transfer floor, or whose transfer
     // failed, are skipped above — the old snapshot-based amount told creators
     // money had been released when nothing moved.
-    if (creatorPaidCount > 0 && this.payoutMailer) {
+    if (creatorPaidCount > 0) {
       try {
         const [creatorRow] = await this.db
           .select({ email: users.email })
@@ -5176,8 +5150,13 @@ export class SubscriptionService extends BaseService {
    *   past_due or paused. Past-due and paused subscribers get the pending
    *   marker only and move once Stripe reports them active; cancelled and
    *   incomplete ones have no renewal to reprice.
-   * - Each subscriber is emailed (`subscription-tier-price-change`) with the
-   *   renewal that first bills the new price. One `noticeAt` for the whole
+   * - Notice first, then move (owner decision D-P3, Codex-2hxff.43): each
+   *   subscriber is emailed (`subscription-tier-price-change`) with the
+   *   renewal that first bills the new price, and their move is scheduled
+   *   only once notifications-api accepts it. A notice that is refused,
+   *   fails, has no address or no mailer, and a move that fails after its
+   *   notice, leave the subscriber on today's price with an error alert
+   *   (errorId and ids) for support to retry. One `noticeAt` for the whole
    *   fan-out, so every subscriber gets the same 30 days.
    * - Nothing is charged now and nothing is prorated: a same-interval swap
    *   with `proration_behavior: 'none'` only changes what the NEXT renewal
@@ -5186,6 +5165,10 @@ export class SubscriptionService extends BaseService {
    *   here.
    * - One failed subscriber never aborts the batch; failures are logged and
    *   counted. Callers run this fire-and-forget after the tier's DB commit.
+   * - It runs on `waitUntil`, which the runtime cancels 30 s after the
+   *   response, so no batch starts after `PRICE_FAN_OUT_BUDGET_MS` (20 s).
+   *   Every subscriber not reached stays on today's price and is named in one
+   *   alert. A start line and an end summary bracket the run.
    *
    * Called from `TierService.updateTier` (Studio — the only place a price is
    * set). A Price created in the Stripe Dashboard is never propagated.
@@ -5199,6 +5182,7 @@ export class SubscriptionService extends BaseService {
     const batchSize = Math.max(1, options.batchSize ?? 8);
     const interBatchDelayMs = Math.max(0, options.interBatchDelayMs ?? 50);
     const noticeAt = new Date();
+    const startedAt = Date.now();
 
     try {
       const conditions = [
@@ -5242,7 +5226,15 @@ export class SubscriptionService extends BaseService {
         )
         .where(and(...conditions));
 
-      const empty = { total: 0, updated: 0, applied: 0, pending: 0, failed: 0 };
+      const empty = {
+        total: 0,
+        updated: 0,
+        applied: 0,
+        pending: 0,
+        unnotified: 0,
+        unhandled: 0,
+        failed: 0,
+      };
       if (rows.length === 0) {
         this.obs.info('Tier price propagation: no subscribers on interval', {
           tierId,
@@ -5268,18 +5260,65 @@ export class SubscriptionService extends BaseService {
         stripeSubscriptionId: string;
         error: string;
       }> = [];
+      const prefix = 'Tier price propagation: ';
+      this.obs.info('Tier price propagation: starting', {
+        tierId,
+        interval,
+        newStripePriceId,
+        noticeAt: noticeAt.toISOString(),
+        total: rows.length,
+      });
 
       for (let i = 0; i < rows.length; i += batchSize) {
+        // The runtime cancels everything 30 s after the response: start no
+        // batch it could cut off, and name every subscriber left (silent #1).
+        if (Date.now() - startedAt >= PRICE_FAN_OUT_BUDGET_MS) {
+          const left = rows.slice(i);
+          counts.unhandled = left.length;
+          alertFanOutOutOfTime(
+            (message, data) => this.obs.error(message, data),
+            {
+              errorId: crypto.randomUUID(),
+              context: {
+                tierId,
+                interval,
+                newStripePriceId,
+                noticeAt: noticeAt.toISOString(),
+              },
+              subscribers: left.map((row) => ({
+                subscriptionId: row.id,
+                stripeSubscriptionId: row.stripeSubscriptionId,
+                userId: row.userId,
+                organizationId: row.organizationId,
+              })),
+            }
+          );
+          break;
+        }
         const batch = rows.slice(i, i + batchSize);
+        // Each accepted notice, so a failure after it can say what was sent.
+        const notified = new Map<string, PriceChangeNotice>();
         const results = await Promise.allSettled(
           batch.map((row) =>
-            schedulePriceChange(this.stripe, {
-              stripeSubscriptionId: row.stripeSubscriptionId,
-              newPriceId: newStripePriceId,
-              newAmountCents,
-              interval,
-              noticeAt,
-            })
+            schedulePriceChange(
+              this.stripe,
+              {
+                stripeSubscriptionId: row.stripeSubscriptionId,
+                newPriceId: newStripePriceId,
+                newAmountCents,
+                interval,
+                noticeAt,
+              },
+              async (notice) => {
+                const accepted = await this.sendTierPriceChangeNotice(
+                  row,
+                  newAmountCents,
+                  { tierId, newStripePriceId, interval, notice }
+                );
+                if (accepted) notified.set(row.id, notice);
+                return accepted;
+              }
+            )
           )
         );
 
@@ -5293,11 +5332,9 @@ export class SubscriptionService extends BaseService {
             if (outcome.kind === 'applied' || outcome.kind === 'pending') {
               counts.updated++;
               counts[outcome.kind]++;
-              this.dispatchTierPriceChangeEmail(row, newAmountCents, {
-                tierId,
-                newStripePriceId,
-                effectiveAt: outcome.effectiveAt,
-              });
+            } else if (outcome.kind === 'unnotified') {
+              // Alerted by sendTierPriceChangeNotice.
+              counts.unnotified++;
             } else if (outcome.kind === 'skipped') {
               this.obs.warn('Tier price propagation: subscription skipped', {
                 tierId,
@@ -5316,17 +5353,23 @@ export class SubscriptionService extends BaseService {
               stripeSubscriptionId: row.stripeSubscriptionId,
               error: message,
             });
-            this.obs.error(
-              'Tier price propagation: scheduling the change failed',
-              {
-                tierId,
-                newStripePriceId,
-                subscriptionId: row.id,
-                stripeSubscriptionId: row.stripeSubscriptionId,
-                organizationId: row.organizationId,
-                error: message,
-              }
+            const alert = moveFailureAlert(
+              prefix,
+              result.reason,
+              notified.get(row.id),
+              noticeAt
             );
+            this.obs.error(alert.message, {
+              errorId: crypto.randomUUID(),
+              ...alert.data,
+              tierId,
+              interval,
+              newStripePriceId,
+              subscriptionId: row.id,
+              stripeSubscriptionId: row.stripeSubscriptionId,
+              userId: row.userId,
+              organizationId: row.organizationId,
+            });
           }
         }
 
@@ -5338,10 +5381,11 @@ export class SubscriptionService extends BaseService {
         }
       }
 
-      if (counts.failed > 0) {
+      if (counts.failed > 0 || counts.unnotified > 0 || counts.unhandled > 0) {
         this.obs.error(
           'Tier price propagation completed with failures (operator review required)',
           {
+            errorId: crypto.randomUUID(),
             tierId,
             interval,
             newStripePriceId,
@@ -5365,19 +5409,22 @@ export class SubscriptionService extends BaseService {
   }
 
   /**
-   * Email one subscriber about a scheduled price change
-   * (`subscription-tier-price-change`).
+   * Send one subscriber the notice of a price change
+   * (`subscription-tier-price-change`) and resolve whether notifications-api
+   * accepted it: their move is scheduled only then (D-P3, Codex-2hxff.43).
    *
    * - `effectiveAt` is the renewal that first bills the new price — at least
    *   30 days after this email (Codex-2hxff.3).
    * - Copy is neutral on direction: increases and decreases read the same.
    * - Category `transactional`: billing notices bypass the opt-out.
-   * - A missing mailer (unit tests), email or price is logged and skipped; a
-   *   mailer that throws never breaks the fan-out.
+   * - A notice not accepted (no address, refused, skipped, or an unknown
+   *   outcome) is alerted at error with an errorId and the ids support needs
+   *   to retry (`noticeFailureAlert`). Never throws.
    */
-  private dispatchTierPriceChangeEmail(
+  private async sendTierPriceChangeNotice(
     row: {
       id: string;
+      stripeSubscriptionId: string;
       organizationId: string;
       userId: string;
       billingInterval: string;
@@ -5387,56 +5434,52 @@ export class SubscriptionService extends BaseService {
       tierName: string | null;
     },
     newPriceCents: number,
-    context: { tierId: string; newStripePriceId: string; effectiveAt: Date }
-  ): void {
-    if (!this.mailer) return;
-
-    if (!row.userEmail) {
-      this.obs.warn(
-        'Tier price propagation: subscriber has no email; skipping notice',
-        {
-          tierId: context.tierId,
-          newStripePriceId: context.newStripePriceId,
-          subscriptionId: row.id,
-          userId: row.userId,
-          organizationId: row.organizationId,
-        }
-      );
-      return;
+    context: {
+      tierId: string;
+      newStripePriceId: string;
+      interval: 'month' | 'year';
+      notice: PriceChangeNotice;
     }
+  ): Promise<boolean> {
+    const failure = await sendPriceChangeNotice(this.mailer, {
+      to: row.userEmail,
+      toName: row.userName || undefined,
+      templateName: 'subscription-tier-price-change',
+      category: 'transactional',
+      userId: row.userId,
+      organizationId: row.organizationId,
+      data: {
+        userName: row.userName || 'there',
+        planName: row.tierName || 'your subscription',
+        // The amount billing today, from the subscription's own snapshot.
+        oldPriceFormatted: `£${(row.amountCents / 100).toFixed(2)}`,
+        newPriceFormatted: `£${(newPriceCents / 100).toFixed(2)}`,
+        billingInterval: row.billingInterval,
+        effectiveDate: context.notice.effectiveAt.toLocaleDateString('en-GB', {
+          timeZone: 'UTC',
+        }),
+        manageUrl: `${this.webAppUrl ?? ''}/account/subscriptions`,
+      },
+    });
+    if (!failure) return true;
 
-    try {
-      this.mailer({
-        to: row.userEmail,
-        toName: row.userName || undefined,
-        templateName: 'subscription-tier-price-change',
-        category: 'transactional',
-        userId: row.userId,
-        organizationId: row.organizationId,
-        data: {
-          userName: row.userName || 'there',
-          planName: row.tierName || 'your subscription',
-          // The amount billing today, from the subscription's own snapshot.
-          oldPriceFormatted: `£${(row.amountCents / 100).toFixed(2)}`,
-          newPriceFormatted: `£${(newPriceCents / 100).toFixed(2)}`,
-          billingInterval: row.billingInterval,
-          effectiveDate: context.effectiveAt.toLocaleDateString('en-GB', {
-            timeZone: 'UTC',
-          }),
-          manageUrl: `${this.webAppUrl ?? ''}/account/subscriptions`,
-        },
-      });
-    } catch (error) {
-      this.obs.warn(
-        'Tier price propagation: mailer threw synchronously; notice skipped',
-        {
-          tierId: context.tierId,
-          newStripePriceId: context.newStripePriceId,
-          subscriptionId: row.id,
-          error: error instanceof Error ? error.message : String(error),
-        }
-      );
-    }
+    const alert = noticeFailureAlert(
+      'Tier price propagation: ',
+      failure,
+      context.notice
+    );
+    this.obs.error(alert.message, {
+      errorId: crypto.randomUUID(),
+      ...alert.data,
+      tierId: context.tierId,
+      interval: context.interval,
+      newStripePriceId: context.newStripePriceId,
+      subscriptionId: row.id,
+      stripeSubscriptionId: row.stripeSubscriptionId,
+      userId: row.userId,
+      organizationId: row.organizationId,
+    });
+    return false;
   }
 
   /**

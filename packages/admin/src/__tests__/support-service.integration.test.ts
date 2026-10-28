@@ -34,6 +34,7 @@ import { ServiceError } from '@codex/service-errors';
 import {
   createMockStripe,
   createTestContentInput,
+  createTestMoneyDeps,
   createTestSubscriptionInput,
   createTestTierInput,
   createUniqueSlug,
@@ -314,7 +315,10 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
       db,
       environment: 'test',
       stripe: fake.stripe,
-      purchase: new PurchaseService({ db, environment: 'test' }, fake.stripe),
+      purchase: new PurchaseService(
+        { db, environment: 'test', ...createTestMoneyDeps() },
+        fake.stripe
+      ),
     });
     const log = (
       service as unknown as {
@@ -2204,7 +2208,7 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
     created.stripeRefundIds.push(made.refund.id);
 
     await new PurchaseService(
-      { db, environment: 'test' },
+      { db, environment: 'test', ...createTestMoneyDeps() },
       fake.stripe
     ).recordChargeRefunds({ id: chargeId, paymentIntentId });
 

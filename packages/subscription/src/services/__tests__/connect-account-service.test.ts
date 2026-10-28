@@ -25,6 +25,7 @@ import {
 import {
   createMockStripe,
   createTestConnectAccountInput,
+  createTestMoneyDeps,
   createTestOrganizationInput,
   createTestSubscriptionInput,
   createTestTierInput,
@@ -849,7 +850,7 @@ describe('ConnectAccountService', () => {
       } as unknown as Stripe.Account);
 
       const subscriptionService = new SubscriptionService(
-        { db, environment: 'test' },
+        { db, environment: 'test', ...createTestMoneyDeps() },
         stripe
       );
 
@@ -1024,7 +1025,7 @@ describe('ConnectAccountService', () => {
       await service.handleAccountDeauthorized(connectRow.stripeAccountId);
 
       const subscriptionService = new SubscriptionService(
-        { db, environment: 'test' },
+        { db, environment: 'test', ...createTestMoneyDeps() },
         stripe
       );
       (stripe as unknown as { customers: unknown }).customers = {

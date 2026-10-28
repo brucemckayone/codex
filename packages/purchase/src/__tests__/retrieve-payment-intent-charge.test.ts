@@ -14,6 +14,7 @@
  * No database: the method reads Stripe only.
  */
 
+import { createTestMoneyDeps } from '@codex/test-utils';
 import type Stripe from 'stripe';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PaymentProcessingError } from '../errors';
@@ -30,7 +31,7 @@ function serviceFailingWith(error: Error) {
     paymentIntents: { retrieve: vi.fn().mockRejectedValue(error) },
   } as unknown as Stripe;
   const service = new PurchaseService(
-    { db: {} as never, environment: 'test' },
+    { db: {} as never, environment: 'test', ...createTestMoneyDeps() },
     stripe
   );
   // biome-ignore lint/suspicious/noExplicitAny: spy on the protected obs

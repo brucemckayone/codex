@@ -448,8 +448,8 @@ Support then settles it one of two ways (owner decisions 2026-10-24, Q5):
      - **No retry will run it.** Its delivery died, or Stripe refused it on
        every try. It is checked with Stripe before the settlement's
        transaction opens (`settleUnfinishedRefundSteps`). If Stripe made its
-       reversal, it is recorded `done`, and so re-paid, since that is true
-       whatever support decides. If not, the settlement cancels it inside its
+       reversal, it is recorded `done` if the step has not moved since the
+       check, and so re-paid, since that is true whatever support decides. If not, the settlement cancels it inside its
        transaction, only if the step has not moved since the check. So a
        refused settlement leaves it for a redelivery to finish, and a step a
        redelivery tried again meanwhile is not cancelled unchecked.
@@ -464,7 +464,9 @@ Support then settles it one of two ways (owner decisions 2026-10-24, Q5):
        there is no tool yet for a person to settle it.
      - **Nothing starts after the settlement.** A clawback step cannot start
        once the refund is settled, because its claim reads the refund under a
-       lock.
+       lock. A delivery already running cannot change the step afterwards; a
+       reversal of it that lands is held for support
+       ([refund-reversal-record.md](refund-reversal-record.md) §4 step 7).
   3. **A debt the payee already paid** (`creator_absorbed`,
      `manually_reversed`) gets a re-pay row too; one the platform wrote off
      (`platform_absorbed`) gets nothing. The refund's open debts close as

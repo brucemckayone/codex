@@ -29,7 +29,6 @@ import {
   canBeSold,
   DISPUTE_CHARGEBACK_OPEN_STATUSES,
   DISPUTE_CLOSED_STATUSES,
-  FEES,
   isForeignStripeEnvironment,
   PRICE_LIMITS,
   PURCHASE_STATUS,
@@ -141,6 +140,7 @@ import {
   writeCoursePurchaseEntitlement,
 } from './entitlement-writer';
 import { withStaleCustomerRecovery } from './resolve-customer';
+import { verifyPurchase } from './verify-purchase';
 
 /**
  * Type guard for Stripe errors
@@ -274,12 +274,10 @@ import type {
   SaleListItem,
   SalesStats,
 } from '../types';
-import type { FeeConfigService } from './fee-config-service';
+import type { FeeResolver } from './fee-config-service';
 import {
   applyMinPlatformFeeFloor,
   calculateRevenueSplit,
-  DEFAULT_ORG_FEE_PERCENTAGE,
-  DEFAULT_PLATFORM_FEE_PERCENTAGE,
   type RevenueSplit,
 } from './revenue-calculator';
 
@@ -304,22 +302,24 @@ export type PurchaseMailer = (params: {
 /**
  * Configuration for `PurchaseService`.
  *
- * Adds optional `feeConfig` (Codex-m644n) so the one-off purchase flow can
- * resolve DB-configurable fees via the 3-tier fallback chain. When absent,
- * the service uses the `DEFAULT_*` constants — bit-for-bit pre-Codex-m644n
- * behaviour (covered by existing tests).
+ * The money dependencies are REQUIRED (Codex-2hxff.55, docs/payments/
+ * architecture.md rule A4): there is no constant fallback to drift from what
+ * production resolves. The registry wires both; a test uses
+ * `createTestMoneyDeps()` from `@codex/test-utils`.
  *
- * Adds optional `mailer` (WP-10 — Codex-69t7c.10): when wired, fires a
- * `creator-connect-needed` notification fire-and-forget after a pending
- * `creator_payout` row is parked. Notification failure MUST NOT block or
- * roll back the payout ledger write.
+ * - `feeConfig` (Codex-m644n): the one-off purchase flow resolves fees via the
+ *   3-tier fallback chain.
+ * - `mailer` (WP-10 — Codex-69t7c.10): fires a `creator-connect-needed`
+ *   notification fire-and-forget after a pending `creator_payout` row is
+ *   parked. Notification failure MUST NOT block or roll back the payout
+ *   ledger write.
  *
  * Adds optional `webAppUrl` to build the dashboard deep-link embedded in
  * payout notifications. When absent the URL is omitted gracefully.
  */
 interface PurchaseServiceConfig extends ServiceConfig {
-  feeConfig?: FeeConfigService;
-  mailer?: PurchaseMailer;
+  feeConfig: FeeResolver;
+  mailer: PurchaseMailer;
   webAppUrl?: string;
   /**
    * The locked Billing Portal configuration (`bpc_...`, from
@@ -537,8 +537,8 @@ function selfHealedSale(metadata: Stripe.Metadata): {
  */
 export class PurchaseService extends BaseService {
   private readonly stripe: Stripe;
-  private readonly feeConfig: FeeConfigService | undefined;
-  private readonly mailer: PurchaseMailer | undefined;
+  private readonly feeConfig: FeeResolver;
+  private readonly mailer: PurchaseMailer;
   private readonly webAppUrl: string | undefined;
   private readonly portalConfigurationId: string | undefined;
   private readonly checkoutReservations: CheckoutReservations;
@@ -546,7 +546,7 @@ export class PurchaseService extends BaseService {
   /**
    * Initialize purchase service
    *
-   * @param config - Service configuration (db, environment, optional feeConfig, optional mailer)
+   * @param config - Service configuration (db, environment, feeConfig, mailer)
    * @param stripe - Stripe client instance
    */
   constructor(config: PurchaseServiceConfig, stripe: Stripe) {
@@ -1768,20 +1768,13 @@ export class PurchaseService extends BaseService {
       organizationId = row.organizationId;
     }
 
-    const fees = this.feeConfig
-      ? organizationId
-        ? await this.feeConfig.getFeesForCreator(
-            organizationId,
-            creatorId,
-            'one_off'
-          )
-        : await this.feeConfig.getFeesPlatform('one_off')
-      : {
-          platformFeePercent: DEFAULT_PLATFORM_FEE_PERCENTAGE,
-          orgFeePercent: DEFAULT_ORG_FEE_PERCENTAGE,
-          minPlatformFeeCents: FEES.MIN_PLATFORM_FEE_CENTS,
-          minTransferCents: 0,
-        };
+    const fees = organizationId
+      ? await this.feeConfig.getFeesForCreator(
+          organizationId,
+          creatorId,
+          'one_off'
+        )
+      : await this.feeConfig.getFeesPlatform('one_off');
 
     const agreement = organizationId
       ? await findActiveCreatorAgreementShare(tx, {
@@ -2202,7 +2195,6 @@ export class PurchaseService extends BaseService {
     organizationId: string | null,
     amountCents: number
   ): Promise<void> {
-    if (!this.mailer) return;
     try {
       const [creatorRow] = await this.db
         .select({ email: users.email })
@@ -2254,23 +2246,9 @@ export class PurchaseService extends BaseService {
     customerId: string
   ): Promise<boolean> {
     try {
-      // A disputed purchase keeps `status='completed'` by design (Stripe's
-      // semantics — a chargeback doesn't refund until the dispute resolves)
-      // so a status-only filter would still grant access during the
-      // dispute window. processDispute soft-deletes the contentAccess
-      // row but a caller using verifyPurchase directly would miss that.
-      // Filter `disputedAt IS NULL` here to keep verifyPurchase aligned
-      // with the access-revocation invariant.
-      const purchase = await this.db.query.purchases.findFirst({
-        where: and(
-          eq(purchases.contentId, contentId),
-          eq(purchases.customerId, customerId),
-          eq(purchases.status, PURCHASE_STATUS.COMPLETED),
-          isNull(purchases.disputedAt)
-        ),
-      });
-
-      return !!purchase;
+      // The read itself lives in `./verify-purchase`, the owner's read that
+      // `@codex/access` calls without a service (rule A8).
+      return await verifyPurchase(this.db, contentId, customerId);
     } catch (error) {
       this.handleError(error, 'verifyPurchase');
     }

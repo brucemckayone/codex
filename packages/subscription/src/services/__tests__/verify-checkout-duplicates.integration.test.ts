@@ -22,6 +22,7 @@ import {
 } from '@codex/database/schema';
 import {
   createMockStripe,
+  createTestMoneyDeps,
   createTestOrganizationInput,
   createTestSubscriptionInput,
   createTestTierInput,
@@ -150,7 +151,7 @@ describe('verifyCheckoutSession on a duplicate subscription (Codex-o4jvw)', () =
         'duplicate subscription'
       );
       const service = new SubscriptionService(
-        { db, environment: 'test' },
+        { db, environment: 'test', ...createTestMoneyDeps() },
         stripeReturning(completeSession(userId, duplicate.stripeSubscriptionId))
       );
 
@@ -179,7 +180,7 @@ describe('verifyCheckoutSession on a duplicate subscription (Codex-o4jvw)', () =
         'kept subscription'
       );
       const service = new SubscriptionService(
-        { db, environment: 'test' },
+        { db, environment: 'test', ...createTestMoneyDeps() },
         stripeReturning(completeSession(userId, kept.stripeSubscriptionId))
       );
 
@@ -201,7 +202,7 @@ describe('verifyCheckoutSession on a duplicate subscription (Codex-o4jvw)', () =
 
       // The session's metadata says it is this user's, but the row is not.
       const result = await new SubscriptionService(
-        { db, environment: 'test' },
+        { db, environment: 'test', ...createTestMoneyDeps() },
         stripeReturning(completeSession(userId, theirs.stripeSubscriptionId))
       ).verifyCheckoutSession('cs_mismatch', userId);
 
@@ -290,7 +291,7 @@ describe('verifyCheckoutSession on a duplicate subscription (Codex-o4jvw)', () =
       });
 
       const forDuplicate = await new CourseSubscriptionService(
-        { db, environment: 'test' },
+        { db, environment: 'test', ...createTestMoneyDeps() },
         stripeReturning(completeSession(userId, duplicate.stripeSubscriptionId))
       ).verifyCheckoutSession('cs_dup', userId);
 
@@ -303,7 +304,7 @@ describe('verifyCheckoutSession on a duplicate subscription (Codex-o4jvw)', () =
       });
 
       const forKept = await new CourseSubscriptionService(
-        { db, environment: 'test' },
+        { db, environment: 'test', ...createTestMoneyDeps() },
         stripeReturning(completeSession(userId, kept.stripeSubscriptionId))
       ).verifyCheckoutSession('cs_kept', userId);
 
@@ -313,7 +314,7 @@ describe('verifyCheckoutSession on a duplicate subscription (Codex-o4jvw)', () =
 
     it('reports no subscription until our row exists, so the page keeps waiting', async () => {
       const result = await new CourseSubscriptionService(
-        { db, environment: 'test' },
+        { db, environment: 'test', ...createTestMoneyDeps() },
         stripeReturning(completeSession(userId, 'sub_not_yet_recorded'))
       ).verifyCheckoutSession('cs_race', userId);
 
@@ -322,7 +323,7 @@ describe('verifyCheckoutSession on a duplicate subscription (Codex-o4jvw)', () =
 
     it("refuses a session that is not the user's own", async () => {
       const service = new CourseSubscriptionService(
-        { db, environment: 'test' },
+        { db, environment: 'test', ...createTestMoneyDeps() },
         stripeReturning(completeSession(creatorId, 'sub_someone_else'))
       );
 
@@ -340,7 +341,7 @@ describe('verifyCheckoutSession on a duplicate subscription (Codex-o4jvw)', () =
 
       // The session's metadata says it is this user's, but the row is not.
       const result = await new CourseSubscriptionService(
-        { db, environment: 'test' },
+        { db, environment: 'test', ...createTestMoneyDeps() },
         stripeReturning(completeSession(userId, theirs.stripeSubscriptionId))
       ).verifyCheckoutSession('cs_mismatch', userId);
 
