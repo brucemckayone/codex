@@ -12,7 +12,8 @@
  *     nor one whose creator has left the org or never joined it;
  *   - a draft course, a deleted course, a deleted org and another org's id
  *     refuse as `no-course`, an empty slot as `empty-slot`, a paid film as
- *     `not-eligible`;
+ *     `paid-use`, unready media as `not-ready` and a departed creator's film
+ *     as `creator-not-member`;
  *   - the sell preview flags each film with the same predicate, and never the
  *     hero's loop;
  *   - `getCourseFilmStream` signs a film token for that course and media that
@@ -52,6 +53,7 @@ import { ContentAccessService } from '../ContentAccessService';
 import { CourseJourneyService } from '../course-journey-service';
 import {
   type CourseFilmRefusal,
+  type CourseFilmResolution,
   findPreviewOnlyMedia,
   resolveCourseFilm,
 } from '../sales-films';
@@ -156,15 +158,19 @@ describe('course sales films (owner P10)', () => {
 
   const refused = (reason: CourseFilmRefusal) => ({ ok: false, reason });
 
-  /** Would the minter stream this film in full from a published intro slot? */
-  async function isFull(film: string): Promise<boolean> {
+  /** The minter's answer for this film in a published course's intro slot. */
+  async function mint(film: string): Promise<CourseFilmResolution> {
     const courseId = await seedCourse({ intro: film });
-    const minted = await resolveCourseFilm(db, {
+    return resolveCourseFilm(db, {
       organizationId: orgId,
       courseId,
       film: 'intro',
     });
-    return minted.ok;
+  }
+
+  /** Would the minter stream this film in full? */
+  async function isFull(film: string): Promise<boolean> {
+    return (await mint(film)).ok;
   }
 
   beforeAll(async () => {
@@ -246,7 +252,9 @@ describe('course sales films (owner P10)', () => {
           isTeamOnly: row.isTeamOnly ?? null,
           courseOnly: row.courseOnly ?? null,
         });
-        expect(await isFull(film)).toBe(expected);
+        expect(await mint(film)).toEqual(
+          expected ? expect.objectContaining({ ok: true }) : refused('paid-use')
+        );
         expect(expected).toBe(name === 'plainly free');
       });
     }
@@ -258,7 +266,7 @@ describe('course sales films (owner P10)', () => {
         priceCents: 900,
         status: 'draft',
       });
-      expect(await isFull(film)).toBe(false);
+      expect(await mint(film)).toEqual(refused('paid-use'));
     });
 
     it('a paid use in ANOTHER org cuts it: a paid lesson anywhere is still paid', async () => {
@@ -271,7 +279,7 @@ describe('course sales films (owner P10)', () => {
           priceCents: 900,
         })
       );
-      expect(await isFull(film)).toBe(false);
+      expect(await mint(film)).toEqual(refused('paid-use'));
     });
 
     it('a DELETED paid use does not cut it, and no use leaves it full', async () => {
@@ -289,7 +297,7 @@ describe('course sales films (owner P10)', () => {
       const film = await seedFilm();
       await useIn(film);
       await useIn(film, { courseOnly: true });
-      expect(await isFull(film)).toBe(false);
+      expect(await mint(film)).toEqual(refused('paid-use'));
     });
   });
 
@@ -305,15 +313,19 @@ describe('course sales films (owner P10)', () => {
         status: 'failed',
         hlsMasterPlaylistKey: null,
       });
-      expect(await isFull(transcoding)).toBe(false);
-      expect(await isFull(deleted)).toBe(false);
-      expect(await isFull(masterless)).toBe(false);
+      expect(await mint(transcoding)).toEqual(refused('not-ready'));
+      expect(await mint(deleted)).toEqual(refused('not-ready'));
+      expect(await mint(masterless)).toEqual(refused('not-ready'));
     });
 
     it("is never full once its creator has LEFT the course's org, or never joined it", async () => {
       // Nothing clears a slot when a member leaves, so the read asks again.
-      expect(await isFull(await seedFilm({}, leaverId))).toBe(false);
-      expect(await isFull(await seedFilm({}, outsiderId))).toBe(false);
+      expect(await mint(await seedFilm({}, leaverId))).toEqual(
+        refused('creator-not-member')
+      );
+      expect(await mint(await seedFilm({}, outsiderId))).toEqual(
+        refused('creator-not-member')
+      );
       expect(await isFull(await seedFilm({}, colleagueId))).toBe(true);
     });
   });
@@ -351,7 +363,7 @@ describe('course sales films (owner P10)', () => {
         refused('no-course')
       );
       expect(await ask(live, 'reel')).toEqual(refused('empty-slot'));
-      expect(await ask(live, 'guide')).toEqual(refused('not-eligible'));
+      expect(await ask(live, 'guide')).toEqual(refused('paid-use'));
       expect(await ask(live)).toEqual({ ok: true, creatorId, mediaId: film });
     });
 
@@ -479,9 +491,10 @@ describe('course sales films (owner P10)', () => {
           })
         ).toBeNull();
         expect(info).toHaveBeenCalledWith('Course film stream refused', {
+          organizationId: orgId,
           courseId,
           film: 'intro',
-          reason: 'not-eligible',
+          reason: 'paid-use',
         });
       } finally {
         info.mockRestore();

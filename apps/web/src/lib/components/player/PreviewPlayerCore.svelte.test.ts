@@ -18,6 +18,7 @@ import {
   test,
   vi,
 } from 'vitest';
+import type { HlsErrorKind } from '$lib/components/VideoPlayer/hls';
 import * as m from '$paraglide/messages';
 import {
   flushSync,
@@ -29,7 +30,7 @@ const attached: string[] = [];
 /** The latest stream's 403 hand-off (`onUrlExpired`), if it was given one. */
 let expire: (() => void) | undefined;
 /** The latest stream's fatal error report (`onError`), in the helper's words. */
-let broke: ((message: string) => void) | undefined;
+let broke: ((message: string, kind: HlsErrorKind) => void) | undefined;
 
 vi.mock('$lib/components/VideoPlayer/hls', () => ({
   createHlsPlayer: vi.fn(
@@ -39,7 +40,7 @@ vi.mock('$lib/components/VideoPlayer/hls', () => ({
       onUrlExpired,
     }: {
       src: string;
-      onError?: (message: string) => void;
+      onError?: (message: string, kind: HlsErrorKind) => void;
       onUrlExpired?: () => void;
     }) => {
       attached.push(src);
@@ -384,6 +385,7 @@ describe('renewal', () => {
     await settle();
     expect(attached).toEqual([FULL]);
     loads(video);
+    state(video, true);
     const detach = playhead(video, 200);
     play.mockClear();
 
@@ -451,6 +453,7 @@ describe('renewal', () => {
     });
     await settle();
     loads(video);
+    state(video, true);
     playhead(video, 200);
     expire?.();
     await settle();
@@ -697,9 +700,16 @@ describe('renewal', () => {
       expect(errorText(root)).toBe(m.player_error());
     });
 
-    test('a renewed stream that 403s before its first frame: no second ask, an error, and no resume left to fire', async () => {
+    test('a renewed stream that 403s before its first frame: no second ask, the film ends ("Watch again"), and no resume left to fire', async () => {
       const renew = vi.fn(async () => ({ playlistUrl: RENEWED }));
-      const { root, video } = film({ src: signed(), renew, start: 'sound' });
+      const onended = vi.fn();
+      const { root, video } = film({
+        src: signed(),
+        renew,
+        start: 'sound',
+        onended,
+        ended: again,
+      });
       await settle();
       loads(video);
       playhead(video, 200);
@@ -711,7 +721,10 @@ describe('renewal', () => {
       await settle();
       expect(renew).toHaveBeenCalledTimes(1);
       expect(attached).toEqual([FULL, RENEWED]);
-      expect(errorText(root)).toBe(m.player_error());
+      // A failed renewal: the owner's end, never a dead error.
+      expect(onended).toHaveBeenCalledTimes(1);
+      expect(root.querySelector('.again')).not.toBeNull();
+      expect(errorText(root)).toBeUndefined();
       // The refused stream's resume went with it.
       play.mockClear();
       video.dispatchEvent(new Event('loadedmetadata'));
@@ -751,7 +764,7 @@ describe('renewal', () => {
       state(video, true);
       expect(vi.getTimerCount()).toBe(1);
 
-      broke?.('An unexpected playback error occurred.');
+      broke?.('An unexpected playback error occurred.', 'unknown');
       flushSync();
       expect(errorText(root)).toBe(m.player_error());
       expect(vi.getTimerCount()).toBe(0);
@@ -761,20 +774,204 @@ describe('renewal', () => {
       expect(renew).not.toHaveBeenCalled();
     });
 
+    // Only a browser that cannot play HLS at all is sent to another one: a
+    // media error past recovery is as often the film's own fault.
     test.each([
-      ['This browser cannot play this video format.', m.player_error_format()],
-      [
-        'Playback error. The video format may not be supported.',
-        m.player_error_format(),
-      ],
-      ['An unexpected playback error occurred.', m.player_error()],
-      ['Playback error. Please try again.', m.player_error()],
-    ])('the helper says "%s": the film says so in its own words', async (cause, said) => {
-      const { root } = film();
+      ['unsupported', m.player_error_format()],
+      ['media', m.player_error()],
+      ['network', m.player_error()],
+      ['unknown', m.player_error()],
+    ] as const)('the helper reports "%s": the film says so in its own words', async (kind, said) => {
+      const onfail = vi.fn();
+      const { root } = film({ onfail });
       await settle();
-      broke?.(cause);
+      broke?.('(the helper’s English)', kind);
+      broke?.('(and again)', kind);
       flushSync();
       expect(errorText(root)).toBe(said);
+      expect(onfail).toHaveBeenCalledTimes(1);
+      expect(onfail).toHaveBeenCalledWith(said);
+    });
+
+    test('the element’s own error (a decode failure HLS.js never raises) shows; Safari’s network error is left to renewal', async () => {
+      vi.stubGlobal('MediaError', {
+        MEDIA_ERR_NETWORK: 2,
+        MEDIA_ERR_DECODE: 3,
+      });
+      const raise = (video: HTMLVideoElement, code: number) => {
+        Object.defineProperty(video, 'error', {
+          configurable: true,
+          get: () => ({ code }),
+        });
+        video.dispatchEvent(new Event('error'));
+        flushSync();
+      };
+      const native = film({ src: signed(), renew: vi.fn(async () => null) });
+      await settle();
+      raise(native.video, 2);
+      expect(errorText(native.root)).toBeUndefined();
+
+      const decoding = film();
+      await settle();
+      raise(decoding.video, 3);
+      expect(errorText(decoding.root)).toBe(m.player_error());
+    });
+  });
+
+  // While it asks, the film lives on: the answer must not undo what happened.
+  describe('while the renewal is out', () => {
+    /** A renewal that answers when the test says. */
+    function pending() {
+      let answer: (value: { playlistUrl: string } | null) => void = () => {};
+      const renew = vi.fn(
+        () =>
+          new Promise<{ playlistUrl: string } | null>((resolve) => {
+            answer = resolve;
+          })
+      );
+      return {
+        renew,
+        answer: (value: { playlistUrl: string } | null) => answer(value),
+      };
+    }
+
+    test('an error meanwhile: the answer is dropped, nothing plays behind it', async () => {
+      vi.useFakeTimers();
+      const { renew, answer } = pending();
+      const { root, video } = film({
+        src: signed(inTen()),
+        renew,
+        start: 'sound',
+      });
+      await settle();
+      loads(video);
+      state(video, true);
+      vi.advanceTimersByTime(570_000);
+      expect(renew).toHaveBeenCalledTimes(1);
+      play.mockClear();
+
+      broke?.('An unexpected playback error occurred.', 'unknown');
+      answer({ playlistUrl: RENEWED });
+      await settle();
+      expect(attached).toEqual([FULL]);
+      expect(play).not.toHaveBeenCalled();
+      expect(errorText(root)).toBe(m.player_error());
+    });
+
+    test('the end meanwhile: "Watch again" stays, and it does not start over', async () => {
+      vi.useFakeTimers();
+      const { renew, answer } = pending();
+      const { root, video } = film({
+        src: signed(inTen()),
+        renew,
+        start: 'sound',
+        ended: again,
+      });
+      await settle();
+      loads(video);
+      state(video, true);
+      vi.advanceTimersByTime(570_000);
+      play.mockClear();
+
+      video.dispatchEvent(new Event('ended'));
+      answer({ playlistUrl: RENEWED });
+      await settle();
+      expect(attached).toEqual([FULL]);
+      expect(play).not.toHaveBeenCalled();
+      expect(root.querySelector('.again')).not.toBeNull();
+    });
+
+    test('paused from outside (the system’s controls), then a 403: the new stream stays paused', async () => {
+      const renew = vi.fn(async () => ({ playlistUrl: RENEWED }));
+      const { video } = film({ src: signed(), renew, start: 'sound' });
+      await settle();
+      loads(video);
+      state(video, true);
+      playhead(video, 90);
+      // No press of ours: the element pauses on its own say.
+      state(video, false);
+      play.mockClear();
+
+      expire?.();
+      await settle();
+      video.dispatchEvent(new Event('loadedmetadata'));
+      expect(attached).toEqual([FULL, RENEWED]);
+      expect(video.currentTime).toBe(90);
+      expect(play).not.toHaveBeenCalled();
+    });
+
+    test('another film starts meanwhile: this one takes its new stream, paused', async () => {
+      const { renew, answer } = pending();
+      const first = film({ src: signed(), renew, start: 'sound' });
+      await settle();
+      loads(first.video);
+      state(first.video, true);
+      playhead(first.video, 200);
+      expire?.();
+      const second = film();
+      second.video.dispatchEvent(new Event('play'));
+      play.mockClear();
+
+      answer({ playlistUrl: RENEWED });
+      await settle();
+      first.video.dispatchEvent(new Event('loadedmetadata'));
+      expect(first.video.currentTime).toBe(200);
+      expect(play).not.toHaveBeenCalled();
+    });
+  });
+
+  // Per PLAYBACK, on the monotonic clock: a device clock running fast, or
+  // a 403 that is no expiry, never turns renewal into a loop.
+  describe('never two asks within two minutes', () => {
+    test('a clock running fast (every expiresAt already past): at most one ask per two minutes', async () => {
+      vi.useFakeTimers();
+      const past = () => new Date(Date.now() - 60_000).toISOString();
+      let n = 0;
+      const renew = vi.fn(async () => ({
+        playlistUrl: `${RENEWED}${++n}`,
+        expiresAt: past(),
+      }));
+      const { video } = film({ src: signed(past()), renew, start: 'sound' });
+      await settle();
+      loads(video);
+      state(video, true);
+
+      vi.advanceTimersByTime(0);
+      await settle();
+      loads(video);
+      expect(renew).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(120_000 - 1);
+      await settle();
+      expect(renew).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(1);
+      await settle();
+      expect(renew).toHaveBeenCalledTimes(2);
+    });
+
+    test('a 403 after the first frame, within two minutes of the last ask: no re-mint, the film ends ("Watch again")', async () => {
+      vi.useFakeTimers();
+      let n = 0;
+      const renew = vi.fn(async () => ({ playlistUrl: `${RENEWED}${++n}` }));
+      const { root, video } = film({
+        src: signed(),
+        renew,
+        start: 'sound',
+        ended: again,
+      });
+      await settle();
+      loads(video);
+      state(video, true);
+      expire?.();
+      await settle();
+      expect(renew).toHaveBeenCalledTimes(1);
+
+      // The renewed stream plays a frame, then a rung it will not serve.
+      loads(video);
+      vi.advanceTimersByTime(60_000);
+      expire?.();
+      await settle();
+      expect(renew).toHaveBeenCalledTimes(1);
+      expect(root.querySelector('.again')).not.toBeNull();
     });
   });
 });

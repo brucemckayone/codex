@@ -35,8 +35,11 @@
   does ("Watch again" then asks afresh): it never drops to the 30-second
   preview mid-film. A 403 BEFORE the stream's first frame is a refusal, not
   an expiry (a variant it will not serve, a token it will not take): asking
-  again would loop, so the film says it could not play. A plain string `src`
-  (a preview) is public and never renewed.
+  again would loop, so a first stream says it could not play and a renewed
+  one ends the film. And per PLAYBACK, never two asks within two minutes on
+  the monotonic clock (`MIN_ASK_INTERVAL_MS`): a device clock running fast,
+  or a 403 that is no expiry, cannot loop either. A plain string `src` (a
+  preview) is public and never renewed.
 
   KEYBOARD (`media-a11y`), from anywhere inside it: Space or K play and
   pause, M mutes, the arrows seek five seconds, F is full screen.
@@ -65,9 +68,9 @@
     Volume2Icon,
     VolumeXIcon,
   } from '$lib/components/ui/Icon';
-  import { createHlsPlayer } from '$lib/components/VideoPlayer/hls';
+  import { createHlsPlayer, type HlsErrorKind } from '$lib/components/VideoPlayer/hls';
   import * as m from '$paraglide/messages';
-  import { claim, release, showing } from './now-playing.svelte';
+  import { claim, holds, release, showing } from './now-playing.svelte';
   import { playNow, settleStart } from './start';
   import { clock, loadedTo } from './timeline';
 
@@ -112,6 +115,11 @@
     takeFocus?: boolean;
     onplay?: () => void;
     onended?: () => void;
+    /**
+     * The film cannot play; `message` is what the core shows. A frame that
+     * can offer a retry (`InlineFilm`) takes the visitor back to its poster.
+     */
+    onfail?: (message: string) => void;
     /** Drawn over the film once it ends, in place of the controls; `replay` starts it over. */
     ended?: Snippet<[replay: () => void]>;
     /**
@@ -147,6 +155,7 @@
     takeFocus = false,
     onplay,
     onended,
+    onfail,
     ended,
     demo,
     class: className,
@@ -167,8 +176,13 @@
   /** A signed stream is renewed this long before its links run out. */
   const RENEW_LEAD_MS = 30_000;
 
-  /** The HLS helper's words for a format this browser cannot play (`VideoPlayer/hls.ts`). */
-  const UNSUPPORTED = /video format/i;
+  /**
+   * Never two asks closer than this, whatever the device's clock says: a
+   * fresh stream lives ten minutes, so no real expiry comes sooner. Measured
+   * on the monotonic clock (`performance.now()`), because a clock running
+   * fast puts every `expiresAt` in the past.
+   */
+  const MIN_ASK_INTERVAL_MS = 120_000;
 
   let root: HTMLDivElement | undefined = $state();
   let video: HTMLVideoElement | undefined = $state();
@@ -177,8 +191,13 @@
   let hlsCleanup: (() => void) | null = null;
   let destroyed = false;
 
-  /** The stream attached now; a signed one may be renewed (RENEWAL above). */
-  let stream: { url: string; signed: boolean } | null = null;
+  /**
+   * The stream attached now; a signed one may be renewed (RENEWAL above).
+   * `renewal`: it is a renewal's answer, so refusing it ends the film.
+   */
+  let stream: { url: string; signed: boolean; renewal: boolean } | null = null;
+  /** When this playback last asked for a stream (`performance.now()`). */
+  let lastAskAt: number | null = null;
   /** When its links run out (epoch ms), if the server said. */
   let expiry: number | null = null;
   /** Its links have run out (it answered 403), at `stoppedAt` seconds in. */
@@ -214,7 +233,11 @@
   let canFullscreen = $state(Boolean(fixed));
   let captionsOn = $state(false);
   let error = $state<string | null>(null);
-  /** The visitor wants it playing: false once they pause, so nothing resumes behind them. */
+  /**
+   * The visitor wants it playing: false at any pause (theirs, the page's
+   * one-film rule, the end), so nothing resumes behind them. A stream swap
+   * fires no pause: the element's own reset is silent.
+   */
   let wanted = false;
 
   const played = $derived(duration > 0 ? Math.min(1, time / duration) : 0);
@@ -237,14 +260,16 @@
   }
 
   /**
-   * The film cannot play: say so, and stop asking for it. `cause` is the HLS
-   * helper's own English; a format it names gets its own words, since another
-   * browser may play the film.
+   * The film cannot play: say so, once, and stop asking for it. Only a
+   * browser with no way to play HLS at all (`unsupported`) is told to try
+   * another; a media error past recovery is as often the film's own.
    */
-  function fail(cause?: string) {
-    error ??= cause && UNSUPPORTED.test(cause) ? m.player_error_format() : m.player_error();
+  function fail(kind?: HlsErrorKind) {
+    if (error !== null) return;
+    error = kind === 'unsupported' ? m.player_error_format() : m.player_error();
     waiting = false;
     disarm();
+    onfail?.(error);
   }
 
   function finish() {
@@ -334,14 +359,25 @@
 
   function handlePause() {
     paused = true;
+    wanted = false;
     disarm();
   }
 
   function handleLoaded() {
     ready = true;
     // A frame: the stream's links are good, so their end may be renewed.
+    // Renewal first arms here, even for a press that played before the
+    // stream attached.
     flowing = true;
     arm();
+  }
+
+  // The element's own error, which HLS.js does not always raise (a decode
+  // failure). On Safari's own HLS a network error is the renewal signal,
+  // which the helper hands to `lapse`.
+  function handleMediaError() {
+    if (!hls && video?.error?.code === MediaError.MEDIA_ERR_NETWORK) return;
+    fail('media');
   }
 
   function handleTimeUpdate() {
@@ -396,10 +432,14 @@
     }
   }
 
-  /** Attach `source`; false when the core went while it attached. */
-  async function attach(media: HTMLVideoElement, source: string | SignedStream) {
+  /** Attach `source` (a renewal's answer, or not); false when the core went while it attached. */
+  async function attach(
+    media: HTMLVideoElement,
+    source: string | SignedStream,
+    renewal: boolean
+  ) {
     const signed = typeof source !== 'string';
-    stream = { url: signed ? source.playlistUrl : source, signed };
+    stream = { url: signed ? source.playlistUrl : source, signed, renewal };
     const end = signed && source.expiresAt ? Date.parse(source.expiresAt) : Number.NaN;
     expiry = Number.isFinite(end) ? end : null;
     expired = false;
@@ -408,7 +448,7 @@
     const handle = await createHlsPlayer({
       media,
       src: stream.url,
-      onError: fail,
+      onError: (_message, kind) => fail(kind),
       onUrlExpired: signed && renew ? lapse : undefined,
     });
     hls = handle.hls;
@@ -417,8 +457,6 @@
       teardown();
       return false;
     }
-    // Already playing (a press plays before the stream attaches): arm now.
-    arm();
     return true;
   }
 
@@ -427,7 +465,7 @@
       // A press may still be asking for the full film; its play() already
       // holds the activation.
       const source = typeof src === 'string' ? src : await src;
-      if (destroyed || !(await attach(media, source))) return;
+      if (destroyed || !(await attach(media, source, false))) return;
       if (start === 'muted') {
         wanted = true;
         media.muted = true;
@@ -439,38 +477,43 @@
     }
   }
 
+  /** This playback asked for a stream less than MIN_ASK_INTERVAL_MS ago. */
+  function askedLately() {
+    return lastAskAt !== null && performance.now() - lastAskAt < MIN_ASK_INTERVAL_MS;
+  }
+
   /**
-   * When this stream's one early renewal is due (epoch ms), or `null`: a
+   * How long until this stream's one early renewal (ms), or `null`: a
    * preview, no `expiresAt`, its ask already made (once per expiry), no frame
    * played yet (a stream stuck loading never asks), or an error on screen.
+   * Never sooner than MIN_ASK_INTERVAL_MS after the last ask.
    */
-  function renewalDue() {
+  function renewalDelay() {
     if (!renew || expiry === null || asked || !flowing || error !== null) return null;
-    return expiry - RENEW_LEAD_MS;
+    const sinceAsk =
+      lastAskAt === null ? Number.POSITIVE_INFINITY : performance.now() - lastAskAt;
+    return Math.max(0, expiry - RENEW_LEAD_MS - Date.now(), MIN_ASK_INTERVAL_MS - sinceAsk);
   }
 
   /** Its links have run out, or nearly: a resume renews first. */
   function stale() {
-    const due = renewalDue();
-    return due !== null && due <= Date.now();
+    return renewalDelay() === 0;
   }
 
   /**
    * The one-shot early renewal, armed only while the film plays: a paused,
    * scrolled-away or forgotten film never asks (the owner's cost rule).
-   * Re-armed on every play, cleared on pause, at the end and on destroy.
+   * Re-armed on every play, cleared on pause, at the end, on an error and
+   * on destroy.
    */
   function arm() {
     disarm();
-    const due = renewalDue();
-    if (due === null || !wanted || paused || finished) return;
-    renewTimer = setTimeout(
-      () => {
-        renewTimer = null;
-        void refresh();
-      },
-      Math.max(0, due - Date.now())
-    );
+    const delay = renewalDelay();
+    if (delay === null || !wanted || paused || finished) return;
+    renewTimer = setTimeout(() => {
+      renewTimer = null;
+      void refresh();
+    }, delay);
   }
 
   function disarm() {
@@ -480,24 +523,28 @@
 
   // The stream answered 403, and the helper has already destroyed its HLS.js
   // instance. Before the stream's first frame that is a refusal, never an
-  // expiry: asking again would only loop (ask, attach, 403), so the film
-  // says it could not play. After it, the links have run out. The destroy
-  // detached the element and reset its `currentTime` to 0, so the film
-  // resumes from `time`, the last moment it reported (the reset's own
-  // `timeupdate` is still queued). A renewal under way decides; otherwise
-  // renew, unless this stream already had its one ask (the timer's), which
+  // expiry: asking again would only loop (ask, attach, 403). A first stream
+  // refused could not play; a renewal's answer refused is a failed renewal,
+  // which ends the film ("Watch again"). After it, the links have run out.
+  // The destroy detached the element and reset its `currentTime` to 0, so
+  // the film resumes from `time`, the last moment it reported (the reset's
+  // own `timeupdate` is still queued). A renewal under way decides;
+  // otherwise renew, unless this stream already had its one ask (the
+  // timer's) or this playback asked too lately for a real expiry (an ABR
+  // switch to a refused rung, Safari's own HLS on a flaky network), which
   // ends the film where it stands.
   function lapse() {
     hls = null;
     if (!flowing) {
       teardown();
-      fail();
+      if (stream?.renewal) endLapsed();
+      else fail();
       return;
     }
     expired = true;
     stoppedAt = time;
     if (renewing) return;
-    if (asked) endLapsed();
+    if (asked || askedLately()) endLapsed();
     else void refresh();
   }
 
@@ -514,6 +561,10 @@
    * playing if the visitor wants it. With no answer, a stream that has run
    * out ends the film; one renewed early (the timer, or a press that
    * resumes it) plays on until it runs out, and ends then (`lapse`).
+   *
+   * The ask takes a moment, and the film lives on meanwhile: gone, an error
+   * or its end drops the answer; another film started, or a pause, leaves
+   * the swap paused.
    */
   async function refresh(at?: number) {
     const media = video;
@@ -522,6 +573,7 @@
     }
     renewing = true;
     asked = true;
+    lastAskAt = performance.now();
     let next: SignedStream | null = null;
     try {
       next = await renew();
@@ -529,7 +581,8 @@
       next = null;
     }
     renewing = false;
-    if (destroyed) return;
+    if (destroyed || error !== null || finished) return;
+    if (!holds(media)) wanted = false;
     if (!next?.playlistUrl) {
       if (expired) endLapsed();
       else if (wanted && paused) playNow(media).catch(() => {});
@@ -539,7 +592,7 @@
     const from = at ?? (expired ? stoppedAt : media.currentTime);
     teardown();
     try {
-      if (!(await attach(media, next))) return;
+      if (!(await attach(media, next, true))) return;
     } catch {
       fail();
       return;
@@ -650,6 +703,7 @@
     onplaying={() => (waiting = false)}
     oncanplay={() => (waiting = false)}
     onloadeddata={handleLoaded}
+    onerror={handleMediaError}
     ontimeupdate={handleTimeUpdate}
     onprogress={measure}
     ondurationchange={handleDuration}

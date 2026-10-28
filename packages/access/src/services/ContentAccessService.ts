@@ -766,6 +766,7 @@ export class ContentAccessService
       if (!film.ok) {
         // The reason is the log's alone: the caller gets one null for all.
         this.obs.info('Course film stream refused', {
+          organizationId: input.organizationId,
           courseId: input.courseId,
           film: input.film,
           reason: film.reason,

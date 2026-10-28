@@ -16,8 +16,9 @@
   THE PRESS mounts the player in its own tick (`flushSync`), so its `play()`
   keeps the sound (`components/player/start.ts`); a player not fetched yet is
   waited for, and may then start muted. If its code never arrives (a deploy
-  replaced the chunk, the connection dropped), the button says so beside it
-  and a press tries again. A clip the server marked `fullFilm` asks the page
+  replaced the chunk, the connection dropped), or the film cannot play (the
+  player's `onfail`), the poster returns, the button says why beside it, and
+  a press tries again. A clip the server marked `fullFilm` asks the page
   for the full film once the player is here to play it (`film-source.ts`),
   and asks again as its links run out (`filmRenewal`).
 
@@ -74,13 +75,13 @@
   let layer: HTMLDivElement | undefined = $state();
   /** The player had focus when the film ended: "Watch again" takes it. */
   let refocus = $state(false);
-  /** The player's code did not arrive: the button says so, and a press tries again. */
-  let failed = $state(false);
+  /** Why the last press did not play, said beside the button; a press tries again. */
+  let note = $state<string | null>(null);
 
   function press() {
     if (edit || phase === 'loading' || phase === 'up') return;
     refocus = false;
-    failed = false;
+    note = null;
     const ready = loadedPlayerCore();
     if (ready) {
       show(ready);
@@ -90,7 +91,7 @@
     }
     phase = 'loading';
     loadPlayerCore().then(show, () => {
-      failed = true;
+      note = FILM_COPY.failed;
       phase = 'poster';
     });
   }
@@ -107,6 +108,13 @@
     refocus = Boolean(layer?.contains(document.activeElement));
     phase = 'ended';
   }
+
+  // The film cannot play: the poster again, saying why, for another press.
+  function fail(message: string) {
+    refocus = Boolean(layer?.contains(document.activeElement));
+    note = message;
+    phase = 'poster';
+  }
 </script>
 
 {#snippet control()}
@@ -117,7 +125,7 @@
       onclick={press}
       preload={!edit && !page.still}
       takeFocus={refocus}
-      note={failed ? FILM_COPY.failed : null}
+      {note}
     />
   {/if}
 {/snippet}
@@ -133,6 +141,7 @@
         start="sound"
         takeFocus
         onended={finish}
+        onfail={fail}
       />
     </div>
   {/if}

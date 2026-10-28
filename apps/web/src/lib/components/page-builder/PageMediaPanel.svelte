@@ -568,8 +568,11 @@
           Owner P10: the sales page plays a film in full unless paid content
           uses it, and then only its 30-second preview. Said here, under the
           slot, the moment such a film is picked or found already attached, so
-          the cut is never a surprise on the live page. The same rule the public
-          stream applies (`sales-films.ts`), read once with the panel.
+          the cut is never a surprise on the live page. The note covers PAID
+          USE only, the one reason a creator acts on here; it uses the public
+          stream's own paid-use test (`paidUse` in `sales-films.ts`), read once
+          with the panel. The stream also refuses media that is not ready, or
+          whose creator has left the org, and says nothing of those here.
         -->
         {#if sellMedia.previewOnly(entry.slot)}
           <p class="panel__note" role="status">

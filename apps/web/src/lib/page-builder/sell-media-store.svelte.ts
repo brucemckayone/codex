@@ -190,7 +190,11 @@ class SellMediaStore {
    * changes can change it.
    */
   #previewOnly = $state<ReadonlySet<string>>(new Set());
-  /** The org's ready media items, for the pickers. */
+  /**
+   * The VIEWER's own ready media, for the pickers (`GET /api/media` is
+   * creator-scoped). `#previewOnly` covers exactly this plus the course's film
+   * slots (`findPreviewOnlyMedia`).
+   */
   #options = $state<SellMediaOption[]>([]);
   #loading = $state(false);
   #coverBusy = $state(false);

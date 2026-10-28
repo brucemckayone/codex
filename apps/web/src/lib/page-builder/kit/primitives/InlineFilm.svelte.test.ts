@@ -43,6 +43,7 @@ vi.mock('$lib/components/VideoPlayer/hls', () => ({
 }));
 
 import { loadPlayerCore } from '$lib/components/player/load-core';
+import * as m from '$paraglide/messages';
 import { FILM_COPY } from './film-copy';
 import Harness from './InlineFilmHarness.test.svelte';
 
@@ -185,6 +186,27 @@ describe('which film a press plays (P10)', () => {
         (button) => button.textContent?.trim() === FILM_COPY.again
       )
     ).toBe(true);
+  });
+
+  test('the film cannot play: the poster returns, saying why, and a press tries again', async () => {
+    const requestFilm = vi.fn(async () => ({ playlistUrl: FULL }));
+    render({ film: 'intro', requestFilm });
+    press();
+    await settle();
+
+    // Refused before its first frame: it could not play.
+    expire?.();
+    await settle();
+    expect(document.body.querySelector('video')).toBeNull();
+    expect(document.body.querySelector('[role="alert"]')?.textContent).toBe(
+      m.player_error()
+    );
+
+    press();
+    await settle();
+    expect(document.body.querySelector('[role="alert"]')).toBeNull();
+    expect(document.body.querySelectorAll('.lp-film video')).toHaveLength(1);
+    expect(requestFilm).toHaveBeenCalledTimes(2);
   });
 
   test('a clip the server did not mark never asks', () => {

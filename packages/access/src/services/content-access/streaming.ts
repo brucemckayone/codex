@@ -388,6 +388,7 @@ export async function buildFilmStreamResponse(
       mediaItemId: film.mediaId,
       errorName: err instanceof Error ? err.name : undefined,
       errorMessage: err instanceof Error ? err.message : String(err),
+      errorStack: err instanceof Error ? err.stack : undefined,
     });
     throw new InternalServiceError(FILM_STREAM_UNAVAILABLE, undefined, {
       cause: err,

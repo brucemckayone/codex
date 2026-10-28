@@ -7,13 +7,21 @@
  * Media Source. Do not reorder these: see `supportsNativeHls`, where Chrome
  * reporting `'maybe'` for the HLS MIME type broke every player in the app.
  *
- * Error handling:
+ * Error handling (each `onError` names its `HlsErrorKind`):
  * - Network 403 (signed URL expired): hand off to `onUrlExpired` — caller
  *   is expected to fetch a fresh signed URL and rebuild the source. Looping
  *   `startLoad()` against an expired URL only produces cascading 403s.
- * - Other network errors: retries via HLS.js built-in recovery
- * - Media errors: attempts recoverMediaError, then swapAudioCodec on second failure
- * - Fatal unknown errors: destroys instance, calls onError callback
+ * - A fragment that fails to load: `startLoad()` tries again, at most
+ *   FRAGMENT_RETRIES times in a row (a fragment that loads resets the count),
+ *   then destroys the instance and calls onError (`network`).
+ * - A playlist that fails to load (master or variant: 404, 429, 5xx, a
+ *   timeout): destroys the instance and calls onError (`network`) at once. In
+ *   hls.js 1.6 `startLoad()` never reloads a manifest, so "recovering" one
+ *   left the player loading for good, and a failing variant reloaded without
+ *   end.
+ * - Media errors: attempts recoverMediaError, then swapAudioCodec on second
+ *   failure, then destroys the instance and calls onError (`media`)
+ * - Fatal unknown errors: destroys instance, calls onError (`unknown`)
  *
  * Safari native HLS path:
  *   Native HLS on Safari/iOS swallows the individual segment response status,
@@ -40,10 +48,24 @@ interface HlsPlayerHandle {
   cleanup: () => void;
 }
 
+/**
+ * Why a stream failed, for a caller that words it for the visitor:
+ * - `unsupported`: this browser has neither MSE nor native HLS — a capability
+ *   fact, so another browser may play it.
+ * - `media`: decoding failed, even after recovery — as often a broken
+ *   rendition as a browser gap.
+ * - `network`: a playlist would not load, or fragments kept failing.
+ * - `unknown`: anything else fatal.
+ */
+export type HlsErrorKind = 'unsupported' | 'media' | 'network' | 'unknown';
+
+/** A failed fragment is loaded again at most this many times in a row. */
+const FRAGMENT_RETRIES = 2;
+
 interface HlsPlayerOptions {
   media: HTMLMediaElement;
   src: string;
-  onError?: (message: string) => void;
+  onError?: (message: string, kind: HlsErrorKind) => void;
   /**
    * Fired when the current signed URL has (almost certainly) expired — HLS.js
    * saw a 403 from a segment fetch, or Safari native HLS surfaced
@@ -117,7 +139,7 @@ export async function createHlsPlayer(
     // explanation. Guarded on the extension because this same last resort is
     // correct for a plain mp4 URL, which most browsers play fine.
     if (!supportsNativeHls() && /\.m3u8(\?|$)/.test(src)) {
-      onError?.('This browser cannot play this video format.');
+      onError?.('This browser cannot play this video format.', 'unsupported');
     }
 
     let handled = false;
@@ -139,7 +161,7 @@ export async function createHlsPlayer(
       // Non-network or no-callback: surface as a generic playback error.
       if (mediaError && onError) {
         handled = true;
-        onError('Playback error. Please try again.');
+        onError('Playback error. Please try again.', 'media');
       }
     };
     media.addEventListener('error', handleError);
@@ -177,6 +199,11 @@ export async function createHlsPlayer(
   });
 
   let mediaErrorRecoveryAttempts = 0;
+  let fragmentRetries = 0;
+
+  hls.on(HlsJs.Events.FRAG_LOADED, () => {
+    fragmentRetries = 0;
+  });
 
   hls.on(HlsJs.Events.ERROR, (_event: string, data: ErrorData) => {
     if (!data.fatal) return;
@@ -194,9 +221,22 @@ export async function createHlsPlayer(
           onUrlExpired();
           return;
         }
-        // Other network errors (timeouts, genuine connectivity loss):
-        // HLS.js's built-in backoff gives us a reasonable recovery.
-        hls.startLoad();
+        // A fragment (a timeout, a dropped connection) may load again, a
+        // few times in a row. A playlist cannot: `startLoad()` never reloads
+        // one, so it gives up and says so.
+        const fragment =
+          data.details === HlsJs.ErrorDetails.FRAG_LOAD_ERROR ||
+          data.details === HlsJs.ErrorDetails.FRAG_LOAD_TIMEOUT;
+        if (fragment && fragmentRetries < FRAGMENT_RETRIES) {
+          fragmentRetries++;
+          hls.startLoad();
+          break;
+        }
+        hls.destroy();
+        onError?.(
+          'The video could not be loaded. Please try again.',
+          'network'
+        );
         break;
       }
 
@@ -208,14 +248,17 @@ export async function createHlsPlayer(
           hls.recoverMediaError();
         } else {
           hls.destroy();
-          onError?.('Playback error. The video format may not be supported.');
+          onError?.(
+            'Playback error. The video format may not be supported.',
+            'media'
+          );
         }
         mediaErrorRecoveryAttempts++;
         break;
 
       default:
         hls.destroy();
-        onError?.('An unexpected playback error occurred.');
+        onError?.('An unexpected playback error occurred.', 'unknown');
         break;
     }
   });

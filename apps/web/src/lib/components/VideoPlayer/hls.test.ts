@@ -27,21 +27,26 @@ const loadSource = vi.fn();
 const attachMedia = vi.fn();
 const on = vi.fn();
 const destroy = vi.fn();
+const startLoad = vi.fn();
 const isSupported = vi.fn(() => true);
 
 vi.mock('hls.js', () => {
   class FakeHls {
     static isSupported = () => isSupported();
-    static Events = { ERROR: 'hlsError' };
+    static Events = { ERROR: 'hlsError', FRAG_LOADED: 'hlsFragLoaded' };
     static ErrorTypes = {
       NETWORK_ERROR: 'networkError',
       MEDIA_ERROR: 'mediaError',
+    };
+    static ErrorDetails = {
+      FRAG_LOAD_ERROR: 'fragLoadError',
+      FRAG_LOAD_TIMEOUT: 'fragLoadTimeOut',
     };
     loadSource = loadSource;
     attachMedia = attachMedia;
     on = on;
     destroy = destroy;
-    startLoad = vi.fn();
+    startLoad = startLoad;
     recoverMediaError = vi.fn();
     swapAudioCodec = vi.fn();
   }
@@ -152,7 +157,8 @@ describe('createHlsPlayer — path selection', () => {
     await createHlsPlayer({ media, src: MANIFEST, onError });
 
     expect(onError).toHaveBeenCalledWith(
-      expect.stringContaining('cannot play this video format')
+      expect.stringContaining('cannot play this video format'),
+      'unsupported'
     );
   });
 
@@ -173,5 +179,99 @@ describe('createHlsPlayer — path selection', () => {
 
     expect(onError).not.toHaveBeenCalled();
     expect(media.src).toBe('https://cdn.example/x/video.mp4');
+  });
+});
+
+/**
+ * Recovery is bounded, and a stream that cannot recover says so. In hls.js
+ * 1.6 `startLoad()` never reloads a playlist (`PlaylistLoader.startLoad` is
+ * a no-op), so the old "retry every network error" left a master answering
+ * 404, 429 or 5xx on a loading sheen for good, and a failing variant
+ * reloading without end.
+ */
+describe('createHlsPlayer — recovery', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.restoreAllMocks();
+    isSupported.mockReturnValue(true);
+  });
+
+  /** Start a player, and hand back what hls.js would call on each event. */
+  async function player(options: { onUrlExpired?: () => void } = {}) {
+    const onError = vi.fn();
+    const { createHlsPlayer } = await import('./hls');
+    await createHlsPlayer({
+      media: fakeMedia(),
+      src: MANIFEST,
+      onError,
+      ...options,
+    });
+    const handler = (event: string) => {
+      const call = on.mock.calls.find(([name]) => name === event);
+      if (!call) throw new Error(`no ${event} handler`);
+      return call[1] as (event: string, data?: unknown) => void;
+    };
+    const report = (data: Record<string, unknown>) =>
+      handler('hlsError')('hlsError', { fatal: true, ...data });
+    const fail = (details: string, code?: number) =>
+      report({
+        type: 'networkError',
+        details,
+        response: code === undefined ? undefined : { code },
+      });
+    const fragmentLoaded = () => handler('hlsFragLoaded')('hlsFragLoaded');
+    return { onError, report, fail, fragmentLoaded };
+  }
+
+  it.each([
+    ['the master answers 404', 'manifestLoadError', 404],
+    ['the master is rate-limited', 'manifestLoadError', 429],
+    ['the master times out', 'manifestLoadTimeOut', undefined],
+    ['a variant answers 500', 'levelLoadError', 500],
+  ])('%s: gives up at once and says so, never startLoad()', async (_label, details, code) => {
+    const { onError, fail } = await player();
+    fail(details, code);
+    expect(startLoad).not.toHaveBeenCalled();
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledWith(expect.any(String), 'network');
+  });
+
+  it('a failing fragment loads again twice, then gives up', async () => {
+    const { onError, fail } = await player();
+    fail('fragLoadError');
+    fail('fragLoadTimeOut');
+    expect(startLoad).toHaveBeenCalledTimes(2);
+    expect(onError).not.toHaveBeenCalled();
+    fail('fragLoadError');
+    expect(startLoad).toHaveBeenCalledTimes(2);
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledWith(expect.any(String), 'network');
+  });
+
+  it('a fragment that loads earns the next failure its retries again', async () => {
+    const { onError, fail, fragmentLoaded } = await player();
+    fail('fragLoadError');
+    fail('fragLoadError');
+    fragmentLoaded();
+    fail('fragLoadError');
+    expect(startLoad).toHaveBeenCalledTimes(3);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('a 403 still hands off to the caller to renew, unretried', async () => {
+    const onUrlExpired = vi.fn();
+    const { onError, fail } = await player({ onUrlExpired });
+    fail('fragLoadError', 403);
+    expect(onUrlExpired).toHaveBeenCalledTimes(1);
+    expect(startLoad).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('a media error past recovery is a media fault, not a browser gap', async () => {
+    const { onError, report } = await player();
+    for (let i = 0; i < 3; i++) {
+      report({ type: 'mediaError', details: 'bufferAppendError' });
+    }
+    expect(onError).toHaveBeenCalledWith(expect.any(String), 'media');
   });
 });

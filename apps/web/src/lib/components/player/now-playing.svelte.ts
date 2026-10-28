@@ -22,6 +22,14 @@ export function claim(media: HTMLMediaElement): void {
   current = media;
 }
 
+/**
+ * `media` holds the page's one film: no other has started since it did. A
+ * film waiting on a renewal (`PreviewPlayerCore`) plays on only if so.
+ */
+export function holds(media: HTMLMediaElement): boolean {
+  return current === media;
+}
+
 /** `media` is going away: it no longer holds the page's one film. */
 export function release(media: HTMLMediaElement): void {
   if (current === media) current = null;

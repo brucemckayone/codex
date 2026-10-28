@@ -106,19 +106,28 @@ function paidUse(db: AccessQueryClient): SQL {
 }
 
 /**
- * Rules (b) and (c) for the outer query's `media_items` row: its FULL film may
- * stream from a sell slot of a course in `organizationId` (a value, or the
- * joined `courses.organization_id` column). Rule (a) is the caller's: it has
- * read the course whose slot holds the media.
- *
- * Raw `sql`, as `library.ts` composes its scopes: drizzle's `and()` is typed
- * `SQL | undefined`, and this is a predicate every caller relies on whole.
+ * Rule (c)'s media half, for the outer query's `media_items` row: not deleted,
+ * `ready`, video or audio, with an HLS master.
  */
-export function fullFilmEligible(
+function filmReady(): SQL {
+  return sql`(
+    ${mediaItems.deletedAt} IS NULL
+    AND ${mediaItems.status} = ${MEDIA_STATUS.READY}
+    AND ${mediaItems.hlsMasterPlaylistKey} IS NOT NULL
+    AND ${mediaItems.mediaType} IN (${MEDIA_TYPES.VIDEO}, ${MEDIA_TYPES.AUDIO})
+  )`;
+}
+
+/**
+ * Rule (c)'s membership half: the outer `media_items` row's creator is an
+ * ACTIVE member of `organizationId` (a value, or the joined
+ * `courses.organization_id` column), as `assertMediaItemsInOrg` asks.
+ */
+function creatorIsMember(
   db: AccessQueryClient,
   organizationId: string | SQLWrapper
 ): SQL {
-  const activeMember = exists(
+  return exists(
     db
       .select({ one: sql`1` })
       .from(organizationMemberships)
@@ -130,14 +139,31 @@ export function fullFilmEligible(
         )
       )
   );
+}
+
+/**
+ * Rules (b) and (c) for the outer query's `media_items` row: its FULL film may
+ * stream from a sell slot of a course in `organizationId`. Rule (a) is the
+ * caller's: it has read the course whose slot holds the media. The minter
+ * projects the same three parts one by one, to log which refused.
+ *
+ * Raw `sql`, as `library.ts` composes its scopes: drizzle's `and()` is typed
+ * `SQL | undefined`, and this is a predicate every caller relies on whole.
+ */
+export function fullFilmEligible(
+  db: AccessQueryClient,
+  organizationId: string | SQLWrapper
+): SQL {
   return sql`(
-    ${mediaItems.deletedAt} IS NULL
-    AND ${mediaItems.status} = ${MEDIA_STATUS.READY}
-    AND ${mediaItems.hlsMasterPlaylistKey} IS NOT NULL
-    AND ${mediaItems.mediaType} IN (${MEDIA_TYPES.VIDEO}, ${MEDIA_TYPES.AUDIO})
-    AND ${activeMember}
+    ${filmReady()}
+    AND ${creatorIsMember(db, organizationId)}
     AND NOT ${paidUse(db)}
   )`;
+}
+
+/** A predicate as a strict boolean column: NULL (an absent row) reads false. */
+function asFlag(predicate: SQL): SQL<boolean> {
+  return sql<boolean>`CASE WHEN ${predicate} THEN true ELSE false END`;
 }
 
 /**
@@ -146,10 +172,16 @@ export function fullFilmEligible(
  *   - `no-course`: no published, non-deleted course of a live org by that id
  *     in that org (a draft, a deleted course or org, another org's id);
  *   - `empty-slot`: the course has no film in that slot;
- *   - `not-eligible`: the film fails {@link fullFilmEligible} (a paid use,
- *     media not ready, a creator who has left).
+ *   - `not-ready`: the media is deleted, not `ready`, or has no HLS master;
+ *   - `creator-not-member`: its creator has left the org, or never joined;
+ *   - `paid-use`: content that is anything but plainly free uses it.
  */
-export type CourseFilmRefusal = 'no-course' | 'empty-slot' | 'not-eligible';
+export type CourseFilmRefusal =
+  | 'no-course'
+  | 'empty-slot'
+  | 'not-ready'
+  | 'creator-not-member'
+  | 'paid-use';
 
 export type CourseFilmResolution =
   | { ok: true; creatorId: string; mediaId: string }
@@ -158,8 +190,9 @@ export type CourseFilmResolution =
 /**
  * The film a press asked for, when its full stream may be minted: ONE
  * statement, the course under rule (a) with its slot's media LEFT-joined and
- * {@link fullFilmEligible} projected, so the one round trip also says which
- * part refused.
+ * {@link fullFilmEligible}'s three parts projected one by one, so the one
+ * round trip also says which part refused. It mints only when all three hold,
+ * exactly the conjunction `fullFilmEligible` is.
  *
  * `organizationId` comes from the browser, so it is a CONSISTENCY filter, not
  * an authorisation input: it can only narrow, and the course→org join is the
@@ -173,10 +206,9 @@ export async function resolveCourseFilm(
     .select({
       mediaId: mediaItems.id,
       creatorId: mediaItems.creatorId,
-      eligible: sql<boolean>`CASE WHEN ${fullFilmEligible(
-        db,
-        courses.organizationId
-      )} THEN true ELSE false END`,
+      ready: asFlag(filmReady()),
+      member: asFlag(creatorIsMember(db, courses.organizationId)),
+      paid: asFlag(paidUse(db)),
     })
     .from(courses)
     .innerJoin(organizations, eq(organizations.id, courses.organizationId))
@@ -197,8 +229,11 @@ export async function resolveCourseFilm(
   if (!row) return { ok: false, reason: 'no-course' };
   if (!row.mediaId || !row.creatorId)
     return { ok: false, reason: 'empty-slot' };
-  // `=== true`, not truthiness: only the predicate's own true mints.
-  if (row.eligible !== true) return { ok: false, reason: 'not-eligible' };
+  // `=== true` / `!== false`, not truthiness: only the predicate's own
+  // answer mints, and anything unexpected refuses.
+  if (row.ready !== true) return { ok: false, reason: 'not-ready' };
+  if (row.member !== true) return { ok: false, reason: 'creator-not-member' };
+  if (row.paid !== false) return { ok: false, reason: 'paid-use' };
   return { ok: true, creatorId: row.creatorId, mediaId: row.mediaId };
 }
 
@@ -216,19 +251,20 @@ export async function findPreviewOnlyMedia(
   db: AccessQueryClient,
   input: { organizationId: string; courseId: string; viewerId?: string }
 ): Promise<string[]> {
-  const inThisCourse = exists(
-    db
-      .select({ one: sql`1` })
-      .from(courses)
-      .where(
-        and(
-          eq(courses.id, input.courseId),
-          eq(courses.organizationId, input.organizationId),
-          isNull(courses.deletedAt),
-          sql`${mediaItems.id} IN (${courses.introVideoMediaId}, ${courses.previewVideoMediaId}, ${courses.guideVideoMediaId})`
-        )
-      )
-  );
+  // UNCORRELATED: the course's three film ids are read once (an InitPlan),
+  // so `id = ANY(...)` and `creator_id = $viewer` are both index arms (the
+  // pkey and `idx_media_items_creator_id`, a BitmapOr) instead of a scan of
+  // `media_items` that tests every row against the course. No course row
+  // (another org's id, a deleted course) is `= ANY(NULL)`: no row matches.
+  // The `::uuid[]` cast is load-bearing: without it Postgres reads
+  // `ANY((SELECT ...))` as `ANY (subquery)` and compares uuid with uuid[].
+  const inThisCourse = sql`${mediaItems.id} = ANY((
+    SELECT ARRAY[${courses.introVideoMediaId}, ${courses.previewVideoMediaId}, ${courses.guideVideoMediaId}]
+    FROM ${courses}
+    WHERE ${courses.id} = ${input.courseId}
+      AND ${courses.organizationId} = ${input.organizationId}
+      AND ${courses.deletedAt} IS NULL
+  )::uuid[])`;
   // Raw `sql`, not `or()`: `or()` is `SQL | undefined`, and `and()` would
   // drop it without a word, which here would widen the set to every media.
   const reach = input.viewerId
