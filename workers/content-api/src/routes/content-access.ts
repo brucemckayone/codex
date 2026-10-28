@@ -48,7 +48,8 @@ const app = new Hono<HonoEnv>();
  * a shared cache's or the viewer's own browser's — outlives the credential
  * inside it. Not merely per-viewer, per-REQUEST.
  *
- * NAMED RATHER THAN SPELLED OUT. These two routes are plain Hono handlers, not
+ * NAMED RATHER THAN SPELLED OUT. The four HLS playlist proxies (content and
+ * course film, master and variant) are plain Hono handlers, not
  * `procedure()` calls, so they cannot declare `policy.cache` and must set the
  * header themselves. Using the preset is what keeps the value on the same
  * dial as every other response in the platform: the string is unchanged
@@ -64,13 +65,15 @@ const HLS_PLAYLIST_HEADERS = {
 /**
  * Count against the HLS token the caller presented.
  *
- * These two routes carry no session: the video player authenticates with the
+ * The four playlist proxies carry no session: the video player authenticates with the
  * short-lived token in the query string, so `sessionSubject()` names nothing
  * and — when the player is reached through a worker hop — `trustedIpSubject()`
  * names nothing either. The token is the one subject this surface can ALWAYS
  * name, so keying on it is what keeps the limiter from permanently failing
- * open here. It is per-user and per-media, which is exactly the granularity a
- * segment-refresh budget wants. The middleware SHA-256s the value before it
+ * open here. A content token is per-user and per-media, which is exactly the
+ * granularity a segment-refresh budget wants; a film token is minted per
+ * press for an anonymous visitor, so its bucket is per press and per course,
+ * and the address bucket bounds the visitor. The middleware SHA-256s the value before it
  * reaches a bucket key or a log line.
  *
  * A random-token flood still mints a fresh bucket per request; the address

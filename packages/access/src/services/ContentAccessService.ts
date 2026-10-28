@@ -71,6 +71,7 @@ import {
   getHlsMasterPlaylist as buildHlsMasterPlaylist,
   getHlsVariantPlaylist as buildHlsVariantPlaylist,
   buildStreamingResponse,
+  filmStreamFailure,
   resolveStreamableMedia,
 } from './content-access/streaming';
 import { resolveCourseFilm } from './sales-films';
@@ -791,7 +792,8 @@ export class ContentAccessService
       });
       return { playlistUrl, expiresAt: toIso(expiresAt) };
     } catch (error) {
-      this.handleError(error, 'getCourseFilmStream');
+      // Not handleError: its context would reach this anonymous caller.
+      throw filmStreamFailure(error, this.obs, input);
     }
   }
 

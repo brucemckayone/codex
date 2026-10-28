@@ -10,7 +10,11 @@
 import { MEDIA_STATUS, MEDIA_TYPES } from '@codex/constants';
 import { toIso } from '@codex/database';
 import type { ObservabilityClient } from '@codex/observability';
-import { InternalServiceError } from '@codex/service-errors';
+import {
+  InternalServiceError,
+  isServiceError,
+  type ServiceError,
+} from '@codex/service-errors';
 import {
   getHlsMasterKey,
   getHlsVariantKey,
@@ -328,6 +332,34 @@ export async function getHlsMasterPlaylist(
 
 /** The one message a film-stream failure gives its anonymous caller. */
 const FILM_STREAM_UNAVAILABLE = 'Streaming is unavailable';
+
+/**
+ * The film minter's error for a failure it did not raise itself, most often
+ * the eligibility read. `handleError` would wrap that with the service name
+ * and environment as context, which `mapErrorToResponse` hands the anonymous
+ * caller as `details`, 500s included; so it is logged here and replaced by
+ * the same context-free error a signing failure gives.
+ *
+ * A ServiceError passes through unchanged: on this path the only ones are
+ * {@link buildFilmStreamResponse}'s, already context-free and logged.
+ */
+export function filmStreamFailure(
+  err: unknown,
+  obs: ObservabilityClient,
+  ids: { courseId: string; film: string }
+): ServiceError {
+  if (isServiceError(err)) return err;
+  obs.error('Failed to mint course film stream', {
+    courseId: ids.courseId,
+    film: ids.film,
+    errorName: err instanceof Error ? err.name : undefined,
+    errorMessage: err instanceof Error ? err.message : String(err),
+    errorStack: err instanceof Error ? err.stack : undefined,
+  });
+  return new InternalServiceError(FILM_STREAM_UNAVAILABLE, undefined, {
+    cause: err,
+  });
+}
 
 /**
  * Mint the signed FULL stream of a course sales film (owner P10): a film token

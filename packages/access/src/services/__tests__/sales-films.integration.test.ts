@@ -600,6 +600,52 @@ describe('course sales films (owner P10)', () => {
         })
       );
     });
+
+    it('a failed eligibility read is the same generic 500, with no service context for the caller', async () => {
+      // handleError would wrap it with { service, environment, context }, and
+      // mapErrorToResponse sends that to the anonymous caller as `details`.
+      const unreachable = new Proxy(db, {
+        get: (target, prop, receiver) =>
+          prop === 'select'
+            ? () => {
+                throw new Error('connection refused');
+              }
+            : Reflect.get(target, prop, receiver),
+      });
+      const offline = new ContentAccessService({
+        db: unreachable,
+        environment: 'test',
+        r2: {} as R2,
+        purchaseService: new PurchaseService(
+          { db, environment: 'test', ...createTestMoneyDeps() },
+          {} as Stripe
+        ),
+        contentApiBaseUrl: API,
+        hlsTokenSecret: SECRET,
+      });
+      const error = vi.spyOn(obsOf(offline), 'error');
+
+      const failure = await offline
+        .getCourseFilmStream({
+          organizationId: orgId,
+          courseId: '00000000-0000-4000-8000-000000000000',
+          film: 'intro',
+        })
+        .then(
+          () => null,
+          (err: unknown) => err
+        );
+      expect(failure).toBeInstanceOf(InternalServiceError);
+      expect(failure).toMatchObject({
+        statusCode: 500,
+        message: 'Streaming is unavailable',
+        context: undefined,
+      });
+      expect(error).toHaveBeenCalledWith(
+        'Failed to mint course film stream',
+        expect.objectContaining({ errorMessage: 'connection refused' })
+      );
+    });
   });
 
   describe("findPreviewOnlyMedia: the studio's note", () => {
