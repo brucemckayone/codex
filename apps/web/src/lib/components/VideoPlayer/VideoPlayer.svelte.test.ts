@@ -457,6 +457,28 @@ describe('VideoPlayer — a rebuilt stream keeps the viewer’s place', () => {
     unmount(component);
   });
 
+  test('a 403 before the first stream landed rebuilds at the saved progress, not 0:00', async () => {
+    const props = $state({
+      src: SRC_A,
+      contentId: 'lesson-a',
+      contentTitle: 'Lesson one',
+      initialProgress: 1800,
+    });
+    const component = mount(VideoPlayer, { target: document.body, props });
+    flushSync();
+    await vi.waitFor(() => expect(recorded).toHaveLength(1));
+    const el = videoElement();
+    resetElement(el);
+
+    // The page's link ran out before the stream knew its length.
+    recorded[0]?.onUrlExpired?.(0);
+    await vi.waitFor(() => expect(recorded).toHaveLength(2));
+    el.dispatchEvent(new Event('loadedmetadata'));
+    expect(el.currentTime).toBe(1800);
+
+    unmount(component);
+  });
+
   test('an element error on a live hls.js stream destroys it and keeps the place for Retry', async () => {
     hlsMode = 'mse';
     const { component } = await mountPlayer();
@@ -557,6 +579,63 @@ describe('VideoPlayer — renewing the link', () => {
     expect(refresh).not.toHaveBeenCalled();
     expect(recorded).toHaveLength(1);
     expect(play).not.toHaveBeenCalled();
+    unmount(component);
+  });
+
+  test('a 403 while the renewal’s ask is out keeps its place for the rebuild', async () => {
+    const { component } = await mountExpiring(10 * 60_000);
+    const el = videoElement();
+    Object.defineProperty(el, 'currentTime', {
+      configurable: true,
+      writable: true,
+      value: 0,
+    });
+    let answer: (
+      value: Awaited<ReturnType<typeof refreshStreamingUrl>>
+    ) => void = () => {};
+    refresh.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }) as ReturnType<typeof refreshStreamingUrl>
+    );
+
+    setPlaying(el, true);
+    await vi.advanceTimersByTimeAsync(9 * 60_000 + 1000);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    // A laptop wakes past the link's end: the old stream 403s mid-ask.
+    recorded[0]?.onUrlExpired?.(540);
+    answer({
+      streamingUrl: 'https://cdn.test/refreshed/index.m3u8',
+      waveformUrl: null,
+      expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.waitFor(() => expect(recorded).toHaveLength(2));
+    el.dispatchEvent(new Event('loadedmetadata'));
+    expect(el.currentTime).toBe(540);
+    unmount(component);
+  });
+
+  test('a play under the error card is refused and arms nothing', async () => {
+    const { component } = await mountExpiring(10 * 60_000);
+    const el = videoElement();
+    recorded[0]?.onError?.(
+      'This could not be loaded. Please try again.',
+      'network',
+      90
+    );
+    flushSync();
+    pauseSpy.mockClear();
+
+    // Media keys or picture-in-picture press play on the dead element.
+    setPlaying(el, true);
+    expect(pauseSpy).toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(refresh).not.toHaveBeenCalled();
+    expect(
+      document.body.querySelector('.video-player-error-retry')
+    ).not.toBeNull();
     unmount(component);
   });
 

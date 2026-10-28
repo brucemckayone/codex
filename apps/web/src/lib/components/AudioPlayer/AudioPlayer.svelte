@@ -77,10 +77,16 @@
   let resumePoint: number | null = null;
   /** Drops a build's wait for its stream's metadata (`landPlace`). */
   let unland: (() => void) | null = null;
-  /** The place that wait will land when nothing was kept (`fail` keeps it). */
+  /** What that wait will land when nothing was kept (`keepPending`). */
   let pendingFallback = 0;
-  /** A failure stopped playing audio: Retry plays on (`fail`). */
-  let failedWhilePlaying = false;
+  let pendingResume = false;
+  /**
+   * The next rebuild plays on: a failure, or a dropped build, interrupted
+   * audio the listener was playing (`fail`, `keepPending`).
+   */
+  let playOnNext = false;
+  /** A 403 killed the old stream while a renewal's ask was out. */
+  let lapsedMidAsk = false;
   /**
    * A renewal or Retry built this stream and it has played nothing yet. A
    * 403 now is a refusal, not an expiry (its link is seconds old): asking
@@ -199,8 +205,8 @@
    * error card and its Retry live in the main player.
    */
   function fail(message: string) {
-    if (unland && resumePoint === null) keepPlace(pendingFallback);
-    failedWhilePlaying ||= isPlaying;
+    keepPending();
+    playOnNext ||= isPlaying;
     teardownRefresh();
     isPlaying = false;
     stopAnalysisLoop();
@@ -239,8 +245,20 @@
       return;
     }
     pendingFallback = fallback;
+    pendingResume = resume;
     el.addEventListener('loadedmetadata', land, { once: true });
     unland = () => el.removeEventListener('loadedmetadata', land);
+  }
+
+  /**
+   * Keep what a build that has not landed yet was to give its stream, its
+   * place and its play-on, before a failure or a rebuild drops that wait
+   * (mirrors VideoPlayer).
+   */
+  function keepPending() {
+    if (!unland) return;
+    if (resumePoint === null) keepPlace(pendingFallback);
+    playOnNext ||= pendingResume;
   }
 
   /**
@@ -251,8 +269,9 @@
    * then set to the truth, and the renewal timer stops with the stream.
    */
   function stopForRebuild(): boolean {
-    const wasPlaying = isPlaying || failedWhilePlaying;
-    failedWhilePlaying = false;
+    keepPending();
+    const wasPlaying = isPlaying || playOnNext;
+    playOnNext = false;
     teardownHls();
     teardownRefresh();
     isPlaying = !(audioEl?.paused ?? true);
@@ -327,6 +346,13 @@
   }
 
   function handlePlay() {
+    // A play under the error card (media keys, a script) is refused: it would
+    // re-arm the renewal, which then clears the card and plays unasked. The
+    // card's Try Again is the way back.
+    if (errorMessage) {
+      audioEl?.pause();
+      return;
+    }
     isPlaying = true;
     // Lazily create audio analyser on first play (requires user gesture for AudioContext)
     if (audioEl && !analyserHandle) {
@@ -433,7 +459,7 @@
     loading = true;
     errorMessage = '';
     // This build's `resume` says what plays; an earlier failure's wish is spent.
-    failedWhilePlaying = false;
+    playOnNext = false;
     freshUnframed = false;
 
     try {
@@ -569,14 +595,21 @@
    *   and the element, still playing, says it live.
    */
   async function handleUrlExpired(at?: number) {
-    if (refreshInFlight) return;
+    // A 403's stream is already dead, so its place is kept first, even while
+    // a renewal's ask is out (mirrors VideoPlayer).
     if (at !== undefined) keepPlace(at);
+    if (refreshInFlight) {
+      if (at !== undefined) lapsedMidAsk = true;
+      return;
+    }
     if (freshUnframed) {
       fail('This could not be loaded. Please try again.');
       teardownHls();
       return;
     }
     refreshInFlight = true;
+    lapsedMidAsk = false;
+    const item = initializedContentId;
     let stopped = false;
     try {
       await buildFresh(() => {
@@ -586,9 +619,11 @@
         return stopForRebuild();
       });
     } catch {
+      // The listener moved on to another item, whose build owns the element.
+      if (item !== initializedContentId) return;
       // A timer's renewal that could not ask leaves its link playing out its
-      // last minute, and that link's 403 asks again.
-      if (at === undefined && !stopped) return;
+      // last minute, and that link's 403 asks again — unless it died meanwhile.
+      if (at === undefined && !stopped && !lapsedMidAsk) return;
       fail('Playback link expired and could not be refreshed. Please try again.');
       // On the native path the old link still plays for up to a minute;
       // nothing may play on under the error card.
@@ -632,10 +667,13 @@
     // One at a time: a second press would spend the first one's play-on.
     if (refreshInFlight) return;
     refreshInFlight = true;
+    const item = initializedContentId;
     const resume = stopForRebuild();
     try {
       await buildFresh(() => resume);
     } catch {
+      // The listener moved on to another item, whose build owns the element.
+      if (item !== initializedContentId) return;
       // Refresh endpoint itself failed — reset the init guard and try the
       // original src path; transient network blips may self-heal. It lands
       // the kept place too.
@@ -805,7 +843,7 @@
    * Attached via `onkeydown` on `.audio-player` — NOT `<svelte:window>` — so
    * Space / Arrow / m don't hijack every `<button>` on the page.
    */
-  const handleKey = createMediaKeyboardHandler({
+  const mediaKeys = createMediaKeyboardHandler({
     getWrapper: () => playerEl,
     getMedia: () => audioEl ?? null,
     shortcuts: {
@@ -814,6 +852,12 @@
       seekSecs: 10,
     },
   });
+
+  /** Under the error card the keys are the card's: Space reaches Try Again. */
+  function handleKey(e: KeyboardEvent) {
+    if (errorMessage) return;
+    mediaKeys(e);
+  }
 </script>
 
 <!-- Hidden audio element.

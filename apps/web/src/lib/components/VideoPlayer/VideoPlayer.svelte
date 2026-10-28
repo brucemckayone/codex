@@ -145,10 +145,16 @@
   let resumePoint: number | null = null;
   /** Drops a build's wait for its stream's metadata (`landPlace`). */
   let unland: (() => void) | null = null;
-  /** The place that wait will land when nothing was kept (`fail` keeps it). */
+  /** What that wait will land when nothing was kept (`keepPending`). */
   let pendingFallback = 0;
-  /** A failure stopped a playing film: Retry plays on (`fail`). */
-  let failedWhilePlaying = false;
+  let pendingResume = false;
+  /**
+   * The next rebuild plays on: a failure, or a dropped build, interrupted a
+   * film the viewer was watching (`fail`, `keepPending`).
+   */
+  let playOnNext = false;
+  /** A 403 killed the old stream while a renewal's ask was out. */
+  let lapsedMidAsk = false;
   /**
    * A renewal or Retry built this stream and it has shown no frame yet. A
    * 403 now is a refusal, not an expiry (its link is seconds old): asking
@@ -372,6 +378,13 @@
   }
 
   function handlePlay() {
+    // A play under the error card (media keys, picture-in-picture) is
+    // refused: it would re-arm the renewal, which then clears the card and
+    // plays unasked. The card's Try Again is the way back.
+    if (errorMessage) {
+      videoEl?.pause();
+      return;
+    }
     isPaused = false;
     hasStartedPlayback = true;
     scheduleHideControls();
@@ -528,8 +541,8 @@
    * Retry never starts a paid film at 0:00.
    */
   function fail(message: string) {
-    if (unland && resumePoint === null) keepPlace(pendingFallback);
-    failedWhilePlaying ||= !isPaused;
+    keepPending();
+    playOnNext ||= !isPaused;
     teardownRefresh();
     isPaused = true;
     errorMessage = message;
@@ -565,8 +578,21 @@
       return;
     }
     pendingFallback = fallback;
+    pendingResume = resume;
     el.addEventListener('loadedmetadata', land, { once: true });
     unland = () => el.removeEventListener('loadedmetadata', land);
+  }
+
+  /**
+   * Keep what a build that has not landed yet was to give its stream, its
+   * place and its play-on, before a failure or a rebuild drops that wait.
+   * Without it, a stream that 403s or fails before its first metadata
+   * would be rebuilt at 0:00, paused.
+   */
+  function keepPending() {
+    if (!unland) return;
+    if (resumePoint === null) keepPlace(pendingFallback);
+    playOnNext ||= pendingResume;
   }
 
   /**
@@ -577,8 +603,9 @@
    * then set to the truth, and the renewal timer stops with the stream.
    */
   function stopForRebuild(): boolean {
-    const wasPlaying = !isPaused || failedWhilePlaying;
-    failedWhilePlaying = false;
+    keepPending();
+    const wasPlaying = !isPaused || playOnNext;
+    playOnNext = false;
     teardownHls();
     teardownRefresh();
     isPaused = videoEl?.paused ?? true;
@@ -765,7 +792,7 @@
     errorMessage = '';
     hasStartedPlayback = false;
     // This build's `resume` says what plays; an earlier failure's wish is spent.
-    failedWhilePlaying = false;
+    playOnNext = false;
     freshUnframed = false;
     clearBuffering();
     lastInitialisedSrc = src;
@@ -897,14 +924,22 @@
    *   and the element, still playing, says it live.
    */
   async function handleUrlExpired(at?: number) {
-    if (refreshInFlight) return;
+    // A 403's stream is already dead, so its place is kept first, even while
+    // a renewal's ask is out: the timer's renewal keeps the old stream until
+    // its answer, and a laptop that wakes past the link's end hits both.
     if (at !== undefined) keepPlace(at);
+    if (refreshInFlight) {
+      if (at !== undefined) lapsedMidAsk = true;
+      return;
+    }
     if (freshUnframed) {
       fail('This could not be loaded. Please try again.');
       teardownHls();
       return;
     }
     refreshInFlight = true;
+    lapsedMidAsk = false;
+    const item = lastInitialisedContentId;
     let stopped = false;
     try {
       await buildFresh(() => {
@@ -914,9 +949,11 @@
         return stopForRebuild();
       });
     } catch {
+      // The viewer moved on to another item, whose build owns the element.
+      if (item !== lastInitialisedContentId) return;
       // A timer's renewal that could not ask leaves its link playing out its
-      // last minute, and that link's 403 asks again.
-      if (at === undefined && !stopped) return;
+      // last minute, and that link's 403 asks again — unless it died meanwhile.
+      if (at === undefined && !stopped && !lapsedMidAsk) return;
       fail('Playback link expired and could not be refreshed. Please try again.');
       // On the native path the old link still plays for up to a minute;
       // nothing may play on under the error card.
@@ -962,10 +999,13 @@
     // One at a time: a second press would spend the first one's play-on.
     if (refreshInFlight) return;
     refreshInFlight = true;
+    const item = lastInitialisedContentId;
     const resume = stopForRebuild();
     try {
       await buildFresh(() => resume);
     } catch {
+      // The viewer moved on to another item, whose build owns the element.
+      if (item !== lastInitialisedContentId) return;
       // Refresh endpoint itself unreachable — fall back to the original
       // src; the network blip that caused the error may have already
       // recovered. It lands the kept place too.
