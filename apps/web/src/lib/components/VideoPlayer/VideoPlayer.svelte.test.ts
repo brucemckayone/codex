@@ -37,6 +37,9 @@ interface RecordedCall {
   src: string;
   srcAttrAtCall: string | null;
   pauseCountAtCall: number;
+  /** What `hls.ts` calls when the stream fails for good, or expires. */
+  onError?: (message: string, kind: string, at: number) => void;
+  onUrlExpired?: (at: number) => void;
 }
 let recorded: RecordedCall[] = [];
 const destroyedInstances: string[] = [];
@@ -47,11 +50,21 @@ const loadSpy = vi.fn();
 
 vi.mock('./hls', () => ({
   createHlsPlayer: vi.fn(
-    async ({ media, src }: { media: HTMLMediaElement; src: string }) => {
+    async ({
+      media,
+      src,
+      onError,
+      onUrlExpired,
+    }: Pick<RecordedCall, 'onError' | 'onUrlExpired'> & {
+      media: HTMLMediaElement;
+      src: string;
+    }) => {
       recorded.push({
         src,
         srcAttrAtCall: media.getAttribute('src'),
         pauseCountAtCall: pauseSpy.mock.calls.length,
+        onError,
+        onUrlExpired,
       });
       if (hlsMode === 'native') {
         media.setAttribute('src', src);
@@ -225,6 +238,68 @@ describe('VideoPlayer — same item, freshly signed URL', () => {
     expect(recorded).toHaveLength(1); // no rebuild
     expect(destroyedInstances).toHaveLength(0);
     expect(pauseSpy).not.toHaveBeenCalled();
+
+    unmount(component);
+  });
+});
+
+/**
+ * A rebuilt stream keeps the viewer's place. `hls.ts` destroys a failed or
+ * expired stream, and the destroy resets the element to 0, so it reads the
+ * playhead first and passes it on (`at`). Without it a paid viewer 50
+ * minutes in who lost the network pressed Retry, the film started at 0:00,
+ * and the progress tracker saved that over their resume point.
+ */
+describe('VideoPlayer — a rebuilt stream keeps the viewer’s place', () => {
+  /** The element after the helper's destroy: back at 0, its length known again once rebuilt. */
+  function resetElement(el: HTMLVideoElement) {
+    Object.defineProperty(el, 'duration', { configurable: true, value: 5400 });
+    Object.defineProperty(el, 'currentTime', {
+      configurable: true,
+      writable: true,
+      value: 0,
+    });
+  }
+
+  test('Retry after a network failure resumes where it failed; no save writes 0 meanwhile', async () => {
+    const { component } = await mountPlayer();
+    const el = videoElement();
+    resetElement(el);
+
+    recorded[0]?.onError?.(
+      'This could not be loaded. Please try again.',
+      'network',
+      3012
+    );
+    flushSync();
+    document.body
+      .querySelector<HTMLButtonElement>('.video-player-error-retry')
+      ?.click();
+    await vi.waitFor(() => expect(recorded).toHaveLength(2));
+
+    // The new stream reads 0 until it knows its length: a save now keeps the place.
+    el.dispatchEvent(new Event('pause'));
+    expect(updateLocalProgress).toHaveBeenLastCalledWith(
+      'lesson-a',
+      3012,
+      5400
+    );
+    expect(updateLocalProgress).not.toHaveBeenCalledWith('lesson-a', 0, 5400);
+    el.dispatchEvent(new Event('loadedmetadata'));
+    expect(el.currentTime).toBe(3012);
+
+    unmount(component);
+  });
+
+  test('an expiry resumes where the helper read the playhead, not the reset 0', async () => {
+    const { component } = await mountPlayer();
+    const el = videoElement();
+    resetElement(el);
+
+    recorded[0]?.onUrlExpired?.(612);
+    await vi.waitFor(() => expect(recorded).toHaveLength(2));
+    el.dispatchEvent(new Event('loadedmetadata'));
+    expect(el.currentTime).toBe(612);
 
     unmount(component);
   });

@@ -70,7 +70,7 @@
   } from '$lib/components/ui/Icon';
   import { createHlsPlayer, type HlsErrorKind } from '$lib/components/VideoPlayer/hls';
   import * as m from '$paraglide/messages';
-  import { claim, holds, release, showing } from './now-playing.svelte';
+  import { claim, displaced, mark, release, showing } from './now-playing.svelte';
   import { playNow, settleStart } from './start';
   import { clock, loadedTo } from './timeline';
 
@@ -207,6 +207,8 @@
   let asked = false;
   /** It has played a frame since it attached; a 403 before that is a refusal. */
   let flowing = false;
+  /** Its element's error has had its one HLS.js recovery (`handleMediaError`). */
+  let recovered = false;
   /** Drops the last swap's resume, should that stream go before it loads. */
   let unresume: (() => void) | null = null;
   let renewing = false;
@@ -260,15 +262,17 @@
   }
 
   /**
-   * The film cannot play: say so, once, and stop asking for it. Only a
-   * browser with no way to play HLS at all (`unsupported`) is told to try
-   * another; a media error past recovery is as often the film's own.
+   * The film cannot play: say so, once, stop asking for it, and let the
+   * stream go, so nothing is left to play under the error. Only a browser
+   * with no way to play HLS at all (`unsupported`) is told to try another; a
+   * media error past recovery is as often the film's own.
    */
   function fail(kind?: HlsErrorKind) {
     if (error !== null) return;
     error = kind === 'unsupported' ? m.player_error_format() : m.player_error();
     waiting = false;
     disarm();
+    teardown();
     onfail?.(error);
   }
 
@@ -296,7 +300,8 @@
   }
 
   function toggle() {
-    if (!video || fixed) return;
+    // Behind an error there is nothing to play, Space and K included.
+    if (!video || fixed || error !== null) return;
     if (finished) {
       replay();
     } else if (video.paused) {
@@ -373,9 +378,16 @@
   }
 
   // The element's own error, which HLS.js does not always raise (a decode
-  // failure). On Safari's own HLS a network error is the renewal signal,
+  // failure). HLS.js recovers one on its next append, but the element says
+  // so first, so each stream gets that recovery once; a second error is the
+  // film's. On Safari's own HLS a network error is the renewal signal,
   // which the helper hands to `lapse`.
   function handleMediaError() {
+    if (hls && !recovered) {
+      recovered = true;
+      hls.recoverMediaError();
+      return;
+    }
     if (!hls && video?.error?.code === MediaError.MEDIA_ERR_NETWORK) return;
     fail('media');
   }
@@ -445,10 +457,15 @@
     expired = false;
     asked = false;
     flowing = false;
+    recovered = false;
     const handle = await createHlsPlayer({
       media,
       src: stream.url,
-      onError: (_message, kind) => fail(kind),
+      // The helper has already destroyed its instance.
+      onError: (_message, kind) => {
+        hls = null;
+        fail(kind);
+      },
       onUrlExpired: signed && renew ? lapse : undefined,
     });
     hls = handle.hls;
@@ -463,8 +480,11 @@
   async function begin(media: HTMLVideoElement) {
     try {
       // A press may still be asking for the full film; its play() already
-      // holds the activation.
+      // holds the activation. That ask is this playback's first, so the
+      // two-minute floor between asks counts from it.
+      const askedAt = performance.now();
       const source = typeof src === 'string' ? src : await src;
+      if (typeof source !== 'string') lastAskAt = askedAt;
       if (destroyed || !(await attach(media, source, false))) return;
       if (start === 'muted') {
         wanted = true;
@@ -548,9 +568,13 @@
     else void refresh();
   }
 
-  /** No stream came back: the film ends here, never on the 30s preview. */
+  /**
+   * No stream came back: the film ends here, never on the 30s preview. Its
+   * stream is dead, so "Watch again" answered `null` ends it again.
+   */
   function endLapsed() {
     lapsed = true;
+    expired = true;
     video?.pause();
     finish();
   }
@@ -574,6 +598,7 @@
     renewing = true;
     asked = true;
     lastAskAt = performance.now();
+    const since = mark();
     let next: SignedStream | null = null;
     try {
       next = await renew();
@@ -582,7 +607,7 @@
     }
     renewing = false;
     if (destroyed || error !== null || finished) return;
-    if (!holds(media)) wanted = false;
+    if (displaced(media, since)) wanted = false;
     if (!next?.playlistUrl) {
       if (expired) endLapsed();
       else if (wanted && paused) playNow(media).catch(() => {});
@@ -597,18 +622,24 @@
       fail();
       return;
     }
-    resumeAt(media, from);
+    resumeAt(media, from, since);
   }
 
   /**
    * Seek the new stream to `from` once it knows its length, and play on if
-   * wanted. Its wait goes with the stream (`teardown`), so a stream refused
-   * before it loads leaves nothing to fire later.
+   * still wanted. Its wait goes with the stream (`teardown`), so a stream
+   * refused before it loads leaves nothing to fire later.
+   *
+   * While it loads the element sits paused, silently: a scroll away,
+   * another film's start (`since`, a `mark()`) or the system's pause fire
+   * nothing on it. So it looks again before it plays: the observer has
+   * recorded a scroll away in `wanted`, and another film's start shows here.
    */
-  function resumeAt(media: HTMLVideoElement, from: number) {
+  function resumeAt(media: HTMLVideoElement, from: number, since: number) {
     const carryOn = () => {
       unresume = null;
       media.currentTime = from;
+      if (displaced(media, since)) wanted = false;
       if (!wanted) return;
       void settleStart(media, playNow(media), () => wanted && !destroyed).then(
         (outcome) => {
@@ -648,13 +679,15 @@
 
     void begin(media);
 
-    // Out of view, it pauses; on screen, the page knows (`now-playing`).
+    // Out of view, it pauses; on screen, the page knows (`now-playing`). It
+    // records the intent, not the element's state: mid-swap the element is
+    // already paused, silently, and would otherwise resume off-screen.
     const observer = new IntersectionObserver((entries) => {
       for (const entry of entries) {
         showing(box, entry.isIntersecting);
-        if (!entry.isIntersecting && !media.paused) {
+        if (!entry.isIntersecting) {
           wanted = false;
-          media.pause();
+          if (!media.paused) media.pause();
         }
       }
     });

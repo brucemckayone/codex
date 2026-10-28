@@ -134,12 +134,15 @@
    */
   let mediaEl: HTMLVideoElement | null = null;
   /**
-   * Preserve playback position across a refresh-and-reload cycle. The 403
-   * recovery path destroys the HLS instance, which resets the video element;
-   * we capture the last known time right before teardown so the rebuilt
-   * player can seek back to it.
+   * Preserve playback position across a rebuild: a 403's refresh-and-reload,
+   * or a Retry after the stream failed. Destroying the HLS instance resets
+   * the video element to 0, so the place is taken from `hls.ts` (`at`, read
+   * before its destroy) and given to the rebuilt player once it knows its
+   * length (`restorePlace`). Until then the progress tracker saves this
+   * place, never the reset 0, so a paid viewer keeps their resume point.
+   * `null` once it has landed.
    */
-  let lastCurrentTime = 0;
+  let resumePoint: number | null = null;
   /**
    * Guard against concurrent refresh attempts. If a 403 fires while we're
    * already refreshing (e.g. races between multiple in-flight segments),
@@ -478,7 +481,25 @@
   const tracker = createProgressTracker({
     getContentId: () => contentId,
     getMedia: () => videoEl ?? null,
+    getResumePoint: () => resumePoint,
   });
+
+  /** A failed or expired stream's place, for the rebuild to restore. */
+  function keepPlace(at: number) {
+    if (Number.isFinite(at) && at > 0) resumePoint = at;
+  }
+
+  /** Give the rebuilt stream the place the old one had, once it knows its length. */
+  function restorePlace() {
+    const at = resumePoint;
+    if (!videoEl || at === null) return;
+    const land = () => {
+      if (videoEl) videoEl.currentTime = at;
+      resumePoint = null;
+    };
+    if (videoEl.readyState >= 1) land();
+    else videoEl.addEventListener('loadedmetadata', land, { once: true });
+  }
 
   function handleCanPlay() {
     loading = false;
@@ -621,7 +642,8 @@
       const handle = await createHlsPlayer({
         media: videoEl,
         src,
-        onError: (msg) => {
+        onError: (msg, _kind, at) => {
+          keepPlace(at);
           errorMessage = msg;
           loading = false;
           // hls.ts destroys the instance internally before calling onError —
@@ -630,11 +652,11 @@
           hlsInstance = null;
           lastInitialisedSrc = null;
         },
-        onUrlExpired: () => {
+        onUrlExpired: (at) => {
           // HLS.js path: instance has already been destroyed by hls.ts.
           // Safari path: `<video>` is still attached. Either way we need a
           // fresh URL + a new player instance pointing at it.
-          void handleUrlExpired();
+          void handleUrlExpired(at);
         },
       });
       if (token !== initToken) {
@@ -729,14 +751,16 @@
    * currentTime so playback resumes where it was — the user should only
    * see a brief buffering blip. Guarded by `refreshInFlight` so concurrent
    * 403s don't stampede the access worker.
+   *
+   * @param at - Where the expired stream stood, as `hls.ts` read it before
+   *   its destroy reset the element; the pre-emptive timer passes nothing,
+   *   and the element, still playing, says it live.
    */
-  async function handleUrlExpired() {
+  async function handleUrlExpired(at?: number) {
     if (refreshInFlight) return;
     refreshInFlight = true;
     try {
-      if (videoEl && Number.isFinite(videoEl.currentTime)) {
-        lastCurrentTime = videoEl.currentTime;
-      }
+      keepPlace(at ?? videoEl?.currentTime ?? 0);
       teardownHls();
       const token = ++initToken;
       const fresh = await refreshStreamingUrl(contentId);
@@ -747,7 +771,8 @@
       const handle = await createHlsPlayer({
         media: videoEl,
         src: fresh.streamingUrl,
-        onError: (msg) => {
+        onError: (msg, _kind, at) => {
+          keepPlace(at);
           errorMessage = msg;
           loading = false;
           // hls.ts destroys the instance internally before calling onError —
@@ -756,8 +781,8 @@
           hlsInstance = null;
           lastInitialisedSrc = null;
         },
-        onUrlExpired: () => {
-          void handleUrlExpired();
+        onUrlExpired: (at) => {
+          void handleUrlExpired(at);
         },
       });
       if (token !== initToken) {
@@ -768,20 +793,7 @@
       hlsInstance = handle.hls;
       hlsCleanup = handle.cleanup;
       void attachQualityListeners();
-      if (lastCurrentTime > 0) {
-        const resumeAt = lastCurrentTime;
-        if (videoEl.readyState >= 1) {
-          videoEl.currentTime = resumeAt;
-        } else {
-          videoEl.addEventListener(
-            'loadedmetadata',
-            () => {
-              if (videoEl) videoEl.currentTime = resumeAt;
-            },
-            { once: true }
-          );
-        }
-      }
+      restorePlace();
       scheduleRefresh();
     } catch {
       errorMessage =
@@ -821,6 +833,8 @@
   async function retry() {
     // The Retry button most often fires because the URL expired, so
     // refresh it before reinitialising — otherwise Retry would 403 again.
+    // Either way the rebuilt stream resumes where the failed one stopped
+    // (`resumePoint`), never at 0.
     teardownHls();
     try {
       const token = ++initToken;
@@ -832,7 +846,8 @@
       const handle = await createHlsPlayer({
         media: videoEl,
         src: fresh.streamingUrl,
-        onError: (msg) => {
+        onError: (msg, _kind, at) => {
+          keepPlace(at);
           errorMessage = msg;
           loading = false;
           // hls.ts destroys the instance internally before calling onError —
@@ -841,8 +856,8 @@
           hlsInstance = null;
           lastInitialisedSrc = null;
         },
-        onUrlExpired: () => {
-          void handleUrlExpired();
+        onUrlExpired: (at) => {
+          void handleUrlExpired(at);
         },
       });
       if (token !== initToken) {
@@ -853,12 +868,14 @@
       hlsInstance = handle.hls;
       hlsCleanup = handle.cleanup;
       void attachQualityListeners();
+      restorePlace();
       scheduleRefresh();
     } catch {
       // Refresh endpoint itself unreachable — fall back to the original
       // src; the network blip that caused the error may have already
-      // recovered.
+      // recovered. Its own resume to `initialProgress` lands first.
       await initPlayer();
+      restorePlace();
     }
   }
 
@@ -923,6 +940,8 @@
         // `releaseMedia` also stops the tracker's own `pause` handler from
         // re-saving the old position under the new id.
         tracker.detach(lastInitialisedContentId);
+        // A place kept for a rebuild belonged to the outgoing item.
+        resumePoint = null;
       }
 
       teardownHls();
@@ -1133,253 +1152,257 @@
         <PlayIcon class="video-player-play-overlay-icon" />
       </span>
     </button>
+  {/if}
 
-    <!-- Click on video to toggle play/pause; keyboard equivalents live on the wrapper. -->
-    <media-controller
-      hotkeys="noarrowleft noarrowright nospace nom nof"
-      autohide="-1"
+  <!-- Click on video to toggle play/pause; keyboard equivalents live on the wrapper.
+       Kept mounted through an error, only hidden: a Retry rebuilds the stream on
+       this very <video> (`retry`), and the progress tracker keeps listening to
+       it. Unmounted, Retry found no element and did nothing. -->
+  <media-controller
+    hotkeys="noarrowleft noarrowright nospace nom nof"
+    autohide="-1"
+    hidden={Boolean(errorMessage)}
+  >
+    <video
+      bind:this={videoEl}
+      slot="media"
+      aria-label={contentTitle ?? 'Video'}
+      crossorigin="anonymous"
+      playsinline
+      preload="metadata"
+      poster={poster}
+      oncanplay={handleCanPlay}
+      onloadeddata={handleLoadedData}
+      onerror={handleError}
+      onplay={handlePlay}
+      onpause={handlePause}
+      onwaiting={handleWaiting}
+      onplaying={handlePlaying}
     >
-      <video
-        bind:this={videoEl}
-        slot="media"
-        aria-label={contentTitle ?? 'Video'}
-        crossorigin="anonymous"
-        playsinline
-        preload="metadata"
-        poster={poster}
-        oncanplay={handleCanPlay}
-        onloadeddata={handleLoadedData}
-        onerror={handleError}
-        onplay={handlePlay}
-        onpause={handlePause}
-        onwaiting={handleWaiting}
-        onplaying={handlePlaying}
-      >
-        {#if captions && captions.length > 0}
-          {#each captions as track (track.srclang)}
-            <track
-              kind="captions"
-              src={track.src}
-              srclang={track.srclang}
-              label={track.label}
-              default={track.default ?? false}
-            />
-          {/each}
-        {/if}
-      </video>
+      {#if captions && captions.length > 0}
+        {#each captions as track (track.srclang)}
+          <track
+            kind="captions"
+            src={track.src}
+            srclang={track.srclang}
+            label={track.label}
+            default={track.default ?? false}
+          />
+        {/each}
+      {/if}
+    </video>
 
-      <!-- Unified tap/click zone. aria-hidden decorative overlay; owns ALL
-           single-tap play/pause + double-tap seek. Single path prevents the
-           iOS/Android synthetic click from racing a native click when the
-           video element owned `onclick` directly (iter-09 audit, Codex-04ozt).
-           Pointer-events are enabled on both coarse and fine pointers now that
-           this zone carries the click handler — media-chrome controls still
-           take priority via the `.closest('.video-player-controls-container')`
-           guard inside handleTapZoneClick/handleVideoTap. Sighted SR users
-           have keyboard shortcuts (Space/ArrowLeft/ArrowRight) scoped to the
-           wrapper — ref 05 §"Media elements" §3 — so this overlay does NOT
-           need its own key handlers. -->
-      <div
-        class="video-player-tap-zone"
-        onclick={handleTapZoneClick}
-        ontouchend={handleVideoTap}
-        aria-hidden="true"
-      >
-        {#if seekIndicator === 'left'}
-          <div class="video-player-seek-indicator video-player-seek-indicator--left">-10s</div>
-        {/if}
-        {#if seekIndicator === 'right'}
-          <div class="video-player-seek-indicator video-player-seek-indicator--right">+10s</div>
-        {/if}
-      </div>
+    <!-- Unified tap/click zone. aria-hidden decorative overlay; owns ALL
+         single-tap play/pause + double-tap seek. Single path prevents the
+         iOS/Android synthetic click from racing a native click when the
+         video element owned `onclick` directly (iter-09 audit, Codex-04ozt).
+         Pointer-events are enabled on both coarse and fine pointers now that
+         this zone carries the click handler — media-chrome controls still
+         take priority via the `.closest('.video-player-controls-container')`
+         guard inside handleTapZoneClick/handleVideoTap. Sighted SR users
+         have keyboard shortcuts (Space/ArrowLeft/ArrowRight) scoped to the
+         wrapper — ref 05 §"Media elements" §3 — so this overlay does NOT
+         need its own key handlers. -->
+    <div
+      class="video-player-tap-zone"
+      onclick={handleTapZoneClick}
+      ontouchend={handleVideoTap}
+      aria-hidden="true"
+    >
+      {#if seekIndicator === 'left'}
+        <div class="video-player-seek-indicator video-player-seek-indicator--left">-10s</div>
+      {/if}
+      {#if seekIndicator === 'right'}
+        <div class="video-player-seek-indicator video-player-seek-indicator--right">+10s</div>
+      {/if}
+    </div>
 
-      <!-- Controls container — slides up from bottom on hover -->
-      <div class="video-player-controls-container {controlsVisible ? 'video-player-controls-container--visible' : ''}">
-        <!-- Row 2 (top): time pill + config pill -->
-        <div class="video-player-controls-row video-player-controls-row--top">
-          <button
-            type="button"
-            class="video-player-pill video-player-time-pill"
-            onclick={() => (showRemaining = !showRemaining)}
-            aria-label={showRemaining ? 'Show elapsed time' : 'Show remaining time'}
-          >
-            {#if showRemaining}
-              <media-time-display remaining></media-time-display>
-            {:else}
-              <media-time-display showduration></media-time-display>
-            {/if}
-          </button>
-          <div class="video-player-spacer"></div>
-          <div class="video-player-pill video-player-config-pill">
-            <media-playback-rate-button rates="0.5 1 1.5 2"></media-playback-rate-button>
-            {#if hasCaptions}
-              <span class="video-player-pill-divider"></span>
-              <button
-                type="button"
-                class="video-player-captions-btn"
-                onclick={toggleCaptions}
-                aria-label={captionsEnabled ? 'Hide captions' : 'Show captions'}
-                aria-pressed={captionsEnabled}
-                title={captionsEnabled ? 'Hide captions (c)' : 'Show captions (c)'}
-              >
-                <span aria-hidden="true" class="video-player-captions-label">CC</span>
-              </button>
-            {/if}
-            {#if showQualityMenu}
-              <span class="video-player-pill-divider"></span>
-              <DropdownMenu
-                bind:open={qualityMenuOpen}
-                positioning={{ placement: 'top-end', gutter: 8 }}
-              >
-                <DropdownMenuTrigger
-                  class="video-player-quality-btn"
-                  aria-label="Video quality"
-                  title="Video quality"
-                >
-                  <SettingsIcon size={18} />
-                  <span class="video-player-quality-label">{qualityTriggerLabel}</span>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent class="video-player-quality-menu">
-                  <DropdownMenuItem
-                    class={manualLevel === -1
-                      ? 'video-player-quality-item video-player-quality-item--active'
-                      : 'video-player-quality-item'}
-                    onclick={() => selectQuality(-1)}
-                  >
-                    <span class="video-player-quality-item-label">Auto</span>
-                    {#if autoLevel >= 0 && manualLevel === -1}
-                      <span class="video-player-quality-item-sub">{labelForLevel(autoLevel)}</span>
-                    {/if}
-                  </DropdownMenuItem>
-                  {#each sortedVariants as variant (variant)}
-                    {@const idx = variantToLevelIndex(variant, hlsInstance?.levels ?? [])}
-                    {#if idx !== null}
-                      <DropdownMenuItem
-                        class={manualLevel === idx
-                          ? 'video-player-quality-item video-player-quality-item--active'
-                          : 'video-player-quality-item'}
-                        onclick={() => selectQuality(idx)}
-                      >
-                        <span class="video-player-quality-item-label">{variant}</span>
-                      </DropdownMenuItem>
-                    {/if}
-                  {/each}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            {/if}
+    <!-- Controls container — slides up from bottom on hover -->
+    <div class="video-player-controls-container {controlsVisible ? 'video-player-controls-container--visible' : ''}">
+      <!-- Row 2 (top): time pill + config pill -->
+      <div class="video-player-controls-row video-player-controls-row--top">
+        <button
+          type="button"
+          class="video-player-pill video-player-time-pill"
+          onclick={() => (showRemaining = !showRemaining)}
+          aria-label={showRemaining ? 'Show elapsed time' : 'Show remaining time'}
+        >
+          {#if showRemaining}
+            <media-time-display remaining></media-time-display>
+          {:else}
+            <media-time-display showduration></media-time-display>
+          {/if}
+        </button>
+        <div class="video-player-spacer"></div>
+        <div class="video-player-pill video-player-config-pill">
+          <media-playback-rate-button rates="0.5 1 1.5 2"></media-playback-rate-button>
+          {#if hasCaptions}
             <span class="video-player-pill-divider"></span>
             <button
               type="button"
-              class="video-player-cinema-btn"
-              onclick={toggleCinemaMode}
-              aria-label={cinemaMode ? 'Exit cinema mode' : 'Cinema mode'}
-              aria-pressed={cinemaMode}
-              title={cinemaMode ? 'Exit cinema mode' : 'Cinema mode'}
+              class="video-player-captions-btn"
+              onclick={toggleCaptions}
+              aria-label={captionsEnabled ? 'Hide captions' : 'Show captions'}
+              aria-pressed={captionsEnabled}
+              title={captionsEnabled ? 'Hide captions (c)' : 'Show captions (c)'}
             >
-              <CinemaIcon size={18} active={cinemaMode} />
+              <span aria-hidden="true" class="video-player-captions-label">CC</span>
             </button>
+          {/if}
+          {#if showQualityMenu}
             <span class="video-player-pill-divider"></span>
-            <media-fullscreen-button></media-fullscreen-button>
-          </div>
-        </div>
-
-        <!-- Row 1 (bottom): play + progress bar + volume pill -->
-        <div class="video-player-controls-row video-player-controls-row--bottom">
+            <DropdownMenu
+              bind:open={qualityMenuOpen}
+              positioning={{ placement: 'top-end', gutter: 8 }}
+            >
+              <DropdownMenuTrigger
+                class="video-player-quality-btn"
+                aria-label="Video quality"
+                title="Video quality"
+              >
+                <SettingsIcon size={18} />
+                <span class="video-player-quality-label">{qualityTriggerLabel}</span>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent class="video-player-quality-menu">
+                <DropdownMenuItem
+                  class={manualLevel === -1
+                    ? 'video-player-quality-item video-player-quality-item--active'
+                    : 'video-player-quality-item'}
+                  onclick={() => selectQuality(-1)}
+                >
+                  <span class="video-player-quality-item-label">Auto</span>
+                  {#if autoLevel >= 0 && manualLevel === -1}
+                    <span class="video-player-quality-item-sub">{labelForLevel(autoLevel)}</span>
+                  {/if}
+                </DropdownMenuItem>
+                {#each sortedVariants as variant (variant)}
+                  {@const idx = variantToLevelIndex(variant, hlsInstance?.levels ?? [])}
+                  {#if idx !== null}
+                    <DropdownMenuItem
+                      class={manualLevel === idx
+                        ? 'video-player-quality-item video-player-quality-item--active'
+                        : 'video-player-quality-item'}
+                      onclick={() => selectQuality(idx)}
+                    >
+                      <span class="video-player-quality-item-label">{variant}</span>
+                    </DropdownMenuItem>
+                  {/if}
+                {/each}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          {/if}
+          <span class="video-player-pill-divider"></span>
           <button
             type="button"
-            class="video-player-play-btn"
-            onclick={togglePlay}
-            aria-label={isPaused ? 'Play' : 'Pause'}
+            class="video-player-cinema-btn"
+            onclick={toggleCinemaMode}
+            aria-label={cinemaMode ? 'Exit cinema mode' : 'Cinema mode'}
+            aria-pressed={cinemaMode}
+            title={cinemaMode ? 'Exit cinema mode' : 'Cinema mode'}
+          >
+            <CinemaIcon size={18} active={cinemaMode} />
+          </button>
+          <span class="video-player-pill-divider"></span>
+          <media-fullscreen-button></media-fullscreen-button>
+        </div>
+      </div>
+
+      <!-- Row 1 (bottom): play + progress bar + volume pill -->
+      <div class="video-player-controls-row video-player-controls-row--bottom">
+        <button
+          type="button"
+          class="video-player-play-btn"
+          onclick={togglePlay}
+          aria-label={isPaused ? 'Play' : 'Pause'}
+        >
+          <!--
+            Play ↔ Pause icon kept INLINE as a genuine exception.
+            Rationale: the "d" attribute is transitioned between two path definitions to
+            create a Disney-style morph (see styles.css .video-player-morph-path). IconBase
+            cannot express per-path `d` transitions — extracting would forfeit the morph.
+            Reference: ref 05 §"Media elements" refactor (iter-011).
+          -->
+          <svg
+            class="video-player-play-icon"
+            width="22"
+            height="22"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path
+              class="video-player-morph-path video-player-morph-path--left"
+              fill="currentColor"
+              d={isPaused
+                ? 'M 6,4 C 6,3 6,3 7,3 L 12,12 L 12,12 L 7,21 C 6,21 6,21 6,20 Z'
+                : 'M 5,5 C 5,4 5.5,4 6,4 L 10,4 C 10.5,4 11,4 11,5 L 11,19 C 11,20 10.5,20 10,20 L 6,20 C 5.5,20 5,20 5,19 Z'}
+            />
+            <path
+              class="video-player-morph-path video-player-morph-path--right"
+              fill="currentColor"
+              d={isPaused
+                ? 'M 7,3 C 7,3 8,3.5 8.5,4 L 19,12 L 19,12 L 8.5,20 C 8,20.5 7,21 7,21 Z'
+                : 'M 13,5 C 13,4 13.5,4 14,4 L 18,4 C 18.5,4 19,4 19,5 L 19,19 C 19,20 18.5,20 18,20 L 14,20 C 13.5,20 13,20 13,19 Z'}
+            />
+          </svg>
+        </button>
+
+        <media-time-range class="video-player-time-range"></media-time-range>
+
+        <div class="video-player-pill video-player-volume-pill">
+          <button
+            type="button"
+            class="video-player-mute-btn"
+            onclick={() => { if (videoEl) videoEl.muted = !videoEl.muted; }}
+            aria-label={isMuted ? 'Unmute' : 'Mute'}
           >
             <!--
-              Play ↔ Pause icon kept INLINE as a genuine exception.
-              Rationale: the "d" attribute is transitioned between two path definitions to
-              create a Disney-style morph (see styles.css .video-player-morph-path). IconBase
-              cannot express per-path `d` transitions — extracting would forfeit the morph.
-              Reference: ref 05 §"Media elements" refactor (iter-011).
+              Volume icon kept INLINE for the same reason as play/pause: the per-path
+              opacity / transform / stroke-dash animations (Disney secondary action,
+              staggered follow-through, mute-X arc) are wired to classes that swap
+              `--active` state. Extracting to IconBase would forfeit the animation
+              surface. A static VolumeIcon primitive exists for non-animated callers.
             -->
             <svg
-              class="video-player-play-icon"
-              width="22"
-              height="22"
+              class="video-player-volume-icon"
+              width="20"
+              height="20"
               viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
               aria-hidden="true"
             >
+              <!-- Speaker body — always visible -->
+              <path class="video-player-vol-body" d="M11 5L6 9H2v6h4l5 4V5z" />
+              <!-- Sound wave 1 (small arc) — visible when low or high -->
               <path
-                class="video-player-morph-path video-player-morph-path--left"
-                fill="currentColor"
-                d={isPaused
-                  ? 'M 6,4 C 6,3 6,3 7,3 L 12,12 L 12,12 L 7,21 C 6,21 6,21 6,20 Z'
-                  : 'M 5,5 C 5,4 5.5,4 6,4 L 10,4 C 10.5,4 11,4 11,5 L 11,19 C 11,20 10.5,20 10,20 L 6,20 C 5.5,20 5,20 5,19 Z'}
+                class="video-player-vol-wave1"
+                class:video-player-vol-wave--active={volumeState !== 'off'}
+                d="M15.54 8.46a5 5 0 0 1 0 7.07"
               />
+              <!-- Sound wave 2 (large arc) — visible only when high -->
               <path
-                class="video-player-morph-path video-player-morph-path--right"
-                fill="currentColor"
-                d={isPaused
-                  ? 'M 7,3 C 7,3 8,3.5 8.5,4 L 19,12 L 19,12 L 8.5,20 C 8,20.5 7,21 7,21 Z'
-                  : 'M 13,5 C 13,4 13.5,4 14,4 L 18,4 C 18.5,4 19,4 19,5 L 19,19 C 19,20 18.5,20 18,20 L 14,20 C 13.5,20 13,20 13,19 Z'}
+                class="video-player-vol-wave2"
+                class:video-player-vol-wave--active={volumeState === 'high'}
+                d="M19.07 4.93a10 10 0 0 1 0 14.14"
               />
+              <!-- Mute X — visible when off -->
+              {#if volumeState === 'off'}
+                <line class="video-player-vol-mute-x" x1="23" y1="9" x2="17" y2="15" />
+                <line class="video-player-vol-mute-x" x1="17" y1="9" x2="23" y2="15" />
+              {/if}
             </svg>
           </button>
-
-          <media-time-range class="video-player-time-range"></media-time-range>
-
-          <div class="video-player-pill video-player-volume-pill">
-            <button
-              type="button"
-              class="video-player-mute-btn"
-              onclick={() => { if (videoEl) videoEl.muted = !videoEl.muted; }}
-              aria-label={isMuted ? 'Unmute' : 'Mute'}
-            >
-              <!--
-                Volume icon kept INLINE for the same reason as play/pause: the per-path
-                opacity / transform / stroke-dash animations (Disney secondary action,
-                staggered follow-through, mute-X arc) are wired to classes that swap
-                `--active` state. Extracting to IconBase would forfeit the animation
-                surface. A static VolumeIcon primitive exists for non-animated callers.
-              -->
-              <svg
-                class="video-player-volume-icon"
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                aria-hidden="true"
-              >
-                <!-- Speaker body — always visible -->
-                <path class="video-player-vol-body" d="M11 5L6 9H2v6h4l5 4V5z" />
-                <!-- Sound wave 1 (small arc) — visible when low or high -->
-                <path
-                  class="video-player-vol-wave1"
-                  class:video-player-vol-wave--active={volumeState !== 'off'}
-                  d="M15.54 8.46a5 5 0 0 1 0 7.07"
-                />
-                <!-- Sound wave 2 (large arc) — visible only when high -->
-                <path
-                  class="video-player-vol-wave2"
-                  class:video-player-vol-wave--active={volumeState === 'high'}
-                  d="M19.07 4.93a10 10 0 0 1 0 14.14"
-                />
-                <!-- Mute X — visible when off -->
-                {#if volumeState === 'off'}
-                  <line class="video-player-vol-mute-x" x1="23" y1="9" x2="17" y2="15" />
-                  <line class="video-player-vol-mute-x" x1="17" y1="9" x2="23" y2="15" />
-                {/if}
-              </svg>
-            </button>
-            <media-volume-range class="video-player-volume-range"></media-volume-range>
-          </div>
+          <media-volume-range class="video-player-volume-range"></media-volume-range>
         </div>
       </div>
+    </div>
 
-      <!-- Persistent mini progress bar — always visible, fades when full controls show -->
-      <media-time-range
-        class="video-player-mini-progress {controlsVisible ? 'video-player-mini-progress--hidden' : ''}"
-      ></media-time-range>
-    </media-controller>
-  {/if}
+    <!-- Persistent mini progress bar — always visible, fades when full controls show -->
+    <media-time-range
+      class="video-player-mini-progress {controlsVisible ? 'video-player-mini-progress--hidden' : ''}"
+    ></media-time-range>
+  </media-controller>
 </div>

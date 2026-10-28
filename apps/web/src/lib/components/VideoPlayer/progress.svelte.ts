@@ -20,10 +20,17 @@ const SAVE_INTERVAL_MS = 30_000;
 interface ProgressTrackerOptions {
   getContentId: () => string;
   getMedia: () => HTMLMediaElement | null;
+  /**
+   * The position a rebuilt stream is about to be given (a Retry after a
+   * network failure, a renewed link), or `null`. Until it lands the element
+   * reads 0 — the rebuild reset it — so a save reports this instead, and a
+   * paid viewer's resume point is never written over with the start.
+   */
+  getResumePoint?: () => number | null;
 }
 
 export function createProgressTracker(options: ProgressTrackerOptions) {
-  const { getContentId, getMedia } = options;
+  const { getContentId, getMedia, getResumePoint } = options;
 
   let intervalId: ReturnType<typeof setInterval> | null = null;
 
@@ -44,7 +51,7 @@ export function createProgressTracker(options: ProgressTrackerOptions) {
 
     updateLocalProgress(
       contentId ?? getContentId(),
-      video.currentTime,
+      getResumePoint?.() ?? video.currentTime,
       video.duration
     );
   }

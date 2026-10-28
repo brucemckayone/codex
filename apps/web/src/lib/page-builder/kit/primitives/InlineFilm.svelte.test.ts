@@ -80,7 +80,14 @@ afterEach(() => {
   app = null;
   document.body.innerHTML = '';
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
+
+/**
+ * Ten minutes on, a fresh link's life (fake timers): a 403 now is an
+ * expiry. Within two minutes of the press's own ask it would be a refusal.
+ */
+const tenMinutesOn = () => vi.advanceTimersByTime(600_000);
 
 function render(props: Record<string, unknown>) {
   app = mount(Harness, {
@@ -138,6 +145,7 @@ describe('which film a press plays (P10)', () => {
   });
 
   test('the full film runs out (a 403): the page is asked once more, and the film carries on', async () => {
+    vi.useFakeTimers();
     const requestFilm = vi
       .fn<() => Promise<{ playlistUrl: string } | null>>()
       .mockResolvedValueOnce({ playlistUrl: FULL })
@@ -156,6 +164,7 @@ describe('which film a press plays (P10)', () => {
     });
     video.dispatchEvent(new Event('timeupdate'));
 
+    tenMinutesOn();
     expire?.();
     await settle();
     video.dispatchEvent(new Event('loadedmetadata'));
@@ -166,6 +175,7 @@ describe('which film a press plays (P10)', () => {
   });
 
   test('the full film runs out and the page will not renew it: "Watch again", never the preview', async () => {
+    vi.useFakeTimers();
     const requestFilm = vi
       .fn<() => Promise<{ playlistUrl: string } | null>>()
       .mockResolvedValueOnce({ playlistUrl: FULL })
@@ -177,8 +187,10 @@ describe('which film a press plays (P10)', () => {
       .querySelector('video')
       ?.dispatchEvent(new Event('loadeddata'));
 
+    tenMinutesOn();
     expire?.();
     await settle();
+    expect(requestFilm).toHaveBeenCalledTimes(2);
     expect(attached).toEqual([FULL]);
     expect(document.body.querySelector('video')).toBeNull();
     expect(

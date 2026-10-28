@@ -68,7 +68,13 @@
    * expired original.
    */
   let currentWaveformUrl: string | null = waveformUrl ?? null;
-  let lastCurrentTime = 0;
+  /**
+   * The playhead a rebuild restores — a 403's refresh, or a Retry after the
+   * stream failed — as `hls.ts` read it before its destroy reset the
+   * element to 0 (mirrors VideoPlayer). Until it lands the progress tracker
+   * saves this place, never the reset 0. `null` once it has landed.
+   */
+  let resumePoint: number | null = null;
   let refreshInFlight = false;
   let refreshTimer: ReturnType<typeof setTimeout> | null = null;
   let loading = $state(true);
@@ -162,7 +168,25 @@
   const tracker = createProgressTracker({
     getContentId: () => contentId,
     getMedia: () => audioEl ?? null,
+    getResumePoint: () => resumePoint,
   });
+
+  /** A failed or expired stream's place, for the rebuild to restore. */
+  function keepPlace(at: number) {
+    if (Number.isFinite(at) && at > 0) resumePoint = at;
+  }
+
+  /** Give the rebuilt stream the place the old one had, once it knows its length. */
+  function restorePlace() {
+    const at = resumePoint;
+    if (!audioEl || at === null) return;
+    const land = () => {
+      if (audioEl) audioEl.currentTime = at;
+      resumePoint = null;
+    };
+    if (audioEl.readyState >= 1) land();
+    else audioEl.addEventListener('loadedmetadata', land, { once: true });
+  }
 
   function formatTime(seconds: number): string {
     if (!seconds || Number.isNaN(seconds)) return '0:00';
@@ -323,7 +347,8 @@
       const handle = await createHlsPlayer({
         media: audioEl,
         src,
-        onError: (msg) => {
+        onError: (msg, _kind, at) => {
+          keepPlace(at);
           errorMessage = msg;
           loading = false;
           // The instance may already have been destroyed inside hls.ts's
@@ -332,8 +357,8 @@
           hlsInstance = null;
           initializedSrc = null;
         },
-        onUrlExpired: () => {
-          void handleUrlExpired();
+        onUrlExpired: (at) => {
+          void handleUrlExpired(at);
         },
       });
       if (token !== initToken) {
@@ -415,14 +440,16 @@
    * Signed-URL expiry recovery — mirrors VideoPlayer. Audio and waveform
    * share an expiry (both signed in the same `getStreamingUrl` access
    * call), so a single refresh swaps both URLs.
+   *
+   * @param at - Where the expired stream stood, as `hls.ts` read it before
+   *   its destroy reset the element; the pre-emptive timer passes nothing,
+   *   and the element, still playing, says it live.
    */
-  async function handleUrlExpired() {
+  async function handleUrlExpired(at?: number) {
     if (refreshInFlight) return;
     refreshInFlight = true;
     try {
-      if (audioEl && Number.isFinite(audioEl.currentTime)) {
-        lastCurrentTime = audioEl.currentTime;
-      }
+      keepPlace(at ?? audioEl?.currentTime ?? 0);
       teardownHls();
       const token = ++initToken;
       const fresh = await refreshStreamingUrl(contentId);
@@ -433,14 +460,15 @@
       const handle = await createHlsPlayer({
         media: audioEl,
         src: fresh.streamingUrl,
-        onError: (msg) => {
+        onError: (msg, _kind, at) => {
+          keepPlace(at);
           errorMessage = msg;
           loading = false;
           hlsInstance = null;
           initializedSrc = null;
         },
-        onUrlExpired: () => {
-          void handleUrlExpired();
+        onUrlExpired: (at) => {
+          void handleUrlExpired(at);
         },
       });
       if (token !== initToken) {
@@ -450,20 +478,7 @@
       }
       hlsInstance = handle.hls;
       hlsCleanup = handle.cleanup;
-      if (lastCurrentTime > 0) {
-        const resumeAt = lastCurrentTime;
-        if (audioEl.readyState >= 1) {
-          audioEl.currentTime = resumeAt;
-        } else {
-          audioEl.addEventListener(
-            'loadedmetadata',
-            () => {
-              if (audioEl) audioEl.currentTime = resumeAt;
-            },
-            { once: true }
-          );
-        }
-      }
+      restorePlace();
       // Waveform URL shares the same signature lifecycle — refetch it so
       // the waveform keeps rendering after expiry.
       currentWaveformUrl = fresh.waveformUrl;
@@ -506,7 +521,8 @@
 
   async function retry() {
     // Most often Retry fires because the URL expired; refresh first so
-    // Retry doesn't immediately 403 again.
+    // Retry doesn't immediately 403 again. Either way the rebuilt stream
+    // resumes where the failed one stopped (`resumePoint`), never at 0.
     teardownHls();
     try {
       const token = ++initToken;
@@ -518,14 +534,15 @@
       const handle = await createHlsPlayer({
         media: audioEl,
         src: fresh.streamingUrl,
-        onError: (msg) => {
+        onError: (msg, _kind, at) => {
+          keepPlace(at);
           errorMessage = msg;
           loading = false;
           hlsInstance = null;
           initializedSrc = null;
         },
-        onUrlExpired: () => {
-          void handleUrlExpired();
+        onUrlExpired: (at) => {
+          void handleUrlExpired(at);
         },
       });
       if (token !== initToken) {
@@ -535,6 +552,7 @@
       }
       hlsInstance = handle.hls;
       hlsCleanup = handle.cleanup;
+      restorePlace();
       currentWaveformUrl = fresh.waveformUrl;
       waveformLoaded = false;
       waveformData = null;
@@ -542,9 +560,11 @@
       scheduleRefresh();
     } catch {
       // Refresh endpoint itself failed — reset the init guard and try the
-      // original src path; transient network blips may self-heal.
+      // original src path; transient network blips may self-heal. Its own
+      // resume lands first, then the failed stream's place.
       initializedSrc = null;
       await initPlayer();
+      restorePlace();
     }
   }
 
@@ -666,7 +686,7 @@
     isPlaying = false;
     currentTime = 0;
     duration = 0;
-    lastCurrentTime = 0;
+    resumePoint = null;
     miniMode = false;
     showImmersive = false;
     waveformData = null;

@@ -58,6 +58,7 @@ function fakeMedia() {
   return {
     src: '',
     error: null,
+    currentTime: 0,
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
   } as unknown as HTMLMediaElement;
@@ -158,7 +159,8 @@ describe('createHlsPlayer — path selection', () => {
 
     expect(onError).toHaveBeenCalledWith(
       expect.stringContaining('cannot play this video format'),
-      'unsupported'
+      'unsupported',
+      0
     );
   });
 
@@ -197,15 +199,15 @@ describe('createHlsPlayer — recovery', () => {
   });
 
   /** Start a player, and hand back what hls.js would call on each event. */
-  async function player(options: { onUrlExpired?: () => void } = {}) {
+  async function player(options: { onUrlExpired?: (at: number) => void } = {}) {
     const onError = vi.fn();
-    const { createHlsPlayer } = await import('./hls');
-    await createHlsPlayer({
-      media: fakeMedia(),
-      src: MANIFEST,
-      onError,
-      ...options,
+    const media = fakeMedia();
+    // What hls.js's detach does: `src` removed, `load()`, the playhead at 0.
+    destroy.mockImplementation(() => {
+      media.currentTime = 0;
     });
+    const { createHlsPlayer } = await import('./hls');
+    await createHlsPlayer({ media, src: MANIFEST, onError, ...options });
     const handler = (event: string) => {
       const call = on.mock.calls.find(([name]) => name === event);
       if (!call) throw new Error(`no ${event} handler`);
@@ -220,7 +222,7 @@ describe('createHlsPlayer — recovery', () => {
         response: code === undefined ? undefined : { code },
       });
     const fragmentLoaded = () => handler('hlsFragLoaded')('hlsFragLoaded');
-    return { onError, report, fail, fragmentLoaded };
+    return { media, onError, report, fail, fragmentLoaded };
   }
 
   it.each([
@@ -233,7 +235,33 @@ describe('createHlsPlayer — recovery', () => {
     fail(details, code);
     expect(startLoad).not.toHaveBeenCalled();
     expect(destroy).toHaveBeenCalledTimes(1);
-    expect(onError).toHaveBeenCalledWith(expect.any(String), 'network');
+    expect(onError).toHaveBeenCalledWith(
+      expect.any(String),
+      'network',
+      expect.any(Number)
+    );
+  });
+
+  // A paid viewer 50 minutes in loses the network: the Retry resumes there,
+  // and the progress tracker never writes the reset 0 over their place.
+  it('says where the playhead stood, read before the destroy reset it', async () => {
+    const onUrlExpired = vi.fn();
+    const expiring = await player({ onUrlExpired });
+    expiring.media.currentTime = 3012;
+    expiring.fail('fragLoadError', 403);
+    expect(onUrlExpired).toHaveBeenCalledWith(3012);
+    expect(expiring.media.currentTime).toBe(0);
+
+    vi.clearAllMocks();
+    const failing = await player();
+    failing.media.currentTime = 2996;
+    failing.fail('manifestLoadError', 404);
+    expect(failing.onError).toHaveBeenCalledWith(
+      expect.any(String),
+      'network',
+      2996
+    );
+    expect(failing.media.currentTime).toBe(0);
   });
 
   it('a failing fragment loads again twice, then gives up', async () => {
@@ -245,7 +273,11 @@ describe('createHlsPlayer — recovery', () => {
     fail('fragLoadError');
     expect(startLoad).toHaveBeenCalledTimes(2);
     expect(destroy).toHaveBeenCalledTimes(1);
-    expect(onError).toHaveBeenCalledWith(expect.any(String), 'network');
+    expect(onError).toHaveBeenCalledWith(
+      expect.any(String),
+      'network',
+      expect.any(Number)
+    );
   });
 
   it('a fragment that loads earns the next failure its retries again', async () => {
@@ -272,6 +304,10 @@ describe('createHlsPlayer — recovery', () => {
     for (let i = 0; i < 3; i++) {
       report({ type: 'mediaError', details: 'bufferAppendError' });
     }
-    expect(onError).toHaveBeenCalledWith(expect.any(String), 'media');
+    expect(onError).toHaveBeenCalledWith(
+      expect.any(String),
+      'media',
+      expect.any(Number)
+    );
   });
 });

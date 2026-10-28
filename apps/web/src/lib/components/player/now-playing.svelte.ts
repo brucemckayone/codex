@@ -14,20 +14,30 @@
 import { SvelteSet } from 'svelte/reactivity';
 
 let current: HTMLMediaElement | null = null;
+/** How many times a film has started: a mark to compare against later. */
+let starts = 0;
 const inView = new SvelteSet<Element>();
 
 /** `media` has started: the film playing before it stops. */
 export function claim(media: HTMLMediaElement): void {
   if (current && current !== media) current.pause();
   current = media;
+  starts++;
+}
+
+/** A mark for `displaced`: the films started so far. */
+export function mark(): number {
+  return starts;
 }
 
 /**
- * `media` holds the page's one film: no other has started since it did. A
- * film waiting on a renewal (`PreviewPlayerCore`) plays on only if so.
+ * Another film has started since `since` (a `mark()`), and `media` has not
+ * started again after it. A film waiting on a renewal (`PreviewPlayerCore`)
+ * then stays paused. "Last to start" would not do: a film that started and
+ * has since gone (`release`) would swallow the press that asked.
  */
-export function holds(media: HTMLMediaElement): boolean {
-  return current === media;
+export function displaced(media: HTMLMediaElement, since: number): boolean {
+  return starts !== since && current !== media;
 }
 
 /** `media` is going away: it no longer holds the page's one film. */

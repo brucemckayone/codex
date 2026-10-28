@@ -65,19 +65,26 @@ const FRAGMENT_RETRIES = 2;
 interface HlsPlayerOptions {
   media: HTMLMediaElement;
   src: string;
-  onError?: (message: string, kind: HlsErrorKind) => void;
+  /**
+   * The stream has failed for good. `at` is the playhead as it failed, read
+   * BEFORE the instance was destroyed: the destroy detaches the element and
+   * resets its `currentTime` to 0, so a caller that rebuilds (a Retry)
+   * resumes from `at`, never from the reset.
+   */
+  onError?: (message: string, kind: HlsErrorKind, at: number) => void;
   /**
    * Fired when the current signed URL has (almost certainly) expired — HLS.js
    * saw a 403 from a segment fetch, or Safari native HLS surfaced
    * MEDIA_ERR_NETWORK. Callers should fetch a fresh URL via
-   * `refreshStreamingUrl(contentId)` and swap the player's source.
+   * `refreshStreamingUrl(contentId)` and swap the player's source, resuming
+   * from `at` (read before the destroy, as for `onError`).
    *
    * HLS.js path: the instance has already been destroyed by the time this
    * fires — the caller must rebuild a new instance with the refreshed URL.
    * Safari path: the `<video>` element is still attached; calling
    * `media.src = newUrl; media.load()` is the expected recovery.
    */
-  onUrlExpired?: () => void;
+  onUrlExpired?: (at: number) => void;
 }
 
 /**
@@ -139,7 +146,11 @@ export async function createHlsPlayer(
     // explanation. Guarded on the extension because this same last resort is
     // correct for a plain mp4 URL, which most browsers play fine.
     if (!supportsNativeHls() && /\.m3u8(\?|$)/.test(src)) {
-      onError?.('This browser cannot play this video format.', 'unsupported');
+      onError?.(
+        'This browser cannot play this video format.',
+        'unsupported',
+        media.currentTime
+      );
     }
 
     let handled = false;
@@ -155,13 +166,17 @@ export async function createHlsPlayer(
         onUrlExpired
       ) {
         handled = true;
-        onUrlExpired();
+        onUrlExpired(media.currentTime);
         return;
       }
       // Non-network or no-callback: surface as a generic playback error.
       if (mediaError && onError) {
         handled = true;
-        onError('Playback error. Please try again.', 'media');
+        onError(
+          'Playback error. Please try again.',
+          'media',
+          media.currentTime
+        );
       }
     };
     media.addEventListener('error', handleError);
@@ -205,6 +220,17 @@ export async function createHlsPlayer(
     fragmentRetries = 0;
   });
 
+  /**
+   * Destroy the instance and say where the playhead stood. Read first: the
+   * destroy detaches the element and resets it to 0, and a caller that
+   * rebuilds resumes from here (a paid viewer's place in a long film).
+   */
+  const stop = () => {
+    const at = media.currentTime;
+    hls.destroy();
+    return at;
+  };
+
   hls.on(HlsJs.Events.ERROR, (_event: string, data: ErrorData) => {
     if (!data.fatal) return;
 
@@ -217,8 +243,7 @@ export async function createHlsPlayer(
         // rebuild the player.
         const responseCode = data.response?.code;
         if (responseCode === 403 && onUrlExpired) {
-          hls.destroy();
-          onUrlExpired();
+          onUrlExpired(stop());
           return;
         }
         // A fragment (a timeout, a dropped connection) may load again, a
@@ -232,11 +257,9 @@ export async function createHlsPlayer(
           hls.startLoad();
           break;
         }
-        hls.destroy();
-        onError?.(
-          'The video could not be loaded. Please try again.',
-          'network'
-        );
+        const at = stop();
+        // Media-neutral: AudioPlayer shows it as it stands.
+        onError?.('This could not be loaded. Please try again.', 'network', at);
         break;
       }
 
@@ -247,19 +270,21 @@ export async function createHlsPlayer(
           hls.swapAudioCodec();
           hls.recoverMediaError();
         } else {
-          hls.destroy();
+          const at = stop();
           onError?.(
             'Playback error. The video format may not be supported.',
-            'media'
+            'media',
+            at
           );
         }
         mediaErrorRecoveryAttempts++;
         break;
 
-      default:
-        hls.destroy();
-        onError?.('An unexpected playback error occurred.', 'unknown');
+      default: {
+        const at = stop();
+        onError?.('An unexpected playback error occurred.', 'unknown', at);
         break;
+      }
     }
   });
 
