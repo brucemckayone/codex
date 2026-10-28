@@ -376,7 +376,10 @@
   function handlePlay() {
     paused = false;
     finished = false;
-    // Playing, whoever asked: the button reads the element again.
+    // Playing, whoever asked (the OS's media keys too): the visitor wants
+    // it, as any pause says they don't, so it renews and resumes after a
+    // swap; and the button reads the element again.
+    wanted = true;
     resuming = false;
     if (video) claim(video);
     arm();

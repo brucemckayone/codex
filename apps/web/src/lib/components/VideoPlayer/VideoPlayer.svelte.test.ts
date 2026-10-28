@@ -360,6 +360,8 @@ describe('VideoPlayer — a rebuilt stream keeps the viewer’s place', () => {
     el.dispatchEvent(new Event('loadedmetadata'));
     expect(el.currentTime).toBe(612);
     expect(play).toHaveBeenCalledTimes(1);
+    // Its first frame: from here a 403 is an expiry again.
+    el.dispatchEvent(new Event('loadeddata'));
 
     el.dispatchEvent(new Event('pause'));
     play.mockClear();
@@ -368,6 +370,89 @@ describe('VideoPlayer — a rebuilt stream keeps the viewer’s place', () => {
     el.dispatchEvent(new Event('loadedmetadata'));
     expect(el.currentTime).toBe(700);
     expect(play).not.toHaveBeenCalled();
+
+    unmount(component);
+  });
+
+  test('a 403 on a renewed stream before its first frame is a refusal: the card, and no second ask', async () => {
+    const refresh = vi.mocked(refreshStreamingUrl);
+    refresh.mockClear();
+    const { component } = await mountPlayer();
+    const el = videoElement();
+    resetElement(el);
+
+    recorded[0]?.onUrlExpired?.(612);
+    await vi.waitFor(() => expect(recorded).toHaveLength(2));
+    recorded[1]?.onUrlExpired?.(0);
+    flushSync();
+    await Promise.resolve();
+
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(recorded).toHaveLength(2);
+    expect(
+      document.body.querySelector('.video-player-error-retry')
+    ).not.toBeNull();
+
+    unmount(component);
+  });
+
+  test('a failure while playing stops the renewal and the mirror; Retry plays on', async () => {
+    const play = vi.mocked(HTMLMediaElement.prototype.play);
+    const { component } = await mountPlayer();
+    const el = videoElement();
+    resetElement(el);
+
+    el.dispatchEvent(new Event('play'));
+    recorded[0]?.onError?.(
+      'This could not be loaded. Please try again.',
+      'network',
+      2000
+    );
+    flushSync();
+    // The card shows Retry, and nothing reads as playing under it.
+    expect(document.body.querySelector('[aria-label="Pause"]')).toBeNull();
+
+    play.mockClear();
+    document.body
+      .querySelector<HTMLButtonElement>('.video-player-error-retry')
+      ?.click();
+    await vi.waitFor(() => expect(recorded).toHaveLength(2));
+    el.dispatchEvent(new Event('loadedmetadata'));
+    expect(el.currentTime).toBe(2000);
+    expect(play).toHaveBeenCalledTimes(1);
+
+    unmount(component);
+  });
+
+  test('Retry after a first load that never landed starts at the saved progress, not 0:00', async () => {
+    const props = $state({
+      src: SRC_A,
+      contentId: 'lesson-a',
+      contentTitle: 'Lesson one',
+      initialProgress: 1800,
+    });
+    const component = mount(VideoPlayer, { target: document.body, props });
+    flushSync();
+    await vi.waitFor(() => expect(recorded).toHaveLength(1));
+    const el = videoElement();
+    resetElement(el);
+
+    // The playlist failed before the stream knew its length.
+    recorded[0]?.onError?.(
+      'This could not be loaded. Please try again.',
+      'network',
+      0
+    );
+    flushSync();
+    el.dispatchEvent(new Event('pause'));
+    expect(updateLocalProgress).not.toHaveBeenCalledWith('lesson-a', 0, 5400);
+
+    document.body
+      .querySelector<HTMLButtonElement>('.video-player-error-retry')
+      ?.click();
+    await vi.waitFor(() => expect(recorded).toHaveLength(2));
+    el.dispatchEvent(new Event('loadedmetadata'));
+    expect(el.currentTime).toBe(1800);
 
     unmount(component);
   });
@@ -452,6 +537,26 @@ describe('VideoPlayer — renewing the link', () => {
     setPlaying(el, false);
     await vi.advanceTimersByTimeAsync(60 * 60_000);
     expect(refresh).toHaveBeenCalledTimes(1);
+    unmount(component);
+  });
+
+  test('a failure while playing disarms the renewal: nothing rebuilds or plays unasked', async () => {
+    const { component } = await mountExpiring(10 * 60_000);
+    const el = videoElement();
+    const play = vi.mocked(HTMLMediaElement.prototype.play);
+
+    setPlaying(el, true);
+    // The stream fails; the element stops without a pause event.
+    recorded[0]?.onError?.(
+      'This could not be loaded. Please try again.',
+      'network',
+      90
+    );
+    play.mockClear();
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(refresh).not.toHaveBeenCalled();
+    expect(recorded).toHaveLength(1);
+    expect(play).not.toHaveBeenCalled();
     unmount(component);
   });
 

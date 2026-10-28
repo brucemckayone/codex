@@ -78,7 +78,7 @@
 
   function togglePlay() {
     if (audioElement.paused) {
-      audioElement.play();
+      audioElement.play().catch(() => {});
     } else {
       audioElement.pause();
     }

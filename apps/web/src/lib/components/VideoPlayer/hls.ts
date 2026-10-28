@@ -238,6 +238,22 @@ export async function createHlsPlayer(
     return at;
   };
 
+  /**
+   * hls.js's media recovery detaches and re-attaches the element, which
+   * pauses it with no `pause` event, so a film that was playing would freeze
+   * under its Pause button. It plays on once the element is attached again;
+   * hls.js seeks it back to where it stood.
+   */
+  const recover = (swapCodec: boolean) => {
+    const wasPlaying = !media.paused;
+    if (swapCodec) hls.swapAudioCodec();
+    hls.recoverMediaError();
+    if (!wasPlaying) return;
+    hls.once(HlsJs.Events.MEDIA_ATTACHED, () => {
+      media.play().catch(() => {});
+    });
+  };
+
   hls.on(HlsJs.Events.ERROR, (_event: string, data: ErrorData) => {
     if (!data.fatal) return;
 
@@ -273,10 +289,9 @@ export async function createHlsPlayer(
       case HlsJs.ErrorTypes.MEDIA_ERROR:
         if (mediaErrorRecoveryAttempts === 0) {
           placeAtFault = media.currentTime;
-          hls.recoverMediaError();
+          recover(false);
         } else if (mediaErrorRecoveryAttempts === 1) {
-          hls.swapAudioCodec();
-          hls.recoverMediaError();
+          recover(true);
         } else {
           const at = stop();
           onError?.('This could not be played. Please try again.', 'media', at);

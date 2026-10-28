@@ -431,6 +431,51 @@ describe('AudioPlayer — a rebuilt stream keeps the listener’s place', () => 
     unmount(component);
   });
 
+  test('a failure while playing stops the renewal and the mirror; Retry plays on at its place', async () => {
+    const play = vi.mocked(HTMLMediaElement.prototype.play);
+    const { component } = await mountPlayer();
+    const el = audioElement();
+    resetElement(el);
+
+    el.dispatchEvent(new Event('play'));
+    recorded[0]?.onError?.(
+      'This could not be loaded. Please try again.',
+      'network',
+      1200
+    );
+    flushSync();
+
+    play.mockClear();
+    document.body
+      .querySelector<HTMLButtonElement>('.audio-player__error-retry')
+      ?.click();
+    await vi.waitFor(() => expect(recorded).toHaveLength(2));
+    el.dispatchEvent(new Event('loadedmetadata'));
+    expect(el.currentTime).toBe(1200);
+    expect(play).toHaveBeenCalledTimes(1);
+
+    unmount(component);
+  });
+
+  test('a 403 on a renewed stream before it plays is a refusal: no second ask', async () => {
+    const { component } = await mountPlayer();
+    const el = audioElement();
+    resetElement(el);
+
+    recorded[0]?.onUrlExpired?.(845);
+    await vi.waitFor(() => expect(recorded).toHaveLength(2));
+    recorded[1]?.onUrlExpired?.(0);
+    flushSync();
+    await Promise.resolve();
+
+    expect(recorded).toHaveLength(2);
+    expect(
+      document.body.querySelector('.audio-player__error-retry')
+    ).not.toBeNull();
+
+    unmount(component);
+  });
+
   test('a renewal of PLAYING audio plays on once it lands; paused audio stays paused', async () => {
     const play = vi.mocked(HTMLMediaElement.prototype.play);
     const { component } = await mountPlayer();
@@ -444,6 +489,8 @@ describe('AudioPlayer — a rebuilt stream keeps the listener’s place', () => 
     el.dispatchEvent(new Event('loadedmetadata'));
     expect(el.currentTime).toBe(845);
     expect(play).toHaveBeenCalledTimes(1);
+    // It plays: from here a 403 is an expiry again, not a refusal.
+    el.dispatchEvent(new Event('canplay'));
 
     el.dispatchEvent(new Event('pause'));
     play.mockClear();

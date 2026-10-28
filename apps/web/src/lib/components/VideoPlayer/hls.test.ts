@@ -26,6 +26,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const loadSource = vi.fn();
 const attachMedia = vi.fn();
 const on = vi.fn();
+const once = vi.fn();
 const destroy = vi.fn();
 const startLoad = vi.fn();
 const isSupported = vi.fn(() => true);
@@ -33,7 +34,11 @@ const isSupported = vi.fn(() => true);
 vi.mock('hls.js', () => {
   class FakeHls {
     static isSupported = () => isSupported();
-    static Events = { ERROR: 'hlsError', FRAG_LOADED: 'hlsFragLoaded' };
+    static Events = {
+      ERROR: 'hlsError',
+      FRAG_LOADED: 'hlsFragLoaded',
+      MEDIA_ATTACHED: 'hlsMediaAttached',
+    };
     static ErrorTypes = {
       NETWORK_ERROR: 'networkError',
       MEDIA_ERROR: 'mediaError',
@@ -45,6 +50,7 @@ vi.mock('hls.js', () => {
     loadSource = loadSource;
     attachMedia = attachMedia;
     on = on;
+    once = once;
     destroy = destroy;
     startLoad = startLoad;
     recoverMediaError = vi.fn();
@@ -59,6 +65,8 @@ function fakeMedia() {
     src: '',
     error: null,
     currentTime: 0,
+    paused: true,
+    play: vi.fn(async () => undefined),
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
   } as unknown as HTMLMediaElement;
@@ -297,6 +305,23 @@ describe('createHlsPlayer — recovery', () => {
     expect(onUrlExpired).toHaveBeenCalledTimes(1);
     expect(startLoad).not.toHaveBeenCalled();
     expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('a recovered PLAYING film plays on once re-attached; a paused one stays paused', async () => {
+    const { media, report } = await player();
+    (media as { paused: boolean }).paused = false;
+    report({ type: 'mediaError', details: 'bufferAppendError' });
+    // The recovery re-attaches the element, pausing it with no pause event.
+    expect(once).toHaveBeenCalledTimes(1);
+    const [event, attached] = once.mock.calls[0] as [string, () => void];
+    expect(event).toBe('hlsMediaAttached');
+    attached();
+    expect(media.play).toHaveBeenCalledTimes(1);
+
+    once.mockClear();
+    (media as { paused: boolean }).paused = true;
+    report({ type: 'mediaError', details: 'bufferAppendError' });
+    expect(once).not.toHaveBeenCalled();
   });
 
   it('a media error past recovery is a media fault, not a browser gap', async () => {

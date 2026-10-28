@@ -145,6 +145,16 @@
   let resumePoint: number | null = null;
   /** Drops a build's wait for its stream's metadata (`landPlace`). */
   let unland: (() => void) | null = null;
+  /** The place that wait will land when nothing was kept (`fail` keeps it). */
+  let pendingFallback = 0;
+  /** A failure stopped a playing film: Retry plays on (`fail`). */
+  let failedWhilePlaying = false;
+  /**
+   * A renewal or Retry built this stream and it has shown no frame yet. A
+   * 403 now is a refusal, not an expiry (its link is seconds old): asking
+   * again would loop refresh → 403 until the rate limit.
+   */
+  let freshUnframed = false;
   /**
    * When the signed URL the player is actually using expires. The
    * `expiresAt` prop describes the `src` prop, which a re-sign of the same
@@ -510,6 +520,23 @@
   }
 
   /**
+   * The stream failed: say why, and stop everything that would act on the
+   * dead stream. The element stopped without a `pause` event, so the mirror
+   * is set to paused here and the renewal timer stops: left armed, it would
+   * rebuild and play the film unasked minutes later. What the viewer wanted
+   * is kept for Retry, and so is a first place that had not landed yet, so
+   * Retry never starts a paid film at 0:00.
+   */
+  function fail(message: string) {
+    if (unland && resumePoint === null) keepPlace(pendingFallback);
+    failedWhilePlaying ||= !isPaused;
+    teardownRefresh();
+    isPaused = true;
+    errorMessage = message;
+    loading = false;
+  }
+
+  /**
    * Give a freshly built stream its place once it knows its length: the
    * place a rebuild kept (`resumePoint`), else `fallback` (the saved
    * progress). Every build path ends here, so a kept place is always
@@ -537,6 +564,7 @@
       land();
       return;
     }
+    pendingFallback = fallback;
     el.addEventListener('loadedmetadata', land, { once: true });
     unland = () => el.removeEventListener('loadedmetadata', land);
   }
@@ -545,11 +573,12 @@
    * Stop the live stream for a rebuild, and say whether the viewer was
    * watching. `isPaused` is read first: hls.js may already have destroyed
    * the stream, which pauses the element without a `pause` event, so the
-   * mirror still holds what the viewer wanted. It is then set to the truth,
-   * and the renewal timer stops with the stream.
+   * mirror still holds what the viewer wanted (or `fail` kept it). It is
+   * then set to the truth, and the renewal timer stops with the stream.
    */
   function stopForRebuild(): boolean {
-    const wasPlaying = !isPaused;
+    const wasPlaying = !isPaused || failedWhilePlaying;
+    failedWhilePlaying = false;
     teardownHls();
     teardownRefresh();
     isPaused = videoEl?.paused ?? true;
@@ -605,6 +634,7 @@
    */
   function handleLoadedData() {
     loading = false;
+    freshUnframed = false;
   }
 
   function clearBuffering() {
@@ -639,21 +669,18 @@
   }
 
   function handleError() {
-    if (hlsInstance && videoEl) {
-      // A decode or MSE failure reaches the element before hls.js, which only
-      // notices on its next append. Keep the place for Retry and destroy the
-      // instance here: orphaned, it would stay bound to the element a
-      // Retry's instance then owns, and its own recovery would take it back.
-      keepPlace(videoEl.currentTime);
-      teardownHls();
-    }
-    if (!errorMessage) {
-      errorMessage =
-        videoEl?.error?.code === MEDIA_ERR_NETWORK
-          ? 'Failed to load video. Please check your connection and try again.'
-          : 'This video could not be played. Please try again.';
-    }
-    loading = false;
+    const live = hlsInstance && videoEl;
+    if (live) keepPlace(videoEl?.currentTime ?? 0);
+    const network = videoEl?.error?.code === MEDIA_ERR_NETWORK;
+    const message = network
+      ? 'Failed to load video. Please check your connection and try again.'
+      : 'This video could not be played. Please try again.';
+    fail(errorMessage || message);
+    // A decode or MSE failure reaches the element before hls.js, which only
+    // notices on its next append. Destroy the instance here: orphaned, it
+    // would stay bound to the element a Retry's instance then owns, and its
+    // own recovery would take it back.
+    if (live) teardownHls();
     // Null the HLS reference — the instance may already have been destroyed
     // by hls.ts's fatal-error path, but the local reference is what the
     // src-change $effect checks. Without this, navigating to a working video
@@ -737,6 +764,9 @@
     loading = true;
     errorMessage = '';
     hasStartedPlayback = false;
+    // This build's `resume` says what plays; an earlier failure's wish is spent.
+    failedWhilePlaying = false;
+    freshUnframed = false;
     clearBuffering();
     lastInitialisedSrc = src;
     liveExpiresAt = expiresAt;
@@ -750,16 +780,7 @@
       const handle = await createHlsPlayer({
         media: videoEl,
         src,
-        onError: (msg, _kind, at) => {
-          keepPlace(at);
-          errorMessage = msg;
-          loading = false;
-          // hls.ts destroys the instance internally before calling onError —
-          // null our reference so the src-change $effect takes the rebuild
-          // path instead of calling loadSource() on a dead instance.
-          hlsInstance = null;
-          lastInitialisedSrc = null;
-        },
+        onError: streamFailed,
         onUrlExpired: (at) => {
           // HLS.js path: instance has already been destroyed by hls.ts.
           // Safari path: `<video>` is still attached. Either way we need a
@@ -792,8 +813,7 @@
 
       tracker.attach();
     } catch {
-      errorMessage = 'Failed to initialize video player.';
-      loading = false;
+      fail('Failed to initialize video player.');
     }
   }
 
@@ -819,8 +839,7 @@
   /** `hls.ts` gave up on the stream; it has destroyed the instance itself. */
   function streamFailed(msg: string, _kind: unknown, at: number) {
     keepPlace(at);
-    errorMessage = msg;
-    loading = false;
+    fail(msg);
     // Null our reference so the src-change $effect rebuilds instead of
     // calling loadSource() on a dead instance.
     hlsInstance = null;
@@ -829,13 +848,18 @@
 
   /**
    * Build this item's stream on a freshly signed URL, at the place the
-   * rebuild kept: a renewal's and a Retry's shared second half. A newer
-   * build that claimed the element meanwhile wins, and this one is dropped.
+   * rebuild kept: a renewal's and a Retry's shared second half. The link is
+   * asked for BEFORE `stop` ends the live stream, so a renewal that cannot
+   * ask leaves a still-good link playing. A newer build that claimed the
+   * element meanwhile wins, and this one is dropped.
+   *
+   * @param stop - Ends the live stream; says whether to play on.
    */
-  async function buildFresh(resume: boolean) {
+  async function buildFresh(stop: () => boolean) {
     const token = ++initToken;
     const fresh = await refreshStreamingUrl(contentId);
     if (!videoEl || token !== initToken) return;
+    const resume = stop();
     lastInitialisedSrc = fresh.streamingUrl;
     liveExpiresAt = fresh.expiresAt;
     loading = true;
@@ -856,6 +880,7 @@
     }
     hlsInstance = handle.hls;
     hlsCleanup = handle.cleanup;
+    freshUnframed = true;
     void attachQualityListeners();
     landPlace(0, resume);
     tracker.attach();
@@ -873,17 +898,29 @@
    */
   async function handleUrlExpired(at?: number) {
     if (refreshInFlight) return;
+    if (at !== undefined) keepPlace(at);
+    if (freshUnframed) {
+      fail('This could not be loaded. Please try again.');
+      teardownHls();
+      return;
+    }
     refreshInFlight = true;
+    let stopped = false;
     try {
-      keepPlace(at ?? videoEl?.currentTime ?? 0);
-      await buildFresh(stopForRebuild());
+      await buildFresh(() => {
+        stopped = true;
+        // The timer's renewal ran while the film played on.
+        if (at === undefined) keepPlace(videoEl?.currentTime ?? 0);
+        return stopForRebuild();
+      });
     } catch {
+      // A timer's renewal that could not ask leaves its link playing out its
+      // last minute, and that link's 403 asks again.
+      if (at === undefined && !stopped) return;
+      fail('Playback link expired and could not be refreshed. Please try again.');
       // On the native path the old link still plays for up to a minute;
       // nothing may play on under the error card.
       videoEl?.pause();
-      errorMessage =
-        'Playback link expired and could not be refreshed. Please try again.';
-      loading = false;
     } finally {
       refreshInFlight = false;
     }
@@ -922,14 +959,19 @@
     // refresh it before reinitialising — otherwise Retry would 403 again.
     // Either way the rebuilt stream resumes where the failed one stopped
     // (`resumePoint`), never at 0, and plays on if the viewer was watching.
+    // One at a time: a second press would spend the first one's play-on.
+    if (refreshInFlight) return;
+    refreshInFlight = true;
     const resume = stopForRebuild();
     try {
-      await buildFresh(resume);
+      await buildFresh(() => resume);
     } catch {
       // Refresh endpoint itself unreachable — fall back to the original
       // src; the network blip that caused the error may have already
       // recovered. It lands the kept place too.
       await initPlayer(resume);
+    } finally {
+      refreshInFlight = false;
     }
   }
 
@@ -999,6 +1041,7 @@
       }
 
       teardownHls();
+      teardownRefresh();
       releaseMedia();
       lastInitialisedSrc = null;
       void initPlayer();
@@ -1100,9 +1143,9 @@
       case 'F':
         e.preventDefault();
         if (document.fullscreenElement) {
-          document.exitFullscreen();
+          document.exitFullscreen().catch(() => {});
         } else {
-          videoEl.closest('media-controller')?.requestFullscreen();
+          videoEl.closest('media-controller')?.requestFullscreen().catch(() => {});
         }
         break;
       case 't':
