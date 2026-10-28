@@ -10,6 +10,7 @@
 import { MEDIA_STATUS, MEDIA_TYPES } from '@codex/constants';
 import { toIso } from '@codex/database';
 import type { ObservabilityClient } from '@codex/observability';
+import { InternalServiceError } from '@codex/service-errors';
 import {
   getHlsMasterKey,
   getHlsVariantKey,
@@ -22,10 +23,11 @@ import {
 } from '../../errors';
 import {
   collectVariantSegments,
+  rewriteFilmMasterPlaylist,
   rewriteMasterPlaylist,
   rewriteVariantPlaylist,
 } from '../../hls-rewrite';
-import { signHlsToken } from '../../hls-token';
+import { signFilmToken, signHlsToken } from '../../hls-token';
 import type { R2Signer } from './r2-signer';
 
 /**
@@ -320,6 +322,92 @@ export async function getHlsMasterPlaylist(
   return rewriteMasterPlaylist(text, {
     contentApiBaseUrl,
     contentId: input.contentId,
+    token: input.token,
+  });
+}
+
+/**
+ * Mint the signed FULL stream of a course sales film (owner P10): a film token
+ * and the FILM master-proxy URL it opens. The caller has run the eligibility
+ * check (`resolveCourseFilm`); this only signs, as
+ * {@link buildStreamingResponse} does for a granted content stream.
+ *
+ * Its failures carry NO context, unlike that function's `R2SigningError`: a
+ * ServiceError's context reaches the client verbatim, and this one answers an
+ * anonymous caller, who must not be handed the R2 key.
+ *
+ * @throws {InternalServiceError} proxy misconfigured, or signing failed
+ */
+export async function buildFilmStreamResponse(
+  film: { creatorId: string; mediaId: string },
+  deps: {
+    contentApiBaseUrl: string | undefined;
+    hlsTokenSecret: string | undefined;
+  },
+  courseId: string,
+  expirySeconds: number
+): Promise<{ playlistUrl: string; expiresAt: Date }> {
+  const { contentApiBaseUrl, hlsTokenSecret } = deps;
+  if (!contentApiBaseUrl || !hlsTokenSecret) {
+    throw new InternalServiceError(
+      'HLS streaming proxy is not configured (contentApiBaseUrl / hlsTokenSecret missing)'
+    );
+  }
+
+  try {
+    const exp = Math.floor(Date.now() / 1000) + expirySeconds;
+    const token = await signFilmToken(
+      { courseId, creatorId: film.creatorId, mediaId: film.mediaId, exp },
+      hlsTokenSecret
+    );
+    const base = contentApiBaseUrl.replace(/\/+$/, '');
+    return {
+      playlistUrl: `${base}/api/access/courses/${encodeURIComponent(
+        courseId
+      )}/films/hls/master.m3u8?token=${encodeURIComponent(token)}`,
+      expiresAt: new Date(exp * 1000),
+    };
+  } catch (err) {
+    throw new InternalServiceError(
+      'Failed to sign a course film stream',
+      undefined,
+      { cause: err }
+    );
+  }
+}
+
+/**
+ * {@link getHlsMasterPlaylist} for a course sales film: the variants point at
+ * the FILM variant proxy. Auth is the verified film token (checked at the
+ * route via `verifyFilmToken`), so no DB read.
+ *
+ * @returns Rewritten master playlist text, or `null` when the master object
+ *          is absent in R2 (route maps to 404).
+ */
+export async function getFilmHlsMasterPlaylist(
+  deps: { r2: R2Signer; contentApiBaseUrl: string | undefined },
+  input: {
+    courseId: string;
+    creatorId: string;
+    mediaId: string;
+    token: string;
+  }
+): Promise<string | null> {
+  const { r2, contentApiBaseUrl } = deps;
+  const masterKey = getHlsMasterKey(input.creatorId, input.mediaId);
+  if (!contentApiBaseUrl) {
+    throw new R2SigningError(
+      masterKey,
+      new Error('HLS streaming proxy is not configured (contentApiBaseUrl)')
+    );
+  }
+
+  const text = await r2.getObjectText(masterKey);
+  if (text === null) return null;
+
+  return rewriteFilmMasterPlaylist(text, {
+    contentApiBaseUrl,
+    courseId: input.courseId,
     token: input.token,
   });
 }

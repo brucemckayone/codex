@@ -1181,6 +1181,21 @@ export interface JourneySellMedia {
    * OPTIONAL-additive, same deployment-skew reason as the two above.
    */
   signatureImageUrl?: string | null;
+  /**
+   * The media this space's pickers can offer whose film a visitor sees only as
+   * the 30-second preview, because a content item that is anything but plainly
+   * free uses it (owner P10). The panel says so under a film slot holding one.
+   *
+   * The set covers every media item the slots may hold (that of the org's active
+   * members, `assertMediaItemsInOrg`'s boundary), not only the attached ones, so
+   * a film picked but not yet saved is named too. Read once with the panel; it
+   * is the same rule the public stream applies (`findPaidMediaUses`), so the
+   * note and the page agree.
+   *
+   * OPTIONAL-additive: an older worker omits it, and no note shows. The write's
+   * echo omits it too; the panel keeps what it read.
+   */
+  previewOnlyMediaIds?: string[];
 }
 
 /**
@@ -1239,6 +1254,18 @@ export interface CourseSellPreviewClip {
   posterUrl: string | null;
   /** Advisory duration (seconds) for a "N sec preview" affordance. */
   durationSeconds: number | null;
+  /**
+   * The FULL film may be asked for (owner P10, "Full film unless it's paid"):
+   * the media is ready, and no content item that is anything but plainly free
+   * uses it. A press then asks `GET /api/access/courses/:courseId/films/:film/stream`,
+   * which re-checks and mints a 10-minute signed stream. ADVISORY: a UI hint
+   * only, never the gate. Set on the three films a press can ask for (`intro`,
+   * `reel`, `guideClip`); the hero's loop never carries it.
+   *
+   * OPTIONAL-additive: an older worker deployment omits it, and every film
+   * stays the preview.
+   */
+  fullFilm?: boolean;
 }
 
 /**

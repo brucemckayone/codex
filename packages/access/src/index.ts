@@ -58,8 +58,11 @@ export {
   rewriteVariantPlaylist,
 } from './hls-rewrite';
 export {
+  type FilmTokenPayload,
   type HlsTokenPayload,
+  signFilmToken,
   signHlsToken,
+  verifyFilmToken,
   verifyHlsToken,
 } from './hls-token';
 export type {
@@ -100,6 +103,7 @@ export type {
   ContentHeld,
   ContentHeldBy,
   CourseEntryResponse,
+  CourseFilmStreamResponse,
   PlaybackProgressResponse,
   StreamingUrlResponse,
   UpdatePlaybackProgressResponse,

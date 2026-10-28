@@ -102,6 +102,7 @@ import type {
   MediaStatusTicket,
   ReactivateSubscriptionInput,
   ResumeSubscriptionInput,
+  SalesFilm,
   SupportChargeSearchQuery,
   SupportIssueRefundInput,
   SupportQueueQuery,
@@ -1281,6 +1282,26 @@ export function createServerApi(
         request<SellPreview | null>(
           'access',
           `/api/journeys/courses/${courseId}/sell-preview`
+        ),
+
+      /**
+       * A course sales film's signed FULL stream (owner P10), asked for by a
+       * visitor's press: a 10-minute film-proxy URL, or null when the film may
+       * only play its 30s preview (a paid practice uses it, or it is not a
+       * published course's). Public; the worker re-checks on every call.
+       */
+      courseFilmStream: (
+        organizationId: string,
+        courseId: string,
+        film: SalesFilm
+      ) =>
+        request<{ playlistUrl: string; expiresAt: string } | null>(
+          'access',
+          `/api/access/courses/${encodeURIComponent(
+            courseId
+          )}/films/${film}/stream?organizationId=${encodeURIComponent(
+            organizationId
+          )}`
         ),
 
       /**

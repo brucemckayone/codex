@@ -115,6 +115,7 @@ import {
 } from './course-payouts';
 import { pageRevision } from './page-revision';
 import { resolvePracticeThumbnail } from './practice-thumbnail';
+import { findFullFilmMedia, findPaidMediaInOrg } from './sales-films';
 
 /**
  * Narrow a stored `content.contentType` varchar to the practice union. The DB
@@ -771,6 +772,11 @@ export class CourseJourneyService extends BaseService {
    * `content-api/routes/r2-public-urls.ts`); NO R2 signing is ever involved. A clip is `null` when the course has no such
    * media, its preview has not transcoded (`hlsPreviewKey` null), or no CDN base
    * is configured. Returns `null` when the course is not published/non-deleted.
+   *
+   * The intro, reel and guide clips also say whether their FULL film may be
+   * asked for (`fullFilm`, owner P10; `sales-films.ts`). A hint only: the full
+   * stream is minted, and re-checked, per press. This read is uncached (no KV
+   * slot, and the page is `private`), so the hint is as fresh as the load.
    */
   async getCourseSellPreview(
     courseId: string,
@@ -829,17 +835,32 @@ export class CourseJourneyService extends BaseService {
         }
       >();
 
+      // Owner P10 ("Full film unless it's paid"): which of the three films a
+      // press can ask for may stream in full. This course's published row is
+      // rule (a); `findFullFilmMedia` applies the rest. ADVISORY only — the
+      // minter re-checks on every press — so an empty set is the safe answer.
+      const filmMediaIds = [
+        courseRow.introVideoMediaId,
+        courseRow.previewVideoMediaId,
+        courseRow.guideVideoMediaId,
+      ].filter((id): id is string => id !== null);
+
+      let fullFilms = new Map<string, string>();
       if (mediaIds.length > 0) {
-        const mediaRows = await this.db
-          .select({
-            id: mediaItems.id,
-            hlsPreviewKey: mediaItems.hlsPreviewKey,
-            thumbnailKey: mediaItems.thumbnailKey,
-            durationSeconds: mediaItems.durationSeconds,
-          })
-          .from(mediaItems)
-          .where(inArray(mediaItems.id, mediaIds));
+        const [mediaRows, eligible] = await Promise.all([
+          this.db
+            .select({
+              id: mediaItems.id,
+              hlsPreviewKey: mediaItems.hlsPreviewKey,
+              thumbnailKey: mediaItems.thumbnailKey,
+              durationSeconds: mediaItems.durationSeconds,
+            })
+            .from(mediaItems)
+            .where(inArray(mediaItems.id, mediaIds)),
+          findFullFilmMedia(this.db, filmMediaIds),
+        ]);
         for (const row of mediaRows) previewByMediaId.set(row.id, row);
+        fullFilms = eligible;
       }
 
       // Resolve one media id → a public clip. Null unless a transcoded preview
@@ -857,6 +878,15 @@ export class CourseJourneyService extends BaseService {
         };
       };
 
+      // A film a press can ask for: its clip, saying whether the full film may
+      // be asked for. The hero's loop is `toClip` alone: it plays muted, so it
+      // never asks.
+      const toFilm = (mediaId: string | null): CourseSellPreviewClip | null => {
+        const clip = toClip(mediaId);
+        if (!clip || !mediaId) return clip;
+        return { ...clip, fullFilm: fullFilms.has(mediaId) };
+      };
+
       // Resolve one media id → a public STILL. The portrait is a `media_items`
       // ref, and `media_items` is CHECK-constrained to video/audio, so the still
       // the creator picked is the item's `thumbnailKey` — NOT `hlsPreviewKey`,
@@ -869,13 +899,13 @@ export class CourseJourneyService extends BaseService {
       };
 
       return {
-        intro: toClip(courseRow.introVideoMediaId),
-        reel: toClip(courseRow.previewVideoMediaId),
+        intro: toFilm(courseRow.introVideoMediaId),
+        reel: toFilm(courseRow.previewVideoMediaId),
         // Contract amendment A15: both guide slots were WRITE-ONLY codebase-wide
         // — the builder's pickers persisted them and no public read projected
         // them, so the guide section could never show a portrait or a clip.
         guidePortraitUrl: toStill(guidePortraitMediaId),
-        guideClip: toClip(courseRow.guideVideoMediaId),
+        guideClip: toFilm(courseRow.guideVideoMediaId),
         // Contract amendment A27 (Codex-wqxv4) + A32 (Codex-490z7): the hero
         // image, resolved down A32's FALLBACK CHAIN, uploaded first:
         //
@@ -3044,6 +3074,10 @@ export class CourseJourneyService extends BaseService {
           row.signatureImageKey,
           r2PublicUrlBase
         ),
+        // Owner P10: the films a visitor sees only as the 30-second preview,
+        // for the panel's note. Every media the slots may hold, not only the
+        // attached ones, so a pick not yet saved is named too.
+        previewOnlyMediaIds: await findPaidMediaInOrg(this.db, organizationId),
       };
     } catch (error) {
       this.handleError(error, 'getJourneySellMedia');

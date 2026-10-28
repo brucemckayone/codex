@@ -38,11 +38,14 @@
   column, so this is never `.lp-bleed`. The picture paints in the first HTML
   (`priority`); it takes the hero's one entrance (`hero__enter-m`) on its
   outer box and a wipe as it scrolls in (`data-lp-reveal`) on its inner one.
+  A clip plays in the picture's own box (`InlineFilm`), cut as it is.
 -->
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import type { PreviewMedia } from '../../../render/types';
   import type { HeadingRuns } from '../../model/long-heading';
+  import type { BlockEdit } from '../../model/types';
+  import InlineFilm from '../../primitives/InlineFilm.svelte';
   import Media from '../../primitives/Media.svelte';
 
   interface Props {
@@ -59,8 +62,11 @@
     chars: number;
     /** How wide the headline's words are (`model/long-heading.ts`). */
     runs: HeadingRuns;
-    /** The play button laid over a clip. */
-    watch: Snippet;
+    /** The play button's words, over a clip that plays in the picture (`InlineFilm`). */
+    watchLabel: string;
+    /** The film's accessible title. */
+    title: string;
+    edit?: BlockEdit | null;
     /**
      * Keep the picture's place though there is no still yet — only where the
      * page is looked at: one may arrive on the streamed preview, and the
@@ -70,8 +76,20 @@
     reserve?: boolean;
   }
 
-  const { still, srcset = '', focus, clip, alt, copy, chars, runs, watch, reserve = false }: Props =
-    $props();
+  const {
+    still,
+    srcset = '',
+    focus,
+    clip,
+    alt,
+    copy,
+    chars,
+    runs,
+    watchLabel,
+    title,
+    edit = null,
+    reserve = false,
+  }: Props = $props();
   // Wide, the picture floats at about half the band; stacked, it spans it.
   const sizes = '(min-width: 56rem) 46vw, 100vw';
 
@@ -93,7 +111,15 @@
     <div class="hero-poster__media hero__enter-m">
       <div class="hero-poster__reveal" data-lp-reveal="wipe">
         {#if clip}
-          <Media image={still} {clip} {srcset} {sizes} {focus} priority {alt}>{@render watch()}</Media>
+          <!-- While the film is up, the ambient loop under it rests. -->
+          <InlineFilm {clip} label={watchLabel} {title} {edit}>
+            {#snippet children(control, player, up)}
+              <Media image={still} clip={up ? null : clip} {srcset} {sizes} {focus} priority {alt}>
+                {@render control()}
+              </Media>
+              {@render player()}
+            {/snippet}
+          </InlineFilm>
         {:else}
           <Media image={still} {srcset} {sizes} {focus} priority {alt} />
         {/if}
@@ -167,6 +193,11 @@
   .hero-poster__reveal :global(.lp-media) {
     position: absolute;
     inset: 0;
+    border-radius: 0;
+  }
+
+  /* A film playing over the picture is cut as the picture is (`InlineFilm`). */
+  .hero-poster__reveal :global(.lp-film) {
     border-radius: 0;
   }
 
@@ -244,7 +275,8 @@
     }
 
     /* Only the corner inside the band is rounded; the others are cut by it. */
-    .hero-poster__reveal :global(.lp-media) {
+    .hero-poster__reveal :global(.lp-media),
+    .hero-poster__reveal :global(.lp-film) {
       border-start-start-radius: var(--lp-radius-media);
     }
 

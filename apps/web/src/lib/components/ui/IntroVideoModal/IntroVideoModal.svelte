@@ -1,30 +1,47 @@
 <!--
   @component IntroVideoModal
 
-  Fullscreen video overlay for the org hero intro video.
-  Uses HLS.js for adaptive streaming via createHlsPlayer().
+  The theatre: a film over the page, in the same player as a film that plays
+  in place (`PreviewPlayerCore`) — scrubber, time, mute, captions when there
+  are tracks, and full screen — with sound, because a press opened it. The
+  org landing page opens it for its intro film on a phone; a sales page, for
+  a film with no frame to play in (the hero's cover, the guide's quote, a
+  Button that plays the preview: owner P2).
 
-  The overlay uses backdrop-filter: blur so the shader background
-  bleeds through. The video has CSS mask-image feathered edges that
-  dissolve into the blurred backdrop — no hard rectangle.
+  A dark room over the page, a row with the film's name and a close button,
+  and the film at 16:9 as large as the window allows. Escape, the close
+  button or a click on the room outside the film dismiss it; Tab stays
+  inside, and focus goes back to what had it before it opened. When the film
+  ends, its poster returns with "Watch again".
+
+  The player's code loads on demand (`components/player/load-core.ts`).
+  When it has loaded — a kit play button fetches it ahead — the theatre
+  mounts it with itself, in the press's tick, so its `play()` keeps the
+  sound; otherwise it waits for it, and the film may start muted.
 
   @prop {boolean} open - Whether the modal is visible
-  @prop {string} src - HLS manifest URL
-  @prop {string} [title] - Content title for the `<video aria-label>` (ref 05 §"Media elements" §1)
-  @prop {Array<{src, srclang, label, default?}>} [captions] - Optional caption tracks
-    (ref 05 §"Media elements" §2). Intro videos are typically decorative — omit unless narration exists.
+  @prop {string | Promise<string | {playlistUrl, expiresAt?}>} src - HLS
+    manifest URL, or a promise of one while the full film is being asked for
+    (`requestFilm`)
+  @prop {() => Promise<{playlistUrl, expiresAt?} | null>} [renew] - Asks again
+    for a full film whose links are running out (the player's RENEWAL)
+  @prop {string} [title] - The film's name: the theatre's heading and the
+    player's accessible label
+  @prop {string | null} [poster] - Shown until the first frame, and again at the end
+  @prop {Array<{src, srclang, label, default?}>} [captions] - Optional caption
+    tracks (ref 05 §"Media elements" §2); the CC button appears only with some
   @prop {() => void} onclose - Called when the modal is dismissed
 -->
 <script lang="ts">
-  import { onDestroy } from 'svelte';
-  import { browser } from '$app/environment';
-  import { createHlsPlayer } from '$lib/components/VideoPlayer/hls';
-  import { PlayIcon, XIcon, Volume2Icon, VolumeXIcon } from '$lib/components/ui/Icon';
+  import type { ComponentProps } from 'svelte';
   import {
-    createMediaKeyboardHandler,
-    MediaLiveRegion,
-  } from '$lib/components/media-a11y';
-  import type Hls from 'hls.js';
+    loadedPlayerCore,
+    loadPlayerCore,
+    type PlayerCore,
+  } from '$lib/components/player/load-core';
+  import { RefreshCwIcon, XIcon } from '$lib/components/ui/Icon';
+  import { getThumbnailSrcset, getThumbnailUrl } from '$lib/utils/image';
+  import * as m from '$paraglide/messages';
 
   interface CaptionTrack {
     src: string;
@@ -35,105 +52,63 @@
 
   interface Props {
     open: boolean;
-    src: string;
+    src: ComponentProps<PlayerCore>['src'];
+    renew?: ComponentProps<PlayerCore>['renew'];
     title?: string;
+    poster?: string | null;
     /**
      * Caption tracks per ref 05 §"Media elements" §2. Provide one entry per
-     * language; exactly one should carry `default: true`. Intro videos are
-     * typically decorative and can omit — the justification lives in the
-     * svelte-ignore comment below per §7.
+     * language; exactly one should carry `default: true`. The transcoding
+     * pipeline makes none yet (Codex-jw0pn).
      */
     captions?: CaptionTrack[];
     onclose: () => void;
   }
 
-  const { open, src, title = 'Intro video', captions, onclose }: Props = $props();
+  const { open, src, renew, title, poster = null, captions, onclose }: Props =
+    $props();
+
+  const name = $derived(title || m.player_intro_video());
+  // The ended still is contained in the theatre, so never wider than the
+  // viewport: the browser picks its file from the srcset (Codex-kk9nv.1).
+  const stillSrcset = $derived(poster ? getThumbnailSrcset(poster) : '');
 
   let dialogEl = $state<HTMLDivElement | undefined>(undefined);
-  let videoEl = $state<HTMLVideoElement | undefined>(undefined);
-  let hlsInstance: Hls | null = null;
-  let hlsCleanup: (() => void) | null = null;
-  let playing = $state(false);
-  let muted = $state(true);
-  let loading = $state(false);
-  let error = $state<string | null>(null);
+  let Player = $state.raw<PlayerCore | null>(loadedPlayerCore());
+  let failed = $state(false);
 
-  /**
-   * Tear down the current HLS.js instance and any Safari error listener.
-   *
-   * `createHlsPlayer` returns a HANDLE — `{ hls, cleanup }` — not the player.
-   * Assigning that handle straight to `hlsInstance` (typed `Hls`) is what this
-   * component used to do: `hlsInstance.destroy()` then threw
-   * `destroy is not a function` on every close, `cleanup()` never ran, and the
-   * real HLS.js instance was never destroyed — so each open leaked a player
-   * whose worker kept fetching segments, plus the native-Safari `error`
-   * listener. `svelte-check` had been reporting the type mismatch all along
-   * ("Type 'HlsPlayerHandle' is missing … 88 more"); it sat in the accepted
-   * error baseline as if it were cosmetic.
-   *
-   * `hlsCleanup` is a no-op on the HLS.js branch and a `removeEventListener`
-   * on the Safari native branch, so both halves are needed. Mirrors
-   * `AudioPlayer`/`VideoPlayer`, which had it right.
-   */
-  function teardownHls() {
-    if (hlsCleanup) {
-      hlsCleanup();
-      hlsCleanup = null;
-    }
-    if (hlsInstance) {
-      hlsInstance.destroy();
-      hlsInstance = null;
-    }
-  }
+  // What had focus before the theatre opened, read as it is made: the
+  // player inside takes focus for itself as it mounts.
+  const opener =
+    typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
 
-  // ── HLS init/teardown tied to open state ──
+  // The player's code, when the theatre opened before it arrived.
   $effect(() => {
-    if (!open || !browser || !videoEl) return;
-
-    let destroyed = false;
-
-    async function init() {
-      error = null;
-      loading = true;
-      try {
-        const handle = await createHlsPlayer({
-          media: videoEl,
-          src,
-          onError: (msg) => {
-            error = msg;
-            loading = false;
-          },
-        });
-        hlsInstance = handle.hls;
-        hlsCleanup = handle.cleanup;
-
-        if (destroyed) {
-          teardownHls();
-          return;
-        }
-
-        loading = false;
-
-        // Autoplay muted — the scale-in keyframe halts under
-        // prefers-reduced-motion via the CSS @media guard below.
-        videoEl.muted = true;
-        muted = true;
-        try { await videoEl.play(); playing = true; } catch { /* autoplay blocked */ }
-      } catch {
-        error = 'Failed to load video';
-        loading = false;
+    if (!open || Player) return;
+    let gone = false;
+    loadPlayerCore().then(
+      (loaded) => {
+        if (!gone) Player = loaded;
+      },
+      () => {
+        if (!gone) failed = true;
       }
-    }
-
-    init();
-
+    );
     return () => {
-      destroyed = true;
-      teardownHls();
-      playing = false;
-      muted = true;
-      loading = false;
+      gone = true;
     };
+  });
+
+  // Focus into the theatre (unless the player already took it), and back out
+  // to its opener when it closes.
+  $effect(() => {
+    if (!open) return;
+    if (!dialogEl?.contains(document.activeElement)) {
+      dialogEl?.focus({ preventScroll: true });
+    }
+    return () => opener?.focus({ preventScroll: true });
   });
 
   // ── Click outside ──
@@ -141,61 +116,34 @@
     if (e.target === e.currentTarget) onclose();
   }
 
-  // ── Toggle play/pause ──
-  function togglePlay() {
-    if (!videoEl) return;
-    dialogEl?.focus({ preventScroll: true });
-    if (videoEl.paused) {
-      videoEl.muted = false;
-      muted = false;
-      videoEl.play();
-      playing = true;
-    } else {
-      videoEl.pause();
-      playing = false;
-    }
-  }
-
-  // ── Toggle mute ──
-  function toggleMute() {
-    if (!videoEl) return;
-    videoEl.muted = !videoEl.muted;
-    muted = videoEl.muted;
-  }
-
   /**
-   * Dialog-scoped keyboard shortcuts (ref 05 §"Media elements" §3).
-   * Modal is a native dialog pattern — Escape closes, Space toggles play,
-   * arrow keys seek. Focus trap is implicit: focus enters the dialog via
-   * the close-button auto-focus on open; Tab cycles through interactive
-   * descendants of the dialog; the wrapper containment check keeps shortcuts
-   * scoped to the open dialog.
+   * The player answers its own keys (Space, K, M, the arrows, F) from
+   * anywhere inside it; the theatre adds Escape to close, and keeps Tab
+   * inside: from the last control to the first, and back.
    */
-  const handleKey = createMediaKeyboardHandler({
-    getWrapper: () => dialogEl,
-    getMedia: () => videoEl ?? null,
-    shortcuts: {
-      playPause: togglePlay,
-      mute: toggleMute,
-      // Wrap `onclose` so changes to the prop propagate — capturing the prop
-      // directly pins the initial value per Svelte 5 $props semantics.
-      escape: () => onclose(),
-      seekSecs: 10,
-    },
-  });
-
-  // Focus trap: focus close button when modal opens
-  let closeBtn = $state<HTMLButtonElement | undefined>(undefined);
-  $effect(() => {
-    if (open && closeBtn) {
-      // Delay to allow transition
-      requestAnimationFrame(() => closeBtn?.focus());
+  function handleKey(e: KeyboardEvent) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      onclose();
+    } else if (e.key === 'Tab' && dialogEl) {
+      const stops = [
+        ...dialogEl.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), input:not([disabled]), a[href]'
+        ),
+      ];
+      const first = stops[0];
+      const last = stops.at(-1);
+      if (!first || !last) return;
+      const at = document.activeElement;
+      if (e.shiftKey && (at === first || at === dialogEl)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && at === last) {
+        e.preventDefault();
+        first.focus();
+      }
     }
-  });
-
-  onDestroy(() => {
-    teardownHls();
-  });
+  }
 
   /**
    * Portal the modal root out of the section subtree.
@@ -209,10 +157,15 @@
    * fullscreen video. Re-parenting to `.org-layout`
    * (NOT raw `<body>` — it carries the org-brand + `--color-player-*` cascade
    * this modal styles against) lets the modal stack against the root instead.
+   *
+   * Moving a node drops the focus inside it, and the player may already have
+   * taken focus as it mounted: it is handed back after the move.
    */
   function portal(node: HTMLElement) {
     const target = document.querySelector('.org-layout') ?? document.body;
+    const focused = node.contains(document.activeElement) ? document.activeElement : null;
     target.appendChild(node);
+    if (focused instanceof HTMLElement) focused.focus({ preventScroll: true });
     return {
       destroy() {
         node.remove();
@@ -221,6 +174,22 @@
   }
 </script>
 
+{#snippet again(replay: () => void)}
+  {#if poster}
+    <img
+      class="intro-modal__still"
+      src={getThumbnailUrl(poster, 'lg')}
+      srcset={stillSrcset || undefined}
+      sizes={stillSrcset ? '100vw' : undefined}
+      alt=""
+    />
+  {/if}
+  <button type="button" class="intro-modal__again" onclick={replay}>
+    <RefreshCwIcon size={16} />
+    {m.player_watch_again()}
+  </button>
+{/snippet}
+
 {#if open}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <div
@@ -228,75 +197,42 @@
     role="dialog"
     tabindex="-1"
     aria-modal="true"
-    aria-label={title || 'Intro video'}
+    aria-label={name}
     bind:this={dialogEl}
     use:portal
     onclick={handleOverlayClick}
     onkeydown={handleKey}
   >
-    <!-- Live region per ref 05 §"Media elements" §4 — announces loading + errors. -->
-    <MediaLiveRegion {loading} {error} loadingLabel="Loading intro video…" />
-
-    <!-- Close button -->
-    <button
-      bind:this={closeBtn}
-      class="intro-modal__close"
-      onclick={onclose}
-      aria-label="Close video"
-    >
-      <XIcon size={24} />
-    </button>
-
-    <!-- Video container with feathered edges -->
-    <div class="intro-modal__player">
-      <!--
-        Intro video is demonstrably decorative (no narration) — captions are
-        omitted by design per ref 05 §"Media elements" §7. Pass `captions`
-        if future intros carry narration. The compile-time `<track>` branch
-        below satisfies `a11y_media_has_caption` without a suppression.
-      -->
-      <video
-        bind:this={videoEl}
-        class="intro-modal__video"
-        aria-label={title}
-        playsinline
-        preload="auto"
-        onclick={togglePlay}
-      >
-        {#if captions && captions.length > 0}
-          {#each captions as track (track.srclang)}
-            <track
-              kind="captions"
-              src={track.src}
-              srclang={track.srclang}
-              label={track.label}
-              default={track.default ?? false}
-            />
-          {/each}
-        {/if}
-      </video>
-
-      <!-- Center play overlay (shows when paused) -->
-      {#if !playing}
-        <button class="intro-modal__play-overlay" onclick={togglePlay} aria-label="Play video">
-          <span class="intro-modal__play-ring" aria-hidden="true"></span>
-          <PlayIcon size={32} />
+    <div class="intro-modal__inner">
+      <div class="intro-modal__top">
+        {#if title}<p class="intro-modal__name">{title}</p>{/if}
+        <button
+          type="button"
+          class="intro-modal__close"
+          onclick={onclose}
+          aria-label={m.player_close()}
+        >
+          <XIcon size={20} />
         </button>
-      {/if}
+      </div>
 
-      <!-- Mute toggle -->
-      <button class="intro-modal__mute" onclick={toggleMute} aria-label={muted ? 'Unmute' : 'Mute'}>
-        {#if muted}
-          <VolumeXIcon size={20} />
-        {:else}
-          <Volume2Icon size={20} />
+      <div class="intro-modal__player">
+        {#if Player}
+          <Player
+            {src}
+            {renew}
+            {poster}
+            title={name}
+            {captions}
+            start="sound"
+            takeFocus
+            ended={again}
+          />
+        {:else if failed}
+          <p class="intro-modal__error" role="alert">{m.player_error()}</p>
         {/if}
-      </button>
+      </div>
     </div>
-
-    {#if error}
-      <p class="intro-modal__error" role="alert">{error}</p>
-    {/if}
   </div>
 {/if}
 
@@ -305,12 +241,12 @@
     position: fixed;
     inset: 0;
     z-index: var(--z-modal-backdrop);
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    display: grid;
+    place-items: center;
+    padding: var(--space-4);
     backdrop-filter: blur(var(--blur-2xl));
     -webkit-backdrop-filter: blur(var(--blur-2xl));
-    background: var(--color-player-surface-active);
+    background: var(--color-player-overlay-heavy);
     animation: modal-fade-in var(--duration-slow) var(--ease-out) both;
     /* Dialog is programmatically focused to enable scoped keyboard; hide the ring. */
     outline: none;
@@ -321,45 +257,19 @@
     to { opacity: 1; }
   }
 
-  .intro-modal__close {
-    position: absolute;
-    top: var(--space-4);
-    right: var(--space-4);
-    z-index: var(--z-modal);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: var(--space-10);
-    height: var(--space-10);
-    border-radius: var(--radius-full);
-    background: var(--color-player-overlay);
-    color: var(--color-player-text);
-    border: none;
-    cursor: pointer;
-    transition: background var(--duration-fast) var(--ease-default);
-  }
-
-  .intro-modal__close:hover {
-    background: var(--color-player-overlay-heavy);
-  }
-
-  .intro-modal__close:focus-visible {
-    outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: var(--space-1);
-  }
-
-  .intro-modal__player {
-    position: relative;
-    width: 90vw;
-    max-width: 960px;
-    aspect-ratio: 16 / 9;
-    border-radius: var(--radius-xl);
-    overflow: hidden;
+  /* As large as the window allows at 16:9, leaving room for the top row. */
+  .intro-modal__inner {
+    display: grid;
+    gap: var(--space-3);
+    inline-size: min(100%, var(--container-xl), (100vh - var(--space-32)) * 16 / 9);
     animation: modal-scale-in var(--duration-slow) var(--ease-out) both;
     animation-delay: calc(var(--duration-fast) * 0.5);
-    /* Feathered edges — video dissolves into the blurred backdrop */
-    mask-image: radial-gradient(ellipse 92% 92% at center, black 60%, transparent 100%);
-    -webkit-mask-image: radial-gradient(ellipse 92% 92% at center, black 60%, transparent 100%);
+  }
+
+  @supports (height: 100dvh) {
+    .intro-modal__inner {
+      inline-size: min(100%, var(--container-xl), (100dvh - var(--space-32)) * 16 / 9);
+    }
   }
 
   @keyframes modal-scale-in {
@@ -367,20 +277,31 @@
     to { opacity: 1; transform: scale(1); }
   }
 
-  .intro-modal__video {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    cursor: pointer;
-    background: var(--color-neutral-950, black);
+  .intro-modal__top {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
   }
 
-  .intro-modal__play-overlay {
-    position: absolute;
-    inset: 0;
+  .intro-modal__name {
+    min-inline-size: 0;
+    margin: 0;
+    color: var(--color-player-text);
+    font-size: var(--text-base);
+    font-weight: var(--font-semibold);
+    line-height: var(--leading-snug);
+    overflow-wrap: anywhere;
+  }
+
+  .intro-modal__close {
+    flex: none;
     display: flex;
     align-items: center;
     justify-content: center;
+    inline-size: var(--tap-target-min);
+    block-size: var(--tap-target-min);
+    margin-inline-start: auto;
+    border-radius: var(--radius-full);
     background: var(--color-player-surface-hover);
     color: var(--color-player-text);
     border: none;
@@ -388,56 +309,57 @@
     transition: background var(--duration-fast) var(--ease-default);
   }
 
-  .intro-modal__play-overlay:hover {
+  .intro-modal__close:hover {
     background: var(--color-player-surface-active);
   }
 
-  .intro-modal__play-overlay:focus-visible {
-    outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: calc(var(--border-width-thick) * -2);
-  }
-
-  .intro-modal__play-ring {
-    position: absolute;
-    width: var(--space-16);
-    height: var(--space-16);
-    border: var(--border-width-thick) solid var(--color-player-text);
-    border-radius: var(--radius-full);
-    opacity: var(--opacity-40);
-    pointer-events: none;
-  }
-
-  .intro-modal__mute {
-    position: absolute;
-    bottom: var(--space-4);
-    right: var(--space-4);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: var(--space-9);
-    height: var(--space-9);
-    border-radius: var(--radius-full);
-    background: var(--color-player-overlay);
-    color: var(--color-player-text);
-    border: none;
-    cursor: pointer;
-    transition: background var(--duration-fast) var(--ease-default);
-  }
-
-  .intro-modal__mute:hover {
-    background: var(--color-player-overlay-heavy);
-  }
-
-  .intro-modal__mute:focus-visible {
-    outline: var(--border-width-thick) solid var(--color-focus);
+  .intro-modal__close:focus-visible,
+  .intro-modal__again:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-player-text);
     outline-offset: var(--space-1);
+  }
+
+  /* No mask on the frame: a feathered edge would fade the controls away. */
+  .intro-modal__player {
+    position: relative;
+    aspect-ratio: 16 / 9;
+    overflow: hidden;
+    border-radius: var(--radius-lg);
+    background: var(--color-neutral-900);
+  }
+
+  /* The ended layer: the poster again, under the replay. */
+  .intro-modal__still {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    inline-size: 100%;
+    block-size: 100%;
+    object-fit: contain;
+  }
+
+  .intro-modal__again {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-block-size: var(--tap-target-min);
+    padding: var(--space-2) var(--space-5) var(--space-2) var(--space-4);
+    border: none;
+    border-radius: var(--radius-full);
+    background: var(--color-player-overlay-heavy);
+    color: var(--color-player-text);
+    font-family: inherit;
+    font-size: var(--text-sm);
+    font-weight: var(--font-semibold);
+    cursor: pointer;
   }
 
   .intro-modal__error {
     position: absolute;
-    bottom: var(--space-8);
-    left: 50%;
+    inset-block-end: var(--space-8);
+    inset-inline-start: 50%;
     transform: translateX(-50%);
+    margin: 0;
     padding: var(--space-2) var(--space-4);
     background: var(--color-error-50);
     color: var(--color-error-700);
@@ -447,14 +369,12 @@
   }
 
   @media (--below-md) {
-    .intro-modal__player {
-      width: 95vw;
-      border-radius: var(--radius-lg);
+    .intro-modal {
+      padding: var(--space-3);
     }
 
-    .intro-modal__close {
-      top: var(--space-3);
-      right: var(--space-3);
+    .intro-modal__player {
+      border-radius: var(--radius-md);
     }
   }
 
@@ -465,13 +385,11 @@
   */
   @media (prefers-reduced-motion: reduce) {
     .intro-modal,
-    .intro-modal__player {
+    .intro-modal__inner {
       animation: none;
     }
 
-    .intro-modal__close,
-    .intro-modal__play-overlay,
-    .intro-modal__mute {
+    .intro-modal__close {
       transition: none;
     }
   }

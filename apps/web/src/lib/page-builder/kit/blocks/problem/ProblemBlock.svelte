@@ -185,11 +185,13 @@
     margin-block-start: var(--space-4);
   }
 
+  /* A sign is a list's item, a step above the lead the aside answers in:
+     never the smallest words in the section. */
   .problem__strip li {
     padding-block-start: var(--space-4);
     border-block-start: var(--lp-border) var(--border-style) var(--lp-line);
     color: var(--lp-ink);
-    font-size: var(--lp-size-body);
+    font-size: var(--lp-size-item);
     line-height: var(--lp-leading-body);
     text-wrap: pretty;
   }
@@ -273,13 +275,14 @@
     border-block-start: var(--lp-border) var(--border-style) var(--lp-line);
   }
 
+  /* Item size too, beside the words' lead. */
   .problem__signs li {
     display: grid;
     grid-template-columns: var(--space-8) minmax(0, 1fr);
     padding-block: var(--space-5);
     border-block-end: var(--lp-border) var(--border-style) var(--lp-line);
     color: var(--lp-ink);
-    font-size: var(--lp-size-body);
+    font-size: var(--lp-size-item);
     line-height: var(--lp-leading-body);
     text-wrap: pretty;
   }

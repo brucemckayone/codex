@@ -1,9 +1,11 @@
 import {
   type CourseEntryResponse,
+  type CourseFilmStreamResponse,
   createContentAccessService,
   type PlaybackProgressResponse,
   type StreamingUrlResponse,
   type UpdatePlaybackProgressResponse,
+  verifyFilmToken,
   verifyHlsToken,
 } from '@codex/access';
 import { CACHE_PRESETS } from '@codex/constants';
@@ -17,6 +19,10 @@ import type { HonoEnv } from '@codex/shared-types';
 import {
   canEnterCourseParamsSchema,
   canViewParamsSchema,
+  courseFilmParamsSchema,
+  courseFilmQuerySchema,
+  courseFilmVariantParamsSchema,
+  courseParamsSchema,
   createIdParamsSchema,
   hlsProxyQuerySchema,
   hlsVariantParamsSchema,
@@ -337,6 +343,149 @@ app.get(
 
     // Presign segments for the remaining token lifetime (bounded to a minimum
     // floor so a near-expiry refresh still yields usable segment URLs).
+    const remaining = payload.exp - Math.floor(Date.now() / 1000);
+    const expirySeconds = Math.max(remaining, 60);
+
+    const { service, cleanup } = createContentAccessService(c.env);
+    try {
+      const playlist = await service.getHlsVariantPlaylist({
+        creatorId: payload.creatorId,
+        mediaId: payload.mediaId,
+        variant,
+        expirySeconds,
+      });
+      if (playlist === null) {
+        return c.text('Playlist not found', 404);
+      }
+      return c.body(playlist, 200, HLS_PLAYLIST_HEADERS);
+    } finally {
+      c.executionCtx.waitUntil(cleanup());
+    }
+  }
+);
+
+/**
+ * GET /api/access/courses/:courseId/films/:film/stream?organizationId=...
+ *
+ * A course sales film's signed FULL stream, asked for by a visitor's press on
+ * the public sales page (owner P10, "Full film unless it's paid"). `film` is
+ * `intro`, `reel` or `guide`; the service reads the media from that slot of
+ * the course, so a caller can never name a media item.
+ *
+ * `auth: 'none'`: the sales page is public, so nothing here may depend on who
+ * asks. The gate is the film, re-checked on every call (`resolveCourseFilm`):
+ * a published course of this org holds it, no content item that is anything
+ * but plainly free uses it, and it is ready. Otherwise `{ data: null }`, the
+ * same for every reason, and the page plays the 30-second preview. Null data,
+ * not a 404, because that is how the public journey reads answer "nothing
+ * here" (`sell-preview`, `pages/by-slug`), and a worker 4xx thrown through a
+ * remote function surfaces in production as a 500.
+ *
+ * `streaming` (60/min), the `/stream` route's preset: each call signs a token.
+ * Through the web's server hop there is no client address, so the limiter
+ * counts nothing there; the film proxies' token-keyed limiter bounds the
+ * playback itself. `fresh` (`private, no-store`): the body is a credential.
+ * @returns {CourseFilmStreamResponse | null}
+ */
+app.get(
+  '/courses/:courseId/films/:film/stream',
+  procedure({
+    policy: {
+      auth: 'none',
+      rateLimit: 'streaming', // 60 req/min - one token per call
+      cache: 'fresh',
+    },
+    input: {
+      params: courseFilmParamsSchema,
+      query: courseFilmQuerySchema,
+    },
+    handler: async (ctx): Promise<CourseFilmStreamResponse | null> =>
+      ctx.services.access.getCourseFilmStream({
+        organizationId: ctx.input.query.organizationId,
+        courseId: ctx.input.params.courseId,
+        film: ctx.input.params.film,
+      }),
+  })
+);
+
+/**
+ * GET /api/access/courses/:courseId/films/hls/master.m3u8?token=...
+ *
+ * The FILM master playlist proxy: the content proxy above, keyed by course
+ * instead of content, and opened only by a FILM token (`verifyFilmToken`).
+ * A content token, minted after a paid access decision, is refused here, as a
+ * film token is refused there, so neither route grants what the other's
+ * decision did not. The token must name the course in the path too.
+ *
+ * On an invalid, expired or foreign token → 403; on a missing playlist → 404.
+ */
+app.get(
+  '/courses/:courseId/films/hls/master.m3u8',
+  hlsStreamingRateLimit,
+  async (c) => {
+    const paramsResult = courseParamsSchema.safeParse({
+      courseId: c.req.param('courseId'),
+    });
+    const queryResult = hlsProxyQuerySchema.safeParse({
+      token: c.req.query('token'),
+    });
+    if (!paramsResult.success || !queryResult.success) {
+      return c.text('Invalid request', 403);
+    }
+    const { courseId } = paramsResult.data;
+    const { token } = queryResult.data;
+
+    const payload = await verifyFilmToken(token, c.env.WORKER_SHARED_SECRET);
+    if (!payload || payload.courseId !== courseId) {
+      return c.text('Invalid or expired streaming token', 403);
+    }
+
+    const { service, cleanup } = createContentAccessService(c.env);
+    try {
+      const playlist = await service.getFilmMasterPlaylist({
+        courseId,
+        creatorId: payload.creatorId,
+        mediaId: payload.mediaId,
+        token,
+      });
+      if (playlist === null) {
+        return c.text('Playlist not found', 404);
+      }
+      return c.body(playlist, 200, HLS_PLAYLIST_HEADERS);
+    } finally {
+      c.executionCtx.waitUntil(cleanup());
+    }
+  }
+);
+
+/**
+ * GET /api/access/courses/:courseId/films/hls/:variant/index.m3u8?token=...
+ *
+ * The FILM variant playlist proxy: the content variant proxy's work (segments
+ * presigned for the token's remaining life), behind the film master's checks.
+ */
+app.get(
+  '/courses/:courseId/films/hls/:variant/index.m3u8',
+  hlsStreamingRateLimit,
+  async (c) => {
+    const paramsResult = courseFilmVariantParamsSchema.safeParse({
+      courseId: c.req.param('courseId'),
+      variant: c.req.param('variant'),
+    });
+    const queryResult = hlsProxyQuerySchema.safeParse({
+      token: c.req.query('token'),
+    });
+    if (!paramsResult.success || !queryResult.success) {
+      return c.text('Invalid request', 403);
+    }
+    const { courseId, variant } = paramsResult.data;
+    const { token } = queryResult.data;
+
+    const payload = await verifyFilmToken(token, c.env.WORKER_SHARED_SECRET);
+    if (!payload || payload.courseId !== courseId) {
+      return c.text('Invalid or expired streaming token', 403);
+    }
+
     const remaining = payload.exp - Math.floor(Date.now() / 1000);
     const expirySeconds = Math.max(remaining, 60);
 

@@ -3,7 +3,16 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tick } from 'svelte';
 import { parse } from 'svelte/compiler';
-import { afterEach, describe, expect, it } from 'vitest';
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
+import { loadPlayerCore } from '$lib/components/player/load-core';
 import {
   flushSync,
   mount,
@@ -1161,6 +1170,93 @@ describe('HeroBlock', () => {
       };
       expect(await draw(true)).toBe(1);
       expect(await draw(false)).toBe(0);
+    });
+  });
+
+  // Owner P1, P2: in a frame the film plays there, the ambient loop resting
+  // under the player until it ends; the cover has no frame (its film is the
+  // band), so its button opens the theatre.
+  describe('its film', () => {
+    const FILMED: Partial<SellPreview> = {
+      heroImageUrl: '/hero.jpg',
+      heroClip: { playlistUrl: '/clip.m3u8', posterUrl: '/hero.jpg' },
+    };
+    const watch = () =>
+      [...document.body.querySelectorAll('button')].find(
+        (button) => button.textContent?.trim() === COPY.hero.watch
+      );
+
+    // Fetched ahead, as the page's first sight of the button does.
+    beforeAll(async () => {
+      await loadPlayerCore();
+    });
+
+    beforeEach(() => {
+      vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it.each([
+      ['statement', '.hero-statement__media'],
+      ['split', '.hero-split__media'],
+      ['centered', '.hero-centered__media'],
+      ['poster', '.hero-poster__reveal'],
+    ])('%s: plays in its picture, the ambient loop resting under the player', async (layout, frame) => {
+      await render(
+        { heading: 'H' },
+        { layout, context: sampleContext({ media: FILMED }) }
+      );
+      const box = document.body.querySelector(frame);
+      expect(box?.querySelector('.lp-media video')).not.toBeNull();
+      watch()?.click();
+      expect(box?.querySelector(':scope > .lp-film video')).not.toBeNull();
+      expect(box?.querySelector('.lp-media video')).toBeNull();
+      expect(box?.querySelector('.lp-media img')?.getAttribute('src')).toBe(
+        '/hero.jpg'
+      );
+      expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+      box?.querySelector('.lp-film video')?.dispatchEvent(new Event('ended'));
+      flushSync();
+      expect(box?.querySelector('.lp-film')).toBeNull();
+      expect(box?.querySelector('.lp-media video')).not.toBeNull();
+    });
+
+    it('cover: its button opens the theatre, and closing it gives the button back its focus', async () => {
+      await render(
+        { heading: 'H' },
+        { layout: 'cover', context: sampleContext({ media: FILMED }) }
+      );
+      watch()?.click();
+      const dialog = document.body.querySelector('[role="dialog"]');
+      expect(dialog?.querySelector('.player video')).not.toBeNull();
+      expect(document.body.querySelector('.lp-film')).toBeNull();
+      dialog?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })
+      );
+      flushSync();
+      expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+      expect(document.activeElement).toBe(watch());
+    });
+
+    it.each(
+      SECTION_LAYOUTS.hero
+    )('%s: the canvas draws the button and plays nothing', async (layout) => {
+      await render(
+        { heading: 'H' },
+        {
+          layout,
+          context: sampleContext({ media: FILMED }),
+          edit: { commit: () => {} },
+        }
+      );
+      watch()?.click();
+      flushSync();
+      expect(watch()).toBeDefined();
+      expect(document.body.querySelector('.lp-film')).toBeNull();
+      expect(document.body.querySelector('[role="dialog"]')).toBeNull();
     });
   });
 });

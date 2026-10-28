@@ -31,7 +31,8 @@ import type {
 /**
  * One public preview clip. The public sales page shows the existing 30s
  * `preview.m3u8` (SPEC §10) — NO `canView` on the shell, no auth. `playlistUrl`
- * is a plain HLS manifest URL consumed by `IntroVideoModal` / `HeroInlineVideo`.
+ * is a plain HLS manifest URL, played in place by the kit's `InlineFilm` or in
+ * the theatre (`IntroVideoModal`), both on `PreviewPlayerCore`.
  */
 export interface PreviewMedia {
   /** HLS manifest URL for the 30s public preview clip. */
@@ -40,7 +41,26 @@ export interface PreviewMedia {
   posterUrl?: string | null;
   /** Advisory duration (seconds) for a "N sec preview" affordance. */
   durationSeconds?: number | null;
+  /**
+   * The server says the FULL film may be asked for (owner P10, "Full film
+   * unless it's paid"): the media sits in a sell slot of a published course
+   * and no content item that is anything but free uses it. A press then asks
+   * through the page's `requestFilm` (`kit/page-context.ts`) and plays what
+   * comes back. Absent or false: the 30s preview plays, as before.
+   *
+   * OPTIONAL-additive: an older worker deployment omits it, and every film
+   * stays the preview.
+   */
+  fullFilm?: boolean;
 }
+
+/**
+ * The course films a sales page can ask for in full (`requestFilm`), named
+ * for the slots that hold them: the intro film (`SellPreview.intro`), the
+ * practice reel (`reel`, which the Button block's preview action plays too)
+ * and the guide's talking-head clip (`guideClip`).
+ */
+export type SalesFilm = 'intro' | 'reel' | 'guide';
 
 /**
  * The STREAMED secondary payload of the sales page (shell+stream): the public

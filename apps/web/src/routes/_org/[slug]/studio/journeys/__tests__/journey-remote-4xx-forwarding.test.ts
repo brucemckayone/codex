@@ -333,7 +333,11 @@ describe('module-wide', () => {
      *    (documented in each: "a pricing hiccup must cost the author their
      *    prices, never their canvas"), so nothing throws to forward;
      *  - `markPracticeCompleted` reaches the api through the Round-D seam, not
-     *    through an `api.access.*` call in this module.
+     *    through an `api.access.*` call in this module;
+     *  - `requestCourseFilm` is the PUBLIC sales page's film minter (owner
+     *    P10): a refusal is null data, not a 4xx, and its one caller turns any
+     *    rejection into null too, so the player keeps the 30s preview. No
+     *    creator reads its error.
      */
     const EXEMPT = new Set([
       'getCoursePage',
@@ -344,6 +348,7 @@ describe('module-wide', () => {
       'getCourseOffer',
       'getCoursePagePreview',
       'markPracticeCompleted',
+      'requestCourseFilm',
     ]);
 
     const unforwarded: string[] = [];
@@ -357,6 +362,6 @@ describe('module-wide', () => {
 
     expect(unforwarded).toEqual([]);
     // And the split itself worked — an empty map would make the loop vacuous.
-    expect(bodies.size).toBe(30);
+    expect(bodies.size).toBe(31);
   });
 });

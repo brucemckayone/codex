@@ -15,6 +15,8 @@
  */
 
 import {
+  courseFilmParamsSchema,
+  courseFilmQuerySchema,
   createJourneyBodySchema,
   createSearchQuerySchema,
   journeyPageStatusSchema,
@@ -97,6 +99,42 @@ export const resolveSellPreview = query(
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
     return api.access.courseSellPreview(courseId);
+  }
+);
+
+const requestCourseFilmSchema = courseFilmParamsSchema.extend(
+  courseFilmQuerySchema.shape
+);
+
+/**
+ * A course sales film's signed FULL stream (owner P10, "Full film unless it's
+ * paid"), behind the public sales page's `requestFilm`: called on a press,
+ * never on load. Null when the film may only play its 30s preview. The worker
+ * re-checks on every call, so this is the gate and the clip's `fullFilm` only
+ * a hint.
+ *
+ * A `command()`, not a `query()`: every call mints a fresh 10-minute token,
+ * which a query's per-argument cache would hand back after it had expired. No
+ * `setHeaders` (it throws inside a remote function); the worker answers
+ * `private, no-store`, and a command is a POST no shared cache stores.
+ */
+export const requestCourseFilm = command(
+  requestCourseFilmSchema,
+  async ({
+    organizationId,
+    courseId,
+    film,
+  }): Promise<{ playlistUrl: string; expiresAt: string } | null> => {
+    const { platform, cookies } = getRequestEvent();
+    const stream = await createServerApi(
+      platform,
+      cookies
+    ).access.courseFilmStream(organizationId, courseId, film);
+    // `expiresAt` lets the player renew the stream before its links run out,
+    // rather than stall on the first refused segment.
+    return stream
+      ? { playlistUrl: stream.playlistUrl, expiresAt: stream.expiresAt }
+      : null;
   }
 );
 

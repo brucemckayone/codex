@@ -1,5 +1,14 @@
 import { tick } from 'svelte';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
+import { loadPlayerCore } from '$lib/components/player/load-core';
 import {
   flushSync,
   mount,
@@ -33,14 +42,22 @@ const REEL: PreviewMedia = {
 
 let app: ReturnType<typeof mount> | null = null;
 
+// The player's code is fetched before any press, as the page's first sight
+// of a play button fetches it (`preloadPlayer`).
+beforeAll(async () => {
+  await loadPlayerCore();
+});
+
 beforeEach(() => {
   played.length = 0;
+  vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
 });
 
 afterEach(() => {
   if (app) unmount(app);
   app = null;
   document.body.innerHTML = '';
+  vi.restoreAllMocks();
 });
 
 async function render(
@@ -137,6 +154,20 @@ describe('PreviewBlock', () => {
     await tick();
     await Promise.resolve();
     expect(played).toEqual([REEL.playlistUrl]);
+  });
+
+  it.each(
+    SECTION_LAYOUTS.preview
+  )('%s: plays in its own frame, which keeps its shape', async (layout) => {
+    await render(SAMPLE, { layout });
+    const frame = document.body.querySelector('.preview__clip .clip');
+    play()?.click();
+    // The player lies over the picture, beside it rather than inside it, so
+    // a Style's mask on the picture never reaches the controls.
+    expect(frame?.querySelector(':scope > .lp-film video')).not.toBeNull();
+    expect(frame?.querySelector('.lp-media .lp-film')).toBeNull();
+    expect(frame?.querySelector(':scope > .lp-media')).not.toBeNull();
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
   });
 
   it('keeps a plate and a play button for a clip with no poster', async () => {

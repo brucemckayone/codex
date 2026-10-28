@@ -369,6 +369,14 @@ export interface JourneySellMedia {
    * it stays correct rather than becoming wrong now this field exists.
    */
   signatureImageUrl?: string | null;
+  /**
+   * The media whose film a visitor sees only as the 30s preview, because a
+   * content item that is anything but plainly free uses it (owner P10). Every
+   * media the slots may hold, not only the attached ones, so the panel can say
+   * so the moment a film is picked. OPTIONAL-additive: an older worker, and
+   * the write's echo, omit it.
+   */
+  previewOnlyMediaIds?: string[];
 }
 
 /** One org tier the pricing panel offers as a way into the course. */

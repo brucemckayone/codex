@@ -9,6 +9,7 @@ import {
   mount,
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
+import { pageImageSrcset } from '../../../page-images';
 import type { JourneySalesContext } from '../../../render/types';
 import { SECTION_LAYOUTS } from '../../model/ids';
 import { sampleContext } from '../../model/sample';
@@ -568,25 +569,28 @@ describe('TestimonialsBlock', () => {
   });
 });
 
+/** A face as drawn: its photo's file, or its letters. */
+const drawn = (face: Element) =>
+  face.querySelector('img')?.getAttribute('src') ?? face.textContent?.trim();
+
 describe('a face for each quote (Codex-61zsk.58)', () => {
   const CDN = 'https://cdn.example';
   const PHOTO = { key: 'landing-pages/page-1/images/tom' };
   const context = () => sampleContext({ mediaBaseUrl: CDN });
-  /** Each byline's face, in reading order: the photo's file, its letters, or none. */
+  /** Each quote's face, in reading order, large or in its byline; or none. */
   const faces = () =>
-    read('.voice__by').map((by) => {
-      const face = by.querySelector('.voice__face');
-      if (!face) return null;
-      return (
-        face.querySelector('img')?.getAttribute('src') ??
-        face.textContent?.trim()
+    read('.voice').map((voice) => {
+      const face = voice.querySelector(
+        ':scope > .voice__portrait, .voice__by > .voice__face'
       );
+      return face ? drawn(face) : null;
     });
 
   it('draws no face while no quote has a photo, so a saved page reads as before', async () => {
     for (const layout of SECTION_LAYOUTS.testimonials) {
       await render({ items: [OWN] }, { layout, context: context() });
       expect(document.querySelector('.voice__face'), layout).toBeNull();
+      expect(document.querySelector('.voice__portrait'), layout).toBeNull();
       expect(
         document.querySelector('.voice__by[data-face]'),
         layout
@@ -604,9 +608,17 @@ describe('a face for each quote (Codex-61zsk.58)', () => {
       { layout, context: context() }
     );
     // The course's three first, then the creator's two; the nameless one has no circle.
-    expect(faces()).toEqual(['HR', 'DP', 'SO', `${CDN}/${PHOTO.key}/sm.webp`]);
+    expect(faces()).toEqual([
+      'HR',
+      'DP',
+      'SO',
+      `${CDN}/${PHOTO.key}/sm.webp`,
+      null,
+    ]);
     // The face is decoration beside the name, which is what reads.
-    for (const img of document.querySelectorAll('.voice__face img'))
+    for (const img of document.querySelectorAll(
+      ':is(.voice__face, .voice__portrait) img'
+    ))
       expect(img.getAttribute('alt')).toBe('');
   });
 
@@ -626,6 +638,106 @@ describe('a face for each quote (Codex-61zsk.58)', () => {
       undefined,
       undefined,
     ]);
+  });
+});
+
+/**
+ * The quote that leads its section draws its face large beside its words: the
+ * panel's in `featured`, the monument in `quote`, the wall's featured tile.
+ * Every other quote keeps its byline's circle, and a layout with no lead draws
+ * none. It picks from every stored size by a plain-length `sizes`: Safari
+ * before 26.4 reads a math function there as 100vw.
+ */
+describe('the large face beside the quote that leads', () => {
+  const CDN = 'https://cdn.example';
+  const PHOTO = { key: 'landing-pages/page-1/images/tom' };
+  const LEADING = ['featured', 'quote', 'wall'];
+  /** The creator's quotes alone, so the first written one leads. */
+  const own = () => ({
+    ...sampleContext({ mediaBaseUrl: CDN }),
+    testimonials: [],
+  });
+  const ANA = { quote: 'Quiet at last.', name: 'Ana Ruiz' };
+  const voiceCss = () => declarationsOf(VOICE_SOURCE);
+  const portraitWidths = (value: string) =>
+    voiceCss().filter(
+      (d) =>
+        d.property === 'inline-size' &&
+        d.value === value &&
+        d.selectors.some((s) => s.includes('.voice__portrait'))
+    );
+
+  it.each(
+    SECTION_LAYOUTS.testimonials
+  )('%s: only the quote that leads draws its face large, and not in its byline too', async (layout) => {
+    await render(
+      { items: [{ ...OWN, photo: PHOTO }, ANA] },
+      { layout, context: own() }
+    );
+    const [first, second] = read('.voice');
+    const portraits = read('.voice__portrait');
+    if (LEADING.includes(layout)) {
+      expect(portraits).toHaveLength(1);
+      expect(first.contains(portraits[0])).toBe(true);
+      expect(first.querySelector('.voice__face')).toBeNull();
+    } else {
+      expect(portraits).toEqual([]);
+      const face = first.querySelector('.voice__by > .voice__face');
+      expect(face && drawn(face)).toBe(`${CDN}/${PHOTO.key}/sm.webp`);
+    }
+    const face = second.querySelector('.voice__by > .voice__face');
+    expect(face && drawn(face)).toBe('AR');
+  });
+
+  it.each(
+    LEADING
+  )('%s: picks the large photo from every stored size, by a plain length that switches where the face grows', async (layout) => {
+    const [wide] = portraitWidths('var(--space-32)');
+    const query = wide.conditions[0].replace(/^@container /, '');
+    await render(
+      { items: [{ ...OWN, photo: PHOTO }] },
+      { layout, context: own() }
+    );
+    const img = document.querySelector('.voice__portrait img');
+    expect(img?.getAttribute('src')).toBe(`${CDN}/${PHOTO.key}/md.webp`);
+    expect(img?.getAttribute('srcset')).toBe(pageImageSrcset(PHOTO, CDN));
+    const sizes = img?.getAttribute('sizes') ?? '';
+    // The wall's tile is a phone's width at any size, so its face never grows.
+    expect(sizes).toBe(layout === 'wall' ? '5rem' : `${query} 8rem, 5rem`);
+    expect(sizes).not.toMatch(/\b(min|max|clamp)\(/);
+  });
+
+  it('draws large initials when the quote that leads has no photo', async () => {
+    await render(
+      { items: [OWN, { ...ANA, photo: PHOTO }] },
+      { layout: 'featured', context: own() }
+    );
+    const [portrait] = read('.voice__portrait');
+    expect(portrait.hasAttribute('data-mark')).toBe(true);
+    expect(portrait.querySelector('img')).toBeNull();
+    expect(drawn(portrait)).toBe('TW');
+  });
+
+  it('is 5rem, and 8rem only in a wide panel or monument, its initials on the brand’s tint', () => {
+    expect(portraitWidths('var(--space-20)').map((d) => d.conditions)).toEqual([
+      [],
+    ]);
+    const wide = portraitWidths('var(--space-32)');
+    expect(wide.map((d) => d.conditions)).toEqual([
+      ['@container (min-width: 60rem)'],
+    ]);
+    expect(wide[0].selectors.join()).not.toContain('wall');
+    const mark = voiceCss().filter((d) =>
+      d.selectors.some((s) => s.includes('.voice__portrait[data-mark]'))
+    );
+    const value = (property: string) =>
+      mark.find((d) => d.property === property)?.value;
+    // The panel tinted with the brand, as the cards on a ground are, in the
+    // panel's own ink: one pair in every scheme.
+    expect(value('background')).toBe(
+      'color-mix(in oklab, var(--lp-panel), var(--lp-brand) var(--lp-tint-panel))'
+    );
+    expect(value('color')).toBe('var(--lp-panel-ink)');
   });
 });
 

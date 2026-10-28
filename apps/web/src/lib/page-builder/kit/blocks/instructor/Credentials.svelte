@@ -33,10 +33,15 @@
     margin: 0;
   }
 
+  /* A list's item size: a step under the guide's quote and name, a title or
+     more in the display face, so they still lead; a chip keeps the body's.
+     A column is at least ten of the list's own em, so a long word fits it at
+     the size each Type sets. */
   .creds[data-variant='ledger'] {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(min(100%, 12rem), 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 10em), 1fr));
     gap: var(--space-3) var(--space-6);
+    font-size: var(--lp-size-item);
   }
 
   .creds[data-variant='ledger'] li {

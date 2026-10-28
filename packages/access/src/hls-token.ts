@@ -133,6 +133,44 @@ export async function signHlsToken(
 }
 
 /**
+ * Check a token's signature over `${domain}${encodedPayload}` and decode its
+ * payload, or `null` when it is malformed or tampered. Field and expiry checks
+ * are the caller's: each token kind names its own fields.
+ */
+async function decodeSignedPayload(
+  token: string,
+  secret: string,
+  domain: string
+): Promise<Record<string, unknown> | null> {
+  const dotIndex = token.indexOf('.');
+  if (dotIndex <= 0 || dotIndex === token.length - 1) {
+    return null;
+  }
+
+  const encodedPayload = token.slice(0, dotIndex);
+  const providedSignature = token.slice(dotIndex + 1);
+
+  const expectedSignature = await hmacSha256Base64Url(
+    `${domain}${encodedPayload}`,
+    secret
+  );
+  if (!constantTimeEqual(providedSignature, expectedSignature)) {
+    return null;
+  }
+
+  try {
+    const payload: unknown = JSON.parse(
+      base64UrlDecodeToString(encodedPayload)
+    );
+    return typeof payload === 'object' && payload !== null
+      ? (payload as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Verify an HLS proxy token and return its payload, or `null` when the token
  * is malformed, tampered (signature mismatch), or expired.
  *
@@ -147,26 +185,8 @@ export async function verifyHlsToken(
   secret: string,
   nowSeconds: number = Math.floor(Date.now() / 1000)
 ): Promise<HlsTokenPayload | null> {
-  const dotIndex = token.indexOf('.');
-  if (dotIndex <= 0 || dotIndex === token.length - 1) {
-    return null;
-  }
-
-  const encodedPayload = token.slice(0, dotIndex);
-  const providedSignature = token.slice(dotIndex + 1);
-
-  const expectedSignature = await hmacSha256Base64Url(encodedPayload, secret);
-  if (!constantTimeEqual(providedSignature, expectedSignature)) {
-    return null;
-  }
-
-  let payload: HlsTokenPayload;
-  try {
-    payload = JSON.parse(base64UrlDecodeToString(encodedPayload));
-  } catch {
-    return null;
-  }
-
+  // No domain: a content token signs the bare payload, as it always has.
+  const payload = await decodeSignedPayload(token, secret, '');
   if (
     typeof payload?.creatorId !== 'string' ||
     typeof payload?.mediaId !== 'string' ||
@@ -179,5 +199,78 @@ export async function verifyHlsToken(
     return null;
   }
 
-  return payload;
+  return {
+    creatorId: payload.creatorId,
+    mediaId: payload.mediaId,
+    exp: payload.exp,
+  };
+}
+
+/**
+ * A course sales film's token (owner P10): the full stream of one film, minted
+ * by the public film minter only when no paid content uses that media.
+ *
+ * Bound to the course as well as the media, so the film proxies can refuse a
+ * token presented under another course's path.
+ */
+export interface FilmTokenPayload extends HlsTokenPayload {
+  /** The published course whose sell slot holds the film. */
+  courseId: string;
+}
+
+/**
+ * DOMAIN SEPARATION. A film token is signed over `course-film.<payload>`, a
+ * content token over the bare `<payload>`, with the same secret. So neither
+ * verifier accepts the other's token: a film token is not a content-stream
+ * credential, and a content token (minted after a paid access decision) opens
+ * no film route. Both are capabilities for one media item's HLS tree, so the
+ * separation keeps each route's grant to the decision that minted it.
+ */
+const FILM_TOKEN_DOMAIN = 'course-film.';
+
+/**
+ * Mint a short-lived film token. The caller has run the eligibility check
+ * (`resolveCourseFilm`); this only signs.
+ */
+export async function signFilmToken(
+  payload: FilmTokenPayload,
+  secret: string
+): Promise<string> {
+  const encodedPayload = base64UrlEncodeString(JSON.stringify(payload));
+  const signature = await hmacSha256Base64Url(
+    `${FILM_TOKEN_DOMAIN}${encodedPayload}`,
+    secret
+  );
+  return `${encodedPayload}.${signature}`;
+}
+
+/**
+ * Verify a film token, or `null` when it is malformed, tampered, expired, or
+ * a content token. Never throws — the routes map `null` to 403.
+ */
+export async function verifyFilmToken(
+  token: string,
+  secret: string,
+  nowSeconds: number = Math.floor(Date.now() / 1000)
+): Promise<FilmTokenPayload | null> {
+  const payload = await decodeSignedPayload(token, secret, FILM_TOKEN_DOMAIN);
+  if (
+    typeof payload?.courseId !== 'string' ||
+    typeof payload?.creatorId !== 'string' ||
+    typeof payload?.mediaId !== 'string' ||
+    typeof payload?.exp !== 'number'
+  ) {
+    return null;
+  }
+
+  if (nowSeconds >= payload.exp) {
+    return null;
+  }
+
+  return {
+    courseId: payload.courseId,
+    creatorId: payload.creatorId,
+    mediaId: payload.mediaId,
+    exp: payload.exp,
+  };
 }

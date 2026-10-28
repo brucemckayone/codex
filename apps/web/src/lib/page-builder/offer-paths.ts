@@ -233,8 +233,12 @@ function enumerateOfferPaths(
         recurring: false,
         cadenceLabel: 'one-off',
         who: 'Prefer to own, not subscribe',
-        blurb: `Buy ${course.title} outright. Yours to return to, for good.`,
-        bullets: ['Yours forever', 'No subscription', 'Lifetime access'],
+        // No bullets, and no "yours for good" in the blurb (Codex-61zsk.73):
+        // the one claim a one-off has is said once, by its billing line
+        // (`derivedNote`, the checkout's fine print), and the sell page
+        // states what the course holds beside it instead ("What's included").
+        blurb: `Buy ${course.title} outright.`,
+        bullets: [],
         best: false,
       });
     }

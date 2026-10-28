@@ -147,6 +147,26 @@
   rotate: -1.6deg;
 }
 
+/* A film playing in a print (`InlineFilm`) fills it square to the paper's
+   edge, as the photograph does, and the print stands straight while it
+   plays: a tilted scrubber is hard to aim along. It leans again once the
+   film ends. */
+:is(.lp, #lp-style)[data-lp-style='studio']
+  :is(.hero-split__media, .hero-statement__media, .hero-centered__media, .guide__portrait .clip)
+  > .lp-film {
+  border-radius: 0;
+}
+
+:is(.lp, #lp-style)[data-lp-style='studio']
+  :is(
+    .hero-split__media,
+    .hero-statement__media,
+    .hero-centered__media,
+    .guide__portrait:not([data-layout='quote']) .clip
+  ):has(> .lp-film) {
+  rotate: none;
+}
+
 :is(.lp, #lp-style)[data-lp-style='studio'] .benefits-grid li:nth-child(odd) .lp-media {
   rotate: -1deg;
 }

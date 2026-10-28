@@ -5,10 +5,12 @@
  * filled one.
  *
  * Live counts come from the curriculum the page renders (`context.stages`),
- * so they can never disagree with the curriculum section. A count of zero is
- * left out: "0 practices" sells nothing.
+ * counted by `courseFacts` as the hero and pricing count it, so they can
+ * never disagree with the curriculum section or each other. A count of zero
+ * is left out: "0 practices" sells nothing.
  */
 import type { JourneyStageView } from '$lib/page-builder';
+import { courseFacts } from '../../model/facts';
 import { STATS_COPY } from './copy';
 import type { StatItem } from './definition';
 
@@ -21,16 +23,14 @@ function count(value: number): string {
 }
 
 export function liveFigures(stages: readonly JourneyStageView[]): StatFigure[] {
-  const practices = stages.reduce(
-    (sum, stage) => sum + stage.practices.length,
-    0
-  );
+  const facts = courseFacts(stages);
+  const practices = facts.practices;
   const figures: StatFigure[] = [];
-  if (stages.length > 0) {
+  if (facts.stages > 0) {
     figures.push({
       key: 'live-stages',
-      value: count(stages.length),
-      label: STATS_COPY.stages(stages.length),
+      value: count(facts.stages),
+      label: STATS_COPY.stages(facts.stages),
     });
   }
   if (practices > 0) {

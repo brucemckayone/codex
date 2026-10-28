@@ -100,7 +100,7 @@ paragraph), `ctaLabel?`, `note?` (small reassurance under a CTA).
 | instructor | `name?`, `role?`, `credentials?: string[]`, `quote?` |
 | testimonials | `items?: { quote: string; name?: string; detail?: string }[]` (merged after live testimonials) |
 | faq | `items?: { question: string; answer: string }[]`, `contactLabel?`, `contactHref?` |
-| pricing | `offers?: { id: string; name?: string; blurb?: string; bullets?: string[]; best?: boolean }[]` — decorations of live paths only; never a price |
+| pricing | `offers?: { id: string; name?: string; blurb?: string; bullets?: string[]; best?: boolean }[]` — decorations of live paths only; never a price · `included?: { fact?: 'stages'\|'practices'\|'length'\|'mix'; text?: string }[]` (A7) |
 | cta | — |
 | stats | `items?: { value: string; label: string }[]`, `live?: boolean` (derive from curriculum) |
 | text | — |
@@ -346,6 +346,19 @@ _(append here: `A<n> · <date> · <WP> · what changed · why`)_
   radius), and the Style and scheme lists of §2 and §5 (8 Styles, 6 schemes, `story` and `gallery`
   types). Why: the owner asked for "a set of really different styles … more interfactive components …
   awwwards level without the usabliitiy issues", always conforming to brand settings.
+- **A7 · 2026-10-28 · Codex-61zsk.73 · Pricing gains `included?`, the "What's included" beside a single
+  way in.** Rows of `{ fact?: 'stages'|'practices'|'length'|'mix'; text?: string }`, read by
+  `blocks/pricing/included.ts`: absent = the course's own lines, counted live from `context.stages`
+  (`kit/model/facts.ts` `courseFacts`, the one count the hero, stats and checkout use too); `[]` = no
+  list; `{fact}` = that line, live; `{fact,text}` = the creator's words for it; `{text}` = their own
+  line. The length times the video and audio practices only, and says so ("5 hr 40 min of video and
+  audio"); it is stated only when there is at least one and every one has a measured length. Drawn
+  when the offer has exactly one path, in every layout: beside the card in `cards`, under it in
+  `focus`, and along the strip under its rule in `band` (a label and a wrapping line of facts, so the
+  band stays a strip). At most 8 rows of 80 characters, inside the 16 KB props cap; no Zod change
+  (props are a passthrough record) and no migration (jsonb). The one-off path's derived bullets ("Yours forever / No subscription / Lifetime
+  access") are removed with it. Why: the owner chose "From the course, editable": a lone card filled
+  itself with three restatements of its own billing line while the course's real contents went unsaid.
 
 ---
 

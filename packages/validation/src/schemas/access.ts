@@ -105,6 +105,51 @@ export type HlsProxyQuery = z.infer<typeof hlsProxyQuerySchema>;
 export type HlsVariantParams = z.infer<typeof hlsVariantParamsSchema>;
 
 /**
+ * The course sales films a visitor's press can ask for in full (owner P10,
+ * "Full film unless it's paid"), named for the slots that hold them: the intro
+ * film (`courses.intro_video_media_id`), the practice reel
+ * (`preview_video_media_id`) and the guide's clip (`guide_video_media_id`).
+ * The hero is not one: its loop plays the preview, muted.
+ */
+export const SALES_FILMS = ['intro', 'reel', 'guide'] as const;
+export const salesFilmSchema = z.enum(SALES_FILMS);
+export type SalesFilm = z.infer<typeof salesFilmSchema>;
+
+/**
+ * Params of `GET /api/access/courses/:courseId/films/:film/stream`, the public
+ * minter of a film's signed full stream. Explicit `courseId`, never a bare
+ * `:id`, so the procedure org resolver cannot read it as an org id.
+ */
+export const courseFilmParamsSchema = z.object({
+  courseId: uuidSchema,
+  film: salesFilmSchema,
+});
+
+/**
+ * Query of the same route: the org whose sales page asks. The course must be
+ * one of its published courses, or the answer is null.
+ */
+export const courseFilmQuerySchema = z.object({
+  organizationId: uuidSchema,
+});
+
+/**
+ * Params of the film HLS variant proxy (`/courses/:courseId/films/hls/...`).
+ * The token carries the media; `courseId` must match the one it was minted
+ * for. `variant` is bounded exactly as {@link hlsVariantParamsSchema}'s is.
+ */
+export const courseFilmVariantParamsSchema = z.object({
+  courseId: uuidSchema,
+  variant: hlsVariantPathSchema,
+});
+
+export type CourseFilmParams = z.infer<typeof courseFilmParamsSchema>;
+export type CourseFilmQuery = z.infer<typeof courseFilmQuerySchema>;
+export type CourseFilmVariantParams = z.infer<
+  typeof courseFilmVariantParamsSchema
+>;
+
+/**
  * Response schema for GET /api/access/content/:id/stream.
  *
  * Mirrors `StreamingUrlResponse` in `@codex/access/types.ts`. Kept here as a

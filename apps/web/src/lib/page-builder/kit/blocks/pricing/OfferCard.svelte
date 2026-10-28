@@ -27,8 +27,13 @@
     label: string;
     /** The nested scheme of the recommended card; absent = transparent card. */
     scheme?: ColourSchemeId;
-    /** "Recommended" means something only when there is a choice. */
-    badge?: boolean;
+    /**
+     * There is more than one way in. Only then does "Recommended" mean
+     * something, and only then has a path's `who` (what sets it apart from
+     * the others, "Prefer to own, not subscribe") anything to set it apart
+     * from.
+     */
+    choice?: boolean;
     size?: 'card' | 'focus';
     /** Only one card edits the shared button label inline. */
     editable?: boolean;
@@ -40,7 +45,7 @@
     context,
     label,
     scheme,
-    badge = false,
+    choice = false,
     size = 'card',
     editable = false,
     edit = null,
@@ -55,9 +60,9 @@
 >
   <div class="offer__top">
     <Heading level={3} size="title" text={path.name} type="pricing" />
-    {#if badge && path.best}<p class="offer__badge">{COPY.pricing.recommended}</p>{/if}
+    {#if choice && path.best}<p class="offer__badge">{COPY.pricing.recommended}</p>{/if}
   </div>
-  {#if path.who}<p class="offer__who">{path.who}</p>{/if}
+  {#if choice && path.who}<p class="offer__who">{path.who}</p>{/if}
   <p class="offer__price">
     <span class="offer__amount">{path.priceLabel}</span>
     <span class="offer__cadence">{path.cadenceLabel}</span>

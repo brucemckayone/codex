@@ -4,7 +4,9 @@
   The page's standing way in, for a reader who has scrolled past the hero's
   button. It appears once the first section leaves the viewport and yields
   whenever a pricing, call-to-action or Button section is on screen — it stands in for
-  a button the reader cannot see, so it never covers one they can.
+  a button the reader cannot see, so it never covers one they can. It yields
+  too while a film's player is on screen (`now-playing.svelte.ts`): on a
+  phone it would sit on the film's controls.
 
   On a phone it is a bar above the org layout's fixed bottom nav (hidden from
   `--breakpoint-md` up), clearing that nav or the home indicator, whichever is
@@ -17,6 +19,7 @@
 -->
 <script lang="ts">
   import type { Attachment } from 'svelte/attachments';
+  import { filmInView } from '$lib/components/player/now-playing.svelte';
   import type { JourneySalesContext } from '../render/types';
   import { COPY } from './model/copy';
   import { resolvePrimaryCta } from './model/cta';
@@ -39,7 +42,7 @@
   /** Set by the first observation, so the bar is never shown on a guess. */
   let openingVisible = $state<boolean | null>(null);
   let offersVisible = $state(0);
-  const shown = $derived(openingVisible === false && offersVisible === 0);
+  const shown = $derived(openingVisible === false && offersVisible === 0 && !filmInView());
 
   /**
    * Watch the opening section and every offer section of the page this bar

@@ -493,7 +493,8 @@
 
 /* ── the numbers: counted up, at display size ────────────────────────────── */
 /* Fewer to a line, so each figure can take the display size: four make two
-   pairs, never four small ones. Labels read at body size under them. */
+   pairs, never four small ones. Labels read at the block's item size under
+   them, in the label's weight. */
 :is(.lp, #lp-style)[data-lp-type-facet='bold'] .stats[data-layout='row'] {
   --_figure: var(--lp-size-display);
 }
@@ -508,7 +509,6 @@
 
 :is(.lp, #lp-style)[data-lp-type-facet='bold'] .stat__label {
   max-inline-size: calc(24 * var(--lp-measure-unit));
-  font-size: var(--lp-size-body);
   font-weight: var(--lp-weight-label);
   --lp-measure-unit: var(--lp-zero-label);
 }

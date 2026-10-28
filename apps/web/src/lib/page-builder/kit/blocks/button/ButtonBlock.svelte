@@ -10,7 +10,9 @@
               two can never disagree. "Continue" for a member; the closed
               notice when there is no way in.
     section — a jump to a section on this page; no price beside it
-    preview — plays the page's preview film in the shared player; no price
+    preview — plays the page's preview film in the theatre, the player a
+              framed film plays in (it has no frame of its own: owner P2),
+              with sound; focus comes back to the button; no price
     link    — an https address, opened in a new tab (`rel="noopener"`, and
               the accessible name says so); no price
 
@@ -28,6 +30,8 @@
   visitors will not see it.
 -->
 <script lang="ts">
+  import { flushSync } from 'svelte';
+  import { preloadPlayer } from '$lib/components/player/load-core';
   import IntroVideoModal from '$lib/components/ui/IntroVideoModal/IntroVideoModal.svelte';
   import { actionKind } from '../../model/button-action';
   import { filmToShow } from '../../model/films';
@@ -35,6 +39,11 @@
   import type { BlockProps } from '../../model/types';
   import { getKitPage } from '../../page-context';
   import Button from '../../primitives/Button.svelte';
+  import {
+    type FilmSource,
+    filmRenewal,
+    filmSource,
+  } from '../../primitives/film-source';
   import OfferAsk from '../../primitives/OfferAsk.svelte';
   import { settled } from '../hero/settled.svelte';
   import { BUTTON_COPY, BUTTON_LABELS } from './copy';
@@ -69,7 +78,26 @@
     kind === 'preview' &&
       filmToShow(context.course.filmsAttached?.reel, preview, 'reel') === false
   );
-  let playing = $state(false);
+  // What the open theatre plays (`null` while it is closed): the full film
+  // when the page may ask for it, else the preview (`filmSource`); a full
+  // film asks again as its links run out (`filmRenewal`).
+  let source = $state.raw<FilmSource | null>(null);
+  const renew = $derived(film ? filmRenewal(film, 'reel', page.requestFilm) : undefined);
+  let ask: HTMLDivElement | undefined = $state();
+
+  function play() {
+    if (!film) return;
+    source = filmSource(film, 'reel', page.requestFilm);
+    // Opened in the press's own tick, so the player's play() keeps the sound.
+    flushSync();
+  }
+
+  function close() {
+    source = null;
+    flushSync();
+    // Back to the button, though a browser may not have focused it on the click.
+    ask?.querySelector('button')?.focus({ preventScroll: true });
+  }
 
   const dead = $derived(
     unreadable || (kind === 'section' && anchor === undefined) || noFilm
@@ -95,7 +123,11 @@
         <p class="button__note" data-lp-edit-only>{BUTTON_COPY.noPrice}</p>
       {/if}
     {:else}
-      <div class="button__ask">
+      <div
+        class="button__ask"
+        bind:this={ask}
+        {@attach kind === 'preview' && !edit && !page.still && preloadPlayer}
+      >
         {#if action?.kind === 'link'}
           <Button
             href={action.href}
@@ -119,7 +151,7 @@
           />
         {:else}
           <Button
-            onpress={() => (playing = film !== null)}
+            onpress={play}
             {label}
             size="lg"
             section="button"
@@ -134,12 +166,14 @@
     {/if}
   </div>
 {/if}
-{#if playing && film}
+{#if source !== null && film}
   <IntroVideoModal
     open={true}
-    src={film.playlistUrl}
+    src={source}
+    {renew}
+    poster={film.posterUrl}
     title={context.course.title}
-    onclose={() => (playing = false)}
+    onclose={close}
   />
 {/if}
 

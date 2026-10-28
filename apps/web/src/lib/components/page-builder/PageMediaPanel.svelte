@@ -564,6 +564,18 @@
           onchange={(mediaItemId) => sellMedia.setSlot(entry.slot, mediaItemId)}
         />
         <span class="panel__hint">{entry.hint()}</span>
+        <!--
+          Owner P10: the sales page plays a film in full unless paid content
+          uses it, and then only its 30-second preview. Said here, under the
+          slot, the moment such a film is picked or found already attached, so
+          the cut is never a surprise on the live page. The same rule the public
+          stream applies (`sales-films.ts`), read once with the panel.
+        -->
+        {#if sellMedia.previewOnly(entry.slot)}
+          <p class="panel__note" role="status">
+            {m.studio_builder_media_slot_preview_only()}
+          </p>
+        {/if}
       </div>
     {/each}
   </section>
