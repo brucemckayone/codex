@@ -16,7 +16,8 @@
   `included.ts`), in each layout's own form: in `cards` the lone card and the
   list share the row, the card first; in `focus` the list sits under the
   card, in its column; in `band` the lines run along the strip under its
-  rule, as the other ways to join do.
+  rule, as the other ways to join do. Beside other cards, the one-off's card
+  carries the list's first lines as its points (`ownedPoints`).
 
   And, in every layout, the states that are not "priced": an enrolled viewer
   gets a way back in, a course with no way in says so, and a failed offer read
@@ -37,7 +38,7 @@
   import Text from '../../primitives/Text.svelte';
   import { PRICING_COPY } from './copy';
   import { pricingDefinition } from './definition';
-  import { drawsIncluded, includedLines } from './included';
+  import { drawsIncluded, includedLines, ownedPoints } from './included';
   import OfferCard from './OfferCard.svelte';
   import { pricingView } from '../../model/offer';
 
@@ -124,7 +125,7 @@
   {:else if section.layout === 'focus'}
     <div class="pricing__focus">
       <OfferCard
-        path={view.featured}
+        path={ownedPoints(view.featured, included, view.paths.length)}
         {context}
         {label}
         scheme={featured}
@@ -164,7 +165,7 @@
     >
       {#each view.paths as path (path.id)}
         <OfferCard
-          {path}
+          path={ownedPoints(path, included, view.paths.length)}
           {context}
           {label}
           scheme={path.best ? featured : undefined}
@@ -214,6 +215,31 @@
     .pricing__cards[data-count='1'] {
     inline-size: 100%;
     margin-inline: auto;
+  }
+
+  /* And with what it holds beside it, the two are one pair centred under the
+     head, so their mass sits under the heading: the card at its measure (or
+     its share, if less) and the list as wide as its longest line. Stacked,
+     the list is a block centred under the card, its lines set from the left
+     to be read. */
+  :global(.lp[data-lp-style='soft'])
+    .pricing[data-layout='cards']
+    .pricing__cards[data-included]
+    > .pricing__included {
+    justify-self: center;
+  }
+
+  @container (min-width: 44rem) {
+    :global(.lp[data-lp-style='soft'])
+      .pricing[data-layout='cards']
+      .pricing__cards[data-included] {
+      --_track: min(
+        (var(--lp-column) - var(--_split-gap)) * 5 / 11,
+        var(--lp-measure-lead) * var(--lp-measure-unit) + var(--space-16)
+      );
+      grid-template-columns: var(--_track) minmax(0, max-content);
+      justify-content: center;
+    }
   }
 
   .pricing__note,
@@ -432,18 +458,22 @@
 
   /* What's included along the strip (Codex-61zsk.73): under a rule of the
      Style's own weight (`--lp-rule`: Poster's thick print, Bold's heavier
-     one), its label and then its lines in a row that wraps, so the band
-     stays a strip rather than growing a column. */
+     one), its label and then its lines. Where two cards would sit side by
+     side the lines run in a row that wraps, so the band stays a strip rather
+     than growing a column; narrower, a row breaks raggedly, so they keep the
+     list's one to a line. */
   .pricing__included[data-form='strip'] {
     gap: var(--space-3);
     padding-block-start: var(--space-4);
     border-block-start: var(--lp-rule) var(--border-style) var(--lp-line);
   }
 
-  .pricing__included[data-form='strip'] :global(.lp-list) {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-2) var(--space-6);
+  @container (min-width: 44rem) {
+    .pricing__included[data-form='strip'] :global(.lp-list) {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--space-2) var(--space-6);
+    }
   }
 
   /* The head beside its price wherever its widest word fits there, and over

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { deriveOfferPaths } from '../../../offer-paths';
 import { type CourseFacts, courseFacts } from '../../model/facts';
-import { sampleStages } from '../../model/sample';
+import { SAMPLE_COURSE, sampleOffer, sampleStages } from '../../model/sample';
 import { pricingDefinition } from './definition';
 import {
   courseRows,
@@ -9,6 +10,8 @@ import {
   INCLUDED_LINE_MAX,
   INCLUDED_MAX,
   includedLines,
+  OWNED_POINTS_MAX,
+  ownedPoints,
 } from './included';
 
 /** 6 stages, 24 practices, 18 videos and 6 audio, 5 hr 40 min of them. */
@@ -213,6 +216,56 @@ describe('pricingDefinition.coerce — reading `included`', () => {
       { text: 'Printable workbook' },
     ]);
     expect(coerce(rows)).toEqual(rows);
+  });
+});
+
+describe('ownedPoints — the one-off’s card beside other cards', () => {
+  const LINES = includedLines(undefined, COURSE);
+  const paths = (props?: Record<string, unknown>) =>
+    deriveOfferPaths(sampleOffer('tiers'), SAMPLE_COURSE, props);
+
+  it('gives the one-off the course’s first lines, so its card says what a buyer would own', () => {
+    const [purchase, ...tiers] = paths();
+    if (purchase?.kind !== 'purchase')
+      throw new Error('the sample has a one-off');
+    expect(ownedPoints(purchase, LINES, 3).bullets).toEqual([
+      '6 stages',
+      '24 practices',
+      '5 hr 40 min of video and audio',
+    ]);
+    expect(OWNED_POINTS_MAX).toBe(3);
+    // The memberships keep their own points.
+    for (const tier of tiers) expect(ownedPoints(tier, LINES, 3)).toBe(tier);
+  });
+
+  it('gives a lone card none: the list stands beside it', () => {
+    const [purchase] = paths();
+    if (!purchase) throw new Error('the sample has a one-off');
+    expect(ownedPoints(purchase, LINES, 1).bullets).toEqual([]);
+  });
+
+  it('follows the list: none when it is switched off, the creator’s rows when they wrote them', () => {
+    const [purchase] = paths();
+    if (!purchase) throw new Error('the sample has a one-off');
+    expect(ownedPoints(purchase, includedLines([], COURSE), 3).bullets).toEqual(
+      []
+    );
+    const theirs = includedLines(
+      [{ text: 'Printable workbook' }, { fact: 'stages' }],
+      COURSE
+    );
+    expect(ownedPoints(purchase, theirs, 3).bullets).toEqual([
+      'Printable workbook',
+      '6 stages',
+    ]);
+  });
+
+  it('keeps points the creator wrote for the one-off', () => {
+    const [purchase] = paths({
+      offers: [{ id: 'purchase', bullets: ['Yours to keep'] }],
+    });
+    if (!purchase) throw new Error('the sample has a one-off');
+    expect(ownedPoints(purchase, LINES, 3).bullets).toEqual(['Yours to keep']);
   });
 });
 

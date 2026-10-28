@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { editableRows, kindOf, retyped } from './included-field';
+import { editableRows, kindOf, oneLine, retyped } from './included-field';
+
+describe('oneLine — a line is one line', () => {
+  it('turns any break, and the spaces round it, into one space', () => {
+    expect(oneLine('Printable\nworkbook')).toBe('Printable workbook');
+    expect(oneLine('A  \r\n\n  b')).toBe('A b');
+  });
+
+  it('leaves a line without breaks as typed, its own spaces too', () => {
+    expect(oneLine('6 stages ')).toBe('6 stages ');
+    expect(oneLine('Two  spaces')).toBe('Two  spaces');
+  });
+});
 
 describe('included-field — the rows as the inspector edits them', () => {
   it('reads nothing stored as null: the page draws the course’s own lines', () => {

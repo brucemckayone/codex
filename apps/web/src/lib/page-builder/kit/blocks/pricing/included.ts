@@ -21,8 +21,10 @@
  *
  * Every layout draws it beside a single way in, each in its own form: beside
  * the lone card in `cards`, under the card in `focus`, and along the strip in
- * `band`. Two or more ways in are left as they were.
+ * `band`. Beside two or more, the list's first lines are the one-off's own
+ * points instead (`ownedPoints`), so its card says what a buyer would own.
  */
+import type { OfferPath } from '../../../offer-paths';
 import { COPY } from '../../model/copy';
 import type { CourseFacts } from '../../model/facts';
 import { compact, readItems, readOneOf, readText } from '../../model/read';
@@ -48,6 +50,28 @@ export const INCLUDED_LINE_MAX = 80;
  */
 export function drawsIncluded(paths: number): boolean {
   return paths === 1;
+}
+
+/** How many of the lines a one-off's card carries beside other cards. */
+export const OWNED_POINTS_MAX = 3;
+
+/**
+ * A path as its card draws it among `paths` ways in. Beside other cards the
+ * one-off has no points of its own (offer-paths.ts derives none, so it stops
+ * repeating its billing line), and the memberships beside it list theirs:
+ * its card takes the first of the course's lines (`lines`, the same reading
+ * as the list, so `[]` gives none), which is what a buyer would own. Points
+ * the creator wrote for it stay theirs. Alone, a card gets none: the list
+ * stands beside it. The checkout's own cards are not drawn through here.
+ */
+export function ownedPoints(
+  path: OfferPath,
+  lines: readonly string[],
+  paths: number
+): OfferPath {
+  if (drawsIncluded(paths) || path.kind !== 'purchase') return path;
+  if (path.bullets.length > 0) return path;
+  return { ...path, bullets: lines.slice(0, OWNED_POINTS_MAX) };
 }
 
 /** What the course says for `fact`, or null when it has nothing true to say. */

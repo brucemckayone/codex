@@ -25,10 +25,12 @@
      drops below 1.125rem, and the smallest line on a page is 0.9375rem. */
   --lp-size-lead: calc(clamp(1.25rem, 1.05rem + 0.5cqi, 1.5rem) * var(--lp-scale));
   /* An item of a list that carries its section (a sign, a credential, a
-     figure's label): halfway from the lead it sits beside to a title. Read
-     here, so each Type's own lead and title (on this same root) flow in; a
-     part that re-sets either does not move it. */
-  --lp-size-item: calc((var(--lp-size-lead) + var(--lp-size-title)) / 2);
+     figure's label): halfway from the lead it sits beside to a title, and
+     never under that lead, where a title is the smaller (Quiet, and every
+     phone, whose title floor is under the lead's). Read here, so each Type's
+     own lead and title (on this same root) flow in; a part that re-sets
+     either does not move it. */
+  --lp-size-item: max(var(--lp-size-lead), calc((var(--lp-size-lead) + var(--lp-size-title)) / 2));
   --lp-size-body: calc(clamp(1.125rem, 1.05rem + 0.2cqi, 1.25rem) * var(--lp-scale));
   --lp-size-small: calc(clamp(1rem, 0.96rem + 0.1cqi, 1.0625rem) * var(--lp-scale));
   --lp-size-label: calc(clamp(0.9375rem, 0.9rem + 0.08cqi, 1rem) * var(--lp-scale));

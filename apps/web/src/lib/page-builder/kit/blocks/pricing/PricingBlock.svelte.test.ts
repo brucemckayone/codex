@@ -430,6 +430,38 @@ describe('PricingBlock — a single way in, beside what the course holds', () =>
     expect(text()).toContain('Prefer to own, not subscribe');
   });
 
+  // The one-off beside two memberships had no points and a tall empty gap
+  // down to its button, while theirs carried lists (p3g visual L6).
+  const points = (price: string) =>
+    [...(offerUnit(price)?.querySelectorAll('li') ?? [])].map((li) =>
+      li.textContent?.trim()
+    );
+
+  it('gives the one-off beside other cards the course’s first lines as its points', async () => {
+    await render({}, 'cards', 'tiers');
+    expect(points('£49')).toEqual(COURSE_LINES.slice(0, 3));
+    expect(points('£15')).toContain('Plus everything else in the membership');
+    expect(list()).toBeNull();
+    unmount(app);
+    app = null;
+    await render(
+      { included: [{ text: 'Printable workbook' }, { fact: 'stages' }] },
+      'cards',
+      'tiers'
+    );
+    expect(points('£49')).toEqual(['Printable workbook', '6 stages']);
+  });
+
+  it('gives the one-off no points when the list is off, nor when it stands alone', async () => {
+    await render({ included: [] }, 'cards', 'tiers');
+    expect(points('£49')).toEqual([]);
+    unmount(app);
+    app = null;
+    await render({}, 'cards', 'buy');
+    expect(points('£49')).toEqual([]);
+    expect(lines()).toEqual(COURSE_LINES);
+  });
+
   it('draws the list the same on the canvas, where it is not edited inline', async () => {
     await render({}, 'cards', 'buy', { commit: () => {} });
     expect(lines()).toEqual(COURSE_LINES);
@@ -468,5 +500,29 @@ describe('PricingBlock — a single way in, beside what the course holds', () =>
         ) && rule.within.includes('@container (min-width: 60rem)')
     );
     expect(row?.decls.get('flex-basis')).toBe('100%');
+
+    // Narrow, the strip keeps the list's one fact to a line: a wrapped row
+    // breaks raggedly (p3g visual L5).
+    const inline = rules.filter(
+      (rule) =>
+        rule.selector.startsWith(".pricing__included[data-form='strip']") &&
+        rule.decls.get('display') === 'flex'
+    );
+    expect(inline.map((rule) => rule.within)).toEqual([
+      ['@container (min-width: 44rem)'],
+    ]);
+
+    // Soft centres the card and its list as one pair under its centred head
+    // (p3g visual L4).
+    const soft = rules.find(
+      (rule) =>
+        rule.selector.includes("[data-lp-style='soft']") &&
+        rule.selector.endsWith('.pricing__cards[data-included]') &&
+        rule.within.includes('@container (min-width: 44rem)')
+    );
+    expect(soft?.decls.get('justify-content')).toBe('center');
+    expect(soft?.decls.get('grid-template-columns')).toBe(
+      'var(--_track) minmax(0, max-content)'
+    );
   });
 });

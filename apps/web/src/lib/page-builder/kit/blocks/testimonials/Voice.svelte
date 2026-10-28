@@ -336,7 +336,10 @@
   /* Above the words, on the voice's own edge (the wall pads the voice, so it
      lines up with the words there too); centred over the monument. Its
      initials are drawn on the panel tinted with the brand, as the cards on a
-     ground are, in the panel's ink, inside the section's hairline. */
+     ground are, in the panel's ink. The tint can land on the band's own
+     colour (Soft's tinted band, Studio's paper), so the disc is ringed in the
+     band's ink at 40%: about 2:1 on any band whose ink holds 4.5:1, where the
+     section's hairline can be the band's colour too. */
   .voice :global(.voice__portrait) {
     inline-size: var(--space-20);
     border-radius: var(--radius-full);
@@ -344,7 +347,7 @@
 
   .voice :global(.voice__portrait[data-mark]) {
     background: color-mix(in oklab, var(--lp-panel), var(--lp-brand) var(--lp-tint-panel));
-    box-shadow: inset 0 0 0 var(--lp-border) var(--lp-line);
+    box-shadow: inset 0 0 0 var(--lp-border) color-mix(in oklab, var(--lp-ink) 40%, var(--lp-bg));
     color: var(--lp-panel-ink);
   }
 

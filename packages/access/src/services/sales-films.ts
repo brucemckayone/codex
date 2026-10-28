@@ -13,8 +13,8 @@
  *   (b) NO non-deleted content row that is anything but plainly free uses it,
  *       through `content.media_item_id` ({@link paidUse});
  *   (c) the media is ready (not deleted, `ready`, video or audio, with an HLS
- *       master), and its creator is still an ACTIVE member of the course's
- *       org, the boundary `assertMediaItemsInOrg` writes against. Nothing
+ *       master), and its creator is still on the course org's TEAM: an
+ *       active owner, admin or creator ({@link creatorIsMember}). Nothing
  *       clears a slot when a member leaves, so the read asks again.
  *
  * (b) and (c) are {@link fullFilmEligible}, the ONE predicate the sell
@@ -30,6 +30,7 @@
  */
 
 import { CONTENT_STATUS, MEDIA_STATUS, MEDIA_TYPES } from '@codex/constants';
+import { CREATOR_LIST_ROLES } from '@codex/database';
 import {
   content,
   courses,
@@ -42,6 +43,7 @@ import {
   and,
   eq,
   exists,
+  inArray,
   isNull,
   type SQL,
   type SQLWrapper,
@@ -120,8 +122,17 @@ function filmReady(): SQL {
 
 /**
  * Rule (c)'s membership half: the outer `media_items` row's creator is an
- * ACTIVE member of `organizationId` (a value, or the joined
- * `courses.organization_id` column), as `assertMediaItemsInOrg` asks.
+ * ACTIVE member of the TEAM of `organizationId` (a value, or the joined
+ * `courses.organization_id` column): an owner, admin or creator, the set the
+ * platform lists as an org's creators (`CREATOR_LIST_ROLES`).
+ *
+ * Narrower than `assertMediaItemsInOrg`, which admits any active role, on
+ * purpose. `member` and `subscriber` are CUSTOMER rows: a paying subscriber
+ * holds an active `subscriber` membership, and subscribing re-activates a
+ * removed member's row as one (`upsertSubscriberMembership`). Admitting them
+ * would stream a departed creator's still-slotted film in full again the day
+ * they subscribe, so they fail closed. The write side is left as it is (an
+ * owner decision); a film it lets through still shows only its public preview.
  */
 function creatorIsMember(
   db: AccessQueryClient,
@@ -135,7 +146,8 @@ function creatorIsMember(
         and(
           eq(organizationMemberships.userId, mediaItems.creatorId),
           eq(organizationMemberships.organizationId, organizationId),
-          eq(organizationMemberships.status, 'active')
+          eq(organizationMemberships.status, 'active'),
+          inArray(organizationMemberships.role, [...CREATOR_LIST_ROLES])
         )
       )
   );
@@ -173,7 +185,8 @@ function asFlag(predicate: SQL): SQL<boolean> {
  *     in that org (a draft, a deleted course or org, another org's id);
  *   - `empty-slot`: the course has no film in that slot;
  *   - `not-ready`: the media is deleted, not `ready`, or has no HLS master;
- *   - `creator-not-member`: its creator has left the org, or never joined;
+ *   - `creator-not-member`: its creator is not on the org's team (left,
+ *     never joined, or holds only a customer-side `member`/`subscriber` row);
  *   - `paid-use`: content that is anything but plainly free uses it.
  */
 export type CourseFilmRefusal =

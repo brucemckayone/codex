@@ -738,6 +738,12 @@ describe('the large face beside the quote that leads', () => {
       'color-mix(in oklab, var(--lp-panel), var(--lp-brand) var(--lp-tint-panel))'
     );
     expect(value('color')).toBe('var(--lp-panel-ink)');
+    // The tint can be the band's own colour, so the disc is ringed in the
+    // band's ink, which holds against the band in every scheme; never the
+    // section's hairline, which can be the band's colour too.
+    expect(value('box-shadow')).toBe(
+      'inset 0 0 0 var(--lp-border) color-mix(in oklab, var(--lp-ink) 40%, var(--lp-bg))'
+    );
   });
 });
 

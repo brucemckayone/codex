@@ -4,11 +4,13 @@
  * section, a step above the lead it sits beside and short of a title.
  *
  *   1. It is derived once, on the kit's root, from the lead and the title, so
- *      every Type's own steps flow into it and no sheet restates it.
+ *      every Type's own steps flow into it and no sheet restates it. It never
+ *      falls under the lead, where the title is the smaller.
  *   2. The problem's signs (statement and split), the guide's credentials as
  *      a list and the figures' labels are set in it. A credential drawn as a
- *      chip keeps the body's, and the list layout's signs, already a title
- *      and more, keep theirs.
+ *      chip keeps the body's, and so does the list under the quote layout's
+ *      centrepiece, whose heading is a title; the list layout's signs,
+ *      already a title and more, keep theirs.
  *   3. A figure's cell is a query container, so the token's `cqi` read there
  *      would measure the cell: the list reads it against the section into a
  *      registered length, which the labels take. No Style or Type sizes a
@@ -79,12 +81,12 @@ function registered(file: string): Map<string, Map<string, string>> {
 }
 
 describe('the item size', () => {
-  it('is derived once, on the kit’s root, halfway from the lead to a title', () => {
+  it('is derived once, on the kit’s root, halfway from the lead to a title and never under the lead', () => {
     const declared = RULES.filter((rule) => rule.decls.has('--lp-size-item'));
     expect(declared.map(where)).toEqual(['styles/kit.css: .lp']);
     expect(declared[0].within).toEqual([]);
     expect(declared[0].decls.get('--lp-size-item')).toBe(
-      'calc((var(--lp-size-lead) + var(--lp-size-title)) / 2)'
+      'max(var(--lp-size-lead), calc((var(--lp-size-lead) + var(--lp-size-title)) / 2))'
     );
   });
 
@@ -110,6 +112,17 @@ describe('the item size', () => {
     const block = 'blocks/instructor/Credentials.svelte';
     expect(sized(block, '.creds')).toEqual(['var(--lp-size-body)']);
     expect(sized(block, ".creds[data-variant='ledger']")).toEqual([ITEM]);
+    // Under the quote layout's centrepiece the heading is a title, so the
+    // list keeps the body's there; calibrated on the class the block draws.
+    expect(
+      sized(block, ":global(.guide-quote__more) .creds[data-variant='ledger']")
+    ).toEqual(['var(--lp-size-body)']);
+    expect(
+      readFileSync(
+        join(KIT, 'blocks/instructor/InstructorBlock.svelte'),
+        'utf8'
+      )
+    ).toMatch(/<div class="guide-quote__more">[\s\S]*?<Credentials/);
     expect(
       rulesIn(block)
         .filter(

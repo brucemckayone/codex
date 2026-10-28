@@ -25,7 +25,7 @@
   import type { CourseFacts } from '$lib/page-builder/kit/model/facts';
   import * as m from '$paraglide/messages';
   import { moveItem } from './field-values';
-  import { editableRows, type IncludedKind, kindOf, retyped } from './included-field';
+  import { editableRows, type IncludedKind, kindOf, oneLine, retyped } from './included-field';
   import SortableRows from './SortableRows.svelte';
 
   interface Props {
@@ -56,7 +56,7 @@
   const stored = $derived(editableRows(value));
   const rows = $derived(stored ?? courseRows(facts));
   const on = $derived(stored === null || stored.length > 0);
-  const inputs: HTMLInputElement[] = $state([]);
+  const inputs: HTMLTextAreaElement[] = $state([]);
   /**
    * The rows "Show this list" put away when it switched the list off, so
    * switching it back on in the same visit brings the same lines back (undo
@@ -94,7 +94,14 @@
   }
 
   function retype(index: number, text: string): void {
-    onChange(rows.map((row, at) => (at === index ? retyped(row, text, liveOf(row)) : row)));
+    onChange(
+      rows.map((row, at) => (at === index ? retyped(row, oneLine(text), liveOf(row)) : row))
+    );
+  }
+
+  /** Enter would break the line, which the page draws as one. */
+  function keepOneLine(event: KeyboardEvent): void {
+    if (event.key === 'Enter' && !event.isComposing) event.preventDefault();
   }
 
   async function relive(index: number): Promise<void> {
@@ -161,16 +168,19 @@
             <span class="included__tag">{TAGS[kind]()}</span>
             <span class="included__source">{sourceOf(entry)}</span>
           </p>
-          <input
+          <!-- A textarea so a long line wraps into view; it stays one line
+               (`keepOneLine`, `oneLine`). -->
+          <textarea
             class="included__input"
-            type="text"
+            rows="2"
             aria-label={rowLabel(index)}
             value={lineOf(entry)}
             maxlength={INCLUDED_LINE_MAX}
             placeholder={entry.fact ? undefined : m.studio_page_editor_included_placeholder()}
             bind:this={inputs[index]}
+            onkeydown={keepOneLine}
             oninput={(event) => retype(index, event.currentTarget.value)}
-          />
+          ></textarea>
           {#if kind === 'rewritten' && live}
             <p class="included__hint">
               {m.studio_page_editor_included_course_says({ line: live })}
@@ -279,7 +289,10 @@
     color: var(--color-text-secondary);
   }
 
+  /* Grows with its line, as FieldControl's textarea does, from a one-line
+     field; a browser without `field-sizing` shows its two rows. */
   .included__input {
+    display: block;
     inline-size: 100%;
     min-block-size: var(--space-10);
     padding: var(--space-2) var(--space-3);
@@ -289,6 +302,9 @@
     color: var(--color-text);
     font: inherit;
     font-size: var(--text-sm);
+    line-height: var(--leading-normal);
+    field-sizing: content;
+    resize: none;
   }
 
   .included__input:focus-visible {

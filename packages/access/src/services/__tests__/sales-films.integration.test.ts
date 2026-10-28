@@ -9,7 +9,8 @@
  *     mirrors; a plainly free use, a deleted use and no use leave it full;
  *   - a draft paid practice cuts it too, as does a paid use in another org;
  *   - a film that is not ready, deleted, or has no HLS master is never full,
- *     nor one whose creator has left the org or never joined it;
+ *     nor one whose creator is off the org's team: left, never joined, or
+ *     holding only a customer-side subscriber or member row;
  *   - a draft course, a deleted course, a deleted org and another org's id
  *     refuse as `no-course`, an empty slot as `empty-slot`, a paid film as
  *     `paid-use`, unready media as `not-ready` and a departed creator's film
@@ -83,6 +84,11 @@ describe('course sales films (owner P10)', () => {
   let leaverId: string;
   /** Never a member of `orgId`. */
   let outsiderId: string;
+  /** Customer-side rows in `orgId`: an active subscriber, an active member. */
+  let subscriberId: string;
+  let memberId: string;
+  /** A creator who left `orgId`, then subscribed to it. */
+  let returnerId: string;
   let orgId: string;
   let otherOrgId: string;
   let tierId: string;
@@ -149,11 +155,12 @@ describe('course sales films (owner P10)', () => {
   async function join(
     organizationId: string,
     userId: string,
-    status: 'active' | 'inactive' = 'active'
+    status: 'active' | 'inactive' = 'active',
+    role: 'owner' | 'admin' | 'creator' | 'member' | 'subscriber' = 'creator'
   ) {
     await db
       .insert(organizationMemberships)
-      .values({ organizationId, userId, role: 'creator', status });
+      .values({ organizationId, userId, role, status });
   }
 
   const refused = (reason: CourseFilmRefusal) => ({ ok: false, reason });
@@ -196,20 +203,35 @@ describe('course sales films (owner P10)', () => {
       hlsTokenSecret: SECRET,
     });
 
-    const [creator, colleague, leaver, outsider] = await seedTestUsers(db, 4);
-    if (!creator || !colleague || !leaver || !outsider) {
+    const [creator, colleague, leaver, outsider, subscriber, member, returner] =
+      await seedTestUsers(db, 7);
+    if (
+      !creator ||
+      !colleague ||
+      !leaver ||
+      !outsider ||
+      !subscriber ||
+      !member ||
+      !returner
+    ) {
       throw new Error('failed to seed test users');
     }
     creatorId = creator;
     colleagueId = colleague;
     leaverId = leaver;
     outsiderId = outsider;
+    subscriberId = subscriber;
+    memberId = member;
+    returnerId = returner;
 
     orgId = await seedOrg('Films org');
     otherOrgId = await seedOrg('Other films org');
     await join(orgId, creatorId);
     await join(orgId, colleagueId);
     await join(orgId, leaverId, 'inactive');
+    await join(orgId, subscriberId, 'active', 'subscriber');
+    await join(orgId, memberId, 'active', 'member');
+    await join(orgId, returnerId, 'inactive');
 
     const [tier] = await db
       .insert(subscriptionTiers)
@@ -327,6 +349,45 @@ describe('course sales films (owner P10)', () => {
         refused('creator-not-member')
       );
       expect(await isFull(await seedFilm({}, colleagueId))).toBe(true);
+    });
+  });
+
+  describe("the creator must be on the org's TEAM, not a customer", () => {
+    it('an active subscriber or member creator is refused: those rows are customer-side', async () => {
+      expect(await mint(await seedFilm({}, subscriberId))).toEqual(
+        refused('creator-not-member')
+      );
+      expect(await mint(await seedFilm({}, memberId))).toEqual(
+        refused('creator-not-member')
+      );
+    });
+
+    it('a creator who left and then SUBSCRIBED stays refused', async () => {
+      const film = await seedFilm({}, returnerId);
+      expect(await mint(film)).toEqual(refused('creator-not-member'));
+      // What `upsertSubscriberMembership` does to a removed member's row.
+      await db
+        .update(organizationMemberships)
+        .set({ status: 'active', role: 'subscriber' })
+        .where(eq(organizationMemberships.userId, returnerId));
+      expect(await mint(film)).toEqual(refused('creator-not-member'));
+    });
+
+    it('an active owner, admin or creator passes, and the sell preview agrees', async () => {
+      const [owner, admin] = await seedTestUsers(db, 2);
+      if (!owner || !admin) throw new Error('failed to seed test users');
+      await join(orgId, owner, 'active', 'owner');
+      await join(orgId, admin, 'active', 'admin');
+      for (const userId of [owner, admin, colleagueId]) {
+        expect(await isFull(await seedFilm({}, userId))).toBe(true);
+      }
+
+      const intro = await seedFilm({}, colleagueId);
+      const reel = await seedFilm({}, subscriberId);
+      const courseId = await seedCourse({ intro, reel });
+      const preview = await journeys.getCourseSellPreview(courseId, CDN);
+      expect(preview?.intro?.fullFilm).toBe(true);
+      expect(preview?.reel?.fullFilm).toBe(false);
     });
   });
 

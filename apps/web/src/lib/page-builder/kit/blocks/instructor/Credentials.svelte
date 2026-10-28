@@ -44,6 +44,13 @@
     font-size: var(--lp-size-item);
   }
 
+  /* Under the quote layout's centrepiece (InstructorBlock's
+     `.guide-quote__more`) the section's heading steps down to a title, so a
+     list there keeps the body's size and never matches the heading. */
+  :global(.guide-quote__more) .creds[data-variant='ledger'] {
+    font-size: var(--lp-size-body);
+  }
+
   .creds[data-variant='ledger'] li {
     padding-block-start: var(--space-3);
     border-block-start: var(--lp-border) var(--border-style) var(--lp-line);

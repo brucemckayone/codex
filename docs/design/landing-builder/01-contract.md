@@ -356,9 +356,13 @@ _(append here: `A<n> · <date> · <WP> · what changed · why`)_
   when the offer has exactly one path, in every layout: beside the card in `cards`, under it in
   `focus`, and along the strip under its rule in `band` (a label and a wrapping line of facts, so the
   band stays a strip). At most 8 rows of 80 characters, inside the 16 KB props cap; no Zod change
-  (props are a passthrough record) and no migration (jsonb). The one-off path's derived bullets ("Yours forever / No subscription / Lifetime
-  access") are removed with it. Why: the owner chose "From the course, editable": a lone card filled
-  itself with three restatements of its own billing line while the course's real contents went unsaid.
+  (props are a passthrough record) and no migration (jsonb). The one-off path's derived bullets
+  ("Yours forever / No subscription / Lifetime access") are removed with it. Beside two or more
+  cards, the pricing block draws the one-off's card with the first three of these same lines as its
+  points (`ownedPoints`: live, rewritten or the creator's own; `[]` gives none; points authored for
+  the one-off in `offers` win). The checkout's radio cards keep the path's own (empty) bullets. Why:
+  the owner chose "From the course, editable": a lone card filled itself with three restatements of
+  its own billing line while the course's real contents went unsaid.
 
 ---
 

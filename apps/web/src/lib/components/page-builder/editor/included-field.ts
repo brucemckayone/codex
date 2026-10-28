@@ -36,6 +36,14 @@ export function editableRows(value: unknown): IncludedRow[] | null {
 }
 
 /**
+ * A line is one line: its field wraps to show it whole, but a break pasted
+ * into it is a space, as the page would draw it.
+ */
+export function oneLine(text: string): string {
+  return text.replace(/[^\S\r\n]*[\r\n]+[^\S\r\n]*/g, ' ');
+}
+
+/**
  * A row as typed into. A fact's own line typed back makes it live again, so
  * a creator who undoes a rewrite by hand gets the counting line back.
  */

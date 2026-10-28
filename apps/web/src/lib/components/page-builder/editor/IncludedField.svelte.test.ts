@@ -56,7 +56,7 @@ function render(
 }
 
 const inputs = () => [
-  ...document.body.querySelectorAll<HTMLInputElement>('.included__input'),
+  ...document.body.querySelectorAll<HTMLTextAreaElement>('.included__input'),
 ];
 const values = () => inputs().map((input) => input.value);
 const tags = () =>
@@ -70,7 +70,7 @@ const button = (label: string) =>
 const toggle = () =>
   document.body.querySelector<HTMLButtonElement>('[role="switch"]');
 
-function type(input: HTMLInputElement | undefined, text: string): void {
+function type(input: HTMLTextAreaElement | undefined, text: string): void {
   if (!input) throw new Error('no such line');
   input.value = text;
   input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -216,5 +216,23 @@ describe('IncludedField — the course’s own lines, until touched', () => {
     expect(document.body.textContent).toContain(
       m.studio_page_editor_included_elsewhere()
     );
+  });
+
+  it('shows a long line whole, and keeps it one line', () => {
+    // A wrapping field, so "2 hr 10 min of video and audio" is never cut
+    // off; but the page draws a line as one, so Enter adds no break and a
+    // pasted one is a space.
+    const { writes } = render([{ text: 'Printable workbook' }]);
+    const [field] = inputs();
+    expect(field?.tagName).toBe('TEXTAREA');
+    const enter = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      bubbles: true,
+      cancelable: true,
+    });
+    field?.dispatchEvent(enter);
+    expect(enter.defaultPrevented).toBe(true);
+    type(field, 'Printable\nworkbook  \r\n and notes');
+    expect(writes.at(-1)).toEqual([{ text: 'Printable workbook and notes' }]);
   });
 });
