@@ -18,6 +18,7 @@ export {
   PreconditionFailedError,
   RateLimitExceededError,
   ServiceError,
+  type ServiceErrorOptions,
   ServiceUnavailableError,
   StripeNotConfiguredError,
   UnauthorizedError,

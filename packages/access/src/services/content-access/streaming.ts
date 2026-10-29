@@ -140,7 +140,6 @@ export function resolveStreamableMedia(
       mediaItemId: contentRecord.mediaItem.id,
     });
     throw new R2SigningError(
-      'missing_hls_key',
       new Error('Media marked as ready but HLS master playlist key is missing')
     );
   }
@@ -228,18 +227,23 @@ export async function buildStreamingResponse(
   //
   // The waveform is a single static file with no relative children, so it
   // is still presigned directly — unchanged from the prior behaviour.
-  try {
-    if (!contentApiBaseUrl || !hlsTokenSecret) {
-      // Misconfiguration (env var unbound) — fail with a typed internal
-      // error rather than emitting a token-less or broken master URL.
-      throw new R2SigningError(
-        r2Key,
-        new Error(
-          'HLS streaming proxy is not configured (contentApiBaseUrl / hlsTokenSecret missing)'
-        )
-      );
-    }
+  if (!contentApiBaseUrl || !hlsTokenSecret) {
+    // Misconfiguration (env var unbound) — fail with a typed internal
+    // error rather than emitting a token-less or broken master URL. The
+    // reason is the log's: the error itself carries no context.
+    const reason =
+      'HLS streaming proxy is not configured (contentApiBaseUrl / hlsTokenSecret missing)';
+    obs.error('Failed to mint HLS streaming URL', {
+      errorName: 'MisconfiguredStreamingProxy',
+      errorMessage: reason,
+      userId,
+      contentId,
+      r2Key,
+    });
+    throw new R2SigningError(new Error(reason));
+  }
 
+  try {
     const exp = Math.floor(Date.now() / 1000) + expirySeconds;
     const token = await signHlsToken(
       { creatorId, mediaId, exp },
@@ -285,8 +289,7 @@ export async function buildStreamingResponse(
       contentId,
       r2Key,
     });
-    if (err instanceof R2SigningError) throw err;
-    throw new R2SigningError(r2Key, err);
+    throw new R2SigningError(err);
   }
 }
 
@@ -314,7 +317,6 @@ export async function getHlsMasterPlaylist(
   const { r2, contentApiBaseUrl } = deps;
   if (!contentApiBaseUrl) {
     throw new R2SigningError(
-      getHlsMasterKey(input.creatorId, input.mediaId),
       new Error('HLS streaming proxy is not configured (contentApiBaseUrl)')
     );
   }
@@ -335,10 +337,11 @@ const FILM_STREAM_UNAVAILABLE = 'Streaming is unavailable';
 
 /**
  * The film minter's error for a failure it did not raise itself, most often
- * the eligibility read. `handleError` would wrap that with the service name
- * and environment as context, which `mapErrorToResponse` hands the anonymous
- * caller as `details`, 500s included; so it is logged here and replaced by
- * the same context-free error a signing failure gives.
+ * the eligibility read. It is logged here with the course and film, and
+ * replaced by the same error a signing failure gives, so the anonymous caller
+ * gets one message for every failure. (It was first written to keep the
+ * context `handleError` added off the response; neither `handleError` nor a
+ * 5xx response carries context now, since Codex-adcgb.)
  *
  * A ServiceError passes through unchanged: on this path the only ones are
  * {@link buildFilmStreamResponse}'s, already context-free and logged.
@@ -367,11 +370,10 @@ export function filmStreamFailure(
  * check (`resolveCourseFilm`); this only signs, as
  * {@link buildStreamingResponse} does for a granted content stream.
  *
- * Its failures carry NO context and one generic message, unlike that
- * function's `R2SigningError`: a ServiceError's message and context reach the
- * client verbatim, and this one answers an anonymous caller, who must not be
- * handed the R2 key or the names of internal config. The detail goes to the
- * log instead.
+ * Its failures carry NO context and one generic message: a ServiceError's
+ * message reaches the client verbatim, and this one answers an anonymous
+ * caller, who must not be handed the R2 key or the names of internal config.
+ * The detail goes to the log instead.
  *
  * @throws {InternalServiceError} proxy misconfigured, or signing failed
  */
@@ -449,7 +451,6 @@ export async function getFilmHlsMasterPlaylist(
   const masterKey = getHlsMasterKey(input.creatorId, input.mediaId);
   if (!contentApiBaseUrl) {
     throw new R2SigningError(
-      masterKey,
       new Error('HLS streaming proxy is not configured (contentApiBaseUrl)')
     );
   }
@@ -516,12 +517,6 @@ export async function getHlsVariantPlaylist(
         // Should never happen — collectVariantSegments + presign cover every
         // relative line. Defensive: surface as a typed signing error.
         throw new R2SigningError(
-          getHlsVariantSegmentKey(
-            input.creatorId,
-            input.mediaId,
-            input.variant,
-            filename
-          ),
           new Error('Segment was not presigned before rewrite')
         );
       }

@@ -637,8 +637,9 @@ describe('POST /checkout/complete', () => {
     );
   });
 
-  // mapErrorToResponse logs no ServiceError: without the route's own line, a
-  // paid session that is never recorded left no trace in ecom. The page is
+  // mapErrorToResponse never logs a ServiceError's failure (only a 5xx's
+  // withheld context, and this one's is public): without the route's own line,
+  // a paid session that is never recorded left no trace in ecom. The page is
   // told it is for good (CHECKOUT_NOT_RECORDED, Codex-2hxff.81), under the
   // errorId support was alerted with, and with nothing of the refusal's.
   it('a permanent refusal before the commit: an error line with an errorId and the root cause, and CHECKOUT_NOT_RECORDED to the page', async () => {

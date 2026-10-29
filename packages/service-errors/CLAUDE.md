@@ -67,7 +67,7 @@ try {
 
 **`mapErrorToResponse(error, options?)`** — converts any error to a standardized HTTP response.
 
-- `ServiceError` → uses its `statusCode` and `code`
+- `ServiceError` → uses its `statusCode` and `code`. A 4xx sends its `context` as `details`. A 5xx sends **no** `details`: its context is withheld and logged once (via `obs`, else a fallback client), unless the error was built with `{ publicContext: true }` (Codex-adcgb)
 - `ZodError` → 422 with field-level details
 - Unknown → 500 with generic message (never exposes internals)
 
@@ -76,6 +76,8 @@ Options: `{ includeStack?: boolean, logError?: boolean, obs?: ObservabilityClien
 Returns: `{ statusCode: number, response: { error: { code, message, details? } } }`
 
 In practice, `procedure()` from `@codex/worker-utils` calls this automatically — you don't call it manually in route handlers unless you bypass `procedure()`.
+
+**`publicContext`** is for a 5xx whose context a client acts on, and only for context that holds ids, codes and instants: `CheckoutNotRecordedError` (the buyer's support reference `errorId`), ecom's "could not be recorded yet" 503 in `routes/checkout.ts` (`sessionId`, `errorId`), and the `STRIPE_UNAVAILABLE` 503 from `createKeyRefusal` (`details.code`, `retryAfter`). A 4xx's context always reaches the client, so keep it free of internals too.
 
 ## Helper Functions
 

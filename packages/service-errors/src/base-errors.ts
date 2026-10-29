@@ -28,6 +28,20 @@ export type ErrorStatusCode =
   | 503;
 
 /**
+ * Options every ServiceError takes: the standard `cause`, and whether its
+ * context is written for the client.
+ */
+export interface ServiceErrorOptions extends ErrorOptions {
+  /**
+   * A 5xx's context is the log's, not the client's: `mapErrorToResponse`
+   * withholds it and logs it. `true` sends it as `details` anyway, for a 5xx
+   * whose context a client acts on. Set it only on context that holds ids,
+   * codes and instants, never internals. A 4xx always sends its context.
+   */
+  publicContext?: boolean;
+}
+
+/**
  * Base error class for all service errors
  * Provides consistent structure and context tracking
  *
@@ -44,26 +58,30 @@ export abstract class ServiceError extends Error {
   public readonly code: string;
   public readonly context?: Record<string, unknown>;
   public readonly statusCode: ErrorStatusCode;
+  /** See {@link ServiceErrorOptions.publicContext}. */
+  public readonly publicContext: boolean;
 
   /**
    * `options.cause` keeps the error this one replaced. It is never part of an
-   * API response (`mapErrorToResponse` sends only code, message and
-   * `context`), so it may hold anything, but it lets a caller judge the
-   * failure by what actually went wrong: a webhook must answer 500 for a
-   * database outage that a service wrapped (Codex-2hxff.6).
+   * API response (`mapErrorToResponse` sends only code, message and, for a
+   * 4xx or a `publicContext` 5xx, `context`), so it may hold anything, but it
+   * lets a caller judge the failure by what actually went wrong: a webhook
+   * must answer 500 for a database outage that a service wrapped
+   * (Codex-2hxff.6).
    */
   constructor(
     message: string,
     code: string,
     statusCode: ErrorStatusCode,
     context?: Record<string, unknown>,
-    options?: ErrorOptions
+    options?: ServiceErrorOptions
   ) {
     super(message, options);
     this.name = this.constructor.name;
     this.code = code;
     this.statusCode = statusCode;
     this.context = context;
+    this.publicContext = options?.publicContext ?? false;
 
     // captureStackTrace is V8-specific (Node.js, Cloudflare Workers)
     // Gracefully handle its absence in other runtimes
@@ -214,7 +232,7 @@ export class ServiceUnavailableError extends ServiceError {
   constructor(
     message: string,
     context?: Record<string, unknown>,
-    options?: ErrorOptions
+    options?: ServiceErrorOptions
   ) {
     super(message, 'SERVICE_UNAVAILABLE', 503, context, options);
   }
@@ -266,10 +284,10 @@ export class UnsupportedCurrencyError extends ServiceError {
  * makes the next occurrence triageable straight off the wire.
  *
  * Deliberately says nothing about WHICH binding is missing: `mapErrorToResponse`
- * forwards a `ServiceError`'s `message` AND its `context` to the client
- * verbatim, so both must stay free of configuration and secret material. The
- * `STRIPE_NOT_CONFIGURED` code is the operator's pointer; the remediation lives
- * in each worker's `wrangler.jsonc` secret block.
+ * forwards a `ServiceError`'s `message` to the client verbatim, so it must stay
+ * free of configuration and secret material (a 500's `context` is withheld and
+ * logged instead). The `STRIPE_NOT_CONFIGURED` code is the operator's pointer;
+ * the remediation lives in each worker's `wrangler.jsonc` secret block.
  *
  * Distinct from `ConnectPlatformNotConfiguredError` (@codex/subscription), which
  * means the platform's Stripe account exists but has not been enabled for

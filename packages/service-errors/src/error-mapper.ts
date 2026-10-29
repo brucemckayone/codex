@@ -43,7 +43,8 @@ export interface ErrorMapperOptions {
   includeStack?: boolean;
 
   /**
-   * Whether to log unknown (500) errors.
+   * Whether to log unknown (500) errors, and the context a 5xx ServiceError
+   * withholds from the response.
    * If `obs` is provided, logs via `ObservabilityClient`; otherwise logs to console.
    * @default true
    */
@@ -51,7 +52,8 @@ export interface ErrorMapperOptions {
 
   /**
    * Optional observability client for structured logging.
-   * When provided and `logError` is true, unknown errors are logged via this client.
+   * When provided and `logError` is true, unknown errors and withheld 5xx
+   * context are logged via this client.
    */
   obs?: ObservabilityClient;
 }
@@ -60,7 +62,8 @@ export interface ErrorMapperOptions {
  * Maps any error to a standardized HTTP error response
  *
  * Handles:
- * - ServiceError instances (custom errors with status codes)
+ * - ServiceError instances (custom errors with status codes). A 4xx sends its
+ *   context as `details`; a 5xx sends none unless it set `publicContext`
  * - ZodError instances (validation errors)
  * - Unknown errors (wrapped as 500 internal errors)
  *
@@ -86,15 +89,36 @@ export function mapErrorToResponse(
 
   // Handle ServiceError (already has statusCode and code)
   if (isServiceError(error)) {
+    // A 4xx's context is the client's (validation issues, conflict ids). A
+    // 5xx's names internals (Codex-adcgb), so it is withheld unless the error
+    // opted in, and logged, since nothing else logs a ServiceError here.
+    if (error.statusCode < 500 || error.publicContext) {
+      return {
+        statusCode: error.statusCode,
+        response: {
+          error: {
+            code: error.code,
+            message: error.message,
+            details: error.context,
+          },
+        },
+      };
+    }
+    if (logError && error.context) {
+      (obs ?? fallbackObs).error(
+        'Server error context withheld from response',
+        {
+          source: 'mapErrorToResponse',
+          errorName: error.name,
+          code: error.code,
+          statusCode: error.statusCode,
+          context: error.context,
+        }
+      );
+    }
     return {
       statusCode: error.statusCode,
-      response: {
-        error: {
-          code: error.code,
-          message: error.message,
-          details: error.context,
-        },
-      },
+      response: { error: { code: error.code, message: error.message } },
     };
   }
 

@@ -208,28 +208,23 @@ describe('ContentNotFoundError', () => {
 });
 
 describe('R2SigningError', () => {
-  it('should create error with correct code in context', () => {
-    const error = new R2SigningError(
-      'path/to/file.pdf',
-      new Error('Sign failed')
-    );
-    expect(error.context).toHaveProperty('code', 'R2_SIGNING_ERROR');
-  });
-
   it('should have correct message', () => {
-    const error = new R2SigningError(
-      'path/to/file.pdf',
-      new Error('Sign failed')
-    );
+    const error = new R2SigningError(new Error('Sign failed'));
     expect(error.message).toBe('Failed to generate R2 signed URL');
+    expect(error.statusCode).toBe(500);
   });
 
-  it('should include r2Key in context', () => {
-    const error = new R2SigningError(
-      'path/to/file.pdf',
-      new Error('Sign failed')
-    );
-    expect(error.context).toHaveProperty('r2Key', 'path/to/file.pdf');
+  // Codex-adcgb: the context used to hold the R2 key and the cause, and a
+  // ServiceError's context is serialised into the response. Both are the
+  // throw site's log line now.
+  it('should carry no context, so neither the R2 key nor the cause can reach a response', () => {
+    const error = new R2SigningError(new Error('Sign failed'));
+    expect(error.context).toBeUndefined();
+  });
+
+  it('should keep the failure on cause, which is never sent', () => {
+    const cause = new Error('Sign failed');
+    expect(new R2SigningError(cause).cause).toBe(cause);
   });
 });
 
