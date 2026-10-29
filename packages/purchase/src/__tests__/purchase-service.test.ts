@@ -1773,12 +1773,35 @@ describe('PurchaseService Integration', () => {
     // its own content + connect account (chargesEnabled=false) and instantiates
     // PurchaseService locally with a mock mailer injected.
     describe('creator-connect-needed notification (WP-10)', () => {
+      // The service checks the template exists before claiming (notices
+      // review LOW-4): stand in the seed's global row, as an environment the
+      // seed has run on has it. Left in place; a re-insert is a no-op.
+      beforeAll(async () => {
+        await db
+          .insert(schema.emailTemplates)
+          .values({
+            name: 'creator-connect-needed',
+            scope: 'global',
+            subject: 'Money is waiting',
+            htmlBody: '<p>{{creatorName}}</p>',
+            textBody: '{{creatorName}}',
+            status: 'active',
+          })
+          .onConflictDoNothing();
+      });
+
       /**
-       * Build a paid content item owned by `otherUserId` in a fresh org, with
-       * the Connect account set to chargesEnabled=false so the creator_payout
-       * parks as pending. Returns content + org + stripe stub.
+       * Build a paid content item owned by a FRESH creator in a fresh org,
+       * with the Connect account set to chargesEnabled=false so the
+       * creator_payout parks as pending. Returns content + org + stripe stub.
+       *
+       * Fresh per test: the email goes for the first waiting sale of a
+       * creator's waiting episode only (Codex-2hxff.34). A creator shared
+       * across these tests would already be mid-episode, told by an earlier
+       * test's sale, so a later test's sale would rightly send nothing.
        */
       async function setupDisconnectedContent(titleSuffix: string) {
+        const [creatorId] = await seedTestUsers(db, 1);
         // Create a fresh org per test so there are no conflicts on the
         // stripeConnectAccounts unique constraint.
         const localOrg = takeFirst(
@@ -1791,7 +1814,7 @@ describe('PurchaseService Integration', () => {
             .returning()
         );
         await db.insert(schema.stripeConnectAccounts).values({
-          userId: otherUserId,
+          userId: creatorId,
           organizationId: localOrg.id,
           stripeAccountId: `acct_wp10_${titleSuffix}_${Date.now()}`,
           status: 'active',
@@ -1806,7 +1829,7 @@ describe('PurchaseService Integration', () => {
             mimeType: 'video/mp4',
             fileSizeBytes: 1024 * 1024,
           },
-          otherUserId
+          creatorId
         );
         await mediaService.markAsReady(
           media.id,
@@ -1815,7 +1838,7 @@ describe('PurchaseService Integration', () => {
             thumbnailKey: `thumbnails/wp10-${titleSuffix}.jpg`,
             durationSeconds: 60,
           },
-          otherUserId
+          creatorId
         );
         const testContent = await contentService.create(
           {
@@ -1827,9 +1850,9 @@ describe('PurchaseService Integration', () => {
             priceCents: 5000,
             tags: [],
           },
-          otherUserId
+          creatorId
         );
-        await contentService.publish(testContent.id, otherUserId);
+        await contentService.publish(testContent.id, creatorId);
         // Gate satisfied at publish time with a READY account; now model the
         // offline Connect the runtime purchase path is meant to exercise.
         await db
@@ -1839,7 +1862,7 @@ describe('PurchaseService Integration', () => {
             payoutsEnabled: false,
             status: 'onboarding',
           })
-          .where(eq(schema.stripeConnectAccounts.userId, otherUserId));
+          .where(eq(schema.stripeConnectAccounts.userId, creatorId));
 
         const localStubStripe = {
           ...mockStripe,

@@ -1,7 +1,7 @@
 /**
  * The queue's pieces and the search results (Codex-2hxff.28, mockup A1, D1,
- * D2, D3): the two tables, the two settle dialogs, the tab links, and the
- * charges found. Mounts the real components with the real Dialog; only the
+ * D2, D3; batch B's mock-b-support D1-D2 and O1-O4): the three tables, the
+ * three settle dialogs, the tab links, and the charges found. Mounts the real components with the real Dialog; only the
  * remote module is the reactive double.
  */
 
@@ -22,8 +22,11 @@ vi.mock(
 import {
   chargeSummary,
   creatorDebt,
+  debtPerson,
   failedRefund,
   NOW,
+  owedItem,
+  refusedDebtPerson,
 } from '../__fixtures__/support-fixtures';
 import {
   failure,
@@ -31,10 +34,14 @@ import {
   reset,
   resolveCreatorDebt,
   resolveFailedRefund,
+  resolveOwedToCreator,
 } from '../__fixtures__/support-remote.mock.svelte';
 import ChargeResults from '../ChargeResults.svelte';
 import CreatorDebtsTable from '../CreatorDebtsTable.svelte';
 import FailedRefundsTable from '../FailedRefundsTable.svelte';
+import OwedToCreatorsTable from '../OwedToCreatorsTable.svelte';
+import { targetFromItem } from '../owed-view';
+import ResolveCreditDialog from '../ResolveCreditDialog.svelte';
 import {
   clearRepayBlocks,
   markRepayBlocked,
@@ -188,59 +195,440 @@ describe('a row whose re-pay was refused for a later cause', () => {
   });
 });
 
-describe('Creator debts table', () => {
-  test('who owes, from what, why, and the history on request', () => {
-    render(CreatorDebtsTable, { items: [creatorDebt()], onSettle: vi.fn() });
-    const row = document.querySelector('[data-testid="creator-debt-row"]');
-    const rowText = row?.textContent?.replace(/\s+/g, ' ') ?? '';
-    expect(rowText).toContain('Maya Chen');
-    expect(rowText).toContain(m.support_role_creator());
-    expect(rowText).toContain('£8.10');
-    expect(rowText).toContain(
-      m.support_debt_from_refund({ buyer: 'Grace Liu', amount: '£10.00' })
+describe('Creator debts table, one row per person', () => {
+  const personRow = () =>
+    document.querySelector('[data-testid="creator-debt-person"]');
+  const rowText = () => personRow()?.textContent?.replace(/\s+/g, ' ') ?? '';
+
+  test('who owes, what, the live Stripe balance, back so far and where it stands (D1)', () => {
+    render(CreatorDebtsTable, { items: [debtPerson()], onSettle: vi.fn() });
+    expect(rowText()).toContain('Maya Chen');
+    expect(rowText()).toContain(m.support_role_creator());
+    expect(rowText()).toContain('£8.40');
+    // Stripe's own negative balance, signed, with why bank payouts wait.
+    const balance = document.querySelector('[data-testid="stripe-balance"]');
+    expect(balance?.textContent).toContain('−£8.40');
+    expect(balance?.querySelector('.balance-negative')).not.toBeNull();
+    expect(balance?.textContent).toContain(m.support_debts_balance_paused());
+    expect(rowText()).toContain('£6.00');
+    expect(rowText()).toContain(m.support_debts_state_recovering());
+    expect(rowText()).toContain(
+      m.support_debts_clock_writes_off({
+        date: '24 Apr 2027',
+        left: m.support_days_in({ count: '178' }),
+      })
     );
-    expect(rowText).toContain('slice_repaid');
-    expect(document.querySelector('[data-testid="history-line"]')).toBeNull();
-    const toggle = button(m.support_history_show());
-    toggle?.click();
-    flushSync();
-    // The toggle names the history it opens.
-    const controls = toggle?.getAttribute('aria-controls') ?? '';
-    expect(
-      document
-        .getElementById(controls)
-        ?.querySelectorAll('[data-testid="history-line"]')
-    ).toHaveLength(3);
-    // The table's copy (jsdom applies no media query, so the phone list's
-    // copy renders too).
-    expect(
-      document
-        .querySelector('table')
-        ?.querySelectorAll('[data-testid="history-line"]')
-    ).toHaveLength(3);
+    // Its take-back's chargeback is still open.
+    expect(rowText()).toContain(m.support_debt_closes_if_won());
   });
 
-  test('a debt from an open chargeback says it closes by itself if won', () => {
+  test("Show debts opens the person's debts; a Stripe-held one has no Settle, and its history opens", () => {
+    render(CreatorDebtsTable, { items: [debtPerson()], onSettle: vi.fn() });
+    expect(document.querySelector('[data-testid="debt-line"]')).toBeNull();
+    const toggle = button(m.support_debts_show());
+    toggle?.click();
+    flushSync();
+    const debts = document.getElementById(
+      toggle?.getAttribute('aria-controls') ?? ''
+    );
+    const line = debts?.querySelector('[data-testid="debt-line"]');
+    expect(line?.getAttribute('data-held')).toBe('stripe');
+    expect(line?.textContent).toContain(m.support_debts_held_stripe());
+    expect(line?.textContent).toContain('trr_1QlW3aLk2v');
+    expect(line?.textContent).not.toContain(m.support_action_settle());
+    expect(debts?.querySelector('[data-testid="history-line"]')).toBeNull();
+    [...(debts?.querySelectorAll<HTMLButtonElement>('button') ?? [])]
+      .find((b) => b.textContent?.includes(m.support_history_show()))
+      ?.click();
+    flushSync();
+    expect(
+      debts?.querySelectorAll('[data-testid="history-line"]')
+    ).toHaveLength(1);
+  });
+
+  test('a balance Stripe could not be read for says so, never £0.00 (D2)', () => {
     render(CreatorDebtsTable, {
       items: [
-        creatorDebt({
-          cause: {
-            type: 'dispute',
-            id: 'du_1',
-            amountCents: 1800,
-            disputeStatus: 'needs_response',
+        debtPerson({
+          stripe: {
+            availableCents: null,
+            pendingCents: null,
+            checkedAt: null,
+            live: false,
+          },
+          backCents: null,
+        }),
+      ],
+      onSettle: vi.fn(),
+    });
+    const balance = document.querySelector('[data-testid="stripe-balance"]');
+    expect(balance?.textContent?.trim()).toBe(m.support_debts_balance_unread());
+    expect(balance?.textContent).not.toContain('£');
+    expect(rowText()).toContain(m.support_debts_as_recorded());
+    expect(rowText()).toContain(m.support_debts_back_unknown());
+  });
+
+  test('a debt Stripe refused: Settle on its line, and a link to Owed to creators when a take-back paid it (D2)', () => {
+    const onSettle = vi.fn();
+    const debt = creatorDebt({
+      owedCreditId: '44444444-4444-4444-8444-444444444444',
+    });
+    render(CreatorDebtsTable, {
+      items: [refusedDebtPerson({ recordedDebts: [debt] })],
+      onSettle,
+    });
+    expect(rowText()).toContain(m.support_debts_state_needs_settling());
+    expect(rowText()).toContain(m.support_debts_clock_refused());
+    expect(
+      document.querySelector('[data-testid="stripe-balance"]')?.textContent
+    ).toContain(m.support_debts_balance_refused());
+    button(m.support_debts_show())?.click();
+    flushSync();
+    const line = document.querySelector('table [data-testid="debt-line"]');
+    expect(line?.getAttribute('data-held')).toBe('platform');
+    expect(line?.textContent).toContain(m.support_debts_held_platform());
+    expect(
+      line?.querySelector('a[href="/admin/queue?tab=owed"]')?.textContent
+    ).toBe(m.support_debts_count_link());
+    [...(line?.querySelectorAll<HTMLButtonElement>('button') ?? [])]
+      .find((b) => b.textContent?.includes(m.support_action_settle()))
+      ?.click();
+    expect(onSettle).toHaveBeenCalledWith(debt);
+  });
+
+  test('over £50 before 90 days: the invoice clock, in days', () => {
+    render(CreatorDebtsTable, {
+      items: [
+        debtPerson({
+          totalOwedCents: 6240,
+          stripeOwedCents: 6240,
+          clock: {
+            kind: 'invoice',
+            on: '2027-01-24T07:00:00.000Z',
+            daysLeft: 1,
           },
         }),
       ],
       onSettle: vi.fn(),
     });
-    expect(text()).toContain(m.support_debt_closes_if_won());
-    expect(text()).toContain(
-      m.support_debt_from_chargeback({
-        buyer: 'Grace Liu',
-        status: m.support_chargeback_word_open(),
+    expect(rowText()).toContain(
+      m.support_debts_clock_invoice({
+        date: '24 Jan 2027',
+        left: m.support_days_in_one(),
       })
     );
+  });
+});
+
+describe('Owed to creators table', () => {
+  const RUTH = {
+    userId: 'user-ruth',
+    name: 'Ruth Calder',
+    deleted: false,
+    role: 'creator' as const,
+  };
+  const rows = () => [
+    owedItem(),
+    owedItem({
+      creditId: 'c-count',
+      payee: RUTH,
+      amountCents: 450,
+      repayCents: 450,
+      stepAmountCents: 450,
+      settledAs: 'debt',
+      debt: { reviewId: 'r-1', owedCents: 450, resolution: null },
+      action: 'count_against_debt',
+    }),
+    owedItem({
+      creditId: 'c-check',
+      state: 'needs_check',
+      effect: 'unverified',
+      amountCents: null,
+      repayCents: null,
+      stepAmountCents: 1080,
+      stripeReversalId: null,
+      action: 'check',
+    }),
+    owedItem({
+      creditId: 'c-hand',
+      settledAs: 'done',
+      action: 'settle_by_hand',
+    }),
+  ];
+  const rowAt = (i: number) =>
+    document.querySelectorAll('[data-testid="owed-row"]')[i] as
+      | HTMLElement
+      | undefined;
+  const rowText = (i: number) =>
+    rowAt(i)?.textContent?.replace(/\s+/g, ' ') ?? '';
+  const mainAction = (i: number) =>
+    rowAt(i)?.querySelector<HTMLButtonElement>(
+      '[data-testid="owed-main-action"]'
+    );
+
+  test('every row: who, what, from what, what happened, one main action and Not owed (O1)', () => {
+    render(OwedToCreatorsTable, {
+      items: rows(),
+      onResolve: vi.fn(),
+      onCheck: vi.fn(),
+    });
+    expect(document.querySelectorAll('[data-testid="owed-row"]')).toHaveLength(
+      4
+    );
+
+    expect(rowText(0)).toContain('Maya Okafor');
+    expect(rowText(0)).toContain(
+      m.support_debt_from_chargeback({
+        buyer: 'Owen Clarke',
+        status: m.support_chargeback_word_won(),
+      })
+    );
+    expect(rowText(0)).toContain(m.support_owed_what_landed_dispute());
+    expect(rowText(0)).toContain('trr_1QkR8sLk2vTb41cC');
+    expect(mainAction(0)?.textContent).toContain(
+      m.support_repay_submit({ amount: '£9.00' })
+    );
+
+    expect(rowText(1)).toContain(m.support_owed_what_landed_debt());
+    expect(rowText(1)).toContain(
+      m.support_owed_debt_open({ name: 'Ruth Calder', amount: '£4.50' })
+    );
+    expect(mainAction(1)?.textContent).toContain(m.support_owed_action_count());
+
+    // Nothing is owed until Stripe says it took it: the share, "if taken".
+    expect(rowText(2)).toContain('£10.80');
+    expect(rowText(2)).toContain(m.support_owed_if_taken());
+    expect(rowText(2)).toContain(m.support_owed_what_unverified_note());
+    expect(mainAction(2)?.textContent).toContain(m.support_owed_action_check());
+
+    // Only a person can settle it: no main action, and it says why.
+    expect(mainAction(3)).toBeNull();
+    expect(rowText(3)).toContain(m.support_owed_settle_by_hand());
+
+    for (let i = 0; i < 4; i++) {
+      expect(rowText(i)).toContain(m.support_owed_action_not_owed());
+    }
+  });
+
+  test('the main action resolves or checks; Not owed resolves not_owed', () => {
+    const onResolve = vi.fn();
+    const onCheck = vi.fn();
+    const items = rows();
+    render(OwedToCreatorsTable, { items, onResolve, onCheck });
+    mainAction(0)?.click();
+    mainAction(1)?.click();
+    mainAction(2)?.click();
+    [...(rowAt(3)?.querySelectorAll<HTMLButtonElement>('button') ?? [])]
+      .find((b) => b.textContent?.includes(m.support_owed_action_not_owed()))
+      ?.click();
+    expect(onResolve.mock.calls).toEqual([
+      [items[0], 'repay'],
+      [items[1], 'count_against_debt'],
+      [items[3], 'not_owed'],
+    ]);
+    expect(onCheck).toHaveBeenCalledWith(items[2]);
+  });
+
+  test('while a check runs: its button is busy, and no other row button can be pressed', () => {
+    render(OwedToCreatorsTable, {
+      items: rows(),
+      onResolve: vi.fn(),
+      onCheck: vi.fn(),
+      checkingId: 'c-check',
+    });
+    expect(mainAction(2)?.getAttribute('aria-busy')).toBe('true');
+    expect(mainAction(0)?.disabled).toBe(true);
+    for (let i = 0; i < 4; i++) {
+      const notOwed = [
+        ...(rowAt(i)?.querySelectorAll<HTMLButtonElement>('button') ?? []),
+      ].find((b) => b.textContent?.includes(m.support_owed_action_not_owed()));
+      expect(notOwed?.disabled).toBe(true);
+    }
+  });
+});
+
+describe('Resolving money owed to a creator', () => {
+  function renderDialog(
+    action: 'repay' | 'count_against_debt' | 'not_owed',
+    item = owedItem()
+  ) {
+    const notices: SettleNotice[] = [];
+    render(ResolveCreditDialog, {
+      target: targetFromItem(item),
+      action,
+      open: true,
+      onFinished: (notice: SettleNotice) => notices.push(notice),
+    });
+    return notices;
+  }
+
+  const done = (
+    resolution: 'repaid' | 'debt_collected' | 'not_owed',
+    amountCents: number | null
+  ) => ({
+    outcome: 'done' as const,
+    result: {
+      creditId: owedItem().creditId,
+      resolution,
+      resolvedAt: NOW.toISOString(),
+      repayPayoutId: resolution === 'repaid' ? 'payout-repay-1' : null,
+      amountCents,
+      payeeName: 'Maya Okafor',
+    },
+  });
+
+  test('Re-pay names the person and the amount, shows what Stripe took, and needs no note (O2)', async () => {
+    const notices = renderDialog('repay');
+    expect(text()).toContain(
+      m.support_credit_repay_title({ name: 'Maya Okafor', amount: '£9.00' })
+    );
+    expect(text()).toContain(
+      m.support_credit_repay_taken({
+        name: 'Maya Okafor',
+        amount: '£9.00',
+        after: m.support_credit_after_dispute(),
+      })
+    );
+    expect(text()).toContain('trr_1QkR8sLk2vTb41cC');
+    expect(submit()?.textContent).toContain(
+      m.support_credit_repay_submit({ amount: '£9.00', name: 'Maya Okafor' })
+    );
+    resolveOwedToCreator.mockResolvedValue(done('repaid', 900));
+    submit()?.click();
+    await settled();
+    expect(resolveOwedToCreator).toHaveBeenCalledWith({
+      creditId: owedItem().creditId,
+      body: { action: 'repay', note: '' },
+    });
+    expect(notices).toEqual([
+      {
+        variant: 'success',
+        text: m.support_credit_repaid({ name: 'Maya Okafor', amount: '£9.00' }),
+      },
+    ]);
+  });
+
+  test('a cancelled unpaid share says it was never paid, not that Stripe took it', () => {
+    renderDialog(
+      'repay',
+      owedItem({
+        effect: 'slice_cancelled',
+        stripeReversalId: null,
+        amountCents: 1215,
+        repayCents: 1215,
+      })
+    );
+    expect(text()).toContain(
+      m.support_credit_repay_cancelled({
+        name: 'Maya Okafor',
+        amount: '£12.15',
+        after: m.support_credit_after_dispute(),
+      })
+    );
+    expect(text()).not.toContain('trr_');
+  });
+
+  test('Count against this debt settles the debt and re-pays nothing (O3)', async () => {
+    const notices = renderDialog(
+      'count_against_debt',
+      owedItem({
+        amountCents: 450,
+        repayCents: 450,
+        settledAs: 'debt',
+        action: 'count_against_debt',
+      })
+    );
+    expect(text()).toContain(
+      m.support_credit_count_title({ name: 'Maya Okafor', amount: '£4.50' })
+    );
+    resolveOwedToCreator.mockResolvedValue(done('debt_collected', 450));
+    submit()?.click();
+    await settled();
+    expect(notices[0]?.text).toBe(
+      m.support_credit_counted({ name: 'Maya Okafor', amount: '£4.50' })
+    );
+  });
+
+  test('Not owed needs a note: an empty one sends nothing (O4)', async () => {
+    const notices = renderDialog('not_owed');
+    expect(text()).toContain(
+      m.support_credit_not_owed_title({ name: 'Maya Okafor', amount: '£9.00' })
+    );
+    submit()?.click();
+    await settled();
+    expect(resolveOwedToCreator).not.toHaveBeenCalled();
+    expect(text()).toContain(m.support_note_missing());
+    resolveOwedToCreator.mockResolvedValue(done('not_owed', null));
+    typeNote('Paid back by bank transfer on 27 Oct.');
+    submit()?.click();
+    await settled();
+    expect(resolveOwedToCreator).toHaveBeenCalledWith({
+      creditId: owedItem().creditId,
+      body: {
+        action: 'not_owed',
+        note: 'Paid back by bank transfer on 27 Oct.',
+      },
+    });
+    expect(notices[0]?.text).toBe(
+      m.support_credit_not_owed_done({ name: 'Maya Okafor' })
+    );
+  });
+
+  test.each([
+    ['ALREADY_SETTLED', 409, m.support_settle_already()],
+    ['CREDIT_DEBT_STILL_OPEN', 409, m.support_credit_changed()],
+    ['CREDIT_DEBT_ALREADY_CLOSED', 409, m.support_credit_changed()],
+    ['CREDIT_NEEDS_CHECK', 422, m.support_credit_changed()],
+    ['CREDIT_SETTLE_BY_HAND', 422, m.support_credit_settle_by_hand()],
+  ] as const)('%s closes the dialog with a notice: nothing is paid twice', async (detailsCode, status, said) => {
+    resolveOwedToCreator.mockResolvedValue(failure({ status, detailsCode }));
+    const notices = renderDialog('repay');
+    submit()?.click();
+    await settled();
+    expect(notices).toEqual([{ variant: 'info', text: said }]);
+  });
+
+  test('another take-back still running on the slice: the dialog stays open and says so, and nothing reloads', async () => {
+    resolveOwedToCreator.mockResolvedValue(
+      failure({ status: 422, detailsCode: 'CREDIT_SIBLING_UNFINISHED' })
+    );
+    const notices = renderDialog(
+      'repay',
+      owedItem({
+        state: 'needs_person',
+        effect: 'unverified',
+        amountCents: null,
+        repayCents: 1215,
+        stripeReversalId: null,
+        action: 'decide',
+      })
+    );
+    typeNote('Stripe shows no transfer for this share.');
+    submit()?.click();
+    await settled();
+    // No notice: the list is not reloaded, and the row stays as it was.
+    expect(notices).toEqual([]);
+    const problem = document.querySelector<HTMLElement>(
+      '[data-testid="settle-problem"]'
+    );
+    expect(problem?.dataset.problem).toBe('sibling_unfinished');
+    expect(problem?.textContent).toContain(
+      m.support_credit_sibling_unfinished()
+    );
+  });
+
+  test('a failure keeps the dialog open and says so', async () => {
+    resolveOwedToCreator.mockResolvedValue(
+      failure({ status: 500, code: null })
+    );
+    const notices = renderDialog('repay');
+    submit()?.click();
+    await settled();
+    expect(notices).toEqual([]);
+    expect(
+      document.querySelector<HTMLElement>('[data-testid="settle-problem"]')
+        ?.dataset.problem
+    ).toBe('failed');
   });
 });
 
@@ -278,6 +666,7 @@ describe('Settling a failed refund', () => {
         ],
         accessRestored: true,
         accessNotRestoredReason: null,
+        systemSettled: [],
       },
     });
     typeNote('Daniel asked to keep the programme instead.');
@@ -308,6 +697,7 @@ describe('Settling a failed refund', () => {
         ],
         accessRestored: true,
         accessNotRestoredReason: null,
+        systemSettled: [],
       },
     });
     typeNote('Kept the programme.');
@@ -360,6 +750,34 @@ describe('Settling a failed refund', () => {
     ).toBe(expected === 'blocked');
   });
 
+  test('re-paid after the system settled a stuck take-back: the notice says so, last (F2)', async () => {
+    resolveFailedRefund.mockResolvedValue({
+      outcome: 'done',
+      result: {
+        refundId: failedRefund().refundId,
+        resolution: 'creators_repaid',
+        resolvedAt: NOW.toISOString(),
+        repaid: [
+          { payoutId: 'p1', payeeName: 'Rowan Ellis', amountCents: 1944 },
+        ],
+        accessRestored: true,
+        accessNotRestoredReason: null,
+        systemSettled: [
+          { payoutId: 'p1', payeeName: 'Rowan Ellis', decision: 'took_share' },
+        ],
+      },
+    });
+    const notices = renderDialog('creators_repaid');
+    typeNote('Kept the programme.');
+    submit()?.click();
+    await settled();
+    expect(
+      notices[0]?.text.endsWith(
+        m.support_settled_system_one({ name: 'Rowan Ellis' })
+      )
+    ).toBe(true);
+  });
+
   test('"refunded another way" needs no note', async () => {
     resolveFailedRefund.mockResolvedValue({
       outcome: 'done',
@@ -370,6 +788,7 @@ describe('Settling a failed refund', () => {
         repaid: [],
         accessRestored: false,
         accessNotRestoredReason: null,
+        systemSettled: [],
       },
     });
     const notices = renderDialog('refunded_elsewhere');
@@ -484,6 +903,7 @@ describe('Settling a failed refund', () => {
         ],
         accessRestored: false,
         accessNotRestoredReason,
+        systemSettled: [],
       },
     });
     const notices = renderDialog('creators_repaid');
@@ -716,5 +1136,227 @@ describe('The charges found', () => {
     const row = document.querySelector('[data-testid="charge-row"]');
     expect(row?.textContent).toContain(m.support_deleted());
     expect(row?.textContent).toContain(m.support_chargeback_lost());
+  });
+});
+
+describe('A row the ledger cannot attribute: check in Stripe, then decide (MED-3)', () => {
+  const decideRow = () =>
+    owedItem({
+      creditId: 'c-decide',
+      state: 'needs_person',
+      effect: 'unverified',
+      amountCents: null,
+      repayCents: 1215,
+      // The step's whole share; Re-pay pays it less its done reductions.
+      stepAmountCents: 1500,
+      stripeReversalId: null,
+      action: 'decide',
+    });
+
+  test('the row: the share it would pay "if it is owed", why, and Re-pay beside Not owed', () => {
+    const onResolve = vi.fn();
+    render(OwedToCreatorsTable, {
+      items: [decideRow()],
+      onResolve,
+      onCheck: vi.fn(),
+    });
+    const row = document.querySelector('[data-testid="owed-row"]');
+    const said = row?.textContent?.replace(/\s+/g, ' ') ?? '';
+    expect(said).toContain('£12.15');
+    expect(said).not.toContain('£15.00');
+    expect(said).toContain(m.support_owed_if_owed());
+    expect(said).toContain(m.support_owed_what_needs_person());
+    expect(said).toContain(m.support_owed_what_needs_person_note());
+    const main = row?.querySelector<HTMLButtonElement>(
+      '[data-testid="owed-main-action"]'
+    );
+    expect(main?.textContent).toContain(
+      m.support_repay_submit({ amount: '£12.15' })
+    );
+    main?.click();
+    expect(onResolve).toHaveBeenCalledWith(decideRow(), 'repay');
+  });
+
+  test('Re-pay needs a note of what was seen in Stripe: an empty one sends nothing', async () => {
+    const notices: SettleNotice[] = [];
+    render(ResolveCreditDialog, {
+      target: targetFromItem(decideRow()),
+      action: 'repay',
+      open: true,
+      onFinished: (notice: SettleNotice) => notices.push(notice),
+    });
+    expect(text()).toContain(m.support_credit_note_label_decide());
+    expect(text()).toContain(
+      m.support_credit_decide_body({ name: 'Maya Okafor', amount: '£12.15' })
+    );
+    submit()?.click();
+    await settled();
+    expect(resolveOwedToCreator).not.toHaveBeenCalled();
+    expect(text()).toContain(m.support_note_missing());
+
+    resolveOwedToCreator.mockResolvedValue({
+      outcome: 'done',
+      result: {
+        creditId: 'c-decide',
+        resolution: 'repaid',
+        resolvedAt: NOW.toISOString(),
+        repayPayoutId: 'payout-repay-2',
+        amountCents: 1215,
+        payeeName: 'Maya Okafor',
+      },
+    });
+    typeNote('Stripe shows no transfer for this share.');
+    submit()?.click();
+    await settled();
+    expect(resolveOwedToCreator).toHaveBeenCalledWith({
+      creditId: 'c-decide',
+      body: {
+        action: 'repay',
+        note: 'Stripe shows no transfer for this share.',
+      },
+    });
+    expect(notices[0]?.text).toBe(
+      m.support_credit_repaid({ name: 'Maya Okafor', amount: '£12.15' })
+    );
+  });
+
+  test('the server asking for the note keeps the dialog open on it', async () => {
+    resolveOwedToCreator.mockResolvedValue(
+      failure({ status: 422, detailsCode: 'CREDIT_NOTE_REQUIRED' })
+    );
+    const notices: SettleNotice[] = [];
+    render(ResolveCreditDialog, {
+      target: targetFromItem(decideRow()),
+      action: 'repay',
+      open: true,
+      onFinished: (notice: SettleNotice) => notices.push(notice),
+    });
+    typeNote(' ');
+    // A blank note is caught before sending; a note the server still refuses
+    // (it trims) is shown the same way.
+    typeNote('x');
+    submit()?.click();
+    await settled();
+    expect(notices).toEqual([]);
+    expect(text()).toContain(m.support_note_missing());
+  });
+});
+
+describe('A debt over £50 Stripe collected from the platform (AMENDMENT 2)', () => {
+  test('it stays To invoice, says what Stripe collected and when, and has no lines to open', () => {
+    render(CreatorDebtsTable, {
+      items: [
+        debtPerson({
+          stripe: {
+            availableCents: 0,
+            pendingCents: 0,
+            checkedAt: '2026-10-24T09:40:00.000Z',
+            live: true,
+          },
+          stripeOwedCents: 0,
+          negativeSince: null,
+          backCents: null,
+          stripeHeld: [],
+          collectedCents: 6240,
+          collectedAt: '2027-04-24T07:00:00.000Z',
+          totalOwedCents: 6240,
+          state: 'to_invoice',
+          clock: null,
+          oldestAt: '2027-04-24T07:00:00.000Z',
+        }),
+      ],
+      onSettle: vi.fn(),
+    });
+    const row = document.querySelector('[data-testid="creator-debt-person"]');
+    const said = row?.textContent?.replace(/\s+/g, ' ') ?? '';
+    expect(said).toContain(m.support_debts_state_to_invoice());
+    expect(said).toContain(
+      m.support_debts_collected({ amount: '£62.40', date: '24 Apr 2027' })
+    );
+    expect(said).toContain('£62.40');
+    expect(button(m.support_debts_show())).toBeUndefined();
+  });
+});
+
+describe('CONTRACT CHANGE 3: collected and below zero again, one row', () => {
+  test("both the collected line and the new balance's clock, on one row, with its debts to open", () => {
+    render(CreatorDebtsTable, {
+      items: [
+        debtPerson({
+          collectedCents: 6240,
+          collectedAt: '2027-04-24T07:00:00.000Z',
+          totalOwedCents: 7080,
+          state: 'to_invoice',
+        }),
+      ],
+      onSettle: vi.fn(),
+    });
+    const rows = document.querySelectorAll(
+      '[data-testid="creator-debt-person"]'
+    );
+    expect(rows).toHaveLength(1);
+    const said = rows[0]?.textContent?.replace(/\s+/g, ' ') ?? '';
+    expect(said).toContain(m.support_debts_state_to_invoice());
+    expect(said).toContain('£70.80');
+    expect(said).toContain(
+      m.support_debts_collected({ amount: '£62.40', date: '24 Apr 2027' })
+    );
+    // The new negative balance keeps its own Q4 clock and Stripe figure.
+    expect(said).toContain(
+      m.support_debts_clock_writes_off({
+        date: '24 Apr 2027',
+        left: m.support_days_in({ count: '178' }),
+      })
+    );
+    expect(said).toContain('−£8.40');
+    expect(button(m.support_debts_show())).toBeDefined();
+  });
+});
+
+describe('CONTRACT CHANGE 4: the row shows the action the server sends', () => {
+  test('a needs-person row whose sibling step is done offers no Re-pay: settle it by hand, then Not owed', () => {
+    render(OwedToCreatorsTable, {
+      items: [
+        owedItem({
+          creditId: 'c-person-hand',
+          state: 'needs_person',
+          effect: 'unverified',
+          amountCents: null,
+          repayCents: 1215,
+          stripeReversalId: null,
+          action: 'settle_by_hand',
+        }),
+      ],
+      onResolve: vi.fn(),
+      onCheck: vi.fn(),
+    });
+    const row = document.querySelector('[data-testid="owed-row"]');
+    expect(row?.querySelector('[data-testid="owed-main-action"]')).toBeNull();
+    expect(row?.textContent).toContain(m.support_owed_settle_by_hand());
+    expect(row?.textContent).toContain(m.support_owed_action_not_owed());
+  });
+
+  test('a needs-check row offers Check Stripe again, whatever its effect', () => {
+    render(OwedToCreatorsTable, {
+      items: [
+        owedItem({
+          creditId: 'c-check-cancelled',
+          state: 'needs_check',
+          effect: 'slice_cancelled',
+          amountCents: null,
+          repayCents: null,
+          stepAmountCents: 1215,
+          stripeReversalId: null,
+          action: 'check',
+        }),
+      ],
+      onResolve: vi.fn(),
+      onCheck: vi.fn(),
+    });
+    const row = document.querySelector('[data-testid="owed-row"]');
+    expect(
+      row?.querySelector('[data-testid="owed-main-action"]')?.textContent
+    ).toContain(m.support_owed_action_check());
+    expect(row?.textContent).toContain(m.support_owed_what_unverified());
   });
 });

@@ -12,17 +12,22 @@ import type {
   ChargebackState,
   ChargeSummary,
   HistoryOutcome,
+  PayeeRole,
+  QueueCause,
   RefundRequester,
   Slice,
   SupportChargeKind,
   SupportPerson,
   SupportRefundWindow,
+  SystemDecision,
 } from '@codex/admin';
 import {
   DISPUTE_CHARGEBACK_OPEN_STATUSES,
+  DISPUTE_CLOSED_STATUSES,
   DISPUTE_INQUIRY_STATUSES,
 } from '@codex/constants';
 import { formatShareBps } from '$lib/components/studio/ownership/ownership-view';
+import { formatPrice } from '$lib/utils/format';
 import * as m from '$paraglide/messages';
 
 export type BadgeVariant = 'neutral' | 'success' | 'warning' | 'error' | 'info';
@@ -164,6 +169,103 @@ export function chargebackWord(status: string): string {
   if (state === 'won') return m.support_chargeback_word_won();
   if (state === 'lost') return m.support_chargeback_word_lost();
   return humanise(status).toLowerCase();
+}
+
+type SettledWords = {
+  one: (args: { name: string }) => string;
+  many: (args: { names: string }) => string;
+  plain: () => string;
+  some: () => string;
+};
+
+function settledSentence(
+  rows: ReadonlyArray<{ payeeName: string | null }>,
+  words: SettledWords
+): string | null {
+  if (rows.length === 0) return null;
+  const names = rows.flatMap((row) => (row.payeeName ? [row.payeeName] : []));
+  if (rows.length === 1) {
+    return names.length === 1
+      ? words.one({ name: names[0] ?? '' })
+      : words.plain();
+  }
+  return names.length === rows.length
+    ? words.many({ names: formatList(names) })
+    : words.some();
+}
+
+/**
+ * The settle notice's last sentences when the system settled a stranded
+ * take-back first (Q6, Codex-2hxff.71); null when it settled none. The two
+ * decisions read apart: a share the take-back took is paid back with this
+ * settlement; a payee who kept a transfer is paid nothing, and support
+ * reconciles the slice by hand.
+ */
+export function systemSettledSentence(
+  settled: ReadonlyArray<{ payeeName: string | null; decision: SystemDecision }>
+): string | null {
+  const took = settledSentence(
+    settled.filter((row) => row.decision === 'took_share'),
+    {
+      one: m.support_settled_system_one,
+      many: m.support_settled_system_many,
+      plain: m.support_settled_system_plain,
+      some: m.support_settled_system_some,
+    }
+  );
+  const kept = settledSentence(
+    settled.filter((row) => row.decision === 'payee_kept'),
+    {
+      one: m.support_settled_kept_one,
+      many: m.support_settled_kept_many,
+      plain: m.support_settled_kept_plain,
+      some: m.support_settled_kept_some,
+    }
+  );
+  if (took && kept)
+    return m.support_sentences_two({ first: took, second: kept });
+  return took ?? kept;
+}
+
+/**
+ * A queue row's "From" line: the buyer, and the refund or chargeback that
+ * took the share ("Grace Liu · chargeback, won").
+ */
+export function causeLine(
+  buyerName: string | null,
+  cause: QueueCause | null
+): string {
+  const buyer = buyerName ?? m.support_unknown_buyer();
+  if (cause?.type === 'dispute') {
+    const status = cause.disputeStatus
+      ? chargebackWord(cause.disputeStatus)
+      : '';
+    return m.support_debt_from_chargeback({ buyer, status });
+  }
+  if (cause?.amountCents != null) {
+    return m.support_debt_from_refund({
+      buyer,
+      amount: formatPrice(cause.amountCents),
+    });
+  }
+  return m.support_debt_from_refund_plain({ buyer });
+}
+
+/** A chargeback still open: winning it closes the debt by itself (Q7). */
+export function closesIfWon(cause: QueueCause | null): boolean {
+  return (
+    cause?.type === 'dispute' &&
+    !(DISPUTE_CLOSED_STATUSES as readonly string[]).includes(
+      cause.disputeStatus ?? 'won'
+    )
+  );
+}
+
+/** A payee's role on a queue row. */
+export function roleLabel(role: PayeeRole): string {
+  return role === 'organisation_owner'
+    ? m.support_role_owner()
+    : m.support_role_creator();
 }
 
 /** Stripe's refund status, as the refunds card shows it. */
@@ -362,6 +464,11 @@ export function historyOutcome(
       return { label: m.support_history_retrying(), variant: 'warning' };
     case 'refused':
       return { label: m.support_history_refused(), variant: 'error' };
+    case 'taken_after_settled':
+      return {
+        label: m.support_history_taken_after_settled(),
+        variant: 'warning',
+      };
   }
 }
 

@@ -405,6 +405,7 @@ subscriptions.get(
           sourceType: ctx.input.query.source,
           fromDate: ctx.input.query.fromDate,
           toDate: ctx.input.query.toDate,
+          transferredFrom: ctx.input.query.transferredFrom,
         }
       );
       return new PaginatedResult(result.items, result.pagination);

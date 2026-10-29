@@ -76,10 +76,194 @@ Owner decisions Q1 and Q2 (SEC-01).
 
 Money reaches a payee's **Stripe balance** when their transfer is made, but moves
 from there to their **bank** only after the **14-day refund window** (owner
-decision 2026-10-13, "Hold for the window"). That way a refund within the window
-can always be clawed back from the Stripe balance. The platform sets every
-connected account's payout schedule; creators cannot change it — **gap**:
-`Codex-2hxff.29` (today Stripe's default schedule applies).
+decision 2026-10-13, "Hold for the window"; 2026-10-27, Q1: manual payouts and a
+daily payout job; `Codex-2hxff.29`). That way a refund within the window can
+always be clawed back from the Stripe balance. The platform sets every connected
+account's payout schedule; creators cannot change it.
+
+- **Manual payouts, bank debit off.** Every connected account has
+  `settings.payouts.schedule.interval: 'manual'` and
+  `debit_negative_balances: false`, set at `accounts.create`
+  (`connect-account-service.ts`) and, for older accounts, by the backfill below.
+  Stripe's own default on our accounts is daily with a 7-day delay, and bank debit
+  ON (test-mode probe, 2026-10-27). `delay_days` cannot do the hold: it applies
+  only to `on_behalf_of` and direct charges, never to our `source_transaction`
+  transfers. Bank debit is off because Stripe holds a negative balance and takes
+  it from later earnings (`Codex-2hxff.30`, Q2), never from the creator's bank.
+- **The daily bank payout** (`runBankPayouts`, `packages/payments/src/bank-payouts.ts`)
+  runs inside the hourly ecom-api cron, on the one run whose London hour is 8
+  (08:00 UTC in winter, 07:00 UTC in summer), last in the wake: a reversal the
+  clawback retry made that hour has landed, and an old sale the drain released
+  goes the same morning. No new cron, no new database wake. It takes the accounts
+  flagged in `connect_balances` (switched), least recently checked first and
+  any on a failing streak last, at most 1,000 a run (`BANK_PAYOUT_ACCOUNT_LIMIT`,
+  sized to the invocation's 10,000-subrequest budget, which the wake's other
+  sweeps share: the arithmetic is beside the constant). Reaching it is an error
+  alert with the flagged count, and the rest go first the next morning. If
+  Cloudflare's "Too many subrequests" comes first (many transfer pages, say),
+  the run stops at it with one error alert naming the accounts done and left,
+  and the rest go first the next morning too. Four at a time, for each:
+  1. reads the balance on the account and records it (available, pending, and a
+     negative episode: see [Reversals](#reversals)). This includes a current
+     account Stripe has payouts off on: its balance can still go below zero.
+     Nothing is paid while the account's total available is zero or below,
+     whatever one pot holds, or while payouts are off (a replaced account is
+     still paid, S5's 90 days);
+  2. lists the platform's transfers to it created in the last 14 × 24 h, each
+     with its charge. `young` is the net (amount less reversed) of the transfers
+     whose **charge** is under 14 × 24 h old. The list stops at 10,000 transfers:
+     an account with more is not paid that day, and support gets an error alert
+     with its `stripeAccountId`;
+  3. pays out `available − held`, where `held = young − pending` (pending money
+     has not settled, and settlement is always inside 14 days, so it is all
+     young). If pending is more than young, it holds all of `young` and warns:
+     old money can go a day late, young money never goes early;
+  4. calls `payouts.create` with the key
+     `bank_payout_<acct>_<London date>_<source type>`.
+
+  **Each pot separately** (owner, HIGH-1: "Pay each pot separately"). Stripe
+  keeps an account's balance in one pot per source type and a payout draws on
+  one (`source_type`; the default is `card`), so steps 1 to 4 run per pot: each
+  pot's own available and pending, against the young transfers that landed in
+  it (`Transfer.source_type`; none given is `card`), one payout per pot with
+  money to pay. Past the total's gate (step 1), a debt in one pot is not netted
+  against another's payout: Stripe recovers each from its own later earnings. In GBP there is **one pot today**: Stripe's
+  `card` covers cards and non-legacy bank debits, Bacs included; `bank_account`
+  is legacy US ACH and `fpx` Malaysian (test-mode probe, 2026-10-28: the
+  platform's whole GBP balance is `card`). Paying per pot is the guard that a
+  second pot can never strand money: a balance with no source-type breakdown is
+  all `card`, and even a pot this code has no name for is asked for, so a
+  refusal reaches support through the 3-day alert. Studio's next payout, the
+  covered chargeback and `bankOn` read the account's totals, which is exact
+  with one pot.
+
+  A transfer is judged by its sale's charge, never by its own time: a drain on
+  day 40 of a day-1 sale goes at the next run. A re-pay (a won chargeback's, or
+  support's Re-pay) has no `source_transaction`, is never young, and goes at the
+  next run after it.
+- **When Stripe says no.** Each pot's payout is judged on its own.
+  `balance_insufficient` skips that pot for the day and is never retried in the
+  same run; it is also recorded as a refusal, since Stripe holding money our
+  figures say is there means money is stuck. `idempotency_error` means the
+  day's payout already exists. A refusal (including `balance_insufficient`) is
+  recorded on the account (`last_error_code`, `failing_since`), even when
+  another pot was paid that morning; once Stripe has refused an account for 3
+  days (London dates), one error alert goes to support, naming the pot's
+  source type. A balance read Stripe refuses (access lost) counts into the
+  same streak and alert, and sends the account to the back of the order, since
+  a read that fails writes no `checked_at`; an outage or a timeout doesn't.
+  Deauthorizing the platform (`account.application.deauthorized`) takes the
+  account off the job. A day that ends the
+  streak (nothing to pay, the balance below zero, payouts off) clears it, so a
+  later refusal starts a new streak and can alert again. An outage or a timeout is
+  a warning: the payout may exist, and the next day's balance read decides. A
+  payout Stripe made whose database write then fails is logged as an error with
+  the payout's id, and counted as paid.
+- **What creators see.** On Studio → Earnings each paid sale says "Goes to your
+  bank on {date}" (`bankOn`: the first 08:00 London run 14 × 24 h after the sale
+  and strictly after its transfer), and the account card shows the next bank
+  payout and any chargeback the balance is covering (`GET /connect/me/balance`,
+  cached 10 minutes). The `payout-released` email names the bank date or
+  dates. Only the cron's own drain runs ahead of the bank payout in the 08:00
+  wake, so only its email names that morning's payout; any other drain
+  (`account.updated`, `/connect/me/sync`) may transfer after the job read the
+  account, so it names the next. Studio reads the date later from the row,
+  which can't say which drain paid it, so its date is never early: a sale the
+  cron's drain paid at 08:00 shows the next morning. Nothing goes to the bank
+  while the balance is below zero, so a date that fell inside the last episode
+  that ended (`cleared_since` up to `cleared_at`) moves to the run that saw it
+  clear: that run records its snapshot and then pays what is above zero.
+  **Known limits:** only the last episode is kept, so a date inside an earlier
+  one still shows the day it would have gone; and a payee with a replaced
+  account has the latest episode of either account applied to all their rows.
+- **What went towards a take-back, sale by sale** (amendment 3, owner
+  2026-10-29: "Exact amounts, oldest first"). Money leaves a Stripe balance
+  oldest first, by our bank payout or by covering a take-back, so
+  `towards = (what should be in Stripe) − (what is)`, clamped to [0, what
+  should be], is shared over the unsent sales oldest first (sale date, then
+  id); each sale's share is at most its net, and the rest goes to the bank.
+  One function, `towardsTakeBack` (`packages/payments/src/bank-payouts.ts`),
+  serves Studio's covering card, the Earnings rows and Org Payouts, from the
+  person's own ledger rows (`ledgerSalesSince`: every organisation and their
+  own, paid or since reversed). Each sale is valued at the reading T is from:
+  what the drain sent (the amount less the reductions made before sending,
+  `pendingReductionsFor`, the drain's own definition) less the take-backs that
+  moved money by then. So a refund after an episode cleared leaves that
+  episode's figures as they were.
+
+  | Case | Should be in Stripe | Is in Stripe |
+  |---|---|---|
+  | No episode (the covering card) | the sales no run has paid yet | live available + pending |
+  | Below zero | the sales due from `negative_since` (or the first run that pays nothing) | live available + pending, below zero: all of it went towards |
+  | The last episode that ended | the sales due from `cleared_since`, sent by the clearing run's reading, valued then | `cleared_balance_cents`, written by the clearing |
+
+  The clearing run's reading includes its wake's earlier steps: the dispute
+  reconcile and the cron's own drain run before the job reads any account
+  (`runReadingEnd`, the run plus 15 minutes).
+
+  A sale counts as unsent only until the earliest run that could have paid it
+  (a transfer in the 08:00 wake may have gone that morning), so `towards` is
+  never overstated. Like the job, it judges a sale by its charge's time:
+  - The young transfers Studio already lists reach 16 days back, so they give
+    it for the sales due at the next run.
+  - A row due inside an episode by its own date, sent before the episode, is
+    asked for in one list around its transfer (`chargeTimesWanted`). A failed
+    read is a 503, as the balance's is.
+  - Where Stripe doesn't have it, the row's date stands in. That date is
+    never earlier than the charge.
+
+  `GET /connect/me/balance` carries it as `towards.live` and
+  `towards.lastEpisode`, per payout id, inside its 10-minute cache. Each also
+  carries `causeType`, so a row can say "the chargeback" or "the refund"
+  (`towardsKind`). It is the one kind among the take-backs that moved the
+  person's money in its window, which runs up to its reading. Every window
+  starts as far back as its unsent sales were sent (16 days before its first
+  run), or at the episode's start if that is earlier, because a take-back
+  before the episode can have used their money. It is null when the
+  take-backs are mixed, when none is on record, or when there are 20 or
+  more. A window wider than it needs to be can make it null, but never the
+  wrong kind.
+
+  Worst case per 10-minute cache miss:
+  - Stripe: the balance read; the main transfer list (16 days, paged); and
+    at most two bounded lists, each about 17 days, for the running episode
+    and the last ended one. Only rows needing a charge time cause a bounded
+    list.
+  - Database: the `connect_balances` row; the ledger's three queries (rows,
+    reductions, steps); and up to three take-back queries (the below-zero
+    causes, and `causeType` for live and for the last episode).
+
+  **Known limits:**
+  - Episodes before the last one aren't shared, and keep their stored bank
+    days.
+  - The rows don't record which account was paid, so "should be in Stripe"
+    is scoped to the current account by time only. Only rows sent after that
+    account's switch to manual payouts count (`connect_balances` is per
+    account, and a new account is created on manual payouts), which leaves out
+    what an old account was paid. The exception is a transfer an earlier
+    attempt made to a replaced account but recorded only after the switch
+    (Codex-2hxff.47). It counts against the current balance, so it can read as
+    having gone towards a take-back.
+  - A transfer or take-back from outside the cron, landing in the clearing
+    wake after the job read the account, is counted as in the reading.
+- **Creators cannot change it.** In the Stripe Dashboard (Connect → Express
+  dashboard settings) payout-schedule editing, self-serve manual payouts and
+  Instant Payouts are off: an owner action, which no API can check
+  ([operations.md](operations.md)). `account.updated` flags an account in
+  `connect_balances` once Stripe reports both settings and the live account,
+  asked again, does not say otherwise (if Stripe can't be asked, the event is
+  trusted: an unflagged manual account would never be paid). If a flagged
+  account is later reported otherwise (an edit in the Dashboard), it leaves the job and
+  support gets an error alert, but only once the live account, asked again, still
+  says so: a late or replayed event changes nothing. The heal is in
+  [operations.md](operations.md#payout-schedule-backfill).
+- **Switching existing accounts** is
+  `packages/database/scripts/backfill-payout-schedule.ts`: a dry run by default,
+  then `--apply --confirm <checksum>` (and `--live` in production), only with
+  the owner's OK. The runbook is in [operations.md](operations.md). At the switch,
+  money from the last 14 days that Stripe's old schedule would have paid that week
+  waits until its day 14. Earnings says so for 14 days after the switch (owner,
+  OQ5).
 
 ---
 
@@ -480,10 +664,59 @@ window, or for another code, are left for review one by one.
 Refunds and disputes reverse paid slices in proportion and adjust pending ones;
 see [refunds](purchases.md#refunds) and [disputes](purchases.md#disputes). What
 each refund did to each slice is one `payout_reversals` row
-([design](refund-reversal-record.md)); the `payouts` row is never rewritten. When
-a payee's balance cannot cover a reversal, a `refund_reviews` row records the
-debt, and it is deducted from their next payouts until cleared — they are told,
-and the debt and each deduction show in their earnings.
+([design](refund-reversal-record.md)); the `payouts` row is never rewritten.
+
+**When a payee's balance cannot cover a take-back, Stripe holds the debt**
+(owner decision 2026-10-27, Q2; `Codex-2hxff.30`). Stripe takes the reversal
+anyway and the payee's Stripe balance goes below zero. Stripe recovers it from
+their next earnings by itself, and bank payouts pause until the balance is back
+above zero (Stripe blocks them, and so does the daily payout job). Bank debit is
+off, so Stripe never takes it from their bank. Nothing in our ledger nets it:
+the take-back is a `done` step like any other.
+
+- **The daily payout job records each episode** in `connect_balances`: the first
+  morning it sees the balance below zero (`negative_since`), the last morning
+  before that it was at or above zero (`negative_after`; the take-back lies
+  between), and how it ended (`cleared_at`, `cleared_reason`). An episode of 180
+  days or more (London dates, so a clock change cannot move it) is read as Stripe
+  collecting it from the platform
+  (`stripe_collected`), otherwise as `recovered`; that only changes an email's
+  wording. The payee is emailed when it goes below zero and when it clears
+  (notifications-api's daily money sweep), and Studio → Earnings shows a live card.
+- **Q4, on what is owed NOW** (owner decisions 2026-10-13 and 2026-10-27; studio
+  S1, option A), on the person's total across organisations:
+
+  | What they owe | What happens |
+  |---|---|
+  | **£50 or less** | Written off when Stripe collects it from the platform, 180 days below zero |
+  | **More than £50** | "To invoice" 90 days after it first went below zero |
+
+  If Stripe collects a debt over £50 from the platform first (180 days below
+  zero), it is still support's to invoice: the clearing write adds it to
+  `collected_owed_cents` (keeping the first `collected_at`) and support gets an
+  error alert, `bank_payout.debt_collected`, with the `stripeAccountId` and the
+  amount. A later episode never touches those two columns; only the P6
+  follow-up clears them (amendment 2, 2026-10-29).
+
+  The invoice itself (and the top-up transfer that brings their balance back to
+  zero once it is paid, so Stripe does not also take it from their earnings)
+  ships after the lawyer's P6 answer, as a follow-up: support will send it with
+  one button (OQ1). Until then "To invoice" is a state on the Creator debts tab,
+  counted in the Support badge.
+- **A take-back Stripe REFUSES** (`insufficient_funds` or `balance_insufficient`,
+  which the probe has not seen on our platform) still writes a `refund_reviews`
+  debt, kept for that case. It never moved the balance, so the two never
+  overlap. Support settles it by hand.
+- **Support sees both in Admin → Queue → Creator debts, one row per person**
+  (`Codex-2hxff.73`): the live Stripe balance (read for the page, 5 s each, the
+  morning snapshot when Stripe can't be read), what has come back so far, the
+  take-backs that took them below zero, any refused debts, and the Q4 clock. The
+  badge counts only the people who need a person: a refused debt, or "To
+  invoice" (OQ2). A balance Stripe is recovering by itself is listed, not counted.
+  A known limit: the badge reads the 08:00 snapshot and the tab the live
+  balance, so for someone owing close to £50 the two can disagree for up to a
+  day. When Stripe refuses admin-api's key the balance (no Balance: Read on
+  connected accounts), the tab shows the snapshot and raises an error alert.
 
 Each step of a clawback is claimed under a lease, so one delivery works on it
 at a time. A delivery that outlives its lease never changes a step another path
@@ -492,27 +725,25 @@ has settled since: support's re-pay of a failed refund, or a won dispute's re-pa
 `Codex-2hxff.72`). If its reversal lands anyway, the payee has lost money nothing
 will re-pay. The reversal's id is recorded on the step, and nothing else on it
 changes. One error alert, with an `errorId`, names the payee, the amount, and the
-refund or dispute, for support to re-pay the payee from the admin Refunds screen.
-Nothing is re-paid automatically ([design](refund-reversal-record.md), §4 step 7).
-An unpaid slice cancelled under a settled step is alerted the same way, unless a
-transfer had gone out for it that Stripe refused to reverse: the payee still
-holds that transfer, so its alert says NOT to re-pay, and the slice is
-reconciled instead. When Stripe cannot confirm what went out, the alert says to
-check Stripe first, and what each answer means for the payee. **Gap:** that
-screen has no state for these yet. Until batch
-B's support view (`Codex-2hxff.73`), support finds them with the two queries in
-the design and the alerts.
+refund or dispute, and the case is queued for support as a `payee_credits` row:
+every late case, the unconfirmed ones as "Check Stripe again" (Q10, OQ3).
+Support settles it in Admin → Queue → **Owed to creators**, or on the charge page
+("Taken after it was settled. £X owed back to {name}"): Re-pay what Stripe
+actually took (a pending re-pay payout the next run pays, Q9), Count it against
+the share's own open debt when Stripe took exactly that (Q11), or Not owed with a
+note. Nothing is re-paid automatically, and a credit is never netted against
+another debt ([design](refund-reversal-record.md), §4 step 7). An unpaid slice
+cancelled under a settled step is queued the same way, unless a transfer had
+gone out for it that Stripe refused to reverse: the payee still holds that
+transfer, so its alert says NOT to re-pay, the slice is reconciled instead, and
+its row is born closed as not owed.
 
-If it is never recovered (owner decisions 2026-10-13: "Write off after 12 months
-(Recommended)", then a cap of "£50 (Recommended)" with "All of it, after 90 days
-(Recommended)"):
-
-| A payee's total open debt | What happens |
-|---|---|
-| **£50 or less** | Written off by the platform once they have earned nothing for 12 months |
-| **More than £50** | Invoiced to them in full if not recovered from earnings within 90 days |
-
-— **gap**: `Codex-2hxff.30`.
+A clawback step whose delivery died after it may have cancelled its slice is
+settled by the system, on refunds and disputes alike (owner decision Q6,
+`Codex-2hxff.71`; [design](refund-reversal-record.md), §8 rule 2), including a
+slice the drain marked `reversed` after the cancel (`Codex-2hxff.88`). A case the
+ledger cannot attribute is "Check in Stripe, then decide" in Owed to creators:
+support re-pays or marks it not owed, with a note saying what Stripe showed.
 
 ## Earnings screens
 

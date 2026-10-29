@@ -140,6 +140,14 @@ describe('ConnectAccountService', () => {
             card_payments: { requested: true },
             transfers: { requested: true },
           },
+          // Manual payouts, paid by the daily job after the 14-day window
+          // (Codex-2hxff.29), and never a debit of the creator's bank (.30).
+          settings: {
+            payouts: {
+              schedule: { interval: 'manual' },
+              debit_negative_balances: false,
+            },
+          },
           // Onboarding is userId-centric (Codex-69t7c.2) — no org metadata;
           // an org's account is its owner's, resolved at each sale.
           metadata: {

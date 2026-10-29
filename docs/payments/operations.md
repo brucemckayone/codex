@@ -102,7 +102,7 @@ There is no event-id table; safety on redelivery comes from unique keys
 | Name | Kind | Notes |
 |---|---|---|
 | `DATABASE_URL` | secret | |
-| `STRIPE_SECRET_KEY` | secret | Also needed by organization-api, which creates tier Products and Prices |
+| `STRIPE_SECRET_KEY` | secret | Also needed by organization-api, which creates tier Products and Prices. The daily bank payout (`Codex-2hxff.29`) needs, on connected accounts, Balance read, Payouts write and Transfers read: list them if ecom-api ever moves to a restricted key |
 | `STRIPE_WEBHOOK_SECRET_BOOKING`, `_PAYMENT`, `_DISPUTE`, `_SUBSCRIPTION`, `_CONNECT` | secret | One per endpoint |
 | `STRIPE_WEBHOOK_SECRET_CUSTOMER` | secret | To be removed — **gap**: `Codex-2hxff.24` |
 | `STRIPE_PORTAL_CONFIGURATION_ID` | secret | The locked billing-portal configuration — `bpc_1UQ9QH7wyGmo4sh6hXwkCS1s` in the sandbox. Optional at boot; without it the billing portal refuses to open. The deploy uploads it only when it is set and is a `bpc_` id; otherwise the run warns (unset) or errors (wrong shape) and keeps the current value (`Codex-2hxff.41`) |
@@ -189,7 +189,7 @@ and again when moving to live mode.
 | Billing customer portal | A configuration with cancelling, plan switching, pausing and profile edits **off**: `bpc_1UQ9QH7wyGmo4sh6hXwkCS1s` (created 2026-10-13; deliberately not the account default). Its id goes in `STRIPE_PORTAL_CONFIGURATION_ID`. The account default still allows cancelling, so every portal session passes the id |
 | Billing → Subscriptions → Manage disputed payments | **Do nothing** (Stripe's default). Our dispute webhook pauses billing while a chargeback is open and cancels on a loss; if Stripe cancelled on a dispute instead, a won dispute could not restore the subscription ([subscription-disputes.md](subscription-disputes.md)) |
 | Billing → Subscriptions and emails → Manage failed payments | The retry schedule Stripe follows while a subscriber is `past_due`, with "If all retries for a payment fail" set to **cancel the subscription**, so access ends when retries run out (owner decision P-3). `past_due` keeps access, so "leave as past-due" would keep it for ever. Found set to "leave as past-due" on 2026-10-20; the owner set it to "cancel the subscription" the same day. Check each test-mode account matches |
-| Connect Express Dashboard features | Creators can change their payout bank account (Stripe's default) but **not** their payout schedule — schedule editing turned off (owner decision "Bank account only"). The schedule itself (a 14-day delay) is set per account by our code — **gap**: `Codex-2hxff.29` |
+| Connect Express Dashboard features | Creators can change their payout bank account (Stripe's default) but **not** their payout schedule: payout-schedule editing, self-serve manual payouts and Instant Payouts all **off** (owner decision "Bank account only"; `Codex-2hxff.29`). No API can check these: after changing them, log in to one test Express account and look. The schedule itself is set per account by our code: manual payouts, paid by the daily bank payout job 14 days after each sale, with bank debit off ([Payout timing](connect-and-payouts.md#payout-timing)). Editing either on an account in the Stripe Dashboard takes it off the daily payout, with an alert: [heal](#payout-schedule-backfill) |
 | Connect branding | Platform name and icon shown during onboarding and in the Express Dashboard |
 
 If a creator cannot pass Stripe's check when changing bank details, the platform
@@ -204,7 +204,57 @@ can generate an external-account update code from the connected account's page
 | Agreement review reminders | notifications-api | `0 8 * * *` | Production only |
 
 Both run at minute `0` so they share one database wake
-([why](connect-and-payouts.md#releasing-pending-money)).
+([why](connect-and-payouts.md#releasing-pending-money)). The daily bank payout
+(`Codex-2hxff.29`) is not a cron of its own: it is the payouts sweep's run whose
+London hour is 8, last in that wake.
+
+## Payout schedule backfill
+
+`packages/database/scripts/backfill-payout-schedule.ts` moves Connect accounts
+made before manual payouts (`Codex-2hxff.29`) to `interval: 'manual'` with
+`debit_negative_balances: false`, and flags them for the daily bank payout. In
+production it writes to live Stripe, so it runs only with the owner's OK, after
+the deploy:
+
+1. Deploy. New accounts are manual from creation; the job only pays flagged
+   accounts.
+2. The owner turns off the three Express Dashboard features above.
+3. In **test mode**, dry run and then apply on one production-shaped account
+   (`requirement_collection: 'stripe'`), and check Stripe accepted both settings.
+4. Production dry run (writes nothing; set `DATABASE_URL` and the live
+   `STRIPE_SECRET_KEY` in the shell; no env file is read for production):
+
+   ```text
+   pnpm --filter @codex/database exec tsx scripts/backfill-payout-schedule.ts --env production
+   ```
+
+   One line per account (our row id, never an email): its `codex_env` tag,
+   schedule, bank debit, GBP balance and the action (`switch`, `already manual +
+   debit off`, `skip: env tag differs`, `skip: deauthorized`, `skip: Stripe error
+   <code>`), then the counts and a checksum of the accounts to switch.
+5. The owner reads it and gives the OK. Then apply, with the dry run's checksum:
+
+   ```text
+   … --env production --apply --confirm <checksum> --live
+   ```
+
+   It refuses if the set to switch changed since the dry run, updates each under
+   `codex_manual_payouts_<acct>`, checks what Stripe returns, and only then flags
+   the account. A re-run skips the done ones.
+6. The next 08:00 London run pays out the money older than 14 days.
+
+**An account that leaves the daily payout.** If someone changes an account's
+payout schedule or bank debit in the Stripe Dashboard, its `account.updated`
+takes it off the daily bank payout (Stripe's own schedule pays it from then on)
+and raises an error alert, `Connect payout settings were changed in Stripe`, with
+the `stripeAccountId`. Before it clears the flag it asks Stripe for the live
+account, so a late or replayed event does not drop an account whose settings are
+right; if Stripe cannot be asked, the flag stays and a different alert says so.
+To heal, either put back manual payouts with bank debit off on that account in
+Stripe (its next `account.updated` flags it again), or re-run this backfill:
+the dry run lists the account as `switch`, and `--apply` switches it and flags
+it. An account already back on both settings is listed as
+`already manual + debit off` and is flagged without a Stripe write.
 
 ## Local development
 

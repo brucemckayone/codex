@@ -161,3 +161,29 @@ export const supportResolveCreatorDebtSchema = z
 export type SupportResolveCreatorDebtInput = z.infer<
   typeof supportResolveCreatorDebtSchema
 >;
+
+/** `:creditId` on the Owed to creators routes: a `payee_credits` row. */
+export const supportCreditIdParamsSchema = z.object({ creditId: uuidSchema });
+
+/**
+ * POST /api/admin/support/owed-to-creators/:creditId/resolve
+ * (Codex-2hxff.73, §7.4). Re-pay what Stripe took, count it against the
+ * step's own open debt, or mark it not owed, which needs a note: nothing is
+ * paid, so the note is the record. The name confirmation is the dialog's: the
+ * server takes the credit id only. A needs-person row's Re-pay needs a note
+ * too (what support saw in Stripe; review MED-3), but only the server knows
+ * the row's state, so it refuses that one (422 `CREDIT_NOTE_REQUIRED`).
+ */
+export const supportResolveCreditSchema = z
+  .object({
+    action: z.enum(['repay', 'count_against_debt', 'not_owed']),
+    note: supportNoteSchema,
+  })
+  .refine((input) => input.action !== 'not_owed' || input.note !== '', {
+    message: 'A note is required to mark it as not owed',
+    path: ['note'],
+  });
+
+export type SupportResolveCreditInput = z.infer<
+  typeof supportResolveCreditSchema
+>;

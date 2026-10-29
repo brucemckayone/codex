@@ -17,7 +17,8 @@
  *
  * The same wake first settles disputes whose webhook events were missed
  * (./dispute-reconcile.ts, Codex-2hxff.58), then runs the course off-sale and
- * owed-duplicate sweeps.
+ * owed-duplicate sweeps, and last, on the 08:00 London run, the daily bank
+ * payout (Codex-2hxff.29).
  *
  * Error handling: NEVER throws. The function is invoked from
  * `scheduled()` inside a `waitUntil` chain — if we throw, the cron
@@ -83,6 +84,11 @@ export interface RunSweepDeps {
   olderThanMinutes?: number;
   /** Optional override for the payees claimed per run (mainly for tests) */
   payeeLimit?: number;
+  /**
+   * The cron's own drain, ahead of the bank payout in the same wake: its
+   * payout-released emails may name this morning's payout (review r2 LOW-1).
+   */
+  cronDrain?: boolean;
 }
 
 /**
@@ -101,12 +107,14 @@ export async function runPayoutsSweep(deps: RunSweepDeps): Promise<{
     obs,
     olderThanMinutes = DEFAULT_OLDER_THAN_MINUTES,
     payeeLimit = PAYOUTS_SWEEP_PAYEE_LIMIT,
+    cronDrain = false,
   } = deps;
 
   try {
     const result = await subscription.sweepUnresolvedPayouts(
       olderThanMinutes,
-      payeeLimit
+      payeeLimit,
+      { cronDrain }
     );
 
     obs.info('payouts-sweep cron completed', {
@@ -196,6 +204,30 @@ export async function runOwedDuplicatesSweep(
 }
 
 /**
+ * The daily bank payout (Codex-2hxff.29), LAST in the hourly wake: a reversal
+ * the clawback retry made this hour has landed before any balance is read,
+ * and an old sale the drain released goes to the bank the same morning. Every
+ * run hands over its `scheduledTime` and only the 08:00 London one pays (the
+ * service decides), so there is no new cron. Isolated like the other sweeps:
+ * its failure is an alert, never the cron's.
+ */
+export async function runBankPayoutsSweep(
+  subscription: Pick<SubscriptionService, 'runBankPayouts'>,
+  scheduledTime: Date,
+  obs: SweepLogger
+): Promise<void> {
+  try {
+    await subscription.runBankPayouts(scheduledTime);
+  } catch (error) {
+    obs.error('payouts-sweep cron could not run the bank payouts', {
+      errorId: crypto.randomUUID(),
+      scheduledTime: scheduledTime.toISOString(),
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
  * Settle disputes whose webhook events were missed (Codex-2hxff.58,
  * ./dispute-reconcile.ts). Isolated like the clawback retry: its failure is
  * logged and never fails the cron, so the other sweeps still run. Access
@@ -247,11 +279,14 @@ export async function runScheduledPayoutsSweep(
     stripe?: Stripe;
     olderThanMinutes?: number;
     payeeLimit?: number;
+    /** The cron's `controller.scheduledTime`; decides the bank payout run. */
+    scheduledTime?: number;
   }
 ): Promise<void> {
   const obs =
     deps?.obs ??
     new ObservabilityClient('ecom-api', env.ENVIRONMENT ?? 'development');
+  const scheduledTime = new Date(deps?.scheduledTime ?? Date.now());
 
   // Guard against missing env vars — don't throw, log and exit.
   if (!env.DATABASE_URL || !env.STRIPE_SECRET_KEY) {
@@ -287,12 +322,18 @@ export async function runScheduledPayoutsSweep(
       obs,
       olderThanMinutes: deps?.olderThanMinutes,
       payeeLimit: deps?.payeeLimit,
+      cronDrain: true,
     });
   } finally {
-    // Same hourly wake (Codex-2hxff.64, Codex-2hxff.15): neither throws, so
-    // the pool is always released below.
+    // Same hourly wake (Codex-2hxff.64, Codex-2hxff.15, .29): none throws,
+    // so the pool is always released below. The bank payout goes last.
     await runCourseOffSaleSweep(webhookServices.services, obs);
     await runOwedDuplicatesSweep(webhookServices.services, obs);
+    await runBankPayoutsSweep(
+      webhookServices.services.subscription,
+      scheduledTime,
+      obs
+    );
     webhookServices.release();
   }
 }
@@ -301,19 +342,22 @@ export async function runScheduledPayoutsSweep(
  * Top-level `scheduled()` dispatcher for the ecom-api Worker.
  *
  * Currently routes all cron invocations to the payouts sweep. If we later
- * add more crons we discriminate by `controller.cron` here.
+ * add more crons we discriminate by `controller.cron` here. The run's
+ * `scheduledTime` goes through: the bank payout pays on the 08:00 London run.
  *
  * Wraps the sweep in `waitUntil` with `.catch()` so a slow sweep doesn't
  * get killed mid-flight and an unexpected rejection doesn't crash the
  * cron invocation silently.
  */
 export function dispatchScheduled(
-  _controller: ScheduledController,
+  controller: ScheduledController,
   env: Bindings,
   ctx: ExecutionContext
 ): void {
   ctx.waitUntil(
-    runScheduledPayoutsSweep(env, ctx).catch((error: unknown) => {
+    runScheduledPayoutsSweep(env, ctx, {
+      scheduledTime: controller.scheduledTime,
+    }).catch((error: unknown) => {
       // runScheduledPayoutsSweep already swallows its own errors and logs
       // via ObservabilityClient — this .catch is the belt-and-braces guard
       // against future refactors that drop the inner try/catch.

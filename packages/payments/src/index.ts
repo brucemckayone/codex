@@ -7,6 +7,9 @@
  * an extraction that changes no behaviour.
  */
 
+// The daily bank payout: manual payouts held for the 14-day refund window,
+// and a balance below zero tracked for Q4's rule (Codex-2hxff.29, .30)
+export * from './bank-payouts';
 // Claw back each refund's share of a charge's payout slices, for every
 // source, recorded per slice per refund (Codex-2hxff.56, .8)
 export {
@@ -40,6 +43,18 @@ export { assertGbpOnly, isGbpOrUnset } from './currency';
 // The charge an invoice payment settled on: the key every invoice payout
 // uses (Codex-2hxff.50)
 export { resolveInvoiceCharge } from './invoice-charge';
+// Money owed TO a payee after a late take-back: support's Re-pay, Count it
+// against this debt, Not owed, and Check Stripe again (Codex-2hxff.73)
+export {
+  type PayeeCreditAction,
+  type PayeeCreditCheck,
+  payeeCreditsNeedingAPerson,
+  type RecheckedPayeeCredit,
+  type ResolvedPayeeCredit,
+  type ResolvePayeeCreditInput,
+  recheckPayeeCredit,
+  resolvePayeeCredit,
+} from './payee-credits';
 // The payouts ledger's write path: one row per slice per charge, reserved
 // before any transfer (Codex-2hxff.11, .12, .37)
 export {
@@ -87,9 +102,13 @@ export {
 export {
   type DisputeRepayResult,
   type FailedRefundRepay,
+  type FailedRefundRepayResult,
+  PAYEE_PAID_RESOLUTIONS,
+  type PayeeKeptStep,
   repayBlockedError,
   repayDispute,
   repayFailedRefund,
+  reportPayeeKept,
   type StrandedStep,
   settleUnfinishedRefundSteps,
   type UnfinishedRefundSteps,
@@ -99,3 +118,6 @@ export {
   type OrganisationPayee,
   resolveOrganisationPayee,
 } from './resolve-organisation-payee';
+// Money waiting for a payee to finish Connect setup: the Studio banner and
+// the monthly reminder share one query (Codex-2hxff.34)
+export * from './waiting-money';

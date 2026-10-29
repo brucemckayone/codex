@@ -9,6 +9,8 @@
  * - After a refund the charge and the counts are refreshed ONCE, then a
  *   Refresh button is offered (Q10). Nothing polls.
  * - Each answer reloads, or offers "Reload the charge", as drawn.
+ * - A late take-back's Re-pay on its history line (C1) opens the queue's
+ *   dialog; once done, the charge and the counts reload once (C2).
  *
  * Mounts the real `+page.svelte` and real components; `$app/*` and the remote
  * module are the reactive doubles.
@@ -41,7 +43,10 @@ import { setPage } from '$lib/components/support/__fixtures__/app-state.mock.sve
 import {
   CHARGE_ID,
   chargeDetail,
+  historyLine,
+  NOW,
   preview,
+  slice,
 } from '$lib/components/support/__fixtures__/support-fixtures';
 import {
   chargeSlot,
@@ -52,6 +57,7 @@ import {
   issueSupportRefund,
   previewSlot,
   reset,
+  resolveOwedToCreator,
 } from '$lib/components/support/__fixtures__/support-remote.mock.svelte';
 import ChargePage from '../+page.svelte';
 
@@ -587,5 +593,121 @@ describe('after Refund', () => {
     charge.loading = false;
     flushSync();
     expect(review()?.disabled).toBe(false);
+  });
+});
+
+describe('money owed back to a payee (C1, C2)', () => {
+  test('Re-pay on the line opens the dialog; once done, the charge and the counts reload once', async () => {
+    const creditId = '44444444-4444-4444-8444-444444444444';
+    resolveOwedToCreator.mockResolvedValue({
+      outcome: 'done',
+      result: {
+        creditId,
+        resolution: 'repaid',
+        resolvedAt: NOW.toISOString(),
+        repayPayoutId: 'payout-repay-1',
+        amountCents: 900,
+        payeeName: 'Rowan Ellis',
+      },
+    });
+    mountCharge();
+    const charge = chargeSlot(CHARGE_ID);
+    charge.current = chargeDetail({
+      slices: [
+        slice({
+          takenCents: 900,
+          owedToPayeeCents: 900,
+          history: [
+            historyLine({
+              causeType: 'dispute',
+              causeId: 'du_1QjM3pLk2vSb91tU',
+              amountCents: 900,
+              outcome: 'taken_after_settled',
+              credit: {
+                creditId,
+                state: 'owed',
+                amountCents: 900,
+                action: 'repay',
+                repayPayout: null,
+              },
+            }),
+          ],
+        }),
+      ],
+    });
+    flushSync();
+    [...document.querySelectorAll<HTMLButtonElement>('table button')]
+      .find((b) => b.textContent?.includes(m.support_history_show()))
+      ?.click();
+    flushSync();
+    document
+      .querySelector<HTMLButtonElement>('table [data-testid="credit-action"]')
+      ?.click();
+    flushSync();
+    expect(text()).toContain(
+      m.support_credit_repay_title({ name: 'Rowan Ellis', amount: '£9.00' })
+    );
+    document
+      .querySelector<HTMLButtonElement>('[data-testid="settle-submit"]')
+      ?.click();
+    await tick();
+    expect(resolveOwedToCreator).toHaveBeenCalledWith({
+      creditId,
+      body: { action: 'repay', note: '' },
+    });
+    expect(charge.refresh).toHaveBeenCalledTimes(1);
+    expect(countsSlot().refresh).toHaveBeenCalledTimes(1);
+    expect(
+      document.querySelector('[data-testid="credit-notice"]')?.textContent
+    ).toContain(
+      m.support_credit_repaid({ name: 'Rowan Ellis', amount: '£9.00' })
+    );
+  });
+  test('Cancel on the dialog puts focus back on the line’s button (L1)', async () => {
+    const creditId = '55555555-5555-4555-8555-555555555555';
+    mountCharge();
+    chargeSlot(CHARGE_ID).current = chargeDetail({
+      slices: [
+        slice({
+          takenCents: 900,
+          owedToPayeeCents: 900,
+          history: [
+            historyLine({
+              causeType: 'dispute',
+              causeId: 'du_1QjM3pLk2vSb91tU',
+              amountCents: 900,
+              outcome: 'taken_after_settled',
+              credit: {
+                creditId,
+                state: 'owed',
+                amountCents: 900,
+                action: 'repay',
+                repayPayout: null,
+              },
+            }),
+          ],
+        }),
+      ],
+    });
+    flushSync();
+    [...document.querySelectorAll<HTMLButtonElement>('table button')]
+      .find((b) => b.textContent?.includes(m.support_history_show()))
+      ?.click();
+    flushSync();
+    const button = document.querySelector<HTMLButtonElement>(
+      'table [data-testid="credit-action"]'
+    );
+    button?.focus();
+    button?.click();
+    flushSync();
+    const cancel = [
+      ...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button'),
+    ].find((b) => b.textContent?.trim() === m.support_confirm_cancel());
+    cancel?.focus();
+    cancel?.click();
+    flushSync();
+    await tick(20);
+    expect(button).not.toBeNull();
+    expect(document.activeElement).toBe(button);
   });
 });

@@ -217,6 +217,12 @@ export const listPayoutsQuerySchema = paginationSchema.extend({
   source: payoutSourceFilterEnum.default('all'),
   fromDate: z.string().datetime().optional(),
   toDate: z.string().datetime().optional(),
+  /**
+   * Rows TRANSFERRED on or after this (the transfer, else the row's own
+   * time, as `bankOn` reads it), not created: a backlog sale released after
+   * a late Connect setup has an old `createdAt` and a near bank day.
+   */
+  transferredFrom: z.string().datetime().optional(),
 });
 
 export const getPayoutSummaryQuerySchema = z.object({

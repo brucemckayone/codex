@@ -122,11 +122,12 @@ organisation.
   lose, it stays taken back. We pay the bank's dispute fee.
 - If a buyer's card issuer warns us that a payment looks fraudulent, we refund it
   in full and your share is taken back.
-- **If your Stripe balance cannot cover an amount taken back**, it is recorded as
-  an amount you owe. It is deducted from your future earnings until it is
-  cleared. We tell you when this happens, and it shows in your earnings.
-- If you owe **£50 or less** in total and earn nothing for 12 months, we write
-  off what is left.
+- **If your Stripe balance cannot cover an amount taken back**, your Stripe
+  balance can go below zero. Stripe takes it from your next earnings, and bank
+  payouts pause until it is back above zero. We tell you when this happens, and
+  it shows in your earnings.
+- If you owe **£50 or less** in total, it is written off when Stripe collects it
+  from us at 180 days below zero.
 - If you owe **more than £50** in total and it has not been recovered from your
   earnings within 90 days, we will send you an invoice for the whole amount
   outstanding.

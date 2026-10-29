@@ -1,6 +1,7 @@
 /**
  * Route → service contract for support refunds (Codex-2hxff.28; data design
- * §1, §10): the nine `/api/admin/support/*` routes.
+ * §1, §10): the twelve `/api/admin/support/*` routes, with batch B's Owed to
+ * creators list, settle and check (Codex-2hxff.73).
  *
  * What this file pins:
  *   - the policy matrix on every route: anonymous 401, a creator 403, an
@@ -166,6 +167,7 @@ import app from './index';
 const CHARGE = 'ch_3QiC9bLk2vAbCdEf';
 const REFUND_ID = '523e4567-e89b-12d3-a456-426614174004';
 const REVIEW_ID = '623e4567-e89b-12d3-a456-426614174005';
+const CREDIT_ID = '723e4567-e89b-12d3-a456-426614174006';
 const PLATFORM_OWNER = { id: 'support_user', role: 'platform_owner' };
 const PAGE = { page: 1, limit: 20, total: 1, totalPages: 1 };
 
@@ -180,9 +182,11 @@ function supportMock() {
       refund: { id: 're_1', amountCents: 500, status: 'succeeded' },
       replayed: false,
     }),
-    getQueueCounts: vi
-      .fn()
-      .mockResolvedValue({ failedRefunds: 2, creatorDebts: 3 }),
+    getQueueCounts: vi.fn().mockResolvedValue({
+      failedRefunds: 2,
+      creatorDebts: 3,
+      owedToCreators: 6,
+    }),
     listFailedRefunds: vi.fn().mockResolvedValue({
       items: [{ refundId: REFUND_ID }],
       pagination: PAGE,
@@ -198,6 +202,18 @@ function supportMock() {
     resolveCreatorDebt: vi.fn().mockResolvedValue({
       reviewId: REVIEW_ID,
       resolution: 'creator_absorbed',
+    }),
+    listOwedToCreators: vi.fn().mockResolvedValue({
+      items: [{ creditId: CREDIT_ID }],
+      pagination: PAGE,
+    }),
+    resolveOwedToCreator: vi.fn().mockResolvedValue({
+      creditId: CREDIT_ID,
+      resolution: 'repaid',
+    }),
+    checkOwedToCreator: vi.fn().mockResolvedValue({
+      creditId: CREDIT_ID,
+      outcome: 'still_unknown',
     }),
   };
 }
@@ -319,6 +335,28 @@ const routes: Route[] = [
     path: `/api/admin/support/creator-debts/${REVIEW_ID}/resolve`,
     body: { resolution: 'creator_absorbed', note: '' },
     service: 'resolveCreatorDebt',
+    writes: true,
+  },
+  {
+    name: 'owed to creators',
+    method: 'GET',
+    path: '/api/admin/support/queue/owed-to-creators',
+    service: 'listOwedToCreators',
+    writes: false,
+  },
+  {
+    name: 'settle an owed-to-creator',
+    method: 'POST',
+    path: `/api/admin/support/owed-to-creators/${CREDIT_ID}/resolve`,
+    body: { action: 'repay', note: '' },
+    service: 'resolveOwedToCreator',
+    writes: true,
+  },
+  {
+    name: 'check Stripe again',
+    method: 'POST',
+    path: `/api/admin/support/owed-to-creators/${CREDIT_ID}/check`,
+    service: 'checkOwedToCreator',
     writes: true,
   },
 ];
@@ -502,6 +540,42 @@ describe('the routes', () => {
     });
     expect(invalidateUserLibrary).not.toHaveBeenCalled();
     expect(clearRevocation).not.toHaveBeenCalled();
+  });
+
+  it('owed to creators: Not owed needs a note, the action comes validated, and the check takes no body (Codex-2hxff.73)', async () => {
+    const path = `/api/admin/support/owed-to-creators/${CREDIT_ID}/resolve`;
+    expect(
+      (await call('POST', path, { action: 'not_owed', note: '' })).status
+    ).toBe(400);
+    expect(
+      (await call('POST', path, { action: 'refund_it', note: '' })).status
+    ).toBe(400);
+    expect(
+      (
+        await call('POST', path.replace(CREDIT_ID, 'not-a-uuid'), {
+          action: 'repay',
+        })
+      ).status
+    ).toBe(400);
+    expect(support.resolveOwedToCreator).not.toHaveBeenCalled();
+
+    const res = await call('POST', path, {
+      action: 'not_owed',
+      note: '  Paid back by hand in Stripe  ',
+    });
+    expect(res.status).toBe(200);
+    expect(support.resolveOwedToCreator).toHaveBeenCalledWith(
+      CREDIT_ID,
+      { action: 'not_owed', note: 'Paid back by hand in Stripe' },
+      PLATFORM_OWNER.id
+    );
+
+    const check = await call(
+      'POST',
+      `/api/admin/support/owed-to-creators/${CREDIT_ID}/check`
+    );
+    expect(check.status).toBe(200);
+    expect(support.checkOwedToCreator).toHaveBeenCalledWith(CREDIT_ID);
   });
 
   it("maps a service's typed error to its status", async () => {
