@@ -38,6 +38,7 @@ import type {
   ContentHeldBy,
   CourseEntryResponse,
   CourseFilmStreamResponse,
+  OrgFilmStreamResponse,
   WithdrawnContent,
 } from '../types';
 import { AccessRevocation } from './access-revocation';
@@ -74,7 +75,7 @@ import {
   filmStreamFailure,
   resolveStreamableMedia,
 } from './content-access/streaming';
-import { resolveCourseFilm } from './sales-films';
+import { resolveCourseFilm, resolveIntroFilm } from './sales-films';
 
 /**
  * Default TTL (in seconds) for presigned streaming URLs.
@@ -782,7 +783,7 @@ export class ContentAccessService
           hlsTokenSecret: this.hlsTokenSecret,
           obs: this.obs,
         },
-        input.courseId,
+        { kind: 'course', courseId: input.courseId },
         DEFAULT_STREAMING_URL_TTL_SECONDS
       );
       this.obs.info('Course film stream minted', {
@@ -794,7 +795,12 @@ export class ContentAccessService
     } catch (error) {
       // Not handleError: one message for every failure and a line with the
       // course and film. Defence in depth: a 5xx sends no context (Codex-adcgb).
-      throw filmStreamFailure(error, this.obs, input);
+      throw filmStreamFailure(
+        error,
+        this.obs,
+        { kind: 'course', courseId: input.courseId },
+        { film: input.film }
+      );
     }
   }
 
@@ -813,9 +819,83 @@ export class ContentAccessService
     mediaId: string;
     token: string;
   }): Promise<string | null> {
+    const { courseId, ...film } = input;
     return buildFilmMasterPlaylist(
       { r2: this.r2, contentApiBaseUrl: this.contentApiBaseUrl },
-      input
+      { scope: { kind: 'course', courseId }, ...film }
+    );
+  }
+
+  /**
+   * Mint the signed FULL stream of an org's intro film, for a visitor's press
+   * on the org's landing page (Codex-376dl): {@link getCourseFilmStream}'s rule
+   * for the film `branding_settings` holds. PUBLIC, so every press re-checks
+   * the film (`resolveIntroFilm`): the org is live, the media is a ready video,
+   * its creator is still on the org's team, and no content that is anything but
+   * plainly free uses it. Every refusal is the same `null`, and the landing
+   * plays the 30-second preview. The public org info's `fullFilm` is a hint;
+   * this is the check.
+   *
+   * `organizationId` is the path's, and it is the slot's key: a caller can name
+   * an org but never a media item. The token is bound to this org and media.
+   */
+  async getOrgFilmStream(input: {
+    organizationId: string;
+  }): Promise<OrgFilmStreamResponse | null> {
+    const scope = {
+      kind: 'org',
+      organizationId: input.organizationId,
+    } as const;
+    try {
+      const resolution = await resolveIntroFilm(this.db, input.organizationId);
+      if (!resolution.ok) {
+        // The reason is the log's alone: the caller gets one null for all.
+        this.obs.info('Org film stream refused', {
+          organizationId: input.organizationId,
+          reason: resolution.reason,
+        });
+        return null;
+      }
+
+      const { film } = resolution;
+      const { playlistUrl, expiresAt } = await buildFilmStreamResponse(
+        film,
+        {
+          contentApiBaseUrl: this.contentApiBaseUrl,
+          hlsTokenSecret: this.hlsTokenSecret,
+          obs: this.obs,
+        },
+        scope,
+        DEFAULT_STREAMING_URL_TTL_SECONDS
+      );
+      this.obs.info('Org film stream minted', {
+        organizationId: input.organizationId,
+        mediaItemId: film.mediaId,
+      });
+      return { playlistUrl, expiresAt: toIso(expiresAt) };
+    } catch (error) {
+      throw filmStreamFailure(error, this.obs, scope);
+    }
+  }
+
+  /**
+   * {@link getFilmMasterPlaylist} for an org intro film: the variants point at
+   * the org film variant proxy. Auth is the org film token the route verified.
+   *
+   * Called from content-access.ts on the destructured-factory receiver, as
+   * `getFilmMasterPlaylist` is, which dead-code detection cannot resolve.
+   */
+  // fallow-ignore-next-line unused-class-member
+  async getOrgFilmMasterPlaylist(input: {
+    organizationId: string;
+    creatorId: string;
+    mediaId: string;
+    token: string;
+  }): Promise<string | null> {
+    const { organizationId, ...film } = input;
+    return buildFilmMasterPlaylist(
+      { r2: this.r2, contentApiBaseUrl: this.contentApiBaseUrl },
+      { scope: { kind: 'org', organizationId }, ...film }
     );
   }
 

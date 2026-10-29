@@ -3,12 +3,15 @@ import {
   type CourseFilmStreamResponse,
   createContentAccessService,
   type FilmTokenPayload,
+  type OrgFilmStreamResponse,
+  type OrgFilmTokenPayload,
   type PlaybackProgressResponse,
   type StreamingUrlResponse,
   type TokenRefusal,
   type UpdatePlaybackProgressResponse,
   verifyFilmToken,
   verifyHlsToken,
+  verifyOrgFilmToken,
 } from '@codex/access';
 import { CACHE_PRESETS } from '@codex/constants';
 import {
@@ -29,6 +32,8 @@ import {
   hlsProxyQuerySchema,
   hlsVariantParamsSchema,
   listUserLibrarySchema,
+  orgFilmParamsSchema,
+  orgFilmVariantParamsSchema,
   savePlaybackProgressSchema,
   streamingUrlQuerySchema,
   withdrawnContentQuerySchema,
@@ -48,8 +53,8 @@ const app = new Hono<HonoEnv>();
  * a shared cache's or the viewer's own browser's — outlives the credential
  * inside it. Not merely per-viewer, per-REQUEST.
  *
- * NAMED RATHER THAN SPELLED OUT. The four HLS playlist proxies (content and
- * course film, master and variant) are plain Hono handlers, not
+ * NAMED RATHER THAN SPELLED OUT. The six HLS playlist proxies (content, course
+ * film and org film, master and variant) are plain Hono handlers, not
  * `procedure()` calls, so they cannot declare `policy.cache` and must set the
  * header themselves. Using the preset is what keeps the value on the same
  * dial as every other response in the platform: the string is unchanged
@@ -65,7 +70,7 @@ const HLS_PLAYLIST_HEADERS = {
 /**
  * Count against the HLS token the caller presented.
  *
- * The four playlist proxies carry no session: the video player authenticates with the
+ * The six playlist proxies carry no session: the video player authenticates with the
  * short-lived token in the query string, so `sessionSubject()` names nothing
  * and — when the player is reached through a worker hop — `trustedIpSubject()`
  * names nothing either. The token is the one subject this surface can ALWAYS
@@ -130,6 +135,7 @@ async function servePlaylist(
 type FilmRefusal =
   | TokenRefusal
   | 'course-mismatch'
+  | 'org-mismatch'
   | 'no-token'
   | 'bad-path'
   | 'bad-variant';
@@ -140,19 +146,39 @@ type FilmRefusal =
  * one. Expiry is routine (a paused film, a tab left open), so it is debug.
  * Every other reason is a link no player builds from a minted token (forged or
  * tampered, a content token, another course's, a path or rung that does not
- * exist), so it warns.
+ * exist), so it warns. `film` names the proxies: a course sales film's, or an
+ * org intro film's (Codex-376dl).
  */
+function logRefusal(
+  c: Context<HonoEnv>,
+  film: 'course_film' | 'org_film',
+  reason: FilmRefusal,
+  ids: { courseId?: string } | { organizationId?: string }
+): void {
+  const obs = c.get('obs');
+  if (reason === 'expired') {
+    obs?.debug(`${film}.token_expired`, ids);
+    return;
+  }
+  obs?.warn(`${film}.token_refused`, { reason, ...ids });
+}
+
+/** {@link logRefusal} for the course film proxies. */
 function logFilmRefusal(
   c: Context<HonoEnv>,
   reason: FilmRefusal,
   courseId?: string
 ): void {
-  const obs = c.get('obs');
-  if (reason === 'expired') {
-    obs?.debug('course_film.token_expired', { courseId });
-    return;
-  }
-  obs?.warn('course_film.token_refused', { reason, courseId });
+  logRefusal(c, 'course_film', reason, { courseId });
+}
+
+/** {@link logRefusal} for the org film proxies. */
+function logOrgFilmRefusal(
+  c: Context<HonoEnv>,
+  reason: FilmRefusal,
+  organizationId?: string
+): void {
+  logRefusal(c, 'org_film', reason, { organizationId });
 }
 
 /**
@@ -172,6 +198,28 @@ async function verifiedFilmToken(
   }
   if (check.payload.courseId !== courseId) {
     logFilmRefusal(c, 'course-mismatch', courseId);
+    return null;
+  }
+  return check.payload;
+}
+
+/**
+ * {@link verifiedFilmToken} for the org film proxies: an org film token that
+ * verifies AND was minted for the org in the path. A course film token or a
+ * content token is a `signature` refusal here: each signs its own domain.
+ */
+async function verifiedOrgFilmToken(
+  c: Context<HonoEnv>,
+  organizationId: string,
+  token: string
+): Promise<OrgFilmTokenPayload | null> {
+  const check = await verifyOrgFilmToken(token, c.env.WORKER_SHARED_SECRET);
+  if (!check.ok) {
+    logOrgFilmRefusal(c, check.reason, organizationId);
+    return null;
+  }
+  if (check.payload.organizationId !== organizationId) {
+    logOrgFilmRefusal(c, 'org-mismatch', organizationId);
     return null;
   }
   return check.payload;
@@ -565,6 +613,133 @@ app.get(
     const { token } = queryResult.data;
 
     const payload = await verifiedFilmToken(c, courseId, token);
+    if (!payload) {
+      return c.text('Invalid or expired streaming token', 403);
+    }
+
+    return servePlaylist(c, (service) =>
+      service.getHlsVariantPlaylist({
+        creatorId: payload.creatorId,
+        mediaId: payload.mediaId,
+        variant,
+        expirySeconds: presignWindow(payload.exp),
+      })
+    );
+  }
+);
+
+/**
+ * GET /api/access/orgs/:organizationId/film/stream
+ *
+ * An org intro film's signed FULL stream (Codex-376dl), asked for by a
+ * visitor's press on the org's landing page: the course film minter above,
+ * for the film the org's branding holds. The service reads the media from
+ * that slot, so a caller can name an org but never a media item.
+ *
+ * `auth: 'none'`, as the landing is public. The procedure org resolver runs
+ * only for `requireOrg*` policies, so `:organizationId` here is a plain input.
+ * The gate is the film, re-checked on every call (`resolveIntroFilm`): a live
+ * org, a ready video, its creator still on the team, and no content that is
+ * anything but plainly free using it. Otherwise `{ data: null }`, the same
+ * for every reason, and the landing plays the 30-second preview.
+ *
+ * `streaming` and `fresh` for the reasons the course film route gives.
+ * @returns {OrgFilmStreamResponse | null}
+ */
+app.get(
+  '/orgs/:organizationId/film/stream',
+  procedure({
+    policy: {
+      auth: 'none',
+      rateLimit: 'streaming', // 60 req/min - one token per call
+      cache: 'fresh',
+    },
+    input: { params: orgFilmParamsSchema },
+    handler: async (ctx): Promise<OrgFilmStreamResponse | null> =>
+      ctx.services.access.getOrgFilmStream({
+        organizationId: ctx.input.params.organizationId,
+      }),
+  })
+);
+
+/**
+ * GET /api/access/orgs/:organizationId/film/hls/master.m3u8?token=...
+ *
+ * The org film's master playlist proxy, opened only by an ORG film token
+ * minted for the org in the path. A course film token or a content token is
+ * refused here, as this one is refused on their routes.
+ *
+ * On an invalid, expired or foreign token → 403; on a missing playlist → 404.
+ */
+app.get(
+  '/orgs/:organizationId/film/hls/master.m3u8',
+  hlsStreamingRateLimit,
+  async (c) => {
+    const paramsResult = orgFilmParamsSchema.safeParse({
+      organizationId: c.req.param('organizationId'),
+    });
+    const queryResult = hlsProxyQuerySchema.safeParse({
+      token: c.req.query('token'),
+    });
+    if (!paramsResult.success) {
+      logOrgFilmRefusal(c, 'bad-path');
+      return c.text('Invalid request', 403);
+    }
+    const { organizationId } = paramsResult.data;
+    if (!queryResult.success) {
+      logOrgFilmRefusal(c, 'no-token', organizationId);
+      return c.text('Invalid request', 403);
+    }
+    const { token } = queryResult.data;
+
+    const payload = await verifiedOrgFilmToken(c, organizationId, token);
+    if (!payload) {
+      return c.text('Invalid or expired streaming token', 403);
+    }
+
+    return servePlaylist(c, (service) =>
+      service.getOrgFilmMasterPlaylist({
+        organizationId,
+        creatorId: payload.creatorId,
+        mediaId: payload.mediaId,
+        token,
+      })
+    );
+  }
+);
+
+/**
+ * GET /api/access/orgs/:organizationId/film/hls/:variant/index.m3u8?token=...
+ *
+ * The org film's variant playlist proxy: segments presigned for the token's
+ * remaining life, behind the org film master's checks.
+ */
+app.get(
+  '/orgs/:organizationId/film/hls/:variant/index.m3u8',
+  hlsStreamingRateLimit,
+  async (c) => {
+    const paramsResult = orgFilmVariantParamsSchema.safeParse({
+      organizationId: c.req.param('organizationId'),
+      variant: c.req.param('variant'),
+    });
+    const queryResult = hlsProxyQuerySchema.safeParse({
+      token: c.req.query('token'),
+    });
+    if (!paramsResult.success) {
+      const badVariant = paramsResult.error.issues.some(
+        (issue) => issue.path[0] === 'variant'
+      );
+      logOrgFilmRefusal(c, badVariant ? 'bad-variant' : 'bad-path');
+      return c.text('Invalid request', 403);
+    }
+    const { organizationId, variant } = paramsResult.data;
+    if (!queryResult.success) {
+      logOrgFilmRefusal(c, 'no-token', organizationId);
+      return c.text('Invalid request', 403);
+    }
+    const { token } = queryResult.data;
+
+    const payload = await verifiedOrgFilmToken(c, organizationId, token);
     if (!payload) {
       return c.text('Invalid or expired streaming token', 403);
     }

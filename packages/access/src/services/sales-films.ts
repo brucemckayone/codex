@@ -27,11 +27,18 @@
  * The studio's note under a film slot reads (b) alone
  * ({@link findPreviewOnlyMedia}): it says why a film is cut, and a paid use is
  * the only reason it names.
+ *
+ * An org's intro film (Codex-376dl, the film on its landing page) follows the
+ * same rule ({@link resolveIntroFilm}): the slot is `branding_settings`
+ * instead of a course, (a) becomes "a live org", and the film must be a video.
+ * It reads these same predicates, never a copy, so a change to what counts as
+ * paid reaches both kinds of film at once.
  */
 
 import { CONTENT_STATUS, MEDIA_STATUS, MEDIA_TYPES } from '@codex/constants';
 import { CREATOR_LIST_ROLES } from '@codex/database';
 import {
+  brandingSettings,
   content,
   courses,
   mediaItems,
@@ -248,6 +255,100 @@ export async function resolveCourseFilm(
   if (row.member !== true) return { ok: false, reason: 'creator-not-member' };
   if (row.paid !== false) return { ok: false, reason: 'paid-use' };
   return { ok: true, creatorId: row.creatorId, mediaId: row.mediaId };
+}
+
+/**
+ * Why an org's intro film may not stream in full. `CourseFilmRefusal`'s
+ * reasons, with `no-org` for `no-course` and one more:
+ *   - `not-video`: the media is audio. The studio picks only video, but a pick
+ *     saved before it checked may be audio, and the landing plays a film.
+ */
+export type IntroFilmRefusal =
+  | 'no-org'
+  | 'empty-slot'
+  | 'not-ready'
+  | 'not-video'
+  | 'creator-not-member'
+  | 'paid-use';
+
+/** The intro's media, as the landing and the studio draw it. */
+export interface IntroFilmMedia {
+  mediaId: string;
+  creatorId: string;
+  title: string;
+  thumbnailKey: string | null;
+  hlsPreviewKey: string | null;
+  durationSeconds: number | null;
+}
+
+/**
+ * The org's intro film and whether its FULL stream may be minted. `film` is
+ * there whenever the slot holds media, refused or not, so a caller can still
+ * draw a refused film's public preview (a paid use) or name what went wrong
+ * (the studio).
+ */
+export type IntroFilmResolution =
+  | { ok: true; film: IntroFilmMedia }
+  | { ok: false; reason: IntroFilmRefusal; film: IntroFilmMedia | null };
+
+/**
+ * An org's intro film under the sales-film rule, as {@link resolveCourseFilm}
+ * resolves a course's: ONE statement, the org with its intro media LEFT-joined
+ * and each part of {@link fullFilmEligible} projected one by one, plus the
+ * video check. The minter, the public org info and the studio all read it, so
+ * each answers the same.
+ */
+export async function resolveIntroFilm(
+  db: AccessQueryClient,
+  organizationId: string
+): Promise<IntroFilmResolution> {
+  const [row] = await db
+    .select({
+      mediaId: mediaItems.id,
+      creatorId: mediaItems.creatorId,
+      title: mediaItems.title,
+      thumbnailKey: mediaItems.thumbnailKey,
+      hlsPreviewKey: mediaItems.hlsPreviewKey,
+      durationSeconds: mediaItems.durationSeconds,
+      ready: asFlag(filmReady()),
+      video: asFlag(sql`${mediaItems.mediaType} = ${MEDIA_TYPES.VIDEO}`),
+      member: asFlag(creatorIsMember(db, organizations.id)),
+      paid: asFlag(paidUse(db)),
+    })
+    .from(organizations)
+    .leftJoin(
+      brandingSettings,
+      eq(brandingSettings.organizationId, organizations.id)
+    )
+    .leftJoin(
+      mediaItems,
+      eq(mediaItems.id, brandingSettings.introVideoMediaItemId)
+    )
+    .where(
+      and(eq(organizations.id, organizationId), isNull(organizations.deletedAt))
+    )
+    .limit(1);
+
+  if (!row) return { ok: false, reason: 'no-org', film: null };
+  if (!row.mediaId || !row.creatorId || row.title === null) {
+    return { ok: false, reason: 'empty-slot', film: null };
+  }
+  const film: IntroFilmMedia = {
+    mediaId: row.mediaId,
+    creatorId: row.creatorId,
+    title: row.title,
+    thumbnailKey: row.thumbnailKey,
+    hlsPreviewKey: row.hlsPreviewKey,
+    durationSeconds: row.durationSeconds,
+  };
+  // As resolveCourseFilm: only the predicate's own answer mints.
+  if (row.ready !== true) return { ok: false, reason: 'not-ready', film };
+  if (row.video !== true) return { ok: false, reason: 'not-video', film };
+  if (row.member !== true) {
+    return { ok: false, reason: 'creator-not-member', film };
+  }
+  if (row.paid !== false) return { ok: false, reason: 'paid-use', film };
+  return { ok: true, film };
 }
 
 /**
