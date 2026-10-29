@@ -70,6 +70,8 @@ const PAYOUTS_PAGE = {
       purchaseId: null,
       subscriptionId: null,
       stripeChargeId: null,
+      bankOn: null,
+      takenBack: null,
     },
   ],
   pagination: { page: 1, limit: 20, total: 1, totalPages: 1 },
@@ -80,6 +82,7 @@ const SUMMARY = {
   totalEarnedCents: 1500,
   inTransitCents: 200,
   needsAttentionCount: 1,
+  waiting: null,
 };
 
 function buildApp(user: Record<string, unknown> | null) {

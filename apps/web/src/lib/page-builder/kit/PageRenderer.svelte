@@ -80,7 +80,7 @@
   import { STYLES } from './model/styles';
   import type { BlockEdit, KitPage } from './model/types';
   import { entrances } from './motion/entrances';
-  import { type PageEdit, setKitPage } from './page-context';
+  import { type KitPageContext, type PageEdit, setKitPage } from './page-context';
   import { BLOCKS } from './registry';
   import SectionShell from './SectionShell.svelte';
   import StickyCta from './StickyCta.svelte';
@@ -128,6 +128,12 @@
      * page never passes it.
      */
     proofType?: TypeFacet;
+    /**
+     * The visitor's page asks for a clip's full film with this (owner P10;
+     * `KitPageContext.requestFilm`). Only the public sales route passes it:
+     * the canvas and stills never play, so they never get it.
+     */
+    requestFilm?: KitPageContext['requestFilm'];
   }
 
   const {
@@ -142,6 +148,7 @@
     orgGrounds = {},
     orgShader = false,
     proofType,
+    requestFilm,
   }: Props = $props();
 
   const style = $derived(resolveStyle(page.design));
@@ -218,6 +225,9 @@
     },
     anchorOf(id: string) {
       return anchors.get(id);
+    },
+    get requestFilm() {
+      return edit || still ? undefined : requestFilm;
     },
   });
 

@@ -1,14 +1,21 @@
 /**
  * Page-level facts a block may need but `BlockProps` does not carry: the
- * page's Style (a featured card's scheme depends on it), and whether the page
- * is still.
+ * page's Style (a featured card's scheme depends on it), whether the page
+ * is still, and how a film asks for its full cut.
  *
  * Provided by `PageRenderer` as getters so a change re-renders the blocks
  * that read them. A block mounted on its own (a test) gets the default Style
  * and a live page rather than a missing context.
  */
 import { getContext, setContext } from 'svelte';
+import type { SalesFilm } from '../render/types';
 import { DEFAULT_PAGE_STYLE, type PageStyleId } from './model/ids';
+
+/** A full film's signed stream, and when its links run out (ISO), if known. */
+export interface FullFilm {
+  playlistUrl: string;
+  expiresAt?: string;
+}
 
 export interface KitPageContext {
   readonly style: PageStyleId;
@@ -34,6 +41,21 @@ export interface KitPageContext {
    * not draw (hidden, deleted, folded), and for a block mounted on its own.
    */
   anchorOf(id: string): string | undefined;
+  /**
+   * Ask for the full film behind a clip the server marked `fullFilm` (owner
+   * P10): a short-lived signed stream, or `null` when it may not play, which
+   * leaves the 30s preview — as does a rejection. Called only by a press, as
+   * the player unlocks its `<video>` (`primitives/film-source.ts`), so nothing
+   * is fetched on page load. It must settle: a promise that never does leaves
+   * the film loading. Absent on the editor canvas, which never plays, and for
+   * a block mounted on its own.
+   *
+   * The stream's links run out in about ten minutes, so a playing film asks
+   * again — shortly before `expiresAt` when it is given, else when the stream
+   * answers 403 — once per stream (`PreviewPlayerCore`, RENEWAL). A `null`
+   * then ends the film where it stands; it never drops to the preview.
+   */
+  requestFilm?: (film: SalesFilm) => Promise<FullFilm | null>;
 }
 
 /**

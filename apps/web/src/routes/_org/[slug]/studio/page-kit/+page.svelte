@@ -29,6 +29,9 @@
     ?faces=1 (each testimonials section's first written quote gets a photo,
       so the course's own show their initials)   ?marks=1 (each benefit
       takes the kit's marks in turn)
+    ?film=<HLS URL> (every clip, the intro, reel, guide and hero, plays this
+      stream, so the players can be pressed here: a real local preview, e.g.
+      dev-cdn's `{creatorId}/hls/{mediaId}/preview/preview.m3u8`)
     ?edit=1 (inline-edit attributes on)   ?chrome=0 (hide the studio chrome)
 -->
 <script lang="ts">
@@ -194,6 +197,12 @@
     return byType;
   });
 
+  /** `?film=<HLS URL>`: the one stream every clip plays, its poster the hero's photo. */
+  const clip = $derived.by(() => {
+    const playlistUrl = param('film');
+    return playlistUrl ? { playlistUrl, posterUrl: image } : null;
+  });
+
   /** `?faces=1`, `?marks=1`: the items' own controls, drawn on the sample (Codex-61zsk.58). */
   const faces = $derived(param('faces') === '1');
   const marks = $derived(param('marks') === '1');
@@ -291,7 +300,16 @@
   const context = $derived(
     sampleContext({
       offer,
-      media: withMedia ? { heroImageUrl: image, guidePortraitUrl: image } : {},
+      media: withMedia
+        ? {
+            heroImageUrl: image,
+            guidePortraitUrl: image,
+            intro: clip,
+            reel: clip,
+            guideClip: clip,
+            heroClip: clip,
+          }
+        : {},
       // Reuses the SAME dev-cdn base as the hero/portrait stills above, so a
       // page-image block (`resolvePageImageUrl`) previews here too instead of
       // rendering its designed empty state on every gallery load.

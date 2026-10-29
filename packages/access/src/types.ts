@@ -46,6 +46,18 @@ export interface StreamingUrlResponse {
 }
 
 /**
+ * Response for GET /api/access/courses/:courseId/films/:film/stream (owner
+ * P10): a course sales film's signed FULL stream, or `null` (in the `data`
+ * envelope) when the film may only play its 30-second preview.
+ */
+export interface CourseFilmStreamResponse {
+  /** The film master-proxy URL, carrying its film token. */
+  playlistUrl: string;
+  /** ISO 8601. The token's expiry: after it no playlist under it loads. */
+  expiresAt: string;
+}
+
+/**
  * How a reader still holds an item that has left the storefront: it decides
  * the note the detail page shows them (Codex-ov2ii). Mapped from the arm of
  * the access decision that granted, so the note can never give a reason the

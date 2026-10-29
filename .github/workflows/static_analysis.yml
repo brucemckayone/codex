@@ -10,6 +10,9 @@ jobs:
   static-analysis:
     name: Lint, Format & Type Check
     runs-on: ubuntu-latest
+    # About 2x the p95 of 40 green runs (4.5 min). It lives here because a job
+    # that calls a reusable workflow (`uses:`) cannot set it (Codex-j7x4u).
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
 

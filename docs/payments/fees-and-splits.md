@@ -111,8 +111,9 @@ since #597 (fee config in webhooks and the cron; `Codex-2hxff.7`, closed).
 
 Off: `minTransferCents = 0`, so every slice is transferred as it is earned
 (owner decision 2026-10-13, "Keep it off (Recommended)"). Stripe charges nothing
-per transfer, and bank payouts already wait out the 14-day refund window. If it
-is ever turned on, the creator payout terms must say so.
+per transfer, and bank payouts already wait out the 14-day refund window (the
+daily bank payout, `Codex-2hxff.29`: [Payout timing](connect-and-payouts.md#payout-timing)).
+If it is ever turned on, the creator payout terms must say so.
 
 A creator slice smaller than `minTransferCents` is not transferred on its own.
 It is recorded as a pending row (reason `min_transfer_floor`) and paid together

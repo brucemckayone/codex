@@ -22,6 +22,11 @@
   still thumbnail) the section keeps its screen, the kit's plate in it, and
   on the canvas a prompt for the film. The button row appears only when the
   creator writes one.
+
+  The film plays in the screen itself (`InlineFilm`): a press lays the player
+  over the poster, letterboxed in Bold's 21:9, and the poster returns with
+  "Watch again" when it ends. It asks for the full film where the server
+  allows one (`intro`).
 -->
 <script lang="ts">
   import { filmToShow } from '../../model/films';
@@ -32,12 +37,12 @@
   import { editAttrs } from '../../primitives/edit';
   import Eyebrow from '../../primitives/Eyebrow.svelte';
   import Heading from '../../primitives/Heading.svelte';
+  import InlineFilm from '../../primitives/InlineFilm.svelte';
   import Text from '../../primitives/Text.svelte';
   import { settled } from '../hero/settled.svelte';
   import ClipFrame from './ClipFrame.svelte';
   import { VIDEO_COPY } from './copy';
   import { VIDEO_PROMPT, videoDefinition } from './definition';
-  import Watch from './Watch.svelte';
 
   const { props, section, context, edit }: BlockProps = $props();
 
@@ -104,9 +109,18 @@
   <figure class="video__screen" data-layout={section.layout} data-lp-edit-only={creatorOnly}>
     <span class="lp-atmos video__glow" aria-hidden="true"></span>
     {#if clip}
-      <ClipFrame still={clip.posterUrl} ratio="var(--_ratio)" place={split ? 'corner' : 'center'}>
-        <Watch {clip} label={VIDEO_COPY.watch} {title} {edit} />
-      </ClipFrame>
+      <InlineFilm {clip} film="intro" label={VIDEO_COPY.watch} {title} {edit}>
+        {#snippet children(control, player)}
+          <ClipFrame
+            still={clip.posterUrl}
+            ratio="var(--_ratio)"
+            place={split ? 'corner' : 'center'}
+            {player}
+          >
+            {@render control()}
+          </ClipFrame>
+        {/snippet}
+      </InlineFilm>
     {:else}
       <ClipFrame
         ratio="var(--_ratio)"

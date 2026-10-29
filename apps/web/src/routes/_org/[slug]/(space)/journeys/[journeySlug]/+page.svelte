@@ -22,7 +22,9 @@
     type OfferPath,
   } from '$lib/page-builder/offer-paths';
   import { orgGrounds, orgShader } from '$lib/page-builder/org-grounds';
+  import { createFilmRequester } from '$lib/page-builder/film-request';
   import { buildPublicContext, offerAsVisitor } from '$lib/page-builder/public-context';
+  import { requestCourseFilm } from '$lib/remote/journeys.remote';
   import { buildJourneyUrl } from '$lib/utils/subdomain';
   import type { PageData } from './$types';
 
@@ -131,6 +133,20 @@
       mediaBaseUrl: data.coursePage.mediaBaseUrl ?? null,
       url: page.url,
     })
+  );
+
+  // ── THE FULL FILM, ON PRESS (owner P10, "Full film unless it's paid") ───────
+  // A clip the server marked `fullFilm` asks for its 10-minute signed stream
+  // through this, and only when a visitor presses play: one call per press,
+  // nothing on load. A refusal, a failure or a hang all end as `null`
+  // (`createFilmRequester` times out), so the player keeps the 30s preview.
+  // The studio canvas renders the same kit with no such function, so a film
+  // there never asks.
+  const requestFilm = $derived(
+    createFilmRequester(
+      { organizationId: data.org?.id, courseId: data.coursePage.course.id },
+      requestCourseFilm
+    )
   );
 
   // The share image. `courses.coverImageKey` resolved to a public CDN URL by the
@@ -374,4 +390,5 @@
   brandOverrides={data.coursePage.page.brandOverrides}
   orgGrounds={grounds}
   orgShader={shader}
+  {requestFilm}
 />

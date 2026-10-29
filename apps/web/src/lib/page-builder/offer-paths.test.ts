@@ -765,19 +765,44 @@ describe('`who` and `bullets` — decoration only, and now rendered', () => {
     // list, so which of the two wins is now visible to a buyer. An empty
     // repeater must read as "I have not authored these" rather than as "show
     // nothing" — otherwise adding then clearing one bullet blanks the column.
-    const empty = deriveOfferPaths(FULL_OFFER, COURSE, {
-      offers: [{ id: 'purchase', bullets: [] }],
-    } as unknown as SectionProps)[0];
-    expect(empty.bullets).toEqual([
-      'Yours forever',
-      'No subscription',
-      'Lifetime access',
+    // Pinned on the tier, the path whose bullets are not the one-off's
+    // nothing (Codex-61zsk.73).
+    const tierOf = (props: SectionProps) =>
+      deriveOfferPaths(FULL_OFFER, COURSE, props).find(
+        (path) => path.kind === 'tier'
+      );
+    const empty = tierOf({
+      offers: [{ id: `tier:${TIER_ID}`, bullets: [] }],
+    } as unknown as SectionProps);
+    expect(empty?.bullets).toEqual([
+      'Includes Rootwork',
+      'Plus everything else in the membership',
+      'Cancel anytime',
     ]);
 
-    const filled = deriveOfferPaths(FULL_OFFER, COURSE, {
-      offers: [{ id: 'purchase', bullets: ['Only this'] }],
+    const filled = tierOf({
+      offers: [{ id: `tier:${TIER_ID}`, bullets: ['Only this'] }],
+    } as unknown as SectionProps);
+    expect(filled?.bullets).toEqual(['Only this']);
+  });
+
+  it('gives the one-off no bullets of its own, and keeps the ones that tell the recurring paths apart', () => {
+    // "Yours forever / No subscription / Lifetime access" said the one-off's
+    // billing line three more times (Codex-61zsk.73). The sell page now says
+    // what the course holds beside a lone card instead.
+    const paths = deriveOfferPaths(FULL_OFFER, COURSE);
+    const purchase = paths.find((path) => path.kind === 'purchase');
+    expect(purchase?.bullets).toEqual([]);
+    expect(purchase?.blurb).toBe('Buy Rootwork outright.');
+    for (const path of paths.filter((p) => p.kind !== 'purchase')) {
+      expect(path.bullets.length, path.id).toBeGreaterThan(0);
+    }
+
+    // A creator's own points still decorate it.
+    const authored = deriveOfferPaths(FULL_OFFER, COURSE, {
+      offers: [{ id: 'purchase', bullets: ['Printable workbook'] }],
     } as unknown as SectionProps)[0];
-    expect(filled.bullets).toEqual(['Only this']);
+    expect(authored.bullets).toEqual(['Printable workbook']);
   });
 
   it('falls back to the derived `who` when the authored one is blank', () => {

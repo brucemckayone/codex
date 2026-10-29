@@ -21,6 +21,7 @@
  * @module purchase-service
  */
 
+import { isEnvName } from '@codex/agreements';
 import {
   ACCESS_TYPES,
   CHECKOUT_SESSION_KIND,
@@ -34,6 +35,7 @@ import {
   PURCHASE_STATUS,
   STRIPE_REQUESTED_BY_METADATA_KEY,
   stripeEnvMetadata,
+  TEMPLATE_SCOPES,
 } from '@codex/constants';
 import {
   type DatabaseClient,
@@ -47,7 +49,9 @@ import {
   courses,
   type Dispute,
   disputes,
+  emailTemplates,
   entitlements,
+  moneyNotices,
   payoutReversals,
   purchases,
   type RefundStatus,
@@ -62,6 +66,7 @@ import {
   type LedgerDeps,
   listChargeRefunds,
   listClawableRefunds,
+  oldestWaitingPayoutId,
   recordPlatformFee,
   recordSlice,
   repayDispute,
@@ -77,6 +82,7 @@ import {
   ServiceUnavailableError,
   StripeNotConfiguredError,
 } from '@codex/service-errors';
+import { buildOrgUrlFromEnv } from '@codex/urls';
 import type {
   CreateCheckoutInput,
   CreateCourseCheckoutInput,
@@ -314,13 +320,17 @@ export type PurchaseMailer = (params: {
  *   parked. Notification failure MUST NOT block or roll back the payout
  *   ledger write.
  *
- * Adds optional `webAppUrl` to build the dashboard deep-link embedded in
- * payout notifications. When absent the URL is omitted gracefully.
+ * There is no `webAppUrl`: the payout email's Earnings link is built from
+ * `environment` (see `notifyCreatorConnectNeeded`).
  */
 interface PurchaseServiceConfig extends ServiceConfig {
   feeConfig: FeeResolver;
   mailer: PurchaseMailer;
-  webAppUrl?: string;
+  /**
+   * Whether the `creator-connect-needed` template exists. Default: a live
+   * global template of that name, read before the claim. Testing only.
+   */
+  templateExists?: (name: 'creator-connect-needed') => Promise<boolean>;
   /**
    * The locked Billing Portal configuration (`bpc_...`, from
    * `STRIPE_PORTAL_CONFIGURATION_ID`): payment methods and invoices only, with
@@ -539,8 +549,10 @@ export class PurchaseService extends BaseService {
   private readonly stripe: Stripe;
   private readonly feeConfig: FeeResolver;
   private readonly mailer: PurchaseMailer;
-  private readonly webAppUrl: string | undefined;
   private readonly portalConfigurationId: string | undefined;
+  private readonly templateExists: (
+    name: 'creator-connect-needed'
+  ) => Promise<boolean>;
   private readonly checkoutReservations: CheckoutReservations;
 
   /**
@@ -554,8 +566,9 @@ export class PurchaseService extends BaseService {
     this.stripe = stripe;
     this.feeConfig = config.feeConfig;
     this.mailer = config.mailer;
-    this.webAppUrl = config.webAppUrl;
     this.portalConfigurationId = config.portalConfigurationId;
+    this.templateExists =
+      config.templateExists ?? ((name) => this.globalTemplateExists(name));
     this.checkoutReservations = new CheckoutReservations(
       this.db,
       stripe,
@@ -2189,21 +2202,69 @@ export class PurchaseService extends BaseService {
    * WP-10 (Codex-69t7c.10): tell a creator money is waiting for them to set
    * up payouts. Best-effort and fire-and-forget: a notification miss must
    * never block or reverse the payout.
+   *
+   * Only the FIRST waiting sale of an episode sends it (Codex-2hxff.34, Q5):
+   * the email is claimed on `money_notices` under the person's oldest waiting
+   * row, so two sales at the same moment pick the same row and only one email
+   * goes. Later sales wait for the monthly `payouts-waiting` reminder. Once
+   * the money drains, the next waiting row starts a new episode.
+   *
+   * The mailer is fire-and-forget, so `sent_at` records that the email was
+   * handed to it; a refusal is logged by `sendEmailToWorker`. A missing
+   * template (an environment whose seed hasn't run) is checked before the
+   * claim, as the money sweep does, so it never burns the episode with a
+   * send that can't render (notices review LOW-4).
    */
   private async notifyCreatorConnectNeeded(
     creatorId: string,
     organizationId: string | null,
     amountCents: number
   ): Promise<void> {
+    let oldestWaitingId: string | null = null;
     try {
       const [creatorRow] = await this.db
-        .select({ email: users.email })
+        .select({ name: users.name, email: users.email })
         .from(users)
         .where(eq(users.id, creatorId))
         .limit(1);
       if (!creatorRow?.email) return;
-      const dashboardUrl = this.webAppUrl
-        ? `${this.webAppUrl}/studio/earnings`
+      oldestWaitingId = await oldestWaitingPayoutId(this.db, creatorId);
+      if (!oldestWaitingId) return;
+      if (!(await this.templateExists('creator-connect-needed'))) {
+        this.obs.warn(
+          'creator-connect-needed not sent: template missing, nothing claimed',
+          {
+            payoutId: oldestWaitingId,
+            organizationId,
+          }
+        );
+        return;
+      }
+      const [claimed] = await this.db
+        .insert(moneyNotices)
+        .values({
+          userId: creatorId,
+          kind: 'connect_needed_first',
+          periodKey: `episode:${oldestWaitingId}`,
+          amountCents,
+        })
+        .onConflictDoNothing({
+          target: [
+            moneyNotices.userId,
+            moneyNotices.kind,
+            moneyNotices.periodKey,
+          ],
+        })
+        // Bare `.returning()`: the client union collapses the projected overload.
+        .returning();
+      // An earlier sale of this episode was told already.
+      if (!claimed) return;
+      // Earnings lives on the creators subdomain: the bare domain has no
+      // studio route, so `${WEB_APP_URL}/studio/earnings` was a 404. Built
+      // from the env name, never WEB_APP_URL's host (on staging that parses
+      // to the production apex), as the agreement emails' links are.
+      const dashboardUrl = isEnvName(this.environment)
+        ? buildOrgUrlFromEnv(this.environment, 'creators', '/studio/earnings')
         : '/studio/earnings';
       void this.mailer({
         to: creatorRow.email,
@@ -2212,18 +2273,42 @@ export class PurchaseService extends BaseService {
         userId: creatorId,
         organizationId,
         data: {
-          creatorName: creatorRow.email, // fallback; template can resolve display name
+          // The renderer has no conditionals and /internal/send refuses a
+          // null, so a missing name greets "there", never the address.
+          creatorName: creatorRow.name.trim() || 'there',
           amountFormatted: `£${(amountCents / 100).toFixed(2)}`,
           dashboardUrl,
         },
       });
+      await this.db
+        .update(moneyNotices)
+        .set({ sentAt: new Date() })
+        .where(eq(moneyNotices.id, claimed.id));
     } catch (err) {
-      this.obs.warn('creator-connect-needed notification dispatch failed', {
-        creatorId,
+      // The payout stands; the episode's first-sale email may be lost.
+      this.obs.error('creator-connect-needed notification failed', {
+        errorId: crypto.randomUUID(),
+        payoutId: oldestWaitingId,
         organizationId,
         error: err instanceof Error ? err.message : String(err),
       });
     }
+  }
+
+  /** A live global template of this name (the money sweep's own check). */
+  private async globalTemplateExists(name: string): Promise<boolean> {
+    const [template] = await this.db
+      .select({ id: emailTemplates.id })
+      .from(emailTemplates)
+      .where(
+        and(
+          eq(emailTemplates.name, name),
+          eq(emailTemplates.scope, TEMPLATE_SCOPES.GLOBAL),
+          isNull(emailTemplates.deletedAt)
+        )
+      )
+      .limit(1);
+    return template !== undefined;
   }
 
   /**

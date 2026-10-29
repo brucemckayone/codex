@@ -517,6 +517,11 @@ const listPayoutsQueryArgsSchema = z.object({
   source: payoutSourceFilterEnum.default('all'),
   fromDate: z.string().datetime().optional(),
   toDate: z.string().datetime().optional(),
+  /**
+   * Rows transferred on or after this: the date a bank day follows from, so
+   * a backlog sale released late is caught (Org Payouts' Held).
+   */
+  transferredFrom: z.string().datetime().optional(),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),
 });
@@ -541,7 +546,16 @@ const getPayoutSummaryArgsSchema = z.object({
  */
 export const listPayouts = query(
   listPayoutsQueryArgsSchema,
-  async ({ organizationId, status, source, fromDate, toDate, page, limit }) => {
+  async ({
+    organizationId,
+    status,
+    source,
+    fromDate,
+    toDate,
+    transferredFrom,
+    page,
+    limit,
+  }) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
     const params = new URLSearchParams();
@@ -549,6 +563,7 @@ export const listPayouts = query(
     if (source) params.set('source', source);
     if (fromDate) params.set('fromDate', fromDate);
     if (toDate) params.set('toDate', toDate);
+    if (transferredFrom) params.set('transferredFrom', transferredFrom);
     params.set('page', String(page));
     params.set('limit', String(limit));
     return api.subscription.listPayouts(organizationId, params);
@@ -671,6 +686,19 @@ export const getMyConnectDashboard = command(z.void(), async () => {
   const { platform, cookies } = getRequestEvent();
   const api = createServerApi(platform, cookies);
   return api.connect.getMyDashboardLink();
+});
+
+/**
+ * The current user's own Stripe balance (Codex-2hxff.29, .30): the next bank
+ * payout, a take-back the balance is covering, and a balance below zero.
+ * Maps to GET /connect/me/balance — self-scoped, no input; ecom-api caches it
+ * for 10 minutes. Org Studio → Payouts reads it for the owner, whose one
+ * account receives the organisation's share. It rejects (404) for a user with
+ * no Connect account.
+ */
+export const getMyStripeBalance = query(async () => {
+  const { platform, cookies } = getRequestEvent();
+  return createServerApi(platform, cookies).connect.getMyBalance();
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

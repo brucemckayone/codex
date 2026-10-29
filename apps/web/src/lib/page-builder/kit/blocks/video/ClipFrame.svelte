@@ -7,6 +7,11 @@
   control the block lays over it, and, on the canvas only, the block's prompt
   when there is nothing to show yet (marked `data-lp-edit-only`).
 
+  A film that plays in place (`InlineFilm`) lays its `player` over the whole
+  frame, beside the picture rather than inside it: a Style's arch, circle or
+  fade shapes the picture (`.lp-media`), so it never clips the player, and
+  the picture keeps its shape underneath for when the film stops.
+
   Shared by the video, sneak peek and about-you blocks.
 -->
 <script lang="ts">
@@ -35,6 +40,8 @@
     /** The canvas's words for an empty frame. Never passed on the public page. */
     prompt?: string;
     children?: Snippet;
+    /** A film playing in this frame, laid over all of it (`InlineFilm`). */
+    player?: Snippet;
     class?: string;
   }
 
@@ -50,6 +57,7 @@
     place = 'corner',
     prompt,
     children,
+    player,
     class: className,
   }: Props = $props();
 </script>
@@ -57,6 +65,7 @@
 <div class="clip {className ?? ''}" data-place={place}>
   <Media image={still} {srcset} {sizes} {ratio} {pending} {alt} {mark} {scheme} />
   {#if children}<div class="clip__control">{@render children()}</div>{/if}
+  {#if player}{@render player()}{/if}
   {#if prompt && !still && !pending}
     <p class="clip__prompt" data-lp-edit-only><span>{prompt}</span></p>
   {/if}

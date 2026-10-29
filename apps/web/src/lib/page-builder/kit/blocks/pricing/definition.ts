@@ -14,6 +14,7 @@ import {
   readTextList,
 } from '../../model/read';
 import type { BlockDefinition, BlockField } from '../../model/types';
+import { type IncludedRow, readIncluded } from './included';
 
 /**
  * The creator's note on a section that sells (pricing, call to action): their
@@ -48,6 +49,13 @@ export type PricingProps = {
   ctaLabel?: string;
   note?: string;
   offers?: PricingOfferCopy[];
+  /**
+   * "What's included" beside a single way in (`included.ts`): absent = the
+   * course's own lines, live; `[]` = no list. Edited by the inspector's own
+   * control (`IncludedField`), not a `fields` entry: no generic control can
+   * tell a live line from the creator's words for it.
+   */
+  included?: IncludedRow[];
 };
 
 export const pricingDefinition: BlockDefinition<PricingProps> = {
@@ -141,5 +149,6 @@ export const pricingDefinition: BlockDefinition<PricingProps> = {
         },
         6
       ),
+      included: readIncluded(raw),
     }),
 };

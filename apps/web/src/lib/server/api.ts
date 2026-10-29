@@ -12,6 +12,7 @@ import type {
   ContentBodySource,
   ContentHeld,
   CourseEntryResponse,
+  CourseFilmStreamResponse,
   PlaybackProgressResponse,
   StreamingUrlResponse,
   UpdatePlaybackProgressResponse,
@@ -21,17 +22,20 @@ import type {
   ActivityFeedResponse,
   ChargeDetail,
   ChargeSummary,
+  CheckedOwedToCreator,
   ContentPerformanceItem,
-  CreatorDebtItem,
+  CreatorDebtPerson,
   CreatorRevenueSplitItem,
   CustomerDetails,
   CustomerListItem,
   DashboardStats,
   FailedRefundItem,
   FollowerStats,
+  OwedToCreatorItem,
   RefundPreview,
   ResolvedCreatorDebt,
   ResolvedFailedRefund,
+  ResolvedOwedToCreator,
   RevenueStats,
   SubscriberStats,
   SupportQueueCounts,
@@ -78,9 +82,11 @@ import type {
   UserProfile,
 } from '@codex/shared-types';
 import type {
+  ConnectAccountService,
   CourseSubscriptionCheckoutVerifyResult,
   CreatorEarningsSummary,
   CreatorPayoutBreakdown,
+  CreatorPayoutRow,
   PayoutSummary,
   PayoutWithCreator,
   SubscriberListItem,
@@ -102,10 +108,12 @@ import type {
   MediaStatusTicket,
   ReactivateSubscriptionInput,
   ResumeSubscriptionInput,
+  SalesFilm,
   SupportChargeSearchQuery,
   SupportIssueRefundInput,
   SupportQueueQuery,
   SupportResolveCreatorDebtInput,
+  SupportResolveCreditInput,
   SupportResolveFailedRefundInput,
   UpdateBrandingInput,
   UpdateCategoryInput,
@@ -184,6 +192,15 @@ import type {
   UserOrgSubscription,
 } from '../types';
 import { ApiError } from './errors';
+
+/**
+ * The session user's own Stripe balance, as Studio reads it (Codex-2hxff.29,
+ * .30; GET /connect/me/balance). Derived from the service, whose index does
+ * not export the interface by name.
+ */
+export type MyStripeBalance = Awaited<
+  ReturnType<ConnectAccountService['getBalanceForUser']>
+>;
 
 /**
  * One item from `GET /api/content/public`, typed to match what the endpoint
@@ -411,6 +428,19 @@ export interface CreatorOnboardingResponse {
   updatedAt: string;
 }
 
+/** How long `request()` waits on a worker before it aborts with a 408. */
+const REQUEST_TIMEOUT_MS = 10000;
+
+/**
+ * How long the course-film mint may take (owner P10). Below the page's own
+ * 8s wait (`FILM_REQUEST_TIMEOUT_MS`), so a slow mint ends HERE, as a logged
+ * 408, rather than as a silent give-up in the browser.
+ */
+const COURSE_FILM_TIMEOUT_MS = 6000;
+
+/** `fetch` options, plus a per-call timeout for a caller that gives up sooner. */
+type RequestOptions = RequestInit & { timeoutMs?: number };
+
 export function createServerApi(
   platform: App.Platform | undefined,
   cookies?: Cookies
@@ -423,13 +453,14 @@ export function createServerApi(
    *
    * @param worker - Which worker to call
    * @param path - API path (starting with /)
-   * @param options - Additional fetch options
+   * @param options - Additional fetch options, plus `timeoutMs` for a call
+   *   whose caller gives up sooner than the default
    * @returns Typed response data
    */
   async function request<T>(
     worker: ServiceName,
     path: string,
-    options?: RequestInit
+    { timeoutMs = REQUEST_TIMEOUT_MS, ...options }: RequestOptions = {}
   ): Promise<T> {
     const url = `${serverApiUrl(platform, worker)}${path}`;
     // Logs name the route, never its query: a visitor's search text (and any
@@ -437,7 +468,7 @@ export function createServerApi(
     const logPath = path.split('?')[0];
     const headers: HeadersInit = {
       [HEADERS.CONTENT_TYPE]: MIME_TYPES.APPLICATION.JSON,
-      ...options?.headers,
+      ...options.headers,
     };
 
     if (sessionCookie) {
@@ -447,10 +478,11 @@ export function createServerApi(
         buildAuthForwardingCookie(sessionCookie);
     }
 
-    // Abort fetch after 10 seconds to prevent indefinite hangs when a worker
-    // is slow or unresponsive (e.g. during E2E tests with cold KV/DB).
+    // Abort fetch after 10 seconds (or the call's own `timeoutMs`) to prevent
+    // indefinite hangs when a worker is slow or unresponsive (e.g. during E2E
+    // tests with cold KV/DB).
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     const timer = logger.startTimer(`api:${worker}${logPath}`);
     let response: Response;
@@ -463,7 +495,7 @@ export function createServerApi(
     } catch (err) {
       clearTimeout(timeoutId);
       if (err instanceof DOMException && err.name === 'AbortError') {
-        timer.end({ method: options?.method ?? 'GET', status: 408 });
+        timer.end({ method: options.method ?? 'GET', status: 408 });
         throw new ApiError(
           408,
           `Request to ${worker}${logPath} timed out`,
@@ -473,7 +505,7 @@ export function createServerApi(
       throw err;
     }
     clearTimeout(timeoutId);
-    timer.end({ method: options?.method ?? 'GET', status: response.status });
+    timer.end({ method: options.method ?? 'GET', status: response.status });
 
     if (!response.ok) {
       const body = (await response.json().catch(() => null)) as Record<
@@ -1281,6 +1313,27 @@ export function createServerApi(
         request<SellPreview | null>(
           'access',
           `/api/journeys/courses/${courseId}/sell-preview`
+        ),
+
+      /**
+       * A course sales film's signed FULL stream (owner P10), asked for by a
+       * visitor's press: a 10-minute film-proxy URL, or null when the film may
+       * only play its 30s preview (a paid practice uses it, or it is not a
+       * published course's). Public; the worker re-checks on every call.
+       */
+      courseFilmStream: (
+        organizationId: string,
+        courseId: string,
+        film: SalesFilm
+      ) =>
+        request<CourseFilmStreamResponse | null>(
+          'access',
+          `/api/access/courses/${encodeURIComponent(
+            courseId
+          )}/films/${film}/stream?organizationId=${encodeURIComponent(
+            organizationId
+          )}`,
+          { timeoutMs: COURSE_FILM_TIMEOUT_MS }
         ),
 
       /**
@@ -2929,7 +2982,7 @@ export function createServerApi(
           { method: 'POST', body: JSON.stringify(body) }
         ),
 
-      /** The queue's two counts, for the nav badge. */
+      /** The queue's three counts, for the nav badge. */
       getQueueCounts: () =>
         request<SupportQueueCounts>('admin', '/api/admin/support/queue/counts'),
 
@@ -2943,9 +2996,12 @@ export function createServerApi(
           })}`
         ),
 
-      /** Creator debts waiting for a person, oldest first. */
+      /**
+       * Creator debts, one row per person, oldest first: what Stripe holds
+       * as a negative balance, and any debt Stripe refused.
+       */
       listCreatorDebts: ({ page, limit }: SupportQueueQuery) =>
-        request<PaginatedListResponse<CreatorDebtItem>>(
+        request<PaginatedListResponse<CreatorDebtPerson>>(
           'admin',
           `/api/admin/support/queue/creator-debts?${new URLSearchParams({
             page: String(page),
@@ -2973,6 +3029,35 @@ export function createServerApi(
           'admin',
           `/api/admin/support/creator-debts/${encodeURIComponent(reviewId)}/resolve`,
           { method: 'POST', body: JSON.stringify(body) }
+        ),
+
+      /** Money owed back to payees after a late take-back, oldest first. */
+      listOwedToCreators: ({ page, limit }: SupportQueueQuery) =>
+        request<PaginatedListResponse<OwedToCreatorItem>>(
+          'admin',
+          `/api/admin/support/queue/owed-to-creators?${new URLSearchParams({
+            page: String(page),
+            limit: String(limit),
+          })}`
+        ),
+
+      /** Re-pay it, count it against its own open debt, or mark it not owed. */
+      resolveOwedToCreator: (
+        creditId: string,
+        body: SupportResolveCreditInput
+      ) =>
+        request<ResolvedOwedToCreator>(
+          'admin',
+          `/api/admin/support/owed-to-creators/${encodeURIComponent(creditId)}/resolve`,
+          { method: 'POST', body: JSON.stringify(body) }
+        ),
+
+      /** "Check Stripe again": asks Stripe once. The route takes no body. */
+      checkOwedToCreator: (creditId: string) =>
+        request<CheckedOwedToCreator>(
+          'admin',
+          `/api/admin/support/owed-to-creators/${encodeURIComponent(creditId)}/check`,
+          { method: 'POST' }
         ),
     },
 
@@ -3237,10 +3322,12 @@ export function createServerApi(
       /**
        * List the current creator's own payouts (paginated).
        * GET /subscriptions/me/payouts — self-scoped, no org context.
-       * Returns `{ items: PayoutWithCreator[], pagination }` envelope.
+       * Returns `{ items: CreatorPayoutRow[], pagination }` envelope: no
+       * creator or subscriber identity, and each row's bank date and
+       * take-back.
        */
       getMyPayouts: (params?: URLSearchParams) =>
-        request<PaginatedListResponse<PayoutWithCreator>>(
+        request<PaginatedListResponse<CreatorPayoutRow>>(
           'ecom',
           `/subscriptions/me/payouts${params?.toString() ? `?${params.toString()}` : ''}`
         ),
@@ -3312,6 +3399,16 @@ export function createServerApi(
         request<ConnectDashboardResponse>('ecom', '/connect/me/dashboard', {
           method: 'POST',
         }),
+
+      /**
+       * The current creator's Stripe balance: the next bank payout, a
+       * take-back the balance is covering, and a balance below zero
+       * (Codex-2hxff.29, .30). GET /connect/me/balance — self-scoped, cached
+       * 10 minutes by ecom-api. 404 when the user has no Connect account, so
+       * call it only when connected; 503 when Stripe can't be read.
+       */
+      getMyBalance: () =>
+        request<MyStripeBalance>('ecom', '/connect/me/balance'),
     },
 
     /**

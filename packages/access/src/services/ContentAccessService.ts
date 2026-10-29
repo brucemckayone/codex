@@ -10,6 +10,7 @@ import {
 import {
   createPerRequestDbClient,
   MEDIA_ITEM_RESPONSE_COLUMNS,
+  toIso,
 } from '@codex/database';
 import { content } from '@codex/database/schema';
 import { verifyPurchase } from '@codex/purchase';
@@ -24,6 +25,7 @@ import type {
   GetPlaybackProgressInput,
   GetStreamingUrlInput,
   ListUserLibraryInput,
+  SalesFilm,
   SavePlaybackProgressInput,
   WithdrawnContentQuery,
 } from '@codex/validation';
@@ -35,6 +37,7 @@ import type {
   ContentHeld,
   ContentHeldBy,
   CourseEntryResponse,
+  CourseFilmStreamResponse,
   WithdrawnContent,
 } from '../types';
 import { AccessRevocation } from './access-revocation';
@@ -63,11 +66,15 @@ import {
 } from './content-access/playback-progress';
 import { DevR2Signer, type R2Signer } from './content-access/r2-signer';
 import {
+  getFilmHlsMasterPlaylist as buildFilmMasterPlaylist,
+  buildFilmStreamResponse,
   getHlsMasterPlaylist as buildHlsMasterPlaylist,
   getHlsVariantPlaylist as buildHlsVariantPlaylist,
   buildStreamingResponse,
+  filmStreamFailure,
   resolveStreamableMedia,
 } from './content-access/streaming';
+import { resolveCourseFilm } from './sales-films';
 
 /**
  * Default TTL (in seconds) for presigned streaming URLs.
@@ -726,6 +733,89 @@ export class ContentAccessService
     expirySeconds: number;
   }): Promise<string | null> {
     return buildHlsVariantPlaylist({ r2: this.r2 }, input);
+  }
+
+  /**
+   * Mint the signed FULL stream of a course sales film, for a visitor's press
+   * on the public sales page (owner P10, "Full film unless it's paid").
+   *
+   * PUBLIC: there is no user, so the gate is the film itself, re-checked on
+   * every press by `resolveCourseFilm`: the named slot of a published course in
+   * this org holds the media, no content item that is anything but plainly free
+   * uses it, it is ready, and its creator is still an active member of the
+   * org. Every refusal is the same `null`, so a caller learns nothing about
+   * why, and the page plays the 30-second preview. The sell preview's
+   * `fullFilm` flag is only a hint; this is the check.
+   *
+   * `organizationId` arrives from the browser: a CONSISTENCY filter, never an
+   * authorisation input. It can only narrow; the course→org join decides.
+   *
+   * The URL opens the FILM proxies with a film token bound to this course and
+   * media for {@link DEFAULT_STREAMING_URL_TTL_SECONDS}. The content proxies
+   * refuse it, and the film proxies refuse a content token (`hls-token.ts`).
+   * Once minted it plays until it expires, the window a revoked buyer's stream
+   * has too: a price set on the film's content after the press stops the next
+   * press, not this one.
+   */
+  async getCourseFilmStream(input: {
+    organizationId: string;
+    courseId: string;
+    film: SalesFilm;
+  }): Promise<CourseFilmStreamResponse | null> {
+    try {
+      const film = await resolveCourseFilm(this.db, input);
+      if (!film.ok) {
+        // The reason is the log's alone: the caller gets one null for all.
+        this.obs.info('Course film stream refused', {
+          organizationId: input.organizationId,
+          courseId: input.courseId,
+          film: input.film,
+          reason: film.reason,
+        });
+        return null;
+      }
+
+      const { playlistUrl, expiresAt } = await buildFilmStreamResponse(
+        film,
+        {
+          contentApiBaseUrl: this.contentApiBaseUrl,
+          hlsTokenSecret: this.hlsTokenSecret,
+          obs: this.obs,
+        },
+        input.courseId,
+        DEFAULT_STREAMING_URL_TTL_SECONDS
+      );
+      this.obs.info('Course film stream minted', {
+        courseId: input.courseId,
+        film: input.film,
+        mediaItemId: film.mediaId,
+      });
+      return { playlistUrl, expiresAt: toIso(expiresAt) };
+    } catch (error) {
+      // Not handleError: its context would reach this anonymous caller.
+      throw filmStreamFailure(error, this.obs, input);
+    }
+  }
+
+  /**
+   * {@link getHlsMasterPlaylist} for a course sales film: the variants point at
+   * the film variant proxy. Auth is the film token the route verified.
+   *
+   * Called at workers/content-api/src/routes/content-access.ts on the same
+   * destructured-factory receiver as `getHlsMasterPlaylist`, which dead-code
+   * detection cannot resolve to this class.
+   */
+  // fallow-ignore-next-line unused-class-member
+  async getFilmMasterPlaylist(input: {
+    courseId: string;
+    creatorId: string;
+    mediaId: string;
+    token: string;
+  }): Promise<string | null> {
+    return buildFilmMasterPlaylist(
+      { r2: this.r2, contentApiBaseUrl: this.contentApiBaseUrl },
+      input
+    );
   }
 
   /**

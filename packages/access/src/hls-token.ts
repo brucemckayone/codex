@@ -132,6 +132,52 @@ export async function signHlsToken(
   return `${encodedPayload}.${signature}`;
 }
 
+/** Why a token was refused, as the film proxies log it. */
+export type TokenRefusal = 'malformed' | 'signature' | 'expired';
+
+/**
+ * Check a token's signature over `${domain}${encodedPayload}` and decode its
+ * payload: `malformed` when it is not `<payload>.<signature>` or its payload is
+ * not a JSON object, `signature` when it was tampered with or signed for
+ * another domain. Field and expiry checks are the caller's: each token kind
+ * names its own fields.
+ */
+async function decodeSignedPayload(
+  token: string,
+  secret: string,
+  domain: string
+): Promise<
+  | { ok: true; payload: Record<string, unknown> }
+  | { ok: false; reason: Exclude<TokenRefusal, 'expired'> }
+> {
+  const dotIndex = token.indexOf('.');
+  if (dotIndex <= 0 || dotIndex === token.length - 1) {
+    return { ok: false, reason: 'malformed' };
+  }
+
+  const encodedPayload = token.slice(0, dotIndex);
+  const providedSignature = token.slice(dotIndex + 1);
+
+  const expectedSignature = await hmacSha256Base64Url(
+    `${domain}${encodedPayload}`,
+    secret
+  );
+  if (!constantTimeEqual(providedSignature, expectedSignature)) {
+    return { ok: false, reason: 'signature' };
+  }
+
+  try {
+    const payload: unknown = JSON.parse(
+      base64UrlDecodeToString(encodedPayload)
+    );
+    return typeof payload === 'object' && payload !== null
+      ? { ok: true, payload: payload as Record<string, unknown> }
+      : { ok: false, reason: 'malformed' };
+  } catch {
+    return { ok: false, reason: 'malformed' };
+  }
+}
+
 /**
  * Verify an HLS proxy token and return its payload, or `null` when the token
  * is malformed, tampered (signature mismatch), or expired.
@@ -147,26 +193,9 @@ export async function verifyHlsToken(
   secret: string,
   nowSeconds: number = Math.floor(Date.now() / 1000)
 ): Promise<HlsTokenPayload | null> {
-  const dotIndex = token.indexOf('.');
-  if (dotIndex <= 0 || dotIndex === token.length - 1) {
-    return null;
-  }
-
-  const encodedPayload = token.slice(0, dotIndex);
-  const providedSignature = token.slice(dotIndex + 1);
-
-  const expectedSignature = await hmacSha256Base64Url(encodedPayload, secret);
-  if (!constantTimeEqual(providedSignature, expectedSignature)) {
-    return null;
-  }
-
-  let payload: HlsTokenPayload;
-  try {
-    payload = JSON.parse(base64UrlDecodeToString(encodedPayload));
-  } catch {
-    return null;
-  }
-
+  // No domain: a content token signs the bare payload, as it always has.
+  const decoded = await decodeSignedPayload(token, secret, '');
+  const payload = decoded.ok ? decoded.payload : null;
   if (
     typeof payload?.creatorId !== 'string' ||
     typeof payload?.mediaId !== 'string' ||
@@ -179,5 +208,91 @@ export async function verifyHlsToken(
     return null;
   }
 
-  return payload;
+  return {
+    creatorId: payload.creatorId,
+    mediaId: payload.mediaId,
+    exp: payload.exp,
+  };
+}
+
+/**
+ * A course sales film's token (owner P10): the full stream of one film, minted
+ * by the public film minter only when no paid content uses that media.
+ *
+ * Bound to the course as well as the media, so the film proxies can refuse a
+ * token presented under another course's path.
+ */
+export interface FilmTokenPayload extends HlsTokenPayload {
+  /** The published course whose sell slot holds the film. */
+  courseId: string;
+}
+
+/**
+ * DOMAIN SEPARATION. A film token is signed over `course-film.<payload>`, a
+ * content token over the bare `<payload>`, with the same secret. So neither
+ * verifier accepts the other's token: a film token is not a content-stream
+ * credential, and a content token (minted after a paid access decision) opens
+ * no film route. Both are capabilities for one media item's HLS tree, so the
+ * separation keeps each route's grant to the decision that minted it.
+ */
+const FILM_TOKEN_DOMAIN = 'course-film.';
+
+/**
+ * Mint a short-lived film token. The caller has run the eligibility check
+ * (`resolveCourseFilm`); this only signs.
+ */
+export async function signFilmToken(
+  payload: FilmTokenPayload,
+  secret: string
+): Promise<string> {
+  const encodedPayload = base64UrlEncodeString(JSON.stringify(payload));
+  const signature = await hmacSha256Base64Url(
+    `${FILM_TOKEN_DOMAIN}${encodedPayload}`,
+    secret
+  );
+  return `${encodedPayload}.${signature}`;
+}
+
+/**
+ * A film token's verdict. The film proxies answer every refusal with the same
+ * 403, but log the reason, so a broken token is told apart from routine
+ * expiry. A content token presented here is a `signature` refusal: it was
+ * signed for the other domain.
+ */
+export type FilmTokenCheck =
+  | { ok: true; payload: FilmTokenPayload }
+  | { ok: false; reason: TokenRefusal };
+
+/** Verify a film token. Never throws. */
+export async function verifyFilmToken(
+  token: string,
+  secret: string,
+  nowSeconds: number = Math.floor(Date.now() / 1000)
+): Promise<FilmTokenCheck> {
+  const decoded = await decodeSignedPayload(token, secret, FILM_TOKEN_DOMAIN);
+  if (!decoded.ok) return decoded;
+
+  const { payload } = decoded;
+  if (
+    typeof payload.courseId !== 'string' ||
+    typeof payload.creatorId !== 'string' ||
+    typeof payload.mediaId !== 'string' ||
+    typeof payload.exp !== 'number'
+  ) {
+    return { ok: false, reason: 'malformed' };
+  }
+
+  if (nowSeconds >= payload.exp) {
+    return { ok: false, reason: 'expired' };
+  }
+
+  return {
+    ok: true,
+    payload: {
+      courseId: payload.courseId,
+      creatorId: payload.creatorId,
+      mediaId: payload.mediaId,
+      exp: payload.exp,
+    },
+  };
 }

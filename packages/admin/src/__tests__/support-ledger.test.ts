@@ -8,14 +8,19 @@ import type { PayoutReversal } from '@codex/database/schema';
 import { MAX_CLAWBACK_ATTEMPTS } from '@codex/payments';
 import { describe, expect, it } from 'vitest';
 import {
+  type CreditView,
   causeKey,
   chargebackState,
+  creditAction,
+  creditState,
   debtErrorLabel,
+  debtStanding,
   type HistoryContext,
   previewLabel,
   refundFailureLabel,
   sliceHistory,
 } from '../services/support-ledger';
+import type { CreditAction } from '../support-types';
 
 const SLICE = 'slice-1';
 const REPAY = 'repay-1';
@@ -52,6 +57,7 @@ function context(overrides: Partial<HistoryContext> = {}): HistoryContext {
     wonDisputeIds: new Set(),
     debtResolutions: new Map(),
     disputeDates: new Map(),
+    credits: new Map(),
     ...overrides,
   };
 }
@@ -74,6 +80,8 @@ describe('sliceHistory', () => {
         debtResolution: null,
         disputeOpenedAt: null,
         disputeWonAt: null,
+        systemDecision: null,
+        credit: null,
       },
     ]);
     expect(takenCents).toBe(540);
@@ -233,6 +241,315 @@ describe('sliceHistory', () => {
     );
     expect(history).toHaveLength(1);
     expect(takenCents).toBe(0);
+  });
+});
+
+describe('a late take-back on a settled step (Codex-2hxff.73, data design §7.6)', () => {
+  function creditOf(
+    stepId: string,
+    overrides: Partial<CreditView & { action: CreditAction | null }> = {}
+  ): HistoryContext['credits'] {
+    return new Map([
+      [
+        stepId,
+        {
+          id: 'credit-1',
+          effect: 'reversal_landed',
+          amountCents: 700,
+          settledAs: 'cancelled',
+          resolution: null,
+          repayPayout: null,
+          needsPerson: false,
+          siblingTook: false,
+          action: 'repay',
+          ...overrides,
+        },
+      ],
+    ]);
+  }
+
+  it('reads a cancelled step with an open, confirmed credit as taken_after_settled, owed back for what Stripe took', () => {
+    const cancelled = step({ status: 'cancelled', amountCents: 765 });
+    const { history, takenCents, owedToPayeeCents } = sliceHistory(
+      SLICE,
+      [cancelled],
+      context({ credits: creditOf(cancelled.id) })
+    );
+    expect(history[0]).toMatchObject({
+      outcome: 'taken_after_settled',
+      amountCents: 765,
+      credit: {
+        creditId: 'credit-1',
+        state: 'owed',
+        amountCents: 700,
+        action: 'repay',
+        repayPayout: null,
+      },
+    });
+    expect(owedToPayeeCents).toBe(700);
+    expect(takenCents).toBe(700);
+  });
+
+  it('once re-paid, the line is paid_back with its pending re-pay, and nothing is taken or owed back', () => {
+    const cancelled = step({ status: 'cancelled' });
+    const { history, takenCents, owedToPayeeCents } = sliceHistory(
+      SLICE,
+      [cancelled],
+      context({
+        credits: creditOf(cancelled.id, {
+          resolution: 'repaid',
+          repayPayout: { id: 'repay-9', status: 'pending' },
+          action: null,
+        }),
+      })
+    );
+    expect(history[0]).toMatchObject({
+      outcome: 'paid_back',
+      credit: {
+        state: 'repaid',
+        action: null,
+        repayPayout: { id: 'repay-9', status: 'pending' },
+      },
+    });
+    expect([takenCents, owedToPayeeCents]).toEqual([0, 0]);
+  });
+
+  it('a debt step with a credit is taken_after_settled while its debt still counts as owed', () => {
+    const debt = step({ status: 'debt', amountCents: 700 });
+    const { history, owedCents, owedToPayeeCents } = sliceHistory(
+      SLICE,
+      [debt],
+      context({
+        debtResolutions: new Map([[debt.id, null]]),
+        credits: creditOf(debt.id, {
+          settledAs: 'debt',
+          action: 'count_against_debt',
+        }),
+      })
+    );
+    expect(history[0]).toMatchObject({
+      outcome: 'taken_after_settled',
+      debtResolution: null,
+      credit: { action: 'count_against_debt' },
+    });
+    expect([owedCents, owedToPayeeCents]).toEqual([700, 700]);
+  });
+
+  it('a credit that needs a check, or is not owed, leaves the line as the step alone reads', () => {
+    const a = step({ status: 'cancelled' });
+    const b = step({ status: 'cancelled', causeId: 're_2' });
+    const { history, owedToPayeeCents } = sliceHistory(
+      SLICE,
+      [a, b],
+      context({
+        credits: new Map([
+          ...creditOf(a.id, {
+            effect: 'unverified',
+            amountCents: null,
+            action: 'check',
+          }),
+          ...creditOf(b.id, {
+            id: 'credit-2',
+            resolution: 'not_owed',
+            action: null,
+          }),
+        ]),
+      })
+    );
+    expect(history.map((line) => [line.outcome, line.credit?.state])).toEqual([
+      ['not_taken', 'needs_check'],
+      ['not_taken', 'not_owed'],
+    ]);
+    expect(owedToPayeeCents).toBe(0);
+  });
+
+  it('names what the system decided for a stranded step (Codex-2hxff.71)', () => {
+    const took = step({
+      lastErrorCode: 'system_took_share',
+      kind: 'cancellation',
+    });
+    const kept = step({
+      status: 'cancelled',
+      causeId: 're_2',
+      kind: 'cancellation',
+      lastErrorCode: 'system_payee_kept',
+    });
+    const other = step({
+      causeId: 're_3',
+      lastErrorCode: 'insufficient_funds',
+      status: 'debt',
+    });
+    const { history } = sliceHistory(SLICE, [took, kept, other], context());
+    expect(history.map((line) => line.systemDecision)).toEqual([
+      'took_share',
+      'payee_kept',
+      null,
+    ]);
+  });
+});
+
+describe('creditState and creditAction (§7.2, §7.4)', () => {
+  const owed = {
+    effect: 'reversal_landed',
+    resolution: null,
+    settledAs: 'cancelled',
+    amountCents: 700,
+    needsPerson: false,
+    siblingTook: false,
+  };
+  const unlinked = { repaidByPayoutId: null };
+  /** A cancellation the ledger cannot attribute to its step (MED-3). */
+  const forPerson = {
+    ...owed,
+    effect: 'unverified',
+    amountCents: null,
+    needsPerson: true,
+  };
+
+  it('states', () => {
+    expect(creditState(owed)).toBe('owed');
+    expect(creditState({ ...owed, effect: 'unverified' })).toBe('needs_check');
+    expect(creditState(forPerson)).toBe('needs_person');
+    expect(creditState({ ...forPerson, resolution: 'not_owed' })).toBe(
+      'not_owed'
+    );
+    for (const resolution of ['repaid', 'debt_collected', 'not_owed']) {
+      expect(creditState({ ...owed, resolution })).toBe(resolution);
+    }
+  });
+
+  it.each([
+    ['a confirmed credit on a cancelled step', owed, unlinked, null, 'repay'],
+    [
+      'one Stripe never answered for',
+      { ...owed, effect: 'unverified', amountCents: null },
+      unlinked,
+      null,
+      'check',
+    ],
+    [
+      'one found on a done step',
+      { ...owed, settledAs: 'done' },
+      unlinked,
+      null,
+      'settle_by_hand',
+    ],
+    [
+      'one on a step already re-paid',
+      owed,
+      { repaidByPayoutId: 'repay-1' },
+      null,
+      'settle_by_hand',
+    ],
+    [
+      'its own open debt, the same amount',
+      { ...owed, settledAs: 'debt' },
+      unlinked,
+      { attemptedReversalCents: 700, resolvedAt: null, resolution: null },
+      'count_against_debt',
+    ],
+    [
+      'its own open debt, another amount (OQ4)',
+      { ...owed, settledAs: 'debt' },
+      unlinked,
+      { attemptedReversalCents: 765, resolvedAt: null, resolution: null },
+      'repay',
+    ],
+    [
+      'its own debt, already settled',
+      { ...owed, settledAs: 'debt' },
+      unlinked,
+      {
+        attemptedReversalCents: 700,
+        resolvedAt: new Date(),
+        resolution: 'platform_absorbed',
+      },
+      'repay',
+    ],
+    [
+      'a settled credit',
+      { ...owed, resolution: 'repaid' },
+      unlinked,
+      null,
+      null,
+    ],
+    [
+      'a cancellation the ledger cannot attribute (MED-3): support decides',
+      forPerson,
+      unlinked,
+      null,
+      'decide',
+    ],
+    [
+      'one of those on a step already re-paid',
+      forPerson,
+      { repaidByPayoutId: 'repay-1' },
+      null,
+      'settle_by_hand',
+    ],
+    [
+      'one of those whose sibling step is done or re-paid (round 2 MED-1): settled by hand',
+      { ...forPerson, siblingTook: true },
+      unlinked,
+      null,
+      'settle_by_hand',
+    ],
+    [
+      "on a debt step whose payee-paid debt's own re-pay went out first: Re-pay still goes ahead (round 2 LOW-3)",
+      { ...owed, settledAs: 'debt' },
+      { repaidByPayoutId: 'debt-repay-1' },
+      {
+        attemptedReversalCents: 1000,
+        resolvedAt: new Date(),
+        resolution: 'creator_absorbed',
+      },
+      'repay',
+    ],
+    [
+      'on a debt step linked while its debt is still open: settled by hand',
+      { ...owed, settledAs: 'debt' },
+      { repaidByPayoutId: 'repay-1' },
+      { attemptedReversalCents: 1000, resolvedAt: null, resolution: null },
+      'settle_by_hand',
+    ],
+  ])('%s', (_name, credit, onStep, debt, expected) => {
+    expect(creditAction(credit, onStep, debt)).toBe(expected);
+  });
+});
+
+describe('debtStanding (Q4, data design §4.1)', () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  const since = new Date('2026-10-26T08:00:00.000Z');
+
+  it('£50 or less is written off by Stripe at 180 days; over £50 is invoiced at 90', () => {
+    const now = new Date(since.getTime() + 2 * DAY);
+    expect(debtStanding(5000, since, now)).toEqual({
+      state: 'recovering',
+      clock: { kind: 'stripe_writes_off', on: '2027-04-24', daysLeft: 178 },
+    });
+    expect(debtStanding(5001, since, now)).toEqual({
+      state: 'recovering',
+      clock: { kind: 'invoice', on: '2027-01-24', daysLeft: 88 },
+    });
+  });
+
+  it('turns to_invoice at exactly 90 days, not a moment before', () => {
+    const due = since.getTime() + 90 * DAY;
+    expect(debtStanding(6240, since, new Date(due - 1)).state).toBe(
+      'recovering'
+    );
+    expect(debtStanding(6240, since, new Date(due))).toEqual({
+      state: 'to_invoice',
+      clock: { kind: 'invoice', on: '2027-01-24', daysLeft: 0 },
+    });
+  });
+
+  it('follows the live amount: a debt that drops to £50 switches to the write-off rule', () => {
+    const now = new Date(since.getTime() + 100 * DAY);
+    expect(debtStanding(5000, since, now)).toMatchObject({
+      state: 'recovering',
+      clock: { kind: 'stripe_writes_off' },
+    });
   });
 });
 

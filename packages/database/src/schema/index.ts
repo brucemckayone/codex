@@ -6,6 +6,7 @@
 
 export * from './auth';
 export * from './categories';
+export * from './connect-balances';
 export * from './content';
 export * from './course-commerce';
 export * from './course-progress';
@@ -16,9 +17,11 @@ export * from './entitlements';
 export * from './fee-config';
 export * from './followers';
 export * from './journeys';
+export * from './money-notices';
 export * from './notifications';
 export * from './organization-ownership';
 export * from './organizations';
+export * from './payee-credits';
 export * from './payout-reversals';
 export * from './payouts';
 export * from './playback';

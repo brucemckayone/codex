@@ -4,7 +4,8 @@
  * page's own): one ask, wherever it is put, going where the creator said.
  */
 import { tick } from 'svelte';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { loadPlayerCore } from '$lib/components/player/load-core';
 import {
   flushSync,
   mount,
@@ -163,7 +164,17 @@ describe('ButtonBlock: section', () => {
 });
 
 describe('ButtonBlock: preview', () => {
+  // Fetched ahead, as the page's first sight of the button does.
+  beforeAll(async () => {
+    await loadPlayerCore();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('plays the preview film in the shared player, with no price beside it', async () => {
+    vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
     await render({
       props: { action: { kind: 'preview' } },
       reel: FILM,
@@ -176,7 +187,18 @@ describe('ButtonBlock: preview', () => {
     press?.click();
     flushSync();
     await tick();
-    expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
+    const dialog = document.body.querySelector('[role="dialog"]');
+    expect(dialog).not.toBeNull();
+    // The theatre: the same player as a framed film, started by the press.
+    expect(dialog?.querySelector('.player video')).not.toBeNull();
+    expect(HTMLMediaElement.prototype.play).toHaveBeenCalled();
+    // Escape dismisses it, and the focus is the button's again.
+    dialog?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })
+    );
+    flushSync();
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(press);
   });
 
   it('on the canvas it plays nothing', async () => {

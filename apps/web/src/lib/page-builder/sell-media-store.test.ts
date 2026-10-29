@@ -572,3 +572,90 @@ describe('sell-media store · the read failure is RENDERED', () => {
     expect(branch.slice(0, 400)).toContain('{sellMedia.loadError}');
   });
 });
+
+/**
+ * Owner P10, "Full film unless it's paid": a film slot holding media that paid
+ * content uses plays only its 30s preview on the live page, and the panel says
+ * so under the slot. The set arrives with the read (`previewOnlyMediaIds`) and
+ * covers every media the slots may hold, so the note follows a fresh PICK too,
+ * not only what was saved.
+ */
+describe('sell-media store · preview-only films (owner P10)', () => {
+  const PAID = PERSISTED.introVideoMediaId as string;
+
+  it('names a saved film slot that holds a paid film, and no other', async () => {
+    getJourneySellMedia.mockResolvedValue({
+      ...PERSISTED,
+      previewOnlyMediaIds: [PAID],
+    });
+    await sellMedia.open(PAGE_ID);
+
+    expect(sellMedia.previewOnly('introVideoMediaId')).toBe(true);
+    expect(sellMedia.previewOnly('previewVideoMediaId')).toBe(false);
+    expect(sellMedia.previewOnly('guideVideoMediaId')).toBe(false);
+  });
+
+  it('follows a pick: a paid film picked into another film slot is named at once', async () => {
+    getJourneySellMedia.mockResolvedValue({
+      ...PERSISTED,
+      previewOnlyMediaIds: [PAID],
+    });
+    await sellMedia.open(PAGE_ID);
+
+    sellMedia.setSlot('guideVideoMediaId', PAID);
+    expect(sellMedia.previewOnly('guideVideoMediaId')).toBe(true);
+    sellMedia.setSlot('introVideoMediaId', null);
+    expect(sellMedia.previewOnly('introVideoMediaId')).toBe(false);
+  });
+
+  it('never names the hero loop or a still, which are not cut short', async () => {
+    getJourneySellMedia.mockResolvedValue({
+      ...PERSISTED,
+      previewOnlyMediaIds: [PAID],
+    });
+    await sellMedia.open(PAGE_ID);
+
+    sellMedia.setSlot('heroMediaId', PAID);
+    sellMedia.setSlot('guidePortraitMediaId', PAID);
+    expect(sellMedia.previewOnly('heroMediaId')).toBe(false);
+    expect(sellMedia.previewOnly('guidePortraitMediaId')).toBe(false);
+  });
+
+  it('an older worker that omits the set names nothing', async () => {
+    getJourneySellMedia.mockResolvedValue(PERSISTED);
+    await sellMedia.open(PAGE_ID);
+    expect(sellMedia.previewOnly('introVideoMediaId')).toBe(false);
+  });
+
+  it('keeps the set across a save, whose echo omits it, and forgets it on close', async () => {
+    getJourneySellMedia.mockResolvedValue({
+      ...PERSISTED,
+      previewOnlyMediaIds: [PAID],
+    });
+    await sellMedia.open(PAGE_ID);
+    sellMedia.setSlot('previewVideoMediaId', PAID);
+    updateJourneySellMedia.mockResolvedValue({
+      ...PERSISTED,
+      previewVideoMediaId: PAID,
+    });
+    await sellMedia.save();
+
+    expect(sellMedia.previewOnly('previewVideoMediaId')).toBe(true);
+    sellMedia.close();
+    expect(sellMedia.previewOnly('previewVideoMediaId')).toBe(false);
+  });
+
+  it('the media panel says why, under the slot', () => {
+    const PANEL = readFileSync(
+      join(
+        dirname(fileURLToPath(import.meta.url)),
+        '..',
+        'components/page-builder/PageMediaPanel.svelte'
+      ),
+      'utf8'
+    );
+    const loop = PANEL.slice(PANEL.indexOf('{#each SLOTS as entry'));
+    expect(loop).toMatch(/\{#if sellMedia\.previewOnly\(entry\.slot\)\}/);
+    expect(loop).toContain('m.studio_builder_media_slot_preview_only()');
+  });
+});

@@ -277,6 +277,45 @@ const TEMPLATE_TOKENS: Record<string, string[]> = {
     'amountFormatted',
     'payoutCount',
     'dashboardUrl',
+    // When each part reaches the bank, composed by the drain from the
+    // account's real state (Codex-2hxff.29, batch B design §5.4). Listed a
+    // release before production's row uses them (§5.5).
+    'bankSentence',
+    'bankLines',
+    'bankDate',
+  ],
+  // Money waiting and money owed (Codex-2hxff.34, .30). Sent only by this
+  // worker's own money sweep, so the sender and this list deploy together.
+  'payouts-waiting': [
+    'userName',
+    'totalFormatted',
+    'organisationLines',
+    'waitingSince',
+    'statusSentence',
+    'buttonLabel',
+    'dashboardUrl',
+  ],
+  'stripe-balance-below-zero': [
+    'userName',
+    'balanceFormatted',
+    'takeBackSentence',
+    'paidBackSentence',
+    'ruleSentence',
+    'dashboardUrl',
+  ],
+  // M9's cause line and M10's since line are composed by the money sweep.
+  'stripe-balance-recovered': [
+    'userName',
+    'balanceFormatted',
+    'coveredSentence',
+    'dashboardUrl',
+  ],
+  'debt-written-off': [
+    'userName',
+    'amountFormatted',
+    'balanceFormatted',
+    'sinceSentence',
+    'dashboardUrl',
   ],
 
   // Engagement
@@ -442,6 +481,11 @@ const TRANSACTIONAL_TEMPLATES = new Set([
   // Payout notifications (WP-10 — Codex-69t7c.10): touch billing state.
   'creator-connect-needed',
   'payout-released',
+  // Money waiting and money owed (Codex-2hxff.34, .30): billing state.
+  'payouts-waiting',
+  'stripe-balance-below-zero',
+  'stripe-balance-recovered',
+  'debt-written-off',
   // Revenue-share agreements (WP-5 — Codex-90de9): commercial contract,
   // not marketable.
   'agreement-proposed-by-owner',
@@ -489,6 +533,8 @@ const MAY_RENDER_BLANK: Record<string, readonly string[]> = {
   'agreement-countered-by-owner': ['note'],
   'agreement-declined': ['declineReason'],
   'agreement-terminated': ['terminationReason'],
+  // Only a chargeback can be paid back; a refund's take-back has no sentence.
+  'stripe-balance-below-zero': ['paidBackSentence'],
 };
 
 /** The tokens of a template that may render as nothing (MAY_RENDER_BLANK). */

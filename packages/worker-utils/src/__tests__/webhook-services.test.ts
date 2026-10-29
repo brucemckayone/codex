@@ -67,6 +67,7 @@ function depsOf(service: object) {
     payoutMailer?: unknown;
     offSaleMailer?: unknown;
     webAppUrl?: unknown;
+    environment?: unknown;
     stripe: Stripe;
   };
 }
@@ -83,8 +84,13 @@ describe('createWebhookServices', () => {
       for (const service of [purchase, subscription, courseSubscription]) {
         expect(service.feeConfig).toBe(services.feeConfig);
         expect(service.mailer).toBeTypeOf('function');
+      }
+      for (const service of [subscription, courseSubscription]) {
         expect(service.webAppUrl).toBe('https://app.example.test');
       }
+      // Purchase builds its Earnings link from the environment, not a URL,
+      // so the environment is what it must be handed.
+      expect(purchase.environment).toBe('production');
       expect(subscription.payoutMailer).toBeTypeOf('function');
       // The course's off-sale email is its own, fire-and-forget slot; its
       // `mailer` is the awaited price-change notice (Codex-2hxff.43).

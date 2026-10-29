@@ -111,6 +111,16 @@ export const CacheType = {
    */
   CONNECT_STATUS: 'connect:status',
 
+  /**
+   * A creator's own Stripe balance for Studio → Earnings (Codex-2hxff.29,
+   * .30): available, pending, the next bank payout, a covered take-back and a
+   * balance below zero. Keyed by user id. Two Stripe reads on a miss.
+   *
+   * TTL: 10 min. The daily bank payout job invalidates it after a payout or a
+   * negative-balance change, and `account.updated` already does.
+   */
+  CONNECT_BALANCE: 'connect:balance',
+
   /** User session data (complements BetterAuth KV cache) */
   USER_SESSION: 'user:session',
 

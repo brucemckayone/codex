@@ -114,7 +114,12 @@ describe('ecom-api payouts-sweep handler', () => {
   // And the dispute reconcile's second source (Codex-2hxff.58): no row of
   // ours is final and unapplied.
   let disputeRows: MockInstance<PurchaseService['findDisputesToReconcile']>;
+  // And the daily bank payout (Codex-2hxff.29), pinned in its own tests.
+  let bankPayouts: MockInstance<SubscriptionService['runBankPayouts']>;
   beforeEach(() => {
+    bankPayouts = vi
+      .spyOn(SubscriptionService.prototype, 'runBankPayouts')
+      .mockResolvedValue(null);
     disputeRows = vi
       .spyOn(PurchaseService.prototype, 'findDisputesToReconcile')
       .mockResolvedValue([]);
@@ -133,6 +138,7 @@ describe('ecom-api payouts-sweep handler', () => {
     clawbackRetry.mockRestore();
     offSaleCancel.mockRestore();
     disputeRows.mockRestore();
+    bankPayouts.mockRestore();
   });
 
   it('runPayoutsSweep delegates to SubscriptionService.sweepUnresolvedPayouts and logs the result', async () => {
@@ -166,7 +172,9 @@ describe('ecom-api payouts-sweep handler', () => {
       errors: 0,
     });
     // The run is bounded: the default payee limit is passed through.
-    expect(spy).toHaveBeenCalledWith(30, PAYOUTS_SWEEP_PAYEE_LIMIT);
+    expect(spy).toHaveBeenCalledWith(30, PAYOUTS_SWEEP_PAYEE_LIMIT, {
+      cronDrain: false,
+    });
     expect(obs.info).toHaveBeenCalledWith(
       'payouts-sweep cron completed',
       expect.objectContaining({
@@ -202,7 +210,7 @@ describe('ecom-api payouts-sweep handler', () => {
       payeeLimit: 2,
     });
 
-    expect(spy).toHaveBeenCalledWith(15, 2);
+    expect(spy).toHaveBeenCalledWith(15, 2, { cronDrain: false });
     spy.mockRestore();
   });
 
@@ -344,6 +352,11 @@ describe('ecom-api payouts-sweep handler', () => {
     expect(OWED_DUPLICATES_OLDER_THAN_MS).toBe(60 * 60 * 1000);
 
     expect(spy).toHaveBeenCalledTimes(1);
+    // The cron's own drain: its emails may name this morning's bank payout,
+    // which runs after it in the same wake (review r2 LOW-1).
+    expect(spy).toHaveBeenCalledWith(expect.any(Number), expect.any(Number), {
+      cronDrain: true,
+    });
     // Codex-2hxff.54: the sweep runs on the registry's SubscriptionService,
     // so a drained payout is split with configured fees and its payee gets
     // the payout-released email (Codex-2hxff.7, .13). It used to be built
@@ -369,10 +382,107 @@ describe('ecom-api payouts-sweep handler', () => {
     spy.mockRestore();
   });
 
+  describe('the daily bank payout (Codex-2hxff.29)', () => {
+    /** Thu 14 Jan 2027, 08:00 London (GMT). */
+    const LONDON_EIGHT = Date.UTC(2027, 0, 14, 8);
+
+    it('runs LAST in the wake, with the cron’s scheduledTime, before the pool goes back', async () => {
+      const { obs } = makeObs();
+      const ctx = fakeCtx();
+      const drain = vi
+        .spyOn(SubscriptionService.prototype, 'sweepUnresolvedPayouts')
+        .mockResolvedValue({
+          groupsScanned: 0,
+          groupsResolved: 0,
+          groupsSkipped: 0,
+          errors: 0,
+        });
+      const owed = vi
+        .spyOn(CourseSubscriptionService.prototype, 'settleOwedDuplicates')
+        .mockResolvedValue({ settled: 0, stillOwed: [] });
+      const otherOwed = [
+        vi
+          .spyOn(PurchaseService.prototype, 'settleOwedDuplicates')
+          .mockResolvedValue({ settled: 0, stillOwed: [] }),
+        vi
+          .spyOn(SubscriptionService.prototype, 'settleOwedDuplicates')
+          .mockResolvedValue({ settled: 0, stillOwed: [] }),
+      ];
+
+      await runScheduledPayoutsSweep(makeEnv() as never, ctx, {
+        stripe: disputeEventsStripe() as never,
+        obs: obs as never,
+        scheduledTime: LONDON_EIGHT,
+      });
+
+      expect(bankPayouts).toHaveBeenCalledExactlyOnceWith(
+        new Date(LONDON_EIGHT)
+      );
+      const order = (mock: { mock: { invocationCallOrder: number[] } }) =>
+        mock.mock.invocationCallOrder[0] ?? 0;
+      const bank = order(bankPayouts);
+      for (const before of [drain, clawbackRetry, offSaleCancel, owed]) {
+        expect(order(before)).toBeLessThan(bank);
+      }
+      expect(bank).toBeLessThan(order(ctx.waitUntil));
+      expect(obs.error).not.toHaveBeenCalled();
+      drain.mockRestore();
+      owed.mockRestore();
+      for (const settler of otherOwed) settler.mockRestore();
+    });
+
+    it('a bank payout run that fails is an alert; the other sweeps ran and the pool still goes back', async () => {
+      bankPayouts.mockRejectedValue(new Error('database unavailable (test)'));
+      const { obs } = makeObs();
+
+      const ran = await cronWithStubbedSweeps(disputeEventsStripe(), obs, {
+        scheduledTime: LONDON_EIGHT,
+      });
+
+      expect(obs.error).toHaveBeenCalledWith(
+        'payouts-sweep cron could not run the bank payouts',
+        {
+          errorId: expect.any(String),
+          scheduledTime: new Date(LONDON_EIGHT).toISOString(),
+          error: 'database unavailable (test)',
+        }
+      );
+      expect(ran).toEqual({
+        drain: 1,
+        offSale: 1,
+        owed: [1, 1, 1],
+        released: 1,
+      });
+    });
+
+    it('only the run whose London hour is 8 pays: the other 23 return before any read', async () => {
+      bankPayouts.mockRestore();
+      const service = sweepService();
+      for (const day of [Date.UTC(2027, 0, 14), Date.UTC(2026, 6, 15)]) {
+        for (let hour = 0; hour < 24; hour++) {
+          const at = new Date(day + hour * 60 * 60 * 1000);
+          const londonEight =
+            (day === Date.UTC(2027, 0, 14) && hour === 8) ||
+            (day === Date.UTC(2026, 6, 15) && hour === 7);
+          if (londonEight) {
+            // It goes on to read the accounts: this stub db can't answer.
+            await expect(service.runBankPayouts(at)).rejects.toThrow();
+          } else {
+            await expect(service.runBankPayouts(at)).resolves.toBeNull();
+          }
+        }
+      }
+      bankPayouts = vi
+        .spyOn(SubscriptionService.prototype, 'runBankPayouts')
+        .mockResolvedValue(null);
+    });
+  });
+
   /** The cron with every sweep but the dispute reconcile stubbed. */
   async function cronWithStubbedSweeps(
     stripe: unknown,
-    obs: ReturnType<typeof makeObs>['obs']
+    obs: ReturnType<typeof makeObs>['obs'],
+    extra: { scheduledTime?: number } = {}
   ) {
     const sweep = vi
       .spyOn(SubscriptionService.prototype, 'sweepUnresolvedPayouts')
@@ -398,6 +508,7 @@ describe('ecom-api payouts-sweep handler', () => {
     const run = runScheduledPayoutsSweep(makeEnv() as never, ctx, {
       stripe: stripe as never,
       obs: obs as never,
+      ...extra,
     });
     await expect(run).resolves.toBeUndefined();
     const ran = {

@@ -1,5 +1,14 @@
 import { tick } from 'svelte';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
+import { loadPlayerCore } from '$lib/components/player/load-core';
 import {
   flushSync,
   mount,
@@ -43,14 +52,22 @@ const GUIDE = {
 
 let app: ReturnType<typeof mount> | null = null;
 
+// The player's code is fetched before any press, as the page's first sight
+// of a play button fetches it (`preloadPlayer`).
+beforeAll(async () => {
+  await loadPlayerCore();
+});
+
 beforeEach(() => {
   played.length = 0;
+  vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
 });
 
 afterEach(() => {
   if (app) unmount(app);
   app = null;
   document.body.innerHTML = '';
+  vi.restoreAllMocks();
 });
 
 function contextWith(media: Partial<SellPreview>): JourneySalesContext {
@@ -162,6 +179,27 @@ describe('InstructorBlock', () => {
     await tick();
     await Promise.resolve();
     expect(played).toEqual([MEDIA.guideClip?.playlistUrl]);
+  });
+
+  it.each([
+    ['split', 'portrait'],
+    ['centered', 'portrait'],
+    ['quote', 'theatre'],
+  ] as const)('%s: the guide clip plays in the %s', async (layout, where) => {
+    await render(GUIDE, { layout });
+    playButton()?.click();
+    const dialog = document.body.querySelector('[role="dialog"]');
+    const inPortrait = document.body.querySelector(
+      '.guide__portrait .clip > .lp-film video'
+    );
+    if (where === 'portrait') {
+      expect(inPortrait).not.toBeNull();
+      expect(dialog).toBeNull();
+    } else {
+      // The quote has no frame to play in: the theatre, the same player.
+      expect(inPortrait).toBeNull();
+      expect(dialog?.querySelector('.player video')).not.toBeNull();
+    }
   });
 
   it('has no play button without a clip, and a generic name without a guide name', async () => {

@@ -26,6 +26,7 @@ import {
   supportIssueRefundSchema,
   supportQueueQuerySchema,
   supportResolveCreatorDebtSchema,
+  supportResolveCreditSchema,
   supportResolveFailedRefundSchema,
 } from '@codex/validation';
 import { error, type RequestEvent } from '@sveltejs/kit';
@@ -118,7 +119,7 @@ export const getRefundPreview = query(
 );
 
 /**
- * The queue's two counts, for the nav badge. It takes nothing, but has a
+ * The queue's three counts, for the nav badge. It takes nothing, but has a
  * schema all the same: kit refuses an argument to a schema-less query with a
  * 400 before the guard could run.
  */
@@ -139,12 +140,21 @@ export const listFailedRefunds = query(
   }
 );
 
-/** Creator debts waiting for a person, oldest first. */
+/** Creator debts, one row per person, oldest first. */
 export const listCreatorDebts = query(
   ownerOnly(supportQueueQuerySchema),
   async (input) => {
     const api = supportApi();
     return forwardClientErrors(() => api.listCreatorDebts(input));
+  }
+);
+
+/** Money owed back to payees after a late take-back, oldest first. */
+export const listOwedToCreators = query(
+  ownerOnly(supportQueueQuerySchema),
+  async (input) => {
+    const api = supportApi();
+    return forwardClientErrors(() => api.listOwedToCreators(input));
   }
 );
 
@@ -202,6 +212,45 @@ export const resolveCreatorDebt = command(
     const api = supportApi();
     try {
       const result = await api.resolveCreatorDebt(reviewId, body);
+      return { outcome: 'done' as const, result };
+    } catch (error) {
+      return toSupportFailure(error);
+    }
+  }
+);
+
+/**
+ * Settle money owed back to a payee: re-pay it, count it against the step's
+ * own open debt, or mark it not owed (the schema requires a note for that).
+ */
+export const resolveOwedToCreator = command(
+  ownerOnly(
+    z.object({
+      creditId: z.string().uuid(),
+      body: supportResolveCreditSchema,
+    })
+  ),
+  async ({ creditId, body }) => {
+    const api = supportApi();
+    try {
+      const result = await api.resolveOwedToCreator(creditId, body);
+      return { outcome: 'done' as const, result };
+    } catch (error) {
+      return toSupportFailure(error);
+    }
+  }
+);
+
+/**
+ * "Check Stripe again" on a take-back Stripe couldn't be asked about. One
+ * question per click: nothing here, or on the page, asks again by itself.
+ */
+export const checkOwedToCreator = command(
+  ownerOnly(z.object({ creditId: z.string().uuid() })),
+  async ({ creditId }) => {
+    const api = supportApi();
+    try {
+      const result = await api.checkOwedToCreator(creditId);
       return { outcome: 'done' as const, result };
     } catch (error) {
       return toSupportFailure(error);

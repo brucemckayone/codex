@@ -35,9 +35,13 @@
   also carry the drawn headline's length, `--lp-heading-chars`, so a Style
   can scale it character by character on that parent where the browser can
   compute it (`pow()`); the two marks are then its fallback.
+
+  A FILM in a frame (statement, split, centred, poster) plays there
+  (`InlineFilm`): the press lays the player over the picture, with sound,
+  and the ambient loop under it rests until the film ends. The cover has no
+  frame — its film is the band — so its button opens the theatre (`Watch`).
 -->
 <script lang="ts">
-  import IntroVideoModal from '$lib/components/ui/IntroVideoModal/IntroVideoModal.svelte';
   import { getThumbnailSrcset } from '$lib/utils/image';
   import { pageImageSrcset, resolvePageImageUrl, storedFocus } from '../../../page-images';
   import type { PreviewMedia, SellPreview } from '../../../render/types';
@@ -49,9 +53,11 @@
   import ButtonRow from '../../primitives/ButtonRow.svelte';
   import Eyebrow from '../../primitives/Eyebrow.svelte';
   import Heading from '../../primitives/Heading.svelte';
+  import InlineFilm from '../../primitives/InlineFilm.svelte';
   import Media from '../../primitives/Media.svelte';
   import Text from '../../primitives/Text.svelte';
   import WatchButton from '../../primitives/WatchButton.svelte';
+  import Watch from '../video/Watch.svelte';
   import { heroDefinition } from './definition';
   import HeroPoster from './HeroPoster.svelte';
   import { settled as settledValue } from './settled.svelte';
@@ -68,7 +74,7 @@
   const layout = $derived(section.layout);
   // The course's shape and its way in, under the lede (`model/facts.ts`).
   const facts = $derived(heroFacts(context));
-  let watching = $state<PreviewMedia | null>(null);
+  const watchLabel = $derived(content.watchLabel ?? COPY.hero.watch);
 
   interface HeroMedia {
     still: string | null;
@@ -116,10 +122,6 @@
       still: ownStill ?? preview?.heroImageUrl ?? syncStill,
       clip: mode === 'image' ? null : (preview?.heroClip ?? null),
     };
-  }
-
-  function watch(clip: PreviewMedia) {
-    if (!edit) watching = clip;
   }
 
   // The streamed preview once it settles, for the layouts whose shape depends
@@ -202,30 +204,29 @@
   </div>
 {/snippet}
 
-{#snippet watchControl(media: HeroMedia)}
-  {#if media.clip}
-    <WatchButton
-      label={content.watchLabel ?? COPY.hero.watch}
-      onclick={() => media.clip && watch(media.clip)}
-    />
-  {/if}
-{/snippet}
-
+<!-- A clip plays in the frame; while it is up, the ambient loop under the
+     player rests and the still stands in for it. -->
 {#snippet frame(media: HeroMedia, pending: boolean, ratio: string)}
   {#if media.clip}
-    <Media
-      image={media.still}
-      clip={media.clip}
-      srcset={srcsetOf(media.still)}
-      sizes={frameSizes}
-      focus={ownFocus}
-      {ratio}
-      {pending}
-      priority
-      {alt}
-    >
-      {@render watchControl(media)}
-    </Media>
+    {@const clip = media.clip}
+    <InlineFilm {clip} label={watchLabel} title={heading} {edit}>
+      {#snippet children(control, player, up)}
+        <Media
+          image={media.still}
+          clip={up ? null : clip}
+          srcset={srcsetOf(media.still)}
+          sizes={frameSizes}
+          focus={ownFocus}
+          {ratio}
+          {pending}
+          priority
+          {alt}
+        >
+          {@render control()}
+        </Media>
+        {@render player()}
+      {/snippet}
+    </InlineFilm>
   {:else}
     <Media
       image={media.still}
@@ -239,8 +240,6 @@
     />
   {/if}
 {/snippet}
-
-{#snippet posterWatch()}{@render watchControl(settled)}{/snippet}
 
 {#if layout === 'cover'}
   <!-- Only the media bleeds (03 X10): the words keep the content column, so
@@ -276,10 +275,11 @@
         data-held={settled.clip ? undefined : ''}
         inert={!settled.clip}
       >
-        <WatchButton
-          label={content.watchLabel ?? COPY.hero.watch}
-          onclick={() => settled.clip && watch(settled.clip)}
-        />
+        {#if settled.clip}
+          <Watch clip={settled.clip} label={watchLabel} title={heading} {edit} />
+        {:else}
+          <WatchButton label={watchLabel} />
+        {/if}
       </div>
     {/if}
   </div>
@@ -299,7 +299,9 @@
     {copy}
     {chars}
     {runs}
-    watch={posterWatch}
+    {watchLabel}
+    title={heading}
+    {edit}
   />
 {:else if layout === 'split'}
   {#if framed}
@@ -342,15 +344,6 @@
   {/await}
 {/if}
 
-{#if watching}
-  <IntroVideoModal
-    open={true}
-    src={watching.playlistUrl}
-    title={heading}
-    onclose={() => (watching = null)}
-  />
-{/if}
-
 <style>
   /* ── the facts line: small, in the soft ink, its figures lined up ──────── */
   .hero__facts {
@@ -365,6 +358,13 @@
 
   .hero__lede:has(> :global(.lp-text)) > .hero__facts {
     margin-block-start: var(--lp-stack);
+  }
+
+  /* ── the frames: a film plays over the whole picture (`InlineFilm`) ────── */
+  .hero-statement__media,
+  .hero-split__media,
+  .hero-centered__media {
+    position: relative;
   }
 
   /* ── statement ─────────────────────────────────────────────────────────── */

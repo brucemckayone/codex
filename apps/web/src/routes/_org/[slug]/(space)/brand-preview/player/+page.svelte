@@ -27,9 +27,17 @@
   replicates the transport/video chrome with the real player design tokens
   rather than mounting the real players (which would spin up HLS). Not a public
   destination — noindex.
+
+  The FILM card is the real `PreviewPlayerCore` — the player sales-page films
+  and content previews play in — in its `demo` state: a fixed moment (0:12 of
+  2:04, loaded to 0:46, sound refused), with no stream and nothing playing.
+  Its chrome is the component's own markup and CSS, so it cannot drift from
+  what visitors see (the drift this page once had: Codex-cijzb.17, cause 1).
+  It has no captions, so no CC button, as a film without tracks.
 -->
 <script lang="ts">
   import Waveform from '$lib/components/AudioPlayer/Waveform.svelte';
+  import PreviewPlayerCore from '$lib/components/player/PreviewPlayerCore.svelte';
 
   // A static, pleasant amplitude profile (0–1) — no audio analysis needed. The
   // Waveform component paints it in the brand colours (played vs unplayed split
@@ -44,6 +52,10 @@
   const AUDIO_DURATION = 126; // 2:06
   const AUDIO_POSITION = 38; // 0:38
   const VIDEO_PROGRESS = 0.35;
+
+  // The film card's moment: playing at 0:12 of 2:04, loaded to 0:46, and the
+  // browser refused sound, so the mute button asks for it.
+  const FILM_MOMENT = { time: 12, duration: 124, loaded: 46, askSound: true };
 
   const noop = (): void => {};
 
@@ -178,8 +190,23 @@
     </div>
   </article>
 
+  <!-- ── Film player (sales-page films, content previews): the real one ── -->
+  <article class="pv-card" aria-label="Film player preview">
+    <div class="pv-card__head">
+      <span class="pv-badge">Film</span>
+      <div class="pv-card__titles">
+        <p class="pv-card__title">A sample film</p>
+        <p class="pv-card__sub">Your sales-page films and previews, in your brand</p>
+      </div>
+    </div>
+
+    <div class="pv-film">
+      <PreviewPlayerCore src="" title="A sample film" demo={FILM_MOMENT} />
+    </div>
+  </article>
+
   <p class="pv__note">
-    Play buttons, the waveform and the progress bar follow your <strong>Primary</strong>
+    Play buttons, the waveform and the progress bars follow your <strong>Primary</strong>
     colour. Everything else here follows the <strong>Player Chrome</strong> colours.
   </p>
 </main>
@@ -494,5 +521,29 @@
 
   .pv-time--onmedia {
     color: var(--color-player-text);
+  }
+
+  /* ── Film: the real player in its demo state ── */
+  .pv-film {
+    aspect-ratio: 16 / 9;
+    border-radius: var(--radius-md);
+    overflow: hidden;
+  }
+
+  /* The demo has no picture: the video card's brand wash stands in for the
+     film's frame, on the player's own box. Everything over it is the
+     player's own CSS. */
+  .pv-film :global(.player) {
+    background:
+      radial-gradient(
+        120% 120% at 30% 20%,
+        var(--color-brand-primary-subtle),
+        transparent 60%
+      ),
+      linear-gradient(
+        135deg,
+        color-mix(in oklch, var(--color-brand-primary) 30%, var(--color-neutral-900)),
+        var(--color-neutral-900)
+      );
   }
 </style>

@@ -7,10 +7,17 @@
   this card adds nothing up but the column totals. A slice with history can
   show it underneath.
 
+  A late take-back owed back to its payee (Codex-2hxff.73, C1) shows under
+  "Taken back so far" in the info colour ("£9.00 owed back to Maya Okafor"),
+  never like a debt the payee owes, and its history line carries the same
+  Re-pay as the queue.
+
   @prop {ChargeDetail} detail
+  @prop {(slice: Slice, line: HistoryLine) => void} [onCreditAction] - Opens
+    the Re-pay (or Count against this debt) dialog for a line's credit.
 -->
 <script lang="ts">
-  import type { ChargeDetail, Slice } from '@codex/admin';
+  import type { ChargeDetail, HistoryLine, Slice } from '@codex/admin';
   import { formatShareBps } from '$lib/components/studio/ownership/ownership-view';
   import * as m from '$paraglide/messages';
   import { Badge, Button } from '$lib/components/ui';
@@ -19,6 +26,7 @@
   import { ChevronDownIcon } from '$lib/components/ui/Icon';
   import { formatPrice } from '$lib/utils/format';
   import SliceHistory from './SliceHistory.svelte';
+  import { slicePayeeName } from './owed-view';
   import {
     formatShortDay,
     payeeCell,
@@ -29,9 +37,10 @@
 
   interface Props {
     detail: ChargeDetail;
+    onCreditAction?: (slice: Slice, line: HistoryLine) => void;
   }
 
-  const { detail }: Props = $props();
+  const { detail, onCreditAction }: Props = $props();
 
   const amount = $derived(formatPrice(detail.charge.amountCents));
   const isInvoice = $derived(detail.source.type !== 'purchase');
@@ -92,6 +101,17 @@
   {/if}
 {/snippet}
 
+{#snippet owedBack(slice: Slice)}
+  {#if slice.owedToPayeeCents > 0}
+    <span class="owed-back" data-testid="owed-back">
+      {m.support_owed_back({
+        amount: formatPrice(slice.owedToPayeeCents),
+        name: slicePayeeName(slice),
+      })}
+    </span>
+  {/if}
+{/snippet}
+
 {#snippet historyToggle(slice: Slice, where: 'table' | 'list')}
   {#if slice.history.length > 0}
     <Button
@@ -147,6 +167,7 @@
               {#if slice.owedCents > 0}
                 <span class="owed">{m.support_owed({ amount: formatPrice(slice.owedCents) })}</span>
               {/if}
+              {@render owedBack(slice)}
             </Table.Cell>
           </Table.Row>
           {#if open[slice.payoutId]}
@@ -156,6 +177,8 @@
                   id={historyId(slice, 'table')}
                   title={historyTitle(slice)}
                   lines={slice.history}
+                  payeeName={slicePayeeName(slice)}
+                  onCreditAction={onCreditAction ? (line) => onCreditAction(slice, line) : undefined}
                 />
               </Table.Cell>
             </Table.Row>
@@ -188,12 +211,15 @@
         {#if slice.owedCents > 0}
           <span class="owed">{m.support_owed({ amount: formatPrice(slice.owedCents) })}</span>
         {/if}
+        {@render owedBack(slice)}
         <div>{@render historyToggle(slice, 'list')}</div>
         {#if open[slice.payoutId]}
           <SliceHistory
             id={historyId(slice, 'list')}
             title={historyTitle(slice)}
             lines={slice.history}
+            payeeName={slicePayeeName(slice)}
+            onCreditAction={onCreditAction ? (line) => onCreditAction(slice, line) : undefined}
           />
         {/if}
       </li>
@@ -243,6 +269,15 @@
     display: block;
     font-size: var(--text-xs);
     color: var(--color-status-warning-text);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Money owed BACK to the payee: the shape of `.owed`, in the info colour so
+     the two directions never read alike. */
+  .owed-back {
+    display: block;
+    font-size: var(--text-xs);
+    color: var(--color-status-info-text);
     font-variant-numeric: tabular-nums;
   }
 

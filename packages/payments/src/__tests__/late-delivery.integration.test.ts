@@ -18,6 +18,7 @@ import {
   organizations,
   type Payout,
   type PayoutReversal,
+  payeeCredits,
   payoutReversals,
   payouts,
   refundReviews,
@@ -54,6 +55,7 @@ import {
   type ClawbackDeps,
   type ClawbackRefund,
   pendingReductionsFor,
+  recordPayeeCredit,
   reverseCharge,
 } from '../clawback';
 import {
@@ -77,6 +79,7 @@ describe('a clawback delivery that outlives its lease (Codex-2hxff.72)', () => {
   let supportId: string;
   /** A payee with a Connect account, so a cancel asks Stripe for a late transfer. */
   let payeeId: string;
+  let payeeAccountId: string;
   let orgId: string;
   const obs = { error: vi.fn(), warn: vi.fn(), info: vi.fn() };
   const createdRefundIds: string[] = [];
@@ -88,9 +91,10 @@ describe('a clawback delivery that outlives its lease (Codex-2hxff.72)', () => {
   beforeAll(async () => {
     db = setupTestDatabase();
     [creatorId, supportId, payeeId] = await seedTestUsers(db, 3);
+    payeeAccountId = `acct_late_${uid()}`;
     await db.insert(stripeConnectAccounts).values({
       userId: payeeId,
-      stripeAccountId: `acct_late_${uid()}`,
+      stripeAccountId: payeeAccountId,
       status: 'active',
       chargesEnabled: true,
       payoutsEnabled: true,
@@ -124,6 +128,8 @@ describe('a clawback delivery that outlives its lease (Codex-2hxff.72)', () => {
       .where(eq(payouts.organizationId, orgId));
     const ids = ours.map((row) => row.id);
     if (ids.length > 0) {
+      // A late take-back's support item (Codex-2hxff.73) holds its step.
+      await db.delete(payeeCredits).where(inArray(payeeCredits.payoutId, ids));
       await db
         .delete(refundReviews)
         .where(inArray(refundReviews.payoutId, ids));
@@ -230,7 +236,7 @@ describe('a clawback delivery that outlives its lease (Codex-2hxff.72)', () => {
   function settle(refundId: string, unlanded: readonly StrandedStep[]) {
     const now = new Date();
     return db.transaction(async (tx) => {
-      const repaid = await repayFailedRefund(tx, {
+      const { repaid } = await repayFailedRefund(tx, {
         stripeRefundId: refundId,
         resolvedByUserId: supportId,
         note: NOTE,
@@ -352,6 +358,20 @@ describe('a clawback delivery that outlives its lease (Codex-2hxff.72)', () => {
     );
   }
 
+  /** The step's "Owed to creators" item (Codex-2hxff.73), if any. */
+  async function creditsOf(stepId: string | undefined) {
+    return db
+      .select()
+      .from(payeeCredits)
+      .where(eq(payeeCredits.payoutReversalId, stepId ?? ''));
+  }
+
+  /** The errorId the one log line saying `text` carries. */
+  function idOf(calls: unknown[][]): unknown {
+    expect(calls).toHaveLength(1);
+    return (calls[0]?.[1] as { errorId?: unknown }).errorId;
+  }
+
   // ── after support's settlement ──────────────────────────────────────
 
   it('after support cancelled its step, a late reversal that LANDS leaves the step cancelled, records the reversal on it, raises one alert and re-pays nothing', async () => {
@@ -419,11 +439,205 @@ describe('a clawback delivery that outlives its lease (Codex-2hxff.72)', () => {
     ]);
     // The slice is left as the settlement left it, for support.
     expect((await readRow(creator.id)).status).toBe('paid');
+    // Queued for support under the alert's own errorId (§7.1 site 5).
+    expect(await creditsOf(step?.id)).toEqual([
+      expect.objectContaining({
+        effect: 'reversal_landed',
+        amountCents: 765,
+        payoutId: creator.id,
+        payeeUserId: creatorId,
+        stripeReversalId: trr,
+        stripeTransferId: creator.stripeTransferId,
+        settledAs: 'cancelled',
+        resolution: null,
+        alertErrorId: alerts()[0]?.errorId,
+      }),
+    ]);
 
     // A redelivery changes nothing, and alerts no more.
     await reverseCharge(deps, { charge, source: SOURCE, refunds: [refund] });
     expect(obs.error).toHaveBeenCalledTimes(1);
     expect((await stepsOf(refund.id))[0]?.status).toBe('cancelled');
+    expect(await creditsOf(step?.id)).toHaveLength(1);
+  });
+
+  // ── a confirmed take-back meets a closed credit (owner decision
+  //    2026-10-28 on review MED-1, "Reopen if the system closed it") ──
+
+  it("the reviewer's case: the settlement decided the payee kept the transfer, then the slow delivery's reversal of it landed: the system-closed credit reopens as owed what Stripe took", async () => {
+    const charge = newCharge();
+    const pending = await slice(charge, 765, 'pending', payeeId);
+    const refund = await failedRefund(charge, 1000);
+    // A drain's transfer for the slice, sent anyway.
+    const transfer = await stripe.transfers.create({
+      amount: 765,
+      currency: 'gbp',
+      destination: payeeAccountId,
+      metadata: { payout_id: pending.id },
+    });
+    const hold = holdReversal('lands');
+    const { run } = await lateDelivery(
+      () => reverseCharge(deps, { charge, source: SOURCE, refunds: [refund] }),
+      hold.reached
+    );
+    // Support settles while the delivery waits on Stripe: no reversal yet,
+    // and the transfer is not reversed, so the payee kept it (§6.2).
+    const checked = await settleUnfinishedRefundSteps(deps, {
+      stripeRefundId: refund.id,
+    });
+    expect(checked.unlanded).toEqual([
+      expect.objectContaining({
+        payeeKept: expect.objectContaining({ stripeTransferId: transfer.id }),
+      }),
+    ]);
+    expect(await settle(refund.id, checked.unlanded)).toEqual([]);
+    const [step] = await stepsOf(refund.id);
+    expect(step).toMatchObject({
+      status: 'cancelled',
+      lastErrorCode: 'system_payee_kept',
+    });
+    expect(await creditsOf(step?.id)).toEqual([
+      expect.objectContaining({
+        effect: 'transfer_kept',
+        resolution: 'not_owed',
+        resolvedByUserId: null,
+      }),
+    ]);
+
+    hold.answer();
+    await run;
+
+    const trr = hold.made[0];
+    expect(trr?.amount).toBe(765);
+    const took = errorsSaying('held for support to re-pay');
+    expect(await creditsOf(step?.id)).toEqual([
+      expect.objectContaining({
+        effect: 'reversal_landed',
+        amountCents: 765,
+        stripeReversalId: trr?.id,
+        stripeTransferId: transfer.id,
+        settledAs: 'cancelled',
+        resolution: null,
+        resolvedAt: null,
+        resolvedByUserId: null,
+        resolutionNote: null,
+        alertErrorId: idOf(took),
+      }),
+    ]);
+    expect(warningsSaying('reopened a credit the system had closed')).toEqual([
+      [
+        expect.any(String),
+        expect.objectContaining({
+          wasEffect: 'transfer_kept',
+          amountCents: 765,
+          alertErrorId: idOf(took),
+        }),
+      ],
+    ]);
+    expect(errorsSaying('reopen by hand')).toEqual([]);
+  });
+
+  /**
+   * Support's settlement cancels a paid slice's step while its delivery
+   * waits on Stripe (as above), then `closed` is how its credit stands when
+   * the late reversal lands.
+   */
+  async function landsOnClosedCredit(
+    closed: Partial<typeof payeeCredits.$inferInsert>
+  ) {
+    const charge = newCharge();
+    const creator = await slice(charge, 765);
+    const refund = await failedRefund(charge, 1000);
+    const hold = holdReversal('lands');
+    const { run } = await lateDelivery(
+      () => reverseCharge(deps, { charge, source: SOURCE, refunds: [refund] }),
+      hold.reached
+    );
+    const checked = await settleUnfinishedRefundSteps(deps, {
+      stripeRefundId: refund.id,
+    });
+    await settle(refund.id, checked.unlanded);
+    const [step] = await stepsOf(refund.id);
+    const credit = takeFirst(
+      await db
+        .insert(payeeCredits)
+        .values({
+          payoutReversalId: step?.id ?? '',
+          payoutId: creator.id,
+          payeeUserId: creatorId,
+          effect: 'unverified',
+          stripeTransferId: creator.stripeTransferId,
+          settledAs: 'cancelled',
+          alertErrorId: crypto.randomUUID(),
+          resolution: 'not_owed',
+          resolvedAt: new Date(),
+          ...closed,
+        })
+        .returning()
+    );
+    hold.answer();
+    await run;
+    return {
+      credit,
+      trr: hold.made[0],
+      took: errorsSaying('held for support to re-pay'),
+    };
+  }
+
+  it("a check had closed it not owed (Stripe showed nothing yet), then the reversal landed: the system's close reopens as owed", async () => {
+    const { credit, trr, took } = await landsOnClosedCredit({
+      resolvedByUserId: null,
+      resolutionNote: 'Stripe shows nothing was taken',
+      checkedAt: new Date(),
+    });
+
+    expect(await creditsOf(credit.payoutReversalId)).toEqual([
+      expect.objectContaining({
+        id: credit.id,
+        effect: 'reversal_landed',
+        amountCents: 765,
+        stripeReversalId: trr?.id,
+        resolution: null,
+        resolvedAt: null,
+        resolutionNote: null,
+        alertErrorId: idOf(took),
+      }),
+    ]);
+    expect(warningsSaying('reopened a credit the system had closed')).toEqual([
+      [
+        expect.any(String),
+        expect.objectContaining({
+          creditId: credit.id,
+          wasEffect: 'unverified',
+          wasNote: 'Stripe shows nothing was taken',
+        }),
+      ],
+    ]);
+  });
+
+  it('a person had closed it not owed, then the reversal landed: their decision stands, and an error under the alert names the credit to reopen by hand', async () => {
+    const { credit, trr, took } = await landsOnClosedCredit({
+      resolvedByUserId: supportId,
+      resolutionNote: 'Checked Stripe: nothing taken',
+    });
+
+    expect(await creditsOf(credit.payoutReversalId)).toEqual([credit]);
+    expect(
+      errorsSaying('A confirmed take-back met a settled credit: reopen by hand')
+    ).toEqual([
+      [
+        expect.any(String),
+        expect.objectContaining({
+          errorId: idOf(took),
+          creditId: credit.id,
+          creditResolution: 'not_owed',
+          findingEffect: 'reversal_landed',
+          findingAmountCents: 765,
+          stripeReversalId: trr?.id,
+        }),
+      ],
+    ]);
+    expect(warningsSaying('reopened a credit')).toEqual([]);
   });
 
   it('after support cancelled its step, a late refusal leaves it cancelled, never failed for the retry cron; nothing landed, so no alert', async () => {
@@ -443,10 +657,12 @@ describe('a clawback delivery that outlives its lease (Codex-2hxff.72)', () => {
     hold.answer();
     await run;
 
-    expect(await stepsOf(refund.id)).toMatchObject([
+    const steps = await stepsOf(refund.id);
+    expect(steps).toMatchObject([
       { status: 'cancelled', attempt: 0, stripeReversalId: null },
     ]);
     expect(obs.error).not.toHaveBeenCalled();
+    expect(await creditsOf(steps[0]?.id)).toEqual([]);
   });
 
   it('after support cancelled its step, a late reversal whose answer was LOST is looked up at Stripe: it landed, so it is recorded and alerted once', async () => {
@@ -472,7 +688,8 @@ describe('a clawback delivery that outlives its lease (Codex-2hxff.72)', () => {
       creator.stripeTransferId,
       expect.anything()
     );
-    expect(await stepsOf(refund.id)).toMatchObject([
+    const steps = await stepsOf(refund.id);
+    expect(steps).toMatchObject([
       { status: 'cancelled', stripeReversalId: trr },
     ]);
     expect(alerts()).toEqual([
@@ -482,6 +699,14 @@ describe('a clawback delivery that outlives its lease (Codex-2hxff.72)', () => {
         refundId: refund.id,
         stripeReversalId: trr,
         settledAs: 'cancelled',
+      }),
+    ]);
+    expect(await creditsOf(steps[0]?.id)).toEqual([
+      expect.objectContaining({
+        effect: 'reversal_landed',
+        amountCents: 765,
+        stripeReversalId: trr,
+        alertErrorId: alerts()[0]?.errorId,
       }),
     ]);
   });
@@ -545,6 +770,15 @@ describe('a clawback delivery that outlives its lease (Codex-2hxff.72)', () => {
         stripeReversalId: trr,
         recordedReversalId: null,
         settledAs: 'done',
+      }),
+    ]);
+    // Queued as found on a done step: support's Re-pay refuses it as one to
+    // settle by hand (data design §7.4 step 3).
+    expect(await creditsOf(step.id)).toEqual([
+      expect.objectContaining({
+        effect: 'reversal_landed',
+        settledAs: 'done',
+        stripeReversalId: trr,
       }),
     ]);
   });
@@ -892,13 +1126,20 @@ describe('a clawback delivery that outlives its lease (Codex-2hxff.72)', () => {
    * fail: `{ select: [1] }` fails the first select after it. Transactions are
    * passed through.
    */
-  function faultyDb(plan: { select?: number[]; update?: number[] }) {
-    const counts = { select: 0, update: 0 };
+  function faultyDb(plan: {
+    select?: number[];
+    update?: number[];
+    insert?: number[];
+  }) {
+    const counts = { select: 0, update: 0, insert: 0 };
     let armed = false;
     const faulty = new Proxy(db, {
       get(target, prop, receiver) {
         const value = Reflect.get(target, prop, receiver);
-        if (armed && (prop === 'select' || prop === 'update')) {
+        if (
+          armed &&
+          (prop === 'select' || prop === 'update' || prop === 'insert')
+        ) {
           counts[prop]++;
           const n = counts[prop];
           if (plan[prop]?.includes(n)) {
@@ -987,6 +1228,16 @@ describe('a clawback delivery that outlives its lease (Codex-2hxff.72)', () => {
     expect(errorsSaying('could not be read')).toHaveLength(1);
     // The original failure is still logged, once.
     expect(errorsSaying('clawback step failed')).toHaveLength(1);
+    // Best effort, once the step reads again: for support to check (§7.1 site 1).
+    expect(await creditsOf((await stepsOf(refund.id))[0]?.id)).toEqual([
+      expect.objectContaining({
+        effect: 'unverified',
+        amountCents: null,
+        stripeReversalId: trr,
+        settledAs: 'cancelled',
+        alertErrorId: idOf(errorsSaying('landed under a lost claim')),
+      }),
+    ]);
   });
 
   it('a landed reversal whose record cannot be written: the follow-up carries the alert’s own errorId, never a second alert', async () => {
@@ -1176,6 +1427,74 @@ describe('a clawback delivery that outlives its lease (Codex-2hxff.72)', () => {
         .from(refundReviews)
         .where(eq(refundReviews.payoutReversalId, step?.id ?? ''))
     ).toEqual([]);
+    // Recorded, but not owed: born resolved by the system (§7.1 site 3a).
+    expect(await creditsOf(step?.id)).toEqual([
+      expect.objectContaining({
+        effect: 'transfer_kept',
+        amountCents: null,
+        stripeTransferId: transferId,
+        settledAs: 'cancelled',
+        resolution: 'not_owed',
+        resolvedByUserId: null,
+        resolvedAt: expect.any(Date),
+        resolutionNote: 'The payee kept the transfer for this share',
+        alertErrorId: idOf(errorsSaying('do not re-pay')),
+      }),
+    ]);
+  });
+
+  it('a definitive refusal whose confirming transfer lookup TIMED OUT, under a settled step: unverified for "Check Stripe again", never a born-resolved "was NOT reversed" (review MED-5)', async () => {
+    const charge = newCharge();
+    const pending = await slice(charge, 765, 'pending', payeeId);
+    const refund = fullRefund();
+    const transferId = `tr_late_${uid()}`;
+    const list = lateTransfer(pending, transferId);
+    const hold = holdReversal('refuses');
+    // Stripe can't be asked whether the transfer is reversed: the drain's
+    // surplus reversal may have taken it all first.
+    vi.mocked(stripe.transfers.retrieve).mockRejectedValue(
+      Object.assign(new Error('timed out'), { type: 'StripeConnectionError' })
+    );
+    const run = reverseCharge(deps, {
+      charge,
+      source: SOURCE,
+      refunds: [refund],
+    });
+    await list.reached;
+    list.answer();
+    await hold.reached;
+    await settleByHand(refund.id);
+    hold.answer();
+    await run.catch(() => undefined);
+
+    expect(stripe.transfers.retrieve).toHaveBeenCalledWith(transferId);
+    expect(errorsSaying('took money')).toEqual([]);
+    expect(errorsSaying('was NOT reversed')).toEqual([]);
+    const unconfirmed = errorsSaying('outcome unconfirmed: check Stripe');
+    expect(unconfirmed).toEqual([
+      [
+        expect.stringContaining(
+          'Stripe refused its transfer reversal and could not say whether the transfer is reversed'
+        ),
+        expect.objectContaining({
+          errorId: expect.any(String),
+          stripeTransferId: transferId,
+          creatorUserId: payeeId,
+          settledAs: 'cancelled',
+          unconfirmed: true,
+        }),
+      ],
+    ]);
+    // In the queue, for support to check Stripe again.
+    expect(await creditsOf((await stepsOf(refund.id))[0]?.id)).toEqual([
+      expect.objectContaining({
+        effect: 'unverified',
+        stripeTransferId: transferId,
+        resolution: null,
+        resolvedAt: null,
+        alertErrorId: idOf(unconfirmed),
+      }),
+    ]);
   });
 
   it('a cancelled slice whose transfer lookup FAILED, under a step settled meanwhile: the unconfirmed alert, never "took money"', async () => {
@@ -1214,6 +1533,16 @@ describe('a clawback delivery that outlives its lease (Codex-2hxff.72)', () => {
       ],
     ]);
     expect(String(unconfirmed[0]?.[0])).not.toContain('was NOT reversed');
+    // For support to check Stripe again (§7.1 site 3c).
+    expect(await creditsOf((await stepsOf(refund.id))[0]?.id)).toEqual([
+      expect.objectContaining({
+        effect: 'unverified',
+        amountCents: null,
+        stripeTransferId: null,
+        resolution: null,
+        alertErrorId: idOf(unconfirmed),
+      }),
+    ]);
   });
 
   it('a cancelled slice\'s late transfer whose reversal answer was LOST, with nothing at Stripe, under a settled step: check Stripe, never "was NOT reversed"', async () => {
@@ -1249,6 +1578,14 @@ describe('a clawback delivery that outlives its lease (Codex-2hxff.72)', () => {
           code: 'ECONNRESET',
         }),
       ],
+    ]);
+    // For support to check Stripe again (§7.1 site 3b).
+    expect(await creditsOf((await stepsOf(refund.id))[0]?.id)).toEqual([
+      expect.objectContaining({
+        effect: 'unverified',
+        stripeTransferId: transferId,
+        alertErrorId: idOf(errorsSaying('outcome unconfirmed: check Stripe')),
+      }),
     ]);
   });
 
@@ -1295,6 +1632,16 @@ describe('a clawback delivery that outlives its lease (Codex-2hxff.72)', () => {
         )
       );
     expect(found).toHaveLength(1);
+    // Owed what the drain would have paid (§7.1 site 5, §7.3).
+    expect(await creditsOf(found[0]?.id)).toEqual([
+      expect.objectContaining({
+        effect: 'slice_cancelled',
+        amountCents: 765,
+        stripeReversalId: null,
+        settledAs: 'cancelled',
+        alertErrorId: idOf(errorsSaying('took money')),
+      }),
+    ]);
   });
 
   // ── what the warnings carry ─────────────────────────────────────────
@@ -1319,11 +1666,21 @@ describe('a clawback delivery that outlives its lease (Codex-2hxff.72)', () => {
       [
         expect.any(String),
         expect.objectContaining({
+          errorId: expect.any(String),
           code: 'ECONNRESET',
           error: 'socket hang up',
           status: 'cancelled',
         }),
       ],
+    ]);
+    // Queued for "Check Stripe again" (owner decision OQ3; §7.1 site 4).
+    expect(await creditsOf((await stepsOf(refund.id))[0]?.id)).toEqual([
+      expect.objectContaining({
+        effect: 'unverified',
+        amountCents: null,
+        settledAs: 'cancelled',
+        alertErrorId: idOf(warningsSaying('unconfirmed')),
+      }),
     ]);
   });
 
@@ -1356,5 +1713,175 @@ describe('a clawback delivery that outlives its lease (Codex-2hxff.72)', () => {
         }),
       ],
     ]);
+    // That delivery finishes it: nothing for support.
+    expect(await creditsOf((await stepsOf(refund.id))[0]?.id)).toEqual([]);
+  });
+
+  // ── the queue for support (Codex-2hxff.73; data design §7.1) ────────
+
+  it('a reversal whose answer was lost under a settled step, when Stripe cannot then be asked: alerted, and queued for support to check (§7.1 site 2)', async () => {
+    const charge = newCharge();
+    const creator = await slice(charge, 765);
+    const refund = fullRefund();
+    const hold = holdReversal('timeout');
+    const run = reverseCharge(deps, {
+      charge,
+      source: SOURCE,
+      refunds: [refund],
+    });
+    await hold.reached;
+    await settleByHand(refund.id);
+    vi.mocked(stripe.transfers.listReversals).mockRejectedValueOnce(
+      new Error('Stripe is down')
+    );
+    hold.answer();
+    await run.catch(() => undefined);
+
+    const asked = errorsSaying('could not be asked whether it landed');
+    expect(await creditsOf((await stepsOf(refund.id))[0]?.id)).toEqual([
+      expect.objectContaining({
+        effect: 'unverified',
+        amountCents: null,
+        stripeTransferId: creator.stripeTransferId,
+        settledAs: 'cancelled',
+        alertErrorId: idOf(asked),
+      }),
+    ]);
+  });
+
+  it("the credit is what Stripe took (the reversal's amount), never the step's amount (Q9)", async () => {
+    const charge = newCharge();
+    await slice(charge, 765);
+    const refund = fullRefund();
+    let reach: () => void = () => undefined;
+    let answer: () => void = () => undefined;
+    const reached = new Promise<void>((resolve) => {
+      reach = resolve;
+    });
+    vi.mocked(stripe.transfers.createReversal).mockImplementationOnce((async (
+      transferId: string,
+      params: { metadata?: Record<string, string> }
+    ) => {
+      reach();
+      await new Promise<void>((resolve) => {
+        answer = resolve;
+      });
+      return {
+        id: `trr_partial_${uid()}`,
+        object: 'transfer_reversal',
+        transfer: transferId,
+        amount: 700,
+        metadata: params.metadata ?? {},
+      };
+    }) as never);
+    const run = reverseCharge(deps, {
+      charge,
+      source: SOURCE,
+      refunds: [refund],
+    });
+    await reached;
+    await settleByHand(refund.id);
+    answer();
+    await run;
+
+    const [step] = await stepsOf(refund.id);
+    expect(step?.amountCents).toBe(765);
+    expect(await creditsOf(step?.id)).toEqual([
+      expect.objectContaining({ effect: 'reversal_landed', amountCents: 700 }),
+    ]);
+  });
+
+  it('a credit that cannot be written never throws: the failure is logged under the alert’s own errorId', async () => {
+    const charge = newCharge();
+    await slice(charge, 765);
+    const refund = fullRefund();
+    const fault = faultyDb({ insert: [1] });
+    const hold = holdReversal('lands');
+    const run = reverseCharge(
+      { ...deps, db: fault.db },
+      { charge, source: SOURCE, refunds: [refund] }
+    );
+    await hold.reached;
+    await settleByHand(refund.id);
+    fault.arm();
+    hold.answer();
+
+    await expect(run).resolves.toBeUndefined();
+    const errorId = idOf(errorsSaying('took money'));
+    expect(errorsSaying('could not be queued for support')).toEqual([
+      [expect.any(String), expect.objectContaining({ errorId })],
+    ]);
+    const [step] = await stepsOf(refund.id);
+    expect(await creditsOf(step?.id)).toEqual([]);
+    // The landing is still recorded on the step.
+    expect(step?.stripeReversalId).toBe(hold.made[0]?.id);
+  });
+
+  it('a later confirmed finding upgrades an open unverified credit; nothing changes a confirmed or settled one', async () => {
+    const charge = newCharge();
+    const creator = await slice(charge, 765);
+    const [step] = await db
+      .insert(payoutReversals)
+      .values({
+        payoutId: creator.id,
+        causeType: 'refund',
+        causeId: `re_late_${uid()}`,
+        amountCents: 765,
+        kind: 'transfer_reversal',
+        status: 'cancelled',
+      })
+      .returning();
+    const finding = {
+      payoutReversalId: step?.id ?? '',
+      payout: creator,
+      settledAs: 'cancelled' as const,
+    };
+    const [first, second, confirmed, later] = [1, 2, 3, 4].map(() =>
+      crypto.randomUUID()
+    );
+    await recordPayeeCredit(db, {
+      ...finding,
+      effect: 'unverified',
+      amountCents: null,
+      stripeTransferId: creator.stripeTransferId,
+      alertErrorId: first ?? '',
+    });
+    // A second unverified finding changes nothing.
+    await recordPayeeCredit(db, {
+      ...finding,
+      effect: 'unverified',
+      amountCents: null,
+      alertErrorId: second ?? '',
+    });
+    expect(await creditsOf(step?.id)).toEqual([
+      expect.objectContaining({ effect: 'unverified', alertErrorId: first }),
+    ]);
+
+    await recordPayeeCredit(db, {
+      ...finding,
+      effect: 'reversal_landed',
+      amountCents: 700,
+      stripeReversalId: 'trr_upgrade',
+      alertErrorId: confirmed ?? '',
+    });
+    const [upgraded] = await creditsOf(step?.id);
+    expect(upgraded).toMatchObject({
+      effect: 'reversal_landed',
+      amountCents: 700,
+      stripeReversalId: 'trr_upgrade',
+      // Kept from the first finding: the new one named no transfer.
+      stripeTransferId: creator.stripeTransferId,
+      alertErrorId: confirmed,
+      resolution: null,
+    });
+
+    // Confirmed: a later finding never rewrites it.
+    await recordPayeeCredit(db, {
+      ...finding,
+      effect: 'slice_cancelled',
+      amountCents: 765,
+      alertErrorId: later ?? '',
+    });
+    expect(await creditsOf(step?.id)).toEqual([upgraded]);
   });
 });

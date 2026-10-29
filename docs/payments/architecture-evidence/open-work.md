@@ -225,7 +225,11 @@ Owner decisions and design reviews:
 | Codex-xyb7v | Auth approach for the desktop fee app (TBD). | bead text |
 
 Not owner decisions, but research needed first:
-- .29: Stripe's GB `delay_days` minimum and maximum.
+- ~~.29: Stripe's GB `delay_days` minimum and maximum.~~ Answered 2026-10-27:
+  the maximum is 31, and `delay_days` doesn't apply to our transfers at all (it
+  times only `on_behalf_of` and direct charges; a `source_transaction` transfer
+  takes its charge's settlement). .29 is manual payouts plus a daily bank payout
+  job instead ([Payout timing](../connect-and-payouts.md#payout-timing)).
 - .9: does Stripe reject a `source_transaction` transfer against a disputed charge (PAY-06 "S")?
 
 Already decided (no blocker):

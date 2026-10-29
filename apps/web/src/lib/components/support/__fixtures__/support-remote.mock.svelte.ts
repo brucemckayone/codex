@@ -14,11 +14,14 @@
 import type {
   ChargeDetail,
   ChargeSummary,
-  CreatorDebtItem,
+  CheckedOwedToCreator,
+  CreatorDebtPerson,
   FailedRefundItem,
+  OwedToCreatorItem,
   RefundPreview,
   ResolvedCreatorDebt,
   ResolvedFailedRefund,
+  ResolvedOwedToCreator,
   SupportQueueCounts,
 } from '@codex/admin';
 import { type Mock, vi } from 'vitest';
@@ -65,7 +68,8 @@ const charges = new Map<string, QuerySlot<ChargeDetail>>();
 const searches = new Map<string, QuerySlot<Paginated<ChargeSummary>>>();
 const previews = new Map<string, QuerySlot<RefundPreview>>();
 const failedLists = new Map<string, QuerySlot<Paginated<FailedRefundItem>>>();
-const debtLists = new Map<string, QuerySlot<Paginated<CreatorDebtItem>>>();
+const debtLists = new Map<string, QuerySlot<Paginated<CreatorDebtPerson>>>();
+const owedLists = new Map<string, QuerySlot<Paginated<OwedToCreatorItem>>>();
 let counts = makeSlot<SupportQueueCounts>();
 
 export interface PreviewArgs {
@@ -97,6 +101,10 @@ export const listCreatorDebts = vi.fn(
   (args: { page?: number; limit?: number }) =>
     slotFor(debtLists, String(args.page ?? 1))
 );
+export const listOwedToCreators = vi.fn(
+  (args: { page?: number; limit?: number }) =>
+    slotFor(owedLists, String(args.page ?? 1))
+);
 
 // ── command() ───────────────────────────────────────────────────────────
 type IssueInput = {
@@ -122,6 +130,15 @@ export const resolveCreatorDebt: Mock<
     body: { resolution: string; note: string };
   }) => Promise<Answer<ResolvedCreatorDebt>>
 > = vi.fn();
+export const resolveOwedToCreator: Mock<
+  (input: {
+    creditId: string;
+    body: { action: string; note: string };
+  }) => Promise<Answer<ResolvedOwedToCreator>>
+> = vi.fn();
+export const checkOwedToCreator: Mock<
+  (input: { creditId: string }) => Promise<Answer<CheckedOwedToCreator>>
+> = vi.fn();
 
 // ── test controls ───────────────────────────────────────────────────────
 export const chargeSlot = (chargeId: string) => slotFor(charges, chargeId);
@@ -131,6 +148,7 @@ export const previewSlot = (args: PreviewArgs) =>
   slotFor(previews, previewKey(args));
 export const failedSlot = (page = 1) => slotFor(failedLists, String(page));
 export const debtsSlot = (page = 1) => slotFor(debtLists, String(page));
+export const owedSlot = (page = 1) => slotFor(owedLists, String(page));
 export const countsSlot = () => counts;
 export const previewKeysAsked = () => [...previews.keys()];
 
@@ -173,6 +191,7 @@ export function reset() {
   previews.clear();
   failedLists.clear();
   debtLists.clear();
+  owedLists.clear();
   counts = makeSlot<SupportQueueCounts>();
   for (const fn of [
     getSupportCharge,
@@ -181,10 +200,13 @@ export function reset() {
     getSupportQueueCounts,
     listFailedRefunds,
     listCreatorDebts,
+    listOwedToCreators,
   ]) {
     fn.mockClear();
   }
   issueSupportRefund.mockReset();
   resolveFailedRefund.mockReset();
   resolveCreatorDebt.mockReset();
+  resolveOwedToCreator.mockReset();
+  checkOwedToCreator.mockReset();
 }

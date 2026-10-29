@@ -89,14 +89,50 @@ export function rewriteMasterPlaylist(
   { contentApiBaseUrl, contentId, token }: RewriteMasterOptions
 ): string {
   const base = contentApiBaseUrl.replace(/\/+$/, '');
+  return rewriteVariantUris(
+    text,
+    `${base}/api/access/content/${encodeURIComponent(contentId)}/hls`,
+    token
+  );
+}
+
+export interface RewriteFilmMasterOptions {
+  /** Public content-api origin, e.g. `https://api.revelations.studio`. */
+  contentApiBaseUrl: string;
+  /** The course the film token was minted for — the film proxies' path key. */
+  courseId: string;
+  /** The SAME film token minted for the master request, propagated to children. */
+  token: string;
+}
+
+/**
+ * {@link rewriteMasterPlaylist} for a course sales film (owner P10): each
+ * variant points at the FILM variant proxy, which accepts only a film token.
+ */
+export function rewriteFilmMasterPlaylist(
+  text: string,
+  { contentApiBaseUrl, courseId, token }: RewriteFilmMasterOptions
+): string {
+  const base = contentApiBaseUrl.replace(/\/+$/, '');
+  return rewriteVariantUris(
+    text,
+    `${base}/api/access/courses/${encodeURIComponent(courseId)}/films/hls`,
+    token
+  );
+}
+
+/** Point each variant URI at `${hlsBase}/<variant>/index.m3u8`, token propagated. */
+function rewriteVariantUris(
+  text: string,
+  hlsBase: string,
+  token: string
+): string {
   return rewriteLines(text, (uri) => {
     // Variant URI is `<variant>/index.m3u8`; take the leading path segment.
     const variant = uri.split('/')[0] ?? uri;
-    return `${base}/api/access/content/${encodeURIComponent(
-      contentId
-    )}/hls/${encodeURIComponent(variant)}/index.m3u8?token=${encodeURIComponent(
-      token
-    )}`;
+    return `${hlsBase}/${encodeURIComponent(
+      variant
+    )}/index.m3u8?token=${encodeURIComponent(token)}`;
   });
 }
 

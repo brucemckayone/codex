@@ -35,7 +35,16 @@
  * - settling a failed refund `creators_repaid`: `charges.retrieve(id)` (its
  *   amount, for the later-cause guard), `refunds.list` (the engine's causes),
  *   and `transfers.listReversals(transferId)` for each step no retry will run
- *   (`settleUnfinishedRefundSteps`, @codex/payments).
+ *   (`settleUnfinishedRefundSteps`, @codex/payments); for a stranded
+ *   cancellation, also `transfers.list({ destination, created, limit: 100 })`
+ *   on each account the payee has had, and `transfers.retrieve(id)`
+ *   (Codex-2hxff.71);
+ * - the Creator debts tab: `balance.retrieve({}, { stripeAccount })` on each
+ *   listed person's account, 5 s each, for the live balance (Codex-2hxff.73;
+ *   the key needs Balance: Read on connected accounts);
+ * - "Check Stripe again" on an Owed to creators row (`recheckPayeeCredit`,
+ *   @codex/payments): `transfers.listReversals`, `transfers.retrieve` and
+ *   `transfers.list({ destination, … })`.
  */
 
 import {
@@ -46,6 +55,8 @@ import {
 import { type DatabaseClient, toIso, withPagination } from '@codex/database';
 import {
   agreementProposals,
+  type ConnectBalance,
+  connectBalances,
   content,
   courseSubscriptions,
   courses,
@@ -54,27 +65,38 @@ import {
   organizations,
   type Payout,
   type PayoutReversal,
+  payeeCredits,
   payoutReversals,
   payouts,
   purchases,
   refundReviews,
   refunds,
+  stripeConnectAccounts,
   subscriptions,
   subscriptionTiers,
   users,
 } from '@codex/database/schema';
 import {
   type ClawbackSource,
+  DEBT_INVOICE_AFTER_DAYS,
+  DEBT_INVOICE_THRESHOLD_CENTS,
   failedRefundRepayBlock,
+  type GbpBalance,
   issueRefund as issueStripeRefund,
   listChargeRefunds,
   listClawableRefunds,
   loadClawbackCauses,
   loadClawbackPlanInput,
+  payeeCreditsNeedingAPerson,
+  pendingReductionsFor,
   planClawback,
+  readGbpBalance,
+  recheckPayeeCredit,
   refundWindow,
   repayBlockedError,
   repayFailedRefund,
+  reportPayeeKept,
+  resolvePayeeCredit,
   type StrandedStep,
   settleUnfinishedRefundSteps,
 } from '@codex/payments';
@@ -97,6 +119,7 @@ import {
   type SupportIssueRefundInput,
   type SupportQueueQuery,
   type SupportResolveCreatorDebtInput,
+  type SupportResolveCreditInput,
   type SupportResolveFailedRefundInput,
   uuidSchema,
 } from '@codex/validation';
@@ -133,25 +156,36 @@ import type {
   ChargeDetail,
   ChargeDetailSource,
   ChargeSummary,
+  CheckedOwedToCreator,
   CreatorDebtItem,
+  CreatorDebtPerson,
   FailedRefundItem,
+  OwedToCreatorItem,
+  PayeeRole,
+  QueueCause,
   RefundPreview,
   RefundRequester,
   RefundRow,
   ResolvedCreatorDebt,
   ResolvedFailedRefund,
+  ResolvedOwedToCreator,
   Slice,
+  StripeHeldTakeBack,
   SupportBuyer,
   SupportChargeKind,
   SupportPerson,
   SupportQueueCounts,
   SupportRefundResult,
+  SystemDecision,
 } from '../support-types';
 import {
   BLOCKING_DISPUTE_STATUSES,
   causeKey,
   chargebackState,
+  creditAction,
+  creditState,
   debtErrorLabel,
+  debtStanding,
   type HistoryContext,
   previewLabel,
   refundFailureLabel,
@@ -159,12 +193,50 @@ import {
   sliceHistory,
 } from './support-ledger';
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * The Creator debts tab's live balance read, per account: a slow Stripe never
+ * holds the page (data design §4.3). No retry: the snapshot is the fallback.
+ */
+const LIVE_BALANCE_REQUEST = {
+  timeout: 5_000,
+  maxNetworkRetries: 0,
+} as const satisfies Stripe.RequestOptions;
+
+/** A payee's role on a slice of this payout type. */
+function payeeRoleOf(payoutType: string): PayeeRole {
+  return payoutType === 'creator_payout' ? 'creator' : 'organisation_owner';
+}
+
+/** A queue row's refund or chargeback, with what we hold of it. */
+function queueCause(
+  causeType: string,
+  causeId: string,
+  facts:
+    | { amountCents: number | null; disputeStatus: string | null }
+    | undefined
+): QueueCause {
+  return {
+    type: causeType === 'dispute' ? 'dispute' : 'refund',
+    id: causeId,
+    amountCents: facts?.amountCents ?? null,
+    disputeStatus: facts?.disputeStatus ?? null,
+  };
+}
+
 /** What the settlement's transaction needs from the Stripe pre-step. */
 interface PreparedRepay {
   /** The Stripe charge's amount: the guard's denominator. */
   chargeAmountCents: number;
   /** Steps no retry will run whose reversal never landed: cancelled in the transaction. */
   unlanded: StrandedStep[];
+  /**
+   * The slices whose stranded step the system settled as `took_share`
+   * (Codex-2hxff.71). The `payee_kept` ones are cancelled in the
+   * transaction, so they come back from `repayFailedRefund`.
+   */
+  tookShare: string[];
 }
 
 export interface SupportServiceConfig extends ServiceConfig {
@@ -875,11 +947,8 @@ export class SupportService extends BaseService {
           a.createdAt.getTime() - b.createdAt.getTime()
       )
       .map((slice) => {
-        const { history, takenCents, owedCents } = sliceHistory(
-          slice.id,
-          steps,
-          context
-        );
+        const { history, takenCents, owedCents, owedToPayeeCents } =
+          sliceHistory(slice.id, steps, context);
         return {
           payoutId: slice.id,
           payoutType: slice.payoutType,
@@ -898,6 +967,7 @@ export class SupportService extends BaseService {
           transferId: slice.stripeTransferId,
           takenCents,
           owedCents,
+          owedToPayeeCents,
           history,
         };
       });
@@ -1287,22 +1357,58 @@ export class SupportService extends BaseService {
   // The queue (routes 5, 6, 7)
   // ==========================================================================
 
-  /** The queue's two counts, each through its partial index. */
+  /**
+   * The queue's three counts, each through partial indexes. Creator debts
+   * counts PEOPLE who need a person (owner decision OQ2): an open debt Stripe
+   * refused, a Stripe-held balance over £50 for 90 days ("To invoice", on
+   * the morning snapshot), or a debt over £50 Stripe collected from the
+   * platform, awaiting the P6 invoice (AMENDMENT 2). Each person once. A
+   * balance Stripe is recovering by itself is listed on the tab, not counted.
+   */
   async getQueueCounts(): Promise<SupportQueueCounts> {
     try {
-      const [[failed], [debts]] = await Promise.all([
+      const invoiceFrom = new Date(
+        Date.now() - DEBT_INVOICE_AFTER_DAYS * DAY_MS
+      );
+      const needing = this.db
+        .select({ userId: refundReviews.creatorUserId })
+        .from(refundReviews)
+        .where(isNull(refundReviews.resolvedAt))
+        .union(
+          this.db
+            .select({ userId: connectBalances.userId })
+            .from(connectBalances)
+            .where(isNotNull(connectBalances.negativeSince))
+            .groupBy(connectBalances.userId)
+            .having(
+              and(
+                sql`MIN(${connectBalances.negativeSince}) <= ${invoiceFrom}`,
+                sql`SUM(GREATEST(0, -COALESCE(${connectBalances.availableCents}, 0))) > ${DEBT_INVOICE_THRESHOLD_CENTS}`
+              )
+            )
+        )
+        .union(
+          this.db
+            .select({ userId: connectBalances.userId })
+            .from(connectBalances)
+            .where(isNotNull(connectBalances.collectedOwedCents))
+        )
+        .as('needing');
+      const [[failed], [debts], [owed]] = await Promise.all([
         this.db
           .select({ total: count() })
           .from(refunds)
           .where(and(eq(refunds.status, 'failed'), isNull(refunds.resolvedAt))),
+        this.db.select({ total: count() }).from(needing),
         this.db
           .select({ total: count() })
-          .from(refundReviews)
-          .where(isNull(refundReviews.resolvedAt)),
+          .from(payeeCredits)
+          .where(isNull(payeeCredits.resolvedAt)),
       ]);
       return {
         failedRefunds: failed?.total ?? 0,
         creatorDebts: debts?.total ?? 0,
+        owedToCreators: owed?.total ?? 0,
       };
     } catch (error) {
       this.handleError(error, 'getQueueCounts');
@@ -1410,106 +1516,807 @@ export class SupportService extends BaseService {
     }
   }
 
-  /** Creator debts not yet settled, oldest first (`idx_refund_reviews_open`). */
+  /**
+   * Creator debts, ONE ROW PER PERSON (data design §4.3; owner decisions Q2,
+   * Q4, Q7): everyone whose Stripe balance is below zero (Stripe holds the
+   * debt), everyone with a debt Stripe refused (`refund_reviews`), and
+   * everyone whose debt over £50 Stripe collected from the platform at 180
+   * days (`collected_owed_cents`, design §14, AMENDMENT 2: `to_invoice`
+   * until the P6 invoice, with no balance below zero needed), oldest first,
+   * paginated by person. A refused take-back never moved the balance, so
+   * those two never overlap.
+   *
+   * Each listed account's balance is read live, in parallel, 5 s each; a
+   * failure shows the morning snapshot (`live: false`), never £0.00.
+   */
   async listCreatorDebts(
     query: SupportQueueQuery
-  ): Promise<PaginatedListResponse<CreatorDebtItem>> {
+  ): Promise<PaginatedListResponse<CreatorDebtPerson>> {
     try {
       const { page, limit } = query;
       const { offset } = withPagination({ page, limit });
-      const open = isNull(refundReviews.resolvedAt);
+      const people = this.db
+        .select({
+          userId: connectBalances.userId,
+          oldest: sql<string>`MIN(${connectBalances.negativeSince})`.as(
+            'oldest'
+          ),
+        })
+        .from(connectBalances)
+        .where(isNotNull(connectBalances.negativeSince))
+        .groupBy(connectBalances.userId)
+        .unionAll(
+          this.db
+            .select({
+              userId: refundReviews.creatorUserId,
+              oldest: sql<string>`MIN(${refundReviews.createdAt})`.as('oldest'),
+            })
+            .from(refundReviews)
+            .where(isNull(refundReviews.resolvedAt))
+            .groupBy(refundReviews.creatorUserId)
+        )
+        .unionAll(
+          this.db
+            .select({
+              userId: connectBalances.userId,
+              oldest: sql<string>`MIN(${connectBalances.collectedAt})`.as(
+                'oldest'
+              ),
+            })
+            .from(connectBalances)
+            .where(isNotNull(connectBalances.collectedOwedCents))
+            .groupBy(connectBalances.userId)
+        )
+        .as('people');
+      const oldest = sql<string>`MIN(${people.oldest})`;
       const [rows, [totals]] = await Promise.all([
         this.db
-          .select({
-            review: {
-              id: refundReviews.id,
-              payoutId: refundReviews.payoutId,
-              creatorUserId: refundReviews.creatorUserId,
-              attemptedReversalCents: refundReviews.attemptedReversalCents,
-              errorCode: refundReviews.errorCode,
-              createdAt: refundReviews.createdAt,
-            },
-            causeType: payoutReversals.causeType,
-            causeId: payoutReversals.causeId,
-            slice: {
-              payoutType: payouts.payoutType,
-              stripeChargeId: payouts.stripeChargeId,
-              purchaseId: payouts.purchaseId,
-            },
-            payeeName: users.name,
-            payeeDeletedAt: users.deletedAt,
-          })
-          .from(refundReviews)
-          .innerJoin(payouts, eq(payouts.id, refundReviews.payoutId))
-          .innerJoin(users, eq(users.id, refundReviews.creatorUserId))
-          .leftJoin(
-            payoutReversals,
-            eq(payoutReversals.id, refundReviews.payoutReversalId)
-          )
-          .where(open)
-          .orderBy(asc(refundReviews.createdAt), asc(refundReviews.id))
+          .select({ userId: people.userId, oldest })
+          .from(people)
+          .groupBy(people.userId)
+          .orderBy(oldest, people.userId)
           .limit(limit)
           .offset(offset),
-        this.db.select({ total: count() }).from(refundReviews).where(open),
+        this.db
+          .select({
+            total: sql<number>`COUNT(DISTINCT ${people.userId})::int`,
+          })
+          .from(people),
+      ]);
+      const userIds = rows.map((row) => row.userId);
+      if (userIds.length === 0) {
+        return pageOf([], totals?.total ?? 0, page, limit);
+      }
+
+      const [balances, accounts, roles, names] = await Promise.all([
+        this.db
+          .select()
+          .from(connectBalances)
+          .where(inArray(connectBalances.userId, userIds)),
+        this.db
+          .select({
+            userId: stripeConnectAccounts.userId,
+            stripeAccountId: stripeConnectAccounts.stripeAccountId,
+          })
+          .from(stripeConnectAccounts)
+          .where(inArray(stripeConnectAccounts.userId, userIds)),
+        this.db
+          .selectDistinct({
+            userId: payouts.userId,
+            payoutType: payouts.payoutType,
+          })
+          .from(payouts)
+          .where(
+            and(
+              inArray(payouts.userId, userIds),
+              ne(payouts.payoutType, 'platform_fee')
+            )
+          ),
+        this.peopleById(userIds),
+      ]);
+      const negativeOf = (userId: string) =>
+        balances.filter(
+          (row) => row.userId === userId && row.negativeSince !== null
+        );
+      // Each person's take-backs since the last morning they were at or
+      // above zero (§4.2): one read for the page.
+      const windows = new Map(
+        userIds.flatMap((userId) => {
+          const starts = negativeOf(userId).map(
+            (row) => row.negativeAfter ?? row.negativeSince
+          );
+          const start = starts.reduce<Date | null>(
+            (min, at) => (at && (!min || at < min) ? at : min),
+            null
+          );
+          return start ? [[userId, start] as const] : [];
+        })
+      );
+      const currentAccount = new Map(
+        accounts.map((account) => [account.userId, account.stripeAccountId])
+      );
+      const snapshotOf = new Map(
+        balances.map((row) => [row.stripeAccountId, row])
+      );
+      const [debts, held, live] = await Promise.all([
+        this.openDebts(inArray(refundReviews.creatorUserId, userIds)),
+        this.stripeHeldTakeBacks(windows),
+        Promise.all(
+          userIds.map((userId) => {
+            const accountId = currentAccount.get(userId) ?? null;
+            return this.liveBalanceOf(
+              userId,
+              negativeOf(userId),
+              accountId ? (snapshotOf.get(accountId) ?? null) : null,
+              accountId
+            );
+          })
+        ),
       ]);
 
-      const charges = await this.chargeFacts(
-        rows.flatMap(({ slice }) =>
-          slice.stripeChargeId
-            ? [{ chargeId: slice.stripeChargeId, purchaseId: slice.purchaseId }]
-            : []
-        )
-      );
-      const histories = await this.historiesFor(
-        rows.map(({ review }) => review.payoutId)
-      );
-      const causes = await this.causeFacts(
-        rows.flatMap(({ causeType, causeId }) =>
-          causeType && causeId ? [{ causeType, causeId }] : []
-        )
-      );
-      const items = rows.map((row): CreatorDebtItem => {
-        const facts = row.slice.stripeChargeId
-          ? charges.get(row.slice.stripeChargeId)
-          : undefined;
-        const cause =
-          row.causeType && row.causeId
-            ? causes.get(causeKey(row.causeType, row.causeId))
-            : undefined;
+      const now = new Date();
+      const items = rows.map((row, index): CreatorDebtPerson => {
+        const negative = negativeOf(row.userId);
+        const balance = live[index] ?? {
+          availableCents: null,
+          pendingCents: null,
+          checkedAt: null,
+          live: false,
+          owedCents: 0,
+        };
+        const recordedDebts = debts.filter(
+          (debt) => debt.payee.userId === row.userId
+        );
+        const stripeHeld = held.get(row.userId) ?? [];
+        const recordedCents = recordedDebts.reduce(
+          (sum, debt) => sum + debt.owedCents,
+          0
+        );
+        // Collected by Stripe over £50, awaiting the P6 invoice (AMENDMENT 2).
+        const collected = balances.filter(
+          (account) =>
+            account.userId === row.userId && account.collectedOwedCents !== null
+        );
+        const collectedCents =
+          collected.length === 0
+            ? null
+            : collected.reduce(
+                (sum, account) => sum + (account.collectedOwedCents ?? 0),
+                0
+              );
+        const collectedAt = collected.reduce<Date | null>(
+          (min, account) =>
+            account.collectedAt && (!min || account.collectedAt < min)
+              ? account.collectedAt
+              : min,
+          null
+        );
+        const owedNowCents = balance.owedCents + recordedCents;
+        const totalOwedCents = owedNowCents + (collectedCents ?? 0);
+        const negativeSince = negative.reduce<Date | null>(
+          (min, at) =>
+            at.negativeSince && (!min || at.negativeSince < min)
+              ? at.negativeSince
+              : min,
+          null
+        );
+        const windowKnown =
+          negative.length > 0 &&
+          negative.every((account) => account.negativeAfter !== null);
+        const person = names.get(row.userId);
+        // The clock is the balance below zero now; a collected debt is
+        // support's to invoice whatever that balance does.
+        const standing = negativeSince
+          ? debtStanding(owedNowCents, negativeSince, now)
+          : { state: 'needs_settling' as const, clock: null };
         return {
-          reviewId: row.review.id,
-          payoutId: row.review.payoutId,
           payee: {
-            userId: row.review.creatorUserId,
-            name: row.payeeName,
-            deleted: row.payeeDeletedAt !== null,
-            role:
-              row.slice.payoutType === 'creator_payout'
-                ? 'creator'
-                : 'organisation_owner',
+            userId: row.userId,
+            name: person?.name ?? '',
+            deleted: person?.deleted ?? false,
+            roles: unique(
+              roles
+                .filter((role) => role.userId === row.userId)
+                .map((role) => payeeRoleOf(role.payoutType))
+            ).sort(),
           },
-          owedCents: row.review.attemptedReversalCents,
-          chargeId: row.slice.stripeChargeId,
-          title: facts?.title ?? null,
-          buyerName: facts?.buyer?.name ?? null,
-          cause:
-            row.causeType && row.causeId
-              ? {
-                  type: row.causeType === 'dispute' ? 'dispute' : 'refund',
-                  id: row.causeId,
-                  amountCents: cause?.amountCents ?? null,
-                  disputeStatus: cause?.disputeStatus ?? null,
-                }
+          stripe: {
+            availableCents: balance.availableCents,
+            pendingCents: balance.pendingCents,
+            checkedAt: balance.checkedAt,
+            live: balance.live,
+          },
+          stripeOwedCents: balance.owedCents,
+          negativeSince: toIso(negativeSince),
+          backCents:
+            windowKnown && balance.live
+              ? Math.max(
+                  0,
+                  stripeHeld.reduce((sum, take) => sum + take.amountCents, 0) -
+                    balance.owedCents
+                )
               : null,
-          errorCode: row.review.errorCode,
-          errorLabel: debtErrorLabel(row.review.errorCode, row.payeeName),
-          createdAt: row.review.createdAt.toISOString(),
-          history: histories.get(row.review.payoutId)?.history ?? [],
+          stripeHeld,
+          recordedDebts,
+          collectedCents,
+          collectedAt: toIso(collectedAt),
+          totalOwedCents,
+          state: collectedCents === null ? standing.state : 'to_invoice',
+          clock: standing.clock,
+          oldestAt: new Date(row.oldest).toISOString(),
         };
       });
       return pageOf(items, totals?.total ?? 0, page, limit);
     } catch (error) {
       this.handleError(error, 'listCreatorDebts');
+    }
+  }
+
+  /**
+   * A person's balance for the Creator debts tab: read live on each account
+   * below zero (else their current one), and on any failure the morning
+   * snapshot, marked `live: false`. `owedCents` is what Stripe holds: each
+   * account's balance below zero, never netted across accounts.
+   */
+  private async liveBalanceOf(
+    userId: string,
+    negative: readonly ConnectBalance[],
+    current: ConnectBalance | null,
+    currentAccountId: string | null
+  ): Promise<{
+    availableCents: number | null;
+    pendingCents: number | null;
+    checkedAt: string | null;
+    live: boolean;
+    owedCents: number;
+  }> {
+    const snapshots = negative.length > 0 ? negative : current ? [current] : [];
+    const accountIds =
+      negative.length > 0
+        ? negative.map((row) => row.stripeAccountId)
+        : currentAccountId
+          ? [currentAccountId]
+          : [];
+    const fromSnapshot = () => {
+      const read = snapshots.filter((row) => row.availableCents !== null);
+      if (read.length === 0) {
+        return {
+          availableCents: null,
+          pendingCents: null,
+          checkedAt: null,
+          live: false,
+          owedCents: 0,
+        };
+      }
+      return {
+        availableCents: read.reduce(
+          (sum, row) => sum + (row.availableCents ?? 0),
+          0
+        ),
+        pendingCents: read.reduce(
+          (sum, row) => sum + (row.pendingCents ?? 0),
+          0
+        ),
+        checkedAt: toIso(
+          read.reduce<Date | null>(
+            (min, row) =>
+              row.checkedAt && (!min || row.checkedAt < min)
+                ? row.checkedAt
+                : min,
+            null
+          )
+        ),
+        live: false,
+        owedCents: read.reduce(
+          (sum, row) => sum + Math.max(0, -(row.availableCents ?? 0)),
+          0
+        ),
+      };
+    };
+    if (accountIds.length === 0) return fromSnapshot();
+    let read: GbpBalance[];
+    try {
+      read = await Promise.all(
+        accountIds.map((accountId) =>
+          readGbpBalance(this.stripe, accountId, LIVE_BALANCE_REQUEST)
+        )
+      );
+    } catch (error) {
+      const e = error as StripeErrorFields | null;
+      const facts = {
+        userId,
+        stripeAccountIds: accountIds,
+        stripeRequestId: typeof e?.requestId === 'string' ? e.requestId : null,
+        statusCode: typeof e?.statusCode === 'number' ? e.statusCode : null,
+        stripeCode: typeof e?.code === 'string' ? e.code.slice(0, 64) : null,
+        stripeErrorType:
+          typeof e?.type === 'string' ? e.type.slice(0, 64) : null,
+        stripeMessage: (error instanceof Error
+          ? error.message
+          : String(error)
+        ).slice(0, 300),
+      };
+      // A refused key is a configuration fault, not an outage: every load
+      // would show the snapshot for good. The key needs Balance: Read on
+      // connected accounts (review MED-6).
+      if (facts.statusCode === 401 || facts.statusCode === 403) {
+        this.obs.error(
+          "Stripe refused admin-api's key a creator debt's live balance: the key needs Balance: Read on connected accounts. The morning snapshot is shown",
+          { errorId: crypto.randomUUID(), ...facts }
+        );
+      } else {
+        this.obs.warn(
+          "A creator debt's Stripe balance could not be read: the morning snapshot is shown",
+          facts
+        );
+      }
+      return fromSnapshot();
+    }
+    return {
+      availableCents: read.reduce((sum, b) => sum + b.availableCents, 0),
+      pendingCents: read.reduce((sum, b) => sum + b.pendingCents, 0),
+      checkedAt: new Date().toISOString(),
+      live: true,
+      owedCents: read.reduce(
+        (sum, b) => sum + Math.max(0, -b.availableCents),
+        0
+      ),
+    };
+  }
+
+  /**
+   * Open debts Stripe refused (`refund_reviews`), oldest first, each with its
+   * slice's facts and history, and a credit whose late take-back paid it.
+   */
+  private async openDebts(where: SQL): Promise<CreatorDebtItem[]> {
+    const rows = await this.db
+      .select({
+        review: {
+          id: refundReviews.id,
+          payoutId: refundReviews.payoutId,
+          payoutReversalId: refundReviews.payoutReversalId,
+          creatorUserId: refundReviews.creatorUserId,
+          attemptedReversalCents: refundReviews.attemptedReversalCents,
+          errorCode: refundReviews.errorCode,
+          createdAt: refundReviews.createdAt,
+        },
+        causeType: payoutReversals.causeType,
+        causeId: payoutReversals.causeId,
+        repaidByPayoutId: payoutReversals.repaidByPayoutId,
+        slice: {
+          payoutType: payouts.payoutType,
+          organizationId: payouts.organizationId,
+          stripeChargeId: payouts.stripeChargeId,
+          purchaseId: payouts.purchaseId,
+        },
+        payeeName: users.name,
+        payeeDeletedAt: users.deletedAt,
+      })
+      .from(refundReviews)
+      .innerJoin(payouts, eq(payouts.id, refundReviews.payoutId))
+      .innerJoin(users, eq(users.id, refundReviews.creatorUserId))
+      .leftJoin(
+        payoutReversals,
+        eq(payoutReversals.id, refundReviews.payoutReversalId)
+      )
+      .where(and(isNull(refundReviews.resolvedAt), where))
+      .orderBy(asc(refundReviews.createdAt), asc(refundReviews.id));
+    if (rows.length === 0) return [];
+
+    const stepIds = unique(rows.map(({ review }) => review.payoutReversalId));
+    const [charges, histories, causes, orgs, credits] = await Promise.all([
+      this.chargeFacts(
+        rows.flatMap(({ slice }) =>
+          slice.stripeChargeId
+            ? [{ chargeId: slice.stripeChargeId, purchaseId: slice.purchaseId }]
+            : []
+        )
+      ),
+      this.historiesFor(rows.map(({ review }) => review.payoutId)),
+      this.causeFacts(
+        rows.flatMap(({ causeType, causeId }) =>
+          causeType && causeId ? [{ causeType, causeId }] : []
+        )
+      ),
+      this.organizationNames(rows.map(({ slice }) => slice.organizationId)),
+      stepIds.length === 0
+        ? Promise.resolve([])
+        : this.db
+            .select()
+            .from(payeeCredits)
+            .where(
+              and(
+                inArray(payeeCredits.payoutReversalId, stepIds),
+                isNull(payeeCredits.resolvedAt)
+              )
+            ),
+    ]);
+    const needsPerson = await payeeCreditsNeedingAPerson(this.db, credits);
+    return rows.map((row): CreatorDebtItem => {
+      const facts = row.slice.stripeChargeId
+        ? charges.get(row.slice.stripeChargeId)
+        : undefined;
+      const cause =
+        row.causeType && row.causeId
+          ? causes.get(causeKey(row.causeType, row.causeId))
+          : undefined;
+      const found = credits.find(
+        (c) => c.payoutReversalId === row.review.payoutReversalId
+      );
+      const credit = found && {
+        ...found,
+        needsPerson: needsPerson.has(found.id),
+        siblingTook: needsPerson.get(found.id)?.siblingTook ?? false,
+      };
+      return {
+        reviewId: row.review.id,
+        payoutId: row.review.payoutId,
+        payee: {
+          userId: row.review.creatorUserId,
+          name: row.payeeName,
+          deleted: row.payeeDeletedAt !== null,
+          role: payeeRoleOf(row.slice.payoutType),
+        },
+        owedCents: row.review.attemptedReversalCents,
+        chargeId: row.slice.stripeChargeId,
+        title: facts?.title ?? null,
+        organizationName: row.slice.organizationId
+          ? (orgs.get(row.slice.organizationId) ?? null)
+          : null,
+        buyerName: facts?.buyer?.name ?? null,
+        cause:
+          row.causeType && row.causeId
+            ? queueCause(row.causeType, row.causeId, cause)
+            : null,
+        errorCode: row.review.errorCode,
+        errorLabel: debtErrorLabel(row.review.errorCode, row.payeeName),
+        createdAt: row.review.createdAt.toISOString(),
+        owedCreditId:
+          credit &&
+          creditAction(
+            credit,
+            { repaidByPayoutId: row.repaidByPayoutId },
+            {
+              attemptedReversalCents: row.review.attemptedReversalCents,
+              resolvedAt: null,
+              resolution: null,
+            }
+          ) === 'count_against_debt'
+            ? credit.id
+            : null,
+        history: histories.get(row.review.payoutId)?.history ?? [],
+      };
+    });
+  }
+
+  /**
+   * The take-backs that came out of each person's Stripe balance since
+   * `windows`' start (§4.2): `done` steps with a Stripe reversal on their
+   * payouts, not since paid back. A cancelled share's late full reversal
+   * reads its share, so "back so far" is approximate there.
+   */
+  private async stripeHeldTakeBacks(
+    windows: ReadonlyMap<string, Date>
+  ): Promise<Map<string, StripeHeldTakeBack[]>> {
+    const held = new Map<string, StripeHeldTakeBack[]>();
+    if (windows.size === 0) return held;
+    const from = [...windows.values()].reduce((min, at) =>
+      at < min ? at : min
+    );
+    const rows = await this.db
+      .select({
+        step: payoutReversals,
+        slice: {
+          userId: payouts.userId,
+          organizationId: payouts.organizationId,
+          stripeChargeId: payouts.stripeChargeId,
+          purchaseId: payouts.purchaseId,
+        },
+      })
+      .from(payoutReversals)
+      .innerJoin(payouts, eq(payouts.id, payoutReversals.payoutId))
+      .where(
+        and(
+          inArray(payouts.userId, [...windows.keys()]),
+          eq(payoutReversals.status, 'done'),
+          isNotNull(payoutReversals.stripeReversalId),
+          isNull(payoutReversals.repaidByPayoutId),
+          sql`${payoutReversals.resolvedAt} >= ${from}`
+        )
+      )
+      .orderBy(asc(payoutReversals.resolvedAt), asc(payoutReversals.id));
+    const inWindow = rows.filter(({ step, slice }) => {
+      const start = slice.userId ? windows.get(slice.userId) : undefined;
+      return (
+        start !== undefined &&
+        step.resolvedAt !== null &&
+        step.resolvedAt >= start
+      );
+    });
+    if (inWindow.length === 0) return held;
+    const [charges, histories, causes, orgs] = await Promise.all([
+      this.chargeFacts(
+        inWindow.flatMap(({ slice }) =>
+          slice.stripeChargeId
+            ? [{ chargeId: slice.stripeChargeId, purchaseId: slice.purchaseId }]
+            : []
+        )
+      ),
+      this.historiesFor(inWindow.map(({ step }) => step.payoutId)),
+      this.causeFacts(inWindow.map(({ step }) => step)),
+      this.organizationNames(inWindow.map(({ slice }) => slice.organizationId)),
+    ]);
+    for (const { step, slice } of inWindow) {
+      if (!slice.userId) continue;
+      const facts = slice.stripeChargeId
+        ? charges.get(slice.stripeChargeId)
+        : undefined;
+      const cause = causes.get(causeKey(step.causeType, step.causeId));
+      const line: StripeHeldTakeBack = {
+        payoutReversalId: step.id,
+        payoutId: step.payoutId,
+        amountCents: step.amountCents,
+        takenAt: (step.resolvedAt ?? step.updatedAt).toISOString(),
+        stripeReversalId: step.stripeReversalId,
+        chargeId: slice.stripeChargeId,
+        title: facts?.title ?? null,
+        organizationName: slice.organizationId
+          ? (orgs.get(slice.organizationId) ?? null)
+          : null,
+        buyerName: facts?.buyer?.name ?? null,
+        cause: queueCause(step.causeType, step.causeId, cause),
+        history: histories.get(step.payoutId)?.history ?? [],
+      };
+      held.set(slice.userId, [...(held.get(slice.userId) ?? []), line]);
+    }
+    return held;
+  }
+
+  /**
+   * Owed to creators (Codex-2hxff.73; owner decisions Q8-Q11): open payee
+   * credits, oldest first (`idx_payee_credits_open`). Each row carries its
+   * one action, by the rules the resolve route enforces (`creditAction`).
+   */
+  async listOwedToCreators(
+    query: SupportQueueQuery
+  ): Promise<PaginatedListResponse<OwedToCreatorItem>> {
+    try {
+      const { page, limit } = query;
+      const { offset } = withPagination({ page, limit });
+      const open = isNull(payeeCredits.resolvedAt);
+      // A step on a re-pay payout: its charge is its slice's.
+      const repaidFrom = alias(payoutReversals, 'repaid_from');
+      const origin = alias(payouts, 'origin');
+      const [rows, [totals]] = await Promise.all([
+        this.db
+          .select({
+            credit: payeeCredits,
+            step: {
+              amountCents: payoutReversals.amountCents,
+              causeType: payoutReversals.causeType,
+              causeId: payoutReversals.causeId,
+              repaidByPayoutId: payoutReversals.repaidByPayoutId,
+            },
+            slice: {
+              id: payouts.id,
+              amountCents: payouts.amountCents,
+              payoutType: payouts.payoutType,
+              organizationId: payouts.organizationId,
+              purchaseId: payouts.purchaseId,
+              stripeChargeId: sql<
+                string | null
+              >`COALESCE(${payouts.stripeChargeId}, ${origin.stripeChargeId})`,
+            },
+            review: {
+              id: refundReviews.id,
+              attemptedReversalCents: refundReviews.attemptedReversalCents,
+              resolution: refundReviews.resolution,
+              resolvedAt: refundReviews.resolvedAt,
+            },
+            payeeName: users.name,
+            payeeDeletedAt: users.deletedAt,
+          })
+          .from(payeeCredits)
+          .innerJoin(
+            payoutReversals,
+            eq(payoutReversals.id, payeeCredits.payoutReversalId)
+          )
+          .innerJoin(payouts, eq(payouts.id, payeeCredits.payoutId))
+          .leftJoin(repaidFrom, eq(repaidFrom.repaidByPayoutId, payouts.id))
+          .leftJoin(origin, eq(origin.id, repaidFrom.payoutId))
+          .leftJoin(users, eq(users.id, payeeCredits.payeeUserId))
+          .leftJoin(
+            refundReviews,
+            eq(refundReviews.payoutReversalId, payeeCredits.payoutReversalId)
+          )
+          .where(open)
+          .orderBy(asc(payeeCredits.foundAt), asc(payeeCredits.id))
+          .limit(limit)
+          .offset(offset),
+        this.db.select({ total: count() }).from(payeeCredits).where(open),
+      ]);
+
+      const [charges, causes, orgs] = await Promise.all([
+        this.chargeFacts(
+          rows.flatMap(({ slice }) =>
+            slice.stripeChargeId
+              ? [
+                  {
+                    chargeId: slice.stripeChargeId,
+                    purchaseId: slice.purchaseId,
+                  },
+                ]
+              : []
+          )
+        ),
+        this.causeFacts(rows.map(({ step }) => step)),
+        this.organizationNames(rows.map(({ slice }) => slice.organizationId)),
+      ]);
+      // Needs-person rows (MED-3): Re-pay pays the cancelled share, as
+      // `resolvePayeeCredit` works it out.
+      const needsPerson = await payeeCreditsNeedingAPerson(
+        this.db,
+        rows.map(({ credit }) => credit)
+      );
+      const reductions = await pendingReductionsFor(
+        this.db,
+        rows
+          .filter(({ credit }) => needsPerson.has(credit.id))
+          .map(({ slice }) => slice.id)
+      );
+      const items = rows.map((row): OwedToCreatorItem => {
+        const credit = {
+          ...row.credit,
+          needsPerson: needsPerson.has(row.credit.id),
+          siblingTook: needsPerson.get(row.credit.id)?.siblingTook ?? false,
+        };
+        const state = creditState(credit);
+        const facts = row.slice.stripeChargeId
+          ? charges.get(row.slice.stripeChargeId)
+          : undefined;
+        return {
+          creditId: credit.id,
+          payoutId: credit.payoutId,
+          payee:
+            credit.payeeUserId && row.payeeName !== null
+              ? {
+                  userId: credit.payeeUserId,
+                  name: row.payeeName,
+                  deleted: row.payeeDeletedAt !== null,
+                  role: payeeRoleOf(row.slice.payoutType),
+                }
+              : null,
+          // Open: a `transfer_kept` row is born settled, so never here.
+          state: state as OwedToCreatorItem['state'],
+          effect: credit.effect as OwedToCreatorItem['effect'],
+          amountCents: credit.amountCents,
+          repayCents:
+            state === 'needs_person'
+              ? row.slice.amountCents - (reductions.get(row.slice.id) ?? 0)
+              : credit.effect === 'unverified'
+                ? null
+                : credit.amountCents,
+          stepAmountCents: row.step.amountCents,
+          settledAs: credit.settledAs as OwedToCreatorItem['settledAs'],
+          stripeReversalId: credit.stripeReversalId,
+          chargeId: row.slice.stripeChargeId,
+          title: facts?.title ?? null,
+          organizationName: row.slice.organizationId
+            ? (orgs.get(row.slice.organizationId) ?? null)
+            : null,
+          buyerName: facts?.buyer?.name ?? null,
+          cause: queueCause(
+            row.step.causeType,
+            row.step.causeId,
+            causes.get(causeKey(row.step.causeType, row.step.causeId))
+          ),
+          debt: row.review
+            ? {
+                reviewId: row.review.id,
+                owedCents: row.review.attemptedReversalCents,
+                resolution: row.review.resolution,
+              }
+            : null,
+          // Never null for an open credit.
+          action:
+            creditAction(
+              credit,
+              { repaidByPayoutId: row.step.repaidByPayoutId },
+              row.review
+            ) ?? 'check',
+          foundAt: credit.foundAt.toISOString(),
+          checkedAt: toIso(credit.checkedAt),
+        };
+      });
+      return pageOf(items, totals?.total ?? 0, page, limit);
+    } catch (error) {
+      this.handleError(error, 'listOwedToCreators');
+    }
+  }
+
+  /**
+   * Settle an Owed to creators row (data design §7.4): Re-pay, Count it
+   * against this debt, or Not owed, in one transaction with the credit
+   * locked (`resolvePayeeCredit`). Its refusals pass through as they are.
+   */
+  async resolveOwedToCreator(
+    creditId: string,
+    input: SupportResolveCreditInput,
+    resolvedByUserId: string
+  ): Promise<ResolvedOwedToCreator> {
+    try {
+      const { credit, repayPayout } = await resolvePayeeCredit(
+        { db: this.db, obs: this.obs },
+        { creditId, action: input.action, note: input.note, resolvedByUserId }
+      );
+      const people = await this.peopleById([credit.payeeUserId]);
+      return {
+        creditId: credit.id,
+        resolution: credit.resolution as ResolvedOwedToCreator['resolution'],
+        resolvedAt: (credit.resolvedAt ?? new Date()).toISOString(),
+        repayPayoutId: repayPayout?.id ?? null,
+        amountCents: credit.amountCents,
+        payeeName: credit.payeeUserId
+          ? (people.get(credit.payeeUserId)?.name ?? null)
+          : null,
+      };
+    } catch (error) {
+      this.handleError(error, 'resolveOwedToCreator');
+    }
+  }
+
+  /** "Check Stripe again" on an Owed to creators row (`recheckPayeeCredit`). */
+  async checkOwedToCreator(creditId: string): Promise<CheckedOwedToCreator> {
+    try {
+      const { credit, outcome } = await recheckPayeeCredit(
+        {
+          db: this.db,
+          stripe: this.stripe,
+          obs: this.obs,
+          environment: this.environment,
+        },
+        { creditId }
+      );
+      const [[step], [review]] = await Promise.all([
+        this.db
+          .select({ repaidByPayoutId: payoutReversals.repaidByPayoutId })
+          .from(payoutReversals)
+          .where(eq(payoutReversals.id, credit.payoutReversalId))
+          .limit(1),
+        this.db
+          .select({
+            attemptedReversalCents: refundReviews.attemptedReversalCents,
+            resolvedAt: refundReviews.resolvedAt,
+            resolution: refundReviews.resolution,
+          })
+          .from(refundReviews)
+          .where(eq(refundReviews.payoutReversalId, credit.payoutReversalId))
+          .limit(1),
+      ]);
+      const person = (await payeeCreditsNeedingAPerson(this.db, [credit])).get(
+        credit.id
+      );
+      const view = {
+        ...credit,
+        needsPerson: outcome === 'needs_person' || person !== undefined,
+        siblingTook: person?.siblingTook ?? false,
+      };
+      return {
+        creditId: credit.id,
+        outcome,
+        state: creditState(view),
+        amountCents: credit.amountCents,
+        stripeReversalId: credit.stripeReversalId,
+        note: credit.resolution === 'not_owed' ? credit.resolutionNote : null,
+        checkedAt: (credit.checkedAt ?? new Date()).toISOString(),
+        action: creditAction(
+          view,
+          { repaidByPayoutId: step?.repaidByPayoutId ?? null },
+          review ?? null
+        ),
+      };
+    } catch (error) {
+      this.handleError(error, 'checkOwedToCreator');
     }
   }
 
@@ -1588,6 +2395,7 @@ export class SupportService extends BaseService {
         repaid: [],
         accessRestored: false,
         accessNotRestoredReason: null,
+        systemSettled: [],
       },
       restoredAccess: null,
     };
@@ -1636,7 +2444,12 @@ export class SupportService extends BaseService {
           refundId,
           'creators_repaid'
         );
-        return { row: settled, repaid: null, access: undefined };
+        return {
+          row: settled,
+          repaid: null,
+          payeeKept: [],
+          access: undefined,
+        };
       }
       // Unresolved here means it was unresolved before: a settlement is
       // never undone.
@@ -1649,13 +2462,14 @@ export class SupportService extends BaseService {
       // Re-checks the whole later-cause guard under the lock, and cancels the
       // pre-step's unlanded steps here, so a refusal leaves them as they were
       // (round 2 LOW-B, LOW-D).
-      const repaid = await repayFailedRefund(tx, {
+      const { repaid, payeeKept } = await repayFailedRefund(tx, {
         stripeRefundId: row.stripeRefundId,
         resolvedByUserId,
         note,
         now,
         chargeAmountCents: prepared.chargeAmountCents,
         unlanded: prepared.unlanded,
+        obs: this.obs,
       });
       const access = purchaseId
         ? await this.purchase.restoreAfterFailedRefund(
@@ -1688,8 +2502,15 @@ export class SupportService extends BaseService {
           'The failed refund could not be marked settled'
         );
       }
-      return { row: resolved, repaid, access };
+      return { row: resolved, repaid, payeeKept, access };
     });
+    // Only now that the cancellations committed (review LOW-8): a refused
+    // settlement changed nothing, so it raises nothing.
+    reportPayeeKept(
+      this.obs,
+      { stripeRefundId: outcome.row.stripeRefundId },
+      outcome.payeeKept
+    );
 
     // A repeat reports the re-pay rows the first settlement wrote.
     const repaid =
@@ -1699,7 +2520,32 @@ export class SupportService extends BaseService {
         payeeUserId: row.userId,
         amountCents: row.amountCents,
       }));
-    const people = await this.peopleById(repaid.map((row) => row.payeeUserId));
+    // What the system settled with this settlement, and how (F2's notice):
+    // paid back (`took_share`) or kept by the payee. A repeat ran no
+    // pre-step, so it names none.
+    const tookShare =
+      outcome.repaid === null || !prepared
+        ? []
+        : await this.payeesOfSlices(prepared.tookShare);
+    const systemSettled: Array<{
+      id: string;
+      userId: string | null;
+      decision: SystemDecision;
+    }> = [
+      ...tookShare.map((slice) => ({
+        ...slice,
+        decision: 'took_share' as const,
+      })),
+      ...outcome.payeeKept.map((step) => ({
+        id: step.payoutId,
+        userId: step.payeeUserId,
+        decision: 'payee_kept' as const,
+      })),
+    ].sort((a, b) => a.id.localeCompare(b.id));
+    const people = await this.peopleById([
+      ...repaid.map((row) => row.payeeUserId),
+      ...systemSettled.map((slice) => slice.userId),
+    ]);
     const restored = outcome.access?.restored === true;
     return {
       settled: {
@@ -1719,6 +2565,13 @@ export class SupportService extends BaseService {
           outcome.repaid === null
             ? null
             : (outcome.access?.reason ?? (purchaseId ? null : 'no_purchase')),
+        systemSettled: systemSettled.map((slice) => ({
+          payoutId: slice.id,
+          payeeName: slice.userId
+            ? (people.get(slice.userId)?.name ?? null)
+            : null,
+          decision: slice.decision,
+        })),
       },
       restoredAccess: restored && outcome.access ? outcome.access : null,
     };
@@ -1767,7 +2620,23 @@ export class SupportService extends BaseService {
       },
       { stripeRefundId }
     );
-    return { chargeAmountCents: charge.amount, unlanded: unfinished.unlanded };
+    return {
+      chargeAmountCents: charge.amount,
+      unlanded: unfinished.unlanded,
+      tookShare: unfinished.decided,
+    };
+  }
+
+  /** The slices named, with their payees, in id order. */
+  private async payeesOfSlices(
+    payoutIds: readonly string[]
+  ): Promise<Array<{ id: string; userId: string | null }>> {
+    if (payoutIds.length === 0) return [];
+    return this.db
+      .select({ id: payouts.id, userId: payouts.userId })
+      .from(payouts)
+      .where(inArray(payouts.id, [...payoutIds]))
+      .orderBy(asc(payouts.id));
   }
 
   /**
@@ -1850,7 +2719,11 @@ export class SupportService extends BaseService {
     return row;
   }
 
-  /** The re-pay payouts a refund's steps were paid back by. */
+  /**
+   * The re-pay payouts a refund's steps were paid back by. Not a credit's
+   * (Owed to creators): support re-paid a late take-back there, which is not
+   * this settlement's (data design §7.5).
+   */
   private async repaidFor(stripeRefundId: string) {
     return this.db
       .select({
@@ -1863,7 +2736,8 @@ export class SupportService extends BaseService {
       .where(
         and(
           eq(payoutReversals.causeType, 'refund'),
-          eq(payoutReversals.causeId, stripeRefundId)
+          eq(payoutReversals.causeId, stripeRefundId),
+          sql`NOT EXISTS (SELECT 1 FROM ${payeeCredits} WHERE ${payeeCredits.repayPayoutId} = ${payouts.id})`
         )
       )
       .orderBy(asc(payouts.createdAt), asc(payouts.id));
@@ -2405,21 +3279,72 @@ export class SupportService extends BaseService {
   private async historyContext(
     steps: readonly PayoutReversal[]
   ): Promise<HistoryContext> {
-    const causes = await this.causeFacts(steps);
     const debtIds = steps
       .filter((step) => step.status === 'debt')
       .map((step) => step.id);
-    const reviews =
+    const stepIds = steps.map((step) => step.id);
+    const [causes, reviews, credits] = await Promise.all([
+      this.causeFacts(steps),
       debtIds.length === 0
-        ? []
-        : await this.db
+        ? Promise.resolve([])
+        : this.db
             .select({
               payoutReversalId: refundReviews.payoutReversalId,
               resolution: refundReviews.resolution,
+              attemptedReversalCents: refundReviews.attemptedReversalCents,
+              resolvedAt: refundReviews.resolvedAt,
             })
             .from(refundReviews)
-            .where(inArray(refundReviews.payoutReversalId, debtIds));
+            .where(inArray(refundReviews.payoutReversalId, debtIds)),
+      stepIds.length === 0
+        ? Promise.resolve([])
+        : this.db
+            .select({ credit: payeeCredits, repayStatus: payouts.status })
+            .from(payeeCredits)
+            .leftJoin(payouts, eq(payouts.id, payeeCredits.repayPayoutId))
+            .where(inArray(payeeCredits.payoutReversalId, stepIds)),
+    ]);
+    const stepById = new Map(steps.map((step) => [step.id, step]));
+    const reviewOf = new Map(
+      reviews.flatMap((review) =>
+        review.payoutReversalId ? [[review.payoutReversalId, review]] : []
+      )
+    );
+    const needsPerson = await payeeCreditsNeedingAPerson(
+      this.db,
+      credits.map(({ credit }) => credit)
+    );
     return {
+      credits: new Map(
+        credits.map(({ credit, repayStatus }) => [
+          credit.payoutReversalId,
+          {
+            id: credit.id,
+            effect: credit.effect,
+            amountCents: credit.amountCents,
+            settledAs: credit.settledAs,
+            resolution: credit.resolution,
+            repayPayout: credit.repayPayoutId
+              ? { id: credit.repayPayoutId, status: repayStatus ?? 'pending' }
+              : null,
+            needsPerson: needsPerson.has(credit.id),
+            siblingTook: needsPerson.get(credit.id)?.siblingTook ?? false,
+            action: creditAction(
+              {
+                ...credit,
+                needsPerson: needsPerson.has(credit.id),
+                siblingTook: needsPerson.get(credit.id)?.siblingTook ?? false,
+              },
+              {
+                repaidByPayoutId:
+                  stepById.get(credit.payoutReversalId)?.repaidByPayoutId ??
+                  null,
+              },
+              reviewOf.get(credit.payoutReversalId) ?? null
+            ),
+          },
+        ])
+      ),
       causeAmounts: new Map(
         [...causes].flatMap(([key, cause]) =>
           cause.amountCents === null ? [] : [[key, cause.amountCents]]

@@ -225,7 +225,7 @@ describe('repayFailedRefund (creators_repaid)', () => {
   function settle(refundId: string, unlanded?: readonly StrandedStep[]) {
     const now = new Date();
     return db.transaction(async (tx) => {
-      const repaid = await repayFailedRefund(tx, {
+      const { repaid } = await repayFailedRefund(tx, {
         stripeRefundId: refundId,
         resolvedByUserId: supportId,
         note: NOTE,
@@ -337,7 +337,7 @@ describe('repayFailedRefund (creators_repaid)', () => {
       (await stepsOf(refund.id)).map((s) => `${s.id}:${s.repaidByPayoutId}`);
     const linked = (await links()).sort();
 
-    const again = await db.transaction((tx) =>
+    const { repaid: again } = await db.transaction((tx) =>
       repayFailedRefund(tx, {
         stripeRefundId: refund.id,
         resolvedByUserId: supportId,
@@ -457,7 +457,7 @@ describe('repayFailedRefund (creators_repaid)', () => {
     // The cron retries it within the hour: the pre-step leaves it alone.
     expect(
       await settleUnfinishedRefundSteps(deps, { stripeRefundId: refund.id })
-    ).toEqual({ landed: 0, unlanded: [], forPerson: 0 });
+    ).toEqual({ landed: 0, decided: [], unlanded: [], forPerson: 0 });
     const error = await settle(refund.id).catch((e: unknown) => e);
 
     expect(error).toBeInstanceOf(BusinessLogicError);
@@ -543,7 +543,7 @@ describe('repayFailedRefund (creators_repaid)', () => {
 
     expect(
       await settleUnfinishedRefundSteps(deps, { stripeRefundId: refund.id })
-    ).toEqual({ landed: 1, unlanded: [], forPerson: 0 });
+    ).toEqual({ landed: 1, decided: [], unlanded: [], forPerson: 0 });
     const repaid = await settle(refund.id);
 
     expect(
@@ -575,7 +575,7 @@ describe('repayFailedRefund (creators_repaid)', () => {
 
     expect(
       await settleUnfinishedRefundSteps(deps, { stripeRefundId: refund.id })
-    ).toEqual({ landed: 0, unlanded: [], forPerson: 0 });
+    ).toEqual({ landed: 0, decided: [], unlanded: [], forPerson: 0 });
     const error = await settle(refund.id).catch((e: unknown) => e);
 
     expect((error as BusinessLogicError).context).toEqual({
@@ -732,7 +732,7 @@ describe('repayFailedRefund (creators_repaid)', () => {
     ).toBe(true);
   });
 
-  it('an unfinished cancellation on a slice already cancelled is left for a person, logged, and the settlement says a person must check it (LOW-C)', async () => {
+  it('an unfinished cancellation on a slice already cancelled, which the rule cannot decide (another refund cancelled there too), is left for a person, logged, and the settlement says a person must check it (LOW-C; Codex-2hxff.71)', async () => {
     const charge = newCharge();
     await slice(charge, 'organization_fee', 135);
     const refund = await failedRefund(charge, 1000);
@@ -743,11 +743,24 @@ describe('repayFailedRefund (creators_repaid)', () => {
       'cancelled_by_refund'
     );
     const step = await claimedLongAgo(refund, cancelled, 'cancellation');
+    // A second refund's cancellation, whose lease is not the slice's either:
+    // nothing says which of the two took the slice. A sole one is decided by
+    // the system (stranded-cancellation.integration.test.ts).
+    await claimedLongAgo(
+      { id: `re_repay_${uid()}`, amountCents: 1000, createdAt: 2 },
+      cancelled,
+      'cancellation'
+    );
 
     const checked = await settleUnfinishedRefundSteps(deps, {
       stripeRefundId: refund.id,
     });
-    expect(checked).toEqual({ landed: 0, unlanded: [], forPerson: 1 });
+    expect(checked).toEqual({
+      landed: 0,
+      decided: [],
+      unlanded: [],
+      forPerson: 1,
+    });
     const error = await settle(refund.id, checked.unlanded).catch(
       (e: unknown) => e
     );

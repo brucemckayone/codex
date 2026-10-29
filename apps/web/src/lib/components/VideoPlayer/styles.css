@@ -300,6 +300,12 @@
  * Media Chrome base theming
  * ═══════════════════════════════════════════════════════════════════════════ */
 
+/* Hidden behind an error, never unmounted (VideoPlayer: Retry rebuilds on
+   its <video>). Its shadow `:host` display would beat the UA `[hidden]`. */
+media-controller[hidden] {
+  display: none;
+}
+
 media-controller {
   --media-background-color: transparent;
   --media-control-background: transparent;

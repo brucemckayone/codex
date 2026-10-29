@@ -134,18 +134,57 @@
    */
   let mediaEl: HTMLVideoElement | null = null;
   /**
-   * Preserve playback position across a refresh-and-reload cycle. The 403
-   * recovery path destroys the HLS instance, which resets the video element;
-   * we capture the last known time right before teardown so the rebuilt
-   * player can seek back to it.
+   * Preserve playback position across a rebuild: a 403's refresh-and-reload,
+   * or a Retry after the stream failed. Destroying the HLS instance resets
+   * the video element to 0, so the place is taken from `hls.ts` (`at`, read
+   * before its destroy) and given to the rebuilt player once it knows its
+   * length (`landPlace`). Until then the progress tracker saves this
+   * place, never the reset 0, so a paid viewer keeps their resume point.
+   * `null` once it has landed.
    */
-  let lastCurrentTime = 0;
+  let resumePoint: number | null = null;
+  /** Drops a build's wait for its stream's metadata (`landPlace`). */
+  let unland: (() => void) | null = null;
+  /** What that wait will land when nothing was kept (`keepPending`). */
+  let pendingFallback = 0;
+  let pendingResume = false;
   /**
-   * Guard against concurrent refresh attempts. If a 403 fires while we're
-   * already refreshing (e.g. races between multiple in-flight segments),
-   * we'd otherwise trigger a cascade of redundant server calls.
+   * The next rebuild plays on: a failure, or a dropped build, interrupted a
+   * film the viewer was watching (`fail`, `keepPending`).
    */
-  let refreshInFlight = false;
+  let playOnNext = false;
+  /** A 403 killed the old stream while a renewal's ask was out. */
+  let lapsedMidAsk = false;
+  /**
+   * A renewal or Retry built this stream and it has shown no frame yet. A
+   * 403 now is a refusal, not an expiry (its link is seconds old): asking
+   * again would loop refresh → 403 until the rate limit.
+   */
+  let freshUnframed = false;
+  /**
+   * When the signed URL the player is actually using expires. The
+   * `expiresAt` prop describes the `src` prop, which a re-sign of the same
+   * item replaces without the player switching to it (the src-change
+   * effect), so a refresh records its own expiry here and the renewal timer
+   * reads this, never the prop.
+   */
+  let liveExpiresAt: string | null | undefined = null;
+  /** The element the one-time setup (`wireElement`) has run on. */
+  let wiredEl: HTMLVideoElement | null = null;
+  /**
+   * Guard against concurrent refresh attempts: the item whose renewal or
+   * Retry ask is out (`asking`). If a 403 fires while it is already
+   * refreshing (e.g. races between multiple in-flight segments), we'd
+   * otherwise trigger a cascade of redundant server calls. Tied to the
+   * item: a slow ask for the item the viewer left must not swallow the
+   * next item's own 403 or Try Again.
+   */
+  let refreshingFor: string | null = null;
+
+  /** This item's renewal or Retry ask is out. */
+  function asking() {
+    return refreshingFor !== null && refreshingFor === lastInitialisedContentId;
+  }
   /** Pre-emptive refresh timer (browser setTimeout handle). */
   let refreshTimer: ReturnType<typeof setTimeout> | null = null;
   let loading = $state(true);
@@ -161,6 +200,8 @@
   let buffering = $state(false);
   let bufferingTimer: ReturnType<typeof setTimeout> | null = null;
   const BUFFERING_DELAY_MS = 400;
+  /** `MediaError.MEDIA_ERR_NETWORK`, spelled out: jsdom has no `MediaError`. */
+  const MEDIA_ERR_NETWORK = 2;
   /**
    * Latch that arms the buffering detector. Between `canplay` (first frame
    * decodable) and first user `play`, HLS rapidly fires `waiting`/`playing`
@@ -345,14 +386,27 @@
   }
 
   function handlePlay() {
+    // A play under the error card (media keys, picture-in-picture) is
+    // refused: it would re-arm the renewal, which then clears the card and
+    // plays unasked. The card's Try Again is the way back.
+    if (errorMessage) {
+      videoEl?.pause();
+      return;
+    }
     isPaused = false;
     hasStartedPlayback = true;
     scheduleHideControls();
+    scheduleRefresh();
   }
 
   function handlePause() {
     isPaused = true;
     clearHideTimer();
+    // A paused film never renews its link: a forgotten tab would otherwise
+    // ask every ~9 minutes for good (owner cost rule). Playing again arms it,
+    // and a link that lapsed meanwhile comes back as a 403 the helper turns
+    // into a renewal.
+    teardownRefresh();
   }
 
   function togglePlay() {
@@ -361,7 +415,7 @@
     // scoped `onkeydown` — clicking `<video>` does not focus it natively.
     wrapperEl?.focus({ preventScroll: true });
     if (videoEl.paused) {
-      videoEl.play();
+      videoEl.play().catch(() => {});
     } else {
       videoEl.pause();
     }
@@ -478,7 +532,128 @@
   const tracker = createProgressTracker({
     getContentId: () => contentId,
     getMedia: () => videoEl ?? null,
+    getResumePoint: () => resumePoint,
   });
+
+  /** A failed or expired stream's place, for the rebuild to restore. */
+  function keepPlace(at: number) {
+    if (Number.isFinite(at) && at > 0) resumePoint = at;
+  }
+
+  /**
+   * The stream failed: say why, and stop everything that would act on the
+   * dead stream. The element stopped without a `pause` event, so the mirror
+   * is set to paused here and the renewal timer stops: left armed, it would
+   * rebuild and play the film unasked minutes later. What the viewer wanted
+   * is kept for Retry, and so is a first place that had not landed yet, so
+   * Retry never starts a paid film at 0:00.
+   */
+  function fail(message: string) {
+    keepPending();
+    playOnNext ||= !isPaused;
+    teardownRefresh();
+    isPaused = true;
+    errorMessage = message;
+    loading = false;
+  }
+
+  /**
+   * Give a freshly built stream its place once it knows its length: the
+   * place a rebuild kept (`resumePoint`), else `fallback` (the saved
+   * progress). Every build path ends here, so a kept place is always
+   * consumed and never left to freeze later saves.
+   *
+   * @param resume - Carry on playing. A rebuild's destroy paused the element
+   *   without a `pause` event, so nothing else would restart the film.
+   */
+  function landPlace(fallback: number, resume: boolean) {
+    unland?.();
+    unland = null;
+    const el = videoEl;
+    if (!el) return;
+    const land = () => {
+      unland = null;
+      const at = resumePoint ?? fallback;
+      resumePoint = null;
+      if (at > 0) el.currentTime = at;
+      if (!resume) return;
+      el.play().catch(() => {
+        isPaused = el.paused;
+      });
+    };
+    if (el.readyState >= 1) {
+      land();
+      return;
+    }
+    pendingFallback = fallback;
+    pendingResume = resume;
+    el.addEventListener('loadedmetadata', land, { once: true });
+    unland = () => el.removeEventListener('loadedmetadata', land);
+  }
+
+  /**
+   * Keep what a build that has not landed yet was to give its stream, its
+   * place and its play-on, before a failure or a rebuild drops that wait.
+   * Without it, a stream that 403s or fails before its first metadata
+   * would be rebuilt at 0:00, paused.
+   */
+  function keepPending() {
+    if (!unland) return;
+    if (resumePoint === null) keepPlace(pendingFallback);
+    playOnNext ||= pendingResume;
+  }
+
+  /**
+   * Stop the live stream for a rebuild, and say whether the viewer was
+   * watching. `isPaused` is read first: hls.js may already have destroyed
+   * the stream, which pauses the element without a `pause` event, so the
+   * mirror still holds what the viewer wanted (or `fail` kept it). It is
+   * then set to the truth, and the renewal timer stops with the stream.
+   */
+  function stopForRebuild(): boolean {
+    keepPending();
+    const wasPlaying = !isPaused || playOnNext;
+    playOnNext = false;
+    teardownHls();
+    teardownRefresh();
+    isPaused = videoEl?.paused ?? true;
+    return wasPlaying;
+  }
+
+  /**
+   * The setup a stream needs on its element once: media-chrome, the saved
+   * preferences and their listeners. Every build path awaits it, so a Retry
+   * after a failed first load (a chunk that did not arrive) still gets the
+   * controls and the preferences.
+   */
+  async function wireElement(el: HTMLVideoElement) {
+    await import('media-chrome');
+    if (wiredEl === el) return;
+    wiredEl = el;
+
+    const prefs = loadPlayerPreferences();
+    el.volume = prefs.volume;
+    el.muted = prefs.muted;
+    el.playbackRate = prefs.playbackRate;
+    volumeLevel = prefs.volume;
+    isMuted = prefs.muted;
+
+    // Track volume changes for animated icon + preferences. Icon state
+    // updates eagerly (every event) so the UI stays in lock-step with
+    // the slider; the localStorage write is debounced 250ms so a drag
+    // collapses into one save instead of up to 60 per second.
+    el.addEventListener('volumechange', () => {
+      volumeLevel = el.volume;
+      isMuted = el.muted;
+      if (volumeSaveTimer) clearTimeout(volumeSaveTimer);
+      volumeSaveTimer = setTimeout(() => {
+        savePlayerPreferences({ volume: el.volume, muted: el.muted });
+      }, 250);
+    });
+    el.addEventListener('ratechange', () => {
+      savePlayerPreferences({ playbackRate: el.playbackRate });
+    });
+  }
 
   function handleCanPlay() {
     loading = false;
@@ -494,6 +669,7 @@
    */
   function handleLoadedData() {
     loading = false;
+    freshUnframed = false;
   }
 
   function clearBuffering() {
@@ -528,10 +704,18 @@
   }
 
   function handleError() {
-    if (!errorMessage) {
-      errorMessage = 'Failed to load video. Please check your connection and try again.';
-    }
-    loading = false;
+    const live = hlsInstance && videoEl;
+    if (live) keepPlace(videoEl?.currentTime ?? 0);
+    const network = videoEl?.error?.code === MEDIA_ERR_NETWORK;
+    const message = network
+      ? 'Failed to load video. Please check your connection and try again.'
+      : 'This video could not be played. Please try again.';
+    fail(errorMessage || message);
+    // A decode or MSE failure reaches the element before hls.js, which only
+    // notices on its next append. Destroy the instance here: orphaned, it
+    // would stay bound to the element a Retry's instance then owns, and its
+    // own recovery would take it back.
+    if (live) teardownHls();
     // Null the HLS reference — the instance may already have been destroyed
     // by hls.ts's fatal-error path, but the local reference is what the
     // src-change $effect checks. Without this, navigating to a working video
@@ -602,39 +786,41 @@
     });
   }
 
-  async function initPlayer() {
+  /**
+   * Build the stream for the `src` prop, at the place a rebuild kept or the
+   * saved progress.
+   *
+   * @param resume - Carry on playing once it lands (a Retry on a film the
+   *   viewer was watching).
+   */
+  async function initPlayer(resume = false) {
     if (!videoEl) return;
 
     loading = true;
     errorMessage = '';
     hasStartedPlayback = false;
+    // This build's `resume` says what plays; an earlier failure's wish is spent.
+    playOnNext = false;
+    freshUnframed = false;
     clearBuffering();
     lastInitialisedSrc = src;
+    liveExpiresAt = expiresAt;
     lastInitialisedContentId = contentId;
     mediaEl = videoEl;
     const token = ++initToken;
 
     try {
-      // Import media-chrome dynamically on the client
-      await import('media-chrome');
+      await wireElement(videoEl);
 
       const handle = await createHlsPlayer({
         media: videoEl,
         src,
-        onError: (msg) => {
-          errorMessage = msg;
-          loading = false;
-          // hls.ts destroys the instance internally before calling onError —
-          // null our reference so the src-change $effect takes the rebuild
-          // path instead of calling loadSource() on a dead instance.
-          hlsInstance = null;
-          lastInitialisedSrc = null;
-        },
-        onUrlExpired: () => {
+        onError: streamFailed,
+        onUrlExpired: (at) => {
           // HLS.js path: instance has already been destroyed by hls.ts.
           // Safari path: `<video>` is still attached. Either way we need a
           // fresh URL + a new player instance pointing at it.
-          void handleUrlExpired();
+          void handleUrlExpired(at);
         },
       });
       if (token !== initToken) {
@@ -646,29 +832,7 @@
       hlsInstance = handle.hls;
       hlsCleanup = handle.cleanup;
       void attachQualityListeners();
-
-      // Set initial progress (resume position)
-      if (initialProgress > 0) {
-        if (videoEl.readyState >= 1) {
-          videoEl.currentTime = initialProgress;
-        } else {
-          videoEl.addEventListener(
-            'loadedmetadata',
-            () => {
-              if (videoEl) videoEl.currentTime = initialProgress;
-            },
-            { once: true }
-          );
-        }
-      }
-
-      // Apply saved preferences
-      const prefs = loadPlayerPreferences();
-      videoEl.volume = prefs.volume;
-      videoEl.muted = prefs.muted;
-      videoEl.playbackRate = prefs.playbackRate;
-      volumeLevel = prefs.volume;
-      isMuted = prefs.muted;
+      landPlace(initialProgress, resume);
 
       // Sync captions-enabled with the initially-active text track (if any)
       if (hasCaptions) {
@@ -682,28 +846,9 @@
         }
       }
 
-      // Track volume changes for animated icon + preferences. Icon state
-      // updates eagerly (every event) so the UI stays in lock-step with
-      // the slider; the localStorage write is debounced 250ms so a drag
-      // collapses into one save instead of up to 60 per second.
-      videoEl.addEventListener('volumechange', () => {
-        if (!videoEl) return;
-        volumeLevel = videoEl.volume;
-        isMuted = videoEl.muted;
-        if (volumeSaveTimer) clearTimeout(volumeSaveTimer);
-        volumeSaveTimer = setTimeout(() => {
-          if (!videoEl) return;
-          savePlayerPreferences({ volume: videoEl.volume, muted: videoEl.muted });
-        }, 250);
-      });
-      videoEl.addEventListener('ratechange', () => {
-        if (videoEl) savePlayerPreferences({ playbackRate: videoEl.playbackRate });
-      });
-
       tracker.attach();
     } catch {
-      errorMessage = 'Failed to initialize video player.';
-      loading = false;
+      fail('Failed to initialize video player.');
     }
   }
 
@@ -714,6 +859,8 @@
    * instance/listener are never orphaned.
    */
   function teardownHls() {
+    unland?.();
+    unland = null;
     if (hlsCleanup) {
       hlsCleanup();
       hlsCleanup = null;
@@ -724,84 +871,118 @@
     }
   }
 
+  /** `hls.ts` gave up on the stream; it has destroyed the instance itself. */
+  function streamFailed(msg: string, _kind: unknown, at: number) {
+    keepPlace(at);
+    fail(msg);
+    // Null our reference so the src-change $effect rebuilds instead of
+    // calling loadSource() on a dead instance.
+    hlsInstance = null;
+    lastInitialisedSrc = null;
+  }
+
   /**
-   * Refresh the signed URL and reinitialise the player. Preserves
-   * currentTime so playback resumes where it was — the user should only
-   * see a brief buffering blip. Guarded by `refreshInFlight` so concurrent
-   * 403s don't stampede the access worker.
+   * Build this item's stream on a freshly signed URL, at the place the
+   * rebuild kept: a renewal's and a Retry's shared second half. The link is
+   * asked for BEFORE `stop` ends the live stream, so a renewal that cannot
+   * ask leaves a still-good link playing. A newer build that claimed the
+   * element meanwhile wins, and this one is dropped.
+   *
+   * @param stop - Ends the live stream; says whether to play on.
    */
-  async function handleUrlExpired() {
-    if (refreshInFlight) return;
-    refreshInFlight = true;
-    try {
-      if (videoEl && Number.isFinite(videoEl.currentTime)) {
-        lastCurrentTime = videoEl.currentTime;
-      }
+  async function buildFresh(stop: () => boolean) {
+    const token = ++initToken;
+    const fresh = await refreshStreamingUrl(contentId);
+    if (!videoEl || token !== initToken) return;
+    const resume = stop();
+    lastInitialisedSrc = fresh.streamingUrl;
+    liveExpiresAt = fresh.expiresAt;
+    loading = true;
+    errorMessage = '';
+    await wireElement(videoEl);
+    const handle = await createHlsPlayer({
+      media: videoEl,
+      src: fresh.streamingUrl,
+      onError: streamFailed,
+      onUrlExpired: (at) => {
+        void handleUrlExpired(at);
+      },
+    });
+    if (token !== initToken) {
+      handle.cleanup();
+      handle.hls?.destroy();
+      return;
+    }
+    hlsInstance = handle.hls;
+    hlsCleanup = handle.cleanup;
+    freshUnframed = true;
+    void attachQualityListeners();
+    landPlace(0, resume);
+    tracker.attach();
+  }
+
+  /**
+   * Refresh the signed URL and rebuild the stream where it stood, playing
+   * on if it was — the viewer should only see a brief buffering blip.
+   * Guarded by `asking` so concurrent 403s don't stampede the
+   * access worker.
+   *
+   * @param at - Where the expired stream stood, as `hls.ts` read it before
+   *   its destroy reset the element; the pre-emptive timer passes nothing,
+   *   and the element, still playing, says it live.
+   */
+  async function handleUrlExpired(at?: number) {
+    // A 403's stream is already dead, so its place is kept first, even while
+    // a renewal's ask is out: the timer's renewal keeps the old stream until
+    // its answer, and a laptop that wakes past the link's end hits both.
+    if (at !== undefined) keepPlace(at);
+    if (asking()) {
+      if (at !== undefined) lapsedMidAsk = true;
+      return;
+    }
+    if (freshUnframed) {
+      fail('This could not be loaded. Please try again.');
       teardownHls();
-      const token = ++initToken;
-      const fresh = await refreshStreamingUrl(contentId);
-      if (!videoEl || token !== initToken) return;
-      lastInitialisedSrc = fresh.streamingUrl;
-      loading = true;
-      errorMessage = '';
-      const handle = await createHlsPlayer({
-        media: videoEl,
-        src: fresh.streamingUrl,
-        onError: (msg) => {
-          errorMessage = msg;
-          loading = false;
-          // hls.ts destroys the instance internally before calling onError —
-          // null our reference so the src-change $effect takes the rebuild
-          // path instead of calling loadSource() on a dead instance.
-          hlsInstance = null;
-          lastInitialisedSrc = null;
-        },
-        onUrlExpired: () => {
-          void handleUrlExpired();
-        },
+      return;
+    }
+    refreshingFor = lastInitialisedContentId;
+    lapsedMidAsk = false;
+    const item = lastInitialisedContentId;
+    let stopped = false;
+    try {
+      await buildFresh(() => {
+        stopped = true;
+        // The timer's renewal ran while the film played on.
+        if (at === undefined) keepPlace(videoEl?.currentTime ?? 0);
+        return stopForRebuild();
       });
-      if (token !== initToken) {
-        handle.cleanup();
-        handle.hls?.destroy();
-        return;
-      }
-      hlsInstance = handle.hls;
-      hlsCleanup = handle.cleanup;
-      void attachQualityListeners();
-      if (lastCurrentTime > 0) {
-        const resumeAt = lastCurrentTime;
-        if (videoEl.readyState >= 1) {
-          videoEl.currentTime = resumeAt;
-        } else {
-          videoEl.addEventListener(
-            'loadedmetadata',
-            () => {
-              if (videoEl) videoEl.currentTime = resumeAt;
-            },
-            { once: true }
-          );
-        }
-      }
-      scheduleRefresh();
     } catch {
-      errorMessage =
-        'Playback link expired and could not be refreshed. Please try again.';
-      loading = false;
+      // The viewer moved on to another item, whose build owns the element.
+      if (item !== lastInitialisedContentId) return;
+      // A timer's renewal that could not ask leaves its link playing out its
+      // last minute, and that link's 403 asks again — unless it died meanwhile.
+      if (at === undefined && !stopped && !lapsedMidAsk) return;
+      fail('Playback link expired and could not be refreshed. Please try again.');
+      // On the native path the old link still plays for up to a minute;
+      // nothing may play on under the error card.
+      videoEl?.pause();
     } finally {
-      refreshInFlight = false;
+      if (refreshingFor === item) refreshingFor = null;
     }
   }
 
   /**
-   * Pre-emptive refresh — schedule a URL refresh 60s before `expiresAt`.
-   * Skips when `expiresAt` is unset or already past; the reactive 403 path
-   * still catches those cases. 60s is enough margin for a slow-network
-   * refresh to finish before the existing URL dies.
+   * Pre-emptive renewal: refresh the link in use 60s before it expires, and
+   * only while the film plays (`handlePlay` arms it, `handlePause` clears
+   * it), so a paused tab never asks. Skips when the expiry is unknown or
+   * already inside the margin; the reactive 403 path still catches those.
+   * 60s is enough margin for a slow-network refresh to finish before the
+   * existing URL dies.
    */
   function scheduleRefresh() {
     teardownRefresh();
-    if (!expiresAt) return;
-    const expiresMs = Date.parse(expiresAt);
+    if (!liveExpiresAt || !videoEl || videoEl.paused) return;
+    const expiresMs = Date.parse(liveExpiresAt);
     if (!Number.isFinite(expiresMs)) return;
     const refreshAt = expiresMs - 60_000;
     const delay = refreshAt - Date.now();
@@ -821,50 +1002,29 @@
   async function retry() {
     // The Retry button most often fires because the URL expired, so
     // refresh it before reinitialising — otherwise Retry would 403 again.
-    teardownHls();
+    // Either way the rebuilt stream resumes where the failed one stopped
+    // (`resumePoint`), never at 0, and plays on if the viewer was watching.
+    // One at a time: a second press would spend the first one's play-on.
+    if (asking()) return;
+    refreshingFor = lastInitialisedContentId;
+    const item = lastInitialisedContentId;
+    const resume = stopForRebuild();
     try {
-      const token = ++initToken;
-      const fresh = await refreshStreamingUrl(contentId);
-      if (!videoEl || token !== initToken) return;
-      lastInitialisedSrc = fresh.streamingUrl;
-      loading = true;
-      errorMessage = '';
-      const handle = await createHlsPlayer({
-        media: videoEl,
-        src: fresh.streamingUrl,
-        onError: (msg) => {
-          errorMessage = msg;
-          loading = false;
-          // hls.ts destroys the instance internally before calling onError —
-          // null our reference so the src-change $effect takes the rebuild
-          // path instead of calling loadSource() on a dead instance.
-          hlsInstance = null;
-          lastInitialisedSrc = null;
-        },
-        onUrlExpired: () => {
-          void handleUrlExpired();
-        },
-      });
-      if (token !== initToken) {
-        handle.cleanup();
-        handle.hls?.destroy();
-        return;
-      }
-      hlsInstance = handle.hls;
-      hlsCleanup = handle.cleanup;
-      void attachQualityListeners();
-      scheduleRefresh();
+      await buildFresh(() => resume);
     } catch {
+      // The viewer moved on to another item, whose build owns the element.
+      if (item !== lastInitialisedContentId) return;
       // Refresh endpoint itself unreachable — fall back to the original
       // src; the network blip that caused the error may have already
-      // recovered.
-      await initPlayer();
+      // recovered. It lands the kept place too.
+      await initPlayer(resume);
+    } finally {
+      if (refreshingFor === item) refreshingFor = null;
     }
   }
 
   onMount(() => {
     initPlayer();
-    scheduleRefresh();
     document.addEventListener('fullscreenchange', handleFullscreenChange);
   });
 
@@ -875,8 +1035,13 @@
    * handling (Codex-1g5lh.12) — `contentId` is the discriminator:
    *
    *   1. SAME `contentId`, new `src` — the same item re-signed, because the
-   *      server-side access flow re-ran (follow / subscribe unlock). Swap the
-   *      manifest under the playhead so the viewer keeps their position.
+   *      page's access load re-ran: every tab return and the org layout's
+   *      version poll re-run it (`await parent()`), and so does a follow or
+   *      subscribe. A live stream is LEFT ALONE: it renews its own link, and
+   *      swapping it would restart it, because hls.js 1.6.15's
+   *      `loadSource()` re-creates the MediaSource for a new URL, which puts
+   *      the element back at 0:00, paused, with no `pause` event. Only an
+   *      errored player is rebuilt, at the place it kept.
    *   2. DIFFERENT `contentId` — a different item, i.e. in-course navigation
    *      between two sessions on the SAME component instance (SvelteKit reuses
    *      the page and its children when only the route params change). The
@@ -888,12 +1053,10 @@
    * never paused and the tracker kept writing the old playhead against the new
    * item's id.
    *
-   * `errorMessage` is deliberately not read here — it is `$state`, so reading
-   * it would re-run this effect on every error, and after a mid-session URL
-   * refresh `lastInitialisedSrc` no longer matches the (stale) `src` prop, so
-   * the rebuild would reload the expired URL. The error handlers null
-   * `hlsInstance` instead, which already routes an errored player down the
-   * full-rebuild branch.
+   * `errorMessage` is read only inside `untrack` — tracked, it would re-run
+   * this effect on every error, and after a mid-session URL refresh
+   * `lastInitialisedSrc` no longer matches the (stale) `src` prop, so the
+   * rebuild would reload the expired URL.
    */
   $effect(() => {
     // Tracked reads first, then `untrack` — the swap below writes plenty of
@@ -910,10 +1073,8 @@
         lastInitialisedContentId !== null &&
         lastInitialisedContentId === nextContentId;
 
-      if (sameItem && hlsInstance) {
+      if (sameItem && (asking() || !errorMessage)) {
         lastInitialisedSrc = nextSrc;
-        hlsInstance.loadSource(nextSrc);
-        scheduleRefresh();
         return;
       }
 
@@ -923,24 +1084,29 @@
         // `releaseMedia` also stops the tracker's own `pause` handler from
         // re-saving the old position under the new id.
         tracker.detach(lastInitialisedContentId);
+        // A place kept for a rebuild belonged to the outgoing item.
+        resumePoint = null;
       }
 
       teardownHls();
+      teardownRefresh();
       releaseMedia();
       lastInitialisedSrc = null;
       void initPlayer();
-      scheduleRefresh();
     });
   });
 
   /**
-   * React to `expiresAt` prop changes so the pre-emptive refresh timer
-   * always fires relative to the latest expiry (not a stale one).
+   * An error hides `<media-controller>`, which is what fullscreen shows, and
+   * the error card sits outside it. Leave fullscreen so the viewer sees the
+   * card and its Retry, not a black screen.
    */
   $effect(() => {
-    void expiresAt;
-    if (typeof window === 'undefined') return;
-    scheduleRefresh();
+    if (!errorMessage || typeof document === 'undefined') return;
+    const full = document.fullscreenElement;
+    if (full && wrapperEl?.contains(full)) {
+      document.exitFullscreen().catch(() => {});
+    }
   });
 
   onDestroy(() => {
@@ -999,7 +1165,7 @@
       case 'K':
         e.preventDefault();
         if (videoEl.paused) {
-          videoEl.play();
+          videoEl.play().catch(() => {});
         } else {
           videoEl.pause();
         }
@@ -1025,9 +1191,9 @@
       case 'F':
         e.preventDefault();
         if (document.fullscreenElement) {
-          document.exitFullscreen();
+          document.exitFullscreen().catch(() => {});
         } else {
-          videoEl.closest('media-controller')?.requestFullscreen();
+          videoEl.closest('media-controller')?.requestFullscreen().catch(() => {});
         }
         break;
       case 't':
@@ -1133,253 +1299,257 @@
         <PlayIcon class="video-player-play-overlay-icon" />
       </span>
     </button>
+  {/if}
 
-    <!-- Click on video to toggle play/pause; keyboard equivalents live on the wrapper. -->
-    <media-controller
-      hotkeys="noarrowleft noarrowright nospace nom nof"
-      autohide="-1"
+  <!-- Click on video to toggle play/pause; keyboard equivalents live on the wrapper.
+       Kept mounted through an error, only hidden: a Retry rebuilds the stream on
+       this very <video> (`retry`), and the progress tracker keeps listening to
+       it. Unmounted, Retry found no element and did nothing. -->
+  <media-controller
+    hotkeys="noarrowleft noarrowright nospace nom nof"
+    autohide="-1"
+    hidden={Boolean(errorMessage)}
+  >
+    <video
+      bind:this={videoEl}
+      slot="media"
+      aria-label={contentTitle ?? 'Video'}
+      crossorigin="anonymous"
+      playsinline
+      preload="metadata"
+      poster={poster}
+      oncanplay={handleCanPlay}
+      onloadeddata={handleLoadedData}
+      onerror={handleError}
+      onplay={handlePlay}
+      onpause={handlePause}
+      onwaiting={handleWaiting}
+      onplaying={handlePlaying}
     >
-      <video
-        bind:this={videoEl}
-        slot="media"
-        aria-label={contentTitle ?? 'Video'}
-        crossorigin="anonymous"
-        playsinline
-        preload="metadata"
-        poster={poster}
-        oncanplay={handleCanPlay}
-        onloadeddata={handleLoadedData}
-        onerror={handleError}
-        onplay={handlePlay}
-        onpause={handlePause}
-        onwaiting={handleWaiting}
-        onplaying={handlePlaying}
-      >
-        {#if captions && captions.length > 0}
-          {#each captions as track (track.srclang)}
-            <track
-              kind="captions"
-              src={track.src}
-              srclang={track.srclang}
-              label={track.label}
-              default={track.default ?? false}
-            />
-          {/each}
-        {/if}
-      </video>
+      {#if captions && captions.length > 0}
+        {#each captions as track (track.srclang)}
+          <track
+            kind="captions"
+            src={track.src}
+            srclang={track.srclang}
+            label={track.label}
+            default={track.default ?? false}
+          />
+        {/each}
+      {/if}
+    </video>
 
-      <!-- Unified tap/click zone. aria-hidden decorative overlay; owns ALL
-           single-tap play/pause + double-tap seek. Single path prevents the
-           iOS/Android synthetic click from racing a native click when the
-           video element owned `onclick` directly (iter-09 audit, Codex-04ozt).
-           Pointer-events are enabled on both coarse and fine pointers now that
-           this zone carries the click handler — media-chrome controls still
-           take priority via the `.closest('.video-player-controls-container')`
-           guard inside handleTapZoneClick/handleVideoTap. Sighted SR users
-           have keyboard shortcuts (Space/ArrowLeft/ArrowRight) scoped to the
-           wrapper — ref 05 §"Media elements" §3 — so this overlay does NOT
-           need its own key handlers. -->
-      <div
-        class="video-player-tap-zone"
-        onclick={handleTapZoneClick}
-        ontouchend={handleVideoTap}
-        aria-hidden="true"
-      >
-        {#if seekIndicator === 'left'}
-          <div class="video-player-seek-indicator video-player-seek-indicator--left">-10s</div>
-        {/if}
-        {#if seekIndicator === 'right'}
-          <div class="video-player-seek-indicator video-player-seek-indicator--right">+10s</div>
-        {/if}
-      </div>
+    <!-- Unified tap/click zone. aria-hidden decorative overlay; owns ALL
+         single-tap play/pause + double-tap seek. Single path prevents the
+         iOS/Android synthetic click from racing a native click when the
+         video element owned `onclick` directly (iter-09 audit, Codex-04ozt).
+         Pointer-events are enabled on both coarse and fine pointers now that
+         this zone carries the click handler — media-chrome controls still
+         take priority via the `.closest('.video-player-controls-container')`
+         guard inside handleTapZoneClick/handleVideoTap. Sighted SR users
+         have keyboard shortcuts (Space/ArrowLeft/ArrowRight) scoped to the
+         wrapper — ref 05 §"Media elements" §3 — so this overlay does NOT
+         need its own key handlers. -->
+    <div
+      class="video-player-tap-zone"
+      onclick={handleTapZoneClick}
+      ontouchend={handleVideoTap}
+      aria-hidden="true"
+    >
+      {#if seekIndicator === 'left'}
+        <div class="video-player-seek-indicator video-player-seek-indicator--left">-10s</div>
+      {/if}
+      {#if seekIndicator === 'right'}
+        <div class="video-player-seek-indicator video-player-seek-indicator--right">+10s</div>
+      {/if}
+    </div>
 
-      <!-- Controls container — slides up from bottom on hover -->
-      <div class="video-player-controls-container {controlsVisible ? 'video-player-controls-container--visible' : ''}">
-        <!-- Row 2 (top): time pill + config pill -->
-        <div class="video-player-controls-row video-player-controls-row--top">
-          <button
-            type="button"
-            class="video-player-pill video-player-time-pill"
-            onclick={() => (showRemaining = !showRemaining)}
-            aria-label={showRemaining ? 'Show elapsed time' : 'Show remaining time'}
-          >
-            {#if showRemaining}
-              <media-time-display remaining></media-time-display>
-            {:else}
-              <media-time-display showduration></media-time-display>
-            {/if}
-          </button>
-          <div class="video-player-spacer"></div>
-          <div class="video-player-pill video-player-config-pill">
-            <media-playback-rate-button rates="0.5 1 1.5 2"></media-playback-rate-button>
-            {#if hasCaptions}
-              <span class="video-player-pill-divider"></span>
-              <button
-                type="button"
-                class="video-player-captions-btn"
-                onclick={toggleCaptions}
-                aria-label={captionsEnabled ? 'Hide captions' : 'Show captions'}
-                aria-pressed={captionsEnabled}
-                title={captionsEnabled ? 'Hide captions (c)' : 'Show captions (c)'}
-              >
-                <span aria-hidden="true" class="video-player-captions-label">CC</span>
-              </button>
-            {/if}
-            {#if showQualityMenu}
-              <span class="video-player-pill-divider"></span>
-              <DropdownMenu
-                bind:open={qualityMenuOpen}
-                positioning={{ placement: 'top-end', gutter: 8 }}
-              >
-                <DropdownMenuTrigger
-                  class="video-player-quality-btn"
-                  aria-label="Video quality"
-                  title="Video quality"
-                >
-                  <SettingsIcon size={18} />
-                  <span class="video-player-quality-label">{qualityTriggerLabel}</span>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent class="video-player-quality-menu">
-                  <DropdownMenuItem
-                    class={manualLevel === -1
-                      ? 'video-player-quality-item video-player-quality-item--active'
-                      : 'video-player-quality-item'}
-                    onclick={() => selectQuality(-1)}
-                  >
-                    <span class="video-player-quality-item-label">Auto</span>
-                    {#if autoLevel >= 0 && manualLevel === -1}
-                      <span class="video-player-quality-item-sub">{labelForLevel(autoLevel)}</span>
-                    {/if}
-                  </DropdownMenuItem>
-                  {#each sortedVariants as variant (variant)}
-                    {@const idx = variantToLevelIndex(variant, hlsInstance?.levels ?? [])}
-                    {#if idx !== null}
-                      <DropdownMenuItem
-                        class={manualLevel === idx
-                          ? 'video-player-quality-item video-player-quality-item--active'
-                          : 'video-player-quality-item'}
-                        onclick={() => selectQuality(idx)}
-                      >
-                        <span class="video-player-quality-item-label">{variant}</span>
-                      </DropdownMenuItem>
-                    {/if}
-                  {/each}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            {/if}
+    <!-- Controls container — slides up from bottom on hover -->
+    <div class="video-player-controls-container {controlsVisible ? 'video-player-controls-container--visible' : ''}">
+      <!-- Row 2 (top): time pill + config pill -->
+      <div class="video-player-controls-row video-player-controls-row--top">
+        <button
+          type="button"
+          class="video-player-pill video-player-time-pill"
+          onclick={() => (showRemaining = !showRemaining)}
+          aria-label={showRemaining ? 'Show elapsed time' : 'Show remaining time'}
+        >
+          {#if showRemaining}
+            <media-time-display remaining></media-time-display>
+          {:else}
+            <media-time-display showduration></media-time-display>
+          {/if}
+        </button>
+        <div class="video-player-spacer"></div>
+        <div class="video-player-pill video-player-config-pill">
+          <media-playback-rate-button rates="0.5 1 1.5 2"></media-playback-rate-button>
+          {#if hasCaptions}
             <span class="video-player-pill-divider"></span>
             <button
               type="button"
-              class="video-player-cinema-btn"
-              onclick={toggleCinemaMode}
-              aria-label={cinemaMode ? 'Exit cinema mode' : 'Cinema mode'}
-              aria-pressed={cinemaMode}
-              title={cinemaMode ? 'Exit cinema mode' : 'Cinema mode'}
+              class="video-player-captions-btn"
+              onclick={toggleCaptions}
+              aria-label={captionsEnabled ? 'Hide captions' : 'Show captions'}
+              aria-pressed={captionsEnabled}
+              title={captionsEnabled ? 'Hide captions (c)' : 'Show captions (c)'}
             >
-              <CinemaIcon size={18} active={cinemaMode} />
+              <span aria-hidden="true" class="video-player-captions-label">CC</span>
             </button>
+          {/if}
+          {#if showQualityMenu}
             <span class="video-player-pill-divider"></span>
-            <media-fullscreen-button></media-fullscreen-button>
-          </div>
-        </div>
-
-        <!-- Row 1 (bottom): play + progress bar + volume pill -->
-        <div class="video-player-controls-row video-player-controls-row--bottom">
+            <DropdownMenu
+              bind:open={qualityMenuOpen}
+              positioning={{ placement: 'top-end', gutter: 8 }}
+            >
+              <DropdownMenuTrigger
+                class="video-player-quality-btn"
+                aria-label="Video quality"
+                title="Video quality"
+              >
+                <SettingsIcon size={18} />
+                <span class="video-player-quality-label">{qualityTriggerLabel}</span>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent class="video-player-quality-menu">
+                <DropdownMenuItem
+                  class={manualLevel === -1
+                    ? 'video-player-quality-item video-player-quality-item--active'
+                    : 'video-player-quality-item'}
+                  onclick={() => selectQuality(-1)}
+                >
+                  <span class="video-player-quality-item-label">Auto</span>
+                  {#if autoLevel >= 0 && manualLevel === -1}
+                    <span class="video-player-quality-item-sub">{labelForLevel(autoLevel)}</span>
+                  {/if}
+                </DropdownMenuItem>
+                {#each sortedVariants as variant (variant)}
+                  {@const idx = variantToLevelIndex(variant, hlsInstance?.levels ?? [])}
+                  {#if idx !== null}
+                    <DropdownMenuItem
+                      class={manualLevel === idx
+                        ? 'video-player-quality-item video-player-quality-item--active'
+                        : 'video-player-quality-item'}
+                      onclick={() => selectQuality(idx)}
+                    >
+                      <span class="video-player-quality-item-label">{variant}</span>
+                    </DropdownMenuItem>
+                  {/if}
+                {/each}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          {/if}
+          <span class="video-player-pill-divider"></span>
           <button
             type="button"
-            class="video-player-play-btn"
-            onclick={togglePlay}
-            aria-label={isPaused ? 'Play' : 'Pause'}
+            class="video-player-cinema-btn"
+            onclick={toggleCinemaMode}
+            aria-label={cinemaMode ? 'Exit cinema mode' : 'Cinema mode'}
+            aria-pressed={cinemaMode}
+            title={cinemaMode ? 'Exit cinema mode' : 'Cinema mode'}
+          >
+            <CinemaIcon size={18} active={cinemaMode} />
+          </button>
+          <span class="video-player-pill-divider"></span>
+          <media-fullscreen-button></media-fullscreen-button>
+        </div>
+      </div>
+
+      <!-- Row 1 (bottom): play + progress bar + volume pill -->
+      <div class="video-player-controls-row video-player-controls-row--bottom">
+        <button
+          type="button"
+          class="video-player-play-btn"
+          onclick={togglePlay}
+          aria-label={isPaused ? 'Play' : 'Pause'}
+        >
+          <!--
+            Play ↔ Pause icon kept INLINE as a genuine exception.
+            Rationale: the "d" attribute is transitioned between two path definitions to
+            create a Disney-style morph (see styles.css .video-player-morph-path). IconBase
+            cannot express per-path `d` transitions — extracting would forfeit the morph.
+            Reference: ref 05 §"Media elements" refactor (iter-011).
+          -->
+          <svg
+            class="video-player-play-icon"
+            width="22"
+            height="22"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path
+              class="video-player-morph-path video-player-morph-path--left"
+              fill="currentColor"
+              d={isPaused
+                ? 'M 6,4 C 6,3 6,3 7,3 L 12,12 L 12,12 L 7,21 C 6,21 6,21 6,20 Z'
+                : 'M 5,5 C 5,4 5.5,4 6,4 L 10,4 C 10.5,4 11,4 11,5 L 11,19 C 11,20 10.5,20 10,20 L 6,20 C 5.5,20 5,20 5,19 Z'}
+            />
+            <path
+              class="video-player-morph-path video-player-morph-path--right"
+              fill="currentColor"
+              d={isPaused
+                ? 'M 7,3 C 7,3 8,3.5 8.5,4 L 19,12 L 19,12 L 8.5,20 C 8,20.5 7,21 7,21 Z'
+                : 'M 13,5 C 13,4 13.5,4 14,4 L 18,4 C 18.5,4 19,4 19,5 L 19,19 C 19,20 18.5,20 18,20 L 14,20 C 13.5,20 13,20 13,19 Z'}
+            />
+          </svg>
+        </button>
+
+        <media-time-range class="video-player-time-range"></media-time-range>
+
+        <div class="video-player-pill video-player-volume-pill">
+          <button
+            type="button"
+            class="video-player-mute-btn"
+            onclick={() => { if (videoEl) videoEl.muted = !videoEl.muted; }}
+            aria-label={isMuted ? 'Unmute' : 'Mute'}
           >
             <!--
-              Play ↔ Pause icon kept INLINE as a genuine exception.
-              Rationale: the "d" attribute is transitioned between two path definitions to
-              create a Disney-style morph (see styles.css .video-player-morph-path). IconBase
-              cannot express per-path `d` transitions — extracting would forfeit the morph.
-              Reference: ref 05 §"Media elements" refactor (iter-011).
+              Volume icon kept INLINE for the same reason as play/pause: the per-path
+              opacity / transform / stroke-dash animations (Disney secondary action,
+              staggered follow-through, mute-X arc) are wired to classes that swap
+              `--active` state. Extracting to IconBase would forfeit the animation
+              surface. A static VolumeIcon primitive exists for non-animated callers.
             -->
             <svg
-              class="video-player-play-icon"
-              width="22"
-              height="22"
+              class="video-player-volume-icon"
+              width="20"
+              height="20"
               viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
               aria-hidden="true"
             >
+              <!-- Speaker body — always visible -->
+              <path class="video-player-vol-body" d="M11 5L6 9H2v6h4l5 4V5z" />
+              <!-- Sound wave 1 (small arc) — visible when low or high -->
               <path
-                class="video-player-morph-path video-player-morph-path--left"
-                fill="currentColor"
-                d={isPaused
-                  ? 'M 6,4 C 6,3 6,3 7,3 L 12,12 L 12,12 L 7,21 C 6,21 6,21 6,20 Z'
-                  : 'M 5,5 C 5,4 5.5,4 6,4 L 10,4 C 10.5,4 11,4 11,5 L 11,19 C 11,20 10.5,20 10,20 L 6,20 C 5.5,20 5,20 5,19 Z'}
+                class="video-player-vol-wave1"
+                class:video-player-vol-wave--active={volumeState !== 'off'}
+                d="M15.54 8.46a5 5 0 0 1 0 7.07"
               />
+              <!-- Sound wave 2 (large arc) — visible only when high -->
               <path
-                class="video-player-morph-path video-player-morph-path--right"
-                fill="currentColor"
-                d={isPaused
-                  ? 'M 7,3 C 7,3 8,3.5 8.5,4 L 19,12 L 19,12 L 8.5,20 C 8,20.5 7,21 7,21 Z'
-                  : 'M 13,5 C 13,4 13.5,4 14,4 L 18,4 C 18.5,4 19,4 19,5 L 19,19 C 19,20 18.5,20 18,20 L 14,20 C 13.5,20 13,20 13,19 Z'}
+                class="video-player-vol-wave2"
+                class:video-player-vol-wave--active={volumeState === 'high'}
+                d="M19.07 4.93a10 10 0 0 1 0 14.14"
               />
+              <!-- Mute X — visible when off -->
+              {#if volumeState === 'off'}
+                <line class="video-player-vol-mute-x" x1="23" y1="9" x2="17" y2="15" />
+                <line class="video-player-vol-mute-x" x1="17" y1="9" x2="23" y2="15" />
+              {/if}
             </svg>
           </button>
-
-          <media-time-range class="video-player-time-range"></media-time-range>
-
-          <div class="video-player-pill video-player-volume-pill">
-            <button
-              type="button"
-              class="video-player-mute-btn"
-              onclick={() => { if (videoEl) videoEl.muted = !videoEl.muted; }}
-              aria-label={isMuted ? 'Unmute' : 'Mute'}
-            >
-              <!--
-                Volume icon kept INLINE for the same reason as play/pause: the per-path
-                opacity / transform / stroke-dash animations (Disney secondary action,
-                staggered follow-through, mute-X arc) are wired to classes that swap
-                `--active` state. Extracting to IconBase would forfeit the animation
-                surface. A static VolumeIcon primitive exists for non-animated callers.
-              -->
-              <svg
-                class="video-player-volume-icon"
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                aria-hidden="true"
-              >
-                <!-- Speaker body — always visible -->
-                <path class="video-player-vol-body" d="M11 5L6 9H2v6h4l5 4V5z" />
-                <!-- Sound wave 1 (small arc) — visible when low or high -->
-                <path
-                  class="video-player-vol-wave1"
-                  class:video-player-vol-wave--active={volumeState !== 'off'}
-                  d="M15.54 8.46a5 5 0 0 1 0 7.07"
-                />
-                <!-- Sound wave 2 (large arc) — visible only when high -->
-                <path
-                  class="video-player-vol-wave2"
-                  class:video-player-vol-wave--active={volumeState === 'high'}
-                  d="M19.07 4.93a10 10 0 0 1 0 14.14"
-                />
-                <!-- Mute X — visible when off -->
-                {#if volumeState === 'off'}
-                  <line class="video-player-vol-mute-x" x1="23" y1="9" x2="17" y2="15" />
-                  <line class="video-player-vol-mute-x" x1="17" y1="9" x2="23" y2="15" />
-                {/if}
-              </svg>
-            </button>
-            <media-volume-range class="video-player-volume-range"></media-volume-range>
-          </div>
+          <media-volume-range class="video-player-volume-range"></media-volume-range>
         </div>
       </div>
+    </div>
 
-      <!-- Persistent mini progress bar — always visible, fades when full controls show -->
-      <media-time-range
-        class="video-player-mini-progress {controlsVisible ? 'video-player-mini-progress--hidden' : ''}"
-      ></media-time-range>
-    </media-controller>
-  {/if}
+    <!-- Persistent mini progress bar — always visible, fades when full controls show -->
+    <media-time-range
+      class="video-player-mini-progress {controlsVisible ? 'video-player-mini-progress--hidden' : ''}"
+    ></media-time-range>
+  </media-controller>
 </div>

@@ -216,6 +216,17 @@ describe('Admin API Worker', () => {
         path: `/api/admin/support/creator-debts/${ID}/resolve`,
         body: { resolution: 'creator_absorbed' },
       },
+      // Codex-2hxff.73: Owed to creators.
+      { method: 'GET', path: '/api/admin/support/queue/owed-to-creators' },
+      {
+        method: 'POST',
+        path: `/api/admin/support/owed-to-creators/${ID}/resolve`,
+        body: { action: 'repay' },
+      },
+      {
+        method: 'POST',
+        path: `/api/admin/support/owed-to-creators/${ID}/check`,
+      },
     ])('rejects anonymous $method $path with 401', async ({
       method,
       path,

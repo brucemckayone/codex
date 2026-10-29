@@ -820,6 +820,20 @@
       "when": 1793027519691,
       "tag": "0116_media_transcoding_error_code",
       "breakpoints": true
+    },
+    {
+      "idx": 117,
+      "version": "7",
+      "when": 1793188191346,
+      "tag": "0117_member_invitation_copy",
+      "breakpoints": true
+    },
+    {
+      "idx": 118,
+      "version": "7",
+      "when": 1793188921883,
+      "tag": "0118_payout_timing_and_money_owed",
+      "breakpoints": true
     }
   ]
 }

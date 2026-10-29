@@ -10,6 +10,9 @@
  * - Error classes: Domain-specific subscription errors
  */
 
+// The Q4 rule on a balance below zero, as `MyStripeBalance.negative.rule`
+// carries it (Codex-2hxff.30); apps/web reads it from here, not @codex/payments
+export type { DebtRule } from '@codex/payments';
 // Re-export validation schemas for convenience
 export {
   type BillingInterval,
@@ -69,7 +72,13 @@ export {
 } from './errors';
 
 // Services
-export { ConnectAccountService } from './services/connect-account-service';
+export {
+  ConnectAccountService,
+  // Studio's own Stripe balance, GET /connect/me/balance (Codex-2hxff.29, .30)
+  type MyStripeBalance,
+  type MyStripeBalanceCause,
+  type MyStripeBalanceTowards,
+} from './services/connect-account-service';
 export {
   COURSE_SUBSCRIPTION_METADATA_TYPE,
   type CourseSubscriptionCheckoutVerifyResult,
@@ -106,6 +115,7 @@ export type {
   CreatorEarningsSummary,
   CreatorPayoutBreakdown,
   CreatorPayoutRow,
+  CreatorWaitingMoney,
   PayoutDisplayStatus,
   PayoutSummary,
   PayoutWithCreator,

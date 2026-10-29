@@ -1,6 +1,7 @@
 /**
- * The charge's record (Codex-2hxff.28, mockup B1, B3, B4, C1, D2): "The
- * charge", the split, the refunds, the chargebacks, and a slice's history.
+ * The charge's record (Codex-2hxff.28, mockup B1, B3, B4, C1, D2; batch B's
+ * mock-b-support C1-C2 and F3): "The charge", the split, the refunds, the
+ * chargebacks, and a slice's history.
  * Each mounts the real component.
  */
 
@@ -362,5 +363,214 @@ describe('A slice’s history', () => {
       })
     );
     expect(text()).not.toContain(m.support_history_this_debt());
+  });
+});
+
+describe('A late take-back on the charge page (C1, C2)', () => {
+  const credit = (overrides = {}) => ({
+    creditId: '44444444-4444-4444-8444-444444444444',
+    state: 'owed' as const,
+    amountCents: 900,
+    action: 'repay' as const,
+    repayPayout: null,
+    ...overrides,
+  });
+  const lateLine = (overrides = {}) =>
+    historyLine({
+      causeType: 'dispute',
+      causeId: 'du_1QjM3pLk2vSb91tU',
+      causeAmountCents: 1200,
+      amountCents: 900,
+      outcome: 'taken_after_settled',
+      disputeOpenedAt: '2026-10-02T09:00:00.000Z',
+      disputeWonAt: '2026-10-23T09:00:00.000Z',
+      credit: credit(),
+      ...overrides,
+    });
+
+  test('the line says it was taken after it was settled, and what is owed back to whom', () => {
+    render(SliceHistory, {
+      title: 'History',
+      lines: [lateLine()],
+      payeeName: 'Maya Okafor',
+    });
+    const line = document.querySelector('[data-testid="history-line"]');
+    expect(line?.textContent).toContain(
+      m.support_history_what_taken_after_settled({
+        amount: '£9.00',
+        name: 'Maya Okafor',
+      })
+    );
+    expect(line?.textContent).toContain(
+      m.support_history_taken_after_settled()
+    );
+    // Never "Not taken": it was.
+    expect(line?.textContent).not.toContain(m.support_history_what_not_taken());
+  });
+
+  test('Re-pay is on the line only where the page asks for it, and calls back with the line', () => {
+    render(SliceHistory, {
+      title: 'History',
+      lines: [lateLine()],
+      payeeName: 'Maya Okafor',
+    });
+    expect(document.querySelector('[data-testid="credit-action"]')).toBeNull();
+    if (component) unmount(component);
+    const onCreditAction = vi.fn();
+    const line = lateLine();
+    render(SliceHistory, {
+      title: 'History',
+      lines: [line],
+      payeeName: 'Maya Okafor',
+      onCreditAction,
+    });
+    const action = document.querySelector<HTMLButtonElement>(
+      '[data-testid="credit-action"]'
+    );
+    expect(action?.textContent).toContain(
+      m.support_repay_submit({ amount: '£9.00' })
+    );
+    action?.click();
+    expect(onCreditAction).toHaveBeenCalledWith(line);
+  });
+
+  test('Check Stripe again stays in the queue: a needs-check credit has no button here', () => {
+    render(SliceHistory, {
+      title: 'History',
+      lines: [
+        lateLine({
+          outcome: 'not_taken',
+          credit: credit({
+            state: 'needs_check',
+            amountCents: null,
+            action: 'check',
+          }),
+        }),
+      ],
+      payeeName: 'Maya Okafor',
+      onCreditAction: vi.fn(),
+    });
+    expect(document.querySelector('[data-testid="credit-action"]')).toBeNull();
+    expect(text()).toContain(m.support_history_needs_check());
+  });
+
+  test('once re-paid: paid back by a new payout, waiting for the next run, and no button', () => {
+    render(SliceHistory, {
+      title: 'History',
+      lines: [
+        lateLine({
+          outcome: 'paid_back',
+          credit: credit({
+            state: 'repaid',
+            action: null,
+            repayPayout: { id: 'payout-repay-1', status: 'pending' },
+          }),
+        }),
+      ],
+      payeeName: 'Maya Okafor',
+      onCreditAction: vi.fn(),
+    });
+    expect(text()).toContain(m.support_history_what_repaid_late_waiting());
+    expect(document.querySelector('[data-testid="credit-action"]')).toBeNull();
+  });
+
+  test('the split shows what is owed back, in its own words, never as a debt the payee owes', () => {
+    render(SplitCard, {
+      detail: chargeDetail({
+        slices: [
+          slice({
+            takenCents: 900,
+            owedToPayeeCents: 900,
+            history: [lateLine()],
+          }),
+        ],
+      }),
+    });
+    const owedBack = document.querySelector('table [data-testid="owed-back"]');
+    expect(owedBack?.textContent?.trim()).toBe(
+      m.support_owed_back({ amount: '£9.00', name: 'Rowan Ellis' })
+    );
+    expect(document.querySelector('table .owed')).toBeNull();
+  });
+});
+
+describe('A step the system settled (Q6, F3)', () => {
+  test.each([
+    ['took_share', 'refund', m.support_history_system_took_share_refund()],
+    ['took_share', 'dispute', m.support_history_system_took_share_dispute()],
+    ['payee_kept', 'refund', m.support_history_system_payee_kept()],
+  ] as const)('%s on a %s line says what the system decided, with its tag', (systemDecision, causeType, said) => {
+    render(SliceHistory, {
+      title: 'History',
+      lines: [historyLine({ causeType, outcome: 'paid_back', systemDecision })],
+    });
+    const line = document.querySelector('[data-testid="history-line"]');
+    expect(line?.textContent).toContain(m.support_history_system_lead());
+    expect(line?.textContent).toContain(said);
+    expect(line?.textContent).toContain(m.support_history_system_badge());
+  });
+
+  test('a line the system did not settle has no such tag', () => {
+    render(SliceHistory, { title: 'History', lines: [historyLine()] });
+    expect(text()).not.toContain(m.support_history_system_badge());
+  });
+});
+
+describe('A take-back after the system decided (MED-1, MED-3)', () => {
+  test('a reopened credit on a step the system said the payee kept: the line says what is owed back, not "kept"', () => {
+    render(SliceHistory, {
+      title: 'History',
+      lines: [
+        historyLine({
+          causeType: 'refund',
+          outcome: 'taken_after_settled',
+          amountCents: 765,
+          systemDecision: 'payee_kept',
+          credit: {
+            creditId: 'c-reopened',
+            state: 'owed',
+            amountCents: 765,
+            action: 'repay',
+            repayPayout: null,
+          },
+        }),
+      ],
+      payeeName: 'Jonah Reyes',
+    });
+    const line = document.querySelector('[data-testid="history-line"]');
+    expect(line?.textContent).toContain(
+      m.support_history_what_taken_after_settled({
+        amount: '£7.65',
+        name: 'Jonah Reyes',
+      })
+    );
+    expect(line?.textContent).not.toContain(
+      m.support_history_system_payee_kept()
+    );
+    // What the system decided first is still marked.
+    expect(line?.textContent).toContain(m.support_history_system_badge());
+  });
+
+  test('a step only a person can decide says so, and has no button on the charge page', () => {
+    render(SliceHistory, {
+      title: 'History',
+      lines: [
+        historyLine({
+          causeType: 'dispute',
+          outcome: 'not_taken',
+          credit: {
+            creditId: 'c-decide',
+            state: 'needs_person',
+            amountCents: null,
+            action: 'decide',
+            repayPayout: null,
+          },
+        }),
+      ],
+      payeeName: 'Jonah Reyes',
+      onCreditAction: vi.fn(),
+    });
+    expect(text()).toContain(m.support_history_needs_person());
+    expect(document.querySelector('[data-testid="credit-action"]')).toBeNull();
   });
 });

@@ -52,11 +52,13 @@ import {
   reassignOwnerSchema,
   supportChargeParamsSchema,
   supportChargeSearchQuerySchema,
+  supportCreditIdParamsSchema,
   supportIssueRefundSchema,
   supportQueueQuerySchema,
   supportRefundIdParamsSchema,
   supportRefundPreviewQuerySchema,
   supportResolveCreatorDebtSchema,
+  supportResolveCreditSchema,
   supportResolveFailedRefundSchema,
   supportReviewIdParamsSchema,
   updateOrgFeesSchema,
@@ -963,7 +965,10 @@ app.get(
   })
 );
 
-/** GET /api/admin/support/queue/creator-debts — oldest first. */
+/**
+ * GET /api/admin/support/queue/creator-debts — one row per person, oldest
+ * first, with each person's live Stripe balance (Codex-2hxff.73, .30).
+ */
 app.get(
   '/api/admin/support/queue/creator-debts',
   procedure({
@@ -971,6 +976,24 @@ app.get(
     input: { query: supportQueueQuerySchema },
     handler: async (ctx) => {
       const result = await ctx.services.support.listCreatorDebts(
+        ctx.input.query
+      );
+      return new PaginatedResult(result.items, result.pagination);
+    },
+  })
+);
+
+/**
+ * GET /api/admin/support/queue/owed-to-creators — late take-backs owed back
+ * to payees, oldest first (Codex-2hxff.73).
+ */
+app.get(
+  '/api/admin/support/queue/owed-to-creators',
+  procedure({
+    policy: { auth: 'platform_owner', cache: 'fresh' },
+    input: { query: supportQueueQuerySchema },
+    handler: async (ctx) => {
+      const result = await ctx.services.support.listOwedToCreators(
         ctx.input.query
       );
       return new PaginatedResult(result.items, result.pagination);
@@ -1049,6 +1072,47 @@ app.post(
         ctx.input.params.reviewId,
         ctx.input.body,
         ctx.user.id
+      );
+    },
+  })
+);
+
+/**
+ * POST /api/admin/support/owed-to-creators/:creditId/resolve
+ * Settle a late take-back: Re-pay what Stripe took (a pending re-pay payout
+ * the next run pays), count it against the share's own open debt, or mark it
+ * not owed (with a note).
+ */
+app.post(
+  '/api/admin/support/owed-to-creators/:creditId/resolve',
+  procedure({
+    policy: { auth: 'platform_owner', cache: 'fresh', rateLimit: 'strict' },
+    input: {
+      params: supportCreditIdParamsSchema,
+      body: supportResolveCreditSchema,
+    },
+    handler: async (ctx) => {
+      return await ctx.services.support.resolveOwedToCreator(
+        ctx.input.params.creditId,
+        ctx.input.body,
+        ctx.user.id
+      );
+    },
+  })
+);
+
+/**
+ * POST /api/admin/support/owed-to-creators/:creditId/check
+ * "Check Stripe again" on a row Stripe never answered for: one look, no body.
+ */
+app.post(
+  '/api/admin/support/owed-to-creators/:creditId/check',
+  procedure({
+    policy: { auth: 'platform_owner', cache: 'fresh', rateLimit: 'strict' },
+    input: { params: supportCreditIdParamsSchema },
+    handler: async (ctx) => {
+      return await ctx.services.support.checkOwedToCreator(
+        ctx.input.params.creditId
       );
     },
   })

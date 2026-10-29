@@ -535,16 +535,23 @@ charge's refunds from Stripe and records them all; `refund.updated` and
 `refund.failed` record each change. The purchase keeps the amount refunded so
 far and the newest refund's id and reason.
 
-- If the payee's Connect balance is too low (`insufficient_funds` or
-  `balance_insufficient`), a `refund_reviews` row is written recording the
-  debt, one per reversal, for purchases and subscriptions alike. This is the chosen policy — reverse on refund, with a debt
-  ledger as the fallback (`Codex-13v21`). The debt is **recovered from the
-  payee's future earnings** (owner decision 2026-10-13, "From future earnings") —
-  **gap**: `Codex-2hxff.30`. Because payouts are held for the 14-day refund window
+- If the payee's Stripe balance cannot cover a take-back, Stripe takes it
+  anyway and the balance goes below zero (owner decision Q2, Codex-2hxff.30):
+  Stripe holds the debt and recovers it from the payee's next earnings, and
+  bank payouts wait until it is back above zero. Bank debit is off, so Stripe
+  never takes it from a bank account. Over £50 for 90 days is invoiced (a
+  follow-up, after the lawyer's P6 answer); £50 or less is written off when
+  Stripe collects it from the platform at 180 days (Q4). Because payouts are
+  held for the 14-day refund window
   ([payout timing](connect-and-payouts.md#payout-timing)), a refund normally finds
-  the money still in the payee's Stripe balance; debts mostly come from disputes,
-  which can arrive later. Refund reviews need an operations screen — **gap**:
-  `Codex-2hxff.73` (no reader today).
+  the money still in the payee's Stripe balance; a negative balance mostly comes
+  from a chargeback on an older sale.
+- Only a reversal Stripe REFUSES (`insufficient_funds` or
+  `balance_insufficient`, which the probe has not seen on this platform) writes a
+  `refund_reviews` row recording the debt, one per reversal, for purchases and
+  subscriptions alike (`Codex-13v21`). Support reads both in Admin → Queue →
+  Creator debts, one row per person with their live Stripe balance, and settles a
+  refused debt by hand (`Codex-2hxff.28`, `.73`).
 - Any other reversal failure is retried, and nothing is marked done until it
   succeeds. A database or Stripe outage makes the webhook return 500, so Stripe
   redelivers. A request Stripe refused is retried by the hourly cron with the

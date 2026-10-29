@@ -53,7 +53,14 @@ export default defineConfig({
   // Gate criteria for keeping workers=2: ≥99% pass rate across 3 consecutive
   // green CI runs. Rollback: flip back to 1 if a new flake cluster emerges.
   workers: 2,
-  reporter: process.env.CI ? 'html' : 'list',
+  // CI: `line` prints each test as it finishes (the E2E step streams turbo's
+  // output), so a hung run shows where it stopped. `html` alone is written at
+  // the end, which left a 115-minute hang with no output at all (Codex-j7x4u).
+  reporter: process.env.CI ? [['line'], ['html']] : 'list',
+  // A whole-run bound: the suite takes ~20 min. Hitting this FAILS the run
+  // rather than leaving the job to be cancelled, so failure() steps (worker
+  // logs, the html report) still upload (Codex-j7x4u).
+  globalTimeout: process.env.CI ? 45 * 60 * 1000 : 0,
   // Authenticated tests create real users via DB (register→verify→session) which takes
   // 5-25s under parallel load (Neon DB latency). 90s accommodates auth + page load.
   timeout: 90000,

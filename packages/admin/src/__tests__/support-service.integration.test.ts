@@ -12,6 +12,7 @@
 import { CONTENT_TYPES, PURCHASE_STATUS } from '@codex/constants';
 import {
   agreementProposals,
+  connectBalances,
   contentAccess,
   content as contentTable,
   creatorOrganizationAgreements,
@@ -19,16 +20,24 @@ import {
   entitlements,
   organizations,
   type Payout,
+  payeeCredits,
   payoutReversals,
   payouts,
   purchases,
   refundReviews,
   refunds,
+  stripeConnectAccountHistory,
+  stripeConnectAccounts,
   subscriptions,
   subscriptionTiers,
   users,
 } from '@codex/database/schema';
-import { type ClawbackDeps, reverseCharge } from '@codex/payments';
+import {
+  type ClawbackDeps,
+  loadClawbackPlanInput,
+  repayDispute,
+  reverseCharge,
+} from '@codex/payments';
 import { PurchaseService } from '@codex/purchase';
 import { ServiceError } from '@codex/service-errors';
 import {
@@ -277,6 +286,10 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
     stripeDisputeIds: [] as string[],
     agreementIds: [] as string[],
     proposalIds: [] as string[],
+    /** Users given a `connect_balances` row (Codex-2hxff.30). */
+    balanceUserIds: [] as string[],
+    /** Payees given a Connect account (review LOW-8). */
+    connectUserIds: [] as string[],
   };
 
   beforeAll(async () => {
@@ -361,6 +374,8 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
     }
     if (all.size > 0) {
       const ids = [...all];
+      // A credit holds its step and its re-pay (restrict): first.
+      await db.delete(payeeCredits).where(inArray(payeeCredits.payoutId, ids));
       await db
         .delete(refundReviews)
         .where(inArray(refundReviews.payoutId, ids));
@@ -414,6 +429,22 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
       await db
         .delete(agreementProposals)
         .where(inArray(agreementProposals.id, created.proposalIds));
+    }
+    if (created.balanceUserIds.length > 0) {
+      await db
+        .delete(connectBalances)
+        .where(inArray(connectBalances.userId, created.balanceUserIds));
+    }
+    if (created.connectUserIds.length > 0) {
+      await db
+        .delete(stripeConnectAccounts)
+        .where(inArray(stripeConnectAccounts.userId, created.connectUserIds));
+      // The delete's trigger keeps a history row of each.
+      await db
+        .delete(stripeConnectAccountHistory)
+        .where(
+          inArray(stripeConnectAccountHistory.userId, created.connectUserIds)
+        );
     }
     await db.delete(subscriptionTiers).where(eq(subscriptionTiers.id, tierId));
     await teardownTestDatabase();
@@ -1933,12 +1964,14 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
       expect(await statusOf()).toBe('cancelled');
     });
 
-    it('a cancellation step only a person can read refuses with its own 422, REFUND_CLAWBACK_NEEDS_PERSON, not "try again" (round 2 LOW-C)', async () => {
-      const charge = await purchaseCharge();
-      const failed = await failedRefund(charge, 1000);
-      // The organisation's unpaid slice was cancelled by the refund; its step
-      // was left pending by a delivery that died, so the ledger cannot tell
-      // whether that step's cancel took the slice.
+    /**
+     * The organisation's unpaid slice was cancelled by the refund; its step is
+     * put back to pending, as a delivery that died after the cancel leaves it.
+     */
+    async function strandOrgStep(
+      charge: Awaited<ReturnType<typeof purchaseCharge>>,
+      stripeRefundId: string
+    ) {
       await db
         .update(payoutReversals)
         .set({
@@ -1947,10 +1980,135 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
         })
         .where(
           and(
-            eq(payoutReversals.causeId, failed.stripeRefundId),
+            eq(payoutReversals.causeId, stripeRefundId),
             eq(payoutReversals.payoutId, charge.org.id)
           )
         );
+    }
+
+    it('a stranded cancellation on its own cancelled slice is settled by the system: it took the share, so it is re-paid, and the notice names the payee (Codex-2hxff.71, was LOW-C)', async () => {
+      const charge = await purchaseCharge();
+      const failed = await failedRefund(charge, 1000);
+      await strandOrgStep(charge, failed.stripeRefundId);
+
+      const settled = await service.resolveFailedRefund(
+        failed.id,
+        { resolution: 'creators_repaid', note: 'Re-pay' },
+        supportId
+      );
+      for (const row of settled.settled.repaid) {
+        created.payoutIds.push(row.payoutId);
+      }
+
+      expect(
+        settled.settled.repaid.map((row) => row.amountCents).sort()
+      ).toEqual([135, 765]);
+      const [owner] = await db
+        .select({ name: users.name })
+        .from(users)
+        .where(eq(users.id, ownerId));
+      expect(settled.settled.systemSettled).toEqual([
+        {
+          payoutId: charge.org.id,
+          payeeName: owner?.name ?? null,
+          decision: 'took_share',
+        },
+      ]);
+      // The charge page's history says what the system decided.
+      const detail = await service.getChargeDetail(charge.chargeId);
+      const org = detail.slices.find((row) => row.payoutId === charge.org.id);
+      expect(org?.history).toEqual([
+        expect.objectContaining({
+          outcome: 'paid_back',
+          systemDecision: 'took_share',
+        }),
+      ]);
+    });
+
+    it("a stranded cancellation whose payee kept a late transfer: not re-paid, the notice says payee_kept, and the alert is raised with the settlement under its credit's errorId (review LOW-8)", async () => {
+      const charge = await purchaseCharge();
+      // The organisation's slice goes to a payee with an account, so a drain
+      // could still send it a transfer.
+      const payeeId = takeFirst(await seedTestUsers(db, 1));
+      const accountId = `acct_sup${uid()}`;
+      created.connectUserIds.push(payeeId);
+      await db.insert(stripeConnectAccounts).values({
+        userId: payeeId,
+        stripeAccountId: accountId,
+        status: 'active',
+        chargesEnabled: true,
+        payoutsEnabled: true,
+      });
+      await db
+        .update(payouts)
+        .set({ userId: payeeId })
+        .where(eq(payouts.id, charge.org.id));
+      const failed = await failedRefund(charge, 1000);
+      await strandOrgStep(charge, failed.stripeRefundId);
+      // The drain's transfer, sent after the cancel and never reversed.
+      const transfer = await fake.stripe.transfers.create({
+        amount: 135,
+        currency: 'gbp',
+        destination: accountId,
+        metadata: { payout_id: charge.org.id },
+      });
+
+      const settled = await service.resolveFailedRefund(
+        failed.id,
+        { resolution: 'creators_repaid', note: 'Re-pay' },
+        supportId
+      );
+      for (const row of settled.settled.repaid) {
+        created.payoutIds.push(row.payoutId);
+      }
+
+      // Only the creator's reversed share is re-paid: the payee kept theirs.
+      expect(settled.settled.repaid.map((row) => row.amountCents)).toEqual([
+        765,
+      ]);
+      const [payee] = await db
+        .select({ name: users.name })
+        .from(users)
+        .where(eq(users.id, payeeId));
+      expect(settled.settled.systemSettled).toEqual([
+        {
+          payoutId: charge.org.id,
+          payeeName: payee?.name ?? null,
+          decision: 'payee_kept',
+        },
+      ]);
+      const [credit] = await db
+        .select()
+        .from(payeeCredits)
+        .where(eq(payeeCredits.payoutId, charge.org.id));
+      expect(credit).toMatchObject({
+        effect: 'transfer_kept',
+        resolution: 'not_owed',
+      });
+      expect(serviceLog().error).toHaveBeenCalledWith(
+        expect.stringContaining('the payee kept it'),
+        expect.objectContaining({
+          errorId: credit?.alertErrorId,
+          stripeRefundId: failed.stripeRefundId,
+          payoutId: charge.org.id,
+          stripeTransferId: transfer.id,
+        })
+      );
+    });
+
+    it('a stranded cancellation the rule cannot decide (another refund cancelled there too) refuses with its own 422, REFUND_CLAWBACK_NEEDS_PERSON, not "try again" (round 2 LOW-C)', async () => {
+      const charge = await purchaseCharge();
+      const failed = await failedRefund(charge, 1000);
+      await strandOrgStep(charge, failed.stripeRefundId);
+      await db.insert(payoutReversals).values({
+        payoutId: charge.org.id,
+        causeType: 'refund',
+        causeId: `re_sup${uid()}`,
+        amountCents: 135,
+        kind: 'cancellation',
+        status: 'pending',
+        attemptedAt: new Date(Date.now() - 2 * DAY * 1000),
+      });
 
       const error = await failureOf(
         service.resolveFailedRefund(
@@ -2149,8 +2307,18 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
         .where(eq(refundReviews.payoutId, charge.creator.id));
       if (!review) throw new Error('expected a creator debt');
 
+      // One row per person (Codex-2hxff.73, §4.3): the debt is under its payee.
       const list = await service.listCreatorDebts({ page: 1, limit: 50 });
-      const item = list.items.find((row) => row.reviewId === review.id);
+      const person = list.items.find((row) => row.payee.userId === creatorId);
+      expect(person).toMatchObject({
+        state: 'needs_settling',
+        clock: null,
+        negativeSince: null,
+        stripeHeld: [],
+      });
+      const item = person?.recordedDebts.find(
+        (row) => row.reviewId === review.id
+      );
       expect(item).toMatchObject({
         payoutId: charge.creator.id,
         payee: { userId: creatorId, role: 'creator' },
@@ -2193,6 +2361,706 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
         )
       );
       expect(missing.statusCode).toBe(404);
+    });
+
+    // ── per person, with Stripe's balance (Codex-2hxff.73, .30; §4.3) ──
+
+    /** A `connect_balances` row as the daily job leaves it. */
+    async function balance(
+      userId: string,
+      values: Partial<typeof connectBalances.$inferInsert>
+    ) {
+      created.balanceUserIds.push(userId);
+      const stripeAccountId = `acct_sup${uid()}`;
+      await db.insert(connectBalances).values({
+        stripeAccountId,
+        userId,
+        manualPayoutsSince: new Date(Date.now() - 200 * DAY * 1000),
+        checkedAt: new Date(Date.now() - 3600_000),
+        ...values,
+      });
+      return stripeAccountId;
+    }
+
+    /** Stripe's live balance per account; a missing one fails, as a timeout. */
+    function liveBalances(available: Record<string, number>) {
+      const retrieve = vi.fn(
+        async (_params: unknown, options: { stripeAccount: string }) => {
+          const cents = available[options.stripeAccount];
+          if (cents === undefined) {
+            throw Object.assign(new Error('timed out'), {
+              type: 'StripeConnectionError',
+            });
+          }
+          return {
+            object: 'balance',
+            available: [{ amount: cents, currency: 'gbp' }],
+            pending: [{ amount: 0, currency: 'gbp' }],
+          };
+        }
+      );
+      (fake.stripe as unknown as { balance: unknown }).balance = { retrieve };
+      return retrieve;
+    }
+
+    const daysAgo = (days: number) => new Date(Date.now() - days * DAY * 1000);
+
+    it('lists Creator debts one row per person, oldest first: the live balance, back so far and its clock; a refused debt beside it is never double-counted; a failed read shows the snapshot; the badge counts only people who need a person (OQ2)', async () => {
+      const [held, both, unread] = await seedTestUsers(db, 3);
+      if (!held || !both || !unread) throw new Error('expected 3 users');
+      const before = await service.getQueueCounts();
+
+      // Held by Stripe, over £50 for 100 days: To invoice.
+      const heldAccount = await balance(held, {
+        availableCents: -6240,
+        pendingCents: 0,
+        negativeAfter: daysAgo(101),
+        negativeSince: daysAgo(100),
+      });
+      const heldSlice = await slice({
+        payoutType: 'creator_payout',
+        userId: held,
+        amountCents: 7400,
+        status: 'paid',
+        stripeChargeId: `ch_sup${uid()}`,
+        stripeTransferId: `tr_sup${uid()}`,
+      });
+      const takeBack = takeFirst(
+        await db
+          .insert(payoutReversals)
+          .values({
+            payoutId: heldSlice.id,
+            causeType: 'dispute',
+            causeId: `du_sup${uid()}`,
+            amountCents: 7400,
+            kind: 'transfer_reversal',
+            status: 'done',
+            stripeReversalId: `trr_sup${uid()}`,
+            resolvedAt: new Date(daysAgo(101).getTime() + 3600_000),
+          })
+          .returning()
+      );
+      // Below zero for 10 days, and a debt Stripe refused, on another sale.
+      const bothAccount = await balance(both, {
+        availableCents: -900,
+        pendingCents: 0,
+        negativeAfter: daysAgo(11),
+        negativeSince: daysAgo(10),
+      });
+      const refusedSlice = await slice({
+        payoutType: 'organization_fee',
+        userId: both,
+        amountCents: 450,
+        status: 'paid',
+        stripeChargeId: `ch_sup${uid()}`,
+        stripeTransferId: `tr_sup${uid()}`,
+      });
+      const refusedStep = takeFirst(
+        await db
+          .insert(payoutReversals)
+          .values({
+            payoutId: refusedSlice.id,
+            causeType: 'refund',
+            causeId: `re_sup${uid()}`,
+            amountCents: 450,
+            kind: 'transfer_reversal',
+            status: 'debt',
+            lastErrorCode: 'insufficient_funds',
+          })
+          .returning()
+      );
+      await db.insert(refundReviews).values({
+        payoutReversalId: refusedStep.id,
+        payoutId: refusedSlice.id,
+        creatorUserId: both,
+        attemptedReversalCents: 450,
+        errorCode: 'insufficient_funds',
+      });
+      // Below zero 3 days; Stripe can't be read for it now.
+      await balance(unread, {
+        availableCents: -1200,
+        pendingCents: 0,
+        negativeSince: daysAgo(3),
+      });
+      const retrieve = liveBalances({
+        [heldAccount]: -5820,
+        [bothAccount]: -840,
+      });
+
+      const list = await service.listCreatorDebts({ page: 1, limit: 50 });
+      const ours = list.items.filter((row) =>
+        [held, both, unread].includes(row.payee.userId)
+      );
+
+      expect(ours.map((row) => row.payee.userId)).toEqual([held, both, unread]);
+      const [heldRow, bothRow, unreadRow] = ours;
+      expect(heldRow).toMatchObject({
+        payee: { roles: ['creator'] },
+        stripe: { availableCents: -5820, live: true },
+        stripeOwedCents: 5820,
+        totalOwedCents: 5820,
+        // 74.00 taken since the last morning at or above zero; 58.20 owed now.
+        backCents: 1580,
+        recordedDebts: [],
+        state: 'to_invoice',
+        clock: { kind: 'invoice', daysLeft: 0 },
+        negativeSince: expect.any(String),
+      });
+      expect(heldRow?.stripeHeld).toEqual([
+        expect.objectContaining({
+          payoutReversalId: takeBack.id,
+          amountCents: 7400,
+          stripeReversalId: takeBack.stripeReversalId,
+          cause: expect.objectContaining({ type: 'dispute' }),
+        }),
+      ]);
+      expect(bothRow).toMatchObject({
+        payee: { roles: ['organisation_owner'] },
+        stripeOwedCents: 840,
+        totalOwedCents: 1290,
+        state: 'recovering',
+        clock: { kind: 'stripe_writes_off' },
+        stripeHeld: [],
+      });
+      expect(bothRow?.recordedDebts).toEqual([
+        expect.objectContaining({ owedCents: 450, owedCreditId: null }),
+      ]);
+      expect(unreadRow).toMatchObject({
+        stripe: { availableCents: -1200, live: false },
+        stripeOwedCents: 1200,
+        backCents: null,
+        state: 'recovering',
+      });
+      // One live read per listed account; never the acct_ id in the answer.
+      expect(retrieve).toHaveBeenCalledWith(
+        {},
+        expect.objectContaining({ stripeAccount: heldAccount, timeout: 5000 })
+      );
+      expect(JSON.stringify(ours)).not.toContain('acct_');
+
+      // The badge: the To invoice person and the refused debt; not the rest.
+      const after = await service.getQueueCounts();
+      expect(after.creatorDebts - before.creatorDebts).toBe(2);
+      // Paginated by person.
+      const one = await service.listCreatorDebts({ page: 1, limit: 1 });
+      expect(one.items).toHaveLength(1);
+      expect(one.pagination.total).toBe(list.pagination.total);
+    });
+
+    it("a live balance Stripe refuses the key for is an error with an errorId, a configuration fault; a timeout stays a warning; both log Stripe's answer (review MED-6)", async () => {
+      const [refused, slow] = await seedTestUsers(db, 2);
+      if (!refused || !slow) throw new Error('two users were seeded');
+      const refusedAccount = await balance(refused, {
+        availableCents: -900,
+        pendingCents: 0,
+        negativeSince: daysAgo(3),
+      });
+      await balance(slow, {
+        availableCents: -700,
+        pendingCents: 0,
+        negativeSince: daysAgo(3),
+      });
+      (fake.stripe as unknown as { balance: unknown }).balance = {
+        retrieve: vi.fn(
+          async (_params: unknown, options: { stripeAccount: string }) => {
+            if (options.stripeAccount === refusedAccount) {
+              throw Object.assign(
+                new Error(
+                  'The provided key does not have the required permissions for this endpoint'
+                ),
+                {
+                  type: 'StripePermissionError',
+                  statusCode: 403,
+                  requestId: 'req_sup403',
+                }
+              );
+            }
+            throw Object.assign(new Error('timed out'), {
+              type: 'StripeConnectionError',
+            });
+          }
+        ),
+      };
+
+      const list = await service.listCreatorDebts({ page: 1, limit: 50 });
+      const ours = list.items.filter((row) =>
+        [refused, slow].includes(row.payee.userId)
+      );
+
+      // Both show the morning snapshot, and say so.
+      expect(ours.map((row) => row.stripe.live)).toEqual([false, false]);
+      expect(serviceLog().error).toHaveBeenCalledWith(
+        expect.stringContaining('Balance: Read'),
+        expect.objectContaining({
+          errorId: expect.any(String),
+          userId: refused,
+          statusCode: 403,
+          stripeErrorType: 'StripePermissionError',
+          stripeRequestId: 'req_sup403',
+          stripeMessage: expect.stringContaining('required permissions'),
+        })
+      );
+      expect(serviceLog().warn).toHaveBeenCalledWith(
+        expect.stringContaining('could not be read'),
+        expect.objectContaining({
+          userId: slow,
+          statusCode: null,
+          stripeErrorType: 'StripeConnectionError',
+          stripeMessage: 'timed out',
+        })
+      );
+      expect(serviceLog().error).not.toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ userId: slow })
+      );
+    });
+
+    // ── a debt over £50 Stripe collected (design §14; AMENDMENT 2) ──────
+
+    /** The person's row on the tab, if listed. */
+    async function debtRowOf(userId: string) {
+      const list = await service.listCreatorDebts({ page: 1, limit: 100 });
+      return list.items.filter((row) => row.payee.userId === userId);
+    }
+
+    it('collected by Stripe over £50, nothing below zero now: still listed To invoice with what was collected, and counted', async () => {
+      const userId = takeFirst(await seedTestUsers(db, 1));
+      const collectedAt = daysAgo(2);
+      const accountId = await balance(userId, {
+        availableCents: 300,
+        pendingCents: 0,
+        negativeSince: null,
+        // The episode Stripe collected: below zero from 182 days ago.
+        clearedSince: daysAgo(182),
+        clearedAt: collectedAt,
+        clearedReason: 'stripe_collected',
+        clearedOwedCents: 7200,
+        collectedOwedCents: 7200,
+        collectedAt,
+      });
+      liveBalances({ [accountId]: 300 });
+      const before = await service.getQueueCounts();
+
+      const rows = await debtRowOf(userId);
+
+      expect(rows).toEqual([
+        expect.objectContaining({
+          state: 'to_invoice',
+          collectedCents: 7200,
+          collectedAt: collectedAt.toISOString(),
+          negativeSince: null,
+          stripeOwedCents: 0,
+          totalOwedCents: 7200,
+          clock: null,
+          oldestAt: collectedAt.toISOString(),
+        }),
+      ]);
+      // Counted: remove the collected debt, and the badge drops by one.
+      await db
+        .update(connectBalances)
+        .set({ collectedOwedCents: null, collectedAt: null })
+        .where(eq(connectBalances.stripeAccountId, accountId));
+      expect((await service.getQueueCounts()).creatorDebts).toBe(
+        before.creatorDebts - 1
+      );
+    });
+
+    it('collected over £50 AND below zero again (over £50, 90 days): ONE row carrying both, counted once', async () => {
+      const userId = takeFirst(await seedTestUsers(db, 1));
+      const collectedAt = daysAgo(120);
+      const accountId = await balance(userId, {
+        availableCents: -6000,
+        pendingCents: 0,
+        negativeSince: daysAgo(95),
+        collectedOwedCents: 6500,
+        collectedAt,
+      });
+      liveBalances({ [accountId]: -6000 });
+      const counted = await service.getQueueCounts();
+
+      const rows = await debtRowOf(userId);
+
+      expect(rows).toEqual([
+        expect.objectContaining({
+          state: 'to_invoice',
+          collectedCents: 6500,
+          collectedAt: collectedAt.toISOString(),
+          negativeSince: expect.any(String),
+          stripeOwedCents: 6000,
+          totalOwedCents: 12_500,
+          clock: expect.objectContaining({ kind: 'invoice' }),
+          oldestAt: collectedAt.toISOString(),
+        }),
+      ]);
+      // Both reasons, one person: remove the collected debt and the count
+      // stays, as the balance alone still needs a person.
+      await db
+        .update(connectBalances)
+        .set({ collectedOwedCents: null, collectedAt: null })
+        .where(eq(connectBalances.stripeAccountId, accountId));
+      expect((await service.getQueueCounts()).creatorDebts).toBe(
+        counted.creatorDebts
+      );
+      // And with the balance back to zero too, it drops by one.
+      await db
+        .update(connectBalances)
+        .set({ availableCents: 0, negativeSince: null })
+        .where(eq(connectBalances.stripeAccountId, accountId));
+      expect((await service.getQueueCounts()).creatorDebts).toBe(
+        counted.creatorDebts - 1
+      );
+    });
+
+    it('collected by Stripe at £50 or less: written off, so neither listed nor counted', async () => {
+      const userId = takeFirst(await seedTestUsers(db, 1));
+      const accountId = await balance(userId, {
+        availableCents: 0,
+        pendingCents: 0,
+        negativeSince: null,
+        clearedSince: daysAgo(182),
+        clearedAt: daysAgo(2),
+        clearedReason: 'stripe_collected',
+        clearedOwedCents: 4000,
+      });
+      liveBalances({ [accountId]: 0 });
+      const before = await service.getQueueCounts();
+
+      expect(await debtRowOf(userId)).toEqual([]);
+      await db
+        .delete(connectBalances)
+        .where(eq(connectBalances.stripeAccountId, accountId));
+      expect((await service.getQueueCounts()).creatorDebts).toBe(
+        before.creatorDebts
+      );
+    });
+
+    // ── Owed to creators (Codex-2hxff.73; §7) ───────────────────────────
+
+    /** A late take-back on the creator's settled step: its credit, open. */
+    async function lateTakeBack(
+      charge: Awaited<ReturnType<typeof purchaseCharge>>,
+      effect: 'reversal_landed' | 'unverified' = 'reversal_landed'
+    ) {
+      const step = takeFirst(
+        await db
+          .insert(payoutReversals)
+          .values({
+            payoutId: charge.creator.id,
+            causeType: 'refund',
+            causeId: `re_sup${uid()}`,
+            amountCents: 765,
+            kind: 'transfer_reversal',
+            status: 'cancelled',
+            resolvedAt: new Date(),
+          })
+          .returning()
+      );
+      const credit = takeFirst(
+        await db
+          .insert(payeeCredits)
+          .values({
+            payoutReversalId: step.id,
+            payoutId: charge.creator.id,
+            payeeUserId: creatorId,
+            effect,
+            amountCents: effect === 'unverified' ? null : 700,
+            stripeReversalId:
+              effect === 'unverified' ? null : `trr_sup${uid()}`,
+            stripeTransferId: charge.creator.stripeTransferId,
+            settledAs: 'cancelled',
+            alertErrorId: crypto.randomUUID(),
+          })
+          .returning()
+      );
+      return { step, credit };
+    }
+
+    it('Owed to creators: lists an open credit with its one action, the charge page reads "taken after it was settled", Re-pay writes the payout and the line turns paid back', async () => {
+      const charge = await purchaseCharge();
+      const { credit } = await lateTakeBack(charge);
+      const before = await service.getQueueCounts();
+
+      const list = await service.listOwedToCreators({ page: 1, limit: 50 });
+      expect(list.items.find((row) => row.creditId === credit.id)).toEqual({
+        creditId: credit.id,
+        payoutId: charge.creator.id,
+        payee: expect.objectContaining({ userId: creatorId, role: 'creator' }),
+        state: 'owed',
+        effect: 'reversal_landed',
+        amountCents: 700,
+        repayCents: 700,
+        stepAmountCents: 765,
+        settledAs: 'cancelled',
+        stripeReversalId: credit.stripeReversalId,
+        chargeId: charge.chargeId,
+        title: charge.item.title,
+        organizationName: 'Support Org',
+        buyerName: expect.any(String),
+        cause: expect.objectContaining({ type: 'refund' }),
+        debt: null,
+        action: 'repay',
+        foundAt: credit.foundAt.toISOString(),
+        checkedAt: null,
+      });
+      const detail = await service.getChargeDetail(charge.chargeId);
+      const creator = detail.slices.find(
+        (row) => row.payoutId === charge.creator.id
+      );
+      expect(creator?.owedToPayeeCents).toBe(700);
+      expect(
+        creator?.history.find((line) => line.credit?.creditId === credit.id)
+      ).toMatchObject({
+        outcome: 'taken_after_settled',
+        credit: { state: 'owed', amountCents: 700, action: 'repay' },
+      });
+
+      const repaid = await service.resolveOwedToCreator(
+        credit.id,
+        { action: 'repay', note: '' },
+        supportId
+      );
+      expect(repaid).toMatchObject({
+        creditId: credit.id,
+        resolution: 'repaid',
+        repayPayoutId: expect.any(String),
+        amountCents: 700,
+      });
+      const after = await service.getQueueCounts();
+      expect(before.owedToCreators - after.owedToCreators).toBe(1);
+      const line = (await service.getChargeDetail(charge.chargeId)).slices
+        .find((row) => row.payoutId === charge.creator.id)
+        ?.history.find((h) => h.credit?.creditId === credit.id);
+      expect(line).toMatchObject({
+        outcome: 'paid_back',
+        credit: {
+          state: 'repaid',
+          action: null,
+          repayPayout: { id: repaid.repayPayoutId, status: 'pending' },
+        },
+      });
+      // Another answer once settled is a 409.
+      const other = await failureOf(
+        service.resolveOwedToCreator(
+          credit.id,
+          { action: 'not_owed', note: 'no' },
+          supportId
+        )
+      );
+      expect(other.statusCode).toBe(409);
+    });
+
+    it('Check Stripe again: nothing taken closes it as not owed by the system, with that note', async () => {
+      const charge = await purchaseCharge();
+      const { credit } = await lateTakeBack(charge, 'unverified');
+      vi.mocked(fake.stripe.transfers.listReversals).mockResolvedValue({
+        object: 'list',
+        data: [],
+        has_more: false,
+      } as never);
+
+      const checked = await service.checkOwedToCreator(credit.id);
+
+      expect(checked).toMatchObject({
+        creditId: credit.id,
+        outcome: 'not_owed',
+        state: 'not_owed',
+        note: 'Stripe shows nothing was taken',
+        action: null,
+      });
+      const list = await service.listOwedToCreators({ page: 1, limit: 50 });
+      expect(list.items.some((row) => row.creditId === credit.id)).toBe(false);
+    });
+
+    it('a cancellation the ledger cannot attribute: listed needs_person with Decide and the share Re-pay pays, a check says so and alerts, and Re-pay needs the note (review MED-3)', async () => {
+      const charge = await purchaseCharge();
+      // The organisation's unpaid 135 was cancelled by a refund, and two
+      // refunds' cancellations are on it: the ledger cannot say which.
+      await db
+        .update(payouts)
+        .set({ status: 'cancelled_by_refund' })
+        .where(eq(payouts.id, charge.org.id));
+      const cancellation = () =>
+        db
+          .insert(payoutReversals)
+          .values({
+            payoutId: charge.org.id,
+            causeType: 'refund',
+            causeId: `re_sup${uid()}`,
+            amountCents: 135,
+            kind: 'cancellation',
+            status: 'cancelled',
+            resolvedAt: new Date(),
+          })
+          .returning();
+      const step = takeFirst(await cancellation());
+      await cancellation();
+      const credit = takeFirst(
+        await db
+          .insert(payeeCredits)
+          .values({
+            payoutReversalId: step.id,
+            payoutId: charge.org.id,
+            payeeUserId: ownerId,
+            effect: 'unverified',
+            settledAs: 'cancelled',
+            alertErrorId: crypto.randomUUID(),
+          })
+          .returning()
+      );
+
+      const list = await service.listOwedToCreators({ page: 1, limit: 50 });
+      expect(
+        list.items.find((row) => row.creditId === credit.id)
+      ).toMatchObject({
+        state: 'needs_person',
+        action: 'decide',
+        effect: 'unverified',
+        amountCents: null,
+        repayCents: 135,
+      });
+      const detail = await service.getChargeDetail(charge.chargeId);
+      expect(
+        detail.slices
+          .find((row) => row.payoutId === charge.org.id)
+          ?.history.find((line) => line.credit?.creditId === credit.id)?.credit
+      ).toMatchObject({ state: 'needs_person', action: 'decide' });
+
+      const checked = await service.checkOwedToCreator(credit.id);
+      expect(checked).toMatchObject({
+        outcome: 'needs_person',
+        state: 'needs_person',
+        action: 'decide',
+        amountCents: null,
+      });
+      expect(serviceLog().error).toHaveBeenCalledWith(
+        expect.stringContaining('Check in Stripe'),
+        expect.objectContaining({
+          errorId: expect.any(String),
+          creditId: credit.id,
+        })
+      );
+
+      const refused = await failureOf(
+        service.resolveOwedToCreator(
+          credit.id,
+          { action: 'repay', note: '' },
+          supportId
+        )
+      );
+      expect(refused.statusCode).toBe(422);
+      expect(refused.context).toEqual({ code: 'CREDIT_NOTE_REQUIRED' });
+      const repaid = await service.resolveOwedToCreator(
+        credit.id,
+        {
+          action: 'repay',
+          note: 'Stripe: nothing went out for it; this refund cancelled it',
+        },
+        supportId
+      );
+      if (repaid.repayPayoutId) created.payoutIds.push(repaid.repayPayoutId);
+      expect(repaid).toMatchObject({
+        resolution: 'repaid',
+        amountCents: 135,
+        repayPayoutId: expect.any(String),
+      });
+    });
+
+    it("a debt the creator paid, after a credit's re-pay on its step: the won dispute still re-pays it, and neither re-pay is read as a slice of the purchase (review MED-4)", async () => {
+      const charge = await purchaseCharge();
+      const disputeId = `du_sup${uid()}`;
+      created.stripeDisputeIds.push(disputeId);
+      await db.insert(disputes).values({
+        stripeDisputeId: disputeId,
+        stripeChargeId: charge.chargeId,
+        amountCents: 1000,
+        currency: 'gbp',
+        status: 'won',
+        stripeCreatedAt: new Date(),
+      });
+      // The creator's 765 take-back was refused for their balance (a debt),
+      // then 400 of it landed late: re-paid, the debt left open (OQ4).
+      const step = takeFirst(
+        await db
+          .insert(payoutReversals)
+          .values({
+            payoutId: charge.creator.id,
+            causeType: 'dispute',
+            causeId: disputeId,
+            amountCents: 765,
+            kind: 'transfer_reversal',
+            status: 'debt',
+            resolvedAt: new Date(),
+          })
+          .returning()
+      );
+      const review = takeFirst(
+        await db
+          .insert(refundReviews)
+          .values({
+            payoutReversalId: step.id,
+            payoutId: charge.creator.id,
+            creatorUserId: creatorId,
+            attemptedReversalCents: 765,
+            errorCode: 'insufficient_funds',
+          })
+          .returning()
+      );
+      const credit = takeFirst(
+        await db
+          .insert(payeeCredits)
+          .values({
+            payoutReversalId: step.id,
+            payoutId: charge.creator.id,
+            payeeUserId: creatorId,
+            effect: 'reversal_landed',
+            amountCents: 400,
+            stripeReversalId: `trr_sup${uid()}`,
+            stripeTransferId: charge.creator.stripeTransferId,
+            settledAs: 'debt',
+            alertErrorId: crypto.randomUUID(),
+          })
+          .returning()
+      );
+      const creditRepay = await service.resolveOwedToCreator(
+        credit.id,
+        { action: 'repay', note: '' },
+        supportId
+      );
+      if (creditRepay.repayPayoutId) {
+        created.payoutIds.push(creditRepay.repayPayoutId);
+      }
+      // The creator pays the debt; then the dispute is won.
+      await service.resolveCreatorDebt(
+        review.id,
+        { resolution: 'creator_absorbed', note: '' },
+        supportId
+      );
+
+      const won = await repayDispute(
+        { db, stripe: fake.stripe, obs, environment: 'test' },
+        { disputeId }
+      );
+
+      expect(won.repaid).toBe(1);
+      const after = takeFirst(
+        await db
+          .select()
+          .from(payoutReversals)
+          .where(eq(payoutReversals.id, step.id))
+      );
+      if (after.repaidByPayoutId)
+        created.payoutIds.push(after.repaidByPayoutId);
+      expect(after.repaidByPayoutId).not.toBeNull();
+      expect(after.repaidByPayoutId).not.toBe(creditRepay.repayPayoutId);
+      // A later cause of this purchase sees its three slices only.
+      const plan = await loadClawbackPlanInput(db, {
+        charge: { id: charge.chargeId, amountCents: 1000 },
+        source: { sourceType: 'purchase', purchaseId: charge.purchase.id },
+        refunds: [],
+      });
+      expect(plan.slices.map((row) => row.id).sort()).toEqual(
+        [charge.fee.id, charge.org.id, charge.creator.id].sort()
+      );
     });
   });
 

@@ -10655,38 +10655,6 @@ export const back_to_top = () => `Back to top`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const preview_player_load_error = () => `Failed to load preview.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const preview_player_init_error = () => `Failed to initialize preview player.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const preview_player_loading = () => `Loading preview`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const preview_player_ready = () => `Preview ready`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const preview_player_error_status = () => `Error loading preview`
 
 
@@ -10736,6 +10704,102 @@ export const player_mute = () => `Mute`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const player_fullscreen = () => `Fullscreen`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const player_tap_for_sound = () => `Tap for sound`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const player_captions = () => `Captions`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const player_seek = () => `Seek`
+
+
+/**
+ * @param {{ time: NonNullable<unknown>, duration: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const player_time = (params) => `${params.time} of ${params.duration}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const player_controls = () => `Film controls`
+
+
+/**
+ * @param {{ title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const player_named = (params) => `${params.title} player`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const player_loading = () => `Loading the film`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const player_error = () => `This film could not be played.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const player_error_format = () => `This browser cannot play this film. Try another browser.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const player_watch_again = () => `Watch again`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const player_close = () => `Close video`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const player_intro_video = () => `Intro video`
 
 
 /**
@@ -11183,7 +11247,7 @@ export const earnings_connect_pending_title = () => `Payout account under review
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const earnings_connect_pending_body = () => `Stripe is reviewing your account. Earnings will be held in transit until approval.`
+export const earnings_connect_pending_body = () => `Stripe has paused your payouts while it reviews your account. Your earnings are kept for you until it's done.`
 
 
 /**
@@ -11488,6 +11552,382 @@ export const earnings_payouts_load_error = () => `Could not load payout history.
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const earnings_payouts_retry = () => `Retry`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_status_reversed = () => `Reversed`
+
+
+/**
+ * @param {{ total: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_connect_not_started_waiting = (params) => `${params.total} is waiting for you. Connect a Stripe account to receive it. It's kept for you until then.`
+
+
+/**
+ * @param {{ total: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_connect_incomplete_waiting = (params) => `${params.total} is waiting for you. Your onboarding is incomplete. Return to Stripe to finish setting up your account.`
+
+
+/**
+ * @param {{ total: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_connect_pending_waiting = (params) => `${params.total} is waiting for you. Stripe has paused your payouts while it reviews your account. Your earnings are kept for you until it's done, and money already in your Stripe balance stays there until then.`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_waiting_since = (params) => `Waiting since ${params.date}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_waiting_owner_share = () => `· organisation's share, as owner`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_waiting_own_sales = () => `Your own sales`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_bank_next_payout = () => `Next bank payout`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_bank_in_stripe = () => `In your Stripe balance`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_bank_hold_sentence = () => `Each sale's money stays in your Stripe balance for 14 days, in case of a refund, then goes to your bank.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_bank_nothing_waiting = () => `Nothing is waiting to go to your bank. Each new sale's money stays in your Stripe balance for 14 days, in case of a refund, then goes to your bank.`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_bank_covering_sentence = (params) => `A refund or chargeback took back ${params.amount}. Your Stripe balance covered it, so the next ${params.amount} of your sales stays in Stripe instead of going to your bank.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_bank_check_failed = () => `We couldn't check your Stripe balance just now, so the next bank payout isn't shown.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_bank_check_retry = () => `Retry`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_bank_goes_on = (params) => `Goes to your bank on ${params.date}`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_bank_sent_on = (params) => `Sent to your bank on ${params.date}`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_bank_due_on = (params) => `Due to your bank on ${params.date}`
+
+
+/**
+ * @param {{ what: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_bank_towards_all = (params) => `Went towards ${params.what}`
+
+
+/**
+ * @param {{ towards: NonNullable<unknown>, what: NonNullable<unknown>, rest: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_bank_towards_part_goes = (params) => `${params.towards} went towards ${params.what}. ${params.rest} goes to your bank on ${params.date}`
+
+
+/**
+ * @param {{ towards: NonNullable<unknown>, what: NonNullable<unknown>, rest: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_bank_towards_part_went = (params) => `${params.towards} went towards ${params.what}. ${params.rest} went to your bank on ${params.date}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_towards_what_chargeback = () => `the chargeback`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_towards_what_refund = () => `the refund`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_towards_what_unknown = () => `a refund or chargeback`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_bank_paused = () => `In your Stripe balance until Stripe has finished`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_bank_waiting_not_started = () => `Waiting for you to set up payouts`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_bank_waiting_incomplete = () => `Waiting for you to finish setup`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_bank_waiting_paused = () => `Waiting while Stripe reviews your account`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_bank_taken_back_chargeback = (params) => `Taken back for a chargeback on ${params.date}`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_bank_taken_back_refund = (params) => `Taken back for a refund on ${params.date}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_money_minus = () => `minus`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_negative_aria = () => `Stripe balance below zero`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_negative_title = () => `Your Stripe balance is`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_negative_body = () => `Bank payouts resume once it's back above zero. New earnings go towards it first, and each sale still waits its 14 days.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_negative_cause = () => `A refund or chargeback took back money that had already gone to your bank. If a chargeback is decided for us, that money is paid back to you.`
+
+
+/**
+ * @param {{ what: NonNullable<unknown>, amount: NonNullable<unknown>, date: NonNullable<unknown>, more: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_negative_cause_chargeback = (params) => `A chargeback on ${params.what} took back ${params.amount} on ${params.date}${params.more}, after that money had gone to your bank. If the bank decides for us, the ${params.amount} is paid back to you.`
+
+
+/**
+ * @param {{ what: NonNullable<unknown>, amount: NonNullable<unknown>, date: NonNullable<unknown>, more: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_negative_cause_refund = (params) => `A refund on ${params.what} took back ${params.amount} on ${params.date}${params.more}, after that money had gone to your bank.`
+
+
+/**
+ * @param {{ title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_cause_titled = (params) => `‘${params.title}’`
+
+
+/**
+ * @param {{ title: NonNullable<unknown>, organisation: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_cause_titled_in = (params) => `‘${params.title}’ (${params.organisation})`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_cause_untitled = () => `one of your sales`
+
+
+/**
+ * @param {{ organisation: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_cause_untitled_in = (params) => `one of your sales (${params.organisation})`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_cause_more_one = () => `, along with one other take-back`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_cause_more_many = (params) => `, along with ${params.count} other take-backs`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_negative_rule_writes_off_label = () => `£50 or less:`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_negative_rule_writes_off = (params) => `if it's still below zero on ${params.date}, we'll write off what's left. We never take it from your bank account.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_negative_rule_invoice_label = () => `Over £50:`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_negative_rule_invoice = (params) => `if more than £50 is still owed on ${params.date}, we'll send you an invoice for what's left. We never take it from your bank account.`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_switchover_notice = (params) => `Since ${params.date}, each sale's money stays in your Stripe balance for 14 days before it goes to your bank, in case of a refund. Sales from the last 14 days follow the same rule.`
 
 
 /**
@@ -11936,6 +12376,134 @@ export const payouts_title = () => `Payouts`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const payouts_description = () => `Every transfer Stripe has made on your behalf, plus anything still in transit. Each subscription invoice splits into an organisation fee and one creator-share row per beneficiary.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const payouts_held_label = () => `Held for 14 days`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const payouts_held_next = (params) => `Next to your bank: ${params.amount} on ${params.date}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const payouts_held_covering = () => `All of it is covering the chargeback first (see below).`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const payouts_held_check_failed = () => `We couldn't check your Stripe balance just now, so what's held isn't shown.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const payouts_held_retry = () => `Try again`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const payouts_held_too_many = () => `More recent sales than this card can add up, so no total is shown. Each row's bank date is in the table.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const payouts_negative_body = () => `Bank payouts are paused, including this organisation's share, and resume once it's back above zero. New earnings go towards it first, and each sale still waits its 14 days.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const payouts_negative_cause = () => `A refund or chargeback took back money that had already gone to your bank. If a chargeback is decided for us, that money is paid back to you.`
+
+
+/**
+ * @param {{ what: NonNullable<unknown>, amount: NonNullable<unknown>, date: NonNullable<unknown>, more: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const payouts_negative_cause_here_chargeback = (params) => `A chargeback on ${params.what} took back ${params.amount} of the organisation's share on ${params.date}${params.more}, after that money had gone to your bank. If the bank decides for us, it is paid back to you.`
+
+
+/**
+ * @param {{ what: NonNullable<unknown>, amount: NonNullable<unknown>, date: NonNullable<unknown>, more: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const payouts_negative_cause_here_refund = (params) => `A refund on ${params.what} took back ${params.amount} of the organisation's share on ${params.date}${params.more}, after that money had gone to your bank.`
+
+
+/**
+ * @param {{ what: NonNullable<unknown>, amount: NonNullable<unknown>, date: NonNullable<unknown>, more: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const payouts_negative_cause_elsewhere_chargeback = (params) => `A chargeback on ${params.what} took back ${params.amount} on ${params.date}${params.more}, after that money had gone to your bank. If the bank decides for us, it is paid back to you.`
+
+
+/**
+ * @param {{ what: NonNullable<unknown>, amount: NonNullable<unknown>, date: NonNullable<unknown>, more: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const payouts_negative_cause_elsewhere_refund = (params) => `A refund on ${params.what} took back ${params.amount} on ${params.date}${params.more}, after that money had gone to your bank.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const payouts_cause_untitled_here = () => `one of the organisation's sales`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const payouts_cause_other_org = () => `a sale in another organisation`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const payouts_cause_own_sale = () => `one of your own sales`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const payouts_negative_cta = () => `See your earnings`
 
 
 /**
@@ -14559,6 +15127,14 @@ export const studio_builder_media_slot_guide_video_hint = () => `A talking-head 
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_builder_media_slot_preview_only = () => `Visitors see a 30-second preview of this film, because it is part of a paid practice.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const studio_builder_media_cover = () => `Cover`
 
 
@@ -16816,6 +17392,182 @@ export const studio_page_editor_row_moved = (params) => `${params.item} moved to
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_page_editor_rows_full = (params) => `That’s the most this section shows (${params.max}).`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_title = () => `What’s included`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_show = () => `Show this list`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_elsewhere = () => `Shown beside your price when there is one way to join.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_live = () => `Live`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_rewritten = () => `Rewritten`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_own = () => `Your line`
+
+
+/**
+ * @param {{ fact: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_source_live = (params) => `From the course: ${params.fact}`
+
+
+/**
+ * @param {{ fact: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_source_rewritten = (params) => `Your words for the ${params.fact}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_source_own = () => `Not from the course`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_fact_stages = () => `stages`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_fact_practices = () => `practices`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_fact_length = () => `video and audio length`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_fact_mix = () => `content mix`
+
+
+/**
+ * @param {{ line: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_course_says = (params) => `The course says “${params.line}”.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_relive = () => `Use the course’s words`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_waiting = () => `Not shown until the course has a practice.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_waiting_length = () => `Shown when the course has video or audio and every one has a length.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_placeholder = () => `Your line, for example Printable workbook`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_add = () => `Add a line`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_note = () => `Counts on live lines follow the curriculum. A rewritten line keeps your words.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_reset = () => `Reset to the course’s lines`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_off = () => `No list: the card stands alone.`
 
 
 /**
@@ -21239,7 +21991,7 @@ export const support_queue_failed_intro = () => `The buyer's bank sent these ref
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const support_queue_debts_intro = () => `A refund or chargeback that couldn't take a payee's share back automatically. The buyer has their money; the platform paid it.`
+export const support_queue_debts_intro = () => `A refund or chargeback took more than the payee had in Stripe. One row per person, oldest debt first. Most are held by Stripe as a negative balance and come back from the payee's next earnings by themselves; a debt Stripe refused waits for you to settle it.`
 
 
 /**
@@ -22208,3 +22960,931 @@ export const support_chargeback_word_lost = () => `lost`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const support_chargeback_word_inquiry = () => `an inquiry`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_tab_owed = () => `Owed to creators`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_owed_intro = () => `A take-back reached Stripe after the failed refund was settled or the chargeback was won, so these payees lost money they were meant to keep. Re-pay writes a payout for what Stripe took, and the next payout run pays it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_owed_empty_title = () => `Nothing owed to creators`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_owed_empty_body = () => `When a take-back reaches Stripe after its share was settled, what it took waits here to be paid back.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_col_found = () => `Found`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_col_who_is_owed = () => `Who is owed`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_col_owed = () => `Owed`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_col_what_happened = () => `What happened`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_col_oldest = () => `Oldest`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_col_stripe_balance = () => `Stripe balance`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_col_back_so_far = () => `Back so far`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_col_where_it_stands = () => `Where it stands`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_if_taken = () => `If Stripe took it`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_if_taken_phone = (params) => `${params.amount} if taken`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_is_owed = (params) => `${params.name} is owed`
+
+
+/**
+ * @param {{ role: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_found_line = (params) => `${params.role} · found ${params.date}`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_found_line_plain = (params) => `Found ${params.date}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_what_landed_refund = () => `A take-back reached Stripe after the failed refund was settled`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_what_landed_dispute = () => `A take-back reached Stripe after the chargeback was won`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_what_landed_debt = () => `A take-back reached Stripe after this share had become a debt`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_what_landed_done = () => `A take-back reached Stripe after this share had been paid back`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_what_cancelled_refund = () => `The unpaid share was cancelled after the failed refund was settled`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_what_cancelled_dispute = () => `The unpaid share was cancelled after the chargeback was won`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_what_cancelled_note = () => `No take-back in Stripe: the payout was cancelled before it was made`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_what_unverified = () => `Stripe couldn't be asked whether a take-back went through`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_what_unverified_note = () => `Needs a check: nothing is owed until Stripe says it took the money`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_debt_open = (params) => `${params.name}'s ${params.amount} debt for this share is still open`
+
+
+/**
+ * @param {{ resolution: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_debt_closed = (params) => `That debt was already settled: ${params.resolution}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_settle_by_hand = () => `Another path already paid this share back, so Re-pay is off. Settle it by hand in Stripe, then mark it not owed.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_action_count = () => `Count against this debt`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_action_check = () => `Check Stripe again`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_action_not_owed = () => `Not owed`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_credit_after_refund = () => `after the failed refund was settled`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_credit_after_dispute = () => `after the chargeback was won`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_credit_after_debt = () => `after this share had become a debt, and that debt was already settled`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_credit_after_done = () => `after this share had been paid back`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_credit_after_settled = () => `after it was settled`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_credit_repay_title = (params) => `Re-pay ${params.name} ${params.amount}?`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, name: NonNullable<unknown>, after: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_credit_repay_taken = (params) => `Stripe took ${params.amount} from ${params.name} ${params.after}, so it was theirs to keep.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, amount: NonNullable<unknown>, after: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_credit_repay_cancelled = (params) => `${params.name}'s unpaid share of ${params.amount} was cancelled ${params.after}, so ${params.name} never got it.`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_credit_repay_writes = (params) => `This writes a payout of ${params.amount} for ${params.name}, and the next payout run pays it, like any other.`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_credit_repay_ref = (params) => `${params.amount} is what Stripe took:`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_credit_repay_submit = (params) => `Re-pay ${params.amount} to ${params.name}`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_credit_count_title = (params) => `Count it against ${params.name}'s ${params.amount} debt?`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_credit_count_body = (params) => `Stripe took ${params.amount} from ${params.name} after this share had become a debt, so the take-back paid that debt. The debt is settled as paid back, and nothing is re-paid.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_credit_not_owed_title = (params) => `Mark ${params.name}'s ${params.amount} as not owed?`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_credit_not_owed_body = (params) => `Use this once you've checked in Stripe that ${params.name} isn't out of pocket, for example because the money was paid back another way. Nothing is paid, and it leaves the queue.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_credit_not_owed_submit = () => `Mark as not owed`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_credit_repaid = (params) => `${params.name} is re-paid ${params.amount}. The next payout run pays it.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_credit_counted = (params) => `${params.name}'s ${params.amount} debt is settled: the take-back paid it. Nothing was re-paid.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_credit_not_owed_done = (params) => `Marked as not owed to ${params.name}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_credit_changed = () => `This changed since the list loaded, so nothing was done. The list is up to date now: check what it offers.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_credit_settle_by_hand = () => `Another path already paid this share back, so it can't be re-paid from here. Settle it by hand in Stripe, then mark it not owed.`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_credit_check_owed = (params) => `Stripe confirms it: ${params.amount} was taken from ${params.name}. It is owed now, so Re-pay is on.`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_credit_check_owed_count = (params) => `Stripe confirms it: ${params.amount} was taken from ${params.name}. It is owed now, and it can be counted against its debt.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_credit_check_not_owed = (params) => `Stripe shows nothing was taken from ${params.name}, so nothing is owed.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_credit_check_unknown_lead = () => `Stripe couldn't be asked just now.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_credit_check_unknown_body = () => `Nothing changed. Try again in a moment.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_credit_check_failed = () => `The check didn't run, and nothing changed. Try again in a moment.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debts_state_recovering = () => `Recovering`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debts_state_to_invoice = () => `To invoice`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debts_state_needs_settling = () => `Settle by hand`
+
+
+/**
+ * @param {{ date: NonNullable<unknown>, left: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debts_clock_writes_off = (params) => `£50 or less: written off on ${params.date} if not back by then (${params.left})`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debts_clock_writes_off_due = (params) => `£50 or less: Stripe writes it off on ${params.date}`
+
+
+/**
+ * @param {{ date: NonNullable<unknown>, left: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debts_clock_invoice = (params) => `Over £50: invoiced on ${params.date} if still over £50 then (${params.left})`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debts_clock_invoice_due = (params) => `Over £50 after 90 days: to invoice since ${params.date}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debts_clock_refused = () => `The platform holds it until you settle it`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_days_in = (params) => `in ${params.count} days`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_days_in_one = () => `in 1 day`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debts_balance_paused = () => `Bank payouts paused`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debts_balance_refused = () => `Stripe refused the take-back`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debts_balance_unread = () => `Couldn't read Stripe just now`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debts_as_recorded = () => `As recorded`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debts_back_unknown = () => `—`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debts_show = () => `Show debts`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debts_hide = () => `Hide debts`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debts_person_title = (params) => `${params.name}'s debts`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debts_held_stripe = () => `Held by Stripe`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debts_held_platform = () => `Held by the platform`
+
+
+/**
+ * @param {{ date: NonNullable<unknown>, amount: NonNullable<unknown>, name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debts_held_what_dispute = (params) => `Taken ${params.date}. The chargeback took back ${params.amount} of ${params.name}'s share from their Stripe balance. Stripe takes what it left owed from new earnings by itself.`
+
+
+/**
+ * @param {{ date: NonNullable<unknown>, amount: NonNullable<unknown>, name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debts_held_what_refund = (params) => `Taken ${params.date}. The refund took back ${params.amount} of ${params.name}'s share from their Stripe balance. Stripe takes what it left owed from new earnings by itself.`
+
+
+/**
+ * @param {{ date: NonNullable<unknown>, why: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debts_recorded_what = (params) => `Recorded ${params.date}. ${params.why}, so the platform holds this debt.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debts_paid_by_take_back = () => `A later take-back has paid it:`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debts_count_link = () => `count it in Owed to creators`
+
+
+/**
+ * @param {{ role: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debts_phone_line = (params) => `${params.role} · oldest ${params.date}`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debts_phone_balance = (params) => `Stripe balance ${params.amount}`
+
+
+/**
+ * @param {{ balance: NonNullable<unknown>, back: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debts_phone_back = (params) => `${params.balance} · back so far ${params.back}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_taken_after_settled = () => `Taken after it was settled`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_what_taken_after_settled = (params) => `Taken after it was settled. ${params.amount} owed back to ${params.name}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_what_repaid_late = () => `Taken after it was settled, then paid back by a new payout.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_what_repaid_late_waiting = () => `Taken after it was settled, then paid back by a new payout, waiting for the next run.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_needs_check = () => `A later take-back may have reached Stripe: it waits in Owed to creators for a check.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_system_badge = () => `Settled by the system`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_system_lead = () => `Settled by the system:`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_system_took_share_refund = () => `the take-back had stopped part-way. Only this refund could have cancelled the unpaid payout, and Stripe shows no money left with the payee for it, so it counts as taken.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_system_took_share_dispute = () => `the take-back had stopped part-way. Only this chargeback could have cancelled the unpaid payout, and Stripe shows no money left with the payee for it, so it counts as taken.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_system_payee_kept = () => `the take-back had stopped part-way, and a transfer had already gone out to the payee, who kept it. Nothing was taken back.`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_back = (params) => `${params.amount} owed back to ${params.name}`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_settled_system_one = (params) => `${params.name}'s take-back had stopped part-way, so the system settled it first: the charge's history says how.`
+
+
+/**
+ * @param {{ names: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_settled_system_many = (params) => `The take-backs of ${params.names} had stopped part-way, so the system settled them first: the charge's history says how.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_settled_system_plain = () => `A take-back had stopped part-way, so the system settled it first: the charge's history says how.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_settled_system_some = () => `Some take-backs had stopped part-way, so the system settled them first: the charge's history says how.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_settled_kept_one = (params) => `${params.name} had kept a transfer for their share, so nothing was paid back for it. Reconcile it by hand: the charge's history says how.`
+
+
+/**
+ * @param {{ names: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_settled_kept_many = (params) => `${params.names} had kept transfers for their shares, so nothing was paid back for them. Reconcile them by hand: the charge's history says how.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_settled_kept_plain = () => `A payee had kept a transfer for their share, so nothing was paid back for it. Reconcile it by hand: the charge's history says how.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_settled_kept_some = () => `Some payees had kept transfers for their shares, so nothing was paid back for them. Reconcile them by hand: the charge's history says how.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_if_owed = () => `If it is owed`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_if_owed_phone = (params) => `${params.amount} if owed`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_what_needs_person = () => `The ledger can't tell whether this take-back cancelled the share`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed_what_needs_person_note = () => `Check in Stripe, then decide: Re-pay or Not owed, with a note of what you saw`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_credit_decide_body = (params) => `The ledger can't tell whether this take-back cancelled ${params.name}'s share of ${params.amount}. Check in Stripe first: if the share was cancelled and ${params.name} never got it, re-pay it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_credit_note_label_decide = () => `What you saw in Stripe`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_credit_check_needs_person = () => `Stripe wasn't asked: the ledger can't tell which take-back this was. Check in Stripe, then decide.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_needs_person = () => `The ledger can't tell whether a later take-back cancelled this share: it waits in Owed to creators for a person to decide.`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debts_collected = (params) => `Stripe collected ${params.amount} from the platform on ${params.date}. It's still owed: invoice them when invoices ship.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_credit_sibling_unfinished = () => `Another take-back on this sale is still running. Try again once it has finished.`

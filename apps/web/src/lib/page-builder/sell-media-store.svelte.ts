@@ -95,6 +95,17 @@ export const SLOT_ACCEPTS: Readonly<
   guideVideoMediaId: ['video', 'audio'],
 };
 
+/**
+ * The slots whose film a visitor's press can ask for in full (owner P10): the
+ * intro film, the practice reel and the guide's clip. The hero's loop plays
+ * its preview muted, and the stills draw a frame, so neither is cut short.
+ */
+const FILM_SLOTS: ReadonlySet<JourneySellMediaSlot> = new Set([
+  'introVideoMediaId',
+  'previewVideoMediaId',
+  'guideVideoMediaId',
+]);
+
 /** The six slots, all independently clearable. `null` = empty. */
 export type SellMediaSlots = Record<JourneySellMediaSlot, string | null>;
 
@@ -172,7 +183,18 @@ class SellMediaStore {
    * too (`CourseSellPreview.signatureUrl`, Codex-61zsk.47): no film stands in.
    */
   #signatureImageUrl = $state<string | null>(null);
-  /** The org's ready media items, for the pickers. */
+  /**
+   * The media a visitor sees only as the 30s preview, because paid content
+   * uses it (owner P10; `JourneySellMedia.previewOnlyMediaIds`). Read with the
+   * slots and kept across saves: the write's echo omits it, and nothing a save
+   * changes can change it.
+   */
+  #previewOnly = $state<ReadonlySet<string>>(new Set());
+  /**
+   * The VIEWER's own ready media, for the pickers (`GET /api/media` is
+   * creator-scoped). `#previewOnly` covers exactly this plus the course's film
+   * slots (`findPreviewOnlyMedia`).
+   */
   #options = $state<SellMediaOption[]>([]);
   #loading = $state(false);
   #coverBusy = $state(false);
@@ -290,6 +312,19 @@ class SellMediaStore {
   }
 
   /**
+   * True when this film slot holds, saved or just picked, a film a visitor
+   * sees only as the 30s preview because paid content uses it (owner P10).
+   * The panel says why under the picker. Always false for a slot that does not
+   * play a film in full anyway (the hero loop, the stills).
+   */
+  previewOnly(slot: JourneySellMediaSlot): boolean {
+    const mediaId = this.#pending[slot];
+    return (
+      FILM_SLOTS.has(slot) && mediaId !== null && this.#previewOnly.has(mediaId)
+    );
+  }
+
+  /**
    * The picker options this slot may actually hold — see {@link SLOT_ACCEPTS}.
    *
    * Every surface with a sell-media picker calls THIS rather than reading
@@ -375,6 +410,8 @@ class SellMediaStore {
         // also let `src={undefined}` reach the DOM if the guard were ever
         // loosened, so it is normalised HERE, once, at the wire boundary.
         this.#signatureImageUrl = media.signatureImageUrl ?? null;
+        // Optional-additive too: an older worker omits it, and no note shows.
+        this.#previewOnly = new Set(media.previewOnlyMediaIds ?? []);
       }
 
       this.#options = (library?.items ?? []).map((item) => ({
@@ -539,6 +576,7 @@ class SellMediaStore {
     this.#coverImageUrl = null;
     this.#heroImageUrl = null;
     this.#signatureImageUrl = null;
+    this.#previewOnly = new Set();
     this.#options = [];
     this.#loading = false;
     this.#coverBusy = false;

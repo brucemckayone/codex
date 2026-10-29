@@ -34,6 +34,9 @@ const api = vi.hoisted(() => ({
   listCreatorDebts: vi.fn(),
   resolveFailedRefund: vi.fn(),
   resolveCreatorDebt: vi.fn(),
+  listOwedToCreators: vi.fn(),
+  resolveOwedToCreator: vi.fn(),
+  checkOwedToCreator: vi.fn(),
 }));
 
 vi.mock('$lib/server/api', () => ({
@@ -129,6 +132,12 @@ const CALLS: [string, unknown][] = [
     'resolveCreatorDebt',
     { reviewId: UUID, body: { resolution: 'platform_absorbed', note: '' } },
   ],
+  ['listOwedToCreators', { page: 1, limit: 20 }],
+  [
+    'resolveOwedToCreator',
+    { creditId: UUID, body: { action: 'repay', note: '' } },
+  ],
+  ['checkOwedToCreator', { creditId: UUID }],
 ];
 
 describe('the owner guard', () => {
@@ -166,10 +175,15 @@ describe('the owner guard', () => {
   });
 
   it('the platform owner reaches the worker', async () => {
-    api.getQueueCounts.mockResolvedValue({ failedRefunds: 0, creatorDebts: 0 });
+    api.getQueueCounts.mockResolvedValue({
+      failedRefunds: 0,
+      creatorDebts: 0,
+      owedToCreators: 0,
+    });
     await expect(remote.getSupportQueueCounts()).resolves.toEqual({
       failedRefunds: 0,
       creatorDebts: 0,
+      owedToCreators: 0,
     });
   });
 });
@@ -233,6 +247,36 @@ describe('the input schemas', () => {
         body: { resolution: 'platform_absorbed', note: '' },
       })
     ).toBe(false);
+  });
+
+  it('money owed back: a credit uuid, one of three actions, and a note to mark it not owed', async () => {
+    expect(
+      await accepts('resolveOwedToCreator', {
+        creditId: 'trr_1QkR8sLk2v',
+        body: { action: 'repay', note: '' },
+      })
+    ).toBe(false);
+    expect(
+      await accepts('resolveOwedToCreator', {
+        creditId: UUID,
+        body: { action: 'check', note: '' },
+      })
+    ).toBe(false);
+    expect(
+      await accepts('resolveOwedToCreator', {
+        creditId: UUID,
+        body: { action: 'not_owed', note: '' },
+      })
+    ).toBe(false);
+    expect(
+      await accepts('resolveOwedToCreator', {
+        creditId: UUID,
+        body: { action: 'not_owed', note: 'Paid back by bank transfer.' },
+      })
+    ).toBe(true);
+    expect(await accepts('checkOwedToCreator', { creditId: 'nope' })).toBe(
+      false
+    );
   });
 
   it('a debt is never settled as dispute_won from here', async () => {
@@ -385,6 +429,60 @@ describe('the settle commands', () => {
       '22222222-2222-4222-8222-222222222222',
       { resolution: 'platform_absorbed', note: '' }
     );
+  });
+});
+
+describe('money owed back to a payee', () => {
+  it('a re-pay goes through its own route, with the action and the note', async () => {
+    api.resolveOwedToCreator.mockResolvedValue({
+      creditId: UUID,
+      resolution: 'repaid',
+    });
+    await expect(
+      remote.resolveOwedToCreator({
+        creditId: UUID,
+        body: { action: 'repay', note: '' },
+      })
+    ).resolves.toMatchObject({
+      outcome: 'done',
+      result: { resolution: 'repaid' },
+    });
+    expect(api.resolveOwedToCreator).toHaveBeenCalledWith(UUID, {
+      action: 'repay',
+      note: '',
+    });
+  });
+
+  it('a row whose debt is still open reaches the dialog by its code, never thrown', async () => {
+    api.resolveOwedToCreator.mockRejectedValue(
+      new ApiError(409, "This share's debt is still open.", 'CONFLICT', {
+        code: 'CREDIT_DEBT_STILL_OPEN',
+      })
+    );
+    await expect(
+      remote.resolveOwedToCreator({
+        creditId: UUID,
+        body: { action: 'repay', note: '' },
+      })
+    ).resolves.toMatchObject({
+      outcome: 'failed',
+      status: 409,
+      detailsCode: 'CREDIT_DEBT_STILL_OPEN',
+    });
+  });
+
+  it('Check Stripe again sends only the credit, and answers what Stripe said', async () => {
+    api.checkOwedToCreator.mockResolvedValue({
+      creditId: UUID,
+      outcome: 'still_unknown',
+    });
+    await expect(
+      remote.checkOwedToCreator({ creditId: UUID })
+    ).resolves.toMatchObject({
+      outcome: 'done',
+      result: { outcome: 'still_unknown' },
+    });
+    expect(api.checkOwedToCreator).toHaveBeenCalledWith(UUID);
   });
 });
 

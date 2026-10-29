@@ -12,6 +12,13 @@
   The creator's note is the section's own words, under the lede, and only
   while there is something to buy.
 
+  A single way in stands beside what the course holds ("What's included",
+  `included.ts`), in each layout's own form: in `cards` the lone card and the
+  list share the row, the card first; in `focus` the list sits under the
+  card, in its column; in `band` the lines run along the strip under its
+  rule, as the other ways to join do. Beside other cards, the one-off's card
+  carries the list's first lines as its points (`ownedPoints`).
+
   And, in every layout, the states that are not "priced": an enrolled viewer
   gets a way back in, a course with no way in says so, and a failed offer read
   gets a price-less button — never an invented price.
@@ -19,6 +26,7 @@
 <script lang="ts">
   import { COPY, derivedNote, priceWithCadence } from '../../model/copy';
   import { pathHref } from '../../model/cta';
+  import { courseFacts } from '../../model/facts';
   import { featuredScheme } from '../../model/resolve';
   import type { BlockProps } from '../../model/types';
   import { getKitPage } from '../../page-context';
@@ -26,8 +34,11 @@
   import ButtonRow from '../../primitives/ButtonRow.svelte';
   import Eyebrow from '../../primitives/Eyebrow.svelte';
   import Heading from '../../primitives/Heading.svelte';
+  import List from '../../primitives/List.svelte';
   import Text from '../../primitives/Text.svelte';
+  import { PRICING_COPY } from './copy';
   import { pricingDefinition } from './definition';
+  import { drawsIncluded, includedLines, ownedPoints } from './included';
   import OfferCard from './OfferCard.svelte';
   import { pricingView } from '../../model/offer';
 
@@ -40,6 +51,10 @@
   const selling = $derived(view.state === 'priced' || view.state === 'unpriced');
   const featured = $derived(featuredScheme(page.style, section.scheme));
   const label = $derived(content.ctaLabel ?? COPY.cta.buy);
+  const included = $derived(includedLines(content.included, courseFacts(context.stages)));
+  // An empty list (switched off, or a course with nothing to count yet) draws
+  // the card as it stood alone.
+  const beside = $derived(drawsIncluded(view.paths.length) && included.length > 0);
 </script>
 
 {#snippet head()}
@@ -79,6 +94,19 @@
   {/if}
 {/snippet}
 
+<!-- A list under a title beside a card; along a `strip`, a line under a
+     small label, as the other ways to join are set. -->
+{#snippet whatsIncluded(form: 'list' | 'strip')}
+  <div class="pricing__included" data-form={form}>
+    {#if form === 'strip'}
+      <p class="pricing__included-label">{PRICING_COPY.included}</p>
+    {:else}
+      <Heading level={3} size="title" text={PRICING_COPY.included} type="pricing" />
+    {/if}
+    <List items={included} />
+  </div>
+{/snippet}
+
 <div class="pricing" data-layout={section.layout} data-state={view.state}>
   {@render head()}
 
@@ -97,16 +125,17 @@
   {:else if section.layout === 'focus'}
     <div class="pricing__focus">
       <OfferCard
-        path={view.featured}
+        path={ownedPoints(view.featured, included, view.paths.length)}
         {context}
         {label}
         scheme={featured}
-        badge={view.paths.length > 1}
+        choice={view.paths.length > 1}
         size="focus"
         editable
         {edit}
       />
       {@render others()}
+      {#if beside}{@render whatsIncluded('list')}{/if}
     </div>
   {:else if section.layout === 'band'}
     <div class="pricing__band">
@@ -127,19 +156,25 @@
       </div>
     </div>
     {@render others()}
+    {#if beside}{@render whatsIncluded('strip')}{/if}
   {:else}
-    <div class="pricing__cards" data-count={Math.min(view.paths.length, 5)}>
+    <div
+      class="pricing__cards"
+      data-count={Math.min(view.paths.length, 5)}
+      data-included={beside ? '' : undefined}
+    >
       {#each view.paths as path (path.id)}
         <OfferCard
-          {path}
+          path={ownedPoints(path, included, view.paths.length)}
           {context}
           {label}
           scheme={path.best ? featured : undefined}
-          badge={view.paths.length > 1}
+          choice={view.paths.length > 1}
           editable={path.best}
           {edit}
         />
       {/each}
+      {#if beside}{@render whatsIncluded('list')}{/if}
     </div>
   {/if}
 </div>
@@ -180,6 +215,31 @@
     .pricing__cards[data-count='1'] {
     inline-size: 100%;
     margin-inline: auto;
+  }
+
+  /* And with what it holds beside it, the two are one pair centred under the
+     head, so their mass sits under the heading: the card at its measure (or
+     its share, if less) and the list as wide as its longest line. Stacked,
+     the list is a block centred under the card, its lines set from the left
+     to be read. */
+  :global(.lp[data-lp-style='soft'])
+    .pricing[data-layout='cards']
+    .pricing__cards[data-included]
+    > .pricing__included {
+    justify-self: center;
+  }
+
+  @container (min-width: 44rem) {
+    :global(.lp[data-lp-style='soft'])
+      .pricing[data-layout='cards']
+      .pricing__cards[data-included] {
+      --_track: min(
+        (var(--lp-column) - var(--_split-gap)) * 5 / 11,
+        var(--lp-measure-lead) * var(--lp-measure-unit) + var(--space-16)
+      );
+      grid-template-columns: var(--_track) minmax(0, max-content);
+      justify-content: center;
+    }
   }
 
   .pricing__note,
@@ -259,6 +319,40 @@
     }
   }
 
+  /* One way in beside what it holds (Codex-61zsk.73). Narrow, the list sits
+     under the card at the card's measure, card first as a phone reads them.
+     Across, the card takes five parts to the list's six, and the card's
+     width (`--_track`, its name's room) is its share of the column. */
+  .pricing__cards[data-included] {
+    --_split-gap: calc(var(--lp-gap) * 1.25);
+  }
+
+  /* The heading's room is the column it sits in: the card's, until the list
+     has a column of its own. */
+  .pricing__included {
+    --lp-title-column: var(--_track, var(--lp-column));
+    display: grid;
+    align-content: start;
+    gap: var(--space-4);
+  }
+
+  @container (min-width: 44rem) {
+    .pricing__cards[data-included] {
+      --_track: calc((var(--lp-column) - var(--_split-gap)) * 5 / 11);
+      grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+      column-gap: var(--_split-gap);
+      align-items: start;
+      max-inline-size: none;
+    }
+
+    /* Its heading level with the card's name: the card's own inset
+       (OfferCard's `--_pad` and border). */
+    .pricing__cards[data-included] > .pricing__included {
+      --lp-title-column: calc((var(--lp-column) - var(--_split-gap)) * 6 / 11);
+      padding-block-start: calc(var(--space-6) + var(--lp-border));
+    }
+  }
+
   /* ── focus ─────────────────────────────────────────────────────────────── */
   .pricing__focus {
     --_track: var(--lp-column);
@@ -290,7 +384,8 @@
     gap: var(--space-3);
   }
 
-  .pricing__others-label {
+  .pricing__others-label,
+  .pricing__included-label {
     margin: 0;
     color: var(--lp-ink-soft);
     font-size: var(--lp-size-small);
@@ -361,6 +456,26 @@
     gap: var(--space-2);
   }
 
+  /* What's included along the strip (Codex-61zsk.73): under a rule of the
+     Style's own weight (`--lp-rule`: Poster's thick print, Bold's heavier
+     one), its label and then its lines. Where two cards would sit side by
+     side the lines run in a row that wraps, so the band stays a strip rather
+     than growing a column; narrower, a row breaks raggedly, so they keep the
+     list's one to a line. */
+  .pricing__included[data-form='strip'] {
+    gap: var(--space-3);
+    padding-block-start: var(--space-4);
+    border-block-start: var(--lp-rule) var(--border-style) var(--lp-line);
+  }
+
+  @container (min-width: 44rem) {
+    .pricing__included[data-form='strip'] :global(.lp-list) {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--space-2) var(--space-6);
+    }
+  }
+
   /* The head beside its price wherever its widest word fits there, and over
      it where it does not (03 X70). The head grows from nothing, so the
      narrowest it can be is its own longest word (a flex item's automatic
@@ -390,7 +505,8 @@
       column-gap: var(--lp-gap);
     }
 
-    .pricing[data-layout='band'] .pricing__others {
+    .pricing[data-layout='band'] .pricing__others,
+    .pricing[data-layout='band'] .pricing__included {
       flex-basis: 100%;
     }
   }

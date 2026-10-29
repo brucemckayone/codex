@@ -29,6 +29,7 @@ import { ObservabilityClient } from '@codex/observability';
 import { workerFetch } from '@codex/security';
 import type { Bindings } from '@codex/shared-types';
 import { type EnvName, buildServiceUrl as getServiceUrl } from '@codex/urls';
+import { runScheduledMoneyNoticesSweep } from './money-notices-sweep';
 
 /**
  * Default warning lead time — fire the email when an agreement is within
@@ -381,9 +382,9 @@ async function runScheduledAgreementExpiringSweep(
  * Top-level `scheduled()` dispatcher for the notifications-api Worker.
  *
  * Routes cron invocations by `controller.cron` so this Worker can host
- * multiple schedules (today: just `0 8 * * *` for the agreement-expiring
- * sweep; the original weekly-digest stub is left in place but currently
- * unwired).
+ * multiple schedules (today: just `0 8 * * *`, for the agreement-expiring
+ * sweep and then the money sweep; the original weekly-digest stub is left in
+ * place but currently unwired).
  *
  * Wraps the sweep in `waitUntil` with `.catch()` so a slow sweep doesn't
  * get killed mid-flight and an unexpected rejection doesn't crash the
@@ -401,13 +402,24 @@ export function dispatchScheduled(
 
   if (cronExpression === '0 8 * * *') {
     ctx.waitUntil(
-      runScheduledAgreementExpiringSweep(env).catch((error: unknown) => {
-        // runScheduledAgreementExpiringSweep already swallows its own
-        // errors and logs via ObservabilityClient — this .catch is the
-        // belt-and-braces guard against future refactors that drop the
-        // inner try/catch.
-        console.error('notifications-api scheduled waitUntil rejected', error);
-      })
+      runScheduledAgreementExpiringSweep(env)
+        .catch((error: unknown) => {
+          // runScheduledAgreementExpiringSweep already swallows its own
+          // errors and logs via ObservabilityClient — this .catch is the
+          // belt-and-braces guard against future refactors that drop the
+          // inner try/catch.
+          console.error(
+            'notifications-api scheduled waitUntil rejected',
+            error
+          );
+        })
+        // The money sweep (Codex-2hxff.34, .30) runs after the agreement
+        // sweep, on the same wake, and a failure in one never stops the
+        // other.
+        .then(() => runScheduledMoneyNoticesSweep(env))
+        .catch((error: unknown) => {
+          console.error('notifications-api money sweep rejected', error);
+        })
     );
     return;
   }

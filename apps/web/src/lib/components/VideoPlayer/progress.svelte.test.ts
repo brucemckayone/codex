@@ -123,4 +123,54 @@ describe('createProgressTracker — save attribution', () => {
 
     expect(updateLocalProgress).not.toHaveBeenCalled();
   });
+
+  test('a rebuilt stream reads 0 until it has its place: the place is saved, then the playhead', () => {
+    // A Retry after a network failure: the new stream knows its length
+    // before the player has seeked it back to where the old one stopped.
+    let resumePoint: number | null = 3012;
+    const media = fakeMedia(0, 5400);
+    const tracker = createProgressTracker({
+      getContentId: () => 'item-a',
+      getMedia: () => media,
+      getResumePoint: () => resumePoint,
+    });
+
+    tracker.save();
+    expect(updateLocalProgress).toHaveBeenLastCalledWith('item-a', 3012, 5400);
+    expect(updateLocalProgress).not.toHaveBeenCalledWith('item-a', 0, 5400);
+
+    media.currentTime = 3040;
+    resumePoint = null;
+    tracker.save();
+    expect(updateLocalProgress).toHaveBeenLastCalledWith('item-a', 3040, 5400);
+  });
+});
+
+describe('createProgressTracker — a silent reset', () => {
+  test('stops the 30s saves when the element empties without a pause, and play starts them again', () => {
+    vi.useFakeTimers();
+    try {
+      const media = fakeMedia(600, 5400);
+      const tracker = createProgressTracker({
+        getContentId: () => 'item-a',
+        getMedia: () => media,
+      });
+      tracker.attach();
+      media.dispatchEvent(new Event('play'));
+      vi.advanceTimersByTime(30_000);
+      expect(updateLocalProgress).toHaveBeenCalledTimes(1);
+
+      // A destroy or an error: the element resets and fires no `pause`.
+      media.dispatchEvent(new Event('emptied'));
+      vi.advanceTimersByTime(60 * 60_000);
+      expect(updateLocalProgress).toHaveBeenCalledTimes(1);
+
+      media.dispatchEvent(new Event('play'));
+      vi.advanceTimersByTime(30_000);
+      expect(updateLocalProgress).toHaveBeenCalledTimes(2);
+      tracker.detach();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
