@@ -2701,12 +2701,16 @@ export function createServerApi(
        * - mediaType: 'video' | 'audio' (optional)
        * - sortBy: 'createdAt' | 'uploadedAt' | 'title' (optional)
        * - sortOrder: 'asc' | 'desc' (optional)
+       *
+       * Each row also carries its poster's CDN URL, or null with none: the
+       * route resolves `thumbnailKey` (workers/content-api/src/routes/media.ts).
        */
       list: (params?: URLSearchParams) =>
-        request<PaginatedListResponse<MediaItemWithRelations>>(
-          'content',
-          `/api/media${params ? `?${params}` : ''}`
-        ),
+        request<
+          PaginatedListResponse<
+            MediaItemWithRelations & { thumbnailUrl: string | null }
+          >
+        >('content', `/api/media${params ? `?${params}` : ''}`),
 
       /**
        * Get a single media item by ID

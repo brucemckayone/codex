@@ -26,7 +26,8 @@ export type RailControlId =
   | 'logo'
   | 'hero-text'
   | 'hero-layout'
-  | 'hero-effects';
+  | 'hero-effects'
+  | 'hero-film';
 
 export interface RailControlMeta {
   readonly id: RailControlId;
@@ -176,6 +177,15 @@ export const RAIL_GROUPS: readonly RailGroupMeta[] = [
           'canvas',
         ],
         affects: ['Hero background'],
+      },
+      {
+        // The org's intro film (Codex-376dl): picked from the creator's
+        // library, played from a chip in the landing hero.
+        id: 'hero-film',
+        label: 'Film',
+        icon: '▶',
+        keywords: ['film', 'intro', 'video', 'trailer'],
+        affects: ['Hero section'],
       },
     ],
   },

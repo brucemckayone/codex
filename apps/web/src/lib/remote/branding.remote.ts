@@ -259,8 +259,9 @@ export const deleteLogo = command(z.string().uuid(), async (orgId) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Link a media item as the org's intro video.
- * Called after the frontend uploads the video via content-api's media pipeline.
+ * Pick one of the caller's finished videos as the org's intro film
+ * (Codex-376dl). The worker refuses audio, unfinished media and another
+ * user's video. The studio's read of the film rides back with the answer.
  */
 export const linkIntroVideo = command(
   z.object({ orgId: z.string().uuid(), mediaItemId: z.string().uuid() }),
@@ -270,6 +271,12 @@ export const linkIntroVideo = command(
 
     const result = await api.org.linkIntroVideo(orgId, mediaItemId);
     await invalidateCache(platform, orgId);
+
+    try {
+      await getIntroFilm(orgId).refresh();
+    } catch {
+      /* non-critical: the studio's read shows its own failure */
+    }
 
     return result;
   }
@@ -296,6 +303,12 @@ export const unlinkIntroVideo = command(z.string().uuid(), async (orgId) => {
 
   const result = await api.org.unlinkIntroVideo(orgId);
   await invalidateCache(platform, orgId);
+
+  try {
+    await getIntroFilm(orgId).refresh();
+  } catch {
+    /* non-critical: the studio's read shows its own failure */
+  }
 
   return result;
 });
