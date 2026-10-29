@@ -140,10 +140,14 @@ app.get(
     policy: { auth: 'required' },
     input: { query: mediaQuerySchema },
     handler: async (ctx) => {
-      const result = await ctx.services.media.list(
-        ctx.user.id,
-        ctx.input.query
-      );
+      // `list()` pages from its third argument only. Passed inside the
+      // filters, page and limit were ignored, so every call returned the
+      // newest 20 (Codex-9hh1n), as the content lists did (Codex-uuj1g).
+      const { page, limit, ...filters } = ctx.input.query;
+      const result = await ctx.services.media.list(ctx.user.id, filters, {
+        page,
+        limit,
+      });
       const cdnBase = ctx.env.R2_PUBLIC_URL_BASE;
       const items = result.items.map((item) => ({
         ...item,
