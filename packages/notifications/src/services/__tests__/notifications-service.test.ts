@@ -159,7 +159,8 @@ describe('NotificationsService', () => {
     expect(mockDbRaw.set).toHaveBeenCalledWith(
       expect.objectContaining({
         status: EMAIL_SEND_STATUS.FAILED,
-        error: 'Resend rejected: domain not verified',
+        error:
+          'Email provider reported failure: Resend rejected: domain not verified',
       })
     );
   });

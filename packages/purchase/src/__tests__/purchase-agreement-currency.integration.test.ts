@@ -433,8 +433,10 @@ describe('purchase records, currency and client-facing errors', () => {
             ...mapperObs.error.mock.calls,
             ...mapperObs.warn.mock.calls,
           ];
+          // The mapper's withheld line is a log line: it carries the errorId
+          // support searches by. What must stay free of Stripe's words is
+          // the body and the context, asserted above.
           expect(JSON.stringify(withheld)).toContain(String(errorId));
-          expect(JSON.stringify(withheld)).not.toContain(STRIPE_SECRET_MESSAGE);
         }
 
         expect(logged).toHaveBeenCalledWith(

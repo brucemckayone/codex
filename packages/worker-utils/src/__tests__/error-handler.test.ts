@@ -170,4 +170,35 @@ describe('createErrorHandler — the log names what actually failed', () => {
     );
     expect(body).not.toContain('not configured');
   });
+
+  // A drizzle query error's message ends with the bound params, so a wrapped
+  // one would put a user's token or email on this line.
+  it("names a query error's driver error on the line, never its params", async () => {
+    const obs = { error: vi.fn() };
+    const app = new Hono();
+    app.use('*', async (c, next) => {
+      c.set('obs' as never, obs as never);
+      await next();
+    });
+    app.onError(createErrorHandler('production'));
+    app.get('/boom', () => {
+      const query = Object.assign(
+        new Error('Failed query: select 1 where email = $1\nparams: a@x.com'),
+        { params: ['a@x.com'], cause: new Error('connection terminated') }
+      );
+      throw new InternalServiceError(
+        'An unexpected error occurred',
+        undefined,
+        {
+          cause: query,
+        }
+      );
+    });
+
+    await app.request('/boom');
+
+    const line = obs.error.mock.calls[0]?.[1] as { cause?: string };
+    expect(line.cause).toBe('Failed query: Error: connection terminated');
+    expect(JSON.stringify(line)).not.toContain('a@x.com');
+  });
 });

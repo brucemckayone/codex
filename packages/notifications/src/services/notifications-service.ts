@@ -4,7 +4,7 @@ import {
   BrandingSettingsService,
   ContactSettingsService,
 } from '@codex/platform-settings';
-import { BaseService } from '@codex/service-errors';
+import { BaseService, describeThrown } from '@codex/service-errors';
 import { z } from '@codex/validation';
 import { eq } from 'drizzle-orm';
 import {
@@ -43,14 +43,17 @@ const DEFAULT_RETRY_CONFIG: RetryConfig = {
 };
 
 /**
- * What actually failed, for the log and the audit row: the provider's own
- * words, which a send failure keeps on its `cause`, never on its message.
+ * What actually failed, for the log and the audit row: the error's message
+ * and then its cause, where a send failure keeps the provider's own words.
+ * Both, because this runs on whatever a provider throws, not only the
+ * wrapper sendWithRetry builds.
  */
 function failureReason(error: unknown): string {
-  const cause = error instanceof Error ? error.cause : undefined;
-  if (cause instanceof Error) return cause.message;
-  if (cause !== undefined) return String(cause);
-  return error instanceof Error ? error.message : String(error);
+  if (!(error instanceof Error)) return describeThrown(error);
+  const { cause } = error;
+  if (cause === undefined) return error.message;
+  const detail = cause instanceof Error ? cause.message : describeThrown(cause);
+  return `${error.message}: ${detail}`;
 }
 
 interface SendEmailParams {
@@ -410,7 +413,7 @@ export class NotificationsService extends BaseService {
           throw new InternalServiceError(
             'Email provider reported failure',
             undefined,
-            { cause: new Error(result.error ?? 'No reason given') }
+            { cause: new Error(result.error || 'No reason given') }
           );
         }
 

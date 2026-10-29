@@ -159,6 +159,18 @@ describe('redactSensitiveData', () => {
       });
     });
 
+    // A query error's message lists its params, so one string can hold an
+    // address twice: as a column value and again in a JSON payload.
+    it('redacts every address in a string, not only the first', () => {
+      const redacted = redactSensitiveData(
+        { cause: 'params: a@x.com, b@y.org, {"email":"a@x.com"}' },
+        { redactEmails: true }
+      );
+      expect(redacted).toEqual({
+        cause: 'params: [REDACTED], [REDACTED], {"email":"[REDACTED]"}',
+      });
+    });
+
     it('should not redact emails when disabled', () => {
       const data = {
         email: 'user@example.com',

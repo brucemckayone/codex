@@ -138,8 +138,9 @@ describe('ButtonBlock: join (the default)', () => {
   });
 
   // The canvas pins `purchasable` true, so a course with no way in still
-  // draws "Join now" there. pricingView calls that course unavailable since
-  // Codex-36vjw, and the note keyed on 'unpriced' alone went quiet for it.
+  // draws "Join now" there. The Pricing section draws it closed (PricingBlock,
+  // Codex-36vjw); the Button keeps its note, as pricingView still calls the
+  // course unpriced here.
   it('on the canvas, a course with no way in still says where the price will come from', async () => {
     await render({ offer: 'unavailable', edit: editing, pinned: true });
     expect(button()?.textContent).toContain(BUTTON_COPY.noPrice);

@@ -12,6 +12,7 @@ import {
   requireAuth,
   securityHeaders,
 } from '@codex/security';
+import { describeThrown } from '@codex/service-errors';
 import type { Bindings, HonoEnv } from '@codex/shared-types';
 
 import { generateRequestId, getClientIP } from './procedure/helpers';
@@ -470,9 +471,7 @@ export function createErrorHandler(environment?: string) {
     // being the client's: the HLS proxies' R2SigningError ("proxy is not
     // configured") reaches here with no other log line (Codex-7ed5z).
     const cause =
-      err.cause instanceof Error
-        ? `${err.cause.name}: ${err.cause.message}`
-        : undefined;
+      err.cause === undefined ? undefined : describeThrown(err.cause);
     const code =
       'code' in err && typeof err.code === 'string' ? err.code : undefined;
     obs?.error('Unhandled error', {

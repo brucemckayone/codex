@@ -8,15 +8,14 @@
 import { ERROR_CODES, STATUS_CODES } from '@codex/constants';
 import { ObservabilityClient } from '@codex/observability';
 
-// Strict redaction whatever the environment: a caller with no request obs
-// gets this client, and it logs withheld 5xx context (Codex-adcgb).
-const fallbackObs = new ObservabilityClient('error-mapper', 'development', {
-  mode: 'hash',
-  redactEmails: true,
-});
+// The production client, whatever the environment: a caller with no request
+// obs gets this one, and it logs withheld 5xx context (Codex-adcgb), so it
+// hashes and redacts emails, and writes JSON that Workers Logs can query.
+const fallbackObs = new ObservabilityClient('error-mapper', 'production');
 
 import { ZodError } from 'zod';
 import { type ErrorStatusCode, isServiceError } from './base-errors';
+import { describeThrown } from './describe-thrown';
 
 /**
  * Standard HTTP error response structure
@@ -120,8 +119,8 @@ export function mapErrorToResponse(
         // the client already has it.
         message: error.message,
         context: error.context,
-        ...(error.cause instanceof Error && {
-          cause: `${error.cause.name}: ${error.cause.message}`,
+        ...(error.cause !== undefined && {
+          cause: describeThrown(error.cause),
         }),
       };
       // A 503 is a "try again" its throw site expects; a 500 is a fault.

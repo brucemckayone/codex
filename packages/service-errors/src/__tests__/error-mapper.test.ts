@@ -114,7 +114,7 @@ describe('mapErrorToResponse: a 5xx ServiceError', () => {
     );
   });
 
-  it('names the root cause on the withheld line, when the error has one', () => {
+  it('names its cause on the withheld line, when the error has one', () => {
     const { error, obs } = stubObs();
 
     mapErrorToResponse(
@@ -129,6 +129,24 @@ describe('mapErrorToResponse: a 5xx ServiceError', () => {
     expect(error).toHaveBeenCalledWith(
       'Server error context withheld from response',
       expect.objectContaining({ cause: 'TypeError: connection refused' })
+    );
+  });
+
+  it('names a cause that is not an Error too', () => {
+    const { error, obs } = stubObs();
+
+    mapErrorToResponse(
+      new InternalServiceError(
+        'Email send failed',
+        { attempt: 3 },
+        { cause: { statusCode: 500 } }
+      ),
+      { obs }
+    );
+
+    expect(error).toHaveBeenCalledWith(
+      'Server error context withheld from response',
+      expect.objectContaining({ cause: '{"statusCode":500}' })
     );
   });
 
