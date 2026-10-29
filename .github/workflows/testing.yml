@@ -93,6 +93,9 @@ jobs:
   # a branch any more (Codex-75m0t.2).
   cleanup-stale-branches:
     runs-on: ubuntu-latest
+    # About 2x the p95 of 40 green runs (0.2 min). The default is 360,
+    # so a wedged job could hold the PR for six hours (Codex-j7x4u).
+    timeout-minutes: 10
     steps:
       - name: Install neonctl
         run: npm i -g neonctl@2
@@ -111,6 +114,9 @@ jobs:
           # hard-cancelled run. Keep this ABOVE the max run duration: lowering
           # it below an in-flight branch's lifetime reintroduces the
           # cross-workflow deletion race documented on the job above.
+          # migration-check (the one job that forks a branch) has
+          # `timeout-minutes: 10`, far below this. Change the two together
+          # (Codex-j7x4u).
           STALE_THRESHOLD_SECONDS=7200
 
           echo "Listing all branches..."
@@ -155,6 +161,9 @@ jobs:
 
   changes:
     runs-on: ubuntu-latest
+    # About 2x the p95 of 40 green runs (0.2 min). The default is 360,
+    # so a wedged job could hold the PR for six hours (Codex-j7x4u).
+    timeout-minutes: 10
     outputs:
       # The COMMON tier. Any file under packages/ sets this, and it is the ONLY
       # term in worker-tests' COMMON_CHANGED. See the comment on the filter
@@ -334,6 +343,10 @@ jobs:
       (needs.changes.outputs.migrations == 'true' ||
        needs.changes.outputs.workflows == 'true')
     runs-on: ubuntu-latest
+    # This job forks a Neon branch, so it must end well before
+    # cleanup-stale-branches counts that branch stale (STALE_THRESHOLD_SECONDS,
+    # 2h). Change the two together. The p95 of 40 green runs is 1.1 min (Codex-j7x4u).
+    timeout-minutes: 10
     environment: test
     outputs:
       branch_id: ${{ steps.create-branch.outputs.branch_id }}
@@ -399,6 +412,9 @@ jobs:
   test:
     needs: [changes, static-analysis]  # Both must pass before running tests
     runs-on: ubuntu-latest
+    # About 2x the p95 of 40 green runs (12.9 min). The default is 360,
+    # so a wedged job could hold the PR for six hours (Codex-j7x4u).
+    timeout-minutes: 30
     # Use test environment for environment-specific secrets and variables
     environment: test
     strategy:
@@ -567,6 +583,9 @@ jobs:
     # before expensive tests. Default `success()`: both must have passed.
     needs: [changes, static-analysis]
     runs-on: ubuntu-latest
+    # About 2x the p95 of 40 green runs (4.1 min). The default is 360,
+    # so a wedged job could hold the PR for six hours (Codex-j7x4u).
+    timeout-minutes: 15
     environment: test
     # The test database — see "THE TEST DATABASE" at the top of this file.
     # Same block as the `test` job; keep the four copies in step. Services
@@ -852,6 +871,9 @@ jobs:
     # Runs in parallel with e2e-tests (web)
     needs: [static-analysis]
     runs-on: ubuntu-latest
+    # About 2x the p95 of 40 green runs (8.3 min). The default is 360,
+    # so a wedged job could hold the PR for six hours (Codex-j7x4u).
+    timeout-minutes: 20
     environment: test
     # The test database — see "THE TEST DATABASE" at the top of this file.
     # Same block as the `test` job; keep the four copies in step.
@@ -1056,6 +1078,9 @@ jobs:
        needs.changes.outputs.shared-types == 'true' ||
        needs.changes.outputs.workflows == 'true')
     runs-on: ubuntu-latest
+    # About 2x the p95 of 40 green runs (42.4 min). The default is 360,
+    # so a wedged job could hold the PR for six hours (Codex-j7x4u).
+    timeout-minutes: 90
     environment: test
     # The test database — see "THE TEST DATABASE" at the top of this file.
     # Same block as the `test` job; keep the four copies in step. Nine
@@ -1434,7 +1459,11 @@ jobs:
             echo "::error::Dead worker(s):$dead. Not running E2E; see worker-logs artifact."
             exit 1
           fi
-          pnpm test:e2e
+          # Stream, not turbo's grouped default: grouped holds the task's
+          # output until it ends, so a hung suite printed nothing for 115 min
+          # (Codex-j7x4u). With playwright.config.ts's `line` reporter and
+          # its CI globalTimeout, a hang now shows where it stopped.
+          pnpm test:e2e --log-order=stream
 
       # Run visual tests with --update-snapshots to generate Linux baselines
       # TODO: Remove --update-snapshots after committing the generated snapshots
@@ -1631,6 +1660,9 @@ jobs:
   cleanup-neon-branches:
     name: Cleanup Neon Branches
     runs-on: ubuntu-latest
+    # About 2x the p95 of 40 green runs (0.3 min). The default is 360,
+    # so a wedged job could hold the PR for six hours (Codex-j7x4u).
+    timeout-minutes: 10
     needs: [migration-check]
     # `always()` on purpose — it MUST run during cancellation. Skipped with
     # `migration-check`, since then there is no branch to clean up.
