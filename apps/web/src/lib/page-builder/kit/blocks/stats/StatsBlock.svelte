@@ -108,10 +108,22 @@
   }
 
   /* ── the figures ───────────────────────────────────────────────────────── */
+  /* A label is a list's item, at the section's item size. Each cell is a
+     query container (below), so the token's `cqi` read in a cell would
+     measure the cell and hold the size at its floor at every width. The list
+     is no container, so it reads the section, and a registered length
+     carries what it read down to the labels as a length. */
+  @property --_stat-label {
+    syntax: '<length>';
+    inherits: true;
+    initial-value: 0px;
+  }
+
   /* Always the column's full width: its cells are size containers, so they
      have no width of their own, and a centred (shrink-to-fit) list would
      collapse to nothing. */
   .stats__list {
+    --_stat-label: var(--lp-size-item);
     --_cols: 2;
     --_gap: var(--space-8);
     justify-self: stretch;
@@ -153,7 +165,7 @@
 
   .stat__label {
     max-inline-size: calc(26 * var(--lp-measure-unit));
-    font-size: var(--lp-size-small);
+    font-size: var(--_stat-label);
     line-height: var(--lp-leading-body);
     color: var(--lp-ink-soft);
   }

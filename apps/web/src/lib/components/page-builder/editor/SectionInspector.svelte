@@ -31,6 +31,7 @@
     type KitPage,
     type KitSection,
     OWN_BACKDROP,
+    pricingView,
     resolveGroundBands,
     resolveLayout,
     resolveScheme,
@@ -40,6 +41,8 @@
     resolveStyle,
     SIMPLE_SECTIONS,
   } from '$lib/page-builder/kit';
+  import { drawsIncluded } from '$lib/page-builder/kit/blocks/pricing/included';
+  import { courseFacts } from '$lib/page-builder/kit/model/facts';
   import { deriveOfferPaths } from '$lib/page-builder/offer-paths';
   import type { OfferChoices } from './offer-field';
   import { orgGrounds, orgShader } from '$lib/page-builder/org-grounds';
@@ -52,6 +55,7 @@
   import { fieldsForLayout, sameValue } from './field-values';
   import FocalPointField from './FocalPointField.svelte';
   import ImageField from './ImageField.svelte';
+  import IncludedField from './IncludedField.svelte';
   import LayoutPicker from './LayoutPicker.svelte';
   import { sectionIcon } from './outline';
   import SchemeSwatches from './SchemeSwatches.svelte';
@@ -232,6 +236,16 @@
   const offerPaths: OfferChoices = $derived(
     offerRead === 'read' ? deriveOfferPaths(context.offer, context.course) : offerRead
   );
+  // Pricing's "What's included" (Codex-61zsk.73): the course counted as the
+  // canvas counts it, and whether the offer draws the list there.
+  const included = $derived(
+    section.type === 'pricing'
+      ? {
+          facts: courseFacts(context.stages),
+          shown: drawsIncluded(pricingView(context, section.props).paths.length),
+        }
+      : null
+  );
 
   function writeProp(key: string, value: unknown): void {
     // Deleted by the time a slow write arrived: there is nothing to write to.
@@ -393,6 +407,14 @@
             {offerPaths}
           />
         {/each}
+        {#if included}
+          <IncludedField
+            value={valueOf('included')}
+            facts={included.facts}
+            shown={included.shown}
+            onChange={(next) => writeProp('included', next)}
+          />
+        {/if}
       </div>
     </section>
   {/if}

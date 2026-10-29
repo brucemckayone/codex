@@ -51,6 +51,9 @@ interface RecordedCall {
   srcAttrAtCall: string | null;
   /** How many times `pause()` had been called by then. */
   pauseCountAtCall: number;
+  /** What `hls.ts` calls when the stream fails for good, or expires. */
+  onError?: (message: string, kind: string, at: number) => void;
+  onUrlExpired?: (at: number) => void;
 }
 let recorded: RecordedCall[] = [];
 const destroyedInstances: string[] = [];
@@ -61,11 +64,21 @@ const loadSpy = vi.fn();
 
 vi.mock('$lib/components/VideoPlayer/hls', () => ({
   createHlsPlayer: vi.fn(
-    async ({ media, src }: { media: HTMLMediaElement; src: string }) => {
+    async ({
+      media,
+      src,
+      onError,
+      onUrlExpired,
+    }: Pick<RecordedCall, 'onError' | 'onUrlExpired'> & {
+      media: HTMLMediaElement;
+      src: string;
+    }) => {
       recorded.push({
         src,
         srcAttrAtCall: media.getAttribute('src'),
         pauseCountAtCall: pauseSpy.mock.calls.length,
+        onError,
+        onUrlExpired,
       });
       if (hlsMode === 'native') {
         // Mirrors attachNative(): the manifest goes straight on the element.
@@ -309,22 +322,217 @@ describe('AudioPlayer — moving between course items', () => {
   });
 });
 
+/**
+ * The page's access load re-runs on every tab return and on the org version
+ * poll, signing the same item again. hls.js 1.6.15's `loadSource()` would
+ * restart the stream at 0:00, paused (mirrors VideoPlayer), so a live stream
+ * is left alone.
+ */
 describe('AudioPlayer — same item, freshly signed URL', () => {
-  test('swaps the manifest under the playhead instead of restarting', async () => {
+  test('leaves a live stream alone: no loadSource, no rebuild, no pause', async () => {
     hlsMode = 'mse';
     const { component, props } = await mountPlayer();
 
-    // Follow / subscribe unlock: the access flow re-runs and returns a new
-    // signed URL for the SAME content. This must NOT stop playback.
     props.src = 'https://cdn.test/item-a/resigned.m3u8';
     flushSync();
-    await vi.waitFor(() =>
-      expect(loadSourceCalls).toContain('https://cdn.test/item-a/resigned.m3u8')
-    );
+    await Promise.resolve();
 
-    expect(recorded).toHaveLength(1); // no rebuild
+    expect(loadSourceCalls).toHaveLength(0);
+    expect(recorded).toHaveLength(1);
     expect(destroyedInstances).toHaveLength(0);
     expect(pauseSpy).not.toHaveBeenCalled();
+
+    unmount(component);
+  });
+
+  test('rebuilds an errored player at the place it kept, not 0:00', async () => {
+    hlsMode = 'mse';
+    const { component, props } = await mountPlayer();
+    const el = audioElement();
+    Object.defineProperty(el, 'duration', { configurable: true, value: 3600 });
+    Object.defineProperty(el, 'currentTime', {
+      configurable: true,
+      writable: true,
+      value: 0,
+    });
+
+    recorded[0]?.onError?.(
+      'This could not be loaded. Please try again.',
+      'network',
+      2420
+    );
+    flushSync();
+    props.src = 'https://cdn.test/item-a/resigned.m3u8';
+    flushSync();
+    await vi.waitFor(() => expect(recorded).toHaveLength(2));
+    el.dispatchEvent(new Event('loadedmetadata'));
+
+    expect(el.currentTime).toBe(2420);
+    el.currentTime = 2500;
+    el.dispatchEvent(new Event('pause'));
+    expect(updateLocalProgress).toHaveBeenLastCalledWith('item-a', 2500, 3600);
+
+    unmount(component);
+  });
+});
+
+/**
+ * A rebuilt stream keeps the listener's place (mirrors VideoPlayer). `hls.ts`
+ * destroys a failed or expired stream, which resets the element to 0, so it
+ * reads the playhead first and passes it on (`at`); the progress tracker
+ * saves that place until the rebuilt stream has it, never the reset 0.
+ */
+describe('AudioPlayer — a rebuilt stream keeps the listener’s place', () => {
+  /** The element after the helper's destroy: back at 0, its length known again once rebuilt. */
+  function resetElement(el: HTMLAudioElement) {
+    Object.defineProperty(el, 'duration', { configurable: true, value: 3600 });
+    Object.defineProperty(el, 'currentTime', {
+      configurable: true,
+      writable: true,
+      value: 0,
+    });
+  }
+
+  test('Retry after a network failure resumes where it failed; no save writes 0 meanwhile', async () => {
+    const { component } = await mountPlayer();
+    const el = audioElement();
+    resetElement(el);
+
+    recorded[0]?.onError?.(
+      'This could not be loaded. Please try again.',
+      'network',
+      2420
+    );
+    flushSync();
+    document.body
+      .querySelector<HTMLButtonElement>('.audio-player__error-retry')
+      ?.click();
+    await vi.waitFor(() => expect(recorded).toHaveLength(2));
+
+    el.dispatchEvent(new Event('pause'));
+    expect(updateLocalProgress).toHaveBeenLastCalledWith('item-a', 2420, 3600);
+    expect(updateLocalProgress).not.toHaveBeenCalledWith('item-a', 0, 3600);
+    el.dispatchEvent(new Event('loadedmetadata'));
+    expect(el.currentTime).toBe(2420);
+
+    unmount(component);
+  });
+
+  test('an expiry resumes where the helper read the playhead, not the reset 0', async () => {
+    const { component } = await mountPlayer();
+    const el = audioElement();
+    resetElement(el);
+
+    recorded[0]?.onUrlExpired?.(845);
+    await vi.waitFor(() => expect(recorded).toHaveLength(2));
+    el.dispatchEvent(new Event('loadedmetadata'));
+    expect(el.currentTime).toBe(845);
+
+    unmount(component);
+  });
+
+  test('a failure while playing stops the renewal and the mirror; Retry plays on at its place', async () => {
+    const play = vi.mocked(HTMLMediaElement.prototype.play);
+    const { component } = await mountPlayer();
+    const el = audioElement();
+    resetElement(el);
+
+    el.dispatchEvent(new Event('play'));
+    recorded[0]?.onError?.(
+      'This could not be loaded. Please try again.',
+      'network',
+      1200
+    );
+    flushSync();
+
+    play.mockClear();
+    document.body
+      .querySelector<HTMLButtonElement>('.audio-player__error-retry')
+      ?.click();
+    await vi.waitFor(() => expect(recorded).toHaveLength(2));
+    el.dispatchEvent(new Event('loadedmetadata'));
+    expect(el.currentTime).toBe(1200);
+    expect(play).toHaveBeenCalledTimes(1);
+
+    unmount(component);
+  });
+
+  test('a play under the error card is refused, and the player keys stand aside', async () => {
+    const play = vi.mocked(HTMLMediaElement.prototype.play);
+    const { component } = await mountPlayer();
+    recorded[0]?.onError?.(
+      'This could not be loaded. Please try again.',
+      'network',
+      300
+    );
+    flushSync();
+    pauseSpy.mockClear();
+
+    // Media keys press play on the dead element.
+    audioElement().dispatchEvent(new Event('play'));
+    expect(pauseSpy).toHaveBeenCalled();
+
+    // Space on a focused Try Again is the button's, not the player's
+    // play/pause, which would call play() under the card.
+    const retry = document.body.querySelector<HTMLButtonElement>(
+      '.audio-player__error-retry'
+    );
+    retry?.focus();
+    play.mockClear();
+    const space = new KeyboardEvent('keydown', {
+      key: ' ',
+      bubbles: true,
+      cancelable: true,
+    });
+    retry?.dispatchEvent(space);
+    expect(space.defaultPrevented).toBe(false);
+    expect(play).not.toHaveBeenCalled();
+
+    unmount(component);
+  });
+
+  test('a 403 on a renewed stream before it plays is a refusal: no second ask', async () => {
+    const { component } = await mountPlayer();
+    const el = audioElement();
+    resetElement(el);
+
+    recorded[0]?.onUrlExpired?.(845);
+    await vi.waitFor(() => expect(recorded).toHaveLength(2));
+    recorded[1]?.onUrlExpired?.(0);
+    flushSync();
+    await Promise.resolve();
+
+    expect(recorded).toHaveLength(2);
+    expect(
+      document.body.querySelector('.audio-player__error-retry')
+    ).not.toBeNull();
+
+    unmount(component);
+  });
+
+  test('a renewal of PLAYING audio plays on once it lands; paused audio stays paused', async () => {
+    const play = vi.mocked(HTMLMediaElement.prototype.play);
+    const { component } = await mountPlayer();
+    const el = audioElement();
+    resetElement(el);
+
+    el.dispatchEvent(new Event('play'));
+    play.mockClear();
+    recorded[0]?.onUrlExpired?.(845);
+    await vi.waitFor(() => expect(recorded).toHaveLength(2));
+    el.dispatchEvent(new Event('loadedmetadata'));
+    expect(el.currentTime).toBe(845);
+    expect(play).toHaveBeenCalledTimes(1);
+    // It plays: from here a 403 is an expiry again, not a refusal.
+    el.dispatchEvent(new Event('canplay'));
+
+    el.dispatchEvent(new Event('pause'));
+    play.mockClear();
+    recorded[1]?.onUrlExpired?.(900);
+    await vi.waitFor(() => expect(recorded).toHaveLength(3));
+    el.dispatchEvent(new Event('loadedmetadata'));
+    expect(el.currentTime).toBe(900);
+    expect(play).not.toHaveBeenCalled();
 
     unmount(component);
   });

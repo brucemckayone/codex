@@ -224,6 +224,7 @@ export interface SampleMedia {
   guidePortraitUrl?: string | null;
   intro?: PreviewMedia | null;
   reel?: PreviewMedia | null;
+  guideClip?: PreviewMedia | null;
 }
 
 export interface SampleContextOptions {
@@ -280,6 +281,7 @@ export function sampleContext(
     heroImageUrl: media.heroImageUrl ?? null,
     heroClip: media.heroClip ?? null,
     guidePortraitUrl: media.guidePortraitUrl ?? null,
+    guideClip: media.guideClip ?? null,
   };
   return {
     course,

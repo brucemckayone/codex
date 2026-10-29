@@ -149,14 +149,18 @@
           <h2 class="summary__cover-title">{summary.title}</h2>
         </div>
         <div class="summary__body">
-          <ul class="summary__list">
-            {#each summary.bullets as bullet (bullet)}
-              <li class="summary__item">
-                <span class="summary__mark">{@render spark()}</span>
-                <span>{bullet}</span>
-              </li>
-            {/each}
-          </ul>
+          <!-- Facts only (`deriveCourseSummary`): a course with nothing to
+               count yet has no list, never an empty one. -->
+          {#if summary.bullets.length > 0}
+            <ul class="summary__list">
+              {#each summary.bullets as bullet (bullet)}
+                <li class="summary__item">
+                  <span class="summary__mark">{@render spark()}</span>
+                  <span>{bullet}</span>
+                </li>
+              {/each}
+            </ul>
+          {/if}
           <p class="summary__taste">
             Meet the practice before you decide.
             <a href={salesUrl}>Watch the intro →</a>
@@ -486,6 +490,13 @@
     font-size: var(--text-sm);
     line-height: var(--leading-normal);
     color: var(--color-text-tertiary);
+  }
+
+  /* With no facts to list, there is nothing above it to rule off. */
+  .summary__taste:first-child {
+    margin-block-start: 0;
+    padding-block-start: 0;
+    border-block-start: none;
   }
 
   .summary__taste a {

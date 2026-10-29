@@ -513,6 +513,10 @@ describe('completeness', () => {
     setJourneyStatus: 'proven in portals-lifecycle.remote.test.ts',
     duplicateJourney: 'proven in portals-manage.remote.test.ts',
     deleteJourney: 'proven in portals-manage.remote.test.ts',
+    // A command because each call mints a fresh token, but a PUBLIC read, not
+    // a studio write: the worker answers null unless the course is that org's.
+    requestCourseFilm:
+      'public film minter (owner P10) — proven in lib/remote/journeys-course-film.remote.test.ts',
   };
 
   it('covers every command() and form() the module exports', async () => {

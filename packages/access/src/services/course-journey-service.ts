@@ -115,6 +115,7 @@ import {
 } from './course-payouts';
 import { pageRevision } from './page-revision';
 import { resolvePracticeThumbnail } from './practice-thumbnail';
+import { findPreviewOnlyMedia, fullFilmEligible } from './sales-films';
 
 /**
  * Narrow a stored `content.contentType` varchar to the practice union. The DB
@@ -771,6 +772,11 @@ export class CourseJourneyService extends BaseService {
    * `content-api/routes/r2-public-urls.ts`); NO R2 signing is ever involved. A clip is `null` when the course has no such
    * media, its preview has not transcoded (`hlsPreviewKey` null), or no CDN base
    * is configured. Returns `null` when the course is not published/non-deleted.
+   *
+   * The intro, reel and guide clips also say whether their FULL film may be
+   * asked for (`fullFilm`, owner P10; `sales-films.ts`). A hint only: the full
+   * stream is minted, and re-checked, per press. This read is uncached (no KV
+   * slot, and the page is `private`), so the hint is as fresh as the load.
    */
   async getCourseSellPreview(
     courseId: string,
@@ -779,6 +785,8 @@ export class CourseJourneyService extends BaseService {
     try {
       const [courseRow] = await this.db
         .select({
+          // The org a film's creator must still belong to (owner P10).
+          organizationId: courses.organizationId,
           introVideoMediaId: courses.introVideoMediaId,
           previewVideoMediaId: courses.previewVideoMediaId,
           guideVideoMediaId: courses.guideVideoMediaId,
@@ -826,6 +834,7 @@ export class CourseJourneyService extends BaseService {
           hlsPreviewKey: string | null;
           thumbnailKey: string | null;
           durationSeconds: number | null;
+          fullFilm: boolean;
         }
       >();
 
@@ -836,6 +845,16 @@ export class CourseJourneyService extends BaseService {
             hlsPreviewKey: mediaItems.hlsPreviewKey,
             thumbnailKey: mediaItems.thumbnailKey,
             durationSeconds: mediaItems.durationSeconds,
+            // Owner P10 ("Full film unless it's paid"): may this media's FULL
+            // film stream from this course? This course's published row is
+            // rule (a); `fullFilmEligible` is the minter's own predicate for
+            // the rest, so the flag and the gate cannot drift. Projected here,
+            // in the read the page already makes, rather than a second one.
+            // ADVISORY: the minter re-checks on every press.
+            fullFilm: sql<boolean>`CASE WHEN ${fullFilmEligible(
+              this.db,
+              courseRow.organizationId
+            )} THEN true ELSE false END`,
           })
           .from(mediaItems)
           .where(inArray(mediaItems.id, mediaIds));
@@ -857,6 +876,18 @@ export class CourseJourneyService extends BaseService {
         };
       };
 
+      // A film a press can ask for (intro, reel, guide): its clip, saying
+      // whether the full film may be asked for. The hero's loop is `toClip`
+      // alone: it plays muted, so it never asks.
+      const toFilm = (mediaId: string | null): CourseSellPreviewClip | null => {
+        const clip = toClip(mediaId);
+        if (!clip || !mediaId) return clip;
+        return {
+          ...clip,
+          fullFilm: previewByMediaId.get(mediaId)?.fullFilm === true,
+        };
+      };
+
       // Resolve one media id → a public STILL. The portrait is a `media_items`
       // ref, and `media_items` is CHECK-constrained to video/audio, so the still
       // the creator picked is the item's `thumbnailKey` — NOT `hlsPreviewKey`,
@@ -869,13 +900,13 @@ export class CourseJourneyService extends BaseService {
       };
 
       return {
-        intro: toClip(courseRow.introVideoMediaId),
-        reel: toClip(courseRow.previewVideoMediaId),
+        intro: toFilm(courseRow.introVideoMediaId),
+        reel: toFilm(courseRow.previewVideoMediaId),
         // Contract amendment A15: both guide slots were WRITE-ONLY codebase-wide
         // — the builder's pickers persisted them and no public read projected
         // them, so the guide section could never show a portrait or a clip.
         guidePortraitUrl: toStill(guidePortraitMediaId),
-        guideClip: toClip(courseRow.guideVideoMediaId),
+        guideClip: toFilm(courseRow.guideVideoMediaId),
         // Contract amendment A27 (Codex-wqxv4) + A32 (Codex-490z7): the hero
         // image, resolved down A32's FALLBACK CHAIN, uploaded first:
         //
@@ -2989,11 +3020,14 @@ export class CourseJourneyService extends BaseService {
    * Org-scoped through {@link resolveCourseIdForPage} (a foreign, missing, or
    * non-course page 404s), then re-scoped on the course row itself as
    * defence-in-depth. `r2PublicUrlBase` is env-owned and supplied by the route.
+   * `viewerId` is the session user, whose own library the panel's
+   * preview-only set covers too (`previewOnlyMediaIds`, owner P10).
    */
   async getJourneySellMedia(
     organizationId: string,
     pageId: string,
-    r2PublicUrlBase?: string
+    r2PublicUrlBase?: string,
+    viewerId?: string
   ): Promise<JourneySellMedia> {
     try {
       const courseId = await this.resolveCourseIdForPage(
@@ -3001,27 +3035,34 @@ export class CourseJourneyService extends BaseService {
         pageId
       );
 
-      const [row] = await this.db
-        .select({
-          introVideoMediaId: courses.introVideoMediaId,
-          previewVideoMediaId: courses.previewVideoMediaId,
-          guideVideoMediaId: courses.guideVideoMediaId,
-          heroMediaId: courses.heroMediaId,
-          signatureMediaId: courses.signatureMediaId,
-          guide: courses.guide,
-          coverImageKey: courses.coverImageKey,
-          heroImageKey: courses.heroImageKey,
-          signatureImageKey: courses.signatureImageKey,
-        })
-        .from(courses)
-        .where(
-          and(
-            eq(courses.id, courseId),
-            eq(courses.organizationId, organizationId),
-            isNull(courses.deletedAt)
+      // Owner P10: the films a visitor sees only as the 30-second preview, for
+      // the panel's note, read beside the row rather than after it. This
+      // course's film slots plus, given the viewer, their own library (what the
+      // picker lists), so a pick not yet saved is named too.
+      const [[row], previewOnlyMediaIds] = await Promise.all([
+        this.db
+          .select({
+            introVideoMediaId: courses.introVideoMediaId,
+            previewVideoMediaId: courses.previewVideoMediaId,
+            guideVideoMediaId: courses.guideVideoMediaId,
+            heroMediaId: courses.heroMediaId,
+            signatureMediaId: courses.signatureMediaId,
+            guide: courses.guide,
+            coverImageKey: courses.coverImageKey,
+            heroImageKey: courses.heroImageKey,
+            signatureImageKey: courses.signatureImageKey,
+          })
+          .from(courses)
+          .where(
+            and(
+              eq(courses.id, courseId),
+              eq(courses.organizationId, organizationId),
+              isNull(courses.deletedAt)
+            )
           )
-        )
-        .limit(1);
+          .limit(1),
+        findPreviewOnlyMedia(this.db, { organizationId, courseId, viewerId }),
+      ]);
 
       if (!row) {
         throw new NotFoundError('Journey course not found');
@@ -3044,6 +3085,7 @@ export class CourseJourneyService extends BaseService {
           row.signatureImageKey,
           r2PublicUrlBase
         ),
+        previewOnlyMediaIds,
       };
     } catch (error) {
       this.handleError(error, 'getJourneySellMedia');

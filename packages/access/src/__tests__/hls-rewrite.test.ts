@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
   collectVariantSegments,
+  rewriteFilmMasterPlaylist,
   rewriteMasterPlaylist,
   rewriteVariantPlaylist,
 } from '../hls-rewrite';
-import { signHlsToken, verifyHlsToken } from '../hls-token';
+import {
+  signFilmToken,
+  signHlsToken,
+  verifyFilmToken,
+  verifyHlsToken,
+} from '../hls-token';
 
 const BASE = 'https://api.revelations.studio';
 const CONTENT_ID = '11111111-1111-4111-8111-111111111111';
@@ -248,5 +254,100 @@ describe('hls-token sign/verify', () => {
 
   it('rejects a malformed token (no separator)', async () => {
     expect(await verifyHlsToken('not-a-token', SECRET)).toBeNull();
+  });
+});
+
+describe('rewriteFilmMasterPlaylist (owner P10)', () => {
+  it('points each variant at the FILM variant proxy, keyed by course, token propagated', () => {
+    const courseId = '33333333-3333-4333-8333-333333333333';
+    const master = ['#EXTM3U', '720p/index.m3u8', '128k/index.m3u8', ''].join(
+      '\n'
+    );
+
+    const lines = rewriteFilmMasterPlaylist(master, {
+      contentApiBaseUrl: `${BASE}/`,
+      courseId,
+      token: TOKEN,
+    }).split('\n');
+
+    expect(lines[0]).toBe('#EXTM3U');
+    expect(lines[1]).toBe(
+      `${BASE}/api/access/courses/${courseId}/films/hls/720p/index.m3u8?token=tok.sig`
+    );
+    expect(lines[2]).toBe(
+      `${BASE}/api/access/courses/${courseId}/films/hls/128k/index.m3u8?token=tok.sig`
+    );
+  });
+});
+
+describe('film token sign/verify (owner P10)', () => {
+  const SECRET = 'test-worker-shared-secret';
+  const payload = {
+    courseId: '33333333-3333-4333-8333-333333333333',
+    creatorId: 'user_abc',
+    mediaId: '22222222-2222-4222-8222-222222222222',
+  };
+  const inTenMinutes = () => Math.floor(Date.now() / 1000) + 600;
+  const SIGNATURE = { ok: false, reason: 'signature' };
+  const MALFORMED = { ok: false, reason: 'malformed' };
+
+  it('verifies a freshly-signed film token', async () => {
+    const exp = inTenMinutes();
+    const token = await signFilmToken({ ...payload, exp }, SECRET);
+    expect(await verifyFilmToken(token, SECRET)).toEqual({
+      ok: true,
+      payload: { ...payload, exp },
+    });
+  });
+
+  it('a film token is NOT a content-stream token', async () => {
+    const token = await signFilmToken(
+      { ...payload, exp: inTenMinutes() },
+      SECRET
+    );
+    expect(await verifyHlsToken(token, SECRET)).toBeNull();
+  });
+
+  it('a content token (minted after a paid access decision) is NOT a film token', async () => {
+    const { courseId: _courseId, ...media } = payload;
+    const token = await signHlsToken({ ...media, exp: inTenMinutes() }, SECRET);
+    // Signed for the other domain: a signature refusal.
+    expect(await verifyFilmToken(token, SECRET)).toEqual(SIGNATURE);
+    // Not even with a course id forged into its payload: the signature binds
+    // the domain, and the payload with it.
+    const [, sig] = token.split('.');
+    const forged = btoa(JSON.stringify({ ...payload, exp: inTenMinutes() }))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+    expect(await verifyFilmToken(`${forged}.${sig}`, SECRET)).toEqual(
+      SIGNATURE
+    );
+  });
+
+  it('rejects another secret, an expired token, a missing course and a malformed token', async () => {
+    const live = await signFilmToken(
+      { ...payload, exp: inTenMinutes() },
+      SECRET
+    );
+    expect(await verifyFilmToken(live, 'wrong-secret')).toEqual(SIGNATURE);
+
+    const expired = await signFilmToken(
+      { ...payload, exp: Math.floor(Date.now() / 1000) - 1 },
+      SECRET
+    );
+    expect(await verifyFilmToken(expired, SECRET)).toEqual({
+      ok: false,
+      reason: 'expired',
+    });
+
+    const { courseId: _courseId, ...media } = payload;
+    const courseless = await signFilmToken(
+      { ...media, exp: inTenMinutes() } as Parameters<typeof signFilmToken>[0],
+      SECRET
+    );
+    expect(await verifyFilmToken(courseless, SECRET)).toEqual(MALFORMED);
+
+    expect(await verifyFilmToken('not-a-token', SECRET)).toEqual(MALFORMED);
   });
 });

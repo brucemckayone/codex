@@ -14,6 +14,13 @@
   its space while they load, and a clip adds a play button. Every field the
   creator filled shows in every layout.
 
+  The clip plays in the portrait's own frame in split and centred
+  (`InlineFilm`): letterboxed in the 4/5 or square frame, Soft's arch and
+  circle and Cinematic's fades lifting under the player (squared where
+  Cinematic squares the portrait). The quote has no frame to play in: its
+  button opens the theatre (`Watch`). Both ask for the full film where the
+  server allows one (`guide`).
+
   NO PORTRAIT (Codex-61zsk.37): split and centered hold its place with a
   medallion, public and canvas alike — the guide's initials in the display
   face, on the section's filled scheme, in the frame every Style already
@@ -31,6 +38,7 @@
   import ButtonRow from '../../primitives/ButtonRow.svelte';
   import Eyebrow from '../../primitives/Eyebrow.svelte';
   import Heading from '../../primitives/Heading.svelte';
+  import InlineFilm from '../../primitives/InlineFilm.svelte';
   import Text from '../../primitives/Text.svelte';
   import ClipFrame from '../video/ClipFrame.svelte';
   import Watch from '../video/Watch.svelte';
@@ -119,16 +127,21 @@
       <div class="guide__portrait" data-layout={layout}>
         <span class="lp-atmos guide__glow" aria-hidden="true"></span>
         {#if clip && play}
-          <ClipFrame
-            still={still(preview)}
-            srcset={getThumbnailSrcset(still(preview) ?? '')}
-            sizes={portraitSizes}
-            ratio="var(--_ratio)"
-            {alt}
-            {place}
-          >
-            <Watch {clip} label={watchLabel} {title} {edit} />
-          </ClipFrame>
+          <InlineFilm {clip} film="guide" label={watchLabel} {title} {edit}>
+            {#snippet children(control, player)}
+              <ClipFrame
+                still={still(preview)}
+                srcset={getThumbnailSrcset(still(preview) ?? '')}
+                sizes={portraitSizes}
+                ratio="var(--_ratio)"
+                {alt}
+                {place}
+                {player}
+              >
+                {@render control()}
+              </ClipFrame>
+            {/snippet}
+          </InlineFilm>
         {:else}
           <ClipFrame
             still={still(preview)}
@@ -168,7 +181,7 @@
       <Signoff {context} name={content.name} role={content.role} {edit} />
       {#await context.sellPreview then preview}
         {#if preview?.guideClip}
-          <Watch clip={preview.guideClip} label={watchLabel} {title} {edit} />
+          <Watch clip={preview.guideClip} film="guide" label={watchLabel} {title} {edit} />
         {:else if edit && !still(preview)}
           <p class="guide__prompt" data-lp-edit-only>{INSTRUCTOR_PROMPT}</p>
         {/if}
@@ -294,6 +307,12 @@
   :global(.lp[data-lp-style='cinematic']) .guide__portrait[data-layout='split'] :global(.lp-media) {
     border-radius: 0;
     mask-image: linear-gradient(to bottom, black 55%, transparent);
+  }
+
+  /* A film playing over a Cinematic portrait is square as the portrait is,
+     and unmasked: the fade would take its controls. */
+  :global(.lp[data-lp-style='cinematic']) .guide__portrait :global(.lp-film) {
+    border-radius: 0;
   }
 
   @container (min-width: 52rem) {

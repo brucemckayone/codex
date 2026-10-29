@@ -33,10 +33,22 @@
     margin: 0;
   }
 
+  /* A list's item size: a step under the guide's quote and name, a title or
+     more in the display face, so they still lead; a chip keeps the body's.
+     A column is at least ten of the list's own em, so a long word fits it at
+     the size each Type sets. */
   .creds[data-variant='ledger'] {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(min(100%, 12rem), 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 10em), 1fr));
     gap: var(--space-3) var(--space-6);
+    font-size: var(--lp-size-item);
+  }
+
+  /* Under the quote layout's centrepiece (InstructorBlock's
+     `.guide-quote__more`) the section's heading steps down to a title, so a
+     list there keeps the body's size and never matches the heading. */
+  :global(.guide-quote__more) .creds[data-variant='ledger'] {
+    font-size: var(--lp-size-body);
   }
 
   .creds[data-variant='ledger'] li {

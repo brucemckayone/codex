@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { refreshStreamingUrl } from '$lib/remote/library.remote';
 import {
   flushSync,
   mount,
@@ -37,6 +38,9 @@ interface RecordedCall {
   src: string;
   srcAttrAtCall: string | null;
   pauseCountAtCall: number;
+  /** What `hls.ts` calls when the stream fails for good, or expires. */
+  onError?: (message: string, kind: string, at: number) => void;
+  onUrlExpired?: (at: number) => void;
 }
 let recorded: RecordedCall[] = [];
 const destroyedInstances: string[] = [];
@@ -47,11 +51,21 @@ const loadSpy = vi.fn();
 
 vi.mock('./hls', () => ({
   createHlsPlayer: vi.fn(
-    async ({ media, src }: { media: HTMLMediaElement; src: string }) => {
+    async ({
+      media,
+      src,
+      onError,
+      onUrlExpired,
+    }: Pick<RecordedCall, 'onError' | 'onUrlExpired'> & {
+      media: HTMLMediaElement;
+      src: string;
+    }) => {
       recorded.push({
         src,
         srcAttrAtCall: media.getAttribute('src'),
         pauseCountAtCall: pauseSpy.mock.calls.length,
+        onError,
+        onUrlExpired,
       });
       if (hlsMode === 'native') {
         media.setAttribute('src', src);
@@ -209,23 +223,503 @@ describe('VideoPlayer — moving between course items', () => {
   });
 });
 
+/**
+ * The content page's access load re-runs on every tab return and on the org
+ * layout's version poll, and each run signs the same item again. hls.js
+ * 1.6.15's `loadSource()` re-creates the MediaSource for a new URL, which
+ * puts the element back at 0:00, paused, with no `pause` event; the mock here
+ * cannot show that, so the rule is pinned as "the live stream is not touched".
+ */
 describe('VideoPlayer — same item, freshly signed URL', () => {
-  test('keeps the loadSource fast path so the playhead survives', async () => {
+  test('leaves a live stream alone: no loadSource, no rebuild, no pause', async () => {
     hlsMode = 'mse';
     const { component, props } = await mountPlayer();
 
     props.src = 'https://cdn.test/lesson-a/resigned.m3u8';
     flushSync();
-    await vi.waitFor(() =>
-      expect(loadSourceCalls).toContain(
-        'https://cdn.test/lesson-a/resigned.m3u8'
-      )
-    );
+    await Promise.resolve();
 
-    expect(recorded).toHaveLength(1); // no rebuild
+    expect(loadSourceCalls).toHaveLength(0);
+    expect(recorded).toHaveLength(1);
     expect(destroyedInstances).toHaveLength(0);
     expect(pauseSpy).not.toHaveBeenCalled();
 
+    unmount(component);
+  });
+
+  test('rebuilds an errored player at the place it kept', async () => {
+    hlsMode = 'mse';
+    const { component, props } = await mountPlayer();
+    const el = videoElement();
+    Object.defineProperty(el, 'duration', { configurable: true, value: 5400 });
+    Object.defineProperty(el, 'currentTime', {
+      configurable: true,
+      writable: true,
+      value: 0,
+    });
+
+    recorded[0]?.onError?.(
+      'This could not be loaded. Please try again.',
+      'network',
+      3012
+    );
+    flushSync();
+    props.src = 'https://cdn.test/lesson-a/resigned.m3u8';
+    flushSync();
+    await vi.waitFor(() => expect(recorded).toHaveLength(2));
+    el.dispatchEvent(new Event('loadedmetadata'));
+
+    expect(el.currentTime).toBe(3012);
+    // The kept place is consumed: a later save writes the live playhead.
+    el.currentTime = 3100;
+    el.dispatchEvent(new Event('pause'));
+    expect(updateLocalProgress).toHaveBeenLastCalledWith(
+      'lesson-a',
+      3100,
+      5400
+    );
+
+    unmount(component);
+  });
+});
+
+/**
+ * A rebuilt stream keeps the viewer's place. `hls.ts` destroys a failed or
+ * expired stream, and the destroy resets the element to 0, so it reads the
+ * playhead first and passes it on (`at`). Without it a paid viewer 50
+ * minutes in who lost the network pressed Retry, the film started at 0:00,
+ * and the progress tracker saved that over their resume point.
+ */
+describe('VideoPlayer — a rebuilt stream keeps the viewer’s place', () => {
+  /** The element after the helper's destroy: back at 0, its length known again once rebuilt. */
+  function resetElement(el: HTMLVideoElement) {
+    Object.defineProperty(el, 'duration', { configurable: true, value: 5400 });
+    Object.defineProperty(el, 'currentTime', {
+      configurable: true,
+      writable: true,
+      value: 0,
+    });
+  }
+
+  test('Retry after a network failure resumes where it failed; no save writes 0 meanwhile', async () => {
+    const { component } = await mountPlayer();
+    const el = videoElement();
+    resetElement(el);
+
+    recorded[0]?.onError?.(
+      'This could not be loaded. Please try again.',
+      'network',
+      3012
+    );
+    flushSync();
+    document.body
+      .querySelector<HTMLButtonElement>('.video-player-error-retry')
+      ?.click();
+    await vi.waitFor(() => expect(recorded).toHaveLength(2));
+
+    // The new stream reads 0 until it knows its length: a save now keeps the place.
+    el.dispatchEvent(new Event('pause'));
+    expect(updateLocalProgress).toHaveBeenLastCalledWith(
+      'lesson-a',
+      3012,
+      5400
+    );
+    expect(updateLocalProgress).not.toHaveBeenCalledWith('lesson-a', 0, 5400);
+    el.dispatchEvent(new Event('loadedmetadata'));
+    expect(el.currentTime).toBe(3012);
+
+    unmount(component);
+  });
+
+  test('an expiry resumes where the helper read the playhead, not the reset 0', async () => {
+    const { component } = await mountPlayer();
+    const el = videoElement();
+    resetElement(el);
+
+    recorded[0]?.onUrlExpired?.(612);
+    await vi.waitFor(() => expect(recorded).toHaveLength(2));
+    el.dispatchEvent(new Event('loadedmetadata'));
+    expect(el.currentTime).toBe(612);
+
+    unmount(component);
+  });
+
+  test('a renewal of a PLAYING film plays on once it lands; a paused one stays paused', async () => {
+    const play = vi.mocked(HTMLMediaElement.prototype.play);
+    const { component } = await mountPlayer();
+    const el = videoElement();
+    resetElement(el);
+
+    // The destroy that came with the expiry fired no pause: the mirror
+    // still says the viewer was watching.
+    el.dispatchEvent(new Event('play'));
+    play.mockClear();
+    recorded[0]?.onUrlExpired?.(612);
+    await vi.waitFor(() => expect(recorded).toHaveLength(2));
+    expect(play).not.toHaveBeenCalled();
+    el.dispatchEvent(new Event('loadedmetadata'));
+    expect(el.currentTime).toBe(612);
+    expect(play).toHaveBeenCalledTimes(1);
+    // Its first frame: from here a 403 is an expiry again.
+    el.dispatchEvent(new Event('loadeddata'));
+
+    el.dispatchEvent(new Event('pause'));
+    play.mockClear();
+    recorded[1]?.onUrlExpired?.(700);
+    await vi.waitFor(() => expect(recorded).toHaveLength(3));
+    el.dispatchEvent(new Event('loadedmetadata'));
+    expect(el.currentTime).toBe(700);
+    expect(play).not.toHaveBeenCalled();
+
+    unmount(component);
+  });
+
+  test('a 403 on a renewed stream before its first frame is a refusal: the card, and no second ask', async () => {
+    const refresh = vi.mocked(refreshStreamingUrl);
+    refresh.mockClear();
+    const { component } = await mountPlayer();
+    const el = videoElement();
+    resetElement(el);
+
+    recorded[0]?.onUrlExpired?.(612);
+    await vi.waitFor(() => expect(recorded).toHaveLength(2));
+    recorded[1]?.onUrlExpired?.(0);
+    flushSync();
+    await Promise.resolve();
+
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(recorded).toHaveLength(2);
+    expect(
+      document.body.querySelector('.video-player-error-retry')
+    ).not.toBeNull();
+
+    unmount(component);
+  });
+
+  test('a failure while playing stops the renewal and the mirror; Retry plays on', async () => {
+    const play = vi.mocked(HTMLMediaElement.prototype.play);
+    const { component } = await mountPlayer();
+    const el = videoElement();
+    resetElement(el);
+
+    el.dispatchEvent(new Event('play'));
+    recorded[0]?.onError?.(
+      'This could not be loaded. Please try again.',
+      'network',
+      2000
+    );
+    flushSync();
+    // The card shows Retry, and nothing reads as playing under it.
+    expect(document.body.querySelector('[aria-label="Pause"]')).toBeNull();
+
+    play.mockClear();
+    document.body
+      .querySelector<HTMLButtonElement>('.video-player-error-retry')
+      ?.click();
+    await vi.waitFor(() => expect(recorded).toHaveLength(2));
+    el.dispatchEvent(new Event('loadedmetadata'));
+    expect(el.currentTime).toBe(2000);
+    expect(play).toHaveBeenCalledTimes(1);
+
+    unmount(component);
+  });
+
+  test('Retry after a first load that never landed starts at the saved progress, not 0:00', async () => {
+    const props = $state({
+      src: SRC_A,
+      contentId: 'lesson-a',
+      contentTitle: 'Lesson one',
+      initialProgress: 1800,
+    });
+    const component = mount(VideoPlayer, { target: document.body, props });
+    flushSync();
+    await vi.waitFor(() => expect(recorded).toHaveLength(1));
+    const el = videoElement();
+    resetElement(el);
+
+    // The playlist failed before the stream knew its length.
+    recorded[0]?.onError?.(
+      'This could not be loaded. Please try again.',
+      'network',
+      0
+    );
+    flushSync();
+    el.dispatchEvent(new Event('pause'));
+    expect(updateLocalProgress).not.toHaveBeenCalledWith('lesson-a', 0, 5400);
+
+    document.body
+      .querySelector<HTMLButtonElement>('.video-player-error-retry')
+      ?.click();
+    await vi.waitFor(() => expect(recorded).toHaveLength(2));
+    el.dispatchEvent(new Event('loadedmetadata'));
+    expect(el.currentTime).toBe(1800);
+
+    unmount(component);
+  });
+
+  test('a 403 before the first stream landed rebuilds at the saved progress, not 0:00', async () => {
+    const props = $state({
+      src: SRC_A,
+      contentId: 'lesson-a',
+      contentTitle: 'Lesson one',
+      initialProgress: 1800,
+    });
+    const component = mount(VideoPlayer, { target: document.body, props });
+    flushSync();
+    await vi.waitFor(() => expect(recorded).toHaveLength(1));
+    const el = videoElement();
+    resetElement(el);
+
+    // The page's link ran out before the stream knew its length.
+    recorded[0]?.onUrlExpired?.(0);
+    await vi.waitFor(() => expect(recorded).toHaveLength(2));
+    el.dispatchEvent(new Event('loadedmetadata'));
+    expect(el.currentTime).toBe(1800);
+
+    unmount(component);
+  });
+
+  test('a slow ask for the item the viewer left does not swallow the next item’s 403', async () => {
+    const refresh = vi.mocked(refreshStreamingUrl);
+    refresh.mockClear();
+    const { component, props } = await mountPlayer();
+    recorded[0]?.onError?.(
+      'This could not be loaded. Please try again.',
+      'network',
+      0
+    );
+    flushSync();
+    // Lesson A's Try Again asks, and the answer is slow.
+    refresh.mockImplementationOnce(
+      () => new Promise(() => {}) as ReturnType<typeof refreshStreamingUrl>
+    );
+    document.body
+      .querySelector<HTMLButtonElement>('.video-player-error-retry')
+      ?.click();
+    await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+
+    props.src = SRC_B;
+    props.contentId = 'lesson-b';
+    flushSync();
+    await vi.waitFor(() => expect(recorded).toHaveLength(2));
+    // Lesson B's own first link answers 403: it renews for itself.
+    recorded[1]?.onUrlExpired?.(0);
+    await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(2));
+    expect(refresh).toHaveBeenLastCalledWith('lesson-b');
+
+    unmount(component);
+  });
+
+  test('an element error on a live hls.js stream destroys it and keeps the place for Retry', async () => {
+    hlsMode = 'mse';
+    const { component } = await mountPlayer();
+    const el = videoElement();
+    resetElement(el);
+    el.currentTime = 1500;
+
+    // A decode failure reaches the element before hls.js notices it.
+    el.dispatchEvent(new Event('error'));
+    flushSync();
+    expect(destroyedInstances).toContain(SRC_A);
+
+    document.body
+      .querySelector<HTMLButtonElement>('.video-player-error-retry')
+      ?.click();
+    await vi.waitFor(() => expect(recorded).toHaveLength(2));
+    el.currentTime = 0;
+    el.dispatchEvent(new Event('loadedmetadata'));
+    expect(el.currentTime).toBe(1500);
+
+    unmount(component);
+  });
+});
+
+/**
+ * The renewal timer runs only while the film plays (owner cost rule: no
+ * open-ended polling). A paused tab never asks; a playing film renews the
+ * link it is actually using, a minute before it expires.
+ */
+describe('VideoPlayer — renewing the link', () => {
+  const refresh = vi.mocked(refreshStreamingUrl);
+
+  beforeEach(() => {
+    refresh.mockClear();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function mountExpiring(inMs: number) {
+    const props = $state({
+      src: SRC_A,
+      contentId: 'lesson-a',
+      contentTitle: 'Lesson one',
+      initialProgress: 0,
+      expiresAt: new Date(Date.now() + inMs).toISOString(),
+    });
+    const component = mount(VideoPlayer, { target: document.body, props });
+    flushSync();
+    await vi.waitFor(() => expect(recorded).toHaveLength(1));
+    return { component, props };
+  }
+
+  function setPlaying(el: HTMLVideoElement, playing: boolean) {
+    Object.defineProperty(el, 'paused', {
+      configurable: true,
+      value: !playing,
+    });
+    el.dispatchEvent(new Event(playing ? 'play' : 'pause'));
+  }
+
+  test('a paused film never renews, however long the tab stays open', async () => {
+    const { component } = await mountExpiring(10 * 60_000);
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(refresh).not.toHaveBeenCalled();
+    unmount(component);
+  });
+
+  test('a playing film renews a minute before expiry, and pausing stops the timer', async () => {
+    const { component } = await mountExpiring(10 * 60_000);
+    const el = videoElement();
+
+    setPlaying(el, true);
+    await vi.advanceTimersByTimeAsync(9 * 60_000 + 1000);
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    setPlaying(el, false);
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    unmount(component);
+  });
+
+  test('a failure while playing disarms the renewal: nothing rebuilds or plays unasked', async () => {
+    const { component } = await mountExpiring(10 * 60_000);
+    const el = videoElement();
+    const play = vi.mocked(HTMLMediaElement.prototype.play);
+
+    setPlaying(el, true);
+    // The stream fails; the element stops without a pause event.
+    recorded[0]?.onError?.(
+      'This could not be loaded. Please try again.',
+      'network',
+      90
+    );
+    play.mockClear();
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(refresh).not.toHaveBeenCalled();
+    expect(recorded).toHaveLength(1);
+    expect(play).not.toHaveBeenCalled();
+    unmount(component);
+  });
+
+  test('a 403 while the renewal’s ask is out keeps its place for the rebuild', async () => {
+    const { component } = await mountExpiring(10 * 60_000);
+    const el = videoElement();
+    Object.defineProperty(el, 'currentTime', {
+      configurable: true,
+      writable: true,
+      value: 0,
+    });
+    let answer: (
+      value: Awaited<ReturnType<typeof refreshStreamingUrl>>
+    ) => void = () => {};
+    refresh.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }) as ReturnType<typeof refreshStreamingUrl>
+    );
+
+    setPlaying(el, true);
+    await vi.advanceTimersByTimeAsync(9 * 60_000 + 1000);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    // A laptop wakes past the link's end: the old stream 403s mid-ask.
+    recorded[0]?.onUrlExpired?.(540);
+    answer({
+      streamingUrl: 'https://cdn.test/refreshed/index.m3u8',
+      waveformUrl: null,
+      expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.waitFor(() => expect(recorded).toHaveLength(2));
+    el.dispatchEvent(new Event('loadedmetadata'));
+    expect(el.currentTime).toBe(540);
+    unmount(component);
+  });
+
+  test('a failed ask after the old stream lapsed mid-ask shows the card', async () => {
+    const { component } = await mountExpiring(10 * 60_000);
+    const el = videoElement();
+    let refuse: (reason: unknown) => void = () => {};
+    refresh.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          refuse = reject;
+        }) as ReturnType<typeof refreshStreamingUrl>
+    );
+
+    setPlaying(el, true);
+    await vi.advanceTimersByTimeAsync(9 * 60_000 + 1000);
+    recorded[0]?.onUrlExpired?.(540);
+    refuse(new Error('offline'));
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+    expect(
+      document.body.querySelector('.video-player-error-retry')
+    ).not.toBeNull();
+    unmount(component);
+  });
+
+  test('a play under the error card is refused and arms nothing', async () => {
+    const { component } = await mountExpiring(10 * 60_000);
+    const el = videoElement();
+    recorded[0]?.onError?.(
+      'This could not be loaded. Please try again.',
+      'network',
+      90
+    );
+    flushSync();
+    pauseSpy.mockClear();
+
+    // Media keys or picture-in-picture press play on the dead element.
+    setPlaying(el, true);
+    expect(pauseSpy).toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(refresh).not.toHaveBeenCalled();
+    expect(
+      document.body.querySelector('.video-player-error-retry')
+    ).not.toBeNull();
+    unmount(component);
+  });
+
+  test('pausing before the renewal is due disarms it', async () => {
+    const { component } = await mountExpiring(10 * 60_000);
+    const el = videoElement();
+
+    setPlaying(el, true);
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    setPlaying(el, false);
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(refresh).not.toHaveBeenCalled();
+    unmount(component);
+  });
+
+  test('a re-signed src prop does not move the timer off the link in use', async () => {
+    const { component, props } = await mountExpiring(10 * 60_000);
+    const el = videoElement();
+    setPlaying(el, true);
+
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    // The page signs the same item again for another ten minutes. The
+    // player keeps its own link, which still expires on the first clock.
+    props.src = 'https://cdn.test/lesson-a/resigned.m3u8';
+    props.expiresAt = new Date(Date.now() + 10 * 60_000).toISOString();
+    flushSync();
+    await vi.advanceTimersByTimeAsync(4 * 60_000 + 1000);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(recorded).toHaveLength(2);
+    expect(recorded[1].src).toBe('https://cdn.test/refreshed/index.m3u8');
     unmount(component);
   });
 });

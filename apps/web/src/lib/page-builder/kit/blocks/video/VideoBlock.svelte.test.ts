@@ -1,5 +1,14 @@
 import { tick } from 'svelte';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
+import { loadPlayerCore } from '$lib/components/player/load-core';
 import {
   flushSync,
   mount,
@@ -14,6 +23,7 @@ import { COPY } from '../../model/copy';
 import { SECTION_LAYOUTS } from '../../model/ids';
 import { type SampleOfferState, sampleContext } from '../../model/sample';
 import type { BlockEdit, ResolvedSection } from '../../model/types';
+import { FILM_COPY } from '../../primitives/film-copy';
 import { VIDEO_COPY } from './copy';
 import { VIDEO_PROMPT } from './definition';
 import VideoBlock from './VideoBlock.svelte';
@@ -38,14 +48,24 @@ const INTRO: PreviewMedia = {
 
 let app: ReturnType<typeof mount> | null = null;
 
+// The player's code is fetched before any press, as the page's first sight
+// of a play button fetches it (`preloadPlayer`): a press then mounts it in
+// its own tick. `InlineFilm.first-press.svelte.test.ts` covers a press that
+// beats it.
+beforeAll(async () => {
+  await loadPlayerCore();
+});
+
 beforeEach(() => {
   played.length = 0;
+  vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
 });
 
 afterEach(() => {
   if (app) unmount(app);
   app = null;
   document.body.innerHTML = '';
+  vi.restoreAllMocks();
 });
 
 function section(layout: string, headingLevel: 1 | 2 = 2): ResolvedSection {
@@ -130,14 +150,47 @@ describe('VideoBlock', () => {
     expect(text()).not.toMatch(/\d+:\d\d|30 min|minutes long/);
   });
 
-  it('opens the shared player with exactly the intro clip', async () => {
+  it.each(
+    SECTION_LAYOUTS.video
+  )('%s: plays exactly the intro clip in its own screen, not a pop-up', async (layout) => {
+    await render(SAMPLE, { layout });
+    watch()?.click();
+    // Mounted in the press's own tick, so its play() keeps the sound.
+    expect(HTMLMediaElement.prototype.play).toHaveBeenCalled();
+    const screen = document.body.querySelector('.video__screen');
+    expect(screen?.querySelector('.clip > .lp-film video')).not.toBeNull();
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+    expect(played).toEqual([INTRO.playlistUrl]);
+    // The press's button has gone; the player's play button has the focus.
+    expect(watch()).toBeUndefined();
+    expect(document.activeElement?.classList.contains('player__play')).toBe(
+      true
+    );
+    // The poster stays under the player, for when the film stops.
+    expect(screen?.querySelector('img')?.getAttribute('src')).toBe(
+      INTRO.posterUrl
+    );
+  });
+
+  it('when the film ends the poster comes back with "Watch again", and no buy button', async () => {
     await render(SAMPLE);
     watch()?.click();
+    document.querySelector('.lp-film video')?.dispatchEvent(new Event('ended'));
     flushSync();
-    await tick();
-    await Promise.resolve();
-    expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
-    expect(played).toEqual([INTRO.playlistUrl]);
+    expect(document.body.querySelector('.lp-film')).toBeNull();
+    expect(document.body.querySelector('img')?.getAttribute('src')).toBe(
+      INTRO.posterUrl
+    );
+    const again = [...document.body.querySelectorAll('button')].find(
+      (button) => button.textContent?.trim() === FILM_COPY.again
+    );
+    expect(again).toBeDefined();
+    // The player had the focus, so "Watch again" takes it.
+    expect(document.activeElement).toBe(again);
+    expect(document.body.querySelector('a')).toBeNull();
+    again?.click();
+    expect(document.body.querySelector('.lp-film video')).not.toBeNull();
+    expect(played).toEqual([INTRO.playlistUrl, INTRO.playlistUrl]);
   });
 
   it('holds the screen while the film is on its way, as the server sends it, and folds away once there is none', async () => {
@@ -273,6 +326,8 @@ describe('VideoBlock', () => {
     flushSync();
     await tick();
     expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.body.querySelector('video')).toBeNull();
+    expect(watch()).toBeDefined();
     expect(played).toEqual([]);
   });
 

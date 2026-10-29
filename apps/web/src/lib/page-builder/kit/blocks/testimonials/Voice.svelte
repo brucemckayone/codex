@@ -11,11 +11,13 @@
 
   `faces` (Codex-61zsk.58): once one quote in the section has a photo, each
   byline leads with a round face, the photo or, with none, the initials of the
-  name (a quote with neither has no circle), so the names line up. The face
-  is decoration: the name is what reads.
+  name (a quote with neither has no circle), so the names line up. The quote
+  that leads its section (the panel's, the monument, the wall's featured
+  tile) draws its face large beside its words instead, its initials on the
+  brand's tint. The face is decoration: the name is what reads.
 -->
 <script lang="ts">
-  import { resolvePageImageUrl, storedFocus } from '../../../page-images';
+  import { pageImageSrcset, resolvePageImageUrl, storedFocus } from '../../../page-images';
   import { initials } from '../../model/initials';
   import Media from '../../primitives/Media.svelte';
   import type { Testimonial } from './voices';
@@ -41,10 +43,22 @@
     mediaBaseUrl = null,
   }: Props = $props();
 
-  // A 2.5rem circle: the smallest stored size covers it twice over.
-  const photo = $derived(faces ? resolvePageImageUrl(voice.photo, 'sm', mediaBaseUrl) : null);
+  // The quote its section draws larger than the rest.
+  const leads = $derived(size === 'lead' || size === 'monument' || (size === 'wall' && featured));
+  // A 2.5rem circle: the smallest stored size covers it twice over. The large
+  // face picks from every stored size by how wide it is drawn.
+  const photo = $derived(
+    faces ? resolvePageImageUrl(voice.photo, leads ? 'md' : 'sm', mediaBaseUrl) : null
+  );
+  const srcset = $derived(leads && photo ? pageImageSrcset(voice.photo, mediaBaseUrl) : '');
+  // 5rem, and 8rem in a wide section, except on the wall, whose tile is a
+  // phone's width at any size. Plain lengths: Safari before 26.4 reads a math
+  // function in `sizes` as 100vw.
+  const sizes = $derived(size === 'wall' ? '5rem' : '(min-width: 60rem) 8rem, 5rem');
   const letters = $derived(faces ? initials(voice.name) : '');
   const face = $derived(Boolean(photo || letters));
+  const large = $derived(face && leads);
+  const small = $derived(face && !leads);
 </script>
 
 <figure
@@ -54,10 +68,22 @@
   data-centred={centred ? '' : undefined}
   data-featured={featured ? '' : undefined}
 >
+  {#if large}
+    <Media
+      class="voice__portrait"
+      image={photo}
+      alt=""
+      ratio="1 / 1"
+      {srcset}
+      {sizes}
+      focus={storedFocus(voice.photo)}
+      mark={letters || undefined}
+    />
+  {/if}
   <blockquote class="voice__quote"><p>{voice.quote}</p></blockquote>
-  {#if voice.name || voice.detail || face}
-    <figcaption class="voice__by" data-face={face ? '' : undefined}>
-      {#if face}
+  {#if voice.name || voice.detail || small}
+    <figcaption class="voice__by" data-face={small ? '' : undefined}>
+      {#if small}
         <Media
           class="voice__face"
           image={photo}
@@ -286,12 +312,6 @@
     text-align: start;
   }
 
-  @container (min-width: 60rem) {
-    .voice[data-size='lead'] .voice__by[data-face] {
-      justify-content: end;
-    }
-  }
-
   /* The initials sit on the panel, in its ink, as the guide's face does
      (03 X57), inside a hairline of the section's own line, so the circle
      holds on a ground as pale as the panel and on a filled panel too. */
@@ -310,5 +330,40 @@
 
   .voice__by[data-face]:not(:has(.voice__name ~ .voice__detail)) :global(.voice__face) {
     grid-row: 1;
+  }
+
+  /* ── the large face: the quote that leads ─────────────────────────────── */
+  /* Above the words, on the voice's own edge (the wall pads the voice, so it
+     lines up with the words there too); centred over the monument. Its
+     initials are drawn on the panel tinted with the brand, as the cards on a
+     ground are, in the panel's ink. The tint can land on the band's own
+     colour (Soft's tinted band, Studio's paper), so the disc is ringed in the
+     band's ink at 40%: about 2:1 on any band whose ink holds 4.5:1, where the
+     section's hairline can be the band's colour too. */
+  .voice :global(.voice__portrait) {
+    inline-size: var(--space-20);
+    border-radius: var(--radius-full);
+  }
+
+  .voice :global(.voice__portrait[data-mark]) {
+    background: color-mix(in oklab, var(--lp-panel), var(--lp-brand) var(--lp-tint-panel));
+    box-shadow: inset 0 0 0 var(--lp-border) color-mix(in oklab, var(--lp-ink) 40%, var(--lp-bg));
+    color: var(--lp-panel-ink);
+  }
+
+  /* Wide, it grows, and the panel's quote stands between it and the byline
+     at the far corner. */
+  @container (min-width: 60rem) {
+    .voice:is([data-size='lead'], [data-size='monument']) :global(.voice__portrait) {
+      inline-size: var(--space-32);
+    }
+
+    .voice[data-size='lead']:has(> :global(.voice__portrait)) {
+      grid-template-columns: auto minmax(0, 1fr) auto;
+    }
+
+    .voice[data-size='lead'] :global(.voice__portrait) {
+      align-self: start;
+    }
   }
 </style>

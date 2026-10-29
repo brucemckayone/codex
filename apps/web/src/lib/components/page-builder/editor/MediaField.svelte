@@ -44,6 +44,14 @@
       onchange={(mediaItemId) => sellMedia.setSlot(slot, mediaItemId)}
     />
     <p class="media__hint">{field.hint ?? m.studio_page_editor_media_shared()}</p>
+    <!-- Owner P10: a film paid content uses plays only its 30-second preview
+         on the live page. The same paid-use note the Media panel shows under
+         the slot, from the same store read, so the two cannot disagree. -->
+    {#if sellMedia.previewOnly(slot)}
+      <p class="media__hint" role="status">
+        {m.studio_builder_media_slot_preview_only()}
+      </p>
+    {/if}
   </div>
 {/if}
 

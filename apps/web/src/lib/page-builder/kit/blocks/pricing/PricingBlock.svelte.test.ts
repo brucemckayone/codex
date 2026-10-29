@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import { tick } from 'svelte';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
@@ -5,10 +6,13 @@ import {
   mount,
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
+import type { JourneySalesContext } from '../../../render/types';
 import { COPY } from '../../model/copy';
 import { SECTION_LAYOUTS } from '../../model/ids';
 import { type SampleOfferState, sampleContext } from '../../model/sample';
 import type { BlockEdit, ResolvedSection } from '../../model/types';
+import { componentRules } from '../testing';
+import { PRICING_COPY } from './copy';
 import PricingBlock from './PricingBlock.svelte';
 
 let app: ReturnType<typeof mount> | null = null;
@@ -38,14 +42,18 @@ async function render(
   offer: SampleOfferState,
   edit: BlockEdit | null = null
 ) {
+  await renderWith(props, layout, sampleContext({ offer }), edit);
+}
+
+async function renderWith(
+  props: Record<string, unknown>,
+  layout: string,
+  context: JourneySalesContext,
+  edit: BlockEdit | null = null
+) {
   app = mount(PricingBlock, {
     target: document.body,
-    props: {
-      props,
-      section: section(layout),
-      context: sampleContext({ offer }),
-      edit,
-    },
+    props: { props, section: section(layout), context, edit },
   });
   flushSync();
   await tick();
@@ -248,5 +256,273 @@ describe('PricingBlock — the words beside a price describe that price', () => 
     const unit = offerUnit('£15');
     expect(unit?.textContent).toContain(FEATURED.tiers.print);
     expect(unit?.querySelector('[data-field="note"]')).toBeNull();
+  });
+});
+
+// Codex-61zsk.73: a single way in stood alone, its card filled with three
+// ways of saying "yours to keep" while what the course holds went unsaid.
+describe('PricingBlock — a single way in, beside what the course holds', () => {
+  const list = () => document.body.querySelector('.pricing__included');
+  const lines = () =>
+    [...(list()?.querySelectorAll('li') ?? [])].map((li) =>
+      li.textContent?.trim()
+    );
+  // The sample course: six stages of four, its films and recordings timed.
+  const COURSE_LINES = [
+    '6 stages',
+    '24 practices',
+    '2 hr 41 min of video and audio',
+    '7 videos · 8 audio · 9 readings',
+  ];
+
+  /** The sample's offer with one tier and nothing else. */
+  function oneTier(): JourneySalesContext {
+    const context = sampleContext({ offer: 'tiers' });
+    const tiers = context.offer?.tiers.slice(0, 1) ?? [];
+    return {
+      ...context,
+      offer: context.offer && {
+        ...context.offer,
+        paths: ['tier'],
+        purchase: null,
+        tiers,
+      },
+    };
+  }
+
+  it('sets the lone card beside the course’s own lines, card first', async () => {
+    await render({}, 'cards', 'buy');
+    const cards = document.body.querySelector('.pricing__cards');
+    expect(cards?.getAttribute('data-count')).toBe('1');
+    expect(cards?.hasAttribute('data-included')).toBe(true);
+    expect(cards?.firstElementChild?.tagName).toBe('ARTICLE');
+    expect(cards?.lastElementChild).toBe(list());
+    expect(list()?.querySelector('h3')?.textContent).toBe(
+      PRICING_COPY.included
+    );
+    expect(lines()).toEqual(COURSE_LINES);
+  });
+
+  it('draws the list under the card in focus', async () => {
+    await render({}, 'focus', 'buy');
+    expect(list()?.parentElement?.className).toContain('pricing__focus');
+    expect(list()?.getAttribute('data-form')).toBe('list');
+    expect(lines()).toEqual(COURSE_LINES);
+  });
+
+  it('runs the lines along the price strip in band, which stays a strip', async () => {
+    // Poster's own layout: no card and no title, so a label and a line of
+    // facts under the strip's rule, as the other ways to join are set.
+    await render({}, 'band', 'buy');
+    expect(list()?.getAttribute('data-form')).toBe('strip');
+    expect(list()?.previousElementSibling?.className).toContain(
+      'pricing__band'
+    );
+    expect(list()?.querySelector('h3')).toBeNull();
+    expect(list()?.querySelector('.pricing__included-label')?.textContent).toBe(
+      PRICING_COPY.included
+    );
+    expect(lines()).toEqual(COURSE_LINES);
+  });
+
+  it.each(
+    SECTION_LAYOUTS.pricing
+  )('%s: draws the list beside one way in, a one-off or a single tier', async (layout) => {
+    for (const context of [sampleContext({ offer: 'buy' }), oneTier()]) {
+      await renderWith({}, layout, context);
+      expect(lines(), layout).toEqual(COURSE_LINES);
+      unmount(app);
+      app = null;
+    }
+  });
+
+  it('sets a single tier beside the list too, and keeps the tier’s own points', async () => {
+    await renderWith({}, 'cards', oneTier());
+    expect(prices()).toEqual(['£15']);
+    expect(lines()).toEqual(COURSE_LINES);
+    expect(text()).toContain('Plus everything else in the membership');
+  });
+
+  // `sub` is one way in drawn as two cards (monthly and yearly); `tiers` is a
+  // one-off and two memberships.
+  it.each([
+    'sub',
+    'tiers',
+  ] as const)('leaves two or more cards as they were (%s)', async (offer) => {
+    for (const layout of SECTION_LAYOUTS.pricing) {
+      await render({}, layout, offer);
+      expect(list(), layout).toBeNull();
+      expect(document.body.querySelector('[data-included]'), layout).toBeNull();
+      unmount(app);
+      app = null;
+    }
+  });
+
+  it.each([
+    'enrolled',
+    'unavailable',
+    'unknown',
+  ] as const)('draws no list when there is no price to stand beside (%s)', async (offer) => {
+    await render({}, 'cards', offer);
+    expect(list()).toBeNull();
+  });
+
+  it('draws no list for a free course: it has no way in to stand beside', async () => {
+    // A price of 0 gives no purchase path (`course-access-service`), and
+    // with nothing else to join by the course is not open.
+    await renderWith(
+      {},
+      'cards',
+      sampleContext({ offer: 'unavailable', course: { priceCents: 0 } })
+    );
+    expect(list()).toBeNull();
+    expect(text()).toContain(COPY.cta.unavailableTitle);
+  });
+
+  it('draws the creator’s rows: live, rewritten and their own, in their order', async () => {
+    await render(
+      {
+        included: [
+          { text: 'Printable workbook' },
+          { fact: 'practices', text: 'Two dozen practices' },
+          { fact: 'stages' },
+        ],
+      },
+      'cards',
+      'buy'
+    );
+    expect(lines()).toEqual([
+      'Printable workbook',
+      'Two dozen practices',
+      '6 stages',
+    ]);
+  });
+
+  it('draws the card alone when the list is switched off', async () => {
+    await render({ included: [] }, 'cards', 'buy');
+    expect(list()).toBeNull();
+    const cards = document.body.querySelector('.pricing__cards');
+    expect(cards?.hasAttribute('data-included')).toBe(false);
+    expect(prices()).toEqual(['£49']);
+  });
+
+  it('draws the card alone for a course with nothing to count yet', async () => {
+    const context = sampleContext({ offer: 'buy' });
+    await renderWith({}, 'cards', {
+      ...context,
+      stages: context.stages.map((stage) => ({ ...stage, practices: [] })),
+    });
+    expect(list()).toBeNull();
+  });
+
+  it('says the one-off’s billing once: no generic points, no "for good" twice', async () => {
+    await render({}, 'cards', 'buy');
+    expect(text()).not.toMatch(
+      /yours forever|no subscription|lifetime access/i
+    );
+    expect(text().match(/for good/gi)).toHaveLength(1);
+    // "Prefer to own, not subscribe" sets a path apart from others there
+    // are none of.
+    expect(text()).not.toContain('Prefer to own, not subscribe');
+    unmount(app);
+    app = null;
+    await render({}, 'cards', 'tiers');
+    expect(text()).toContain('Prefer to own, not subscribe');
+  });
+
+  // The one-off beside two memberships had no points and a tall empty gap
+  // down to its button, while theirs carried lists (p3g visual L6).
+  const points = (price: string) =>
+    [...(offerUnit(price)?.querySelectorAll('li') ?? [])].map((li) =>
+      li.textContent?.trim()
+    );
+
+  it('gives the one-off beside other cards the course’s first lines as its points', async () => {
+    await render({}, 'cards', 'tiers');
+    expect(points('£49')).toEqual(COURSE_LINES.slice(0, 3));
+    expect(points('£15')).toContain('Plus everything else in the membership');
+    expect(list()).toBeNull();
+    unmount(app);
+    app = null;
+    await render(
+      { included: [{ text: 'Printable workbook' }, { fact: 'stages' }] },
+      'cards',
+      'tiers'
+    );
+    expect(points('£49')).toEqual(['Printable workbook', '6 stages']);
+  });
+
+  it('gives the one-off no points when the list is off, nor when it stands alone', async () => {
+    await render({ included: [] }, 'cards', 'tiers');
+    expect(points('£49')).toEqual([]);
+    unmount(app);
+    app = null;
+    await render({}, 'cards', 'buy');
+    expect(points('£49')).toEqual([]);
+    expect(lines()).toEqual(COURSE_LINES);
+  });
+
+  it('draws the list the same on the canvas, where it is not edited inline', async () => {
+    await render({}, 'cards', 'buy', { commit: () => {} });
+    expect(lines()).toEqual(COURSE_LINES);
+    expect(list()?.querySelector('[contenteditable], [data-field]')).toBeNull();
+  });
+
+  it('gives the card its share of the row as its width, so its name fits it', () => {
+    const rules = componentRules(
+      join(import.meta.dirname, 'PricingBlock.svelte')
+    );
+    const split = rules.find(
+      (rule) =>
+        rule.selector === '.pricing__cards[data-included]' &&
+        rule.within.includes('@container (min-width: 44rem)')
+    );
+    expect(split?.decls.get('grid-template-columns')).toBe(
+      'minmax(0, 5fr) minmax(0, 6fr)'
+    );
+    expect(split?.decls.get('--_track')).toBe(
+      'calc((var(--lp-column) - var(--_split-gap)) * 5 / 11)'
+    );
+    expect(split?.decls.get('max-inline-size')).toBe('none');
+
+    // Along the strip, the rule is the Style's own weight (Poster's thick
+    // print), and wide it takes the strip's whole row.
+    const strip = rules.find(
+      (rule) => rule.selector === ".pricing__included[data-form='strip']"
+    );
+    expect(strip?.decls.get('border-block-start')).toBe(
+      'var(--lp-rule) var(--border-style) var(--lp-line)'
+    );
+    const row = rules.find(
+      (rule) =>
+        rule.selector.includes(
+          ".pricing[data-layout='band'] .pricing__included"
+        ) && rule.within.includes('@container (min-width: 60rem)')
+    );
+    expect(row?.decls.get('flex-basis')).toBe('100%');
+
+    // Narrow, the strip keeps the list's one fact to a line: a wrapped row
+    // breaks raggedly (p3g visual L5).
+    const inline = rules.filter(
+      (rule) =>
+        rule.selector.startsWith(".pricing__included[data-form='strip']") &&
+        rule.decls.get('display') === 'flex'
+    );
+    expect(inline.map((rule) => rule.within)).toEqual([
+      ['@container (min-width: 44rem)'],
+    ]);
+
+    // Soft centres the card and its list as one pair under its centred head
+    // (p3g visual L4).
+    const soft = rules.find(
+      (rule) =>
+        rule.selector.includes("[data-lp-style='soft']") &&
+        rule.selector.endsWith('.pricing__cards[data-included]') &&
+        rule.within.includes('@container (min-width: 44rem)')
+    );
+    expect(soft?.decls.get('justify-content')).toBe('center');
+    expect(soft?.decls.get('grid-template-columns')).toBe(
+      'var(--_track) minmax(0, max-content)'
+    );
   });
 });

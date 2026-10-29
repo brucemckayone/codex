@@ -21,6 +21,7 @@ import type {
   JourneyCourseView,
   JourneyPageRecord,
 } from '$lib/page-builder';
+import type { FactStage } from '$lib/page-builder/kit/model/facts';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import { ApiError } from '$lib/server/errors';
 import { deriveCourseSummary } from '../checkout-offer-model';
@@ -35,8 +36,10 @@ const COURSE: JourneyCourseView = {
   lede: null,
   status: 'published',
   priceCents: 4900,
+  // The envelope's counts are the stages' own (`course-journey-service`
+  // counts `loadPublicStages`), so they agree with `STAGES` below.
   stageCount: 2,
-  practiceCount: 5,
+  practiceCount: 4,
 };
 
 /**
@@ -109,33 +112,42 @@ const inviteWithOffers = pageWith([
   },
 ]);
 
-const STAGES = [
+const STAGES: FactStage[] = [
   { practices: [{ contentType: 'video' }, { contentType: 'written' }] },
   { practices: [{ contentType: 'video' }, { contentType: 'audio' }] },
 ];
 
 describe('checkout-offer-model · deriveCourseSummary', () => {
-  it('builds DB-derived facts: counts, content mix, and an invitation', () => {
+  it('builds DB-derived facts only: the counts and the content mix', () => {
     const summary = deriveCourseSummary(COURSE, STAGES);
 
     expect(summary.kicker).toBe('A guided descent');
     expect(summary.title).toBe('Rootwork');
-    expect(summary.bullets[0]).toBe('5 practices across 2 stages');
-    expect(summary.bullets.some((b) => b.includes('practice'))).toBe(true);
-    // First-seen order across stages: video → written → audio.
-    expect(summary.bullets).toContain('Video, written & audio practice');
-    expect(summary.bullets.at(-1)).toBe(
-      'Yours to return to, as often as you need'
-    );
+    // Counted off the stages, as the sell page counts them (`courseFacts`),
+    // and the kinds in the curriculum's own order.
+    expect(summary.bullets).toEqual([
+      '4 practices across 2 stages',
+      'Video, audio & written practice',
+    ]);
   });
 
-  it('uses a neutral kicker fallback and omits count/mix lines when absent', () => {
+  it('names one kind alone, and two with an ampersand', () => {
+    const only = (...kinds: FactStage['practices'][number]['contentType'][]) =>
+      deriveCourseSummary(COURSE, [
+        { practices: kinds.map((contentType) => ({ contentType })) },
+      ]).bullets.at(-1);
+    expect(only('audio', 'audio')).toBe('Audio practice');
+    expect(only('written', 'video')).toBe('Video & written practice');
+  });
+
+  it('uses a neutral kicker fallback and says nothing it cannot count', () => {
     const bare = { ...COURSE, kicker: null, stageCount: 0, practiceCount: 0 };
     const summary = deriveCourseSummary(bare, []);
     expect(summary.kicker).toBe('The course');
-    expect(summary.bullets).toEqual([
-      'Yours to return to, as often as you need',
-    ]);
+    expect(summary.bullets).toEqual([]);
+    // A stage whose practices are all drafts still counts as a stage on the
+    // public read, but "0 practices across 1 stage" sells nothing.
+    expect(deriveCourseSummary(bare, [{ practices: [] }]).bullets).toEqual([]);
   });
 });
 
@@ -249,7 +261,7 @@ describe('journey checkout +page.server load', () => {
     const data = (await load(event)) as LoadData;
 
     expect(getCoursePageMock).toHaveBeenCalledWith({ slug: 'rootwork' });
-    expect(data.summary.bullets[0]).toBe('5 practices across 2 stages');
+    expect(data.summary.bullets[0]).toBe('4 practices across 2 stages');
     // Three PATHS, four cards — the note counts ways in.
     expect(data.headNote).toBe('One course. Three ways in.');
     expect(data.priceNote).toBe('VAT included');

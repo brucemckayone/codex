@@ -12,6 +12,7 @@ import type {
   ContentBodySource,
   ContentHeld,
   CourseEntryResponse,
+  CourseFilmStreamResponse,
   PlaybackProgressResponse,
   StreamingUrlResponse,
   UpdatePlaybackProgressResponse,
@@ -107,6 +108,7 @@ import type {
   MediaStatusTicket,
   ReactivateSubscriptionInput,
   ResumeSubscriptionInput,
+  SalesFilm,
   SupportChargeSearchQuery,
   SupportIssueRefundInput,
   SupportQueueQuery,
@@ -426,6 +428,19 @@ export interface CreatorOnboardingResponse {
   updatedAt: string;
 }
 
+/** How long `request()` waits on a worker before it aborts with a 408. */
+const REQUEST_TIMEOUT_MS = 10000;
+
+/**
+ * How long the course-film mint may take (owner P10). Below the page's own
+ * 8s wait (`FILM_REQUEST_TIMEOUT_MS`), so a slow mint ends HERE, as a logged
+ * 408, rather than as a silent give-up in the browser.
+ */
+const COURSE_FILM_TIMEOUT_MS = 6000;
+
+/** `fetch` options, plus a per-call timeout for a caller that gives up sooner. */
+type RequestOptions = RequestInit & { timeoutMs?: number };
+
 export function createServerApi(
   platform: App.Platform | undefined,
   cookies?: Cookies
@@ -438,13 +453,14 @@ export function createServerApi(
    *
    * @param worker - Which worker to call
    * @param path - API path (starting with /)
-   * @param options - Additional fetch options
+   * @param options - Additional fetch options, plus `timeoutMs` for a call
+   *   whose caller gives up sooner than the default
    * @returns Typed response data
    */
   async function request<T>(
     worker: ServiceName,
     path: string,
-    options?: RequestInit
+    { timeoutMs = REQUEST_TIMEOUT_MS, ...options }: RequestOptions = {}
   ): Promise<T> {
     const url = `${serverApiUrl(platform, worker)}${path}`;
     // Logs name the route, never its query: a visitor's search text (and any
@@ -452,7 +468,7 @@ export function createServerApi(
     const logPath = path.split('?')[0];
     const headers: HeadersInit = {
       [HEADERS.CONTENT_TYPE]: MIME_TYPES.APPLICATION.JSON,
-      ...options?.headers,
+      ...options.headers,
     };
 
     if (sessionCookie) {
@@ -462,10 +478,11 @@ export function createServerApi(
         buildAuthForwardingCookie(sessionCookie);
     }
 
-    // Abort fetch after 10 seconds to prevent indefinite hangs when a worker
-    // is slow or unresponsive (e.g. during E2E tests with cold KV/DB).
+    // Abort fetch after 10 seconds (or the call's own `timeoutMs`) to prevent
+    // indefinite hangs when a worker is slow or unresponsive (e.g. during E2E
+    // tests with cold KV/DB).
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     const timer = logger.startTimer(`api:${worker}${logPath}`);
     let response: Response;
@@ -478,7 +495,7 @@ export function createServerApi(
     } catch (err) {
       clearTimeout(timeoutId);
       if (err instanceof DOMException && err.name === 'AbortError') {
-        timer.end({ method: options?.method ?? 'GET', status: 408 });
+        timer.end({ method: options.method ?? 'GET', status: 408 });
         throw new ApiError(
           408,
           `Request to ${worker}${logPath} timed out`,
@@ -488,7 +505,7 @@ export function createServerApi(
       throw err;
     }
     clearTimeout(timeoutId);
-    timer.end({ method: options?.method ?? 'GET', status: response.status });
+    timer.end({ method: options.method ?? 'GET', status: response.status });
 
     if (!response.ok) {
       const body = (await response.json().catch(() => null)) as Record<
@@ -1296,6 +1313,27 @@ export function createServerApi(
         request<SellPreview | null>(
           'access',
           `/api/journeys/courses/${courseId}/sell-preview`
+        ),
+
+      /**
+       * A course sales film's signed FULL stream (owner P10), asked for by a
+       * visitor's press: a 10-minute film-proxy URL, or null when the film may
+       * only play its 30s preview (a paid practice uses it, or it is not a
+       * published course's). Public; the worker re-checks on every call.
+       */
+      courseFilmStream: (
+        organizationId: string,
+        courseId: string,
+        film: SalesFilm
+      ) =>
+        request<CourseFilmStreamResponse | null>(
+          'access',
+          `/api/access/courses/${encodeURIComponent(
+            courseId
+          )}/films/${film}/stream?organizationId=${encodeURIComponent(
+            organizationId
+          )}`,
+          { timeoutMs: COURSE_FILM_TIMEOUT_MS }
         ),
 
       /**

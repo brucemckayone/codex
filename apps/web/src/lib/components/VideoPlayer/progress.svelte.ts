@@ -20,10 +20,17 @@ const SAVE_INTERVAL_MS = 30_000;
 interface ProgressTrackerOptions {
   getContentId: () => string;
   getMedia: () => HTMLMediaElement | null;
+  /**
+   * The position a rebuilt stream is about to be given (a Retry after a
+   * network failure, a renewed link), or `null`. Until it lands the element
+   * reads 0 — the rebuild reset it — so a save reports this instead, and a
+   * paid viewer's resume point is never written over with the start.
+   */
+  getResumePoint?: () => number | null;
 }
 
 export function createProgressTracker(options: ProgressTrackerOptions) {
-  const { getContentId, getMedia } = options;
+  const { getContentId, getMedia, getResumePoint } = options;
 
   let intervalId: ReturnType<typeof setInterval> | null = null;
 
@@ -44,7 +51,7 @@ export function createProgressTracker(options: ProgressTrackerOptions) {
 
     updateLocalProgress(
       contentId ?? getContentId(),
-      video.currentTime,
+      getResumePoint?.() ?? video.currentTime,
       video.duration
     );
   }
@@ -85,6 +92,16 @@ export function createProgressTracker(options: ProgressTrackerOptions) {
     save();
   }
 
+  /**
+   * A destroy, a source swap or an error resets the element without a
+   * `pause` event, so the 30s saves would run on against a stopped element
+   * for as long as the tab stays open. Stop them; a rebuild's `play` starts
+   * them again. No save here: the element already reads the reset 0.
+   */
+  function handleEmptied(): void {
+    stopInterval();
+  }
+
   function attach(): void {
     const video = getMedia();
     if (!video) return;
@@ -92,6 +109,7 @@ export function createProgressTracker(options: ProgressTrackerOptions) {
     video.addEventListener('play', handlePlay);
     video.addEventListener('pause', handlePause);
     video.addEventListener('ended', handleEnded);
+    video.addEventListener('emptied', handleEmptied);
     if (browser) {
       document.addEventListener('visibilitychange', handleVisibilityChange);
       window.addEventListener('beforeunload', handleBeforeUnload);
@@ -116,6 +134,7 @@ export function createProgressTracker(options: ProgressTrackerOptions) {
       video.removeEventListener('play', handlePlay);
       video.removeEventListener('pause', handlePause);
       video.removeEventListener('ended', handleEnded);
+      video.removeEventListener('emptied', handleEmptied);
     }
 
     if (browser) {

@@ -13,7 +13,13 @@
  * (`invite.props.offers`, including a free-text `priceLabel`) rather than the
  * authoritative `CourseOffer`. See that module's header for the provenance rule.
  */
-import type { JourneyCourseView } from '$lib/page-builder';
+import type { JourneyContentType, JourneyCourseView } from '$lib/page-builder';
+import { COPY } from '$lib/page-builder/kit/model/copy';
+import {
+  type CourseFacts,
+  courseFacts,
+  type FactStage,
+} from '$lib/page-builder/kit/model/facts';
 
 /** The left-hand "what you're getting" summary card. */
 export interface CheckoutSummary {
@@ -24,59 +30,41 @@ export interface CheckoutSummary {
   bullets: string[];
 }
 
-/** Minimal shape the derivation reads off a stage (public sales projection). */
-interface StageLike {
-  practices: { contentType: string }[];
-}
+/** The kinds in the curriculum's own order, as a sentence names them. */
+const KIND_ORDER: readonly JourneyContentType[] = ['video', 'audio', 'written'];
 
-/** Title-case a content-type token for the "what's inside" mix line. */
-function contentTypeLabel(type: string): string {
-  if (type === 'written') return 'written';
-  return type; // 'video' | 'audio' — already lower, joined into a sentence
-}
-
-/** "Video, audio & written practice" from the real practice content types. */
-function formatContentMix(stages: StageLike[]): string | undefined {
-  const seen: string[] = [];
-  for (const stage of stages) {
-    for (const practice of stage.practices) {
-      const label = contentTypeLabel(practice.contentType);
-      if (label && !seen.includes(label)) seen.push(label);
-    }
-  }
-  if (seen.length === 0) return undefined;
-  const capped = seen[0].charAt(0).toUpperCase() + seen[0].slice(1);
-  const rest = seen.slice(1);
-  const tail =
-    rest.length === 0
-      ? ''
-      : rest.length === 1
-        ? ` & ${rest[0]}`
-        : `, ${rest.slice(0, -1).join(', ')} & ${rest[rest.length - 1]}`;
-  return `${capped}${tail} practice`;
+/** "Video, audio & written practice" from the kinds the course really holds. */
+function formatContentMix(kinds: CourseFacts['kinds']): string | undefined {
+  const named = KIND_ORDER.filter((kind) => kinds[kind] > 0);
+  const last = named.at(-1);
+  if (!last) return undefined;
+  const list =
+    named.length === 1 ? last : `${named.slice(0, -1).join(', ')} & ${last}`;
+  return `${list.charAt(0).toUpperCase()}${list.slice(1)} practice`;
 }
 
 /**
- * The left-hand order summary. Every factual line is DB-derived — the practice/
- * stage counts and the content-type mix come straight off the awaited course +
- * stages, so the card can never claim more than the course actually holds.
+ * The left-hand order summary. Every line is a fact, counted by
+ * `courseFacts` off the awaited stages (the one count the sell page states
+ * too), so the card can never claim more than the course actually holds.
+ * Nothing generic: "Yours to return to" was untrue of every recurring way in
+ * (Codex-61zsk.73), and each path's own fine print says how it is kept.
  */
 export function deriveCourseSummary(
   course: JourneyCourseView,
-  stages: StageLike[]
+  stages: readonly FactStage[]
 ): CheckoutSummary {
+  const facts = courseFacts(stages);
   const bullets: string[] = [];
 
-  if (course.practiceCount > 0 && course.stageCount > 0) {
-    const practices = `${course.practiceCount} ${course.practiceCount === 1 ? 'practice' : 'practices'}`;
-    const stagesLabel = `${course.stageCount} ${course.stageCount === 1 ? 'stage' : 'stages'}`;
-    bullets.push(`${practices} across ${stagesLabel}`);
+  if (facts.practices > 0) {
+    bullets.push(
+      `${COPY.course.practices(facts.practices)} across ${COPY.course.stages(facts.stages)}`
+    );
   }
 
-  const mix = formatContentMix(stages);
+  const mix = formatContentMix(facts.kinds);
   if (mix) bullets.push(mix);
-
-  bullets.push('Yours to return to, as often as you need');
 
   return {
     kicker: course.kicker ?? 'The course',

@@ -22,6 +22,11 @@
   the page is looked at (the canvas, a still thumbnail) the
   section keeps its frame, the kit's plate in it, and on the canvas a prompt
   for the clip. The button row appears only when the creator writes one.
+
+  The clip plays in its own frame (`InlineFilm`), letterboxed in the split's
+  tall one; Cinematic's fades lift under the player, which is squared where
+  Cinematic squares the picture. It asks for the full film where the server
+  allows one (`reel`).
 -->
 <script lang="ts">
   import { filmToShow } from '../../model/films';
@@ -31,10 +36,10 @@
   import { editAttrs } from '../../primitives/edit';
   import Eyebrow from '../../primitives/Eyebrow.svelte';
   import Heading from '../../primitives/Heading.svelte';
+  import InlineFilm from '../../primitives/InlineFilm.svelte';
   import Text from '../../primitives/Text.svelte';
   import { settled } from '../hero/settled.svelte';
   import ClipFrame from '../video/ClipFrame.svelte';
-  import Watch from '../video/Watch.svelte';
   import { PREVIEW_COPY } from './copy';
   import { PREVIEW_PROMPT, previewDefinition } from './definition';
 
@@ -101,9 +106,13 @@
 {#snippet frame()}
   <figure class="preview__clip" data-layout={section.layout} data-lp-edit-only={creatorOnly}>
     {#if clip}
-      <ClipFrame still={clip.posterUrl} ratio="var(--_ratio)" {place}>
-        <Watch {clip} label={PREVIEW_COPY.watch} {title} {edit} />
-      </ClipFrame>
+      <InlineFilm {clip} film="reel" label={PREVIEW_COPY.watch} {title} {edit}>
+        {#snippet children(control, player)}
+          <ClipFrame still={clip.posterUrl} ratio="var(--_ratio)" {place} {player}>
+            {@render control()}
+          </ClipFrame>
+        {/snippet}
+      </InlineFilm>
     {:else}
       <ClipFrame
         ratio="var(--_ratio)"
@@ -242,10 +251,16 @@
     }
   }
 
-  /* Cinematic: the picture dissolves into the room, most of all below it. */
+  /* Cinematic: the picture dissolves into the room, most of all below it.
+     A film playing over it is square too, and unmasked: the fade would take
+     its controls. */
   :global(.lp[data-lp-style='cinematic']) .preview__clip[data-layout='feature'] :global(.lp-media) {
     border-radius: 0;
     mask-image: linear-gradient(to bottom, transparent, black 10%, black 58%, transparent);
+  }
+
+  :global(.lp[data-lp-style='cinematic']) .preview__clip :global(.lp-film) {
+    border-radius: 0;
   }
 
   /* ── split ─────────────────────────────────────────────────────────────── */

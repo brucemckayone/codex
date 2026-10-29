@@ -10655,38 +10655,6 @@ export const back_to_top = () => `Back to top`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const preview_player_load_error = () => `Failed to load preview.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const preview_player_init_error = () => `Failed to initialize preview player.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const preview_player_loading = () => `Loading preview`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const preview_player_ready = () => `Preview ready`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const preview_player_error_status = () => `Error loading preview`
 
 
@@ -10736,6 +10704,102 @@ export const player_mute = () => `Mute`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const player_fullscreen = () => `Fullscreen`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const player_tap_for_sound = () => `Tap for sound`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const player_captions = () => `Captions`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const player_seek = () => `Seek`
+
+
+/**
+ * @param {{ time: NonNullable<unknown>, duration: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const player_time = (params) => `${params.time} of ${params.duration}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const player_controls = () => `Film controls`
+
+
+/**
+ * @param {{ title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const player_named = (params) => `${params.title} player`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const player_loading = () => `Loading the film`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const player_error = () => `This film could not be played.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const player_error_format = () => `This browser cannot play this film. Try another browser.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const player_watch_again = () => `Watch again`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const player_close = () => `Close video`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const player_intro_video = () => `Intro video`
 
 
 /**
@@ -15063,6 +15127,14 @@ export const studio_builder_media_slot_guide_video_hint = () => `A talking-head 
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_builder_media_slot_preview_only = () => `Visitors see a 30-second preview of this film, because it is part of a paid practice.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const studio_builder_media_cover = () => `Cover`
 
 
@@ -17320,6 +17392,182 @@ export const studio_page_editor_row_moved = (params) => `${params.item} moved to
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_page_editor_rows_full = (params) => `That’s the most this section shows (${params.max}).`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_title = () => `What’s included`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_show = () => `Show this list`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_elsewhere = () => `Shown beside your price when there is one way to join.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_live = () => `Live`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_rewritten = () => `Rewritten`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_own = () => `Your line`
+
+
+/**
+ * @param {{ fact: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_source_live = (params) => `From the course: ${params.fact}`
+
+
+/**
+ * @param {{ fact: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_source_rewritten = (params) => `Your words for the ${params.fact}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_source_own = () => `Not from the course`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_fact_stages = () => `stages`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_fact_practices = () => `practices`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_fact_length = () => `video and audio length`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_fact_mix = () => `content mix`
+
+
+/**
+ * @param {{ line: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_course_says = (params) => `The course says “${params.line}”.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_relive = () => `Use the course’s words`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_waiting = () => `Not shown until the course has a practice.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_waiting_length = () => `Shown when the course has video or audio and every one has a length.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_placeholder = () => `Your line, for example Printable workbook`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_add = () => `Add a line`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_note = () => `Counts on live lines follow the curriculum. A rewritten line keeps your words.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_reset = () => `Reset to the course’s lines`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_included_off = () => `No list: the card stands alone.`
 
 
 /**

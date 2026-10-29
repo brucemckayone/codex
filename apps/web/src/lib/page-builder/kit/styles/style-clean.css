@@ -219,6 +219,12 @@
     border-start-end-radius: 0;
     border-end-end-radius: 0;
   }
+
+  /* A film playing over it (`InlineFilm`) meets the edge square too. */
+  :is(.lp, #lp-style)[data-lp-style='clean'] .hero-split__media > .lp-film {
+    border-start-end-radius: 0;
+    border-end-end-radius: 0;
+  }
 }
 
 /* ── a long headline comes down, character by character ─────────────────── */

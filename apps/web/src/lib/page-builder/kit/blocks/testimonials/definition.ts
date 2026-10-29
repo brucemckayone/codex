@@ -42,8 +42,7 @@ export const TESTIMONIALS_EMPTY =
 export const testimonialsDefinition: BlockDefinition<TestimonialsProps> = {
   type: 'testimonials',
   label: 'Testimonials',
-  description:
-    'What members say, from your course testimonials and any quotes you add here.',
+  description: 'What members say, in the quotes you add here.',
   group: 'proof',
   icon: 'HeartIcon',
   layouts: [
@@ -80,7 +79,7 @@ export const testimonialsDefinition: BlockDefinition<TestimonialsProps> = {
     {
       key: 'items',
       label: 'Quotes',
-      hint: 'Shown after the testimonials from your course. Use their own words, and their name only if they are happy to share it.',
+      hint: 'What your members have told you. Use their own words, and their name only if they are happy to share it.',
       control: 'items',
       maxItems: 9,
       itemFields: [
@@ -102,7 +101,7 @@ export const testimonialsDefinition: BlockDefinition<TestimonialsProps> = {
         {
           key: 'photo',
           label: 'Their photo',
-          hint: 'Optional, and only if they are happy for you to use it. A small round photo beside their name; once one quote has a photo, the others show their initials.',
+          hint: 'Optional, and only if they are happy for you to use it. A round photo beside their name, shown large beside the first quote in the Highlighted, Big quote and Wall layouts; once one quote has a photo, the others show their initials.',
           control: 'image',
           decorative: true,
           // A circle beside the name, in every layout and Style.
