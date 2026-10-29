@@ -3,57 +3,52 @@
  *
  * The full film when the server marked the clip `fullFilm` and the page can
  * ask for one (`requestFilm`, absent on the canvas); the 30-second preview
- * otherwise, and whenever asking fails — a `null` (the film may not play in
- * full), a rejection, an empty address, or a throw. The visitor pressed
- * play: they always get a film.
- *
- * Called in the press's own tick and handed to the player as it mounts, so
- * the player's `play()` unlocks the `<video>` before anything awaits the
- * answer (`components/player/start.ts`). Nothing is asked on page load.
+ * otherwise, and whenever asking fails. The rule itself is the player's
+ * (`components/player/press-source.ts`), shared with the org landing's
+ * intro film; this says when a sales page's clip may ask.
  *
  * A full film is its whole signed answer, `expiresAt` and all, so the
  * player can ask again before its links run out (`filmRenewal`).
  */
+import {
+  type AskForFull,
+  type PressSource,
+  pressRenewal,
+  pressSource,
+} from '$lib/components/player/press-source';
 import type { PreviewMedia, SalesFilm } from '../../render/types';
 import type { FullFilm, KitPageContext } from '../page-context';
 
 /** The preview's address, or the full film once the page answers. */
-export type FilmSource = string | Promise<string | FullFilm>;
+export type FilmSource = PressSource;
+
+/** How this clip asks for its full film, or `undefined` when it may not. */
+function askFor(
+  clip: PreviewMedia,
+  film: SalesFilm | undefined,
+  requestFilm: KitPageContext['requestFilm']
+): AskForFull | undefined {
+  if (!clip.fullFilm || !film || !requestFilm) return undefined;
+  return () => requestFilm(film);
+}
 
 export function filmSource(
   clip: PreviewMedia,
   film: SalesFilm | undefined,
   requestFilm: KitPageContext['requestFilm']
 ): FilmSource {
-  const preview = clip.playlistUrl;
-  if (!clip.fullFilm || !film || !requestFilm) return preview;
-  try {
-    return requestFilm(film).then(
-      (full) => (full?.playlistUrl ? full : preview),
-      () => preview
-    );
-  } catch {
-    return preview;
-  }
+  return pressSource(clip.playlistUrl, askFor(clip, film, requestFilm));
 }
 
 /**
  * How a playing full film asks again as its links run out (the player's
- * RENEWAL): the same question, settled, so a rejection or a throw answers
- * `null` and the film ends where it stands. `undefined` when no full film
- * can be asked for: a preview is public and never renewed.
+ * RENEWAL). `undefined` when no full film can be asked for: a preview is
+ * public and never renewed.
  */
 export function filmRenewal(
   clip: PreviewMedia,
   film: SalesFilm | undefined,
   requestFilm: KitPageContext['requestFilm']
 ): (() => Promise<FullFilm | null>) | undefined {
-  if (!clip.fullFilm || !film || !requestFilm) return undefined;
-  return async () => {
-    try {
-      return await requestFilm(film);
-    } catch {
-      return null;
-    }
-  };
+  return pressRenewal(askFor(clip, film, requestFilm));
 }

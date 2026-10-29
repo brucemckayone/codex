@@ -36,6 +36,7 @@ vi.mock('$app/state', () => ({
 vi.mock('$lib/remote/org.remote', () => ({
   followOrganization: vi.fn(),
   getMyMembership: vi.fn(async () => null),
+  requestOrgFilm: vi.fn(),
   unfollowOrganization: vi.fn(),
 }));
 vi.mock('$lib/collections', () => ({

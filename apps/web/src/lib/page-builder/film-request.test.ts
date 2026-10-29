@@ -6,7 +6,11 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createFilmRequester, FILM_REQUEST_TIMEOUT_MS } from './film-request';
+import {
+  createFilmRequester,
+  createOrgFilmRequester,
+  FILM_REQUEST_TIMEOUT_MS,
+} from './film-request';
 
 const IDS = {
   organizationId: '1a000000-0000-4000-8000-000000000001',
@@ -78,5 +82,49 @@ describe('createFilmRequester', () => {
     );
     expect(await requestFilm('intro')).toBeNull();
     expect(ask).not.toHaveBeenCalled();
+  });
+});
+
+// The org landing's intro film (Codex-376dl) settles by the same rule.
+describe('createOrgFilmRequester', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('asks once per press for that org, and hands back the stream', async () => {
+    const ask = vi.fn().mockResolvedValue(STREAM);
+    const requestFilm = createOrgFilmRequester(IDS.organizationId, ask);
+
+    expect(await requestFilm()).toEqual(STREAM);
+    expect(ask).toHaveBeenCalledTimes(1);
+    expect(ask).toHaveBeenCalledWith({ organizationId: IDS.organizationId });
+  });
+
+  it('turns a refusal, a rejection and a synchronous throw into null', async () => {
+    const answers = [
+      vi.fn().mockResolvedValue(null),
+      vi.fn().mockRejectedValue(new Error('500')),
+      vi.fn(() => {
+        throw new Error('called during render');
+      }),
+    ];
+    for (const ask of answers) {
+      expect(
+        await createOrgFilmRequester(IDS.organizationId, ask)()
+      ).toBeNull();
+    }
+  });
+
+  it('settles as null when the request hangs', async () => {
+    const pending = createOrgFilmRequester(
+      IDS.organizationId,
+      vi.fn(() => new Promise<typeof STREAM>(() => {}))
+    )();
+
+    await vi.advanceTimersByTimeAsync(FILM_REQUEST_TIMEOUT_MS);
+    expect(await pending).toBeNull();
   });
 });

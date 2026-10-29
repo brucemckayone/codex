@@ -8,8 +8,9 @@
 <script lang="ts">
   import { subscriptionStatusGrantsAccess } from '@codex/constants';
   import { getDisplayThumbnail } from '$lib/utils/thumbnail';
-  import { cappedSizes } from '$lib/utils/image';
-  import { onMount } from 'svelte';
+  import { cappedSizes, getThumbnailUrl } from '$lib/utils/image';
+  import { formatDuration } from '$lib/utils/format';
+  import { flushSync, onMount, tick } from 'svelte';
   import { browser } from '$app/environment';
   import { replaceState } from '$app/navigation';
   import { page } from '$app/state';
@@ -33,6 +34,14 @@
   import SubscribeStickyBar from '$lib/components/subscription/SubscribeStickyBar.svelte';
   import { IntroVideoModal } from '$lib/components/ui/IntroVideoModal';
   import { HeroInlineVideo } from '$lib/components/ui/HeroInlineVideo';
+  import { preloadPlayerOnIntent } from '$lib/components/player/load-core';
+  import {
+    type AskForFull,
+    type PressSource,
+    pressRenewal,
+    pressSource,
+  } from '$lib/components/player/press-source';
+  import { createOrgFilmRequester } from '$lib/page-builder/film-request';
   import { buildContentUrl, buildJourneyUrl } from '$lib/utils/subdomain';
   import { getLibraryDisputeState } from '$lib/subscription/library-access';
   import { extractPlainText } from '@codex/validation';
@@ -48,6 +57,7 @@
   import {
     followOrganization,
     getMyMembership,
+    requestOrgFilm,
     unfollowOrganization,
   } from '$lib/remote/org.remote';
   import { useAccessContext } from '$lib/utils/access-context.svelte';
@@ -58,7 +68,6 @@
 
   let { data }: { data: PageData } = $props();
 
-  let videoActive = $state(false);
   let isDesktop = $state(false);
 
   // Browse-everything filter state. The active type/topic live in LOCAL $state
@@ -117,8 +126,8 @@
     isDesktop = mql.matches;
     const handler = (e: MediaQueryListEvent) => {
       isDesktop = e.matches;
-      // Close inline video if viewport shrinks to mobile
-      if (!e.matches && videoActive) videoActive = false;
+      // The film plays in the hero or in the pop-up, never moved between them.
+      if (filmSrc !== null) closeFilm();
     };
     mql.addEventListener('change', handler);
     return () => mql.removeEventListener('change', handler);
@@ -130,12 +139,20 @@
   const stats = $derived(data.stats);
   const feedCategories = $derived(data.feedCategories ?? []);
   const user = $derived(data.user);
-  // The org intro is OFF until Codex-376dl re-introduces it, designed. Its
-  // stored link is the FULL master playlist, which the public CDN never
-  // serves, so in production every press 404s (Codex-aexid). Nothing in the
-  // studio can set or clear it since b27cd845. The player code below stays for
-  // that work to reuse; `data.org.introVideoUrl` is still loaded.
-  const introVideoUrl: string | null = null;
+  // The intro film (Codex-376dl): its preview, or in full when nothing paid
+  // depends on it. `?? null`: a public info cached before it existed has none.
+  const introFilm = $derived(data.org?.introFilm ?? null);
+  // Something to play: a preview, or a film offered in full.
+  const filmPlayable = $derived(
+    Boolean(introFilm && (introFilm.previewUrl || introFilm.fullFilm))
+  );
+  const filmDuration = $derived(formatDuration(introFilm?.durationSeconds));
+  /** What the open film plays; `null` while it is closed. */
+  let filmSrc = $state.raw<PressSource | null>(null);
+  let filmRenew = $state.raw<AskForFull | undefined>(undefined);
+  let filmChip = $state<HTMLButtonElement | undefined>(undefined);
+  // On a desktop the film grows out of the hero, so its text steps aside.
+  const filmInHero = $derived(filmSrc !== null && isDesktop);
 
   // ── Landing sections derived from the single catalogue fetch ──────────
   // Editor's picks: creator-flagged items → full-bleed feature slides.
@@ -411,16 +428,36 @@
     }
   }
   let videoOriginX = $state(50);
-  let videoOriginY = $state(38);
+  let videoOriginY = $state(50);
 
-  function handlePlayClick(e: MouseEvent) {
-    const hero = (e.currentTarget as HTMLElement).closest('.hero');
-    if (!hero) { videoActive = true; return; }
+  /** Where the chip is in the hero, so the film grows out of it. */
+  function setFilmOrigin(chip: HTMLElement) {
+    const hero = chip.closest('.hero');
+    if (!hero) return;
     const heroRect = hero.getBoundingClientRect();
-    const btnRect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    videoOriginX = ((btnRect.left + btnRect.width / 2 - heroRect.left) / heroRect.width) * 100;
-    videoOriginY = ((btnRect.top + btnRect.height / 2 - heroRect.top) / heroRect.height) * 100;
-    videoActive = true;
+    const chipRect = chip.getBoundingClientRect();
+    videoOriginX = ((chipRect.left + chipRect.width / 2 - heroRect.left) / heroRect.width) * 100;
+    videoOriginY = ((chipRect.top + chipRect.height / 2 - heroRect.top) / heroRect.height) * 100;
+  }
+
+  function pressFilm(e: MouseEvent) {
+    const orgId = data.org?.id;
+    if (!introFilm || !orgId) return;
+    const ask = introFilm.fullFilm
+      ? createOrgFilmRequester(orgId, requestOrgFilm)
+      : undefined;
+    setFilmOrigin(e.currentTarget as HTMLElement);
+    filmRenew = pressRenewal(ask);
+    filmSrc = pressSource(introFilm.previewUrl ?? '', ask);
+    // Opened in the press's own tick, so the player's play() keeps the sound.
+    flushSync();
+  }
+
+  async function closeFilm() {
+    filmSrc = null;
+    filmRenew = undefined;
+    await tick();
+    filmChip?.focus({ preventScroll: true });
   }
 
   function formatHours(totalSeconds: number): string {
@@ -459,36 +496,25 @@
 
 <div class="org-landing">
   <!-- Hero: full viewport, content anchored bottom-left, editorial -->
-  <section class="hero" class:hero--video-playing={videoActive && isDesktop}>
+  <section class="hero" class:hero--video-playing={filmInHero}>
     <!-- Title lives OUTSIDE hero__content so it has no z-index isolation
          and mix-blend-mode: difference can reach the shader canvas -->
     <h1 class="hero__title">{orgName}</h1>
 
-    <!-- Desktop: centered play button in hero -->
-    {#if introVideoUrl && isDesktop && !videoActive}
-      <button
-        class="hero__play-center"
-        onclick={handlePlayClick}
-        aria-label={m.org_hero_watch_intro()}
-      >
-        <svg width="40" height="40" viewBox="0 0 40 40" fill="none" aria-hidden="true">
-          <path d="M14 8L34 20L14 32V8Z" fill="currentColor" opacity="0.9" />
-        </svg>
-      </button>
-    {/if}
-
-    <!-- Desktop: inline video within hero -->
-    {#if introVideoUrl && videoActive && isDesktop}
+    <!-- Desktop: the intro film, grown out of its chip -->
+    {#if introFilm && filmSrc !== null && isDesktop}
       <HeroInlineVideo
-        src={introVideoUrl}
-        active={true}
+        src={filmSrc}
+        renew={filmRenew}
+        title={introFilm.title}
+        poster={introFilm.posterUrl}
         originX={videoOriginX}
         originY={videoOriginY}
-        onclose={() => { videoActive = false; }}
+        onclose={closeFilm}
       />
     {/if}
 
-    <div class="hero__content">
+    <div class="hero__content" inert={filmInHero}>
       <!-- Logo badge -->
       {#if logoUrl}
         <div class="hero__logo-wrap">
@@ -548,12 +574,30 @@
         >
           {isFollowing ? m.org_following() : m.org_follow()}
         </button>
-        {#if introVideoUrl}
-          <button class="hero__cta hero__cta--glass hero__play" onclick={() => { videoActive = true; }}>
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-              <path d="M4 2.5L13 8L4 13.5V2.5Z" />
-            </svg>
-            {m.org_hero_watch_intro()}
+        {#if introFilm && filmPlayable}
+          <!-- The intro film's chip: a poster that carries its own contrast
+               over any shader, in the row every layout already places. -->
+          <button
+            type="button"
+            class="hero__cta hero__cta--glass hero__film"
+            bind:this={filmChip}
+            onclick={pressFilm}
+            {@attach preloadPlayerOnIntent}
+          >
+            <span class="hero__film-poster" aria-hidden="true">
+              {#if introFilm.posterUrl}
+                <img src={getThumbnailUrl(introFilm.posterUrl, 'sm')} alt="" decoding="async" />
+              {/if}
+              <svg class="hero__film-mark" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M4 2.5L13 8L4 13.5V2.5Z" />
+              </svg>
+            </span>
+            <span class="hero__film-text">
+              {m.org_hero_watch_film()}
+              {#if filmDuration}
+                <span class="hero__film-duration"><span aria-hidden="true">·</span> {filmDuration}</span>
+              {/if}
+            </span>
           </button>
         {/if}
       </div>
@@ -927,8 +971,16 @@
   </div>
 </div>
 
-{#if introVideoUrl && videoActive && !isDesktop}
-  <IntroVideoModal open={true} src={introVideoUrl} onclose={() => { videoActive = false; }} />
+<!-- Phone: the intro film in the pop-up -->
+{#if introFilm && filmSrc !== null && !isDesktop}
+  <IntroVideoModal
+    open={true}
+    src={filmSrc}
+    renew={filmRenew}
+    title={introFilm.title}
+    poster={introFilm.posterUrl}
+    onclose={closeFilm}
+  />
 {/if}
 
 <!-- Sticky subscribe CTA — appears once the hero has scrolled above the
@@ -1142,6 +1194,7 @@
   /* ── CTAs ── */
   .hero__actions {
     display: flex;
+    flex-wrap: wrap;
     gap: var(--space-3);
     margin-top: var(--space-2);
   }
@@ -1189,72 +1242,53 @@
     box-shadow: var(--shadow-md);
   }
 
-  .hero__play {
-    gap: var(--space-2);
-  }
-
   .hero__follow--active {
     background: color-mix(in srgb, var(--_hero-glass-tint) 25%, transparent);
     border-color: color-mix(in srgb, var(--_hero-glass-tint) 40%, transparent);
   }
 
-  /* ── Centered play button (desktop only) ──
-     Large glass circle in the middle of the hero viewport.
-     Replaces the small text button on desktop. */
-  .hero__play-center {
-    display: none;
+  /* ── Intro film chip (Codex-376dl) ──
+     A small poster with a play mark, as tall as the row's other buttons, so
+     every layout places it as one of them. The poster brings its own dark
+     ground, so the mark reads over any shader. */
+  .hero__film {
+    gap: var(--space-3);
+    padding: var(--space-1) var(--space-6) var(--space-1) var(--space-1);
   }
 
-  @media (--breakpoint-md) {
-    .hero__play-center {
-      display: flex;
-      position: absolute;
-      top: 38%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      z-index: 2;
-      align-items: center;
-      justify-content: center;
-      width: var(--space-24);
-      height: var(--space-24);
-      border-radius: var(--radius-base);
-      background: color-mix(in srgb, var(--_hero-glass-tint) 12%, transparent);
-      border: var(--border-width) solid color-mix(in srgb, var(--_hero-glass-tint) 25%, transparent);
-      backdrop-filter: blur(var(--blur-md));
-      -webkit-backdrop-filter: blur(var(--blur-md));
-      color: var(--_hero-glass-ink);
-      cursor: pointer;
-      transition: transform var(--duration-normal) var(--ease-out),
-        background var(--duration-fast) var(--ease-default),
-        box-shadow var(--duration-normal) var(--ease-default);
-      animation: hero-play-pulse 3s ease-in-out infinite;
-    }
-
-    .hero__play-center:hover {
-      transform: translate(-50%, -50%) scale(1.1);
-      background: color-mix(in srgb, var(--_hero-glass-tint) 20%, transparent);
-      box-shadow: 0 0 0 var(--space-3) color-mix(in srgb, var(--_hero-glass-tint) 8%, transparent);
-    }
-
-    .hero__play-center:focus-visible {
-      outline: var(--border-width-thick) solid var(--color-focus);
-      outline-offset: var(--space-1);
-    }
-
-    .hero__play-center:active {
-      transform: translate(-50%, -50%) scale(0.96);
-    }
-
-    /* Hide the small text "Watch Intro" button on desktop —
-       replaced by the centered play button */
-    .hero__play {
-      display: none;
-    }
+  .hero__film-text {
+    padding-block: var(--space-2);
   }
 
-  @keyframes hero-play-pulse {
-    0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--_hero-glass-tint) 15%, transparent); }
-    50% { box-shadow: 0 0 0 var(--space-4) color-mix(in srgb, var(--_hero-glass-tint) 0%, transparent); }
+  .hero__film-duration {
+    opacity: var(--opacity-80);
+    font-weight: var(--font-medium);
+  }
+
+  .hero__film-poster {
+    position: relative;
+    display: grid;
+    place-items: center;
+    align-self: stretch;
+    aspect-ratio: 16 / 9;
+    overflow: hidden;
+    border-radius: calc(var(--radius-base) - var(--space-1));
+    background: var(--color-neutral-900);
+    color: var(--color-player-text);
+  }
+
+  .hero__film-poster img {
+    position: absolute;
+    inset: 0;
+    inline-size: 100%;
+    block-size: 100%;
+    object-fit: cover;
+  }
+
+  .hero__film-mark {
+    position: relative;
+    inline-size: var(--space-4);
+    block-size: var(--space-4);
   }
 
   /* ── Hero video-playing state ──
@@ -1283,12 +1317,6 @@
   .hero--video-playing::after {
     opacity: 0.3;
     transition: opacity var(--duration-slow) var(--ease-out);
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .hero__play-center {
-      animation: none;
-    }
   }
 
   /* ── Stats — big numbers ── */

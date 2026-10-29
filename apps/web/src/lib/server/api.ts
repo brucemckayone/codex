@@ -13,6 +13,7 @@ import type {
   ContentHeld,
   CourseEntryResponse,
   CourseFilmStreamResponse,
+  OrgFilmStreamResponse,
   PlaybackProgressResponse,
   StreamingUrlResponse,
   UpdatePlaybackProgressResponse,
@@ -1334,6 +1335,19 @@ export function createServerApi(
           )}/films/${film}/stream?organizationId=${encodeURIComponent(
             organizationId
           )}`,
+          { timeoutMs: COURSE_FILM_TIMEOUT_MS }
+        ),
+
+      /**
+       * The org landing's intro film in FULL (Codex-376dl), asked for by a
+       * visitor's press: the course film's twin, on the same 6s bound. Null
+       * when it may only play its 30s preview (paid content uses it, it is
+       * not ready, or its creator left). Public; the worker re-checks.
+       */
+      orgFilmStream: (organizationId: string) =>
+        request<OrgFilmStreamResponse | null>(
+          'access',
+          `/api/access/orgs/${encodeURIComponent(organizationId)}/film/stream`,
           { timeoutMs: COURSE_FILM_TIMEOUT_MS }
         ),
 

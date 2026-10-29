@@ -1415,7 +1415,7 @@ export const org_hero_meet_creators = () => `Meet Creators`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const org_hero_watch_intro = () => `Watch Intro`
+export const org_hero_watch_film = () => `Watch our film`
 
 
 /**
