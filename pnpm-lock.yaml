@@ -990,6 +990,9 @@ importers:
       '@codex/shared-types':
         specifier: workspace:*
         version: link:../shared-types
+      '@codex/urls':
+        specifier: workspace:*
+        version: link:../urls
       '@codex/validation':
         specifier: workspace:*
         version: link:../validation
@@ -1116,6 +1119,9 @@ importers:
       '@codex/shared-types':
         specifier: workspace:*
         version: link:../shared-types
+      '@codex/urls':
+        specifier: workspace:*
+        version: link:../urls
       '@codex/validation':
         specifier: workspace:*
         version: link:../validation
@@ -1783,6 +1789,9 @@ importers:
       '@codex/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@codex/payments':
+        specifier: workspace:*
+        version: link:../../packages/payments
       '@codex/security':
         specifier: workspace:*
         version: link:../../packages/security

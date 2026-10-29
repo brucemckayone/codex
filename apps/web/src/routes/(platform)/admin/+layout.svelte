@@ -17,9 +17,12 @@
   const { children }: { children: Snippet } = $props();
 
   const countsQuery = provideQueueCounts();
+  // All three tabs: nothing owed to a creator waits on someone seeing an alert (Q8).
   const waiting = $derived(
     countsQuery.current
-      ? countsQuery.current.failedRefunds + countsQuery.current.creatorDebts
+      ? countsQuery.current.failedRefunds +
+          countsQuery.current.creatorDebts +
+          countsQuery.current.owedToCreators
       : null
   );
 

@@ -9,11 +9,14 @@ import type {
   ChargeDetail,
   ChargeSummary,
   CreatorDebtItem,
+  CreatorDebtPerson,
   FailedRefundItem,
   HistoryLine,
+  OwedToCreatorItem,
   RefundPreview,
   RefundRow,
   Slice,
+  StripeHeldTakeBack,
 } from '@codex/admin';
 
 /** "Today" in the mockup: 24 Oct 2026, 10:41 London (09:41 UTC). */
@@ -34,6 +37,7 @@ export function slice(overrides: Partial<Slice> = {}): Slice {
     transferId: 'tr_3QeT9aLk2v',
     takenCents: 324,
     owedCents: 0,
+    owedToPayeeCents: 0,
     // A purchase split without an agreement: B1 says only "Creator".
     agreementShareBps: null,
     history: [],
@@ -241,6 +245,8 @@ export function historyLine(overrides: Partial<HistoryLine> = {}): HistoryLine {
     debtResolution: null,
     disputeOpenedAt: null,
     disputeWonAt: null,
+    systemDecision: null,
+    credit: null,
     ...overrides,
   };
 }
@@ -260,6 +266,7 @@ export function creatorDebt(
     owedCents: 810,
     chargeId: 'ch_3QhA1aLk2vRb22bB',
     title: 'Mindful Mornings',
+    organizationName: 'Studio Alpha',
     buyerName: 'Grace Liu',
     cause: {
       type: 'refund',
@@ -271,6 +278,7 @@ export function creatorDebt(
     errorLabel:
       'Already paid back after a won chargeback, and that payout had gone out',
     createdAt: '2026-10-23T09:00:00.000Z',
+    owedCreditId: null,
     history: [
       historyLine({
         causeType: 'dispute',
@@ -290,6 +298,147 @@ export function creatorDebt(
       }),
       historyLine(),
     ],
+    ...overrides,
+  };
+}
+
+/** A take-back that came out of a payee's Stripe balance (D1). */
+export function stripeHeld(
+  overrides: Partial<StripeHeldTakeBack> = {}
+): StripeHeldTakeBack {
+  return {
+    payoutReversalId: '33333333-3333-4333-8333-333333333333',
+    payoutId: 'payout-maya-winter',
+    amountCents: 1440,
+    takenAt: '2026-10-26T09:00:00.000Z',
+    stripeReversalId: 'trr_1QlW3aLk2v',
+    chargeId: 'ch_3QlW1aLk2vRb33cC',
+    title: 'Winter Light',
+    organizationName: 'Studio Alpha',
+    buyerName: 'Nadia Hassan',
+    cause: {
+      type: 'dispute',
+      id: 'du_1QlW2nLk2vSc18kD',
+      amountCents: 1600,
+      disputeStatus: 'needs_response',
+    },
+    history: [
+      historyLine({
+        causeType: 'dispute',
+        causeId: 'du_1QlW2nLk2vSc18kD',
+        causeAmountCents: 1600,
+        amountCents: 1440,
+        outcome: 'taken',
+        disputeOpenedAt: '2026-10-26T09:00:00.000Z',
+      }),
+    ],
+    ...overrides,
+  };
+}
+
+/**
+ * One person on Creator debts (D1): Maya's −£8.40 Stripe-held balance, £6.00
+ * back so far, written off by Stripe on 24 Apr 2027 if not back by then.
+ */
+export function debtPerson(
+  overrides: Partial<CreatorDebtPerson> = {}
+): CreatorDebtPerson {
+  return {
+    payee: {
+      userId: 'user-maya',
+      name: 'Maya Chen',
+      deleted: false,
+      roles: ['creator'],
+    },
+    stripe: {
+      availableCents: -840,
+      pendingCents: 0,
+      checkedAt: '2026-10-24T09:40:00.000Z',
+      live: true,
+    },
+    stripeOwedCents: 840,
+    negativeSince: '2026-10-26T07:00:00.000Z',
+    backCents: 600,
+    stripeHeld: [stripeHeld()],
+    recordedDebts: [],
+    collectedCents: null,
+    collectedAt: null,
+    totalOwedCents: 840,
+    state: 'recovering',
+    clock: {
+      kind: 'stripe_writes_off',
+      on: '2027-04-24T07:00:00.000Z',
+      daysLeft: 178,
+    },
+    oldestAt: '2026-10-26T07:00:00.000Z',
+    ...overrides,
+  };
+}
+
+/** A person whose only debt is one Stripe refused (D2: Ruth's). */
+export function refusedDebtPerson(
+  overrides: Partial<CreatorDebtPerson> = {}
+): CreatorDebtPerson {
+  return debtPerson({
+    payee: {
+      userId: 'user-ruth',
+      name: 'Ruth Calder',
+      deleted: false,
+      roles: ['creator'],
+    },
+    stripe: {
+      availableCents: 0,
+      pendingCents: 0,
+      checkedAt: '2026-10-24T09:40:00.000Z',
+      live: true,
+    },
+    stripeOwedCents: 0,
+    negativeSince: null,
+    backCents: null,
+    stripeHeld: [],
+    recordedDebts: [creatorDebt()],
+    totalOwedCents: 810,
+    state: 'needs_settling',
+    clock: null,
+    oldestAt: '2026-10-23T09:00:00.000Z',
+    ...overrides,
+  });
+}
+
+/** One row of Owed to creators (O1): Maya's £9.00, a take-back after a won chargeback. */
+export function owedItem(
+  overrides: Partial<OwedToCreatorItem> = {}
+): OwedToCreatorItem {
+  return {
+    creditId: '44444444-4444-4444-8444-444444444444',
+    payoutId: 'payout-maya-golden',
+    payee: {
+      userId: 'user-maya',
+      name: 'Maya Okafor',
+      deleted: false,
+      role: 'creator',
+    },
+    state: 'owed',
+    effect: 'reversal_landed',
+    amountCents: 900,
+    repayCents: 900,
+    stepAmountCents: 900,
+    settledAs: 'cancelled',
+    stripeReversalId: 'trr_1QkR8sLk2vTb41cC',
+    chargeId: 'ch_3QhK1zLk2vRb27pQ',
+    title: 'Golden Hour Portraits',
+    organizationName: 'Hollow Oak Films',
+    buyerName: 'Owen Clarke',
+    cause: {
+      type: 'dispute',
+      id: 'du_1QjM3pLk2vSb91tU',
+      amountCents: 1200,
+      disputeStatus: 'won',
+    },
+    debt: null,
+    action: 'repay',
+    foundAt: '2026-10-23T09:00:00.000Z',
+    checkedAt: null,
     ...overrides,
   };
 }

@@ -25,9 +25,13 @@ import {
 } from '@codex/constants';
 import {
   disputes,
+  type PayeeCredit,
+  type PayeeCreditEffect,
+  type PayeeCreditSettledAs,
   type Payout,
   type PayoutReversal,
   type PayoutReversalKind,
+  payeeCredits,
   payoutReversals,
   payouts,
   refundReviews,
@@ -43,6 +47,7 @@ import {
   asc,
   eq,
   inArray,
+  isNotNull,
   isNull,
   lt,
   ne,
@@ -54,7 +59,6 @@ import { alias } from 'drizzle-orm/pg-core';
 import type Stripe from 'stripe';
 import {
   cancelUnpaidRow,
-  isTransferFullyReversed,
   type LedgerDeps,
   lateTransferOf,
   PAYOUT_ATTEMPT_LEASE_MINUTES,
@@ -400,7 +404,10 @@ function sourceScope(source: ClawbackSource, chargeId: string): SQL {
           eq(payouts.sourceType, 'subscription')
         ),
     // A re-pay row (a won dispute, paid back) is not a slice of the charge.
-    sql`NOT EXISTS (SELECT 1 FROM ${payoutReversals} WHERE ${payoutReversals.repaidByPayoutId} = ${payouts.id})`
+    sql`NOT EXISTS (SELECT 1 FROM ${payoutReversals} WHERE ${payoutReversals.repaidByPayoutId} = ${payouts.id})`,
+    // Nor is a payee credit's, which a debt's own re-pay can take the step's
+    // link from (`repayDebtStep`, review MED-4).
+    sql`NOT EXISTS (SELECT 1 FROM ${payeeCredits} WHERE ${payeeCredits.repayPayoutId} = ${payouts.id})`
   );
   // `and()` is typed `SQL | undefined`, and an undefined where-clause selects
   // every payout row.
@@ -1068,7 +1075,9 @@ async function clawBackShare(
 }
 
 /** A step with nothing left to do. */
-function isSettled(record: PayoutReversal): boolean {
+function isSettled(
+  record: PayoutReversal
+): record is PayoutReversal & { status: PayeeCreditSettledAs } {
   return (
     record.status === 'done' ||
     record.status === 'debt' ||
@@ -1317,23 +1326,7 @@ async function cancelUnpaidSlice(
     cause.type === 'dispute' ? 'cancelled_by_dispute' : 'cancelled_by_refund',
     renewedAt
   );
-
-  if (cancelled) {
-    const late = await lateTransferOf(deps, row);
-    if (late.kind === 'found') {
-      return reverseTransfer(ctx, row, record, late.transferId, undefined);
-    }
-    // None, or Stripe could not say: the step is done as the ledger knows
-    // it, as `cancelUnpaidPayout` leaves it. Under a step settled meanwhile,
-    // a failed lookup is never read as "no transfer went out".
-    if (!(await markDone(deps, record))) {
-      return claimLost(ctx, row, record, {
-        cancelledSlice: true,
-        lateTransferUnknown: late.kind === 'unknown',
-      });
-    }
-    return {};
-  }
+  if (cancelled) return finishCancelledSlice(ctx, row, record);
 
   // Changed since it was read. Paid: claw back this share of the transfer.
   const current = await readPayout(deps, row.id);
@@ -1348,8 +1341,216 @@ async function cancelUnpaidSlice(
       asReversal.amountCents
     );
   }
+  // A retry of a step whose own cancel committed before it failed (data
+  // design §6.4): the cancel matches nothing now, but this step took the
+  // slice, so a transfer a drain made for it is still to be reversed. Marked
+  // done without asking, the payee would keep it.
+  if (current && (await tookTheSliceOf(deps.db, record, current))) {
+    return finishCancelledSlice(ctx, current, record);
+  }
   if (!(await markDone(deps, record))) return claimLost(ctx, row, record);
   return {};
+}
+
+/**
+ * After this step cancelled the unpaid slice: a transfer Stripe made for it
+ * anyway is reversed in full; otherwise the step is done.
+ */
+async function finishCancelledSlice(
+  ctx: StepContext,
+  row: Payout,
+  record: ClaimedStep
+): Promise<StepResult> {
+  const { deps } = ctx;
+  const late = await lateTransferOf(deps, row);
+  if (late.kind === 'found') {
+    return reverseTransfer(ctx, row, record, late.transferId, undefined);
+  }
+  // None, or Stripe could not say: the step is done as the ledger knows
+  // it, as `cancelUnpaidPayout` leaves it. Under a step settled meanwhile,
+  // a failed lookup is never read as "no transfer went out".
+  if (!(await markDone(deps, record))) {
+    return claimLost(ctx, row, record, {
+      cancelledSlice: true,
+      lateTransferUnknown: late.kind === 'unknown',
+    });
+  }
+  return {};
+}
+
+/** The fields `tookTheSlice` reads from a step. */
+type CancellationStep = Pick<
+  PayoutReversal,
+  'id' | 'kind' | 'causeType' | 'attemptedAt'
+>;
+
+/**
+ * Whether this `cancellation` step is the one that cancelled its slice (owner
+ * decision Q6, 2026-10-27; data design §6.1). Only a cancellation step's
+ * cancel writes `cancelled_by_<cause type>` (`cancelUnpaidSlice`), a slice
+ * already cancelled gets no new step (`kindFor`), and the cancel writes the
+ * step's renewed lease as the slice's `resolved_at`. So it did when the slice
+ * is cancelled by its cause type and either that lease is still on the step,
+ * or no other cancellation of that cause type exists on the slice. `steps`
+ * may hold any of the slice's steps; only the other cancellations count.
+ */
+export function tookTheSlice(
+  step: CancellationStep,
+  slice: Pick<Payout, 'status' | 'resolvedAt'>,
+  steps: readonly Pick<PayoutReversal, 'id' | 'kind' | 'causeType'>[]
+): boolean {
+  if (step.kind !== 'cancellation') return false;
+  if (slice.status !== `cancelled_by_${step.causeType}`) return false;
+  if (
+    step.attemptedAt !== null &&
+    slice.resolvedAt !== null &&
+    step.attemptedAt.getTime() === slice.resolvedAt.getTime()
+  ) {
+    return true;
+  }
+  return !steps.some(
+    (other) =>
+      other.id !== step.id &&
+      other.kind === 'cancellation' &&
+      other.causeType === step.causeType
+  );
+}
+
+/** `tookTheSlice`, reading the slice's other cancellations. */
+export async function tookTheSliceOf(
+  db: Client,
+  step: CancellationStep,
+  slice: Payout
+): Promise<boolean> {
+  if (step.kind !== 'cancellation') return false;
+  if (slice.status !== `cancelled_by_${step.causeType}`) return false;
+  const others = await db
+    .select({
+      id: payoutReversals.id,
+      kind: payoutReversals.kind,
+      causeType: payoutReversals.causeType,
+    })
+    .from(payoutReversals)
+    .where(
+      and(
+        eq(payoutReversals.payoutId, slice.id),
+        eq(payoutReversals.kind, 'cancellation'),
+        eq(payoutReversals.causeType, step.causeType),
+        ne(payoutReversals.id, step.id)
+      )
+    );
+  return tookTheSlice(step, slice, others);
+}
+
+/**
+ * How the ledger says a `cancellation` step took its slice
+ * (`sliceTakenBy`).
+ */
+export type SliceTaken =
+  /** `tookTheSlice`: its cancel is the one that cancelled the slice. */
+  | { by: 'cancel' }
+  /**
+   * The drain then sent the slice's transfer anyway, reversed it in full and
+   * recorded it, marking the slice `reversed` (Codex-2hxff.88). The step
+   * took the share only if Stripe shows `transferId` reversed in full,
+   * which the caller asks.
+   */
+  | { by: 'reversed'; transferId: string };
+
+/**
+ * `tookTheSlice`, and also for a slice the drain marked `reversed` after the
+ * cancel (owner decision 2026-10-28 on Codex-2hxff.88, "Re-pay them, same
+ * rule"): that state no longer says which cause cancelled it, so the step
+ * took it only when it is the slice's ONLY cancellation or transfer
+ * reversal, of any cause, and the slice records its transfer. Null when
+ * neither holds: a person decides.
+ */
+export function sliceTakenBy(
+  step: CancellationStep,
+  slice: Pick<Payout, 'status' | 'resolvedAt' | 'stripeTransferId'>,
+  steps: readonly Pick<PayoutReversal, 'id' | 'kind' | 'causeType'>[]
+): SliceTaken | null {
+  if (tookTheSlice(step, slice, steps)) return { by: 'cancel' };
+  if (
+    step.kind !== 'cancellation' ||
+    slice.status !== 'reversed' ||
+    !slice.stripeTransferId
+  ) {
+    return null;
+  }
+  const another = steps.some(
+    (other) =>
+      other.id !== step.id &&
+      (other.kind === 'cancellation' || other.kind === 'transfer_reversal')
+  );
+  return another
+    ? null
+    : { by: 'reversed', transferId: slice.stripeTransferId };
+}
+
+/**
+ * What the ledger says of a `cancellation` step and its slice (review
+ * round 2 MED-1): it took the slice (`SliceTaken`); the slice IS cancelled by
+ * its cause type, or `reversed`, but a sibling makes it unclear which step
+ * took it (`ambiguous`: only then does a person decide); or the slice is in
+ * any other state, pending, paid, or cancelled by the other cause type, so
+ * this step's cancel never took it (`not_cancelled`: read it as a transfer
+ * step would be). Any other step is `not_cancelled` too.
+ */
+export type CancellationAttribution =
+  | SliceTaken
+  | 'ambiguous'
+  | 'not_cancelled';
+
+export function cancellationAttribution(
+  step: CancellationStep,
+  slice: Pick<Payout, 'status' | 'resolvedAt' | 'stripeTransferId'>,
+  steps: readonly Pick<PayoutReversal, 'id' | 'kind' | 'causeType'>[]
+): CancellationAttribution {
+  if (
+    step.kind !== 'cancellation' ||
+    (slice.status !== `cancelled_by_${step.causeType}` &&
+      slice.status !== 'reversed')
+  ) {
+    return 'not_cancelled';
+  }
+  return sliceTakenBy(step, slice, steps) ?? 'ambiguous';
+}
+
+/** `sliceTakenBy`, reading the slice's other cancellations and transfer reversals. */
+export async function sliceTakenByOf(
+  db: Client,
+  step: CancellationStep,
+  slice: Payout
+): Promise<SliceTaken | null> {
+  const attribution = await cancellationAttributionOf(db, step, slice);
+  return typeof attribution === 'object' ? attribution : null;
+}
+
+/** `cancellationAttribution`, reading the slice's other cancellations and transfer reversals. */
+export async function cancellationAttributionOf(
+  db: Client,
+  step: CancellationStep,
+  slice: Payout
+): Promise<CancellationAttribution> {
+  if (cancellationAttribution(step, slice, []) === 'not_cancelled') {
+    return 'not_cancelled';
+  }
+  const others = await db
+    .select({
+      id: payoutReversals.id,
+      kind: payoutReversals.kind,
+      causeType: payoutReversals.causeType,
+    })
+    .from(payoutReversals)
+    .where(
+      and(
+        eq(payoutReversals.payoutId, slice.id),
+        inArray(payoutReversals.kind, ['cancellation', 'transfer_reversal']),
+        ne(payoutReversals.id, step.id)
+      )
+    );
+  return cancellationAttribution(step, slice, others);
 }
 
 /**
@@ -1393,7 +1594,12 @@ async function reverseTransfer(
       }
     );
   } catch (error) {
-    if (cancelledSlice && (await isTransferFullyReversed(deps, transferId))) {
+    // Read once: "reversed" settles the step below, and "not reversed" is
+    // what lets a refusal under a settled step say the payee kept it.
+    const transferState = cancelledSlice
+      ? await transferReversedState(deps, transferId)
+      : undefined;
+    if (transferState === 'reversed') {
       // The late transfer's own settle found it too and reversed it first
       // (Codex-pqsfg). Stripe refuses a second full reversal, but the money is
       // back, so the step is done, whoever reversed it. Logged as
@@ -1419,11 +1625,13 @@ async function reverseTransfer(
     const code = errorCodeOf(error);
     if (code === 'insufficient_funds' || code === 'balance_insufficient') {
       if (!(await recordDebt(ctx, row, record, error))) {
-        // Refused: a cancelled slice's late transfer is still the payee's.
+        // Refused for the balance: a cancelled slice's late transfer is still
+        // the payee's, for certain.
         return claimLost(ctx, row, record, {
           transferId,
           cancelledSlice,
           refused: true,
+          keptConfirmed: true,
           error,
         });
       }
@@ -1443,6 +1651,7 @@ async function reverseTransfer(
         ask: !definitive,
         cancelledSlice,
         refused: definitive,
+        keptConfirmed: transferState === 'not_reversed',
         error,
       });
     }
@@ -1467,6 +1676,27 @@ async function reverseTransfer(
     await settleIfFullyReversed(deps, row.id);
   }
   return {};
+}
+
+/**
+ * Whether Stripe has reversed this transfer in full, under any key, or
+ * `unknown` when it cannot be asked. Never read as "not reversed": a cancelled
+ * slice's transfer read as kept closes its payee's credit as not owed.
+ */
+export async function transferReversedState(
+  deps: Pick<ClawbackDeps, 'stripe' | 'obs'>,
+  transferId: string
+): Promise<'reversed' | 'not_reversed' | 'unknown'> {
+  try {
+    const transfer = await deps.stripe.transfers.retrieve(transferId);
+    return transfer.reversed === true ? 'reversed' : 'not_reversed';
+  } catch (error) {
+    deps.obs.warn('Stripe could not say whether a transfer is reversed', {
+      stripeTransferId: transferId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return 'unknown';
+  }
 }
 
 /**
@@ -1692,7 +1922,7 @@ export async function retryFailedClawbacks(
  * so once claimed, the total cannot change under the transfer.
  */
 export async function pendingReductionsFor(
-  db: LedgerDeps['db'],
+  db: Client,
   payoutIds: readonly string[]
 ): Promise<Map<string, number>> {
   if (payoutIds.length === 0) return new Map();
@@ -2371,6 +2601,262 @@ async function setKind(
   return changed ? { ...record, kind } : undefined;
 }
 
+/** The note on a `transfer_kept` credit, which is born resolved. */
+const TRANSFER_KEPT_NOTE = 'The payee kept the transfer for this share';
+
+/**
+ * A late effect of one step, for support's "Owed to creators"
+ * (Codex-2hxff.73, owner decision Q10; data design §7.1).
+ */
+export interface PayeeCreditFinding {
+  payoutReversalId: string;
+  /** The step's own payout: its payee is who is owed. */
+  payout: Pick<Payout, 'id' | 'userId'>;
+  effect: PayeeCreditEffect;
+  /** What Stripe took, or the cancelled share; null while unverified. */
+  amountCents: number | null;
+  stripeReversalId?: string | null;
+  stripeTransferId?: string | null;
+  /** The step's status when the effect was found. */
+  settledAs: PayeeCreditSettledAs;
+  /** The errorId of the alert that found it. */
+  alertErrorId: string;
+}
+
+/** What `recordPayeeCredit` did with a finding (review MED-1). */
+export type PayeeCreditWrite =
+  /** Written: a new row, or an open `unverified` row upgraded. */
+  | { kind: 'recorded'; credit: PayeeCredit }
+  /**
+   * A confirmed take-back met a row the SYSTEM had closed as not owed (a
+   * born-resolved `transfer_kept`, or a check's not owed): reopened as owed,
+   * for what Stripe took (owner decision 2026-10-28, "Reopen if the system
+   * closed it"). `was` is the row as it stood.
+   */
+  | { kind: 'reopened'; credit: PayeeCredit; was: PayeeCredit }
+  /**
+   * A confirmed take-back met a row a PERSON settled: their decision stands,
+   * and a person reopens it by hand if it must change.
+   */
+  | { kind: 'person_settled'; credit: PayeeCredit }
+  /**
+   * Left as it was, because the row already says as much: an unverified
+   * finding on any row, a confirmed one on an open confirmed row, or a kept
+   * transfer on any row but an open unverified one.
+   */
+  | { kind: 'unchanged'; credit: PayeeCredit };
+
+/**
+ * Record a late effect as a `payee_credits` row: one per step. A confirmed
+ * finding upgrades an open `unverified` row; an unverified one never changes
+ * any. A `transfer_kept` row is born resolved `not_owed` by the system: the
+ * payee kept the money.
+ *
+ * A confirmed take-back (`reversal_landed`, `slice_cancelled`) that meets a
+ * row the system closed reopens it as owed, compare-and-set on that closed
+ * state; one a person closed is left as their decision (review MED-1). It
+ * never matches nothing silently: the caller reports what this returns
+ * (`reportPayeeCreditWrite`).
+ */
+export async function recordPayeeCredit(
+  db: Client,
+  finding: PayeeCreditFinding
+): Promise<PayeeCreditWrite> {
+  const now = new Date();
+  const kept = finding.effect === 'transfer_kept';
+  const values = {
+    payoutReversalId: finding.payoutReversalId,
+    payoutId: finding.payout.id,
+    payeeUserId: finding.payout.userId,
+    effect: finding.effect,
+    amountCents: finding.amountCents,
+    stripeReversalId: finding.stripeReversalId ?? null,
+    stripeTransferId: finding.stripeTransferId ?? null,
+    settledAs: finding.settledAs,
+    alertErrorId: finding.alertErrorId,
+    resolution: kept ? ('not_owed' as const) : null,
+    resolvedAt: kept ? now : null,
+    resolutionNote: kept ? TRANSFER_KEPT_NOTE : null,
+  };
+  const insert = db.insert(payeeCredits).values(values);
+  const found = {
+    effect: values.effect,
+    amountCents: values.amountCents,
+    stripeReversalId:
+      values.stripeReversalId ?? sql`${payeeCredits.stripeReversalId}`,
+    stripeTransferId:
+      values.stripeTransferId ?? sql`${payeeCredits.stripeTransferId}`,
+    settledAs: values.settledAs,
+    alertErrorId: values.alertErrorId,
+    resolution: values.resolution,
+    resolvedAt: values.resolvedAt,
+    resolutionNote: values.resolutionNote,
+    updatedAt: now,
+  };
+  const [written] =
+    finding.effect === 'unverified'
+      ? await insert
+          .onConflictDoNothing({ target: payeeCredits.payoutReversalId })
+          .returning()
+      : await insert
+          .onConflictDoUpdate({
+            target: payeeCredits.payoutReversalId,
+            set: found,
+            where: sql`${payeeCredits.effect} = 'unverified' AND ${payeeCredits.resolvedAt} IS NULL`,
+          })
+          .returning();
+  if (written) return { kind: 'recorded', credit: written };
+
+  // The step's row already says something: read it, never assume.
+  const current = await payeeCreditOfStep(db, finding.payoutReversalId);
+  const owed =
+    finding.effect === 'reversal_landed' ||
+    finding.effect === 'slice_cancelled';
+  if (!owed || current.resolvedAt === null) {
+    return { kind: 'unchanged', credit: current };
+  }
+  if (current.resolution !== 'not_owed' || current.resolvedByUserId !== null) {
+    return { kind: 'person_settled', credit: current };
+  }
+  const [reopened] = await db
+    .update(payeeCredits)
+    .set({ ...found, resolvedByUserId: null })
+    .where(
+      and(
+        eq(payeeCredits.id, current.id),
+        eq(payeeCredits.resolution, 'not_owed'),
+        isNotNull(payeeCredits.resolvedAt),
+        isNull(payeeCredits.resolvedByUserId)
+      )
+    )
+    .returning();
+  if (reopened) return { kind: 'reopened', credit: reopened, was: current };
+  // Another delivery reopened it first: as it stands now.
+  return {
+    kind: 'unchanged',
+    credit: await payeeCreditOfStep(db, finding.payoutReversalId),
+  };
+}
+
+async function payeeCreditOfStep(
+  db: Client,
+  payoutReversalId: string
+): Promise<PayeeCredit> {
+  const [credit] = await db
+    .select()
+    .from(payeeCredits)
+    .where(eq(payeeCredits.payoutReversalId, payoutReversalId))
+    .limit(1);
+  // The write matched a row on this step, or it would have inserted one.
+  if (!credit) {
+    throw new InternalServiceError(
+      'A payee credit was neither written nor found',
+      { payoutReversalId }
+    );
+  }
+  return credit;
+}
+
+/**
+ * Log what `recordPayeeCredit` did when it did not simply write (review
+ * MED-1): a reopen, a person's decision left standing (an error under the
+ * finding's alert, for a person to reopen by hand), or a finding that changed
+ * nothing.
+ */
+export function reportPayeeCreditWrite(
+  obs: ClawbackDeps['obs'],
+  finding: Pick<
+    PayeeCreditFinding,
+    'effect' | 'amountCents' | 'alertErrorId' | 'stripeReversalId'
+  >,
+  write: PayeeCreditWrite,
+  ids: Record<string, string>
+): void {
+  if (write.kind === 'recorded') return;
+  const facts = {
+    ...ids,
+    creditId: write.credit.id,
+    alertErrorId: finding.alertErrorId,
+    findingEffect: finding.effect,
+    findingAmountCents: finding.amountCents,
+    stripeReversalId: finding.stripeReversalId ?? null,
+    creditEffect: write.credit.effect,
+    creditResolution: write.credit.resolution,
+  };
+  if (write.kind === 'person_settled') {
+    obs.error(
+      'A confirmed take-back met a settled credit: reopen by hand. Support settled it before Stripe confirmed what was taken, so their decision stands',
+      { ...facts, errorId: finding.alertErrorId }
+    );
+  } else if (write.kind === 'reopened') {
+    obs.warn(
+      'A confirmed take-back reopened a credit the system had closed as not owed: owed again, in Owed to creators',
+      {
+        ...facts,
+        wasEffect: write.was.effect,
+        wasNote: write.was.resolutionNote,
+        amountCents: write.credit.amountCents,
+      }
+    );
+  } else if (finding.effect === 'unverified') {
+    obs.info('An unconfirmed late take-back left its credit as it was', facts);
+  } else {
+    obs.warn(
+      'A late take-back left its credit as it was: the row already says as much',
+      facts
+    );
+  }
+}
+
+/**
+ * What a cancelled slice's payee is owed (data design §7.3): what the drain
+ * would have paid, the slice less its done reductions.
+ */
+export async function cancelledShareOf(
+  db: Client,
+  slice: Pick<Payout, 'id' | 'amountCents'>
+): Promise<number> {
+  const reduced = (await pendingReductionsFor(db, [slice.id])).get(slice.id);
+  return slice.amountCents - (reduced ?? 0);
+}
+
+/**
+ * `claimLost`'s queue write: after its alert, and never throwing. A failure,
+ * of the write or of the reads that build it, is logged under the alert's own
+ * errorId, since a redelivery never reaches `claimLost` again for a settled
+ * step (`clawBackShare`).
+ */
+async function queueForSupport(
+  ctx: StepContext,
+  ids: Record<string, string>,
+  alertErrorId: string,
+  finding: () =>
+    | Promise<PayeeCreditFinding | undefined>
+    | PayeeCreditFinding
+    | undefined
+): Promise<void> {
+  try {
+    const found = await finding();
+    if (found) {
+      reportPayeeCreditWrite(
+        ctx.deps.obs,
+        found,
+        await recordPayeeCredit(ctx.deps.db, found),
+        ids
+      );
+    }
+  } catch (error) {
+    ctx.deps.obs.error(
+      `${causeLabel(ctx.cause)} clawback: this late take-back could not be queued for support; it is in this alert only`,
+      {
+        errorId: alertErrorId,
+        ...ids,
+        error: error instanceof Error ? error.message : String(error),
+      }
+    );
+  }
+}
+
 /**
  * What a delivery had already done to the payee when a write found its claim
  * gone (`claimLost`).
@@ -2384,11 +2870,16 @@ interface Taken {
   ask?: boolean;
   /** The delivery cancelled the unpaid slice (`cancelUnpaidSlice`). */
   cancelledSlice?: boolean;
-  /**
-   * Stripe refused the reversal. A cancelled slice's late transfer is then
-   * still with the payee.
-   */
+  /** Stripe refused the reversal. */
   refused?: boolean;
+  /**
+   * A refused reversal of a cancelled slice's late transfer, with the transfer
+   * known to be still with the payee: refused for the balance, or Stripe read
+   * it as not reversed. Only then is the payee's credit born closed as not
+   * owed (`transfer_kept`); a refusal Stripe could not confirm is queued for a
+   * check instead.
+   */
+  keptConfirmed?: boolean;
   /**
    * Stripe could not be asked whether a transfer went out for the cancelled
    * slice (`lateTransferOf`, `unknown`).
@@ -2469,12 +2960,13 @@ async function claimLost(
     // The alert is raised here or not at all: runRecord's catch, which gets
     // this error next, does not run this again.
     if (taken.reversal || taken.ask || taken.cancelledSlice) {
+      const errorId = crypto.randomUUID();
       deps.obs.error(
         taken.reversal
           ? `${causeLabel(cause)} clawback: a reversal landed under a lost claim; the step could not be read; check by hand`
           : `${causeLabel(cause)} clawback: a step's claim was lost after it may have taken money; the step could not be read; check by hand`,
         {
-          errorId: crypto.randomUUID(),
+          errorId,
           ...ids,
           creatorUserId: row.userId,
           amountCents: taken.reversal?.amount ?? step.amountCents,
@@ -2485,6 +2977,34 @@ async function claimLost(
             readError instanceof Error ? readError.message : String(readError),
         }
       );
+      // Best effort: the database is probably down, and the alert is the
+      // fallback. Only a step settled by now is queued; one another
+      // delivery holds is that delivery's to finish.
+      await queueForSupport(ctx, ids, errorId, async () => {
+        const [now] = await deps.db
+          .select()
+          .from(payoutReversals)
+          .where(eq(payoutReversals.id, step.id))
+          .limit(1);
+        if (!now || !isSettled(now)) return undefined;
+        // Its own reversal, or nothing taken: as the read below decides.
+        if (
+          now.status === 'done' &&
+          (!taken.reversal || now.stripeReversalId === taken.reversal.id)
+        ) {
+          return undefined;
+        }
+        return {
+          payoutReversalId: step.id,
+          payout: row,
+          effect: 'unverified',
+          amountCents: null,
+          stripeReversalId: taken.reversal?.id,
+          stripeTransferId: transferId,
+          settledAs: now.status,
+          alertErrorId: errorId,
+        };
+      });
     }
     throw readError;
   }
@@ -2501,12 +3021,28 @@ async function claimLost(
     return {};
   }
   const settled = current;
-  const leftAsSettled = (unconfirmed = false) => {
+  const settledAs = settled.status;
+  /** An unverified credit, for "Check Stripe again". */
+  const unverified = (errorId: string, stripeTransferId?: string | null) =>
+    queueForSupport(ctx, ids, errorId, () => ({
+      payoutReversalId: step.id,
+      payout: row,
+      effect: 'unverified',
+      amountCents: null,
+      stripeTransferId,
+      settledAs,
+      alertErrorId: errorId,
+    }));
+  const leftAsSettled = async (unconfirmed = false) => {
+    // With an errorId when unconfirmed: it is queued for support to check
+    // Stripe again (owner decision OQ3), and the row joins its log line.
+    const errorId = unconfirmed ? crypto.randomUUID() : undefined;
     deps.obs.warn(
       unconfirmed
         ? `${causeLabel(cause)} clawback: this step was settled while its delivery ran, and its reversal's outcome is unconfirmed: Stripe lists none for it yet, and one still in flight could land`
         : `${causeLabel(cause)} clawback: this step was settled while its delivery ran; left as it is`,
       {
+        ...(errorId ? { errorId } : {}),
         ...ids,
         status: settled.status,
         stripeReversalId: taken.reversal?.id ?? null,
@@ -2514,6 +3050,7 @@ async function claimLost(
         ...attemptError,
       }
     );
+    if (errorId) await unverified(errorId, transferId);
     return {};
   };
   if (
@@ -2528,10 +3065,11 @@ async function claimLost(
     try {
       reversal = await findLandedReversal(deps, transferId, step.id);
     } catch (error) {
+      const errorId = crypto.randomUUID();
       deps.obs.error(
         `${causeLabel(cause)} clawback: a step was settled by another path while its reversal was at Stripe, and Stripe could not be asked whether it landed. Check it by hand`,
         {
-          errorId: crypto.randomUUID(),
+          errorId,
           ...ids,
           creatorUserId: row.userId,
           amountCents: step.amountCents,
@@ -2541,6 +3079,7 @@ async function claimLost(
           lookupError: error instanceof Error ? error.message : String(error),
         }
       );
+      await unverified(errorId, transferId);
       return {};
     }
   }
@@ -2550,27 +3089,48 @@ async function claimLost(
   // what the payee is owed turns on a transfer, so the alert says what is
   // known, and never more. A late landing must not leave them short on our
   // word, nor a re-pay pay them twice.
+  const kept =
+    taken.refused === true &&
+    taken.keptConfirmed === true &&
+    transferId !== null;
   const heldMessage =
     !reversal && taken.cancelledSlice
-      ? taken.refused && transferId
+      ? kept
         ? 'slice cancelled under a settled step; its transfer is still with the payee and was NOT reversed; do not re-pay; reconcile the slice'
-        : unconfirmed && transferId
-          ? 'slice cancelled under a settled step; its transfer reversal outcome unconfirmed: check Stripe. If a reversal of this transfer exists, the payee is owed it back; if not, reconcile the slice and do not re-pay'
-          : taken.lateTransferUnknown
-            ? 'slice cancelled under a settled step; Stripe could not say whether a transfer went out for it, outcome unconfirmed: check Stripe. If none went out, or one went out and was reversed, the payee is owed the slice back; if one went out and was not reversed, reconcile the slice and do not re-pay'
-            : undefined
+        : taken.refused && transferId
+          ? 'slice cancelled under a settled step; Stripe refused its transfer reversal and could not say whether the transfer is reversed, outcome unconfirmed: check Stripe. If it was reversed, the payee is owed the slice back; if not, reconcile the slice and do not re-pay'
+          : unconfirmed && transferId
+            ? 'slice cancelled under a settled step; its transfer reversal outcome unconfirmed: check Stripe. If a reversal of this transfer exists, the payee is owed it back; if not, reconcile the slice and do not re-pay'
+            : taken.lateTransferUnknown
+              ? 'slice cancelled under a settled step; Stripe could not say whether a transfer went out for it, outcome unconfirmed: check Stripe. If none went out, or one went out and was reversed, the payee is owed the slice back; if one went out and was not reversed, reconcile the slice and do not re-pay'
+              : undefined
       : undefined;
   if (heldMessage) {
+    const errorId = crypto.randomUUID();
     deps.obs.error(`${causeLabel(cause)} clawback: ${heldMessage}`, {
-      errorId: crypto.randomUUID(),
+      errorId,
       ...ids,
       creatorUserId: row.userId,
       amountCents: step.amountCents,
       settledAs: settled.status,
       stripeTransferId: transferId,
-      unconfirmed: !(taken.refused && transferId),
+      unconfirmed: !kept,
       ...attemptError,
     });
+    // Kept: not owed, so born resolved. Otherwise support checks Stripe.
+    if (kept) {
+      await queueForSupport(ctx, ids, errorId, () => ({
+        payoutReversalId: step.id,
+        payout: row,
+        effect: 'transfer_kept',
+        amountCents: null,
+        stripeTransferId: transferId,
+        settledAs,
+        alertErrorId: errorId,
+      }));
+    } else {
+      await unverified(errorId, transferId);
+    }
     return {};
   }
   if (!reversal && !taken.cancelledSlice) return leftAsSettled(unconfirmed);
@@ -2591,6 +3151,25 @@ async function claimLost(
       cancelledSlice: taken.cancelledSlice === true,
     }
   );
+  // Owed what Stripe took (Q9), never the step's amount; or, for the
+  // cancelled slice, what the drain would have paid.
+  await queueForSupport(ctx, ids, errorId, async () => ({
+    payoutReversalId: step.id,
+    payout: row,
+    ...(reversal
+      ? {
+          effect: 'reversal_landed' as const,
+          amountCents: reversal.amount,
+          stripeReversalId: reversal.id,
+        }
+      : {
+          effect: 'slice_cancelled' as const,
+          amountCents: await cancelledShareOf(deps.db, row),
+        }),
+    stripeTransferId: transferId,
+    settledAs,
+    alertErrorId: errorId,
+  }));
   if (reversal && settled.status !== 'done' && !settled.stripeReversalId) {
     // The record that it landed: the case support finds by
     // `status <> 'done' AND stripe_reversal_id IS NOT NULL`. Only that column
@@ -2658,7 +3237,7 @@ export async function findLandedReversal(
  * request with the same key) or a rate limit (429). Stripe stores that answer
  * for the key, so only a new key can succeed.
  */
-function isDefinitiveStripeError(error: unknown): boolean {
+export function isDefinitiveStripeError(error: unknown): boolean {
   const status = (error as { statusCode?: unknown } | null)?.statusCode;
   return (
     typeof status === 'number' &&

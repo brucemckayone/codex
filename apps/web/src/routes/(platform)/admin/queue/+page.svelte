@@ -2,8 +2,9 @@
   /admin/queue — money the automatic refund path couldn't settle
   (Codex-2hxff.28, mockup D1–D3). Oldest first; each needs a person.
 
-  `?tab=failed` (the default) or `?tab=debts` is the list on screen. Only that
-  list is loaded; the other loads when support switches to it. Settling
+  `?tab=failed` (the default), `?tab=debts` or `?tab=owed` (Owed to creators,
+  Codex-2hxff.73) is the list on screen. Only that list is loaded; another
+  loads when support switches to it. Settling
   refreshes the list and the counts (the nav badge shares the counts query).
   A charge's own page is not open beside the queue, and it reads fresh each
   time it opens, so there is no charge to refresh here.
@@ -12,6 +13,10 @@
   never the empty state. Settling the last row of a later page goes back to
   the last page with rows, rather than saying nothing is waiting. A list
   refused because the session ended says so, with no Try again (R2-M1).
+
+  "Check Stripe again" on an Owed to creators row asks Stripe once per click,
+  with no dialog, and says what it found. Nothing on the page asks again by
+  itself.
 
   When a settle dialog closes on an answer, focus moves to the notice
   (`tabindex="-1"`) so it is read out; on Cancel, back to the row's button,
@@ -23,7 +28,10 @@
     CreatorDebtItem,
     FailedRefundItem,
     FailedRefundResolution,
+    OwedToCreatorAction,
+    OwedToCreatorItem,
   } from '@codex/admin';
+  import { tick } from 'svelte';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import * as m from '$paraglide/messages';
@@ -32,6 +40,13 @@
   import { ReceiptIcon } from '$lib/components/ui/Icon';
   import CreatorDebtsTable from '$lib/components/support/CreatorDebtsTable.svelte';
   import FailedRefundsTable from '$lib/components/support/FailedRefundsTable.svelte';
+  import OwedToCreatorsTable from '$lib/components/support/OwedToCreatorsTable.svelte';
+  import ResolveCreditDialog from '$lib/components/support/ResolveCreditDialog.svelte';
+  import {
+    type CreditTarget,
+    checkNotice,
+    targetFromItem,
+  } from '$lib/components/support/owed-view';
   import SettleDebtDialog from '$lib/components/support/SettleDebtDialog.svelte';
   import SettleRefundDialog from '$lib/components/support/SettleRefundDialog.svelte';
   import SessionEndedAlert from '$lib/components/support/SessionEndedAlert.svelte';
@@ -40,11 +55,21 @@
   import TabLinks from '$lib/components/support/TabLinks.svelte';
   import { useQueueCounts } from '$lib/components/support/queue-counts';
   import { queryErrorMessage } from '$lib/remote/query-result';
-  import { listCreatorDebts, listFailedRefunds } from '$lib/remote/support.remote';
+  import {
+    checkOwedToCreator,
+    listCreatorDebts,
+    listFailedRefunds,
+    listOwedToCreators,
+  } from '$lib/remote/support.remote';
 
   const LIMIT = 20;
 
-  const tab = $derived(page.url.searchParams.get('tab') === 'debts' ? 'debts' : 'failed');
+  type Tab = 'failed' | 'debts' | 'owed';
+
+  const tab = $derived.by((): Tab => {
+    const asked = page.url.searchParams.get('tab');
+    return asked === 'debts' || asked === 'owed' ? asked : 'failed';
+  });
   const currentPage = $derived(
     Math.max(1, Number.parseInt(page.url.searchParams.get('page') ?? '1', 10) || 1)
   );
@@ -58,12 +83,18 @@
   const debtsQuery = $derived(
     tab === 'debts' ? listCreatorDebts({ page: currentPage, limit: LIMIT }) : null
   );
-  const activeQuery = $derived(tab === 'failed' ? failedQuery : debtsQuery);
+  const owedQuery = $derived(
+    tab === 'owed' ? listOwedToCreators({ page: currentPage, limit: LIMIT }) : null
+  );
+  const activeQuery = $derived(
+    tab === 'failed' ? failedQuery : tab === 'debts' ? debtsQuery : owedQuery
+  );
   const listError = $derived(queryErrorMessage(activeQuery?.error));
   const sessionEnded = $derived(isSessionEnded(activeQuery?.error));
   const failed = $derived(failedQuery?.current);
   const debts = $derived(debtsQuery?.current);
-  const active = $derived(tab === 'failed' ? failed : debts);
+  const owed = $derived(owedQuery?.current);
+  const active = $derived(tab === 'failed' ? failed : tab === 'debts' ? debts : owed);
   const pagination = $derived(active?.pagination);
   /** A later page left empty (its last row settled): on its way back. */
   const emptyLaterPage = $derived(active !== undefined && active.items.length === 0 && currentPage > 1);
@@ -88,6 +119,11 @@
   let refundOpen = $state(false);
   let debtItem = $state<CreatorDebtItem | null>(null);
   let debtOpen = $state(false);
+  let creditTarget = $state<CreditTarget | null>(null);
+  let creditAction = $state<OwedToCreatorAction | null>(null);
+  let creditOpen = $state(false);
+  /** The credit whose "Check Stripe again" is running. */
+  let checkingId = $state<string | null>(null);
 
   // Where focus goes when a settle dialog closes.
   let returnFocus: HTMLElement | null = null;
@@ -126,11 +162,51 @@
     debtOpen = true;
   }
 
+  function openCredit(item: OwedToCreatorItem, action: OwedToCreatorAction) {
+    rememberFocus();
+    creditTarget = targetFromItem(item);
+    creditAction = action;
+    creditOpen = true;
+  }
+
   function handleFinished(next: SettleNotice) {
     focusNotice = true;
     notice = next;
     void activeQuery?.refresh().catch(() => {});
     void countsQuery.refresh().catch(() => {});
+  }
+
+  /** One question to Stripe per click (O5, O6): it never asks again by itself. */
+  async function checkStripe(item: OwedToCreatorItem) {
+    if (checkingId !== null) return;
+    checkingId = item.creditId;
+    const target = targetFromItem(item);
+    let next: SettleNotice;
+    let changed = true;
+    try {
+      const answer = await checkOwedToCreator({ creditId: item.creditId });
+      next = checkNotice(target, answer);
+      // Still no answer from Stripe: nothing changed, so nothing to reload.
+      changed = !(answer.outcome === 'done' && answer.result.outcome === 'still_unknown');
+    } catch (error) {
+      next = isSessionEnded(error)
+        ? {
+            variant: 'warning',
+            lead: m.support_outcome_signed_out_lead(),
+            text: m.support_settle_session_ended(),
+          }
+        : { variant: 'warning', text: m.support_credit_check_failed() };
+      changed = false;
+    } finally {
+      checkingId = null;
+    }
+    notice = next;
+    if (changed) {
+      void activeQuery?.refresh().catch(() => {});
+      void countsQuery.refresh().catch(() => {});
+    }
+    await tick();
+    document.querySelector<HTMLElement>('[data-settle-notice]')?.focus();
   }
 
   function goToPage(next: number) {
@@ -172,16 +248,29 @@
         ? m.support_nav_queue_waiting({ count: String(counts.creatorDebts) })
         : undefined,
     },
+    {
+      href: '/admin/queue?tab=owed',
+      label: m.support_queue_tab_owed(),
+      current: tab === 'owed',
+      count: counts?.owedToCreators ?? null,
+      countLabel: counts?.owedToCreators
+        ? m.support_nav_queue_waiting({ count: String(counts.owedToCreators) })
+        : undefined,
+    },
   ]}
 />
 
 <p class="intro">
-  {tab === 'failed' ? m.support_queue_failed_intro() : m.support_queue_debts_intro()}
+  {tab === 'failed'
+    ? m.support_queue_failed_intro()
+    : tab === 'debts'
+      ? m.support_queue_debts_intro()
+      : m.support_queue_owed_intro()}
 </p>
 
 {#if notice}
   <Alert variant={notice.variant} tabindex={-1} data-settle-notice data-testid="settle-notice">
-    <p>{notice.text}</p>
+    <p>{#if notice.lead}<strong>{notice.lead}</strong> {/if}{notice.text}</p>
   </Alert>
 {/if}
 
@@ -219,10 +308,14 @@
     <EmptyState
       title={tab === 'failed'
         ? m.support_queue_failed_empty_title()
-        : m.support_queue_debts_empty_title()}
+        : tab === 'debts'
+          ? m.support_queue_debts_empty_title()
+          : m.support_queue_owed_empty_title()}
       description={tab === 'failed'
         ? m.support_queue_failed_empty_body()
-        : m.support_queue_debts_empty_body()}
+        : tab === 'debts'
+          ? m.support_queue_debts_empty_body()
+          : m.support_queue_owed_empty_body()}
       icon={ReceiptIcon}
       headingLevel={2}
     />
@@ -231,8 +324,15 @@
   <Card.Root>
     {#if tab === 'failed' && failed}
       <FailedRefundsTable items={failed.items} onSettle={openRefund} />
-    {:else if debts}
+    {:else if tab === 'debts' && debts}
       <CreatorDebtsTable items={debts.items} onSettle={openDebt} />
+    {:else if owed}
+      <OwedToCreatorsTable
+        items={owed.items}
+        onResolve={openCredit}
+        onCheck={(item) => void checkStripe(item)}
+        {checkingId}
+      />
     {/if}
   </Card.Root>
   {#if pagination && pagination.totalPages > 1}
@@ -273,6 +373,13 @@
 <SettleDebtDialog
   item={debtItem}
   bind:open={debtOpen}
+  onFinished={handleFinished}
+  closeFocus={focusAfterSettle}
+/>
+<ResolveCreditDialog
+  target={creditTarget}
+  action={creditAction}
+  bind:open={creditOpen}
   onFinished={handleFinished}
   closeFocus={focusAfterSettle}
 />

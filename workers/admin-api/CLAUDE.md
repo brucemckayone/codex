@@ -7,7 +7,7 @@ Org management dashboard (analytics, content management, customer support grants
 Two kinds of route, never mixed:
 
 - **Org management** (analytics, content, customers, grants, status): `auth: 'required'` + `requireOrgMembership: true` + `requireOrgManagement: true`, scoped by `ctx.organizationId` (resolved from org membership).
-- **Platform support**: the 9 `/api/admin/fees/*` endpoints (Codex-m644n, no web UI consumer), `/api/admin/organizations/:orgId/owner` and the 9 `/api/admin/support/*` endpoints. They take `policy: { auth: 'platform_owner' }` with NO org policy: platform-wide on purpose, gated by the role.
+- **Platform support**: the 9 `/api/admin/fees/*` endpoints (Codex-m644n, no web UI consumer), `/api/admin/organizations/:orgId/owner` and the 12 `/api/admin/support/*` endpoints. They take `policy: { auth: 'platform_owner' }` with NO org policy: platform-wide on purpose, gated by the role.
 
 All are rate limited via the `api` preset (100/min) on `/api/*`, and by their own policy's preset.
 
@@ -23,11 +23,14 @@ Platform support's refund screen and queue (the `/admin` pages in apps/web). Des
 | 2 | GET | `/api/admin/support/charges/:chargeId` | params `supportChargeParamsSchema` | `{ data: ChargeDetail }` |
 | 3 | GET | `/api/admin/support/charges/:chargeId/refund-preview` | + query `supportRefundPreviewQuerySchema` (`amountCents`) | `{ data: RefundPreview }` |
 | 4 | POST | `/api/admin/support/charges/:chargeId/refunds` | body `supportIssueRefundSchema` (`amountCents`, `reason`, `expectedRefundCount`) | **200** `{ data: { refund, replayed } }` |
-| 5 | GET | `/api/admin/support/queue/counts` | — | `{ data: { failedRefunds, creatorDebts } }` |
+| 5 | GET | `/api/admin/support/queue/counts` | — | `{ data: { failedRefunds, creatorDebts, owedToCreators } }`: only items needing a person (open reviews, `to_invoice` people, open credits) |
 | 6 | GET | `/api/admin/support/queue/failed-refunds` | query `supportQueueQuerySchema` | `{ items: FailedRefundItem[], pagination }` |
-| 7 | GET | `/api/admin/support/queue/creator-debts` | query `supportQueueQuerySchema` | `{ items: CreatorDebtItem[], pagination }` |
+| 7 | GET | `/api/admin/support/queue/creator-debts` | query `supportQueueQuerySchema` | `{ items: CreatorDebtPerson[], pagination }`: one row per person, with Stripe's live balance (`live: false` = the 08:00 snapshot) and a collected-over-£50 debt (Codex-2hxff.30, .73) |
 | 8 | POST | `/api/admin/support/refunds/:refundId/resolve` | body `supportResolveFailedRefundSchema` (a note is required for `creators_repaid`) | `{ data: ResolvedFailedRefund }` |
 | 9 | POST | `/api/admin/support/creator-debts/:reviewId/resolve` | body `supportResolveCreatorDebtSchema` (never `dispute_won`; a note is required for `manually_reversed`) | `{ data: ResolvedCreatorDebt }` |
+| 10 | GET | `/api/admin/support/queue/owed-to-creators` | query `supportQueueQuerySchema` | `{ items: OwedToCreatorItem[], pagination }`: late take-backs owed back to a payee (`payee_credits`, Codex-2hxff.73) |
+| 11 | POST | `/api/admin/support/owed-to-creators/:creditId/resolve` | params `supportCreditIdParamsSchema`, body `supportResolveCreditSchema` (`action` repay / count_against_debt / not_owed; a note for not_owed and on a `needs_person` row) | `{ data: ResolvedOwedToCreator }` |
+| 12 | POST | `/api/admin/support/owed-to-creators/:creditId/check` | params `supportCreditIdParamsSchema` (no body) | `{ data: CheckedOwedToCreator }`: Check Stripe again |
 
 - **Route 4 writes nothing.** It only asks Stripe, in a fixed order: list the charge's refunds; one carrying this decision's key is answered `replayed: true`; a moved count is `CHARGE_CHANGED` (412); then the 14-day window, an open or lost chargeback, and the amount cap; then `refunds.create` with the key and `codex_requested_by`. `charge.refunded` records the refund and claws back the shares. 200, not 201: a repeat creates nothing. A spent key (Stripe holds an earlier refusal or 500 for it, 24 h) is `REFUND_KEY_SPENT` (409): change the amount or use the Dashboard.
 - **Route 8**, `creators_repaid`, re-pays the payees in one transaction and, for a failed full purchase refund, gives the buyer access back. It is refused, `REPAY_BLOCKED_BY_LATER_CAUSE` (422), when a chargeback or a later refund was shared against the failed one (owner decision 2026-10-25). The route then bumps the buyer's library (`invalidateUserLibrary`) and clears their streaming block, as a won dispute's restore does.

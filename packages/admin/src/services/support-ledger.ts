@@ -12,12 +12,21 @@ import {
 import type { PayoutReversal } from '@codex/database/schema';
 import {
   type ClawbackPlanMethod,
+  DEBT_INVOICE_AFTER_DAYS,
+  debtRule,
   MAX_CLAWBACK_ATTEMPTS,
+  PAYEE_PAID_RESOLUTIONS,
+  STRIPE_WRITE_OFF_AFTER_DAYS,
 } from '@codex/payments';
 import type {
   ChargebackState,
+  CreatorDebtPerson,
+  CreditAction,
+  CreditState,
+  HistoryCredit,
   HistoryLine,
   HistoryOutcome,
+  SystemDecision,
 } from '../support-types';
 
 /**
@@ -26,6 +35,110 @@ import type {
  * taken, from the re-pay row: it is never "not taken".
  */
 const MOVED_TO_REPAY = 'moved_to_repay';
+
+/**
+ * The codes a stranded cancellation carries once the system decided it
+ * (`repay.ts`, Codex-2hxff.71; data design §6.3).
+ */
+const SYSTEM_DECISIONS: Readonly<Record<string, SystemDecision>> = {
+  system_took_share: 'took_share',
+  system_payee_kept: 'payee_kept',
+};
+
+/** A `payee_credits` row, as the history and the queue read it. */
+export interface CreditView {
+  id: string;
+  effect: string;
+  amountCents: number | null;
+  /** The step's status when the late effect was found. */
+  settledAs: string;
+  resolution: string | null;
+  /** Its re-pay payout, once support re-paid it. */
+  repayPayout: { id: string; status: string } | null;
+  /**
+   * Open, unverified, and on a cancellation the ledger cannot attribute to
+   * its step: its slice is cancelled or reversed, with an ambiguous sibling
+   * (`payeeCreditsNeedingAPerson`; review MED-3, round 2 MED-1).
+   */
+  needsPerson: boolean;
+  /**
+   * A needs-person row whose sibling step on the slice is done or re-paid:
+   * Re-pay could pay the share twice, so it is settled by hand.
+   */
+  siblingTook: boolean;
+}
+
+/** A credit's state (data design §7.2). */
+export function creditState(
+  credit: Pick<CreditView, 'effect' | 'resolution' | 'needsPerson'>
+): CreditState {
+  switch (credit.resolution) {
+    case 'repaid':
+      return 'repaid';
+    case 'debt_collected':
+      return 'debt_collected';
+    case 'not_owed':
+      return 'not_owed';
+    default:
+      if (credit.effect !== 'unverified') return 'owed';
+      return credit.needsPerson ? 'needs_person' : 'needs_check';
+  }
+}
+
+/**
+ * An open credit's one action (§7.4; owner decisions Q11, OQ4, MED-3), by the
+ * same rules the resolve route enforces: a check while Stripe never answered;
+ * by hand on a step another path paid back already (but not when that is
+ * the payee-paid debt's own re-pay: the two are independent, round 2 LOW-3),
+ * or on a needs-person row a sibling step already took; decide (Re-pay or
+ * Not owed, with a note) on any other needs-person row; Count it against
+ * the step's own debt only while that debt is open and Stripe took exactly
+ * its amount; otherwise Re-pay. Null once the credit is settled.
+ */
+export function creditAction(
+  credit: Pick<
+    CreditView,
+    | 'effect'
+    | 'resolution'
+    | 'settledAs'
+    | 'amountCents'
+    | 'needsPerson'
+    | 'siblingTook'
+  >,
+  step: { repaidByPayoutId: string | null },
+  debt: {
+    attemptedReversalCents: number;
+    resolvedAt: Date | null;
+    resolution: string | null;
+  } | null
+): CreditAction | null {
+  const state = creditState(credit);
+  if (state === 'needs_check') return 'check';
+  if (state !== 'owed' && state !== 'needs_person') return null;
+  const besideDebtRepay =
+    credit.settledAs === 'debt' &&
+    debt !== null &&
+    debt.resolvedAt !== null &&
+    debt.resolution !== null &&
+    PAYEE_PAID_RESOLUTIONS.has(debt.resolution);
+  if (
+    credit.settledAs === 'done' ||
+    (step.repaidByPayoutId !== null && !besideDebtRepay) ||
+    (state === 'needs_person' && credit.siblingTook)
+  ) {
+    return 'settle_by_hand';
+  }
+  if (state === 'needs_person') return 'decide';
+  if (
+    credit.settledAs === 'debt' &&
+    debt !== null &&
+    debt.resolvedAt === null &&
+    debt.attemptedReversalCents === credit.amountCents
+  ) {
+    return 'count_against_debt';
+  }
+  return 'repay';
+}
 
 /** A chargeback that took the money and was not won: it blocks a refund. */
 export const BLOCKING_DISPUTE_STATUSES: readonly string[] = [
@@ -62,12 +175,19 @@ export interface HistoryContext {
   debtResolutions: ReadonlyMap<string, string | null>;
   /** A dispute's dates, by dispute id: opened, and won (null unless won). */
   disputeDates: ReadonlyMap<string, { openedAt: string; wonAt: string | null }>;
+  /**
+   * A late take-back's credit, by step id, with its one action worked out
+   * (`creditAction`; Codex-2hxff.73).
+   */
+  credits: ReadonlyMap<string, CreditView & { action: CreditAction | null }>;
 }
 
 export interface SliceHistory {
   history: HistoryLine[];
   takenCents: number;
   owedCents: number;
+  /** Owed back TO the payee: open, confirmed credits (`taken_after_settled`). */
+  owedToPayeeCents: number;
 }
 
 /**
@@ -82,8 +202,13 @@ export interface SliceHistory {
  * - A `cancelled` step marked `moved_to_repay` was taken from the re-pay
  *   rows: it shows as the same cause's steps there, `taken_from_repay` when
  *   done, each naming its row. Never "not taken".
+ * - A `cancelled` or `debt` step with an open, confirmed credit (a late
+ *   take-back reached Stripe after it was settled) is `taken_after_settled`,
+ *   and once support re-pays the credit, `paid_back` (Codex-2hxff.73).
  * - `takenCents` counts taken and taken from re-pay, but not a won
- *   chargeback's, which was paid back. `owedCents` counts open debts.
+ *   chargeback's, which was paid back, and an open credit's amount (what
+ *   Stripe took). `owedCents` counts open debts; `owedToPayeeCents`, open
+ *   credits.
  */
 export function sliceHistory(
   sliceId: string,
@@ -101,13 +226,17 @@ export function sliceHistory(
   const placed: Array<{ step: PayoutReversal; line: HistoryLine }> = [];
   const place = (
     step: PayoutReversal,
-    outcome: HistoryOutcome,
+    baseOutcome: HistoryOutcome,
     repayPayoutId: string | null
   ) => {
     const dates =
       step.causeType === 'dispute'
         ? context.disputeDates.get(step.causeId)
         : undefined;
+    const credit = context.credits.get(step.id);
+    const outcome = credit
+      ? creditOutcome(step, credit, baseOutcome)
+      : baseOutcome;
     placed.push({
       step,
       line: {
@@ -119,12 +248,17 @@ export function sliceHistory(
         amountCents: step.amountCents,
         outcome,
         repayPayoutId,
+        // A debt step's, whatever its line reads: a late take-back on an open
+        // debt is `taken_after_settled` while the debt stays owed.
         debtResolution:
-          outcome === 'owed'
+          step.status === 'debt'
             ? (context.debtResolutions.get(step.id) ?? null)
             : null,
         disputeOpenedAt: dates?.openedAt ?? null,
         disputeWonAt: dates?.wonAt ?? null,
+        systemDecision:
+          (step.lastErrorCode && SYSTEM_DECISIONS[step.lastErrorCode]) || null,
+        credit: credit ? historyCredit(credit) : null,
       },
     });
   };
@@ -152,20 +286,58 @@ export function sliceHistory(
       a.step.id.localeCompare(b.step.id)
   );
   const history = placed.map(({ line }) => line);
-  const takenCents = history
+  // What Stripe took after the step was settled: the credit's amount.
+  const owedToPayeeCents = history
+    .filter((line) => line.outcome === 'taken_after_settled')
+    .reduce((sum, line) => sum + (line.credit?.amountCents ?? 0), 0);
+  const takenCents =
+    history
+      .filter(
+        (line) =>
+          (line.outcome === 'taken' || line.outcome === 'taken_from_repay') &&
+          !(
+            line.causeType === 'dispute' &&
+            context.wonDisputeIds.has(line.causeId)
+          )
+      )
+      .reduce((sum, line) => sum + line.amountCents, 0) + owedToPayeeCents;
+  const owedCents = placed
     .filter(
-      (line) =>
-        (line.outcome === 'taken' || line.outcome === 'taken_from_repay') &&
-        !(
-          line.causeType === 'dispute' &&
-          context.wonDisputeIds.has(line.causeId)
-        )
+      ({ step, line }) => step.status === 'debt' && line.debtResolution === null
     )
-    .reduce((sum, line) => sum + line.amountCents, 0);
-  const owedCents = history
-    .filter((line) => line.outcome === 'owed' && line.debtResolution === null)
-    .reduce((sum, line) => sum + line.amountCents, 0);
-  return { history, takenCents, owedCents };
+    .reduce((sum, { line }) => sum + line.amountCents, 0);
+  return { history, takenCents, owedCents, owedToPayeeCents };
+}
+
+/**
+ * A step's line under a credit: `taken_after_settled` while a confirmed one
+ * is open on a `cancelled` or `debt` step, `paid_back` once support re-paid
+ * it; otherwise what the step alone reads.
+ */
+function creditOutcome(
+  step: PayoutReversal,
+  credit: CreditView,
+  baseOutcome: HistoryOutcome
+): HistoryOutcome {
+  if (step.status !== 'cancelled' && step.status !== 'debt') {
+    return baseOutcome;
+  }
+  const state = creditState(credit);
+  if (state === 'owed') return 'taken_after_settled';
+  if (state === 'repaid') return 'paid_back';
+  return baseOutcome;
+}
+
+function historyCredit(
+  credit: CreditView & { action: CreditAction | null }
+): HistoryCredit {
+  return {
+    creditId: credit.id,
+    state: creditState(credit),
+    amountCents: credit.amountCents,
+    action: credit.action,
+    repayPayout: credit.repayPayout,
+  };
 }
 
 /** A step's outcome; `taken` is what a done step that was not paid back reads. */
@@ -185,6 +357,39 @@ function outcomeOf(
     default:
       return 'in_progress';
   }
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Where a person's Stripe-held debt stands (data design §4.1, owner decision
+ * Q4), on what they owe NOW (studio S1, option A): over £50 is invoiced 90
+ * days after the balance first went below zero, and is `to_invoice` from that
+ * instant; £50 or less is written off when Stripe collects it at 180 days.
+ * `daysLeft` counts whole days to that instant, 0 once it has come.
+ */
+export function debtStanding(
+  owedCents: number,
+  negativeSince: Date,
+  now: Date
+): Pick<CreatorDebtPerson, 'state' | 'clock'> {
+  const rule = debtRule(owedCents, negativeSince);
+  const days =
+    rule.kind === 'invoice'
+      ? DEBT_INVOICE_AFTER_DAYS
+      : STRIPE_WRITE_OFF_AFTER_DAYS;
+  const dueAt = negativeSince.getTime() + days * DAY_MS;
+  return {
+    state:
+      rule.kind === 'invoice' && now.getTime() >= dueAt
+        ? 'to_invoice'
+        : 'recovering',
+    clock: {
+      kind: rule.kind,
+      on: rule.on,
+      daysLeft: Math.max(0, Math.ceil((dueAt - now.getTime()) / DAY_MS)),
+    },
+  };
 }
 
 /** Plain words for Stripe's refund `failure_reason` (the mockup's table). */

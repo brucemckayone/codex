@@ -28,7 +28,7 @@
  * - Webhook handlers check-before-insert (same pattern as PurchaseService)
  */
 
-import { agreementsInForce } from '@codex/agreements';
+import { agreementsInForce, isEnvName } from '@codex/agreements';
 import type { VersionedCache } from '@codex/cache';
 import {
   BILLING_INTERVAL,
@@ -46,9 +46,11 @@ import {
   toIso,
 } from '@codex/database';
 import {
+  connectBalances,
   organizationFollowers,
   organizationMemberships,
   type PayoutType,
+  payoutReversals,
   payouts,
   stripeConnectAccounts,
   subscriptions,
@@ -57,21 +59,28 @@ import {
 } from '@codex/database/schema';
 import {
   assertGbpOnly,
+  type BankPayoutRunSummary,
+  bankOnFor,
   type ClawbackCharge,
+  type ClearedEpisode,
   claimPayoutAttempts,
   findTransfersForPayouts,
+  isBankPayoutRun,
   isDrainablePayout,
   issueRefund,
   type LedgerDeps,
   listClawableRefunds,
+  londonDate,
   type OrganisationPayee,
   type PayeeAccounts,
   type PlatformFailureTally,
   payeeAccountIds,
+  payoutReleasedBankFields,
   pendingReductionsFor,
   platformFailureTally,
   type RecordSliceInput,
   type RecordSliceOutcome,
+  type ReleasedSlice,
   recordPlatformFee,
   recordSplitOnce,
   recordTransferFailure,
@@ -82,8 +91,12 @@ import {
   retryFailedClawbacks,
   reverseCharge,
   reverseEarlierRefundsAfterCommit,
+  runBankPayouts,
   settlePayoutPaid,
   settleTransfer,
+  takeBackMovedMoney,
+  type WaitingSetup,
+  waitingMoney,
 } from '@codex/payments';
 import {
   applyMinPlatformFeeFloor,
@@ -104,6 +117,7 @@ import {
   ServiceUnavailableError,
 } from '@codex/service-errors';
 import type { PaginatedListResponse } from '@codex/shared-types';
+import { buildOrgUrlFromEnv } from '@codex/urls';
 import {
   aliasedTable,
   and,
@@ -357,6 +371,13 @@ export interface PayoutWithCreator {
   purchaseId: string | null;
   subscriptionId: string | null;
   stripeChargeId: string | null;
+  /**
+   * The London date (`YYYY-MM-DD`) this row's money goes, or went, to the
+   * payee's bank: the daily payout run 14 days after the sale (Codex-2hxff.29,
+   * `bankOnFor`). Null when unpaid, or while Stripe's own schedule pays the
+   * payee's account.
+   */
+  bankOn: string | null;
 }
 
 /**
@@ -423,6 +444,8 @@ type PayoutFilterOptions = {
   sourceType?: 'all' | 'purchase' | 'subscription';
   fromDate?: string;
   toDate?: string;
+  /** Rows transferred on or after this: `bankOnFor`'s transferredAt. */
+  transferredFrom?: string;
 };
 
 /**
@@ -464,6 +487,34 @@ export interface CreatorPayoutRow {
   purchaseId: string | null;
   subscriptionId: string | null;
   stripeChargeId: string | null;
+  /** As on {@link PayoutWithCreator}: when this row's money reaches the bank. */
+  bankOn: string | null;
+  /**
+   * A `reversed` row's take-back: when Stripe took the money back (London
+   * `YYYY-MM-DD`) and why, from its latest step that moved money. Null
+   * otherwise.
+   */
+  takenBack: { causeType: 'refund' | 'dispute'; on: string } | null;
+}
+
+/**
+ * Money waiting for the creator to set up payouts (Codex-2hxff.34), from the
+ * same query as the monthly email (`waitingMoney`), so the Earnings banner
+ * and the email cannot disagree. Across every organisation, as creator and
+ * as owner.
+ */
+export interface CreatorWaitingMoney {
+  totalCents: number;
+  /** ISO: the oldest waiting row. */
+  oldestAt: string;
+  organisations: Array<{
+    organizationId: string | null;
+    name: string | null;
+    /** The organisation's own share, paid to its owner. */
+    asOwner: boolean;
+    cents: number;
+  }>;
+  setup: WaitingSetup;
 }
 
 /**
@@ -480,6 +531,8 @@ export interface CreatorEarningsSummary {
   totalEarnedCents: number;
   inTransitCents: number;
   needsAttentionCount: number;
+  /** Null when nothing is waiting for setup. */
+  waiting: CreatorWaitingMoney | null;
 }
 
 /**
@@ -4000,10 +4053,22 @@ export class SubscriptionService extends BaseService {
    * single-sourced regardless of whether the caller scopes by org or by user.
    */
   private buildPayoutFilterConditions(options: PayoutFilterOptions) {
-    const { status = 'all', sourceType = 'all', fromDate, toDate } = options;
+    const {
+      status = 'all',
+      sourceType = 'all',
+      fromDate,
+      toDate,
+      transferredFrom,
+    } = options;
     // Seed from dateWindow (SQL[], empty when no dates) into a fresh mutable
     // array so the element type is inferred without importing the SQL type.
     const conditions = [...dateWindow(payouts.createdAt, fromDate, toDate)];
+    if (transferredFrom) {
+      // The same transferredAt `bankOnFor` dates a row by (web r2 R2-L3).
+      conditions.push(
+        sql`COALESCE(${payouts.resolvedAt}, ${payouts.createdAt}) >= ${new Date(transferredFrom).toISOString()}::timestamptz`
+      );
+    }
 
     if (status === 'pending') {
       conditions.push(eq(payouts.status, 'pending'));
@@ -4145,6 +4210,12 @@ export class SubscriptionService extends BaseService {
             // banner-first/children-after render stays predictable.
             .orderBy(desc(payouts.createdAt), payouts.payoutType, payouts.id);
 
+    const bankDates = await this.bankDatesFor(
+      items.flatMap((row) => (row.creatorId ? [row.creatorId] : []))
+    );
+    const datesOf = (creatorId: string | null) =>
+      creatorId ? bankDates.get(creatorId) : undefined;
+
     return {
       items: items.map((row) => ({
         id: row.id,
@@ -4167,6 +4238,11 @@ export class SubscriptionService extends BaseService {
         purchaseId: row.purchaseId ?? null,
         subscriptionId: row.subscriptionId ?? null,
         stripeChargeId: row.stripeChargeId ?? null,
+        bankOn: bankOnFor(
+          row,
+          datesOf(row.creatorId)?.manualSince ?? null,
+          datesOf(row.creatorId)?.cleared ?? null
+        ),
       })),
       pagination: {
         page,
@@ -4175,6 +4251,62 @@ export class SubscriptionService extends BaseService {
         totalPages: Math.ceil(total / limit),
       },
     };
+  }
+
+  /**
+   * What `bankOn` needs per payee, from `connect_balances`:
+   *   - `manualSince`: when the daily job started paying them out
+   *     (`manual_payouts_since`), the earliest of their accounts (a payee
+   *     normally has one; a replaced account keeps its row and is paid out);
+   *   - `cleared`: the last below-zero episode that ended (`cleared_since`
+   *     to `cleared_at`), the latest of their accounts. Only the last is
+   *     kept, so an earlier episode's dates can't be moved.
+   */
+  private async bankDatesFor(
+    userIds: string[]
+  ): Promise<
+    Map<string, { manualSince: Date; cleared: ClearedEpisode | null }>
+  > {
+    const dates = new Map<
+      string,
+      { manualSince: Date; cleared: ClearedEpisode | null }
+    >();
+    const ids = [...new Set(userIds)];
+    if (ids.length === 0) return dates;
+    const rows = await this.db
+      .select({
+        userId: connectBalances.userId,
+        manualPayoutsSince: connectBalances.manualPayoutsSince,
+        clearedSince: connectBalances.clearedSince,
+        clearedAt: connectBalances.clearedAt,
+      })
+      .from(connectBalances)
+      .where(
+        and(
+          inArray(connectBalances.userId, ids),
+          isNotNull(connectBalances.manualPayoutsSince)
+        )
+      );
+    for (const row of rows) {
+      if (!row.manualPayoutsSince) continue;
+      const known = dates.get(row.userId);
+      const cleared =
+        row.clearedSince && row.clearedAt
+          ? { since: row.clearedSince, clearedAt: row.clearedAt }
+          : null;
+      dates.set(row.userId, {
+        manualSince:
+          known && known.manualSince < row.manualPayoutsSince
+            ? known.manualSince
+            : row.manualPayoutsSince,
+        cleared:
+          known?.cleared &&
+          (!cleared || known.cleared.clearedAt > cleared.clearedAt)
+            ? known.cleared
+            : cleared,
+      });
+    }
+    return dates;
   }
 
   /**
@@ -4293,6 +4425,15 @@ export class SubscriptionService extends BaseService {
     ]);
 
     const total = totalResult?.count ?? 0;
+    const [bankDates, takenBack] = await Promise.all([
+      rows.length === 0
+        ? undefined
+        : this.bankDatesFor([userId]).then((dates) => dates.get(userId)),
+      this.takenBackFor(
+        userId,
+        rows.filter((row) => row.status === 'reversed').map((row) => row.id)
+      ),
+    ]);
 
     return {
       items: rows.map((row) => ({
@@ -4311,6 +4452,12 @@ export class SubscriptionService extends BaseService {
         purchaseId: row.purchaseId ?? null,
         subscriptionId: row.subscriptionId ?? null,
         stripeChargeId: row.stripeChargeId ?? null,
+        bankOn: bankOnFor(
+          row,
+          bankDates?.manualSince ?? null,
+          bankDates?.cleared ?? null
+        ),
+        takenBack: takenBack.get(row.id) ?? null,
       })),
       pagination: {
         page,
@@ -4319,6 +4466,45 @@ export class SubscriptionService extends BaseService {
         totalPages: Math.ceil(total / limit),
       },
     };
+  }
+
+  /**
+   * Each reversed row's latest take-back that moved money, in one query for
+   * the page, and only the caller's own rows (`payouts.user_id`).
+   */
+  private async takenBackFor(
+    userId: string,
+    payoutIds: readonly string[]
+  ): Promise<Map<string, NonNullable<CreatorPayoutRow['takenBack']>>> {
+    const latest = new Map<
+      string,
+      NonNullable<CreatorPayoutRow['takenBack']>
+    >();
+    if (payoutIds.length === 0) return latest;
+    const steps = await this.db
+      .select({
+        payoutId: payoutReversals.payoutId,
+        causeType: payoutReversals.causeType,
+        resolvedAt: payoutReversals.resolvedAt,
+      })
+      .from(payoutReversals)
+      .innerJoin(payouts, eq(payouts.id, payoutReversals.payoutId))
+      .where(
+        and(
+          eq(payouts.userId, userId),
+          inArray(payoutReversals.payoutId, [...payoutIds]),
+          takeBackMovedMoney(),
+          isNotNull(payoutReversals.resolvedAt)
+        )
+      )
+      .orderBy(desc(payoutReversals.resolvedAt));
+    for (const step of steps) {
+      const { causeType, resolvedAt } = step;
+      if (latest.has(step.payoutId) || !resolvedAt) continue;
+      if (causeType !== 'refund' && causeType !== 'dispute') continue;
+      latest.set(step.payoutId, { causeType, on: londonDate(resolvedAt) });
+    }
+    return latest;
   }
 
   /**
@@ -4347,7 +4533,7 @@ export class SubscriptionService extends BaseService {
         ? sql<number>`COALESCE(SUM(${payouts.amountCents}),0)::int`
         : sql<number>`COALESCE(SUM(CASE WHEN ${and(...dateConditions)} THEN ${payouts.amountCents} ELSE 0 END),0)::int`;
 
-    const [paid, inTransit, needsAttention] = await Promise.all([
+    const [paid, inTransit, needsAttention, waiting] = await Promise.all([
       this.db
         .select({
           inPeriod: inPeriodSum,
@@ -4367,6 +4553,9 @@ export class SubscriptionService extends BaseService {
         .where(
           and(...creatorScope, inArray(payouts.status, ['pending', 'failed']))
         ),
+      // The banner's total is the email's (Codex-2hxff.34): every payee row,
+      // as creator and as owner, so wider than the KPIs' creator scope.
+      waitingMoney(this.db, { userId }),
     ]);
 
     return {
@@ -4374,6 +4563,19 @@ export class SubscriptionService extends BaseService {
       totalEarnedCents: paid[0]?.total ?? 0,
       inTransitCents: inTransit[0]?.sum ?? 0,
       needsAttentionCount: needsAttention[0]?.count ?? 0,
+      waiting: waiting
+        ? {
+            totalCents: waiting.totalCents,
+            oldestAt: waiting.oldestAt.toISOString(),
+            organisations: waiting.organisations.map((organisation) => ({
+              organizationId: organisation.organizationId,
+              name: organisation.name,
+              asOwner: organisation.asOwner,
+              cents: organisation.cents,
+            })),
+            setup: waiting.setup,
+          }
+        : null,
     };
   }
 
@@ -4600,12 +4802,17 @@ export class SubscriptionService extends BaseService {
    * `platformFailures` is the hourly sweep's tally, so a short platform
    * balance is one error per sweep, not one per payee (Codex-r094t). Any
    * other caller leaves it out, and the drain reports its own run.
+   *
+   * `cronDrain` is the hourly cron's own drain, which runs ahead of the bank
+   * payout in its wake: only its email may name this morning's payout
+   * (review r2 LOW-1). Every other drain leaves it out.
    */
   async resolvePendingPayoutsForAccount(
     stripeAccountId: string,
-    platformFailures?: PlatformFailureTally
+    platformFailures?: PlatformFailureTally,
+    options: { cronDrain?: boolean } = {}
   ): Promise<{ resolved: number; failed: number }> {
-    return this.drainPayee(stripeAccountId, 'all', platformFailures);
+    return this.drainPayee(stripeAccountId, 'all', platformFailures, options);
   }
 
   /**
@@ -4625,7 +4832,8 @@ export class SubscriptionService extends BaseService {
   private async drainPayee(
     stripeAccountId: string,
     scope: 'all' | { orgId: string | null },
-    sweepFailures?: PlatformFailureTally
+    sweepFailures?: PlatformFailureTally,
+    { cronDrain = false }: { cronDrain?: boolean } = {}
   ): Promise<{ resolved: number; failed: number }> {
     const scopeOrgId = scope === 'all' ? null : scope.orgId;
     const platformFailures = sweepFailures ?? platformFailureTally();
@@ -4635,6 +4843,7 @@ export class SubscriptionService extends BaseService {
     // the payout-released email must report this, not the pre-loop snapshot.
     let creatorPaidCents = 0;
     let creatorPaidCount = 0;
+    const creatorPaidSlices: ReleasedSlice[] = [];
     // The organisations whose creator slices were paid, for the email.
     const creatorPaidOrgs = new Set<string | null>();
 
@@ -4761,6 +4970,7 @@ export class SubscriptionService extends BaseService {
       failed += groupResult.failed;
       creatorPaidCents += groupResult.creatorPaidCents;
       creatorPaidCount += groupResult.creatorPaidCount;
+      creatorPaidSlices.push(...groupResult.creatorPaidSlices);
       if (groupResult.creatorPaidCount > 0) creatorPaidOrgs.add(groupOrgId);
     }
 
@@ -4796,16 +5006,33 @@ export class SubscriptionService extends BaseService {
     // money had been released when nothing moved.
     if (creatorPaidCount > 0) {
       try {
-        const [creatorRow] = await this.db
-          .select({ email: users.email })
-          .from(users)
-          .where(eq(users.id, connectAccount.userId))
-          .limit(1);
+        const [[creatorRow], [balanceRow]] = await Promise.all([
+          this.db
+            .select({ email: users.email, name: users.name })
+            .from(users)
+            .where(eq(users.id, connectAccount.userId))
+            .limit(1),
+          // The account the money went to: on manual payouts, the daily job
+          // sends it 14 days after each sale (Codex-2hxff.29).
+          this.db
+            .select({ manualPayoutsSince: connectBalances.manualPayoutsSince })
+            .from(connectBalances)
+            .where(eq(connectBalances.stripeAccountId, stripeAccountId))
+            .limit(1),
+        ]);
 
         if (creatorRow?.email) {
           const amountFormatted = `£${(creatorPaidCents / 100).toFixed(2)}`;
-          const dashboardUrl = this.webAppUrl
-            ? `${this.webAppUrl}/studio/earnings`
+          // Earnings lives on the creators subdomain: the bare domain has no
+          // studio route, so `${WEB_APP_URL}/studio/earnings` was a 404. Built
+          // from the env name, never WEB_APP_URL's host (on staging that
+          // parses to the production apex), as purchase-service's link is.
+          const dashboardUrl = isEnvName(this.environment)
+            ? buildOrgUrlFromEnv(
+                this.environment,
+                'creators',
+                '/studio/earnings'
+              )
             : '/studio/earnings';
           // The email names an organisation only when every creator slice
           // it reports is that organisation's.
@@ -4819,10 +5046,22 @@ export class SubscriptionService extends BaseService {
             userId: connectAccount.userId,
             organizationId: emailOrgId ?? null,
             data: {
-              creatorName: creatorRow.email, // fallback; template can resolve display name
+              // Their name, as mock-b-studio M5 greets them, never the email
+              // address; a string either way, since a null is refused.
+              creatorName: creatorRow.name || 'there',
               amountFormatted,
               payoutCount: creatorPaidCount,
               dashboardUrl,
+              // When it reaches the bank, from this account's real state, so
+              // it is true before and after the switch (data design §5.4).
+              // Release N's template doesn't use them yet; an unknown field
+              // is dropped, never refused (§5.5).
+              ...payoutReleasedBankFields({
+                slices: creatorPaidSlices,
+                manualPayouts: Boolean(balanceRow?.manualPayoutsSince),
+                now: new Date(),
+                cronDrain,
+              }),
             },
           });
         }
@@ -4872,11 +5111,14 @@ export class SubscriptionService extends BaseService {
     /** creator_payout rows that actually transitioned pending→paid here */
     creatorPaidCents: number;
     creatorPaidCount: number;
+    /** The same rows, for the email's bank dates (Codex-2hxff.29). */
+    creatorPaidSlices: ReleasedSlice[];
   }> {
     let resolved = 0;
     let failed = 0;
     let creatorPaidCents = 0;
     let creatorPaidCount = 0;
+    const creatorPaidSlices: ReleasedSlice[] = [];
 
     const payoutFees = await this.resolvePayoutFees(
       orgId,
@@ -4912,6 +5154,7 @@ export class SubscriptionService extends BaseService {
         failed: 0,
         creatorPaidCents: 0,
         creatorPaidCount: 0,
+        creatorPaidSlices,
       };
     }
 
@@ -4947,6 +5190,11 @@ export class SubscriptionService extends BaseService {
       if (payout.payoutType === 'creator_payout') {
         creatorPaidCents += payable(payout);
         creatorPaidCount++;
+        creatorPaidSlices.push({
+          cents: payable(payout),
+          createdAt: payout.createdAt,
+          hasCharge: payout.stripeChargeId !== null,
+        });
       }
     };
 
@@ -5093,7 +5341,13 @@ export class SubscriptionService extends BaseService {
       }
     }
 
-    return { resolved, failed, creatorPaidCents, creatorPaidCount };
+    return {
+      resolved,
+      failed,
+      creatorPaidCents,
+      creatorPaidCount,
+      creatorPaidSlices,
+    };
   }
 
   // ─── Private Helpers ─────────────────────────────────────────────────────
@@ -5646,6 +5900,38 @@ export class SubscriptionService extends BaseService {
     return retryFailedClawbacks(
       { ...this.ledger(), obs: this.obs },
       { olderThanMinutes }
+    );
+  }
+
+  /**
+   * The daily bank payout (Codex-2hxff.29, .30). The hourly cron hands every
+   * run's `scheduledTime` here, last; only the run whose London hour is 8
+   * pays out, so there is no new cron and no new database wake. Null on the
+   * other 23. Each paid or newly negative account's cached Studio balance is
+   * dropped, which bumps that user's version key (once a day at most).
+   */
+  async runBankPayouts(
+    scheduledTime: Date
+  ): Promise<BankPayoutRunSummary | null> {
+    if (!isBankPayoutRun(scheduledTime)) return null;
+    const { cache, waitUntil } = this;
+    return runBankPayouts(
+      {
+        ...this.ledger(),
+        obs: this.obs,
+        invalidateBalance: (userId) => {
+          if (!cache || !waitUntil) return;
+          waitUntil(
+            cache.invalidate(userId).catch((error: unknown) => {
+              this.obs.warn('Studio balance cache invalidation failed', {
+                userId,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            })
+          );
+        },
+      },
+      scheduledTime
     );
   }
 
@@ -6287,7 +6573,9 @@ export class SubscriptionService extends BaseService {
    */
   async sweepUnresolvedPayouts(
     olderThanMinutes = 15,
-    limit = SWEEP_PAYEE_LIMIT
+    limit = SWEEP_PAYEE_LIMIT,
+    /** The hourly cron's own drain (`resolvePendingPayoutsForAccount`). */
+    { cronDrain = false }: { cronDrain?: boolean } = {}
   ): Promise<{
     groupsScanned: number;
     groupsResolved: number;
@@ -6400,7 +6688,8 @@ export class SubscriptionService extends BaseService {
         // The whole payee, every organisation (Codex-2hxff.13).
         await this.resolvePendingPayoutsForAccount(
           connect.stripeAccountId,
-          platformFailures
+          platformFailures,
+          { cronDrain }
         );
         groupsResolved++;
       } catch (error) {

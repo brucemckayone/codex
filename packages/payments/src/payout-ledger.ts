@@ -56,6 +56,7 @@ import type { DatabaseClient } from '@codex/database';
 import {
   disputes,
   type Payout,
+  payeeCredits,
   payoutReversals,
   payouts,
   stripeConnectAccountHistory,
@@ -215,14 +216,23 @@ const DRAINABLE: Array<'pending' | 'failed'> = ['pending', 'failed'];
  * first. `repaid_by_payout_id` is unique-indexed, so this costs one index
  * probe per row.
  *
+ * A payee credit's re-pay row (`payee_credits.repay_payout_id`, support's
+ * Re-pay of a late take-back) is held the same way through its credit's
+ * slice: while that slice's charge has a dispute holding it. Its step's link
+ * names it too, until a payee-paid debt's own re-pay takes the link over
+ * (`repayDebtStep`, review MED-4), so this keeps the hold after that.
+ * `repay_payout_id` is unique-indexed too: one more probe per row.
+ *
  * A row flagged for support (`needs_review_at`, Codex-2hxff.48) is skipped
  * until support releases it. It is still `failed`, so a refund still cancels
  * it and earnings still count it as owed: they key on the status, not this.
  */
 export function isDrainablePayout(): SQL {
-  // In the second subquery the slice re-paid is aliased, so `payouts` there
-  // still names the outer row.
-  return sql`((${payouts.status} = 'pending' OR (${payouts.status} = 'failed' AND ${payouts.lastRetryAt} IS NOT NULL)) AND ${payouts.needsReviewAt} IS NULL AND NOT EXISTS (SELECT 1 FROM ${disputes} WHERE ${holdsItsSale()} AND (${disputes.stripeChargeId} = ${payouts.stripeChargeId} OR ${disputes.purchaseId} = ${payouts.purchaseId})) AND NOT EXISTS (SELECT 1 FROM ${payoutReversals} JOIN ${payouts} AS repaid_slice ON repaid_slice.id = ${payoutReversals.payoutId} JOIN ${disputes} ON (${disputes.stripeChargeId} = repaid_slice.stripe_charge_id OR ${disputes.stripeDisputeId} = ${payoutReversals.causeId}) WHERE ${payoutReversals.repaidByPayoutId} = ${payouts.id} AND (${holdsItsSale()} OR (${disputes.stripeDisputeId} = ${payoutReversals.causeId} AND ${disputes.status} = 'won' AND ${disputes.outcomeAppliedAt} IS NULL))))`;
+  // In the second and third subqueries the slices are aliased, so
+  // `payouts` there still names the outer row. A credit's slice may itself
+  // be a re-pay row (its step was on one), with no charge id: its charge is
+  // then the slice that row re-pays.
+  return sql`((${payouts.status} = 'pending' OR (${payouts.status} = 'failed' AND ${payouts.lastRetryAt} IS NOT NULL)) AND ${payouts.needsReviewAt} IS NULL AND NOT EXISTS (SELECT 1 FROM ${disputes} WHERE ${holdsItsSale()} AND (${disputes.stripeChargeId} = ${payouts.stripeChargeId} OR ${disputes.purchaseId} = ${payouts.purchaseId})) AND NOT EXISTS (SELECT 1 FROM ${payoutReversals} JOIN ${payouts} AS repaid_slice ON repaid_slice.id = ${payoutReversals.payoutId} JOIN ${disputes} ON (${disputes.stripeChargeId} = repaid_slice.stripe_charge_id OR ${disputes.stripeDisputeId} = ${payoutReversals.causeId}) WHERE ${payoutReversals.repaidByPayoutId} = ${payouts.id} AND (${holdsItsSale()} OR (${disputes.stripeDisputeId} = ${payoutReversals.causeId} AND ${disputes.status} = 'won' AND ${disputes.outcomeAppliedAt} IS NULL))) AND NOT EXISTS (SELECT 1 FROM ${payeeCredits} JOIN ${payouts} AS credited_slice ON credited_slice.id = ${payeeCredits.payoutId} LEFT JOIN ${payoutReversals} AS credited_from ON credited_from.repaid_by_payout_id = credited_slice.id LEFT JOIN ${payouts} AS credited_origin ON credited_origin.id = credited_from.payout_id JOIN ${disputes} ON ${disputes.stripeChargeId} = COALESCE(credited_slice.stripe_charge_id, credited_origin.stripe_charge_id) WHERE ${payeeCredits.repayPayoutId} = ${payouts.id} AND ${holdsItsSale()}))`;
 }
 
 /**

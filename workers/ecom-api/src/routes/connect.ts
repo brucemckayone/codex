@@ -13,6 +13,8 @@
  * `ctx.user.id`) — one Connect account per user, no org context (Codex-69t7c.3):
  * - POST /connect/me/onboard   - Create/reuse the creator's account + onboarding URL
  * - GET  /connect/me/status    - Get the creator's account status
+ * - GET  /connect/me/balance   - The creator's own Stripe balance and next bank
+ *                                payout (Codex-2hxff.29, .30)
  * - POST /connect/me/sync      - Force sync, return refreshed status payload;
  *                                drain pending payouts if payable
  * - POST /connect/me/dashboard - Get the creator's Express dashboard link
@@ -110,6 +112,27 @@ app.get(
     },
     handler: async (ctx) => {
       return await ctx.services.connect.getStatusForUser(ctx.user.id);
+    },
+  })
+);
+
+/**
+ * GET /connect/me/balance
+ * The current creator's own Stripe balance for Studio → Earnings
+ * (Codex-2hxff.29, .30): the next bank payout, a take-back the balance
+ * covered, and a balance below zero with its rule. Self-scoped: there is no
+ * id input, so it can only ever read the caller's own account. Cached 10 min;
+ * the daily bank payout and `account.updated` invalidate it. 404 without a
+ * Connect account; 503 when Stripe can't be read (not cached).
+ */
+app.get(
+  '/me/balance',
+  procedure({
+    policy: {
+      auth: 'required',
+    },
+    handler: async (ctx) => {
+      return await ctx.services.connect.getBalanceForUser(ctx.user.id);
     },
   })
 );

@@ -2,7 +2,9 @@
  * /admin/queue (Codex-2hxff.28, mockup D1–D3).
  *
  * - The tab is the URL's `?tab=`: failed refunds by default, creator debts on
- *   `?tab=debts`. Only that list is asked for; the other loads on switching.
+ *   `?tab=debts`, Owed to creators on `?tab=owed` (Codex-2hxff.73). Only that
+ *   list is asked for; another loads on switching.
+ * - "Check Stripe again" asks once per click, and reloads only what changed.
  * - A rejected list shows an error, never "No failed refunds".
  * - Settling refreshes the list and the counts.
  *
@@ -35,12 +37,14 @@ vi.mock(
 
 import { setPage } from '$lib/components/support/__fixtures__/app-state.mock.svelte';
 import {
-  creatorDebt,
+  debtPerson,
   failedRefund,
   list,
   NOW,
+  owedItem,
 } from '$lib/components/support/__fixtures__/support-fixtures';
 import {
+  checkOwedToCreator,
   countsSlot,
   debtsSlot,
   failedSlot,
@@ -48,8 +52,11 @@ import {
   httpError,
   listCreatorDebts,
   listFailedRefunds,
+  listOwedToCreators,
+  owedSlot,
   reset,
   resolveFailedRefund,
+  resolveOwedToCreator,
 } from '$lib/components/support/__fixtures__/support-remote.mock.svelte';
 import { clearRepayBlocks } from '$lib/components/support/repay-blocks.svelte';
 import QueuePage from '../+page.svelte';
@@ -102,21 +109,25 @@ describe('the tab', () => {
     setPage('/admin/queue?tab=debts');
     flushSync();
     expect(listCreatorDebts).toHaveBeenCalledTimes(1);
-    debtsSlot().current = list([creatorDebt()]);
+    debtsSlot().current = list([debtPerson()]);
     flushSync();
     expect(
-      document.querySelectorAll('[data-testid="creator-debt-row"]')
+      document.querySelectorAll('[data-testid="creator-debt-person"]')
     ).toHaveLength(1);
   });
 
   test('each tab carries its count once the counts land', () => {
     mountAt('/admin/queue');
-    countsSlot().current = { failedRefunds: 2, creatorDebts: 3 };
+    countsSlot().current = {
+      failedRefunds: 2,
+      creatorDebts: 1,
+      owedToCreators: 6,
+    };
     flushSync();
     const badges = [
       ...document.querySelectorAll('nav a [data-variant="warning"]'),
     ].map((b) => b.textContent);
-    expect(badges).toEqual(['2', '3']);
+    expect(badges).toEqual(['2', '1', '6']);
   });
 });
 
@@ -391,6 +402,7 @@ describe('settling', () => {
         repaid: [],
         accessRestored: false,
         accessNotRestoredReason: null,
+        systemSettled: [],
       },
     });
     mountAt('/admin/queue');
@@ -423,5 +435,215 @@ describe('settling', () => {
     expect(document.activeElement).toBe(
       document.querySelector('[data-testid="settle-notice"]')
     );
+  });
+});
+
+describe('Owed to creators (?tab=owed)', () => {
+  const owedButton = (label: string) =>
+    [
+      ...document.querySelectorAll<HTMLButtonElement>(
+        '[data-testid="owed-row"] button'
+      ),
+    ].find((b) => b.textContent?.includes(label));
+  const notice = () =>
+    document.querySelector<HTMLElement>('[data-testid="settle-notice"]');
+  const answered = async () => {
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    flushSync();
+  };
+  const checkRow = () =>
+    owedItem({
+      creditId: '55555555-5555-4555-8555-555555555555',
+      payee: {
+        userId: 'user-priya',
+        name: 'Priya Shah',
+        deleted: false,
+        role: 'creator',
+      },
+      state: 'needs_check',
+      effect: 'unverified',
+      amountCents: null,
+      repayCents: null,
+      stepAmountCents: 1080,
+      stripeReversalId: null,
+      action: 'check',
+    });
+
+  test('only that list is asked for, with its own intro', () => {
+    mountAt('/admin/queue?tab=owed');
+    expect(current()[0]).toContain(m.support_queue_tab_owed());
+    expect(listOwedToCreators).toHaveBeenCalledWith({ page: 1, limit: 20 });
+    expect(listFailedRefunds).not.toHaveBeenCalled();
+    expect(listCreatorDebts).not.toHaveBeenCalled();
+    expect(text()).toContain(m.support_queue_owed_intro());
+  });
+
+  test('a rejected list shows an error, never "Nothing owed to creators"', () => {
+    mountAt('/admin/queue?tab=owed');
+    owedSlot().error = httpError(500);
+    flushSync();
+    expect(
+      document.querySelector('[data-testid="queue-error"]')
+    ).not.toBeNull();
+    expect(text()).not.toContain(m.support_queue_owed_empty_title());
+  });
+
+  test('an empty list says so, in its own words', () => {
+    mountAt('/admin/queue?tab=owed');
+    owedSlot().current = list([]);
+    flushSync();
+    expect(text()).toContain(m.support_queue_owed_empty_title());
+    expect(text()).toContain(m.support_queue_owed_empty_body());
+  });
+
+  test('Re-pay: the dialog names who and how much; done refreshes the list and the counts', async () => {
+    resolveOwedToCreator.mockResolvedValue({
+      outcome: 'done',
+      result: {
+        creditId: owedItem().creditId,
+        resolution: 'repaid',
+        resolvedAt: NOW.toISOString(),
+        repayPayoutId: 'payout-repay-1',
+        amountCents: 900,
+        payeeName: 'Maya Okafor',
+      },
+    });
+    mountAt('/admin/queue?tab=owed');
+    owedSlot().current = list([owedItem()]);
+    flushSync();
+    owedButton(m.support_repay_submit({ amount: '£9.00' }))?.click();
+    flushSync();
+    expect(text()).toContain(
+      m.support_credit_repay_title({ name: 'Maya Okafor', amount: '£9.00' })
+    );
+    const submit = document.querySelector<HTMLButtonElement>(
+      '[data-testid="settle-submit"]'
+    );
+    expect(submit?.textContent).toContain(
+      m.support_credit_repay_submit({ amount: '£9.00', name: 'Maya Okafor' })
+    );
+    submit?.click();
+    await answered();
+    expect(resolveOwedToCreator).toHaveBeenCalledWith({
+      creditId: owedItem().creditId,
+      body: { action: 'repay', note: '' },
+    });
+    expect(owedSlot().refresh).toHaveBeenCalledTimes(1);
+    expect(countsSlot().refresh).toHaveBeenCalledTimes(1);
+    expect(notice()?.textContent).toContain(
+      m.support_credit_repaid({ name: 'Maya Okafor', amount: '£9.00' })
+    );
+  });
+
+  test('Check Stripe again asks once, says what Stripe found, and refreshes', async () => {
+    checkOwedToCreator.mockResolvedValue({
+      outcome: 'done',
+      result: {
+        creditId: checkRow().creditId,
+        outcome: 'owed',
+        state: 'owed',
+        amountCents: 1080,
+        stripeReversalId: 'trr_1QkV9eLk2vTb85gG',
+        note: null,
+        checkedAt: NOW.toISOString(),
+        action: 'repay',
+      },
+    });
+    mountAt('/admin/queue?tab=owed');
+    owedSlot().current = list([checkRow()]);
+    flushSync();
+    owedButton(m.support_owed_action_check())?.click();
+    await answered();
+    expect(checkOwedToCreator).toHaveBeenCalledTimes(1);
+    expect(checkOwedToCreator).toHaveBeenCalledWith({
+      creditId: checkRow().creditId,
+    });
+    // No dialog: a check is one question, not a decision.
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(notice()?.textContent).toContain(
+      m.support_credit_check_owed({ name: 'Priya Shah', amount: '£10.80' })
+    );
+    expect(owedSlot().refresh).toHaveBeenCalledTimes(1);
+    expect(countsSlot().refresh).toHaveBeenCalledTimes(1);
+    await afterFocus();
+    expect(document.activeElement).toBe(notice());
+  });
+
+  test('Stripe still with no answer: nothing changed, so nothing reloads', async () => {
+    checkOwedToCreator.mockResolvedValue({
+      outcome: 'done',
+      result: {
+        creditId: checkRow().creditId,
+        outcome: 'still_unknown',
+        state: 'needs_check',
+        amountCents: null,
+        stripeReversalId: null,
+        note: null,
+        checkedAt: NOW.toISOString(),
+        action: 'check',
+      },
+    });
+    mountAt('/admin/queue?tab=owed');
+    owedSlot().current = list([checkRow()]);
+    flushSync();
+    owedButton(m.support_owed_action_check())?.click();
+    await answered();
+    expect(
+      notice()?.dataset.variant ?? notice()?.getAttribute('data-variant')
+    ).toBe('warning');
+    expect(notice()?.textContent).toContain(
+      m.support_credit_check_unknown_lead()
+    );
+    expect(owedSlot().refresh).not.toHaveBeenCalled();
+    expect(countsSlot().refresh).not.toHaveBeenCalled();
+  });
+
+  test('a check the ledger cannot attribute: the row now asks a person, so the list reloads', async () => {
+    checkOwedToCreator.mockResolvedValue({
+      outcome: 'done',
+      result: {
+        creditId: checkRow().creditId,
+        outcome: 'needs_person',
+        state: 'needs_person',
+        amountCents: null,
+        stripeReversalId: null,
+        note: null,
+        checkedAt: NOW.toISOString(),
+        action: 'decide',
+      },
+    });
+    mountAt('/admin/queue?tab=owed');
+    owedSlot().current = list([checkRow()]);
+    flushSync();
+    owedButton(m.support_owed_action_check())?.click();
+    await answered();
+    expect(notice()?.textContent).toContain(
+      m.support_credit_check_needs_person()
+    );
+    expect(owedSlot().refresh).toHaveBeenCalledTimes(1);
+    expect(countsSlot().refresh).toHaveBeenCalledTimes(1);
+  });
+
+  test('while a check runs, its button is busy and the row cannot be acted on twice', async () => {
+    let answer: (value: unknown) => void = () => {};
+    checkOwedToCreator.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }) as never
+    );
+    mountAt('/admin/queue?tab=owed');
+    owedSlot().current = list([checkRow()]);
+    flushSync();
+    owedButton(m.support_owed_action_check())?.click();
+    flushSync();
+    expect(owedButton(m.support_owed_action_not_owed())?.disabled).toBe(true);
+    owedButton(m.support_owed_action_check())?.click();
+    flushSync();
+    expect(checkOwedToCreator).toHaveBeenCalledTimes(1);
+    answer(failure({ status: 500, code: null }));
+    await answered();
+    expect(owedButton(m.support_owed_action_not_owed())?.disabled).toBe(false);
+    expect(notice()?.textContent).toContain(m.support_credit_check_failed());
   });
 });

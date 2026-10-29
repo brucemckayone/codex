@@ -41,21 +41,40 @@
   import KPICard from '$lib/components/studio/analytics/KPICard.svelte';
   import CreatorBreakdownRail from '$lib/components/studio/payouts/CreatorBreakdownRail.svelte';
   import {
+    getMyConnectStatus,
+    getMyStripeBalance,
     getPayoutSummary,
     getPayoutsByCreatorBreakdown,
     listPayouts,
   } from '$lib/remote/subscription.remote';
+  import {
+    deriveConnectState,
+    formatDay,
+    formatPence,
+    londonDay,
+    ruleLine,
+  } from '$lib/utils/bank-payouts';
+  import { buildCreatorsUrl } from '$lib/utils/subdomain';
   import { formatDate, formatPrice, getInitials } from '$lib/utils/format';
   import type {
     CreatorPayoutBreakdown,
+    MyStripeBalance,
     PayoutSourceFilter,
     PayoutStatusFilter,
     PayoutSummary,
     PayoutWithCreator,
   } from '@codex/subscription';
   import type { DateRange } from '@codex/shared-types';
+  import type { ConnectAccountStatusResponse } from '$lib/types';
   import { queryErrorMessage, type QueryResult } from '$lib/remote/query-result';
   import { groupTransactions } from './group-transactions';
+  import {
+    heldCard,
+    heldRowsOf,
+    orgCauseLine,
+    ownerBalanceOf,
+    ownerBankLine,
+  } from './payouts-view';
 
   type PayoutsPage = {
     items: PayoutWithCreator[];
@@ -177,6 +196,84 @@
   const queryError = $derived(
     queryErrorMessage((payoutsQuery as QueryResult<PayoutsPage> | null)?.error)
   );
+
+  // ── The owner's Stripe balance and the 14-day hold (Codex-2hxff.29, .30) ──
+  // The organisation's share is paid to its owner's one Connect account, so
+  // the hold and a balance below zero apply to it as on Earnings. This page is
+  // owner-only, and the owner is the organisation's payee. Read once per page
+  // load from ecom-api's 10-minute cache; nothing refreshes by itself, and
+  // Try again is a button.
+  const pageNow = new Date();
+  // A row's bank day is 14 days after its sale, and never before its
+  // transfer; two more days cover a late one. One page of the organisation's
+  // paid rows transferred since then.
+  const HELD_WINDOW_MS = 16 * 24 * 60 * 60 * 1000;
+  const HELD_ROWS_LIMIT = 100;
+
+  // The owner's own Connect state, as Earnings reads it. Only an account that
+  // exists has a balance to read: the balance route 404s without one.
+  const statusQuery = $derived(isOwner && orgId ? getMyConnectStatus() : null);
+  const statusResult = $derived(
+    statusQuery as QueryResult<ConnectAccountStatusResponse> | null
+  );
+  const ownerConnectState = $derived(
+    statusResult?.current
+      ? deriveConnectState(statusResult.current)
+      : statusResult?.error
+        ? ('fetch_failed' as const)
+        : undefined
+  );
+  const balanceQuery = $derived(
+    statusResult?.current?.isConnected ? getMyStripeBalance() : null
+  );
+  const balanceResult = $derived(
+    balanceQuery as QueryResult<MyStripeBalance> | null
+  );
+  /** Undefined while loading, null for no account, or 'failed'. */
+  const ownerBalance = $derived(ownerBalanceOf(statusResult, balanceResult));
+  /** For the bank lines: a failed read keeps the dates from our ledger (E8). */
+  const rowBalance = $derived(
+    ownerBalance === 'failed' ? null : ownerBalance
+  );
+  const negative = $derived(balanceResult?.current?.negative ?? null);
+
+  // Below zero, a row whose bank day ran from `since` on went towards the
+  // take-back, and Held says so: the rows go back far enough to reach it. Counted in whole days, so a
+  // `since` of today asks for the same rows again, not a second time.
+  const today = londonDay(pageNow);
+  const heldFromDay = $derived(
+    negative && negative.since < today ? negative.since : today
+  );
+  const heldFrom = $derived(
+    new Date(`${heldFromDay}T00:00:00Z`).getTime() - HELD_WINDOW_MS
+  );
+  const heldQuery = $derived(
+    isOwner && orgId
+      ? listPayouts({
+          organizationId: orgId,
+          status: 'paid',
+          source: 'all',
+          page: 1,
+          limit: HELD_ROWS_LIMIT,
+          // By transfer, not sale: a backlog sale released late (after a
+          // late Connect setup) has an old sale date and a bank day to come.
+          transferredFrom: new Date(heldFrom).toISOString(),
+        })
+      : null
+  );
+  const heldResult = $derived(heldQuery as QueryResult<PayoutsPage> | null);
+  /** The organisation's share still in the owner's Stripe balance. */
+  const held = $derived(
+    heldCard({ balance: ownerBalance, rows: heldRowsOf(heldResult), now: pageNow })
+  );
+  const showHeld = $derived(held.kind !== 'hidden');
+
+  /** Try again on the card: only the reads that failed, once per click. */
+  function retryHeld() {
+    if (statusResult?.error) statusQuery?.refresh().catch(() => {});
+    if (balanceResult?.error) balanceQuery?.refresh().catch(() => {});
+    if (heldResult?.error) heldQuery?.refresh().catch(() => {});
+  }
 
   const items = $derived(payoutsData?.items ?? []);
   const pagination = $derived(payoutsData?.pagination);
@@ -463,6 +560,16 @@
 
   <Table.Cell>
     {#if payout.status === 'resolved' && payout.stripeTransferId}
+      <!-- The organisation's share reaches the owner's bank on its date
+           (Codex-2hxff.29). A creator's share is in the creator's own
+           account, whose balance the owner can't see, so it gets no date. -->
+      {@const bankLine = ownerBankLine(payout, {
+        connectState: ownerConnectState ?? 'enabled',
+        // Until the owner's status is known, no line: see `ownerBalance`.
+        balance: rowBalance,
+        now: pageNow,
+      })}
+      <span class="transfer-stack">
       <span class="transfer-cell">
         <code class="transfer-id" title={payout.stripeTransferId}>
           {truncateTransferId(payout.stripeTransferId)}
@@ -488,6 +595,10 @@
         >
           <ExternalLinkIcon size={14} />
         </a>
+      </span>
+      {#if bankLine}
+        <span class="bank-line">{bankLine}</span>
+      {/if}
       </span>
     {:else if payout.payoutType === 'platform_fee'}
       <!-- Structural, not a data gap: the schema states that platform_fee rows
@@ -537,7 +648,7 @@
          `earnedInPeriodCents` with a different window (identical when
          range=all), and "Needs attention" is the number an operator opens this
          page for. -->
-    <div class="kpi-row">
+    <div class="kpi-row" class:kpi-row--four={showHeld}>
       <KPICard
         label="Settled · {rangeLabel}"
         value={summary?.earnedInPeriodCents ?? 0}
@@ -566,6 +677,49 @@
         format="number"
         loading={summaryLoading}
       />
+      {#if showHeld}
+        <!-- The organisation's share from the last 14 days, still in the
+             owner's Stripe balance, and the next part of it that goes to the
+             bank. Only this organisation's share: the owner's own creator
+             earnings are on Earnings. -->
+        <KPICard
+          label={m.payouts_held_label()}
+          value={held.kind === 'shown' ? held.cents : 0}
+          loading={held.kind === 'loading'}
+          data-testid="payouts-held"
+          data-state={held.kind}
+        >
+          {#snippet valueContent()}
+            {#if held.kind === 'shown'}
+              <span class="kpi-money">{formatPrice(held.cents)}</span>
+            {:else}
+              <!-- A read that failed, or one page that isn't the whole: no figure. -->
+              <span class="kpi-money" aria-hidden="true">—</span>
+            {/if}
+          {/snippet}
+          {#snippet detail()}
+            {#if held.kind === 'failed'}
+              <p class="kpi-detail" role="alert">
+                {m.payouts_held_check_failed()}
+                <Button variant="ghost" size="sm" onclick={retryHeld}>
+                  {m.payouts_held_retry()}
+                </Button>
+              </p>
+            {:else if held.kind === 'too_many'}
+              <p class="kpi-detail">{m.payouts_held_too_many()}</p>
+            {:else if held.kind === 'shown' && held.detail === 'covering'}
+              <p class="kpi-detail">{m.payouts_held_covering()}</p>
+            {:else if held.kind === 'shown' && typeof held.detail === 'object' && held.detail}
+              <p class="kpi-detail">
+                {m.payouts_held_next({
+                  amount: formatPrice(held.detail.cents),
+                  date: formatDay(held.detail.on, { weekday: true }),
+                })}
+              </p>
+            {/if}
+          {/snippet}
+        </KPICard>
+      {/if}
     </div>
 
     <!-- `getPayoutSummary` sums payouts.amountCents for status='paid' with NO
@@ -578,6 +732,35 @@
       Settled counts every ledger line that cleared, including the platform's
       fee. The table below shows the split.
     </p>
+
+    <!-- ── The owner's Stripe balance below zero (Codex-2hxff.30) ───── -->
+    <!-- The organisation's share is paused too, so the owner sees it here as
+         well as on Earnings, with a way there (the Stripe dashboard button
+         lives on Earnings). -->
+    {#if negative}
+      {@const rule = ruleLine(negative.rule)}
+      <Alert variant="warning">
+        <div class="balance-alert" role="status">
+          <span class="balance-alert__title">
+            <AlertTriangleIcon size={16} />
+            <span>
+              {m.earnings_negative_title()}
+              <span class="money-neg"
+                ><span class="sr-only">{m.earnings_money_minus()} </span><span aria-hidden="true">−</span>{formatPence(negative.owedCents)}</span
+              >
+            </span>
+          </span>
+          <p>{m.payouts_negative_body()}</p>
+          <p>{orgCauseLine(negative.causes, orgId)}</p>
+          <p class="balance-alert__rule"><b>{rule.label}</b> {rule.text}</p>
+          <div class="balance-alert__actions">
+            <a class="balance-alert__link" href={buildCreatorsUrl(page.url, '/studio/earnings')}>
+              {m.payouts_negative_cta()}
+            </a>
+          </div>
+        </div>
+      </Alert>
+    {/if}
 
     <!-- ── Exception banner (only when needsAttention > 0) ──────────── -->
     {#if summary && summary.needsAttentionCount > 0 && statusFilter !== 'needs_attention'}
@@ -949,6 +1132,97 @@
     color: var(--color-text);
     line-height: var(--leading-tight);
     font-variant-numeric: tabular-nums;
+  }
+
+  /* A fourth card, "Held for 14 days", while the owner's account holds the
+     organisation's share (Codex-2hxff.29). */
+  @media (--breakpoint-md) {
+    .kpi-row--four {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+  }
+
+  .kpi-detail {
+    margin: 0;
+    font-size: var(--text-xs);
+    line-height: var(--leading-snug);
+    color: var(--color-text-secondary);
+  }
+
+  /* The owner's share rows carry their bank date under the transfer id. */
+  .transfer-stack {
+    display: inline-flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    align-items: flex-start;
+  }
+
+  .bank-line {
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
+    white-space: nowrap;
+  }
+
+  /* The balance alert's body (ui/Alert warning). */
+  .balance-alert {
+    display: grid;
+    gap: var(--space-2);
+  }
+
+  .balance-alert p {
+    margin: 0;
+    color: var(--color-text);
+  }
+
+  .balance-alert__title {
+    display: inline-flex;
+    gap: var(--space-2);
+    align-items: center;
+    font-size: var(--text-sm);
+    font-weight: var(--font-semibold);
+    color: inherit;
+  }
+
+  .balance-alert__rule {
+    padding-top: var(--space-2);
+    border-top: var(--border-width) var(--border-style) var(--color-status-warning-border);
+  }
+
+  .balance-alert__rule b {
+    font-weight: var(--font-semibold);
+  }
+
+  .balance-alert__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .balance-alert__link {
+    display: inline-flex;
+    align-items: center;
+    height: var(--space-8);
+    padding-inline: var(--space-3);
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
+    color: var(--color-text);
+    background-color: var(--color-surface);
+    border: var(--border-width) var(--border-style) var(--color-border);
+    border-radius: var(--radius-md);
+    text-decoration: none;
+  }
+
+  .balance-alert__link:hover {
+    background-color: var(--color-surface-secondary);
+  }
+
+  .balance-alert__link:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-0-5);
+  }
+
+  .money-neg {
+    color: var(--color-status-error-text);
   }
 
   .kpi-note {

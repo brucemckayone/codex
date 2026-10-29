@@ -49,7 +49,7 @@
   import { resolveFailedRefund } from '$lib/remote/support.remote';
   import { markRepayBlocked } from './repay-blocks.svelte';
   import { isSessionEnded } from './session';
-  import { formatList, formatShortDay } from './support-format';
+  import { formatList, formatShortDay, systemSettledSentence } from './support-format';
   import type { SettleNotice } from './settle-notice';
 
   interface Props {
@@ -192,6 +192,9 @@
               ? accessKept(result.accessNotRestoredReason, settling.buyer)
               : null;
           text = access ? m.support_sentences_two({ first: repaid, second: access }) : repaid;
+          // A take-back that had stopped part-way, settled first by the system (Q6).
+          const system = systemSettledSentence(result.systemSettled);
+          if (system) text = m.support_sentences_two({ first: text, second: system });
         }
         open = false;
         onFinished({ variant: 'success', text });

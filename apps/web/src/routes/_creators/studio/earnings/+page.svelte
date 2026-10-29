@@ -33,28 +33,28 @@
   } from '$lib/remote/subscription.remote';
   import * as m from '$paraglide/messages';
   import type { PageData } from './$types';
+  import {
+    bankLineFor,
+    deriveConnectState,
+    filterPayouts,
+    formatDay,
+    formatPence,
+    negativeCauseLine,
+    ruleLine,
+    type SourceFilter,
+    type StatusFilter,
+    statusLabel,
+    statusTone,
+    switchoverNotice,
+    waitingLines,
+    type WaitingView,
+    waitingSince,
+  } from './earnings-view';
 
   const { data }: { data: PageData } = $props();
 
   // ── Connect state ─────────────────────────────────────────────────────────
-  type ConnectStateStatus =
-    | 'not_started'
-    | 'incomplete'
-    | 'pending_verification'
-    | 'enabled'
-    | 'fetch_failed';
-
-  const connectStateStatus = $derived.by<ConnectStateStatus>(() => {
-    const s = data.connectStatus;
-    if (!s) return 'not_started';
-    // Distinct sentinel returned by server on transient fetch error
-    if ('fetchFailed' in s && s.fetchFailed) return 'fetch_failed';
-    if (!s.isConnected) return 'not_started';
-    if (s.chargesEnabled && s.payoutsEnabled) return 'enabled';
-    if (s.status === 'restricted' || s.status === 'disabled') return 'pending_verification';
-    // status === 'onboarding' or accountId exists but not fully enabled
-    return 'incomplete';
-  });
+  const connectStateStatus = $derived(deriveConnectState(data.connectStatus));
 
   let isSyncing = $state(false);
   let isOnboarding = $state(false);
@@ -63,53 +63,44 @@
   const returnBanner = $derived(data.connectReturnBanner);
 
   // ── Filter state ──────────────────────────────────────────────────────────
-  type StatusFilter = 'all' | 'paid' | 'pending' | 'failed';
-  type SourceFilter = 'all' | 'subscription' | 'purchase';
-
   let statusFilter = $state<StatusFilter>('all');
   let sourceFilter = $state<SourceFilter>('all');
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
-
-  function formatPence(pence: number): string {
-    return `£${(pence / 100).toFixed(2)}`;
-  }
+  // ── The Stripe balance (Codex-2hxff.29, .30) ──────────────────────────────
+  // Read once per load (nothing polls). The ledger rows render at once from
+  // our own dates and take the balance in when it lands, so a row the
+  // balance is using never shows a bank date first.
+  type BalanceResult = Awaited<PageData['stripeBalance']>;
+  type PayoutRow = Extract<
+    Awaited<PageData['payouts']>,
+    { ok: true }
+  >['list']['items'][number];
+  let balanceResult = $state<BalanceResult | undefined>(undefined);
+  $effect(() => {
+    const pending = data.stripeBalance;
+    let current = true;
+    balanceResult = undefined;
+    pending.then((result) => {
+      if (current) balanceResult = result;
+    });
+    return () => {
+      current = false;
+    };
+  });
+  /** For the rows: undefined while loading, null when there is none to use. */
+  const rowBalance = $derived(
+    balanceResult === undefined
+      ? undefined
+      : balanceResult?.ok
+        ? balanceResult.balance
+        : null
+  );
+  // The page's clock for "goes" against "sent": fixed per load, never ticking.
+  const now = new Date();
 
   function formatDate(dateStr: string): string {
     const d = new Date(dateStr);
     return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-  }
-
-  function statusLabel(status: string): string {
-    switch (status) {
-      case 'paid':
-        return m.earnings_status_paid();
-      case 'pending':
-        return m.earnings_status_pending();
-      case 'failed':
-        return m.earnings_status_failed();
-      case 'in_transit':
-        return m.earnings_status_in_transit();
-      case 'cancelled':
-        return m.earnings_status_cancelled();
-      default:
-        return status;
-    }
-  }
-
-  function statusClass(status: string): string {
-    switch (status) {
-      case 'paid':
-        return 'status-badge--paid';
-      case 'pending':
-      case 'in_transit':
-        return 'status-badge--pending';
-      case 'failed':
-      case 'cancelled':
-        return 'status-badge--failed';
-      default:
-        return '';
-    }
   }
 
   function sourceLabel(sourceType: string): string {
@@ -121,6 +112,10 @@
       default:
         return sourceType;
     }
+  }
+
+  function reload() {
+    goto(page.url.pathname, { invalidateAll: true });
   }
 
   // ── Actions ───────────────────────────────────────────────────────────────
@@ -155,7 +150,7 @@
       await syncMyConnect();
       toast.success('Status refreshed', 'Your Stripe account status has been updated.');
       // Remove the ?connect= param and invalidate so the server load re-runs
-      goto(page.url.pathname, { invalidateAll: true });
+      reload();
     } catch (err) {
       toast.error('Could not sync status', err instanceof Error ? err.message : 'Unknown error');
     } finally {
@@ -172,28 +167,6 @@
     } catch (err) {
       toast.error('Could not open dashboard', err instanceof Error ? err.message : 'Unknown error');
     }
-  }
-
-  // ── Filter helpers ────────────────────────────────────────────────────────
-
-  type PayoutItem = {
-    id: string;
-    amountCents: number;
-    status: string;
-    sourceType: 'purchase' | 'subscription';
-    organizationId?: string | null;
-    createdAt: string;
-  };
-
-  function filterPayouts(items: PayoutItem[]): PayoutItem[] {
-    return items.filter((p) => {
-      const matchStatus = statusFilter === 'all' || p.status === statusFilter;
-      const matchSource =
-        sourceFilter === 'all' ||
-        (sourceFilter === 'subscription' && p.sourceType === 'subscription') ||
-        (sourceFilter === 'purchase' && p.sourceType === 'purchase');
-      return matchStatus && matchSource;
-    });
   }
 </script>
 
@@ -241,7 +214,18 @@
     <section class="connect-card connect-card--cta" aria-label="Set up payouts">
       <div class="connect-card__body">
         <h2 class="connect-card__title">{m.earnings_connect_not_started_title()}</h2>
-        <p class="connect-card__description">{m.earnings_connect_not_started_body()}</p>
+        {#await data.earningsSummary}
+          <p class="connect-card__description">{m.earnings_connect_not_started_body()}</p>
+        {:then result}
+          {#if result.ok && result.summary.waiting}
+            <p class="connect-card__description">
+              {m.earnings_connect_not_started_waiting({ total: formatPence(result.summary.waiting.totalCents) })}
+            </p>
+            {@render waitingList(result.summary.waiting)}
+          {:else}
+            <p class="connect-card__description">{m.earnings_connect_not_started_body()}</p>
+          {/if}
+        {/await}
       </div>
       <button
         type="button"
@@ -258,7 +242,18 @@
     <section class="connect-card connect-card--warning" aria-label="Resume Stripe onboarding">
       <div class="connect-card__body">
         <h2 class="connect-card__title">{m.earnings_connect_incomplete_title()}</h2>
-        <p class="connect-card__description">{m.earnings_connect_incomplete_body()}</p>
+        {#await data.earningsSummary}
+          <p class="connect-card__description">{m.earnings_connect_incomplete_body()}</p>
+        {:then result}
+          {#if result.ok && result.summary.waiting}
+            <p class="connect-card__description">
+              {m.earnings_connect_incomplete_waiting({ total: formatPence(result.summary.waiting.totalCents) })}
+            </p>
+            {@render waitingList(result.summary.waiting)}
+          {:else}
+            <p class="connect-card__description">{m.earnings_connect_incomplete_body()}</p>
+          {/if}
+        {/await}
       </div>
       <button
         type="button"
@@ -275,32 +270,31 @@
     <section class="connect-card connect-card--info" aria-label="Account under review">
       <div class="connect-card__body">
         <h2 class="connect-card__title">{m.earnings_connect_pending_title()}</h2>
-        <p class="connect-card__description">{m.earnings_connect_pending_body()}</p>
-      </div>
-      <button
-        type="button"
-        class="btn btn--ghost btn--sm"
-        onclick={handleSync}
-        disabled={isSyncing}
-        aria-busy={isSyncing}
-      >
-        {isSyncing ? m.earnings_connect_syncing() : m.earnings_connect_sync_cta()}
-      </button>
-    </section>
-
-  {:else if connectStateStatus === 'enabled'}
-    <section class="connect-card connect-card--enabled" aria-label="Payout account connected">
-      <div class="connect-card__body">
-        <h2 class="connect-card__title">{m.earnings_connect_enabled_title()}</h2>
+        {#await data.earningsSummary}
+          <p class="connect-card__description">{m.earnings_connect_pending_body()}</p>
+        {:then result}
+          {#if result.ok && result.summary.waiting}
+            <p class="connect-card__description">
+              {m.earnings_connect_pending_waiting({ total: formatPence(result.summary.waiting.totalCents) })}
+            </p>
+            {@render waitingList(result.summary.waiting)}
+          {:else}
+            <p class="connect-card__description">{m.earnings_connect_pending_body()}</p>
+          {/if}
+        {/await}
       </div>
       <div class="connect-card__actions">
+        <!-- A paused account needs the person to give Stripe something, and
+             the monthly email sends them here (M3): the same onboarding link
+             as the incomplete state. -->
         <button
           type="button"
-          class="btn btn--ghost btn--sm"
-          onclick={handleOpenDashboard}
-          aria-label={m.earnings_connect_dashboard_cta()}
+          class="btn btn--secondary btn--sm"
+          onclick={handleOnboard}
+          disabled={isOnboarding}
+          aria-busy={isOnboarding}
         >
-          {m.earnings_connect_dashboard_cta()}
+          {isOnboarding ? m.common_loading() : m.earnings_connect_resume_cta()}
         </button>
         <button
           type="button"
@@ -313,7 +307,131 @@
         </button>
       </div>
     </section>
+
+  {:else if connectStateStatus === 'enabled'}
+    {#await data.stripeBalance}
+      <section class="connect-card connect-card--enabled" aria-label="Payout account connected" aria-busy="true">
+        <div class="connect-card__body">
+          <h2 class="connect-card__title">{m.earnings_connect_enabled_title()}</h2>
+          <Skeleton height="2.5rem" width="60%" />
+        </div>
+        {@render enabledActions()}
+      </section>
+    {:then result}
+      {#if result?.ok}
+        {@const notice = switchoverNotice(result.balance.manualPayoutsSince, now)}
+        {#if notice}
+          <div class="connect-banner connect-banner--info" role="status">
+            <span class="connect-banner__message">{notice}</span>
+          </div>
+        {/if}
+      {/if}
+      {#if result?.ok && result.balance.negative}
+        {@const rule = ruleLine(result.balance.negative.rule)}
+        <section class="connect-card connect-card--warning" aria-label={m.earnings_negative_aria()}>
+          <div class="connect-card__body">
+            <h2 class="connect-card__title">
+              {m.earnings_negative_title()} {@render negativeMoney(result.balance.negative.owedCents)}
+            </h2>
+            <p class="connect-card__description">{m.earnings_negative_body()}</p>
+            <p class="connect-card__description">{negativeCauseLine(result.balance.negative.causes)}</p>
+            <p class="connect-card__rule"><b>{rule.label}</b> {rule.text}</p>
+          </div>
+          {@render enabledActions()}
+        </section>
+      {:else}
+        <section class="connect-card connect-card--enabled" aria-label="Payout account connected">
+          <div class="connect-card__body">
+            <h2 class="connect-card__title">{m.earnings_connect_enabled_title()}</h2>
+            {#if result && !result.ok}
+              <!-- A failed read is never shown as £0.00 or "nothing waiting" (E8). -->
+              <p class="connect-card__inline-error" role="alert">
+                {m.earnings_bank_check_failed()}
+                <button type="button" class="btn btn--ghost btn--sm" onclick={reload}>
+                  {m.earnings_bank_check_retry()}
+                </button>
+              </p>
+              <p class="connect-card__description">{m.earnings_bank_hold_sentence()}</p>
+            {:else if result?.ok && result.balance.manualPayouts}
+              {@const balance = result.balance}
+              {@const inStripe = balance.availableCents + balance.pendingCents}
+              {#if balance.nextPayout === null && inStripe <= 0}
+                <p class="connect-card__description">{m.earnings_bank_nothing_waiting()}</p>
+              {:else}
+                <dl class="bank-figures">
+                  {#if balance.nextPayout}
+                    <div>
+                      <dt>{m.earnings_bank_next_payout()}</dt>
+                      <dd>
+                        {formatPence(balance.nextPayout.amountCents)}<small>{formatDay(balance.nextPayout.on, { weekday: true })}</small>
+                      </dd>
+                    </div>
+                  {/if}
+                  <div>
+                    <dt>{m.earnings_bank_in_stripe()}</dt>
+                    <dd>{formatPence(inStripe)}</dd>
+                  </div>
+                </dl>
+                {#if balance.covering}
+                  <p class="connect-card__description">
+                    {m.earnings_bank_covering_sentence({ amount: formatPence(balance.covering.cents) })}
+                  </p>
+                {/if}
+                <p class="connect-card__description">{m.earnings_bank_hold_sentence()}</p>
+              {/if}
+            {/if}
+          </div>
+          {@render enabledActions()}
+        </section>
+      {/if}
+    {/await}
   {/if}
+
+  {#snippet enabledActions()}
+    <div class="connect-card__actions">
+      <button
+        type="button"
+        class="btn btn--ghost btn--sm"
+        onclick={handleOpenDashboard}
+        aria-label={m.earnings_connect_dashboard_cta()}
+      >
+        {m.earnings_connect_dashboard_cta()}
+      </button>
+      <button
+        type="button"
+        class="btn btn--ghost btn--sm"
+        onclick={handleSync}
+        disabled={isSyncing}
+        aria-busy={isSyncing}
+      >
+        {isSyncing ? m.earnings_connect_syncing() : m.earnings_connect_sync_cta()}
+      </button>
+    </div>
+  {/snippet}
+
+  {#snippet negativeMoney(owedCents: number)}
+    <span class="money-neg"
+      ><span class="sr-only">{m.earnings_money_minus()} </span><span aria-hidden="true">−</span>{formatPence(owedCents)}</span
+    >
+  {/snippet}
+
+  {#snippet waitingList(waiting: WaitingView)}
+    <dl class="waiting-list">
+      {#each waitingLines(waiting) as line (line.key)}
+        <div class="waiting-list__row">
+          <dt>
+            {line.name}{#if line.asOwner}
+              <em> {m.earnings_waiting_owner_share()}</em>{/if}
+          </dt>
+          <dd>{line.amount}</dd>
+        </div>
+      {/each}
+      <div class="waiting-list__row waiting-list__row--total">
+        <dt>{m.earnings_waiting_since({ date: waitingSince(waiting) })}</dt>
+        <dd>{formatPence(waiting.totalCents)}</dd>
+      </div>
+    </dl>
+  {/snippet}
 
   <!-- ── Earnings KPI cards (streamed) ─────────────────────────────────────── -->
   {#await data.earningsSummary}
@@ -325,8 +443,9 @@
         </div>
       {/each}
     </div>
-  {:then summary}
-    {#if summary}
+  {:then result}
+    {#if result.ok}
+      {@const summary = result.summary}
       <div class="kpi-grid" aria-label="Earnings summary">
         <div class="kpi-card">
           <span class="kpi-card__label">{m.earnings_kpi_earned_period()}</span>
@@ -345,18 +464,15 @@
           <span class="kpi-card__value">{summary.needsAttentionCount ?? 0}</span>
         </div>
       </div>
+    {:else}
+      <!-- A failed read, never empty KPIs. -->
+      <div class="stream-error" role="alert" data-testid="earnings-kpi-error">
+        <span class="stream-error__message">{m.earnings_kpi_load_error()}</span>
+        <button type="button" class="btn btn--ghost btn--sm" onclick={reload}>
+          {m.earnings_kpi_retry()}
+        </button>
+      </div>
     {/if}
-  {:catch}
-    <div class="stream-error" role="alert">
-      <span class="stream-error__message">{m.earnings_kpi_load_error()}</span>
-      <button
-        type="button"
-        class="btn btn--ghost btn--sm"
-        onclick={() => goto(page.url.pathname, { invalidateAll: true })}
-      >
-        {m.earnings_kpi_retry()}
-      </button>
-    </div>
   {/await}
 
   <!-- ── Payouts ledger (streamed) ──────────────────────────────────────────── -->
@@ -410,9 +526,18 @@
           </div>
         {/each}
       </div>
-    {:then payoutsResult}
-      {#if payoutsResult?.items && payoutsResult.items.length > 0}
-        {@const filtered = filterPayouts(payoutsResult.items)}
+    {:then result}
+      {@const payoutsResult = result.ok ? result.list : null}
+      {#if !result.ok}
+        <!-- Distinct from empty: the request failed -->
+        <div class="stream-error" role="alert" data-testid="earnings-payouts-error">
+          <span class="stream-error__message">{m.earnings_payouts_load_error()}</span>
+          <button type="button" class="btn btn--ghost btn--sm" onclick={reload}>
+            {m.earnings_payouts_retry()}
+          </button>
+        </div>
+      {:else if payoutsResult?.items && payoutsResult.items.length > 0}
+        {@const filtered = filterPayouts<PayoutRow>(payoutsResult.items, statusFilter, sourceFilter)}
         {#if filtered.length > 0}
           <div class="payouts-table" role="table" aria-label={m.earnings_payouts_title()}>
             <div class="payouts-table__head" role="row">
@@ -422,6 +547,11 @@
               <span class="payouts-table__th" role="columnheader">{m.earnings_payouts_col_source()}</span>
             </div>
             {#each filtered as payout (payout.id)}
+              {@const bankLine = bankLineFor(payout, {
+                connectState: connectStateStatus,
+                balance: rowBalance,
+                now,
+              })}
               <div class="payouts-table__row" role="row">
                 <span
                   class="payouts-table__cell payouts-table__cell--date"
@@ -438,8 +568,13 @@
                   {formatPence(payout.amountCents)}
                 </span>
                 <span class="payouts-table__cell" role="cell" data-label={m.earnings_payouts_col_status()}>
-                  <span class="status-badge {statusClass(payout.status)}" aria-label={statusLabel(payout.status)}>
-                    {statusLabel(payout.status)}
+                  <span class="status-stack">
+                    <span class="status-badge status-badge--{statusTone(payout.status)}">
+                      {statusLabel(payout.status)}
+                    </span>
+                    {#if bankLine}
+                      <span class="bank-line">{bankLine}</span>
+                    {/if}
                   </span>
                 </span>
                 <span class="payouts-table__cell" role="cell" data-label={m.earnings_payouts_col_source()}>
@@ -467,24 +602,12 @@
           </div>
         {/if}
       {:else}
-        <!-- payoutsResult is null (never fetched / no items) -->
+        <!-- The read worked and there are no rows -->
         <div class="payouts-empty">
           <p class="payouts-empty__title">{m.earnings_payouts_empty()}</p>
           <p class="payouts-empty__description">{m.earnings_payouts_empty_description()}</p>
         </div>
       {/if}
-    {:catch}
-      <!-- Distinct from empty: the request failed -->
-      <div class="stream-error" role="alert">
-        <span class="stream-error__message">{m.earnings_payouts_load_error()}</span>
-        <button
-          type="button"
-          class="btn btn--ghost btn--sm"
-          onclick={() => goto(page.url.pathname, { invalidateAll: true })}
-        >
-          {m.earnings_payouts_retry()}
-        </button>
-      </div>
     {/await}
   </section>
 </div>
@@ -528,16 +651,25 @@
     font-size: var(--text-sm);
   }
 
+  /* Status tokens, not the raw -50/-200/-700 steps: those are fixed
+     light-mode hex, so in dark theme every card was near-white under
+     near-white text (themes/status.css). */
   .connect-banner--success {
-    background: var(--color-success-50);
-    color: var(--color-success-700);
-    border: var(--border-width) var(--border-style) var(--color-success-200);
+    background: var(--color-status-success-surface);
+    color: var(--color-status-success-text);
+    border: var(--border-width) var(--border-style) var(--color-status-success-border);
   }
 
   .connect-banner--warning {
-    background: var(--color-warning-50);
-    color: var(--color-warning-700);
-    border: var(--border-width) var(--border-style) var(--color-warning-200);
+    background: var(--color-status-warning-surface);
+    color: var(--color-status-warning-text);
+    border: var(--border-width) var(--border-style) var(--color-status-warning-border);
+  }
+
+  .connect-banner--info {
+    background: var(--color-status-info-surface);
+    color: var(--color-status-info-text);
+    border: var(--border-width) var(--border-style) var(--color-status-info-border);
   }
 
   /* ── Connect cards ──────────────────────────────────────────────────────── */
@@ -552,13 +684,13 @@
   }
 
   .connect-card--cta {
-    background: var(--color-primary-50);
-    border-color: var(--color-primary-200);
+    background: color-mix(in oklab, var(--color-interactive) 8%, var(--color-surface));
+    border-color: color-mix(in oklab, var(--color-interactive) 40%, var(--color-border));
   }
 
   .connect-card--warning {
-    background: var(--color-warning-50);
-    border-color: var(--color-warning-200);
+    background: var(--color-status-warning-surface);
+    border-color: var(--color-status-warning-border);
   }
 
   .connect-card--info {
@@ -567,19 +699,21 @@
   }
 
   .connect-card--enabled {
-    background: var(--color-success-50);
-    border-color: var(--color-success-200);
+    background: var(--color-status-success-surface);
+    border-color: var(--color-status-success-border);
   }
 
   .connect-card--error {
-    background: var(--color-error-50);
-    border-color: var(--color-error-200);
+    background: var(--color-status-error-surface);
+    border-color: var(--color-status-error-border);
   }
 
   .connect-card__body {
     display: flex;
     flex-direction: column;
-    gap: var(--space-1);
+    gap: var(--space-2);
+    min-width: 0;
+    flex: 1 1 auto;
   }
 
   .connect-card__title {
@@ -599,6 +733,112 @@
     display: flex;
     gap: var(--space-2);
     flex-shrink: 0;
+  }
+
+  /* ── The money lines in the connect card (Codex-2hxff.29, .30, .34) ───── */
+  .bank-figures {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-8);
+    margin: 0;
+  }
+
+  .bank-figures > div {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-0-5);
+  }
+
+  .bank-figures dt {
+    font-size: var(--text-xs);
+    font-weight: var(--font-medium);
+    color: var(--color-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .bank-figures dd {
+    margin: 0;
+    font-size: var(--text-xl);
+    font-weight: var(--font-semibold);
+    color: var(--color-text);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .bank-figures dd small {
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
+    color: var(--color-text-secondary);
+    margin-inline-start: var(--space-1);
+  }
+
+  .waiting-list {
+    display: grid;
+    gap: var(--space-1);
+    max-width: var(--measure-narrow);
+    margin: var(--space-1) 0 0;
+    font-size: var(--text-sm);
+  }
+
+  .waiting-list__row {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--space-4);
+  }
+
+  .waiting-list__row dt {
+    color: var(--color-text-secondary);
+    min-width: 0;
+  }
+
+  .waiting-list__row dt em {
+    font-style: normal;
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
+  }
+
+  .waiting-list__row dd {
+    margin: 0;
+    color: var(--color-text);
+    font-variant-numeric: tabular-nums;
+    font-weight: var(--font-medium);
+  }
+
+  .waiting-list__row--total {
+    padding-top: var(--space-1);
+    border-top: var(--border-width) var(--border-style) var(--color-border);
+  }
+
+  .waiting-list__row--total dt,
+  .waiting-list__row--total dd {
+    color: var(--color-text);
+    font-weight: var(--font-semibold);
+  }
+
+  .connect-card__rule {
+    margin: 0;
+    padding-top: var(--space-2);
+    font-size: var(--text-sm);
+    color: var(--color-text);
+    border-top: var(--border-width) var(--border-style) var(--color-status-warning-border);
+  }
+
+  .connect-card__rule b {
+    font-weight: var(--font-semibold);
+  }
+
+  .connect-card__inline-error {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2) var(--space-3);
+    margin: 0;
+    font-size: var(--text-sm);
+    color: var(--color-text);
+  }
+
+  .money-neg {
+    color: var(--color-status-error-text);
   }
 
   /* The connect card is a body↔actions row on desktop; on phones the actions
@@ -632,8 +872,8 @@
   }
 
   .kpi-card--attention {
-    border-color: var(--color-warning-300);
-    background: var(--color-warning-50);
+    border-color: var(--color-status-warning-border);
+    background: var(--color-status-warning-surface);
   }
 
   .kpi-card--skeleton {
@@ -668,13 +908,13 @@
     gap: var(--space-3);
     padding: var(--space-4);
     border-radius: var(--radius-md);
-    background: var(--color-error-50);
-    border: var(--border-width) var(--border-style) var(--color-error-200);
+    background: var(--color-status-error-surface);
+    border: var(--border-width) var(--border-style) var(--color-status-error-border);
   }
 
   .stream-error__message {
     font-size: var(--text-sm);
-    color: var(--color-error-700);
+    color: var(--color-status-error-text);
     flex: 1;
   }
 
@@ -731,9 +971,9 @@
   }
 
   .filter-chip--active {
-    background: var(--color-primary-100);
-    border-color: var(--color-primary-300);
-    color: var(--color-primary-700);
+    background: color-mix(in oklab, var(--color-interactive) 12%, var(--color-surface));
+    border-color: color-mix(in oklab, var(--color-interactive) 45%, var(--color-border));
+    color: var(--color-text);
   }
 
   /* ── Payouts table ──────────────────────────────────────────────────────── */
@@ -844,18 +1084,49 @@
   }
 
   .status-badge--paid {
-    background: var(--color-success-100);
-    color: var(--color-success-700);
+    background: var(--color-status-success-surface);
+    color: var(--color-status-success-text);
   }
 
   .status-badge--pending {
-    background: var(--color-warning-100);
-    color: var(--color-warning-700);
+    background: var(--color-status-warning-surface);
+    color: var(--color-status-warning-text);
   }
 
   .status-badge--failed {
-    background: var(--color-error-100);
-    color: var(--color-error-700);
+    background: var(--color-status-error-surface);
+    color: var(--color-status-error-text);
+  }
+
+  /* Reversed and cancelled rows: neutral, as on the org Payouts page. */
+  .status-badge--neutral {
+    background: var(--color-surface-secondary);
+    color: var(--color-text);
+  }
+
+  /* The per-sale bank line under the status badge (E1-E6). */
+  .status-stack {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-1);
+  }
+
+  .bank-line {
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
+    line-height: var(--leading-snug);
+  }
+
+  @media (--below-sm) {
+    .status-stack {
+      align-items: flex-end;
+      text-align: end;
+    }
+
+    .bank-figures {
+      gap: var(--space-3) var(--space-6);
+    }
   }
 
   /* ── Empty state ────────────────────────────────────────────────────────── */
@@ -916,14 +1187,14 @@
   }
 
   .btn--primary {
-    background: var(--color-primary-600);
-    color: var(--color-surface);
-    border-color: var(--color-primary-600);
+    background: var(--color-interactive);
+    color: var(--color-on-interactive);
+    border-color: var(--color-interactive);
   }
 
   .btn--primary:hover:not(:disabled) {
-    background: var(--color-primary-700);
-    border-color: var(--color-primary-700);
+    background: color-mix(in oklab, var(--color-interactive) 88%, var(--color-text));
+    border-color: color-mix(in oklab, var(--color-interactive) 88%, var(--color-text));
   }
 
   .btn--secondary {

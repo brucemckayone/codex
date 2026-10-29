@@ -21,17 +21,20 @@ import type {
   ActivityFeedResponse,
   ChargeDetail,
   ChargeSummary,
+  CheckedOwedToCreator,
   ContentPerformanceItem,
-  CreatorDebtItem,
+  CreatorDebtPerson,
   CreatorRevenueSplitItem,
   CustomerDetails,
   CustomerListItem,
   DashboardStats,
   FailedRefundItem,
   FollowerStats,
+  OwedToCreatorItem,
   RefundPreview,
   ResolvedCreatorDebt,
   ResolvedFailedRefund,
+  ResolvedOwedToCreator,
   RevenueStats,
   SubscriberStats,
   SupportQueueCounts,
@@ -78,9 +81,11 @@ import type {
   UserProfile,
 } from '@codex/shared-types';
 import type {
+  ConnectAccountService,
   CourseSubscriptionCheckoutVerifyResult,
   CreatorEarningsSummary,
   CreatorPayoutBreakdown,
+  CreatorPayoutRow,
   PayoutSummary,
   PayoutWithCreator,
   SubscriberListItem,
@@ -106,6 +111,7 @@ import type {
   SupportIssueRefundInput,
   SupportQueueQuery,
   SupportResolveCreatorDebtInput,
+  SupportResolveCreditInput,
   SupportResolveFailedRefundInput,
   UpdateBrandingInput,
   UpdateCategoryInput,
@@ -184,6 +190,15 @@ import type {
   UserOrgSubscription,
 } from '../types';
 import { ApiError } from './errors';
+
+/**
+ * The session user's own Stripe balance, as Studio reads it (Codex-2hxff.29,
+ * .30; GET /connect/me/balance). Derived from the service, whose index does
+ * not export the interface by name.
+ */
+export type MyStripeBalance = Awaited<
+  ReturnType<ConnectAccountService['getBalanceForUser']>
+>;
 
 /**
  * One item from `GET /api/content/public`, typed to match what the endpoint
@@ -2929,7 +2944,7 @@ export function createServerApi(
           { method: 'POST', body: JSON.stringify(body) }
         ),
 
-      /** The queue's two counts, for the nav badge. */
+      /** The queue's three counts, for the nav badge. */
       getQueueCounts: () =>
         request<SupportQueueCounts>('admin', '/api/admin/support/queue/counts'),
 
@@ -2943,9 +2958,12 @@ export function createServerApi(
           })}`
         ),
 
-      /** Creator debts waiting for a person, oldest first. */
+      /**
+       * Creator debts, one row per person, oldest first: what Stripe holds
+       * as a negative balance, and any debt Stripe refused.
+       */
       listCreatorDebts: ({ page, limit }: SupportQueueQuery) =>
-        request<PaginatedListResponse<CreatorDebtItem>>(
+        request<PaginatedListResponse<CreatorDebtPerson>>(
           'admin',
           `/api/admin/support/queue/creator-debts?${new URLSearchParams({
             page: String(page),
@@ -2973,6 +2991,35 @@ export function createServerApi(
           'admin',
           `/api/admin/support/creator-debts/${encodeURIComponent(reviewId)}/resolve`,
           { method: 'POST', body: JSON.stringify(body) }
+        ),
+
+      /** Money owed back to payees after a late take-back, oldest first. */
+      listOwedToCreators: ({ page, limit }: SupportQueueQuery) =>
+        request<PaginatedListResponse<OwedToCreatorItem>>(
+          'admin',
+          `/api/admin/support/queue/owed-to-creators?${new URLSearchParams({
+            page: String(page),
+            limit: String(limit),
+          })}`
+        ),
+
+      /** Re-pay it, count it against its own open debt, or mark it not owed. */
+      resolveOwedToCreator: (
+        creditId: string,
+        body: SupportResolveCreditInput
+      ) =>
+        request<ResolvedOwedToCreator>(
+          'admin',
+          `/api/admin/support/owed-to-creators/${encodeURIComponent(creditId)}/resolve`,
+          { method: 'POST', body: JSON.stringify(body) }
+        ),
+
+      /** "Check Stripe again": asks Stripe once. The route takes no body. */
+      checkOwedToCreator: (creditId: string) =>
+        request<CheckedOwedToCreator>(
+          'admin',
+          `/api/admin/support/owed-to-creators/${encodeURIComponent(creditId)}/check`,
+          { method: 'POST' }
         ),
     },
 
@@ -3237,10 +3284,12 @@ export function createServerApi(
       /**
        * List the current creator's own payouts (paginated).
        * GET /subscriptions/me/payouts — self-scoped, no org context.
-       * Returns `{ items: PayoutWithCreator[], pagination }` envelope.
+       * Returns `{ items: CreatorPayoutRow[], pagination }` envelope: no
+       * creator or subscriber identity, and each row's bank date and
+       * take-back.
        */
       getMyPayouts: (params?: URLSearchParams) =>
-        request<PaginatedListResponse<PayoutWithCreator>>(
+        request<PaginatedListResponse<CreatorPayoutRow>>(
           'ecom',
           `/subscriptions/me/payouts${params?.toString() ? `?${params.toString()}` : ''}`
         ),
@@ -3312,6 +3361,16 @@ export function createServerApi(
         request<ConnectDashboardResponse>('ecom', '/connect/me/dashboard', {
           method: 'POST',
         }),
+
+      /**
+       * The current creator's Stripe balance: the next bank payout, a
+       * take-back the balance is covering, and a balance below zero
+       * (Codex-2hxff.29, .30). GET /connect/me/balance — self-scoped, cached
+       * 10 minutes by ecom-api. 404 when the user has no Connect account, so
+       * call it only when connected; 503 when Stripe can't be read.
+       */
+      getMyBalance: () =>
+        request<MyStripeBalance>('ecom', '/connect/me/balance'),
     },
 
     /**

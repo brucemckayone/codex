@@ -88,6 +88,7 @@ const mockApiClient = {
       inTransitCents: 1000,
       earnedInPeriodCents: 500,
       needsAttentionCount: 0,
+      waiting: null,
     })),
   },
 };
@@ -245,6 +246,7 @@ describe('WP8: /me api client methods — envelope shape', () => {
       inTransitCents: 0,
       earnedInPeriodCents: 0,
       needsAttentionCount: 0,
+      waiting: null,
     }));
     const params = new URLSearchParams({
       fromDate: '2025-01-01T00:00:00.000Z',

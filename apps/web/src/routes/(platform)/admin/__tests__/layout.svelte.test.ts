@@ -70,15 +70,20 @@ describe('the Support nav', () => {
     expect(queueLink()?.querySelector('[data-variant="warning"]')).toBeNull();
   });
 
-  test('shows the waiting total once the counts land, and says it', () => {
+  test('shows the waiting total of all three tabs once the counts land, and says it', () => {
     mountAt('/admin/refunds');
-    countsSlot().current = { failedRefunds: 2, creatorDebts: 3 };
+    // Owed to creators counts too (Q8): 2 + 1 + 6, as drawn (O1).
+    countsSlot().current = {
+      failedRefunds: 2,
+      creatorDebts: 1,
+      owedToCreators: 6,
+    };
     flushSync();
     expect(
       queueLink()?.querySelector('[data-variant="warning"]')?.textContent
-    ).toBe('5');
+    ).toBe('9');
     expect(queueLink()?.textContent).toContain(
-      m.support_nav_queue_waiting({ count: '5' })
+      m.support_nav_queue_waiting({ count: '9' })
     );
   });
 

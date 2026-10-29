@@ -20,11 +20,17 @@
   fails, so the lock reads the query's error, not the promise. The outcome
   takes focus as it arrives, so a screen reader reads it out.
 
+  A late take-back owed back to a payee (Codex-2hxff.73, C1-C2) carries the
+  queue's Re-pay (or Count against this debt) on its history line. It opens
+  the same dialog; once it answers, the charge and the counts reload once,
+  and the notice says what was done.
+
   The not-found, error and loading states still name the page with an h1.
   Only the worker's own 404 is "not found": the remote guard's bare 404, like
   a 401 or a 403, means the session ended (R2-M1, `session.ts`).
 -->
 <script lang="ts">
+  import type { HistoryLine, OwedToCreatorAction, Slice } from '@codex/admin';
   import { tick } from 'svelte';
   import { afterNavigate } from '$app/navigation';
   import { page } from '$app/state';
@@ -40,6 +46,9 @@
   import RefundsCard from '$lib/components/support/RefundsCard.svelte';
   import SessionEndedAlert from '$lib/components/support/SessionEndedAlert.svelte';
   import SplitCard from '$lib/components/support/SplitCard.svelte';
+  import ResolveCreditDialog from '$lib/components/support/ResolveCreditDialog.svelte';
+  import { type CreditTarget, targetFromLine } from '$lib/components/support/owed-view';
+  import type { SettleNotice } from '$lib/components/support/settle-notice';
   import {
     type RefundOutcome,
     refreshesCounts,
@@ -78,11 +87,17 @@
   /** A refund with this key may still be landing: nothing more is sent until a reload lands. */
   let reloadLock = $state(false);
 
+  let creditTarget = $state<CreditTarget | null>(null);
+  let creditAction = $state<OwedToCreatorAction | null>(null);
+  let creditOpen = $state(false);
+  let creditNotice = $state<SettleNotice | null>(null);
+
   // A different charge starts clean.
   $effect(() => {
     void chargeId;
     outcome = null;
     reloadLock = false;
+    creditNotice = null;
   });
 
   // "Back to results" returns to the search it came from, query and all.
@@ -114,6 +129,38 @@
       countsQuery.refresh().catch(() => {}),
     ]);
     refreshingByHand = false;
+  }
+
+  // Where focus goes when the credit dialog closes: the notice once it has
+  // answered, otherwise the line's button that opened it.
+  let creditReturnFocus: HTMLElement | null = null;
+  let creditFocusNotice = false;
+
+  function focusAfterCredit(): HTMLElement | null {
+    if (creditFocusNotice) return document.querySelector<HTMLElement>('[data-credit-notice]');
+    return creditReturnFocus?.isConnected ? creditReturnFocus : null;
+  }
+
+  function openCredit(slice: Slice, line: HistoryLine) {
+    if (!detail) return;
+    const target = targetFromLine(detail, slice, line);
+    const action = line.credit?.action;
+    if (!target || (action !== 'repay' && action !== 'count_against_debt')) return;
+    creditReturnFocus =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    creditFocusNotice = false;
+    creditTarget = target;
+    creditAction = action;
+    creditOpen = true;
+  }
+
+  async function handleCreditFinished(next: SettleNotice) {
+    creditFocusNotice = true;
+    creditNotice = next;
+    void reloadCharge();
+    void countsQuery.refresh().catch(() => {});
+    await tick();
+    document.querySelector<HTMLElement>('[data-credit-notice]')?.focus();
   }
 
   async function handleOutcome(next: RefundOutcome) {
@@ -254,6 +301,17 @@
     </Alert>
   {/if}
 
+  {#if creditNotice}
+    <Alert
+      variant={creditNotice.variant}
+      tabindex={-1}
+      data-credit-notice
+      data-testid="credit-notice"
+    >
+      <p>{#if creditNotice.lead}<strong>{creditNotice.lead}</strong> {/if}{creditNotice.text}</p>
+    </Alert>
+  {/if}
+
   {#if outcome}
     <RefundOutcomeAlert
       {outcome}
@@ -273,7 +331,7 @@
         />
       {/if}
       <ChargeSummaryCard {detail} />
-      <SplitCard {detail} />
+      <SplitCard {detail} onCreditAction={openCredit} />
       {#if !outcome}
         <RefundsCard {detail} />
       {/if}
@@ -289,6 +347,13 @@
       />
     </aside>
   </div>
+  <ResolveCreditDialog
+    target={creditTarget}
+    action={creditAction}
+    bind:open={creditOpen}
+    onFinished={(next) => void handleCreditFinished(next)}
+    closeFocus={focusAfterCredit}
+  />
 {/if}
 
 <style>

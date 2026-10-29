@@ -221,6 +221,8 @@ describe('SubscriptionService — creator earnings (WP7)', () => {
         totalEarnedCents: 0,
         inTransitCents: 0,
         needsAttentionCount: 0,
+        // Nothing waiting for setup either (Codex-2hxff.34).
+        waiting: null,
       });
     });
   });

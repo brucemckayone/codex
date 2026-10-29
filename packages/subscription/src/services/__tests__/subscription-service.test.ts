@@ -10846,9 +10846,12 @@ describe('SubscriptionService', () => {
       // One drain per payee, not per row, and for every organisation, on the
       // sweep's one platform-failure tally (Codex-r094t)
       expect(resolveSpy).toHaveBeenCalledTimes(1);
+      // Called directly, not from the 08:00 cron, so it is not the cron's own
+      // drain: payout-released names the first run strictly after (Codex-2hxff.29)
       expect(resolveSpy).toHaveBeenCalledWith(
         stripeAccountId,
-        expect.objectContaining({ errorId: expect.any(String), count: 0 })
+        expect.objectContaining({ errorId: expect.any(String), count: 0 }),
+        { cronDrain: false }
       );
       // Three transfers because the drain processes 3 rows
       expect(transferSpy).toHaveBeenCalledTimes(3);
