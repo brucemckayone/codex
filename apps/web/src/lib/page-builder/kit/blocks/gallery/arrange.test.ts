@@ -154,20 +154,20 @@ describe('pictureVariant', () => {
 describe('pictureSizes (Codex-61zsk.66)', () => {
   it('a strip picture is its fixed height at its shape', () => {
     expect(pictureSizes('strip', 0, 5)).toBe(
-      'clamp(19.5rem, calc(12rem + 24vw), 39rem)'
+      '(min-width: 112.5rem) 39rem, (min-width: 31.25rem) calc(12rem + 24vw), 19.5rem'
     );
     expect(pictureSizes('strip', 1, 5)).toBe(
-      'clamp(10.4rem, calc(6.4rem + 12.8vw), 20.8rem)'
+      '(min-width: 112.5rem) 20.8rem, (min-width: 31.25rem) calc(6.4rem + 12.8vw), 10.4rem'
     );
   });
 
   it('a grid divides the column by its row from 60rem, in two from 36rem', () => {
-    expect(pictureSizes('grid', 0, 1)).toBe('min(100vw, 82rem)');
+    expect(pictureSizes('grid', 0, 1)).toBe('(min-width: 82rem) 82rem, 100vw');
     expect(pictureSizes('grid', 0, 3)).toBe(
-      '(min-width: 60rem) min(33.33vw, 27.33rem), (min-width: 36rem) min(50vw, 41rem), min(100vw, 82rem)'
+      '(min-width: 82rem) 27.33rem, (min-width: 60rem) 33.33vw, (min-width: 36rem) 50vw, 100vw'
     );
     expect(pictureSizes('grid', 0, 4)).toBe(
-      '(min-width: 60rem) min(50vw, 41rem), (min-width: 36rem) min(50vw, 41rem), min(100vw, 82rem)'
+      '(min-width: 82rem) 41rem, (min-width: 36rem) 50vw, 100vw'
     );
   });
 
@@ -175,17 +175,18 @@ describe('pictureSizes (Codex-61zsk.66)', () => {
     const tiles = mosaicTiles(5);
     expect(tiles[0]).toBe('large');
     expect(pictureSizes('mosaic', 0, 5)).toBe(
-      '(min-width: 53rem) min(75vw, 61.5rem), min(100vw, 82rem)'
+      '(min-width: 82rem) 61.5rem, (min-width: 53rem) 75vw, 100vw'
     );
-    expect(pictureSizes('mosaic', 1, 5)).toMatch(/, min\(50vw, 41rem\)$/);
-    expect(pictureSizes('mosaic', 0, 1)).toBe('min(100vw, 82rem)');
+    expect(pictureSizes('mosaic', 1, 5)).toMatch(/, 50vw$/);
+    expect(pictureSizes('mosaic', 0, 1)).toBe(
+      '(min-width: 82rem) 82rem, 100vw'
+    );
   });
 
   // The pictures that take `lg` are the ones drawn wide: on the wide layout
   // each declares at least half the column, and an `md` one a third at most.
   it('agrees with pictureVariant on which pictures are the large ones', () => {
-    const wideShare = (sizes: string) =>
-      Number(/min\(([\d.]+)vw/.exec(sizes)?.[1]);
+    const wideShare = (sizes: string) => Number(/([\d.]+)vw/.exec(sizes)?.[1]);
     for (let count = 2; count <= 12; count++) {
       for (const layout of ['mosaic', 'grid']) {
         for (let index = 0; index < count; index++) {
@@ -212,13 +213,13 @@ describe('pictureSizes under Clean (Codex-61zsk.66)', () => {
   // (style-clean.css), so its grid declares those shares, not the base ones.
   it('a set of six is drawn in pairs, and four or more in threes', () => {
     expect(pictureSizes('grid', 0, 6, 'clean')).toBe(
-      '(min-width: 60rem) min(50vw, 41rem), (min-width: 36rem) min(50vw, 41rem), min(100vw, 82rem)'
+      '(min-width: 82rem) 41rem, (min-width: 36rem) 50vw, 100vw'
     );
     expect(pictureSizes('grid', 0, 7, 'clean')).toBe(
-      '(min-width: 60rem) min(33.33vw, 27.33rem), (min-width: 36rem) min(50vw, 41rem), min(100vw, 82rem)'
+      '(min-width: 82rem) 27.33rem, (min-width: 60rem) 33.33vw, (min-width: 36rem) 50vw, 100vw'
     );
     expect(pictureSizes('grid', 0, 7)).toBe(
-      '(min-width: 60rem) min(25vw, 20.5rem), (min-width: 36rem) min(50vw, 41rem), min(100vw, 82rem)'
+      '(min-width: 82rem) 20.5rem, (min-width: 60rem) 25vw, (min-width: 36rem) 50vw, 100vw'
     );
   });
 });

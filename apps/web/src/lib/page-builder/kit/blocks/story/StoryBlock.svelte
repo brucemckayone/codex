@@ -16,8 +16,9 @@
   column.
 -->
 <script lang="ts">
+  import { clampedSizes } from '$lib/utils/image';
   import { hasHead } from '../../model/read';
-  import { columnSize, pageImageSrcset, resolvePageImageUrl } from '../../../page-images';
+  import { columnSizes, pageImageSrcset, resolvePageImageUrl } from '../../../page-images';
   import type { BlockProps } from '../../model/types';
   import Eyebrow from '../../primitives/Eyebrow.svelte';
   import Heading from '../../primitives/Heading.svelte';
@@ -47,13 +48,11 @@
   const srcsets = $derived(
     steps.map((step) => pageImageSrcset(step.image, context.mediaBaseUrl))
   );
-  const sizes = $derived(
-    layout === 'chapters'
-      ? '100vw'
-      : layout === 'strip'
-        ? 'clamp(16rem, 34vw, 28rem)'
-        : `(min-width: 48rem) ${columnSize(0.5)}, ${columnSize()}`
-  );
+  const sizes = $derived.by(() => {
+    if (layout === 'chapters') return '100vw';
+    if (layout === 'strip') return clampedSizes(16, { vw: 34 }, 28);
+    return columnSizes(1, [[48, 0.5]]);
+  });
   // A moment's heading sits one level under the section heading, or takes its
   // level when there is none, so the outline never skips a step.
   const level = $derived(content.heading ? (section.headingLevel === 1 ? 2 : 3) : section.headingLevel);

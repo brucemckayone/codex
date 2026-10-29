@@ -511,8 +511,8 @@ describe('StoryBlock: every size a picture has (Codex-61zsk.66)', () => {
 
   it.each([
     ['chapters', '100vw'],
-    ['strip', 'clamp(16rem, 34vw, 28rem)'],
-    ['scroll', '(min-width: 48rem) min(50vw, 41rem), min(100vw, 82rem)'],
+    ['strip', '(min-width: 82.35rem) 28rem, (min-width: 47.06rem) 34vw, 16rem'],
+    ['scroll', '(min-width: 82rem) 41rem, (min-width: 48rem) 50vw, 100vw'],
   ])('%s: offers the set, at the width its layout draws it', async (layout, sizes) => {
     await render({ steps: moments(3) }, { layout });
     const first = all('img').filter((img) =>

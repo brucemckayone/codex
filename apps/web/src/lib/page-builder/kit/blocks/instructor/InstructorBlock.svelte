@@ -30,7 +30,7 @@
   stays.
 -->
 <script lang="ts">
-  import { getThumbnailSrcset } from '$lib/utils/image';
+  import { cappedSizes, getThumbnailSrcset } from '$lib/utils/image';
   import type { SellPreview } from '../../../render/types';
   import { featuredScheme } from '../../model/resolve';
   import type { BlockProps } from '../../model/types';
@@ -71,15 +71,12 @@
   // columns from 52rem (Bold and Cinematic crop it to the band's edge, so up
   // to half the window); centred is 26rem at most; quote signs off small,
   // except in Cinematic, where the portrait becomes the room from 52rem.
-  const portraitSizes = $derived(
-    layout === 'split'
-      ? '(min-width: 52rem) 50vw, 100vw'
-      : layout === 'quote'
-        ? page.style === 'cinematic'
-          ? '(min-width: 52rem) 50vw, 6rem'
-          : '6rem'
-        : 'min(100vw, 26rem)'
-  );
+  const portraitSizes = $derived.by(() => {
+    if (layout === 'split') return '(min-width: 52rem) 50vw, 100vw';
+    if (layout === 'centered') return cappedSizes(100, '26rem');
+    if (page.style === 'cinematic') return '(min-width: 52rem) 50vw, 6rem';
+    return '6rem';
+  });
 </script>
 
 {#snippet head(size: 'heading' | 'title')}

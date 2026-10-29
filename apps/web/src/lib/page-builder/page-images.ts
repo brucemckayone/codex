@@ -183,15 +183,44 @@ export function pageImageSrcset(
 /** The widest content column any Style draws (Bold's `--lp-container`). */
 const WIDEST_COLUMN_REM = 82;
 
+/** A share of the content column from a viewport width (rem) up. */
+type ColumnShare = readonly [fromRem: number, fraction: number];
+
 /**
- * A `sizes` length for a picture drawn across `fraction` of the kit's content
- * column, for choosing from {@link pageImageSrcset} (Codex-61zsk.66). The
- * column is the window less its gutters, up to the Style's container, so the
- * window capped at the widest Style's column never declares less than a
- * Style draws; a narrower Style fetches a file one step larger at most.
+ * A `sizes` for a picture drawn across `fraction` of the kit's content
+ * column, or across each share in `from` from its viewport width up, for
+ * choosing from {@link pageImageSrcset} (Codex-61zsk.66). The column is the
+ * window less its gutters, up to the Style's container, so the window capped
+ * at the widest Style's column never declares less than a Style draws; a
+ * narrower Style fetches a file one step larger at most.
+ *
+ * Every share stops growing where the column does, at an 82rem window, so
+ * each is its `vw` below that and its `rem` from it: not min(), which Safari
+ * before 26.4 ignores in `sizes`, reading 100vw (Codex-sntzy). The first
+ * entry that matches wins, so they run widest first, and an entry a wider one
+ * always answers, or one that says what the next one does, is left out.
  */
-export function columnSize(fraction = 1): string {
-  const vw = Math.round(fraction * 10000) / 100;
-  const rem = Math.round(fraction * WIDEST_COLUMN_REM * 100) / 100;
-  return `min(${vw}vw, ${rem}rem)`;
+export function columnSizes(
+  fraction = 1,
+  from: readonly ColumnShare[] = []
+): string {
+  const shares = [...from, [0, fraction] as const].sort((a, b) => b[0] - a[0]);
+  const entries: { fromRem: number; length: string }[] = [];
+  const add = (fromRem: number, length: string) => {
+    const last = entries.at(-1);
+    if (last && fromRem >= last.fromRem) return;
+    if (last?.length === length) last.fromRem = fromRem;
+    else entries.push({ fromRem, length });
+  };
+  for (const [fromRem, share] of shares) {
+    const vw = Math.round(share * 10000) / 100;
+    const rem = Math.round(share * WIDEST_COLUMN_REM * 100) / 100;
+    add(Math.max(fromRem, WIDEST_COLUMN_REM), `${rem}rem`);
+    if (fromRem < WIDEST_COLUMN_REM) add(fromRem, `${vw}vw`);
+  }
+  return entries
+    .map(({ fromRem, length }) =>
+      fromRem > 0 ? `(min-width: ${fromRem}rem) ${length}` : length
+    )
+    .join(', ');
 }
