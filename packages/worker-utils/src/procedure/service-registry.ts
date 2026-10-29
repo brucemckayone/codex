@@ -993,7 +993,6 @@ export async function createServiceRegistry(
             // WP-10 (Codex-69t7c.10): a parked creator_payout sends
             // creator-connect-needed, fire-and-forget.
             mailer: sendAfterResponse,
-            webAppUrl: env.WEB_APP_URL,
             portalConfigurationId: env.STRIPE_PORTAL_CONFIGURATION_ID,
           },
           getLazyStripeClient()

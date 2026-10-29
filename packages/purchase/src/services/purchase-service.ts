@@ -320,14 +320,12 @@ export type PurchaseMailer = (params: {
  *   parked. Notification failure MUST NOT block or roll back the payout
  *   ledger write.
  *
- * `webAppUrl` is no longer read: the payout email's Earnings link is built
- * from `environment` (see `notifyCreatorConnectNeeded`). The service
- * registry still passes it.
+ * There is no `webAppUrl`: the payout email's Earnings link is built from
+ * `environment` (see `notifyCreatorConnectNeeded`).
  */
 interface PurchaseServiceConfig extends ServiceConfig {
   feeConfig: FeeResolver;
   mailer: PurchaseMailer;
-  webAppUrl?: string;
   /**
    * Whether the `creator-connect-needed` template exists. Default: a live
    * global template of that name, read before the claim. Testing only.
