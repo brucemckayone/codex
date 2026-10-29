@@ -16,6 +16,8 @@
  *     refetching the list every 60 s, with one socket attempt every 5 min.
  *     A connect that hangs, or a socket that never sends a snapshot this
  *     page can read (a newer protocol after a deploy), counts as failed.
+ *     So does a socket the browser shut without a close event: Chromium
+ *     sends only `error` for a URL the page's CSP refuses (Codex-dh31e).
  *   - A session that ended (two 401/403 tickets in a row, close 4401, `bye`)
  *     stops: a reconnect would be refused the same way. One refusal tries
  *     again, because a session lookup that failed also answers 401.
@@ -67,6 +69,8 @@ export const REFRESH_DEBOUNCE_MS = 750;
 export const TICKET_TIMEOUT_MS = 15_000;
 /** 401/403 tickets in a row before the store believes the session ended. */
 export const AUTH_REFUSALS_BEFORE_STOP = 2;
+/** After an `error`, how long a close event has before the store acts without one. */
+export const CLOSE_AFTER_ERROR_MS = 1_000;
 
 /** The object's close code for a socket whose session ended. */
 const SESSION_EXPIRED_CLOSE = 4401;
@@ -116,6 +120,9 @@ export interface MediaStatusTransport {
 }
 
 const OPEN = 1;
+const CLOSED = 3;
+/** The close code a browser reports for a connection that failed. */
+const ABNORMAL_CLOSE = 1006;
 
 /** Why the last connect failed, for the logs that say the store gave up. */
 interface ConnectFailure {
@@ -430,23 +437,41 @@ export function createMediaStatus(transport: MediaStatusTransport) {
     ws.onmessage = (event) => {
       if (mine === generation) onMessage(ws, event.data);
     };
-    // An error is always followed by a close, which decides what happens.
-    ws.onclose = (event) => {
-      if (mine !== generation) return;
-      socket = null;
-      stopHeartbeat();
-      if (event.code === SESSION_EXPIRED_CLOSE) {
-        end('session_closed');
-        return;
-      }
-      lastFailure = {
-        stage: snapshotSeen ? 'socket' : 'connect',
-        closeCode: event.code,
-        reason: closingBecause ?? (event.reason || undefined),
-      };
-      failed();
+    ws.onclose = (event) => closed(ws, mine, event.code, event.reason);
+    // An error is normally followed by a close, which decides what happens.
+    // Chromium sends no close for a URL the page's CSP refuses: the socket
+    // is CLOSED at once and stays silent, even when closed again (measured
+    // 2026-10-29, Codex-dh31e). Waiting for that close hung the store.
+    ws.onerror = () => {
+      setTimeout(() => {
+        if (ws.readyState === CLOSED) {
+          closed(ws, mine, ABNORMAL_CLOSE, 'error_without_close');
+        }
+      }, CLOSE_AFTER_ERROR_MS);
     };
     startHeartbeat(ws, mine);
+  }
+
+  /** This connection's socket closed: reconnect, poll or stop. Once per socket. */
+  function closed(
+    ws: StatusSocket,
+    mine: number,
+    code: number,
+    reason: string
+  ): void {
+    if (mine !== generation || socket !== ws) return;
+    socket = null;
+    stopHeartbeat();
+    if (code === SESSION_EXPIRED_CLOSE) {
+      end('session_closed');
+      return;
+    }
+    lastFailure = {
+      stage: snapshotSeen ? 'socket' : 'connect',
+      closeCode: code,
+      reason: closingBecause ?? (reason || undefined),
+    };
+    failed();
   }
 
   /** Close this connection's socket ourselves; its onclose reconnects. */
@@ -481,6 +506,12 @@ export function createMediaStatus(transport: MediaStatusTransport) {
     stopHeartbeat();
     heartbeatTimer = setInterval(() => {
       if (mine !== generation) return;
+      if (ws.readyState === CLOSED) {
+        // Shut without a close event (see onerror): closing it again would
+        // fire nothing either, so it is handled as a close here.
+        closed(ws, mine, ABNORMAL_CLOSE, 'closed_silently');
+        return;
+      }
       // Until a snapshot, pongs prove nothing: a handshake that hangs, or a
       // socket that answers pings but never sends a snapshot, is dead too.
       const since = snapshotSeen ? lastHeardAt : openedAt;

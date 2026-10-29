@@ -50,6 +50,13 @@ const config = {
     // previously omitted, which silently blocked all direct-to-R2 uploads in
     // production (Codex-xjdz7).
     //
+    // The studio's live media status is a browser WebSocket to media-api
+    // (wss://media-api.revelations.studio/api/media-status/live). CSP3 never
+    // lets an `https:` source match a `wss:` URL, and `'self'` reaches only
+    // our own host, so the `wss:` entries MUST be here. Without them Chromium
+    // refused every socket in production (Codex-dh31e). The csp-connect-src
+    // test pins the socket URL of each deployed environment to this list.
+    //
     // The dev-only `localhost:4100` / `*.nip.io:4100` entries on
     // `connect-src` cover the AudioPlayer's `fetch(waveform.json)` sidecar.
     // The waveform is rendered as a separate JSON file alongside the HLS
@@ -207,6 +214,10 @@ const config = {
           // sibling subdomains.
           'https://*.revelations.studio',
           'https://*.dev.revelations.studio',
+          // The studio's live media status socket to media-api (Codex-dh31e).
+          // See the header comment above.
+          'wss://*.revelations.studio',
+          'wss://*.dev.revelations.studio',
           // Direct-to-R2 media upload: the browser PUTs the file straight to
           // the presigned R2 URL. Governed by connect-src (not media-src).
           // Mirrors the R2 origins already trusted on img-src / media-src.
@@ -216,6 +227,9 @@ const config = {
           // See header comment above on `connect-src`. Inert in production.
           'http://localhost:4100',
           'http://*.nip.io:4100',
+          // Dev-only — the live media status socket to local media-api
+          // (SERVICE_PORTS.MEDIA). Inert in production.
+          'ws://localhost:4002',
         ],
         'media-src': [
           'self',

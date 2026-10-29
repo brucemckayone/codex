@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { logger } from '$lib/observability';
 import {
   AUTH_REFUSALS_BEFORE_STOP,
+  CLOSE_AFTER_ERROR_MS,
   createMediaStatus,
   FAILURES_BEFORE_POLLING,
   HEARTBEAT_MS,
@@ -45,10 +46,21 @@ class FakeSocket implements StatusSocket {
     this.sent.push(data);
   }
 
-  /** As a browser does: the close event follows. */
+  /** As a browser does: the close event follows, unless it is already CLOSED. */
   close(code = 1000): void {
     this.closedWith = code;
+    if (this.readyState === 3) return;
     this.drop(code);
+  }
+
+  /**
+   * What Chromium does with a URL the page's CSP refuses (measured on
+   * https://revelations.studio, Codex-dh31e): `error`, CLOSED at once, and
+   * no close event, ever.
+   */
+  refuse(): void {
+    this.readyState = 3;
+    this.onerror?.({} as Event);
   }
 
   open(): void {
@@ -658,6 +670,49 @@ describe('recovering', () => {
     await settle();
     expect(h.sockets).toHaveLength(2);
   });
+
+  it('a socket refused with no close event (CSP) fails the connect, and five poll the list', async () => {
+    const warn = vi.spyOn(logger, 'warn');
+    const h = harness();
+    const p = page();
+    h.store.register(p);
+    await settle();
+
+    for (let failure = 1; failure <= FAILURES_BEFORE_POLLING; failure++) {
+      const opened = h.sockets.length;
+      h.last().refuse();
+      await vi.advanceTimersByTimeAsync(CLOSE_AFTER_ERROR_MS);
+      if (failure < FAILURES_BEFORE_POLLING) {
+        await vi.advanceTimersByTimeAsync(RECONNECT_DELAYS_MS[failure - 1]);
+        expect(h.sockets).toHaveLength(opened + 1);
+      }
+    }
+    expect(h.store.connection).toBe('polling');
+    expect(warn).toHaveBeenCalledWith('media_status.polling', {
+      failures: FAILURES_BEFORE_POLLING,
+      stage: 'connect',
+      closeCode: 1006,
+      reason: 'error_without_close',
+    });
+    await vi.advanceTimersByTimeAsync(REFRESH_DEBOUNCE_MS);
+    expect(p.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('an error followed by its close event is one failure, not two', async () => {
+    const h = harness();
+    h.store.register(page());
+    await settle();
+    h.last().onerror?.({} as Event);
+    h.last().drop();
+    await vi.advanceTimersByTimeAsync(CLOSE_AFTER_ERROR_MS);
+    await vi.advanceTimersByTimeAsync(RECONNECT_DELAYS_MS[0]);
+    expect(h.sockets).toHaveLength(2);
+    // Had the error counted too, the second wait would be 2 s, not 1 s.
+    h.last().drop();
+    await vi.advanceTimersByTimeAsync(RECONNECT_DELAYS_MS[1]);
+    expect(h.sockets).toHaveLength(3);
+    expect(h.ticket).toHaveBeenCalledTimes(3);
+  });
 });
 
 describe('the heartbeat', () => {
@@ -673,6 +728,17 @@ describe('the heartbeat', () => {
     // Silent from here: the first tick past the limit closes it.
     await vi.advanceTimersByTimeAsync(SILENCE_LIMIT_MS + HEARTBEAT_MS);
     expect(h.sockets[0].closedWith).toBe(4000);
+    await vi.advanceTimersByTimeAsync(RECONNECT_DELAYS_MS[0]);
+    expect(h.sockets).toHaveLength(2);
+  });
+
+  it('treats a socket shut with neither error nor close as closed', async () => {
+    const h = harness();
+    h.store.register(page());
+    await goLive(h);
+    h.last().readyState = 3;
+    await vi.advanceTimersByTimeAsync(HEARTBEAT_MS);
+    expect(h.store.connection).toBe('reconnecting');
     await vi.advanceTimersByTimeAsync(RECONNECT_DELAYS_MS[0]);
     expect(h.sockets).toHaveLength(2);
   });
