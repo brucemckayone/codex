@@ -6,6 +6,7 @@ import {
   mount,
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
+import { builderSalesContext } from '../../../render/builder-context';
 import type { JourneySalesContext } from '../../../render/types';
 import { COPY } from '../../model/copy';
 import { SECTION_LAYOUTS } from '../../model/ids';
@@ -13,6 +14,7 @@ import { type SampleOfferState, sampleContext } from '../../model/sample';
 import type { BlockEdit, ResolvedSection } from '../../model/types';
 import { componentRules } from '../testing';
 import { PRICING_COPY } from './copy';
+import { PRICING_NO_WAY_IN } from './definition';
 import PricingBlock from './PricingBlock.svelte';
 
 let app: ReturnType<typeof mount> | null = null;
@@ -92,6 +94,46 @@ describe('PricingBlock — priced only from the live offer', () => {
     expect(prices()).toEqual([]);
     expect(text()).toContain(COPY.cta.unavailableTitle);
     expect(hrefs().some((href) => href?.includes('checkout'))).toBe(false);
+  });
+
+  // The canvas pins `purchasable` true for the hero's button, and drew a
+  // course with no way in as "you will see the price before you pay", the
+  // failed-read state (Codex-36vjw). It now draws what visitors see, plus the
+  // creator's next step, which the public page never shows.
+  it.each(
+    SECTION_LAYOUTS.pricing
+  )('%s: on the canvas, a course with no way in reads as visitors see it, with the next step', async (layout) => {
+    const { course, offer } = sampleContext({ offer: 'unavailable' });
+    const canvas = builderSalesContext({ course, offer });
+    expect(canvas.purchasable).toBe(true);
+
+    await renderWith({ heading: 'Join', ctaLabel: 'Buy' }, layout, canvas, {
+      commit: () => {},
+    });
+    expect(prices()).toEqual([]);
+    expect(text()).toContain(COPY.cta.unavailableTitle);
+    expect(text()).not.toContain(COPY.pricing.atCheckout);
+    expect(hrefs().some((href) => href?.includes('checkout'))).toBe(false);
+    const hint = document.body.querySelector('[data-lp-edit-only]');
+    expect(hint?.textContent).toBe(PRICING_NO_WAY_IN);
+  });
+
+  it('never shows the canvas’s next step on the public page', async () => {
+    await render({ heading: 'Join' }, 'cards', 'unavailable');
+    expect(text()).toContain(COPY.cta.unavailableTitle);
+    expect(text()).not.toContain(PRICING_NO_WAY_IN);
+  });
+
+  it('keeps an UNREAD offer price-less on the canvas, not closed', async () => {
+    const { course, checkoutUrl } = sampleContext({ offer: 'unknown' });
+    const canvas = builderSalesContext({ course, offer: null, checkoutUrl });
+
+    await renderWith({ heading: 'Join' }, 'cards', canvas, {
+      commit: () => {},
+    });
+    expect(text()).toContain(COPY.pricing.atCheckout);
+    expect(text()).not.toContain(COPY.cta.unavailableTitle);
+    expect(hrefs()).toContain('/journeys/steady-ground/checkout');
   });
 
   it.each(

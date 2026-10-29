@@ -179,7 +179,9 @@ export function builderSalesContext(
     // case where the canvas shows an affordance the published page withholds —
     // and it is the same trade the `enrolled` flag already makes. The honest
     // surface for "this course has no way in yet" is the builder's Pricing panel,
-    // not a silently missing button on the canvas.
+    // not a silently missing button on the canvas. The Pricing SECTION says so
+    // too: it reads a read-but-empty `offer` as unavailable itself, so only the
+    // hero and its peers keep the button (`pricingView`, Codex-36vjw).
     purchasable: true,
     sellPreview: Promise.resolve(input.sellPreview ?? null),
     mediaBaseUrl: input.mediaBaseUrl ?? null,

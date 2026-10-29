@@ -37,7 +37,7 @@
   import List from '../../primitives/List.svelte';
   import Text from '../../primitives/Text.svelte';
   import { PRICING_COPY } from './copy';
-  import { pricingDefinition } from './definition';
+  import { PRICING_NO_WAY_IN, pricingDefinition } from './definition';
   import { drawsIncluded, includedLines, ownedPoints } from './included';
   import OfferCard from './OfferCard.svelte';
   import { pricingView } from '../../model/offer';
@@ -55,6 +55,12 @@
   // An empty list (switched off, or a course with nothing to count yet) draws
   // the card as it stood alone.
   const beside = $derived(drawsIncluded(view.paths.length) && included.length > 0);
+  // The canvas pins `purchasable` true for the hero's button, so where this
+  // section knows there is no way in, its own button row is told so too and
+  // draws the visitor's notice, not a Join button (Codex-36vjw).
+  const stateContext = $derived(
+    view.state === 'unavailable' ? { ...context, purchasable: false } : context
+  );
 </script>
 
 {#snippet head()}
@@ -118,9 +124,13 @@
     </div>
   {:else if view.state !== 'priced' || !view.featured}
     <div class="pricing__state">
-      <ButtonRow {context} section="pricing" label={content.ctaLabel} {edit} />
+      <ButtonRow context={stateContext} section="pricing" label={content.ctaLabel} {edit} />
       <!-- The kit's own line, so never an editable field. -->
       {#if view.state === 'unpriced'}<p class="pricing__note">{COPY.pricing.atCheckout}</p>{/if}
+      <!-- The creator's next step, never on the public page (contract A4). -->
+      {#if view.state === 'unavailable' && edit}
+        <p class="pricing__note" data-lp-edit-only>{PRICING_NO_WAY_IN}</p>
+      {/if}
     </div>
   {:else if section.layout === 'focus'}
     <div class="pricing__focus">

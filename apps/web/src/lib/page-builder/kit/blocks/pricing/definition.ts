@@ -28,6 +28,10 @@ export const offerNoteField: BlockField = {
   hint: 'Optional. Shown under your text, like "Start whenever you like". Each price already says how it is paid.',
 };
 
+/** The canvas's line under "Not open for enrolment yet", for the creator only. */
+export const PRICING_NO_WAY_IN =
+  'Set up a way in on your Offer tab, and its price appears here.';
+
 /**
  * Authored copy that DECORATES one real offer path. `id` names a canonical
  * path (`purchase`, `subscription-monthly`, `subscription-annual`,
