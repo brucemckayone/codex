@@ -124,11 +124,6 @@
 
   // ─── Compare toggle ───────────────────────────────────────────────────
   function handleCompareToggle(next: boolean) {
-    // Bail when the toggle is echoing its current state — Melt UI's Switch
-    // fires onCheckedChange during mount/re-render sync, which otherwise
-    // loops through navigate → URL update → prop re-derive → Switch syncs.
-    if (next === compareEnabled) return;
-
     const params = baseParams();
     params.set('startDate', startDate);
     params.set('endDate', endDate);

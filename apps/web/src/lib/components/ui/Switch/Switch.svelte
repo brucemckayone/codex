@@ -32,9 +32,14 @@
   } = createSwitch({
     defaultChecked: checked,
     disabled: untrack(() => disabled),
+    // Melt runs this on EVERY set of its store, the prop sync below included.
+    // A set to the value `checked` already holds is that sync, not a press,
+    // so only a real change reaches the consumer (Codex-pyogl).
     onCheckedChange: ({ next }) => {
-      checked = next;
-      onCheckedChange?.(next);
+      if (next !== checked) {
+        checked = next;
+        onCheckedChange?.(next);
+      }
       return next;
     }
   });
