@@ -632,9 +632,18 @@ describe('POST /checkout/complete', () => {
       vi
         .mocked(obs.warn)
         .mock.calls.find(([message]) => message.includes('yet')) ?? [];
-    expect(JSON.stringify(await res.json())).toContain(
-      (line as { errorId: string }).errorId
-    );
+    // The whole body: this 503 opts its context in (publicContext), so a
+    // field added to it later would reach the browser (Codex-adcgb).
+    expect(await res.json()).toEqual({
+      error: {
+        code: 'SERVICE_UNAVAILABLE',
+        message: 'The purchase could not be recorded yet',
+        details: {
+          sessionId: 'cs_landing_1',
+          errorId: (line as { errorId: string }).errorId,
+        },
+      },
+    });
   });
 
   // mapErrorToResponse never logs a ServiceError's failure (only a 5xx's

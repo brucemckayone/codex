@@ -8,7 +8,12 @@
 import { ERROR_CODES, STATUS_CODES } from '@codex/constants';
 import { ObservabilityClient } from '@codex/observability';
 
-const fallbackObs = new ObservabilityClient('error-mapper');
+// Strict redaction whatever the environment: a caller with no request obs
+// gets this client, and it logs withheld 5xx context (Codex-adcgb).
+const fallbackObs = new ObservabilityClient('error-mapper', 'development', {
+  mode: 'hash',
+  redactEmails: true,
+});
 
 import { ZodError } from 'zod';
 import { type ErrorStatusCode, isServiceError } from './base-errors';
@@ -105,16 +110,26 @@ export function mapErrorToResponse(
       };
     }
     if (logError && error.context) {
-      (obs ?? fallbackObs).error(
-        'Server error context withheld from response',
-        {
-          source: 'mapErrorToResponse',
-          errorName: error.name,
-          code: error.code,
-          statusCode: error.statusCode,
-          context: error.context,
-        }
-      );
+      const client = obs ?? fallbackObs;
+      const line = {
+        source: 'mapErrorToResponse',
+        errorName: error.name,
+        code: error.code,
+        statusCode: error.statusCode,
+        // Most 500s share INTERNAL_ERROR: the message tells them apart, and
+        // the client already has it.
+        message: error.message,
+        context: error.context,
+        ...(error.cause instanceof Error && {
+          cause: `${error.cause.name}: ${error.cause.message}`,
+        }),
+      };
+      // A 503 is a "try again" its throw site expects; a 500 is a fault.
+      if (error.statusCode === 503) {
+        client.warn('Server error context withheld from response', line);
+      } else {
+        client.error('Server error context withheld from response', line);
+      }
     }
     return {
       statusCode: error.statusCode,

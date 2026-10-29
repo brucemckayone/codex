@@ -48,4 +48,40 @@ describe('createKeyRefusal: Stripe failing', () => {
       retryAfter: '2026-10-29T15:00:00.000Z',
     });
   });
+
+  // The tier dialog mints a new submissionId on exactly this code: without
+  // it, every resubmit replays the failure Stripe stored under the old key
+  // for 24 hours (monetisation +page.svelte, refuseCreate).
+  it('reaches the tier dialog with its code and no retryAfter, as a tier key carries no hour', () => {
+    const refusal = createKeyRefusal(
+      stripeApiError(),
+      {
+        noun: 'tier',
+        reusedCode: 'SUBMISSION_ID_REUSED',
+        inProgressCode: 'SUBMISSION_IN_PROGRESS',
+      },
+      { organizationId: 'org-1', submissionId: 'sub-1' }
+    );
+
+    const { statusCode, response } = mapErrorToResponse(refusal, {
+      logError: false,
+    });
+
+    expect(statusCode).toBe(503);
+    expect(response.error.details).toEqual({
+      organizationId: 'org-1',
+      submissionId: 'sub-1',
+      code: 'STRIPE_UNAVAILABLE',
+    });
+  });
+
+  it('is no refusal at all for a Stripe error that is not an outage', () => {
+    const invalid = Object.assign(new Error('No such price'), {
+      type: 'StripeInvalidRequestError',
+    });
+
+    expect(createKeyRefusal(invalid, SUBJECT, { courseId: 'course-1' })).toBe(
+      null
+    );
+  });
 });

@@ -45,13 +45,6 @@ export function pricingView(
   if (context.disputeHold) return { state: 'paused', ...NONE };
   if (context.purchasable === false) return { state: 'unavailable', ...NONE };
   const paths = deriveOfferPaths(context.offer, context.course, props);
-  // A READ offer with no paths is the confident "no way in", even where
-  // `purchasable` is pinned true: the studio canvas pins it for the hero's
-  // button, and drew this course as "price at checkout" (Codex-36vjw). Only a
-  // failed read (`null`) is unpriced.
-  if (paths.length === 0 && context.offer) {
-    return { state: 'unavailable', ...NONE };
-  }
   if (paths.length === 0) return { state: 'unpriced', ...NONE };
   const featured = paths.find((path) => path.best) ?? paths[0];
   return {

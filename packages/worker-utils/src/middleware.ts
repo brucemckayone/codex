@@ -466,8 +466,19 @@ export function createErrorHandler(environment?: string) {
   return (err: Error, c: Context) => {
     const obs = c.get('obs');
     const requestId = c.get('requestId');
+    // A ServiceError keeps what actually failed on its `cause`, its message
+    // being the client's: the HLS proxies' R2SigningError ("proxy is not
+    // configured") reaches here with no other log line (Codex-7ed5z).
+    const cause =
+      err.cause instanceof Error
+        ? `${err.cause.name}: ${err.cause.message}`
+        : undefined;
+    const code =
+      'code' in err && typeof err.code === 'string' ? err.code : undefined;
     obs?.error('Unhandled error', {
       error: err.message,
+      ...(code && { code }),
+      ...(cause && { cause }),
       stack: err.stack,
       path: c.req.path,
       method: c.req.method,

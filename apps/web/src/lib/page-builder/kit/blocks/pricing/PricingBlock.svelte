@@ -46,7 +46,18 @@
 
   const page = getKitPage();
   const content = $derived(pricingDefinition.coerce(props));
-  const view = $derived(pricingView(context, content));
+  const view = $derived.by(() => {
+    const read = pricingView(context, content);
+    // The canvas pins `purchasable` true for the hero's button, so a course
+    // whose offer was READ with no way in reaches here as unpriced: "you will
+    // see the price before you pay", which only a failed read (`null`) means.
+    // This section alone draws it closed, as visitors see it (Codex-36vjw);
+    // the public page is already unavailable through `purchasable`.
+    if (read.state === 'unpriced' && context.offer) {
+      return { ...read, state: 'unavailable' as const };
+    }
+    return read;
+  });
   // The note reassures a buyer: it has no place once there is nothing to buy.
   const selling = $derived(view.state === 'priced' || view.state === 'unpriced');
   const featured = $derived(featuredScheme(page.style, section.scheme));
@@ -55,9 +66,8 @@
   // An empty list (switched off, or a course with nothing to count yet) draws
   // the card as it stood alone.
   const beside = $derived(drawsIncluded(view.paths.length) && included.length > 0);
-  // The canvas pins `purchasable` true for the hero's button, so where this
-  // section knows there is no way in, its own button row is told so too and
-  // draws the visitor's notice, not a Join button (Codex-36vjw).
+  // Closed, its button row is told so too, and draws the visitor's notice,
+  // not the canvas's Join button.
   const stateContext = $derived(
     view.state === 'unavailable' ? { ...context, purchasable: false } : context
   );

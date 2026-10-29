@@ -390,8 +390,11 @@ describe('purchase records, currency and client-facing errors', () => {
 
   describe("Stripe's message stays out of client-facing errors (SEC-02)", () => {
     /**
-     * The client sees `mapErrorToResponse(error).response.error.details`; the
-     * log keeps Stripe's message under the same errorId.
+     * The error carries an errorId and never Stripe's message; the service's
+     * log keeps Stripe's message under that errorId. What reaches the client
+     * is `mapErrorToResponse`'s body: a 4xx sends the errorId as `details`,
+     * and a 5xx sends no details at all, its context logged by the mapper
+     * instead (Codex-adcgb).
      */
     async function expectOnlyAnErrorId(
       run: () => Promise<unknown>,
@@ -402,6 +405,7 @@ describe('purchase records, currency and client-facing errors', () => {
       ).obs;
       const logged = vi.spyOn(obs, level);
       const other = vi.spyOn(obs, level === 'error' ? 'warn' : 'error');
+      const mapperObs = { error: vi.fn(), warn: vi.fn() };
       try {
         const error = await run().then(
           () => {
@@ -410,14 +414,29 @@ describe('purchase records, currency and client-facing errors', () => {
           (e: unknown) => e
         );
         expect(error).toBeInstanceOf(ServiceError);
-        const details = mapErrorToResponse(error).response.error.details as
-          | Record<string, unknown>
-          | undefined;
-        expect(JSON.stringify(details)).not.toContain(STRIPE_SECRET_MESSAGE);
-        expect(details).not.toHaveProperty('stripeError');
-        expect(details).not.toHaveProperty('stripeMessage');
-        const errorId = details?.errorId;
+        const { context, statusCode } = error as ServiceError;
+        expect(JSON.stringify(context)).not.toContain(STRIPE_SECRET_MESSAGE);
+        expect(context).not.toHaveProperty('stripeError');
+        expect(context).not.toHaveProperty('stripeMessage');
+        const errorId = context?.errorId;
         expect(errorId).toEqual(expect.any(String));
+
+        const { response } = mapErrorToResponse(error, {
+          obs: mapperObs as never,
+        });
+        expect(JSON.stringify(response)).not.toContain(STRIPE_SECRET_MESSAGE);
+        if (statusCode < 500) {
+          expect(response.error.details).toMatchObject({ errorId });
+        } else {
+          expect(response.error).not.toHaveProperty('details');
+          const withheld = [
+            ...mapperObs.error.mock.calls,
+            ...mapperObs.warn.mock.calls,
+          ];
+          expect(JSON.stringify(withheld)).toContain(String(errorId));
+          expect(JSON.stringify(withheld)).not.toContain(STRIPE_SECRET_MESSAGE);
+        }
+
         expect(logged).toHaveBeenCalledWith(
           expect.any(String),
           expect.objectContaining({ errorId, error: STRIPE_SECRET_MESSAGE })

@@ -40,28 +40,14 @@ export class ContentNotFoundError extends NotFoundError {
   }
 }
 
+/**
+ * A 404's context reaches the client as `details`, so this names the media
+ * item only. Its (r2Key, contentId) form, which no caller used, would have
+ * sent `{creatorId}/hls/{mediaId}/...` (Codex-adcgb).
+ */
 export class MediaNotFoundError extends NotFoundError {
-  constructor(
-    mediaItemIdOrR2Key: string,
-    contentId?: string,
-    context?: Record<string, unknown>
-  ) {
-    // Support both old signature (mediaItemId) and new signature (r2Key, contentId)
-    const isOldSignature = contentId === undefined;
-    const message = isOldSignature
-      ? 'Media item not found'
-      : 'Media file not found in storage';
-
-    const contextData = isOldSignature
-      ? { mediaItemId: mediaItemIdOrR2Key, ...context }
-      : {
-          r2Key: mediaItemIdOrR2Key,
-          contentId,
-          code: ERROR_CODES.MEDIA_NOT_FOUND || 'MEDIA_NOT_FOUND',
-          ...context,
-        };
-
-    super(message, contextData);
+  constructor(mediaItemId: string, context?: Record<string, unknown>) {
+    super('Media item not found', { mediaItemId, ...context });
   }
 }
 

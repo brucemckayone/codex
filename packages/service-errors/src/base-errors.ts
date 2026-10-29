@@ -194,6 +194,10 @@ export class BusinessLogicError extends ServiceError {
  * Internal service error (500)
  * Thrown when unexpected errors occur
  * Should be logged and wrapped to prevent detail exposure
+ *
+ * Its options are plain `ErrorOptions` on purpose: a 500's context is logged,
+ * never sent. A 500 whose context a client must act on extends ServiceError
+ * directly with `publicContext`, as CheckoutNotRecordedError does.
  */
 export class InternalServiceError extends ServiceError {
   constructor(

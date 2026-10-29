@@ -225,7 +225,8 @@ async function resolveCustomer(
     }
   } catch (error) {
     if (isStripeError(error)) {
-      // The context is sent to the client: Stripe's message stays in the log.
+      // Stripe's message stays in this log line, never in the context, which
+      // the mapper logs for a 5xx and would send for a 4xx.
       const errorId = crypto.randomUUID();
       obs.error('Stripe Customer could not be resolved or created', {
         errorId,

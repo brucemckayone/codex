@@ -28,7 +28,12 @@ const R2_KEY = 'creator-1/hls/media-1/master.m3u8';
 
 function stubObs() {
   const error = vi.fn();
-  return { error, obs: { error } as unknown as ObservabilityClient };
+  const warn = vi.fn();
+  return {
+    error,
+    warn,
+    obs: { error, warn } as unknown as ObservabilityClient,
+  };
 }
 
 describe('mapErrorToResponse: a 5xx ServiceError', () => {
@@ -53,8 +58,8 @@ describe('mapErrorToResponse: a 5xx ServiceError', () => {
     expect(JSON.stringify(response)).not.toContain(R2_KEY);
   });
 
-  it('withholds a 503 context the same way', () => {
-    const { obs } = stubObs();
+  it('withholds a 503 context the same way, logged at warn', () => {
+    const { error, warn, obs } = stubObs();
     const { statusCode, response } = mapErrorToResponse(
       new ServiceUnavailableError('Try again', { subscriptionId: 'sub-1' }),
       { obs }
@@ -62,6 +67,15 @@ describe('mapErrorToResponse: a 5xx ServiceError', () => {
 
     expect(statusCode).toBe(503);
     expect(response.error).not.toHaveProperty('details');
+    // A 503 is a "try again" its throw site expects, not a fault.
+    expect(error).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      'Server error context withheld from response',
+      expect.objectContaining({
+        message: 'Try again',
+        context: { subscriptionId: 'sub-1' },
+      })
+    );
   });
 
   it('keeps the code of a typed 500, which the client acts on', () => {
@@ -93,8 +107,28 @@ describe('mapErrorToResponse: a 5xx ServiceError', () => {
         errorName: 'InternalServiceError',
         code: 'INTERNAL_ERROR',
         statusCode: 500,
+        // Most 500s share INTERNAL_ERROR: the message tells them apart.
+        message: 'Failed to generate R2 signed URL',
         context: { r2Key: R2_KEY },
       })
+    );
+  });
+
+  it('names the root cause on the withheld line, when the error has one', () => {
+    const { error, obs } = stubObs();
+
+    mapErrorToResponse(
+      new InternalServiceError(
+        'The payee credit could not be settled',
+        { creditId: 'credit-1' },
+        { cause: new TypeError('connection refused') }
+      ),
+      { obs }
+    );
+
+    expect(error).toHaveBeenCalledWith(
+      'Server error context withheld from response',
+      expect.objectContaining({ cause: 'TypeError: connection refused' })
     );
   });
 
