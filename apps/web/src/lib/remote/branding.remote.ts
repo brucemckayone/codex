@@ -276,24 +276,25 @@ export const linkIntroVideo = command(
 );
 
 /**
- * Get intro video transcoding status.
- * Polls this until status is 'ready' or 'failed'.
+ * The org's intro film as the brand studio shows it (Codex-376dl): what was
+ * picked and whether visitors get the whole film, its preview, or none.
+ * Read once per change: only finished videos can be picked, so nothing polls.
  */
-export const getIntroVideoStatus = query(z.string().uuid(), async (orgId) => {
+export const getIntroFilm = query(z.string().uuid(), async (orgId) => {
   const { platform, cookies } = getRequestEvent();
   const api = createServerApi(platform, cookies);
-  return api.org.getIntroVideoStatus(orgId);
+  return api.org.getIntroFilm(orgId);
 });
 
 /**
- * Delete the org's intro video.
- * Soft-deletes the media item and clears branding references.
+ * Take the org's intro film off its landing page. The media item stays in
+ * the creator's library.
  */
-export const deleteIntroVideo = command(z.string().uuid(), async (orgId) => {
+export const unlinkIntroVideo = command(z.string().uuid(), async (orgId) => {
   const { platform, cookies } = getRequestEvent();
   const api = createServerApi(platform, cookies);
 
-  const result = await api.org.deleteIntroVideo(orgId);
+  const result = await api.org.unlinkIntroVideo(orgId);
   await invalidateCache(platform, orgId);
 
   return result;

@@ -404,8 +404,9 @@ export class MediaItemService extends BaseService {
    * than no cleanup at all. Errors during the R2 sweep are swallowed and
    * logged; orphans are recoverable, failed user-deletes are not.
    *
-   * Mirrors the pattern landed in branding-settings-service.deleteIntroVideo
-   * for HLS cleanup, scaled to four prefixes via a shared helper.
+   * The pattern the org intro's old delete used for HLS cleanup (removed in
+   * Codex-376dl, which unlinks instead), scaled to four prefixes via a
+   * shared helper.
    *
    * Note: Content referencing this media will still exist but cannot be published
    *

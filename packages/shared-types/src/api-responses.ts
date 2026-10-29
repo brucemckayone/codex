@@ -232,9 +232,9 @@ export interface BrandingSettingsResponse {
   fontHeading: string | null;
   radiusValue: number;
   densityValue: number;
-  // Intro video
+  // Intro film: the media id only. Its URLs are built on each read
+  // (Codex-376dl), so no stored URL can go stale.
   introVideoMediaItemId: string | null;
-  introVideoUrl: string | null;
   // Brand Editor fine-tune fields — text/heading/body weight, shadow scale/color,
   // etc. are stored as keys inside tokenOverrides JSON. The previously
   // broken-out columns were dropped in Codex-g49b4.
@@ -312,6 +312,37 @@ export interface PublicBrandingResponse {
   fontHeading: string | null;
   radiusValue: number;
   densityValue: number;
-  introVideoUrl: string | null;
+  introFilm: IntroFilm | null;
   heroLayout: string;
+}
+
+/**
+ * The org intro film, as the public landing page draws it (Codex-376dl).
+ * `previewUrl` is its 30-second public preview on the CDN. `fullFilm` says
+ * whether a press may ask the org film minter for the whole film; it is a
+ * hint, and the minter re-checks on every press. Null on the org when there
+ * is no film to show: none picked, or one no longer ready, a video, or by a
+ * member of the team.
+ */
+export interface IntroFilm {
+  title: string;
+  posterUrl: string | null;
+  previewUrl: string | null;
+  durationSeconds: number | null;
+  fullFilm: boolean;
+}
+
+/**
+ * The org intro film as the brand studio shows it: what was picked, and
+ * which version visitors get. `plays` is `full`, the 30-second `preview` (a
+ * paid use, the only cut the rule makes), or `none` with the `reason`
+ * visitors see no film.
+ */
+export interface StudioIntroFilm {
+  mediaItemId: string;
+  title: string;
+  posterUrl: string | null;
+  durationSeconds: number | null;
+  plays: 'full' | 'preview' | 'none';
+  reason?: 'paid' | 'not-ready' | 'not-video' | 'creator-left';
 }

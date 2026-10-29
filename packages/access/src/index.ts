@@ -106,6 +106,7 @@ export { CourseJourneyService } from './services/course-journey-service';
 export { EntitlementsService } from './services/entitlements-service';
 // The org intro film's one read (Codex-376dl): the public org info and the
 // studio draw from it what the minter mints from.
+export { toPublicIntroFilm } from './services/intro-film-views';
 export {
   type IntroFilmMedia,
   type IntroFilmRefusal,

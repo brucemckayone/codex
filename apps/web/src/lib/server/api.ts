@@ -78,6 +78,7 @@ import type {
   PublicCreatorProfile,
   PublicMediaItem,
   SessionData,
+  StudioIntroFilm,
   UserData,
   UserProfile,
 } from '@codex/shared-types';
@@ -2017,29 +2018,19 @@ export function createServerApi(
         ),
 
       /**
-       * Get intro video transcoding status
+       * The org's intro film as the brand studio shows it (Codex-376dl): the
+       * pick and which version visitors get. Null when none is picked.
        */
-      getIntroVideoStatus: (id: string) =>
-        request<{
-          status:
-            | 'none'
-            | 'uploading'
-            | 'uploaded'
-            | 'transcoding'
-            | 'ready'
-            | 'failed';
-          introVideoUrl: string | null;
-          progress: number | null;
-          errorCode: string | null;
-        }>(
+      getIntroFilm: (id: string) =>
+        request<StudioIntroFilm | null>(
           'org',
-          `/api/organizations/${id}/settings/branding/intro-video/status`
+          `/api/organizations/${id}/settings/branding/intro-video`
         ),
 
       /**
-       * Delete the org's intro video
+       * Take the intro film off the landing page; the media item is kept
        */
-      deleteIntroVideo: (id: string) =>
+      unlinkIntroVideo: (id: string) =>
         request<BrandingSettingsResponse>(
           'org',
           `/api/organizations/${id}/settings/branding/intro-video`,

@@ -19,6 +19,7 @@ export type {
   CheckSlugResponse,
   ContactSettingsResponse,
   FeatureSettingsResponse,
+  IntroFilm,
   MembershipLookupResponse,
   MyMembershipResponse,
   OrganizationPublicStatsResponse,
@@ -32,6 +33,7 @@ export type {
   PublicMediaItem,
   SingleItemResponse,
   SortOrder,
+  StudioIntroFilm,
 } from './api-responses';
 
 // Financial types (revenue splits, fees, payouts)

@@ -19,8 +19,11 @@ import { createExecutionContext, env } from 'cloudflare:test';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+// Its own user id: the limiter counts per user, `singleWorker` shares one
+// limiter across files, and ten files already spend the usual test user's
+// 100 a minute.
 const USER = {
-  id: '7a1d0f2e-3b4c-4d5e-8f60-112233445566',
+  id: 'medialistpage01',
   email: 'creator@test.com',
   role: 'creator',
 };

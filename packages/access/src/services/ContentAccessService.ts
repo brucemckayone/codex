@@ -19,7 +19,7 @@ import {
   type ServiceConfig,
   ValidationError,
 } from '@codex/service-errors';
-import type { EntitlementResolver } from '@codex/shared-types';
+import type { EntitlementResolver, StudioIntroFilm } from '@codex/shared-types';
 import { buildServiceUrl } from '@codex/urls';
 import type {
   GetPlaybackProgressInput,
@@ -75,6 +75,7 @@ import {
   filmStreamFailure,
   resolveStreamableMedia,
 } from './content-access/streaming';
+import { toStudioIntroFilm } from './intro-film-views';
 import { resolveCourseFilm, resolveIntroFilm } from './sales-films';
 
 /**
@@ -875,6 +876,27 @@ export class ContentAccessService
       return { playlistUrl, expiresAt: toIso(expiresAt) };
     } catch (error) {
       throw filmStreamFailure(error, this.obs, scope);
+    }
+  }
+
+  /**
+   * The org intro film as the brand studio shows it (Codex-376dl): what was
+   * picked and which version visitors get, read by the same
+   * `resolveIntroFilm` the minter runs. Null when no film is picked.
+   *
+   * Called at workers/organization-api/src/routes/settings.ts as
+   * `ctx.services.access.getStudioIntroFilm`, a lazy registry getter that
+   * dead-code detection cannot resolve to this class.
+   */
+  // fallow-ignore-next-line unused-class-member
+  async getStudioIntroFilm(
+    organizationId: string
+  ): Promise<StudioIntroFilm | null> {
+    try {
+      const resolution = await resolveIntroFilm(this.db, organizationId);
+      return toStudioIntroFilm(resolution, this.r2PublicUrlBase);
+    } catch (error) {
+      this.handleError(error, 'getStudioIntroFilm');
     }
   }
 

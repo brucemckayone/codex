@@ -17,6 +17,7 @@
  * - GET    /api/organizations/check-slug/:slug - Check slug availability
  */
 
+import { resolveIntroFilm, toPublicIntroFilm } from '@codex/access';
 import {
   CacheType,
   invalidateOrgPublicCaches,
@@ -24,6 +25,7 @@ import {
 } from '@codex/cache';
 import { BRAND_COLORS, CACHE_TTL } from '@codex/constants';
 import { createDbClient } from '@codex/database';
+import type { ObservabilityClient } from '@codex/observability';
 import type {
   CreateOrganizationResponse,
   OrganizationBySlugResponse,
@@ -200,7 +202,7 @@ app.get(
         fontHeading: info.brandFonts.heading ?? null,
         radiusValue: info.brandRadius ?? 0.5,
         densityValue: info.brandDensity ?? 1,
-        introVideoUrl: info.introVideoUrl ?? null,
+        introFilm: info.introFilm,
         heroLayout: info.heroLayout ?? 'default',
       };
     },
@@ -225,6 +227,7 @@ async function fetchPublicOrgInfo(
       };
     };
     env: Bindings;
+    obs?: Pick<ObservabilityClient, 'warn'>;
   },
   slug: string
 ) {
@@ -246,10 +249,14 @@ async function fetchPublicOrgInfo(
   const brandingSvc = new BrandingSettingsService(svcOpts);
   const featureSvc = new FeatureSettingsService(svcOpts);
 
-  const [brandingResult, featuresResult] = await Promise.allSettled([
-    brandingSvc.get(),
-    featureSvc.get(),
-  ]);
+  // The intro film (Codex-376dl) is read by the same check its minter runs,
+  // so the landing never offers a full film the minter would refuse.
+  const [brandingResult, featuresResult, introResult] =
+    await Promise.allSettled([
+      brandingSvc.get(),
+      featureSvc.get(),
+      resolveIntroFilm(db, organization.id),
+    ]);
 
   type BrandingInfo = {
     logoUrl: string | null;
@@ -261,7 +268,6 @@ async function fetchPublicOrgInfo(
     fontHeading: string | null;
     radiusValue: number;
     densityValue: number;
-    introVideoUrl: string | null;
     tokenOverrides: string | null;
     darkModeOverrides: string | null;
     darkTokenOverrides: string | null;
@@ -278,7 +284,6 @@ async function fetchPublicOrgInfo(
     fontHeading: null,
     radiusValue: 0.5,
     densityValue: 1,
-    introVideoUrl: null,
     tokenOverrides: null,
     darkModeOverrides: null,
     darkTokenOverrides: null,
@@ -298,7 +303,6 @@ async function fetchPublicOrgInfo(
       fontHeading: b.fontHeading ?? null,
       radiusValue: b.radiusValue ?? 0.5,
       densityValue: b.densityValue ?? 1,
-      introVideoUrl: b.introVideoUrl ?? null,
       tokenOverrides: b.tokenOverrides ?? null,
       darkModeOverrides: b.darkModeOverrides ?? null,
       darkTokenOverrides: b.darkTokenOverrides ?? null,
@@ -311,6 +315,21 @@ async function fetchPublicOrgInfo(
     featuresResult.status === 'fulfilled'
       ? featuresResult.value.enableSubscriptions
       : true;
+
+  // Non-critical too: a failed read draws the hero with no film, and says so.
+  if (introResult.status === 'rejected') {
+    ctx.obs?.warn('Intro film read failed; the landing draws no film', {
+      organizationId: organization.id,
+      error:
+        introResult.reason instanceof Error
+          ? introResult.reason.message
+          : String(introResult.reason),
+    });
+  }
+  const introFilm =
+    introResult.status === 'fulfilled'
+      ? toPublicIntroFilm(introResult.value, ctx.env.R2_PUBLIC_URL_BASE)
+      : null;
 
   return {
     id: organization.id,
@@ -330,7 +349,7 @@ async function fetchPublicOrgInfo(
     },
     brandRadius: branding.radiusValue,
     brandDensity: branding.densityValue,
-    introVideoUrl: branding.introVideoUrl,
+    introFilm,
     heroLayout: branding.heroLayout,
     brandFineTune: {
       // Fine-tune values (text/heading/body weight, shadow scale/color,
