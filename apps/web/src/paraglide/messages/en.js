@@ -3535,7 +3535,119 @@ export const upgrade_cta_title = () => `Upgrade to Watch`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const upgrade_cta_description = () => `Upgrade your plan to access this content`
+export const upgrade_cta_description = () => `Your plan doesn't include this content`
+
+
+/**
+ * @param {{ plans: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscribe_cta_included_short = (params) => `Included with ${params.plans}.`
+
+
+/**
+ * @param {{ plans: NonNullable<unknown>, price: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscribe_cta_included = (params) => `Included with ${params.plans}, from ${params.price} a month.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscribe_cta_see_plans = () => `See plans`
+
+
+/**
+ * @param {{ currentPlan: NonNullable<unknown>, plans: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_cta_not_in_plan_short = (params) => `Not in your ${params.currentPlan} plan. Included with ${params.plans}.`
+
+
+/**
+ * @param {{ currentPlan: NonNullable<unknown>, plans: NonNullable<unknown>, price: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const upgrade_cta_not_in_plan = (params) => `Your ${params.currentPlan} plan doesn't include this. It's included with ${params.plans}, from ${params.price} a month.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const change_plan_cta_title = () => `Change plan to watch`
+
+
+/**
+ * @param {{ currentPlan: NonNullable<unknown>, plansWithPrices: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const change_plan_cta_not_in_plan = (params) => `Your ${params.currentPlan} plan doesn't include this. It's included with ${params.plansWithPrices}.`
+
+
+/**
+ * @param {{ plan: NonNullable<unknown>, price: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const change_plan_cta_plan_with_price = (params) => `${params.plan} (${params.price} a month)`
+
+
+/**
+ * @param {{ upgradePlans: NonNullable<unknown>, downgradePlans: NonNullable<unknown>, currentPlan: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const change_plan_cta_timing = (params) => `${params.upgradePlans} starts straight away; a move to ${params.downgradePlans} starts when your ${params.currentPlan} period ends on ${params.date}.`
+
+
+/**
+ * @param {{ downgradePlans: NonNullable<unknown>, currentPlan: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const change_plan_cta_timing_downgrade = (params) => `A move to ${params.downgradePlans} starts when your ${params.currentPlan} period ends on ${params.date}.`
+
+
+/**
+ * @param {{ downgradePlans: NonNullable<unknown>, currentPlan: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const change_plan_cta_timing_downgrade_undated = (params) => `A move to ${params.downgradePlans} starts when your current ${params.currentPlan} period ends.`
+
+
+/**
+ * @param {{ plan: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_names_and_above = (params) => `${params.plan} and above`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const unavailable_cta_title = () => `Not available right now`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const unavailable_cta_description = () => `No plan includes this at the moment.`
 
 
 /**
@@ -3560,6 +3672,38 @@ export const members_only_cta_description = () => `This content is only availabl
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const content_price_subscribers = () => `Subscription`
+
+
+/**
+ * @param {{ plan: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_price_tier_and_above = (params) => `${params.plan} and above`
+
+
+/**
+ * @param {{ plan: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_price_tier_only = (params) => `${params.plan} only`
+
+
+/**
+ * @param {{ first: NonNullable<unknown>, second: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_price_tier_pair = (params) => `${params.first}, ${params.second}`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_price_tier_count = (params) => `${params.count} plans`
 
 
 /**
@@ -3999,7 +4143,239 @@ export const monetisation_tiers_delete_confirm = () => `Are you sure you want to
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const monetisation_tiers_delete_confirm_named = (params) => `Delete "${params.name}"? Subscribers on this tier keep access until their period ends. This cannot be undone.`
+export const monetisation_tiers_delete_confirm_named = (params) => `Delete "${params.name}"? Nobody can subscribe to it after this, and it can't be undone.`
+
+
+/**
+ * @param {{ counts: NonNullable<unknown>, name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_only_here_one = (params) => `${params.counts} is only in ${params.name}.`
+
+
+/**
+ * @param {{ counts: NonNullable<unknown>, name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_only_here_other = (params) => `${params.counts} are only in ${params.name}.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_only_here_more = (params) => `And ${params.count} more`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_choice_label_one = () => `What should happen to it?`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_choice_label_other = () => `What should happen to them?`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_move_one = () => `Move it to other tiers`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_move_other = () => `Move them to other tiers`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_move_desc_one = () => `Their subscribers get it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_move_desc_other = () => `Their subscribers get them.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_move_pick_one = () => `Tick at least one tier to move it to.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_move_pick_other = () => `Tick at least one tier to move them to.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_keep_one = () => `Keep it subscribers-only, with no tier`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_keep_other = () => `Keep them subscribers-only, with no tier`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_keep_desc_one = () => `Closed until you add it to a tier: only people who bought it and your team can watch.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_keep_desc_other = () => `Closed until you add them to a tier: only people who bought them and your team can watch.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_keep_course_one = () => `The course stays on sale on its own page.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_keep_course_other = () => `The courses stay on sale on their own pages.`
+
+
+/**
+ * @param {{ counts: NonNullable<unknown>, tiers: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_unaffected_one = (params) => `${params.counts} is also in ${params.tiers}, so it's not affected.`
+
+
+/**
+ * @param {{ counts: NonNullable<unknown>, tiers: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_unaffected_other = (params) => `${params.counts} are also in ${params.tiers}, so they're not affected.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, tiers: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_nothing_only_here = (params) => `Every film and course in ${params.name} is also in ${params.tiers}, so nothing is left without a tier.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_empty = (params) => `${params.name} doesn't include any films or courses.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_refused_title = (params) => `${params.name} can't be deleted while people subscribe to it.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_refused_body_one = (params) => `1 subscription on ${params.name} hasn't ended yet. You can delete it once every subscription on it has ended.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown>, name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_refused_body_other = (params) => `${params.count} subscriptions on ${params.name} haven't ended yet. You can delete it once every subscription on it has ended.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_refused_view = (params) => `View ${params.name}'s subscribers`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_close = () => `Close`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_impact_failed = (params) => `We couldn't check what's only in ${params.name}, so it can't be deleted yet.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_impact_retry = () => `Retry`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_only_here_changed = (params) => `Something changed: some films or courses are now only in ${params.name}. Choose what happens to them, then delete again.`
 
 
 /**
@@ -4240,6 +4616,62 @@ export const pricing_features_included = () => `What's included`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const pricing_all_tier_content = (params) => `Access to all ${params.tierName} content`
+
+
+/**
+ * @param {{ title: NonNullable<unknown>, plans: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_for_content_included = (params) => `${params.title} is included with ${params.plans}.`
+
+
+/**
+ * @param {{ title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_for_content_none = (params) => `No plan includes ${params.title} right now.`
+
+
+/**
+ * @param {{ title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_for_content_back = (params) => `Back to ${params.title}`
+
+
+/**
+ * @param {{ title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_tier_includes_content = (params) => `Includes ${params.title}`
+
+
+/**
+ * @param {{ title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_tier_excludes_content = (params) => `Doesn't include ${params.title}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const offer_path_tier_who = () => `More than just this course`
+
+
+/**
+ * @param {{ tierName: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const offer_path_tier_everything_else = (params) => `Plus everything else in ${params.tierName}`
 
 
 /**
@@ -7415,7 +7847,7 @@ export const studio_content_form_access_subscribers = () => `Subscribers`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_content_form_access_subscribers_desc = () => `Available to subscribers at or above a tier`
+export const studio_content_form_access_subscribers_desc = () => `Available to subscribers on the tiers you tick`
 
 
 /**
@@ -7488,6 +7920,430 @@ export const studio_content_form_access_members_desc = () => `Only your organisa
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_content_form_access_also_purchasable = () => `Also available for one-time purchase`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_form_access_tiers_label = () => `Tiers that include this`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_form_access_tiers_optional_label = () => `Also included in tiers (optional)`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_form_ready_tier_ticked = () => `At least one tier ticked`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_picker_and_above = () => `and above`
+
+
+/**
+ * @param {{ tierName: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_picker_and_above_aria = (params) => `${params.tierName} and above: tick ${params.tierName} and every dearer tier`
+
+
+/**
+ * @param {{ count: NonNullable<unknown>, total: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_picker_count_film = (params) => `${params.count} of ${params.total} tiers include this film.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_picker_shortcut_hint = () => `"and above" ticks that tier and every dearer one.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown>, total: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_picker_count_paid = (params) => `${params.count} of ${params.total} tiers include it: their subscribers watch without buying.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_picker_none_paid = () => `Not included in any tier: only buyers can watch it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_picker_closed_title = () => `Closed to subscribers.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_picker_closed_body = () => `No tier is ticked, so only people who bought this film and your team can watch it. Tick a tier to open it to subscribers.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_picker_load_failed = () => `We couldn't load your tiers, so this film's tiers can't be changed right now. Saving keeps them as they are.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_picker_load_failed_new = () => `We couldn't load your tiers, so this film can't be made subscribers-only yet.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_picker_retry = () => `Retry`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_picker_hidden_one = () => `Also in 1 hidden tier, kept for its existing subscribers.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_picker_hidden_other = (params) => `Also in ${params.count} hidden tiers, kept for their existing subscribers.`
+
+
+/**
+ * @param {{ dearer: NonNullable<unknown>, cheaper: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_gap_film = (params) => `${params.dearer} doesn't include this film, but ${params.cheaper} does.`
+
+
+/**
+ * @param {{ dearer: NonNullable<unknown>, cheaper: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_gap_film_many = (params) => `${params.dearer} doesn't include this film, but ${params.cheaper} do.`
+
+
+/**
+ * @param {{ dearer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_gap_film_body = (params) => `${params.dearer} costs more, so a ${params.dearer} subscriber would need to change tier to watch it.`
+
+
+/**
+ * @param {{ dearer: NonNullable<unknown>, cheaper: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_gap_course = (params) => `${params.dearer} doesn't include this course, but ${params.cheaper} does.`
+
+
+/**
+ * @param {{ dearer: NonNullable<unknown>, cheaper: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_gap_course_many = (params) => `${params.dearer} doesn't include this course, but ${params.cheaper} do.`
+
+
+/**
+ * @param {{ dearer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_gap_course_body = (params) => `${params.dearer} costs more, so a ${params.dearer} subscriber would need to change tier to get it.`
+
+
+/**
+ * @param {{ tierName: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_gap_tick = (params) => `Tick ${params.tierName}`
+
+
+/**
+ * @param {{ dearer: NonNullable<unknown>, cheaper: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_gap_tier_row_one = (params) => `${params.dearer} doesn't include 1 item ${params.cheaper} has.`
+
+
+/**
+ * @param {{ dearer: NonNullable<unknown>, count: NonNullable<unknown>, cheaper: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_gap_tier_row_other = (params) => `${params.dearer} doesn't include ${params.count} items ${params.cheaper} has.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_gap_review = () => `Review`
+
+
+/**
+ * @param {{ dearer: NonNullable<unknown>, cheaper: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_gap_tier_list_one = (params) => `${params.dearer} doesn't include 1 item ${params.cheaper} has:`
+
+
+/**
+ * @param {{ dearer: NonNullable<unknown>, count: NonNullable<unknown>, cheaper: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_gap_tier_list_other = (params) => `${params.dearer} doesn't include ${params.count} items ${params.cheaper} has:`
+
+
+/**
+ * @param {{ dearer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_gap_tier_list_body_one = (params) => `${params.dearer} costs more, so ${params.dearer} subscribers would need to change tier to watch it.`
+
+
+/**
+ * @param {{ dearer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_gap_tier_list_body_other = (params) => `${params.dearer} costs more, so ${params.dearer} subscribers would need to change tier to watch them.`
+
+
+/**
+ * @param {{ names: NonNullable<unknown>, count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_gap_names_more = (params) => `${params.names} and ${params.count} more`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_gap_tick_it = () => `Tick it`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_gap_tick_both = () => `Tick both`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_gap_tick_all = (params) => `Tick all ${params.count}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_gap_show_it = () => `Show it`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_gap_show_them = () => `Show them`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, items: NonNullable<unknown>, cheaper: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_gap_create_one = (params) => `${params.name} won't include the ${params.items} ${params.cheaper} has, though it costs more.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, items: NonNullable<unknown>, cheaper: NonNullable<unknown>, count2: NonNullable<unknown>, cheaper2: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_gap_create_two = (params) => `${params.name} won't include the ${params.items} ${params.cheaper} has, or the ${params.count2} ${params.cheaper2} has, though it costs more than both.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, items: NonNullable<unknown>, cheaper: NonNullable<unknown>, others: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_gap_create_many = (params) => `${params.name} won't include the ${params.items} ${params.cheaper} has, or what ${params.others} have, though it costs more than all of them.`
+
+
+/**
+ * @param {{ tierName: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_gap_create_action = (params) => `Include everything from ${params.tierName}`
+
+
+/**
+ * @param {{ dearer: NonNullable<unknown>, cheaper: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_gap_delete_one = (params) => `${params.dearer} won't include this one, though ${params.cheaper} will.`
+
+
+/**
+ * @param {{ dearer: NonNullable<unknown>, count: NonNullable<unknown>, cheaper: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_gap_delete_other = (params) => `${params.dearer} won't include these ${params.count}, though ${params.cheaper} will.`
+
+
+/**
+ * @param {{ dearer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_gap_delete_body = (params) => `${params.dearer} costs more.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_count_films_one = () => `1 film`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_count_films_other = (params) => `${params.count} films`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_count_courses_one = () => `1 course`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_count_courses_other = (params) => `${params.count} courses`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_count_items_one = () => `1 item`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_count_items_other = (params) => `${params.count} items`
+
+
+/**
+ * @param {{ films: NonNullable<unknown>, courses: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_counts_films_and_courses = (params) => `${params.films} and ${params.courses}`
+
+
+/**
+ * @param {{ films: NonNullable<unknown>, courses: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_counts_films_dot_courses = (params) => `${params.films} · ${params.courses}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_item_kind_film = () => `Film`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_item_kind_course = () => `Course`
 
 
 /**
@@ -13291,6 +14147,510 @@ export const monetisation_tier_subscribers_one = () => `1 subscriber`
 
 
 /**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_contents_link_aria = (params) => `What's in ${params.name}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_copy_label = () => `Include everything from…`
+
+
+/**
+ * @param {{ counts: NonNullable<unknown>, price: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_copy_option_desc = (params) => `${params.counts} · ${params.price}/mo`
+
+
+/**
+ * @param {{ price: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_copy_option_price = (params) => `${params.price}/mo`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_copy_none = () => `Nothing`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_copy_none_desc = () => `Start empty and tick films and courses later`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_copy_hint = () => `Copies what that tier includes today. Later changes to it don't carry over.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_title = (params) => `What's in ${params.name}`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_description_one = (params) => `Tick the films and courses ${params.name} includes. Changes reach ${params.name}'s 1 subscriber as soon as you save.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_description_other = (params) => `Tick the films and courses ${params.name} includes. Changes reach ${params.name}'s ${params.count} subscribers as soon as you save.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_description_none = (params) => `Tick the films and courses ${params.name} includes. Changes reach its subscribers as soon as you save.`
+
+
+/**
+ * @param {{ price: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_price = (params) => `${params.price}/mo`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_no_subscribers = () => `No subscribers yet`
+
+
+/**
+ * @param {{ counts: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_includes = (params) => `Includes ${params.counts}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_search = () => `Search films and courses`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_search_clear = () => `Clear search`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_filter_label = () => `Filter`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_filter_all = () => `All`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_filter_included = () => `Included`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_filter_excluded = () => `Not included`
+
+
+/**
+ * @param {{ cheaper: NonNullable<unknown>, name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_filter_missing = (params) => `In ${params.cheaper}, not in ${params.name}`
+
+
+/**
+ * @param {{ count: NonNullable<unknown>, total: NonNullable<unknown>, name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_shown_in_one = (params) => `${params.count} of ${params.total} shown is in ${params.name}`
+
+
+/**
+ * @param {{ count: NonNullable<unknown>, total: NonNullable<unknown>, name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_shown_in_other = (params) => `${params.count} of ${params.total} shown are in ${params.name}`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_cant_tick = (params) => `${params.count} can't be ticked`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_tick_all = () => `Tick all shown`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_tick_all_count = (params) => `Tick all ${params.count} shown`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_untick_all = () => `Untick all shown`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_group_films = (params) => `Films · ${params.count}`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_group_courses = (params) => `Courses · ${params.count}`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_minutes = (params) => `${params.count} min`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_stages_one = () => `1 stage`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_stages_other = (params) => `${params.count} stages`
+
+
+/**
+ * @param {{ price: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_to_buy = (params) => `${params.price} to buy`
+
+
+/**
+ * @param {{ tiers: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_also_in = (params) => `Also in ${params.tiers}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_no_other = () => `In no other tier`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_ineligible_free = () => `Free · change its access to include it`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_ineligible_followers = () => `Followers only · change its access to include it`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_ineligible_team = () => `Team only · change its access to include it`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_tag_draft = () => `Draft`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_tag_added = () => `Added`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_tag_removed = () => `Removed`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_tag_closed = () => `Closed after save`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_changes_one = () => `1 change`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_changes_other = (params) => `${params.count} changes`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, counts: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_will_include = (params) => `${params.name} will include ${params.counts}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_will_close_one = () => `1 film will be closed: no tier will include it.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_will_close_other = (params) => `${params.count} films will be closed: no tier will include them.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_discard = () => `Discard`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_save = () => `Save changes`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_saving = () => `Saving…`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, counts: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_saved = (params) => `Saved. ${params.name} now includes ${params.counts}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_closed_now_one = () => `1 film is now closed: no tier includes it.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_closed_now_other = (params) => `${params.count} films are now closed: no tier includes them.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_save_error = (params) => `We couldn't save the changes to ${params.name}. Nothing was changed.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_save_payouts = () => `Some of these items can't be added until their creator sets up payouts. Nothing was changed.`
+
+
+/**
+ * @param {{ max: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_too_many = (params) => `Save at most ${params.max} changes at a time.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_load_failed = (params) => `We couldn't load what's in ${params.name}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_retry = () => `Retry`
+
+
+/**
+ * @param {{ search: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_no_results = (params) => `No films or courses match "${params.search}".`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_empty = () => `There are no films or courses a tier can include yet.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_ineligible_note_one = () => `1 free, follower-only or team-only film isn't listed: a tier can only include subscriber and paid content.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_ineligible_note_other = (params) => `${params.count} free, follower-only and team-only films aren't listed: a tier can only include subscriber and paid content.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_ineligible_link = () => `Change a film's access in its editor.`
+
+
+/**
  * 
  * @returns {string}
  */
@@ -15807,7 +17167,7 @@ export const studio_builder_pricing_membership_word = () => `Membership`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_builder_pricing_membership_note = () => `unlocks every journey — the buyer should feel it’s more than this one course.`
+export const studio_builder_pricing_membership_note = () => `can include other journeys and films too — the buyer should feel it’s more than this one course.`
 
 
 /**
