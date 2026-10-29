@@ -23,10 +23,11 @@ set -e
 #   - ADMIN_API_STRIPE_RESTRICTED_KEY (secret, admin-api only, OPTIONAL):
 #     admin-api's OWN restricted key for support refunds (Codex-2hxff.28,
 #     owner decision Q4; Codex-5vvwj.2), uploaded as admin-api's
-#     STRIPE_SECRET_KEY. Sent only when set and of this environment's mode
-#     (rk_live_ in production, rk_test_ elsewhere); unset is a ::warning::,
-#     any other value an ::error:: and not sent. Either way the deploy still
-#     succeeds and only the support refund routes fail.
+#     STRIPE_SECRET_KEY. Sent only when set and in the platform key's mode
+#     (rk_test_ beside an sk_test_ STRIPE_SECRET_KEY, rk_live_ beside
+#     sk_live_); unset is a ::warning::, any other value an ::error:: and not
+#     sent. Either way the deploy still succeeds and only the support refund
+#     routes fail.
 #   - STRIPE_WEBHOOK_SECRET_* (secrets, ecom-api only — it owns all Stripe webhooks)
 #   - STRIPE_PORTAL_CONFIGURATION_ID (secret, ecom-api only — the locked Billing
 #     Portal configuration, bpc_...; without it the portal refuses to open).
@@ -173,16 +174,26 @@ EOF
     # value would overwrite a working key with "". Without it the deploy still
     # succeeds; only the support refund routes need it.
     #
-    # It must be a RESTRICTED key of this environment's mode (silent F8):
-    # rk_live_ in production, rk_test_ elsewhere. A full sk_ key would defeat
-    # the restriction, and a test key in production makes every live charge
-    # "unknown". Anything else is reported as a GitHub error annotation and
-    # NOT uploaded; the deploy carries on. An unset key is a warning.
-    if [ "$ENVIRONMENT" = "production" ]; then
-      ADMIN_API_KEY_PREFIX="rk_live_"
-    else
-      ADMIN_API_KEY_PREFIX="rk_test_"
-    fi
+    # It must be a RESTRICTED key in the PLATFORM key's mode (silent F8). A
+    # full sk_ key would defeat the restriction, and a key in another mode
+    # than STRIPE_SECRET_KEY's makes every charge "unknown" to support. The
+    # mode comes from STRIPE_SECRET_KEY, not ENVIRONMENT: production runs on
+    # test keys for now (owner, 2026-10-29; Codex-2hxff.92). That key is read
+    # here only for its prefix and is never uploaded to admin-api. Without
+    # it, the old rule: rk_live_ in production, rk_test_ elsewhere. Anything
+    # else is reported as a GitHub error annotation and NOT uploaded; the
+    # deploy carries on. An unset key is a warning.
+    case "${STRIPE_SECRET_KEY:-}" in
+      sk_live_*) ADMIN_API_KEY_PREFIX="rk_live_" ;;
+      sk_test_*) ADMIN_API_KEY_PREFIX="rk_test_" ;;
+      *)
+        if [ "$ENVIRONMENT" = "production" ]; then
+          ADMIN_API_KEY_PREFIX="rk_live_"
+        else
+          ADMIN_API_KEY_PREFIX="rk_test_"
+        fi
+        ;;
+    esac
     ADMIN_API_STRIPE_JSON=""
     if [ -z "${ADMIN_API_STRIPE_RESTRICTED_KEY:-}" ]; then
       echo "::warning title=admin-api Stripe key::ADMIN_API_STRIPE_RESTRICTED_KEY is not set: admin-api's STRIPE_SECRET_KEY is left as it is, and support refunds fail without one"
