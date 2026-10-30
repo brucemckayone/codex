@@ -73,7 +73,7 @@ fetcher. All three log `r2_public_base.missing` on every request with no base
 | GET | `/api/media` | `auth: 'required'` | any | List own media (paginated) |
 | POST | `/api/media/:id/upload` | `auth: 'required'` | creator, admin | Binary upload fallback (local dev) |
 | POST | `/api/media/:id/upload-complete` | `auth: 'required'` | creator, admin | Mark upload done; triggers transcoding |
-| DELETE | `/api/media/:id` | `auth: 'required'` | creator, admin | Soft delete; `strict` rate limit; 204 |
+| DELETE | `/api/media/:id` | `auth: 'required'` | creator, admin | Soft delete; `strict` rate limit; 204. If the item is an org's intro film, bumps that org's public caches (`dispatchOrgPublicInvalidation` from `@codex/worker-utils`, in `waitUntil`) |
 
 ### Access & Streaming (`/api/access`)
 

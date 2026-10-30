@@ -28,6 +28,7 @@ import type {
   ContactSettingsResponse,
   FeatureSettingsResponse,
   HonoEnv,
+  StudioIntroFilm,
 } from '@codex/shared-types';
 import {
   ALLOWED_LOGO_MIME_TYPES,
@@ -235,8 +236,8 @@ app.delete(
 
 /**
  * POST /api/organizations/:id/settings/branding/intro-video
- * Link a media item as the org's intro video.
- * The media item is created via content-api (presigned upload flow).
+ * Link a media item as the org's intro film (Codex-376dl): one of the
+ * caller's own finished videos, picked in the brand studio.
  */
 app.post(
   '/branding/intro-video',
@@ -260,23 +261,26 @@ app.post(
 );
 
 /**
- * GET /api/organizations/:id/settings/branding/intro-video/status
- * Poll intro video transcoding status. Auto-finalizes URL when ready.
+ * GET /api/organizations/:id/settings/branding/intro-video
+ * The intro film as the brand studio shows it: what was picked and which
+ * version visitors get (the whole film, its 30-second preview, or none, with
+ * why). Null when no film is picked. Read through the access service, by the
+ * same check the landing's minter runs, so the two never disagree.
  */
 app.get(
-  '/branding/intro-video/status',
+  '/branding/intro-video',
   procedure({
-    policy: { auth: 'required', requireOrgMembership: true },
+    policy: { auth: 'required', requireOrgManagement: true },
     input: { params: orgIdParamSchema },
-    handler: async (ctx) => {
-      return await ctx.services.settings.getIntroVideoStatus();
-    },
+    handler: async (ctx): Promise<StudioIntroFilm | null> =>
+      ctx.services.access.getStudioIntroFilm(ctx.input.params.id),
   })
 );
 
 /**
  * DELETE /api/organizations/:id/settings/branding/intro-video
- * Remove the intro video. Soft-deletes the media item.
+ * Take the intro film off the landing page. The media item stays in the
+ * creator's library: it may be used by content too.
  */
 app.delete(
   '/branding/intro-video',
@@ -284,7 +288,7 @@ app.delete(
     policy: { auth: 'required', requireOrgManagement: true },
     input: { params: orgIdParamSchema },
     handler: async (ctx): Promise<BrandingSettingsResponse> => {
-      const result = await ctx.services.settings.deleteIntroVideo();
+      const result = await ctx.services.settings.unlinkIntroVideo();
 
       await invalidateBrandAndCache(ctx, ctx.input.params.id, ctx.obs);
 

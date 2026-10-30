@@ -13,6 +13,7 @@ import type {
   ContentHeld,
   CourseEntryResponse,
   CourseFilmStreamResponse,
+  OrgFilmStreamResponse,
   PlaybackProgressResponse,
   StreamingUrlResponse,
   UpdatePlaybackProgressResponse,
@@ -78,6 +79,7 @@ import type {
   PublicCreatorProfile,
   PublicMediaItem,
   SessionData,
+  StudioIntroFilm,
   UserData,
   UserProfile,
 } from '@codex/shared-types';
@@ -1337,6 +1339,19 @@ export function createServerApi(
         ),
 
       /**
+       * The org landing's intro film in FULL (Codex-376dl), asked for by a
+       * visitor's press: the course film's twin, on the same 6s bound. Null
+       * when it may only play its 30s preview (paid content uses it, it is
+       * not ready, or its creator left). Public; the worker re-checks.
+       */
+      orgFilmStream: (organizationId: string) =>
+        request<OrgFilmStreamResponse | null>(
+          'access',
+          `/api/access/orgs/${encodeURIComponent(organizationId)}/film/stream`,
+          { timeoutMs: COURSE_FILM_TIMEOUT_MS }
+        ),
+
+      /**
        * Public journey DISCOVERY list (Codex-oi2w4) — published course-journeys
        * for the org home "featured" rail (`featured: true`) + the Explore grid.
        * Fully public; carries no per-user state.
@@ -2017,29 +2032,19 @@ export function createServerApi(
         ),
 
       /**
-       * Get intro video transcoding status
+       * The org's intro film as the brand studio shows it (Codex-376dl): the
+       * pick and which version visitors get. Null when none is picked.
        */
-      getIntroVideoStatus: (id: string) =>
-        request<{
-          status:
-            | 'none'
-            | 'uploading'
-            | 'uploaded'
-            | 'transcoding'
-            | 'ready'
-            | 'failed';
-          introVideoUrl: string | null;
-          progress: number | null;
-          errorCode: string | null;
-        }>(
+      getIntroFilm: (id: string) =>
+        request<StudioIntroFilm | null>(
           'org',
-          `/api/organizations/${id}/settings/branding/intro-video/status`
+          `/api/organizations/${id}/settings/branding/intro-video`
         ),
 
       /**
-       * Delete the org's intro video
+       * Take the intro film off the landing page; the media item is kept
        */
-      deleteIntroVideo: (id: string) =>
+      unlinkIntroVideo: (id: string) =>
         request<BrandingSettingsResponse>(
           'org',
           `/api/organizations/${id}/settings/branding/intro-video`,
@@ -2696,12 +2701,16 @@ export function createServerApi(
        * - mediaType: 'video' | 'audio' (optional)
        * - sortBy: 'createdAt' | 'uploadedAt' | 'title' (optional)
        * - sortOrder: 'asc' | 'desc' (optional)
+       *
+       * Each row also carries its poster's CDN URL, or null with none: the
+       * route resolves `thumbnailKey` (workers/content-api/src/routes/media.ts).
        */
       list: (params?: URLSearchParams) =>
-        request<PaginatedListResponse<MediaItemWithRelations>>(
-          'content',
-          `/api/media${params ? `?${params}` : ''}`
-        ),
+        request<
+          PaginatedListResponse<
+            MediaItemWithRelations & { thumbnailUrl: string | null }
+          >
+        >('content', `/api/media${params ? `?${params}` : ''}`),
 
       /**
        * Get a single media item by ID

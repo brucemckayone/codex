@@ -73,8 +73,14 @@ export const CacheType = {
   /** User notification preferences */
   USER_PREFERENCES: 'user:preferences',
 
-  /** Organization configuration and settings */
-  ORG_CONFIG: 'org:config',
+  /**
+   * Organization configuration and settings: the org's public info. v2
+   * (Codex-376dl): `introVideoUrl` (a stored URL of the FULL master playlist,
+   * with the creator and media ids in its path) is gone and `introFilm`
+   * replaces it; the bump keeps old slots, which still carry it, from being
+   * read for their 4h TTL.
+   */
+  ORG_CONFIG: 'org:config:v2',
 
   /** Organization public aggregate statistics (content counts, creators, duration) */
   ORG_STATS: 'org:stats:v2',

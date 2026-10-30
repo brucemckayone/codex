@@ -272,7 +272,9 @@ export const load: LayoutServerLoad = async ({
           brandRadius: org.brandRadius,
           brandDensity: org.brandDensity,
           brandFineTune: org.brandFineTune,
-          introVideoUrl: org.introVideoUrl ?? null,
+          // No intro film on this fallback: it is drawn only from the public
+          // info, which reads it by its minter's own check (Codex-376dl).
+          introFilm: null,
           // Auth fallback doesn't carry branding/feature flags — fall back to
           // the same defaults the public endpoint uses so consumers reading
           // `data.org.heroLayout` / `data.org.enableSubscriptions` don't see

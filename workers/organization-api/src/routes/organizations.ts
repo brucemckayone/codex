@@ -18,12 +18,18 @@
  */
 
 import {
+  resolveIntroFilm,
+  resolveR2PublicBases,
+  toPublicIntroFilm,
+} from '@codex/access';
+import {
   CacheType,
   invalidateOrgPublicCaches,
   VersionedCache,
 } from '@codex/cache';
 import { BRAND_COLORS, CACHE_TTL } from '@codex/constants';
 import { createDbClient } from '@codex/database';
+import type { ObservabilityClient } from '@codex/observability';
 import type {
   CreateOrganizationResponse,
   OrganizationBySlugResponse,
@@ -38,7 +44,7 @@ import {
   BrandingSettingsService,
   FeatureSettingsService,
 } from '@codex/platform-settings';
-import { NotFoundError } from '@codex/service-errors';
+import { describeThrown, NotFoundError } from '@codex/service-errors';
 import type {
   Bindings,
   CheckSlugResponse,
@@ -187,8 +193,12 @@ app.get(
     input: { params: z.object({ slug: createSlugSchema(255) }) },
     handler: async (ctx): Promise<PublicBrandingResponse> => {
       // Use fetchPublicOrgInfo — ctx.services.settings requires org context
-      // which is unavailable on public (no-auth) endpoints
-      const info = await fetchPublicOrgInfo(ctx, ctx.input.params.slug);
+      // which is unavailable on public (no-auth) endpoints. Branding only:
+      // this uncached route never reads the features or the intro film it
+      // would not return.
+      const { info } = await fetchPublicOrgInfo(ctx, ctx.input.params.slug, {
+        brandingOnly: true,
+      });
 
       return {
         logoUrl: info.logoUrl ?? null,
@@ -200,7 +210,6 @@ app.get(
         fontHeading: info.brandFonts.heading ?? null,
         radiusValue: info.brandRadius ?? 0.5,
         densityValue: info.brandDensity ?? 1,
-        introVideoUrl: info.introVideoUrl ?? null,
         heroLayout: info.heroLayout ?? 'default',
       };
     },
@@ -211,6 +220,13 @@ app.get(
  * Fetch public org identity + branding from DB.
  * Extracted so VersionedCache can use it as a fetcher on cache miss,
  * and it can be called directly when CACHE_KV is unavailable.
+ *
+ * Branding, features and the intro film are each non-critical: a part whose
+ * read fails is answered with its fallback, so the page still draws.
+ * `partial` says one did, or that the film had no R2 host to resolve
+ * against (`CACHE_TTL.ORG_PUBLIC_INFO_PARTIAL_SECONDS` on why that matters).
+ * `brandingOnly` skips the features and the film, for a caller that returns
+ * neither (its `enableSubscriptions` is then the fallback, and means nothing).
  */
 async function fetchPublicOrgInfo(
   ctx: {
@@ -225,8 +241,10 @@ async function fetchPublicOrgInfo(
       };
     };
     env: Bindings;
+    obs?: Pick<ObservabilityClient, 'warn'>;
   },
-  slug: string
+  slug: string,
+  { brandingOnly = false }: { brandingOnly?: boolean } = {}
 ) {
   const organization = await ctx.services.organization.getBySlug(slug);
 
@@ -246,10 +264,31 @@ async function fetchPublicOrgInfo(
   const brandingSvc = new BrandingSettingsService(svcOpts);
   const featureSvc = new FeatureSettingsService(svcOpts);
 
-  const [brandingResult, featuresResult] = await Promise.allSettled([
-    brandingSvc.get(),
-    featureSvc.get(),
-  ]);
+  // The intro film (Codex-376dl) is read by the same check its minter runs,
+  // so the landing never offers a full film the minter would refuse.
+  const [brandingResult, featuresResult, introResult] =
+    await Promise.allSettled([
+      brandingSvc.get(),
+      brandingOnly ? null : featureSvc.get(),
+      brandingOnly ? null : resolveIntroFilm(db, organization.id),
+    ]);
+
+  // Each failed part is served as its fallback below; the answer says so.
+  const failed = Object.entries({
+    branding: brandingResult,
+    features: featuresResult,
+    introFilm: introResult,
+  }).flatMap(([part, result]) =>
+    result.status === 'rejected'
+      ? [`${part}: ${describeFailure(result.reason)}`]
+      : []
+  );
+  if (failed.length > 0) {
+    ctx.obs?.warn('Public org info served with fallbacks', {
+      organizationId: organization.id,
+      failed: failed.join('; '),
+    });
+  }
 
   type BrandingInfo = {
     logoUrl: string | null;
@@ -261,7 +300,6 @@ async function fetchPublicOrgInfo(
     fontHeading: string | null;
     radiusValue: number;
     densityValue: number;
-    introVideoUrl: string | null;
     tokenOverrides: string | null;
     darkModeOverrides: string | null;
     darkTokenOverrides: string | null;
@@ -278,7 +316,6 @@ async function fetchPublicOrgInfo(
     fontHeading: null,
     radiusValue: 0.5,
     densityValue: 1,
-    introVideoUrl: null,
     tokenOverrides: null,
     darkModeOverrides: null,
     darkTokenOverrides: null,
@@ -298,7 +335,6 @@ async function fetchPublicOrgInfo(
       fontHeading: b.fontHeading ?? null,
       radiusValue: b.radiusValue ?? 0.5,
       densityValue: b.densityValue ?? 1,
-      introVideoUrl: b.introVideoUrl ?? null,
       tokenOverrides: b.tokenOverrides ?? null,
       darkModeOverrides: b.darkModeOverrides ?? null,
       darkTokenOverrides: b.darkTokenOverrides ?? null,
@@ -309,10 +345,30 @@ async function fetchPublicOrgInfo(
   // Non-critical — defaults to true so subscriptions aren't hidden on fetch failure.
   const enableSubscriptions =
     featuresResult.status === 'fulfilled'
-      ? featuresResult.value.enableSubscriptions
+      ? (featuresResult.value?.enableSubscriptions ?? true)
       : true;
 
-  return {
+  // Non-critical too: a failed read draws the hero with no film.
+  const introResolution =
+    introResult.status === 'fulfilled' ? introResult.value : null;
+  const bases = resolveR2PublicBases(ctx.env);
+  const baseMissing =
+    Boolean(introResolution?.film) && (!bases.assets || !bases.mediaPreview);
+  if (baseMissing) {
+    // A key with no host to resolve it against draws no poster, or no film
+    // at all for a paid one, with nothing on the page to say why. Partial,
+    // so a fixed config is not held back by a 4h slot.
+    ctx.obs?.warn('r2_public_base.missing', {
+      organizationId: organization.id,
+      assetsBaseSet: Boolean(bases.assets),
+      mediaPreviewBaseSet: Boolean(bases.mediaPreview),
+    });
+  }
+  const introFilm = introResolution
+    ? toPublicIntroFilm(introResolution, bases)
+    : null;
+
+  const info = {
     id: organization.id,
     slug: organization.slug,
     name: organization.name,
@@ -330,7 +386,7 @@ async function fetchPublicOrgInfo(
     },
     brandRadius: branding.radiusValue,
     brandDensity: branding.densityValue,
-    introVideoUrl: branding.introVideoUrl,
+    introFilm,
     heroLayout: branding.heroLayout,
     brandFineTune: {
       // Fine-tune values (text/heading/body weight, shadow scale/color,
@@ -342,6 +398,25 @@ async function fetchPublicOrgInfo(
     },
     enableSubscriptions,
   };
+  return { info, partial: failed.length > 0 || baseMissing };
+}
+
+/**
+ * A failed part, for the log: what failed, never the SQL or its bound params
+ * (`describeThrown` names a drizzle error by the driver error under it).
+ */
+function describeFailure(reason: unknown): string {
+  if (reason instanceof Error && !('params' in reason)) {
+    // A service wraps a DB failure in a ServiceError whose message is the
+    // client's ("An unexpected error occurred"): what failed is its cause.
+    if (reason.cause !== undefined) return describeThrown(reason.cause);
+    // A ServiceError's class name does not survive the package build's
+    // minifier (it logs as "f"); its code does.
+    if ('code' in reason && typeof reason.code === 'string') {
+      return `${reason.code}: ${reason.message}`;
+    }
+  }
+  return describeThrown(reason);
 }
 
 /**
@@ -374,13 +449,22 @@ app.get(
       // and the stats emit. This is the busiest cached read on the platform and
       // its key is one of the four data slots live in CACHE_KV_PRODUCTION, so
       // it was also one of the reads the hit ratio could not see.
-      return cachedRead(
+      //
+      // The slot holds `partial` beside the info, so its TTL is priced by
+      // what was fetched: a fallback briefly, a whole answer for 4h.
+      const { info } = await cachedRead(
         ctx,
         slug,
         CacheType.ORG_CONFIG,
         () => fetchPublicOrgInfo(ctx, slug),
-        { ttl: CACHE_TTL.ORG_PUBLIC_INFO_SECONDS }
+        {
+          ttl: ({ partial }) =>
+            partial
+              ? CACHE_TTL.ORG_PUBLIC_INFO_PARTIAL_SECONDS
+              : CACHE_TTL.ORG_PUBLIC_INFO_SECONDS,
+        }
       );
+      return info;
     },
   })
 );

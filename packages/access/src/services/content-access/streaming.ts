@@ -27,11 +27,13 @@ import {
 } from '../../errors';
 import {
   collectVariantSegments,
+  type FilmScope,
+  filmHlsPath,
   rewriteFilmMasterPlaylist,
   rewriteMasterPlaylist,
   rewriteVariantPlaylist,
 } from '../../hls-rewrite';
-import { signFilmToken, signHlsToken } from '../../hls-token';
+import { signFilmToken, signHlsToken, signOrgFilmToken } from '../../hls-token';
 import type { R2Signer } from './r2-signer';
 
 /**
@@ -335,13 +337,25 @@ export async function getHlsMasterPlaylist(
 /** The one message a film-stream failure gives its anonymous caller. */
 const FILM_STREAM_UNAVAILABLE = 'Streaming is unavailable';
 
+/** A film scope's log line name and id fields: `course film` + `courseId`. */
+function filmLog(scope: FilmScope): {
+  name: string;
+  ids: { courseId: string } | { organizationId: string };
+} {
+  if (scope.kind === 'course') {
+    return { name: 'course film', ids: { courseId: scope.courseId } };
+  }
+  return { name: 'org film', ids: { organizationId: scope.organizationId } };
+}
+
 /**
  * The film minter's error for a failure it did not raise itself, most often
- * the eligibility read. It is logged here with the course and film, and
- * replaced by the same error a signing failure gives, so the anonymous caller
- * gets one message for every failure. (It was first written to keep the
- * context `handleError` added off the response; neither `handleError` nor a
- * 5xx response carries context now, since Codex-adcgb.)
+ * the eligibility read. It is logged here with the film's scope (and `fields`,
+ * such as which sales film), and replaced by the same error a signing failure
+ * gives, so the anonymous caller gets one message for every failure. (It was
+ * first written to keep the context `handleError` added off the response;
+ * neither `handleError` nor a 5xx response carries context now, since
+ * Codex-adcgb.)
  *
  * A ServiceError passes through unchanged: on this path the only ones are
  * {@link buildFilmStreamResponse}'s, already context-free and logged.
@@ -349,12 +363,14 @@ const FILM_STREAM_UNAVAILABLE = 'Streaming is unavailable';
 export function filmStreamFailure(
   err: unknown,
   obs: ObservabilityClient,
-  ids: { courseId: string; film: string }
+  scope: FilmScope,
+  fields: Record<string, string> = {}
 ): ServiceError {
   if (isServiceError(err)) return err;
-  obs.error('Failed to mint course film stream', {
-    courseId: ids.courseId,
-    film: ids.film,
+  const log = filmLog(scope);
+  obs.error(`Failed to mint ${log.name} stream`, {
+    ...log.ids,
+    ...fields,
     errorName: err instanceof Error ? err.name : undefined,
     errorMessage: err instanceof Error ? err.message : String(err),
     errorStack: err instanceof Error ? err.stack : undefined,
@@ -364,11 +380,27 @@ export function filmStreamFailure(
   });
 }
 
+/** Sign the film token of `scope`: each scope has its own token domain. */
+function signScopedFilmToken(
+  scope: FilmScope,
+  ids: { creatorId: string; mediaId: string; exp: number },
+  secret: string
+): Promise<string> {
+  if (scope.kind === 'course') {
+    return signFilmToken({ courseId: scope.courseId, ...ids }, secret);
+  }
+  return signOrgFilmToken(
+    { organizationId: scope.organizationId, ...ids },
+    secret
+  );
+}
+
 /**
- * Mint the signed FULL stream of a course sales film (owner P10): a film token
- * and the FILM master-proxy URL it opens. The caller has run the eligibility
- * check (`resolveCourseFilm`); this only signs, as
- * {@link buildStreamingResponse} does for a granted content stream.
+ * Mint the signed FULL stream of a film: a course sales film (owner P10) or an
+ * org's intro film (Codex-376dl). It is a film token, and the URL of that
+ * scope's FILM master proxy, which the token opens. The caller has run the
+ * eligibility check (`resolveCourseFilm`, `resolveIntroFilm`); this only
+ * signs, as {@link buildStreamingResponse} does for a granted content stream.
  *
  * Its failures carry NO context and one generic message: a ServiceError's
  * message reaches the client verbatim, and this one answers an anonymous
@@ -384,18 +416,19 @@ export async function buildFilmStreamResponse(
     hlsTokenSecret: string | undefined;
     obs: ObservabilityClient;
   },
-  courseId: string,
+  scope: FilmScope,
   expirySeconds: number
 ): Promise<{ playlistUrl: string; expiresAt: Date }> {
   const { contentApiBaseUrl, hlsTokenSecret, obs } = deps;
+  const log = filmLog(scope);
   if (!contentApiBaseUrl || !hlsTokenSecret) {
     // Field NAMES only, never a value: one of them is the signing secret.
     const missing = [
       contentApiBaseUrl ? null : 'contentApiBaseUrl',
       hlsTokenSecret ? null : 'hlsTokenSecret',
     ].filter((name) => name !== null);
-    obs.error('Failed to mint course film stream', {
-      courseId,
+    obs.error(`Failed to mint ${log.name} stream`, {
+      ...log.ids,
       mediaItemId: film.mediaId,
       errorName: 'MisconfiguredStreamingProxy',
       errorMessage: `missing ${missing.join('/')}`,
@@ -405,20 +438,19 @@ export async function buildFilmStreamResponse(
 
   try {
     const exp = Math.floor(Date.now() / 1000) + expirySeconds;
-    const token = await signFilmToken(
-      { courseId, creatorId: film.creatorId, mediaId: film.mediaId, exp },
+    const token = await signScopedFilmToken(
+      scope,
+      { creatorId: film.creatorId, mediaId: film.mediaId, exp },
       hlsTokenSecret
     );
     const base = contentApiBaseUrl.replace(/\/+$/, '');
     return {
-      playlistUrl: `${base}/api/access/courses/${encodeURIComponent(
-        courseId
-      )}/films/hls/master.m3u8?token=${encodeURIComponent(token)}`,
+      playlistUrl: `${base}${filmHlsPath(scope)}/master.m3u8?token=${encodeURIComponent(token)}`,
       expiresAt: new Date(exp * 1000),
     };
   } catch (err) {
-    obs.error('Failed to mint course film stream', {
-      courseId,
+    obs.error(`Failed to mint ${log.name} stream`, {
+      ...log.ids,
       mediaItemId: film.mediaId,
       errorName: err instanceof Error ? err.name : undefined,
       errorMessage: err instanceof Error ? err.message : String(err),
@@ -431,9 +463,9 @@ export async function buildFilmStreamResponse(
 }
 
 /**
- * {@link getHlsMasterPlaylist} for a course sales film: the variants point at
- * the FILM variant proxy. Auth is the verified film token (checked at the
- * route via `verifyFilmToken`), so no DB read.
+ * {@link getHlsMasterPlaylist} for a film: the variants point at that scope's
+ * FILM variant proxy. Auth is the verified film token (checked at the route,
+ * `verifyFilmToken` / `verifyOrgFilmToken`), so no DB read.
  *
  * @returns Rewritten master playlist text, or `null` when the master object
  *          is absent in R2 (route maps to 404).
@@ -441,7 +473,7 @@ export async function buildFilmStreamResponse(
 export async function getFilmHlsMasterPlaylist(
   deps: { r2: R2Signer; contentApiBaseUrl: string | undefined },
   input: {
-    courseId: string;
+    scope: FilmScope;
     creatorId: string;
     mediaId: string;
     token: string;
@@ -460,7 +492,7 @@ export async function getFilmHlsMasterPlaylist(
 
   return rewriteFilmMasterPlaylist(text, {
     contentApiBaseUrl,
-    courseId: input.courseId,
+    scope: input.scope,
     token: input.token,
   });
 }

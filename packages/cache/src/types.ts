@@ -17,9 +17,15 @@ import type { WaitUntilFn } from './helpers/invalidate';
  * keys no longer expire at all, so a data TTL can never outlive the version key
  * that stales it — and there is no second number left to drift.
  */
-export interface CacheOptions {
-  /** Time-to-live for cached data in seconds (default: 600 = 10 minutes) */
-  ttl?: number;
+export interface CacheOptions<T = unknown> {
+  /**
+   * Time-to-live for cached data in seconds (default: 600 = 10 minutes).
+   * A read (`get`, `getWithResult`) may pass a function of the fetched value
+   * instead, to keep a fallback answer briefly and a whole one for long
+   * (`CACHE_TTL.ORG_PUBLIC_INFO_PARTIAL_SECONDS`). KV refuses an
+   * `expirationTtl` under 60.
+   */
+  ttl?: number | ((data: T) => number);
 }
 
 /**

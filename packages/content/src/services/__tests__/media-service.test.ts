@@ -20,8 +20,14 @@
 
 import type { R2Service } from '@codex/cloudflare-clients';
 import { TRANSCODING_ERROR_MAX_LENGTH } from '@codex/constants';
-import { mediaItems } from '@codex/database/schema';
 import {
+  brandingSettings,
+  mediaItems,
+  organizations,
+  platformSettings,
+} from '@codex/database/schema';
+import {
+  createTestOrganizationInput,
   type Database,
   seedTestUsers,
   setupTestDatabase,
@@ -533,6 +539,45 @@ describe('MediaItemService', () => {
       await expect(service.delete(created.id, creatorId)).rejects.toThrow(
         MediaNotFoundError
       );
+    });
+
+    it("names the orgs whose intro film it was, so their landings' cache can drop it", async () => {
+      const film = await service.create(
+        {
+          title: 'Intro film',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          r2Key: getOriginalKey(creatorId, crypto.randomUUID(), 'intro.mp4'),
+          fileSizeBytes: 1024,
+        },
+        creatorId
+      );
+      const [org] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning({ id: organizations.id, slug: organizations.slug });
+      if (!org) throw new Error('failed to seed the org');
+      await db.insert(platformSettings).values({ organizationId: org.id });
+      await db
+        .insert(brandingSettings)
+        .values({ organizationId: org.id, introVideoMediaItemId: film.id });
+      const other = await service.create(
+        {
+          title: 'Not an intro',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          r2Key: getOriginalKey(creatorId, crypto.randomUUID(), 'other.mp4'),
+          fileSizeBytes: 1024,
+        },
+        creatorId
+      );
+
+      expect(await service.delete(film.id, creatorId)).toEqual({
+        introFilmOrgSlugs: [org.slug],
+      });
+      expect(await service.delete(other.id, creatorId)).toEqual({
+        introFilmOrgSlugs: [],
+      });
     });
 
     /**

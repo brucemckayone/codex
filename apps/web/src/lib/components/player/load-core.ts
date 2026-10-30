@@ -42,11 +42,11 @@ export function loadedPlayerCore(): PlayerCore | null {
 
 /**
  * Load the core before the press: the first time a pointer enters `node`,
- * focus reaches it, or it comes within a screen's quarter of the viewport.
- * Then every trigger is dropped. A failure here is quiet: the press asks
- * again, and says so if it fails too.
+ * focus reaches it, or (with `near`) it comes within a screen's quarter of
+ * the viewport. Then every trigger is dropped. A failure here is quiet: the
+ * press asks again, and says so if it fails too.
  */
-export const preloadPlayer: Attachment<HTMLElement> = (node) => {
+function preload(node: HTMLElement, near: boolean): () => void {
   const triggers = ['pointerenter', 'focusin'] as const;
   let observer: IntersectionObserver | null = null;
 
@@ -62,7 +62,7 @@ export const preloadPlayer: Attachment<HTMLElement> = (node) => {
   }
 
   for (const type of triggers) node.addEventListener(type, warm);
-  if (typeof IntersectionObserver !== 'undefined') {
+  if (near && typeof IntersectionObserver !== 'undefined') {
     observer = new IntersectionObserver(
       (entries) => {
         if (entries.some((entry) => entry.isIntersecting)) warm();
@@ -72,4 +72,16 @@ export const preloadPlayer: Attachment<HTMLElement> = (node) => {
     observer.observe(node);
   }
   return stop;
-};
+}
+
+/** A play button down the page: loads the core as it nears the screen, too. */
+export const preloadPlayer: Attachment<HTMLElement> = (node) =>
+  preload(node, true);
+
+/**
+ * A play button the page opens with in view (the org landing's intro film,
+ * Codex-376dl): a pointer or focus only, or every visit would fetch the core
+ * whether or not anyone plays.
+ */
+export const preloadPlayerOnIntent: Attachment<HTMLElement> = (node) =>
+  preload(node, false);

@@ -73,6 +73,7 @@ describe('RAIL_GROUPS structure', () => {
     expect(findControlGroup('hero-text')).toBe('identity');
     expect(findControlGroup('hero-layout')).toBe('hero');
     expect(findControlGroup('hero-effects')).toBe('hero');
+    expect(findControlGroup('hero-film')).toBe('hero');
   });
 });
 
@@ -143,6 +144,12 @@ describe('firstControlMatch (search jump target)', () => {
 
   test('null when nothing matches', () => {
     expect(firstControlMatch('xyzzy-nope')).toBeNull();
+  });
+
+  test('finds the intro film by the words a creator uses for it', () => {
+    for (const word of ['film', 'intro', 'video', 'trailer']) {
+      expect(firstControlMatch(word)?.control.id).toBe('hero-film');
+    }
   });
 });
 

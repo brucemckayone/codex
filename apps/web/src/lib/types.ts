@@ -19,7 +19,7 @@ import type {
   ServedMediaItem,
   SubscriptionTier,
 } from '@codex/database/schema';
-import type { MyMembershipResponse } from '@codex/shared-types';
+import type { IntroFilm, MyMembershipResponse } from '@codex/shared-types';
 import type { SubscriberSubscription } from '@codex/subscription';
 import type { HeroLayout } from '@codex/validation';
 
@@ -553,7 +553,11 @@ export interface OrganizationData {
   brandRadius?: number;
   brandDensity?: number;
   brandFineTune?: OrgBrandFineTune;
-  introVideoUrl?: string | null;
+  /**
+   * The landing's intro film (Codex-376dl). Optional: a public-info payload
+   * cached before it existed has none, and draws no film until it expires.
+   */
+  introFilm?: IntroFilm | null;
   heroLayout?: HeroLayout;
   enableSubscriptions?: boolean;
 }

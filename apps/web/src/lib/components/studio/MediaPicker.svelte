@@ -13,6 +13,8 @@
   @prop {(mediaItemId: string | null) => void} [onchange] - Selection callback
   @prop {string} [name='mediaItemId'] - Hidden input name for form submission
   @prop {boolean} [showLibraryLink] - Whether to show "Go to Media library" links
+  @prop {boolean} [thumbnails=false] - Draw each video's poster (`thumbnailUrl`)
+    in place of its type icon
 -->
 <script lang="ts">
   import { createCombobox } from '@melt-ui/svelte';
@@ -20,6 +22,7 @@
   import { untrack } from 'svelte';
   import * as m from '$paraglide/messages';
   import { formatDuration, formatFileSize } from '$lib/utils/format';
+  import { getThumbnailUrl } from '$lib/utils/image';
   import {
     CheckIcon,
     ChevronDownIcon,
@@ -39,6 +42,8 @@
     mediaType: string;
     durationSeconds?: number | null;
     fileSizeBytes?: number | null;
+    /** The poster's CDN URL; drawn only with `thumbnails`. */
+    thumbnailUrl?: string | null;
   }
 
   /** Combobox option value — null represents the "No media" sentinel. */
@@ -85,6 +90,13 @@
      * test.
      */
     disabled?: boolean;
+    /**
+     * Draw each video's poster in place of its type icon: a picker where the
+     * picture is how a creator tells their films apart (the brand studio's
+     * Film control, Codex-376dl). Off by default, so the content form and the
+     * page builder's pickers stay as they are.
+     */
+    thumbnails?: boolean;
   }
 
   const {
@@ -95,6 +107,7 @@
     showLibraryLink = false,
     ariaLabel,
     disabled = false,
+    thumbnails = false,
   }: Props = $props();
 
   // ── Melt UI Combobox ────────────────────────────────────────────────
@@ -171,6 +184,22 @@
   }
 </script>
 
+{#snippet mediaIcon(item: MediaItemOption)}
+  {#if thumbnails && item.thumbnailUrl}
+    <img
+      class="media-thumb"
+      src={getThumbnailUrl(item.thumbnailUrl, 'sm')}
+      alt=""
+      loading="lazy"
+      decoding="async"
+    />
+  {:else if item.mediaType === 'video'}
+    <PlayIcon size={16} />
+  {:else}
+    <MusicIcon size={16} />
+  {/if}
+{/snippet}
+
 <input type="hidden" {name} value={value ?? ''} />
 
 <div class="media-picker">
@@ -186,11 +215,7 @@
         {disabled}
       >
         <span class="trigger-icon" aria-hidden="true">
-          {#if selectedItem.mediaType === 'video'}
-            <PlayIcon size={16} />
-          {:else}
-            <MusicIcon size={16} />
-          {/if}
+          {@render mediaIcon(selectedItem)}
         </span>
         <span class="trigger-details">
           <span class="trigger-title">{selectedItem.title}</span>
@@ -281,11 +306,7 @@
               class:selected={item.id === value}
             >
               <span class="option-icon" data-type={item.mediaType} aria-hidden="true">
-                {#if item.mediaType === 'video'}
-                  <PlayIcon size={16} />
-                {:else}
-                  <MusicIcon size={16} />
-                {/if}
+                {@render mediaIcon(item)}
               </span>
               <span class="option-details">
                 <span class="option-title">{item.title}</span>
@@ -585,6 +606,18 @@
 
   .option-icon[data-type='video'] {
     color: var(--color-interactive-hover);
+  }
+
+  /* A poster fills the icon's square, in its corners. */
+  .trigger-icon,
+  .option-icon {
+    overflow: hidden;
+  }
+
+  .media-thumb {
+    inline-size: 100%;
+    block-size: 100%;
+    object-fit: cover;
   }
 
   .option-icon[data-type='audio'] {

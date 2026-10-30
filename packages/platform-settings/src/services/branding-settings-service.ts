@@ -7,13 +7,20 @@
 
 import type { R2Service } from '@codex/cloudflare-clients';
 import {
+  MEDIA_STATUS,
+  MEDIA_TYPES,
   MIME_TYPES,
   R2_OVERWRITTEN_OBJECT_CACHE_CONTROL,
 } from '@codex/constants';
-import { type dbHttp, type dbWs, schema } from '@codex/database';
+import {
+  type dbHttp,
+  type dbWs,
+  schema,
+  scopedNotDeleted,
+} from '@codex/database';
 import {
   BaseService,
-  ForbiddenError,
+  BusinessLogicError,
   InternalServiceError,
   NotFoundError,
   ValidationError,
@@ -25,7 +32,7 @@ import {
   pricingFaqSchema,
   type UpdateBrandingInput,
 } from '@codex/validation';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { InvalidFileTypeError, SettingsUpsertError } from '../errors';
 
 /**
@@ -157,7 +164,6 @@ export class BrandingSettingsService extends BaseService {
         radiusValue: schema.brandingSettings.radiusValue,
         densityValue: schema.brandingSettings.densityValue,
         introVideoMediaItemId: schema.brandingSettings.introVideoMediaItemId,
-        introVideoUrl: schema.brandingSettings.introVideoUrl,
         tokenOverrides: schema.brandingSettings.tokenOverrides,
         darkModeOverrides: schema.brandingSettings.darkModeOverrides,
         darkTokenOverrides: schema.brandingSettings.darkTokenOverrides,
@@ -176,61 +182,7 @@ export class BrandingSettingsService extends BaseService {
       return { ...DEFAULT_BRANDING };
     }
 
-    // Codex-631mn: self-heal intro video URL on read. If a mediaItemId is
-    // linked but introVideoUrl is null, the user closed the editor before
-    // transcoding finished and no one polled getIntroVideoStatus to run
-    // the lazy finalize. Heal here so every org page load auto-recovers.
-    // No-op in the happy path (URL already set, or no mediaItemId).
-    if (row.introVideoMediaItemId && !row.introVideoUrl) {
-      const healed = await this.maybeHealIntroVideoUrl(
-        row.introVideoMediaItemId
-      );
-      if (healed) row.introVideoUrl = healed;
-    }
-
     return this.mapRow(row);
-  }
-
-  /**
-   * Check whether a linked intro video media item has finished transcoding
-   * and persist its HLS URL if so. Returns the new URL on success, null
-   * otherwise (still transcoding / missing hlsMasterPlaylistKey / no
-   * r2PublicUrlBase configured / media not found).
-   *
-   * Extracted from getIntroVideoStatus's inline auto-finalize block so
-   * get() can trigger the same healing path on any branding read.
-   */
-  private async maybeHealIntroVideoUrl(
-    mediaItemId: string
-  ): Promise<string | null> {
-    if (!this.r2PublicUrlBase) return null;
-
-    const mediaResult = await this.db
-      .select({
-        status: schema.mediaItems.status,
-        hlsMasterPlaylistKey: schema.mediaItems.hlsMasterPlaylistKey,
-      })
-      .from(schema.mediaItems)
-      .where(eq(schema.mediaItems.id, mediaItemId))
-      .limit(1);
-
-    const media = mediaResult[0];
-    if (!media || media.status !== 'ready' || !media.hlsMasterPlaylistKey) {
-      return null;
-    }
-
-    const introVideoUrl = `${this.r2PublicUrlBase}/${media.hlsMasterPlaylistKey}`;
-    await this.db
-      .update(schema.brandingSettings)
-      .set({ introVideoUrl, updatedAt: new Date() })
-      .where(eq(schema.brandingSettings.organizationId, this.organizationId));
-
-    this.obs.info('Intro video URL auto-finalized on read', {
-      organizationId: this.organizationId,
-      introVideoUrl,
-    });
-
-    return introVideoUrl;
   }
 
   /** Map a database row to the response shape */
@@ -245,7 +197,6 @@ export class BrandingSettingsService extends BaseService {
     radiusValue: string;
     densityValue: string;
     introVideoMediaItemId: string | null;
-    introVideoUrl: string | null;
     tokenOverrides: string | null;
     darkModeOverrides: string | null;
     darkTokenOverrides: string | null;
@@ -263,7 +214,6 @@ export class BrandingSettingsService extends BaseService {
       radiusValue: parseFloat(row.radiusValue) || 0.5,
       densityValue: parseFloat(row.densityValue) || 1,
       introVideoMediaItemId: row.introVideoMediaItemId,
-      introVideoUrl: row.introVideoUrl,
       tokenOverrides: row.tokenOverrides,
       darkModeOverrides: row.darkModeOverrides,
       darkTokenOverrides: row.darkTokenOverrides,
@@ -569,30 +519,34 @@ export class BrandingSettingsService extends BaseService {
     return this.get();
   }
 
-  // ── Intro Video ──────────────────────────────────────────────────
+  // ── Intro film ───────────────────────────────────────────────────
 
   /**
-   * Link a media item as the org's intro video.
-   * The media item must exist, belong to creatorId, and not be soft-deleted.
-   * If the media is already `ready`, auto-sets introVideoUrl.
+   * Link a media item as the org's intro film, the film its landing page
+   * plays (Codex-376dl). It must be the caller's own, not deleted, a video,
+   * and finished: the studio lists only ready videos, so nothing waits on
+   * transcoding here. Only the id is stored. The landing builds the film's
+   * URLs from the media row on each read (`resolveIntroFilm`), so a stored
+   * URL can never point at a file the CDN does not serve (Codex-aexid).
+   *
+   * Another user's media reads as not found, exactly as a missing id does:
+   * the ownership scope is in the WHERE, so the answer never says whether
+   * someone else's media exists.
    */
   async linkIntroVideo(
     mediaItemId: string,
     creatorId: string
   ): Promise<BrandingSettingsResponse> {
-    // Validate media item exists, belongs to user, and is not deleted
     const mediaResult = await this.db
       .select({
-        id: schema.mediaItems.id,
-        creatorId: schema.mediaItems.creatorId,
         status: schema.mediaItems.status,
-        hlsMasterPlaylistKey: schema.mediaItems.hlsMasterPlaylistKey,
+        mediaType: schema.mediaItems.mediaType,
       })
       .from(schema.mediaItems)
       .where(
         and(
           eq(schema.mediaItems.id, mediaItemId),
-          isNull(schema.mediaItems.deletedAt)
+          scopedNotDeleted(schema.mediaItems, creatorId)
         )
       )
       .limit(1);
@@ -601,17 +555,14 @@ export class BrandingSettingsService extends BaseService {
     if (!media) {
       throw new NotFoundError('Media item not found');
     }
-    if (media.creatorId !== creatorId) {
-      throw new ForbiddenError('Media item does not belong to this user');
+    if (media.mediaType !== MEDIA_TYPES.VIDEO) {
+      throw new ValidationError('The intro film must be a video');
     }
-
-    // Construct public URL if media is already transcoded
-    const introVideoUrl =
-      media.status === 'ready' &&
-      media.hlsMasterPlaylistKey &&
-      this.r2PublicUrlBase
-        ? `${this.r2PublicUrlBase}/${media.hlsMasterPlaylistKey}`
-        : null;
+    if (media.status !== MEDIA_STATUS.READY) {
+      throw new BusinessLogicError(
+        'This video is still processing. Pick it once it is ready.'
+      );
+    }
 
     await this.ensurePlatformSettingsExists();
 
@@ -620,14 +571,12 @@ export class BrandingSettingsService extends BaseService {
       .values({
         organizationId: this.organizationId,
         introVideoMediaItemId: mediaItemId,
-        introVideoUrl,
         primaryColorHex: DEFAULT_BRANDING.primaryColorHex,
       })
       .onConflictDoUpdate({
         target: schema.brandingSettings.organizationId,
         set: {
           introVideoMediaItemId: mediaItemId,
-          introVideoUrl,
           updatedAt: new Date(),
         },
       })
@@ -636,8 +585,6 @@ export class BrandingSettingsService extends BaseService {
     this.obs.info('Intro video linked', {
       organizationId: this.organizationId,
       mediaItemId,
-      status: media.status,
-      urlSet: !!introVideoUrl,
     });
 
     const row = result[0];
@@ -652,221 +599,22 @@ export class BrandingSettingsService extends BaseService {
   }
 
   /**
-   * Get intro video transcoding status.
-   * Auto-finalizes introVideoUrl when media becomes ready (lazy pattern).
+   * Take the intro film off the landing page. Only the link goes: the film
+   * stays in the creator's media library, where content may also use it.
+   * (The old intro was an upload made for this slot alone, so removing it
+   * once deleted the media item and its files.)
    */
-  async getIntroVideoStatus(): Promise<{
-    status:
-      | 'none'
-      | 'uploading'
-      | 'uploaded'
-      | 'transcoding'
-      | 'ready'
-      | 'failed';
-    introVideoUrl: string | null;
-    progress: number | null;
-    /** A TRANSCODING_ERROR_CODES value; its sentence is the client's. */
-    errorCode: string | null;
-  }> {
-    // Get the linked media item ID
-    const brandingResult = await this.db
-      .select({
-        introVideoMediaItemId: schema.brandingSettings.introVideoMediaItemId,
-        introVideoUrl: schema.brandingSettings.introVideoUrl,
-      })
-      .from(schema.brandingSettings)
-      .where(eq(schema.brandingSettings.organizationId, this.organizationId))
-      .limit(1);
-
-    const branding = brandingResult[0];
-    if (!branding?.introVideoMediaItemId) {
-      return {
-        status: 'none',
-        introVideoUrl: null,
-        progress: null,
-        errorCode: null,
-      };
-    }
-
-    // Query media item status
-    const mediaResult = await this.db
-      .select({
-        status: schema.mediaItems.status,
-        hlsMasterPlaylistKey: schema.mediaItems.hlsMasterPlaylistKey,
-        transcodingProgress: schema.mediaItems.transcodingProgress,
-        transcodingErrorCode: schema.mediaItems.transcodingErrorCode,
-      })
-      .from(schema.mediaItems)
-      .where(eq(schema.mediaItems.id, branding.introVideoMediaItemId))
-      .limit(1);
-
-    const media = mediaResult[0];
-    if (!media) {
-      return {
-        status: 'none',
-        introVideoUrl: null,
-        progress: null,
-        errorCode: null,
-      };
-    }
-
-    // Auto-finalize: if media is ready but URL not yet set, construct and persist it
-    let { introVideoUrl } = branding;
-    if (
-      media.status === 'ready' &&
-      !introVideoUrl &&
-      media.hlsMasterPlaylistKey &&
-      this.r2PublicUrlBase
-    ) {
-      introVideoUrl = `${this.r2PublicUrlBase}/${media.hlsMasterPlaylistKey}`;
-      await this.db
-        .update(schema.brandingSettings)
-        .set({ introVideoUrl, updatedAt: new Date() })
-        .where(eq(schema.brandingSettings.organizationId, this.organizationId));
-
-      this.obs.info('Intro video URL auto-finalized', {
-        organizationId: this.organizationId,
-        introVideoUrl,
-      });
-    }
-
-    return {
-      status: media.status as
-        | 'uploading'
-        | 'uploaded'
-        | 'transcoding'
-        | 'ready'
-        | 'failed',
-      introVideoUrl,
-      progress: media.transcodingProgress,
-      // The code, never the transcoder's raw detail (Codex-l2c48): a client
-      // shows its sentence (transcodingErrorInfo).
-      errorCode: media.transcodingErrorCode,
-    };
-  }
-
-  /**
-   * Delete the intro video.
-   * Soft-deletes the media item, clears branding references, and hard-deletes
-   * the HLS manifest + segments from R2 so they don't accumulate as orphans.
-   */
-  async deleteIntroVideo(): Promise<BrandingSettingsResponse> {
-    // Get the linked media item ID
-    const brandingResult = await this.db
-      .select({
-        introVideoMediaItemId: schema.brandingSettings.introVideoMediaItemId,
-      })
-      .from(schema.brandingSettings)
-      .where(eq(schema.brandingSettings.organizationId, this.organizationId))
-      .limit(1);
-
-    const mediaItemId = brandingResult[0]?.introVideoMediaItemId;
-
-    // Capture the media item's creatorId BEFORE soft-deleting so we can
-    // build the HLS R2 prefix (`{creatorId}/hls/{mediaId}/`) for cleanup.
-    let mediaCreatorId: string | null = null;
-    if (mediaItemId) {
-      const mediaResult = await this.db
-        .select({ creatorId: schema.mediaItems.creatorId })
-        .from(schema.mediaItems)
-        .where(eq(schema.mediaItems.id, mediaItemId))
-        .limit(1);
-      mediaCreatorId = mediaResult[0]?.creatorId ?? null;
-
-      await this.db
-        .update(schema.mediaItems)
-        .set({ deletedAt: new Date() })
-        .where(
-          and(
-            eq(schema.mediaItems.id, mediaItemId),
-            isNull(schema.mediaItems.deletedAt)
-          )
-        );
-
-      this.obs.info('Intro video media item soft-deleted', {
-        organizationId: this.organizationId,
-        mediaItemId,
-      });
-    }
-
-    // Clear branding references
+  async unlinkIntroVideo(): Promise<BrandingSettingsResponse> {
     await this.db
       .update(schema.brandingSettings)
-      .set({
-        introVideoMediaItemId: null,
-        introVideoUrl: null,
-        updatedAt: new Date(),
-      })
+      .set({ introVideoMediaItemId: null, updatedAt: new Date() })
       .where(eq(schema.brandingSettings.organizationId, this.organizationId));
 
-    // Hard-delete HLS objects from R2. Run AFTER the DB writes succeed so
-    // the soft-delete + reference clearing remain consistent if R2 fails.
-    // Mirrors deleteLogo's swallow-and-log pattern: orphaned files are an
-    // acceptable tradeoff vs failing the user's delete operation.
-    if (mediaItemId && mediaCreatorId && this.r2) {
-      await this.deleteHlsObjects(mediaCreatorId, mediaItemId);
-    }
+    this.obs.info('Intro video unlinked', {
+      organizationId: this.organizationId,
+    });
 
     return this.get();
-  }
-
-  /**
-   * Hard-delete every R2 object under the HLS prefix for an intro video.
-   * Lists with pagination (HLS folders contain manifest + per-variant
-   * playlists + many .ts segments), then deletes each key. R2 has no
-   * "delete folder" primitive, so list + delete is the canonical approach.
-   *
-   * Errors are logged but never thrown — orphaned files are recoverable
-   * via background cleanup; failing the user's delete is not.
-   *
-   * Layout: `{creatorId}/hls/{mediaItemId}/master.m3u8`,
-   *         `{creatorId}/hls/{mediaItemId}/{variant}/index.m3u8`,
-   *         `{creatorId}/hls/{mediaItemId}/{variant}/segment_*.ts`,
-   *         `{creatorId}/hls/{mediaItemId}/preview/preview.m3u8`
-   */
-  private async deleteHlsObjects(
-    creatorId: string,
-    mediaItemId: string
-  ): Promise<void> {
-    if (!this.r2) return;
-
-    const prefix = `${creatorId}/hls/${mediaItemId}/`;
-    let cursor: string | undefined;
-    let totalDeleted = 0;
-
-    try {
-      do {
-        const page = await this.r2.list({ prefix, cursor });
-        for (const object of page.objects) {
-          try {
-            await this.r2.delete(object.key);
-            totalDeleted++;
-          } catch (error) {
-            this.obs.warn('Failed to delete intro video HLS object from R2', {
-              organizationId: this.organizationId,
-              mediaItemId,
-              r2Key: object.key,
-              error: String(error),
-            });
-          }
-        }
-        cursor = page.truncated ? page.cursor : undefined;
-      } while (cursor);
-
-      this.obs.info('Deleted intro video HLS objects from R2', {
-        organizationId: this.organizationId,
-        mediaItemId,
-        prefix,
-        deleted: totalDeleted,
-      });
-    } catch (error) {
-      this.obs.warn('Failed to list intro video HLS objects for cleanup', {
-        organizationId: this.organizationId,
-        mediaItemId,
-        prefix,
-        error: String(error),
-      });
-    }
   }
 
   // ── Private Helpers ─────────────────────────────────────────────

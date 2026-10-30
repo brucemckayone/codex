@@ -478,7 +478,7 @@ CacheType.USER_PROFILE           // 'user:profile'  (carries email)
 CacheType.USER_PUBLIC_PROFILE    // 'user:public-profile'
 CacheType.USERNAME_TO_ID         // 'user:username-to-id'
 CacheType.USER_PREFERENCES       // 'user:preferences'
-CacheType.ORG_CONFIG             // 'org:config'
+CacheType.ORG_CONFIG             // 'org:config:v2' (v2: the payload gained introFilm)
 
 // Collection version identifiers (server KV only)
 CacheType.COLLECTION_CONTENT_PUBLISHED             // 'content:published'

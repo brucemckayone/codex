@@ -1850,6 +1850,9 @@ importers:
 
   workers/organization-api:
     dependencies:
+      '@codex/access':
+        specifier: workspace:*
+        version: link:../../packages/access
       '@codex/cache':
         specifier: workspace:*
         version: link:../../packages/cache

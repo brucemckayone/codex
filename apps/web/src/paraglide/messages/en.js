@@ -1415,7 +1415,7 @@ export const org_hero_meet_creators = () => `Meet Creators`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const org_hero_watch_intro = () => `Watch Intro`
+export const org_hero_watch_film = () => `Watch our film`
 
 
 /**
@@ -6360,6 +6360,190 @@ export const branding_hero_subheading_label = () => `Hero subheading`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const branding_hero_subheading_placeholder = () => `A short tagline shown beneath your organization name`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_film_hint = () => `A film on your landing page that introduces your org. Pick one from your media library.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_film_label = () => `Film`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_film_choose = () => `Choose a film`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_film_empty = () => `No film yet. Visitors see the hero without one.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_film_upload_lead = () => `Not in your library yet?`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_film_upload_link = () => `Upload it in Media`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_film_upload_tail = () => `It shows up here when it has finished processing.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_film_plays_full = () => `Visitors can watch the whole film.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_film_plays_preview = () => `Visitors see a 30-second preview. This film is part of paid content, so the whole film stays for people who have bought it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_film_none_paid = () => `Visitors won't see this film. It is part of paid content and has no preview to show.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_film_none_not_ready = () => `Visitors won't see this film until it has finished processing.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_film_none_not_video = () => `Visitors won't see this. It isn't a video, so pick a video instead.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_film_none_creator_left = () => `Visitors won't see this film. The person who uploaded it is no longer on your team, so pick another.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_film_none_failed = () => `Visitors won't see this film. It couldn't be processed, so pick another or upload it again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_film_none_other = () => `Visitors won't see this film.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_film_change = () => `Change film`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_film_keep = () => `Keep this film`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_film_remove = () => `Remove from landing`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_film_remove_note = () => `Removing takes the film off your landing page. It stays in your media library.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_film_load_failed = () => `Couldn't load your film.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_film_library_failed = () => `Couldn't load your videos.`
+
+
+/**
+ * @param {{ shown: NonNullable<unknown>, total: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_film_library_capped = (params) => `Showing ${params.shown} of your ${params.total} finished videos.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_film_save_failed = () => `Couldn't save the film. Try again.`
 
 
 /**

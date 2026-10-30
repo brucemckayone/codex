@@ -96,29 +96,42 @@ export function rewriteMasterPlaylist(
   );
 }
 
+/**
+ * Whose film a film token opens: a course sales film (owner P10) or an org's
+ * intro film (Codex-376dl). Each has its own proxies, path key and token
+ * domain; the minting and the playlists are otherwise one code path.
+ */
+export type FilmScope =
+  | { kind: 'course'; courseId: string }
+  | { kind: 'org'; organizationId: string };
+
+/** The film proxies' HLS root for a scope, below the content-api origin. */
+export function filmHlsPath(scope: FilmScope): string {
+  if (scope.kind === 'course') {
+    return `/api/access/courses/${encodeURIComponent(scope.courseId)}/films/hls`;
+  }
+  return `/api/access/orgs/${encodeURIComponent(scope.organizationId)}/film/hls`;
+}
+
 export interface RewriteFilmMasterOptions {
   /** Public content-api origin, e.g. `https://api.revelations.studio`. */
   contentApiBaseUrl: string;
-  /** The course the film token was minted for — the film proxies' path key. */
-  courseId: string;
+  /** Whose film the token was minted for: the film proxies' path key. */
+  scope: FilmScope;
   /** The SAME film token minted for the master request, propagated to children. */
   token: string;
 }
 
 /**
- * {@link rewriteMasterPlaylist} for a course sales film (owner P10): each
- * variant points at the FILM variant proxy, which accepts only a film token.
+ * {@link rewriteMasterPlaylist} for a film: each variant points at that
+ * scope's FILM variant proxy, which accepts only its own film token.
  */
 export function rewriteFilmMasterPlaylist(
   text: string,
-  { contentApiBaseUrl, courseId, token }: RewriteFilmMasterOptions
+  { contentApiBaseUrl, scope, token }: RewriteFilmMasterOptions
 ): string {
   const base = contentApiBaseUrl.replace(/\/+$/, '');
-  return rewriteVariantUris(
-    text,
-    `${base}/api/access/courses/${encodeURIComponent(courseId)}/films/hls`,
-    token
-  );
+  return rewriteVariantUris(text, `${base}${filmHlsPath(scope)}`, token);
 }
 
 /** Point each variant URI at `${hlsBase}/<variant>/index.m3u8`, token propagated. */

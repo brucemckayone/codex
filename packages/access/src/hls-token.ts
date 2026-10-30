@@ -296,3 +296,80 @@ export async function verifyFilmToken(
     },
   };
 }
+
+/**
+ * An org intro film's token (Codex-376dl): the full stream of the film on the
+ * org's landing page, minted only when no paid content uses that media, as a
+ * course sales film's is. Bound to the org as well as the media, so the org
+ * film proxies refuse a token presented under another org's path.
+ */
+export interface OrgFilmTokenPayload extends HlsTokenPayload {
+  /** The org whose landing page holds the film. */
+  organizationId: string;
+}
+
+/**
+ * Its own domain, beside `course-film.` and the content token's bare payload:
+ * each of the three verifiers accepts only its own kind. A base64url payload
+ * holds no `.`, so no payload of one domain reads as another's.
+ */
+const ORG_FILM_TOKEN_DOMAIN = 'org-film.';
+
+/**
+ * Mint a short-lived org film token. The caller has run the eligibility check
+ * (`resolveIntroFilm`); this only signs.
+ */
+export async function signOrgFilmToken(
+  payload: OrgFilmTokenPayload,
+  secret: string
+): Promise<string> {
+  const encodedPayload = base64UrlEncodeString(JSON.stringify(payload));
+  const signature = await hmacSha256Base64Url(
+    `${ORG_FILM_TOKEN_DOMAIN}${encodedPayload}`,
+    secret
+  );
+  return `${encodedPayload}.${signature}`;
+}
+
+/** An org film token's verdict, as {@link FilmTokenCheck} is a course film's. */
+export type OrgFilmTokenCheck =
+  | { ok: true; payload: OrgFilmTokenPayload }
+  | { ok: false; reason: TokenRefusal };
+
+/** Verify an org film token. Never throws. */
+export async function verifyOrgFilmToken(
+  token: string,
+  secret: string,
+  nowSeconds: number = Math.floor(Date.now() / 1000)
+): Promise<OrgFilmTokenCheck> {
+  const decoded = await decodeSignedPayload(
+    token,
+    secret,
+    ORG_FILM_TOKEN_DOMAIN
+  );
+  if (!decoded.ok) return decoded;
+
+  const { payload } = decoded;
+  if (
+    typeof payload.organizationId !== 'string' ||
+    typeof payload.creatorId !== 'string' ||
+    typeof payload.mediaId !== 'string' ||
+    typeof payload.exp !== 'number'
+  ) {
+    return { ok: false, reason: 'malformed' };
+  }
+
+  if (nowSeconds >= payload.exp) {
+    return { ok: false, reason: 'expired' };
+  }
+
+  return {
+    ok: true,
+    payload: {
+      organizationId: payload.organizationId,
+      creatorId: payload.creatorId,
+      mediaId: payload.mediaId,
+      exp: payload.exp,
+    },
+  };
+}

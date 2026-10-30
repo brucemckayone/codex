@@ -150,6 +150,25 @@ export type CourseFilmVariantParams = z.infer<
 >;
 
 /**
+ * Params of the org intro film's minter and master proxy
+ * (`/orgs/:organizationId/film/...`, Codex-376dl). The org is the film slot's
+ * key: the minter reads the media from its branding, so a caller never names a
+ * media item.
+ */
+export const orgFilmParamsSchema = z.object({
+  organizationId: uuidSchema,
+});
+
+/**
+ * Params of the org film's variant proxy: `organizationId` must match the one
+ * the token was minted for, and `variant` is bounded as the course film's is.
+ */
+export const orgFilmVariantParamsSchema = z.object({
+  organizationId: uuidSchema,
+  variant: hlsVariantPathSchema,
+});
+
+/**
  * Response schema for GET /api/access/content/:id/stream.
  *
  * Mirrors `StreamingUrlResponse` in `@codex/access/types.ts`. Kept here as a

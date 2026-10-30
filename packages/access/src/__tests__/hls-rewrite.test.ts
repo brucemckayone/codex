@@ -8,8 +8,10 @@ import {
 import {
   signFilmToken,
   signHlsToken,
+  signOrgFilmToken,
   verifyFilmToken,
   verifyHlsToken,
+  verifyOrgFilmToken,
 } from '../hls-token';
 
 const BASE = 'https://api.revelations.studio';
@@ -266,7 +268,7 @@ describe('rewriteFilmMasterPlaylist (owner P10)', () => {
 
     const lines = rewriteFilmMasterPlaylist(master, {
       contentApiBaseUrl: `${BASE}/`,
-      courseId,
+      scope: { kind: 'course', courseId },
       token: TOKEN,
     }).split('\n');
 
@@ -276,6 +278,21 @@ describe('rewriteFilmMasterPlaylist (owner P10)', () => {
     );
     expect(lines[2]).toBe(
       `${BASE}/api/access/courses/${courseId}/films/hls/128k/index.m3u8?token=tok.sig`
+    );
+  });
+
+  it("points an org intro film's variants at the ORG film variant proxy (Codex-376dl)", () => {
+    const organizationId = '44444444-4444-4444-8444-444444444444';
+    const master = ['#EXTM3U', '720p/index.m3u8', ''].join('\n');
+
+    const lines = rewriteFilmMasterPlaylist(master, {
+      contentApiBaseUrl: BASE,
+      scope: { kind: 'org', organizationId },
+      token: TOKEN,
+    }).split('\n');
+
+    expect(lines[1]).toBe(
+      `${BASE}/api/access/orgs/${organizationId}/film/hls/720p/index.m3u8?token=tok.sig`
     );
   });
 });
@@ -349,5 +366,79 @@ describe('film token sign/verify (owner P10)', () => {
     expect(await verifyFilmToken(courseless, SECRET)).toEqual(MALFORMED);
 
     expect(await verifyFilmToken('not-a-token', SECRET)).toEqual(MALFORMED);
+  });
+});
+
+describe('org film token sign/verify (Codex-376dl)', () => {
+  const SECRET = 'test-worker-shared-secret';
+  const media = {
+    creatorId: 'user_abc',
+    mediaId: '22222222-2222-4222-8222-222222222222',
+  };
+  const payload = {
+    ...media,
+    organizationId: '44444444-4444-4444-8444-444444444444',
+  };
+  const inTenMinutes = () => Math.floor(Date.now() / 1000) + 600;
+  const SIGNATURE = { ok: false, reason: 'signature' };
+  const MALFORMED = { ok: false, reason: 'malformed' };
+
+  it('verifies a freshly-signed org film token', async () => {
+    const exp = inTenMinutes();
+    const token = await signOrgFilmToken({ ...payload, exp }, SECRET);
+    expect(await verifyOrgFilmToken(token, SECRET)).toEqual({
+      ok: true,
+      payload: { ...payload, exp },
+    });
+  });
+
+  // Each of the three tokens opens only its own proxies: the same secret signs
+  // all three, so the domain is the only thing keeping them apart.
+  it('an org film token is neither a content token nor a course film token', async () => {
+    const token = await signOrgFilmToken(
+      { ...payload, exp: inTenMinutes() },
+      SECRET
+    );
+    expect(await verifyHlsToken(token, SECRET)).toBeNull();
+    expect(await verifyFilmToken(token, SECRET)).toEqual(SIGNATURE);
+  });
+
+  it('neither a content token nor a course film token is an org film token', async () => {
+    const exp = inTenMinutes();
+    const content = await signHlsToken({ ...media, exp }, SECRET);
+    expect(await verifyOrgFilmToken(content, SECRET)).toEqual(SIGNATURE);
+
+    const course = await signFilmToken(
+      { ...media, courseId: '33333333-3333-4333-8333-333333333333', exp },
+      SECRET
+    );
+    expect(await verifyOrgFilmToken(course, SECRET)).toEqual(SIGNATURE);
+  });
+
+  it('rejects another secret, an expired token, a missing org and a malformed token', async () => {
+    const live = await signOrgFilmToken(
+      { ...payload, exp: inTenMinutes() },
+      SECRET
+    );
+    expect(await verifyOrgFilmToken(live, 'wrong-secret')).toEqual(SIGNATURE);
+
+    const expired = await signOrgFilmToken(
+      { ...payload, exp: Math.floor(Date.now() / 1000) - 1 },
+      SECRET
+    );
+    expect(await verifyOrgFilmToken(expired, SECRET)).toEqual({
+      ok: false,
+      reason: 'expired',
+    });
+
+    const orgless = await signOrgFilmToken(
+      { ...media, exp: inTenMinutes() } as Parameters<
+        typeof signOrgFilmToken
+      >[0],
+      SECRET
+    );
+    expect(await verifyOrgFilmToken(orgless, SECRET)).toEqual(MALFORMED);
+
+    expect(await verifyOrgFilmToken('not-a-token', SECRET)).toEqual(MALFORMED);
   });
 });

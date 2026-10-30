@@ -829,184 +829,101 @@ describe('BrandingSettingsService', () => {
     });
   });
 
-  describe('deleteIntroVideo()', () => {
-    /**
-     * Helper to seed a media item linked as the org's intro video.
-     * Returns { creatorId, mediaItemId, hlsPrefix }.
-     */
-    async function seedLinkedIntroVideo() {
+  // The intro film (Codex-376dl): picked from the creator's own finished
+  // videos in the brand studio, and only its id is stored.
+  describe('linkIntroVideo()', () => {
+    async function seedMedia(
+      overrides: Parameters<typeof createTestMediaItemInput>[1]
+    ) {
       const [creatorId] = await seedTestUsers(db, 1);
-      // Insert in `uploaded` state so we don't trigger the
-      // `status_ready_requires_keys` check constraint. deleteIntroVideo()
-      // only reads creatorId; the media's status is irrelevant for cleanup.
       const media = takeFirst(
         await db
           .insert(schema.mediaItems)
-          .values(createTestMediaItemInput(creatorId, { status: 'uploaded' }))
+          .values(createTestMediaItemInput(creatorId, overrides))
           .returning()
       );
-
-      await db.insert(schema.platformSettings).values({ organizationId });
-      await db.insert(schema.brandingSettings).values({
-        organizationId,
-        introVideoMediaItemId: media.id,
-        introVideoUrl: `https://cdn.example.com/${creatorId}/hls/${media.id}/master.m3u8`,
-        primaryColorHex: DEFAULT_BRANDING.primaryColorHex,
-      });
-
-      return {
-        creatorId,
-        mediaItemId: media.id,
-        hlsPrefix: `${creatorId}/hls/${media.id}/`,
-      };
+      return { creatorId, mediaItemId: media.id };
     }
 
-    it('soft-deletes the media item and clears branding references', async () => {
+    async function storedRow() {
+      return takeFirst(
+        await db
+          .select()
+          .from(schema.brandingSettings)
+          .where(eq(schema.brandingSettings.organizationId, organizationId))
+      );
+    }
+
+    it('links a ready video and stores only its id', async () => {
+      const { creatorId, mediaItemId } = await seedMedia({ status: 'ready' });
+
+      const result = await createService().linkIntroVideo(
+        mediaItemId,
+        creatorId
+      );
+
+      expect(result.introVideoMediaItemId).toBe(mediaItemId);
+      // The old intro stored a URL to the full master, which the CDN never
+      // serves (Codex-aexid). Nothing writes one now.
+      expect((await storedRow()).introVideoUrl).toBeNull();
+    });
+
+    it('refuses audio, an unfinished video and another user’s video', async () => {
+      const audio = await seedMedia({ mediaType: 'audio', status: 'ready' });
+      const uploading = await seedMedia({ status: 'uploading' });
+      const theirs = await seedMedia({ status: 'ready' });
+      const [someoneElse] = await seedTestUsers(db, 1);
+      const service = createService();
+
+      await expect(
+        service.linkIntroVideo(audio.mediaItemId, audio.creatorId)
+      ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+      await expect(
+        service.linkIntroVideo(uploading.mediaItemId, uploading.creatorId)
+      ).rejects.toMatchObject({ code: 'BUSINESS_LOGIC_ERROR' });
+      // Not FORBIDDEN: a refusal that differs from "no such media" would say
+      // that someone else's media exists.
+      await expect(
+        service.linkIntroVideo(theirs.mediaItemId, someoneElse)
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      await expect(
+        service.linkIntroVideo(crypto.randomUUID(), someoneElse)
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+  });
+
+  describe('unlinkIntroVideo()', () => {
+    it('takes the film off the landing and leaves the media item in the library', async () => {
       const mockR2 = createMockR2();
-      mockR2.list.mockResolvedValue({ objects: [], truncated: false });
       const service = createService(mockR2);
-
-      const { mediaItemId } = await seedLinkedIntroVideo();
-
-      const result = await service.deleteIntroVideo();
-
-      // Branding references cleared
-      expect(result.introVideoMediaItemId).toBeNull();
-      expect(result.introVideoUrl).toBeNull();
-
-      // Media item soft-deleted
+      const [creatorId] = await seedTestUsers(db, 1);
       const media = takeFirst(
+        await db
+          .insert(schema.mediaItems)
+          .values(createTestMediaItemInput(creatorId, { status: 'ready' }))
+          .returning()
+      );
+      await service.linkIntroVideo(media.id, creatorId);
+
+      const result = await service.unlinkIntroVideo();
+
+      expect(result.introVideoMediaItemId).toBeNull();
+      const kept = takeFirst(
         await db
           .select()
           .from(schema.mediaItems)
-          .where(eq(schema.mediaItems.id, mediaItemId))
+          .where(eq(schema.mediaItems.id, media.id))
       );
-      expect(media.deletedAt).not.toBeNull();
-    });
-
-    it('hard-deletes every HLS object under the intro video prefix from R2', async () => {
-      const mockR2 = createMockR2();
-      const service = createService(mockR2);
-      const { mediaItemId, hlsPrefix } = await seedLinkedIntroVideo();
-
-      // Simulate R2 returning a manifest + a few segment files for the prefix
-      const objects = [
-        { key: `${hlsPrefix}master.m3u8` },
-        { key: `${hlsPrefix}1080p/index.m3u8` },
-        { key: `${hlsPrefix}1080p/segment_001.ts` },
-        { key: `${hlsPrefix}1080p/segment_002.ts` },
-        { key: `${hlsPrefix}preview/preview.m3u8` },
-      ];
-      mockR2.list.mockResolvedValue({ objects, truncated: false });
-
-      await service.deleteIntroVideo();
-
-      // list() was called with the correct HLS prefix
-      expect(mockR2.list).toHaveBeenCalledWith(
-        expect.objectContaining({ prefix: hlsPrefix })
-      );
-
-      // Every listed object was deleted
-      for (const obj of objects) {
-        expect(mockR2.delete).toHaveBeenCalledWith(obj.key);
-      }
-      expect(mockR2.delete).toHaveBeenCalledTimes(objects.length);
-
-      // Suppress unused-var lint
-      void mediaItemId;
-    });
-
-    it('paginates list results when R2 returns truncated pages', async () => {
-      const mockR2 = createMockR2();
-      const service = createService(mockR2);
-      const { hlsPrefix } = await seedLinkedIntroVideo();
-
-      // Page 1: truncated with cursor
-      mockR2.list
-        .mockResolvedValueOnce({
-          objects: [
-            { key: `${hlsPrefix}1080p/segment_001.ts` },
-            { key: `${hlsPrefix}1080p/segment_002.ts` },
-          ],
-          truncated: true,
-          cursor: 'next-page',
-        })
-        // Page 2: final page
-        .mockResolvedValueOnce({
-          objects: [{ key: `${hlsPrefix}1080p/segment_003.ts` }],
-          truncated: false,
-        });
-
-      await service.deleteIntroVideo();
-
-      // Two list calls — first without cursor, second with cursor
-      expect(mockR2.list).toHaveBeenCalledTimes(2);
-      expect(mockR2.list).toHaveBeenNthCalledWith(1, {
-        prefix: hlsPrefix,
-        cursor: undefined,
-      });
-      expect(mockR2.list).toHaveBeenNthCalledWith(2, {
-        prefix: hlsPrefix,
-        cursor: 'next-page',
-      });
-
-      // All three objects across both pages were deleted
-      expect(mockR2.delete).toHaveBeenCalledTimes(3);
-    });
-
-    it('does not throw when R2 list fails — DB writes still complete', async () => {
-      const mockR2 = createMockR2();
-      mockR2.list.mockRejectedValue(new Error('R2 list error'));
-      const service = createService(mockR2);
-
-      const { mediaItemId } = await seedLinkedIntroVideo();
-
-      // Should not throw — orphaned HLS files are an acceptable tradeoff
-      const result = await service.deleteIntroVideo();
-      expect(result.introVideoMediaItemId).toBeNull();
-      expect(result.introVideoUrl).toBeNull();
-
-      // Soft-delete still happened despite R2 failure
-      const media = takeFirst(
-        await db
-          .select()
-          .from(schema.mediaItems)
-          .where(eq(schema.mediaItems.id, mediaItemId))
-      );
-      expect(media.deletedAt).not.toBeNull();
-    });
-
-    it('does not throw when an individual R2 delete fails', async () => {
-      const mockR2 = createMockR2();
-      const service = createService(mockR2);
-      const { hlsPrefix } = await seedLinkedIntroVideo();
-
-      mockR2.list.mockResolvedValue({
-        objects: [
-          { key: `${hlsPrefix}master.m3u8` },
-          { key: `${hlsPrefix}1080p/segment_001.ts` },
-        ],
-        truncated: false,
-      });
-      // First delete succeeds, second fails
-      mockR2.delete
-        .mockResolvedValueOnce(undefined)
-        .mockRejectedValueOnce(new Error('R2 delete error'));
-
-      await expect(service.deleteIntroVideo()).resolves.not.toThrow();
-      expect(mockR2.delete).toHaveBeenCalledTimes(2);
-    });
-
-    it('is a no-op when no intro video is linked', async () => {
-      const mockR2 = createMockR2();
-      const service = createService(mockR2);
-
-      // No branding row, no media item linked
-      const result = await service.deleteIntroVideo();
-
-      expect(result.introVideoMediaItemId).toBeNull();
+      // The old remove soft-deleted the media and its files: a film picked
+      // from the library may be used by content too.
+      expect(kept.deletedAt).toBeNull();
       expect(mockR2.list).not.toHaveBeenCalled();
       expect(mockR2.delete).not.toHaveBeenCalled();
+    });
+
+    it('is a no-op when no intro film is linked', async () => {
+      const result = await createService().unlinkIntroVideo();
+      expect(result.introVideoMediaItemId).toBeNull();
     });
   });
 });
