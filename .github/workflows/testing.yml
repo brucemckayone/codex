@@ -1463,7 +1463,14 @@ jobs:
           # output until it ends, so a hung suite printed nothing for 115 min
           # (Codex-j7x4u). With playwright.config.ts's `line` reporter and
           # its CI globalTimeout, a hang now shows where it stopped.
-          pnpm test:e2e --log-order=stream
+          #
+          # --only: run test:e2e WITHOUT its `^build` dependencies. They are
+          # all built (step "Build all packages…"), so each is a cache hit,
+          # and a cache hit still REWRITES that package's dist/. The workers
+          # above watch those files: on release run 41106524046 every worker
+          # reloaded twice, and content-api's reload read image-processing's
+          # dist mid-write and never started again (Codex-53j21).
+          pnpm test:e2e --only --log-order=stream
 
       # Run visual tests with --update-snapshots to generate Linux baselines
       # TODO: Remove --update-snapshots after committing the generated snapshots
