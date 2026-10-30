@@ -37,14 +37,31 @@ type Payload = Record<string, unknown>;
  *
  * Only the surface `create()`/`update()` actually touch is implemented:
  * `transaction`, `insert().values().returning()`, `update().set().where()
- * .returning()`, and the two `query.*.findFirst` lookups. Anything else is
- * deliberately absent so an unrelated future call fails loudly rather than
- * silently passing through a permissive stub.
+ * .returning()`, the two `query.*.findFirst` lookups, and `update()`'s
+ * locked read of its row, `select().from().where().for()` (Codex-2hxff.91).
+ * Anything else is deliberately absent so an unrelated future call fails
+ * loudly rather than silently passing through a permissive stub.
  *
  * `existingContent` seeds the row `update()` reads back before writing.
  */
 function createCapturingDb(existingContent: Payload = {}) {
   const captured: { insert?: Payload; update?: Payload } = {};
+  const existingRow = (): Payload => ({
+    id: 'content-1',
+    creatorId: 'creator-1',
+    organizationId: null,
+    isPurchasable: false,
+    isFollowerGated: false,
+    isTeamOnly: false,
+    courseOnly: false,
+    isTierGated: false,
+    legacyIncludedInTierId: null,
+    isFree: true,
+    shaderPreset: null,
+    shaderConfig: null,
+    featured: false,
+    ...existingContent,
+  });
 
   const tx = {
     query: {
@@ -57,24 +74,16 @@ function createCapturingDb(existingContent: Payload = {}) {
         }),
       },
       content: {
-        findFirst: async () => ({
-          id: 'content-1',
-          creatorId: 'creator-1',
-          organizationId: null,
-          isPurchasable: false,
-          isFollowerGated: false,
-          isTeamOnly: false,
-          courseOnly: false,
-          isTierGated: false,
-          legacyIncludedInTierId: null,
-          isFree: true,
-          shaderPreset: null,
-          shaderConfig: null,
-          featured: false,
-          ...existingContent,
-        }),
+        findFirst: async () => existingRow(),
       },
     },
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          for: async () => [existingRow()],
+        }),
+      }),
+    }),
     insert: () => ({
       values: (values: Payload) => {
         captured.insert = values;
