@@ -305,32 +305,35 @@ describe('keyboard', () => {
 });
 
 // The Preview block's listening card draws its own chrome over a core with no
-// controls, and drives it through the core's own buttons (Codex-61zsk.73).
+// controls, reads its clock and drives it through the core's own buttons
+// (Codex-61zsk.73).
 describe('its own controls, elsewhere', () => {
   function headless() {
-    const heard: PlayerClock[] = [];
     const target = document.createElement('div');
     document.body.appendChild(target);
     const core = mount(PreviewPlayerCore, {
       target,
-      props: {
-        src: SRC,
-        title: 'Slow Mornings',
-        controls: false,
-        ontime: (clock: PlayerClock) => heard.push(clock),
-      },
+      props: { src: SRC, title: 'Slow Mornings', controls: false },
     });
     apps.push(core);
     flushSync();
     const video = target.querySelector('video');
     if (!video) throw new Error('no video drawn');
-    return { core, heard, root: target, video };
+    return { core, root: target, video };
   }
 
-  test('a frame hears the clock as the element reports it', () => {
-    const { heard, root, video } = headless();
+  test('a frame reads the clock as the element reports it', () => {
+    const { core, root, video } = headless();
+    // Read reactively, as a frame's `$derived` reads it.
+    let now: PlayerClock | undefined;
+    const stop = $effect.root(() => {
+      $effect(() => {
+        now = core.clock();
+      });
+    });
+    flushSync();
     expect(root.querySelector('.player__bar')).toBeNull();
-    expect(heard.at(-1)).toEqual({
+    expect(now).toEqual({
       time: 0,
       duration: 0,
       offerPlay: true,
@@ -348,12 +351,35 @@ describe('its own controls, elsewhere', () => {
     video.dispatchEvent(new Event('timeupdate'));
     video.dispatchEvent(new Event('play'));
     flushSync();
-    expect(heard.at(-1)).toEqual({
+    expect(now).toEqual({
       time: 12,
       duration: 30,
       offerPlay: false,
       askSound: false,
     });
+    stop();
+  });
+
+  test('measures no loaded band with no scrubber to draw it', () => {
+    const buffered = vi.fn(
+      (): TimeRanges => ({ length: 0, start: () => 0, end: () => 0 })
+    );
+    const { video } = headless();
+    Object.defineProperty(video, 'buffered', {
+      configurable: true,
+      get: buffered,
+    });
+    video.dispatchEvent(new Event('timeupdate'));
+    video.dispatchEvent(new Event('progress'));
+    expect(buffered).not.toHaveBeenCalled();
+
+    const drawn = film().video;
+    Object.defineProperty(drawn, 'buffered', {
+      configurable: true,
+      get: buffered,
+    });
+    drawn.dispatchEvent(new Event('progress'));
+    expect(buffered).toHaveBeenCalled();
   });
 
   test('and plays, pauses and mutes it as the core’s own buttons do', () => {

@@ -38,8 +38,7 @@ export function fullPicture(
 ): Picture['full'] {
   const url = resolvePageImageUrl(ref, 'xl', cdnBase);
   if (!url) return undefined;
-  const size = readSize(ref);
-  return size ? { url, w: size.w, h: size.h } : { url };
+  return { url, ...readSize(ref) };
 }
 
 /**

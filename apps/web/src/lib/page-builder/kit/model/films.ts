@@ -14,6 +14,7 @@
  */
 import type { PreviewMedia, SellPreview } from '../../render/types';
 import type { KitPageContext } from '../page-context';
+import { playsInFull } from '../primitives/film-source';
 
 /** The films a visitor's page can draw, as `SellPreview` names them. */
 export type PageFilm = 'intro' | 'reel';
@@ -40,18 +41,19 @@ export interface FilmPlays {
 /**
  * What a press plays, as the Preview and Video lines say it (Codex-61zsk.73),
  * by the landing chip's rule: the whole film when it plays in full, else its
- * preview as the transcoder cuts it. It plays in full when the server marked
- * it `fullFilm` and the page can ask for it: a visitor's page, which has
- * `requestFilm`, or one that is only looked at (`still`), so the canvas names
- * the length the visitor's press will play. An older payload with no
- * `previewSeconds` knows the length only of a film that plays in full.
+ * preview as the transcoder cuts it. It plays in full by the press's own rule
+ * (`playsInFull`), and where the page is only looked at (`still`) as though
+ * it could ask, so the canvas names the length the visitor's press will play.
+ * An older payload with no `previewSeconds` knows the length only of a film
+ * that plays in full.
  */
 export function filmPlays(
   clip: PreviewMedia,
   page: Pick<KitPageContext, 'still' | 'requestFilm'>
 ): FilmPlays {
-  const canAsk = page.requestFilm !== undefined || page.still;
-  const full = clip.fullFilm === true && canAsk;
+  const full = page.still
+    ? clip.fullFilm === true
+    : playsInFull(clip, page.requestFilm);
   const seconds = (full ? clip.durationSeconds : clip.previewSeconds) ?? null;
   return { full, seconds: seconds !== null && seconds > 0 ? seconds : null };
 }

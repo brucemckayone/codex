@@ -153,7 +153,7 @@
     align-content: start;
     gap: var(--space-4);
     margin: 0;
-    font-size: var(--_figure, var(--lp-size-display));
+    font-size: var(--lp-size-display);
   }
 
   .stat__value {
@@ -261,9 +261,10 @@
     padding-block: var(--space-8);
   }
 
-  /* The head stays above the tiles at every width, and the tiles take the
-     column's whole width, so the fit lets a figure reach the display size
-     (a seven-twelfths share beside the head held "6 weeks" to about 57px). */
+  /* Three, five or six tiles go three across later than a row's figures do:
+     a tile's padding and border take some 50px from its figure's room, so
+     at 48rem a tile would hold about 170px against a row cell's 200, and at
+     56rem it has the room a row cell had at 48rem. */
   @container (min-width: 56rem) {
     .stats[data-layout='grid'] .stats__list:is([data-count='3'], [data-count='5'], [data-count='6']) {
       --_cols: 3;

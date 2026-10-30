@@ -62,6 +62,7 @@
   } from '../render/brand-overrides';
   import type { JourneySalesContext } from '../render/types';
   import { settled } from './blocks/hero/settled.svelte';
+  import { instructorDefinition } from './blocks/instructor/definition';
   import { priceWithCadence } from './model/copy';
   import { filmToShow } from './model/films';
   import { brandFontsHref } from './model/fonts';
@@ -246,11 +247,9 @@
   );
   /** The About you section's name: who the Video block says is speaking. */
   const guideName = $derived(
-    readText(
-      propsById.get(sections.find((s) => s.type === 'instructor')?.id ?? '') ?? {},
-      'name',
-      80
-    )
+    instructorDefinition.coerce(
+      propsById.get(sections.find((s) => s.type === 'instructor')?.id ?? '') ?? {}
+    ).name
   );
   const stickyLabel = $derived(
     readText(offerProps, 'ctaLabel') ?? readText(heroProps, 'ctaLabel')

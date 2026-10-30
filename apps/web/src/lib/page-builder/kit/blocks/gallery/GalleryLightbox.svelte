@@ -9,8 +9,9 @@
   page behind it is inert.
 
   It is mounted only while open (GalleryBlock), so its large pictures are
-  fetched only then: each the largest file its reference has (`fullPicture`),
-  fitted whole to the screen with its caption beneath.
+  fetched only then: each chosen from its srcset at the screen's width, the
+  largest file its reference has (`fullPicture`) where a browser cannot
+  choose, and fitted whole to the screen with its caption beneath.
 
   The pictures are one row of the browser's own scrolling, snapping one to the
   screen, so a swipe moves between them; the counter and the previous and next
@@ -25,7 +26,7 @@
   import { untrack } from 'svelte';
   import type { Attachment } from 'svelte/attachments';
   import { ChevronLeftIcon, ChevronRightIcon, XIcon } from '$lib/components/ui/Icon';
-  import { NOTHING_MOVES } from '../../motion/attributes';
+  import { holdsStill } from '../../motion/attributes';
   import type { Picture } from './arrange';
   import { GALLERY_COPY } from './copy';
 
@@ -60,17 +61,15 @@
     at = Math.max(0, Math.min(last, index));
     const slide = slides[at];
     if (!track || !slide) return;
-    const still =
-      !glide ||
-      matchMedia('(prefers-reduced-motion: reduce)').matches ||
-      track.closest(NOTHING_MOVES) !== null;
+    const still = !glide || holdsStill(track);
     // The track is the slides' offset parent, so a slide's offset is the
     // scroll position that shows it.
     track.scrollTo({ left: slide.offsetLeft, behavior: still ? 'auto' : 'smooth' });
   }
 
+  /** One along. At either end `go` holds it on the picture already shown. */
   function step(by: 1 | -1) {
-    if (by === 1 ? at < last : at > 0) go(at + by, true);
+    go(at + by, true);
   }
 
   function shut() {
@@ -162,10 +161,14 @@
     {#each pictures as picture, index (index)}
       <li class="gallery-lightbox__slide">
         <figure class="gallery-lightbox__figure">
+          <!-- Always there: GalleryBlock opens only a set that has them, so
+               the `if` only narrows the type. -->
           {#if picture.full}
             <img
               class="gallery-lightbox__picture"
               src={picture.full.url}
+              srcset={picture.srcset || undefined}
+              sizes={picture.srcset ? '100vw' : undefined}
               alt={picture.alt}
               width={picture.full.w}
               height={picture.full.h}

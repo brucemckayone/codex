@@ -4,8 +4,8 @@
  * (03 X8), until that shared file takes them.
  */
 export const GALLERY_COPY = {
-  /** The strip's name for a screen reader when the section has no heading. */
-  strip: 'Pictures',
+  /** The strip's and the lightbox's name for a screen reader when the section has no heading. */
+  pictures: 'Pictures',
   previous: 'Previous picture',
   next: 'Next picture',
   /** A tile's press, counted from 1: "Open picture 3 of 8: A mat by the window". */
@@ -13,8 +13,6 @@ export const GALLERY_COPY = {
     alt
       ? `Open picture ${index} of ${count}: ${alt}`
       : `Open picture ${index} of ${count}`,
-  /** The lightbox's name for a screen reader when the section has no heading. */
-  lightbox: 'Pictures',
   close: 'Close',
   /** Where the lightbox is in the set, counted from 1: "3 / 8". */
   counter: (index: number, count: number) => `${index} / ${count}`,

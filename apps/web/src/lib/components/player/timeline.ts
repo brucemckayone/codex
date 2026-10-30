@@ -31,7 +31,7 @@ export function loadedTo(ranges: TimeRanges, time: number): number {
   return end;
 }
 
-/** Where the film is, for a frame drawing its own controls (`ontime`). */
+/** Where the film is, for a frame drawing its own controls (the core's `clock()`). */
 export interface PlayerClock {
   time: number;
   /** The stream's own length; 0 until it says. */

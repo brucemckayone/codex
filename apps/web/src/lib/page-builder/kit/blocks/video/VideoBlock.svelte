@@ -87,7 +87,7 @@
 
 <!-- One run of text, no space between: "Maya Okafor · 2:04". -->
 {#snippet line()}
-  <p class="video__line">{#if speaker}<b>{speaker}</b>{/if}{#if speaker && length}{' · '}{/if}{#if length}{length}{/if}</p>
+  <p class="video__line">{#if speaker}<b>{speaker}</b>{/if}{#if speaker && length}{' · '}{/if}{length}</p>
 {/snippet}
 
 {#snippet words()}

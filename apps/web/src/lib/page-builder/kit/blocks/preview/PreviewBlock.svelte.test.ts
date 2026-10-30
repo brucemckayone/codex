@@ -407,6 +407,11 @@ describe('PreviewBlock', () => {
       card()?.querySelector<HTMLButtonElement>('.listen__play');
     const time = () => card()?.querySelector('.listen__time')?.textContent;
     const audio = () => card()?.querySelector('video');
+    /** How full the strip is: set on the fill alone, so a tick restyles nothing else. */
+    const strip = () =>
+      card()
+        ?.querySelector<HTMLElement>('.listen__fill')
+        ?.style.getPropertyValue('--_played');
 
     async function press() {
       button()?.click();
@@ -443,7 +448,8 @@ describe('PreviewBlock', () => {
       );
       // Before the press: the length, an empty strip, a labelled play button.
       expect(time()).toBe('0:30');
-      expect(card()?.style.getPropertyValue('--_played')).toBe('0');
+      expect(strip()).toBe('0');
+      expect(card()?.style.getPropertyValue('--_played')).toBe('');
       expect(button()?.getAttribute('aria-label')).toBe(PREVIEW_COPY.watch);
       expect(audio()).toBeNull();
     });
@@ -470,9 +476,7 @@ describe('PreviewBlock', () => {
       at(element, 6, 30);
       expect(button()?.getAttribute('aria-label')).toBe(PREVIEW_COPY.pause);
       expect(time()).toBe('0:06 / 0:30');
-      expect(Number(card()?.style.getPropertyValue('--_played'))).toBeCloseTo(
-        0.2
-      );
+      expect(Number(strip())).toBeCloseTo(0.2);
 
       // A press now pauses it, as the player's own button would.
       Object.defineProperty(element, 'paused', {
@@ -486,7 +490,7 @@ describe('PreviewBlock', () => {
       expect(pause.mock.contexts).toEqual([element]);
     });
 
-    it('once it ends the player goes and the button offers it again', async () => {
+    it('once it ends the player stays at its end and the button replays it in place', async () => {
       await render(SAMPLE, { reel: AUDIO });
       await press();
       const element = audio();
@@ -494,11 +498,23 @@ describe('PreviewBlock', () => {
       at(element, 30, 30);
       element.dispatchEvent(new Event('ended'));
       flushSync();
-      expect(audio()).toBeNull();
+      expect(audio()).toBe(element);
       expect(button()?.getAttribute('aria-label')).toBe(PREVIEW_COPY.again);
       expect(time()).toBe('0:30 / 0:30');
+      expect(Number(strip())).toBe(1);
+
+      // The replay seeks the same element to the start: no second stream.
+      Object.defineProperty(element, 'currentTime', {
+        configurable: true,
+        writable: true,
+        value: 30,
+      });
+      vi.mocked(HTMLMediaElement.prototype.play).mockClear();
       await press();
-      expect(played).toEqual([AUDIO.playlistUrl, AUDIO.playlistUrl]);
+      expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(1);
+      expect(element.currentTime).toBe(0);
+      expect(played).toEqual([AUDIO.playlistUrl]);
+      expect(button()?.getAttribute('aria-label')).not.toBe(PREVIEW_COPY.again);
     });
 
     it('with its sound refused, the button asks for it and a press takes it', async () => {
@@ -536,6 +552,40 @@ describe('PreviewBlock', () => {
       unmount(app);
       await render(SAMPLE, { reel: AUDIO });
       expect(card()?.querySelector('.listen__still')).toBeNull();
+    });
+
+    it('draws the still from the file its small square needs, poster or hero alike', async () => {
+      const POSTER = 'https://cdn.example/c1/media-thumbnails/m1/lg.webp';
+      const HERO = 'https://cdn.example/c1/courses/k1/hero/lg.webp';
+      const still = () =>
+        card()?.querySelector<HTMLImageElement>('.listen__still');
+      for (const [media, dir] of [
+        [
+          { reel: { ...AUDIO, posterUrl: POSTER } },
+          'https://cdn.example/c1/media-thumbnails/m1',
+        ],
+        [
+          { reel: AUDIO, heroImageUrl: HERO },
+          'https://cdn.example/c1/courses/k1/hero',
+        ],
+      ] as const) {
+        await render(SAMPLE, { context: sampleContext({ media }) });
+        expect(still()?.getAttribute('src')).toBe(`${dir}/md.webp`);
+        expect(still()?.getAttribute('srcset')).toBe(
+          `${dir}/sm.webp 200w, ${dir}/md.webp 400w, ${dir}/lg.webp 800w`
+        );
+        // A 16:9 still cropped to a square, 4rem on a phone, 10rem wider.
+        expect(still()?.getAttribute('sizes')).toBe(
+          '(min-width: 40rem) calc(10rem * 1.78), calc(4rem * 1.78)'
+        );
+        unmount(app);
+      }
+      // An address with no sized files is drawn as it is.
+      await render(SAMPLE, {
+        reel: { ...AUDIO, posterUrl: '/media/reel-audio/poster.jpg' },
+      });
+      expect(still()?.hasAttribute('srcset')).toBe(false);
+      expect(still()?.hasAttribute('sizes')).toBe(false);
     });
 
     it('never plays on the canvas', async () => {

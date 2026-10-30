@@ -13,6 +13,7 @@ import {
   mount,
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
+import { pageImageSrcset } from '../../../page-images';
 import { SECTION_LAYOUTS } from '../../model/ids';
 import { sampleContext } from '../../model/sample';
 import type { BlockEdit, ResolvedSection } from '../../model/types';
@@ -169,7 +170,7 @@ describe('GalleryBlock: each picture opens the lightbox (p3n §4)', () => {
     });
     expect(tiles()[1].getAttribute('aria-label')).toBe('Open picture 2 of 2');
     press(tiles()[0]);
-    expect(dialog()?.getAttribute('aria-label')).toBe(GALLERY_COPY.lightbox);
+    expect(dialog()?.getAttribute('aria-label')).toBe(GALLERY_COPY.pictures);
   });
 
   it('shows each picture whole, at the largest file it has, with its caption under it', async () => {
@@ -189,7 +190,14 @@ describe('GalleryBlock: each picture opens the lightbox (p3n §4)', () => {
       [`${CDN}/landing-pages/p1/images/g2/lg.webp`, null, null],
       [`${CDN}/landing-pages/p1/images/g3/lg.webp`, null, null],
     ]);
+    // A narrow screen takes a smaller file from every size it has; a wide
+    // one still reaches `xl` where the picture records its size.
+    expect(shown.map((img) => img.getAttribute('srcset'))).toEqual(
+      pictures(3).map(({ image }) => pageImageSrcset(image, CDN))
+    );
+    expect(shown[0].getAttribute('srcset')).toMatch(/\/g1\/xl\.webp 1600w$/);
     for (const img of shown) {
+      expect(img.getAttribute('sizes')).toBe('100vw');
       expect(img.getAttribute('loading')).toBe('lazy');
       expect(img.getAttribute('decoding')).toBe('async');
     }

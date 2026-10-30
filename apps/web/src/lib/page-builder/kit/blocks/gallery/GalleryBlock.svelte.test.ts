@@ -184,7 +184,7 @@ describe('GalleryBlock', () => {
       }
       await rerender({ items: pictures(4) }, { layout: 'strip' });
       expect(one('[role="region"]')?.getAttribute('aria-label')).toBe(
-        GALLERY_COPY.strip
+        GALLERY_COPY.pictures
       );
     });
 

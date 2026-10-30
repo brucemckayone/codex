@@ -85,10 +85,12 @@
     clip?.mediaType && plays ? previewKind(clip.mediaType, plays.seconds) : undefined
   );
   const listen = $derived(clip?.mediaType === 'audio');
-  const hasLine = $derived(Boolean(kind || content.caption));
-  // The card holds its own line; split sets a film's under the words.
-  const lineUnderWords = $derived(split && !listen && hasLine);
-  const hasWords = $derived(hasTop || Boolean(content.body) || hasCta || lineUnderWords);
+  // A film's line: split sets it under the words, feature under the frame.
+  // The listening card holds its own.
+  const filmLine = $derived(!listen && Boolean(kind || content.caption));
+  const hasWords = $derived(
+    hasTop || Boolean(content.body) || hasCta || (split && filmLine)
+  );
 </script>
 
 <!-- One run of text, no space between: "A 30-second watch · From week one". -->
@@ -115,7 +117,7 @@
   {#if content.body}
     <Text text={content.body} size="lead" type="preview" field="body" {edit} />
   {/if}
-  {#if lineUnderWords}<p class="preview__line">{@render line()}</p>{/if}
+  {#if split && filmLine}<p class="preview__line">{@render line()}</p>{/if}
   {#if hasCta}
     <div class="preview__actions">
       <ButtonRow
@@ -161,7 +163,7 @@
         prompt={edit && !pending ? PREVIEW_PROMPT : undefined}
       />
     {/if}
-    {#if hasLine && !listen && !split}
+    {#if !split && filmLine}
       <figcaption class="preview__line">{@render line()}</figcaption>
     {/if}
   </figure>
@@ -185,7 +187,7 @@
   {:else}
     <!-- Side by side, no space between: nothing is left behind when the
          canvas's own parts are set aside. -->
-    {@render frame()}{#if hasTop || content.body || hasCta}<div class="preview-words" data-lp-edit-only={creatorOnly}>
+    {@render frame()}{#if hasWords}<div class="preview-words" data-lp-edit-only={creatorOnly}>
         {#if hasTop}{@render top()}{/if}
         {#if content.body || hasCta}<div class="preview__more">{@render more()}</div>{/if}
       </div>{/if}

@@ -78,7 +78,9 @@
     Array.from({ length: PLATES[layout] }, () => ({ url: null, alt: '' }))
   );
   /** Every picture has a file to show large: none do without a CDN base. */
-  const opens = $derived(pictures.length > 0 && pictures.every((picture) => picture.full));
+  const opens = $derived(pictures.every((picture) => picture.full));
+  /** The strip's and the lightbox's name for a screen reader: the heading, when there is one. */
+  const name = $derived(content.heading ?? GALLERY_COPY.pictures);
 
   /** The picture the lightbox opened on, from 0; `null` while it is closed. */
   let shown = $state<number | null>(null);
@@ -100,7 +102,7 @@
 
 {#snippet arrangement(set: readonly Picture[], onopen?: OpenPicture)}
   {#if layout === 'strip'}
-    <GalleryStrip pictures={set} label={content.heading} anchor={section.anchor} {onopen} />
+    <GalleryStrip pictures={set} label={name} anchor={section.anchor} {onopen} />
   {:else if layout === 'grid'}
     <GalleryGrid pictures={set} {onopen} />
   {:else}
@@ -130,12 +132,7 @@
   {#if pictures.length > 0}
     {@render arrangement(pictures, opens ? open : undefined)}
     {#if shown !== null}
-      <GalleryLightbox
-        {pictures}
-        start={shown}
-        label={content.heading ?? GALLERY_COPY.lightbox}
-        onclose={close}
-      />
+      <GalleryLightbox {pictures} start={shown} label={name} onclose={close} />
     {/if}
   {:else}
     <div class="gallery__empty">

@@ -9,35 +9,32 @@
   as it plays, beside the time played. Before a press the strip is empty and
   the length shows. No photo sits behind the controls.
 
-  It plays through the same `PreviewPlayerCore` as every film, mounted on a
-  press in the press's own tick, so its `play()` keeps the sound (as
-  `InlineFilm` does), with its picture hidden: a `<video>` plays audio HLS.
-  The core draws no controls. The card's button drives it through the core's
-  own `toggle` and `toggleMute`, and the core's clock (`ontime`, from the
-  element's own events: nothing polls) fills the strip. The hidden core
+  It plays through the same `PreviewPlayerCore` as every film, brought by
+  the same press as `InlineFilm`'s (`film-press.svelte.ts`), so its
+  `play()` keeps the sound, with its picture hidden: a `<video>` plays audio
+  HLS. The core draws no controls. The card's button drives it through the
+  core's own `toggle` and `toggleMute`, and the core's `clock` (the
+  element's own figures: nothing polls) fills the strip. The hidden core
   keeps the card's size, so it pauses once scrolled away and moves the
-  floating bar aside as any film does. When the clip ends the core goes and
-  the button offers "Play again"; one that cannot play says why beside the
-  button, and a press tries again. The canvas never plays.
+  floating bar aside as any film does. When the clip ends the core stays,
+  the strip full and the time at its end, and the button offers "Play
+  again", which replays it in place; one that cannot play says why beside
+  the button, and a press tries again. The canvas never plays.
 
   The ratio is the block's (`--listen-ratio`, 4:3 unless it says otherwise),
   and the card grows past it rather than clip a long line.
 -->
 <script lang="ts">
-  import { flushSync, type Snippet } from 'svelte';
-  import {
-    loadedPlayerCore,
-    loadPlayerCore,
-    type PlayerCore,
-    preloadPlayer,
-  } from '$lib/components/player/load-core';
+  import type { Snippet } from 'svelte';
+  import { type PlayerCore, preloadPlayer } from '$lib/components/player/load-core';
   import type { PlayerClock } from '$lib/components/player/timeline';
   import { clock } from '$lib/components/player/timeline';
   import { PauseIcon, PlayIcon, RefreshCwIcon, Volume2Icon } from '$lib/components/ui/Icon';
+  import { coverCropSizes, getThumbnailSrcset, getThumbnailUrl } from '$lib/utils/image';
   import type { PreviewMedia } from '../../../render/types';
   import type { BlockEdit } from '../../model/types';
   import { getKitPage } from '../../page-context';
-  import { type FilmSource, filmRenewal, filmSource } from '../../primitives/film-source';
+  import { FilmPress } from '../../primitives/film-press.svelte';
   import { PREVIEW_COPY } from './copy';
 
   interface Props {
@@ -69,20 +66,27 @@
 
   const SILENT: PlayerClock = { time: 0, duration: 0, offerPlay: true, askSound: false };
 
-  // `idle` until a press; `loading` while a first press waits for the
-  // player's code; `up` playing or paused; `ended` played through.
-  let phase = $state<'idle' | 'loading' | 'up' | 'ended'>('idle');
-  let Player = $state.raw<PlayerCore | null>(null);
+  /**
+   * Drawn 4rem square on a phone and up to 10rem wider, cropped from the
+   * still (16:9 unless its address records its size): the browser picks the
+   * file. An address with no sized files is drawn as it is.
+   */
+  const STILL_SLOTS = '(min-width: 40rem) 10rem, 4rem';
+
+  // The press and the player; its picture and controls are the card's.
+  const press = new FilmPress(
+    () => ({ clip, film: 'reel', requestFilm: page.requestFilm }),
+    PREVIEW_COPY.failed
+  );
   let core = $state.raw<ReturnType<PlayerCore> | null>(null);
-  let source = $state.raw<FilmSource>('');
-  const renew = $derived(filmRenewal(clip, 'reel', page.requestFilm));
-  let now = $state.raw<PlayerClock>(SILENT);
-  /** Why the last press did not play, said beside the button; a press tries again. */
-  let note = $state<string | null>(null);
+  /** Played through: the core stays, at its end, until it plays again. */
+  let ended = $state(false);
+  // The core's own clock while it is mounted; silence before and after.
+  const now = $derived(core?.clock() ?? SILENT);
 
   const action = $derived.by((): Action => {
-    if (phase === 'ended') return 'again';
-    if (phase !== 'up') return 'play';
+    if (ended) return 'again';
+    if (press.phase !== 'up') return 'play';
     if (now.askSound) return 'sound';
     return now.offerPlay ? 'play' : 'pause';
   });
@@ -90,73 +94,49 @@
   const total = $derived(now.duration > 0 ? now.duration : seconds);
   const played = $derived(total ? Math.min(1, now.time / total) : 0);
   const time = $derived.by(() => {
-    if (phase === 'idle') return seconds === null ? '' : clock(seconds);
+    if (press.phase === 'idle') return seconds === null ? '' : clock(seconds);
     return total ? `${clock(now.time)} / ${clock(total)}` : clock(now.time);
   });
+  const stillSrcset = $derived(still ? getThumbnailSrcset(still) : '');
 
-  function press() {
-    if (edit || phase === 'loading') return;
-    if (phase === 'up') {
-      drive();
-      return;
-    }
-    note = null;
-    const ready = loadedPlayerCore();
-    if (ready) {
-      show(ready);
-      // Mounted now, in the press's own tick: its play() keeps the sound.
-      flushSync();
-      return;
-    }
-    phase = 'loading';
-    loadPlayerCore().then(show, () => {
-      note = PREVIEW_COPY.failed;
-      phase = 'idle';
-    });
+  function start() {
+    if (edit) return;
+    if (press.phase === 'up') drive();
+    else press.start();
   }
 
   // A press while it is up does what the core's own buttons would: a refused
-  // sound is taken (and a paused clip plays with it), else it plays or pauses.
+  // sound is taken (and a paused clip plays with it), else it plays or
+  // pauses, and once played through it plays again from the start, in place.
   function drive() {
-    if (action !== 'sound') {
-      core?.toggle();
+    if (action === 'sound') {
+      core?.toggleMute();
+      if (now.offerPlay) core?.toggle();
       return;
     }
-    core?.toggleMute();
-    if (now.offerPlay) core?.toggle();
-  }
-
-  // The full film is asked for only once the player is here to play it.
-  function show(next: PlayerCore) {
-    source = filmSource(clip, 'reel', page.requestFilm);
-    now = SILENT;
-    Player = next;
-    phase = 'up';
-  }
-
-  function hear(next: PlayerClock) {
-    now = next;
-  }
-
-  function finish() {
-    phase = 'ended';
-  }
-
-  function fail(message: string) {
-    note = message;
-    now = SILENT;
-    phase = 'idle';
+    ended = false;
+    core?.toggle();
   }
 </script>
 
-<div class="listen" style:--_played={played}>
+<div class="listen">
   <div class="listen__in" data-still={still ? '' : undefined}>
-    {#if still}<img class="listen__still" src={still} alt="" loading="lazy" decoding="async" />{/if}
+    {#if still}
+      <img
+        class="listen__still"
+        src={getThumbnailUrl(still, 'md')}
+        srcset={stillSrcset || undefined}
+        sizes={stillSrcset ? coverCropSizes(STILL_SLOTS, 1, still, 16 / 9) : undefined}
+        alt=""
+        loading="lazy"
+        decoding="async"
+      />
+    {/if}
     <button
       type="button"
       class="listen__play"
       aria-label={LABELS[action]}
-      onclick={press}
+      onclick={start}
       {@attach !edit && !page.still && preloadPlayer}
     >
       {#if action === 'pause'}
@@ -172,23 +152,23 @@
     <div class="listen__text">
       <p class="listen__line">{@render line()}</p>
       {#if time}<p class="listen__time">{time}</p>{/if}
-      {#if note}<p class="listen__note" role="alert">{note}</p>{/if}
+      {#if press.note}<p class="listen__note" role="alert">{press.note}</p>{/if}
     </div>
   </div>
-  <span class="listen__foot" aria-hidden="true"><span class="listen__fill"></span></span>
-  {#if Player && phase === 'up'}
+  <span class="listen__foot" aria-hidden="true"><span class="listen__fill" style:--_played={played}></span></span>
+  {#if press.Player && press.phase === 'up'}
     <!-- The sound only: its picture and its own controls are the card's. -->
     <div class="listen__player" aria-hidden="true" inert>
-      <Player
+      <press.Player
         bind:this={core}
-        src={source}
-        {renew}
+        src={press.source}
+        renew={press.renew}
         {title}
         start="sound"
         controls={false}
-        ontime={hear}
-        onended={finish}
-        onfail={fail}
+        onplay={() => (ended = false)}
+        onended={() => (ended = true)}
+        onfail={(message) => press.fail(message)}
       />
     </div>
   {/if}
@@ -326,20 +306,25 @@
   .listen__foot::before,
   .listen__fill {
     position: absolute;
-    inset-inline-start: 0;
+    inset-inline: 0;
     inset-block-end: 0;
     block-size: var(--_strip);
   }
 
   .listen__foot::before {
     content: '';
-    inset-inline-end: 0;
     background: color-mix(in oklab, var(--lp-panel-ink) 14%, transparent);
   }
 
+  /* Full width, scaled from the inline start: no layout as it fills. */
   .listen__fill {
-    inline-size: calc(var(--_played) * 100%);
     background: var(--lp-button-bg);
+    transform: scaleX(var(--_played, 0));
+    transform-origin: left;
+  }
+
+  .listen__fill:dir(rtl) {
+    transform-origin: right;
   }
 
   /* The player plays the sound only: the card's size, so it knows when the

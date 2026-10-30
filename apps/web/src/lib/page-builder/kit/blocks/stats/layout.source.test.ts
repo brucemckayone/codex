@@ -40,9 +40,7 @@ const block = (selector: string, within: string[] = []) =>
 
 describe('StatsBlock: Bold’s scale in every Style', () => {
   it('sets every figure at the display size, fitted to the longest value', () => {
-    expect(block('.stat')?.get('font-size')).toBe(
-      'var(--_figure, var(--lp-size-display))'
-    );
+    expect(block('.stat')?.get('font-size')).toBe('var(--lp-size-display)');
     expect(block('.stat__value')?.get('font-size')).toBe(
       'min(1em, 100cqi / (var(--_chars) * 0.62))'
     );

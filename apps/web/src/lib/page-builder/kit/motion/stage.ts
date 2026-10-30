@@ -16,7 +16,7 @@
  * server sends.
  */
 
-import { NOTHING_MOVES } from './attributes';
+import { holdsStill } from './attributes';
 
 export interface Actor {
   /** Hold the first frame, out of sight. False: it has nothing to play. */
@@ -38,11 +38,7 @@ const stages = new WeakMap<Element, Stage>();
 
 /** The stage of the page `el` is on, or null where nothing may move. */
 export function stageFor(el: Element): Stage | null {
-  if (
-    typeof IntersectionObserver === 'undefined' ||
-    el.closest(NOTHING_MOVES) ||
-    matchMedia('(prefers-reduced-motion: reduce)').matches
-  )
+  if (typeof IntersectionObserver === 'undefined' || holdsStill(el))
     return null;
   const root = el.closest('.lp') ?? el.ownerDocument.documentElement;
   let stage = stages.get(root);

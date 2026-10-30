@@ -6,7 +6,7 @@
  */
 import { describe, expect, test, vi } from 'vitest';
 import type { PreviewMedia } from '../../render/types';
-import { filmRenewal, filmSource } from './film-source';
+import { filmRenewal, filmSource, playsInFull } from './film-source';
 
 const PREVIEW = '/m1/hls/preview/preview.m3u8';
 const FULL = '/films/m1/master.m3u8?token=t';
@@ -14,6 +14,23 @@ const EXPIRES = '2026-10-28T12:10:00.000Z';
 
 const allowed: PreviewMedia = { playlistUrl: PREVIEW, fullFilm: true };
 const previewOnly: PreviewMedia = { playlistUrl: PREVIEW };
+
+// The rule `filmSource` asks by, and `filmPlays` reads for the line.
+describe('playsInFull', () => {
+  const requestFilm = async () => null;
+
+  test('a clip the server marked, on a page that can ask', () => {
+    expect(playsInFull(allowed, requestFilm)).toBe(true);
+  });
+
+  test('not a clip the server did not mark, nor a page that cannot ask', () => {
+    expect(playsInFull(previewOnly, requestFilm)).toBe(false);
+    expect(playsInFull({ ...allowed, fullFilm: false }, requestFilm)).toBe(
+      false
+    );
+    expect(playsInFull(allowed, undefined)).toBe(false);
+  });
+});
 
 describe('filmSource', () => {
   test('the full film when the server allows it and the page asks', async () => {

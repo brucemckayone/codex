@@ -16,8 +16,8 @@
 
   interface Props {
     pictures: readonly Picture[];
-    /** The region's name: the section heading, when there is one. */
-    label?: string;
+    /** The region's name for a screen reader (GalleryBlock's `name`). */
+    label: string;
     anchor: string;
     onopen?: OpenPicture;
   }
@@ -28,7 +28,7 @@
 <div class="gallery-strip">
   <ScrollStrip
     id={`${anchor}-pictures`}
-    label={label ?? GALLERY_COPY.strip}
+    {label}
     previousLabel={GALLERY_COPY.previous}
     nextLabel={GALLERY_COPY.next}
     count={pictures.length}

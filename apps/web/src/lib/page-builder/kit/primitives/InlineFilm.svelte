@@ -13,14 +13,14 @@
   visitor shows intent (`preloadPlayer`). The canvas never plays (`edit`),
   and neither it nor a still thumbnail fetches anything.
 
-  THE PRESS mounts the player in its own tick (`flushSync`), so its `play()`
-  keeps the sound (`components/player/start.ts`); a player not fetched yet is
-  waited for, and may then start muted. If its code never arrives (a deploy
-  replaced the chunk, the connection dropped), or the film cannot play (the
-  player's `onfail`), the poster returns, the button says why beside it, and
-  a press tries again. A clip the server marked `fullFilm` asks the page
-  for the full film once the player is here to play it (`film-source.ts`),
-  and asks again as its links run out (`filmRenewal`).
+  THE PRESS (`film-press.svelte.ts`, shared with the Preview block's
+  listening card) mounts the player in its own tick, so its `play()` keeps
+  the sound; a player not fetched yet is waited for, and may then start
+  muted. If its code never arrives, or the film cannot play (the player's
+  `onfail`), the poster returns, the button says why beside it, and a press
+  tries again. A clip the server marked `fullFilm` asks the page for the
+  full film once the player is here to play it, and asks again as its links
+  run out.
 
   IN THE FRAME the player covers it edge to edge, the film letterboxed on its
   dark backdrop, so a 4/5 portrait or Bold's 21:9 screen keeps its shape and
@@ -38,17 +38,12 @@
   hero drops its ambient loop under it.
 -->
 <script lang="ts">
-  import { flushSync, type Snippet } from 'svelte';
-  import {
-    loadedPlayerCore,
-    loadPlayerCore,
-    type PlayerCore,
-  } from '$lib/components/player/load-core';
+  import type { Snippet } from 'svelte';
   import type { PreviewMedia, SalesFilm } from '../../render/types';
   import type { BlockEdit } from '../model/types';
   import { getKitPage } from '../page-context';
   import { FILM_COPY } from './film-copy';
-  import { type FilmSource, filmRenewal, filmSource } from './film-source';
+  import { FilmPress } from './film-press.svelte';
   import WatchButton from './WatchButton.svelte';
 
   interface Props {
@@ -66,76 +61,53 @@
 
   const page = getKitPage();
 
-  // `poster` until a press; `loading` while a first press waits for the
-  // player's code; `up` playing or paused; `ended` the poster again.
-  let phase = $state<'poster' | 'loading' | 'up' | 'ended'>('poster');
-  let Player = $state.raw<PlayerCore | null>(null);
-  let source = $state.raw<FilmSource>('');
-  const renew = $derived(filmRenewal(clip, film, page.requestFilm));
+  // The press, the player and the film it plays; the poster while `idle`,
+  // and again once `ended`.
+  const press = new FilmPress(
+    () => ({ clip, film, requestFilm: page.requestFilm }),
+    FILM_COPY.failed
+  );
   let layer: HTMLDivElement | undefined = $state();
   /** The player had focus when the film ended: "Watch again" takes it. */
   let refocus = $state(false);
-  /** Why the last press did not play, said beside the button; a press tries again. */
-  let note = $state<string | null>(null);
 
-  function press() {
-    if (edit || phase === 'loading' || phase === 'up') return;
+  function start() {
+    if (edit) return;
     refocus = false;
-    note = null;
-    const ready = loadedPlayerCore();
-    if (ready) {
-      show(ready);
-      // Mounted now, in the press's own tick: its play() keeps the sound.
-      flushSync();
-      return;
-    }
-    phase = 'loading';
-    loadPlayerCore().then(show, () => {
-      note = FILM_COPY.failed;
-      phase = 'poster';
-    });
-  }
-
-  // The full film is asked for only once the player is here to play it: a
-  // press whose player never arrived asks for nothing.
-  function show(core: PlayerCore) {
-    source = filmSource(clip, film, page.requestFilm);
-    Player = core;
-    phase = 'up';
+    press.start();
   }
 
   function finish() {
     refocus = Boolean(layer?.contains(document.activeElement));
-    phase = 'ended';
+    press.finish();
   }
 
   // The film cannot play: the poster again, saying why, for another press.
   function fail(message: string) {
     refocus = Boolean(layer?.contains(document.activeElement));
-    note = message;
-    phase = 'poster';
+    press.fail(message);
   }
 </script>
 
 {#snippet control()}
-  {#if phase !== 'up'}
+  {#if press.phase !== 'up'}
     <WatchButton
-      label={phase === 'ended' ? FILM_COPY.again : label}
-      again={phase === 'ended'}
-      onclick={press}
+      label={press.phase === 'ended' ? FILM_COPY.again : label}
+      again={press.phase === 'ended'}
+      onclick={start}
       preload={!edit && !page.still}
       takeFocus={refocus}
-      {note}
+      note={press.note}
     />
   {/if}
 {/snippet}
 
 {#snippet player()}
-  {#if Player && phase === 'up'}
+  {#if press.Player && press.phase === 'up'}
     <div class="lp-film" bind:this={layer}>
-      <Player
-        src={source}
-        {renew}
+      <press.Player
+        src={press.source}
+        renew={press.renew}
         poster={clip.posterUrl}
         stillFit="cover"
         {title}
@@ -148,7 +120,7 @@
   {/if}
 {/snippet}
 
-{@render children(control, player, phase === 'up')}
+{@render children(control, player, press.phase === 'up')}
 
 <style>
   /* Over the whole frame, in the Style's media corners. */

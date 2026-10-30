@@ -46,11 +46,11 @@
   pause, M mutes, the arrows seek five seconds, F is full screen.
 
   ITS OWN CONTROLS, ELSEWHERE (opt-in). A frame that draws its own chrome
-  over a core with `controls={false}` hears the clock through `ontime` and
-  drives the film through the core's own `toggle` and `toggleMute` (bound
-  with `bind:this`), so it plays, pauses, renews and takes refused sound
-  exactly as the core's buttons do. The Preview block's listening card
-  plays audio this way, the picture hidden. No other caller passes it.
+  over a core with `controls={false}` reads where the film is through the
+  core's own `clock` and drives it through its `toggle` and `toggleMute`
+  (bound with `bind:this`), so it plays, pauses, renews and takes refused
+  sound exactly as the core's buttons do. The Preview block's listening
+  card plays audio this way, the picture hidden.
 
   `createHlsPlayer` returns `{ hls, cleanup }`: `hls` is the HLS.js instance
   (null on Safari's native HLS), `cleanup` detaches the native path's
@@ -80,7 +80,7 @@
   import * as m from '$paraglide/messages';
   import { claim, displaced, mark, release, showing } from './now-playing.svelte';
   import { playNow, settleStart } from './start';
-  import { clock, loadedTo, type PlayerClock } from './timeline';
+  import { clock as timeText, loadedTo, type PlayerClock } from './timeline';
 
   interface CaptionTrack {
     src: string;
@@ -140,12 +140,6 @@
      * can offer a retry (`InlineFilm`) takes the visitor back to its poster.
      */
     onfail?: (message: string) => void;
-    /**
-     * Hears the clock as the element reports it (its `timeupdate`, length,
-     * play and pause events; nothing polls), for a frame drawing its own
-     * controls (ITS OWN CONTROLS, ELSEWHERE above).
-     */
-    ontime?: (clock: PlayerClock) => void;
     /** Drawn over the film once it ends, in place of the controls; `replay` starts it over. */
     ended?: Snippet<[replay: () => void]>;
     /**
@@ -183,7 +177,6 @@
     onplay,
     onended,
     onfail,
-    ontime,
     ended,
     demo,
     class: className,
@@ -281,14 +274,6 @@
     askSound ? m.player_tap_for_sound() : muted ? m.player_unmute() : m.player_mute()
   );
 
-  // The clock, told to a frame drawing its own controls. Read only while one
-  // listens, so for every other caller a time update re-runs nothing.
-  $effect(() => {
-    if (!ontime) return;
-    const now: PlayerClock = { time, duration, offerPlay, askSound };
-    untrack(() => ontime(now));
-  });
-
   function teardown() {
     if (hlsCleanup) {
       hlsCleanup();
@@ -368,6 +353,14 @@
     if (video && !fixed) video.muted = !video.muted;
   }
 
+  /**
+   * Where the film is, for a frame drawing its own controls: the element's
+   * own figures (its events; nothing polls), read reactively by the frame.
+   */
+  export function clock(): PlayerClock {
+    return { time, duration, offerPlay, askSound };
+  }
+
   function toggleCaptions() {
     if (!video?.textTracks) return;
     captionsOn = !captionsOn;
@@ -399,8 +392,8 @@
   function measure() {
     if (!video) return;
     time = video.currentTime;
-    // jsdom has no buffered ranges.
-    loaded = video.buffered ? loadedTo(video.buffered, time) : 0;
+    // Only the scrubber draws it. jsdom has no buffered ranges.
+    if (controls) loaded = video.buffered ? loadedTo(video.buffered, time) : 0;
   }
 
   function handlePlay() {
@@ -875,14 +868,14 @@
           disabled={duration <= 0}
           inert={Boolean(fixed)}
           aria-label={m.player_seek()}
-          aria-valuetext={m.player_time({ time: clock(time), duration: clock(duration) })}
+          aria-valuetext={m.player_time({ time: timeText(time), duration: timeText(duration) })}
           oninput={(event) => seek(Number(event.currentTarget.value))}
           onkeydown={handleScrubKey}
         />
       </div>
 
       <span class="player__time" aria-hidden="true">
-        {clock(time)}{#if duration > 0}<span class="player__total">{' / '}{clock(duration)}</span>{/if}
+        {timeText(time)}{#if duration > 0}<span class="player__total">{' / '}{timeText(duration)}</span>{/if}
       </span>
 
       {#if captions.length > 0}
