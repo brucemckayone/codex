@@ -50,6 +50,27 @@ export class TierHasSubscribersError extends BusinessLogicError {
   }
 }
 
+/**
+ * Deleting a tier that some films or courses are ONLY in, without saying what
+ * happens to them (Codex-2hxff.91). The studio dialog asks "Move them to other
+ * tiers" or "Keep them subscribers-only"; an older client that sends neither
+ * fails safe here instead of leaving them in no tier by accident. Counts only:
+ * the context is sent to the client.
+ */
+export class TierHasOnlyItemsError extends ConflictError {
+  constructor(
+    tierId: string,
+    counts: { filmCount: number; courseCount: number }
+  ) {
+    super('Choose what happens to the items only in this plan', {
+      tierId,
+      filmCount: counts.filmCount,
+      courseCount: counts.courseCount,
+      code: 'TIER_HAS_ONLY_ITEMS',
+    });
+  }
+}
+
 export class TierSortOrderConflictError extends ConflictError {
   constructor(orgId: string, sortOrder: number) {
     super('A tier with this sort order already exists', {
@@ -225,15 +246,16 @@ export class ConnectAccountNotReadyError extends BusinessLogicError {
  * pay: a course plan, or one put back on sale (Codex-2hxff.14, owner decision
  * "Yes, same rule"). Same code and message as `@codex/content`'s
  * `CreatorPayoutsRequiredError`, so the Studio shows one message for all.
+ *
+ * Like it, the context never names the creator: it reaches the client
+ * verbatim, and the caller is an org admin while the creator who can't be
+ * paid is often another member (review round 2, as L5 did for the others).
  */
 export class CreatorConnectRequiredError extends BusinessLogicError {
-  constructor(creatorId: string) {
+  constructor() {
     super(
       'Set up payouts before publishing paid or subscriber content. Complete Stripe Connect onboarding to receive payments.',
-      {
-        creatorId,
-        code: 'CREATOR_CONNECT_REQUIRED',
-      }
+      { code: 'CREATOR_CONNECT_REQUIRED' }
     );
   }
 }

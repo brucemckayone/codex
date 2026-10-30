@@ -8,9 +8,14 @@
   Variants:
   - "Free" / formatted price / "Purchased" (check) / "Included" (check)
   - "Followers" / "Team" — gating labels
-  - Tier name or "Subscription" with faint brand gradient for subscriber-gated
-  - Stacked dual badge (price ▲ tier ▼) for hybrid content (paid + tierName),
+  - The plans that include it ("Basic and above", "Pro only", "Basic,
+    Premium": `tierName`, owner decision U8, Codex-2hxff.91) or
+    "Subscription" with faint brand gradient for subscriber-gated
+  - Stacked dual badge (price ▲ plans ▼) for hybrid content (paid + tierName),
     enabled by `stacked={true}` from ContentCard.
+
+  A plan label can be long (a plan name may be 100 characters): the pill never
+  wraps, so it is cut with an ellipsis and carries the full text as its title.
 
   Priority: purchased > included > followers+isFollower > stacked-hybrid >
             subscribers > accessType > price.
@@ -28,6 +33,7 @@
     included?: boolean;
     accessType?: 'free' | 'paid' | 'followers' | 'subscribers' | 'team' | null;
     isFollower?: boolean;
+    /** The plan label (`planBadgeLabel`), not necessarily one plan's name. */
     tierName?: string | null;
     stacked?: boolean;
   }
@@ -87,6 +93,8 @@
   });
 
   const showCheck = $derived(variant === 'purchased' || variant === 'included');
+  // The full text of a label the ellipsis may cut: only a plan label is long.
+  const labelTitle = $derived(variant === 'subscribers' && tierName ? label : undefined);
   const show = $derived(amount != null || purchased || included || accessType != null);
   const hybridPrice = $derived(amount != null && amount > 0 ? formatPrice(amount) : '');
 </script>
@@ -95,14 +103,16 @@
   {#if variant === 'hybrid' && tierName}
     <span class="price-badge-stack {className ?? ''}" data-variant="hybrid" {...restProps}>
       <span class="price-badge">{hybridPrice}</span>
-      <span class="price-badge price-badge--premium">{tierName}</span>
+      <span class="price-badge price-badge--premium" title={tierName}>
+        <span class="price-badge__label">{tierName}</span>
+      </span>
     </span>
   {:else}
-    <span class="price-badge {className ?? ''}" data-variant={variant} {...restProps}>
+    <span class="price-badge {className ?? ''}" data-variant={variant} title={labelTitle} {...restProps}>
       {#if showCheck}
         <CheckIcon size={12} />
       {/if}
-      {label}
+      <span class="price-badge__label">{label}</span>
     </span>
   {/if}
 {/if}
@@ -128,8 +138,15 @@
     border-radius: var(--radius-full);
     line-height: var(--leading-tight);
     white-space: nowrap;
+    max-width: 100%;
     background: var(--color-neutral-900);
     color: var(--color-neutral-50);
+  }
+
+  .price-badge__label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .price-badge[data-variant='subscribers'],
@@ -146,5 +163,6 @@
     flex-direction: column;
     align-items: flex-end;
     gap: var(--space-0-5);
+    max-width: 100%;
   }
 </style>

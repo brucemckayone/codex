@@ -172,7 +172,7 @@ describe('explore +page.server.ts — cache wiring', () => {
       // Shared version key — one per org — is what `publish` bumps.
       expect(idArg).toBe(CacheType.COLLECTION_ORG_CONTENT(ORG_ID));
       // Per-combo type carries sort + contentType + category + page.
-      expect(typeArg).toMatch(/^content:auth:v3:popular:/);
+      expect(typeArg).toMatch(/^content:auth:v4:popular:/);
     });
 
     it('includes sort + contentType + category + page in the cache type', async () => {
@@ -186,7 +186,7 @@ describe('explore +page.server.ts — cache wiring', () => {
       );
 
       const [, typeArg] = cacheGetMock.mock.calls[0];
-      expect(typeArg).toBe('content:auth:v3:top-selling:video:3:cat:ritual');
+      expect(typeArg).toBe('content:auth:v4:top-selling:video:3:cat:ritual');
     });
 
     it('varies the cache type by category so two filter combos cannot collide', async () => {
@@ -207,8 +207,8 @@ describe('explore +page.server.ts — cache wiring', () => {
 
       const [, firstType] = cacheGetMock.mock.calls[0];
       const [, secondType] = cacheGetMock.mock.calls[1];
-      expect(firstType).toBe('content:auth:v3:popular:all:1:cat:ritual');
-      expect(secondType).toBe('content:auth:v3:popular:all:1:cat:breath');
+      expect(firstType).toBe('content:auth:v4:popular:all:1:cat:ritual');
+      expect(secondType).toBe('content:auth:v4:popular:all:1:cat:breath');
     });
 
     // A real category value must never produce the unfiltered key: an 'all'
@@ -232,7 +232,7 @@ describe('explore +page.server.ts — cache wiring', () => {
 
       const [, filtered] = cacheGetMock.mock.calls[0];
       const [, unfiltered] = cacheGetMock.mock.calls[1];
-      expect(unfiltered).toBe('content:auth:v3:popular:all:1');
+      expect(unfiltered).toBe('content:auth:v4:popular:all:1');
       expect(filtered).not.toBe(unfiltered);
     });
 

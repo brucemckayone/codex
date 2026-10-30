@@ -30,6 +30,7 @@
     "db:seed:creators": "pnpm exec tsx scripts/seed-creators.ts",
     "backfill:stripe-customer-ids": "pnpm exec tsx scripts/backfill-stripe-customer-ids.ts",
     "audit:content-flags": "pnpm exec tsx scripts/audit-content-access-flags.ts",
+    "audit:plan-access": "pnpm exec tsx scripts/plan-access-parity.ts",
     "db:dry-run": "pnpm exec tsx scripts/neon-dry-run.ts",
     "db:studio": "pnpm exec tsx scripts/db-commands.ts studio",
     "db:push": "pnpm exec tsx scripts/db-commands.ts push",

@@ -17,6 +17,7 @@ import {
 import { type DatabaseClient, toIso } from '@codex/database';
 import {
   content,
+  contentTierAccess,
   courseStages,
   courses,
   entitlements,
@@ -27,7 +28,6 @@ import {
   purchases,
   stagePractices,
   subscriptions,
-  subscriptionTiers,
   videoPlayback,
 } from '@codex/database/schema';
 import type { ObservabilityClient } from '@codex/observability';
@@ -268,7 +268,6 @@ export async function listUserLibrary(
               ? [eq(subscriptions.organizationId, input.organizationId)]
               : [])
           ),
-          with: { tier: true },
         });
 
   // ── Step 2: Build shared filter conditions ────────────────────────
@@ -722,14 +721,13 @@ export async function listUserLibrary(
       return { items: [] as UserLibraryItem[], count: 0 };
     }
 
-    // Build a tier-aware filter: for each subscription, include content
-    // from that org where the user's tier sortOrder >= content's minimum tier
-    // sortOrder (or content has no minimum tier).
+    // Build a tier-aware filter (Codex-2hxff.91): for each subscription,
+    // include content from that org TICKED for the subscription's own tier
+    // (`content_tier_access`, a set — a dearer tier is not implied). The same
+    // table the decision reads, so the shelf and the player cannot disagree.
     //
-    // Build per-subscription tier conditions using SQL:
-    // For each sub, content.organizationId = sub.orgId AND
-    //   (content.minimumTierId IS NULL
-    //    OR content.minimumTierId IN (tiers with sortOrder <= user's tier sortOrder))
+    // For each sub: content.organizationId = sub.orgId AND
+    //   content.id IN (ticks of sub.tierId in sub.orgId)
     //
     // Since each subscription may be to a different org with a different tier,
     // we build an OR of per-subscription conditions.
@@ -739,23 +737,18 @@ export async function listUserLibrary(
     // creator left the org stays in the library until this subscription's next
     // renewal — the same rule `decideContentAccess` applies, so the shelf never
     // lists an item the player would refuse, nor hides one it would play.
-    const subConditions = activeSubscriptions.map((sub) => {
-      const tierSortOrder = sub.tier.sortOrder;
-      return and(
+    const subConditions = activeSubscriptions.map((sub) =>
+      and(
         eq(content.organizationId, sub.organizationId),
-        or(
-          isNull(content.includedInTierId),
-          // includedInTierId's sortOrder must be <= user's subscription tier sortOrder
-          sql`${content.includedInTierId} IN (
-            SELECT ${subscriptionTiers.id} FROM ${subscriptionTiers}
-            WHERE ${subscriptionTiers.sortOrder} <= ${tierSortOrder}
-              AND ${subscriptionTiers.organizationId} = ${sub.organizationId}
-              AND ${subscriptionTiers.deletedAt} IS NULL
-          )`
-        ),
+        // (tier_id, content_id) index-only.
+        sql`${content.id} IN (
+          SELECT ${contentTierAccess.contentId} FROM ${contentTierAccess}
+          WHERE ${contentTierAccess.tierId} = ${sub.tierId}
+            AND ${contentTierAccess.organizationId} = ${sub.organizationId}
+        )`,
         onOfferToSubscriptionPeriod(sub.currentPeriodStart)
-      );
-    });
+      )
+    );
 
     // `or()` is `SQL | undefined`, and `and()` drops an undefined argument
     // WITHOUT COMPLAINT — losing this predicate would return every org's
@@ -768,14 +761,15 @@ export async function listUserLibrary(
     }
 
     const conditions = [
-      // Content a subscription grants access to = anything TIER-GATED
-      // (`includedInTierId` set). The former `accessType='subscribers'` tag and
-      // tier-gated paid content (`accessType='paid'` + a tier) BOTH carry a
-      // tier, so the single flag captures exactly the old union. Paid content
-      // WITHOUT a tier is still gated behind purchase — never appears here.
-      // Per-org tier-sortOrder check below (subConditions) decides whether this
-      // user's tier is high enough for any given item.
-      sql`${content.includedInTierId} IS NOT NULL`,
+      // Content a subscription grants access to = anything behind the TIER
+      // SWITCH (Codex-2hxff.91). Subscribers-only content and paid content
+      // that is also in tiers BOTH carry it. Paid content without it is
+      // gated behind purchase — never appears here. The per-subscription
+      // ticks (subConditions) decide which items this user's tier includes.
+      eq(content.isTierGated, true),
+      // The decision refuses course-only content before any tier arm, so the
+      // shelf must not list it either (census §7.14).
+      eq(content.courseOnly, false),
       isNull(content.deletedAt),
       // Must belong to one of the user's subscribed orgs (with tier check),
       // and be on offer to that subscription — published, or off sale within

@@ -29,6 +29,7 @@ import {
   createTestTierInput,
   createUniqueSlug,
   type Database,
+  gateContentToTiers,
   seedTestUsers,
   setupTestDatabase,
   teardownTestDatabase,
@@ -210,11 +211,15 @@ describe('getWithdrawnContent: which rows the lookup can find (Codex-ov2ii)', ()
       }),
       null
     );
-    await insertContent('departedTier', {
-      includedInTierId: tier.id,
-      status: 'archived',
-      publishedAt: daysAgo(30),
-      offSaleAt: daysAgo(5),
+    await gateContentToTiers(db, {
+      contentId: await insertContent('departedTier', {
+        isTierGated: true,
+        status: 'archived',
+        publishedAt: daysAgo(30),
+        offSaleAt: daysAgo(5),
+      }),
+      organizationId: orgId,
+      tierIds: [tier.id],
     });
   });
 

@@ -306,6 +306,52 @@ const tagsArraySchema = z
 const tagsSchema = tagsArraySchema.optional().default([]);
 
 /**
+ * A set of tier ids (Codex-2hxff.91), at most 50. A repeated id is refused
+ * rather than collapsed: the service checks "every id is a live tier of this
+ * org" by comparing the rows it finds with the ids it was sent, so a duplicate
+ * would read as a missing tier.
+ */
+const tierIdSetSchema = (maxMessage: string) =>
+  z
+    .array(uuidSchema)
+    .max(50, maxMessage)
+    .refine((ids) => new Set(ids).size === ids.length, {
+      message: 'The same tier is listed twice',
+    });
+
+/**
+ * Whether a payload gates the item behind tiers: the new switch, or the
+ * phase-1 legacy single tier (`includedInTierId`), which the service expands
+ * to the switch plus ladder ticks. `null` on the legacy field means "no tier".
+ */
+const statesTierGate = (data: {
+  isTierGated?: boolean;
+  includedInTierId?: string | null;
+}): boolean => data.isTierGated === true || data.includedInTierId != null;
+
+/** A gate the access decision applies BEFORE the tier arm (invariant I4). */
+const hasExclusiveGate = (data: {
+  isFollowerGated?: boolean;
+  isTeamOnly?: boolean;
+  courseOnly?: boolean;
+}): boolean =>
+  data.isFollowerGated === true ||
+  data.isTeamOnly === true ||
+  data.courseOnly === true;
+
+/**
+ * The legacy single tier stated beside the new switch or set. `undefined`
+ * means "not stated"; an explicit `null` on the legacy field IS stated.
+ */
+const mixesLegacyTierInput = (data: {
+  isTierGated?: boolean;
+  includedInTierIds?: string[];
+  includedInTierId?: string | null;
+}): boolean =>
+  data.includedInTierId !== undefined &&
+  (data.isTierGated !== undefined || data.includedInTierIds !== undefined);
+
+/**
  * Base content schema (without refinements)
  * Used for both create and update schemas
  */
@@ -360,8 +406,26 @@ const baseContentSchema = z.object({
 
   priceCents: priceCentsSchema.optional(),
 
-  // Included in this org tier AND ABOVE (by sortOrder). null = not tier-included.
-  // 1:1 successor of the former `minimumTierId`.
+  // The subscribers-only switch (Codex-2hxff.91): the tier arm applies. The
+  // GATE, kept apart from the SET below, so a gated item with no tier ticked
+  // is CLOSED, never free. No `.default()` (see `includedInTierIds`).
+  isTierGated: z.boolean().optional(),
+
+  // The EXACT set of the org's tiers that include this item: a TOTAL set,
+  // like `categoryIds` and `setCourseTierAccessSchema`. Absent = leave the
+  // ticks alone; `[]` = in no tier (a gated item is then closed). NEVER give
+  // this a `.default()`: `.partial()` does not strip an inner default
+  // (Codex-moyu5), so every PATCH that never mentioned tiers would empty them.
+  // ContentService checks every id is a live tier of the item's OWN org.
+  includedInTierIds: tierIdSetSchema(
+    'Cannot include one item in more than 50 tiers'
+  ).optional(),
+
+  // LEGACY (phase 1 of Codex-2hxff.91 only): the old studio's single "this
+  // tier and above" pick. The service expands it to ladder ticks (every live
+  // tier of the org at or above it, by sortOrder) and sets `isTierGated`.
+  // Never sent together with `isTierGated` / `includedInTierIds`. Removed in
+  // the cleanup release.
   includedInTierId: uuidSchema.optional().nullable(),
 
   // Reachable ONLY via a course entitlement (suppresses standalone paths).
@@ -474,33 +538,68 @@ export const createContentSchema = baseContentSchema
   .refine(
     (data) => {
       // Codex-up7bx: `subscription_tiers` is org-scoped (FK to organizations,
-      // unique per org), so `includedInTierId` is only meaningful on content
-      // that belongs to an organization. Orgless (creator-direct) content with
-      // a tier set is a semantically invalid row — there is no org against
-      // which a subscription/tier could be resolved — and the access layer must
-      // fail closed on it. Reject the combination at the write boundary so such
-      // a row is never created in the first place.
-      return !data.includedInTierId || !!data.organizationId;
+      // unique per org), so the tier gate is only meaningful on content that
+      // belongs to an organization. Orgless (creator-direct) content behind a
+      // tier is a semantically invalid row — there is no org against which a
+      // subscription/tier could be resolved — and the access layer must fail
+      // closed on it. Reject the combination at the write boundary so such a
+      // row is never created in the first place (Codex-2hxff.91 refine (a):
+      // the switch and the legacy single tier both count).
+      return !statesTierGate(data) || !!data.organizationId;
     },
     {
       message:
         'Subscription tier requires an organisation — orgless content cannot be tier-gated',
-      path: ['includedInTierId'],
+      path: ['isTierGated'],
     }
   )
+  .refine(
+    (data) => {
+      // Codex-2hxff.91 refine (b): ticks only mean something behind the gate.
+      // On create there is no existing row, so an absent switch is OFF: a
+      // non-empty set without `isTierGated: true` would be silently dropped.
+      if (!data.includedInTierIds?.length) return true;
+      return data.isTierGated === true;
+    },
+    {
+      message:
+        'Tiers can only be ticked on subscriber content — set isTierGated to include it in tiers',
+      path: ['includedInTierIds'],
+    }
+  )
+  .refine((data) => !statesTierGate(data) || !hasExclusiveGate(data), {
+    // Codex-2hxff.91 refine (c), invariant I4: followers, team-only and
+    // course-only are decided BEFORE the tier arm, so ticks on such a row
+    // would be dead (and the seed validator already forbids follower + tier).
+    message:
+      'Tier-gated content cannot also be followers-only, team-only or course-only',
+    path: ['isTierGated'],
+  })
+  .refine((data) => !statesTierGate(data) || data.isFree !== true, {
+    // Codex-2hxff.91 refine (d), invariant I2: an item in no tier is CLOSED,
+    // so the gate must never sit beside `isFree: true` — `isPublicContent`
+    // would render its body into the anonymous payload.
+    message:
+      'Tier-gated content cannot be free — an item in no tier is closed, not free.',
+    path: ['isFree'],
+  })
+  .refine((data) => !mixesLegacyTierInput(data), {
+    // Codex-2hxff.91 refine (f): one form only. The legacy single tier is the
+    // old studio's; the new studio sends the switch and the set.
+    message:
+      'Send either includedInTierId (legacy) or isTierGated / includedInTierIds, not both',
+    path: ['includedInTierId'],
+  })
   .refine(
     (data) => {
       // A non-free row MUST declare at least one access gate. This WP hard-
       // replaced the single `accessType` enum with separable flags and, in
       // doing so, dropped the old "subscribers requires a tier" guard. Without
-      // this invariant the studio form's "subscribers, no tier" pick emits an
-      // all-gates-off row with `isFree:false`, which the resolver falls through
-      // team/follower/tier/paid to a final `return true` → PUBLIC (a paywall
-      // bypass). The "any-subscriber / no specific tier" state is intentionally
-      // NOT representable in the flag model — subscriber content REQUIRES a
-      // concrete `includedInTierId`. Reject any explicitly non-free row that
-      // carries no gate at all (generically restores the deleted guard, and
-      // also closes any other zero-gate non-free combination).
+      // this invariant an all-gates-off row with `isFree:false` falls through
+      // the resolver's team/follower/tier/paid arms to PUBLIC (a paywall
+      // bypass). Codex-2hxff.91 refine (e): the subscribers-only SWITCH is a
+      // gate on its own — gated with no tier ticked is a legal, CLOSED row.
+      // Reject any explicitly non-free row that carries no gate at all.
       if (data.isFree !== false) return true;
       return (
         !!data.isPurchasable ||
@@ -511,13 +610,13 @@ export const createContentSchema = baseContentSchema
         !!data.isFollowerGated ||
         !!data.isTeamOnly ||
         !!data.courseOnly ||
-        data.includedInTierId != null
+        statesTierGate(data)
       );
     },
     {
       message:
         'Non-free content must declare at least one access gate (price, tier, followers, team, or course).',
-      path: ['includedInTierId'],
+      path: ['isTierGated'],
     }
   )
   .refine(
@@ -566,22 +665,56 @@ export const updateContentSchema = baseContentSchema
   .extend({ tags: tagsArraySchema.optional() })
   .refine(
     (data) => {
-      // Codex-up7bx: reject an update that sets `includedInTierId` while
+      // Codex-up7bx: reject an update that gates the item behind tiers while
       // simultaneously clearing the organisation (organizationId explicitly null
       // in the same payload). Tiers are org-scoped, so orgless content can never
       // be tier-gated. When organizationId is ABSENT the existing org value
-      // stands and we can't reason here — ContentService.update() applies the
-      // defensive clamp for the "tier left set on an already-orgless row" case.
-      if (!data.includedInTierId) return true;
+      // stands and we can't reason here — ContentService.update() refuses the
+      // "gated on an already-orgless row" case against the effective row.
+      if (!statesTierGate(data)) return true;
       if (!('organizationId' in data)) return true;
       return data.organizationId != null;
     },
     {
       message:
         'Subscription tier requires an organisation — orgless content cannot be tier-gated',
-      path: ['includedInTierId'],
+      path: ['isTierGated'],
     }
   )
+  .refine(
+    (data) => {
+      // Codex-2hxff.91 refine (b): a non-empty set needs the gate. An ABSENT
+      // switch is fine on an update (the existing row's switch stands, and the
+      // service checks the effective value); only an explicit OFF beside ticks
+      // is a contradiction.
+      if (!data.includedInTierIds?.length) return true;
+      return data.isTierGated !== false;
+    },
+    {
+      message:
+        'Tiers can only be ticked on subscriber content — set isTierGated to include it in tiers',
+      path: ['includedInTierIds'],
+    }
+  )
+  .refine((data) => !statesTierGate(data) || !hasExclusiveGate(data), {
+    // Codex-2hxff.91 refine (c), I4, where the payload states both sides;
+    // the service checks the effective row for a partial that states one.
+    message:
+      'Tier-gated content cannot also be followers-only, team-only or course-only',
+    path: ['isTierGated'],
+  })
+  .refine((data) => !statesTierGate(data) || data.isFree !== true, {
+    // Codex-2hxff.91 refine (d), I2 — mirrors the create schema.
+    message:
+      'Tier-gated content cannot be free — an item in no tier is closed, not free.',
+    path: ['isFree'],
+  })
+  .refine((data) => !mixesLegacyTierInput(data), {
+    // Codex-2hxff.91 refine (f) — mirrors the create schema.
+    message:
+      'Send either includedInTierId (legacy) or isTierGated / includedInTierIds, not both',
+    path: ['includedInTierId'],
+  })
   .refine(
     (data) => {
       // If a caller marks content purchasable AND sends a price in the same
@@ -602,9 +735,9 @@ export const updateContentSchema = baseContentSchema
       // the row non-free (`isFree:false`) must also carry at least one access
       // gate, otherwise it persists a zero-gate non-free row that resolves to
       // PUBLIC (the subscribers-without-tier bypass). A partial that does not
-      // set `isFree:false` is unaffected (the existing row's policy stands);
-      // the studio update form always submits the full flag set, so its
-      // "subscribers, no tier" pick is caught here.
+      // set `isFree:false` is unaffected (the existing row's policy stands).
+      // The subscribers-only switch counts as a gate (Codex-2hxff.91 refine
+      // (e)): gated with no tier ticked is the legal CLOSED state.
       if (data.isFree !== false) return true;
       return (
         !!data.isPurchasable ||
@@ -613,13 +746,13 @@ export const updateContentSchema = baseContentSchema
         !!data.isFollowerGated ||
         !!data.isTeamOnly ||
         !!data.courseOnly ||
-        data.includedInTierId != null
+        statesTierGate(data)
       );
     },
     {
       message:
         'Non-free content must declare at least one access gate (price, tier, followers, team, or course).',
-      path: ['includedInTierId'],
+      path: ['isTierGated'],
     }
   )
   .refine(

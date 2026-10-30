@@ -125,3 +125,86 @@ refused; its alert names the account.
 "connect your Stripe account" email on every sale, while `0118`'s copy says
 "We won't email you about each sale". Nothing else breaks: the new tables are
 read only by the new code.
+
+---
+
+## Plan access by ticks (migration `0120`)
+
+`0120` turns a film's single "this tier and above" (`content.included_in_tier_id`)
+into the subscribers-only switch (`is_tier_gated`) plus one tick per tier
+(`content_tier_access`), and backfills both once, when it runs
+(`Codex-2hxff.91`; [Subscriptions](subscriptions.md)). The deploy applies
+migrations first and redeploys content-api later. In between, the OLD
+content-api still saves films, and it writes only the old column. A film saved
+as "Subscribers" in that window has the switch off and no ticks, and the new
+workers read it as **free to anyone signed in**. Production had 1 tier and 0
+gated films on 2026-10-29, so expect nothing; the check below proves it.
+
+Both steps use one read-only script. It runs in a `READ ONLY` transaction and
+prints counts and content ids only. It loads no env file, so pass the
+production connection string in the shell (Neon console → Connection details),
+never from a file:
+
+    DB_METHOD=PRODUCTION DATABASE_URL='<production url>' pnpm --filter @codex/database audit:plan-access
+
+### R12 — after the deploy: the plan-access parity check
+
+Run it once, after the production deploy has finished and before anyone saves a
+film's access in the new Studio. Expect **check A = 0** and **check B = 0**;
+the exit code is 1 only when A is not 0.
+
+- **Check A** (legacy tier set, switch off): the window shape above. The fix is
+  `0120`'s own backfill, steps 6 then 5, each scoped to `NOT is_tier_gated` so
+  it touches only these rows. The script prints the same statements. Run them
+  in the Neon SQL Editor, in one transaction, in this order (the INSERT finds
+  its rows by the switch still being off), then run the script again:
+
+  ```sql
+  BEGIN;
+  INSERT INTO content_tier_access (content_id, tier_id, organization_id)
+  SELECT c.id, t.id, c.organization_id
+    FROM content c
+    JOIN subscription_tiers x ON x.id = c.included_in_tier_id
+    JOIN subscription_tiers t ON t.organization_id = c.organization_id
+                             AND t.deleted_at IS NULL
+                             AND t.sort_order >= x.sort_order
+   WHERE c.organization_id IS NOT NULL
+     AND NOT c.is_tier_gated
+  ON CONFLICT DO NOTHING;
+  UPDATE content SET is_tier_gated = true
+   WHERE included_in_tier_id IS NOT NULL
+     AND NOT is_tier_gated;
+  COMMIT;
+  ```
+
+  Never run `0120`'s step 6 unscoped once the new Studio is in use: it would
+  add every dearer tier to each bundle ("Basic, Premium") a creator has saved.
+  Both statements are idempotent.
+- **Check B** (ticks differ from the ladder `0120` would give): straight after
+  the deploy, a `ticked_not_ladder` row is an old-Studio edit in the window
+  that narrowed or cleared the tier. Its ticks still open the old set. Open the
+  film in the new Studio and save the tiers the creator wants. Once creators
+  use the new Studio, bundles, "keep" deletes and tier reorders make B non-zero
+  by design, so B is only meaningful on this first run.
+
+### R13 — before any workers rollback
+
+Keep this step until the cleanup release drops `included_in_tier_id`. The old
+workers read only that column, and two shapes read **looser** there than now:
+
+- a film closed with no tier ticked and no previous tier (`included_in_tier_id`
+  NULL) and no price: the old decision serves it free;
+- a `ladder_not_ticked` row: the old workers read "lowest ticked tier and
+  above", which opens tiers the creator did not tick.
+
+Run the script with `--pre-rollback`. It lists those rows (check C) and exits 1
+when there are any:
+
+    DB_METHOD=PRODUCTION DATABASE_URL='<production url>' pnpm --filter @codex/database audit:plan-access --pre-rollback
+
+At 0, a workers rollback is exact. Otherwise prefer a forward fix. If the
+workers must roll back anyway, the closed rows can be set
+`is_team_only = true` for the window, which closes them to buyers too, and
+reverted when rolling forward (data design §6.5). The `ladder_not_ticked` rows
+have no honest old-code shape: they read wider until the roll forward. `0120`
+itself stays: it is additive, and the old code ignores the new column and table.

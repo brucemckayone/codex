@@ -25,6 +25,12 @@
  * expressed via `Pick<>` — the canonical type lives in `$lib/types` (moved
  * out of `$lib/server/content-detail.ts` so client modules can import it
  * without crossing the SvelteKit server boundary).
+ *
+ * Plan access (Codex-2hxff.91): the subscription covers the content when its
+ * plan is one of the item's `includedInTierIds` (set membership, never a
+ * `sortOrder` ladder), so the live override needs no tier list. The tiers,
+ * the viewer's plan and the period end are passed on for the paywall's plan
+ * names (`describePlanPaywall`).
  */
 
 import { subscriptionStatusGrantsAccess } from '@codex/constants';
@@ -32,6 +38,7 @@ import { untrack } from 'svelte';
 import { browser } from '$app/environment';
 import { subscriptionCollection } from '$lib/collections';
 import type { SubscriptionContext, SubscriptionTier } from '$lib/types';
+import type { PlanListStatus, ViewerPlan } from './plan-label';
 
 type ResolvedSubscriptionContext = Pick<
   SubscriptionContext,
@@ -39,7 +46,11 @@ type ResolvedSubscriptionContext = Pick<
   | 'hasSubscription'
   | 'subscriptionCoversContent'
   | 'tiers'
->;
+> &
+  Partial<Pick<SubscriptionContext, 'currentSubscription'>> & {
+    /** The tier list failed to load (the server's `tiersFailed`). */
+    tiersFailed?: boolean;
+  };
 
 interface UseSubscriptionContextParams {
   /** Server-streamed promise from `loadSubscriptionContext()` */
@@ -49,18 +60,30 @@ interface UseSubscriptionContextParams {
   /** Feature flag — when false, all subscription state is zeroed. */
   enableSubscriptions: boolean;
   /**
-   * Tier gate (WP-1) — `includedInTierId != null` means a subscription is
-   * required; the subscription's tier `sortOrder` must meet this tier. The
-   * successor of accessType 'subscribers' / the former `minimumTierId`.
+   * The subscribers-only switch (Codex-2hxff.91): on means a subscription is
+   * required, and only a plan in {@link includedInTierIds} covers it.
    */
-  includedInTierId: string | null | undefined;
+  isTierGated: boolean | null | undefined;
+  /** The plans that include the item; `[]` with the switch on is CLOSED. */
+  includedInTierIds: readonly string[] | null | undefined;
 }
 
 interface SubCtx {
   requiresSubscription: boolean;
   hasSubscription: boolean;
   subscriptionCoversContent: boolean;
+  /** The viewer's access-granting plan, for "Your Pro plan doesn't…". */
+  currentPlan: ViewerPlan | null;
+  /** When that plan's period ends (ISO), for the change-plan line. */
+  currentPeriodEnd: string | null;
 }
+
+const NO_SUBSCRIPTION = {
+  hasSubscription: false,
+  subscriptionCoversContent: false,
+  currentPlan: null,
+  currentPeriodEnd: null,
+} as const;
 
 export function useSubscriptionContext(
   getParams: () => UseSubscriptionContextParams
@@ -68,12 +91,16 @@ export function useSubscriptionContext(
   const initial = getParams();
   let promiseSubCtx = $state<SubCtx>({
     requiresSubscription: initial.enableSubscriptions
-      ? initial.includedInTierId != null
+      ? initial.isTierGated === true
       : false,
-    hasSubscription: false,
-    subscriptionCoversContent: false,
+    ...NO_SUBSCRIPTION,
   });
   let resolvedTiers = $state<SubscriptionTier[]>([]);
+  // Until the streamed context lands the tier list is loading; with no
+  // promise to wait on there is no list at all.
+  let tiersStatus = $state<PlanListStatus>(
+    initial.subscriptionContext ? 'loading' : 'failed'
+  );
 
   // Guard against stale promise resolution when navigating between content
   // items. Without this, content A's subscriptionContext can resolve after
@@ -84,17 +111,14 @@ export function useSubscriptionContext(
     const {
       subscriptionContext: promise,
       enableSubscriptions,
-      includedInTierId,
+      isTierGated,
     } = getParams();
 
     if (!enableSubscriptions) {
       untrack(() => {
-        promiseSubCtx = {
-          requiresSubscription: false,
-          hasSubscription: false,
-          subscriptionCoversContent: false,
-        };
+        promiseSubCtx = { requiresSubscription: false, ...NO_SUBSCRIPTION };
         resolvedTiers = [];
+        tiersStatus = 'failed';
         resolvedSubPromise = null;
       });
       return;
@@ -103,29 +127,39 @@ export function useSubscriptionContext(
     untrack(() => {
       if (promise && promise !== resolvedSubPromise) {
         resolvedSubPromise = promise;
+        tiersStatus = 'loading';
         promise
           .then((ctx) => {
             if (resolvedSubPromise === promise) {
+              const sub = ctx.hasSubscription
+                ? (ctx.currentSubscription ?? null)
+                : null;
               promiseSubCtx = {
                 requiresSubscription: ctx.requiresSubscription,
                 hasSubscription: ctx.hasSubscription,
                 subscriptionCoversContent: ctx.subscriptionCoversContent,
+                currentPlan: sub
+                  ? { id: sub.tier.id, name: sub.tier.name }
+                  : null,
+                currentPeriodEnd: sub?.currentPeriodEnd ?? null,
               };
               resolvedTiers = ctx.tiers ?? [];
+              tiersStatus = ctx.tiersFailed ? 'failed' : 'ready';
             }
           })
           .catch(() => {
             if (resolvedSubPromise === promise) {
               resolvedTiers = [];
+              tiersStatus = 'failed';
             }
           });
       } else if (!promise) {
         promiseSubCtx = {
-          requiresSubscription: includedInTierId != null,
-          hasSubscription: false,
-          subscriptionCoversContent: false,
+          requiresSubscription: isTierGated === true,
+          ...NO_SUBSCRIPTION,
         };
         resolvedTiers = [];
+        tiersStatus = 'failed';
         resolvedSubPromise = null;
       }
     });
@@ -149,22 +183,19 @@ export function useSubscriptionContext(
   const subCtx = $derived.by<SubCtx>(() => {
     const sub = liveSubscription;
     if (sub) {
-      const { includedInTierId } = getParams();
-      const requiresSubscription = includedInTierId != null;
-      let subscriptionCoversContent = false;
-      if (includedInTierId == null) {
-        // Any active subscription grants access when no tier gate is set.
-        subscriptionCoversContent = true;
-      } else {
-        const minTier = resolvedTiers.find((t) => t.id === includedInTierId);
-        subscriptionCoversContent = minTier
-          ? sub.tier.sortOrder >= minTier.sortOrder
-          : false;
-      }
+      const { isTierGated, includedInTierIds } = getParams();
+      const requiresSubscription = isTierGated === true;
       return {
         requiresSubscription,
         hasSubscription: true,
-        subscriptionCoversContent,
+        // Set membership: only a ticked plan covers it, and a gated item
+        // with none ticked is covered by no plan (closed). Not gated: any
+        // granting subscription covers it, as before.
+        subscriptionCoversContent: requiresSubscription
+          ? (includedInTierIds?.includes(sub.tier.id) ?? false)
+          : true,
+        currentPlan: { id: sub.tier.id, name: sub.tier.name },
+        currentPeriodEnd: sub.currentPeriodEnd ?? null,
       };
     }
     return promiseSubCtx;
@@ -173,6 +204,13 @@ export function useSubscriptionContext(
   return {
     get subCtx() {
       return subCtx;
+    },
+    /** The org's active plans, once the streamed context lands. */
+    get tiers() {
+      return resolvedTiers;
+    },
+    get tiersStatus() {
+      return tiersStatus;
     },
   };
 }

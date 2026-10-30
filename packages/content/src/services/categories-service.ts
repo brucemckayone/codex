@@ -28,6 +28,7 @@
 import { CONTENT_STATUS } from '@codex/constants';
 import {
   isUniqueViolation,
+  notClosedToNewViewers,
   paginatedQuery,
   scopedNotDeleted,
   whereNotDeleted,
@@ -237,7 +238,9 @@ export class CategoriesService extends BaseService {
       // membership-row count. The join on a LIVE org is the same rule as
       // listPublic's: deleting an org soft-deletes only the org row, so its
       // content stays published, and without it a deleted org's topics went
-      // on being served (and re-cached after the org-delete bump).
+      // on being served (and re-cached after the org-delete bump). A CLOSED
+      // item doesn't count either: listPublic hides it, so its topic would
+      // open on an empty list (owner U11, review L7).
       const activeCategoryIds = this.db
         .selectDistinct({ categoryId: contentCategories.categoryId })
         .from(contentCategories)
@@ -253,7 +256,8 @@ export class CategoriesService extends BaseService {
           and(
             eq(content.organizationId, organizationId),
             eq(content.status, CONTENT_STATUS.PUBLISHED),
-            isNull(content.deletedAt)
+            isNull(content.deletedAt),
+            notClosedToNewViewers()
           )
         );
 

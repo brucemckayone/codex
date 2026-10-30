@@ -364,7 +364,7 @@ out. The case that taught it: org content lists would have kept serving
 `creator.email` from 2h slots (Codex-osuqt). The other direction bites too: a
 field a new reader needs is missing from every old slot, and nothing tells the
 reader so. Put a shape version in the `type`, as `PUBLIC_CONTENT_SHAPE_VERSION`
-(`content:public:v4:…`) and explore's `content:auth:v3:…` do, and bump it with
+(`content:public:v5:…`) and explore's `content:auth:v4:…` do, and bump it with
 the change. Old slots are never read again. A bump also renames the
 cache-stats series. A cached payload is the whole thing the slot stores: for
 content-api's org list, `listPublic`'s rows, with the wire item built after

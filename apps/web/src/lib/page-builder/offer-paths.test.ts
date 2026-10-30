@@ -176,6 +176,32 @@ describe('deriveOfferPaths · every path traces to offer.paths', () => {
     expect(paths.map((p) => p.priceCents)).toEqual([1500, 4500]);
   });
 
+  it('says each tier card holds more than this course, never "everything"', () => {
+    // A tier is a set of items (Codex-2hxff.91): a dearer tier may lack a film
+    // a cheaper one has, so each card speaks only for its own tier, by name.
+    const paths = deriveOfferPaths(
+      offerWith({
+        paths: ['tier'],
+        purchase: null,
+        subscription: null,
+        tiers: [
+          ...FULL_OFFER.tiers,
+          {
+            tierId: 'tier-inner',
+            tierName: 'Inner Circle',
+            priceMonthly: 4500,
+            priceAnnual: 43200,
+          },
+        ],
+      }),
+      COURSE
+    );
+    expect(paths.map((p) => [p.who, p.bullets[1]])).toEqual([
+      ['More than just this course', 'Plus everything else in Soul Path'],
+      ['More than just this course', 'Plus everything else in Inner Circle'],
+    ]);
+  });
+
   it('is empty when the course is not sold at all', () => {
     expect(
       deriveOfferPaths(
@@ -776,7 +802,7 @@ describe('`who` and `bullets` — decoration only, and now rendered', () => {
     } as unknown as SectionProps);
     expect(empty?.bullets).toEqual([
       'Includes Rootwork',
-      'Plus everything else in the membership',
+      'Plus everything else in Soul Path',
       'Cancel anytime',
     ]);
 

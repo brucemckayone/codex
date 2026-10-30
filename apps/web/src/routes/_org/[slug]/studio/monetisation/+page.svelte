@@ -35,14 +35,37 @@
   import Input from '$lib/components/ui/Input/Input.svelte';
   import TextArea from '$lib/components/ui/TextArea/TextArea.svelte';
   import Label from '$lib/components/ui/Label/Label.svelte';
-  import { TrashIcon, EditIcon, PlusIcon, CheckCircleIcon } from '$lib/components/ui/Icon';
+  import {
+    TrashIcon,
+    EditIcon,
+    PlusIcon,
+    CheckCircleIcon,
+    ChevronRightIcon,
+    UsersIcon,
+  } from '$lib/components/ui/Icon';
   import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
   import { toast } from '$lib/components/ui/Toast/toast-store';
+  import PlanPicker from '$lib/components/studio/plan-picker/PlanPicker.svelte';
+  import PlanGuidanceNote from '$lib/components/studio/plan-picker/PlanGuidanceNote.svelte';
+  import {
+    countsAnd,
+    countsDot,
+    itemsLabel,
+  } from '$lib/components/studio/plan-picker/plan-counts';
+  import {
+    isDearer,
+    itemGaps,
+    joinNames,
+    tiersByPrice,
+    toggleTierId,
+  } from '$lib/components/studio/plan-picker/select-from-tier';
   import { onMount, tick } from 'svelte';
   import {
     listTiers,
     getMyConnectStatus,
     getSubscriptionStats,
+    getTierAccessSummary,
+    getTierDeleteImpact,
     createTier,
     updateTier,
     deleteTier,
@@ -56,6 +79,7 @@
   import { randomUuid } from '$lib/utils/random-uuid';
   import { humanizeRequirement } from '$lib/utils/connect-requirement-humanization';
   import {
+    type ConnectQueryState,
     connectQueryState,
     isConnectReady,
     moneyReadiness,
@@ -127,6 +151,26 @@
     connectQueryState(statsQuery as QueryResult<SubscriptionStats> | null)
   );
   const statsFailed = $derived(statsState.kind === 'failed');
+
+  // What each tier includes (Codex-2hxff.91). STREAMED secondary data: the
+  // rows render without it, their counts and guidance notes fill in when it
+  // lands, and a failed read simply hides them (the create dialog's copy
+  // choice still works, without its numbers). Authoritative and uncached.
+  type TierAccessSummary = NonNullable<
+    Awaited<ReturnType<typeof getTierAccessSummary>>
+  >;
+  type TierDeleteImpact = NonNullable<
+    Awaited<ReturnType<typeof getTierDeleteImpact>>
+  >;
+  const summaryQuery = $derived(orgId ? getTierAccessSummary(orgId) : null);
+  const summaryState = $derived(
+    connectQueryState(summaryQuery as QueryResult<TierAccessSummary> | null)
+  );
+  const summary = $derived(summaryState.kind === 'ok' ? summaryState.status : null);
+  const summaryByTier = $derived(
+    new Map((summary?.tiers ?? []).map((row) => [row.tierId, row]))
+  );
+  const tierById = $derived(new Map(tiers.map((t) => [t.id, t])));
 
   type ConnectStatusPayload = {
     isConnected: boolean; accountId: string | null;
@@ -374,6 +418,13 @@
   let tierFormError = $state('');
   let tierFormLoading = $state(false);
   /**
+   * "Include everything from…" (Codex-2hxff.91): the tier whose films and
+   * courses the new tier starts with, or `null` for Nothing. It starts on the
+   * dearest existing tier (owner decision U3), which is what a new top tier
+   * got under the old ladder. Create only: copying happens at creation.
+   */
+  let tierCopyFrom = $state<string | null>(null);
+  /**
    * One id per create attempt, minted when the dialog opens (Codex-2hxff.66).
    * The server keys the Stripe product and prices on it, so resubmitting the
    * SAME values (a retry after a dropped response, a double submit) gets back
@@ -388,7 +439,44 @@
     description: string | undefined;
     priceMonthly: number;
     priceAnnual: number;
+    /**
+     * Part of the attempt: Stripe compares only its own parameters under a
+     * key, so a reused `submissionId` with a different source would return
+     * the first attempt's tier with the FIRST copy. A changed source is
+     * therefore a new attempt with a new id, like a changed price.
+     */
+    copyAccessFromTierId: string | null;
   };
+
+  /** The copy choices, dearest first: what the default and the cards follow. */
+  const copySources = $derived([...tiersByPrice(tiers)].reverse());
+
+  function defaultCopySource(): string | null {
+    return copySources[0]?.id ?? null;
+  }
+
+  /** Films + courses a tier includes, once the summary has landed. */
+  function itemCountOf(tierId: string): number | null {
+    const row = summaryByTier.get(tierId);
+    return row ? row.films + row.courses : null;
+  }
+
+  /**
+   * The create dialog's preview note (mockup P2): a new tier that starts with
+   * Nothing but costs more than tiers that include things lacks all of them.
+   * The cheaper tiers with items, dearest first; `[]` hides the note (it also
+   * hides with no counts, no name yet, or a copy source chosen).
+   */
+  const createGaps = $derived.by(() => {
+    if (editingTier || tierCopyFrom !== null || !summary || !tierName.trim()) {
+      return [];
+    }
+    const monthly = Number(tierPriceMonthly);
+    return copySources
+      .filter((t) => isDearer(t, { ...t, priceMonthly: monthly }))
+      .map((t) => ({ tier: t, items: itemCountOf(t.id) ?? 0 }))
+      .filter((gap) => gap.items > 0);
+  });
   /**
    * A create whose outcome is unknown: it was sent and did not answer with
    * success. The server may still have made the tier (a lost response, a
@@ -444,6 +532,120 @@
   // Delete dialog state
   let deleteLoading = $state(false);
   let deleteError = $state('');
+  /**
+   * What happens to the films and courses ONLY in the tier being deleted
+   * (Codex-2hxff.91). Nothing is preselected (owner decision U5): Delete stays
+   * disabled until the creator moves them to one or more tiers or keeps them
+   * subscribers-only (closed, never free).
+   */
+  let deleteChoice = $state<'keep' | 'move' | null>(null);
+  let deleteMoveTo = $state<string[]>([]);
+
+  /**
+   * The dialog's preview, read when it opens. The delete recomputes "only
+   * here" in its own transaction; this decides what the dialog offers, and
+   * until it has loaded Delete stays disabled. A failed read never reads as
+   * "nothing only here".
+   */
+  const impactQuery = $derived(
+    orgId && deletingTier && deleteDialogOpen
+      ? getTierDeleteImpact({ orgId, tierId: deletingTier.id })
+      : null
+  );
+  /**
+   * A refusal (TIER_HAS_ONLY_ITEMS, TIER_HAS_SUBSCRIBERS) proves the preview
+   * out of date, but kit's `Query` keeps the old `current` while it re-reads
+   * and FOREVER if the re-read fails, so `impactState` alone still reads
+   * `ok` on the old preview. Until the re-read lands the dialog treats the
+   * preview as unknown: no choices, Delete disabled, and the "couldn't
+   * check" alert if the re-read fails.
+   */
+  let impactStale = $state(false);
+  let impactRereadFailed = $state(false);
+  /** Only the newest re-read speaks (see retryImpact). */
+  let impactReadRun = 0;
+  const impactState = $derived.by<ConnectQueryState<TierDeleteImpact>>(() => {
+    if (impactStale) return impactRereadFailed ? { kind: 'failed' } : { kind: 'loading' };
+    return connectQueryState(impactQuery as QueryResult<TierDeleteImpact> | null);
+  });
+  const impact = $derived(impactState.kind === 'ok' ? impactState.status : null);
+  const onlyHereFilms = $derived(impact?.onlyHere.films.total ?? 0);
+  const onlyHereCourses = $derived(impact?.onlyHere.courses.total ?? 0);
+  const onlyHereTotal = $derived(onlyHereFilms + onlyHereCourses);
+  const alsoElsewhere = $derived(
+    (impact?.alsoInOtherPlans.films ?? 0) + (impact?.alsoInOtherPlans.courses ?? 0)
+  );
+  /** The tiers the only-here items can move to: every other active tier. */
+  const moveOptions = $derived(tiers.filter((t) => t.id !== deletingTier?.id));
+  const otherTierNames = $derived(
+    joinNames(
+      tiersByPrice(moveOptions).map((t) => t.name),
+      'or'
+    )
+  );
+  /** The first few only-here items, films first, as the dialog lists them. */
+  const DELETE_PREVIEW_LIMIT = 5;
+  const onlyHereShown = $derived(
+    impact
+      ? [
+          ...impact.onlyHere.films.items.map((item) => ({ kind: 'film' as const, ...item })),
+          ...impact.onlyHere.courses.items.map((item) => ({ kind: 'course' as const, ...item })),
+        ].slice(0, DELETE_PREVIEW_LIMIT)
+      : []
+  );
+  /** "Pro won't include these 5, though Basic will." for the move target. */
+  const moveGaps = $derived(
+    deleteChoice === 'move' ? itemGaps(deleteMoveTo, moveOptions) : []
+  );
+  const deleteReady = $derived(
+    impact !== null &&
+      impact.liveSubscriberCount === 0 &&
+      (onlyHereTotal === 0 ||
+        deleteChoice === 'keep' ||
+        (deleteChoice === 'move' && deleteMoveTo.length > 0))
+  );
+
+  /**
+   * Re-read the preview. A first-read failure stays on the query's `.error`,
+   * which keeps the alert up. A stale preview stays hidden until THIS read
+   * lands; a failed one keeps the alert up (with Retry) until a read lands.
+   *
+   * Kit settles every EARLIER pending refresh when a later one settles, even
+   * when the later one fails, so a resolved promise is not "this read landed".
+   * A double-clicked Retry whose second read fails would otherwise clear the
+   * stale flag on the old preview. Only the newest call may speak.
+   */
+  function retryImpact() {
+    const query = impactQuery;
+    if (!query) return;
+    const run = ++impactReadRun;
+    query.refresh().then(
+      () => {
+        if (impactQuery !== query || run !== impactReadRun) return;
+        impactStale = false;
+        impactRereadFailed = false;
+      },
+      () => {
+        if (impactQuery === query && run === impactReadRun) impactRereadFailed = true;
+      }
+    );
+  }
+
+  /**
+   * Why Delete is disabled, for its `aria-describedby`: the visible line that
+   * says what is missing (U5's choice, a move target, or a failed check).
+   */
+  const deleteBlockedBy = $derived(
+    deleteReady
+      ? undefined
+      : impactState.kind === 'failed'
+        ? 'tier-delete-impact-failed-text'
+        : impact && onlyHereTotal > 0 && deleteChoice === null
+          ? 'tier-delete-choice-legend'
+          : impact && deleteChoice === 'move' && deleteMoveTo.length === 0
+            ? 'tier-delete-move-pick'
+            : undefined
+  );
 
   // Connect state
   let connectLoading = $state(false);
@@ -620,11 +822,13 @@
       tierDescription = unsettledCreate.description ?? '';
       tierPriceMonthly = unsettledCreate.priceMonthly;
       tierPriceAnnual = unsettledCreate.priceAnnual;
+      tierCopyFrom = unsettledCreate.copyAccessFromTierId;
     } else {
       tierName = '';
       tierDescription = '';
       tierPriceMonthly = 499;
       tierPriceAnnual = 4990;
+      tierCopyFrom = defaultCopySource();
       mintTierSubmission();
     }
     // Busy only while a send of THIS attempt is still out, i.e. a reopen that
@@ -650,6 +854,11 @@
   function openDeleteTier(tier: SubscriptionTier) {
     deletingTier = tier;
     deleteError = '';
+    deleteChoice = null;
+    deleteMoveTo = [];
+    impactStale = false;
+    impactRereadFailed = false;
+    impactReadRun += 1;
     deleteDialogOpen = true;
   }
 
@@ -702,6 +911,9 @@
       description: tierDescription || undefined,
       priceMonthly: tierPriceMonthly,
       priceAnnual: tierPriceAnnual,
+      // As chosen. A source deleted meanwhile is refused by the server before
+      // any Stripe call; it is never quietly swapped for Nothing.
+      copyAccessFromTierId: tierCopyFrom,
     };
     // Stripe refuses a reused key with different parameters, so values
     // that changed since the last send are a new attempt with a new id.
@@ -823,14 +1035,52 @@
   }
 
   async function handleDeleteTier() {
-    if (!deletingTier) return;
+    if (!deletingTier || !deleteReady) return;
+    // The choice goes only when something is only in this tier, and only as
+    // the creator made it. With nothing only-here a bare delete is sent; if
+    // something became only-here meanwhile, the worker refuses it.
+    const choice =
+      onlyHereTotal === 0
+        ? undefined
+        : deleteChoice === 'keep'
+          ? { onlyHere: 'keep' as const }
+          : { onlyHere: 'move' as const, moveTo: [...deleteMoveTo] };
     deleteLoading = true;
     deleteError = '';
     try {
-      await deleteTier({ orgId, tierId: deletingTier.id });
-      deleteDialogOpen = false;
-      deletingTier = null;
-      await invalidateAll();
+      const result = await deleteTier({ orgId, tierId: deletingTier.id, choice });
+      if (result.success) {
+        deleteDialogOpen = false;
+        deletingTier = null;
+        await invalidateAll();
+        return;
+      }
+      if (!('detailsCode' in result)) return;
+      if (result.detailsCode === 'TIER_HAS_ONLY_ITEMS') {
+        // The preview went stale: ask again, from a FRESH read only.
+        deleteError = m.monetisation_tier_delete_only_here_changed({
+          name: deletingTier.name,
+        });
+        deleteChoice = null;
+        deleteMoveTo = [];
+        impactStale = true;
+        retryImpact();
+      } else if (result.detailsCode === 'TIER_HAS_SUBSCRIBERS') {
+        // Someone subscribed since the check: say so, and the fresh read
+        // shows the refusal up front.
+        deleteError = m.monetisation_tier_delete_subscribed_meanwhile({
+          name: deletingTier.name,
+        });
+        impactStale = true;
+        retryImpact();
+      } else {
+        deleteError = m.monetisation_tier_delete_error();
+      }
+      logRawError(
+        'tier delete refused',
+        `${result.status} ${result.detailsCode ?? result.code ?? 'unknown'}`,
+        result.status >= 500 ? 'error' : 'warn'
+      );
     } catch (error) {
       deleteError = m.monetisation_tier_delete_error();
       logRawError('tier delete failed', error);
@@ -1299,6 +1549,10 @@
           {#each tiers as tier, i (tier.id)}
             {@const tierStats = subscribersByTier.get(tier.id)}
             {@const saving = annualSavingPercent(tier)}
+            {@const access = summaryByTier.get(tier.id)}
+            {@const rowGaps = (access?.missingFromCheaper ?? []).filter((gap) =>
+              tierById.has(gap.cheaperTierId)
+            )}
             <div class="tier-item">
               <div class="tier-rank">{i + 1}</div>
               <div class="tier-details">
@@ -1317,6 +1571,22 @@
                       {formatPrice(tierStats.mrrCents)}/{m.monetisation_tier_monthly()}
                     </span>
                   </a>
+                {/if}
+                <!-- What the tier includes, the way into its checklist
+                     (Codex-2hxff.91). Streamed: a skeleton while the summary
+                     loads, nothing if it failed. -->
+                {#if access}
+                  <a
+                    class="tier-subscribers tier-content-link"
+                    href="/studio/monetisation/tiers/{tier.id}"
+                    data-testid="tier-contents-link"
+                  >
+                    {countsDot(access.films, access.courses)}
+                    <span class="sr-only">{m.monetisation_tier_contents_link_aria({ name: tier.name })}</span>
+                    <ChevronRightIcon size={12} aria-hidden="true" />
+                  </a>
+                {:else if summaryState.kind === 'loading'}
+                  <Skeleton width="var(--space-24)" height="var(--text-xs)" />
                 {/if}
               </div>
               <!-- The switch had NO accessible name at all — no `aria-label`, no
@@ -1367,6 +1637,36 @@
                   <TrashIcon size={14} />
                 </Button>
               </div>
+              <!-- The guidance note (owner decision 2): this tier costs more
+                   than one that has items it lacks. Info, never a block. -->
+              {#if rowGaps.length > 0}
+                <div class="tier-gaps">
+                  {#each rowGaps as gap (gap.cheaperTierId)}
+                    {@const cheaperName = tierById.get(gap.cheaperTierId)?.name ?? ''}
+                    {@const count = gap.films + gap.courses}
+                    <PlanGuidanceNote
+                      size="compact"
+                      data-testid="tier-row-gap"
+                      actions={[
+                        {
+                          label: m.plan_gap_review(),
+                          href: `/studio/monetisation/tiers/${tier.id}?filter=missing&cheaper=${gap.cheaperTierId}`,
+                        },
+                      ]}
+                    >
+                      <b>
+                        {count === 1
+                          ? m.plan_gap_tier_row_one({ dearer: tier.name, cheaper: cheaperName })
+                          : m.plan_gap_tier_row_other({
+                              dearer: tier.name,
+                              count,
+                              cheaper: cheaperName,
+                            })}
+                      </b>
+                    </PlanGuidanceNote>
+                  {/each}
+                </div>
+              {/if}
             </div>
           {/each}
         </div>
@@ -1442,6 +1742,92 @@
           </div>
         </div>
 
+        <!-- "Include everything from…" (Codex-2hxff.91): copies a tier's films
+             and courses in the same server command as the create. Create only,
+             and only when there is a tier to copy. Dearest first; the dearest
+             is the default (U3). -->
+        {#if !editingTier && copySources.length > 0}
+          <fieldset class="choice-group" data-testid="tier-copy-from">
+            <legend class="choice-legend">{m.monetisation_tier_copy_label()}</legend>
+            {#each copySources as source (source.id)}
+              {@const row = summaryByTier.get(source.id)}
+              <label class="choice-card" data-selected={tierCopyFrom === source.id || undefined}>
+                <input
+                  type="radio"
+                  name="tier-copy-from"
+                  class="sr-only"
+                  value={source.id}
+                  checked={tierCopyFrom === source.id}
+                  onchange={() => (tierCopyFrom = source.id)}
+                />
+                <span class="choice-text">
+                  <span class="choice-label">{source.name}</span>
+                  <span class="choice-desc">
+                    {row
+                      ? m.monetisation_tier_copy_option_desc({
+                          counts: countsAnd(row.films, row.courses),
+                          price: formatPrice(source.priceMonthly),
+                        })
+                      : m.monetisation_tier_copy_option_price({
+                          price: formatPrice(source.priceMonthly),
+                        })}
+                  </span>
+                </span>
+                <span class="choice-check" aria-hidden="true"></span>
+              </label>
+            {/each}
+            <label class="choice-card" data-selected={tierCopyFrom === null || undefined}>
+              <input
+                type="radio"
+                name="tier-copy-from"
+                class="sr-only"
+                value=""
+                checked={tierCopyFrom === null}
+                onchange={() => (tierCopyFrom = null)}
+              />
+              <span class="choice-text">
+                <span class="choice-label">{m.monetisation_tier_copy_none()}</span>
+                <span class="choice-desc">{m.monetisation_tier_copy_none_desc()}</span>
+              </span>
+              <span class="choice-check" aria-hidden="true"></span>
+            </label>
+            <span class="form-hint">{m.monetisation_tier_copy_hint()}</span>
+          </fieldset>
+
+          {#if createGaps.length > 0}
+            {@const first = createGaps[0]}
+            {@const name = tierName.trim()}
+            <PlanGuidanceNote
+              data-testid="tier-create-gap"
+              actions={[
+                {
+                  label: m.plan_gap_create_action({ tierName: first.tier.name }),
+                  onclick: () => (tierCopyFrom = first.tier.id),
+                },
+              ]}
+            >
+              {#if createGaps.length === 1}
+                {m.plan_gap_create_one({ name, items: itemsLabel(first.items), cheaper: first.tier.name })}
+              {:else if createGaps.length === 2}
+                {m.plan_gap_create_two({
+                  name,
+                  items: itemsLabel(first.items),
+                  cheaper: first.tier.name,
+                  count2: createGaps[1].items,
+                  cheaper2: createGaps[1].tier.name,
+                })}
+              {:else}
+                {m.plan_gap_create_many({
+                  name,
+                  items: itemsLabel(first.items),
+                  cheaper: first.tier.name,
+                  others: joinNames(createGaps.slice(1).map((gap) => gap.tier.name)),
+                })}
+              {/if}
+            </PlanGuidanceNote>
+          {/if}
+        {/if}
+
         {#if tierFormError}
           <Alert variant="error">{tierFormError}</Alert>
         {/if}
@@ -1466,25 +1852,248 @@
       <Dialog.Title>{m.monetisation_tiers_delete()}</Dialog.Title>
     </Dialog.Header>
     <Dialog.Body>
-      <!-- Names the tier. WCAG 3.3.4 wants something to REVIEW before a
-           revenue-bearing object is destroyed, and neither the trigger, the
-           title nor this sentence used to identify which tier was about to go. -->
-      <p class="delete-confirm">
-        {deletingTier
-          ? m.monetisation_tiers_delete_confirm_named({ name: deletingTier.name })
-          : m.monetisation_tiers_delete_confirm()}
-      </p>
+      {#if impact && impact.liveSubscriberCount > 0 && deletingTier}
+        <!-- Refused, said up front (mockup D6): the worker refuses a tier with
+             any subscription that isn't cancelled, and this count comes from
+             the same read, so the dialog and the refusal can't disagree. -->
+        <Alert variant="warning" data-testid="tier-delete-refused">
+          <span class="alert-icon-row">
+            <UsersIcon size={16} aria-hidden="true" />
+            <span class="alert-copy">
+              <span>
+                <b>{m.monetisation_tier_delete_refused_title({ name: deletingTier.name })}</b>
+                {impact.liveSubscriberCount === 1
+                  ? m.monetisation_tier_delete_refused_body_one({ name: deletingTier.name })
+                  : m.monetisation_tier_delete_refused_body_other({
+                      count: impact.liveSubscriberCount,
+                      name: deletingTier.name,
+                    })}
+              </span>
+              <a class="alert-link" href="/studio/subscribers?tierId={deletingTier.id}">
+                {m.monetisation_tier_delete_refused_view({ name: deletingTier.name })}
+              </a>
+            </span>
+          </span>
+        </Alert>
+      {:else}
+        <!-- Names the tier. WCAG 3.3.4 wants something to REVIEW before a
+             revenue-bearing object is destroyed, and neither the trigger, the
+             title nor this sentence used to identify which tier was about to go. -->
+        <p class="delete-confirm">
+          {deletingTier
+            ? m.monetisation_tiers_delete_confirm_named({ name: deletingTier.name })
+            : m.monetisation_tiers_delete_confirm()}
+        </p>
+
+        {#if impactState.kind === 'failed' && deletingTier}
+          <!-- Never read as "nothing only here" (mockup D7). -->
+          <Alert variant="error" data-testid="tier-delete-impact-failed">
+            <span class="alert-row">
+              <span id="tier-delete-impact-failed-text">
+                {m.monetisation_tier_delete_impact_failed({ name: deletingTier.name })}
+              </span>
+              <Button variant="secondary" size="sm" type="button" onclick={retryImpact}>
+                {m.monetisation_tier_delete_impact_retry()}
+              </Button>
+            </span>
+          </Alert>
+        {:else if !impact}
+          <div class="impact-skeleton" aria-hidden="true">
+            <Skeleton width="70%" height="var(--text-sm)" />
+            <Skeleton width="100%" height="var(--space-16)" />
+          </div>
+        {:else if deletingTier && onlyHereTotal === 0}
+          <p class="impact-lede" data-testid="tier-delete-nothing-only-here">
+            {alsoElsewhere > 0 && otherTierNames
+              ? m.monetisation_tier_delete_nothing_only_here({
+                  name: deletingTier.name,
+                  tiers: otherTierNames,
+                })
+              : m.monetisation_tier_delete_empty({ name: deletingTier.name })}
+          </p>
+        {:else if deletingTier}
+          {@const counts = countsAnd(onlyHereFilms, onlyHereCourses, true)}
+          {@const one = onlyHereTotal === 1}
+          <!-- "Keep" closes only the films that are NOT for sale (design §3.4):
+               a paid film stays on sale, in no tier, and a course stays on
+               sale on its own page. -->
+          {@const closingFilms = impact.onlyHere.films.closing}
+          {@const forSaleFilms = impact.onlyHere.films.staysForSale}
+          <p class="impact-lede" data-testid="tier-delete-only-here">
+            <b>
+              {one
+                ? m.monetisation_tier_delete_only_here_one({ counts, name: deletingTier.name })
+                : m.monetisation_tier_delete_only_here_other({ counts, name: deletingTier.name })}
+            </b>
+          </p>
+          <ul class="impact-list">
+            {#each onlyHereShown as item (item.kind + item.id)}
+              <li>
+                <span class="impact-kind">
+                  {item.kind === 'film' ? m.plan_item_kind_film() : m.plan_item_kind_course()}
+                </span>
+                <span>{item.title}</span>
+              </li>
+            {/each}
+            {#if onlyHereTotal > onlyHereShown.length}
+              <li class="impact-more">
+                {m.monetisation_tier_delete_only_here_more({
+                  count: onlyHereTotal - onlyHereShown.length,
+                })}
+              </li>
+            {/if}
+          </ul>
+
+          <fieldset class="choice-group" data-testid="tier-delete-choice">
+            <legend class="choice-legend" id="tier-delete-choice-legend">
+              {one
+                ? m.monetisation_tier_delete_choice_label_one()
+                : m.monetisation_tier_delete_choice_label_other()}
+            </legend>
+            {#if moveOptions.length > 0}
+              <label class="choice-card" data-selected={deleteChoice === 'move' || undefined}>
+                <input
+                  type="radio"
+                  name="tier-delete-choice"
+                  class="sr-only"
+                  value="move"
+                  checked={deleteChoice === 'move'}
+                  onchange={() => (deleteChoice = 'move')}
+                />
+                <span class="choice-text">
+                  <span class="choice-label">
+                    {one ? m.monetisation_tier_delete_move_one() : m.monetisation_tier_delete_move_other()}
+                  </span>
+                  <span class="choice-desc">
+                    {one
+                      ? m.monetisation_tier_delete_move_desc_one()
+                      : m.monetisation_tier_delete_move_desc_other()}
+                  </span>
+                </span>
+                <span class="choice-check" aria-hidden="true"></span>
+              </label>
+              {#if deleteChoice === 'move'}
+                <div class="choice-detail">
+                  <!-- The shared picker, without "and above": one or more tiers. -->
+                  <PlanPicker
+                    tiers={moveOptions}
+                    selected={deleteMoveTo}
+                    label={one ? m.monetisation_tier_delete_move_one() : m.monetisation_tier_delete_move_other()}
+                    disabled={deleteLoading}
+                    onToggle={(id) => (deleteMoveTo = toggleTierId(deleteMoveTo, id))}
+                  />
+                  {#if deleteMoveTo.length === 0}
+                    <span class="form-hint" id="tier-delete-move-pick">
+                      {one
+                        ? m.monetisation_tier_delete_move_pick_one()
+                        : m.monetisation_tier_delete_move_pick_other()}
+                    </span>
+                  {/if}
+                  {#each moveGaps as gap (gap.dearer.id)}
+                    <PlanGuidanceNote
+                      actions={[
+                        {
+                          label: m.plan_gap_tick({ tierName: gap.dearer.name }),
+                          onclick: () => (deleteMoveTo = toggleTierId(deleteMoveTo, gap.dearer.id)),
+                        },
+                      ]}
+                    >
+                      <b>
+                        {one
+                          ? m.plan_gap_delete_one({
+                              dearer: gap.dearer.name,
+                              cheaper: joinNames(gap.cheaper.map((t) => t.name)),
+                            })
+                          : m.plan_gap_delete_other({
+                              dearer: gap.dearer.name,
+                              count: onlyHereTotal,
+                              cheaper: joinNames(gap.cheaper.map((t) => t.name)),
+                            })}
+                      </b>
+                      {m.plan_gap_delete_body({ dearer: gap.dearer.name })}
+                    </PlanGuidanceNote>
+                  {/each}
+                </div>
+              {/if}
+            {/if}
+            <label class="choice-card" data-selected={deleteChoice === 'keep' || undefined}>
+              <input
+                type="radio"
+                name="tier-delete-choice"
+                class="sr-only"
+                value="keep"
+                checked={deleteChoice === 'keep'}
+                onchange={() => (deleteChoice = 'keep')}
+              />
+              <span class="choice-text">
+                <span class="choice-label">
+                  {#if closingFilms > 0}
+                    {one ? m.monetisation_tier_delete_keep_one() : m.monetisation_tier_delete_keep_other()}
+                  {:else}
+                    {one
+                      ? m.monetisation_tier_delete_keep_no_tier_one()
+                      : m.monetisation_tier_delete_keep_no_tier_other()}
+                  {/if}
+                </span>
+                <span class="choice-desc" data-testid="tier-delete-keep-desc">
+                  {#if closingFilms > 0}
+                    {closingFilms === 1
+                      ? m.monetisation_tier_delete_keep_desc_one()
+                      : m.monetisation_tier_delete_keep_desc_other({ count: closingFilms })}
+                  {/if}
+                  {#if forSaleFilms > 0}
+                    {forSaleFilms === 1
+                      ? m.monetisation_tier_delete_keep_for_sale_one()
+                      : m.monetisation_tier_delete_keep_for_sale_other({ count: forSaleFilms })}
+                  {/if}
+                  {#if onlyHereCourses > 0}
+                    {onlyHereCourses === 1
+                      ? m.monetisation_tier_delete_keep_course_one()
+                      : m.monetisation_tier_delete_keep_course_other()}
+                  {/if}
+                </span>
+              </span>
+              <span class="choice-check" aria-hidden="true"></span>
+            </label>
+          </fieldset>
+
+          {#if alsoElsewhere > 0 && otherTierNames}
+            {@const elsewhere = countsAnd(
+              impact.alsoInOtherPlans.films,
+              impact.alsoInOtherPlans.courses,
+              true
+            )}
+            <p class="impact-foot">
+              {alsoElsewhere === 1
+                ? m.monetisation_tier_delete_unaffected_one({ counts: elsewhere, tiers: otherTierNames })
+                : m.monetisation_tier_delete_unaffected_other({ counts: elsewhere, tiers: otherTierNames })}
+            </p>
+          {/if}
+        {/if}
+      {/if}
       {#if deleteError}
         <Alert variant="error">{deleteError}</Alert>
       {/if}
     </Dialog.Body>
     <Dialog.Footer>
-      <Button variant="ghost" onclick={() => { deleteDialogOpen = false; deletingTier = null; }} disabled={deleteLoading}>
-        {m.monetisation_cancel()}
-      </Button>
-      <Button variant="destructive" onclick={handleDeleteTier} loading={deleteLoading}>
-        {m.monetisation_tiers_delete()}
-      </Button>
+      {#if impact && impact.liveSubscriberCount > 0}
+        <Button variant="ghost" onclick={() => { deleteDialogOpen = false; deletingTier = null; }}>
+          {m.monetisation_tier_delete_close()}
+        </Button>
+      {:else}
+        <Button variant="ghost" onclick={() => { deleteDialogOpen = false; deletingTier = null; }} disabled={deleteLoading}>
+          {m.monetisation_cancel()}
+        </Button>
+        <Button
+          variant="destructive"
+          onclick={handleDeleteTier}
+          loading={deleteLoading}
+          disabled={!deleteReady}
+          aria-describedby={deleteBlockedBy}
+        >
+          {m.monetisation_tiers_delete()}
+        </Button>
+      {/if}
     </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>
@@ -1908,9 +2517,217 @@
 
   /* Delete confirm */
   .delete-confirm {
-    padding: 0 var(--space-4);
+    margin: 0;
     font-size: var(--text-sm);
     color: var(--color-text-secondary);
+  }
+
+  /* ── Plan access (Codex-2hxff.91) ───────────────────────────────────── */
+
+  /* The row's count, a link into "What's in <tier>", styled as the
+     subscriber count beside it. */
+  .tier-content-link {
+    align-items: center;
+    gap: var(--space-1);
+  }
+
+  /* The guidance notes span the row under its clusters. */
+  .tier-gaps {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1-5);
+  }
+
+  @media (--breakpoint-sm) {
+    .tier-gaps {
+      grid-column: 2 / -1;
+    }
+  }
+
+  /* A radio group in the content editor's access-card look: the create
+     dialog's "Include everything from…" and the delete dialog's choice. */
+  .choice-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  .choice-legend {
+    padding: 0;
+    margin-bottom: var(--space-2);
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
+    color: var(--color-text);
+  }
+
+  .choice-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    border: var(--border-width) var(--border-style) var(--color-border);
+    border-radius: var(--radius-md);
+    background-color: var(--color-surface);
+    cursor: pointer;
+    transition: var(--transition-colors);
+  }
+
+  .choice-card:hover {
+    border-color: color-mix(in srgb, var(--color-interactive) 50%, var(--color-border));
+  }
+
+  .choice-card:focus-within {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-0-5);
+  }
+
+  .choice-card[data-selected] {
+    border-color: var(--color-interactive);
+    background-color: color-mix(in srgb, var(--color-interactive) 5%, var(--color-surface));
+  }
+
+  .choice-text {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-0-5);
+    min-width: 0;
+  }
+
+  .choice-label {
+    font-size: var(--text-sm);
+    font-weight: var(--font-semibold);
+    color: var(--color-text);
+  }
+
+  .choice-desc {
+    font-size: var(--text-xs);
+    line-height: var(--leading-relaxed);
+    color: var(--color-text-secondary);
+  }
+
+  .choice-check {
+    width: var(--space-4);
+    height: var(--space-4);
+    border-radius: var(--radius-full);
+    border: var(--border-width-thick) var(--border-style) var(--color-border);
+    background: var(--color-surface);
+  }
+
+  .choice-card[data-selected] .choice-check {
+    border-color: var(--color-interactive);
+    background-color: var(--color-interactive);
+    box-shadow: inset 0 0 0 var(--space-1) var(--color-surface);
+  }
+
+  .choice-detail {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding-inline-start: var(--space-4);
+  }
+
+  /* The delete dialog's impact block. */
+  .impact-lede {
+    margin: 0;
+    font-size: var(--text-sm);
+    line-height: var(--leading-normal);
+    color: var(--color-text);
+  }
+
+  .impact-lede b {
+    font-weight: var(--font-semibold);
+  }
+
+  .impact-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    margin: 0;
+    padding: var(--space-2) var(--space-3);
+    list-style: none;
+    border: var(--border-width) var(--border-style) var(--color-border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--color-surface-secondary);
+    font-size: var(--text-sm);
+    color: var(--color-text);
+  }
+
+  .impact-list li {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    margin: 0;
+  }
+
+  .impact-kind {
+    flex: none;
+    min-width: var(--space-14);
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
+  }
+
+  .impact-more {
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
+  }
+
+  .impact-foot {
+    margin: 0;
+    font-size: var(--text-xs);
+    line-height: var(--leading-normal);
+    color: var(--color-text-secondary);
+  }
+
+  .impact-skeleton {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  /* An alert's sentence, then its action. */
+  .alert-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2) var(--space-3);
+  }
+
+  /* An alert with a leading icon. */
+  .alert-icon-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: var(--space-2);
+    align-items: start;
+    line-height: var(--leading-normal);
+  }
+
+  .alert-icon-row :global(svg) {
+    margin-top: var(--space-0-5);
+  }
+
+  .alert-copy {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .alert-copy b {
+    font-weight: var(--font-semibold);
+  }
+
+  .alert-link {
+    align-self: flex-start;
+    color: inherit;
+    font-weight: var(--font-semibold);
+    text-decoration: underline;
+    text-underline-offset: var(--space-0-5);
   }
 
 </style>

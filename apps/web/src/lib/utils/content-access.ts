@@ -3,7 +3,7 @@
  *
  * WP-1 hard-replaced the single `content.accessType` enum with the separable
  * SPEC §6.1 policy flags (`isFree` / `isPurchasable` + `priceCents` /
- * `includedInTierId` / `courseOnly` / `isFollowerGated` / `isTeamOnly`). Access
+ * `isTierGated` / `courseOnly` / `isFollowerGated` / `isTeamOnly`). Access
  * DECISIONS now read those flags directly (server `@codex/access`, client
  * `access-context` / `subscription-context`).
  *
@@ -41,7 +41,11 @@ export interface ContentAccessPolicyLike {
   isFree?: boolean | null;
   isPurchasable?: boolean | null;
   priceCents?: number | null;
-  includedInTierId?: string | null;
+  /**
+   * The subscribers-only switch (Codex-2hxff.91). Which plans open it is the
+   * item's `includedInTierIds`; on with none ticked is CLOSED, never free.
+   */
+  isTierGated?: boolean | null;
   isFollowerGated?: boolean | null;
   isTeamOnly?: boolean | null;
 }
@@ -54,11 +58,15 @@ export interface ContentAccessPolicyLike {
  * behaviour-preserving inverse of the legacy CHECK mapping (HARDENING §H2):
  * migrated single-mode rows set exactly one gate, so the order is only
  * observable for future multi-flag content. Note that `paid` is checked BEFORE
- * `includedInTierId`: a hybrid "purchasable + tier-included" item resolves to
- * `'paid'` (its former `accessType`) and the caller passes the tier name
- * separately, so `PriceBadge` renders the stacked price/tier badge. This is
+ * `isTierGated`: a hybrid "purchasable + tier-included" item resolves to
+ * `'paid'` (its former `accessType`) and the caller passes the plan label
+ * separately, so `PriceBadge` renders the stacked price/plan badge. This is
  * the DISPLAY inverse — the `@codex/access` gate orders tier before paid, a
  * decision concern that does not affect the label.
+ *
+ * The switch is read, never the set: a gated item with no plan ticked is
+ * `'subscribers'` (closed), never `'free'`, and the Studio editor opens it as
+ * subscribers-only (Codex-2hxff.91).
  */
 export function deriveContentAccessKind(
   policy: ContentAccessPolicyLike
@@ -66,6 +74,6 @@ export function deriveContentAccessKind(
   if (policy.isTeamOnly) return 'team';
   if (policy.isFollowerGated) return 'followers';
   if (policy.isPurchasable || (policy.priceCents ?? 0) > 0) return 'paid';
-  if (policy.includedInTierId != null) return 'subscribers';
+  if (policy.isTierGated === true) return 'subscribers';
   return 'free';
 }

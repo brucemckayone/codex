@@ -231,7 +231,7 @@ The org layout uses `invalidate('cache:org-versions')` (separate from platform's
 | Key | Who bumps it | Client action on stale |
 |---|---|---|
 | `user:{id}:library` | ecom-api (purchase) | `invalidateCollection('library')` |
-| `org:{id}:content` | content-api (publish/unpublish) | `invalidateCollection({ kind: 'content', orgId })` |
+| `org:{id}:content` | content-api (publish/unpublish, content edits); organization-api (tier create with a copy, tier delete, tier checklist saves: the public list carries which tiers include an item) | `invalidateCollection({ kind: 'content', orgId })` |
 | `user:{id}:subscription:{orgId}` | ecom-api (checkout/tier change/cancel) | `invalidateCollection('subscription')` |
 
 ### HTTP Cache Headers
@@ -397,7 +397,7 @@ const org = await api.org.getPublicInfo(slug);
 | `api.ownership` | org | `get()`, `offer()`, `withdraw()`, `accept()`, `decline()` — one-owner transfer (Codex-2hxff.2); the last three send no body |
 | `api.checkout` | ecom | `create()`, `verify()`, `createPortalSession()` |
 | `api.subscription` | ecom | `getCurrent()`, `checkout()`, `cancel()`, `getSubscribers()` |
-| `api.tiers` | org | `list()`, `create()`, `update()`, `reorder()` |
+| `api.tiers` | org | `list()`, `create()`, `update()`, `reorder()`, `delete()` (Move/Keep choice), `accessSummary()`, `deleteImpact()`, `items()`, `setItems()` — plan access by ticks (Codex-2hxff.91) |
 | `api.connect` | ecom | `onboard()`, `getStatus()`, `getDashboardLink()` |
 | `api.analytics` | admin | `getDashboardStats()`, `getRevenue()`, `getTopContent()` |
 | `api.admin` | admin | `getCustomers()`, `getActivity()`, `getCustomerDetail()`, `grantContentAccess()` |

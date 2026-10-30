@@ -229,18 +229,16 @@ export const load: PageServerLoad = async ({
 
   // Subscription context (org-scoped content may have tier gating).
   // Skip the round-trip entirely for content that can't require a
-  // subscription — no tier gate (includedInTierId == null, the WP-1
-  // successor of accessType 'subscribers').
+  // subscription — the tier switch off (`isTierGated`, Codex-2hxff.91).
   // Saves 2-3 round-trips per non-gated page load (Codex-585ie).
-  const gatingOrgId =
-    content.includedInTierId != null
-      ? (content.organization?.id ?? null)
-      : null;
+  const gatingOrgId = content.isTierGated
+    ? (content.organization?.id ?? null)
+    : null;
 
   const subContextPromise = gatingOrgId
     ? loadSubscriptionContext(
         gatingOrgId,
-        content.includedInTierId ?? null,
+        content,
         platform,
         cookies,
         locals.user != null

@@ -43,6 +43,7 @@ import {
   createTestTierInput,
   createUniqueSlug,
   type Database,
+  gateContentToTiers,
   seedTestUsers,
   setupTestDatabase,
   teardownTestDatabase,
@@ -111,13 +112,25 @@ describe('course sales films (owner P10)', () => {
   }
 
   async function useIn(mediaItemId: string, policy: NewContent = {}) {
-    await db.insert(content).values(
-      createTestContentInput(creatorId, {
+    const [row] = await db
+      .insert(content)
+      .values(
+        createTestContentInput(creatorId, {
+          organizationId: orgId,
+          mediaItemId,
+          ...policy,
+        })
+      )
+      .returning({ id: content.id, organizationId: content.organizationId });
+    // "In a tier" (Codex-2hxff.91): behind the switch with the org's tier
+    // ticked, as the studio saves it.
+    if (row && policy.isTierGated && row.organizationId === orgId) {
+      await gateContentToTiers(db, {
+        contentId: row.id,
         organizationId: orgId,
-        mediaItemId,
-        ...policy,
-      })
-    );
+        tierIds: [tierId],
+      });
+    }
   }
 
   async function seedCourse(
@@ -254,7 +267,7 @@ describe('course sales films (owner P10)', () => {
       ['isFree false', () => ({ isFree: false })],
       ['purchasable', () => ({ isPurchasable: true, priceCents: 500 })],
       ['priced but not purchasable', () => ({ priceCents: 500 })],
-      ['in a tier', () => ({ includedInTierId: tierId })],
+      ['in a tier', () => ({ isTierGated: true })],
       ['followers only', () => ({ isFollowerGated: true })],
       ['team only', () => ({ isTeamOnly: true })],
       ['course only', () => ({ courseOnly: true })],
@@ -270,7 +283,7 @@ describe('course sales films (owner P10)', () => {
           isFree: row.isFree ?? null,
           isPurchasable: row.isPurchasable ?? null,
           priceCents: row.priceCents ?? null,
-          includedInTierId: row.includedInTierId ?? null,
+          isTierGated: row.isTierGated ?? null,
           isFollowerGated: row.isFollowerGated ?? null,
           isTeamOnly: row.isTeamOnly ?? null,
           courseOnly: row.courseOnly ?? null,
@@ -478,7 +491,7 @@ describe('course sales films (owner P10)', () => {
     it('full for a free film, preview for a paid one or a leaver’s, and no flag on the hero loop', async () => {
       const intro = await seedFilm();
       const reel = await seedFilm();
-      await useIn(reel, { includedInTierId: tierId });
+      await useIn(reel, { isTierGated: true });
       const guide = await seedFilm({}, leaverId);
       const hero = await seedFilm();
       const courseId = await seedCourse({ intro, reel, guide, hero });

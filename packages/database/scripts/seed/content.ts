@@ -1,7 +1,7 @@
 import { getMediaThumbnailKey } from '../../../transcoding/src/paths';
 import type { dbWs as DbClient } from '../../src';
 import { schema } from '../../src';
-import { CONTENT, ORGS } from './constants';
+import { CONTENT, ORGS, TIERS } from './constants';
 import { ARTICLE_BODY_JSON, OFFERING_BODY_JSON } from './placeholders';
 
 const now = new Date();
@@ -127,77 +127,96 @@ const DESCRIPTIONS: Record<string, string> = {
     'An essay on sound and vibration as healing modalities. The science and the sacred behind bowls, drums, and voice.',
 };
 
+const TIER_SORT_ORDER: ReadonlyMap<string, number> = new Map(
+  Object.values(TIERS).map((t) => [t.id, t.sortOrder])
+);
+
 /**
  * Translate a seed constant's authoring shape (single `accessType` + price +
- * minimum tier) into the SPEC §6.1 policy flags the `content` table now stores
- * (WP-1 hard-replaced the `accessType`/`minimumTierId` columns). Mirrors the
- * legacy CHECK mapping (HARDENING §H2) and the `ContentService.create`
- * normalization, so seeded rows behave identically to app-created content.
+ * the plans it is included in) into the SPEC §6.1 policy flags the `content`
+ * table stores. Mirrors the `ContentService.create` normalization, so seeded
+ * rows behave identically to app-created content.
  *
- * `includedInTierId` is populated only for tier-bearing modes (subscribers /
- * hybrid paid), matching the former clamp — a nonsensical (mode, tier) pair
- * can never land even if the constants drift.
+ * Plan access (Codex-2hxff.91): `isTierGated` is the switch and the ticks
+ * (`content_tier_access`, written by {@link seedContentTierAccess}) say which
+ * plans include the item. The legacy `included_in_tier_id` column is
+ * dual-written with the lowest ticked plan by sort order, as the service does.
+ * Ticks are populated only for tier-bearing modes (subscribers / hybrid paid),
+ * so a nonsensical (mode, tiers) pair can never land even if the constants
+ * drift.
  */
 function toAccessFlags(c: {
   accessType?: string;
   priceCents?: number | null;
-  minimumTierId?: string | null;
+  includedInTierIds?: readonly string[];
   slug?: string;
 }): {
-  isFree: boolean;
-  isPurchasable: boolean;
-  priceCents: number | null;
-  includedInTierId: string | null;
-  courseOnly: boolean;
-  isFollowerGated: boolean;
-  isTeamOnly: boolean;
+  flags: {
+    isFree: boolean;
+    isPurchasable: boolean;
+    priceCents: number | null;
+    isTierGated: boolean;
+    legacyIncludedInTierId: string | null;
+    courseOnly: boolean;
+    isFollowerGated: boolean;
+    isTeamOnly: boolean;
+  };
+  tierIds: string[];
 } {
   const accessType = c.accessType ?? 'free';
   const price = c.priceCents ?? null;
-  const tierId = c.minimumTierId ?? null;
+  const tierIds = [...new Set(c.includedInTierIds ?? [])];
+  const lowest =
+    [...tierIds].sort(
+      (a, b) => (TIER_SORT_ORDER.get(a) ?? 0) - (TIER_SORT_ORDER.get(b) ?? 0)
+    )[0] ?? null;
   const base = {
     isFree: false,
     isPurchasable: false,
     priceCents: null as number | null,
-    includedInTierId: null as string | null,
+    isTierGated: false,
+    legacyIncludedInTierId: null as string | null,
     courseOnly: false,
     isFollowerGated: false,
     isTeamOnly: false,
   };
+  const gated = { isTierGated: true, legacyIncludedInTierId: lowest };
   switch (accessType) {
     case 'paid':
-      // Purchasable; a non-null tier makes it a hybrid (also tier-included).
+      // Purchasable; ticked plans make it a hybrid (also included in them).
       return {
-        ...base,
-        isPurchasable: true,
-        priceCents: price,
-        includedInTierId: tierId,
+        flags: {
+          ...base,
+          isPurchasable: true,
+          priceCents: price,
+          ...(tierIds.length > 0 ? gated : {}),
+        },
+        tierIds,
       };
     case 'subscribers':
-      // Fail-closed: subscriber gating REQUIRES a concrete tier — the flag model
-      // has no "any-subscriber / no specific tier" state. Without a tier this
-      // would author a zero-gate non-free row (isFree:false, every gate off)
-      // that the resolver treats as PUBLIC. Refuse loudly so seed-constant drift
-      // can never mint a public row (mirrors `accessSelectionToFlags` in the
-      // remote form + the `createContentSchema` refine). An optional price makes
-      // it ALSO purchasable.
-      if (!tierId) {
+      // A subscribers-only item with no plan ticked is CLOSED, never public.
+      // A seed should never mint one by accident, so refuse loudly. An
+      // optional price makes it ALSO purchasable.
+      if (tierIds.length === 0) {
         throw new Error(
-          `Seed content "${c.slug ?? '(unknown)'}" is accessType 'subscribers' but has no minimumTierId — subscriber content requires a concrete tier.`
+          `Seed content "${c.slug ?? '(unknown)'}" is accessType 'subscribers' but lists no includedInTierIds — subscriber content needs at least one plan.`
         );
       }
       return {
-        ...base,
-        includedInTierId: tierId,
-        isPurchasable: (price ?? 0) > 0,
-        priceCents: (price ?? 0) > 0 ? price : null,
+        flags: {
+          ...base,
+          ...gated,
+          isPurchasable: (price ?? 0) > 0,
+          priceCents: (price ?? 0) > 0 ? price : null,
+        },
+        tierIds,
       };
     case 'followers':
-      return { ...base, isFollowerGated: true };
+      return { flags: { ...base, isFollowerGated: true }, tierIds: [] };
     case 'team':
-      return { ...base, isTeamOnly: true };
+      return { flags: { ...base, isTeamOnly: true }, tierIds: [] };
     default:
-      return { ...base, isFree: true };
+      return { flags: { ...base, isFree: true }, tierIds: [] };
   }
 }
 
@@ -206,7 +225,7 @@ export async function seedContent(db: typeof DbClient) {
 
   await db.insert(schema.content).values(
     items.map((c) => {
-      const accessFlags = toAccessFlags(c);
+      const { flags: accessFlags } = toAccessFlags(c);
 
       // Optional per-item publish offset (days ago). Items without it fall
       // back to the shared 7-days-ago constant. Lets the expanded catalogue
@@ -262,4 +281,27 @@ export async function seedContent(db: typeof DbClient) {
   );
 
   console.log(`  Seeded ${items.length} content items`);
+
+  await seedContentTierAccess(db);
+}
+
+/**
+ * Write each tier-gated item's ticks (`content_tier_access`). Runs after the
+ * content insert — the ticks FK `(content_id, organization_id)` onto it.
+ */
+async function seedContentTierAccess(db: typeof DbClient) {
+  const ticks = Object.values(CONTENT).flatMap((c) => {
+    const { tierIds } = toAccessFlags(c);
+    if (tierIds.length === 0 || !c.orgId) return [];
+    const organizationId: string = c.orgId;
+    return tierIds.map((tierId) => ({
+      contentId: c.id,
+      tierId,
+      organizationId,
+    }));
+  });
+  if (ticks.length > 0) {
+    await db.insert(schema.contentTierAccess).values(ticks);
+  }
+  console.log(`  Seeded ${ticks.length} plan-access ticks`);
 }

@@ -41,7 +41,7 @@ const paidItem: StreamingAccessContent = {
   isFree: false,
   isPurchasable: true,
   priceCents: 1500,
-  includedInTierId: null,
+  isTierGated: false,
   isFollowerGated: false,
   isTeamOnly: false,
   courseOnly: false,

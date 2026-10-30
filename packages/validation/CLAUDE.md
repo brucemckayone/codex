@@ -34,6 +34,7 @@ app.get('/content/:id',
 ### Content & Media (`content/content-schemas.ts`)
 - `createContentSchema` — create content (title, slug, type, visibility, price, etc.)
 - `updateContentSchema` — partial update
+- Plan access on content (Codex-2hxff.91): `isTierGated` is the subscribers-only switch and `includedInTierIds` the exact tier set; gated with `[]` is CLOSED, never free. An absent `includedInTierIds` on update leaves the ticks alone (no `.default()`). The old single `includedInTierId` is still accepted for one release
 - `publishContentSchema` — publish with optional publishedAt date
 - `contentQuerySchema` — paginated list (status, type, creatorId, visibility filters)
 - `publicContentQuerySchema` — public-facing list (published only)
@@ -91,6 +92,7 @@ admin-api's `/api/admin/support/*` routes (Codex-2hxff.28), all platform-owner o
 
 ### Subscriptions (`schemas/subscription.ts`)
 - Subscription-related schemas (plans, membership)
+- Plan access by ticks (Codex-2hxff.91): `createTierSchema` takes an optional `copyAccessFromTierId` ("Include everything from…", copied in the same transaction; a replayed `submissionId` copies nothing again); `deleteTierQuerySchema` (`onlyHere: keep|move`, `moveTo` a comma list of tier ids) for what is only in the deleted tier; `planItemsQuerySchema` (the tier checklist, paginated to `PLAN_ITEMS_PAGE_MAX`) and `planItemsDeltaSchema` (adds and removes, capped by `PLAN_ITEMS_DELTA_MAX` / `PLAN_ITEMS_DELTA_LIST_MAX`)
 
 ### Transcoding (`schemas/transcoding.ts`)
 - `runpodWebhookSchema`, `runpodWebhookUnionSchema` — RunPod webhook payloads

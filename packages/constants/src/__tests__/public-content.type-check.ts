@@ -21,7 +21,7 @@ isPublicContent({
   isFree: true,
   isPurchasable: false,
   priceCents: null,
-  includedInTierId: null,
+  isTierGated: false,
   isFollowerGated: false,
   isTeamOnly: false,
   courseOnly: false,
@@ -31,7 +31,7 @@ isPublicContent({
 isPublicContent({
   isPurchasable: false,
   priceCents: null,
-  includedInTierId: null,
+  isTierGated: false,
   isFollowerGated: false,
   isTeamOnly: false,
   courseOnly: false,
@@ -41,7 +41,7 @@ isPublicContent({
 isPublicContent({
   isFree: true,
   priceCents: null,
-  includedInTierId: null,
+  isTierGated: false,
   isFollowerGated: false,
   isTeamOnly: false,
   courseOnly: false,
@@ -51,13 +51,13 @@ isPublicContent({
 isPublicContent({
   isFree: true,
   isPurchasable: false,
-  includedInTierId: null,
+  isTierGated: false,
   isFollowerGated: false,
   isTeamOnly: false,
   courseOnly: false,
 });
 
-// @ts-expect-error includedInTierId is required
+// @ts-expect-error isTierGated is required
 isPublicContent({
   isFree: true,
   isPurchasable: false,
@@ -72,7 +72,7 @@ isPublicContent({
   isFree: true,
   isPurchasable: false,
   priceCents: null,
-  includedInTierId: null,
+  isTierGated: false,
   isTeamOnly: false,
   courseOnly: false,
 });
@@ -82,7 +82,7 @@ isPublicContent({
   isFree: true,
   isPurchasable: false,
   priceCents: null,
-  includedInTierId: null,
+  isTierGated: false,
   isFollowerGated: false,
   courseOnly: false,
 });
@@ -92,7 +92,7 @@ isPublicContent({
   isFree: true,
   isPurchasable: false,
   priceCents: null,
-  includedInTierId: null,
+  isTierGated: false,
   isFollowerGated: false,
   isTeamOnly: false,
 });

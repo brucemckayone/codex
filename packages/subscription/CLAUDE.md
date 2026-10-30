@@ -86,8 +86,27 @@ on `SubscriptionService`; `feeConfig`, `mailer` and `offSaleMailer` on
   Product back on sale after its row commits, and a clean-up that archived
   re-checks for a live row, so a live row's Product always ends on sale.
 - One `isRecommended` tier per organisation (enforced in a transaction).
-- `sortOrder` **is** the access hierarchy. Soft delete only; a tier with
-  subscribers who have not cancelled cannot be deleted (`TierHasSubscribersError`).
+- `sortOrder` is the DISPLAY order only (Codex-2hxff.91): a tier includes
+  exactly the items ticked for it (`content_tier_access`, `course_tier_access`).
+  Soft delete only; a tier with subscribers who have not cancelled cannot be
+  deleted (`TierHasSubscribersError`).
+- **Create with copy** (`copyAccessFromTierId`): the source must be a live tier
+  of the org — checked BEFORE any Stripe call, then re-checked `FOR SHARE`
+  inside the insert's transaction (always a transaction now). The copy is the
+  source's exact set: live gated films and live courses of the org. A replay of
+  the same `submissionId` returns the first tier and copies nothing again. No
+  payouts check (owner U7).
+- **Delete with reassignment** (`deleteTier(tierId, orgId, { onlyHere, moveTo })`,
+  one `dbWs` transaction): lock the tier `FOR UPDATE`, the move targets
+  `FOR SHARE`; compute the items ONLY in this tier now; with none of
+  `keep`/`move` while such items exist → `TierHasOnlyItemsError` (409, code
+  `TIER_HAS_ONLY_ITEMS`, counts only) and nothing changes; `move` ticks them on
+  every target; then soft-delete and sweep the tier's ticks in BOTH tables, and
+  dual-write the legacy `included_in_tier_id` (lowest remaining tick; a film
+  left in no tier KEEPS its value — under old code NULL reads as free). It never
+  nulls a gate (that was the Codex-2hxff.90 fail-open). The worker route runs
+  `ctx.services.planAccess.afterTierAccessChange` after a copy or a delete.
+  Tests: `tier-plan-access.test.ts`.
 
 ### Archived tiers resolve on read paths
 
@@ -109,8 +128,9 @@ deleted tier take new subscriptions.
 
 `subscribers ⊇ followers ⊇ public`: an active subscription unlocks
 followers-only content without a follower row (the follower row is the fallback
-for ex-subscribers who still follow). Tier-gated content needs a tier whose
-`sortOrder` is at least the content's minimum tier. The grant path is in
+for ex-subscribers who still follow). Tier-gated content needs a subscription
+on one of the tiers ticked for it — a set, not a ladder; with none ticked the
+item is closed to subscribers, never free. The grant path is in
 `ContentAccessService` (`packages/access/CLAUDE.md`); the full rules are in
 [docs/payments/access.md](../../docs/payments/access.md).
 

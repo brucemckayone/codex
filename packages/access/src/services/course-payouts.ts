@@ -7,7 +7,7 @@
  * course subscription plan (`course_subscription_plans`, active and not
  * deleted), or inclusion in an org tier (`course_tier_access`, any row — an
  * archived tier still lets its subscribers in, as an archived
- * `content.included_in_tier_id` does).
+ * archived tier's `content_tier_access` ticks do).
  *
  * The refusal is `@codex/content`'s own `CreatorPayoutsRequiredError`, so the
  * Studio shows the one "set up payouts" message whichever kind of item it was.
@@ -60,17 +60,16 @@ export async function courseEarnsMoney(
 }
 
 /**
- * Throw unless the course creator can be paid. The same DB-only readiness
- * check `ContentService` makes: `stripe_connect_accounts` (one row per user)
- * mirrors Stripe's `charges_enabled` / `payouts_enabled` via `account.updated`.
- *
- * @throws {CreatorPayoutsRequiredError} No account, or one not charges +
- *   payouts enabled
+ * Can the creator be paid? The same DB-only readiness check `ContentService`
+ * makes: `stripe_connect_accounts` (one row per user) mirrors Stripe's
+ * `charges_enabled` / `payouts_enabled` via `account.updated`. The course
+ * paths and the tier checklist (`PlanAccessService.setTierItems`, films and
+ * courses alike) all ask here, so the rule cannot drift between them.
  */
-export async function assertCourseCreatorCanBePaid(
+export async function creatorCanBePaid(
   db: AccessQueryClient,
   creatorId: string
-): Promise<void> {
+): Promise<boolean> {
   const [account] = await db
     .select({
       chargesEnabled: stripeConnectAccounts.chargesEnabled,
@@ -79,7 +78,19 @@ export async function assertCourseCreatorCanBePaid(
     .from(stripeConnectAccounts)
     .where(eq(stripeConnectAccounts.userId, creatorId))
     .limit(1);
+  return !!account?.chargesEnabled && !!account.payoutsEnabled;
+}
 
-  if (account?.chargesEnabled && account.payoutsEnabled) return;
-  throw new CreatorPayoutsRequiredError(creatorId, 'course');
+/**
+ * Throw unless a course's creator can be paid ({@link creatorCanBePaid}).
+ *
+ * @throws {CreatorPayoutsRequiredError} No account, or one not charges +
+ *   payouts enabled
+ */
+export async function assertCourseCreatorCanBePaid(
+  db: AccessQueryClient,
+  creatorId: string
+): Promise<void> {
+  if (await creatorCanBePaid(db, creatorId)) return;
+  throw new CreatorPayoutsRequiredError('course');
 }

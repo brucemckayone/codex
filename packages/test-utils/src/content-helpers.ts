@@ -84,8 +84,8 @@ export function expectContentEqual(
   if (expected.isPurchasable !== undefined) {
     expect(actual.isPurchasable).toBe(expected.isPurchasable);
   }
-  if (expected.includedInTierId !== undefined) {
-    expect(actual.includedInTierId).toBe(expected.includedInTierId);
+  if (expected.isTierGated !== undefined) {
+    expect(actual.isTierGated).toBe(expected.isTierGated);
   }
   if (expected.courseOnly !== undefined) {
     expect(actual.courseOnly).toBe(expected.courseOnly);

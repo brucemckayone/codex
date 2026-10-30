@@ -57,6 +57,7 @@ import {
   createTestTierInput,
   createUniqueSlug,
   type Database,
+  gateContentFromTier,
   seedTestUsers,
   setupTestDatabase,
   takeFirst,
@@ -243,10 +244,12 @@ describe('paused by a payment dispute (Codex-2hxff.60)', () => {
     await contentService.publish(item.id, creatorId);
 
     if (shape === 'tier' || shape === 'upper-tier') {
-      await db
-        .update(content)
-        .set({ includedInTierId: shape === 'tier' ? tierId : upperTierId })
-        .where(eq(content.id, item.id));
+      // The old "this tier and above", as the migration backfilled it.
+      await gateContentFromTier(db, {
+        contentId: item.id,
+        organizationId,
+        fromTierId: shape === 'tier' ? tierId : upperTierId,
+      });
     }
     if (shape === 'followers') {
       await db

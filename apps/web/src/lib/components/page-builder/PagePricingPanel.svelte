@@ -33,6 +33,9 @@
 <script lang="ts">
   import { PRICE_LIMITS } from '@codex/constants';
   import * as m from '$paraglide/messages';
+  import PlanGuidanceNote from '$lib/components/studio/plan-picker/PlanGuidanceNote.svelte';
+  import PlanPicker from '$lib/components/studio/plan-picker/PlanPicker.svelte';
+  import { itemGaps, joinNames } from '$lib/components/studio/plan-picker/select-from-tier';
   import { monetisation } from '$lib/page-builder/monetisation-store.svelte';
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
 
@@ -41,6 +44,8 @@
 
   const draft = $derived(monetisation.draft);
   const tierOptions = $derived(monetisation.tierOptions);
+  /** "Pro doesn't include this course, but Basic does." — only over a loaded draft. */
+  const gaps = $derived(monetisation.loaded ? itemGaps(draft.tierIds, tierOptions) : []);
   // A course page whose authoritative state failed to read must not offer edits:
   // the store reports `loaded: false` rather than an empty draft precisely so a
   // save cannot withdraw a live plan the panel never managed to see.
@@ -197,25 +202,37 @@
         {m.studio_builder_pricing_tiers_none()}
       </p>
     {:else}
-      <ul class="tiers">
-        {#each tierOptions as tier (tier.id)}
-          {@const checked = draft.tierIds.includes(tier.id)}
-          <li>
-            <button
-              type="button"
-              class="tier"
-              class:tier--on={checked}
-              aria-pressed={checked}
-              disabled={locked}
-              onclick={() => monetisation.toggleTier(tier.id)}
-            >
-              <span class="tier__box" aria-hidden="true"></span>
-              <span class="tier__name">{tier.name}</span>
-              <span class="tier__price">{m.studio_builder_pricing_tier_price({ price: poundsOf(tier.priceMonthly) })}</span>
-            </button>
-          </li>
-        {/each}
-      </ul>
+      <!-- The ONE tier picker, shared with the film editor (Codex-2hxff.91):
+           "and above" ticks a tier and every dearer one. -->
+      <PlanPicker
+        tiers={tierOptions}
+        selected={draft.tierIds}
+        label={m.studio_builder_pricing_tiers()}
+        disabled={locked}
+        onToggle={(id) => monetisation.toggleTier(id)}
+        onSelectFromTier={(id) => monetisation.selectFromTier(id)}
+      />
+      {#each gaps as gap (gap.dearer.id)}
+        {@const cheaper = joinNames(gap.cheaper.map((t) => t.name))}
+        <PlanGuidanceNote
+          size="compact"
+          actions={locked
+            ? []
+            : [
+                {
+                  label: m.plan_gap_tick({ tierName: gap.dearer.name }),
+                  onclick: () => monetisation.toggleTier(gap.dearer.id),
+                },
+              ]}
+        >
+          <b>
+            {gap.cheaper.length > 1
+              ? m.plan_gap_course_many({ dearer: gap.dearer.name, cheaper })
+              : m.plan_gap_course({ dearer: gap.dearer.name, cheaper })}
+          </b>
+          {m.plan_gap_course_body({ dearer: gap.dearer.name })}
+        </PlanGuidanceNote>
+      {/each}
     {/if}
   </div>
 
@@ -564,82 +581,5 @@
   .field__input input:focus-visible {
     outline: none;
     border-color: var(--color-interactive);
-  }
-
-  .tiers {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1-5);
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-
-  .tier {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2-5);
-    width: 100%;
-    padding: var(--space-2) var(--space-2-5);
-    border: var(--border-width) var(--border-style) var(--color-border-subtle);
-    border-radius: var(--radius-sm);
-    background-color: var(--color-surface);
-    cursor: pointer;
-    text-align: left;
-    transition: var(--transition-colors);
-  }
-
-  .tier:disabled {
-    cursor: not-allowed;
-    opacity: var(--opacity-50);
-  }
-
-  .tier--on {
-    border-color: color-mix(in oklab, var(--color-interactive) 45%, var(--color-border));
-    background-color: color-mix(in oklab, var(--color-interactive) 8%, var(--color-surface));
-  }
-
-  .tier:focus-visible {
-    outline: none;
-    box-shadow: var(--shadow-focus-ring);
-  }
-
-  .tier__box {
-    position: relative;
-    flex: none;
-    width: 16px;
-    height: 16px;
-    border: var(--border-width) var(--border-style) var(--color-border);
-    border-radius: var(--radius-xs);
-    background-color: var(--color-surface);
-  }
-
-  .tier--on .tier__box {
-    border-color: var(--color-interactive);
-    background-color: var(--color-interactive);
-  }
-
-  .tier--on .tier__box::after {
-    content: '';
-    position: absolute;
-    top: 3px;
-    left: 5px;
-    width: 4px;
-    height: 8px;
-    border: solid var(--color-surface);
-    border-width: 0 2px 2px 0;
-    transform: rotate(45deg);
-  }
-
-  .tier__name {
-    flex: 1;
-    font-size: var(--text-sm);
-    color: var(--color-text);
-  }
-
-  .tier__price {
-    font-size: var(--text-xs);
-    color: var(--color-text-secondary);
-    white-space: nowrap;
   }
 </style>

@@ -396,10 +396,12 @@ export type EntitlementSource = StoredEntitlementSource | 'tier_subscription';
  *
  * `courseOnly=true` suppresses EVERY standalone path regardless of the other
  * flags — the content is reachable ONLY via a course entitlement.
- * `isFree` / `isPurchasable` / `includedInTierId` may combine freely.
+ * `isPurchasable` and `isTierGated` may combine (a paid film that is also in
+ * tiers). `isTierGated` excludes `isFree`, `isFollowerGated`, `isTeamOnly` and
+ * `courseOnly` (Codex-2hxff.91, invariants I2 and I4).
  *
  * The legacy `accessType` CHECK maps (HARDENING §H2): `free`→`isFree`,
- * `paid`→`isPurchasable`, `subscribers`→`includedInTierId`,
+ * `paid`→`isPurchasable`, `subscribers`→`isTierGated`,
  * `followers`→`isFollowerGated`, `team`→`isTeamOnly`.
  */
 export interface ContentAccessPolicy {
@@ -407,8 +409,20 @@ export interface ContentAccessPolicy {
   /** Paired with {@link ContentAccessPolicy.priceCents} for a one-off content purchase. */
   isPurchasable: boolean;
   priceCents: number | null;
-  /** Included in this org tier AND ABOVE (by `subscription_tiers.sortOrder`). */
-  includedInTierId: string | null;
+  /**
+   * The subscribers-only switch (Codex-2hxff.91): the tier arm applies. It is
+   * the GATE; {@link ContentAccessPolicy.includedInTierIds} only says WHICH
+   * tiers open it. Gated with no tier ticked is CLOSED (buyers, granted users,
+   * course owners and the team only), never free.
+   */
+  isTierGated: boolean;
+  /**
+   * The EXACT set of the org's tiers that include this content
+   * (`content_tier_access`), ordered by tier `sortOrder`. A set, not a ladder:
+   * a dearer tier is NOT implied. `[]` when not gated, or gated and closed.
+   * Inactive tiers are included (their existing subscribers keep access).
+   */
+  includedInTierIds: string[];
   courseOnly: boolean;
   /** [H2] Free to org followers / opt-in (was accessType 'followers'). */
   isFollowerGated: boolean;

@@ -413,7 +413,7 @@ export const CONTENT = {
     contentType: 'video' as const,
     accessType: 'subscribers' as const,
     priceCents: null, // Pro subscription only — no one-off purchase
-    minimumTierId: TIERS.alphaPro.id, // Requires Pro tier — viewer's Standard won't cover it
+    includedInTierIds: [TIERS.alphaPro.id], // Pro plan only — the viewer's Standard plan doesn't include it
     status: 'published' as const,
     orgId: ORGS.alpha.id,
     mediaId: MEDIA.advancedSvelte.id,
@@ -461,7 +461,7 @@ export const CONTENT = {
     viewCount: 0,
     purchaseCount: 0,
   },
-  // Hybrid mode — `paid` + non-null minimumTierId. Standard subscribers get
+  // Hybrid mode — `paid` + ticked plans. Standard (and Pro) subscribers get
   // this included in their sub; everyone else can pay £9.99 one-off.
   // This is the canonical encoding of the hybrid-paid/subscriber mode from
   // the six-mode access table (see packages/access/CLAUDE.md).
@@ -472,7 +472,7 @@ export const CONTENT = {
     contentType: 'video' as const,
     accessType: 'paid' as const,
     priceCents: 999, // Standard subscription OR £9.99 one-off purchase
-    minimumTierId: TIERS.alphaStandard.id,
+    includedInTierIds: [TIERS.alphaStandard.id, TIERS.alphaPro.id],
     status: 'published' as const,
     orgId: ORGS.alpha.id,
     mediaId: MEDIA.introTs.id, // reuse media
@@ -528,7 +528,7 @@ export const CONTENT = {
     contentType: 'video' as const,
     accessType: 'subscribers' as const,
     priceCents: null, // Standard subscription only — no one-off purchase
-    minimumTierId: TIERS.alphaStandard.id,
+    includedInTierIds: [TIERS.alphaStandard.id, TIERS.alphaPro.id],
     status: 'published' as const,
     orgId: ORGS.alpha.id,
     mediaId: MEDIA.introTs.id, // reuse media
@@ -614,7 +614,7 @@ export const CONTENT = {
     contentType: 'written' as const,
     accessType: 'subscribers' as const,
     priceCents: null,
-    minimumTierId: TIERS.bonesSoulPath.id,
+    includedInTierIds: [TIERS.bonesSoulPath.id],
     status: 'published' as const,
     orgId: ORGS.bones.id,
     mediaId: null,
@@ -656,7 +656,7 @@ export const CONTENT = {
     contentType: 'written' as const,
     accessType: 'subscribers' as const,
     priceCents: null,
-    minimumTierId: TIERS.bonesSoulPath.id,
+    includedInTierIds: [TIERS.bonesSoulPath.id],
     status: 'published' as const,
     orgId: ORGS.bones.id,
     mediaId: null,
@@ -686,7 +686,7 @@ export const CONTENT = {
     contentType: 'written' as const,
     accessType: 'paid' as const,
     priceCents: 2999,
-    minimumTierId: TIERS.bonesSoulPath.id,
+    includedInTierIds: [TIERS.bonesSoulPath.id],
     status: 'published' as const,
     orgId: ORGS.bones.id,
     mediaId: null,
@@ -789,7 +789,7 @@ export const CONTENT = {
     contentType: 'video' as const,
     accessType: 'subscribers' as const,
     priceCents: null,
-    minimumTierId: TIERS.bonesSoulPath.id,
+    includedInTierIds: [TIERS.bonesSoulPath.id],
     status: 'published' as const,
     publishedDaysAgo: 13,
     orgId: ORGS.bones.id,
@@ -878,7 +878,7 @@ export const CONTENT = {
     contentType: 'audio' as const,
     accessType: 'subscribers' as const,
     priceCents: null,
-    minimumTierId: TIERS.bonesSoulPath.id,
+    includedInTierIds: [TIERS.bonesSoulPath.id],
     status: 'published' as const,
     publishedDaysAgo: 15,
     orgId: ORGS.bones.id,
@@ -981,7 +981,7 @@ export const CONTENT = {
     contentType: 'written' as const,
     accessType: 'subscribers' as const,
     priceCents: null,
-    minimumTierId: TIERS.bonesSoulPath.id,
+    includedInTierIds: [TIERS.bonesSoulPath.id],
     status: 'published' as const,
     publishedDaysAgo: 20,
     orgId: ORGS.bones.id,

@@ -24,12 +24,31 @@
  * - Cleanup failures are logged but never mask the original error
  *
  * All queries scoped by organizationId. Soft delete only.
+ *
+ * THE PLAN-ACCESS LOCK ORDER (Codex-2hxff.91). Every writer of tier rows, of
+ * the items ticked on them, or of the ticks takes its row locks in this order,
+ * so no two can wait on each other in a cycle (a 40P01 that aborts one):
+ * 1. `subscription_tiers` rows, by id: FOR UPDATE to delete one, FOR NO KEY
+ *    UPDATE to rewrite one (reorder, the recommended flag), FOR SHARE to tick
+ *    one. A set in mixed modes is still ONE id order across the set (Postgres
+ *    has no mixed-mode statement, so `deleteTier` splits it at its own id);
+ * 2. then `content` rows, then `courses` rows, by id, FOR NO KEY UPDATE (a
+ *    tick insert's foreign key takes KEY SHARE, which that never blocks);
+ * 3. then the tick rows.
+ * `SELECT … ORDER BY id … FOR …` locks its rows in that order. The writers:
+ * this service (create with copy, the recommended flag, delete, reorder),
+ * `PlanAccessService.setTierItems` (@codex/access), the content editor
+ * (`ContentService.create`/`update`, @codex/content) and
+ * `CourseAccessService.setTierAccess` (@codex/access).
  */
 
 import { CURRENCY, stripeEnvMetadata } from '@codex/constants';
 import type { DatabaseWs } from '@codex/database';
 import {
   content,
+  contentTierAccess,
+  courses,
+  courseTierAccess,
   subscriptions,
   subscriptionTiers,
 } from '@codex/database/schema';
@@ -40,11 +59,26 @@ import {
   type ServiceConfig,
   ValidationError,
 } from '@codex/service-errors';
-import type { CreateTierInput, UpdateTierInput } from '@codex/validation';
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import type {
+  CreateTierInput,
+  DeleteTierQueryInput,
+  UpdateTierInput,
+} from '@codex/validation';
+import {
+  and,
+  asc,
+  eq,
+  gt,
+  inArray,
+  isNull,
+  lt,
+  type SQL,
+  sql,
+} from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
   ConnectAccountNotReadyError,
+  TierHasOnlyItemsError,
   TierHasSubscribersError,
   TierNotFoundError,
 } from '../errors';
@@ -55,6 +89,47 @@ import {
 } from './create-key-refusal';
 
 type SubscriptionTier = typeof subscriptionTiers.$inferSelect;
+
+/** A `dbWs` transaction, as the plan-access writes below take one. */
+type TierTransaction = Parameters<Parameters<DatabaseWs['transaction']>[0]>[0];
+
+/**
+ * Live films of this org ticked for `tierId` and for NO other live tier, as
+ * `content_id`: paid or closed alike (the delete dialog splits them). One
+ * query for both the delete's count and its move, so the two cannot drift.
+ */
+function onlyHereFilmsSql(orgId: string, tierId: string): SQL {
+  return sql`
+    SELECT ${contentTierAccess.contentId} AS content_id
+      FROM ${contentTierAccess}
+      INNER JOIN ${content} ON ${content.id} = ${contentTierAccess.contentId}
+        AND ${content.deletedAt} IS NULL
+     WHERE ${contentTierAccess.tierId} = ${tierId}
+       AND ${contentTierAccess.organizationId} = ${orgId}
+       AND NOT EXISTS (
+         SELECT 1 FROM content_tier_access o
+           INNER JOIN subscription_tiers ot ON ot.id = o.tier_id
+            AND ot.deleted_at IS NULL
+          WHERE o.content_id = ${contentTierAccess.contentId}
+            AND o.tier_id <> ${tierId})`;
+}
+
+/** {@link onlyHereFilmsSql} for live courses, as `course_id`. */
+function onlyHereCoursesSql(orgId: string, tierId: string): SQL {
+  return sql`
+    SELECT ${courseTierAccess.courseId} AS course_id
+      FROM ${courseTierAccess}
+      INNER JOIN ${courses} ON ${courses.id} = ${courseTierAccess.courseId}
+        AND ${courses.deletedAt} IS NULL
+     WHERE ${courseTierAccess.tierId} = ${tierId}
+       AND ${courseTierAccess.organizationId} = ${orgId}
+       AND NOT EXISTS (
+         SELECT 1 FROM course_tier_access o
+           INNER JOIN subscription_tiers ot ON ot.id = o.tier_id
+            AND ot.deleted_at IS NULL
+          WHERE o.course_id = ${courseTierAccess.courseId}
+            AND o.tier_id <> ${tierId})`;
+}
 
 /** Codes for Stripe's refusals of a tier create (Codex-2hxff.66). */
 const TIER_CREATE_KEY: CreateKeySubject = {
@@ -166,9 +241,36 @@ export class TierService extends BaseService {
   }
 
   /**
+   * Lock every live tier of the org FOR NO KEY UPDATE, in id order (step 1
+   * of the lock order, file header), before a write that rewrites several of
+   * their rows: a reorder, or the recommended flag moving from one tier to
+   * another. Row-by-row UPDATEs would lock them in whatever order they ran.
+   * NO KEY UPDATE, not UPDATE: neither write changes a key (the sort index is
+   * partial), so the KEY SHARE a subscription or tick insert takes on a tier
+   * is never blocked.
+   */
+  private async lockOrgTiers(
+    tx: TierTransaction,
+    orgId: string
+  ): Promise<void> {
+    await tx
+      .select({ id: subscriptionTiers.id })
+      .from(subscriptionTiers)
+      .where(
+        and(
+          eq(subscriptionTiers.organizationId, orgId),
+          isNull(subscriptionTiers.deletedAt)
+        )
+      )
+      .orderBy(asc(subscriptionTiers.id))
+      .for('no key update');
+  }
+
+  /**
    * Ensure only one tier per org is recommended.
    * Clears isRecommended on all other active tiers for the org.
-   * Called INSIDE a transaction with the insert/update to prevent race conditions.
+   * Called INSIDE a transaction with the insert/update to prevent race
+   * conditions, after {@link lockOrgTiers}: it rewrites another tier's row.
    */
   private async ensureSingleRecommended(
     tx: Parameters<
@@ -204,6 +306,13 @@ export class TierService extends BaseService {
    * If the DB insert fails after Stripe resources are created, the Stripe
    * Product is archived (which deactivates its Prices) to prevent orphans,
    * unless a live tier already uses it.
+   *
+   * "Include everything from…" (Codex-2hxff.91): `copyAccessFromTierId`
+   * copies that tier's films and courses in the SAME transaction as the
+   * insert, so the tier and its copy commit or roll back together, and a
+   * replayed `submissionId` (which returns the tier already made) copies
+   * nothing again. A snapshot: later changes to the source don't carry over.
+   * No payouts check (owner U7): the items already sit in a tier.
    */
   async createTier(
     orgId: string,
@@ -211,6 +320,13 @@ export class TierService extends BaseService {
   ): Promise<SubscriptionTier> {
     // Validate Connect account is ready
     await this.requireActiveConnect(orgId);
+
+    // Fail fast, before any Stripe call: the copy source must be a live tier
+    // of THIS org. It is checked again, and locked, inside the transaction.
+    const copyFrom = input.copyAccessFromTierId ?? null;
+    if (copyFrom) {
+      await this.getTierOrThrow(copyFrom, orgId);
+    }
 
     try {
       // Determine next sort order — include soft-deleted rows to avoid
@@ -313,23 +429,45 @@ export class TierService extends BaseService {
       };
 
       try {
-        if (input.isRecommended) {
-          // Atomically clear other recommended flags + insert new tier
-          await this.dbWs.transaction(async (tx) => {
+        // Always one transaction: the source re-check, the recommended flag,
+        // the insert and the copy commit or roll back together. A concurrent
+        // twin of this submission computes the same sort order, so exactly
+        // one insert wins (uq_subscription_tiers_org_sort) and only its copy
+        // commits; the loser lands in the catch below and returns the twin.
+        await this.dbWs.transaction(async (tx) => {
+          // Tier locks first (lock order, file header). The recommended flag
+          // rewrites another tier's row, so with it every live tier is locked
+          // in id order, the source among them, and the source's FOR SHARE
+          // below waits for nothing; without it, the source alone.
+          if (input.isRecommended) {
+            await this.lockOrgTiers(tx, orgId);
+          }
+          if (copyFrom) {
+            const [source] = await tx
+              .select({ id: subscriptionTiers.id })
+              .from(subscriptionTiers)
+              .where(
+                and(
+                  eq(subscriptionTiers.id, copyFrom),
+                  eq(subscriptionTiers.organizationId, orgId),
+                  isNull(subscriptionTiers.deletedAt)
+                )
+              )
+              .for('share');
+            if (!source) throw new TierNotFoundError(copyFrom);
+          }
+          if (input.isRecommended) {
             await this.ensureSingleRecommended(tx, orgId);
-            const [inserted] = await tx
-              .insert(subscriptionTiers)
-              .values(tierValues)
-              .returning();
-            tier = inserted;
-          });
-        } else {
-          const [inserted] = await this.db
+          }
+          const [inserted] = await tx
             .insert(subscriptionTiers)
             .values(tierValues)
             .returning();
           tier = inserted;
-        }
+          if (copyFrom && inserted) {
+            await this.copyTierAccess(tx, orgId, copyFrom, inserted.id);
+          }
+        });
       } catch (dbError) {
         // A concurrent twin of this submission inserted first: it computed
         // the same sort order (uq_subscription_tiers_org_sort) and holds the
@@ -583,8 +721,13 @@ export class TierService extends BaseService {
 
       try {
         if (input.isRecommended === true) {
-          // Atomically clear other recommended flags + update this tier
+          // Atomically clear other recommended flags + update this tier. The
+          // flag moves between two tier rows, so every live tier is locked
+          // first, in id order (lock order, file header): taking the old
+          // recommended row and then this one could cycle with a reorder or
+          // a delete that holds this one and waits for the other.
           await this.dbWs.transaction(async (tx) => {
+            await this.lockOrgTiers(tx, orgId);
             await this.ensureSingleRecommended(tx, orgId, tierId);
             const [result] = await tx
               .update(subscriptionTiers)
@@ -668,17 +811,127 @@ export class TierService extends BaseService {
   }
 
   /**
-   * Soft-delete a tier. Fails if active subscribers exist.
-   * Archives the Stripe Product.
-   *
-   * The FK content.minimum_tier_id → subscription_tiers.id is
-   * ON DELETE SET NULL, but soft deletes don't fire the trigger. Without
-   * sweeping the reference column explicitly, any content gated by the
-   * deleted tier becomes unreachable: listTiers no longer returns the
-   * tier, so nobody can subscribe to it, but access control still
-   * compares content.minimum_tier_id against a dangling row.
+   * Lock the films, then the courses, ticked on `tierId`, FOR NO KEY UPDATE
+   * in id order (step 2 of the lock order, file header). Every other writer
+   * of an item's ticks or switch (the editor, the checklist, the course
+   * panel, another delete or copy) holds that item's row while it writes
+   * them, so the items' ticks read next cannot change under the caller.
    */
-  async deleteTier(tierId: string, orgId: string): Promise<void> {
+  private async lockItemsTickedOn(
+    tx: TierTransaction,
+    orgId: string,
+    tierId: string
+  ): Promise<void> {
+    await tx
+      .select({ id: content.id })
+      .from(content)
+      .where(
+        inArray(
+          content.id,
+          tx
+            .select({ id: contentTierAccess.contentId })
+            .from(contentTierAccess)
+            .where(
+              and(
+                eq(contentTierAccess.tierId, tierId),
+                eq(contentTierAccess.organizationId, orgId)
+              )
+            )
+        )
+      )
+      .orderBy(asc(content.id))
+      .for('no key update');
+    await tx
+      .select({ id: courses.id })
+      .from(courses)
+      .where(
+        inArray(
+          courses.id,
+          tx
+            .select({ id: courseTierAccess.courseId })
+            .from(courseTierAccess)
+            .where(
+              and(
+                eq(courseTierAccess.tierId, tierId),
+                eq(courseTierAccess.organizationId, orgId)
+              )
+            )
+        )
+      )
+      .orderBy(asc(courses.id))
+      .for('no key update');
+  }
+
+  /**
+   * Copy a tier's films and courses to a new tier (Codex-2hxff.91). Only live
+   * items of this org; only gated films (an ungated row's ticks would be
+   * dead). The new tier takes the org's highest `sort_order`, so it is never
+   * any item's "lowest ticked tier": the legacy column needs no dual-write.
+   *
+   * The source's items are locked first (review round 2). A tick insert's
+   * foreign key takes only KEY SHARE on the film, which an editor save
+   * turning the switch off does not block, so unlocked, the copy could read a
+   * film as gated, the editor could clear its ticks and commit, and the copy
+   * could then tick it on the new tier: switch off with a tick (breaking I1).
+   * Locked, a save that came first commits before the INSERT below reads (a
+   * new snapshot, which skips the film), and a save that comes second waits,
+   * then clears the new tick with the rest. Courses have no switch, but the
+   * course panel replaces a course's whole set; holding the course rows keeps
+   * a copy from re-adding a course that save just took out of the source.
+   */
+  private async copyTierAccess(
+    tx: TierTransaction,
+    orgId: string,
+    fromTierId: string,
+    toTierId: string
+  ): Promise<void> {
+    await this.lockItemsTickedOn(tx, orgId, fromTierId);
+    await tx.execute(sql`
+      INSERT INTO ${contentTierAccess} (content_id, tier_id, organization_id)
+      SELECT ${contentTierAccess.contentId}, ${toTierId}::uuid, ${orgId}::uuid
+        FROM ${contentTierAccess}
+        INNER JOIN ${content} ON ${content.id} = ${contentTierAccess.contentId}
+          AND ${content.organizationId} = ${orgId}
+          AND ${content.deletedAt} IS NULL
+          AND ${content.isTierGated} IS TRUE
+       WHERE ${contentTierAccess.tierId} = ${fromTierId}
+         AND ${contentTierAccess.organizationId} = ${orgId}
+      ON CONFLICT DO NOTHING`);
+    await tx.execute(sql`
+      INSERT INTO ${courseTierAccess} (course_id, tier_id, organization_id)
+      SELECT ${courseTierAccess.courseId}, ${toTierId}::uuid, ${orgId}::uuid
+        FROM ${courseTierAccess}
+        INNER JOIN ${courses} ON ${courses.id} = ${courseTierAccess.courseId}
+          AND ${courses.organizationId} = ${orgId}
+          AND ${courses.deletedAt} IS NULL
+       WHERE ${courseTierAccess.tierId} = ${fromTierId}
+         AND ${courseTierAccess.organizationId} = ${orgId}
+      ON CONFLICT DO NOTHING`);
+  }
+
+  /**
+   * Soft-delete a tier. Fails if live subscribers exist. Archives the Stripe
+   * Product.
+   *
+   * Plan access (Codex-2hxff.91): the tier's ticks are DELETED in the same
+   * transaction, for films and courses (a soft delete never fires the FK
+   * cascade). Items ONLY in this tier need a choice — `keep` leaves them
+   * subscribers-only with no tier (CLOSED, never free), `move` adds them to
+   * every tier in `moveTo` first. Without a choice while such items exist,
+   * the delete is refused (`TierHasOnlyItemsError`) and nothing changes. It
+   * never nulls a gate: that was Codex-2hxff.90, where a deleted tier's films
+   * became free to anyone signed in. No payouts check on a move (owner U7).
+   *
+   * @throws {TierHasSubscribersError} while any subscription isn't cancelled
+   * @throws {TierHasOnlyItemsError} items only here and no `onlyHere`
+   * @throws {ValidationError} a `moveTo` that is this tier, or not a live
+   *   tier of the org
+   */
+  async deleteTier(
+    tierId: string,
+    orgId: string,
+    choice: DeleteTierQueryInput = {}
+  ): Promise<void> {
     try {
       const existing = await this.getTierOrThrow(tierId, orgId);
 
@@ -697,11 +950,135 @@ export class TierService extends BaseService {
         throw new TierHasSubscribersError(tierId, subCount.count);
       }
 
-      // Tier soft-delete + content sweep must atomically succeed or fail.
-      // A partial state (tier gone, content still gated) is the exact bug
-      // this sweep is here to fix.
-      let affectedContentCount = 0;
+      const moveTo =
+        choice.onlyHere === 'move' ? [...new Set(choice.moveTo ?? [])] : [];
+      if (moveTo.includes(tierId)) {
+        throw new ValidationError('Move them to a tier other than this one', {
+          tierId,
+        });
+      }
+
+      let onlyHereFilms = 0;
+      let onlyHereCourses = 0;
+      let sweptFilms = 0;
       await this.dbWs.transaction(async (tx) => {
+        // a + b. Lock this tier FOR UPDATE and the move targets (live tiers
+        //    of this org) FOR SHARE, as ONE id-ordered set (lock order, file
+        //    header). Postgres has no mixed-mode statement, so: the targets
+        //    below this tier's id, then the tier, then the targets above it.
+        //    Locking the tier first and then a lower target cycles with a
+        //    reorder, or a crossed delete-and-move, that holds the lower one
+        //    and waits for this one (review round 2). Tick writes take FOR
+        //    SHARE on a tier, so they wait for this delete and then refuse
+        //    the deleted tier.
+        const lockTargets = async (side: SQL): Promise<{ id: string }[]> =>
+          moveTo.length === 0
+            ? []
+            : await tx
+                .select({ id: subscriptionTiers.id })
+                .from(subscriptionTiers)
+                .where(
+                  and(
+                    inArray(subscriptionTiers.id, moveTo),
+                    eq(subscriptionTiers.organizationId, orgId),
+                    isNull(subscriptionTiers.deletedAt),
+                    side
+                  )
+                )
+                .orderBy(asc(subscriptionTiers.id))
+                .for('share');
+        const lowerTargets = await lockTargets(
+          lt(subscriptionTiers.id, tierId)
+        );
+        const [locked] = await tx
+          .select({ id: subscriptionTiers.id })
+          .from(subscriptionTiers)
+          .where(
+            and(
+              eq(subscriptionTiers.id, tierId),
+              eq(subscriptionTiers.organizationId, orgId),
+              isNull(subscriptionTiers.deletedAt)
+            )
+          )
+          .for('update');
+        const upperTargets = await lockTargets(
+          gt(subscriptionTiers.id, tierId)
+        );
+        if (!locked) throw new TierNotFoundError(tierId);
+        const targets = [...lowerTargets, ...upperTargets];
+        if (targets.length !== moveTo.length) {
+          const found = new Set(targets.map((t) => t.id));
+          throw new ValidationError(
+            'One or more tiers do not exist in this organisation',
+            { invalidTierIds: moveTo.filter((id) => !found.has(id)) }
+          );
+        }
+
+        // b2. Lock the films, then the courses, ticked here, before reading
+        //     what is only here or writing any tick. Their other writers hold
+        //     an item's row while they write its ticks, so the only-here set
+        //     read next cannot change under this delete, for films AND
+        //     courses (review round 2: two crossed deletes of a course's two
+        //     tiers each saw the other tier still live, and the course ended
+        //     in neither with nobody asked; now the second waits, then counts
+        //     it). It also keeps the one lock order: the move below writes
+        //     ticks before it updates content rows, and without this lock a
+        //     checklist save adding the same film to a move target (which
+        //     locks the film's row first) would deadlock with it.
+        await this.lockItemsTickedOn(tx, orgId, tierId);
+
+        // c. What is ONLY here, computed now (never the dialog's preview).
+        const onlyHere = await this.findOnlyHereItems(tx, orgId, tierId);
+        onlyHereFilms = onlyHere.contentIds.length;
+        onlyHereCourses = onlyHere.courseIds.length;
+
+        // d. No choice while items are only here: refuse, change nothing.
+        if (
+          (onlyHereFilms > 0 || onlyHereCourses > 0) &&
+          choice.onlyHere === undefined
+        ) {
+          throw new TierHasOnlyItemsError(tierId, {
+            filmCount: onlyHereFilms,
+            courseCount: onlyHereCourses,
+          });
+        }
+
+        // e. Move: add every only-here item to every target. One
+        //    INSERT … SELECT per kind (review L3): the items are re-derived in
+        //    SQL by the same query as step c, so the bind parameters are the
+        //    two ids plus the targets (at most 50, the schema's max), however
+        //    many items there are. A VALUES list of items × targets × 3 would
+        //    pass Postgres's 65,535-parameter limit at ~21,845 pairs.
+        //    Each INSERT is skipped when step c found none of its kind. That
+        //    is exact because of b2: an item becomes only-here only when its
+        //    other tier's tick goes, and every writer that removes one (a
+        //    delete of that tier, the checklist, the course panel) waits for
+        //    the item rows or this tier held above. Concurrent ADDS can only
+        //    shrink the set, which the re-derived SELECT then follows.
+        if (moveTo.length > 0) {
+          const targets = sql.join(
+            moveTo.map((to) => sql`${to}::uuid`),
+            sql`, `
+          );
+          if (onlyHere.contentIds.length > 0) {
+            await tx.execute(sql`
+              INSERT INTO ${contentTierAccess} (content_id, tier_id, organization_id)
+              SELECT here.content_id, target.id, ${orgId}::uuid
+                FROM (${onlyHereFilmsSql(orgId, tierId)}) here
+                CROSS JOIN unnest(ARRAY[${targets}]) AS target(id)
+              ON CONFLICT DO NOTHING`);
+          }
+          if (onlyHere.courseIds.length > 0) {
+            await tx.execute(sql`
+              INSERT INTO ${courseTierAccess} (course_id, tier_id, organization_id)
+              SELECT here.course_id, target.id, ${orgId}::uuid
+                FROM (${onlyHereCoursesSql(orgId, tierId)}) here
+                CROSS JOIN unnest(ARRAY[${targets}]) AS target(id)
+              ON CONFLICT DO NOTHING`);
+          }
+        }
+
+        // f. Soft-delete the tier.
         await tx
           .update(subscriptionTiers)
           .set({
@@ -711,17 +1088,47 @@ export class TierService extends BaseService {
           })
           .where(eq(subscriptionTiers.id, tierId));
 
-        const cleared = await tx
-          .update(content)
-          .set({ includedInTierId: null })
+        // g. Sweep this tier's ticks, films and courses. Replaces the old
+        //    `SET included_in_tier_id = NULL` (Codex-2hxff.90).
+        const swept = await tx
+          .delete(contentTierAccess)
           .where(
             and(
-              eq(content.includedInTierId, tierId),
-              eq(content.organizationId, orgId)
+              eq(contentTierAccess.tierId, tierId),
+              eq(contentTierAccess.organizationId, orgId)
             )
           )
-          .returning({ id: content.id });
-        affectedContentCount = cleared.length;
+          .returning({ contentId: contentTierAccess.contentId });
+        sweptFilms = swept.length;
+        await tx
+          .delete(courseTierAccess)
+          .where(
+            and(
+              eq(courseTierAccess.tierId, tierId),
+              eq(courseTierAccess.organizationId, orgId)
+            )
+          );
+
+        // h. Dual-write the legacy column (phase 1-2) for every film that had
+        //    a tick here: the lowest remaining tick, or — for a film now in no
+        //    tier — its CURRENT value, never NULL (under old code NULL is free).
+        //    Inline (this package cannot reach @codex/content); the same rule
+        //    as `syncLegacyIncludedInTierId`.
+        const touched = swept.map((r) => r.contentId);
+        if (touched.length > 0) {
+          await tx
+            .update(content)
+            .set({
+              legacyIncludedInTierId: sql`(SELECT ${contentTierAccess.tierId} FROM ${contentTierAccess} INNER JOIN ${subscriptionTiers} ON ${subscriptionTiers.id} = ${contentTierAccess.tierId} WHERE ${contentTierAccess.contentId} = ${content.id} ORDER BY ${subscriptionTiers.sortOrder} LIMIT 1)`,
+            })
+            .where(
+              and(
+                inArray(content.id, touched),
+                eq(content.isTierGated, true),
+                sql`EXISTS (SELECT 1 FROM ${contentTierAccess} WHERE ${contentTierAccess.contentId} = ${content.id})`
+              )
+            );
+        }
       });
 
       // Archive Stripe Product after the DB transaction commits so a Stripe
@@ -733,25 +1140,40 @@ export class TierService extends BaseService {
         });
       }
 
-      if (affectedContentCount > 0) {
-        this.obs.warn(
-          'Cleared minimum_tier_id on content gated by deleted tier',
-          {
-            tierId,
-            organizationId: orgId,
-            affectedContentCount,
-          }
-        );
-      }
-
       this.obs.info('Subscription tier deleted', {
         tierId,
         organizationId: orgId,
-        affectedContentCount,
+        onlyHere: choice.onlyHere ?? 'none',
+        onlyHereFilms,
+        onlyHereCourses,
+        sweptFilms,
+        movedToCount: moveTo.length,
       });
     } catch (error) {
       this.handleError(error, 'deleteTier');
     }
+  }
+
+  /**
+   * Live films and courses of this org ticked for `tierId` and for NO other
+   * live tier. Films: any live content row (paid or closed alike — the
+   * dialog splits them). Courses: live courses.
+   */
+  private async findOnlyHereItems(
+    tx: TierTransaction,
+    orgId: string,
+    tierId: string
+  ): Promise<{ contentIds: string[]; courseIds: string[] }> {
+    const films = await tx.execute<{ content_id: string }>(
+      onlyHereFilmsSql(orgId, tierId)
+    );
+    const courseRows = await tx.execute<{ course_id: string }>(
+      onlyHereCoursesSql(orgId, tierId)
+    );
+    return {
+      contentIds: films.rows.map((r) => r.content_id),
+      courseIds: courseRows.rows.map((r) => r.course_id),
+    };
   }
 
   /**
@@ -843,6 +1265,16 @@ export class TierService extends BaseService {
       // Uses high-offset temp values (10000+) to avoid both the UNIQUE constraint
       // on (organizationId, sortOrder) and the CHECK constraint (sort_order > 0).
       await this.dbWs.transaction(async (tx) => {
+        // Lock every live tier of the org in id order BEFORE the row-by-row
+        // updates (lock order, file header). Every plan-access writer takes
+        // its tier locks in id order too; updating in payload order instead
+        // could hold one tier while waiting on another that a sharer holds,
+        // a deadlock (40P01) that aborts one of them. NO KEY UPDATE, not
+        // UPDATE (review round 2): uq_subscription_tiers_org_sort is partial,
+        // so these UPDATEs need no more, and FOR UPDATE would also block the
+        // KEY SHARE every subscription or tick insert takes on a tier.
+        await this.lockOrgTiers(tx, orgId);
+
         // Phase 1: Move all to high temp values to clear the target range
         for (const [i, tierId] of tierIds.entries()) {
           await tx

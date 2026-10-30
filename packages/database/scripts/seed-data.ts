@@ -129,10 +129,11 @@ async function seedData() {
     const db = tx as unknown as typeof dbWs;
     await seedUsers(db);
     await seedOrganizations(db);
-    // Tiers MUST be seeded before content so `content.includedInTierId` FK
-    // targets exist at insert time. Historically this ran inside
-    // `seedCommerce()` after content, which forced a post-hoc update pass
-    // that silently missed hybrid (paid + tier) rows. See Codex-32nb5.
+    // Tiers MUST be seeded before content so the plan-access ticks (and the
+    // legacy `included_in_tier_id` column) have FK targets at insert time.
+    // Historically this ran inside `seedCommerce()` after content, which
+    // forced a post-hoc update pass that silently missed hybrid (paid + tier)
+    // rows. See Codex-32nb5.
     await seedTiers(db);
     await seedMedia(db);
     await seedContent(db);

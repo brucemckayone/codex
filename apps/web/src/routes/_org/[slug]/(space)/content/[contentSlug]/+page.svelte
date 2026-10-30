@@ -47,7 +47,8 @@
     subscriptionContext: data.subscriptionContext,
     organizationId: data.content.organizationId,
     enableSubscriptions,
-    includedInTierId: data.content.includedInTierId,
+    isTierGated: data.content.isTierGated,
+    includedInTierIds: data.content.includedInTierIds,
   }));
 
   // Access state — resolved reactively from the streaming promise.
@@ -214,6 +215,12 @@
   requiresSubscription={subscription.subCtx.requiresSubscription}
   hasSubscription={subscription.subCtx.hasSubscription}
   subscriptionCoversContent={subscription.subCtx.subscriptionCoversContent}
+  plans={{
+    tiers: subscription.tiers,
+    status: subscription.tiersStatus,
+    currentPlan: subscription.subCtx.currentPlan,
+    currentPeriodEnd: subscription.subCtx.currentPeriodEnd,
+  }}
 >
   {#snippet purchaseForm()}
     {#if accessState.loading}

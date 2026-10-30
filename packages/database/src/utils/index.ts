@@ -6,6 +6,8 @@
  * - Query helper functions (soft delete filtering, scoping, pagination)
  */
 
+// Which content is closed to new viewers (public lists and counts)
+export * from './closed-content';
 // Who an org's public creators list shows
 export * from './creator-listing';
 // Date-window helper

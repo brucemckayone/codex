@@ -33,7 +33,7 @@ history.
 
 | Bead | P | What is not true yet | Spec |
 |---|---|---|---|
-| `Codex-2hxff.16` | P2 | Downgrades at period end; tier reorders warn first | [subscriptions](subscriptions.md#changing-tier) |
+| `Codex-2hxff.16` | P2 | Downgrades at period end | [subscriptions](subscriptions.md#changing-tier) |
 | `Codex-2hxff.24` | P3 | Dev and CI Stripe setup mirrors production; customer stub removed | [operations](operations.md#local-development) |
 | `Codex-2hxff.25` | P2 | CI exercises real webhook round trips | [operations](operations.md#testing) |
 | `Codex-2hxff.29` | P2 | Creators' bank payouts are held for the 14-day refund window | [connect-and-payouts](connect-and-payouts.md#payout-timing) |

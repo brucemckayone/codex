@@ -41,7 +41,8 @@ export const VISIBILITY = {
  *
  * NOT a stored column. The former `content.access_type` enum was HARD-REPLACED
  * by the separable {@link ContentAccessFlags} policy (SPEC §6.1 — `is_free`,
- * `is_purchasable`, `included_in_tier_id`, `course_only`, `is_follower_gated`,
+ * `is_purchasable`, `is_tier_gated` (+ its `content_tier_access` ticks),
+ * `course_only`, `is_follower_gated`,
  * `is_team_only`). This projection exists only so the studio form (an exclusive
  * picker) and display badges can keep speaking in one "kind":
  *   - {@link deriveContentAccessKind} — flags → kind (display label / legacy
@@ -52,7 +53,7 @@ export const VISIBILITY = {
  * entitlement resolver (`@codex/access`) reads the flags directly (SPEC §6.3).
  *
  * Legacy value mapping (HARDENING §H2): free→isFree, paid→isPurchasable,
- * subscribers→includedInTierId, followers→isFollowerGated, team→isTeamOnly.
+ * subscribers→isTierGated, followers→isFollowerGated, team→isTeamOnly.
  * `course` (courseOnly) is net-new. 'members' was a stale alias for 'team',
  * fully removed.
  *
@@ -80,7 +81,12 @@ export interface ContentAccessFlags {
   isFree: boolean;
   isPurchasable: boolean;
   priceCents: number | null;
-  includedInTierId: string | null;
+  /**
+   * The subscribers-only switch (Codex-2hxff.91). WHICH tiers open it is the
+   * `content_tier_access` set, which travels beside these flags, never in
+   * them. Gated with no tier ticked is CLOSED, never free.
+   */
+  isTierGated: boolean;
   courseOnly: boolean;
   isFollowerGated: boolean;
   isTeamOnly: boolean;
@@ -98,31 +104,29 @@ export function deriveContentAccessKind(
   if (flags.courseOnly) return CONTENT_ACCESS_TYPE.COURSE;
   if (flags.isTeamOnly) return CONTENT_ACCESS_TYPE.TEAM;
   if (flags.isPurchasable) return CONTENT_ACCESS_TYPE.PAID;
-  if (flags.includedInTierId) return CONTENT_ACCESS_TYPE.SUBSCRIBERS;
+  if (flags.isTierGated) return CONTENT_ACCESS_TYPE.SUBSCRIBERS;
   if (flags.isFollowerGated) return CONTENT_ACCESS_TYPE.FOLLOWERS;
   return CONTENT_ACCESS_TYPE.FREE;
 }
 
 /**
  * Expand an exclusive display KIND back into the stored flag policy. `priceCents`
- * is carried for `paid`; `includedInTierId` for `subscribers` and the `paid`
- * hybrid (paid content also included at a tier). Every other flag is cleared.
+ * is carried for `paid`. The tier switch is on for `subscribers` (with or
+ * without a tick: none ticked is closed) and for the `paid` hybrid only when
+ * at least one tier is ticked (`tierCount`). Every other flag is cleared.
  */
 export function contentAccessKindToPolicy(
   kind: ContentAccessType,
-  opts: { priceCents?: number | null; includedInTierId?: string | null } = {}
+  opts: { priceCents?: number | null; tierCount?: number } = {}
 ): ContentAccessFlags {
   const priceCents = opts.priceCents ?? null;
-  const tier = opts.includedInTierId ?? null;
   return {
     isFree: kind === CONTENT_ACCESS_TYPE.FREE,
     isPurchasable: kind === CONTENT_ACCESS_TYPE.PAID,
     priceCents: kind === CONTENT_ACCESS_TYPE.PAID ? priceCents : null,
-    includedInTierId:
+    isTierGated:
       kind === CONTENT_ACCESS_TYPE.SUBSCRIBERS ||
-      kind === CONTENT_ACCESS_TYPE.PAID
-        ? tier
-        : null,
+      (kind === CONTENT_ACCESS_TYPE.PAID && (opts.tierCount ?? 0) > 0),
     courseOnly: kind === CONTENT_ACCESS_TYPE.COURSE,
     isFollowerGated: kind === CONTENT_ACCESS_TYPE.FOLLOWERS,
     isTeamOnly: kind === CONTENT_ACCESS_TYPE.TEAM,
@@ -149,7 +153,7 @@ export function isGrantableContent(
     | 'courseOnly'
     | 'isTeamOnly'
     | 'isFollowerGated'
-    | 'includedInTierId'
+    | 'isTierGated'
     | 'priceCents'
   >
 ): boolean {
@@ -157,7 +161,7 @@ export function isGrantableContent(
     !c.courseOnly &&
     !c.isTeamOnly &&
     !c.isFollowerGated &&
-    (c.includedInTierId != null || (c.priceCents ?? 0) > 0)
+    (c.isTierGated || (c.priceCents ?? 0) > 0)
   );
 }
 
@@ -186,7 +190,7 @@ export function canBeSold(
     | 'courseOnly'
     | 'isTeamOnly'
     | 'isFollowerGated'
-    | 'includedInTierId'
+    | 'isTierGated'
   > & { organizationId: string | null }
 ): boolean {
   return (
@@ -195,7 +199,7 @@ export function canBeSold(
     !c.courseOnly &&
     !c.isTeamOnly &&
     !c.isFollowerGated &&
-    !(c.organizationId == null && c.includedInTierId != null)
+    !(c.organizationId == null && c.isTierGated)
   );
 }
 
@@ -211,7 +215,8 @@ export interface ContentPublicnessPolicy {
   isFree: boolean | null;
   isPurchasable: boolean | null;
   priceCents: number | null;
-  includedInTierId: string | null;
+  /** The tier switch (Codex-2hxff.91): on = a gate, ticked or not. */
+  isTierGated: boolean | null;
   isFollowerGated: boolean | null;
   isTeamOnly: boolean | null;
   courseOnly: boolean | null;
@@ -248,7 +253,7 @@ export function isPublicContent(policy: ContentPublicnessPolicy): boolean {
   return !(
     policy.isPurchasable === true ||
     (policy.priceCents ?? 0) > 0 ||
-    policy.includedInTierId != null ||
+    policy.isTierGated === true ||
     policy.isFollowerGated === true ||
     policy.isTeamOnly === true ||
     policy.courseOnly === true
@@ -257,16 +262,43 @@ export function isPublicContent(policy: ContentPublicnessPolicy): boolean {
 
 /**
  * Does publishing this content need the creator's payouts set up? Any price,
- * or inclusion in a tier, earns money, whether or not the item is marked
+ * or the tier switch, earns money, whether or not the item is marked
  * purchasable (owner decision, Codex-2hxff.14: "any priced item needs payouts
- * set up to publish"). The content publish and update paths and the admin
+ * set up to publish"). Conservative for a closed item (gated, no tick): it
+ * still needs payouts. The content publish and update paths and the admin
  * publish route all refuse with `CreatorPayoutsRequiredError` when this holds
  * and the creator can't be paid.
  */
 export function requiresPayoutsToPublish(
-  c: Pick<ContentAccessFlags, 'priceCents' | 'includedInTierId'>
+  c: Pick<ContentAccessFlags, 'priceCents' | 'isTierGated'>
 ): boolean {
-  return (c.priceCents ?? 0) > 0 || c.includedInTierId != null;
+  return (c.priceCents ?? 0) > 0 || c.isTierGated;
+}
+
+/**
+ * Is this item CLOSED (Codex-2hxff.91, owner U11)? Gated behind tiers with no
+ * open tier ticked: no new subscriber can reach it, only buyers who already
+ * hold it, granted users, course owners, the team and the members of a
+ * switched-off tier that includes it. With a one-time price on sale it is presented as
+ * any paid item; without one it is hidden from the public lists and its page
+ * says "Not available right now".
+ *
+ * `openTierCount` counts the item's ticks on tiers a NEW subscriber can join:
+ * live and active (owner U13). A tick on a switched-off tier still lets that
+ * tier's members watch, but opens the item to nobody new, so it is not
+ * counted here. The server's twin is `notClosedToNewViewers()` in
+ * `@codex/content`; the web's is the paywall's `closed` case over the public
+ * (active) tier list.
+ */
+export function isClosedToNewViewers(
+  c: Pick<ContentAccessFlags, 'isTierGated' | 'isPurchasable' | 'priceCents'>,
+  openTierCount: number
+): boolean {
+  return (
+    c.isTierGated &&
+    openTierCount === 0 &&
+    !(c.isPurchasable && (c.priceCents ?? 0) >= PRICE_LIMITS.MIN_CENTS)
+  );
 }
 
 /**

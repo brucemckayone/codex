@@ -40,6 +40,7 @@ import {
   createTestTierInput,
   createUniqueSlug,
   type Database,
+  gateContentToTiers,
   seedTestUsers,
   setupTestDatabase,
   teardownTestDatabase,
@@ -223,21 +224,33 @@ describe('a removed creator’s catalogue (Codex-2hxff.64)', () => {
       priceCents: 900,
       ...offSale,
     });
-    tierOffSaleId = await insertContent(creatorId, {
-      includedInTierId: tierId,
-      ...offSale,
-    });
-    tierDraftId = await insertContent(creatorId, {
-      includedInTierId: tierId,
-      status: 'draft',
-      offSaleAt: null,
-    });
-    tierPublishedId = await insertContent(creatorId, {
-      includedInTierId: tierId,
-      status: 'published',
-      publishedAt: daysAgo(30),
-      offSaleAt: null,
-    });
+    // Behind the tier switch with the one tier ticked (Codex-2hxff.91).
+    const inTier = async (id: string) => {
+      await gateContentToTiers(db, {
+        contentId: id,
+        organizationId: orgId,
+        tierIds: [tierId],
+      });
+      return id;
+    };
+    tierOffSaleId = await inTier(
+      await insertContent(creatorId, { isTierGated: true, ...offSale })
+    );
+    tierDraftId = await inTier(
+      await insertContent(creatorId, {
+        isTierGated: true,
+        status: 'draft',
+        offSaleAt: null,
+      })
+    );
+    tierPublishedId = await inTier(
+      await insertContent(creatorId, {
+        isTierGated: true,
+        status: 'published',
+        publishedAt: daysAgo(30),
+        offSaleAt: null,
+      })
+    );
     followerOffSaleId = await insertContent(creatorId, {
       isFollowerGated: true,
       ...offSale,

@@ -80,7 +80,7 @@ function gatedContent(): SQL {
     ${content.isFree} IS TRUE
     AND ${content.isPurchasable} IS NOT TRUE
     AND COALESCE(${content.priceCents}, 0) <= 0
-    AND ${content.includedInTierId} IS NULL
+    AND ${content.isTierGated} IS NOT TRUE
     AND ${content.isFollowerGated} IS NOT TRUE
     AND ${content.isTeamOnly} IS NOT TRUE
     AND ${content.courseOnly} IS NOT TRUE

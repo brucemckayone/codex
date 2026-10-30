@@ -302,7 +302,7 @@ export class CourseSubscriptionService extends BaseService {
       .where(eq(stripeConnectAccounts.userId, course.creatorId))
       .limit(1);
     if (!account?.chargesEnabled || !account.payoutsEnabled) {
-      throw new CreatorConnectRequiredError(course.creatorId);
+      throw new CreatorConnectRequiredError();
     }
   }
 

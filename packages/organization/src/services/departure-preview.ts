@@ -27,15 +27,15 @@ import {
 import type { DatabaseClient } from '@codex/database';
 import {
   content,
+  contentTierAccess,
   courseSubscriptions,
   courses,
   courseTierAccess,
   creatorOrganizationAgreements,
   organizationMemberships,
   subscriptions,
-  subscriptionTiers,
 } from '@codex/database/schema';
-import { and, eq, inArray, isNotNull, isNull, min, or, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, or } from 'drizzle-orm';
 
 export interface DeparturePreview {
   agreements: number;
@@ -76,39 +76,28 @@ export async function countDepartureEffects(
     .where(coursesOnSale);
 
   // Tier reach follows the access decision (`decideContentAccess`): content
-  // with `includedInTierId` T is in tier T AND every tier above it by
-  // `sortOrder`, so the subscribers who reach the creator's tier content are
-  // those on a tier at or above the LOWEST tier any of it sits in. Content that
-  // is course-only, team-only or follower-gated never reaches the tier arm,
-  // so it is left out. No such content → the minimum is NULL and no tier
-  // qualifies.
-  const lowestTierWithTheirContent = db
-    .select({ sortOrder: min(subscriptionTiers.sortOrder) })
-    .from(subscriptionTiers)
+  // behind the tier switch is in exactly the tiers ticked for it
+  // (`content_tier_access`, Codex-2hxff.91; no tier implies another), the same
+  // shape as the course arm below. Content that is course-only, team-only or
+  // follower-gated never reaches the tier arm, so it is left out.
+  const tiersReachingTheirContent = db
+    .select({ tierId: contentTierAccess.tierId })
+    .from(contentTierAccess)
     .where(
       inArray(
-        subscriptionTiers.id,
+        contentTierAccess.contentId,
         db
-          .select({ tierId: content.includedInTierId })
+          .select({ id: content.id })
           .from(content)
           .where(
             and(
               contentOnSale,
-              isNotNull(content.includedInTierId),
+              eq(content.isTierGated, true),
               eq(content.courseOnly, false),
               eq(content.isTeamOnly, false),
               eq(content.isFollowerGated, false)
             )
           )
-      )
-    );
-  const tiersReachingTheirContent = db
-    .select({ id: subscriptionTiers.id })
-    .from(subscriptionTiers)
-    .where(
-      and(
-        eq(subscriptionTiers.organizationId, organizationId),
-        sql`${subscriptionTiers.sortOrder} >= ${lowestTierWithTheirContent}`
       )
     );
   // A tier unlocks a course only by an explicit `course_tier_access` row (no
