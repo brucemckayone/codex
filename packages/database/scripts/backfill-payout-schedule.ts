@@ -24,6 +24,9 @@
  *
  *   … --env production --apply --confirm <checksum> --live
  *
+ *   While production runs on Stripe TEST keys (owner, 2026-10-29), pass
+ *   `--test-keys` instead of `--live`, on the dry run and on the apply.
+ *
  *   Re-reads every account and refuses if the set to switch has changed since
  *   the dry run. Each is updated under the key `codex_manual_payouts_<acct>`;
  *   the settings Stripe returns are checked, and only then is the account
@@ -33,6 +36,9 @@
  * Safety:
  *   - The key must match --env: `sk_live_`/`rk_live_` for production, a test
  *     key otherwise. `--apply` with a live key also needs `--live`.
+ *     Production takes a test key only with `--test-keys`, said out loud, so
+ *     a dev key run against the production database by mistake still refuses
+ *     (Codex-2hxff.92).
  *   - Only accounts in this environment's database are read, and one tagged
  *     for another environment is skipped (production and dev share a sandbox).
  *   - Per-account failures are printed and skipped.
@@ -74,6 +80,8 @@ export interface BackfillArgs {
   apply: boolean;
   confirm: string | null;
   live: boolean;
+  /** Production is on Stripe test keys for now (Codex-2hxff.92). */
+  testKeys: boolean;
 }
 
 export function parseArgs(argv: readonly string[]): BackfillArgs {
@@ -91,6 +99,7 @@ export function parseArgs(argv: readonly string[]): BackfillArgs {
     apply: argv.includes('--apply'),
     confirm: value('--confirm'),
     live: argv.includes('--live'),
+    testKeys: argv.includes('--test-keys'),
   };
   if (args.apply && !args.confirm) {
     throw new Error(
@@ -109,6 +118,8 @@ export function keyMode(key: string | undefined): 'live' | 'test' | 'unknown' {
 
 /**
  * The key must be the environment's: live for production, test otherwise.
+ * Production takes a test key only with `--test-keys`, while it runs on test
+ * keys, and `--test-keys` beside a live key is refused as a contradiction.
  * Writing to live Stripe takes `--live` as well as `--apply`. Never prints
  * the key.
  */
@@ -117,10 +128,18 @@ export function assertKeyMatchesEnv(
   args: BackfillArgs
 ): void {
   const mode = keyMode(key);
-  const wanted = args.env === 'production' ? 'live' : 'test';
+  if (args.testKeys && mode === 'live') {
+    throw new Error(
+      '--test-keys was given, but STRIPE_SECRET_KEY is a live-mode key'
+    );
+  }
+  const wanted = args.env === 'production' && !args.testKeys ? 'live' : 'test';
   if (mode !== wanted) {
     throw new Error(
-      `--env ${args.env} needs a ${wanted}-mode Stripe key; STRIPE_SECRET_KEY is ${mode}`
+      `--env ${args.env} needs a ${wanted}-mode Stripe key; STRIPE_SECRET_KEY is ${mode}` +
+        (args.env === 'production' && mode === 'test'
+          ? ' (pass --test-keys while production runs on test keys)'
+          : '')
     );
   }
   if (args.apply && mode === 'live' && !args.live) {
@@ -426,7 +445,7 @@ async function main(): Promise<void> {
   } else {
     await survey(deps, args.env);
     console.log(
-      '\n  Nothing was changed. To apply: --apply --confirm <checksum> (and --live for production).'
+      '\n  Nothing was changed. To apply: --apply --confirm <checksum> (and, for production, --live, or --test-keys while it runs on test keys).'
     );
   }
 }

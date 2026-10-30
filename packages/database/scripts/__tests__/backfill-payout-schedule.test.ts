@@ -293,12 +293,50 @@ describe('backfill-payout-schedule', () => {
       ).not.toThrow();
     });
 
+    // Production runs on Stripe test keys for now (Codex-2hxff.92). A test
+    // key there must be said out loud, so a dev key against the production
+    // database still refuses.
+    it('production takes a test key only with --test-keys', () => {
+      expect(() =>
+        assertKeyMatchesEnv('sk_test_x', parseArgs(['--env', 'production']))
+      ).toThrow(/--test-keys/);
+      expect(() =>
+        assertKeyMatchesEnv(
+          'sk_test_x',
+          parseArgs(['--env', 'production', '--test-keys'])
+        )
+      ).not.toThrow();
+      expect(() =>
+        assertKeyMatchesEnv(
+          'sk_test_x',
+          parseArgs([
+            '--env',
+            'production',
+            '--test-keys',
+            '--apply',
+            '--confirm',
+            'abc',
+          ])
+        )
+      ).not.toThrow();
+    });
+
+    it('--test-keys beside a live key is a contradiction', () => {
+      expect(() =>
+        assertKeyMatchesEnv(
+          'sk_live_x',
+          parseArgs(['--env', 'production', '--test-keys', '--live'])
+        )
+      ).toThrow(/live-mode key/);
+    });
+
     it('a dry run is the default; --apply needs --confirm', () => {
       expect(parseArgs(['--env', 'test'])).toEqual({
         env: 'test',
         apply: false,
         confirm: null,
         live: false,
+        testKeys: false,
       });
       expect(() => parseArgs(['--env', 'test', '--apply'])).toThrow(
         /--confirm/
