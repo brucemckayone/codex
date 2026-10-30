@@ -150,7 +150,7 @@ admin-api's `/api/admin/support/*` routes (Codex-2hxff.28), all platform-owner o
 | `radiusValueSchema` | Border radius: 0–2 rem |
 | `densityValueSchema` | Spacing multiplier: 0.75–1.25 |
 | `fontNameSchema` | Font family name (alphanumeric + spaces, max 50) |
-| `sanitizeSvgContent(content)` | Async DOMPurify SVG sanitization |
+| `sanitizeSvgContent(content)` | Async SVG sanitization that runs on Workers (SVGO inlines the stylesheet, sanitize-html keeps an allowlist); `svg-sanitize.ts` |
 | `extractMimeType(contentType)` | Strips parameters from Content-Type header |
 
 `z` is also re-exported: `import { z } from '@codex/validation'`
@@ -177,6 +177,9 @@ const safeSvg = await sanitizeSvgContent(userUploadedSvg);
 - **MUST** validate all user input (body, query, params) via `procedure({ input })` — no unvalidated input reaches handlers
 - **MUST** use existing primitives (`uuidSchema`, `urlSchema`, `emailSchema`) — NEVER write ad-hoc regex
 - **MUST** use `sanitizeSvgContent()` for ALL SVG uploads
+- **MUST** prove a sanitiser or parser runs inside workerd, not only under Node. This package's build bundled
+  DOMPurify's browser copy, which has no `sanitize()` without a window, so every SVG logo upload threw in
+  production while every Node test passed (Codex-kcr87). `svg-sanitize.workerd.test.ts` shows how.
 - **MUST** use `urlSchema` for ALL user-provided URLs — blocks dangerous protocols
 - **MUST** narrow user-provided IMAGE URLs with `createPlatformImageUrlSchema(base)` at the write path (Codex-8so68) —
   `urlSchema` alone lets a caller hotlink a third-party host, leaking every viewer's IP/referrer and bypassing

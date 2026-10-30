@@ -33,7 +33,8 @@ export const MIME_TYPES = {
  * Supported MIME types for image uploads across the platform
  * Used by image-processing and validation packages
  *
- * Note: SVG excluded from upload validation (sanitized separately via DOMPurify)
+ * Note: SVG excluded from upload validation (sanitized separately by
+ * @codex/validation sanitizeSvgContent)
  */
 export const SUPPORTED_IMAGE_MIME_TYPES = new Set([
   MIME_TYPES.IMAGE.PNG,

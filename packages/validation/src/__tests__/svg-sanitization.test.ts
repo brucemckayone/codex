@@ -1,12 +1,8 @@
-import { beforeAll, describe, expect, it } from 'vitest';
-import { sanitizeSvgContent } from '../primitives';
+import { describe, expect, it } from 'vitest';
+import { sanitizeSvgContent } from '../svg-sanitize';
 
+// Under Node. svg-sanitize.workerd.test.ts runs it where the workers do.
 describe('sanitizeSvgContent', () => {
-  // Pre-warm isomorphic-dompurify (jsdom init is slow on first import)
-  beforeAll(async () => {
-    await import('isomorphic-dompurify');
-  }, 30_000);
-
   it('should preserve safe SVG content', async () => {
     const safeSvg = `
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
