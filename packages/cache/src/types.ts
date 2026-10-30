@@ -18,18 +18,18 @@ import type { WaitUntilFn } from './helpers/invalidate';
  * that stales it — and there is no second number left to drift.
  */
 export interface CacheOptions<T = unknown> {
-  /** Time-to-live for cached data in seconds (default: 600 = 10 minutes) */
-  ttl?: number;
   /**
-   * Whether a fetched value may be stored. The value is returned either way;
-   * `false` only skips the write, so the next read fetches again.
+   * Time-to-live for cached data in seconds (default: 600 = 10 minutes).
    *
-   * For a fetcher that answers with a FALLBACK when one of its reads fails
-   * (the org's public info serves the brand without its intro film): stored,
-   * that fallback would be served as the truth for the whole TTL after one
-   * blip, with the only trace a warning on the miss that wrote it.
+   * A read (`get`, `getWithResult`) may pass a function of the fetched value
+   * instead, for a fetcher that answers with a FALLBACK when one of its reads
+   * fails (the org's public info serves the brand without its intro film).
+   * Stored for the full TTL, that fallback stands as the truth for hours
+   * after one blip; never stored, a read that keeps failing sends every page
+   * view to the database. A short TTL for it bounds both. KV refuses an
+   * `expirationTtl` under 60.
    */
-  shouldCache?: (data: T) => boolean;
+  ttl?: number | ((data: T) => number);
 }
 
 /**

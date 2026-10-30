@@ -20,7 +20,7 @@ Versioned KV cache for Cloudflare Workers. Cache-aside pattern with atomic versi
 
 | Method | Signature | Purpose |
 |---|---|---|
-| `get<T>(id, type, fetcher, options?)` | `(string, CacheType, () => Promise<T>, { ttl? }) => Promise<T>` | Cache-aside; fetcher called on miss or KV failure |
+| `get<T>(id, type, fetcher, options?)` | `(string, CacheType, () => Promise<T>, { ttl? }) => Promise<T>` | Cache-aside; fetcher called on miss or KV failure. `ttl` may be a function of the fetched value, to keep a fallback briefly (`/public/:slug/info`: 60s, not 4h) |
 | `getWithResult<T>(id, type, fetcher, options?)` | Same + returns `{ data: T, hit: boolean }` | Cache-aside with hit/miss tracking |
 | `set<T>(id, type, data, options?)` | `(string, CacheType, T, { ttl? }) => Promise<void>` | Write-through: put a value you already hold into the current slot. 1 read + 1 write |
 | `invalidate(id)` | `(string) => Promise<void>` | Bump version — all cached data for this id becomes stale. The ONLY writer of version keys |
@@ -64,7 +64,7 @@ CacheType.USER_PROFILE         // 'user:profile'      — CARRIES email; never p
 CacheType.USER_PUBLIC_PROFILE  // 'user:public-profile' — public subset, keyed by USER ID
 CacheType.USERNAME_TO_ID       // 'user:username-to-id' — keyed by USERNAME_LOOKUP(username) = 'username:{name}', 1h
 CacheType.USER_PREFERENCES     // 'user:preferences'
-CacheType.ORG_CONFIG           // 'org:config'
+CacheType.ORG_CONFIG           // 'org:config:v2' (v2: the payload gained introFilm)
 CacheType.ORG_STATS            // 'org:stats:v2'
 CacheType.ORG_CREATORS         // 'org:creators:v2' (v2: no course-only practices, Codex-ot6vj)
 CacheType.ORG_MEMBERS          // 'org:members'

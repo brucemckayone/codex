@@ -346,7 +346,7 @@ export class VersionedCache {
    * 4. On KV error, fall back to the fetcher (graceful degradation)
    *
    * Cost: 2 reads on a hit; 2 reads + 1 write on a miss; 2 reads and NO write
-   * when the fetcher throws, or when `shouldCache` declines its answer.
+   * when the fetcher throws.
    *
    * @param id - Entity identifier (userId, orgId, etc.)
    * @param type - Cache type (e.g., 'user:profile', 'org:config')
@@ -396,7 +396,7 @@ export class VersionedCache {
     fetcher: () => Promise<T>,
     options: CacheOptions<T> = {}
   ): Promise<CacheResult<T>> {
-    const { ttl = DEFAULT_TTL, shouldCache } = options;
+    const { ttl = DEFAULT_TTL } = options;
 
     this.stats.gets++;
     // `get` delegates here, so this is the only place a hit or a miss is
@@ -430,9 +430,10 @@ export class VersionedCache {
     const data = await fetcher();
 
     // `null` means the version read failed, so there is no key worth writing.
-    // A value the caller marks unstorable (a fallback) is served, not stored.
-    if (lookup.cacheKey !== null && (shouldCache?.(data) ?? true)) {
-      this.writeCacheSlot(lookup.cacheKey, data, ttl, id, type);
+    // A TTL function prices the value itself: a fallback is kept briefly.
+    if (lookup.cacheKey !== null) {
+      const seconds = typeof ttl === 'function' ? ttl(data) : ttl;
+      this.writeCacheSlot(lookup.cacheKey, data, seconds, id, type);
     }
 
     return { data, hit: false };
@@ -467,7 +468,8 @@ export class VersionedCache {
     id: string,
     type: string,
     data: T,
-    options: CacheOptions = {}
+    // The value is in hand, so its TTL is a number: no function of it.
+    options: { ttl?: number } = {}
   ): Promise<void> {
     const { ttl = DEFAULT_TTL } = options;
 

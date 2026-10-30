@@ -563,4 +563,14 @@ export const CACHE_TTL = {
    * stale content count on a public page; a day is not.
    */
   ORG_PUBLIC_INFO_SECONDS: 4 * 60 * 60, // 4 hours
+
+  /**
+   * The org's public info when a part of it failed and was served as its
+   * fallback, or its intro film had no R2 host to resolve against
+   * (Codex-376dl). Short, so a blip clears within a minute and not after 4h;
+   * not zero, so a read that keeps failing costs the database one read per
+   * org per minute rather than one per page view. 60 is KV's floor for
+   * `expirationTtl`, and the `/info` CDN window too.
+   */
+  ORG_PUBLIC_INFO_PARTIAL_SECONDS: 60,
 } as const;

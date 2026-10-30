@@ -18,6 +18,7 @@
 <script lang="ts">
   import type { StudioIntroFilm } from '@codex/shared-types';
   import { brandEditor } from '$lib/brand-editor';
+  import { describeThrown } from '$lib/client-log';
   import { Button } from '$lib/components/ui';
   import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
   import MediaPicker from '$lib/components/studio/MediaPicker.svelte';
@@ -26,6 +27,7 @@
     linkIntroVideo,
     unlinkIntroVideo,
   } from '$lib/remote/branding.remote';
+  import { logger } from '$lib/observability';
   import { listMedia } from '$lib/remote/media.remote';
   import { isFirstLoad, queryErrorMessage } from '$lib/remote/query-result';
   import { formatDuration } from '$lib/utils/format';
@@ -72,6 +74,17 @@
   let busy = $state(false);
   let saveError = $state<string | null>(null);
 
+  /**
+   * Re-read a query. A failed read shows through the query's own `error`
+   * ("Couldn't load your film"); this keeps a trace of why, which the
+   * screen does not say.
+   */
+  function reread(query: { refresh(): Promise<unknown> } | null, what: string) {
+    query?.refresh().catch((error) => {
+      logger.warn('brand_film.refresh_failed', { what, ...describeThrown(error) });
+    });
+  }
+
   /** What visitors get, in the studio's words. */
   function playsNote(view: StudioIntroFilm): string {
     if (view.plays === 'full') return m.branding_film_plays_full();
@@ -95,7 +108,7 @@
       // The command answers the write alone; the film is re-read here, so a
       // failed read shows as this control's own "Couldn't load your film"
       // rather than failing a save that already landed.
-      film?.refresh().catch(() => {});
+      reread(film, 'film');
       onsaved?.();
     } catch (error) {
       saveError = queryErrorMessage(error, m.branding_film_save_failed());
@@ -124,7 +137,7 @@
   {#if filmError}
     <div class="hero-film__failed" role="alert">
       <p>{m.branding_film_load_failed()}</p>
-      <Button variant="secondary" size="sm" onclick={() => film?.refresh()}>
+      <Button variant="secondary" size="sm" onclick={() => reread(film, 'film')}>
         {m.common_try_again()}
       </Button>
     </div>
@@ -178,7 +191,7 @@
         <span class="hero-film__label">{m.branding_film_label()}</span>
         {#if libraryError}
           <p class="hero-film__error" role="alert">{m.branding_film_library_failed()}</p>
-          <Button variant="secondary" size="sm" onclick={() => library?.refresh()}>
+          <Button variant="secondary" size="sm" onclick={() => reread(library, 'library')}>
             {m.common_try_again()}
           </Button>
         {:else if isFirstLoad(library)}

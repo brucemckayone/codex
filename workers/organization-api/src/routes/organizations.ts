@@ -44,7 +44,7 @@ import {
   BrandingSettingsService,
   FeatureSettingsService,
 } from '@codex/platform-settings';
-import { NotFoundError } from '@codex/service-errors';
+import { describeThrown, NotFoundError } from '@codex/service-errors';
 import type {
   Bindings,
   CheckSlugResponse,
@@ -194,9 +194,10 @@ app.get(
     handler: async (ctx): Promise<PublicBrandingResponse> => {
       // Use fetchPublicOrgInfo — ctx.services.settings requires org context
       // which is unavailable on public (no-auth) endpoints. Branding only:
-      // this uncached route never reads the intro film it would not return.
+      // this uncached route never reads the features or the intro film it
+      // would not return.
       const { info } = await fetchPublicOrgInfo(ctx, ctx.input.params.slug, {
-        withIntroFilm: false,
+        brandingOnly: true,
       });
 
       return {
@@ -222,8 +223,11 @@ app.get(
  *
  * Branding, features and the intro film are each non-critical: a part whose
  * read fails is answered with its fallback, so the page still draws.
- * `partial` says one did, and the `/info` route then serves the answer
- * without caching it: stored, one blip would stand for the 4h TTL.
+ * `partial` says one did, or that the film had no R2 host to resolve
+ * against, and the `/info` route then keeps the answer for a minute, not the
+ * 4h TTL a whole one gets. `brandingOnly` skips the features and the film,
+ * for a caller that returns neither (its `enableSubscriptions` is then the
+ * fallback, and means nothing).
  */
 async function fetchPublicOrgInfo(
   ctx: {
@@ -241,7 +245,7 @@ async function fetchPublicOrgInfo(
     obs?: Pick<ObservabilityClient, 'warn'>;
   },
   slug: string,
-  { withIntroFilm }: { withIntroFilm: boolean }
+  { brandingOnly }: { brandingOnly: boolean }
 ) {
   const organization = await ctx.services.organization.getBySlug(slug);
 
@@ -266,8 +270,8 @@ async function fetchPublicOrgInfo(
   const [brandingResult, featuresResult, introResult] =
     await Promise.allSettled([
       brandingSvc.get(),
-      featureSvc.get(),
-      withIntroFilm ? resolveIntroFilm(db, organization.id) : null,
+      brandingOnly ? null : featureSvc.get(),
+      brandingOnly ? null : resolveIntroFilm(db, organization.id),
     ]);
 
   // Each failed part is served as its fallback below; the answer says so.
@@ -275,13 +279,15 @@ async function fetchPublicOrgInfo(
     branding: brandingResult,
     features: featuresResult,
     introFilm: introResult,
-  }).filter(([, result]) => result.status === 'rejected');
+  }).flatMap(([part, result]) =>
+    result.status === 'rejected'
+      ? [`${part}: ${describeFailure(result.reason)}`]
+      : []
+  );
   if (failed.length > 0) {
-    ctx.obs?.warn('Public org info served with fallbacks, not cached', {
+    ctx.obs?.warn('Public org info served with fallbacks', {
       organizationId: organization.id,
-      failed: failed
-        .map(([part, result]) => `${part}: ${rejectionMessage(result)}`)
-        .join('; '),
+      failed: failed.join('; '),
     });
   }
 
@@ -340,16 +346,19 @@ async function fetchPublicOrgInfo(
   // Non-critical — defaults to true so subscriptions aren't hidden on fetch failure.
   const enableSubscriptions =
     featuresResult.status === 'fulfilled'
-      ? featuresResult.value.enableSubscriptions
+      ? (featuresResult.value?.enableSubscriptions ?? true)
       : true;
 
   // Non-critical too: a failed read draws the hero with no film.
   const introResolution =
     introResult.status === 'fulfilled' ? introResult.value : null;
   const bases = resolveR2PublicBases(ctx.env);
-  if (introResolution?.film && (!bases.assets || !bases.mediaPreview)) {
+  const baseMissing =
+    Boolean(introResolution?.film) && (!bases.assets || !bases.mediaPreview);
+  if (baseMissing) {
     // A key with no host to resolve it against draws no poster, or no film
-    // at all for a paid one, with nothing on the page to say why.
+    // at all for a paid one, with nothing on the page to say why. Counted as
+    // partial, so the fixed config shows within a minute of its deploy.
     ctx.obs?.warn('r2_public_base.missing', {
       organizationId: organization.id,
       assetsBaseSet: Boolean(bases.assets),
@@ -390,14 +399,25 @@ async function fetchPublicOrgInfo(
     },
     enableSubscriptions,
   };
-  return { info, partial: failed.length > 0 };
+  return { info, partial: failed.length > 0 || baseMissing };
 }
 
-/** A rejected part's message, for the log: never its stack or its cause. */
-function rejectionMessage(result: PromiseSettledResult<unknown>): string {
-  if (result.status !== 'rejected') return '';
-  const { reason } = result;
-  return reason instanceof Error ? reason.message : String(reason);
+/**
+ * A failed part, for the log: what failed, never the SQL or its bound params
+ * (`describeThrown` names a drizzle error by the driver error under it).
+ */
+function describeFailure(reason: unknown): string {
+  if (!(reason instanceof Error) || 'params' in reason) {
+    return describeThrown(reason);
+  }
+  // A service wraps a DB failure in a ServiceError whose message is the
+  // client's ("An unexpected error occurred"): what failed is its cause.
+  if (reason.cause !== undefined) return describeThrown(reason.cause);
+  // A ServiceError's class name does not survive the package build's
+  // minifier (it logs as "f"); its code does.
+  return 'code' in reason && typeof reason.code === 'string'
+    ? `${reason.code}: ${reason.message}`
+    : describeThrown(reason);
 }
 
 /**
@@ -431,8 +451,10 @@ app.get(
       // its key is one of the four data slots live in CACHE_KV_PRODUCTION, so
       // it was also one of the reads the hit ratio could not see.
       //
-      // An answer built with a fallback (a part's read failed) is served but
-      // not stored, so one blip cannot hide the brand or the film for 4h.
+      // An answer built with a fallback (a part's read failed) is kept for a
+      // minute: one blip cannot hide the brand or the film for 4h, and a part
+      // that keeps failing still costs the DB one read a minute, not one per
+      // page view.
       let partial = false;
       return cachedRead(
         ctx,
@@ -440,14 +462,16 @@ app.get(
         CacheType.ORG_CONFIG,
         async () => {
           const result = await fetchPublicOrgInfo(ctx, slug, {
-            withIntroFilm: true,
+            brandingOnly: false,
           });
           partial = result.partial;
           return result.info;
         },
         {
-          ttl: CACHE_TTL.ORG_PUBLIC_INFO_SECONDS,
-          shouldCache: () => !partial,
+          ttl: () =>
+            partial
+              ? CACHE_TTL.ORG_PUBLIC_INFO_PARTIAL_SECONDS
+              : CACHE_TTL.ORG_PUBLIC_INFO_SECONDS,
         }
       );
     },

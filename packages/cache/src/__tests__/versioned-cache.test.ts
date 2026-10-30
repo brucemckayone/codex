@@ -108,33 +108,37 @@ describe('VersionedCache', () => {
       expect(mockKV.put).not.toHaveBeenCalled();
     });
 
-    it('serves but never stores a value shouldCache declines (a fallback)', async () => {
+    it('stores each value for the TTL its function gives it: a fallback briefly', async () => {
       // The org's public info answers with a fallback when its intro-film
-      // read fails: stored, one blip would hide the film for the whole TTL.
-      const fetcher = vi
-        .fn()
-        .mockResolvedValueOnce({ introFilm: null, partial: true })
-        .mockResolvedValueOnce({ introFilm: 'film', partial: false });
-      const shouldCache = (data: { partial: boolean }) => !data.partial;
+      // read fails: kept for 4h, one blip would hide the film for hours.
+      const ttl = (data: { partial: boolean }) => (data.partial ? 60 : 14_400);
 
-      const first = await cache.get('org-slug', CacheType.ORG_CONFIG, fetcher, {
-        shouldCache,
-      });
-      expect(first).toEqual({ introFilm: null, partial: true });
-      expect(mockKV.put).not.toHaveBeenCalled();
-
-      // The next read fetches again, and stores the whole answer.
-      const second = await cache.get(
-        'org-slug',
+      const fallback = await cache.get(
+        'org-a',
         CacheType.ORG_CONFIG,
-        fetcher,
-        {
-          shouldCache,
-        }
+        async () => ({ partial: true }),
+        { ttl }
       );
-      expect(second).toEqual({ introFilm: 'film', partial: false });
-      expect(fetcher).toHaveBeenCalledTimes(2);
-      expect(mockKV.put).toHaveBeenCalledTimes(1);
+      await cache.get(
+        'org-b',
+        CacheType.ORG_CONFIG,
+        async () => ({ partial: false }),
+        { ttl }
+      );
+
+      expect(fallback).toEqual({ partial: true });
+      expect(mockKV.put).toHaveBeenNthCalledWith(
+        1,
+        expect.stringContaining('org-a'),
+        expect.any(String),
+        expect.objectContaining({ expirationTtl: 60 })
+      );
+      expect(mockKV.put).toHaveBeenNthCalledWith(
+        2,
+        expect.stringContaining('org-b'),
+        expect.any(String),
+        expect.objectContaining({ expirationTtl: 14_400 })
+      );
     });
 
     it('should return cached data on subsequent access (cache hit)', async () => {

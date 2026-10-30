@@ -327,4 +327,26 @@ describe('the Film control', () => {
     button(m.common_try_again()).click();
     expect(film.refresh).toHaveBeenCalledTimes(1);
   });
+
+  test('a retry that fails again is logged, never left unhandled', async () => {
+    const { logger } = await import('$lib/observability');
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    film = fakeQuery<StudioIntroFilm | null>(undefined, {
+      status: 500,
+      body: { message: 'Internal Error' },
+    });
+    film.refresh = vi.fn(async () => {
+      throw new Error('network down');
+    });
+    render();
+
+    button(m.common_try_again()).click();
+    await vi.waitFor(() =>
+      expect(warn).toHaveBeenCalledWith(
+        'brand_film.refresh_failed',
+        expect.objectContaining({ what: 'film', error: 'network down' })
+      )
+    );
+    warn.mockRestore();
+  });
 });

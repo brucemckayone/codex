@@ -6,7 +6,8 @@
  * branding-only `/public/:slug` (CDN only) never reads it. The landing must
  * never be told a film plays in full when the minter would refuse it, and is
  * never handed the media's id as a field: the minter resolves the film from
- * the org, so nothing public needs it. A failed read is served, never cached.
+ * the org, so nothing public needs it. A failed read is served, and kept for
+ * a minute where a whole answer is kept for 4h.
  *
  * STUDIO: `GET /:id/settings/branding/intro-video` is for the people who
  * manage the brand. A subscriber holds a membership row too, so the policy is
@@ -24,6 +25,8 @@ import {
   waitOnExecutionContext,
 } from 'cloudflare:test';
 import type { IntroFilmResolution } from '@codex/access';
+import { ObservabilityClient } from '@codex/observability';
+import { InternalServiceError } from '@codex/service-errors';
 import type { StudioIntroFilm } from '@codex/shared-types';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -103,17 +106,51 @@ const testEnv = {
 let n = 0;
 const freshSlug = () => `intro-film-${Date.now()}-${n++}`;
 
-async function readPublic(path: string): Promise<Response> {
-  const app = new Hono();
+let obs: ObservabilityClient;
+
+async function readPublic(
+  path: string,
+  bindings: typeof env = testEnv
+): Promise<Response> {
+  const app = new Hono<{ Variables: Record<string, unknown> }>();
+  app.use('*', async (c, next) => {
+    // `createWorker` sets this in production; `ctx.obs` reads it.
+    c.set('obs', obs);
+    await next();
+  });
   app.route('/api/organizations', organizations);
   const ec = createExecutionContext();
   const res = await app.fetch(
     new Request(`http://organization-api.test/api/organizations${path}`),
-    testEnv,
+    bindings,
     ec
   );
   await waitOnExecutionContext(ec);
   return res;
+}
+
+/** Seconds until `/info`'s stored answer for `slug` expires. */
+async function infoSlotExpiresIn(slug: string): Promise<number> {
+  const kv = env.CACHE_KV;
+  if (!kv) throw new Error('CACHE_KV is not bound in this test env');
+  const { keys } = await kv.list({
+    prefix: `cache:org:config:v2:${slug}:`,
+  });
+  expect(keys).toHaveLength(1);
+  const [slot] = keys;
+  return (slot?.expiration ?? 0) - Date.now() / 1000;
+}
+
+/** A fresh org whose `/info` the next read will build. */
+function freshOrg(): string {
+  const slug = freshSlug();
+  orgSpies.getBySlug.mockResolvedValue({
+    id: ORG_ID,
+    slug,
+    name: 'Studio Alpha',
+    description: null,
+  });
+  return slug;
 }
 
 /** Read the public info of a fresh org whose intro resolves to `answer`. */
@@ -135,6 +172,7 @@ async function publicInfo(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  obs = new ObservabilityClient('organization-api', 'test');
   brandingSpies.get.mockResolvedValue({});
   featureSpies.get.mockResolvedValue({ enableSubscriptions: true });
 });
@@ -197,45 +235,93 @@ describe('public info: the landing film', () => {
     expect(body.data).toMatchObject({ brandColors: { primary: '#112233' } });
   });
 
-  it('serves a failed film read uncached, so the next read asks again', async () => {
-    const slug = freshSlug();
-    orgSpies.getBySlug.mockResolvedValue({
-      id: ORG_ID,
-      slug,
-      name: 'Studio Alpha',
-      description: null,
-    });
+  it('keeps a failed film read for a minute, where a whole answer gets 4h', async () => {
+    // Kept for 4h, one blip would hide the film for hours; never kept, a
+    // read that keeps failing would send every page view to the DB.
+    const blip = freshOrg();
     resolveSpy.mockRejectedValueOnce(new Error('neon blip'));
+    await readPublic(`/public/${blip}/info`);
+    const blipExpiresIn = await infoSlotExpiresIn(blip);
+    expect(blipExpiresIn).toBeGreaterThan(50);
+    expect(blipExpiresIn).toBeLessThanOrEqual(61);
+
+    const whole = freshOrg();
     resolveSpy.mockResolvedValueOnce({ ok: true, film: FILM });
-
-    const first = (await (await readPublic(`/public/${slug}/info`)).json()) as {
-      data: { introFilm: unknown };
-    };
-    const second = (await (
-      await readPublic(`/public/${slug}/info`)
-    ).json()) as { data: { introFilm: unknown } };
-
-    expect(first.data.introFilm).toBeNull();
-    // Cached, the blip would have stood for 4h; it was not, so this read
-    // went to the DB and found the film.
-    expect(second.data.introFilm).toMatchObject({ fullFilm: true });
-    expect(resolveSpy).toHaveBeenCalledTimes(2);
+    await readPublic(`/public/${whole}/info`);
+    expect(await infoSlotExpiresIn(whole)).toBeGreaterThan(4 * 60 * 60 - 60);
   });
 
-  it('never reads the film on the branding-only /public/:slug', async () => {
-    const slug = freshSlug();
-    orgSpies.getBySlug.mockResolvedValue({
-      id: ORG_ID,
-      slug,
-      name: 'Studio Alpha',
-      description: null,
+  it('keeps the answer for a minute when the film has no R2 host to draw from', async () => {
+    // A paid film with no host draws no film at all; once the config is
+    // fixed and deployed, the landing must not wait out 4h to show it.
+    const slug = freshOrg();
+    resolveSpy.mockResolvedValueOnce({
+      ok: false,
+      reason: 'paid-use',
+      film: FILM,
     });
+    const noHost = { ...testEnv, R2_PUBLIC_URL_BASE: undefined } as typeof env;
+    const body = (await (
+      await readPublic(`/public/${slug}/info`, noHost)
+    ).json()) as {
+      data: { introFilm: unknown };
+    };
+    expect(body.data.introFilm).toBeNull();
+    expect(await infoSlotExpiresIn(slug)).toBeLessThanOrEqual(61);
+  });
+
+  it('logs what failed, never the SQL or its bound params', async () => {
+    const warn = vi.spyOn(obs, 'warn').mockImplementation(() => {});
+    // drizzle's DrizzleQueryError: the SQL and params in its message, the
+    // driver error on its cause. A service wraps it in a ServiceError.
+    const queryError = Object.assign(
+      new Error(
+        'Failed query: select "id" from "media_items"\nparams: secret-param'
+      ),
+      {
+        query: 'select',
+        params: ['secret-param'],
+        cause: new Error('column status does not exist'),
+      }
+    );
+    brandingSpies.get.mockRejectedValue(
+      new InternalServiceError('An unexpected error occurred', undefined, {
+        cause: queryError,
+      })
+    );
+    featureSpies.get.mockRejectedValue(
+      new InternalServiceError('Feature settings unavailable')
+    );
+    await publicInfo(queryError);
+
+    const call = warn.mock.calls.find(
+      ([message]) => message === 'Public org info served with fallbacks'
+    );
+    const line = String(call?.[1]?.failed);
+    // A wrapper is named by what it wraps; its message is the client's.
+    expect(line).toContain(
+      'branding: Failed query: Error: column status does not exist'
+    );
+    // A ServiceError's class name is minified in the built package: its code.
+    expect(line).toContain(
+      'features: INTERNAL_ERROR: Feature settings unavailable'
+    );
+    expect(line).toContain(
+      'introFilm: Failed query: Error: column status does not exist'
+    );
+    expect(line).not.toContain('secret-param');
+    expect(line).not.toContain('media_items');
+  });
+
+  it('never reads the features or the film on the branding-only /public/:slug', async () => {
+    const slug = freshOrg();
     resolveSpy.mockResolvedValue({ ok: true, film: FILM });
     const res = await readPublic(`/public/${slug}`);
     expect(res.status).toBe(200);
     const body = (await res.json()) as { data: Record<string, unknown> };
     expect(body.data).not.toHaveProperty('introFilm');
     expect(resolveSpy).not.toHaveBeenCalled();
+    expect(featureSpies.get).not.toHaveBeenCalled();
   });
 });
 
