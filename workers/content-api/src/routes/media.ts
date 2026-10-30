@@ -12,7 +12,6 @@
  * - DELETE /api/media/:id    - Soft delete
  */
 
-import { invalidateOrgPublicCaches, VersionedCache } from '@codex/cache';
 import {
   AUTH_ROLES,
   FILE_SIZES,
@@ -38,6 +37,7 @@ import type { HonoEnv } from '@codex/shared-types';
 import { createIdParamsSchema, uploadCompleteSchema } from '@codex/validation';
 import {
   binaryUploadProcedure,
+  dispatchOrgPublicInvalidation,
   PaginatedResult,
   procedure,
 } from '@codex/worker-utils';
@@ -395,23 +395,9 @@ app.delete(
         ctx.input.params.id,
         ctx.user.id
       );
-      if (introFilmOrgSlugs.length > 0 && ctx.env.CACHE_KV) {
-        // The cache logs a failed invalidation through `obs` and never
-        // throws, so the delete it follows cannot fail; the slots also
-        // expire on their own (CACHE_TTL.ORG_PUBLIC_INFO_SECONDS).
-        const cache = new VersionedCache({
-          kv: ctx.env.CACHE_KV,
-          waitUntil: (promise) => ctx.executionCtx.waitUntil(promise),
-          obs: ctx.obs,
-        });
-        ctx.executionCtx.waitUntil(
-          Promise.all(
-            introFilmOrgSlugs.map((slug) =>
-              invalidateOrgPublicCaches(cache, slug)
-            )
-          )
-        );
-      }
+      // An org whose intro film this was stops drawing it now, not after
+      // its cached public info expires.
+      dispatchOrgPublicInvalidation(ctx, introFilmOrgSlugs, ctx.obs);
       return null;
     },
   })

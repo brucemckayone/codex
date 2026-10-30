@@ -25,6 +25,7 @@ import {
   waitOnExecutionContext,
 } from 'cloudflare:test';
 import type { IntroFilmResolution } from '@codex/access';
+import { buildCacheKey, CacheType } from '@codex/cache';
 import { ObservabilityClient } from '@codex/observability';
 import { InternalServiceError } from '@codex/service-errors';
 import type { StudioIntroFilm } from '@codex/shared-types';
@@ -134,7 +135,7 @@ async function infoSlotExpiresIn(slug: string): Promise<number> {
   const kv = env.CACHE_KV;
   if (!kv) throw new Error('CACHE_KV is not bound in this test env');
   const { keys } = await kv.list({
-    prefix: `cache:org:config:v2:${slug}:`,
+    prefix: `${buildCacheKey(CacheType.ORG_CONFIG, slug)}:`,
   });
   expect(keys).toHaveLength(1);
   const [slot] = keys;
@@ -157,13 +158,7 @@ function freshOrg(): string {
 async function publicInfo(
   answer: IntroFilmResolution | Error
 ): Promise<{ status: number; body: { data: { introFilm: unknown } } }> {
-  const slug = freshSlug();
-  orgSpies.getBySlug.mockResolvedValue({
-    id: ORG_ID,
-    slug,
-    name: 'Studio Alpha',
-    description: null,
-  });
+  const slug = freshOrg();
   if (answer instanceof Error) resolveSpy.mockRejectedValue(answer);
   else resolveSpy.mockResolvedValue(answer);
   const res = await readPublic(`/public/${slug}/info`);

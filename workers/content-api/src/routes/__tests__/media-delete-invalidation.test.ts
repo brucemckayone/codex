@@ -20,6 +20,7 @@ import {
   env,
   waitOnExecutionContext,
 } from 'cloudflare:test';
+import { buildVersionKey, CacheType } from '@codex/cache';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -83,8 +84,6 @@ async function remove(mediaId: string): Promise<Response> {
   return res;
 }
 
-const versionKey = (id: string) => `cache:version:${id}`;
-
 /**
  * Narrowed with a THROW: the route skips the bump when the binding is absent,
  * so an unbound namespace would make every `toBeNull()` pass vacuously.
@@ -103,16 +102,18 @@ describe('DELETE /api/media/:id stales the orgs whose intro film it was', () => 
   it("bumps the org's slug-keyed public caches", async () => {
     const { mediaId, slug } = freshIds();
     mediaSpies.delete.mockResolvedValue({ introFilmOrgSlugs: [slug] });
-    expect(await cacheKv().get(versionKey(slug))).toBeNull();
+    expect(await cacheKv().get(buildVersionKey(slug))).toBeNull();
 
     const res = await remove(mediaId);
 
     expect(res.status).toBe(204);
     expect(mediaSpies.delete).toHaveBeenCalledWith(mediaId, USER.id);
     // The public info and stats, and the org's creators list.
-    expect(await cacheKv().get(versionKey(slug))).not.toBeNull();
+    expect(await cacheKv().get(buildVersionKey(slug))).not.toBeNull();
     expect(
-      await cacheKv().get(versionKey(`org:${slug}:creators`))
+      await cacheKv().get(
+        buildVersionKey(CacheType.COLLECTION_ORG_CREATORS(slug))
+      )
     ).not.toBeNull();
   });
 
@@ -123,6 +124,6 @@ describe('DELETE /api/media/:id stales the orgs whose intro film it was', () => 
     const res = await remove(mediaId);
 
     expect(res.status).toBe(204);
-    expect(await cacheKv().get(versionKey(slug))).toBeNull();
+    expect(await cacheKv().get(buildVersionKey(slug))).toBeNull();
   });
 });

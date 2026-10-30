@@ -6,7 +6,7 @@
  */
 
 import type { IntroFilm, StudioIntroFilm } from '@codex/shared-types';
-import type { R2PublicBases } from '../r2-public-bases';
+import { publicUrl, type R2PublicBases } from '../r2-public-bases';
 import type {
   IntroFilmMedia,
   IntroFilmRefusal,
@@ -21,15 +21,6 @@ type PickedRefusal = Exclude<IntroFilmRefusal, 'no-org' | 'empty-slot'>;
  * (`create_preview`, infrastructure/runpod/handler/main.py).
  */
 const PREVIEW_SECONDS = 30;
-
-/** `${base}/${key}`, or null without either. */
-function publicUrl(
-  base: string | undefined,
-  key: string | null
-): string | null {
-  if (!base || !key) return null;
-  return `${base}/${key}`;
-}
 
 /**
  * How long a film's preview runs. The transcoder cuts it from a tenth of the

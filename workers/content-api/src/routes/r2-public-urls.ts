@@ -30,7 +30,11 @@
  * field here needs a bump THERE.
  */
 
-import { type R2PublicBases, resolveR2PublicBases } from '@codex/access';
+import {
+  publicUrl,
+  type R2PublicBases,
+  resolveR2PublicBases,
+} from '@codex/access';
 import type { PublicMediaItemSource } from '@codex/content';
 import type { Logger } from '@codex/observability';
 import type {
@@ -60,19 +64,6 @@ export type PublicItem<T extends CatalogueRelations> = Omit<
   organization: PublicContentOrganization | null;
   creator: PublicContentCreator;
 };
-
-/**
- * A key's public URL, or null when there is no key or no base to resolve it
- * against. The builder and the missing-base warning share it, so the warning
- * can never disagree with what was sent.
- */
-function publicUrl(
-  base: string | undefined,
-  key: string | null
-): string | null {
-  if (!key || !base) return null;
-  return `${base}/${key}`;
-}
 
 function buildMediaItem(
   mediaItem: PublicMediaItemSource,

@@ -20,13 +20,9 @@ import type { WaitUntilFn } from './helpers/invalidate';
 export interface CacheOptions<T = unknown> {
   /**
    * Time-to-live for cached data in seconds (default: 600 = 10 minutes).
-   *
    * A read (`get`, `getWithResult`) may pass a function of the fetched value
-   * instead, for a fetcher that answers with a FALLBACK when one of its reads
-   * fails (the org's public info serves the brand without its intro film).
-   * Stored for the full TTL, that fallback stands as the truth for hours
-   * after one blip; never stored, a read that keeps failing sends every page
-   * view to the database. A short TTL for it bounds both. KV refuses an
+   * instead, to keep a fallback answer briefly and a whole one for long
+   * (`CACHE_TTL.ORG_PUBLIC_INFO_PARTIAL_SECONDS`). KV refuses an
    * `expirationTtl` under 60.
    */
   ttl?: number | ((data: T) => number);

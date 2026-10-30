@@ -32,7 +32,6 @@ import type {
 import { and, eq, isNotNull, isNull, ne } from 'drizzle-orm';
 import { LOG_EVENTS, LOG_SEVERITY } from '../constants';
 import { AccessDeniedError, ContentNotFoundError } from '../errors';
-import { resolveR2PublicBases } from '../r2-public-bases';
 import type {
   ContentBodySource,
   ContentHeld,
@@ -895,12 +894,13 @@ export class ContentAccessService
   ): Promise<StudioIntroFilm | null> {
     try {
       const resolution = await resolveIntroFilm(this.db, organizationId);
-      // The service holds the assets host only, which is also the preview
-      // host by default: the studio names the film, it never plays it.
-      const bases = resolveR2PublicBases({
-        R2_PUBLIC_URL_BASE: this.r2PublicUrlBase,
+      // The service holds the assets host only: the studio draws the film's
+      // poster, never its preview.
+      const base = this.r2PublicUrlBase;
+      return toStudioIntroFilm(resolution, {
+        assets: base,
+        mediaPreview: base,
       });
-      return toStudioIntroFilm(resolution, bases);
     } catch (error) {
       this.handleError(error, 'getStudioIntroFilm');
     }

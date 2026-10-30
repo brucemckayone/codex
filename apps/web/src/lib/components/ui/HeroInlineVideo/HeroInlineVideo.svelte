@@ -87,15 +87,14 @@
 
   let closeButton = $state<HTMLButtonElement | undefined>(undefined);
 
-  // Until the player mounts and takes focus, the close button holds it.
-  $effect(() => {
-    if (!Player) closeButton?.focus({ preventScroll: true });
-  });
-
-  /** The film cannot play: its controls are gone, so focus goes to close. */
-  function failedToPlay() {
+  /** Focus to close: before the player takes it, and once the film fails. */
+  function focusClose() {
     closeButton?.focus({ preventScroll: true });
   }
+
+  $effect(() => {
+    if (!Player) focusClose();
+  });
 
   /** A real end closes the film; a lapse keeps it, with "Watch again". */
   function ended(reason: 'end' | 'lapsed') {
@@ -137,7 +136,7 @@
         start="sound"
         takeFocus
         onended={ended}
-        onfail={failedToPlay}
+        onfail={focusClose}
         ended={again}
       />
     {:else if failed}

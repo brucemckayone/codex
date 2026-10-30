@@ -17,6 +17,7 @@ export { createBodyParsingMiddleware } from './body-parsing-middleware';
 // thin/standalone). The membership fan-out is shared by organization-api and
 // admin-api (Codex-2hxff.44).
 export {
+  dispatchOrgPublicInvalidation,
   dispatchOrgSlugInvalidation,
   type InvalidateOrgSlugCacheArgs,
   invalidateMemberCaches,

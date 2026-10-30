@@ -73,7 +73,11 @@ export {
 } from './hls-token';
 // The two public R2 hosts a poster and a preview resolve against: shared by
 // content-api's catalogue and the intro film's views.
-export { type R2PublicBases, resolveR2PublicBases } from './r2-public-bases';
+export {
+  publicUrl,
+  type R2PublicBases,
+  resolveR2PublicBases,
+} from './r2-public-bases';
 export type {
   Revocation,
   RevocationReason,

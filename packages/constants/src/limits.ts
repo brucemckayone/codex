@@ -567,10 +567,12 @@ export const CACHE_TTL = {
   /**
    * The org's public info when a part of it failed and was served as its
    * fallback, or its intro film had no R2 host to resolve against
-   * (Codex-376dl). Short, so a blip clears within a minute and not after 4h;
-   * not zero, so a read that keeps failing costs the database one read per
-   * org per minute rather than one per page view. 60 is KV's floor for
-   * `expirationTtl`, and the `/info` CDN window too.
+   * (Codex-376dl). Short, so a blip clears in minutes and not after 4h; not
+   * zero, so a read that keeps failing costs the database one read per org
+   * per minute rather than one per page view. 60 is KV's floor for
+   * `expirationTtl`. What a visitor sees can lag by up to three such
+   * windows: this slot, KV's default 60s edge read cache (the read passes no
+   * `cacheTtl`), and the `/info` route's `public` 60s CDN and browser cache.
    */
   ORG_PUBLIC_INFO_PARTIAL_SECONDS: 60,
 } as const;

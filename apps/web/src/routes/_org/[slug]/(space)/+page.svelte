@@ -151,12 +151,10 @@
   let filmSrc = $state.raw<PressSource | null>(null);
   let filmRenew = $state.raw<AskForFull | undefined>(undefined);
   let filmChip = $state<HTMLButtonElement | undefined>(undefined);
-  // The film is open: what mounts its player, so nothing outlives the player.
-  // A re-run that drops the film (it was removed mid-play) closes it here, and
-  // never leaves the hero's text hidden and inert behind no film.
-  const filmOpen = $derived(introFilm !== null && filmSrc !== null);
-  // On a desktop the film grows out of the hero, so its text steps aside.
-  const filmInHero = $derived(filmOpen && isDesktop);
+  // On a desktop the film grows out of the hero, so its text steps aside. It
+  // reads what mounts the player, so a re-run that drops the film (removed
+  // mid-play) never leaves the text hidden and inert behind no film.
+  const filmInHero = $derived(introFilm !== null && filmSrc !== null && isDesktop);
 
   // ── Landing sections derived from the single catalogue fetch ──────────
   // Editor's picks: creator-flagged items → full-bleed feature slides.

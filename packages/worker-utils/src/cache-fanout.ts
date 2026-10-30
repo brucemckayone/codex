@@ -163,6 +163,28 @@ export function dispatchOrgSlugInvalidation(
 }
 
 /**
+ * Invalidate the public caches of orgs whose slugs the caller already holds,
+ * dispatched through `waitUntil`: content-api's media delete, when the item
+ * was an org's intro film (Codex-376dl). The cache logs a failed invalidation
+ * through `obs` and never throws, so the write it follows cannot fail.
+ */
+export function dispatchOrgPublicInvalidation(
+  ctx: MemberCacheCtx,
+  slugs: readonly string[],
+  obs?: ObservabilityClient
+): void {
+  if (slugs.length === 0 || !ctx.env.CACHE_KV) return;
+  const cache = new VersionedCache({
+    kv: ctx.env.CACHE_KV,
+    waitUntil: (promise) => ctx.executionCtx.waitUntil(promise),
+    obs,
+  });
+  ctx.executionCtx.waitUntil(
+    Promise.all(slugs.map((slug) => invalidateOrgPublicCaches(cache, slug)))
+  );
+}
+
+/**
  * Everything a role change busts for one user: the membership entry the
  * policy reads, the org's slug-keyed public caches, and the user's library
  * (management roles unlock team-only content, Codex-c01do). An ownership

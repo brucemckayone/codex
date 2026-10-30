@@ -56,3 +56,16 @@ export function resolveR2PublicBases(env: {
   const assets = env.R2_PUBLIC_URL_BASE;
   return { assets, mediaPreview: env.R2_PUBLIC_MEDIA_URL_BASE ?? assets };
 }
+
+/**
+ * A key's public URL on one of those hosts, or null when there is no key or
+ * no base to resolve it against. A caller's missing-base warning reads the
+ * same null, so it can never disagree with what was sent.
+ */
+export function publicUrl(
+  base: string | undefined,
+  key: string | null
+): string | null {
+  if (!base || !key) return null;
+  return `${base}/${key}`;
+}

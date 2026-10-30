@@ -224,10 +224,9 @@ app.get(
  * Branding, features and the intro film are each non-critical: a part whose
  * read fails is answered with its fallback, so the page still draws.
  * `partial` says one did, or that the film had no R2 host to resolve
- * against, and the `/info` route then keeps the answer for a minute, not the
- * 4h TTL a whole one gets. `brandingOnly` skips the features and the film,
- * for a caller that returns neither (its `enableSubscriptions` is then the
- * fallback, and means nothing).
+ * against (`CACHE_TTL.ORG_PUBLIC_INFO_PARTIAL_SECONDS` on why that matters).
+ * `brandingOnly` skips the features and the film, for a caller that returns
+ * neither (its `enableSubscriptions` is then the fallback, and means nothing).
  */
 async function fetchPublicOrgInfo(
   ctx: {
@@ -245,7 +244,7 @@ async function fetchPublicOrgInfo(
     obs?: Pick<ObservabilityClient, 'warn'>;
   },
   slug: string,
-  { brandingOnly }: { brandingOnly: boolean }
+  { brandingOnly = false }: { brandingOnly?: boolean } = {}
 ) {
   const organization = await ctx.services.organization.getBySlug(slug);
 
@@ -357,8 +356,8 @@ async function fetchPublicOrgInfo(
     Boolean(introResolution?.film) && (!bases.assets || !bases.mediaPreview);
   if (baseMissing) {
     // A key with no host to resolve it against draws no poster, or no film
-    // at all for a paid one, with nothing on the page to say why. Counted as
-    // partial, so the fixed config shows within a minute of its deploy.
+    // at all for a paid one, with nothing on the page to say why. Partial,
+    // so a fixed config is not held back by a 4h slot.
     ctx.obs?.warn('r2_public_base.missing', {
       organizationId: organization.id,
       assetsBaseSet: Boolean(bases.assets),
@@ -407,17 +406,17 @@ async function fetchPublicOrgInfo(
  * (`describeThrown` names a drizzle error by the driver error under it).
  */
 function describeFailure(reason: unknown): string {
-  if (!(reason instanceof Error) || 'params' in reason) {
-    return describeThrown(reason);
+  if (reason instanceof Error && !('params' in reason)) {
+    // A service wraps a DB failure in a ServiceError whose message is the
+    // client's ("An unexpected error occurred"): what failed is its cause.
+    if (reason.cause !== undefined) return describeThrown(reason.cause);
+    // A ServiceError's class name does not survive the package build's
+    // minifier (it logs as "f"); its code does.
+    if ('code' in reason && typeof reason.code === 'string') {
+      return `${reason.code}: ${reason.message}`;
+    }
   }
-  // A service wraps a DB failure in a ServiceError whose message is the
-  // client's ("An unexpected error occurred"): what failed is its cause.
-  if (reason.cause !== undefined) return describeThrown(reason.cause);
-  // A ServiceError's class name does not survive the package build's
-  // minifier (it logs as "f"); its code does.
-  return 'code' in reason && typeof reason.code === 'string'
-    ? `${reason.code}: ${reason.message}`
-    : describeThrown(reason);
+  return describeThrown(reason);
 }
 
 /**
@@ -451,29 +450,21 @@ app.get(
       // its key is one of the four data slots live in CACHE_KV_PRODUCTION, so
       // it was also one of the reads the hit ratio could not see.
       //
-      // An answer built with a fallback (a part's read failed) is kept for a
-      // minute: one blip cannot hide the brand or the film for 4h, and a part
-      // that keeps failing still costs the DB one read a minute, not one per
-      // page view.
-      let partial = false;
-      return cachedRead(
+      // The slot holds `partial` beside the info, so its TTL is priced by
+      // what was fetched: a fallback briefly, a whole answer for 4h.
+      const { info } = await cachedRead(
         ctx,
         slug,
         CacheType.ORG_CONFIG,
-        async () => {
-          const result = await fetchPublicOrgInfo(ctx, slug, {
-            brandingOnly: false,
-          });
-          partial = result.partial;
-          return result.info;
-        },
+        () => fetchPublicOrgInfo(ctx, slug),
         {
-          ttl: () =>
+          ttl: ({ partial }) =>
             partial
               ? CACHE_TTL.ORG_PUBLIC_INFO_PARTIAL_SECONDS
               : CACHE_TTL.ORG_PUBLIC_INFO_SECONDS,
         }
       );
+      return info;
     },
   })
 );
