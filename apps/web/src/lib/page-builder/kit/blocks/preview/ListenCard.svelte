@@ -31,7 +31,7 @@
     type PlayerCore,
     preloadPlayer,
   } from '$lib/components/player/load-core';
-  import type { PlayerClock } from '$lib/components/player/PreviewPlayerCore.svelte';
+  import type { PlayerClock } from '$lib/components/player/timeline';
   import { clock } from '$lib/components/player/timeline';
   import { PauseIcon, PlayIcon, RefreshCwIcon, Volume2Icon } from '$lib/components/ui/Icon';
   import type { PreviewMedia } from '../../../render/types';

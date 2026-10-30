@@ -62,19 +62,6 @@
   @prop title - The film's name, for its accessible label
   @prop start - `sound` (a press), `muted` (autoplay) or `paused`
 -->
-<script lang="ts" module>
-  /** Where the film is, for a frame drawing its own controls (`ontime`). */
-  export interface PlayerClock {
-    time: number;
-    /** The stream's own length; 0 until it says. */
-    duration: number;
-    /** The play button would offer Play: paused, or mid-swap and not wanted. */
-    offerPlay: boolean;
-    /** Sound was refused and it plays muted: `toggleMute` takes it (owner P7). */
-    askSound: boolean;
-  }
-</script>
-
 <script lang="ts">
   import { flushSync, onMount, type Snippet, untrack } from 'svelte';
   import type Hls from 'hls.js';
@@ -93,7 +80,7 @@
   import * as m from '$paraglide/messages';
   import { claim, displaced, mark, release, showing } from './now-playing.svelte';
   import { playNow, settleStart } from './start';
-  import { clock, loadedTo } from './timeline';
+  import { clock, loadedTo, type PlayerClock } from './timeline';
 
   interface CaptionTrack {
     src: string;

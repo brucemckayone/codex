@@ -30,3 +30,14 @@ export function loadedTo(ranges: TimeRanges, time: number): number {
   }
   return end;
 }
+
+/** Where the film is, for a frame drawing its own controls (`ontime`). */
+export interface PlayerClock {
+  time: number;
+  /** The stream's own length; 0 until it says. */
+  duration: number;
+  /** The play button would offer Play: paused, or mid-swap and not wanted. */
+  offerPlay: boolean;
+  /** Sound was refused and it plays muted: `toggleMute` takes it (owner P7). */
+  askSound: boolean;
+}

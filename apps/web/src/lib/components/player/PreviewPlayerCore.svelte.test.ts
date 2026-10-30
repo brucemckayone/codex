@@ -55,9 +55,8 @@ vi.mock('$lib/components/VideoPlayer/hls', () => ({
 }));
 
 import { filmInView } from './now-playing.svelte';
-import PreviewPlayerCore, {
-  type PlayerClock,
-} from './PreviewPlayerCore.svelte';
+import PreviewPlayerCore from './PreviewPlayerCore.svelte';
+import type { PlayerClock } from './timeline';
 
 const SRC = '/films/f1/preview/preview.m3u8';
 const ENGLISH = { src: '/films/f1/en.vtt', srclang: 'en', label: 'English' };
