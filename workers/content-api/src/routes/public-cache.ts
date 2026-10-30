@@ -69,6 +69,10 @@ const PUBLIC_CONTENT_CACHE_TTL = 7200;
  * where it held the whole media_items row with its raw R2 keys, RunPod job id
  * and transcoding error, and the org four (id, name, slug, logoUrl) where it
  * held the whole organizations row; the content row has no `purchaseCount`.
+ * v5 (Codex-2hxff.91): WIDENED — each row carries `isTierGated` and its
+ * `includedInTierIds` (plus the phase-1 `includedInTierId` shim), and closed
+ * items (behind the tier switch, in no tier, not for sale) are left out of
+ * catalogue reads. Bump again (v6) when the shim is dropped.
  *
  * The wire item (`toPublicItems`) is built AFTER the cache, so a change to it
  * alone needs no bump here. apps/web's /explore caches the browse route's
@@ -86,9 +90,9 @@ const PUBLIC_CONTENT_CACHE_TTL = 7200;
  * Old slots are never read again and age out. A bump also
  * renames the cache-stats series (`cacheStatsLabel` keeps four segments, so
  * `content:public:newest` became `content:public:v2:newest`, now
- * `content:public:v4:newest`).
+ * `content:public:v5:newest`).
  */
-const PUBLIC_CONTENT_SHAPE_VERSION = 'v4';
+const PUBLIC_CONTENT_SHAPE_VERSION = 'v5';
 
 /**
  * KV refuses a key over 512 bytes. A data-slot key is this type plus about 70

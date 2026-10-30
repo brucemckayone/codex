@@ -114,6 +114,21 @@ export { EntitlementsService } from './services/entitlements-service';
 // The org intro film's one read (Codex-376dl): the public org info and the
 // studio draw from it what the minter mints from.
 export { toPublicIntroFilm } from './services/intro-film-views';
+// Plan access by ticks (Codex-2hxff.91): the studio's tier-contents reads and
+// the tier checklist's delta write.
+export {
+  PlanAccessService,
+  type PlanAccessServiceConfig,
+  type PlanItemAccess,
+  type PlanItemKind,
+  type PlanItemRef,
+  type PlanItemRow,
+  type PlanItemsDeltaResult,
+  type TierAccessGap,
+  type TierAccessSummary,
+  type TierAccessSummaryRow,
+  type TierDeleteImpact,
+} from './services/plan-access-service';
 export {
   type IntroFilmMedia,
   type IntroFilmRefusal,

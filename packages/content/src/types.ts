@@ -104,6 +104,18 @@ export interface ContentWithRelations extends Content {
    * current memberships; excludes soft-deleted categories.
    */
   categoryIds?: string[];
+  /**
+   * The exact tiers that include this item (Codex-2hxff.91), by tier
+   * `sortOrder`, inactive tiers included; `[]` when not behind the switch.
+   * Every content read attaches it (`withTierWire`).
+   */
+  includedInTierIds?: string[];
+  /**
+   * @deprecated Phase 1-2 wire shim: the legacy single tier under its old
+   * name, for a web older than the plan-access release. Read
+   * `includedInTierIds` and `isTierGated`.
+   */
+  includedInTierId?: string | null;
 }
 
 export type { ServedMediaItem };
@@ -176,6 +188,8 @@ export type CatalogueContentRow = Omit<
  */
 export type PublicContentRow = CatalogueContentRow & {
   categorySlugs: string[];
+  includedInTierIds: string[];
+  includedInTierId: string | null;
 };
 
 /**

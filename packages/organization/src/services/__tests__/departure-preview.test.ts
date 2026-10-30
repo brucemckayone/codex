@@ -21,6 +21,8 @@ import {
   createTestTierInput,
   createUniqueSlug,
   type Database,
+  gateContentFromTier,
+  gateContentToTiers,
   seedTestUsers,
   setupTestDatabase,
   teardownTestDatabase,
@@ -109,9 +111,17 @@ describe('OrganizationService.getDeparturePreview', () => {
   async function seedItem(
     creator: string,
     organizationId: string | null,
-    overrides: Partial<schema.NewContent> = {}
+    options: Partial<schema.NewContent> & {
+      /** Behind the tier switch, ticked on exactly these tiers. */
+      tierIds?: string[];
+      /** Behind the tier switch on this tier and every dearer one (the
+       *  old ladder, as the migration backfilled it). */
+      fromTierId?: string;
+    } = {}
   ): Promise<string> {
+    const { tierIds, fromTierId, ...overrides } = options;
     const status = overrides.status ?? 'published';
+    const gated = tierIds !== undefined || fromTierId !== undefined;
     const [row] = await db
       .insert(schema.content)
       .values(
@@ -121,10 +131,25 @@ describe('OrganizationService.getDeparturePreview', () => {
           publishedAt:
             status === 'published' ? new Date(Date.now() - DAY_MS) : null,
           ...overrides,
+          ...(gated ? { isTierGated: true, isFree: false } : {}),
         })
       )
       .returning({ id: schema.content.id });
     if (!row) throw new Error('content not inserted');
+    if (organizationId && tierIds !== undefined) {
+      await gateContentToTiers(db, {
+        contentId: row.id,
+        organizationId,
+        tierIds,
+      });
+    }
+    if (organizationId && fromTierId !== undefined) {
+      await gateContentFromTier(db, {
+        contentId: row.id,
+        organizationId,
+        fromTierId,
+      });
+    }
     return row.id;
   }
 
@@ -322,9 +347,10 @@ describe('OrganizationService.getDeparturePreview', () => {
     });
   });
 
-  // `includedInTierId` T reaches tier T and every tier above it by
-  // `sortOrder` (decideContentAccess), so subscribers on those tiers lose the
-  // creator's content at their next renewal.
+  // An item reaches the subscribers of the tiers it is ticked on
+  // (Codex-2hxff.91); `fromTierId` ticks the old ladder (T and every tier
+  // above it, as migrated), so subscribers on those tiers lose the creator's
+  // content at their next renewal.
   it('counts the tier subscribers who reach their work today, through the tier hierarchy or a course their tier unlocks', async () => {
     const orgId = await seedOrg();
     const otherOrgId = await seedOrg();
@@ -332,22 +358,22 @@ describe('OrganizationService.getDeparturePreview', () => {
     const silver = await seedTier(orgId, 2);
     const gold = await seedTier(orgId, 3);
 
-    await seedItem(creatorId, orgId, { includedInTierId: silver });
+    await seedItem(creatorId, orgId, { fromTierId: silver });
     // None of these lowers the reach to bronze: a draft, content that never
     // reaches the tier arm, and a colleague's.
     await seedItem(creatorId, orgId, {
       status: 'draft',
-      includedInTierId: bronze,
+      fromTierId: bronze,
     });
     await seedItem(creatorId, orgId, {
-      includedInTierId: bronze,
+      fromTierId: bronze,
       courseOnly: true,
     });
     await seedItem(creatorId, orgId, {
-      includedInTierId: bronze,
+      fromTierId: bronze,
       isFollowerGated: true,
     });
-    await seedItem(colleagueId, orgId, { includedInTierId: bronze });
+    await seedItem(colleagueId, orgId, { fromTierId: bronze });
 
     await seedSubscription(subscriber(0), orgId, bronze);
     await seedSubscription(subscriber(1), orgId, silver);
@@ -356,7 +382,7 @@ describe('OrganizationService.getDeparturePreview', () => {
     await seedSubscription(subscriber(4), orgId, silver, 'incomplete');
     // Another organisation's subscriber to the creator's content there.
     const elsewhereTier = await seedTier(otherOrgId, 1);
-    await seedItem(creatorId, otherOrgId, { includedInTierId: elsewhereTier });
+    await seedItem(creatorId, otherOrgId, { fromTierId: elsewhereTier });
     await seedSubscription(subscriber(5), otherOrgId, elsewhereTier);
 
     const before = await service.getDeparturePreview(orgId, creatorId);
@@ -377,6 +403,24 @@ describe('OrganizationService.getDeparturePreview', () => {
     await unlock(await seedCourse(creatorId, orgId));
     const after = await service.getDeparturePreview(orgId, creatorId);
     expect(after.tierSubscribersAffected).toBe(3);
+  });
+
+  // A SET, not a ladder: a cheaper tier is not implied by a dearer one, and a
+  // closed item (gated, no tier) reaches no subscriber at all.
+  it('counts only the subscribers of the tiers an item is ticked on', async () => {
+    const orgId = await seedOrg();
+    const bronze = await seedTier(orgId, 1);
+    const silver = await seedTier(orgId, 2);
+    const gold = await seedTier(orgId, 3);
+    await seedItem(creatorId, orgId, { tierIds: [bronze, gold] });
+    await seedItem(creatorId, orgId, { tierIds: [] });
+
+    await seedSubscription(subscriber(0), orgId, bronze);
+    await seedSubscription(subscriber(1), orgId, silver);
+    await seedSubscription(subscriber(2), orgId, gold);
+
+    const preview = await service.getDeparturePreview(orgId, creatorId);
+    expect(preview.tierSubscribersAffected).toBe(2);
   });
 
   it('is all zeros for a member with nothing to unwind', async () => {

@@ -129,3 +129,23 @@ export class CreatorPayoutsRequiredError extends BusinessLogicError {
     );
   }
 }
+
+/**
+ * Publishing subscriber content that no tier includes (Codex-2hxff.91, owner
+ * U2: "publishing needs at least one tier"). Saving such an item is allowed —
+ * it is the CLOSED state a tier delete's "keep" also leaves — but it can't be
+ * put on offer that way. "Subscriber content" is the switch on and NOT for
+ * sale (`deriveContentAccessKind` = subscribers); a paid item whose tiers are
+ * optional publishes with none, as it stays on sale. The studio's readiness
+ * check matches
+ * `code: 'TIER_REQUIRED_TO_PUBLISH'`. Maps to HTTP 422 via BusinessLogicError.
+ * The context carries the content id only (it is sent to the client).
+ */
+export class TierRequiredToPublishError extends BusinessLogicError {
+  constructor(contentId: string) {
+    super('Tick at least one plan before publishing subscriber content.', {
+      contentId,
+      code: 'TIER_REQUIRED_TO_PUBLISH',
+    });
+  }
+}

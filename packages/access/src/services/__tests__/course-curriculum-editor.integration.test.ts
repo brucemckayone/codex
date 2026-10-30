@@ -37,6 +37,7 @@ import {
   createTestContentInput,
   createUniqueSlug,
   type Database,
+  gateContentToTiers,
   seedTestUsers,
   setupTestDatabase,
   teardownTestDatabase,
@@ -622,7 +623,7 @@ describe('CourseJourneyService curriculum editor (Codex-03cwh)', () => {
       isFree: boolean;
       isPurchasable: boolean;
       priceCents: number | null;
-      includedInTierId: string | null;
+      isTierGated: boolean;
       isFollowerGated: boolean;
       isTeamOnly: boolean;
       courseOnly: boolean;
@@ -735,10 +736,25 @@ describe('CourseJourneyService curriculum editor (Codex-03cwh)', () => {
       const courseId = await createCourse(db, orgAId, creatorId);
       const tierId = await createTier(db, orgAId);
       const practice = await createContent(db, { creatorId, orgId: orgAId });
-      await setAccessFlags(db, practice, {
-        isFree: false,
-        includedInTierId: tierId,
+      await setAccessFlags(db, practice, { isFree: false, isTierGated: true });
+      await gateContentToTiers(db, {
+        contentId: practice,
+        organizationId: orgAId,
+        tierIds: [tierId],
       });
+
+      await linkPractices(orgAId, courseId, [practice]);
+
+      expect((await readPolicy(db, practice)).courseOnly).toBe(false);
+    });
+
+    // Plan access (Codex-2hxff.91, design §2.4 #10): a practice behind the
+    // tier switch with NO tier ticked is CLOSED, still a gate of its own. The
+    // save keys on the switch, so it must not turn it course-only.
+    it('leaves a CLOSED tier-gated practice (no tier ticked) standalone', async () => {
+      const courseId = await createCourse(db, orgAId, creatorId);
+      const practice = await createContent(db, { creatorId, orgId: orgAId });
+      await setAccessFlags(db, practice, { isFree: false, isTierGated: true });
 
       await linkPractices(orgAId, courseId, [practice]);
 

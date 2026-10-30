@@ -7,12 +7,11 @@ const open = {
   isFree: true,
   isPurchasable: false,
   priceCents: null,
-  includedInTierId: null,
+  isTierGated: false,
   isFollowerGated: false,
   isTeamOnly: false,
   courseOnly: false,
 };
-const TIER = '00000000-0000-0000-0000-0000000000aa';
 
 describe('isPublicContent (Codex-039vo: a body goes unchecked only when no gate applies)', () => {
   it('is public when free with no gate', () => {
@@ -29,7 +28,7 @@ describe('isPublicContent (Codex-039vo: a body goes unchecked only when no gate 
     ['course-only', { ...open, courseOnly: true }],
     ['priced', { ...open, priceCents: 1500 }],
     ['purchasable', { ...open, isPurchasable: true }],
-    ['tier-included', { ...open, includedInTierId: TIER }],
+    ['tier-included', { ...open, isTierGated: true }],
     ['followers-only', { ...open, isFollowerGated: true }],
     ['team-only', { ...open, isTeamOnly: true }],
   ])('is not public when flagged free but %s', (_gate, policy) => {

@@ -22,12 +22,13 @@
  * ## What the core decides (SPEC §6.1/§6.3 + HARDENING §C/§B.6)
  *
  * The core folds the 7 per-content policy flags (`isFree` / `isPurchasable` +
- * `priceCents` / `includedInTierId` / `courseOnly` / `isFollowerGated` /
+ * `priceCents` / `isTierGated` / `courseOnly` / `isFollowerGated` /
  * `isTeamOnly`) together with the live grant sources:
  *   - `PurchaseService.verifyPurchase` (the authoritative content-purchase read),
  *   - the STORED `entitlements` grants (`content_purchase` / `grant`) — additive,
  *     forward-compatible with WP-6 (empty until it writes; see entitlements-resolver.ts),
- *   - the DERIVED subscription-tier grant (`includedInTierId` "this tier and above"),
+ *   - the DERIVED subscription-tier grant: the viewer's tier is one of the
+ *     item's ticked tiers (`content_tier_access`, Codex-2hxff.91),
  *   - and the "reachable via a course you own" arm (`courseOnly` + fallthrough).
  *
  * Precedence is preserved from WP-1 EXACTLY — team > followers > tier > paid >
@@ -50,16 +51,25 @@ import {
 import type { DatabaseClient } from '@codex/database';
 import {
   content,
+  contentTierAccess,
   courses,
   organizationFollowers,
   organizationMemberships,
   purchases,
   subscriptions,
-  subscriptionTiers,
 } from '@codex/database/schema';
 import type { ObservabilityClient } from '@codex/observability';
 import type { PurchaseService } from '@codex/purchase';
-import { and, eq, gt, inArray, isNotNull, isNull } from 'drizzle-orm';
+import {
+  and,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  isNull,
+  type SQL,
+  sql,
+} from 'drizzle-orm';
 import { LOG_EVENTS, LOG_SEVERITY } from '../../constants';
 import { AccessDeniedError } from '../../errors';
 import type { RevocationReason } from '../access-revocation';
@@ -116,7 +126,12 @@ export interface ContentAccessPolicyRow {
   isFree: boolean;
   isPurchasable: boolean;
   priceCents: number | null;
-  includedInTierId: string | null;
+  /**
+   * The subscribers-only switch (Codex-2hxff.91). On: the tier arm decides,
+   * and only a subscription on one of the item's TICKED tiers grants. With no
+   * tick it grants to no subscriber: CLOSED, never free.
+   */
+  isTierGated: boolean;
   isFollowerGated: boolean;
   isTeamOnly: boolean;
   courseOnly: boolean;
@@ -223,11 +238,28 @@ const deny = (reason: DenyReason): AccessDecision => ({
 });
 
 /**
- * The user's subscription to `orgId` that meets the content's minimum tier (by
- * sortOrder), or `null`. `minimumTierId === null` → any subscription qualifies
- * (community gate). Returns the subscription's `currentPeriodStart`, which the
- * renewal rule in `decideContentAccess` reads, and its `currentPeriodEnd`,
- * which a withdrawn item's note reads.
+ * `subscriptions.tier_id` is one of the tiers ticked for this content
+ * (Codex-2hxff.91). An uncorrelated `IN` over the `(content_id, tier_id)`
+ * primary-key prefix, scoped to the org on BOTH sides. No tick → the subquery
+ * is empty → no subscription matches: a closed item grants no subscriber.
+ *
+ * The subquery names its columns as TEXT under its own alias, never as drizzle
+ * columns: this runs inside a relational `findFirst`, which rewrites EVERY
+ * column in its `where` to the root table's alias, so
+ * `${contentTierAccess.tierId}` would render as `"subscriptions"."tier_id"`.
+ */
+function subscriptionTierIncludes(contentId: string, orgId: string): SQL {
+  return sql`${subscriptions.tierId} IN (SELECT cta.tier_id FROM ${contentTierAccess} cta WHERE cta.content_id = ${contentId} AND cta.organization_id = ${orgId})`;
+}
+
+/**
+ * The user's subscription to `orgId` that grants the item, or `null`. With a
+ * `gate`, only a subscription on one of the item's ticked tiers qualifies (a
+ * SET, not a ladder: a dearer tier is not implied). `gate === null` → any
+ * subscription qualifies (the followers gate). One read: the tier test is a
+ * subquery, not a second round trip. Returns the subscription's
+ * `currentPeriodStart`, which the renewal rule in `decideContentAccess` reads,
+ * and its `currentPeriodEnd`, which a withdrawn item's note reads.
  *
  * `disputed` picks the side of the dispute pause it reads. The decision reads
  * `false`: a subscription is paused while a chargeback on one of its invoices
@@ -237,7 +269,7 @@ async function findGrantingSubscription(
   db: AccessQueryClient,
   userId: string,
   orgId: string,
-  minimumTierId: string | null,
+  gate: { contentId: string } | null,
   disputed: boolean
 ): Promise<{ currentPeriodStart: Date; currentPeriodEnd: Date } | null> {
   const userSub = await db.query.subscriptions.findFirst({
@@ -248,18 +280,12 @@ async function findGrantingSubscription(
       disputed
         ? isNotNull(subscriptions.disputedAt)
         : isNull(subscriptions.disputedAt),
-      gt(subscriptions.currentPeriodEnd, new Date())
+      gt(subscriptions.currentPeriodEnd, new Date()),
+      ...(gate ? [subscriptionTierIncludes(gate.contentId, orgId)] : [])
     ),
-    with: { tier: true },
+    columns: { currentPeriodStart: true, currentPeriodEnd: true },
   });
-  if (!userSub) return null;
-  if (!minimumTierId) return userSub;
-  const contentTier = await db.query.subscriptionTiers.findFirst({
-    where: eq(subscriptionTiers.id, minimumTierId),
-    columns: { sortOrder: true },
-  });
-  if (!contentTier) return null;
-  return userSub.tier.sortOrder >= contentTier.sortOrder ? userSub : null;
+  return userSub ?? null;
 }
 
 /**
@@ -283,9 +309,9 @@ async function decidePolicyAccess(
   const orgId = policy.organizationId;
 
   // Fail-closed guard: orgless content can never tier-gate (Codex-up7bx).
-  // `subscription_tiers` is org-scoped, so a `includedInTierId` on content with
-  // NO `organizationId` is a semantically invalid row — deny before any branch.
-  if (orgId == null && policy.includedInTierId != null) {
+  // `subscription_tiers` is org-scoped, so the tier switch on content with NO
+  // `organizationId` is a semantically invalid row — deny before any branch.
+  if (orgId == null && policy.isTierGated) {
     return deny('orgless_tier_gate');
   }
 
@@ -319,10 +345,10 @@ async function decidePolicyAccess(
   // The GRANTING subscription, or `null` when none grants. One that a
   // chargeback holds back grants nothing.
   const grantingSubscription = async (
-    minimumTierId: string | null
+    gate: { contentId: string } | null
   ): Promise<{ currentPeriodStart: Date; currentPeriodEnd: Date } | null> => {
     if (userId == null || orgId == null) return null;
-    return findGrantingSubscription(db, userId, orgId, minimumTierId, false);
+    return findGrantingSubscription(db, userId, orgId, gate, false);
   };
 
   const verifyPurchase = async (): Promise<boolean> => {
@@ -374,14 +400,16 @@ async function decidePolicyAccess(
       : deny('followers_only');
   }
 
-  // ── tier-gated (subscribers) — includedInTierId set (orgId guaranteed by the
+  // ── tier-gated (subscribers) — the switch is on (orgId guaranteed by the
   // orgless guard above). Subscription + purchase are independent → parallel;
   // then the additive entitlements-table grant and the "via a course you own"
-  // arm; then management fallback.
-  if (policy.includedInTierId != null) {
+  // arm; then management fallback. With no tier ticked no subscription
+  // matches, so a CLOSED item falls to purchase / grant / course / team and
+  // then `subscribers_only` — never to the free fallthrough below.
+  if (policy.isTierGated) {
     if (!orgId) return deny('subscribers_only_requires_org');
     const [sub, purchased] = await Promise.all([
-      grantingSubscription(policy.includedInTierId),
+      grantingSubscription({ contentId }),
       verifyPurchase(),
     ]);
     // Once the item is off offer, only some grants outlive that (see
@@ -598,13 +626,13 @@ async function disputeHold(
 ): Promise<DisputeHold | null> {
   if (!isReleased(policy)) return null;
   const orgId = policy.organizationId;
-  if (orgId == null && policy.includedInTierId != null) return null;
+  if (orgId == null && policy.isTierGated) return null;
   if (policy.courseOnly) return courseDisputeHold(db, userId, contentId);
   if (policy.isTeamOnly) return null;
 
   // The branch `decidePolicyAccess` takes: followers-only before tier-gated.
   const followersOnly = policy.isFollowerGated;
-  const tierGated = !followersOnly && policy.includedInTierId != null;
+  const tierGated = !followersOnly && policy.isTierGated;
   const paid = !followersOnly && !tierGated && (policy.priceCents ?? 0) > 0;
 
   if (tierGated || paid) {
@@ -625,7 +653,7 @@ async function disputeHold(
       db,
       userId,
       orgId,
-      followersOnly ? null : policy.includedInTierId,
+      followersOnly ? null : { contentId },
       true
     );
     if (held) {
@@ -755,7 +783,7 @@ const POLICY_COLUMNS = {
   isFree: true,
   isPurchasable: true,
   priceCents: true,
-  includedInTierId: true,
+  isTierGated: true,
   isFollowerGated: true,
   isTeamOnly: true,
   courseOnly: true,
@@ -809,7 +837,7 @@ export async function resolveHasContentAccess(
     obs.warn('Access denied - orgless content with tier gate', {
       userId,
       contentId,
-      includedInTierId: contentRecord.includedInTierId,
+      isTierGated: contentRecord.isTierGated,
       securityEvent: LOG_EVENTS.UNAUTHORIZED_ACCESS,
       severity: LOG_SEVERITY.MEDIUM,
       eventType: LOG_EVENTS.ACCESS_CONTROL,

@@ -151,18 +151,16 @@ const orgId = 'org_xyz';
 const contentId = 'content_123';
 const revocationKey = `revoked:user:${userId}:${orgId}`;
 
-// Subscriber-gating is ALWAYS a concrete tier in the flag model (no
-// "any-tier" state). Use the tier the active subscriber sits on (sortOrder
-// 10) so any active subscriber to this org qualifies.
-const tierId = 'tier_pro';
-
+// Subscriber-gated: the plan-access switch is on (Codex-2hxff.91). Whether the
+// subscriber's plan is ticked is decided inside the one subscriptions read, so
+// the stub's answer to that read is the verdict.
 const subscribersContent = {
   id: contentId,
   organizationId: orgId,
   isFree: false,
   isPurchasable: false,
   priceCents: null,
-  includedInTierId: tierId,
+  isTierGated: true,
   status: 'published',
   isFollowerGated: false,
   isTeamOnly: false,
@@ -180,7 +178,6 @@ const activeSub = {
   organizationId: orgId,
   status: 'active',
   currentPeriodEnd: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-  tier: { name: 'pro', sortOrder: 10 },
 };
 
 // ─── Tests ────────────────────────────────────────────────────────────
@@ -195,10 +192,8 @@ describe('ContentAccessService.savePlaybackProgress — access gate', () => {
   it('allows a user with an active subscription to save progress', async () => {
     // content row — subscriber-gated, in org
     stub.mocks.content.findFirst.mockResolvedValue(subscribersContent);
-    // active subscription exists; the content's included tier resolves to
-    // sortOrder 10 (== the subscriber's tier), so access is granted.
+    // an active subscription on a ticked plan exists, so access is granted.
     stub.mocks.subscriptions.findFirst.mockResolvedValue(activeSub);
-    stub.mocks.subscriptionTiers.findFirst.mockResolvedValue({ sortOrder: 10 });
 
     const { service } = buildService(stub);
 
@@ -334,7 +329,7 @@ describe('ContentAccessService.savePlaybackProgress — access gate', () => {
       isFree: false,
       isPurchasable: false,
       priceCents: null,
-      includedInTierId: null,
+      isTierGated: false,
       status: 'published',
       isFollowerGated: true,
       isTeamOnly: false,

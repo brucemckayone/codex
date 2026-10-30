@@ -31,6 +31,7 @@ import {
   createTestTierInput,
   createUniqueSlug,
   type Database,
+  gateContentToTiers,
   seedTestUsers,
   setupTestDatabase,
   takeFirst,
@@ -865,17 +866,23 @@ describe('AdminCustomerManagementService', () => {
       const { testOrg, customer } = await setupGrantable();
       const flags =
         kind === 'tier'
-          ? {
-              priceCents: null,
-              includedInTierId: takeFirst(
-                await db
-                  .insert(subscriptionTiers)
-                  .values(createTestTierInput(testOrg.id))
-                  .returning()
-              ).id,
-            }
+          ? { priceCents: null, isTierGated: true }
           : { priceCents: 1500 };
       const item = await insertContent(testOrg.id, `grantable-${kind}`, flags);
+      if (kind === 'tier') {
+        await gateContentToTiers(db, {
+          contentId: item.id,
+          organizationId: testOrg.id,
+          tierIds: [
+            takeFirst(
+              await db
+                .insert(subscriptionTiers)
+                .values(createTestTierInput(testOrg.id))
+                .returning()
+            ).id,
+          ],
+        });
+      }
 
       await service.grantContentAccess(
         testOrg.id,

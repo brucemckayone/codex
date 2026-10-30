@@ -7,7 +7,7 @@
  * course subscription plan (`course_subscription_plans`, active and not
  * deleted), or inclusion in an org tier (`course_tier_access`, any row — an
  * archived tier still lets its subscribers in, as an archived
- * `content.included_in_tier_id` does).
+ * archived tier's `content_tier_access` ticks do).
  *
  * The refusal is `@codex/content`'s own `CreatorPayoutsRequiredError`, so the
  * Studio shows the one "set up payouts" message whichever kind of item it was.

@@ -6,6 +6,7 @@ import {
   PUBLIC_CREATOR_COLUMNS,
   PUBLIC_MEDIA_ITEM_COLUMNS,
   PUBLIC_ORGANIZATION_COLUMNS,
+  withTierWire,
 } from '@codex/content';
 import {
   createPerRequestDbClient,
@@ -672,11 +673,17 @@ export class ContentAccessService
         throw notFound();
       }
 
+      // Its tiers (Codex-2hxff.91), as every content read carries them.
+      const [wired] = await withTierWire(this.db, [row]);
       return {
         // No body: it comes from `/stream?include=body`, as for any gated
         // piece. No topic slugs: only the org landing reads them.
         content: {
-          ...row,
+          ...(wired ?? {
+            ...row,
+            includedInTierIds: [],
+            includedInTierId: null,
+          }),
           contentBody: null,
           contentBodyJson: null,
           categorySlugs: [],

@@ -80,6 +80,7 @@ import {
   MediaNotFoundError,
   MediaNotReadyError,
   SlugConflictError,
+  TierRequiredToPublishError,
 } from '../errors';
 import type {
   CatalogueContentRow,
@@ -93,6 +94,18 @@ import type {
   PublicContentRow,
   PublicMediaItemSource,
 } from '../types';
+import {
+  assertTiersInOrg,
+  type ContentTierWire,
+  clearTicks,
+  expandLegacyTier,
+  hasAnyTick,
+  notClosedToNewViewers,
+  readTickIds,
+  replaceTicks,
+  syncLegacyIncludedInTierId,
+  withTierWire,
+} from './content-tier-access';
 
 /**
  * The media_items columns `listPublic` selects (Codex-ve5eh). It used to load
@@ -290,7 +303,7 @@ export class ContentService extends BaseService {
   private async assertCreatorCanBePaid(
     tx: DatabaseTransaction,
     creatorId: string,
-    row: { priceCents: number | null; includedInTierId: string | null }
+    row: { priceCents: number | null; isTierGated: boolean }
   ): Promise<void> {
     if (!requiresPayoutsToPublish(row)) return;
     if (await this.isCreatorConnectReady(tx, creatorId)) return;
@@ -389,9 +402,19 @@ export class ContentService extends BaseService {
    * @throws {ContentTypeMismatchError} If content type doesn't match media type
    * @throws {SlugConflictError} If slug already exists for organization
    */
-  async create(input: CreateContentInput, creatorId: string): Promise<Content> {
+  async create(
+    input: CreateContentInput,
+    creatorId: string
+  ): Promise<Content & ContentTierWire> {
     // Step 1: Validate input with Zod schema
     const validated = createContentSchema.parse(input);
+
+    // Plan access (Codex-2hxff.91). The switch is the gate; the set says which
+    // tiers. The legacy single tier (the old studio, phase 1) means the switch
+    // plus every tier at or above it. The schema refuses the two forms
+    // together, and refuses the switch without an org.
+    const tierGated =
+      validated.isTierGated ?? validated.includedInTierId != null;
 
     // Step 1b: Zod only proved the thumbnail is an http(s) URL — reject any
     // host other than the platform asset CDN (Codex-8so68). Mirrored in
@@ -414,6 +437,23 @@ export class ContentService extends BaseService {
               | typeof CONTENT_TYPES.AUDIO,
             false // requireReady = false for draft creation
           );
+        }
+
+        // Step 3b: the tiers the item starts in, checked against its org
+        // before anything is written (refine (a) guarantees the org).
+        const orgId = validated.organizationId || null;
+        let tierIds: string[] = [];
+        if (tierGated && orgId) {
+          tierIds =
+            validated.includedInTierIds ??
+            (validated.includedInTierId
+              ? await expandLegacyTier(
+                  tx as DatabaseTransaction,
+                  orgId,
+                  validated.includedInTierId
+                )
+              : []);
+          await assertTiersInOrg(tx as DatabaseTransaction, orgId, tierIds);
         }
 
         // Step 4: Create content record
@@ -448,14 +488,9 @@ export class ContentService extends BaseService {
             // (accessType, minimumTierId). Flags are separable/non-exclusive.
             isPurchasable: validated.isPurchasable ?? false,
             priceCents: validated.priceCents ?? null,
-            // Codex-up7bx clamp: `includedInTierId` (subscriber gate, 1:1
-            // successor of `minimumTierId`) is only valid on org-scoped content
-            // — subscription_tiers is org-scoped. Never persist a tier the
-            // access layer must then fail closed on.
-            includedInTierId:
-              validated.includedInTierId && validated.organizationId
-                ? validated.includedInTierId
-                : null,
+            // The subscribers-only switch (Codex-2hxff.91). The legacy column
+            // is written by syncLegacyIncludedInTierId below, never here.
+            isTierGated: tierGated,
             courseOnly: validated.courseOnly ?? false,
             isFollowerGated: validated.isFollowerGated ?? false,
             isTeamOnly: validated.isTeamOnly ?? false,
@@ -480,7 +515,8 @@ export class ContentService extends BaseService {
                 (validated.isFollowerGated ?? false) ||
                 (validated.isTeamOnly ?? false) ||
                 (validated.courseOnly ?? false) ||
-                (!!validated.includedInTierId && !!validated.organizationId)
+                // The switch is a gate even with no tick (closed, I2).
+                tierGated
               ),
             status: CONTENT_STATUS.DRAFT, // Always start as draft
             viewCount: 0,
@@ -509,6 +545,26 @@ export class ContentService extends BaseService {
           );
         }
 
+        // The ticks, then the legacy dual-write, in the same transaction. A
+        // draft needs no payouts check: publish() asks.
+        if (tierGated && orgId && tierIds.length > 0) {
+          await replaceTicks(
+            tx as DatabaseTransaction,
+            newContent.id,
+            orgId,
+            tierIds
+          );
+          await syncLegacyIncludedInTierId(tx as DatabaseTransaction, [
+            newContent.id,
+          ]);
+          const [synced] = await tx
+            .select({ legacyIncludedInTierId: content.legacyIncludedInTierId })
+            .from(content)
+            .where(eq(content.id, newContent.id));
+          newContent.legacyIncludedInTierId =
+            synced?.legacyIncludedInTierId ?? null;
+        }
+
         return newContent;
       });
 
@@ -522,7 +578,10 @@ export class ContentService extends BaseService {
         );
       }
 
-      return result;
+      const [wired] = await withTierWire(this.db, [result]);
+      return (
+        wired ?? { ...result, includedInTierIds: [], includedInTierId: null }
+      );
     } catch (error) {
       // Handle unique constraint violations (slug conflicts)
       if (isUniqueViolation(error)) {
@@ -579,8 +638,11 @@ export class ContentService extends BaseService {
           and(eq(contentCategories.contentId, id), isNull(categories.deletedAt))
         );
 
+      // The item's tiers (Codex-2hxff.91), so the editor's tier picker can
+      // pre-tick them: the editor refuses to save a set it never read.
+      const [wired] = await withTierWire(this.db, [result]);
       return {
-        ...result,
+        ...(wired ?? result),
         categoryIds: membershipRows.map((row) => row.categoryId),
       };
     } catch (error) {
@@ -609,7 +671,7 @@ export class ContentService extends BaseService {
     id: string,
     input: UpdateContentInput,
     creatorId: string
-  ): Promise<Content> {
+  ): Promise<Content & ContentTierWire> {
     const { content: updated } = await this.updateReportingDroppedThumbnail(
       id,
       input,
@@ -628,7 +690,10 @@ export class ContentService extends BaseService {
     id: string,
     input: UpdateContentInput,
     creatorId: string
-  ): Promise<{ content: Content; droppedThumbnailUrl: string | null }> {
+  ): Promise<{
+    content: Content & ContentTierWire;
+    droppedThumbnailUrl: string | null;
+  }> {
     // Validate input
     const validated = updateContentSchema.parse(input);
 
@@ -655,9 +720,15 @@ export class ContentService extends BaseService {
         // `categoryIds` is pulled OUT here so it never reaches the `.set()`
         // spread below — it is not a `content` column; it drives the
         // `content_categories` join write instead (see syncContentCategories).
+        // The plan-access fields (Codex-2hxff.91) come out too: the switch is
+        // written explicitly below, the set goes to `content_tier_access`, and
+        // the legacy single tier is expanded, never spread onto the column.
         const {
           contentBody: _rawBody,
           categoryIds: _categoryIds,
+          isTierGated: sentTierGated,
+          includedInTierIds: sentTierIds,
+          includedInTierId: sentLegacyTierId,
           ...restValidated
         } = validated;
         const bodyFields =
@@ -679,19 +750,97 @@ export class ContentService extends BaseService {
             this.r2PublicUrlBase
           ) !== null;
 
-        // Codex-up7bx: `includedInTierId` (the subscriber gate) is only valid
-        // on org-scoped content — subscription_tiers is org-scoped. Determine
-        // the org the row will have AFTER this update (incoming value when the
-        // payload touches organizationId, otherwise the existing value); if
-        // that resolves to orgless, clear the tier so the access layer never
-        // honours a dangling tier. (The old accessType-incompatibility clamp is
-        // obsolete: policy flags are set directly and are non-exclusive —
-        // SPEC §6.1 — so there is no "incompatible mode" to clear against.)
+        // Codex-up7bx: the tier gate is only valid on org-scoped content —
+        // subscription_tiers is org-scoped. Determine the org the row will have
+        // AFTER this update (incoming value when the payload touches
+        // organizationId, otherwise the existing value).
         const resultingOrgId =
           'organizationId' in restValidated
-            ? restValidated.organizationId
+            ? (restValidated.organizationId ?? null)
             : existing.organizationId;
-        const clearTier = resultingOrgId == null;
+
+        // Plan access (Codex-2hxff.91), steps 2-4 of the design's §3.1.
+        // The EFFECTIVE switch: the payload's, else the legacy single tier's
+        // meaning (set = gated, null = not), else the row's.
+        const legacyStated = sentLegacyTierId !== undefined;
+        const effGated =
+          sentTierGated ??
+          (legacyStated ? sentLegacyTierId != null : existing.isTierGated);
+        if (effGated && resultingOrgId == null) {
+          // Belt and braces for a partial that never stated the org (the
+          // schema catches the one that does). Refuse, never clamp: the old
+          // clamp nulled the tier, which reads as free.
+          throw new ValidationError(
+            'Subscription tier requires an organisation — orgless content cannot be tier-gated',
+            { contentId: id }
+          );
+        }
+        if (
+          effGated &&
+          'organizationId' in restValidated &&
+          resultingOrgId !== existing.organizationId
+        ) {
+          // Ticks are pinned to the item's org (composite FK). A move would
+          // silently keep the old org's tiers, so it is refused.
+          throw new ValidationError(
+            'Remove this item from plans before moving it out of the organisation',
+            { contentId: id }
+          );
+        }
+        // The new SET, when the payload states one: the explicit set, or the
+        // legacy tier expanded to the old ladder. `undefined` leaves the
+        // ticks alone (a title edit never undoes a checklist change). The old
+        // studio resends its single pick on EVERY save, so a pick equal to the
+        // stored legacy value on a gated row is "unchanged", not a re-pick:
+        // expanding it would silently undo a checklist edit made since.
+        const legacyUnchanged =
+          existing.isTierGated &&
+          sentLegacyTierId != null &&
+          sentLegacyTierId === existing.legacyIncludedInTierId;
+        let nextTierIds: string[] | undefined = sentTierIds;
+        if (
+          nextTierIds === undefined &&
+          legacyStated &&
+          sentLegacyTierId != null &&
+          !legacyUnchanged &&
+          resultingOrgId != null
+        ) {
+          nextTierIds = await expandLegacyTier(
+            tx as DatabaseTransaction,
+            resultingOrgId,
+            sentLegacyTierId
+          );
+        }
+        if (effGated && nextTierIds !== undefined && resultingOrgId) {
+          await assertTiersInOrg(
+            tx as DatabaseTransaction,
+            resultingOrgId,
+            nextTierIds
+          );
+        }
+
+        // I2 and I4 on the EFFECTIVE row (the schema sees only what the
+        // partial states): gated is never free, and never beside a gate the
+        // decision applies before the tier arm.
+        const effIsFollowerGated =
+          restValidated.isFollowerGated ?? existing.isFollowerGated;
+        const effIsTeamOnly = restValidated.isTeamOnly ?? existing.isTeamOnly;
+        const effCourseOnly = restValidated.courseOnly ?? existing.courseOnly;
+        if (effGated && restValidated.isFree === true) {
+          throw new ValidationError(
+            'Tier-gated content cannot be free — an item in no tier is closed, not free.',
+            { contentId: id }
+          );
+        }
+        if (
+          effGated &&
+          (effIsFollowerGated || effIsTeamOnly || effCourseOnly)
+        ) {
+          throw new ValidationError(
+            'Tier-gated content cannot also be followers-only, team-only or course-only',
+            { contentId: id }
+          );
+        }
 
         // Access-policy invariant: NON-FREE ⟺ at least one active gate.
         // A partial PATCH can clear the sole gate WITHOUT restating `isFree`
@@ -700,15 +849,12 @@ export class ContentService extends BaseService {
         // `isFree:false`; the resolver then falls through team/follower/tier/
         // paid to its final `return true` → the content is silently PUBLIC.
         // Recompute the EFFECTIVE merged policy (existing row overlaid with the
-        // partial + the tier clamp above) and, when it carries no gate, force
-        // `isFree:true`. CLAMP (not throw): a gate-less row IS free — this
-        // mirrors create()'s `isFree ?? !gates` derivation and keeps a
-        // legitimate "clear the gate → make it free" edit working.
-        const effIncludedInTierId = clearTier
-          ? null
-          : 'includedInTierId' in restValidated
-            ? restValidated.includedInTierId
-            : existing.includedInTierId;
+        // partial) and, when it carries no gate, force `isFree:true`. CLAMP
+        // (not throw): a gate-less row IS free — this mirrors create()'s
+        // `isFree ?? !gates` derivation and keeps a legitimate "clear the gate
+        // → make it free" edit working. The tier SWITCH is a gate whether or
+        // not any tier is ticked (Codex-2hxff.91): closed, never free.
+        //
         // A PRICE IS A GATE (Codex-al9ft) — and omitting it here was worse than
         // in create(): because the clamp at the `.set()` below FORCES
         // `isFree: true` when it sees no gate, a PATCH that unset
@@ -722,32 +868,40 @@ export class ContentService extends BaseService {
         const effHasGate =
           (restValidated.isPurchasable ?? existing.isPurchasable) ||
           (effPriceCents ?? 0) > 0 ||
-          (restValidated.isFollowerGated ?? existing.isFollowerGated) ||
-          (restValidated.isTeamOnly ?? existing.isTeamOnly) ||
-          (restValidated.courseOnly ?? existing.courseOnly) ||
-          effIncludedInTierId != null;
+          effIsFollowerGated ||
+          effIsTeamOnly ||
+          effCourseOnly ||
+          effGated;
 
         // Codex-2hxff.14: publish() refuses priced or tier content whose
         // creator can't be paid, so a LIVE row must not be priced or tiered
         // past that gate here. Only a change that opens a way to pay is
-        // checked — a price or tier set or changed, or the row turned
-        // purchasable — and it is compared by VALUE, not by key presence,
-        // because the studio form resends the whole flag set on every save and
-        // a title edit must never fail on payouts. Removing a price or tier is
-        // never refused. Drafts are left to publish().
+        // checked — a price set or changed, a tier ADDED, the switch newly on,
+        // or the row turned purchasable — compared by VALUE, not by key
+        // presence, because the studio form resends the whole flag set on
+        // every save and a title edit must never fail on payouts. Removing a
+        // price or a tier is never refused. Drafts are left to publish().
+        const currentTierIds =
+          nextTierIds !== undefined
+            ? await readTickIds(tx as DatabaseTransaction, id)
+            : undefined;
         if (existing.status === CONTENT_STATUS.PUBLISHED) {
           const nextPriceCents = effPriceCents ?? null;
-          const nextTierId = effIncludedInTierId ?? null;
+          const current = new Set(currentTierIds ?? []);
+          const tierAdded =
+            effGated &&
+            (nextTierIds ?? []).some((tierId) => !current.has(tierId));
           const opensAWayToPay =
             ((nextPriceCents ?? 0) > 0 &&
               nextPriceCents !== existing.priceCents) ||
-            (nextTierId != null && nextTierId !== existing.includedInTierId) ||
+            tierAdded ||
+            (effGated && !existing.isTierGated) ||
             (!existing.isPurchasable && restValidated.isPurchasable === true);
           if (opensAWayToPay) {
             await this.assertCreatorCanBePaid(
               tx as DatabaseTransaction,
               creatorId,
-              { priceCents: nextPriceCents, includedInTierId: nextTierId }
+              { priceCents: nextPriceCents, isTierGated: effGated }
             );
           }
         }
@@ -782,10 +936,12 @@ export class ContentService extends BaseService {
             ...(keepStoredThumbnail
               ? { thumbnailUrl: existing.thumbnailUrl }
               : {}),
-            ...(clearTier ? { includedInTierId: null } : {}),
+            isTierGated: effGated,
             // Clamp AFTER the spread so it overrides a stale `isFree:false` the
-            // partial may carry alongside the gate it just cleared.
+            // partial may carry alongside the gate it just cleared — and a
+            // stale `isFree:true` on a row behind the tier switch (I2).
             ...(effHasGate ? {} : { isFree: true }),
+            ...(effGated ? { isFree: false } : {}),
             updatedAt: new Date(),
           })
           .where(and(eq(content.id, id), withCreatorScope(content, creatorId)))
@@ -807,6 +963,35 @@ export class ContentService extends BaseService {
             updated.creatorId,
             _categoryIds
           );
+        }
+
+        // The ticks (design §3.1 step 7), then the legacy dual-write (step
+        // 8). Switch off → no ticks (I1). Switch on → the stated set, or the
+        // current ticks untouched when none was stated.
+        const tierTouched =
+          sentTierGated !== undefined ||
+          sentTierIds !== undefined ||
+          legacyStated;
+        if (!effGated) {
+          if (existing.isTierGated || tierTouched) {
+            await clearTicks(tx as DatabaseTransaction, id);
+          }
+        } else if (nextTierIds !== undefined && updated.organizationId) {
+          await replaceTicks(
+            tx as DatabaseTransaction,
+            id,
+            updated.organizationId,
+            nextTierIds
+          );
+        }
+        if (tierTouched || existing.isTierGated !== effGated) {
+          await syncLegacyIncludedInTierId(tx as DatabaseTransaction, [id]);
+          const [synced] = await tx
+            .select({ legacyIncludedInTierId: content.legacyIncludedInTierId })
+            .from(content)
+            .where(eq(content.id, id));
+          updated.legacyIncludedInTierId =
+            synced?.legacyIncludedInTierId ?? null;
         }
 
         return updated;
@@ -838,8 +1023,13 @@ export class ContentService extends BaseService {
       }
 
       const thumbnailMoved = previousThumbnailUrl !== result.thumbnailUrl;
+      const [wired] = await withTierWire(this.db, [result]);
       return {
-        content: result,
+        content: wired ?? {
+          ...result,
+          includedInTierIds: [],
+          includedInTierId: result.legacyIncludedInTierId,
+        },
         droppedThumbnailUrl: thumbnailMoved ? previousThumbnailUrl : null,
       };
     } catch (error) {
@@ -957,7 +1147,10 @@ export class ContentService extends BaseService {
    * @throws {ContentNotFoundError} If content doesn't exist
    * @throws {BusinessLogicError} If content is not ready to publish
    */
-  async publish(id: string, creatorId: string): Promise<Content> {
+  async publish(
+    id: string,
+    creatorId: string
+  ): Promise<Content & ContentTierWire> {
     try {
       const result = await this.db.transaction(async (tx) => {
         // Get content with media item
@@ -997,6 +1190,17 @@ export class ContentService extends BaseService {
           if (existing.mediaItem.status !== MEDIA_STATUS.READY) {
             throw new MediaNotReadyError(existing.mediaItem.id);
           }
+        }
+
+        // Subscriber content needs at least one tier to go live (Codex-2hxff.91,
+        // owner U2). Saving it with none is allowed (closed); publishing it is
+        // not. A paid item whose tiers are optional stays on sale, so it may.
+        if (
+          existing.isTierGated &&
+          !existing.isPurchasable &&
+          !(await hasAnyTick(tx as DatabaseTransaction, id))
+        ) {
+          throw new TierRequiredToPublishError(id);
         }
 
         // Content that earns money needs a payout-ready Connect account before
@@ -1043,7 +1247,10 @@ export class ContentService extends BaseService {
         );
       }
 
-      return result;
+      const [wired] = await withTierWire(this.db, [result]);
+      return (
+        wired ?? { ...result, includedInTierIds: [], includedInTierId: null }
+      );
     } catch (error) {
       if (
         error instanceof ContentNotFoundError ||
@@ -1067,7 +1274,10 @@ export class ContentService extends BaseService {
    * @returns Unpublished content
    * @throws {ContentNotFoundError} If content doesn't exist
    */
-  async unpublish(id: string, creatorId: string): Promise<Content> {
+  async unpublish(
+    id: string,
+    creatorId: string
+  ): Promise<Content & ContentTierWire> {
     try {
       const result = await this.db.transaction(async (tx) => {
         const existing = await tx.query.content.findFirst({
@@ -1102,7 +1312,11 @@ export class ContentService extends BaseService {
         );
       }
 
-      return result;
+      // Its tiers (Codex-2hxff.91), as every content read carries them.
+      const [wired] = await withTierWire(this.db, [result]);
+      return (
+        wired ?? { ...result, includedInTierIds: [], includedInTierId: null }
+      );
     } catch (error) {
       if (error instanceof ContentNotFoundError) {
         throw error;
@@ -1266,6 +1480,9 @@ export class ContentService extends BaseService {
               // A deleted org's catalogue is not browsable either; its content
               // stays published when the org is deleted.
               this.orgIsLive(),
+              // A CLOSED item (behind the tier switch, in no tier, not for
+              // sale) is hidden from the catalogue (Codex-2hxff.91, owner U11).
+              notClosedToNewViewers(),
             ]
           : [scopedNotDeleted(content, creatorId)];
 
@@ -1288,7 +1505,7 @@ export class ContentService extends BaseService {
             : at === CONTENT_ACCESS_TYPE.PAID
               ? eq(content.isPurchasable, true)
               : at === CONTENT_ACCESS_TYPE.SUBSCRIBERS
-                ? isNotNull(content.includedInTierId)
+                ? eq(content.isTierGated, true)
                 : at === CONTENT_ACCESS_TYPE.FOLLOWERS
                   ? eq(content.isFollowerGated, true)
                   : at === CONTENT_ACCESS_TYPE.TEAM
@@ -1333,7 +1550,7 @@ export class ContentService extends BaseService {
           : asc(content[sortColumn]);
 
       const where = and(...whereConditions);
-      return await paginatedQuery({
+      const page = await paginatedQuery({
         page: pagination.page,
         limit: pagination.limit,
         // Two reads, not one with conditional relations: drizzle types a
@@ -1386,6 +1603,12 @@ export class ContentService extends BaseService {
             ? { ...item, contentBody: null, contentBodyJson: null }
             : item,
       });
+      // Every content read carries its tiers (Codex-2hxff.91, design §4.1):
+      // one query over the page's ids.
+      return {
+        items: await withTierWire(this.db, page.items),
+        pagination: page.pagination,
+      };
     } catch (error) {
       this.handleError(error, 'list');
     }
@@ -1470,6 +1693,10 @@ export class ContentService extends BaseService {
         // entitlement resolver, not by this projection — hiding the row from a
         // catalogue is a discovery concern, not the access control itself.
         whereConditions.push(eq(content.courseOnly, false));
+        // The same for a CLOSED item (Codex-2hxff.91, owner U11): hidden from
+        // every catalogue, while its own page (the by-slug read) still loads
+        // to say "Not available right now". A priced one stays listed.
+        whereConditions.push(notClosedToNewViewers());
       }
 
       // Optional content type filter
@@ -1616,8 +1843,11 @@ export class ContentService extends BaseService {
         }
       }
 
+      // The tiers that include each item (Codex-2hxff.91): public, as the
+      // tier list already is. Per-tier counts and closed items never are.
+      const wired = await withTierWire(this.db, result.items);
       return {
-        items: result.items.map((item) => ({
+        items: wired.map((item) => ({
           ...item,
           categorySlugs: slugsByContentId.get(item.id) ?? [],
         })),

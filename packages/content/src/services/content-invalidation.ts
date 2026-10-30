@@ -92,7 +92,8 @@ export type ContentInvalidationReason =
   | 'membership_removed'
   | 'membership_invited'
   | 'follower_added'
-  | 'follower_removed';
+  | 'follower_removed'
+  | 'plan_access_changed';
 
 /**
  * `WaitUntilFn` and `InvalidationLogger` are canonically declared in
@@ -276,6 +277,89 @@ export async function invalidateContentAccess(
     reason,
     userCount: affectedUserIds.size,
   });
+}
+
+// ============================================================================
+// Per-tier invalidation (plan access, Codex-2hxff.91)
+// ============================================================================
+
+/** Arguments for {@link invalidatePlanSubscriberLibraries}. */
+export interface InvalidatePlanSubscriberLibrariesArgs {
+  db: Database;
+  cache: VersionedCache;
+  waitUntil: WaitUntilFn;
+  organizationId: string;
+  /** The tiers whose contents changed. `[]` bumps the org catalogue only. */
+  tierIds: string[];
+  reason: 'plan_access_changed';
+  logger?: InvalidationLogger;
+  /** Override the fanout cap (default {@link DEFAULT_MAX_LIBRARY_FANOUT}). */
+  maxFanout?: number;
+}
+
+/**
+ * A tier's films or courses changed (the checklist, a delete's "move", a
+ * create's copy). Bumps the org's content catalogue version (the public list
+ * carries each item's `includedInTierIds`), then the library of every user
+ * whose subscription to one of `tierIds` grants access now — the same
+ * statuses and period test as the decision. Above `maxFanout` the per-user
+ * bumps are skipped (logged), as {@link invalidateContentAccess} does.
+ */
+export async function invalidatePlanSubscriberLibraries(
+  args: InvalidatePlanSubscriberLibrariesArgs
+): Promise<void> {
+  const {
+    db,
+    cache,
+    waitUntil,
+    organizationId,
+    tierIds,
+    reason,
+    logger,
+    maxFanout = DEFAULT_MAX_LIBRARY_FANOUT,
+  } = args;
+
+  bumpWithLogger(
+    cache,
+    waitUntil,
+    CacheType.COLLECTION_ORG_CONTENT(organizationId),
+    { reason, organizationId, key: 'org:content' },
+    logger
+  );
+
+  const ids = [...new Set(tierIds)];
+  if (ids.length === 0) return;
+
+  const rows = await db.query.subscriptions.findMany({
+    where: and(
+      eq(subscriptions.organizationId, organizationId),
+      inArray(subscriptions.tierId, ids),
+      inArray(subscriptions.status, [...ACCESS_GRANTING_SUBSCRIPTION_STATUSES]),
+      gt(subscriptions.currentPeriodEnd, new Date())
+    ),
+    columns: { userId: true },
+  });
+  const userIds = new Set(rows.map((r) => r.userId));
+  if (userIds.size === 0) return;
+  if (userIds.size > maxFanout) {
+    logger?.warn('content-invalidation: tier fanout skipped (cap exceeded)', {
+      organizationId,
+      reason,
+      tierCount: ids.length,
+      userCount: userIds.size,
+      maxFanout,
+    });
+    return;
+  }
+  for (const userId of userIds) {
+    bumpWithLogger(
+      cache,
+      waitUntil,
+      CacheType.COLLECTION_USER_LIBRARY(userId),
+      { reason, organizationId, userId, key: 'user:library' },
+      logger
+    );
+  }
 }
 
 // ============================================================================

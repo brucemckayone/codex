@@ -27,8 +27,11 @@ import {
   BusinessLogicError,
   NotFoundError,
 } from '@codex/service-errors';
-import { and, count, desc, eq, isNull } from 'drizzle-orm';
-import { CreatorPayoutsRequiredError } from '../errors';
+import { and, count, desc, eq, isNull, sql } from 'drizzle-orm';
+import {
+  CreatorPayoutsRequiredError,
+  TierRequiredToPublishError,
+} from '../errors';
 import type {
   AdminContentItem,
   AdminContentListOptions,
@@ -191,6 +194,27 @@ export class AdminContentManagementService extends BaseService {
               mediaStatus: existing.mediaItem.status,
             });
           }
+        }
+
+        // Subscriber content needs at least one tier to go live — the rule
+        // ContentService.publish applies (Codex-2hxff.91, owner U2). A paid
+        // item whose tiers are optional stays on sale, so it may publish.
+        if (existing.isTierGated && !existing.isPurchasable) {
+          const [tick] = await tx
+            .select({ one: sql<number>`1` })
+            .from(schema.contentTierAccess)
+            .innerJoin(
+              schema.subscriptionTiers,
+              eq(schema.subscriptionTiers.id, schema.contentTierAccess.tierId)
+            )
+            .where(
+              and(
+                eq(schema.contentTierAccess.contentId, contentId),
+                isNull(schema.subscriptionTiers.deletedAt)
+              )
+            )
+            .limit(1);
+          if (!tick) throw new TierRequiredToPublishError(contentId);
         }
 
         // Content that earns money needs a creator who can be paid — the rule

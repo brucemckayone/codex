@@ -30,6 +30,7 @@ import {
   createTestTierInput,
   createUniqueSlug,
   type Database,
+  gateContentToTiers,
   seedTestUsers,
   setupTestDatabase,
   takeFirst,
@@ -37,7 +38,10 @@ import {
 } from '@codex/test-utils';
 import { eq, inArray } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { CreatorPayoutsRequiredError } from '../errors';
+import {
+  CreatorPayoutsRequiredError,
+  TierRequiredToPublishError,
+} from '../errors';
 import { AdminContentManagementService } from '../services/content-management-service';
 
 describe('AdminContentManagementService', () => {
@@ -578,8 +582,12 @@ describe('AdminContentManagementService', () => {
       });
 
       async function seedDraft(
-        flags: Partial<typeof contentTable.$inferInsert>
+        flags: Partial<typeof contentTable.$inferInsert> & {
+          /** Behind the tier switch, ticked on these tiers. */
+          tierIds?: string[];
+        }
       ): Promise<string> {
+        const { tierIds, ...policy } = flags;
         const row = takeFirst(
           await db
             .insert(contentTable)
@@ -591,11 +599,19 @@ describe('AdminContentManagementService', () => {
               contentType: 'written',
               contentBody: 'Body',
               status: CONTENT_STATUS.DRAFT,
-              ...flags,
+              ...policy,
+              isTierGated: tierIds !== undefined,
             })
             .returning()
         );
         contentIds.push(row.id);
+        if (tierIds !== undefined) {
+          await gateContentToTiers(db, {
+            contentId: row.id,
+            organizationId: gateOrgId,
+            tierIds,
+          });
+        }
         return row.id;
       }
 
@@ -635,7 +651,7 @@ describe('AdminContentManagementService', () => {
         );
         const tiered = await seedDraft({
           isFree: false,
-          includedInTierId: tierId,
+          tierIds: [tierId],
         });
 
         const refusal = service.publishContent(gateOrgId, tiered);
@@ -667,7 +683,7 @@ describe('AdminContentManagementService', () => {
         });
         const tiered = await seedDraft({
           isFree: false,
-          includedInTierId: tierId,
+          tierIds: [tierId],
         });
 
         expect((await service.publishContent(gateOrgId, priced)).status).toBe(
@@ -676,6 +692,32 @@ describe('AdminContentManagementService', () => {
         expect((await service.publishContent(gateOrgId, tiered)).status).toBe(
           CONTENT_STATUS.PUBLISHED
         );
+      });
+
+      // Owner U2 (Codex-2hxff.91): the same rule as ContentService.publish.
+      it('refuses subscriber content with no tier ticked, and publishes a PAID one', async () => {
+        await db
+          .insert(stripeConnectAccounts)
+          .values(createTestConnectAccountInput(null, creatorId));
+        const closed = await seedDraft({ isFree: false, tierIds: [] });
+        const paidClosed = await seedDraft({
+          isFree: false,
+          isPurchasable: true,
+          priceCents: 900,
+          tierIds: [],
+        });
+
+        const refusal = await service
+          .publishContent(gateOrgId, closed)
+          .catch((e: unknown) => e);
+        expect(refusal).toBeInstanceOf(TierRequiredToPublishError);
+        expect((refusal as TierRequiredToPublishError).context).toEqual({
+          contentId: closed,
+          code: 'TIER_REQUIRED_TO_PUBLISH',
+        });
+        expect(
+          (await service.publishContent(gateOrgId, paidClosed)).status
+        ).toBe(CONTENT_STATUS.PUBLISHED);
       });
     });
   });

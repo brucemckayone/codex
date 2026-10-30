@@ -50,6 +50,27 @@ export class TierHasSubscribersError extends BusinessLogicError {
   }
 }
 
+/**
+ * Deleting a tier that some films or courses are ONLY in, without saying what
+ * happens to them (Codex-2hxff.91). The studio dialog asks "Move them to other
+ * tiers" or "Keep them subscribers-only"; an older client that sends neither
+ * fails safe here instead of leaving them in no tier by accident. Counts only:
+ * the context is sent to the client.
+ */
+export class TierHasOnlyItemsError extends ConflictError {
+  constructor(
+    tierId: string,
+    counts: { filmCount: number; courseCount: number }
+  ) {
+    super('Choose what happens to the items only in this plan', {
+      tierId,
+      filmCount: counts.filmCount,
+      courseCount: counts.courseCount,
+      code: 'TIER_HAS_ONLY_ITEMS',
+    });
+  }
+}
+
 export class TierSortOrderConflictError extends ConflictError {
   constructor(orgId: string, sortOrder: number) {
     super('A tier with this sort order already exists', {
