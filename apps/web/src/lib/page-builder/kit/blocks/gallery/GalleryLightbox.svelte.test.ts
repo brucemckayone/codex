@@ -8,6 +8,7 @@ import {
   it,
   vi,
 } from 'vitest';
+import { logger } from '$lib/observability';
 import {
   flushSync,
   mount,
@@ -66,6 +67,7 @@ afterEach(() => {
   app = null;
   document.body.innerHTML = '';
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 const CDN = 'https://cdn.test';
@@ -353,6 +355,93 @@ describe('GalleryBlock: each picture opens the lightbox (p3n §4)', () => {
       if (app) unmount(app);
       app = null;
       expect(locked()).toBe(false);
+    });
+
+    // A browser with no `showModal`, or one that refuses it, fires no
+    // `close`: the page stayed held and every tile went dead.
+    it.each([
+      [
+        'showModal throws',
+        () =>
+          vi
+            .spyOn(HTMLDialogElement.prototype, 'showModal')
+            .mockImplementation(() => {
+              throw new DOMException('not connected', 'InvalidStateError');
+            }),
+      ],
+      [
+        'a later step of opening throws',
+        () =>
+          vi.stubGlobal(
+            'IntersectionObserver',
+            class {
+              constructor() {
+                throw new TypeError('no observer here');
+              }
+            }
+          ),
+      ],
+    ])('when %s: lets the page go, gives focus back, says so, and the tile still opens', async (_, breakOpening) => {
+      const warned = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      await render({ items: pictures(3) });
+      const tile = tiles()[1];
+      breakOpening();
+      press(tile);
+      flushSync();
+      expect(dialog()).toBeNull();
+      expect(locked()).toBe(false);
+      expect(document.activeElement).toBe(tile);
+      expect(warned).toHaveBeenCalledWith(
+        'gallery.lightbox_open_failed',
+        expect.objectContaining({ error: expect.any(String) })
+      );
+      // A press after the browser recovers opens it, so the tile is not dead.
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+      press(tile);
+      expect(dialog()?.hasAttribute('open')).toBe(true);
+      expect(locked()).toBe(true);
+    });
+  });
+
+  describe('a picture that will not load', () => {
+    const fail = (img: Element) => {
+      img.dispatchEvent(new Event('error'));
+      flushSync();
+    };
+
+    it('falls back to the file its tile showed, then to a line beside its caption', async () => {
+      await render({ items: pictures(2) });
+      press(tiles()[0]);
+      const slide = () => all('.gallery-lightbox__figure')[0];
+      const shown = () =>
+        slide().querySelector('.gallery-lightbox__picture') as HTMLImageElement;
+      expect(shown().getAttribute('src')).toBe(
+        `${CDN}/landing-pages/p1/images/g1/xl.webp`
+      );
+      fail(shown());
+      // The tile's own file, alone: its srcset would choose the failed size.
+      const tile = (
+        one('.gallery-picture img') as HTMLImageElement
+      ).getAttribute('src');
+      expect(shown().getAttribute('src')).toBe(tile);
+      expect(shown().hasAttribute('srcset')).toBe(false);
+      expect(shown().hasAttribute('sizes')).toBe(false);
+      // The same frame: the large file's size.
+      expect(shown().getAttribute('width')).toBe('2400');
+      fail(shown());
+      expect(slide().querySelector('img')).toBeNull();
+      expect(
+        [...slide().children].map((child) => child.textContent?.trim())
+      ).toEqual([GALLERY_COPY.lost, 'Caption 1']);
+      // The words hold it open, as the picture did; the others are untouched.
+      press(slide().querySelector('.gallery-lightbox__lost') as Element);
+      expect(dialog()?.hasAttribute('open')).toBe(true);
+      expect(
+        all('.gallery-lightbox__figure')[1]
+          .querySelector('img')
+          ?.getAttribute('src')
+      ).toBe(`${CDN}/landing-pages/p1/images/g2/lg.webp`);
     });
   });
 

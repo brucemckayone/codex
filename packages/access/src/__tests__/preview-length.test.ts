@@ -5,11 +5,19 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { previewLength } from '../../preview-length';
+import { previewLength } from '../preview-length';
 
 describe('previewLength', () => {
   it('runs a film under 30 seconds from a tenth of the way in to its end', () => {
     expect(previewLength(20)).toBe(18);
+  });
+
+  // The transcoder truncates the tenth (`int(duration * 0.1)`, main.py
+  // `create_preview`): 2.5s in starts at 2, 1.9s in at 1. Rounding would
+  // start them at 3 and 2, and name a preview a second shorter than the cut.
+  it('starts from the whole second the tenth falls in, as the transcoder truncates it', () => {
+    expect(previewLength(25)).toBe(23);
+    expect(previewLength(19)).toBe(18);
   });
 
   it('runs a 30-second film from 3 seconds in, so for 27', () => {

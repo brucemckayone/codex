@@ -13,8 +13,10 @@ const PREVIEW_SECONDS = 30;
 
 /**
  * How long a film's preview runs. The transcoder cuts it from a tenth of the
- * way in, for up to {@link PREVIEW_SECONDS} (`create_preview`), so a short
- * film's preview is shorter still.
+ * way in, for up to {@link PREVIEW_SECONDS}, so a short film's preview is
+ * shorter still. Its twin is `preview_window` in the RunPod handler, which
+ * cuts video and audio previews alike (Codex-hro3u): change one, change both,
+ * or the page names a length the press does not play.
  */
 export function previewLength(durationSeconds: number | null): number | null {
   if (durationSeconds === null) return null;

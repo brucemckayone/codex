@@ -125,7 +125,8 @@ const BORROWED: Record<PageStyleId, Record<string, Borrowed>> = {
     },
     '--_chars': {
       owner: 'blocks/stats/StatsBlock.svelte',
-      reason: 'READ: the longest figure’s length, to fit it in its circle',
+      reason:
+        'READ: the longest figure’s length, to fit it and size every circle',
     },
   },
 };

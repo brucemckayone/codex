@@ -20,8 +20,11 @@ import type {
   SellPreview,
 } from '../../../render/types';
 import { SECTION_LAYOUTS } from '../../model/ids';
-import { sampleContext } from '../../model/sample';
+import { sampleContext, samplePage } from '../../model/sample';
 import type { BlockEdit, ResolvedSection } from '../../model/types';
+import PageRenderer from '../../PageRenderer.svelte';
+import type { PageEdit } from '../../page-context';
+import { FILM_COPY } from '../../primitives/film-copy';
 import { PREVIEW_COPY } from './copy';
 import { PREVIEW_PROMPT } from './definition';
 import PreviewBlock from './PreviewBlock.svelte';
@@ -391,6 +394,39 @@ describe('PreviewBlock', () => {
       // On its own the block has no `requestFilm`, so a press plays the cut.
       await render(SAMPLE, { reel: { ...VIDEO, fullFilm: true } });
       expect(line()).toBe(`A 30-second watch · ${SAMPLE.caption}`);
+      expect(play()).toBeDefined();
+    });
+
+    // The button says what a press plays, as the line does: the whole film,
+    // on the page that can ask for it and on the canvas alike.
+    it.each([
+      ['the page', null],
+      ['the canvas', { commit: () => {} }],
+    ] as [
+      string,
+      PageEdit | null,
+    ][])('on %s, a clip that plays in full says "Watch the film", never the preview', async (_, edit) => {
+      app = mount(PageRenderer, {
+        target: document.body,
+        props: {
+          page: samplePage('clean', ['preview']),
+          context: sampleContext({
+            media: { reel: { ...VIDEO, fullFilm: true } },
+          }),
+          edit,
+          requestFilm: vi.fn(async () => null),
+        },
+      });
+      flushSync();
+      await tick();
+      await Promise.resolve();
+      flushSync();
+      expect(line()).toContain('A 2-minute watch');
+      const labels = [...document.body.querySelectorAll('button')].map(
+        (button) => button.textContent?.trim()
+      );
+      expect(labels).toContain(FILM_COPY.watch);
+      expect(labels).not.toContain(PREVIEW_COPY.watch);
     });
   });
 
@@ -472,7 +508,10 @@ describe('PreviewBlock', () => {
       await press();
       const element = audio();
       if (!element) throw new Error('no player');
-      element.dispatchEvent(new Event('play'));
+      // Its first sound: until then the time says it is loading.
+      expect(time()).toBe(PREVIEW_COPY.loading);
+      for (const name of ['loadeddata', 'play', 'playing'])
+        element.dispatchEvent(new Event(name));
       at(element, 6, 30);
       expect(button()?.getAttribute('aria-label')).toBe(PREVIEW_COPY.pause);
       expect(time()).toBe('0:06 / 0:30');

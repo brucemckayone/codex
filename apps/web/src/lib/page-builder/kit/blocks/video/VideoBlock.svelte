@@ -26,7 +26,9 @@
   The film plays in the screen itself (`InlineFilm`): a press lays the player
   over the poster, letterboxed in Bold's 21:9, and the poster returns with
   "Watch again" when it ends. It asks for the full film where the server
-  allows one (`intro`).
+  allows one (`intro`). Its button says what a press plays, as the line does:
+  "Watch the film" in full, "Play the preview" for the preview
+  (`filmPressLabel`).
 
   A line says who speaks and for how long (Codex-61zsk.73): "Maya Okafor ·
   2:04", or "0:30 preview" when a press plays the preview (`filmPlays`). The
@@ -45,11 +47,12 @@
   import { editAttrs } from '../../primitives/edit';
   import Eyebrow from '../../primitives/Eyebrow.svelte';
   import Heading from '../../primitives/Heading.svelte';
+  import { filmPressLabel } from '../../primitives/film-copy';
   import InlineFilm from '../../primitives/InlineFilm.svelte';
   import Text from '../../primitives/Text.svelte';
   import { settled } from '../hero/settled.svelte';
   import ClipFrame from './ClipFrame.svelte';
-  import { filmLength, VIDEO_COPY } from './copy';
+  import { filmLength } from './copy';
   import { VIDEO_PROMPT, videoDefinition } from './definition';
 
   const { props, section, context, edit }: BlockProps = $props();
@@ -81,7 +84,8 @@
   const speaker = $derived(
     content.hideSpeaker === true ? undefined : (content.speaker ?? page.guideName)
   );
-  const length = $derived(filmLength(clip ? filmPlays(clip, page) : null));
+  const plays = $derived(clip ? filmPlays(clip, page) : null);
+  const length = $derived(filmLength(plays));
   const hasLine = $derived(Boolean(speaker || length));
 </script>
 
@@ -130,7 +134,7 @@
   <figure class="video__screen" data-layout={section.layout} data-lp-edit-only={creatorOnly}>
     <span class="lp-atmos video__glow" aria-hidden="true"></span>
     {#if clip}
-      <InlineFilm {clip} film="intro" label={VIDEO_COPY.watch} {title} {edit}>
+      <InlineFilm {clip} film="intro" label={filmPressLabel(plays)} {title} {edit}>
         {#snippet children(control, player)}
           <ClipFrame
             still={clip.posterUrl}

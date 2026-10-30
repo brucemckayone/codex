@@ -333,11 +333,14 @@ describe('its own controls, elsewhere', () => {
     });
     flushSync();
     expect(root.querySelector('.player__bar')).toBeNull();
+    // Nothing loaded yet: it is loading, as its own live region says.
     expect(now).toEqual({
       time: 0,
       duration: 0,
       offerPlay: true,
       askSound: false,
+      ready: false,
+      waiting: true,
     });
     Object.defineProperty(video, 'duration', {
       configurable: true,
@@ -348,15 +351,27 @@ describe('its own controls, elsewhere', () => {
       configurable: true,
       get: () => 12,
     });
+    video.dispatchEvent(new Event('loadeddata'));
     video.dispatchEvent(new Event('timeupdate'));
     video.dispatchEvent(new Event('play'));
+    video.dispatchEvent(new Event('playing'));
     flushSync();
     expect(now).toEqual({
       time: 12,
       duration: 30,
       offerPlay: false,
       askSound: false,
+      ready: true,
+      waiting: false,
     });
+
+    // A stall mid-play, as the scrubber shows it, and its end.
+    video.dispatchEvent(new Event('waiting'));
+    flushSync();
+    expect(now?.waiting).toBe(true);
+    video.dispatchEvent(new Event('playing'));
+    flushSync();
+    expect(now?.waiting).toBe(false);
     stop();
   });
 

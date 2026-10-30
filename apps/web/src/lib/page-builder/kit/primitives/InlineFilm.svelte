@@ -30,7 +30,10 @@
   the controls. The frame takes the Style's media corners (squared where a
   block or Style squares the picture's: the `.lp-film` rules beside those).
   When the film ends the player goes, and the poster returns with "Watch
-  again" (P4); the player adds no buy button of its own.
+  again" (P4); the player adds no buy button of its own. A full film whose
+  links ran out mid-play has not ended: the poster returns saying so, and a
+  press starts it afresh. One that asked for the full film and got the
+  preview says so over the film, so the block's line never over-promises.
 
   The block lays out its own frame: `children` is given the control to set
   over the picture, the player to lay over the whole frame (inside a
@@ -65,7 +68,7 @@
   // and again once `ended`.
   const press = new FilmPress(
     () => ({ clip, film, requestFilm: page.requestFilm }),
-    FILM_COPY.failed
+    FILM_COPY
   );
   let layer: HTMLDivElement | undefined = $state();
   /** The player had focus when the film ended: "Watch again" takes it. */
@@ -77,9 +80,9 @@
     press.start();
   }
 
-  function finish() {
+  function finish(reason: 'end' | 'lapsed') {
     refocus = Boolean(layer?.contains(document.activeElement));
-    press.finish();
+    press.finish(reason);
   }
 
   // The film cannot play: the poster again, saying why, for another press.
@@ -116,6 +119,10 @@
         onended={finish}
         onfail={fail}
       />
+      <!-- Mounted with the player, so the words it gains are announced. -->
+      <div class="lp-film__status" role="status">
+        {#if press.fellBack}<p class="lp-film__note" data-lp-on-media>{FILM_COPY.fellBack}</p>{/if}
+      </div>
     </div>
   {/if}
 {/snippet}
@@ -130,5 +137,27 @@
     z-index: 1;
     overflow: hidden;
     border-radius: var(--lp-radius-media);
+  }
+
+  /* Over the film's top corner, clear of its controls along the foot; on
+     the on-media fill, as the play button's own note is. */
+  .lp-film__status {
+    position: absolute;
+    inset-block-start: var(--space-3);
+    inset-inline: var(--space-3);
+    z-index: 2;
+    pointer-events: none;
+  }
+
+  .lp-film__note {
+    inline-size: fit-content;
+    max-inline-size: 100%;
+    margin: 0;
+    padding: var(--space-2) var(--space-4);
+    border-radius: var(--lp-radius-chip);
+    background: var(--lp-bg);
+    color: var(--lp-ink);
+    font-family: var(--lp-font-body);
+    font-size: var(--lp-size-small);
   }
 </style>

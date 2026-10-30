@@ -341,15 +341,24 @@
   row-gap: max(var(--space-4), 0.42em);
 }
 
-/* A figure's circle is drawn on its own box, made square: never narrower
-   than a numeral and the pen's air, so a short figure sits in a true circle
-   (one stretched round a wide figure flattens into a smear). A figure past
-   four characters (`data-long`, `blocks/stats/figures.ts`) gets a pill
-   instead, on a box that hugs it. */
+/* A figure's circle is drawn on its own box, made square, so a short figure
+   sits in a true circle (one stretched round a wide figure flattens into a
+   smear). Never narrower than a numeral and the pen's air; and where every
+   figure is short, every box is as wide as the longest one's own — its
+   characters (`--_chars`) in the display face's measured zeros (never `ch`,
+   which moves when the face lands), tracked, and that air — so a row's
+   circles are one size and its labels one line ("6" beside "100" sat
+   higher). A figure past four characters (`data-long`,
+   `blocks/stats/figures.ts`) gets a pill instead, on a box that hugs it, and
+   in its block (`--_studio-short` is 0) each circle hugs its own figure. */
 :is(.lp, #lp-style)[data-lp-style='studio'] .stat__value {
+  --_studio-short: clamp(0, 5 - var(--_chars, 1), 1);
   display: inline-grid;
   place-items: center;
-  min-inline-size: 1.7em;
+  min-inline-size: max(
+    1.7em,
+    var(--_chars, 1) * var(--_studio-short) * (var(--lp-zero-display) + var(--lp-tracking-display)) + 0.6em
+  );
   aspect-ratio: 1;
   padding: 0.3em;
 }

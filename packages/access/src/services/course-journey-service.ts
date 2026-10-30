@@ -861,7 +861,12 @@ export class CourseJourneyService extends BaseService {
             )} THEN true ELSE false END`,
           })
           .from(mediaItems)
-          .where(inArray(mediaItems.id, mediaIds));
+          // Media deleted after it was attached stays in its slot until the
+          // creator next saves, so a deleted item must never read back as a
+          // public clip or still: a missing row resolves to null below.
+          .where(
+            and(inArray(mediaItems.id, mediaIds), isNull(mediaItems.deletedAt))
+          );
         for (const row of mediaRows) previewByMediaId.set(row.id, row);
       }
 

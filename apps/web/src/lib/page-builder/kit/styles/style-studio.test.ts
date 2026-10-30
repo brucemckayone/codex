@@ -20,6 +20,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse, parseCss } from 'svelte/compiler';
 import { describe, expect, it } from 'vitest';
+import { isLongFigure } from '../blocks/stats/figures';
+import { FACE_ZERO } from '../model/faces';
 
 type CssNode = {
   type: string;
@@ -201,6 +203,79 @@ describe("the portrait frame's room (Codex-61zsk.31)", () => {
   });
 });
 
+/**
+ * A CSS length in em, as the browser computes it on one figure: `calc()`,
+ * `min()`, `max()`, `clamp()` and `var()` (from `vars`, else its fallback).
+ */
+function em(css: string, vars: Record<string, string> = {}): number {
+  const tokens =
+    css.match(/\d*\.?\d+[a-z]*|--[\w-]+|[a-z-]+\(|[()+\-*/,]|\S/g) ?? [];
+  let i = 0;
+  const next = () => {
+    const token = tokens[i++];
+    if (token === undefined) throw new Error(`${css} ends early`);
+    return token;
+  };
+  const args = (): number[] => {
+    const list = [sum()];
+    while (tokens[i] === ',') {
+      i++;
+      list.push(sum());
+    }
+    if (next() !== ')') throw new Error(`unclosed in ${css}`);
+    return list;
+  };
+  const atom = (): number => {
+    const token = next();
+    if (token === '-') return -atom();
+    if (token === '(' || token === 'calc(') return args()[0];
+    if (token === 'min(') return Math.min(...args());
+    if (token === 'max(') return Math.max(...args());
+    if (token === 'clamp(') {
+      const [low, value, high] = args();
+      return Math.max(low, Math.min(value, high));
+    }
+    if (token === 'var(') {
+      const name = next();
+      let fallback: number | undefined;
+      if (tokens[i] === ',') {
+        i++;
+        fallback = sum();
+      }
+      if (next() !== ')') throw new Error(`unclosed var() in ${css}`);
+      const value = vars[name];
+      if (value !== undefined) return em(value, vars);
+      if (fallback === undefined) throw new Error(`${name} is not set`);
+      return fallback;
+    }
+    const [, n] = token.match(/^(\d*\.?\d+)(em)?$/) ?? [];
+    if (n === undefined) throw new Error(`no ${token} here, in ${css}`);
+    return Number(n);
+  };
+  const product = (): number => {
+    let value = atom();
+    while (tokens[i] === '*' || tokens[i] === '/') {
+      const by = next() === '*' ? atom() : 1 / atom();
+      value *= by;
+    }
+    return value;
+  };
+  const sum = (): number => {
+    let value = product();
+    while (tokens[i] === '+' || tokens[i] === '-') {
+      const sign = next() === '+' ? 1 : -1;
+      value += sign * product();
+    }
+    return value;
+  };
+  const value = sum();
+  if (i !== tokens.length) throw new Error(`trailing text in ${css}`);
+  return value;
+}
+
+/** The least a circle is: a numeral and the pen's air. */
+const FLOOR = 1.7;
+
 describe("the numbers' circles and pills", () => {
   const STUDIO = ":is(.lp, #lp-style)[data-lp-style='studio']";
   const rules = rulesOf(uncomment(readFileSync(SHEET, 'utf8')));
@@ -218,6 +293,54 @@ describe("the numbers' circles and pills", () => {
     const pill = decls('.stat__value[data-long]::after');
     expect(pill?.get('mask')).toMatch(/^var\(--lp-mark-pill\)/);
     expect(pill?.get('background')).toBe(MARK_INK);
+  });
+
+  // "6", "24" and "100" drew three circles of three sizes, each hugging its
+  // figure, so the labels under them sat at three heights (Codex-61zsk.73).
+  it('draws every short figure in a block on one circle, its longest figure’s own', () => {
+    const box = decls('.stat__value');
+    const min = box?.get('min-inline-size');
+    const short = box?.get('--_studio-short');
+    const padding = box?.get('padding');
+    const tracking = rules
+      .find((r) => r.selector === ".lp[data-lp-type-facet='studio']")
+      ?.decls.get('--lp-tracking-display');
+    if (!min || !short || !padding || !tracking)
+      throw new Error('the circle’s rule or the Type’s tracking is missing');
+    // Studio's own faces and the kit's default, at 700, each by its measured
+    // zero (`--lp-zero-display`, as `styles/faces.css` sets it).
+    for (const face of ['Bitter', 'Figtree', 'Inter'] as const) {
+      const zero = FACE_ZERO[face][1];
+      /** A figure of `n` zeros, hugged: its characters, tracked, and its padding. */
+      const own = (n: number) => n * (zero + em(tracking)) + 2 * em(padding);
+      /** Its box, in a block whose longest figure has `longest` characters. */
+      const drawn = (n: number, longest: number) =>
+        Math.max(
+          own(n),
+          em(min, {
+            '--_chars': String(longest),
+            '--_studio-short': short,
+            '--lp-zero-display': `${zero}em`,
+            '--lp-tracking-display': tracking,
+          })
+        );
+      for (let longest = 1; longest <= 8; longest++) {
+        const circles = Array.from({ length: Math.min(longest, 4) }, (_, i) =>
+          drawn(i + 1, longest)
+        );
+        if (isLongFigure('0'.repeat(longest))) {
+          // A block that pills one: each circle hugs its own figure.
+          expect(circles, `${face}, a pill in the block`).toEqual(
+            circles.map((_, i) => Math.max(own(i + 1), FLOOR))
+          );
+        } else {
+          // Never past the longest's own circle, which fits its cell.
+          const one = Math.max(own(longest), FLOOR);
+          for (const circle of circles)
+            expect(circle, `${face}, longest ${longest}`).toBeCloseTo(one, 6);
+        }
+      }
+    }
   });
 
   it('keys the pill on the mark the numbers block sets on a long figure', () => {

@@ -2,7 +2,8 @@
   @component ListenCard
 
   An audio clip's frame in the Preview block (Codex-61zsk.73), where a film
-  would have its picture: a listening card on the scheme's panel. The course
+  would have its picture: a listening card on the scheme's panel, tinted
+  toward the brand where the panel is light (THE FILL, below). The course
   still, when there is one, sits small and square at its leading edge; a
   round button plays and pauses; the block's line says what the clip is and
   how long it runs; and along its foot a strip in the brand's colour fills
@@ -19,13 +20,22 @@
   floating bar aside as any film does. When the clip ends the core stays,
   the strip full and the time at its end, and the button offers "Play
   again", which replays it in place; one that cannot play says why beside
-  the button, and a press tries again. The canvas never plays.
+  the button, and a press tries again. A full recording whose links ran out
+  mid-play has not ended (the core's `lapsed`): the card says so, and a
+  press starts it afresh. The canvas never plays.
+
+  What the core's own chrome would show, the card shows instead: while the
+  player's code, or the stream's first sound, is on its way, or the stream
+  stalls, the time reads "Loading…", the button is busy and the card says
+  so politely; and a press that asked for the full recording and got the
+  preview says so, as `InlineFilm` does over a film.
 
   The ratio is the block's (`--listen-ratio`, 4:3 unless it says otherwise),
   and the card grows past it rather than clip a long line.
 -->
 <script lang="ts">
   import type { Snippet } from 'svelte';
+  import { MediaLiveRegion } from '$lib/components/media-a11y';
   import { type PlayerCore, preloadPlayer } from '$lib/components/player/load-core';
   import type { PlayerClock } from '$lib/components/player/timeline';
   import { clock } from '$lib/components/player/timeline';
@@ -41,6 +51,8 @@
     clip: PreviewMedia;
     /** The player's accessible title. */
     title: string;
+    /** A press plays the clip in full, not its preview (`filmPlays`): the button says which. */
+    full: boolean;
     /** How long a press plays (`filmPlays`), shown before it; `null` when unknown. */
     seconds: number | null;
     /** The small square still at the leading edge: decorative. */
@@ -50,21 +62,28 @@
     edit?: BlockEdit | null;
   }
 
-  const { clip, title, seconds, still = null, line, edit = null }: Props = $props();
+  const { clip, title, full, seconds, still = null, line, edit = null }: Props = $props();
 
   const page = getKitPage();
 
   /** What a press on the button does now. */
-  type Action = 'play' | 'pause' | 'sound' | 'again';
+  type Action = 'play' | 'resume' | 'pause' | 'sound' | 'again';
 
-  const LABELS: Record<Action, string> = {
-    play: PREVIEW_COPY.watch,
+  const LABELS: Record<Exclude<Action, 'play'>, string> = {
+    resume: PREVIEW_COPY.resume,
     pause: PREVIEW_COPY.pause,
     sound: PREVIEW_COPY.sound,
     again: PREVIEW_COPY.again,
   };
 
-  const SILENT: PlayerClock = { time: 0, duration: 0, offerPlay: true, askSound: false };
+  const SILENT: PlayerClock = {
+    time: 0,
+    duration: 0,
+    offerPlay: true,
+    askSound: false,
+    ready: false,
+    waiting: false,
+  };
 
   /**
    * Drawn 4rem square on a phone and up to 10rem wider, cropped from the
@@ -76,7 +95,7 @@
   // The press and the player; its picture and controls are the card's.
   const press = new FilmPress(
     () => ({ clip, film: 'reel', requestFilm: page.requestFilm }),
-    PREVIEW_COPY.failed
+    PREVIEW_COPY
   );
   let core = $state.raw<ReturnType<PlayerCore> | null>(null);
   /** Played through: the core stays, at its end, until it plays again. */
@@ -88,12 +107,29 @@
     if (ended) return 'again';
     if (press.phase !== 'up') return 'play';
     if (now.askSound) return 'sound';
-    return now.offerPlay ? 'play' : 'pause';
+    if (!now.offerPlay) return 'pause';
+    return now.time > 0 ? 'resume' : 'play';
   });
+  // Before a press it says what a press plays, the preview or the clip in
+  // full; once up, what a press does.
+  const label = $derived.by(() => {
+    if (action !== 'play') return LABELS[action];
+    return full || press.phase === 'up' ? PREVIEW_COPY.play : PREVIEW_COPY.watch;
+  });
+  // The player's code on its way, or the stream before its first sound, or
+  // stalled while it should play: the core's own cues are in its hidden
+  // player, so the card shows and says them.
+  const busy = $derived(
+    press.phase === 'loading' ||
+      (press.phase === 'up' &&
+        !ended &&
+        (!now.ready || (now.waiting && !now.offerPlay)))
+  );
   // The stream's own length once it says; the length a press plays until then.
   const total = $derived(now.duration > 0 ? now.duration : seconds);
   const played = $derived(total ? Math.min(1, now.time / total) : 0);
   const time = $derived.by(() => {
+    if (busy) return PREVIEW_COPY.loading;
     if (press.phase === 'idle') return seconds === null ? '' : clock(seconds);
     return total ? `${clock(now.time)} / ${clock(total)}` : clock(now.time);
   });
@@ -117,6 +153,13 @@
     ended = false;
     core?.toggle();
   }
+
+  // Played through, the core stays at its end. A lapse is no end: the press
+  // says so, and the next starts afresh.
+  function finish(reason: 'end' | 'lapsed') {
+    if (reason === 'end') ended = true;
+    else press.finish(reason);
+  }
 </script>
 
 <div class="listen">
@@ -135,7 +178,8 @@
     <button
       type="button"
       class="listen__play"
-      aria-label={LABELS[action]}
+      aria-label={label}
+      aria-busy={busy}
       onclick={start}
       {@attach !edit && !page.still && preloadPlayer}
     >
@@ -151,7 +195,13 @@
     </button>
     <div class="listen__text">
       <p class="listen__line">{@render line()}</p>
-      {#if time}<p class="listen__time">{time}</p>{/if}
+      <!-- Said by the live region below while it loads, so not twice. -->
+      {#if time}<p class="listen__time" aria-hidden={busy || undefined}>{time}</p>{/if}
+      <MediaLiveRegion loading={busy} loadingLabel={PREVIEW_COPY.loading}>
+        {#if press.fellBack && press.phase === 'up' && !ended}
+          <p class="listen__note">{PREVIEW_COPY.fellBack}</p>
+        {/if}
+      </MediaLiveRegion>
       {#if press.note}<p class="listen__note" role="alert">{press.note}</p>{/if}
     </div>
   </div>
@@ -167,7 +217,7 @@
         start="sound"
         controls={false}
         onplay={() => (ended = false)}
-        onended={() => (ended = true)}
+        onended={finish}
         onfail={(message) => press.fail(message)}
       />
     </div>
@@ -175,18 +225,58 @@
 </div>
 
 <style>
-  /* The scheme's panel, the brand's own surface. A container, so its insides
-     answer its own width; never `overflow: hidden`, which would cut a long
-     line instead of letting the card grow. */
+  /* THE FILL (the owner's mockup): a light panel takes the brand's tint,
+     the atmosphere scheme's own panel (`--_panel-g` in `schemes.css`, the
+     ground moved toward the brand and held at L 0.9-0.965, so dark ink
+     reads), where the org's plain card would be an empty white box. A dark
+     panel is drawn as it is: the org's ink is proven only up to its band's
+     edge, which a tint would pass. The switch is the kit's premultiplied
+     color-mix (`--lp-brand-2`): the panel at alpha 1 where it is dark (L
+     under 0.565, between the lightest dark band's edge, 0.48, and the
+     darkest light band's, 0.65) and 0 where it is light, mixed half and
+     half with the tint at alpha 0.004, is the panel within 1/255 or the
+     tint exactly, then made opaque. The card's ink is the panel's, which
+     holds on any light surface its band allows (`listen-fill.test.ts`).
+
+     A container, so its insides answer its own width; never `overflow:
+     hidden`, which would cut a long line instead of letting the card grow. */
   .listen {
     --_strip: var(--space-1-5);
+    --_fill: rgb(
+      from color-mix(
+          in srgb,
+          oklch(from var(--lp-panel) l c h / clamp(0, (0.565 - l) * 1e6, 1)) 50%,
+          rgb(from var(--_panel-g) r g b / 0.004) 50%
+        )
+        r g b / 1
+    );
+    --_button: var(--lp-button-bg);
+    --_button-ink: var(--lp-button-ink);
+    --_focus: var(--lp-focus);
     position: relative;
     container: listen / inline-size;
     display: grid;
     aspect-ratio: var(--listen-ratio, 4 / 3);
     border-radius: var(--lp-radius-media);
-    background: var(--lp-panel);
+    background: var(--_fill);
     color: var(--lp-panel-ink);
+  }
+
+  /* Contrast's panel is the ground's inverse. On the dark pole it is light,
+     and the tint, the ground's, would darken it under the button that was
+     drawn for it: drawn as it is. */
+  :global(.lp [data-lp-scheme='contrast']) .listen {
+    --_fill: var(--lp-panel);
+  }
+
+  /* A brand or accent band's button and focus ring are its ink, drawn for
+     the band's own fill, so on the card they could vanish (a white disc on
+     a light card): the card's own pair instead, its ink with the card for a
+     label, the band's "button inverted" (`schemes.css`). */
+  :global(.lp :is([data-lp-scheme='brand'], [data-lp-scheme='accent'])) .listen {
+    --_button: var(--lp-panel-ink);
+    --_button-ink: var(--_fill);
+    --_focus: var(--lp-panel-ink);
   }
 
   /* On a phone the still sits on top, the button and the line under it. */
@@ -243,8 +333,8 @@
     padding: 0;
     border: none;
     border-radius: var(--radius-full);
-    background: var(--lp-button-bg);
-    color: var(--lp-button-ink);
+    background: var(--_button);
+    color: var(--_button-ink);
     cursor: pointer;
   }
 
@@ -259,7 +349,7 @@
   }
 
   .listen__play:focus-visible {
-    outline: var(--border-width-thick) solid var(--lp-focus);
+    outline: var(--border-width-thick) solid var(--_focus);
     outline-offset: var(--space-1);
   }
 
@@ -318,7 +408,7 @@
 
   /* Full width, scaled from the inline start: no layout as it fills. */
   .listen__fill {
-    background: var(--lp-button-bg);
+    background: var(--_button);
     transform: scaleX(var(--_played, 0));
     transform-origin: left;
   }

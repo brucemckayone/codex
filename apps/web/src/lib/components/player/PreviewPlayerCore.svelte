@@ -46,8 +46,10 @@
   pause, M mutes, the arrows seek five seconds, F is full screen.
 
   ITS OWN CONTROLS, ELSEWHERE (opt-in). A frame that draws its own chrome
-  over a core with `controls={false}` reads where the film is through the
-  core's own `clock` and drives it through its `toggle` and `toggleMute`
+  over a core with `controls={false}` reads where the film is, and whether
+  it is still loading or has stalled (the cues the core's own scrubber and
+  live region show), through the core's own `clock`, and drives it through
+  its `toggle` and `toggleMute`
   (bound with `bind:this`), so it plays, pauses, renews and takes refused
   sound exactly as the core's buttons do. The Preview block's listening
   card plays audio this way, the picture hidden.
@@ -358,7 +360,7 @@
    * own figures (its events; nothing polls), read reactively by the frame.
    */
   export function clock(): PlayerClock {
-    return { time, duration, offerPlay, askSound };
+    return { time, duration, offerPlay, askSound, ready, waiting };
   }
 
   function toggleCaptions() {

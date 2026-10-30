@@ -40,4 +40,8 @@ export interface PlayerClock {
   offerPlay: boolean;
   /** Sound was refused and it plays muted: `toggleMute` takes it (owner P7). */
   askSound: boolean;
+  /** The first frame has loaded; until then it is loading. */
+  ready: boolean;
+  /** Nothing to play yet, or the stream has stalled (the scrubber's cue). */
+  waiting: boolean;
 }

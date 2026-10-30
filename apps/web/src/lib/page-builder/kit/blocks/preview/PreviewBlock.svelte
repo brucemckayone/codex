@@ -26,7 +26,8 @@
   The clip plays in its own frame (`InlineFilm`), letterboxed in the split's
   tall one; Cinematic's fades lift under the player, which is squared where
   Cinematic squares the picture. It asks for the full film where the server
-  allows one (`reel`).
+  allows one (`reel`), and its button says what a press plays: "Play the
+  preview", or "Watch the film" in full (`filmPressLabel`).
 
   Its line says what it is and how long a press plays (Codex-61zsk.73),
   "A 30-second listen", then the creator's caption, "· From week one"
@@ -43,12 +44,13 @@
   import ButtonRow from '../../primitives/ButtonRow.svelte';
   import { editAttrs } from '../../primitives/edit';
   import Eyebrow from '../../primitives/Eyebrow.svelte';
+  import { filmPressLabel } from '../../primitives/film-copy';
   import Heading from '../../primitives/Heading.svelte';
   import InlineFilm from '../../primitives/InlineFilm.svelte';
   import Text from '../../primitives/Text.svelte';
   import { settled } from '../hero/settled.svelte';
   import ClipFrame from '../video/ClipFrame.svelte';
-  import { PREVIEW_COPY, previewKind } from './copy';
+  import { previewKind } from './copy';
   import { PREVIEW_PROMPT, previewDefinition } from './definition';
   import ListenCard from './ListenCard.svelte';
 
@@ -79,10 +81,11 @@
   const creatorOnly = $derived(clipless ? '' : undefined);
 
   // What a press plays, said before the caption. An older payload names no
-  // kind, so its line is the caption alone.
+  // kind, and a full film of a length not known names none, so its line is
+  // the caption alone.
   const plays = $derived(clip ? filmPlays(clip, page) : null);
   const kind = $derived(
-    clip?.mediaType && plays ? previewKind(clip.mediaType, plays.seconds) : undefined
+    clip?.mediaType && plays ? previewKind(clip.mediaType, plays) : undefined
   );
   const listen = $derived(clip?.mediaType === 'audio');
   // A film's line: split sets it under the words, feature under the frame.
@@ -143,13 +146,14 @@
       <ListenCard
         {clip}
         {title}
+        full={plays?.full ?? false}
         seconds={plays?.seconds ?? null}
         still={clip.posterUrl ?? preview?.heroImageUrl ?? null}
         {line}
         {edit}
       />
     {:else if clip}
-      <InlineFilm {clip} film="reel" label={PREVIEW_COPY.watch} {title} {edit}>
+      <InlineFilm {clip} film="reel" label={filmPressLabel(plays)} {title} {edit}>
         {#snippet children(control, player)}
           <ClipFrame still={clip.posterUrl} ratio="var(--_ratio)" {place} {player}>
             {@render control()}

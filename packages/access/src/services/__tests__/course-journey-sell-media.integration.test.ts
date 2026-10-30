@@ -679,6 +679,29 @@ describe('CourseJourneyService sell media + cover (journey media write path)', (
   describe('getCourseSellPreview projects the A27 stills', () => {
     const CDN = 'https://cdn.example.test';
 
+    /** A ready clip of its own; `hlsPreviewKey: null` is a clip never cut. */
+    const seedClip = async (
+      mediaType: 'video' | 'audio',
+      durationSeconds: number,
+      hlsPreviewKey:
+        | string
+        | null = `previews/${mediaType}-${durationSeconds}/preview.m3u8`
+    ) => {
+      const [row] = await db
+        .insert(mediaItems)
+        .values(
+          createTestMediaItemInput(creatorId, {
+            mediaType,
+            status: 'ready',
+            durationSeconds,
+            hlsPreviewKey,
+          })
+        )
+        .returning({ id: mediaItems.id });
+      if (!row) throw new Error(`failed to seed a ${mediaType} clip`);
+      return row.id;
+    };
+
     beforeAll(async () => {
       // The projection is published-only, and `seedCoursePage` seeds a draft.
       await db
@@ -758,25 +781,10 @@ describe('CourseJourneyService sell media + cover (journey media write path)', (
 
     // Codex-61zsk.73: the page says "A 30-second listen", so each clip says
     // what it is and how long its preview runs, as the transcoder cuts it.
+    // The audio here HAS a preview, which the transcoder does not yet cut for
+    // audio (video only, Codex-hro3u): this is the clip a cut audio preview
+    // will produce. Audio as it is written today is the case below.
     it('says what each clip is and how long its preview runs', async () => {
-      const seedClip = async (
-        mediaType: 'video' | 'audio',
-        durationSeconds: number
-      ) => {
-        const [row] = await db
-          .insert(mediaItems)
-          .values(
-            createTestMediaItemInput(creatorId, {
-              mediaType,
-              status: 'ready',
-              durationSeconds,
-              hlsPreviewKey: `previews/${mediaType}-${durationSeconds}/preview.m3u8`,
-            })
-          )
-          .returning({ id: mediaItems.id });
-        if (!row) throw new Error(`failed to seed a ${mediaType} clip`);
-        return row.id;
-      };
       const shortFilm = await seedClip('video', 20);
       const longListen = await seedClip('audio', 300);
       await svc.updateJourneySellMedia(
@@ -801,6 +809,45 @@ describe('CourseJourneyService sell media + cover (journey media write path)', (
         durationSeconds: 300,
         previewSeconds: 30,
       });
+    });
+
+    // The transcoder cuts no preview for audio today (Codex-hro3u), so an
+    // audio item is written with no `hlsPreviewKey`: it has no public
+    // manifest to play, and the slot shows no clip rather than a dead one.
+    it('shows no clip for audio as the transcoder writes it today, with no preview', async () => {
+      const listen = await seedClip('audio', 300, null);
+      await svc.updateJourneySellMedia(
+        orgAId,
+        pageId,
+        mediaBag({ previewVideoMediaId: listen })
+      );
+
+      const preview = await svc.getCourseSellPreview(courseId, CDN);
+      expect(preview?.reel).toBeNull();
+    });
+
+    it('shows no clip for media deleted after it was attached', async () => {
+      const film = await seedClip('video', 120);
+      await svc.updateJourneySellMedia(
+        orgAId,
+        pageId,
+        mediaBag({ introVideoMediaId: film })
+      );
+      // Attached and cut, so it plays: the deletion below is what takes it.
+      expect(
+        (await svc.getCourseSellPreview(courseId, CDN))?.intro
+      ).toMatchObject({
+        playlistUrl: `${CDN}/previews/video-120/preview.m3u8`,
+      });
+
+      await db
+        .update(mediaItems)
+        .set({ deletedAt: new Date() })
+        .where(eq(mediaItems.id, film));
+
+      // Still in the slot: only the read can keep it off the page.
+      expect((await readCourse(courseId))?.introVideoMediaId).toBe(film);
+      expect((await svc.getCourseSellPreview(courseId, CDN))?.intro).toBeNull();
     });
   });
 

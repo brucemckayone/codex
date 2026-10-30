@@ -31,7 +31,6 @@ import PageRenderer from '../../PageRenderer.svelte';
 import type { PageEdit } from '../../page-context';
 import { FILM_COPY } from '../../primitives/film-copy';
 import { instructorDefinition } from '../instructor/definition';
-import { VIDEO_COPY } from './copy';
 import { VIDEO_PROMPT, videoDefinition } from './definition';
 import VideoBlock from './VideoBlock.svelte';
 
@@ -121,9 +120,14 @@ async function render(
 }
 
 const text = () => document.body.textContent ?? '';
+/** A press on a block mounted on its own (no `requestFilm`) plays the preview. */
 const watch = () =>
   [...document.body.querySelectorAll('button')].find(
-    (button) => button.textContent?.trim() === VIDEO_COPY.watch
+    (button) => button.textContent?.trim() === FILM_COPY.preview
+  );
+const labels = () =>
+  [...document.body.querySelectorAll('button')].map((button) =>
+    button.textContent?.trim()
   );
 const SAMPLE = {
   heading: 'Two minutes, from me to you',
@@ -526,6 +530,20 @@ describe('VideoBlock', () => {
       it('with no guide on the page, the length alone', async () => {
         await page(['video']);
         expect(line()).toBe('2:04');
+      });
+
+      // The button says what a press plays, as the line does: never "the
+      // preview" for the whole film, on the page or the canvas.
+      it.each([
+        ['the page', null],
+        ['the canvas', { commit: () => {} }],
+      ] as [
+        string,
+        PageEdit | null,
+      ][])('on %s, the whole film’s button says "Watch the film"', async (_, edit) => {
+        await page(['video'], { edit });
+        expect(labels()).toContain(FILM_COPY.watch);
+        expect(labels()).not.toContain(FILM_COPY.preview);
       });
 
       it('a new section names who speaks without writing a switch', () => {

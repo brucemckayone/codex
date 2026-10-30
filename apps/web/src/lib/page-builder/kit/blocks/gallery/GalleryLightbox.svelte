@@ -11,7 +11,9 @@
   It is mounted only while open (GalleryBlock), so its large pictures are
   fetched only then: each chosen from its srcset at the screen's width, the
   largest file its reference has (`fullPicture`) where a browser cannot
-  choose, and fitted whole to the screen with its caption beneath.
+  choose, and fitted whole to the screen with its caption beneath. A large
+  file that fails gives way to its tile's, and that failing too, to a line
+  that says so.
 
   The pictures are one row of the browser's own scrolling, snapping one to the
   screen, so a swipe moves between them; the counter and the previous and next
@@ -25,7 +27,9 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import type { Attachment } from 'svelte/attachments';
+  import { describeThrown } from '$lib/client-log';
   import { ChevronLeftIcon, ChevronRightIcon, XIcon } from '$lib/components/ui/Icon';
+  import { logger } from '$lib/observability';
   import { holdsStill } from '../../motion/attributes';
   import type { Picture } from './arrange';
   import { GALLERY_COPY } from './copy';
@@ -45,7 +49,8 @@
   /** The root attribute that holds the page still behind it. */
   const LOCK = 'data-lp-lightbox';
   /** What a click may land on without closing: a picture, its words, a control. */
-  const HELD = '.gallery-lightbox__picture, .gallery-lightbox__caption, button';
+  const HELD =
+    '.gallery-lightbox__picture, .gallery-lightbox__lost, .gallery-lightbox__caption, button';
   const STEPS: Partial<Record<string, 1 | -1>> = { ArrowLeft: -1, ArrowRight: 1 };
 
   /** The picture in view, from 0. */
@@ -98,6 +103,11 @@
    * Opens as it mounts, on its first picture, and holds the page still until
    * it unmounts. The picture the row settles on is the current one, so a
    * swipe moves the counter too.
+   *
+   * It holds the page only once it is open, and a setup that throws (a
+   * browser with no `showModal`, an `InvalidStateError`) lets go and closes
+   * the way every other close does: no `close` event would come, so the
+   * block would think it open and every tile would go dead.
    */
   const modal: Attachment<HTMLDialogElement> = (node) =>
     // What it reads (the picture in view among them) must never re-open it.
@@ -106,29 +116,60 @@
       track = node.querySelector<HTMLElement>('.gallery-lightbox__track') ?? undefined;
       slides = [...node.querySelectorAll<HTMLElement>('.gallery-lightbox__slide')];
       const root = document.documentElement;
-      root.setAttribute(LOCK, '');
-      node.showModal();
-      go(start, false);
-      node.querySelector<HTMLElement>('.gallery-lightbox__close')?.focus();
       let settled: IntersectionObserver | undefined;
-      if (track && typeof IntersectionObserver !== 'undefined') {
-        settled = new IntersectionObserver(
-          (entries) => {
-            for (const entry of entries) {
-              if (!entry.isIntersecting) continue;
-              const index = slides.findIndex((slide) => slide === entry.target);
-              if (index >= 0) at = index;
-            }
-          },
-          { root: track, threshold: 0.6 }
-        );
-        for (const slide of slides) settled.observe(slide);
-      }
-      return () => {
+      const release = () => {
         settled?.disconnect();
         root.removeAttribute(LOCK);
       };
+      try {
+        node.showModal();
+        root.setAttribute(LOCK, '');
+        go(start, false);
+        node.querySelector<HTMLElement>('.gallery-lightbox__close')?.focus();
+        if (track && typeof IntersectionObserver !== 'undefined') {
+          settled = new IntersectionObserver(
+            (entries) => {
+              for (const entry of entries) {
+                if (!entry.isIntersecting) continue;
+                const index = slides.findIndex((slide) => slide === entry.target);
+                if (index >= 0) at = index;
+              }
+            },
+            { root: track, threshold: 0.6 }
+          );
+          for (const slide of slides) settled.observe(slide);
+        }
+      } catch (error) {
+        release();
+        logger.warn('gallery.lightbox_open_failed', describeThrown(error));
+        onclose();
+      }
+      return release;
     });
+
+  /**
+   * How far each picture has fallen back, by its place: from its large file
+   * to its tile's (`picture.url`, which the page already showed), then to a
+   * line saying it could not load.
+   */
+  let fallen = $state<Partial<Record<number, 'tile' | 'none'>>>({});
+
+  /**
+   * The file slide `index` shows now: the large one from every size it has,
+   * then the tile's alone (a srcset would choose the failed size again).
+   * None once both have failed. GalleryBlock opens only a set whose pictures
+   * all have a large file.
+   */
+  function source(picture: Picture, index: number) {
+    const fell = fallen[index];
+    if (!fell && picture.full) return { url: picture.full.url, srcset: picture.srcset };
+    if (fell === 'tile' && picture.url) return { url: picture.url, srcset: undefined };
+    return null;
+  }
+
+  function fail(picture: Picture, index: number) {
+    fallen[index] = !fallen[index] && picture.url ? 'tile' : 'none';
+  }
 </script>
 
 <svelte:window {onkeydown} />
@@ -159,22 +200,26 @@
   </div>
   <ul class="gallery-lightbox__track">
     {#each pictures as picture, index (index)}
+      {@const file = source(picture, index)}
       <li class="gallery-lightbox__slide">
         <figure class="gallery-lightbox__figure">
-          <!-- Always there: GalleryBlock opens only a set that has them, so
-               the `if` only narrows the type. -->
-          {#if picture.full}
+          <!-- The tile's file keeps the large one's size: the same frame,
+               only softer. -->
+          {#if file}
             <img
               class="gallery-lightbox__picture"
-              src={picture.full.url}
-              srcset={picture.srcset || undefined}
-              sizes={picture.srcset ? '100vw' : undefined}
+              src={file.url}
+              srcset={file.srcset || undefined}
+              sizes={file.srcset ? '100vw' : undefined}
               alt={picture.alt}
-              width={picture.full.w}
-              height={picture.full.h}
+              width={picture.full?.w}
+              height={picture.full?.h}
               loading="lazy"
               decoding="async"
+              onerror={() => fail(picture, index)}
             />
+          {:else}
+            <p class="gallery-lightbox__lost">{GALLERY_COPY.lost}</p>
           {/if}
           {#if picture.caption}
             <figcaption class="gallery-lightbox__caption">{picture.caption}</figcaption>
@@ -350,6 +395,16 @@
     max-inline-size: 100%;
     max-block-size: 100%;
     border-radius: var(--lp-radius-media);
+  }
+
+  /* In the picture's place, over its caption, when neither file loads.
+     global.css caps every `p` at 65ch and spaces it. */
+  .gallery-lightbox__lost {
+    margin: 0;
+    color: var(--lp-ink-soft);
+    font-size: var(--lp-size-small);
+    line-height: var(--lp-leading-body);
+    text-align: center;
   }
 
   /* global.css sets every figcaption small and muted; this one is read. */

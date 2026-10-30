@@ -14,6 +14,8 @@ export const GALLERY_COPY = {
       ? `Open picture ${index} of ${count}: ${alt}`
       : `Open picture ${index} of ${count}`,
   close: 'Close',
+  /** In the lightbox, where a picture's large file and its tile's both failed. */
+  lost: 'This picture could not load',
   /** Where the lightbox is in the set, counted from 1: "3 / 8". */
   counter: (index: number, count: number) => `${index} / ${count}`,
 } as const;
