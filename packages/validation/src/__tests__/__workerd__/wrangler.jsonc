@@ -1,0 +1,7 @@
+// Names the test-only Worker in svg-sanitize.workerd.test.ts. Without a
+// config of its own, wrangler would search upwards for one. The compatibility
+// date and flags come from workers/organization-api/wrangler.jsonc (the
+// worker that sanitises SVG logos) at test time, so this never drifts.
+{
+  "name": "svg-sanitize-workerd-test"
+}

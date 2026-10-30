@@ -34,17 +34,18 @@ import {
 import { InvalidFileTypeError } from '../errors';
 import { BrandingSettingsService } from '../services/branding-settings-service';
 
-// Mock sanitizeSvgContent — replace the real DOMPurify-backed implementation
-// with a deterministic stub. The job of these tests is to verify that
-// uploadLogo CALLS sanitizeSvgContent when MIME is SVG; DOMPurify itself
-// is tested in packages/validation/src/__tests__/svg-sanitization.test.ts.
+// Mock sanitizeSvgContent with a deterministic stub. The job of these tests
+// is to verify that uploadLogo CALLS sanitizeSvgContent when MIME is SVG; the
+// sanitiser itself is tested in packages/validation/src/__tests__/
+// (svg-sanitization.test.ts under Node, svg-sanitize.workerd.test.ts on
+// workerd).
 vi.mock('@codex/validation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@codex/validation')>();
   return {
     ...actual,
     sanitizeSvgContent: vi.fn(async (svgText: string): Promise<string> => {
       // Simulate stripping <script>...</script> and event handler attributes.
-      // Matches the observable behaviour of DOMPurify for the tests below.
+      // Matches the real sanitiser's observable behaviour for the tests below.
       return svgText
         .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
         .replace(/\s+on\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]*)/gi, '');

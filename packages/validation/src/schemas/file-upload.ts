@@ -28,7 +28,7 @@ export interface ValidatedLogoFile {
  * 2. MIME type is in allowlist (PNG, JPEG, WebP, SVG)
  * 3. File size within limit (5MB)
  * 4. Magic numbers match claimed MIME type (prevents spoofing)
- * 5. SVG content is sanitized via DOMPurify (XSS prevention)
+ * 5. SVG content is sanitized by sanitizeSvgContent (XSS prevention)
  *
  * @param formData - FormData from multipart/form-data request
  * @returns Validated file data ready for R2 upload

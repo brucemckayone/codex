@@ -6,7 +6,6 @@ import { z } from 'zod';
  *
  * Reusable validation schemas for common data types used across the application.
  * These are the building blocks for more complex validation schemas.
- * Includes SVG sanitization via DOMPurify for XSS prevention.
  */
 
 // ============================================================================
@@ -493,78 +492,6 @@ export const fontNameSchema = z
   .trim()
   .max(50, 'Font name must be 50 characters or less')
   .regex(/^[a-zA-Z0-9 ]+$/, 'Font name must be alphanumeric');
-
-// ============================================================================
-// SVG Sanitization
-// ============================================================================
-
-/**
- * Sanitizes SVG content to remove XSS vectors using DOMPurify.
- *
- * Production-grade sanitization that:
- * - Removes <script> tags and event handlers
- * - Blocks javascript:, data:, and other dangerous URIs
- * - Prevents <foreignObject> and other embedding vectors
- * - Allows safe SVG elements and attributes
- *
- * Uses dynamic import to avoid SSR issues (DOMPurify requires browser globals).
- *
- * @param content - Raw SVG file content as string
- * @returns Sanitized SVG content safe for rendering
- * @throws Error if sanitization results in empty content (indicates malicious file)
- *
- * @example
- * ```typescript
- * const safeSvg = await sanitizeSvgContent(userUploadedSvg);
- * // <script> tags removed, onclick handlers stripped, etc.
- * ```
- */
-export async function sanitizeSvgContent(content: string): Promise<string> {
-  // Dynamic import to avoid SSR issues - DOMPurify accesses `self` at module load
-  const DOMPurify = (await import('isomorphic-dompurify')).default;
-
-  const clean = DOMPurify.sanitize(content, {
-    USE_PROFILES: { svg: true, svgFilters: true },
-
-    // Explicitly allow common safe SVG tags
-    ADD_TAGS: [
-      'svg',
-      'path',
-      'circle',
-      'rect',
-      'g',
-      'defs',
-      'use',
-      'linearGradient',
-      'stop',
-    ],
-
-    // Block dangerous embedding tags
-    FORBID_TAGS: [
-      'script',
-      'iframe',
-      'object',
-      'embed',
-      'foreignObject',
-      'image',
-    ],
-
-    // Block all event handler attributes
-    FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'onmouseout'],
-
-    // Return as string (not DOM nodes)
-    RETURN_DOM: false,
-    RETURN_DOM_FRAGMENT: false,
-  });
-
-  if (!clean || clean.trim().length === 0) {
-    throw new Error(
-      'SVG sanitization resulted in empty content - file may be malicious'
-    );
-  }
-
-  return clean;
-}
 
 // ============================================================================
 // MIME Type Utilities
