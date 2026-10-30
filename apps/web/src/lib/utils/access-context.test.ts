@@ -7,10 +7,12 @@
  * `subscriptionCollection` and an awaited tiers promise; the access decision
  * itself lives in pure helpers (`isAccessGrantingSubscription`,
  * `decideIsIncluded`) so it can be exercised here without a Svelte runtime.
+ *
+ * Plan access (Codex-2hxff.91): "Included" is set membership in the item's
+ * `includedInTierIds`, never a `sortOrder` compare, so it needs no tier list.
  */
 import { describe, expect, it } from 'vitest';
 import type { SubscriptionItem } from '$lib/collections';
-import type { SubscriptionTier } from '$lib/types';
 import {
   decideIsIncluded,
   isAccessGrantingSubscription,
@@ -27,12 +29,6 @@ function makeSub(partial: Partial<SubscriptionItem> = {}): SubscriptionItem {
     ...partial,
   };
 }
-
-const TIERS: SubscriptionTier[] = [
-  { id: 'tier-bronze', name: 'Bronze', sortOrder: 1 } as SubscriptionTier,
-  { id: 'tier-silver', name: 'Silver', sortOrder: 2 } as SubscriptionTier,
-  { id: 'tier-gold', name: 'Gold', sortOrder: 3 } as SubscriptionTier,
-];
 
 describe('isAccessGrantingSubscription', () => {
   it('treats active, cancelling and past_due as access-granting', () => {
@@ -70,70 +66,81 @@ describe('decideIsIncluded — follower-gated (Codex-xybr3 hierarchy)', () => {
   const followersItem = { isFollowerGated: true };
 
   it('returns true when an active subscription exists at any tier', () => {
-    expect(decideIsIncluded(followersItem, makeSub(), TIERS)).toBe(true);
+    expect(decideIsIncluded(followersItem, makeSub())).toBe(true);
   });
 
   it('returns true for cancelling subscriptions (still in access window)', () => {
     expect(
-      decideIsIncluded(followersItem, makeSub({ status: 'cancelling' }), TIERS)
+      decideIsIncluded(followersItem, makeSub({ status: 'cancelling' }))
     ).toBe(true);
   });
 
-  it('returns true regardless of includedInTierId — follower-gated is tier-agnostic', () => {
+  it('returns true regardless of the plan set — follower-gated is tier-agnostic', () => {
     // backend ignores the tier for follower-gated content (xybr3) — any active
     // subscription counts. The pure helper preserves that semantic so the badge
     // decision matches the streaming-gate decision.
     const followersItemWithTier = {
       isFollowerGated: true,
-      includedInTierId: 'tier-gold',
+      includedInTierIds: ['tier-gold'],
     };
-    expect(decideIsIncluded(followersItemWithTier, makeSub(), TIERS)).toBe(
-      true
-    );
+    expect(decideIsIncluded(followersItemWithTier, makeSub())).toBe(true);
   });
 
   it('returns false when no subscription exists', () => {
-    expect(decideIsIncluded(followersItem, null, TIERS)).toBe(false);
+    expect(decideIsIncluded(followersItem, null)).toBe(false);
   });
 });
 
-describe('decideIsIncluded — tier-gated (includedInTierId)', () => {
+describe('decideIsIncluded — tier-gated (set membership)', () => {
+  const sub = (id: string, name: string, sortOrder: number) =>
+    makeSub({ tier: { id, name, sortOrder } });
+
   it('returns false when not tier-gated and not follower-gated', () => {
-    // WP-1 §6.1: a null includedInTierId is the "not tier-gated" state, not
-    // "any tier covers". With no follower gate either, the item is not
-    // subscription-included.
-    const item = { includedInTierId: null };
-    expect(decideIsIncluded(item, makeSub(), TIERS)).toBe(false);
+    // The switch off is "not tier-gated", not "any tier covers". With no
+    // follower gate either, the item is not subscription-included.
+    const item = { isTierGated: false, includedInTierIds: [] };
+    expect(decideIsIncluded(item, makeSub())).toBe(false);
   });
 
-  it('returns true when user tier sortOrder >= gating tier sortOrder', () => {
-    const item = { includedInTierId: 'tier-silver' };
-    const goldSub = makeSub({
-      tier: { id: 'tier-gold', name: 'Gold', sortOrder: 3 },
-    });
-    expect(decideIsIncluded(item, goldSub, TIERS)).toBe(true);
+  it("returns true when the user's plan is one of the item's plans", () => {
+    const item = {
+      isTierGated: true,
+      includedInTierIds: ['tier-silver', 'tier-gold'],
+    };
+    expect(decideIsIncluded(item, sub('tier-gold', 'Gold', 3))).toBe(true);
+    expect(decideIsIncluded(item, sub('tier-silver', 'Silver', 2))).toBe(true);
   });
 
-  it('returns true at exact tier match', () => {
-    const item = { includedInTierId: 'tier-silver' };
-    const silverSub = makeSub({
-      tier: { id: 'tier-silver', name: 'Silver', sortOrder: 2 },
-    });
-    expect(decideIsIncluded(item, silverSub, TIERS)).toBe(true);
+  it("returns false when the user's plan is not in the set", () => {
+    const item = { isTierGated: true, includedInTierIds: ['tier-gold'] };
+    expect(decideIsIncluded(item, makeSub())).toBe(false);
   });
 
-  it('returns false when user tier is below the gating tier', () => {
-    const item = { includedInTierId: 'tier-gold' };
-    const bronzeSub = makeSub();
-    expect(decideIsIncluded(item, bronzeSub, TIERS)).toBe(false);
+  it('returns false for a dearer plan left out of a non-contiguous set', () => {
+    // A bundle: Bronze and Gold include it, Silver doesn't. Under the old
+    // ladder a Silver member (sortOrder 2 >= Bronze's 1) read "Included";
+    // the server denies them (Codex-2hxff.91, design §2.4 #2).
+    const item = {
+      isTierGated: true,
+      includedInTierIds: ['tier-bronze', 'tier-gold'],
+    };
+    expect(decideIsIncluded(item, sub('tier-silver', 'Silver', 2))).toBe(false);
+    expect(decideIsIncluded(item, sub('tier-bronze', 'Bronze', 1))).toBe(true);
+    expect(decideIsIncluded(item, sub('tier-gold', 'Gold', 3))).toBe(true);
   });
 
-  it('returns false when includedInTierId is unknown to the resolved tiers', () => {
-    // Defensive: if the tier list is stale and the content references a
-    // tier we don't recognise, the badge stays neutral rather than
-    // optimistically claiming inclusion.
-    const item = { includedInTierId: 'tier-platinum' };
-    expect(decideIsIncluded(item, makeSub(), TIERS)).toBe(false);
+  it('returns false for a closed item: gated with no plan ticked', () => {
+    // Fail closed: no plan includes it, so no subscriber reads "Included".
+    expect(
+      decideIsIncluded({ isTierGated: true, includedInTierIds: [] }, makeSub())
+    ).toBe(false);
+    expect(decideIsIncluded({ isTierGated: true }, makeSub())).toBe(false);
+  });
+
+  it('ignores a set on an item whose switch is off', () => {
+    // I1 says no switch, no ticks; a stale set must not open it.
+    const item = { isTierGated: false, includedInTierIds: ['tier-bronze'] };
+    expect(decideIsIncluded(item, makeSub())).toBe(false);
   });
 });
 
@@ -142,6 +149,6 @@ describe('decideIsIncluded — non-eligible content', () => {
     { label: 'free', item: {} },
     { label: 'purchasable', item: { isPurchasable: true } },
   ])('returns false for $label content', ({ item }) => {
-    expect(decideIsIncluded(item, makeSub(), TIERS)).toBe(false);
+    expect(decideIsIncluded(item, makeSub())).toBe(false);
   });
 });

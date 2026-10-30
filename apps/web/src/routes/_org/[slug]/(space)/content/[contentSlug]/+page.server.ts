@@ -173,16 +173,17 @@ export const load: PageServerLoad = async ({
     };
   }
 
-  // Only run the subscription-context fetch when content is tier-gated
-  // (includedInTierId set — the WP-1 successor of accessType 'subscribers').
-  // Non-gated content (paid / free / followers / team) never consumes the
-  // result — skipping saves 2-3 round-trips per page load (Codex-585ie).
-  const mayRequireSubscription = content.includedInTierId != null;
+  // Only run the subscription-context fetch when content is tier-gated (the
+  // switch on, Codex-2hxff.91). Non-gated content (paid / free / followers /
+  // team) never consumes the result — skipping saves 2-3 round-trips per page
+  // load (Codex-585ie). The covering check is set membership in the item's
+  // `includedInTierIds`; a gated item with none ticked is closed.
+  const mayRequireSubscription = content.isTierGated;
 
   const subscriptionContext = mayRequireSubscription
     ? loadSubscriptionContext(
         org.id,
-        content.includedInTierId ?? null,
+        content,
         platform,
         cookies,
         locals.user != null

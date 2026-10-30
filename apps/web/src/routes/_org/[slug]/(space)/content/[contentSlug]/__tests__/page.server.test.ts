@@ -66,7 +66,8 @@ const row = (overrides: Record<string, unknown>) => ({
   isFree: true,
   isPurchasable: false,
   priceCents: null,
-  includedInTierId: null,
+  isTierGated: false,
+  includedInTierIds: [],
   isFollowerGated: false,
   isTeamOnly: false,
   courseOnly: false,
@@ -635,7 +636,8 @@ describe("org content detail: a tier-gated piece's subscription context (Codex-7
   const tier = { id: 'tier-2', sortOrder: 2 };
   const tierGated = row({
     isFree: false,
-    includedInTierId: 'tier-2',
+    isTierGated: true,
+    includedInTierIds: ['tier-2'],
     contentBody: null,
   });
 
@@ -658,6 +660,60 @@ describe("org content detail: a tier-gated piece's subscription context (Codex-7
       hasSubscription: false,
       tiers: [tier],
     });
+    expect(mockGetCurrentSubscription).not.toHaveBeenCalled();
+  });
+
+  it('covers a reader whose plan is in the set, and not one whose plan is not', async () => {
+    // Set membership (Codex-2hxff.91): the piece is in Basic and Premium, so
+    // a Pro member, though Pro ranks above Basic, is not covered.
+    mockServerGetPublicContent.mockResolvedValue({
+      items: [
+        row({
+          isFree: false,
+          isTierGated: true,
+          includedInTierIds: ['tier-basic', 'tier-premium'],
+          contentBody: null,
+        }),
+      ],
+    });
+    const { load } = await import('../+page.server');
+    const coveredFor = async (tier: { id: string; sortOrder: number }) => {
+      mockGetCurrentSubscription.mockResolvedValue({ status: 'active', tier });
+      const data = (await load(event('practice', reader))) as {
+        subscriptionContext: Promise<{ subscriptionCoversContent: boolean }>;
+      };
+      return (await data.subscriptionContext).subscriptionCoversContent;
+    };
+
+    expect(await coveredFor({ id: 'tier-pro', sortOrder: 2 })).toBe(false);
+    expect(await coveredFor({ id: 'tier-premium', sortOrder: 3 })).toBe(true);
+  });
+
+  it('a CLOSED piece (gated, no plan ticked) makes neither read', async () => {
+    // Owner decision U11: the page says it is not available, so it needs no
+    // plan list and no subscription.
+    mockServerGetPublicContent.mockResolvedValue({
+      items: [
+        row({
+          isFree: false,
+          isTierGated: true,
+          includedInTierIds: [],
+          contentBody: null,
+        }),
+      ],
+    });
+    const { load } = await import('../+page.server');
+
+    const data = (await load(event('practice', reader))) as {
+      subscriptionContext: Promise<unknown>;
+    };
+
+    expect(await data.subscriptionContext).toMatchObject({
+      requiresSubscription: true,
+      subscriptionCoversContent: false,
+      tiers: [],
+    });
+    expect(mockListTiers).not.toHaveBeenCalled();
     expect(mockGetCurrentSubscription).not.toHaveBeenCalled();
   });
 
@@ -691,6 +747,7 @@ describe("org content detail: a tier-gated piece's subscription context (Codex-7
       subscriptionCoversContent: false,
       currentSubscription: null,
       tiers: [],
+      tiersFailed: true,
     });
     expect(mockLogger.error).toHaveBeenCalledWith(
       'Subscription context threw',

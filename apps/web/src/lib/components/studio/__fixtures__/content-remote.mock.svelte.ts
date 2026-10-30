@@ -46,7 +46,7 @@ export function contentItem(
       | 'courseOnly'
       | 'isTeamOnly'
       | 'isFollowerGated'
-      | 'includedInTierId'
+      | 'isTierGated'
       | 'priceCents'
     >
   >
@@ -58,7 +58,7 @@ export function contentItem(
     courseOnly: false,
     isTeamOnly: false,
     isFollowerGated: false,
-    includedInTierId: null,
+    isTierGated: false,
     priceCents: null,
     ...flags,
   } as ContentWithRelations;

@@ -256,13 +256,15 @@ export const load: PageServerLoad = async ({
         obs: logger,
       });
       // Every param that varies the RESULT must vary the key, or two filter
-      // combinations read each other's cached payload. `v3` is the item shape:
+      // combinations read each other's cached payload. `v4` is the item shape:
       // bump it whenever the browse list CHANGES SHAPE, or slots the old code
       // wrote keep serving removed fields, or lack a field a reader needs,
       // until their TTL (v2, Codex-osuqt: no
       // body, no creator email; v3, Codex-1bdx0: the public list's media item
       // and org, no longer the whole media_items and organizations rows, and no
-      // purchaseCount, owner 2026-10-26). The browse select (the shared
+      // purchaseCount, owner 2026-10-26; v4, Codex-2hxff.91: `isTierGated` and
+      // `includedInTierIds`, which the badge and "Included" read, and closed
+      // items left out). The browse select (the shared
       // PUBLIC_*_COLUMNS and CATALOGUE_CONTENT_COLUMNS in @codex/content) and
       // content-api's item builder both shape this payload.
       // The category is a `:cat:` suffix only when set, as in public-cache.ts.
@@ -270,7 +272,7 @@ export const load: PageServerLoad = async ({
       // nothing) share the unfiltered slot, so one signed-in visitor blanked
       // that sort's grid for every viewer until the TTL.
       const categoryKey = category ? `:cat:${category}` : '';
-      const dataType = `content:auth:v3:${sort}:${contentType ?? 'all'}:${page}${categoryKey}`;
+      const dataType = `content:auth:v4:${sort}:${contentType ?? 'all'}:${page}${categoryKey}`;
       contentResult = await cache.get(
         CacheType.COLLECTION_ORG_CONTENT(org.id),
         dataType,

@@ -244,9 +244,13 @@
   // to the lightweight primitive shape SubscribeCTA expects. This is the
   // "honest fallback" path — if the org has no gated content, the strip
   // hides gracefully (the component checks `previewContent?.length > 0`).
+  // A gated item counts only when some plan includes it (Codex-2hxff.91): a
+  // closed one, in no plan, is unlocked by no subscription (owner U11).
   const subscribeGatedContent = $derived(
     data.allContent.filter(
-      (c) => c.includedInTierId != null || c.isFollowerGated === true
+      (c) =>
+        (c.isTierGated && c.includedInTierIds.length > 0) ||
+        c.isFollowerGated === true
     )
   );
 

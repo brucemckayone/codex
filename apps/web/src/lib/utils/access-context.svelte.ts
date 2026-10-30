@@ -5,6 +5,10 @@
  * subscriptionCollection, and provides helpers for badge personalization
  * (isIncluded, getTierName).
  *
+ * Plan access (Codex-2hxff.91): an item stores the exact set of plans that
+ * include it (`includedInTierIds`). "Included" is set membership and needs no
+ * tier list; only the badge's plan NAMES wait for the streamed tiers.
+ *
  * User subscription data comes from subscriptionCollection (localStorage-backed)
  * instead of a server stream, saving ~567ms on authenticated page loads.
  */
@@ -15,6 +19,7 @@ import {
   subscriptionCollection,
 } from '$lib/collections';
 import type { OrgTiersContext, SubscriptionTier } from '$lib/types';
+import { planBadgeLabel } from './plan-label';
 
 interface AccessContextInput {
   // Renamed from `SubscriptionContext` to `OrgTiersContext` (Codex-lqvw4.16)
@@ -32,7 +37,10 @@ interface ContentAccessItem {
   // full content row and narrower landing-page item shapes satisfy it.
   isFollowerGated?: boolean | null;
   isPurchasable?: boolean | null;
-  includedInTierId?: string | null;
+  /** The subscribers-only switch (Codex-2hxff.91). */
+  isTierGated?: boolean | null;
+  /** The plans that include it. Absent or `[]`: in no plan (closed if gated). */
+  includedInTierIds?: readonly string[] | null;
 }
 
 /**
@@ -62,25 +70,24 @@ export function isAccessGrantingSubscription(
  *   1. `subscribers ⊇ followers` (Codex-xybr3) — any access-granting
  *      subscription covers follower-gated content (`isFollowerGated`),
  *      regardless of tier.
- *   2. Tier-gated content (`includedInTierId != null`, the successor of
- *      accessType 'subscribers') — covered only when the user's tier
- *      `sortOrder` meets the content's gating tier.
+ *   2. Tier-gated content (`isTierGated`) — covered only when the user's
+ *      plan is one of the item's ticked plans (Codex-2hxff.91). A set, not a
+ *      ladder: a dearer plan does not cover a film only a cheaper one has, and
+ *      a gated item with no plan ticked is covered by none.
  *
  * Returns false for free / pure-paid / team content — those surfaces use
  * `purchased` or their own labels.
  */
 export function decideIsIncluded(
   item: ContentAccessItem,
-  sub: AccessGrantingSubscription | null,
-  tiers: SubscriptionTier[]
+  sub: AccessGrantingSubscription | null
 ): boolean {
   if (!sub) return false;
 
   if (item.isFollowerGated) return true;
 
-  if (item.includedInTierId == null) return false;
-  const minTier = tiers.find((t) => t.id === item.includedInTierId);
-  return minTier ? sub.tier.sortOrder >= minTier.sortOrder : false;
+  if (item.isTierGated !== true) return false;
+  return item.includedInTierIds?.includes(sub.tier.id) ?? false;
 }
 
 export function useAccessContext(getData: () => AccessContextInput) {
@@ -128,29 +135,24 @@ export function useAccessContext(getData: () => AccessContextInput) {
    * (Codex-xybr3 — subscribers ⊇ followers).
    */
   function isIncluded(item: ContentAccessItem): boolean {
-    return decideIsIncluded(item, getActiveSubscription(), resolvedTiers);
+    return decideIsIncluded(item, getActiveSubscription());
   }
 
   /**
-   * Resolve the display name of the tier associated with a content item.
+   * The badge's plan label for a content item: "Basic and above", "Pro
+   * only", "Basic, Premium" (owner decision U8, `planBadgeLabel`).
    *
-   * Resolves for two policy shapes (WP-1 flags):
-   *   - tier-gated (`includedInTierId != null`, former 'subscribers'): the
-   *     gating tier.
-   *   - purchasable + tier (hybrid, former 'paid' + minimumTierId): the tier
-   *     that *also includes* this paid content. Purchase-only paid returns null.
-   *
-   * Returns null for free / follower / team content or when tiers aren't
-   * loaded yet.
+   * Resolves for the tier-gated shapes (`isTierGated`): subscribers-only,
+   * and purchasable + in plans (the hybrid, whose badge stacks the price over
+   * this label). Returns null for free / follower / team / purchase-only
+   * content, for a gated item no active plan includes (a priced one then
+   * shows its price alone, U11), and while the tiers are loading or after
+   * they failed (the badge falls back to "Subscription").
    */
   function getTierName(item: ContentAccessItem): string | null {
-    const isTierGated = item.includedInTierId != null;
-    if (!isTierGated && !item.isPurchasable) return null;
+    if (item.isTierGated !== true) return null;
     if (!resolvedTiers?.length) return null;
-    // Pure paid with no tier association → no "included in" tier to name.
-    if (item.includedInTierId == null) return null;
-    const tier = resolvedTiers.find((t) => t.id === item.includedInTierId);
-    return tier?.name ?? null;
+    return planBadgeLabel(item.includedInTierIds, resolvedTiers);
   }
 
   return {

@@ -18,7 +18,7 @@ A **gap** marker means the code does not behave this way yet; see
 | **Entitlement** — `course_purchase` | One course | Stored |
 | **Entitlement** — `course_subscription` | One course, until the end of the paid period | Stored, with `expiresAt` |
 | **Entitlement** — `grant` | One piece of content or course, given by support | Stored |
-| **Tier subscription** | The organisation's content up to that tier, and courses included in that tier | Derived live from `subscriptions` |
+| **Tier subscription** | The content and courses ticked for that tier in Studio | Derived live from `subscriptions` and `content_tier_access` |
 | **Management role** | Everything in the organisation, for its owner, admins and creators | Derived from membership |
 
 An entitlement is live while `revokedAt` is empty and `expiresAt` (if set) is
@@ -30,9 +30,16 @@ own sale outside any organisation stores no organisation.
 `cancelling` — and `past_due` while Stripe is still retrying the payment —
 and the paid period has not ended. Course subscription plans follow the same
 statuses: every gate reads `ACCESS_GRANTING_SUBSCRIPTION_STATUSES`
-(`@codex/constants`). A higher tier
-includes everything in the tiers below it. A course is included in the exact
-tiers chosen for it in Studio.
+(`@codex/constants`).
+
+**A tier includes exactly what is ticked for it** (`Codex-2hxff.91`). Films and
+courses both use ticks: a film's set lives in `content_tier_access`, beside its
+`is_tier_gated` switch, and a course's in `course_tier_access`. There is no ladder,
+so a dearer tier does not include a cheaper tier's items unless they are ticked
+for it too. Studio's "and above" link ticks every tier at that monthly price or
+dearer in one go, and "Include everything from…" copies a tier's ticks into a
+new one; both only write ticks. A gated film with no ticks is **closed**: no
+subscription opens it, ever. It never falls back to free.
 
 **`content_access` is not a source of access.** The table is still written by
 purchase completion and cleared on refunds and disputes, but nothing reads it
@@ -44,7 +51,8 @@ for access. Never add a reader; it is due for removal.
 |---|---|
 | Free | Everyone |
 | Priced (sold on its own) | A purchase, a `content_purchase` or `grant` entitlement, a course that contains it, or a management role |
-| In a tier | A subscription at that tier or above, a purchase if it is also sold on its own, or a management role |
+| In a tier | A subscription to any tier ticked for it, a purchase if it is also sold on its own, or a management role |
+| Closed (gated, nothing ticked) | A purchase if it has a one-time price, or a management role. Without a price it is hidden from Explore and the landing page, and its link says it isn't available right now |
 | Followers-only | A subscription, following the organisation, or a management role |
 | Team-only | A management role |
 | Course-only | A course entitlement, or a management role |

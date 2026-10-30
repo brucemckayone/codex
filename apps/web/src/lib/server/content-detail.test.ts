@@ -146,7 +146,7 @@ function policy(
     isFree: true,
     isPurchasable: false,
     priceCents: null,
-    includedInTierId: null,
+    isTierGated: false,
     isFollowerGated: false,
     isTeamOnly: false,
     courseOnly: false,
@@ -263,6 +263,7 @@ describe('shared fallback shapes', () => {
       subscriptionCoversContent: false,
       currentSubscription: null,
       tiers: [],
+      tiersFailed: false,
     });
   });
 });
@@ -271,18 +272,30 @@ describe('loadSubscriptionContext (non-subscriber early return)', () => {
   type Cookies = Parameters<typeof loadSubscriptionContext>[3];
   const unusedCookies = {} as unknown as Cookies;
 
-  it('returns the empty context for content with no gating tier', async () => {
-    // A null includedInTierId (not tier-gated) short-circuits before ever
-    // touching the API, and the inline literal it returns must stay identical
-    // to EMPTY_SUB_CONTEXT.
+  it('returns the empty context for content with the tier switch off', async () => {
+    // Not tier-gated short-circuits before ever touching the API (no API is
+    // mocked here, so a call would throw), and returns EMPTY_SUB_CONTEXT.
     const ctx = await loadSubscriptionContext(
       'org-1',
-      null,
+      { isTierGated: false, includedInTierIds: [] },
       undefined,
       unusedCookies,
       true
     );
     expect(ctx).toEqual(EMPTY_SUB_CONTEXT);
+  });
+
+  it('a CLOSED item (gated, no plan ticked) requires a subscription no plan covers, with no reads', async () => {
+    // Codex-2hxff.91, owner U11: gated with no tick is closed, never free.
+    // No plan can cover it and none will be named, so neither read is made.
+    const ctx = await loadSubscriptionContext(
+      'org-1',
+      { isTierGated: true, includedInTierIds: [] },
+      undefined,
+      unusedCookies,
+      true
+    );
+    expect(ctx).toEqual({ ...EMPTY_SUB_CONTEXT, requiresSubscription: true });
   });
 });
 
@@ -293,6 +306,8 @@ describe('loadSubscriptionContext (tier-gated)', () => {
   type Cookies = Parameters<typeof loadSubscriptionContext>[3];
   const cookies = {} as unknown as Cookies;
   const tier = { id: 'tier-2', sortOrder: 2 };
+  /** Gated to one plan, "tier-2". */
+  const inTier2 = { isTierGated: true, includedInTierIds: ['tier-2'] };
 
   function apiReturns(
     getCurrent: () => Promise<unknown>,
@@ -313,12 +328,15 @@ describe('loadSubscriptionContext (tier-gated)', () => {
 
   it('a covering subscription opens the piece to a signed-in reader', async () => {
     apiReturns(() =>
-      Promise.resolve({ status: 'active', tier: { sortOrder: 2 } })
+      Promise.resolve({
+        status: 'active',
+        tier: { id: 'tier-2', sortOrder: 2 },
+      })
     );
 
     const ctx = await loadSubscriptionContext(
       'org-1',
-      'tier-2',
+      inTier2,
       undefined,
       cookies,
       true
@@ -328,6 +346,67 @@ describe('loadSubscriptionContext (tier-gated)', () => {
       requiresSubscription: true,
       hasSubscription: true,
       subscriptionCoversContent: true,
+      tiersFailed: false,
+    });
+  });
+
+  it('covers by set membership: a dearer plan outside the set does not cover it', async () => {
+    // A bundle [Basic, Premium] (Codex-2hxff.91, design §2.4 #2): a Pro member
+    // ranks above Basic, which the old ladder read as covered. The server
+    // denies them, so the page must not offer Play.
+    const basic = { id: 'tier-basic', sortOrder: 1 };
+    const pro = { id: 'tier-pro', sortOrder: 2 };
+    const premium = { id: 'tier-premium', sortOrder: 3 };
+    const bundle = {
+      isTierGated: true,
+      includedInTierIds: [basic.id, premium.id],
+    };
+    for (const [plan, covered] of [
+      [basic, true],
+      [pro, false],
+      [premium, true],
+    ] as const) {
+      apiReturns(
+        () => Promise.resolve({ status: 'active', tier: plan }),
+        () => Promise.resolve([basic, pro, premium])
+      );
+      const ctx = await loadSubscriptionContext(
+        'org-1',
+        bundle,
+        undefined,
+        cookies,
+        true
+      );
+      expect({ plan: plan.id, covered: ctx.subscriptionCoversContent }).toEqual(
+        { plan: plan.id, covered }
+      );
+    }
+  });
+
+  it('a covered subscriber stays covered when the tier list fails', async () => {
+    // Membership needs no tier list (design §4.3): the old ladder needed the
+    // gating tier's sortOrder, so a failed list turned a covered member away.
+    apiReturns(
+      () =>
+        Promise.resolve({
+          status: 'active',
+          tier: { id: 'tier-2', sortOrder: 2 },
+        }),
+      () => Promise.reject(new ApiError(503, 'unavailable'))
+    );
+
+    const ctx = await loadSubscriptionContext(
+      'org-1',
+      inTier2,
+      undefined,
+      cookies,
+      true
+    );
+
+    expect(ctx).toMatchObject({
+      subscriptionCoversContent: true,
+      tiers: [],
+      tiersFailed: true,
     });
   });
 
@@ -338,7 +417,7 @@ describe('loadSubscriptionContext (tier-gated)', () => {
 
     const ctx = await loadSubscriptionContext(
       'org-1',
-      'tier-2',
+      inTier2,
       undefined,
       cookies,
       false
@@ -359,7 +438,7 @@ describe('loadSubscriptionContext (tier-gated)', () => {
 
     const ctx = await loadSubscriptionContext(
       'org-1',
-      'tier-2',
+      inTier2,
       undefined,
       cookies,
       true
@@ -380,13 +459,14 @@ describe('loadSubscriptionContext (tier-gated)', () => {
 
     const ctx = await loadSubscriptionContext(
       'org-1',
-      'tier-2',
+      inTier2,
       undefined,
       cookies,
       true
     );
 
     expect(ctx.tiers).toEqual([]);
+    expect(ctx.tiersFailed).toBe(true);
     expect(mockLogger.warn).toHaveBeenCalledWith(
       'Subscription tiers not loaded',
       expect.objectContaining({ orgId: 'org-1', status: 503 })
@@ -401,6 +481,7 @@ describe('loadSubscriptionContext (tier-gated)', () => {
     expect(subscriptionContextFault('content-1', fault)).toEqual({
       ...EMPTY_SUB_CONTEXT,
       requiresSubscription: true,
+      tiersFailed: true,
     });
     expect(mockLogger.error).toHaveBeenCalledWith(
       'Subscription context threw',
@@ -755,7 +836,8 @@ describe('loadWithdrawnDetail (Codex-ov2ii)', () => {
     isFree: false,
     isPurchasable: true,
     priceCents: 900,
-    includedInTierId: null,
+    isTierGated: false,
+    includedInTierIds: [],
     isFollowerGated: false,
     isTeamOnly: false,
     courseOnly: false,

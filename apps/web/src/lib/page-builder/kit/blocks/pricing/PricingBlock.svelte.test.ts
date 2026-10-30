@@ -382,7 +382,7 @@ describe('PricingBlock — a single way in, beside what the course holds', () =>
     await renderWith({}, 'cards', oneTier());
     expect(prices()).toEqual(['£15']);
     expect(lines()).toEqual(COURSE_LINES);
-    expect(text()).toContain('Plus everything else in the membership');
+    expect(text()).toContain('Plus everything else in Studio membership');
   });
 
   // `sub` is one way in drawn as two cards (monthly and yearly); `tiers` is a
@@ -482,7 +482,9 @@ describe('PricingBlock — a single way in, beside what the course holds', () =>
   it('gives the one-off beside other cards the course’s first lines as its points', async () => {
     await render({}, 'cards', 'tiers');
     expect(points('£49')).toEqual(COURSE_LINES.slice(0, 3));
-    expect(points('£15')).toContain('Plus everything else in the membership');
+    expect(points('£15')).toContain(
+      'Plus everything else in Studio membership'
+    );
     expect(list()).toBeNull();
     unmount(app);
     app = null;

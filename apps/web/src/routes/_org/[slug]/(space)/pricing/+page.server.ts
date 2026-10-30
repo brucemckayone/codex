@@ -26,9 +26,17 @@
  * Everything below the fold — the catalogue sample, portals, stats — stays a
  * bare streamed promise. None of it feeds `<svelte:head>` or the page's
  * structure, and the catalogue read is the slowest call on the page.
+ *
+ * Opened from an item's paywall (`?for=<contentSlug>`, Codex-2hxff.91, owner
+ * decision U10), the page also STREAMS that item's plan set, so the hero can
+ * name the plans that include it and each card can say whether it does. The
+ * cards render first; a failed or unknown `for` is no highlight at all, and a
+ * tampered one only changes a highlight.
  */
+import { publicContentSlugSchema } from '@codex/validation';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
+import { logReadFailure } from '$lib/server/read-failure';
 import { getDisplayThumbnail } from '$lib/utils/thumbnail';
 import type { PageServerLoad } from './$types';
 
@@ -47,12 +55,21 @@ export interface CataloguePreviewItem {
   thumbnailUrl: string | null;
 }
 
+/** The item the pricing page was opened from: what the highlight reads. */
+export interface PricingForContent {
+  title: string;
+  slug: string;
+  /** The plans that include it (all ticks; the page keeps its active ones). */
+  includedInTierIds: string[];
+}
+
 export const load: PageServerLoad = async ({
   parent,
   locals,
   platform,
   cookies,
   setHeaders,
+  url,
 }) => {
   const { org } = await parent();
 
@@ -78,10 +95,44 @@ export const load: PageServerLoad = async ({
       : Promise.resolve({ data: null, loadError: false as const }),
   ]);
 
+  // The item a paywall sent the visitor from. Its PUBLIC row, by slug in this
+  // org (the same read as the item's own page, KV-cached in content-api), so
+  // only a published item of this org is ever named. A slug the list refuses
+  // names nothing, so it makes no call.
+  const forSlug = url.searchParams.get('for');
+  const forContent: Promise<PricingForContent | null> =
+    forSlug && publicContentSlugSchema.safeParse(forSlug).success
+      ? api.content
+          .getPublicContent(
+            new URLSearchParams({ orgId: org.id, slug: forSlug, limit: '1' })
+          )
+          .then((result) => {
+            const item = result?.items?.[0];
+            return item
+              ? {
+                  title: item.title,
+                  slug: item.slug,
+                  includedInTierIds: item.includedInTierIds ?? [],
+                }
+              : null;
+          })
+          .catch((error: unknown) => {
+            logReadFailure(
+              'Pricing highlight item not loaded',
+              { orgId: org.id },
+              error
+            );
+            return null;
+          })
+      : Promise.resolve(null);
+
   return {
     tiers,
     currentSubscription,
     isAuthenticated: !!locals.user,
+
+    // The pricing highlight (streamed, U10): null → no highlight.
+    forContent,
 
     // Catalogue sample for the marquee band (streamed). Projected down to the
     // four fields the tile renders: `getPublicContent` returns the whole

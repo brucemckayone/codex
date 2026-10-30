@@ -9,7 +9,6 @@
   import { page } from '$app/state';
   import { getContent } from '$lib/remote/content.remote';
   import { listMedia } from '$lib/remote/media.remote';
-  import { listTiers } from '$lib/remote/subscription.remote';
   import { ErrorBoundary } from '$lib/components/ui';
   import { Breadcrumb } from '$lib/components/ui/Breadcrumb';
   import ContentForm from '$lib/components/studio/ContentForm.svelte';
@@ -28,8 +27,6 @@
     sortBy: 'createdAt',
     sortOrder: 'desc',
   }));
-
-  const tiersQuery = $derived(listTiers(data.org.id));
 
   const loading = $derived(contentQuery.loading || mediaQuery.loading);
   const content = $derived(contentQuery.current ?? null);
@@ -75,7 +72,6 @@
         organizationId={data.org.id}
         orgSlug={data.org.slug}
         mediaItems={mediaQuery.current?.items ?? []}
-        tiers={tiersQuery.current ?? []}
       />
     </ErrorBoundary>
   {/if}

@@ -174,6 +174,27 @@ describe('SubscribeButton', () => {
     expect(screen.getByTestId('subscribe-button-manage')).toBeTruthy();
   });
 
+  test('active + upgradeRequired + changePlan → Change Plan CTA (Codex-2hxff.91)', () => {
+    // A cheaper plan includes the content, so "Upgrade" would be wrong.
+    seed({ status: 'active' });
+    component = mount(SubscribeButton, {
+      target: document.body,
+      props: {
+        organizationId: ORG_ID,
+        isAuthenticated: true,
+        upgradeRequired: true,
+        changePlan: true,
+        subscribeHref: '/pricing?for=winter-light',
+      },
+    });
+
+    const cta = screen.getByTestId('subscribe-button-upgrade');
+    expect(cta?.getAttribute('href')).toBe('/pricing?for=winter-light');
+    expect(cta?.textContent).toContain('Change Plan');
+    expect(cta?.textContent).not.toContain('Upgrade to Watch');
+    expect(screen.getByTestId('subscribe-button-manage')).toBeTruthy();
+  });
+
   test('cancelling → Ends date warning + Reactivate button', () => {
     seed({
       status: 'active',

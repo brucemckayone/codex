@@ -59,7 +59,7 @@ const PAID = contentItem('c-paid', 'Kettlebell Foundations', {
   priceCents: 1500,
 });
 const TIER = contentItem('c-tier', 'Sleep Reset Programme', {
-  includedInTierId: 'tier-1',
+  isTierGated: true,
 });
 const FREE = contentItem('c-free', 'Breathing for Runners', {});
 const FREE_ZERO = contentItem('c-zero', 'Desk Stretch Series', {
@@ -71,7 +71,7 @@ const FOLLOWERS = contentItem('c-followers', 'Core Conditioning', {
 });
 const TEAM = contentItem('c-team', 'Coaching Notes', {
   isTeamOnly: true,
-  includedInTierId: 'tier-1',
+  isTierGated: true,
 });
 const COURSE = contentItem('c-course', 'Week One: Mobility', {
   courseOnly: true,
