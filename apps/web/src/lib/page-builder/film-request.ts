@@ -1,7 +1,9 @@
 /**
- * The public sales page's `requestFilm` (owner P10, "Full film unless it's
- * paid"): what a press on a film the server marked `fullFilm` calls for that
- * film's 10-minute signed stream.
+ * The public pages' `requestFilm` (owner P10, "Full film unless it's paid"):
+ * what a press on a film the server marked `fullFilm` calls for that film's
+ * 10-minute signed stream. A course sales page asks for one of its films
+ * (`createFilmRequester`); the org landing, for its intro film
+ * (`createOrgFilmRequester`, Codex-376dl).
  *
  * It ALWAYS SETTLES, and never rejects or throws. The player waits on it with
  * the film loading, so a refusal, a failure and a hang must all end as `null`,
@@ -29,6 +31,28 @@ type AskForFilm = (input: {
   film: SalesFilm;
 }) => Promise<FilmStream>;
 
+/** The remote command the org landing asks (`requestOrgFilm`). */
+type AskForOrgFilm = (input: { organizationId: string }) => Promise<FilmStream>;
+
+/** `ask`'s answer, or `null` on a throw, a rejection, or `timeoutMs`. */
+function settled(
+  ask: () => Promise<FilmStream>,
+  timeoutMs: number
+): Promise<FilmStream> {
+  let answered: Promise<FilmStream>;
+  try {
+    answered = ask().catch(() => null);
+  } catch {
+    return Promise.resolve(null);
+  }
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), timeoutMs);
+  });
+  return Promise.race([answered, timedOut]).finally(() => clearTimeout(timer));
+}
+
 /**
  * A `requestFilm` for one course's sales page. With no organisation (a page
  * that resolved none) every film plays its preview.
@@ -41,20 +65,15 @@ export function createFilmRequester(
   return (film) => {
     const { organizationId, courseId } = ids;
     if (!organizationId) return Promise.resolve(null);
-
-    let answered: Promise<FilmStream>;
-    try {
-      answered = ask({ organizationId, courseId, film }).catch(() => null);
-    } catch {
-      return Promise.resolve(null);
-    }
-
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const timedOut = new Promise<null>((resolve) => {
-      timer = setTimeout(() => resolve(null), timeoutMs);
-    });
-    return Promise.race([answered, timedOut]).finally(() =>
-      clearTimeout(timer)
-    );
+    return settled(() => ask({ organizationId, courseId, film }), timeoutMs);
   };
+}
+
+/** The org landing's intro film, asked for in full on each press. */
+export function createOrgFilmRequester(
+  organizationId: string,
+  ask: AskForOrgFilm,
+  timeoutMs: number = FILM_REQUEST_TIMEOUT_MS
+): () => Promise<FilmStream> {
+  return () => settled(() => ask({ organizationId }), timeoutMs);
 }

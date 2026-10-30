@@ -238,8 +238,7 @@ Results are merged, deduplicated, and enriched with progress data.
 | `ContentNotFoundError` | 404 | Content doesn't exist or is deleted (a draft is not a 404: see Access Decision Logic) |
 | `MediaNotReadyForStreamingError` | 422 | Content has no associated media item |
 | `R2SigningError` | 500 | Failed to generate signed URL |
-| `InvalidContentTypeError` | 422 | Unexpected media type |
-| `OrganizationMismatchError` | 422 | Org context mismatch |
+| `InvalidContentTypeError` | 500 | Unexpected media type |
 
 ## Rules
 

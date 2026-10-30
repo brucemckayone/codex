@@ -17,6 +17,7 @@ import { z } from 'zod';
 import { command, form, getRequestEvent, query } from '$app/server';
 import { createServerApi } from '$lib/server/api';
 import { invalidateCache } from '$lib/server/cache';
+import { forwardClientErrors } from '$lib/server/forward-client-errors';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Branding Settings Query
@@ -259,8 +260,14 @@ export const deleteLogo = command(z.string().uuid(), async (orgId) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Link a media item as the org's intro video.
- * Called after the frontend uploads the video via content-api's media pipeline.
+ * Pick one of the caller's finished videos as the org's intro film
+ * (Codex-376dl). The worker refuses audio, unfinished media and a video that
+ * is not the caller's; that refusal reaches the studio in the worker's words
+ * (`forwardClientErrors`), never as an unexpected error.
+ *
+ * The studio re-reads `getIntroFilm` itself once this resolves. A refresh
+ * HERE would ride in this command's answer, and in SvelteKit a failed one
+ * fails the whole command, after the pick was already saved (Codex-luo5q).
  */
 export const linkIntroVideo = command(
   z.object({ orgId: z.string().uuid(), mediaItemId: z.string().uuid() }),
@@ -268,34 +275,38 @@ export const linkIntroVideo = command(
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
 
-    const result = await api.org.linkIntroVideo(orgId, mediaItemId);
+    const result = await forwardClientErrors(() =>
+      api.org.linkIntroVideo(orgId, mediaItemId)
+    );
     await invalidateCache(platform, orgId);
-
     return result;
   }
 );
 
 /**
- * Get intro video transcoding status.
- * Polls this until status is 'ready' or 'failed'.
+ * The org's intro film as the brand studio shows it (Codex-376dl): what was
+ * picked and whether visitors get the whole film, its preview, or none.
+ * Read once per change: only finished videos can be picked, so nothing polls.
  */
-export const getIntroVideoStatus = query(z.string().uuid(), async (orgId) => {
+export const getIntroFilm = query(z.string().uuid(), async (orgId) => {
   const { platform, cookies } = getRequestEvent();
   const api = createServerApi(platform, cookies);
-  return api.org.getIntroVideoStatus(orgId);
+  return api.org.getIntroFilm(orgId);
 });
 
 /**
- * Delete the org's intro video.
- * Soft-deletes the media item and clears branding references.
+ * Take the org's intro film off its landing page. The media item stays in
+ * the creator's library. As {@link linkIntroVideo}: a refusal keeps its
+ * words, and the studio re-reads the film itself.
  */
-export const deleteIntroVideo = command(z.string().uuid(), async (orgId) => {
+export const unlinkIntroVideo = command(z.string().uuid(), async (orgId) => {
   const { platform, cookies } = getRequestEvent();
   const api = createServerApi(platform, cookies);
 
-  const result = await api.org.deleteIntroVideo(orgId);
+  const result = await forwardClientErrors(() =>
+    api.org.unlinkIntroVideo(orgId)
+  );
   await invalidateCache(platform, orgId);
-
   return result;
 });
 

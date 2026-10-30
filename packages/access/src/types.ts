@@ -58,6 +58,13 @@ export interface CourseFilmStreamResponse {
 }
 
 /**
+ * Response for GET /api/access/orgs/:organizationId/film/stream (Codex-376dl):
+ * the org intro film's signed FULL stream, or `null` when it may only play its
+ * 30-second preview. The course film's shape, under the org film's proxies.
+ */
+export type OrgFilmStreamResponse = CourseFilmStreamResponse;
+
+/**
  * How a reader still holds an item that has left the storefront: it decides
  * the note the detail page shows them (Codex-ov2ii). Mapped from the arm of
  * the access decision that granted, so the note can never give a reason the

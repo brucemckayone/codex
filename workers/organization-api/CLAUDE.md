@@ -53,9 +53,9 @@ One owner per organisation; it moves only by the owner's offer being accepted. W
 | PUT | `/api/organizations/:id/settings/branding` | `required`, `requireOrgManagement` | body: `updateBrandingSchema` | 200 | Invalidates brand + version caches |
 | POST | `/api/organizations/:id/settings/branding/logo` | `required`, `requireOrgManagement` | multipart: `logo` file | 200 | Max 5 MB; PNG/JPEG/WebP |
 | DELETE | `/api/organizations/:id/settings/branding/logo` | `required`, `requireOrgManagement` | — | 200 | |
-| POST | `/api/organizations/:id/settings/branding/intro-video` | `required`, `requireOrgManagement` | body: `linkIntroVideoSchema` | 200 | Links an existing media item as intro video |
-| GET | `/api/organizations/:id/settings/branding/intro-video/status` | `required`, `requireOrgMembership` | — | 200 | Poll transcoding status; auto-finalizes URL when ready |
-| DELETE | `/api/organizations/:id/settings/branding/intro-video` | `required`, `requireOrgManagement` | — | 200 | Soft-deletes media item |
+| POST | `/api/organizations/:id/settings/branding/intro-video` | `required`, `requireOrgManagement` | body: `linkIntroVideoSchema` | 200 | Picks the org's intro film: one of the caller's own `ready` videos (audio → 400, unfinished → 422, another user's or a missing id → 404, alike, so the answer never says someone else's media exists) |
+| GET | `/api/organizations/:id/settings/branding/intro-video` | `required`, `requireOrgManagement` | — | 200 | `StudioIntroFilm \| null`: what was picked and whether visitors get the full film, its preview, or none (and why). Read via `ctx.services.access.getStudioIntroFilm`, the minter's own check (Codex-376dl) |
+| DELETE | `/api/organizations/:id/settings/branding/intro-video` | `required`, `requireOrgManagement` | — | 200 | Unlinks only — the media item stays in the creator's library |
 | GET | `/api/organizations/:id/settings/contact` | `required`, `requireOrgManagement` | — | 200 | |
 | PUT | `/api/organizations/:id/settings/contact` | `required`, `requireOrgManagement` | body: `updateContactSchema` | 200 | |
 | GET | `/api/organizations/:id/settings/features` | `required`, `requireOrgManagement` | — | 200 | |
@@ -99,6 +99,7 @@ One owner per organisation; it moves only by the owner's offer being accepted. W
 |---|---|
 | `@codex/organization` | `OrganizationService` — org CRUD, members, followers, tiers, slug validation |
 | `@codex/platform-settings` | `PlatformSettingsFacade`, `BrandingSettingsService`, `FeatureSettingsService` |
+| `@codex/access` | `resolveIntroFilm` / `toPublicIntroFilm` for public info; `ctx.services.access.getStudioIntroFilm` for the studio read |
 | `@codex/cache` | `VersionedCache` — KV cache for public endpoints; invalidated on mutations |
 | `@codex/image-processing` | Logo upload via `ImageProcessingService`; MIME type/size constants |
 | `@codex/worker-utils` | `procedure()`, `multipartProcedure()`, `PaginatedResult`, `sendEmailToWorker` |
@@ -128,7 +129,10 @@ Branding and org-info reads go through a single cache layer (`CACHE_KV` via `Ver
 ## Gotchas
 
 - **Slug = subdomain** — slugs are validated against `RESERVED_SUBDOMAINS_SET` before creation. A slug that passes becomes a live subdomain. Never skip this check.
-- **Logo and intro-video uploads** use `multipartProcedure()` — not `procedure()`. Multipart form handling is incompatible with standard Zod body parsing.
+- **Logo uploads** use `multipartProcedure()` — not `procedure()`. Multipart form handling is incompatible with standard Zod body parsing. The intro film is not uploaded here: it is picked from the media library (a JSON body).
+- **`introFilm` on public info** comes from `resolveIntroFilm` + `toPublicIntroFilm` (`@codex/access`), the same check the content-api org-film minter runs, with the poster and preview resolved on the two public hosts (`resolveR2PublicBases`). It rides on `/public/:slug/info` only; the uncached `/public/:slug` branding route skips it and the features read (`brandingOnly: true`). The KV slot is `org:config:v2`, so no payload cached before Codex-376dl (with its stored `introVideoUrl`) is read; web readers still treat a missing key as `?? null`.
+- **A partial public info is kept for a minute, not 4h.** `fetchPublicOrgInfo` answers a failed branding, features or intro-film read with its fallback and reports `partial` (also when the film has no R2 host to resolve against); the `/info` route passes `cachedRead` a `ttl` function giving `CACHE_TTL.ORG_PUBLIC_INFO_PARTIAL_SECONDS` (60, KV's floor) for it; a visitor can see it for up to three such windows (the slot, KV's 60s edge read cache, the 60s `public` CDN cache). One blip cannot stand for the 4h TTL, and a part that keeps failing costs one DB read per org per minute, not one per page view. One `Public org info served with fallbacks` warn names each failed part by `describeThrown` (the driver error, never the SQL or its params).
+- **Deleting a media item that is an org's intro film** drops that org's public caches (content-api `DELETE /api/media/:id`, from the slugs `MediaItemService.delete` returns), and `resolveIntroFilm` reads a deleted pick as an empty slot. The link itself stays.
 - **Public endpoints create ad-hoc DB clients** — `fetchPublicOrgInfo()` instantiates `BrandingSettingsService` and `FeatureSettingsService` directly (not via service registry) because `ctx.services.settings` requires org membership context unavailable on public routes.
 - **`my-membership` (members route)** intentionally omits `requireOrgMembership` so non-members can query their own status — returns `null` for non-members.
 - **Membership mutation cache**: Member invite/update/delete also invalidates the slug-keyed public cache (creator profiles are part of public org info).

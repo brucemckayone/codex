@@ -1197,7 +1197,8 @@ export const BANK_TRANSFER_LIST_MAX_PAGES = 100;
 /**
  * An account with more transfers in 14 days than the job reads. It is not
  * paid out until someone looks, so the job raises it as an error alert.
- * The context stays empty: it is client-facing, and Studio maps this to 503.
+ * The context stays empty: a 500's context is logged, not sent (Codex-adcgb),
+ * and the account id is on `stripeAccountId`. Studio maps this to 503.
  */
 export class BankTransferListTooLongError extends InternalServiceError {
   readonly stripeAccountId: string;

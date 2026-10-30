@@ -37,6 +37,7 @@ import type { HonoEnv } from '@codex/shared-types';
 import { createIdParamsSchema, uploadCompleteSchema } from '@codex/validation';
 import {
   binaryUploadProcedure,
+  dispatchOrgPublicInvalidation,
   PaginatedResult,
   procedure,
 } from '@codex/worker-utils';
@@ -140,10 +141,14 @@ app.get(
     policy: { auth: 'required' },
     input: { query: mediaQuerySchema },
     handler: async (ctx) => {
-      const result = await ctx.services.media.list(
-        ctx.user.id,
-        ctx.input.query
-      );
+      // `list()` pages from its third argument only. Passed inside the
+      // filters, page and limit were ignored, so every call returned the
+      // newest 20 (Codex-9hh1n), as the content lists did (Codex-uuj1g).
+      const { page, limit, ...filters } = ctx.input.query;
+      const result = await ctx.services.media.list(ctx.user.id, filters, {
+        page,
+        limit,
+      });
       const cdnBase = ctx.env.R2_PUBLIC_URL_BASE;
       const items = result.items.map((item) => ({
         ...item,
@@ -367,6 +372,10 @@ app.post(
  * DELETE /api/media/:id
  * Soft delete media item (sets deleted_at)
  *
+ * When the media was an org's intro film, that org's public caches are
+ * dropped after the response: its cached public info still offers the film's
+ * poster and preview, which the delete has just swept (Codex-376dl).
+ *
  * Returns: 204 No Content
  * Security: Creator/Admin only, Strict rate limit (5 req/15min)
  * @returns {DeleteMediaResponse}
@@ -382,7 +391,13 @@ app.delete(
     input: { params: createIdParamsSchema() },
     successStatus: 204,
     handler: async (ctx): Promise<DeleteMediaResponse> => {
-      await ctx.services.media.delete(ctx.input.params.id, ctx.user.id);
+      const { introFilmOrgSlugs } = await ctx.services.media.delete(
+        ctx.input.params.id,
+        ctx.user.id
+      );
+      // An org whose intro film this was stops drawing it now, not after
+      // its cached public info expires.
+      dispatchOrgPublicInvalidation(ctx, introFilmOrgSlugs, ctx.obs);
       return null;
     },
   })

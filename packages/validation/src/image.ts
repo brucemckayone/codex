@@ -1,6 +1,6 @@
 import { MIME_TYPES } from '@codex/constants';
 import { z } from 'zod';
-import { sanitizeSvgContent } from './primitives';
+import { sanitizeSvgContent } from './svg-sanitize';
 
 /**
  * Magic numbers (file signatures) for supported image formats
@@ -131,7 +131,7 @@ export function validateImageSignature(
     if (!startsWithXml) return false;
 
     // For <?xml files, verify <svg tag exists within first 1KB (defense in depth)
-    // DOMPurify will catch invalid SVGs later, but we reject obvious non-SVG XML early
+    // The SVG sanitiser catches invalid SVGs later, but we reject obvious non-SVG XML early
     const searchLimit = Math.min(buffer.length, 1024);
     const text = new TextDecoder().decode(buffer.slice(0, searchLimit));
     return /<svg[\s>]/i.test(text);

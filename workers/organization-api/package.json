@@ -18,6 +18,7 @@
     "cf-typegen": "wrangler types"
   },
   "dependencies": {
+    "@codex/access": "workspace:*",
     "@codex/cache": "workspace:*",
     "@codex/cloudflare-clients": "workspace:*",
     "@codex/constants": "workspace:*",

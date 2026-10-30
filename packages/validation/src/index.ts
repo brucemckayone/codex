@@ -18,7 +18,6 @@ export * from './identity/onboarding-schema';
 export * from './identity/user-schema';
 // Image validation utilities
 export * from './image';
-
 // Primitive validation schemas (reusable)
 export * from './primitives';
 // Access schemas
@@ -55,5 +54,7 @@ export * from './schemas/transcoding';
 export * from './shared/pagination-schema';
 // Free-text search: the one builder + the client-side length floor (Codex-k618q)
 export * from './shared/search-schema';
+// SVG upload sanitising (runs on Workers, Codex-kcr87)
+export * from './svg-sanitize';
 // Text extraction utilities (TipTap JSON → plain text)
 export * from './text';

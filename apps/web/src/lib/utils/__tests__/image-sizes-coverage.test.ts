@@ -213,22 +213,16 @@ describe('every stored still chooses the file for its slot', () => {
  * 304915): the file for the whole viewport, in every slot (Codex-kk9nv.3).
  * Outside `<style>` blocks and `style` attributes, a CSS math function with a
  * length in it is a `sizes` value in this app, so every one is a failure.
- *
- * The page builder's own generators are Codex-sntzy, so its folder is exempt
- * until that lands, except the Signature this PR sizes.
+ * That includes the page builder's generators since Codex-sntzy.
  */
 describe('no sizes value uses a math function', () => {
   const MATH_FUNCTION = /(?<![.\w$-])(min|max|clamp)\(/g;
   /** A length in the arguments, written out or after a `${…}`, or a `${…}` itself. */
   const LENGTH = /[\d}](r?em|px|[sdl]?v[whib]|vmin|vmax|ch|ex|cq[whib]|%)|\$\{/;
-  const isExempt = (file: string) =>
-    file.startsWith('lib/page-builder/') &&
-    file !== 'lib/page-builder/kit/blocks/instructor/Signature.svelte';
 
   /** The code a `sizes` value can be written in: no styles, no comments. */
-  function sizesSource(path: string): string {
-    const source = readFileSync(path, 'utf8');
-    if (path.endsWith('.ts')) return codeWithoutComments(source);
+  function sizesCode(source: string, isTs: boolean): string {
+    if (isTs) return codeWithoutComments(source);
     return withoutComments(source)
       .replace(CODE_BLOCK, (block, open: string, tag: string) =>
         tag === 'style' ? open : block
@@ -248,24 +242,41 @@ describe('no sizes value uses a math function', () => {
     return source.slice(start);
   }
 
-  const uses = codeFiles(SRC).flatMap((path) => {
-    const file = relative(SRC, path);
-    const source = sizesSource(path);
-    return [...source.matchAll(MATH_FUNCTION)].flatMap((match) => {
-      const args = parenthesised(source, match.index + match[0].length - 1);
-      return LENGTH.test(args) ? [{ file, use: `${match[1]}${args}` }] : [];
+  /** Each math function in `code` with a length in its arguments. */
+  function mathFunctions(code: string): string[] {
+    return [...code.matchAll(MATH_FUNCTION)].flatMap((match) => {
+      const args = parenthesised(code, match.index + match[0].length - 1);
+      return LENGTH.test(args) ? [`${match[1]}${args}`] : [];
     });
+  }
+
+  const uses = codeFiles(SRC).flatMap((path) =>
+    mathFunctions(
+      sizesCode(readFileSync(path, 'utf8'), path.endsWith('.ts'))
+    ).map((use) => `${relative(SRC, path)}: ${use}`)
+  );
+
+  // The page builder's generators were written like these before
+  // Codex-sntzy; the census must still see each one, in script and markup,
+  // and pass over a style and a math function with no length in it.
+  it('finds the shapes it looks for (the census is not blind)', () => {
+    const script = `const s = \`min(\${vw}vw, \${rem}rem)\`, n = Math.min(a, 3);`;
+    expect(mathFunctions(sizesCode(script, true))).toEqual([
+      `min(\${vw}vw, \${rem}rem)`,
+    ]);
+    const markup = [
+      "<script>const s = 'clamp(16rem, 34vw, 28rem)';</script>",
+      '<img sizes="min(100vw, 52rem)" alt="" />',
+      '<div style="width: min(100%, 4rem)"></div>',
+      '<style>a { width: max(1rem, 2vw); }</style>',
+    ].join('');
+    expect(mathFunctions(sizesCode(markup, false))).toEqual([
+      'clamp(16rem, 34vw, 28rem)',
+      'min(100vw, 52rem)',
+    ]);
   });
 
-  it('finds them where they still are (the census is not blind)', () => {
-    expect(uses.filter(({ file }) => isExempt(file)).length).toBeGreaterThan(0);
-  });
-
-  it('finds none outside the page builder', () => {
-    expect(
-      uses
-        .filter(({ file }) => !isExempt(file))
-        .map(({ file, use }) => `${file}: ${use}`)
-    ).toEqual([]);
+  it('finds none', () => {
+    expect(uses).toEqual([]);
   });
 });

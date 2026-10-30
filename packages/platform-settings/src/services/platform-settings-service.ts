@@ -152,17 +152,10 @@ export class PlatformSettingsFacade {
   }
 
   /**
-   * Get intro video transcoding status
+   * Take the intro film off the landing page; the media item is kept
    */
-  async getIntroVideoStatus() {
-    return this.branding.getIntroVideoStatus();
-  }
-
-  /**
-   * Delete the intro video
-   */
-  async deleteIntroVideo(): Promise<BrandingSettingsResponse> {
-    return this.branding.deleteIntroVideo();
+  async unlinkIntroVideo(): Promise<BrandingSettingsResponse> {
+    return this.branding.unlinkIntroVideo();
   }
 
   // ============================================================================

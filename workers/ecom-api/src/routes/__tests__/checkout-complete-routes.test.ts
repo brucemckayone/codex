@@ -632,13 +632,23 @@ describe('POST /checkout/complete', () => {
       vi
         .mocked(obs.warn)
         .mock.calls.find(([message]) => message.includes('yet')) ?? [];
-    expect(JSON.stringify(await res.json())).toContain(
-      (line as { errorId: string }).errorId
-    );
+    // The whole body: this 503 opts its context in (publicContext), so a
+    // field added to it later would reach the browser (Codex-adcgb).
+    expect(await res.json()).toEqual({
+      error: {
+        code: 'SERVICE_UNAVAILABLE',
+        message: 'The purchase could not be recorded yet',
+        details: {
+          sessionId: 'cs_landing_1',
+          errorId: (line as { errorId: string }).errorId,
+        },
+      },
+    });
   });
 
-  // mapErrorToResponse logs no ServiceError: without the route's own line, a
-  // paid session that is never recorded left no trace in ecom. The page is
+  // mapErrorToResponse never logs a ServiceError's failure (only a 5xx's
+  // withheld context, and this one's is public): without the route's own line,
+  // a paid session that is never recorded left no trace in ecom. The page is
   // told it is for good (CHECKOUT_NOT_RECORDED, Codex-2hxff.81), under the
   // errorId support was alerted with, and with nothing of the refusal's.
   it('a permanent refusal before the commit: an error line with an errorId and the root cause, and CHECKOUT_NOT_RECORDED to the page', async () => {

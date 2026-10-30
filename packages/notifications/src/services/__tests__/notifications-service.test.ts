@@ -136,17 +136,33 @@ describe('NotificationsService', () => {
       error: 'Resend rejected: domain not verified',
     });
 
-    await expect(
-      service.sendEmail({
+    const thrown = await service
+      .sendEmail({
         to: 'user@example.com',
         templateName: 'test-template',
         data: {},
       })
-    ).rejects.toThrow(/domain not verified/);
+      .catch((error: unknown) => error);
 
     // DEFAULT_RETRY_CONFIG.maxRetries = 2, so 3 attempts total. The old code
     // called the provider exactly once and returned success.
     expect(mockEmailProvider.send).toHaveBeenCalledTimes(3);
+
+    // The provider's words name its configuration, and a ServiceError's
+    // message reaches the caller (the studio's test-send) verbatim, so they
+    // ride on the cause: kept for the audit row, never sent (Codex-adcgb).
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toBe('Email provider reported failure');
+    expect(((thrown as Error).cause as Error).message).toBe(
+      'Resend rejected: domain not verified'
+    );
+    expect(mockDbRaw.set).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: EMAIL_SEND_STATUS.FAILED,
+        error:
+          'Email provider reported failure: Resend rejected: domain not verified',
+      })
+    );
   });
 
   it('does NOT treat a user opt-out (success:false + skipped) as a provider failure', async () => {

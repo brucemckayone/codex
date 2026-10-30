@@ -5,7 +5,9 @@
  * Supports both authenticated (full data) and unauthenticated (public branding) queries.
  */
 
+import type { OrgFilmStreamResponse } from '@codex/access';
 import type { OrganizationWithRole } from '@codex/shared-types';
+import { orgFilmParamsSchema } from '@codex/validation';
 import { z } from 'zod';
 import { command, form, getRequestEvent, query } from '$app/server';
 import { createServerApi } from '$lib/server/api';
@@ -417,3 +419,31 @@ export const getFollowingStatus = query(z.string().uuid(), async (orgId) => {
   const result = await api.org.isFollowing(orgId);
   return result.following;
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Intro Film (Public)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The org landing's intro film in FULL (Codex-376dl), behind the landing's
+ * press: called on a press, never on load. Null when the film may only play
+ * its 30s preview. The worker re-checks on every call, so this is the gate
+ * and the public info's `fullFilm` only a hint.
+ *
+ * A `command()`, not a `query()`, as `requestCourseFilm` is: every call mints
+ * a fresh 10-minute token, which a query's per-argument cache would hand back
+ * after it had expired.
+ */
+export const requestOrgFilm = command(
+  orgFilmParamsSchema,
+  async ({ organizationId }): Promise<OrgFilmStreamResponse | null> => {
+    const { platform, cookies } = getRequestEvent();
+    const stream = await createServerApi(
+      platform,
+      cookies
+    ).access.orgFilmStream(organizationId);
+    return stream
+      ? { playlistUrl: stream.playlistUrl, expiresAt: stream.expiresAt }
+      : null;
+  }
+);

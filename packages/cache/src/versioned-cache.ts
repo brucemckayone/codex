@@ -368,7 +368,7 @@ export class VersionedCache {
     id: string,
     type: string,
     fetcher: () => Promise<T>,
-    options: CacheOptions = {}
+    options: CacheOptions<T> = {}
   ): Promise<T> {
     const { data } = await this.getWithResult(id, type, fetcher, options);
     return data;
@@ -394,7 +394,7 @@ export class VersionedCache {
     id: string,
     type: string,
     fetcher: () => Promise<T>,
-    options: CacheOptions = {}
+    options: CacheOptions<T> = {}
   ): Promise<CacheResult<T>> {
     const { ttl = DEFAULT_TTL } = options;
 
@@ -430,8 +430,10 @@ export class VersionedCache {
     const data = await fetcher();
 
     // `null` means the version read failed, so there is no key worth writing.
+    // A TTL function prices the value itself: a fallback is kept briefly.
     if (lookup.cacheKey !== null) {
-      this.writeCacheSlot(lookup.cacheKey, data, ttl, id, type);
+      const seconds = typeof ttl === 'function' ? ttl(data) : ttl;
+      this.writeCacheSlot(lookup.cacheKey, data, seconds, id, type);
     }
 
     return { data, hit: false };
@@ -466,7 +468,8 @@ export class VersionedCache {
     id: string,
     type: string,
     data: T,
-    options: CacheOptions = {}
+    // The value is in hand, so its TTL is a number: no function of it.
+    options: { ttl?: number } = {}
   ): Promise<void> {
     const { ttl = DEFAULT_TTL } = options;
 

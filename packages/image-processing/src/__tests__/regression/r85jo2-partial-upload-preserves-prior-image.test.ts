@@ -230,9 +230,10 @@ describe('Codex-r85jo.2: a partial upload preserves the previous image', () => {
         (e: unknown) => e as Error & { context?: Record<string, unknown> }
       );
 
-    // `mapErrorToResponse` assigns `details: error.context` VERBATIM into the
-    // response body (error-mapper.ts), so the error object is a client-facing
-    // surface. The variant is named; the R2 rejection reason is not.
+    // `mapErrorToResponse` sends the message VERBATIM, and the context for a
+    // 4xx or an opted-in 5xx (error-mapper.ts), so the error object is a
+    // client-facing surface. The variant is named; the R2 rejection reason is
+    // not.
     expect(error?.message).toMatch(/md/);
     const serialised = JSON.stringify({
       message: error?.message,

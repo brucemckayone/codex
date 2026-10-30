@@ -2,14 +2,14 @@
  * Shared Tiptap extension configuration.
  *
  * CRITICAL: This file is the single source of truth for extensions used by
- * both the client-side editor and the server-side generateHTML() renderer.
+ * both the client-side editor and the server-side renderer (render-html.ts).
  * If these diverge, content will render incorrectly.
  */
 
 import type { Extensions } from '@tiptap/core';
 import BubbleMenu from '@tiptap/extension-bubble-menu';
 import CharacterCount from '@tiptap/extension-character-count';
-import Link from '@tiptap/extension-link';
+import type { LinkOptions } from '@tiptap/extension-link';
 import Placeholder from '@tiptap/extension-placeholder';
 import Typography from '@tiptap/extension-typography';
 import StarterKit from '@tiptap/starter-kit';
@@ -18,6 +18,15 @@ import {
   type SlashCommandRender,
 } from './slash-commands.js';
 import type { EditorExtensionOptions } from './types.js';
+
+/**
+ * StarterKit already includes Link: it is configured there, never added a
+ * second time (a duplicate logs "Duplicate extension names found: ['link']").
+ */
+const LINK_OPTIONS: Partial<LinkOptions> = {
+  openOnClick: false,
+  HTMLAttributes: { rel: 'noopener noreferrer nofollow' },
+};
 
 interface FullExtensionOptions extends EditorExtensionOptions {
   /** Render function for slash command popup — only needed client-side */
@@ -33,11 +42,8 @@ interface FullExtensionOptions extends EditorExtensionOptions {
 export function getFullExtensions(options?: FullExtensionOptions): Extensions {
   return [
     StarterKit.configure({
+      link: LINK_OPTIONS,
       heading: { levels: [1, 2, 3] },
-    }),
-    Link.configure({
-      openOnClick: false,
-      HTMLAttributes: { rel: 'noopener noreferrer nofollow' },
     }),
     Typography,
     ...(options?.placeholder
@@ -72,16 +78,13 @@ export function getMinimalExtensions(
 ): Extensions {
   return [
     StarterKit.configure({
+      link: LINK_OPTIONS,
       heading: false,
       codeBlock: false,
       blockquote: false,
       horizontalRule: false,
       code: false,
       strike: false,
-    }),
-    Link.configure({
-      openOnClick: false,
-      HTMLAttributes: { rel: 'noopener noreferrer nofollow' },
     }),
     Typography,
     ...(options?.placeholder
@@ -104,6 +107,7 @@ export function getRenderExtensions(
   if (preset === 'minimal') {
     return [
       StarterKit.configure({
+        link: LINK_OPTIONS,
         heading: false,
         codeBlock: false,
         blockquote: false,
@@ -111,20 +115,13 @@ export function getRenderExtensions(
         code: false,
         strike: false,
       }),
-      Link.configure({
-        openOnClick: false,
-        HTMLAttributes: { rel: 'noopener noreferrer nofollow' },
-      }),
     ];
   }
 
   return [
     StarterKit.configure({
+      link: LINK_OPTIONS,
       heading: { levels: [1, 2, 3] },
-    }),
-    Link.configure({
-      openOnClick: false,
-      HTMLAttributes: { rel: 'noopener noreferrer nofollow' },
     }),
   ];
 }

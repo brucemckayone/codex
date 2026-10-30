@@ -79,6 +79,20 @@ vi.mock('@codex/platform-settings', async (importOriginal) => {
   };
 });
 
+// The intro film (Codex-376dl) is read beside branding with a real db client:
+// without this the two `/public/:slug` reads would query the test database.
+vi.mock('@codex/access', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@codex/access')>();
+  return {
+    ...actual,
+    resolveIntroFilm: vi.fn(async () => ({
+      ok: false,
+      reason: 'empty-slot',
+      film: null,
+    })),
+  };
+});
+
 // Imported AFTER the mocks so the real registry resolves the mocked classes.
 import organizations from '../organizations';
 

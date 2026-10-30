@@ -48,15 +48,28 @@ Stripe's own schedule until the backfill (R10) switches them. Design:
 
 ### R8 — before the deploy: the Stripe keys (owner)
 
-In the Stripe Dashboard → Developers → API keys:
+Production runs on Stripe TEST keys for now (owner, 2026-10-29). Every key
+below is then the test-mode one: `sk_test_`, `rk_test_`.
 
-- **admin-api's restricted key** needs **Balance: Read** on connected
-  accounts. Without it, support's Creator debts shows the 08:00 snapshot
-  instead of the live balance, and every load logs an error.
-- **ecom-api's key** must be able to read a connected account's balance and
-  create its payouts (`balance.retrieve` and `payouts.create` with
-  `Stripe-Account`). Without them the job reads nothing and pays nobody it
-  switched, and logs `bank_payout.account_failed` for each account.
+- **ecom-api's key** (GitHub production secret `STRIPE_SECRET_KEY`) must be a
+  standard secret key, `sk_test_` for now and `sk_live_` later, not a
+  restricted `rk_` key. A standard key already allows `balance.retrieve` and
+  `payouts.create` with `Stripe-Account`. A restricted one would need, on
+  connected accounts, Balance read, Payouts write and Transfers read. Without
+  them the job reads nothing and pays nobody it switched, and it logs
+  `bank_payout.account_failed` for each account.
+- **admin-api's key** is optional for the release, but it is the only thing
+  that makes support refunds and Creator debts' live balance work. Production
+  has NONE today: the deploy uploads one only from the GitHub production
+  secret `ADMIN_API_STRIPE_RESTRICTED_KEY` (Codex-2hxff.92).
+  - **Create it:** a restricted key in the SAME mode as `STRIPE_SECRET_KEY`
+    (`rk_test_` beside `sk_test_`), with Refunds write; Charges,
+    PaymentIntents, Invoices and Disputes read; and Balance read on connected
+    accounts. Save it as `ADMIN_API_STRIPE_RESTRICTED_KEY`; the next deploy
+    uploads it.
+  - **Without it:** support refunds fail, and Creator debts shows the 08:00
+    snapshot with a warning per load.
+  - **Check it:** after the deploy, Creator debts shows a live balance.
 
 ### R9 — before the backfill: the Express dashboard settings (owner)
 
@@ -66,14 +79,21 @@ can read these settings, so nothing in the code can check them.
 
 ### R10 — after the deploy: the backfill (only with the owner's OK)
 
-A live Stripe write. Run it in test mode first, on one production-shaped
-account. Then the dry run, which writes nothing:
+A Stripe write against production's accounts. Run it against the test
+environment first, on one production-shaped account. Then the dry run, which
+writes nothing:
 
-    pnpm --filter @codex/database exec tsx scripts/backfill-payout-schedule.ts --env production
+    pnpm --filter @codex/database exec tsx scripts/backfill-payout-schedule.ts --env production --test-keys
 
 The owner reads its list and checksum. Only then:
 
-    … --env production --apply --confirm <checksum> --live
+    … --env production --test-keys --apply --confirm <checksum>
+
+`--test-keys` is there because production runs on Stripe test keys for now.
+Without it, `--env production` refuses a test key, so a dev key run against the
+production database by mistake still stops. Once production moves to live
+keys, drop `--test-keys` and add `--live` to the apply: a write to live Stripe
+needs `--live` as well as `--apply`.
 
 It refuses if the set of accounts has changed since the dry run, and a re-run
 is a no-op. The Studio switch-over notice shows for 14 days from each

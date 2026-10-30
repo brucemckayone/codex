@@ -43,6 +43,7 @@
   import BrandEditorFineTuneTypography from '$lib/components/brand-editor/levels/BrandEditorFineTuneTypography.svelte';
   import BrandEditorHeaderLayout from '$lib/components/brand-editor/levels/BrandEditorHeaderLayout.svelte';
   import BrandEditorHeroEffects from '$lib/components/brand-editor/levels/BrandEditorHeroEffects.svelte';
+  import BrandEditorHeroFilm from '$lib/components/brand-editor/levels/BrandEditorHeroFilm.svelte';
   import BrandEditorHeroText from '$lib/components/brand-editor/levels/BrandEditorHeroText.svelte';
   import BrandEditorLogo from '$lib/components/brand-editor/levels/BrandEditorLogo.svelte';
   import BrandEditorShape from '$lib/components/brand-editor/levels/BrandEditorShape.svelte';
@@ -75,8 +76,8 @@
     /** Current org description (hero subheading); null when unset. */
     orgDescription?: string | null;
     /**
-     * Fired after a successful hero-text save so the route can bump the preview
-     * reload token (org name/description are not brand tokens).
+     * Fired after a successful hero-text or film save so the route can bump
+     * the preview reload token (neither is a brand token).
      */
     onpreviewreload?: () => void;
   }
@@ -319,6 +320,8 @@
     <BrandEditorHeaderLayout />
   {:else if id === 'hero-effects'}
     <BrandEditorHeroEffects />
+  {:else if id === 'hero-film'}
+    <BrandEditorHeroFilm onsaved={onpreviewreload} />
   {/if}
 {/snippet}
 

@@ -162,8 +162,9 @@ export function createLazyStripeProxy(
  * from the response alone.
  *
  * Nothing identifying the binding is put in the error's message or context:
- * `mapErrorToResponse` forwards a `ServiceError`'s message AND context to the
- * client verbatim. The operator detail goes to observability only.
+ * `mapErrorToResponse` forwards a `ServiceError`'s message to the client
+ * verbatim, and logs a 5xx's context (Codex-adcgb). The operator detail goes
+ * to observability only.
  *
  * Exported for tests — the guard is the whole defect, and the throw is
  * otherwise only reachable through a real Stripe call.

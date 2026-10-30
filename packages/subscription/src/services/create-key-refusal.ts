@@ -90,7 +90,8 @@ export function createKeyRefusal(
       untilTheHour?.message ??
         `Stripe could not create the ${subject.noun}, so nothing was saved. Try again.`,
       { ...context, code: 'STRIPE_UNAVAILABLE', ...retryAfter },
-      { cause: error }
+      // The pages act on details.code and retryAfter: a new key, a retry time.
+      { cause: error, publicContext: true }
     );
   }
   return null;

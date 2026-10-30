@@ -4,7 +4,7 @@ import {
   BrandingSettingsService,
   ContactSettingsService,
 } from '@codex/platform-settings';
-import { BaseService } from '@codex/service-errors';
+import { BaseService, describeThrown } from '@codex/service-errors';
 import { z } from '@codex/validation';
 import { eq } from 'drizzle-orm';
 import {
@@ -41,6 +41,20 @@ const DEFAULT_RETRY_CONFIG: RetryConfig = {
   maxRetries: 2,
   initialBackoffMs: 1000,
 };
+
+/**
+ * What actually failed, for the log and the audit row: the error's message
+ * and then its cause, where a send failure keeps the provider's own words.
+ * Both, because this runs on whatever a provider throws, not only the
+ * wrapper sendWithRetry builds.
+ */
+function failureReason(error: unknown): string {
+  if (!(error instanceof Error)) return describeThrown(error);
+  const { cause } = error;
+  if (cause === undefined) return error.message;
+  const detail = cause instanceof Error ? cause.message : describeThrown(cause);
+  return `${error.message}: ${detail}`;
+}
 
 interface SendEmailParams {
   to: string;
@@ -341,7 +355,7 @@ export class NotificationsService extends BaseService {
         .update(schema.emailAuditLogs)
         .set({
           status: EMAIL_SEND_STATUS.FAILED,
-          error: error instanceof Error ? error.message : String(error),
+          error: failureReason(error),
           updatedAt: new Date(),
         })
         .where(eq(schema.emailAuditLogs.id, auditLog.id));
@@ -390,9 +404,16 @@ export class NotificationsService extends BaseService {
         //
         // `skipped` (a user opt-out) also carries success:false and is NOT a
         // failure, so it must not be turned into a throw.
+        //
+        // The provider's words go on the cause, not the message: a
+        // ServiceError's message reaches the caller verbatim, and Resend's
+        // name its configuration ("You can only send testing emails to your
+        // own email address (…)", "API key is invalid") (Codex-adcgb).
         if (!result.success && !result.skipped) {
           throw new InternalServiceError(
-            result.error ?? 'Email provider reported failure'
+            'Email provider reported failure',
+            undefined,
+            { cause: new Error(result.error || 'No reason given') }
           );
         }
 
@@ -409,7 +430,9 @@ export class NotificationsService extends BaseService {
         lastError =
           error instanceof Error
             ? error
-            : new InternalServiceError(String(error));
+            : new InternalServiceError('Email send failed', undefined, {
+                cause: error,
+              });
 
         // Skip retry for known non-transient errors
         if (
@@ -422,7 +445,7 @@ export class NotificationsService extends BaseService {
         this.obs.warn(`Email send attempt ${attempt + 1} failed`, {
           ...context,
           errorType: lastError.name,
-          errorMessage: lastError.message,
+          errorMessage: failureReason(lastError),
         });
       }
     }
@@ -432,7 +455,7 @@ export class NotificationsService extends BaseService {
       ...context,
       success: false,
       totalAttempts: maxRetries + 1,
-      errorMessage: lastError?.message || 'Unknown error',
+      errorMessage: lastError ? failureReason(lastError) : 'Unknown error',
     });
 
     // Throw for consistent error handling (callers can catch if needed)

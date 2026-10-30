@@ -60,17 +60,20 @@ export interface CachedReadContext {
  *
  * @example
  * ```typescript
- * return cachedRead(ctx, slug, CacheType.ORG_CONFIG,
- *   () => fetchPublicOrgInfo(ctx, slug),
- *   { ttl: CACHE_TTL.ORG_PUBLIC_INFO_SECONDS });
+ * return cachedRead(ctx, orgId, CacheType.ORG_TIERS,
+ *   () => ctx.services.tier.listTiers(orgId),
+ *   { ttl: 86400 });
  * ```
+ *
+ * A fetcher that can answer with a fallback prices it with a `ttl` function
+ * (organization-api's `/public/:slug/info`): see `CacheOptions.ttl`.
  */
 export async function cachedRead<T>(
   ctx: CachedReadContext,
   id: string,
   type: string,
   fetcher: () => Promise<T>,
-  options: CacheOptions = {}
+  options: CacheOptions<T> = {}
 ): Promise<T> {
   const kv = ctx.env.CACHE_KV;
   if (!kv) return fetcher();

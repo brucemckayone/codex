@@ -170,11 +170,11 @@ const IMAGE_VARIANT_PUT_OPTIONS = {
  *
  * ## Where the failure detail is allowed to go
  *
- * `mapErrorToResponse` assigns `details: error.context` VERBATIM into the
- * response body for any `ServiceError`, so a thrown error is a client-facing
- * surface, not a log line. R2 rejection reasons (error codes, bucket
- * identifiers, request ids) therefore stay in `obs.error` and never reach the
- * error object.
+ * `mapErrorToResponse` sends a `ServiceError`'s message VERBATIM, and its
+ * context as `details` for a 4xx (a 5xx's is logged instead, Codex-adcgb), so
+ * a thrown error is a client-facing surface, not a log line. R2 rejection
+ * reasons (error codes, bucket identifiers, request ids) therefore stay in
+ * `obs.error` and never reach the error object.
  *
  * The thrown type is `InternalServiceError` (500), not `ValidationError` (400):
  * nothing about a failed R2 put is a problem with the user's input, and telling

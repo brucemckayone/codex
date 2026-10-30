@@ -46,12 +46,12 @@ export {
   InvalidContentTypeError,
   MediaNotFoundError,
   MediaNotReadyForStreamingError,
-  OrganizationMismatchError,
   R2SigningError,
 } from './errors';
 // HLS playlist-proxy helpers (WP-14)
 export {
   collectVariantSegments,
+  type FilmScope,
   type RewriteMasterOptions,
   type RewriteVariantOptions,
   rewriteMasterPlaylist,
@@ -61,12 +61,23 @@ export {
   type FilmTokenCheck,
   type FilmTokenPayload,
   type HlsTokenPayload,
+  type OrgFilmTokenCheck,
+  type OrgFilmTokenPayload,
   signFilmToken,
   signHlsToken,
+  signOrgFilmToken,
   type TokenRefusal,
   verifyFilmToken,
   verifyHlsToken,
+  verifyOrgFilmToken,
 } from './hls-token';
+// The two public R2 hosts a poster and a preview resolve against: shared by
+// content-api's catalogue and the intro film's views.
+export {
+  publicUrl,
+  type R2PublicBases,
+  resolveR2PublicBases,
+} from './r2-public-bases';
 export type {
   Revocation,
   RevocationReason,
@@ -100,12 +111,22 @@ export { CourseInsightsService } from './services/course-insights-service';
 // Course member surfaces: dashboard + in-course player reads (Round-D · Codex-776gg).
 export { CourseJourneyService } from './services/course-journey-service';
 export { EntitlementsService } from './services/entitlements-service';
+// The org intro film's one read (Codex-376dl): the public org info and the
+// studio draw from it what the minter mints from.
+export { toPublicIntroFilm } from './services/intro-film-views';
+export {
+  type IntroFilmMedia,
+  type IntroFilmRefusal,
+  type IntroFilmResolution,
+  resolveIntroFilm,
+} from './services/sales-films';
 export type {
   ContentBodySource,
   ContentHeld,
   ContentHeldBy,
   CourseEntryResponse,
   CourseFilmStreamResponse,
+  OrgFilmStreamResponse,
   PlaybackProgressResponse,
   StreamingUrlResponse,
   UpdatePlaybackProgressResponse,

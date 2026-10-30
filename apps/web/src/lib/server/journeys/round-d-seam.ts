@@ -135,7 +135,7 @@ export async function fetchCourseDashboard(
  * A written practice's body arrives AS STORED (TipTap JSON or legacy
  * markdown) and is rendered HERE with the standalone content page's
  * `renderContentBody`: the same TipTap/markdown render and the same
- * isomorphic-dompurify pass, so the player's `{@html}` gets exactly the page's
+ * sanitize pass, so the player's `{@html}` gets exactly the page's
  * safe HTML, and an editor-written practice is no longer empty (Codex-woj7k).
  * Server-only, so the stored body never reaches the browser.
  *

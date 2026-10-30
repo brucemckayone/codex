@@ -121,7 +121,13 @@
     /** Move focus to the play button as it mounts: a press removed the control that had it. */
     takeFocus?: boolean;
     onplay?: () => void;
-    onended?: () => void;
+    /**
+     * The film stopped: `end`, it played to its end (or its `limit`);
+     * `lapsed`, its stream ran out and no fresh one came back. A frame that
+     * closes on a real end must not close on a lapse, or the film vanishes
+     * mid-play with no word.
+     */
+    onended?: (reason: 'end' | 'lapsed') => void;
     /**
      * The film cannot play; `message` is what the core shows. A frame that
      * can offer a retry (`InlineFilm`) takes the visitor back to its poster.
@@ -294,7 +300,7 @@
     finished = true;
     resuming = false;
     disarm();
-    onended?.();
+    onended?.(lapsed ? 'lapsed' : 'end');
   }
 
   function replay() {

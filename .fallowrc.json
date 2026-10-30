@@ -13,6 +13,7 @@
     "apps/web/playwright.config.ts",
     "apps/web/.storybook/**/*.ts",
     "apps/web/src/tests/setup.ts",
+    "**/__workerd__/*.ts",
     "apps/web/e2e/**/*.spec.ts",
     "**/*.test.ts",
     "**/*.type-check.ts",

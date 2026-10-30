@@ -432,7 +432,7 @@ describe('BenefitsBlock: every size a tile picture has (Codex-61zsk.66)', () => 
     const img = document.body.querySelector('.benefits-grid li img');
     expect(img?.getAttribute('srcset')).toBe(SET);
     expect(img?.getAttribute('sizes')).toBe(
-      '(min-width: 60rem) min(33.33vw, 27.33rem), (min-width: 36rem) min(50vw, 41rem), min(100vw, 82rem)'
+      '(min-width: 82rem) 27.33rem, (min-width: 60rem) 33.33vw, (min-width: 36rem) 50vw, 100vw'
     );
   });
 
@@ -442,7 +442,7 @@ describe('BenefitsBlock: every size a tile picture has (Codex-61zsk.66)', () => 
     expect(img?.getAttribute('srcset')).toBe(SET);
     // The lead tile: four of six columns from 56rem, both of two from 36rem.
     expect(img?.getAttribute('sizes')).toBe(
-      '(min-width: 56rem) min(66.67vw, 54.67rem), (min-width: 36rem) min(100vw, 82rem), min(100vw, 82rem)'
+      '(min-width: 82rem) 54.67rem, (min-width: 56rem) 66.67vw, 100vw'
     );
   });
 });

@@ -146,6 +146,33 @@ describe('the theatre', () => {
     expect(onclose).toHaveBeenCalledTimes(2);
   });
 
+  test('Escape and Tab still work once focus has fallen out of it', () => {
+    // A film that fails to play removes the control that had focus, which
+    // drops focus to <body>; a listener on the dialog then heard nothing
+    // (Codex-s1ebi).
+    const { dialog, onclose } = openFrom();
+    (document.activeElement as HTMLElement | null)?.blur();
+    expect(dialog.contains(document.activeElement)).toBe(false);
+
+    key(document.body, { key: 'Tab' });
+    expect(dialog.contains(document.activeElement)).toBe(true);
+
+    (document.activeElement as HTMLElement | null)?.blur();
+    key(document.body, { key: 'Escape' });
+    expect(onclose).toHaveBeenCalledTimes(1);
+  });
+
+  test('a closed theatre answers no keys', () => {
+    const onclose = vi.fn();
+    app = mount(IntroVideoModal, {
+      target: document.body,
+      props: { open: false, src: SRC, onclose },
+    });
+    flushSync();
+    key(document.body, { key: 'Escape' });
+    expect(onclose).not.toHaveBeenCalled();
+  });
+
   test('focus goes back to what opened it', () => {
     const { opener } = openFrom();
     expect(document.activeElement).not.toBe(opener);

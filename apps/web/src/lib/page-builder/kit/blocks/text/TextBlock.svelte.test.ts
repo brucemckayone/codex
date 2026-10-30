@@ -223,9 +223,9 @@ describe('TextBlock', () => {
     // Codex-61zsk.66: every size it has, at the width each form draws it, so
     // a statement across a 1440 band takes the 1600px file, not the 800.
     it.each([
-      ['statement', 'min(100vw, 82rem)'],
-      ['centered', 'min(100vw, 52rem)'],
-      ['columns', '(min-width: 56rem) min(50vw, 41rem), min(100vw, 82rem)'],
+      ['statement', '(min-width: 82rem) 82rem, 100vw'],
+      ['centered', '(min-width: 52rem) 52rem, 100vw'],
+      ['columns', '(min-width: 82rem) 41rem, (min-width: 56rem) 50vw, 100vw'],
     ])('%s: offers every size the picture has, at its drawn width', async (layout, sizes) => {
       await render(
         { ...SAMPLE, image: { ...image, w: 2400, h: 1600 } },
@@ -330,6 +330,6 @@ describe('TextBlock: columns without a body (Codex-61zsk.66)', () => {
     );
     expect(
       document.body.querySelector('.text__media img')?.getAttribute('sizes')
-    ).toBe('min(100vw, 82rem)');
+    ).toBe('(min-width: 82rem) 82rem, 100vw');
   });
 });
