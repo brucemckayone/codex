@@ -17,7 +17,13 @@
   would fade the player's own controls. Reduced motion shows it at once.
 
   Escape closes it wherever focus is, as do its close button and the film's
-  end; the landing then gives the chip its focus back.
+  end; the landing then gives the chip its focus back. A full film whose links
+  ran out with no fresh ones (a `lapsed` end) does NOT close: it shows its
+  poster and "Watch again", which asks afresh, so it never just vanishes.
+
+  The chip is inert while the film is open, so focus needs a home: the
+  player's play button once it mounts (`takeFocus`), and the close button
+  while its code is still loading or once the film cannot play.
 
   @prop src - The preview's HLS manifest, or a promise of the full film while
     a press asks for it (`components/player/press-source.ts`)
@@ -35,7 +41,8 @@
     loadPlayerCore,
     type PlayerCore,
   } from '$lib/components/player/load-core';
-  import { XIcon } from '$lib/components/ui/Icon';
+  import { RefreshCwIcon, XIcon } from '$lib/components/ui/Icon';
+  import { getThumbnailUrl } from '$lib/utils/image';
   import * as m from '$paraglide/messages';
 
   interface Props {
@@ -78,6 +85,23 @@
     };
   });
 
+  let closeButton = $state<HTMLButtonElement | undefined>(undefined);
+
+  // Until the player mounts and takes focus, the close button holds it.
+  $effect(() => {
+    if (!Player) closeButton?.focus({ preventScroll: true });
+  });
+
+  /** The film cannot play: its controls are gone, so focus goes to close. */
+  function failedToPlay() {
+    closeButton?.focus({ preventScroll: true });
+  }
+
+  /** A real end closes the film; a lapse keeps it, with "Watch again". */
+  function ended(reason: 'end' | 'lapsed') {
+    if (reason === 'end') onclose();
+  }
+
   function handleKey(e: KeyboardEvent) {
     if (e.key !== 'Escape' || e.defaultPrevented) return;
     e.preventDefault();
@@ -86,6 +110,16 @@
 </script>
 
 <svelte:window onkeydown={handleKey} />
+
+{#snippet again(replay: () => void)}
+  {#if poster}
+    <img class="hero-film__still" src={getThumbnailUrl(poster, 'lg')} alt="" />
+  {/if}
+  <button type="button" class="hero-film__again" onclick={replay}>
+    <RefreshCwIcon size={16} />
+    {m.player_watch_again()}
+  </button>
+{/snippet}
 
 <div
   class="hero-film"
@@ -102,12 +136,15 @@
         stillFit="cover"
         start="sound"
         takeFocus
-        onended={onclose}
+        onended={ended}
+        onfail={failedToPlay}
+        ended={again}
       />
     {:else if failed}
       <p class="hero-film__error" role="alert">{m.player_error()}</p>
     {/if}
     <button
+      bind:this={closeButton}
       type="button"
       class="hero-film__close"
       onclick={onclose}
@@ -178,6 +215,37 @@
   }
 
   .hero-film__close:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-player-text);
+    outline-offset: var(--space-1);
+  }
+
+  /* The lapsed layer: the poster again, under "Watch again". */
+  .hero-film__still {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    inline-size: 100%;
+    block-size: 100%;
+    object-fit: cover;
+  }
+
+  .hero-film__again {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-block-size: var(--tap-target-min);
+    padding: var(--space-2) var(--space-5) var(--space-2) var(--space-4);
+    border: none;
+    border-radius: var(--radius-full);
+    background: var(--color-player-overlay-heavy);
+    color: var(--color-player-text);
+    font-family: inherit;
+    font-size: var(--text-sm);
+    font-weight: var(--font-semibold);
+    cursor: pointer;
+  }
+
+  .hero-film__again:focus-visible {
     outline: var(--border-width-thick) solid var(--color-player-text);
     outline-offset: var(--space-1);
   }

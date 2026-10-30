@@ -151,8 +151,12 @@
   let filmSrc = $state.raw<PressSource | null>(null);
   let filmRenew = $state.raw<AskForFull | undefined>(undefined);
   let filmChip = $state<HTMLButtonElement | undefined>(undefined);
+  // The film is open: what mounts its player, so nothing outlives the player.
+  // A re-run that drops the film (it was removed mid-play) closes it here, and
+  // never leaves the hero's text hidden and inert behind no film.
+  const filmOpen = $derived(introFilm !== null && filmSrc !== null);
   // On a desktop the film grows out of the hero, so its text steps aside.
-  const filmInHero = $derived(filmSrc !== null && isDesktop);
+  const filmInHero = $derived(filmOpen && isDesktop);
 
   // ── Landing sections derived from the single catalogue fetch ──────────
   // Editor's picks: creator-flagged items → full-bleed feature slides.
@@ -448,7 +452,7 @@
       : undefined;
     setFilmOrigin(e.currentTarget as HTMLElement);
     filmRenew = pressRenewal(ask);
-    filmSrc = pressSource(introFilm.previewUrl ?? '', ask);
+    filmSrc = pressSource(introFilm.previewUrl, ask);
     // Opened in the press's own tick, so the player's play() keeps the sound.
     flushSync();
   }
@@ -1263,13 +1267,20 @@
   .hero__film-duration {
     opacity: var(--opacity-80);
     font-weight: var(--font-medium);
+    white-space: nowrap;
   }
 
+  /* Exactly the label's box (one line and its padding), so the chip stays as
+     tall as its neighbours. The height is KNOWN, not stretched: a stretched
+     height arrives after the chip is measured, so the 16:9 width came too
+     late, squeezed the label onto two lines, and collapsed to a sliver in a
+     full-width phone button. */
   .hero__film-poster {
     position: relative;
     display: grid;
     place-items: center;
-    align-self: stretch;
+    flex-shrink: 0;
+    block-size: calc(1lh + 2 * var(--space-2));
     aspect-ratio: 16 / 9;
     overflow: hidden;
     border-radius: calc(var(--radius-base) - var(--space-1));

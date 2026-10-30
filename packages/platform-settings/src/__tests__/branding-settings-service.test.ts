@@ -881,9 +881,14 @@ describe('BrandingSettingsService', () => {
       await expect(
         service.linkIntroVideo(uploading.mediaItemId, uploading.creatorId)
       ).rejects.toMatchObject({ code: 'BUSINESS_LOGIC_ERROR' });
+      // Not FORBIDDEN: a refusal that differs from "no such media" would say
+      // that someone else's media exists.
       await expect(
         service.linkIntroVideo(theirs.mediaItemId, someoneElse)
-      ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      await expect(
+        service.linkIntroVideo(crypto.randomUUID(), someoneElse)
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
     });
   });
 

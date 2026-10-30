@@ -12,11 +12,15 @@ import {
   MIME_TYPES,
   R2_OVERWRITTEN_OBJECT_CACHE_CONTROL,
 } from '@codex/constants';
-import { type dbHttp, type dbWs, schema } from '@codex/database';
+import {
+  type dbHttp,
+  type dbWs,
+  schema,
+  scopedNotDeleted,
+} from '@codex/database';
 import {
   BaseService,
   BusinessLogicError,
-  ForbiddenError,
   InternalServiceError,
   NotFoundError,
   ValidationError,
@@ -28,7 +32,7 @@ import {
   pricingFaqSchema,
   type UpdateBrandingInput,
 } from '@codex/validation';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { InvalidFileTypeError, SettingsUpsertError } from '../errors';
 
 /**
@@ -524,6 +528,10 @@ export class BrandingSettingsService extends BaseService {
    * transcoding here. Only the id is stored. The landing builds the film's
    * URLs from the media row on each read (`resolveIntroFilm`), so a stored
    * URL can never point at a file the CDN does not serve (Codex-aexid).
+   *
+   * Another user's media reads as not found, exactly as a missing id does:
+   * the ownership scope is in the WHERE, so the answer never says whether
+   * someone else's media exists.
    */
   async linkIntroVideo(
     mediaItemId: string,
@@ -531,7 +539,6 @@ export class BrandingSettingsService extends BaseService {
   ): Promise<BrandingSettingsResponse> {
     const mediaResult = await this.db
       .select({
-        creatorId: schema.mediaItems.creatorId,
         status: schema.mediaItems.status,
         mediaType: schema.mediaItems.mediaType,
       })
@@ -539,7 +546,7 @@ export class BrandingSettingsService extends BaseService {
       .where(
         and(
           eq(schema.mediaItems.id, mediaItemId),
-          isNull(schema.mediaItems.deletedAt)
+          scopedNotDeleted(schema.mediaItems, creatorId)
         )
       )
       .limit(1);
@@ -547,9 +554,6 @@ export class BrandingSettingsService extends BaseService {
     const media = mediaResult[0];
     if (!media) {
       throw new NotFoundError('Media item not found');
-    }
-    if (media.creatorId !== creatorId) {
-      throw new ForbiddenError('Media item does not belong to this user');
     }
     if (media.mediaType !== MEDIA_TYPES.VIDEO) {
       throw new ValidationError('The intro film must be a video');

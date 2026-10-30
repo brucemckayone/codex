@@ -17,9 +17,19 @@ import type { WaitUntilFn } from './helpers/invalidate';
  * keys no longer expire at all, so a data TTL can never outlive the version key
  * that stales it — and there is no second number left to drift.
  */
-export interface CacheOptions {
+export interface CacheOptions<T = unknown> {
   /** Time-to-live for cached data in seconds (default: 600 = 10 minutes) */
   ttl?: number;
+  /**
+   * Whether a fetched value may be stored. The value is returned either way;
+   * `false` only skips the write, so the next read fetches again.
+   *
+   * For a fetcher that answers with a FALLBACK when one of its reads fails
+   * (the org's public info serves the brand without its intro film): stored,
+   * that fallback would be served as the truth for the whole TTL after one
+   * blip, with the only trace a warning on the miss that wrote it.
+   */
+  shouldCache?: (data: T) => boolean;
 }
 
 /**

@@ -12,6 +12,13 @@ import {
   preloadPlayerOnIntent,
 } from './load-core';
 
+// The test is about WHEN the core loads, not the core: the real chunk pulls
+// the icon set and every message, a cold transform of which outlasts
+// `vi.waitFor`'s second.
+vi.mock('./PreviewPlayerCore.svelte', () => ({
+  default: function PreviewPlayerCore() {},
+}));
+
 const observed: Element[] = [];
 
 class SpyObserver {

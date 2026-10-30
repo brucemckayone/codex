@@ -6471,6 +6471,22 @@ export const branding_film_none_creator_left = () => `Visitors won't see this fi
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const branding_film_none_failed = () => `Visitors won't see this film. It couldn't be processed, so pick another or upload it again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_film_none_other = () => `Visitors won't see this film.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const branding_film_change = () => `Change film`
 
 
@@ -6512,6 +6528,14 @@ export const branding_film_load_failed = () => `Couldn't load your film.`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const branding_film_library_failed = () => `Couldn't load your videos.`
+
+
+/**
+ * @param {{ shown: NonNullable<unknown>, total: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_film_library_capped = (params) => `Showing ${params.shown} of your ${params.total} finished videos.`
 
 
 /**

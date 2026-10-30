@@ -108,6 +108,35 @@ describe('VersionedCache', () => {
       expect(mockKV.put).not.toHaveBeenCalled();
     });
 
+    it('serves but never stores a value shouldCache declines (a fallback)', async () => {
+      // The org's public info answers with a fallback when its intro-film
+      // read fails: stored, one blip would hide the film for the whole TTL.
+      const fetcher = vi
+        .fn()
+        .mockResolvedValueOnce({ introFilm: null, partial: true })
+        .mockResolvedValueOnce({ introFilm: 'film', partial: false });
+      const shouldCache = (data: { partial: boolean }) => !data.partial;
+
+      const first = await cache.get('org-slug', CacheType.ORG_CONFIG, fetcher, {
+        shouldCache,
+      });
+      expect(first).toEqual({ introFilm: null, partial: true });
+      expect(mockKV.put).not.toHaveBeenCalled();
+
+      // The next read fetches again, and stores the whole answer.
+      const second = await cache.get(
+        'org-slug',
+        CacheType.ORG_CONFIG,
+        fetcher,
+        {
+          shouldCache,
+        }
+      );
+      expect(second).toEqual({ introFilm: 'film', partial: false });
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      expect(mockKV.put).toHaveBeenCalledTimes(1);
+    });
+
     it('should return cached data on subsequent access (cache hit)', async () => {
       const fetcher = vi.fn().mockResolvedValue({ name: 'Test User' });
       const version = '1712345678';
@@ -686,7 +715,7 @@ describe('VersionedCache', () => {
 
       expect(CT.USER_PROFILE).toBe('user:profile');
       expect(CT.USER_PREFERENCES).toBe('user:preferences');
-      expect(CT.ORG_CONFIG).toBe('org:config');
+      expect(CT.ORG_CONFIG).toBe('org:config:v2');
       expect(CT.ORG_MEMBERS).toBe('org:members');
       expect(CT.CONTENT_METADATA).toBe('content:metadata');
       expect(CT.CONTENT_ACCESS).toBe('content:access');

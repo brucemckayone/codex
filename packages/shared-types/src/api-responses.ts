@@ -312,17 +312,19 @@ export interface PublicBrandingResponse {
   fontHeading: string | null;
   radiusValue: number;
   densityValue: number;
-  introFilm: IntroFilm | null;
   heroLayout: string;
 }
 
 /**
- * The org intro film, as the public landing page draws it (Codex-376dl).
+ * The org intro film, as the public landing page draws it (Codex-376dl). It
+ * rides on the org's public INFO (the landing's read), not on its branding.
  * `previewUrl` is its 30-second public preview on the CDN. `fullFilm` says
  * whether a press may ask the org film minter for the whole film; it is a
- * hint, and the minter re-checks on every press. Null on the org when there
- * is no film to show: none picked, or one no longer ready, a video, or by a
- * member of the team.
+ * hint, and the minter re-checks on every press. `durationSeconds` is the
+ * length of what a press plays, as the chip says it: the whole film's when
+ * `fullFilm`, otherwise its preview's. Null on the org when there is no film
+ * to show: none picked (or a deleted one), or one no longer ready, a video,
+ * or by a member of the team.
  */
 export interface IntroFilm {
   title: string;
@@ -336,7 +338,8 @@ export interface IntroFilm {
  * The org intro film as the brand studio shows it: what was picked, and
  * which version visitors get. `plays` is `full`, the 30-second `preview` (a
  * paid use, the only cut the rule makes), or `none` with the `reason`
- * visitors see no film.
+ * visitors see no film (`failed`: its transcode failed, so it never will be
+ * ready). `durationSeconds` is the film's own.
  */
 export interface StudioIntroFilm {
   mediaItemId: string;
@@ -344,5 +347,5 @@ export interface StudioIntroFilm {
   posterUrl: string | null;
   durationSeconds: number | null;
   plays: 'full' | 'preview' | 'none';
-  reason?: 'paid' | 'not-ready' | 'not-video' | 'creator-left';
+  reason?: 'paid' | 'not-ready' | 'failed' | 'not-video' | 'creator-left';
 }

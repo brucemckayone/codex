@@ -259,14 +259,20 @@ export async function resolveCourseFilm(
 
 /**
  * Why an org's intro film may not stream in full. `CourseFilmRefusal`'s
- * reasons, with `no-org` for `no-course` and one more:
+ * reasons, with `no-org` for `no-course` and two more:
  *   - `not-video`: the media is audio. The studio picks only video, but a pick
  *     saved before it checked may be audio, and the landing plays a film.
+ *   - `failed`: its transcode failed, so it will never be ready. `not-ready`
+ *     would tell the studio to wait for it.
+ *
+ * A pick whose media was DELETED is an `empty-slot`: the film is gone from
+ * the library, so the studio offers the picker again instead of naming it.
  */
 export type IntroFilmRefusal =
   | 'no-org'
   | 'empty-slot'
   | 'not-ready'
+  | 'failed'
   | 'not-video'
   | 'creator-not-member'
   | 'paid-use';
@@ -310,6 +316,7 @@ export async function resolveIntroFilm(
       thumbnailKey: mediaItems.thumbnailKey,
       hlsPreviewKey: mediaItems.hlsPreviewKey,
       durationSeconds: mediaItems.durationSeconds,
+      status: mediaItems.status,
       ready: asFlag(filmReady()),
       video: asFlag(sql`${mediaItems.mediaType} = ${MEDIA_TYPES.VIDEO}`),
       member: asFlag(creatorIsMember(db, organizations.id)),
@@ -320,9 +327,13 @@ export async function resolveIntroFilm(
       brandingSettings,
       eq(brandingSettings.organizationId, organizations.id)
     )
+    // A deleted pick joins nothing, so it reads as an empty slot.
     .leftJoin(
       mediaItems,
-      eq(mediaItems.id, brandingSettings.introVideoMediaItemId)
+      and(
+        eq(mediaItems.id, brandingSettings.introVideoMediaItemId),
+        isNull(mediaItems.deletedAt)
+      )
     )
     .where(
       and(eq(organizations.id, organizationId), isNull(organizations.deletedAt))
@@ -342,6 +353,9 @@ export async function resolveIntroFilm(
     durationSeconds: row.durationSeconds,
   };
   // As resolveCourseFilm: only the predicate's own answer mints.
+  if (row.status === MEDIA_STATUS.FAILED) {
+    return { ok: false, reason: 'failed', film };
+  }
   if (row.ready !== true) return { ok: false, reason: 'not-ready', film };
   if (row.video !== true) return { ok: false, reason: 'not-video', film };
   if (row.member !== true) {

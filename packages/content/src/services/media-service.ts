@@ -28,7 +28,11 @@ import {
   withCreatorScope,
   withoutTranscodingDetail,
 } from '@codex/database';
-import { mediaItems } from '@codex/database/schema';
+import {
+  brandingSettings,
+  mediaItems,
+  organizations,
+} from '@codex/database/schema';
 import {
   BaseService,
   BusinessLogicError,
@@ -410,14 +414,23 @@ export class MediaItemService extends BaseService {
    *
    * Note: Content referencing this media will still exist but cannot be published
    *
+   * An org whose intro film this was keeps its link (the landing and the
+   * studio read a deleted pick as no film, Codex-376dl), but its public info
+   * is cached with the film's poster and preview, which the sweep removes. So
+   * the delete answers those orgs' slugs, for the caller to invalidate.
+   *
    * @param id - Media item ID
    * @param creatorId - Creator ID (for authorization)
+   * @returns The slugs of the orgs whose intro film the media was
    * @throws {MediaNotFoundError} If media doesn't exist
    */
-  async delete(id: string, creatorId: string): Promise<void> {
+  async delete(
+    id: string,
+    creatorId: string
+  ): Promise<{ introFilmOrgSlugs: string[] }> {
     try {
       // Verify-and-soft-delete inside transaction
-      await this.db.transaction(async (tx) => {
+      const introFilmOrgs = await this.db.transaction(async (tx) => {
         const existing = await tx.query.mediaItems.findFirst({
           where: and(
             eq(mediaItems.id, id),
@@ -438,6 +451,17 @@ export class MediaItemService extends BaseService {
           .where(
             and(eq(mediaItems.id, id), withCreatorScope(mediaItems, creatorId))
           );
+
+        // Keyed on the media just verified as this creator's: only its
+        // owner can pick it as an intro film (linkIntroVideo).
+        return tx
+          .select({ slug: organizations.slug })
+          .from(brandingSettings)
+          .innerJoin(
+            organizations,
+            eq(organizations.id, brandingSettings.organizationId)
+          )
+          .where(eq(brandingSettings.introVideoMediaItemId, id));
       });
       // After commit: a rolled-back delete must not vanish from the studio.
       publishMediaRemoved(this.mediaStatus, id, creatorId, this.obs);
@@ -451,6 +475,7 @@ export class MediaItemService extends BaseService {
         await this.deletePrefixObjects(`${creatorId}/thumbnails/${id}/`, id);
         await this.deletePrefixObjects(`${creatorId}/waveforms/${id}/`, id);
       }
+      return { introFilmOrgSlugs: introFilmOrgs.map((org) => org.slug) };
     } catch (error) {
       if (error instanceof MediaNotFoundError) {
         throw error;

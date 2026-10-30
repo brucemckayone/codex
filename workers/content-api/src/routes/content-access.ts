@@ -110,10 +110,15 @@ const hlsStreamingRateLimit = createMiddleware<HonoEnv>((c, next) =>
 type PlaylistService = ReturnType<typeof createContentAccessService>['service'];
 
 /**
- * The shared tail of the four HLS playlist proxies, once each has parsed and
- * verified its own token (kept explicit in each route, because that is where
- * they differ): a per-request access service, the read, a 404 for a playlist
- * missing from R2, the playlist headers, and the DB cleanup after the response.
+ * The shared tail of the six HLS playlist proxies (content, course film and
+ * org film, master and variant), once each has parsed and verified its own
+ * token (kept explicit in each route, because that is where they differ): a
+ * per-request access service, the read, a 404 for a playlist missing from R2,
+ * the playlist headers, and the DB cleanup after the response.
+ *
+ * The 404 is logged: a token verified for a stream whose playlist is gone is
+ * a stream the minter approved and the visitor cannot play, and nothing else
+ * would say so (the player shows its error; the CDN never reaches a worker).
  */
 async function servePlaylist(
   c: Context<HonoEnv>,
@@ -123,6 +128,8 @@ async function servePlaylist(
   try {
     const playlist = await read(service);
     if (playlist === null) {
+      // The path only: the token rides in the query and is never logged.
+      c.get('obs')?.warn('hls.playlist_missing', { path: c.req.path });
       return c.text('Playlist not found', 404);
     }
     return c.body(playlist, 200, HLS_PLAYLIST_HEADERS);

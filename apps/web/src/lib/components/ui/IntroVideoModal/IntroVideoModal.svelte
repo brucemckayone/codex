@@ -120,8 +120,15 @@
    * The player answers its own keys (Space, K, M, the arrows, F) from
    * anywhere inside it; the theatre adds Escape to close, and keeps Tab
    * inside: from the last control to the first, and back.
+   *
+   * Heard on the WINDOW while open, not on the dialog: a film that fails to
+   * play removes the control that had focus, which drops focus to `<body>`,
+   * and a listener on the dialog then heard nothing, so Escape did nothing
+   * and Tab walked out to the page behind (Codex-s1ebi). Tab from outside
+   * now brings focus back in.
    */
   function handleKey(e: KeyboardEvent) {
+    if (!open || e.defaultPrevented) return;
     if (e.key === 'Escape') {
       e.preventDefault();
       onclose();
@@ -135,7 +142,10 @@
       const last = stops.at(-1);
       if (!first || !last) return;
       const at = document.activeElement;
-      if (e.shiftKey && (at === first || at === dialogEl)) {
+      if (!dialogEl.contains(at)) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+      } else if (e.shiftKey && (at === first || at === dialogEl)) {
         e.preventDefault();
         last.focus();
       } else if (!e.shiftKey && at === last) {
@@ -201,6 +211,8 @@
   </button>
 {/snippet}
 
+<svelte:window onkeydown={handleKey} />
+
 {#if open}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <div
@@ -212,7 +224,6 @@
     bind:this={dialogEl}
     use:portal
     onclick={handleOverlayClick}
-    onkeydown={handleKey}
   >
     <div class="intro-modal__inner">
       <div class="intro-modal__top">

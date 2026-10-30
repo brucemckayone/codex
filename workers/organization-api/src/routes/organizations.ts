@@ -17,7 +17,11 @@
  * - GET    /api/organizations/check-slug/:slug - Check slug availability
  */
 
-import { resolveIntroFilm, toPublicIntroFilm } from '@codex/access';
+import {
+  resolveIntroFilm,
+  resolveR2PublicBases,
+  toPublicIntroFilm,
+} from '@codex/access';
 import {
   CacheType,
   invalidateOrgPublicCaches,
@@ -189,8 +193,11 @@ app.get(
     input: { params: z.object({ slug: createSlugSchema(255) }) },
     handler: async (ctx): Promise<PublicBrandingResponse> => {
       // Use fetchPublicOrgInfo — ctx.services.settings requires org context
-      // which is unavailable on public (no-auth) endpoints
-      const info = await fetchPublicOrgInfo(ctx, ctx.input.params.slug);
+      // which is unavailable on public (no-auth) endpoints. Branding only:
+      // this uncached route never reads the intro film it would not return.
+      const { info } = await fetchPublicOrgInfo(ctx, ctx.input.params.slug, {
+        withIntroFilm: false,
+      });
 
       return {
         logoUrl: info.logoUrl ?? null,
@@ -202,7 +209,6 @@ app.get(
         fontHeading: info.brandFonts.heading ?? null,
         radiusValue: info.brandRadius ?? 0.5,
         densityValue: info.brandDensity ?? 1,
-        introFilm: info.introFilm,
         heroLayout: info.heroLayout ?? 'default',
       };
     },
@@ -213,6 +219,11 @@ app.get(
  * Fetch public org identity + branding from DB.
  * Extracted so VersionedCache can use it as a fetcher on cache miss,
  * and it can be called directly when CACHE_KV is unavailable.
+ *
+ * Branding, features and the intro film are each non-critical: a part whose
+ * read fails is answered with its fallback, so the page still draws.
+ * `partial` says one did, and the `/info` route then serves the answer
+ * without caching it: stored, one blip would stand for the 4h TTL.
  */
 async function fetchPublicOrgInfo(
   ctx: {
@@ -229,7 +240,8 @@ async function fetchPublicOrgInfo(
     env: Bindings;
     obs?: Pick<ObservabilityClient, 'warn'>;
   },
-  slug: string
+  slug: string,
+  { withIntroFilm }: { withIntroFilm: boolean }
 ) {
   const organization = await ctx.services.organization.getBySlug(slug);
 
@@ -255,8 +267,23 @@ async function fetchPublicOrgInfo(
     await Promise.allSettled([
       brandingSvc.get(),
       featureSvc.get(),
-      resolveIntroFilm(db, organization.id),
+      withIntroFilm ? resolveIntroFilm(db, organization.id) : null,
     ]);
+
+  // Each failed part is served as its fallback below; the answer says so.
+  const failed = Object.entries({
+    branding: brandingResult,
+    features: featuresResult,
+    introFilm: introResult,
+  }).filter(([, result]) => result.status === 'rejected');
+  if (failed.length > 0) {
+    ctx.obs?.warn('Public org info served with fallbacks, not cached', {
+      organizationId: organization.id,
+      failed: failed
+        .map(([part, result]) => `${part}: ${rejectionMessage(result)}`)
+        .join('; '),
+    });
+  }
 
   type BrandingInfo = {
     logoUrl: string | null;
@@ -316,22 +343,24 @@ async function fetchPublicOrgInfo(
       ? featuresResult.value.enableSubscriptions
       : true;
 
-  // Non-critical too: a failed read draws the hero with no film, and says so.
-  if (introResult.status === 'rejected') {
-    ctx.obs?.warn('Intro film read failed; the landing draws no film', {
+  // Non-critical too: a failed read draws the hero with no film.
+  const introResolution =
+    introResult.status === 'fulfilled' ? introResult.value : null;
+  const bases = resolveR2PublicBases(ctx.env);
+  if (introResolution?.film && (!bases.assets || !bases.mediaPreview)) {
+    // A key with no host to resolve it against draws no poster, or no film
+    // at all for a paid one, with nothing on the page to say why.
+    ctx.obs?.warn('r2_public_base.missing', {
       organizationId: organization.id,
-      error:
-        introResult.reason instanceof Error
-          ? introResult.reason.message
-          : String(introResult.reason),
+      assetsBaseSet: Boolean(bases.assets),
+      mediaPreviewBaseSet: Boolean(bases.mediaPreview),
     });
   }
-  const introFilm =
-    introResult.status === 'fulfilled'
-      ? toPublicIntroFilm(introResult.value, ctx.env.R2_PUBLIC_URL_BASE)
-      : null;
+  const introFilm = introResolution
+    ? toPublicIntroFilm(introResolution, bases)
+    : null;
 
-  return {
+  const info = {
     id: organization.id,
     slug: organization.slug,
     name: organization.name,
@@ -361,6 +390,14 @@ async function fetchPublicOrgInfo(
     },
     enableSubscriptions,
   };
+  return { info, partial: failed.length > 0 };
+}
+
+/** A rejected part's message, for the log: never its stack or its cause. */
+function rejectionMessage(result: PromiseSettledResult<unknown>): string {
+  if (result.status !== 'rejected') return '';
+  const { reason } = result;
+  return reason instanceof Error ? reason.message : String(reason);
 }
 
 /**
@@ -393,12 +430,25 @@ app.get(
       // and the stats emit. This is the busiest cached read on the platform and
       // its key is one of the four data slots live in CACHE_KV_PRODUCTION, so
       // it was also one of the reads the hit ratio could not see.
+      //
+      // An answer built with a fallback (a part's read failed) is served but
+      // not stored, so one blip cannot hide the brand or the film for 4h.
+      let partial = false;
       return cachedRead(
         ctx,
         slug,
         CacheType.ORG_CONFIG,
-        () => fetchPublicOrgInfo(ctx, slug),
-        { ttl: CACHE_TTL.ORG_PUBLIC_INFO_SECONDS }
+        async () => {
+          const result = await fetchPublicOrgInfo(ctx, slug, {
+            withIntroFilm: true,
+          });
+          partial = result.partial;
+          return result.info;
+        },
+        {
+          ttl: CACHE_TTL.ORG_PUBLIC_INFO_SECONDS,
+          shouldCache: () => !partial,
+        }
       );
     },
   })

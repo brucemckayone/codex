@@ -187,18 +187,29 @@ describe('org intro film (Codex-376dl)', () => {
       });
     });
 
-    it('refuses unready, deleted and audio media with the reason', async () => {
+    it('refuses unready, failed and audio media with the reason', async () => {
       const transcoding = await seedFilm({ status: 'transcoding' });
-      const deleted = await seedFilm({ deletedAt: new Date() });
+      const failed = await seedFilm({ status: 'failed' });
       const audio = await seedFilm({ mediaType: 'audio' });
 
       const reasons = await Promise.all(
-        [transcoding, deleted, audio].map(async (film) => {
+        [transcoding, failed, audio].map(async (film) => {
           const resolution = await resolveIntroFilm(db, await seedOrg(film));
           return resolution.ok ? 'ok' : resolution.reason;
         })
       );
-      expect(reasons).toEqual(['not-ready', 'not-ready', 'not-video']);
+      // `failed`, not `not-ready`: the studio must not say "wait for it".
+      expect(reasons).toEqual(['not-ready', 'failed', 'not-video']);
+    });
+
+    it('reads a deleted pick as an empty slot, never naming the deleted film', async () => {
+      const deleted = await seedFilm({ deletedAt: new Date() });
+
+      expect(await resolveIntroFilm(db, await seedOrg(deleted))).toEqual({
+        ok: false,
+        reason: 'empty-slot',
+        film: null,
+      });
     });
 
     it("refuses a creator who left, or who is only the org's customer", async () => {

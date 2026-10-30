@@ -66,6 +66,8 @@
       thumbnailUrl: item.thumbnailUrl,
     }))
   );
+  // The read takes the first 100: say so when there are more.
+  const libraryTotal = $derived(library?.current?.pagination?.total ?? 0);
 
   let busy = $state(false);
   let saveError = $state<string | null>(null);
@@ -74,10 +76,13 @@
   function playsNote(view: StudioIntroFilm): string {
     if (view.plays === 'full') return m.branding_film_plays_full();
     if (view.plays === 'preview') return m.branding_film_plays_preview();
+    if (view.reason === 'paid') return m.branding_film_none_paid();
     if (view.reason === 'not-ready') return m.branding_film_none_not_ready();
+    if (view.reason === 'failed') return m.branding_film_none_failed();
     if (view.reason === 'not-video') return m.branding_film_none_not_video();
     if (view.reason === 'creator-left') return m.branding_film_none_creator_left();
-    return m.branding_film_none_paid();
+    // A reason this build does not know yet: say no more than is known.
+    return m.branding_film_none_other();
   }
 
   async function save(write: () => Promise<unknown>) {
@@ -87,6 +92,10 @@
     try {
       await write();
       changing = false;
+      // The command answers the write alone; the film is re-read here, so a
+      // failed read shows as this control's own "Couldn't load your film"
+      // rather than failing a save that already landed.
+      film?.refresh().catch(() => {});
       onsaved?.();
     } catch (error) {
       saveError = queryErrorMessage(error, m.branding_film_save_failed());
@@ -119,7 +128,9 @@
         {m.common_try_again()}
       </Button>
     </div>
-  {:else if isFirstLoad(film)}
+  {:else if film === null || isFirstLoad(film)}
+    <!-- `film` is null until the studio's branding read names the org: the
+         film is not known yet, which is not the same as "No film yet". -->
     <Skeleton height="var(--space-24)" aria-hidden="true" />
   {:else}
     {#if chosen}
@@ -170,6 +181,9 @@
           <Button variant="secondary" size="sm" onclick={() => library?.refresh()}>
             {m.common_try_again()}
           </Button>
+        {:else if isFirstLoad(library)}
+          <!-- Not an empty picker: that would say there are no videos. -->
+          <Skeleton height="var(--space-10)" aria-hidden="true" />
         {:else}
           <MediaPicker
             mediaItems={videos}
@@ -181,6 +195,11 @@
             thumbnails
             showLibraryLink
           />
+          {#if libraryTotal > videos.length}
+            <p class="hero-film__note">
+              {m.branding_film_library_capped({ shown: videos.length, total: libraryTotal })}
+            </p>
+          {/if}
         {/if}
         <p class="hero-film__note">
           {m.branding_film_upload_lead()}

@@ -272,6 +272,8 @@ describe('the time (the stream’s, never the source’s)', () => {
     video.dispatchEvent(new Event('timeupdate'));
     expect(pause).toHaveBeenCalled();
     expect(onended).toHaveBeenCalledTimes(1);
+    // A real end, which a frame may close on.
+    expect(onended).toHaveBeenCalledWith('end');
   });
 });
 
@@ -528,6 +530,8 @@ describe('renewal', () => {
     await settle();
     expect(renew).toHaveBeenCalledTimes(1);
     expect(onended).toHaveBeenCalledTimes(1);
+    // Not a real end: the hero, which closes on one, must not close here.
+    expect(onended).toHaveBeenCalledWith('lapsed');
     expect(pause).toHaveBeenCalled();
     expect(root.querySelector('.again')).not.toBeNull();
     expect(attached).toEqual([FULL]);

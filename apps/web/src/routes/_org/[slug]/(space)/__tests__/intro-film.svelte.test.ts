@@ -117,36 +117,39 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+/** Mount the landing; its props are live, so a test can re-run the load. */
 async function mountLanding(introFilm: IntroFilm | null | undefined) {
+  const props = $state({
+    data: {
+      org: {
+        id: ORG_ID,
+        slug: 'studio-alpha',
+        name: 'Studio Alpha',
+        description: null,
+        logoUrl: null,
+        introFilm,
+      },
+      user: null,
+      allContent: [],
+      featuredJourneys: [],
+      journeys: [],
+      stats: null,
+      feedCategories: [],
+      categories: Promise.resolve([]),
+      creators: Promise.resolve({ items: [], total: 0 }),
+      continueWatching: Promise.resolve([]),
+      subscriptionContext: Promise.resolve(null),
+      enableSubscriptions: false,
+      subscriptionPricing: null,
+    },
+  });
   component = mount(OrgLandingPage, {
     target: document.body,
-    props: {
-      data: {
-        org: {
-          id: ORG_ID,
-          slug: 'studio-alpha',
-          name: 'Studio Alpha',
-          description: null,
-          logoUrl: null,
-          introFilm,
-        },
-        user: null,
-        allContent: [],
-        featuredJourneys: [],
-        journeys: [],
-        stats: null,
-        feedCategories: [],
-        categories: Promise.resolve([]),
-        creators: Promise.resolve({ items: [], total: 0 }),
-        continueWatching: Promise.resolve([]),
-        subscriptionContext: Promise.resolve(null),
-        enableSubscriptions: false,
-        subscriptionPricing: null,
-      },
-    } as never,
+    props: props as never,
   });
   await tick();
   flushSync();
+  return props;
 }
 
 const chip = () => document.querySelector<HTMLButtonElement>('.hero__film');
@@ -240,6 +243,30 @@ describe('org landing: a press on a desktop', () => {
     await mountLanding({ ...FILM, fullFilm: true });
     press();
     await vi.waitFor(() => expect(attached).toEqual([PREVIEW]));
+  });
+
+  test('a full film with no preview, refused, fails at once and loads nothing', async () => {
+    requestOrgFilm.mockResolvedValue(null);
+    await mountLanding({ ...FILM, previewUrl: null, fullFilm: true });
+    press();
+    await vi.waitFor(() =>
+      expect(bloom()?.textContent).toContain(m.player_error())
+    );
+    // Never a made-up address: '' would have loaded the page as a playlist.
+    expect(attached).toEqual([]);
+  });
+
+  test('a film taken away mid-play closes, and the hero is usable again', async () => {
+    // A re-run of the load (the creator removed the film) while it plays.
+    const props = await mountLanding(FILM);
+    press();
+    expect(heroContent()?.inert).toBe(true);
+
+    props.data.org.introFilm = null;
+    flushSync();
+
+    expect(bloom()).toBeNull();
+    expect(heroContent()?.inert).toBe(false);
   });
 
   test('Escape closes it wherever focus is, and the chip has focus again', async () => {

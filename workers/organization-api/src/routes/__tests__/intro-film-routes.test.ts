@@ -1,12 +1,12 @@
 /**
  * The org intro film's two organization-api reads (Codex-376dl).
  *
- * PUBLIC: `/public/:slug/info` (KV cache-aside) and `/public/:slug` (CDN only)
- * both carry `introFilm`, built from `resolveIntroFilm`, the check the
- * content-api minter runs. The landing must never be told a film plays in
- * full when the minter would refuse it, and is never handed the media's id
- * as a field: the minter resolves the film from the org, so nothing public
- * needs it.
+ * PUBLIC: `/public/:slug/info` (KV cache-aside) carries `introFilm`, built
+ * from `resolveIntroFilm`, the check the content-api minter runs; the
+ * branding-only `/public/:slug` (CDN only) never reads it. The landing must
+ * never be told a film plays in full when the minter would refuse it, and is
+ * never handed the media's id as a field: the minter resolves the film from
+ * the org, so nothing public needs it. A failed read is served, never cached.
  *
  * STUDIO: `GET /:id/settings/branding/intro-video` is for the people who
  * manage the brand. A subscriber holds a membership row too, so the policy is
@@ -153,13 +153,17 @@ describe('public info: the landing film', () => {
     expect(resolveSpy).toHaveBeenCalledWith(expect.anything(), ORG_ID);
   });
 
-  it('offers a paid film as its preview only', async () => {
+  it("offers a paid film as its preview only, at the preview's length", async () => {
     const { body } = await publicInfo({
       ok: false,
       reason: 'paid-use',
-      film: FILM,
+      film: { ...FILM, durationSeconds: 1800 },
     });
-    expect(body.data.introFilm).toMatchObject({ fullFilm: false });
+    // The chip says what a press plays: 0:30, not the film's 30:00.
+    expect(body.data.introFilm).toMatchObject({
+      fullFilm: false,
+      durationSeconds: 30,
+    });
   });
 
   it('offers no film when the pick is refused', async () => {
@@ -193,7 +197,32 @@ describe('public info: the landing film', () => {
     expect(body.data).toMatchObject({ brandColors: { primary: '#112233' } });
   });
 
-  it('carries the same film on /public/:slug', async () => {
+  it('serves a failed film read uncached, so the next read asks again', async () => {
+    const slug = freshSlug();
+    orgSpies.getBySlug.mockResolvedValue({
+      id: ORG_ID,
+      slug,
+      name: 'Studio Alpha',
+      description: null,
+    });
+    resolveSpy.mockRejectedValueOnce(new Error('neon blip'));
+    resolveSpy.mockResolvedValueOnce({ ok: true, film: FILM });
+
+    const first = (await (await readPublic(`/public/${slug}/info`)).json()) as {
+      data: { introFilm: unknown };
+    };
+    const second = (await (
+      await readPublic(`/public/${slug}/info`)
+    ).json()) as { data: { introFilm: unknown } };
+
+    expect(first.data.introFilm).toBeNull();
+    // Cached, the blip would have stood for 4h; it was not, so this read
+    // went to the DB and found the film.
+    expect(second.data.introFilm).toMatchObject({ fullFilm: true });
+    expect(resolveSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('never reads the film on the branding-only /public/:slug', async () => {
     const slug = freshSlug();
     orgSpies.getBySlug.mockResolvedValue({
       id: ORG_ID,
@@ -204,8 +233,9 @@ describe('public info: the landing film', () => {
     resolveSpy.mockResolvedValue({ ok: true, film: FILM });
     const res = await readPublic(`/public/${slug}`);
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { data: { introFilm: unknown } };
-    expect(body.data.introFilm).toMatchObject({ fullFilm: true });
+    const body = (await res.json()) as { data: Record<string, unknown> };
+    expect(body.data).not.toHaveProperty('introFilm');
+    expect(resolveSpy).not.toHaveBeenCalled();
   });
 });
 

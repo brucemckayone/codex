@@ -70,7 +70,7 @@ export async function cachedRead<T>(
   id: string,
   type: string,
   fetcher: () => Promise<T>,
-  options: CacheOptions = {}
+  options: CacheOptions<T> = {}
 ): Promise<T> {
   const kv = ctx.env.CACHE_KV;
   if (!kv) return fetcher();

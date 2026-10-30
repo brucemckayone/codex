@@ -183,7 +183,17 @@ describe('the Film control', () => {
     expect(option('Studio tour').querySelector('img')).toBeNull();
   });
 
-  test('choosing a video links it and reloads the preview', async () => {
+  test('says nothing about the film until the studio knows its org', () => {
+    // The store opens once the studio's branding read lands; until then the
+    // film is unknown, which is not "No film yet".
+    brandEditor.close();
+    render();
+    expect(text()).not.toContain(m.branding_film_empty());
+    expect(document.querySelector('.media-picker')).toBeNull();
+    expect(listMedia).not.toHaveBeenCalled();
+  });
+
+  test('choosing a video links it, re-reads the film, and reloads the preview', async () => {
     render();
     openPicker();
     option('Studio tour').dispatchEvent(
@@ -196,6 +206,29 @@ describe('the Film control', () => {
       orgId: ORG_ID,
       mediaItemId: OTHER,
     });
+    // The command answers the write alone: the control re-reads the film.
+    expect(film.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  test('while the library loads, it shows no empty picker', () => {
+    library = fakeQuery<{ items: unknown[] }>(undefined);
+    listMedia.mockImplementation(() => library);
+    render();
+    expect(
+      document.querySelector('input.picker-input, button.trigger-preview')
+    ).toBeNull();
+  });
+
+  test('says when it shows only the first of many videos', () => {
+    library = fakeQuery<{ items: unknown[]; pagination: { total: number } }>({
+      items: ROWS,
+      pagination: { total: 140 },
+    });
+    listMedia.mockImplementation(() => library);
+    render();
+    expect(text()).toContain(
+      m.branding_film_library_capped({ shown: ROWS.length, total: 140 })
+    );
   });
 
   test('a film that plays in full says so, and reads no library', () => {
@@ -222,6 +255,8 @@ describe('the Film control', () => {
     const cases: Array<[StudioIntroFilm['reason'], string]> = [
       ['paid', m.branding_film_none_paid()],
       ['not-ready', m.branding_film_none_not_ready()],
+      // Not "until it has finished processing": it never will.
+      ['failed', m.branding_film_none_failed()],
       ['not-video', m.branding_film_none_not_video()],
       ['creator-left', m.branding_film_none_creator_left()],
     ];
