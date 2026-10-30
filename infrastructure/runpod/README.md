@@ -8,7 +8,7 @@ This worker runs on RunPod's serverless GPU infrastructure to:
 
 - Transcode video/audio to multi-quality HLS streams
 - Generate archive-quality mezzanine files (stored in B2)
-- Extract thumbnails and preview clips
+- Extract thumbnails, and a 30-second preview clip of every video and audio source
 - Generate audio waveform visualizations
 - Send HMAC-signed webhook callbacks on completion
 

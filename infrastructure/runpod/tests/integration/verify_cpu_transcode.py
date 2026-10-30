@@ -110,6 +110,57 @@ def test_transcode_function():
                 raise Exception(f"{variant}: playlist missing #EXT-X-BYTERANGE")
 
         print("✅ Single-file HLS verified (one stream.ts + byte-range per variant)")
+
+        # Audio preview (Codex-hro3u): 30s from the 10% mark, audio only.
+        print("Running create_audio_preview...")
+        audio_path = os.path.join(TEST_ASSETS_DIR, "test_audio.m4a")
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=40",
+                "-ac",
+                "2",
+                audio_path,
+            ],
+            check=True,
+        )
+        audio_dir = os.path.join(OUTPUT_DIR, "audio-hls")
+        handler_module.create_audio_preview(audio_path, audio_dir, 40)
+        probe = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration:stream=codec_type,codec_name,sample_rate",
+                "-of",
+                "json",
+                os.path.join(audio_dir, "preview", "stream.ts"),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        import json
+
+        found = json.loads(probe.stdout)
+        streams = [
+            (s["codec_type"], s["codec_name"], s.get("sample_rate"))
+            for s in found["streams"]
+        ]
+        if streams != [("audio", "aac", "48000")]:
+            raise Exception(
+                f"audio preview: expected one 48 kHz AAC stream, got {streams}"
+            )
+        seconds = float(found["format"]["duration"])
+        if abs(seconds - 30) > 0.5:
+            raise Exception(f"audio preview: expected 30s, got {seconds:.2f}s")
+        print("✅ Audio preview verified (30s, audio-only 48 kHz AAC)")
+
         print("✅ CPU Transcode successful")
 
     except Exception as e:

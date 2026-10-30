@@ -5,7 +5,7 @@
     "durationSeconds": 180,
     "height": null,
     "hlsMasterKey": "k9Xq2LmVt7RzP4wN/hls/550e8400-e29b-41d4-a716-446655440000/master.m3u8",
-    "hlsPreviewKey": null,
+    "hlsPreviewKey": "k9Xq2LmVt7RzP4wN/hls/550e8400-e29b-41d4-a716-446655440000/preview/preview.m3u8",
     "loudnessIntegrated": -1400,
     "loudnessPeak": -50,
     "loudnessRange": 500,

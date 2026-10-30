@@ -9,7 +9,7 @@ Pipeline:
 3. Create mezzanine (CRF 18) → Upload to B2
 4. Two-pass loudness analysis
 5. Transcode HLS variants (1080p/720p/480p/360p + source fallback)
-6. Generate preview (30s at 720p)
+6. Generate preview (30s: 720p video, or audio-only AAC for an audio source)
 7. Extract thumbnail (10% mark)
 8. Generate waveform JSON + PNG (audio only)
 9. Upload outputs to R2
@@ -62,6 +62,7 @@ FEATURES = {
     "loudness_analysis": _env_flag("ENABLE_LOUDNESS_ANALYSIS", default=True),
     "waveform_image": _env_flag("ENABLE_WAVEFORM_IMAGE", default=True),
     "video_preview": _env_flag("ENABLE_VIDEO_PREVIEW", default=True),
+    "audio_preview": _env_flag("ENABLE_AUDIO_PREVIEW", default=True),
 }
 
 
@@ -1395,6 +1396,15 @@ def transcode_audio_hls(
     return ["audio"] if variant_playlists else []
 
 
+def preview_window(duration: int) -> tuple[int, int]:
+    """(start, length) in seconds of a source's preview: from the 10% mark,
+    PREVIEW_DURATION long or to the end. Every preview, video or audio, is cut
+    here. The sales page states a preview's length by the same rule, with a
+    TypeScript twin in @codex/access (Codex-61zsk.73): change one, change both."""
+    start_time = max(0, int(duration * 0.1))
+    return start_time, min(PREVIEW_DURATION, duration - start_time)
+
+
 def _build_preview_cmd(
     input_path: str,
     preview_dir: str,
@@ -1437,8 +1447,7 @@ def create_preview(
     preview_dir = os.path.join(output_dir, "preview")
     os.makedirs(preview_dir, exist_ok=True)
 
-    start_time = max(0, int(duration * 0.1))
-    preview_duration = min(PREVIEW_DURATION, duration - start_time)
+    start_time, preview_duration = preview_window(duration)
     short_side = PREVIEW_HEIGHT
     if source_short_side:
         short_side = min(PREVIEW_HEIGHT, even_floor(source_short_side))
@@ -1457,6 +1466,56 @@ def create_preview(
         ),
         lambda: _validate_hls_rung(preview_dir, playlist_path, "preview"),
         "preview",
+        timeout=120,
+    )
+
+
+def _build_audio_preview_cmd(
+    input_path: str, preview_dir: str, start_time: int, preview_duration: int
+) -> list[str]:
+    """Build ffmpeg command for an audio preview clip: audio-only single-file
+    HLS, levelled like the audio rungs so it sounds as the full track does.
+
+    Not TOLERANT_DECODE, for the reason _build_audio_hls_cmd gives.
+    """
+    return [
+        "ffmpeg",
+        "-y",
+        "-ss",
+        str(start_time),
+        "-i",
+        input_path,
+        "-t",
+        str(preview_duration),
+        "-vn",
+        *_audio_codec("128k"),
+        "-af",
+        LOUDNORM,
+        *_hls_output(
+            os.path.join(preview_dir, "stream.ts"),
+            os.path.join(preview_dir, "preview.m3u8"),
+        ),
+    ]
+
+
+def create_audio_preview(input_path: str, output_dir: str, duration: int) -> None:
+    """Create an audio source's 30-second preview, in the same place and from
+    the same window (preview_window) as a video's, so the web reads both alike
+    (Codex-hro3u). Audio needs no GPU, so there is one CPU try."""
+    print("Creating audio preview clip...")
+
+    preview_dir = os.path.join(output_dir, "preview")
+    os.makedirs(preview_dir, exist_ok=True)
+
+    start_time, preview_duration = preview_window(duration)
+    playlist_path = os.path.join(preview_dir, "preview.m3u8")
+    _encode_with_fallback(
+        False,
+        lambda _gpu: _build_audio_preview_cmd(
+            input_path, preview_dir, start_time, preview_duration
+        ),
+        lambda: _validate_hls_rung(preview_dir, playlist_path, "audio preview"),
+        "audio preview",
         timeout=120,
     )
 
@@ -1951,6 +2010,11 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
         if FEATURES["video_preview"] and media_type == "video" and duration > 0:
             progress.report("preview", 72)
             create_preview(input_path, hls_dir, duration, use_gpu, short_side, tonemap)
+            preview_generated = True
+        elif FEATURES["audio_preview"] and media_type == "audio" and duration > 0:
+            # The sales page's audio reel plays this (Codex-hro3u).
+            progress.report("preview", 72)
+            create_audio_preview(input_path, hls_dir, duration)
             preview_generated = True
 
         # Upload HLS to R2 (includes preview if generated above)
