@@ -10,7 +10,7 @@
 -->
 <script lang="ts">
   import ScrollStrip from '../../primitives/ScrollStrip.svelte';
-  import { type Picture, stripShape } from './arrange';
+  import { type OpenPicture, type Picture, stripShape } from './arrange';
   import { GALLERY_COPY } from './copy';
   import GalleryPicture from './GalleryPicture.svelte';
 
@@ -19,9 +19,10 @@
     /** The region's name: the section heading, when there is one. */
     label?: string;
     anchor: string;
+    onopen?: OpenPicture;
   }
 
-  const { pictures, label, anchor }: Props = $props();
+  const { pictures, label, anchor, onopen }: Props = $props();
 </script>
 
 <div class="gallery-strip">
@@ -34,7 +35,7 @@
   >
     {#each pictures as picture, index (index)}
       <li class="gallery-strip__item" data-shape={stripShape(index)}>
-        <GalleryPicture {picture} />
+        <GalleryPicture {picture} {index} count={pictures.length} {onopen} />
       </li>
     {/each}
   </ScrollStrip>

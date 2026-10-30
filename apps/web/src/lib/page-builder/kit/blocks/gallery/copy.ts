@@ -8,4 +8,14 @@ export const GALLERY_COPY = {
   strip: 'Pictures',
   previous: 'Previous picture',
   next: 'Next picture',
+  /** A tile's press, counted from 1: "Open picture 3 of 8: A mat by the window". */
+  open: (index: number, count: number, alt: string) =>
+    alt
+      ? `Open picture ${index} of ${count}: ${alt}`
+      : `Open picture ${index} of ${count}`,
+  /** The lightbox's name for a screen reader when the section has no heading. */
+  lightbox: 'Pictures',
+  close: 'Close',
+  /** Where the lightbox is in the set, counted from 1: "3 / 8". */
+  counter: (index: number, count: number) => `${index} / ${count}`,
 } as const;

@@ -3,7 +3,12 @@
  * so every arrangement is tested at every count it can meet (1–12).
  */
 import { clampedSizes } from '$lib/utils/image';
-import { columnSizes, type PageImageVariant } from '../../../page-images';
+import {
+  columnSizes,
+  type PageImageVariant,
+  readSize,
+  resolvePageImageUrl,
+} from '../../../page-images';
 
 /** One picture, resolved: its URL (none draws the kit's plate), its description, its caption. */
 export interface Picture {
@@ -15,6 +20,26 @@ export interface Picture {
   /** Its stored sizes (`pageImageSrcset`) and how wide its tile is drawn (`pictureSizes`). */
   srcset?: string;
   sizes?: string;
+  /** What the lightbox shows (`fullPicture`); none without a CDN base. */
+  full?: { url: string; w?: number; h?: number };
+}
+
+/** A tile's press: which picture, counted from 0, and the tile focus returns to. */
+export type OpenPicture = (index: number, from: HTMLElement) => void;
+
+/**
+ * The picture the lightbox shows: the largest file its reference has, `xl`
+ * (1600w) where it records its size, else `lg` (800w, `resolvePageImageUrl`),
+ * with that size so the frame knows its shape before the file arrives.
+ */
+export function fullPicture(
+  ref: unknown,
+  cdnBase: string | null | undefined
+): Picture['full'] {
+  const url = resolvePageImageUrl(ref, 'xl', cdnBase);
+  if (!url) return undefined;
+  const size = readSize(ref);
+  return size ? { url, w: size.w, h: size.h } : { url };
 }
 
 /**
@@ -82,6 +107,23 @@ export function mosaicTiles(count: number): MosaicTile[] {
     { length: count },
     (_, index) => designed[index] ?? 'small'
   );
+}
+
+const CAPTION_OVER: ReadonlySet<MosaicTile> = new Set([
+  'single',
+  'large',
+  'wide',
+]);
+
+/**
+ * Where a mosaic tile's caption sits. Only the broad tiles have the room to
+ * carry words on the picture's foot; a square, tall or small one has its
+ * caption beneath, as the grid's and the strip's are. On a phone every tile
+ * but the first drops its caption from view (`GalleryMosaic`), and the
+ * lightbox shows it.
+ */
+export function mosaicCaption(tile: MosaicTile): 'over' | 'under' {
+  return CAPTION_OVER.has(tile) ? 'over' : 'under';
 }
 
 /**
