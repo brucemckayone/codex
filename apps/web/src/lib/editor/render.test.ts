@@ -5,14 +5,13 @@ import { renderContentBody } from './render';
 vi.mock('$lib/observability', () => ({ logger: { error: vi.fn() } }));
 
 /**
- * Guards the prod 500 on /content/liberty (Codex-eb00a.2): the content-detail
- * SSR load renders TipTap JSON bodies via `generateHTML`, which must come from
- * `@tiptap/html/server` — the browser `@tiptap/html` build throws when `window`
- * is undefined (Cloudflare Workers / workerd), 500-ing the whole page.
+ * renderContentBody under Node (jsdom): what it renders, what it strips, and
+ * that a body it cannot render degrades to null with a log.
  *
- * These run under jsdom (where `window` exists), so the "no-window" test below
- * simulates workerd explicitly — that is the only case that distinguishes the
- * browser build from the server build here.
+ * Node cannot show whether the renderers run in production. workerd lacks
+ * APIs Node has, and until Codex-yzxu0 every production render threw while a
+ * "window is undefined" test here passed. render-html.workerd.test.ts runs
+ * the renderers inside workerd.
  */
 
 const paragraphDoc = {
@@ -51,24 +50,6 @@ describe('renderContentBody', () => {
     await expect(
       renderContentBody({ contentBodyJson: bad }, { contentId: 'c1' })
     ).resolves.toBeNull();
-  });
-
-  it('renders even when global window is undefined (workerd SSR)', async () => {
-    // Reproduces the prod condition: the browser @tiptap/html build throws on
-    // `typeof window === "undefined"`; the /server build does not. If this
-    // returns null, the browser import has regressed (throw → degrade → null).
-    const g = globalThis as unknown as { window?: unknown };
-    const saved = g.window;
-    g.window = undefined;
-    try {
-      const html = await renderContentBody(
-        { contentBodyJson: paragraphDoc },
-        { contentId: 'c1' }
-      );
-      expect(html).toContain('Liberty body');
-    } finally {
-      g.window = saved;
-    }
   });
 });
 

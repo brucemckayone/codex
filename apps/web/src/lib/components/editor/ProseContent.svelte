@@ -5,7 +5,7 @@
   Provides beautiful long-form typography that inherits org branding
   CSS variables (colors, fonts, density, radius) automatically.
 
-  @prop {string} html - Pre-rendered HTML string from generateHTML()
+  @prop {string} html - Pre-rendered, sanitised HTML from renderContentBody()
 -->
 <script lang="ts">
   interface Props {

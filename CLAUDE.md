@@ -195,6 +195,10 @@ comments. The reasoning for its settings lives here.
     (92%) had real call sites and the category was 46% of the whole backlog.
     The trade is real: a genuinely dead member in those 15 files is now
     invisible, so file it before muting further (Codex-j4gxo, Codex-3wzpl).
+  - **`**/__workerd__/*.ts` is an `entry` glob.** A file there is a Worker
+    that a test starts with wrangler's `unstable_dev`, by path, to run code
+    inside workerd (e.g. `apps/web/src/lib/editor/render-html.workerd.test.ts`,
+    Codex-yzxu0). Nothing imports it, so fallow would call it unused.
   - **Re-run fallow after committing a suppression.** lint-staged runs
     `biome check --write`, and an autofix that reformats the comment silently
     un-suppresses it — the same failure mode as a wrapped `biome-ignore` reason.

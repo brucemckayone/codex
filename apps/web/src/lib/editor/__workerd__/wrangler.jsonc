@@ -1,0 +1,7 @@
+// Names the test-only Worker in render-html.workerd.test.ts. Without a config
+// of its own, wrangler would load the web app's (assets, bindings, routes).
+// The compatibility date and flags come from apps/web/wrangler.jsonc at test
+// time, so this file never drifts from what production runs.
+{
+  "name": "render-html-workerd-test"
+}
