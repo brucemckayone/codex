@@ -113,6 +113,7 @@ def save_template(api_key, registry_auth_id=None):
             {"key": "ENABLE_LOUDNESS_ANALYSIS", "value": "true"},
             {"key": "ENABLE_WAVEFORM_IMAGE", "value": "true"},
             {"key": "ENABLE_VIDEO_PREVIEW", "value": "true"},
+            {"key": "ENABLE_AUDIO_PREVIEW", "value": "true"},
         ],
         "isServerless": True,
     }
