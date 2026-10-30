@@ -13,7 +13,8 @@
   largest file its reference has (`fullPicture`) where a browser cannot
   choose, and fitted whole to the screen with its caption beneath. A large
   file that fails gives way to its tile's, and that failing too, to a line
-  that says so.
+  that says so. The first file to fail at each stage while it is open is
+  logged, by its stage and its size, never by its address.
 
   The pictures are one row of the browser's own scrolling, snapping one to the
   screen, so a swipe moves between them; the counter and the previous and next
@@ -30,6 +31,7 @@
   import { describeThrown } from '$lib/client-log';
   import { ChevronLeftIcon, ChevronRightIcon, XIcon } from '$lib/components/ui/Icon';
   import { logger } from '$lib/observability';
+  import type { PageImageVariant } from '../../../page-images';
   import { holdsStill } from '../../motion/attributes';
   import type { Picture } from './arrange';
   import { GALLERY_COPY } from './copy';
@@ -52,6 +54,10 @@
   const HELD =
     '.gallery-lightbox__picture, .gallery-lightbox__lost, .gallery-lightbox__caption, button';
   const STEPS: Partial<Record<string, 1 | -1>> = { ArrowLeft: -1, ArrowRight: 1 };
+  /** A slide showing this much of itself is the one the row is on: two never both do. */
+  const SETTLED = 0.6;
+  /** The sizes a page image's files are named by (`…/lg.webp`). */
+  const VARIANTS: readonly PageImageVariant[] = ['sm', 'md', 'lg', 'xl'];
 
   /** The picture in view, from 0. */
   let at = $state(0);
@@ -104,10 +110,12 @@
    * it unmounts. The picture the row settles on is the current one, so a
    * swipe moves the counter too.
    *
-   * It holds the page only once it is open, and a setup that throws (a
-   * browser with no `showModal`, an `InvalidStateError`) lets go and closes
-   * the way every other close does: no `close` event would come, so the
-   * block would think it open and every tile would go dead.
+   * It holds the page only once it is open, and a setup that throws (an
+   * `InvalidStateError`, or a later step) lets go and closes. Already modal,
+   * it closes itself, so the page behind is no longer inert when its `close`
+   * gives the tile focus back; never opened, no `close` would come, so it
+   * says it has closed, or the block would think it open and every tile would
+   * go dead. GalleryBlock never opens it where there is no `showModal`.
    */
   const modal: Attachment<HTMLDialogElement> = (node) =>
     // What it reads (the picture in view among them) must never re-open it.
@@ -130,19 +138,22 @@
           settled = new IntersectionObserver(
             (entries) => {
               for (const entry of entries) {
-                if (!entry.isIntersecting) continue;
+                // A slide at the row's edge intersects at 0, and one gliding
+                // away still does: only the one it settles on shows this much.
+                if (entry.intersectionRatio < SETTLED) continue;
                 const index = slides.findIndex((slide) => slide === entry.target);
                 if (index >= 0) at = index;
               }
             },
-            { root: track, threshold: 0.6 }
+            { root: track, threshold: SETTLED }
           );
           for (const slide of slides) settled.observe(slide);
         }
       } catch (error) {
         release();
         logger.warn('gallery.lightbox_open_failed', describeThrown(error));
-        onclose();
+        if (node.open) node.close();
+        else onclose();
       }
       return release;
     });
@@ -167,8 +178,21 @@
     return null;
   }
 
-  function fail(picture: Picture, index: number) {
+  /** The stages a file has failed at since it opened: heard once a stage an open, not once a file. */
+  const reported = new Set<'full' | 'tile'>();
+
+  /**
+   * A file of slide `index` failed: the one the browser chose (`currentSrc`,
+   * from every size the large file has), named only by its size.
+   */
+  function fail(picture: Picture, index: number, img: Element) {
+    const stage = fallen[index] ? 'tile' : 'full';
     fallen[index] = !fallen[index] && picture.url ? 'tile' : 'none';
+    if (reported.has(stage)) return;
+    reported.add(stage);
+    const file = img instanceof HTMLImageElement ? img.currentSrc || img.src : '';
+    const variant = VARIANTS.find((size) => file.endsWith(`/${size}.webp`)) ?? 'unknown';
+    logger.warn('gallery.lightbox_image_failed', { stage, variant });
   }
 </script>
 
@@ -216,7 +240,7 @@
               height={picture.full?.h}
               loading="lazy"
               decoding="async"
-              onerror={() => fail(picture, index)}
+              onerror={(event) => fail(picture, index, event.currentTarget)}
             />
           {:else}
             <p class="gallery-lightbox__lost">{GALLERY_COPY.lost}</p>

@@ -25,7 +25,10 @@ import GalleryBlock from './GalleryBlock.svelte';
  * jsdom 27 draws a `<dialog>` but can neither open it as a modal nor close
  * it, and an element cannot scroll: each is stubbed here as a browser does
  * it (the `open` attribute, then a `close` event), and only where missing.
+ * Nor does a modal make the page behind it inert: `focus` is held to that
+ * here, so nothing outside the open modal takes focus.
  */
+let modal: HTMLElement | null = null;
 const STUBS: [object, string, (this: HTMLElement, ...args: never[]) => void][] =
   [
     [
@@ -33,6 +36,7 @@ const STUBS: [object, string, (this: HTMLElement, ...args: never[]) => void][] =
       'showModal',
       function (this: HTMLElement) {
         this.setAttribute('open', '');
+        modal = this;
       },
     ],
     [
@@ -41,12 +45,14 @@ const STUBS: [object, string, (this: HTMLElement, ...args: never[]) => void][] =
       function (this: HTMLElement) {
         if (!this.hasAttribute('open')) return;
         this.removeAttribute('open');
+        if (modal === this) modal = null;
         this.dispatchEvent(new Event('close'));
       },
     ],
     [Element.prototype, 'scrollTo', () => {}],
   ];
 const stubbed: [object, string][] = [];
+const focus = HTMLElement.prototype.focus;
 
 beforeAll(() => {
   for (const [proto, name, value] of STUBS) {
@@ -54,10 +60,18 @@ beforeAll(() => {
     Object.defineProperty(proto, name, { value, configurable: true });
     stubbed.push([proto, name]);
   }
+  HTMLElement.prototype.focus = function (
+    this: HTMLElement,
+    options?: FocusOptions
+  ) {
+    if (modal?.isConnected && !modal.contains(this)) return;
+    focus.call(this, options);
+  };
 });
 
 afterAll(() => {
   for (const [proto, name] of stubbed) Reflect.deleteProperty(proto, name);
+  HTMLElement.prototype.focus = focus;
 });
 
 let app: ReturnType<typeof mount> | null = null;
@@ -65,6 +79,7 @@ let app: ReturnType<typeof mount> | null = null;
 afterEach(() => {
   if (app) unmount(app);
   app = null;
+  modal = null;
   document.body.innerHTML = '';
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -259,59 +274,122 @@ describe('GalleryBlock: each picture opens the lightbox (p3n §4)', () => {
     expect(counter()).toBe('2 / 4');
   });
 
-  it('follows the picture a swipe settles on, and stops watching once closed', async () => {
-    const watching: {
+  /**
+   * The row's observer, heard as a browser reports to it: each slide by how
+   * much of it shows, a slide at the row's edge intersecting at 0, and only
+   * when a slide crosses a threshold, or first, every slide at once.
+   */
+  describe('the picture the row is on', () => {
+    type Watch = {
       callback: IntersectionObserverCallback;
       options?: IntersectionObserverInit;
       targets: Element[];
       disconnected: boolean;
-    }[] = [];
-    vi.stubGlobal(
-      'IntersectionObserver',
-      class {
-        private readonly watch;
-        constructor(
-          callback: IntersectionObserverCallback,
-          options?: IntersectionObserverInit
-        ) {
-          this.watch = { callback, options, targets: [], disconnected: false };
-          watching.push(this.watch);
-        }
-        observe(target: Element) {
-          this.watch.targets.push(target);
-        }
-        unobserve() {}
-        disconnect() {
-          this.watch.disconnected = true;
-        }
-        takeRecords() {
-          return [];
-        }
-      }
-    );
-    await render({ items: pictures(5) });
-    press(tiles()[0]);
-    const slides = all('.gallery-lightbox__slide');
-    const row = watching.find(
-      (w) => w.options?.root === one('.gallery-lightbox__track')
-    );
-    expect(row?.targets).toEqual(slides);
-    const settle = (index: number) => {
-      const entry = {
-        isIntersecting: true,
-        target: slides[index],
-      } as IntersectionObserverEntry;
-      row?.callback([entry], {} as IntersectionObserver);
-      flushSync();
     };
-    settle(3);
-    expect(counter()).toBe('4 / 5');
-    settle(4);
-    expect(control(GALLERY_COPY.next).getAttribute('aria-disabled')).toBe(
-      'true'
-    );
-    press(control(GALLERY_COPY.close));
-    expect(row?.disconnected).toBe(true);
+
+    /** Opens picture `start` of `count` and gives back the row's observer. */
+    async function watchRow(count: number, start: number) {
+      const watching: Watch[] = [];
+      vi.stubGlobal(
+        'IntersectionObserver',
+        class {
+          private readonly watch: Watch;
+          constructor(
+            callback: IntersectionObserverCallback,
+            options?: IntersectionObserverInit
+          ) {
+            this.watch = {
+              callback,
+              options,
+              targets: [],
+              disconnected: false,
+            };
+            watching.push(this.watch);
+          }
+          observe(target: Element) {
+            this.watch.targets.push(target);
+          }
+          unobserve() {}
+          disconnect() {
+            this.watch.disconnected = true;
+          }
+          takeRecords() {
+            return [];
+          }
+        }
+      );
+      await render({ items: pictures(count) });
+      press(tiles()[start]);
+      const slides = all('.gallery-lightbox__slide');
+      const row = watching.find(
+        (w) => w.options?.root === one('.gallery-lightbox__track')
+      );
+      expect(row?.targets).toEqual(slides);
+      /**
+       * One report: each slide by its place, how much of it shows, and
+       * whether it touches the row (any of it showing does; `edge`, at 0).
+       */
+      const report = (...seen: [index: number, ratio: number | 'edge'][]) => {
+        row?.callback(
+          seen.map(
+            ([index, ratio]) =>
+              ({
+                target: slides[index],
+                intersectionRatio: ratio === 'edge' ? 0 : ratio,
+                isIntersecting: ratio === 'edge' || ratio > 0,
+              }) as IntersectionObserverEntry
+          ),
+          {} as IntersectionObserver
+        );
+        flushSync();
+      };
+      return { row, slides, report };
+    }
+
+    it('stays on the picture it opened on through the first report, whose neighbours touch the row', async () => {
+      const { report } = await watchRow(5, 2);
+      // The slides either side sit at the row's edge: intersecting, at 0.
+      report([0, 0], [1, 'edge'], [2, 1], [3, 'edge'], [4, 0]);
+      expect(counter()).toBe('3 / 5');
+      expect(control(GALLERY_COPY.next).getAttribute('aria-disabled')).toBe(
+        'false'
+      );
+    });
+
+    it('is not pulled back by the slide a press glides away from, so a second press steps on', async () => {
+      const { report } = await watchRow(5, 0);
+      report([0, 1], [1, 'edge'], [2, 0], [3, 0], [4, 0]);
+      press(control(GALLERY_COPY.next));
+      expect(counter()).toBe('2 / 5');
+      // Mid-glide, the first slide drops under the threshold, still in view.
+      report([0, 0.59]);
+      expect(counter()).toBe('2 / 5');
+      press(control(GALLERY_COPY.next));
+      expect(counter()).toBe('3 / 5');
+    });
+
+    it('follows the picture a swipe settles on, and stops watching once closed', async () => {
+      const { row, report } = await watchRow(5, 0);
+      report([0, 1], [1, 'edge'], [2, 0], [3, 0], [4, 0]);
+      // Each swipe: the slide it leaves drops under the threshold first,
+      // then the one it comes to rises over it.
+      for (const [from, to] of [
+        [0, 1],
+        [1, 2],
+        [2, 3],
+      ]) {
+        report([from, 0.59]);
+        report([to, 0.61]);
+      }
+      expect(counter()).toBe('4 / 5');
+      report([3, 0.59]);
+      report([4, 0.61]);
+      expect(control(GALLERY_COPY.next).getAttribute('aria-disabled')).toBe(
+        'true'
+      );
+      press(control(GALLERY_COPY.close));
+      expect(row?.disconnected).toBe(true);
+    });
   });
 
   describe('closing', () => {
@@ -357,8 +435,10 @@ describe('GalleryBlock: each picture opens the lightbox (p3n §4)', () => {
       expect(locked()).toBe(false);
     });
 
-    // A browser with no `showModal`, or one that refuses it, fires no
-    // `close`: the page stayed held and every tile went dead.
+    // A browser that refuses `showModal` fires no `close`: the page stayed
+    // held and every tile went dead. One that opened it and failed after
+    // must close it first: the tile, behind a modal, is inert and refuses
+    // focus, which then fell to the body as the dialog went.
     it.each([
       [
         'showModal throws',
@@ -442,6 +522,78 @@ describe('GalleryBlock: each picture opens the lightbox (p3n §4)', () => {
           .querySelector('img')
           ?.getAttribute('src')
       ).toBe(`${CDN}/landing-pages/p1/images/g2/lg.webp`);
+    });
+
+    it('says so once a stage an open, by the size the browser chose, never by its address', async () => {
+      const warned = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      const failures = () =>
+        warned.mock.calls.filter(
+          ([event]) => event === 'gallery.lightbox_image_failed'
+        );
+      await render({ items: pictures(3) });
+      const tile = tiles()[0];
+      press(tile);
+      const picture = (index: number) =>
+        all('.gallery-lightbox__figure')[index].querySelector(
+          'img'
+        ) as HTMLImageElement;
+      // A narrow screen chose the medium file from the large one's srcset.
+      Object.defineProperty(picture(0), 'currentSrc', {
+        value: `${CDN}/landing-pages/p1/images/g1/md.webp`,
+      });
+      fail(picture(0));
+      expect(failures()).toEqual([
+        ['gallery.lightbox_image_failed', { stage: 'full', variant: 'md' }],
+      ]);
+      // Its tile's file is the next stage, heard once; another picture's large
+      // file is a stage already heard: no more.
+      fail(picture(0));
+      fail(picture(1));
+      expect(failures()).toEqual([
+        ['gallery.lightbox_image_failed', { stage: 'full', variant: 'md' }],
+        ['gallery.lightbox_image_failed', { stage: 'tile', variant: 'md' }],
+      ]);
+      // The next open is heard afresh.
+      press(control(GALLERY_COPY.close));
+      press(tile);
+      fail(picture(2));
+      expect(failures()).toEqual([
+        ['gallery.lightbox_image_failed', { stage: 'full', variant: 'md' }],
+        ['gallery.lightbox_image_failed', { stage: 'tile', variant: 'md' }],
+        ['gallery.lightbox_image_failed', { stage: 'full', variant: 'lg' }],
+      ]);
+    });
+  });
+
+  // Safari before 15.4 has no `<dialog>`; a browser can lack only its modal.
+  describe('a browser with no modal dialog', () => {
+    it.each([
+      ['no dialog at all', undefined],
+      ['a dialog that cannot be modal', class {}],
+    ])('with %s: a press opens the large file in a tab of its own, and the page is drawn the same', async (_, dialogClass) => {
+      await render({ items: pictures(3) });
+      const drawn = one('.gallery')?.outerHTML;
+      if (app) unmount(app);
+      vi.stubGlobal('HTMLDialogElement', dialogClass);
+      const opened = vi.spyOn(window, 'open').mockReturnValue(null);
+      await render({ items: pictures(3) });
+      expect(one('.gallery')?.outerHTML).toBe(drawn);
+      press(tiles()[2]);
+      expect(opened).toHaveBeenCalledExactlyOnceWith(
+        `${CDN}/landing-pages/p1/images/g3/lg.webp`,
+        '_blank',
+        'noopener'
+      );
+      expect(dialog()).toBeNull();
+      expect(locked()).toBe(false);
+    });
+
+    it('opens no tab from the canvas', async () => {
+      vi.stubGlobal('HTMLDialogElement', undefined);
+      const opened = vi.spyOn(window, 'open').mockReturnValue(null);
+      await render({ items: pictures(3) }, { edit: { commit: () => {} } });
+      press(tiles()[0]);
+      expect(opened).not.toHaveBeenCalled();
     });
   });
 

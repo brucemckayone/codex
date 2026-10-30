@@ -308,12 +308,14 @@ describe('keyboard', () => {
 // controls, reads its clock and drives it through the core's own buttons
 // (Codex-61zsk.73).
 describe('its own controls, elsewhere', () => {
-  function headless() {
+  function headless(
+    props: Partial<ComponentProps<typeof PreviewPlayerCore>> = {}
+  ) {
     const target = document.createElement('div');
     document.body.appendChild(target);
     const core = mount(PreviewPlayerCore, {
       target,
-      props: { src: SRC, title: 'Slow Mornings', controls: false },
+      props: { src: SRC, title: 'Slow Mornings', controls: false, ...props },
     });
     apps.push(core);
     flushSync();
@@ -341,6 +343,8 @@ describe('its own controls, elsewhere', () => {
       askSound: false,
       ready: false,
       waiting: true,
+      wanted: false,
+      resuming: false,
     });
     Object.defineProperty(video, 'duration', {
       configurable: true,
@@ -363,6 +367,8 @@ describe('its own controls, elsewhere', () => {
       askSound: false,
       ready: true,
       waiting: false,
+      wanted: true,
+      resuming: false,
     });
 
     // A stall mid-play, as the scrubber shows it, and its end.
@@ -410,6 +416,22 @@ describe('its own controls, elsewhere', () => {
     expect(pause.mock.contexts).toEqual([video]);
     core.toggleMute();
     expect(video.muted).toBe(true);
+  });
+
+  // iOS's own HLS loads nothing until something plays: a frame that read
+  // "still loading" here would read it for ever.
+  test('a press the browser refuses outright, muted too, wants nothing: Play, not loading', async () => {
+    play.mockRejectedValue(new DOMException('No sound', 'NotAllowedError'));
+    const { core } = headless({ start: 'sound' });
+    expect(core.clock().wanted).toBe(true);
+    await vi.waitFor(() => expect(core.clock().wanted).toBe(false));
+    expect(play).toHaveBeenCalledTimes(2);
+    expect(core.clock()).toMatchObject({ offerPlay: true, ready: false });
+
+    // A press now is the visitor's again.
+    play.mockResolvedValue(undefined);
+    core.toggle();
+    expect(core.clock().wanted).toBe(true);
   });
 });
 

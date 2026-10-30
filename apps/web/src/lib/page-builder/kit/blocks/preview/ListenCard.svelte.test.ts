@@ -1,8 +1,9 @@
 /**
  * The listening card on a page that can ask for the full recording
  * (Codex-61zsk.73): what its button says, what it shows while the stream
- * loads or stalls, a full recording whose links run out mid-play (no end),
- * and a press that asked for the full recording and got the preview.
+ * loads, stalls or swaps in renewed links, a start the browser refused, a
+ * full recording whose links run out mid-play (no end), and a press that
+ * asked for the full recording and got the preview.
  */
 import {
   afterEach,
@@ -92,6 +93,13 @@ const note = () => document.body.querySelector('.listen__note')?.textContent;
 /** The card's own polite live region (the hidden core has its own). */
 const status = () =>
   document.body.querySelector('.listen__text [role="status"]');
+/** How full the strip is. */
+const strip = () =>
+  Number(
+    document.body
+      .querySelector<HTMLElement>('.listen__fill')
+      ?.style.getPropertyValue('--_played')
+  );
 
 /** Let the page's answer and the stream's attach settle. */
 async function settle() {
@@ -151,11 +159,12 @@ describe('while it loads or stalls, the card says so', () => {
     expect(button()?.getAttribute('aria-busy')).toBe('false');
     expect(status()?.textContent?.trim()).toBe('');
 
-    // Pressed: the page is still asking, nothing has sounded.
+    // Pressed: the page is still asking, nothing has sounded. The button is
+    // busy; the region is never, or what it gains may go unsaid.
     press();
     expect(button()?.getAttribute('aria-busy')).toBe('true');
     expect(time()).toBe(PREVIEW_COPY.loading);
-    expect(status()?.getAttribute('aria-busy')).toBe('true');
+    expect(status()?.hasAttribute('aria-busy')).toBe(false);
     expect(status()?.textContent).toContain(PREVIEW_COPY.loading);
 
     answer({ playlistUrl: FULL });
@@ -175,6 +184,81 @@ describe('while it loads or stalls, the card says so', () => {
     element.dispatchEvent(new Event('playing'));
     flushSync();
     expect(time()).toBe('0:06 / 5:00');
+  });
+
+  test('busy while it swaps in renewed links, held where it stood, and on from there', async () => {
+    vi.useFakeTimers();
+    let renewed: (value: { playlistUrl: string }) => void = () => {};
+    const requestFilm = vi
+      .fn<() => Promise<{ playlistUrl: string } | null>>()
+      .mockResolvedValueOnce({ playlistUrl: FULL })
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          renewed = resolve;
+        })
+      );
+    render({ requestFilm });
+    press();
+    await settle();
+    const element = audio();
+    if (!element) throw new Error('no player');
+    sounds(element, 240);
+    expect(time()).toBe('4:00 / 5:00');
+
+    // Ten minutes on its links run out; the element, detached, reads 0
+    // while the page is asked again.
+    vi.advanceTimersByTime(600_000);
+    expire?.();
+    element.currentTime = 0;
+    element.dispatchEvent(new Event('timeupdate'));
+    await settle();
+    expect(requestFilm).toHaveBeenCalledTimes(2);
+    expect(button()?.getAttribute('aria-busy')).toBe('true');
+    expect(label()).toBe(PREVIEW_COPY.pause);
+    expect(time()).toBe(PREVIEW_COPY.loading);
+    expect(status()?.textContent).toContain(PREVIEW_COPY.loading);
+    expect(strip()).toBeCloseTo(0.8);
+
+    // Paused meanwhile: not loading, and the moment it stood at.
+    press();
+    expect(button()?.getAttribute('aria-busy')).toBe('false');
+    expect(label()).toBe(PREVIEW_COPY.resume);
+    expect(time()).toBe('4:00 / 5:00');
+
+    // Wanted again; the new links land and it carries on from that moment.
+    press();
+    expect(button()?.getAttribute('aria-busy')).toBe('true');
+    renewed({ playlistUrl: `${FULL}2` });
+    await settle();
+    expect(attached).toEqual([FULL, `${FULL}2`]);
+    element.dispatchEvent(new Event('loadedmetadata'));
+    flushSync();
+    expect(element.currentTime).toBe(240);
+    expect(time()).toBe('4:00 / 5:00');
+    for (const name of ['play', 'playing'])
+      element.dispatchEvent(new Event(name));
+    flushSync();
+    expect(button()?.getAttribute('aria-busy')).toBe('false');
+    expect(label()).toBe(PREVIEW_COPY.pause);
+    expect(strip()).toBeCloseTo(0.8);
+  });
+});
+
+describe('a start the browser refused outright', () => {
+  test('shows the length and Play, never "Loading…" for ever', async () => {
+    vi.mocked(HTMLMediaElement.prototype.play).mockRejectedValue(
+      new DOMException('No sound', 'NotAllowedError')
+    );
+    render({ requestFilm: vi.fn(async () => ({ playlistUrl: FULL })) });
+    press();
+    await vi.waitFor(() => {
+      flushSync();
+      expect(button()?.getAttribute('aria-busy')).toBe('false');
+    });
+    expect(audio()).not.toBeNull();
+    expect(label()).toBe(PREVIEW_COPY.play);
+    expect(time()).toBe('0:00 / 5:00');
+    expect(status()?.textContent).not.toContain(PREVIEW_COPY.loading);
   });
 });
 
@@ -223,7 +307,35 @@ describe('a press that asked for the full recording and got the preview', () => 
     press();
     await settle();
     expect(attached).toEqual([PREVIEW]);
+    // Said as it arrives, before the first sound: busy is the button's, not
+    // the region's, or the note could go unannounced.
+    expect(button()?.getAttribute('aria-busy')).toBe('true');
+    expect(status()?.hasAttribute('aria-busy')).toBe(false);
     expect(status()?.textContent).toContain(PREVIEW_COPY.fellBack);
+  });
+
+  test('played through, "Play again" asks for the full recording afresh', async () => {
+    const requestFilm = vi
+      .fn<() => Promise<{ playlistUrl: string } | null>>()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ playlistUrl: FULL });
+    render({ requestFilm });
+    press();
+    await settle();
+    const element = audio();
+    if (!element) throw new Error('no player');
+    expect(attached).toEqual([PREVIEW]);
+    sounds(element, 30);
+    element.dispatchEvent(new Event('ended'));
+    flushSync();
+    expect(label()).toBe(PREVIEW_COPY.again);
+
+    press();
+    await settle();
+    expect(requestFilm).toHaveBeenCalledTimes(2);
+    expect(attached).toEqual([PREVIEW, FULL]);
+    expect(audio()).not.toBe(element);
+    expect(status()?.textContent).not.toContain(PREVIEW_COPY.fellBack);
   });
 
   test('the full recording says nothing of the kind', async () => {

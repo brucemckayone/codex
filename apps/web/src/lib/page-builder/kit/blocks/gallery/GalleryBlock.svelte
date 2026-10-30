@@ -18,7 +18,9 @@
   the lightbox (GalleryLightbox, p3n §4) on that picture; closing it gives
   focus back to the tile. The lightbox exists only while open, so the page's
   markup and the canvas's stay the same, and on the canvas or a thumbnail a
-  press opens nothing: a click there belongs to the editor.
+  press opens nothing: a click there belongs to the editor. A browser with no
+  modal `<dialog>` (Safari before 15.4) opens the picture's large file in a
+  tab of its own instead.
 
   EMPTY. The public page keeps only the words. Wherever the section is only
   being looked at — the canvas, the layout picker, the section gallery, any
@@ -87,8 +89,21 @@
   /** The tile it opened from, which takes focus back when it closes. */
   let opener: HTMLElement | null = null;
 
+  /** Whether this browser can show the lightbox: a modal `<dialog>`. */
+  function modals() {
+    return (
+      typeof HTMLDialogElement === 'function' &&
+      typeof HTMLDialogElement.prototype.showModal === 'function'
+    );
+  }
+
   const open: OpenPicture = (index, from) => {
     if (edit || page.still) return;
+    if (!modals()) {
+      const file = pictures[index]?.full;
+      if (file) window.open(file.url, '_blank', 'noopener');
+      return;
+    }
     opener = from;
     shown = index;
   };

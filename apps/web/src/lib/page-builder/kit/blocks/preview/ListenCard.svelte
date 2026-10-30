@@ -19,23 +19,26 @@
   keeps the card's size, so it pauses once scrolled away and moves the
   floating bar aside as any film does. When the clip ends the core stays,
   the strip full and the time at its end, and the button offers "Play
-  again", which replays it in place; one that cannot play says why beside
-  the button, and a press tries again. A full recording whose links ran out
-  mid-play has not ended (the core's `lapsed`): the card says so, and a
-  press starts it afresh. The canvas never plays.
+  again", which replays it in place, unless it asked for the full recording
+  and got the preview: then, as `InlineFilm`'s "Watch again", it asks
+  afresh. One that cannot play says why beside the button, and a press
+  tries again. A full recording whose links ran out mid-play has not ended
+  (the core's `lapsed`): the card says so, and a press starts it afresh.
+  The canvas never plays.
 
   What the core's own chrome would show, the card shows instead: while the
   player's code, or the stream's first sound, is on its way, or the stream
-  stalls, the time reads "Loading…", the button is busy and the card says
-  so politely; and a press that asked for the full recording and got the
-  preview says so, as `InlineFilm` does over a film.
+  stalls or swaps in renewed links (the strip held where it stood), the
+  time reads "Loading…", the button is busy and the card says so politely;
+  a start the browser refused shows the length and Play; and a press that
+  asked for the full recording and got the preview says so, as
+  `InlineFilm` does over a film.
 
   The ratio is the block's (`--listen-ratio`, 4:3 unless it says otherwise),
   and the card grows past it rather than clip a long line.
 -->
 <script lang="ts">
-  import type { Snippet } from 'svelte';
-  import { MediaLiveRegion } from '$lib/components/media-a11y';
+  import { flushSync, type Snippet } from 'svelte';
   import { type PlayerCore, preloadPlayer } from '$lib/components/player/load-core';
   import type { PlayerClock } from '$lib/components/player/timeline';
   import { clock } from '$lib/components/player/timeline';
@@ -83,6 +86,8 @@
     askSound: false,
     ready: false,
     waiting: false,
+    wanted: false,
+    resuming: false,
   };
 
   /**
@@ -116,14 +121,16 @@
     if (action !== 'play') return LABELS[action];
     return full || press.phase === 'up' ? PREVIEW_COPY.play : PREVIEW_COPY.watch;
   });
-  // The player's code on its way, or the stream before its first sound, or
-  // stalled while it should play: the core's own cues are in its hidden
-  // player, so the card shows and says them.
+  // The player's code on its way, or the stream before its first sound
+  // while it is wanted, or stalled or swapping in renewed links while it
+  // should play: the core's own cues are in its hidden player, so the card
+  // shows and says them. A start the browser refused wants nothing: Play.
   const busy = $derived(
     press.phase === 'loading' ||
       (press.phase === 'up' &&
         !ended &&
-        (!now.ready || (now.waiting && !now.offerPlay)))
+        ((!now.ready && now.wanted) ||
+          ((now.waiting || now.resuming) && !now.offerPlay)))
   );
   // The stream's own length once it says; the length a press plays until then.
   const total = $derived(now.duration > 0 ? now.duration : seconds);
@@ -137,8 +144,19 @@
 
   function start() {
     if (edit) return;
-    if (press.phase === 'up') drive();
+    if (ended && press.fellBack) again();
+    else if (press.phase === 'up') drive();
     else press.start();
+  }
+
+  // Played through on the preview where the full recording was asked for:
+  // "Play again" asks for it afresh, as `InlineFilm`'s "Watch again" does.
+  // The player goes first, so the press brings a fresh one in this tick.
+  function again() {
+    ended = false;
+    press.finish('end');
+    flushSync();
+    press.start();
   }
 
   // A press while it is up does what the core's own buttons would: a refused
@@ -197,11 +215,14 @@
       <p class="listen__line">{@render line()}</p>
       <!-- Said by the live region below while it loads, so not twice. -->
       {#if time}<p class="listen__time" aria-hidden={busy || undefined}>{time}</p>{/if}
-      <MediaLiveRegion loading={busy} loadingLabel={PREVIEW_COPY.loading}>
+      <!-- Always mounted and never busy, as InlineFilm's is: a busy region's
+           changes may go unsaid, so the button alone carries `aria-busy`. -->
+      <div class="listen__status" role="status">
+        {#if busy}<span class="sr-only">{PREVIEW_COPY.loading}</span>{/if}
         {#if press.fellBack && press.phase === 'up' && !ended}
           <p class="listen__note">{PREVIEW_COPY.fellBack}</p>
         {/if}
-      </MediaLiveRegion>
+      </div>
       {#if press.note}<p class="listen__note" role="alert">{press.note}</p>{/if}
     </div>
   </div>
@@ -381,6 +402,12 @@
 
   .listen__note {
     font-size: var(--lp-size-small);
+  }
+
+  /* Its words sit in the column as the others do: an empty region adds no
+     row, so no gap, to the column. */
+  .listen__status {
+    display: contents;
   }
 
   /* The strip, cut to the card's corners on a layer of its own, so the card

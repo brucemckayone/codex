@@ -33,8 +33,9 @@ export function loadedTo(ranges: TimeRanges, time: number): number {
 
 /** Where the film is, for a frame drawing its own controls (the core's `clock()`). */
 export interface PlayerClock {
+  /** Mid-swap (`resuming`), where it stood: the reset element reads 0. */
   time: number;
-  /** The stream's own length; 0 until it says. */
+  /** The stream's own length; 0 until it says. Held mid-swap, as `time` is. */
   duration: number;
   /** The play button would offer Play: paused, or mid-swap and not wanted. */
   offerPlay: boolean;
@@ -44,4 +45,14 @@ export interface PlayerClock {
   ready: boolean;
   /** Nothing to play yet, or the stream has stalled (the scrubber's cue). */
   waiting: boolean;
+  /**
+   * The visitor wants it playing: a press, or a play, and no pause since. A
+   * start the browser refused outright wants nothing, so nothing is loading.
+   */
+  wanted: boolean;
+  /**
+   * Its stream is being swapped (a renewal's new links, a recovery): the
+   * element sits reset and silent until it resumes, as the visitor wants.
+   */
+  resuming: boolean;
 }

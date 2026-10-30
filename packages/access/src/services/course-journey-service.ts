@@ -861,9 +861,9 @@ export class CourseJourneyService extends BaseService {
             )} THEN true ELSE false END`,
           })
           .from(mediaItems)
-          // Media deleted after it was attached stays in its slot until the
-          // creator next saves, so a deleted item must never read back as a
-          // public clip or still: a missing row resolves to null below.
+          // Media deleted after it was attached stays in its slot (nothing
+          // clears it: Codex-tw1kl), so only this read keeps a deleted item
+          // off the page: a missing row resolves to a null clip or still below.
           .where(
             and(inArray(mediaItems.id, mediaIds), isNull(mediaItems.deletedAt))
           );

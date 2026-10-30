@@ -48,7 +48,8 @@
   ITS OWN CONTROLS, ELSEWHERE (opt-in). A frame that draws its own chrome
   over a core with `controls={false}` reads where the film is, and whether
   it is still loading or has stalled (the cues the core's own scrubber and
-  live region show), through the core's own `clock`, and drives it through
+  live region show), wanted, or mid-swap, through the core's own `clock`
+  (which holds where it stood through a swap), and drives it through
   its `toggle` and `toggleMute`
   (bound with `bind:this`), so it plays, pauses, renews and takes refused
   sound exactly as the core's buttons do. The Preview block's listening
@@ -267,6 +268,8 @@
   let wanted = $state(false);
   /** A silent reset waits on its resume (`suspend`, `resumeAt`). */
   let resuming = $state(false);
+  /** Where it stood as a swap reset it: a frame's `clock` holds it until the resume. */
+  let held = { time: 0, duration: 0 };
 
   /** The play button offers Play: mid-swap, unless the visitor wants it playing. */
   const offerPlay = $derived(resuming ? !wanted : paused);
@@ -358,9 +361,11 @@
   /**
    * Where the film is, for a frame drawing its own controls: the element's
    * own figures (its events; nothing polls), read reactively by the frame.
+   * Mid-swap the reset element reads 0, so it holds where it stood.
    */
   export function clock(): PlayerClock {
-    return { time, duration, offerPlay, askSound, ready, waiting };
+    const at = resuming ? held : { time, duration };
+    return { ...at, offerPlay, askSound, ready, waiting, wanted, resuming };
   }
 
   function toggleCaptions() {
@@ -606,6 +611,9 @@
    * press sets, the visitor's intent (`wanted`); after the end nothing resumes.
    */
   function suspend() {
+    // Before the reset's own `timeupdate` lands; a second reset mid-swap
+    // (a 403's, then its renewal's) keeps the first's.
+    if (!resuming) held = { time, duration };
     paused = true;
     disarm();
     resuming = !finished;
@@ -698,6 +706,23 @@
   }
 
   /**
+   * Play now, in this tick (a press's activation holds only here), and
+   * settle it (`start.ts`): refused sound plays muted and asks for it. A
+   * play refused outright leaves it paused, wanting nothing, so a frame's
+   * own controls offer Play rather than load forever (iOS's own HLS loads
+   * nothing until something plays).
+   */
+  function startPlaying(media: HTMLVideoElement) {
+    void settleStart(media, playNow(media), () => wanted && !destroyed).then(
+      (outcome) => {
+        if (destroyed) return;
+        if (outcome === 'muted') askSound = true;
+        else if (outcome === 'failed' && media.paused) wanted = false;
+      }
+    );
+  }
+
+  /**
    * Seek the new stream to `from` once it knows its length, and play on if
    * still wanted. Its wait goes with the stream (`teardown`), so a stream
    * refused before it loads leaves nothing to fire later.
@@ -714,13 +739,11 @@
       unresume = null;
       resuming = false;
       media.currentTime = from;
+      // Read now, as `seek` does: a frame's clock leaves its hold for the
+      // moment it resumes from, never the reset's 0 before the seek reports.
+      time = media.currentTime;
       if (displaced(media, since)) wanted = false;
-      if (!wanted) return;
-      void settleStart(media, playNow(media), () => wanted && !destroyed).then(
-        (outcome) => {
-          if (!destroyed && outcome === 'muted') askSound = true;
-        }
-      );
+      if (wanted) startPlaying(media);
     };
     if (media.readyState >= HTMLMediaElement.HAVE_METADATA) {
       carryOn();
@@ -744,11 +767,7 @@
     if (start === 'sound') {
       wanted = true;
       media.muted = false;
-      void settleStart(media, playNow(media), () => wanted && !destroyed).then(
-        (outcome) => {
-          if (!destroyed && outcome === 'muted') askSound = true;
-        }
-      );
+      startPlaying(media);
     }
     if (takeFocus) playButton?.focus({ preventScroll: true });
 
