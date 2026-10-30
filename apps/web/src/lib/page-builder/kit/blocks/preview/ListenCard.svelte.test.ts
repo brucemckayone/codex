@@ -242,6 +242,64 @@ describe('while it loads or stalls, the card says so', () => {
     expect(label()).toBe(PREVIEW_COPY.pause);
     expect(strip()).toBeCloseTo(0.8);
   });
+
+  test('pressed while paused past its links’ end: busy while it asks, and a second press never plays the dead links', async () => {
+    vi.useFakeTimers();
+    let renewed: (value: { playlistUrl: string }) => void = () => {};
+    const requestFilm = vi
+      .fn<() => Promise<{ playlistUrl: string; expiresAt?: string } | null>>()
+      .mockResolvedValueOnce({
+        playlistUrl: FULL,
+        expiresAt: new Date(Date.now() + 600_000).toISOString(),
+      })
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          renewed = resolve;
+        })
+      );
+    render({ requestFilm });
+    press();
+    await settle();
+    const element = audio();
+    if (!element) throw new Error('no player');
+    sounds(element, 240);
+    // Paused by the visitor, then left past the links' end.
+    element.dispatchEvent(new Event('pause'));
+    flushSync();
+    vi.advanceTimersByTime(700_000);
+    const play = vi.mocked(HTMLMediaElement.prototype.play);
+    play.mockClear();
+
+    // The press asks for fresh links first: loading, and nothing plays yet.
+    press();
+    await settle();
+    expect(requestFilm).toHaveBeenCalledTimes(2);
+    expect(button()?.getAttribute('aria-busy')).toBe('true');
+    expect(label()).toBe(PREVIEW_COPY.pause);
+    expect(time()).toBe(PREVIEW_COPY.loading);
+    expect(status()?.textContent).toContain(PREVIEW_COPY.loading);
+    expect(play).not.toHaveBeenCalled();
+
+    // A second press meanwhile is the visitor's say: it pauses, on its place.
+    press();
+    expect(play).not.toHaveBeenCalled();
+    expect(requestFilm).toHaveBeenCalledTimes(2);
+    expect(button()?.getAttribute('aria-busy')).toBe('false');
+    expect(label()).toBe(PREVIEW_COPY.resume);
+    expect(time()).toBe('4:00 / 5:00');
+
+    // Wanted again; the fresh links land and it plays on from there.
+    press();
+    expect(button()?.getAttribute('aria-busy')).toBe('true');
+    renewed({ playlistUrl: `${FULL}2` });
+    await settle();
+    expect(attached).toEqual([FULL, `${FULL}2`]);
+    expect(play).not.toHaveBeenCalled();
+    element.dispatchEvent(new Event('loadedmetadata'));
+    flushSync();
+    expect(element.currentTime).toBe(240);
+    expect(play).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('a start the browser refused outright', () => {

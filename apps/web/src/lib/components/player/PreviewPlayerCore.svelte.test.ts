@@ -19,6 +19,7 @@ import {
   vi,
 } from 'vitest';
 import type { HlsErrorKind } from '$lib/components/VideoPlayer/hls';
+import { logger } from '$lib/observability';
 import * as m from '$paraglide/messages';
 import {
   flushSync,
@@ -432,6 +433,25 @@ describe('its own controls, elsewhere', () => {
     play.mockResolvedValue(undefined);
     core.toggle();
     expect(core.clock().wanted).toBe(true);
+  });
+
+  // Not only a press's mount: every other play the browser refuses leaves it
+  // wanting nothing, or a frame would read "loading" for ever.
+  test.each([
+    ['a press', 'paused'],
+    ['muted autoplay', 'muted'],
+  ] as const)('%s the browser refuses outright wants nothing, and logs the error’s name alone', async (_, start) => {
+    const warned = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    play.mockRejectedValue(
+      new DOMException('Not now, visitor@example.com', 'NotAllowedError')
+    );
+    const { core } = headless({ start });
+    if (start === 'paused') core.toggle();
+    await vi.waitFor(() => expect(warned).toHaveBeenCalledTimes(1));
+    expect(warned).toHaveBeenCalledWith('player.play_failed', {
+      name: 'NotAllowedError',
+    });
+    expect(core.clock()).toMatchObject({ wanted: false, offerPlay: true });
   });
 });
 
@@ -1158,6 +1178,75 @@ describe('renewal', () => {
       first.video.dispatchEvent(new Event('loadedmetadata'));
       expect(first.video.currentTime).toBe(200);
       expect(play).not.toHaveBeenCalled();
+    });
+
+    test('"Watch again" once its links have run out: mid-swap while it asks, and a press meanwhile never plays the dead links', async () => {
+      vi.useFakeTimers();
+      const { renew, answer } = pending();
+      const { root, video } = film({
+        src: signed(inTen()),
+        renew,
+        start: 'sound',
+        ended: again,
+      });
+      await settle();
+      loads(video);
+      state(video, true);
+      playhead(video, 200);
+      state(video, false);
+      video.dispatchEvent(new Event('ended'));
+      flushSync();
+      tenMinutesOn();
+      play.mockClear();
+
+      root.querySelector<HTMLButtonElement>('.again')?.click();
+      await settle();
+      expect(renew).toHaveBeenCalledTimes(1);
+      // Wanted, and waiting on the answer: Pause, never Play on the old links.
+      expect(button(root, m.player_pause())).not.toBeNull();
+
+      button(root, m.player_pause())?.click();
+      flushSync();
+      expect(button(root, m.player_play())).not.toBeNull();
+      expect(play).not.toHaveBeenCalled();
+      expect(renew).toHaveBeenCalledTimes(1);
+
+      answer({ playlistUrl: RENEWED });
+      await settle();
+      expect(attached).toEqual([FULL, RENEWED]);
+      video.dispatchEvent(new Event('loadedmetadata'));
+      flushSync();
+      expect(video.currentTime).toBe(0);
+      expect(play).not.toHaveBeenCalled();
+      expect(button(root, m.player_play())).not.toBeNull();
+    });
+
+    test('a press whose play its stream’s 403 cuts short: the swap honours it, and plays on', async () => {
+      vi.useFakeTimers();
+      const warned = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      const renew = vi.fn(async () => ({ playlistUrl: RENEWED }));
+      const { root, video } = film({ src: signed(), renew });
+      await settle();
+      loads(video);
+      playhead(video, 120);
+      let cut: (error: unknown) => void = () => {};
+      play.mockReturnValueOnce(
+        new Promise((_resolve, reject) => {
+          cut = reject;
+        })
+      );
+      button(root, m.player_play())?.click();
+
+      // The links run out before it starts; the helper's destroy cuts the play short.
+      tenMinutesOn();
+      expire?.();
+      cut(new DOMException('Interrupted', 'AbortError'));
+      await settle();
+      expect(attached).toEqual([FULL, RENEWED]);
+      video.dispatchEvent(new Event('loadedmetadata'));
+      expect(video.currentTime).toBe(120);
+      expect(play).toHaveBeenCalledTimes(2);
+      expect(warned).not.toHaveBeenCalled();
     });
   });
 

@@ -19,8 +19,9 @@
   focus back to the tile. The lightbox exists only while open, so the page's
   markup and the canvas's stay the same, and on the canvas or a thumbnail a
   press opens nothing: a click there belongs to the editor. A browser with no
-  modal `<dialog>` (Safari before 15.4) opens the picture's large file in a
-  tab of its own instead.
+  modal `<dialog>` (Safari before 15.4), or one whose dialog refuses to open,
+  opens the picture's large file in a tab of its own instead, and where it
+  refuses the tab too, in this one.
 
   EMPTY. The public page keeps only the words. Wherever the section is only
   being looked at — the canvas, the layout picker, the section gallery, any
@@ -29,6 +30,7 @@
   points at a made-up image. While editing, the prompt sits over them.
 -->
 <script lang="ts">
+  import { logger } from '$lib/observability';
   import { hasHead } from '../../model/read';
   import { pageImageSrcset, resolvePageImageUrl, storedFocus } from '../../../page-images';
   import type { BlockProps } from '../../model/types';
@@ -97,11 +99,25 @@
     );
   }
 
+  /**
+   * Picture `index`'s large file without the lightbox: in a tab of its own,
+   * cut loose from this page once open. `noopener` would do that, but then
+   * the browser answers `null` whether it opened one or not, and a refused
+   * popup would show nothing; refused, the file opens in this tab.
+   */
+  function inTab(index: number) {
+    const file = pictures[index]?.full;
+    if (!file) return;
+    const tab = window.open(file.url, '_blank');
+    if (tab) tab.opener = null;
+    else location.assign(file.url);
+    logger.info('gallery.lightbox_tab_fallback', { opened: Boolean(tab) });
+  }
+
   const open: OpenPicture = (index, from) => {
     if (edit || page.still) return;
     if (!modals()) {
-      const file = pictures[index]?.full;
-      if (file) window.open(file.url, '_blank', 'noopener');
+      inTab(index);
       return;
     }
     opener = from;
@@ -147,7 +163,7 @@
   {#if pictures.length > 0}
     {@render arrangement(pictures, opens ? open : undefined)}
     {#if shown !== null}
-      <GalleryLightbox {pictures} start={shown} label={name} onclose={close} />
+      <GalleryLightbox {pictures} start={shown} label={name} onclose={close} onfail={inTab} />
     {/if}
   {:else}
     <div class="gallery__empty">

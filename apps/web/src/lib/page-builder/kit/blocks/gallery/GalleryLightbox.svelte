@@ -18,7 +18,8 @@
 
   The pictures are one row of the browser's own scrolling, snapping one to the
   screen, so a swipe moves between them; the counter and the previous and next
-  buttons follow the picture the row settles on. Escape (the dialog's
+  buttons follow the picture the row settles on, or the one a press is gliding
+  it to. Escape (the dialog's
   `cancel`), the close button and a click on the dark ground round the
   picture close it. ← and → step, heard on the window while it is open, never
   on the dialog itself (s1ebi). The page behind does not scroll: the root
@@ -44,9 +45,11 @@
     label: string;
     /** Heard once it has closed, whichever way. */
     onclose: () => void;
+    /** Heard, just before `onclose`, when it could not open at all: show picture `index` another way. */
+    onfail: (index: number) => void;
   }
 
-  const { pictures, start, label, onclose }: Props = $props();
+  const { pictures, start, label, onclose, onfail }: Props = $props();
 
   /** The root attribute that holds the page still behind it. */
   const LOCK = 'data-lp-lightbox';
@@ -54,13 +57,26 @@
   const HELD =
     '.gallery-lightbox__picture, .gallery-lightbox__lost, .gallery-lightbox__caption, button';
   const STEPS: Partial<Record<string, 1 | -1>> = { ArrowLeft: -1, ArrowRight: 1 };
-  /** A slide showing this much of itself is the one the row is on: two never both do. */
+  /**
+   * A slide showing this much of itself is the one the row is on, or one a
+   * glide is passing: two never both do.
+   */
   const SETTLED = 0.6;
+  /** How long the row scrolls no further before it is at rest, without `scrollend`. */
+  const STILL_MS = 150;
   /** The sizes a page image's files are named by (`…/lg.webp`). */
   const VARIANTS: readonly PageImageVariant[] = ['sm', 'md', 'lg', 'xl'];
 
   /** The picture in view, from 0. */
   let at = $state(0);
+  /**
+   * The slide a press is gliding the row to, until it is there. Each slide is
+   * the row's width, so a glide over two shows the one between whole on its
+   * way, and that must not count as the picture in view: the counter would
+   * flicker back to it, and a press then would step on from it.
+   */
+  let bound: number | null = null;
+  let idle = 0;
   let dialog: HTMLDialogElement | undefined;
   let track: HTMLElement | undefined;
   let slides: HTMLElement[] = [];
@@ -69,7 +85,14 @@
 
   /** Puts picture `index` in view: at once, or gliding there from a press. */
   function go(index: number, glide: boolean) {
-    at = Math.max(0, Math.min(last, index));
+    const to = Math.max(0, Math.min(last, index));
+    // A rest still to come was the last scroll's, not this glide's. At either
+    // end a press goes nowhere, and nothing would come to free a bound.
+    if (glide && to !== at) {
+      clearTimeout(idle);
+      bound = to;
+    }
+    at = to;
     const slide = slides[at];
     if (!track || !slide) return;
     const still = !glide || holdsStill(track);
@@ -81,6 +104,27 @@
   /** One along. At either end `go` holds it on the picture already shown. */
   function step(by: 1 | -1) {
     go(at + by, true);
+  }
+
+  /**
+   * The row has stopped: the picture in view is the slide it rests on, the
+   * one whose offset is its scroll (`go`), wherever a press was taking it. A
+   * swipe that caught the glide may have left it short of there.
+   */
+  function rest() {
+    clearTimeout(idle);
+    bound = null;
+    if (!track) return;
+    const left = track.scrollLeft;
+    const gaps = slides.map((slide) => Math.abs(slide.offsetLeft - left));
+    const index = gaps.indexOf(Math.min(...gaps));
+    if (index >= 0) at = index;
+  }
+
+  /** Without `scrollend` (Safari), the row is at rest once it scrolls no further. */
+  function onscroll() {
+    clearTimeout(idle);
+    idle = window.setTimeout(rest, STILL_MS);
   }
 
   function shut() {
@@ -115,7 +159,9 @@
    * it closes itself, so the page behind is no longer inert when its `close`
    * gives the tile focus back; never opened, no `close` would come, so it
    * says it has closed, or the block would think it open and every tile would
-   * go dead. GalleryBlock never opens it where there is no `showModal`.
+   * go dead, and the block shows the picture another way (`onfail`), or the
+   * press would show nothing. GalleryBlock never opens it where there is no
+   * `showModal`.
    */
   const modal: Attachment<HTMLDialogElement> = (node) =>
     // What it reads (the picture in view among them) must never re-open it.
@@ -127,6 +173,7 @@
       let settled: IntersectionObserver | undefined;
       const release = () => {
         settled?.disconnect();
+        clearTimeout(idle);
         root.removeAttribute(LOCK);
       };
       try {
@@ -139,10 +186,13 @@
             (entries) => {
               for (const entry of entries) {
                 // A slide at the row's edge intersects at 0, and one gliding
-                // away still does: only the one it settles on shows this much.
+                // away still does. The one it settles on shows this much, and
+                // so, for a moment, does every slide a glide passes on its way.
                 if (entry.intersectionRatio < SETTLED) continue;
                 const index = slides.findIndex((slide) => slide === entry.target);
-                if (index >= 0) at = index;
+                if (index < 0 || (bound !== null && index !== bound)) continue;
+                bound = null;
+                at = index;
               }
             },
             { root: track, threshold: SETTLED }
@@ -152,8 +202,13 @@
       } catch (error) {
         release();
         logger.warn('gallery.lightbox_open_failed', describeThrown(error));
-        if (node.open) node.close();
-        else onclose();
+        if (node.open) {
+          node.close();
+        } else {
+          // `start` is the block's open picture, gone once it hears `onclose`.
+          onfail(start);
+          onclose();
+        }
       }
       return release;
     });
@@ -222,7 +277,7 @@
       <XIcon size="1.25em" />
     </button>
   </div>
-  <ul class="gallery-lightbox__track">
+  <ul class="gallery-lightbox__track" onscrollend={rest} {onscroll}>
     {#each pictures as picture, index (index)}
       {@const file = source(picture, index)}
       <li class="gallery-lightbox__slide">

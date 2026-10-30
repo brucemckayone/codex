@@ -80,9 +80,10 @@
     VolumeXIcon,
   } from '$lib/components/ui/Icon';
   import { createHlsPlayer, type HlsErrorKind } from '$lib/components/VideoPlayer/hls';
+  import { logger } from '$lib/observability';
   import * as m from '$paraglide/messages';
   import { claim, displaced, mark, release, showing } from './now-playing.svelte';
-  import { playNow, settleStart } from './start';
+  import { playErrorName, playNow, settleStart } from './start';
   import { clock as timeText, loadedTo, type PlayerClock } from './timeline';
 
   interface CaptionTrack {
@@ -235,7 +236,8 @@
   let recovered = false;
   /** Drops the last swap's resume, should that stream go before it loads. */
   let unresume: (() => void) | null = null;
-  let renewing = false;
+  /** A renewal is out: a paused film waits on its answer (`swapping`). */
+  let renewing = $state(false);
   let renewTimer: ReturnType<typeof setTimeout> | null = null;
   /** The stream ran out and none came back: "Watch again" asks afresh. */
   let lapsed = false;
@@ -271,8 +273,16 @@
   /** Where it stood as a swap reset it: a frame's `clock` holds it until the resume. */
   let held = { time: 0, duration: 0 };
 
+  /**
+   * Mid-swap: the element sits reset (`resuming`), or paused while a
+   * renewal is out (a press on links that ran out, "Watch again"), waiting
+   * on the answer. Either way it is silent, so the play button reads, and a
+   * press sets, the visitor's intent (`wanted`), and the swap honours it. A
+   * renewal the timer asked for while the film plays on is no swap yet.
+   */
+  const swapping = $derived(resuming || (renewing && paused));
   /** The play button offers Play: mid-swap, unless the visitor wants it playing. */
-  const offerPlay = $derived(resuming ? !wanted : paused);
+  const offerPlay = $derived(swapping ? !wanted : paused);
   const played = $derived(duration > 0 ? Math.min(1, time / duration) : 0);
   const fill = $derived(duration > 0 ? Math.min(1, loaded / duration) : 0);
   const muteLabel = $derived(
@@ -325,7 +335,7 @@
       void refresh(0);
     } else {
       video.currentTime = 0;
-      playNow(video).catch(() => {});
+      playWanted(video);
     }
     // The ended layer that had focus has gone; the play button takes it.
     flushSync();
@@ -338,15 +348,16 @@
     if (!video || fixed || error !== null) return;
     if (finished) {
       replay();
-    } else if (resuming) {
+    } else if (swapping) {
       // Mid-swap the element sits paused, silently, either way: a press is
-      // the visitor's say, and the resume honours it (`resumeAt`).
+      // the visitor's say, and the resume honours it (`resumeAt`), or with
+      // no answer `refresh` does. Never a play on the links that ran out.
       wanted = !wanted;
     } else if (video.paused) {
       wanted = true;
       // Paused past its links' end: renew first, and the answer plays it.
       if (stale()) void refresh();
-      else playNow(video).catch(() => {});
+      else playWanted(video);
     } else {
       wanted = false;
       video.pause();
@@ -361,11 +372,12 @@
   /**
    * Where the film is, for a frame drawing its own controls: the element's
    * own figures (its events; nothing polls), read reactively by the frame.
-   * Mid-swap the reset element reads 0, so it holds where it stood.
+   * The reset element reads 0, so it holds where it stood; a paused film
+   * waiting on its renewal still reads its own place.
    */
   export function clock(): PlayerClock {
     const at = resuming ? held : { time, duration };
-    return { ...at, offerPlay, askSound, ready, waiting, wanted, resuming };
+    return { ...at, offerPlay, askSound, ready, waiting, wanted, resuming: swapping };
   }
 
   function toggleCaptions() {
@@ -553,7 +565,7 @@
         wanted = true;
         media.muted = true;
         // A browser that blocks even muted autoplay leaves it to the play button.
-        playNow(media).catch(() => {});
+        playWanted(media);
       }
     } catch {
       fail();
@@ -689,7 +701,7 @@
     if (displaced(media, since)) wanted = false;
     if (!next?.playlistUrl) {
       if (expired) endLapsed();
-      else if (wanted && paused) playNow(media).catch(() => {});
+      else if (wanted && paused) playWanted(media);
       return;
     }
     // The timer's renewal ran while the film played on.
@@ -720,6 +732,21 @@
         else if (outcome === 'failed' && media.paused) wanted = false;
       }
     );
+  }
+
+  /**
+   * Play now, for a play that is not a press's mount (`startPlaying` settles
+   * that one, refused sound and all). One refused or cut short while it
+   * still sits paused and wanted wants nothing, so a frame's own controls
+   * offer Play rather than load for ever; mid-swap the resume decides. The
+   * log carries the error's name alone (`playErrorName`).
+   */
+  function playWanted(media: HTMLVideoElement) {
+    playNow(media).catch((error: unknown) => {
+      if (destroyed || !media.paused || !wanted || swapping) return;
+      wanted = false;
+      logger.warn('player.play_failed', { name: playErrorName(error) });
+    });
   }
 
   /**

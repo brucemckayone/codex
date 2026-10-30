@@ -28,8 +28,9 @@
 
   What the core's own chrome would show, the card shows instead: while the
   player's code, or the stream's first sound, is on its way, or the stream
-  stalls or swaps in renewed links (the strip held where it stood), the
-  time reads "Loading…", the button is busy and the card says so politely;
+  stalls, or a press waits on renewed links or their swap (the strip held
+  where it stood), the time reads "Loading…", the button is busy and the
+  card says so politely;
   a start the browser refused shows the length and Play; and a press that
   asked for the full recording and got the preview says so, as
   `InlineFilm` does over a film.
@@ -122,8 +123,8 @@
     return full || press.phase === 'up' ? PREVIEW_COPY.play : PREVIEW_COPY.watch;
   });
   // The player's code on its way, or the stream before its first sound
-  // while it is wanted, or stalled or swapping in renewed links while it
-  // should play: the core's own cues are in its hidden player, so the card
+  // while it is wanted, or stalled, or asking for or swapping in renewed
+  // links (`resuming`), while it should play: the core's own cues are in its hidden player, so the card
   // shows and says them. A start the browser refused wants nothing: Play.
   const busy = $derived(
     press.phase === 'loading' ||
@@ -374,10 +375,12 @@
     outline-offset: var(--space-1);
   }
 
+  /* The column's gap is each later line's own top margin, never `gap`: the
+     status region (below) is a box, most often empty, and an empty box
+     would still take a gap. */
   .listen__text {
     grid-area: text;
     display: grid;
-    gap: var(--space-1);
     min-inline-size: 0;
   }
 
@@ -386,6 +389,11 @@
   .listen__note {
     margin: 0;
     max-inline-size: calc(var(--lp-measure) * var(--lp-measure-unit));
+  }
+
+  .listen__time,
+  .listen__note {
+    margin-block-start: var(--space-1);
   }
 
   .listen__line {
@@ -404,10 +412,13 @@
     font-size: var(--lp-size-small);
   }
 
-  /* Its words sit in the column as the others do: an empty region adds no
-     row, so no gap, to the column. */
+  /* A real box, never `display: contents`: Safari 16 and older drop such an
+     element from the accessibility tree, role and all, so nothing it says
+     would be announced. Empty, it is no height and adds no gap; its note
+     carries its own margin, as the column's others do
+     (`listen-status.source.test.ts`). */
   .listen__status {
-    display: contents;
+    display: grid;
   }
 
   /* The strip, cut to the card's corners on a layer of its own, so the card
