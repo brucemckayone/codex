@@ -277,19 +277,26 @@ export function requiresPayoutsToPublish(
 
 /**
  * Is this item CLOSED (Codex-2hxff.91, owner U11)? Gated behind tiers with no
- * tier ticked: only buyers who already hold it, granted users, course owners
- * and the team can open it. With a one-time price on sale it is presented as
+ * open tier ticked: no new subscriber can reach it, only buyers who already
+ * hold it, granted users, course owners, the team and the members of a
+ * switched-off tier that includes it. With a one-time price on sale it is presented as
  * any paid item; without one it is hidden from the public lists and its page
- * says "Not available right now". `tierCount` is the item's tick count
- * (`content_tier_access`, live tiers).
+ * says "Not available right now".
+ *
+ * `openTierCount` counts the item's ticks on tiers a NEW subscriber can join:
+ * live and active (owner U13). A tick on a switched-off tier still lets that
+ * tier's members watch, but opens the item to nobody new, so it is not
+ * counted here. The server's twin is `notClosedToNewViewers()` in
+ * `@codex/content`; the web's is the paywall's `closed` case over the public
+ * (active) tier list.
  */
 export function isClosedToNewViewers(
   c: Pick<ContentAccessFlags, 'isTierGated' | 'isPurchasable' | 'priceCents'>,
-  tierCount: number
+  openTierCount: number
 ): boolean {
   return (
     c.isTierGated &&
-    tierCount === 0 &&
+    openTierCount === 0 &&
     !(c.isPurchasable && (c.priceCents ?? 0) >= PRICE_LIMITS.MIN_CENTS)
   );
 }

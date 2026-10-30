@@ -769,9 +769,10 @@ describe('the paywall names the plans that include it (Codex-2hxff.91)', () => {
     expect(timing()).toBeUndefined();
   });
 
-  test('on a dearer plan a cheaper one beats: Change plan, with when each starts', () => {
-    // Winter Light: in Basic and Premium, not Pro. Basic is a downgrade that
-    // waits for the period end (U9, Codex-2hxff.16); Premium starts now.
+  test('on a dearer plan a cheaper one beats: Change plan, with how each is billed', () => {
+    // Winter Light: in Basic and Premium, not Pro. Both start now, as
+    // changeTier does today (owner U12): Basic credits the difference to the
+    // next bill. Codex-2hxff.16 moves Basic to the period end.
     render({
       content: gated([BASIC.id, PREMIUM.id]),
       hasAccess: false,
@@ -788,11 +789,11 @@ describe('the paywall names the plans that include it (Codex-2hxff.91)', () => {
       "Your Pro plan doesn't include this. It's included with Basic (£5.00 a month) and Premium (£20.00 a month)."
     );
     expect(timing()).toContain(
-      'Premium starts straight away; a move to Basic starts when your Pro period ends on 12 November'
+      'Premium starts straight away, and so does a move to Basic, with credit on your next bill for the difference until your Pro period ends on 12 November'
     );
   });
 
-  test('a cheaper plan alone: Change plan, starting at the period end', () => {
+  test('a cheaper plan alone: Change plan, starting now with the difference credited', () => {
     render({
       content: gated([BASIC.id]),
       hasAccess: false,
@@ -801,7 +802,7 @@ describe('the paywall names the plans that include it (Codex-2hxff.91)', () => {
       plans: plansFor({ id: PREMIUM.id, name: PREMIUM.name }),
     });
     expect(timing()).toContain(
-      'A move to Basic starts when your Premium period ends on 12 November'
+      'A move to Basic starts straight away, with credit on your next bill for the difference until your Premium period ends on 12 November'
     );
   });
 

@@ -74,7 +74,7 @@ interface SubCtx {
   subscriptionCoversContent: boolean;
   /** The viewer's access-granting plan, for "Your Pro plan doesn't…". */
   currentPlan: ViewerPlan | null;
-  /** When that plan's period ends (ISO), for a downgrade's start date. */
+  /** When that plan's period ends (ISO), for the change-plan line. */
   currentPeriodEnd: string | null;
 }
 

@@ -74,13 +74,6 @@
     orgSlug: string | null;
     creatorUsername?: string | null;
     mediaItems?: MediaItemOption[];
-    /**
-     * @deprecated Ignored (Codex-2hxff.91). The form reads the org's tiers
-     * through `listTiers` itself, because a host's `tiersQuery.current ?? []`
-     * made a FAILED read look like "no tiers" and hid the Subscribers card
-     * from a subscriber film. Kept only until the hosts stop passing it.
-     */
-    tiers?: SubscriptionTier[];
     onSuccess?: () => void;
   }
 

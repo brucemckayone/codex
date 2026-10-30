@@ -19,7 +19,6 @@
 
 import { CONTENT_STATUS, PRICE_LIMITS } from '@codex/constants';
 import {
-  CreatorPayoutsRequiredError,
   type InvalidatePlanSubscriberLibrariesArgs,
   invalidatePlanSubscriberLibraries,
   syncLegacyIncludedInTierId,
@@ -30,7 +29,6 @@ import {
   contentTierAccess,
   courses,
   courseTierAccess,
-  stripeConnectAccounts,
   subscriptions,
   subscriptionTiers,
 } from '@codex/database/schema';
@@ -46,6 +44,7 @@ import type {
   PlanItemsQueryInput,
 } from '@codex/validation';
 import { and, eq, inArray, isNull, type SQL, sql } from 'drizzle-orm';
+import { assertCreatorCanBePaid } from './course-payouts';
 
 // ── Wire shapes (the contract is apps/web `api.ts`, Codex-2hxff.91 phase 1) ──
 
@@ -702,7 +701,7 @@ export class PlanAccessService extends BaseService {
         );
 
         // Payouts: a PUBLISHED item added to a tier opens a way to pay. Each
-        // distinct creator is checked once.
+        // distinct creator is checked once, by the course paths' own check.
         const creators = new Map<string, 'included_in_tier' | 'course'>();
         for (const id of addedFilms) {
           const f = filmById.get(id);
@@ -720,17 +719,7 @@ export class PlanAccessService extends BaseService {
           }
         }
         for (const [creatorId, reason] of creators) {
-          const [account] = await tx
-            .select({
-              chargesEnabled: stripeConnectAccounts.chargesEnabled,
-              payoutsEnabled: stripeConnectAccounts.payoutsEnabled,
-            })
-            .from(stripeConnectAccounts)
-            .where(eq(stripeConnectAccounts.userId, creatorId))
-            .limit(1);
-          if (!(account?.chargesEnabled && account.payoutsEnabled)) {
-            throw new CreatorPayoutsRequiredError(creatorId, reason);
-          }
+          await assertCreatorCanBePaid(tx, creatorId, reason);
         }
 
         // Write.

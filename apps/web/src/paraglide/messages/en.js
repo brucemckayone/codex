@@ -3607,7 +3607,7 @@ export const change_plan_cta_plan_with_price = (params) => `${params.plan} (${pa
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const change_plan_cta_timing = (params) => `${params.upgradePlans} starts straight away; a move to ${params.downgradePlans} starts when your ${params.currentPlan} period ends on ${params.date}.`
+export const change_plan_cta_timing = (params) => `${params.upgradePlans} starts straight away, and so does a move to ${params.downgradePlans}, with credit on your next bill for the difference until your ${params.currentPlan} period ends on ${params.date}.`
 
 
 /**
@@ -3615,7 +3615,7 @@ export const change_plan_cta_timing = (params) => `${params.upgradePlans} starts
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const change_plan_cta_timing_downgrade = (params) => `A move to ${params.downgradePlans} starts when your ${params.currentPlan} period ends on ${params.date}.`
+export const change_plan_cta_timing_downgrade = (params) => `A move to ${params.downgradePlans} starts straight away, with credit on your next bill for the difference until your ${params.currentPlan} period ends on ${params.date}.`
 
 
 /**
@@ -3623,7 +3623,7 @@ export const change_plan_cta_timing_downgrade = (params) => `A move to ${params.
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const change_plan_cta_timing_downgrade_undated = (params) => `A move to ${params.downgradePlans} starts when your current ${params.currentPlan} period ends.`
+export const change_plan_cta_timing_downgrade_undated = (params) => `A move to ${params.downgradePlans} starts straight away, with credit on your next bill for the difference until your current ${params.currentPlan} period ends.`
 
 
 /**

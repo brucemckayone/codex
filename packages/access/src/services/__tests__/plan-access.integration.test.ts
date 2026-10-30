@@ -366,6 +366,30 @@ describe('plan access — decision, library, checklist (Codex-2hxff.91)', () => 
     });
   });
 
+  // ── owner U13: a switched-off tier ─────────────────────────────────────
+
+  it('a film ticked only on a SWITCHED-OFF tier: its members still watch it and keep it in their library, nobody else gets in, and the catalogue hides it (owner U13)', async () => {
+    const orgId = await org('switched-off');
+    const onSale = await tier(orgId, 1);
+    const switchedOff = await tier(orgId, 2, { isActive: false });
+    const item = await film(orgId, { tierIds: [switchedOff] });
+    const member = await subscriber(orgId, switchedOff);
+    const otherMember = await subscriber(orgId, onSale);
+
+    expect(await access.canView(member, item)).toBe(true);
+    expect(await libraryIds(member, orgId)).toContain(item);
+    expect(await access.canView(otherMember, item)).toBe(false);
+    expect(await libraryIds(otherMember, orgId)).not.toContain(item);
+    // Closed to new viewers: no price, and no tier anyone can join.
+    const listed = await contentService.listPublic({
+      orgId,
+      page: 1,
+      limit: 100,
+      sort: 'oldest',
+    });
+    expect(listed.items.map((i) => i.id)).not.toContain(item);
+  });
+
   // ── §2.4 #3 decision = library, property style ─────────────────────────
 
   it('for every tier × every subset of three tiers × {published, off sale in period, off sale before period}: the library lists it ⇔ the decision grants it', async () => {

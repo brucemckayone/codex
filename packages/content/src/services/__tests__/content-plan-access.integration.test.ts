@@ -460,4 +460,140 @@ describe('ContentService — plan access (Codex-2hxff.91)', () => {
       expect(tickedRow?.includedInTierIds).toEqual([premiumId]);
     });
   });
+
+  describe('a tick on a SWITCHED-OFF tier opens the item to nobody new (owner U13)', () => {
+    // Its own org, so the inactive tier never joins the ladder the legacy
+    // expansion above reads.
+    let u13OrgId: string;
+    let activeId: string;
+    let inactiveId: string;
+    let deletedId: string;
+
+    beforeAll(async () => {
+      u13OrgId = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({ slug: createUniqueSlug('pa-u13') })
+          )
+          .returning()
+      ).id;
+      orgIds.push(u13OrgId);
+      const tier = async (
+        sortOrder: number,
+        overrides: { isActive?: boolean; deletedAt?: Date } = {}
+      ) =>
+        takeFirst(
+          await db
+            .insert(subscriptionTiers)
+            .values(createTestTierInput(u13OrgId, { sortOrder, ...overrides }))
+            .returning()
+        ).id;
+      activeId = await tier(1);
+      inactiveId = await tier(2, { isActive: false });
+      // Deleted with `is_active` still on, a row no delete writes (it clears
+      // both), so the test pins the deleted_at check on its own.
+      deletedId = await tier(3, { deletedAt: new Date() });
+    });
+
+    /** Published on the active tier, then given exactly `tierIds`. */
+    async function publishedOn(
+      tierIds: string[],
+      priceCents = 0
+    ): Promise<string> {
+      const created = await service.create(
+        written({
+          organizationId: u13OrgId,
+          isTierGated: true,
+          includedInTierIds: [activeId],
+          ...(priceCents > 0 ? { isPurchasable: true, priceCents } : {}),
+        }),
+        creatorId
+      );
+      await service.publish(created.id, creatorId);
+      // A raw write: the editor refuses a deleted tier, but a tick on one
+      // must still open nothing should it ever survive the delete's sweep.
+      await gateContentToTiers(db, {
+        contentId: created.id,
+        organizationId: u13OrgId,
+        tierIds,
+      });
+      return created.id;
+    }
+
+    /** What both catalogues list: the public list and the signed-in browse. */
+    async function catalogues(): Promise<{
+      listed: string[];
+      browsed: string[];
+    }> {
+      const listed = await service.listPublic({
+        orgId: u13OrgId,
+        page: 1,
+        limit: 100,
+        sort: 'oldest',
+      });
+      const browsed = await service.list(
+        creatorId,
+        { organizationId: u13OrgId, status: 'published' },
+        { page: 1, limit: 100 },
+        { scope: 'browse' }
+      );
+      return {
+        listed: listed.items.map((i) => i.id),
+        browsed: browsed.items.map((i) => i.id),
+      };
+    }
+
+    it('ticked only on an inactive tier, no price: hidden from both catalogues', async () => {
+      const id = await publishedOn([inactiveId]);
+
+      const { listed, browsed } = await catalogues();
+      expect(listed).not.toContain(id);
+      expect(browsed).not.toContain(id);
+    });
+
+    it('ticked only on a soft-deleted tier, no price: hidden from both catalogues', async () => {
+      const id = await publishedOn([deletedId]);
+
+      const { listed, browsed } = await catalogues();
+      expect(listed).not.toContain(id);
+      expect(browsed).not.toContain(id);
+    });
+
+    it('listed once an ACTIVE tick is added, and the set still names the inactive tier', async () => {
+      const id = await publishedOn([inactiveId]);
+      expect((await catalogues()).listed).not.toContain(id);
+
+      await gateContentToTiers(db, {
+        contentId: id,
+        organizationId: u13OrgId,
+        tierIds: [activeId, inactiveId],
+      });
+
+      const { listed, browsed } = await catalogues();
+      expect(listed).toContain(id);
+      expect(browsed).toContain(id);
+      // The wire keeps every live tick: the inactive tier's members still see
+      // "Included", and the web names only the tiers on sale.
+      const row = (
+        await service.listPublic({
+          orgId: u13OrgId,
+          page: 1,
+          limit: 100,
+          sort: 'oldest',
+        })
+      ).items.find((i) => i.id === id);
+      expect([...(row?.includedInTierIds ?? [])].sort()).toEqual(
+        [activeId, inactiveId].sort()
+      );
+    });
+
+    it('ticked only on an inactive tier WITH a price: listed, as any paid item', async () => {
+      const id = await publishedOn([inactiveId], 900);
+
+      const { listed, browsed } = await catalogues();
+      expect(listed).toContain(id);
+      expect(browsed).toContain(id);
+    });
+  });
 });

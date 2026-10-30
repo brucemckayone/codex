@@ -50,6 +50,19 @@ export function includingPlans<T extends PlanOption>(
 }
 
 /**
+ * Whether a plan a new viewer can join includes the item: some ACTIVE plan
+ * (owner U13). A tick on a switched-off plan keeps its members in but sells
+ * nothing, so it does not count, as on the server's catalogue rule
+ * (`notClosedToNewViewers`, `@codex/content`).
+ */
+export function inAPlanOnSale(
+  includedTierIds: readonly string[] | null | undefined,
+  tiers: readonly PlanOption[]
+): boolean {
+  return includingPlans(includedTierIds, tiers).length > 0;
+}
+
+/**
  * Whether the plans are "the cheapest of them and every dearer active plan",
  * the shape the "and above" shortcut ticks. Never true for one plan.
  */
@@ -130,7 +143,7 @@ export interface PlanPaywallInput {
   tiersStatus: PlanListStatus;
   /** The viewer's access-granting plan; null for anyone without one. */
   currentPlan: ViewerPlan | null;
-  /** When the viewer's current period ends (ISO), for a downgrade's start. */
+  /** The viewer's period end (ISO), which a downgrade's credit runs to. */
   currentPeriodEnd: string | null;
 }
 
@@ -141,8 +154,7 @@ export interface PlanPaywallInput {
  *   plan is named.
  * - `subscribe`: no plan yet. `upgrade`: every plan that includes it costs
  *   more than the viewer's. `change`: a cheaper (or same-price) plan includes
- *   it, which starts only when the current period ends (Codex-2hxff.16), so
- *   the copy says when each plan would start.
+ *   it, so the copy says how the move is billed (see `changeTiming`).
  */
 export type PlanPaywall =
   | { kind: 'closed' }
@@ -158,7 +170,7 @@ export type PlanPaywall =
       plansWithPrices: string;
       /** "Premium": dearer plans, which start straight away. */
       upgradePlans: string | null;
-      /** "Basic": the rest, which start at the period end. */
+      /** "Basic": the rest, which credit the difference to the next bill. */
       downgradePlans: string | null;
       periodEnd: string | null;
     };
@@ -319,6 +331,16 @@ export function planPaywallCopy(
   }
 }
 
+/**
+ * When a change of plan starts, as `SubscriptionService.changeTier` does it
+ * TODAY (owner decision U12): a dearer plan is invoiced for the difference
+ * and starts at once; a cheaper or same-price one also starts at once, and
+ * Stripe puts the difference for the rest of the period on the next bill as
+ * a credit (`proration_behavior: 'create_prorations'`). U9 wants a cheaper
+ * plan to start at the period end instead: Codex-2hxff.16 flips this line
+ * (the three `change_plan_cta_timing*` messages) in the same PR that changes
+ * the behaviour.
+ */
 function changeTiming(
   paywall: Extract<PlanPaywall, { kind: 'change' }>,
   formatDate: (iso: string) => string
