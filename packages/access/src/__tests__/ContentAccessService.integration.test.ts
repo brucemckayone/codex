@@ -44,6 +44,8 @@ import {
   createTestTierInput,
   createUniqueSlug,
   type Database,
+  gateContentFromTier,
+  gateContentToTiers,
   seedPurchaseWithAccess,
   seedTestUsers,
   setupTestDatabase,
@@ -1083,11 +1085,19 @@ describe('ContentAccessService Integration', () => {
             isFree: false,
             isPurchasable: opts.accessType === 'paid',
             priceCents: opts.accessType === 'paid' ? opts.priceCents : null,
-            includedInTierId: opts.minimumTierId,
+            isTierGated: opts.minimumTierId != null,
             isFollowerGated: false,
             isTeamOnly: false,
           })
           .where(eq(content.id, item.id));
+        // The old "this tier and above", as the migration backfilled it.
+        if (opts.minimumTierId != null) {
+          await gateContentFromTier(db, {
+            contentId: item.id,
+            organizationId: orgId,
+            fromTierId: opts.minimumTierId,
+          });
+        }
 
         return item;
       }
@@ -2469,7 +2479,7 @@ describe('ContentAccessService Integration', () => {
             isFree: accessType === 'free',
             isPurchasable: false,
             priceCents: null,
-            includedInTierId: null,
+            isTierGated: false,
             isFollowerGated: accessType === 'followers',
             isTeamOnly: accessType === 'team',
           })
@@ -2615,7 +2625,7 @@ describe('ContentAccessService Integration', () => {
             isFree: accessType === 'free',
             isPurchasable: false,
             priceCents: null,
-            includedInTierId: null,
+            isTierGated: false,
             isFollowerGated: accessType === 'followers',
             isTeamOnly: accessType === 'team',
           })
@@ -3186,7 +3196,7 @@ describe('ContentAccessService Integration', () => {
       }
 
       /**
-       * Seed a PUBLISHED content row in the invalid (orgless + includedInTierId)
+       * Seed a PUBLISHED content row in the invalid (orgless + isTierGated)
        * state. Creates the row as orgless free content (passes the write
        * path), then patches the access-policy flags directly while
        * keeping organizationId NULL.
@@ -3236,9 +3246,9 @@ describe('ContentAccessService Integration', () => {
         );
         await contentService.publish(item.id, opts.creator);
 
-        // Force the invalid state: orgless (organizationId stays NULL) + a tier
-        // (includedInTierId set). Translate the legacy KIND arg to the full
-        // flag set at the write boundary.
+        // Force the invalid state: orgless (organizationId stays NULL) + the
+        // tier switch on (no ticks can exist without an org). Translate the
+        // legacy KIND arg to the full flag set at the write boundary.
         await db
           .update(content)
           .set({
@@ -3246,7 +3256,7 @@ describe('ContentAccessService Integration', () => {
             isFree: opts.accessType === 'free',
             isPurchasable: opts.accessType === 'paid',
             priceCents: opts.accessType === 'paid' ? opts.priceCents : null,
-            includedInTierId: opts.minimumTierId,
+            isTierGated: true,
             isFollowerGated: false,
             isTeamOnly: false,
           })
@@ -3377,7 +3387,7 @@ describe('ContentAccessService Integration', () => {
             isFree: false,
             isPurchasable: true,
             priceCents: 1500,
-            includedInTierId: null,
+            isTierGated: false,
             isFollowerGated: false,
             isTeamOnly: false,
           })
@@ -3442,11 +3452,15 @@ describe('ContentAccessService Integration', () => {
             isFree: false,
             isPurchasable: false,
             priceCents: null,
-            includedInTierId: tierId,
             isFollowerGated: false,
             isTeamOnly: false,
           })
           .where(eq(content.id, item.id));
+        await gateContentToTiers(db, {
+          contentId: item.id,
+          organizationId: tierOrgId,
+          tierIds: [tierId],
+        });
 
         // Active subscription at the required tier.
         await db.insert(subscriptions).values(
@@ -3486,7 +3500,8 @@ describe('ContentAccessService Integration', () => {
         isFree: boolean;
         isPurchasable: boolean;
         priceCents: number | null;
-        includedInTierId: string | null;
+        /** Ticked tiers: turns the tier switch on (`[]` = gated and closed). */
+        includedInTierIds: string[];
         courseOnly: boolean;
         isFollowerGated: boolean;
         isTeamOnly: boolean;
@@ -3539,12 +3554,19 @@ describe('ContentAccessService Integration', () => {
           isFree: opts.policy.isFree ?? false,
           isPurchasable: opts.policy.isPurchasable ?? false,
           priceCents: opts.policy.priceCents ?? null,
-          includedInTierId: opts.policy.includedInTierId ?? null,
+          isTierGated: opts.policy.includedInTierIds !== undefined,
           courseOnly: opts.policy.courseOnly ?? false,
           isFollowerGated: opts.policy.isFollowerGated ?? false,
           isTeamOnly: opts.policy.isTeamOnly ?? false,
         })
         .where(eq(content.id, item.id));
+      if (opts.policy.includedInTierIds !== undefined && opts.organizationId) {
+        await gateContentToTiers(db, {
+          contentId: item.id,
+          organizationId: opts.organizationId,
+          tierIds: opts.policy.includedInTierIds,
+        });
+      }
       return item.id;
     }
 
@@ -3652,7 +3674,7 @@ describe('ContentAccessService Integration', () => {
         const contentId = await makeContent({
           slug: 'org-tier',
           organizationId,
-          policy: { includedInTierId: tierId },
+          policy: { includedInTierIds: [tierId] },
         });
 
         // NEGATIVE — no subscription.
@@ -3776,7 +3798,7 @@ describe('ContentAccessService Integration', () => {
         const contentId = await makeContent({
           slug: 'entitlement-grant',
           organizationId,
-          policy: { includedInTierId: tierId },
+          policy: { includedInTierIds: [tierId] },
         });
 
         const [holder] = await seedTestUsers(db, 1);

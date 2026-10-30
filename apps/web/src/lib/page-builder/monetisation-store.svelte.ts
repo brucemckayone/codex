@@ -25,9 +25,12 @@
  * two write paths.
  *
  * IMPORT BOUNDARY (CE-4): this file sits under the scanned `$lib/page-builder`
- * PUBLIC_LIB_ROOT, so it imports ONLY remotes and types — never studio editor UI.
+ * PUBLIC_LIB_ROOT, so it imports ONLY remotes, types and the pure tier rules
+ * (`plan-picker/select-from-tier.ts`, no UI and no imports of its own) — never
+ * studio editor UI.
  */
 
+import { selectFromTier } from '$lib/components/studio/plan-picker/select-from-tier';
 import type { JourneyTierOption } from '$lib/page-builder/journey-queries';
 import {
   getCourseMonetisation,
@@ -216,6 +219,22 @@ class MonetisationStore {
       ? this.#pending.tierIds.filter((id) => id !== tierId)
       : [...this.#pending.tierIds, tierId];
     this.#pending = { ...this.#pending, tierIds: [...next].sort() };
+  }
+
+  /**
+   * The "{tier} and above" shortcut (Codex-2hxff.91, owner decision U1): tick
+   * that tier and every option dearer by MONTHLY price, untick the cheaper
+   * ones. Ticks on tiers that are not options (an inactive tier the offer
+   * still lists) are kept, so the course never silently leaves a tier the
+   * panel cannot show. A snapshot: a tier created later is not added.
+   */
+  selectFromTier(tierId: string): void {
+    const next = selectFromTier(
+      this.#pending.tierIds,
+      tierId,
+      this.#tierOptions
+    );
+    this.#pending = { ...this.#pending, tierIds: [...new Set(next)].sort() };
   }
 
   /**

@@ -63,12 +63,15 @@
 export type {
   CategorySpace,
   ContentInvalidationReason,
+  ContentTierWire,
   InvalidateContentAccessArgs,
   InvalidateOrgMembershipArgs,
+  InvalidatePlanSubscriberLibrariesArgs,
   InvalidationLogger,
   WaitUntilFn,
 } from './services';
 export {
+  assertTiersInOrg,
   CATALOGUE_CONTENT_COLUMNS,
   CategoriesService,
   ContentService,
@@ -76,10 +79,15 @@ export {
   DEFAULT_MAX_LIBRARY_FANOUT,
   invalidateContentAccess,
   invalidateOrgMembership,
+  invalidatePlanSubscriberLibraries,
   MediaItemService,
+  notClosedToNewViewers,
   PUBLIC_CREATOR_COLUMNS,
   PUBLIC_MEDIA_ITEM_COLUMNS,
   PUBLIC_ORGANIZATION_COLUMNS,
+  syncLegacyIncludedInTierId,
+  TIERS_NOT_IN_ORG_MESSAGE,
+  withTierWire,
 } from './services';
 
 // ============================================================================
@@ -143,6 +151,7 @@ export {
   MediaOwnershipError,
   NotFoundError,
   SlugConflictError,
+  TierRequiredToPublishError,
   ValidationError,
   wrapError,
 } from './errors';

@@ -116,16 +116,44 @@ export class CategorySlugConflictError extends ConflictError {
  * `code: 'CREATOR_CONNECT_REQUIRED'` is shared with the subscription domain's
  * equivalent so the frontend can recognise the "set up payouts" condition
  * uniformly. Maps to HTTP 422 via BusinessLogicError.
+ *
+ * The context reaches the client verbatim, so it never names the creator: in
+ * a team the one who can't be paid is often not the caller (review L5). A
+ * refusal of several items (the tier checklist) names them by their ids,
+ * which the caller already sees.
  */
 export class CreatorPayoutsRequiredError extends BusinessLogicError {
-  constructor(creatorId: string, accessType: string) {
+  constructor(
+    accessType: string,
+    items: { contentIds?: string[]; courseIds?: string[] } = {}
+  ) {
     super(
       'Set up payouts before publishing paid or subscriber content. Complete Stripe Connect onboarding to receive payments.',
       {
-        creatorId,
         accessType,
+        ...items,
         code: 'CREATOR_CONNECT_REQUIRED',
       }
     );
+  }
+}
+
+/**
+ * Publishing subscriber content that no tier includes (Codex-2hxff.91, owner
+ * U2: "publishing needs at least one tier"). Saving such an item is allowed —
+ * it is the CLOSED state a tier delete's "keep" also leaves — but it can't be
+ * put on offer that way. "Subscriber content" is the switch on and NOT for
+ * sale (`deriveContentAccessKind` = subscribers); a paid item whose tiers are
+ * optional publishes with none, as it stays on sale. The studio's readiness
+ * check matches
+ * `code: 'TIER_REQUIRED_TO_PUBLISH'`. Maps to HTTP 422 via BusinessLogicError.
+ * The context carries the content id only (it is sent to the client).
+ */
+export class TierRequiredToPublishError extends BusinessLogicError {
+  constructor(contentId: string) {
+    super('Tick at least one plan before publishing subscriber content.', {
+      contentId,
+      code: 'TIER_REQUIRED_TO_PUBLISH',
+    });
   }
 }

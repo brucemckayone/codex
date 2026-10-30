@@ -3888,7 +3888,10 @@ export class CourseJourneyService extends BaseService {
                 isNull(content.deletedAt),
                 eq(content.courseOnly, false),
                 eq(content.isPurchasable, false),
-                isNull(content.includedInTierId),
+                // Keyed on the tier SWITCH, never on "has ticks": a closed
+                // (gated, untick) practice must not become course-only by
+                // surprise (Codex-2hxff.91).
+                eq(content.isTierGated, false),
                 eq(content.isFollowerGated, false),
                 eq(content.isTeamOnly, false)
               )

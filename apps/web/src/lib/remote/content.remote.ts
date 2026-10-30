@@ -437,77 +437,108 @@ const contentBaseFormSchema = z.object({
     })
     .pipe(z.array(z.string().trim().max(50)).max(20)),
   thumbnailUrl: optionalString,
-  minimumTierId: optionalUuid,
+  // The tiers that include the item (Codex-2hxff.91): a JSON array of tier
+  // ids in a hidden input, parsed exactly like `categoryIds`, and a TOTAL set
+  // when present. The editor renders the input only when the creator touched
+  // the tier picker or the access kind in this session (owner decision U4), and
+  // never when the tier list failed to load, so:
+  //   - field absent          → `undefined` → the server leaves the ticks alone
+  //   - field present          → the exact set (`[]` = in no tier)
+  //   - malformed / non-array → `undefined` (degrade to the safe "untouched")
+  // An absent field must never read as `[]`: that would take the item out of
+  // every tier the editor did not manage to load.
+  includedTierIds: z
+    .string()
+    .optional()
+    .transform((v) => {
+      if (v === undefined) return undefined;
+      try {
+        const parsed = JSON.parse(v);
+        return Array.isArray(parsed) ? (parsed as string[]) : undefined;
+      } catch {
+        return undefined;
+      }
+    })
+    .pipe(z.array(z.string().uuid()).max(50).optional()),
   shaderPreset: optionalString,
   featured: formBoolean,
 });
 
 /**
  * Translate the studio access-editor's single-select `accessType` (+ price +
- * minimum tier) into the SPEC §6.1 policy flags the content API now expects
- * (WP-1 hard-replaced the `accessType`/`minimumTierId` columns). The form UX
- * is unchanged — this is the write-boundary inverse of `deriveContentAccessKind`
- * and mirrors the legacy CHECK mapping (HARDENING §H2).
+ * the tiers ticked) into the SPEC §6.1 policy flags the content API expects.
+ * The write-boundary inverse of `deriveContentAccessKind`.
  *
- * `includedInTierId` is clamped to org-scoped content only (`subscription_tiers`
- * is org-scoped) so the payload always satisfies the create/update schema
- * refine and the `ContentService` tier clamp.
+ * Plan access (Codex-2hxff.91): `isTierGated` is the subscribers-only switch
+ * and `includedInTierIds` the exact set of tiers. Gated with no tier is
+ * CLOSED (only buyers, granted users and the team get in), never free, so an
+ * empty set is a legal save: the editor shows the "Closed to subscribers"
+ * warning instead of refusing (owner decision U2).
+ *
+ * `includedTierIds` is `undefined` when the editor did not send the field
+ * (untouched this session, or the tier list failed to load): the set is then
+ * left out of the payload and the server keeps the ticks. For a paid item the
+ * switch follows the set, so it is left out too: guessing it would either
+ * clear real ticks (`false`) or gate an item the creator never put in a tier
+ * (`true`). The new web never sends the legacy `includedInTierId`: the
+ * schema refuses it beside the new fields.
+ *
+ * Orgless (personal) content has no tiers; the picker never renders for it.
+ * A subscribers selection there still sends the switch, which the server
+ * refuses ("orgless content cannot be tier-gated"): refused, never free.
  */
 function accessSelectionToFlags(
   accessType: 'free' | 'paid' | 'followers' | 'subscribers' | 'team',
   priceCents: number,
-  minimumTierId: string | undefined,
-  organizationId: string | undefined
+  includedTierIds: string[] | undefined,
+  organizationId: string | null | undefined
 ): {
   isFree: boolean;
   isPurchasable: boolean;
   priceCents: number | null;
-  includedInTierId: string | null;
+  isTierGated?: boolean;
+  includedInTierIds?: string[];
   isFollowerGated: boolean;
   isTeamOnly: boolean;
 } {
-  const tier = organizationId ? (minimumTierId ?? null) : null;
+  const ids = organizationId ? includedTierIds : undefined;
   switch (accessType) {
     case 'paid':
-      // Purchasable; may also be included in a tier (hybrid).
+      // Purchasable; may also be included in tiers (hybrid). In no tier it is
+      // simply for sale, not closed.
       return {
         isFree: false,
         isPurchasable: true,
         priceCents,
-        includedInTierId: tier,
+        ...(ids === undefined
+          ? {}
+          : ids.length > 0
+            ? { isTierGated: true, includedInTierIds: ids }
+            : { isTierGated: false }),
         isFollowerGated: false,
         isTeamOnly: false,
       };
     case 'subscribers':
-      // Tier-gated; the optional price makes it ALSO purchasable (only set the
-      // purchasable flag when a real price is present, so pure subscription
-      // content keeps its 'subscribers' display kind).
-      //
-      // Fail-closed: subscriber gating REQUIRES a concrete tier — the flag model
-      // has no "any active subscription / no specific tier" state. Without a
-      // tier this would emit an all-gates-off row (isFree:false, every gate off)
-      // that the resolver falls through to PUBLIC. Refuse it here (defense-in-
-      // depth; the create/update schema refine is the authoritative guard, and
-      // the handler's try/catch surfaces this as a form error).
-      if (!tier) {
-        throw new Error(
-          'Subscriber content requires a subscription tier — select a tier or choose a different access type.'
-        );
-      }
+      // The subscribers-only switch. The optional price makes it ALSO
+      // purchasable (only with a real price, so pure subscription content
+      // keeps its 'subscribers' display kind).
       return {
         isFree: false,
         isPurchasable: priceCents > 0,
         priceCents: priceCents > 0 ? priceCents : null,
-        includedInTierId: tier,
+        isTierGated: true,
+        ...(ids === undefined ? {} : { includedInTierIds: ids }),
         isFollowerGated: false,
         isTeamOnly: false,
       };
+    // Every other kind turns the switch off; the server then clears the ticks
+    // in the same transaction, so no set is sent.
     case 'followers':
       return {
         isFree: false,
         isPurchasable: false,
         priceCents: null,
-        includedInTierId: null,
+        isTierGated: false,
         isFollowerGated: true,
         isTeamOnly: false,
       };
@@ -516,7 +547,7 @@ function accessSelectionToFlags(
         isFree: false,
         isPurchasable: false,
         priceCents: null,
-        includedInTierId: null,
+        isTierGated: false,
         isFollowerGated: false,
         isTeamOnly: true,
       };
@@ -525,7 +556,7 @@ function accessSelectionToFlags(
         isFree: true,
         isPurchasable: false,
         priceCents: null,
-        includedInTierId: null,
+        isTierGated: false,
         isFollowerGated: false,
         isTeamOnly: false,
       };
@@ -556,7 +587,7 @@ export const createContentForm = form(
     categoryIds,
     tags,
     thumbnailUrl,
-    minimumTierId,
+    includedTierIds,
     shaderPreset,
     featured,
   }) => {
@@ -575,7 +606,7 @@ export const createContentForm = form(
         ...accessSelectionToFlags(
           accessType,
           price,
-          minimumTierId,
+          includedTierIds,
           organizationId
         ),
         category,
@@ -699,7 +730,7 @@ export const updateContentForm = form(
     categoryIds,
     tags,
     thumbnailUrl,
-    minimumTierId,
+    includedTierIds,
     shaderPreset,
     featured,
   }) => {
@@ -718,7 +749,7 @@ export const updateContentForm = form(
         ...accessSelectionToFlags(
           accessType,
           price,
-          minimumTierId,
+          includedTierIds,
           organizationId
         ),
         category,

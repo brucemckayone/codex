@@ -32,7 +32,7 @@ import type {
   CourseOffer,
   CourseTierOffer,
 } from '@codex/shared-types';
-import { and, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import { hasCourseEntitlement } from './content-access/entitlements-resolver';
 import { assertCourseCreatorCanBePaid } from './course-payouts';
 
@@ -62,6 +62,16 @@ export class CourseAccessService extends BaseService {
    * publishing a tier-included course does — else `CreatorPayoutsRequiredError`
    * and nothing is written. Removing tiers is never refused, and a draft is
    * left to the publish check (`CourseJourneyService.saveJourneyPage`).
+   *
+   * LOCKS (review round 2): every check runs inside the write's transaction,
+   * in the plan-access lock order (@codex/subscription tier-service.ts, file
+   * header): the tiers FOR SHARE by id, then the course row FOR NO KEY
+   * UPDATE, then the ticks. A tier `deleteTier` holds is waited for and then
+   * re-read, so a tier deleted meanwhile is refused here instead of ticked,
+   * and the delete's sweep never meets this save's half-written ticks (the
+   * unlocked check outside the transaction could deadlock with it, 40P01).
+   * The course row orders this save with a delete or a copy that holds it,
+   * and with another save of the same course.
    */
   async setTierAccess(
     organizationId: string,
@@ -69,35 +79,48 @@ export class CourseAccessService extends BaseService {
     tierIds: string[]
   ): Promise<void> {
     try {
-      const course = await this.db.query.courses.findFirst({
-        where: and(
-          eq(courses.id, courseId),
-          eq(courses.organizationId, organizationId),
-          isNull(courses.deletedAt)
-        ),
-        columns: { id: true, status: true, creatorId: true },
-      });
-      if (!course) {
-        throw new NotFoundError('Course not found', {
-          courseId,
-          organizationId,
-        });
-      }
-
       const uniqueTierIds = [...new Set(tierIds)];
 
-      if (uniqueTierIds.length > 0) {
-        // N1: reject any tier that is not a live tier in the course's org.
-        const validTiers = await this.db
-          .select({ id: subscriptionTiers.id })
-          .from(subscriptionTiers)
+      await this.txDb.transaction(async (tx) => {
+        // N1: only live tiers in the course's org are found (and locked).
+        const validTiers =
+          uniqueTierIds.length > 0
+            ? await tx
+                .select({ id: subscriptionTiers.id })
+                .from(subscriptionTiers)
+                .where(
+                  and(
+                    inArray(subscriptionTiers.id, uniqueTierIds),
+                    eq(subscriptionTiers.organizationId, organizationId),
+                    isNull(subscriptionTiers.deletedAt)
+                  )
+                )
+                .orderBy(asc(subscriptionTiers.id))
+                .for('share')
+            : [];
+        const [course] = await tx
+          .select({
+            id: courses.id,
+            status: courses.status,
+            creatorId: courses.creatorId,
+          })
+          .from(courses)
           .where(
             and(
-              inArray(subscriptionTiers.id, uniqueTierIds),
-              eq(subscriptionTiers.organizationId, organizationId),
-              isNull(subscriptionTiers.deletedAt)
+              eq(courses.id, courseId),
+              eq(courses.organizationId, organizationId),
+              isNull(courses.deletedAt)
             )
-          );
+          )
+          .for('no key update');
+        // The course first: a foreign course reads as not found, whatever
+        // the tiers are, so this never confirms that it exists.
+        if (!course) {
+          throw new NotFoundError('Course not found', {
+            courseId,
+            organizationId,
+          });
+        }
         if (validTiers.length !== uniqueTierIds.length) {
           throw new ForbiddenError(
             'Tier access grants must reference tiers in the same organization as the course',
@@ -105,8 +128,11 @@ export class CourseAccessService extends BaseService {
           );
         }
 
-        if (course.status === CONTENT_STATUS.PUBLISHED) {
-          const granted = await this.db
+        if (
+          uniqueTierIds.length > 0 &&
+          course.status === CONTENT_STATUS.PUBLISHED
+        ) {
+          const granted = await tx
             .select({ tierId: courseTierAccess.tierId })
             .from(courseTierAccess)
             .where(
@@ -117,12 +143,10 @@ export class CourseAccessService extends BaseService {
             );
           const alreadyGranted = new Set(granted.map((row) => row.tierId));
           if (uniqueTierIds.some((tierId) => !alreadyGranted.has(tierId))) {
-            await assertCourseCreatorCanBePaid(this.db, course.creatorId);
+            await assertCourseCreatorCanBePaid(tx, course.creatorId);
           }
         }
-      }
 
-      await this.txDb.transaction(async (tx) => {
         await tx
           .delete(courseTierAccess)
           .where(eq(courseTierAccess.courseId, courseId));

@@ -25,6 +25,7 @@ import {
 import {
   isUniqueViolation,
   listedCreatorConditions,
+  notClosedToNewViewers,
   toIso,
   whereNotDeleted,
   withPagination,
@@ -732,7 +733,8 @@ export class OrganizationService extends BaseService {
           .innerJoin(users, eq(organizationMemberships.userId, users.id))
           // A course-only practice is reachable only inside its course, so a
           // public listing never counts or shows one (Codex-ot6vj), as
-          // listPublic's catalogue read does not.
+          // listPublic's catalogue read does not. Nor a CLOSED item, which
+          // the catalogue hides too (owner U11, review L7).
           .leftJoin(
             content,
             and(
@@ -740,7 +742,8 @@ export class OrganizationService extends BaseService {
               eq(content.organizationId, org.id),
               eq(content.status, 'published'),
               eq(content.courseOnly, false),
-              isNull(content.deletedAt)
+              isNull(content.deletedAt),
+              notClosedToNewViewers()
             )
           )
           .where(listedWhere)
@@ -804,6 +807,7 @@ export class OrganizationService extends BaseService {
               AND ${content.status} = 'published'
               AND ${content.courseOnly} = false
               AND ${content.deletedAt} IS NULL
+              AND ${notClosedToNewViewers()}
           ) ranked
           WHERE rn <= 4
         `);
@@ -1552,10 +1556,13 @@ export class OrganizationService extends BaseService {
     try {
       const org = await this.findOrgIdBySlugOrThrow(slug);
 
+      // A CLOSED item is counted nowhere the catalogue hides it (owner U11,
+      // review L7).
       const publishedContentFilter = and(
         eq(content.organizationId, org.id),
         eq(content.status, 'published'),
-        isNull(content.deletedAt)
+        isNull(content.deletedAt),
+        notClosedToNewViewers()
       );
 
       // Run all aggregation queries concurrently

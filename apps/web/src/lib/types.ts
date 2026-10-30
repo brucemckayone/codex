@@ -23,7 +23,14 @@ import type { IntroFilm, MyMembershipResponse } from '@codex/shared-types';
 import type { SubscriberSubscription } from '@codex/subscription';
 import type { HeroLayout } from '@codex/validation';
 
-export interface ContentWithRelations extends Content {
+/**
+ * A content row as content-api serves it. `legacyIncludedInTierId` is the
+ * drizzle name of the old single-tier column (Codex-2hxff.91 phase 1): the
+ * wire never carries it under that name, and new code must read the
+ * subscribers-only switch `isTierGated` and the set `includedInTierIds`.
+ */
+export interface ContentWithRelations
+  extends Omit<Content, 'legacyIncludedInTierId'> {
   creator?: {
     id: string;
     /** Absent on the anonymous public list, which never selects it. */
@@ -32,6 +39,14 @@ export interface ContentWithRelations extends Content {
   };
   organization?: Organization | null;
   mediaItem?: ServedMediaItem | null;
+  /**
+   * The exact set of tiers that include this item (Codex-2hxff.91), ordered
+   * by tier `sortOrder`, inactive tiers included; `[]` when not gated.
+   * Optional because a content-api older than the plan-access release omits
+   * it: treat ABSENT as "not loaded" (never as "in no tier"), so the editor
+   * never saves an empty set it did not read.
+   */
+  includedInTierIds?: string[];
 }
 
 /** As content-api serves it: never the transcoder's raw detail. */

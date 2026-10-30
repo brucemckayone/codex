@@ -5,22 +5,32 @@
  * Mounted at /api/organizations/:id/tiers
  *
  * Endpoints:
- * - POST   /                 - Create subscription tier
- * - GET    /                 - List tiers (public, no auth required)
- * - PATCH  /:tierId          - Update tier
- * - DELETE /:tierId          - Soft-delete tier
- * - POST   /reorder          - Reorder tiers
+ * - POST   /                       - Create subscription tier (optionally copying another's items)
+ * - GET    /                       - List tiers (public, no auth required)
+ * - GET    /access-summary         - Per-tier film/course counts + gaps (studio)
+ * - PATCH  /:tierId                - Update tier
+ * - DELETE /:tierId?onlyHere=&moveTo= - Soft-delete tier, saying what happens to items only in it
+ * - GET    /:tierId/delete-impact  - What deleting it would leave only there (studio)
+ * - GET    /:tierId/items          - The tier checklist's rows (studio)
+ * - POST   /:tierId/items          - The tier checklist's delta save (studio)
+ * - POST   /reorder                - Reorder tiers (display only)
+ *
+ * Plan access by ticks: Codex-2hxff.91. The studio reads are uncached: counts,
+ * closed items and gaps never go on a public or cached route.
  */
 
 import { CacheType, VersionedCache, type WaitUntilFn } from '@codex/cache';
 import type { HonoEnv } from '@codex/shared-types';
 import {
   createTierSchema,
+  deleteTierQuerySchema,
+  planItemsDeltaSchema,
+  planItemsQuerySchema,
   reorderTiersSchema,
   updateTierSchema,
   uuidSchema,
 } from '@codex/validation';
-import { cachedRead, procedure } from '@codex/worker-utils';
+import { cachedRead, PaginatedResult, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 import { z } from 'zod';
 
@@ -87,8 +97,33 @@ app.post(
       const orgId = ctx.organizationId;
       const tier = await ctx.services.tier.createTier(orgId, ctx.input.body);
       warmTierCache(ctx, orgId);
+      if (ctx.input.body.copyAccessFromTierId) {
+        // The copy changed which tiers the org's items are in (the public
+        // list carries them). A new tier has no subscribers: catalogue only.
+        await ctx.services.planAccess.afterTierAccessChange(orgId, []);
+      }
       return tier;
     },
+  })
+);
+
+/**
+ * GET /api/organizations/:id/tiers/access-summary
+ * Per-tier film and course counts, the guidance-note gaps and the org's
+ * eligible / closed / ineligible film counts. Registered before every
+ * `/:tierId` route (Hono matches in registration order).
+ */
+app.get(
+  '/access-summary',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'api',
+    },
+    input: { params: orgIdParamSchema },
+    handler: async (ctx) =>
+      ctx.services.planAccess.getAccessSummary(ctx.organizationId),
   })
 );
 
@@ -159,15 +194,91 @@ app.delete(
     },
     input: {
       params: orgTierParamSchema,
+      query: deleteTierQuerySchema,
     },
     successStatus: 204,
     handler: async (ctx) => {
       const orgId = ctx.organizationId;
       const { tierId } = ctx.input.params;
-      await ctx.services.tier.deleteTier(tierId, orgId);
+      const choice = ctx.input.query;
+      await ctx.services.tier.deleteTier(tierId, orgId, choice);
       warmTierCache(ctx, orgId);
+      // The deleted tier's ticks are gone and, on a move, its only-here
+      // items are in `moveTo`: bump the catalogue and those subscribers.
+      await ctx.services.planAccess.afterTierAccessChange(
+        orgId,
+        choice.onlyHere === 'move' ? (choice.moveTo ?? []) : []
+      );
       return null;
     },
+  })
+);
+
+/**
+ * GET /api/organizations/:id/tiers/:tierId/delete-impact
+ * The delete dialog's preview. The delete recomputes in its transaction.
+ */
+app.get(
+  '/:tierId/delete-impact',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'api',
+    },
+    input: { params: orgTierParamSchema },
+    handler: async (ctx) =>
+      ctx.services.planAccess.getDeleteImpact(
+        ctx.organizationId,
+        ctx.input.params.tierId
+      ),
+  })
+);
+
+/**
+ * GET /api/organizations/:id/tiers/:tierId/items
+ * One page of the tier checklist ("What's in {tier}").
+ */
+app.get(
+  '/:tierId/items',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'api',
+    },
+    input: { params: orgTierParamSchema, query: planItemsQuerySchema },
+    handler: async (ctx) => {
+      const result = await ctx.services.planAccess.listTierItems(
+        ctx.organizationId,
+        ctx.input.params.tierId,
+        ctx.input.query
+      );
+      return new PaginatedResult(result.items, result.pagination);
+    },
+  })
+);
+
+/**
+ * POST /api/organizations/:id/tiers/:tierId/items
+ * The tier checklist's save: a capped, idempotent delta of adds and removes.
+ * The default `api` rate limit, which this worker binds.
+ */
+app.post(
+  '/:tierId/items',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'api',
+    },
+    input: { params: orgTierParamSchema, body: planItemsDeltaSchema },
+    handler: async (ctx) =>
+      ctx.services.planAccess.setTierItems(
+        ctx.organizationId,
+        ctx.input.params.tierId,
+        ctx.input.body
+      ),
   })
 );
 

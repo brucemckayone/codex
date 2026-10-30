@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import { canBeSold, PRICE_LIMITS, requiresPayoutsToPublish } from '../index';
 
 const ORG = '00000000-0000-0000-0000-0000000000a1';
-const TIER = '00000000-0000-0000-0000-0000000000aa';
 
 /** Sold on its own, in an org, at £15. Each case overrides what it needs. */
 const sellable = {
@@ -12,7 +11,7 @@ const sellable = {
   courseOnly: false,
   isTeamOnly: false,
   isFollowerGated: false,
-  includedInTierId: null,
+  isTierGated: false,
   organizationId: ORG,
 };
 
@@ -20,7 +19,7 @@ describe('canBeSold (Codex-2hxff.14: checkout only for items a purchase opens)',
   it.each([
     ['paid, in an org', sellable],
     ['paid, orgless', { ...sellable, organizationId: null }],
-    ['paid + tier hybrid', { ...sellable, includedInTierId: TIER }],
+    ['paid + tier hybrid', { ...sellable, isTierGated: true }],
     [
       'exactly the minimum price',
       { ...sellable, priceCents: PRICE_LIMITS.MIN_CENTS },
@@ -42,7 +41,7 @@ describe('canBeSold (Codex-2hxff.14: checkout only for items a purchase opens)',
     ['followers-only', { ...sellable, isFollowerGated: true }],
     [
       'orgless with a tier (denied to everyone)',
-      { ...sellable, organizationId: null, includedInTierId: TIER },
+      { ...sellable, organizationId: null, isTierGated: true },
     ],
   ])('refuses %s content', (_shape, c) => {
     expect(canBeSold(c)).toBe(false);
@@ -51,16 +50,16 @@ describe('canBeSold (Codex-2hxff.14: checkout only for items a purchase opens)',
 
 describe('requiresPayoutsToPublish (Codex-2hxff.14: any priced item)', () => {
   it.each([
-    ['priced', { priceCents: 1500, includedInTierId: null }],
-    ['in a tier', { priceCents: null, includedInTierId: TIER }],
-    ['priced and in a tier', { priceCents: 1500, includedInTierId: TIER }],
+    ['priced', { priceCents: 1500, isTierGated: false }],
+    ['in a tier', { priceCents: null, isTierGated: true }],
+    ['priced and in a tier', { priceCents: 1500, isTierGated: true }],
   ])('needs payouts for %s content', (_shape, c) => {
     expect(requiresPayoutsToPublish(c)).toBe(true);
   });
 
   it.each([
-    ['unpriced', { priceCents: null, includedInTierId: null }],
-    ['priced 0', { priceCents: 0, includedInTierId: null }],
+    ['unpriced', { priceCents: null, isTierGated: false }],
+    ['priced 0', { priceCents: 0, isTierGated: false }],
   ])('does not need payouts for %s content', (_shape, c) => {
     expect(requiresPayoutsToPublish(c)).toBe(false);
   });

@@ -151,7 +151,7 @@ function paidRow(status: string) {
     isFree: false,
     isPurchasable: true,
     priceCents: 2499,
-    includedInTierId: null,
+    isTierGated: false,
     isFollowerGated: false,
     isTeamOnly: false,
     courseOnly: false,
@@ -171,7 +171,7 @@ function freeRow(status: string) {
 
 /** A TIER-GATED item — the subscription arm. */
 function tierRow(status: string) {
-  return { ...paidRow(status), includedInTierId: 'tier_pro' };
+  return { ...paidRow(status), isTierGated: true };
 }
 
 /** A FOLLOWER-GATED item. */
@@ -229,10 +229,6 @@ describe('Codex-p3m5j: a one-off purchase outlives unpublication', () => {
         organizationId: orgId,
         status: 'active',
         currentPeriodEnd: new Date(Date.now() + 7 * 864e5),
-        tier: { name: 'pro', sortOrder: 10 },
-      });
-      stub.mocks.subscriptionTiers.findFirst.mockResolvedValue({
-        sortOrder: 10,
       });
       stub.mocks.organizationFollowers.findFirst.mockResolvedValue(undefined);
       stub.mocks.organizationMemberships.findFirst.mockResolvedValue(undefined);

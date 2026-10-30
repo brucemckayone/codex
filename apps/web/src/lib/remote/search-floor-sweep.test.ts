@@ -118,6 +118,11 @@ describe('every landed client gate is still wired', () => {
       file: 'lib/components/search/CommandPaletteSearch.svelte',
       shape: 'fetch',
     },
+    // The tier checklist's title search (Codex-2hxff.91).
+    {
+      file: 'routes/_org/[slug]/studio/monetisation/tiers/[tierId]/+page.svelte',
+      shape: 'hold',
+    },
   ];
 
   for (const { file, shape } of GATED_SURFACES) {

@@ -56,7 +56,11 @@
  * handed to `waitUntil`. Individual KV failures are swallowed and logged.
  */
 
-import { CacheType, type VersionedCache } from '@codex/cache';
+import {
+  CacheType,
+  invalidateOrgPublicCaches,
+  type VersionedCache,
+} from '@codex/cache';
 import {
   ACCESS_GRANTING_SUBSCRIPTION_STATUSES,
   ORGANIZATION_ROLES,
@@ -66,6 +70,7 @@ import type { Database } from '@codex/database';
 import {
   organizationFollowers,
   organizationMemberships,
+  organizations,
   purchases,
   subscriptions,
 } from '@codex/database/schema';
@@ -92,7 +97,8 @@ export type ContentInvalidationReason =
   | 'membership_removed'
   | 'membership_invited'
   | 'follower_added'
-  | 'follower_removed';
+  | 'follower_removed'
+  | 'plan_access_changed';
 
 /**
  * `WaitUntilFn` and `InvalidationLogger` are canonically declared in
@@ -276,6 +282,129 @@ export async function invalidateContentAccess(
     reason,
     userCount: affectedUserIds.size,
   });
+}
+
+// ============================================================================
+// Per-tier invalidation (plan access, Codex-2hxff.91)
+// ============================================================================
+
+/** Arguments for {@link invalidatePlanSubscriberLibraries}. */
+export interface InvalidatePlanSubscriberLibrariesArgs {
+  db: Database;
+  cache: VersionedCache;
+  waitUntil: WaitUntilFn;
+  organizationId: string;
+  /** The tiers whose contents changed. `[]` bumps the org catalogue only. */
+  tierIds: string[];
+  reason: 'plan_access_changed';
+  logger?: InvalidationLogger;
+  /** Override the fanout cap (default {@link DEFAULT_MAX_LIBRARY_FANOUT}). */
+  maxFanout?: number;
+}
+
+/**
+ * A tier's films or courses changed (the checklist, a delete's "move", a
+ * create's copy). Bumps the org's content catalogue version (the public list
+ * carries each item's `includedInTierIds`) and its public counts (topics,
+ * stats, creators), then the library of every user
+ * whose subscription to one of `tierIds` grants access now — the same
+ * statuses and period test as the decision. Above `maxFanout` the per-user
+ * bumps are skipped (logged), as {@link invalidateContentAccess} does.
+ */
+export async function invalidatePlanSubscriberLibraries(
+  args: InvalidatePlanSubscriberLibrariesArgs
+): Promise<void> {
+  const {
+    db,
+    cache,
+    waitUntil,
+    organizationId,
+    tierIds,
+    reason,
+    logger,
+    maxFanout = DEFAULT_MAX_LIBRARY_FANOUT,
+  } = args;
+
+  bumpWithLogger(
+    cache,
+    waitUntil,
+    CacheType.COLLECTION_ORG_CONTENT(organizationId),
+    { reason, organizationId, key: 'org:content' },
+    logger
+  );
+  // Ticks decide which items are CLOSED, and the public counts leave closed
+  // items out (review L7): the active topics, and the slug-keyed stats and
+  // creators list. The editor's saves bump these already
+  // (`bumpOrgContentVersion`); a tick write elsewhere must too, or a topic
+  // whose only film just closed keeps its chip until the TTL.
+  bumpWithLogger(
+    cache,
+    waitUntil,
+    CacheType.CATEGORIES(organizationId),
+    { reason, organizationId, key: 'org:categories' },
+    logger
+  );
+  // The slug-keyed bumps need the slug: one primary-key read, AWAITED so it
+  // runs inside the request (review round 2). Handed to a plain `waitUntil`,
+  // it raced the request's DB cleanup (`pool.end()`), and a lost race left
+  // the stats and creators stale until their TTL. Only the KV bumps are fire
+  // and forget. A failed read is logged and never fails the write.
+  const logPublicBumpFailure = (error: unknown) => {
+    logger?.warn('content-invalidation: bump failed', {
+      reason,
+      organizationId,
+      key: 'org:public',
+      error: error instanceof Error ? error.message : String(error),
+    });
+  };
+  const org = await db.query.organizations
+    .findFirst({
+      where: eq(organizations.id, organizationId),
+      columns: { slug: true },
+    })
+    .catch((error: unknown) => {
+      logPublicBumpFailure(error);
+      return undefined;
+    });
+  if (org?.slug) {
+    waitUntil(
+      invalidateOrgPublicCaches(cache, org.slug).catch(logPublicBumpFailure)
+    );
+  }
+
+  const ids = [...new Set(tierIds)];
+  if (ids.length === 0) return;
+
+  const rows = await db.query.subscriptions.findMany({
+    where: and(
+      eq(subscriptions.organizationId, organizationId),
+      inArray(subscriptions.tierId, ids),
+      inArray(subscriptions.status, [...ACCESS_GRANTING_SUBSCRIPTION_STATUSES]),
+      gt(subscriptions.currentPeriodEnd, new Date())
+    ),
+    columns: { userId: true },
+  });
+  const userIds = new Set(rows.map((r) => r.userId));
+  if (userIds.size === 0) return;
+  if (userIds.size > maxFanout) {
+    logger?.warn('content-invalidation: tier fanout skipped (cap exceeded)', {
+      organizationId,
+      reason,
+      tierCount: ids.length,
+      userCount: userIds.size,
+      maxFanout,
+    });
+    return;
+  }
+  for (const userId of userIds) {
+    bumpWithLogger(
+      cache,
+      waitUntil,
+      CacheType.COLLECTION_USER_LIBRARY(userId),
+      { reason, organizationId, userId, key: 'user:library' },
+      logger
+    );
+  }
 }
 
 // ============================================================================

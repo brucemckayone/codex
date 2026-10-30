@@ -117,7 +117,10 @@
     contentAccessType?: 'free' | 'paid' | 'followers' | 'subscribers' | 'team' | null;
     /** Whether the user follows this org (contextualizes followers badge) */
     isFollower?: boolean;
-    /** Resolved tier name for subscriber-gated content */
+    /**
+     * The plans that include subscriber-gated content, as the badge says
+     * them ("Basic and above", "Pro only": `planBadgeLabel`, Codex-2hxff.91).
+     */
     tierName?: string | null;
     /** Content category (shown as overlay tag on thumbnail) */
     category?: string | null;
@@ -1017,12 +1020,15 @@
     flex-shrink: 0;
   }
 
-  /* PriceBadge position */
+  /* PriceBadge position. Capped to the cover's width less both gutters, so
+     a long plan label ("Foundations and above", Codex-2hxff.91) ends in an
+     ellipsis inside the card instead of running past its edge. */
   :global(.cc__price-badge) {
     position: absolute;
     top: var(--space-2);
     right: var(--space-2);
     z-index: 1;
+    max-width: calc(100% - 2 * var(--space-2));
   }
 
   /* ═══════════════════════════════════════════

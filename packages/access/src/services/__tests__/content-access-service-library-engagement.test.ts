@@ -39,6 +39,7 @@ import {
   createTestTierInput,
   createUniqueSlug,
   type Database,
+  gateContentToTiers,
   seedTestUsers,
   setupTestDatabase,
   teardownTestDatabase,
@@ -152,7 +153,7 @@ describe('ContentAccessService.listUserLibrary — relationship buckets', () => 
         isFree: accessType === 'free',
         isPurchasable: false,
         priceCents: null,
-        includedInTierId: null,
+        isTierGated: false,
         isFollowerGated: accessType === 'followers',
         isTeamOnly: false,
       })
@@ -622,10 +623,11 @@ describe('ContentAccessService.listUserLibrary — relationship buckets', () => 
       const [subscriber] = await seedTestUsers(db, 1);
       const tier = await seedActiveSubscription(subscriber, organizationId);
       const item = await createContentWithAccessType('free', 'thumb-tier');
-      await db
-        .update(content)
-        .set({ isFree: false, includedInTierId: tier.id })
-        .where(eq(content.id, item.id));
+      await gateContentToTiers(db, {
+        contentId: item.id,
+        organizationId,
+        tierIds: [tier.id],
+      });
 
       const result = await serviceWithBase(CDN).listUserLibrary(subscriber, {
         ...libraryInput,

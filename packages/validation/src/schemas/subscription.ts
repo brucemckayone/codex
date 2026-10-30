@@ -70,6 +70,16 @@ export const createTierSchema = baseTierSchema
      * Stripe refuses a reused key with different parameters.
      */
     submissionId: uuidSchema,
+    /**
+     * "Include everything from…" (Codex-2hxff.91): a live tier of the same
+     * org whose films and courses the new tier starts with, copied in the
+     * SAME transaction as the insert. A snapshot: later changes to the source
+     * don't carry over. Absent or null copies nothing. A replayed
+     * `submissionId` returns the first attempt's tier and copies nothing
+     * again, so a retry never re-adds items the creator removed meanwhile.
+     * Only at creation: `updateTierSchema` has no such field.
+     */
+    copyAccessFromTierId: uuidSchema.nullable().optional(),
   })
   .refine((data) => data.priceAnnual <= data.priceMonthly * 12, {
     message: 'Annual price must offer equal or better value than monthly',
@@ -99,6 +109,176 @@ export const reorderTiersSchema = z.object({
     .min(1, 'At least one tier ID is required')
     .max(50, 'Cannot reorder more than 50 tiers in one call'),
 });
+
+// ============================================================================
+// Plan access: what each tier includes (Codex-2hxff.91)
+// ============================================================================
+
+/** At most this many changes (adds + removes, films + courses) per delta. */
+export const PLAN_ITEMS_DELTA_MAX = 200;
+
+/** At most this many ids in one of the delta's four lists. */
+export const PLAN_ITEMS_DELTA_LIST_MAX = 100;
+
+/** The tier checklist's page size cap. */
+export const PLAN_ITEMS_PAGE_MAX = 50;
+
+/**
+ * A list of ids with no repeats. A repeat is refused, not collapsed: the
+ * services compare the rows they find with the ids they were sent.
+ */
+const distinctIds = <T extends z.ZodArray<z.ZodString>>(schema: T) =>
+  schema.refine((ids) => new Set(ids).size === ids.length, {
+    message: 'The same item is listed twice',
+  });
+
+/**
+ * `DELETE /api/organizations/:id/tiers/:tierId?onlyHere=keep|move&moveTo=…`.
+ *
+ * A QUERY, not a body: the old studio sends a bare DELETE, and it must keep
+ * working for a tier with nothing only-here. When films or courses are ONLY in
+ * this tier, the service refuses a delete without `onlyHere` (409
+ * `TierHasOnlyItemsError`), so an old client fails safe instead of leaving
+ * them in no tier by accident.
+ * - `keep`: they stay subscribers-only with no tier: CLOSED, never free.
+ * - `move`: they are added to every tier in `moveTo` (one or more, comma-
+ *   separated: `moveTo=<id>,<id>`) in the same transaction. The service
+ *   refuses a `moveTo` that is the deleted tier, or not a live tier of the org.
+ */
+export const deleteTierQuerySchema = z
+  .object({
+    onlyHere: z
+      .enum(['keep', 'move'], {
+        message: 'Choose whether to keep or move what is only in this tier',
+      })
+      .optional(),
+    moveTo: z
+      .string()
+      .transform((raw) => raw.split(','))
+      .pipe(
+        distinctIds(
+          z
+            .array(uuidSchema)
+            .min(1, 'Choose a tier to move them to')
+            .max(50, 'Cannot move them to more than 50 tiers')
+        )
+      )
+      .optional(),
+  })
+  .refine((q) => q.onlyHere !== 'move' || (q.moveTo?.length ?? 0) > 0, {
+    message: 'Choose a tier to move them to',
+    path: ['moveTo'],
+  })
+  .refine((q) => q.onlyHere === 'move' || q.moveTo === undefined, {
+    message: 'moveTo needs onlyHere=move',
+    path: ['moveTo'],
+  });
+
+const planItemIdsSchema = z.object({
+  contentIds: distinctIds(
+    z
+      .array(uuidSchema)
+      .max(
+        PLAN_ITEMS_DELTA_LIST_MAX,
+        `Send at most ${PLAN_ITEMS_DELTA_LIST_MAX} films at a time`
+      )
+  ).default(() => []),
+  courseIds: distinctIds(
+    z
+      .array(uuidSchema)
+      .max(
+        PLAN_ITEMS_DELTA_LIST_MAX,
+        `Send at most ${PLAN_ITEMS_DELTA_LIST_MAX} courses at a time`
+      )
+  ).default(() => []),
+});
+
+interface PlanItemIdLists {
+  contentIds: string[];
+  courseIds: string[];
+}
+
+const planItemsChangeCount = (d: {
+  add: PlanItemIdLists;
+  remove: PlanItemIdLists;
+}): number =>
+  d.add.contentIds.length +
+  d.add.courseIds.length +
+  d.remove.contentIds.length +
+  d.remove.courseIds.length;
+
+const overlaps = (a: string[], b: string[]): boolean => {
+  const seen = new Set(a);
+  return b.some((id) => seen.has(id));
+};
+
+/**
+ * BODY of `POST /api/organizations/:id/tiers/:tierId/items`: the tier
+ * checklist's save. A DELTA, never the tier's whole set: the checklist only
+ * ever sees one page, and a delta is idempotent (add = insert-if-absent,
+ * remove = delete), so a resent request lands the same state and composes
+ * with an editor save that touches another tier.
+ *
+ * Removing an item's last tier never makes it free: a subscribers-only film
+ * left in no tier is CLOSED (the response's `closedNow` lists them). The
+ * service refuses ids outside the tier's eligible set (free, followers-only,
+ * team-only and course-only films; anything of another org) and writes
+ * nothing.
+ *
+ * A POST body on a non-partial schema, so the inner defaults are safe
+ * here (the Codex-moyu5 trap is `.partial()` only). They are factories, so
+ * no two parses share one default array.
+ */
+export const planItemsDeltaSchema = z
+  .object({
+    add: planItemIdsSchema.default(() => ({ contentIds: [], courseIds: [] })),
+    remove: planItemIdsSchema.default(() => ({
+      contentIds: [],
+      courseIds: [],
+    })),
+  })
+  .refine(
+    (d) => {
+      const n = planItemsChangeCount(d);
+      return n >= 1 && n <= PLAN_ITEMS_DELTA_MAX;
+    },
+    { message: `Send between 1 and ${PLAN_ITEMS_DELTA_MAX} changes at a time` }
+  )
+  .refine(
+    (d) =>
+      !overlaps(d.add.contentIds, d.remove.contentIds) &&
+      !overlaps(d.add.courseIds, d.remove.courseIds),
+    { message: 'An item cannot be added and removed in one request' }
+  );
+
+/**
+ * QUERY of `GET /api/organizations/:id/tiers/:tierId/items`, the tier
+ * checklist's rows (a `PaginatedResult`).
+ * - `kind`: films, courses, or (absent) both, films first.
+ * - `filter`: `included` / `excluded` = ticked or not for THIS tier;
+ *   `missing` = ticked for `cheaperTierId` but not for this tier (the
+ *   guidance note's "Show them" / "Review").
+ * - `search`: the title, as the studio content list searches it.
+ */
+export const planItemsQuerySchema = paginationSchema
+  .extend({
+    limit: z.coerce
+      .number()
+      .int({ message: 'Must be a whole number' })
+      .positive({ message: 'Must be greater than 0' })
+      .max(PLAN_ITEMS_PAGE_MAX, {
+        message: `Must be ${PLAN_ITEMS_PAGE_MAX} or less`,
+      })
+      .default(20),
+    kind: z.enum(['film', 'course']).optional(),
+    filter: z.enum(['all', 'included', 'excluded', 'missing']).default('all'),
+    cheaperTierId: uuidSchema.optional(),
+    search: createSearchQuerySchema(),
+  })
+  .refine((q) => (q.filter === 'missing') === (q.cheaperTierId !== undefined), {
+    message: 'cheaperTierId goes with filter=missing, and only with it',
+    path: ['cheaperTierId'],
+  });
 
 // ============================================================================
 // Subscription Checkout Schemas
@@ -330,6 +510,9 @@ export type ConnectAccountStatus = z.infer<typeof connectAccountStatusEnum>;
 export type CreateTierInput = z.infer<typeof createTierSchema>;
 export type UpdateTierInput = z.infer<typeof updateTierSchema>;
 export type ReorderTiersInput = z.infer<typeof reorderTiersSchema>;
+export type DeleteTierQueryInput = z.infer<typeof deleteTierQuerySchema>;
+export type PlanItemsDeltaInput = z.infer<typeof planItemsDeltaSchema>;
+export type PlanItemsQueryInput = z.infer<typeof planItemsQuerySchema>;
 
 export type CreateSubscriptionCheckoutInput = z.infer<
   typeof createSubscriptionCheckoutSchema

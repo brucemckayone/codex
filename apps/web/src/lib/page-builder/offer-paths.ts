@@ -43,6 +43,7 @@ import {
   fieldString,
 } from '$lib/page-builder/render/coerce';
 import { formatPrice, formatPriceCompact } from '$lib/utils/format';
+import * as m from '$paraglide/messages';
 
 /**
  * Which of the three SPEC §7 ways in a card represents. A STRING discriminant
@@ -297,11 +298,14 @@ function enumerateOfferPaths(
           priceCents: tier.priceMonthly,
           recurring: true,
           cadenceLabel: 'per month',
-          who: 'Everything, not just this course',
+          // A plan is a set of items, not "everything" (Codex-2hxff.91): a
+          // dearer plan may lack a film a cheaper one has, so each card
+          // speaks only for its own plan.
+          who: m.offer_path_tier_who(),
           blurb: `${course.title} is included with ${tier.tierName}.`,
           bullets: [
             `Includes ${course.title}`,
-            'Plus everything else in the membership',
+            m.offer_path_tier_everything_else({ tierName: tier.tierName }),
             'Cancel anytime',
           ],
           best: false,

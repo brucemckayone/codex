@@ -9,6 +9,8 @@
 
     not subscribed           → "Subscribe" (primary) → pricing
     subscribed + active      → "Subscribed" (disabled, success badge)
+    active + upgradeRequired → "Upgrade to Watch", or "Change Plan" with
+                               `changePlan` (Codex-2hxff.91) → pricing
     subscribed + cancelling  → warning "Ends {date}" + "Reactivate" (inline, optimistic)
     subscribed + past_due    → danger "Payment failed" + "Update payment" (Stripe portal)
     subscribed + paused      → warning "Paused" + "Resume" (interactive,
@@ -67,6 +69,12 @@
      * current tier isn't high enough for the viewed content.
      */
     upgradeRequired?: boolean;
+    /**
+     * With `upgradeRequired`: the plans that include the content are not all
+     * dearer than the viewer's (plan access, Codex-2hxff.91), so the CTA says
+     * "Change Plan" rather than "Upgrade to Watch".
+     */
+    changePlan?: boolean;
     /** Button size forwarded to the underlying <Button> primitive. */
     size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl';
     /** Whether to render the inline status badge (Ends/Payment failed/Paused). */
@@ -80,6 +88,7 @@
     isAuthenticated,
     subscribeHref = '/pricing',
     upgradeRequired = false,
+    changePlan = false,
     size = 'md',
     showBadge = true,
     class: className = '',
@@ -291,7 +300,7 @@
         data-testid="subscribe-button-upgrade"
       >
         <Button variant="primary" {size}>
-          {m.upgrade_cta_title()}
+          {changePlan ? m.subscription_change_tier() : m.upgrade_cta_title()}
         </Button>
       </a>
       <a

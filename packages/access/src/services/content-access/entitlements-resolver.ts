@@ -20,8 +20,8 @@
  *   — never materialised, so a tier change (or lapse) takes effect instantly and
  *   can never strand a stale grant. `course_tier_access` is an EXACT tier→course
  *   grant (SPEC §7: "not just min-tier"), so membership is by explicit `tierId`,
- *   NOT by `sortOrder ≥` (that "and above" semantic is content-only, via
- *   `content.includedInTierId`).
+ *   the same as content (`content_tier_access`, Codex-2hxff.91): no tier
+ *   implies another.
  *
  * ## No N+1 on Neon HTTP (HARDENING §D / §E / §12)
  * {@link resolveCourseEntitlementsBatch} answers N courses in a BOUNDED number of

@@ -9,7 +9,10 @@ Content access control, signed URL generation, and playback progress tracking. C
 ```typescript
 import { ContentAccessService, createContentAccessService } from '@codex/access';
 import { AccessDeniedError, ContentNotFoundError, R2SigningError } from '@codex/access';
+import { PlanAccessService } from '@codex/access'; // ctx.services.planAccess
 ```
+
+`PlanAccessService` (Codex-2hxff.91) is the Studio's tier checklist: `getAccessSummary`, `getDeleteImpact`, `listTierItems`, `setTierItems` (an idempotent delta, one `dbWs` transaction: eligibility, payouts for PUBLISHED adds, a paid film's switch turned on, `closedNow`) and `afterTierAccessChange` (catalogue + subscriber library bumps). Studio-only and uncached; organization-api's `tiers.ts` routes call it. It is one of the three writers of `content_tier_access` (with `@codex/content`'s `content-tier-access.ts` and `TierService`).
 
 ## `ContentAccessService`
 
@@ -46,13 +49,13 @@ const { service, cleanup } = createContentAccessService(env);
 
 ## Access Decision Logic
 
-`getStreamingUrl()` (via `assertStreamingAccess` → `decideContentAccess` in `services/content-access/access-decision.ts`) branches by the content's access-policy flags — `courseOnly`, `isTeamOnly`, `isFollowerGated`, `includedInTierId`, `priceCents > 0` — inside a read-only transaction:
+`getStreamingUrl()` (via `assertStreamingAccess` → `decideContentAccess` in `services/content-access/access-decision.ts`) branches by the content's access-policy flags — `courseOnly`, `isTeamOnly`, `isFollowerGated`, `isTierGated`, `priceCents > 0` — inside a read-only transaction:
 
 | accessType | Granted when |
 |---|---|
 | `team` | User has a management role in the org (owner / admin / creator). |
 | `followers` | User has an **active subscription** to the org **or** follows the org **or** has a management role. |
-| `subscribers` (`includedInTierId` set) | Active subscription whose tier `sortOrder` meets the content's `includedInTierId` **or** a completed purchase **or** a stored entitlement **or** an owned course **or** a management role. |
+| `subscribers` (`isTierGated` on) | Active subscription on one of the tiers TICKED for the content (`content_tier_access`, a set: a dearer tier is not implied) **or** a completed purchase **or** a stored entitlement **or** an owned course **or** a management role. With NO tier ticked the item is CLOSED: no subscriber reaches it, and it never falls through to free. |
 | paid (`priceCents > 0`, no tier) | User has a completed purchase **or** a stored entitlement **or** an owned course **or** a management role. A subscription alone does NOT unlock paid content. |
 | `free` / `null` (no price) | Granted — subject only to content being non-deleted AND published. This is the one arm where publication still gates everyone, because `free` does not survive unpublication (see below). |
 
@@ -209,7 +212,7 @@ end. Pinned by `content-access-service-withdrawn.test.ts` (decision, identical
 
 ### Access hierarchy (Codex-xybr3)
 
-The platform's access hierarchy is **`subscribers ⊇ followers ⊇ public`**. An active subscription to the content's org grants followers-only access without requiring a follower row. Tier-gated (subscribers-only) content is **orthogonal** to this hierarchy — a subscription does NOT automatically unlock tier-gated content unless the subscriber's tier meets the content's `includedInTierId` (by tier `sortOrder`).
+The platform's access hierarchy is **`subscribers ⊇ followers ⊇ public`**. An active subscription to the content's org grants followers-only access without requiring a follower row. Tier-gated (subscribers-only) content is **orthogonal** to this hierarchy — a subscription does NOT automatically unlock tier-gated content unless the subscriber's tier is one of the content's ticked tiers.
 
 Inside the followers branch, checks run in this order:
 
@@ -217,14 +220,16 @@ Inside the followers branch, checks run in this order:
 2. **Follower row** — fallback so ex-subscribers (status=cancelled) who are still following continue to see the content.
 3. **Management membership** — owner/admin/creator implicitly bypass the gate.
 
-**Archived (soft-deleted) tiers still resolve during access checks.** When `content.included_in_tier_id` points at a tier that has been soft-deleted after the content was gated — or when an active subscription's `tier_id` references an archived tier — the access decision must still compare sortOrder. The inline tier lookup inside `getStreamingUrl` therefore deliberately omits the `deletedAt` filter (mirror of `TierService.getTierForAccessCheck`). See `packages/subscription/CLAUDE.md` → **Archived-tier semantic** for the full write-vs-read-path contract.
+**The decision reads ticks, not tiers (Codex-2hxff.91).** `findGrantingSubscription` is ONE subscriptions read whose `where` carries `tier_id IN (SELECT tier_id FROM content_tier_access WHERE content_id = $c AND organization_id = $org)`. No tier row, `sortOrder` or `deletedAt` is read. A tier's soft delete sweeps its ticks in the same transaction, so an archived tier opens nothing; the legacy column `included_in_tier_id` is never read here (the rename guard test in `@codex/content` fails if a new reader appears).
+
+**Raw SQL inside a relational query names its columns as text.** Drizzle's `db.query.X.findFirst/findMany` rewrites EVERY drizzle column in its `where` to the ROOT table's alias: `${contentTierAccess.tierId}` inside the subscriptions read rendered as `"subscriptions"."tier_id"` (42703). The tick subqueries therefore alias the table (`content_tier_access cta`) and write `cta.tier_id`. Mock-db suites cannot see this; only the DB-backed suites do.
 
 ## Library Query
 
 `listUserLibrary()` runs five independent query arms in parallel:
 - `queryPurchased` — content with completed purchases, unioned with live support grants (`entitlements.source = 'grant'`); an item both bought and granted is one row. A purchase with an open chargeback stays listed with `purchase.disputedAt` set (Codex-2hxff.60), paused, only while `resolveDisputePause` names a hold: the mark is cleared when the item still opens (a covering subscription, a support grant, a staff role, an owned course) or is refused for a reason no dispute explains (say it became course-only). That costs one access decision per disputed row. The undim is decided at fetch time, so it stays cached on the client until the next library version bump: a covering grant that lapses by its `expiresAt` bumps nothing, and the card stays undimmed while the stream refuses. A lost dispute is `refunded` and leaves. `purchase.disputedAt` is `null` for a grant. No second-copy check: `uq_purchases_completed_customer_content` allows one completed purchase per item
 - `queryMembership` — content accessible via org membership
-- `querySubscription` — content accessible via subscription tier
+- `querySubscription` — content behind the tier switch (`isTierGated`, not `courseOnly`) ticked for the subscription's own tier: the same ticks the decision reads
 - `queryFreeRelationship` — `isFree` content of followed/subscribed orgs
 - `queryFollowersRelationship` — `isFollowerGated` content of followed/subscribed orgs
 

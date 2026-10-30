@@ -14,6 +14,7 @@ import type {
   CourseInsightsService,
   CourseJourneyService,
   EntitlementsService,
+  PlanAccessService,
 } from '@codex/access';
 import type {
   AdminAnalyticsService,
@@ -195,6 +196,12 @@ export interface ServiceRegistry {
    * paths. Pure DB — no Stripe.
    */
   courseAccess: CourseAccessService;
+  /**
+   * Plan access by ticks (Codex-2hxff.91): the studio's tier-contents reads
+   * (summary, delete impact, checklist rows) and the checklist's delta write.
+   * Pure DB, with fire-and-forget catalogue + library bumps after a write.
+   */
+  planAccess: PlanAccessService;
   /**
    * Course MEMBER-surface reads (Codex-2pryk Round-D): the dashboard curriculum
    * + progress rollup and the in-course practice/playlist projections (SPEC §11

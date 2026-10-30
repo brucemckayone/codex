@@ -108,6 +108,8 @@ import type {
   CreateSubscriptionCheckoutInput,
   CreateTierInput,
   MediaStatusTicket,
+  PlanItemsDeltaInput,
+  PlanItemsQueryInput,
   ReactivateSubscriptionInput,
   ResumeSubscriptionInput,
   SalesFilm,
@@ -127,6 +129,7 @@ import type {
   UpdateTierInput,
   UpgradeToCreatorInput,
 } from '@codex/validation';
+import { gateSearchQuery } from '@codex/validation';
 import type { Cookies } from '@sveltejs/kit';
 import { dev } from '$app/environment';
 // Studio journey-insights view shape (Codex-2pryk Round-D · WP-7). The FROZEN
@@ -217,10 +220,18 @@ export type MyStripeBalance = Awaited<
  * `categorySlugs`; `content_type` is a `varchar`
  * column (so `ContentWithRelations` widens it to `string`) but is constrained
  * to its enum, so we narrow it here. The SPEC §6.1 access-policy flags
- * (`isFree` / `isPurchasable` + `priceCents` / `includedInTierId` /
- * `isFollowerGated` / `isTeamOnly` / `courseOnly`) flow through unchanged from
+ * (`isFree` / `isPurchasable` + `priceCents` / `isFollowerGated` /
+ * `isTeamOnly` / `courseOnly`) flow through unchanged from
  * `ContentWithRelations` (WP-1 replaced the single `accessType` enum). This is
  * the single source of truth for the landing/explore `ContentItem` shape.
+ *
+ * Plan access (Codex-2hxff.91): `isTierGated` is the subscribers-only switch
+ * and `includedInTierIds` the exact set of tiers that include the item. "Is it
+ * included for me?" is `includedInTierIds.includes(mySub.tier.id)`: a set, not
+ * a ladder, so no tier list or `sortOrder` is needed to decide it. Gated with
+ * `[]` is CLOSED, never free. The worker still emits the legacy single
+ * `includedInTierId` for one release, for the old web; new code must not read
+ * it, so it is left off this type once the row's property is renamed.
  */
 export type PublicContentListItem = Omit<
   ContentWithRelations,
@@ -231,7 +242,173 @@ export type PublicContentListItem = Omit<
   creator: PublicContentCreator;
   contentType: 'video' | 'audio' | 'written';
   categorySlugs: string[];
+  isTierGated: boolean;
+  /** Ordered by tier `sortOrder`; inactive tiers included; `[]` when not gated. */
+  includedInTierIds: string[];
 };
+
+// ── Plan access (Codex-2hxff.91): the studio's tier-contents reads ──────────
+// organization-api, `requireOrgManagement`, uncached (authoritative, like the
+// course monetisation read). Per-tier counts, closed items and gaps NEVER go on
+// a public or cached route.
+
+/** What a tier can include: a film (a content row) or a course. */
+export type PlanItemKind = 'film' | 'course';
+
+/** An item named in a gap or a delete preview. */
+export interface PlanItemRef {
+  kind: PlanItemKind;
+  id: string;
+  title: string;
+}
+
+/**
+ * One gap the guidance note names ("Pro doesn't include 2 items Basic has"):
+ * live, eligible items `cheaperTierId` includes and this tier doesn't. Cheaper
+ * is by MONTHLY price, strictly (equal prices are not cheaper).
+ */
+export interface TierAccessGap {
+  cheaperTierId: string;
+  films: number;
+  courses: number;
+  /**
+   * The first ≤ 3 by title. The note names them; when `films + courses` is 3
+   * or fewer, "Tick both" / "Tick all" can send these ids. Otherwise the note
+   * offers "Show them" (the checklist with `filter=missing`).
+   */
+  sampleItems: PlanItemRef[];
+}
+
+/** One tier's row in {@link TierAccessSummary}. */
+export interface TierAccessSummaryRow {
+  tierId: string;
+  /** Live (not deleted) films ticked for this tier. */
+  films: number;
+  /** Live (not deleted) courses ticked for this tier. */
+  courses: number;
+  /** One entry per ACTIVE cheaper tier with a gap; `[]` when none. */
+  missingFromCheaper: TierAccessGap[];
+}
+
+/**
+ * `GET /api/organizations/:id/tiers/access-summary`: the monetisation rows'
+ * counts, their guidance notes, the create dialog's "18 films and 2 courses"
+ * per source tier, and the checklist's filter counts and footnote.
+ */
+export interface TierAccessSummary {
+  /** Every live tier of the org, inactive ones included. */
+  tiers: TierAccessSummaryRow[];
+  /** Films a tier CAN include (subscribers-only or paid; not course-only). */
+  eligibleFilms: number;
+  /** Every live course of the org (any course can be in a tier). */
+  totalCourses: number;
+  /** Gated films in no tier and not for sale: closed. */
+  closedFilms: number;
+  /** Free, followers-only and team-only films: a tier can't include them. */
+  ineligibleFilms: number;
+}
+
+/** A film only in the tier being deleted. */
+export interface TierDeleteImpactFilm {
+  id: string;
+  title: string;
+  status: 'draft' | 'published' | 'archived';
+  /** For sale: it stays on sale after "keep". Otherwise "keep" closes it. */
+  isPurchasable: boolean;
+}
+
+/** A course only in the tier being deleted. */
+export interface TierDeleteImpactCourse {
+  id: string;
+  title: string;
+  status: 'draft' | 'published' | 'archived';
+}
+
+/**
+ * `GET /api/organizations/:id/tiers/:tierId/delete-impact`: the delete
+ * dialog. It refuses to offer Delete when this did not load. The delete
+ * itself recomputes "only here" in its transaction; this is a preview.
+ */
+export interface TierDeleteImpact {
+  /** Every subscription on the tier that isn't cancelled. > 0 → the delete is refused (`TIER_HAS_SUBSCRIBERS`). */
+  liveSubscriberCount: number;
+  onlyHere: {
+    films: {
+      total: number;
+      /** Subscribers-only and not for sale: "keep" leaves them CLOSED. */
+      closing: number;
+      /** For sale: "keep" leaves them on sale, in no tier. */
+      staysForSale: number;
+      /** The first ≤ 50 by title. */
+      items: TierDeleteImpactFilm[];
+    };
+    courses: {
+      total: number;
+      /** The first ≤ 50 by title. */
+      items: TierDeleteImpactCourse[];
+    };
+  };
+  /** In this tier AND another live one: they only lose this tier. */
+  alsoInOtherPlans: { films: number; courses: number };
+}
+
+/**
+ * How a film or course is reached today, for the checklist row's sub-line.
+ * `free` / `followers` / `team` films can't be in a tier (`eligible: false`).
+ */
+export type PlanItemAccess =
+  | 'subscribers'
+  | 'paid'
+  | 'free'
+  | 'followers'
+  | 'team'
+  | 'course';
+
+/**
+ * One row of `GET /api/organizations/:id/tiers/:tierId/items` (a list
+ * envelope, ≤ 50 a page). Films first, then courses, each by title.
+ * Ineligible films appear only in a SEARCH (as disabled rows, with the reason),
+ * never in an unfiltered or `included` list.
+ */
+export interface PlanItemRow {
+  kind: PlanItemKind;
+  id: string;
+  title: string;
+  thumbnailUrl: string | null;
+  status: 'draft' | 'published' | 'archived';
+  access: PlanItemAccess;
+  /** Can be ticked for a tier. False for free, followers-only and team-only films. */
+  eligible: boolean;
+  /** Ticked for THIS tier. */
+  included: boolean;
+  /** Its other tiers (live, inactive included), for "Also in Basic, Premium". */
+  otherTierIds: string[];
+  /** Films: the media duration in seconds, when known. Courses: null. */
+  durationSeconds: number | null;
+  /** Courses: the number of stages. Films: null. */
+  stageCount: number | null;
+  /** A one-time price in pence ("£4.99 to buy"), or null. */
+  priceCents: number | null;
+}
+
+/**
+ * `POST /api/organizations/:id/tiers/:tierId/items` (body
+ * `PlanItemsDeltaInput`): the tier's new totals, and the subscribers-only films
+ * this save left in no tier (now CLOSED), for the warning.
+ */
+export interface PlanItemsDeltaResult {
+  films: number;
+  courses: number;
+  closedNow: { contentIds: string[] };
+}
+
+/**
+ * The delete dialog's choice for items only in the tier. Nothing is
+ * preselected: the dialog sends one only after the creator picks.
+ */
+export type DeleteTierChoice =
+  | { onlyHere: 'keep' }
+  | { onlyHere: 'move'; moveTo: string[] };
 
 /**
  * `GET /api/access/content/withdrawn` (Codex-ov2ii), typed to what it ACTUALLY
@@ -3081,7 +3258,11 @@ export function createServerApi(
         request<SubscriptionTier[]>('org', `/api/organizations/${orgId}/tiers`),
 
       /**
-       * Create a subscription tier
+       * Create a subscription tier. `copyAccessFromTierId` ("Include
+       * everything from…", Codex-2hxff.91) copies that tier's films and courses
+       * in the same server command; a replayed `submissionId` copies nothing
+       * again. The response is the tier, as before: the dialog takes the
+       * copied counts from {@link TierAccessSummary}.
        */
       create: (orgId: string, data: CreateTierInput) =>
         request<SubscriptionTier>('org', `/api/organizations/${orgId}/tiers`, {
@@ -3103,12 +3284,81 @@ export function createServerApi(
         ),
 
       /**
-       * Delete a subscription tier (soft delete)
+       * Delete a subscription tier (soft delete). `choice` says what happens
+       * to the films and courses ONLY in this tier (Codex-2hxff.91): keep them
+       * subscribers-only with no tier (closed, never free), or move them to
+       * one or more other tiers. Without a choice the worker refuses (context
+       * code `TIER_HAS_ONLY_ITEMS`) whenever such items exist, so read
+       * {@link TierDeleteImpact} first. 204 on success.
        */
-      delete: (orgId: string, tierId: string) =>
-        request<void>('org', `/api/organizations/${orgId}/tiers/${tierId}`, {
-          method: 'DELETE',
-        }),
+      delete: (orgId: string, tierId: string, choice?: DeleteTierChoice) => {
+        const params = new URLSearchParams();
+        if (choice) {
+          params.set('onlyHere', choice.onlyHere);
+          if (choice.onlyHere === 'move') {
+            params.set('moveTo', choice.moveTo.join(','));
+          }
+        }
+        const qs = params.toString();
+        return request<void>(
+          'org',
+          `/api/organizations/${orgId}/tiers/${tierId}${qs ? `?${qs}` : ''}`,
+          { method: 'DELETE' }
+        );
+      },
+
+      /**
+       * Per-tier film and course counts, the guidance-note gaps, and the
+       * org's eligible / closed / ineligible film counts (Codex-2hxff.91).
+       */
+      accessSummary: (orgId: string) =>
+        request<TierAccessSummary>(
+          'org',
+          `/api/organizations/${orgId}/tiers/access-summary`
+        ),
+
+      /** What deleting this tier would leave only here, and its live subscribers. */
+      deleteImpact: (orgId: string, tierId: string) =>
+        request<TierDeleteImpact>(
+          'org',
+          `/api/organizations/${orgId}/tiers/${tierId}/delete-impact`
+        ),
+
+      /** One page of the tier checklist ("What's in {tier}"). */
+      items: (
+        orgId: string,
+        tierId: string,
+        query: Partial<PlanItemsQueryInput> = {}
+      ) => {
+        const params = new URLSearchParams();
+        if (query.kind) params.set('kind', query.kind);
+        if (query.filter) params.set('filter', query.filter);
+        if (query.cheaperTierId) {
+          params.set('cheaperTierId', query.cheaperTierId);
+        }
+        // The checklist gates its box already; below the floor, send no search.
+        const search = gateSearchQuery(query.search);
+        if (search) params.set('search', search);
+        if (query.page) params.set('page', String(query.page));
+        if (query.limit) params.set('limit', String(query.limit));
+        const qs = params.toString();
+        return request<PaginatedListResponse<PlanItemRow>>(
+          'org',
+          `/api/organizations/${orgId}/tiers/${tierId}/items${qs ? `?${qs}` : ''}`
+        );
+      },
+
+      /**
+       * The checklist's save: a DELTA of adds and removes (at most
+       * `PLAN_ITEMS_DELTA_MAX` changes), idempotent, so a resend lands the
+       * same state.
+       */
+      setItems: (orgId: string, tierId: string, delta: PlanItemsDeltaInput) =>
+        request<PlanItemsDeltaResult>(
+          'org',
+          `/api/organizations/${orgId}/tiers/${tierId}/items`,
+          { method: 'POST', body: JSON.stringify(delta) }
+        ),
 
       /**
        * Reorder tiers

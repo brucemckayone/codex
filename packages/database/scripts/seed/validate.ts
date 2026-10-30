@@ -43,7 +43,7 @@ export async function validateContentSeed(db: typeof DbClient) {
       isFree: schema.content.isFree,
       isPurchasable: schema.content.isPurchasable,
       priceCents: schema.content.priceCents,
-      includedInTierId: schema.content.includedInTierId,
+      isTierGated: schema.content.isTierGated,
       isFollowerGated: schema.content.isFollowerGated,
       isTeamOnly: schema.content.isTeamOnly,
       courseOnly: schema.content.courseOnly,
@@ -87,13 +87,33 @@ export async function validateContentSeed(db: typeof DbClient) {
   // would signal constant drift).
   const gateWithExtras = rows.filter(
     (r) =>
-      (r.isFollowerGated || r.isTeamOnly) &&
-      (r.includedInTierId !== null || r.isPurchasable)
+      (r.isFollowerGated || r.isTeamOnly) && (r.isTierGated || r.isPurchasable)
   );
   for (const r of gateWithExtras) {
     errors.push(
-      `  - row "${r.slug}" is follower/team-gated but also has includedInTierId=${r.includedInTierId} / isPurchasable=${r.isPurchasable}`
+      `  - row "${r.slug}" is follower/team-gated but also has isTierGated=${r.isTierGated} / isPurchasable=${r.isPurchasable}`
     );
+  }
+
+  // ── Invariant 2b: the plan-access switch and its ticks agree ──
+  // (Codex-2hxff.91.) A gated row with no plan ticked is CLOSED to new
+  // viewers — legal in the app, but a seed must never mint one by accident.
+  // A ticked row with the switch off breaks I1 (switch off ⇒ no ticks).
+  const tickRows = await db
+    .select({ contentId: schema.contentTierAccess.contentId })
+    .from(schema.contentTierAccess);
+  const ticked = new Set(tickRows.map((t) => t.contentId));
+  for (const r of rows) {
+    if (r.isTierGated && !ticked.has(r.id)) {
+      errors.push(
+        `  - row "${r.slug}" is isTierGated but no plan is ticked (closed to new viewers)`
+      );
+    }
+    if (!r.isTierGated && ticked.has(r.id)) {
+      errors.push(
+        `  - row "${r.slug}" has plan ticks but isTierGated=false (I1: switch off means no ticks)`
+      );
+    }
   }
 
   // ── Classify each published row into a canonical mode from its flags ──
@@ -103,9 +123,9 @@ export async function validateContentSeed(db: typeof DbClient) {
     if (r.status !== 'published') return null;
     if (r.isTeamOnly) return 'team';
     if (r.isFollowerGated) return 'followers';
-    if (r.isPurchasable && r.includedInTierId !== null) return 'hybrid';
+    if (r.isPurchasable && r.isTierGated) return 'hybrid';
     if (r.isPurchasable) return 'paid';
-    if (r.includedInTierId !== null) return 'subscribers';
+    if (r.isTierGated) return 'subscribers';
     return 'free';
   };
 
@@ -148,10 +168,9 @@ export async function validateContentSeed(db: typeof DbClient) {
   for (const r of rows) {
     if (r.isTeamOnly) allStatusCounts.team += 1;
     else if (r.isFollowerGated) allStatusCounts.followers += 1;
-    else if (r.isPurchasable && r.includedInTierId !== null)
-      allStatusCounts.hybrid += 1;
+    else if (r.isPurchasable && r.isTierGated) allStatusCounts.hybrid += 1;
     else if (r.isPurchasable) allStatusCounts.paid += 1;
-    else if (r.includedInTierId !== null) allStatusCounts.subscribers += 1;
+    else if (r.isTierGated) allStatusCounts.subscribers += 1;
     else allStatusCounts.free += 1;
   }
 

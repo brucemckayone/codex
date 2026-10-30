@@ -334,3 +334,44 @@ describe('monetisation store · save', () => {
     expect(monetisation.isDirty).toBe(false);
   });
 });
+
+describe('monetisation store · the "and above" shortcut (Codex-2hxff.91)', () => {
+  // Created in this order, so display order is NOT price order.
+  const PREMIUM = '00000000-0000-4000-8000-0000000000a3';
+  const RETIRED = '00000000-0000-4000-8000-0000000000a9';
+  const options = [
+    {
+      id: PREMIUM,
+      name: 'Inner Circle',
+      priceMonthly: 3000,
+      priceAnnual: 30000,
+    },
+    { id: TIER_A, name: 'Companion', priceMonthly: 800, priceAnnual: 8000 },
+    { id: TIER_B, name: 'Circle', priceMonthly: 1800, priceAnnual: 18000 },
+  ];
+
+  it('ticks the tier and every one dearer by monthly price, and unticks the cheaper', async () => {
+    getCourseMonetisation.mockResolvedValue(
+      makeState({ tierIds: [TIER_A], tierOptions: options })
+    );
+    await monetisation.open(COURSE_ID);
+
+    monetisation.selectFromTier(TIER_B);
+
+    expect(monetisation.draft.tierIds).toEqual([TIER_B, PREMIUM].sort());
+    expect(monetisation.isDirty).toBe(true);
+  });
+
+  it('keeps a tick on a tier that is not an option (an inactive tier)', async () => {
+    getCourseMonetisation.mockResolvedValue(
+      makeState({ tierIds: [RETIRED, TIER_A], tierOptions: options })
+    );
+    await monetisation.open(COURSE_ID);
+
+    monetisation.selectFromTier(TIER_A);
+
+    expect(monetisation.draft.tierIds).toEqual(
+      [RETIRED, TIER_A, TIER_B, PREMIUM].sort()
+    );
+  });
+});

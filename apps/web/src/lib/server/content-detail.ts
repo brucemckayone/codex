@@ -142,12 +142,23 @@ function extractRevocationReason(
 }
 
 /**
+ * The detail pages' subscription context: `SubscriptionContext` plus whether
+ * the org's tier list failed to load (Codex-2hxff.91). The paywall names the
+ * plans that include the item from that list, so it must tell "we couldn't
+ * load the plans" (say no plan's name) from "no plan anyone can join includes
+ * it" (say it is not available).
+ */
+export interface ContentSubscriptionContext extends SubscriptionContext {
+  tiersFailed: boolean;
+}
+
+/**
  * Empty subscription-context fallback used by content detail loaders when
- * the content does not require a subscription (any content with no tier gate —
- * `includedInTierId == null`). Both the org and creators content
- * detail loaders return this exact 5-field shape — extracted here so the
+ * the content does not require a subscription (any content with the tier
+ * switch off, `isTierGated` false). Both the org and creators content
+ * detail loaders return this exact shape — extracted here so the
  * shape can only drift in one place. Truth-source for the field set is
- * `SubscriptionContext` in `$lib/types`.
+ * `SubscriptionContext` in `$lib/types`, plus `tiersFailed`.
  *
  * The `.catch` on the gated `loadSubscriptionContext()` call is
  * `subscriptionContextFault`: this shape with `requiresSubscription` true,
@@ -156,12 +167,13 @@ function extractRevocationReason(
  * Shape pinned by `content-detail.test.ts` so the field set can only drift in
  * one place (originally the removed iter-027 F3 denoise proof).
  */
-export const EMPTY_SUB_CONTEXT: SubscriptionContext = {
+export const EMPTY_SUB_CONTEXT: ContentSubscriptionContext = {
   requiresSubscription: false,
   hasSubscription: false,
   subscriptionCoversContent: false,
   currentSubscription: null,
   tiers: [],
+  tiersFailed: false,
 };
 
 /**
@@ -260,17 +272,21 @@ export function logAccessCheckFault(contentId: string, error: unknown): void {
  * The detail pages' catch on `loadSubscriptionContext`. Its two reads catch
  * and log their own failures, so what reaches here is a fault in our own
  * code: logged at error with its stack (Codex-7ms7h). The page still offers
- * the tier, as it did before.
+ * a plan, as it did before, without naming one: the tier list is unknown.
  */
 export function subscriptionContextFault(
   contentId: string,
   error: unknown
-): SubscriptionContext {
+): ContentSubscriptionContext {
   logger.error('Subscription context threw', {
     contentId,
     ...faultFields(error),
   });
-  return { ...EMPTY_SUB_CONTEXT, requiresSubscription: true };
+  return {
+    ...EMPTY_SUB_CONTEXT,
+    requiresSubscription: true,
+    tiersFailed: true,
+  };
 }
 
 function faultFields(error: unknown): { error: string; stack?: string } {
@@ -643,11 +659,25 @@ async function fetchAccess(
   };
 }
 
+/** The item's plan access, as the public row carries it (Codex-2hxff.91). */
+export interface ContentPlanAccess {
+  /** The subscribers-only switch. */
+  isTierGated: boolean;
+  /** The plans that include it; `[]` with the switch on is CLOSED. */
+  includedInTierIds: readonly string[];
+}
+
 /**
  * Load subscription context for content that may require a tier.
  *
- * Fetches the user's current subscription + org tiers in parallel.
- * Compares tier sortOrder to determine if subscription covers the content.
+ * Fetches the user's current subscription + org tiers in parallel. The
+ * subscription covers the content when its plan is one of the item's ticked
+ * plans: set membership, not a `sortOrder` ladder (Codex-2hxff.91). The
+ * tiers are still read, for the paywall's plan names and prices.
+ *
+ * A closed item (the switch on, no plan ticked) makes neither read: no plan
+ * can cover it and none will be named, so the page says it is not available
+ * (owner decision U11).
  *
  * A visitor who is not signed in has no subscription, so it is not asked for:
  * the route is auth-required, and its certain 401 was a wasted round-trip that
@@ -657,27 +687,18 @@ async function fetchAccess(
  */
 export async function loadSubscriptionContext(
   orgId: string,
-  includedInTierId: string | null,
+  planAccess: ContentPlanAccess,
   platform: App.Platform | undefined,
   cookies: Cookies,
   signedIn: boolean
-): Promise<SubscriptionContext> {
-  // Content requires a subscription when it is tier-gated — the WP-1
-  // successor of accessType 'subscribers' is a non-null includedInTierId.
-  // Any active subscription meeting the tier's sortOrder grants access.
-  const isSubscriberContent = includedInTierId != null;
-
-  if (!isSubscriberContent) {
-    return {
-      requiresSubscription: false,
-      hasSubscription: false,
-      subscriptionCoversContent: false,
-      currentSubscription: null,
-      tiers: [],
-    };
+): Promise<ContentSubscriptionContext> {
+  if (!planAccess.isTierGated) return EMPTY_SUB_CONTEXT;
+  if (planAccess.includedInTierIds.length === 0) {
+    return { ...EMPTY_SUB_CONTEXT, requiresSubscription: true };
   }
 
   const api = createServerApi(platform, cookies);
+  let tiersFailed = false;
 
   const [currentSubscription, tiers] = await Promise.all([
     signedIn
@@ -688,6 +709,7 @@ export async function loadSubscriptionContext(
       : null,
     api.tiers.list(orgId).catch((error) => {
       logReadFailure('Subscription tiers not loaded', { orgId }, error);
+      tiersFailed = true;
       return [] as SubscriptionTier[];
     }),
   ]);
@@ -702,19 +724,12 @@ export async function loadSubscriptionContext(
     !!currentSubscription &&
     subscriptionStatusGrantsAccess(currentSubscription.status);
   const hasSubscription = isAccessGranting;
-  let subscriptionCoversContent = false;
-
-  if (isAccessGranting && currentSubscription) {
-    if (!includedInTierId) {
-      subscriptionCoversContent = true;
-    } else {
-      const contentTier = tiers.find((t) => t.id === includedInTierId);
-      if (contentTier) {
-        subscriptionCoversContent =
-          currentSubscription.tier.sortOrder >= contentTier.sortOrder;
-      }
-    }
-  }
+  // No tier list is needed to decide it, so a failed tier read never turns
+  // a covered subscriber away.
+  const subscriptionCoversContent =
+    isAccessGranting &&
+    !!currentSubscription &&
+    planAccess.includedInTierIds.includes(currentSubscription.tier.id);
 
   return {
     requiresSubscription: true,
@@ -722,6 +737,7 @@ export async function loadSubscriptionContext(
     subscriptionCoversContent,
     currentSubscription,
     tiers,
+    tiersFailed,
   };
 }
 

@@ -16,18 +16,77 @@ A tier is an organisation's membership level, with a monthly and an annual price
 - Each tier has one Stripe Product and two Prices (monthly and annual) on the
   **platform** account, created by Studio.
 - Prices are in pence: at least £1.00 and at most £100,000.
-- **Tier order is the access hierarchy.** A higher tier (`sortOrder`) includes
-  everything in the tiers below it. `sortOrder` is unique within an organisation.
+- **A tier includes exactly the items ticked for it** (Codex-2hxff.91, below).
+  There is no hierarchy: a dearer tier does not include a cheaper one's items.
+  `sortOrder` is the display order, unique within an organisation.
 - Creating a tier requires the organisation owner's payouts to be set up (a
-  payable Connect account).
+  payable Connect account). It can copy another live tier's items
+  ("Include everything from…", `copyAccessFromTierId`).
 - A tier with subscribers who have not cancelled cannot be deleted. Deleting
-  is a soft delete that also archives the Stripe Product.
-- **Reordering tiers** changes what existing subscribers can see. Studio shows
-  how many subscribers would gain or lose access and asks the owner to confirm
-  (owner decision P-8, "Warn, then allow") — **gap**: `Codex-2hxff.16`.
+  is a soft delete that also archives the Stripe Product, and removes the tier
+  from every item. Items in no other tier need a choice; see below.
+- **Reordering tiers** changes only the display order. It no longer changes
+  what anyone can see, because access is the ticked set, not the order.
 
 Tiers are managed through organisation-api (`/api/organizations/:id/tiers*`,
 `TierService`).
+
+### What a tier includes (plan access)
+
+A film is "subscribers only" (or a paid film "also included in tiers") when
+its **tier switch** (`content.is_tier_gated`) is on. The tiers that open it are
+its ticks in `content_tier_access` (composite FKs pin the item and the tier to
+the row's organisation). Courses use `course_tier_access` the same way.
+
+- **A film behind the switch with no tier ticked is CLOSED, never free.** No
+  subscriber reaches it; a buyer, a support grant, a course that includes it
+  and the team still do. Without a price it is hidden from public lists (its own
+  page still loads); with one it is on sale like any paid item (owner U11).
+- **Publishing** subscriber content needs at least one tier ticked
+  (`TierRequiredToPublishError`, code `TIER_REQUIRED_TO_PUBLISH`, owner U2).
+  Saving it with none is allowed. A paid item may publish with no tier.
+- **The access decision and the library read the same ticks** (one
+  subscription read with an `IN` over the item's ticks), so the shelf never
+  lists what the player would refuse.
+- **Where ticks are written** — three writers, one file each:
+  - the content editor (`POST/PATCH /api/content`, `includedInTierIds`, a total
+    set; absent = leave the ticks alone);
+  - the tier checklist (`POST /api/organizations/:id/tiers/:tierId/items`, an
+    idempotent delta of at most 200 changes; `PlanAccessService`);
+  - `TierService` (create with copy, delete with reassignment).
+
+  A course's ticks are also replaced whole by the course panel
+  (`CourseAccessService.setTierAccess`, through ecom-api).
+- **One lock order for every writer** (the `tier-service.ts` file header):
+  tier rows by id first (FOR UPDATE to delete, FOR NO KEY UPDATE to reorder or
+  move the recommended flag, FOR SHARE to tick), then the films and courses by
+  id (FOR NO KEY UPDATE), then the ticks. So two writers never deadlock: the
+  second waits, then reads the first's commit (a deleted tier is refused, an
+  item that became only-here is counted).
+- **Deleting a tier** whose items are in no other tier needs
+  `?onlyHere=keep` (they stay in no tier: subscribers-only films become closed,
+  paid films stay for sale, courses are in no tier) or
+  `?onlyHere=move&moveTo=<ids>` (they are added to those tiers first). Without
+  a choice the delete is refused (`TierHasOnlyItemsError`, 409, code
+  `TIER_HAS_ONLY_ITEMS`, with the film and course counts) and nothing changes.
+  `GET …/tiers/:tierId/delete-impact` previews it.
+- **No payouts check on a copy or a move** (owner U7): the items are already in
+  a tier. Adding a PUBLISHED item from the checklist checks its creator's
+  payouts, as the editor does.
+- `GET …/tiers/access-summary` gives each tier's film and course counts, and
+  for each active tier the items a cheaper active tier has and it lacks.
+  `GET …/tiers/:tierId/items` is the checklist page. Both are Studio-only and
+  never cached.
+- **Phase 1-2 compatibility.** The old column `content.included_in_tier_id`
+  (drizzle `legacyIncludedInTierId`) is dual-written with the lowest ticked
+  tier, and kept for a closed item. Every content read still carries it as
+  `includedInTierId`, and the old single-tier input is accepted and expanded to
+  "that tier and every dearer one" (an unchanged resend leaves the ticks
+  alone). Removed in the cleanup release.
+- **An organisation's hard delete** removes its items' ticks
+  (`trigger_sweep_tier_access_on_org_change`); without that trigger the delete
+  would fail on the composite FK. The items keep their switch, so they stay
+  denied, never free.
 
 ## Course subscription plans
 

@@ -749,7 +749,7 @@ export async function seedCommerce(
 
   // ── Subscription Tiers ────────────────────────────────────────────
   // Tiers are now seeded in `seedTiers()` before content (FK ordering), so
-  // content rows can reference `includedInTierId` at insert time. Stripe
+  // content rows and their plan-access ticks can reference them. Stripe
   // Product/Price linkage still happens here, below.
 
   // ── Stripe Objects (Products, Prices, Connect) ──────────────────

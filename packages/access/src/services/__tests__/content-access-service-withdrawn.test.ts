@@ -39,6 +39,7 @@ function emptySelect() {
     innerJoin: () => builder,
     leftJoin: () => builder,
     where: () => builder,
+    orderBy: () => builder,
     limit: () => builder,
     // biome-ignore lint/suspicious/noThenProperty: intentional thenable — mimics Drizzle's awaitable query builder so `await db.select()...` resolves to [].
     then: (resolve: (rows: never[]) => unknown) => resolve([]),
@@ -107,7 +108,7 @@ const withdrawnRow = (overrides: Record<string, unknown> = {}) => ({
   isFree: false,
   isPurchasable: true,
   priceCents: 900,
-  includedInTierId: null,
+  isTierGated: false,
   isFollowerGated: false,
   isTeamOnly: false,
   courseOnly: false,
@@ -126,7 +127,7 @@ const departedTierRow = (offSaleAt: Date) =>
     offSaleAt,
     isPurchasable: false,
     priceCents: null,
-    includedInTierId: 'tier_pro',
+    isTierGated: true,
   });
 
 const subscription = {
@@ -135,7 +136,6 @@ const subscription = {
   status: 'active',
   currentPeriodStart: periodStart,
   currentPeriodEnd: periodEnd,
-  tier: { sortOrder: 10 },
 };
 
 /** The 404 a reader sees, whatever the reason: keyed on what they sent. */
@@ -159,7 +159,6 @@ describe('getWithdrawnContent (Codex-ov2ii)', () => {
     stub.mocks.organizationMemberships.findFirst.mockResolvedValue(undefined);
     stub.mocks.organizationFollowers.findFirst.mockResolvedValue(undefined);
     stub.mocks.subscriptions.findFirst.mockResolvedValue(undefined);
-    stub.mocks.subscriptionTiers.findFirst.mockResolvedValue({ sortOrder: 10 });
   });
 
   it('opens an unpublished item for its buyer, without its body', async () => {

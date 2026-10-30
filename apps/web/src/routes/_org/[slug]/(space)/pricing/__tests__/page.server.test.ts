@@ -53,13 +53,14 @@ vi.mock('$lib/server/cache', async () => {
 describe('pricing page server load', () => {
   type LoadInput = Parameters<typeof import('../+page.server').load>[0];
 
-  const baseInput = (user: { id: string } | null): LoadInput =>
+  const baseInput = (user: { id: string } | null, search = ''): LoadInput =>
     ({
       parent: async () => ({ org: { id: 'org-1', slug: 'demo' } }),
       locals: { user },
       platform: { env: {} },
       cookies: {},
       setHeaders: vi.fn(),
+      url: new URL(`http://demo.lvh.me:3000/pricing${search}`),
     }) as unknown as LoadInput;
 
   beforeEach(() => {
@@ -249,6 +250,94 @@ describe('pricing page server load', () => {
 
       if (!result) throw new Error('load returned void');
       await expect(result.portals).resolves.toEqual([]);
+    });
+  });
+
+  // Opened from an item's paywall (Codex-2hxff.91, owner decision U10): the
+  // item's plan set is STREAMED, so the plan cards never wait on it, and any
+  // miss or failure is simply no highlight.
+  describe('the item it was opened from (?for=, streamed)', () => {
+    const saltRoads = {
+      id: 'c1',
+      title: 'Salt Roads',
+      slug: 'salt-roads',
+      includedInTierIds: ['tier-pro', 'tier-premium'],
+      contentBody: 'never shipped',
+    };
+
+    it('reads the public row by slug in this org and keeps only what the highlight needs', async () => {
+      contentMock.mockImplementation((params: URLSearchParams) =>
+        Promise.resolve({
+          items: params.get('slug') === 'salt-roads' ? [saltRoads] : [],
+        })
+      );
+      const { load } = await import('../+page.server');
+      const result = await load(
+        baseInput(null, '?for=salt-roads&returnTo=%2Fx')
+      );
+
+      if (!result) throw new Error('load returned void');
+      await expect(result.forContent).resolves.toEqual({
+        title: 'Salt Roads',
+        slug: 'salt-roads',
+        includedInTierIds: ['tier-pro', 'tier-premium'],
+      });
+      const sent = contentMock.mock.calls
+        .map(([params]) =>
+          Object.fromEntries((params as URLSearchParams).entries())
+        )
+        .find((p) => p.slug);
+      expect(sent).toEqual({ orgId: 'org-1', slug: 'salt-roads', limit: '1' });
+    });
+
+    it('is null, with no read, when the page was not opened from an item', async () => {
+      const { load } = await import('../+page.server');
+      const result = await load(baseInput(null));
+
+      if (!result) throw new Error('load returned void');
+      await expect(result.forContent).resolves.toBeNull();
+      expect(
+        contentMock.mock.calls.some(([params]) =>
+          (params as URLSearchParams).has('slug')
+        )
+      ).toBe(false);
+    });
+
+    it('is null for a slug that names nothing here', async () => {
+      const { load } = await import('../+page.server');
+      const result = await load(baseInput(null, '?for=someone-elses'));
+
+      if (!result) throw new Error('load returned void');
+      await expect(result.forContent).resolves.toBeNull();
+    });
+
+    it('makes no read for a slug the public list would refuse', async () => {
+      const { load } = await import('../+page.server');
+      const result = await load(baseInput(null, `?for=${'x'.repeat(600)}`));
+
+      if (!result) throw new Error('load returned void');
+      await expect(result.forContent).resolves.toBeNull();
+      expect(
+        contentMock.mock.calls.some(([params]) =>
+          (params as URLSearchParams).has('slug')
+        )
+      ).toBe(false);
+    });
+
+    it('a failed read is no highlight, and never holds up the plan cards', async () => {
+      tiersListMock.mockResolvedValue([{ id: 'tier-pro' }]);
+      contentMock.mockImplementation((params: URLSearchParams) =>
+        params.has('slug')
+          ? Promise.reject(new Error('content-api down'))
+          : Promise.resolve({ items: [] })
+      );
+      const { load } = await import('../+page.server');
+      const result = await load(baseInput(null, '?for=salt-roads'));
+
+      if (!result) throw new Error('load returned void');
+      expect(result.tiers).toEqual([{ id: 'tier-pro' }]);
+      expect(result.forContent).toBeInstanceOf(Promise);
+      await expect(result.forContent).resolves.toBeNull();
     });
   });
 });

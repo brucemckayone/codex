@@ -75,7 +75,9 @@ const POLICY_COLUMNS = {
   isFree: schema.content.isFree,
   isPurchasable: schema.content.isPurchasable,
   priceCents: schema.content.priceCents,
-  includedInTierId: schema.content.includedInTierId,
+  // The plan-access switch (Codex-2hxff.91); migration 0120 set it on every
+  // row that carried `included_in_tier_id`, so it reads the same gate.
+  isTierGated: schema.content.isTierGated,
   isFollowerGated: schema.content.isFollowerGated,
   isTeamOnly: schema.content.isTeamOnly,
   courseOnly: schema.content.courseOnly,
@@ -107,7 +109,7 @@ async function checkResetSignature(): Promise<number> {
     (r) =>
       r.isFree &&
       !r.isPurchasable &&
-      r.includedInTierId === null &&
+      !r.isTierGated &&
       (r.priceCents ?? 0) === 0
   );
 
@@ -183,7 +185,7 @@ async function checkFreeWithAGate(): Promise<number> {
   const gateOf = (r: (typeof free)[number]): string | null => {
     if (r.isPurchasable) return 'isPurchasable';
     if ((r.priceCents ?? 0) > 0) return `priceCents=${r.priceCents}`;
-    if (r.includedInTierId !== null) return 'includedInTierId';
+    if (r.isTierGated) return 'isTierGated';
     if (r.isFollowerGated) return 'isFollowerGated';
     if (r.isTeamOnly) return 'isTeamOnly';
     if (r.courseOnly) return 'courseOnly';

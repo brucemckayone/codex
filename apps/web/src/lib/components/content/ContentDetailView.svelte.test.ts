@@ -75,7 +75,8 @@ function makeContent(overrides: Record<string, unknown> = {}): Content {
     priceCents: 0,
     isPurchasable: false,
     courseOnly: false,
-    includedInTierId: null,
+    isTierGated: false,
+    includedInTierIds: [],
     isFollowerGated: false,
     isTeamOnly: false,
     mediaItem: { id: 'm1', durationSeconds: 754, thumbnailUrl: null },
@@ -232,7 +233,10 @@ describe('a real lock names its real reason', () => {
 
   test('tier-gated content asks for a subscription', () => {
     render({
-      content: makeContent(),
+      content: makeContent({
+        isTierGated: true,
+        includedInTierIds: ['tier-1'],
+      }),
       hasAccess: false,
       requiresSubscription: true,
       hasSubscription: false,
@@ -329,7 +333,11 @@ describe('Buy only when a purchase opens the item (Codex-2hxff.14)', () => {
 
     test('tier content that is also on sale offers the purchase', () => {
       render({
-        content: makeContent({ ...SELLABLE, includedInTierId: 'tier-1' }),
+        content: makeContent({
+          ...SELLABLE,
+          isTierGated: true,
+          includedInTierIds: ['tier-1'],
+        }),
         hasAccess: false,
         ...tierGated,
       });
@@ -339,7 +347,11 @@ describe('Buy only when a purchase opens the item (Codex-2hxff.14)', () => {
 
     test('tier content with a price but not on sale offers no purchase', () => {
       render({
-        content: makeContent({ priceCents: 900, includedInTierId: 'tier-1' }),
+        content: makeContent({
+          priceCents: 900,
+          isTierGated: true,
+          includedInTierIds: ['tier-1'],
+        }),
         hasAccess: false,
         ...tierGated,
       });
@@ -353,7 +365,8 @@ describe('Buy only when a purchase opens the item (Codex-2hxff.14)', () => {
         content: makeContent({
           ...SELLABLE,
           organizationId: null,
-          includedInTierId: 'tier-1',
+          isTierGated: true,
+          includedInTierIds: ['tier-1'],
         }),
         hasAccess: false,
         ...tierGated,
@@ -449,7 +462,10 @@ describe('withdrawn from sale, still the reader’s (Codex-ov2ii)', () => {
 
   test('a subscriber is told until when, and sees Included, never Purchased', () => {
     render({
-      content: makeContent({ includedInTierId: 'tier-1' }),
+      content: makeContent({
+        isTierGated: true,
+        includedInTierIds: ['tier-1'],
+      }),
       hasAccess: true,
       withdrawnHeld: { by: 'subscription', until: '2026-11-12T09:00:00.000Z' },
     });
@@ -543,7 +559,11 @@ describe('paused by a payment dispute (Codex-2hxff.60)', () => {
 
   test('a disputed subscriber is offered no Subscribe, Upgrade or Buy', () => {
     render({
-      content: makeContent({ ...SELLABLE, includedInTierId: 'tier-1' }),
+      content: makeContent({
+        ...SELLABLE,
+        isTierGated: true,
+        includedInTierIds: ['tier-1'],
+      }),
       hasAccess: false,
       requiresSubscription: true,
       hasSubscription: false,
@@ -644,6 +664,251 @@ describe('paused by a payment dispute (Codex-2hxff.60)', () => {
         document.querySelector('.content-detail__body-lock-text')?.textContent
       ).toBe(m.access_paused_dispute_title());
     });
+  });
+});
+
+describe('the paywall names the plans that include it (Codex-2hxff.91)', () => {
+  // The buyer mockup's org: Basic £5, Pro £12, Premium £20 a month.
+  const BASIC = {
+    id: 'tier-basic',
+    name: 'Basic',
+    priceMonthly: 500,
+    sortOrder: 1,
+  };
+  const PRO = { id: 'tier-pro', name: 'Pro', priceMonthly: 1200, sortOrder: 2 };
+  const PREMIUM = {
+    id: 'tier-premium',
+    name: 'Premium',
+    priceMonthly: 2000,
+    sortOrder: 3,
+  };
+  const TIERS = [BASIC, PRO, PREMIUM];
+  const gated = (ids: string[], extra: Record<string, unknown> = {}) =>
+    makeContent({ isTierGated: true, includedInTierIds: ids, ...extra });
+  const plansFor = (
+    currentPlan: { id: string; name: string } | null,
+    status: 'loading' | 'ready' | 'failed' = 'ready'
+  ) => ({
+    tiers: TIERS,
+    status,
+    currentPlan,
+    currentPeriodEnd: currentPlan ? '2026-11-12T09:00:00.000Z' : null,
+  });
+  const subGate = () =>
+    document.getElementById('purchase-label-sub')?.closest('section');
+  const lockText = () =>
+    player().querySelector('.content-detail__preview-cta')?.textContent ?? '';
+  const line = () =>
+    document.querySelector('[data-testid="plan-paywall-line"]')?.textContent;
+  const timing = () =>
+    document.querySelector('[data-testid="plan-paywall-timing"]')?.textContent;
+
+  test('signed out: names the plans and the cheapest price, with See plans and Sign in', () => {
+    render({
+      content: gated([PRO.id, PREMIUM.id]),
+      hasAccess: false,
+      isAuthenticated: false,
+      requiresSubscription: true,
+      hasSubscription: false,
+      plans: plansFor(null),
+    });
+    expect(lockText()).toContain('Subscribe to Watch');
+    expect(lockText()).toContain('Included with Pro and above.');
+    expect(line()).toBe('Included with Pro and above, from £12.00 a month.');
+    const seePlans = [...(subGate()?.querySelectorAll('a') ?? [])].find(
+      (a) => a.textContent?.trim() === 'See plans'
+    );
+    // The film travels to Pricing, so its plans are marked there (U10).
+    expect(seePlans?.getAttribute('href')).toBe(
+      '/pricing?for=morning-somatic-flow&returnTo=%2Fcontent%2Fmorning-somatic-flow'
+    );
+    expect(subGate()?.textContent).toContain('Sign in');
+    expect(subGate()?.textContent).not.toContain('Sign in to purchase');
+  });
+
+  test('a scattered set is named in full, cheapest first', () => {
+    render({
+      content: gated([PREMIUM.id, BASIC.id]),
+      hasAccess: false,
+      isAuthenticated: false,
+      requiresSubscription: true,
+      plans: plansFor(null),
+    });
+    expect(line()).toBe('Included with Basic and Premium, from £5.00 a month.');
+  });
+
+  test('signed in with no plan: the same line, and the purchase beside it', () => {
+    render({
+      content: gated([PRO.id, PREMIUM.id], SELLABLE),
+      hasAccess: false,
+      requiresSubscription: true,
+      hasSubscription: false,
+      plans: plansFor(null),
+    });
+    expect(line()).toBe('Included with Pro and above, from £12.00 a month.');
+    expect(bodyText()).toContain('or purchase for £9.00');
+    expect(document.querySelector(`.${PURCHASE_FORM}`)).not.toBeNull();
+  });
+
+  test('on a plan that is not included, with every including plan dearer: Upgrade', () => {
+    render({
+      content: gated([PRO.id, PREMIUM.id]),
+      hasAccess: false,
+      requiresSubscription: true,
+      hasSubscription: true,
+      subscriptionCoversContent: false,
+      plans: plansFor({ id: BASIC.id, name: BASIC.name }),
+    });
+    expect(lockText()).toContain('Upgrade to Watch');
+    expect(lockText()).toContain(
+      'Not in your Basic plan. Included with Pro and above.'
+    );
+    expect(line()).toBe(
+      "Your Basic plan doesn't include this. It's included with Pro and above, from £12.00 a month."
+    );
+    expect(timing()).toBeUndefined();
+  });
+
+  test('on a dearer plan a cheaper one beats: Change plan, with how each is billed', () => {
+    // Winter Light: in Basic and Premium, not Pro. Both start now, as
+    // changeTier does today (owner U12): Basic credits the difference to the
+    // next bill. Codex-2hxff.16 moves Basic to the period end.
+    render({
+      content: gated([BASIC.id, PREMIUM.id]),
+      hasAccess: false,
+      requiresSubscription: true,
+      hasSubscription: true,
+      subscriptionCoversContent: false,
+      plans: plansFor({ id: PRO.id, name: PRO.name }),
+    });
+    expect(lockText()).toContain('Change plan to watch');
+    expect(lockText()).toContain(
+      'Not in your Pro plan. Included with Basic and Premium.'
+    );
+    expect(line()).toBe(
+      "Your Pro plan doesn't include this. It's included with Basic (£5.00 a month) and Premium (£20.00 a month)."
+    );
+    expect(timing()).toContain(
+      'Premium starts straight away, and so does a move to Basic, with credit on your next bill for the difference until your Pro period ends on 12 November'
+    );
+  });
+
+  test('a cheaper plan alone: Change plan, starting now with the difference credited', () => {
+    render({
+      content: gated([BASIC.id]),
+      hasAccess: false,
+      requiresSubscription: true,
+      hasSubscription: true,
+      plans: plansFor({ id: PREMIUM.id, name: PREMIUM.name }),
+    });
+    expect(timing()).toContain(
+      'A move to Basic starts straight away, with credit on your next bill for the difference until your Premium period ends on 12 November'
+    );
+  });
+
+  test('while the plans load: the title, and a skeleton for the plan line', () => {
+    render({
+      content: gated([PRO.id]),
+      hasAccess: false,
+      requiresSubscription: true,
+      plans: plansFor(null, 'loading'),
+    });
+    expect(subGate()?.textContent).toContain('Subscribe to Watch');
+    expect(line()).toBeUndefined();
+    expect(subGate()?.querySelector('.skeleton--plan-line')).not.toBeNull();
+    expect(player().querySelector('.skeleton--plan-line')).not.toBeNull();
+  });
+
+  test('the plans failed to load: no plan named, still a way to subscribe', () => {
+    render({
+      content: gated([PRO.id]),
+      hasAccess: false,
+      requiresSubscription: true,
+      plans: plansFor(null, 'failed'),
+    });
+    expect(subGate()?.textContent).toContain(
+      'Subscribe to get access to this content'
+    );
+  });
+
+  describe('closed: gated with no plan anyone can join (U11)', () => {
+    test('with no price: Not available right now, and nothing to subscribe to or buy', () => {
+      render({
+        content: gated([]),
+        hasAccess: false,
+        requiresSubscription: true,
+        plans: plansFor(null),
+      });
+      const gate = document
+        .getElementById('purchase-label-closed')
+        ?.closest('section');
+      expect(gate?.textContent).toContain('Not available right now');
+      expect(gate?.textContent).toContain(
+        'No plan includes this at the moment.'
+      );
+      expect(lockText()).toContain('Not available right now');
+      expect(subGate()).toBeUndefined();
+      expect(bodyText()).not.toContain('See plans');
+      expect(bodyText()).not.toContain('Subscribe');
+      expect(document.querySelector(`.${PURCHASE_FORM}`)).toBeNull();
+    });
+
+    test('in no plan, even while the plan list is still loading', () => {
+      // No tick needs no list to call: never a subscribe offer.
+      render({
+        content: gated([]),
+        hasAccess: false,
+        requiresSubscription: true,
+        plans: plansFor(null, 'loading'),
+      });
+      expect(document.getElementById('purchase-label-closed')).not.toBeNull();
+    });
+
+    test('ticked only on a plan nobody can join any more', () => {
+      render({
+        content: gated(['tier-retired']),
+        hasAccess: false,
+        requiresSubscription: true,
+        plans: plansFor(null),
+      });
+      expect(document.getElementById('purchase-label-closed')).not.toBeNull();
+      expect(subGate()).toBeUndefined();
+    });
+
+    test('with a one-time price: sold like any paid film, with no subscribe option', () => {
+      render({
+        content: gated([], SELLABLE),
+        hasAccess: false,
+        requiresSubscription: true,
+        plans: plansFor(null),
+      });
+      expect(document.getElementById('purchase-label-buy')).not.toBeNull();
+      expect(document.querySelector(`.${PURCHASE_FORM}`)).not.toBeNull();
+      expect(subGate()).toBeUndefined();
+      expect(document.getElementById('purchase-label-closed')).toBeNull();
+      expect(bodyText()).not.toContain('Subscribe to Watch');
+    });
+
+    test('a buyer who holds it gets no gate at all', () => {
+      render({
+        content: gated([]),
+        hasAccess: true,
+        requiresSubscription: true,
+        plans: plansFor(null),
+      });
+      expect(document.getElementById('purchase-label-closed')).toBeNull();
+    });
+  });
+
+  test('a row without the plan set (an older content-api) is never called closed', () => {
+    render({
+      content: makeContent({ isTierGated: true, includedInTierIds: undefined }),
+      hasAccess: false,
+      requiresSubscription: true,
+      plans: plansFor(null),
+    });
+    expect(document.getElementById('purchase-label-closed')).toBeNull();
+    expect(subGate()?.textContent).toContain('Subscribe to Watch');
   });
 });
 

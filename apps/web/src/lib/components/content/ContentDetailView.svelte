@@ -72,6 +72,13 @@
   import { canBeSold } from '@codex/constants';
   import { updateLocalProgress } from '$lib/collections/progress';
   import type { ContentWithRelations } from '$lib/types';
+  import {
+    describePlanPaywall,
+    planPaywallCopy,
+    type PlanListStatus,
+    type PlanOption,
+    type ViewerPlan,
+  } from '$lib/utils/plan-label';
 
   /**
    * The media item fields this view reads. The public content API sends the
@@ -153,6 +160,18 @@
     hasSubscription?: boolean;
     /** Whether the user's tier is high enough for this content */
     subscriptionCoversContent?: boolean;
+    /**
+     * Plan access (Codex-2hxff.91): the org's active plans and the viewer's
+     * own plan, so the paywall names every plan that includes this item, with
+     * its price and when a move would start (owner decision U9). Omitted, no
+     * plan is named.
+     */
+    plans?: {
+      tiers: readonly PlanOption[];
+      status: PlanListStatus;
+      currentPlan: ViewerPlan | null;
+      currentPeriodEnd: string | null;
+    };
     /** True while the access check is still resolving (skeleton state) */
     accessLoading?: boolean;
     /**
@@ -213,6 +232,12 @@
     requiresSubscription,
     hasSubscription,
     subscriptionCoversContent,
+    plans = {
+      tiers: [],
+      status: 'failed',
+      currentPlan: null,
+      currentPeriodEnd: null,
+    },
     accessLoading = false,
     revocationReason = null,
     accessCheckFailed = false,
@@ -376,8 +401,42 @@
         return m.content_detail_withdrawn_entitlement();
     }
   }
+  /**
+   * The paywall's plan case (Codex-2hxff.91): which plans include the item,
+   * named and priced, or `closed` when no plan anyone can join includes it.
+   * `includedInTierIds` absent (an older content-api) names no plan and is
+   * never read as closed.
+   */
+  const planPaywall = $derived(
+    describePlanPaywall({
+      includedInTierIds: content.includedInTierIds ?? null,
+      tiers: plans.tiers,
+      tiersStatus: plans.status,
+      currentPlan: hasSubscription ? plans.currentPlan : null,
+      currentPeriodEnd: plans.currentPeriodEnd,
+    })
+  );
+  const planCopy = $derived(planPaywallCopy(planPaywall, formatSentenceDate));
+  /**
+   * A plan can still open it. A closed item (gated, no plan anyone can join)
+   * WITH a price is sold like any paid item, with no subscribe option; one
+   * WITHOUT a price is "Not available right now" (owner decision U11).
+   */
+  const subscriptionPathOpen = $derived(
+    !!requiresSubscription && planPaywall.kind !== 'closed'
+  );
   const needsPurchase = $derived(
-    !hasAccess && isSellable && !requiresSubscription
+    !hasAccess && isSellable && !subscriptionPathOpen
+  );
+  const isClosed = $derived(
+    !hasAccess &&
+      !!requiresSubscription &&
+      planPaywall.kind === 'closed' &&
+      !isSellable
+  );
+  /** Pricing, with the item marked on each plan card (owner decision U10). */
+  const pricingHref = $derived(
+    `/pricing?for=${encodeURIComponent(content.slug)}&returnTo=${encodeURIComponent(page.url.pathname)}`
   );
   // A priced practice that only opens inside its course gets a plain note in
   // place of Buy, like the team-only one.
@@ -385,7 +444,7 @@
     !hasAccess && content.courseOnly === true && isPaid
   );
   const needsSubscription = $derived(
-    !hasAccess && requiresSubscription && !subscriptionCoversContent
+    !hasAccess && subscriptionPathOpen && !subscriptionCoversContent
   );
   const isFollowersOnly = $derived(
     !hasAccess && content.isFollowerGated === true
@@ -436,7 +495,7 @@
       hasAccess,
       hasPreview: !!previewUrl,
       isAuthenticated,
-      requiresSubscription,
+      requiresSubscription: subscriptionPathOpen,
       hasSubscription,
       subscriptionCoversContent,
     })
@@ -457,6 +516,7 @@
       if (isFollowersOnly) return 'Follow to unlock this content.';
       if (isTeamOnly) return 'Team-only content.';
       if (isCourseOnly) return 'Part of a course.';
+      if (isClosed) return m.unavailable_cta_title();
       if (needsSubscription) return 'Subscription required.';
       if (!isAuthenticated) return 'Sign in required.';
       return needsPurchase ? 'Purchase required.' : 'Access required.';
@@ -492,9 +552,7 @@
     if (isTeamOnly) return m.team_only_cta_title();
     if (isCourseOnly) return m.course_only_cta_title();
     if (isFollowersOnly) return m.followers_only_cta_title();
-    if (needsSubscription) {
-      return hasSubscription ? m.upgrade_cta_title() : m.subscribe_cta_title();
-    }
+    if (isClosed || needsSubscription) return planCopy.title;
     if (isFreeSigninPrompt) {
       return isAudio
         ? m.content_detail_signin_listen_cta()
@@ -504,7 +562,8 @@
     return m.content_detail_locked_cta();
   });
 
-  const lockCtaSubtext = $derived.by<string>(() => {
+  /** Null while the plan names load: the lock shows a skeleton pill. */
+  const lockCtaSubtext = $derived.by<string | null>(() => {
     if (accessCheckFailed) return m.content_detail_refresh_description();
     if (isTeamOnly) return m.team_only_cta_description();
     if (isCourseOnly) return m.course_only_cta_description();
@@ -513,11 +572,7 @@
         ? m.content_detail_followers_listen_description()
         : m.content_detail_followers_watch_description();
     }
-    if (needsSubscription) {
-      return hasSubscription
-        ? m.upgrade_cta_description()
-        : m.subscribe_cta_description();
-    }
+    if (isClosed || needsSubscription) return planCopy.short;
     if (isFreeSigninPrompt) {
       return isAudio
         ? m.content_detail_signin_listen_description()
@@ -562,11 +617,7 @@
     if (isFollowersOnly) return m.followers_only_cta_description();
     if (isTeamOnly) return m.team_only_cta_description();
     if (isCourseOnly) return m.course_only_cta_description();
-    if (needsSubscription) {
-      return hasSubscription
-        ? m.upgrade_cta_description()
-        : m.subscribe_cta_description();
-    }
+    if (isClosed || needsSubscription) return planCopy.short ?? planCopy.title;
     if (!isAuthenticated) return m.checkout_signin_to_purchase();
     return m.content_detail_purchase_cta_description();
   });
@@ -857,6 +908,15 @@
   />
 {/snippet}
 
+<!-- The lock's second line; a skeleton pill while the plan names load. -->
+{#snippet lockSubtext()}
+  {#if lockCtaSubtext}
+    <p class="content-detail__cta-subtext">{lockCtaSubtext}</p>
+  {:else}
+    <span class="skeleton skeleton--plan-line" aria-hidden="true"></span>
+  {/if}
+{/snippet}
+
 <!--
   Root is an <article> (Codex-jo819 O1) — this is the semantic owner of the
   content page. The nested live region announces access-state transitions to
@@ -952,7 +1012,7 @@
             <div class="content-detail__preview-overlay">
               <div class="content-detail__preview-cta">
                 <p class="content-detail__cta-text">{lockCtaText}</p>
-                <p class="content-detail__cta-subtext">{lockCtaSubtext}</p>
+                {@render lockSubtext()}
               </div>
             </div>
           </div>
@@ -985,7 +1045,7 @@
           <div class="content-detail__preview-cta">
             <LockIcon size={40} class="content-detail__lock-icon" stroke-width="1.5" />
             <p class="content-detail__cta-text">{lockCtaText}</p>
-            <p class="content-detail__cta-subtext">{lockCtaSubtext}</p>
+            {@render lockSubtext()}
           </div>
         </div>
       </div>
@@ -1099,7 +1159,7 @@
             <div class="content-detail__audio-locked-overlay">
               <LockIcon size={32} class="content-detail__lock-icon" stroke-width="1.5" />
               <p class="content-detail__cta-text">{lockCtaText}</p>
-              <p class="content-detail__cta-subtext">{lockCtaSubtext}</p>
+              {@render lockSubtext()}
             </div>
           </div>
         {/if}
@@ -1177,15 +1237,30 @@
             </a>
           {/if}
         </section>
+      {:else if isClosed}
+        <!-- Closed (owner decision U11): gated, and no plan anyone can join
+             includes it, with no price either. Only those who already hold it
+             and the team get in, so there is nothing to offer. -->
+        <section class="content-detail__purchase" aria-labelledby="purchase-label-closed">
+          <div class="content-detail__price">
+            <span id="purchase-label-closed" class="content-detail__price-amount">{planCopy.title}</span>
+            <span class="content-detail__price-label">{planCopy.full}</span>
+          </div>
+        </section>
       {:else if needsSubscription}
         <section class="content-detail__purchase" aria-labelledby="purchase-label-sub">
           <div class="content-detail__price">
             <span id="purchase-label-sub" class="content-detail__price-amount">
-              {hasSubscription ? m.upgrade_cta_title() : m.subscribe_cta_title()}
+              {planCopy.title}
             </span>
-            <span class="content-detail__price-label">
-              {hasSubscription ? m.upgrade_cta_description() : m.subscribe_cta_description()}
-            </span>
+            {#if planCopy.full}
+              <span class="content-detail__price-label" data-testid="plan-paywall-line">{planCopy.full}</span>
+              {#if planCopy.timing}
+                <span class="content-detail__price-label" data-testid="plan-paywall-timing">{planCopy.timing}</span>
+              {/if}
+            {:else}
+              <span class="skeleton skeleton--plan-line" aria-hidden="true"></span>
+            {/if}
           </div>
 
           {#if isAuthenticated && content.organizationId}
@@ -1193,6 +1268,8 @@
               State-aware CTA (Codex-g5vbp). Renders:
                 no sub          → Subscribe → pricing
                 active + upgrade→ "Upgrade to Watch" + Manage plan
+                active + change → "Change Plan" + Manage plan (a cheaper plan
+                                  includes it, Codex-2hxff.91)
                 cancelling      → "Ends {date}" badge + Reactivate + Manage
                 past_due        → "Payment failed" badge + Update payment + Manage
                 paused          → "Paused" badge + Resume (interactive — Codex-7h4vo) + Manage
@@ -1202,13 +1279,22 @@
             <SubscribeButton
               organizationId={content.organizationId}
               {isAuthenticated}
-              subscribeHref={`/pricing?returnTo=${encodeURIComponent(page.url.pathname)}`}
+              subscribeHref={pricingHref}
               upgradeRequired={hasSubscription ?? false}
+              changePlan={planPaywall.kind !== 'upgrade'}
               class="content-detail__subscribe-button"
             />
           {:else if !isAuthenticated}
-            <a href="/login" class="content-detail__purchase-btn content-detail__purchase-btn--link">
-              {m.checkout_signin_to_purchase()}
+            <!-- Nothing to buy here yet: the plans come first, then sign in
+                 (pricing sends a signed-out visitor to sign in on a pick). -->
+            <a href={pricingHref} class="content-detail__purchase-btn content-detail__purchase-btn--link">
+              {m.subscribe_cta_see_plans()}
+            </a>
+            <a
+              href={`/login?redirect=${encodeURIComponent(page.url.pathname)}`}
+              class="content-detail__signin-link"
+            >
+              {m.auth_signin_link()}
             </a>
           {/if}
 
@@ -2258,6 +2344,36 @@
     width: 60%;
   }
 
+  /* The paywall's plan line while the plan names load (Codex-2hxff.91). */
+  .skeleton--plan-line {
+    display: block;
+    width: var(--space-32);
+    max-width: 100%;
+    height: var(--text-sm);
+    border-radius: var(--radius-full);
+    background: linear-gradient(
+      90deg,
+      var(--color-surface-secondary) 25%,
+      var(--color-surface-tertiary) 50%,
+      var(--color-surface-secondary) 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer calc(var(--duration-slower) * 3) infinite;
+  }
+
+  .content-detail__signin-link {
+    align-self: center;
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
+    color: var(--color-text-secondary);
+    text-decoration: underline;
+    text-underline-offset: var(--space-0-5);
+  }
+
+  .content-detail__signin-link:hover {
+    color: var(--color-text);
+  }
+
   @keyframes shimmer {
     0% { background-position: 200% 0; }
     100% { background-position: -200% 0; }
@@ -2271,7 +2387,8 @@
   @media (prefers-reduced-motion: reduce) {
     .skeleton--audio,
     .skeleton--player,
-    .skeleton--body-line {
+    .skeleton--body-line,
+    .skeleton--plan-line {
       animation: none;
     }
   }

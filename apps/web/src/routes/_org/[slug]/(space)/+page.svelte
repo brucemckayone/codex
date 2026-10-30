@@ -61,6 +61,7 @@
     unfollowOrganization,
   } from '$lib/remote/org.remote';
   import { useAccessContext } from '$lib/utils/access-context.svelte';
+  import { inAPlanOnSale } from '$lib/utils/plan-label';
   import { shouldShowSubscribeCta } from '$lib/utils/subscribe-cta';
   import { StructuredData } from '$lib/components/seo';
   import type { ContentItem } from './feed-types';
@@ -239,30 +240,6 @@
     resolvedCategories.map((c) => ({ slug: c.slug, name: c.name }))
   );
 
-  // Preview strip for the SubscribeCTA — member-only items ("You'll unlock:").
-  // Filter allContent to subscriber/follower-gated items, cap at 5, and map
-  // to the lightweight primitive shape SubscribeCTA expects. This is the
-  // "honest fallback" path — if the org has no gated content, the strip
-  // hides gracefully (the component checks `previewContent?.length > 0`).
-  const subscribeGatedContent = $derived(
-    data.allContent.filter(
-      (c) => c.includedInTierId != null || c.isFollowerGated === true
-    )
-  );
-
-  const subscribePreview = $derived(
-    subscribeGatedContent.slice(0, 5).map((c) => ({
-      id: c.id,
-      title: c.title,
-      thumbnail: getDisplayThumbnail(c),
-      href: buildContentUrl(page.url, c),
-    }))
-  );
-
-  // Total gated items — SubscribeCTA uses this to render "+N more" when
-  // the full catalogue exceeds the visible 5 tiles.
-  const subscribePreviewTotal = $derived(subscribeGatedContent.length);
-
   // Canonical URL is the org's own subdomain origin. Prevents SEO
   // duplicate-content issues if the platform ever links to the same org
   // via a different path shape.
@@ -285,6 +262,37 @@
     isFollowing: followingStore.get(data.org.id),
     orgId: data.org.id,
   }));
+
+  // Preview strip for the SubscribeCTA — member-only items ("You'll unlock:").
+  // Filter allContent to subscriber/follower-gated items, cap at 5, and map
+  // to the lightweight primitive shape SubscribeCTA expects. This is the
+  // "honest fallback" path — if the org has no gated content, the strip
+  // hides gracefully (the component checks `previewContent?.length > 0`).
+  // A gated item counts only when a plan a new subscriber can join includes
+  // it (Codex-2hxff.91): a closed one, or one only in switched-off plans, is
+  // unlocked by no subscription on sale (owner U11, U13). Until the plans
+  // arrive none counts, and the CTA waits for them too (`hasActiveTiers`).
+  // Declared after `access`, whose plan list it reads.
+  const subscribeGatedContent = $derived(
+    data.allContent.filter(
+      (c) =>
+        (c.isTierGated && inAPlanOnSale(c.includedInTierIds, access.tiers)) ||
+        c.isFollowerGated === true
+    )
+  );
+
+  const subscribePreview = $derived(
+    subscribeGatedContent.slice(0, 5).map((c) => ({
+      id: c.id,
+      title: c.title,
+      thumbnail: getDisplayThumbnail(c),
+      href: buildContentUrl(page.url, c),
+    }))
+  );
+
+  // Total gated items — SubscribeCTA uses this to render "+N more" when
+  // the full catalogue exceeds the visible 5 tiles.
+  const subscribePreviewTotal = $derived(subscribeGatedContent.length);
 
   // Browse everything: the whole catalogue flattened to the browse-card shape
   // (written → article; href resolved; categorySlugs carry the topic filter).

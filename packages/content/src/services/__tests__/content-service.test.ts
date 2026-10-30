@@ -33,6 +33,7 @@ import {
   createTestTierInput,
   createUniqueSlug,
   type Database,
+  gateContentToTiers,
   seedTestUsers,
   setupTestDatabase,
   takeFirst,
@@ -281,11 +282,17 @@ describe('ContentService', () => {
         );
       });
 
-      it('clears a lingering tier when content is updated to be orgless (Codex-up7bx)', async () => {
-        // Seed org-scoped subscriber content WITH a real tier, then move it
-        // out of the org via update. The service must clamp the now-dangling
-        // tier to null so the access layer never has to fail closed on it.
+      it('refuses to move tier-gated content out of its org (Codex-2hxff.91)', async () => {
+        // The old clamp (Codex-up7bx) nulled the tier on an orgless move,
+        // which read as FREE. The ticks are pinned to the org, so the service
+        // now refuses the move instead, and nothing changes.
         const org = takeFirst(
+          await db
+            .insert(organizations)
+            .values(createTestOrganizationInput())
+            .returning()
+        );
+        const otherOrg = takeFirst(
           await db
             .insert(organizations)
             .values(createTestOrganizationInput())
@@ -324,22 +331,30 @@ describe('ContentService', () => {
               slug: createUniqueSlug('org-tier'),
               contentType: 'video',
               isFree: false,
-              includedInTierId: tier.id,
+              isTierGated: true,
               status: 'draft',
             })
             .returning()
         );
+        await gateContentToTiers(db, {
+          contentId: seeded.id,
+          organizationId: org.id,
+          tierIds: [tier.id],
+        });
 
-        // Update to orgless WITHOUT touching minimumTierId in the payload —
-        // the schema can't reason here; the service clamp must clear the tier.
-        const updated = await service.update(
-          seeded.id,
-          { organizationId: null },
-          creatorId
-        );
+        // Orgless, WITHOUT touching the tier fields in the payload.
+        await expect(
+          service.update(seeded.id, { organizationId: null }, creatorId)
+        ).rejects.toThrow(/orgless content cannot be tier-gated/i);
+        // Another org: the ticks would point at the old org's tier.
+        await expect(
+          service.update(seeded.id, { organizationId: otherOrg.id }, creatorId)
+        ).rejects.toThrow(/remove this item from plans/i);
 
-        expect(updated.organizationId).toBeNull();
-        expect(updated.includedInTierId).toBeNull();
+        const after = await service.get(seeded.id, creatorId);
+        expect(after?.organizationId).toBe(org.id);
+        expect(after?.isTierGated).toBe(true);
+        expect(after?.includedInTierIds).toEqual([tier.id]);
       });
 
       it('should create content with tags and category', async () => {
@@ -1079,9 +1094,11 @@ describe('ContentService', () => {
         priceCents?: number | null;
         isFollowerGated?: boolean;
         isTeamOnly?: boolean;
-        includedInTierId?: string | null;
+        /** Ticked tiers: turns the tier switch on (needs `organizationId`). */
+        tierIds?: string[];
         organizationId?: string | null;
       }): Promise<string> {
+        const { tierIds, ...policy } = flags;
         const media = takeFirst(
           await db
             .insert(mediaItems)
@@ -1104,10 +1121,18 @@ describe('ContentService', () => {
               contentType: 'video',
               isFree: false,
               status: 'draft',
-              ...flags,
+              ...policy,
+              isTierGated: tierIds !== undefined,
             })
             .returning()
         );
+        if (tierIds !== undefined && policy.organizationId) {
+          await gateContentToTiers(db, {
+            contentId: row.id,
+            organizationId: policy.organizationId,
+            tierIds,
+          });
+        }
         return row.id;
       }
 
@@ -1126,10 +1151,11 @@ describe('ContentService', () => {
         );
         const id = await seedGated({
           organizationId: org.id,
-          includedInTierId: tier.id,
+          tierIds: [tier.id],
         });
 
-        // Partial PATCH clears the sole gate WITHOUT restating isFree.
+        // Partial PATCH clears the sole gate WITHOUT restating isFree (the
+        // legacy single-tier input: null = switch off).
         const updated = await service.update(
           id,
           { includedInTierId: null },
@@ -1137,6 +1163,8 @@ describe('ContentService', () => {
         );
 
         expect(updated.includedInTierId).toBeNull();
+        expect(updated.isTierGated).toBe(false);
+        expect(updated.includedInTierIds).toEqual([]);
         expect(updated.isFree).toBe(true); // clamped — never non-free + zero-gate
         expect(updated.isPurchasable).toBe(false);
         expect(updated.isFollowerGated).toBe(false);
@@ -1193,7 +1221,7 @@ describe('ContentService', () => {
           organizationId: org.id,
           isPurchasable: true,
           priceCents: 1500,
-          includedInTierId: tier.id,
+          tierIds: [tier.id],
         });
 
         const updated = await service.update(
@@ -1204,6 +1232,7 @@ describe('ContentService', () => {
 
         expect(updated.isPurchasable).toBe(false);
         expect(updated.includedInTierId).toBe(tier.id); // tier gate remains
+        expect(updated.includedInTierIds).toEqual([tier.id]);
         expect(updated.isFree).toBe(false); // still gated → NOT clamped free
       });
     });
@@ -1488,11 +1517,16 @@ describe('ContentService', () => {
             contentType: 'written',
             contentBody: 'Members only',
             isFree: false,
-            includedInTierId: tier.id,
+            isTierGated: true,
             status: 'draft',
           })
           .returning()
       );
+      await gateContentToTiers(db, {
+        contentId: seeded.id,
+        organizationId: org.id,
+        tierIds: [tier.id],
+      });
 
       await expect(
         service.publish(seeded.id, creatorId)
@@ -1567,8 +1601,12 @@ describe('ContentService', () => {
      * legacy rows published before it do).
      */
     async function seed(
-      flags: Partial<typeof content.$inferInsert>
+      flags: Partial<typeof content.$inferInsert> & {
+        /** Ticked tiers: turns the tier switch on. */
+        tierIds?: string[];
+      }
     ): Promise<string> {
+      const { tierIds, ...policy } = flags;
       const row = takeFirst(
         await db
           .insert(content)
@@ -1580,11 +1618,19 @@ describe('ContentService', () => {
             contentType: 'written',
             contentBody: 'Body',
             status: 'draft',
-            ...flags,
+            ...policy,
+            isTierGated: tierIds !== undefined,
           })
           .returning()
       );
       contentIds.push(row.id);
+      if (tierIds !== undefined) {
+        await gateContentToTiers(db, {
+          contentId: row.id,
+          organizationId: orgId,
+          tierIds,
+        });
+      }
       return row.id;
     }
 
@@ -1612,7 +1658,7 @@ describe('ContentService', () => {
       });
 
       it('refuses TIER-only content (no price)', async () => {
-        const id = await seed({ isFree: false, includedInTierId: tierId });
+        const id = await seed({ isFree: false, tierIds: [tierId] });
 
         await expect(service.publish(id, creatorId)).rejects.toBeInstanceOf(
           CreatorPayoutsRequiredError
@@ -1626,7 +1672,7 @@ describe('ContentService', () => {
           isPurchasable: false,
           priceCents: 500,
         });
-        const tiered = await seed({ isFree: false, includedInTierId: tierId });
+        const tiered = await seed({ isFree: false, tierIds: [tierId] });
 
         expect((await service.publish(priced, creatorId)).status).toBe(
           'published'
@@ -1668,7 +1714,7 @@ describe('ContentService', () => {
         const tiered = await seed({
           ...live,
           isFree: false,
-          includedInTierId: tierId,
+          tierIds: [tierId],
         });
         const notPurchasable = await seed({
           ...live,
@@ -1694,7 +1740,7 @@ describe('ContentService', () => {
           isFree: false,
           isPurchasable: true,
           priceCents: 500,
-          includedInTierId: tierId,
+          tierIds: [tierId],
         });
 
         // The studio form submits the whole flag set on every save.
@@ -1719,7 +1765,7 @@ describe('ContentService', () => {
           isFree: false,
           isPurchasable: true,
           priceCents: 500,
-          includedInTierId: tierId,
+          tierIds: [tierId],
         });
 
         const updated = await service.update(

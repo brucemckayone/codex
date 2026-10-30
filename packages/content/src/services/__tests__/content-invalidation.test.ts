@@ -29,6 +29,7 @@ import {
   type InvalidationLogger,
   invalidateContentAccess,
   invalidateOrgMembership,
+  invalidatePlanSubscriberLibraries,
   type WaitUntilFn,
 } from '../content-invalidation';
 
@@ -500,5 +501,116 @@ describe('invalidateOrgMembership', () => {
         reason: 'membership_role_changed',
       })
     ).toThrow(ValidationError);
+  });
+});
+
+// ============================================================================
+// Tests — invalidatePlanSubscriberLibraries (Codex-2hxff.91)
+// ============================================================================
+
+describe('invalidatePlanSubscriberLibraries', () => {
+  const ORG_SLUG = 'plan-org';
+
+  function makePlanDb(slug: string | null): Database {
+    return {
+      query: {
+        organizations: {
+          findFirst: vi.fn().mockResolvedValue(slug ? { slug } : undefined),
+        },
+        subscriptions: { findMany: vi.fn().mockResolvedValue([]) },
+      },
+    } as unknown as Database;
+  }
+
+  it('bumps the catalogue AND the public counts: topics, stats and creators (review L7)', async () => {
+    const { cache, invalidate } = makeCache();
+    const { waitUntil, promises } = makeWaitUntil();
+
+    await invalidatePlanSubscriberLibraries({
+      db: makePlanDb(ORG_SLUG),
+      cache,
+      waitUntil,
+      organizationId: ORG_ID,
+      tierIds: [],
+      reason: 'plan_access_changed',
+    });
+    await Promise.all(promises);
+
+    const keys = invalidate.mock.calls.map((args) => args[0]);
+    expect(keys).toEqual(
+      expect.arrayContaining([
+        CacheType.COLLECTION_ORG_CONTENT(ORG_ID),
+        CacheType.CATEGORIES(ORG_ID),
+        // The slug keys the org's config and stats; the creators list has
+        // its own id.
+        ORG_SLUG,
+        CacheType.COLLECTION_ORG_CREATORS(ORG_SLUG),
+      ])
+    );
+  });
+
+  it('a failed slug lookup is logged and swallowed; the other bumps still land', async () => {
+    const { cache, invalidate } = makeCache();
+    const { waitUntil, promises } = makeWaitUntil();
+    const logger: InvalidationLogger = { warn: vi.fn() };
+    const db = makePlanDb(ORG_SLUG);
+    (
+      db.query.organizations.findFirst as unknown as ReturnType<typeof vi.fn>
+    ).mockRejectedValueOnce(new Error('db down'));
+
+    await invalidatePlanSubscriberLibraries({
+      db,
+      cache,
+      waitUntil,
+      organizationId: ORG_ID,
+      tierIds: [],
+      reason: 'plan_access_changed',
+      logger,
+    });
+    await Promise.all(promises);
+
+    expect(invalidate).toHaveBeenCalledWith(CacheType.CATEGORIES(ORG_ID));
+    expect(invalidate).not.toHaveBeenCalledWith(ORG_SLUG);
+    expect(logger.warn).toHaveBeenCalledWith(
+      'content-invalidation: bump failed',
+      expect.objectContaining({ key: 'org:public', error: 'db down' })
+    );
+  });
+
+  it('awaits the slug lookup, so it ends before the request does; only the KV bumps go to waitUntil (round 2)', async () => {
+    const { cache, invalidate } = makeCache();
+    const { waitUntil, promises } = makeWaitUntil();
+    const db = makePlanDb(ORG_SLUG);
+    // A read that takes a while, as a real one does: handed to waitUntil, it
+    // would still be running when the request's DB cleanup ends the pool.
+    let lookupSettled = false;
+    (
+      db.query.organizations.findFirst as unknown as ReturnType<typeof vi.fn>
+    ).mockImplementationOnce(
+      () =>
+        new Promise((resolve) =>
+          setTimeout(() => {
+            lookupSettled = true;
+            resolve({ slug: ORG_SLUG });
+          }, 20)
+        )
+    );
+
+    await invalidatePlanSubscriberLibraries({
+      db,
+      cache,
+      waitUntil,
+      organizationId: ORG_ID,
+      tierIds: [],
+      reason: 'plan_access_changed',
+    });
+
+    expect(lookupSettled).toBe(true);
+    // The slug's bumps are already under way, before the queue is awaited.
+    expect(invalidate).toHaveBeenCalledWith(ORG_SLUG);
+    expect(invalidate).toHaveBeenCalledWith(
+      CacheType.COLLECTION_ORG_CREATORS(ORG_SLUG)
+    );
+    await Promise.all(promises);
   });
 });

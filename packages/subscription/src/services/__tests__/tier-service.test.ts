@@ -9,7 +9,6 @@
  */
 
 import {
-  content,
   organizations,
   stripeConnectAccounts,
   subscriptions,
@@ -24,7 +23,6 @@ import {
 import {
   createMockStripe,
   createTestConnectAccountInput,
-  createTestContentInput,
   createTestOrganizationInput,
   createTestSubscriptionInput,
   createUniqueSlug,
@@ -923,102 +921,9 @@ describe('TierService', () => {
       ).rejects.toThrow(TierNotFoundError);
     });
 
-    it('should clear content.included_in_tier_id on soft-delete (X1 regression)', async () => {
-      // FK content.included_in_tier_id -> subscription_tiers.id is ON DELETE
-      // SET NULL, but that never fires for soft-deletes (deletedAt). Without
-      // this sweep, deleting a tier would leave content silently unreachable.
-      const org = await createOrgWithConnect('delete-sweep');
-      const tier = await service.createTier(org.id, {
-        submissionId: crypto.randomUUID(),
-        name: 'Gated',
-        priceMonthly: 499,
-        priceAnnual: 4990,
-      });
-
-      // Two content rows gated by this tier, plus one unrelated row.
-      const gatedA = takeFirst(
-        await db
-          .insert(content)
-          .values(
-            createTestContentInput(creatorId, {
-              organizationId: org.id,
-              includedInTierId: tier.id,
-            })
-          )
-          .returning()
-      );
-      const gatedB = takeFirst(
-        await db
-          .insert(content)
-          .values(
-            createTestContentInput(creatorId, {
-              organizationId: org.id,
-              includedInTierId: tier.id,
-            })
-          )
-          .returning()
-      );
-      const ungated = takeFirst(
-        await db
-          .insert(content)
-          .values(
-            createTestContentInput(creatorId, {
-              organizationId: org.id,
-              includedInTierId: null,
-            })
-          )
-          .returning()
-      );
-
-      await service.deleteTier(tier.id, org.id);
-
-      const rows = await db
-        .select({ id: content.id, includedInTierId: content.includedInTierId })
-        .from(content)
-        .where(eq(content.organizationId, org.id));
-      const byId = new Map(rows.map((r) => [r.id, r.includedInTierId]));
-      expect(byId.get(gatedA.id)).toBeNull();
-      expect(byId.get(gatedB.id)).toBeNull();
-      expect(byId.get(ungated.id)).toBeNull();
-    });
-
-    it('should only clear included_in_tier_id for content within the same org (scoping)', async () => {
-      // A different org with its own tier accidentally sharing an id would
-      // still be scoped out by the WHERE organizationId clause.
-      const orgA = await createOrgWithConnect('delete-scope-a');
-      const orgB = await createOrgWithConnect('delete-scope-b');
-
-      const tierA = await service.createTier(orgA.id, {
-        submissionId: crypto.randomUUID(),
-        name: 'A-gated',
-        priceMonthly: 499,
-        priceAnnual: 4990,
-      });
-
-      // Content in org B that shares includedInTierId = tierA.id (contrived,
-      // would not happen normally but guards against the sweep over-reaching).
-      const orgBContent = takeFirst(
-        await db
-          .insert(content)
-          .values(
-            createTestContentInput(creatorId, {
-              organizationId: orgB.id,
-              includedInTierId: tierA.id,
-            })
-          )
-          .returning()
-      );
-
-      await service.deleteTier(tierA.id, orgA.id);
-
-      const row = takeFirst(
-        await db
-          .select({ includedInTierId: content.includedInTierId })
-          .from(content)
-          .where(eq(content.id, orgBContent.id))
-      );
-      expect(row.includedInTierId).toBe(tierA.id);
-    });
+    // The tier's ticks on delete — the sweep that replaced the X1
+    // `included_in_tier_id = NULL` (Codex-2hxff.90/.91), "keep", "move", the
+    // only-here refusal and org scoping — are in tier-plan-access.test.ts.
   });
 
   // ─── listTiers ──────────────────────────────────────────────────────

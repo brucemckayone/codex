@@ -65,6 +65,7 @@ export {
   SubscriptionNotFoundError,
   type SubscriptionServiceError,
   TierChangePreviewExpiredError,
+  TierHasOnlyItemsError,
   TierHasSubscribersError,
   TierNotFoundError,
   TierSortOrderConflictError,

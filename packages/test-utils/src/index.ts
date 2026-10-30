@@ -26,6 +26,8 @@ export * from './helpers';
 export * from './mocks';
 // Money dependencies for PurchaseService / SubscriptionService / CourseSubscriptionService (Codex-2hxff.55)
 export * from './money-deps';
+// Plan access (Codex-2hxff.91): gate content to an exact set of tiers
+export * from './plan-access';
 // Purchase Seeders (purchase + contentAccess atomic inserts)
 export * from './purchase-helpers';
 // Test Setup Helpers

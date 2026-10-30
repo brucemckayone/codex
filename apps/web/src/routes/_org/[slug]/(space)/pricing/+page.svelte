@@ -36,6 +36,7 @@
   import type { PricingFaqItem } from '@codex/validation';
   import { formatDate, formatPrice } from '$lib/utils/format';
   import { buildJourneyUrl, buildPlatformUrl } from '$lib/utils/subdomain';
+  import { pricingHighlight } from '$lib/utils/plan-label';
   import { logger } from '$lib/observability';
   import {
     getEffectiveStatus,
@@ -988,9 +989,29 @@
         <h1 id="pricing-hero-title" class="pricing-hero__title">
           {m.subscription_pricing_title()}
         </h1>
-        <p class="pricing-hero__subtitle">
-          {m.subscription_pricing_subtitle()}
+        <!-- Opened from an item's paywall (?for=, Codex-2hxff.91, owner
+             decision U10): the line names the plans that include it. Streamed,
+             so the default line shows until it lands, and stays on a miss. -->
+        <p class="pricing-hero__subtitle" data-testid="pricing-hero-subtitle">
+          {#await data.forContent}
+            {m.subscription_pricing_subtitle()}
+          {:then forContent}
+            {forContent
+              ? pricingHighlight(forContent, tiers).headline
+              : m.subscription_pricing_subtitle()}
+          {/await}
         </p>
+        {#await data.forContent then forContent}
+          {#if forContent}
+            <a
+              class="pricing-hero__back"
+              href={`/content/${encodeURIComponent(forContent.slug)}`}
+              data-testid="pricing-for-content-back"
+            >
+              {m.pricing_for_content_back({ title: forContent.title })}
+            </a>
+          {/if}
+        {/await}
       </header>
 
       <div class="billing-toggle-wrapper">
@@ -1198,6 +1219,32 @@
               </div>
 
               <ul class="card__features">
+                <!-- The item this page was opened from: whether THIS plan
+                     includes it (U10). The "Most Popular" glow stays where
+                     the creator put it, even on a plan that doesn't. -->
+                {#await data.forContent then forContent}
+                  {#if forContent}
+                    {@const includes = forContent.includedInTierIds.includes(tier.id)}
+                    <li
+                      class="card__feature--content"
+                      class:card__feature--excluded={!includes}
+                      data-testid="tier-content-line"
+                      data-includes={includes}
+                    >
+                      {#if includes}
+                        <span class="card__feature-icon" aria-hidden="true">
+                          <CheckIcon size={16} />
+                        </span>
+                        <span>{m.pricing_tier_includes_content({ title: forContent.title })}</span>
+                      {:else}
+                        <span class="card__feature-icon card__feature-icon--muted" aria-hidden="true">
+                          <span class="card__feature-dash"></span>
+                        </span>
+                        <span>{m.pricing_tier_excludes_content({ title: forContent.title })}</span>
+                      {/if}
+                    </li>
+                  {/if}
+                {/await}
                 <li>
                   <span class="card__feature-icon" aria-hidden="true">
                     <CheckIcon size={16} />
@@ -1928,6 +1975,25 @@
     transform: translateY(var(--space-3));
   }
 
+  .pricing-hero__back {
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
+    color: var(--color-text-secondary);
+    text-decoration: underline;
+    text-underline-offset: var(--space-0-5);
+    transition: var(--transition-colors);
+  }
+
+  .pricing-hero__back:hover {
+    color: var(--color-text);
+  }
+
+  .pricing-hero__back:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-0-5);
+    border-radius: var(--radius-sm);
+  }
+
   .billing-toggle-wrapper {
     display: inline-flex;
     opacity: 0;
@@ -2519,6 +2585,32 @@
 
   .card--featured .card__feature-icon {
     background: color-mix(in srgb, var(--color-brand-primary) 20%, transparent);
+  }
+
+  /* The item this page was opened from (Codex-2hxff.91): included reads in
+     the text colour; not included is muted, with a dash for the check. */
+  .card__features li.card__feature--content {
+    color: var(--color-text);
+    font-weight: var(--font-medium);
+  }
+
+  .card__features li.card__feature--excluded {
+    color: var(--color-text-muted);
+    font-weight: var(--font-normal);
+  }
+
+  .card__feature-icon--muted,
+  .card--featured .card__feature-icon--muted {
+    background: var(--color-surface-secondary);
+    color: var(--color-text-muted);
+  }
+
+  .card__feature-dash {
+    display: block;
+    width: var(--space-2-5);
+    height: var(--border-width-thick);
+    border-radius: var(--radius-full);
+    background: currentColor;
   }
 
   .card__features li :global(svg) {

@@ -13,6 +13,7 @@ import {
   CourseInsightsService,
   CourseJourneyService,
   EntitlementsService,
+  PlanAccessService,
 } from '@codex/access';
 import {
   AdminAnalyticsService,
@@ -455,6 +456,7 @@ export async function createServiceRegistry(
   let _connectAccount: ConnectAccountService | undefined;
   let _courseSubscription: CourseSubscriptionService | undefined;
   let _courseAccess: CourseAccessService | undefined;
+  let _planAccess: PlanAccessService | undefined;
   let _courseJourney: CourseJourneyService | undefined;
   let _courseInsights: CourseInsightsService | undefined;
   let _agreements: AgreementService | undefined;
@@ -1270,6 +1272,23 @@ export async function createServiceRegistry(
         });
       }
       return _courseAccess;
+    },
+
+    get planAccess() {
+      if (!_planAccess) {
+        // Pure DB. The shared WS client: the checklist's delta write is one
+        // transaction. Cache + waitUntil wire the post-write catalogue and
+        // subscriber-library bumps; without either they degrade to no-ops.
+        _planAccess = new PlanAccessService({
+          db: getSharedDb(),
+          environment: getEnvironment(),
+          cache: env.CACHE_KV ? buildTrackedCache(env.CACHE_KV) : undefined,
+          waitUntil: executionCtx
+            ? executionCtx.waitUntil.bind(executionCtx)
+            : undefined,
+        });
+      }
+      return _planAccess;
     },
 
     get courseJourney() {

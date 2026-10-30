@@ -160,6 +160,7 @@ export {
   RefundKeySpentError,
   RefundWindowClosedError,
   StripeRefusedRefundError,
+  TierRequiredToPublishError,
   ValidationError,
   wrapError,
 } from './errors';

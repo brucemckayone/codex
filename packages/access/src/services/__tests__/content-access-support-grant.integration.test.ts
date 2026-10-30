@@ -43,6 +43,7 @@ import {
   createTestTierInput,
   createUniqueSlug,
   type Database,
+  gateContentToTiers,
   seedTestUsers,
   setupTestDatabase,
   teardownTestDatabase,
@@ -388,7 +389,7 @@ describe('support grants — access and library (Codex-2hxff.21)', () => {
       isFree: false,
       isPurchasable: false,
       priceCents: null,
-      includedInTierId: null,
+      isTierGated: false,
       courseOnly: false,
       isFollowerGated: false,
       isTeamOnly: false,
@@ -399,6 +400,9 @@ describe('support grants — access and library (Codex-2hxff.21)', () => {
     it.each([
       ['paid', true, { isPurchasable: true, priceCents: 1500 }],
       ['tier (subscriber)', true, 'tier' as const],
+      // Plan access (Codex-2hxff.91): behind the switch with NO plan ticked is
+      // CLOSED, never free, and a grant still opens it.
+      ['tier, closed (no plan ticked)', true, { isTierGated: true }],
       ['free', false, { isFree: true, priceCents: 0 }],
       ['followers-only', false, { isFollowerGated: true }],
       ['team-only', false, { isTeamOnly: true }],
@@ -409,22 +413,25 @@ describe('support grants — access and library (Codex-2hxff.21)', () => {
         `grantable-${shape.replace(/[^a-z]+/g, '-').replace(/-+$/, '')}`
       );
       const flags =
-        flagsOrTier === 'tier'
-          ? {
-              includedInTierId: (
-                await db
-                  .insert(subscriptionTiers)
-                  .values(createTestTierInput(organizationId))
-                  .returning()
-              )[0]?.id,
-            }
-          : flagsOrTier;
+        flagsOrTier === 'tier' ? { isTierGated: true } : flagsOrTier;
       const [row] = await db
         .update(content)
         .set({ ...neutral, ...flags })
         .where(eq(content.id, item.id))
         .returning();
       if (!row) throw new Error('Failed to set the content shape');
+      if (flagsOrTier === 'tier') {
+        const [tier] = await db
+          .insert(subscriptionTiers)
+          .values(createTestTierInput(organizationId))
+          .returning();
+        if (!tier) throw new Error('Failed to create the tier');
+        await gateContentToTiers(db, {
+          contentId: item.id,
+          organizationId,
+          tierIds: [tier.id],
+        });
+      }
 
       await grant(granted, item.id);
 
@@ -445,7 +452,7 @@ describe('support grants — access and library (Codex-2hxff.21)', () => {
       isFree: false,
       isPurchasable: true,
       priceCents: 1500,
-      includedInTierId: null,
+      isTierGated: false,
       courseOnly: false,
       isFollowerGated: false,
       isTeamOnly: false,
@@ -457,6 +464,9 @@ describe('support grants — access and library (Codex-2hxff.21)', () => {
       ['course-only', false, false, { courseOnly: true }],
       ['team-only', false, false, { isTeamOnly: true }],
       ['followers-only', false, false, { isFollowerGated: true }],
+      // A paid item behind the tier switch with no plan ticked is still on
+      // sale, and a purchase opens it (owner U11: closed + price = paid).
+      ['paid, closed tier set', true, true, { isTierGated: true }],
     ])('%s: sold = %s, a purchase opens it = %s', async (shape, sold, opens, flags) => {
       const [buyer, other] = await seedTestUsers(db, 2);
       const item = await createPaidContent(

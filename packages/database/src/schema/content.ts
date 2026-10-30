@@ -3,10 +3,12 @@ import {
   bigint,
   boolean,
   check,
+  foreignKey,
   index,
   integer,
   jsonb,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -282,18 +284,30 @@ export const content = pgTable(
     // the entitlement resolver (@codex/access, WP-2).
     //
     // Legacy accessType → flag mapping (HARDENING §H2): free→isFree,
-    // paid→isPurchasable, subscribers→includedInTierId, followers→isFollowerGated,
-    // team→isTeamOnly. `courseOnly` is net-new. `isFree`/`isPurchasable`/
-    // `includedInTierId` may combine freely; `courseOnly` suppresses every
-    // standalone path regardless of the others.
+    // paid→isPurchasable, subscribers→isTierGated, followers→isFollowerGated,
+    // team→isTeamOnly. `courseOnly` is net-new. `isPurchasable` and
+    // `isTierGated` may combine; `isTierGated` excludes `isFree`, followers,
+    // team and course-only (Codex-2hxff.91 I2/I4); `courseOnly` suppresses
+    // every standalone path regardless of the others.
     isFree: boolean('is_free').notNull().default(true), // open to all
     isPurchasable: boolean('is_purchasable').notNull().default(false), // one-off purchase (+ priceCents)
 
     priceCents: integer('price_cents'), // Paired with isPurchasable — one-off price in pence (NULL = not priced)
 
-    // Included in this org tier AND ABOVE (by subscription_tiers.sortOrder).
-    // 1:1 successor to the former `minimumTierId` (same FK, set null on tier delete).
-    includedInTierId: uuid('included_in_tier_id').references(
+    // The subscribers-only SWITCH (Codex-2hxff.91): the tier arm applies. The
+    // tiers that open it are the rows of `content_tier_access`. Gated with no
+    // tier ticked is CLOSED (buyers, granted users, course owners and the team
+    // only), never free. Every "is it gated?" check reads THIS, never "has
+    // ticks" and never the legacy column below.
+    isTierGated: boolean('is_tier_gated').notNull().default(false),
+
+    // LEGACY (Codex-2hxff.91 phase 1-2 only): the old single "this tier and
+    // above" column. Renamed so every reader fails typecheck; nothing decides
+    // access from it any more. Dual-written as the lowest ticked tier (kept,
+    // never NULLed, while gated with no tick) for the old web and a rollback,
+    // ONLY by `packages/content/src/services/content-tier-access.ts`
+    // `syncLegacyIncludedInTierId`. Dropped in the cleanup release.
+    legacyIncludedInTierId: uuid('included_in_tier_id').references(
       () => subscriptionTiers.id,
       { onDelete: 'set null' }
     ),
@@ -343,7 +357,12 @@ export const content = pgTable(
     index('idx_content_status').on(table.status),
     index('idx_content_published_at').on(table.publishedAt),
     index('idx_content_category').on(table.category),
-    index('idx_content_included_in_tier').on(table.includedInTierId),
+    index('idx_content_included_in_tier').on(table.legacyIncludedInTierId),
+
+    // Composite-FK target for `content_tier_access` (Codex-2hxff.91). `id` is
+    // the PK, so this is redundant for uniqueness, exactly as
+    // `uq_courses_id_org` / `uq_subscription_tiers_id_org`.
+    uniqueIndex('uq_content_id_org').on(table.id, table.organizationId),
 
     // Composite indexes for landing page query performance
     index('idx_content_org_published')
@@ -391,6 +410,48 @@ export const content = pgTable(
   ]
 );
 
+/**
+ * Explicit tier → content grants (Codex-2hxff.91): the content twin of
+ * `course_tier_access`. Each row names one tier that includes one content
+ * item; a SET, not a ladder, so a dearer tier is never implied. Read only
+ * behind `content.is_tier_gated` (the gate); ticks never open an ungated row.
+ *
+ * A join table with no `deleted_at`: writers replace rows by delete + insert in
+ * one transaction (the accepted exception to soft deletes). The composite FKs
+ * pin the content and the tier to the row's ONE organisation, so a cross-org
+ * tick is impossible in the DB. Tier delete is SOFT, so its cascade never
+ * fires: `TierService.deleteTier` deletes the ticks itself.
+ */
+export const contentTierAccess = pgTable(
+  'content_tier_access',
+  {
+    contentId: uuid('content_id').notNull(),
+    tierId: uuid('tier_id').notNull(),
+    // The org BOTH the content and the tier belong to.
+    organizationId: uuid('organization_id').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.contentId, table.tierId] }),
+    // tier → content ids, index-only: the library arm, the copy and the
+    // checklist all read this way.
+    index('idx_content_tier_access_tier_content').on(
+      table.tierId,
+      table.contentId
+    ),
+    index('idx_content_tier_access_org_id').on(table.organizationId),
+    foreignKey({
+      columns: [table.contentId, table.organizationId],
+      foreignColumns: [content.id, content.organizationId],
+      name: 'fk_content_tier_access_content_org',
+    }).onDelete('cascade'),
+    foreignKey({
+      columns: [table.tierId, table.organizationId],
+      foreignColumns: [subscriptionTiers.id, subscriptionTiers.organizationId],
+      name: 'fk_content_tier_access_tier_org',
+    }).onDelete('cascade'),
+  ]
+);
+
 // Relations
 export const organizationsRelations = relations(organizations, ({ many }) => ({
   content: many(content),
@@ -422,7 +483,8 @@ export const mediaItemsRelations = relations(mediaItems, ({ one }) => ({
   }),
 }));
 
-export const contentRelations = relations(content, ({ one }) => ({
+export const contentRelations = relations(content, ({ one, many }) => ({
+  tierAccess: many(contentTierAccess),
   creator: one(users, {
     fields: [content.creatorId],
     references: [users.id],
@@ -436,6 +498,20 @@ export const contentRelations = relations(content, ({ one }) => ({
     references: [mediaItems.id],
   }),
 }));
+
+export const contentTierAccessRelations = relations(
+  contentTierAccess,
+  ({ one }) => ({
+    content: one(content, {
+      fields: [contentTierAccess.contentId],
+      references: [content.id],
+    }),
+    tier: one(subscriptionTiers, {
+      fields: [contentTierAccess.tierId],
+      references: [subscriptionTiers.id],
+    }),
+  })
+);
 
 // Type exports
 export type Organization = typeof organizations.$inferSelect;
@@ -453,3 +529,5 @@ export type ServedMediaItem = Omit<MediaItem, 'transcodingError'>;
 export type NewMediaItem = typeof mediaItems.$inferInsert;
 export type Content = typeof content.$inferSelect;
 export type NewContent = typeof content.$inferInsert;
+export type ContentTierAccess = typeof contentTierAccess.$inferSelect;
+export type NewContentTierAccess = typeof contentTierAccess.$inferInsert;
