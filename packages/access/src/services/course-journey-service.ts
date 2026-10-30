@@ -24,7 +24,7 @@
  * this service composes the shapes and does NOT re-run the entitlement decision.
  */
 
-import { CONTENT_STATUS } from '@codex/constants';
+import { CONTENT_STATUS, MEDIA_TYPES } from '@codex/constants';
 import type { CourseGuide } from '@codex/database/schema';
 import {
   content,
@@ -105,6 +105,7 @@ import {
   or,
   sql,
 } from 'drizzle-orm';
+import { previewLength } from '../preview-length';
 import {
   type DisputeHold,
   resolveCourseDisputePauses,
@@ -834,6 +835,7 @@ export class CourseJourneyService extends BaseService {
           hlsPreviewKey: string | null;
           thumbnailKey: string | null;
           durationSeconds: number | null;
+          mediaType: string;
           fullFilm: boolean;
         }
       >();
@@ -845,6 +847,8 @@ export class CourseJourneyService extends BaseService {
             hlsPreviewKey: mediaItems.hlsPreviewKey,
             thumbnailKey: mediaItems.thumbnailKey,
             durationSeconds: mediaItems.durationSeconds,
+            // So the page can say "watch" or "listen" (Codex-61zsk.73).
+            mediaType: mediaItems.mediaType,
             // Owner P10 ("Full film unless it's paid"): may this media's FULL
             // film stream from this course? This course's published row is
             // rule (a); `fullFilmEligible` is the minter's own predicate for
@@ -863,16 +867,22 @@ export class CourseJourneyService extends BaseService {
 
       // Resolve one media id → a public clip. Null unless a transcoded preview
       // key AND a CDN base exist (a preview-less clip has no playable manifest).
+      // It says what it is and how long its preview runs, so the page can say
+      // "A 30-second listen" (Codex-61zsk.73). `media_items` is CHECK-
+      // constrained to video and audio.
       const toClip = (mediaId: string | null): CourseSellPreviewClip | null => {
         if (!mediaId) return null;
         const media = previewByMediaId.get(mediaId);
         if (!media?.hlsPreviewKey || !r2PublicUrlBase) return null;
+        const durationSeconds = media.durationSeconds ?? null;
         return {
           playlistUrl: `${r2PublicUrlBase}/${media.hlsPreviewKey}`,
           posterUrl: media.thumbnailKey
             ? `${r2PublicUrlBase}/${media.thumbnailKey}`
             : null,
-          durationSeconds: media.durationSeconds ?? null,
+          durationSeconds,
+          mediaType: media.mediaType === MEDIA_TYPES.AUDIO ? 'audio' : 'video',
+          previewSeconds: previewLength(durationSeconds),
         };
       };
 

@@ -27,9 +27,17 @@
   tall one; Cinematic's fades lift under the player, which is squared where
   Cinematic squares the picture. It asks for the full film where the server
   allows one (`reel`).
+
+  Its line says what it is and how long a press plays (Codex-61zsk.73),
+  "A 30-second listen", then the creator's caption, "· From week one"
+  (`filmPlays`). It sits where the caption did, under the frame in
+  `feature`, and under the words, above the buttons, in `split`. An audio
+  clip has no picture, so it plays in a listening card instead
+  (`ListenCard`), which holds the line, and keeps to the column in every
+  Style.
 -->
 <script lang="ts">
-  import { filmToShow } from '../../model/films';
+  import { filmPlays, filmToShow } from '../../model/films';
   import type { BlockProps } from '../../model/types';
   import { getKitPage } from '../../page-context';
   import ButtonRow from '../../primitives/ButtonRow.svelte';
@@ -40,8 +48,9 @@
   import Text from '../../primitives/Text.svelte';
   import { settled } from '../hero/settled.svelte';
   import ClipFrame from '../video/ClipFrame.svelte';
-  import { PREVIEW_COPY } from './copy';
+  import { PREVIEW_COPY, previewKind } from './copy';
   import { PREVIEW_PROMPT, previewDefinition } from './definition';
+  import ListenCard from './ListenCard.svelte';
 
   const { props, section, context, edit }: BlockProps = $props();
 
@@ -68,7 +77,24 @@
   const shown = $derived(!clipless || page.still || !!edit);
   // A section with no clip is the creator's alone: the canvas's own.
   const creatorOnly = $derived(clipless ? '' : undefined);
+
+  // What a press plays, said before the caption. An older payload names no
+  // kind, so its line is the caption alone.
+  const plays = $derived(clip ? filmPlays(clip, page) : null);
+  const kind = $derived(
+    clip?.mediaType && plays ? previewKind(clip.mediaType, plays.seconds) : undefined
+  );
+  const listen = $derived(clip?.mediaType === 'audio');
+  const hasLine = $derived(Boolean(kind || content.caption));
+  // The card holds its own line; split sets a film's under the words.
+  const lineUnderWords = $derived(split && !listen && hasLine);
+  const hasWords = $derived(hasTop || Boolean(content.body) || hasCta || lineUnderWords);
 </script>
+
+<!-- One run of text, no space between: "A 30-second watch · From week one". -->
+{#snippet line()}
+  {#if kind}<b class="preview__kind">{kind}</b>{/if}{#if kind && content.caption}{' · '}{/if}{#if content.caption}<span {...captionAttrs}>{content.caption}</span>{/if}
+{/snippet}
 
 {#snippet top()}
   <div class="preview__top">
@@ -89,6 +115,7 @@
   {#if content.body}
     <Text text={content.body} size="lead" type="preview" field="body" {edit} />
   {/if}
+  {#if lineUnderWords}<p class="preview__line">{@render line()}</p>{/if}
   {#if hasCta}
     <div class="preview__actions">
       <ButtonRow
@@ -104,8 +131,22 @@
 {/snippet}
 
 {#snippet frame()}
-  <figure class="preview__clip" data-layout={section.layout} data-lp-edit-only={creatorOnly}>
-    {#if clip}
+  <figure
+    class="preview__clip"
+    data-layout={section.layout}
+    data-media={listen ? 'audio' : undefined}
+    data-lp-edit-only={creatorOnly}
+  >
+    {#if clip && listen}
+      <ListenCard
+        {clip}
+        {title}
+        seconds={plays?.seconds ?? null}
+        still={clip.posterUrl ?? preview?.heroImageUrl ?? null}
+        {line}
+        {edit}
+      />
+    {:else if clip}
       <InlineFilm {clip} film="reel" label={PREVIEW_COPY.watch} {title} {edit}>
         {#snippet children(control, player)}
           <ClipFrame still={clip.posterUrl} ratio="var(--_ratio)" {place} {player}>
@@ -120,8 +161,8 @@
         prompt={edit && !pending ? PREVIEW_PROMPT : undefined}
       />
     {/if}
-    {#if content.caption}
-      <figcaption class="preview__caption" {...captionAttrs}>{content.caption}</figcaption>
+    {#if hasLine && !listen && !split}
+      <figcaption class="preview__line">{@render line()}</figcaption>
     {/if}
   </figure>
 {/snippet}
@@ -133,7 +174,7 @@
 {#if shown}
   {#if split}
     <div class="preview-split" data-lp-edit-only={creatorOnly}>
-      {#if hasTop || content.body || hasCta}
+      {#if hasWords}
         <div class="preview-split__words">
           {#if hasTop}{@render top()}{/if}
           {@render more()}
@@ -179,12 +220,28 @@
     margin: 0;
   }
 
-  .preview__caption {
+  .preview__line {
     margin: 0;
     max-inline-size: calc(var(--lp-measure) * var(--lp-measure-unit));
     color: var(--lp-ink-soft);
     font-size: var(--lp-size-small);
     line-height: var(--lp-leading-body);
+  }
+
+  /* What it is and how long, in the line's own ink (the card's panel ink). */
+  .preview__kind {
+    font-weight: var(--lp-weight-label);
+  }
+
+  .preview__line .preview__kind {
+    color: var(--lp-ink);
+  }
+
+  /* The listening card is wide where the frame is (`ListenCard`). */
+  @container (min-width: 40rem) {
+    .preview__clip[data-layout='feature'] {
+      --listen-ratio: 21 / 9;
+    }
   }
 
   /* ── feature ───────────────────────────────────────────────────────────── */
@@ -224,7 +281,7 @@
     text-wrap: balance;
   }
 
-  :global(.lp[data-lp-style='soft']) .preview__clip[data-layout='feature'] .preview__caption {
+  :global(.lp[data-lp-style='soft']) .preview__clip[data-layout='feature'] .preview__line {
     justify-self: center;
     text-align: center;
   }
@@ -241,7 +298,13 @@
 
   :global(.lp:is([data-lp-style='bold'], [data-lp-style='cinematic']))
     .preview__clip[data-layout='feature']
-    .preview__caption {
+    .preview__line {
+    padding-inline: var(--_edge);
+  }
+
+  /* The listening card keeps to the column: a panel run off the band's edge
+     would read as a band of its own. */
+  :global(.lp:is([data-lp-style='bold'], [data-lp-style='cinematic'])) .preview__clip[data-media='audio'] {
     padding-inline: var(--_edge);
   }
 
@@ -304,10 +367,6 @@
     border-radius: 0;
   }
 
-  :global(.lp:is([data-lp-style='bold'], [data-lp-style='cinematic'])) .preview-split .preview__caption {
-    padding-inline: var(--_edge);
-  }
-
   @container (min-width: 50rem) {
     :global(.lp:is([data-lp-style='bold'], [data-lp-style='cinematic']))
       .preview-split:has(> .preview__clip):has(> .preview-split__words) {
@@ -330,7 +389,7 @@
 
     :global(.lp:is([data-lp-style='bold'], [data-lp-style='cinematic']))
       .preview-split:has(> .preview-split__words)
-      .preview__caption {
+      > .preview__clip[data-media='audio'] {
       padding-inline-start: 0;
     }
 

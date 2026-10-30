@@ -27,9 +27,17 @@
   over the poster, letterboxed in Bold's 21:9, and the poster returns with
   "Watch again" when it ends. It asks for the full film where the server
   allows one (`intro`).
+
+  A line says who speaks and for how long (Codex-61zsk.73): "Maya Okafor ·
+  2:04", or "0:30 preview" when a press plays the preview (`filmPlays`). The
+  speaker is the creator's, else the page's guide (the About you section's
+  name), shown by default; the "Hide who's speaking" switch leaves them off
+  (`hideSpeaker`). In `theatre` it sits under the
+  screen, in line with the words; in `split` under the words, above the
+  buttons. With neither a speaker nor a length there is no line.
 -->
 <script lang="ts">
-  import { filmToShow } from '../../model/films';
+  import { filmPlays, filmToShow } from '../../model/films';
   import { hasHead } from '../../model/read';
   import type { BlockProps } from '../../model/types';
   import { getKitPage } from '../../page-context';
@@ -41,7 +49,7 @@
   import Text from '../../primitives/Text.svelte';
   import { settled } from '../hero/settled.svelte';
   import ClipFrame from './ClipFrame.svelte';
-  import { VIDEO_COPY } from './copy';
+  import { filmLength, VIDEO_COPY } from './copy';
   import { VIDEO_PROMPT, videoDefinition } from './definition';
 
   const { props, section, context, edit }: BlockProps = $props();
@@ -68,7 +76,19 @@
   const shown = $derived(!filmless || page.still || !!edit);
   // A section with no film is the creator's alone: the canvas's own.
   const creatorOnly = $derived(filmless ? '' : undefined);
+
+  // Who speaks, unless the creator hides them, and for how long a press plays.
+  const speaker = $derived(
+    content.hideSpeaker === true ? undefined : (content.speaker ?? page.guideName)
+  );
+  const length = $derived(filmLength(clip ? filmPlays(clip, page) : null));
+  const hasLine = $derived(Boolean(speaker || length));
 </script>
+
+<!-- One run of text, no space between: "Maya Okafor · 2:04". -->
+{#snippet line()}
+  <p class="video__line">{#if speaker}<b>{speaker}</b>{/if}{#if speaker && length}{' · '}{/if}{#if length}{length}{/if}</p>
+{/snippet}
 
 {#snippet words()}
   {#if content.eyebrow || content.heading}
@@ -88,6 +108,7 @@
   {#if content.body}
     <Text text={content.body} size="lead" type="video" field="body" {edit} />
   {/if}
+  {#if split && hasLine}{@render line()}{/if}
 {/snippet}
 
 {#snippet actions()}
@@ -128,6 +149,7 @@
         prompt={edit && !pending ? VIDEO_PROMPT : undefined}
       />
     {/if}
+    {#if !split && hasLine}{@render line()}{/if}
     {#if content.caption}
       <figcaption class="video__caption" {...captionAttrs}>{content.caption}</figcaption>
     {/if}
@@ -141,7 +163,7 @@
 {#if shown}
   {#if split}
     <div class="video-split" data-lp-edit-only={creatorOnly}>
-      {#if hasWords || hasCta}
+      {#if hasWords || hasCta || hasLine}
         <div class="video-split__words">{@render words()}{@render actions()}</div>
       {/if}
       {@render screen()}
@@ -183,12 +205,22 @@
     margin: 0;
   }
 
-  .video__caption {
+  .video__caption,
+  .video__line {
     margin: 0;
     max-inline-size: calc(var(--lp-measure) * var(--lp-measure-unit));
     color: var(--lp-ink-soft);
     font-size: var(--lp-size-small);
     line-height: var(--lp-leading-body);
+  }
+
+  .video__line {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .video__line b {
+    color: var(--lp-ink);
+    font-weight: var(--lp-weight-label);
   }
 
   /* Cinematic's screen lights the room around it; on a light band the same
@@ -233,7 +265,7 @@
 
   :global(.lp:is([data-lp-style='soft'], [data-lp-style='cinematic']))
     .video__screen[data-layout='theatre']
-    .video__caption {
+    :is(.video__caption, .video__line) {
     justify-self: center;
     text-align: center;
   }
@@ -242,12 +274,15 @@
     --lp-actions-align: center;
   }
 
-  /* Bold: the screen runs edge to edge; its caption stays in the column. */
+  /* Bold: the screen runs edge to edge; its line and caption stay in the
+     column. */
   :global(.lp[data-lp-style='bold']) .video__screen[data-layout='theatre'] {
     grid-column: bleed;
   }
 
-  :global(.lp[data-lp-style='bold']) .video__screen[data-layout='theatre'] .video__caption {
+  :global(.lp[data-lp-style='bold'])
+    .video__screen[data-layout='theatre']
+    :is(.video__caption, .video__line) {
     padding-inline: var(--_edge);
   }
 

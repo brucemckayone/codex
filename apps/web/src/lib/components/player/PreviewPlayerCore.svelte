@@ -45,6 +45,13 @@
   KEYBOARD (`media-a11y`), from anywhere inside it: Space or K play and
   pause, M mutes, the arrows seek five seconds, F is full screen.
 
+  ITS OWN CONTROLS, ELSEWHERE (opt-in). A frame that draws its own chrome
+  over a core with `controls={false}` hears the clock through `ontime` and
+  drives the film through the core's own `toggle` and `toggleMute` (bound
+  with `bind:this`), so it plays, pauses, renews and takes refused sound
+  exactly as the core's buttons do. The Preview block's listening card
+  plays audio this way, the picture hidden. No other caller passes it.
+
   `createHlsPlayer` returns `{ hls, cleanup }`: `hls` is the HLS.js instance
   (null on Safari's native HLS), `cleanup` detaches the native path's
   listener. Teardown calls both: `cleanup()` always, then `hls?.destroy()`.
@@ -55,6 +62,19 @@
   @prop title - The film's name, for its accessible label
   @prop start - `sound` (a press), `muted` (autoplay) or `paused`
 -->
+<script lang="ts" module>
+  /** Where the film is, for a frame drawing its own controls (`ontime`). */
+  export interface PlayerClock {
+    time: number;
+    /** The stream's own length; 0 until it says. */
+    duration: number;
+    /** The play button would offer Play: paused, or mid-swap and not wanted. */
+    offerPlay: boolean;
+    /** Sound was refused and it plays muted: `toggleMute` takes it (owner P7). */
+    askSound: boolean;
+  }
+</script>
+
 <script lang="ts">
   import { flushSync, onMount, type Snippet, untrack } from 'svelte';
   import type Hls from 'hls.js';
@@ -133,6 +153,12 @@
      * can offer a retry (`InlineFilm`) takes the visitor back to its poster.
      */
     onfail?: (message: string) => void;
+    /**
+     * Hears the clock as the element reports it (its `timeupdate`, length,
+     * play and pause events; nothing polls), for a frame drawing its own
+     * controls (ITS OWN CONTROLS, ELSEWHERE above).
+     */
+    ontime?: (clock: PlayerClock) => void;
     /** Drawn over the film once it ends, in place of the controls; `replay` starts it over. */
     ended?: Snippet<[replay: () => void]>;
     /**
@@ -170,6 +196,7 @@
     onplay,
     onended,
     onfail,
+    ontime,
     ended,
     demo,
     class: className,
@@ -267,6 +294,14 @@
     askSound ? m.player_tap_for_sound() : muted ? m.player_unmute() : m.player_mute()
   );
 
+  // The clock, told to a frame drawing its own controls. Read only while one
+  // listens, so for every other caller a time update re-runs nothing.
+  $effect(() => {
+    if (!ontime) return;
+    const now: PlayerClock = { time, duration, offerPlay, askSound };
+    untrack(() => ontime(now));
+  });
+
   function teardown() {
     if (hlsCleanup) {
       hlsCleanup();
@@ -320,7 +355,8 @@
     playButton?.focus({ preventScroll: true });
   }
 
-  function toggle() {
+  /** Play or pause, as the play button does: a frame's own controls call it too. */
+  export function toggle() {
     // Behind an error there is nothing to play, Space and K included.
     if (!video || fixed || error !== null) return;
     if (finished) {
@@ -340,7 +376,8 @@
     }
   }
 
-  function toggleMute() {
+  /** Mute or unmute, as the mute button does ("Tap for sound" included). */
+  export function toggleMute() {
     if (video && !fixed) video.muted = !video.muted;
   }
 

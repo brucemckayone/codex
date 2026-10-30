@@ -223,6 +223,9 @@
     get offerProps() {
       return offerProps;
     },
+    get guideName() {
+      return guideName;
+    },
     anchorOf(id: string) {
       return anchors.get(id);
     },
@@ -240,6 +243,14 @@
   );
   const heroProps = $derived(
     propsById.get(sections.find((s) => s.type === 'hero')?.id ?? '') ?? {}
+  );
+  /** The About you section's name: who the Video block says is speaking. */
+  const guideName = $derived(
+    readText(
+      propsById.get(sections.find((s) => s.type === 'instructor')?.id ?? '') ?? {},
+      'name',
+      80
+    )
   );
   const stickyLabel = $derived(
     readText(offerProps, 'ctaLabel') ?? readText(heroProps, 'ctaLabel')

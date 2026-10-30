@@ -55,7 +55,9 @@ vi.mock('$lib/components/VideoPlayer/hls', () => ({
 }));
 
 import { filmInView } from './now-playing.svelte';
-import PreviewPlayerCore from './PreviewPlayerCore.svelte';
+import PreviewPlayerCore, {
+  type PlayerClock,
+} from './PreviewPlayerCore.svelte';
 
 const SRC = '/films/f1/preview/preview.m3u8';
 const ENGLISH = { src: '/films/f1/en.vtt', srclang: 'en', label: 'English' };
@@ -300,6 +302,74 @@ describe('keyboard', () => {
       new KeyboardEvent('keydown', { key: 'k', bubbles: true })
     );
     expect(play).toHaveBeenCalledTimes(1);
+  });
+});
+
+// The Preview block's listening card draws its own chrome over a core with no
+// controls, and drives it through the core's own buttons (Codex-61zsk.73).
+describe('its own controls, elsewhere', () => {
+  function headless() {
+    const heard: PlayerClock[] = [];
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const core = mount(PreviewPlayerCore, {
+      target,
+      props: {
+        src: SRC,
+        title: 'Slow Mornings',
+        controls: false,
+        ontime: (clock: PlayerClock) => heard.push(clock),
+      },
+    });
+    apps.push(core);
+    flushSync();
+    const video = target.querySelector('video');
+    if (!video) throw new Error('no video drawn');
+    return { core, heard, root: target, video };
+  }
+
+  test('a frame hears the clock as the element reports it', () => {
+    const { heard, root, video } = headless();
+    expect(root.querySelector('.player__bar')).toBeNull();
+    expect(heard.at(-1)).toEqual({
+      time: 0,
+      duration: 0,
+      offerPlay: true,
+      askSound: false,
+    });
+    Object.defineProperty(video, 'duration', {
+      configurable: true,
+      get: () => 30,
+    });
+    video.dispatchEvent(new Event('durationchange'));
+    Object.defineProperty(video, 'currentTime', {
+      configurable: true,
+      get: () => 12,
+    });
+    video.dispatchEvent(new Event('timeupdate'));
+    video.dispatchEvent(new Event('play'));
+    flushSync();
+    expect(heard.at(-1)).toEqual({
+      time: 12,
+      duration: 30,
+      offerPlay: false,
+      askSound: false,
+    });
+  });
+
+  test('and plays, pauses and mutes it as the core’s own buttons do', () => {
+    const { core, video } = headless();
+    core.toggle();
+    expect(play.mock.contexts).toEqual([video]);
+    video.dispatchEvent(new Event('play'));
+    Object.defineProperty(video, 'paused', {
+      configurable: true,
+      get: () => false,
+    });
+    core.toggle();
+    expect(pause.mock.contexts).toEqual([video]);
+    core.toggleMute();
+    expect(video.muted).toBe(true);
   });
 });
 

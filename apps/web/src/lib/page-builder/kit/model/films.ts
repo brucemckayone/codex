@@ -12,7 +12,8 @@
  * A film that arrives although none was attached still shows: the awaited
  * view can lag a film the creator has just attached.
  */
-import type { SellPreview } from '../../render/types';
+import type { PreviewMedia, SellPreview } from '../../render/types';
+import type { KitPageContext } from '../page-context';
 
 /** The films a visitor's page can draw, as `SellPreview` names them. */
 export type PageFilm = 'intro' | 'reel';
@@ -27,4 +28,30 @@ export function filmToShow(
   if (preview?.[film]) return true;
   if (preview !== undefined || attached === false) return false;
   return undefined;
+}
+
+/** What a press on a clip plays: the whole film or its preview, and for how long. */
+export interface FilmPlays {
+  full: boolean;
+  /** Seconds, or `null` when the length is not known. */
+  seconds: number | null;
+}
+
+/**
+ * What a press plays, as the Preview and Video lines say it (Codex-61zsk.73),
+ * by the landing chip's rule: the whole film when it plays in full, else its
+ * preview as the transcoder cuts it. It plays in full when the server marked
+ * it `fullFilm` and the page can ask for it: a visitor's page, which has
+ * `requestFilm`, or one that is only looked at (`still`), so the canvas names
+ * the length the visitor's press will play. An older payload with no
+ * `previewSeconds` knows the length only of a film that plays in full.
+ */
+export function filmPlays(
+  clip: PreviewMedia,
+  page: Pick<KitPageContext, 'still' | 'requestFilm'>
+): FilmPlays {
+  const canAsk = page.requestFilm !== undefined || page.still;
+  const full = clip.fullFilm === true && canAsk;
+  const seconds = (full ? clip.durationSeconds : clip.previewSeconds) ?? null;
+  return { full, seconds: seconds !== null && seconds > 0 ? seconds : null };
 }

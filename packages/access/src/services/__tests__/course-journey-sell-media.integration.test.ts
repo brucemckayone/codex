@@ -755,6 +755,53 @@ describe('CourseJourneyService sell media + cover (journey media write path)', (
       // erroring rather than falling back to the plate.
       expect(preview?.heroClip).toBeNull();
     });
+
+    // Codex-61zsk.73: the page says "A 30-second listen", so each clip says
+    // what it is and how long its preview runs, as the transcoder cuts it.
+    it('says what each clip is and how long its preview runs', async () => {
+      const seedClip = async (
+        mediaType: 'video' | 'audio',
+        durationSeconds: number
+      ) => {
+        const [row] = await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType,
+              status: 'ready',
+              durationSeconds,
+              hlsPreviewKey: `previews/${mediaType}-${durationSeconds}/preview.m3u8`,
+            })
+          )
+          .returning({ id: mediaItems.id });
+        if (!row) throw new Error(`failed to seed a ${mediaType} clip`);
+        return row.id;
+      };
+      const shortFilm = await seedClip('video', 20);
+      const longListen = await seedClip('audio', 300);
+      await svc.updateJourneySellMedia(
+        orgAId,
+        pageId,
+        mediaBag({
+          introVideoMediaId: shortFilm,
+          previewVideoMediaId: longListen,
+        })
+      );
+
+      const preview = await svc.getCourseSellPreview(courseId, CDN);
+      // A 20s film's preview runs from 2s to its end; a 5:00 one's is 30s.
+      // `durationSeconds` stays the whole media's.
+      expect(preview?.intro).toMatchObject({
+        mediaType: 'video',
+        durationSeconds: 20,
+        previewSeconds: 18,
+      });
+      expect(preview?.reel).toMatchObject({
+        mediaType: 'audio',
+        durationSeconds: 300,
+        previewSeconds: 30,
+      });
+    });
   });
 
   // ── getCoursePage projects the AWAITED hero still + mediaBaseUrl (Codex-61zsk.6 · WP-6) ──
