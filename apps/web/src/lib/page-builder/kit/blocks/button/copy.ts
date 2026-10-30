@@ -16,7 +16,7 @@ export const BUTTON_LABELS: Readonly<Record<ButtonActionId, string>> = {
 
 export const BUTTON_COPY = {
   /** The canvas's line under a joining Button while the journey has no price. */
-  noPrice: 'Your price shows here once the journey has one (the Pricing tab).',
+  noPrice: 'Your price shows here once the journey has one (the Offer tab).',
   /** The canvas's warning for a Button whose section is gone or hidden. */
   deadSection:
     'The section this button goes to is hidden or deleted. Visitors will not see this button until you choose another.',

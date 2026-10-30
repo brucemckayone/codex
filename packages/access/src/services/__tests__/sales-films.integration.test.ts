@@ -602,8 +602,8 @@ describe('course sales films (owner P10)', () => {
     });
 
     it('a failed eligibility read is the same generic 500, with no service context for the caller', async () => {
-      // handleError would wrap it with { service, environment, context }, and
-      // mapErrorToResponse sends that to the anonymous caller as `details`.
+      // The minter's own wrap, not handleError's. Defence in depth: neither
+      // handleError's wrap nor a 5xx response carries context (Codex-adcgb).
       const unreachable = new Proxy(db, {
         get: (target, prop, receiver) =>
           prop === 'select'

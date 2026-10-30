@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   cappedSizes,
+  clampedSizes,
   containSizes,
   coverCropSizes,
   getShareImage,
@@ -228,6 +229,39 @@ describe('cappedSizes', () => {
 
   it('keeps a px cap in px', () => {
     expect(cappedSizes(82, '280px')).toBe('(min-width: 341.46px) 280px, 82vw');
+  });
+});
+
+describe('clampedSizes (Codex-sntzy)', () => {
+  // clamp() is ignored in `sizes` as min() is, so the slot is written as the
+  // two viewport widths where its fluid width meets its bounds.
+  it('is the fluid width between its bounds, switching where it meets each', () => {
+    // 34vw is 16rem at 16 / 0.34 = 47.06rem, and 28rem at 28 / 0.34 = 82.35rem.
+    expect(clampedSizes(16, { vw: 34 }, 28)).toBe(
+      '(min-width: 82.35rem) 28rem, (min-width: 47.06rem) 34vw, 16rem'
+    );
+  });
+
+  it('keeps a fixed part of the fluid width in a calc()', () => {
+    // 12rem + 24vw is 19.5rem at 7.5 / 0.24 = 31.25rem, and 39rem at
+    // 27 / 0.24 = 112.5rem.
+    expect(clampedSizes(19.5, { rem: 12, vw: 24 }, 39)).toBe(
+      '(min-width: 112.5rem) 39rem, (min-width: 31.25rem) calc(12rem + 24vw), 19.5rem'
+    );
+  });
+
+  // At each switch the entries either side give the same width, so the slot
+  // never jumps: it is what clamp() itself draws there.
+  it('switches where the fluid width reaches each bound', () => {
+    const sizes = clampedSizes(10.4, { rem: 6.4, vw: 12.8 }, 20.8);
+    expect(sizes).toBe(
+      '(min-width: 112.5rem) 20.8rem, (min-width: 31.25rem) calc(6.4rem + 12.8vw), 10.4rem'
+    );
+    const [high, low] = [...sizes.matchAll(/min-width: ([\d.]+)rem/g)].map(
+      (match) => Number(match[1])
+    );
+    expect(6.4 + (12.8 * high) / 100).toBeCloseTo(20.8, 2);
+    expect(6.4 + (12.8 * low) / 100).toBeCloseTo(10.4, 2);
   });
 });
 

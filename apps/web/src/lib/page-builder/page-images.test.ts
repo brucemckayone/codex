@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
-  columnSize,
+  columnSizes,
   type ImageRef,
   isImageRef,
   pageImageSrcset,
@@ -213,15 +213,148 @@ describe('storedFocus — what a block steers by (Codex-61zsk.58)', () => {
   });
 });
 
-describe('columnSize (Codex-61zsk.66)', () => {
-  it('is the window, capped at the widest content column', () => {
-    expect(columnSize()).toBe('min(100vw, 82rem)');
+/**
+ * The width, in rem, that a `sizes` list of plain `(min-width: …rem)`
+ * conditions gives a window `viewportRem` wide: its first entry that matches.
+ */
+function drawnAt(sizes: string, viewportRem: number): number {
+  for (const entry of sizes.split(', ')) {
+    const match = /^(?:\(min-width: ([\d.]+)rem\) )?([\d.]+)(rem|vw)$/.exec(
+      entry
+    );
+    expect(match, entry).not.toBeNull();
+    const [, from, value, unit] = match ?? [];
+    if (from !== undefined && viewportRem < Number(from)) continue;
+    return unit === 'rem' ? Number(value) : (Number(value) * viewportRem) / 100;
+  }
+  return Number.NaN;
+}
+
+/** What the min() form drew: the first share from at most `viewportRem`, capped. */
+function minDrawnAt(
+  fraction: number,
+  from: [number, number][],
+  viewportRem: number
+): number {
+  const share =
+    [...from]
+      .sort((a, b) => b[0] - a[0])
+      .find(([at]) => viewportRem >= at)?.[1] ?? fraction;
+  const vw = Math.round(share * 10000) / 100;
+  const rem = Math.round(share * 82 * 100) / 100;
+  return Math.min((vw * viewportRem) / 100, rem);
+}
+
+describe('columnSizes (Codex-61zsk.66, Codex-sntzy)', () => {
+  it('is the window up to the widest content column, switching where they meet', () => {
+    expect(columnSizes()).toBe('(min-width: 82rem) 82rem, 100vw');
   });
 
-  it('takes a share of both for a picture across part of the column', () => {
-    expect(columnSize(0.5)).toBe('min(50vw, 41rem)');
-    expect(columnSize(0.25)).toBe('min(25vw, 20.5rem)');
-    expect(columnSize(1 / 3)).toBe('min(33.33vw, 27.33rem)');
+  it('meets the cap at the same 82rem window for every share of the column', () => {
+    expect(columnSizes(0.5)).toBe('(min-width: 82rem) 41rem, 50vw');
+    expect(columnSizes(0.25)).toBe('(min-width: 82rem) 20.5rem, 25vw');
+    expect(columnSizes(1 / 3)).toBe('(min-width: 82rem) 27.33rem, 33.33vw');
+  });
+
+  it('takes each share from its own window width, widest first', () => {
+    const grid =
+      '(min-width: 82rem) 27.33rem, (min-width: 60rem) 33.33vw, (min-width: 36rem) 50vw, 100vw';
+    expect(
+      columnSizes(1, [
+        [60, 1 / 3],
+        [36, 0.5],
+      ])
+    ).toBe(grid);
+    expect(
+      columnSizes(1, [
+        [36, 0.5],
+        [60, 1 / 3],
+      ])
+    ).toBe(grid);
+    // From past the cap a share is its rem alone.
+    expect(
+      columnSizes(1, [
+        [90, 0.25],
+        [60, 0.5],
+      ])
+    ).toBe(
+      '(min-width: 90rem) 20.5rem, (min-width: 82rem) 41rem, (min-width: 60rem) 50vw, 100vw'
+    );
+  });
+
+  // The first entry that matches wins, so an entry a wider one always
+  // answers is dead, and one that says what the next one says is noise.
+  it('leaves out an entry a wider one answers, or one the next repeats', () => {
+    expect(
+      columnSizes(1, [
+        [56, 4 / 6],
+        [36, 1],
+      ])
+    ).toBe('(min-width: 82rem) 54.67rem, (min-width: 56rem) 66.67vw, 100vw');
+    expect(
+      columnSizes(1, [
+        [60, 0.5],
+        [36, 0.5],
+      ])
+    ).toBe('(min-width: 82rem) 41rem, (min-width: 36rem) 50vw, 100vw');
+    expect(
+      columnSizes(1, [
+        [56, 1],
+        [36, 1],
+      ])
+    ).toBe('(min-width: 82rem) 82rem, 100vw');
+  });
+
+  // Every shape the kit asks for, at every window from a phone to past the
+  // cap: the same width the min() form drew, to the hundredth of a rem.
+  it.each<[number, [number, number][]]>([
+    [1, []],
+    [
+      1,
+      [
+        [60, 1 / 3],
+        [36, 0.5],
+      ],
+    ],
+    [
+      1,
+      [
+        [60, 0.25],
+        [36, 0.5],
+      ],
+    ],
+    [
+      1,
+      [
+        [56, 4 / 6],
+        [36, 1],
+      ],
+    ],
+    [
+      1,
+      [
+        [56, 1 / 3],
+        [36, 0.5],
+      ],
+    ],
+    [0.5, [[53, 0.25]]],
+    [1, [[53, 0.75]]],
+    [1, [[48, 0.5]]],
+    [
+      1,
+      [
+        [90, 0.25],
+        [60, 0.5],
+      ],
+    ],
+  ])('draws what min() drew: %s from %j', (fraction, from) => {
+    const sizes = columnSizes(fraction, from);
+    for (let viewportRem = 16; viewportRem <= 120; viewportRem += 0.25) {
+      expect(drawnAt(sizes, viewportRem), `${viewportRem}rem`).toBeCloseTo(
+        minDrawnAt(fraction, from, viewportRem),
+        2
+      );
+    }
   });
 
   // The cap must be the widest any Style draws, or a picture in that Style's
@@ -244,6 +377,7 @@ describe('columnSize (Codex-61zsk.66)', () => {
     const widths = declared.map((line) =>
       Number(/([\d.]+)rem/.exec(line)?.[1])
     );
-    expect(columnSize()).toBe(`min(100vw, ${Math.max(...widths)}rem)`);
+    const widest = Math.max(...widths);
+    expect(columnSizes()).toBe(`(min-width: ${widest}rem) ${widest}rem, 100vw`);
   });
 });

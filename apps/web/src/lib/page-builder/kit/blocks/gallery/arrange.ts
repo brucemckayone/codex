@@ -2,7 +2,8 @@
  * How the gallery arranges its pictures (03-expressive-contract §3, §7). Pure,
  * so every arrangement is tested at every count it can meet (1–12).
  */
-import { columnSize, type PageImageVariant } from '../../../page-images';
+import { clampedSizes } from '$lib/utils/image';
+import { columnSizes, type PageImageVariant } from '../../../page-images';
 
 /** One picture, resolved: its URL (none draws the kit's plate), its description, its caption. */
 export interface Picture {
@@ -132,6 +133,15 @@ const MOSAIC_WIDE_SHARE: Readonly<Record<MosaicTile, number>> = {
   small: 0.25,
 };
 
+/** How many grid pictures share a row from 60rem. */
+function gridRow(count: number, style?: string): number {
+  const columns = Math.max(gridColumns(count), 2);
+  if (style !== 'clean') return columns;
+  // Clean hangs no more than three to a row, and a set of six in pairs.
+  if (count === 6) return 2;
+  return Math.min(columns, 3);
+}
+
 /**
  * How wide a picture's tile is drawn, as `sizes`, so it fetches from its
  * srcset the file its tile needs (Codex-61zsk.66). It follows the same
@@ -142,7 +152,7 @@ const MOSAIC_WIDE_SHARE: Readonly<Record<MosaicTile, number>> = {
  *   most, a set of six in pairs), in two from 36rem;
  * - a mosaic tile spans its share of four columns from a 48rem column, and on
  *   two columns the first picture, and an even count's last, span both.
- * Each width is the column's at most (`columnSize`), never less than a Style
+ * Each width is the column's at most (`columnSizes`), never less than a Style
  * draws.
  */
 export function pictureSizes(
@@ -153,19 +163,18 @@ export function pictureSizes(
 ): string {
   if (layout === 'strip') {
     return stripShape(index) === 'wide'
-      ? 'clamp(19.5rem, calc(12rem + 24vw), 39rem)'
-      : 'clamp(10.4rem, calc(6.4rem + 12.8vw), 20.8rem)';
+      ? clampedSizes(19.5, { rem: 12, vw: 24 }, 39)
+      : clampedSizes(10.4, { rem: 6.4, vw: 12.8 }, 20.8);
   }
   if (layout === 'grid') {
-    if (count <= 1) return columnSize();
-    // Clean hangs no more than three to a row, and a set of six in pairs.
-    const columns = Math.max(gridColumns(count), 2);
-    const wide =
-      style === 'clean' ? (count === 6 ? 2 : Math.min(columns, 3)) : columns;
-    return `(min-width: 60rem) ${columnSize(1 / wide)}, (min-width: 36rem) ${columnSize(0.5)}, ${columnSize()}`;
+    if (count <= 1) return columnSizes();
+    return columnSizes(1, [
+      [60, 1 / gridRow(count, style)],
+      [36, 0.5],
+    ]);
   }
   const tile = mosaicTiles(count)[index];
-  if (!tile || tile === 'single') return columnSize();
+  if (!tile || tile === 'single') return columnSizes();
   const spansBoth = index === 0 || (index === count - 1 && count % 2 === 0);
-  return `(min-width: 53rem) ${columnSize(MOSAIC_WIDE_SHARE[tile])}, ${spansBoth ? columnSize() : columnSize(0.5)}`;
+  return columnSizes(spansBoth ? 1 : 0.5, [[53, MOSAIC_WIDE_SHARE[tile]]]);
 }

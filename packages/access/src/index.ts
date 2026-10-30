@@ -46,7 +46,6 @@ export {
   InvalidContentTypeError,
   MediaNotFoundError,
   MediaNotReadyForStreamingError,
-  OrganizationMismatchError,
   R2SigningError,
 } from './errors';
 // HLS playlist-proxy helpers (WP-14)

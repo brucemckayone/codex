@@ -8,10 +8,14 @@
 import { ERROR_CODES, STATUS_CODES } from '@codex/constants';
 import { ObservabilityClient } from '@codex/observability';
 
-const fallbackObs = new ObservabilityClient('error-mapper');
+// The production client, whatever the environment: a caller with no request
+// obs gets this one, and it logs withheld 5xx context (Codex-adcgb), so it
+// hashes and redacts emails, and writes JSON that Workers Logs can query.
+const fallbackObs = new ObservabilityClient('error-mapper', 'production');
 
 import { ZodError } from 'zod';
 import { type ErrorStatusCode, isServiceError } from './base-errors';
+import { describeThrown } from './describe-thrown';
 
 /**
  * Standard HTTP error response structure
@@ -43,7 +47,8 @@ export interface ErrorMapperOptions {
   includeStack?: boolean;
 
   /**
-   * Whether to log unknown (500) errors.
+   * Whether to log unknown (500) errors, and the context a 5xx ServiceError
+   * withholds from the response.
    * If `obs` is provided, logs via `ObservabilityClient`; otherwise logs to console.
    * @default true
    */
@@ -51,7 +56,8 @@ export interface ErrorMapperOptions {
 
   /**
    * Optional observability client for structured logging.
-   * When provided and `logError` is true, unknown errors are logged via this client.
+   * When provided and `logError` is true, unknown errors and withheld 5xx
+   * context are logged via this client.
    */
   obs?: ObservabilityClient;
 }
@@ -60,7 +66,8 @@ export interface ErrorMapperOptions {
  * Maps any error to a standardized HTTP error response
  *
  * Handles:
- * - ServiceError instances (custom errors with status codes)
+ * - ServiceError instances (custom errors with status codes). A 4xx sends its
+ *   context as `details`; a 5xx sends none unless it set `publicContext`
  * - ZodError instances (validation errors)
  * - Unknown errors (wrapped as 500 internal errors)
  *
@@ -86,15 +93,46 @@ export function mapErrorToResponse(
 
   // Handle ServiceError (already has statusCode and code)
   if (isServiceError(error)) {
+    // A 4xx's context is the client's (validation issues, conflict ids). A
+    // 5xx's names internals (Codex-adcgb), so it is withheld unless the error
+    // opted in, and logged, since nothing else logs a ServiceError here.
+    if (error.statusCode < 500 || error.publicContext) {
+      return {
+        statusCode: error.statusCode,
+        response: {
+          error: {
+            code: error.code,
+            message: error.message,
+            details: error.context,
+          },
+        },
+      };
+    }
+    if (logError && error.context) {
+      const client = obs ?? fallbackObs;
+      const line = {
+        source: 'mapErrorToResponse',
+        errorName: error.name,
+        code: error.code,
+        statusCode: error.statusCode,
+        // Most 500s share INTERNAL_ERROR: the message tells them apart, and
+        // the client already has it.
+        message: error.message,
+        context: error.context,
+        ...(error.cause !== undefined && {
+          cause: describeThrown(error.cause),
+        }),
+      };
+      // A 503 is a "try again" its throw site expects; a 500 is a fault.
+      if (error.statusCode === 503) {
+        client.warn('Server error context withheld from response', line);
+      } else {
+        client.error('Server error context withheld from response', line);
+      }
+    }
     return {
       statusCode: error.statusCode,
-      response: {
-        error: {
-          code: error.code,
-          message: error.message,
-          details: error.context,
-        },
-      },
+      response: { error: { code: error.code, message: error.message } },
     };
   }
 

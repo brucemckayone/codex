@@ -76,6 +76,20 @@ const ERROR_ID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
+ * The errorId ecom-api logged this failure under, when its response carries
+ * one: CHECKOUT_NOT_RECORDED and the "could not be recorded yet" 503 opt in
+ * to sending it (`publicContext`, Codex-adcgb).
+ */
+function errorIdOf(err: unknown): string | undefined {
+  if (!(err instanceof ApiError)) return undefined;
+  const details = err.details as { errorId?: unknown } | undefined;
+  const errorId = details?.errorId;
+  return typeof errorId === 'string' && ERROR_ID.test(errorId)
+    ? errorId
+    : undefined;
+}
+
+/**
  * Unlock on arrival (owner decision 2026-10-26; Stripe's "trigger fulfillment
  * on your landing page"): Stripe says the session is paid and our record is
  * not there yet, so ask for it to be recorded now, with the webhook's own
@@ -98,11 +112,7 @@ export function completeOnArrival(
     .catch((err: unknown): ArrivalCompletion => {
       if (err instanceof ApiError && err.code === 'CHECKOUT_NOT_RECORDED') {
         // ecom-api alerted support at error under this errorId.
-        const details = err.details as { errorId?: unknown } | undefined;
-        const errorId =
-          typeof details?.errorId === 'string' && ERROR_ID.test(details.errorId)
-            ? details.errorId
-            : undefined;
+        const errorId = errorIdOf(err);
         logger.warn(`${page}: the purchase could not be recorded`, {
           sessionId,
           errorId,
@@ -114,6 +124,8 @@ export function completeOnArrival(
       }
       logger.warn(`${page}: completion on arrival failed`, {
         sessionId,
+        // Ties this line to ecom-api's own warn for a transient failure.
+        errorId: errorIdOf(err),
         status: err instanceof ApiError ? err.status : undefined,
         transient: isTransientFailure(err),
         error: err instanceof Error ? err.message : String(err),

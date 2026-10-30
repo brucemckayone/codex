@@ -100,8 +100,6 @@
   }
 
   async function setDecorative(on: boolean): Promise<void> {
-    // Melt's switch echoes its own prop on mount and on every sync.
-    if (on === isDecorative) return;
     describing = !on;
     if (!on) {
       await tick();

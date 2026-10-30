@@ -150,4 +150,32 @@ describe('completeOnArrival', () => {
       expect.objectContaining({ sessionId: 'cs_test_abc' })
     );
   });
+
+  // ecom-api's "could not be recorded yet" 503 sends the errorId it logged
+  // the transient under (publicContext, Codex-adcgb): this line carries it,
+  // so the two can be matched.
+  it("logs a transient 503's errorId, so it ties to ecom-api's own line", async () => {
+    const api = apiAnswering(async () => {
+      throw new ApiError(
+        503,
+        'The purchase could not be recorded yet',
+        'SERVICE_UNAVAILABLE',
+        {
+          sessionId: 'cs_test_abc',
+          errorId: '3f2a9c1e-7b4d-4e8a-9c2f-1a2b3c4d5e6f',
+        }
+      );
+    });
+
+    await expect(
+      completeOnArrival(api, 'cs_test_abc', 'checkout-success')
+    ).resolves.toBeNull();
+    expect(warnMock).toHaveBeenCalledWith(
+      'checkout-success: completion on arrival failed',
+      expect.objectContaining({
+        errorId: '3f2a9c1e-7b4d-4e8a-9c2f-1a2b3c4d5e6f',
+        transient: true,
+      })
+    );
+  });
 });

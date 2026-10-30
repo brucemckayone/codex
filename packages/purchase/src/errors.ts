@@ -182,7 +182,8 @@ export class CheckoutNotRecordedError extends ServiceError {
       'CHECKOUT_NOT_RECORDED',
       500,
       context,
-      options
+      // The page shows the buyer the errorId as their support reference.
+      { ...options, publicContext: true }
     );
   }
 }

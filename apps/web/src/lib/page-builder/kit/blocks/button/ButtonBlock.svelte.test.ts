@@ -51,6 +51,7 @@ async function render({
   reel = null,
   attached,
   pageOverride,
+  pinned = false,
 }: {
   props?: Record<string, unknown>;
   offer?: SampleOfferState;
@@ -58,19 +59,22 @@ async function render({
   reel?: typeof FILM | null;
   attached?: boolean;
   pageOverride?: KitPage;
+  /** `purchasable` pinned true, as the studio canvas pins it (builder-context). */
+  pinned?: boolean;
 } = {}) {
+  const context = sampleContext({
+    offer,
+    media: { reel },
+    course:
+      attached === undefined
+        ? {}
+        : { filmsAttached: { hero: false, intro: false, reel: attached } },
+  });
   app = mount(PageRenderer, {
     target: document.body,
     props: {
       page: pageOverride ?? page(props),
-      context: sampleContext({
-        offer,
-        media: { reel },
-        course:
-          attached === undefined
-            ? {}
-            : { filmsAttached: { hero: false, intro: false, reel: attached } },
-      }),
+      context: pinned ? { ...context, purchasable: true } : context,
       edit,
       sticky: false,
     },
@@ -130,6 +134,18 @@ describe('ButtonBlock: join (the default)', () => {
     expect(button()?.textContent).not.toContain(BUTTON_COPY.noPrice);
     unmount(app);
     await render({ offer: 'tiers', edit: editing });
+    expect(button()?.textContent).not.toContain(BUTTON_COPY.noPrice);
+  });
+
+  // The canvas pins `purchasable` true, so a course with no way in still
+  // draws "Join now" there. The Pricing section draws it closed (PricingBlock,
+  // Codex-36vjw); the Button keeps its note, as pricingView still calls the
+  // course unpriced here.
+  it('on the canvas, a course with no way in still says where the price will come from', async () => {
+    await render({ offer: 'unavailable', edit: editing, pinned: true });
+    expect(button()?.textContent).toContain(BUTTON_COPY.noPrice);
+    unmount(app);
+    await render({ offer: 'unavailable' });
     expect(button()?.textContent).not.toContain(BUTTON_COPY.noPrice);
   });
 });

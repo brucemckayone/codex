@@ -372,8 +372,9 @@ checkout.post(
           withPurchaseService: (run) => run(purchase),
         });
       } catch (error) {
-        // mapErrorToResponse logs no ServiceError, so every way out of here
-        // writes its own line, under one errorId.
+        // mapErrorToResponse never logs a ServiceError's failure, only a 5xx's
+        // withheld context, so every way out of here writes its own line,
+        // under one errorId.
         const errorId = crypto.randomUUID();
         const cause = causeOf(error);
         // Only a clawback's failure comes back as `completion.failure`; a
@@ -447,7 +448,8 @@ checkout.post(
           throw new ServiceUnavailableError(
             'The purchase could not be recorded yet',
             { sessionId, errorId },
-            { cause: error }
+            // Ids only: the errorId ties support to this transient's warn line.
+            { cause: error, publicContext: true }
           );
         }
         // Refused for good, and the re-read found no row of ours: nothing

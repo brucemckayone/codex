@@ -16,8 +16,9 @@
  * throughout.
  */
 
+import { InternalServiceError } from '@codex/service-errors';
 import { Hono } from 'hono';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createErrorHandler } from '../middleware';
 import { createWorker } from '../worker-factory';
 
@@ -131,5 +132,73 @@ describe('createErrorHandler — explicit argument still wins', () => {
 
     expect(body.error.message).toBe('An unexpected error occurred');
     expect(body.error).not.toHaveProperty('stack');
+  });
+});
+
+describe('createErrorHandler — the log names what actually failed', () => {
+  // Routes outside procedure() end here: the HLS proxies' R2SigningError
+  // keeps its reason on `cause`, and this line was the only one written for
+  // it, with just the generic message (Codex-7ed5z).
+  it("logs a ServiceError's code and its cause, and sends neither", async () => {
+    const obs = { error: vi.fn() };
+    const app = new Hono();
+    app.use('*', async (c, next) => {
+      c.set('obs' as never, obs as never);
+      await next();
+    });
+    app.onError(createErrorHandler('production'));
+    app.get('/boom', () => {
+      throw new InternalServiceError(
+        'Failed to generate R2 signed URL',
+        undefined,
+        {
+          cause: new Error('HLS streaming proxy is not configured'),
+        }
+      );
+    });
+
+    const res = await app.request('/boom');
+    const body = JSON.stringify(await res.json());
+
+    expect(obs.error).toHaveBeenCalledWith(
+      'Unhandled error',
+      expect.objectContaining({
+        error: 'Failed to generate R2 signed URL',
+        code: 'INTERNAL_ERROR',
+        cause: 'Error: HLS streaming proxy is not configured',
+      })
+    );
+    expect(body).not.toContain('not configured');
+  });
+
+  // A drizzle query error's message ends with the bound params, so a wrapped
+  // one would put a user's token or email on this line.
+  it("names a query error's driver error on the line, never its params", async () => {
+    const obs = { error: vi.fn() };
+    const app = new Hono();
+    app.use('*', async (c, next) => {
+      c.set('obs' as never, obs as never);
+      await next();
+    });
+    app.onError(createErrorHandler('production'));
+    app.get('/boom', () => {
+      const query = Object.assign(
+        new Error('Failed query: select 1 where email = $1\nparams: a@x.com'),
+        { params: ['a@x.com'], cause: new Error('connection terminated') }
+      );
+      throw new InternalServiceError(
+        'An unexpected error occurred',
+        undefined,
+        {
+          cause: query,
+        }
+      );
+    });
+
+    await app.request('/boom');
+
+    const line = obs.error.mock.calls[0]?.[1] as { cause?: string };
+    expect(line.cause).toBe('Failed query: Error: connection terminated');
+    expect(JSON.stringify(line)).not.toContain('a@x.com');
   });
 });

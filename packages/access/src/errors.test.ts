@@ -11,7 +11,6 @@ import {
   ContentNotFoundError,
   InvalidContentTypeError,
   MediaNotFoundError,
-  OrganizationMismatchError,
   R2SigningError,
 } from './errors';
 
@@ -208,49 +207,32 @@ describe('ContentNotFoundError', () => {
 });
 
 describe('R2SigningError', () => {
-  it('should create error with correct code in context', () => {
-    const error = new R2SigningError(
-      'path/to/file.pdf',
-      new Error('Sign failed')
-    );
-    expect(error.context).toHaveProperty('code', 'R2_SIGNING_ERROR');
-  });
-
   it('should have correct message', () => {
-    const error = new R2SigningError(
-      'path/to/file.pdf',
-      new Error('Sign failed')
-    );
+    const error = new R2SigningError(new Error('Sign failed'));
     expect(error.message).toBe('Failed to generate R2 signed URL');
+    expect(error.statusCode).toBe(500);
   });
 
-  it('should include r2Key in context', () => {
-    const error = new R2SigningError(
-      'path/to/file.pdf',
-      new Error('Sign failed')
-    );
-    expect(error.context).toHaveProperty('r2Key', 'path/to/file.pdf');
+  // Codex-adcgb: the context used to hold the R2 key and the cause, and a
+  // ServiceError's context is serialised into the response. Both are the
+  // throw site's log line now.
+  it('should carry no context, so neither the R2 key nor the cause can reach a response', () => {
+    const error = new R2SigningError(new Error('Sign failed'));
+    expect(error.context).toBeUndefined();
+  });
+
+  it('should keep the failure on cause, which is never sent', () => {
+    const cause = new Error('Sign failed');
+    expect(new R2SigningError(cause).cause).toBe(cause);
   });
 });
 
 describe('MediaNotFoundError', () => {
-  it('should create error with correct code in context (new signature)', () => {
-    const error = new MediaNotFoundError('r2-key-123', 'content-123');
-    expect(error.context).toHaveProperty('code', 'MEDIA_NOT_FOUND');
-  });
-
-  it('should have correct message (new signature)', () => {
-    const error = new MediaNotFoundError('r2-key-123', 'content-123');
-    expect(error.message).toBe('Media file not found in storage');
-  });
-
-  it('should include r2Key and contentId in context (new signature)', () => {
-    const error = new MediaNotFoundError('r2-key-123', 'content-123');
-    expect(error.context).toMatchObject({
-      r2Key: 'r2-key-123',
-      contentId: 'content-123',
-      code: 'MEDIA_NOT_FOUND',
-    });
+  // A 404 sends its context as `details`: the (r2Key, contentId) form, which
+  // no caller used, would have sent the storage key (Codex-adcgb).
+  it('names the media item only, never a storage key', () => {
+    const error = new MediaNotFoundError('media-item-456');
+    expect(Object.keys(error.context ?? {})).toEqual(['mediaItemId']);
   });
 
   it('should support old signature with mediaItemId', () => {
@@ -288,59 +270,6 @@ describe('InvalidContentTypeError', () => {
       contentId: 'content-123',
       mediaType: null,
       code: 'INVALID_CONTENT_TYPE',
-    });
-  });
-});
-
-describe('OrganizationMismatchError', () => {
-  it('should create error with correct code', () => {
-    const error = new OrganizationMismatchError(
-      'content-123',
-      'org-456',
-      'org-789'
-    );
-    expect(error.code).toBe('ORGANIZATION_MISMATCH');
-  });
-
-  it('should have correct message', () => {
-    const error = new OrganizationMismatchError(
-      'content-123',
-      'org-456',
-      'org-789'
-    );
-    expect(error.message).toBe(
-      'Content does not belong to the specified organization'
-    );
-  });
-
-  it('should have 403 status code', () => {
-    const error = new OrganizationMismatchError(
-      'content-123',
-      'org-456',
-      'org-789'
-    );
-    expect(error.statusCode).toBe(403);
-  });
-
-  it('should include organization IDs in context', () => {
-    const error = new OrganizationMismatchError(
-      'content-123',
-      'org-456',
-      'org-789'
-    );
-    expect(error.context).toMatchObject({
-      contentId: 'content-123',
-      expectedOrganizationId: 'org-456',
-      actualOrganizationId: 'org-789',
-    });
-  });
-
-  it('should handle null actualOrganizationId', () => {
-    const error = new OrganizationMismatchError('content-123', 'org-456', null);
-    expect(error.context).toMatchObject({
-      contentId: 'content-123',
-      expectedOrganizationId: 'org-456',
-      actualOrganizationId: null,
     });
   });
 });

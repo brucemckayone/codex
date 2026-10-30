@@ -18,6 +18,7 @@ export {
   PreconditionFailedError,
   RateLimitExceededError,
   ServiceError,
+  type ServiceErrorOptions,
   ServiceUnavailableError,
   StripeNotConfiguredError,
   UnauthorizedError,
@@ -30,6 +31,7 @@ export {
   BaseService,
   type ServiceConfig,
 } from './base-service';
+export { describeThrown } from './describe-thrown';
 // Error mapper
 export {
   type ErrorMapperOptions,

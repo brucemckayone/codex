@@ -280,19 +280,19 @@ describe('GalleryBlock: every size a picture has (Codex-61zsk.66)', () => {
   // ones; a strip of wide, tall, wide.
   const DRAWN: Record<string, string[]> = {
     grid: [
-      '(min-width: 60rem) min(33.33vw, 27.33rem), (min-width: 36rem) min(50vw, 41rem), min(100vw, 82rem)',
-      '(min-width: 60rem) min(33.33vw, 27.33rem), (min-width: 36rem) min(50vw, 41rem), min(100vw, 82rem)',
-      '(min-width: 60rem) min(33.33vw, 27.33rem), (min-width: 36rem) min(50vw, 41rem), min(100vw, 82rem)',
+      '(min-width: 82rem) 27.33rem, (min-width: 60rem) 33.33vw, (min-width: 36rem) 50vw, 100vw',
+      '(min-width: 82rem) 27.33rem, (min-width: 60rem) 33.33vw, (min-width: 36rem) 50vw, 100vw',
+      '(min-width: 82rem) 27.33rem, (min-width: 60rem) 33.33vw, (min-width: 36rem) 50vw, 100vw',
     ],
     mosaic: [
-      '(min-width: 53rem) min(75vw, 61.5rem), min(100vw, 82rem)',
-      '(min-width: 53rem) min(25vw, 20.5rem), min(50vw, 41rem)',
-      '(min-width: 53rem) min(25vw, 20.5rem), min(50vw, 41rem)',
+      '(min-width: 82rem) 61.5rem, (min-width: 53rem) 75vw, 100vw',
+      '(min-width: 82rem) 20.5rem, (min-width: 53rem) 25vw, 50vw',
+      '(min-width: 82rem) 20.5rem, (min-width: 53rem) 25vw, 50vw',
     ],
     strip: [
-      'clamp(19.5rem, calc(12rem + 24vw), 39rem)',
-      'clamp(10.4rem, calc(6.4rem + 12.8vw), 20.8rem)',
-      'clamp(19.5rem, calc(12rem + 24vw), 39rem)',
+      '(min-width: 112.5rem) 39rem, (min-width: 31.25rem) calc(12rem + 24vw), 19.5rem',
+      '(min-width: 112.5rem) 20.8rem, (min-width: 31.25rem) calc(6.4rem + 12.8vw), 10.4rem',
+      '(min-width: 112.5rem) 39rem, (min-width: 31.25rem) calc(12rem + 24vw), 19.5rem',
     ],
   };
   it.each([

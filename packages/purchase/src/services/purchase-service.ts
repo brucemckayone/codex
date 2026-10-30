@@ -2092,9 +2092,10 @@ export class PurchaseService extends BaseService {
   }
 
   /**
-   * Log a Stripe failure for support and return the errorId the client gets
-   * instead (Codex-2hxff.23 SEC-02). A ServiceError's context is sent to the
-   * client verbatim as `details`, so Stripe's own message never goes in it.
+   * Log a Stripe failure for support and return its errorId, for the error's
+   * context (Codex-2hxff.23 SEC-02). A 4xx sends its context to the client
+   * as `details`, and a 5xx's is logged (Codex-adcgb), so Stripe's own
+   * message never goes in it.
    * `warn` is for a failure the caller caused, such as a session id that
    * does not exist; anything else is an error.
    */

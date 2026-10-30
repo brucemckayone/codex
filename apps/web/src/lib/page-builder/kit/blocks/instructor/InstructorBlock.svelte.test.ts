@@ -399,7 +399,7 @@ describe('InstructorBlock: every size the portrait has (Codex-61zsk.66)', () => 
 
   it.each([
     ['split', '(min-width: 52rem) 50vw, 100vw'],
-    ['centered', 'min(100vw, 26rem)'],
+    ['centered', '(min-width: 26rem) 26rem, 100vw'],
     ['quote', '6rem'],
   ])('%s: offers the three sizes its URL names, at its drawn width', async (layout, sizes) => {
     await render(GUIDE, { layout, media: { guidePortraitUrl: STILL } });

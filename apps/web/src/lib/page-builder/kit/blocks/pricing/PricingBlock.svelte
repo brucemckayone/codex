@@ -37,7 +37,7 @@
   import List from '../../primitives/List.svelte';
   import Text from '../../primitives/Text.svelte';
   import { PRICING_COPY } from './copy';
-  import { pricingDefinition } from './definition';
+  import { PRICING_NO_WAY_IN, pricingDefinition } from './definition';
   import { drawsIncluded, includedLines, ownedPoints } from './included';
   import OfferCard from './OfferCard.svelte';
   import { pricingView } from '../../model/offer';
@@ -46,7 +46,18 @@
 
   const page = getKitPage();
   const content = $derived(pricingDefinition.coerce(props));
-  const view = $derived(pricingView(context, content));
+  const view = $derived.by(() => {
+    const read = pricingView(context, content);
+    // The canvas pins `purchasable` true for the hero's button, so a course
+    // whose offer was READ with no way in reaches here as unpriced: "you will
+    // see the price before you pay", which only a failed read (`null`) means.
+    // This section alone draws it closed, as visitors see it (Codex-36vjw);
+    // the public page is already unavailable through `purchasable`.
+    if (read.state === 'unpriced' && context.offer) {
+      return { ...read, state: 'unavailable' as const };
+    }
+    return read;
+  });
   // The note reassures a buyer: it has no place once there is nothing to buy.
   const selling = $derived(view.state === 'priced' || view.state === 'unpriced');
   const featured = $derived(featuredScheme(page.style, section.scheme));
@@ -55,6 +66,11 @@
   // An empty list (switched off, or a course with nothing to count yet) draws
   // the card as it stood alone.
   const beside = $derived(drawsIncluded(view.paths.length) && included.length > 0);
+  // Closed, its button row is told so too, and draws the visitor's notice,
+  // not the canvas's Join button.
+  const stateContext = $derived(
+    view.state === 'unavailable' ? { ...context, purchasable: false } : context
+  );
 </script>
 
 {#snippet head()}
@@ -118,9 +134,13 @@
     </div>
   {:else if view.state !== 'priced' || !view.featured}
     <div class="pricing__state">
-      <ButtonRow {context} section="pricing" label={content.ctaLabel} {edit} />
+      <ButtonRow context={stateContext} section="pricing" label={content.ctaLabel} {edit} />
       <!-- The kit's own line, so never an editable field. -->
       {#if view.state === 'unpriced'}<p class="pricing__note">{COPY.pricing.atCheckout}</p>{/if}
+      <!-- The creator's next step, never on the public page (contract A4). -->
+      {#if view.state === 'unavailable' && edit}
+        <p class="pricing__note" data-lp-edit-only>{PRICING_NO_WAY_IN}</p>
+      {/if}
     </div>
   {:else if section.layout === 'focus'}
     <div class="pricing__focus">

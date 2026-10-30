@@ -77,24 +77,56 @@ describe('Switch', () => {
     expect(toggle2?.getAttribute('data-state')).toBe('unchecked');
   });
 
-  test('onCheckedChange is wired to melt-ui state changes', () => {
-    // The callback is wired through Melt-UI's onCheckedChange option.
-    // We can verify it fires on state sync. Full click interaction
-    // testing is handled by E2E tests.
+  // Melt calls its change function on every store set, and the component's
+  // prop sync is one, so the consumer used to hear its own prop back on mount
+  // and on every parent change (Codex-pyogl). A handler that saves or toggles
+  // then acted on load: the pricing "Show this list" switch wiped a creator's
+  // lines. Only a press may reach onCheckedChange.
+  test('onCheckedChange does not fire on mount', () => {
     const onCheckedChange = vi.fn();
 
     component = mount(Switch, {
       target: document.body,
-      props: {
-        checked: true,
-        onCheckedChange,
-      },
+      props: { checked: true, onCheckedChange },
     });
-
     flushSync();
 
-    // The effect syncs checked=true to melt state, triggering callback
-    expect(onCheckedChange).toHaveBeenCalledWith(true);
+    expect(onCheckedChange).not.toHaveBeenCalled();
+  });
+
+  test('onCheckedChange fires once per press, with the new state', () => {
+    const onCheckedChange = vi.fn();
+
+    component = mount(Switch, {
+      target: document.body,
+      props: { checked: true, onCheckedChange },
+    });
+    flushSync();
+
+    const toggle = document.body.querySelector(
+      '[role="switch"]'
+    ) as HTMLButtonElement;
+    toggle.click();
+    flushSync();
+
+    expect(onCheckedChange).toHaveBeenCalledTimes(1);
+    expect(onCheckedChange).toHaveBeenCalledWith(false);
+    expect(toggle.getAttribute('aria-checked')).toBe('false');
+  });
+
+  test('onCheckedChange does not fire when the parent changes checked', () => {
+    const onCheckedChange = vi.fn();
+    const props = $state({ checked: false, onCheckedChange });
+
+    component = mount(Switch, { target: document.body, props });
+    flushSync();
+
+    props.checked = true;
+    flushSync();
+
+    const toggle = document.body.querySelector('[role="switch"]');
+    expect(toggle?.getAttribute('aria-checked')).toBe('true');
+    expect(onCheckedChange).not.toHaveBeenCalled();
   });
 
   test('renders disabled state', () => {

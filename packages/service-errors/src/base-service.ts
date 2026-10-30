@@ -143,10 +143,10 @@ export abstract class BaseService {
       });
     }
 
-    throw wrapError(error, {
-      service: this.constructor.name,
-      environment: this.environment,
-      ...(context && { context }),
-    });
+    // No context on the wrap: the line above already records the service
+    // (`this.obs` is named for it), the environment and `context`, and a
+    // wrap's context is client-facing. `wrapError` can return a 409
+    // ConflictError, whose context `mapErrorToResponse` sends as `details`.
+    throw wrapError(error);
   }
 }

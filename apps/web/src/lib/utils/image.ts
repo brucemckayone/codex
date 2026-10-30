@@ -161,6 +161,22 @@ export function cappedSizes(vw: number, max: CssLength): string {
 }
 
 /**
+ * A `sizes` for a slot `fluid.rem` plus `fluid.vw` of the viewport wide, held
+ * between `min` and `max` rem: what `clamp(min, fluid, max)` says, as the two
+ * viewport widths where the fluid width meets its bounds (Codex-sntzy).
+ */
+export function clampedSizes(
+  min: number,
+  fluid: { rem?: number; vw: number },
+  max: number
+): string {
+  const base = fluid.rem ?? 0;
+  const meet = (bound: number) => hundredths(((bound - base) * 100) / fluid.vw);
+  const width = base ? `calc(${base}rem + ${fluid.vw}vw)` : `${fluid.vw}vw`;
+  return `(min-width: ${meet(max)}rem) ${max}rem, (min-width: ${meet(min)}rem) ${width}, ${min}rem`;
+}
+
+/**
  * A `sizes` for a picture drawn with `object-fit: cover` into a frame of
  * `frameRatio` (width / height). A picture wider than its frame is drawn
  * wider than the frame, by (picture ratio / frame ratio), and a width-only

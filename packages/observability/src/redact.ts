@@ -198,7 +198,9 @@ export function redactSensitiveData(
       typeof value === 'string' &&
       EMAIL_PATTERN.test(value)
     ) {
-      redacted[key] = value.replace(EMAIL_PATTERN, (email) =>
+      // Global, as the async path's: EMAIL_PATTERN has no `g` flag, so a
+      // plain replace stopped at the first address and logged the rest.
+      redacted[key] = value.replace(new RegExp(EMAIL_PATTERN, 'g'), (email) =>
         redactValue(email, mode, keepChars)
       );
     } else {

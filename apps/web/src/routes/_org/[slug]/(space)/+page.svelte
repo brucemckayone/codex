@@ -130,7 +130,12 @@
   const stats = $derived(data.stats);
   const feedCategories = $derived(data.feedCategories ?? []);
   const user = $derived(data.user);
-  const introVideoUrl = $derived(data.org?.introVideoUrl ?? null);
+  // The org intro is OFF until Codex-376dl re-introduces it, designed. Its
+  // stored link is the FULL master playlist, which the public CDN never
+  // serves, so in production every press 404s (Codex-aexid). Nothing in the
+  // studio can set or clear it since b27cd845. The player code below stays for
+  // that work to reuse; `data.org.introVideoUrl` is still loaded.
+  const introVideoUrl: string | null = null;
 
   // ── Landing sections derived from the single catalogue fetch ──────────
   // Editor's picks: creator-flagged items → full-bleed feature slides.

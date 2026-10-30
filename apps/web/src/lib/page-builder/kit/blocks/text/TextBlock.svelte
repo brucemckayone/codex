@@ -16,8 +16,9 @@
   (`imageAt: 'after'`, before the join button: Codex-61zsk.58).
 -->
 <script lang="ts">
+  import { cappedSizes } from '$lib/utils/image';
   import {
-    columnSize,
+    columnSizes,
     pageImageSrcset,
     resolvePageImageUrl,
     storedFocus,
@@ -52,13 +53,11 @@
   // band is 56rem wide, unless there is no body to sit beside, when the
   // heading and its picture span the column (Codex-61zsk.66).
   const srcset = $derived(pageImageSrcset(content.image, context.mediaBaseUrl));
-  const sizes = $derived(
-    layout === 'centered'
-      ? 'min(100vw, 52rem)'
-      : layout === 'columns' && content.body
-        ? `(min-width: 56rem) ${columnSize(0.5)}, ${columnSize()}`
-        : columnSize()
-  );
+  const sizes = $derived.by(() => {
+    if (layout === 'centered') return cappedSizes(100, '52rem');
+    if (layout === 'columns' && content.body) return columnSizes(1, [[56, 0.5]]);
+    return columnSizes();
+  });
   const beside = $derived(layout === 'columns');
   // Beside the words in `columns`, the picture is neither before nor after them.
   const after = $derived(content.imageAt === 'after' && !beside);

@@ -792,7 +792,8 @@ export class ContentAccessService
       });
       return { playlistUrl, expiresAt: toIso(expiresAt) };
     } catch (error) {
-      // Not handleError: its context would reach this anonymous caller.
+      // Not handleError: one message for every failure and a line with the
+      // course and film. Defence in depth: a 5xx sends no context (Codex-adcgb).
       throw filmStreamFailure(error, this.obs, input);
     }
   }

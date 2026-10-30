@@ -118,10 +118,6 @@
   }
 
   function show(checked: boolean): void {
-    // `Switch` reports its state whenever it syncs to `checked`, on mount
-    // too, not only when pressed: a report of the state the list is already
-    // in changes nothing.
-    if (checked === on) return;
     if (checked) {
       onChange(parked);
       parked = undefined;
