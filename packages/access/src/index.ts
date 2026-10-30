@@ -129,6 +129,7 @@ export {
   type TierAccessSummaryRow,
   type TierDeleteImpact,
 } from './services/plan-access-service';
+// The intro film's resolver (Codex-376dl), which the minter mints from.
 export {
   type IntroFilmMedia,
   type IntroFilmRefusal,

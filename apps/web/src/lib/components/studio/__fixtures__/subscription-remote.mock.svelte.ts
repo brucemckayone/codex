@@ -4,13 +4,20 @@
  *
  * The real module imports `$app/server`, so it cannot load in jsdom. Each
  * query returns a slot built on `$state`, so a test can land an answer or a
- * rejection and watch the page re-render, as in production. A rejected slot
- * mirrors kit's `Query`: `current` stays undefined, `error` is set, `loading`
- * is false. A slot nobody has answered is still loading.
+ * rejection and watch the page re-render, as in production. A slot nobody
+ * has answered is still loading.
  *
- * `refresh` is a spy that changes nothing by itself. A test drives the retry
- * the way kit does: `loading` goes true while `error` stays set, then the
- * answer lands.
+ * A rejection mirrors kit's `Query` (2.55, `query.svelte.js` `#run`): it sets
+ * `error` and clears `loading`, and NEVER touches the value. So:
+ * - `fail()` is a failed FIRST read: nothing landed, `current` is undefined.
+ * - `failRefresh()` is a failed RE-read: `current` KEEPS the old answer. A
+ *   page that reads "has a value" as "fresh" cannot tell this from success,
+ *   which is the case a test of a re-read must model.
+ *
+ * `refresh` is a spy that resolves at once and changes nothing by itself. A
+ * test drives the retry the way kit does: `loading` goes true while `error`
+ * stays set, then the answer lands. `deferRefresh()` makes the next refresh a
+ * kit-shaped one whose promise settles only when the test lands or fails it.
  *
  * A `.svelte.ts` module (runes compiled), NOT a `*.test.*` file, so it is
  * never collected as a suite.
@@ -47,9 +54,21 @@ export const httpError = (status = 500) => ({
   body: { message: 'Internal Error' },
 });
 
-/** Land a rejection on a slot, as kit does when the read fails. */
+/** Land a rejection on a slot, as kit does when its FIRST read fails. */
 export function fail<T>(slot: QuerySlot<T>, error: unknown = httpError()) {
   slot.current = undefined;
+  slot.error = error;
+  slot.loading = false;
+}
+
+/**
+ * Land a rejection on a slot that already had an answer, as kit does when a
+ * RE-read fails: `current` keeps the old value, only `error` changes.
+ */
+export function failRefresh<T>(
+  slot: QuerySlot<T>,
+  error: unknown = httpError()
+) {
   slot.error = error;
   slot.loading = false;
 }
@@ -59,6 +78,39 @@ export function land<T>(slot: QuerySlot<T>, value: T) {
   slot.current = value;
   slot.error = undefined;
   slot.loading = false;
+}
+
+/**
+ * Make the slot's NEXT `refresh()` behave as kit's: `loading` goes true (the
+ * old `current` and `error` stay), and the returned promise settles only when
+ * the test calls `land` (resolves, after the value is set) or `fail` (a
+ * failed re-read: rejects, `current` kept).
+ */
+export function deferRefresh<T>(slot: QuerySlot<T>) {
+  let settle: { resolve: () => void; reject: (e: unknown) => void } | null =
+    null;
+  slot.refresh.mockImplementationOnce(() => {
+    slot.loading = true;
+    return new Promise<void>((resolve, reject) => {
+      settle = { resolve, reject };
+    });
+  });
+  const pending = () => {
+    if (!settle) throw new Error('deferRefresh: refresh() was never called');
+    return settle;
+  };
+  return {
+    land(value: T) {
+      const { resolve } = pending();
+      land(slot, value);
+      resolve();
+    },
+    fail(error: unknown = httpError()) {
+      const { reject } = pending();
+      failRefresh(slot, error);
+      reject(error);
+    },
+  };
 }
 
 export const ACTIVE_ACCOUNT: ConnectAccountStatusResponse = {

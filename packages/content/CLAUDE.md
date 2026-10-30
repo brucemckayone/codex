@@ -19,9 +19,9 @@ import type { CatalogueContentRow, PublicContentRow } from '@codex/content';
 // Plan access (Codex-2hxff.91): the content side of content_tier_access.
 import {
   withTierWire, // adds includedInTierIds + the phase-1 includedInTierId shim to rows
-  notClosedToNewViewers, // SQL: hide a closed, unpriced item from catalogues
+  notClosedToNewViewers, // SQL: hide a closed, unpriced item (re-export of @codex/database's)
   syncLegacyIncludedInTierId, // the legacy column's dual-write
-  invalidatePlanSubscriberLibraries, // catalogue + tier subscribers' libraries
+  invalidatePlanSubscriberLibraries, // catalogue, public counts + tier subscribers' libraries
 } from '@codex/content';
 ```
 

@@ -4255,7 +4255,7 @@ export const monetisation_tier_delete_keep_other = () => `Keep them subscribers-
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const monetisation_tier_delete_keep_desc_one = () => `Closed until you add it to a tier: only people who bought it and your team can watch.`
+export const monetisation_tier_delete_keep_no_tier_one = () => `Leave it in no tier`
 
 
 /**
@@ -4263,7 +4263,39 @@ export const monetisation_tier_delete_keep_desc_one = () => `Closed until you ad
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const monetisation_tier_delete_keep_desc_other = () => `Closed until you add them to a tier: only people who bought them and your team can watch.`
+export const monetisation_tier_delete_keep_no_tier_other = () => `Leave them in no tier`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_keep_desc_one = () => `1 film will be closed until you add it to a tier: only people who bought it and your team can watch.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_keep_desc_other = (params) => `${params.count} films will be closed until you add them to a tier: only people who bought them and your team can watch.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_keep_for_sale_one = () => `1 film stays on sale: anyone can still buy it.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_keep_for_sale_other = (params) => `${params.count} films stay on sale: anyone can still buy them.`
 
 
 /**
@@ -4376,6 +4408,14 @@ export const monetisation_tier_delete_impact_retry = () => `Retry`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const monetisation_tier_delete_only_here_changed = (params) => `Something changed: some films or courses are now only in ${params.name}. Choose what happens to them, then delete again.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_subscribed_meanwhile = (params) => `Someone subscribed to ${params.name} after this opened, so it can't be deleted.`
 
 
 /**
@@ -14599,7 +14639,39 @@ export const monetisation_tier_items_too_many = (params) => `Save at most ${para
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_save_partial_one = (params) => `Some of your changes to ${params.name} were saved, but 1 wasn't. Save again to finish.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_save_partial_other = (params) => `Some of your changes to ${params.name} were saved, but ${params.count} weren't. Save again to finish.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_reread_failed = () => `Saved, but we couldn't reload the list, so it may be out of date.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const monetisation_tier_items_load_failed = (params) => `We couldn't load what's in ${params.name}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_tier_load_failed = () => `We couldn't load this tier.`
 
 
 /**
@@ -14624,6 +14696,54 @@ export const monetisation_tier_items_no_results = (params) => `No films or cours
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const monetisation_tier_items_empty = () => `There are no films or courses a tier can include yet.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_empty_filter = () => `No films or courses match this filter.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_leave_title = () => `Leave without saving?`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_leave_body_one = (params) => `Your change to ${params.name} hasn't been saved. Leaving discards it.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown>, name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_leave_body_other = (params) => `Your ${params.count} changes to ${params.name} haven't been saved. Leaving discards them.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_leave_confirm = () => `Leave and discard`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_leave_stay = () => `Keep editing`
 
 
 /**

@@ -10,10 +10,17 @@
  * `PlanAccessService` (the tier checklist).
  *
  * Phase 1-2 also keeps the legacy `included_in_tier_id` column in step
- * (`syncLegacyIncludedInTierId`), so an old web or a rolled-back worker reads
- * a value that is never looser than the ticks.
+ * (`syncLegacyIncludedInTierId`) for an old web and a rolled-back worker. That
+ * value is exact for a ladder but LOOSER than the ticks in three cases, which
+ * the old code reads as "this tier and above", or as free when NULL:
+ * - a bundle: the lowest tick, so the tiers between are opened too;
+ * - a tier delete with "keep": the deleted tier's id, which the old decision
+ *   still compares by sort order;
+ * - an item created closed: NULL, so the old decision serves it free.
+ * A tier reorder does not re-sync it either. Before any workers rollback, run
+ * `packages/database/scripts/plan-access-parity.ts --pre-rollback`
+ * (docs/payments/release-checklist.md R13).
  */
-import { PRICE_LIMITS } from '@codex/constants';
 import type { DatabaseClient } from '@codex/database';
 import {
   content,
@@ -29,7 +36,6 @@ import {
   inArray,
   isNull,
   notInArray,
-  type SQL,
   sql,
 } from 'drizzle-orm';
 import type { DatabaseTransaction } from '../types';
@@ -120,6 +126,8 @@ export async function assertTiersInOrg(
         isNull(subscriptionTiers.deletedAt)
       )
     )
+    // Id order, as every multi-tier lock here takes (see reorderTiers).
+    .orderBy(asc(subscriptionTiers.id))
     .for('share');
   if (rows.length === unique.length) return;
   const found = new Set(rows.map((r) => r.id));
@@ -276,35 +284,12 @@ export async function withTierWire<
 }
 
 /**
- * Hides a CLOSED item from public lists (owner U11): behind the switch, in no
- * tier a new subscriber can join, and not on sale for a one-time price. A
- * priced closed item stays listed, as any paid item. Its own page (by slug)
- * still loads, to say "Not available right now". Every conjunct is IS TRUE /
- * COALESCE / EXISTS, so the whole test is never NULL (a NULL inside NOT(…)
- * would hide nothing).
- *
- * Only a tick on a live ACTIVE tier opens the item to new viewers (owner U13):
- * checkout and a change of tier both refuse an inactive or deleted tier. The
- * access decision and the library still read every tick, so the members of a
- * switched-off tier keep watching what it includes.
- *
- * The subquery names its columns as TEXT under its own aliases: the public list
- * runs this inside a relational `findMany`, which rewrites EVERY drizzle column
- * in its `where` to the root alias (`"content"."content_id"` would not exist).
+ * Hides a CLOSED item from public lists (owner U11, U13). It lives in
+ * `@codex/database` since review L7, so the public counts in
+ * `@codex/organization` apply the same test; re-exported here for this
+ * package's readers.
  */
-export function notClosedToNewViewers(): SQL {
-  return sql`NOT (
-    ${content.isTierGated} IS TRUE
-    AND NOT (${content.isPurchasable} IS TRUE AND COALESCE(${content.priceCents}, 0) >= ${PRICE_LIMITS.MIN_CENTS})
-    AND NOT EXISTS (
-      SELECT 1 FROM ${contentTierAccess} cta
-      INNER JOIN ${subscriptionTiers} st ON st.id = cta.tier_id
-      WHERE cta.content_id = ${content.id}
-        AND st.is_active IS TRUE
-        AND st.deleted_at IS NULL
-    )
-  )`;
-}
+export { notClosedToNewViewers } from '@codex/database';
 
 /** Does this item have at least one tick (for the publish rule)? */
 export async function hasAnyTick(

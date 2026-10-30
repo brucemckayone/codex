@@ -516,7 +516,7 @@
       if (isFollowersOnly) return 'Follow to unlock this content.';
       if (isTeamOnly) return 'Team-only content.';
       if (isCourseOnly) return 'Part of a course.';
-      if (isClosed) return 'Not available right now.';
+      if (isClosed) return m.unavailable_cta_title();
       if (needsSubscription) return 'Subscription required.';
       if (!isAuthenticated) return 'Sign in required.';
       return needsPurchase ? 'Purchase required.' : 'Access required.';

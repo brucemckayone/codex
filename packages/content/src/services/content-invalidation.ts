@@ -56,7 +56,11 @@
  * handed to `waitUntil`. Individual KV failures are swallowed and logged.
  */
 
-import { CacheType, type VersionedCache } from '@codex/cache';
+import {
+  CacheType,
+  invalidateOrgPublicCaches,
+  type VersionedCache,
+} from '@codex/cache';
 import {
   ACCESS_GRANTING_SUBSCRIPTION_STATUSES,
   ORGANIZATION_ROLES,
@@ -66,6 +70,7 @@ import type { Database } from '@codex/database';
 import {
   organizationFollowers,
   organizationMemberships,
+  organizations,
   purchases,
   subscriptions,
 } from '@codex/database/schema';
@@ -300,7 +305,8 @@ export interface InvalidatePlanSubscriberLibrariesArgs {
 /**
  * A tier's films or courses changed (the checklist, a delete's "move", a
  * create's copy). Bumps the org's content catalogue version (the public list
- * carries each item's `includedInTierIds`), then the library of every user
+ * carries each item's `includedInTierIds`) and its public counts (topics,
+ * stats, creators), then the library of every user
  * whose subscription to one of `tierIds` grants access now — the same
  * statuses and period test as the decision. Above `maxFanout` the per-user
  * bumps are skipped (logged), as {@link invalidateContentAccess} does.
@@ -325,6 +331,36 @@ export async function invalidatePlanSubscriberLibraries(
     CacheType.COLLECTION_ORG_CONTENT(organizationId),
     { reason, organizationId, key: 'org:content' },
     logger
+  );
+  // Ticks decide which items are CLOSED, and the public counts leave closed
+  // items out (review L7): the active topics, and the slug-keyed stats and
+  // creators list. The editor's saves bump these already
+  // (`bumpOrgContentVersion`); a tick write elsewhere must too, or a topic
+  // whose only film just closed keeps its chip until the TTL.
+  bumpWithLogger(
+    cache,
+    waitUntil,
+    CacheType.CATEGORIES(organizationId),
+    { reason, organizationId, key: 'org:categories' },
+    logger
+  );
+  waitUntil(
+    db.query.organizations
+      .findFirst({
+        where: eq(organizations.id, organizationId),
+        columns: { slug: true },
+      })
+      .then((org) =>
+        org?.slug ? invalidateOrgPublicCaches(cache, org.slug) : undefined
+      )
+      .catch((error: unknown) => {
+        logger?.warn('content-invalidation: bump failed', {
+          reason,
+          organizationId,
+          key: 'org:public',
+          error: error instanceof Error ? error.message : String(error),
+        });
+      })
   );
 
   const ids = [...new Set(tierIds)];

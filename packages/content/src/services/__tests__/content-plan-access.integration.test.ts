@@ -14,7 +14,9 @@
  */
 
 import {
+  categories,
   content,
+  contentCategories,
   contentTierAccess,
   organizations,
   stripeConnectAccounts,
@@ -37,6 +39,7 @@ import type { CreateContentInput } from '@codex/validation';
 import { asc, eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { TierRequiredToPublishError } from '../../errors';
+import { CategoriesService } from '../categories-service';
 import { ContentService } from '../content-service';
 
 describe('ContentService — plan access (Codex-2hxff.91)', () => {
@@ -324,6 +327,29 @@ describe('ContentService — plan access (Codex-2hxff.91)', () => {
       ).rejects.toBeInstanceOf(ValidationError);
       expect(await ticksOf(id)).toEqual([basicId]);
     });
+
+    it('a set sent to an UNGATED paid film with no switch is refused, never dropped (L4)', async () => {
+      const { id } = await service.create(
+        written({ isPurchasable: true, priceCents: 900 }),
+        creatorId
+      );
+
+      const error = await service
+        .update(id, { includedInTierIds: [premiumId] }, creatorId)
+        .catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(ValidationError);
+      expect((error as ValidationError).context).toEqual({ contentId: id });
+      expect(await rowOf(id)).toEqual({ isTierGated: false, isFree: false });
+      expect(await ticksOf(id)).toEqual([]);
+      // The same set WITH the switch is the way in.
+      await service.update(
+        id,
+        { isTierGated: true, includedInTierIds: [premiumId] },
+        creatorId
+      );
+      expect(await ticksOf(id)).toEqual([premiumId]);
+    });
   });
 
   describe('publish (owner U2)', () => {
@@ -458,6 +484,35 @@ describe('ContentService — plan access (Codex-2hxff.91)', () => {
         })
       ).items[0];
       expect(tickedRow?.includedInTierIds).toEqual([premiumId]);
+    });
+
+    it('a topic whose only film is closed shows no chip; a tick brings it back (L7)', async () => {
+      const closed = await publishedWith({ tierIds: [] });
+      const topic = takeFirst(
+        await db
+          .insert(categories)
+          .values({
+            organizationId: orgId,
+            creatorId,
+            name: 'Closed topic',
+            slug: createUniqueSlug('closed-topic'),
+          })
+          .returning({ id: categories.id })
+      ).id;
+      await db
+        .insert(contentCategories)
+        .values({ contentId: closed.id, categoryId: topic });
+      const topics = new CategoriesService({ db, environment: 'test' });
+      const topicIds = async () =>
+        (await topics.listPublicForOrg(orgId)).map((c) => c.id);
+
+      expect(await topicIds()).not.toContain(topic);
+      await gateContentToTiers(db, {
+        contentId: closed.id,
+        organizationId: orgId,
+        tierIds: [premiumId],
+      });
+      expect(await topicIds()).toContain(topic);
     });
   });
 

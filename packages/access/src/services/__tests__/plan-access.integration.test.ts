@@ -593,14 +593,27 @@ describe('plan access — decision, library, checklist (Codex-2hxff.91)', () => 
         tierIds: [basic],
         creator: unpaidCreatorId,
       });
+      const payable = await film(orgId, { tierIds: [] });
 
-      await expect(
-        plans.setTierItems(orgId, basic, {
-          add: { contentIds: [published], courseIds: [] },
+      const refusal = await plans
+        .setTierItems(orgId, basic, {
+          add: { contentIds: [published, payable], courseIds: [] },
           remove: none,
         })
-      ).rejects.toBeInstanceOf(CreatorPayoutsRequiredError);
+        .catch((e: unknown) => e);
+      expect(refusal).toBeInstanceOf(CreatorPayoutsRequiredError);
+      // The context reaches the client: it names the refused ITEMS, never the
+      // creator, who is another member of the team (review L5).
+      const context = (refusal as CreatorPayoutsRequiredError).context;
+      expect(context).toEqual({
+        accessType: 'included_in_tier',
+        contentIds: [published],
+        courseIds: [],
+        code: 'CREATOR_CONNECT_REQUIRED',
+      });
+      expect(JSON.stringify(context)).not.toContain(unpaidCreatorId);
       expect(await ticksOf(published)).toEqual([]);
+      expect(await ticksOf(payable)).toEqual([]);
 
       // A draft is left to publish(); a re-add of a ticked item adds nothing.
       await expect(
@@ -679,6 +692,176 @@ describe('plan access — decision, library, checklist (Codex-2hxff.91)', () => 
         });
       }
       expect(await ticksOf(item)).toEqual([]);
+    });
+
+    // ── races (review L1, L2): a held transaction stands in for the other
+    // writer, holding the lock that writer takes, until it is released.
+
+    type Tx = Parameters<Parameters<Database['transaction']>[0]>[0];
+
+    /**
+     * Runs `hold` in its own transaction, then waits for `release()` before
+     * `finish` and the commit. `held` resolves once `hold` has run.
+     */
+    function heldTransaction(
+      hold: (tx: Tx) => Promise<unknown>,
+      finish: (tx: Tx) => Promise<unknown> = async () => {}
+    ) {
+      let release = () => {};
+      const released = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let ready = () => {};
+      const held = new Promise<void>((resolve) => {
+        ready = resolve;
+      });
+      const done = db.transaction(async (tx) => {
+        await hold(tx);
+        ready();
+        await released;
+        await finish(tx);
+      });
+      return { held, release, done };
+    }
+
+    /** 'waiting' when `promise` is still pending after 750 ms. */
+    const stateAfterAWhile = (promise: Promise<unknown>) =>
+      Promise.race([
+        promise.then(
+          () => 'finished',
+          () => 'finished'
+        ),
+        new Promise<string>((resolve) =>
+          setTimeout(() => resolve('waiting'), 750)
+        ),
+      ]);
+
+    it('a removal racing a delete of another tier the item is in waits for it, then names the item it closed (L1)', async () => {
+      const orgId = await org('race-delete');
+      const basic = await tier(orgId, 1);
+      const pro = await tier(orgId, 2);
+      const item = await film(orgId, { tierIds: [basic, pro] });
+
+      // Pro's delete, as deleteTier runs it: the tier FOR UPDATE first;
+      // once released, the films ticked there, the sweep and the soft delete.
+      const deleting = heldTransaction(
+        (tx) =>
+          tx
+            .select({ id: subscriptionTiers.id })
+            .from(subscriptionTiers)
+            .where(eq(subscriptionTiers.id, pro))
+            .for('update'),
+        async (tx) => {
+          await tx
+            .select({ id: content.id })
+            .from(content)
+            .where(eq(content.id, item))
+            .for('no key update');
+          await tx
+            .delete(contentTierAccess)
+            .where(eq(contentTierAccess.tierId, pro));
+          await tx
+            .update(subscriptionTiers)
+            .set({ deletedAt: new Date(), isActive: false })
+            .where(eq(subscriptionTiers.id, pro));
+        }
+      );
+      await deleting.held;
+      const saving = plans.setTierItems(orgId, basic, {
+        add: none,
+        remove: { contentIds: [item], courseIds: [] },
+      });
+      const early = await stateAfterAWhile(saving);
+      deleting.release();
+      await deleting.done;
+
+      expect(early).toBe('waiting');
+      expect((await saving).closedNow.contentIds).toEqual([item]);
+      expect(await ticksOf(item)).toEqual([]);
+    });
+
+    it("a course removal waits the same way for a delete of the course's other tier (L1)", async () => {
+      const orgId = await org('race-delete-course');
+      const basic = await tier(orgId, 1);
+      const pro = await tier(orgId, 2);
+      const courseId = takeFirst(
+        await db
+          .insert(courses)
+          .values({
+            organizationId: orgId,
+            creatorId,
+            slug: createUniqueSlug('race-course'),
+            title: 'Race course',
+          })
+          .returning({ id: courses.id })
+      ).id;
+      await db.insert(courseTierAccess).values(
+        [basic, pro].map((tierId) => ({
+          courseId,
+          tierId,
+          organizationId: orgId,
+        }))
+      );
+
+      const deleting = heldTransaction((tx) =>
+        tx
+          .select({ id: subscriptionTiers.id })
+          .from(subscriptionTiers)
+          .where(eq(subscriptionTiers.id, pro))
+          .for('update')
+      );
+      await deleting.held;
+      const saving = plans.setTierItems(orgId, basic, {
+        add: none,
+        remove: { contentIds: [], courseIds: [courseId] },
+      });
+      const early = await stateAfterAWhile(saving);
+      deleting.release();
+      await deleting.done;
+
+      expect(early).toBe('waiting');
+      await expect(saving).resolves.toMatchObject({ courses: 0 });
+    });
+
+    it('an editor save that makes a paid film team-only first: the checklist waits, re-checks and refuses it, and never turns its switch on (L2)', async () => {
+      const orgId = await org('race-editor');
+      const basic = await tier(orgId, 1);
+      const paid = await film(orgId, {
+        isFree: false,
+        isPurchasable: true,
+        priceCents: 900,
+      });
+
+      // The editor's UPDATE of the row, committed once released.
+      const editing = heldTransaction((tx) =>
+        tx
+          .update(content)
+          .set({ isTeamOnly: true, isPurchasable: false, priceCents: null })
+          .where(eq(content.id, paid))
+      );
+      await editing.held;
+      const saving = plans.setTierItems(orgId, basic, {
+        add: { contentIds: [paid], courseIds: [] },
+        remove: none,
+      });
+      const early = await stateAfterAWhile(saving);
+      editing.release();
+      await editing.done;
+
+      expect(early).toBe('waiting');
+      const error = await saving.catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(ValidationError);
+      expect((error as ValidationError).context).toMatchObject({
+        invalidContentIds: [paid],
+      });
+      const row = takeFirst(
+        await db
+          .select({ isTierGated: content.isTierGated })
+          .from(content)
+          .where(eq(content.id, paid))
+      );
+      expect(row.isTierGated).toBe(false);
+      expect(await ticksOf(paid)).toEqual([]);
     });
   });
 

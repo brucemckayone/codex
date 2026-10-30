@@ -72,10 +72,21 @@ describe('PlanPicker', () => {
       m.plan_picker_and_above_aria({ tierName: 'Basic' }),
       m.plan_picker_and_above_aria({ tierName: 'Pro' }),
     ]);
-    expect(above.map((b) => b.hasAttribute('data-current'))).toEqual([
-      false,
-      true,
+    // Heard, not just coloured: `aria-current` is announced.
+    expect(above.map((b) => b.getAttribute('aria-current'))).toEqual([
+      null,
+      'true',
     ]);
+  });
+
+  it('names the group on its wrapper and keeps the rows a list', () => {
+    render({ label: 'Tiers that include this' });
+    const group = document.querySelector('[role="group"]');
+    expect(group?.getAttribute('aria-label')).toBe('Tiers that include this');
+    expect(group?.classList.contains('plan-picker')).toBe(true);
+    const list = document.querySelector('ul.tiers');
+    expect(list?.hasAttribute('role')).toBe(false);
+    expect(list?.querySelectorAll(':scope > li')).toHaveLength(3);
   });
 
   it('reports which row or shortcut was pressed', () => {

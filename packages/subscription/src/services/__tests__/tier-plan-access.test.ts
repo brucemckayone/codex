@@ -38,7 +38,7 @@ import {
   teardownTestDatabase,
   validateDatabaseConnection,
 } from '@codex/test-utils';
-import { and, eq, inArray, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
   afterAll,
@@ -454,6 +454,63 @@ describe('TierService — plan access (Codex-2hxff.91)', () => {
       expect(await filmsIn(basic)).toEqual([]);
       expect(await coursesIn(basic)).toEqual([]);
       expect((await rowOf(onlyHere)).legacy).toBe(pro);
+    });
+
+    it('"move" of more item × target pairs than one VALUES list can bind (65,535 parameters) still lands every tick (L3)', async () => {
+      const orgId = await org('pa-del-move-big');
+      // 440 films × 50 targets = 22,000 pairs: 66,000 parameters as VALUES.
+      const FILMS = 440;
+      const TARGETS = 50;
+      const tierRows = await db
+        .insert(subscriptionTiers)
+        .values(
+          Array.from({ length: TARGETS + 1 }, (_, i) =>
+            createTestTierInput(orgId, {
+              name: `Big move ${i + 1}`,
+              sortOrder: i + 1,
+            })
+          )
+        )
+        .returning({ id: subscriptionTiers.id });
+      const [doomed, ...targets] = tierRows.map((t) => t.id) as [
+        string,
+        ...string[],
+      ];
+      const filmRows = await db
+        .insert(content)
+        .values(
+          Array.from({ length: FILMS }, () =>
+            createTestContentInput(creatorId, {
+              organizationId: orgId,
+              contentType: 'written',
+              isFree: false,
+              isTierGated: true,
+              status: 'published',
+              publishedAt: new Date(),
+            })
+          )
+        )
+        .returning({ id: content.id });
+      await db.insert(contentTierAccess).values(
+        filmRows.map((f) => ({
+          contentId: f.id,
+          tierId: doomed,
+          organizationId: orgId,
+        }))
+      );
+
+      await service.deleteTier(doomed, orgId, {
+        onlyHere: 'move',
+        moveTo: targets,
+      });
+
+      const [moved] = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(contentTierAccess)
+        .where(inArray(contentTierAccess.tierId, targets));
+      expect(moved?.count).toBe(FILMS * TARGETS);
+      expect(await filmsIn(doomed)).toEqual([]);
+      expect(await isLive(doomed)).toBe(false);
     });
 
     it("refuses a move to itself or to another org's tier, and nothing changes", async () => {

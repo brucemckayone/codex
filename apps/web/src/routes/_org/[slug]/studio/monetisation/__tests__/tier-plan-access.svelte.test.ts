@@ -12,7 +12,10 @@
  * - Delete Tier reads what is only in the tier. Nothing is preselected and
  *   Delete stays disabled until the creator moves those items or keeps them
  *   subscribers-only (U5); a tier with live subscribers is refused up front;
- *   a failed check never reads as "nothing only here".
+ *   a failed check never reads as "nothing only here". "Keep" says which
+ *   films close and which stay on sale. After a refusal the dialog acts only
+ *   on a FRESH preview: kit keeps the old one through the re-read, and for
+ *   good when it fails (`deferRefresh` models exactly that).
  *
  * Mounts the real `+page.svelte`; `$app/*` and the remote modules are mocked.
  */
@@ -53,6 +56,7 @@ import {
   ACTIVE_ACCOUNT,
   accessSummarySlot,
   createTier,
+  deferRefresh,
   deleteImpactSlot,
   deleteTier,
   fail,
@@ -515,5 +519,247 @@ describe('Delete Tier: what is only in this tier', () => {
     );
     expect(radio('tier-delete-choice', 'keep')?.checked).toBe(false);
     expect(slot.refresh).toHaveBeenCalled();
+  });
+
+  test('"keep" names what each film becomes: closed, or still on sale', () => {
+    mountPage();
+    land(deleteImpactSlot('premium'), IMPACT_ONLY_HERE);
+    openDelete('Premium');
+    const desc = document.querySelector(
+      '[data-testid="tier-delete-keep-desc"]'
+    )?.textContent;
+    expect(text()).toContain(m.monetisation_tier_delete_keep_other());
+    expect(desc).toContain(
+      m.monetisation_tier_delete_keep_desc_other({ count: 4 })
+    );
+    expect(desc).toContain(m.monetisation_tier_delete_keep_course_one());
+  });
+});
+
+/**
+ * A preview whose only-here films are `closing` subscribers-only ones and
+ * `forSale` paid ones (design §3.4: "keep" leaves a paid film on sale).
+ */
+function impactWith(closing: number, forSale: number) {
+  const film = (i: number, isPurchasable: boolean) => ({
+    id: `m-${i}`,
+    title: `Film ${i}`,
+    status: 'published',
+    isPurchasable,
+  });
+  return {
+    liveSubscriberCount: 0,
+    onlyHere: {
+      films: {
+        total: closing + forSale,
+        closing,
+        staysForSale: forSale,
+        items: [
+          ...Array.from({ length: closing }, (_, i) => film(i, false)),
+          ...Array.from({ length: forSale }, (_, i) => film(closing + i, true)),
+        ],
+      },
+      courses: { total: 0, items: [] },
+    },
+    alsoInOtherPlans: { films: 0, courses: 0 },
+  };
+}
+
+const NOTHING_ONLY_HERE = {
+  liveSubscriberCount: 0,
+  onlyHere: {
+    films: { total: 0, closing: 0, staysForSale: 0, items: [] },
+    courses: { total: 0, items: [] },
+  },
+  alsoInOtherPlans: { films: 12, courses: 1 },
+};
+
+describe('Delete Tier: "keep" on films that are for sale (M4)', () => {
+  function openDelete(name: string) {
+    byLabel(m.monetisation_tiers_delete_aria({ name }))?.click();
+    flushSync();
+  }
+  const keepDesc = () =>
+    document.querySelector('[data-testid="tier-delete-keep-desc"]')
+      ?.textContent ?? '';
+
+  test('paid films stay on sale: never called closed or subscribers-only', () => {
+    mountPage();
+    land(deleteImpactSlot('premium'), impactWith(0, 3));
+    openDelete('Premium');
+    expect(text()).toContain(m.monetisation_tier_delete_keep_no_tier_other());
+    expect(text()).not.toContain(m.monetisation_tier_delete_keep_other());
+    expect(keepDesc()).toContain(
+      m.monetisation_tier_delete_keep_for_sale_other({ count: 3 })
+    );
+    expect(keepDesc()).not.toMatch(/closed/i);
+  });
+
+  test('a mix says how many close and how many stay on sale', () => {
+    mountPage();
+    land(deleteImpactSlot('premium'), impactWith(3, 1));
+    openDelete('Premium');
+    expect(text()).toContain(m.monetisation_tier_delete_keep_other());
+    expect(keepDesc()).toContain(
+      m.monetisation_tier_delete_keep_desc_other({ count: 3 })
+    );
+    expect(keepDesc()).toContain(
+      m.monetisation_tier_delete_keep_for_sale_one()
+    );
+  });
+});
+
+describe('Delete Tier after a refusal: never the old preview (M1)', () => {
+  function openDelete(name: string) {
+    byLabel(m.monetisation_tiers_delete_aria({ name }))?.click();
+    flushSync();
+  }
+  const deleteButton = () => buttonNamed(m.monetisation_tiers_delete());
+  const testId = (id: string) =>
+    document.querySelector(`[data-testid="${id}"]`);
+  const refusal = (detailsCode: string) => ({
+    success: false,
+    status: 409,
+    code: 'CONFLICT',
+    detailsCode,
+    message: 'refused',
+  });
+
+  /** Basic opens with nothing only in it; Delete is enabled at once. */
+  function openBasic() {
+    mountPage();
+    const slot = deleteImpactSlot('basic');
+    land(slot, NOTHING_ONLY_HERE);
+    openDelete('Basic');
+    expect(deleteButton()?.disabled).toBe(false);
+    return slot;
+  }
+
+  test('TIER_HAS_SUBSCRIBERS is said, and Delete waits for the fresh check', async () => {
+    deleteTier.mockResolvedValue(refusal('TIER_HAS_SUBSCRIBERS'));
+    const slot = openBasic();
+    const reread = deferRefresh(slot);
+    deleteButton()?.click();
+    await settle();
+
+    expect(text()).toContain(
+      m.monetisation_tier_delete_subscribed_meanwhile({ name: 'Basic' })
+    );
+    // kit still holds the old preview while it re-reads; the dialog won't act on it.
+    expect(slot.current).toEqual(NOTHING_ONLY_HERE);
+    expect(testId('tier-delete-nothing-only-here')).toBeNull();
+    expect(deleteButton()?.disabled).toBe(true);
+
+    reread.land({ ...NOTHING_ONLY_HERE, liveSubscriberCount: 1 });
+    await settle();
+    expect(testId('tier-delete-refused')).not.toBeNull();
+    expect(deleteButton()).toBeUndefined();
+  });
+
+  test('a FAILED re-read (kit keeps the old value) shows "couldn\'t check", Delete stays off', async () => {
+    deleteTier.mockResolvedValue(refusal('TIER_HAS_SUBSCRIBERS'));
+    const slot = openBasic();
+    const reread = deferRefresh(slot);
+    deleteButton()?.click();
+    await settle();
+
+    reread.fail();
+    await settle();
+    expect(slot.current).toEqual(NOTHING_ONLY_HERE);
+    expect(testId('tier-delete-impact-failed')).not.toBeNull();
+    expect(testId('tier-delete-nothing-only-here')).toBeNull();
+    expect(deleteButton()?.disabled).toBe(true);
+    expect(deleteButton()?.getAttribute('aria-describedby')).toBe(
+      'tier-delete-impact-failed-text'
+    );
+  });
+
+  test('TIER_HAS_ONLY_ITEMS offers Move/Keep from the FRESH preview only', async () => {
+    deleteTier
+      .mockResolvedValueOnce(refusal('TIER_HAS_ONLY_ITEMS'))
+      .mockResolvedValueOnce({ success: true });
+    const slot = openBasic();
+    const reread = deferRefresh(slot);
+    deleteButton()?.click();
+    await settle();
+
+    expect(text()).toContain(
+      m.monetisation_tier_delete_only_here_changed({ name: 'Basic' })
+    );
+    // No choices, and no "nothing only here", from the old preview.
+    expect(testId('tier-delete-choice')).toBeNull();
+    expect(testId('tier-delete-nothing-only-here')).toBeNull();
+    expect(deleteButton()?.disabled).toBe(true);
+
+    reread.land(IMPACT_ONLY_HERE);
+    await settle();
+    expect(testId('tier-delete-choice')).not.toBeNull();
+    expect(text()).toContain(
+      m.monetisation_tier_delete_only_here_other({
+        counts: '4 films and 1 course',
+        name: 'Basic',
+      })
+    );
+    // U5 still holds: nothing chosen, nothing sent.
+    expect(deleteButton()?.disabled).toBe(true);
+    radio('tier-delete-choice', 'keep')?.click();
+    flushSync();
+    deleteButton()?.click();
+    await settle();
+    expect(deleteTier).toHaveBeenLastCalledWith({
+      orgId: ORG.id,
+      tierId: 'basic',
+      choice: { onlyHere: 'keep' },
+    });
+  });
+
+  test('TIER_HAS_ONLY_ITEMS with a failed re-read: the alert stays up through Retry until a read lands', async () => {
+    deleteTier.mockResolvedValue(refusal('TIER_HAS_ONLY_ITEMS'));
+    const slot = openBasic();
+    const reread = deferRefresh(slot);
+    deleteButton()?.click();
+    await settle();
+    reread.fail();
+    await settle();
+    expect(testId('tier-delete-impact-failed')).not.toBeNull();
+    expect(testId('tier-delete-choice')).toBeNull();
+
+    const retry = deferRefresh(slot);
+    buttonNamed(m.monetisation_tier_delete_impact_retry())?.click();
+    await settle();
+    expect(testId('tier-delete-impact-failed')).not.toBeNull();
+    expect(deleteButton()?.disabled).toBe(true);
+
+    retry.land(IMPACT_ONLY_HERE);
+    await settle();
+    expect(testId('tier-delete-impact-failed')).toBeNull();
+    expect(testId('tier-delete-choice')).not.toBeNull();
+  });
+});
+
+describe('Delete Tier: a disabled Delete says why (L8)', () => {
+  test('it is described by the choice it waits for, then the move target', () => {
+    mountPage();
+    land(deleteImpactSlot('premium'), IMPACT_ONLY_HERE);
+    byLabel(m.monetisation_tiers_delete_aria({ name: 'Premium' }))?.click();
+    flushSync();
+    const deleteButton = () => buttonNamed(m.monetisation_tiers_delete());
+    const describedBy = () =>
+      document.getElementById(
+        deleteButton()?.getAttribute('aria-describedby') ?? ''
+      )?.textContent ?? '';
+
+    expect(describedBy()).toContain(
+      m.monetisation_tier_delete_choice_label_other()
+    );
+    radio('tier-delete-choice', 'move')?.click();
+    flushSync();
+    expect(describedBy()).toContain(
+      m.monetisation_tier_delete_move_pick_other()
+    );
+    radio('tier-delete-choice', 'keep')?.click();
+    flushSync();
+    expect(deleteButton()?.disabled).toBe(false);
+    expect(deleteButton()?.hasAttribute('aria-describedby')).toBe(false);
   });
 });

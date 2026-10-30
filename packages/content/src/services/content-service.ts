@@ -308,7 +308,6 @@ export class ContentService extends BaseService {
     if (!requiresPayoutsToPublish(row)) return;
     if (await this.isCreatorConnectReady(tx, creatorId)) return;
     throw new CreatorPayoutsRequiredError(
-      creatorId,
       (row.priceCents ?? 0) > 0 ? 'paid' : 'included_in_tier'
     );
   }
@@ -766,6 +765,16 @@ export class ContentService extends BaseService {
         const effGated =
           sentTierGated ??
           (legacyStated ? sentLegacyTierId != null : existing.isTierGated);
+        // Update refine (b)'s other half (review L4): the schema lets a set
+        // through with the switch absent, so the EFFECTIVE switch is checked
+        // here. Off, the ticks are cleared below, and the set would be
+        // dropped without a word, so it is refused as create refuses it.
+        if (!effGated && (sentTierIds?.length ?? 0) > 0) {
+          throw new ValidationError(
+            'Tiers can only be ticked on subscriber content — set isTierGated to include it in tiers',
+            { contentId: id }
+          );
+        }
         if (effGated && resultingOrgId == null) {
           // Belt and braces for a partial that never stated the org (the
           // schema catches the one that does). Refuse, never clamp: the old

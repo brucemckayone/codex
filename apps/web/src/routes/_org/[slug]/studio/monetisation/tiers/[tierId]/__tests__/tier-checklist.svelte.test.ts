@@ -38,11 +38,15 @@ vi.mock(
     )
 );
 
+import { PLAN_ITEMS_DELTA_LIST_MAX } from '@codex/validation';
+import { beforeNavigate } from '$app/navigation';
 import {
   accessSummarySlot,
+  deferRefresh,
   fail,
   land,
   listTierItems,
+  type QuerySlot,
   reset,
   setTierItems,
   tiersSlot,
@@ -155,20 +159,26 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-type Slot = { refresh: ReturnType<typeof vi.fn> };
-const lastItemsSlot = () => listTierItems.mock.results.at(-1)?.value as Slot;
+const lastItemsSlot = () =>
+  listTierItems.mock.results.at(-1)?.value as QuerySlot<unknown>;
 const lastItemsArgs = () =>
   listTierItems.mock.calls.at(-1)?.[0] as {
     tierId: string;
     query: Record<string, unknown>;
   };
 
-function mountPage({ items = ROWS as unknown[] | null } = {}) {
+function mountPage({
+  items = ROWS as unknown[] | null,
+  tiers = true,
+}: {
+  items?: unknown[] | null;
+  tiers?: boolean;
+} = {}) {
   component = mount(ChecklistPage, {
     target: document.body,
     props: { data: { userRole: 'owner', org: ORG } } as never,
   });
-  land(tiersSlot(), TIERS);
+  if (tiers) land(tiersSlot(), TIERS);
   land(accessSummarySlot(), SUMMARY);
   flushSync();
   if (items) land(lastItemsSlot() as never, PAGE(items));
@@ -360,5 +370,229 @@ describe('a list that failed to load', () => {
     expect(saveBar()).toBeNull();
     buttonNamed(m.monetisation_tier_items_retry())?.click();
     expect(lastItemsSlot().refresh).toHaveBeenCalled();
+  });
+});
+
+describe('a tier list that failed to load (M2)', () => {
+  test('says so with Retry, never an endless skeleton', () => {
+    mountPage({ tiers: false });
+    fail(tiersSlot());
+    flushSync();
+    expect(
+      document.querySelector('[data-testid="tier-checklist-tiers-failed"]')
+        ?.textContent
+    ).toContain(m.monetisation_tier_items_tier_load_failed());
+    expect(document.querySelector('.checklist-loading')).toBeNull();
+    buttonNamed(m.monetisation_tier_items_retry())?.click();
+    expect(tiersSlot().refresh).toHaveBeenCalled();
+  });
+});
+
+/** `n` subscriber films, unticked, numbered from `from`. */
+const films = (from: number, n: number) =>
+  Array.from({ length: n }, (_, i) =>
+    row({ id: `f-${from + i}`, title: `Film ${from + i}` })
+  );
+const PAGED = (items: unknown[], page: number, totalPages: number) => ({
+  items,
+  pagination: { page, limit: 50, total: totalPages * 50, totalPages },
+});
+const pageButton = (page: number) =>
+  document.querySelector(
+    `button[aria-label="${m.common_page_number({ page })}"]`
+  ) as HTMLButtonElement | null;
+const saved = (films: number) => ({
+  success: true,
+  result: { films, courses: 2, closedNow: { contentIds: [] } },
+});
+type Delta = {
+  add: { contentIds: string[]; courseIds: string[] };
+  remove: { contentIds: string[]; courseIds: string[] };
+};
+const sentDeltas = () =>
+  setTierItems.mock.calls.map((call) => (call[0] as { delta: Delta }).delta);
+
+/** "Tick all shown" on three full pages: 150 film adds, past one list's cap. */
+function tickThreePages() {
+  mountPage({ items: null });
+  for (const p of [1, 2, 3]) {
+    if (p > 1) {
+      pageButton(p)?.click();
+      flushSync();
+    }
+    land(lastItemsSlot(), PAGED(films((p - 1) * 50, 50), p, 3));
+    flushSync();
+    buttonNamed(m.monetisation_tier_items_tick_all())?.click();
+    flushSync();
+  }
+  expect(saveBar()?.textContent).toContain(
+    m.monetisation_tier_items_changes_other({ count: 150 })
+  );
+}
+
+describe("a save past one request's per-list cap (M3)", () => {
+  test('goes as two requests, each list within the cap, every change once', async () => {
+    setTierItems
+      .mockResolvedValueOnce(saved(118))
+      .mockResolvedValueOnce(saved(168));
+    tickThreePages();
+    buttonNamed(m.monetisation_tier_items_save())?.click();
+    await settle();
+
+    expect(setTierItems).toHaveBeenCalledTimes(2);
+    const [first, second] = sentDeltas();
+    expect(first.add.contentIds).toHaveLength(PLAN_ITEMS_DELTA_LIST_MAX);
+    expect(second.add.contentIds).toHaveLength(50);
+    expect(
+      new Set([...first.add.contentIds, ...second.add.contentIds]).size
+    ).toBe(150);
+    expect(saveBar()).toBeNull();
+    expect(text()).toContain(
+      m.monetisation_tier_items_saved({
+        name: 'Pro',
+        counts: '168 films and 2 courses',
+      })
+    );
+  });
+
+  test('a refused second request keeps only the unwritten changes, and says so', async () => {
+    setTierItems.mockResolvedValueOnce(saved(118)).mockResolvedValueOnce({
+      success: false,
+      status: 422,
+      code: 'BUSINESS_LOGIC_ERROR',
+      detailsCode: 'CREATOR_CONNECT_REQUIRED',
+      message: 'refused',
+    });
+    tickThreePages();
+    buttonNamed(m.monetisation_tier_items_save())?.click();
+    await settle();
+
+    expect(saveBar()?.textContent).toContain(
+      m.monetisation_tier_items_save_partial_other({ name: 'Pro', count: 50 })
+    );
+    expect(saveBar()?.textContent).toContain(
+      m.monetisation_tier_items_changes_other({ count: 50 })
+    );
+    expect(lastItemsSlot().refresh).toHaveBeenCalled();
+  });
+});
+
+describe('after a save (L5)', () => {
+  const savedOne = () =>
+    setTierItems.mockResolvedValue({
+      success: true,
+      result: { films: 19, courses: 2, closedNow: { contentIds: [] } },
+    });
+  const rereadAlert = () =>
+    document.querySelector('[data-testid="tier-checklist-reread-failed"]');
+
+  test('a just-saved row keeps its new tick while kit still holds the old page', async () => {
+    savedOne();
+    mountPage();
+    const slot = lastItemsSlot();
+    const reread = deferRefresh(slot);
+    toggle('Winter Light');
+    buttonNamed(m.monetisation_tier_items_save())?.click();
+    await settle();
+
+    expect(saveBar()).toBeNull();
+    expect(checkbox('Winter Light')?.checked).toBe(true);
+
+    // The re-read lands: the fresh page decides (here someone else unticked it).
+    reread.land(PAGE(ROWS));
+    await settle();
+    expect(checkbox('Winter Light')?.checked).toBe(false);
+    expect(rereadAlert()).toBeNull();
+  });
+
+  test('a FAILED re-read (old page kept) keeps the saved ticks and says so, with Retry', async () => {
+    savedOne();
+    mountPage();
+    const slot = lastItemsSlot();
+    const reread = deferRefresh(slot);
+    toggle('Winter Light');
+    buttonNamed(m.monetisation_tier_items_save())?.click();
+    await settle();
+    reread.fail();
+    await settle();
+
+    expect(checkbox('Winter Light')?.checked).toBe(true);
+    expect(rereadAlert()?.textContent).toContain(
+      m.monetisation_tier_items_reread_failed()
+    );
+    // Unticking it again is a change against what was SAVED, not the old page.
+    toggle('Winter Light');
+    expect(saveBar()?.textContent).toContain(
+      m.monetisation_tier_items_changes_one()
+    );
+
+    const calls = slot.refresh.mock.calls.length;
+    buttonNamed(m.monetisation_tier_items_retry())?.click();
+    expect(slot.refresh.mock.calls.length).toBe(calls + 1);
+  });
+
+  test('a save that empties the last page steps back a page', async () => {
+    savedOne();
+    setPage('/studio/monetisation/tiers/pro?filter=excluded', {
+      tierId: 'pro',
+    });
+    mountPage({ items: null });
+    land(lastItemsSlot(), PAGED(films(0, 50), 1, 2));
+    flushSync();
+    pageButton(2)?.click();
+    flushSync();
+    const last = lastItemsSlot();
+    land(last, PAGED(films(50, 20), 2, 2));
+    flushSync();
+    const reread = deferRefresh(last);
+    buttonNamed(
+      m.monetisation_tier_items_tick_all_count({ count: 20 })
+    )?.click();
+    flushSync();
+    buttonNamed(m.monetisation_tier_items_save())?.click();
+    await settle();
+
+    reread.land(PAGED([], 2, 1));
+    await settle();
+    expect(lastItemsArgs().query).toMatchObject({
+      filter: 'excluded',
+      page: 1,
+    });
+  });
+});
+
+describe('empty and leaving', () => {
+  test('an empty filter says so, not "nothing a tier can include"', () => {
+    mountPage({ items: [] });
+    expect(text()).toContain(m.monetisation_tier_items_empty());
+    buttonNamed(`${m.monetisation_tier_items_filter_included()}20`)?.click();
+    flushSync();
+    land(lastItemsSlot(), PAGE([]));
+    flushSync();
+    expect(
+      document.querySelector('[data-testid="tier-checklist-empty"]')
+        ?.textContent
+    ).toContain(m.monetisation_tier_items_empty_filter());
+  });
+
+  test('leaving with unsaved ticks asks first, in its own words', () => {
+    mountPage();
+    toggle('Winter Light');
+    const guard = vi.mocked(beforeNavigate).mock.calls.at(-1)?.[0];
+    const cancel = vi.fn();
+    guard?.({
+      to: { url: new URL('http://localhost/studio/content') },
+      cancel,
+    } as never);
+    flushSync();
+    expect(cancel).toHaveBeenCalled();
+    expect(text()).toContain(m.monetisation_tier_items_leave_title());
+    expect(text()).toContain(
+      m.monetisation_tier_items_leave_body_one({ name: 'Pro' })
+    );
+    expect(
+      buttonNamed(m.monetisation_tier_items_leave_confirm())
+    ).toBeDefined();
+    expect(buttonNamed(m.monetisation_tier_items_leave_stay())).toBeDefined();
   });
 });

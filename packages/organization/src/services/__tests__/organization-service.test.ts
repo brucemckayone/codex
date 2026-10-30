@@ -21,6 +21,7 @@
 import * as schema from '@codex/database/schema';
 import {
   createTestContentInput,
+  createTestTierInput,
   createUniqueSlug,
   type Database,
   seedTestUsers,
@@ -2113,6 +2114,95 @@ describe('OrganizationService', () => {
       expect(result.items).toHaveLength(1);
       expect(result.pagination.total).toBe(1);
       expect(result.items[0]!.role).toBe('owner');
+    });
+  });
+
+  // Codex-2hxff.91 review L7: a CLOSED item (behind the tier switch, in no
+  // tier a new subscriber can join, not on sale) is hidden from the public
+  // catalogue, so no public count or creator card may show it either.
+  describe('a CLOSED item in the public counts', () => {
+    let slug: string;
+    let creatorUserId: string;
+    let tierId: string;
+    let closedId: string;
+    let closedSlug: string;
+
+    beforeAll(async () => {
+      const [ownerId, creatorId] = await seedTestUsers(db, 2);
+      creatorUserId = creatorId!;
+      const org = await service.create(
+        { name: 'Closed Count Org', slug: createUniqueSlug('closed-count') },
+        ownerId!
+      );
+      slug = org.slug;
+      await db.insert(schema.organizationMemberships).values({
+        organizationId: org.id,
+        userId: creatorUserId,
+        role: 'creator',
+        status: 'active',
+      });
+      const [tier] = await db
+        .insert(schema.subscriptionTiers)
+        .values(createTestTierInput(org.id, { sortOrder: 1 }))
+        .returning({ id: schema.subscriptionTiers.id });
+      tierId = tier!.id;
+
+      const item = async (overrides: Record<string, unknown>) => {
+        const [row] = await db
+          .insert(schema.content)
+          .values(
+            createTestContentInput(creatorUserId, {
+              organizationId: org.id,
+              contentType: 'written',
+              status: 'published',
+              publishedAt: new Date(),
+              ...overrides,
+            })
+          )
+          .returning({ id: schema.content.id, slug: schema.content.slug });
+        return row!;
+      };
+      await item({ isFree: true });
+      // Closed but on sale: listed, as any paid item, so it is counted.
+      await item({
+        isFree: false,
+        isTierGated: true,
+        isPurchasable: true,
+        priceCents: 900,
+      });
+      const closed = await item({ isFree: false, isTierGated: true });
+      closedId = closed.id;
+      closedSlug = closed.slug;
+    });
+
+    const creatorCard = async () =>
+      (await service.getPublicCreators(slug)).items.find(
+        (c) => c.id === creatorUserId
+      );
+
+    it('leaves it out of the creator card count and gallery, and the org stats', async () => {
+      const card = await creatorCard();
+      expect(card?.contentCount).toBe(2);
+      expect(card?.recentContent.map((c) => c.slug)).not.toContain(closedSlug);
+      const stats = await service.getPublicStats(slug);
+      expect(stats.content.total).toBe(2);
+      expect(stats.content.written).toBe(2);
+    });
+
+    it('counts it once a tier includes it', async () => {
+      await db.insert(schema.contentTierAccess).values({
+        contentId: closedId,
+        tierId,
+        organizationId: (await db.query.organizations.findFirst({
+          where: eq(schema.organizations.slug, slug),
+          columns: { id: true },
+        }))!.id,
+      });
+
+      const card = await creatorCard();
+      expect(card?.contentCount).toBe(3);
+      expect(card?.recentContent.map((c) => c.slug)).toContain(closedSlug);
+      expect((await service.getPublicStats(slug)).content.total).toBe(3);
     });
   });
 });

@@ -6,9 +6,13 @@
   other tiers" all render this list. Each row ticks one tier; "and above" on a
   row ticks that tier and every dearer one and unticks the cheaper ones
   (owner decision U1: dearer by MONTHLY price, the guidance note's yardstick).
-  The shortcut whose set equals the ticks is drawn in the accent colour, so
-  the creator sees the shape at a glance. It is a snapshot, not a rule: a
+  The shortcut whose set equals the ticks is drawn in the accent colour,
+  without its underline, and carries `aria-current`, so the shape is seen at
+  a glance and heard, never colour alone. It is a snapshot, not a rule: a
   tier created later is not added.
+
+  The group (role + name) sits on the wrapper, not the `<ul>`: a role on the
+  list would strip its list semantics from the rows.
 
   Rows are sorted by monthly price, cheapest first. Ticks on tiers that are
   not options (an inactive tier, kept for its existing subscribers) are never
@@ -64,8 +68,8 @@
   }
 </script>
 
-<div class="plan-picker">
-  <ul class="tiers" role="group" aria-label={label}>
+<div class="plan-picker" role="group" aria-label={label}>
+  <ul class="tiers">
     {#each rows as tier (tier.id)}
       {@const on = selected.includes(tier.id)}
       {@const shortcut = onSelectFromTier && offersAndAbove(tier.id, tiers)}
@@ -86,7 +90,7 @@
             <button
               type="button"
               class="tier__above"
-              data-current={isAndAboveSelection(selected, tier.id, tiers) || undefined}
+              aria-current={isAndAboveSelection(selected, tier.id, tiers) ? 'true' : undefined}
               aria-label={m.plan_picker_and_above_aria({ tierName: tier.name })}
               {disabled}
               onclick={() => onSelectFromTier?.(tier.id)}
@@ -244,7 +248,7 @@
     border-inline-start-color: color-mix(in oklab, var(--color-interactive) 30%, var(--color-border-subtle));
   }
 
-  .tier__above[data-current] {
+  .tier__above[aria-current='true'] {
     color: var(--color-interactive);
     text-decoration: none;
   }

@@ -52,14 +52,14 @@ export class ContentNotGrantableError extends BusinessLogicError {
  * package cannot import (admin depends on Foundation packages only). The
  * message and `code: 'CREATOR_CONNECT_REQUIRED'` are copied verbatim so the
  * Studio shows the same "set up payouts" text whichever route refused — keep
- * the two in step.
+ * the two in step. Like it, the context never names the creator (it reaches
+ * the client verbatim).
  */
 export class CreatorPayoutsRequiredError extends BusinessLogicError {
-  constructor(creatorId: string, accessType: string) {
+  constructor(accessType: string) {
     super(
       'Set up payouts before publishing paid or subscriber content. Complete Stripe Connect onboarding to receive payments.',
       {
-        creatorId,
         accessType,
         code: 'CREATOR_CONNECT_REQUIRED',
       }

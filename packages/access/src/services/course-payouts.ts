@@ -60,21 +60,16 @@ export async function courseEarnsMoney(
 }
 
 /**
- * Throw unless the creator can be paid. The same DB-only readiness check
- * `ContentService` makes: `stripe_connect_accounts` (one row per user)
- * mirrors Stripe's `charges_enabled` / `payouts_enabled` via `account.updated`.
- * The course paths and the tier checklist (`PlanAccessService.setTierItems`,
- * films and courses alike) all ask here, so the rule cannot drift between
- * them. `reason` is the refusal's `accessType`: what was being put on offer.
- *
- * @throws {CreatorPayoutsRequiredError} No account, or one not charges +
- *   payouts enabled
+ * Can the creator be paid? The same DB-only readiness check `ContentService`
+ * makes: `stripe_connect_accounts` (one row per user) mirrors Stripe's
+ * `charges_enabled` / `payouts_enabled` via `account.updated`. The course
+ * paths and the tier checklist (`PlanAccessService.setTierItems`, films and
+ * courses alike) all ask here, so the rule cannot drift between them.
  */
-export async function assertCreatorCanBePaid(
+export async function creatorCanBePaid(
   db: AccessQueryClient,
-  creatorId: string,
-  reason: 'course' | 'included_in_tier'
-): Promise<void> {
+  creatorId: string
+): Promise<boolean> {
   const [account] = await db
     .select({
       chargesEnabled: stripeConnectAccounts.chargesEnabled,
@@ -83,15 +78,19 @@ export async function assertCreatorCanBePaid(
     .from(stripeConnectAccounts)
     .where(eq(stripeConnectAccounts.userId, creatorId))
     .limit(1);
-
-  if (account?.chargesEnabled && account.payoutsEnabled) return;
-  throw new CreatorPayoutsRequiredError(creatorId, reason);
+  return !!account?.chargesEnabled && !!account.payoutsEnabled;
 }
 
-/** {@link assertCreatorCanBePaid} for a course being put on offer. */
-export function assertCourseCreatorCanBePaid(
+/**
+ * Throw unless a course's creator can be paid ({@link creatorCanBePaid}).
+ *
+ * @throws {CreatorPayoutsRequiredError} No account, or one not charges +
+ *   payouts enabled
+ */
+export async function assertCourseCreatorCanBePaid(
   db: AccessQueryClient,
   creatorId: string
 ): Promise<void> {
-  return assertCreatorCanBePaid(db, creatorId, 'course');
+  if (await creatorCanBePaid(db, creatorId)) return;
+  throw new CreatorPayoutsRequiredError('course');
 }

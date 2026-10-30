@@ -48,7 +48,7 @@ import type {
   DeleteTierQueryInput,
   UpdateTierInput,
 } from '@codex/validation';
-import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, type SQL, sql } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
   ConnectAccountNotReadyError,
@@ -66,6 +66,44 @@ type SubscriptionTier = typeof subscriptionTiers.$inferSelect;
 
 /** A `dbWs` transaction, as the plan-access writes below take one. */
 type TierTransaction = Parameters<Parameters<DatabaseWs['transaction']>[0]>[0];
+
+/**
+ * Live films of this org ticked for `tierId` and for NO other live tier, as
+ * `content_id`: paid or closed alike (the delete dialog splits them). One
+ * query for both the delete's count and its move, so the two cannot drift.
+ */
+function onlyHereFilmsSql(orgId: string, tierId: string): SQL {
+  return sql`
+    SELECT ${contentTierAccess.contentId} AS content_id
+      FROM ${contentTierAccess}
+      INNER JOIN ${content} ON ${content.id} = ${contentTierAccess.contentId}
+        AND ${content.deletedAt} IS NULL
+     WHERE ${contentTierAccess.tierId} = ${tierId}
+       AND ${contentTierAccess.organizationId} = ${orgId}
+       AND NOT EXISTS (
+         SELECT 1 FROM content_tier_access o
+           INNER JOIN subscription_tiers ot ON ot.id = o.tier_id
+            AND ot.deleted_at IS NULL
+          WHERE o.content_id = ${contentTierAccess.contentId}
+            AND o.tier_id <> ${tierId})`;
+}
+
+/** {@link onlyHereFilmsSql} for live courses, as `course_id`. */
+function onlyHereCoursesSql(orgId: string, tierId: string): SQL {
+  return sql`
+    SELECT ${courseTierAccess.courseId} AS course_id
+      FROM ${courseTierAccess}
+      INNER JOIN ${courses} ON ${courses.id} = ${courseTierAccess.courseId}
+        AND ${courses.deletedAt} IS NULL
+     WHERE ${courseTierAccess.tierId} = ${tierId}
+       AND ${courseTierAccess.organizationId} = ${orgId}
+       AND NOT EXISTS (
+         SELECT 1 FROM course_tier_access o
+           INNER JOIN subscription_tiers ot ON ot.id = o.tier_id
+            AND ot.deleted_at IS NULL
+          WHERE o.course_id = ${courseTierAccess.courseId}
+            AND o.tier_id <> ${tierId})`;
+}
 
 /** Codes for Stripe's refusals of a tier create (Codex-2hxff.66). */
 const TIER_CREATE_KEY: CreateKeySubject = {
@@ -822,6 +860,7 @@ export class TierService extends BaseService {
                 isNull(subscriptionTiers.deletedAt)
               )
             )
+            .orderBy(asc(subscriptionTiers.id))
             .for('share');
           if (targets.length !== moveTo.length) {
             const found = new Set(targets.map((t) => t.id));
@@ -831,6 +870,35 @@ export class TierService extends BaseService {
             );
           }
         }
+
+        // b2. Lock the films ticked here, in id order, before reading what is
+        //     only here or writing any tick. Every other writer of a film's
+        //     ticks (the editor, the tier checklist) holds that film's row
+        //     while it writes them, so the only-here set read next cannot
+        //     change under this delete. It also keeps ONE lock order for all
+        //     three: tiers, then content rows, then ticks. The move below
+        //     writes ticks before it updates content rows; without this lock
+        //     a checklist save adding the same film to a move target (which
+        //     locks the film's row first) would deadlock with it.
+        await tx
+          .select({ id: content.id })
+          .from(content)
+          .where(
+            inArray(
+              content.id,
+              tx
+                .select({ id: contentTierAccess.contentId })
+                .from(contentTierAccess)
+                .where(
+                  and(
+                    eq(contentTierAccess.tierId, tierId),
+                    eq(contentTierAccess.organizationId, orgId)
+                  )
+                )
+            )
+          )
+          .orderBy(asc(content.id))
+          .for('no key update');
 
         // c. What is ONLY here, computed now (never the dialog's preview).
         const onlyHere = await this.findOnlyHereItems(tx, orgId, tierId);
@@ -848,35 +916,32 @@ export class TierService extends BaseService {
           });
         }
 
-        // e. Move: add every only-here item to every target.
+        // e. Move: add every only-here item to every target. One
+        //    INSERT … SELECT per kind (review L3): the items are re-derived in
+        //    SQL by the same query as step c, so the bind parameters are the
+        //    two ids plus the targets (at most 50, the schema's max), however
+        //    many items there are. A VALUES list of items × targets × 3 would
+        //    pass Postgres's 65,535-parameter limit at ~21,845 pairs.
         if (moveTo.length > 0) {
+          const targets = sql.join(
+            moveTo.map((to) => sql`${to}::uuid`),
+            sql`, `
+          );
           if (onlyHere.contentIds.length > 0) {
-            await tx
-              .insert(contentTierAccess)
-              .values(
-                onlyHere.contentIds.flatMap((contentId) =>
-                  moveTo.map((to) => ({
-                    contentId,
-                    tierId: to,
-                    organizationId: orgId,
-                  }))
-                )
-              )
-              .onConflictDoNothing();
+            await tx.execute(sql`
+              INSERT INTO ${contentTierAccess} (content_id, tier_id, organization_id)
+              SELECT here.content_id, target.id, ${orgId}::uuid
+                FROM (${onlyHereFilmsSql(orgId, tierId)}) here
+                CROSS JOIN unnest(ARRAY[${targets}]) AS target(id)
+              ON CONFLICT DO NOTHING`);
           }
           if (onlyHere.courseIds.length > 0) {
-            await tx
-              .insert(courseTierAccess)
-              .values(
-                onlyHere.courseIds.flatMap((courseId) =>
-                  moveTo.map((to) => ({
-                    courseId,
-                    tierId: to,
-                    organizationId: orgId,
-                  }))
-                )
-              )
-              .onConflictDoNothing();
+            await tx.execute(sql`
+              INSERT INTO ${courseTierAccess} (course_id, tier_id, organization_id)
+              SELECT here.course_id, target.id, ${orgId}::uuid
+                FROM (${onlyHereCoursesSql(orgId, tierId)}) here
+                CROSS JOIN unnest(ARRAY[${targets}]) AS target(id)
+              ON CONFLICT DO NOTHING`);
           }
         }
 
@@ -966,32 +1031,12 @@ export class TierService extends BaseService {
     orgId: string,
     tierId: string
   ): Promise<{ contentIds: string[]; courseIds: string[] }> {
-    const films = await tx.execute<{ content_id: string }>(sql`
-      SELECT ${contentTierAccess.contentId} AS content_id
-        FROM ${contentTierAccess}
-        INNER JOIN ${content} ON ${content.id} = ${contentTierAccess.contentId}
-          AND ${content.deletedAt} IS NULL
-       WHERE ${contentTierAccess.tierId} = ${tierId}
-         AND ${contentTierAccess.organizationId} = ${orgId}
-         AND NOT EXISTS (
-           SELECT 1 FROM content_tier_access o
-             INNER JOIN subscription_tiers ot ON ot.id = o.tier_id
-              AND ot.deleted_at IS NULL
-            WHERE o.content_id = ${contentTierAccess.contentId}
-              AND o.tier_id <> ${tierId})`);
-    const courseRows = await tx.execute<{ course_id: string }>(sql`
-      SELECT ${courseTierAccess.courseId} AS course_id
-        FROM ${courseTierAccess}
-        INNER JOIN ${courses} ON ${courses.id} = ${courseTierAccess.courseId}
-          AND ${courses.deletedAt} IS NULL
-       WHERE ${courseTierAccess.tierId} = ${tierId}
-         AND ${courseTierAccess.organizationId} = ${orgId}
-         AND NOT EXISTS (
-           SELECT 1 FROM course_tier_access o
-             INNER JOIN subscription_tiers ot ON ot.id = o.tier_id
-              AND ot.deleted_at IS NULL
-            WHERE o.course_id = ${courseTierAccess.courseId}
-              AND o.tier_id <> ${tierId})`);
+    const films = await tx.execute<{ content_id: string }>(
+      onlyHereFilmsSql(orgId, tierId)
+    );
+    const courseRows = await tx.execute<{ course_id: string }>(
+      onlyHereCoursesSql(orgId, tierId)
+    );
     return {
       contentIds: films.rows.map((r) => r.content_id),
       courseIds: courseRows.rows.map((r) => r.course_id),
@@ -1087,6 +1132,23 @@ export class TierService extends BaseService {
       // Uses high-offset temp values (10000+) to avoid both the UNIQUE constraint
       // on (organizationId, sortOrder) and the CHECK constraint (sort_order > 0).
       await this.dbWs.transaction(async (tx) => {
+        // Lock every live tier of the org in id order BEFORE the row-by-row
+        // updates. The plan-access writers (checklist save, editor, delete
+        // targets) take their multi-tier locks in id order too; updating in
+        // payload order instead could hold one tier while waiting on another
+        // that a sharer holds, a deadlock (40P01) that aborts one of them.
+        await tx
+          .select({ id: subscriptionTiers.id })
+          .from(subscriptionTiers)
+          .where(
+            and(
+              eq(subscriptionTiers.organizationId, orgId),
+              isNull(subscriptionTiers.deletedAt)
+            )
+          )
+          .orderBy(asc(subscriptionTiers.id))
+          .for('update');
+
         // Phase 1: Move all to high temp values to clear the target range
         for (const [i, tierId] of tierIds.entries()) {
           await tx

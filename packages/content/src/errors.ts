@@ -116,14 +116,22 @@ export class CategorySlugConflictError extends ConflictError {
  * `code: 'CREATOR_CONNECT_REQUIRED'` is shared with the subscription domain's
  * equivalent so the frontend can recognise the "set up payouts" condition
  * uniformly. Maps to HTTP 422 via BusinessLogicError.
+ *
+ * The context reaches the client verbatim, so it never names the creator: in
+ * a team the one who can't be paid is often not the caller (review L5). A
+ * refusal of several items (the tier checklist) names them by their ids,
+ * which the caller already sees.
  */
 export class CreatorPayoutsRequiredError extends BusinessLogicError {
-  constructor(creatorId: string, accessType: string) {
+  constructor(
+    accessType: string,
+    items: { contentIds?: string[]; courseIds?: string[] } = {}
+  ) {
     super(
       'Set up payouts before publishing paid or subscriber content. Complete Stripe Connect onboarding to receive payments.',
       {
-        creatorId,
         accessType,
+        ...items,
         code: 'CREATOR_CONNECT_REQUIRED',
       }
     );

@@ -232,7 +232,6 @@ export class AdminContentManagementService extends BaseService {
             .limit(1);
           if (!account?.chargesEnabled || !account.payoutsEnabled) {
             throw new CreatorPayoutsRequiredError(
-              existing.creatorId,
               (existing.priceCents ?? 0) > 0 ? 'paid' : 'included_in_tier'
             );
           }

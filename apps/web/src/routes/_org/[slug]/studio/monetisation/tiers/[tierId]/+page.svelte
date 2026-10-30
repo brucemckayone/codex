@@ -11,9 +11,13 @@
     footnote with a link to the editor, never listed for bulk ticking (a
     search can show them, as disabled rows with the reason): ticking one here
     would quietly put a free film behind a subscription.
-  - Ticks are DRAFTS until "Save changes". One save is one capped,
-    idempotent DELTA (adds and removes), so it never overwrites ticks on
-    rows this page never showed, and a resend lands the same state.
+  - Ticks are DRAFTS until "Save changes". A save sends capped, idempotent
+    DELTAS (adds and removes), so it never overwrites ticks on rows this
+    page never showed, and a resend lands the same state. A draft past one
+    request's per-list cap goes as two requests.
+  - After a save the rows keep showing what was saved until the re-read
+    lands (kit keeps the old page meanwhile, and for good if the re-read
+    fails, which the page then says).
   - Unticking the last tier of a subscribers-only film leaves it CLOSED,
     never free: the row says "Closed after save" and the save bar warns.
   - A list that failed to load shows "We couldn't load what's in {tier}"
@@ -26,7 +30,11 @@
   polling: the items and the summary are re-read after a save, or on Retry.
 -->
 <script lang="ts">
-  import { PLAN_ITEMS_DELTA_MAX, PLAN_ITEMS_PAGE_MAX } from '@codex/validation';
+  import {
+    PLAN_ITEMS_DELTA_LIST_MAX,
+    PLAN_ITEMS_DELTA_MAX,
+    PLAN_ITEMS_PAGE_MAX,
+  } from '@codex/validation';
   import { beforeNavigate, goto } from '$app/navigation';
   import { page } from '$app/state';
   import * as m from '$paraglide/messages';
@@ -132,6 +140,13 @@
     itemsState.kind === 'ok' ? itemsState.status.pagination.totalPages : 0
   );
 
+  // A page past the end (a save emptied the last page of "Not included", or
+  // the list shrank meanwhile) steps back, never an empty dead end.
+  $effect(() => {
+    if (itemsState.kind !== 'ok' || pageNo <= 1 || rows.length > 0) return;
+    pageNo = Math.max(1, Math.min(pageNo - 1, totalPages));
+  });
+
   // A tier that is not live (deleted, or hidden): back to the list.
   $effect(() => {
     if (isOwner && tiersState.kind === 'ok' && !tier) {
@@ -151,14 +166,27 @@
     closes: boolean;
   }
   let changes = $state<Record<string, Change>>({});
+  /**
+   * Changes a save wrote that the rows on screen may not show yet: kit's
+   * `Query` keeps the old page in `current` while it re-reads, and for good
+   * if the re-read fails. Until a re-read lands, a row's stored tick is read
+   * through this, so a just-saved row never flips back to its old tick.
+   */
+  let justSaved = $state<Record<string, Change>>({});
   const keyOf = (kind: 'film' | 'course', id: string) => `${kind}:${id}`;
   const changeList = $derived(Object.values(changes));
   const changeCount = $derived(changeList.length);
   const closingCount = $derived(changeList.filter((c) => c.closes).length);
 
+  /** The row's tick as stored: the list's, or what a save just wrote. */
+  function stored(row: PlanItemRow): boolean {
+    const saved = justSaved[keyOf(row.kind, row.id)];
+    return saved ? saved.add : row.included;
+  }
+
   function isOn(row: PlanItemRow): boolean {
     const change = changes[keyOf(row.kind, row.id)];
-    return change ? change.add : row.included;
+    return change ? change.add : stored(row);
   }
 
   /** A removal that leaves a subscribers-only film (not for sale) in no tier. */
@@ -175,7 +203,7 @@
     if (!row.eligible) return;
     const key = keyOf(row.kind, row.id);
     const next = { ...changes };
-    if (on === row.included) delete next[key];
+    if (on === stored(row)) delete next[key];
     else next[key] = { kind: row.kind, id: row.id, add: on, closes: !on && closesWhenRemoved(row) };
     changes = next;
     notice = null;
@@ -191,7 +219,7 @@
     const next = { ...changes };
     for (const row of eligibleRows) {
       const key = keyOf(row.kind, row.id);
-      if (on === row.included) delete next[key];
+      if (on === stored(row)) delete next[key];
       else next[key] = { kind: row.kind, id: row.id, add: on, closes: !on && closesWhenRemoved(row) };
     }
     changes = next;
@@ -216,11 +244,15 @@
   const gaps = $derived(
     (summaryRow?.missingFromCheaper ?? [])
       .filter((gap) => tierById.has(gap.cheaperTierId))
-      // A small gap the draft closes goes away, as the mockup's L3 shows.
+      // A small gap the draft (or a save the summary hasn't re-read yet)
+      // closes goes away, as the mockup's L3 shows.
       .filter((gap) => {
         const count = gap.films + gap.courses;
         if (count > gap.sampleItems.length) return true;
-        return !gap.sampleItems.every((item) => changes[keyOf(item.kind, item.id)]?.add);
+        return !gap.sampleItems.every((item) => {
+          const key = keyOf(item.kind, item.id);
+          return (changes[key] ?? justSaved[key])?.add;
+        });
       })
   );
 
@@ -349,6 +381,39 @@
   let saving = $state(false);
   let saveError = $state('');
   let notice = $state<{ saved: string; closed: number } | null>(null);
+  /** A re-read after a save failed: the list may show the old ticks. */
+  let rereadFailed = $state(false);
+  let rereadRun = 0;
+
+  /**
+   * The draft as one or more requests, each within the command's caps:
+   * PLAN_ITEMS_DELTA_LIST_MAX ids per list, so "Tick all" on three pages of
+   * "Not included" (150 film adds) is two requests. The total is checked
+   * against PLAN_ITEMS_DELTA_MAX first, so no request goes over it either.
+   */
+  function batchesOf(draft: Change[]): Change[][] {
+    const lists = [
+      draft.filter((c) => c.kind === 'film' && c.add),
+      draft.filter((c) => c.kind === 'course' && c.add),
+      draft.filter((c) => c.kind === 'film' && !c.add),
+      draft.filter((c) => c.kind === 'course' && !c.add),
+    ];
+    const count = Math.max(...lists.map((list) => Math.ceil(list.length / PLAN_ITEMS_DELTA_LIST_MAX)));
+    return Array.from({ length: count }, (_, i) =>
+      lists.flatMap((list) =>
+        list.slice(i * PLAN_ITEMS_DELTA_LIST_MAX, (i + 1) * PLAN_ITEMS_DELTA_LIST_MAX)
+      )
+    );
+  }
+
+  function deltaOf(batch: Change[]) {
+    const ids = (kind: 'film' | 'course', add: boolean) =>
+      batch.filter((c) => c.kind === kind && c.add === add).map((c) => c.id);
+    return {
+      add: { contentIds: ids('film', true), courseIds: ids('course', true) },
+      remove: { contentIds: ids('film', false), courseIds: ids('course', false) },
+    };
+  }
 
   async function save() {
     if (!orgId || saving || changeCount === 0) return;
@@ -356,46 +421,94 @@
       saveError = m.monetisation_tier_items_too_many({ max: PLAN_ITEMS_DELTA_MAX });
       return;
     }
-    const pick = (kind: 'film' | 'course', add: boolean) =>
-      changeList.filter((c) => c.kind === kind && c.add === add).map((c) => c.id);
-    const delta = {
-      add: { contentIds: pick('film', true), courseIds: pick('course', true) },
-      remove: { contentIds: pick('film', false), courseIds: pick('course', false) },
-    };
+    const draft = changeList;
+    const written: Change[] = [];
+    let closed = 0;
+    let tierNow: { films: number; courses: number } | null = null;
     saving = true;
     saveError = '';
     notice = null;
     try {
-      const result = await setTierItems({ orgId, tierId, delta });
-      if ('result' in result) {
-        changes = {};
+      for (const batch of batchesOf(draft)) {
+        const result = await setTierItems({ orgId, tierId, delta: deltaOf(batch) });
+        if (!('result' in result)) {
+          // Refused: this request wrote nothing. Keep the rest of the draft.
+          saveError =
+            written.length > 0
+              ? partialError(draft.length - written.length)
+              : result.detailsCode === 'CREATOR_CONNECT_REQUIRED'
+                ? m.monetisation_tier_items_save_payouts()
+                : m.monetisation_tier_items_save_error({ name: tierName });
+          logError(
+            'save refused',
+            `${result.status} ${result.detailsCode ?? result.code ?? 'unknown'}`,
+            result.status >= 500 ? 'error' : 'warn'
+          );
+          return;
+        }
+        written.push(...batch);
+        closed += result.result.closedNow.contentIds.length;
+        tierNow = result.result;
+      }
+      if (tierNow) {
         notice = {
           saved: m.monetisation_tier_items_saved({
             name: tierName,
-            counts: countsAnd(result.result.films, result.result.courses),
+            counts: countsAnd(tierNow.films, tierNow.courses),
           }),
-          closed: result.result.closedNow.contentIds.length,
+          closed,
         };
-        void itemsQuery?.refresh().catch((error) => logError('items re-read failed', error));
-        void summaryQuery?.refresh().catch((error) => logError('summary re-read failed', error));
-        return;
       }
-      // Refused: nothing was written. Keep the draft so it can be fixed.
-      saveError =
-        result.detailsCode === 'CREATOR_CONNECT_REQUIRED'
-          ? m.monetisation_tier_items_save_payouts()
-          : m.monetisation_tier_items_save_error({ name: tierName });
-      logError(
-        'save refused',
-        `${result.status} ${result.detailsCode ?? result.code ?? 'unknown'}`,
-        result.status >= 500 ? 'error' : 'warn'
-      );
     } catch (error) {
-      saveError = m.monetisation_tier_items_save_error({ name: tierName });
+      saveError =
+        written.length > 0
+          ? partialError(draft.length - written.length)
+          : m.monetisation_tier_items_save_error({ name: tierName });
       logError('save failed', error);
     } finally {
+      commit(written);
       saving = false;
     }
+  }
+
+  function partialError(unsaved: number): string {
+    return unsaved === 1
+      ? m.monetisation_tier_items_save_partial_one({ name: tierName })
+      : m.monetisation_tier_items_save_partial_other({ name: tierName, count: unsaved });
+  }
+
+  /** Move what a save wrote out of the draft, show it as stored, re-read. */
+  function commit(written: Change[]) {
+    if (written.length === 0) return;
+    const draft = { ...changes };
+    const saved = { ...justSaved };
+    for (const change of written) {
+      const key = keyOf(change.kind, change.id);
+      delete draft[key];
+      saved[key] = change;
+    }
+    changes = draft;
+    justSaved = saved;
+    reread();
+  }
+
+  /**
+   * Re-read the page and the summary after a save, or on Retry. A failed
+   * re-read keeps the old values in kit's `current`, so it is said here, and
+   * the just-saved ticks stay shown until a re-read of the page lands.
+   */
+  function reread() {
+    const run = ++rereadRun;
+    void Promise.allSettled([itemsQuery?.refresh(), summaryQuery?.refresh()]).then(
+      ([items, summary]) => {
+        // A later save's re-read owns the outcome.
+        if (run !== rereadRun) return;
+        if (items.status === 'fulfilled') justSaved = {};
+        else logError('items re-read failed', items.reason);
+        if (summary.status === 'rejected') logError('summary re-read failed', summary.reason);
+        rereadFailed = items.status === 'rejected' || summary.status === 'rejected';
+      }
+    );
   }
 
   function logError(what: string, error: unknown, level: 'error' | 'warn' = 'error') {
@@ -406,8 +519,13 @@
     });
   }
 
+  // A failed first read stays on the query's `.error`, which keeps its alert up.
   function retryItems() {
     void itemsQuery?.refresh().catch(() => {});
+  }
+
+  function retryTiers() {
+    void tiersQuery?.refresh().catch(() => {});
   }
 
   // ── Unsaved ticks: ask before leaving ────────────────────────────────────
@@ -457,7 +575,17 @@
       ]}
     />
 
-    {#if !tier}
+    {#if tiersState.kind === 'failed'}
+      <!-- The tier list failed: say so, never an endless skeleton. -->
+      <Alert variant="error" data-testid="tier-checklist-tiers-failed">
+        <span class="alert-row">
+          <span>{m.monetisation_tier_items_tier_load_failed()}</span>
+          <Button variant="secondary" size="sm" type="button" onclick={retryTiers}>
+            {m.monetisation_tier_items_retry()}
+          </Button>
+        </span>
+      </Alert>
+    {:else if !tier}
       <div class="checklist-loading" aria-hidden="true">
         <Skeleton width="40%" height="var(--text-xl)" />
         <Skeleton width="70%" height="var(--text-sm)" />
@@ -520,6 +648,17 @@
         </Alert>
       {/if}
 
+      {#if rereadFailed}
+        <Alert variant="warning" data-testid="tier-checklist-reread-failed">
+          <span class="alert-row">
+            <span>{m.monetisation_tier_items_reread_failed()}</span>
+            <Button variant="secondary" size="sm" type="button" onclick={reread}>
+              {m.monetisation_tier_items_retry()}
+            </Button>
+          </span>
+        </Alert>
+      {/if}
+
       <Card.Root>
         <Card.Content>
           <div class="checklist-body">
@@ -568,7 +707,9 @@
                 <p class="checklist-empty" data-testid="tier-checklist-empty">
                   {search
                     ? m.monetisation_tier_items_no_results({ search })
-                    : m.monetisation_tier_items_empty()}
+                    : filter !== 'all'
+                      ? m.monetisation_tier_items_empty_filter()
+                      : m.monetisation_tier_items_empty()}
                 </p>
               {:else}
                 <div class="bulk-bar">
@@ -705,10 +846,12 @@
 
   <ConfirmDialog
     bind:open={leaveOpen}
-    title={m.monetisation_faq_unsaved()}
-    description={changesLabel}
-    confirmText={m.monetisation_tier_items_discard()}
-    cancelText={m.common_cancel()}
+    title={m.monetisation_tier_items_leave_title()}
+    description={changeCount === 1
+      ? m.monetisation_tier_items_leave_body_one({ name: tierName })
+      : m.monetisation_tier_items_leave_body_other({ count: changeCount, name: tierName })}
+    confirmText={m.monetisation_tier_items_leave_confirm()}
+    cancelText={m.monetisation_tier_items_leave_stay()}
     variant="destructive"
     onConfirm={confirmLeave}
   />

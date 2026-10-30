@@ -79,6 +79,7 @@
   import { randomUuid } from '$lib/utils/random-uuid';
   import { humanizeRequirement } from '$lib/utils/connect-requirement-humanization';
   import {
+    type ConnectQueryState,
     connectQueryState,
     isConnectReady,
     moneyReadiness,
@@ -551,9 +552,20 @@
       ? getTierDeleteImpact({ orgId, tierId: deletingTier.id })
       : null
   );
-  const impactState = $derived(
-    connectQueryState(impactQuery as QueryResult<TierDeleteImpact> | null)
-  );
+  /**
+   * A refusal (TIER_HAS_ONLY_ITEMS, TIER_HAS_SUBSCRIBERS) proves the preview
+   * out of date, but kit's `Query` keeps the old `current` while it re-reads
+   * and FOREVER if the re-read fails, so `impactState` alone still reads
+   * `ok` on the old preview. Until the re-read lands the dialog treats the
+   * preview as unknown: no choices, Delete disabled, and the "couldn't
+   * check" alert if the re-read fails.
+   */
+  let impactStale = $state(false);
+  let impactRereadFailed = $state(false);
+  const impactState = $derived.by<ConnectQueryState<TierDeleteImpact>>(() => {
+    if (impactStale) return impactRereadFailed ? { kind: 'failed' } : { kind: 'loading' };
+    return connectQueryState(impactQuery as QueryResult<TierDeleteImpact> | null);
+  });
   const impact = $derived(impactState.kind === 'ok' ? impactState.status : null);
   const onlyHereFilms = $derived(impact?.onlyHere.films.total ?? 0);
   const onlyHereCourses = $derived(impact?.onlyHere.courses.total ?? 0);
@@ -591,10 +603,41 @@
         (deleteChoice === 'move' && deleteMoveTo.length > 0))
   );
 
+  /**
+   * Re-read the preview. A first-read failure stays on the query's `.error`,
+   * which keeps the alert up. A stale preview stays hidden until THIS read
+   * lands; a failed one keeps the alert up (with Retry) until a read lands.
+   */
   function retryImpact() {
-    // The failure stays on the query's `.error`, which keeps the alert up.
-    void impactQuery?.refresh().catch(() => {});
+    const query = impactQuery;
+    if (!query) return;
+    query.refresh().then(
+      () => {
+        if (impactQuery !== query) return;
+        impactStale = false;
+        impactRereadFailed = false;
+      },
+      () => {
+        if (impactQuery === query) impactRereadFailed = true;
+      }
+    );
   }
+
+  /**
+   * Why Delete is disabled, for its `aria-describedby`: the visible line that
+   * says what is missing (U5's choice, a move target, or a failed check).
+   */
+  const deleteBlockedBy = $derived(
+    deleteReady
+      ? undefined
+      : impactState.kind === 'failed'
+        ? 'tier-delete-impact-failed-text'
+        : impact && onlyHereTotal > 0 && deleteChoice === null
+          ? 'tier-delete-choice-legend'
+          : impact && deleteChoice === 'move' && deleteMoveTo.length === 0
+            ? 'tier-delete-move-pick'
+            : undefined
+  );
 
   // Connect state
   let connectLoading = $state(false);
@@ -805,6 +848,8 @@
     deleteError = '';
     deleteChoice = null;
     deleteMoveTo = [];
+    impactStale = false;
+    impactRereadFailed = false;
     deleteDialogOpen = true;
   }
 
@@ -1003,15 +1048,21 @@
       }
       if (!('detailsCode' in result)) return;
       if (result.detailsCode === 'TIER_HAS_ONLY_ITEMS') {
-        // The preview went stale: re-read it and ask again.
+        // The preview went stale: ask again, from a FRESH read only.
         deleteError = m.monetisation_tier_delete_only_here_changed({
           name: deletingTier.name,
         });
         deleteChoice = null;
         deleteMoveTo = [];
+        impactStale = true;
         retryImpact();
       } else if (result.detailsCode === 'TIER_HAS_SUBSCRIBERS') {
-        // Someone subscribed since the check: the re-read shows the refusal.
+        // Someone subscribed since the check: say so, and the fresh read
+        // shows the refusal up front.
+        deleteError = m.monetisation_tier_delete_subscribed_meanwhile({
+          name: deletingTier.name,
+        });
+        impactStale = true;
         retryImpact();
       } else {
         deleteError = m.monetisation_tier_delete_error();
@@ -1829,7 +1880,9 @@
           <!-- Never read as "nothing only here" (mockup D7). -->
           <Alert variant="error" data-testid="tier-delete-impact-failed">
             <span class="alert-row">
-              <span>{m.monetisation_tier_delete_impact_failed({ name: deletingTier.name })}</span>
+              <span id="tier-delete-impact-failed-text">
+                {m.monetisation_tier_delete_impact_failed({ name: deletingTier.name })}
+              </span>
               <Button variant="secondary" size="sm" type="button" onclick={retryImpact}>
                 {m.monetisation_tier_delete_impact_retry()}
               </Button>
@@ -1852,6 +1905,11 @@
         {:else if deletingTier}
           {@const counts = countsAnd(onlyHereFilms, onlyHereCourses, true)}
           {@const one = onlyHereTotal === 1}
+          <!-- "Keep" closes only the films that are NOT for sale (design §3.4):
+               a paid film stays on sale, in no tier, and a course stays on
+               sale on its own page. -->
+          {@const closingFilms = impact.onlyHere.films.closing}
+          {@const forSaleFilms = impact.onlyHere.films.staysForSale}
           <p class="impact-lede" data-testid="tier-delete-only-here">
             <b>
               {one
@@ -1878,7 +1936,7 @@
           </ul>
 
           <fieldset class="choice-group" data-testid="tier-delete-choice">
-            <legend class="choice-legend">
+            <legend class="choice-legend" id="tier-delete-choice-legend">
               {one
                 ? m.monetisation_tier_delete_choice_label_one()
                 : m.monetisation_tier_delete_choice_label_other()}
@@ -1916,7 +1974,7 @@
                     onToggle={(id) => (deleteMoveTo = toggleTierId(deleteMoveTo, id))}
                   />
                   {#if deleteMoveTo.length === 0}
-                    <span class="form-hint">
+                    <span class="form-hint" id="tier-delete-move-pick">
                       {one
                         ? m.monetisation_tier_delete_move_pick_one()
                         : m.monetisation_tier_delete_move_pick_other()}
@@ -1960,12 +2018,25 @@
               />
               <span class="choice-text">
                 <span class="choice-label">
-                  {one ? m.monetisation_tier_delete_keep_one() : m.monetisation_tier_delete_keep_other()}
+                  {#if closingFilms > 0}
+                    {one ? m.monetisation_tier_delete_keep_one() : m.monetisation_tier_delete_keep_other()}
+                  {:else}
+                    {one
+                      ? m.monetisation_tier_delete_keep_no_tier_one()
+                      : m.monetisation_tier_delete_keep_no_tier_other()}
+                  {/if}
                 </span>
-                <span class="choice-desc">
-                  {one
-                    ? m.monetisation_tier_delete_keep_desc_one()
-                    : m.monetisation_tier_delete_keep_desc_other()}
+                <span class="choice-desc" data-testid="tier-delete-keep-desc">
+                  {#if closingFilms > 0}
+                    {closingFilms === 1
+                      ? m.monetisation_tier_delete_keep_desc_one()
+                      : m.monetisation_tier_delete_keep_desc_other({ count: closingFilms })}
+                  {/if}
+                  {#if forSaleFilms > 0}
+                    {forSaleFilms === 1
+                      ? m.monetisation_tier_delete_keep_for_sale_one()
+                      : m.monetisation_tier_delete_keep_for_sale_other({ count: forSaleFilms })}
+                  {/if}
                   {#if onlyHereCourses > 0}
                     {onlyHereCourses === 1
                       ? m.monetisation_tier_delete_keep_course_one()
@@ -2009,6 +2080,7 @@
           onclick={handleDeleteTier}
           loading={deleteLoading}
           disabled={!deleteReady}
+          aria-describedby={deleteBlockedBy}
         >
           {m.monetisation_tiers_delete()}
         </Button>

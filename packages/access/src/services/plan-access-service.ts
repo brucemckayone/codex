@@ -19,6 +19,7 @@
 
 import { CONTENT_STATUS, PRICE_LIMITS } from '@codex/constants';
 import {
+  CreatorPayoutsRequiredError,
   type InvalidatePlanSubscriberLibrariesArgs,
   invalidatePlanSubscriberLibraries,
   syncLegacyIncludedInTierId,
@@ -43,8 +44,8 @@ import type {
   PlanItemsDeltaInput,
   PlanItemsQueryInput,
 } from '@codex/validation';
-import { and, eq, inArray, isNull, type SQL, sql } from 'drizzle-orm';
-import { assertCreatorCanBePaid } from './course-payouts';
+import { and, asc, eq, inArray, isNull, ne, type SQL, sql } from 'drizzle-orm';
+import { creatorCanBePaid } from './course-payouts';
 
 // ── Wire shapes (the contract is apps/web `api.ts`, Codex-2hxff.91 phase 1) ──
 
@@ -184,24 +185,33 @@ export class PlanAccessService extends BaseService {
     return this.db as TxDb;
   }
 
-  /** A live tier of this org, or `NotFoundError` (code `TIER_NOT_FOUND`). */
+  /**
+   * A live tier of this org, or `NotFoundError` (code `TIER_NOT_FOUND`).
+   * `shareLockWith` locks it FOR SHARE together with those other tiers, in
+   * ONE statement ordered by id (the lock order `setTierItems` explains).
+   */
   private async liveTier(
     db: TxDb | Tx,
     orgId: string,
     tierId: string,
-    lock?: 'share'
+    shareLockWith?: string[]
   ): Promise<{ id: string }> {
     const query = db
       .select({ id: subscriptionTiers.id })
       .from(subscriptionTiers)
       .where(
         and(
-          eq(subscriptionTiers.id, tierId),
+          inArray(subscriptionTiers.id, [
+            ...new Set([tierId, ...(shareLockWith ?? [])]),
+          ]),
           eq(subscriptionTiers.organizationId, orgId),
           isNull(subscriptionTiers.deletedAt)
         )
       );
-    const [tier] = lock ? await query.for(lock) : await query;
+    const rows = shareLockWith
+      ? await query.orderBy(asc(subscriptionTiers.id)).for('share')
+      : await query;
+    const tier = rows.find((r) => r.id === tierId);
     if (!tier) {
       throw new NotFoundError('Subscription tier not found', {
         tierId,
@@ -209,6 +219,42 @@ export class PlanAccessService extends BaseService {
       });
     }
     return tier;
+  }
+
+  /** The tiers other than `tierId` that tick a film or course being removed. */
+  private async otherTiersOfRemoved(
+    tx: Tx,
+    orgId: string,
+    tierId: string,
+    remove: PlanItemsDeltaInput['remove']
+  ): Promise<string[]> {
+    const films =
+      remove.contentIds.length > 0
+        ? await tx
+            .selectDistinct({ id: contentTierAccess.tierId })
+            .from(contentTierAccess)
+            .where(
+              and(
+                inArray(contentTierAccess.contentId, remove.contentIds),
+                eq(contentTierAccess.organizationId, orgId),
+                ne(contentTierAccess.tierId, tierId)
+              )
+            )
+        : [];
+    const courseTiers =
+      remove.courseIds.length > 0
+        ? await tx
+            .selectDistinct({ id: courseTierAccess.tierId })
+            .from(courseTierAccess)
+            .where(
+              and(
+                inArray(courseTierAccess.courseId, remove.courseIds),
+                eq(courseTierAccess.organizationId, orgId),
+                ne(courseTierAccess.tierId, tierId)
+              )
+            )
+        : [];
+    return [...films, ...courseTiers].map((r) => r.id);
   }
 
   // ── Summary ────────────────────────────────────────────────────────────
@@ -591,7 +637,8 @@ export class PlanAccessService extends BaseService {
    * - an id that is not an eligible live item of this org (`ValidationError`
    *   naming them);
    * - an ADD of a PUBLISHED item whose creator can't be paid
-   *   (`CreatorPayoutsRequiredError`), as the editor and the course panel do.
+   *   (`CreatorPayoutsRequiredError`, naming those items by id), as the
+   *   editor and the course panel do.
    *
    * Adding a paid film turns its tier switch on. Removing never touches the
    * switch: a subscribers-only film left in no tier is CLOSED (never free),
@@ -611,9 +658,47 @@ export class PlanAccessService extends BaseService {
       ];
 
       const result = await this.txDb.transaction(async (tx) => {
-        await this.liveTier(tx, orgId, tierId, 'share');
+        // Lock order (review L1). `deleteTier` locks its tier FOR UPDATE and
+        // then decides what is "only here" from the OTHER tiers' ticks. A
+        // removal racing it, unlocked, could leave an item in no tier with
+        // neither admin told: the delete still sees our uncommitted tick, and
+        // our `closedNow` still sees the deleted tier's. So, before any
+        // write, this tier AND every other live tier that still ticks an
+        // item we remove are locked FOR SHARE in ONE statement, ordered by
+        // id. Whichever transaction runs second then reads the other's
+        // commit: the delete refuses (or applies its choice), or `closedNow`
+        // names the item.
+        //
+        // Why this cannot deadlock with `deleteTier`: FOR SHARE conflicts
+        // only with a WRITER of the tier row. deleteTier's one conflicting
+        // lock (FOR UPDATE on its own tier) is its FIRST, and after it it
+        // only waits for FOR SHARE locks (its move targets), which ours never
+        // block. If it holds the tier first, we wait holding only SHARE locks
+        // and no row writes, so it never waits on us; if we hold it first,
+        // it waits holding nothing. No cycle. The same holds against another
+        // checklist save or the editor's `assertTiersInOrg` (SHARE vs SHARE).
+        // `reorderTiers` UPDATEs tier rows one by one in payload order, so it
+        // can still cycle with any multi-tier lock here or in the editor; the
+        // database then aborts one (40P01), and this delta is safe to resend.
+        await this.liveTier(
+          tx,
+          orgId,
+          tierId,
+          await this.otherTiersOfRemoved(tx, orgId, tierId, delta.remove)
+        );
 
-        // Eligible films and live courses of THIS org only.
+        // Eligible films and live courses of THIS org only. The films are
+        // locked (review L2), in id order, before any tick or switch write,
+        // so an editor save of one of them either commits first, and this
+        // statement re-checks `eligibleFilm` on the committed row (a film
+        // saved as team-only or free is then refused below), or waits for
+        // this save. Unlocked, a switch-on here could land on a row the
+        // editor had just made team-only. NO KEY UPDATE, not UPDATE: it
+        // still conflicts with the editor's UPDATE, and never blocks the
+        // KEY SHARE that a tick insert's foreign key takes on the row.
+        // The editor and `deleteTier` take tier locks, then content rows,
+        // then ticks, as this does, so no two of them wait on each other in
+        // opposite orders.
         const films =
           contentIds.length > 0
             ? await tx
@@ -627,6 +712,8 @@ export class PlanAccessService extends BaseService {
                 .where(
                   and(inArray(content.id, contentIds), eligibleFilm(orgId))
                 )
+                .orderBy(asc(content.id))
+                .for('no key update')
             : [];
         const courseRows =
           courseIds.length > 0
@@ -702,24 +789,39 @@ export class PlanAccessService extends BaseService {
 
         // Payouts: a PUBLISHED item added to a tier opens a way to pay. Each
         // distinct creator is checked once, by the course paths' own check.
-        const creators = new Map<string, 'included_in_tier' | 'course'>();
-        for (const id of addedFilms) {
-          const f = filmById.get(id);
-          if (f?.status === CONTENT_STATUS.PUBLISHED) {
-            creators.set(f.creatorId, 'included_in_tier');
-          }
+        // The refusal names the ITEMS, never the creator: the caller is an
+        // org admin, and the creator who can't be paid is often another
+        // member, whose user id must not reach the client (review L5).
+        const publishedAdds = [
+          ...addedFilms.flatMap((id) => {
+            const f = filmById.get(id);
+            return f?.status === CONTENT_STATUS.PUBLISHED
+              ? [{ kind: 'film' as const, id, creatorId: f.creatorId }]
+              : [];
+          }),
+          ...addedCourses.flatMap((id) => {
+            const c = courseById.get(id);
+            return c?.status === CONTENT_STATUS.PUBLISHED
+              ? [{ kind: 'course' as const, id, creatorId: c.creatorId }]
+              : [];
+          }),
+        ];
+        const unpaid = new Set<string>();
+        for (const creatorId of new Set(
+          publishedAdds.map((a) => a.creatorId)
+        )) {
+          if (!(await creatorCanBePaid(tx, creatorId))) unpaid.add(creatorId);
         }
-        for (const id of addedCourses) {
-          const c = courseById.get(id);
-          if (
-            c?.status === CONTENT_STATUS.PUBLISHED &&
-            !creators.has(c.creatorId)
-          ) {
-            creators.set(c.creatorId, 'course');
-          }
-        }
-        for (const [creatorId, reason] of creators) {
-          await assertCreatorCanBePaid(tx, creatorId, reason);
+        if (unpaid.size > 0) {
+          const refused = publishedAdds.filter((a) => unpaid.has(a.creatorId));
+          throw new CreatorPayoutsRequiredError('included_in_tier', {
+            contentIds: refused
+              .filter((a) => a.kind === 'film')
+              .map((a) => a.id),
+            courseIds: refused
+              .filter((a) => a.kind === 'course')
+              .map((a) => a.id),
+          });
         }
 
         // Write.

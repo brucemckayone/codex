@@ -231,7 +231,7 @@ The org layout uses `invalidate('cache:org-versions')` (separate from platform's
 | Key | Who bumps it | Client action on stale |
 |---|---|---|
 | `user:{id}:library` | ecom-api (purchase) | `invalidateCollection('library')` |
-| `org:{id}:content` | content-api (publish/unpublish) | `invalidateCollection({ kind: 'content', orgId })` |
+| `org:{id}:content` | content-api (publish/unpublish, content edits); organization-api (tier create with a copy, tier delete, tier checklist saves: the public list carries which tiers include an item) | `invalidateCollection({ kind: 'content', orgId })` |
 | `user:{id}:subscription:{orgId}` | ecom-api (checkout/tier change/cancel) | `invalidateCollection('subscription')` |
 
 ### HTTP Cache Headers
