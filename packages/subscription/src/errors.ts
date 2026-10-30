@@ -246,15 +246,16 @@ export class ConnectAccountNotReadyError extends BusinessLogicError {
  * pay: a course plan, or one put back on sale (Codex-2hxff.14, owner decision
  * "Yes, same rule"). Same code and message as `@codex/content`'s
  * `CreatorPayoutsRequiredError`, so the Studio shows one message for all.
+ *
+ * Like it, the context never names the creator: it reaches the client
+ * verbatim, and the caller is an org admin while the creator who can't be
+ * paid is often another member (review round 2, as L5 did for the others).
  */
 export class CreatorConnectRequiredError extends BusinessLogicError {
-  constructor(creatorId: string) {
+  constructor() {
     super(
       'Set up payouts before publishing paid or subscriber content. Complete Stripe Connect onboarding to receive payments.',
-      {
-        creatorId,
-        code: 'CREATOR_CONNECT_REQUIRED',
-      }
+      { code: 'CREATOR_CONNECT_REQUIRED' }
     );
   }
 }

@@ -344,24 +344,33 @@ export async function invalidatePlanSubscriberLibraries(
     { reason, organizationId, key: 'org:categories' },
     logger
   );
-  waitUntil(
-    db.query.organizations
-      .findFirst({
-        where: eq(organizations.id, organizationId),
-        columns: { slug: true },
-      })
-      .then((org) =>
-        org?.slug ? invalidateOrgPublicCaches(cache, org.slug) : undefined
-      )
-      .catch((error: unknown) => {
-        logger?.warn('content-invalidation: bump failed', {
-          reason,
-          organizationId,
-          key: 'org:public',
-          error: error instanceof Error ? error.message : String(error),
-        });
-      })
-  );
+  // The slug-keyed bumps need the slug: one primary-key read, AWAITED so it
+  // runs inside the request (review round 2). Handed to a plain `waitUntil`,
+  // it raced the request's DB cleanup (`pool.end()`), and a lost race left
+  // the stats and creators stale until their TTL. Only the KV bumps are fire
+  // and forget. A failed read is logged and never fails the write.
+  const logPublicBumpFailure = (error: unknown) => {
+    logger?.warn('content-invalidation: bump failed', {
+      reason,
+      organizationId,
+      key: 'org:public',
+      error: error instanceof Error ? error.message : String(error),
+    });
+  };
+  const org = await db.query.organizations
+    .findFirst({
+      where: eq(organizations.id, organizationId),
+      columns: { slug: true },
+    })
+    .catch((error: unknown) => {
+      logPublicBumpFailure(error);
+      return undefined;
+    });
+  if (org?.slug) {
+    waitUntil(
+      invalidateOrgPublicCaches(cache, org.slug).catch(logPublicBumpFailure)
+    );
+  }
 
   const ids = [...new Set(tierIds)];
   if (ids.length === 0) return;

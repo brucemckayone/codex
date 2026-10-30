@@ -84,7 +84,10 @@ export function land<T>(slot: QuerySlot<T>, value: T) {
  * Make the slot's NEXT `refresh()` behave as kit's: `loading` goes true (the
  * old `current` and `error` stay), and the returned promise settles only when
  * the test calls `land` (resolves, after the value is set) or `fail` (a
- * failed re-read: rejects, `current` kept).
+ * failed re-read: rejects, `current` kept). `supersede` is kit settling an
+ * OLDER pending refresh once a later one has settled (2.55,
+ * `query.svelte.js` #run): it resolves, whatever the later read did, and
+ * changes nothing on the slot.
  */
 export function deferRefresh<T>(slot: QuerySlot<T>) {
   let settle: { resolve: () => void; reject: (e: unknown) => void } | null =
@@ -109,6 +112,9 @@ export function deferRefresh<T>(slot: QuerySlot<T>) {
       const { reject } = pending();
       failRefresh(slot, error);
       reject(error);
+    },
+    supersede() {
+      pending().resolve();
     },
   };
 }

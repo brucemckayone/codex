@@ -1829,6 +1829,8 @@
   "monetisation_tier_items_too_many": "Save at most {max} changes at a time.",
   "monetisation_tier_items_save_partial_one": "Some of your changes to {name} were saved, but 1 wasn't. Save again to finish.",
   "monetisation_tier_items_save_partial_other": "Some of your changes to {name} were saved, but {count} weren't. Save again to finish.",
+  "monetisation_tier_items_save_partial_payouts": "Some of your changes to {name} were saved. The rest include items that can't be added until their creator sets up payouts.",
+  "monetisation_tier_items_save_partial_refused": "Some of your changes to {name} were saved. The rest couldn't be, because some items can't be added to this plan any more.",
   "monetisation_tier_items_reread_failed": "Saved, but we couldn't reload the list, so it may be out of date.",
   "monetisation_tier_items_load_failed": "We couldn't load what's in {name}.",
   "monetisation_tier_items_tier_load_failed": "We couldn't load this tier.",

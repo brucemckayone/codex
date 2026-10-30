@@ -103,6 +103,7 @@ import {
   notClosedToNewViewers,
   readTickIds,
   replaceTicks,
+  shareLockOrgTiers,
   syncLegacyIncludedInTierId,
   withTierWire,
 } from './content-tier-access';
@@ -706,10 +707,42 @@ export class ContentService extends BaseService {
 
     try {
       const result = await this.db.transaction(async (tx) => {
-        // Verify content exists and belongs to creator
-        const existing = await tx.query.content.findFirst({
-          where: and(eq(content.id, id), scopedNotDeleted(content, creatorId)),
-        });
+        // Verify content exists and belongs to creator, reading the row
+        // LOCKED (review round 2). Every decision below reads `existing`,
+        // and the write always sets the switch, so from an unlocked read a
+        // save that never mentioned access reverted a checklist switch-on
+        // that committed while it waited for the row. FOR NO KEY UPDATE
+        // waits for that commit instead, then reads it. Lock order
+        // (@codex/subscription tier-service.ts, file header): tiers, then
+        // this row, then ticks. A save that names tiers locks the org's
+        // tiers before the row; one that names none takes no tier lock
+        // below (`assertTiersInOrg` locks nothing for an empty set).
+        const rowScope = and(
+          eq(content.id, id),
+          scopedNotDeleted(content, creatorId)
+        );
+        const namesTiers =
+          (validated.includedInTierIds?.length ?? 0) > 0 ||
+          validated.includedInTierId != null;
+        if (namesTiers) {
+          const tierOrgId =
+            'organizationId' in validated
+              ? (validated.organizationId ?? null)
+              : ((
+                  await tx
+                    .select({ organizationId: content.organizationId })
+                    .from(content)
+                    .where(rowScope)
+                )[0]?.organizationId ?? null);
+          if (tierOrgId) {
+            await shareLockOrgTiers(tx as DatabaseTransaction, tierOrgId);
+          }
+        }
+        const [existing] = await tx
+          .select()
+          .from(content)
+          .where(rowScope)
+          .for('no key update');
 
         if (!existing) {
           throw new ContentNotFoundError(id);

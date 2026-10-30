@@ -562,6 +562,8 @@
    */
   let impactStale = $state(false);
   let impactRereadFailed = $state(false);
+  /** Only the newest re-read speaks (see retryImpact). */
+  let impactReadRun = 0;
   const impactState = $derived.by<ConnectQueryState<TierDeleteImpact>>(() => {
     if (impactStale) return impactRereadFailed ? { kind: 'failed' } : { kind: 'loading' };
     return connectQueryState(impactQuery as QueryResult<TierDeleteImpact> | null);
@@ -607,18 +609,24 @@
    * Re-read the preview. A first-read failure stays on the query's `.error`,
    * which keeps the alert up. A stale preview stays hidden until THIS read
    * lands; a failed one keeps the alert up (with Retry) until a read lands.
+   *
+   * Kit settles every EARLIER pending refresh when a later one settles, even
+   * when the later one fails, so a resolved promise is not "this read landed".
+   * A double-clicked Retry whose second read fails would otherwise clear the
+   * stale flag on the old preview. Only the newest call may speak.
    */
   function retryImpact() {
     const query = impactQuery;
     if (!query) return;
+    const run = ++impactReadRun;
     query.refresh().then(
       () => {
-        if (impactQuery !== query) return;
+        if (impactQuery !== query || run !== impactReadRun) return;
         impactStale = false;
         impactRereadFailed = false;
       },
       () => {
-        if (impactQuery === query) impactRereadFailed = true;
+        if (impactQuery === query && run === impactReadRun) impactRereadFailed = true;
       }
     );
   }
@@ -850,6 +858,7 @@
     deleteMoveTo = [];
     impactStale = false;
     impactRereadFailed = false;
+    impactReadRun += 1;
     deleteDialogOpen = true;
   }
 

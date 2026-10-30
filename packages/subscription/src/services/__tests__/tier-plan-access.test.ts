@@ -8,6 +8,9 @@
  *   choice: "keep" leaves them in no tier (a subscribers-only film is then
  *   CLOSED, never free), "move" ticks them on the chosen tiers first. With no
  *   choice while such items exist the delete is refused and nothing changes.
+ * - the one lock order (review round 2): each writer here, raced against a
+ *   held transaction standing in for another, waits and then reads the other's
+ *   commit, never deadlocks.
  *
  * DB-backed. Every org and row it writes is its own and is deleted in
  * afterAll.
@@ -48,6 +51,7 @@ import {
   expect,
   it,
   type Mock,
+  vi,
 } from 'vitest';
 import { TierHasOnlyItemsError, TierNotFoundError } from '../../errors';
 import { TierService } from '../tier-service';
@@ -539,6 +543,367 @@ describe('TierService — plan access (Codex-2hxff.91)', () => {
 
       expect(await filmsIn(tierB)).toEqual([filmB]);
       expect((await rowOf(filmB)).legacy).toBe(tierB);
+    });
+  });
+
+  // ─── the one lock order (review round 2) ───────────────────────────
+  // A held transaction stands in for the other writer: it takes the locks
+  // that writer takes first, waits for `release()`, then takes the rest.
+
+  describe('races: tiers by id, then items, then ticks', () => {
+    type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+    function heldTransaction(
+      hold: (tx: Tx) => Promise<unknown>,
+      finish: (tx: Tx) => Promise<unknown> = async () => {}
+    ) {
+      let release = () => {};
+      const released = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let ready = () => {};
+      const held = new Promise<void>((resolve) => {
+        ready = resolve;
+      });
+      const done = db.transaction(async (tx) => {
+        await hold(tx);
+        ready();
+        await released;
+        await finish(tx);
+      });
+      return { held, release, done };
+    }
+
+    /**
+     * 'waiting' once a session of this database is blocked on a row lock
+     * (the call under test: the held transaction is idle), 'finished' once
+     * `promise` settles first. A probe, not a timer: a timer let a call
+     * slowed by a cold connection pool read the state after the held
+     * transaction committed, and pass without the lock it was testing.
+     */
+    async function stateAfterAWhile(promise: Promise<unknown>) {
+      let settled = false;
+      promise.then(
+        () => {
+          settled = true;
+        },
+        () => {
+          settled = true;
+        }
+      );
+      for (let i = 0; i < 200; i++) {
+        if (settled) return 'finished';
+        const blocked = await db.execute<{ n: number }>(sql`
+          SELECT count(*)::int AS n FROM pg_stat_activity
+           WHERE datname = current_database()
+             AND wait_event_type = 'Lock'
+             AND pid <> pg_backend_pid()`);
+        if (Number(blocked.rows[0]?.n) > 0) return 'waiting';
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      return 'neither after 5 s';
+    }
+
+    /** 'ok', or the failure's message (a deadlock reads "deadlock detected"). */
+    const outcome = (promise: Promise<unknown>) =>
+      promise.then(
+        () => 'ok',
+        (error: unknown) =>
+          error instanceof Error ? error.message : String(error)
+      );
+
+    const lockTier = (
+      tx: Tx,
+      tierId: string,
+      mode: 'update' | 'no key update' | 'share'
+    ) =>
+      tx
+        .select({ id: subscriptionTiers.id })
+        .from(subscriptionTiers)
+        .where(eq(subscriptionTiers.id, tierId))
+        .for(mode);
+
+    /** Two tiers of a fresh org, as [lower id, higher id]. */
+    async function twoTiers(slug: string) {
+      const orgId = await org(slug);
+      const [low, high] = [await tier(orgId, 1), await tier(orgId, 2)].sort();
+      return { orgId, low: low as string, high: high as string };
+    }
+
+    it('a delete moving its items to a tier with a LOWER id, racing a reorder: both finish, no deadlock', async () => {
+      const { orgId, low, high } = await twoTiers('pa-race-reorder');
+      const onlyHigh = await film(orgId, [high]);
+
+      // The reorder, as reorderTiers locks: every live tier in id order. It
+      // holds the lower one; once released it takes the higher one.
+      const reordering = heldTransaction(
+        (tx) => lockTier(tx, low, 'no key update'),
+        (tx) => lockTier(tx, high, 'no key update')
+      );
+      await reordering.held;
+      const deleting = service.deleteTier(high, orgId, {
+        onlyHere: 'move',
+        moveTo: [low],
+      });
+      const early = await stateAfterAWhile(deleting);
+      reordering.release();
+      const [reorder, del] = await Promise.all([
+        outcome(reordering.done),
+        outcome(deleting),
+      ]);
+
+      expect(early).toBe('waiting');
+      expect({ reorder, del }).toEqual({ reorder: 'ok', del: 'ok' });
+      expect(await filmsIn(low)).toEqual([onlyHigh]);
+      expect(await isLive(high)).toBe(false);
+    });
+
+    it("a reorder does not wait for a tick insert's foreign key on a tier (FOR NO KEY UPDATE)", async () => {
+      const { orgId, low, high } = await twoTiers('pa-race-reorder-keyshare');
+      const unticked = await film(orgId, []);
+
+      // A tick insert in flight: its foreign key holds KEY SHARE on `low`.
+      const ticking = heldTransaction((tx) =>
+        tx.insert(contentTierAccess).values({
+          contentId: unticked,
+          tierId: low,
+          organizationId: orgId,
+        })
+      );
+      await ticking.held;
+      const reordering = service.reorderTiers(orgId, [high, low]);
+      const early = await stateAfterAWhile(reordering);
+      ticking.release();
+      await ticking.done;
+      await reordering;
+
+      expect(early).toBe('finished');
+      const order = await db
+        .select({ id: subscriptionTiers.id })
+        .from(subscriptionTiers)
+        .where(eq(subscriptionTiers.organizationId, orgId))
+        .orderBy(subscriptionTiers.sortOrder);
+      expect(order.map((t) => t.id)).toEqual([high, low]);
+    });
+
+    it('two crossed deletes, each moving into the other: one finishes, the other is refused cleanly, no deadlock', async () => {
+      const { orgId, low, high } = await twoTiers('pa-race-crossed');
+      const onlyLow = await film(orgId, [low]);
+      await film(orgId, [high]);
+
+      // The delete of `low` moving into `high`, in id order: its own tier
+      // FOR UPDATE; once released, its target FOR SHARE, then the soft
+      // delete and the move.
+      const deletingLow = heldTransaction(
+        (tx) => lockTier(tx, low, 'update'),
+        async (tx) => {
+          await lockTier(tx, high, 'share');
+          await tx.insert(contentTierAccess).values({
+            contentId: onlyLow,
+            tierId: high,
+            organizationId: orgId,
+          });
+          await tx
+            .delete(contentTierAccess)
+            .where(eq(contentTierAccess.tierId, low));
+          await tx
+            .update(subscriptionTiers)
+            .set({ deletedAt: new Date(), isActive: false })
+            .where(eq(subscriptionTiers.id, low));
+        }
+      );
+      await deletingLow.held;
+      const deletingHigh = service.deleteTier(high, orgId, {
+        onlyHere: 'move',
+        moveTo: [low],
+      });
+      const early = await stateAfterAWhile(deletingHigh);
+      deletingLow.release();
+      const [first, second] = await Promise.all([
+        outcome(deletingLow.done),
+        deletingHigh.then(
+          () => 'ok',
+          (error: unknown) => error
+        ),
+      ]);
+
+      expect(early).toBe('waiting');
+      expect(first).toBe('ok');
+      // It waited, then found its target gone: refused, nothing changed.
+      expect(second).toBeInstanceOf(ValidationError);
+      expect((second as ValidationError).context).toEqual({
+        invalidTierIds: [low],
+      });
+      expect(await isLive(high)).toBe(true);
+      expect(await filmsIn(high)).toContain(onlyLow);
+    });
+
+    it('the recommended flag moving to a tier with a LOWER id, racing a reorder: both finish, no deadlock', async () => {
+      const orgId = await org('pa-race-recommended');
+      const ids = [
+        takeFirst(
+          await db
+            .insert(subscriptionTiers)
+            .values(createTestTierInput(orgId, { sortOrder: 1 }))
+            .returning()
+        ).id,
+        takeFirst(
+          await db
+            .insert(subscriptionTiers)
+            .values(createTestTierInput(orgId, { sortOrder: 2 }))
+            .returning()
+        ).id,
+      ].sort() as [string, string];
+      const [low, high] = ids;
+      await db
+        .update(subscriptionTiers)
+        .set({ isRecommended: true })
+        .where(eq(subscriptionTiers.id, high));
+
+      const reordering = heldTransaction(
+        (tx) => lockTier(tx, low, 'no key update'),
+        (tx) => lockTier(tx, high, 'no key update')
+      );
+      await reordering.held;
+      const recommending = service.updateTier(low, orgId, {
+        isRecommended: true,
+      });
+      const early = await stateAfterAWhile(recommending);
+      reordering.release();
+      const [reorder, update] = await Promise.all([
+        outcome(reordering.done),
+        outcome(recommending),
+      ]);
+
+      expect(early).toBe('waiting');
+      expect({ reorder, update }).toEqual({ reorder: 'ok', update: 'ok' });
+      const flags = await db
+        .select({
+          id: subscriptionTiers.id,
+          isRecommended: subscriptionTiers.isRecommended,
+        })
+        .from(subscriptionTiers)
+        .where(inArray(subscriptionTiers.id, ids))
+        .orderBy(subscriptionTiers.id);
+      expect(flags).toEqual([
+        { id: low, isRecommended: true },
+        { id: high, isRecommended: false },
+      ]);
+    });
+
+    it('a copy racing an editor save that switches a film off waits for it, and never ticks the film (I1)', async () => {
+      const orgId = await org('pa-race-copy');
+      const pro = await tier(orgId, 1);
+      const switchedOff = await film(orgId, [pro]);
+      const kept = await film(orgId, [pro]);
+
+      // The editor's save, as ContentService.update writes it: the row's
+      // switch off, then its ticks cleared; committed once released.
+      const editing = heldTransaction(async (tx) => {
+        await tx
+          .update(content)
+          .set({ isTierGated: false, isFree: true })
+          .where(eq(content.id, switchedOff));
+        await tx
+          .delete(contentTierAccess)
+          .where(eq(contentTierAccess.contentId, switchedOff));
+      });
+      await editing.held;
+      const creating = service.createTier(orgId, input(pro));
+      const early = await stateAfterAWhile(creating);
+      editing.release();
+      await editing.done;
+      const created = await creating;
+
+      expect(early).toBe('waiting');
+      expect(await filmsIn(created.id)).toEqual([kept]);
+      expect((await rowOf(switchedOff)).isTierGated).toBe(false);
+      expect(
+        await db
+          .select()
+          .from(contentTierAccess)
+          .where(eq(contentTierAccess.contentId, switchedOff))
+      ).toEqual([]);
+    });
+
+    /**
+     * The delete of `t1`, as deleteTier runs it: its tier FOR UPDATE and the
+     * course row ticked there; once released, the sweep and the soft delete.
+     */
+    const deleteHeld = (t1: string, courseId: string) =>
+      heldTransaction(
+        async (tx) => {
+          await lockTier(tx, t1, 'update');
+          await tx
+            .select({ id: courses.id })
+            .from(courses)
+            .where(eq(courses.id, courseId))
+            .for('no key update');
+        },
+        async (tx) => {
+          await tx
+            .delete(courseTierAccess)
+            .where(eq(courseTierAccess.tierId, t1));
+          await tx
+            .update(subscriptionTiers)
+            .set({ deletedAt: new Date(), isActive: false })
+            .where(eq(subscriptionTiers.id, t1));
+        }
+      );
+
+    it("two crossed deletes of a course's two tiers: the second waits, then counts the course as only-here and refuses", async () => {
+      const orgId = await org('pa-race-course');
+      const t1 = await tier(orgId, 1);
+      const t2 = await tier(orgId, 2);
+      const shared = await course(orgId, [t1, t2]);
+
+      const deletingT1 = deleteHeld(t1, shared);
+      await deletingT1.held;
+      const deletingT2 = service.deleteTier(t2, orgId);
+      const early = await stateAfterAWhile(deletingT2);
+      deletingT1.release();
+      await deletingT1.done;
+      const error = await deletingT2.catch((e: unknown) => e);
+
+      expect(early).toBe('waiting');
+      expect(error).toBeInstanceOf(TierHasOnlyItemsError);
+      expect((error as TierHasOnlyItemsError).context).toMatchObject({
+        filmCount: 0,
+        courseCount: 1,
+      });
+      expect(await isLive(t2)).toBe(true);
+      expect(await coursesIn(t2)).toEqual([shared]);
+    });
+
+    it('two crossed deletes that both "keep": the second reports the course it left in no tier', async () => {
+      const orgId = await org('pa-race-course-keep');
+      const t1 = await tier(orgId, 1);
+      const t2 = await tier(orgId, 2);
+      const shared = await course(orgId, [t1, t2]);
+      const info = vi.spyOn(
+        (service as unknown as { obs: { info: (...a: unknown[]) => void } })
+          .obs,
+        'info'
+      );
+
+      const deletingT1 = deleteHeld(t1, shared);
+      await deletingT1.held;
+      const deletingT2 = service.deleteTier(t2, orgId, { onlyHere: 'keep' });
+      const early = await stateAfterAWhile(deletingT2);
+      deletingT1.release();
+      await deletingT1.done;
+      await deletingT2;
+
+      expect(early).toBe('waiting');
+      expect(info).toHaveBeenCalledWith(
+        'Subscription tier deleted',
+        expect.objectContaining({
+          tierId: t2,
+          onlyHere: 'keep',
+          onlyHereCourses: 1,
+        })
+      );
+      expect(await coursesIn(t2)).toEqual([]);
     });
   });
 });

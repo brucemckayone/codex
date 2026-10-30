@@ -576,4 +576,41 @@ describe('invalidatePlanSubscriberLibraries', () => {
       expect.objectContaining({ key: 'org:public', error: 'db down' })
     );
   });
+
+  it('awaits the slug lookup, so it ends before the request does; only the KV bumps go to waitUntil (round 2)', async () => {
+    const { cache, invalidate } = makeCache();
+    const { waitUntil, promises } = makeWaitUntil();
+    const db = makePlanDb(ORG_SLUG);
+    // A read that takes a while, as a real one does: handed to waitUntil, it
+    // would still be running when the request's DB cleanup ends the pool.
+    let lookupSettled = false;
+    (
+      db.query.organizations.findFirst as unknown as ReturnType<typeof vi.fn>
+    ).mockImplementationOnce(
+      () =>
+        new Promise((resolve) =>
+          setTimeout(() => {
+            lookupSettled = true;
+            resolve({ slug: ORG_SLUG });
+          }, 20)
+        )
+    );
+
+    await invalidatePlanSubscriberLibraries({
+      db,
+      cache,
+      waitUntil,
+      organizationId: ORG_ID,
+      tierIds: [],
+      reason: 'plan_access_changed',
+    });
+
+    expect(lookupSettled).toBe(true);
+    // The slug's bumps are already under way, before the queue is awaited.
+    expect(invalidate).toHaveBeenCalledWith(ORG_SLUG);
+    expect(invalidate).toHaveBeenCalledWith(
+      CacheType.COLLECTION_ORG_CREATORS(ORG_SLUG)
+    );
+    await Promise.all(promises);
+  });
 });

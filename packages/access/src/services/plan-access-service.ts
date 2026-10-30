@@ -669,17 +669,15 @@ export class PlanAccessService extends BaseService {
         // commit: the delete refuses (or applies its choice), or `closedNow`
         // names the item.
         //
-        // Why this cannot deadlock with `deleteTier`: FOR SHARE conflicts
-        // only with a WRITER of the tier row. deleteTier's one conflicting
-        // lock (FOR UPDATE on its own tier) is its FIRST, and after it it
-        // only waits for FOR SHARE locks (its move targets), which ours never
-        // block. If it holds the tier first, we wait holding only SHARE locks
-        // and no row writes, so it never waits on us; if we hold it first,
-        // it waits holding nothing. No cycle. The same holds against another
-        // checklist save or the editor's `assertTiersInOrg` (SHARE vs SHARE).
-        // `reorderTiers` UPDATEs tier rows one by one in payload order, so it
-        // can still cycle with any multi-tier lock here or in the editor; the
-        // database then aborts one (40P01), and this delta is safe to resend.
+        // Why this cannot deadlock: it is step 1 of the one lock order
+        // (@codex/subscription tier-service.ts, file header), and every
+        // other writer takes its tier locks in id order too, before any item
+        // row or tick: `deleteTier` (its tier FOR UPDATE and its move targets
+        // FOR SHARE, as one id-ordered set), `reorderTiers` and the
+        // recommended flag (every live tier FOR NO KEY UPDATE), the editor's
+        // `assertTiersInOrg` and the course panel (FOR SHARE). Two writers
+        // that both want some of the same tiers take them in the same order,
+        // so whichever waits holds nothing the other still needs.
         await this.liveTier(
           tx,
           orgId,
@@ -696,9 +694,12 @@ export class PlanAccessService extends BaseService {
         // editor had just made team-only. NO KEY UPDATE, not UPDATE: it
         // still conflicts with the editor's UPDATE, and never blocks the
         // KEY SHARE that a tick insert's foreign key takes on the row.
-        // The editor and `deleteTier` take tier locks, then content rows,
-        // then ticks, as this does, so no two of them wait on each other in
-        // opposite orders.
+        // The courses are locked the same way, after the films (step 2 of
+        // the lock order): `deleteTier` and a create's copy hold the course
+        // rows ticked on their tier, and the course panel holds its course,
+        // so each orders with this save on the row. Every writer takes tier
+        // locks, then content rows, then course rows, then ticks, as this
+        // does, so no two of them wait on each other in opposite orders.
         const films =
           contentIds.length > 0
             ? await tx
@@ -731,6 +732,8 @@ export class PlanAccessService extends BaseService {
                     isNull(courses.deletedAt)
                   )
                 )
+                .orderBy(asc(courses.id))
+                .for('no key update')
             : [];
         if (
           films.length !== contentIds.length ||
@@ -939,8 +942,10 @@ export class PlanAccessService extends BaseService {
   /**
    * After a tier's contents change (this service's save, a delete's move, a
    * create's copy): bump the org catalogue (the public list carries each
-   * item's tiers) and the libraries of the tiers' live subscribers. Fire and
-   * forget; a failure is logged, never thrown. `[]` → the catalogue only.
+   * item's tiers) and the libraries of the tiers' live subscribers. The KV
+   * bumps are fire and forget; the reads that pick the keys (the org's slug,
+   * the subscribers) are awaited, so they finish before the request's DB
+   * cleanup. A failure is logged, never thrown. `[]` → the catalogue only.
    */
   async afterTierAccessChange(orgId: string, tierIds: string[]): Promise<void> {
     if (!this.cache || !this.waitUntil) return;

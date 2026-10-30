@@ -32,7 +32,7 @@ import {
   subscriptionTiers,
 } from '@codex/database/schema';
 import { PurchaseService } from '@codex/purchase';
-import { ValidationError } from '@codex/service-errors';
+import { ForbiddenError, ValidationError } from '@codex/service-errors';
 import {
   createTestConnectAccountInput,
   createTestContentInput,
@@ -47,10 +47,11 @@ import {
   takeFirst,
   teardownTestDatabase,
 } from '@codex/test-utils';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ContentAccessService } from '../ContentAccessService';
+import { CourseAccessService } from '../course-access-service';
 import { PlanAccessService } from '../plan-access-service';
 
 type R2 = ConstructorParameters<typeof ContentAccessService>[0]['r2'];
@@ -724,17 +725,35 @@ describe('plan access — decision, library, checklist (Codex-2hxff.91)', () => 
       return { held, release, done };
     }
 
-    /** 'waiting' when `promise` is still pending after 750 ms. */
-    const stateAfterAWhile = (promise: Promise<unknown>) =>
-      Promise.race([
-        promise.then(
-          () => 'finished',
-          () => 'finished'
-        ),
-        new Promise<string>((resolve) =>
-          setTimeout(() => resolve('waiting'), 750)
-        ),
-      ]);
+    /**
+     * 'waiting' once a session of this database is blocked on a row lock
+     * (the call under test: the held transaction is idle), 'finished' once
+     * `promise` settles first. A probe, not a timer (round 2): a timer let a
+     * call slowed by a cold connection pool read the state after the held
+     * transaction committed, and pass without the lock it was testing.
+     */
+    async function stateAfterAWhile(promise: Promise<unknown>) {
+      let settled = false;
+      promise.then(
+        () => {
+          settled = true;
+        },
+        () => {
+          settled = true;
+        }
+      );
+      for (let i = 0; i < 200; i++) {
+        if (settled) return 'finished';
+        const blocked = await db.execute<{ n: number }>(sql`
+          SELECT count(*)::int AS n FROM pg_stat_activity
+           WHERE datname = current_database()
+             AND wait_event_type = 'Lock'
+             AND pid <> pg_backend_pid()`);
+        if (Number(blocked.rows[0]?.n) > 0) return 'waiting';
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      return 'neither after 5 s';
+    }
 
     it('a removal racing a delete of another tier the item is in waits for it, then names the item it closed (L1)', async () => {
       const orgId = await org('race-delete');
@@ -862,6 +881,80 @@ describe('plan access — decision, library, checklist (Codex-2hxff.91)', () => 
       );
       expect(row.isTierGated).toBe(false);
       expect(await ticksOf(paid)).toEqual([]);
+    });
+
+    it("the course panel's save racing a delete of a tier it keeps: it waits, then refuses the deleted tier; no deadlock, no tick on it (round 2)", async () => {
+      const orgId = await org('race-course-panel');
+      const basic = await tier(orgId, 1);
+      const pro = await tier(orgId, 2);
+      const courseId = takeFirst(
+        await db
+          .insert(courses)
+          .values({
+            organizationId: orgId,
+            creatorId,
+            slug: createUniqueSlug('race-panel'),
+            title: 'Race panel course',
+          })
+          .returning({ id: courses.id })
+      ).id;
+      await db
+        .insert(courseTierAccess)
+        .values({ courseId, tierId: pro, organizationId: orgId });
+
+      // Pro's delete, as deleteTier runs it: the tier FOR UPDATE and the
+      // course row ticked there; once released, the sweep and the soft
+      // delete.
+      const deleting = heldTransaction(
+        async (tx) => {
+          await tx
+            .select({ id: subscriptionTiers.id })
+            .from(subscriptionTiers)
+            .where(eq(subscriptionTiers.id, pro))
+            .for('update');
+          await tx
+            .select({ id: courses.id })
+            .from(courses)
+            .where(eq(courses.id, courseId))
+            .for('no key update');
+        },
+        async (tx) => {
+          await tx
+            .delete(courseTierAccess)
+            .where(eq(courseTierAccess.tierId, pro));
+          await tx
+            .update(subscriptionTiers)
+            .set({ deletedAt: new Date(), isActive: false })
+            .where(eq(subscriptionTiers.id, pro));
+        }
+      );
+      await deleting.held;
+      // The panel re-sends Pro with Basic added.
+      const saving = new CourseAccessService({
+        db,
+        environment: 'test',
+      }).setTierAccess(orgId, courseId, [basic, pro]);
+      const early = await stateAfterAWhile(saving);
+      deleting.release();
+      const [deleted, saved] = await Promise.all([
+        deleting.done.then(
+          () => 'ok',
+          (e: unknown) => (e instanceof Error ? e.message : String(e))
+        ),
+        saving.then(
+          () => 'ok',
+          (e: unknown) => e
+        ),
+      ]);
+
+      expect(early).toBe('waiting');
+      expect(deleted).toBe('ok');
+      expect(saved).toBeInstanceOf(ForbiddenError);
+      const ticks = await db
+        .select({ tierId: courseTierAccess.tierId })
+        .from(courseTierAccess)
+        .where(eq(courseTierAccess.courseId, courseId));
+      expect(ticks).toEqual([]);
     });
   });
 

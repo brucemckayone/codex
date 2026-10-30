@@ -950,12 +950,19 @@ describe('CourseSubscriptionService plan management (Codex-2pryk.2.4.1)', () => 
       const courseId = await newCourse(orgId, unpaidCreator);
       spies.products.create.mockClear();
 
-      await expect(
-        service.upsertPlan(orgId, courseId, {
+      const error = await service
+        .upsertPlan(orgId, courseId, {
           priceMonthly: 800,
           priceAnnual: 8000,
         })
-      ).rejects.toBeInstanceOf(CreatorConnectRequiredError);
+        .catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(CreatorConnectRequiredError);
+      // The context reaches the client verbatim, and the caller is an org
+      // admin: it carries the code only, never the creator's user id.
+      expect((error as CreatorConnectRequiredError).context).toEqual({
+        code: 'CREATOR_CONNECT_REQUIRED',
+      });
+      expect(JSON.stringify(error)).not.toContain(unpaidCreator);
       expect(spies.products.create).not.toHaveBeenCalled();
       expect(await planRows(courseId)).toHaveLength(0);
     });

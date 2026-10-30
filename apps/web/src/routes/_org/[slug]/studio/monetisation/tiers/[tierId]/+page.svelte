@@ -31,6 +31,8 @@
 -->
 <script lang="ts">
   import {
+    gateSearchQuery,
+    isSearchQueryBelowFloor,
     PLAN_ITEMS_DELTA_LIST_MAX,
     PLAN_ITEMS_DELTA_MAX,
     PLAN_ITEMS_PAGE_MAX,
@@ -325,8 +327,13 @@
       : []),
   ]);
 
+  /**
+   * The search floor (Codex-k618q): one or two letters HOLD, so the box keeps
+   * the partial word and the list stays as it is. Emptying it clears.
+   */
   function onSearch(value: string) {
-    search = value.trim();
+    if (isSearchQueryBelowFloor(value)) return;
+    search = gateSearchQuery(value) ?? '';
     pageNo = 1;
   }
 
@@ -381,8 +388,16 @@
   let saving = $state(false);
   let saveError = $state('');
   let notice = $state<{ saved: string; closed: number } | null>(null);
-  /** A re-read after a save failed: the list may show the old ticks. */
-  let rereadFailed = $state(false);
+  /**
+   * A re-read after a save failed: the list may show the old ticks. The items
+   * half belongs to the page it re-read, so a page or filter change that loads
+   * a fresh page drops it; a failed summary keeps the warning up.
+   */
+  let rereadFailure = $state<{ items: unknown; summary: boolean } | null>(null);
+  const rereadFailed = $derived(
+    rereadFailure !== null &&
+      (rereadFailure.summary || (rereadFailure.items !== null && rereadFailure.items === itemsQuery))
+  );
   let rereadRun = 0;
 
   /**
@@ -435,7 +450,7 @@
           // Refused: this request wrote nothing. Keep the rest of the draft.
           saveError =
             written.length > 0
-              ? partialError(draft.length - written.length)
+              ? partialError(draft.length - written.length, result)
               : result.detailsCode === 'CREATOR_CONNECT_REQUIRED'
                 ? m.monetisation_tier_items_save_payouts()
                 : m.monetisation_tier_items_save_error({ name: tierName });
@@ -450,6 +465,15 @@
         closed += result.result.closedNow.contentIds.length;
         tierNow = result.result;
       }
+    } catch (error) {
+      saveError =
+        written.length > 0
+          ? partialError(draft.length - written.length)
+          : m.monetisation_tier_items_save_error({ name: tierName });
+      logError('save failed', error);
+    } finally {
+      // Whatever landed is reported, a partial save included, so the films
+      // an earlier request closed are never left unsaid.
       if (tierNow) {
         notice = {
           saved: m.monetisation_tier_items_saved({
@@ -459,19 +483,25 @@
           closed,
         };
       }
-    } catch (error) {
-      saveError =
-        written.length > 0
-          ? partialError(draft.length - written.length)
-          : m.monetisation_tier_items_save_error({ name: tierName });
-      logError('save failed', error);
-    } finally {
       commit(written);
       saving = false;
     }
   }
 
-  function partialError(unsaved: number): string {
+  /**
+   * Part of the draft was written. "Save again" only where a resend can
+   * succeed (a failed request or a 5xx); a 4xx refusal would refuse again.
+   */
+  function partialError(
+    unsaved: number,
+    refusal?: { status: number; detailsCode?: string }
+  ): string {
+    if (refusal?.detailsCode === 'CREATOR_CONNECT_REQUIRED') {
+      return m.monetisation_tier_items_save_partial_payouts({ name: tierName });
+    }
+    if (refusal && refusal.status < 500) {
+      return m.monetisation_tier_items_save_partial_refused({ name: tierName });
+    }
     return unsaved === 1
       ? m.monetisation_tier_items_save_partial_one({ name: tierName })
       : m.monetisation_tier_items_save_partial_other({ name: tierName, count: unsaved });
@@ -499,14 +529,21 @@
    */
   function reread() {
     const run = ++rereadRun;
-    void Promise.allSettled([itemsQuery?.refresh(), summaryQuery?.refresh()]).then(
+    const query = itemsQuery;
+    void Promise.allSettled([query?.refresh(), summaryQuery?.refresh()]).then(
       ([items, summary]) => {
         // A later save's re-read owns the outcome.
         if (run !== rereadRun) return;
         if (items.status === 'fulfilled') justSaved = {};
         else logError('items re-read failed', items.reason);
         if (summary.status === 'rejected') logError('summary re-read failed', summary.reason);
-        rereadFailed = items.status === 'rejected' || summary.status === 'rejected';
+        rereadFailure =
+          items.status === 'rejected' || summary.status === 'rejected'
+            ? {
+                items: items.status === 'rejected' ? (query ?? null) : null,
+                summary: summary.status === 'rejected',
+              }
+            : null;
       }
     );
   }

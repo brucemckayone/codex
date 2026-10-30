@@ -333,6 +333,31 @@ describe('the checklist', () => {
       page: 1,
     });
   });
+
+  test('one or two letters hold the search; the third issues it (Codex-k618q)', () => {
+    mountPage();
+    vi.useFakeTimers();
+    try {
+      const box = document.querySelector(
+        `input[placeholder="${m.monetisation_tier_items_search()}"]`
+      ) as HTMLInputElement;
+      const type = (value: string) => {
+        box.value = value;
+        box.dispatchEvent(new Event('input', { bubbles: true }));
+        vi.advanceTimersByTime(300);
+        flushSync();
+      };
+      const reads = listTierItems.mock.calls.length;
+      type('wi');
+      expect(listTierItems.mock.calls.length).toBe(reads);
+      expect(box.value).toBe('wi');
+
+      type('win');
+      expect(lastItemsArgs().query).toMatchObject({ search: 'win', page: 1 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('opened from a guidance note', () => {
@@ -455,13 +480,53 @@ describe("a save past one request's per-list cap (M3)", () => {
     );
   });
 
-  test('a refused second request keeps only the unwritten changes, and says so', async () => {
+  test('a second request refused for payouts keeps only the unwritten changes, and says why', async () => {
+    setTierItems
+      .mockResolvedValueOnce({
+        success: true,
+        result: {
+          films: 118,
+          courses: 2,
+          closedNow: { contentIds: ['f-1', 'f-2'] },
+        },
+      })
+      .mockResolvedValueOnce({
+        success: false,
+        status: 422,
+        code: 'BUSINESS_LOGIC_ERROR',
+        detailsCode: 'CREATOR_CONNECT_REQUIRED',
+        message: 'refused',
+      });
+    tickThreePages();
+    buttonNamed(m.monetisation_tier_items_save())?.click();
+    await settle();
+
+    // A resend would be refused the same way, so no "Save again".
+    expect(saveBar()?.textContent).toContain(
+      m.monetisation_tier_items_save_partial_payouts({ name: 'Pro' })
+    );
+    expect(saveBar()?.textContent).toContain(
+      m.monetisation_tier_items_changes_other({ count: 50 })
+    );
+    // What the first request wrote is reported, the films it closed included.
+    expect(text()).toContain(
+      m.monetisation_tier_items_saved({
+        name: 'Pro',
+        counts: '118 films and 2 courses',
+      })
+    );
+    expect(text()).toContain(
+      m.monetisation_tier_items_closed_now_other({ count: 2 })
+    );
+    expect(lastItemsSlot().refresh).toHaveBeenCalled();
+  });
+
+  test('a second request that fails on the server asks for a resend', async () => {
     setTierItems.mockResolvedValueOnce(saved(118)).mockResolvedValueOnce({
       success: false,
-      status: 422,
-      code: 'BUSINESS_LOGIC_ERROR',
-      detailsCode: 'CREATOR_CONNECT_REQUIRED',
-      message: 'refused',
+      status: 503,
+      code: 'SERVICE_UNAVAILABLE',
+      message: 'unavailable',
     });
     tickThreePages();
     buttonNamed(m.monetisation_tier_items_save())?.click();
@@ -470,10 +535,22 @@ describe("a save past one request's per-list cap (M3)", () => {
     expect(saveBar()?.textContent).toContain(
       m.monetisation_tier_items_save_partial_other({ name: 'Pro', count: 50 })
     );
+  });
+
+  test('a second request refused for another reason says the rest could not be added', async () => {
+    setTierItems.mockResolvedValueOnce(saved(118)).mockResolvedValueOnce({
+      success: false,
+      status: 400,
+      code: 'VALIDATION_ERROR',
+      message: 'refused',
+    });
+    tickThreePages();
+    buttonNamed(m.monetisation_tier_items_save())?.click();
+    await settle();
+
     expect(saveBar()?.textContent).toContain(
-      m.monetisation_tier_items_changes_other({ count: 50 })
+      m.monetisation_tier_items_save_partial_refused({ name: 'Pro' })
     );
-    expect(lastItemsSlot().refresh).toHaveBeenCalled();
   });
 });
 
@@ -529,6 +606,22 @@ describe('after a save (L5)', () => {
     const calls = slot.refresh.mock.calls.length;
     buttonNamed(m.monetisation_tier_items_retry())?.click();
     expect(slot.refresh.mock.calls.length).toBe(calls + 1);
+  });
+
+  test('a filter change that loads a fresh page drops the out-of-date warning', async () => {
+    savedOne();
+    mountPage();
+    const reread = deferRefresh(lastItemsSlot());
+    toggle('Winter Light');
+    buttonNamed(m.monetisation_tier_items_save())?.click();
+    await settle();
+    reread.fail();
+    await settle();
+    expect(rereadAlert()).not.toBeNull();
+
+    buttonNamed(`${m.monetisation_tier_items_filter_included()}20`)?.click();
+    flushSync();
+    expect(rereadAlert()).toBeNull();
   });
 
   test('a save that empties the last page steps back a page', async () => {

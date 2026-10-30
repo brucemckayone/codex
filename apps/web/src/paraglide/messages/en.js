@@ -14651,6 +14651,22 @@ export const monetisation_tier_items_save_partial_other = (params) => `Some of y
 
 
 /**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_save_partial_payouts = (params) => `Some of your changes to ${params.name} were saved. The rest include items that can't be added until their creator sets up payouts.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_items_save_partial_refused = (params) => `Some of your changes to ${params.name} were saved. The rest couldn't be, because some items can't be added to this plan any more.`
+
+
+/**
  * 
  * @returns {string}
  */

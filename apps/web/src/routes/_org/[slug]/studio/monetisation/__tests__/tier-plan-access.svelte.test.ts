@@ -735,6 +735,31 @@ describe('Delete Tier after a refusal: never the old preview (M1)', () => {
     expect(testId('tier-delete-impact-failed')).toBeNull();
     expect(testId('tier-delete-choice')).not.toBeNull();
   });
+
+  test('a double-clicked Retry whose newer read fails never brings back the old preview', async () => {
+    deleteTier.mockResolvedValue(refusal('TIER_HAS_SUBSCRIBERS'));
+    const slot = openBasic();
+    const reread = deferRefresh(slot);
+    deleteButton()?.click();
+    await settle();
+    reread.fail();
+    await settle();
+
+    const older = deferRefresh(slot);
+    const newer = deferRefresh(slot);
+    buttonNamed(m.monetisation_tier_delete_impact_retry())?.click();
+    buttonNamed(m.monetisation_tier_delete_impact_retry())?.click();
+    await settle();
+    // The newer read fails, and kit then settles the older one as resolved.
+    newer.fail();
+    older.supersede();
+    await settle();
+
+    expect(slot.current).toEqual(NOTHING_ONLY_HERE);
+    expect(testId('tier-delete-impact-failed')).not.toBeNull();
+    expect(testId('tier-delete-nothing-only-here')).toBeNull();
+    expect(deleteButton()?.disabled).toBe(true);
+  });
 });
 
 describe('Delete Tier: a disabled Delete says why (L8)', () => {

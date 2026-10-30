@@ -129,6 +129,7 @@ import type {
   UpdateTierInput,
   UpgradeToCreatorInput,
 } from '@codex/validation';
+import { gateSearchQuery } from '@codex/validation';
 import type { Cookies } from '@sveltejs/kit';
 import { dev } from '$app/environment';
 // Studio journey-insights view shape (Codex-2pryk Round-D · WP-7). The FROZEN
@@ -3335,7 +3336,9 @@ export function createServerApi(
         if (query.cheaperTierId) {
           params.set('cheaperTierId', query.cheaperTierId);
         }
-        if (query.search) params.set('search', query.search);
+        // The checklist gates its box already; below the floor, send no search.
+        const search = gateSearchQuery(query.search);
+        if (search) params.set('search', search);
         if (query.page) params.set('page', String(query.page));
         if (query.limit) params.set('limit', String(query.limit));
         const qs = params.toString();

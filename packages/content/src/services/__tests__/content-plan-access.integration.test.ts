@@ -36,7 +36,7 @@ import {
   teardownTestDatabase,
 } from '@codex/test-utils';
 import type { CreateContentInput } from '@codex/validation';
-import { asc, eq, inArray } from 'drizzle-orm';
+import { asc, eq, inArray, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { TierRequiredToPublishError } from '../../errors';
 import { CategoriesService } from '../categories-service';
@@ -243,6 +243,90 @@ describe('ContentService — plan access (Codex-2hxff.91)', () => {
       await service.update(id, { includedInTierIds: [premiumId] }, creatorId);
 
       expect(await ticksOf(id)).toEqual([premiumId]);
+    });
+
+    it('one with no access fields, racing a checklist add, keeps the switch the checklist turned on (round 2)', async () => {
+      const { id } = await service.create(
+        written({ isPurchasable: true, priceCents: 900 }),
+        creatorId
+      );
+
+      // The checklist adding this paid film to Basic, as setTierItems writes
+      // it: the tier FOR SHARE, the row's switch on with the legacy column,
+      // then the tick; committed once released.
+      let release = () => {};
+      const released = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let ready = () => {};
+      const held = new Promise<void>((resolve) => {
+        ready = resolve;
+      });
+      const checklist = db.transaction(async (tx) => {
+        await tx
+          .select({ id: subscriptionTiers.id })
+          .from(subscriptionTiers)
+          .where(eq(subscriptionTiers.id, basicId))
+          .for('share');
+        await tx
+          .update(content)
+          .set({ isTierGated: true, legacyIncludedInTierId: basicId })
+          .where(eq(content.id, id));
+        await tx
+          .insert(contentTierAccess)
+          .values({ contentId: id, tierId: basicId, organizationId: orgId });
+        ready();
+        await released;
+      });
+      await held;
+      const patching = service.update(id, { title: 'Renamed' }, creatorId);
+      // Release only once the PATCH is blocked on the row (a probe, not a
+      // timer): with an unlocked read it has by then read the row as the
+      // checklist left it before committing.
+      let settled = false;
+      patching.then(
+        () => {
+          settled = true;
+        },
+        () => {
+          settled = true;
+        }
+      );
+      let early = 'neither after 5 s';
+      for (let i = 0; i < 200 && early === 'neither after 5 s'; i++) {
+        const blocked = await db.execute<{ n: number }>(sql`
+          SELECT count(*)::int AS n FROM pg_stat_activity
+           WHERE datname = current_database()
+             AND wait_event_type = 'Lock'
+             AND pid <> pg_backend_pid()`);
+        if (settled) early = 'finished';
+        else if (Number(blocked.rows[0]?.n) > 0) early = 'waiting';
+        else await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      release();
+      await checklist;
+      const updated = await patching;
+
+      expect(early).toBe('waiting');
+      expect(updated.title).toBe('Renamed');
+      const row = takeFirst(
+        await db
+          .select({
+            isTierGated: content.isTierGated,
+            isFree: content.isFree,
+            legacy: content.legacyIncludedInTierId,
+          })
+          .from(content)
+          .where(eq(content.id, id))
+      );
+      // The switch, the tick and the legacy column agree: never parity
+      // check A's shape (the legacy tier set with the switch off).
+      expect(row).toEqual({
+        isTierGated: true,
+        isFree: false,
+        legacy: basicId,
+      });
+      expect(await ticksOf(id)).toEqual([basicId]);
     });
   });
 

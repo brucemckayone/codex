@@ -24,6 +24,22 @@
  * - Cleanup failures are logged but never mask the original error
  *
  * All queries scoped by organizationId. Soft delete only.
+ *
+ * THE PLAN-ACCESS LOCK ORDER (Codex-2hxff.91). Every writer of tier rows, of
+ * the items ticked on them, or of the ticks takes its row locks in this order,
+ * so no two can wait on each other in a cycle (a 40P01 that aborts one):
+ * 1. `subscription_tiers` rows, by id: FOR UPDATE to delete one, FOR NO KEY
+ *    UPDATE to rewrite one (reorder, the recommended flag), FOR SHARE to tick
+ *    one. A set in mixed modes is still ONE id order across the set (Postgres
+ *    has no mixed-mode statement, so `deleteTier` splits it at its own id);
+ * 2. then `content` rows, then `courses` rows, by id, FOR NO KEY UPDATE (a
+ *    tick insert's foreign key takes KEY SHARE, which that never blocks);
+ * 3. then the tick rows.
+ * `SELECT … ORDER BY id … FOR …` locks its rows in that order. The writers:
+ * this service (create with copy, the recommended flag, delete, reorder),
+ * `PlanAccessService.setTierItems` (@codex/access), the content editor
+ * (`ContentService.create`/`update`, @codex/content) and
+ * `CourseAccessService.setTierAccess` (@codex/access).
  */
 
 import { CURRENCY, stripeEnvMetadata } from '@codex/constants';
@@ -48,7 +64,17 @@ import type {
   DeleteTierQueryInput,
   UpdateTierInput,
 } from '@codex/validation';
-import { and, asc, eq, inArray, isNull, type SQL, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  eq,
+  gt,
+  inArray,
+  isNull,
+  lt,
+  type SQL,
+  sql,
+} from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
   ConnectAccountNotReadyError,
@@ -215,9 +241,36 @@ export class TierService extends BaseService {
   }
 
   /**
+   * Lock every live tier of the org FOR NO KEY UPDATE, in id order (step 1
+   * of the lock order, file header), before a write that rewrites several of
+   * their rows: a reorder, or the recommended flag moving from one tier to
+   * another. Row-by-row UPDATEs would lock them in whatever order they ran.
+   * NO KEY UPDATE, not UPDATE: neither write changes a key (the sort index is
+   * partial), so the KEY SHARE a subscription or tick insert takes on a tier
+   * is never blocked.
+   */
+  private async lockOrgTiers(
+    tx: TierTransaction,
+    orgId: string
+  ): Promise<void> {
+    await tx
+      .select({ id: subscriptionTiers.id })
+      .from(subscriptionTiers)
+      .where(
+        and(
+          eq(subscriptionTiers.organizationId, orgId),
+          isNull(subscriptionTiers.deletedAt)
+        )
+      )
+      .orderBy(asc(subscriptionTiers.id))
+      .for('no key update');
+  }
+
+  /**
    * Ensure only one tier per org is recommended.
    * Clears isRecommended on all other active tiers for the org.
-   * Called INSIDE a transaction with the insert/update to prevent race conditions.
+   * Called INSIDE a transaction with the insert/update to prevent race
+   * conditions, after {@link lockOrgTiers}: it rewrites another tier's row.
    */
   private async ensureSingleRecommended(
     tx: Parameters<
@@ -382,6 +435,13 @@ export class TierService extends BaseService {
         // one insert wins (uq_subscription_tiers_org_sort) and only its copy
         // commits; the loser lands in the catch below and returns the twin.
         await this.dbWs.transaction(async (tx) => {
+          // Tier locks first (lock order, file header). The recommended flag
+          // rewrites another tier's row, so with it every live tier is locked
+          // in id order, the source among them, and the source's FOR SHARE
+          // below waits for nothing; without it, the source alone.
+          if (input.isRecommended) {
+            await this.lockOrgTiers(tx, orgId);
+          }
           if (copyFrom) {
             const [source] = await tx
               .select({ id: subscriptionTiers.id })
@@ -661,8 +721,13 @@ export class TierService extends BaseService {
 
       try {
         if (input.isRecommended === true) {
-          // Atomically clear other recommended flags + update this tier
+          // Atomically clear other recommended flags + update this tier. The
+          // flag moves between two tier rows, so every live tier is locked
+          // first, in id order (lock order, file header): taking the old
+          // recommended row and then this one could cycle with a reorder or
+          // a delete that holds this one and waits for the other.
           await this.dbWs.transaction(async (tx) => {
+            await this.lockOrgTiers(tx, orgId);
             await this.ensureSingleRecommended(tx, orgId, tierId);
             const [result] = await tx
               .update(subscriptionTiers)
@@ -746,10 +811,73 @@ export class TierService extends BaseService {
   }
 
   /**
+   * Lock the films, then the courses, ticked on `tierId`, FOR NO KEY UPDATE
+   * in id order (step 2 of the lock order, file header). Every other writer
+   * of an item's ticks or switch (the editor, the checklist, the course
+   * panel, another delete or copy) holds that item's row while it writes
+   * them, so the items' ticks read next cannot change under the caller.
+   */
+  private async lockItemsTickedOn(
+    tx: TierTransaction,
+    orgId: string,
+    tierId: string
+  ): Promise<void> {
+    await tx
+      .select({ id: content.id })
+      .from(content)
+      .where(
+        inArray(
+          content.id,
+          tx
+            .select({ id: contentTierAccess.contentId })
+            .from(contentTierAccess)
+            .where(
+              and(
+                eq(contentTierAccess.tierId, tierId),
+                eq(contentTierAccess.organizationId, orgId)
+              )
+            )
+        )
+      )
+      .orderBy(asc(content.id))
+      .for('no key update');
+    await tx
+      .select({ id: courses.id })
+      .from(courses)
+      .where(
+        inArray(
+          courses.id,
+          tx
+            .select({ id: courseTierAccess.courseId })
+            .from(courseTierAccess)
+            .where(
+              and(
+                eq(courseTierAccess.tierId, tierId),
+                eq(courseTierAccess.organizationId, orgId)
+              )
+            )
+        )
+      )
+      .orderBy(asc(courses.id))
+      .for('no key update');
+  }
+
+  /**
    * Copy a tier's films and courses to a new tier (Codex-2hxff.91). Only live
    * items of this org; only gated films (an ungated row's ticks would be
    * dead). The new tier takes the org's highest `sort_order`, so it is never
    * any item's "lowest ticked tier": the legacy column needs no dual-write.
+   *
+   * The source's items are locked first (review round 2). A tick insert's
+   * foreign key takes only KEY SHARE on the film, which an editor save
+   * turning the switch off does not block, so unlocked, the copy could read a
+   * film as gated, the editor could clear its ticks and commit, and the copy
+   * could then tick it on the new tier: switch off with a tick (breaking I1).
+   * Locked, a save that came first commits before the INSERT below reads (a
+   * new snapshot, which skips the film), and a save that comes second waits,
+   * then clears the new tick with the rest. Courses have no switch, but the
+   * course panel replaces a course's whole set; holding the course rows keeps
+   * a copy from re-adding a course that save just took out of the source.
    */
   private async copyTierAccess(
     tx: TierTransaction,
@@ -757,6 +885,7 @@ export class TierService extends BaseService {
     fromTierId: string,
     toTierId: string
   ): Promise<void> {
+    await this.lockItemsTickedOn(tx, orgId, fromTierId);
     await tx.execute(sql`
       INSERT INTO ${contentTierAccess} (content_id, tier_id, organization_id)
       SELECT ${contentTierAccess.contentId}, ${toTierId}::uuid, ${orgId}::uuid
@@ -833,8 +962,34 @@ export class TierService extends BaseService {
       let onlyHereCourses = 0;
       let sweptFilms = 0;
       await this.dbWs.transaction(async (tx) => {
-        // a. Lock the tier. Tick writes take FOR SHARE on it, so they wait
-        //    for this delete and then refuse the deleted tier.
+        // a + b. Lock this tier FOR UPDATE and the move targets (live tiers
+        //    of this org) FOR SHARE, as ONE id-ordered set (lock order, file
+        //    header). Postgres has no mixed-mode statement, so: the targets
+        //    below this tier's id, then the tier, then the targets above it.
+        //    Locking the tier first and then a lower target cycles with a
+        //    reorder, or a crossed delete-and-move, that holds the lower one
+        //    and waits for this one (review round 2). Tick writes take FOR
+        //    SHARE on a tier, so they wait for this delete and then refuse
+        //    the deleted tier.
+        const lockTargets = async (side: SQL): Promise<{ id: string }[]> =>
+          moveTo.length === 0
+            ? []
+            : await tx
+                .select({ id: subscriptionTiers.id })
+                .from(subscriptionTiers)
+                .where(
+                  and(
+                    inArray(subscriptionTiers.id, moveTo),
+                    eq(subscriptionTiers.organizationId, orgId),
+                    isNull(subscriptionTiers.deletedAt),
+                    side
+                  )
+                )
+                .orderBy(asc(subscriptionTiers.id))
+                .for('share');
+        const lowerTargets = await lockTargets(
+          lt(subscriptionTiers.id, tierId)
+        );
         const [locked] = await tx
           .select({ id: subscriptionTiers.id })
           .from(subscriptionTiers)
@@ -846,59 +1001,31 @@ export class TierService extends BaseService {
             )
           )
           .for('update');
+        const upperTargets = await lockTargets(
+          gt(subscriptionTiers.id, tierId)
+        );
         if (!locked) throw new TierNotFoundError(tierId);
-
-        // b. The move targets: live tiers of this org, locked FOR SHARE.
-        if (moveTo.length > 0) {
-          const targets = await tx
-            .select({ id: subscriptionTiers.id })
-            .from(subscriptionTiers)
-            .where(
-              and(
-                inArray(subscriptionTiers.id, moveTo),
-                eq(subscriptionTiers.organizationId, orgId),
-                isNull(subscriptionTiers.deletedAt)
-              )
-            )
-            .orderBy(asc(subscriptionTiers.id))
-            .for('share');
-          if (targets.length !== moveTo.length) {
-            const found = new Set(targets.map((t) => t.id));
-            throw new ValidationError(
-              'One or more tiers do not exist in this organisation',
-              { invalidTierIds: moveTo.filter((id) => !found.has(id)) }
-            );
-          }
+        const targets = [...lowerTargets, ...upperTargets];
+        if (targets.length !== moveTo.length) {
+          const found = new Set(targets.map((t) => t.id));
+          throw new ValidationError(
+            'One or more tiers do not exist in this organisation',
+            { invalidTierIds: moveTo.filter((id) => !found.has(id)) }
+          );
         }
 
-        // b2. Lock the films ticked here, in id order, before reading what is
-        //     only here or writing any tick. Every other writer of a film's
-        //     ticks (the editor, the tier checklist) holds that film's row
-        //     while it writes them, so the only-here set read next cannot
-        //     change under this delete. It also keeps ONE lock order for all
-        //     three: tiers, then content rows, then ticks. The move below
-        //     writes ticks before it updates content rows; without this lock
-        //     a checklist save adding the same film to a move target (which
+        // b2. Lock the films, then the courses, ticked here, before reading
+        //     what is only here or writing any tick. Their other writers hold
+        //     an item's row while they write its ticks, so the only-here set
+        //     read next cannot change under this delete, for films AND
+        //     courses (review round 2: two crossed deletes of a course's two
+        //     tiers each saw the other tier still live, and the course ended
+        //     in neither with nobody asked; now the second waits, then counts
+        //     it). It also keeps the one lock order: the move below writes
+        //     ticks before it updates content rows, and without this lock a
+        //     checklist save adding the same film to a move target (which
         //     locks the film's row first) would deadlock with it.
-        await tx
-          .select({ id: content.id })
-          .from(content)
-          .where(
-            inArray(
-              content.id,
-              tx
-                .select({ id: contentTierAccess.contentId })
-                .from(contentTierAccess)
-                .where(
-                  and(
-                    eq(contentTierAccess.tierId, tierId),
-                    eq(contentTierAccess.organizationId, orgId)
-                  )
-                )
-            )
-          )
-          .orderBy(asc(content.id))
-          .for('no key update');
+        await this.lockItemsTickedOn(tx, orgId, tierId);
 
         // c. What is ONLY here, computed now (never the dialog's preview).
         const onlyHere = await this.findOnlyHereItems(tx, orgId, tierId);
@@ -922,6 +1049,12 @@ export class TierService extends BaseService {
         //    two ids plus the targets (at most 50, the schema's max), however
         //    many items there are. A VALUES list of items × targets × 3 would
         //    pass Postgres's 65,535-parameter limit at ~21,845 pairs.
+        //    Each INSERT is skipped when step c found none of its kind. That
+        //    is exact because of b2: an item becomes only-here only when its
+        //    other tier's tick goes, and every writer that removes one (a
+        //    delete of that tier, the checklist, the course panel) waits for
+        //    the item rows or this tier held above. Concurrent ADDS can only
+        //    shrink the set, which the re-derived SELECT then follows.
         if (moveTo.length > 0) {
           const targets = sql.join(
             moveTo.map((to) => sql`${to}::uuid`),
@@ -1133,21 +1266,14 @@ export class TierService extends BaseService {
       // on (organizationId, sortOrder) and the CHECK constraint (sort_order > 0).
       await this.dbWs.transaction(async (tx) => {
         // Lock every live tier of the org in id order BEFORE the row-by-row
-        // updates. The plan-access writers (checklist save, editor, delete
-        // targets) take their multi-tier locks in id order too; updating in
-        // payload order instead could hold one tier while waiting on another
-        // that a sharer holds, a deadlock (40P01) that aborts one of them.
-        await tx
-          .select({ id: subscriptionTiers.id })
-          .from(subscriptionTiers)
-          .where(
-            and(
-              eq(subscriptionTiers.organizationId, orgId),
-              isNull(subscriptionTiers.deletedAt)
-            )
-          )
-          .orderBy(asc(subscriptionTiers.id))
-          .for('update');
+        // updates (lock order, file header). Every plan-access writer takes
+        // its tier locks in id order too; updating in payload order instead
+        // could hold one tier while waiting on another that a sharer holds,
+        // a deadlock (40P01) that aborts one of them. NO KEY UPDATE, not
+        // UPDATE (review round 2): uq_subscription_tiers_org_sort is partial,
+        // so these UPDATEs need no more, and FOR UPDATE would also block the
+        // KEY SHARE every subscription or tick insert takes on a tier.
+        await this.lockOrgTiers(tx, orgId);
 
         // Phase 1: Move all to high temp values to clear the target range
         for (const [i, tierId] of tierIds.entries()) {

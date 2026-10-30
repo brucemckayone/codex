@@ -103,6 +103,32 @@ export async function expandLegacyTier(
 }
 
 /**
+ * Lock every live tier of the org FOR SHARE, in id order: step 1 of the
+ * plan-access lock order (@codex/subscription tier-service.ts, file header).
+ * The editor's update takes it BEFORE the item's row when a save names tiers,
+ * because which of them the save ticks is only known once that row is read
+ * (the old studio's single pick expands to a ladder). Locking the row first
+ * and a tier after would cycle with a `deleteTier` that holds the tier and
+ * waits for the row.
+ */
+export async function shareLockOrgTiers(
+  tx: DatabaseTransaction,
+  organizationId: string
+): Promise<void> {
+  await tx
+    .select({ id: subscriptionTiers.id })
+    .from(subscriptionTiers)
+    .where(
+      and(
+        eq(subscriptionTiers.organizationId, organizationId),
+        isNull(subscriptionTiers.deletedAt)
+      )
+    )
+    .orderBy(asc(subscriptionTiers.id))
+    .for('share');
+}
+
+/**
  * Every id must be a LIVE tier of this org. `FOR SHARE` serialises with a
  * concurrent `deleteTier` (which locks the tier `FOR UPDATE`): it waits, and
  * READ COMMITTED then re-reads `deleted_at` and refuses the deleted tier.

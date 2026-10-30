@@ -54,6 +54,15 @@ the row's organisation). Courses use `course_tier_access` the same way.
   - the tier checklist (`POST /api/organizations/:id/tiers/:tierId/items`, an
     idempotent delta of at most 200 changes; `PlanAccessService`);
   - `TierService` (create with copy, delete with reassignment).
+
+  A course's ticks are also replaced whole by the course panel
+  (`CourseAccessService.setTierAccess`, through ecom-api).
+- **One lock order for every writer** (the `tier-service.ts` file header):
+  tier rows by id first (FOR UPDATE to delete, FOR NO KEY UPDATE to reorder or
+  move the recommended flag, FOR SHARE to tick), then the films and courses by
+  id (FOR NO KEY UPDATE), then the ticks. So two writers never deadlock: the
+  second waits, then reads the first's commit (a deleted tier is refused, an
+  item that became only-here is counted).
 - **Deleting a tier** whose items are in no other tier needs
   `?onlyHere=keep` (they stay in no tier: subscribers-only films become closed,
   paid films stay for sale, courses are in no tier) or
