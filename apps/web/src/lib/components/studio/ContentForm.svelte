@@ -29,7 +29,13 @@
     updateContentForm,
     deleteContent,
   } from '$lib/remote/content.remote';
-  import { getMyConnectStatus } from '$lib/remote/subscription.remote';
+  import { getMyConnectStatus, listTiers } from '$lib/remote/subscription.remote';
+  import type { QueryResult } from '$lib/remote/query-result';
+  import { connectQueryState } from '$lib/utils/connect-readiness';
+  import {
+    selectFromTier,
+    toggleTierId,
+  } from './plan-picker/select-from-tier';
   import { togglePublishStatus, type ContentStatus } from './publish-toggle';
   import { keepValuesOnSave } from '$lib/utils/remote-form';
   import { toast } from '$lib/components/ui/Toast/toast-store';
@@ -68,6 +74,12 @@
     orgSlug: string | null;
     creatorUsername?: string | null;
     mediaItems?: MediaItemOption[];
+    /**
+     * @deprecated Ignored (Codex-2hxff.91). The form reads the org's tiers
+     * through `listTiers` itself, because a host's `tiersQuery.current ?? []`
+     * made a FAILED read look like "no tiers" and hid the Subscribers card
+     * from a subscriber film. Kept only until the hosts stop passing it.
+     */
     tiers?: SubscriptionTier[];
     onSuccess?: () => void;
   }
@@ -78,7 +90,6 @@
     orgSlug,
     creatorUsername,
     mediaItems = [],
-    tiers = [],
     onSuccess,
   }: Props = $props();
 
@@ -134,7 +145,7 @@
   // Shader preset for immersive audio mode
   let shaderPreset = $state<string | null>(content?.shaderPreset ?? null);
 
-  // Tags + featured + minimum tier: locally managed, serialized to hidden input
+  // Tags + featured: locally managed, serialized to hidden input
   // svelte-ignore state_referenced_locally — form field: user edits must survive until submit
   let tags = $state<string[]>(content?.tags ?? []);
   // svelte-ignore state_referenced_locally — user edits must survive until submit
@@ -144,10 +155,44 @@
   // the update REPLACE path. Serialized to the hidden `categoryIds` input.
   // svelte-ignore state_referenced_locally — form field: user edits must survive until submit
   let selectedCategoryIds = $state<string[]>(content?.categoryIds ?? []);
+  // ── The tiers that include the item (Codex-2hxff.91) ────────────────────
+  // The item's WHOLE set, seeded from the content read (inactive tiers kept
+  // for their subscribers included, so a save never drops them).
   // svelte-ignore state_referenced_locally — form field: user edits must survive until submit
-  // WP-1: the single-select access UI still edits a `minimumTierId`; it is
-  // seeded from (and saved back to) the policy flag `includedInTierId`.
-  let selectedMinimumTierId = $state<string>(content?.includedInTierId ?? '');
+  let selectedTierIds = $state<string[]>([...(content?.includedInTierIds ?? [])]);
+  /**
+   * Whether the creator touched the tier picker or the access kind in this
+   * editing session (owner decision U4). Only then does the save carry the set
+   * (as the full set). Otherwise a typo fix in this tab could take the item
+   * out of a tier the creator just added it to from the tier checklist in
+   * another tab: the stored ticks are left alone.
+   */
+  let tierIdsTouched = $state(false);
+  // A content-api older than plan access omits the set: ABSENT is "not
+  // loaded", never "in no tier", so the picker refuses to edit it.
+  const ticksLoaded = $derived(!content || content.includedInTierIds !== undefined);
+
+  // The org's ACTIVE tiers (the options). Read here, not from a host prop:
+  // `?? []` on a host made a failed read look like "this org has no tiers".
+  // Remote queries are cached per argument, so this is the host's query too.
+  const tiersQuery = $derived(organizationId ? listTiers(organizationId) : null);
+  const tiersQueryState = $derived(
+    connectQueryState(tiersQuery as QueryResult<SubscriptionTier[]> | null)
+  );
+  const orgTiers = $derived<SubscriptionTier[]>(
+    tiersQueryState.kind === 'ok' ? tiersQueryState.status : []
+  );
+  const tiersState = $derived.by((): 'loading' | 'loaded' | 'failed' => {
+    if (!organizationId) return 'loaded'; // personal content: no tiers at all
+    if (tiersQueryState.kind === 'failed') return 'failed';
+    if (tiersQueryState.kind === 'loading') return 'loading';
+    return ticksLoaded ? 'loaded' : 'failed';
+  });
+
+  function retryTiers() {
+    // The failure stays on the query's own `.error`; the alert reads it.
+    void tiersQuery?.refresh().catch(() => {});
+  }
 
   const contentTypeVal = $derived(form.fields.contentType.value() ?? content?.contentType ?? 'video');
   const formPending = $derived(form.pending > 0);
@@ -218,7 +263,7 @@
             : content!.contentBody ?? '',
           // Reconstruct the single-select access kind from the WP-1 policy
           // flags so the existing radio UI re-populates on edit.
-          accessType: deriveContentAccessKind(content!),
+          accessType: editorAccessKind(content!),
           visibility: content!.visibility ?? 'public',
           price: content!.priceCents ? (content!.priceCents / 100).toFixed(2) : '0.00',
           category: content!.category ?? '',
@@ -416,7 +461,11 @@
       checks.push({ label: 'Price set for paid content', met: priceMeetsMinimum });
     }
     if (accessTypeVal === 'subscribers') {
-      checks.push({ label: 'Subscription tier selected', met: !!selectedMinimumTierId });
+      // Saving a closed item is allowed; publishing one is not (U2).
+      checks.push({
+        label: m.studio_content_form_ready_tier_ticked(),
+        met: selectedTierIds.length > 0,
+      });
     }
     return checks;
   });
@@ -437,7 +486,7 @@
     accessTypeVal === 'paid'
       ? priceMeetsMinimum
       : accessTypeVal === 'subscribers'
-        ? !!selectedMinimumTierId
+        ? selectedTierIds.length > 0
         : true
   );
 
@@ -467,18 +516,48 @@
   // ── Access handlers ──────────────────────────────────────────────────
   type AccessType = 'free' | 'paid' | 'followers' | 'subscribers' | 'team';
   function handleAccessChange(val: string) {
+    // Changing the kind is a touch (U4): the save then states the full set.
+    if (val !== accessTypeVal) tierIdsTouched = true;
     form.fields.accessType?.set(val as AccessType);
     if (val === 'free' || val === 'followers' || val === 'team') {
       form.fields.price?.set('0.00');
-      // Tier is only meaningful for 'subscribers' (required) and 'paid' (optional, hybrid mode).
-      // Clear any leftover tier state when switching to a mode that can't have one, so the
-      // hidden input submits '' → coerced to null on the server.
-      selectedMinimumTierId = '';
+      // Tiers are only meaningful for 'subscribers' and 'paid' (hybrid). The
+      // save turns the switch off and the server clears the ticks; the picker
+      // starts empty if the creator comes back to a tiered kind.
+      selectedTierIds = [];
     }
   }
 
-  function handleTierChange(val: string | undefined) {
-    selectedMinimumTierId = val ?? '';
+  function handleTierToggle(tierId: string) {
+    selectedTierIds = toggleTierId(selectedTierIds, tierId);
+    tierIdsTouched = true;
+  }
+
+  /** "{tier} and above": that tier and every dearer one (U1). */
+  function handleSelectFromTier(tierId: string) {
+    selectedTierIds = selectFromTier(selectedTierIds, tierId, orgTiers);
+    tierIdsTouched = true;
+  }
+
+  /**
+   * Send the set only when the creator touched the picker or the kind this
+   * session (U4), and only over a loaded picker. A new item has no stored
+   * ticks to protect, so its set is always stated.
+   */
+  const sendTierIds = $derived(
+    tiersState === 'loaded' && (!isEdit || tierIdsTouched)
+  );
+
+  /**
+   * The editor's access kind for a stored row. `deriveContentAccessKind`
+   * reads the display flags; a gated row it cannot place (the subscribers-only
+   * switch on, no price, no legacy tier, e.g. a CLOSED film) must still open
+   * as Subscribers. Read as Free, the next save would send `isFree: true` and
+   * make a closed film free to everyone. Fail closed.
+   */
+  function editorAccessKind(row: ContentWithRelations): AccessType {
+    const kind = deriveContentAccessKind(row);
+    return kind === 'free' && row.isTierGated ? 'subscribers' : kind;
   }
 
   const derivedVisibility = $derived.by(() => {
@@ -640,14 +719,19 @@
       >
         <AccessSection
           {form}
-          {tiers}
+          tiers={orgTiers}
+          {tiersState}
+          onRetryTiers={retryTiers}
+          isNew={!isEdit}
           {accessTypeVal}
           {priceVal}
-          {selectedMinimumTierId}
+          {selectedTierIds}
+          {sendTierIds}
           {derivedVisibility}
           {connectReady}
           onAccessChange={handleAccessChange}
-          onTierChange={handleTierChange}
+          onTierToggle={handleTierToggle}
+          onSelectFromTier={handleSelectFromTier}
         />
       </FormSection>
 

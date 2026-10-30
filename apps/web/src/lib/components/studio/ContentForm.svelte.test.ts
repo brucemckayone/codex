@@ -92,7 +92,8 @@ const CONTENT = {
   thumbnailUrl: null,
   shaderPreset: null,
   featured: false,
-  includedInTierId: null,
+  isTierGated: false,
+  includedInTierIds: [],
 };
 
 /** Drain every pending microtask, then flush Svelte's effect queue. */

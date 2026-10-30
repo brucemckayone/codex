@@ -13,11 +13,15 @@ import {
  *
  *   2.a — Create 3 tiers (Bronze / Silver / Gold) via the studio
  *         monetisation dialog. Asserts each appears in the rendered
- *         tier list, and the org's tier list count grows by 3.
- *   2.b — Create content with accessType='subscribers' and a minimum
- *         tier assigned. Asserts the resulting content row carries the
- *         tier reference (assertion is read-side: the content list /
- *         the redirected detail view shows the tier-gated state).
+ *         tier list, and the org's tier list count grows by 3. The dialog
+ *         asks "Include everything from…" (Codex-2hxff.91): the dearest
+ *         existing tier is chosen by default; Bronze picks "Nothing", the
+ *         others keep the default copy.
+ *   2.b — Create content with accessType='subscribers' and a tier ticked in
+ *         the shared tier picker (checkboxes, not the old "Minimum tier"
+ *         combobox). With nothing ticked the picker says the item is closed
+ *         to subscribers. Asserts the resulting content row appears (read-
+ *         side: the content list after the redirect).
  *
  * Fixture:
  *   - Seeded creator@test.com (Studio Alpha owner). Connect is
@@ -183,6 +187,21 @@ test.describe('Studio Tier CRUD', () => {
       await priceMonthlyInput.fill(String(tier.priceMonthlyPence));
       await priceAnnualInput.fill(String(tier.priceAnnualPence));
 
+      // "Include everything from…": Studio Alpha already has tiers, so the
+      // field is there, with the dearest existing tier chosen by default
+      // (owner decision U3) and "Nothing" last.
+      const copyFrom = page.locator('[data-testid="tier-copy-from"]');
+      await expect(copyFrom).toBeVisible();
+      const checked = copyFrom.locator('input[name="tier-copy-from"]:checked');
+      await expect(checked).toHaveCount(1);
+      await expect(checked).not.toHaveValue('');
+      if (tier === TEST_TIERS[0]) {
+        // Bronze starts empty; the others copy the dearest tier.
+        await copyFrom
+          .locator('input[name="tier-copy-from"][value=""]')
+          .check({ force: true });
+      }
+
       // Submit (form posts to createTier remote function → TierService →
       // Stripe products.create + 2x prices.create + DB insert).
       // Click the "Save" button INSIDE the dialog footer — disambiguate
@@ -205,7 +224,7 @@ test.describe('Studio Tier CRUD', () => {
     expect(finalTierCount).toBe(initialTierCount + TEST_TIERS.length);
   });
 
-  test('2.b creates an article with accessType=subscribers and a tier assigned', async ({
+  test('2.b creates an article with accessType=subscribers and a tier ticked', async ({
     page,
   }) => {
     await injectCreatorAuth(page);
@@ -251,24 +270,19 @@ test.describe('Studio Tier CRUD', () => {
     // force: true — sticky command bar can intercept clicks on form rows.
     await subscribersRadio.click({ force: true });
 
-    // The conditional row reveals: select the FIRST tier from the
-    // "Minimum tier" combobox. The Select component's accessible name is
-    // taken from its `placeholder` prop (Select.svelte:82-85), which is
-    // "Select a minimum tier" when accessType=subscribers.
-    const tierCombobox = page.getByRole('combobox', {
-      name: /Select a minimum tier/i,
-    });
-    await expect(tierCombobox).toBeVisible({ timeout: 15_000 });
-    await tierCombobox.click();
+    // The conditional row reveals the shared tier picker (Codex-2hxff.91):
+    // one toggle per tier, cheapest first, named by the field label. With
+    // nothing ticked the item is CLOSED to subscribers, and the picker says so.
+    const picker = page.getByRole('group', { name: 'Tiers that include this' });
+    await expect(picker).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('[data-testid="tier-closed"]')).toBeVisible();
 
-    // Pick the first tier — it must be a real tier name, not the
-    // "Select a minimum tier" placeholder. Any of: alphaStandard / alphaPro
+    // Tick the first (cheapest) tier. Any of: alphaStandard / alphaPro
     // (seeded) or our 3 E2E tiers (created by 2.a).
-    const firstTierOption = page
-      .getByRole('option')
-      .filter({ hasNotText: /Select a minimum tier/i })
-      .first();
-    await firstTierOption.click();
+    const firstTier = picker.locator('button.tier').first();
+    await firstTier.click({ force: true });
+    await expect(firstTier).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('[data-testid="tier-closed"]')).toHaveCount(0);
 
     // Submit
     await page.getByRole('button', { name: 'Create Content' }).click();

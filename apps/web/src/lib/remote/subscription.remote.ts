@@ -13,6 +13,8 @@ import {
   createSearchQuerySchema,
   payoutSourceFilterEnum,
   payoutStatusFilterEnum,
+  planItemsDeltaSchema,
+  planItemsQuerySchema,
 } from '@codex/validation';
 import { z } from 'zod';
 import { command, getRequestEvent, query } from '$app/server';
@@ -335,6 +337,13 @@ const createTierCommandSchema = z.object({
   priceMonthly: z.number().int().min(100),
   priceAnnual: z.number().int().min(100),
   isRecommended: z.boolean().optional(),
+  /**
+   * "Include everything from…" (Codex-2hxff.91): a live tier of the org whose
+   * films and courses the new tier starts with, copied in the same server
+   * command as the create. `null` copies nothing. A replayed `submissionId`
+   * returns the first attempt's tier and copies nothing again.
+   */
+  copyAccessFromTierId: z.string().uuid().nullable().optional(),
 });
 
 /**
@@ -387,18 +396,110 @@ export const updateTier = command(
 const deleteTierCommandSchema = z.object({
   orgId: z.string().uuid(),
   tierId: z.string().uuid(),
+  /**
+   * What happens to the films and courses ONLY in this tier (Codex-2hxff.91):
+   * keep them subscribers-only with no tier (closed, never free), or move them
+   * to one or more other tiers. Sent only after the creator chose (owner
+   * decision U5); without it the worker refuses whenever such items exist.
+   */
+  choice: z
+    .discriminatedUnion('onlyHere', [
+      z.object({ onlyHere: z.literal('keep') }),
+      z.object({
+        onlyHere: z.literal('move'),
+        moveTo: z.array(z.string().uuid()).min(1).max(50),
+      }),
+    ])
+    .optional(),
 });
 
 /**
  * Soft-delete a subscription tier.
+ *
+ * A refusal is RETURNED, not thrown, with its `details.code`, because the
+ * dialog acts on two of them: `TIER_HAS_SUBSCRIBERS` (someone subscribed
+ * since the dialog's check) and `TIER_HAS_ONLY_ITEMS` (something became only
+ * in this tier since the check). A thrown 4xx reaches the browser as a
+ * sanitised 500 with no code.
  */
 export const deleteTier = command(
   deleteTierCommandSchema,
+  async ({ orgId, tierId, choice }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    try {
+      await api.tiers.delete(orgId, tierId, choice);
+      return { success: true as const };
+    } catch (error) {
+      return toCommandFailure(error, 'deleteTier', orgId);
+    }
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Admin: what each tier includes (Codex-2hxff.91)
+// ─────────────────────────────────────────────────────────────────────────────
+// Studio-only, authoritative and uncached (organization-api,
+// `requireOrgManagement`): per-tier counts, gaps and checklist rows never go
+// on a public or cached route.
+
+/**
+ * Per-tier film and course counts, the guidance-note gaps, and the org's
+ * eligible / closed / ineligible film counts. Feeds the tier rows, the create
+ * dialog's "copies 18 films and 2 courses" and the checklist's chips.
+ */
+export const getTierAccessSummary = query(z.string().uuid(), async (orgId) => {
+  const { platform, cookies } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+  return api.tiers.accessSummary(orgId);
+});
+
+const tierRefSchema = z.object({
+  orgId: z.string().uuid(),
+  tierId: z.string().uuid(),
+});
+
+/**
+ * What deleting a tier would leave only in it, and its live subscribers. The
+ * delete dialog offers Delete only once this has loaded.
+ */
+export const getTierDeleteImpact = query(
+  tierRefSchema,
   async ({ orgId, tierId }) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
-    await api.tiers.delete(orgId, tierId);
-    return { success: true as const };
+    return api.tiers.deleteImpact(orgId, tierId);
+  }
+);
+
+/** One page of the tier checklist ("What's in {tier}"). */
+export const listTierItems = query(
+  tierRefSchema.extend({ query: planItemsQuerySchema }),
+  async ({ orgId, tierId, query: itemsQuery }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    return api.tiers.items(orgId, tierId, itemsQuery);
+  }
+);
+
+/**
+ * The checklist's save: a capped, idempotent DELTA of adds and removes. A
+ * refusal is RETURNED with its `details.code` (a creator who can't be paid
+ * yet is `CREATOR_CONNECT_REQUIRED`); nothing is written on any refusal.
+ */
+export const setTierItems = command(
+  tierRefSchema.extend({ delta: planItemsDeltaSchema }),
+  async ({ orgId, tierId, delta }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    try {
+      return {
+        success: true as const,
+        result: await api.tiers.setItems(orgId, tierId, delta),
+      };
+    } catch (error) {
+      return toCommandFailure(error, 'setTierItems', orgId);
+    }
   }
 );
 
