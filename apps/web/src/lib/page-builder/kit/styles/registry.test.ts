@@ -51,14 +51,6 @@ const BORROWED: Record<PageStyleId, Record<string, Borrowed>> = {
       owner: 'blocks/curriculum/StageTimeline.svelte',
       reason: 'larger timeline markers, for Bold’s larger type',
     },
-    '--_figure': {
-      owner: 'blocks/stats/StatsBlock.svelte',
-      reason: 'the row’s figures at display size',
-    },
-    '--_cols': {
-      owner: 'blocks/stats/StatsBlock.svelte',
-      reason: 'two to a row for two or four figures',
-    },
     '--_inset': {
       owner: 'blocks/benefits/BenefitsBento.svelte',
       reason: 'an open tile’s name has the tile’s whole width (03 X71)',

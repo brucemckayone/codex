@@ -331,14 +331,50 @@
 }
 
 /* A figure is drawn at three quarters of its cell, so the widest one and
-   its circle together just fill it, and the label steps clear of the
-   circle's foot (in the figure's own em). */
+   its circle (or pill) together just fill it, and the label steps clear of
+   the mark's foot (in the figure's own em). */
 :is(.lp, #lp-style)[data-lp-type-facet='studio'] .stat__value {
   font-size: min(1em, 100cqi / (var(--_chars) * 0.62) * 0.74);
 }
 
 :is(.lp, #lp-style)[data-lp-style='studio'] .stat {
   row-gap: max(var(--space-4), 0.42em);
+}
+
+/* A figure's circle is drawn on its own box, made square: never narrower
+   than a numeral and the pen's air, so a short figure sits in a true circle
+   (one stretched round a wide figure flattens into a smear). A figure past
+   four characters (`data-long`, `blocks/stats/figures.ts`) gets a pill
+   instead, on a box that hugs it. */
+:is(.lp, #lp-style)[data-lp-style='studio'] .stat__value {
+  display: inline-grid;
+  place-items: center;
+  min-inline-size: 1.7em;
+  aspect-ratio: 1;
+  padding: 0.3em;
+}
+
+:is(.lp, #lp-style)[data-lp-style='studio'] .stat__value::after {
+  inset: 0;
+}
+
+:is(.lp, #lp-style)[data-lp-style='studio'] .stat__value[data-long] {
+  aspect-ratio: auto;
+  padding: 0.3em 0.5em;
+}
+
+:is(.lp, #lp-style)[data-lp-style='studio'] .stat__value[data-long]::after {
+  background: var(--lp-mark-ink);
+  mask: var(--lp-mark-pill) center / 100% 100% no-repeat;
+}
+
+/* The count runs centred over the figure, as the figure sits in its box.
+   Printed, the count is gone (motion.css), so this is the screen's. */
+@media screen {
+  :is(.lp, #lp-style)[data-lp-style='studio'] .stat__value > .lp-count {
+    display: grid;
+    place-items: center;
+  }
 }
 
 /* The numbers need no rules between them once each is circled — and the

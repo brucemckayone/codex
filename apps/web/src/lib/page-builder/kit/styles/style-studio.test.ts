@@ -123,13 +123,18 @@ function marksOf(source: string): Mark[] {
 describe("Studio's pen marks", () => {
   const marks = marksOf(readFileSync(SHEET, 'utf8'));
 
-  it('finds the pen: the underlines, the circles, the frame and the dashes', () => {
+  it('finds the pen: the underlines, the circles, the pill, the frame and the dashes', () => {
     expect(new Set(marks.map((m) => m.shape))).toEqual(
-      new Set(['--lp-mark-underline', '--lp-mark-circle', '--lp-mark-scribble'])
+      new Set([
+        '--lp-mark-underline',
+        '--lp-mark-circle',
+        '--lp-mark-pill',
+        '--lp-mark-scribble',
+      ])
     );
     // A section heading's underline, the hero's, the circle round a number,
-    // the portrait's frame and the problem's dashes.
-    expect(marks.length).toBeGreaterThanOrEqual(5);
+    // the pill round a long one, the portrait's frame and the problem's dashes.
+    expect(marks.length).toBeGreaterThanOrEqual(6);
   });
 
   it('paints every mark in the mark ink, never the text-grade accent', () => {
@@ -193,5 +198,35 @@ describe("the portrait frame's room (Codex-61zsk.31)", () => {
     const width = split?.query.match(/^\(min-width: ([\d.]+rem)\)$/)?.[1];
     expect(width, `the guide's split: ${split?.query}`).toBeDefined();
     expect(room?.query).toBe(`(width < ${width})`);
+  });
+});
+
+describe("the numbers' circles and pills", () => {
+  const STUDIO = ":is(.lp, #lp-style)[data-lp-style='studio']";
+  const rules = rulesOf(uncomment(readFileSync(SHEET, 'utf8')));
+  const decls = (selector: string) =>
+    rules.find((r) => r.selector === `${STUDIO} ${selector}`)?.decls;
+
+  it('rings a short figure in a true circle, drawn on its own square box', () => {
+    expect(decls('.stat__value')?.get('aspect-ratio')).toBe('1');
+    expect(decls('.stat__value::after')?.get('inset')).toBe('0');
+  });
+
+  // An ellipse stretched round "4,000+" flattened into a smear.
+  it('rings a long figure in a pill, on a box that hugs it, never a stretched circle', () => {
+    expect(decls('.stat__value[data-long]')?.get('aspect-ratio')).toBe('auto');
+    const pill = decls('.stat__value[data-long]::after');
+    expect(pill?.get('mask')).toMatch(/^var\(--lp-mark-pill\)/);
+    expect(pill?.get('background')).toBe(MARK_INK);
+  });
+
+  it('keys the pill on the mark the numbers block sets on a long figure', () => {
+    const block = readFileSync(
+      join(STYLES, '..', 'blocks', 'stats', 'StatsBlock.svelte'),
+      'utf8'
+    );
+    expect(block).toMatch(
+      /class="stat__value"[^>]*data-long=\{isLongFigure\(figure\.value\)/
+    );
   });
 });
