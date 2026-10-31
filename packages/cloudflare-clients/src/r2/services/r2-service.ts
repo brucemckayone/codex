@@ -120,8 +120,12 @@ export class R2Service {
     return object.text();
   }
 
-  async delete(key: string) {
-    return this.withRetries(() => this.bucket.delete(key));
+  /**
+   * Delete one object, or several in one call: the binding takes up to 1,000
+   * keys per call. An absent key is not an error.
+   */
+  async delete(keys: string | string[]) {
+    return this.withRetries(() => this.bucket.delete(keys));
   }
 
   async list(options?: R2ListOptions) {

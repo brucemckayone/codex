@@ -30,7 +30,7 @@
  * one, a "no scroll lock" assertion would also pass in the world where the click
  * never opened anything at all.
  */
-import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import {
   flushSync,
   mount,
@@ -188,5 +188,110 @@ describe('MediaPicker — the menu leaves the page scroll alone', () => {
     clickTrigger();
     expect(el.getAttribute('aria-expanded')).toBe('false');
     expect(pageScrollIsLocked()).toBe(false);
+  });
+});
+
+/**
+ * A `value` set from outside is shown, never reported back (Codex-6sbn1).
+ *
+ * Melt calls `onSelectedChange` on every `selected.set`, so the effect that
+ * mirrors an outside value used to come back out as `onchange`. For a value
+ * the list lacks that was `onchange(null)`: the content editor cleared a
+ * deleted item's id (so "media missing" never showed and a save cut the
+ * link), the course builder cleared the slot, and the intro film's picker
+ * unlinked the film. Only the creator's own pick or clear calls `onchange`.
+ */
+describe('MediaPicker — an outside value is shown, never echoed', () => {
+  const GONE = '99999999-9999-4999-8999-999999999999';
+  const ELSEWHERE = '88888888-8888-4888-8888-888888888888';
+  let component: ReturnType<typeof mount> | null = null;
+  let originalResizeObserver: unknown;
+
+  beforeEach(() => {
+    originalResizeObserver = (globalThis as { ResizeObserver?: unknown })
+      .ResizeObserver;
+    (globalThis as { ResizeObserver?: unknown }).ResizeObserver =
+      NoopResizeObserver;
+  });
+
+  afterEach(() => {
+    if (component) unmount(component);
+    component = null;
+    (globalThis as { ResizeObserver?: unknown }).ResizeObserver =
+      originalResizeObserver;
+  });
+
+  function render(value: string | null, mediaItems = MEDIA_ITEMS) {
+    const onchange = vi.fn();
+    const props = $state({ mediaItems, value, onchange, name: 'mediaItemId' });
+    component = mount(MediaPicker, { target: document.body, props });
+    flushSync();
+    return { props, onchange };
+  }
+
+  const carried = () =>
+    document.querySelector<HTMLInputElement>('input[name="mediaItemId"]')
+      ?.value;
+
+  test('a value set from outside that the list lacks: no call, and the form still carries it', () => {
+    const { props, onchange } = render(null);
+
+    props.value = GONE;
+    flushSync();
+
+    expect(onchange).not.toHaveBeenCalled();
+    expect(carried()).toBe(GONE);
+  });
+
+  test('a saved value outside the list, the list arriving without it then with it, and a re-read naming another: no call', () => {
+    // The intro film: a saved film past the list's 100, then the film re-read
+    // naming another the list lacks. Each echo would have been an unlink.
+    const { props, onchange } = render(ELSEWHERE, []);
+
+    props.mediaItems = MEDIA_ITEMS;
+    flushSync();
+    props.mediaItems = [
+      ...MEDIA_ITEMS,
+      { ...MEDIA_ITEMS[1], id: ELSEWHERE, title: 'Past the first 100' },
+    ];
+    flushSync();
+    props.value = GONE;
+    flushSync();
+
+    expect(onchange).not.toHaveBeenCalled();
+    expect(carried()).toBe(GONE);
+  });
+
+  test('a value set from outside that the list has: shown, still no call', () => {
+    const { props, onchange } = render(null);
+
+    props.value = MEDIA_ITEMS[1].id;
+    flushSync();
+
+    expect(onchange).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('Evening wind-down');
+  });
+
+  test("the creator's own pick and clear still call onchange", () => {
+    const { props, onchange } = render(null);
+    clickTrigger();
+    const evening = [
+      ...document.querySelectorAll<HTMLElement>('[role="option"]'),
+    ].find((el) => el.textContent?.includes('Evening wind-down'));
+    expect(evening, 'the menu did not open').toBeDefined();
+    evening?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSync();
+    expect(onchange).toHaveBeenLastCalledWith(MEDIA_ITEMS[1].id);
+
+    // The caller takes the pick, as every caller does.
+    props.value = MEDIA_ITEMS[1].id;
+    flushSync();
+    onchange.mockClear();
+    document.querySelector<HTMLButtonElement>('.clear-btn')?.click();
+    flushSync();
+    // A clear reports `null` (twice, as it did before: `handleClear` calls
+    // it and its own `selected.set` does again), and nothing else.
+    expect(onchange).toHaveBeenCalledWith(null);
+    expect(onchange.mock.calls.every(([next]) => next === null)).toBe(true);
   });
 });

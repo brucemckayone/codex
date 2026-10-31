@@ -301,3 +301,69 @@ describe('Toaster integration', () => {
     expect(document.querySelectorAll('.toast').length).toBe(1);
   });
 });
+
+/**
+ * A toast's action link (Codex-6sbn1: the media delete's "Show them"). It must
+ * stay reachable by keyboard: Melt pauses the timer on hover only, and the
+ * toaster is last in the tab order, so an actionable toast never times out.
+ */
+describe('Toaster · action', () => {
+  let component: ReturnType<typeof mount> | null = null;
+
+  afterEach(() => {
+    if (component) unmount(component);
+    component = null;
+    clearToasts();
+    document.body.innerHTML = '';
+  });
+
+  function entries() {
+    type Entry = { id: string; closeDelay: number; data: ToastData };
+    let list: Entry[] = [];
+    const unsub = (
+      toaster.toasts as unknown as {
+        subscribe: (fn: (v: Entry[]) => void) => () => void;
+      }
+    ).subscribe((v) => {
+      list = v;
+    });
+    unsub();
+    return list;
+  }
+
+  test('renders the action as a link, and following it closes the toast', () => {
+    component = mount(Toaster, { target: document.body, props: {} });
+    flushSync();
+
+    toast.add({
+      variant: 'success',
+      title: 'Deleted. 2 drafts need a new media item.',
+      action: { label: 'Show them', href: '/studio/content/c1/edit' },
+    });
+    flushSync();
+
+    const link = document.querySelector<HTMLAnchorElement>(
+      '.toast a.toast-action'
+    );
+    expect(link?.textContent?.trim()).toBe('Show them');
+    expect(link?.getAttribute('href')).toBe('/studio/content/c1/edit');
+    expect(link?.getAttribute('target')).toBeNull();
+
+    link?.addEventListener('click', (event) => event.preventDefault());
+    link?.click();
+    flushSync();
+    expect(entries()).toHaveLength(0);
+  });
+
+  test('a toast with an action stays until closed; a plain one keeps its timer', () => {
+    toast.add({ variant: 'success', title: 'Plain' });
+    toast.add({
+      variant: 'success',
+      title: 'With a link',
+      action: { label: 'Show it', href: '/x' },
+    });
+    const [plain, withAction] = entries();
+    expect(plain.closeDelay).toBe(5000);
+    expect(withAction.closeDelay).toBe(0);
+  });
+});

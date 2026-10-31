@@ -32,6 +32,7 @@ import type {
   PageOffer,
   PageSection,
 } from '@codex/shared-types';
+import { remoteErrorCode } from '$lib/remote/query-result';
 import { formatLocalClockTime } from '$lib/utils/format';
 import * as m from '$paraglide/messages';
 
@@ -197,6 +198,14 @@ export type BuilderSaveResult =
       outcome: 'failed';
       stage: BuilderSaveFailureStage;
       message: string;
+      /**
+       * The worker's code, when the refusal carried one the builder acts on:
+       * `MEDIA_DELETED`, a publish refused because the course page's slot media
+       * was deleted (Codex-6sbn1). Page stage only.
+       */
+      code?: string;
+      /** With `MEDIA_DELETED`: the course slots (`'intro'`, `'reel'`, …) at fault. */
+      slots?: readonly string[];
     };
 
 export interface BuilderSaveDeps {
@@ -288,6 +297,17 @@ export function remoteErrorMessage(err: unknown): string | undefined {
     }
   }
   return err instanceof Error && err.message ? err.message : undefined;
+}
+
+/**
+ * The `slots` a `MEDIA_DELETED` refusal carries (`saveJourneyPage` forwards
+ * them), or none.
+ */
+function remoteErrorSlots(err: unknown): string[] {
+  const body = (err as { body?: { slots?: unknown } } | null)?.body;
+  return Array.isArray(body?.slots)
+    ? body.slots.filter((slot): slot is string => typeof slot === 'string')
+    : [];
 }
 
 /**
@@ -425,10 +445,12 @@ export async function saveBuilderDraft(
       ...(payload.seo ? { seo: payload.seo } : {}),
     });
   } catch (err) {
+    const code = remoteErrorCode(err);
     return {
       outcome: 'failed',
       stage: 'page',
       message: remoteErrorMessage(err) ?? 'Failed to save page',
+      ...(code === 'MEDIA_DELETED' && { code, slots: remoteErrorSlots(err) }),
     };
   }
 

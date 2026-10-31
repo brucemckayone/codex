@@ -70,10 +70,11 @@ fetcher. All three log `r2_public_base.missing` on every request with no base
 | POST | `/api/media` | `auth: 'required'` | creator, admin | Create media item; 201 |
 | GET | `/api/media/:id` | `auth: 'required'` | any | Get media by ID |
 | PATCH | `/api/media/:id` | `auth: 'required'` | creator, admin | Update media |
-| GET | `/api/media` | `auth: 'required'` | any | List own media (paginated) |
+| GET | `/api/media` | `auth: 'required'` | any | List own media (paginated); each item carries `usage: { total, live }` (Codex-6sbn1) |
+| GET | `/api/media/:id/usage` | `auth: 'required'` | any | Where the caller's item is used (`MediaUsage`): uses named only where the caller can see them, plus the delete's `fingerprint`. Never cached |
 | POST | `/api/media/:id/upload` | `auth: 'required'` | creator, admin | Binary upload fallback (local dev) |
 | POST | `/api/media/:id/upload-complete` | `auth: 'required'` | creator, admin | Mark upload done; triggers transcoding |
-| DELETE | `/api/media/:id` | `auth: 'required'` | creator, admin | Soft delete; `strict` rate limit; 204. If the item is an org's intro film, bumps that org's public caches (`dispatchOrgPublicInvalidation` from `@codex/worker-utils`, in `waitUntil`) |
+| DELETE | `/api/media/:id?usage=` | `auth: 'required'` | creator, admin | Soft delete; `strict` rate limit; 204. Refused 409 `MEDIA_IN_USE` while anything live uses it, 409 `MEDIA_USAGE_CHANGED` when `usage` (the fingerprint from `/usage`, optional) no longer matches; details are `{ live, drafts }` only. The files stay 30 days (media-api's daily purge). No public cache is dropped: an org's intro video always counts as live, so it blocks the delete (Codex-6sbn1) |
 
 ### Access & Streaming (`/api/access`)
 

@@ -32,6 +32,15 @@ export const EDITOR_TABS: readonly EditorTab[] = [
   'settings',
 ];
 
+/**
+ * The tab a `?tab=` link opens on, or the Page tab. The media library's
+ * Replace on a course page links to `?tab=settings`, where the Media slots
+ * are (Codex-6sbn1).
+ */
+export function editorTabFromParam(value: string | null): EditorTab {
+  return EDITOR_TABS.find((tab) => tab === value) ?? 'page';
+}
+
 export type PrimaryKind = 'publish' | 'publish-changes' | 'published';
 
 export interface PrimaryAction {

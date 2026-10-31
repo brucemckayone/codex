@@ -8,7 +8,7 @@
   The rail tracks scroll position via IntersectionObserver and marks
   the currently-visible section with aria-current.
 
-  @prop sections  Ordered list of { id, label, ready? }
+  @prop sections  Ordered list of { id, label, ready?, warn? }
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
@@ -18,6 +18,8 @@
     label: string;
     /** undefined = not scored; true/false = readiness state */
     ready?: boolean;
+    /** Needs the creator's attention, e.g. its media was deleted (Codex-6sbn1). */
+    warn?: boolean;
   }
 
   interface Props {
@@ -88,6 +90,7 @@
           data-active={activeId === section.id || undefined}
           data-ready={section.ready === true || undefined}
           data-unscored={section.ready === undefined || undefined}
+          data-warn={section.warn || undefined}
           aria-current={activeId === section.id ? 'location' : undefined}
           onclick={(e) => handleClick(e, section.id)}
         >
@@ -208,6 +211,12 @@
     border-color: var(--color-interactive);
     box-shadow: 0 0 0 var(--space-1)
       color-mix(in srgb, var(--color-interactive) 18%, transparent);
+  }
+
+  /* Needs attention: the warning fill, never mistaken for ready. */
+  .rail-link[data-warn] .rail-pip {
+    background-color: var(--color-warning);
+    border-color: var(--color-warning);
   }
 
   /* Unscored sections (e.g. optional, organize, danger) — hollow mark */

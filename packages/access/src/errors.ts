@@ -1,5 +1,9 @@
 import { ERROR_CODES } from '@codex/constants';
-import { InternalServiceError, ServiceError } from '@codex/service-errors';
+import {
+  BusinessLogicError,
+  InternalServiceError,
+  ServiceError,
+} from '@codex/service-errors';
 
 // Re-export error classes from @codex/content (canonical source)
 export { ContentNotFoundError, MediaNotFoundError } from '@codex/content';
@@ -84,6 +88,31 @@ export class MediaNotReadyForStreamingError extends ServiceError {
         mediaId,
         status,
       }
+    );
+  }
+}
+
+/** A course page's sell-media slot, as the media usage lookup names it. */
+export type CourseMediaSlot =
+  | 'intro'
+  | 'reel'
+  | 'guide_video'
+  | 'hero'
+  | 'guide_portrait';
+
+/**
+ * Publishing a course page whose sell media includes a deleted item (422,
+ * Codex-6sbn1). A draft keeps its link to a deleted item, so a restore heals
+ * it, but it can't go live on one, as content publish can't
+ * (`MediaDeletedError`, the same `code: 'MEDIA_DELETED'`). `slots` names
+ * which of the page's media to replace; nothing else is sent (the context
+ * reaches the client verbatim).
+ */
+export class CourseMediaDeletedError extends BusinessLogicError {
+  constructor(slots: CourseMediaSlot[]) {
+    super(
+      'Replace the deleted media on this course page before you publish it.',
+      { code: ERROR_CODES.MEDIA_DELETED, slots }
     );
   }
 }

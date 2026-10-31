@@ -21,7 +21,7 @@ import {
   teardownTestDatabase,
 } from '@codex/test-utils';
 import { DEFAULT_BRANDING } from '@codex/validation';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import {
   afterAll,
   beforeAll,
@@ -890,6 +890,70 @@ describe('BrandingSettingsService', () => {
       await expect(
         service.linkIntroVideo(crypto.randomUUID(), someoneElse)
       ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+
+    // Codex-6sbn1: a media delete holds the row FOR UPDATE while it checks
+    // the item's uses. A link that starts meanwhile must wait on its locking
+    // read and find the item deleted. A plain read would pass, and the
+    // foreign key check would wait and then succeed on the soft-deleted row.
+    it('a link that starts while a media delete holds the row waits on its locking read, then refuses', async () => {
+      const { creatorId, mediaItemId } = await seedMedia({ status: 'ready' });
+      let release = () => {};
+      const released = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let holding = (_pid: number) => {};
+      const held = new Promise<number>((resolve) => {
+        holding = resolve;
+      });
+      const deleting = db.transaction(async (tx) => {
+        await tx
+          .select({ id: schema.mediaItems.id })
+          .from(schema.mediaItems)
+          .where(eq(schema.mediaItems.id, mediaItemId))
+          .for('update');
+        const pid = await tx.execute(sql`SELECT pg_backend_pid() AS pid`);
+        holding(Number((pid.rows[0] as { pid: number }).pid));
+        await released;
+        await tx
+          .update(schema.mediaItems)
+          .set({ deletedAt: new Date() })
+          .where(eq(schema.mediaItems.id, mediaItemId));
+      });
+      const deleter = await held;
+
+      const linking = createService().linkIntroVideo(mediaItemId, creatorId);
+      // Release only once the link is blocked BY the delete (a probe, not a
+      // timer): a wait for a pool connection is not a lock wait.
+      let settled = false;
+      linking.then(
+        () => {
+          settled = true;
+        },
+        () => {
+          settled = true;
+        }
+      );
+      let early = 'neither after 10 s';
+      for (let i = 0; i < 400 && early === 'neither after 10 s'; i++) {
+        const blocked = await db.execute(sql`
+          SELECT count(*)::int AS n FROM pg_stat_activity
+           WHERE ${deleter} = ANY(pg_blocking_pids(pid))`);
+        if (settled) early = 'finished';
+        else if (Number((blocked.rows[0] as { n: number }).n) > 0)
+          early = 'waiting';
+        else await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      release();
+      await deleting;
+
+      expect(early).toBe('waiting');
+      await expect(linking).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      const [row] = await db
+        .select({ id: schema.brandingSettings.introVideoMediaItemId })
+        .from(schema.brandingSettings)
+        .where(eq(schema.brandingSettings.organizationId, organizationId));
+      expect(row?.id ?? null).toBeNull();
     });
   });
 

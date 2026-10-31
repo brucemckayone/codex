@@ -10,7 +10,10 @@
  * - Typed error handling
  */
 
-import { updateMediaItemSchema } from '@codex/validation';
+import {
+  deleteMediaInputSchema,
+  updateMediaItemSchema,
+} from '@codex/validation';
 import { z } from 'zod';
 import { command, getRequestEvent, query } from '$app/server';
 import { createServerApi } from '$lib/server/api';
@@ -109,14 +112,39 @@ export const updateMedia = command(updateMediaSchema, async ({ id, data }) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Delete a media item (soft delete)
+ * Delete a media item (soft delete; support can restore it for 30 days).
+ *
+ * `usage` is the fingerprint `getMediaUsage` returned for the list the dialog
+ * showed. The worker refuses with 409 `MEDIA_IN_USE` (something published
+ * uses it) or `MEDIA_USAGE_CHANGED` (the uses moved since that read), and
+ * `forwardClientErrors` keeps those codes: without it, every 4xx reached the
+ * browser as a bare 500 and the dialog could only log it (Codex-6sbn1).
  */
-export const deleteMedia = command(z.string().uuid(), async (id) => {
+export const deleteMedia = command(
+  deleteMediaInputSchema,
+  async ({ id, usage }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+
+    await forwardClientErrors(() => api.media.delete(id, usage));
+    return { success: true };
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Media Usage Query (Codex-6sbn1)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Where a media item is used: the library chip's popover and the delete
+ * dialog. The worker never caches it (it is the delete's guard), and the
+ * dialog refreshes it on every open, so a read the popover still holds is
+ * never what a delete trusts. A 4xx keeps its status (429 = wait a minute).
+ */
+export const getMediaUsage = query(z.string().uuid(), async (id) => {
   const { platform, cookies } = getRequestEvent();
   const api = createServerApi(platform, cookies);
-
-  await api.media.delete(id);
-  return { success: true };
+  return forwardClientErrors(() => api.media.usage(id));
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

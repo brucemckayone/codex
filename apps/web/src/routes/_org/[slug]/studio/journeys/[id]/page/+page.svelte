@@ -9,11 +9,14 @@
   import { page } from '$app/state';
   import { createBuilderSession } from '$lib/components/page-builder/editor/builder-session.svelte';
   import BuilderShell from '$lib/components/page-builder/editor/BuilderShell.svelte';
+  import { editorTabFromParam } from '$lib/components/page-builder/editor/editor-state';
   import * as m from '$paraglide/messages';
 
   const { data } = $props();
 
   const session = createBuilderSession({ pageId: () => page.params.id ?? '' });
+  // `?tab=settings` opens on Settings → Media: the media library's Replace (Codex-6sbn1).
+  const initialTab = editorTabFromParam(page.url.searchParams.get('tab'));
   const orgName = $derived(data.org?.name ?? 'Studio');
   const orgDomain = $derived(data.org?.slug ?? 'your-space');
 </script>
@@ -24,7 +27,7 @@
 </svelte:head>
 
 {#if session.load === 'ready'}
-  <BuilderShell {session} {orgDomain} />
+  <BuilderShell {session} {orgDomain} {initialTab} />
 {:else if session.load === 'error'}
   <div class="state" role="alert" data-studio-fullbleed>
     <p class="state__title">{m.studio_builder_error_title()}</p>

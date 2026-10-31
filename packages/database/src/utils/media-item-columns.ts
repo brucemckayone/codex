@@ -5,15 +5,36 @@
  * storage endpoint's text. The owner diagnoses from it in the database and
  * the failure email; no API serves it. A creator sees the sentence for
  * `transcoding_error_code` instead.
+ *
+ * `files_purge_after`, `files_purge_started_at` and `files_purged_at` are
+ * the delete's file-purge bookkeeping (Codex-6sbn1): support's and the purge's, never a creator's.
  */
 
 /** `columns` for any relational query whose media row may reach a response. */
-export const MEDIA_ITEM_RESPONSE_COLUMNS = { transcodingError: false } as const;
+export const MEDIA_ITEM_RESPONSE_COLUMNS = {
+  transcodingError: false,
+  filesPurgeAfter: false,
+  filesPurgeStartedAt: false,
+  filesPurgedAt: false,
+} as const;
 
-/** A written row (`.returning()`) without the transcoder's raw detail. */
+/** The columns {@link MEDIA_ITEM_RESPONSE_COLUMNS} leaves out. */
+type UnservedMediaColumn =
+  | 'transcodingError'
+  | 'filesPurgeAfter'
+  | 'filesPurgeStartedAt'
+  | 'filesPurgedAt';
+
+/** A written row (`.returning()`) without the columns no response carries. */
 export function withoutTranscodingDetail<
-  T extends { transcodingError?: unknown },
->(row: T): Omit<T, 'transcodingError'> {
-  const { transcodingError: _detail, ...served } = row;
+  T extends Partial<Record<UnservedMediaColumn, unknown>>,
+>(row: T): Omit<T, UnservedMediaColumn> {
+  const {
+    transcodingError: _detail,
+    filesPurgeAfter: _purgeAfter,
+    filesPurgeStartedAt: _purgeStartedAt,
+    filesPurgedAt: _purgedAt,
+    ...served
+  } = row;
   return served;
 }

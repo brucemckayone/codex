@@ -43,6 +43,7 @@ import {
   standardDatabaseCheck,
 } from '@codex/worker-utils';
 // Import route modules
+import { isMediaFilesPurgeHour, runMediaFilesPurge } from './media-files-purge';
 import mediaStatusRoutes from './routes/media-status';
 import transcodingRoutes from './routes/transcoding';
 import webhookRoutes from './routes/webhook';
@@ -339,18 +340,21 @@ async function runEnsureOrphanCleanupScheduled(
 export default {
   fetch: app.fetch,
   async scheduled(
-    _controller: ScheduledController,
+    controller: ScheduledController,
     env: Bindings,
     ctx: ExecutionContext
   ): Promise<void> {
     // One waitUntil, in order. The poke goes first: it takes a second, and
     // a maintenance run that hangs until the wall limit must not take it
     // down too. Its sweep runs ~60 s on, inside the Neon wake the
-    // maintenance run pays for.
+    // maintenance run pays for. Once a day the media file purge follows.
     ctx.waitUntil(
       (async () => {
         await runEnsureOrphanCleanupScheduled(env);
         await runTranscodingMaintenance(env, ctx);
+        if (isMediaFilesPurgeHour(controller.scheduledTime)) {
+          await runMediaFilesPurge(env, ctx);
+        }
       })()
     );
   },

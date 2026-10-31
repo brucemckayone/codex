@@ -31,6 +31,7 @@ import {
   updateJourneySellMedia,
 } from '$lib/remote/journeys.remote';
 import { listMedia } from '$lib/remote/media.remote';
+import { readFreshQuery } from '$lib/remote/query-result';
 import { remoteErrorMessage } from './builder-save';
 
 /**
@@ -105,6 +106,13 @@ const FILM_SLOTS: ReadonlySet<JourneySellMediaSlot> = new Set([
   'previewVideoMediaId',
   'guideVideoMediaId',
 ]);
+
+/** `JourneySellMedia.missingMedia` as id → title (Codex-6sbn1). */
+function toMissing(
+  missing: readonly { id: string; title: string }[]
+): ReadonlyMap<string, string> {
+  return new Map(missing.map(({ id, title }) => [id, title]));
+}
 
 /** The six slots, all independently clearable. `null` = empty. */
 export type SellMediaSlots = Record<JourneySellMediaSlot, string | null>;
@@ -190,6 +198,13 @@ class SellMediaStore {
    * changes can change it.
    */
   #previewOnly = $state<ReadonlySet<string>>(new Set());
+  /**
+   * The slot media deleted from a library, id to title (Codex-6sbn1;
+   * `JourneySellMedia.missingMedia`). The course keeps the link, so a support
+   * restore heals it; until then the panel says "Media missing". Read with the
+   * slots, and refreshed from a save's echo when it carries it.
+   */
+  #missing = $state<ReadonlyMap<string, string>>(new Map());
   /**
    * The VIEWER's own ready media, for the pickers (`GET /api/media` is
    * creator-scoped). `#previewOnly` covers exactly this plus the course's film
@@ -325,6 +340,15 @@ class SellMediaStore {
   }
 
   /**
+   * The title of the media this slot holds, saved or picked, when it was
+   * deleted from its library; null otherwise. A pick of another item clears it.
+   */
+  missingTitle(slot: JourneySellMediaSlot): string | null {
+    const mediaId = this.#pending[slot];
+    return mediaId === null ? null : (this.#missing.get(mediaId) ?? null);
+  }
+
+  /**
    * The picker options this slot may actually hold — see {@link SLOT_ACCEPTS}.
    *
    * Every surface with a sell-media picker calls THIS rather than reading
@@ -412,6 +436,8 @@ class SellMediaStore {
         this.#signatureImageUrl = media.signatureImageUrl ?? null;
         // Optional-additive too: an older worker omits it, and no note shows.
         this.#previewOnly = new Set(media.previewOnlyMediaIds ?? []);
+        // Optional-additive: an older worker omits it, and no slot says missing.
+        this.#missing = toMissing(media.missingMedia ?? []);
       }
 
       this.#options = (library?.items ?? []).map((item) => ({
@@ -477,6 +503,31 @@ class SellMediaStore {
     const echoed: UploadedStillsOnTheWire = persisted;
     this.#heroImageUrl = echoed.heroImageUrl ?? null;
     this.#signatureImageUrl = echoed.signatureImageUrl ?? null;
+    // The echo names the deleted slot media of the row just written; an older
+    // worker's omits it, and then what `open()` read stands.
+    if (persisted.missingMedia)
+      this.#missing = toMissing(persisted.missingMedia);
+  }
+
+  /**
+   * Read again which slot media was deleted, after the server refused to
+   * publish over it (Codex-6sbn1): the item may have gone since {@link open}
+   * read the slots. Only that set moves; the slots, saved and pending, stay as
+   * they are. Best effort: on a failed read what `open()` read stands, and the
+   * refusal's toast names the slots anyway.
+   */
+  async refreshMissing(): Promise<void> {
+    const pageId = this.#pageId;
+    if (!pageId) return;
+    try {
+      const media = await readFreshQuery(getJourneySellMedia({ pageId }));
+      // A page closed or switched during the read is not this one.
+      if (this.#pageId === pageId && media?.missingMedia) {
+        this.#missing = toMissing(media.missingMedia);
+      }
+    } catch {
+      // Best effort, as above.
+    }
   }
 
   /**
@@ -577,6 +628,7 @@ class SellMediaStore {
     this.#heroImageUrl = null;
     this.#signatureImageUrl = null;
     this.#previewOnly = new Set();
+    this.#missing = new Map();
     this.#options = [];
     this.#loading = false;
     this.#coverBusy = false;

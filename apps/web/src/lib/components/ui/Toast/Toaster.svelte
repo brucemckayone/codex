@@ -23,6 +23,17 @@
         {#if t.data.description}
           <div use:melt={$description(t.id)} class="toast-description">{t.data.description}</div>
         {/if}
+        {#if t.data.action}
+          <a
+            class="toast-action"
+            href={t.data.action.href}
+            target={t.data.action.newTab ? '_blank' : undefined}
+            rel={t.data.action.newTab ? 'noopener noreferrer' : undefined}
+            onclick={() => toaster.remove(t.id)}
+          >
+            {t.data.action.label}
+          </a>
+        {/if}
       </div>
       <button use:melt={$close(t.id)} class="toast-close" aria-label="Close">
         ✕
@@ -87,6 +98,21 @@
 
   .toast-close:hover {
     color: var(--color-text);
+  }
+
+  .toast-action {
+    align-self: flex-start;
+    font-size: var(--text-sm);
+    font-weight: var(--font-semibold);
+    color: var(--color-interactive);
+    text-decoration: underline;
+    text-underline-offset: var(--space-0-5);
+    border-radius: var(--radius-sm);
+  }
+
+  .toast-action:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-0-5);
   }
 
   /* Variants */

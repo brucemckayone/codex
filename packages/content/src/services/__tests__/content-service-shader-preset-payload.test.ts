@@ -27,6 +27,7 @@
 
 import { CONTENT_STATUS } from '@codex/constants';
 import type { Database } from '@codex/database';
+import { mediaItems } from '@codex/database/schema';
 import { describe, expect, it } from 'vitest';
 import { ContentService } from '../content-service';
 
@@ -37,10 +38,13 @@ type Payload = Record<string, unknown>;
  *
  * Only the surface `create()`/`update()` actually touch is implemented:
  * `transaction`, `insert().values().returning()`, `update().set().where()
- * .returning()`, the two `query.*.findFirst` lookups, and `update()`'s
- * locked read of its row, `select().from().where().for()` (Codex-2hxff.91).
- * Anything else is deliberately absent so an unrelated future call fails
- * loudly rather than silently passing through a permissive stub.
+ * .returning()`, the `query.content.findFirst` lookup, and the two locked
+ * reads, `select().from(table).where().for()`, which `from(table)`
+ * dispatches: `update()`'s read of its content row (Codex-2hxff.91) gets
+ * `existingRow()`, and `validateMediaItem`'s read of the media row, `FOR KEY
+ * SHARE` (Codex-6sbn1), gets a ready audio item. Anything else is
+ * deliberately absent so an unrelated future call fails loudly rather than
+ * silently passing through a permissive stub.
  *
  * `existingContent` seeds the row `update()` reads back before writing.
  */
@@ -63,24 +67,23 @@ function createCapturingDb(existingContent: Payload = {}) {
     ...existingContent,
   });
 
+  const mediaRow = (): Payload => ({
+    id: 'media-1',
+    mediaType: 'audio',
+    status: 'ready',
+    deletedAt: null,
+  });
+
   const tx = {
     query: {
-      mediaItems: {
-        findFirst: async () => ({
-          id: 'media-1',
-          mediaType: 'audio',
-          status: 'ready',
-          deletedAt: null,
-        }),
-      },
       content: {
         findFirst: async () => existingRow(),
       },
     },
     select: () => ({
-      from: () => ({
+      from: (table: unknown) => ({
         where: () => ({
-          for: async () => [existingRow()],
+          for: async () => [table === mediaItems ? mediaRow() : existingRow()],
         }),
       }),
     }),

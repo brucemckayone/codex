@@ -43,6 +43,8 @@ export {
 export {
   AccessDeniedError,
   ContentNotFoundError,
+  CourseMediaDeletedError,
+  type CourseMediaSlot,
   InvalidContentTypeError,
   MediaNotFoundError,
   MediaNotReadyForStreamingError,

@@ -674,6 +674,107 @@ describe('publish', () => {
   });
 });
 
+/**
+ * Codex-6sbn1: the server will not put a course page live while a slot holds
+ * media deleted from its library (422, `code: 'MEDIA_DELETED'`, the slots).
+ */
+describe('a publish refused over deleted media', () => {
+  const REFUSED =
+    'Replace the deleted media on this course page before you publish it.';
+  const BLOCKED = 'This page can’t be published yet';
+  const course = () => record({ subjectType: 'course', subjectId: 'course-1' });
+  const refusal = (slots: unknown[]) => ({
+    status: 422,
+    body: { message: REFUSED, code: 'MEDIA_DELETED', slots },
+  });
+
+  it('says why and where, each slot with its deleted item’s title, and stays a draft', async () => {
+    const held = { ...mediaEcho(null), previewVideoMediaId: 'media-gone' };
+    remotes.getJourneySellMedia.mockResolvedValue(held);
+    remotes.saveJourneyPage.mockRejectedValue(refusal(['reel', 'hero']));
+    const session = start(course());
+    await settle();
+    // Deleted after the builder opened: only a fresh read knows. The read is
+    // still cached, as kit keeps one something tracks.
+    const read = {
+      ready: true,
+      loading: false,
+      current: held as Record<string, unknown>,
+      refresh: vi.fn(async () => {
+        read.current = {
+          ...held,
+          missingMedia: [{ id: 'media-gone', title: 'Winter Light' }],
+        };
+      }),
+    };
+    remotes.getJourneySellMedia.mockReturnValue(read);
+    expect(sellMedia.missingTitle('previewVideoMediaId')).toBeNull();
+
+    const result = await session.publish();
+
+    // The title is in the toast: it waited for the fresh read.
+    expect(result).toEqual({ ok: false });
+    expect(toasts.error).toHaveBeenCalledTimes(1);
+    expect(toasts.error).toHaveBeenCalledWith(
+      BLOCKED,
+      `${REFUSED} Settings → Media: Hero film, Practice reel (Winter Light).`
+    );
+    expect(toasts.success).not.toHaveBeenCalled();
+    expect(session.status).toBe('draft');
+    expect(read.refresh).toHaveBeenCalledTimes(1);
+    expect(sellMedia.missingTitle('previewVideoMediaId')).toBe('Winter Light');
+  });
+
+  it('a refusal naming no slot this build knows says why in the server’s words alone', async () => {
+    remotes.saveJourneyPage.mockRejectedValue(refusal(['trailer']));
+    const session = start(course());
+    await settle();
+
+    const result = await session.publish();
+
+    expect(result).toEqual({ ok: false });
+    expect(toasts.error).toHaveBeenCalledWith(BLOCKED, REFUSED);
+  });
+
+  it('Replace then Publish is not refused: the new media is saved before the page goes live', async () => {
+    remotes.getJourneySellMedia.mockResolvedValue(mediaEcho('media-gone'));
+    let replaced = false;
+    remotes.updateJourneySellMedia.mockImplementation(async () => {
+      replaced = true;
+      return mediaEcho('media-new');
+    });
+    // The server as it is: a publish while the course still holds the
+    // deleted item is refused.
+    remotes.saveJourneyPage.mockImplementation(
+      async (input: { status: string }) => {
+        if (input.status === 'published' && !replaced) {
+          throw refusal(['hero']);
+        }
+      }
+    );
+    const session = start(course());
+    await settle();
+    expect(sellMedia.loaded).toBe(true);
+    // Replace, and Publish before the autosave's debounce runs.
+    sellMedia.setSlot('heroMediaId', 'media-new');
+    flushSync();
+
+    const result = await session.publish();
+
+    expect(result.ok).toBe(true);
+    const pages = remotes.saveJourneyPage.mock;
+    expect(pages.calls.map((call) => call[0].status)).toEqual([
+      'draft',
+      'published',
+    ]);
+    // The media landed between the two: before the page went live.
+    const mediaAt = remotes.updateJourneySellMedia.mock.invocationCallOrder[0];
+    expect(mediaAt).toBeGreaterThan(pages.invocationCallOrder[0]);
+    expect(mediaAt).toBeLessThan(pages.invocationCallOrder[1]);
+    expect(session.status).toBe('published');
+  });
+});
+
 describe('the status is never an undo step', () => {
   it('undo after publish never changes the status, and never unpublishes', async () => {
     vi.useFakeTimers();

@@ -65,6 +65,12 @@ declare global {
        * (`RecipientCannotHoldAgreementError`, Codex-2hxff.76/.77).
        */
       reason?: string;
+      /**
+       * The course page slots whose media was deleted, from a publish refused
+       * with `details.code: 'MEDIA_DELETED'` (Codex-6sbn1). Set by
+       * `saveJourneyPage`; the page builder names them and opens Settings.
+       */
+      slots?: string[];
     }
 
     interface PageData {

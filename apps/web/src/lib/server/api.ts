@@ -70,6 +70,7 @@ import type {
   ContactSettingsResponse,
   CourseOffer,
   FeatureSettingsResponse,
+  MediaUsage,
   OrganizationPublicStatsResponse,
   OrganizationWithRole,
   PaginatedListResponse,
@@ -2881,6 +2882,8 @@ export function createServerApi(
        *
        * Each row also carries its poster's CDN URL, or null with none: the
        * route resolves `thumbnailKey` (workers/content-api/src/routes/media.ts).
+       * And `usage`, how many places use it (Codex-6sbn1), for the library
+       * chip (`MediaItemWithRelations.usage`).
        */
       list: (params?: URLSearchParams) =>
         request<
@@ -2905,12 +2908,25 @@ export function createServerApi(
         }),
 
       /**
-       * Soft delete a media item
+       * Where a media item is used (Codex-6sbn1): the list the delete dialog
+       * and the library chip's popover draw, and the fingerprint the delete
+       * sends back. Never cached: it is the delete's guard.
        */
-      delete: (id: string) =>
-        request<void>('content', `/api/media/${id}`, {
-          method: 'DELETE',
-        }),
+      usage: (id: string) =>
+        request<MediaUsage>('content', `/api/media/${id}/usage`),
+
+      /**
+       * Soft delete a media item. `usage` is the fingerprint of the uses the
+       * dialog showed; the worker refuses with 409 `MEDIA_IN_USE` when
+       * something published uses the item, or `MEDIA_USAGE_CHANGED` when the
+       * uses differ from what the fingerprint described.
+       */
+      delete: (id: string, usage?: string) =>
+        request<void>(
+          'content',
+          `/api/media/${id}${usage ? `?usage=${encodeURIComponent(usage)}` : ''}`,
+          { method: 'DELETE' }
+        ),
 
       /**
        * A one-minute ticket for the studio's live status socket, and the URL
