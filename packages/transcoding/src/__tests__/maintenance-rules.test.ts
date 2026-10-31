@@ -116,9 +116,15 @@ describe('unstartedJobAction (Codex-t359w)', () => {
     expect(unstartedJobAction('unanswered')).toEqual({ kind: 'ask_later' });
   });
 
+  it('sends again a job RunPod no longer has: this early, it was dropped, not a lost webhook', () => {
+    const gone = { ok: true, state: 'GONE' } as const;
+    expect(unstartedJobAction(gone)).toMatchObject({ kind: 'wait' });
+    // The reconcile, asking 45 minutes on, reads the same answer otherwise.
+    expect(lostJobAction(gone, 0)).toMatchObject({ code: 'WEBHOOK_LOST' });
+  });
+
   it.each([
     ['COMPLETED', 'WEBHOOK_LOST'],
-    ['GONE', 'WEBHOOK_LOST'],
     ['FAILED', 'INFRA_ERROR'],
     ['CANCELLED', 'TIMED_OUT'],
     ['TIMED_OUT', 'TIMED_OUT'],

@@ -425,6 +425,10 @@ class TestCheckEndpointHealth:
         get.assert_not_called()
 
 
+# The handler's ping branch answers {"status": "pong"}.
+PONG = {"id": "job-1", "status": "COMPLETED", "output": {"status": "pong"}}
+
+
 class TestWarmTranscoder:
     @pytest.fixture(autouse=True)
     def _env(self, monkeypatch):
@@ -451,9 +455,7 @@ class TestWarmTranscoder:
             monkeypatch,
             [
                 _response(payload={"id": "job-1", "status": "IN_QUEUE"}),
-                _response(
-                    payload={"id": "job-1", "status": "COMPLETED", "delayTime": 95_400}
-                ),
+                _response(payload={**PONG, "delayTime": 95_400}),
             ],
         )
 
@@ -505,7 +507,7 @@ class TestWarmTranscoder:
                 requests.ConnectionError("reset"),
                 _response(status=502),
                 _response(payload=["not", "an", "object"]),
-                _response(payload={"id": "job-1", "status": "COMPLETED"}),
+                _response(payload=PONG),
             ],
         )
 
@@ -515,6 +517,41 @@ class TestWarmTranscoder:
         out = capsys.readouterr().out
         assert out.count("Status read failed") == 3
         assert "an unreported time" in out
+
+    def test_a_completed_ping_without_its_pong_fails_the_step(
+        self, monkeypatch, capsys
+    ):
+        # A real job's error dict is COMPLETED too: the ping ran the wrong path.
+        self._patch(
+            monkeypatch,
+            [_response(payload={**PONG, "output": {"error": "KeyError"}})],
+        )
+
+        assert script.warm_transcoder() == 4
+
+        assert "completed without its pong" in capsys.readouterr().out
+
+    def test_a_status_never_read_is_named_as_the_cause(self, monkeypatch, capsys):
+        self._patch(monkeypatch, [_response(status=403)] * 1000)
+
+        assert script.warm_transcoder() == 4
+
+        out = capsys.readouterr().out
+        assert "its status could not be read: 403 Client Error" in out
+        assert "check the endpoint's workers" not in out
+
+    def test_runpods_text_cannot_start_a_workflow_command(self, monkeypatch, capsys):
+        error = "boom\n::warning::forged 100%"
+        self._patch(
+            monkeypatch,
+            [_response(payload={"id": "job-1", "status": "FAILED", "error": error})],
+        )
+
+        assert script.warm_transcoder() == 4
+
+        out = capsys.readouterr().out
+        assert "boom%0A::warning::forged 100%25" in out
+        assert "\n::warning::" not in out
 
     @pytest.mark.parametrize(
         "answer",

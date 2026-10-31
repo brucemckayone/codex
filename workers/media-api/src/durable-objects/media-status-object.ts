@@ -26,7 +26,9 @@
  *   A job RunPod accepted that has sent no progress is asked about at 2, 5
  *   and 10 minutes after its dispatch (UNSTARTED_CHECKS_MS, Codex-t359w):
  *   still queued shows on its tile, ended fails it then, not at the hourly
- *   reconcile 45 minutes or more later. Its first tick cancels the asks.
+ *   reconcile 45 minutes or more later. Its first tick cancels the asks. A
+ *   last ask RunPod leaves unanswered is asked again every 5 minutes, to
+ *   30 minutes after dispatch: the reconcile never says a job is queued.
  */
 
 import type {
@@ -80,6 +82,11 @@ export const RESYNC_GRACE_MS = 5 * 60_000;
 
 /** One alarm's asks of RunPod, all of them: each call is bounded inside it. */
 const CHECK_BUDGET_MS = 20_000;
+
+/** A last ask left unanswered is asked again this much later... */
+const UNANSWERED_REASK_MS = 5 * 60_000;
+/** ...until this long after the dispatch. */
+const UNANSWERED_REASK_UNTIL_MS = 30 * 60_000;
 
 /**
  * Columns added after `items` first shipped (Codex-t359w). An object made
@@ -217,6 +224,14 @@ function isSameChange(held: Row, change: MediaStatusChange): boolean {
     held.error_code === change.errorCode &&
     held.attempts === change.attempts &&
     held.job_id === change.jobId
+  );
+}
+
+/** Whether a write moved a time the alarm keys on. */
+function movesAlarm(held: Row | null, row: Row): boolean {
+  return (
+    (held?.retry_at ?? null) !== row.retry_at ||
+    (held?.check_at ?? null) !== row.check_at
   );
 }
 
@@ -504,12 +519,7 @@ export class MediaStatusObject {
     this.broadcast(row);
     // A terminal row's retry_at and check_at are null: the alarm moves only
     // if it had one.
-    if (
-      (held?.retry_at ?? null) !== row.retry_at ||
-      (held?.check_at ?? null) !== row.check_at
-    ) {
-      await this.rescheduleAlarm();
-    }
+    if (movesAlarm(held, row)) await this.rescheduleAlarm();
   }
 
   /** Whether a change tells the held row anything; the suspect ones logged. */
@@ -698,55 +708,17 @@ export class MediaStatusObject {
   // fallow-ignore-next-line unused-class-member
   async alarm(): Promise<void> {
     const now = Date.now();
-    const sql = this.state.storage.sql;
-    const due = sql
-      .exec<{ media_id: string }>(
-        'SELECT media_id FROM items WHERE retry_at IS NOT NULL AND retry_at <= ?',
-        now
-      )
-      .toArray()
-      .map((row) => row.media_id);
-    const asks = sql
-      .exec<DueAsk>(
-        `SELECT media_id, job_id, checks, updated_at FROM items
-         WHERE check_at IS NOT NULL AND check_at <= ?`,
-        now
-      )
-      .toArray();
-    // Counted and cleared first, so a retry that throws cannot loop. One that
-    // fails is the hourly cron's (its waiting step retries the same rows).
-    for (const mediaId of due) {
-      sql.exec(
-        'UPDATE items SET retry_at = NULL, retries = retries + 1 WHERE media_id = ?',
-        mediaId
-      );
-    }
-    // Each ask counted, and the next one set, before RunPod is asked, for the
-    // same reason. One that fails is the hourly reconcile's.
-    const jobs: UnstartedJob[] = [];
-    for (const ask of asks) {
-      const next = nextCheckAt(ask.updated_at, ask.checks + 1);
-      sql.exec(
-        'UPDATE items SET check_at = ?, checks = ? WHERE media_id = ?',
-        next,
-        ask.checks + 1,
-        ask.media_id
-      );
-      if (ask.job_id === null) continue;
-      jobs.push({
-        mediaId: ask.media_id,
-        jobId: ask.job_id,
-        dispatchedAt: ask.updated_at,
-        last: next === null,
-      });
-    }
+    const due = this.takeDueRetries(now);
+    const jobs = this.takeDueAsks(now);
     // Also when nothing was due: the alarm may have been set for an ask a
     // tick has since cancelled, and the next due item needs one of its own.
+    let rescheduleFailed: unknown = null;
     try {
       await this.rescheduleAlarm();
     } catch (error) {
+      rescheduleFailed = error;
       this.obs.error('media_status.alarm_reschedule_failed', {
-        due: due.length + asks.length,
+        due: due.length + jobs.length,
         error: messageForLog(error),
       });
     }
@@ -766,13 +738,69 @@ export class MediaStatusObject {
       try {
         await this.ask(jobs);
       } catch (error) {
-        this.obs.error('media_status.alarm_ask_failed', {
-          due: jobs.length,
-          fallback: 'hourly_cron',
+        this.obs.error('media_status.alarm_asked_not_kept', {
+          mediaIds: jobs.map((job) => job.mediaId),
+          fallback: 'hourly_reconcile_ended_jobs_only',
           error: messageForLog(error),
         });
       }
     }
+    // Thrown after the work, so workerd retries the alarm: everything due
+    // was moved on above, so the retry only sets it again.
+    if (rescheduleFailed !== null) throw rescheduleFailed;
+  }
+
+  /**
+   * The retries due, counted and cleared first, so a retry that throws
+   * cannot loop. One that fails is the hourly cron's (its waiting step
+   * retries the same rows).
+   */
+  private takeDueRetries(now: number): string[] {
+    const sql = this.state.storage.sql;
+    const due = sql
+      .exec<{ media_id: string }>(
+        'SELECT media_id FROM items WHERE retry_at IS NOT NULL AND retry_at <= ?',
+        now
+      )
+      .toArray()
+      .map((row) => row.media_id);
+    for (const mediaId of due) {
+      sql.exec(
+        'UPDATE items SET retry_at = NULL, retries = retries + 1 WHERE media_id = ?',
+        mediaId
+      );
+    }
+    return due;
+  }
+
+  /** The asks due, each counted and the next one set before RunPod is asked, for the same reason. */
+  private takeDueAsks(now: number): UnstartedJob[] {
+    const sql = this.state.storage.sql;
+    const asks = sql
+      .exec<DueAsk>(
+        `SELECT media_id, job_id, checks, updated_at FROM items
+         WHERE check_at IS NOT NULL AND check_at <= ?`,
+        now
+      )
+      .toArray();
+    const jobs: UnstartedJob[] = [];
+    for (const ask of asks) {
+      const next = nextCheckAt(ask.updated_at, ask.checks + 1);
+      sql.exec(
+        'UPDATE items SET check_at = ?, checks = ? WHERE media_id = ?',
+        next,
+        ask.checks + 1,
+        ask.media_id
+      );
+      if (ask.job_id === null) continue;
+      jobs.push({
+        mediaId: ask.media_id,
+        jobId: ask.job_id,
+        dispatchedAt: ask.updated_at,
+        last: next === null,
+      });
+    }
+    return jobs;
   }
 
   /** The cron's claim and dispatch, for the due items, with the cron's stop after a refusal. */
@@ -788,12 +816,25 @@ export class MediaStatusObject {
    * failed by the service, whose publish removes its row here.
    */
   private async ask(jobs: readonly UnstartedJob[]): Promise<void> {
-    const outcomes = await this.withServices((services) =>
-      services.transcodingMaintenance.checkUnstarted(
-        jobs,
-        Date.now() + CHECK_BUDGET_MS
-      )
-    );
+    let outcomes: ReadonlyMap<string, UnstartedOutcome>;
+    try {
+      outcomes = await this.withServices((services) =>
+        services.transcodingMaintenance.checkUnstarted(
+          jobs,
+          Date.now() + CHECK_BUDGET_MS
+        )
+      );
+    } catch (error) {
+      // Nothing was learned: each job waits for its next ask, a last one too.
+      this.obs.error('media_status.alarm_ask_failed', {
+        mediaIds: jobs.map((job) => job.mediaId),
+        fallback: 'next_ask',
+        error: messageForLog(error),
+      });
+      outcomes = new Map<string, UnstartedOutcome>(
+        jobs.map((job) => [job.mediaId, 'ask_later'])
+      );
+    }
     await this.applyAsked(jobs, outcomes);
   }
 
@@ -810,27 +851,66 @@ export class MediaStatusObject {
       queued: 0,
       running: 0,
       failed: 0,
+      requeued: 0,
       gone: 0,
       ask_later: 0,
     };
     for (const job of jobs) {
-      const outcome = outcomes.get(job.mediaId) ?? 'ask_later';
-      counts[outcome]++;
-      if (outcome === 'queued') {
-        this.setQueued(job, job.last ? 'overdue' : 'waiting');
-      } else if (outcome === 'running' || outcome === 'gone') {
-        // Nothing more to ask: a worker has the job (its steps follow), or
-        // the row moved on.
-        this.state.storage.sql.exec(
-          'UPDATE items SET check_at = NULL WHERE media_id = ? AND job_id = ?',
-          job.mediaId,
-          job.jobId
-        );
-        this.setQueued(job, null);
+      const found = outcomes.get(job.mediaId);
+      if (found === undefined) {
+        // checkUnstarted answers for every job it is given.
+        this.obs.error('media_status.alarm_outcome_missing', {
+          mediaId: job.mediaId,
+          runpodJobId: job.jobId,
+        });
       }
+      const outcome = found ?? 'ask_later';
+      counts[outcome]++;
+      this.keepAsked(job, outcome);
     }
     await this.rescheduleAlarm();
     this.obs.info('media_status.alarm_asked', counts);
+  }
+
+  /** What one ask found, kept on its row (an ended job's is the service's to write). */
+  private keepAsked(job: UnstartedJob, outcome: UnstartedOutcome): void {
+    if (outcome === 'queued') {
+      this.setQueued(job, job.last ? 'overdue' : 'waiting');
+    } else if (outcome === 'running' || outcome === 'gone') {
+      // Nothing more to ask: a worker has the job (its steps follow), or the
+      // row moved on.
+      this.state.storage.sql.exec(
+        'UPDATE items SET check_at = NULL WHERE media_id = ? AND job_id = ?',
+        job.mediaId,
+        job.jobId
+      );
+      this.setQueued(job, null);
+    } else if (outcome === 'ask_later' && job.last) {
+      this.askAgainLater(job);
+    }
+  }
+
+  /**
+   * A last ask RunPod left unanswered, asked again: still queued then is
+   * what the tile and the owner must hear, and the reconcile never says it.
+   */
+  private askAgainLater(job: UnstartedJob): void {
+    const at = Date.now() + UNANSWERED_REASK_MS;
+    if (at > job.dispatchedAt + UNANSWERED_REASK_UNTIL_MS) {
+      this.obs.warn('media_status.early_check_gave_up', {
+        mediaId: job.mediaId,
+        runpodJobId: job.jobId,
+        fallback: 'hourly_reconcile_ended_jobs_only',
+      });
+      return;
+    }
+    this.state.storage.sql.exec(
+      `UPDATE items SET check_at = ?
+       WHERE media_id = ? AND job_id = ? AND step IS NULL`,
+      at,
+      job.mediaId,
+      job.jobId
+    );
   }
 
   /** What its tile says of a job not yet started, told once per change. */

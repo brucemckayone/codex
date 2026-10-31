@@ -155,11 +155,14 @@ export type UnstartedJobAction =
   | { kind: 'queued' }
   | { kind: 'running' }
   | { kind: 'ask_later' }
-  | Extract<LostJobAction, { kind: 'fail' }>;
+  | Extract<LostJobAction, { kind: 'fail' | 'wait' }>;
 
 /**
- * An ended job fails as the hourly reconcile would fail it, only sooner. An
- * answer that cannot be read waits for the next ask.
+ * An ended job fails as the hourly reconcile would fail it, only sooner. A
+ * job RunPod no longer has is sent again: the reconcile reads GONE as a lost
+ * webhook because RunPod keeps a result 30 minutes, so one gone within
+ * minutes of dispatch, with no step, was dropped (or the endpoint changed).
+ * An answer that cannot be read waits for the next ask.
  */
 export function unstartedJobAction(
   answer: Exclude<JobAnswer, 'no_job'>
@@ -167,6 +170,9 @@ export function unstartedJobAction(
   if (answer === 'unanswered') return { kind: 'ask_later' };
   if (answer.state === 'IN_QUEUE') return { kind: 'queued' };
   if (answer.state === 'IN_PROGRESS') return { kind: 'running' };
+  if (answer.state === 'GONE') {
+    return { kind: 'wait', detail: 'RunPod dropped the job before it started' };
+  }
   const action = lostJobAction(answer, 0);
   return action.kind === 'fail' ? action : { kind: 'ask_later' };
 }

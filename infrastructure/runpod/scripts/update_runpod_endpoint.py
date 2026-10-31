@@ -267,6 +267,12 @@ def _int_or_none(value):
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
+def _annotation(text):
+    """Text safe inside a `::error::` line: a newline would end it and start
+    whatever follows as a workflow command of its own."""
+    return str(text).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
 def _json_object(call, url, **kwargs):
     """The JSON object `call` answers with, or (None, why) when there is none."""
     try:
@@ -392,16 +398,20 @@ def warm_transcoder():
         timeout=30,
     )
     if sent is None:
-        print(f"::error::The warm-up ping was not accepted: {why}")
+        print(f"::error::The warm-up ping was not accepted: {_annotation(why)}")
         return 4
     job_id = sent.get("id")
     if not isinstance(job_id, str) or not job_id:
-        print(f"::error::The warm-up ping was accepted without a job id: {sent!r}")
+        print(
+            "::error::The warm-up ping was accepted without a job id: "
+            f"{_annotation(repr(sent))}"
+        )
         return 4
 
     print(f"🔥 Warm-up ping {job_id} sent; waiting up to {WARM_WAIT_S // 60} min")
     deadline = time.monotonic() + WARM_WAIT_S
     state = None
+    last_failure = None
     while time.monotonic() < deadline:
         time.sleep(WARM_POLL_S)
         job, why = _json_object(
@@ -411,11 +421,20 @@ def warm_transcoder():
             timeout=10,
         )
         if job is None:
+            last_failure = why
             print(f"⏳ Status read failed, asking again: {why}")
             continue
         if job.get("status") != state:
             state = job.get("status")
             print(f"⏳ {state}")
+        if state == "COMPLETED" and job.get("output") != {"status": "pong"}:
+            # Only the handler's ping branch answers pong: anything else ran
+            # the ping down a real job's path.
+            print(
+                "::error::The warm-up ping completed without its pong: "
+                f"{_annotation(repr(job.get('output')))[:500]}"
+            )
+            return 4
         if state == "COMPLETED":
             delay_ms = _int_or_none(job.get("delayTime"))
             waited = (
@@ -430,14 +449,20 @@ def warm_transcoder():
         if state in JOB_ENDED:
             print(
                 f"::error::The warm-up ping ended {state}: "
-                f"{str(job.get('error'))[:500]}. The new image may not start."
+                f"{_annotation(job.get('error'))[:500]}. The new image may not start."
             )
             return 4
 
+    # A status RunPod would not give is the likelier cause than no worker.
+    cause = (
+        f"its status could not be read: {_annotation(last_failure)[:500]}"
+        if state is None and last_failure is not None
+        else "Uploads wait for one too: check the endpoint's workers in the "
+        "RunPod console"
+    )
     print(
         f"::error::No worker answered the warm-up ping within {WARM_WAIT_S // 60} "
-        f"minutes (last state: {state}). Uploads wait for one too: check the "
-        "endpoint's workers in the RunPod console."
+        f"minutes (last state: {state}). {cause}."
     )
     return 4
 

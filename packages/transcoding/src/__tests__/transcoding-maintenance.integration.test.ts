@@ -420,7 +420,6 @@ describe.skipIf(!HAS_DB || !ALONE_WITH_ITS_ROWS)(
         ['CANCELLED', 'TIMED_OUT'],
         ['TIMED_OUT', 'TIMED_OUT'],
         ['COMPLETED', 'WEBHOOK_LOST'],
-        ['GONE', 'WEBHOOK_LOST'],
       ] as const)('fails a job RunPod reports %s as %s', async (state, code) => {
         const { media, job } = await dispatched(`job-${state}`);
         api.jobStatus.mockResolvedValue({ ok: true, state });
@@ -430,6 +429,19 @@ describe.skipIf(!HAS_DB || !ALONE_WITH_ITS_ROWS)(
           status: 'failed',
           transcodingErrorCode: code,
         });
+      });
+
+      it('sends again a job RunPod dropped before it started, the attempt given back', async () => {
+        const { media, job } = await dispatched('job-dropped');
+        api.jobStatus.mockResolvedValue({ ok: true, state: 'GONE' });
+
+        expect((await ask([job])).get(media.id)).toBe('requeued');
+        expect(await read(media.id)).toMatchObject({
+          status: 'uploaded',
+          transcodingErrorCode: 'TRANSCODER_UNAVAILABLE',
+          transcodingAttempts: 0,
+        });
+        expect(failureAlertsFor(media.id)).toHaveLength(0);
       });
 
       it('writes nothing for a job RunPod still has queued', async () => {
@@ -464,16 +476,50 @@ describe.skipIf(!HAS_DB || !ALONE_WITH_ITS_ROWS)(
 
       it('lets a webhook that landed first win', async () => {
         const { media, job } = await dispatched('job-raced');
-        // The completion webhook wrote the row after the object read it.
+        // The failure webhook wrote the row after the object read it.
+        await db
+          .update(mediaItems)
+          .set({
+            status: MEDIA_STATUS.FAILED,
+            transcodingErrorCode: 'CORRUPT_INPUT',
+            updatedAt: new Date(),
+          })
+          .where(eq(mediaItems.id, media.id));
+        api.jobStatus.mockResolvedValue({ ok: true, state: 'FAILED' });
+
+        expect((await ask([job])).get(media.id)).toBe('gone');
+        // The webhook's own code stands, not the early check's INFRA_ERROR.
+        expect(await read(media.id)).toMatchObject({
+          status: 'failed',
+          transcodingErrorCode: 'CORRUPT_INPUT',
+        });
+        expect(failureAlertsFor(media.id)).toHaveLength(0);
+      });
+
+      it('still fails an ended job whose title was edited meanwhile', async () => {
+        const { media, job } = await dispatched('job-edited');
+        // A title or description edit moves updatedAt and nothing else.
         await db
           .update(mediaItems)
           .set({ updatedAt: new Date() })
           .where(eq(mediaItems.id, media.id));
         api.jobStatus.mockResolvedValue({ ok: true, state: 'FAILED' });
 
-        expect((await ask([job])).get(media.id)).toBe('gone');
-        expect((await read(media.id)).status).toBe('transcoding');
-        expect(failureAlertsFor(media.id)).toHaveLength(0);
+        expect((await ask([job])).get(media.id)).toBe('failed');
+        expect((await read(media.id)).status).toBe('failed');
+      });
+
+      it("one job's failed write leaves the others what RunPod said", async () => {
+        const { media, job } = await dispatched('job-written');
+        // Not a uuid: its guarded write throws in Postgres.
+        const broken = { ...job, mediaId: 'not-a-uuid', jobId: 'job-broken' };
+        api.jobStatus.mockResolvedValue({ ok: true, state: 'FAILED' });
+
+        const outcomes = await ask([broken, job]);
+
+        expect(outcomes.get('not-a-uuid')).toBe('ask_later');
+        expect(outcomes.get(media.id)).toBe('failed');
+        expect((await read(media.id)).status).toBe('failed');
       });
 
       it('writes nothing to a row deleted meanwhile', async () => {

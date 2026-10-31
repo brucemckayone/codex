@@ -492,32 +492,40 @@ describe('MediaStatusObject: a resync row it cannot read', () => {
 describe('MediaStatusObject: waiting uploads are retried within minutes', () => {
   beforeEach(clearDueTimes);
 
-  it('retries at 1, 3 and 10 minutes, then leaves the item to the cron', async () => {
-    const waiting = change({
-      lifecycle: 'uploaded',
-      errorCode: 'TRANSCODER_PAUSED',
-    });
+  // Three alarm rounds, each a real claim and dispatch against the database:
+  // 3.6 to 5 s locally, so the default 5 s timeout flaked.
+  it(
+    'retries at 1, 3 and 10 minutes, then leaves the item to the cron',
+    {
+      timeout: 20_000,
+    },
+    async () => {
+      const waiting = change({
+        lifecycle: 'uploaded',
+        errorCode: 'TRANSCODER_PAUSED',
+      });
 
-    for (const [attempt, delay] of RETRY_DELAYS_MS.entries()) {
-      const before = Date.now();
-      await publish({ ...waiting, at: waiting.at + attempt });
-      const row = await held(waiting.mediaId);
-      expect(row?.retries).toBe(attempt);
-      expect(row?.retry_at).toBeGreaterThanOrEqual(before + delay);
-      expect(await alarmAt()).toBe(row?.retry_at);
+      for (const [attempt, delay] of RETRY_DELAYS_MS.entries()) {
+        const before = Date.now();
+        await publish({ ...waiting, at: waiting.at + attempt });
+        const row = await held(waiting.mediaId);
+        expect(row?.retries).toBe(attempt);
+        expect(row?.retry_at).toBeGreaterThanOrEqual(before + delay);
+        expect(await alarmAt()).toBe(row?.retry_at);
 
-      await makeDue(waiting.mediaId);
-      expect(await runDurableObjectAlarm(object())).toBe(true);
-      // Counted and cleared before the retry ran (and failed: no database).
-      const after = await held(waiting.mediaId);
-      expect(after?.retries).toBe(attempt + 1);
-      expect(after?.retry_at).toBeNull();
+        await makeDue(waiting.mediaId);
+        expect(await runDurableObjectAlarm(object())).toBe(true);
+        // Counted and cleared before the retry ran (and failed: no database).
+        const after = await held(waiting.mediaId);
+        expect(after?.retries).toBe(attempt + 1);
+        expect(after?.retry_at).toBeNull();
+      }
+
+      await publish({ ...waiting, at: waiting.at + RETRY_DELAYS_MS.length });
+      expect((await held(waiting.mediaId))?.retry_at).toBeNull();
+      expect(await alarmAt()).toBeNull();
     }
-
-    await publish({ ...waiting, at: waiting.at + RETRY_DELAYS_MS.length });
-    expect((await held(waiting.mediaId))?.retry_at).toBeNull();
-    expect(await alarmAt()).toBeNull();
-  });
+  );
 
   it('schedules nothing for a file the transcoder refused', async () => {
     const c = change({ lifecycle: 'uploaded', errorCode: 'CORRUPT_INPUT' });
@@ -543,11 +551,13 @@ describe('MediaStatusObject: a job with no progress is asked about early (Codex-
     return { mediaId: c.mediaId, jobId: c.jobId, dispatchedAt: c.at, last };
   }
 
-  it('asks at 2, 5 and 10 minutes after the job-id write, then leaves it to the hourly reconcile', async () => {
+  it('asks at 2, 5 and 10 minutes after the job-id write; unanswered, the last is asked again', async () => {
     const c = dispatched();
     await publish(c);
+    const before = Date.now();
 
     for (const [ask, after] of UNSTARTED_CHECKS_MS.entries()) {
+      // Each ask was counted and the next set before RunPod was asked.
       const row = await held(c.mediaId);
       expect(row?.checks).toBe(ask);
       expect(row?.check_at).toBe(c.at + after);
@@ -555,15 +565,38 @@ describe('MediaStatusObject: a job with no progress is asked about early (Codex-
 
       await makeDue(c.mediaId, 'check_at');
       expect(await runDurableObjectAlarm(object())).toBe(true);
-      // Counted and moved on before RunPod was asked. It went unanswered:
-      // the test env's RUNPOD_DIRECT_URL makes every management call so.
-      const next = UNSTARTED_CHECKS_MS[ask + 1];
-      const asked = await held(c.mediaId);
-      expect(asked?.checks).toBe(ask + 1);
-      expect(asked?.check_at).toBe(next === undefined ? null : c.at + next);
-      expect(asked?.queued).toBeNull();
     }
-    expect(await alarmAt()).toBeNull();
+
+    // Every ask went unanswered (the test env's RUNPOD_DIRECT_URL makes
+    // every management call so): the last is asked again, not dropped.
+    const asked = await held(c.mediaId);
+    expect(asked?.checks).toBe(UNSTARTED_CHECKS_MS.length);
+    expect(asked?.queued).toBeNull();
+    expect(asked?.check_at).toBeGreaterThanOrEqual(before + 5 * 60_000);
+    expect(await alarmAt()).toBe(asked?.check_at);
+  });
+
+  it('asks a last unanswered ask again only until 30 minutes after dispatch', async () => {
+    const c = dispatched();
+    await publish(c);
+    // As the alarm leaves a row whose last ask it has counted.
+    const spent = () =>
+      runInDurableObject(object(), (_instance, state) => {
+        state.storage.sql.exec(
+          'UPDATE items SET check_at = NULL, checks = ? WHERE media_id = ?',
+          UNSTARTED_CHECKS_MS.length,
+          c.mediaId
+        );
+      });
+
+    await spent();
+    await applyAsked([jobOf(c, true)], 'ask_later');
+    expect((await held(c.mediaId))?.check_at).not.toBeNull();
+
+    await spent();
+    const late = { ...jobOf(c, true), dispatchedAt: Date.now() - 26 * 60_000 };
+    await applyAsked([late], 'ask_later');
+    expect((await held(c.mediaId))?.check_at).toBeNull();
   });
 
   it('its first tick cancels the asks: the alarm set for one finds nothing due', async () => {
@@ -611,6 +644,7 @@ describe('MediaStatusObject: a job with no progress is asked about early (Codex-
     const c = dispatched({ creatorId: a });
     await publish(c);
     const tab = await openTab(a);
+    const other = await openTab(creator());
     expect(snapshotOf(tab).find((i) => i.mediaId === c.mediaId)?.queued).toBe(
       null
     );
@@ -629,6 +663,8 @@ describe('MediaStatusObject: a job with no progress is asked about early (Codex-
       expect(itemsOf(tab, c.mediaId).at(-1)?.queued).toBe('overdue')
     );
     expect((await held(c.mediaId))?.queued).toBe('overdue');
+    // Another creator's tab hears nothing of it.
+    expect(itemsOf(other, c.mediaId)).toHaveLength(0);
   });
 
   it('never marks queued a job that has started', async () => {

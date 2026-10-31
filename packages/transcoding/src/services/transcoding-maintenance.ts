@@ -145,20 +145,22 @@ export interface RetryDueReport {
 export interface UnstartedJob {
   mediaId: string;
   jobId: string;
-  /** Epoch ms of the job-id write the object holds: the row's updatedAt. */
+  /** Epoch ms of the job-id write the object holds: its asks count from it. */
   dispatchedAt: number;
   /** The last early ask: still queued then is a fault the owner hears of. */
   last: boolean;
 }
 
 /**
- * What one early ask found. `failed`: written and published. `gone`: the
- * row moved on (a webhook, a Retry, a delete), so there is nothing to ask.
+ * What one early ask found. `failed`, `requeued` (RunPod dropped the job, so
+ * it waits to be sent again): written and published. `gone`: the row moved
+ * on (a webhook, a Retry, a delete), so there is nothing to ask.
  */
 export type UnstartedOutcome =
   | 'queued'
   | 'running'
   | 'failed'
+  | 'requeued'
   | 'gone'
   | 'ask_later';
 
@@ -261,11 +263,12 @@ export class TranscodingMaintenance extends BaseService {
 
   /**
    * The jobs the status object's alarm found with no progress at an early ask
-   * (UNSTARTED_CHECKS_MS): what RunPod says of each. Only an ended job
-   * touches the database, through step 3's guarded write, so a webhook or a
-   * Retry that got there first wins. Still queued at the last ask, RunPod has
-   * no worker for it: the owner hears once a day. When RunPod cannot answer
-   * for one job it cannot for the next, so the rest wait for their next ask.
+   * (UNSTARTED_CHECKS_MS): what RunPod says of each. Only an ended or
+   * dropped job touches the database, through step 3's guarded write, so a
+   * webhook or a Retry that got there first wins. Still queued at the last
+   * ask, RunPod has no worker for it: the owner hears once a day. When RunPod
+   * cannot answer for one job it cannot for the next, so the rest wait for
+   * their next ask.
    */
   async checkUnstarted(
     jobs: readonly UnstartedJob[],
@@ -275,23 +278,54 @@ export class TranscodingMaintenance extends BaseService {
     const ask = this.runpodAsker(deadline, 'early_check');
     for (const job of jobs) {
       const action = unstartedJobAction(await ask(job.mediaId, job.jobId));
-      if (action.kind !== 'fail') {
-        if (action.kind === 'queued' && job.last) {
-          this.alerts?.jobNotStarted(job.mediaId);
-        }
-        outcomes.set(job.mediaId, action.kind);
+      if (action.kind === 'fail' || action.kind === 'wait') {
+        outcomes.set(job.mediaId, await this.resolveUnstarted(job, action));
         continue;
       }
-      const resolved = await this.resolveLostJob(
+      if (action.kind === 'queued' && job.last) {
+        this.alerts?.jobNotStarted(job.mediaId);
+      }
+      outcomes.set(job.mediaId, action.kind);
+    }
+    return outcomes;
+  }
+
+  /**
+   * Write what an early ask found of an ended or dropped job. A write that
+   * throws is that job's alone: the others keep what RunPod said of them.
+   */
+  private async resolveUnstarted(
+    job: UnstartedJob,
+    action: Extract<LostJobAction, { kind: 'fail' | 'wait' }>
+  ): Promise<UnstartedOutcome> {
+    const context = {
+      mediaId: job.mediaId,
+      runpodJobId: job.jobId,
+      action: action.kind,
+    };
+    let resolved: Awaited<ReturnType<TranscodingMaintenance['resolveLostJob']>>;
+    try {
+      resolved = await this.resolveLostJob(
         { id: job.mediaId, runpodJobId: job.jobId },
-        // Not touched since the job-id write: updatedAt is that write's time.
-        job.dispatchedAt + 1,
+        // No time guard: the job id proves it is the same dispatch, and a
+        // title edit moves updatedAt without ending anything.
+        null,
         action,
         'early_check'
       );
-      outcomes.set(job.mediaId, resolved === 'raced' ? 'gone' : 'failed');
+    } catch (error) {
+      this.obs.error('transcoding.early_check_write_failed', {
+        ...context,
+        fallback: 'next_ask_or_hourly_reconcile',
+        error: messageForLog(error),
+      });
+      return 'ask_later';
     }
-    return outcomes;
+    if (resolved === 'raced') {
+      this.obs.info('transcoding.early_check_raced', context);
+      return 'gone';
+    }
+    return resolved === 'waiting' ? 'requeued' : 'failed';
   }
 
   private async resync(report: MaintenanceReport): Promise<void> {
@@ -419,7 +453,8 @@ export class TranscodingMaintenance extends BaseService {
       if (status.ok) return status;
 
       // Only a passing outage is a warning: a key that may not ask, or an
-      // answer that cannot be read, leaves rows unresolved every run.
+      // answer that cannot be read, leaves rows unresolved every run. Local
+      // and test runs have no RunPod to ask (`unsupported`).
       const context = {
         mediaId,
         runpodJobId: jobId,
@@ -427,7 +462,12 @@ export class TranscodingMaintenance extends BaseService {
         reason: status.reason,
         statusCode: status.status,
       };
-      if (status.reason === 'unavailable' || status.reason === 'out_of_time') {
+      if (status.reason === 'unsupported') {
+        this.obs.info('transcoding.reconcile_unanswered', context);
+      } else if (
+        status.reason === 'unavailable' ||
+        status.reason === 'out_of_time'
+      ) {
         this.obs.warn('transcoding.reconcile_unanswered', context);
       } else {
         this.obs.error('transcoding.reconcile_unanswered', context);
@@ -440,24 +480,28 @@ export class TranscodingMaintenance extends BaseService {
   /**
    * Write what became of a lost job, guarded on the row the caller read:
    * same job (or still none), not deleted, and not touched since
-   * `untouchedBefore`. `raced` when the guard matched nothing.
+   * `untouchedBefore` (null: no time guard). `raced` when the guard matched
+   * nothing.
    */
   private async resolveLostJob(
     row: { id: string; runpodJobId: string | null },
-    untouchedBefore: number,
+    untouchedBefore: number | null,
     action: Exclude<LostJobAction, { kind: 'leave' }>,
     via: LostJobVia
   ): Promise<'raced' | 'waiting' | 'failed'> {
     const jobId = row.runpodJobId;
-    const sameRow = and(
+    const guard = [
       eq(mediaItems.id, row.id),
       eq(mediaItems.status, MEDIA_STATUS.TRANSCODING),
       isNull(mediaItems.deletedAt),
       jobId
         ? eq(mediaItems.runpodJobId, jobId)
         : isNull(mediaItems.runpodJobId),
-      lt(mediaItems.updatedAt, new Date(untouchedBefore))
-    );
+    ];
+    if (untouchedBefore !== null) {
+      guard.push(lt(mediaItems.updatedAt, new Date(untouchedBefore)));
+    }
+    const sameRow = and(...guard);
     const [written] = await this.db
       .update(mediaItems)
       .set(
