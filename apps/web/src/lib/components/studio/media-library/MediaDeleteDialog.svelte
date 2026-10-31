@@ -39,6 +39,7 @@
     RefreshCwIcon,
   } from '$lib/components/ui/Icon';
   import { formatDuration, formatFileSize } from '$lib/utils/format';
+  import { getThumbnailUrl } from '$lib/utils/image';
   import * as m from '$paraglide/messages';
   import type { MediaDeleteFlow } from './media-delete-flow.svelte';
   import { liveUsesPhrase, splitUses } from './media-usage';
@@ -154,7 +155,11 @@
           <div class="md-media">
             <span class="md-media__thumb">
               {#if target.thumbnailUrl}
-                <img src={target.thumbnailUrl} alt="" class="md-media__img" />
+                <img
+                  src={getThumbnailUrl(target.thumbnailUrl, 'sm')}
+                  alt=""
+                  class="md-media__img"
+                />
               {:else if isVideo}
                 <FilmIcon size={18} />
               {:else}
