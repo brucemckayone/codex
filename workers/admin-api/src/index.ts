@@ -48,12 +48,14 @@ import {
   adminTopContentQuerySchema,
   createIdParamsSchema,
   feeAuditLogQuerySchema,
+  feeChangeIdParamsSchema,
   orgCreatorParamsSchema,
   orgIdParamsSchema,
   reassignOwnerSchema,
   supportChargeParamsSchema,
   supportChargeSearchQuerySchema,
   supportCreditIdParamsSchema,
+  supportFeeNoticeIdParamsSchema,
   supportIssueRefundSchema,
   supportQueueQuerySchema,
   supportRefundIdParamsSchema,
@@ -62,6 +64,7 @@ import {
   supportResolveCreditSchema,
   supportResolveFailedRefundSchema,
   supportReviewIdParamsSchema,
+  supportToldAnotherWaySchema,
   updateOrgFeesSchema,
   updatePlatformFeesSchema,
   upsertCreatorOverrideSchema,
@@ -621,7 +624,7 @@ app.delete(
 );
 
 // ============================================================================
-// Fee Configuration Endpoints (Codex-m644n) — INTERNAL
+// Fee Configuration Endpoints (Codex-m644n, Codex-2hxff.33) — INTERNAL
 //
 // 3-tier DB-configurable fee model: platform → org → creator-override.
 // All routes are gated by `policy: { auth: 'platform_owner' }` — they are NOT
@@ -630,13 +633,18 @@ app.delete(
 // IMPORTANT: These endpoints are NOT public. They are not described in any
 // public OpenAPI document and there is no SvelteKit/web UI that consumes
 // them today. The future local desktop admin app (epic Codex-xyb7v) is the
-// planned consumer. Until that ships, mutations happen via direct DB edits
-// or by ad-hoc admin tooling running on a trusted local machine.
+// planned consumer; until it ships, admin tooling on a trusted local machine
+// calls them. They are the ONLY way a fee changes: never edit the fee tables
+// with SQL (docs/payments/operations.md). A SQL edit skips the notice a rise
+// needs, and the dated history every sale is split by.
 //
-// All write endpoints bump the row's version counter and write one row per
-// changed column to `fee_config_audit_log`, then fire-and-forget invalidate
-// the VersionedCache key for that entity (NO TTL — cache is effectively
-// immutable until the next write).
+// Every write is a dated change (Codex-2hxff.33): a cut applies at once; a
+// rise waits until everyone it pays less has been emailed (notifications-api's
+// daily fee step), then 30 days. The write, its audit rows and the old
+// current-row table kept in step are one transaction, and the answer carries
+// the `change` it made (null when nothing changed). Each write invalidates
+// the level's fee cache; a level with a rise waiting is cached for an hour,
+// because the daily step that dates it can't invalidate it.
 // ============================================================================
 
 app.get(
@@ -656,12 +664,12 @@ app.patch(
     policy: { auth: 'platform_owner' },
     input: { body: updatePlatformFeesSchema },
     handler: async (ctx) => {
-      await ctx.services.feeConfig.updatePlatformFees(
+      const { change } = await ctx.services.feeConfig.updatePlatformFees(
         ctx.input.body,
         ctx.user.id
       );
       const row = await ctx.services.feeConfig.getPlatformRow();
-      return { config: row };
+      return { config: row, change };
     },
   })
 );
@@ -686,7 +694,7 @@ app.patch(
     policy: { auth: 'platform_owner' },
     input: { params: orgIdParamsSchema, body: updateOrgFeesSchema },
     handler: async (ctx) => {
-      await ctx.services.feeConfig.updateOrgFees(
+      const { change } = await ctx.services.feeConfig.updateOrgFees(
         ctx.input.params.orgId,
         ctx.input.body,
         ctx.user.id
@@ -694,23 +702,30 @@ app.patch(
       const row = await ctx.services.feeConfig.getOrgRow(
         ctx.input.params.orgId
       );
-      return { config: row };
+      return { config: row, change };
     },
   })
 );
 
+/**
+ * Removing the organisation's fees is a change like any other: taking away a
+ * lower fee is a rise, and waits. So it answers 200 with the `change` (and
+ * the row still in force meanwhile), not 204.
+ */
 app.delete(
   '/api/admin/fees/org/:orgId',
   procedure({
     policy: { auth: 'platform_owner' },
     input: { params: orgIdParamsSchema },
-    successStatus: 204,
     handler: async (ctx) => {
-      await ctx.services.feeConfig.deleteOrgFees(
+      const { change } = await ctx.services.feeConfig.deleteOrgFees(
         ctx.input.params.orgId,
         ctx.user.id
       );
-      return null;
+      const row = await ctx.services.feeConfig.getOrgRow(
+        ctx.input.params.orgId
+      );
+      return { config: row, change };
     },
   })
 );
@@ -753,7 +768,7 @@ app.put(
       body: upsertCreatorOverrideSchema,
     },
     handler: async (ctx) => {
-      await ctx.services.feeConfig.upsertCreatorOverride(
+      const { change } = await ctx.services.feeConfig.upsertCreatorOverride(
         ctx.input.params.orgId,
         ctx.input.params.creatorId,
         ctx.input.body,
@@ -763,24 +778,28 @@ app.put(
         ctx.input.params.orgId,
         ctx.input.params.creatorId
       );
-      return { override: row };
+      return { override: row, change };
     },
   })
 );
 
+/** As the organisation's removal: 200 with the `change`, not 204. */
 app.delete(
   '/api/admin/fees/org/:orgId/creator/:creatorId',
   procedure({
     policy: { auth: 'platform_owner' },
     input: { params: orgCreatorParamsSchema },
-    successStatus: 204,
     handler: async (ctx) => {
-      await ctx.services.feeConfig.deleteCreatorOverride(
+      const { change } = await ctx.services.feeConfig.deleteCreatorOverride(
         ctx.input.params.orgId,
         ctx.input.params.creatorId,
         ctx.user.id
       );
-      return null;
+      const row = await ctx.services.feeConfig.getCreatorOverrideRow(
+        ctx.input.params.orgId,
+        ctx.input.params.creatorId
+      );
+      return { override: row, change };
     },
   })
 );
@@ -793,6 +812,26 @@ app.get(
     handler: async (ctx) => {
       const entries = await ctx.services.feeConfig.getAuditLog(ctx.input.query);
       return { entries };
+    },
+  })
+);
+
+/**
+ * POST /api/admin/fees/changes/:changeId/cancel — call off a fee rise that
+ * hasn't started. Everyone already told is emailed that it's off, by the
+ * next daily run (F2). 409 FEE_CHANGE_NOT_WAITING once it has started, or
+ * was cancelled or replaced.
+ */
+app.post(
+  '/api/admin/fees/changes/:changeId/cancel',
+  procedure({
+    policy: { auth: 'platform_owner', rateLimit: 'strict' },
+    input: { params: feeChangeIdParamsSchema },
+    handler: async (ctx) => {
+      return await ctx.services.feeConfig.cancelChange(
+        ctx.input.params.changeId,
+        ctx.user.id
+      );
     },
   })
 );
@@ -998,6 +1037,68 @@ app.get(
         ctx.input.query
       );
       return new PaginatedResult(result.items, result.pagination);
+    },
+  })
+);
+
+/**
+ * GET /api/admin/support/queue/fee-changes — fee rises that haven't started,
+ * oldest first, with how many are told (Codex-2hxff.33). Each stays until
+ * its date, so the date is always visible somewhere.
+ */
+app.get(
+  '/api/admin/support/queue/fee-changes',
+  procedure({
+    policy: { auth: 'platform_owner', cache: 'fresh' },
+    input: { query: supportQueueQuerySchema },
+    handler: async (ctx) => {
+      const result = await ctx.services.support.listFeeChanges(ctx.input.query);
+      return new PaginatedResult(result.items, result.pagination);
+    },
+  })
+);
+
+/**
+ * GET /api/admin/support/queue/fee-notices — the people a fee rise is
+ * waiting for: their email failed or may not have gone. Joiners too, flagged.
+ */
+app.get(
+  '/api/admin/support/queue/fee-notices',
+  procedure({
+    policy: { auth: 'platform_owner', cache: 'fresh' },
+    input: { query: supportQueueQuerySchema },
+    handler: async (ctx) => {
+      const result = await ctx.services.support.listFeeNotices(ctx.input.query);
+      return new PaginatedResult(result.items, result.pagination);
+    },
+  })
+);
+
+/**
+ * POST /api/admin/support/fee-notices/:noticeId/told-another-way — support
+ * told the person another way (a note is required). Dates the rise when they
+ * were the last on its list. 409 FEE_CHANGE_NOT_WAITING,
+ * FEE_NOTICE_ALREADY_TOLD (a second press reads as done) or
+ * FEE_NOTICE_NOT_NEEDED.
+ */
+app.post(
+  '/api/admin/support/fee-notices/:noticeId/told-another-way',
+  procedure({
+    policy: { auth: 'platform_owner', cache: 'fresh', rateLimit: 'strict' },
+    input: {
+      params: supportFeeNoticeIdParamsSchema,
+      body: supportToldAnotherWaySchema,
+    },
+    handler: async (ctx) => {
+      const { result, level } = await ctx.services.support.markToldAnotherWay(
+        ctx.input.params.noticeId,
+        ctx.input.body,
+        ctx.user.id
+      );
+      // Not needed for correctness (a date is 30 days off, and the cache
+      // re-reads hourly while a rise waits); it shows the date at once.
+      ctx.services.feeConfig.invalidateLevel(level);
+      return result;
     },
   })
 );

@@ -62,6 +62,10 @@ import {
   courses,
   creatorOrganizationAgreements,
   disputes,
+  type FeeChangeRow,
+  feeChangeNotices,
+  feeChanges,
+  feeConfigVersions,
   organizations,
   type Payout,
   type PayoutReversal,
@@ -80,16 +84,24 @@ import {
   type ClawbackSource,
   DEBT_INVOICE_AFTER_DAYS,
   DEBT_INVOICE_THRESHOLD_CENTS,
+  dateRiseIfAllTold,
+  type FeeLevel,
+  type FeeVersionValues,
   failedRefundRepayBlock,
+  feeRiseStartAfter,
   type GbpBalance,
   issueRefund as issueStripeRefund,
+  type LevelFees,
+  layerLevelFees,
   listChargeRefunds,
   listClawableRefunds,
   loadClawbackCauses,
   loadClawbackPlanInput,
+  nextFeeNoticeRunAfter,
   payeeCreditsNeedingAPerson,
   pendingReductionsFor,
   planClawback,
+  readFeeVersions,
   readGbpBalance,
   recheckPayeeCredit,
   refundWindow,
@@ -99,6 +111,7 @@ import {
   resolvePayeeCredit,
   type StrandedStep,
   settleUnfinishedRefundSteps,
+  versionInForce,
 } from '@codex/payments';
 import {
   type PurchaseService,
@@ -108,6 +121,7 @@ import {
 } from '@codex/purchase';
 import {
   BaseService,
+  ConflictError,
   InternalServiceError,
   NotFoundError,
   type ServiceConfig,
@@ -121,6 +135,7 @@ import {
   type SupportResolveCreatorDebtInput,
   type SupportResolveCreditInput,
   type SupportResolveFailedRefundInput,
+  type SupportToldAnotherWayInput,
   uuidSchema,
 } from '@codex/validation';
 import {
@@ -129,6 +144,7 @@ import {
   count,
   desc,
   eq,
+  gt,
   inArray,
   isNotNull,
   isNull,
@@ -160,6 +176,10 @@ import type {
   CreatorDebtItem,
   CreatorDebtPerson,
   FailedRefundItem,
+  FeeChangeCard,
+  FeeChangeLine,
+  FeeNoticeItem,
+  FeeToldAnotherWay,
   OwedToCreatorItem,
   PayeeRole,
   QueueCause,
@@ -177,6 +197,7 @@ import type {
   SupportQueueCounts,
   SupportRefundResult,
   SystemDecision,
+  ToldAnotherWayResult,
 } from '../support-types';
 import {
   BLOCKING_DISPUTE_STATUSES,
@@ -1358,12 +1379,14 @@ export class SupportService extends BaseService {
   // ==========================================================================
 
   /**
-   * The queue's three counts, each through partial indexes. Creator debts
+   * The queue's counts, each through partial indexes. Creator debts
    * counts PEOPLE who need a person (owner decision OQ2): an open debt Stripe
    * refused, a Stripe-held balance over £50 for 90 days ("To invoice", on
    * the morning snapshot), or a debt over £50 Stripe collected from the
    * platform, awaiting the P6 invoice (AMENDMENT 2). Each person once. A
    * balance Stripe is recovering by itself is listed on the tab, not counted.
+   * Fee notices counts people not yet told about a fee rise that hasn't
+   * started, joiners included (Codex-2hxff.33, Q4).
    */
   async getQueueCounts(): Promise<SupportQueueCounts> {
     try {
@@ -1394,7 +1417,7 @@ export class SupportService extends BaseService {
             .where(isNotNull(connectBalances.collectedOwedCents))
         )
         .as('needing');
-      const [[failed], [debts], [owed]] = await Promise.all([
+      const [[failed], [debts], [owed], [fees]] = await Promise.all([
         this.db
           .select({ total: count() })
           .from(refunds)
@@ -1404,11 +1427,17 @@ export class SupportService extends BaseService {
           .select({ total: count() })
           .from(payeeCredits)
           .where(isNull(payeeCredits.resolvedAt)),
+        this.db
+          .select({ total: count() })
+          .from(feeChangeNotices)
+          .innerJoin(feeChanges, eq(feeChanges.id, feeChangeNotices.changeId))
+          .where(notToldYet(new Date())),
       ]);
       return {
         failedRefunds: failed?.total ?? 0,
         creatorDebts: debts?.total ?? 0,
         owedToCreators: owed?.total ?? 0,
+        feeNotices: fees?.total ?? 0,
       };
     } catch (error) {
       this.handleError(error, 'getQueueCounts');
@@ -2802,6 +2831,458 @@ export class SupportService extends BaseService {
   }
 
   // ==========================================================================
+  // Fee notices (Codex-2hxff.33; batch C1 Part B data design §1.6)
+  // ==========================================================================
+
+  /**
+   * Fee rises that haven't started, oldest first: waiting for their emails,
+   * or dated. A card stays until its date, so the date is always visible
+   * somewhere. The tallies are one grouped read over the page's changes.
+   */
+  async listFeeChanges(
+    query: SupportQueueQuery,
+    now: Date = new Date()
+  ): Promise<PaginatedListResponse<FeeChangeCard>> {
+    try {
+      const { page, limit } = query;
+      const { offset } = withPagination({ page, limit });
+      const open = notStartedRise(now);
+      const [rows, [totals]] = await Promise.all([
+        this.db
+          .select()
+          .from(feeChanges)
+          .where(open)
+          .orderBy(asc(feeChanges.createdAt), asc(feeChanges.id))
+          .limit(limit)
+          .offset(offset),
+        this.db.select({ total: count() }).from(feeChanges).where(open),
+      ]);
+      if (rows.length === 0) return pageOf([], totals?.total ?? 0, page, limit);
+
+      const ids = rows.map((change) => change.id);
+      const platformNow = versionInForce(
+        await readFeeVersions(this.db, { scope: 'platform' }),
+        now
+      );
+      const [tallies, marks, lines, people, orgs] = await Promise.all([
+        this.feeNoticeTallies(ids),
+        this.toldAnotherWayOf(ids),
+        Promise.all(
+          rows.map((change) => this.feeChangeLines(change, platformNow, now))
+        ),
+        this.peopleById(rows.flatMap((c) => [c.creatorId, c.createdBy])),
+        this.organizationsOf(rows.map((c) => c.organizationId)),
+      ]);
+
+      const items = rows.map((change, index): FeeChangeCard => {
+        const tally = tallies.get(change.id);
+        const waitingFor = tally?.waiting ?? 0;
+        const listed = change.firstRunAt !== null;
+        return {
+          changeId: change.id,
+          scope: change.scope,
+          organization: change.organizationId
+            ? (orgs.get(change.organizationId) ?? null)
+            : null,
+          creator: change.creatorId
+            ? (people.get(change.creatorId) ?? null)
+            : null,
+          lines: lines[index]?.lines ?? [],
+          removed: lines[index]?.removed ?? false,
+          replacesChangeId: change.replacesChangeId,
+          savedAt: change.createdAt.toISOString(),
+          savedBy: change.createdBy
+            ? (people.get(change.createdBy) ?? null)
+            : null,
+          firstRunAt: toIso(change.firstRunAt),
+          firstEmailsAt: listed
+            ? null
+            : nextFeeNoticeRunAfter(now).toISOString(),
+          listed: change.listedCount,
+          told: {
+            byEmail: tally?.byEmail ?? 0,
+            anotherWay: tally?.anotherWay ?? 0,
+          },
+          waitingFor,
+          joiners: {
+            total: tally?.joiners ?? 0,
+            told: tally?.joinersTold ?? 0,
+            waiting: tally?.joinersWaiting ?? 0,
+          },
+          toldAnotherWay: marks.get(change.id) ?? [],
+          lastToldAt:
+            listed && waitingFor === 0
+              ? toIso(tally?.lastToldAt ?? null)
+              : null,
+          effectiveFrom: toIso(change.effectiveFrom),
+          earliestFrom: (
+            change.effectiveFrom ?? feeRiseStartAfter(now)
+          ).toISOString(),
+        };
+      });
+      return pageOf(items, totals?.total ?? 0, page, limit);
+    } catch (error) {
+      this.handleError(error, 'listFeeChanges');
+    }
+  }
+
+  /**
+   * The people a fee rise that hasn't started is waiting for: their
+   * announcement failed, or may not have gone, oldest first. Joiners are
+   * listed too, flagged (Q4: they don't hold the date, but they still need
+   * telling).
+   */
+  async listFeeNotices(
+    query: SupportQueueQuery,
+    now: Date = new Date()
+  ): Promise<PaginatedListResponse<FeeNoticeItem>> {
+    try {
+      const { page, limit } = query;
+      const { offset } = withPagination({ page, limit });
+      const where = notToldYet(now);
+      const [rows, [totals]] = await Promise.all([
+        this.db
+          .select({
+            notice: feeChangeNotices,
+            changeSavedAt: feeChanges.createdAt,
+            changeEffectiveFrom: feeChanges.effectiveFrom,
+            name: users.name,
+            email: users.email,
+            deletedAt: users.deletedAt,
+          })
+          .from(feeChangeNotices)
+          .innerJoin(feeChanges, eq(feeChanges.id, feeChangeNotices.changeId))
+          .innerJoin(users, eq(users.id, feeChangeNotices.userId))
+          .where(where)
+          .orderBy(asc(feeChangeNotices.createdAt), asc(feeChangeNotices.id))
+          .limit(limit)
+          .offset(offset),
+        this.db
+          .select({ total: count() })
+          .from(feeChangeNotices)
+          .innerJoin(feeChanges, eq(feeChanges.id, feeChangeNotices.changeId))
+          .where(where),
+      ]);
+      const names = await this.organizationNames(
+        rows.flatMap(({ notice }) => notice.roles.map((r) => r.organizationId))
+      );
+      const nextTryAt = nextFeeNoticeRunAfter(now).toISOString();
+      const items = rows.map(
+        ({
+          notice,
+          changeSavedAt,
+          changeEffectiveFrom,
+          name,
+          email,
+          deletedAt,
+        }): FeeNoticeItem => ({
+          noticeId: notice.id,
+          changeId: notice.changeId,
+          person: {
+            userId: notice.userId,
+            name,
+            email,
+            deleted: deletedAt !== null,
+          },
+          roles: notice.roles.map((role) => ({
+            organizationId: role.organizationId,
+            organizationName: role.organizationId
+              ? (names.get(role.organizationId) ?? null)
+              : null,
+            as: role.as,
+          })),
+          onList: notice.onList,
+          // notToldYet reads only these two.
+          state: notice.state === 'unknown' ? 'unknown' : 'failed',
+          reason: notice.lastReason,
+          error: notice.lastError,
+          attempts: notice.attempts,
+          waitingSince: notice.createdAt.toISOString(),
+          lastTriedAt: toIso(notice.attemptedAt),
+          nextTryAt,
+          changeSavedAt: changeSavedAt.toISOString(),
+          changeEffectiveFrom: toIso(changeEffectiveFrom),
+        })
+      );
+      return pageOf(items, totals?.total ?? 0, page, limit);
+    } catch (error) {
+      this.handleError(error, 'listFeeNotices');
+    }
+  }
+
+  /**
+   * Support told someone about a fee rise another way, for example on the
+   * phone (§1.6). One transaction: lock the change, then the notice (the
+   * order the fee writes and the daily run take them in), refuse with a 409
+   * when there is nothing to mark, record the mark, and date the rise when
+   * this was the last person on the list. The caller invalidates the
+   * level's fee cache, so the date shows at once.
+   *
+   * A second press after a lost answer meets FEE_NOTICE_ALREADY_TOLD, and the
+   * page reads that as done.
+   */
+  async markToldAnotherWay(
+    noticeId: string,
+    input: SupportToldAnotherWayInput,
+    toldByUserId: string,
+    now: Date = new Date()
+  ): Promise<{ result: ToldAnotherWayResult; level: FeeLevel }> {
+    try {
+      const [found] = await this.db
+        .select({ changeId: feeChangeNotices.changeId })
+        .from(feeChangeNotices)
+        .where(
+          and(
+            eq(feeChangeNotices.id, noticeId),
+            eq(feeChangeNotices.kind, 'announce')
+          )
+        )
+        .limit(1);
+      if (!found) {
+        throw new NotFoundError('No fee notice with this id', { noticeId });
+      }
+      return await this.db.transaction(async (tx) => {
+        const [change] = await tx
+          .select()
+          .from(feeChanges)
+          .where(eq(feeChanges.id, found.changeId))
+          .for('update');
+        if (
+          !change ||
+          change.kind !== 'rise' ||
+          change.voidedAt !== null ||
+          (change.effectiveFrom !== null && change.effectiveFrom <= now)
+        ) {
+          throw new ConflictError(
+            'Nothing to mark: this fee rise has started, or was cancelled or replaced.',
+            {
+              code: 'FEE_CHANGE_NOT_WAITING',
+              changeId: found.changeId,
+              voidedAt: toIso(change?.voidedAt ?? null),
+              voidReason: change?.voidReason ?? null,
+              effectiveFrom: toIso(change?.effectiveFrom ?? null),
+            }
+          );
+        }
+        const [notice] = await tx
+          .select()
+          .from(feeChangeNotices)
+          .where(eq(feeChangeNotices.id, noticeId))
+          .for('update');
+        if (!notice) {
+          throw new NotFoundError('No fee notice with this id', { noticeId });
+        }
+        if (notice.state === 'sent' || notice.state === 'told_another_way') {
+          throw new ConflictError('This person has already been told.', {
+            code: 'FEE_NOTICE_ALREADY_TOLD',
+            noticeId,
+            state: notice.state,
+            acceptedAt: toIso(notice.acceptedAt),
+            toldAt: toIso(notice.toldAt),
+            toldByUserId: notice.toldByUserId,
+          });
+        }
+        if (notice.state === 'not_needed') {
+          throw new ConflictError(
+            'Nothing to mark: this rise no longer lowers what this person is paid.',
+            { code: 'FEE_NOTICE_NOT_NEEDED', noticeId }
+          );
+        }
+        await tx
+          .update(feeChangeNotices)
+          .set({
+            state: 'told_another_way',
+            toldNote: input.note,
+            toldByUserId,
+            toldAt: now,
+            updatedAt: now,
+          })
+          .where(eq(feeChangeNotices.id, noticeId));
+        const dating = await dateRiseIfAllTold(tx, change.id);
+        this.obs.info('Support marked a fee notice told another way', {
+          noticeId,
+          changeId: change.id,
+          toldByUserId,
+          dated: dating.dated,
+        });
+        return {
+          result: {
+            notice: {
+              noticeId,
+              state: 'told_another_way',
+              toldAt: now.toISOString(),
+              toldBy: toldByUserId,
+              note: input.note,
+            },
+            change: {
+              changeId: change.id,
+              effectiveFrom: toIso(dating.effectiveFrom),
+              waitingFor: dating.dated ? 0 : dating.waitingFor,
+            },
+          },
+          level: feeLevelOfChange(change),
+        };
+      });
+    } catch (error) {
+      this.handleError(error, 'markToldAnotherWay');
+    }
+  }
+
+  /** Each change's announcement counts, on the list and joined since. */
+  private async feeNoticeTallies(changeIds: string[]) {
+    const n = feeChangeNotices;
+    const counted = (filter: SQL) =>
+      sql<number>`count(*) FILTER (WHERE ${filter})`.mapWith(Number);
+    // Told: an accepted email or support's mark. Waiting: the open states
+    // (FEE_NOTICE_OPEN_STATES), the ones a person on the list holds the date in.
+    const told = sql`${n.state} IN ('sent', 'told_another_way')`;
+    const waiting = sql`${n.state} IN ('due', 'failed', 'unknown')`;
+    const rows = await this.db
+      .select({
+        changeId: n.changeId,
+        byEmail: counted(sql`${n.onList} AND ${n.state} = 'sent'`),
+        anotherWay: counted(
+          sql`${n.onList} AND ${n.state} = 'told_another_way'`
+        ),
+        waiting: counted(sql`${n.onList} AND ${waiting}`),
+        joiners: counted(sql`NOT ${n.onList} AND ${n.state} <> 'not_needed'`),
+        joinersTold: counted(sql`NOT ${n.onList} AND ${told}`),
+        joinersWaiting: counted(sql`NOT ${n.onList} AND ${waiting}`),
+        lastToldAt:
+          sql<Date | null>`max(GREATEST(${n.acceptedAt}, ${n.toldAt})) FILTER (WHERE ${n.onList} AND ${told})`.mapWith(
+            (value: string | Date | null) =>
+              value === null ? null : new Date(value)
+          ),
+      })
+      .from(n)
+      .where(and(inArray(n.changeId, changeIds), eq(n.kind, 'announce')))
+      .groupBy(n.changeId);
+    return new Map(rows.map((row) => [row.changeId, row]));
+  }
+
+  /** The latest 20 people marked told another way, per change. */
+  private async toldAnotherWayOf(
+    changeIds: string[]
+  ): Promise<Map<string, FeeToldAnotherWay[]>> {
+    const lists = await Promise.all(
+      changeIds.map((changeId) =>
+        this.db
+          .select({
+            userId: feeChangeNotices.userId,
+            toldByUserId: feeChangeNotices.toldByUserId,
+            toldAt: feeChangeNotices.toldAt,
+            note: feeChangeNotices.toldNote,
+          })
+          .from(feeChangeNotices)
+          .where(
+            and(
+              eq(feeChangeNotices.changeId, changeId),
+              eq(feeChangeNotices.kind, 'announce'),
+              eq(feeChangeNotices.state, 'told_another_way')
+            )
+          )
+          .orderBy(desc(feeChangeNotices.toldAt), asc(feeChangeNotices.id))
+          .limit(TOLD_ANOTHER_WAY_SHOWN)
+      )
+    );
+    const people = await this.peopleById(
+      lists.flat().flatMap((row) => [row.userId, row.toldByUserId])
+    );
+    return new Map(
+      changeIds.map((changeId, index) => [
+        changeId,
+        (lists[index] ?? []).map((row) => ({
+          person: people.get(row.userId) ?? {
+            userId: row.userId,
+            name: '',
+            deleted: true,
+          },
+          by: row.toldByUserId ? (people.get(row.toldByUserId) ?? null) : null,
+          at: toIso(row.toldAt) ?? '',
+          note: row.note ?? '',
+        })),
+      ])
+    );
+  }
+
+  /**
+   * What a change moves at its own level, layered over the levels in force
+   * now: what that level's sales pay today, and with the change.
+   */
+  private async feeChangeLines(
+    change: FeeChangeRow,
+    platformNow: FeeVersionValues | null,
+    now: Date
+  ): Promise<{ lines: FeeChangeLine[]; removed: boolean }> {
+    const level = feeLevelOfChange(change);
+    const [version] = await this.db
+      .select()
+      .from(feeConfigVersions)
+      .where(
+        and(
+          eq(feeConfigVersions.changeId, change.id),
+          isNull(feeConfigVersions.supersededAt)
+        )
+      )
+      .limit(1);
+    const own = version && !version.removed ? version : null;
+    if (level.scope === 'platform') {
+      return {
+        lines: feeLines(layerLevelFees(platformNow), layerLevelFees(own)),
+        removed: false,
+      };
+    }
+    const orgNow = versionInForce(
+      await readFeeVersions(this.db, {
+        scope: 'org',
+        organizationId: level.organizationId,
+      }),
+      now
+    );
+    if (level.scope === 'org') {
+      return {
+        lines: feeLines(
+          layerLevelFees(platformNow, orgNow),
+          layerLevelFees(platformNow, own)
+        ),
+        removed: version?.removed ?? false,
+      };
+    }
+    const creatorNow = versionInForce(
+      await readFeeVersions(this.db, level),
+      now
+    );
+    return {
+      lines: feeLines(
+        layerLevelFees(platformNow, orgNow, creatorNow),
+        layerLevelFees(platformNow, orgNow, own)
+      ),
+      removed: version?.removed ?? false,
+    };
+  }
+
+  private async organizationsOf(
+    organizationIds: readonly (string | null | undefined)[]
+  ): Promise<Map<string, { id: string; name: string; deleted: boolean }>> {
+    const ids = unique(organizationIds);
+    if (ids.length === 0) return new Map();
+    const rows = await this.db
+      .select({
+        id: organizations.id,
+        name: organizations.name,
+        deletedAt: organizations.deletedAt,
+      })
+      .from(organizations)
+      .where(inArray(organizations.id, ids));
+    return new Map(
+      rows.map((row) => [
+        row.id,
+        { id: row.id, name: row.name, deleted: row.deletedAt !== null },
+      ])
+    );
+  }
+
+  // ==========================================================================
   // Shared reads
   // ==========================================================================
 
@@ -3489,4 +3970,73 @@ export class SupportService extends BaseService {
       .where(inArray(organizations.id, ids));
     return new Map(rows.map((row) => [row.id, row.name]));
   }
+}
+
+// ─── Fee notices: helpers (Codex-2hxff.33) ───────────────────────────────────
+
+/** How many told-another-way marks a fee card names. */
+const TOLD_ANOTHER_WAY_SHOWN = 20;
+
+/** A fee rise that hasn't started: waiting for its emails, or dated later. */
+function notStartedRise(now: Date) {
+  return and(
+    eq(feeChanges.kind, 'rise'),
+    isNull(feeChanges.voidedAt),
+    or(isNull(feeChanges.effectiveFrom), gt(feeChanges.effectiveFrom, now))
+  );
+}
+
+/**
+ * An announcement that hasn't gone through, for a rise that hasn't started.
+ * Joiners' too (Q4): they don't hold the date, but they still need telling.
+ */
+function notToldYet(now: Date) {
+  return and(
+    eq(feeChangeNotices.kind, 'announce'),
+    inArray(feeChangeNotices.state, ['failed', 'unknown']),
+    notStartedRise(now)
+  );
+}
+
+/** The level a change was saved on (its scope CHECK guarantees the keys). */
+function feeLevelOfChange(change: FeeChangeRow): FeeLevel {
+  if (change.scope === 'creator' && change.organizationId && change.creatorId) {
+    return {
+      scope: 'creator',
+      organizationId: change.organizationId,
+      creatorId: change.creatorId,
+    };
+  }
+  if (change.scope === 'org' && change.organizationId) {
+    return { scope: 'org', organizationId: change.organizationId };
+  }
+  return { scope: 'platform' };
+}
+
+const FEE_LINE_VALUES = [
+  'platformFeePercent',
+  'orgFeePercent',
+  'minPlatformFeeCents',
+  'minTransferCents',
+] as const;
+
+/** Each value that moves; one line when both kinds of sale move alike. */
+function feeLines(before: LevelFees, after: LevelFees): FeeChangeLine[] {
+  const lines: FeeChangeLine[] = [];
+  for (const value of FEE_LINE_VALUES) {
+    const one = { from: before.oneOff[value], to: after.oneOff[value] };
+    const sub = {
+      from: before.subscription[value],
+      to: after.subscription[value],
+    };
+    if (one.from === sub.from && one.to === sub.to) {
+      if (one.from !== one.to) lines.push({ value, context: 'both', ...one });
+      continue;
+    }
+    if (one.from !== one.to) lines.push({ value, context: 'one_off', ...one });
+    if (sub.from !== sub.to) {
+      lines.push({ value, context: 'subscription', ...sub });
+    }
+  }
+  return lines;
 }

@@ -187,3 +187,37 @@ export const supportResolveCreditSchema = z
 export type SupportResolveCreditInput = z.infer<
   typeof supportResolveCreditSchema
 >;
+
+// ─── Fee notices (Codex-2hxff.33; batch C1 Part B data design §1.6) ─────────
+
+/** `:noticeId` on the told-another-way route: a `fee_change_notices` row. */
+export const supportFeeNoticeIdParamsSchema = z.object({
+  noticeId: uuidSchema,
+});
+
+/**
+ * POST /api/admin/support/fee-notices/:noticeId/told-another-way. The note
+ * is required: it is the only record of how the person was told, and the
+ * payout terms promise notice. A NUL is dropped (free text), then it is
+ * trimmed; nothing else is accepted.
+ */
+export const supportToldAnotherWaySchema = z
+  .object({
+    note: z
+      .string()
+      .transform(stripNul)
+      .pipe(
+        z
+          .string()
+          .trim()
+          .min(1, { message: 'Say how you told them' })
+          .max(SUPPORT_NOTE_MAX_LENGTH, {
+            message: `Must be ${SUPPORT_NOTE_MAX_LENGTH} characters or less`,
+          })
+      ),
+  })
+  .strict();
+
+export type SupportToldAnotherWayInput = z.infer<
+  typeof supportToldAnotherWaySchema
+>;

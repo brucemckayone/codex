@@ -413,6 +413,12 @@ export interface SupportQueueCounts {
   creatorDebts: number;
   /** Open payee credits: owed back, or waiting for a check (Codex-2hxff.73). */
   owedToCreators: number;
+  /**
+   * People not yet told about a fee rise that hasn't started: their email
+   * failed or may not have gone (Codex-2hxff.33). Joiners count too (Q4):
+   * they don't hold the date, but they still need telling.
+   */
+  feeNotices: number;
 }
 
 /** A failed refund waiting for support (`refunds`, status failed, unresolved). */
@@ -746,4 +752,112 @@ export interface ResolvedCreatorDebt {
   reviewId: string;
   resolution: CreatorDebtResolution;
   resolvedAt: string;
+}
+
+// ─── Fee notices (Codex-2hxff.33; batch C1 Part B data design §1.6) ─────────
+
+/**
+ * One value a fee change moves, at the level it was saved on, layered over
+ * the levels in force now (what that level's sales pay).
+ */
+export interface FeeChangeLine {
+  value:
+    | 'platformFeePercent'
+    | 'orgFeePercent'
+    | 'minPlatformFeeCents'
+    | 'minTransferCents';
+  /** `both` when one-off sales and subscriptions move alike. */
+  context: 'both' | 'one_off' | 'subscription';
+  from: number;
+  to: number;
+}
+
+/** Someone support marked as told another way, and who marked them. */
+export interface FeeToldAnotherWay {
+  person: SupportPerson;
+  by: SupportPerson | null;
+  at: string;
+  note: string;
+}
+
+/**
+ * A fee rise that hasn't started: waiting for its emails, or dated. The card
+ * stays until the date, so the date is always visible somewhere.
+ */
+export interface FeeChangeCard {
+  changeId: string;
+  scope: 'platform' | 'org' | 'creator';
+  organization: { id: string; name: string; deleted: boolean } | null;
+  creator: SupportPerson | null;
+  lines: FeeChangeLine[];
+  /** An override taken away: the level inherits again. */
+  removed: boolean;
+  /** A bigger rise replacing an earlier one (its 30 days start again). */
+  replacesChangeId: string | null;
+  savedAt: string;
+  savedBy: SupportPerson | null;
+  /** The first 08:00 run made the list; null until then. */
+  firstRunAt: string | null;
+  /** That first run, while it is still to come. */
+  firstEmailsAt: string | null;
+  /** The people on the first list. Null until it is made. */
+  listed: number | null;
+  /** On the first list and told: by an accepted email, or another way. */
+  told: { byEmail: number; anotherWay: number };
+  /** On the first list and not told yet: the rise waits for them. */
+  waitingFor: number;
+  /** Joined since the list (F8): told the same date, never holding it. */
+  joiners: { total: number; told: number; waiting: number };
+  /** The most recent people marked told another way (at most 20). */
+  toldAnotherWay: FeeToldAnotherWay[];
+  /** When the last person on the list was told; null while any waits. */
+  lastToldAt: string | null;
+  /** Null until everyone on the list is told. */
+  effectiveFrom: string | null;
+  /** The date, or the earliest it can be if the last person is told today. */
+  earliestFrom: string;
+}
+
+/** One person a fee rise's email hasn't reached. */
+export interface FeeNoticeItem {
+  noticeId: string;
+  changeId: string;
+  person: SupportBuyer;
+  /** Where the rise lowers their take: as a creator, or as an owner. */
+  roles: Array<{
+    organizationId: string | null;
+    organizationName: string | null;
+    as: 'creator' | 'owner';
+  }>;
+  /** False for someone who joined after the list was made: no hold (F8). */
+  onList: boolean;
+  /** `failed`: it certainly didn't go. `unknown`: it may have. */
+  state: 'failed' | 'unknown';
+  reason: 'refused' | 'skipped' | 'no_address' | 'unknown' | null;
+  /** What the mail service answered, in short ("HTTP 400"). */
+  error: string | null;
+  attempts: number;
+  waitingSince: string;
+  lastTriedAt: string | null;
+  /** The next 08:00 run, which tries again. */
+  nextTryAt: string;
+  changeSavedAt: string;
+  changeEffectiveFrom: string | null;
+}
+
+/** What marking someone told another way did. */
+export interface ToldAnotherWayResult {
+  notice: {
+    noticeId: string;
+    state: 'told_another_way';
+    toldAt: string;
+    toldBy: string;
+    note: string;
+  };
+  change: {
+    changeId: string;
+    /** Set when this mark was the last one the rise waited for. */
+    effectiveFrom: string | null;
+    waitingFor: number;
+  };
 }
