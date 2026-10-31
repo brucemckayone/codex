@@ -28,10 +28,12 @@
 -- ships its fee step simply waits for the first run after it ships: later,
 -- never sooner.
 --
--- The one-waiting-rise index covers WAITING rises only (effective_from IS
--- NULL): a rise that has started must not block the next one, and a dated
--- rise that hasn't started is held unique by the classifying write, which
--- locks the level first (pg_advisory_xact_lock).
+-- The one-waiting-rise index covers WAITING rises only (kind 'rise', not
+-- voided, effective_from IS NULL; COALESCE'd keys, so the platform level's
+-- NULLs collide): a rise that has started must not block the next one. The
+-- classifying write locks the level first (pg_advisory_xact_lock), and under
+-- that lock a dated rise that hasn't started counts as pending too, so a
+-- level has at most one pending rise (F2).
 
 CREATE TABLE "fee_change_notices" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,

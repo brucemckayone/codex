@@ -81,7 +81,12 @@ batch C1's decisions F1–F9 and Q1–Q5 (2026-10-30):
   worked out with the same layering a sale uses. Anyone shielded by their
   own setting is not told, and an organisation's owner isn't told about a
   rise in the organisation fee (it raises their share).
-- One waiting rise per level. Saving again while one waits: back to today
+- At most one pending rise per level: waiting for its emails, or dated and
+  not yet started. A unique index allows one **waiting** rise per level (a
+  started one must not block the next), and every write first takes a
+  transaction lock on its level (`pg_advisory_xact_lock`), under which a
+  dated rise that hasn't started counts as pending too. Saving again while one
+  is pending: back to today
   cancels it (everyone told is emailed that it's off); below today cancels it
   and the cut applies at once; a **smaller** rise keeps its date and sends one
   short email to everyone already told (Q2); a **bigger** one replaces it, says
