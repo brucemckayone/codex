@@ -51,6 +51,8 @@ vi.mock('@codex/subscription', () => ({
   // The renewal-time price swap (Codex-2hxff.3) — nothing pending here.
   applyDuePendingPriceChange: vi.fn().mockResolvedValue(false),
   PENDING_PRICE_ID_KEY: 'codex_pending_price_id',
+  // The renewal flip of a waiting tier move (Codex-2hxff.16) reads it.
+  MOVE_TIER_ID_KEY: 'codex_move_tier_id',
   // invalidateForUser is exercised in the sibling invalidation test; here we
   // only care that it doesn't throw synchronously in revocation scenarios.
   invalidateForUser: vi.fn(),
@@ -70,6 +72,7 @@ vi.mock('@codex/subscription', () => ({
       handleCourseSubscriptionUpdated: vi.fn().mockResolvedValue(undefined),
       handleCourseSubscriptionDeleted: vi.fn().mockResolvedValue(undefined),
       handleCourseInvoicePaymentSucceeded: vi.fn().mockResolvedValue(undefined),
+      handleCourseInvoicePaymentFailed: vi.fn().mockResolvedValue(undefined),
     })),
     {
       // MIRRORS the real predicate rather than hardcoding `false`
@@ -268,6 +271,8 @@ describe('handleSubscriptionWebhook — access revocation', () => {
       handleInvoicePaymentSucceeded: mockHandleInvoiceSuccess,
       handleInvoicePaymentFailed: mockHandleInvoiceFailed,
       handleTrialWillEnd: mockHandleTrialWillEnd,
+      // The renewal flip of a waiting tier move (Codex-2hxff.16): none here.
+      applyDueTierMove: vi.fn().mockResolvedValue('none'),
       // charge.refunded clawback (Codex-13v21) — handlePaymentWebhook calls this.
       reverseSubscriptionPayoutsForCharge: vi.fn(),
       // The paid checkout's reservation (Codex-2hxff.15).

@@ -16,9 +16,9 @@
  * Stripe webhooks in a single Worker (no separate payouts-sweep deploy).
  *
  * The same wake first settles disputes whose webhook events were missed
- * (./dispute-reconcile.ts, Codex-2hxff.58), then runs the course off-sale and
- * owed-duplicate sweeps, and last, on the 08:00 London run, the daily bank
- * payout (Codex-2hxff.29).
+ * (./dispute-reconcile.ts, Codex-2hxff.58), then runs the course off-sale,
+ * owed-duplicate and waiting-tier-move sweeps (Codex-2hxff.16), and last, on
+ * the 08:00 London run, the daily bank payout (Codex-2hxff.29).
  *
  * Error handling: NEVER throws. The function is invoked from
  * `scheduled()` inside a `waitUntil` chain — if we throw, the cron
@@ -204,6 +204,37 @@ export async function runOwedDuplicatesSweep(
 }
 
 /**
+ * Flip the moves to a cheaper plan whose renewal is over an hour past and
+ * that the webhook missed (Codex-2hxff.16, data design §5.2): at most
+ * `TIER_MOVE_BACKSTOP_LIMIT` per run, oldest first, about two Stripe calls
+ * each. It rides this hourly wake, so it adds no cron and no polling. What
+ * is still waiting afterwards is alerted by the service. The run's
+ * `scheduledTime` goes through: a move blocked by a deleted tier is alerted
+ * once a day, counted in whole hours from it. Isolated like the other
+ * sweeps: never the cron's failure.
+ */
+export async function runTierMoveBackstopSweep(
+  subscription: Pick<SubscriptionService, 'runTierMoveBackstop'>,
+  scheduledTime: Date,
+  obs: SweepLogger
+): Promise<void> {
+  try {
+    const result = await subscription.runTierMoveBackstop({
+      now: scheduledTime,
+    });
+    if (result.checked > 0) {
+      obs.info('tier move backstop ran', result);
+    }
+  } catch (error) {
+    obs.error('tier_move.apply_failed', {
+      errorId: crypto.randomUUID(),
+      stage: 'backstop',
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
  * The daily bank payout (Codex-2hxff.29), LAST in the hourly wake: a reversal
  * the clawback retry made this hour has landed before any balance is read,
  * and an old sale the drain released goes to the bank the same morning. Every
@@ -329,6 +360,11 @@ export async function runScheduledPayoutsSweep(
     // so the pool is always released below. The bank payout goes last.
     await runCourseOffSaleSweep(webhookServices.services, obs);
     await runOwedDuplicatesSweep(webhookServices.services, obs);
+    await runTierMoveBackstopSweep(
+      webhookServices.services.subscription,
+      scheduledTime,
+      obs
+    );
     await runBankPayoutsSweep(
       webhookServices.services.subscription,
       scheduledTime,

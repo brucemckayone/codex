@@ -57,6 +57,11 @@ export type InvalidationReason =
   | 'subscription_deleted'
   | 'subscription_paused'
   | 'subscription_resumed'
+  // A move to a cheaper tier that waits for the renewal (Codex-2hxff.16):
+  // chosen, undone by Keep current plan, and landed at the renewal.
+  | 'tier_move_scheduled'
+  | 'tier_move_kept'
+  | 'tier_move_applied'
   | 'subscription_updated';
 
 export interface InvalidateForUserArgs {

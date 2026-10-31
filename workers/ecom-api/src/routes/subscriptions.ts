@@ -8,7 +8,10 @@
  * - GET  /subscriptions/current      - Get user's subscription for an org
  * - GET  /subscriptions/mine         - Get all user's subscriptions
  * - POST /subscriptions/change-tier  - Upgrade/downgrade tier
+ * - POST /subscriptions/keep-current-plan - Undo a waiting move to a cheaper plan
  * - POST /subscriptions/cancel       - Cancel at period end
+ * - GET  /subscriptions/courses/mine - The user's course subscriptions
+ * - POST /subscriptions/courses/:courseSubscriptionId/cancel|reactivate
  * - GET  /subscriptions/stats        - Subscriber stats (admin)
  */
 
@@ -19,12 +22,15 @@ import type { HonoEnv } from '@codex/shared-types';
 import {
   cancelSubscriptionSchema,
   changeTierSchema,
+  courseSubscriptionParamsSchema,
   createSubscriptionCheckoutSchema,
   getCurrentSubscriptionQuerySchema,
   getMyEarningsSummaryQuerySchema,
   getPayoutSummaryQuerySchema,
   getPayoutsByCreatorBreakdownQuerySchema,
   getSubscriptionStatsQuerySchema,
+  keepCurrentPlanSchema,
+  listMyCourseSubscriptionsQuerySchema,
   listMyPayoutsQuerySchema,
   listPayoutsQuerySchema,
   listSubscribersQuerySchema,
@@ -235,6 +241,91 @@ subscriptions.post(
       return await ctx.services.subscription.getSubscription(
         ctx.user.id,
         ctx.input.body.organizationId
+      );
+    },
+  })
+);
+
+/**
+ * POST /subscriptions/keep-current-plan
+ * Undo a move to a cheaper plan before it lands at the renewal
+ * (Codex-2hxff.16, data design §4): the held Price goes back on the
+ * subscription and nothing is charged. Nothing waiting: unchanged. After the
+ * renewal it lands on: 409 `MOVE_ALREADY_LANDED`.
+ */
+subscriptions.post(
+  '/keep-current-plan',
+  procedure({
+    policy: { auth: 'required', rateLimit: 'strict' },
+    input: { body: keepCurrentPlanSchema },
+    handler: async (ctx) => {
+      // `keepCurrentPlan` owns its own cache invalidation.
+      await ctx.services.subscription.keepCurrentPlan(
+        ctx.user.id,
+        ctx.input.body.organizationId
+      );
+      return await ctx.services.subscription.getSubscription(
+        ctx.user.id,
+        ctx.input.body.organizationId
+      );
+    },
+  })
+);
+
+/**
+ * GET /subscriptions/courses/mine
+ * The user's own course subscriptions for Account › Subscriptions
+ * (Codex-2hxff.52, C1): live, not ended, not a duplicate, newest first.
+ */
+subscriptions.get(
+  '/courses/mine',
+  procedure({
+    policy: { auth: 'required' },
+    input: { query: listMyCourseSubscriptionsQuerySchema },
+    handler: async (ctx) => {
+      const result = await ctx.services.courseSubscription.listForUser(
+        ctx.user.id,
+        ctx.input.query
+      );
+      return new PaginatedResult(result.items, result.pagination);
+    },
+  })
+);
+
+/**
+ * POST /subscriptions/courses/:courseSubscriptionId/cancel
+ * Cancel one of the user's course subscriptions at period end. Another
+ * user's id is a 404.
+ */
+subscriptions.post(
+  '/courses/:courseSubscriptionId/cancel',
+  procedure({
+    policy: { auth: 'required' },
+    input: { params: courseSubscriptionParamsSchema },
+    handler: async (ctx) => {
+      return await ctx.services.courseSubscription.cancelForUser(
+        ctx.user.id,
+        ctx.input.params.courseSubscriptionId
+      );
+    },
+  })
+);
+
+/**
+ * POST /subscriptions/courses/:courseSubscriptionId/reactivate
+ * Undo a course subscription's cancel before the period ends. 409
+ * `COURSE_NOT_ON_SALE` when the course is no longer offered; a plan only
+ * switched off can be reactivated (owner Q6).
+ */
+subscriptions.post(
+  '/courses/:courseSubscriptionId/reactivate',
+  procedure({
+    policy: { auth: 'required' },
+    input: { params: courseSubscriptionParamsSchema },
+    handler: async (ctx) => {
+      return await ctx.services.courseSubscription.reactivateForUser(
+        ctx.user.id,
+        ctx.input.params.courseSubscriptionId
       );
     },
   })

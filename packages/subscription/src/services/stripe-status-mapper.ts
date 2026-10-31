@@ -9,6 +9,7 @@
 
 import { SUBSCRIPTION_STATUS } from '@codex/constants';
 import type Stripe from 'stripe';
+import { readWaitingMove } from './tier-move';
 
 type SubscriptionStatus =
   (typeof SUBSCRIPTION_STATUS)[keyof typeof SUBSCRIPTION_STATUS];
@@ -26,6 +27,13 @@ interface MappedStripeSubscription {
   tierId: string | null;
   currentPeriodStart: Date | null;
   currentPeriodEnd: Date | null;
+  /**
+   * A move to a cheaper tier that waits for the renewal (Codex-2hxff.16),
+   * from `codex_move_*` / `codex_hold_*`: all three, or all null.
+   */
+  pendingTierId: string | null;
+  pendingTierFrom: Date | null;
+  heldAmountCents: number | null;
 }
 
 /**
@@ -85,6 +93,7 @@ export function mapStripeSubscriptionStatus(
 
   const periodStart = item?.current_period_start ?? 0;
   const periodEnd = item?.current_period_end ?? 0;
+  const move = readWaitingMove(stripeSubscription.metadata);
 
   return {
     status: resolveStatus(
@@ -98,5 +107,8 @@ export function mapStripeSubscriptionStatus(
     tierId: stripeSubscription.metadata?.codex_tier_id ?? null,
     currentPeriodStart: periodStart > 0 ? new Date(periodStart * 1000) : null,
     currentPeriodEnd: periodEnd > 0 ? new Date(periodEnd * 1000) : null,
+    pendingTierId: move?.tierId ?? null,
+    pendingTierFrom: move ? new Date(move.at * 1000) : null,
+    heldAmountCents: move?.holdAmountCents ?? null,
   };
 }

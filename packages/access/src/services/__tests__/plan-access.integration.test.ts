@@ -1074,5 +1074,36 @@ describe('plan access — decision, library, checklist (Codex-2hxff.91)', () => 
           )
       ).toHaveLength(1);
     });
+
+    // Codex-2hxff.16, T5: a member waiting to move to a tier at their
+    // renewal would land on a deleted one, so they block its delete too.
+    it('the delete impact counts members waiting to move here, and the last of their dates', async () => {
+      const early = daysFromNow(5);
+      const late = daysFromNow(9);
+      for (const [status, at] of [
+        ['active', early],
+        ['past_due', late],
+        // A cancelled one never lands: not counted.
+        ['cancelled', daysFromNow(30)],
+      ] as const) {
+        const [userId] = (await seedTestUsers(db, 1)) as [string];
+        await db.insert(subscriptions).values(
+          createTestSubscriptionInput(userId, orgId, pro, {
+            status,
+            pendingTierId: basic,
+            pendingTierFrom: at,
+            heldAmountCents: 1000,
+          })
+        );
+      }
+
+      const impact = await plans.getDeleteImpact(orgId, basic);
+
+      expect(impact.liveSubscriberCount).toBe(1);
+      expect(impact.movingInCount).toBe(2);
+      expect(impact.lastMoveAt).toBe(late.toISOString());
+      const elsewhere = await plans.getDeleteImpact(orgId, pro);
+      expect(elsewhere).toMatchObject({ movingInCount: 0, lastMoveAt: null });
+    });
   });
 });

@@ -1198,12 +1198,17 @@ describe('Subscription drift — tier subscriptions (Codex-2hxff.15)', () => {
     it('an update, then the proration invoice', async () => {
       const { org, tier1 } = await upgrade('update-first');
 
-      // A later move to the cheaper tier is a downgrade, not an upgrade.
+      // A later move to the cheaper tier is a downgrade, not an upgrade: it
+      // waits for the renewal (Codex-2hxff.16).
       await service.changeTier(subscriberId, org.id, tier1.id, 'month');
       const params = asMock(stripe.subscriptions.update).mock.calls.at(
         -1
-      )?.[1] as { proration_behavior: string };
-      expect(params.proration_behavior).toBe('create_prorations');
+      )?.[1] as {
+        proration_behavior: string;
+        metadata: Record<string, string>;
+      };
+      expect(params.proration_behavior).toBe('none');
+      expect(params.metadata.codex_move_tier_id).toBe(tier1.id);
     });
 
     it('the proration invoice, then the update', async () => {
@@ -1279,9 +1284,17 @@ describe('Subscription drift — tier subscriptions (Codex-2hxff.15)', () => {
       const keys = asMock(stripe.subscriptions.update).mock.calls.map(
         (call) => (call[2] as { idempotencyKey: string }).idempotencyKey
       );
+      // The downgrade is a waiting move (Codex-2hxff.16), keyed by its
+      // renewal and its preview. This fake keeps no metadata, so the third
+      // change sees no move; live, it would be refused until Keep
+      // (tier-move.integration.test.ts).
       expect(keys).toEqual([
         `upgrade_${sub.id}_${tier2.stripePriceMonthlyId}_${nowSec - 30}`,
-        `downgrade_${sub.id}_${tier1.stripePriceMonthlyId}_${nowSec - 20}`,
+        expect.stringMatching(
+          new RegExp(
+            `^move_${sub.id}_${tier1.stripePriceMonthlyId}_\\d+_${nowSec - 20}$`
+          )
+        ),
         `upgrade_${sub.id}_${tier2.stripePriceMonthlyId}_${nowSec - 10}`,
       ]);
     });
