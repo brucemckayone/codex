@@ -935,19 +935,32 @@ export class TierService extends BaseService {
     try {
       const existing = await this.getTierOrThrow(tierId, orgId);
 
-      // Check for active subscribers
-      const [subCount] = await this.db
-        .select({ count: sql<number>`count(*)::int` })
+      // Anyone on the tier, and anyone waiting to move to it at their renewal
+      // (Codex-2hxff.16, T5): they would land on a deleted tier. A cancelled
+      // mover who could still reactivate counts too, since the move comes
+      // back with them (T4). The same rows `PlanAccessService.getDeleteImpact`
+      // counts for the dialog.
+      const [counts] = await this.db
+        .select({
+          subscribers: sql<number>`count(*) FILTER (WHERE ${subscriptions.tierId} = ${tierId})::int`,
+          movingIn: sql<number>`count(*) FILTER (WHERE ${subscriptions.pendingTierId} = ${tierId})::int`,
+        })
         .from(subscriptions)
         .where(
           and(
-            eq(subscriptions.tierId, tierId),
+            sql`(${subscriptions.tierId} = ${tierId} OR ${subscriptions.pendingTierId} = ${tierId})`,
             sql`${subscriptions.status} NOT IN ('cancelled')`
           )
         );
 
-      if (subCount && subCount.count > 0) {
-        throw new TierHasSubscribersError(tierId, subCount.count);
+      const subscriberCount = counts?.subscribers ?? 0;
+      const movingInCount = counts?.movingIn ?? 0;
+      if (subscriberCount > 0 || movingInCount > 0) {
+        throw new TierHasSubscribersError(
+          tierId,
+          subscriberCount,
+          movingInCount
+        );
       }
 
       const moveTo =

@@ -57,14 +57,21 @@ export {
   AlreadySubscribedError,
   ConnectAccountNotFoundError,
   ConnectAccountNotReadyError,
+  CourseNotOnSaleError,
   CourseSubscriptionPlanExistsError,
   CourseSubscriptionPlanNotFoundError,
   CreatorConnectRequiredError,
   isSubscriptionServiceError,
+  // Tier change refusals and Keep current plan (Codex-2hxff.16)
+  MoveAlreadyLandedError,
+  PendingMoveKeepFirstError,
   SubscriptionCheckoutError,
   SubscriptionNotFoundError,
   type SubscriptionServiceError,
+  TierChangeCancellingError,
+  TierChangeIntervalWhileMovingError,
   TierChangePreviewExpiredError,
+  TierChangeTwoStepsError,
   TierHasOnlyItemsError,
   TierHasSubscribersError,
   TierNotFoundError,
@@ -85,6 +92,8 @@ export {
   type CourseSubscriptionCheckoutVerifyResult,
   CourseSubscriptionService,
   type CourseSubscriptionWebhookResult,
+  // Account › Subscriptions' course cards (Codex-2hxff.52)
+  type UserCourseSubscription,
 } from './services/course-subscription-service';
 export {
   applyDuePendingPriceChange,
@@ -120,11 +129,15 @@ export type {
   PayoutDisplayStatus,
   PayoutSummary,
   PayoutWithCreator,
+  // A move to a cheaper plan waiting for the renewal (Codex-2hxff.16)
+  PendingTierChange,
   PropagateTierPriceOptions,
   PropagateTierPriceResult,
   SubscriberListItem,
   SubscriberSubscription,
   SubscriptionCheckoutVerifyResult,
+  SubscriptionWithOrg,
+  SubscriptionWithTier,
   TierChangePreview,
   WebhookEmailPayload,
   WebhookHandlerResult,
@@ -133,7 +146,9 @@ export {
   type PayoutReleasedMailer,
   SUBSCRIBER_HIDDEN_COLUMNS,
   SubscriptionService,
+  TIER_MOVE_BACKSTOP_LIMIT,
 } from './services/subscription-service';
+export { MOVE_TIER_ID_KEY } from './services/tier-move';
 export {
   type TierPricePropagator,
   TierService,

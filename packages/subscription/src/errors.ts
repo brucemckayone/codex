@@ -40,11 +40,17 @@ export class TierNotFoundError extends NotFoundError {
   }
 }
 
+/**
+ * A tier someone is on, or is waiting to move to at their renewal
+ * (Codex-2hxff.16, decision T5), cannot be deleted. Counts only: the context
+ * is sent to the client.
+ */
 export class TierHasSubscribersError extends BusinessLogicError {
-  constructor(tierId: string, subscriberCount: number) {
+  constructor(tierId: string, subscriberCount: number, movingInCount = 0) {
     super('Cannot delete tier with active subscribers', {
       tierId,
       subscriberCount,
+      movingInCount,
       code: 'TIER_HAS_SUBSCRIBERS',
     });
   }
@@ -187,8 +193,105 @@ export class TierChangePreviewExpiredError extends ServiceError {
 }
 
 // ============================================================================
+// Tier change refusals (Codex-2hxff.16, owner decisions T1-T4, Q1-Q4)
+// ============================================================================
+//
+// Each is refused before Stripe is written to, with its own code in the
+// context (sent to the client as `details`, as SUBSCRIPTION_DISPUTED is), so
+// the pricing dialog can say why. Ids only.
+
+/**
+ * A change of plan while the subscription is set to cancel (Q2): the member
+ * reactivates first. Picking a plan never reactivates it.
+ */
+export class TierChangeCancellingError extends ConflictError {
+  constructor(organizationId: string) {
+    super('Reactivate your subscription to change plan.', {
+      code: 'TIER_CHANGE_CANCELLING',
+      organizationId,
+    });
+  }
+}
+
+/**
+ * A change that starts now and moves money, while a move to a cheaper plan
+ * waits (T2). The item already carries the cheaper Price, so Stripe would
+ * credit the unused time at the cheaper rate and over-charge: the client keeps
+ * the current plan first (`POST /subscriptions/keep-current-plan`), then
+ * previews the change again.
+ */
+export class PendingMoveKeepFirstError extends ConflictError {
+  constructor(organizationId: string, newTierId: string) {
+    super(
+      'Your move to a cheaper plan is still set. Keep your current plan first, then change.',
+      { code: 'PENDING_MOVE_KEEP_FIRST', organizationId, newTierId }
+    );
+  }
+}
+
+/**
+ * A switch of billing period on the same plan while a move to a cheaper plan
+ * waits (Q3): the move keeps the billing period, and the switch would change
+ * it today, so both cannot hold.
+ */
+export class TierChangeIntervalWhileMovingError extends ConflictError {
+  constructor(organizationId: string) {
+    super(
+      'Your move to a cheaper plan is still set. Change how often you are billed once it has started, or keep your current plan first.',
+      { code: 'TIER_CHANGE_INTERVAL_WHILE_MOVING', organizationId }
+    );
+  }
+}
+
+/**
+ * A cheaper plan on another billing period (T1, Q1): plan first, then
+ * billing. `firstStep` is the change the dialog offers instead: the target
+ * plan on the member's current billing period.
+ */
+export class TierChangeTwoStepsError extends BusinessLogicError {
+  constructor(
+    organizationId: string,
+    firstStep: { tierId: string; billingInterval: 'month' | 'year' }
+  ) {
+    super(
+      'Moving to a cheaper plan on another billing period takes two steps: the plan first, then the billing.',
+      { code: 'TIER_CHANGE_TWO_STEPS', organizationId, firstStep }
+    );
+  }
+}
+
+/**
+ * Keep current plan after the renewal the move lands on (§4): the cheaper
+ * bill has been raised, so the held Price is never put back. The page reads
+ * the subscription again.
+ */
+export class MoveAlreadyLandedError extends ConflictError {
+  constructor(organizationId: string) {
+    super('Your plan has already changed at your renewal.', {
+      code: 'MOVE_ALREADY_LANDED',
+      organizationId,
+    });
+  }
+}
+
+// ============================================================================
 // Course Subscription Errors (Codex-2pryk WP-6 · SPEC §7)
 // ============================================================================
+
+/**
+ * Reactivating a course subscription whose course is no longer offered
+ * (Codex-2hxff.52): the off-sale sweep cancelled it, and reactivating would
+ * undo that. A plan that was only switched off (course still on sale) may be
+ * reactivated (owner Q6).
+ */
+export class CourseNotOnSaleError extends ConflictError {
+  constructor(courseSubscriptionId: string) {
+    super('This course is no longer offered.', {
+      code: 'COURSE_NOT_ON_SALE',
+      courseSubscriptionId,
+    });
+  }
+}
 
 export class CourseSubscriptionPlanNotFoundError extends NotFoundError {
   constructor(courseId: string, context?: Record<string, unknown>) {

@@ -725,8 +725,11 @@ export function firstRenewalOnOrAfter(args: {
   return floor;
 }
 
-/** `unixSeconds` plus `months`, clamping the day to the target month's length. */
-function addMonthsClamped(unixSeconds: number, months: number): number {
+/**
+ * `unixSeconds` plus `months`, clamping the day to the target month's length.
+ * Exported for the tier-change preview's next-bill date (Codex-2hxff.16).
+ */
+export function addMonthsClamped(unixSeconds: number, months: number): number {
   const date = new Date(unixSeconds * 1000);
   const totalMonths = date.getUTCMonth() + months;
   const year = date.getUTCFullYear() + Math.floor(totalMonths / 12);

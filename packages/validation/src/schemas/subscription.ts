@@ -340,6 +340,26 @@ export const resumeSubscriptionSchema = z.object({
   organizationId: uuidSchema,
 });
 
+/**
+ * `POST /subscriptions/keep-current-plan`: undo a move to a cheaper plan
+ * before it lands at the renewal (Codex-2hxff.16).
+ */
+export const keepCurrentPlanSchema = z.object({
+  organizationId: uuidSchema,
+});
+
+/**
+ * The one course subscription a cancel or reactivate acts on
+ * (Codex-2hxff.52). The service scopes it to the caller: another user's id
+ * reads as not found.
+ */
+export const courseSubscriptionParamsSchema = z.object({
+  courseSubscriptionId: uuidSchema,
+});
+
+/** `GET /subscriptions/courses/mine`: the caller's own course subscriptions. */
+export const listMyCourseSubscriptionsQuerySchema = paginationSchema;
+
 // ============================================================================
 // Query Schemas
 // ============================================================================
@@ -523,6 +543,13 @@ export type ReactivateSubscriptionInput = z.infer<
   typeof reactivateSubscriptionSchema
 >;
 export type ResumeSubscriptionInput = z.infer<typeof resumeSubscriptionSchema>;
+export type KeepCurrentPlanInput = z.infer<typeof keepCurrentPlanSchema>;
+export type CourseSubscriptionParams = z.infer<
+  typeof courseSubscriptionParamsSchema
+>;
+export type ListMyCourseSubscriptionsQueryInput = z.infer<
+  typeof listMyCourseSubscriptionsQuerySchema
+>;
 export type PayoutStatusFilter = z.infer<typeof payoutStatusFilterEnum>;
 export type PayoutSourceFilter = z.infer<typeof payoutSourceFilterEnum>;
 export type ListPayoutsQueryInput = z.infer<typeof listPayoutsQuerySchema>;
