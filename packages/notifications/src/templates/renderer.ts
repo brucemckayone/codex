@@ -317,6 +317,28 @@ const TEMPLATE_TOKENS: Record<string, string[]> = {
     'sinceSentence',
     'dashboardUrl',
   ],
+  // Fee changes (Codex-2hxff.33). Sent only by this worker's own fee step,
+  // which composes every sentence, so the sender and this list deploy
+  // together.
+  'fee-change-notice': [
+    'userName',
+    'subjectLine',
+    'headline',
+    'leadSentence',
+    'changeLines',
+    'effectiveDate',
+    'exampleLine',
+    'closingSentence',
+    'ruleSentence',
+    'studioUrl',
+    'buttonLabel',
+  ],
+  'fee-change-cancelled': [
+    'userName',
+    'announcedOn',
+    'changeSentence',
+    'keptLines',
+  ],
 
   // Engagement
   'new-content-published': [
@@ -486,6 +508,9 @@ const TRANSACTIONAL_TEMPLATES = new Set([
   'stripe-balance-below-zero',
   'stripe-balance-recovered',
   'debt-written-off',
+  // Fee changes (Codex-2hxff.33): the payout terms promise this notice.
+  'fee-change-notice',
+  'fee-change-cancelled',
   // Revenue-share agreements (WP-5 — Codex-90de9): commercial contract,
   // not marketable.
   'agreement-proposed-by-owner',

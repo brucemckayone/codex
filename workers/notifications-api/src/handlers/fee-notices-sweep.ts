@@ -1,0 +1,1059 @@
+/**
+ * The daily fee step (Codex-2hxff.33; batch C1 Part B data design §1.5).
+ *
+ * Runs on the existing `0 8 * * *` cron, after the agreement sweep and the
+ * money sweep, isolated from both. A fee rise waits until everyone it pays
+ * less has been told (F4); this step tells them:
+ *
+ *   1. LIST: each new waiting rise gets its list on its first morning
+ *      (`affectedPayees`, F3), one `announce` notice per person, `on_list`.
+ *   2. JOINERS (F8): on later mornings, anyone now affected with no notice is
+ *      added (`on_list = false`, so they never hold the date); anyone on the
+ *      list no longer affected and not yet told becomes `not_needed`.
+ *   3. SEND: up to FEE_NOTICES_PER_RUN notices in `due`, `failed` or
+ *      `unknown`, oldest first, claimed under FOR UPDATE SKIP LOCKED. An
+ *      `unknown` from an earlier run is first looked for in
+ *      `email_audit_logs`: found sent, it counts as told then and nothing is
+ *      resent (M1's rule). Each email names a date: the change's, or the
+ *      earliest it can be (Q1). The words are worked out at send time, so a
+ *      rise made smaller is announced with its smaller figure.
+ *   4. DATE: a rise whose list has nobody left waiting is dated the first UK
+ *      midnight at least 30 days after the last of them was told
+ *      (`dateRiseIfAllTold`, shared with support's "told another way").
+ *   5. FOLLOW-UPS: `smaller` (Q2) and `cancelled` (F2) emails go the same
+ *      way. They hold nothing, so after 3 failed mornings they are dropped
+ *      (`not_needed`) with a log line, and never reach support.
+ *   6. ONE ALERT per run names the people not yet told (50 at most, then a
+ *      count) and points at Admin › Queue › Fee notices, the durable record.
+ *
+ * Why here: admin-api has no worker secret (by design), and the template
+ * allowlist ships in this worker, so the sender and the allowlist deploy
+ * together, as with the money sweep. The 30-day clock starting only once
+ * every email is ACCEPTED is what makes a failed send safe: it only moves
+ * the date later.
+ *
+ * Never throws: it runs inside `waitUntil` from `scheduled()`.
+ */
+
+import { isEnvName } from '@codex/agreements';
+import {
+  and,
+  asc,
+  createPerRequestDbClient,
+  type DatabaseWs,
+  eq,
+  gte,
+  inArray,
+  isNull,
+  messageForLog,
+  sql,
+} from '@codex/database';
+import {
+  emailAuditLogs,
+  type FeeChangeNoticeRow,
+  type FeeChangeRow,
+  type FeeNoticeReason,
+  type FeeNoticeRole,
+  type FeeNoticeRoleValues,
+  feeChangeNotices,
+  feeChanges,
+  organizations,
+  users,
+} from '@codex/database/schema';
+import { TemplateRepository } from '@codex/notifications';
+import { ObservabilityClient } from '@codex/observability';
+import {
+  type AffectedPayee,
+  affectedPayees,
+  dateRiseIfAllTold,
+  dbFeeVersionReader,
+  FEE_NOTICE_OPEN_STATES,
+  feeRiseStartAfter,
+  londonDate,
+  resolveFeesAt,
+  WAITING_RISE,
+} from '@codex/payments';
+import { workerFetch } from '@codex/security';
+import type { Bindings } from '@codex/shared-types';
+import {
+  buildOrgUrlFromEnv,
+  type EnvName,
+  buildServiceUrl as getServiceUrl,
+} from '@codex/urls';
+import {
+  feeChangeCancelledData,
+  feeChangeNoticeData,
+  type OrgNames,
+} from './fee-notice-copy';
+import { greetingName } from './money-notice-copy';
+
+/** Emails a run sends at most; the rest go the next morning (§1.5 budget). */
+export const FEE_NOTICES_PER_RUN = 2000;
+/** A follow-up is dropped after this many failed mornings. */
+const FOLLOW_UP_TRIES = 3;
+/** People named in the run's one alert. */
+const ALERT_NAMED = 50;
+/** Notices inserted per statement when a list is made. */
+const LIST_BATCH = 500;
+/** Sends in flight at once. */
+const SEND_CONCURRENCY = 8;
+/** A notice attempted this recently is not claimed again (overlapping runs). */
+const RECLAIM_AFTER_MS = 12 * 60 * 60 * 1000;
+
+const TEMPLATE_FOR = {
+  announce: 'fee-change-notice',
+  smaller: 'fee-change-notice',
+  cancelled: 'fee-change-cancelled',
+} as const;
+type FeeTemplate = (typeof TEMPLATE_FOR)[keyof typeof TEMPLATE_FOR];
+type NoticeKind = keyof typeof TEMPLATE_FOR;
+
+/** What notifications-api answered (the shape of worker-utils' `EmailSendResult`). */
+export type FeeNoticeDelivery =
+  | { accepted: true }
+  | { accepted: false; status: number }
+  | { accepted: false; skipped: string }
+  | { accepted: false; error: string };
+
+export interface FeeMailerParams {
+  to: string;
+  toName?: string;
+  templateName: FeeTemplate;
+  category: 'transactional';
+  userId: string;
+  organizationId: null;
+  data: Record<string, string>;
+}
+
+export type FeeMailer = (params: FeeMailerParams) => Promise<FeeNoticeDelivery>;
+
+export interface RunFeeNoticesSweepDeps {
+  /** A WebSocket client: making a list and dating a rise are transactions. */
+  db: DatabaseWs;
+  obs: ObservabilityClient;
+  /** Builds the Studio links in every email. */
+  environment: EnvName;
+  workerSecret: string;
+  notificationsUrl: string;
+  /** Now override (testing only). */
+  now?: Date;
+  /** Default: worker-to-worker POST to this worker's /internal/send. */
+  mailer?: FeeMailer;
+  /** Default: a live global template of that name exists. */
+  templateExists?: (name: FeeTemplate) => Promise<boolean>;
+  /** Testing only. */
+  perRun?: number;
+  /**
+   * Testing only: the step touches these changes alone. It otherwise reads
+   * every change, and the test database is shared with other suites.
+   */
+  onlyChanges?: readonly string[];
+}
+
+export interface FeeNoticesSweepResult {
+  listsMade: number;
+  listed: number;
+  joinersAdded: number;
+  notNeeded: number;
+  sent: number;
+  failed: number;
+  unknown: number;
+  /** `unknown` notices the email log showed were sent: not resent. */
+  foundInLog: number;
+  /** Follow-ups dropped after their tries. */
+  dropped: number;
+  dated: number;
+  skippedTemplates: FeeTemplate[];
+  errors: number;
+}
+
+interface SweepContext {
+  db: DatabaseWs;
+  obs: ObservabilityClient;
+  mailer: FeeMailer;
+  now: Date;
+  environment: EnvName;
+  perRun: number;
+  enabled: ReadonlySet<FeeTemplate>;
+  result: FeeNoticesSweepResult;
+  /** Each change's affected people, worked out once per run. */
+  payees: Map<string, Promise<Map<string, AffectedPayee>>>;
+  orgNames: Map<string, { name: string; slug: string }>;
+  onlyChanges: readonly string[] | null;
+}
+
+/** `onlyChanges` as a filter on `fee_changes`; none in production. */
+function scope(ctx: SweepContext) {
+  return ctx.onlyChanges
+    ? inArray(feeChanges.id, [...ctx.onlyChanges])
+    : undefined;
+}
+
+// ─── Sending ─────────────────────────────────────────────────────────────────
+
+function makeDefaultMailer(deps: {
+  notificationsUrl: string;
+  workerSecret: string;
+}): FeeMailer {
+  return async (params) => {
+    let res: Response;
+    try {
+      res = await workerFetch(
+        `${deps.notificationsUrl}/internal/send`,
+        { method: 'POST', body: JSON.stringify(params) },
+        deps.workerSecret
+      );
+    } catch (error) {
+      return { accepted: false, error: messageForLog(error) };
+    }
+    if (!res.ok) return { accepted: false, status: res.status };
+    const body = (await res.json().catch(() => null)) as {
+      data?: { success?: unknown; skipped?: unknown };
+    } | null;
+    if (body?.data?.success === true) return { accepted: true };
+    if (typeof body?.data?.skipped === 'string') {
+      return { accepted: false, skipped: body.data.skipped };
+    }
+    return { accepted: false, error: 'a 2xx without a readable result' };
+  };
+}
+
+/**
+ * What a delivery means for the notice: sent, a definite failure (the email
+ * certainly did not go: a 4xx, a skip, no address) or unknown (a 5xx, a
+ * timeout: it MAY have gone, so the next run checks the email log first).
+ */
+function outcomeOf(
+  delivery: FeeNoticeDelivery | 'no_address'
+):
+  | { state: 'sent' }
+  | { state: 'failed' | 'unknown'; reason: FeeNoticeReason; error: string } {
+  if (delivery === 'no_address') {
+    return { state: 'failed', reason: 'no_address', error: 'no email address' };
+  }
+  if (delivery.accepted) return { state: 'sent' };
+  if ('skipped' in delivery) {
+    return {
+      state: 'failed',
+      reason: 'skipped',
+      error: `skipped: ${delivery.skipped}`,
+    };
+  }
+  if ('status' in delivery) {
+    return delivery.status < 500
+      ? { state: 'failed', reason: 'refused', error: `HTTP ${delivery.status}` }
+      : {
+          state: 'unknown',
+          reason: 'unknown',
+          error: `HTTP ${delivery.status}`,
+        };
+  }
+  return { state: 'unknown', reason: 'unknown', error: delivery.error };
+}
+
+// ─── 1. Lists ────────────────────────────────────────────────────────────────
+
+async function insertNotices(
+  db: DatabaseWs | Parameters<Parameters<DatabaseWs['transaction']>[0]>[0],
+  changeId: string,
+  payees: AffectedPayee[],
+  onList: boolean
+): Promise<number> {
+  let inserted = 0;
+  for (let i = 0; i < payees.length; i += LIST_BATCH) {
+    const rows = await db
+      .insert(feeChangeNotices)
+      .values(
+        payees.slice(i, i + LIST_BATCH).map((payee) => ({
+          changeId,
+          userId: payee.userId,
+          kind: 'announce' as const,
+          onList,
+          roles: payee.roles,
+          beforeValues: payee.before,
+          afterValues: payee.after,
+        }))
+      )
+      .onConflictDoNothing({
+        target: [
+          feeChangeNotices.changeId,
+          feeChangeNotices.userId,
+          feeChangeNotices.kind,
+        ],
+      })
+      .returning({ id: feeChangeNotices.id });
+    inserted += rows.length;
+  }
+  return inserted;
+}
+
+async function makeLists(ctx: SweepContext): Promise<Set<string>> {
+  const made = new Set<string>();
+  const waiting = await ctx.db
+    .select({ id: feeChanges.id })
+    .from(feeChanges)
+    .where(and(WAITING_RISE, isNull(feeChanges.firstRunAt), scope(ctx)))
+    .orderBy(asc(feeChanges.createdAt));
+  for (const { id } of waiting) {
+    try {
+      const listed = await ctx.db.transaction(async (tx) => {
+        const [change] = await tx
+          .select()
+          .from(feeChanges)
+          .where(eq(feeChanges.id, id))
+          .for('update');
+        if (
+          !change ||
+          change.firstRunAt !== null ||
+          change.voidedAt !== null ||
+          change.effectiveFrom !== null
+        ) {
+          return null;
+        }
+        const payees = await affectedPayees(tx, change, ctx.now);
+        await insertNotices(tx, id, payees, true);
+        await tx
+          .update(feeChanges)
+          .set({ firstRunAt: ctx.now, listedCount: payees.length })
+          .where(eq(feeChanges.id, id));
+        return payees.length;
+      });
+      if (listed === null) continue;
+      made.add(id);
+      ctx.result.listsMade += 1;
+      ctx.result.listed += listed;
+      ctx.obs.info('fee step: list made', { changeId: id, listed });
+    } catch (error) {
+      ctx.result.errors += 1;
+      ctx.obs.error('fee step: a list could not be made', {
+        errorId: crypto.randomUUID(),
+        changeId: id,
+        error: messageForLog(error),
+      });
+    }
+  }
+  return made;
+}
+
+// ─── 2. Joiners ──────────────────────────────────────────────────────────────
+
+/** Changes with a list that haven't started: the ones still being told about. */
+function notStarted(now: Date) {
+  return and(
+    eq(feeChanges.kind, 'rise'),
+    isNull(feeChanges.voidedAt),
+    sql`${feeChanges.firstRunAt} IS NOT NULL`,
+    sql`(${feeChanges.effectiveFrom} IS NULL OR ${feeChanges.effectiveFrom} > ${now})`
+  );
+}
+
+function payeesOf(
+  ctx: SweepContext,
+  change: FeeChangeRow
+): Promise<Map<string, AffectedPayee>> {
+  let found = ctx.payees.get(change.id);
+  if (!found) {
+    found = affectedPayees(ctx.db, change, ctx.now).then(
+      (list) => new Map(list.map((p) => [p.userId, p]))
+    );
+    ctx.payees.set(change.id, found);
+  }
+  return found;
+}
+
+async function addJoiners(
+  ctx: SweepContext,
+  listedThisRun: ReadonlySet<string>
+): Promise<void> {
+  const changes = await ctx.db
+    .select()
+    .from(feeChanges)
+    .where(and(notStarted(ctx.now), scope(ctx)))
+    .orderBy(asc(feeChanges.createdAt));
+  for (const change of changes) {
+    if (listedThisRun.has(change.id)) continue;
+    try {
+      const affected = await payeesOf(ctx, change);
+      const existing = await ctx.db
+        .select({
+          id: feeChangeNotices.id,
+          userId: feeChangeNotices.userId,
+          state: feeChangeNotices.state,
+        })
+        .from(feeChangeNotices)
+        .where(
+          and(
+            eq(feeChangeNotices.changeId, change.id),
+            eq(feeChangeNotices.kind, 'announce')
+          )
+        );
+      const known = new Map(existing.map((n) => [n.userId, n]));
+      const joiners = [...affected.values()].filter(
+        (p) => !known.has(p.userId)
+      );
+      const added = await insertNotices(ctx.db, change.id, joiners, false);
+      ctx.result.joinersAdded += added;
+
+      const gone = existing
+        .filter(
+          (n) =>
+            (FEE_NOTICE_OPEN_STATES as readonly string[]).includes(n.state) &&
+            !affected.has(n.userId)
+        )
+        .map((n) => n.id);
+      if (gone.length > 0) {
+        await ctx.db
+          .update(feeChangeNotices)
+          .set({ state: 'not_needed', updatedAt: ctx.now })
+          .where(
+            and(
+              inArray(feeChangeNotices.id, gone),
+              inArray(feeChangeNotices.state, [...FEE_NOTICE_OPEN_STATES])
+            )
+          );
+        ctx.result.notNeeded += gone.length;
+      }
+      // Affected again after being set aside: back to due.
+      const back = existing
+        .filter((n) => n.state === 'not_needed' && affected.has(n.userId))
+        .map((n) => n.id);
+      if (back.length > 0) {
+        await ctx.db
+          .update(feeChangeNotices)
+          .set({ state: 'due', attempts: 0, updatedAt: ctx.now })
+          .where(
+            and(
+              inArray(feeChangeNotices.id, back),
+              eq(feeChangeNotices.state, 'not_needed')
+            )
+          );
+      }
+    } catch (error) {
+      ctx.result.errors += 1;
+      ctx.obs.error('fee step: joiners could not be added for a change', {
+        errorId: crypto.randomUUID(),
+        changeId: change.id,
+        error: messageForLog(error),
+      });
+    }
+  }
+}
+
+// ─── 3 + 5. Sends ────────────────────────────────────────────────────────────
+
+interface Claimed {
+  id: string;
+  changeId: string;
+  userId: string;
+  kind: NoticeKind;
+  onList: boolean;
+  state: string;
+  attempts: number;
+  roles: FeeNoticeRole[];
+  beforeValues: FeeNoticeRoleValues[];
+  afterValues: FeeNoticeRoleValues[];
+  quotedFrom: string | null;
+  prevAttemptedAt: Date | null;
+}
+
+async function claim(ctx: SweepContext): Promise<Claimed[]> {
+  const kinds = (Object.keys(TEMPLATE_FOR) as NoticeKind[]).filter((kind) =>
+    ctx.enabled.has(TEMPLATE_FOR[kind])
+  );
+  if (kinds.length === 0) return [];
+  const reclaimBefore = new Date(ctx.now.getTime() - RECLAIM_AFTER_MS);
+  const result = await ctx.db.execute(sql`
+    WITH picked AS (
+      SELECT n.id, n.attempted_at AS prev_attempted_at
+      FROM ${feeChangeNotices} n
+      JOIN ${feeChanges} c ON c.id = n.change_id
+      WHERE n.state IN ('due', 'failed', 'unknown')
+        AND n.kind IN (${sql.join(
+          kinds.map((k) => sql`${k}`),
+          sql`, `
+        )})
+        AND (n.attempted_at IS NULL OR n.attempted_at < ${reclaimBefore})
+        ${
+          ctx.onlyChanges
+            ? sql`AND c.id IN (${sql.join(
+                ctx.onlyChanges.map((id) => sql`${id}`),
+                sql`, `
+              )})`
+            : sql``
+        }
+        AND (
+          n.kind = 'cancelled'
+          OR (c.voided_at IS NULL AND (c.effective_from IS NULL OR c.effective_from > ${ctx.now}))
+        )
+      ORDER BY n.created_at, n.id
+      LIMIT ${ctx.perRun}
+      FOR UPDATE OF n SKIP LOCKED
+    )
+    UPDATE ${feeChangeNotices} AS n
+    SET attempted_at = ${ctx.now}, attempts = n.attempts + 1, updated_at = ${ctx.now}
+    FROM picked
+    WHERE n.id = picked.id
+    RETURNING n.id, n.change_id, n.user_id, n.kind, n.on_list, n.state,
+      n.attempts, n.roles, n.before_values, n.after_values, n.quoted_from,
+      picked.prev_attempted_at
+  `);
+  type Row = {
+    id: string;
+    change_id: string;
+    user_id: string;
+    kind: NoticeKind;
+    on_list: boolean;
+    state: string;
+    attempts: number;
+    roles: FeeNoticeRole[];
+    before_values: FeeNoticeRoleValues[];
+    after_values: FeeNoticeRoleValues[];
+    quoted_from: string | Date | null;
+    prev_attempted_at: string | Date | null;
+  };
+  return (result.rows as Row[]).map((row) => ({
+    id: row.id,
+    changeId: row.change_id,
+    userId: row.user_id,
+    kind: row.kind,
+    onList: row.on_list,
+    state: row.state,
+    attempts: row.attempts,
+    roles: row.roles,
+    beforeValues: row.before_values,
+    afterValues: row.after_values,
+    quotedFrom:
+      row.quoted_from instanceof Date
+        ? row.quoted_from.toISOString().slice(0, 10)
+        : row.quoted_from,
+    prevAttemptedAt: row.prev_attempted_at
+      ? new Date(row.prev_attempted_at)
+      : null,
+  }));
+}
+
+/**
+ * M1's rule for an `unknown`: did the email go after all? A success in the
+ * email log for this notice, since its last try, counts as told then.
+ */
+async function foundSent(
+  ctx: SweepContext,
+  notice: Claimed,
+  email: string
+): Promise<Date | null> {
+  const since = notice.prevAttemptedAt
+    ? new Date(notice.prevAttemptedAt.getTime() - 60 * 1000)
+    : new Date(0);
+  const [row] = await ctx.db
+    .select({ at: emailAuditLogs.updatedAt })
+    .from(emailAuditLogs)
+    .where(
+      and(
+        eq(emailAuditLogs.templateName, TEMPLATE_FOR[notice.kind]),
+        eq(emailAuditLogs.recipientEmail, email),
+        eq(emailAuditLogs.status, 'success'),
+        gte(emailAuditLogs.createdAt, since),
+        sql`strpos(${emailAuditLogs.metadata}, ${`"feeNoticeId":"${notice.id}"`}) > 0`
+      )
+    )
+    .limit(1);
+  return row?.at ?? null;
+}
+
+async function namesOf(
+  ctx: SweepContext,
+  roles: FeeNoticeRole[]
+): Promise<OrgNames> {
+  const ids = [
+    ...new Set(
+      roles.flatMap((r) => (r.organizationId ? [r.organizationId] : []))
+    ),
+  ].filter((id) => !ctx.orgNames.has(id));
+  if (ids.length > 0) {
+    const rows = await ctx.db
+      .select({
+        id: organizations.id,
+        name: organizations.name,
+        slug: organizations.slug,
+      })
+      .from(organizations)
+      .where(inArray(organizations.id, ids));
+    for (const row of rows) {
+      ctx.orgNames.set(row.id, { name: row.name, slug: row.slug });
+    }
+  }
+  return ctx.orgNames;
+}
+
+/** Earnings for anyone told as a creator (Q3); Billing for an owner. */
+function studioUrlFor(
+  ctx: SweepContext,
+  roles: FeeNoticeRole[],
+  names: OrgNames
+): string {
+  const owned = roles.find((r) => r.as === 'owner' && r.organizationId);
+  if (!roles.some((r) => r.as === 'creator') && owned?.organizationId) {
+    const slug = names.get(owned.organizationId)?.slug;
+    if (slug)
+      return buildOrgUrlFromEnv(ctx.environment, slug, '/studio/billing');
+  }
+  return buildOrgUrlFromEnv(ctx.environment, 'creators', '/studio/earnings');
+}
+
+/**
+ * A role's fees in force now, for the cancelled email's "stays at": a
+ * creator's own override layers over their organisation's; an owner's share
+ * moved with a creator's override only under a creator-scope change.
+ */
+async function feesNow(
+  ctx: SweepContext,
+  userId: string,
+  role: FeeNoticeRole,
+  change: FeeChangeRow
+): Promise<FeeNoticeRoleValues> {
+  const read = dbFeeVersionReader(ctx.db);
+  const creatorId =
+    role.as === 'creator'
+      ? userId
+      : change.scope === 'creator'
+        ? change.creatorId
+        : null;
+  const params = {
+    organizationId: role.organizationId,
+    creatorId: role.organizationId ? creatorId : null,
+    at: ctx.now,
+  };
+  const [oneOff, subscription] = await Promise.all([
+    resolveFeesAt(read, { ...params, ctx: 'one_off' }),
+    resolveFeesAt(read, { ...params, ctx: 'subscription' }),
+  ]);
+  return { ...role, oneOff, subscription };
+}
+
+async function announceOf(ctx: SweepContext, notice: Claimed) {
+  const [row] = await ctx.db
+    .select({
+      acceptedAt: feeChangeNotices.acceptedAt,
+      toldAt: feeChangeNotices.toldAt,
+    })
+    .from(feeChangeNotices)
+    .where(
+      and(
+        eq(feeChangeNotices.changeId, notice.changeId),
+        eq(feeChangeNotices.userId, notice.userId),
+        eq(feeChangeNotices.kind, 'announce')
+      )
+    )
+    .limit(1);
+  return row ?? null;
+}
+
+async function record(
+  ctx: SweepContext,
+  notice: Claimed,
+  set: Partial<FeeChangeNoticeRow>
+): Promise<void> {
+  await ctx.db
+    .update(feeChangeNotices)
+    .set({ ...set, updatedAt: ctx.now })
+    .where(eq(feeChangeNotices.id, notice.id));
+}
+
+async function sendOne(
+  ctx: SweepContext,
+  notice: Claimed,
+  changes: Map<string, FeeChangeRow>
+): Promise<void> {
+  const change = changes.get(notice.changeId);
+  if (!change) return;
+  // 5. A follow-up holds nothing: after its tries it is dropped.
+  if (notice.kind !== 'announce' && notice.attempts > FOLLOW_UP_TRIES) {
+    await record(ctx, notice, { state: 'not_needed' });
+    ctx.result.dropped += 1;
+    ctx.obs.warn('fee step: a follow-up email was dropped after its tries', {
+      errorId: crypto.randomUUID(),
+      feeNoticeId: notice.id,
+      changeId: notice.changeId,
+      kind: notice.kind,
+    });
+    return;
+  }
+  const [person] = await ctx.db
+    .select({
+      name: users.name,
+      email: users.email,
+      deletedAt: users.deletedAt,
+    })
+    .from(users)
+    .where(eq(users.id, notice.userId))
+    .limit(1);
+  const email = person && person.deletedAt === null ? person.email : null;
+
+  if (notice.state === 'unknown' && email) {
+    const at = await foundSent(ctx, notice, email);
+    if (at) {
+      await record(ctx, notice, {
+        state: 'sent',
+        acceptedAt: at,
+        lastReason: null,
+        lastError: null,
+      });
+      ctx.result.foundInLog += 1;
+      return;
+    }
+  }
+
+  let data: Record<string, string>;
+  let told: Partial<FeeChangeNoticeRow> = {};
+  if (notice.kind === 'cancelled') {
+    const announce = await announceOf(ctx, notice);
+    const names = await namesOf(ctx, notice.roles);
+    const now = await Promise.all(
+      notice.roles.map((role) => feesNow(ctx, notice.userId, role, change))
+    );
+    data = feeChangeCancelledData({
+      userName: greetingName(person?.name),
+      roles: notice.roles,
+      toldBefore: notice.beforeValues,
+      toldAfter: notice.afterValues,
+      now,
+      names,
+      announcedAt: announce?.acceptedAt ?? announce?.toldAt ?? null,
+      toldStartsOn: notice.quotedFrom
+        ? new Date(`${notice.quotedFrom}T12:00:00Z`)
+        : null,
+    });
+  } else {
+    const payee = (await payeesOf(ctx, change)).get(notice.userId);
+    if (!payee) {
+      // Their own setting, or a role they left, shields them now.
+      await record(ctx, notice, { state: 'not_needed' });
+      ctx.result.notNeeded += 1;
+      return;
+    }
+    const names = await namesOf(ctx, payee.roles);
+    const startsOn = change.effectiveFrom ?? feeRiseStartAfter(ctx.now);
+    const announce =
+      notice.kind === 'smaller' ? await announceOf(ctx, notice) : null;
+    data = feeChangeNoticeData({
+      userName: greetingName(person?.name),
+      kind: notice.kind,
+      roles: payee.roles,
+      before: payee.before,
+      after: payee.after,
+      names,
+      startsOn,
+      dated: change.effectiveFrom !== null,
+      joiner: !notice.onList,
+      replaces: change.replacesChangeId !== null,
+      announcedAt: announce?.acceptedAt ?? announce?.toldAt ?? null,
+      studioUrl: studioUrlFor(ctx, payee.roles, names),
+    });
+    // What they are told, kept as told (Studio's "not 12%" reads it).
+    told = {
+      roles: payee.roles,
+      beforeValues: payee.before,
+      afterValues: payee.after,
+      quotedFrom: londonDate(startsOn),
+    };
+  }
+
+  const delivery = email
+    ? await ctx
+        .mailer({
+          to: email,
+          toName: person?.name ?? undefined,
+          templateName: TEMPLATE_FOR[notice.kind],
+          category: 'transactional',
+          userId: notice.userId,
+          organizationId: null,
+          // feeNoticeId is not a token: the data schema strips it before
+          // rendering, and the email log keeps it, for M1's check.
+          data: { ...data, feeNoticeId: notice.id },
+        })
+        .catch(
+          (error: unknown): FeeNoticeDelivery => ({
+            accepted: false,
+            error: messageForLog(error),
+          })
+        )
+    : 'no_address';
+  const outcome = outcomeOf(delivery);
+  if (outcome.state === 'sent') {
+    await record(ctx, notice, {
+      ...told,
+      state: 'sent',
+      // The run's clock, as attempted_at: a run is minutes long, and the
+      // 30 days are counted to the next UK midnight anyway.
+      acceptedAt: ctx.now,
+      lastReason: null,
+      lastError: null,
+    });
+    ctx.result.sent += 1;
+    return;
+  }
+  const errorId = crypto.randomUUID();
+  await record(ctx, notice, {
+    state: outcome.state,
+    lastReason: outcome.reason,
+    lastError: outcome.error,
+    alertErrorId: errorId,
+  });
+  if (outcome.state === 'failed') ctx.result.failed += 1;
+  else ctx.result.unknown += 1;
+  ctx.obs.warn(
+    'fee step: a fee email was not accepted; it is tried again tomorrow',
+    {
+      errorId,
+      feeNoticeId: notice.id,
+      changeId: notice.changeId,
+      kind: notice.kind,
+      reason: outcome.reason,
+    }
+  );
+}
+
+async function sendDue(ctx: SweepContext): Promise<void> {
+  const claimed = await claim(ctx);
+  if (claimed.length === 0) return;
+  const changeIds = [...new Set(claimed.map((n) => n.changeId))];
+  const rows = await ctx.db
+    .select()
+    .from(feeChanges)
+    .where(inArray(feeChanges.id, changeIds));
+  const changes = new Map(rows.map((c) => [c.id, c]));
+  for (let i = 0; i < claimed.length; i += SEND_CONCURRENCY) {
+    await Promise.all(
+      claimed.slice(i, i + SEND_CONCURRENCY).map(async (notice) => {
+        try {
+          await sendOne(ctx, notice, changes);
+        } catch (error) {
+          ctx.result.errors += 1;
+          ctx.obs.error('fee step: one notice failed', {
+            errorId: crypto.randomUUID(),
+            feeNoticeId: notice.id,
+            changeId: notice.changeId,
+            error: messageForLog(error),
+          });
+        }
+      })
+    );
+  }
+}
+
+// ─── 4. Dates ────────────────────────────────────────────────────────────────
+
+async function dateRises(ctx: SweepContext): Promise<void> {
+  const waiting = await ctx.db
+    .select({ id: feeChanges.id })
+    .from(feeChanges)
+    .where(
+      and(WAITING_RISE, sql`${feeChanges.firstRunAt} IS NOT NULL`, scope(ctx))
+    );
+  for (const { id } of waiting) {
+    try {
+      const outcome = await ctx.db.transaction((tx) =>
+        dateRiseIfAllTold(tx, id)
+      );
+      if (outcome.dated) {
+        ctx.result.dated += 1;
+        ctx.obs.info('fee step: a rise is dated', {
+          changeId: id,
+          effectiveFrom: outcome.effectiveFrom.toISOString(),
+        });
+      }
+    } catch (error) {
+      ctx.result.errors += 1;
+      ctx.obs.error('fee step: a rise could not be dated', {
+        errorId: crypto.randomUUID(),
+        changeId: id,
+        error: messageForLog(error),
+      });
+    }
+  }
+}
+
+// ─── 6. The alert ────────────────────────────────────────────────────────────
+
+async function alertNotTold(ctx: SweepContext): Promise<void> {
+  const where = and(
+    eq(feeChangeNotices.kind, 'announce'),
+    inArray(feeChangeNotices.state, ['failed', 'unknown']),
+    notStarted(ctx.now),
+    scope(ctx)
+  );
+  const [rows, [total]] = await Promise.all([
+    ctx.db
+      .select({
+        feeNoticeId: feeChangeNotices.id,
+        userId: feeChangeNotices.userId,
+        changeId: feeChangeNotices.changeId,
+        reason: feeChangeNotices.lastReason,
+        onList: feeChangeNotices.onList,
+      })
+      .from(feeChangeNotices)
+      .innerJoin(feeChanges, eq(feeChanges.id, feeChangeNotices.changeId))
+      .where(where)
+      .orderBy(asc(feeChangeNotices.createdAt))
+      .limit(ALERT_NAMED),
+    ctx.db
+      .select({ n: sql<number>`count(*)`.mapWith(Number) })
+      .from(feeChangeNotices)
+      .innerJoin(feeChanges, eq(feeChanges.id, feeChangeNotices.changeId))
+      .where(where),
+  ]);
+  const count = total?.n ?? 0;
+  if (count === 0) return;
+  ctx.obs.error(
+    'fee step: people not yet told about a fee rise; the rise waits for them. See Admin › Queue › Fee notices',
+    {
+      errorId: crypto.randomUUID(),
+      notTold: count,
+      named: rows,
+      unnamed: Math.max(0, count - rows.length),
+    }
+  );
+}
+
+// ─── The run ─────────────────────────────────────────────────────────────────
+
+async function enabledTemplates(
+  deps: RunFeeNoticesSweepDeps,
+  result: FeeNoticesSweepResult
+): Promise<Set<FeeTemplate>> {
+  const repository = new TemplateRepository(deps.db);
+  const exists =
+    deps.templateExists ??
+    (async (name: FeeTemplate) =>
+      (await repository.findTemplate(name, null, null)) !== null);
+  const enabled = new Set<FeeTemplate>();
+  for (const name of new Set(Object.values(TEMPLATE_FOR))) {
+    if (await exists(name)) {
+      enabled.add(name);
+    } else {
+      result.skippedTemplates.push(name);
+      deps.obs.warn('fee step: template missing, its emails wait', {
+        templateName: name,
+      });
+    }
+  }
+  return enabled;
+}
+
+export async function runFeeNoticesSweep(
+  deps: RunFeeNoticesSweepDeps
+): Promise<FeeNoticesSweepResult> {
+  const result: FeeNoticesSweepResult = {
+    listsMade: 0,
+    listed: 0,
+    joinersAdded: 0,
+    notNeeded: 0,
+    sent: 0,
+    failed: 0,
+    unknown: 0,
+    foundInLog: 0,
+    dropped: 0,
+    dated: 0,
+    skippedTemplates: [],
+    errors: 0,
+  };
+  try {
+    const ctx: SweepContext = {
+      db: deps.db,
+      obs: deps.obs,
+      mailer:
+        deps.mailer ??
+        makeDefaultMailer({
+          notificationsUrl: deps.notificationsUrl,
+          workerSecret: deps.workerSecret,
+        }),
+      now: deps.now ?? new Date(),
+      environment: deps.environment,
+      perRun: deps.perRun ?? FEE_NOTICES_PER_RUN,
+      enabled: await enabledTemplates(deps, result),
+      result,
+      payees: new Map(),
+      orgNames: new Map(),
+      onlyChanges: deps.onlyChanges ?? null,
+    };
+    let listedThisRun: Set<string> = new Set();
+    // Each part is isolated: one failing never stops the others.
+    const parts: Array<[string, () => Promise<void>]> = [
+      [
+        'lists',
+        async () => {
+          listedThisRun = await makeLists(ctx);
+        },
+      ],
+      ['joiners', () => addJoiners(ctx, listedThisRun)],
+      ['sends', () => sendDue(ctx)],
+      ['dates', () => dateRises(ctx)],
+      ['alert', () => alertNotTold(ctx)],
+    ];
+    for (const [part, run] of parts) {
+      try {
+        await run();
+      } catch (error) {
+        result.errors += 1;
+        deps.obs.error('fee step part failed', {
+          errorId: crypto.randomUUID(),
+          part,
+          error: messageForLog(error),
+        });
+      }
+    }
+    deps.obs.info('fee step completed', { ...result });
+  } catch (error) {
+    result.errors += 1;
+    deps.obs.error('fee step failed at top level', {
+      errorId: crypto.randomUUID(),
+      error: messageForLog(error),
+    });
+  }
+  return result;
+}
+
+/**
+ * Scheduled entry point: builds a per-run WebSocket client (its lists and
+ * dates are transactions), skips cleanly on missing config, and runs the
+ * step. Dev and e2e call `runFeeNoticesSweep` directly: no environment but
+ * production has the cron.
+ */
+export async function runScheduledFeeNoticesSweep(
+  env: Bindings
+): Promise<FeeNoticesSweepResult | null> {
+  const obs = new ObservabilityClient(
+    'notifications-api',
+    env.ENVIRONMENT ?? 'development'
+  );
+  const environment = env.ENVIRONMENT ?? 'development';
+  if (
+    !env.DATABASE_URL ||
+    !env.WORKER_SHARED_SECRET ||
+    !isEnvName(environment)
+  ) {
+    obs.error('fee step: missing required env vars, skipping', {
+      errorId: crypto.randomUUID(),
+      hasDatabaseUrl: Boolean(env.DATABASE_URL),
+      hasWorkerSecret: Boolean(env.WORKER_SHARED_SECRET),
+      hasKnownEnvironment: isEnvName(environment),
+    });
+    return null;
+  }
+  const { db, cleanup } = createPerRequestDbClient(env);
+  try {
+    return await runFeeNoticesSweep({
+      db,
+      obs,
+      environment,
+      workerSecret: env.WORKER_SHARED_SECRET,
+      notificationsUrl: getServiceUrl('notifications', env),
+    });
+  } finally {
+    await cleanup().catch((error: unknown) => {
+      obs.warn('fee step: database cleanup failed', {
+        error: messageForLog(error),
+      });
+    });
+  }
+}

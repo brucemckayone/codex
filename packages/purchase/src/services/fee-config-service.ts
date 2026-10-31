@@ -1246,7 +1246,8 @@ async function insertVersion(
  * Void a waiting rise. Nobody still waits for it: its open notices become
  * `not_needed`. Unless a bigger rise replaces it (whose own announcement
  * says so), everyone already told about it is emailed that it's off (F2,
- * `fee-change-cancelled`, sent by the next daily run).
+ * `fee-change-cancelled`, sent by the next daily run). The cancelled notice
+ * keeps what they were told (roles, values, the date named) for its email.
  */
 async function voidPending(
   tx: Tx,
@@ -1270,8 +1271,8 @@ async function voidPending(
   if (reason === 'replaced_by_bigger') return;
   await tx.execute(sql`
     INSERT INTO ${feeChangeNotices}
-      (change_id, user_id, kind, on_list, roles, before_values, after_values, state)
-    SELECT change_id, user_id, 'cancelled', false, roles, before_values, after_values, 'due'
+      (change_id, user_id, kind, on_list, roles, before_values, after_values, quoted_from, state)
+    SELECT change_id, user_id, 'cancelled', false, roles, before_values, after_values, quoted_from, 'due'
     FROM ${feeChangeNotices}
     WHERE change_id = ${changeId}
       AND kind = 'announce'

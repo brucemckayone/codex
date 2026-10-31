@@ -29,6 +29,7 @@ import { ObservabilityClient } from '@codex/observability';
 import { workerFetch } from '@codex/security';
 import type { Bindings } from '@codex/shared-types';
 import { type EnvName, buildServiceUrl as getServiceUrl } from '@codex/urls';
+import { runScheduledFeeNoticesSweep } from './fee-notices-sweep';
 import { runScheduledMoneyNoticesSweep } from './money-notices-sweep';
 
 /**
@@ -383,8 +384,8 @@ async function runScheduledAgreementExpiringSweep(
  *
  * Routes cron invocations by `controller.cron` so this Worker can host
  * multiple schedules (today: just `0 8 * * *`, for the agreement-expiring
- * sweep and then the money sweep; the original weekly-digest stub is left in
- * place but currently unwired).
+ * sweep, then the money sweep, then the fee step; the original weekly-digest
+ * stub is left in place but currently unwired).
  *
  * Wraps the sweep in `waitUntil` with `.catch()` so a slow sweep doesn't
  * get killed mid-flight and an unexpected rejection doesn't crash the
@@ -419,6 +420,18 @@ export function dispatchScheduled(
         .then(() => runScheduledMoneyNoticesSweep(env))
         .catch((error: unknown) => {
           console.error('notifications-api money sweep rejected', error);
+        })
+        // The fee step (Codex-2hxff.33) runs last, on the same wake: a rise
+        // waits for it, so a failure here only moves a date later.
+        .then(() => runScheduledFeeNoticesSweep(env))
+        .catch((error: unknown) => {
+          new ObservabilityClient(
+            'notifications-api',
+            env.ENVIRONMENT ?? 'development'
+          ).error('notifications-api fee step rejected', {
+            errorId: crypto.randomUUID(),
+            error: error instanceof Error ? error.message : String(error),
+          });
         })
     );
     return;

@@ -511,6 +511,37 @@ export const agreementExpiringSoonDataSchema = z.object({
   expiryDate: z.string(),
 });
 
+/**
+ * A fee rise, announced (or made smaller) to a creator or organisation owner
+ * it pays less (Codex-2hxff.33). notifications-api's daily fee step composes
+ * every sentence (`fee-notice-copy.ts`): the renderer has no conditionals.
+ * `exampleLine` and `ruleSentence` are always sent, and may be empty (no £10
+ * example for a minimum-fee change; no "can move later" once dated).
+ */
+export const feeChangeNoticeDataSchema = z.object({
+  userName: z.string(),
+  subjectLine: z.string().min(1),
+  headline: z.string().min(1),
+  leadSentence: z.string().min(1),
+  /** One line per value that moves, newline-separated. */
+  changeLines: z.string().min(1),
+  /** The date the email names: the change's, or the earliest it can be. */
+  effectiveDate: z.string().min(1),
+  exampleLine: z.string(),
+  closingSentence: z.string().min(1),
+  ruleSentence: z.string(),
+  studioUrl: z.string().url(),
+  buttonLabel: z.string().min(1),
+});
+
+/** A waiting fee rise called off, to everyone told about it (F2). */
+export const feeChangeCancelledDataSchema = z.object({
+  userName: z.string(),
+  announcedOn: z.string().min(1),
+  changeSentence: z.string().min(1),
+  keptLines: z.string().min(1),
+});
+
 // ============================================
 // Template Data Schema Map (all 18 templates)
 // ============================================
@@ -557,6 +588,9 @@ export const templateDataSchemas = {
   // Removal from an organisation (Codex-2hxff.64)
   'removed-from-organisation': removedFromOrganisationDataSchema,
   'course-no-longer-offered': courseNoLongerOfferedDataSchema,
+  // Fee changes (Codex-2hxff.33)
+  'fee-change-notice': feeChangeNoticeDataSchema,
+  'fee-change-cancelled': feeChangeCancelledDataSchema,
 } as const;
 
 // Type for template data keys (enables compile-time checking)

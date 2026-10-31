@@ -199,3 +199,53 @@ SELECT b."id", 'creator', oc."platform_fee_percent", oc."org_fee_percent",
 FROM "backfilled" b
 JOIN "fee_config_org_creator" oc
   ON oc."organization_id" = b."organization_id" AND oc."creator_id" = b."creator_id";
+--> statement-breakpoint
+-- 4. SEED. The two fee templates, exactly as packages/database/scripts/
+--    seed-email-templates.ts has them (generated from it). The deploy's seed
+--    skips a template that exists, so this and the seed never both insert;
+--    a live global row of the same name is left alone.
+INSERT INTO "email_templates" ("name", "scope", "subject", "html_body", "text_body", "description", "status")
+SELECT $tpl$fee-change-notice$tpl$, 'global', $tpl${{subjectLine}}$tpl$,
+  $tpl$<!DOCTYPE html><html><head><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#333}.container{max-width:600px;margin:0 auto;padding:20px;border:1px solid #eee;border-radius:8px}.button{background-color:{{primaryColor}};color:white;padding:12px 24px;text-decoration:none;border-radius:4px;display:inline-block;font-weight:bold}.logo{max-height:40px;margin-bottom:20px}.footer{margin-top:30px;padding-top:20px;border-top:1px solid #eee;color:#666;font-size:12px}.details{background:#f9f9f9;padding:20px;border-radius:8px;margin:20px 0;border:1px solid #eee}</style></head><body><div class="container"><img src="{{logoUrl}}" alt="{{platformName}}" class="logo"/><h1>{{headline}}</h1><p>Hi {{userName}},</p><p>{{leadSentence}}</p><div class="details"><p style="margin:5px 0;white-space:pre-line;">{{changeLines}}</p><p style="margin:5px 0;"><strong>Applies to:</strong> sales from {{effectiveDate}}</p><p style="margin:5px 0;">{{exampleLine}}</p></div><p>{{closingSentence}}</p><p>{{ruleSentence}}</p><p style="text-align:center;margin:30px 0;"><a href="{{studioUrl}}" class="button" style="color:white;">{{buttonLabel}}</a></p><p style="color:#666;font-size:13px;">We email you at least 30 days before any of our fees rises. A cut applies straight away.</p><div class="footer"><p>{{platformName}} - <a href="mailto:{{supportEmail}}">{{supportEmail}}</a></p></div></div></body></html>$tpl$,
+  $tpl$Hi {{userName}},
+
+{{leadSentence}}
+
+{{changeLines}}
+Applies to: sales from {{effectiveDate}}
+{{exampleLine}}
+
+{{closingSentence}}
+
+{{ruleSentence}}
+
+{{buttonLabel}}: {{studioUrl}}
+
+We email you at least 30 days before any of our fees rises. A cut applies straight away.
+
+{{platformName}}$tpl$,
+  $tpl$Sent once to each creator and organisation owner a fee rise pays less, from the daily 08:00 run, and to anyone who joins while it waits; also as the short "the rise is smaller" email (Codex-2hxff.33, F3, F6, F8, Q1, Q2). It names the earliest date the rise can start.$tpl$,
+  'active'
+WHERE NOT EXISTS (
+  SELECT 1 FROM "email_templates"
+  WHERE "name" = $tpl$fee-change-notice$tpl$ AND "scope" = 'global' AND "deleted_at" IS NULL
+);
+--> statement-breakpoint
+INSERT INTO "email_templates" ("name", "scope", "subject", "html_body", "text_body", "description", "status")
+SELECT $tpl$fee-change-cancelled$tpl$, 'global', $tpl$The fee rise we told you about is cancelled$tpl$,
+  $tpl$<!DOCTYPE html><html><head><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#333}.container{max-width:600px;margin:0 auto;padding:20px;border:1px solid #eee;border-radius:8px}.logo{max-height:40px;margin-bottom:20px}.footer{margin-top:30px;padding-top:20px;border-top:1px solid #eee;color:#666;font-size:12px}.details{background:#f0fdf4;padding:20px;border-radius:8px;margin:20px 0;border:1px solid #bbf7d0}</style></head><body><div class="container"><img src="{{logoUrl}}" alt="{{platformName}}" class="logo"/><h1>That fee rise is off</h1><p>Hi {{userName}},</p><p>On {{announcedOn}} we told you {{changeSentence}}</p><div class="details"><p style="margin:5px 0;white-space:pre-line;">{{keptLines}}</p></div><p>Nothing else changes, and you don’t need to do anything.</p><div class="footer"><p>{{platformName}} - <a href="mailto:{{supportEmail}}">{{supportEmail}}</a></p></div></div></body></html>$tpl$,
+  $tpl$Hi {{userName}},
+
+On {{announcedOn}} we told you {{changeSentence}}
+
+{{keptLines}}
+
+Nothing else changes, and you don’t need to do anything.
+
+{{platformName}}$tpl$,
+  $tpl$Sent to everyone told about a waiting fee rise (by email or by support) when it is cancelled, or replaced by a cut below today’s fee (Codex-2hxff.33, F2).$tpl$,
+  'active'
+WHERE NOT EXISTS (
+  SELECT 1 FROM "email_templates"
+  WHERE "name" = $tpl$fee-change-cancelled$tpl$ AND "scope" = 'global' AND "deleted_at" IS NULL
+);

@@ -67,10 +67,10 @@ const CREATOR_VALUES: ReadonlyArray<keyof FeeValues> = [
   'minTransferCents',
 ];
 /**
- * An owner is paid the organisation's share, so an organisation fee rise
- * pays them MORE: only Codex's fee, its minimum and the minimum transfer can
- * pay them less. Under a creator's own override the minimum transfer is that
- * creator's, not the owner's.
+ * An owner is paid the organisation's share (and, on their own content, the
+ * creator's too), so an organisation fee rise never pays them less: only
+ * Codex's fee, its minimum and the minimum transfer can. Under a creator's
+ * own override the minimum transfer is that creator's, not the owner's.
  */
 const OWNER_VALUES: ReadonlyArray<keyof FeeValues> = [
   'platformFeePercent',
@@ -124,9 +124,9 @@ async function liveVersionOf(
 
 /**
  * Everyone whose take on a sale falls under `change` (F3), with their fees
- * before and after per role. It covers every active owner, admin and creator
- * of the organisations in the change's reach (each can be paid a creator
- * share), every organisation owner, and, for a platform change, every
+ * before and after per role. It covers every active admin and creator of the
+ * organisations in the change's reach (each can be paid a creator share),
+ * every organisation owner (as the owner), and, for a platform change, every
  * creator account for their sales with no organisation. A person shielded by
  * their own organisation or creator setting resolves to the same fee before
  * and after, so they are skipped; so is an owner when only the organisation
@@ -252,9 +252,13 @@ export async function affectedPayees(
 
   for (const member of members) {
     const orgId = member.organizationId;
-    const isTheCreator =
-      change.scope !== 'creator' || member.userId === change.creatorId;
-    if (isTheCreator) {
+    // An owner is weighed once, as the owner: the organisation fee only
+    // moves their own money from one hat to the other, so an org fee rise
+    // never pays them less (F3).
+    const asCreator =
+      member.role !== 'owner' &&
+      (change.scope !== 'creator' || member.userId === change.creatorId);
+    if (asCreator) {
       const before = layerLevelFees(
         platformNow,
         orgNow(orgId),

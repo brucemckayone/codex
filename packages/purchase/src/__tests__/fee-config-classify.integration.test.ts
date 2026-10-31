@@ -90,6 +90,7 @@ describe('FeeConfigService — classifying a write (real DB)', () => {
         state: 'sent',
         acceptedAt: new Date(),
         attempts: 1,
+        quotedFrom: '2026-12-04',
       },
       {
         changeId,
@@ -113,6 +114,7 @@ describe('FeeConfigService — classifying a write (real DB)', () => {
         kind: feeChangeNotices.kind,
         state: feeChangeNotices.state,
         onList: feeChangeNotices.onList,
+        quotedFrom: feeChangeNotices.quotedFrom,
       })
       .from(feeChangeNotices)
       .where(eq(feeChangeNotices.changeId, changeId));
@@ -378,6 +380,10 @@ describe('FeeConfigService — classifying a write (real DB)', () => {
     expect(
       notices.filter((n) => n.kind === 'cancelled').map((n) => n.userId)
     ).toEqual([toldId]);
+    // Its email names the date they were told.
+    expect(notices.find((n) => n.kind === 'cancelled')?.quotedFrom).toBe(
+      '2026-12-04'
+    );
     expect(
       notices.find((n) => n.userId === untoldId && n.kind === 'announce')?.state
     ).toBe('not_needed');
