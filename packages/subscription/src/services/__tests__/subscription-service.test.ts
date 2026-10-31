@@ -5850,6 +5850,50 @@ describe('SubscriptionService', () => {
       expect(result?.userId).toBeUndefined();
       expect(result?.orgId).toBeUndefined();
     });
+
+    // Owner Q5 (Codex-2hxff.16, 2026-10-30): the payment-failed email names
+    // the next retry. After Stripe's LAST one there is none, Stripe ends the
+    // subscription, and the cancellation email follows instead.
+    it.each([
+      ['a retry is scheduled', 1_793_000_000, true],
+      ['no retry is left', null, false],
+    ] as const)('payment-failed email only while a retry is left (Q5): %s', async (_, nextAttempt, emailed) => {
+      const { org, tier1 } = await createFullOrg(
+        `invoice-failed-q5-${emailed ? 'retry' : 'last'}`
+      );
+      const sub = takeFirst(
+        await db
+          .insert(subscriptions)
+          .values(createTestSubscriptionInput(otherCreatorId, org.id, tier1.id))
+          .returning()
+      );
+      const mockInvoice = createMockStripeInvoice({
+        amount_due: 499,
+        customer_email: 'q5@example.com',
+        customer_name: 'Q Five',
+        next_payment_attempt: nextAttempt,
+        parent: {
+          subscription_details: { subscription: sub.stripeSubscriptionId },
+        },
+      }) as unknown as Stripe.Invoice;
+
+      const result = await service.handleInvoicePaymentFailed(mockInvoice);
+
+      // The status and the cache bump happen either way.
+      expect(result?.userId).toBe(otherCreatorId);
+      if (emailed) {
+        expect(result?.email).toMatchObject({
+          templateName: 'payment-failed',
+          data: {
+            retryDate: new Date(1_793_000_000 * 1000).toLocaleDateString(
+              'en-GB'
+            ),
+          },
+        });
+      } else {
+        expect(result?.email).toBeUndefined();
+      }
+    });
   });
 
   // ─── Webhook ordering self-heal (Codex-t7psp) ─────────────────────
