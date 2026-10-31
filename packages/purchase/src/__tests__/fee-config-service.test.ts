@@ -1,265 +1,174 @@
 /**
- * FeeConfigService unit tests (Codex-m644n)
- *
- * Focus: fallback chain (override → org → platform → constants) and floor
- * helpers. Mocked DB / mocked cache — DB integration coverage lives in the
- * subscription-service + purchase-service integration suites that wire the
- * real service end-to-end.
+ * FeeConfigService without a database (Codex-m644n; dated versions
+ * Codex-2hxff.33): input validation, and how the read side goes through the
+ * cache. The layering itself is `@codex/payments`' (fee-versions.test.ts);
+ * the writes, which are one transaction each, are tested on a real database
+ * (fee-config-service-writes and fee-config-classify integration suites).
  */
 
 import type { VersionedCache } from '@codex/cache';
-import { FEES } from '@codex/constants';
-import {
-  feeConfigOrg,
-  feeConfigOrgCreator,
-  feeConfigPlatform,
-} from '@codex/database/schema';
+import { CacheType } from '@codex/cache';
+import type { FeeVersionList } from '@codex/payments';
+import { ValidationError } from '@codex/service-errors';
 import { describe, expect, it, vi } from 'vitest';
 import { FeeConfigService } from '../services/fee-config-service';
 
-/**
- * Build a minimal mock DB that resolves each `select().from(table)` call by
- * comparing the table reference itself (identity check) against the drizzle
- * schema objects. Returns one-row arrays for fixtures or empty arrays for
- * missing tiers.
- */
-function buildMockDb(fixtures: {
-  platform?: Record<string, unknown> | null;
-  org?: Record<string, unknown> | null;
-  override?: Record<string, unknown> | null;
-}) {
-  const select = vi.fn(() => ({
-    from: vi.fn((table: unknown) => {
-      let rows: unknown[] = [];
-      if (table === feeConfigPlatform && fixtures.platform) {
-        rows = [fixtures.platform];
-      } else if (table === feeConfigOrg && fixtures.org) {
-        rows = [fixtures.org];
-      } else if (table === feeConfigOrgCreator && fixtures.override) {
-        rows = [fixtures.override];
-      }
-      // Recursive chain that supports .where().limit() and .orderBy() patterns.
-      // `.limit()` is the only terminal — the service always uses .limit(1) on
-      // single-row reads. listCreatorOverrides goes through .orderBy() which
-      // returns the chain for tests but is not exercised by the unit suite.
-      const chain: Record<string, unknown> = {};
-      chain.where = vi.fn(() => chain);
-      chain.limit = vi.fn(async () => rows);
-      chain.orderBy = vi.fn(() => chain);
-      return chain;
-    }),
-  }));
-  return { select };
+/** A db that fails the test if anything touches it. */
+const untouchable = new Proxy(
+  {},
+  {
+    get(_target, prop) {
+      throw new Error(`the database was touched (${String(prop)})`);
+    },
+  }
+) as never;
+
+function cacheOf(lists: Record<string, FeeVersionList>) {
+  const get = vi.fn(
+    async (
+      id: string,
+      _type: string,
+      _fetcher: () => Promise<unknown>,
+      _options?: { ttl?: (list: FeeVersionList) => number }
+    ) => lists[id] ?? { versions: [], waiting: false }
+  );
+  return { get, cache: { get } as unknown as VersionedCache };
 }
 
-describe('FeeConfigService — fallback chain', () => {
-  it('returns code constants when no rows exist at any tier (subscription)', async () => {
-    const svc = new FeeConfigService({
-      db: buildMockDb({}) as never,
-      environment: 'test',
-    });
-    const fees = await svc.getFeesForCreator(
-      '00000000-0000-0000-0000-000000000001',
-      'user-1',
-      'subscription'
-    );
-    expect(fees.platformFeePercent).toBe(FEES.PLATFORM_PERCENT);
-    expect(fees.orgFeePercent).toBe(FEES.SUBSCRIPTION_ORG_PERCENT);
-    // The minimum platform fee applies with no row (owner decision 2026-10-13).
-    expect(fees.minPlatformFeeCents).toBe(25);
-    expect(fees.minPlatformFeeCents).toBe(FEES.MIN_PLATFORM_FEE_CENTS);
-    expect(fees.minTransferCents).toBe(0);
-  });
-
-  it('returns code constants when no rows exist at any tier (one_off)', async () => {
-    const svc = new FeeConfigService({
-      db: buildMockDb({}) as never,
-      environment: 'test',
-    });
-    const fees = await svc.getFeesForCreator(
-      '00000000-0000-0000-0000-000000000001',
-      'user-1',
-      'one_off'
-    );
-    expect(fees.platformFeePercent).toBe(FEES.PLATFORM_PERCENT);
-    expect(fees.orgFeePercent).toBe(FEES.ORG_PERCENT);
-    expect(fees.minPlatformFeeCents).toBe(FEES.MIN_PLATFORM_FEE_CENTS);
-  });
-
-  it('uses platform row when no org/override exists', async () => {
-    const svc = new FeeConfigService({
-      db: buildMockDb({
-        platform: {
-          platformFeePercent: 1200,
-          subscriptionOrgFeePercent: 2000,
-          oneOffOrgFeePercent: 500,
-          minPlatformFeeCents: 50,
-          minTransferCents: 1000,
-        },
-      }) as never,
-      environment: 'test',
-    });
-    const subs = await svc.getFeesForCreator('o1', 'u1', 'subscription');
-    expect(subs.platformFeePercent).toBe(1200);
-    expect(subs.orgFeePercent).toBe(2000);
-    expect(subs.minPlatformFeeCents).toBe(50);
-    expect(subs.minTransferCents).toBe(1000);
-
-    const oneOff = await svc.getFeesForCreator('o1', 'u1', 'one_off');
-    expect(oneOff.orgFeePercent).toBe(500);
-  });
-
-  it('layers org row over platform (org cols override only where non-null)', async () => {
-    const svc = new FeeConfigService({
-      db: buildMockDb({
-        platform: {
-          platformFeePercent: 1000,
-          subscriptionOrgFeePercent: 1500,
-          oneOffOrgFeePercent: 0,
-          minPlatformFeeCents: 0,
-          minTransferCents: 0,
-        },
-        org: {
-          platformFeePercent: null,
-          orgFeePercent: 2500,
-          minPlatformFeeCents: null,
-          minTransferCents: null,
-        },
-      }) as never,
-      environment: 'test',
-    });
-    const fees = await svc.getFeesForCreator('o1', 'u1', 'subscription');
-    expect(fees.platformFeePercent).toBe(1000);
-    expect(fees.orgFeePercent).toBe(2500);
-    expect(fees.minPlatformFeeCents).toBe(0);
-  });
-
-  it('layers creator-override on top of org and platform', async () => {
-    const svc = new FeeConfigService({
-      db: buildMockDb({
-        platform: {
-          platformFeePercent: 1000,
-          subscriptionOrgFeePercent: 1500,
-          oneOffOrgFeePercent: 0,
-          minPlatformFeeCents: 0,
-          minTransferCents: 0,
-        },
-        org: {
-          platformFeePercent: null,
-          orgFeePercent: 2500,
-          minPlatformFeeCents: null,
-          minTransferCents: 5000,
-        },
-        override: {
-          platformFeePercent: null,
-          orgFeePercent: 0,
-          minPlatformFeeCents: null,
-          minTransferCents: null,
-        },
-      }) as never,
-      environment: 'test',
-    });
-    const fees = await svc.getFeesForCreator('o1', 'u1', 'subscription');
-    expect(fees.platformFeePercent).toBe(1000);
-    expect(fees.orgFeePercent).toBe(0);
-    expect(fees.minTransferCents).toBe(5000);
-  });
-
-  it('getFeesForOrg ignores override row entirely', async () => {
-    const svc = new FeeConfigService({
-      db: buildMockDb({
-        platform: {
-          platformFeePercent: 1000,
-          subscriptionOrgFeePercent: 1500,
-          oneOffOrgFeePercent: 0,
-          minPlatformFeeCents: 0,
-          minTransferCents: 0,
-        },
-        org: {
-          platformFeePercent: null,
-          orgFeePercent: 2000,
-          minPlatformFeeCents: null,
-          minTransferCents: null,
-        },
-        override: {
-          orgFeePercent: 0,
-        },
-      }) as never,
-      environment: 'test',
-    });
-    const fees = await svc.getFeesForOrg('o1', 'subscription');
-    expect(fees.orgFeePercent).toBe(2000);
-  });
-
-  it('getFeesPlatform returns platform row only (no org/override consulted)', async () => {
-    const svc = new FeeConfigService({
-      db: buildMockDb({
-        platform: {
-          platformFeePercent: 800,
-          subscriptionOrgFeePercent: 1200,
-          oneOffOrgFeePercent: 100,
-          minPlatformFeeCents: 25,
-          minTransferCents: 200,
-        },
-        org: { orgFeePercent: 9999 },
-        override: { orgFeePercent: 9999 },
-      }) as never,
-      environment: 'test',
-    });
-    const subs = await svc.getFeesPlatform('subscription');
-    expect(subs.orgFeePercent).toBe(1200);
-    expect(subs.minPlatformFeeCents).toBe(25);
-  });
-
-  it('falls back to constants when platform row is missing (fresh install)', async () => {
-    const svc = new FeeConfigService({
-      db: buildMockDb({
-        org: {
-          platformFeePercent: null,
-          orgFeePercent: 2000,
-          minPlatformFeeCents: null,
-          minTransferCents: null,
-        },
-      }) as never,
-      environment: 'test',
-    });
-    const fees = await svc.getFeesForCreator('o1', 'u1', 'subscription');
-    expect(fees.platformFeePercent).toBe(FEES.PLATFORM_PERCENT);
-    expect(fees.orgFeePercent).toBe(2000);
-  });
+const EPOCH = '1970-01-01T00:00:00.000Z';
+const version = (values: Record<string, number | null>, from = EPOCH) => ({
+  changeId: crypto.randomUUID(),
+  effectiveFrom: from,
+  platformFeePercent: null,
+  oneOffOrgFeePercent: null,
+  subscriptionOrgFeePercent: null,
+  orgFeePercent: null,
+  minPlatformFeeCents: null,
+  minTransferCents: null,
+  ...values,
 });
 
-describe('FeeConfigService — cache integration', () => {
-  it('consults VersionedCache when injected', async () => {
-    const cacheGet = vi.fn(
-      async <T>(_id: string, _type: string, fetcher: () => Promise<T>) =>
-        fetcher()
-    );
-    const cache = {
-      get: cacheGet,
-      invalidate: vi.fn(async () => undefined),
-    } as unknown as VersionedCache;
-
+describe('FeeConfigService — reads go through the version cache', () => {
+  it('reads each level under its FEE_VERSIONS_* type and id', async () => {
+    const { get, cache } = cacheOf({});
     const svc = new FeeConfigService({
-      db: buildMockDb({
-        platform: {
-          platformFeePercent: 1100,
-          subscriptionOrgFeePercent: 1600,
-          oneOffOrgFeePercent: 0,
-          minPlatformFeeCents: 0,
-          minTransferCents: 0,
-        },
-      }) as never,
+      db: untouchable,
       environment: 'test',
       cache,
     });
 
-    await svc.getFeesForCreator('o1', 'u1', 'subscription');
+    await svc.getFeesForCreator('org-1', 'cr-1', 'one_off');
 
-    expect(cacheGet).toHaveBeenCalledTimes(3);
-    const ids = cacheGet.mock.calls.map((c) => c[0]);
-    expect(ids).toContain('platform');
-    expect(ids).toContain('org:o1');
-    expect(ids).toContain('override:o1:u1');
+    expect(get.mock.calls.map(([id, type]) => [id, type])).toEqual([
+      ['platform', CacheType.FEE_VERSIONS_PLATFORM],
+      ['org:org-1', CacheType.FEE_VERSIONS_ORG],
+      ['override:org-1:cr-1', CacheType.FEE_VERSIONS_OVERRIDE],
+    ]);
+  });
+
+  it('getFeesForOrg reads no override, getFeesPlatform only the platform', async () => {
+    const { get, cache } = cacheOf({});
+    const svc = new FeeConfigService({
+      db: untouchable,
+      environment: 'test',
+      cache,
+    });
+
+    await svc.getFeesForOrg('org-1', 'subscription');
+    expect(get.mock.calls.map(([id]) => id)).toEqual(['platform', 'org:org-1']);
+    get.mockClear();
+    await svc.getFeesPlatform('one_off');
+    expect(get.mock.calls.map(([id]) => id)).toEqual(['platform']);
+  });
+
+  it('caches a level for a day, or an hour while a rise there waits', async () => {
+    const { get, cache } = cacheOf({});
+    const svc = new FeeConfigService({
+      db: untouchable,
+      environment: 'test',
+      cache,
+    });
+    await svc.getFeesPlatform('one_off');
+    const ttl = get.mock.calls[0]?.[3]?.ttl;
+    expect(ttl?.({ versions: [], waiting: false })).toBe(24 * 60 * 60);
+    expect(ttl?.({ versions: [], waiting: true })).toBe(60 * 60);
+  });
+
+  it('resolves the version in force at the given `at`, defaulting to now', async () => {
+    const { cache } = cacheOf({
+      platform: {
+        waiting: false,
+        versions: [
+          version(
+            {
+              platformFeePercent: 1200,
+              oneOffOrgFeePercent: 1000,
+              subscriptionOrgFeePercent: 1500,
+              minPlatformFeeCents: 25,
+              minTransferCents: 0,
+            },
+            '2026-06-01T00:00:00.000Z'
+          ),
+          version({
+            platformFeePercent: 1000,
+            oneOffOrgFeePercent: 1000,
+            subscriptionOrgFeePercent: 1500,
+            minPlatformFeeCents: 25,
+            minTransferCents: 0,
+          }),
+        ],
+      },
+      'org:org-1': {
+        waiting: false,
+        versions: [version({ orgFeePercent: 500 })],
+      },
+    });
+    const svc = new FeeConfigService({
+      db: untouchable,
+      environment: 'test',
+      cache,
+    });
+
+    const before = await svc.getFeesForOrg(
+      'org-1',
+      'one_off',
+      new Date('2026-05-31T23:59:59Z')
+    );
+    const now = await svc.getFeesForOrg('org-1', 'one_off');
+    expect(before).toEqual({
+      platformFeePercent: 1000,
+      orgFeePercent: 500,
+      minPlatformFeeCents: 25,
+      minTransferCents: 0,
+    });
+    expect(now.platformFeePercent).toBe(1200);
+    expect(now.orgFeePercent).toBe(500);
+  });
+});
+
+describe('FeeConfigService — input guards reject before the database', () => {
+  const svc = new FeeConfigService({ db: untouchable, environment: 'test' });
+
+  it('rejects negative basis points', async () => {
+    await expect(
+      svc.updatePlatformFees({ platformFeePercent: -1 }, 'admin')
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  it('rejects basis points over 10000', async () => {
+    await expect(
+      svc.updateOrgFees('org-1', { orgFeePercent: 10001 }, 'admin')
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  it('rejects a negative floor', async () => {
+    await expect(
+      svc.upsertCreatorOverride(
+        'org-1',
+        'cr-1',
+        { minPlatformFeeCents: -5 },
+        'admin'
+      )
+    ).rejects.toBeInstanceOf(ValidationError);
   });
 });

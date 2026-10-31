@@ -66,6 +66,10 @@ export type {
   CreditState,
   FailedRefundItem,
   FailedRefundResolution,
+  FeeChangeCard,
+  FeeChangeLine,
+  FeeNoticeItem,
+  FeeToldAnotherWay,
   HistoryCredit,
   HistoryLine,
   HistoryOutcome,
@@ -91,6 +95,7 @@ export type {
   SupportRefundResult,
   SupportRefundWindow,
   SystemDecision,
+  ToldAnotherWayResult,
 } from './support-types';
 export type {
   ActivityFeedItem,

@@ -1,38 +1,28 @@
 /**
- * FeeConfigService write-path real-DB integration tests (Codex-9iapw).
+ * FeeConfigService write-path real-DB integration tests (Codex-9iapw;
+ * dated versions Codex-2hxff.33).
  *
- * Companion to `fee-config-service-writes.test.ts` (25 unit-mocked cases).
- * Those tests assert Drizzle was called with the right fragments; this file
- * proves the fragments produce the right result against a real Postgres
- * (via `setupTestDatabase()` + `dbWs`).
+ * The mechanics of one write, on cuts (a cut applies at once, so its effects
+ * are visible straight away; rises and edits to them are in
+ * fee-config-classify.integration.test.ts):
  *
- * Gaps closed vs the unit suite:
- *
- *   1. Atomic version bump: real SQL `version + 1` executes (assert row's
- *      version column actually increments — unit mocks only assert the SQL
- *      object identity).
+ *   1. The old "current row" tables are kept in step with the values in
+ *      force (data design §6.1 Migrate): each write upserts the row and bumps
+ *      its `version` by real SQL `version + 1`.
  *   2. Audit-log precision: every changed column produces exactly one audit
- *      row (assert `=== n`, not `>= n`); no-op writes produce zero.
- *   3. Cache invalidation observability: with a real `VersionedCache` over a
- *      mock KV, the version key is bumped AFTER the DB write commits
- *      (re-reading after the bump produces the new value).
+ *      row, naming its change; a no-op writes nothing at all.
+ *   3. Cache invalidation: with a real `VersionedCache` over a mock KV, the
+ *      level's version key is bumped after the write commits.
  *
- * NOT covered (and intentionally so):
- *
- *   - Transactional rollback. The current implementation does NOT wrap
- *     upsert + audit-log insert + cache.invalidate in `db.transaction()` —
- *     so there is no atomicity contract to lock in. This was flagged as a
- *     real production gap during this bead and filed as Codex-rtwpv. When
- *     that bug is fixed, this file should grow a scenario that forces an
- *     audit-log FK violation and asserts the upsert rolls back.
- *
- * Parent epic: Codex-hu4ou. Sibling unit suite:
- *   packages/purchase/src/__tests__/fee-config-service-writes.test.ts
+ * Each case starts from a known in-force state seeded with `seedFeeLevel`
+ * (a dated cut, as migration 0123's backfill writes), never from an earlier
+ * write: raising a fee through the service is a rise, which waits.
  */
 
 import type { KVNamespace } from '@cloudflare/workers-types';
 import { VersionedCache } from '@codex/cache';
 import {
+  feeChanges,
   feeConfigAuditLog,
   feeConfigOrg,
   feeConfigOrgCreator,
@@ -42,21 +32,14 @@ import {
   createMockKVNamespace,
   createUniqueSlug,
   type Database,
+  seedFeeLevel,
   seedTestUsers,
   setupTestDatabase,
   teardownTestDatabase,
 } from '@codex/test-utils';
 import { and, eq } from 'drizzle-orm';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { FeeConfigService } from '../services/fee-config-service';
-
-/**
- * KV mock comes from the shared `@codex/test-utils` helper
- * (`createMockKVNamespace`). Its `put`/`get`/`delete` are `vi.fn()` spies
- * we can introspect with `.mock.calls`, and `_storage` is the in-memory
- * Map backing the spied methods. This replaces an earlier hand-rolled
- * mock that drifted from the shared signature.
- */
 
 describe('FeeConfigService — real-DB write integration', () => {
   let db: Database;
@@ -64,14 +47,36 @@ describe('FeeConfigService — real-DB write integration', () => {
   let creatorId: string;
   let organizationId: string;
 
+  async function resetOrg() {
+    await db
+      .delete(feeChanges)
+      .where(eq(feeChanges.organizationId, organizationId));
+    await db
+      .delete(feeConfigOrgCreator)
+      .where(eq(feeConfigOrgCreator.organizationId, organizationId));
+    await db
+      .delete(feeConfigOrg)
+      .where(eq(feeConfigOrg.organizationId, organizationId));
+    await db
+      .delete(feeConfigAuditLog)
+      .where(eq(feeConfigAuditLog.scopeOrgId, organizationId));
+  }
+
+  async function orgRow() {
+    const [row] = await db
+      .select()
+      .from(feeConfigOrg)
+      .where(eq(feeConfigOrg.organizationId, organizationId))
+      .limit(1);
+    return row;
+  }
+
   beforeAll(async () => {
     db = setupTestDatabase();
-
     // seedTestUsers returns user IDs usable as `changedBy` (FK to users.id
     // with onDelete: 'restrict' in fee_config_audit_log).
     const userIds = await seedTestUsers(db, 2);
     [adminId, creatorId] = userIds as [string, string];
-
     const [org] = await db
       .insert(organizations)
       .values({
@@ -83,94 +88,64 @@ describe('FeeConfigService — real-DB write integration', () => {
     organizationId = org.id;
   });
 
+  beforeEach(resetOrg);
+
   afterAll(async () => {
-    // Tests for this bead all mutate per-org/per-creator rows; the schema
-    // ON DELETE CASCADE on organizationId is enough for the org/override
-    // rows. The singleton platform row is shared with other suites — DO NOT
-    // wipe it. teardownTestDatabase closes the pool.
-    await db
-      .delete(feeConfigOrgCreator)
-      .where(eq(feeConfigOrgCreator.organizationId, organizationId));
-    await db
-      .delete(feeConfigOrg)
-      .where(eq(feeConfigOrg.organizationId, organizationId));
-    await db
-      .delete(feeConfigAuditLog)
-      .where(eq(feeConfigAuditLog.scopeOrgId, organizationId));
+    // The org's changes, versions and current rows go with it; the platform
+    // level is shared with other suites, and nothing here touches it.
+    await resetOrg();
+    await db.delete(organizations).where(eq(organizations.id, organizationId));
     await teardownTestDatabase();
   });
 
-  // ── Scenario 1: atomic version bump ───────────────────────────────────────
+  // ── Scenario 1: the current row mirrors the values in force ───────────────
 
-  describe('atomic version bump (real SQL `version + 1`)', () => {
-    it('updateOrgFees: first write sets version=1, second write increments to 2', async () => {
-      // Clean slate for this org row before this test owns it.
-      await db
-        .delete(feeConfigOrg)
-        .where(eq(feeConfigOrg.organizationId, organizationId));
-
+  describe('the old current row follows each cut (real SQL `version + 1`)', () => {
+    it('updateOrgFees: first cut writes version 1 with the new value, the next bumps it to 2', async () => {
+      await seedFeeLevel(
+        db,
+        { scope: 'org', organizationId },
+        { orgFeePercent: 2000 }
+      );
       const svc = new FeeConfigService({ db, environment: 'test' });
 
-      // First write — insert path of upsert. Schema default for `version` is 1.
-      await svc.updateOrgFees(organizationId, { orgFeePercent: 1500 }, adminId);
-      const [afterFirst] = await db
-        .select()
-        .from(feeConfigOrg)
-        .where(eq(feeConfigOrg.organizationId, organizationId))
-        .limit(1);
-      expect(afterFirst).toBeDefined();
-      expect(afterFirst?.version).toBe(1);
-      expect(afterFirst?.orgFeePercent).toBe(1500);
-
-      // Second write changes a different column — must hit the
-      // onConflictDoUpdate branch where `version: sql\`version + 1\`` is in
-      // play. If the SQL fragment were wrong (e.g. plain `1`), version would
-      // stay at 1; if it double-incremented, it would jump to 3.
-      await svc.updateOrgFees(
+      const first = await svc.updateOrgFees(
         organizationId,
+        { orgFeePercent: 1800 },
+        adminId
+      );
+      expect(first.outcome).toBe('cut');
+      const afterFirst = await orgRow();
+      expect(afterFirst?.version).toBe(1);
+      expect(afterFirst?.orgFeePercent).toBe(1800);
+
+      await svc.updateOrgFees(organizationId, { orgFeePercent: 1500 }, adminId);
+      const afterSecond = await orgRow();
+      expect(afterSecond?.version).toBe(2);
+      expect(afterSecond?.orgFeePercent).toBe(1500);
+    });
+
+    it('upsertCreatorOverride: the version increments by exactly 1 per real write', async () => {
+      await seedFeeLevel(
+        db,
+        { scope: 'creator', organizationId, creatorId },
+        { platformFeePercent: 1500, orgFeePercent: 0 }
+      );
+      const svc = new FeeConfigService({ db, environment: 'test' });
+
+      await svc.upsertCreatorOverride(
+        organizationId,
+        creatorId,
+        { platformFeePercent: 1200 },
+        adminId
+      );
+      await svc.upsertCreatorOverride(
+        organizationId,
+        creatorId,
         { platformFeePercent: 1100 },
         adminId
       );
-      const [afterSecond] = await db
-        .select()
-        .from(feeConfigOrg)
-        .where(eq(feeConfigOrg.organizationId, organizationId))
-        .limit(1);
-      expect(afterSecond?.version).toBe(2);
-      expect(afterSecond?.platformFeePercent).toBe(1100);
-      // Untouched columns preserved by the merge step.
-      expect(afterSecond?.orgFeePercent).toBe(1500);
-
-      // Third write — single increment, locks the "exactly +1" contract.
-      await svc.updateOrgFees(organizationId, { orgFeePercent: 1600 }, adminId);
-      const [afterThird] = await db
-        .select()
-        .from(feeConfigOrg)
-        .where(eq(feeConfigOrg.organizationId, organizationId))
-        .limit(1);
-      expect(afterThird?.version).toBe(3);
-    });
-
-    it('upsertCreatorOverride: version increments by exactly 1 per real write', async () => {
-      // Ensure clean override row.
-      await db
-        .delete(feeConfigOrgCreator)
-        .where(
-          and(
-            eq(feeConfigOrgCreator.organizationId, organizationId),
-            eq(feeConfigOrgCreator.creatorId, creatorId)
-          )
-        );
-
-      const svc = new FeeConfigService({ db, environment: 'test' });
-
-      await svc.upsertCreatorOverride(
-        organizationId,
-        creatorId,
-        { orgFeePercent: 0, notes: 'launch partner' },
-        adminId
-      );
-      const [r1] = await db
+      const [row] = await db
         .select()
         .from(feeConfigOrgCreator)
         .where(
@@ -180,215 +155,155 @@ describe('FeeConfigService — real-DB write integration', () => {
           )
         )
         .limit(1);
-      expect(r1?.version).toBe(1);
-
-      await svc.upsertCreatorOverride(
-        organizationId,
-        creatorId,
-        { notes: 'launch partner renewed' },
-        adminId
-      );
-      const [r2] = await db
-        .select()
-        .from(feeConfigOrgCreator)
-        .where(
-          and(
-            eq(feeConfigOrgCreator.organizationId, organizationId),
-            eq(feeConfigOrgCreator.creatorId, creatorId)
-          )
-        )
-        .limit(1);
-      expect(r2?.version).toBe(2);
-      // orgFeePercent preserved across the version bump.
-      expect(r2?.orgFeePercent).toBe(0);
+      expect(row?.version).toBe(2);
+      expect(row?.platformFeePercent).toBe(1100);
+      // orgFeePercent preserved from the version in force.
+      expect(row?.orgFeePercent).toBe(0);
     });
   });
 
   // ── Scenario 2: audit-log precision ───────────────────────────────────────
 
   describe('audit-log precision (exactly one row per changed column)', () => {
-    it('updateOrgFees changing 3 columns writes exactly 3 audit rows', async () => {
-      // Reset the org row so the diff is deterministic.
-      await db
-        .delete(feeConfigOrg)
-        .where(eq(feeConfigOrg.organizationId, organizationId));
-      await db
-        .delete(feeConfigAuditLog)
-        .where(eq(feeConfigAuditLog.scopeOrgId, organizationId));
-
-      // Seed an initial row so subsequent writes hit the update path.
-      const svc = new FeeConfigService({ db, environment: 'test' });
-      await svc.updateOrgFees(
-        organizationId,
+    it('a cut changing 3 of 4 columns writes exactly 3 audit rows, each naming the change', async () => {
+      await seedFeeLevel(
+        db,
+        { scope: 'org', organizationId },
         {
-          platformFeePercent: 1000,
-          orgFeePercent: 1500,
-          minPlatformFeeCents: 50,
+          platformFeePercent: 1500,
+          orgFeePercent: 2000,
+          minPlatformFeeCents: 75,
           minTransferCents: 100,
-        },
-        adminId
+        }
       );
-      // After seed: 4 columns changed from "no row" → null-old/value-new.
-      const seedAudit = await db
-        .select()
-        .from(feeConfigAuditLog)
-        .where(eq(feeConfigAuditLog.scopeOrgId, organizationId));
-      expect(seedAudit.length).toBe(4);
-
-      // Wipe audit log to isolate the next assertion.
-      await db
-        .delete(feeConfigAuditLog)
-        .where(eq(feeConfigAuditLog.scopeOrgId, organizationId));
-
-      // Change exactly 3 of the 4 columns; leave minTransferCents unchanged.
-      await svc.updateOrgFees(
+      const svc = new FeeConfigService({ db, environment: 'test' });
+      const result = await svc.updateOrgFees(
         organizationId,
         {
           platformFeePercent: 1200,
           orgFeePercent: 1800,
-          minPlatformFeeCents: 75,
-          minTransferCents: 100, // same as existing — must be skipped
+          minPlatformFeeCents: 50,
+          minTransferCents: 100, // same as in force — must be skipped
         },
         adminId
       );
+      expect(result.outcome).toBe('cut');
 
       const auditRows = await db
         .select()
         .from(feeConfigAuditLog)
         .where(eq(feeConfigAuditLog.scopeOrgId, organizationId));
-
-      // Tripwire: exact === 3. If the no-op skip in diffUpdate() regresses
-      // (e.g. someone removes the `String(old) === String(value)` guard),
-      // this becomes 4 and fails.
+      // Exact: a regressed no-op skip makes this 4.
       expect(auditRows.length).toBe(3);
-
-      const cols = auditRows.map((r) => r.columnName).sort();
-      expect(cols).toEqual([
+      expect(auditRows.map((r) => r.columnName).sort()).toEqual([
         'minPlatformFeeCents',
         'orgFeePercent',
         'platformFeePercent',
       ]);
-
-      // Every audit row carries the right scope + actor + non-null new value.
       for (const row of auditRows) {
         expect(row.scope).toBe('org');
         expect(row.scopeOrgId).toBe(organizationId);
         expect(row.scopeCreatorId).toBeNull();
         expect(row.changedBy).toBe(adminId);
         expect(row.newValue).not.toBeNull();
+        expect(row.changeId).toBe(result.change?.id);
+        // A cut applies at once, and its lines say when.
+        expect(row.effectiveFrom?.toISOString()).toBe(
+          result.change?.effectiveFrom
+        );
       }
-
-      // Specific old→new values for one column to prove the diff is real.
-      const platformRow = auditRows.find(
+      const platformLine = auditRows.find(
         (r) => r.columnName === 'platformFeePercent'
       );
-      expect(platformRow?.oldValue).toBe('1000');
-      expect(platformRow?.newValue).toBe('1200');
+      expect(platformLine?.oldValue).toBe('1500');
+      expect(platformLine?.newValue).toBe('1200');
     });
 
-    it('no-op update (all values match existing) writes 0 audit rows AND does not bump version', async () => {
-      // Seed a known state.
-      await db
-        .delete(feeConfigOrg)
-        .where(eq(feeConfigOrg.organizationId, organizationId));
-      await db
-        .delete(feeConfigAuditLog)
-        .where(eq(feeConfigAuditLog.scopeOrgId, organizationId));
-
+    it('a no-op (every value as in force) writes no audit row, no change, and leaves the row alone', async () => {
+      await seedFeeLevel(
+        db,
+        { scope: 'org', organizationId },
+        { orgFeePercent: 2000 }
+      );
       const svc = new FeeConfigService({ db, environment: 'test' });
-      await svc.updateOrgFees(organizationId, { orgFeePercent: 2000 }, adminId);
-      const [seeded] = await db
-        .select()
-        .from(feeConfigOrg)
-        .where(eq(feeConfigOrg.organizationId, organizationId))
-        .limit(1);
-      const versionBefore = seeded?.version;
-      expect(versionBefore).toBe(1);
-
-      // Wipe audit so we can assert "zero new rows".
+      await svc.updateOrgFees(organizationId, { orgFeePercent: 1800 }, adminId);
+      const before = await orgRow();
+      expect(before?.version).toBe(1);
       await db
         .delete(feeConfigAuditLog)
         .where(eq(feeConfigAuditLog.scopeOrgId, organizationId));
+      const changesBefore = await db
+        .select({ id: feeChanges.id })
+        .from(feeChanges)
+        .where(eq(feeChanges.organizationId, organizationId));
 
-      // No-op: same value.
-      await svc.updateOrgFees(organizationId, { orgFeePercent: 2000 }, adminId);
+      const result = await svc.updateOrgFees(
+        organizationId,
+        { orgFeePercent: 1800 },
+        adminId
+      );
 
+      expect(result).toEqual({
+        outcome: 'unchanged',
+        change: null,
+        voidedChangeId: null,
+        firstEmailsAt: null,
+      });
       const auditRows = await db
         .select()
         .from(feeConfigAuditLog)
         .where(eq(feeConfigAuditLog.scopeOrgId, organizationId));
       expect(auditRows.length).toBe(0);
-
-      // Version must NOT have bumped (early-return before the upsert).
-      const [after] = await db
-        .select()
-        .from(feeConfigOrg)
-        .where(eq(feeConfigOrg.organizationId, organizationId))
-        .limit(1);
-      expect(after?.version).toBe(versionBefore);
+      const changesAfter = await db
+        .select({ id: feeChanges.id })
+        .from(feeChanges)
+        .where(eq(feeChanges.organizationId, organizationId));
+      expect(changesAfter.length).toBe(changesBefore.length);
+      expect((await orgRow())?.version).toBe(before?.version);
     });
   });
 
-  // ── Scenario 4: cache invalidation observable after commit ────────────────
+  // ── Scenario 3: cache invalidation observable after commit ────────────────
 
   describe('cache invalidation (real VersionedCache over mock KV)', () => {
-    it('updateOrgFees bumps the version key for "org:<orgId>" AFTER the DB row is updated', async () => {
-      // Fresh DB state.
-      await db
-        .delete(feeConfigOrg)
-        .where(eq(feeConfigOrg.organizationId, organizationId));
-      await db
-        .delete(feeConfigAuditLog)
-        .where(eq(feeConfigAuditLog.scopeOrgId, organizationId));
-
+    it('a cut bumps the version key for "org:<orgId>" after the write commits', async () => {
+      await seedFeeLevel(
+        db,
+        { scope: 'org', organizationId },
+        { orgFeePercent: 3000 }
+      );
       const kv = createMockKVNamespace();
       const cache = new VersionedCache({ kv: kv as unknown as KVNamespace });
       const svc = new FeeConfigService({ db, environment: 'test', cache });
-
-      // No version key for org yet.
       const versionKey = `cache:version:org:${organizationId}`;
       expect(await cache.getVersion(`org:${organizationId}`)).toBeNull();
 
       await svc.updateOrgFees(organizationId, { orgFeePercent: 2500 }, adminId);
-
-      // invalidateAsync is fire-and-forget; flush microtasks.
+      // The invalidation is fire-and-forget; flush microtasks.
       await Promise.resolve();
       await Promise.resolve();
 
-      // Tripwire: KV.put was invoked on EXACTLY the org version key, with a
-      // timestamp-shaped value. If the key shape regresses (e.g. someone
-      // refactors orgCacheId), this assertion fails.
       const versionPut = (kv.put.mock.calls as Array<[string, string]>).find(
         ([key]) => key === versionKey
       );
       expect(versionPut).toBeDefined();
       expect(Number(versionPut?.[1])).toBeGreaterThan(0);
-
-      // And the DB row was actually written — proves invalidate runs AFTER
-      // the upsert (if the order were reversed and the upsert failed, we
-      // would see a version put with no row).
-      const [row] = await db
-        .select()
-        .from(feeConfigOrg)
-        .where(eq(feeConfigOrg.organizationId, organizationId))
-        .limit(1);
-      expect(row?.orgFeePercent).toBe(2500);
-
-      // getVersion now returns the new timestamp (observable bump).
-      const observedVersion = await cache.getVersion(`org:${organizationId}`);
-      expect(observedVersion).toBe(versionPut?.[1]);
+      expect((await orgRow())?.orgFeePercent).toBe(2500);
+      expect(await cache.getVersion(`org:${organizationId}`)).toBe(
+        versionPut?.[1]
+      );
+      // And the next read resolves the cut.
+      expect(
+        (await svc.getFeesForOrg(organizationId, 'one_off')).orgFeePercent
+      ).toBe(2500);
     });
 
-    it('upsertCreatorOverride bumps the version key for "override:<orgId>:<creatorId>"', async () => {
-      await db
-        .delete(feeConfigOrgCreator)
-        .where(
-          and(
-            eq(feeConfigOrgCreator.organizationId, organizationId),
-            eq(feeConfigOrgCreator.creatorId, creatorId)
-          )
-        );
-
+    it('an override write bumps the version key for "override:<orgId>:<creatorId>"', async () => {
+      await seedFeeLevel(
+        db,
+        { scope: 'creator', organizationId, creatorId },
+        { orgFeePercent: 500 }
+      );
       const kv = createMockKVNamespace();
       const cache = new VersionedCache({ kv: kv as unknown as KVNamespace });
       const svc = new FeeConfigService({ db, environment: 'test', cache });
@@ -403,48 +318,61 @@ describe('FeeConfigService — real-DB write integration', () => {
       await Promise.resolve();
 
       const versionKey = `cache:version:override:${organizationId}:${creatorId}`;
-      // TWO arguments, not three. `VersionedCache.invalidate` writes the
-      // version key with NO put options (Codex-kgrdp.5): `versionTtl` was
-      // removed from `CacheOptions` because a version key that expires can
-      // resurrect data it had already staled, so version keys never expire
-      // while data slots still carry `expirationTtl`. Re-adding a third
-      // matcher here would make this assertion unsatisfiable again.
+      // TWO arguments: version keys are written with no put options
+      // (Codex-kgrdp.5), so a third matcher could never match.
       expect(kv.put).toHaveBeenCalledWith(versionKey, expect.any(String));
     });
 
-    it('no-op update does NOT bump the cache version', async () => {
-      // Seed first to put the row in a known state.
-      await db
-        .delete(feeConfigOrg)
-        .where(eq(feeConfigOrg.organizationId, organizationId));
-      const seedSvc = new FeeConfigService({ db, environment: 'test' });
-      await seedSvc.updateOrgFees(
-        organizationId,
-        { orgFeePercent: 1234 },
-        adminId
+    it('a no-op does NOT bump the cache version', async () => {
+      await seedFeeLevel(
+        db,
+        { scope: 'org', organizationId },
+        { orgFeePercent: 1234 }
       );
-
       const kv = createMockKVNamespace();
       const cache = new VersionedCache({ kv: kv as unknown as KVNamespace });
       const svc = new FeeConfigService({ db, environment: 'test', cache });
 
-      // Same value → diff is empty → early return before invalidate.
       await svc.updateOrgFees(organizationId, { orgFeePercent: 1234 }, adminId);
       await Promise.resolve();
       await Promise.resolve();
 
-      const versionKey = `cache:version:org:${organizationId}`;
-      // `kv.put` must never have been called with the version key — the
-      // no-op early-returns before reaching invalidateAsync.
-      //
-      // ARITY IS LOAD-BEARING ON A NEGATIVE ASSERTION. This matcher carried a
-      // THIRD `expect.anything()` until Codex-kgrdp.5 dropped put options from
-      // version-key writes, at which point it stopped matching the real
-      // two-argument call — so it passed VACUOUSLY and would have kept passing
-      // even if a no-op update did bump the version. The sibling test above
-      // asserts this exact two-argument shape POSITIVELY and passes, which is
-      // what proves this matcher can still match, and therefore still fail.
-      expect(kv.put).not.toHaveBeenCalledWith(versionKey, expect.anything());
+      // Two arguments, like the positive case above, which proves this
+      // matcher can match (and so can fail).
+      expect(kv.put).not.toHaveBeenCalledWith(
+        `cache:version:org:${organizationId}`,
+        expect.anything()
+      );
+    });
+
+    it('a level with a waiting rise is cached for an hour, any other for a day', async () => {
+      const kv = createMockKVNamespace();
+      const cache = new VersionedCache({ kv: kv as unknown as KVNamespace });
+      const svc = new FeeConfigService({ db, environment: 'test', cache });
+      const ttlOf = (type: string) =>
+        (
+          kv.put.mock.calls as Array<
+            [string, string, { expirationTtl?: number }?]
+          >
+        ).find(
+          ([key]) => key.includes(type) && key.includes(organizationId)
+        )?.[2]?.expirationTtl;
+
+      await svc.getFeesForOrg(organizationId, 'one_off');
+      await Promise.resolve();
+      expect(ttlOf('fee-versions:org')).toBe(24 * 60 * 60);
+
+      // An org fee rise from the inherited 10% waits for its emails.
+      const rise = await svc.updateOrgFees(
+        organizationId,
+        { orgFeePercent: 1500 },
+        adminId
+      );
+      expect(rise.outcome).toBe('rise');
+      kv.put.mockClear();
+      await svc.getFeesForOrg(organizationId, 'one_off');
+      await Promise.resolve();
+      expect(ttlOf('fee-versions:org')).toBe(60 * 60);
     });
   });
 });

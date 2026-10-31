@@ -208,3 +208,60 @@ workers must roll back anyway, the closed rows can be set
 reverted when rolling forward (data design §6.5). The `ladder_not_ticked` rows
 have no honest old-code shape: they read wider until the roll forward. `0120`
 itself stays: it is additive, and the old code ignores the new column and table.
+
+---
+
+## Dated fees and fee notices (migration `0123`)
+
+`0123` adds `fee_changes`, `fee_config_versions` and `fee_change_notices`,
+two columns on `fee_config_audit_log`, and the `fee-change-notice` and
+`fee-change-cancelled` email templates (`Codex-2hxff.33`;
+[Fees and splits](fees-and-splits.md#fee-configuration)). It backfills one
+`cut` change and one version per existing `fee_config_*` row, dated
+1970-01-01, so every sale, old or new, resolves exactly the fees it did
+before. It is additive and runs before the workers deploy; old workers never
+read the new tables.
+
+### R14 — after the deploy: the backfill matches the fee rows
+
+Expect each pair to be equal, and both template rows to exist:
+
+```sql
+BEGIN TRANSACTION READ ONLY;
+SELECT
+  (SELECT count(*) FROM fee_config_platform)    AS platform_rows,
+  (SELECT count(*) FROM fee_changes WHERE scope = 'platform') AS platform_changes,
+  (SELECT count(*) FROM fee_config_org)         AS org_rows,
+  (SELECT count(*) FROM fee_changes WHERE scope = 'org')      AS org_changes,
+  (SELECT count(*) FROM fee_config_org_creator) AS override_rows,
+  (SELECT count(*) FROM fee_changes WHERE scope = 'creator')  AS override_changes;
+SELECT name, status FROM email_templates
+ WHERE name IN ('fee-change-notice', 'fee-change-cancelled')
+   AND scope = 'global' AND deleted_at IS NULL;
+ROLLBACK;
+```
+
+Run it before anyone changes a fee in the new admin routes: after that, a
+level has more than one change by design. A mismatch means a fee row the
+backfill skipped. Don't fix it with SQL ([why](operations.md#changing-fees)):
+save that level's values again through its admin route, which writes the
+change, the version and the audit rows together.
+
+### R15 — the first 08:00 run
+
+The morning after the deploy, read notifications-api's `fee step completed`
+log line. With no rise saved it reads all zeros. Look for any
+`fee step: template missing` warning (the templates didn't arrive: R14's
+second query) or `fee step part failed` error.
+
+The fee cache's key types changed (`fee:*` to `fee-versions:*`, because the
+payload changed). Nothing to purge: the old slots had the default 10-minute
+TTL and expire by themselves, and the version keys are per level, shared by
+both.
+
+### Rollback
+
+`0123` stays. See [Changing fees › Rollback](operations.md#changing-fees):
+the old workers read the old `fee_config_*` rows (kept at the values in force
+now), so sales keep the right fee, and a waiting rise doesn't start until the
+roll forward. Don't change fees while rolled back.
