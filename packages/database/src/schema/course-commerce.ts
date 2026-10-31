@@ -136,6 +136,12 @@ export const courseSubscriptions = pgTable(
       withTimezone: true,
     }),
 
+    // What the subscription bills each period, mirrored from the Stripe
+    // item's `unit_amount` on created, updated and paid (Codex-2hxff.52).
+    // NULL until a webhook or the one-off backfill has written it: the
+    // account card then shows no price rather than a guess from the plan.
+    amountCents: integer('amount_cents'),
+
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()
       .notNull(),

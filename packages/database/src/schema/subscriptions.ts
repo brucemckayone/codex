@@ -165,6 +165,20 @@ export const subscriptions = pgTable(
       withTimezone: true,
     }),
 
+    // A move to a cheaper tier that waits for the renewal (Codex-2hxff.16).
+    // All three are set together or not at all (the CHECK below). Stripe's
+    // item already carries the cheaper Price, so `amount_cents` is the NEXT
+    // bill; `held_amount_cents` is what the period was paid at, and "up or
+    // down" compares against it while a move waits. `tier_id`, and so
+    // access, stays on the current tier until the renewal flips it. Mirrored
+    // from the subscription's `codex_move_*` / `codex_hold_*` metadata.
+    pendingTierId: uuid('pending_tier_id').references(
+      () => subscriptionTiers.id,
+      { onDelete: 'restrict' }
+    ),
+    pendingTierFrom: timestamp('pending_tier_from', { withTimezone: true }),
+    heldAmountCents: integer('held_amount_cents'),
+
     // Revenue split snapshot (immutable — calculated at creation, updated on renewal)
     // Platform keeps 10% of gross. Org gets 15% of post-platform. Creators get remainder.
     amountCents: integer('amount_cents').notNull(),
@@ -194,6 +208,11 @@ export const subscriptions = pgTable(
       table.status
     ),
     index('idx_subscriptions_user_org').on(table.userId, table.organizationId),
+    // The waiting moves: a tier delete's count, the price-change fan-out and
+    // the hourly flip backstop each look them up by target tier and date.
+    index('idx_subscriptions_pending_tier')
+      .on(table.pendingTierId, table.pendingTierFrom)
+      .where(sql`${table.pendingTierId} IS NOT NULL`),
 
     // One active subscription per user per org
     uniqueIndex('uq_active_subscription_per_user_org')
@@ -215,6 +234,11 @@ export const subscriptions = pgTable(
     check(
       'check_churn_reason',
       sql`${table.churnReason} IS NULL OR ${table.churnReason} IN ('too_expensive', 'not_enough_content', 'found_alternative', 'not_using_it', 'technical_issues', 'other')`
+    ),
+    // A waiting move is all three columns or none: half a move can't be stored.
+    check(
+      'check_subscription_pending_move',
+      sql`(${table.pendingTierId} IS NULL) = (${table.pendingTierFrom} IS NULL) AND (${table.pendingTierId} IS NULL) = (${table.heldAmountCents} IS NULL)`
     ),
     check('check_sub_amount_positive', sql`${table.amountCents} >= 0`),
     check(
