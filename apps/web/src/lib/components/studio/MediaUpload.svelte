@@ -349,7 +349,9 @@
    */
   function discardAttempt(mediaId: string | null) {
     if (!mediaId) return;
-    deleteMedia(mediaId).catch((error) => {
+    // No `usage`: a failed upload is in nothing, and with no uses the worker
+    // deletes without a fingerprint (Codex-6sbn1).
+    deleteMedia({ id: mediaId }).catch((error) => {
       logger.warn('Media upload: could not remove the failed attempt', {
         mediaId,
         error: error instanceof Error ? error.message : String(error),

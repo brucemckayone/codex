@@ -5,6 +5,11 @@ export const ERROR_CODES = {
   ACCESS_DENIED: 'ACCESS_DENIED',
   INVALID_CONTENT_TYPE: 'INVALID_CONTENT_TYPE',
   MEDIA_NOT_READY: 'MEDIA_NOT_READY',
+  // Media delete guard (Codex-6sbn1): 409s from DELETE /api/media/:id, and
+  // the `details.code` of a publish refused because its media was deleted.
+  MEDIA_IN_USE: 'MEDIA_IN_USE',
+  MEDIA_USAGE_CHANGED: 'MEDIA_USAGE_CHANGED',
+  MEDIA_DELETED: 'MEDIA_DELETED',
   CONTENT_NOT_FOUND: 'CONTENT_NOT_FOUND',
   VALIDATION_ERROR: 'VALIDATION_ERROR',
   INTERNAL_ERROR: 'INTERNAL_ERROR',

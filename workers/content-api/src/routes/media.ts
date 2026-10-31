@@ -8,8 +8,9 @@
  * - POST   /api/media        - Create media item
  * - GET    /api/media/:id    - Get by ID
  * - PATCH  /api/media/:id    - Update media
- * - GET    /api/media        - List with filters
- * - DELETE /api/media/:id    - Soft delete
+ * - GET    /api/media        - List with filters (each item's usage counts)
+ * - GET    /api/media/:id/usage - Where the item is used
+ * - DELETE /api/media/:id    - Soft delete, refused while anything live uses it
  */
 
 import {
@@ -22,10 +23,12 @@ import type {
   CreateMediaResponse,
   DeleteMediaResponse,
   MediaResponse,
+  MediaUsageResponse,
   UpdateMediaResponse,
 } from '@codex/content';
 import {
   createMediaItemSchema,
+  deleteMediaQuerySchema,
   MediaNotFoundError,
   mediaQuerySchema,
   updateMediaItemSchema,
@@ -37,7 +40,6 @@ import type { HonoEnv } from '@codex/shared-types';
 import { createIdParamsSchema, uploadCompleteSchema } from '@codex/validation';
 import {
   binaryUploadProcedure,
-  dispatchOrgPublicInvalidation,
   PaginatedResult,
   procedure,
 } from '@codex/worker-utils';
@@ -92,6 +94,30 @@ app.get(
         throw new MediaNotFoundError(ctx.input.params.id);
       }
       return media;
+    },
+  })
+);
+
+/**
+ * GET /api/media/:id/usage
+ * Where the media item is used (Codex-6sbn1): what the delete dialog and the
+ * library popover draw. Names only uses the caller can already see; counts
+ * the rest. Never cached: it is the delete's guard.
+ *
+ * Returns: MediaUsage (200)
+ * Security: Authenticated users, own media only, API rate limit (100 req/min)
+ * @returns {MediaUsageResponse}
+ */
+app.get(
+  '/:id/usage',
+  procedure({
+    policy: { auth: 'required' },
+    input: { params: createIdParamsSchema() },
+    handler: async (ctx): Promise<MediaUsageResponse['data']> => {
+      return await ctx.services.media.getUsage(
+        ctx.input.params.id,
+        ctx.user.id
+      );
     },
   })
 );
@@ -369,12 +395,14 @@ app.post(
 );
 
 /**
- * DELETE /api/media/:id
- * Soft delete media item (sets deleted_at)
+ * DELETE /api/media/:id?usage=<fingerprint>
+ * Soft delete media item (sets deleted_at; the files are kept 30 days)
  *
- * When the media was an org's intro film, that org's public caches are
- * dropped after the response: its cached public info still offers the film's
- * poster and preview, which the delete has just swept (Codex-376dl).
+ * Refused while anything live uses it (409 MEDIA_IN_USE), or when its uses
+ * changed since `GET /api/media/:id/usage` gave the fingerprint (409
+ * MEDIA_USAGE_CHANGED). Drafts using it keep their link. No public cache is
+ * dropped: nothing live uses a deleted item, and an org's intro video always
+ * counts as live (Codex-6sbn1).
  *
  * Returns: 204 No Content
  * Security: Creator/Admin only, Strict rate limit (5 req/15min)
@@ -388,16 +416,17 @@ app.delete(
       roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN],
       rateLimit: 'strict', // 20/min for destructive operations
     },
-    input: { params: createIdParamsSchema() },
+    input: {
+      params: createIdParamsSchema(),
+      query: deleteMediaQuerySchema,
+    },
     successStatus: 204,
     handler: async (ctx): Promise<DeleteMediaResponse> => {
-      const { introFilmOrgSlugs } = await ctx.services.media.delete(
+      await ctx.services.media.delete(
         ctx.input.params.id,
-        ctx.user.id
+        ctx.user.id,
+        ctx.input.query.usage
       );
-      // An org whose intro film this was stops drawing it now, not after
-      // its cached public info expires.
-      dispatchOrgPublicInvalidation(ctx, introFilmOrgSlugs, ctx.obs);
       return null;
     },
   })

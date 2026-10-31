@@ -1210,6 +1210,18 @@ export interface JourneySellMedia {
    * echo omits it too; the panel keeps what it read.
    */
   previewOnlyMediaIds?: string[];
+  /**
+   * The items in the offered slots (intro, reel, guide video, hero, guide
+   * portrait) whose media was DELETED (Codex-6sbn1). The slot keeps its id, so
+   * a restore heals it, and a save that sends it back unchanged goes through;
+   * this only labels it, so the panel can say "Media missing" rather than
+   * mistake it for another member's item. Named by title: the route is the
+   * org's owners' and admins' only. The retired signature film is left out.
+   *
+   * OPTIONAL-additive: an older worker omits it. The read and the write's echo
+   * both carry it.
+   */
+  missingMedia?: { id: string; title: string }[];
 }
 
 /**

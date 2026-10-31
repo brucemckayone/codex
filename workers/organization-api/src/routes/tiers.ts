@@ -20,6 +20,7 @@
  */
 
 import { CacheType, VersionedCache, type WaitUntilFn } from '@codex/cache';
+import type { ObservabilityClient } from '@codex/observability';
 import type { HonoEnv } from '@codex/shared-types';
 import {
   createTierSchema,
@@ -35,8 +36,18 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 
 /**
- * Write-through the tier cache after a mutation.
- * Fire-and-forget via waitUntil — never blocks the mutation response.
+ * Write-through the tier cache after a mutation. AWAITED: the response waits
+ * for it (Codex-elg0b).
+ *
+ * The Studio re-reads the tier list straight after every tier mutation
+ * (`invalidateAll()` once the command resolves), and `GET /` serves that
+ * re-read from this slot. So the slot must hold the new list BEFORE the
+ * response goes out. This used to run fire-and-forget on `waitUntil`, after
+ * the response: the re-read could beat the write, hit the old list, and
+ * nothing reads again until a reload. The studio tier E2E saw three 201s and
+ * a list without the third tier. The `listTiers` inside it also ran outside
+ * `ctx.background`, so `procedure()`'s cleanup could end the DB pool under it,
+ * and a `.catch(() => {})` hid that the write never happened.
  *
  * `cache.set` puts the freshly-listed tiers straight into the current slot:
  * 1 read + 1 write, where the previous `invalidate()` + `get()` pair cost
@@ -49,28 +60,41 @@ import { z } from 'zod';
  * alter org members or org settings, which share this `id`, so staling them
  * only forced each to spend a write of its own on its next read.
  *
- * `set` awaits its own put, so this single waitUntil genuinely covers the
- * write — no second waitUntil inside the cache is needed.
+ * Never throws. The mutation has already committed, so a failed refresh must
+ * not fail it: it is logged, and the slot keeps the old list until its TTL.
+ * `set` catches and logs its own KV failure; the `listTiers` read is caught
+ * here.
+ *
+ * The cache still gets a `waitUntil` sink although `set` awaits its own put:
+ * the data-access contract (rule 7) requires one on every construction, since
+ * a later read through this cache would otherwise drop its un-awaited write.
  */
-function warmTierCache(
+async function warmTierCache(
   ctx: {
     env: { CACHE_KV?: import('@cloudflare/workers-types').KVNamespace };
     executionCtx: { waitUntil: WaitUntilFn };
+    obs?: ObservabilityClient;
     services: { tier: { listTiers(orgId: string): Promise<unknown> } };
   },
   orgId: string
-): void {
+): Promise<void> {
   if (!ctx.env.CACHE_KV) return;
+  let tiers: unknown;
+  try {
+    tiers = await ctx.services.tier.listTiers(orgId);
+  } catch (error) {
+    ctx.obs?.error('Tier cache refresh failed: the cached list is stale', {
+      organizationId: orgId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return;
+  }
   const cache = new VersionedCache({
     kv: ctx.env.CACHE_KV,
     waitUntil: (promise) => ctx.executionCtx.waitUntil(promise),
+    obs: ctx.obs,
   });
-  ctx.executionCtx.waitUntil(
-    (async () => {
-      const tiers = await ctx.services.tier.listTiers(orgId);
-      await cache.set(orgId, CacheType.ORG_TIERS, tiers, { ttl: 86400 });
-    })().catch(() => {})
-  );
+  await cache.set(orgId, CacheType.ORG_TIERS, tiers, { ttl: 86400 });
 }
 
 const app = new Hono<HonoEnv>();
@@ -96,7 +120,7 @@ app.post(
     handler: async (ctx) => {
       const orgId = ctx.organizationId;
       const tier = await ctx.services.tier.createTier(orgId, ctx.input.body);
-      warmTierCache(ctx, orgId);
+      await warmTierCache(ctx, orgId);
       if (ctx.input.body.copyAccessFromTierId) {
         // The copy changed which tiers the org's items are in (the public
         // list carries them). A new tier has no subscribers: catalogue only.
@@ -174,7 +198,7 @@ app.patch(
         orgId,
         ctx.input.body
       );
-      warmTierCache(ctx, orgId);
+      await warmTierCache(ctx, orgId);
       return tier;
     },
   })
@@ -202,7 +226,7 @@ app.delete(
       const { tierId } = ctx.input.params;
       const choice = ctx.input.query;
       await ctx.services.tier.deleteTier(tierId, orgId, choice);
-      warmTierCache(ctx, orgId);
+      await warmTierCache(ctx, orgId);
       // The deleted tier's ticks are gone and, on a move, its only-here
       // items are in `moveTo`: bump the catalogue and those subscribers.
       await ctx.services.planAccess.afterTierAccessChange(
@@ -299,7 +323,7 @@ app.post(
     handler: async (ctx) => {
       const orgId = ctx.organizationId;
       await ctx.services.tier.reorderTiers(orgId, ctx.input.body.tierIds);
-      warmTierCache(ctx, orgId);
+      await warmTierCache(ctx, orgId);
       return null;
     },
   })

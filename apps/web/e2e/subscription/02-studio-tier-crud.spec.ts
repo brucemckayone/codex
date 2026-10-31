@@ -196,10 +196,17 @@ test.describe('Studio Tier CRUD', () => {
       await expect(checked).toHaveCount(1);
       await expect(checked).not.toHaveValue('');
       if (tier === TEST_TIERS[0]) {
-        // Bronze starts empty; the others copy the dearest tier.
+        // Bronze starts empty; the others copy the dearest tier. Click the
+        // visible card, as a user would: the radio inside it is `.sr-only`,
+        // and a forced check on that 1px box failed with "Element is outside
+        // of the viewport" (Codex-elg0b).
+        // `has` is queried from inside each label, so it is built off `page`.
+        const nothing = 'input[name="tier-copy-from"][value=""]';
         await copyFrom
-          .locator('input[name="tier-copy-from"][value=""]')
-          .check({ force: true });
+          .locator('label.choice-card')
+          .filter({ has: page.locator(nothing) })
+          .click();
+        await expect(copyFrom.locator(nothing)).toBeChecked();
       }
 
       // Submit (form posts to createTier remote function → TierService →

@@ -7,9 +7,11 @@ Org management dashboard (analytics, content management, customer support grants
 Two kinds of route, never mixed:
 
 - **Org management** (analytics, content, customers, grants, status): `auth: 'required'` + `requireOrgMembership: true` + `requireOrgManagement: true`, scoped by `ctx.organizationId` (resolved from org membership).
-- **Platform support**: the 9 `/api/admin/fees/*` endpoints (Codex-m644n, no web UI consumer), `/api/admin/organizations/:orgId/owner` and the 12 `/api/admin/support/*` endpoints. They take `policy: { auth: 'platform_owner' }` with NO org policy: platform-wide on purpose, gated by the role.
+- **Platform support**: the 9 `/api/admin/fees/*` endpoints (Codex-m644n, no web UI consumer), `/api/admin/organizations/:orgId/owner`, the 12 `/api/admin/support/*` endpoints and `POST /api/admin/media/:id/restore`. They take `policy: { auth: 'platform_owner' }` with NO org policy: platform-wide on purpose, gated by the role.
 
 All are rate limited via the `api` preset (100/min) on `/api/*`, and by their own policy's preset.
+
+`POST /api/admin/media/:id/restore` (Codex-6sbn1) undoes a creator's media delete inside its 30 days (`MediaItemService.restore`), `{ auth: 'platform_owner', cache: 'fresh', rateLimit: 'strict' }`, no screen. 409 once the daily purge has claimed the files, for a delete from before files were kept, or for an item not deleted.
 
 `POST /api/admin/organizations/:orgId/owner` `{ userId, reason }` (Codex-2hxff.2) is also `platform_owner`-only, on the `strict` preset (`RATE_LIMIT_STRICT`, namespaces 1051/2051/3051): platform support assigns a new owner when a transfer is impossible. It withdraws any open offer, busts both users' membership caches, and logs `reason`. No screen yet (Codex-xyb7v).
 

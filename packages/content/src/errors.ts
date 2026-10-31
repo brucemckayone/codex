@@ -11,6 +11,7 @@ import {
   ConflictError,
   ForbiddenError,
   NotFoundError,
+  ServiceError,
 } from '@codex/service-errors';
 
 // Re-export base error classes for convenience
@@ -54,6 +55,63 @@ export class MediaNotFoundError extends NotFoundError {
 export class MediaNotReadyError extends BusinessLogicError {
   constructor(mediaItemId: string) {
     super('Media item not ready for publishing', { mediaItemId });
+  }
+}
+
+/**
+ * The counts a media delete refusal carries (Codex-6sbn1). A 409's context
+ * reaches the client verbatim as `details`, so it is these two numbers and
+ * nothing else: no titles, no ids. The Studio re-reads
+ * `GET /api/media/:id/usage` to draw the list.
+ */
+export interface MediaUseCounts {
+  live: number;
+  drafts: number;
+}
+
+/**
+ * DELETE /api/media/:id, refused: something live (published, bought, or an
+ * org's intro video) uses the item. Checked first, so it wins over
+ * {@link MediaUsageChangedError}.
+ */
+export class MediaInUseError extends ServiceError {
+  constructor(counts: MediaUseCounts) {
+    super(
+      "Something published uses this media, so it can't be deleted yet.",
+      ERROR_CODES.MEDIA_IN_USE,
+      409,
+      { live: counts.live, drafts: counts.drafts }
+    );
+  }
+}
+
+/**
+ * DELETE /api/media/:id, refused: the uses differ from the ones the dialog
+ * showed (the `?usage=` fingerprint), or drafts use it and no fingerprint was
+ * sent. Nothing live uses it, or {@link MediaInUseError} would have won.
+ */
+export class MediaUsageChangedError extends ServiceError {
+  constructor(counts: MediaUseCounts) {
+    super(
+      'Where this media is used has changed since you checked. Check again before deleting.',
+      ERROR_CODES.MEDIA_USAGE_CHANGED,
+      409,
+      { live: counts.live, drafts: counts.drafts }
+    );
+  }
+}
+
+/**
+ * Publishing content whose media item was deleted (it keeps the link, so a
+ * restore heals it). 422 `BUSINESS_LOGIC_ERROR`; the editor matches
+ * `details.code: 'MEDIA_DELETED'`.
+ */
+export class MediaDeletedError extends BusinessLogicError {
+  constructor(contentId: string) {
+    super(
+      'Choose another media item before you publish: the last one was deleted.',
+      { contentId, code: ERROR_CODES.MEDIA_DELETED }
+    );
   }
 }
 

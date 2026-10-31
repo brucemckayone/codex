@@ -6183,14 +6183,6 @@ export const media_empty_cta = () => `Upload media`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const media_delete_confirm = () => `Are you sure you want to delete this media? This action cannot be undone.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const media_delete_title = () => `Delete Media`
 
 
@@ -6224,6 +6216,574 @@ export const media_type_video = () => `Video`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const media_type_audio = () => `Audio`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_chip_in_use = (params) => `In use by ${params.count}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_chip_not_in_use = () => `Not in use`
+
+
+/**
+ * @param {{ count: NonNullable<unknown>, live: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_chip_label_live = (params) => `In use by ${params.count}, ${params.live} published. Show where`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_chip_label_drafts = (params) => `In use by ${params.count}, drafts only. Show where`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_uses_where_title = () => `Where it’s used`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_uses_published = () => `Published`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_uses_drafts = () => `Drafts`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_uses_hidden_one = () => `And 1 more you can’t open. It’s a draft, so it doesn’t stop a delete.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_uses_hidden = (params) => `And ${params.count} more you can’t open. They’re drafts, so they don’t stop a delete.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_uses_capped = (params) => `And ${params.count} more not listed here.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_uses_checking = () => `Checking where it’s used…`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_uses_failed = () => `We couldn’t check where this is used.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_uses_none_now = () => `Nothing uses it any more, so it can be deleted.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_uses_foot_live = () => `It can be deleted once nothing published uses it. Drafts don’t stop a delete.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_uses_foot_drafts = () => `Only drafts use it, so it can be deleted. They’d show “media missing” until you choose another media item.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_use_replace = () => `Replace`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_use_open = () => `Open`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_use_ask_admin = () => `Ask an admin`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_use_ask_creator = () => `Ask its creator`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_use_new_tab = () => `(opens in a new tab)`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_use_intro_title = () => `Intro video`
+
+
+/**
+ * @param {{ org: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_use_where_intro = (params) => `${params.org} home page`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_use_where_course = () => `Course page`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_use_where_course_draft = () => `Draft course page`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_use_where_film_published = () => `Published film`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_use_where_audio_published = () => `Published audio`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_use_where_film_draft = () => `Draft film`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_use_where_audio_draft = () => `Draft audio`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_use_where_bought_film = () => `Off sale · people who bought it can still watch`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_use_where_bought_audio = () => `Off sale · people who bought it can still listen`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_why_film_one = () => `a published film`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_why_film = (params) => `${params.count} published films`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_why_audio_one = () => `a published audio item`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_why_audio = (params) => `${params.count} published audio items`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_why_bought_film_one = () => `a film people have bought`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_why_bought_film = (params) => `${params.count} films people have bought`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_why_bought_audio_one = () => `an audio item people have bought`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_why_bought_audio = (params) => `${params.count} audio items people have bought`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_why_course_one = () => `a course page`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_why_course = (params) => `${params.count} course pages`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_why_intro_one = () => `your intro video`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_why_intro = (params) => `${params.count} intro videos`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_why_more = (params) => `${params.count} more published uses`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_why_something = () => `something published`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_check_failed = () => `We couldn’t check where this is used, so it can’t be deleted yet.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_check_rate_limited = () => `Too many checks in a row, so it can’t be deleted yet. Wait a minute, then try again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_blocked_title = () => `This can’t be deleted yet.`
+
+
+/**
+ * @param {{ uses: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_blocked_body = (params) => `It’s used by ${params.uses}. Choose another media item in each place, then you can delete it.`
+
+
+/**
+ * @param {{ uses: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_blocked_body_one = (params) => `It’s used by ${params.uses}. Choose another media item there, then you can delete it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_why_disabled = () => `Delete turns on when nothing published uses it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_recheck = () => `Replace opens in a new tab. This list checks again when you come back.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_check_now = () => `Check now`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_drafts_title_one = () => `It’s used by 1 draft.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_drafts_title = (params) => `It’s used by ${params.count} drafts.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_drafts_body_one = () => `If you delete it, it will show “media missing” until you choose another media item. Nobody else can see drafts.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_drafts_body = () => `If you delete it, they’ll show “media missing” until you choose another media item. Nobody else can see drafts.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_unused_title = () => `It isn’t used anywhere.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_unused_body = () => `It leaves your library straight away.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_kept = () => `If you delete it by mistake, contact support within 30 days and we can bring it back.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_refused_title = () => `It wasn’t deleted.`
+
+
+/**
+ * @param {{ title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_refused_live_named = (params) => `Since you opened this, “${params.title}” was published, so something published now uses it. Choose another media item there, then you can delete it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_refused_live = () => `Since you opened this, something published started using it. Choose another media item there, then you can delete it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_refused_draft = () => `It was added to a draft since you opened this. Check the list, then delete again if you’re sure.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_refused_changed = () => `Where it’s used changed since you opened this. Check the list, then delete again if you’re sure.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_failed = () => `We couldn’t delete it. Nothing has changed. Try again in a moment.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_failed_rate_limited = () => `Too many deletes in a row. Nothing has changed. Wait a minute, then try again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_already_gone = () => `It was already deleted.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_toast_drafts_one = () => `Deleted. 1 draft needs a new media item.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_toast_drafts = (params) => `Deleted. ${params.count} drafts need a new media item.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_toast_show_one = () => `Show it`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_toast_show = () => `Show them`
 
 
 /**
@@ -7655,6 +8215,30 @@ export const studio_content_form_section_media_desc = () => `Select the media fi
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_content_form_media_deleted_title = () => `This draft’s media was deleted.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_form_media_deleted_body = () => `Choose another media item before you publish. Until then, this draft has nothing to play.`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_form_media_deleted_on = (params) => `Deleted from your library on ${params.date}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const studio_content_form_media_hint = () => `No ready media available. Upload files in the Media library first.`
 
 
@@ -7984,6 +8568,14 @@ export const studio_content_form_access_tiers_optional_label = () => `Also inclu
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_content_form_ready_tier_ticked = () => `At least one tier ticked`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_form_ready_media_deleted = () => `Choose another media item: the last one was deleted`
 
 
 /**
@@ -16808,6 +17400,30 @@ export const studio_builder_media_slot_guide_video_hint = () => `A talking-head 
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_builder_media_slot_preview_only = () => `Visitors see a 30-second preview of this film, because it is part of a paid practice.`
+
+
+/**
+ * @param {{ title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_builder_media_slot_missing = (params) => `Media missing: ${params.title} was deleted. Choose another media item.`
+
+
+/**
+ * @param {{ slots: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_builder_publish_media_missing_slots = (params) => `Settings → Media: ${params.slots}.`
+
+
+/**
+ * @param {{ slot: NonNullable<unknown>, title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_builder_publish_media_missing_slot_titled = (params) => `${params.slot} (${params.title})`
 
 
 /**

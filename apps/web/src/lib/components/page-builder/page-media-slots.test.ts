@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { SLOT_ACCEPTS } from '$lib/page-builder/sell-media-store.svelte';
-import { PAGE_MEDIA_SLOTS, RETIRED_MEDIA_SLOTS } from './page-media-slots';
+import {
+  PAGE_MEDIA_SLOTS,
+  panelSlotsNamed,
+  RETIRED_MEDIA_SLOTS,
+} from './page-media-slots';
 
 const offered = PAGE_MEDIA_SLOTS.map((entry) => entry.slot);
 
@@ -30,5 +34,25 @@ describe('the Media panel’s library slots', () => {
       expect(entry.label(), entry.slot).not.toBe('');
       expect(entry.hint(), entry.slot).not.toBe('');
     }
+  });
+});
+
+describe('the slots a publish refused over deleted media names (Codex-6sbn1)', () => {
+  const named = (names: string[]) =>
+    panelSlotsNamed(names).map((entry) => entry.slot);
+
+  it('maps each course slot to the panel slot that holds it', () => {
+    expect(named(['intro'])).toEqual(['introVideoMediaId']);
+    expect(named(['reel'])).toEqual(['previewVideoMediaId']);
+    expect(named(['guide_video'])).toEqual(['guideVideoMediaId']);
+    expect(named(['hero'])).toEqual(['heroMediaId']);
+    expect(named(['guide_portrait'])).toEqual(['guidePortraitMediaId']);
+  });
+
+  it('answers in panel order, each once, and drops a name it does not know', () => {
+    expect(named(['reel', 'hero', 'reel', 'signature', 'toString'])).toEqual([
+      'heroMediaId',
+      'previewVideoMediaId',
+    ]);
   });
 });

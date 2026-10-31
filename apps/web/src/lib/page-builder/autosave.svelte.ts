@@ -39,6 +39,12 @@ export type AutosaveStatus = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
 export interface AutosaveSaveResult {
   ok: boolean;
   message?: string;
+  /**
+   * A refusal the caller acts on, passed through from the save untouched:
+   * `MEDIA_DELETED`, with the course `slots` at fault (Codex-6sbn1).
+   */
+  code?: string;
+  slots?: readonly string[];
 }
 
 export interface AutosaveDeps {

@@ -160,6 +160,49 @@ describe('saveBuilderDraft', () => {
     });
   });
 
+  it('keeps the code and the slots of a publish refused over deleted media (Codex-6sbn1)', async () => {
+    const message =
+      'Replace the deleted media on this course page before you publish it.';
+    const deps = makeDeps({
+      savePage: vi
+        .fn<(input: unknown) => Promise<unknown>>()
+        .mockRejectedValue({
+          status: 422,
+          body: { message, code: 'MEDIA_DELETED', slots: ['reel', 'hero', 3] },
+        }),
+    });
+
+    const result = await saveBuilderDraft(deps);
+
+    expect(result).toEqual({
+      outcome: 'failed',
+      stage: 'page',
+      message,
+      code: 'MEDIA_DELETED',
+      slots: ['reel', 'hero'],
+    });
+    expect(deps.markSaved).not.toHaveBeenCalled();
+  });
+
+  it('passes on no code or slots for any other refusal', async () => {
+    const deps = makeDeps({
+      savePage: vi
+        .fn<(input: unknown) => Promise<unknown>>()
+        .mockRejectedValue({
+          status: 409,
+          body: { message: 'Taken', code: 'CONFLICT', slots: ['reel'] },
+        }),
+    });
+
+    const result = await saveBuilderDraft(deps);
+
+    expect(result).toEqual({
+      outcome: 'failed',
+      stage: 'page',
+      message: 'Taken',
+    });
+  });
+
   it('saves the offer when it changed, normalising every path to an explicit value', async () => {
     const deps = makeDeps({
       payload: makePayload({

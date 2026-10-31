@@ -111,6 +111,11 @@
   }: Props = $props();
 
   // ── Melt UI Combobox ────────────────────────────────────────────────
+  // True while the effect below mirrors a `value` set from outside. Melt calls
+  // `onSelectedChange` on EVERY `selected.set`, so without this an outside
+  // value the list lacks (a deleted item, an intro film past the list's 100)
+  // came back out as `onchange(null)`, and the caller cleared or unlinked it.
+  let syncing = false;
   const {
     elements: { input, menu, option, label },
     states: { open, inputValue, selected, touchedInput },
@@ -144,7 +149,7 @@
     ),
     onSelectedChange: ({ next }) => {
       const newValue = next?.value ?? null;
-      onchange?.(newValue);
+      if (!syncing) onchange?.(newValue);
       // Reset filter text after selection
       inputValue.set(next?.label ?? '');
       return next;
@@ -165,7 +170,9 @@
     const currentSelected = $selected;
     if (value !== (currentSelected?.value ?? null)) {
       const found = mediaItems.find((item) => item.id === value);
+      syncing = true;
       selected.set(found ? { value: found.id, label: found.title } : undefined);
+      syncing = false;
       inputValue.set(found?.title ?? '');
     }
   });

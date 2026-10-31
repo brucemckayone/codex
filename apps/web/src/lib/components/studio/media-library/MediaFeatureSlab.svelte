@@ -23,6 +23,7 @@
   import { formatDuration, formatFileSize, formatRelativeTime } from '$lib/utils/format';
   import { getThumbnailSrcset } from '$lib/utils/image';
   import * as m from '$paraglide/messages';
+  import MediaUseChip from './MediaUseChip.svelte';
 
   type MediaSlabItem = MediaItemWithRelations & { thumbnailUrl?: string | null };
 
@@ -136,6 +137,9 @@
     <h2 class="slab-title" title={media.title}>{media.title}</h2>
 
     <p class="slab-strap">{strap}</p>
+
+    <!-- The tiles' "In use by N", so the newest item says it too (Codex-6sbn1). -->
+    <MediaUseChip mediaId={media.id} usage={media.usage} />
 
     <dl class="slab-meta">
       <div class="meta-item">

@@ -153,6 +153,7 @@ export {
   ForbiddenError,
   InternalServiceError,
   isAdminServiceError,
+  MediaDeletedError,
   NotFoundError,
   NothingLeftToRefundError,
   RefundAmountTooLargeError,

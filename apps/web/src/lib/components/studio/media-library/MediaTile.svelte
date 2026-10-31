@@ -13,6 +13,8 @@
   `describeTile` decides what it shows: why an item waits or failed, a
   countdown to the automatic retry, and Try again where another attempt can
   help. Every state is drawn in docs/handover/live-media-status/index.html.
+
+  Under the title, "In use by N" (`MediaUseChip`, Codex-6sbn1).
 -->
 <script lang="ts">
   import { mediaStatus } from '$lib/client/media-status.svelte';
@@ -40,6 +42,7 @@
   import { MAX_TRANSCODING_ATTEMPTS } from '@codex/constants';
   import { remoteErrorStatus } from '$lib/remote/query-result';
   import { describeTile, tilePill, type TileFailure, type TilePill } from './tile-state';
+  import MediaUseChip from './MediaUseChip.svelte';
 
   // MediaItemWithRelations doesn't declare thumbnailUrl on the base schema
   // (only thumbnailKey) — but the public content API resolves keys to CDN
@@ -320,6 +323,8 @@
     {#if reason}
       <p class="tile-reason">{reason}</p>
     {/if}
+
+    <MediaUseChip mediaId={media.id} usage={media.usage} />
 
     {#if view.kind === 'failed' && view.canRetry}
       <div class="tile-cta">

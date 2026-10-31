@@ -73,14 +73,27 @@ describe('media rows reach responses without the raw detail', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('the response columns leave out exactly the raw detail', () => {
-    expect(MEDIA_ITEM_RESPONSE_COLUMNS).toEqual({ transcodingError: false });
+  it('the response columns leave out exactly the raw detail and the purge bookkeeping', () => {
+    expect(MEDIA_ITEM_RESPONSE_COLUMNS).toEqual({
+      transcodingError: false,
+      filesPurgeAfter: false,
+      filesPurgeStartedAt: false,
+      filesPurgedAt: false,
+    });
     expect(
       withoutTranscodingDetail({
         id: 'm1',
         transcodingError: 'ffmpeg: moov atom not found',
         transcodingErrorCode: 'CORRUPT_INPUT',
+        filesPurgeAfter: new Date(),
+        filesPurgeStartedAt: null,
+        filesPurgedAt: null,
+        deletedAt: null,
       })
-    ).toEqual({ id: 'm1', transcodingErrorCode: 'CORRUPT_INPUT' });
+    ).toEqual({
+      id: 'm1',
+      transcodingErrorCode: 'CORRUPT_INPUT',
+      deletedAt: null,
+    });
   });
 });

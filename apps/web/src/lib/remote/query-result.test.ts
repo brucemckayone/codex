@@ -17,8 +17,13 @@
  */
 
 import { error } from '@sveltejs/kit';
-import { describe, expect, it } from 'vitest';
-import { isFirstLoad, queryErrorMessage } from './query-result';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  type FreshReadable,
+  isFirstLoad,
+  queryErrorMessage,
+  readFreshQuery,
+} from './query-result';
 
 /** A genuine SvelteKit `HttpError` instance, not a look-alike literal. */
 function realHttpError(status: number, message: string): unknown {
@@ -123,5 +128,95 @@ describe('isFirstLoad', () => {
   it('is false for a query that was never made', () => {
     expect(isFirstLoad(null)).toBe(false);
     expect(isFirstLoad(undefined)).toBe(false);
+  });
+});
+
+/**
+ * `readFreshQuery` (Codex-6sbn1): the media delete trusts this read, so a read
+ * the library chip's popover still holds must never be what it gets.
+ */
+describe('readFreshQuery', () => {
+  /** A stand-in for kit's Query: `then` settles with `settle`, `refresh` re-reads. */
+  function fakeQuery<T>(state: {
+    ready: boolean;
+    loading: boolean;
+    current: T | undefined;
+    settle?: Promise<void>;
+    next?: () => T | undefined;
+    refreshFails?: unknown;
+  }): FreshReadable<T> & { refresh: ReturnType<typeof vi.fn> } {
+    const query = {
+      ...state,
+      refresh: vi.fn(async () => {
+        if (state.refreshFails) throw state.refreshFails;
+        query.current = state.next?.();
+      }),
+      // biome-ignore lint/suspicious/noThenProperty: it stands in for kit's thenable Query
+      then: (
+        resolve: (v: unknown) => unknown,
+        reject: (e: unknown) => unknown
+      ) =>
+        (state.settle ?? Promise.resolve()).then(
+          () => resolve(query.current),
+          reject
+        ),
+    };
+    return query as unknown as FreshReadable<T> & {
+      refresh: ReturnType<typeof vi.fn>;
+    };
+  }
+
+  it('asks again when the read has landed and is idle: a cached read is stale', async () => {
+    const query = fakeQuery({
+      ready: true,
+      loading: false,
+      current: 'old',
+      next: () => 'new',
+    });
+    expect(await readFreshQuery(query)).toBe('new');
+    expect(query.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('a read just made, or in flight, is awaited, not sent twice', async () => {
+    const fresh = fakeQuery({ ready: false, loading: true, current: 'now' });
+    expect(await readFreshQuery(fresh)).toBe('now');
+    expect(fresh.refresh).not.toHaveBeenCalled();
+
+    const reloading = fakeQuery({ ready: true, loading: true, current: 'now' });
+    expect(await readFreshQuery(reloading)).toBe('now');
+    expect(reloading.refresh).not.toHaveBeenCalled();
+  });
+
+  it('rejects when the re-read fails, never handing back the old value', async () => {
+    const failure = { status: 500, body: { message: 'x' } };
+    const query = fakeQuery({
+      ready: true,
+      loading: false,
+      current: 'old',
+      refreshFails: failure,
+    });
+    await expect(readFreshQuery(query)).rejects.toBe(failure);
+  });
+
+  it('rejects when the read fails', async () => {
+    const failure = { status: 429, body: { message: 'x' } };
+    const query = fakeQuery({
+      ready: false,
+      loading: true,
+      current: undefined,
+      settle: Promise.reject(failure),
+    });
+    await expect(readFreshQuery(query)).rejects.toBe(failure);
+  });
+
+  it('rejects when the read answers nothing', async () => {
+    const query = fakeQuery<string>({
+      ready: false,
+      loading: true,
+      current: undefined,
+    });
+    await expect(readFreshQuery(query)).rejects.toThrow(
+      'The query answered nothing'
+    );
   });
 });
