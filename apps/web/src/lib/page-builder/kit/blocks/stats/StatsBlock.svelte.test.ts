@@ -11,7 +11,7 @@ import { SECTION_LAYOUTS } from '../../model/ids';
 import { sampleContext } from '../../model/sample';
 import type { BlockEdit, ResolvedSection } from '../../model/types';
 import { STATS_PROMPT, statsDefinition } from './definition';
-import { liveFigures } from './figures';
+import { isLongFigure, liveFigures } from './figures';
 import StatsBlock from './StatsBlock.svelte';
 
 let app: ReturnType<typeof mount> | null = null;
@@ -129,6 +129,48 @@ describe('StatsBlock', () => {
     await render({ live: true, items: OWN });
     const list = document.body.querySelector<HTMLElement>('.stats__list');
     expect(list?.style.getPropertyValue('--_chars')).toBe('6');
+  });
+
+  // Studio rings each figure: a circle round "4,000+" stretched into a flat
+  // ellipse, so a figure past four characters is marked for a pill.
+  it.each(
+    SECTION_LAYOUTS.stats
+  )('%s: marks a figure too long for a circle, and only that one', async (layout) => {
+    await render(
+      {
+        items: [
+          { value: '98%', label: 'would recommend it' },
+          { value: '100%', label: 'online' },
+          { value: '1,200', label: 'members' },
+          { value: '6 weeks', label: 'from start to finish' },
+        ],
+      },
+      { layout }
+    );
+    const long = [
+      ...document.body.querySelectorAll<HTMLElement>('.stat__value'),
+    ].map((value) => [value.textContent, value.hasAttribute('data-long')]);
+    expect(long).toEqual([
+      ['98%', false],
+      ['100%', false],
+      ['1,200', true],
+      ['6 weeks', true],
+    ]);
+  });
+
+  it('counts a long figure by its characters, past four', () => {
+    expect(['4', '98%', '24/7', '100%'].map(isLongFigure)).toEqual([
+      false,
+      false,
+      false,
+      false,
+    ]);
+    expect(['1,200', '4,000+', '20 min', '6 weeks'].map(isLongFigure)).toEqual([
+      true,
+      true,
+      true,
+      true,
+    ]);
   });
 
   it('takes its heading level from the section', async () => {

@@ -36,6 +36,13 @@ export interface KitPageContext {
    */
   readonly offerProps: Readonly<Record<string, unknown>>;
   /**
+   * The page's guide: its About you section's name, which the Video block
+   * says is speaking unless the creator names someone else (Codex-61zsk.73).
+   * Absent with no such section or no name, and for a block mounted on its
+   * own.
+   */
+  readonly guideName?: string;
+  /**
    * The anchor (`id`) of a section this page draws, by section id, so a
    * Button can jump to it (03 X64). `undefined` for a section the page does
    * not draw (hidden, deleted, folded), and for a block mounted on its own.

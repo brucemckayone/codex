@@ -22,13 +22,27 @@ import type { FullFilm, KitPageContext } from '../page-context';
 /** The preview's address, or the full film once the page answers. */
 export type FilmSource = PressSource;
 
+/**
+ * A press plays the full film: the server marked the clip `fullFilm` and the
+ * page can ask for it. The one rule a press and the line that says what it
+ * plays (`model/films.ts`, `filmPlays`) both read.
+ */
+export function playsInFull(
+  clip: PreviewMedia,
+  requestFilm: KitPageContext['requestFilm']
+): boolean {
+  return clip.fullFilm === true && requestFilm !== undefined;
+}
+
 /** How this clip asks for its full film, or `undefined` when it may not. */
 function askFor(
   clip: PreviewMedia,
   film: SalesFilm | undefined,
   requestFilm: KitPageContext['requestFilm']
 ): AskForFull | undefined {
-  if (!clip.fullFilm || !film || !requestFilm) return undefined;
+  if (!film || !requestFilm || !playsInFull(clip, requestFilm)) {
+    return undefined;
+  }
   return () => requestFilm(film);
 }
 

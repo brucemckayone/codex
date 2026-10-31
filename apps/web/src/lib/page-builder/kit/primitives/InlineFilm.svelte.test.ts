@@ -102,6 +102,9 @@ const press = (n = 1) =>
     .find((button) => button.textContent?.trim() === `Watch film ${n}`)
     ?.click();
 
+/** The film's own polite words over the frame (the core has its own region). */
+const status = () => document.body.querySelector('.lp-film > [role="status"]');
+
 /** Let the page's answer and the stream's attach settle. */
 async function settle() {
   for (let i = 0; i < 6; i++) await Promise.resolve();
@@ -127,14 +130,16 @@ describe('which film a press plays (P10)', () => {
     expect(attached).toEqual([FULL]);
   });
 
-  test('the page says it may not play in full: the 30-second preview', async () => {
+  test('the page says it may not play in full: the 30-second preview, and the film says so', async () => {
     render({ film: 'reel', requestFilm: vi.fn(async () => null) });
     press();
     await settle();
     expect(attached).toEqual([PREVIEW]);
+    // The line promised the full film: the frame owns up to the preview.
+    expect(status()?.textContent?.trim()).toBe(FILM_COPY.fellBack);
   });
 
-  test('asking fails: the preview, never nothing', async () => {
+  test('asking fails: the preview, never nothing, and the film says so', async () => {
     render({
       film: 'guide',
       requestFilm: vi.fn(() => Promise.reject(new Error('503'))),
@@ -142,6 +147,24 @@ describe('which film a press plays (P10)', () => {
     press();
     await settle();
     expect(attached).toEqual([PREVIEW]);
+    expect(status()?.textContent?.trim()).toBe(FILM_COPY.fellBack);
+  });
+
+  test('the full film, or a clip that never asked, says nothing of the kind', async () => {
+    render({
+      clips: [ALLOWED, { playlistUrl: '/m2/preview.m3u8' }],
+      film: 'intro',
+      requestFilm: vi.fn(async () => ({ playlistUrl: FULL })),
+    });
+    press(1);
+    press(2);
+    await settle();
+    expect(new Set(attached)).toEqual(new Set([FULL, '/m2/preview.m3u8']));
+    const regions = document.body.querySelectorAll(
+      '.lp-film > [role="status"]'
+    );
+    expect(regions).toHaveLength(2);
+    for (const region of regions) expect(region.textContent?.trim()).toBe('');
   });
 
   test('the full film runs out (a 403): the page is asked once more, and the film carries on', async () => {
@@ -174,12 +197,15 @@ describe('which film a press plays (P10)', () => {
     expect(video.currentTime).toBe(612);
   });
 
-  test('the full film runs out and the page will not renew it: "Watch again", never the preview', async () => {
+  // A lapse is no end (the core's `onended` with `lapsed`): the poster
+  // returns saying why, never "Watch again", and a press asks afresh.
+  test('the full film runs out and the page will not renew it: the poster says so, never the preview', async () => {
     vi.useFakeTimers();
     const requestFilm = vi
       .fn<() => Promise<{ playlistUrl: string } | null>>()
       .mockResolvedValueOnce({ playlistUrl: FULL })
-      .mockResolvedValueOnce(null);
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ playlistUrl: `${FULL}2` });
     render({ film: 'intro', requestFilm });
     press();
     await settle();
@@ -193,11 +219,20 @@ describe('which film a press plays (P10)', () => {
     expect(requestFilm).toHaveBeenCalledTimes(2);
     expect(attached).toEqual([FULL]);
     expect(document.body.querySelector('video')).toBeNull();
-    expect(
-      [...document.body.querySelectorAll('button')].some(
-        (button) => button.textContent?.trim() === FILM_COPY.again
-      )
-    ).toBe(true);
+    const labels = [...document.body.querySelectorAll('button')].map((button) =>
+      button.textContent?.trim()
+    );
+    expect(labels).not.toContain(FILM_COPY.again);
+    expect(labels).toContain('Watch film 1');
+    expect(document.body.querySelector('[role="alert"]')?.textContent).toBe(
+      FILM_COPY.lapsed
+    );
+
+    press();
+    await settle();
+    expect(requestFilm).toHaveBeenCalledTimes(3);
+    expect(attached).toEqual([FULL, `${FULL}2`]);
+    expect(document.body.querySelector('[role="alert"]')).toBeNull();
   });
 
   test('the film cannot play: the poster returns, saying why, and a press tries again', async () => {

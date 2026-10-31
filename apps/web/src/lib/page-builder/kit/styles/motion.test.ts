@@ -213,7 +213,7 @@ const SCROLL =
 
 /** What may sit outside the gates: the marks (images) and counting's layout. */
 const UNGATED: Record<string, RegExp> = {
-  '.lp': /^--lp-mark-(underline|circle|scribble|arrow)$/,
+  '.lp': /^--lp-mark-(underline|circle|pill|scribble|arrow)$/,
   '[data-lp-counting]': /^(position|-webkit-text-fill-color)$/,
   '.lp-count':
     /^(position|inset|-webkit-text-fill-color|pointer-events|display)$/,
@@ -585,13 +585,15 @@ describe('motion.css', () => {
         expect(selector).toContain(".lp-section:not([data-lp-type='hero'])");
   });
 
-  it('offers the four marks as colourless masks a pen of one width draws', () => {
+  // The pill rings a figure too long for a circle (Studio's numbers).
+  it('offers the five marks as colourless masks a pen of one width draws', () => {
     const marks = readCss(MOTION).declared.filter(
       (d) => d.property.startsWith('--lp-mark-') && d.value.startsWith('url(')
     );
     expect(marks.map((d) => d.property).sort()).toEqual([
       '--lp-mark-arrow',
       '--lp-mark-circle',
+      '--lp-mark-pill',
       '--lp-mark-scribble',
       '--lp-mark-underline',
     ]);

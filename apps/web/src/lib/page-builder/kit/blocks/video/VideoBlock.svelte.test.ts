@@ -20,12 +20,18 @@ import type {
   SellPreview,
 } from '../../../render/types';
 import { COPY } from '../../model/copy';
-import { SECTION_LAYOUTS } from '../../model/ids';
-import { type SampleOfferState, sampleContext } from '../../model/sample';
+import { SECTION_LAYOUTS, type SectionTypeId } from '../../model/ids';
+import {
+  type SampleOfferState,
+  sampleContext,
+  samplePage,
+} from '../../model/sample';
 import type { BlockEdit, ResolvedSection } from '../../model/types';
+import PageRenderer from '../../PageRenderer.svelte';
+import type { PageEdit } from '../../page-context';
 import { FILM_COPY } from '../../primitives/film-copy';
-import { VIDEO_COPY } from './copy';
-import { VIDEO_PROMPT } from './definition';
+import { instructorDefinition } from '../instructor/definition';
+import { VIDEO_PROMPT, videoDefinition } from './definition';
 import VideoBlock from './VideoBlock.svelte';
 
 /** The manifests the shared player was asked to stream, in order. */
@@ -114,9 +120,14 @@ async function render(
 }
 
 const text = () => document.body.textContent ?? '';
+/** A press on a block mounted on its own (no `requestFilm`) plays the preview. */
 const watch = () =>
   [...document.body.querySelectorAll('button')].find(
-    (button) => button.textContent?.trim() === VIDEO_COPY.watch
+    (button) => button.textContent?.trim() === FILM_COPY.preview
+  );
+const labels = () =>
+  [...document.body.querySelectorAll('button')].map((button) =>
+    button.textContent?.trim()
   );
 const SAMPLE = {
   heading: 'Two minutes, from me to you',
@@ -380,5 +391,166 @@ describe('VideoBlock', () => {
     expect(
       document.body.querySelector('h2')?.getAttribute('contenteditable')
     ).toBe('true');
+  });
+
+  describe('its line: who speaks, and for how long (Codex-61zsk.73)', () => {
+    // A 2:04 film whose preview runs 30 seconds.
+    const FILM: PreviewMedia = {
+      ...INTRO,
+      durationSeconds: 124,
+      previewSeconds: 30,
+      mediaType: 'video',
+    };
+    const line = () =>
+      document.body.querySelector('.video__line')?.textContent ?? null;
+
+    it('names the speaker the creator wrote, beside the preview it plays', async () => {
+      await render({ ...SAMPLE, speaker: 'Ada Okafor' }, { intro: FILM });
+      expect(line()).toBe('Ada Okafor · 0:30 preview');
+    });
+
+    it('hidden, the length alone, though a speaker is written', async () => {
+      await render(
+        { ...SAMPLE, speaker: 'Ada Okafor', hideSpeaker: true },
+        { intro: FILM }
+      );
+      expect(line()).toBe('0:30 preview');
+    });
+
+    it('with a speaker and no length known, the speaker alone', async () => {
+      await render(
+        { ...SAMPLE, speaker: 'Ada Okafor' },
+        { intro: { ...FILM, previewSeconds: null } }
+      );
+      expect(line()).toBe('Ada Okafor');
+    });
+
+    it('with neither, no line at all', async () => {
+      // An older payload (no preview length, and the film plays its
+      // preview), and on its own the block has no guide to name.
+      await render(SAMPLE);
+      expect(document.body.querySelector('.video__line')).toBeNull();
+    });
+
+    it('theatre: under the screen, above its caption', async () => {
+      await render({ ...SAMPLE, speaker: 'Ada Okafor' }, { intro: FILM });
+      const under = document.body.querySelector(
+        '.video__screen > .video__line'
+      );
+      const caption = document.body.querySelector(
+        '.video__screen > figcaption'
+      );
+      expect(under).not.toBeNull();
+      expect(
+        under &&
+          caption &&
+          under.compareDocumentPosition(caption) &
+            Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy();
+    });
+
+    it('split: under the words, above the buttons', async () => {
+      await render(
+        {
+          ...SAMPLE,
+          ctaLabel: 'Join',
+          speaker: 'Ada Okafor',
+        },
+        { layout: 'split', intro: FILM }
+      );
+      const words = document.body.querySelector('.video-split__words');
+      const under = words?.querySelector('.video__line');
+      const actions = words?.querySelector('.video__actions');
+      expect(under?.textContent).toBe('Ada Okafor · 0:30 preview');
+      expect(
+        under &&
+          actions &&
+          under.compareDocumentPosition(actions) &
+            Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy();
+      expect(
+        document.body.querySelector('.video__screen .video__line')
+      ).toBeNull();
+    });
+
+    describe('on the page, the guide speaks by default', () => {
+      const requestFilm = vi.fn(async () => null);
+
+      async function page(
+        types: readonly SectionTypeId[],
+        options: {
+          edit?: PageEdit | null;
+          video?: Record<string, unknown>;
+        } = {}
+      ) {
+        const kit = samplePage('clean', types);
+        const video = kit.sections.find((s) => s.type === 'video');
+        if (video && options.video)
+          video.props = { ...video.props, ...options.video };
+        app = mount(PageRenderer, {
+          target: document.body,
+          props: {
+            page: kit,
+            context: sampleContext({
+              media: { intro: { ...FILM, fullFilm: true } },
+            }),
+            edit: options.edit ?? null,
+            requestFilm,
+          },
+        });
+        flushSync();
+        await tick();
+        await Promise.resolve();
+        flushSync();
+      }
+
+      // The sample sets no switch, as a section saved before it existed.
+      it("names the About you section's guide, beside the whole film it plays", async () => {
+        await page(['instructor', 'video']);
+        expect(line()).toBe(`${instructorDefinition.sample.name} · 2:04`);
+      });
+
+      it('the canvas says the same as the visitor’s page', async () => {
+        await page(['instructor', 'video'], { edit: { commit: () => {} } });
+        expect(line()).toBe(`${instructorDefinition.sample.name} · 2:04`);
+      });
+
+      it("the creator's speaker overrides the guide", async () => {
+        await page(['instructor', 'video'], {
+          video: { speaker: 'Ada Okafor' },
+        });
+        expect(line()).toBe('Ada Okafor · 2:04');
+      });
+
+      it('hidden, the guide is not named', async () => {
+        await page(['instructor', 'video'], { video: { hideSpeaker: true } });
+        expect(line()).toBe('2:04');
+      });
+
+      it('with no guide on the page, the length alone', async () => {
+        await page(['video']);
+        expect(line()).toBe('2:04');
+      });
+
+      // The button says what a press plays, as the line does: never "the
+      // preview" for the whole film, on the page or the canvas.
+      it.each([
+        ['the page', null],
+        ['the canvas', { commit: () => {} }],
+      ] as [
+        string,
+        PageEdit | null,
+      ][])('on %s, the whole film’s button says "Watch the film"', async (_, edit) => {
+        await page(['video'], { edit });
+        expect(labels()).toContain(FILM_COPY.watch);
+        expect(labels()).not.toContain(FILM_COPY.preview);
+      });
+
+      it('a new section names who speaks without writing a switch', () => {
+        expect(
+          videoDefinition.starter({ courseTitle: 'Steady Ground' })
+        ).not.toHaveProperty('hideSpeaker');
+      });
+    });
   });
 });

@@ -26,6 +26,29 @@ export const STORY_EMPTY = 'Add the moments of the journey, one at a time.';
 
 export const MAX_STORY_STEPS = 8;
 
+/**
+ * What changes for the member, in three moments: the arc a story tells. Never
+ * the syllabus, which is the curriculum's to tell (its starter is "How
+ * {course} unfolds"), and words only: the creator adds the pictures. Made
+ * afresh for each caller, so no two pages share a moment.
+ */
+function memberArc(): StoryStep[] {
+  return [
+    {
+      heading: 'You arrive as you are.',
+      body: 'No experience needed: the first session asks for twenty quiet minutes and nothing else.',
+    },
+    {
+      heading: 'It starts to feel like yours.',
+      body: 'Somewhere in the middle, the practice stops being something you follow and becomes something you do.',
+    },
+    {
+      heading: 'You leave with it.',
+      body: 'What you learn here keeps going after the last session: a practice you can come back to on your own.',
+    },
+  ];
+}
+
 export const storyDefinition: BlockDefinition<StoryProps> = {
   type: 'story',
   label: 'Story',
@@ -74,8 +97,8 @@ export const storyDefinition: BlockDefinition<StoryProps> = {
           // Each layout's frame at 1440 and 390, in the Style that cuts it most.
           focalLayouts: {
             scroll: [
-              { at: 'wide', ratio: '4 / 3' },
-              { at: 'phone', ratio: '4 / 3' },
+              { at: 'wide', ratio: '1 / 1' },
+              { at: 'phone', ratio: '4 / 5' },
             ],
             chapters: [
               { at: 'wide', ratio: '11 / 5' },
@@ -90,39 +113,19 @@ export const storyDefinition: BlockDefinition<StoryProps> = {
       ],
     },
   ],
-  starter: ({ courseTitle }) => ({
-    heading: `How ${courseTitle} unfolds`,
-    steps: [
-      {
-        heading: 'Where you begin',
-        body: 'Arrive as you are. The first stage meets you there.',
-      },
-      {
-        heading: 'What starts to shift',
-        body: 'Small practices, repeated, begin to change how the days feel.',
-      },
-      {
-        heading: 'Where you arrive',
-        body: 'You leave with a practice of your own, and the way back to it.',
-      },
-    ],
-  }),
+  // The course's lede, where it has one, read as the body field reads it.
+  starter: ({ courseLede }) =>
+    compact({
+      eyebrow: 'Your way through',
+      heading: 'What changes for you',
+      body: readText({ courseLede }, 'courseLede', 500),
+      steps: memberArc(),
+    }),
   sample: {
-    heading: 'How the six weeks unfold',
-    steps: [
-      {
-        heading: 'Week one: arriving',
-        body: 'Ten quiet minutes a day to notice where you are starting from.',
-      },
-      {
-        heading: 'Weeks two to four: the work',
-        body: 'The practices deepen, one small step at a time.',
-      },
-      {
-        heading: 'Weeks five and six: your own practice',
-        body: 'You shape a routine that fits the life you actually have.',
-      },
-    ],
+    eyebrow: 'Your way through',
+    heading: 'What changes for you',
+    body: 'Twenty minutes a day to start the day on your own terms.',
+    steps: memberArc(),
   },
   coerce: (raw) =>
     compact({
