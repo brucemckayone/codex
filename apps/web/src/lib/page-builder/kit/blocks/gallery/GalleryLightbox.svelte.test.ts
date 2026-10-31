@@ -89,21 +89,31 @@ afterEach(() => {
 /**
  * `window.open` as a browser answers it: the new tab, or `null` where its
  * popup blocker refuses one. Asked for `noopener`, it answers `null` either
- * way, so a refusal cannot be told from a tab. jsdom cannot navigate, so
- * `location.assign` is only heard.
+ * way, so a refusal cannot be told from a tab, and an address it cannot
+ * parse throws (`refused` as the error). jsdom cannot navigate, so
+ * `location.assign` is only heard, but it ends the page as a browser's does:
+ * nothing logged after it is sent. `told` is what production sends, the
+ * warnings logged while the page is still there (`info` never leaves it).
  */
-function popups(refused: boolean) {
+function popups(refused: boolean | DOMException) {
   const tab = { opener: window as Window | null };
   const opened = vi
     .spyOn(window, 'open')
-    .mockImplementation((_url, _target, features) =>
-      refused || /\bnoopener\b/.test(features ?? '')
+    .mockImplementation((_url, _target, features) => {
+      if (refused instanceof DOMException) throw refused;
+      return refused || /\bnoopener\b/.test(features ?? '')
         ? null
-        : (tab as unknown as Window)
-    );
-  const assigned = vi.fn();
+        : (tab as unknown as Window);
+    });
+  let left = false;
+  const assigned = vi.fn(() => {
+    left = true;
+  });
   vi.stubGlobal('location', { assign: assigned });
-  const told = vi.spyOn(logger, 'info').mockImplementation(() => {});
+  const told: unknown[][] = [];
+  vi.spyOn(logger, 'warn').mockImplementation((...record) => {
+    if (!left) told.push(record);
+  });
   return { tab, opened, assigned, told };
 }
 
@@ -304,6 +314,8 @@ describe('GalleryBlock: each picture opens the lightbox (p3n §4)', () => {
   describe('the picture the row is on', () => {
     /** A slide's width, and so the scroll between two. */
     const WIDTH = 1000;
+    /** How long the row scrolls no further before it is at rest (the lightbox's). */
+    const STILL_MS = 150;
     type Watch = {
       callback: IntersectionObserverCallback;
       options?: IntersectionObserverInit;
@@ -357,6 +369,8 @@ describe('GalleryBlock: each picture opens the lightbox (p3n §4)', () => {
         });
       }
       Object.defineProperty(track, 'scrollLeft', { get: () => left });
+      // Open, the row's waits run on a clock each test moves itself.
+      vi.useFakeTimers();
       /**
        * The row comes to rest on slide `index`: `scrollend` says so, or,
        * in a browser without it (Safari), the row scrolls no further.
@@ -366,7 +380,6 @@ describe('GalleryBlock: each picture opens the lightbox (p3n §4)', () => {
         if (end === 'scrollend') {
           track.dispatchEvent(new Event('scrollend'));
         } else {
-          vi.useFakeTimers();
           track.dispatchEvent(new Event('scroll'));
           vi.runOnlyPendingTimers();
         }
@@ -454,8 +467,12 @@ describe('GalleryBlock: each picture opens the lightbox (p3n §4)', () => {
       report([0, 0.59]);
       report([1, 0.61]);
       expect(counter()).toBe('3 / 5');
-      // A finger catches it while the second slide shows whole, and holds it there.
+      // A finger catches it while the second slide shows whole, and holds it
+      // there. Short of where the press was taking it, the row is at rest
+      // once it scrolls no further, however it said it had stopped.
       settle(1, end);
+      vi.advanceTimersByTime(STILL_MS);
+      flushSync();
       expect(counter()).toBe('2 / 5');
       // The row is free again: the next swipe is followed.
       report([1, 0.59]);
@@ -463,16 +480,58 @@ describe('GalleryBlock: each picture opens the lightbox (p3n §4)', () => {
       expect(counter()).toBe('3 / 5');
     });
 
+    // Chrome ends the swipe a press cut short only once the press's glide is
+    // under way, so that `scrollend` comes with the row still moving.
+    it('is not set back by the end of the swipe a press cut short', async () => {
+      const { track, report, settle } = await watchRow(5, 0);
+      report([0, 1], [1, 'edge'], [2, 0], [3, 0], [4, 0]);
+      report([0, 0.59]);
+      report([1, 0.61]);
+      press(control(GALLERY_COPY.next));
+      expect(counter()).toBe('3 / 5');
+      // The swipe's end, the row a little past the second slide.
+      settle(1.1, 'scrollend');
+      expect(counter()).toBe('3 / 5');
+      // The glide scrolls on, and comes to rest where it was going.
+      track.dispatchEvent(new Event('scroll'));
+      report([1, 0.59]);
+      report([2, 0.61]);
+      settle(2, 'scrollend');
+      expect(counter()).toBe('3 / 5');
+    });
+
     it('is not set back by the rest of the scroll before a press', async () => {
       const { track } = await watchRow(5, 0);
       // A swipe has just settled on the first slide, in a browser with no
-      // `scrollend`: it is at rest once it scrolls no further.
-      vi.useFakeTimers();
+      // `scrollend`: it is at rest once it scrolls no further. The press
+      // comes as that wait is nearly over.
       track.dispatchEvent(new Event('scroll'));
+      vi.advanceTimersByTime(STILL_MS - 10);
       press(control(GALLERY_COPY.next));
-      // That rest comes before the glide has moved the row.
-      vi.runOnlyPendingTimers();
+      // That rest falls due before the glide has moved the row.
+      vi.advanceTimersByTime(10);
       flushSync();
+      expect(counter()).toBe('2 / 5');
+    });
+
+    // Next, then back within a frame: the row is already where the second
+    // glide goes, so it scrolls nothing, and no scroll comes to free it. The
+    // observer then heard only the slide a press had bound it to.
+    it('is freed by one rest after a glide that goes nowhere, so a swipe after is followed', async () => {
+      const { track, report } = await watchRow(5, 0);
+      report([0, 1], [1, 'edge'], [2, 0], [3, 0], [4, 0]);
+      press(control(GALLERY_COPY.next));
+      press(control(GALLERY_COPY.previous));
+      expect(counter()).toBe('1 / 5');
+      vi.advanceTimersByTime(STILL_MS);
+      flushSync();
+      expect(counter()).toBe('1 / 5');
+      // One rest, which never sets another: nothing is left waiting.
+      expect(vi.getTimerCount()).toBe(0);
+      // A swipe: the row scrolls, and the next slide comes over the threshold.
+      track.dispatchEvent(new Event('scroll'));
+      report([0, 0.59]);
+      report([1, 0.61]);
       expect(counter()).toBe('2 / 5');
     });
 
@@ -543,12 +602,8 @@ describe('GalleryBlock: each picture opens the lightbox (p3n §4)', () => {
       expect(locked()).toBe(false);
     });
 
-    // A browser that refuses `showModal` fires no `close`: the page stayed
-    // held and every tile went dead, and the press showed nothing. One that
-    // opened it and failed after must close it first: the tile, behind a
-    // modal, is inert and refuses focus, which then fell to the body as the
-    // dialog went.
-    it.each([
+    /** The ways opening breaks: before the dialog is modal, or after. */
+    const BREAKS: [string, () => void][] = [
       [
         'showModal throws',
         () =>
@@ -557,7 +612,6 @@ describe('GalleryBlock: each picture opens the lightbox (p3n §4)', () => {
             .mockImplementation(() => {
               throw new DOMException('not connected', 'InvalidStateError');
             }),
-        [`${CDN}/landing-pages/p1/images/g2/lg.webp`, '_blank'],
       ],
       [
         'a later step of opening throws',
@@ -570,32 +624,77 @@ describe('GalleryBlock: each picture opens the lightbox (p3n §4)', () => {
               }
             }
           ),
-        null,
       ],
-    ])('when %s: lets the page go, gives focus back, says so, and the tile still opens', async (_, breakOpening, tab) => {
-      const warned = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    ];
+
+    // A browser that refuses `showModal` fires no `close`: the page stayed
+    // held and every tile went dead, and the press showed nothing. One that
+    // opened it and failed after must close it first: the tile, behind a
+    // modal, is inert and refuses focus, which then fell to the body as the
+    // dialog went. Either way the press must still show the picture: closed
+    // with nothing in its place, it only flashed.
+    it.each(
+      BREAKS
+    )('when %s: lets the page go, gives focus back, says so, shows the picture in a tab, and the tile still opens', async (_, breakOpening) => {
       await render({ items: pictures(3) });
       const tile = tiles()[1];
-      const { opened } = popups(false);
+      const { opened, told } = popups(false);
       breakOpening();
       press(tile);
       flushSync();
       expect(dialog()).toBeNull();
       expect(locked()).toBe(false);
       expect(document.activeElement).toBe(tile);
-      expect(warned).toHaveBeenCalledWith(
-        'gallery.lightbox_open_failed',
-        expect.objectContaining({ error: expect.any(String) })
+      expect(told).toEqual([
+        [
+          'gallery.lightbox_open_failed',
+          expect.objectContaining({ error: expect.any(String) }),
+        ],
+        ['gallery.lightbox_tab_fallback', { opened: true }],
+      ]);
+      expect(opened).toHaveBeenCalledExactlyOnceWith(
+        `${CDN}/landing-pages/p1/images/g2/lg.webp`,
+        '_blank'
       );
-      // Never opened, it shows the picture another way: a tab of its own.
-      if (tab) expect(opened).toHaveBeenCalledExactlyOnceWith(...tab);
-      else expect(opened).not.toHaveBeenCalled();
       // A press after the browser recovers opens it, so the tile is not dead.
       vi.restoreAllMocks();
       vi.unstubAllGlobals();
       press(tile);
       expect(dialog()?.hasAttribute('open')).toBe(true);
       expect(locked()).toBe(true);
+    });
+
+    // An address the browser cannot parse makes `window.open` throw. Thrown
+    // before it said it had closed, the block still held the picture open, so
+    // every tile went dead; thrown out of the lightbox at all, it stopped the
+    // page's updates mid-flush, and the closed lightbox stayed mounted.
+    it.each(
+      BREAKS
+    )('when %s and the tab throws too: closes all the same, says so, and the tile still opens', async (_, breakOpening) => {
+      await render({ items: pictures(3) });
+      const tile = tiles()[1];
+      const { told } = popups(new DOMException('bad address', 'SyntaxError'));
+      breakOpening();
+      press(tile);
+      expect(dialog()).toBeNull();
+      expect(locked()).toBe(false);
+      expect(document.activeElement).toBe(tile);
+      expect(told).toEqual([
+        [
+          'gallery.lightbox_open_failed',
+          expect.objectContaining({ error: expect.any(String) }),
+        ],
+        [
+          'gallery.lightbox_tab_failed',
+          expect.objectContaining({
+            error: expect.stringContaining('bad address'),
+          }),
+        ],
+      ]);
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+      press(tile);
+      expect(dialog()?.hasAttribute('open')).toBe(true);
     });
   });
 
@@ -709,15 +808,15 @@ describe('GalleryBlock: each picture opens the lightbox (p3n §4)', () => {
       );
       expect(tab.opener).toBeNull();
       expect(assigned).not.toHaveBeenCalled();
-      expect(told).toHaveBeenCalledExactlyOnceWith(
-        'gallery.lightbox_tab_fallback',
-        { opened: true }
-      );
+      expect(told).toEqual([
+        ['gallery.lightbox_tab_fallback', { opened: true }],
+      ]);
       expect(dialog()).toBeNull();
       expect(locked()).toBe(false);
     });
 
-    it('opens the large file in this tab where the browser refuses a new one, and says so', async () => {
+    // Logged after the page has gone, or below `warn`, it never reaches the sink.
+    it('opens the large file in this tab where the browser refuses a new one, saying so before it leaves', async () => {
       vi.stubGlobal('HTMLDialogElement', undefined);
       await render({ items: pictures(3) });
       const { assigned, told } = popups(true);
@@ -725,10 +824,9 @@ describe('GalleryBlock: each picture opens the lightbox (p3n §4)', () => {
       expect(assigned).toHaveBeenCalledExactlyOnceWith(
         `${CDN}/landing-pages/p1/images/g2/lg.webp`
       );
-      expect(told).toHaveBeenCalledExactlyOnceWith(
-        'gallery.lightbox_tab_fallback',
-        { opened: false }
-      );
+      expect(told).toEqual([
+        ['gallery.lightbox_tab_fallback', { opened: false }],
+      ]);
     });
 
     it('opens no tab from the canvas', async () => {

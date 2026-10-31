@@ -52,8 +52,9 @@ export interface PlayerClock {
   wanted: boolean;
   /**
    * Its stream is being swapped (a renewal's new links, a recovery), or a
-   * paused film waits on a renewal's answer: the element sits silent until
-   * it resumes, as the visitor wants.
+   * paused film waits on the answer to a press on links that ran out: the
+   * element sits silent until it resumes, as the visitor wants. The timer's
+   * early renewal is no swap: a press meanwhile plays the links it has.
    */
   resuming: boolean;
 }

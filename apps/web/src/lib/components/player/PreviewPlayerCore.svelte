@@ -236,8 +236,14 @@
   let recovered = false;
   /** Drops the last swap's resume, should that stream go before it loads. */
   let unresume: (() => void) | null = null;
-  /** A renewal is out: a paused film waits on its answer (`swapping`). */
-  let renewing = $state(false);
+  /** A renewal is out (`refresh`): one at a time. */
+  let renewing = false;
+  /**
+   * The renewal out is a press's on links that ran out, or nearly (a resume,
+   * "Watch again"): the paused film waits on its answer (`swapping`). The
+   * timer's early ask leaves the links good, so a press meanwhile plays them.
+   */
+  let staleAsk = $state(false);
   let renewTimer: ReturnType<typeof setTimeout> | null = null;
   /** The stream ran out and none came back: "Watch again" asks afresh. */
   let lapsed = false;
@@ -274,15 +280,17 @@
   let held = { time: 0, duration: 0 };
 
   /**
-   * Mid-swap: the element sits reset (`resuming`), or paused while a
-   * renewal is out (a press on links that ran out, "Watch again"), waiting
-   * on the answer. Either way it is silent, so the play button reads, and a
-   * press sets, the visitor's intent (`wanted`), and the swap honours it. A
-   * renewal the timer asked for while the film plays on is no swap yet.
+   * Mid-swap: the element sits reset (`resuming`), or paused while a press's
+   * renewal of links that ran out is out (`staleAsk`), waiting on the
+   * answer. Either way it is silent, so the play button reads, and a press
+   * sets, the visitor's intent (`wanted`), and the swap honours it. A
+   * renewal the timer asked for early is no swap, paused meanwhile or not.
    */
-  const swapping = $derived(resuming || (renewing && paused));
+  const swapping = $derived(resuming || (staleAsk && paused));
   /** The play button offers Play: mid-swap, unless the visitor wants it playing. */
   const offerPlay = $derived(swapping ? !wanted : paused);
+  /** The scrubber's cue: the stream has stalled, or a swap the visitor wants is under way. */
+  const buffering = $derived((waiting && !paused) || (swapping && wanted));
   const played = $derived(duration > 0 ? Math.min(1, time / duration) : 0);
   const fill = $derived(duration > 0 ? Math.min(1, loaded / duration) : 0);
   const muteLabel = $derived(
@@ -332,7 +340,7 @@
     if (lapsed || stale()) {
       // The old stream's links are dead, or nearly: ask afresh, from the start.
       lapsed = false;
-      void refresh(0);
+      void refresh({ at: 0, staleLinks: true });
     } else {
       video.currentTime = 0;
       playWanted(video);
@@ -356,7 +364,7 @@
     } else if (video.paused) {
       wanted = true;
       // Paused past its links' end: renew first, and the answer plays it.
-      if (stale()) void refresh();
+      if (stale()) void refresh({ staleLinks: true });
       else playWanted(video);
     } else {
       wanted = false;
@@ -679,14 +687,20 @@
    *
    * The ask takes a moment, and the film lives on meanwhile: gone, an error
    * or its end drops the answer; another film started, or a pause, leaves
-   * the swap paused.
+   * the swap paused. A press's ask on links that ran out (`staleLinks`)
+   * holds the paused film until it answers (`swapping`); the timer's early
+   * ask leaves it free.
    */
-  async function refresh(at?: number) {
+  async function refresh({
+    at,
+    staleLinks = false,
+  }: { at?: number; staleLinks?: boolean } = {}) {
     const media = video;
     if (!media || !renew || !stream?.signed || renewing || finished || error !== null) {
       return;
     }
     renewing = true;
+    staleAsk = staleLinks;
     asked = true;
     lastAskAt = performance.now();
     const since = mark();
@@ -697,6 +711,7 @@
       next = null;
     }
     renewing = false;
+    staleAsk = false;
     if (destroyed || error !== null || finished) return;
     if (displaced(media, since)) wanted = false;
     if (!next?.playlistUrl) {
@@ -736,16 +751,24 @@
 
   /**
    * Play now, for a play that is not a press's mount (`startPlaying` settles
-   * that one, refused sound and all). One refused or cut short while it
-   * still sits paused and wanted wants nothing, so a frame's own controls
-   * offer Play rather than load for ever; mid-swap the resume decides. The
-   * log carries the error's name alone (`playErrorName`).
+   * that one, refused sound and all). One refused while it still sits paused
+   * and wanted wants nothing, and says paused as the element does (a reset
+   * fires no `pause`), so a frame's own controls offer Play rather than load
+   * for ever; mid-swap the resume decides. A reset refuses nothing: a play
+   * cut short (`AbortError`, HLS.js's own recovery, which plays on) or one
+   * behind an error is left be. The log carries the error's name alone
+   * (`playErrorName`).
    */
   function playWanted(media: HTMLVideoElement) {
-    playNow(media).catch((error: unknown) => {
-      if (destroyed || !media.paused || !wanted || swapping) return;
+    playNow(media).catch((cause: unknown) => {
+      if (destroyed || error !== null || !media.paused || !wanted || swapping) return;
+      const name = playErrorName(cause);
+      if (name === 'AbortError') return;
       wanted = false;
-      logger.warn('player.play_failed', { name: playErrorName(error) });
+      paused = true;
+      // Silently paused, it fires no pause to stop the timer.
+      disarm();
+      logger.warn('player.play_failed', { name });
     });
   }
 
@@ -901,7 +924,7 @@
         {/if}
       </button>
 
-      <div class="player__scrub" data-waiting={waiting && !paused ? '' : undefined}>
+      <div class="player__scrub" data-waiting={buffering ? '' : undefined}>
         <span class="player__track" aria-hidden="true">
           <span class="player__loaded" style:--_to={fill}></span>
           <span class="player__played" style:--_to={played}></span>

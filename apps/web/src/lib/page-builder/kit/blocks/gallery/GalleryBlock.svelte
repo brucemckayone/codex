@@ -103,15 +103,17 @@
    * Picture `index`'s large file without the lightbox: in a tab of its own,
    * cut loose from this page once open. `noopener` would do that, but then
    * the browser answers `null` whether it opened one or not, and a refused
-   * popup would show nothing; refused, the file opens in this tab.
+   * popup would show nothing; refused, the file opens in this tab. Heard at
+   * `warn`, the lowest level production sends on, and before a refusal takes
+   * the visitor off the page: the sink's keepalive send outlives that.
    */
   function inTab(index: number) {
     const file = pictures[index]?.full;
     if (!file) return;
     const tab = window.open(file.url, '_blank');
+    logger.warn('gallery.lightbox_tab_fallback', { opened: Boolean(tab) });
     if (tab) tab.opener = null;
     else location.assign(file.url);
-    logger.info('gallery.lightbox_tab_fallback', { opened: Boolean(tab) });
   }
 
   const open: OpenPicture = (index, from) => {

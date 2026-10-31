@@ -45,7 +45,7 @@
     label: string;
     /** Heard once it has closed, whichever way. */
     onclose: () => void;
-    /** Heard, just before `onclose`, when it could not open at all: show picture `index` another way. */
+    /** Heard as it closes when it could not open, or broke opening: show picture `index` another way. */
     onfail: (index: number) => void;
   }
 
@@ -88,7 +88,8 @@
     const to = Math.max(0, Math.min(last, index));
     // A rest still to come was the last scroll's, not this glide's. At either
     // end a press goes nowhere, and nothing would come to free a bound.
-    if (glide && to !== at) {
+    const binds = glide && to !== at;
+    if (binds) {
       clearTimeout(idle);
       bound = to;
     }
@@ -99,6 +100,10 @@
     // The track is the slides' offset parent, so a slide's offset is the
     // scroll position that shows it.
     track.scrollTo({ left: slide.offsetLeft, behavior: still ? 'auto' : 'smooth' });
+    // A glide back to where the row already is (a press reversed within a
+    // frame) scrolls nothing, so no scroll would come to free the bound: one
+    // rest comes anyway, put off by the glide's own scrolling as any is.
+    if (binds) idle = window.setTimeout(rest, STILL_MS);
   }
 
   /** One along. At either end `go` holds it on the picture already shown. */
@@ -125,6 +130,18 @@
   function onscroll() {
     clearTimeout(idle);
     idle = window.setTimeout(rest, STILL_MS);
+  }
+
+  /**
+   * Chrome ends a swipe that a press cut short only once the press's glide is
+   * under way, so a `scrollend` short of where a press is taking the row may
+   * be that swipe's, with the row still moving: it is at rest once it scrolls
+   * no further, as without `scrollend`.
+   */
+  function onscrollend() {
+    const slide = bound === null ? undefined : slides[bound];
+    if (track && slide && Math.abs(slide.offsetLeft - track.scrollLeft) > 1) onscroll();
+    else rest();
   }
 
   function shut() {
@@ -155,13 +172,16 @@
    * swipe moves the counter too.
    *
    * It holds the page only once it is open, and a setup that throws (an
-   * `InvalidStateError`, or a later step) lets go and closes. Already modal,
-   * it closes itself, so the page behind is no longer inert when its `close`
-   * gives the tile focus back; never opened, no `close` would come, so it
-   * says it has closed, or the block would think it open and every tile would
-   * go dead, and the block shows the picture another way (`onfail`), or the
-   * press would show nothing. GalleryBlock never opens it where there is no
-   * `showModal`.
+   * `InvalidStateError`, or a later step) lets go, closes, and has the block
+   * show the picture another way (`onfail`), or the press would show nothing.
+   * Already modal, it closes itself first, so the page behind is no longer
+   * inert when its `close` gives the tile focus back. Never opened, no
+   * `close` would come, so it says it has closed, or the block would think it
+   * open and every tile would go dead. The other way failing too (an address
+   * `window.open` cannot parse) is logged, never thrown: there is no boundary
+   * above, so thrown from here it would halt the page's updates, and the
+   * closed lightbox would stay mounted. GalleryBlock never opens it where
+   * there is no `showModal`.
    */
   const modal: Attachment<HTMLDialogElement> = (node) =>
     // What it reads (the picture in view among them) must never re-open it.
@@ -202,12 +222,14 @@
       } catch (error) {
         release();
         logger.warn('gallery.lightbox_open_failed', describeThrown(error));
-        if (node.open) {
-          node.close();
-        } else {
-          // `start` is the block's open picture, gone once it hears `onclose`.
-          onfail(start);
-          onclose();
+        // `start` is the block's open picture, gone once it hears `onclose`.
+        const index = start;
+        if (node.open) node.close();
+        else onclose();
+        try {
+          onfail(index);
+        } catch (failed) {
+          logger.warn('gallery.lightbox_tab_failed', describeThrown(failed));
         }
       }
       return release;
@@ -277,7 +299,7 @@
       <XIcon size="1.25em" />
     </button>
   </div>
-  <ul class="gallery-lightbox__track" onscrollend={rest} {onscroll}>
+  <ul class="gallery-lightbox__track" {onscrollend} {onscroll}>
     {#each pictures as picture, index (index)}
       {@const file = source(picture, index)}
       <li class="gallery-lightbox__slide">

@@ -453,6 +453,44 @@ describe('its own controls, elsewhere', () => {
     });
     expect(core.clock()).toMatchObject({ wanted: false, offerPlay: true });
   });
+
+  /** A play() that fails when the test says. */
+  function cutShort() {
+    let cut: (error: unknown) => void = () => {};
+    play.mockReturnValueOnce(
+      new Promise((_resolve, reject) => {
+        cut = reject;
+      })
+    );
+    return (name: string) => cut(new DOMException('Interrupted', name));
+  }
+
+  // HLS.js's own recovery resets the element, with no `pause`, and plays
+  // on once it is back (`hls.ts`): the play it cut short was refused nothing.
+  test('a play a reset cuts short (an AbortError) is no refusal: still wanted, nothing logged', async () => {
+    const warned = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    const { core, video } = headless();
+    const cut = cutShort();
+    core.toggle();
+    video.dispatchEvent(new Event('play'));
+    cut('AbortError');
+    await settle();
+    expect(warned).not.toHaveBeenCalled();
+    expect(core.clock().wanted).toBe(true);
+  });
+
+  // The element's own failure rejects its pending play too (NotSupportedError).
+  test('a play behind an error is no refusal: the error says it, nothing logged', async () => {
+    const warned = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    const { core } = headless();
+    await settle();
+    const cut = cutShort();
+    core.toggle();
+    broke?.('An unexpected playback error occurred.', 'unknown');
+    cut('NotSupportedError');
+    await settle();
+    expect(warned).not.toHaveBeenCalled();
+  });
 });
 
 // The brand studio's Player lens draws this very chrome at a fixed moment,
@@ -936,6 +974,34 @@ describe('renewal', () => {
       await settle();
       expect(renew).toHaveBeenCalledTimes(1);
     });
+
+    test('a play refused after it said it played: it says paused, offers Play, and its timer stops', async () => {
+      vi.useFakeTimers();
+      vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      const renew = fresh();
+      const { root, video } = film({ src: signed(inTen()), renew });
+      await settle();
+      loads(video);
+      let refuse: (error: unknown) => void = () => {};
+      play.mockReturnValueOnce(
+        new Promise((_resolve, reject) => {
+          refuse = reject;
+        })
+      );
+      button(root, m.player_play())?.click();
+      state(video, true);
+      expect(vi.getTimerCount()).toBe(1);
+
+      // Stopped with no `pause`: only the refusal says so.
+      silentlyPaused(video);
+      refuse(new DOMException('No', 'NotAllowedError'));
+      await settle();
+      expect(button(root, m.player_play())).not.toBeNull();
+      expect(vi.getTimerCount()).toBe(0);
+      vi.advanceTimersByTime(600_000);
+      await settle();
+      expect(renew).not.toHaveBeenCalled();
+    });
   });
 
   // Bounded per playback: a 403 before the stream's first frame is a
@@ -1247,6 +1313,82 @@ describe('renewal', () => {
       expect(video.currentTime).toBe(120);
       expect(play).toHaveBeenCalledTimes(2);
       expect(warned).not.toHaveBeenCalled();
+    });
+
+    // The timer asks early, while the links still hold: no swap to wait on.
+    test('paused while the timer’s early renewal is out, then a press: it plays at once, on the links it has', async () => {
+      vi.useFakeTimers();
+      const { renew, answer } = pending();
+      const { root, video } = film({
+        src: signed(inTen()),
+        renew,
+        start: 'sound',
+      });
+      await settle();
+      loads(video);
+      state(video, true);
+      playhead(video, 300);
+      vi.advanceTimersByTime(570_000);
+      expect(renew).toHaveBeenCalledTimes(1);
+      button(root, m.player_pause())?.click();
+      state(video, false);
+      flushSync();
+      play.mockClear();
+
+      button(root, m.player_play())?.click();
+      expect(play).toHaveBeenCalledTimes(1);
+      expect(attached).toEqual([FULL]);
+      state(video, true);
+
+      answer({ playlistUrl: RENEWED });
+      await settle();
+      expect(attached).toEqual([FULL, RENEWED]);
+      video.dispatchEvent(new Event('loadedmetadata'));
+      expect(video.currentTime).toBe(300);
+      expect(play).toHaveBeenCalledTimes(2);
+      expect(renew).toHaveBeenCalledTimes(1);
+    });
+
+    test('a press on a paused film whose links ran out waits on the ask: busy, and never a play on the dead links', async () => {
+      vi.useFakeTimers();
+      const { renew, answer } = pending();
+      const { root, video } = film({
+        src: signed(inTen()),
+        renew,
+        start: 'sound',
+      });
+      const cue = () =>
+        root.querySelector('.player__scrub')?.hasAttribute('data-waiting');
+      await settle();
+      loads(video);
+      state(video, true);
+      playhead(video, 300);
+      button(root, m.player_pause())?.click();
+      state(video, false);
+      vi.advanceTimersByTime(700_000);
+      flushSync();
+      play.mockClear();
+
+      button(root, m.player_play())?.click();
+      flushSync();
+      expect(renew).toHaveBeenCalledTimes(1);
+      // Wanted, and on its way: Pause, and the scrubber's cue.
+      expect(button(root, m.player_pause())).not.toBeNull();
+      expect(cue()).toBe(true);
+      button(root, m.player_pause())?.click();
+      flushSync();
+      expect(cue()).toBe(false);
+      button(root, m.player_play())?.click();
+      flushSync();
+      expect(play).not.toHaveBeenCalled();
+      expect(renew).toHaveBeenCalledTimes(1);
+
+      answer({ playlistUrl: RENEWED });
+      await settle();
+      expect(attached).toEqual([FULL, RENEWED]);
+      video.dispatchEvent(new Event('loadedmetadata'));
+      expect(video.currentTime).toBe(300);
+      expect(play).toHaveBeenCalledTimes(1);
     });
   });
 
