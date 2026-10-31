@@ -25,6 +25,7 @@ export * from './payee-credits';
 export * from './payout-reversals';
 export * from './payouts';
 export * from './playback';
+export * from './price-moves';
 export * from './refund-reviews';
 export * from './refunds';
 export * from './settings';
