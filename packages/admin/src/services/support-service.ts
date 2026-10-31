@@ -3084,7 +3084,7 @@ export class SupportService extends BaseService {
         }
         if (notice.state === 'not_needed') {
           throw new ConflictError(
-            'Nothing to mark: this rise no longer lowers what this person is paid.',
+            'This person is no longer paid less, so no notice is needed.',
             { code: 'FEE_NOTICE_NOT_NEEDED', noticeId }
           );
         }
