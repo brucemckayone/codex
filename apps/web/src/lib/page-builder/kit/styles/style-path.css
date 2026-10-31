@@ -456,6 +456,14 @@
   --_path-line: calc(var(--lp-size-heading) * var(--lp-leading-heading));
 }
 
+/* Wide, the scroll lifts every moment's name to the heading's size and
+   leading (StoryScroll), so its station meets that line. */
+@container (min-width: 48rem) {
+  :is(.lp, #lp-style)[data-lp-style='path'] .story-scroll .story-words {
+    --_path-line: calc(var(--lp-size-heading) * var(--lp-drama-held, 1) * var(--lp-leading-heading));
+  }
+}
+
 :is(.lp, #lp-style)[data-lp-style='path'] .story-chapter::after {
   --_path-x: calc(
     max(var(--lp-gutter), (100% - var(--lp-container)) / 2) - var(--_path-lane)

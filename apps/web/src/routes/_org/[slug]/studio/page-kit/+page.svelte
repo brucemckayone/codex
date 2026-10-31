@@ -32,6 +32,9 @@
     ?film=<HLS URL> (every clip, the intro, reel, guide and hero, plays this
       stream, so the players can be pressed here: a real local preview, e.g.
       dev-cdn's `{creatorId}/hls/{mediaId}/preview/preview.m3u8`)
+      &kind=audio (the clips are sound, so the preview draws its listening
+      card)   &length=<seconds> (the media's length, with the preview cut
+      from it as the transcoder does, so the lines can say how long)
     ?edit=1 (inline-edit attributes on)   ?chrome=0 (hide the studio chrome)
 -->
 <script lang="ts">
@@ -200,7 +203,17 @@
   /** `?film=<HLS URL>`: the one stream every clip plays, its poster the hero's photo. */
   const clip = $derived.by(() => {
     const playlistUrl = param('film');
-    return playlistUrl ? { playlistUrl, posterUrl: image } : null;
+    if (!playlistUrl) return null;
+    const seconds = Number(param('length'));
+    const length = Number.isFinite(seconds) && seconds > 0 ? seconds : null;
+    return {
+      playlistUrl,
+      posterUrl: image,
+      mediaType: param('kind') === 'audio' ? ('audio' as const) : ('video' as const),
+      durationSeconds: length,
+      // As the transcoder cuts it (`@codex/access` previewLength).
+      previewSeconds: length === null ? null : Math.min(30, length - Math.floor(length / 10)),
+    };
   });
 
   /** `?faces=1`, `?marks=1`: the items' own controls, drawn on the sample (Codex-61zsk.58). */

@@ -33,7 +33,7 @@
   import type { Snippet } from 'svelte';
   import type { Attachment } from 'svelte/attachments';
   import { ChevronLeftIcon, ChevronRightIcon } from '$lib/components/ui/Icon';
-  import { NOTHING_MOVES } from '../motion/attributes';
+  import { holdsStill } from '../motion/attributes';
 
   /** Extra class names for the strip's own parts. */
   interface Parts {
@@ -169,10 +169,7 @@
       if (direction === -1 && stop < at - 1) target = stop;
     }
     if (target === undefined) return;
-    const still =
-      matchMedia('(prefers-reduced-motion: reduce)').matches ||
-      track.closest(NOTHING_MOVES) !== null;
-    track.scrollTo({ left: target, behavior: still ? 'auto' : 'smooth' });
+    track.scrollTo({ left: target, behavior: holdsStill(track) ? 'auto' : 'smooth' });
   }
 </script>
 
