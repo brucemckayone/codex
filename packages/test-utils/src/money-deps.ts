@@ -13,6 +13,8 @@
  */
 
 import { FEES } from '@codex/constants';
+import type { DatabaseWs } from '@codex/database';
+import { feeChanges, feeConfigVersions } from '@codex/database/schema';
 
 /** `FeeContext` from `@codex/purchase`, which test-utils cannot depend on. */
 export type TestFeeContext = 'subscription' | 'one_off';
@@ -28,8 +30,9 @@ export interface TestFeeConfig {
 /**
  * FeeConfigService's read side (`FeeResolver` in `@codex/purchase`) with no
  * database: every organisation and creator resolves to the code defaults for
- * the context, which is what FeeConfigService returns when no fee row exists.
- * `overrides` pins fields on every answer.
+ * the context, which is what FeeConfigService returns when no fee version
+ * exists. `overrides` pins fields on every answer. The sale's time (`at`,
+ * Codex-2hxff.33) is accepted and, with no versions, changes nothing.
  */
 export function createTestFeeConfig(overrides: Partial<TestFeeConfig> = {}) {
   const resolve = (ctx: TestFeeContext): TestFeeConfig => ({
@@ -44,10 +47,12 @@ export function createTestFeeConfig(overrides: Partial<TestFeeConfig> = {}) {
     getFeesForCreator: async (
       _orgId: string,
       _creatorId: string,
-      ctx: TestFeeContext
+      ctx: TestFeeContext,
+      _at?: Date
     ) => resolve(ctx),
-    getFeesForOrg: async (_orgId: string, ctx: TestFeeContext) => resolve(ctx),
-    getFeesPlatform: async (ctx: TestFeeContext) => resolve(ctx),
+    getFeesForOrg: async (_orgId: string, ctx: TestFeeContext, _at?: Date) =>
+      resolve(ctx),
+    getFeesPlatform: async (ctx: TestFeeContext, _at?: Date) => resolve(ctx),
   };
 }
 
@@ -74,4 +79,70 @@ export function createTestMoneyDeps(
     payoutMailer: (_params: unknown) => {},
     offSaleMailer: (_params: unknown) => {},
   };
+}
+
+/** One level's own fee values, as `fee_config_versions` stores them. */
+export interface TestFeeLevelValues {
+  platformFeePercent?: number | null;
+  oneOffOrgFeePercent?: number | null;
+  subscriptionOrgFeePercent?: number | null;
+  orgFeePercent?: number | null;
+  minPlatformFeeCents?: number | null;
+  minTransferCents?: number | null;
+  notes?: string | null;
+}
+
+export type TestFeeLevel =
+  | { scope: 'platform' }
+  | { scope: 'org'; organizationId: string }
+  | { scope: 'creator'; organizationId: string; creatorId: string };
+
+/**
+ * Put a level's fees in force as a dated cut (Codex-2hxff.33), the way
+ * migration 0123's backfill does: no classification, no notice. A test
+ * starts from a known state with it; a test of the write itself goes through
+ * FeeConfigService. Defaults to the epoch, so it is in force for every `at`.
+ * A platform level needs every value but `orgFeePercent` (its CHECK); the
+ * code constants fill what is left out.
+ *
+ * Returns the change id. Deleting it cascades to its version and notices;
+ * an organisation's cascade with the organisation.
+ */
+export async function seedFeeLevel(
+  db: DatabaseWs,
+  level: TestFeeLevel,
+  values: TestFeeLevelValues,
+  effectiveFrom: Date = new Date(0)
+): Promise<string> {
+  const platform = level.scope === 'platform';
+  const [change] = await db
+    .insert(feeChanges)
+    .values({
+      scope: level.scope,
+      organizationId: platform ? null : level.organizationId,
+      creatorId: level.scope === 'creator' ? level.creatorId : null,
+      kind: 'cut',
+      effectiveFrom,
+    })
+    .returning({ id: feeChanges.id });
+  if (!change) throw new Error('seedFeeLevel: no change row');
+  await db.insert(feeConfigVersions).values({
+    changeId: change.id,
+    scope: level.scope,
+    platformFeePercent:
+      values.platformFeePercent ?? (platform ? FEES.PLATFORM_PERCENT : null),
+    oneOffOrgFeePercent: platform
+      ? (values.oneOffOrgFeePercent ?? FEES.ORG_PERCENT)
+      : null,
+    subscriptionOrgFeePercent: platform
+      ? (values.subscriptionOrgFeePercent ?? FEES.SUBSCRIPTION_ORG_PERCENT)
+      : null,
+    orgFeePercent: platform ? null : (values.orgFeePercent ?? null),
+    minPlatformFeeCents:
+      values.minPlatformFeeCents ??
+      (platform ? FEES.MIN_PLATFORM_FEE_CENTS : null),
+    minTransferCents: values.minTransferCents ?? (platform ? 0 : null),
+    notes: level.scope === 'creator' ? (values.notes ?? null) : null,
+  });
+  return change.id;
 }
