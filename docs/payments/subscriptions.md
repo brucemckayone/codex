@@ -196,8 +196,8 @@ event never brings back a subscription that has ended:
 |---|---|
 | `checkout.session.completed` | Record the subscription (above) |
 | `invoice.payment_succeeded` | Update the period and status; split and pay out the invoice; renewal email on a cycle renewal; clear any streaming block |
-| `invoice.payment_failed` | `past_due` (only from `active`: a failed first payment stays `incomplete`); payment-failed email with the next retry date; **access continues**, no streaming block |
-| `customer.subscription.updated` | Mirror status, tier, interval, period and price. Stripe `canceled` withdraws access at once; the end (tombstone, cancelled email) is recorded by deletion, or at once for a course plan, which has no email to send |
+| `invoice.payment_failed` | `past_due` (only from `active`: a failed first payment stays `incomplete`); payment-failed email with the next retry date, except after Stripe's last retry (see [failed payments](#failed-payments)); **access continues**, no streaming block. A course subscription goes to its own handler, which sends the same email |
+| `customer.subscription.updated` | Mirror status, tier, interval, period, price and any [waiting tier move](#changing-tier). Then a due price change is swapped in, and a waiting move whose renewal has come is landed. Stripe `canceled` withdraws access at once; the end (tombstone, cancelled email) is recorded by deletion, or at once for a course plan, with its cancellation email |
 | `customer.subscription.deleted` | `cancelled` with a tombstone (`ended_at`); on the first end of the buyer's current subscription, access ends, the streaming block is written and the cancelled email goes |
 | `customer.subscription.paused` / `resumed` | `paused` with access withdrawn / back to the status Stripe reports; never for an ended row |
 | `customer.subscription.trial_will_end` | Email only (no trials are configured) |
@@ -226,6 +226,32 @@ split and paid out exactly like a sale ([fees-and-splits.md](fees-and-splits.md#
 There is no immediate cancellation, except that a full refund ends a
 subscription (see [refunds](#refunds)).
 
+### Course subscriptions on the account page
+
+Account › Subscriptions lists course subscriptions beside memberships
+(`Codex-2hxff.52`).
+
+| Route | Effect |
+|---|---|
+| `GET /subscriptions/courses/mine` | The caller's live course subscriptions (`active`, `past_due`, `cancelling`, `paused`; not ended, not a duplicate), newest first, paginated |
+| `POST /subscriptions/courses/:courseSubscriptionId/cancel` | Cancels at the end of the paid period, as for a membership |
+| `POST /subscriptions/courses/:courseSubscriptionId/reactivate` | Undoes it before the period ends |
+
+- Each is scoped to the caller: another user's id, or one the list does not
+  show, is `COURSE_SUBSCRIPTION_NOT_FOUND` (404).
+- Reactivate is refused with `COURSE_NOT_ON_SALE` (409) when the course is off
+  sale or deleted: the off-sale sweep cancelled it. A plan that only stopped
+  taking new subscribers can be reactivated (owner decision Q6).
+- The Stripe keys include the period and the row's version, so cancel,
+  reactivate, cancel inside Stripe's 24 hours is three writes, not a replay.
+- Each card shows what it bills (`course_subscriptions.amount_cents`), which
+  the course webhooks copy from the item's price on created, updated and paid.
+  A row made before that has none, and the card shows no price rather than a
+  guess. `packages/database/scripts/backfill-course-subscription-amounts.ts`
+  fills them once after the deploy: a dry run by default, bounded
+  (`--limit`, `--after`), and a no-op when re-run. It runs in production only
+  with the owner's OK.
+
 When a course is taken off sale because its creator was removed, each live
 course subscription to it is set to cancel at period end, with Stripe
 idempotency key `course_off_sale_cancel_{id}`. Up to 50 are cancelled at once
@@ -244,18 +270,87 @@ it must be at most 10 minutes old and inside the current period (owner decision
 `TIER_CHANGE_PREVIEW_EXPIRED` (409), and the subscriber is shown a fresh
 preview to confirm.
 
-- **Upgrade** (higher recurring price): takes effect immediately and the
+"Up or down" is judged by price, comparing the two plans on the subscriber's
+**current** billing period (owner decision Q1), against what they pay now: the
+held amount while a move waits (below). The preview says when the change
+happens (`takesEffect`: `now` or `period_end`).
+
+- **Upgrade** (another tier, dearer): takes effect immediately and the
   prorated difference is charged now. If that payment fails, Stripe keeps the
   old tier and the API returns 402 with a plain message — never Stripe's raw
-  error text, which is logged with an errorId instead. The idempotency key includes the
-  target price and the proration date; a downgrade's does too.
-- **Downgrade** (lower recurring price): takes effect at the **end of the paid
-  period**; the subscriber keeps the higher tier until then (owner decision
-  P-5, "At period end") — **gap**: `Codex-2hxff.16` (today it is immediate).
-- **Switching interval** is classified the same way, by recurring price.
+  error text, which is logged with an errorId instead. The idempotency key
+  includes the target price and the proration date.
+- **Downgrade** (another tier, cheaper): waits for the **end of the paid
+  period** (owner decisions P-5 and T1); the subscriber keeps the dearer tier,
+  and its access, until then. See [waiting moves](#waiting-moves).
+- **Same price** (owner decision Q4): switches now with no proration; nothing
+  is charged or credited.
+- **The same tier on the other billing period** switches now, as before: a
+  credit for the unused time, or a charge.
+- **Another tier on the other billing period** switches now when it is not
+  cheaper. A cheaper one is two steps (T1), refused with
+  `TIER_CHANGE_TWO_STEPS` (422) and `details.firstStep`, the same-period
+  change to offer first.
+
+Refused before Stripe is written to, each 409 with `details.code`:
+
+| Code | When |
+|---|---|
+| `TIER_CHANGE_CANCELLING` | Set to cancel: reactivate first (owner decision Q2) |
+| `PENDING_MOVE_KEEP_FIRST` | A move waits, and the change would move money now (a dearer plan), or is to the plan they are on: Keep current plan first (T2) |
+| `TIER_CHANGE_INTERVAL_WHILE_MOVING` | A move waits, and the change switches billing period (Q3) |
+| `SUBSCRIPTION_DISPUTED` | A chargeback is open ([subscription disputes](subscription-disputes.md)) |
 
 A change made in our UI is the only way to change tier — see
 [the billing portal](#billing-portal).
+
+### Waiting moves
+
+A move to a cheaper plan is not a Stripe subscription schedule (owner
+decision T1). It is the price-change machinery's immediate path
+(`packages/subscription/src/services/tier-move.ts`):
+
+- **The write.** One Stripe update puts the cheaper Price on the item with
+  `proration_behavior: 'none'`, so nothing is charged or credited today and
+  the renewal bills the cheaper price. `codex_tier_id` stays on the current
+  tier, so access does not move early. The metadata records the move
+  (`codex_move_tier_id`, `codex_move_at` = the renewal, unix seconds) and the
+  hold: the exact Price and amount the period was paid at
+  (`codex_hold_price_id`, `codex_hold_amount`), and any pending price change
+  on the tier being left, parked (`codex_hold_pending_price_*`). Our row
+  mirrors it at once in `pending_tier_id`, `pending_tier_from` and
+  `held_amount_cents` (all three or none).
+- **Latest wins** (T2). Another cheaper plan replaces the move and keeps the
+  first hold, so Keep still puts back what was paid.
+- **Keep current plan** (`POST /subscriptions/keep-current-plan`, rate limit
+  `strict`): puts the exact held Price back with no proration, so a
+  grandfathered subscriber stays grandfathered, clears the move, and makes a
+  parked price change live again. After the renewal it lands on, it is
+  refused with `MOVE_ALREADY_LANDED` (409). Its Stripe key includes the row's
+  version, so Keep, a new move and Keep again inside 24 hours all write.
+- **The flip.** The renewal's `customer.subscription.updated` lands it, read
+  from the live subscription since events arrive late: once the item's period
+  starts on or after `codex_move_at`, `codex_tier_id` becomes the target and
+  every move and hold key goes (key `move-apply:{sub}:{tier}:{at}`). A
+  past-due or paused subscription flips too; a cancelled one never does, and
+  its row drops the move. A stale event that puts the move back on the row is
+  mirrored again from Stripe. A transient Stripe failure is retried by Stripe;
+  a permanent one is one `tier_move.apply_failed` alert with an errorId, and
+  the subscriber keeps the dearer plan at the cheaper price until it is fixed.
+- **The backstop.** ecom-api's existing hourly wake flips any move whose
+  renewal is more than an hour past (at most 50 a run, oldest first), and
+  alerts, once, what it could not flip. No new cron.
+- **Ending.** A move survives a cancel until the subscription ends; the
+  tombstone drops it.
+- **Deleting a tier** that subscribers are waiting to move to is refused
+  (`TIER_HAS_SUBSCRIBERS`, with `movingInCount`), as for its subscribers. The
+  delete impact Studio reads (`PlanAccessService.getDeleteImpact`) carries
+  `movingInCount` and `lastMoveAt`, the last of their dates.
+
+Not yet (`Codex-2hxff.86`): the price-change fan-out's rules for a subscriber
+moving away from a repriced tier, or to one, and putting a kept subscriber
+back into a price change they were skipped for. Until then a Keep on a tier
+repriced during the wait logs a warning naming the subscription.
 
 ## Price changes
 
@@ -344,8 +439,9 @@ subscribers on that interval are then each handled by `schedulePriceChange`
 - A second change before the first has landed **replaces** it (owner decision
   2026-10-13, "Latest wins"): one move, to the newest price, at the first
   renewal at least 30 days after the newest email.
-- A tier change clears a pending price change; cancelling and reactivating
-  keep it.
+- A tier change made now clears a pending price change; cancelling and
+  reactivating keep it. A [waiting move](#waiting-moves) parks it, and Keep
+  current plan restores it.
 - The notice (`subscription-tier-price-change`) gives the date of the renewal
   that first bills the new price. The "from" figure is what that subscriber is
   billed today, not the previous list price: a tier quotes the subscription's
@@ -409,7 +505,8 @@ supported way to re-send one subscriber's notice. The fixes are filed:
 
 The mechanism is this deferred switch, not Stripe subscription schedules (owner
 decision 2026-10-13): schedules would have had to take over cancel, reactivate
-and tier change. Scheduled downgrades (`Codex-2hxff.16`) will still need them.
+and tier change. Downgrades at period end use the same machinery, not
+schedules (`Codex-2hxff.16`, [waiting moves](#waiting-moves)).
 
 ## Failed payments
 
@@ -418,6 +515,10 @@ Owner decision P-3, "After retries fail".
 - A failed renewal makes the subscription `past_due`. The subscriber **keeps
   access** while Stripe retries the card on the retry schedule set in the Stripe
   Dashboard, sees the existing "update your card" banner, and is emailed.
+- The payment-failed email names the next retry. After Stripe's **last** retry
+  there is none, so no payment-failed email goes (owner decision Q5,
+  2026-10-30): Stripe ends the subscription and the cancellation email
+  follows. Course subscriptions alike, and not for an ended or duplicate one.
 - When the retries are exhausted, Stripe cancels the subscription and access
   ends. An `unpaid` status is treated the same way.
 - This relies on the Stripe Dashboard: "If all retries for a payment fail"
@@ -502,12 +603,15 @@ configuration, which allows cancelling.
 
 ## Emails
 
+Course subscriptions get the same templates (`Codex-2hxff.52`), naming the
+course as the plan.
+
 | Template | When |
 |---|---|
 | `subscription-created` | The subscription is recorded |
 | `subscription-renewed` | A cycle renewal is paid |
-| `payment-failed` | A renewal fails (with the next retry date) |
+| `payment-failed` | A renewal fails (with the next retry date); not after Stripe's last retry (Q5) |
 | `subscription-tier-price-change` | A price changes — sent at least 30 days before the new price applies, and before the move is scheduled: no accepted notice, no move (`Codex-2hxff.43`). Says the subscription "renews at the new price from {{effectiveDate}}"; migration `0098` rewrote the old "on the next billing cycle" sentence on existing rows (`Codex-2hxff.35`) |
-| `subscription-cancelled` | The subscription ends |
+| `subscription-cancelled` | The subscription ends (the first end only). Not for a course subscription whose course is off sale: `course-no-longer-offered` already went |
 | `course-no-longer-offered` | A course subscription is cancelled because the course was taken off sale; gives the date access ends |
 | `trial-ending-soon` | A trial is about to end (no trials are configured today) |

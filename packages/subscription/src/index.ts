@@ -146,7 +146,6 @@ export {
   type PayoutReleasedMailer,
   SUBSCRIBER_HIDDEN_COLUMNS,
   SubscriptionService,
-  TIER_MOVE_BACKSTOP_LIMIT,
 } from './services/subscription-service';
 export { MOVE_TIER_ID_KEY } from './services/tier-move';
 export {

@@ -37,15 +37,15 @@ import {
 /** Metadata key: the tier the member moves to at the renewal. */
 export const MOVE_TIER_ID_KEY = 'codex_move_tier_id';
 /** Metadata key: unix seconds — the renewal the move lands on. */
-export const MOVE_AT_KEY = 'codex_move_at';
+const MOVE_AT_KEY = 'codex_move_at';
 /** Metadata key: the Price the current period was paid at. */
-export const HOLD_PRICE_ID_KEY = 'codex_hold_price_id';
+const HOLD_PRICE_ID_KEY = 'codex_hold_price_id';
 /** Metadata key: that Price's amount, in pence. */
-export const HOLD_AMOUNT_KEY = 'codex_hold_amount';
+const HOLD_AMOUNT_KEY = 'codex_hold_amount';
 /** Metadata key: a `codex_pending_price_id` parked while the move waits. */
-export const HOLD_PENDING_PRICE_ID_KEY = 'codex_hold_pending_price_id';
+const HOLD_PENDING_PRICE_ID_KEY = 'codex_hold_pending_price_id';
 /** Metadata key: its `codex_pending_price_from`. */
-export const HOLD_PENDING_PRICE_FROM_KEY = 'codex_hold_pending_price_from';
+const HOLD_PENDING_PRICE_FROM_KEY = 'codex_hold_pending_price_from';
 
 /** Setting a metadata key to '' deletes it in Stripe. */
 export const CLEAR_MOVE_METADATA: Record<string, string> = {

@@ -281,13 +281,13 @@ const NO_PENDING_MOVE = {
 } as const;
 
 /** Waiting moves the hourly backstop flips per run (data design §5.2). */
-export const TIER_MOVE_BACKSTOP_LIMIT = 50;
+const TIER_MOVE_BACKSTOP_LIMIT = 50;
 
 /**
  * The backstop takes a move this long after its renewal: before then the
  * renewal's own `customer.subscription.updated` is the flip's.
  */
-export const TIER_MOVE_BACKSTOP_GRACE_MS = 60 * 60 * 1000;
+const TIER_MOVE_BACKSTOP_GRACE_MS = 60 * 60 * 1000;
 
 /**
  * Payees one payouts sweep claims (Codex-2hxff.13). Each costs an
