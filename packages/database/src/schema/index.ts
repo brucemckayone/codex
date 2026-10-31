@@ -14,6 +14,7 @@ export * from './creator-onboarding';
 export * from './disputes';
 export * from './ecommerce';
 export * from './entitlements';
+export * from './fee-changes';
 export * from './fee-config';
 export * from './followers';
 export * from './journeys';
