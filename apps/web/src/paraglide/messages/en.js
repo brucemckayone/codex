@@ -6031,6 +6031,30 @@ export const media_tile_waiting_config = () => `Our processing service needs att
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const media_tile_queued_step = () => `Waiting for a transcoder`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_tile_queued = () => `Our processing service is starting a machine for this, which can take a few minutes after an update. It will begin on its own; you don't need to do anything.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_tile_queued_overdue = () => `This is taking longer than usual: our processing service hasn't got a machine free. We've told the team; it will begin on its own.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const media_tile_stopped = () => `The upload stopped before it finished. Upload the file again.`
 
 

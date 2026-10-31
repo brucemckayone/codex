@@ -1,6 +1,7 @@
 """Deploy a new transcoder image to the RunPod endpoint, and check its health.
 
     python update_runpod_endpoint.py           # swap the endpoint's image
+    python update_runpod_endpoint.py --warm    # start a worker on it now
     python update_runpod_endpoint.py --health  # read the endpoint's live settings
 
 They are separate workflow steps so a paused endpoint turns the health step
@@ -23,6 +24,15 @@ MAX_IDLE_TIMEOUT_S = 60
 # A job is killed at the endpoint's execution timeout, with no webhook.
 MIN_EXECUTION_TIMEOUT_MS = 60 * 60 * 1000
 HEALTH_READ_ATTEMPTS = 3
+
+# The job API, which the management calls above do not serve.
+JOBS_URL = "https://api.runpod.ai/v2"
+WARM_WAIT_S = 10 * 60
+WARM_POLL_S = 10
+# Normal priority, unlike the cron's low-priority keep-alive: starting a
+# worker is the point. RunPod drops a job still queued at its ttl.
+WARM_POLICY = {"ttl": 15 * 60 * 1000, "executionTimeout": 60 * 1000}
+JOB_ENDED = {"COMPLETED", "FAILED", "CANCELLED", "TIMED_OUT"}
 
 
 def graphql(headers, operation, query, variables=None):
@@ -257,25 +267,45 @@ def _int_or_none(value):
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
+def _json_object(call, url, **kwargs):
+    """The JSON object `call` answers with, or (None, why) when there is none."""
+    try:
+        response = call(url, **kwargs)
+        response.raise_for_status()
+        body = response.json()
+    except (requests.RequestException, ValueError) as e:
+        return None, str(e)
+    if not isinstance(body, dict):
+        return None, f"answer is not an object: {body!r}"
+    return body, None
+
+
+def _endpoint_env():
+    """(api key, endpoint id), or None after naming what is missing."""
+    api_key = os.environ.get("RUNPOD_API_KEY")
+    endpoint_id = os.environ.get("RUNPOD_ENDPOINT_ID")
+    if not api_key or not endpoint_id:
+        print(
+            "❌ Missing required environment variables: RUNPOD_API_KEY, RUNPOD_ENDPOINT_ID"
+        )
+        return None
+    return api_key, endpoint_id
+
+
 def read_endpoint(api_key, endpoint_id):
     """The endpoint's settings, or (None, why) when they could not be read.
 
     Flattened from REST v2's shape. Only workers.max is required: it is what
     says whether the endpoint is paused.
     """
-    try:
-        response = requests.get(
-            f"{REST_URL}/serverless/{endpoint_id}",
-            headers={"Authorization": f"Bearer {api_key}"},
-            timeout=30,
-        )
-        response.raise_for_status()
-        endpoint = response.json()
-    except (requests.RequestException, ValueError) as e:
-        return None, str(e)
-
-    if not isinstance(endpoint, dict):
-        return None, f"config is not an object: {endpoint!r}"
+    endpoint, why = _json_object(
+        requests.get,
+        f"{REST_URL}/serverless/{endpoint_id}",
+        headers={"Authorization": f"Bearer {api_key}"},
+        timeout=30,
+    )
+    if endpoint is None:
+        return None, why
     workers = endpoint.get("workers")
     workers = workers if isinstance(workers, dict) else {}
     workers_max = _int_or_none(workers.get("max"))
@@ -299,13 +329,10 @@ def check_endpoint_health():
     This reads configuration only, not whether a worker can start; the daily
     ping job is what proves that.
     """
-    api_key = os.environ.get("RUNPOD_API_KEY")
-    endpoint_id = os.environ.get("RUNPOD_ENDPOINT_ID")
-    if not api_key or not endpoint_id:
-        print(
-            "❌ Missing required environment variables: RUNPOD_API_KEY, RUNPOD_ENDPOINT_ID"
-        )
+    env = _endpoint_env()
+    if env is None:
         return 1
+    api_key, endpoint_id = env
 
     for attempt in range(1, HEALTH_READ_ATTEMPTS + 1):
         endpoint, why = read_endpoint(api_key, endpoint_id)
@@ -342,9 +369,84 @@ def check_endpoint_health():
     return 0
 
 
+def warm_transcoder():
+    """Start a worker on the new image now: 0 once one answers a ping.
+
+    A worker on a new image pulls it before its first job, which takes
+    minutes; without this the first upload after a deploy waits for that
+    (Codex-t359w). 4 when no worker answers within WARM_WAIT_S, or one ends
+    the ping any way but COMPLETED: red, so a deploy whose image cannot
+    start is seen at once rather than by a creator.
+    """
+    env = _endpoint_env()
+    if env is None:
+        return 1
+    api_key, endpoint_id = env
+    headers = {"Authorization": f"Bearer {api_key}"}
+
+    sent, why = _json_object(
+        requests.post,
+        f"{JOBS_URL}/{endpoint_id}/run",
+        json={"input": {"ping": True}, "policy": WARM_POLICY},
+        headers=headers,
+        timeout=30,
+    )
+    if sent is None:
+        print(f"::error::The warm-up ping was not accepted: {why}")
+        return 4
+    job_id = sent.get("id")
+    if not isinstance(job_id, str) or not job_id:
+        print(f"::error::The warm-up ping was accepted without a job id: {sent!r}")
+        return 4
+
+    print(f"🔥 Warm-up ping {job_id} sent; waiting up to {WARM_WAIT_S // 60} min")
+    deadline = time.monotonic() + WARM_WAIT_S
+    state = None
+    while time.monotonic() < deadline:
+        time.sleep(WARM_POLL_S)
+        job, why = _json_object(
+            requests.get,
+            f"{JOBS_URL}/{endpoint_id}/status/{job_id}",
+            headers=headers,
+            timeout=10,
+        )
+        if job is None:
+            print(f"⏳ Status read failed, asking again: {why}")
+            continue
+        if job.get("status") != state:
+            state = job.get("status")
+            print(f"⏳ {state}")
+        if state == "COMPLETED":
+            delay_ms = _int_or_none(job.get("delayTime"))
+            waited = (
+                f"{delay_ms / 1000:.0f}s"
+                if delay_ms is not None
+                else "an unreported time"
+            )
+            print(
+                f"✅ Transcoder warm: a worker answered after {waited} in RunPod's queue"
+            )
+            return 0
+        if state in JOB_ENDED:
+            print(
+                f"::error::The warm-up ping ended {state}: "
+                f"{str(job.get('error'))[:500]}. The new image may not start."
+            )
+            return 4
+
+    print(
+        f"::error::No worker answered the warm-up ping within {WARM_WAIT_S // 60} "
+        f"minutes (last state: {state}). Uploads wait for one too: check the "
+        "endpoint's workers in the RunPod console."
+    )
+    return 4
+
+
 def main(argv):
     if argv == ["--health"]:
         return check_endpoint_health()
+    if argv == ["--warm"]:
+        return warm_transcoder()
     update_endpoint()
     return 0
 

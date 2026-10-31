@@ -7,6 +7,8 @@ import {
   MIN_RECONCILE_AGE_MS,
   RECONCILE_MARGIN_MS,
   reconcileDueAt,
+  UNSTARTED_CHECKS_MS,
+  unstartedJobAction,
   waitingAction,
 } from '../maintenance-rules';
 
@@ -84,6 +86,46 @@ describe('lostJobAction', () => {
 
   it('puts a row with no job id back to waiting', () => {
     expect(lostJobAction('no_job', 0)).toMatchObject({ kind: 'wait' });
+  });
+});
+
+describe('unstartedJobAction (Codex-t359w)', () => {
+  it('asks at 2, 5 and 10 minutes after dispatch: the owner-approved times', () => {
+    expect(UNSTARTED_CHECKS_MS).toEqual([2 * 60_000, 5 * 60_000, 10 * 60_000]);
+  });
+
+  it('asks every one well before the hourly reconcile would', () => {
+    for (const at of UNSTARTED_CHECKS_MS) {
+      expect(at).toBeLessThan(MIN_RECONCILE_AGE_MS);
+    }
+  });
+
+  it('a job RunPod has queued is waiting for a worker', () => {
+    expect(unstartedJobAction({ ok: true, state: 'IN_QUEUE' })).toEqual({
+      kind: 'queued',
+    });
+  });
+
+  it('a job a worker has is running: its steps follow', () => {
+    expect(unstartedJobAction({ ok: true, state: 'IN_PROGRESS' })).toEqual({
+      kind: 'running',
+    });
+  });
+
+  it('an answer RunPod could not give waits for the next ask', () => {
+    expect(unstartedJobAction('unanswered')).toEqual({ kind: 'ask_later' });
+  });
+
+  it.each([
+    ['COMPLETED', 'WEBHOOK_LOST'],
+    ['GONE', 'WEBHOOK_LOST'],
+    ['FAILED', 'INFRA_ERROR'],
+    ['CANCELLED', 'TIMED_OUT'],
+    ['TIMED_OUT', 'TIMED_OUT'],
+  ] as const)('fails a job RunPod reports %s as %s, as the reconcile would', (state, code) => {
+    const answer = { ok: true, state } as const;
+    expect(unstartedJobAction(answer)).toEqual(lostJobAction(answer, 0));
+    expect(unstartedJobAction(answer)).toMatchObject({ kind: 'fail', code });
   });
 });
 

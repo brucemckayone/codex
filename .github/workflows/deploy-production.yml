@@ -550,6 +550,18 @@ jobs:
           IMAGE_TAG: ${{ steps.transcoder.outputs.tag }}
         run: python infrastructure/runpod/scripts/update_runpod_endpoint.py
 
+      # The first job after an image switch waits for a worker to fetch and
+      # start the new image: 2m20s on 2026-10-31, while the next worker took
+      # seconds (Codex-t359w). A ping takes that wait here, not in a creator's
+      # upload, and proves the image starts: red when no worker answers within
+      # 10 minutes. The health step below still runs.
+      - name: Warm the transcoder
+        timeout-minutes: 12
+        env:
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+          RUNPOD_ENDPOINT_ID: ${{ secrets.RUNPOD_ENDPOINT_ID }}
+        run: python infrastructure/runpod/scripts/update_runpod_endpoint.py --warm
+
       # Its own step, and run whatever failed before it: red when the endpoint
       # is paused or its settings cannot be read, while the step above, which
       # deployed the image, keeps its own result.
