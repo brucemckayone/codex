@@ -20,6 +20,7 @@ import {
   londonDate,
   londonDaysBetween,
   nextBalanceEpisode,
+  nextPriceMovesRunAfter,
   payoutReleasedBankFields,
   planBankPayout,
   planBankPayouts,
@@ -739,6 +740,37 @@ describe('the London clock', () => {
     expect(runsOn('2026-10-25')).toEqual([
       at('2026-10-25T08:00:00Z').getTime(),
     ]);
+  });
+
+  it('nextPriceMovesRunAfter: the next top of the hour, strictly after, never the payout run', () => {
+    expect(nextPriceMovesRunAfter(at('2027-01-15T10:20:00Z'))).toEqual(
+      at('2027-01-15T11:00:00Z')
+    );
+    // Exactly on the hour: that run may already be under way.
+    expect(nextPriceMovesRunAfter(at('2027-01-15T11:00:00Z'))).toEqual(
+      at('2027-01-15T12:00:00Z')
+    );
+    // Winter: 08:00 UTC is the payout run, so 07:xx waits for 09:00.
+    expect(nextPriceMovesRunAfter(at('2027-01-15T06:59:00Z'))).toEqual(
+      at('2027-01-15T07:00:00Z')
+    );
+    expect(nextPriceMovesRunAfter(at('2027-01-15T07:10:00Z'))).toEqual(
+      at('2027-01-15T09:00:00Z')
+    );
+    // Summer: the payout run is 07:00 UTC.
+    expect(nextPriceMovesRunAfter(at('2026-07-15T06:30:00Z'))).toEqual(
+      at('2026-07-15T08:00:00Z')
+    );
+    expect(nextPriceMovesRunAfter(at('2026-07-15T07:30:00Z'))).toEqual(
+      at('2026-07-15T08:00:00Z')
+    );
+    // Both DST change days.
+    expect(nextPriceMovesRunAfter(at('2026-03-29T06:10:00Z'))).toEqual(
+      at('2026-03-29T08:00:00Z')
+    );
+    expect(nextPriceMovesRunAfter(at('2026-10-25T07:10:00Z'))).toEqual(
+      at('2026-10-25T09:00:00Z')
+    );
   });
 
   it('firstLondon0800After is strictly after, and crosses the DST changes', () => {
