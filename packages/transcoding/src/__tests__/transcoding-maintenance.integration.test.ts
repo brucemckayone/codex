@@ -68,6 +68,7 @@ describe.skipIf(!HAS_DB || !ALONE_WITH_ITS_ROWS)(
       dispatchRefused: Mock;
       endpointStuck: Mock;
       pingRefused: Mock;
+      jobNotStarted: Mock;
       uploadsIncomplete: Mock;
     };
     let maintenance: TranscodingMaintenance;
@@ -111,6 +112,7 @@ describe.skipIf(!HAS_DB || !ALONE_WITH_ITS_ROWS)(
         dispatchRefused: vi.fn(),
         endpointStuck: vi.fn(),
         pingRefused: vi.fn(),
+        jobNotStarted: vi.fn(),
         uploadsIncomplete: vi.fn(),
       };
       const transcoding = new TranscodingService({
@@ -372,6 +374,186 @@ describe.skipIf(!HAS_DB || !ALONE_WITH_ITS_ROWS)(
           transcodingErrorCode: 'TRANSCODER_UNAVAILABLE',
           transcodingAttempts: 1,
         });
+      });
+    });
+
+    // Codex-t359w: the status object asks about a job with no progress at 2,
+    // 5 and 10 minutes, not 45 or more minutes later at the reconcile.
+    describe('early asks about a job with no progress', () => {
+      async function dispatched(jobId: string, minutesAgo = 2) {
+        const media = await insert({
+          status: MEDIA_STATUS.TRANSCODING,
+          runpodJobId: jobId,
+          transcodingAttempts: 1,
+          updatedAt: ago(minutesAgo * MINUTE),
+        });
+        return {
+          media,
+          job: {
+            mediaId: media.id,
+            jobId,
+            dispatchedAt: media.updatedAt.getTime(),
+            last: false,
+          },
+        };
+      }
+
+      const ask = (jobs: Parameters<typeof maintenance.checkUnstarted>[0]) =>
+        maintenance.checkUnstarted(jobs, Date.now() + 60_000);
+
+      it('fails a job RunPod reports failed, and emails once', async () => {
+        const { media, job } = await dispatched('job-failed');
+        api.jobStatus.mockResolvedValue({ ok: true, state: 'FAILED' });
+
+        const outcomes = await ask([job]);
+
+        expect(outcomes.get(media.id)).toBe('failed');
+        expect(await read(media.id)).toMatchObject({
+          status: 'failed',
+          transcodingErrorCode: 'INFRA_ERROR',
+          transcodingAttempts: 1,
+        });
+        expect(failureAlertsFor(media.id)).toHaveLength(1);
+      });
+
+      it.each([
+        ['CANCELLED', 'TIMED_OUT'],
+        ['TIMED_OUT', 'TIMED_OUT'],
+        ['COMPLETED', 'WEBHOOK_LOST'],
+      ] as const)('fails a job RunPod reports %s as %s', async (state, code) => {
+        const { media, job } = await dispatched(`job-${state}`);
+        api.jobStatus.mockResolvedValue({ ok: true, state });
+
+        expect((await ask([job])).get(media.id)).toBe('failed');
+        expect(await read(media.id)).toMatchObject({
+          status: 'failed',
+          transcodingErrorCode: code,
+        });
+      });
+
+      it('sends again a job RunPod dropped before it started, the attempt given back', async () => {
+        const { media, job } = await dispatched('job-dropped');
+        api.jobStatus.mockResolvedValue({ ok: true, state: 'GONE' });
+
+        expect((await ask([job])).get(media.id)).toBe('requeued');
+        expect(await read(media.id)).toMatchObject({
+          status: 'uploaded',
+          transcodingErrorCode: 'TRANSCODER_UNAVAILABLE',
+          transcodingAttempts: 0,
+        });
+        expect(failureAlertsFor(media.id)).toHaveLength(0);
+      });
+
+      it('writes nothing for a job RunPod still has queued', async () => {
+        const { media, job } = await dispatched('job-queued');
+        api.jobStatus.mockResolvedValue({ ok: true, state: 'IN_QUEUE' });
+
+        expect((await ask([job])).get(media.id)).toBe('queued');
+        expect(await read(media.id)).toMatchObject({
+          status: 'transcoding',
+          updatedAt: media.updatedAt,
+        });
+        expect(alerts.jobNotStarted).not.toHaveBeenCalled();
+      });
+
+      it('tells the owner of a job still queued at the last ask', async () => {
+        const { media, job } = await dispatched('job-stuck', 10);
+        api.jobStatus.mockResolvedValue({ ok: true, state: 'IN_QUEUE' });
+
+        expect((await ask([{ ...job, last: true }])).get(media.id)).toBe(
+          'queued'
+        );
+        expect(alerts.jobNotStarted).toHaveBeenCalledWith(media.id);
+      });
+
+      it('writes nothing for a job a worker has', async () => {
+        const { media, job } = await dispatched('job-running');
+        api.jobStatus.mockResolvedValue({ ok: true, state: 'IN_PROGRESS' });
+
+        expect((await ask([job])).get(media.id)).toBe('running');
+        expect((await read(media.id)).status).toBe('transcoding');
+      });
+
+      it('lets a webhook that landed first win', async () => {
+        const { media, job } = await dispatched('job-raced');
+        // The failure webhook wrote the row after the object read it.
+        await db
+          .update(mediaItems)
+          .set({
+            status: MEDIA_STATUS.FAILED,
+            transcodingErrorCode: 'CORRUPT_INPUT',
+            updatedAt: new Date(),
+          })
+          .where(eq(mediaItems.id, media.id));
+        api.jobStatus.mockResolvedValue({ ok: true, state: 'FAILED' });
+
+        expect((await ask([job])).get(media.id)).toBe('gone');
+        // The webhook's own code stands, not the early check's INFRA_ERROR.
+        expect(await read(media.id)).toMatchObject({
+          status: 'failed',
+          transcodingErrorCode: 'CORRUPT_INPUT',
+        });
+        expect(failureAlertsFor(media.id)).toHaveLength(0);
+      });
+
+      it('still fails an ended job whose title was edited meanwhile', async () => {
+        const { media, job } = await dispatched('job-edited');
+        // A title or description edit moves updatedAt and nothing else.
+        await db
+          .update(mediaItems)
+          .set({ updatedAt: new Date() })
+          .where(eq(mediaItems.id, media.id));
+        api.jobStatus.mockResolvedValue({ ok: true, state: 'FAILED' });
+
+        expect((await ask([job])).get(media.id)).toBe('failed');
+        expect((await read(media.id)).status).toBe('failed');
+      });
+
+      it("one job's failed write leaves the others what RunPod said", async () => {
+        const { media, job } = await dispatched('job-written');
+        // Not a uuid: its guarded write throws in Postgres.
+        const broken = { ...job, mediaId: 'not-a-uuid', jobId: 'job-broken' };
+        api.jobStatus.mockResolvedValue({ ok: true, state: 'FAILED' });
+
+        const outcomes = await ask([broken, job]);
+
+        expect(outcomes.get('not-a-uuid')).toBe('ask_later');
+        expect(outcomes.get(media.id)).toBe('failed');
+        expect((await read(media.id)).status).toBe('failed');
+      });
+
+      it('writes nothing to a row deleted meanwhile', async () => {
+        const { media, job } = await dispatched('job-deleted');
+        await db
+          .update(mediaItems)
+          .set({ deletedAt: new Date(job.dispatchedAt) })
+          .where(eq(mediaItems.id, media.id));
+        api.jobStatus.mockResolvedValue({ ok: true, state: 'FAILED' });
+
+        expect((await ask([job])).get(media.id)).toBe('gone');
+        expect((await read(media.id)).status).toBe('transcoding');
+      });
+
+      it('writes nothing for a job the row no longer holds (Try again sent another)', async () => {
+        const { media, job } = await dispatched('job-new');
+        api.jobStatus.mockResolvedValue({ ok: true, state: 'FAILED' });
+
+        expect((await ask([{ ...job, jobId: 'job-old' }])).get(media.id)).toBe(
+          'gone'
+        );
+        expect((await read(media.id)).status).toBe('transcoding');
+      });
+
+      it('stops asking once RunPod cannot answer: the rest wait for their next ask', async () => {
+        const first = await dispatched('job-a');
+        const second = await dispatched('job-b');
+        api.jobStatus.mockResolvedValue({ ok: false, reason: 'unavailable' });
+
+        const outcomes = await ask([first.job, second.job]);
+
+        expect(api.jobStatus).toHaveBeenCalledTimes(1);
+        expect(outcomes.get(first.media.id)).toBe('ask_later');
+        expect(outcomes.get(second.media.id)).toBe('ask_later');
       });
     });
 
