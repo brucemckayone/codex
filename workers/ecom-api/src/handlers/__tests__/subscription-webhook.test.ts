@@ -31,6 +31,8 @@ vi.mock('@codex/subscription', () => ({
   // The renewal-time price swap (Codex-2hxff.3).
   applyDuePendingPriceChange: vi.fn().mockResolvedValue(false),
   PENDING_PRICE_ID_KEY: 'codex_pending_price_id',
+  // The renewal flip of a waiting tier move (Codex-2hxff.16) reads it.
+  MOVE_TIER_ID_KEY: 'codex_move_tier_id',
   // The handler also imports `invalidateForUser` — stub it so the module
   // mock is complete. Cache-invalidation contract is tested separately in
   // `subscription-webhook-invalidation.test.ts`.
@@ -114,6 +116,10 @@ describe('handleSubscriptionWebhook', () => {
   let mockMarkCheckoutCompleted: ReturnType<typeof vi.fn>;
   let mockHandleCourseCreated: ReturnType<typeof vi.fn>;
   let mockHandleCourseInvoiceSuccess: ReturnType<typeof vi.fn>;
+  let mockHandleCourseInvoiceFailed: ReturnType<typeof vi.fn>;
+  let mockHandleCourseUpdated: ReturnType<typeof vi.fn>;
+  let mockHandleCourseDeleted: ReturnType<typeof vi.fn>;
+  let mockApplyDueTierMove: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -122,6 +128,10 @@ describe('handleSubscriptionWebhook', () => {
     mockMarkCheckoutCompleted = vi.fn().mockResolvedValue(undefined);
     mockHandleCourseCreated = vi.fn().mockResolvedValue(undefined);
     mockHandleCourseInvoiceSuccess = vi.fn().mockResolvedValue(undefined);
+    mockHandleCourseInvoiceFailed = vi.fn().mockResolvedValue(undefined);
+    mockHandleCourseUpdated = vi.fn().mockResolvedValue(undefined);
+    mockHandleCourseDeleted = vi.fn().mockResolvedValue(undefined);
+    mockApplyDueTierMove = vi.fn().mockResolvedValue('none');
     mockHandleUpdated = vi.fn().mockResolvedValue(undefined);
     mockHandleDeleted = vi.fn().mockResolvedValue(undefined);
     mockHandleInvoiceSuccess = vi.fn().mockResolvedValue(undefined);
@@ -159,6 +169,8 @@ describe('handleSubscriptionWebhook', () => {
           handleTrialWillEnd: mockHandleTrialWillEnd,
           // The paid checkout's reservation (Codex-2hxff.15).
           markCheckoutSessionCompleted: mockMarkCheckoutCompleted,
+          // The renewal flip of a waiting tier move (Codex-2hxff.16).
+          applyDueTierMove: mockApplyDueTierMove,
         },
         // Dashboard sync-back path (Codex-s7h0y) goes through TierService,
         // stubbed with controllable apply* method behaviour.
@@ -170,9 +182,10 @@ describe('handleSubscriptionWebhook', () => {
         // method instead of a TypeError.
         courseSubscription: {
           handleCourseSubscriptionCreated: mockHandleCourseCreated,
-          handleCourseSubscriptionUpdated: vi.fn().mockResolvedValue(undefined),
-          handleCourseSubscriptionDeleted: vi.fn().mockResolvedValue(undefined),
+          handleCourseSubscriptionUpdated: mockHandleCourseUpdated,
+          handleCourseSubscriptionDeleted: mockHandleCourseDeleted,
           handleCourseInvoicePaymentSucceeded: mockHandleCourseInvoiceSuccess,
+          handleCourseInvoicePaymentFailed: mockHandleCourseInvoiceFailed,
         },
       } as unknown as WebhookServices['services'],
       background: (promise) => promise,
@@ -420,6 +433,75 @@ describe('handleSubscriptionWebhook', () => {
       vi.mocked(applyDuePendingPriceChange).mockRejectedValueOnce(flaky);
       const event = createEvent(STRIPE_EVENTS.SUBSCRIPTION_UPDATED, {
         id: 'sub_swap_flaky',
+        status: 'active',
+      });
+      const { context } = createContext();
+
+      await expect(
+        handleSubscriptionWebhook(event, mockStripe, context)
+      ).rejects.toBe(flaky);
+    });
+
+    // Codex-2hxff.16 §5.1: the renewal also lands a waiting move to a
+    // cheaper plan.
+    it('offers the subscription to the tier move flip AFTER the DB sync and the price swap', async () => {
+      const event = createEvent(STRIPE_EVENTS.SUBSCRIPTION_UPDATED, {
+        id: 'sub_flip_1',
+        status: 'past_due',
+      });
+      const { context, mock } = createContext();
+
+      await handleSubscriptionWebhook(event, mockStripe, context);
+
+      expect(mockApplyDueTierMove).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'sub_flip_1' })
+      );
+      const syncOrder = mockHandleUpdated.mock.invocationCallOrder[0] ?? 0;
+      const swapOrder =
+        vi.mocked(applyDuePendingPriceChange).mock.invocationCallOrder.at(-1) ??
+        0;
+      const flipOrder = mockApplyDueTierMove.mock.invocationCallOrder[0] ?? 0;
+      expect(syncOrder).toBeGreaterThan(0);
+      expect(swapOrder).toBeGreaterThan(syncOrder);
+      expect(flipOrder).toBeGreaterThan(swapOrder);
+      expect(mock._obs.error).not.toHaveBeenCalled();
+    });
+
+    it('a permanent flip failure is acknowledged, with one tier_move.apply_failed alert and an errorId', async () => {
+      const refused = Object.assign(new Error('No such price: price_gone'), {
+        type: 'StripeInvalidRequestError',
+        code: 'resource_missing',
+      });
+      mockApplyDueTierMove.mockRejectedValueOnce(refused);
+      const event = createEvent(STRIPE_EVENTS.SUBSCRIPTION_UPDATED, {
+        id: 'sub_flip_refused',
+        status: 'active',
+        metadata: { codex_move_tier_id: 'tier_basic' },
+      });
+      const { context, mock } = createContext();
+
+      await handleSubscriptionWebhook(event, mockStripe, context);
+
+      expect(mock._obs.error).toHaveBeenCalledTimes(1);
+      expect(mock._obs.error).toHaveBeenCalledWith(
+        'tier_move.apply_failed',
+        expect.objectContaining({
+          errorId: expect.any(String),
+          stripeSubscriptionId: 'sub_flip_refused',
+          pendingTierId: 'tier_basic',
+          errorType: 'StripeInvalidRequestError',
+          errorCode: 'resource_missing',
+        })
+      );
+    });
+
+    it('a transient flip failure is rethrown so Stripe redelivers', async () => {
+      const flaky = Object.assign(new Error('connection reset'), {
+        type: 'StripeConnectionError',
+      });
+      mockApplyDueTierMove.mockRejectedValueOnce(flaky);
+      const event = createEvent(STRIPE_EVENTS.SUBSCRIPTION_UPDATED, {
+        id: 'sub_flip_flaky',
         status: 'active',
       });
       const { context } = createContext();
@@ -1020,6 +1102,231 @@ describe('handleSubscriptionWebhook', () => {
         context.env,
         context.executionCtx,
         expect.objectContaining({ obs: mock._obs, stripe: mockStripe })
+      );
+    });
+  });
+
+  // ─── Every subscription event × member and course (Codex-2hxff.52) ──────
+  //
+  // Data design §9: which service handles each event for each kind, and
+  // whether the email its result carries is sent. Paused, resumed and
+  // trial_will_end have no course branch (owner, Codex-2hxff.89: no change):
+  // the member handler runs for both kinds.
+
+  describe('dispatch: 8 events × member and course', () => {
+    const COURSE = { type: 'course_subscription' };
+    const email = (templateName: string) => ({
+      to: 'buyer@example.com',
+      templateName,
+      category: 'transactional',
+      data: {},
+    });
+    const memberResult = (templateName: string) => ({
+      userId: 'user_1',
+      orgId: 'org_1',
+      email: email(templateName),
+    });
+    const courseResult = (templateName: string) => ({
+      userId: 'user_1',
+      organizationId: 'org_1',
+      email: email(templateName),
+    });
+
+    /** The event for `kind`; course ones carry the course metadata. */
+    function eventFor(type: string, course: boolean): Stripe.Event {
+      const metadata = course ? COURSE : {};
+      if (type === STRIPE_EVENTS.CHECKOUT_COMPLETED) {
+        vi.mocked(mockStripe.subscriptions.retrieve).mockResolvedValue(
+          createMockStripeSubscription({
+            id: 'sub_matrix',
+            metadata,
+          }) as unknown as Awaited<
+            ReturnType<typeof mockStripe.subscriptions.retrieve>
+          >
+        );
+        return createEvent(type, {
+          id: 'cs_matrix',
+          mode: 'subscription',
+          subscription: 'sub_matrix',
+        });
+      }
+      if (
+        type === STRIPE_EVENTS.INVOICE_PAYMENT_SUCCEEDED ||
+        type === STRIPE_EVENTS.INVOICE_PAYMENT_FAILED
+      ) {
+        vi.mocked(mockStripe.subscriptions.retrieve).mockResolvedValue(
+          createMockStripeSubscription({
+            id: 'sub_matrix',
+            metadata,
+          }) as unknown as Awaited<
+            ReturnType<typeof mockStripe.subscriptions.retrieve>
+          >
+        );
+        return createEvent(type, {
+          id: 'in_matrix',
+          parent: {
+            subscription_details: { subscription: 'sub_matrix', metadata },
+          },
+        });
+      }
+      return createEvent(type, {
+        id: 'sub_matrix',
+        status: 'active',
+        metadata,
+      });
+    }
+
+    type Row = {
+      event: string;
+      kind: 'member' | 'course';
+      handler: () => ReturnType<typeof vi.fn>;
+      result: Record<string, unknown>;
+      emails: string | null;
+      notCalled: Array<() => ReturnType<typeof vi.fn>>;
+    };
+    const rows: Row[] = [
+      {
+        event: STRIPE_EVENTS.CHECKOUT_COMPLETED,
+        kind: 'member',
+        handler: () => mockHandleCreated,
+        result: memberResult('subscription-created'),
+        emails: 'subscription-created',
+        notCalled: [() => mockHandleCourseCreated],
+      },
+      {
+        event: STRIPE_EVENTS.CHECKOUT_COMPLETED,
+        kind: 'course',
+        handler: () => mockHandleCourseCreated,
+        result: courseResult('subscription-created'),
+        emails: 'subscription-created',
+        notCalled: [() => mockHandleCreated],
+      },
+      {
+        event: STRIPE_EVENTS.SUBSCRIPTION_UPDATED,
+        kind: 'member',
+        handler: () => mockHandleUpdated,
+        result: { userId: 'user_1', orgId: 'org_1' },
+        emails: null,
+        notCalled: [],
+      },
+      {
+        event: STRIPE_EVENTS.SUBSCRIPTION_UPDATED,
+        kind: 'course',
+        handler: () => mockHandleCourseUpdated,
+        result: courseResult('subscription-cancelled'),
+        emails: 'subscription-cancelled',
+        notCalled: [() => mockHandleUpdated, () => mockApplyDueTierMove],
+      },
+      {
+        event: STRIPE_EVENTS.SUBSCRIPTION_DELETED,
+        kind: 'member',
+        handler: () => mockHandleDeleted,
+        result: memberResult('subscription-cancelled'),
+        emails: 'subscription-cancelled',
+        notCalled: [() => mockHandleCourseDeleted],
+      },
+      {
+        event: STRIPE_EVENTS.SUBSCRIPTION_DELETED,
+        kind: 'course',
+        handler: () => mockHandleCourseDeleted,
+        result: courseResult('subscription-cancelled'),
+        emails: 'subscription-cancelled',
+        notCalled: [() => mockHandleDeleted],
+      },
+      ...(['member', 'course'] as const).flatMap((kind) => [
+        {
+          event: STRIPE_EVENTS.SUBSCRIPTION_PAUSED,
+          kind,
+          handler: () => mockHandlePaused,
+          result: {},
+          emails: null,
+          notCalled: [],
+        },
+        {
+          event: STRIPE_EVENTS.SUBSCRIPTION_RESUMED,
+          kind,
+          handler: () => mockHandleResumed,
+          result: {},
+          emails: null,
+          notCalled: [],
+        },
+        {
+          event: STRIPE_EVENTS.SUBSCRIPTION_TRIAL_WILL_END,
+          kind,
+          handler: () => mockHandleTrialWillEnd,
+          result: memberResult('trial-ending-soon'),
+          emails: 'trial-ending-soon',
+          notCalled: [],
+        },
+      ]),
+      {
+        event: STRIPE_EVENTS.INVOICE_PAYMENT_SUCCEEDED,
+        kind: 'member',
+        handler: () => mockHandleInvoiceSuccess,
+        result: memberResult('subscription-renewed'),
+        emails: 'subscription-renewed',
+        notCalled: [() => mockHandleCourseInvoiceSuccess],
+      },
+      {
+        event: STRIPE_EVENTS.INVOICE_PAYMENT_SUCCEEDED,
+        kind: 'course',
+        handler: () => mockHandleCourseInvoiceSuccess,
+        result: courseResult('subscription-renewed'),
+        emails: 'subscription-renewed',
+        notCalled: [() => mockHandleInvoiceSuccess],
+      },
+      {
+        event: STRIPE_EVENTS.INVOICE_PAYMENT_FAILED,
+        kind: 'member',
+        handler: () => mockHandleInvoiceFailed,
+        result: memberResult('payment-failed'),
+        emails: 'payment-failed',
+        notCalled: [() => mockHandleCourseInvoiceFailed],
+      },
+      {
+        event: STRIPE_EVENTS.INVOICE_PAYMENT_FAILED,
+        kind: 'course',
+        handler: () => mockHandleCourseInvoiceFailed,
+        result: courseResult('payment-failed'),
+        emails: 'payment-failed',
+        notCalled: [() => mockHandleInvoiceFailed],
+      },
+    ];
+
+    it.each(
+      rows.map((row) => [row.event, row.kind, row] as const)
+    )('%s (%s)', async (type, kind, row) => {
+      row.handler().mockResolvedValueOnce(row.result);
+      const event = eventFor(type, kind === 'course');
+      const { context } = createContext();
+
+      await handleSubscriptionWebhook(event, mockStripe, context);
+
+      expect(row.handler()).toHaveBeenCalledTimes(1);
+      for (const other of row.notCalled) {
+        expect(other()).not.toHaveBeenCalled();
+      }
+      if (row.emails) {
+        expect(sendEmailToWorker).toHaveBeenCalledTimes(1);
+        expect(sendEmailToWorker).toHaveBeenCalledWith(
+          context.env,
+          context.executionCtx,
+          expect.objectContaining({ templateName: row.emails })
+        );
+      } else {
+        expect(sendEmailToWorker).not.toHaveBeenCalled();
+      }
+    });
+
+    it('a course payment failure goes to the course handler with its subscription id', async () => {
+      const event = eventFor(STRIPE_EVENTS.INVOICE_PAYMENT_FAILED, true);
+      const { context } = createContext();
+
+      await handleSubscriptionWebhook(event, mockStripe, context);
+
+      expect(mockHandleCourseInvoiceFailed).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'in_matrix' }),
+        'sub_matrix'
       );
     });
   });
