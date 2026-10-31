@@ -2260,7 +2260,7 @@ describe('SubscriptionService', () => {
       ).toBe(updated.amountCents);
     });
 
-    it('downgrade (Phase 1 fallback): keeps create_prorations, NO payment_behavior, its own idempotency key', async () => {
+    it('downgrade waits for the renewal (Codex-2hxff.16): no proration, NO payment_behavior, its own idempotency key', async () => {
       const { org, tier1, tier2 } = await createFullOrg('change-tier-down');
       // Subscribe on tier2 (priceMonthly=999) — split must sum to 999.
       const sub = takeFirst(
@@ -2286,15 +2286,29 @@ describe('SubscriptionService', () => {
         }
       ).mock.calls[0]!;
       const params = updateCall[1] as Record<string, unknown>;
-      expect(params.proration_behavior).toBe('create_prorations');
+      // The cheaper Price goes on the item for the next bill; nothing is
+      // credited or charged today, and access stays on tier2 until then.
+      expect(params.proration_behavior).toBe('none');
       expect(params.payment_behavior).toBeUndefined();
-      // Phase 1 downgrade still updates the local row immediately —
-      // Phase 2 replaces this with a scheduled change.
-      expect(params.proration_date).toEqual(expect.any(Number));
-      // A downgrade has a key too (Codex-2hxff.15, SUB-12): a retried one
-      // must not credit the customer twice.
+      expect(params.proration_date).toBeUndefined();
+      expect(params.metadata).toMatchObject({
+        codex_tier_id: tier2.id,
+        codex_move_tier_id: tier1.id,
+      });
+      // A move has a key too (Codex-2hxff.15, SUB-12), per preview: a
+      // retried one replays, a new one is a new write.
       expect(updateCall[2]).toEqual({
-        idempotencyKey: `downgrade_${sub.id}_${tier1.stripePriceMonthlyId}_${params.proration_date}`,
+        idempotencyKey: expect.stringMatching(
+          new RegExp(`^move_${sub.id}_${tier1.stripePriceMonthlyId}_\\d+_\\d+$`)
+        ),
+      });
+      const stored = await db.query.subscriptions.findFirst({
+        where: eq(subscriptions.id, sub.id),
+      });
+      expect(stored).toMatchObject({
+        tierId: tier2.id,
+        pendingTierId: tier1.id,
+        heldAmountCents: tier2.priceMonthly,
       });
     });
 
@@ -3138,6 +3152,9 @@ describe('SubscriptionService', () => {
     'disputedAt',
     'endedAt',
     'amountCents',
+    // What the current period was paid at while a move to a cheaper plan
+    // waits ("Premium £20 until 1 Dec"); the target is `pendingTierChange`.
+    'heldAmountCents',
     'createdAt',
     'updatedAt',
   ];

@@ -74,6 +74,11 @@ export interface WaitingMove {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** Digits only: `Number('')` is 0, which would read a missing amount as £0. */
+function wholeNumber(value: string | undefined): number | null {
+  return value !== undefined && /^\d+$/.test(value) ? Number(value) : null;
+}
+
 /**
  * The waiting move a subscription's metadata describes, or null. Half a move
  * (a key missing or unreadable) reads as none: the row can only hold all
@@ -84,17 +89,16 @@ export function readWaitingMove(
   metadata: Record<string, string> | null | undefined
 ): WaitingMove | null {
   const tierId = metadata?.[MOVE_TIER_ID_KEY];
-  const at = Number(metadata?.[MOVE_AT_KEY]);
+  const at = wholeNumber(metadata?.[MOVE_AT_KEY]);
   const holdPriceId = metadata?.[HOLD_PRICE_ID_KEY];
-  const holdAmountCents = Number(metadata?.[HOLD_AMOUNT_KEY]);
+  const holdAmountCents = wholeNumber(metadata?.[HOLD_AMOUNT_KEY]);
   if (
     !tierId ||
     !UUID.test(tierId) ||
-    !Number.isInteger(at) ||
+    at === null ||
     at <= 0 ||
     !holdPriceId ||
-    !Number.isInteger(holdAmountCents) ||
-    holdAmountCents < 0
+    holdAmountCents === null
   ) {
     return null;
   }
@@ -253,6 +257,12 @@ export function classifyTierChange(
       : { kind: 'cross_period_change' };
   }
 
+  // The plan they are on while a move waits is Keep current plan, which
+  // puts back the exact Price paid and any parked price change; a switch
+  // now would put the tier's current Price on and lose both.
+  if (facts.moveWaiting && facts.targetTierId === facts.currentTierId) {
+    return { refused: 'keep_first' };
+  }
   if (target > paid) {
     return facts.moveWaiting ? { refused: 'keep_first' } : { kind: 'upgrade' };
   }
