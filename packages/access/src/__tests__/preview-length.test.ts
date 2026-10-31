@@ -13,7 +13,7 @@ describe('previewLength', () => {
   });
 
   // The transcoder truncates the tenth (`int(duration * 0.1)`, main.py
-  // `create_preview`): 2.5s in starts at 2, 1.9s in at 1. Rounding would
+  // `preview_window`): 2.5s in starts at 2, 1.9s in at 1. Rounding would
   // start them at 3 and 2, and name a preview a second shorter than the cut.
   it('starts from the whole second the tenth falls in, as the transcoder truncates it', () => {
     expect(previewLength(25)).toBe(23);

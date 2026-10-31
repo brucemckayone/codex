@@ -781,9 +781,9 @@ describe('CourseJourneyService sell media + cover (journey media write path)', (
 
     // Codex-61zsk.73: the page says "A 30-second listen", so each clip says
     // what it is and how long its preview runs, as the transcoder cuts it.
-    // The audio here HAS a preview, which the transcoder does not yet cut for
-    // audio (video only, Codex-hro3u): this is the clip a cut audio preview
-    // will produce. Audio as it is written today is the case below.
+    // The audio here HAS a preview, as the transcoder cuts one for every
+    // audio upload since Codex-hro3u. Audio transcoded before it is the case
+    // below.
     it('says what each clip is and how long its preview runs', async () => {
       const shortFilm = await seedClip('video', 20);
       const longListen = await seedClip('audio', 300);
@@ -811,10 +811,10 @@ describe('CourseJourneyService sell media + cover (journey media write path)', (
       });
     });
 
-    // The transcoder cuts no preview for audio today (Codex-hro3u), so an
-    // audio item is written with no `hlsPreviewKey`: it has no public
-    // manifest to play, and the slot shows no clip rather than a dead one.
-    it('shows no clip for audio as the transcoder writes it today, with no preview', async () => {
+    // Audio transcoded before Codex-hro3u has no `hlsPreviewKey`, and is not
+    // re-cut (new uploads only): it has no public manifest to play, and the
+    // slot shows no clip rather than a dead one.
+    it('shows no clip for audio transcoded before audio previews, which has none', async () => {
       const listen = await seedClip('audio', 300, null);
       await svc.updateJourneySellMedia(
         orgAId,

@@ -7,16 +7,16 @@
 
 /**
  * The longest public preview: `PREVIEW_DURATION` in the transcoder
- * (`create_preview`, infrastructure/runpod/handler/main.py).
+ * (infrastructure/runpod/handler/main.py).
  */
 const PREVIEW_SECONDS = 30;
 
 /**
  * How long a film's preview runs. The transcoder cuts it from a tenth of the
  * way in, for up to {@link PREVIEW_SECONDS}, so a short film's preview is
- * shorter still. Its twin is the RunPod handler's cut: `create_preview`
- * today, `preview_window` for video and audio alike once Codex-hro3u lands.
- * Change one, change both, or the page names a length the press does not play.
+ * shorter still. Its twin is the RunPod handler's `preview_window`, which
+ * cuts every preview, video and audio alike. Change one, change both, or the
+ * page names a length the press does not play.
  */
 export function previewLength(durationSeconds: number | null): number | null {
   if (durationSeconds === null) return null;
