@@ -20791,6 +20791,30 @@ export const studio_page_editor_focus_crop_phone = () => `Phone`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_focus_still_title = () => `Picture crop`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_focus_still_saved = () => `Saved on this page. Another page using this still sets its own.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_focus_still_inactive = () => `This layout shows the picture whole, so it needs no focal point.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const studio_page_editor_button_action_join = () => `Join, with the page’s own price`
 
 

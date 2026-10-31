@@ -1,4 +1,13 @@
-import { type ImageRef, isImageRef } from '../../../page-images';
+import {
+  type ImageRef,
+  isImageRef,
+  resolvePageImageUrl,
+} from '../../../page-images';
+import type {
+  JourneySalesContext,
+  PreviewMedia,
+  SellPreview,
+} from '../../../render/types';
 import {
   bodyField,
   ctaLabelField,
@@ -7,11 +16,40 @@ import {
   layout,
   noteField,
 } from '../../model/fields';
-import { compact, readOneOf, readText } from '../../model/read';
-import type { BlockDefinition } from '../../model/types';
+import { compact, readBool, readOneOf, readText } from '../../model/read';
+import { readStillFocus, type StillFocus } from '../../model/still-focus';
+import type { BlockDefinition, FocalCrop } from '../../model/types';
 
 export const HERO_MEDIA_MODES = ['auto', 'image', 'video', 'none'] as const;
 export type HeroMediaMode = (typeof HERO_MEDIA_MODES)[number];
+
+/**
+ * Each layout's frame at 1440 and 390, in the Style that cuts it most. The
+ * creator's own image and the course still are drawn in the same frames, so
+ * one set of crops serves both points.
+ */
+const HERO_CROPS: Readonly<Record<string, readonly FocalCrop[]>> = {
+  statement: [
+    { at: 'wide', ratio: '7 / 3' },
+    { at: 'phone', ratio: '4 / 3' },
+  ],
+  split: [
+    { at: 'wide', ratio: '4 / 5' },
+    { at: 'phone', ratio: '4 / 5' },
+  ],
+  cover: [
+    { at: 'wide', ratio: '15 / 8' },
+    { at: 'phone', ratio: '2 / 3' },
+  ],
+  centered: [
+    { at: 'wide', ratio: '16 / 7' },
+    { at: 'phone', ratio: '4 / 3' },
+  ],
+  poster: [
+    { at: 'wide', ratio: '5 / 4' },
+    { at: 'phone', ratio: '4 / 5' },
+  ],
+};
 
 export type HeroProps = {
   eyebrow?: string;
@@ -25,7 +63,52 @@ export type HeroProps = {
   watchLabel?: string;
   /** Replaces the course hero still (contract A5); a clip still plays over it. */
   image?: ImageRef;
+  /**
+   * Where the course still, or the clip's poster, is cropped round on this
+   * page, and which still that was (`model/still-focus.ts`, Codex-61zsk.73).
+   */
+  stillFocus?: StillFocus;
+  /**
+   * The org's logo shows above the eyebrow unless this is set. A switch
+   * stores only `true` or nothing, so a default-on logo is stored inverted,
+   * as video's `hideSpeaker` is (Codex-61zsk.73).
+   */
+  hideLogo?: boolean;
 };
+
+/** What the hero draws: its still, whether that is the creator's own image, and the clip over it. */
+export interface HeroMedia {
+  still: string | null;
+  own: boolean;
+  clip: PreviewMedia | null;
+}
+
+/**
+ * The picture the hero draws and the clip that plays over it (`HeroBlock`),
+ * shared with the inspector so a point is offered on the very still the
+ * canvas shows. The creator's own image (contract A5) replaces the course
+ * still, never the clip. `preview` is `undefined` until the streamed preview
+ * settles: the awaited still then, which the preview can only add a clip to,
+ * or a media-item poster where nothing was uploaded.
+ */
+export function heroMedia(
+  content: Pick<HeroProps, 'media' | 'image'>,
+  preview: SellPreview | null | undefined,
+  context: Pick<JourneySalesContext, 'course' | 'mediaBaseUrl'>
+): HeroMedia {
+  const mode = content.media ?? 'auto';
+  if (mode === 'none') return { still: null, own: false, clip: null };
+  const own = resolvePageImageUrl(content.image, 'lg', context.mediaBaseUrl);
+  const awaited = own ?? context.course.heroImageUrl ?? null;
+  if (preview === undefined) {
+    return { still: awaited, own: Boolean(own), clip: null };
+  }
+  return {
+    still: own ?? preview?.heroImageUrl ?? awaited,
+    own: Boolean(own),
+    clip: mode === 'image' ? null : (preview?.heroClip ?? null),
+  };
+}
 
 export const heroDefinition: BlockDefinition<HeroProps> = {
   type: 'hero',
@@ -63,6 +146,12 @@ export const heroDefinition: BlockDefinition<HeroProps> = {
     ),
   ],
   fields: [
+    {
+      key: 'hideLogo',
+      label: 'Hide your logo',
+      hint: 'Your logo shows above the headline when your organisation has one.',
+      control: 'toggle',
+    },
     eyebrowField,
     {
       ...headingField(120),
@@ -98,29 +187,7 @@ export const heroDefinition: BlockDefinition<HeroProps> = {
       hint: 'Replaces the course image here. When the hero plays a clip, pick "The image only" below to show this instead.',
       control: 'image',
       decorative: true,
-      // Each layout's frame at 1440 and 390, in the Style that cuts it most.
-      focalLayouts: {
-        statement: [
-          { at: 'wide', ratio: '7 / 3' },
-          { at: 'phone', ratio: '4 / 3' },
-        ],
-        split: [
-          { at: 'wide', ratio: '4 / 5' },
-          { at: 'phone', ratio: '4 / 5' },
-        ],
-        cover: [
-          { at: 'wide', ratio: '15 / 8' },
-          { at: 'phone', ratio: '2 / 3' },
-        ],
-        centered: [
-          { at: 'wide', ratio: '16 / 7' },
-          { at: 'phone', ratio: '4 / 3' },
-        ],
-        poster: [
-          { at: 'wide', ratio: '5 / 4' },
-          { at: 'phone', ratio: '4 / 5' },
-        ],
-      },
+      focalLayouts: HERO_CROPS,
     },
     {
       key: 'media',
@@ -170,5 +237,19 @@ export const heroDefinition: BlockDefinition<HeroProps> = {
       media: readOneOf(raw, 'media', HERO_MEDIA_MODES),
       watchLabel: readText(raw, 'watchLabel', 40),
       image: isImageRef(raw.image) ? raw.image : undefined,
+      stillFocus: readStillFocus(raw.stillFocus),
+      hideLogo: readBool(raw, 'hideLogo'),
     }),
+  // The journey's still (its uploaded hero, or the hero clip's poster) as
+  // `HeroBlock` picks it (`heroMedia`), offered under "Hero image or clip".
+  // None where the creator's own image replaces it, where the hero shows no
+  // media, or where the clip plays in the frame, which a point never crops.
+  stillFocus: {
+    under: 'heroMediaId',
+    focalLayouts: HERO_CROPS,
+    still: (raw, preview, context) => {
+      const media = heroMedia(heroDefinition.coerce(raw), preview, context);
+      return media.own || media.clip ? null : media.still;
+    },
+  },
 };

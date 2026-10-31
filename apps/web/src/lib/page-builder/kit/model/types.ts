@@ -11,7 +11,7 @@
  */
 
 import type { PageSection } from '@codex/shared-types';
-import type { JourneySalesContext } from '../../render/types';
+import type { JourneySalesContext, SellPreview } from '../../render/types';
 import type { JourneySellMediaSlot } from '../../sell-media-store.svelte';
 import type {
   ColourSchemeId,
@@ -161,6 +161,36 @@ export interface FocalCrop {
   ratio: string;
 }
 
+/** A shape a layout cuts a course still to, in every Style unless it names some. */
+export interface StillCrop extends FocalCrop {
+  /** The Styles that cut it so; the others show the still whole there. */
+  styles?: readonly PageStyleId[];
+}
+
+/**
+ * A course still the section draws (the journey's, not an upload), and the
+ * crops a focal point steers (Codex-61zsk.73, `model/still-focus.ts`). The
+ * point is stored in the section's `stillFocus`; the inspector offers it
+ * under each still the section draws, as it does under an upload.
+ */
+export interface StillFocusSpec {
+  /**
+   * The still the section draws now, read as the block reads it, from the
+   * streamed preview once it settles (`undefined` until then): `null` where
+   * there is none, or where a point would not steer it (the creator's own
+   * image has its own point; a playing clip is never cropped by one).
+   */
+  still: (
+    raw: Record<string, unknown>,
+    preview: SellPreview | null | undefined,
+    context: JourneySalesContext
+  ) => string | null;
+  /** The layouts that crop it, each with the shapes it is cut to. */
+  focalLayouts: Readonly<Record<string, readonly StillCrop[]>>;
+  /** The field it is offered right under; absent, it has a group of its own. */
+  under?: string;
+}
+
 export interface BlockLayout {
   id: string;
   label: string;
@@ -212,4 +242,6 @@ export interface BlockDefinition<P = Record<string, unknown>> {
     layout: string,
     context: JourneySalesContext
   ) => number | null;
+  /** The course still this section draws, which a focal point may steer. */
+  stillFocus?: StillFocusSpec;
 }

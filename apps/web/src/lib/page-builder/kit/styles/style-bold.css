@@ -393,8 +393,10 @@
       .tf__head,
       .tm:not([data-layout='quote']) > .tm__head,
       .pricing[data-layout='cards'] > .pricing__head
-    )
-    > .lp-text {
+    ):has(> .lp-text)
+    > :is(.lp-text, .lp-facts) {
+    /* A facts line hangs under the lead; a head with no lead has no second
+       column for it to hang in, hence the `:has()` (Codex-61zsk.73). */
     grid-column: 2;
   }
 }

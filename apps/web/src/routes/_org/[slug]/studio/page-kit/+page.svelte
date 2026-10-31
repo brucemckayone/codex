@@ -44,6 +44,7 @@
   import { brandEditor } from '$lib/brand-editor';
   import type { BrandTokenOverrides } from '$lib/page-builder';
   import { orgGrounds, orgShader } from '$lib/page-builder/org-grounds';
+  import { orgLogo } from '$lib/page-builder/render/org-logo';
   import {
     COLOUR_SCHEME_IDS,
     isColourSchemeId,
@@ -138,6 +139,10 @@
   // The org's moving background, so the hero takes it (03 X50, X51).
   const shader = $derived(
     orgShader(page.data.org, brandEditor.isOpen ? brandEditor.pending : null)
+  );
+  // The org's logo, which the hero sets above its words (Codex-61zsk.73).
+  const logo = $derived(
+    orgLogo(page.data.org, brandEditor.isOpen ? brandEditor.pending : null)
   );
   const param = (key: string) => params.get(key) ?? '';
 
@@ -421,6 +426,7 @@
     {edit}
     orgGrounds={grounds}
     orgShader={shader}
+    orgLogo={logo}
     {proofType}
   />
 </div>

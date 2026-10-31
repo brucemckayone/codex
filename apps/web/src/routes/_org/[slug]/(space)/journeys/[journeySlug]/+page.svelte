@@ -24,6 +24,7 @@
   import { orgGrounds, orgShader } from '$lib/page-builder/org-grounds';
   import { createFilmRequester } from '$lib/page-builder/film-request';
   import { buildPublicContext, offerAsVisitor } from '$lib/page-builder/public-context';
+  import { orgLogo } from '$lib/page-builder/render/org-logo';
   import { requestCourseFilm } from '$lib/remote/journeys.remote';
   import { buildJourneyUrl } from '$lib/utils/subdomain';
   import type { PageData } from './$types';
@@ -271,6 +272,10 @@
   const shader = $derived(
     orgShader(data.org, brandEditor.isOpen ? brandEditor.pending : null)
   );
+  // The org's logo, which the hero sets above its words (Codex-61zsk.73).
+  const logo = $derived(
+    orgLogo(data.org, brandEditor.isOpen ? brandEditor.pending : null)
+  );
 
   // Course JSON-LD for rich results.
   //
@@ -390,5 +395,6 @@
   brandOverrides={data.coursePage.page.brandOverrides}
   orgGrounds={grounds}
   orgShader={shader}
+  orgLogo={logo}
   {requestFilm}
 />

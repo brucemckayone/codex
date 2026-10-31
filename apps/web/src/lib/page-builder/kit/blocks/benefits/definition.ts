@@ -11,6 +11,7 @@ import { MARK_OPTIONS, MARKS, type MarkId } from '../../model/marks';
 import {
   compact,
   firstItem,
+  readBool,
   readItems,
   readOneOf,
   readText,
@@ -33,6 +34,12 @@ export type BenefitsProps = {
   ctaLabel?: string;
   note?: string;
   items?: BenefitItem[];
+  /**
+   * Leave the course's facts line off (Codex-61zsk.73). A switch writes
+   * `true` or nothing, so the key says HIDE: absent, every section, an
+   * existing one too, shows the facts.
+   */
+  hideFacts?: boolean;
 };
 
 /** The canvas prompt where the items would be — shown only while editing. */
@@ -70,6 +77,12 @@ export const benefitsDefinition: BlockDefinition<BenefitsProps> = {
     eyebrowField,
     headingField(120),
     { ...bodyField, maxLength: 500 },
+    {
+      key: 'hideFacts',
+      label: 'Hide the course facts',
+      hint: 'The line under your words: your stages, practices and total length, counted from the course.',
+      control: 'toggle',
+    },
     {
       key: 'items',
       label: 'What is included',
@@ -182,6 +195,7 @@ export const benefitsDefinition: BlockDefinition<BenefitsProps> = {
         },
         9
       ),
+      hideFacts: readBool(raw, 'hideFacts'),
     }),
   // The mixed tiles' first tile is the large, filled one.
   leadingItem: (raw, layout) =>

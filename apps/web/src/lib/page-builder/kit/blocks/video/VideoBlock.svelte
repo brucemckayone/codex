@@ -41,6 +41,7 @@
 <script lang="ts">
   import { filmPlays, filmToShow } from '../../model/films';
   import { hasHead } from '../../model/read';
+  import { stillFocusFor } from '../../model/still-focus';
   import type { BlockProps } from '../../model/types';
   import { getKitPage } from '../../page-context';
   import ButtonRow from '../../primitives/ButtonRow.svelte';
@@ -87,6 +88,9 @@
   const plays = $derived(clip ? filmPlays(clip, page) : null);
   const length = $derived(filmLength(plays));
   const hasLine = $derived(Boolean(speaker || length));
+  // Where the poster is cropped round, for this film's poster alone
+  // (`stillFocus`, Codex-61zsk.73): only Bold's wide 21:9 screen cuts it.
+  const focus = $derived(stillFocusFor(content.stillFocus, clip?.posterUrl));
 </script>
 
 <!-- One run of text, no space between: "Maya Okafor · 2:04". -->
@@ -139,6 +143,7 @@
           <ClipFrame
             still={clip.posterUrl}
             ratio="var(--_ratio)"
+            {focus}
             place={split ? 'corner' : 'center'}
             {player}
           >

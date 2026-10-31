@@ -81,7 +81,12 @@
   import { STYLES } from './model/styles';
   import type { BlockEdit, KitPage } from './model/types';
   import { entrances } from './motion/entrances';
-  import { type KitPageContext, type PageEdit, setKitPage } from './page-context';
+  import {
+    type KitPageContext,
+    type OrgLogoSource,
+    type PageEdit,
+    setKitPage,
+  } from './page-context';
   import { BLOCKS } from './registry';
   import SectionShell from './SectionShell.svelte';
   import StickyCta from './StickyCta.svelte';
@@ -124,6 +129,12 @@
      */
     orgShader?: boolean;
     /**
+     * The org's logo and name, as the org layout's rail shows them: the brand
+     * editor's pending logo while it is open (`render/org-logo.ts`). Plain
+     * data, as above. Absent or null: no logo.
+     */
+    orgLogo?: OrgLogoSource | null;
+    /**
      * The kit gallery's proof (03 X73): draw this Type whether or not this
      * Style may take it yet, so a pair is measured before it is offered. A
      * page never passes it.
@@ -148,6 +159,7 @@
     sticky = true,
     orgGrounds = {},
     orgShader = false,
+    orgLogo = null,
     proofType,
     requestFilm,
   }: Props = $props();
@@ -226,6 +238,9 @@
     },
     get guideName() {
       return guideName;
+    },
+    get orgLogo() {
+      return orgLogo;
     },
     anchorOf(id: string) {
       return anchors.get(id);

@@ -17,6 +17,7 @@ import {
   SECTION_TYPE_IDS,
   sampleContext,
 } from '$lib/page-builder/kit';
+import type { SampleMedia } from '$lib/page-builder/kit/model/sample';
 import { STYLES } from '$lib/page-builder/kit/model/styles';
 import { upgradePage } from '$lib/page-builder/kit/model/upgrade';
 import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
@@ -130,7 +131,8 @@ function render(
   style: string = 'bold',
   mediaBaseUrl: string | null = null,
   offer: SampleOfferState = 'buy',
-  offerRead: 'read' | 'loading' | 'failed' = 'read'
+  offerRead: 'read' | 'loading' | 'failed' = 'read',
+  media: SampleMedia = {}
 ) {
   pageBuilder.open(PAGE_ID, {
     pageType: 'course',
@@ -157,7 +159,7 @@ function render(
       get selectedId() {
         return pageBuilder.selectedSectionId;
       },
-      context: sampleContext({ mediaBaseUrl, offer }),
+      context: sampleContext({ mediaBaseUrl, offer, media }),
       offerRead,
       onDuplicate: vi.fn(),
       onToggle: vi.fn(),
@@ -884,5 +886,210 @@ describe('faces, marks and the row that leads (Codex-61zsk.58)', () => {
     ];
     expect(crops).toHaveLength(2);
     expect(document.body.querySelector('.focus__pad')).not.toBeNull();
+  });
+});
+
+describe('a focal point on a course still (Codex-61zsk.73)', () => {
+  const CDN = 'https://cdn.test';
+  const STILL_KEY = 'org-1/media-thumbnails/m-1';
+  const STILL = `${CDN}/${STILL_KEY}/lg.webp`;
+  const CLIP = { playlistUrl: '/hero.m3u8', posterUrl: STILL };
+  const section = (
+    id: string,
+    type: PageSection['type'],
+    props: Record<string, unknown> = {},
+    variant?: string
+  ): PageSection => ({
+    id,
+    type,
+    enabled: true,
+    props,
+    ...(variant ? { variant } : {}),
+  });
+
+  /** Mount, then let the streamed preview settle, as the canvas's does. */
+  async function open(
+    sections: PageSection[],
+    selectedId: string,
+    media: SampleMedia,
+    style = 'bold',
+    mediaBaseUrl: string | null = null
+  ) {
+    render(sections, selectedId, style, mediaBaseUrl, 'buy', 'read', media);
+    await tick();
+    await Promise.resolve();
+    flushSync();
+  }
+
+  const pads = () => [
+    ...document.body.querySelectorAll<HTMLButtonElement>('.focus__pad'),
+  ];
+  const press = (key: string) => {
+    pads()[0]?.dispatchEvent(
+      new KeyboardEvent('keydown', { key, bubbles: true })
+    );
+    flushSync();
+  };
+  const saved = () =>
+    (document.body.textContent ?? '').includes(
+      'Saved on this page. Another page using this still sets its own.'
+    );
+  const groupTitles = () =>
+    [...document.body.querySelectorAll('.section-inspector__group-title')].map(
+      (title) => title.textContent?.trim()
+    );
+
+  it('offers the hero’s course still right under “Hero image or clip”, and stores the point with the still', async () => {
+    await open([section('h', 'hero', { heading: 'H' }, 'statement')], 'h', {
+      heroImageUrl: STILL,
+    });
+    expect(pads()).toHaveLength(1);
+    const control = pads()[0].closest('.focus');
+    expect(control?.previousElementSibling?.textContent).toContain(
+      'Hero image or clip'
+    );
+    expect(document.body.querySelectorAll('.focus__crop')).toHaveLength(2);
+    expect(saved()).toBe(true);
+    expect(groupTitles()).not.toContain('Picture crop');
+
+    press('ArrowRight');
+    expect(stored('h')?.props.stillFocus).toEqual({
+      x: 52,
+      y: 50,
+      of: STILL_KEY,
+    });
+    press('ArrowLeft');
+    // The centre is never stored.
+    expect(stored('h')?.props).not.toHaveProperty('stillFocus');
+  });
+
+  it('offers the journey’s still where the hero shows the image only, though it has a clip', async () => {
+    await open(
+      [section('h', 'hero', { heading: 'H', media: 'image' }, 'split')],
+      'h',
+      { heroImageUrl: STILL, heroClip: { ...CLIP, posterUrl: '/frame.jpg' } }
+    );
+    expect(pads()).toHaveLength(1);
+    expect(saved()).toBe(true);
+  });
+
+  it('offers nothing where the hero plays its clip, shows no picture, or draws the creator’s own', async () => {
+    await open([section('h', 'hero', { heading: 'H' })], 'h', {
+      heroImageUrl: STILL,
+      heroClip: CLIP,
+    });
+    expect(pads()).toHaveLength(0);
+    unmount(app);
+    app = null;
+    pageBuilder.close();
+
+    await open([section('h', 'hero', { heading: 'H', media: 'none' })], 'h', {
+      heroImageUrl: STILL,
+    });
+    expect(pads()).toHaveLength(0);
+    unmount(app);
+    app = null;
+    pageBuilder.close();
+
+    // The creator's own image has its own point, under its own field.
+    const image = { key: KEY, w: 1600, h: 1067 };
+    await open(
+      [section('h', 'hero', { heading: 'H', image }, 'statement')],
+      'h',
+      { heroImageUrl: STILL },
+      'bold',
+      CDN
+    );
+    expect(pads()).toHaveLength(1);
+    expect(saved()).toBe(false);
+  });
+
+  it('a point set on another still reads as the centre, and a new one belongs to this still', async () => {
+    await open(
+      [
+        section('h', 'hero', {
+          heading: 'H',
+          stillFocus: { x: 10, y: 10, of: 'org-1/media-thumbnails/old' },
+        }),
+      ],
+      'h',
+      { heroImageUrl: STILL }
+    );
+    expect(
+      document.body.querySelector('.focus__readout')?.textContent
+    ).toContain('Point at 50% across, 50% down');
+    press('ArrowDown');
+    expect(stored('h')?.props.stillFocus).toEqual({
+      x: 50,
+      y: 52,
+      of: STILL_KEY,
+    });
+  });
+
+  it('offers the guide’s portrait under its own “Picture crop” heading, cut as the layout cuts it', async () => {
+    await open(
+      [hero('h'), section('g', 'instructor', { name: 'Maya' }, 'split')],
+      'g',
+      { guidePortraitUrl: STILL }
+    );
+    expect(groupTitles()).toContain('Picture crop');
+    const group = document.body.querySelector('[data-control="still-focus"]');
+    expect(group?.querySelector('.focus__pad')).not.toBeNull();
+    expect(
+      [...(group?.querySelectorAll('.focus__crop-picture') ?? [])].map(
+        (crop) => (crop as HTMLElement).style.aspectRatio
+      )
+    ).toEqual(['4 / 5', '4 / 5']);
+    press('ArrowUp');
+    expect(stored('g')?.props.stillFocus).toEqual({
+      x: 50,
+      y: 48,
+      of: STILL_KEY,
+    });
+  });
+
+  it('offers no “Picture crop” where the section draws no still', async () => {
+    await open(
+      [hero('h'), section('g', 'instructor', { name: 'Maya' })],
+      'g',
+      {}
+    );
+    expect(groupTitles()).not.toContain('Picture crop');
+    expect(pads()).toHaveLength(0);
+  });
+
+  it('steers the film’s poster in Bold’s wide theatre, and explains itself where the screen shows it whole', async () => {
+    const intro = { playlistUrl: '/intro.m3u8', posterUrl: STILL };
+    await open([hero('h'), section('v', 'video', {}, 'theatre')], 'v', {
+      intro,
+    });
+    expect(groupTitles()).toContain('Picture crop');
+    expect(
+      [
+        ...document.body.querySelectorAll<HTMLElement>('.focus__crop-picture'),
+      ].map((crop) => crop.style.aspectRatio)
+    ).toEqual(['21 / 9']);
+    unmount(app);
+    app = null;
+    pageBuilder.close();
+
+    const whole =
+      'This layout shows the picture whole, so it needs no focal point.';
+    for (const [style, layout] of [
+      ['clean', 'theatre'],
+      ['bold', 'split'],
+    ]) {
+      await open(
+        [hero('h'), section('v', 'video', {}, layout)],
+        'v',
+        { intro },
+        style
+      );
+      expect(pads(), `${style} ${layout}`).toHaveLength(0);
+      expect(document.body.textContent, `${style} ${layout}`).toContain(whole);
+      unmount(app);
+      app = null;
+      pageBuilder.close();
+    }
   });
 });
