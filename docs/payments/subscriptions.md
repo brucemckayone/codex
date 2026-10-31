@@ -346,6 +346,33 @@ decision T1). It is the price-change machinery's immediate path
   (`TIER_HAS_SUBSCRIBERS`, with `movingInCount`), as for its subscribers. The
   delete impact Studio reads (`PlanAccessService.getDeleteImpact`) carries
   `movingInCount` and `lastMoveAt`, the last of their dates.
+- **A move to a tier deleted anyway.** The delete counts movers before its
+  transaction, so a move written in that window gets past it. Such a move is
+  never flipped onto the deleted tier: the flip raises `tier_move.apply_failed`
+  with reason `target_tier_deleted` and the ids, nothing fails, and the
+  member keeps the dearer plan at the cheaper price. The hourly backstop
+  alerts each one at most once a day.
+
+**Runbook: moves to a deleted tier.** Support lists them with:
+
+```sql
+SELECT s.id, s.stripe_subscription_id, s.organization_id, s.tier_id,
+       s.pending_tier_id, s.pending_tier_from, s.held_amount_cents
+FROM subscriptions s
+LEFT JOIN subscription_tiers t ON t.id = s.pending_tier_id
+WHERE s.pending_tier_id IS NOT NULL
+  AND s.status <> 'cancelled'
+  AND (t.id IS NULL OR t.deleted_at IS NOT NULL);
+```
+
+Each member is on `tier_id` and billed the cheaper price. Before the
+renewal, Keep current plan undoes the move. After it, Keep is refused
+(`MOVE_ALREADY_LANDED`). The member can still pick a live plan no dearer than
+the one they kept (a cheaper one waits for the next renewal; one at the same
+price switches now). Otherwise support does what Keep does, by hand at
+Stripe: put `codex_hold_price_id` back on the item with no proration, and
+remove the `codex_move_*` and `codex_hold_*` keys. The next
+`customer.subscription.updated` mirrors it onto our row.
 
 Not yet (`Codex-2hxff.86`): the price-change fan-out's rules for a subscriber
 moving away from a repriced tier, or to one, and putting a kept subscriber

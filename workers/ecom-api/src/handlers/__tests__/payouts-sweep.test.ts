@@ -122,7 +122,7 @@ describe('ecom-api payouts-sweep handler', () => {
   beforeEach(() => {
     tierBackstop = vi
       .spyOn(SubscriptionService.prototype, 'runTierMoveBackstop')
-      .mockResolvedValue({ checked: 0, applied: 0, left: 0 });
+      .mockResolvedValue({ checked: 0, applied: 0, left: 0, blocked: 0 });
     bankPayouts = vi
       .spyOn(SubscriptionService.prototype, 'runBankPayouts')
       .mockResolvedValue(null);
@@ -437,8 +437,11 @@ describe('ecom-api payouts-sweep handler', () => {
       ]) {
         expect(order(before)).toBeLessThan(bank);
       }
-      // The tier move backstop runs once a wake (Codex-2hxff.16).
-      expect(tierBackstop).toHaveBeenCalledOnce();
+      // The tier move backstop runs once a wake (Codex-2hxff.16), on the
+      // cron's scheduled time: its once-a-day alert counts hours from it.
+      expect(tierBackstop).toHaveBeenCalledExactlyOnceWith({
+        now: new Date(LONDON_EIGHT),
+      });
       expect(bank).toBeLessThan(order(ctx.waitUntil));
       expect(obs.error).not.toHaveBeenCalled();
       drain.mockRestore();
@@ -901,16 +904,18 @@ describe('runTierMoveBackstopSweep', () => {
   it('reports a run that checked something', async () => {
     const runTierMoveBackstop = vi
       .fn()
-      .mockResolvedValue({ checked: 3, applied: 2, left: 1 });
+      .mockResolvedValue({ checked: 4, applied: 2, left: 1, blocked: 1 });
     const { obs } = makeObs();
+    const at = new Date(Date.UTC(2027, 0, 14, 9));
 
-    await runTierMoveBackstopSweep({ runTierMoveBackstop }, obs);
+    await runTierMoveBackstopSweep({ runTierMoveBackstop }, at, obs);
 
-    expect(runTierMoveBackstop).toHaveBeenCalledExactlyOnceWith();
+    expect(runTierMoveBackstop).toHaveBeenCalledExactlyOnceWith({ now: at });
     expect(obs.info).toHaveBeenCalledWith('tier move backstop ran', {
-      checked: 3,
+      checked: 4,
       applied: 2,
       left: 1,
+      blocked: 1,
     });
     expect(obs.error).not.toHaveBeenCalled();
   });
@@ -922,8 +927,9 @@ describe('runTierMoveBackstopSweep', () => {
       {
         runTierMoveBackstop: vi
           .fn()
-          .mockResolvedValue({ checked: 0, applied: 0, left: 0 }),
+          .mockResolvedValue({ checked: 0, applied: 0, left: 0, blocked: 0 }),
       },
+      new Date(),
       obs
     );
 
@@ -940,6 +946,7 @@ describe('runTierMoveBackstopSweep', () => {
             .fn()
             .mockRejectedValue(new Error('database unavailable (test)')),
         },
+        new Date(),
         obs
       )
     ).resolves.toBeUndefined();

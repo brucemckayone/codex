@@ -468,6 +468,11 @@ describe('waiting tier moves (Codex-2hxff.16)', () => {
       await service.changeTier(userId, org.id, basic.id, 'month', now - 10);
 
       expect(updates()).toHaveLength(3);
+      // The third reaches Stripe under a key of its own, not the first's.
+      const keys = updates().map(
+        (call) => (call[2] as { idempotencyKey: string }).idempotencyKey
+      );
+      expect(new Set(keys).size).toBe(3);
       expect(liveOf(row.stripeSubscriptionId).items.data[0]?.price.id).toBe(
         basic.stripePriceMonthlyId
       );
@@ -683,6 +688,11 @@ describe('waiting tier moves (Codex-2hxff.16)', () => {
       await service.keepCurrentPlan(userId, org.id);
 
       expect(updates()).toHaveLength(4);
+      const keepKeys = updates()
+        .map((call) => (call[2] as { idempotencyKey: string }).idempotencyKey)
+        .filter((key) => key.startsWith('keep_'));
+      expect(keepKeys).toHaveLength(2);
+      expect(new Set(keepKeys).size).toBe(2);
       expect(liveOf(row.stripeSubscriptionId).items.data[0]?.price.id).toBe(
         premium.stripePriceMonthlyId
       );
@@ -837,6 +847,118 @@ describe('waiting tier moves (Codex-2hxff.16)', () => {
       expect(stored.endedAt).not.toBeNull();
       expect(stored.pendingTierId).toBeNull();
       expect(stored.heldAmountCents).toBeNull();
+    });
+  });
+
+  // ─── A target deleted while the move waited (T5, lead FYI 1) ────────────
+
+  describe('a move to a tier deleted while it waited', () => {
+    /**
+     * deleteTier refuses a tier members are moving to, but it counts them
+     * before its transaction: a move written in between gets past it. The
+     * tier is soft-deleted here directly, as that race leaves it.
+     */
+    async function blockedMove(slug: string) {
+      const { org, basic, premium } = await hollowOak(slug);
+      const m = await member(org.id, premium);
+      await service.changeTier(m.userId, org.id, basic.id, 'month');
+      await db
+        .update(subscriptionTiers)
+        .set({ deletedAt: new Date() })
+        .where(eq(subscriptionTiers.id, basic.id));
+      const event = renew(m.row.stripeSubscriptionId);
+      vi.mocked(stripe.subscriptions.update).mockClear();
+      return { org, basic, premium, ...m, event };
+    }
+
+    function errorsSpy() {
+      const obs = (
+        service as unknown as {
+          obs: { error: (m: string, d?: unknown) => void };
+        }
+      ).obs;
+      return vi.spyOn(obs, 'error');
+    }
+
+    /** This row's target_tier_deleted alerts among everything logged. */
+    function blockedAlertsFor(
+      spy: ReturnType<typeof errorsSpy>,
+      subscriptionId: string
+    ) {
+      return spy.mock.calls.filter(
+        ([message, data]) =>
+          message === 'tier_move.apply_failed' &&
+          (data as { reason?: string; subscriptionId?: string }).reason ===
+            'target_tier_deleted' &&
+          (data as { subscriptionId?: string }).subscriptionId ===
+            subscriptionId
+      );
+    }
+
+    it('never flips onto it: one target_tier_deleted alert with the ids, nothing thrown, the dearer plan kept', async () => {
+      const b = await blockedMove('blocked-flip');
+      const alerted = errorsSpy();
+
+      const outcome = await service.applyDueTierMove(b.event);
+
+      expect(outcome).toBe('blocked');
+      expect(stripe.subscriptions.update).not.toHaveBeenCalled();
+      expect(liveOf(b.row.stripeSubscriptionId).metadata.codex_tier_id).toBe(
+        b.premium.id
+      );
+      expect(alerted).toHaveBeenCalledExactlyOnceWith(
+        'tier_move.apply_failed',
+        expect.objectContaining({
+          errorId: expect.any(String),
+          reason: 'target_tier_deleted',
+          subscriptionId: b.row.id,
+          stripeSubscriptionId: b.row.stripeSubscriptionId,
+          organizationId: b.org.id,
+          tierId: b.premium.id,
+          targetTierId: b.basic.id,
+        })
+      );
+      const stored = await rowOf(b.row.id);
+      expect(stored.tierId).toBe(b.premium.id);
+      expect(stored.pendingTierId).toBe(b.basic.id);
+    });
+
+    it('the hourly backstop alerts it once a day, never in its every-run list', async () => {
+      const b = await blockedMove('blocked-backstop');
+      const due = Date.now() - 2 * 60 * 60 * 1000;
+      await db
+        .update(subscriptions)
+        .set({ pendingTierFrom: new Date(due) })
+        .where(eq(subscriptions.id, b.row.id));
+      const alerted = errorsSpy();
+      const HOUR = 60 * 60 * 1000;
+      const listedEveryRun = () =>
+        alerted.mock.calls.some(
+          ([message, data]) =>
+            message === 'tier_move.apply_failed' &&
+            (
+              (data as { left?: Array<{ subscriptionId: string }> }).left ?? []
+            ).some((left) => left.subscriptionId === b.row.id)
+        );
+
+      // 1, 2 and 25 whole hours overdue, as three of the cron's runs.
+      const alertsAt = async (overdueMs: number) => {
+        alerted.mockClear();
+        const result = await service.runTierMoveBackstop({
+          now: new Date(due + overdueMs),
+        });
+        expect(result.blocked).toBeGreaterThanOrEqual(1);
+        expect(listedEveryRun()).toBe(false);
+        return blockedAlertsFor(alerted, b.row.id).length;
+      };
+      expect(await alertsAt(1.5 * HOUR)).toBe(1);
+      expect(await alertsAt(2.5 * HOUR)).toBe(0);
+      expect(await alertsAt(25.5 * HOUR)).toBe(1);
+      expect(stripe.subscriptions.update).not.toHaveBeenCalledWith(
+        b.row.stripeSubscriptionId,
+        expect.anything(),
+        expect.anything()
+      );
     });
   });
 

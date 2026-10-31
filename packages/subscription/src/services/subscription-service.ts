@@ -287,7 +287,8 @@ const TIER_MOVE_BACKSTOP_LIMIT = 50;
  * The backstop takes a move this long after its renewal: before then the
  * renewal's own `customer.subscription.updated` is the flip's.
  */
-const TIER_MOVE_BACKSTOP_GRACE_MS = 60 * 60 * 1000;
+const TIER_MOVE_HOUR_MS = 60 * 60 * 1000;
+const TIER_MOVE_BACKSTOP_GRACE_MS = TIER_MOVE_HOUR_MS;
 
 /**
  * Payees one payouts sweep claims (Codex-2hxff.13). Each costs an
@@ -4232,13 +4233,21 @@ export class SubscriptionService extends BaseService {
    *   so the row is mirrored from it again.
    * - `codex_pending_price_*` is left alone: a price change on the target
    *   (T6) lands later through `applyDuePendingPriceChange`.
+   * - A target tier deleted while the move waited never gets the member
+   *   (`blocked`). `deleteTier` counts movers before its transaction, so a
+   *   move written in between gets past it. This is the design's "flip fails
+   *   permanently" row: one `tier_move.apply_failed` alert (reason
+   *   `target_tier_deleted`, unless `alertIfBlocked` is false), nothing
+   *   thrown, and the member keeps the dearer plan at the cheaper price until
+   *   support or Keep current plan resolves it.
    *
    * Throws Stripe's errors: the webhook rethrows a transient one (Stripe
    * redelivers) and alerts a permanent one; the hourly backstop retries.
    */
   async applyDueTierMove(
-    eventSubscription: Pick<Stripe.Subscription, 'id' | 'metadata'>
-  ): Promise<'applied' | 'not_due' | 'none'> {
+    eventSubscription: Pick<Stripe.Subscription, 'id' | 'metadata'>,
+    options: { alertIfBlocked?: boolean } = {}
+  ): Promise<'applied' | 'not_due' | 'none' | 'blocked'> {
     const row = await this.findByStripeId(eventSubscription.id);
     if (
       !eventSubscription.metadata?.[MOVE_TIER_ID_KEY] &&
@@ -4273,6 +4282,25 @@ export class SubscriptionService extends BaseService {
     const item = live.items.data[0];
     if (!item || item.current_period_start < move.at) return 'not_due';
 
+    const organizationId =
+      row?.organizationId ?? live.metadata?.codex_organization_id ?? null;
+    if (!(await this.isLiveTier(move.tierId, organizationId))) {
+      if (options.alertIfBlocked ?? true) {
+        this.obs.error('tier_move.apply_failed', {
+          errorId: crypto.randomUUID(),
+          reason: 'target_tier_deleted',
+          subscriptionId: row?.id ?? null,
+          stripeSubscriptionId: live.id,
+          organizationId,
+          tierId: live.metadata?.codex_tier_id ?? row?.tierId ?? null,
+          targetTierId: move.tierId,
+          message:
+            'A waiting tier move targets a deleted tier and was not flipped; the member keeps the dearer plan at the cheaper price (support: docs/payments/subscriptions.md → Waiting moves)',
+        });
+      }
+      return 'blocked';
+    }
+
     const flipped = await this.stripe.subscriptions.update(
       live.id,
       { metadata: flipMetadata(move) },
@@ -4288,6 +4316,26 @@ export class SubscriptionService extends BaseService {
     return 'applied';
   }
 
+  /** The tier exists in the organisation and is not deleted. */
+  private async isLiveTier(
+    tierId: string,
+    organizationId: string | null
+  ): Promise<boolean> {
+    if (!organizationId) return false;
+    const [tier] = await this.db
+      .select({ id: subscriptionTiers.id })
+      .from(subscriptionTiers)
+      .where(
+        and(
+          eq(subscriptionTiers.id, tierId),
+          eq(subscriptionTiers.organizationId, organizationId),
+          isNull(subscriptionTiers.deletedAt)
+        )
+      )
+      .limit(1);
+    return tier !== undefined;
+  }
+
   /**
    * The hourly backstop for a flip the webhook missed (data design §5.2): the
    * moves whose renewal is more than an hour past, oldest first, at most
@@ -4295,21 +4343,37 @@ export class SubscriptionService extends BaseService {
    * Stripe calls each. One row's failure never stops the rest; whatever is
    * still waiting afterwards is alerted, once, with its ids. Never throws.
    * It rides ecom-api's existing hourly wake: no polling.
+   *
+   * A move blocked by a deleted target stays waiting, so every run would
+   * pick it. It is alerted at most once a day instead: on the run where it
+   * is 1, 25, 49… whole hours overdue. `now` is the cron's scheduled time,
+   * exactly an hour apart, so the overdue hours of successive runs are
+   * consecutive and one run in every 24 alerts.
    */
   async runTierMoveBackstop(
     options: { limit?: number; graceMs?: number; now?: Date } = {}
-  ): Promise<{ checked: number; applied: number; left: number }> {
+  ): Promise<{
+    checked: number;
+    applied: number;
+    left: number;
+    blocked: number;
+  }> {
     const limit = options.limit ?? TIER_MOVE_BACKSTOP_LIMIT;
+    const now = options.now ?? new Date();
     const before = new Date(
-      (options.now ?? new Date()).getTime() -
-        (options.graceMs ?? TIER_MOVE_BACKSTOP_GRACE_MS)
+      now.getTime() - (options.graceMs ?? TIER_MOVE_BACKSTOP_GRACE_MS)
     );
-    let rows: Array<{ id: string; stripeSubscriptionId: string }>;
+    let rows: Array<{
+      id: string;
+      stripeSubscriptionId: string;
+      pendingTierFrom: Date | null;
+    }>;
     try {
       rows = await this.db
         .select({
           id: subscriptions.id,
           stripeSubscriptionId: subscriptions.stripeSubscriptionId,
+          pendingTierFrom: subscriptions.pendingTierFrom,
         })
         .from(subscriptions)
         .where(
@@ -4327,22 +4391,32 @@ export class SubscriptionService extends BaseService {
         stage: 'backstop_select',
         error: error instanceof Error ? error.message : String(error),
       });
-      return { checked: 0, applied: 0, left: 0 };
+      return { checked: 0, applied: 0, left: 0, blocked: 0 };
     }
 
     let applied = 0;
+    let blocked = 0;
     const left: Array<{
       subscriptionId: string;
       stripeSubscriptionId: string;
       outcome: string;
     }> = [];
     for (const row of rows) {
+      const overdueHours = row.pendingTierFrom
+        ? Math.floor(
+            (now.getTime() - row.pendingTierFrom.getTime()) / TIER_MOVE_HOUR_MS
+          )
+        : 0;
       try {
-        const outcome = await this.applyDueTierMove({
-          id: row.stripeSubscriptionId,
-          metadata: {},
-        });
-        if (outcome === 'applied') {
+        const outcome = await this.applyDueTierMove(
+          { id: row.stripeSubscriptionId, metadata: {} },
+          { alertIfBlocked: overdueHours % 24 === 1 }
+        );
+        if (outcome === 'blocked') {
+          // Alerted by applyDueTierMove on its day; never in `left`, which
+          // alerts every run.
+          blocked += 1;
+        } else if (outcome === 'applied') {
           applied += 1;
           this.obs.info('tier_move.backstop_applied', {
             subscriptionId: row.id,
@@ -4373,7 +4447,7 @@ export class SubscriptionService extends BaseService {
         left,
       });
     }
-    return { checked: rows.length, applied, left: left.length };
+    return { checked: rows.length, applied, left: left.length, blocked };
   }
 
   // ─── Queries ───────────────────────────────────────────────────────────────
