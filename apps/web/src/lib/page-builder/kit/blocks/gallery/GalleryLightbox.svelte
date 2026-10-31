@@ -229,7 +229,11 @@
         try {
           onfail(index);
         } catch (failed) {
-          logger.warn('gallery.lightbox_tab_failed', describeThrown(failed));
+          // By its name alone (a `SyntaxError` DOMException, as `window.open`
+          // and `location.assign` throw): its message quotes the address.
+          const named = failed instanceof DOMException || failed instanceof Error;
+          const name = named ? failed.name : 'unknown';
+          logger.warn('gallery.lightbox_tab_failed', { name });
         }
       }
       return release;

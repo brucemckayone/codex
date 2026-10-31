@@ -735,16 +735,26 @@
   /**
    * Play now, in this tick (a press's activation holds only here), and
    * settle it (`start.ts`): refused sound plays muted and asks for it. A
-   * play refused outright leaves it paused, wanting nothing, so a frame's
+   * play refused outright leaves it paused, wanting nothing, and saying
+   * paused as the element does (a press's play before its stream attached
+   * said it played, and the attach's reset fires no `pause`), so a frame's
    * own controls offer Play rather than load forever (iOS's own HLS loads
-   * nothing until something plays).
+   * nothing until something plays). A start the visitor paused first, one
+   * behind an error, or one a swap will resume, is no failure.
    */
   function startPlaying(media: HTMLVideoElement) {
     void settleStart(media, playNow(media), () => wanted && !destroyed).then(
       (outcome) => {
         if (destroyed) return;
         if (outcome === 'muted') askSound = true;
-        else if (outcome === 'failed' && media.paused) wanted = false;
+        if (outcome !== 'failed' || error !== null || !media.paused) return;
+        if (!wanted || swapping) return;
+        wanted = false;
+        paused = true;
+        // Silently paused, it fires no pause to stop the timer.
+        disarm();
+        // settleStart says only that it failed, not how.
+        logger.warn('player.start_failed', {});
       }
     );
   }
@@ -910,11 +920,14 @@
     <div class="player__ended">{@render ended(replay)}</div>
   {:else if controls && !error}
     <div class="player__bar" role="group" aria-label={m.player_controls()}>
+      <!-- The scrubber's cue, said: the button alone carries `aria-busy`, as
+           ListenCard's does, since a busy region's changes may go unsaid. -->
       <button
         bind:this={playButton}
         type="button"
         class="player__button player__play"
         aria-label={offerPlay ? m.player_play() : m.player_pause()}
+        aria-busy={buffering || undefined}
         onclick={toggle}
       >
         {#if offerPlay}

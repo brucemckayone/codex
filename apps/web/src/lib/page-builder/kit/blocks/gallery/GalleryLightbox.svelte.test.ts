@@ -673,7 +673,12 @@ describe('GalleryBlock: each picture opens the lightbox (p3n §4)', () => {
     )('when %s and the tab throws too: closes all the same, says so, and the tile still opens', async (_, breakOpening) => {
       await render({ items: pictures(3) });
       const tile = tiles()[1];
-      const { told } = popups(new DOMException('bad address', 'SyntaxError'));
+      const { told } = popups(
+        new DOMException(
+          "Unable to open a window with invalid URL 'x:/lg.webp'",
+          'SyntaxError'
+        )
+      );
       breakOpening();
       press(tile);
       expect(dialog()).toBeNull();
@@ -684,12 +689,8 @@ describe('GalleryBlock: each picture opens the lightbox (p3n §4)', () => {
           'gallery.lightbox_open_failed',
           expect.objectContaining({ error: expect.any(String) }),
         ],
-        [
-          'gallery.lightbox_tab_failed',
-          expect.objectContaining({
-            error: expect.stringContaining('bad address'),
-          }),
-        ],
+        // By its name: the browser's message quotes the address.
+        ['gallery.lightbox_tab_failed', { name: 'SyntaxError' }],
       ]);
       vi.restoreAllMocks();
       vi.unstubAllGlobals();

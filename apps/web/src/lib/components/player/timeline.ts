@@ -43,7 +43,11 @@ export interface PlayerClock {
   askSound: boolean;
   /** The first frame has loaded; until then it is loading. */
   ready: boolean;
-  /** Nothing to play yet, or the stream has stalled (the scrubber's cue). */
+  /**
+   * Nothing to play yet, or the stream has stalled. It stays true while
+   * paused, so it is not a cue alone: a frame shows one for `(waiting ||
+   * resuming) && !offerPlay`, as ListenCard does.
+   */
   waiting: boolean;
   /**
    * The visitor wants it playing: a press, or a play, and no pause since. A
