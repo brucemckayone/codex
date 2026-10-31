@@ -739,12 +739,10 @@ export class FeeConfigService extends BaseService {
           earliestFrom: (
             change.effectiveFrom ?? feeRiseStartAfter(now)
           ).toISOString(),
+          // Seeing the note isn't being told: only an accepted email or
+          // support's mark is (§1.8), so a failed email leaves this null.
           announcedAt:
-            (
-              announce?.acceptedAt ??
-              announce?.toldAt ??
-              change.firstRunAt
-            )?.toISOString() ?? null,
+            (announce?.acceptedAt ?? announce?.toldAt)?.toISOString() ?? null,
           lines,
         });
       }

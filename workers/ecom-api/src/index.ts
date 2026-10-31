@@ -35,6 +35,7 @@ import checkout from './routes/checkout';
 import connect from './routes/connect';
 import courseMonetisation from './routes/course-monetisation';
 import courses from './routes/courses';
+import fees from './routes/fees';
 import purchases from './routes/purchases';
 import sales from './routes/sales';
 import subscriptions from './routes/subscriptions';
@@ -156,6 +157,12 @@ app.route('/connect', connect);
  * terminate / list / threads.
  */
 app.route('/agreements', agreements);
+
+/**
+ * Fee routes (Codex-2hxff.33)
+ * The caller's upcoming fee rises, for the Studio's fee note.
+ */
+app.route('/fees', fees);
 
 // ============================================================================
 // Webhook Endpoints
