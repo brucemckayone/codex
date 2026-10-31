@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  editorTabFromParam,
   inspectorPlacement,
   primaryAction,
   saveIndicator,
@@ -130,5 +131,19 @@ describe('outline arithmetic', () => {
     expect(sectionLabel({ type: 'faq', name: '  Common worries ' })).toBe(
       'Common worries'
     );
+  });
+});
+
+describe('editorTabFromParam', () => {
+  it("opens the tab a `?tab=` link names (the media library's Replace, Codex-6sbn1)", () => {
+    expect(editorTabFromParam('settings')).toBe('settings');
+    expect(editorTabFromParam('offer')).toBe('offer');
+  });
+
+  it('anything else opens the Page tab', () => {
+    expect(editorTabFromParam(null)).toBe('page');
+    expect(editorTabFromParam('')).toBe('page');
+    expect(editorTabFromParam('Settings')).toBe('page');
+    expect(editorTabFromParam('media')).toBe('page');
   });
 });

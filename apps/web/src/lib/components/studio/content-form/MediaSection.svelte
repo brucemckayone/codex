@@ -19,13 +19,14 @@
   @prop {string | null} orgSlug - Org slug for media library link (null for personal content)
   @prop {string | null} [contentId] - Content UUID (edit mode only)
   @prop {string | null} [contentStatus] - Content status — preview is only available when 'published'
+  @prop {object | null} [deletedMedia] - The picked media, when it was deleted from the library: the section says "media missing"
 -->
 <script lang="ts">
   import * as m from '$paraglide/messages';
   import MediaPicker from '../MediaPicker.svelte';
-  import { Badge } from '$lib/components/ui';
-  import { VideoIcon, MusicIcon } from '$lib/components/ui/Icon';
-  import { formatDuration, formatFileSize } from '$lib/utils/format';
+  import { Alert, Badge } from '$lib/components/ui';
+  import { VideoIcon, MusicIcon, UnlinkIcon } from '$lib/components/ui/Icon';
+  import { formatDuration, formatFileSize, formatSentenceDate } from '$lib/utils/format';
   import { getStreamingUrl } from '$lib/remote/library.remote';
   import { VideoPlayer } from '$lib/components/VideoPlayer';
   import { AudioPlayer } from '$lib/components/AudioPlayer';
@@ -50,6 +51,13 @@
     orgSlug: string | null;
     contentId?: string | null;
     contentStatus?: string | null;
+    /**
+     * The saved media item, when it was deleted from the library and is still
+     * the one picked (Codex-6sbn1). The draft keeps its link, so a support
+     * restore heals it; until then the section says so instead of showing an
+     * empty picker with no reason.
+     */
+    deletedMedia?: { title: string; deletedAt: string | Date } | null;
     class?: string;
   }
 
@@ -59,6 +67,7 @@
     orgSlug,
     contentId = null,
     contentStatus = null,
+    deletedMedia = null,
     class: className = '',
   }: Props = $props();
 
@@ -92,6 +101,29 @@
   <p class="card-description">{m.studio_content_form_section_media_desc()}</p>
 
   <div class="form-fields">
+    {#if deletedMedia}
+      <Alert variant="warning">
+        <p class="missing-alert">
+          <UnlinkIcon size={16} />
+          <span>
+            <b>{m.studio_content_form_media_deleted_title()}</b>
+            {m.studio_content_form_media_deleted_body()}
+          </span>
+        </p>
+      </Alert>
+      <div class="missing-card">
+        <span class="missing-card__thumb" aria-hidden="true"><UnlinkIcon size={16} /></span>
+        <span class="missing-card__text">
+          <span class="missing-card__title">{deletedMedia.title}</span>
+          <span class="missing-card__meta">
+            {m.studio_content_form_media_deleted_on({
+              date: formatSentenceDate(deletedMedia.deletedAt),
+            })}
+          </span>
+        </span>
+      </div>
+    {/if}
+
     <div class="form-field">
       <MediaPicker
         {mediaItems}
@@ -215,6 +247,71 @@
     font-size: var(--text-xs);
     color: var(--color-error-600);
     margin: 0;
+  }
+
+  /* ── Media missing (Codex-6sbn1) ───────────────────────────────── */
+  .missing-alert {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2);
+    margin: 0;
+    line-height: var(--leading-normal);
+  }
+
+  .missing-alert > :global(svg) {
+    flex-shrink: 0;
+    margin-top: var(--space-0-5);
+  }
+
+  .missing-alert b {
+    font-weight: var(--font-semibold);
+  }
+
+  .missing-card {
+    display: grid;
+    grid-template-columns: var(--space-16) minmax(0, 1fr);
+    gap: var(--space-3);
+    align-items: center;
+    padding: var(--space-2);
+    border: var(--border-width) dashed var(--color-status-warning-border);
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--color-status-warning-surface) 55%, var(--color-surface));
+  }
+
+  .missing-card__thumb {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    aspect-ratio: 16 / 9;
+    border-radius: var(--radius-sm);
+    color: var(--color-status-warning-text);
+    background: repeating-linear-gradient(
+      135deg,
+      var(--color-surface-secondary) 0 var(--space-1-5),
+      var(--color-surface) var(--space-1-5) var(--space-3)
+    );
+  }
+
+  .missing-card__text {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-0-5);
+    min-width: 0;
+  }
+
+  .missing-card__title {
+    font-size: var(--text-sm);
+    font-weight: var(--font-semibold);
+    color: var(--color-text);
+    text-decoration: line-through;
+    text-decoration-color: color-mix(in srgb, var(--color-text) 40%, transparent);
+    overflow-wrap: anywhere;
+  }
+
+  .missing-card__meta {
+    font-size: var(--text-xs);
+    font-weight: var(--font-medium);
+    color: var(--color-status-warning-text);
   }
 
   .media-preview {

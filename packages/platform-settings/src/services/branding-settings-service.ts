@@ -532,55 +532,66 @@ export class BrandingSettingsService extends BaseService {
    * Another user's media reads as not found, exactly as a missing id does:
    * the ownership scope is in the WHERE, so the answer never says whether
    * someone else's media exists.
+   *
+   * The check and the link are one transaction, the check a LOCKING read
+   * (FOR KEY SHARE): a media delete holds the row FOR UPDATE while it checks
+   * the item's uses, so a link that started after it waits, re-reads the row,
+   * finds it deleted and refuses, and one that committed first is seen by the
+   * delete, which then refuses (Codex-6sbn1).
    */
   async linkIntroVideo(
     mediaItemId: string,
     creatorId: string
   ): Promise<BrandingSettingsResponse> {
-    const mediaResult = await this.db
-      .select({
-        status: schema.mediaItems.status,
-        mediaType: schema.mediaItems.mediaType,
-      })
-      .from(schema.mediaItems)
-      .where(
-        and(
-          eq(schema.mediaItems.id, mediaItemId),
-          scopedNotDeleted(schema.mediaItems, creatorId)
+    const result = await (this.db as typeof dbWs).transaction(async (tx) => {
+      const [media] = await tx
+        .select({
+          status: schema.mediaItems.status,
+          mediaType: schema.mediaItems.mediaType,
+        })
+        .from(schema.mediaItems)
+        .where(
+          and(
+            eq(schema.mediaItems.id, mediaItemId),
+            scopedNotDeleted(schema.mediaItems, creatorId)
+          )
         )
-      )
-      .limit(1);
+        .for('key share');
 
-    const media = mediaResult[0];
-    if (!media) {
-      throw new NotFoundError('Media item not found');
-    }
-    if (media.mediaType !== MEDIA_TYPES.VIDEO) {
-      throw new ValidationError('The intro film must be a video');
-    }
-    if (media.status !== MEDIA_STATUS.READY) {
-      throw new BusinessLogicError(
-        'This video is still processing. Pick it once it is ready.'
-      );
-    }
+      if (!media) {
+        throw new NotFoundError('Media item not found');
+      }
+      if (media.mediaType !== MEDIA_TYPES.VIDEO) {
+        throw new ValidationError('The intro film must be a video');
+      }
+      if (media.status !== MEDIA_STATUS.READY) {
+        throw new BusinessLogicError(
+          'This video is still processing. Pick it once it is ready.'
+        );
+      }
 
-    await this.ensurePlatformSettingsExists();
+      // ensurePlatformSettingsExists, inside the transaction.
+      await tx
+        .insert(schema.platformSettings)
+        .values({ organizationId: this.organizationId })
+        .onConflictDoNothing();
 
-    const result = await this.db
-      .insert(schema.brandingSettings)
-      .values({
-        organizationId: this.organizationId,
-        introVideoMediaItemId: mediaItemId,
-        primaryColorHex: DEFAULT_BRANDING.primaryColorHex,
-      })
-      .onConflictDoUpdate({
-        target: schema.brandingSettings.organizationId,
-        set: {
+      return tx
+        .insert(schema.brandingSettings)
+        .values({
+          organizationId: this.organizationId,
           introVideoMediaItemId: mediaItemId,
-          updatedAt: new Date(),
-        },
-      })
-      .returning();
+          primaryColorHex: DEFAULT_BRANDING.primaryColorHex,
+        })
+        .onConflictDoUpdate({
+          target: schema.brandingSettings.organizationId,
+          set: {
+            introVideoMediaItemId: mediaItemId,
+            updatedAt: new Date(),
+          },
+        })
+        .returning();
+    });
 
     this.obs.info('Intro video linked', {
       organizationId: this.organizationId,

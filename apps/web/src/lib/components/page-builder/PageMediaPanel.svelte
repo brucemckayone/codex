@@ -56,6 +56,7 @@
   import { MAX_IMAGE_SIZE_BYTES } from '@codex/validation';
   import * as m from '$paraglide/messages';
   import MediaPicker from '$lib/components/studio/MediaPicker.svelte';
+  import { UnlinkIcon } from '$lib/components/ui/Icon';
   import { toast } from '$lib/components/ui/Toast/toast-store';
   import { sellMedia } from '$lib/page-builder/sell-media-store.svelte';
   import { shrinkPhotoAndSubmit } from '$lib/utils/shrink-photo';
@@ -524,6 +525,7 @@
 
     {#each SLOTS as entry (entry.slot)}
       {@const slotLabelId = `jm-${entry.slot}`}
+      {@const missing = sellMedia.missingTitle(entry.slot)}
       <!--
         `role="group"` + `aria-labelledby`: `MediaPicker` renders a combobox input
         plus a clear button (plus a preview button once something is chosen), so a
@@ -564,6 +566,18 @@
           onchange={(mediaItemId) => sellMedia.setSlot(entry.slot, mediaItemId)}
         />
         <span class="panel__hint">{entry.hint()}</span>
+        <!--
+          The slot's media was deleted from its library (Codex-6sbn1). The
+          course keeps the link (a support restore heals it), so the picker
+          above reads empty with no reason; this is the reason. The public page
+          shows the section's empty prompt.
+        -->
+        {#if missing}
+          <p class="panel__missing" role="status">
+            <UnlinkIcon size={14} />
+            <span>{m.studio_builder_media_slot_missing({ title: missing })}</span>
+          </p>
+        {/if}
         <!--
           Owner P10: the sales page plays a film in full unless paid content
           uses it, and then only its 30-second preview. Said here, under the
@@ -670,6 +684,27 @@
     font-size: var(--text-xs);
     line-height: var(--leading-normal);
     color: var(--color-warning-700);
+  }
+
+  /* A slot whose media was deleted (Codex-6sbn1): the warning ramp of
+     `.panel__warn`, dashed because the slot still holds the link. */
+  .panel__missing {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-1-5);
+    margin: 0;
+    padding: var(--space-2);
+    border: var(--border-width) dashed var(--color-status-warning-border);
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--color-status-warning-surface) 55%, var(--color-surface));
+    font-size: var(--text-xs);
+    line-height: var(--leading-snug);
+    color: var(--color-status-warning-text);
+  }
+
+  .panel__missing > :global(svg) {
+    flex-shrink: 0;
+    margin-top: var(--space-0-5);
   }
 
   /* The in-flight twin. `--color-text-secondary`, never muted: muted at

@@ -659,3 +659,104 @@ describe('sell-media store · preview-only films (owner P10)', () => {
     expect(loop).toContain('m.studio_builder_media_slot_preview_only()');
   });
 });
+
+/**
+ * Codex-6sbn1: a slot whose media was deleted from its library keeps the link
+ * (a support restore heals it), so the picker reads empty. The read names the
+ * deleted media (`missingMedia`) and the panel says "Media missing" under the
+ * slot, until another item is picked.
+ */
+describe('sell-media store · media missing (Codex-6sbn1)', () => {
+  const DELETED = PERSISTED.previewVideoMediaId as string;
+
+  it('names a slot whose media was deleted, and no other', async () => {
+    getJourneySellMedia.mockResolvedValue({
+      ...PERSISTED,
+      missingMedia: [{ id: DELETED, title: 'Winter Light (rough cut)' }],
+    });
+    await sellMedia.open(PAGE_ID);
+
+    expect(sellMedia.missingTitle('previewVideoMediaId')).toBe(
+      'Winter Light (rough cut)'
+    );
+    expect(sellMedia.missingTitle('introVideoMediaId')).toBeNull();
+  });
+
+  it('a pick of another item clears it; picking nothing clears it too', async () => {
+    getJourneySellMedia.mockResolvedValue({
+      ...PERSISTED,
+      missingMedia: [{ id: DELETED, title: 'Winter Light (rough cut)' }],
+    });
+    await sellMedia.open(PAGE_ID);
+
+    sellMedia.setSlot('previewVideoMediaId', PERSISTED.introVideoMediaId);
+    expect(sellMedia.missingTitle('previewVideoMediaId')).toBeNull();
+    sellMedia.setSlot('previewVideoMediaId', null);
+    expect(sellMedia.missingTitle('previewVideoMediaId')).toBeNull();
+  });
+
+  it('an older worker that omits it names nothing, and close forgets it', async () => {
+    getJourneySellMedia.mockResolvedValue(PERSISTED);
+    await sellMedia.open(PAGE_ID);
+    expect(sellMedia.missingTitle('previewVideoMediaId')).toBeNull();
+
+    getJourneySellMedia.mockResolvedValue({
+      ...PERSISTED,
+      missingMedia: [{ id: DELETED, title: 'Winter Light (rough cut)' }],
+    });
+    await sellMedia.open(PAGE_ID);
+    sellMedia.close();
+    expect(sellMedia.missingTitle('previewVideoMediaId')).toBeNull();
+  });
+
+  it("a save's echo is the truth: a slot it no longer names isn't missing", async () => {
+    getJourneySellMedia.mockResolvedValue({
+      ...PERSISTED,
+      missingMedia: [{ id: DELETED, title: 'Winter Light (rough cut)' }],
+    });
+    await sellMedia.open(PAGE_ID);
+    // Any edit makes the store dirty, so the save runs.
+    sellMedia.setSlot('heroMediaId', null);
+    // e.g. support restored the item meanwhile: the echo names nothing.
+    updateJourneySellMedia.mockResolvedValue({
+      ...PERSISTED,
+      heroMediaId: null,
+      missingMedia: [],
+    });
+    await sellMedia.save();
+    expect(sellMedia.missingTitle('previewVideoMediaId')).toBeNull();
+  });
+
+  it('an echo without it (an older worker) keeps what the read named', async () => {
+    getJourneySellMedia.mockResolvedValue({
+      ...PERSISTED,
+      missingMedia: [{ id: DELETED, title: 'Winter Light (rough cut)' }],
+    });
+    await sellMedia.open(PAGE_ID);
+    sellMedia.setSlot('heroMediaId', null);
+    updateJourneySellMedia.mockResolvedValue({
+      ...PERSISTED,
+      heroMediaId: null,
+    });
+    await sellMedia.save();
+    expect(sellMedia.missingTitle('previewVideoMediaId')).toBe(
+      'Winter Light (rough cut)'
+    );
+  });
+
+  it('the media panel says so, under the slot', () => {
+    const PANEL = readFileSync(
+      join(
+        dirname(fileURLToPath(import.meta.url)),
+        '..',
+        'components/page-builder/PageMediaPanel.svelte'
+      ),
+      'utf8'
+    );
+    const loop = PANEL.slice(PANEL.indexOf('{#each SLOTS as entry'));
+    expect(loop).toContain('sellMedia.missingTitle(entry.slot)');
+    expect(loop).toContain(
+      'm.studio_builder_media_slot_missing({ title: missing })'
+    );
+  });
+});

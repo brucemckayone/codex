@@ -6,6 +6,8 @@ export interface ToastData {
   title?: string;
   description?: string;
   variant: ToastVariant;
+  /** One link under the text (a toast's "Show them"); following it closes the toast. */
+  action?: { label: string; href: string; newTab?: boolean };
 }
 
 // Create the toaster

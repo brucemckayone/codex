@@ -5,7 +5,7 @@
  * - Media creation (valid formats, validation)
  * - Media retrieval (by id, scope enforcement)
  * - Media updates (status transitions, metadata)
- * - Media deletion (soft delete, scope)
+ * - Media deletion (soft delete, scope, the in-use guard, files kept)
  * - List operations (pagination, filtering)
  * - Creator ownership enforcement
  * - Error handling
@@ -33,7 +33,7 @@ import {
   setupTestDatabase,
   teardownTestDatabase,
 } from '@codex/test-utils';
-import { getHlsPrefix, getOriginalKey } from '@codex/transcoding';
+import { getOriginalKey } from '@codex/transcoding';
 import type { CreateMediaItemInput } from '@codex/validation';
 import { eq } from 'drizzle-orm';
 import {
@@ -45,7 +45,7 @@ import {
   it,
   vi,
 } from 'vitest';
-import { MediaNotFoundError } from '../../errors';
+import { MediaInUseError, MediaNotFoundError } from '../../errors';
 import { MediaItemService } from '../media-service';
 
 // Uses workflow-level Neon branch in CI, LOCAL_PROXY locally
@@ -541,7 +541,10 @@ describe('MediaItemService', () => {
       );
     });
 
-    it("names the orgs whose intro film it was, so their landings' cache can drop it", async () => {
+    // Codex-6sbn1: an org's intro video is always live, so it blocks the
+    // delete (before, the delete went through and named the org for a cache
+    // drop, and the landing lost its film).
+    it("refuses while an org's intro video uses it, and deletes once it doesn't", async () => {
       const film = await service.create(
         {
           title: 'Intro film',
@@ -561,33 +564,30 @@ describe('MediaItemService', () => {
       await db
         .insert(brandingSettings)
         .values({ organizationId: org.id, introVideoMediaItemId: film.id });
-      const other = await service.create(
-        {
-          title: 'Not an intro',
-          mediaType: 'video',
-          mimeType: 'video/mp4',
-          r2Key: getOriginalKey(creatorId, crypto.randomUUID(), 'other.mp4'),
-          fileSizeBytes: 1024,
-        },
-        creatorId
-      );
 
-      expect(await service.delete(film.id, creatorId)).toEqual({
-        introFilmOrgSlugs: [org.slug],
+      const refusal = await service
+        .delete(film.id, creatorId)
+        .catch((error: unknown) => error);
+      expect(refusal).toBeInstanceOf(MediaInUseError);
+      expect((refusal as MediaInUseError).context).toEqual({
+        live: 1,
+        drafts: 0,
       });
-      expect(await service.delete(other.id, creatorId)).toEqual({
-        introFilmOrgSlugs: [],
-      });
+      expect(await service.get(film.id, creatorId)).not.toBeNull();
+
+      await db
+        .update(brandingSettings)
+        .set({ introVideoMediaItemId: null })
+        .where(eq(brandingSettings.organizationId, org.id));
+      expect(await service.delete(film.id, creatorId)).toEqual({ drafts: 0 });
     });
 
     /**
-     * R2 cleanup tests — uses a service instance with a mocked R2Service so we
-     * can assert the four-prefix sweep behaviour without hitting real R2.
-     *
-     * The list() mock dispatches per prefix via a per-call key map so each
-     * prefix can be primed with its own page set / failure mode.
+     * The files stay (Codex-6sbn1): the delete is one database step that
+     * sets the 30-day window, and media-api's daily purge removes the files
+     * after. A mocked R2Service proves the request path never touches R2.
      */
-    describe('R2 cleanup', () => {
+    describe('keeps the files', () => {
       function createMockR2() {
         return {
           put: vi.fn().mockResolvedValue(undefined),
@@ -602,261 +602,42 @@ describe('MediaItemService', () => {
         };
       }
 
-      type MockR2 = ReturnType<typeof createMockR2>;
-
-      /**
-       * Configure mockR2.list to return a fixed page per prefix.
-       * Each entry: prefix → array of object keys (single page, not truncated).
-       */
-      function listByPrefix(
-        mockR2: MockR2,
-        pages: Record<string, string[]>
-      ): void {
-        mockR2.list.mockImplementation(
-          async ({ prefix }: { prefix: string; cursor?: string }) => {
-            const keys = pages[prefix] ?? [];
-            return {
-              objects: keys.map((key) => ({ key })),
-              truncated: false,
-            };
-          }
-        );
-      }
-
-      function createServiceWithR2(mockR2: MockR2): MediaItemService {
-        return new MediaItemService({
+      it('makes no R2 call and sets the purge window 30 days after the delete', async () => {
+        const mockR2 = createMockR2();
+        const svc = new MediaItemService({
           db,
           environment: 'test',
           r2: mockR2 as unknown as R2Service,
         });
-      }
-
-      function expectedPrefixes(
-        creator: string,
-        mediaId: string
-      ): {
-        originals: string;
-        hls: string;
-        thumbnails: string;
-        waveforms: string;
-      } {
-        return {
-          originals: `${creator}/originals/${mediaId}/`,
-          hls: getHlsPrefix(creator, mediaId),
-          thumbnails: `${creator}/thumbnails/${mediaId}/`,
-          waveforms: `${creator}/waveforms/${mediaId}/`,
-        };
-      }
-
-      async function seedMedia(svc: MediaItemService): Promise<{
-        id: string;
-      }> {
         const created = await svc.create(
           {
-            title: 'R2 Cleanup Test',
+            title: 'Kept files',
             mediaType: 'video',
             mimeType: 'video/mp4',
-            r2Key: getOriginalKey(
-              creatorId,
-              crypto.randomUUID(),
-              'cleanup.mp4'
-            ),
+            r2Key: getOriginalKey(creatorId, crypto.randomUUID(), 'kept.mp4'),
             fileSizeBytes: 1024,
           },
           creatorId
         );
-        return { id: created.id };
-      }
 
-      it('lists and deletes objects under each of the four prefixes', async () => {
-        const mockR2 = createMockR2();
-        const svc = createServiceWithR2(mockR2);
-        const { id } = await seedMedia(svc);
-        const prefixes = expectedPrefixes(creatorId, id);
-
-        listByPrefix(mockR2, {
-          [prefixes.originals]: [`${prefixes.originals}media.mp4`],
-          [prefixes.hls]: [
-            `${prefixes.hls}master.m3u8`,
-            `${prefixes.hls}1080p/index.m3u8`,
-            `${prefixes.hls}1080p/segment_001.ts`,
-          ],
-          [prefixes.thumbnails]: [`${prefixes.thumbnails}auto-generated.jpg`],
-          [prefixes.waveforms]: [
-            `${prefixes.waveforms}waveform.json`,
-            `${prefixes.waveforms}waveform.png`,
-          ],
-        });
-
-        await svc.delete(id, creatorId);
-
-        // list() was called once per prefix
-        expect(mockR2.list).toHaveBeenCalledTimes(4);
-        for (const prefix of Object.values(prefixes)) {
-          expect(mockR2.list).toHaveBeenCalledWith(
-            expect.objectContaining({ prefix })
-          );
-        }
-
-        // Every object across all prefixes was deleted
-        const expectedKeys = [
-          `${prefixes.originals}media.mp4`,
-          `${prefixes.hls}master.m3u8`,
-          `${prefixes.hls}1080p/index.m3u8`,
-          `${prefixes.hls}1080p/segment_001.ts`,
-          `${prefixes.thumbnails}auto-generated.jpg`,
-          `${prefixes.waveforms}waveform.json`,
-          `${prefixes.waveforms}waveform.png`,
-        ];
-        for (const key of expectedKeys) {
-          expect(mockR2.delete).toHaveBeenCalledWith(key);
-        }
-        expect(mockR2.delete).toHaveBeenCalledTimes(expectedKeys.length);
-      });
-
-      it('isolates per-prefix list failures — other prefixes still sweep', async () => {
-        const mockR2 = createMockR2();
-        const svc = createServiceWithR2(mockR2);
-        const { id } = await seedMedia(svc);
-        const prefixes = expectedPrefixes(creatorId, id);
-
-        // Originals prefix throws on list; the other three return one key each.
-        mockR2.list.mockImplementation(
-          async ({ prefix }: { prefix: string; cursor?: string }) => {
-            if (prefix === prefixes.originals) {
-              throw new Error('R2 list error on originals');
-            }
-            const keyByPrefix: Record<string, string> = {
-              [prefixes.hls]: `${prefixes.hls}master.m3u8`,
-              [prefixes.thumbnails]: `${prefixes.thumbnails}auto-generated.jpg`,
-              [prefixes.waveforms]: `${prefixes.waveforms}waveform.json`,
-            };
-            const key = keyByPrefix[prefix];
-            return {
-              objects: key ? [{ key }] : [],
-              truncated: false,
-            };
-          }
-        );
-
-        // Outer call must NOT throw — failures are swallowed-and-logged
-        await expect(svc.delete(id, creatorId)).resolves.not.toThrow();
-
-        // All four prefixes were attempted
-        expect(mockR2.list).toHaveBeenCalledTimes(4);
-
-        // The other three prefixes still got their object deleted
-        expect(mockR2.delete).toHaveBeenCalledTimes(3);
-        expect(mockR2.delete).toHaveBeenCalledWith(
-          `${prefixes.hls}master.m3u8`
-        );
-        expect(mockR2.delete).toHaveBeenCalledWith(
-          `${prefixes.thumbnails}auto-generated.jpg`
-        );
-        expect(mockR2.delete).toHaveBeenCalledWith(
-          `${prefixes.waveforms}waveform.json`
-        );
-      });
-
-      it('isolates per-key delete failures — other keys in the same page still delete', async () => {
-        const mockR2 = createMockR2();
-        const svc = createServiceWithR2(mockR2);
-        const { id } = await seedMedia(svc);
-        const prefixes = expectedPrefixes(creatorId, id);
-
-        const hlsKeys = [
-          `${prefixes.hls}master.m3u8`,
-          `${prefixes.hls}1080p/segment_001.ts`,
-          `${prefixes.hls}1080p/segment_002.ts`,
-        ];
-        listByPrefix(mockR2, {
-          [prefixes.originals]: [],
-          [prefixes.hls]: hlsKeys,
-          [prefixes.thumbnails]: [],
-          [prefixes.waveforms]: [],
-        });
-
-        // Middle key fails; the others must still be attempted
-        mockR2.delete.mockImplementation(async (key: string) => {
-          if (key === hlsKeys[1]) {
-            throw new Error('R2 delete error');
-          }
-          return undefined;
-        });
-
-        await expect(svc.delete(id, creatorId)).resolves.not.toThrow();
-
-        // All three HLS keys were attempted, including the failed middle one
-        expect(mockR2.delete).toHaveBeenCalledTimes(hlsKeys.length);
-        for (const key of hlsKeys) {
-          expect(mockR2.delete).toHaveBeenCalledWith(key);
-        }
-      });
-
-      it('follows the cursor across truncated pages within a single prefix', async () => {
-        const mockR2 = createMockR2();
-        const svc = createServiceWithR2(mockR2);
-        const { id } = await seedMedia(svc);
-        const prefixes = expectedPrefixes(creatorId, id);
-
-        // Per-prefix call counter so we can return page 1 then page 2 for HLS only.
-        const callsByPrefix: Record<string, number> = {};
-        mockR2.list.mockImplementation(
-          async ({ prefix, cursor }: { prefix: string; cursor?: string }) => {
-            callsByPrefix[prefix] = (callsByPrefix[prefix] ?? 0) + 1;
-            if (prefix === prefixes.hls) {
-              if (callsByPrefix[prefix] === 1) {
-                expect(cursor).toBeUndefined();
-                return {
-                  objects: [
-                    { key: `${prefixes.hls}1080p/segment_001.ts` },
-                    { key: `${prefixes.hls}1080p/segment_002.ts` },
-                  ],
-                  truncated: true,
-                  cursor: 'next-page',
-                };
-              }
-              expect(cursor).toBe('next-page');
-              return {
-                objects: [{ key: `${prefixes.hls}1080p/segment_003.ts` }],
-                truncated: false,
-              };
-            }
-            return { objects: [], truncated: false };
-          }
-        );
-
-        await svc.delete(id, creatorId);
-
-        // HLS prefix listed twice (page 1 + page 2); other prefixes once each
-        const hlsCalls = mockR2.list.mock.calls.filter(
-          (call) => (call[0] as { prefix: string }).prefix === prefixes.hls
-        );
-        expect(hlsCalls).toHaveLength(2);
-
-        // All three segments across both pages were deleted
-        expect(mockR2.delete).toHaveBeenCalledTimes(3);
-        expect(mockR2.delete).toHaveBeenCalledWith(
-          `${prefixes.hls}1080p/segment_001.ts`
-        );
-        expect(mockR2.delete).toHaveBeenCalledWith(
-          `${prefixes.hls}1080p/segment_002.ts`
-        );
-        expect(mockR2.delete).toHaveBeenCalledWith(
-          `${prefixes.hls}1080p/segment_003.ts`
-        );
-      });
-
-      it('does not call any R2 method when MediaNotFoundError throws inside the transaction', async () => {
-        const mockR2 = createMockR2();
-        const svc = createServiceWithR2(mockR2);
-
-        await expect(
-          svc.delete('00000000-0000-0000-0000-000000000000', creatorId)
-        ).rejects.toThrow(MediaNotFoundError);
+        await svc.delete(created.id, creatorId);
 
         expect(mockR2.list).not.toHaveBeenCalled();
         expect(mockR2.delete).not.toHaveBeenCalled();
+        const [row] = await db
+          .select({
+            deletedAt: mediaItems.deletedAt,
+            filesPurgeAfter: mediaItems.filesPurgeAfter,
+            filesPurgedAt: mediaItems.filesPurgedAt,
+          })
+          .from(mediaItems)
+          .where(eq(mediaItems.id, created.id));
+        expect(row?.deletedAt).toBeInstanceOf(Date);
+        expect(row?.filesPurgedAt).toBeNull();
+        expect(
+          (row?.filesPurgeAfter?.getTime() ?? 0) -
+            (row?.deletedAt?.getTime() ?? 0)
+        ).toBe(30 * 24 * 60 * 60 * 1000);
       });
     });
   });

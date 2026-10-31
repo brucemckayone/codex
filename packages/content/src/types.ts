@@ -31,6 +31,8 @@ export type DatabaseTransaction = Parameters<
 >[0];
 
 import type {
+  MediaUsage,
+  MediaUsageCounts,
   PaginatedListResponse,
   PaginationParams,
   PublicContentCreator,
@@ -129,6 +131,14 @@ export interface MediaItemWithRelations extends ServedMediaItem {
     email: string;
     name: string | null;
   };
+}
+
+/**
+ * A `GET /api/media` item: the row, and how many places use it (the library
+ * chip, Codex-6sbn1).
+ */
+export interface MediaListItem extends MediaItemWithRelations {
+  usage: MediaUsageCounts;
 }
 
 /**
@@ -252,7 +262,13 @@ export type MediaResponse = SingleItemResponse<MediaItemWithRelations>;
  * Response for GET /api/media
  * Returns paginated list of media items with relations
  */
-export type MediaListResponse = PaginatedListResponse<MediaItemWithRelations>;
+export type MediaListResponse = PaginatedListResponse<MediaListItem>;
+
+/**
+ * Response for GET /api/media/:id/usage (Codex-6sbn1)
+ * Where the item is used, named only where the caller can already see it
+ */
+export type MediaUsageResponse = SingleItemResponse<MediaUsage>;
 
 /**
  * Response for POST /api/media

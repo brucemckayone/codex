@@ -59,9 +59,11 @@
   interface Props {
     session: BuilderSession;
     orgDomain: string;
+    /** The tab it opens on (a `?tab=` deep link); the Page tab by default. */
+    initialTab?: EditorTab;
   }
 
-  const { session, orgDomain }: Props = $props();
+  const { session, orgDomain, initialTab = 'page' }: Props = $props();
 
   /** The inspector's width, in rem — shared by the grid and the placement rule. */
   const INSPECTOR_REM = 20;
@@ -83,7 +85,8 @@
   };
 
   let device = $state<Device>('desktop');
-  let tab = $state<EditorTab>('page');
+  // svelte-ignore state_referenced_locally — where it opens; the creator moves it after
+  let tab = $state<EditorTab>(initialTab);
   let sideOpen = $state(true);
   let inspectorOpen = $state(true);
   let drawerOpen = $state(false);
@@ -351,7 +354,9 @@
     onUnpublish={() => void session.unpublish()}
   />
 
-  <Tabs.Root bind:value={tab} defaultValue="page" class="shell__workspace">
+  <!-- `defaultValue`, not only `tab`: the Tabs root syncs Melt's value INTO the
+       binding, never out, so the opening tab has to be Melt's own. -->
+  <Tabs.Root bind:value={tab} defaultValue={initialTab} class="shell__workspace">
     <aside class="shell__side" hidden={!sideOpen}>
       <div class="shell__side-head">
         <Tabs.List class="shell__tabs" aria-label={m.studio_page_editor_tabs_label()}>

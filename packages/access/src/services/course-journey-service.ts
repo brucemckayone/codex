@@ -3076,6 +3076,7 @@ export class CourseJourneyService extends BaseService {
         guidePortraitMediaId: row.guide?.portraitMediaId ?? null,
         heroMediaId: row.heroMediaId,
         signatureMediaId: row.signatureMediaId,
+        missingMedia: await this.readMissingSellMedia(this.db, row),
         coverImageUrl: resolveCourseCoverUrl(
           row.coverImageKey,
           r2PublicUrlBase
@@ -3099,14 +3100,17 @@ export class CourseJourneyService extends BaseService {
    * `null` CLEARS. A merge shape could only ever set a video, never unset one,
    * which is why the validated body defaults each absent slot to `null`.
    *
-   * SCOPING — every non-null id is verified BEFORE the write (see
-   * {@link assertMediaItemsInOrg}): the media must exist, be non-deleted, and
-   * belong to a creator holding an ACTIVE membership in this org. A foreign id
-   * throws `ForbiddenError` and NOTHING is written — `media_items` carries no
-   * `organization_id`, so creator-membership is the org boundary, and the FK
-   * alone would happily accept another org's media.
+   * SCOPING — every id the write ATTACHES (non-null, and not the slot's
+   * stored id) is verified BEFORE the write, inside its transaction, under a
+   * locking read (see {@link assertMediaItemsInOrg}): the media must exist, be
+   * non-deleted, and belong to a creator holding an ACTIVE membership in this
+   * org. A foreign id throws `ForbiddenError` and NOTHING is written —
+   * `media_items` carries no `organization_id`, so creator-membership is the
+   * org boundary, and the FK alone would happily accept another org's media.
+   * A stored id sent back unchanged is not re-checked, so a slot whose item
+   * was deleted since never blocks a save of the others (Codex-6sbn1).
    *
-   * TYPE — the same pre-transaction pass also refuses a non-video item in a
+   * TYPE — the same pass also refuses a non-video item in a
    * STILL slot (see {@link assertMediaItemsInOrg}'s `stillSlots` argument). Three
    * of the six slots draw a frame rather than play a stream, and an AUDIO item has
    * `thumbnailKey = null` BY CONSTRUCTION, so accepting one wrote a value that
@@ -3166,55 +3170,16 @@ export class CourseJourneyService extends BaseService {
         pageId
       );
 
-      // The retired "Signature film" (Codex-61zsk.47): no surface offers it, so
-      // the builder sends back whatever is stored. A stored film that has since
-      // been deleted would fail the check below on every save, and the creator
-      // could no longer clear it. So the stored value is kept without being
-      // checked again; a new one is checked like any other.
-      const [stored] = await this.db
-        .select({ signatureMediaId: courses.signatureMediaId })
-        .from(courses)
-        .where(
-          and(
-            eq(courses.id, courseId),
-            eq(courses.organizationId, organizationId),
-            isNull(courses.deletedAt)
-          )
-        )
-        .limit(1);
-      const signatureToCheck =
-        input.signatureMediaId !== null &&
-        input.signatureMediaId === stored?.signatureMediaId
-          ? null
-          : input.signatureMediaId;
-
-      // Validate the ids BEFORE opening the transaction — a rejected write must
-      // leave no trace, and a ForbiddenError here is cheaper than a rollback.
-      //
-      // `stillSlots` names the three slots that DRAW a frame rather than play a
-      // stream. The three clip slots are deliberately absent from it: `reel`'s
-      // `waveform` composition is audio-first, so tightening those would break a
-      // shipped composition.
-      await this.assertMediaItemsInOrg(
-        organizationId,
-        [
-          input.introVideoMediaId,
-          input.previewVideoMediaId,
-          input.guideVideoMediaId,
-          input.guidePortraitMediaId,
-          input.heroMediaId,
-          signatureToCheck,
-        ],
-        [
-          { label: 'Hero image', mediaId: input.heroMediaId },
-          { label: 'Guide portrait', mediaId: input.guidePortraitMediaId },
-          { label: 'Guide signature', mediaId: signatureToCheck },
-        ]
-      );
-
       return await this.txDb.transaction(async (tx) => {
         const [existing] = await tx
-          .select({ guide: courses.guide })
+          .select({
+            guide: courses.guide,
+            introVideoMediaId: courses.introVideoMediaId,
+            previewVideoMediaId: courses.previewVideoMediaId,
+            guideVideoMediaId: courses.guideVideoMediaId,
+            heroMediaId: courses.heroMediaId,
+            signatureMediaId: courses.signatureMediaId,
+          })
           .from(courses)
           .where(
             and(
@@ -3228,6 +3193,53 @@ export class CourseJourneyService extends BaseService {
         if (!existing) {
           throw new NotFoundError('Journey course not found');
         }
+
+        // Only an id that CHANGES is checked: an attach. The write is total,
+        // so the builder sends back every slot it holds, and a stored item
+        // deleted since (Codex-6sbn1 lets a delete go ahead when only drafts
+        // use it; the draft keeps its link so a restore heals it) would fail
+        // every later save, and the creator could save nothing until they
+        // replaced it. The retired "Signature film" (Codex-61zsk.47), which no
+        // surface offers, was the first case of this.
+        const attached = (sent: string | null, stored: string | null) =>
+          sent !== null && sent !== stored ? sent : null;
+        const portrait = attached(
+          input.guidePortraitMediaId,
+          existing.guide?.portraitMediaId ?? null
+        );
+        const hero = attached(input.heroMediaId, existing.heroMediaId);
+        const signature = attached(
+          input.signatureMediaId,
+          existing.signatureMediaId
+        );
+
+        // Inside the transaction, with a locking read: a media delete holds
+        // the row FOR UPDATE while it checks the item's uses, so an attach
+        // that started after it waits, finds it deleted and refuses
+        // (Codex-6sbn1). A refusal rolls back a transaction that has written
+        // nothing.
+        //
+        // `stillSlots` names the three slots that DRAW a frame rather than play a
+        // stream. The three clip slots are deliberately absent from it: `reel`'s
+        // `waveform` composition is audio-first, so tightening those would break a
+        // shipped composition.
+        await this.assertMediaItemsInOrg(
+          organizationId,
+          [
+            attached(input.introVideoMediaId, existing.introVideoMediaId),
+            attached(input.previewVideoMediaId, existing.previewVideoMediaId),
+            attached(input.guideVideoMediaId, existing.guideVideoMediaId),
+            portrait,
+            hero,
+            signature,
+          ],
+          [
+            { label: 'Hero image', mediaId: hero },
+            { label: 'Guide portrait', mediaId: portrait },
+            { label: 'Guide signature', mediaId: signature },
+          ],
+          tx
+        );
 
         // Merge the portrait into the existing guide bag. A portrait with no
         // guide at all still needs somewhere to live, so seed a minimal bag
@@ -3287,6 +3299,7 @@ export class CourseJourneyService extends BaseService {
           guidePortraitMediaId: row.guide?.portraitMediaId ?? null,
           heroMediaId: row.heroMediaId,
           signatureMediaId: row.signatureMediaId,
+          missingMedia: await this.readMissingSellMedia(tx, row),
           // The cover and the hero image are written by their own multipart
           // endpoints, but their STORED keys come back on this same `.returning()`
           // row — so resolving them here costs nothing and makes the echo true.
@@ -3472,6 +3485,41 @@ export class CourseJourneyService extends BaseService {
   }
 
   /**
+   * The offered sell slots' items whose media was deleted (Codex-6sbn1): the
+   * slot keeps the id, so the panel needs this to say "Media missing". One
+   * read, and none when every slot is empty. The retired signature film is
+   * left out: no picker offers it.
+   */
+  private async readMissingSellMedia(
+    db: Pick<typeof this.db, 'select'>,
+    row: {
+      introVideoMediaId: string | null;
+      previewVideoMediaId: string | null;
+      guideVideoMediaId: string | null;
+      heroMediaId: string | null;
+      guide: CourseGuide | null;
+    }
+  ): Promise<{ id: string; title: string }[]> {
+    const ids = [
+      row.introVideoMediaId,
+      row.previewVideoMediaId,
+      row.guideVideoMediaId,
+      row.heroMediaId,
+      row.guide?.portraitMediaId ?? null,
+    ].filter((id): id is string => !!id);
+    if (ids.length === 0) return [];
+    return db
+      .select({ id: mediaItems.id, title: mediaItems.title })
+      .from(mediaItems)
+      .where(
+        and(
+          inArray(mediaItems.id, [...new Set(ids)]),
+          isNotNull(mediaItems.deletedAt)
+        )
+      );
+  }
+
+  /**
    * Guard: every non-null media id exists, is non-deleted, and belongs to a
    * creator with an ACTIVE membership in `organizationId`. Throws
    * `ForbiddenError` naming the offending id otherwise.
@@ -3485,6 +3533,13 @@ export class CourseJourneyService extends BaseService {
    *
    * Nulls are skipped (clearing a slot needs no ownership) and duplicates are
    * de-duplicated, so one id used in two slots costs one row.
+   *
+   * Runs inside the write's transaction `tx`, as a LOCKING read (FOR KEY
+   * SHARE OF media_items): a media delete holds the row FOR UPDATE while it
+   * checks the item's uses, so an attach that started after it waits, re-reads
+   * the row, finds it deleted and refuses (Codex-6sbn1). A membership is
+   * unique per (org, user), so the join yields one row per item and needs no
+   * DISTINCT (which a locking read can't take).
    *
    * SECOND JOB — `stillSlots` (P3, Codex-490z7's sibling defect). The same rows
    * already carry `mediaType`, so the slots that draw a FRAME rather than play a
@@ -3504,13 +3559,14 @@ export class CourseJourneyService extends BaseService {
   private async assertMediaItemsInOrg(
     organizationId: string,
     mediaIds: readonly (string | null)[],
-    stillSlots: readonly { label: string; mediaId: string | null }[] = []
+    stillSlots: readonly { label: string; mediaId: string | null }[],
+    tx: Parameters<Parameters<typeof this.txDb.transaction>[0]>[0]
   ): Promise<void> {
     const wanted = [...new Set(mediaIds.filter((id): id is string => !!id))];
     if (wanted.length === 0) return;
 
-    const rows = await this.db
-      .selectDistinct({ id: mediaItems.id, mediaType: mediaItems.mediaType })
+    const rows = await tx
+      .select({ id: mediaItems.id, mediaType: mediaItems.mediaType })
       .from(mediaItems)
       .innerJoin(
         organizationMemberships,
@@ -3520,7 +3576,8 @@ export class CourseJourneyService extends BaseService {
           eq(organizationMemberships.status, 'active')
         )
       )
-      .where(and(inArray(mediaItems.id, wanted), isNull(mediaItems.deletedAt)));
+      .where(and(inArray(mediaItems.id, wanted), isNull(mediaItems.deletedAt)))
+      .for('key share', { of: mediaItems });
 
     const allowed = new Set(rows.map((r) => r.id));
     const rejected = wanted.find((id) => !allowed.has(id));

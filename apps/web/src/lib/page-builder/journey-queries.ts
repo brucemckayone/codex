@@ -377,6 +377,14 @@ export interface JourneySellMedia {
    * older worker, and the write's echo, omit it.
    */
   previewOnlyMediaIds?: string[];
+  /**
+   * The slot media deleted from a library (Codex-6sbn1): the course keeps the
+   * link, so a support restore heals it, and the panel says "Media missing"
+   * with the title. The route is owner/admin only, so naming it is fine.
+   * The read and the write's echo both carry it. OPTIONAL-additive: an older
+   * worker omits it.
+   */
+  missingMedia?: { id: string; title: string }[];
 }
 
 /** One org tier the pricing panel offers as a way into the course. */

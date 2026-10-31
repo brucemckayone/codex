@@ -181,6 +181,17 @@ export const mediaItems = pgTable(
       .notNull()
       .$onUpdate(() => new Date()),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
+
+    // The files a delete keeps for 30 days (Codex-6sbn1). A delete sets
+    // `deletedAt` and `filesPurgeAfter` = then + 30 days and leaves R2 alone;
+    // media-api's daily purge removes the files once it passes, stamping
+    // `filesPurgedAt` first (the claim). Restore is refused once that stamp
+    // is set. Rows deleted before this shipped lost their files at once and
+    // keep `filesPurgeAfter` NULL, so the purge never lists them. Support can
+    // hold an item's files longer by moving `filesPurgeAfter`. Never served
+    // (MEDIA_ITEM_RESPONSE_COLUMNS).
+    filesPurgeAfter: timestamp('files_purge_after', { withTimezone: true }),
+    filesPurgedAt: timestamp('files_purged_at', { withTimezone: true }),
   },
   (table) => [
     index('idx_media_items_creator_id').on(table.creatorId),
@@ -191,6 +202,12 @@ export const mediaItems = pgTable(
       table.status,
       table.transcodingAttempts
     ), // For efficient polling/retry queries
+    // The purge's due list: deleted, files kept, window set (Codex-6sbn1).
+    index('idx_media_items_files_purge_due')
+      .on(table.filesPurgeAfter)
+      .where(
+        sql`${table.deletedAt} IS NOT NULL AND ${table.filesPurgedAt} IS NULL AND ${table.filesPurgeAfter} IS NOT NULL`
+      ),
 
     // CHECK constraints
     check(
@@ -523,9 +540,13 @@ export type NewOrganizationMembership =
 export type MediaItem = typeof mediaItems.$inferSelect;
 /**
  * A media row as a response carries it: without the transcoder's raw detail
- * (MEDIA_ITEM_RESPONSE_COLUMNS, utils/media-item-columns.ts, Codex-l2c48).
+ * (Codex-l2c48) or the delete's file-purge bookkeeping (Codex-6sbn1).
+ * MEDIA_ITEM_RESPONSE_COLUMNS, utils/media-item-columns.ts.
  */
-export type ServedMediaItem = Omit<MediaItem, 'transcodingError'>;
+export type ServedMediaItem = Omit<
+  MediaItem,
+  'transcodingError' | 'filesPurgeAfter' | 'filesPurgedAt'
+>;
 export type NewMediaItem = typeof mediaItems.$inferInsert;
 export type Content = typeof content.$inferSelect;
 export type NewContent = typeof content.$inferInsert;

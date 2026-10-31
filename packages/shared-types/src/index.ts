@@ -95,7 +95,16 @@ export type {
   SectionProps,
   StoredEntitlementSource,
 } from './journeys';
-
+// Where a media item is used (Codex-6sbn1)
+export type {
+  MediaUsage,
+  MediaUsageCounts,
+  MediaUse,
+  MediaUseKind,
+  MediaUseLink,
+  MediaUseLiveReason,
+  MediaUseSlot,
+} from './media-usage';
 // Organization and Member types
 export type { OrgMemberContext, OrgMemberRole } from './member-types';
 

@@ -28,19 +28,16 @@ import {
   withCreatorScope,
   withoutTranscodingDetail,
 } from '@codex/database';
-import {
-  brandingSettings,
-  mediaItems,
-  organizations,
-} from '@codex/database/schema';
+import { mediaItems } from '@codex/database/schema';
 import {
   BaseService,
   BusinessLogicError,
+  ConflictError,
   InternalServiceError,
   type ServiceConfig,
   ValidationError,
 } from '@codex/service-errors';
-import type { PaginatedListResponse } from '@codex/shared-types';
+import type { MediaUsage, PaginatedListResponse } from '@codex/shared-types';
 import {
   getHlsPrefix,
   getOriginalKey,
@@ -59,15 +56,75 @@ import {
   createMediaItemSchema,
   updateMediaItemSchema,
 } from '@codex/validation';
-import { and, asc, desc, eq, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, isNotNull, isNull, lte } from 'drizzle-orm';
 import { MediaNotFoundError } from '../errors';
 import type {
   MediaItem,
   MediaItemFilters,
   MediaItemWithRelations,
+  MediaListItem,
   PaginationParams,
   ServedMediaItem,
 } from '../types';
+import {
+  assertMediaDeletable,
+  countMediaUses,
+  readMediaUses,
+  summariseMediaUsage,
+} from './media-usage';
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** How long a delete keeps the files (owner, Codex-6sbn1). */
+const MEDIA_FILES_KEPT_MS = 30 * DAY_MS;
+
+/** Due items one purge run takes; what's left waits a day. */
+const MEDIA_FILES_PURGE_BATCH = 25;
+
+/** What one {@link MediaItemService.purgeDueFiles} run did. Ids only. */
+export interface MediaFilesPurgeReport {
+  due: number;
+  purged: number;
+  skippedInUse: number;
+  failed: number;
+  objectsDeleted: number;
+  durationMs: number;
+}
+
+/**
+ * The MEDIA_BUCKET folders a media item's files live in: the original, the
+ * HLS ladder (its 30-second preview is inside it), the poster and the
+ * waveform.
+ */
+function mediaFilePrefixes(creatorId: string, mediaId: string): string[] {
+  return [
+    `${creatorId}/${PATH_CONFIG.ORIGINALS_FOLDER}/${mediaId}/`,
+    getHlsPrefix(creatorId, mediaId),
+    `${creatorId}/${PATH_CONFIG.THUMBNAILS_FOLDER}/${mediaId}/`,
+    `${creatorId}/${PATH_CONFIG.WAVEFORMS_FOLDER}/${mediaId}/`,
+  ];
+}
+
+/**
+ * Delete every object under `prefix`, a listed page (up to 1,000 keys) per
+ * call, and answer how many. R2 has no "delete folder", and an HLS folder is
+ * hundreds of segments. Throws on any failure, so the purge gives its claim
+ * back.
+ */
+async function deletePrefix(r2: R2Service, prefix: string): Promise<number> {
+  let deleted = 0;
+  let cursor: string | undefined;
+  do {
+    const page = await r2.list({ prefix, cursor });
+    const keys = page.objects.map((object) => object.key);
+    if (keys.length > 0) {
+      await r2.delete(keys);
+      deleted += keys.length;
+    }
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+  return deleted;
+}
 
 /** The columns applyUpdate writes: the creator's two, or a lifecycle write's. */
 type MediaRowUpdate = Partial<
@@ -115,7 +172,10 @@ interface MediaItemServiceConfig extends ServiceConfig {
  * Handles all media item-related business logic:
  * - Create media items (during upload) with presigned upload URL
  * - Update media metadata (after transcoding)
- * - Delete media items (soft delete)
+ * - Where a media item is used, and the delete guard on it (Codex-6sbn1)
+ * - Delete media items (soft delete; the files are kept 30 days)
+ * - Restore a deleted item inside the 30 days (support), and the daily
+ *   purge of the files after
  * - List media items with filters
  *
  * Media items are creator-scoped: all R2 paths use {creatorId}/ prefix.
@@ -394,147 +454,278 @@ export class MediaItemService extends BaseService {
   }
 
   /**
-   * Soft delete media item
+   * Where the item is used (GET /api/media/:id/usage, Codex-6sbn1): the list
+   * the delete dialog and the library popover draw, naming only uses the
+   * caller can already see. Never cached: it is the delete's guard.
    *
-   * Security:
-   * - Sets deleted_at timestamp (soft delete)
-   * - Preserves data for content references
-   * - Scoped to creator ownership
+   * @throws {MediaNotFoundError} If media doesn't exist or isn't the creator's
+   */
+  async getUsage(id: string, creatorId: string): Promise<MediaUsage> {
+    try {
+      const [owned] = await this.db
+        .select({ id: mediaItems.id })
+        .from(mediaItems)
+        .where(
+          and(eq(mediaItems.id, id), scopedNotDeleted(mediaItems, creatorId))
+        )
+        .limit(1);
+      if (!owned) throw new MediaNotFoundError(id);
+      return await summariseMediaUsage(
+        await readMediaUses(this.db, [id], creatorId),
+        creatorId
+      );
+    } catch (error) {
+      this.handleError(error, 'getUsage');
+    }
+  }
+
+  /**
+   * Soft delete a media item (Codex-6sbn1).
    *
-   * Side effect: hard-deletes every R2 object under the media item's four
-   * known prefixes (originals, hls, thumbnails, waveforms). R2 cleanup runs
-   * AFTER the soft-delete transaction commits — R2 has no rollback semantics,
-   * so failing inside the DB transaction would leave half-deleted state worse
-   * than no cleanup at all. Errors during the R2 sweep are swallowed and
-   * logged; orphans are recoverable, failed user-deletes are not.
+   * Refused with 409 `MEDIA_IN_USE` while anything live uses it (published
+   * or bought content, a published course, an org's intro video), and with
+   * 409 `MEDIA_USAGE_CHANGED` when `usageFingerprint` (from {@link getUsage})
+   * no longer describes its uses, or is missing while drafts use it. Drafts
+   * keep their link to the deleted row: they show "media missing", can't
+   * publish (`MEDIA_DELETED`), and a {@link restore} heals them.
    *
-   * The pattern the org intro's old delete used for HLS cleanup (removed in
-   * Codex-376dl, which unlinks instead), scaled to four prefixes via a
-   * shared helper.
+   * The check and the write are one transaction, the media row locked FOR
+   * UPDATE first. An attach's foreign key check takes FOR KEY SHARE, which a
+   * plain UPDATE doesn't conflict with, so without the lock an attach would
+   * not be ordered against the delete. Each attach path re-reads the row
+   * with a locking read, so one that waited on this lock finds it deleted.
    *
-   * Note: Content referencing this media will still exist but cannot be published
+   * The files stay: `filesPurgeAfter` is set 30 days on, and media-api's
+   * daily purge ({@link purgeDueFiles}) removes them after, unless something
+   * live uses the item by then. Nothing here touches R2.
    *
-   * An org whose intro film this was keeps its link (the landing and the
-   * studio read a deleted pick as no film, Codex-376dl), but its public info
-   * is cached with the film's poster and preview, which the sweep removes. So
-   * the delete answers those orgs' slugs, for the caller to invalidate.
-   *
-   * @param id - Media item ID
-   * @param creatorId - Creator ID (for authorization)
-   * @returns The slugs of the orgs whose intro film the media was
-   * @throws {MediaNotFoundError} If media doesn't exist
+   * @param usageFingerprint - `MediaUsage.fingerprint` the dialog showed
+   * @returns How many drafts are left without their media
+   * @throws {MediaNotFoundError} If media doesn't exist or isn't the creator's
+   * @throws {MediaInUseError} If anything live uses it
+   * @throws {MediaUsageChangedError} If its uses changed since the dialog read them
    */
   async delete(
     id: string,
-    creatorId: string
-  ): Promise<{ introFilmOrgSlugs: string[] }> {
+    creatorId: string,
+    usageFingerprint?: string
+  ): Promise<{ drafts: number }> {
     try {
-      // Verify-and-soft-delete inside transaction
-      const introFilmOrgs = await this.db.transaction(async (tx) => {
-        const existing = await tx.query.mediaItems.findFirst({
-          where: and(
-            eq(mediaItems.id, id),
-            scopedNotDeleted(mediaItems, creatorId)
-          ),
-        });
+      const drafts = await this.db.transaction(async (tx) => {
+        const [locked] = await tx
+          .select({ id: mediaItems.id })
+          .from(mediaItems)
+          .where(
+            and(eq(mediaItems.id, id), scopedNotDeleted(mediaItems, creatorId))
+          )
+          .for('update');
+        if (!locked) throw new MediaNotFoundError(id);
 
-        if (!existing) {
-          throw new MediaNotFoundError(id);
-        }
+        const uses = await readMediaUses(tx, [id], creatorId);
+        await assertMediaDeletable(uses, usageFingerprint);
 
+        const deletedAt = new Date();
         await tx
           .update(mediaItems)
           .set({
-            deletedAt: new Date(),
-            updatedAt: new Date(),
+            deletedAt,
+            filesPurgeAfter: new Date(
+              deletedAt.getTime() + MEDIA_FILES_KEPT_MS
+            ),
+            updatedAt: deletedAt,
           })
           .where(
             and(eq(mediaItems.id, id), withCreatorScope(mediaItems, creatorId))
           );
-
-        // Keyed on the media just verified as this creator's: only its
-        // owner can pick it as an intro film (linkIntroVideo).
-        return tx
-          .select({ slug: organizations.slug })
-          .from(brandingSettings)
-          .innerJoin(
-            organizations,
-            eq(organizations.id, brandingSettings.organizationId)
-          )
-          .where(eq(brandingSettings.introVideoMediaItemId, id));
+        return uses.length;
       });
       // After commit: a rolled-back delete must not vanish from the studio.
       publishMediaRemoved(this.mediaStatus, id, creatorId, this.obs);
-
-      // After commit: hard-delete R2 objects across all four prefixes.
-      // The helper swallows internally so a list/delete failure on one
-      // prefix doesn't prevent sweeps of the other three.
-      if (this.r2) {
-        await this.deletePrefixObjects(`${creatorId}/originals/${id}/`, id);
-        await this.deletePrefixObjects(getHlsPrefix(creatorId, id), id);
-        await this.deletePrefixObjects(`${creatorId}/thumbnails/${id}/`, id);
-        await this.deletePrefixObjects(`${creatorId}/waveforms/${id}/`, id);
-      }
-      return { introFilmOrgSlugs: introFilmOrgs.map((org) => org.slug) };
+      return { drafts };
     } catch (error) {
-      if (error instanceof MediaNotFoundError) {
-        throw error;
-      }
       this.handleError(error, 'delete');
     }
   }
 
   /**
-   * Hard-delete every R2 object under the given prefix.
+   * Undo a delete inside the 30 days (support only: POST
+   * /api/admin/media/:id/restore). One conditional update, so it and the
+   * purge's claim can't both win. Drafts heal themselves: their link was
+   * never cleared. The tile comes back in the creator's open Studio tabs.
    *
-   * Lists with pagination (HLS folders contain manifest + per-variant
-   * playlists + many .ts segments; originals/thumbnails/waveforms are
-   * usually small, but the same loop handles all four). R2 has no
-   * "delete folder" primitive, so list + delete is the canonical approach.
-   *
-   * Errors are logged but never thrown — both the outer list() call and
-   * each per-key delete() call are caught individually so a single failure
-   * cannot prevent cleanup of the remaining objects (or other prefixes).
-   * Orphaned files are recoverable via background cleanup; failing the
-   * user's delete is not.
+   * @throws {MediaNotFoundError} If no media item has this id
+   * @throws {ConflictError} If it isn't deleted, or its files are gone: the
+   *   purge has claimed it, or it was deleted before files were kept
    */
-  private async deletePrefixObjects(
-    prefix: string,
-    mediaItemId: string
-  ): Promise<void> {
-    if (!this.r2) return;
+  async restore(id: string): Promise<ServedMediaItem> {
+    try {
+      const [restored] = await this.db
+        .update(mediaItems)
+        .set({ deletedAt: null, filesPurgeAfter: null, updatedAt: new Date() })
+        .where(
+          and(
+            eq(mediaItems.id, id),
+            isNotNull(mediaItems.deletedAt),
+            isNotNull(mediaItems.filesPurgeAfter),
+            isNull(mediaItems.filesPurgedAt)
+          )
+        )
+        .returning();
+      if (restored) {
+        publishMediaStatus(this.mediaStatus, restored, this.obs);
+        this.obs.info('media.restored', { mediaItemId: id });
+        return withoutTranscodingDetail(restored);
+      }
 
-    let cursor: string | undefined;
-    let totalDeleted = 0;
+      const [row] = await this.db
+        .select({ deletedAt: mediaItems.deletedAt })
+        .from(mediaItems)
+        .where(eq(mediaItems.id, id))
+        .limit(1);
+      if (!row) throw new MediaNotFoundError(id);
+      throw new ConflictError(
+        row.deletedAt
+          ? 'This media item can no longer be restored: its files are gone.'
+          : 'This media item is not deleted.',
+        {
+          mediaItemId: id,
+          reason: row.deletedAt ? 'FILES_GONE' : 'NOT_DELETED',
+        }
+      );
+    } catch (error) {
+      this.handleError(error, 'restore');
+    }
+  }
+
+  /**
+   * Remove the files of deleted items whose 30 days are up (media-api's
+   * hourly cron, at 03:00 UTC only). NEVER throws: a failure is logged and
+   * the item tried again a day later.
+   *
+   * Per due item, oldest first, until `deadline`:
+   * 1. the usage lookup: anything live uses it, skip and log at error level
+   *    (the safety net: a race nobody thought of can't stop a published film
+   *    playing, and support can restore the item);
+   * 2. the claim, a conditional update stamping `filesPurgedAt` (zero rows:
+   *    restored meanwhile, skip). From here a restore is refused;
+   * 3. list and delete each of its prefixes in MEDIA_BUCKET;
+   * 4. on any failure, give the claim back, due again in a day.
+   *
+   * Idempotent: the claim is conditional, and an absent key or an empty
+   * prefix is not an error. A crash between the claim and the last delete
+   * leaves objects behind a row marked purged, and no `media.files_purged`
+   * line for it.
+   */
+  async purgeDueFiles(options: {
+    deadline: number;
+  }): Promise<MediaFilesPurgeReport> {
+    const startedAt = Date.now();
+    const report: MediaFilesPurgeReport = {
+      due: 0,
+      purged: 0,
+      skippedInUse: 0,
+      failed: 0,
+      objectsDeleted: 0,
+      durationMs: 0,
+    };
+    const r2 = this.r2;
+    if (!r2) {
+      this.obs.error('media.files_purge_unavailable', {
+        reason: 'no media bucket',
+      });
+      return report;
+    }
 
     try {
-      do {
-        const page = await this.r2.list({ prefix, cursor });
-        for (const object of page.objects) {
-          try {
-            await this.r2.delete(object.key);
-            totalDeleted++;
-          } catch (error) {
-            this.obs.warn('Failed to delete media R2 object', {
-              mediaItemId,
-              r2Key: object.key,
-              error: String(error),
-            });
-          }
-        }
-        cursor = page.truncated ? page.cursor : undefined;
-      } while (cursor);
+      const due = await this.db
+        .select({ id: mediaItems.id, creatorId: mediaItems.creatorId })
+        .from(mediaItems)
+        .where(
+          and(
+            isNotNull(mediaItems.deletedAt),
+            isNull(mediaItems.filesPurgedAt),
+            isNotNull(mediaItems.filesPurgeAfter),
+            lte(mediaItems.filesPurgeAfter, new Date())
+          )
+        )
+        .orderBy(asc(mediaItems.filesPurgeAfter))
+        .limit(MEDIA_FILES_PURGE_BATCH);
+      report.due = due.length;
 
-      this.obs.info('Deleted media R2 objects', {
-        mediaItemId,
-        prefix,
-        deleted: totalDeleted,
-      });
+      for (const item of due) {
+        if (Date.now() >= options.deadline) break;
+
+        const counts = await countMediaUses(this.db, [item.id]);
+        const live = counts.get(item.id)?.live ?? 0;
+        if (live > 0) {
+          report.skippedInUse++;
+          this.obs.error('media.files_purge_skipped_in_use', {
+            mediaItemId: item.id,
+            live,
+          });
+          continue;
+        }
+
+        const [claimed] = await this.db
+          .update(mediaItems)
+          .set({ filesPurgedAt: new Date() })
+          .where(
+            and(
+              eq(mediaItems.id, item.id),
+              isNotNull(mediaItems.deletedAt),
+              isNull(mediaItems.filesPurgedAt)
+            )
+          )
+          .returning();
+        if (!claimed) continue;
+
+        let prefix = '';
+        try {
+          let objects = 0;
+          for (prefix of mediaFilePrefixes(item.creatorId, item.id)) {
+            objects += await deletePrefix(r2, prefix);
+          }
+          report.purged++;
+          report.objectsDeleted += objects;
+          this.obs.info('media.files_purged', {
+            mediaItemId: item.id,
+            objects,
+          });
+        } catch (error) {
+          report.failed++;
+          this.obs.warn('media.files_purge_failed', {
+            mediaItemId: item.id,
+            prefix,
+            error: messageForLog(error),
+          });
+          await this.releasePurgeClaim(item.id);
+        }
+      }
     } catch (error) {
-      this.obs.warn('Failed to list media R2 objects for cleanup', {
-        mediaItemId,
-        prefix,
-        error: String(error),
+      this.obs.error('media.files_purge_run_failed', {
+        error: messageForLog(error),
+      });
+    }
+
+    report.durationMs = Date.now() - startedAt;
+    this.obs.info('media.files_purge_run', { ...report });
+    return report;
+  }
+
+  /** Give a failed purge's claim back: due again in a day. Never throws. */
+  private async releasePurgeClaim(id: string): Promise<void> {
+    try {
+      await this.db
+        .update(mediaItems)
+        .set({
+          filesPurgedAt: null,
+          filesPurgeAfter: new Date(Date.now() + DAY_MS),
+        })
+        .where(eq(mediaItems.id, id));
+    } catch (error) {
+      this.obs.error('media.files_purge_claim_not_released', {
+        mediaItemId: id,
+        error: messageForLog(error),
       });
     }
   }
@@ -554,6 +745,10 @@ export class MediaItemService extends BaseService {
    * @param creatorId - Creator ID (for authorization)
    * @param filters - Query filters
    * @param pagination - Pagination parameters
+   * - Each item's `usage`: how many places use it, how many of them live
+   *   (the library chip, Codex-6sbn1). One statement for the page, never
+   *   one per item.
+   *
    * @returns Paginated media item list with metadata
    */
   async list(
@@ -563,7 +758,7 @@ export class MediaItemService extends BaseService {
       page: 1,
       limit: PAGINATION.DEFAULT,
     }
-  ): Promise<PaginatedListResponse<MediaItemWithRelations>> {
+  ): Promise<PaginatedListResponse<MediaListItem>> {
     try {
       // Build WHERE conditions
       const whereConditions = [scopedNotDeleted(mediaItems, creatorId)];
@@ -585,7 +780,7 @@ export class MediaItemService extends BaseService {
           : asc(mediaItems[sortColumn]);
 
       const where = and(...whereConditions);
-      return await paginatedQuery({
+      const page = await paginatedQuery({
         page: pagination.page,
         limit: pagination.limit,
         fetchItems: (limit, offset) =>
@@ -607,6 +802,17 @@ export class MediaItemService extends BaseService {
           }),
         countQuery: { db: this.db, table: mediaItems, where },
       });
+      const usage = await countMediaUses(
+        this.db,
+        page.items.map((item) => item.id)
+      );
+      return {
+        ...page,
+        items: page.items.map((item) => ({
+          ...item,
+          usage: usage.get(item.id) ?? { total: 0, live: 0 },
+        })),
+      };
     } catch (error) {
       this.handleError(error, 'list');
     }

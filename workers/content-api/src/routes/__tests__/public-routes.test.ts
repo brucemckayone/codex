@@ -561,6 +561,8 @@ const FULL_MEDIA_ROW = {
   createdAt: '2026-10-01T00:00:00.000Z',
   updatedAt: '2026-10-02T00:00:00.000Z',
   deletedAt: null,
+  filesPurgeAfter: null,
+  filesPurgedAt: null,
 };
 
 const ROWS_WITH_FULL_MEDIA = {
