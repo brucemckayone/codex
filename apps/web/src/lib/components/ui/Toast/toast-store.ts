@@ -28,8 +28,17 @@ const TOAST_CLOSE_DELAY = 5000;
 
 // Helper for easier usage
 export const toast = {
+  /**
+   * A toast with an `action` stays until it is closed (Melt: `closeDelay` 0).
+   * Melt pauses the timer on pointer hover only, never on focus, and the
+   * toaster is last in the tab order, so a timed one could vanish under a
+   * keyboard user's focus on its way to the link.
+   */
   add: (data: ToastData, options?: { closeDelay?: number }) =>
-    addToast({ data, closeDelay: options?.closeDelay ?? TOAST_CLOSE_DELAY }),
+    addToast({
+      data,
+      closeDelay: options?.closeDelay ?? (data.action ? 0 : TOAST_CLOSE_DELAY),
+    }),
 
   success: (title: string, description?: string) =>
     addToast({

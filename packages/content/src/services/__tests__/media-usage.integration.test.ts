@@ -175,6 +175,7 @@ describe('media in use (Codex-6sbn1)', () => {
       .select({
         deletedAt: mediaItems.deletedAt,
         filesPurgeAfter: mediaItems.filesPurgeAfter,
+        filesPurgeStartedAt: mediaItems.filesPurgeStartedAt,
         filesPurgedAt: mediaItems.filesPurgedAt,
       })
       .from(mediaItems)
@@ -617,6 +618,47 @@ describe('media in use (Codex-6sbn1)', () => {
       await expect(deleting).rejects.toBeInstanceOf(MediaInUseError);
       expect((await mediaRow(film))?.deletedAt).toBeNull();
     });
+
+    // Publish locks its row before it reads the media, as update() does. An
+    // unlocked read let a PATCH that swapped the media in between make the
+    // publish go live on the new item, checked only as a draft attach.
+    it('a publish that starts while a save holds the row waits for it, then checks the media the save left', async () => {
+      const film = await seedMedia(ownerId);
+      const deleted = await seedMedia(ownerId, { deletedAt: new Date() });
+      const draft = await seedContent(ownerId, { mediaItemId: film });
+      let release = () => {};
+      const released = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let holding = (_pid: number) => {};
+      const held = new Promise<number>((resolve) => {
+        holding = resolve;
+      });
+
+      // A save's shape: the row locked by its write, still open.
+      const saving = db.transaction(async (tx) => {
+        await tx
+          .update(content)
+          .set({ mediaItemId: deleted })
+          .where(eq(content.id, draft));
+        holding(await backendPid(tx));
+        await released;
+      });
+      const saver = await held;
+
+      const publishing = contents.publish(draft, ownerId);
+      const early = await untilBlockedBy(saver, publishing);
+      release();
+      await saving;
+
+      expect(early).toBe('waiting');
+      await expect(publishing).rejects.toBeInstanceOf(MediaDeletedError);
+      const [row] = await db
+        .select({ status: content.status })
+        .from(content)
+        .where(eq(content.id, draft));
+      expect(row?.status).toBe('draft');
+    });
   });
 
   describe('publish and PATCH (Codex-vmi6m)', () => {
@@ -636,6 +678,23 @@ describe('media in use (Codex-6sbn1)', () => {
         contentId: draft,
         code: 'MEDIA_DELETED',
       });
+    });
+
+    // Codex-vmi6m: a row that took another creator's item through the old
+    // PATCH hole keeps it (an unchanged id isn't re-checked), but must not go
+    // live streaming their file.
+    it("refuses to publish a row already holding another creator's media", async () => {
+      const theirs = await seedMedia(otherId);
+      const draft = await seedContent(ownerId, { mediaItemId: theirs });
+
+      await expect(contents.publish(draft, ownerId)).rejects.toBeInstanceOf(
+        MediaNotFoundError
+      );
+      const [row] = await db
+        .select({ status: content.status })
+        .from(content)
+        .where(eq(content.id, draft));
+      expect(row?.status).toBe('draft');
     });
 
     it("refuses to attach another creator's media, or a deleted one, and writes nothing", async () => {
@@ -671,6 +730,15 @@ describe('media in use (Codex-6sbn1)', () => {
       await expect(
         contents.update(live, { mediaItemId: processing }, ownerId)
       ).rejects.toBeInstanceOf(MediaNotReadyError);
+      // Released and taken off sale: its buyers still watch it, so it is
+      // live as the usage lookup counts it, and needs a playable item too.
+      const bought = await seedContent(ownerId, {
+        status: 'draft',
+        publishedAt: new Date(),
+      });
+      await expect(
+        contents.update(bought, { mediaItemId: processing }, ownerId)
+      ).rejects.toBeInstanceOf(MediaNotReadyError);
       const saved = await contents.update(
         draft,
         { mediaItemId: processing },
@@ -700,13 +768,15 @@ describe('media in use (Codex-6sbn1)', () => {
   describe('the purge and restore', () => {
     function stubR2(
       files: Record<string, string[]>,
-      failing = new Set<string>()
+      failing = new Set<string>(),
+      onList: (prefix: string) => Promise<void> = async () => {}
     ) {
       const deleted: string[][] = [];
       const listed: string[] = [];
       const r2 = {
         list: vi.fn(async ({ prefix }: { prefix: string }) => {
           listed.push(prefix);
+          await onList(prefix);
           if (failing.has(prefix)) throw new Error('R2 is down');
           return {
             objects: (files[prefix] ?? []).map((key) => ({ key })),
@@ -756,7 +826,9 @@ describe('media in use (Codex-6sbn1)', () => {
         `${hls}1080p/segment_001.ts`,
       ]);
       expect(report.purged).toBeGreaterThanOrEqual(1);
-      expect((await mediaRow(due))?.filesPurgedAt).toBeInstanceOf(Date);
+      const row = await mediaRow(due);
+      expect(row?.filesPurgeStartedAt).toBeInstanceOf(Date);
+      expect(row?.filesPurgedAt).toBeInstanceOf(Date);
 
       // A second run lists nothing of it.
       const again = stubR2({});
@@ -797,21 +869,138 @@ describe('media in use (Codex-6sbn1)', () => {
         mediaItemId: inUse,
         live: 1,
       });
+      // Moved a week down the queue, so it doesn't hold the head of it.
+      const inAWeek =
+        ((await mediaRow(inUse))?.filesPurgeAfter?.getTime() ?? 0) - Date.now();
+      expect(inAWeek).toBeGreaterThan(7 * DAY_MS - 60_000);
     });
 
-    it('gives the claim back on a failure, due again in a day', async () => {
-      const failing = await seedDeleted();
-      const { r2 } = stubR2({}, new Set([getHlsPrefix(ownerId, failing)]));
+    it('does not stall behind 25 items something live uses: the 26th is purged on the next run', async () => {
+      const longAgo = Date.now() - 400 * DAY_MS;
+      const stuck: string[] = [];
+      for (let i = 0; i < 25; i++) {
+        const id = await seedDeleted({
+          filesPurgeAfter: new Date(longAgo + i * 1000),
+        });
+        await seedContent(ownerId, {
+          mediaItemId: id,
+          status: 'published',
+          publishedAt: new Date(),
+        });
+        stuck.push(id);
+      }
+      const twentySixth = await seedDeleted({
+        filesPurgeAfter: new Date(longAgo + 60_000),
+      });
+      const svc = () =>
+        new MediaItemService({ db, environment: 'test', r2: stubR2({}).r2 });
+
+      const first = await svc().purgeDueFiles({
+        deadline: Date.now() + 60_000,
+      });
+      expect(first.skippedInUse).toBe(25);
+      expect((await mediaRow(twentySixth))?.filesPurgedAt).toBeNull();
+
+      await svc().purgeDueFiles({ deadline: Date.now() + 60_000 });
+      expect((await mediaRow(twentySixth))?.filesPurgedAt).toBeInstanceOf(Date);
+      for (const id of stuck) {
+        expect((await mediaRow(id))?.filesPurgeStartedAt).toBeNull();
+      }
+    });
+
+    it('gives the claim back when no file was deleted: the item is whole, and restorable', async () => {
+      const whole = await seedDeleted();
+      const { r2 } = stubR2(
+        {},
+        new Set([`${ownerId}/originals/${whole}/`]) // the first prefix
+      );
       const svc = new MediaItemService({ db, environment: 'test', r2 });
 
       const report = await svc.purgeDueFiles({ deadline: Date.now() + 60_000 });
 
       expect(report.failed).toBeGreaterThanOrEqual(1);
-      const row = await mediaRow(failing);
+      const row = await mediaRow(whole);
+      expect(row?.filesPurgeStartedAt).toBeNull();
       expect(row?.filesPurgedAt).toBeNull();
       const inADay = (row?.filesPurgeAfter?.getTime() ?? 0) - Date.now();
       expect(inADay).toBeGreaterThan(DAY_MS - 60_000);
       expect(inADay).toBeLessThanOrEqual(DAY_MS);
+      expect((await media.restore(whole)).deletedAt).toBeNull();
+    });
+
+    // A failure after a delete was sent leaves the item half removed (its
+    // original gone, say). Giving the claim back would let support "restore"
+    // it as ready with files missing, and the film would be broken; so it
+    // keeps the claim, restore refuses it, and a later run finishes it.
+    it('keeps the claim on an item half removed, refuses its restore, and finishes it later', async () => {
+      const half = await seedDeleted();
+      const original = `${ownerId}/originals/${half}/media.mp4`;
+      const { r2, deleted } = stubR2(
+        { [`${ownerId}/originals/${half}/`]: [original] },
+        new Set([getHlsPrefix(ownerId, half)])
+      );
+      const svc = new MediaItemService({ db, environment: 'test', r2 });
+
+      const report = await svc.purgeDueFiles({ deadline: Date.now() + 60_000 });
+
+      expect(report.failed).toBeGreaterThanOrEqual(1);
+      expect(deleted).toContainEqual([original]);
+      const row = await mediaRow(half);
+      const claimedAt = row?.filesPurgeStartedAt;
+      expect(claimedAt).toBeInstanceOf(Date);
+      expect(row?.filesPurgedAt).toBeNull();
+      const inADay = (row?.filesPurgeAfter?.getTime() ?? 0) - Date.now();
+      expect(inADay).toBeGreaterThan(DAY_MS - 60_000);
+      const refusal = await media
+        .restore(half)
+        .catch((error: unknown) => error);
+      expect(refusal).toBeInstanceOf(ConflictError);
+
+      // A day on, R2 healthy: the next run finishes it.
+      await db
+        .update(mediaItems)
+        .set({ filesPurgeAfter: new Date(Date.now() - 1000) })
+        .where(eq(mediaItems.id, half));
+      await new MediaItemService({
+        db,
+        environment: 'test',
+        r2: stubR2({}).r2,
+      }).purgeDueFiles({ deadline: Date.now() + 60_000 });
+      const finished = await mediaRow(half);
+      expect(finished?.filesPurgedAt).toBeInstanceOf(Date);
+      expect(finished?.filesPurgeStartedAt).toEqual(claimedAt);
+    });
+
+    it('does not claim an item restored and deleted again while the run was going', async () => {
+      const first = await seedDeleted({
+        filesPurgeAfter: new Date(Date.now() - 300 * DAY_MS),
+      });
+      const again = await seedDeleted({
+        filesPurgeAfter: new Date(Date.now() - 299 * DAY_MS),
+      });
+      // Support restores `again` and the creator deletes it once more while
+      // the run is on `first`: a new delete, with its own 30 days.
+      const { r2, listed } = stubR2({}, new Set(), async (prefix) => {
+        if (!prefix.includes(first)) return;
+        await db
+          .update(mediaItems)
+          .set({
+            deletedAt: new Date(),
+            filesPurgeAfter: new Date(Date.now() + 30 * DAY_MS),
+          })
+          .where(eq(mediaItems.id, again));
+      });
+
+      await new MediaItemService({ db, environment: 'test', r2 }).purgeDueFiles(
+        { deadline: Date.now() + 60_000 }
+      );
+
+      expect((await mediaRow(first))?.filesPurgedAt).toBeInstanceOf(Date);
+      expect(listed.some((prefix) => prefix.includes(again))).toBe(false);
+      expect(await mediaRow(again)).toMatchObject({
+        filesPurgeStartedAt: null,
+        filesPurgedAt: null,
+      });
     });
 
     it('claims nothing once the deadline has passed', async () => {
@@ -850,13 +1039,18 @@ describe('media in use (Codex-6sbn1)', () => {
       expect(got?.mediaItem?.deletedAt).toBeNull();
     });
 
-    it('refuses a restore once the files are gone, or of an item not deleted', async () => {
-      const claimed = await seedDeleted({ filesPurgedAt: new Date() });
+    it('refuses a restore once the purge has started or finished, or of an item not deleted', async () => {
+      const started = await seedDeleted({ filesPurgeStartedAt: new Date() });
+      const purged = await seedDeleted({
+        filesPurgeStartedAt: new Date(),
+        filesPurgedAt: new Date(),
+      });
       const legacy = await seedDeleted({ filesPurgeAfter: null });
       const live = await seedMedia(ownerId);
 
       for (const [id, reason] of [
-        [claimed, 'FILES_GONE'],
+        [started, 'FILES_GONE'],
+        [purged, 'FILES_GONE'],
         [legacy, 'FILES_GONE'],
         [live, 'NOT_DELETED'],
       ] as const) {

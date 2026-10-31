@@ -31,6 +31,7 @@ import {
   updateJourneySellMedia,
 } from '$lib/remote/journeys.remote';
 import { listMedia } from '$lib/remote/media.remote';
+import { readFreshQuery } from '$lib/remote/query-result';
 import { remoteErrorMessage } from './builder-save';
 
 /**
@@ -506,6 +507,27 @@ class SellMediaStore {
     // worker's omits it, and then what `open()` read stands.
     if (persisted.missingMedia)
       this.#missing = toMissing(persisted.missingMedia);
+  }
+
+  /**
+   * Read again which slot media was deleted, after the server refused to
+   * publish over it (Codex-6sbn1): the item may have gone since {@link open}
+   * read the slots. Only that set moves; the slots, saved and pending, stay as
+   * they are. Best effort: on a failed read what `open()` read stands, and the
+   * refusal's toast names the slots anyway.
+   */
+  async refreshMissing(): Promise<void> {
+    const pageId = this.#pageId;
+    if (!pageId) return;
+    try {
+      const media = await readFreshQuery(getJourneySellMedia({ pageId }));
+      // A page closed or switched during the read is not this one.
+      if (this.#pageId === pageId && media?.missingMedia) {
+        this.#missing = toMissing(media.missingMedia);
+      }
+    } catch {
+      // Best effort, as above.
+    }
   }
 
   /**

@@ -14,14 +14,17 @@
   - after a click that didn't delete: refused because something became
     published (R1) or the uses moved (R2), or the delete failed (F3).
 
-  Every state but the first two carries the one 30-day line (owner round 2,
-  decision 3). The list checks again once each time the creator comes back to
-  this tab (Replace opens a new one), and on Check now: never on a timer.
+  The drafts and unused states carry the one 30-day line (owner round 2,
+  decision 3); blocked doesn't, as in the mockup, since nothing can be deleted
+  there yet. Once a read has answered, the uses are read again each time the
+  creator comes back to this tab (Replace opens a new one), and on Check now:
+  never on a timer.
 
   `flow` (media-delete-flow.svelte.ts) decides; this words and draws.
 
-  @prop flow       The dialog's state; open it with `flow.open(target)`
-  @prop onConfirm  The Delete button (the page runs `flow.confirm()`)
+  @prop flow              The dialog's state; open it with `flow.open(target)`
+  @prop onConfirm         The Delete button (the page runs `flow.confirm()`)
+  @prop focusAfterDelete  Where focus goes once the item has left the library
 -->
 <script lang="ts">
   import { Alert, Button } from '$lib/components/ui';
@@ -45,9 +48,18 @@
   interface Props {
     flow: MediaDeleteFlow;
     onConfirm: () => void;
+    /**
+     * Where focus goes when the item left the library: the button that opened
+     * the dialog goes with its tile once the list refreshes.
+     */
+    focusAfterDelete?: () => HTMLElement | null;
   }
 
-  const { flow, onConfirm }: Props = $props();
+  const { flow, onConfirm, focusAfterDelete }: Props = $props();
+
+  /** The disabled Delete is described by its reason (a screen reader's "dimmed, why"). */
+  const uid = $props.id();
+  const whyId = `${uid}-why`;
 
   const target = $derived(flow.target);
   const view = $derived(flow.view);
@@ -94,8 +106,8 @@
     focusFor = id;
   });
 
-  // Back from a Replace tab: check once. A list on screen only, never while a
-  // read or the delete is under way.
+  // Back from a Replace tab: check once, in any state a read has answered
+  // (unused too), never while a read or the delete is under way.
   $effect(() => {
     if (!flow.target) return;
     const onVisible = () => {
@@ -116,8 +128,12 @@
     if (!open) flow.close();
   }
 
-  /** A deleted tile's button is gone; Melt then leaves focus where it is. */
+  /**
+   * Back to the button that opened the dialog; after a delete, to the page's
+   * choice, because that button leaves with its tile when the list refreshes.
+   */
   function closeFocus(): HTMLElement | null {
+    if (flow.removed) return focusAfterDelete?.() ?? null;
     return returnFocus?.isConnected ? returnFocus : null;
   }
 </script>
@@ -265,7 +281,7 @@
     </Dialog.Body>
     <Dialog.Footer>
       {#if view === 'blocked'}
-        <span class="md-why">{m.media_delete_why_disabled()}</span>
+        <span class="md-why" id={whyId}>{m.media_delete_why_disabled()}</span>
       {/if}
       <Button variant="ghost" onclick={() => flow.close()} disabled={flow.deleting}>
         {view === 'blocked' ? m.common_close() : m.common_cancel()}
@@ -274,6 +290,7 @@
         variant="destructive"
         onclick={onConfirm}
         disabled={!flow.canDelete}
+        aria-describedby={view === 'blocked' ? whyId : undefined}
         loading={flow.deleting}
       >
         {m.media_delete_button()}
@@ -360,6 +377,7 @@
 
   .md-alert--action > span {
     flex: 1;
+    /* No spacing token is this wide: below about 25 characters, Try again wraps under the sentence. */
     min-width: 12rem;
   }
 

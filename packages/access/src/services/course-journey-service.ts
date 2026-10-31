@@ -105,6 +105,7 @@ import {
   or,
   sql,
 } from 'drizzle-orm';
+import { CourseMediaDeletedError, type CourseMediaSlot } from '../errors';
 import {
   type DisputeHold,
   resolveCourseDisputePauses,
@@ -303,6 +304,15 @@ function rollUpEnrollment(
  * call sites (every read, every write that isn't `saveJourneyPage`) never
  * touch it — only `saveJourneyPage`'s page-image orphan scan does.
  */
+/** A course's sell-media slots as `cascadeCourseFromPage` reads them. */
+interface CourseSellMediaSlots {
+  introVideoMediaId: string | null;
+  previewVideoMediaId: string | null;
+  guideVideoMediaId: string | null;
+  heroMediaId: string | null;
+  guide: CourseGuide | null;
+}
+
 interface CourseJourneyServiceConfig extends ServiceConfig {
   orphanedFileService?: OrphanedFileService;
 }
@@ -2488,12 +2498,20 @@ export class CourseJourneyService extends BaseService {
       if (otherLivePage) courseStatus = CONTENT_STATUS.PUBLISHED;
     }
 
+    // The move INTO published, the only one checked: every autosave of a
+    // live page re-sends `published`.
+    let goingLive: CourseSellMediaSlots | null = null;
     if (courseStatus === CONTENT_STATUS.PUBLISHED) {
       const [course] = await tx
         .select({
           status: courses.status,
           creatorId: courses.creatorId,
           priceCents: courses.priceCents,
+          introVideoMediaId: courses.introVideoMediaId,
+          previewVideoMediaId: courses.previewVideoMediaId,
+          guideVideoMediaId: courses.guideVideoMediaId,
+          heroMediaId: courses.heroMediaId,
+          guide: courses.guide,
         })
         .from(courses)
         .where(
@@ -2514,6 +2532,9 @@ export class CourseJourneyService extends BaseService {
         }))
       ) {
         await assertCourseCreatorCanBePaid(tx, course.creatorId);
+      }
+      if (course && course.status !== CONTENT_STATUS.PUBLISHED) {
+        goingLive = course;
       }
     }
 
@@ -2541,6 +2562,52 @@ export class CourseJourneyService extends BaseService {
     if (updated.length === 0) {
       throw new NotFoundError('Journey course not found');
     }
+
+    if (goingLive) await this.assertSellMediaNotDeleted(tx, goingLive);
+  }
+
+  /**
+   * Refuse a course going live on a deleted sell-media item (Codex-6sbn1),
+   * as content publish refuses one: a draft keeps its link, so a restore
+   * heals it, but nothing may go live on it. The retired signature film is
+   * not checked: nothing serves it.
+   *
+   * A locking read (FOR KEY SHARE), taken AFTER the course row's update has
+   * locked that row, so the plan-access order (@codex/subscription
+   * tier-service.ts: tiers, content, courses) is kept and media comes last.
+   * A media delete holds its row FOR UPDATE while it reads the item's uses:
+   * one that committed first is seen here; one that waits on this lock then
+   * sees a published course, and refuses with MEDIA_IN_USE.
+   *
+   * @throws {CourseMediaDeletedError} naming the slots to replace
+   */
+  private async assertSellMediaNotDeleted(
+    tx: Parameters<Parameters<typeof this.txDb.transaction>[0]>[0],
+    course: CourseSellMediaSlots
+  ): Promise<void> {
+    const slots: [CourseMediaSlot, string | null][] = [
+      ['intro', course.introVideoMediaId],
+      ['reel', course.previewVideoMediaId],
+      ['guide_video', course.guideVideoMediaId],
+      ['hero', course.heroMediaId],
+      ['guide_portrait', course.guide?.portraitMediaId ?? null],
+    ];
+    const ids = [
+      ...new Set(slots.map(([, id]) => id).filter((id): id is string => !!id)),
+    ];
+    if (ids.length === 0) return;
+
+    const live = await tx
+      .select({ id: mediaItems.id })
+      .from(mediaItems)
+      .where(and(inArray(mediaItems.id, ids), isNull(mediaItems.deletedAt)))
+      .orderBy(asc(mediaItems.id))
+      .for('key share');
+    const kept = new Set(live.map((row) => row.id));
+    const deleted = slots
+      .filter(([, id]) => id !== null && !kept.has(id))
+      .map(([slot]) => slot);
+    if (deleted.length > 0) throw new CourseMediaDeletedError(deleted);
   }
 
   /**

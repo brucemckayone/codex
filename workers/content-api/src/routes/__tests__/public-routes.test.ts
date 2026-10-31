@@ -562,6 +562,7 @@ const FULL_MEDIA_ROW = {
   updatedAt: '2026-10-02T00:00:00.000Z',
   deletedAt: null,
   filesPurgeAfter: null,
+  filesPurgeStartedAt: null,
   filesPurgedAt: null,
 };
 

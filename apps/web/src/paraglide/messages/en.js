@@ -6235,11 +6235,19 @@ export const media_chip_not_in_use = () => `Not in use`
 
 
 /**
+ * @param {{ count: NonNullable<unknown>, live: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_chip_label_live = (params) => `In use by ${params.count}, ${params.live} published. Show where`
+
+
+/**
  * @param {{ count: NonNullable<unknown> }} params
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const media_chip_label = (params) => `In use by ${params.count}. Show where`
+export const media_chip_label_drafts = (params) => `In use by ${params.count}, drafts only. Show where`
 
 
 /**
@@ -6304,6 +6312,14 @@ export const media_uses_checking = () => `Checking where it’s used…`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const media_uses_failed = () => `We couldn’t check where this is used.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_uses_none_now = () => `Nothing uses it any more, so it can be deleted.`
 
 
 /**
@@ -17392,6 +17408,22 @@ export const studio_builder_media_slot_preview_only = () => `Visitors see a 30-s
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_builder_media_slot_missing = (params) => `Media missing: ${params.title} was deleted. Choose another media item.`
+
+
+/**
+ * @param {{ slots: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_builder_publish_media_missing_slots = (params) => `Settings → Media: ${params.slots}.`
+
+
+/**
+ * @param {{ slot: NonNullable<unknown>, title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_builder_publish_media_missing_slot_titled = (params) => `${params.slot} (${params.title})`
 
 
 /**

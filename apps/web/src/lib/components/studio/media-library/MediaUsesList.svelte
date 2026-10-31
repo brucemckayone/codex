@@ -245,7 +245,7 @@
       color-mix(in srgb, var(--color-border) 70%, transparent);
   }
 
-  @media (max-width: 39.9375rem) {
+  @media (--below-sm) {
     .use__title,
     .use__where {
       white-space: normal;

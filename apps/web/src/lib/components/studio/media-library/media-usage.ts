@@ -15,6 +15,7 @@ import type {
   MediaUseLink,
   MediaUseSlot,
 } from '@codex/shared-types';
+import type { ToastData } from '$lib/components/ui/Toast/toast-store';
 import { buildCreatorsUrl, buildOrgUrl } from '$lib/utils/subdomain';
 import * as m from '$paraglide/messages';
 
@@ -243,4 +244,33 @@ export function newlyLiveUse(
 /** The first draft the creator can open, for the toast's "Show them". */
 export function firstOpenableDraft(usage: MediaUsage): MediaUse | null {
   return usage.uses.find((use) => !use.live && use.link !== null) ?? null;
+}
+
+/**
+ * The toast after a delete that leaves drafts without media (owner round 2,
+ * decision 6): "Deleted. 2 drafts need a new media item." with Show them,
+ * which opens the first draft the creator can open. No link when none can be.
+ * A toast with an action stays until closed (`toast.add`).
+ */
+export function draftsLeftToast(
+  drafts: number,
+  firstDraft: MediaUse | null,
+  current: URL
+): ToastData {
+  const one = drafts === 1;
+  const href = firstDraft ? useHref(firstDraft.link, current) : null;
+  return {
+    variant: 'success',
+    title: one
+      ? m.media_delete_toast_drafts_one()
+      : m.media_delete_toast_drafts({ count: drafts }),
+    ...(href && {
+      action: {
+        label: one
+          ? m.media_delete_toast_show_one()
+          : m.media_delete_toast_show(),
+        href,
+      },
+    }),
+  };
 }

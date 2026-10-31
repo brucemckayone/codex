@@ -350,3 +350,39 @@ describe('the Film control', () => {
     warn.mockRestore();
   });
 });
+
+/**
+ * The picker reports only the creator's own choice (Codex-6sbn1). Its "No
+ * media" answer is `pick(null)`, which UNLINKS, so a picker that echoed an
+ * outside value it could not find as `onchange(null)` took a saved film off
+ * the landing with nobody asking: a film past the list's first 100, or one
+ * another tab linked while this picker was up.
+ */
+describe('the Film control never unlinks on its own', () => {
+  const PAST_LIMIT = '9b888888-8888-4888-8888-888888888888';
+  const LINKED_ELSEWHERE = 'ac999999-9999-4999-8999-999999999999';
+
+  test('a saved film the list lacks, the list changing, then a re-read naming another: no unlink, no link', async () => {
+    film = fakeQuery<StudioIntroFilm | null>({
+      ...CHOSEN,
+      mediaItemId: PAST_LIMIT,
+    });
+    render();
+    button(m.branding_film_change()).click();
+    flushSync();
+    expect(document.querySelector('.media-picker')).not.toBeNull();
+
+    library.current = { items: ROWS.slice(1) };
+    flushSync();
+    library.current = { items: ROWS };
+    flushSync();
+    // Another tab linked a film this list does not have.
+    film.current = { ...CHOSEN, mediaItemId: LINKED_ELSEWHERE };
+    flushSync();
+    await Promise.resolve();
+
+    expect(unlinkIntroVideo).not.toHaveBeenCalled();
+    expect(linkIntroVideo).not.toHaveBeenCalled();
+    expect(document.querySelector('.media-picker')).not.toBeNull();
+  });
+});

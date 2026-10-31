@@ -64,6 +64,7 @@ import {
 } from '$lib/remote/journeys.remote';
 import { queryErrorMessage } from '$lib/remote/query-result';
 import * as m from '$paraglide/messages';
+import { panelSlotsNamed } from '../page-media-slots';
 
 export type SessionLoad = 'loading' | 'error' | 'missing' | 'ready';
 export type SessionBusy = 'publishing' | 'unpublishing' | null;
@@ -617,7 +618,12 @@ export function createBuilderSession(options: {
         persistedStatus = payload.status;
         announceSave();
       }
-      return { ok: false, message: result.message };
+      return {
+        ok: false,
+        message: result.message,
+        code: result.code,
+        slots: result.slots,
+      };
     }
     persistedStatus = payload.status;
     announceSave();
@@ -694,12 +700,23 @@ export function createBuilderSession(options: {
    * Flip the status and save it. `flush()` rides a save that is already in
    * flight — one sent BEFORE the status changed — so a second flush sends
    * the new status. The status is rolled back only when the server never
-   * accepted it (a failure after the page leg means it did).
+   * accepted it (a failure after the page leg means it did). `ok` only once
+   * the server holds the new status; the caller reports a failure.
    */
-  async function setLive(next: 'published' | 'draft'): Promise<boolean> {
+  async function setLive(
+    next: 'published' | 'draft'
+  ): Promise<AutosaveSaveResult> {
     const previous = status;
     busy = next === 'published' ? 'publishing' : 'unpublishing';
     try {
+      // The page leg goes first and the media leg last (`saveBuilderDraft`),
+      // so a slot replaced since the last save would land only AFTER the
+      // publish it heals, and the server, still holding the deleted item,
+      // would refuse it (Codex-6sbn1). Such a change is saved as a draft first.
+      if (next === 'published' && sellMedia.isDirty) {
+        const first = await flushForAction();
+        if (!first.ok) return first;
+      }
       // Never an undo step: undo walks back edits, not whether the page is live.
       pageBuilder.updateMeta('status', next, { record: false });
       let result = await flushForAction();
@@ -711,12 +728,51 @@ export function createBuilderSession(options: {
       }
       // A flush can resolve without having sent the status (the editor closed
       // under it), so only what the server holds counts as done.
-      const landed = result.ok && persistedStatus === next;
-      if (!landed) reportFailure(result.message);
-      return landed;
+      return result.ok && persistedStatus === next
+        ? result
+        : { ...result, ok: false };
     } finally {
       busy = null;
     }
+  }
+
+  /**
+   * The server would not put the page live over deleted media (Codex-6sbn1).
+   * Its message says what to do; the toast adds where, each slot with the
+   * deleted item's title. The deleted set is read again first: the item may
+   * have gone after the builder opened, and the Media panel marks the slots
+   * from that same set. Publish stays busy until the answer.
+   */
+  async function refusedOverDeletedMedia(
+    result: AutosaveSaveResult
+  ): Promise<PublishResult> {
+    busy = 'publishing';
+    try {
+      await sellMedia.refreshMissing();
+    } finally {
+      busy = null;
+    }
+    const named = panelSlotsNamed(result.slots ?? []).map((entry) => {
+      const title = sellMedia.missingTitle(entry.slot);
+      return title
+        ? m.studio_builder_publish_media_missing_slot_titled({
+            slot: entry.label(),
+            title,
+          })
+        : entry.label();
+    });
+    const where =
+      named.length > 0
+        ? m.studio_builder_publish_media_missing_slots({
+            slots: named.join(', '),
+          })
+        : '';
+    toastedError = result.message ?? null;
+    toast.error(
+      m.studio_page_editor_publish_blocked(),
+      [result.message, where].filter(Boolean).join(' ')
+    );
+    return { ok: false };
   }
 
   /** The shape errors a live page must not have, surfaced and focused. */
@@ -740,9 +796,14 @@ export function createBuilderSession(options: {
     if (busy || stale) return { ok: false };
     const blocked = blockedBy();
     if (blocked) return blocked;
-    const ok = await setLive('published');
-    if (ok) toast.success(m.studio_builder_toast_published());
-    return { ok };
+    const result = await setLive('published');
+    if (result.ok) {
+      toast.success(m.studio_builder_toast_published());
+      return { ok: true };
+    }
+    if (result.code === 'MEDIA_DELETED') return refusedOverDeletedMedia(result);
+    reportFailure(result.message);
+    return { ok: false };
   }
 
   async function publishChanges(): Promise<PublishResult> {
@@ -765,9 +826,10 @@ export function createBuilderSession(options: {
 
   async function unpublish(): Promise<boolean> {
     if (busy || stale) return false;
-    const ok = await setLive('draft');
-    if (ok) toast.success(m.studio_page_editor_toast_unpublished());
-    return ok;
+    const result = await setLive('draft');
+    if (result.ok) toast.success(m.studio_page_editor_toast_unpublished());
+    else reportFailure(result.message);
+    return result.ok;
   }
 
   /**

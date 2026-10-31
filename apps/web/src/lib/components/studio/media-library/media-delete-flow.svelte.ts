@@ -94,6 +94,12 @@ export class MediaDeleteFlow {
   rechecking = $state(false);
   deleting = $state(false);
   notice = $state<DeleteNotice | null>(null);
+  /**
+   * The item left the library from this dialog (deleted, or found already
+   * gone). Kept through {@link close} so the dialog's focus return can read it
+   * as it closes; the next {@link open} clears it.
+   */
+  removed = $state(false);
 
   /** Drops a read that answers for a dialog since closed or re-read. */
   #token = 0;
@@ -127,6 +133,7 @@ export class MediaDeleteFlow {
     this.notice = null;
     this.rechecking = false;
     this.deleting = false;
+    this.removed = false;
     void this.recheck();
   }
 
@@ -178,6 +185,7 @@ export class MediaDeleteFlow {
     let error: unknown;
     try {
       await this.#deps.remove({ id: target.id, usage: shown.fingerprint });
+      this.removed = true;
       return {
         kind: 'deleted',
         drafts: shown.drafts,
@@ -210,7 +218,10 @@ export class MediaDeleteFlow {
       }
       return { kind: 'refused' };
     }
-    if (status === 404) return { kind: 'gone' };
+    if (status === 404) {
+      this.removed = true;
+      return { kind: 'gone' };
+    }
     this.notice = { kind: 'failed', rateLimited: status === 429 };
     return { kind: 'failed', status };
   }

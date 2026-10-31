@@ -23,20 +23,17 @@
   import MediaTileGrid, { type UploadGhost } from '$lib/components/studio/media-library/MediaTileGrid.svelte';
   import EditMediaDialog from '$lib/components/studio/EditMediaDialog.svelte';
   import MediaDeleteDialog from '$lib/components/studio/media-library/MediaDeleteDialog.svelte';
-  import {
-    type DeleteOutcome,
-    MediaDeleteFlow,
-  } from '$lib/components/studio/media-library/media-delete-flow.svelte';
-  import { useHref } from '$lib/components/studio/media-library/media-usage';
+  import { MediaDeleteFlow } from '$lib/components/studio/media-library/media-delete-flow.svelte';
+  import { draftsLeftToast } from '$lib/components/studio/media-library/media-usage';
   import { Pagination } from '$lib/components/ui/Pagination';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import { FilmIcon, SearchXIcon, UploadIcon } from '$lib/components/ui/Icon';
   import { toast } from '$lib/components/ui/Toast/toast-store';
   import { deleteMedia, getMediaUsage, updateMedia } from '$lib/remote/media.remote';
+  import { readFreshQuery } from '$lib/remote/query-result';
   import { mediaStatus } from '$lib/client/media-status.svelte';
   import { logger } from '$lib/observability';
   import type { MediaItemWithRelations } from '$lib/types';
-  import type { MediaUsage } from '@codex/shared-types';
   import * as m from '$paraglide/messages';
   import { Button } from '$lib/components/ui';
 
@@ -123,27 +120,14 @@
 
 
   // ── Delete (Codex-6sbn1) ──────────────────────────────────────────────
-  /**
-   * A fresh read of where the item is used. The chip's popover may hold the
-   * same query, minutes old, so a read already landed is asked again; one
-   * made just now, or still in flight, is already fresh.
-   */
-  async function readFreshUsage(id: string): Promise<MediaUsage> {
-    const usageQuery = getMediaUsage(id);
-    if (usageQuery.ready && !usageQuery.loading) {
-      await usageQuery.refresh();
-    } else {
-      await usageQuery;
-    }
-    const usage = usageQuery.current;
-    if (!usage) throw new Error('The usage read answered nothing');
-    return usage;
-  }
-
+  // Never a cached read: the chip's popover may hold the same query, minutes old.
   const deleteFlow = new MediaDeleteFlow({
-    readUsage: readFreshUsage,
+    readUsage: (id) => readFreshQuery(getMediaUsage(id)),
     remove: (input) => deleteMedia(input),
   });
+
+  /** Focus after a delete: the library, not `<body>` once the tile has gone. */
+  let libraryBody: HTMLElement | null = $state(null);
 
   // ── Edit state ────────────────────────────────────────────────────────
   let showEditDialog = $state(false);
@@ -308,7 +292,10 @@
       case 'deleted':
         deleteFlow.close();
         refreshAfterChange();
-        if (outcome.drafts > 0) announceDraftsLeft(outcome);
+        // Owner round 2, decision 6: say which drafts lost their media.
+        if (outcome.drafts > 0) {
+          toast.add(draftsLeftToast(outcome.drafts, outcome.firstDraft, page.url));
+        }
         return;
       case 'gone':
         // Another tab deleted it first: the list catches up.
@@ -328,28 +315,6 @@
         // The dialog re-read the uses and says why (R1, R2).
         return;
     }
-  }
-
-  /** Owner round 2, decision 6: say which drafts lost their media. */
-  function announceDraftsLeft(outcome: Extract<DeleteOutcome, { kind: 'deleted' }>) {
-    const one = outcome.drafts === 1;
-    const href = outcome.firstDraft ? useHref(outcome.firstDraft.link, page.url) : null;
-    toast.add(
-      {
-        variant: 'success',
-        title: one
-          ? m.media_delete_toast_drafts_one()
-          : m.media_delete_toast_drafts({ count: outcome.drafts }),
-        ...(href && {
-          action: {
-            label: one ? m.media_delete_toast_show_one() : m.media_delete_toast_show(),
-            href,
-          },
-        }),
-      },
-      // Long enough to reach the link.
-      { closeDelay: 10_000 }
-    );
   }
 
   // TODO i18n — studio_media_search_empty_title / _description
@@ -379,7 +344,13 @@
   <!-- Library body — feature slab (page 1 only), grid, pagination -->
   <p class="sr-only" role="status" aria-live="polite">{announcement}</p>
 
-  <div class="library-body">
+  <div
+    class="library-body"
+    role="region"
+    aria-label={m.media_title()}
+    tabindex="-1"
+    bind:this={libraryBody}
+  >
     {#if data.mediaItems.length === 0 && ghostItems.length === 0}
       <EmptyState
         title={m.media_empty()}
@@ -446,7 +417,11 @@
 />
 
 <!-- Delete: reads where the item is used first (Codex-6sbn1) -->
-<MediaDeleteDialog flow={deleteFlow} onConfirm={confirmDelete} />
+<MediaDeleteDialog
+  flow={deleteFlow}
+  onConfirm={confirmDelete}
+  focusAfterDelete={() => libraryBody}
+/>
 
 <style>
   .media-page {
@@ -460,6 +435,12 @@
     flex-direction: column;
     gap: var(--space-5);
     padding: 0 var(--space-1);
+  }
+
+  /* Focused from code only (after a delete): a ring round the whole library
+     would mark nothing the creator can act on; the next Tab lands on a tile. */
+  .library-body:focus {
+    outline: none;
   }
 
   .pagination-container {

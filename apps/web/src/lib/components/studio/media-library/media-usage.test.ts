@@ -4,6 +4,7 @@
 import type { MediaUsage, MediaUse } from '@codex/shared-types';
 import { describe, expect, it } from 'vitest';
 import {
+  draftsLeftToast,
   firstOpenableDraft,
   liveUsesPhrase,
   newlyLiveUse,
@@ -200,5 +201,33 @@ describe('firstOpenableDraft', () => {
         ])
       )
     ).toBe(draft);
+  });
+});
+
+describe('draftsLeftToast', () => {
+  const draft = use({ live: false, liveReason: null });
+
+  it('W2: "Deleted. 2 drafts need a new media item." with Show them on the first draft', () => {
+    expect(draftsLeftToast(2, draft, STUDIO)).toEqual({
+      variant: 'success',
+      title: 'Deleted. 2 drafts need a new media item.',
+      action: {
+        label: 'Show them',
+        href: 'http://hollow-oak.lvh.me:3000/studio/content/c1/edit',
+      },
+    });
+  });
+
+  it('one draft reads in the singular', () => {
+    const data = draftsLeftToast(1, draft, STUDIO);
+    expect(data.title).toBe('Deleted. 1 draft needs a new media item.');
+    expect(data.action?.label).toBe('Show it');
+  });
+
+  it('no draft the creator can open: the line without a link', () => {
+    expect(draftsLeftToast(1, null, STUDIO)).toEqual({
+      variant: 'success',
+      title: 'Deleted. 1 draft needs a new media item.',
+    });
   });
 });

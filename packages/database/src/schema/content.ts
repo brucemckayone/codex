@@ -184,13 +184,19 @@ export const mediaItems = pgTable(
 
     // The files a delete keeps for 30 days (Codex-6sbn1). A delete sets
     // `deletedAt` and `filesPurgeAfter` = then + 30 days and leaves R2 alone;
-    // media-api's daily purge removes the files once it passes, stamping
-    // `filesPurgedAt` first (the claim). Restore is refused once that stamp
-    // is set. Rows deleted before this shipped lost their files at once and
-    // keep `filesPurgeAfter` NULL, so the purge never lists them. Support can
-    // hold an item's files longer by moving `filesPurgeAfter`. Never served
-    // (MEDIA_ITEM_RESPONSE_COLUMNS).
+    // media-api's daily purge removes the files once it passes. The purge
+    // stamps `filesPurgeStartedAt` before its first R2 delete (the claim) and
+    // `filesPurgedAt` once every prefix is gone. A restore is refused from the
+    // claim on, so a half-removed item can never come back; a run that failed
+    // part-way keeps the claim, and a later run finishes the item. Rows deleted
+    // before this shipped lost their files at once and keep `filesPurgeAfter`
+    // NULL, so the purge never lists them and restore refuses them. Support
+    // can hold an item's files longer by moving `filesPurgeAfter`. Never
+    // served (MEDIA_ITEM_RESPONSE_COLUMNS).
     filesPurgeAfter: timestamp('files_purge_after', { withTimezone: true }),
+    filesPurgeStartedAt: timestamp('files_purge_started_at', {
+      withTimezone: true,
+    }),
     filesPurgedAt: timestamp('files_purged_at', { withTimezone: true }),
   },
   (table) => [
@@ -545,7 +551,10 @@ export type MediaItem = typeof mediaItems.$inferSelect;
  */
 export type ServedMediaItem = Omit<
   MediaItem,
-  'transcodingError' | 'filesPurgeAfter' | 'filesPurgedAt'
+  | 'transcodingError'
+  | 'filesPurgeAfter'
+  | 'filesPurgeStartedAt'
+  | 'filesPurgedAt'
 >;
 export type NewMediaItem = typeof mediaItems.$inferInsert;
 export type Content = typeof content.$inferSelect;

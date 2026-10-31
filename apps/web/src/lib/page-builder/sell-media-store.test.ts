@@ -744,19 +744,61 @@ describe('sell-media store · media missing (Codex-6sbn1)', () => {
     );
   });
 
-  it('the media panel says so, under the slot', () => {
-    const PANEL = readFileSync(
-      join(
-        dirname(fileURLToPath(import.meta.url)),
-        '..',
-        'components/page-builder/PageMediaPanel.svelte'
-      ),
-      'utf8'
+  /**
+   * The read as kit hands it back when something still tracks it: landed,
+   * idle, holding `cached`. Only `refresh()` asks the server again.
+   */
+  function cachedRead(
+    cached: JourneySellMedia,
+    refresh: () => Promise<JourneySellMedia>
+  ) {
+    const read = {
+      ready: true,
+      loading: false,
+      current: cached,
+      refresh: vi.fn(async () => {
+        read.current = await refresh();
+      }),
+    };
+    getJourneySellMedia.mockImplementation(
+      () => read as unknown as Promise<JourneySellMedia>
     );
-    const loop = PANEL.slice(PANEL.indexOf('{#each SLOTS as entry'));
-    expect(loop).toContain('sellMedia.missingTitle(entry.slot)');
-    expect(loop).toContain(
-      'm.studio_builder_media_slot_missing({ title: missing })'
+    return read;
+  }
+
+  it('a refused publish asks again which media is deleted, past a cached read, and moves nothing else', async () => {
+    getJourneySellMedia.mockResolvedValue(PERSISTED);
+    await sellMedia.open(PAGE_ID);
+    sellMedia.setSlot('heroMediaId', null);
+    // Deleted from the library after the builder opened.
+    const read = cachedRead(PERSISTED, async () => ({
+      ...PERSISTED,
+      missingMedia: [{ id: DELETED, title: 'Winter Light (rough cut)' }],
+    }));
+
+    await sellMedia.refreshMissing();
+
+    expect(read.refresh).toHaveBeenCalledTimes(1);
+    expect(sellMedia.missingTitle('previewVideoMediaId')).toBe(
+      'Winter Light (rough cut)'
+    );
+    expect(sellMedia.slot('heroMediaId')).toBeNull();
+    expect(sellMedia.isDirty).toBe(true);
+  });
+
+  it('a re-read that fails keeps what the open read named', async () => {
+    getJourneySellMedia.mockResolvedValue({
+      ...PERSISTED,
+      missingMedia: [{ id: DELETED, title: 'Winter Light (rough cut)' }],
+    });
+    await sellMedia.open(PAGE_ID);
+    cachedRead(PERSISTED, async () => {
+      throw new Error('offline');
+    });
+
+    await expect(sellMedia.refreshMissing()).resolves.toBeUndefined();
+    expect(sellMedia.missingTitle('previewVideoMediaId')).toBe(
+      'Winter Light (rough cut)'
     );
   });
 });

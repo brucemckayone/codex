@@ -238,6 +238,7 @@ export function createTestMediaItem(
     updatedAt: now,
     deletedAt: null,
     filesPurgeAfter: null,
+    filesPurgeStartedAt: null,
     filesPurgedAt: null,
     ...overrides,
   };

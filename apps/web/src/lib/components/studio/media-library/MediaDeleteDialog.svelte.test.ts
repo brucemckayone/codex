@@ -55,12 +55,13 @@ let component: ReturnType<typeof mount> | null = null;
 
 function render(
   readUsage: () => Promise<MediaUsage>,
-  remove: () => Promise<unknown> = async () => undefined
+  remove: () => Promise<unknown> = async () => undefined,
+  focusAfterDelete?: () => HTMLElement | null
 ) {
   const flow = new MediaDeleteFlow({ readUsage, remove });
   component = mount(MediaDeleteDialog, {
     target: document.body,
-    props: { flow, onConfirm: () => void flow.confirm() },
+    props: { flow, onConfirm: () => void flow.confirm(), focusAfterDelete },
   });
   flow.open(target);
   flushSync();
@@ -116,6 +117,12 @@ describe('MediaDeleteDialog', () => {
       expect.stringContaining('Replace'),
     ]);
     expect(deleteButton()?.disabled).toBe(true);
+    // The disabled Delete is described by its reason.
+    const describedBy = deleteButton()?.getAttribute('aria-describedby');
+    expect(describedBy).toBeTruthy();
+    expect(document.getElementById(describedBy as string)?.textContent).toBe(
+      'Delete turns on when nothing published uses it.'
+    );
   });
 
   test('W1: drafts only, the warning and the 30-day line, and Delete is on', async () => {
@@ -158,5 +165,28 @@ describe('MediaDeleteDialog', () => {
     // The refusal says why; the blocked line would say it twice.
     expect(text).not.toContain('This can’t be deleted yet.');
     expect(deleteButton()?.disabled).toBe(true);
+  });
+
+  test('after a delete, focus goes where the page says, not to the departing tile', async () => {
+    const opener = document.createElement('button');
+    const library = document.createElement('div');
+    library.tabIndex = -1;
+    document.body.appendChild(opener);
+    document.body.appendChild(library);
+    opener.focus();
+
+    const flow = render(
+      async () => usage([]),
+      async () => undefined,
+      () => library
+    );
+    await tick();
+    flushSync();
+    await flow.confirm();
+    flow.close();
+    flushSync();
+    await tick();
+    await tick();
+    expect(document.activeElement).toBe(library);
   });
 });

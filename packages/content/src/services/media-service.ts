@@ -81,6 +81,13 @@ const MEDIA_FILES_KEPT_MS = 30 * DAY_MS;
 /** Due items one purge run takes; what's left waits a day. */
 const MEDIA_FILES_PURGE_BATCH = 25;
 
+/**
+ * How far an item something live uses moves down the purge's queue: it is
+ * skipped, never purged, and without the move 25 of them would hold the head
+ * of the queue for ever.
+ */
+const MEDIA_FILES_IN_USE_RETRY_MS = 7 * DAY_MS;
+
 /** What one {@link MediaItemService.purgeDueFiles} run did. Ids only. */
 export interface MediaFilesPurgeReport {
   due: number;
@@ -105,25 +112,35 @@ function mediaFilePrefixes(creatorId: string, mediaId: string): string[] {
   ];
 }
 
+/** How far one item's purge got: whether any R2 delete was sent, and how many keys. */
+interface PurgeProgress {
+  attempted: boolean;
+  deleted: number;
+}
+
 /**
  * Delete every object under `prefix`, a listed page (up to 1,000 keys) per
- * call, and answer how many. R2 has no "delete folder", and an HLS folder is
- * hundreds of segments. Throws on any failure, so the purge gives its claim
- * back.
+ * call. R2 has no "delete folder", and an HLS folder is hundreds of segments.
+ * Throws on any failure. `progress` is written BEFORE each delete is sent: a
+ * failed batch may still have removed some keys, so from then on the item
+ * counts as half removed.
  */
-async function deletePrefix(r2: R2Service, prefix: string): Promise<number> {
-  let deleted = 0;
+async function deletePrefix(
+  r2: R2Service,
+  prefix: string,
+  progress: PurgeProgress
+): Promise<void> {
   let cursor: string | undefined;
   do {
     const page = await r2.list({ prefix, cursor });
     const keys = page.objects.map((object) => object.key);
     if (keys.length > 0) {
+      progress.attempted = true;
       await r2.delete(keys);
-      deleted += keys.length;
+      progress.deleted += keys.length;
     }
     cursor = page.truncated ? page.cursor : undefined;
   } while (cursor);
-  return deleted;
 }
 
 /** The columns applyUpdate writes: the creator's two, or a lifecycle write's. */
@@ -551,11 +568,14 @@ export class MediaItemService extends BaseService {
    * Undo a delete inside the 30 days (support only: POST
    * /api/admin/media/:id/restore). One conditional update, so it and the
    * purge's claim can't both win. Drafts heal themselves: their link was
-   * never cleared. The tile comes back in the creator's open Studio tabs.
+   * never cleared. The row goes to the live status feed where the worker has
+   * one; admin-api has none in production, so the creator's library shows
+   * the tile again on its next load.
    *
    * @throws {MediaNotFoundError} If no media item has this id
-   * @throws {ConflictError} If it isn't deleted, or its files are gone: the
-   *   purge has claimed it, or it was deleted before files were kept
+   * @throws {ConflictError} If it isn't deleted, or its files are (being)
+   *   removed: the purge has claimed it, or it was deleted before files were
+   *   kept
    */
   async restore(id: string): Promise<ServedMediaItem> {
     try {
@@ -567,6 +587,7 @@ export class MediaItemService extends BaseService {
             eq(mediaItems.id, id),
             isNotNull(mediaItems.deletedAt),
             isNotNull(mediaItems.filesPurgeAfter),
+            isNull(mediaItems.filesPurgeStartedAt),
             isNull(mediaItems.filesPurgedAt)
           )
         )
@@ -585,7 +606,7 @@ export class MediaItemService extends BaseService {
       if (!row) throw new MediaNotFoundError(id);
       throw new ConflictError(
         row.deletedAt
-          ? 'This media item can no longer be restored: its files are gone.'
+          ? 'This media item can no longer be restored: its files are gone, or being removed.'
           : 'This media item is not deleted.',
         {
           mediaItemId: id,
@@ -603,18 +624,21 @@ export class MediaItemService extends BaseService {
    * the item tried again a day later.
    *
    * Per due item, oldest first, until `deadline`:
-   * 1. the usage lookup: anything live uses it, skip and log at error level
-   *    (the safety net: a race nobody thought of can't stop a published film
-   *    playing, and support can restore the item);
-   * 2. the claim, a conditional update stamping `filesPurgedAt` (zero rows:
-   *    restored meanwhile, skip). From here a restore is refused;
-   * 3. list and delete each of its prefixes in MEDIA_BUCKET;
-   * 4. on any failure, give the claim back, due again in a day.
+   * 1. the usage lookup: anything live uses it, skip, log at error level and
+   *    move it 7 days down the queue (the safety net: a race nobody thought
+   *    of can't stop a published film playing, and support can restore it;
+   *    the move keeps stuck items from holding the head of the queue);
+   * 2. the claim, a conditional update stamping `filesPurgeStartedAt` on a
+   *    row still deleted and still due (zero rows: restored, or deleted
+   *    again, meanwhile). From here a restore is refused;
+   * 3. list and delete each of its prefixes in MEDIA_BUCKET, then stamp
+   *    `filesPurgedAt`;
+   * 4. on any failure, due again in a day. Only an item no R2 delete was
+   *    sent for gets its claim back (restorable again); a half-removed one
+   *    keeps it, and that later run finishes it.
    *
    * Idempotent: the claim is conditional, and an absent key or an empty
-   * prefix is not an error. A crash between the claim and the last delete
-   * leaves objects behind a row marked purged, and no `media.files_purged`
-   * line for it.
+   * prefix is not an error, so a finishing run deletes what is left.
    */
   async purgeDueFiles(options: {
     deadline: number;
@@ -638,7 +662,11 @@ export class MediaItemService extends BaseService {
 
     try {
       const due = await this.db
-        .select({ id: mediaItems.id, creatorId: mediaItems.creatorId })
+        .select({
+          id: mediaItems.id,
+          creatorId: mediaItems.creatorId,
+          filesPurgeStartedAt: mediaItems.filesPurgeStartedAt,
+        })
         .from(mediaItems)
         .where(
           and(
@@ -663,42 +691,56 @@ export class MediaItemService extends BaseService {
             mediaItemId: item.id,
             live,
           });
+          await this.postponePurge(item.id, MEDIA_FILES_IN_USE_RETRY_MS);
           continue;
         }
 
+        // A claimed row from an earlier run that failed part-way is
+        // finished, not claimed again.
+        const resumed = item.filesPurgeStartedAt !== null;
+        const now = new Date();
         const [claimed] = await this.db
           .update(mediaItems)
-          .set({ filesPurgedAt: new Date() })
+          .set({ filesPurgeStartedAt: item.filesPurgeStartedAt ?? now })
           .where(
             and(
               eq(mediaItems.id, item.id),
               isNotNull(mediaItems.deletedAt),
-              isNull(mediaItems.filesPurgedAt)
+              isNull(mediaItems.filesPurgedAt),
+              lte(mediaItems.filesPurgeAfter, now)
             )
           )
           .returning();
         if (!claimed) continue;
 
+        const progress: PurgeProgress = { attempted: false, deleted: 0 };
         let prefix = '';
         try {
-          let objects = 0;
           for (prefix of mediaFilePrefixes(item.creatorId, item.id)) {
-            objects += await deletePrefix(r2, prefix);
+            await deletePrefix(r2, prefix, progress);
           }
+          await this.db
+            .update(mediaItems)
+            .set({ filesPurgedAt: new Date() })
+            .where(eq(mediaItems.id, item.id));
           report.purged++;
-          report.objectsDeleted += objects;
+          report.objectsDeleted += progress.deleted;
           this.obs.info('media.files_purged', {
             mediaItemId: item.id,
-            objects,
+            objects: progress.deleted,
           });
         } catch (error) {
+          const release = !resumed && !progress.attempted;
           report.failed++;
+          report.objectsDeleted += progress.deleted;
           this.obs.warn('media.files_purge_failed', {
             mediaItemId: item.id,
             prefix,
+            objects: progress.deleted,
+            claimReleased: release,
             error: messageForLog(error),
           });
-          await this.releasePurgeClaim(item.id);
+          await this.postponePurge(item.id, DAY_MS, { release });
         }
       }
     } catch (error) {
@@ -712,18 +754,26 @@ export class MediaItemService extends BaseService {
     return report;
   }
 
-  /** Give a failed purge's claim back: due again in a day. Never throws. */
-  private async releasePurgeClaim(id: string): Promise<void> {
+  /**
+   * Move an item down the purge's queue by `delayMs`. With `release`, also
+   * give its claim back: only for an item no R2 delete was sent for, which
+   * is whole and so restorable again. Never throws.
+   */
+  private async postponePurge(
+    id: string,
+    delayMs: number,
+    { release = false }: { release?: boolean } = {}
+  ): Promise<void> {
     try {
       await this.db
         .update(mediaItems)
         .set({
-          filesPurgedAt: null,
-          filesPurgeAfter: new Date(Date.now() + DAY_MS),
+          filesPurgeAfter: new Date(Date.now() + delayMs),
+          ...(release ? { filesPurgeStartedAt: null } : {}),
         })
-        .where(eq(mediaItems.id, id));
+        .where(and(eq(mediaItems.id, id), isNull(mediaItems.filesPurgedAt)));
     } catch (error) {
-      this.obs.error('media.files_purge_claim_not_released', {
+      this.obs.error('media.files_purge_not_postponed', {
         mediaItemId: id,
         error: messageForLog(error),
       });

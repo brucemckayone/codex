@@ -657,7 +657,8 @@ export class ContentService extends BaseService {
    * Security:
    * - Validates creator ownership before update
    * - Checks a CHANGED mediaItemId as create does: the caller's own, not
-   *   deleted, the content's type, ready if published (Codex-vmi6m)
+   *   deleted, the content's type, ready if live (published or ever
+   *   released; Codex-vmi6m)
    * - Maintains organization scoping
    *
    * @param id - Content ID
@@ -923,7 +924,7 @@ export class ContentService extends BaseService {
 
         // Codex-vmi6m: an item the PATCH attaches is checked as create checks
         // one: the caller's own, not deleted, the content's type, and ready
-        // when the content is already published. Before, the id went straight
+        // when the content is live (published, or ever released). Before, the id went straight
         // into the `.set()` spread, so any media item, another creator's or a
         // deleted one, could be attached. A locking read, so an attach can't
         // land on an item a delete just took (Codex-6sbn1). Only a CHANGED id
@@ -940,7 +941,10 @@ export class ContentService extends BaseService {
             sentMediaItemId,
             creatorId,
             restValidated.contentType ?? existing.contentType,
-            existing.status === CONTENT_STATUS.PUBLISHED
+            // Live as the usage lookup counts it: released content keeps its
+            // buyers after it goes off sale, so it needs a playable item too.
+            existing.status === CONTENT_STATUS.PUBLISHED ||
+              existing.publishedAt !== null
           );
         }
 
@@ -1218,6 +1222,8 @@ export class ContentService extends BaseService {
    * @throws {ContentNotFoundError} If content doesn't exist
    * @throws {BusinessLogicError} If content is not ready to publish
    * @throws {MediaDeletedError} If its media item was deleted (Codex-6sbn1)
+   * @throws {MediaNotFoundError} If its media item is another creator's
+   *   (Codex-vmi6m)
    */
   async publish(
     id: string,
@@ -1225,7 +1231,18 @@ export class ContentService extends BaseService {
   ): Promise<Content & ContentTierWire> {
     try {
       const result = await this.db.transaction(async (tx) => {
-        // Get content with media item
+        // The row first, locked FOR NO KEY UPDATE, then its media FOR KEY
+        // SHARE below: the order update() takes them in. Publish takes no tier
+        // lock (its tick and payouts reads are plain), so the plan-access lock
+        // order (@codex/subscription tier-service.ts) holds. Unlocked, a PATCH
+        // that swapped the media between this read and the media lock made
+        // the publish go live on an item checked only as a draft attach
+        // (Codex-6sbn1).
+        await tx
+          .select({ id: content.id })
+          .from(content)
+          .where(and(eq(content.id, id), scopedNotDeleted(content, creatorId)))
+          .for('no key update');
         const existing = await tx.query.content.findFirst({
           where: and(eq(content.id, id), scopedNotDeleted(content, creatorId)),
           with: {
@@ -1263,13 +1280,23 @@ export class ContentService extends BaseService {
           // not go live on it. A locking read, so a delete running now is
           // ordered against this publish: one that committed first is seen
           // here; one that waits on this lock then sees a published use, and
-          // refuses.
+          // refuses. Scoped to the content's creator: a row that took another
+          // creator's item through the old PATCH hole (Codex-vmi6m) must not
+          // go live streaming their file.
           const [media] = await tx
             .select({ deletedAt: mediaItems.deletedAt })
             .from(mediaItems)
-            .where(eq(mediaItems.id, existing.mediaItem.id))
+            .where(
+              and(
+                eq(mediaItems.id, existing.mediaItem.id),
+                eq(mediaItems.creatorId, existing.creatorId)
+              )
+            )
             .for('key share');
-          if (!media || media.deletedAt) {
+          if (!media) {
+            throw new MediaNotFoundError(existing.mediaItem.id);
+          }
+          if (media.deletedAt) {
             throw new MediaDeletedError(id);
           }
           if (existing.mediaItem.status !== MEDIA_STATUS.READY) {

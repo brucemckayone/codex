@@ -285,4 +285,32 @@ describe('MediaDeleteFlow', () => {
     await tick();
     expect(f.view).toBe('unused');
   });
+
+  it('records that the item left the library (for the focus return), until the next open', async () => {
+    let calls = 0;
+    const { flow: f } = flow({
+      remove: async () => {
+        calls++;
+        if (calls === 1) throw httpError(500, 'INTERNAL_ERROR');
+        if (calls === 3) throw httpError(404, 'MEDIA_NOT_FOUND');
+      },
+    });
+    f.open(target);
+    await tick();
+    expect(f.removed).toBe(false);
+
+    await f.confirm(); // 500: still in the library
+    expect(f.removed).toBe(false);
+
+    await f.confirm(); // deleted
+    expect(f.removed).toBe(true);
+    f.close();
+    expect(f.removed).toBe(true);
+
+    f.open(target);
+    expect(f.removed).toBe(false);
+    await tick();
+    await f.confirm(); // 404: gone already
+    expect(f.removed).toBe(true);
+  });
 });

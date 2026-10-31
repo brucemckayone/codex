@@ -77,6 +77,7 @@ describe('media rows reach responses without the raw detail', () => {
     expect(MEDIA_ITEM_RESPONSE_COLUMNS).toEqual({
       transcodingError: false,
       filesPurgeAfter: false,
+      filesPurgeStartedAt: false,
       filesPurgedAt: false,
     });
     expect(
@@ -85,6 +86,7 @@ describe('media rows reach responses without the raw detail', () => {
         transcodingError: 'ffmpeg: moov atom not found',
         transcodingErrorCode: 'CORRUPT_INPUT',
         filesPurgeAfter: new Date(),
+        filesPurgeStartedAt: null,
         filesPurgedAt: null,
         deletedAt: null,
       })

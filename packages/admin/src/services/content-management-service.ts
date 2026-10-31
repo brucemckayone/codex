@@ -30,6 +30,7 @@ import {
 import { and, count, desc, eq, isNull, sql } from 'drizzle-orm';
 import {
   CreatorPayoutsRequiredError,
+  MediaDeletedError,
   TierRequiredToPublishError,
 } from '../errors';
 import type {
@@ -134,6 +135,9 @@ export class AdminContentManagementService extends BaseService {
    *
    * @throws {CreatorPayoutsRequiredError} Priced or tier content whose
    *   creator's Connect account is not charges + payouts enabled
+   * @throws {MediaDeletedError} Its media item was deleted (Codex-6sbn1)
+   * @throws {NotFoundError} Its media item is not the content creator's
+   *   (Codex-vmi6m)
    */
   async publishContent(
     organizationId: string,
@@ -141,6 +145,21 @@ export class AdminContentManagementService extends BaseService {
   ): Promise<AdminContentItem> {
     try {
       const result = await this.db.transaction(async (tx) => {
+        // The row first, locked FOR NO KEY UPDATE, then its media FOR KEY
+        // SHARE below: the order ContentService.publish and update() take
+        // them in (no tier lock is taken here), so a PATCH can't swap the
+        // media under this publish (Codex-6sbn1).
+        await tx
+          .select({ id: schema.content.id })
+          .from(schema.content)
+          .where(
+            and(
+              eq(schema.content.id, contentId),
+              eq(schema.content.organizationId, organizationId),
+              isNull(schema.content.deletedAt)
+            )
+          )
+          .for('no key update');
         // Get content with media item
         const existing = await tx.query.content.findFirst({
           where: and(
@@ -187,6 +206,26 @@ export class AdminContentManagementService extends BaseService {
               }
             );
           }
+          // ContentService.publish's gate (Codex-6sbn1, Codex-vmi6m): a draft
+          // keeps its link to a deleted item and must not go live on it, nor
+          // on another creator's item. A locking read, so a media delete
+          // running now is ordered against this publish.
+          const [media] = await tx
+            .select({ deletedAt: schema.mediaItems.deletedAt })
+            .from(schema.mediaItems)
+            .where(
+              and(
+                eq(schema.mediaItems.id, existing.mediaItem.id),
+                eq(schema.mediaItems.creatorId, existing.creatorId)
+              )
+            )
+            .for('key share');
+          if (!media) {
+            throw new NotFoundError('Media item not found', {
+              mediaItemId: existing.mediaItem.id,
+            });
+          }
+          if (media.deletedAt) throw new MediaDeletedError(contentId);
           if (existing.mediaItem.status !== 'ready') {
             throw new BusinessLogicError('Media is not ready for publishing', {
               contentId,
