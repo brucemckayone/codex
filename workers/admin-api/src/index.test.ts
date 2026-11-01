@@ -240,6 +240,22 @@ describe('Admin API Worker', () => {
         path: `/api/admin/support/fee-notices/${ID}/told-another-way`,
         body: { note: 'Phoned them' },
       },
+      // Codex-2hxff.85, .86: Price moves.
+      { method: 'GET', path: '/api/admin/support/queue/price-moves' },
+      {
+        method: 'GET',
+        path: '/api/admin/support/queue/price-changes-stopped',
+      },
+      { method: 'POST', path: `/api/admin/support/price-moves/${ID}/retry` },
+      {
+        method: 'POST',
+        path: `/api/admin/support/price-moves/${ID}/close`,
+        body: { resolution: 'not_needed', note: 'Phoned them' },
+      },
+      {
+        method: 'POST',
+        path: `/api/admin/support/price-changes/${ID}/restart`,
+      },
     ])('rejects anonymous $method $path with 401', async ({
       method,
       path,

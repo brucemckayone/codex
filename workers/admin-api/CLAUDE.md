@@ -7,7 +7,7 @@ Org management dashboard (analytics, content management, customer support grants
 Two kinds of route, never mixed:
 
 - **Org management** (analytics, content, customers, grants, status): `auth: 'required'` + `requireOrgMembership: true` + `requireOrgManagement: true`, scoped by `ctx.organizationId` (resolved from org membership).
-- **Platform support**: the 9 `/api/admin/fees/*` endpoints (Codex-m644n, no web UI consumer), `/api/admin/organizations/:orgId/owner`, the 12 `/api/admin/support/*` endpoints and `POST /api/admin/media/:id/restore`. They take `policy: { auth: 'platform_owner' }` with NO org policy: platform-wide on purpose, gated by the role.
+- **Platform support**: the 11 `/api/admin/fees/*` endpoints (Codex-m644n, no web UI consumer; the change cancel is Codex-2hxff.33), `/api/admin/organizations/:orgId/owner`, the 20 `/api/admin/support/*` endpoints and `POST /api/admin/media/:id/restore`. They take `policy: { auth: 'platform_owner' }` with NO org policy: platform-wide on purpose, gated by the role.
 
 All are rate limited via the `api` preset (100/min) on `/api/*`, and by their own policy's preset.
 
@@ -15,7 +15,7 @@ All are rate limited via the `api` preset (100/min) on `/api/*`, and by their ow
 
 `POST /api/admin/organizations/:orgId/owner` `{ userId, reason }` (Codex-2hxff.2) is also `platform_owner`-only, on the `strict` preset (`RATE_LIMIT_STRICT`, namespaces 1051/2051/3051): platform support assigns a new owner when a transfer is impossible. It withdraws any open offer, busts both users' membership caches, and logs `reason`. No screen yet (Codex-xyb7v).
 
-### Support refunds (Codex-2hxff.28)
+### Support refunds and queues (Codex-2hxff.28, .73, .33, .85, .86)
 
 Platform support's refund screen and queue (the `/admin` pages in apps/web). Design: `docs/handover/phase3-sources/support-refunds/data-design.md`. Service: `ctx.services.support` (`SupportService`, `@codex/admin`). Every route is `{ auth: 'platform_owner', cache: 'fresh' }`; reads take the `api` preset, writes `strict`. Nothing is cached: every number changes with a refund, a webhook or a payout run.
 
@@ -25,7 +25,7 @@ Platform support's refund screen and queue (the `/admin` pages in apps/web). Des
 | 2 | GET | `/api/admin/support/charges/:chargeId` | params `supportChargeParamsSchema` | `{ data: ChargeDetail }` |
 | 3 | GET | `/api/admin/support/charges/:chargeId/refund-preview` | + query `supportRefundPreviewQuerySchema` (`amountCents`) | `{ data: RefundPreview }` |
 | 4 | POST | `/api/admin/support/charges/:chargeId/refunds` | body `supportIssueRefundSchema` (`amountCents`, `reason`, `expectedRefundCount`) | **200** `{ data: { refund, replayed } }` |
-| 5 | GET | `/api/admin/support/queue/counts` | — | `{ data: { failedRefunds, creatorDebts, owedToCreators } }`: only items needing a person (open reviews, `to_invoice` people, open credits) |
+| 5 | GET | `/api/admin/support/queue/counts` | — | `{ data: { failedRefunds, creatorDebts, owedToCreators, feeNotices, priceMoves } }`: only items needing a person (open reviews, `to_invoice` people, open credits, people not yet told about a fee rise, held price moves not closed plus stopped price changes not yet restarted) |
 | 6 | GET | `/api/admin/support/queue/failed-refunds` | query `supportQueueQuerySchema` | `{ items: FailedRefundItem[], pagination }` |
 | 7 | GET | `/api/admin/support/queue/creator-debts` | query `supportQueueQuerySchema` | `{ items: CreatorDebtPerson[], pagination }`: one row per person, with Stripe's live balance (`live: false` = the 08:00 snapshot) and a collected-over-£50 debt (Codex-2hxff.30, .73) |
 | 8 | POST | `/api/admin/support/refunds/:refundId/resolve` | body `supportResolveFailedRefundSchema` (a note is required for `creators_repaid`) | `{ data: ResolvedFailedRefund }` |
@@ -33,10 +33,21 @@ Platform support's refund screen and queue (the `/admin` pages in apps/web). Des
 | 10 | GET | `/api/admin/support/queue/owed-to-creators` | query `supportQueueQuerySchema` | `{ items: OwedToCreatorItem[], pagination }`: late take-backs owed back to a payee (`payee_credits`, Codex-2hxff.73) |
 | 11 | POST | `/api/admin/support/owed-to-creators/:creditId/resolve` | params `supportCreditIdParamsSchema`, body `supportResolveCreditSchema` (`action` repay / count_against_debt / not_owed; a note for not_owed and on a `needs_person` row) | `{ data: ResolvedOwedToCreator }` |
 | 12 | POST | `/api/admin/support/owed-to-creators/:creditId/check` | params `supportCreditIdParamsSchema` (no body) | `{ data: CheckedOwedToCreator }`: Check Stripe again |
+| 13 | GET | `/api/admin/support/queue/fee-changes` | query `supportQueueQuerySchema` | `{ items: FeeChangeCard[], pagination }`: fee rises not started, waiting for their emails or dated (Codex-2hxff.33) |
+| 14 | GET | `/api/admin/support/queue/fee-notices` | query `supportQueueQuerySchema` | `{ items: FeeNoticeItem[], pagination }`: people a rise's email failed or may not have reached, joiners flagged |
+| 15 | POST | `/api/admin/support/fee-notices/:noticeId/told-another-way` | params `supportFeeNoticeIdParamsSchema`, body `supportToldAnotherWaySchema` (note required) | `{ data: ToldAnotherWayResult }`; dates the rise when it was the last person; 409 `FEE_CHANGE_NOT_WAITING` / `FEE_NOTICE_ALREADY_TOLD` / `FEE_NOTICE_NOT_NEEDED` |
+| 16 | POST | `/api/admin/fees/changes/:changeId/cancel` | params `feeChangeIdParamsSchema` (no body) | `{ data: FeeChange }`; 409 `FEE_CHANGE_NOT_WAITING` |
+| 17 | GET | `/api/admin/support/queue/price-moves` | query `supportQueueQuerySchema` | `{ items: HeldPriceMove[], pagination }`: held price moves not closed, plus rows Retry queued until the run takes them (Codex-2hxff.85) |
+| 18 | GET | `/api/admin/support/queue/price-changes-stopped` | query `supportQueueQuerySchema` | `{ items: StoppedPriceChange[], pagination }`: price changes the run stopped (Codex-2hxff.86) |
+| 19 | POST | `/api/admin/support/price-moves/:moveId/retry` | params `supportPriceMoveIdParamsSchema` (no body) | `{ data: PriceMoveRetried }`; 409 `PRICE_MOVE_NOT_HELD` with `details.reason` |
+| 20 | POST | `/api/admin/support/price-moves/:moveId/close` | params `supportPriceMoveIdParamsSchema`, body `supportClosePriceMoveSchema` (`moved_by_hand` / `not_needed`, note required) | `{ data: HeldPriceMove }`; 409 `PRICE_MOVE_NOT_HELD` |
+| 21 | POST | `/api/admin/support/price-changes/:changeId/restart` | params `supportPriceChangeIdParamsSchema` (no body) | `{ data: PriceChangeRestarted }`; 409 `PRICE_CHANGE_NOT_STOPPED` |
 
 - **Route 4 writes nothing.** It only asks Stripe, in a fixed order: list the charge's refunds; one carrying this decision's key is answered `replayed: true`; a moved count is `CHARGE_CHANGED` (412); then the 14-day window, an open or lost chargeback, and the amount cap; then `refunds.create` with the key and `codex_requested_by`. `charge.refunded` records the refund and claws back the shares. 200, not 201: a repeat creates nothing. A spent key (Stripe holds an earlier refusal or 500 for it, 24 h) is `REFUND_KEY_SPENT` (409): change the amount or use the Dashboard.
 - **Route 8**, `creators_repaid`, re-pays the payees in one transaction and, for a failed full purchase refund, gives the buyer access back. It is refused, `REPAY_BLOCKED_BY_LATER_CAUSE` (422), when a chargeback or a later refund was shared against the failed one (owner decision 2026-10-25). The route then bumps the buyer's library (`invalidateUserLibrary`) and clears their streaming block, as a won dispute's restore does.
 - Every Stripe call `SupportService` makes is listed in its file header: the restricted key (Codex-5vvwj.2) is built from that list.
+- **Route 16** is a fee route, listed here with the fee queue it belongs to: `{ auth: 'platform_owner', rateLimit: 'strict' }`, no `cache`. Route 15 invalidates the change's fee level in `CACHE_KV`, so a date it sets shows at once.
+- **Routes 19-21 are database flips** that ecom-api's next hourly run acts on: this worker has no worker secret and only a refund-restricted Stripe key. Retry sends a held row to `notified` (no second email, owner Q5) when its email was accepted, otherwise to `due`, with three fresh tries; it touches only the row. A repeat Retry is 409 `queued`; a repeat Restart answers 200 unchanged. Runbook: `docs/payments/operations.md#held-price-moves`.
 
 ### Analytics
 
