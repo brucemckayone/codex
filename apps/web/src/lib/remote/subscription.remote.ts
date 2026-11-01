@@ -503,6 +503,17 @@ export const setTierItems = command(
   }
 );
 
+/**
+ * How the org's tier price changes are going (Codex-2hxff.86), for the note
+ * on each tier row. Read once per visit, and again only when the owner
+ * presses Check again or saves: the counts change only on the hourly run.
+ */
+export const getTierPriceChanges = query(z.string().uuid(), async (orgId) => {
+  const { platform, cookies } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+  return (await api.tiers.priceChanges(orgId)).items;
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Admin: Feature Toggle
 // ─────────────────────────────────────────────────────────────────────────────

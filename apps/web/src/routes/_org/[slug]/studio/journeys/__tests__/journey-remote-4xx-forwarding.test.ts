@@ -362,6 +362,6 @@ describe('module-wide', () => {
 
     expect(unforwarded).toEqual([]);
     // And the split itself worked — an empty map would make the loop vacuous.
-    expect(bodies.size).toBe(31);
+    expect(bodies.size).toBe(32);
   });
 });

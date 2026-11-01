@@ -100,6 +100,7 @@ import type {
   CreatorPayoutRow,
   PayoutSummary,
   PayoutWithCreator,
+  PriceChangeProgress,
   SubscriberListItem,
   SubscriptionCheckoutVerifyResult,
 } from '@codex/subscription';
@@ -2730,6 +2731,21 @@ export function createServerApi(
           )}/tier-access?organizationId=${encodeURIComponent(organizationId)}`,
           { method: 'PUT', body: JSON.stringify({ tierIds }) }
         ),
+
+      /**
+       * How the course plan's price changes are going (Codex-2hxff.86), for
+       * the Offer panel's note. As `tiers.priceChanges`, scoped to the
+       * organisation and the course.
+       */
+      planPriceChanges: (organizationId: string, courseId: string) =>
+        request<PaginatedListResponse<PriceChangeProgress>>(
+          'ecom',
+          `/studio/courses/${encodeURIComponent(
+            courseId
+          )}/subscription-plan/price-changes?organizationId=${encodeURIComponent(
+            organizationId
+          )}`
+        ),
     },
 
     /**
@@ -3483,6 +3499,18 @@ export function createServerApi(
           'org',
           `/api/organizations/${orgId}/tiers/${tierId}/items`,
           { method: 'POST', body: JSON.stringify(delta) }
+        ),
+
+      /**
+       * How the tiers' price changes are going (Codex-2hxff.86): who has been
+       * emailed, moved and held, per change and interval. Owner/admin only,
+       * uncached. Running and stopped changes, and those done or replaced in
+       * the last 14 days, newest first, one page.
+       */
+      priceChanges: (orgId: string) =>
+        request<PaginatedListResponse<PriceChangeProgress>>(
+          'org',
+          `/api/organizations/${orgId}/tiers/price-changes`
         ),
 
       /**

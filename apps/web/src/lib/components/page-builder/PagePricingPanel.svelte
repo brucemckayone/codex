@@ -36,8 +36,19 @@
   import PlanGuidanceNote from '$lib/components/studio/plan-picker/PlanGuidanceNote.svelte';
   import PlanPicker from '$lib/components/studio/plan-picker/PlanPicker.svelte';
   import { itemGaps, joinNames } from '$lib/components/studio/plan-picker/select-from-tier';
+  import PriceChangeNote from '$lib/components/studio/PriceChangeNote.svelte';
+  import {
+    dismissalKey,
+    type PriceNoteCheck,
+    type PriceNoteView,
+    priceChangeNotes,
+    stillGoingOutHint,
+  } from '$lib/components/studio/price-note-view';
+  import { AlertTriangleIcon } from '$lib/components/ui/Icon';
+  import { dismiss, isDismissed } from '$lib/collections/dismissals';
   import { monetisation } from '$lib/page-builder/monetisation-store.svelte';
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
+  import { getCoursePlanPriceChanges } from '$lib/remote/journeys.remote';
 
   const offer = $derived(pageBuilder.pending?.offer ?? {});
   const isCoursePage = $derived(pageBuilder.pending?.subjectType === 'course');
@@ -147,6 +158,71 @@
       out.push(m.studio_builder_pricing_problem_oneoff_min());
     return out;
   });
+
+  // ─── How the plan's price change is going (Codex-2hxff.86, P11) ─────────
+  // Read once the plan's baseline has loaded. After that, only Check again,
+  // Try again, and a save that moved a price (the store re-reads it) read
+  // it again: the counts change only on the hourly run.
+  const planChangesQuery = $derived(
+    isCoursePage && monetisation.loaded && monetisation.courseId
+      ? getCoursePlanPriceChanges({ courseId: monetisation.courseId })
+      : null
+  );
+  let planCheck = $state<PriceNoteCheck | null>(null);
+  let planReading = $state(false);
+  // Dismissals live in localStorage, which nothing here tracks.
+  let planDismissTick = $state(0);
+  let monthlyInput = $state<HTMLInputElement>();
+  const planChangesFailed = $derived(Boolean(planChangesQuery?.error));
+  const planNotes = $derived.by(() => {
+    void planDismissTick;
+    const all = planChangesQuery?.current ?? [];
+    return priceChangeNotes({
+      all,
+      changes: all,
+      subject: { kind: 'course' },
+      now: new Date(),
+      check: planCheck,
+      // Q8: a finished note stays until dismissed or 14 days pass.
+      isDismissed: (key) => isDismissed(key, 14),
+    });
+  });
+  // P8: a price typed while that price's emails are still going out.
+  const planHint = $derived(
+    stillGoingOutHint({
+      changes: planChangesQuery?.current ?? [],
+      saved: {
+        monthly: monetisation.saved.priceMonthlyCents,
+        annual: monetisation.saved.priceAnnualCents,
+      },
+      next: { monthly: draft.priceMonthlyCents, annual: draft.priceAnnualCents },
+    })
+  );
+
+  /** Check again or Try again: one read per press, never two at once. */
+  async function readPlanChanges(note?: PriceNoteView) {
+    const query = planChangesQuery;
+    if (!query || planReading) return;
+    planReading = true;
+    const at = new Date().toISOString();
+    try {
+      await query.refresh();
+      planCheck =
+        note && !query.error ? { key: note.key, at, lastRunAt: note.lastRunAt } : null;
+    } catch {
+      // The query keeps the error, and the failed line says so (P10).
+      planCheck = null;
+    } finally {
+      planReading = false;
+    }
+  }
+
+  function dismissPlanNote(note: PriceNoteView) {
+    for (const id of note.ids) dismiss(dismissalKey(id));
+    planDismissTick += 1;
+    // The button leaves with the note: focus goes back to the prices.
+    monthlyInput?.focus();
+  }
 </script>
 
 <div class="panel">
@@ -258,8 +334,10 @@
           <span class="field__label">{m.studio_builder_pricing_monthly()}</span>
           <span class="field__input">
             £<input
+              bind:this={monthlyInput}
               inputmode="decimal"
               aria-label={m.studio_builder_pricing_monthly_aria()}
+              aria-describedby={planHint ? 'plan-price-hint' : undefined}
               disabled={locked}
               value={shown('monthly')}
               oninput={(e) => setPounds('monthly', e.currentTarget.value)}
@@ -273,6 +351,7 @@
             £<input
               inputmode="decimal"
               aria-label={m.studio_builder_pricing_annual_aria()}
+              aria-describedby={planHint ? 'plan-price-hint' : undefined}
               disabled={locked}
               value={shown('annual')}
               oninput={(e) => setPounds('annual', e.currentTarget.value)}
@@ -281,6 +360,28 @@
           </span>
         </label>
       </div>
+      {#if planHint}
+        <p class="price-hint" id="plan-price-hint" data-testid="plan-price-hint">
+          <AlertTriangleIcon size={14} aria-hidden="true" />
+          <span><b>{planHint.lead}</b> {planHint.body}</span>
+        </p>
+      {/if}
+      {#if planChangesFailed}
+        <PriceChangeNote
+          failed
+          busy={planReading}
+          onTryAgain={() => readPlanChanges()}
+          data-testid="price-change-note-failed"
+        />
+      {/if}
+      {#each planNotes as note (note.key)}
+        <PriceChangeNote
+          view={note}
+          busy={planReading}
+          onCheckAgain={() => readPlanChanges(note)}
+          onDismiss={() => dismissPlanNote(note)}
+        />
+      {/each}
       <p class="way__note">
         {m.studio_builder_pricing_stripe_note()}
         <a href="/studio/monetisation">{m.studio_builder_pricing_payout_link()}</a>.
@@ -537,6 +638,24 @@
   .way__fields {
     display: flex;
     gap: var(--space-3);
+  }
+  /* P8, as the Edit Tier dialog's line: a price still going out. */
+  .price-hint {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: var(--space-2);
+    align-items: start;
+    margin: 0;
+    font-size: var(--text-xs);
+    line-height: var(--leading-normal);
+    color: var(--color-text-secondary);
+  }
+  .price-hint > :global(svg) {
+    margin-top: var(--space-0-5);
+  }
+  .price-hint b {
+    color: var(--color-text);
+    font-weight: var(--font-semibold);
   }
 
   .field {

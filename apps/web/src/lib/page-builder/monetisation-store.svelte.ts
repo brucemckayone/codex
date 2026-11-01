@@ -34,6 +34,7 @@ import { selectFromTier } from '$lib/components/studio/plan-picker/select-from-t
 import type { JourneyTierOption } from '$lib/page-builder/journey-queries';
 import {
   getCourseMonetisation,
+  getCoursePlanPriceChanges,
   updateCourseMonetisation,
 } from '$lib/remote/journeys.remote';
 
@@ -99,6 +100,10 @@ class MonetisationStore {
   }
   get draft(): MonetisationDraft {
     return this.#pending;
+  }
+  /** The persisted baseline: what a price the creator types is compared to. */
+  get saved(): MonetisationDraft {
+    return this.#saved;
   }
   get tierOptions(): JourneyTierOption[] {
     return this.#tierOptions;
@@ -248,6 +253,11 @@ class MonetisationStore {
     const courseId = this.#courseId;
     if (!courseId || !this.#loaded || !this.isDirty) return;
 
+    const was = {
+      onSale: this.#saved.subscriptionEnabled,
+      monthly: this.#saved.priceMonthlyCents,
+      annual: this.#saved.priceAnnualCents,
+    };
     // Frozen: the creator can keep typing while Stripe answers.
     const sent: MonetisationDraft = {
       ...this.#pending,
@@ -270,6 +280,25 @@ class MonetisationStore {
       },
       sent
     );
+
+    // A re-price records who is due in the save (Codex-2hxff.86), so the
+    // Offer panel's price-change note re-reads once, on the panel's own
+    // query. The save has landed whatever the read does: a failed read is
+    // the query's error, which the note shows (P10), never a failed save.
+    const plan = persisted.subscription;
+    if (
+      was.onSale &&
+      plan &&
+      (plan.priceMonthly !== was.monthly || plan.priceAnnual !== was.annual)
+    ) {
+      try {
+        void getCoursePlanPriceChanges({ courseId })
+          .refresh()
+          .catch(() => {});
+      } catch {
+        // As above: the note reads again on its next Check again.
+      }
+    }
   }
 
   /** Reset to the closed state (the route calls this on destroy). */
