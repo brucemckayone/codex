@@ -7,6 +7,7 @@ import {
   noteField,
 } from '../../model/fields';
 import { compact, readBool, readText } from '../../model/read';
+import { readStillFocus, type StillFocus } from '../../model/still-focus';
 import type { BlockDefinition, BlockField } from '../../model/types';
 
 export type VideoProps = {
@@ -24,6 +25,8 @@ export type VideoProps = {
    * an existing one too, names who speaks.
    */
   hideSpeaker?: boolean;
+  /** Where the film's poster is cropped round on this page (`model/still-focus.ts`). */
+  stillFocus?: StillFocus;
 };
 
 /**
@@ -120,5 +123,16 @@ export const videoDefinition: BlockDefinition<VideoProps> = {
       caption: readText(raw, 'caption', 140),
       speaker: readText(raw, 'speaker', 60),
       hideSpeaker: readBool(raw, 'hideSpeaker'),
+      stillFocus: readStillFocus(raw.stillFocus),
     }),
+  // The film's poster. Every screen is 16:9, a film's own shape, so the
+  // poster is shown whole, except in Bold's theatre from a wide screen, 21:9:
+  // only there does a point steer it, and elsewhere the control explains
+  // itself (VideoBlock's `--_ratio`).
+  stillFocus: {
+    focalLayouts: {
+      theatre: [{ at: 'wide', ratio: '21 / 9', styles: ['bold'] }],
+    },
+    still: (_raw, preview) => preview?.intro?.posterUrl ?? null,
+  },
 };

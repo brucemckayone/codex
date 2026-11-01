@@ -123,9 +123,16 @@
 /* The hero sets out from its headline. */
 :is(.lp, #lp-style)[data-lp-style='path'] .lp-section[data-lp-type='hero'] {
   --_path-y: calc(
-    var(--lp-pad) + var(--_path-eyebrow, 0px) + var(--lp-size-display) *
-      var(--lp-leading-display) / 2
+    var(--lp-pad) + var(--_path-logo, 0px) + var(--_path-eyebrow, 0px) +
+      var(--lp-size-display) * var(--lp-leading-display) / 2
   );
+}
+
+/* The org's logo heads the hero's words (Codex-61zsk.73): its box and the
+   stack gap under it move the headline down, and the stop with it. Its row
+   is there only while the logo is drawn. */
+:is(.lp, #lp-style)[data-lp-style='path'] .lp-section[data-lp-type='hero']:has(.hero__logo) {
+  --_path-logo: calc(var(--lp-logo-box) + var(--lp-stack));
 }
 
 /* A creator's eyebrow over the heading moves the heading down, and the stop
@@ -515,8 +522,8 @@
 @container lp-page (min-width: 50rem) {
   :is(.lp, #lp-style)[data-lp-style='path'] .lp-section[data-lp-type='hero'][data-lp-layout='split'] {
     --_path-y: calc(
-      var(--lp-pad) + var(--_path-eyebrow, 0px) + var(--lp-size-display) * 0.7 *
-        var(--lp-leading-display) / 2
+      var(--lp-pad) + var(--_path-logo, 0px) + var(--_path-eyebrow, 0px) +
+        var(--lp-size-display) * 0.7 * var(--lp-leading-display) / 2
     );
   }
 }

@@ -15,16 +15,23 @@
   still reads as a set. An item's mark (Codex-61zsk.58) sits above its name,
   in the mark ink (03 §5: a drawn mark, never the text grade); in the
   checklist it takes the tick's place, in the tick's own box and ink.
+
+  Under the words, before the items, every layout draws the course's facts
+  (Codex-61zsk.73): its stages, practices and length, counted from the
+  curriculum, never typed. A new switch says HIDE (`hideFacts`), so every
+  section, an existing one too, shows them until the creator turns it on.
 -->
 <script lang="ts">
   import { hasHead } from '../../model/read';
   import { CheckIcon } from '$lib/components/ui/Icon';
   import { pageImageSrcset, resolvePageImageUrl, storedFocus } from '../../../page-images';
+  import { benefitsFacts } from '../../model/facts';
   import { featuredScheme } from '../../model/resolve';
   import type { BlockProps } from '../../model/types';
   import { getKitPage } from '../../page-context';
   import ButtonRow from '../../primitives/ButtonRow.svelte';
   import Eyebrow from '../../primitives/Eyebrow.svelte';
+  import FactsLine from '../../primitives/FactsLine.svelte';
   import Heading from '../../primitives/Heading.svelte';
   import Mark from '../../primitives/Mark.svelte';
   import Media from '../../primitives/Media.svelte';
@@ -40,7 +47,8 @@
   const layout = $derived(section.layout);
   const items = $derived(content.items ?? []);
   const asks = $derived(Boolean(content.ctaLabel || content.note));
-  const headed = $derived(hasHead(content));
+  const facts = $derived(content.hideFacts ? [] : benefitsFacts(context));
+  const headed = $derived(hasHead(content) || facts.length > 0);
   // A tile's name sits one level under the section heading, or takes its
   // level when there is none, so the outline never skips a step.
   const itemLevel = $derived(
@@ -81,6 +89,7 @@
   {#if content.body}
     <Text text={content.body} size="lead" type="benefits" field="body" {edit} />
   {/if}
+  <FactsLine {facts} />
 {/snippet}
 
 {#snippet ask()}

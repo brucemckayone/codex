@@ -18,7 +18,7 @@
   import type { BlockField } from '$lib/page-builder/kit';
   import { MARKS, type MarkId } from '$lib/page-builder/kit/model/marks';
   import Mark from '$lib/page-builder/kit/primitives/Mark.svelte';
-  import { isImageRef } from '$lib/page-builder/page-images';
+  import { isImageRef, withFocus } from '$lib/page-builder/page-images';
   import { safeHref } from '$lib/page-builder/render/safe-href';
   import * as m from '$paraglide/messages';
   import ButtonActionField from './ButtonActionField.svelte';
@@ -139,11 +139,12 @@
     decorative={field.decorative}
   />
   {#if field.focalLayouts && isImageRef(value)}
+    {@const image = value}
     <FocalPointField
-      image={value}
+      {image}
       {mediaBaseUrl}
       crops={(layout !== undefined && field.focalLayouts[layout]) || []}
-      onChange={(next) => onChange(next)}
+      onChange={(next) => onChange(withFocus(image, next))}
     />
   {/if}
 {:else if field.control === 'action'}

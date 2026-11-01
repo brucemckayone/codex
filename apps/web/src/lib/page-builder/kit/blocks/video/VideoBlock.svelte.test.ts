@@ -554,3 +554,38 @@ describe('VideoBlock', () => {
     });
   });
 });
+
+describe('VideoBlock: a focal point on the poster (Codex-61zsk.73)', () => {
+  const KEY = 'c1/media-thumbnails/intro-1';
+  const POSTER = `https://cdn.test/${KEY}/lg.webp`;
+  const FILM: PreviewMedia = { ...INTRO, posterUrl: POSTER };
+  const poster = () =>
+    document.body.querySelector<HTMLImageElement>(`img[src="${POSTER}"]`);
+
+  it.each(
+    SECTION_LAYOUTS.video
+  )('%s: crops the poster round the point set on it', async (layout) => {
+    await render(
+      { ...SAMPLE, stillFocus: { x: 30, y: 25, of: KEY } },
+      { layout, intro: FILM }
+    );
+    expect(poster()?.style.objectPosition).toBe('30% 25%');
+  });
+
+  it('draws another film’s poster from the centre, as before', async () => {
+    await render(
+      {
+        ...SAMPLE,
+        stillFocus: { x: 30, y: 25, of: 'c1/media-thumbnails/old' },
+      },
+      { intro: FILM }
+    );
+    expect(poster()).not.toBeNull();
+    expect(poster()?.style.objectPosition).toBe('');
+  });
+
+  it('a poster with no point draws from the centre', async () => {
+    await render(SAMPLE, { intro: FILM });
+    expect(poster()?.style.objectPosition).toBe('');
+  });
+});

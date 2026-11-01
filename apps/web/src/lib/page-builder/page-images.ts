@@ -105,6 +105,15 @@ export function storedFocus(
     : focus;
 }
 
+/** The upload with its point placed, or with none for the centre; the rest of the reference kept. */
+export function withFocus(
+  image: ImageRef,
+  focus: { x: number; y: number } | undefined
+): ImageRef {
+  const { focus: _old, ...rest } = image;
+  return focus ? { ...rest, focus } : rest;
+}
+
 /** The picture's own size, or `null` when the reference does not carry one. */
 export function readSize(ref: unknown): { w: number; h: number } | null {
   if (!isImageRef(ref)) return null;

@@ -43,6 +43,7 @@
   import { page as appPage } from '$app/state';
   import { brandEditor } from '$lib/brand-editor';
   import { orgGrounds, orgShader } from '$lib/page-builder/org-grounds';
+  import { orgLogo } from '$lib/page-builder/render/org-logo';
   import type { BrandTokenOverrides } from '$lib/page-builder';
   import { type KitPage, PageRenderer } from '$lib/page-builder/kit';
 
@@ -82,6 +83,10 @@
   // The org's moving background, so the hero takes it (03 X50, X51).
   const shader = $derived(
     orgShader(appPage.data.org, brandEditor.isOpen ? brandEditor.pending : null)
+  );
+  // The org's logo, so a thumbnail's hero draws it (Codex-61zsk.73).
+  const logo = $derived(
+    orgLogo(appPage.data.org, brandEditor.isOpen ? brandEditor.pending : null)
   );
   const thumbContext = $derived({ ...context, sellPreview: stillsOf(context.sellPreview) });
 
@@ -159,7 +164,7 @@
       {@attach stripIds}
       {@attach measureStage}
     >
-      <PageRenderer page={page} context={thumbContext} {brandOverrides} {theme} still sticky={false} orgGrounds={grounds} orgShader={shader} />
+      <PageRenderer page={page} context={thumbContext} {brandOverrides} {theme} still sticky={false} orgGrounds={grounds} orgShader={shader} orgLogo={logo} />
     </div>
   {/if}
 </div>

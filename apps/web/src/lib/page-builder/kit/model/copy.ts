@@ -9,7 +9,31 @@
  * a one-off never promises "Cancel anytime", and a recurring path never claims
  * to be yours to keep.
  */
+import type { JourneyContentType } from '$lib/page-builder';
 import type { OfferPath } from '../../offer-paths';
+
+/**
+ * A length the way a visitor plans by it: whole minutes, then hours.
+ * Rounded, not floored, so a 9:40 film reads "10 min"; under a minute says
+ * so rather than "0 min". Nothing for a length nobody measured.
+ */
+function duration(seconds: number | null | undefined): string | null {
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds <= 0)
+    return null;
+  if (seconds < 60) return 'under 1 min';
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest > 0 ? `${hours} hr ${rest} min` : `${hours} hr`;
+}
+
+/** A kind of practice, as a course's length names what it timed. */
+const KIND_WORD: Record<JourneyContentType, string> = {
+  video: 'video',
+  audio: 'audio',
+  written: 'reading',
+};
 
 export const COPY = {
   cta: {
@@ -47,6 +71,20 @@ export const COPY = {
     stages: (count: number) => `${count} ${count === 1 ? 'stage' : 'stages'}`,
     practices: (count: number) =>
       `${count} ${count === 1 ? 'practice' : 'practices'}`,
+    /** One practice's length: "10 min", "1 hr 15 min". */
+    duration,
+    /**
+     * How long the timed practices run, naming the kinds that were timed so
+     * a course with readings never claims their time too: "5 hr 40 min of
+     * video and audio". Nothing for a length nobody measured. Read through
+     * `lengthFact` (`model/facts.ts`), which the benefits line and pricing's
+     * "What's included" both say.
+     */
+    length: (seconds: number, timed: readonly JourneyContentType[]) => {
+      const time = duration(seconds);
+      const kinds = timed.map((kind) => KIND_WORD[kind]).join(' and ');
+      return time ? `${time} of ${kinds}` : null;
+    },
   },
   hero: {
     watch: 'Watch the film',
