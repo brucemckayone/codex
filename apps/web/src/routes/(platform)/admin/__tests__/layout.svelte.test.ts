@@ -89,6 +89,22 @@ describe('the Support nav', () => {
     );
   });
 
+  test('Price moves and Fee notices count in the waiting total too', () => {
+    mountAt('/admin/refunds');
+    // The counts on 4 Nov (batch C1 Part B pages 5 and 6): joiners count (Q4).
+    countsSlot().current = {
+      failedRefunds: 2,
+      creatorDebts: 1,
+      owedToCreators: 6,
+      feeNotices: 1,
+      priceMoves: 10,
+    };
+    flushSync();
+    expect(
+      queueLink()?.querySelector('[data-variant="warning"]')?.textContent
+    ).toBe('20');
+  });
+
   test('a page gets the layout’s own counts query, never a second one', () => {
     // kit drops a query whose first load failed: a second call would be a
     // new instance the badge never reads. Here the first call's is unique.
