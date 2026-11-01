@@ -179,11 +179,15 @@ describe('the owner guard', () => {
       failedRefunds: 0,
       creatorDebts: 0,
       owedToCreators: 0,
+      feeNotices: 0,
+      priceMoves: 0,
     });
     await expect(remote.getSupportQueueCounts()).resolves.toEqual({
       failedRefunds: 0,
       creatorDebts: 0,
       owedToCreators: 0,
+      feeNotices: 0,
+      priceMoves: 0,
     });
   });
 });

@@ -77,6 +77,8 @@ describe('the Support nav', () => {
       failedRefunds: 2,
       creatorDebts: 1,
       owedToCreators: 6,
+      feeNotices: 0,
+      priceMoves: 0,
     };
     flushSync();
     expect(
