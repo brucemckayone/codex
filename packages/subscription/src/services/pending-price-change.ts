@@ -43,6 +43,7 @@ import {
   priceChanges,
   subscriptionPriceMoves,
   subscriptions,
+  subscriptionTiers,
 } from '@codex/database/schema';
 import { InternalServiceError } from '@codex/service-errors';
 import { type SQL, sql } from 'drizzle-orm';
@@ -1100,7 +1101,7 @@ export async function recordPlanPriceChange(
   return { changeId, total, supersededId };
 }
 
-/** One member who pressed Keep current plan on a tier repriced while they waited. */
+/** One member who pressed Keep current plan. */
 export interface RejoinPriceChangeInput {
   subscriptionId: string;
   stripeSubscriptionId: string;
@@ -1108,15 +1109,22 @@ export interface RejoinPriceChangeInput {
   userId: string;
   tierId: string;
   interval: 'month' | 'year';
-  /** The tier's current Price for the interval, and its amount. */
-  currentPriceId: string;
-  currentAmountCents: number;
-  /** What they pay now: the held Price Keep put back. */
+  /** The Price Keep put back, and its amount: what they pay now. */
+  heldPriceId: string;
   heldAmountCents: number;
+  /** The held tier's price change Keep made live again (parked by the move), or null. */
+  parkedPendingPriceId: string | null;
   now: Date;
 }
 
 export type RejoinPriceChangeResult =
+  /** The tier's current Price is the one put back: nothing to tell. */
+  | { outcome: 'not_repriced' }
+  /**
+   * The change Keep made live again is to the current Price. A pending marker
+   * is written only after an accepted notice, so they were told.
+   */
+  | { outcome: 'already_told' }
   /** A row now waits for the hourly step: written, or re-opened from `skipped`. */
   | { outcome: 'due'; changeId: string; moveId: string }
   /** The change already has them as due, told or held: nothing written. */
@@ -1129,24 +1137,60 @@ export type RejoinPriceChangeResult =
   | { outcome: 'live_change_mismatch'; changeId: string };
 
 /**
- * Keep current plan, on a tier repriced while the member was moving away
- * (Part A rule 3; data design §2.3): they are back at the old price and
- * nobody has told them the new one, so the change gets one `due` row for
- * them, `source = 'keep_current_plan'`. It hangs off the tier and interval's
- * latest change that isn't superseded, if that change's new Price is the
- * tier's current one; a `done` change goes back to `running`. With no such
- * change (the price was set before price moves were recorded), Keep writes a
- * change of its own for the current Price. The hourly step then treats the
- * row like any other: notice first, 30 days from their own email. A row the
- * change already has for them is re-opened only from `skipped` (the step
- * found them moving away): as `due`, or as `notified` if they had been told
- * before they left (the write only, from that email). Any other row is left
- * alone, or they would get a second email.
+ * Keep current plan (Part A rule 3; data design §2.3). A tier repriced while
+ * the member was moving away skipped them (they were left out of its rows, or
+ * the step found them leaving), so they are back at the old price and nobody
+ * has told them the new one: the change gets one `due` row for them,
+ * `source = 'keep_current_plan'`. It hangs off the tier and interval's latest
+ * change that isn't superseded, if that change's new Price is the tier's
+ * current one; a `done` change goes back to `running`. With no such change
+ * (the price was set before price moves were recorded), Keep writes a change
+ * of its own for the current Price. The hourly step then treats the row like
+ * any other: notice first, 30 days from their own email. A row the change
+ * already has for them is re-opened only from `skipped`: as `due`, or as
+ * `notified` if they had been told before they left (the write only, from
+ * that email). Any other row is left alone, or they would get a second email.
+ *
+ * A save of the tier can run at the same time (review C1, F3). The tier row
+ * is share-locked first, as a save updates it first: a save in flight is
+ * waited for, and none can start until this commits, so the tier's current
+ * Price and its latest change are read as they stand, under the lock. Two
+ * Keeps on one tier can still both insert a change of their own; the second
+ * hits `uq_price_changes_live_tier`, and the caller runs this again, when it
+ * finds the first one's change.
  */
 export async function rejoinTierPriceChange(
   tx: PriceChangeTx,
   input: RejoinPriceChangeInput
 ): Promise<RejoinPriceChangeResult> {
+  const tierRow = await tx.execute(sql`
+    SELECT "stripe_price_monthly_id", "stripe_price_annual_id",
+           "price_monthly", "price_annual"
+      FROM ${subscriptionTiers}
+     WHERE ${subscriptionTiers.id} = ${input.tierId}::uuid
+     FOR SHARE
+  `);
+  const [tier] = tierRow.rows as Array<{
+    stripe_price_monthly_id: string | null;
+    stripe_price_annual_id: string | null;
+    price_monthly: number;
+    price_annual: number;
+  }>;
+  const current =
+    input.interval === 'year'
+      ? { priceId: tier?.stripe_price_annual_id, amount: tier?.price_annual }
+      : { priceId: tier?.stripe_price_monthly_id, amount: tier?.price_monthly };
+  if (
+    !current.priceId ||
+    current.amount === undefined ||
+    current.priceId === input.heldPriceId
+  ) {
+    return { outcome: 'not_repriced' };
+  }
+  if (input.parkedPendingPriceId === current.priceId) {
+    return { outcome: 'already_told' };
+  }
+
   const latest = await tx.execute(sql`
     SELECT "id", "state", "new_stripe_price_id"
       FROM ${priceChanges}
@@ -1164,7 +1208,7 @@ export async function rejoinTierPriceChange(
   }>;
 
   let changeId: string;
-  if (found && found.new_stripe_price_id === input.currentPriceId) {
+  if (found && found.new_stripe_price_id === current.priceId) {
     changeId = found.id;
   } else if (
     found &&
@@ -1179,8 +1223,8 @@ export async function rejoinTierPriceChange(
         "new_stripe_price_id", "created_at")
       VALUES (${changeId}::uuid, ${input.organizationId}::uuid, 'tier',
         ${input.tierId}::uuid, ${input.interval},
-        ${input.heldAmountCents}::int, ${input.currentAmountCents}::int,
-        ${input.currentPriceId}, ${input.now}::timestamptz)
+        ${input.heldAmountCents}::int, ${Number(current.amount)}::int,
+        ${current.priceId}, ${input.now}::timestamptz)
     `);
   }
 

@@ -815,6 +815,67 @@ describe('waiting tier moves (Codex-2hxff.16)', () => {
         expect(stripe.prices.update).not.toHaveBeenCalled();
       });
 
+      // Review C1, F3: a second Keep on the same tier wrote its change of
+      // its own first (uq_price_changes_live_tier). Run once more, Keep
+      // joins it instead of alerting.
+      it("a live-change conflict is run once more, and joins the other Keep's change", async () => {
+        const { org, premium, userId, row } =
+          await keptAfterReprice('keep-rejoin-retry');
+        // The other Keep's insert won the race: the first try conflicts.
+        let conflicts = 1;
+        const conflicted = new Proxy(db, {
+          get(target, prop) {
+            if (prop === 'transaction' && conflicts > 0) {
+              return async () => {
+                conflicts -= 1;
+                throw Object.assign(
+                  new Error(
+                    'duplicate key value violates unique constraint "uq_price_changes_live_tier"'
+                  ),
+                  { code: '23505', constraint: 'uq_price_changes_live_tier' }
+                );
+              };
+            }
+            const value = Reflect.get(target, prop, target);
+            return typeof value === 'function' ? value.bind(target) : value;
+          },
+        });
+        const keeping = new SubscriptionService(
+          {
+            db: conflicted,
+            environment: 'test',
+            ...createTestMoneyDeps(),
+            cache: { invalidate } as unknown as VersionedCache,
+            waitUntil: () => {},
+          },
+          stripe
+        );
+        const errors = vi.spyOn(
+          (
+            keeping as unknown as {
+              obs: { error: (m: string, d?: unknown) => void };
+            }
+          ).obs,
+          'error'
+        );
+
+        await keeping.keepCurrentPlan(userId, org.id);
+
+        expect(conflicts).toBe(0);
+        const [change] = await db
+          .select()
+          .from(priceChanges)
+          .where(eq(priceChanges.tierId, premium.id));
+        expect(await rowsOf(row.id)).toEqual([
+          expect.objectContaining({
+            priceChangeId: change?.id,
+            state: 'due',
+            source: 'keep_current_plan',
+          }),
+        ]);
+        expect(errors).not.toHaveBeenCalled();
+      });
+
       it("hangs the row off the tier's latest change and re-opens it when done", async () => {
         const { org, premium, userId, row, repriced } =
           await keptAfterReprice('keep-rejoin-done');
