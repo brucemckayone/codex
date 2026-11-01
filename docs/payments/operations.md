@@ -207,7 +207,9 @@ can generate an external-account update code from the connected account's page
 Both run at minute `0` so they share one database wake
 ([why](connect-and-payouts.md#releasing-pending-money)). The daily bank payout
 (`Codex-2hxff.29`) is not a cron of its own: it is the payouts sweep's run whose
-London hour is 8, last in that wake.
+London hour is 8, last in that wake. The price-move step (`Codex-2hxff.86`)
+rides the same sweep, on every run but that one
+([held price moves](#held-price-moves)).
 
 ## Changing fees
 
@@ -259,6 +261,67 @@ step and the queue tab stop until the roll forward. Don't change fees while
 rolled back: the old routes write only the old tables, and the new resolver
 never sees those writes. Save them again through the new route after rolling
 forward.
+
+## Held price moves
+
+A new tier or course-plan price emails every subscriber first, and moves each
+one only after their own email is accepted; their 30 days count from it.
+ecom-api's hourly run does this, about 1,500 people a run, skipping the 08:00
+London run, which belongs to the bank payout ([Subscriptions](subscriptions.md)).
+Admin › Queue › Price moves (`Codex-2hxff.85`) lists the people it couldn't
+move. The record is the source of truth, not the alerts: the run names at most
+50 people per run in its alert lines.
+
+**Held.** After three hourly tries, a person is held, listed with why, and kept
+on their old price. Each row has one action:
+
+- **Retry**, when no email went through (refused, skipped, no address, or no
+  record that it went). Fix the cause first, for example the address on their
+  account. The next run emails them again, with three fresh tries, and their
+  move is scheduled 30 days after the new email.
+- **Retry the move**, when the email went through and Stripe then refused the
+  move or never answered. The next run asks Stripe again for the date they
+  were told, or their next renewal if that date has passed (later than told,
+  never earlier), and sends no second email.
+
+Both are database writes for the next run: admin-api can't send email or
+change a subscription. The answer gives that run (`nextRunAt`: the next top of
+the hour, or the one after when that is the 08:00 London run), and the row
+shows Queued until the run finishes with it, so come back after it. A support
+retry gets three tries of its own; a row the run holds again says who retried
+it.
+
+**Close…** takes a row off the list without a retry, as moved by hand (told,
+then changed in Stripe) or not needed (cancelled, refunded or replaced), with a
+note. Closing moves nobody. Move someone by hand only once they have been told
+the new price and the date.
+
+**409 `PRICE_MOVE_NOT_HELD`** means there is nothing to retry or close, and
+`details.reason` says why:
+
+- `superseded`: a newer price for the plan replaced this one, and they are
+  emailed about that instead;
+- `moved`: the run got there first;
+- `skipped`: the run set it aside (they are moving to another plan, for
+  example);
+- `subscription_ended`: Retry only; close it as not needed;
+- `resolved`: it is closed already;
+- `queued`: it is already queued, which is also what a second press after a
+  lost answer gets;
+- `in_progress`: the run is still working on it, and it was never held.
+
+**A stopped price change.** If every email in a change's first batch is
+refused with a 4xx (a missing template, a bad worker secret), the run stops the
+whole change with one alert, and nobody is emailed or moved. The queue shows
+one card for it, with the cause and the error id that joins the alert line.
+Fix the cause, then press Restart: the next run sets the change running again
+and carries on where it stopped. A Restart pressed before a later stop doesn't
+count, so press it again. A change that isn't stopped answers 409
+`PRICE_CHANGE_NOT_STOPPED`.
+
+**The badge** counts held people not closed, and stopped changes nobody has
+restarted. A Retry or a Restart takes its row off the badge at once; the list
+keeps it, queued, until the run takes it.
 
 ## Payout schedule backfill
 

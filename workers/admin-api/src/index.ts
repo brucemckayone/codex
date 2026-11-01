@@ -54,9 +54,12 @@ import {
   reassignOwnerSchema,
   supportChargeParamsSchema,
   supportChargeSearchQuerySchema,
+  supportClosePriceMoveSchema,
   supportCreditIdParamsSchema,
   supportFeeNoticeIdParamsSchema,
   supportIssueRefundSchema,
+  supportPriceChangeIdParamsSchema,
+  supportPriceMoveIdParamsSchema,
   supportQueueQuerySchema,
   supportRefundIdParamsSchema,
   supportRefundPreviewQuerySchema,
@@ -1099,6 +1102,109 @@ app.post(
       // re-reads hourly while a rise waits); it shows the date at once.
       ctx.services.feeConfig.invalidateLevel(level);
       return result;
+    },
+  })
+);
+
+// Queue › Price moves (Codex-2hxff.85, .86). Every action is a database flip
+// that ecom-api's next hourly run acts on: this worker has no worker secret to
+// send an email, and only a refund-restricted Stripe key.
+
+/**
+ * GET /api/admin/support/queue/price-moves — subscribers held from a new
+ * price after their automatic tries, and those Retry queued until the run
+ * takes them, oldest first.
+ */
+app.get(
+  '/api/admin/support/queue/price-moves',
+  procedure({
+    policy: { auth: 'platform_owner', cache: 'fresh' },
+    input: { query: supportQueueQuerySchema },
+    handler: async (ctx) => {
+      const result = await ctx.services.support.listHeldPriceMoves(
+        ctx.input.query
+      );
+      return new PaginatedResult(result.items, result.pagination);
+    },
+  })
+);
+
+/**
+ * GET /api/admin/support/queue/price-changes-stopped — price changes the run
+ * stopped because every email in the first batch was refused.
+ */
+app.get(
+  '/api/admin/support/queue/price-changes-stopped',
+  procedure({
+    policy: { auth: 'platform_owner', cache: 'fresh' },
+    input: { query: supportQueueQuerySchema },
+    handler: async (ctx) => {
+      const result = await ctx.services.support.listStoppedPriceChanges(
+        ctx.input.query
+      );
+      return new PaginatedResult(result.items, result.pagination);
+    },
+  })
+);
+
+/**
+ * POST /api/admin/support/price-moves/:moveId/retry — queue a held move for
+ * the next run: the email again if none was accepted, or else the Stripe
+ * write only, with no second email (Q5). No body. 409 PRICE_MOVE_NOT_HELD,
+ * with `details.reason`.
+ */
+app.post(
+  '/api/admin/support/price-moves/:moveId/retry',
+  procedure({
+    policy: { auth: 'platform_owner', cache: 'fresh', rateLimit: 'strict' },
+    input: { params: supportPriceMoveIdParamsSchema },
+    handler: async (ctx) => {
+      return await ctx.services.support.retryPriceMove(
+        ctx.input.params.moveId,
+        ctx.user.id
+      );
+    },
+  })
+);
+
+/**
+ * POST /api/admin/support/price-moves/:moveId/close — take a held move off
+ * the list without a retry (moved by hand, or not needed), with a note. It
+ * moves nobody. 409 PRICE_MOVE_NOT_HELD.
+ */
+app.post(
+  '/api/admin/support/price-moves/:moveId/close',
+  procedure({
+    policy: { auth: 'platform_owner', cache: 'fresh', rateLimit: 'strict' },
+    input: {
+      params: supportPriceMoveIdParamsSchema,
+      body: supportClosePriceMoveSchema,
+    },
+    handler: async (ctx) => {
+      return await ctx.services.support.closePriceMove(
+        ctx.input.params.moveId,
+        ctx.input.body,
+        ctx.user.id
+      );
+    },
+  })
+);
+
+/**
+ * POST /api/admin/support/price-changes/:changeId/restart — after the cause
+ * is fixed, the next run sets the change running again (Q6). No body. 409
+ * PRICE_CHANGE_NOT_STOPPED.
+ */
+app.post(
+  '/api/admin/support/price-changes/:changeId/restart',
+  procedure({
+    policy: { auth: 'platform_owner', cache: 'fresh', rateLimit: 'strict' },
+    input: { params: supportPriceChangeIdParamsSchema },
+    handler: async (ctx) => {
+      return await ctx.services.support.restartPriceChange(
+        ctx.input.params.changeId,
+        ctx.user.id
+      );
     },
   })
 );
