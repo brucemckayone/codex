@@ -425,9 +425,18 @@ async function atStage<T>(
  * true; otherwise nothing is written and the outcome is `unnotified`. A
  * subscriber whose amount does not change is not notified (`unchanged`).
  *
+ * The notice takes seconds, and the member can change plan meanwhile: a move
+ * to a cheaper tier puts that tier's Price on the item, an upgrade moves
+ * `codex_tier_id` (review C1, F1). So once the notice is accepted the
+ * subscription is read again. If anything the move reads changed
+ * (`liveState`), the move is decided again on the fresh state, the same way,
+ * and never written over the member's change: someone now leaving the tier is
+ * `skipped`. Their notice was accepted either way, and the caller records it.
+ *
  * Every Stripe call passes `FAN_OUT_STRIPE_REQUEST`. One that throws before
- * the notice rejects with a `PriceChangeStageError` naming it; a write after
- * an accepted notice rejects with Stripe's own error.
+ * the notice rejects with a `PriceChangeStageError` naming it; after an
+ * accepted notice, the second read rejects with a `read` stage error and a
+ * write with Stripe's own error.
  *
  * A write retried after an accepted notice passes a `notify` that resolves
  * true at once (no second email, M1) and that notice's `noticeAt`.
@@ -440,31 +449,109 @@ export async function schedulePriceChange(
   target: PriceChangeTarget,
   notify: SendPriceChangeNotice
 ): Promise<PriceChangeOutcome> {
-  const subscription = await atStage('read', null, () =>
-    stripe.subscriptions.retrieve(
-      target.stripeSubscriptionId,
-      FAN_OUT_STRIPE_REQUEST
-    )
+  const read = () =>
+    atStage('read', null, () =>
+      stripe.subscriptions.retrieve(
+        target.stripeSubscriptionId,
+        FAN_OUT_STRIPE_REQUEST
+      )
+    );
+  const live = await read();
+  const decided = await decideMove(
+    stripe,
+    target,
+    live,
+    target.mayBeTold === true
   );
+  if (decided.kind === 'done') return decided.outcome;
+  if (decided.kind === 'landed') return { ...decided.outcome, landed: true };
+
+  // Notice first, then move (D-P3): no write until the notice is accepted.
+  if (!(await notify(decided.notice))) {
+    return { kind: 'unnotified' };
+  }
+
+  const fresh = await read();
+  if (liveState(fresh) === liveState(live)) {
+    return writeMove(stripe, target, decided);
+  }
+  // Told just now, so a subscription found already carrying the change is
+  // moved, not `landed`.
+  const again = await decideMove(stripe, target, fresh, true);
+  if (again.kind !== 'move') return again.outcome;
+  return writeMove(stripe, target, again);
+}
+
+/**
+ * What a move reads off a live subscription: its status, the item and its
+ * Price, and every `codex_*` key (the tier, a waiting move and its hold, the
+ * pending marker). Two reads that differ here had a change land between them.
+ */
+function liveState(subscription: Stripe.Subscription): string {
+  const item = subscription.items.data[0];
+  const keys = Object.entries(subscription.metadata ?? {})
+    .filter(([key]) => key.startsWith('codex_'))
+    .sort(([a], [b]) => a.localeCompare(b));
+  return JSON.stringify([
+    subscription.status,
+    item?.id ?? null,
+    item?.price.id ?? null,
+    keys,
+  ]);
+}
+
+type ScheduledOutcome = Extract<
+  PriceChangeOutcome,
+  { kind: 'applied' | 'pending' }
+>;
+
+/** What one read of the live subscription calls for. */
+type MoveDecision =
+  /** Nothing to tell: skipped, or the same amount (its writes made). */
+  | { kind: 'done'; outcome: PriceChangeOutcome }
+  /** It already carries this change (`mayBeTold`): nothing to send or write. */
+  | { kind: 'landed'; outcome: ScheduledOutcome }
+  /** Tell them, then write. */
+  | {
+      kind: 'move';
+      subscriptionId: string;
+      itemId: string;
+      /** Unix seconds: the earliest renewal the new price may bill. */
+      earliest: number;
+      notice: PriceChangeNotice;
+    };
+
+/**
+ * Decide the move from one read of the live subscription. The same-amount
+ * path writes here: it tells nobody, so it has nothing to wait for.
+ */
+async function decideMove(
+  stripe: Stripe,
+  target: PriceChangeTarget,
+  subscription: Stripe.Subscription,
+  mayBeTold: boolean
+): Promise<MoveDecision> {
+  const skipped = (reason: PriceMoveSkipReason): MoveDecision => ({
+    kind: 'done',
+    outcome: { kind: 'skipped', reason },
+  });
   // Ended at Stripe: there is no renewal to reprice, and Stripe refuses
   // writes to a cancelled subscription.
   if (
     subscription.status === 'canceled' ||
     subscription.status === 'incomplete_expired'
   ) {
-    return { kind: 'skipped', reason: 'ended' };
+    return skipped('ended');
   }
   const item = subscription.items.data[0];
-  if (!item) {
-    return { kind: 'skipped', reason: 'no_items' };
-  }
+  if (!item) return skipped('no_items');
   if (item.price.recurring?.interval !== target.interval) {
     // An interval change resets the billing cycle and charges at once — the
     // bug this replaces. Never cross intervals.
-    return { kind: 'skipped', reason: 'other_interval' };
+    return skipped('other_interval');
   }
   const skip = target.skipLive?.(subscription) ?? null;
-  if (skip) return { kind: 'skipped', reason: skip };
+  if (skip) return skipped(skip);
 
   // An earlier change this subscription already carries, if any.
   const pendingPriceId = subscription.metadata?.[PENDING_PRICE_ID_KEY];
@@ -476,27 +563,31 @@ export async function schedulePriceChange(
 
   // Before the same-amount path: a subscription already on the new Price
   // would read as "same amount", and one already told would be told again.
-  if (target.mayBeTold && item.price.id === target.newPriceId) {
+  if (mayBeTold && item.price.id === target.newPriceId) {
     return {
-      kind: 'applied',
-      effectiveAt: new Date(item.current_period_end * 1000),
-      currentAmountCents: item.price.unit_amount,
-      landed: true,
+      kind: 'landed',
+      outcome: {
+        kind: 'applied',
+        effectiveAt: new Date(item.current_period_end * 1000),
+        currentAmountCents: item.price.unit_amount,
+      },
     };
   }
-  if (target.mayBeTold && currentPending?.priceId === target.newPriceId) {
+  if (mayBeTold && currentPending?.priceId === target.newPriceId) {
     return {
-      kind: 'pending',
-      effectiveAt: new Date(
-        firstRenewalOnOrAfter({
-          nextRenewal: item.current_period_end,
-          anchor: subscription.billing_cycle_anchor,
-          interval: target.interval,
-          earliest: Math.floor(currentPending.from.getTime() / 1000),
-        }) * 1000
-      ),
-      currentAmountCents: item.price.unit_amount,
-      landed: true,
+      kind: 'landed',
+      outcome: {
+        kind: 'pending',
+        effectiveAt: new Date(
+          firstRenewalOnOrAfter({
+            nextRenewal: item.current_period_end,
+            anchor: subscription.billing_cycle_anchor,
+            interval: target.interval,
+            earliest: Math.floor(currentPending.from.getTime() / 1000),
+          }) * 1000
+        ),
+        currentAmountCents: item.price.unit_amount,
+      },
     };
   }
 
@@ -535,7 +626,7 @@ export async function schedulePriceChange(
         )
       );
     }
-    return { kind: 'unchanged' };
+    return { kind: 'done', outcome: { kind: 'unchanged' } };
   }
 
   // 30 days from their own notice, and for a member moving onto the tier,
@@ -545,47 +636,54 @@ export async function schedulePriceChange(
     target.floorFrom ? Math.ceil(target.floorFrom.getTime() / 1000) : 0
   );
   const nextRenewal = item.current_period_end;
-  const move =
+  const applied =
     !target.floorFrom &&
     nextRenewal >= earliest &&
-    canSwapNow(subscription.status)
-      ? {
-          kind: 'applied' as const,
-          effectiveAt: new Date(nextRenewal * 1000),
-          currentAmountCents: item.price.unit_amount,
-        }
-      : {
-          kind: 'pending' as const,
-          effectiveAt: new Date(
-            firstRenewalOnOrAfter({
+    canSwapNow(subscription.status);
+  return {
+    kind: 'move',
+    subscriptionId: subscription.id,
+    itemId: item.id,
+    earliest,
+    notice: {
+      kind: applied ? 'applied' : 'pending',
+      effectiveAt: new Date(
+        (applied
+          ? nextRenewal
+          : firstRenewalOnOrAfter({
               nextRenewal,
               anchor: subscription.billing_cycle_anchor,
               interval: target.interval,
               earliest,
-            }) * 1000
-          ),
-          currentAmountCents: item.price.unit_amount,
-        };
+            })) * 1000
+      ),
+      currentAmountCents: item.price.unit_amount,
+      currentPending,
+    },
+  };
+}
 
-  // Notice first, then move (D-P3): no write until the notice is accepted.
-  if (!(await notify({ ...move, currentPending }))) {
-    return { kind: 'unnotified' };
-  }
-
-  if (move.kind === 'applied') {
+/** Write a decided move: the new Price now, or the pending marker. */
+async function writeMove(
+  stripe: Stripe,
+  target: PriceChangeTarget,
+  move: Extract<MoveDecision, { kind: 'move' }>
+): Promise<ScheduledOutcome> {
+  const { kind, effectiveAt, currentAmountCents } = move.notice;
+  if (kind === 'applied') {
     await stripe.subscriptions.update(
-      subscription.id,
+      move.subscriptionId,
       {
-        items: [{ id: item.id, price: target.newPriceId }],
+        items: [{ id: move.itemId, price: target.newPriceId }],
         proration_behavior: 'none',
         metadata: CLEAR_PENDING_PRICE_METADATA,
       },
       {
         ...FAN_OUT_STRIPE_REQUEST,
-        idempotencyKey: `price-change-now:${subscription.id}:${target.newPriceId}`,
+        idempotencyKey: `price-change-now:${move.subscriptionId}:${target.newPriceId}`,
       }
     );
-    return move;
+    return { kind, effectiveAt, currentAmountCents };
   }
 
   // Latest wins: this overwrites any earlier pending change. No idempotency
@@ -593,16 +691,16 @@ export async function schedulePriceChange(
   // notice time, so a newer change within Stripe's 24h key window would
   // reuse a key with different parameters and be refused.
   await stripe.subscriptions.update(
-    subscription.id,
+    move.subscriptionId,
     {
       metadata: {
         [PENDING_PRICE_ID_KEY]: target.newPriceId,
-        [PENDING_PRICE_FROM_KEY]: String(earliest),
+        [PENDING_PRICE_FROM_KEY]: String(move.earliest),
       },
     },
     FAN_OUT_STRIPE_REQUEST
   );
-  return move;
+  return { kind, effectiveAt, currentAmountCents };
 }
 
 /**

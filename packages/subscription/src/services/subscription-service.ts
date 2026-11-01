@@ -113,6 +113,7 @@ import {
 } from '@codex/purchase';
 import {
   BaseService,
+  describeThrown,
   InternalServiceError,
   NotFoundError,
   type ServiceConfig,
@@ -2775,6 +2776,12 @@ export class SubscriptionService extends BaseService {
       status: mapped.status,
       cancelAtPeriodEnd: mapped.cancelAtPeriodEnd,
     });
+    await this.alertIfPriceOffTier(
+      stripeSubscription,
+      sub.id,
+      newTierId ?? sub.tierId,
+      mapped.pendingTierId
+    );
 
     // Orchestrator hook: tier changes, status flips (active ↔ cancelling
     // ↔ past_due) all affect library visibility + subscription badge —
@@ -2794,6 +2801,57 @@ export class SubscriptionService extends BaseService {
       return {};
     }
     return { userId: sub.userId, orgId: sub.organizationId };
+  }
+
+  /**
+   * The backstop for a price written over a change of plan (review C1, F1):
+   * every Price a tier bills is on that tier's Stripe Product, so an item
+   * Price on neither the member's tier's Product nor their waiting tier's is
+   * a wrong bill. An alert, ids only; nothing is written, and the sync above
+   * has mirrored the amount as Stripe holds it. A payload without the
+   * Product, or a tier without one, is not checked.
+   */
+  private async alertIfPriceOffTier(
+    stripeSubscription: Stripe.Subscription,
+    subscriptionId: string,
+    tierId: string | null,
+    waitingTierId: string | null
+  ): Promise<void> {
+    const price = stripeSubscription.items?.data?.[0]?.price;
+    const product =
+      typeof price?.product === 'string' ? price.product : price?.product?.id;
+    const tierIds = [tierId, waitingTierId].filter(
+      (id): id is string => id !== null
+    );
+    if (!price || !product || tierIds.length === 0) return;
+    try {
+      const tiers = await this.db
+        .select({ stripeProductId: subscriptionTiers.stripeProductId })
+        .from(subscriptionTiers)
+        .where(inArray(subscriptionTiers.id, tierIds));
+      const products = tiers.flatMap((t) =>
+        t.stripeProductId ? [t.stripeProductId] : []
+      );
+      if (products.length === 0 || products.includes(product)) return;
+      this.obs.error(
+        "Subscription bills a Price from another tier's Product: a price move or plan change may have been written over (support: check the Stripe subscription)",
+        {
+          errorId: crypto.randomUUID(),
+          subscriptionId,
+          stripeSubscriptionId: stripeSubscription.id,
+          tierId,
+          waitingTierId,
+          stripePriceId: price.id,
+          stripeProductId: product,
+        }
+      );
+    } catch (error) {
+      this.obs.error('Off-tier price check failed; the sync stands', {
+        errorId: crypto.randomUUID(),
+        subscriptionId,
+        error: describeThrown(error),
+      });
+    }
   }
 
   /**

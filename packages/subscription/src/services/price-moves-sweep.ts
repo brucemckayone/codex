@@ -32,8 +32,9 @@
  *      `notified` is `done` (held rows don't keep it running), and one end
  *      alert counts what is held.
  *
- * Budget: about 3 subrequests per person (the Stripe read, the
- * notifications-api call, the Stripe write), so a full run is about 4,500.
+ * Budget: about 4 subrequests per person (the Stripe read, the
+ * notifications-api call, the Stripe read again after it (F1), the Stripe
+ * write), so a full run is about 6,000.
  *
  * Never throws: it runs inside `waitUntil` from `scheduled()`. The record, not
  * the log, is the source of truth; alerts carry ids only.
@@ -208,8 +209,9 @@ type RowResult =
       mover: boolean;
       noticeSent: boolean;
     }
-  | { kind: 'unchanged' }
-  | { kind: 'skipped'; reason: PriceMoveSkipReason }
+  /** `told`: emailed this try, before the move was decided again (F1). */
+  | { kind: 'unchanged'; told?: Told | null }
+  | { kind: 'skipped'; reason: PriceMoveSkipReason; told?: Told | null }
   | {
       kind: 'failed';
       heldReason: PriceMoveHeldReason;
@@ -766,6 +768,8 @@ async function workRow(
     notice?: PriceChangeNotice;
     failure?: NoticeFailure;
     accepted?: boolean;
+    /** notifications-api accepted this run's email. */
+    sentNow?: boolean;
   } = {};
   let noticeSent = false;
   let noticeAt = new Date(run.clock());
@@ -810,9 +814,16 @@ async function workRow(
           return false;
         }
         seen.accepted = true;
+        seen.sentNow = true;
         return true;
       }
     );
+    // Emailed now, then found changed and decided again as unchanged or
+    // skipped (F1): the row still records that they were told.
+    const toldNow: Told | null =
+      seen.sentNow && seen.notice
+        ? { noticeAt, effectiveAt: seen.notice.effectiveAt }
+        : null;
 
     switch (outcome.kind) {
       case 'applied':
@@ -832,9 +843,9 @@ async function workRow(
         };
       }
       case 'unchanged':
-        return { kind: 'unchanged' };
+        return { kind: 'unchanged', told: toldNow };
       case 'skipped':
-        return { kind: 'skipped', reason: outcome.reason };
+        return { kind: 'skipped', reason: outcome.reason, told: toldNow };
       case 'unnotified': {
         const failure = seen.failure ?? { reason: 'unknown' as const };
         const notice = seen.notice ?? fallbackNotice(row, noticeAt);
@@ -891,15 +902,20 @@ function eligibility(
 }
 
 /**
- * Part A rule 1 at Stripe: a move can start after our row was read, so a
- * live `codex_move_tier_id` naming another tier means they are leaving.
+ * Part A rule 1 at Stripe: a change of plan can land after our row was read
+ * (or during the notice, F1). A live `codex_move_tier_id` naming another tier
+ * means they are leaving; with no move waiting, a `codex_tier_id` naming
+ * another tier means they have left (an upgrade, or Keep from a move onto
+ * this tier).
  */
 function movingAwayAtStripe(
   row: MoveRow
 ): (live: Stripe.Subscription) => PriceMoveSkipReason | null {
   return (live) => {
-    const target = live.metadata?.[MOVE_TIER_ID_KEY];
-    return target && target !== row.tierId ? 'moving_away' : null;
+    const movingTo = live.metadata?.[MOVE_TIER_ID_KEY];
+    if (movingTo) return movingTo === row.tierId ? null : 'moving_away';
+    const on = live.metadata?.codex_tier_id;
+    return on && on !== row.tierId ? 'moving_away' : null;
   };
 }
 
@@ -1094,6 +1110,11 @@ async function record(
   const retriedOk = sql`"resolution" = CASE WHEN "retry_requested_at" IS NOT NULL AND "resolution" IS NULL THEN 'retried_ok' ELSE "resolution" END,
            "resolved_at" = CASE WHEN "retry_requested_at" IS NOT NULL AND "resolution" IS NULL THEN ${run.now}::timestamptz ELSE "resolved_at" END`;
   const now = sql`${run.now}::timestamptz`;
+  // Told this try, then decided again as unchanged or skipped (F1).
+  const toldThisTry =
+    (result.kind === 'unchanged' || result.kind === 'skipped') && result.told
+      ? sql`"notice_at" = ${result.told.noticeAt}::timestamptz, "effective_at" = ${result.told.effectiveAt}::timestamptz,`
+      : sql``;
 
   let written: { rows: unknown[] };
   switch (result.kind) {
@@ -1120,8 +1141,8 @@ async function record(
     case 'unchanged':
       written = await db.execute(sql`
         UPDATE ${subscriptionPriceMoves}
-           SET "state" = 'unchanged', "next_attempt_at" = NULL, ${retriedOk},
-               "updated_at" = ${now}
+           SET "state" = 'unchanged', ${toldThisTry} "next_attempt_at" = NULL,
+               ${retriedOk}, "updated_at" = ${now}
          WHERE ${mine}
         RETURNING "id"
       `);
@@ -1131,7 +1152,8 @@ async function record(
       written = await db.execute(sql`
         UPDATE ${subscriptionPriceMoves}
            SET "state" = 'skipped', "skip_reason" = ${result.reason},
-               "next_attempt_at" = NULL, ${retriedOk}, "updated_at" = ${now}
+               ${toldThisTry} "next_attempt_at" = NULL, ${retriedOk},
+               "updated_at" = ${now}
          WHERE ${mine}
         RETURNING "id"
       `);

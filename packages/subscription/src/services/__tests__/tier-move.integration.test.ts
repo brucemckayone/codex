@@ -1316,4 +1316,71 @@ describe('waiting tier moves (Codex-2hxff.16)', () => {
       .where(eq(subscriptionTiers.id, basic.id));
     expect(still?.deletedAt).toBeNull();
   });
+
+  // Review C1, F1's backstop: every Price a tier bills is on its own Stripe
+  // Product, so the sync alerts on an item Price from any other Product.
+  describe("an item billing another tier's Product", () => {
+    function errorsSpy() {
+      const obs = (
+        service as unknown as {
+          obs: { error: (m: string, d?: unknown) => void };
+        }
+      ).obs;
+      return vi.spyOn(obs, 'error');
+    }
+    /** The live subscription as its webhook carries it, item Price on `product`. */
+    function payload(stripeSubscriptionId: string, product: string | null) {
+      const sub = structuredClone(liveOf(stripeSubscriptionId));
+      const [item] = sub.items.data;
+      if (item && product) Object.assign(item.price, { product });
+      return sub as unknown as Stripe.Subscription;
+    }
+    const offTier = (calls: unknown[][]) =>
+      calls.filter(([message]) =>
+        String(message).includes("a Price from another tier's Product")
+      );
+
+    it('alerts, ids only, and the sync still mirrors what Stripe holds', async () => {
+      const { org, pro, premium } = await hollowOak('off-tier-alert');
+      const { row } = await member(org.id, pro);
+      const errors = errorsSpy();
+
+      await service.handleSubscriptionUpdated(
+        payload(row.stripeSubscriptionId, premium.stripeProductId)
+      );
+
+      const [alert] = offTier(errors.mock.calls);
+      expect(alert?.[1]).toMatchObject({
+        errorId: expect.any(String),
+        subscriptionId: row.id,
+        stripeSubscriptionId: row.stripeSubscriptionId,
+        tierId: pro.id,
+        waitingTierId: null,
+        stripeProductId: premium.stripeProductId,
+      });
+      expect(JSON.stringify(alert)).not.toContain('@');
+      expect((await rowOf(row.id)).tierId).toBe(pro.id);
+    });
+
+    it("is quiet on the member's own tier, on a waiting move's tier, and with no Product in the payload", async () => {
+      const { org, basic, pro } = await hollowOak('off-tier-quiet');
+      const { userId, row } = await member(org.id, pro);
+      const errors = errorsSpy();
+
+      await service.handleSubscriptionUpdated(
+        payload(row.stripeSubscriptionId, pro.stripeProductId)
+      );
+      // Waiting to move to Basic: the item carries Basic's Price (T1).
+      await service.changeTier(userId, org.id, basic.id, 'month');
+      await service.handleSubscriptionUpdated(
+        payload(row.stripeSubscriptionId, basic.stripeProductId)
+      );
+      await service.handleSubscriptionUpdated(
+        payload(row.stripeSubscriptionId, null)
+      );
+
+      expect(offTier(errors.mock.calls)).toEqual([]);
+      expect((await rowOf(row.id)).pendingTierId).toBe(basic.id);
+    });
+  });
 });

@@ -561,6 +561,91 @@ describe('the hourly price-moves step (Codex-2hxff.86)', () => {
     expect(send).toHaveBeenCalledTimes(1);
   });
 
+  // Review C1, F1: a change of plan that lands while their email is being
+  // sent is never written over. Stripe is read again after the notice.
+  it('a change of plan made during their email: decided again on what Stripe holds now, never written over, and recorded as told', async () => {
+    const { org: o, basic, pro } = await org('pm-during');
+    const fake = fakeStripe();
+    const downgrades = await subscriber(o.id, pro);
+    const upgrades = await subscriber(o.id, pro);
+    const fallsBehind = await subscriber(o.id, pro);
+    for (const sub of [downgrades, upgrades, fallsBehind]) {
+      onStripe(fake, sub, 40, { metadata: { codex_tier_id: pro.id } });
+    }
+    const changeId = await reprice(o.id, pro);
+    const renewal = String(Math.floor(NOW / 1000) + 40 * DAY_S);
+    const during = new Map([
+      [
+        await emailOf(downgrades),
+        () => {
+          const live = fake.live.get(downgrades.stripeSubscriptionId);
+          if (!live) return;
+          live.priceId = 'price_pm_basic';
+          live.amount = 500;
+          Object.assign(live.metadata, {
+            codex_move_tier_id: basic.id,
+            codex_move_at: renewal,
+            codex_hold_price_id: PRICE_OLD,
+            codex_hold_amount: '1200',
+          });
+        },
+      ],
+      [
+        await emailOf(upgrades),
+        () => {
+          const live = fake.live.get(upgrades.stripeSubscriptionId);
+          if (!live) return;
+          live.priceId = 'price_pm_top';
+          live.amount = 2000;
+          live.metadata.codex_tier_id = crypto.randomUUID();
+        },
+      ],
+      [
+        await emailOf(fallsBehind),
+        () => {
+          const live = fake.live.get(fallsBehind.stripeSubscriptionId);
+          if (live) live.status = 'past_due';
+        },
+      ],
+    ]);
+    const send = vi.fn<PriceChangeNoticeMailer>(async (params) => {
+      during.get(params.to)?.();
+      return { accepted: true };
+    });
+
+    const result = await run([changeId], { fake, send });
+
+    expect(result).toMatchObject({ claimed: 3, skipped: 2, scheduled: 1 });
+    expect(send).toHaveBeenCalledTimes(3);
+    const sentAt = new Date(NOW + SENT_AFTER_MS);
+    for (const [sub, priceId] of [
+      [downgrades, 'price_pm_basic'],
+      [upgrades, 'price_pm_top'],
+    ] as const) {
+      expect(await moveOf(changeId, sub)).toMatchObject({
+        state: 'skipped',
+        skipReason: 'moving_away',
+        noticeAt: sentAt,
+        effectiveAt: new Date(NOW + 40 * DAY_MS),
+      });
+      expect(fake.live.get(sub.stripeSubscriptionId)?.priceId).toBe(priceId);
+      expect(
+        fake.live.get(sub.stripeSubscriptionId)?.metadata
+      ).not.toHaveProperty('codex_pending_price_id');
+    }
+    // Still on Pro, but past due by the time they were told: the marker, not
+    // a swap.
+    expect(await moveOf(changeId, fallsBehind)).toMatchObject({
+      state: 'scheduled',
+      scheduledKind: 'pending',
+      noticeAt: sentAt,
+    });
+    expect(fake.live.get(fallsBehind.stripeSubscriptionId)).toMatchObject({
+      priceId: PRICE_OLD,
+      metadata: { codex_pending_price_id: PRICE_NEW },
+    });
+  });
+
   it('a notice refused for one person is tried each hour, then held for support with its own alert line', async () => {
     const { org: o, pro } = await org('pm-retry');
     const fake = fakeStripe();
