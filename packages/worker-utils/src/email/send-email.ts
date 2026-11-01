@@ -88,9 +88,9 @@ export type EmailSendResult =
   | { accepted: false; error: string };
 
 /**
- * The default wait. The price fan-out passes its own,
- * `PRICE_NOTICE_TIMEOUT_MS` from `@codex/subscription`, whose budget
- * arithmetic (`PRICE_FAN_OUT_BUDGET_MS`) counts on it.
+ * The default wait. The hourly price-moves step passes its own,
+ * `PRICE_NOTICE_TIMEOUT_MS` from `@codex/subscription`, so one slow send
+ * can't eat a batch inside the step's 8-minute budget (Codex-2hxff.86).
  *
  * notifications-api's worst case is longer (three provider attempts with 1 s
  * and 2 s backoff), so a send still running then is not accepted: the caller

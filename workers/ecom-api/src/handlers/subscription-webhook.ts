@@ -294,9 +294,9 @@ export async function handleSubscriptionWebhook(
     // TierService serves `product.updated` / `price.created` from the
     // Dashboard. Studio is the only place a price is set, so a Price created
     // in the Dashboard is logged as drift and never moves a subscriber
-    // (Codex-2hxff.3). The registry's TierService carries a propagator, but
-    // only `updateTier` (Studio) fires it; the two methods this webhook calls,
-    // `applyStripeProductUpdate` and `recordStripePriceDrift`, never do.
+    // (Codex-2hxff.3). Only `updateTier` (Studio) records a price change for
+    // the hourly step to work (Codex-2hxff.86); the two methods this webhook
+    // calls, `applyStripeProductUpdate` and `recordStripePriceDrift`, never do.
     const tierService = services.tier;
 
     // Codex-2pryk WP-6: course-specific subscriptions flow through this SAME
