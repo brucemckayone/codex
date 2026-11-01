@@ -188,6 +188,25 @@ export type SupportResolveCreditInput = z.infer<
   typeof supportResolveCreditSchema
 >;
 
+/**
+ * A note support must write: free text, so a NUL is dropped, then it is
+ * trimmed, and an empty one is refused with `emptyMessage`.
+ */
+function requiredSupportNoteSchema(emptyMessage: string) {
+  return z
+    .string()
+    .transform(stripNul)
+    .pipe(
+      z
+        .string()
+        .trim()
+        .min(1, { message: emptyMessage })
+        .max(SUPPORT_NOTE_MAX_LENGTH, {
+          message: `Must be ${SUPPORT_NOTE_MAX_LENGTH} characters or less`,
+        })
+    );
+}
+
 // ─── Fee notices (Codex-2hxff.33; batch C1 Part B data design §1.6) ─────────
 
 /** `:noticeId` on the told-another-way route: a `fee_change_notices` row. */
@@ -198,26 +217,39 @@ export const supportFeeNoticeIdParamsSchema = z.object({
 /**
  * POST /api/admin/support/fee-notices/:noticeId/told-another-way. The note
  * is required: it is the only record of how the person was told, and the
- * payout terms promise notice. A NUL is dropped (free text), then it is
- * trimmed; nothing else is accepted.
+ * payout terms promise notice. Nothing else is accepted.
  */
 export const supportToldAnotherWaySchema = z
-  .object({
-    note: z
-      .string()
-      .transform(stripNul)
-      .pipe(
-        z
-          .string()
-          .trim()
-          .min(1, { message: 'Say how you told them' })
-          .max(SUPPORT_NOTE_MAX_LENGTH, {
-            message: `Must be ${SUPPORT_NOTE_MAX_LENGTH} characters or less`,
-          })
-      ),
-  })
+  .object({ note: requiredSupportNoteSchema('Say how you told them') })
   .strict();
 
 export type SupportToldAnotherWayInput = z.infer<
   typeof supportToldAnotherWaySchema
+>;
+
+// ─── Price moves (Codex-2hxff.85, .86; batch C1 Part B data design §2.5) ────
+
+/** `:moveId` on Retry and Close: a `subscription_price_moves` row. */
+export const supportPriceMoveIdParamsSchema = z.object({ moveId: uuidSchema });
+
+/** `:changeId` on Restart: a `price_changes` row. */
+export const supportPriceChangeIdParamsSchema = z.object({
+  changeId: uuidSchema,
+});
+
+/**
+ * POST /api/admin/support/price-moves/:moveId/close. Closing moves nobody:
+ * `moved_by_hand` (told, then changed in Stripe) or `not_needed` (cancelled,
+ * refunded or replaced). The note is required, as on every Queue resolve: it
+ * is the only record of what support did. Nothing else is accepted.
+ */
+export const supportClosePriceMoveSchema = z
+  .object({
+    resolution: z.enum(['moved_by_hand', 'not_needed']),
+    note: requiredSupportNoteSchema('Say what you did'),
+  })
+  .strict();
+
+export type SupportClosePriceMoveInput = z.infer<
+  typeof supportClosePriceMoveSchema
 >;

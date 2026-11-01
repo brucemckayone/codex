@@ -51,6 +51,7 @@ import {
   STRIPE_ENV_METADATA_KEY,
   STRIPE_REQUESTED_BY_METADATA_KEY,
   STRIPE_SUPPORT_KEY_METADATA_KEY,
+  SUBSCRIPTION_STATUS,
 } from '@codex/constants';
 import { type DatabaseClient, toIso, withPagination } from '@codex/database';
 import {
@@ -58,6 +59,7 @@ import {
   type ConnectBalance,
   connectBalances,
   content,
+  courseSubscriptionPlans,
   courseSubscriptions,
   courses,
   creatorOrganizationAgreements,
@@ -69,13 +71,17 @@ import {
   organizations,
   type Payout,
   type PayoutReversal,
+  type PriceChange,
   payeeCredits,
   payoutReversals,
   payouts,
+  priceChanges,
   purchases,
   refundReviews,
   refunds,
+  type SubscriptionPriceMove,
   stripeConnectAccounts,
+  subscriptionPriceMoves,
   subscriptions,
   subscriptionTiers,
   users,
@@ -90,6 +96,7 @@ import {
   failedRefundRepayBlock,
   feeRiseStartAfter,
   type GbpBalance,
+  isBankPayoutRun,
   issueRefund as issueStripeRefund,
   type LevelFees,
   layerLevelFees,
@@ -130,6 +137,7 @@ import type { PaginatedListResponse } from '@codex/shared-types';
 import { isCurrentPeriodPayment } from '@codex/subscription';
 import {
   type SupportChargeSearchQuery,
+  type SupportClosePriceMoveInput,
   type SupportIssueRefundInput,
   type SupportQueueQuery,
   type SupportResolveCreatorDebtInput,
@@ -180,8 +188,14 @@ import type {
   FeeChangeLine,
   FeeNoticeItem,
   FeeToldAnotherWay,
+  HeldPriceMove,
   OwedToCreatorItem,
   PayeeRole,
+  PriceChangeRestarted,
+  PriceMoveHeldReason,
+  PriceMoveNotHeldReason,
+  PriceMovePlan,
+  PriceMoveRetried,
   QueueCause,
   RefundPreview,
   RefundRequester,
@@ -190,6 +204,7 @@ import type {
   ResolvedFailedRefund,
   ResolvedOwedToCreator,
   Slice,
+  StoppedPriceChange,
   StripeHeldTakeBack,
   SupportBuyer,
   SupportChargeKind,
@@ -1386,7 +1401,9 @@ export class SupportService extends BaseService {
    * platform, awaiting the P6 invoice (AMENDMENT 2). Each person once. A
    * balance Stripe is recovering by itself is listed on the tab, not counted.
    * Fee notices counts people not yet told about a fee rise that hasn't
-   * started, joiners included (Codex-2hxff.33, Q4).
+   * started, joiners included (Codex-2hxff.33, Q4). Price moves counts held
+   * moves not closed (`idx_price_moves_held_open`) plus stopped changes
+   * nobody has pressed Restart on (Codex-2hxff.85, .86).
    */
   async getQueueCounts(): Promise<SupportQueueCounts> {
     try {
@@ -1417,27 +1434,44 @@ export class SupportService extends BaseService {
             .where(isNotNull(connectBalances.collectedOwedCents))
         )
         .as('needing');
-      const [[failed], [debts], [owed], [fees]] = await Promise.all([
-        this.db
-          .select({ total: count() })
-          .from(refunds)
-          .where(and(eq(refunds.status, 'failed'), isNull(refunds.resolvedAt))),
-        this.db.select({ total: count() }).from(needing),
-        this.db
-          .select({ total: count() })
-          .from(payeeCredits)
-          .where(isNull(payeeCredits.resolvedAt)),
-        this.db
-          .select({ total: count() })
-          .from(feeChangeNotices)
-          .innerJoin(feeChanges, eq(feeChanges.id, feeChangeNotices.changeId))
-          .where(notToldYet(new Date())),
-      ]);
+      const [[failed], [debts], [owed], [fees], [held], [stopped]] =
+        await Promise.all([
+          this.db
+            .select({ total: count() })
+            .from(refunds)
+            .where(
+              and(eq(refunds.status, 'failed'), isNull(refunds.resolvedAt))
+            ),
+          this.db.select({ total: count() }).from(needing),
+          this.db
+            .select({ total: count() })
+            .from(payeeCredits)
+            .where(isNull(payeeCredits.resolvedAt)),
+          this.db
+            .select({ total: count() })
+            .from(feeChangeNotices)
+            .innerJoin(feeChanges, eq(feeChanges.id, feeChangeNotices.changeId))
+            .where(notToldYet(new Date())),
+          this.db
+            .select({ total: count() })
+            .from(subscriptionPriceMoves)
+            .where(
+              and(
+                eq(subscriptionPriceMoves.state, 'held'),
+                isNull(subscriptionPriceMoves.resolvedAt)
+              )
+            ),
+          this.db
+            .select({ total: count() })
+            .from(priceChanges)
+            .where(stoppedAwaitingRestart()),
+        ]);
       return {
         failedRefunds: failed?.total ?? 0,
         creatorDebts: debts?.total ?? 0,
         owedToCreators: owed?.total ?? 0,
         feeNotices: fees?.total ?? 0,
+        priceMoves: (held?.total ?? 0) + (stopped?.total ?? 0),
       };
     } catch (error) {
       this.handleError(error, 'getQueueCounts');
@@ -3283,6 +3317,492 @@ export class SupportService extends BaseService {
   }
 
   // ==========================================================================
+  // Price moves (Codex-2hxff.85, .86; batch C1 Part B data design §2.5)
+  //
+  // Every action is a database flip the next hourly run acts on: admin-api has
+  // no worker secret to send an email, and only a refund-restricted Stripe key.
+  // ==========================================================================
+
+  /**
+   * Queue › Price moves: held moves not closed, and moves support queued
+   * again that the run hasn't finished with, oldest first. A queued row is
+   * off the badge but stays here ("Queued for 11:00") until the run moves it
+   * or holds it again. The plan and amounts come from the record, not the log.
+   */
+  async listHeldPriceMoves(
+    query: SupportQueueQuery,
+    now: Date = new Date()
+  ): Promise<PaginatedListResponse<HeldPriceMove>> {
+    try {
+      const { page, limit } = query;
+      const { offset } = withPagination({ page, limit });
+      const where = onPriceMovesQueue();
+      const [rows, [totals]] = await Promise.all([
+        this.priceMoveRows(where, { limit, offset }),
+        this.db
+          .select({ total: count() })
+          .from(subscriptionPriceMoves)
+          .where(where),
+      ]);
+      const items = await this.priceMoveViews(rows, now);
+      return pageOf(items, totals?.total ?? 0, page, limit);
+    } catch (error) {
+      this.handleError(error, 'listHeldPriceMoves');
+    }
+  }
+
+  /**
+   * Price changes the run stopped, oldest stop first: one card per change,
+   * since nobody on it was tried after the first batch. A card asked to
+   * restart stays, off the badge, until the run restarts it.
+   */
+  async listStoppedPriceChanges(
+    query: SupportQueueQuery,
+    now: Date = new Date()
+  ): Promise<PaginatedListResponse<StoppedPriceChange>> {
+    try {
+      const { page, limit } = query;
+      const { offset } = withPagination({ page, limit });
+      const stopped = eq(priceChanges.state, 'stopped');
+      const [rows, [totals]] = await Promise.all([
+        this.stoppedChangeRows(stopped, { limit, offset }),
+        this.db.select({ total: count() }).from(priceChanges).where(stopped),
+      ]);
+      const items = await this.stoppedChangeViews(rows, now);
+      return pageOf(items, totals?.total ?? 0, page, limit);
+    } catch (error) {
+      this.handleError(error, 'listStoppedPriceChanges');
+    }
+  }
+
+  /**
+   * Retry a held move. With no accepted email, it goes back to `due`: the run
+   * emails them again, and their 30 days count from the new email. With one,
+   * it goes to `notified`: the run asks Stripe again for the date they were
+   * told, or the next renewal if that has passed, and sends no second email
+   * (Q5). Either way it gets three fresh tries and keeps its `held_reason`.
+   *
+   * One transaction: the change locked, then the move (the order a newer save
+   * supersedes them in). A finished change goes back to `running`, since the
+   * run claims only a running change's rows. Refused with 409
+   * PRICE_MOVE_NOT_HELD when the row isn't held, the subscription has ended,
+   * or a newer price for the plan replaced this one: Retry would then tell
+   * them about the older price.
+   */
+  async retryPriceMove(
+    moveId: string,
+    requestedByUserId: string,
+    now: Date = new Date()
+  ): Promise<PriceMoveRetried> {
+    try {
+      const read = await this.priceMoveRead(moveId);
+      await this.db.transaction(async (tx) => {
+        const { change, move } = await this.lockPriceMove(tx, read, moveId);
+        const newer = await this.newerPriceChange(tx, change);
+        const refused = refusedPriceMove(move, {
+          action: 'retry',
+          newer,
+          ended: !isLivePriceMoveStatus(read.subscriptionStatus),
+        });
+        if (refused) {
+          throw priceMoveNotHeld(refused, 'retry', move, read, newer);
+        }
+
+        const told = move.noticeAt !== null;
+        await tx
+          .update(subscriptionPriceMoves)
+          .set({
+            state: told ? 'notified' : 'due',
+            attempts: 0,
+            nextAttemptAt: null,
+            retryRequestedAt: now,
+            retryRequestedByUserId: requestedByUserId,
+            updatedAt: now,
+          })
+          .where(eq(subscriptionPriceMoves.id, moveId));
+        const reopened = change.state === 'done';
+        if (reopened) {
+          await tx
+            .update(priceChanges)
+            .set({ state: 'running', doneAt: null })
+            .where(eq(priceChanges.id, change.id));
+        }
+        this.obs.info('Support queued a held price move again', {
+          moveId,
+          priceChangeId: change.id,
+          requestedByUserId,
+          to: told ? 'notified' : 'due',
+          reopened,
+        });
+      });
+      const move = await this.priceMoveView(moveId, now);
+      return { move, nextRunAt: nextPriceMovesRunAfter(now).toISOString() };
+    } catch (error) {
+      this.handleError(error, 'retryPriceMove');
+    }
+  }
+
+  /**
+   * Close a held move without a retry: `moved_by_hand` or `not_needed`, with
+   * support's note. It moves nobody; the row stays `held` (which the run never
+   * claims) and leaves the Queue. Refused with 409 PRICE_MOVE_NOT_HELD when it
+   * isn't held or is closed already. A held row a newer price overtook can be
+   * closed: closing tells nobody anything.
+   */
+  async closePriceMove(
+    moveId: string,
+    input: SupportClosePriceMoveInput,
+    resolvedByUserId: string,
+    now: Date = new Date()
+  ): Promise<HeldPriceMove> {
+    try {
+      const read = await this.priceMoveRead(moveId);
+      await this.db.transaction(async (tx) => {
+        const { change, move } = await this.lockPriceMove(tx, read, moveId);
+        const refused = refusedPriceMove(move, { action: 'close' });
+        if (refused) {
+          const newer =
+            refused === 'superseded'
+              ? await this.newerPriceChange(tx, change)
+              : undefined;
+          throw priceMoveNotHeld(refused, 'close', move, read, newer);
+        }
+
+        await tx
+          .update(subscriptionPriceMoves)
+          .set({
+            resolution: input.resolution,
+            resolvedAt: now,
+            resolvedByUserId,
+            resolutionNote: input.note,
+            updatedAt: now,
+          })
+          .where(eq(subscriptionPriceMoves.id, moveId));
+        this.obs.info('Support closed a held price move', {
+          moveId,
+          priceChangeId: change.id,
+          resolution: input.resolution,
+          resolvedByUserId,
+        });
+      });
+      return await this.priceMoveView(moveId, now);
+    } catch (error) {
+      this.handleError(error, 'closePriceMove');
+    }
+  }
+
+  /**
+   * Restart a stopped change once its cause is fixed (Q6): the next run sets
+   * it running again and carries on where it stopped. A repeat before that
+   * run returns the change as it stands. Refused with 409
+   * PRICE_CHANGE_NOT_STOPPED when it isn't stopped.
+   */
+  async restartPriceChange(
+    changeId: string,
+    requestedByUserId: string,
+    now: Date = new Date()
+  ): Promise<PriceChangeRestarted> {
+    try {
+      await this.db.transaction(async (tx) => {
+        const [change] = await tx
+          .select()
+          .from(priceChanges)
+          .where(eq(priceChanges.id, changeId))
+          .for('update');
+        if (!change) {
+          throw new NotFoundError('No price change with this id', {
+            changeId,
+          });
+        }
+        if (change.state !== 'stopped') {
+          throw new ConflictError(notStoppedMessage(change.state), {
+            code: 'PRICE_CHANGE_NOT_STOPPED',
+            changeId,
+            state: change.state,
+            doneAt: toIso(change.doneAt),
+            supersededAt: toIso(change.supersededAt),
+            supersededById: change.supersededById,
+          });
+        }
+        if (restartPending(change)) return;
+        await tx
+          .update(priceChanges)
+          .set({
+            restartRequestedAt: now,
+            restartRequestedByUserId: requestedByUserId,
+          })
+          .where(eq(priceChanges.id, changeId));
+        this.obs.info('Support restarted a stopped price change', {
+          changeId,
+          requestedByUserId,
+          stoppedErrorId: change.stoppedErrorId,
+        });
+      });
+      const [row] = await this.stoppedChangeRows(eq(priceChanges.id, changeId));
+      const [change] = await this.stoppedChangeViews(row ? [row] : [], now);
+      if (!change) {
+        throw new InternalServiceError('A restarted price change did not read');
+      }
+      return { change, nextRunAt: nextPriceMovesRunAfter(now).toISOString() };
+    } catch (error) {
+      this.handleError(error, 'restartPriceChange');
+    }
+  }
+
+  /** One move's queue read; a 404 when there is none. */
+  private async priceMoveRead(moveId: string): Promise<PriceMoveRead> {
+    const [read] = await this.priceMoveRows(
+      eq(subscriptionPriceMoves.id, moveId)
+    );
+    if (!read) {
+      throw new NotFoundError('No price move with this id', { moveId });
+    }
+    return read;
+  }
+
+  /** The change, then the move, locked for the action's transaction. */
+  private async lockPriceMove(
+    tx: Tx,
+    read: PriceMoveRead,
+    moveId: string
+  ): Promise<{ change: PriceChange; move: SubscriptionPriceMove }> {
+    const [change] = await tx
+      .select()
+      .from(priceChanges)
+      .where(eq(priceChanges.id, read.move.priceChangeId))
+      .for('update');
+    const [move] = await tx
+      .select()
+      .from(subscriptionPriceMoves)
+      .where(eq(subscriptionPriceMoves.id, moveId))
+      .for('update');
+    if (!change || !move) {
+      throw new NotFoundError('No price move with this id', { moveId });
+    }
+    return { change, move };
+  }
+
+  /**
+   * The latest change saved after this one for the same tier or plan and
+   * interval: latest wins, so its own rows tell these subscribers instead.
+   */
+  private async newerPriceChange(
+    tx: Tx,
+    change: PriceChange
+  ): Promise<NewerPriceChange | undefined> {
+    const c = priceChanges;
+    const samePlan = change.tierId
+      ? eq(c.tierId, change.tierId)
+      : change.courseSubscriptionPlanId
+        ? eq(c.courseSubscriptionPlanId, change.courseSubscriptionPlanId)
+        : undefined;
+    if (!samePlan) {
+      throw new InternalServiceError('A price change names no tier or plan', {
+        changeId: change.id,
+      });
+    }
+    const [newer] = await tx
+      .select({
+        id: c.id,
+        createdAt: c.createdAt,
+        newAmountCents: c.newAmountCents,
+      })
+      .from(c)
+      .where(
+        and(
+          samePlan,
+          eq(c.interval, change.interval),
+          gt(c.createdAt, change.createdAt)
+        )
+      )
+      .orderBy(desc(c.createdAt), desc(c.id))
+      .limit(1);
+    return newer;
+  }
+
+  /**
+   * Queue reads for the moves `where` names, oldest first: the move, its
+   * change's plan and amounts, who and which organisation, and the
+   * subscription's status now.
+   */
+  private async priceMoveRows(
+    where: SQL,
+    pageAt?: { limit: number; offset: number }
+  ): Promise<PriceMoveRead[]> {
+    const m = subscriptionPriceMoves;
+    const c = priceChanges;
+    const query = this.db
+      .select({
+        move: m,
+        change: {
+          kind: c.kind,
+          tierId: c.tierId,
+          courseSubscriptionPlanId: c.courseSubscriptionPlanId,
+          interval: c.interval,
+          fromAmountCents: c.fromAmountCents,
+          newAmountCents: c.newAmountCents,
+        },
+        subscriber: {
+          name: users.name,
+          email: users.email,
+          deletedAt: users.deletedAt,
+        },
+        organization: {
+          name: organizations.name,
+          deletedAt: organizations.deletedAt,
+        },
+        planName: sql<
+          string | null
+        >`COALESCE(${subscriptionTiers.name}, ${courses.title})`,
+        subscriptionStatus: sql<
+          string | null
+        >`COALESCE(${subscriptions.status}, ${courseSubscriptions.status})`,
+      })
+      .from(m)
+      .innerJoin(c, eq(c.id, m.priceChangeId))
+      .innerJoin(users, eq(users.id, m.userId))
+      .innerJoin(organizations, eq(organizations.id, m.organizationId))
+      .leftJoin(subscriptionTiers, eq(subscriptionTiers.id, c.tierId))
+      .leftJoin(
+        courseSubscriptionPlans,
+        eq(courseSubscriptionPlans.id, c.courseSubscriptionPlanId)
+      )
+      .leftJoin(courses, eq(courses.id, courseSubscriptionPlans.courseId))
+      .leftJoin(subscriptions, eq(subscriptions.id, m.subscriptionId))
+      .leftJoin(
+        courseSubscriptions,
+        eq(courseSubscriptions.id, m.courseSubscriptionId)
+      )
+      .where(where)
+      .orderBy(asc(m.createdAt), asc(m.id));
+    return pageAt
+      ? await query.limit(pageAt.limit).offset(pageAt.offset)
+      : await query;
+  }
+
+  private async priceMoveViews(
+    rows: PriceMoveRead[],
+    now: Date
+  ): Promise<HeldPriceMove[]> {
+    const people = await this.peopleById(
+      rows.flatMap(({ move }) => [
+        move.retryRequestedByUserId,
+        move.resolvedByUserId,
+      ])
+    );
+    return rows.map((row) => heldPriceMoveOf(row, people, now));
+  }
+
+  /** One move as the Queue shows it, read after an action's write. */
+  private async priceMoveView(
+    moveId: string,
+    now: Date
+  ): Promise<HeldPriceMove> {
+    const [view] = await this.priceMoveViews(
+      [await this.priceMoveRead(moveId)],
+      now
+    );
+    if (!view) throw new InternalServiceError('A price move did not read');
+    return view;
+  }
+
+  /** Stopped-change reads for the changes `where` names, oldest stop first. */
+  private async stoppedChangeRows(
+    where: SQL,
+    pageAt?: { limit: number; offset: number }
+  ): Promise<StoppedChangeRead[]> {
+    const c = priceChanges;
+    const query = this.db
+      .select({
+        change: c,
+        organization: {
+          name: organizations.name,
+          deletedAt: organizations.deletedAt,
+        },
+        planName: sql<
+          string | null
+        >`COALESCE(${subscriptionTiers.name}, ${courses.title})`,
+      })
+      .from(c)
+      .innerJoin(organizations, eq(organizations.id, c.organizationId))
+      .leftJoin(subscriptionTiers, eq(subscriptionTiers.id, c.tierId))
+      .leftJoin(
+        courseSubscriptionPlans,
+        eq(courseSubscriptionPlans.id, c.courseSubscriptionPlanId)
+      )
+      .leftJoin(courses, eq(courses.id, courseSubscriptionPlans.courseId))
+      .where(where)
+      .orderBy(asc(c.stoppedAt), asc(c.id));
+    return pageAt
+      ? await query.limit(pageAt.limit).offset(pageAt.offset)
+      : await query;
+  }
+
+  /** The cards, with each change's waiting count in one grouped read. */
+  private async stoppedChangeViews(
+    rows: StoppedChangeRead[],
+    now: Date
+  ): Promise<StoppedPriceChange[]> {
+    if (rows.length === 0) return [];
+    const m = subscriptionPriceMoves;
+    const [waiting, people] = await Promise.all([
+      this.db
+        .select({
+          changeId: m.priceChangeId,
+          waiting: count(),
+        })
+        .from(m)
+        .where(
+          and(
+            inArray(
+              m.priceChangeId,
+              rows.map(({ change }) => change.id)
+            ),
+            inArray(m.state, ['due', 'notified'])
+          )
+        )
+        .groupBy(m.priceChangeId),
+      this.peopleById(
+        rows.flatMap(({ change }) => [
+          change.createdByUserId,
+          change.restartRequestedByUserId,
+        ])
+      ),
+    ]);
+    const waitingOf = new Map(
+      waiting.map((row) => [row.changeId, row.waiting])
+    );
+    const restartsAt = nextPriceMovesRunAfter(now).toISOString();
+    return rows.map(({ change, organization, planName }) => ({
+      changeId: change.id,
+      organization: {
+        id: change.organizationId,
+        name: organization.name,
+        deleted: organization.deletedAt !== null,
+      },
+      plan: priceMovePlanOf(change, planName),
+      fromAmountCents: change.fromAmountCents,
+      newAmountCents: change.newAmountCents,
+      savedAt: change.createdAt.toISOString(),
+      savedBy: personOf(people, change.createdByUserId),
+      // A stopped change has all three (check_price_changes_stopped_set).
+      stoppedAt: toIso(change.stoppedAt) ?? '',
+      stoppedReason: change.stoppedReason ?? '',
+      stoppedErrorId: change.stoppedErrorId ?? '',
+      waiting: waitingOf.get(change.id) ?? 0,
+      total: change.totalCount,
+      restart:
+        restartPending(change) && change.restartRequestedAt
+          ? {
+              requestedAt: change.restartRequestedAt.toISOString(),
+              by: personOf(people, change.restartRequestedByUserId),
+              at: restartsAt,
+            }
+          : null,
+    }));
+  }
+
+  // ==========================================================================
   // Shared reads
   // ==========================================================================
 
@@ -4039,4 +4559,339 @@ function feeLines(before: LevelFees, after: LevelFees): FeeChangeLine[] {
     }
   }
   return lines;
+}
+
+// ─── Price moves: helpers (Codex-2hxff.85, .86) ──────────────────────────────
+
+/** A move as the Queue reads it. */
+interface PriceMoveRead {
+  move: SubscriptionPriceMove;
+  change: Pick<
+    PriceChange,
+    | 'kind'
+    | 'tierId'
+    | 'courseSubscriptionPlanId'
+    | 'interval'
+    | 'fromAmountCents'
+    | 'newAmountCents'
+  >;
+  subscriber: { name: string; email: string; deletedAt: Date | null };
+  organization: { name: string; deletedAt: Date | null };
+  /** The tier's name, or the course's title. */
+  planName: string | null;
+  /** The subscription's status now, either kind. */
+  subscriptionStatus: string | null;
+}
+
+/** A stopped change as its card reads it. */
+interface StoppedChangeRead {
+  change: PriceChange;
+  organization: { name: string; deletedAt: Date | null };
+  planName: string | null;
+}
+
+/** A change saved after another for the same tier or plan and interval. */
+interface NewerPriceChange {
+  id: string;
+  createdAt: Date;
+  newAmountCents: number;
+}
+
+const HOUR_MS = 60 * 60 * 1000;
+
+/**
+ * The hourly run that next works price moves, strictly after `at`: the next
+ * top of the hour, or the one after it when that is the 08:00 London run,
+ * which belongs to the bank payout (§2.4, `isBankPayoutRun`). London is a
+ * whole number of hours from UTC, so its hours turn with UTC's on both sides
+ * of a clock change; only which UTC hour is 08:00 London moves.
+ */
+export function nextPriceMovesRunAfter(at: Date): Date {
+  const next = new Date((Math.floor(at.getTime() / HOUR_MS) + 1) * HOUR_MS);
+  return isBankPayoutRun(next) ? new Date(next.getTime() + HOUR_MS) : next;
+}
+
+/**
+ * The run a queued row waits for: the next one, or, when the run set the
+ * row's next try later, the first run at or after it (the claim takes a row
+ * whose next try has come).
+ */
+function queuedRunFor(now: Date, nextAttemptAt: Date | null): Date {
+  return nextAttemptAt && nextAttemptAt > now
+    ? nextPriceMovesRunAfter(new Date(nextAttemptAt.getTime() - 1))
+    : nextPriceMovesRunAfter(now);
+}
+
+/**
+ * On Queue › Price moves: not closed, and held, or queued again by Retry and
+ * still with the run (due, or told with the move still to write).
+ */
+function onPriceMovesQueue(): SQL {
+  const m = subscriptionPriceMoves;
+  return sql`${m.resolvedAt} IS NULL AND (${m.state} = 'held' OR (${m.state} IN ('due', 'notified') AND ${m.retryRequestedAt} IS NOT NULL))`;
+}
+
+/** A stopped change on the badge: nobody has pressed Restart since it stopped. */
+function stoppedAwaitingRestart(): SQL {
+  const c = priceChanges;
+  return sql`${c.state} = 'stopped' AND (${c.restartRequestedAt} IS NULL OR ${c.restartRequestedAt} <= ${c.stoppedAt})`;
+}
+
+/**
+ * Support pressed Restart after the latest stop. The run restarts a stopped
+ * change whose `restart_requested_at` is after its `stopped_at`; a press from
+ * before a later stop is history.
+ */
+function restartPending(
+  change: Pick<PriceChange, 'restartRequestedAt' | 'stoppedAt'>
+): boolean {
+  return (
+    change.restartRequestedAt !== null &&
+    change.stoppedAt !== null &&
+    change.restartRequestedAt > change.stoppedAt
+  );
+}
+
+/** The statuses a price change writes moves for (§2.3); any other has ended. */
+const PRICE_MOVE_LIVE_STATUSES: readonly string[] = [
+  SUBSCRIPTION_STATUS.ACTIVE,
+  SUBSCRIPTION_STATUS.CANCELLING,
+  SUBSCRIPTION_STATUS.PAST_DUE,
+  SUBSCRIPTION_STATUS.PAUSED,
+];
+
+function isLivePriceMoveStatus(status: string | null): boolean {
+  return status !== null && PRICE_MOVE_LIVE_STATUSES.includes(status);
+}
+
+/**
+ * Why Retry or Close can't act on a move now, or null when it can: it must
+ * be held and not closed. Retry also needs a live subscription and no newer
+ * price for the plan, or it would tell them about the older price; Close
+ * needs neither, since closing tells nobody anything.
+ */
+function refusedPriceMove(
+  move: SubscriptionPriceMove,
+  check:
+    | {
+        action: 'retry';
+        newer: NewerPriceChange | undefined;
+        ended: boolean;
+      }
+    | { action: 'close' }
+): PriceMoveNotHeldReason | null {
+  if (move.resolvedAt !== null) return 'resolved';
+  if (move.state === 'superseded') return 'superseded';
+  if (move.state === 'scheduled' || move.state === 'unchanged') return 'moved';
+  if (move.state === 'skipped') return 'skipped';
+  if (move.state !== 'held') {
+    return move.retryRequestedAt !== null ? 'queued' : 'in_progress';
+  }
+  if (check.action === 'close') return null;
+  if (check.newer) return 'superseded';
+  if (check.ended) return 'subscription_ended';
+  return null;
+}
+
+const SKIPPED_MESSAGES: Readonly<Record<string, string>> = {
+  moving_away:
+    'They are moving to another plan, so this price no longer applies to them.',
+  other_interval:
+    'They now pay on another billing interval, so this price no longer applies to them.',
+  no_items: 'The run found nothing on their subscription to move.',
+  ended:
+    'Their subscription ended before the run reached them, so there is nothing to move.',
+};
+
+const CLOSED_AS: Readonly<Record<string, string>> = {
+  moved_by_hand: 'moved by hand',
+  not_needed: 'no move needed',
+  retried_ok: 'moved after a retry',
+};
+
+/**
+ * The 409 for a move Retry or Close can't act on. Its message and details
+ * reach support's page (`mapErrorToResponse`), so they say why in plain
+ * words, with nothing internal.
+ */
+function priceMoveNotHeld(
+  reason: PriceMoveNotHeldReason,
+  action: 'retry' | 'close',
+  move: SubscriptionPriceMove,
+  read: PriceMoveRead,
+  newer: NewerPriceChange | undefined
+): ConflictError {
+  const plan = read.planName ?? 'this plan';
+  const messages: Record<PriceMoveNotHeldReason, string> = {
+    superseded: newer
+      ? `A newer price for ${plan} replaced this one ${londonWhen(newer.createdAt)}, so they are emailed about that instead.`
+      : `A newer price for ${plan} replaced this one, so they are emailed about that instead.`,
+    moved:
+      move.state === 'unchanged'
+        ? 'They are already on the new price.'
+        : 'Their move is already scheduled: the hourly run got there first.',
+    skipped:
+      SKIPPED_MESSAGES[move.skipReason ?? ''] ??
+      'The hourly run set this one aside, so there is nothing to move.',
+    subscription_ended:
+      'Their subscription has ended, so there is nothing to move. Close it as not needed.',
+    resolved: `This one is already closed: ${CLOSED_AS[move.resolution ?? ''] ?? 'closed by support'}.`,
+    queued:
+      action === 'retry'
+        ? 'This one is already queued for the next run.'
+        : 'This one is queued for the next run. If the run holds it again, close it then.',
+    in_progress: "The hourly run is still working on this one: it isn't held.",
+  };
+  return new ConflictError(messages[reason], {
+    code: 'PRICE_MOVE_NOT_HELD',
+    reason,
+    moveId: move.id,
+    state: move.state,
+    ...(reason === 'superseded' && newer
+      ? {
+          supersededById: newer.id,
+          supersededAt: newer.createdAt.toISOString(),
+          newAmountCents: newer.newAmountCents,
+        }
+      : {}),
+    ...(reason === 'skipped' ? { skipReason: move.skipReason } : {}),
+    ...(reason === 'resolved'
+      ? {
+          resolution: move.resolution,
+          resolvedAt: toIso(move.resolvedAt),
+          resolvedByUserId: move.resolvedByUserId,
+        }
+      : {}),
+    ...(reason === 'queued'
+      ? {
+          retryRequestedAt: toIso(move.retryRequestedAt),
+          retryRequestedByUserId: move.retryRequestedByUserId,
+        }
+      : {}),
+  });
+}
+
+function notStoppedMessage(state: string): string {
+  if (state === 'running') {
+    return 'This price change is running: the hourly run is already emailing its subscribers.';
+  }
+  if (state === 'done') {
+    return 'This price change has finished: there is nothing to restart.';
+  }
+  return 'A newer price replaced this one, so there is nothing to restart.';
+}
+
+// Built on first use, not at module scope: a module-scope call would keep
+// this file in every bundle that imports the barrel (bank-payouts.ts).
+let londonWhen_: Intl.DateTimeFormat | undefined;
+
+/** "at 10:30 on 4 Nov 2026", on the London clock. */
+function londonWhen(at: Date): string {
+  londonWhen_ ??= new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/London',
+    hourCycle: 'h23',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  const part: Record<string, string> = {};
+  for (const { type, value } of londonWhen_.formatToParts(at)) {
+    part[type] = value;
+  }
+  return `at ${part.hour}:${part.minute} on ${part.day} ${part.month} ${part.year}`;
+}
+
+function personOf(
+  people: Map<string, SupportPerson>,
+  userId: string | null
+): SupportPerson | null {
+  return userId ? (people.get(userId) ?? null) : null;
+}
+
+function priceMovePlanOf(
+  change: Pick<
+    PriceChange,
+    'kind' | 'tierId' | 'courseSubscriptionPlanId' | 'interval'
+  >,
+  name: string | null
+): PriceMovePlan {
+  // check_price_changes_kind and _interval guarantee these.
+  return {
+    kind: change.kind === 'course_plan' ? 'course_plan' : 'tier',
+    id: change.tierId ?? change.courseSubscriptionPlanId ?? '',
+    name: name ?? '',
+    interval: change.interval === 'year' ? 'year' : 'month',
+  };
+}
+
+function heldPriceMoveOf(
+  row: PriceMoveRead,
+  people: Map<string, SupportPerson>,
+  now: Date
+): HeldPriceMove {
+  const { move, change } = row;
+  const status: HeldPriceMove['status'] =
+    move.resolvedAt !== null
+      ? 'closed'
+      : move.state === 'held'
+        ? 'held'
+        : 'queued';
+  const ended = !isLivePriceMoveStatus(row.subscriptionStatus);
+  const closedBy = move.resolution;
+  return {
+    moveId: move.id,
+    priceChangeId: move.priceChangeId,
+    status,
+    action:
+      status === 'held' && !ended
+        ? move.noticeAt !== null
+          ? 'retry_move'
+          : 'retry'
+        : null,
+    subscriber: {
+      userId: move.userId,
+      name: row.subscriber.name,
+      email: row.subscriber.email,
+      deleted: row.subscriber.deletedAt !== null,
+    },
+    organization: {
+      id: move.organizationId,
+      name: row.organization.name,
+      deleted: row.organization.deletedAt !== null,
+    },
+    plan: priceMovePlanOf(change, row.planName),
+    fromAmountCents: change.fromAmountCents,
+    newAmountCents: change.newAmountCents,
+    heldReason: move.heldReason as PriceMoveHeldReason | null,
+    lastError: move.lastError,
+    alertErrorId: move.alertErrorId,
+    attempts: move.attempts,
+    lastTriedAt: toIso(move.attemptedAt),
+    noticeAt: toIso(move.noticeAt),
+    effectiveAt: toIso(move.effectiveAt),
+    subscriptionEnded: ended,
+    retry: move.retryRequestedAt
+      ? {
+          requestedAt: move.retryRequestedAt.toISOString(),
+          by: personOf(people, move.retryRequestedByUserId),
+        }
+      : null,
+    queuedFor:
+      status === 'queued'
+        ? queuedRunFor(now, move.nextAttemptAt).toISOString()
+        : null,
+    resolution:
+      move.resolvedAt &&
+      (closedBy === 'moved_by_hand' || closedBy === 'not_needed')
+        ? {
+            kind: closedBy,
+            note: move.resolutionNote ?? '',
+            resolvedAt: move.resolvedAt.toISOString(),
+            by: personOf(people, move.resolvedByUserId),
+          }
+        : null,
+    createdAt: move.createdAt.toISOString(),
+  };
 }
