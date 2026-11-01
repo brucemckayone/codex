@@ -155,6 +155,43 @@ describe('describeTile', () => {
         )
       ).toEqual({ kind: 'waiting', cause: 'config' });
     });
+
+    // Codex-t359w: RunPod accepted the job, and no worker has started it.
+    it('RunPod has the job queued: waiting for a transcoder', () => {
+      const view = describeTile(row(), live({ queued: 'waiting' }), NOW);
+      expect(view).toEqual({
+        kind: 'waiting',
+        cause: 'transcoder',
+        overdue: false,
+      });
+      expect(tilePill(view)).toBe('waiting');
+    });
+
+    it('still queued at the last ask: overdue', () => {
+      expect(describeTile(row(), live({ queued: 'overdue' }), NOW)).toEqual({
+        kind: 'waiting',
+        cause: 'transcoder',
+        overdue: true,
+      });
+    });
+
+    it('its first step outranks a queued flag', () => {
+      expect(
+        describeTile(
+          row(),
+          live({ queued: 'waiting', step: 'downloading', progress: 0 }),
+          NOW
+        )
+      ).toEqual({ kind: 'processing', step: 'downloading', pct: 0 });
+    });
+
+    // No flag at all (an object on an older build) is "claimed, before its
+    // first progress report" above.
+    it('a flag the asks cleared: starting', () => {
+      expect(describeTile(row(), live({ queued: null }), NOW)).toEqual({
+        kind: 'starting',
+      });
+    });
   });
 
   it('processing: the live step and %', () => {

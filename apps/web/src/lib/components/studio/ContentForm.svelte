@@ -438,6 +438,18 @@
   );
   const mediaThumbnailUrl = $derived(selectedMedia?.thumbnailUrl ?? null);
 
+  /**
+   * The saved media, when it was deleted from the library and is still the one
+   * picked (Codex-6sbn1). The draft keeps its link (a support restore heals
+   * it), so it reads as attached; it isn't, and publishing is refused by the
+   * worker too (`MEDIA_DELETED`).
+   */
+  const deletedMedia = $derived(
+    content?.mediaItem?.deletedAt && selectedMediaId === content.mediaItemId
+      ? { title: content.mediaItem.title, deletedAt: content.mediaItem.deletedAt }
+      : null
+  );
+
   // ── Readiness checks ─────────────────────────────────────────────────
   const readinessChecks = $derived.by(() => {
     const checks = [
@@ -445,7 +457,11 @@
       { label: 'Slug is valid', met: !!slugVal.trim() && /^[a-z0-9-]+$/.test(slugVal) },
     ];
     if (contentTypeVal === 'video' || contentTypeVal === 'audio') {
-      checks.push({ label: 'Media attached', met: !!mediaItemIdVal });
+      checks.push(
+        deletedMedia
+          ? { label: m.studio_content_form_ready_media_deleted(), met: false }
+          : { label: 'Media attached', met: !!mediaItemIdVal }
+      );
     }
     if (contentTypeVal === 'written') {
       checks.push({ label: 'Content body written', met: !!contentBodyVal.trim() });
@@ -473,7 +489,7 @@
   const detailsReady = $derived(
     !!titleVal.trim() && !!slugVal.trim() && /^[a-z0-9-]+$/.test(slugVal)
   );
-  const mediaReady = $derived(!!mediaItemIdVal);
+  const mediaReady = $derived(!!mediaItemIdVal && !deletedMedia);
   const bodyReady = $derived(!!contentBodyVal.trim());
   const accessReady = $derived(
     accessTypeVal === 'paid'
@@ -484,11 +500,11 @@
   );
 
   const sections = $derived.by(() => {
-    const list: { id: string; label: string; ready?: boolean }[] = [];
+    const list: { id: string; label: string; ready?: boolean; warn?: boolean }[] = [];
     if (!isEdit) list.push({ id: 'section-type', label: 'Content type' });
     list.push({ id: 'section-details', label: 'Details', ready: detailsReady });
     if (contentTypeVal === 'video' || contentTypeVal === 'audio') {
-      list.push({ id: 'section-media', label: 'Media', ready: mediaReady });
+      list.push({ id: 'section-media', label: 'Media', ready: mediaReady, warn: !!deletedMedia });
     }
     if (contentTypeVal === 'audio') {
       list.push({ id: 'section-shader', label: 'Immersive shader' });
@@ -662,6 +678,7 @@
             {orgSlug}
             contentId={content?.id ?? null}
             contentStatus={contentStatus ?? null}
+            {deletedMedia}
           />
         </FormSection>
       {/if}

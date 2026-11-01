@@ -15,8 +15,8 @@
  * Most endpoints require:
  * 1. Valid session (authenticated user)
  * 2. Organization membership with 'owner' or 'admin' role
- * The fee, ownership-support and support-refund routes are `platform_owner`
- * instead, with no org policy.
+ * The fee, ownership-support, support-refund and media-restore routes are
+ * `platform_owner` instead, with no org policy.
  *
  * Uses the procedure() pattern for unified policy, validation, and error handling.
  */
@@ -46,6 +46,7 @@ import {
   adminRevokeGrantParamsSchema,
   adminSubscribersQuerySchema,
   adminTopContentQuerySchema,
+  createIdParamsSchema,
   feeAuditLogQuerySchema,
   orgCreatorParamsSchema,
   orgIdParamsSchema,
@@ -1114,6 +1115,36 @@ app.post(
       return await ctx.services.support.checkOwedToCreator(
         ctx.input.params.creditId
       );
+    },
+  })
+);
+
+// ============================================================================
+// Media restore (Codex-6sbn1) — support only, no screen
+//
+// A creator's media delete keeps the files 30 days ("contact support within 30
+// days and we can bring it back"). Support restores the item here, by its id.
+// ============================================================================
+
+/**
+ * POST /api/admin/media/:id/restore
+ * Undo a media delete inside the 30 days. Drafts that used the item heal
+ * themselves (they kept the link), and the tile reappears in the creator's
+ * open Studio tabs. 409 once the daily purge has claimed the files, for an
+ * item deleted before files were kept, or for one that isn't deleted.
+ */
+app.post(
+  '/api/admin/media/:id/restore',
+  procedure({
+    policy: { auth: 'platform_owner', cache: 'fresh', rateLimit: 'strict' },
+    input: { params: createIdParamsSchema() },
+    handler: async (ctx) => {
+      const media = await ctx.services.media.restore(ctx.input.params.id);
+      ctx.obs?.info('Media item restored by support', {
+        mediaItemId: media.id,
+        actorUserId: ctx.user.id,
+      });
+      return media;
     },
   })
 );

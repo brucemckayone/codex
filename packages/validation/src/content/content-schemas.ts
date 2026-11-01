@@ -878,6 +878,37 @@ export const mediaQuerySchema = paginationSchema.extend({
 
 export type MediaQueryInput = z.infer<typeof mediaQuerySchema>;
 
+/**
+ * The usage fingerprint `GET /api/media/:id/usage` returns (Codex-6sbn1).
+ * Opaque to the client: the delete sends it back, and a value the server
+ * never issued simply doesn't match (409 `MEDIA_USAGE_CHANGED`), so this
+ * bounds its shape and size only.
+ */
+export const mediaUsageFingerprintSchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(/^[A-Za-z0-9_-]+$/, 'Invalid usage fingerprint');
+
+/**
+ * `DELETE /api/media/:id?usage=<fingerprint>`. Optional: with nothing using
+ * the item, a delete without one goes through, so an API caller that never
+ * asked is not broken. With drafts using it, a missing or stale one is
+ * refused.
+ */
+export const deleteMediaQuerySchema = z.object({
+  usage: mediaUsageFingerprintSchema.optional(),
+});
+
+export type DeleteMediaQueryInput = z.infer<typeof deleteMediaQuerySchema>;
+
+/** The Studio's `deleteMedia({ id, usage })` remote command. */
+export const deleteMediaInputSchema = deleteMediaQuerySchema.extend({
+  id: uuidSchema,
+});
+
+export type DeleteMediaInput = z.infer<typeof deleteMediaInputSchema>;
+
 /** The longest content slug a public read accepts. */
 export const PUBLIC_CONTENT_SLUG_MAX = 500;
 

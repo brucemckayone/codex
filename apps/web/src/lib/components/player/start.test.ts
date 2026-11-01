@@ -3,7 +3,7 @@
  * sound (owner P7), and never behind a visitor who paused in the meantime.
  */
 import { describe, expect, test, vi } from 'vitest';
-import { playNow, settleStart } from './start';
+import { playErrorName, playNow, settleStart } from './start';
 
 const refusal = () => new DOMException('No sound', 'NotAllowedError');
 const reset = () => new DOMException('Interrupted', 'AbortError');
@@ -74,6 +74,19 @@ describe('settleStart', () => {
       'failed'
     );
     expect(video.play).not.toHaveBeenCalled();
+  });
+});
+
+describe('playErrorName', () => {
+  test('the name alone, never the message', () => {
+    expect(playErrorName(refusal())).toBe('NotAllowedError');
+    expect(playErrorName(reset())).toBe('AbortError');
+  });
+
+  test('anything without a name is "unknown"', () => {
+    expect(playErrorName('No sound')).toBe('unknown');
+    expect(playErrorName(null)).toBe('unknown');
+    expect(playErrorName({ name: 42 })).toBe('unknown');
   });
 });
 

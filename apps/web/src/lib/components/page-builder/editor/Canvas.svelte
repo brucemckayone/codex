@@ -30,6 +30,7 @@
   import { page as appPage } from '$app/state';
   import { brandEditor } from '$lib/brand-editor';
   import { orgGrounds, orgShader } from '$lib/page-builder/org-grounds';
+  import { orgLogo } from '$lib/page-builder/render/org-logo';
   import { AlertTriangleIcon, PlusIcon, XIcon } from '$lib/components/ui/Icon';
   import type { BrandTokenOverrides } from '$lib/page-builder';
   import {
@@ -115,6 +116,10 @@
   // The org's moving background, so the hero takes it (03 X50, X51).
   const shader = $derived(
     orgShader(appPage.data.org, brandEditor.isOpen ? brandEditor.pending : null)
+  );
+  // The org's logo, which the hero sets above its words (Codex-61zsk.73).
+  const logo = $derived(
+    orgLogo(appPage.data.org, brandEditor.isOpen ? brandEditor.pending : null)
   );
   const visible = $derived(renderableSections(page));
   const frameWidth = $derived(FRAME_WIDTH[device]);
@@ -460,6 +465,7 @@
             sticky={false}
             orgGrounds={grounds}
             orgShader={shader}
+            orgLogo={logo}
           />
         </div>
 

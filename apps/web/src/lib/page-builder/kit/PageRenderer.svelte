@@ -62,6 +62,7 @@
   } from '../render/brand-overrides';
   import type { JourneySalesContext } from '../render/types';
   import { settled } from './blocks/hero/settled.svelte';
+  import { instructorDefinition } from './blocks/instructor/definition';
   import { priceWithCadence } from './model/copy';
   import { filmToShow } from './model/films';
   import { brandFontsHref } from './model/fonts';
@@ -80,7 +81,12 @@
   import { STYLES } from './model/styles';
   import type { BlockEdit, KitPage } from './model/types';
   import { entrances } from './motion/entrances';
-  import { type KitPageContext, type PageEdit, setKitPage } from './page-context';
+  import {
+    type KitPageContext,
+    type OrgLogoSource,
+    type PageEdit,
+    setKitPage,
+  } from './page-context';
   import { BLOCKS } from './registry';
   import SectionShell from './SectionShell.svelte';
   import StickyCta from './StickyCta.svelte';
@@ -123,6 +129,12 @@
      */
     orgShader?: boolean;
     /**
+     * The org's logo and name, as the org layout's rail shows them: the brand
+     * editor's pending logo while it is open (`render/org-logo.ts`). Plain
+     * data, as above. Absent or null: no logo.
+     */
+    orgLogo?: OrgLogoSource | null;
+    /**
      * The kit gallery's proof (03 X73): draw this Type whether or not this
      * Style may take it yet, so a pair is measured before it is offered. A
      * page never passes it.
@@ -147,6 +159,7 @@
     sticky = true,
     orgGrounds = {},
     orgShader = false,
+    orgLogo = null,
     proofType,
     requestFilm,
   }: Props = $props();
@@ -223,6 +236,12 @@
     get offerProps() {
       return offerProps;
     },
+    get guideName() {
+      return guideName;
+    },
+    get orgLogo() {
+      return orgLogo;
+    },
     anchorOf(id: string) {
       return anchors.get(id);
     },
@@ -240,6 +259,12 @@
   );
   const heroProps = $derived(
     propsById.get(sections.find((s) => s.type === 'hero')?.id ?? '') ?? {}
+  );
+  /** The About you section's name: who the Video block says is speaking. */
+  const guideName = $derived(
+    instructorDefinition.coerce(
+      propsById.get(sections.find((s) => s.type === 'instructor')?.id ?? '') ?? {}
+    ).name
   );
   const stickyLabel = $derived(
     readText(offerProps, 'ctaLabel') ?? readText(heroProps, 'ctaLabel')

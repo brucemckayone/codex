@@ -6,6 +6,7 @@
  */
 
 import type { IntroFilm, StudioIntroFilm } from '@codex/shared-types';
+import { previewLength } from '../preview-length';
 import { publicUrl, type R2PublicBases } from '../r2-public-bases';
 import type {
   IntroFilmMedia,
@@ -15,23 +16,6 @@ import type {
 
 /** A refusal with a film behind it: every one but `no-org` and `empty-slot`. */
 type PickedRefusal = Exclude<IntroFilmRefusal, 'no-org' | 'empty-slot'>;
-
-/**
- * The longest public preview: `PREVIEW_DURATION` in the transcoder
- * (`create_preview`, infrastructure/runpod/handler/main.py).
- */
-const PREVIEW_SECONDS = 30;
-
-/**
- * How long a film's preview runs. The transcoder cuts it from a tenth of the
- * way in, for up to {@link PREVIEW_SECONDS} (`create_preview`), so a short
- * film's preview is shorter still.
- */
-function previewLength(durationSeconds: number | null): number | null {
-  if (durationSeconds === null) return null;
-  const start = Math.floor(durationSeconds * 0.1);
-  return Math.min(PREVIEW_SECONDS, durationSeconds - start);
-}
 
 /**
  * The landing's view of a film. `durationSeconds` is the length of what a

@@ -19,6 +19,11 @@ import {
   runDurableObjectAlarm,
   runInDurableObject,
 } from 'cloudflare:test';
+import {
+  UNSTARTED_CHECKS_MS,
+  type UnstartedJob,
+  type UnstartedOutcome,
+} from '@codex/transcoding';
 import type {
   MediaStatusChange,
   MediaStatusServerMessage,
@@ -31,8 +36,10 @@ import {
   mediaStatusShardOf,
   statusObjectFor,
 } from '@codex/worker-utils';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  addMissingColumns,
+  type MediaStatusObject,
   RESYNC_GRACE_MS,
   RETRY_DELAYS_MS,
 } from '../durable-objects/media-status-object';
@@ -91,6 +98,9 @@ interface HeldRow {
   upload_socket: string | null;
   retry_at: number | null;
   retries: number;
+  check_at: number | null;
+  checks: number;
+  queued: 'waiting' | 'overdue' | null;
 }
 
 async function held(mediaId: string): Promise<HeldRow | null> {
@@ -109,18 +119,46 @@ async function alarmAt(): Promise<number | null> {
 }
 
 /**
- * A retry due now, as if its minutes had passed. Only the row is backdated:
- * a past alarm would fire by itself, and runDurableObjectAlarm then finds
- * none to run. The one already set (in the future) is the one it forces.
+ * A retry (or an early ask, Codex-t359w) due now, as if its minutes had
+ * passed. Only the row is backdated: a past alarm would fire by itself, and
+ * runDurableObjectAlarm then finds none to run. The one already set (in the
+ * future) is the one it forces.
  */
-async function makeDue(mediaId: string): Promise<void> {
+async function makeDue(
+  mediaId: string,
+  column: 'retry_at' | 'check_at' = 'retry_at'
+): Promise<void> {
   await runInDurableObject(object(), (_instance, state) => {
     state.storage.sql.exec(
-      'UPDATE items SET retry_at = ? WHERE media_id = ?',
+      `UPDATE items SET ${column} = ? WHERE media_id = ?`,
       Date.now() - 1,
       mediaId
     );
   });
+}
+
+/**
+ * Every test shares one object, and the rows other tests left hold their own
+ * retries and asks. A describe that asserts the alarm's exact time owns it.
+ */
+async function clearDueTimes(): Promise<void> {
+  await runInDurableObject(object(), async (_instance, state) => {
+    state.storage.sql.exec('UPDATE items SET retry_at = NULL, check_at = NULL');
+    await state.storage.deleteAlarm();
+  });
+}
+
+/** What the asks found, as if RunPod had said it (no test can reach RunPod). */
+async function applyAsked(
+  jobs: UnstartedJob[],
+  outcome: UnstartedOutcome
+): Promise<void> {
+  await runInDurableObject(object(), (instance: MediaStatusObject) =>
+    instance.applyAsked(
+      jobs,
+      new Map(jobs.map((job) => [job.mediaId, outcome]))
+    )
+  );
 }
 
 // --------------------------------------------------------------------------
@@ -452,37 +490,264 @@ describe('MediaStatusObject: a resync row it cannot read', () => {
 });
 
 describe('MediaStatusObject: waiting uploads are retried within minutes', () => {
-  it('retries at 1, 3 and 10 minutes, then leaves the item to the cron', async () => {
-    const waiting = change({
-      lifecycle: 'uploaded',
-      errorCode: 'TRANSCODER_PAUSED',
-    });
+  beforeEach(clearDueTimes);
 
-    for (const [attempt, delay] of RETRY_DELAYS_MS.entries()) {
-      const before = Date.now();
-      await publish({ ...waiting, at: waiting.at + attempt });
-      const row = await held(waiting.mediaId);
-      expect(row?.retries).toBe(attempt);
-      expect(row?.retry_at).toBeGreaterThanOrEqual(before + delay);
-      expect(await alarmAt()).toBe(row?.retry_at);
+  // Three alarm rounds, each a real claim and dispatch against the database:
+  // 3.6 to 5 s locally, so the default 5 s timeout flaked.
+  it(
+    'retries at 1, 3 and 10 minutes, then leaves the item to the cron',
+    {
+      timeout: 20_000,
+    },
+    async () => {
+      const waiting = change({
+        lifecycle: 'uploaded',
+        errorCode: 'TRANSCODER_PAUSED',
+      });
 
-      await makeDue(waiting.mediaId);
-      expect(await runDurableObjectAlarm(object())).toBe(true);
-      // Counted and cleared before the retry ran (and failed: no database).
-      const after = await held(waiting.mediaId);
-      expect(after?.retries).toBe(attempt + 1);
-      expect(after?.retry_at).toBeNull();
+      for (const [attempt, delay] of RETRY_DELAYS_MS.entries()) {
+        const before = Date.now();
+        await publish({ ...waiting, at: waiting.at + attempt });
+        const row = await held(waiting.mediaId);
+        expect(row?.retries).toBe(attempt);
+        expect(row?.retry_at).toBeGreaterThanOrEqual(before + delay);
+        expect(await alarmAt()).toBe(row?.retry_at);
+
+        await makeDue(waiting.mediaId);
+        expect(await runDurableObjectAlarm(object())).toBe(true);
+        // Counted and cleared before the retry ran (and failed: no database).
+        const after = await held(waiting.mediaId);
+        expect(after?.retries).toBe(attempt + 1);
+        expect(after?.retry_at).toBeNull();
+      }
+
+      await publish({ ...waiting, at: waiting.at + RETRY_DELAYS_MS.length });
+      expect((await held(waiting.mediaId))?.retry_at).toBeNull();
+      expect(await alarmAt()).toBeNull();
     }
-
-    await publish({ ...waiting, at: waiting.at + RETRY_DELAYS_MS.length });
-    expect((await held(waiting.mediaId))?.retry_at).toBeNull();
-    expect(await alarmAt()).toBeNull();
-  });
+  );
 
   it('schedules nothing for a file the transcoder refused', async () => {
     const c = change({ lifecycle: 'uploaded', errorCode: 'CORRUPT_INPUT' });
     await publish(c);
     expect((await held(c.mediaId))?.retry_at).toBeNull();
+  });
+});
+
+describe('MediaStatusObject: a job with no progress is asked about early (Codex-t359w)', () => {
+  beforeEach(clearDueTimes);
+
+  function dispatched(over: Partial<MediaStatusChange> = {}) {
+    return change({
+      lifecycle: 'transcoding',
+      attempts: 1,
+      jobId: `job-${crypto.randomUUID()}`,
+      ...over,
+    });
+  }
+
+  function jobOf(c: MediaStatusChange, last = false): UnstartedJob {
+    if (c.jobId === null) throw new Error('a dispatched change has a job');
+    return { mediaId: c.mediaId, jobId: c.jobId, dispatchedAt: c.at, last };
+  }
+
+  it('asks at 2, 5 and 10 minutes after the job-id write; unanswered, the last is asked again', async () => {
+    const c = dispatched();
+    await publish(c);
+    const before = Date.now();
+
+    for (const [ask, after] of UNSTARTED_CHECKS_MS.entries()) {
+      // Each ask was counted and the next set before RunPod was asked.
+      const row = await held(c.mediaId);
+      expect(row?.checks).toBe(ask);
+      expect(row?.check_at).toBe(c.at + after);
+      expect(await alarmAt()).toBe(row?.check_at);
+
+      await makeDue(c.mediaId, 'check_at');
+      expect(await runDurableObjectAlarm(object())).toBe(true);
+    }
+
+    // Every ask went unanswered (the test env's RUNPOD_DIRECT_URL makes
+    // every management call so): the last is asked again, not dropped.
+    const asked = await held(c.mediaId);
+    expect(asked?.checks).toBe(UNSTARTED_CHECKS_MS.length);
+    expect(asked?.queued).toBeNull();
+    expect(asked?.check_at).toBeGreaterThanOrEqual(before + 5 * 60_000);
+    expect(await alarmAt()).toBe(asked?.check_at);
+  });
+
+  it('asks a last unanswered ask again only until 30 minutes after dispatch', async () => {
+    const c = dispatched();
+    await publish(c);
+    // As the alarm leaves a row whose last ask it has counted.
+    const spent = () =>
+      runInDurableObject(object(), (_instance, state) => {
+        state.storage.sql.exec(
+          'UPDATE items SET check_at = NULL, checks = ? WHERE media_id = ?',
+          UNSTARTED_CHECKS_MS.length,
+          c.mediaId
+        );
+      });
+
+    await spent();
+    await applyAsked([jobOf(c, true)], 'ask_later');
+    expect((await held(c.mediaId))?.check_at).not.toBeNull();
+
+    await spent();
+    const late = { ...jobOf(c, true), dispatchedAt: Date.now() - 26 * 60_000 };
+    await applyAsked([late], 'ask_later');
+    expect((await held(c.mediaId))?.check_at).toBeNull();
+  });
+
+  it('its first tick cancels the asks: the alarm set for one finds nothing due', async () => {
+    const c = dispatched();
+    await publish(c);
+    await tick(c.mediaId, jobOf(c).jobId, 0);
+    expect((await held(c.mediaId))?.check_at).toBeNull();
+
+    expect(await runDurableObjectAlarm(object())).toBe(true);
+
+    expect((await held(c.mediaId))?.checks).toBe(0);
+    expect(await alarmAt()).toBeNull();
+  });
+
+  it('asks nothing about a job whose tick came before its job-id write', async () => {
+    const c = dispatched({ jobId: null });
+    await publish(c);
+    // No job yet: there is nothing RunPod could be asked about.
+    expect((await held(c.mediaId))?.check_at).toBeNull();
+
+    await tick(c.mediaId, 'job-early', 5);
+    await publish({ ...c, jobId: 'job-early', at: c.at + 1 });
+
+    expect((await held(c.mediaId))?.check_at).toBeNull();
+    expect(await alarmAt()).toBeNull();
+  });
+
+  it('a new job (Try again) gets asks of its own', async () => {
+    const c = dispatched();
+    await publish(c);
+    await makeDue(c.mediaId, 'check_at');
+    expect(await runDurableObjectAlarm(object())).toBe(true);
+    expect((await held(c.mediaId))?.checks).toBe(1);
+
+    const again = { ...c, jobId: 'job-retry', attempts: 2, at: c.at + 1 };
+    await publish(again);
+
+    const row = await held(c.mediaId);
+    expect(row?.checks).toBe(0);
+    expect(row?.check_at).toBe(again.at + UNSTARTED_CHECKS_MS[0]);
+  });
+
+  it('still queued: its tabs are told, once, and overdue after the last ask', async () => {
+    const a = creator();
+    const c = dispatched({ creatorId: a });
+    await publish(c);
+    const tab = await openTab(a);
+    const other = await openTab(creator());
+    expect(snapshotOf(tab).find((i) => i.mediaId === c.mediaId)?.queued).toBe(
+      null
+    );
+
+    await applyAsked([jobOf(c)], 'queued');
+    await vi.waitFor(() =>
+      expect(itemsOf(tab, c.mediaId).at(-1)?.queued).toBe('waiting')
+    );
+    // The same answer again tells no one anything.
+    await applyAsked([jobOf(c)], 'queued');
+    await settle();
+    expect(itemsOf(tab, c.mediaId)).toHaveLength(1);
+
+    await applyAsked([jobOf(c, true)], 'queued');
+    await vi.waitFor(() =>
+      expect(itemsOf(tab, c.mediaId).at(-1)?.queued).toBe('overdue')
+    );
+    expect((await held(c.mediaId))?.queued).toBe('overdue');
+    // Another creator's tab hears nothing of it.
+    expect(itemsOf(other, c.mediaId)).toHaveLength(0);
+  });
+
+  it('never marks queued a job that has started', async () => {
+    const c = dispatched();
+    await publish(c);
+    await tick(c.mediaId, jobOf(c).jobId, 10);
+
+    await applyAsked([jobOf(c)], 'queued');
+
+    expect((await held(c.mediaId))?.queued).toBeNull();
+  });
+
+  it('running: the asks stop, and its tabs go back to starting', async () => {
+    const a = creator();
+    const c = dispatched({ creatorId: a });
+    await publish(c);
+    await applyAsked([jobOf(c)], 'queued');
+    const tab = await openTab(a);
+
+    await applyAsked([jobOf(c)], 'running');
+
+    const row = await held(c.mediaId);
+    expect(row?.check_at).toBeNull();
+    expect(row?.queued).toBeNull();
+    await vi.waitFor(() =>
+      expect(itemsOf(tab, c.mediaId).at(-1)?.queued).toBe(null)
+    );
+    expect(await alarmAt()).toBeNull();
+  });
+
+  it('gone: the asks stop', async () => {
+    const c = dispatched();
+    await publish(c);
+
+    await applyAsked([jobOf(c)], 'gone');
+
+    expect((await held(c.mediaId))?.check_at).toBeNull();
+    expect(await alarmAt()).toBeNull();
+  });
+
+  it('unanswered: the next ask stands', async () => {
+    const c = dispatched();
+    await publish(c);
+    const before = await held(c.mediaId);
+
+    await applyAsked([jobOf(c)], 'ask_later');
+
+    expect(await held(c.mediaId)).toEqual(before);
+  });
+
+  it("an answer about another job of the item's changes nothing", async () => {
+    const c = dispatched();
+    await publish(c);
+
+    await applyAsked([{ ...jobOf(c), jobId: 'job-stale' }], 'running');
+
+    expect((await held(c.mediaId))?.check_at).toBe(
+      c.at + UNSTARTED_CHECKS_MS[0]
+    );
+  });
+});
+
+describe('MediaStatusObject: columns added after it shipped', () => {
+  it('adds the columns a table lacks, and only those', async () => {
+    await runInDurableObject(object(), (_instance, state) => {
+      const sql = state.storage.sql;
+      const table = `probe_${crypto.randomUUID().replace(/-/g, '')}`;
+      sql.exec(`CREATE TABLE ${table} (id TEXT PRIMARY KEY, checks INTEGER)`);
+
+      // `checks` is held already: adding it again would fail as a duplicate.
+      addMissingColumns(sql, table, [
+        ['check_at', 'INTEGER'],
+        ['checks', 'INTEGER'],
+      ]);
+      // Again, on a table that has them all now.
+      addMissingColumns(sql, table, [['check_at', 'INTEGER']]);
+
+      sql.exec(
+        `INSERT INTO ${table} (id, check_at, checks) VALUES ('a', 5, 1)`
+      );
+      expect(sql.exec(`SELECT check_at FROM ${table}`).one().check_at).toBe(5);
+      sql.exec(`DROP TABLE ${table}`);
+    });
   });
 });
 

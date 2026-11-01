@@ -51,6 +51,7 @@ import {
   PING_HOUR_UTC,
   reconcileDueAt,
   STALLED_UPLOAD_MS,
+  unstartedJobAction,
   WAITING_IDLE_MS,
   type WaitingAction,
   waitingAction,
@@ -84,6 +85,9 @@ const ENDPOINT_WIDE: ReadonlySet<RunPodApiFailureReason> = new Set([
 const DISPATCH_RESERVE_MS = DISPATCH_BUDGET_MS + 3_000;
 /** At this many in one run, a lost upload is a fault, not abandonment. */
 const INCOMPLETE_UPLOAD_BURST = 5;
+
+/** Which run asked RunPod about a job, as its logs name it. */
+type LostJobVia = 'reconcile' | 'early_check';
 
 interface TranscodingMaintenanceConfig extends ServiceConfig {
   transcoding: TranscodingService;
@@ -136,6 +140,29 @@ export interface RetryDueReport {
   /** Claimed elsewhere first, or no longer waiting. */
   raced: number;
 }
+
+/** A job the status object holds with no progress yet (Codex-t359w). */
+export interface UnstartedJob {
+  mediaId: string;
+  jobId: string;
+  /** Epoch ms of the job-id write the object holds: its asks count from it. */
+  dispatchedAt: number;
+  /** The last early ask: still queued then is a fault the owner hears of. */
+  last: boolean;
+}
+
+/**
+ * What one early ask found. `failed`, `requeued` (RunPod dropped the job, so
+ * it waits to be sent again): written and published. `gone`: the row moved
+ * on (a webhook, a Retry, a delete), so there is nothing to ask.
+ */
+export type UnstartedOutcome =
+  | 'queued'
+  | 'running'
+  | 'failed'
+  | 'requeued'
+  | 'gone'
+  | 'ask_later';
 
 export class TranscodingMaintenance extends BaseService {
   private readonly transcoding: TranscodingService;
@@ -234,6 +261,73 @@ export class TranscodingMaintenance extends BaseService {
     return report;
   }
 
+  /**
+   * The jobs the status object's alarm found with no progress at an early ask
+   * (UNSTARTED_CHECKS_MS): what RunPod says of each. Only an ended or
+   * dropped job touches the database, through step 3's guarded write, so a
+   * webhook or a Retry that got there first wins. Still queued at the last
+   * ask, RunPod has no worker for it: the owner hears once a day. When RunPod
+   * cannot answer for one job it cannot for the next, so the rest wait for
+   * their next ask.
+   */
+  async checkUnstarted(
+    jobs: readonly UnstartedJob[],
+    deadline: number
+  ): Promise<Map<string, UnstartedOutcome>> {
+    const outcomes = new Map<string, UnstartedOutcome>();
+    const ask = this.runpodAsker(deadline, 'early_check');
+    for (const job of jobs) {
+      const action = unstartedJobAction(await ask(job.mediaId, job.jobId));
+      if (action.kind === 'fail' || action.kind === 'wait') {
+        outcomes.set(job.mediaId, await this.resolveUnstarted(job, action));
+        continue;
+      }
+      if (action.kind === 'queued' && job.last) {
+        this.alerts?.jobNotStarted(job.mediaId);
+      }
+      outcomes.set(job.mediaId, action.kind);
+    }
+    return outcomes;
+  }
+
+  /**
+   * Write what an early ask found of an ended or dropped job. A write that
+   * throws is that job's alone: the others keep what RunPod said of them.
+   */
+  private async resolveUnstarted(
+    job: UnstartedJob,
+    action: Extract<LostJobAction, { kind: 'fail' | 'wait' }>
+  ): Promise<UnstartedOutcome> {
+    const context = {
+      mediaId: job.mediaId,
+      runpodJobId: job.jobId,
+      action: action.kind,
+    };
+    let resolved: Awaited<ReturnType<TranscodingMaintenance['resolveLostJob']>>;
+    try {
+      resolved = await this.resolveLostJob(
+        { id: job.mediaId, runpodJobId: job.jobId },
+        // No time guard: the job id proves it is the same dispatch, and a
+        // title edit moves updatedAt without ending anything.
+        null,
+        action,
+        'early_check'
+      );
+    } catch (error) {
+      this.obs.error('transcoding.early_check_write_failed', {
+        ...context,
+        fallback: 'next_ask_or_hourly_reconcile',
+        error: messageForLog(error),
+      });
+      return 'ask_later';
+    }
+    if (resolved === 'raced') {
+      this.obs.info('transcoding.early_check_raced', context);
+      return 'gone';
+    }
+    return resolved === 'waiting' ? 'requeued' : 'failed';
+  }
+
   private async resync(report: MaintenanceReport): Promise<void> {
     const feed = this.mediaStatus;
     if (!feed) return;
@@ -310,7 +404,7 @@ export class TranscodingMaintenance extends BaseService {
     });
 
     let handled = 0;
-    let runpodCannotSay = false;
+    const ask = this.runpodAsker(deadline, 'reconcile');
     for (const row of rows) {
       const dueAt = reconcileDueAt(row);
       if (dueAt > now.getTime()) {
@@ -320,75 +414,94 @@ export class TranscodingMaintenance extends BaseService {
       if (handled >= ROWS_PER_STEP) break;
       handled++;
 
-      let answer: JobAnswer = 'no_job';
-      if (row.runpodJobId) {
-        answer = 'unanswered';
-        if (!runpodCannotSay) {
-          const asked = await this.askRunPod(row.id, row.runpodJobId, deadline);
-          answer = asked.answer;
-          runpodCannotSay = asked.endpointWide;
-        }
-      }
+      const answer: JobAnswer = row.runpodJobId
+        ? await ask(row.id, row.runpodJobId)
+        : 'no_job';
       const action = lostJobAction(answer, now.getTime() - dueAt);
       if (action.kind === 'leave') {
         report.reconciled.left++;
         continue;
       }
-      await this.resolveLostJob(row, dueAt, action, report);
+      const resolved = await this.resolveLostJob(
+        row,
+        dueAt,
+        action,
+        'reconcile'
+      );
+      if (resolved === 'raced') report.raced++;
+      else report.reconciled[resolved]++;
     }
   }
 
   /**
-   * What RunPod says about one job. `endpointWide`: it will not answer for
-   * the next job either (down, out of time, a key that may not ask); an
-   * unreadable answer is this job's alone.
+   * What RunPod says about each job, one at a time, for one run. Once it
+   * will not answer for a reason that holds for the next job too (down, out
+   * of time, a key that may not ask), the rest go unanswered without a call;
+   * an unreadable answer is that job's alone.
    */
-  private async askRunPod(
-    mediaId: string,
-    jobId: string,
-    deadline: number
-  ): Promise<{ answer: JobAnswer; endpointWide: boolean }> {
-    const status = await this.transcoding.runpodJobs.jobStatus(jobId, deadline);
-    if (status.ok) return { answer: status, endpointWide: false };
+  private runpodAsker(
+    deadline: number,
+    via: LostJobVia
+  ): (mediaId: string, jobId: string) => Promise<Exclude<JobAnswer, 'no_job'>> {
+    let cannotSay = false;
+    return async (mediaId, jobId) => {
+      if (cannotSay) return 'unanswered';
+      const status = await this.transcoding.runpodJobs.jobStatus(
+        jobId,
+        deadline
+      );
+      if (status.ok) return status;
 
-    // Only a passing outage is a warning: a key that may not ask, or an
-    // answer that cannot be read, leaves rows unresolved every run.
-    const context = {
-      mediaId,
-      runpodJobId: jobId,
-      reason: status.reason,
-      statusCode: status.status,
-    };
-    if (status.reason === 'unavailable' || status.reason === 'out_of_time') {
-      this.obs.warn('transcoding.reconcile_unanswered', context);
-    } else {
-      this.obs.error('transcoding.reconcile_unanswered', context);
-    }
-    return {
-      answer: 'unanswered',
-      endpointWide: ENDPOINT_WIDE.has(status.reason),
+      // Only a passing outage is a warning: a key that may not ask, or an
+      // answer that cannot be read, leaves rows unresolved every run. Local
+      // and test runs have no RunPod to ask (`unsupported`).
+      const context = {
+        mediaId,
+        runpodJobId: jobId,
+        via,
+        reason: status.reason,
+        statusCode: status.status,
+      };
+      if (status.reason === 'unsupported') {
+        this.obs.info('transcoding.reconcile_unanswered', context);
+      } else if (
+        status.reason === 'unavailable' ||
+        status.reason === 'out_of_time'
+      ) {
+        this.obs.warn('transcoding.reconcile_unanswered', context);
+      } else {
+        this.obs.error('transcoding.reconcile_unanswered', context);
+      }
+      cannotSay = ENDPOINT_WIDE.has(status.reason);
+      return 'unanswered';
     };
   }
 
-  /** Write what became of a lost job, guarded on the row the run read. */
+  /**
+   * Write what became of a lost job, guarded on the row the caller read:
+   * same job (or still none), not deleted, and not touched since
+   * `untouchedBefore` (null: no time guard). `raced` when the guard matched
+   * nothing.
+   */
   private async resolveLostJob(
     row: { id: string; runpodJobId: string | null },
-    dueAt: number,
+    untouchedBefore: number | null,
     action: Exclude<LostJobAction, { kind: 'leave' }>,
-    report: MaintenanceReport
-  ): Promise<void> {
+    via: LostJobVia
+  ): Promise<'raced' | 'waiting' | 'failed'> {
     const jobId = row.runpodJobId;
-    // Still the row the run looked at: same job (or still none), not
-    // deleted, and not touched since it fell due.
-    const sameRow = and(
+    const guard = [
       eq(mediaItems.id, row.id),
       eq(mediaItems.status, MEDIA_STATUS.TRANSCODING),
       isNull(mediaItems.deletedAt),
       jobId
         ? eq(mediaItems.runpodJobId, jobId)
         : isNull(mediaItems.runpodJobId),
-      lt(mediaItems.updatedAt, new Date(dueAt))
-    );
+    ];
+    if (untouchedBefore !== null) {
+      guard.push(lt(mediaItems.updatedAt, new Date(untouchedBefore)));
+    }
+    const sameRow = and(...guard);
     const [written] = await this.db
       .update(mediaItems)
       .set(
@@ -401,23 +514,19 @@ export class TranscodingMaintenance extends BaseService {
       )
       .where(sameRow)
       .returning();
-    if (!written) {
-      report.raced++;
-      return;
-    }
+    if (!written) return 'raced';
     this.transcoding.publish(written);
 
     const context = {
       mediaId: row.id,
       runpodJobId: jobId,
       action: action.kind,
+      via,
     };
     if (action.kind === 'wait') {
-      report.reconciled.waiting++;
       this.obs.warn('transcoding.lost_job_resolved', context);
-      return;
+      return 'waiting';
     }
-    report.reconciled.failed++;
     this.alerts?.mediaFailed(written);
     // A lost webhook, a failed job that never reported, or a job nobody
     // could account for in a day: the pipeline itself broke.
@@ -427,6 +536,7 @@ export class TranscodingMaintenance extends BaseService {
     const failed = { ...context, code: action.code };
     if (broke) this.obs.error('transcoding.lost_job_resolved', failed);
     else this.obs.warn('transcoding.lost_job_resolved', failed);
+    return 'failed';
   }
 
   private async retryWaiting(

@@ -597,7 +597,7 @@ describe('SectionGallery', () => {
 
     const story = el('.gallery__item[data-type="story"]');
     expect(el('[data-lp-type="story"]', story).textContent).toContain(
-      'How the six weeks unfold'
+      'What changes for you'
     );
     // A still render — every thumbnail is — draws the layout's plates.
     const gallery = el('.gallery__item[data-type="gallery"]');

@@ -45,6 +45,16 @@
   KEYBOARD (`media-a11y`), from anywhere inside it: Space or K play and
   pause, M mutes, the arrows seek five seconds, F is full screen.
 
+  ITS OWN CONTROLS, ELSEWHERE (opt-in). A frame that draws its own chrome
+  over a core with `controls={false}` reads where the film is, and whether
+  it is still loading or has stalled (the cues the core's own scrubber and
+  live region show), wanted, or mid-swap, through the core's own `clock`
+  (which holds where it stood through a swap), and drives it through
+  its `toggle` and `toggleMute`
+  (bound with `bind:this`), so it plays, pauses, renews and takes refused
+  sound exactly as the core's buttons do. The Preview block's listening
+  card plays audio this way, the picture hidden.
+
   `createHlsPlayer` returns `{ hls, cleanup }`: `hls` is the HLS.js instance
   (null on Safari's native HLS), `cleanup` detaches the native path's
   listener. Teardown calls both: `cleanup()` always, then `hls?.destroy()`.
@@ -70,10 +80,11 @@
     VolumeXIcon,
   } from '$lib/components/ui/Icon';
   import { createHlsPlayer, type HlsErrorKind } from '$lib/components/VideoPlayer/hls';
+  import { logger } from '$lib/observability';
   import * as m from '$paraglide/messages';
   import { claim, displaced, mark, release, showing } from './now-playing.svelte';
-  import { playNow, settleStart } from './start';
-  import { clock, loadedTo } from './timeline';
+  import { playErrorName, playNow, settleStart } from './start';
+  import { clock as timeText, loadedTo, type PlayerClock } from './timeline';
 
   interface CaptionTrack {
     src: string;
@@ -225,7 +236,14 @@
   let recovered = false;
   /** Drops the last swap's resume, should that stream go before it loads. */
   let unresume: (() => void) | null = null;
+  /** A renewal is out (`refresh`): one at a time. */
   let renewing = false;
+  /**
+   * The renewal out is a press's on links that ran out, or nearly (a resume,
+   * "Watch again"): the paused film waits on its answer (`swapping`). The
+   * timer's early ask leaves the links good, so a press meanwhile plays them.
+   */
+  let staleAsk = $state(false);
   let renewTimer: ReturnType<typeof setTimeout> | null = null;
   /** The stream ran out and none came back: "Watch again" asks afresh. */
   let lapsed = false;
@@ -258,9 +276,21 @@
   let wanted = $state(false);
   /** A silent reset waits on its resume (`suspend`, `resumeAt`). */
   let resuming = $state(false);
+  /** Where it stood as a swap reset it: a frame's `clock` holds it until the resume. */
+  let held = { time: 0, duration: 0 };
 
+  /**
+   * Mid-swap: the element sits reset (`resuming`), or paused while a press's
+   * renewal of links that ran out is out (`staleAsk`), waiting on the
+   * answer. Either way it is silent, so the play button reads, and a press
+   * sets, the visitor's intent (`wanted`), and the swap honours it. A
+   * renewal the timer asked for early is no swap, paused meanwhile or not.
+   */
+  const swapping = $derived(resuming || (staleAsk && paused));
   /** The play button offers Play: mid-swap, unless the visitor wants it playing. */
-  const offerPlay = $derived(resuming ? !wanted : paused);
+  const offerPlay = $derived(swapping ? !wanted : paused);
+  /** The scrubber's cue: the stream has stalled, or a swap the visitor wants is under way. */
+  const buffering = $derived((waiting && !paused) || (swapping && wanted));
   const played = $derived(duration > 0 ? Math.min(1, time / duration) : 0);
   const fill = $derived(duration > 0 ? Math.min(1, loaded / duration) : 0);
   const muteLabel = $derived(
@@ -310,38 +340,52 @@
     if (lapsed || stale()) {
       // The old stream's links are dead, or nearly: ask afresh, from the start.
       lapsed = false;
-      void refresh(0);
+      void refresh({ at: 0, staleLinks: true });
     } else {
       video.currentTime = 0;
-      playNow(video).catch(() => {});
+      playWanted(video);
     }
     // The ended layer that had focus has gone; the play button takes it.
     flushSync();
     playButton?.focus({ preventScroll: true });
   }
 
-  function toggle() {
+  /** Play or pause, as the play button does: a frame's own controls call it too. */
+  export function toggle() {
     // Behind an error there is nothing to play, Space and K included.
     if (!video || fixed || error !== null) return;
     if (finished) {
       replay();
-    } else if (resuming) {
+    } else if (swapping) {
       // Mid-swap the element sits paused, silently, either way: a press is
-      // the visitor's say, and the resume honours it (`resumeAt`).
+      // the visitor's say, and the resume honours it (`resumeAt`), or with
+      // no answer `refresh` does. Never a play on the links that ran out.
       wanted = !wanted;
     } else if (video.paused) {
       wanted = true;
       // Paused past its links' end: renew first, and the answer plays it.
-      if (stale()) void refresh();
-      else playNow(video).catch(() => {});
+      if (stale()) void refresh({ staleLinks: true });
+      else playWanted(video);
     } else {
       wanted = false;
       video.pause();
     }
   }
 
-  function toggleMute() {
+  /** Mute or unmute, as the mute button does ("Tap for sound" included). */
+  export function toggleMute() {
     if (video && !fixed) video.muted = !video.muted;
+  }
+
+  /**
+   * Where the film is, for a frame drawing its own controls: the element's
+   * own figures (its events; nothing polls), read reactively by the frame.
+   * The reset element reads 0, so it holds where it stood; a paused film
+   * waiting on its renewal still reads its own place.
+   */
+  export function clock(): PlayerClock {
+    const at = resuming ? held : { time, duration };
+    return { ...at, offerPlay, askSound, ready, waiting, wanted, resuming: swapping };
   }
 
   function toggleCaptions() {
@@ -375,8 +419,8 @@
   function measure() {
     if (!video) return;
     time = video.currentTime;
-    // jsdom has no buffered ranges.
-    loaded = video.buffered ? loadedTo(video.buffered, time) : 0;
+    // Only the scrubber draws it. jsdom has no buffered ranges.
+    if (controls) loaded = video.buffered ? loadedTo(video.buffered, time) : 0;
   }
 
   function handlePlay() {
@@ -529,7 +573,7 @@
         wanted = true;
         media.muted = true;
         // A browser that blocks even muted autoplay leaves it to the play button.
-        playNow(media).catch(() => {});
+        playWanted(media);
       }
     } catch {
       fail();
@@ -587,6 +631,9 @@
    * press sets, the visitor's intent (`wanted`); after the end nothing resumes.
    */
   function suspend() {
+    // Before the reset's own `timeupdate` lands; a second reset mid-swap
+    // (a 403's, then its renewal's) keeps the first's.
+    if (!resuming) held = { time, duration };
     paused = true;
     disarm();
     resuming = !finished;
@@ -640,14 +687,20 @@
    *
    * The ask takes a moment, and the film lives on meanwhile: gone, an error
    * or its end drops the answer; another film started, or a pause, leaves
-   * the swap paused.
+   * the swap paused. A press's ask on links that ran out (`staleLinks`)
+   * holds the paused film until it answers (`swapping`); the timer's early
+   * ask leaves it free.
    */
-  async function refresh(at?: number) {
+  async function refresh({
+    at,
+    staleLinks = false,
+  }: { at?: number; staleLinks?: boolean } = {}) {
     const media = video;
     if (!media || !renew || !stream?.signed || renewing || finished || error !== null) {
       return;
     }
     renewing = true;
+    staleAsk = staleLinks;
     asked = true;
     lastAskAt = performance.now();
     const since = mark();
@@ -658,11 +711,12 @@
       next = null;
     }
     renewing = false;
+    staleAsk = false;
     if (destroyed || error !== null || finished) return;
     if (displaced(media, since)) wanted = false;
     if (!next?.playlistUrl) {
       if (expired) endLapsed();
-      else if (wanted && paused) playNow(media).catch(() => {});
+      else if (wanted && paused) playWanted(media);
       return;
     }
     // The timer's renewal ran while the film played on.
@@ -676,6 +730,56 @@
       return;
     }
     resumeAt(media, from, since);
+  }
+
+  /**
+   * Play now, in this tick (a press's activation holds only here), and
+   * settle it (`start.ts`): refused sound plays muted and asks for it. A
+   * play refused outright leaves it paused, wanting nothing, and saying
+   * paused as the element does (a press's play before its stream attached
+   * said it played, and the attach's reset fires no `pause`), so a frame's
+   * own controls offer Play rather than load forever (iOS's own HLS loads
+   * nothing until something plays). A start the visitor paused first, one
+   * behind an error, or one a swap will resume, is no failure.
+   */
+  function startPlaying(media: HTMLVideoElement) {
+    void settleStart(media, playNow(media), () => wanted && !destroyed).then(
+      (outcome) => {
+        if (destroyed) return;
+        if (outcome === 'muted') askSound = true;
+        if (outcome !== 'failed' || error !== null || !media.paused) return;
+        if (!wanted || swapping) return;
+        wanted = false;
+        paused = true;
+        // Silently paused, it fires no pause to stop the timer.
+        disarm();
+        // settleStart says only that it failed, not how.
+        logger.warn('player.start_failed', {});
+      }
+    );
+  }
+
+  /**
+   * Play now, for a play that is not a press's mount (`startPlaying` settles
+   * that one, refused sound and all). One refused while it still sits paused
+   * and wanted wants nothing, and says paused as the element does (a reset
+   * fires no `pause`), so a frame's own controls offer Play rather than load
+   * for ever; mid-swap the resume decides. A reset refuses nothing: a play
+   * cut short (`AbortError`, HLS.js's own recovery, which plays on) or one
+   * behind an error is left be. The log carries the error's name alone
+   * (`playErrorName`).
+   */
+  function playWanted(media: HTMLVideoElement) {
+    playNow(media).catch((cause: unknown) => {
+      if (destroyed || error !== null || !media.paused || !wanted || swapping) return;
+      const name = playErrorName(cause);
+      if (name === 'AbortError') return;
+      wanted = false;
+      paused = true;
+      // Silently paused, it fires no pause to stop the timer.
+      disarm();
+      logger.warn('player.play_failed', { name });
+    });
   }
 
   /**
@@ -695,13 +799,11 @@
       unresume = null;
       resuming = false;
       media.currentTime = from;
+      // Read now, as `seek` does: a frame's clock leaves its hold for the
+      // moment it resumes from, never the reset's 0 before the seek reports.
+      time = media.currentTime;
       if (displaced(media, since)) wanted = false;
-      if (!wanted) return;
-      void settleStart(media, playNow(media), () => wanted && !destroyed).then(
-        (outcome) => {
-          if (!destroyed && outcome === 'muted') askSound = true;
-        }
-      );
+      if (wanted) startPlaying(media);
     };
     if (media.readyState >= HTMLMediaElement.HAVE_METADATA) {
       carryOn();
@@ -725,11 +827,7 @@
     if (start === 'sound') {
       wanted = true;
       media.muted = false;
-      void settleStart(media, playNow(media), () => wanted && !destroyed).then(
-        (outcome) => {
-          if (!destroyed && outcome === 'muted') askSound = true;
-        }
-      );
+      startPlaying(media);
     }
     if (takeFocus) playButton?.focus({ preventScroll: true });
 
@@ -822,11 +920,14 @@
     <div class="player__ended">{@render ended(replay)}</div>
   {:else if controls && !error}
     <div class="player__bar" role="group" aria-label={m.player_controls()}>
+      <!-- The scrubber's cue, said: the button alone carries `aria-busy`, as
+           ListenCard's does, since a busy region's changes may go unsaid. -->
       <button
         bind:this={playButton}
         type="button"
         class="player__button player__play"
         aria-label={offerPlay ? m.player_play() : m.player_pause()}
+        aria-busy={buffering || undefined}
         onclick={toggle}
       >
         {#if offerPlay}
@@ -836,7 +937,7 @@
         {/if}
       </button>
 
-      <div class="player__scrub" data-waiting={waiting && !paused ? '' : undefined}>
+      <div class="player__scrub" data-waiting={buffering ? '' : undefined}>
         <span class="player__track" aria-hidden="true">
           <span class="player__loaded" style:--_to={fill}></span>
           <span class="player__played" style:--_to={played}></span>
@@ -851,14 +952,14 @@
           disabled={duration <= 0}
           inert={Boolean(fixed)}
           aria-label={m.player_seek()}
-          aria-valuetext={m.player_time({ time: clock(time), duration: clock(duration) })}
+          aria-valuetext={m.player_time({ time: timeText(time), duration: timeText(duration) })}
           oninput={(event) => seek(Number(event.currentTarget.value))}
           onkeydown={handleScrubKey}
         />
       </div>
 
       <span class="player__time" aria-hidden="true">
-        {clock(time)}{#if duration > 0}<span class="player__total">{' / '}{clock(duration)}</span>{/if}
+        {timeText(time)}{#if duration > 0}<span class="player__total">{' / '}{timeText(duration)}</span>{/if}
       </span>
 
       {#if captions.length > 0}

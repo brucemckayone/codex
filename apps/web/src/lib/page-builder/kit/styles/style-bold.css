@@ -348,7 +348,7 @@
 /* ── hung heads ──────────────────────────────────────────────────────────── */
 /* Wide: the heading spans the column and its lead hangs in the right-hand
    five-twelfths under it. Only heads that stand ABOVE their block's content;
-   one that sits beside it (pricing's focus, the stats grid) keeps its own. */
+   one that sits beside it (pricing's focus) keeps its own. */
 @container (min-width: 56rem) {
   :is(.lp, #lp-style)[data-lp-style='bold']
     :is(
@@ -393,20 +393,22 @@
       .tf__head,
       .tm:not([data-layout='quote']) > .tm__head,
       .pricing[data-layout='cards'] > .pricing__head
-    )
-    > .lp-text {
+    ):has(> .lp-text)
+    > :is(.lp-text, .lp-facts) {
+    /* A facts line hangs under the lead; a head with no lead has no second
+       column for it to hang in, hence the `:has()` (Codex-61zsk.73). */
     grid-column: 2;
   }
 }
 
-/* A heading that shares its row — with an offer, the numbers, a list, a
-   portrait — steps down one size, so it keeps to two or three lines in its
-   share of the column instead of breaking a word to a line. */
+/* A heading that shares its row — with an offer, a list, a portrait, a
+   moment's picture — steps down one size, so it keeps to two or three lines
+   in its share of the column instead of breaking a word to a line. */
 @container (min-width: 56rem) {
   :is(.lp, #lp-style)[data-lp-type-facet='bold']
     :is(
       .pricing[data-layout='focus'] > .pricing__head,
-      .stats[data-layout='grid'] > .stats__head,
+      .story-scroll .story-words,
       .text[data-layout='columns'] > .text__head,
       .benefits[data-layout='split'] .benefits__words,
       .problem[data-layout='split'] .problem__head,
@@ -440,8 +442,10 @@
 }
 
 /* ── the story told as headlines ─────────────────────────────────────────── */
-/* Each moment's name at a heading's scale, so the scroll reads as a run of
-   headlines, each coming to full ink as it becomes the one in view. */
+/* Each moment's name at a headline's scale, so the scroll reads as a run of
+   headlines, each coming to full ink as it becomes the one in view. Wide,
+   every Type draws it at the heading's size (StoryScroll), Bold's a step
+   down beside its picture (above); this is the phone's. */
 :is(.lp, #lp-style)[data-lp-type-facet='bold'] .story-scroll {
   --lp-size-title: calc(clamp(1.75rem, 0.9rem + 3cqi, 3.5rem) * var(--lp-scale));
   --lp-leading-title: var(--lp-leading-heading);
@@ -492,29 +496,13 @@
 }
 
 /* ── the numbers: counted up, at display size ────────────────────────────── */
-/* Fewer to a line, so each figure can take the display size: four make two
-   pairs, never four small ones. Labels read at the block's item size under
-   them, in the label's weight. */
-:is(.lp, #lp-style)[data-lp-type-facet='bold'] .stats[data-layout='row'] {
-  --_figure: var(--lp-size-display);
-}
-
-@container (min-width: 48rem) {
-  :is(.lp, #lp-style)[data-lp-style='bold']
-    .stats[data-layout='row']
-    .stats__list:is([data-count='2'], [data-count='4']) {
-    --_cols: 2;
-  }
-}
-
+/* Every Style sets the figures at display size, four as two pairs, with
+   labels in full ink (StatsBlock), as Bold first did. Bold's labels read in
+   the label's weight, on a measure of their own. */
 :is(.lp, #lp-style)[data-lp-type-facet='bold'] .stat__label {
   max-inline-size: calc(24 * var(--lp-measure-unit));
   font-weight: var(--lp-weight-label);
   --lp-measure-unit: var(--lp-zero-label);
-}
-
-:is(.lp, #lp-style)[data-lp-style='bold'] .stat__label {
-  color: var(--lp-ink);
 }
 
 /* A Moving background in the tint of Bold's own cards (03 X33), where the

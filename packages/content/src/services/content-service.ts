@@ -77,6 +77,7 @@ import {
   ContentTypeMismatchError,
   CreatorPayoutsRequiredError,
   InternalServiceError,
+  MediaDeletedError,
   MediaNotFoundError,
   MediaNotReadyError,
   SlugConflictError,
@@ -655,7 +656,9 @@ export class ContentService extends BaseService {
    *
    * Security:
    * - Validates creator ownership before update
-   * - Prevents changing mediaItemId (immutable after creation)
+   * - Checks a CHANGED mediaItemId as create does: the caller's own, not
+   *   deleted, the content's type, ready if live (published or ever
+   *   released; Codex-vmi6m)
    * - Maintains organization scoping
    *
    * @param id - Content ID
@@ -664,6 +667,10 @@ export class ContentService extends BaseService {
    * @returns Updated content
    * @throws {ContentNotFoundError} If content doesn't exist
    * @throws {ForbiddenError} If content doesn't belong to creator
+   * @throws {MediaNotFoundError} If a newly attached media item isn't the
+   *   caller's, or is deleted
+   * @throws {MediaNotReadyError} If it isn't ready and the content is live
+   * @throws {ContentTypeMismatchError} If its type isn't the content's
    * @throws {CreatorPayoutsRequiredError} If the update sets or changes a
    *   price or tier on published content whose creator can't be paid
    */
@@ -914,6 +921,32 @@ export class ContentService extends BaseService {
           effIsTeamOnly ||
           effCourseOnly ||
           effGated;
+
+        // Codex-vmi6m: an item the PATCH attaches is checked as create checks
+        // one: the caller's own, not deleted, the content's type, and ready
+        // when the content is live (published, or ever released). Before, the id went straight
+        // into the `.set()` spread, so any media item, another creator's or a
+        // deleted one, could be attached. A locking read, so an attach can't
+        // land on an item a delete just took (Codex-6sbn1). Only a CHANGED id
+        // is checked: a draft whose item was deleted keeps its link until a
+        // new one is picked (a restore heals it), so a save that doesn't touch
+        // the media still goes through.
+        const sentMediaItemId = restValidated.mediaItemId;
+        if (
+          sentMediaItemId != null &&
+          sentMediaItemId !== existing.mediaItemId
+        ) {
+          await this.validateMediaItem(
+            tx as DatabaseTransaction,
+            sentMediaItemId,
+            creatorId,
+            restValidated.contentType ?? existing.contentType,
+            // Live as the usage lookup counts it: released content keeps its
+            // buyers after it goes off sale, so it needs a playable item too.
+            existing.status === CONTENT_STATUS.PUBLISHED ||
+              existing.publishedAt !== null
+          );
+        }
 
         // Codex-2hxff.14: publish() refuses priced or tier content whose
         // creator can't be paid, so a LIVE row must not be priced or tiered
@@ -1188,6 +1221,9 @@ export class ContentService extends BaseService {
    * @returns Published content
    * @throws {ContentNotFoundError} If content doesn't exist
    * @throws {BusinessLogicError} If content is not ready to publish
+   * @throws {MediaDeletedError} If its media item was deleted (Codex-6sbn1)
+   * @throws {MediaNotFoundError} If its media item is another creator's
+   *   (Codex-vmi6m)
    */
   async publish(
     id: string,
@@ -1195,7 +1231,18 @@ export class ContentService extends BaseService {
   ): Promise<Content & ContentTierWire> {
     try {
       const result = await this.db.transaction(async (tx) => {
-        // Get content with media item
+        // The row first, locked FOR NO KEY UPDATE, then its media FOR KEY
+        // SHARE below: the order update() takes them in. Publish takes no tier
+        // lock (its tick and payouts reads are plain), so the plan-access lock
+        // order (@codex/subscription tier-service.ts) holds. Unlocked, a PATCH
+        // that swapped the media between this read and the media lock made
+        // the publish go live on an item checked only as a draft attach
+        // (Codex-6sbn1).
+        await tx
+          .select({ id: content.id })
+          .from(content)
+          .where(and(eq(content.id, id), scopedNotDeleted(content, creatorId)))
+          .for('no key update');
         const existing = await tx.query.content.findFirst({
           where: and(eq(content.id, id), scopedNotDeleted(content, creatorId)),
           with: {
@@ -1228,6 +1275,29 @@ export class ContentService extends BaseService {
                 contentType: existing.contentType,
               }
             );
+          }
+          // A draft keeps its link to a deleted item (Codex-6sbn1), and must
+          // not go live on it. A locking read, so a delete running now is
+          // ordered against this publish: one that committed first is seen
+          // here; one that waits on this lock then sees a published use, and
+          // refuses. Scoped to the content's creator: a row that took another
+          // creator's item through the old PATCH hole (Codex-vmi6m) must not
+          // go live streaming their file.
+          const [media] = await tx
+            .select({ deletedAt: mediaItems.deletedAt })
+            .from(mediaItems)
+            .where(
+              and(
+                eq(mediaItems.id, existing.mediaItem.id),
+                eq(mediaItems.creatorId, existing.creatorId)
+              )
+            )
+            .for('key share');
+          if (!media) {
+            throw new MediaNotFoundError(existing.mediaItem.id);
+          }
+          if (media.deletedAt) {
+            throw new MediaDeletedError(id);
           }
           if (existing.mediaItem.status !== MEDIA_STATUS.READY) {
             throw new MediaNotReadyError(existing.mediaItem.id);
@@ -1910,6 +1980,10 @@ export class ContentService extends BaseService {
    * - Media status is 'ready' (if requireReady is true)
    * - Media type matches content type
    *
+   * A locking read (FOR KEY SHARE): a media delete holds the row FOR UPDATE
+   * while it checks the item's uses, so an attach that started after it
+   * waits, re-reads the row, finds it deleted and refuses (Codex-6sbn1).
+   *
    * @param tx - Database transaction
    * @param mediaItemId - Media item ID
    * @param creatorId - Creator ID
@@ -1923,15 +1997,19 @@ export class ContentService extends BaseService {
     tx: DatabaseTransaction,
     mediaItemId: string,
     creatorId: string,
-    contentType: typeof CONTENT_TYPES.VIDEO | typeof CONTENT_TYPES.AUDIO,
+    contentType: string,
     requireReady: boolean = true
   ): Promise<void> {
-    const mediaItem = await tx.query.mediaItems.findFirst({
-      where: and(
-        eq(mediaItems.id, mediaItemId),
-        scopedNotDeleted(mediaItems, creatorId)
-      ),
-    });
+    const [mediaItem] = await tx
+      .select({ status: mediaItems.status, mediaType: mediaItems.mediaType })
+      .from(mediaItems)
+      .where(
+        and(
+          eq(mediaItems.id, mediaItemId),
+          scopedNotDeleted(mediaItems, creatorId)
+        )
+      )
+      .for('key share');
 
     if (!mediaItem) {
       throw new MediaNotFoundError(mediaItemId);

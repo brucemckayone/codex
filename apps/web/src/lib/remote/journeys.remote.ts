@@ -495,11 +495,36 @@ export const saveJourneyPage = command(
     // (`stage: 'page'`), so the honest sentence was one forward away. A 412
     // (another save got there first, Codex-61zsk.18) arrives the same way, and
     // the builder session reads its status.
-    return withServiceErrors(() =>
-      ctx.api.access.saveJourneyPage(ctx.orgId, record)
-    );
+    return withServiceErrors(async () => {
+      try {
+        return await ctx.api.access.saveJourneyPage(ctx.orgId, record);
+      } catch (err) {
+        forwardCourseMediaDeleted(err);
+        throw err;
+      }
+    });
   }
 );
+
+/**
+ * A publish refused because the course page's slot media was deleted
+ * (Codex-6sbn1, `CourseMediaDeletedError`: 422, `details: { code:
+ * 'MEDIA_DELETED', slots }`). {@link withServiceErrors} forwards the message
+ * only; the builder also needs the code (to open Settings → Media) and the
+ * slots (to name them), so this one refusal keeps both. The slots are the
+ * worker's own enum values, nothing a creator typed.
+ */
+function forwardCourseMediaDeleted(err: unknown): void {
+  if (!ApiError.isApiError(err) || err.status !== 422) return;
+  const details = err.details as
+    | { code?: unknown; slots?: unknown }
+    | undefined;
+  if (details?.code !== 'MEDIA_DELETED') return;
+  const slots = Array.isArray(details.slots)
+    ? details.slots.filter((slot): slot is string => typeof slot === 'string')
+    : [];
+  error(422, { message: err.message, code: 'MEDIA_DELETED', slots });
+}
 
 /**
  * Set the journey's ways-in + prices (pence, GBP) — the pricing panel's write.

@@ -31,8 +31,8 @@
 -->
 <script lang="ts">
   import { cappedSizes, getThumbnailSrcset } from '$lib/utils/image';
-  import type { SellPreview } from '../../../render/types';
   import { featuredScheme } from '../../model/resolve';
+  import { stillFocusFor } from '../../model/still-focus';
   import type { BlockProps } from '../../model/types';
   import { getKitPage } from '../../page-context';
   import ButtonRow from '../../primitives/ButtonRow.svelte';
@@ -44,7 +44,7 @@
   import Watch from '../video/Watch.svelte';
   import { INSTRUCTOR_COPY } from './copy';
   import Credentials from './Credentials.svelte';
-  import { INSTRUCTOR_PROMPT, instructorDefinition } from './definition';
+  import { guideStill, INSTRUCTOR_PROMPT, instructorDefinition } from './definition';
   import GuideQuote from './GuideQuote.svelte';
   import { initials } from '../../model/initials';
   import Signoff from './Signoff.svelte';
@@ -64,8 +64,6 @@
   const monogram = $derived(layout === 'quote' ? '' : initials(content.name));
   const filled = $derived(featuredScheme(page.style, section.scheme));
 
-  const still = (preview: SellPreview | null) =>
-    preview?.guidePortraitUrl ?? preview?.guideClip?.posterUrl ?? null;
   // The portrait is a media still, so it offers the three sizes its URL names,
   // at the width each layout draws it (Codex-61zsk.66): split takes 5 of 12
   // columns from 52rem (Bold and Cinematic crop it to the band's edge, so up
@@ -112,7 +110,9 @@
   {/if}
 {/snippet}
 
-<!-- `play`: the clip's button sits on the portrait (split, centred) or beside the name (quote). -->
+<!-- `play`: the clip's button sits on the portrait (split, centred) or beside the name (quote).
+     The portrait is cropped round the point set on this page, for its still
+     alone (`stillFocus`, Codex-61zsk.73). -->
 {#snippet portrait(play: boolean, place: 'corner' | 'foot' = 'corner')}
   {#await context.sellPreview}
     <div class="guide__portrait" data-layout={layout}>
@@ -120,17 +120,20 @@
     </div>
   {:then preview}
     {@const clip = preview?.guideClip ?? null}
-    {#if still(preview) || clip}
+    {@const still = guideStill(preview)}
+    {@const focus = stillFocusFor(content.stillFocus, still)}
+    {#if still || clip}
       <div class="guide__portrait" data-layout={layout}>
         <span class="lp-atmos guide__glow" aria-hidden="true"></span>
         {#if clip && play}
           <InlineFilm {clip} film="guide" label={watchLabel} {title} {edit}>
             {#snippet children(control, player)}
               <ClipFrame
-                still={still(preview)}
-                srcset={getThumbnailSrcset(still(preview) ?? '')}
+                {still}
+                srcset={getThumbnailSrcset(still ?? '')}
                 sizes={portraitSizes}
                 ratio="var(--_ratio)"
+                {focus}
                 {alt}
                 {place}
                 {player}
@@ -141,10 +144,11 @@
           </InlineFilm>
         {:else}
           <ClipFrame
-            still={still(preview)}
-            srcset={getThumbnailSrcset(still(preview) ?? '')}
+            {still}
+            srcset={getThumbnailSrcset(still ?? '')}
             sizes={portraitSizes}
             ratio="var(--_ratio)"
+            {focus}
             {alt}
           />
         {/if}
@@ -179,7 +183,7 @@
       {#await context.sellPreview then preview}
         {#if preview?.guideClip}
           <Watch clip={preview.guideClip} film="guide" label={watchLabel} {title} {edit} />
-        {:else if edit && !still(preview)}
+        {:else if edit && !guideStill(preview)}
           <p class="guide__prompt" data-lp-edit-only>{INSTRUCTOR_PROMPT}</p>
         {/if}
       {/await}

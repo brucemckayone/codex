@@ -3,6 +3,7 @@ export { default as AlertCircleIcon } from './AlertCircleIcon.svelte';
 export { default as AlertTriangleIcon } from './AlertTriangleIcon.svelte';
 // Navigation
 export { default as ArrowLeftIcon } from './ArrowLeftIcon.svelte';
+export { default as ArrowLeftRightIcon } from './ArrowLeftRightIcon.svelte';
 export { default as ArrowRightIcon } from './ArrowRightIcon.svelte';
 export { default as BanknoteIcon } from './BanknoteIcon.svelte';
 // Misc
@@ -39,6 +40,7 @@ export { default as GripVerticalIcon } from './GripVerticalIcon.svelte';
 export { default as HeartIcon } from './HeartIcon.svelte';
 export { default as HomeIcon } from './HomeIcon.svelte';
 export { default as ImageIcon } from './ImageIcon.svelte';
+export { default as InfoIcon } from './InfoIcon.svelte';
 // Social
 export { default as InstagramIcon } from './InstagramIcon.svelte';
 export { default as LayoutDashboardIcon } from './LayoutDashboardIcon.svelte';
@@ -46,6 +48,7 @@ export { default as LayoutGridIcon } from './LayoutGridIcon.svelte';
 export { default as LayoutListIcon } from './LayoutListIcon.svelte';
 export { default as LibraryIcon } from './LibraryIcon.svelte';
 export { default as LifeBuoyIcon } from './LifeBuoyIcon.svelte';
+export { default as LinkIcon } from './LinkIcon.svelte';
 export { default as LockIcon } from './LockIcon.svelte';
 export { default as LogInIcon } from './LogInIcon.svelte';
 export { default as MaximizeIcon } from './MaximizeIcon.svelte';
@@ -75,6 +78,7 @@ export { default as TrashIcon } from './TrashIcon.svelte';
 export { default as TrendingUpIcon } from './TrendingUpIcon.svelte';
 export { default as TwitterIcon } from './TwitterIcon.svelte';
 export { default as UndoIcon } from './UndoIcon.svelte';
+export { default as UnlinkIcon } from './UnlinkIcon.svelte';
 export { default as UploadIcon } from './UploadIcon.svelte';
 // User
 export { default as UserIcon } from './UserIcon.svelte';

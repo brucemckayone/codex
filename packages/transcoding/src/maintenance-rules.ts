@@ -134,6 +134,49 @@ export function lostJobAction(
   }
 }
 
+/**
+ * When the status object asks RunPod about a job that has sent no progress
+ * (Codex-t359w), as times after its dispatch. A worker that is already up
+ * reports within seconds, and a cold start takes 1 to 3 minutes, so 2 minutes
+ * rarely asks about a job that is about to start. After the last ask the
+ * hourly run's reconcile is the backstop.
+ */
+export const UNSTARTED_CHECKS_MS = [
+  2 * MINUTE_MS,
+  5 * MINUTE_MS,
+  10 * MINUTE_MS,
+] as const;
+
+/**
+ * What an early ask about a job with no progress leads to. `queued`: RunPod
+ * has no worker on it yet. `running`: a worker has it, so its steps follow.
+ */
+export type UnstartedJobAction =
+  | { kind: 'queued' }
+  | { kind: 'running' }
+  | { kind: 'ask_later' }
+  | Extract<LostJobAction, { kind: 'fail' | 'wait' }>;
+
+/**
+ * An ended job fails as the hourly reconcile would fail it, only sooner. A
+ * job RunPod no longer has is sent again: the reconcile reads GONE as a lost
+ * webhook because RunPod keeps a result 30 minutes, so one gone within
+ * minutes of dispatch, with no step, was dropped (or the endpoint changed).
+ * An answer that cannot be read waits for the next ask.
+ */
+export function unstartedJobAction(
+  answer: Exclude<JobAnswer, 'no_job'>
+): UnstartedJobAction {
+  if (answer === 'unanswered') return { kind: 'ask_later' };
+  if (answer.state === 'IN_QUEUE') return { kind: 'queued' };
+  if (answer.state === 'IN_PROGRESS') return { kind: 'running' };
+  if (answer.state === 'GONE') {
+    return { kind: 'wait', detail: 'RunPod dropped the job before it started' };
+  }
+  const action = lostJobAction(answer, 0);
+  return action.kind === 'fail' ? action : { kind: 'ask_later' };
+}
+
 /** What to do with an idle `uploaded` row. */
 export type WaitingAction =
   | { kind: 'retry' }

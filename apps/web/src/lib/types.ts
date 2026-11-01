@@ -19,7 +19,11 @@ import type {
   ServedMediaItem,
   SubscriptionTier,
 } from '@codex/database/schema';
-import type { IntroFilm, MyMembershipResponse } from '@codex/shared-types';
+import type {
+  IntroFilm,
+  MediaUsageCounts,
+  MyMembershipResponse,
+} from '@codex/shared-types';
 import type { SubscriberSubscription } from '@codex/subscription';
 import type { HeroLayout } from '@codex/validation';
 
@@ -56,6 +60,13 @@ export interface MediaItemWithRelations extends ServedMediaItem {
     email: string;
     name: string | null;
   };
+  /**
+   * How many places use it, and how many of those are published
+   * (Codex-6sbn1): the library list's rows only, for the "In use by N" chip.
+   * Absent on a single read, and from a worker older than the chip: treat
+   * ABSENT as "not known", never as "not in use".
+   */
+  usage?: MediaUsageCounts;
 }
 
 /**

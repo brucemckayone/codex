@@ -22,11 +22,15 @@
   import MediaFeatureSlab from '$lib/components/studio/media-library/MediaFeatureSlab.svelte';
   import MediaTileGrid, { type UploadGhost } from '$lib/components/studio/media-library/MediaTileGrid.svelte';
   import EditMediaDialog from '$lib/components/studio/EditMediaDialog.svelte';
+  import MediaDeleteDialog from '$lib/components/studio/media-library/MediaDeleteDialog.svelte';
+  import { MediaDeleteFlow } from '$lib/components/studio/media-library/media-delete-flow.svelte';
+  import { draftsLeftToast } from '$lib/components/studio/media-library/media-usage';
   import { Pagination } from '$lib/components/ui/Pagination';
-  import * as Dialog from '$lib/components/ui/Dialog';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import { FilmIcon, SearchXIcon, UploadIcon } from '$lib/components/ui/Icon';
-  import { deleteMedia, updateMedia } from '$lib/remote/media.remote';
+  import { toast } from '$lib/components/ui/Toast/toast-store';
+  import { deleteMedia, getMediaUsage, updateMedia } from '$lib/remote/media.remote';
+  import { readFreshQuery } from '$lib/remote/query-result';
   import { mediaStatus } from '$lib/client/media-status.svelte';
   import { logger } from '$lib/observability';
   import type { MediaItemWithRelations } from '$lib/types';
@@ -39,7 +43,7 @@
   interface Props {
     /** Page data containing mediaItems, pagination, and filters */
     data: {
-      mediaItems: MediaItemWithRelations[];
+      mediaItems: (MediaItemWithRelations & { thumbnailUrl?: string | null })[];
       pagination: { page: number; totalPages: number; total?: number };
       filters: { status: string; mediaType: string };
     };
@@ -115,10 +119,15 @@
   );
 
 
-  // ── Delete state ──────────────────────────────────────────────────────
-  let showDeleteConfirm = $state(false);
-  let deleteTargetId: string | null = $state(null);
-  let isDeleting = $state(false);
+  // ── Delete (Codex-6sbn1) ──────────────────────────────────────────────
+  // Never a cached read: the chip's popover may hold the same query, minutes old.
+  const deleteFlow = new MediaDeleteFlow({
+    readUsage: (id) => readFreshQuery(getMediaUsage(id)),
+    remove: (input) => deleteMedia(input),
+  });
+
+  /** Focus after a delete: the library, not `<body>` once the tile has gone. */
+  let libraryBody: HTMLElement | null = $state(null);
 
   // ── Edit state ────────────────────────────────────────────────────────
   let showEditDialog = $state(false);
@@ -262,31 +271,49 @@
   }
 
   function handleDelete(id: string) {
-    deleteTargetId = id;
-    showDeleteConfirm = true;
+    const media = data.mediaItems.find((item) => item.id === id);
+    if (!media) return;
+    deleteFlow.open({
+      id: media.id,
+      title: media.title,
+      mediaType: media.mediaType,
+      durationSeconds: media.durationSeconds,
+      fileSizeBytes: media.fileSizeBytes,
+      thumbnailUrl: media.thumbnailUrl,
+      usage: media.usage,
+    });
   }
 
   async function confirmDelete() {
-    if (!deleteTargetId) return;
-    isDeleting = true;
-    try {
-      await deleteMedia(deleteTargetId);
-      showDeleteConfirm = false;
-      deleteTargetId = null;
-      refreshAfterChange();
-    } catch (error) {
-      logger.error('Failed to delete media', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      isDeleting = false;
-    }
-  }
-
-  function handleDeleteDialogChange(isOpen: boolean) {
-    showDeleteConfirm = isOpen;
-    if (!isOpen) {
-      deleteTargetId = null;
+    const mediaId = deleteFlow.target?.id;
+    const outcome = await deleteFlow.confirm();
+    if (!outcome) return;
+    switch (outcome.kind) {
+      case 'deleted':
+        deleteFlow.close();
+        refreshAfterChange();
+        // Owner round 2, decision 6: say which drafts lost their media.
+        if (outcome.drafts > 0) {
+          toast.add(draftsLeftToast(outcome.drafts, outcome.firstDraft, page.url));
+        }
+        return;
+      case 'gone':
+        // Another tab deleted it first: the list catches up.
+        deleteFlow.close();
+        refreshAfterChange();
+        toast.info(m.media_delete_already_gone());
+        return;
+      case 'failed':
+        // The dialog says so (F3); this is for us.
+        if (outcome.status === undefined || outcome.status >= 500) {
+          logger.error('studio_media.delete_failed', { mediaId, status: outcome.status });
+        } else if (outcome.status !== 429) {
+          logger.warn('studio_media.delete_refused', { mediaId, status: outcome.status });
+        }
+        return;
+      case 'refused':
+        // The dialog re-read the uses and says why (R1, R2).
+        return;
     }
   }
 
@@ -317,7 +344,13 @@
   <!-- Library body — feature slab (page 1 only), grid, pagination -->
   <p class="sr-only" role="status" aria-live="polite">{announcement}</p>
 
-  <div class="library-body">
+  <div
+    class="library-body"
+    role="region"
+    aria-label={m.media_title()}
+    tabindex="-1"
+    bind:this={libraryBody}
+  >
     {#if data.mediaItems.length === 0 && ghostItems.length === 0}
       <EmptyState
         title={m.media_empty()}
@@ -383,29 +416,12 @@
   onSave={handleSave}
 />
 
-<!-- Delete Confirmation Dialog -->
-<Dialog.Root bind:open={showDeleteConfirm} onOpenChange={handleDeleteDialogChange}>
-  <Dialog.Content size="sm">
-    <Dialog.Header>
-      <Dialog.Title>{m.media_delete_title()}</Dialog.Title>
-    </Dialog.Header>
-    <Dialog.Body>
-      <p class="delete-description">{m.media_delete_confirm()}</p>
-    </Dialog.Body>
-    <Dialog.Footer>
-      <Button
-        variant="secondary"
-        onclick={() => handleDeleteDialogChange(false)}
-        disabled={isDeleting}
-      >
-        {m.common_cancel()}
-      </Button>
-      <Button variant="destructive" onclick={confirmDelete} disabled={isDeleting} loading={isDeleting}>
-        {isDeleting ? m.common_loading() : m.media_delete_button()}
-      </Button>
-    </Dialog.Footer>
-  </Dialog.Content>
-</Dialog.Root>
+<!-- Delete: reads where the item is used first (Codex-6sbn1) -->
+<MediaDeleteDialog
+  flow={deleteFlow}
+  onConfirm={confirmDelete}
+  focusAfterDelete={() => libraryBody}
+/>
 
 <style>
   .media-page {
@@ -421,16 +437,15 @@
     padding: 0 var(--space-1);
   }
 
+  /* Focused from code only (after a delete): a ring round the whole library
+     would mark nothing the creator can act on; the next Tab lands on a tile. */
+  .library-body:focus {
+    outline: none;
+  }
+
   .pagination-container {
     display: flex;
     justify-content: center;
     margin-top: var(--space-2);
-  }
-
-  .delete-description {
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
-    margin: 0;
-    line-height: var(--leading-relaxed);
   }
 </style>

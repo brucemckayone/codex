@@ -82,6 +82,21 @@ export class TierRequiredToPublishError extends BusinessLogicError {
   }
 }
 
+/**
+ * An admin publish of content whose media item was deleted (422,
+ * Codex-6sbn1). The twin of `@codex/content`'s `MediaDeletedError`; the
+ * message and `code: 'MEDIA_DELETED'` are copied verbatim — keep them in
+ * step. The context carries the content id only (it is sent to the client).
+ */
+export class MediaDeletedError extends BusinessLogicError {
+  constructor(contentId: string) {
+    super(
+      'Choose another media item before you publish: the last one was deleted.',
+      { contentId, code: 'MEDIA_DELETED' }
+    );
+  }
+}
+
 // ============================================================================
 // Support refunds (Codex-2hxff.28; data design §1's error table)
 //

@@ -1,3 +1,5 @@
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { tick } from 'svelte';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
@@ -5,10 +7,13 @@ import {
   mount,
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
+import type { JourneySalesContext } from '../../../render/types';
 import { COPY } from '../../model/copy';
+import { benefitsFacts } from '../../model/facts';
 import { SECTION_LAYOUTS } from '../../model/ids';
 import { type SampleOfferState, sampleContext } from '../../model/sample';
 import type { BlockEdit, ResolvedSection } from '../../model/types';
+import { sheetRules } from '../testing';
 import BenefitsBlock from './BenefitsBlock.svelte';
 import { BENEFITS_EMPTY, benefitsDefinition } from './definition';
 
@@ -30,6 +35,7 @@ async function render(
     offer?: SampleOfferState;
     edit?: BlockEdit | null;
     mediaBaseUrl?: string;
+    context?: JourneySalesContext;
   } = {}
 ) {
   const section: ResolvedSection = {
@@ -47,10 +53,12 @@ async function render(
     props: {
       props,
       section,
-      context: sampleContext({
-        offer: options.offer ?? 'buy',
-        mediaBaseUrl: options.mediaBaseUrl,
-      }),
+      context:
+        options.context ??
+        sampleContext({
+          offer: options.offer ?? 'buy',
+          mediaBaseUrl: options.mediaBaseUrl,
+        }),
       edit: options.edit ?? null,
     },
   });
@@ -444,5 +452,122 @@ describe('BenefitsBlock: every size a tile picture has (Codex-61zsk.66)', () => 
     expect(img?.getAttribute('sizes')).toBe(
       '(min-width: 82rem) 54.67rem, (min-width: 56rem) 66.67vw, 100vw'
     );
+  });
+});
+
+describe('BenefitsBlock: the course’s facts (Codex-61zsk.73)', () => {
+  const FACTS = benefitsFacts(sampleContext());
+  const factsLine = () => one('.lp-facts');
+  const follows = (a: Node | null, b: Node | null) =>
+    Boolean(
+      a && b && a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING
+    );
+
+  it.each(
+    SECTION_LAYOUTS.benefits
+  )('%s: counts the course under the heading and lede, before the items', async (layout) => {
+    await render(
+      { ...SAMPLE, body: 'All of it opens on day one.' },
+      { layout }
+    );
+    const line = factsLine();
+    expect(line?.textContent).toBe(FACTS.join(', '));
+    expect(follows(one('h2'), line)).toBe(true);
+    expect(follows(one('.lp-text'), line)).toBe(true);
+    expect(follows(line, one('ul'))).toBe(true);
+    // One of the section's words, never one of its items.
+    expect(
+      line?.parentElement?.matches('.benefits__head, .benefits__words')
+    ).toBe(true);
+  });
+
+  it('never says the price, whatever the way in', async () => {
+    for (const offer of ['buy', 'sub', 'tiers'] as const) {
+      await rerender(SAMPLE, { offer });
+      expect(factsLine()?.textContent, offer).not.toContain('£');
+    }
+  });
+
+  it.each(
+    SECTION_LAYOUTS.benefits
+  )('%s: the switch hides them', async (layout) => {
+    await render({ ...SAMPLE, hideFacts: true }, { layout });
+    expect(factsLine()).toBeNull();
+    expect(one('h2')?.textContent).toBe(SAMPLE.heading);
+  });
+
+  it('draws them over the items when the section has no words of its own', async () => {
+    await render({ items: SAMPLE.items });
+    expect(one('.benefits__head .lp-facts')).not.toBeNull();
+    // Still no heading, so the items keep the section's level.
+    expect(all('h2')).toHaveLength(SAMPLE.items?.length ?? 0);
+  });
+
+  it('draws no line, and no empty head, for a course with nothing to count', async () => {
+    const empty = { ...sampleContext(), stages: [] };
+    await render({ ...SAMPLE, body: 'B' }, { context: empty });
+    expect(factsLine()).toBeNull();
+    await rerender({ items: SAMPLE.items }, { context: empty });
+    expect(one('.benefits__head')).toBeNull();
+  });
+
+  it('the canvas counts the same course as the visitor’s page', async () => {
+    await render(SAMPLE, { edit: { commit: () => {} } });
+    expect(factsLine()?.textContent).toBe(FACTS.join(', '));
+    // Counted, never typed: nothing in it is edited inline.
+    expect(
+      one('.lp-facts [contenteditable], .lp-facts[data-field]')
+    ).toBeNull();
+  });
+
+  it('offers the switch under the words, saying HIDE, so it stores true or nothing', () => {
+    const keys = benefitsDefinition.fields.map((field) => field.key);
+    expect(keys.indexOf('hideFacts')).toBe(keys.indexOf('body') + 1);
+    const field = benefitsDefinition.fields.find((f) => f.key === 'hideFacts');
+    expect(field?.control).toBe('toggle');
+    expect(field?.label).toBe('Hide the course facts');
+    expect(benefitsDefinition.coerce({ hideFacts: true }).hideFacts).toBe(true);
+    expect(benefitsDefinition.coerce({ hideFacts: 'yes' })).not.toHaveProperty(
+      'hideFacts'
+    );
+  });
+
+  it('starts a new section, and the sample, without writing the switch', () => {
+    expect(
+      benefitsDefinition.starter({ courseTitle: 'Steady Ground' })
+    ).not.toHaveProperty('hideFacts');
+    expect(SAMPLE).not.toHaveProperty('hideFacts');
+  });
+
+  it('hangs under the lede where a wide head splits in two (Bold, Clean), never on a row of its own', () => {
+    const styles = join(
+      dirname(fileURLToPath(import.meta.url)),
+      '../../styles'
+    );
+    for (const style of ['bold', 'clean']) {
+      const split = sheetRules(join(styles, `style-${style}.css`)).filter(
+        (rule) =>
+          rule.within.includes('@container (min-width: 56rem)') &&
+          rule.selector.includes('.benefits__head') &&
+          rule.selector.includes(':has(> .lp-text) >') &&
+          rule.decls.has('grid-column')
+      );
+      const spanAt = split.findIndex(
+        (rule) => rule.decls.get('grid-column') === '1 / -1'
+      );
+      const ledeAt = split.findIndex((rule) =>
+        rule.selector.endsWith('> :is(.lp-text, .lp-facts)')
+      );
+      expect(split[ledeAt]?.decls.get('grid-column'), style).toBe('2');
+      // The span the head's other children take comes first, so the lede's
+      // column wins the tie; a span that picks its children names the line
+      // out of itself, or it would outrank the lede's.
+      expect(spanAt, style).toBeGreaterThan(-1);
+      expect(ledeAt, style).toBeGreaterThan(spanAt);
+      const span = split[spanAt]?.selector ?? '';
+      expect(span.endsWith('> *') || span.includes('.lp-facts)'), span).toBe(
+        true
+      );
+    }
   });
 });

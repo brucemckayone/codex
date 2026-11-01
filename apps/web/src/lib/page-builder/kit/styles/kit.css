@@ -275,6 +275,18 @@
   --lp-zero-body: calc(var(--lp-zero-body-400) + (var(--lp-zero-body-700) - var(--lp-zero-body-400)) * (clamp(400, var(--lp-weight-body), 700) - 400) / 300);
   --lp-zero-label: calc(var(--lp-zero-body-400) + (var(--lp-zero-body-700) - var(--lp-zero-body-400)) * (clamp(400, var(--lp-weight-label), 700) - 400) / 300);
   --lp-measure-unit: var(--lp-zero-body);
+  /* The org's logo (`OrgLogo`): its height, and its box, 15% more above and
+     below for its plate. Declared here, not on the logo, because what sits
+     under the logo allows for its box too: the hero poster's drop and Path's
+     stop (Codex-61zsk.73). Shorter on a phone, below. */
+  --lp-logo-h: var(--space-10);
+  --lp-logo-box: calc(var(--lp-logo-h) * 1.3);
+}
+
+@container lp-page (max-width: 30rem) {
+  .lp-section {
+    --lp-logo-h: var(--space-8);
+  }
 }
 
 .lp-section[data-lp-spacing='compact'] {

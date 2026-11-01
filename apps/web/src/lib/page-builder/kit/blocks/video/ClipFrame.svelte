@@ -26,6 +26,8 @@
     sizes?: string;
     /** CSS aspect ratio; omit to fill the parent. */
     ratio?: string;
+    /** Where the still is cropped round (`Media`); absent is the centre. */
+    focus?: { x: number; y: number };
     alt?: string;
     pending?: boolean;
     /** Letters drawn in the picture's place when there is none (`Media`). */
@@ -50,6 +52,7 @@
     srcset,
     sizes,
     ratio,
+    focus,
     alt = '',
     pending = false,
     mark,
@@ -63,7 +66,7 @@
 </script>
 
 <div class="clip {className ?? ''}" data-place={place}>
-  <Media image={still} {srcset} {sizes} {ratio} {pending} {alt} {mark} {scheme} />
+  <Media image={still} {srcset} {sizes} {ratio} {focus} {pending} {alt} {mark} {scheme} />
   {#if children}<div class="clip__control">{@render children()}</div>{/if}
   {#if player}{@render player()}{/if}
   {#if prompt && !still && !pending}

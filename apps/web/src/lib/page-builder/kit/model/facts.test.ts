@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { JourneySalesContext } from '../../render/types';
-import { courseFacts, type FactStage, heroFacts } from './facts';
+import { benefitsFacts, courseFacts, type FactStage, heroFacts } from './facts';
 import { sampleContext, sampleStages } from './sample';
 
 type Kind = FactStage['practices'][number]['contentType'];
@@ -132,5 +132,88 @@ describe('heroFacts — the course’s shape and its way in', () => {
       heroFacts({ ...base, stages: [{ ...stage, practices: [] }] })
     ).toEqual(['1 stage']);
     expect(heroFacts({ ...base, stages: [] })).toEqual([]);
+  });
+});
+
+describe('benefitsFacts — what the course holds, with no price', () => {
+  type Practice = JourneySalesContext['stages'][number]['practices'][number];
+
+  /** The sample course with each practice put through `change`. */
+  const course = (change: (practice: Practice) => Practice | null) => {
+    const base = sampleContext({ offer: 'buy' });
+    return {
+      ...base,
+      stages: base.stages.map((stage) => ({
+        ...stage,
+        practices: stage.practices.flatMap((practice) => {
+          const changed = change(practice);
+          return changed ? [changed] : [];
+        }),
+      })),
+    };
+  };
+
+  it('counts the stages and practices, and adds up the length with what was timed', () => {
+    expect(benefitsFacts(sampleContext())).toEqual([
+      '6 stages',
+      '24 practices',
+      '2 hr 41 min of video and audio',
+    ]);
+  });
+
+  it('never tells the price, whatever the way in', () => {
+    for (const offer of ['buy', 'sub', 'tiers', 'enrolled'] as const) {
+      const facts = benefitsFacts(sampleContext({ offer }));
+      expect(facts, offer).toHaveLength(3);
+      expect(facts.join(' '), offer).not.toMatch(/£|per month|one-off/);
+    }
+  });
+
+  it('names only the kinds it timed', () => {
+    const films = course((p) => (p.contentType === 'audio' ? null : p));
+    expect(benefitsFacts(films).at(-1)).toMatch(/ of video$/);
+    const recordings = course((p) => (p.contentType === 'video' ? null : p));
+    expect(benefitsFacts(recordings).at(-1)).toMatch(/ of audio$/);
+  });
+
+  it('leaves the length out while one film or recording has none', () => {
+    let first = true;
+    const unmeasured = course((practice) => {
+      if (practice.contentType !== 'video' || !first) return practice;
+      first = false;
+      return { ...practice, durationSeconds: null };
+    });
+    expect(benefitsFacts(unmeasured)).toEqual(['6 stages', '24 practices']);
+  });
+
+  it('tells no length for a course of readings alone', () => {
+    const readings = course((p) => (p.contentType === 'written' ? p : null));
+    expect(benefitsFacts(readings)).toEqual(['6 stages', '9 practices']);
+  });
+
+  it('counts one of each in the singular', () => {
+    const base = sampleContext();
+    const [stage] = base.stages;
+    if (!stage) throw new Error('the sample has no stage');
+    const [practice] = stage.practices;
+    if (!practice) throw new Error('the sample stage has no practice');
+    const film = {
+      ...practice,
+      contentType: 'video' as const,
+      durationSeconds: 600,
+    };
+    expect(
+      benefitsFacts({ ...base, stages: [{ ...stage, practices: [film] }] })
+    ).toEqual(['1 stage', '1 practice', '10 min of video']);
+  });
+
+  it('leaves out a count of nothing, and says nothing about an empty course', () => {
+    const base = sampleContext();
+    const [stage] = base.stages;
+    if (!stage) throw new Error('the sample has no stage');
+    expect(
+      benefitsFacts({ ...base, stages: [{ ...stage, practices: [] }] })
+    ).toEqual(['1 stage']);
+    expect(benefitsFacts({ ...base, stages: [] })).toEqual([]);
   });
 });

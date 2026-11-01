@@ -121,6 +121,12 @@ export const mediaItemStateSchema = z.object({
     .nullable(),
   /** Epoch ms of the next automatic retry, while waiting for the transcoder. */
   retryAt: z.number().int().nullable(),
+  /**
+   * A transcoding job RunPod has not started, as the early asks found it
+   * (Codex-t359w). `overdue`: still queued at the last ask, and the team has
+   * been told. Optional: an object on an older build never sends it.
+   */
+  queued: z.enum(['waiting', 'overdue']).nullable().optional(),
   /** Per item, rising: a tab ignores a state older than the one it has. */
   version: z.number().int(),
 });

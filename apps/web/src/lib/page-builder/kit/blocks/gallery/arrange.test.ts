@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  fullPicture,
   gridColumns,
   MOSAIC_SPANS,
+  mosaicCaption,
   mosaicTiles,
   pictureSizes,
   pictureVariant,
@@ -221,5 +223,48 @@ describe('pictureSizes under Clean (Codex-61zsk.66)', () => {
     expect(pictureSizes('grid', 0, 7)).toBe(
       '(min-width: 82rem) 20.5rem, (min-width: 60rem) 25vw, (min-width: 36rem) 50vw, 100vw'
     );
+  });
+});
+
+describe('mosaicCaption (p3n §4)', () => {
+  it('lays a caption over the broad tiles only, and under every other', () => {
+    expect(
+      (['single', 'large', 'wide', 'block', 'tall', 'small'] as const).map(
+        (tile) => [tile, mosaicCaption(tile)]
+      )
+    ).toEqual([
+      ['single', 'over'],
+      ['large', 'over'],
+      ['wide', 'over'],
+      ['block', 'under'],
+      ['tall', 'under'],
+      ['small', 'under'],
+    ]);
+  });
+});
+
+describe('fullPicture: what the lightbox shows (p3n §4)', () => {
+  const CDN = 'https://cdn.test';
+  const key = 'landing-pages/p1/images/g1';
+
+  it('is the xl file, with its size, for a reference that records one', () => {
+    expect(fullPicture({ key, w: 3000, h: 2000 }, CDN)).toEqual({
+      url: `${CDN}/${key}/xl.webp`,
+      w: 3000,
+      h: 2000,
+    });
+  });
+
+  it('is the lg file, with no size, for one uploaded before xl existed', () => {
+    expect(fullPicture({ key }, CDN)).toEqual({ url: `${CDN}/${key}/lg.webp` });
+    // A size that is not two whole pixel counts is no size at all.
+    expect(fullPicture({ key, w: 3000 }, CDN)).toEqual({
+      url: `${CDN}/${key}/lg.webp`,
+    });
+  });
+
+  it('is nothing without a CDN base or a real reference', () => {
+    expect(fullPicture({ key, w: 3000, h: 2000 }, null)).toBeUndefined();
+    expect(fullPicture({ alt: 'no key' }, CDN)).toBeUndefined();
   });
 });

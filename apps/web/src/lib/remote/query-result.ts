@@ -102,3 +102,33 @@ export function remoteErrorStatus(error: unknown): number | undefined {
   const status = (error as { status?: unknown }).status;
   return typeof status === 'number' ? status : undefined;
 }
+
+/** The parts of kit's `RemoteQuery` that {@link readFreshQuery} uses. */
+export interface FreshReadable<T> extends PromiseLike<unknown> {
+  readonly ready: boolean;
+  readonly loading: boolean;
+  readonly current: T | undefined;
+  refresh(): Promise<void>;
+}
+
+/**
+ * The value of a remote query as the server has it now, never a cached read:
+ * for a check a write is about to trust (the media delete's usage read,
+ * Codex-6sbn1).
+ *
+ * kit caches a query while anything tracks it, so `getX(arg)` can hand back a
+ * read another component made minutes ago. One that has landed and is idle is
+ * asked again; one just made, or still in flight, is already fresh, and a
+ * refresh would only send a second request. Rejects when the read fails, and
+ * when it answers nothing.
+ */
+export async function readFreshQuery<T>(query: FreshReadable<T>): Promise<T> {
+  if (query.ready && !query.loading) {
+    await query.refresh();
+  } else {
+    await query;
+  }
+  const value = query.current;
+  if (value === undefined) throw new Error('The query answered nothing');
+  return value;
+}

@@ -263,7 +263,9 @@
 /* The moments are a real sequence (an ordered list), so each carries its
    number, silent to assistive tech — the list already counts. Wide, and
    pictured, the moments stand apart, so the sticky picture holds each one
-   for a while; words alone keep the block's own pace. */
+   for a while past the frame's own height; words alone keep the block's own
+   pace. A phone's names stand a step above a title; wide, every Type draws
+   them at the heading's size (StoryScroll). */
 :is(.lp, #lp-style)[data-lp-type-facet='cinematic'] .story-scroll {
   --lp-size-title: calc(clamp(1.45rem, 1rem + 1.5cqi, 2.4rem) * var(--lp-scale));
 }

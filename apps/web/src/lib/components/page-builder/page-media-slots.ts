@@ -12,6 +12,7 @@
  * problem the store exists to prevent) and never both.
  */
 
+import type { CourseMediaSlot } from '@codex/access';
 import type { JourneySellMediaSlot } from '$lib/page-builder/sell-media-store.svelte';
 import * as m from '$paraglide/messages';
 
@@ -62,3 +63,28 @@ export const PAGE_MEDIA_SLOTS: readonly PageMediaSlot[] = [
 export const RETIRED_MEDIA_SLOTS: readonly JourneySellMediaSlot[] = [
   'signatureMediaId',
 ];
+
+/**
+ * The store slot behind each course slot the server names when it refuses to
+ * publish a page on deleted media (`CourseMediaDeletedError.slots`,
+ * Codex-6sbn1). A `Record`, so a slot the server adds fails the typecheck here.
+ */
+const BY_COURSE_SLOT: Record<CourseMediaSlot, JourneySellMediaSlot> = {
+  intro: 'introVideoMediaId',
+  reel: 'previewVideoMediaId',
+  guide_video: 'guideVideoMediaId',
+  hero: 'heroMediaId',
+  guide_portrait: 'guidePortraitMediaId',
+};
+
+/**
+ * The panel's slots among the course slots a refusal names, in panel order.
+ * A name this build does not know matches no panel slot, so it drops out: the
+ * refusal's message still says what to do.
+ */
+export function panelSlotsNamed(names: readonly string[]): PageMediaSlot[] {
+  const named = new Set<unknown>(
+    names.map((name) => BY_COURSE_SLOT[name as CourseMediaSlot])
+  );
+  return PAGE_MEDIA_SLOTS.filter((entry) => named.has(entry.slot));
+}

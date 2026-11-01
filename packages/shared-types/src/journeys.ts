@@ -1210,6 +1210,18 @@ export interface JourneySellMedia {
    * echo omits it too; the panel keeps what it read.
    */
   previewOnlyMediaIds?: string[];
+  /**
+   * The items in the offered slots (intro, reel, guide video, hero, guide
+   * portrait) whose media was DELETED (Codex-6sbn1). The slot keeps its id, so
+   * a restore heals it, and a save that sends it back unchanged goes through;
+   * this only labels it, so the panel can say "Media missing" rather than
+   * mistake it for another member's item. Named by title: the route is the
+   * org's owners' and admins' only. The retired signature film is left out.
+   *
+   * OPTIONAL-additive: an older worker omits it. The read and the write's echo
+   * both carry it.
+   */
+  missingMedia?: { id: string; title: string }[];
 }
 
 /**
@@ -1266,7 +1278,10 @@ export interface CourseSellPreviewClip {
   playlistUrl: string;
   /** Optional decorative poster shown before play. */
   posterUrl: string | null;
-  /** Advisory duration (seconds) for a "N sec preview" affordance. */
+  /**
+   * The whole media's length (seconds), advisory. What the preview plays is
+   * `previewSeconds`.
+   */
   durationSeconds: number | null;
   /**
    * The FULL film may be asked for (owner P10, "Full film unless it's paid"):
@@ -1280,6 +1295,23 @@ export interface CourseSellPreviewClip {
    * stays the preview.
    */
   fullFilm?: boolean;
+  /**
+   * What the media is, so the page can say "watch" or "listen" and give an
+   * audio clip its listening card (Codex-61zsk.73).
+   *
+   * OPTIONAL-additive: an older worker deployment omits it, and the page
+   * names no kind.
+   */
+  mediaType?: 'video' | 'audio';
+  /**
+   * How long the public preview runs, as the transcoder cuts it: from a
+   * tenth of the way in, for up to 30 seconds (`previewLength`). Null when
+   * the media's length is unknown.
+   *
+   * OPTIONAL-additive: an older worker deployment omits it, and a clip that
+   * plays its preview says no length.
+   */
+  previewSeconds?: number | null;
 }
 
 /**

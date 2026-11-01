@@ -11,8 +11,14 @@
   point gets, so it is never stored. The crops show what each screen keeps.
   In a layout that never crops, the control explains itself instead.
 
-  It writes the whole reference back with only `focus` changed, so the
-  picture's description and size are never lost.
+  Two kinds of picture take a point. The creator's own upload (`image`)
+  carries it in its reference, which its field writes back with `withFocus`
+  (`page-images.ts`), so the picture's description and size are never lost.
+  A course still from the journey (`still`, a URL: the hero's still or
+  poster, the guide's portrait, the film's poster) is no page image, so the
+  section keeps its point beside it on this page (`stillFocus`,
+  Codex-61zsk.73), and the control says so: another page showing the same
+  still sets its own.
 -->
 <script lang="ts">
   import {
@@ -22,21 +28,39 @@
     resolvePageImageUrl,
   } from '$lib/page-builder/page-images';
   import type { FocalCrop } from '$lib/page-builder/kit';
+  import { getThumbnailUrl } from '$lib/utils/image';
   import * as m from '$paraglide/messages';
 
   interface Props {
-    image: ImageRef;
+    /** An upload, whose reference carries its point. */
+    image?: ImageRef;
     mediaBaseUrl?: string | null;
+    /** Or a course still, by its URL, whose point is `focus`. */
+    still?: string | null;
+    /** A still's point; absent is the centre. */
+    focus?: { x: number; y: number };
     /** The shapes the section's layout cuts this picture to; none where it never crops. */
     crops: readonly FocalCrop[];
-    onChange: (next: ImageRef) => void;
+    /** The point placed, or `undefined` for the centre, which is never stored. */
+    onChange: (next: { x: number; y: number } | undefined) => void;
   }
 
-  const { image, mediaBaseUrl = null, crops, onChange }: Props = $props();
+  const {
+    image,
+    mediaBaseUrl = null,
+    still = null,
+    focus: stillPoint,
+    crops,
+    onChange,
+  }: Props = $props();
 
   const id = $props.id();
-  const focus = $derived(readFocus(image));
-  const src = $derived(resolvePageImageUrl(image, 'md', mediaBaseUrl));
+  const focus = $derived(image ? readFocus(image) : (stillPoint ?? { ...CENTRE_FOCUS }));
+  // The same 400px file an upload shows, from the sizes the still's URL names.
+  const stillSrc = $derived(still ? getThumbnailUrl(still, 'md') : null);
+  const src = $derived(resolvePageImageUrl(image, 'md', mediaBaseUrl) ?? stillSrc);
+  // A still's point is this page's own, and the control says so.
+  const pagePoint = $derived(!image && Boolean(still));
   const centred = $derived(focus.x === CENTRE_FOCUS.x && focus.y === CENTRE_FOCUS.y);
   const active = $derived(crops.length > 0);
   // Each crop's column is its own width-to-height, so every crop is drawn at
@@ -60,16 +84,11 @@
   function place(x: number, y: number): void {
     const next = { x: clamp(x), y: clamp(y) };
     if (next.x === focus.x && next.y === focus.y) return;
-    if (next.x === CENTRE_FOCUS.x && next.y === CENTRE_FOCUS.y) {
-      useCentre();
-      return;
-    }
-    onChange({ ...image, focus: next });
+    onChange(next.x === CENTRE_FOCUS.x && next.y === CENTRE_FOCUS.y ? undefined : next);
   }
 
   function useCentre(): void {
-    const { focus: _focus, ...rest } = image;
-    onChange(rest);
+    onChange(undefined);
   }
 
   function pick(event: MouseEvent): void {
@@ -102,13 +121,15 @@
 <div class="focus" role="group" aria-labelledby="{id}-label">
   <span class="focus__label" id="{id}-label">{m.studio_page_editor_focus_label()}</span>
   {#if !active}
-    <p class="focus__hint">{m.studio_page_editor_focus_inactive()}</p>
+    <p class="focus__hint">
+      {pagePoint ? m.studio_page_editor_focus_still_inactive() : m.studio_page_editor_focus_inactive()}
+    </p>
   {:else if src}
     <button
       type="button"
       class="focus__pad"
       aria-label={m.studio_page_editor_focus_label()}
-      aria-describedby="{id}-readout {id}-hint"
+      aria-describedby={pagePoint ? `${id}-readout ${id}-hint ${id}-page` : `${id}-readout ${id}-hint`}
       onclick={pick}
       onkeydown={nudge}
     >
@@ -137,6 +158,9 @@
     <button type="button" class="focus__centre" disabled={centred} onclick={useCentre}>
       {m.studio_page_editor_focus_centre()}
     </button>
+    {#if pagePoint}
+      <p class="focus__hint" id="{id}-page">{m.studio_page_editor_focus_still_saved()}</p>
+    {/if}
   {/if}
 </div>
 

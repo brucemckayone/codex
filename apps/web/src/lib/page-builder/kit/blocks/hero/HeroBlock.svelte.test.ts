@@ -20,6 +20,7 @@ import {
 } from '$tests/utils/component-test-utils.svelte';
 import type { JourneySalesContext, SellPreview } from '../../../render/types';
 import { COPY } from '../../model/copy';
+import { heroFacts } from '../../model/facts';
 import { type ColourSchemeId, SECTION_LAYOUTS } from '../../model/ids';
 import {
   headingRuns,
@@ -1258,5 +1259,266 @@ describe('HeroBlock', () => {
       expect(document.body.querySelector('.lp-film')).toBeNull();
       expect(document.body.querySelector('[role="dialog"]')).toBeNull();
     });
+  });
+});
+
+describe('a focal point on the course still (Codex-61zsk.73)', () => {
+  const CDN = 'https://cdn.test';
+  const KEY = 'org-1/media-thumbnails/hero-1';
+  const STILL = `${CDN}/${KEY}/lg.webp`;
+  const POINT = { x: 20, y: 30, of: KEY };
+  /** The pictures drawn from the course still, at every size. */
+  const stills = () =>
+    [...document.body.querySelectorAll<HTMLImageElement>('img')].filter((img) =>
+      img.getAttribute('src')?.startsWith(`${CDN}/${KEY}/`)
+    );
+
+  it.each(
+    SECTION_LAYOUTS.hero
+  )('%s: crops the still round the point set on it', async (layout) => {
+    await render(
+      { heading: 'H', stillFocus: POINT },
+      { layout, context: sampleContext({ media: { heroImageUrl: STILL } }) }
+    );
+    expect(stills().length, layout).toBeGreaterThan(0);
+    for (const img of stills())
+      expect(img.style.objectPosition).toBe('20% 30%');
+  });
+
+  it.each(
+    SECTION_LAYOUTS.hero
+  )('%s: draws another still from the centre, as before', async (layout) => {
+    await render(
+      {
+        heading: 'H',
+        stillFocus: { ...POINT, of: 'org-1/media-thumbnails/old' },
+      },
+      { layout, context: sampleContext({ media: { heroImageUrl: STILL } }) }
+    );
+    expect(stills().length, layout).toBeGreaterThan(0);
+    for (const img of stills()) expect(img.style.objectPosition).toBe('');
+  });
+
+  it('steers the still on first paint, before the stream settles', async () => {
+    const context = {
+      ...sampleContext({ course: { heroImageUrl: STILL } }),
+      sellPreview: new Promise<never>(() => {}),
+    };
+    await render(
+      { heading: 'H', stillFocus: POINT },
+      { layout: 'split', context }
+    );
+    expect(stills()).toHaveLength(1);
+    expect(stills()[0].style.objectPosition).toBe('20% 30%');
+  });
+
+  it('a still with no point draws from the centre', async () => {
+    await render(
+      { heading: 'H' },
+      {
+        layout: 'split',
+        context: sampleContext({ media: { heroImageUrl: STILL } }),
+      }
+    );
+    expect(stills()[0].style.objectPosition).toBe('');
+  });
+
+  it('the creator’s own image keeps its own point, never the still’s', async () => {
+    const image = {
+      key: 'landing-pages/p1/images/i1',
+      focus: { x: 70, y: 40 },
+    };
+    await render(
+      { heading: 'H', image, stillFocus: POINT },
+      {
+        layout: 'split',
+        context: sampleContext({
+          media: { heroImageUrl: STILL },
+          mediaBaseUrl: CDN,
+        }),
+      }
+    );
+    const img = document.body.querySelector('img');
+    expect(img?.getAttribute('src')).toBe(`${CDN}/${image.key}/lg.webp`);
+    expect(img?.style.objectPosition).toBe('70% 40%');
+  });
+});
+
+describe('the org logo above the eyebrow (Codex-61zsk.73)', () => {
+  const LOGO = { url: 'https://cdn.example/logo.png', name: 'Studio Alpha' };
+
+  async function draw(
+    layout: string,
+    props: Record<string, unknown>,
+    options: { orgLogo?: typeof LOGO | null; orgShader?: boolean } = {}
+  ) {
+    const page: KitPage = {
+      design: { style: 'clean' },
+      sections: [
+        { id: 'hero-1', type: 'hero', enabled: true, variant: layout, props },
+      ],
+    };
+    app = mount(PageRenderer, {
+      target: document.body,
+      props: {
+        page,
+        context: sampleContext({ media: { heroImageUrl: '/hero.jpg' } }),
+        sticky: false,
+        orgLogo: options.orgLogo === undefined ? LOGO : options.orgLogo,
+        orgShader: options.orgShader ?? false,
+      },
+    });
+    flushSync();
+    await tick();
+    await Promise.resolve();
+    flushSync();
+  }
+
+  const logo = () => document.body.querySelector<HTMLImageElement>('.lp-logo');
+
+  it.each(
+    SECTION_LAYOUTS.hero
+  )('%s: draws the logo first, above the eyebrow, named and never a link', async (layout) => {
+    await draw(layout, { eyebrow: 'A four-stage course', heading: 'H' });
+    const img = logo();
+    expect(img?.getAttribute('src')).toBe(LOGO.url);
+    expect(img?.getAttribute('alt')).toBe('Studio Alpha');
+    expect(img?.closest('a')).toBeNull();
+    const wrapper = img?.closest('.hero__logo');
+    const eyebrow = document.body.querySelector('.hero__eyebrow');
+    expect(wrapper?.nextElementSibling).toBe(eyebrow);
+  });
+
+  it('draws nothing when the creator hides it, or the org has none', async () => {
+    await draw('statement', { heading: 'H', hideLogo: true });
+    expect(logo()).toBeNull();
+    unmount(app);
+    app = null;
+    await draw('statement', { heading: 'H' }, { orgLogo: null });
+    expect(logo()).toBeNull();
+    expect(document.body.querySelector('.hero__logo')).toBeNull();
+  });
+
+  // An empty row would still take the stack gap above the words, and the
+  // poster (`:has(> .hero__logo)`) and Path would still allow for its box.
+  it.each([
+    'statement',
+    'poster',
+  ])('%s: a logo that fails to load takes its row with it', async (layout) => {
+    await draw(layout, { eyebrow: 'A four-stage course', heading: 'H' });
+    expect(document.body.querySelector('.hero__logo')).not.toBeNull();
+    logo()?.dispatchEvent(new Event('error'));
+    flushSync();
+    expect(logo()).toBeNull();
+    expect(document.body.querySelector('.hero__logo')).toBeNull();
+    // The eyebrow heads the words again.
+    expect(
+      document.body
+        .querySelector('.hero__eyebrow')
+        ?.previousElementSibling?.classList.contains('hero__logo')
+    ).not.toBe(true);
+  });
+
+  // The page hands over a fresh logo object on every save and every brand
+  // editor tick, at the same address: a failed address stays out through
+  // them all, or the words would jump each time. A new address is tried.
+  it('keeps a failed address out through fresh logos, and tries a new address', async () => {
+    const props = $state({
+      page: {
+        design: { style: 'clean' },
+        sections: [
+          {
+            id: 'hero-1',
+            type: 'hero',
+            enabled: true,
+            variant: 'statement',
+            props: { heading: 'H' },
+          },
+        ],
+      } satisfies KitPage,
+      context: sampleContext({ media: { heroImageUrl: '/hero.jpg' } }),
+      sticky: false,
+      orgLogo: { ...LOGO },
+    });
+    app = mount(PageRenderer, { target: document.body, props });
+    flushSync();
+    expect(logo()?.getAttribute('src')).toBe(LOGO.url);
+    logo()?.dispatchEvent(new Event('error'));
+    flushSync();
+    expect(document.body.querySelector('.hero__logo')).toBeNull();
+
+    // A save's refetch: the same logo, a fresh object.
+    props.orgLogo = { ...LOGO };
+    flushSync();
+    expect(document.body.querySelector('.hero__logo')).toBeNull();
+
+    props.orgLogo = { ...LOGO, url: 'https://cdn.example/logo.svg' };
+    flushSync();
+    expect(logo()?.getAttribute('src')).toBe('https://cdn.example/logo.svg');
+
+    // That one fails too; the brand editor, closed unsaved, goes back to the
+    // first. Every failed address stays out, so neither jumps the words again.
+    logo()?.dispatchEvent(new Event('error'));
+    flushSync();
+    props.orgLogo = { ...LOGO };
+    flushSync();
+    expect(document.body.querySelector('.hero__logo')).toBeNull();
+  });
+
+  it('forces the plate on a cover and on the shader; elsewhere it reads the ink', async () => {
+    await draw('cover', { heading: 'H' });
+    expect(logo()?.hasAttribute('data-plate')).toBe(true);
+    unmount(app);
+    app = null;
+    await draw('statement', { heading: 'H' }, { orgShader: true });
+    expect(logo()?.hasAttribute('data-plate')).toBe(true);
+    unmount(app);
+    app = null;
+    await draw('statement', { heading: 'H' });
+    expect(logo()?.hasAttribute('data-plate')).toBe(false);
+  });
+
+  it('spans the statement grid with the eyebrow and headline, and joins the poster’s drop', () => {
+    const hero = cssRules('HeroBlock.svelte');
+    const span = [...hero].find(([selector]) =>
+      selector.includes('.hero-statement > .hero__logo')
+    );
+    expect(span?.[1].get('grid-column')).toBe('1 / -1');
+    const poster = cssRules('HeroPoster.svelte');
+    const drop = [...poster].find(([selector]) =>
+      selector.includes('.hero__logo)) .hero-poster__media')
+    );
+    // The kit's box, the one OrgLogo draws (kit.css `--lp-logo-box`).
+    expect(drop?.[1].get('--_logo')).toBe(
+      'calc(var(--lp-logo-box) + var(--lp-stack))'
+    );
+  });
+});
+
+describe('the facts line under the lede (Codex-61zsk.73)', () => {
+  it('draws the course facts on the shared line, one unbroken fact each, after the words', async () => {
+    const context = sampleContext({ media: { heroImageUrl: '/hero.jpg' } });
+    await render({ heading: 'H', body: 'The words.' }, { context });
+    const expected = heroFacts(context);
+    expect(expected.length).toBeGreaterThan(1);
+    const line = document.body.querySelector('.hero__lede > .lp-facts');
+    expect(line?.classList.contains('hero__facts')).toBe(true);
+    expect(line?.previousElementSibling?.classList.contains('lp-text')).toBe(
+      true
+    );
+    const facts = [...(line?.querySelectorAll('.lp-facts__fact') ?? [])];
+    expect(facts.map((fact) => fact.textContent?.replace(/^, /, ''))).toEqual(
+      expected
+    );
+    // The old run's dots were spans of their own, which a wrap could strand.
+    expect(line?.querySelector('[aria-hidden="true"]')).toBeNull();
+  });
+
+  it('keeps one stack between the lede’s words and the line', () => {
+    const rule = [...cssRules('HeroBlock.svelte')].find(([selector]) =>
+      selector.includes('> :global(.hero__facts)')
+    );
+    expect(rule?.[0]).toContain('.hero__lede:has(> :global(.lp-text))');
+    expect(rule?.[1].get('margin-block-start')).toBe('var(--lp-stack)');
   });
 });
