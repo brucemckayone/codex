@@ -154,6 +154,7 @@ import {
 import {
   addMonthsClamped,
   CLEAR_PENDING_PRICE_METADATA,
+  ensurePriceActive,
   type PriceChangeNoticeMailer,
   rejoinTierPriceChange,
 } from './pending-price-change';
@@ -4115,6 +4116,9 @@ export class SubscriptionService extends BaseService {
         throw new MoveAlreadyLandedError(orgId);
       }
 
+      // The held tier may have been repriced while the move waited, which
+      // archived the held Price (Part A rule 3, F2).
+      await ensurePriceActive(this.stripe, move.holdPriceId);
       await this.stripe.subscriptions.update(
         sub.stripeSubscriptionId,
         {

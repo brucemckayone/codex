@@ -57,15 +57,26 @@ function fakeSub(opts: {
   } as unknown as Stripe.Subscription;
 }
 
-function fakeStripe(subscription: Stripe.Subscription) {
+function fakeStripe(
+  subscription: Stripe.Subscription,
+  archived: readonly string[] = []
+) {
   const update = vi.fn().mockResolvedValue({});
+  const prices = {
+    retrieve: vi.fn(async (id: string) => ({
+      id,
+      active: !archived.includes(id),
+    })),
+    update: vi.fn(async (id: string) => ({ id, active: true })),
+  };
   const stripe = {
     subscriptions: {
       retrieve: vi.fn().mockResolvedValue(subscription),
       update,
     },
+    prices,
   } as unknown as Stripe;
-  return { stripe, update };
+  return { stripe, update, prices };
 }
 
 const target = {
@@ -1071,9 +1082,10 @@ describe('applyDuePendingPriceChange', () => {
 
   it('swaps once the next renewal reaches the pending date', async () => {
     const sub = fakeSub({ renewal: NOTICE_SEC + 41 * DAY, metadata: pending });
-    const { stripe, update } = fakeStripe(sub);
+    const { stripe, update, prices } = fakeStripe(sub);
 
     expect(await applyDuePendingPriceChange(stripe, sub)).toBe(true);
+    expect(prices.update).not.toHaveBeenCalled();
     expect(update).toHaveBeenCalledWith(
       'sub_1',
       {
@@ -1085,6 +1097,27 @@ describe('applyDuePendingPriceChange', () => {
     );
   });
 
+  // Review C1, F2: a newer save archived the pending Price before the step
+  // reached this subscriber. Their accepted change still lands.
+  it('a pending Price a newer save archived is made billable first, then swapped in', async () => {
+    const sub = fakeSub({ renewal: NOTICE_SEC + 41 * DAY, metadata: pending });
+    const { stripe, update, prices } = fakeStripe(sub, ['price_new']);
+    const order: string[] = [];
+    prices.update.mockImplementation(async (id: string) => {
+      order.push('activate');
+      return { id, active: true };
+    });
+    update.mockImplementation(async () => {
+      order.push('swap');
+      return {};
+    });
+
+    expect(await applyDuePendingPriceChange(stripe, sub)).toBe(true);
+    expect(prices.update).toHaveBeenCalledExactlyOnceWith('price_new', {
+      active: true,
+    });
+    expect(order).toEqual(['activate', 'swap']);
+  });
   it('waits while the next renewal is still too soon', async () => {
     const sub = fakeSub({ renewal: NOTICE_SEC + 11 * DAY, metadata: pending });
     const { stripe, update } = fakeStripe(sub);

@@ -61,6 +61,13 @@ const DAY = 86_400;
 
 type Tier = typeof subscriptionTiers.$inferSelect;
 
+interface FakePrice {
+  amount: number;
+  interval: 'month' | 'year';
+  /** A re-price archives the old Price. */
+  archived?: boolean;
+}
+
 interface LiveItem {
   id: string;
   price: {
@@ -84,11 +91,10 @@ interface LiveSubscription {
 
 /**
  * Stripe's subscriptions, held in memory. `prices` maps a Price id to its
- * amount and interval, as Stripe's Price objects would.
+ * amount and interval, as Stripe's Price objects would, and whether it is
+ * archived: Stripe refuses an archived Price on an item (F2).
  */
-function liveStripe(
-  prices: Map<string, { amount: number; interval: 'month' | 'year' }>
-) {
+function liveStripe(prices: Map<string, FakePrice>) {
   const stripe = createMockStripe();
   const live = new Map<string, LiveSubscription>();
   const keys = new Map<string, { params: string; response: unknown }>();
@@ -138,6 +144,14 @@ function liveStripe(
       const priceId = params.items[0].price;
       const price = prices.get(priceId);
       if (!price) throw new Error(`no such Price ${priceId}`);
+      if (price.archived) {
+        throw Object.assign(
+          new Error(
+            'The price specified is inactive. This field only accepts active prices.'
+          ),
+          { type: 'StripeInvalidRequestError', statusCode: 400 }
+        );
+      }
       item.price = {
         id: priceId,
         unit_amount: price.amount,
@@ -155,6 +169,23 @@ function liveStripe(
     if (key) keys.set(key, { params: asSent, response });
     return response;
   }) as unknown as typeof stripe.subscriptions.update);
+
+  const priceOf = (id: string) => {
+    const price = prices.get(id);
+    if (!price) throw new Error(`no such Price ${id}`);
+    return price;
+  };
+  (stripe.prices as unknown as Record<string, unknown>).retrieve = vi.fn(
+    async (id: string) => ({ id, active: !priceOf(id).archived })
+  );
+  vi.mocked(stripe.prices.update).mockImplementation((async (
+    id: string,
+    params: { active?: boolean }
+  ) => {
+    const price = priceOf(id);
+    if (params.active !== undefined) price.archived = !params.active;
+    return { id, active: !price.archived };
+  }) as unknown as typeof stripe.prices.update);
 
   const createPreview = vi.fn().mockResolvedValue({
     amount_due: 336,
@@ -177,10 +208,7 @@ describe('waiting tier moves (Codex-2hxff.16)', () => {
   let createPreview: ReturnType<typeof vi.fn>;
   let service: SubscriptionService;
   let invalidate: ReturnType<typeof vi.fn>;
-  const prices = new Map<
-    string,
-    { amount: number; interval: 'month' | 'year' }
-  >();
+  const prices = new Map<string, FakePrice>();
 
   beforeAll(() => {
     db = setupTestDatabase();
@@ -756,6 +784,35 @@ describe('waiting tier moves (Codex-2hxff.16)', () => {
             attempts: 0,
           }),
         ]);
+      });
+
+      // Review C1, F2: the re-price archived the held Price, and Stripe
+      // refuses an archived Price on an item.
+      it('the held Price was archived by the re-price: Keep makes it billable again, puts it back, and leaves it active', async () => {
+        const { org, premium, userId, row } =
+          await keptAfterReprice('keep-archived');
+        const held = premium.stripePriceMonthlyId ?? 'price_missing';
+        const price = prices.get(held);
+        if (price) price.archived = true;
+
+        await service.keepCurrentPlan(userId, org.id);
+
+        expect(stripe.prices.update).toHaveBeenCalledExactlyOnceWith(held, {
+          active: true,
+        });
+        expect(liveOf(row.stripeSubscriptionId).items.data[0]?.price.id).toBe(
+          held
+        );
+        expect(prices.get(held)?.archived).toBe(false);
+        expect((await rowOf(row.id)).pendingTierId).toBeNull();
+      });
+
+      it('a held Price still active is not written to', async () => {
+        const { org, userId } = await keptAfterReprice('keep-active');
+
+        await service.keepCurrentPlan(userId, org.id);
+
+        expect(stripe.prices.update).not.toHaveBeenCalled();
       });
 
       it("hangs the row off the tier's latest change and re-opens it when done", async () => {

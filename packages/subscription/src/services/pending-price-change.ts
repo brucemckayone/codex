@@ -396,6 +396,28 @@ export const FAN_OUT_STRIPE_REQUEST = {
 export const PRICE_NOTICE_TIMEOUT_MS = 5_000;
 
 /**
+ * Make a Price billable before an item write that may put an old one back
+ * (review C1, F2): Keep's held Price, a pending marker's Price. A re-price
+ * archives the tier's old Price, and Stripe refuses an archived Price on a
+ * subscription item. The Price is read first and made active only when it
+ * is not, so a live one costs no write and no `price.updated` event. It is
+ * left active: two members keeping the same held Price would race a
+ * re-archive, and an active old Price is out of customers' reach (checkout
+ * uses the tier's current Price, and the portal is locked).
+ *
+ * Not for a price move's own new Price: that is the tier's current Price
+ * while its change runs, and a save that archives it supersedes the move.
+ */
+export async function ensurePriceActive(
+  stripe: Stripe,
+  priceId: string
+): Promise<void> {
+  const price = await stripe.prices.retrieve(priceId);
+  if (price.active) return;
+  await stripe.prices.update(priceId, { active: true });
+}
+
+/**
  * Stripe statuses where an item swap is safe. A paused subscription is never
  * swapped (it can trigger a reactivation path); a past-due one is retrying an
  * invoice. Both get the pending marker instead, and move when they are active.
@@ -748,6 +770,9 @@ export async function applyDuePendingPriceChange(
   if (!canSwapNow(subscription.status)) return false;
   if (item.current_period_end < from) return false;
 
+  // An accepted change still lands when a newer save has archived its Price
+  // before the step reached this subscriber (F2, correctness #6).
+  await ensurePriceActive(stripe, pendingPriceId);
   await stripe.subscriptions.update(
     subscription.id,
     {
