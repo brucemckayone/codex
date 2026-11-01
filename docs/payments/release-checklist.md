@@ -265,3 +265,64 @@ both.
 the old workers read the old `fee_config_*` rows (kept at the values in force
 now), so sales keep the right fee, and a waiting rise doesn't start until the
 roll forward. Don't change fees while rolled back.
+
+---
+
+## Waiting moves, course amounts and price moves (migrations `0122` and `0124`)
+
+`0122` adds the waiting-move columns on `subscriptions` (`Codex-2hxff.16`) and
+`course_subscriptions.amount_cents` (`Codex-2hxff.52`). `0124` adds
+`price_changes` and `subscription_price_moves` (`Codex-2hxff.85`, `.86`;
+[Subscriptions › Price changes](subscriptions.md#price-changes)). Both are
+additive and run before the workers deploy; old workers never read the new
+columns or tables. Neither backfills anything: no move can wait before `.16`
+ships, and a price change saved before the deploy either finished its fan-out
+or raised an alert.
+
+### R16 — after the deploy: the course amount backfill (only with the owner's OK)
+
+A course subscription made before the deploy has no `amount_cents` until one
+of its webhooks arrives, so Account › Subscriptions shows it without a price.
+The backfill reads each such live subscription from Stripe once (it never
+writes to Stripe) and writes its item's amount to the production database.
+First the dry run, which writes nothing:
+
+    pnpm --filter @codex/database exec tsx scripts/backfill-course-subscription-amounts.ts --env production --test-keys
+
+It prints one line per row (our row id, its Stripe subscription, the amount
+Stripe has, the action), then the counts. The owner reads it. Only then:
+
+    … --env production --test-keys --apply
+
+At most 200 rows a run (`--limit`, up to 1000). When the limit is reached it
+prints the `--after <id>` to carry on from. A re-run is a no-op: the write is
+guarded by `amount_cents IS NULL`, so an amount a webhook wrote meanwhile
+wins. `--test-keys` works as in R10.
+
+Afterwards, expect `missing` to be 0:
+
+```sql
+BEGIN TRANSACTION READ ONLY;
+SELECT count(*) FILTER (WHERE amount_cents IS NULL) AS missing,
+       count(*) AS live
+FROM course_subscriptions
+WHERE ended_at IS NULL AND duplicate_of_course_subscription_id IS NULL;
+ROLLBACK;
+```
+
+### R17 — the first hourly price-moves run
+
+ecom-api's hourly cron runs the price-moves step, except on the 08:00 London
+run, which the bank payout has to itself. After the first run, read its `Price moves: run finished` log line:
+with no price saved since the deploy, it reads all zeros. Look for any
+`Price moves: a step of the run failed` or `payouts-sweep cron could not run
+the price moves` error.
+
+### Rollback
+
+`0122` and `0124` stay. The old workers know nothing of a waiting move, so
+before rolling back, count them:
+`SELECT count(*) FROM subscriptions WHERE pending_tier_id IS NOT NULL`. If it
+isn't 0, decide with the owner first. Don't change prices while rolled back:
+the old fan-out writes no price moves, so the hourly step can't see its
+subscribers after the roll forward.
