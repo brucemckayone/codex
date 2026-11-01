@@ -267,13 +267,15 @@ describe('SupportService price moves (real DB)', () => {
     retryRequestedByUserId: supportId,
     ...values,
   });
-  const CLOSED: MoveValues = {
+  // A function, as QUEUED is: supportId is set in beforeAll, after this
+  // block is collected.
+  const CLOSED = (): MoveValues => ({
     ...HELD_NOTICE,
     resolution: 'not_needed',
     resolvedAt: new Date('2026-11-03T12:00:00Z'),
     resolvedByUserId: supportId,
     resolutionNote: 'Cancelled instead',
-  };
+  });
 
   it('lists held people with their plan, price and why, and queued retries; never a closed, moved, superseded or running row; the badge counts the held only', async () => {
     const before = await badge();
@@ -298,7 +300,7 @@ describe('SupportService price moves (real DB)', () => {
         nextAttemptAt: new Date('2026-11-04T12:00:00Z'),
       })
     );
-    await move(c, gus as Subscriber, CLOSED);
+    await move(c, gus as Subscriber, CLOSED());
     await move(c, hal as Subscriber, {
       state: 'scheduled',
       scheduledKind: 'pending',
@@ -469,7 +471,7 @@ describe('SupportService price moves (real DB)', () => {
         "The hourly run is still working on this one: it isn't held.",
       ],
       [QUEUED(), 'queued', 'This one is already queued for the next run.'],
-      [CLOSED, 'resolved', 'This one is already closed: no move needed.'],
+      [CLOSED(), 'resolved', 'This one is already closed: no move needed.'],
     ];
     for (const [index, [values, reason, message]] of cases.entries()) {
       const id = await move(c, people[index] as Subscriber, values);
