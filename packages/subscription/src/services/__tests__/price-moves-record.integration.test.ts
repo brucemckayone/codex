@@ -35,7 +35,7 @@ import {
   takeFirst,
   teardownTestDatabase,
 } from '@codex/test-utils';
-import { eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
   afterAll,
@@ -329,6 +329,96 @@ describe('recording a tier price change (Codex-2hxff.86)', () => {
     expect((await movesOf(live.id)).map((r) => r.state)).toEqual(['due']);
   });
 
+  // Latest wins reaches a change that already finished: it stays `done`, but
+  // its held people leave support's list, and a row support queued with
+  // Retry never tells the replaced price.
+  it('a newer price supersedes the open rows of an earlier change that finished', async () => {
+    const { org: o, pro } = await org('record-after-done');
+    const subs = await Promise.all(
+      Array.from({ length: 5 }, () => subscriber(o.id, pro))
+    );
+    await service.updateTier(pro.id, o.id, { priceMonthly: 1400 });
+    const first = takeFirst(await changesOf(pro.id));
+    const told = new Date(Date.now() - 40 * DAY_MS);
+    const rowOf = (sub: Sub) =>
+      and(
+        eq(subscriptionPriceMoves.priceChangeId, first.id),
+        eq(subscriptionPriceMoves.subscriptionId, sub.id)
+      );
+    const [held, closed, scheduled, retried, retriedMove] = subs as [
+      Sub,
+      Sub,
+      Sub,
+      Sub,
+      Sub,
+    ];
+    await db
+      .update(subscriptionPriceMoves)
+      .set({ state: 'held', heldReason: 'no_address' })
+      .where(rowOf(held));
+    await db
+      .update(subscriptionPriceMoves)
+      .set({
+        state: 'held',
+        heldReason: 'no_address',
+        resolution: 'not_needed',
+        resolvedAt: told,
+        resolvedByUserId: closed.userId,
+        resolutionNote: 'closed by hand',
+      })
+      .where(rowOf(closed));
+    await db
+      .update(subscriptionPriceMoves)
+      .set({
+        state: 'scheduled',
+        scheduledKind: 'pending',
+        noticeAt: told,
+        effectiveAt: new Date(),
+      })
+      .where(rowOf(scheduled));
+    // Queued by support's Retry, not yet taken by the step.
+    await db
+      .update(subscriptionPriceMoves)
+      .set({
+        state: 'due',
+        heldReason: 'notice_unknown',
+        retryRequestedAt: told,
+        retryRequestedByUserId: retried.userId,
+      })
+      .where(rowOf(retried));
+    await db
+      .update(subscriptionPriceMoves)
+      .set({
+        state: 'notified',
+        heldReason: 'move_refused',
+        noticeAt: told,
+        retryRequestedAt: told,
+        retryRequestedByUserId: retriedMove.userId,
+      })
+      .where(rowOf(retriedMove));
+    await db
+      .update(priceChanges)
+      .set({ state: 'done', doneAt: told })
+      .where(eq(priceChanges.id, first.id));
+
+    await service.updateTier(pro.id, o.id, { priceMonthly: 1500 });
+
+    const changes = await changesOf(pro.id);
+    expect(changes).toHaveLength(2);
+    expect(changes.find((c) => c.id === first.id)?.state).toBe('done');
+    const second = takeFirst(changes.filter((c) => c.id !== first.id));
+    expect(second).toMatchObject({ state: 'running', totalCount: 5 });
+    const stateOf = new Map(
+      (await movesOf(first.id)).map((r) => [r.subscriptionId, r.state])
+    );
+    expect(stateOf.get(held.id)).toBe('superseded');
+    expect(stateOf.get(retried.id)).toBe('superseded');
+    expect(stateOf.get(retriedMove.id)).toBe('superseded');
+    // History stays: closed by hand, or already moved.
+    expect(stateOf.get(closed.id)).toBe('held');
+    expect(stateOf.get(scheduled.id)).toBe('scheduled');
+  });
+
   // One transaction: a recording that fails fails the save, and the Stripe
   // Prices are put back, so nobody is lost between the save and the step.
   it('a recording that fails leaves the tier as it was and archives the new Price', async () => {
@@ -425,6 +515,39 @@ describe('recording a tier price change (Codex-2hxff.86)', () => {
       ]);
       const [after] = await changesOf(input.tierId);
       expect(after?.totalCount).toBe(1);
+    });
+
+    // Told, then they started leaving before the write landed: the step
+    // closed them as moving away. Back on the tier, the write is all that is
+    // left; a second email would break M1.
+    it('re-opens a row they were told about as notified: the write only, from that email', async () => {
+      const { sub, change, input } = await keptMember('rejoin-told');
+      const toldAt = new Date(Date.now() - 5 * DAY_MS);
+      await db.insert(subscriptionPriceMoves).values({
+        priceChangeId: change.id,
+        subscriptionId: sub.id,
+        stripeSubscriptionId: sub.stripeSubscriptionId,
+        organizationId: input.organizationId,
+        userId: sub.userId,
+        state: 'skipped',
+        skipReason: 'moving_away',
+        noticeAt: toldAt,
+        effectiveAt: new Date(Date.now() + 30 * DAY_MS),
+        attempts: 2,
+        lastError: 'move_unknown_500',
+      });
+
+      const result = await rejoin(input);
+
+      expect(result).toMatchObject({ outcome: 'due', changeId: change.id });
+      expect(await movesOf(change.id)).toEqual([
+        expect.objectContaining({
+          state: 'notified',
+          noticeAt: toldAt,
+          skipReason: null,
+          attempts: 0,
+        }),
+      ]);
     });
 
     it.each([

@@ -44,6 +44,7 @@ import {
   subscriptionPriceMoves,
   subscriptions,
 } from '@codex/database/schema';
+import { InternalServiceError } from '@codex/service-errors';
 import { type SQL, sql } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import { type PriceChangeStage, PriceChangeStageError } from '../errors';
@@ -91,6 +92,14 @@ export interface PriceChangeTarget {
    * leaving the repriced one (`moving_away`).
    */
   skipLive?: (live: Stripe.Subscription) => PriceMoveSkipReason | null;
+  /**
+   * The last try's outcome is unknown: the email may have gone, or a run may
+   * have stopped after its Stripe write. A live subscription already carrying
+   * this change then counts as moved, and nothing is sent or written again:
+   * on the new Price (`applied`), or marked pending for it (`pending`, from
+   * the renewal the marker allows). Both outcomes say `landed`.
+   */
+  mayBeTold?: boolean;
 }
 
 /**
@@ -126,9 +135,20 @@ export type SendPriceChangeNotice = (
 
 export type PriceChangeOutcome =
   /** Notified, then swapped now: the next renewal bills the new price. */
-  | { kind: 'applied'; effectiveAt: Date; currentAmountCents: number | null }
+  | {
+      kind: 'applied';
+      effectiveAt: Date;
+      currentAmountCents: number | null;
+      /** Found already done (`mayBeTold`): nothing sent or written now. */
+      landed?: true;
+    }
   /** Notified, then marked pending: a later renewal swaps it. */
-  | { kind: 'pending'; effectiveAt: Date; currentAmountCents: number | null }
+  | {
+      kind: 'pending';
+      effectiveAt: Date;
+      currentAmountCents: number | null;
+      landed?: true;
+    }
   /** The notice was not accepted: nothing written, today's price stays. */
   | { kind: 'unnotified' }
   /** Same amount (e.g. a price set back): price id swapped silently, any pending change dropped. */
@@ -454,6 +474,32 @@ export async function schedulePriceChange(
       ? { priceId: pendingPriceId, from: new Date(pendingFrom * 1000) }
       : null;
 
+  // Before the same-amount path: a subscription already on the new Price
+  // would read as "same amount", and one already told would be told again.
+  if (target.mayBeTold && item.price.id === target.newPriceId) {
+    return {
+      kind: 'applied',
+      effectiveAt: new Date(item.current_period_end * 1000),
+      currentAmountCents: item.price.unit_amount,
+      landed: true,
+    };
+  }
+  if (target.mayBeTold && currentPending?.priceId === target.newPriceId) {
+    return {
+      kind: 'pending',
+      effectiveAt: new Date(
+        firstRenewalOnOrAfter({
+          nextRenewal: item.current_period_end,
+          anchor: subscription.billing_cycle_anchor,
+          interval: target.interval,
+          earliest: Math.floor(currentPending.from.getTime() / 1000),
+        }) * 1000
+      ),
+      currentAmountCents: item.price.unit_amount,
+      landed: true,
+    };
+  }
+
   // Same amount as today (a price set back to what they pay): keep the
   // subscription on the tier's current Price id, drop any pending change, and
   // tell nobody — nothing they pay changes. A failed write here leaves that
@@ -688,7 +734,7 @@ export interface PriceChangeTx {
 }
 
 /** The subscription statuses a price change reaches; the old fan-out's. */
-const REPRICED_STATUSES = [
+export const REPRICED_STATUSES = [
   SUBSCRIPTION_STATUS.ACTIVE,
   SUBSCRIPTION_STATUS.CANCELLING,
   SUBSCRIPTION_STATUS.PAST_DUE,
@@ -735,8 +781,9 @@ type PriceChangeSubject =
  * `superseded_by_id` must name a row that exists, which a foreign key checks
  * at the end of the statement. The insert reads the update's whole result
  * (`count(*)`) before it writes, so the update has run first. Then the old
- * change's `due` and `held` rows become `superseded`: nobody not yet told
- * hears about the replaced price, and its held people leave support's list.
+ * change's `due` and `held` rows become `superseded`, as do the open rows of
+ * an earlier change that already finished: nobody not yet told hears about
+ * the replaced price, and its held people leave support's list.
  */
 async function insertPriceChange(
   tx: PriceChangeTx,
@@ -781,17 +828,32 @@ async function insertPriceChange(
     inserted: number;
   }>;
   if (row?.inserted !== 1) {
-    throw new Error('Price change insert wrote no row');
+    throw new InternalServiceError('Price change insert wrote no row', {
+      kind: subject.kind,
+    });
   }
   const supersededId = row.superseded_id ?? null;
-  if (supersededId) {
-    await tx.execute(sql`
-      UPDATE ${subscriptionPriceMoves}
-         SET "state" = 'superseded', "updated_at" = ${input.now}::timestamptz
-       WHERE ${subscriptionPriceMoves.priceChangeId} = ${supersededId}::uuid
-         AND ${subscriptionPriceMoves.state} IN ('due', 'held')
-    `);
-  }
+  // An earlier change that already finished stays `done`, but its open rows
+  // are superseded too: held people would otherwise stay on support's list,
+  // and a Retry would re-tell a replaced price while this change tells the
+  // new one. Row locks order this against support's Retry, which only takes
+  // a row that is still `held`.
+  const sameSubjectAs =
+    subject.kind === 'tier'
+      ? sql`c."tier_id" = ${subject.tierId}::uuid`
+      : sql`c."course_subscription_plan_id" = ${subject.planId}::uuid`;
+  await tx.execute(sql`
+    UPDATE ${subscriptionPriceMoves} m
+       SET "state" = 'superseded', "updated_at" = ${input.now}::timestamptz
+      FROM ${priceChanges} c
+     WHERE m."price_change_id" = c."id"
+       AND ${sameSubjectAs}
+       AND c."interval" = ${input.interval}
+       AND ((c."id" = ${supersededId}::uuid AND m."state" IN ('due', 'held'))
+            OR (c."state" = 'done'
+                AND (m."state" IN ('due', 'notified')
+                     OR (m."state" = 'held' AND m."resolved_at" IS NULL))))
+  `);
   return { changeId, supersededId };
 }
 
@@ -926,7 +988,7 @@ export interface RejoinPriceChangeInput {
 }
 
 export type RejoinPriceChangeResult =
-  /** A `due` row now waits for the hourly step: written, or re-opened from `skipped`. */
+  /** A row now waits for the hourly step: written, or re-opened from `skipped`. */
   | { outcome: 'due'; changeId: string; moveId: string }
   /** The change already has them as due, told or held: nothing written. */
   | { outcome: 'already_on_it'; changeId: string }
@@ -948,8 +1010,9 @@ export type RejoinPriceChangeResult =
  * change of its own for the current Price. The hourly step then treats the
  * row like any other: notice first, 30 days from their own email. A row the
  * change already has for them is re-opened only from `skipped` (the step
- * found them moving away); one they were told about is left alone, or they
- * would get a second email.
+ * found them moving away): as `due`, or as `notified` if they had been told
+ * before they left (the write only, from that email). Any other row is left
+ * alone, or they would get a second email.
  */
 export async function rejoinTierPriceChange(
   tx: PriceChangeTx,
@@ -1002,7 +1065,9 @@ export async function rejoinTierPriceChange(
       ${input.now}::timestamptz)
     ON CONFLICT ("price_change_id", "subscription_id")
       WHERE "subscription_id" IS NOT NULL
-    DO UPDATE SET "state" = 'due', "source" = 'keep_current_plan',
+    DO UPDATE SET "state" = CASE WHEN ${subscriptionPriceMoves.noticeAt} IS NULL
+                                 THEN 'due' ELSE 'notified' END,
+      "source" = 'keep_current_plan',
       "skip_reason" = NULL, "attempts" = 0, "attempted_at" = NULL,
       "next_attempt_at" = NULL, "last_error" = NULL,
       "updated_at" = EXCLUDED."updated_at"

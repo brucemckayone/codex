@@ -17,8 +17,9 @@
  *
  * The same wake first settles disputes whose webhook events were missed
  * (./dispute-reconcile.ts, Codex-2hxff.58), then runs the course off-sale,
- * owed-duplicate and waiting-tier-move sweeps (Codex-2hxff.16), and last, on
- * the 08:00 London run, the daily bank payout (Codex-2hxff.29).
+ * owed-duplicate and waiting-tier-move sweeps (Codex-2hxff.16), the price
+ * moves (Codex-2hxff.86), and last, on the 08:00 London run, the daily bank
+ * payout (Codex-2hxff.29).
  *
  * Error handling: NEVER throws. The function is invoked from
  * `scheduled()` inside a `waitUntil` chain — if we throw, the cron
@@ -235,6 +236,31 @@ export async function runTierMoveBackstopSweep(
 }
 
 /**
+ * Tell and move the people a price change recorded (Codex-2hxff.86, data
+ * design §2.4): up to `PRICE_MOVES_PER_RUN` a run, notice first, then the
+ * Stripe write. After the tier-move backstop, so a move that has just landed
+ * is read as landed, and before the bank payout, which sizes itself to the
+ * subrequests left. The service does nothing on the 08:00 London run, which
+ * the bank payout has to itself. Isolated like the other sweeps: never the
+ * cron's failure.
+ */
+export async function runPriceMovesSweep(
+  subscription: Pick<SubscriptionService, 'runPriceMoves'>,
+  scheduledTime: Date,
+  obs: SweepLogger
+): Promise<void> {
+  try {
+    await subscription.runPriceMoves(scheduledTime);
+  } catch (error) {
+    obs.error('payouts-sweep cron could not run the price moves', {
+      errorId: crypto.randomUUID(),
+      scheduledTime: scheduledTime.toISOString(),
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
  * The daily bank payout (Codex-2hxff.29), LAST in the hourly wake: a reversal
  * the clawback retry made this hour has landed before any balance is read,
  * and an old sale the drain released goes to the bank the same morning. Every
@@ -356,11 +382,17 @@ export async function runScheduledPayoutsSweep(
       cronDrain: true,
     });
   } finally {
-    // Same hourly wake (Codex-2hxff.64, Codex-2hxff.15, .29): none throws,
-    // so the pool is always released below. The bank payout goes last.
+    // Same hourly wake (Codex-2hxff.64, Codex-2hxff.15, .86, .29): none
+    // throws, so the pool is always released below. The bank payout goes
+    // last.
     await runCourseOffSaleSweep(webhookServices.services, obs);
     await runOwedDuplicatesSweep(webhookServices.services, obs);
     await runTierMoveBackstopSweep(
+      webhookServices.services.subscription,
+      scheduledTime,
+      obs
+    );
+    await runPriceMovesSweep(
       webhookServices.services.subscription,
       scheduledTime,
       obs

@@ -101,6 +101,12 @@ export {
   PENDING_PRICE_ID_KEY,
   PRICE_NOTICE_TIMEOUT_MS,
 } from './services/pending-price-change';
+// The hourly step that tells and moves people after a price change
+// (Codex-2hxff.86)
+export {
+  PRICE_MOVES_PER_RUN,
+  type PriceMoveStepResult,
+} from './services/price-moves-sweep';
 export {
   calculateRevenueSplit,
   type RevenueSplit,

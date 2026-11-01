@@ -1,7 +1,7 @@
 /**
  * The 30-day price-change rule (Codex-2hxff.3) against a mocked Stripe.
  * The hourly step that works the recorded rows is covered in
- * price-moves.integration.test.ts; this file pins the per-subscription
+ * price-moves-sweep.integration.test.ts; this file pins the per-subscription
  * decision, the notice-first order (D-P3, Codex-2hxff.43), the waiting-move
  * rules (Codex-2hxff.16, Part A rules 1 and 2) and the renewal-date
  * arithmetic.
@@ -267,6 +267,95 @@ describe('schedulePriceChange', () => {
           ),
         },
       });
+    });
+  });
+
+  // The hourly step's last try for this person has an unknown outcome: the
+  // email may have gone, or a run stopped after its write. Stripe already
+  // carrying the change counts as moved: nothing is sent or written again.
+  describe('a try whose outcome is unknown (mayBeTold)', () => {
+    it('already on the new Price: moved, from the next renewal; not told again, nothing written', async () => {
+      const renewal = NOTICE_SEC + 10 * DAY;
+      const { stripe, update } = fakeStripe(
+        fakeSub({ renewal, priceId: 'price_new', unitAmount: 700 })
+      );
+      const notify = vi.fn().mockResolvedValue(true);
+
+      const outcome = await schedulePriceChange(
+        stripe,
+        { ...target, mayBeTold: true },
+        notify
+      );
+
+      expect(outcome).toEqual({
+        kind: 'applied',
+        effectiveAt: new Date(renewal * 1000),
+        currentAmountCents: 700,
+        landed: true,
+      });
+      expect(notify).not.toHaveBeenCalled();
+      expect(update).not.toHaveBeenCalled();
+    });
+
+    it('marked pending for the new Price: moved, from the first renewal the marker allows; not told again', async () => {
+      const renewal = NOTICE_SEC + 10 * DAY;
+      const from = NOTICE_SEC + 31 * DAY;
+      const { stripe, update } = fakeStripe(
+        fakeSub({
+          renewal,
+          metadata: {
+            codex_pending_price_id: 'price_new',
+            codex_pending_price_from: String(from),
+          },
+        })
+      );
+      const notify = vi.fn().mockResolvedValue(true);
+
+      const outcome = await schedulePriceChange(
+        stripe,
+        { ...target, mayBeTold: true },
+        notify
+      );
+
+      expect(outcome).toEqual({
+        kind: 'pending',
+        effectiveAt: new Date(
+          firstRenewalOnOrAfter({
+            nextRenewal: renewal,
+            anchor: renewal,
+            interval: 'month',
+            earliest: from,
+          }) * 1000
+        ),
+        currentAmountCents: 500,
+        landed: true,
+      });
+      expect(notify).not.toHaveBeenCalled();
+      expect(update).not.toHaveBeenCalled();
+    });
+
+    it('carrying another change: told and written as usual', async () => {
+      const { stripe, update } = fakeStripe(
+        fakeSub({
+          renewal: NOTICE_SEC + 10 * DAY,
+          metadata: {
+            codex_pending_price_id: 'price_older',
+            codex_pending_price_from: String(NOTICE_SEC + DAY),
+          },
+        })
+      );
+      const notify = vi.fn().mockResolvedValue(true);
+
+      const outcome = await schedulePriceChange(
+        stripe,
+        { ...target, mayBeTold: true },
+        notify
+      );
+
+      expect(outcome.kind).toBe('pending');
+      expect(outcome).not.toHaveProperty('landed');
+      expect(notify).toHaveBeenCalledOnce();
+      expect(update).toHaveBeenCalledOnce();
     });
   });
 

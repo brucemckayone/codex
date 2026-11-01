@@ -156,6 +156,11 @@ import {
   type PriceChangeNoticeMailer,
   rejoinTierPriceChange,
 } from './pending-price-change';
+import {
+  type PriceMoveStepOptions,
+  type PriceMoveStepResult,
+  runPriceMoveStep,
+} from './price-moves-sweep';
 import { calculateRevenueSplit } from './revenue-split';
 import {
   mapStripeSubscriptionStatus,
@@ -4463,6 +4468,36 @@ export class SubscriptionService extends BaseService {
       });
     }
     return { checked: rows.length, applied, left: left.length, blocked };
+  }
+
+  /**
+   * The hourly price-moves step (Codex-2hxff.86; price-moves-sweep.ts): tell
+   * and move the people a price change recorded, tiers and course plans
+   * alike, at most `PRICE_MOVES_PER_RUN` a run. Nothing on the 08:00 London
+   * run. A member waiting to move to a repriced tier gets their caches
+   * bumped once their later price is set, so their account shows it. Never
+   * throws.
+   */
+  async runPriceMoves(
+    scheduledTime: Date,
+    options: Omit<PriceMoveStepOptions, 'now'> = {}
+  ): Promise<PriceMoveStepResult> {
+    return runPriceMoveStep(
+      {
+        db: this.db,
+        stripe: this.stripe,
+        mailer: this.mailer,
+        obs: this.obs,
+        webAppUrl: this.webAppUrl,
+        onMoverScheduled: ({ userId, organizationId }) =>
+          this.invalidateIfConfigured(
+            userId,
+            organizationId,
+            'subscription_updated'
+          ),
+      },
+      { ...options, now: scheduledTime }
+    );
   }
 
   // ─── Queries ───────────────────────────────────────────────────────────────
