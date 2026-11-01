@@ -169,7 +169,6 @@
         <fieldset
           class="choice-list"
           aria-describedby={choiceMissing ? choiceErrorId : undefined}
-          aria-invalid={choiceMissing || undefined}
         >
           <legend>{m.support_queue_moves_close_legend()}</legend>
           {#each CHOICES as choice, index (choice.value)}
@@ -180,6 +179,7 @@
                 name="{uid}-resolution"
                 value={choice.value}
                 bind:group={resolution}
+                aria-invalid={choiceMissing || undefined}
                 disabled={busy}
                 data-testid="close-choice-{choice.value}"
               />

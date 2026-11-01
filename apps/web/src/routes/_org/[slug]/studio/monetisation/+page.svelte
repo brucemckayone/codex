@@ -41,12 +41,14 @@
     PlusIcon,
     CheckCircleIcon,
     ChevronRightIcon,
+    InfoIcon,
     UsersIcon,
   } from '$lib/components/ui/Icon';
   import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
   import { toast } from '$lib/components/ui/Toast/toast-store';
   import PlanPicker from '$lib/components/studio/plan-picker/PlanPicker.svelte';
   import PlanGuidanceNote from '$lib/components/studio/plan-picker/PlanGuidanceNote.svelte';
+  import { editTierHint } from '$lib/components/studio/price-note-view';
   import {
     countsAnd,
     countsDot,
@@ -838,6 +840,23 @@
       createInFlightId !== null && createInFlightId === tierSubmissionId;
     tierDialogOpen = true;
   }
+
+  /**
+   * The Edit Tier dialog's one quiet line before saving new prices
+   * (Codex-2hxff.85, owner decision Q7, mockup P1): who will be emailed, when
+   * it starts, and the 30-day rule. Only when a price differs from the saved
+   * one and the tier has subscribers; the count is the tier row's.
+   */
+  const tierPriceHint = $derived(
+    editingTier
+      ? editTierHint({
+          name: editingTier.name,
+          subscribers: subscribersByTier.get(editingTier.id)?.count ?? 0,
+          saved: { monthly: editingTier.priceMonthly, annual: editingTier.priceAnnual },
+          next: { monthly: tierPriceMonthly, annual: tierPriceAnnual },
+        })
+      : null
+  );
 
   function openEditTier(tier: SubscriptionTier) {
     editingTier = tier;
@@ -1725,6 +1744,7 @@
               min={100}
               step={1}
               required
+              aria-describedby={tierPriceHint ? 'tier-price-hint' : undefined}
             />
             <span class="form-hint">{formatPrice(tierPriceMonthly)}</span>
           </div>
@@ -1737,10 +1757,17 @@
               min={100}
               step={1}
               required
+              aria-describedby={tierPriceHint ? 'tier-price-hint' : undefined}
             />
             <span class="form-hint">{formatPrice(tierPriceAnnual)}</span>
           </div>
         </div>
+        {#if tierPriceHint}
+          <p class="price-hint" id="tier-price-hint" data-testid="tier-price-hint">
+            <InfoIcon size={14} aria-hidden="true" class="price-hint__icon" />
+            <span><b>{tierPriceHint.lead}</b> {tierPriceHint.body}</span>
+          </p>
+        {/if}
 
         <!-- "Include everything from…" (Codex-2hxff.91): copies a tier's films
              and courses in the same server command as the create. Create only,
@@ -2513,6 +2540,27 @@
   .form-hint {
     font-size: var(--text-xs);
     color: var(--color-text-muted);
+  }
+
+  /* Edit Tier's quiet line about existing subscribers (Codex-2hxff.85 P1). */
+  .price-hint {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: var(--space-2);
+    align-items: start;
+    margin: 0;
+    font-size: var(--text-xs);
+    line-height: var(--leading-normal);
+    color: var(--color-text-secondary);
+  }
+
+  .price-hint :global(.price-hint__icon) {
+    margin-top: var(--space-0-5);
+  }
+
+  .price-hint b {
+    color: var(--color-text);
+    font-weight: var(--font-semibold);
   }
 
   /* Delete confirm */

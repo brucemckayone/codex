@@ -3498,5 +3498,11 @@
   "fee_note_meta_list": "Sales before each date keep today's fees. We emailed you about each change.",
   "fee_note_meta_list_unsent": "Sales before each date keep today's fees.",
   "fee_note_check_failed": "We couldn't check for upcoming fee changes.",
-  "fee_note_try_again": "Try again"
+  "fee_note_try_again": "Try again",
+  "price_note_edit_lead": "Your {count} {name} subscribers will be emailed about the new prices.",
+  "price_note_edit_lead_one": "Your 1 {name} subscriber will be emailed about the new prices.",
+  "price_note_edit_body": "Emails start at the next hourly run, and each person moves at their first renewal at least 30 days after their own email. New subscribers pay the new prices straight away.",
+  "price_note_edit_lead_monthly": "Your {name} subscribers who pay monthly will be emailed about the new monthly price.",
+  "price_note_edit_lead_annual": "Your {name} subscribers who pay annually will be emailed about the new annual price.",
+  "price_note_edit_body_one": "Emails start at the next hourly run, and each person moves at their first renewal at least 30 days after their own email. New subscribers pay the new price straight away."
 }
