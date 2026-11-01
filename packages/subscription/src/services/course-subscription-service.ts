@@ -122,16 +122,7 @@ import {
   createKeyRefusal,
   stripeRefusalDetail,
 } from './create-key-refusal';
-import {
-  alertFanOutOutOfTime,
-  moveFailureAlert,
-  noticeFailureAlert,
-  PRICE_FAN_OUT_BUDGET_MS,
-  type PriceChangeNotice,
-  type PriceChangeNoticeMailer,
-  schedulePriceChange,
-  sendPriceChangeNotice,
-} from './pending-price-change';
+import { recordPlanPriceChange } from './pending-price-change';
 import { resolveStatus } from './stripe-status-mapper';
 import {
   cancelAndRefundDuplicate,
@@ -173,33 +164,10 @@ export type CourseOffSaleMailer = (params: {
 interface CourseSubscriptionServiceConfig extends ServiceConfig {
   /** Invoice payouts resolve fees via the 3-tier fallback chain. */
   feeConfig: FeeResolver;
-  /**
-   * Price-change notices (`subscription-tier-price-change`), awaited: a
-   * subscriber moves only once theirs is accepted (D-P3, Codex-2hxff.43).
-   */
-  mailer: PriceChangeNoticeMailer;
   /** Off-sale notices (`course-no-longer-offered`). */
   offSaleMailer: CourseOffSaleMailer;
-  /** Base for the notice's manage-subscription link. */
+  /** Base for the emails' manage-subscription links. */
   webAppUrl?: string;
-  /**
-   * Runs a plan's subscriber fan-out after the response. Absent (tests) → the
-   * fan-out is awaited inline.
-   */
-  waitUntil?: (promise: Promise<unknown>) => void;
-}
-
-/** One interval of a plan whose Price changed. */
-interface PlanPriceMove {
-  interval: 'month' | 'year';
-  newPriceId: string;
-  /**
-   * The plan's previous LIST price. Not what a subscriber pays: the notice
-   * quotes their live item (`PriceChangeOutcome.currentAmountCents`), and
-   * this is only the fallback when that has no unit amount (Codex-2hxff.40).
-   */
-  oldAmountCents: number;
-  newAmountCents: number;
 }
 
 /**
@@ -362,20 +330,16 @@ export interface CourseSubscriptionCheckoutVerifyResult {
 export class CourseSubscriptionService extends BaseService {
   private readonly stripe: Stripe;
   private readonly feeConfig: FeeResolver;
-  private readonly mailer: PriceChangeNoticeMailer;
   private readonly offSaleMailer: CourseOffSaleMailer;
   private readonly webAppUrl: string | undefined;
-  private readonly waitUntil: ((promise: Promise<unknown>) => void) | undefined;
   private readonly checkoutReservations: CheckoutReservations;
 
   constructor(config: CourseSubscriptionServiceConfig, stripe: Stripe) {
     super(config);
     this.stripe = stripe;
     this.feeConfig = config.feeConfig;
-    this.mailer = config.mailer;
     this.offSaleMailer = config.offSaleMailer;
     this.webAppUrl = config.webAppUrl;
-    this.waitUntil = config.waitUntil;
     this.checkoutReservations = new CheckoutReservations(
       this.db,
       stripe,
@@ -784,14 +748,19 @@ export class CourseSubscriptionService extends BaseService {
    * row, so routing that case to `createPlan` would raise
    * `CourseSubscriptionPlanExistsError` and leave the creator permanently unable
    * to put the subscription back on sale.
+   *
+   * `actorUserId` is the owner who saved: a price change records it.
    */
   async upsertPlan(
     organizationId: string,
     courseId: string,
-    input: { priceMonthly: number; priceAnnual: number }
+    input: { priceMonthly: number; priceAnnual: number },
+    actorUserId: string | null = null
   ): Promise<typeof courseSubscriptionPlans.$inferSelect> {
     const existing = await this.findPlanRow(courseId);
-    if (existing) return this.savePlanPrices(organizationId, courseId, input);
+    if (existing) {
+      return this.savePlanPrices(organizationId, courseId, input, actorUserId);
+    }
     try {
       return await this.createPlan(organizationId, courseId, input);
     } catch (error) {
@@ -800,7 +769,12 @@ export class CourseSubscriptionService extends BaseService {
       // hour's keys. Save onto it, as a repeat of the save that made it
       // (Codex-2hxff.66). A race inside one hour returns the plan already.
       if (error instanceof CourseSubscriptionPlanExistsError) {
-        return this.savePlanPrices(organizationId, courseId, input);
+        return this.savePlanPrices(
+          organizationId,
+          courseId,
+          input,
+          actorUserId
+        );
       }
       throw error;
     }
@@ -819,9 +793,10 @@ export class CourseSubscriptionService extends BaseService {
    *
    * Existing subscribers on a changed interval move to its new Price under the
    * same rule as org tiers (owner decision P-6, "Same rule as tiers"): at their
-   * first renewal at least 30 days after they are emailed, no proration — see
-   * `movePlanSubscribers` (Codex-2hxff.3). New checkouts pay the new amount at
-   * once.
+   * first renewal at least 30 days after they are emailed, no proration
+   * (Codex-2hxff.3). The save records who is due in its own transaction
+   * (`recordPlanPriceChange`, Codex-2hxff.86), and ecom-api's hourly step
+   * emails and moves them. New checkouts pay the new amount at once.
    *
    * RE-LISTS a withdrawn plan (`isActive` back to true, Stripe Product
    * un-archived). Saving an offer is the creator asserting "this is what I sell",
@@ -835,7 +810,8 @@ export class CourseSubscriptionService extends BaseService {
   async savePlanPrices(
     organizationId: string,
     courseId: string,
-    input: { priceMonthly: number; priceAnnual: number }
+    input: { priceMonthly: number; priceAnnual: number },
+    actorUserId: string | null = null
   ): Promise<typeof courseSubscriptionPlans.$inferSelect> {
     try {
       const course = await this.getCourseInOrgOrThrow(organizationId, courseId);
@@ -936,72 +912,77 @@ export class CourseSubscriptionService extends BaseService {
         archivedPriceIds.push(stripePriceAnnualId);
       }
 
-      try {
-        const [updated] = await this.db
-          .update(courseSubscriptionPlans)
-          .set({
-            priceMonthly: input.priceMonthly,
-            priceAnnual: input.priceAnnual,
-            stripePriceMonthlyId: newMonthlyPriceId,
-            stripePriceAnnualId: newAnnualPriceId,
-            // Saving an offer puts it on sale — this is what re-lists a plan the
-            // creator had withdrawn.
-            isActive: true,
-            updatedAt: new Date(),
-          })
-          .where(eq(courseSubscriptionPlans.id, existing.id))
-          .returning();
-        if (!updated) {
-          throw new InternalServiceError(
-            'Failed to update course plan prices',
-            {
-              courseId,
-              planId: existing.id,
-            }
-          );
-        }
+      // Each interval whose Price this save minted, as its change records it.
+      const changedPrices: Array<{
+        interval: 'month' | 'year';
+        newStripePriceId: string;
+        fromAmountCents: number;
+        newAmountCents: number;
+      }> = [];
+      if (monthlyChanged && newMonthlyPriceId) {
+        changedPrices.push({
+          interval: 'month',
+          newStripePriceId: newMonthlyPriceId,
+          fromAmountCents: existing.priceMonthly,
+          newAmountCents: input.priceMonthly,
+        });
+      }
+      if (annualChanged && newAnnualPriceId) {
+        changedPrices.push({
+          interval: 'year',
+          newStripePriceId: newAnnualPriceId,
+          fromAmountCents: existing.priceAnnual,
+          newAmountCents: input.priceAnnual,
+        });
+      }
 
-        const moves: PlanPriceMove[] = [];
-        if (monthlyChanged && newMonthlyPriceId) {
-          moves.push({
-            interval: 'month',
-            newPriceId: newMonthlyPriceId,
-            oldAmountCents: existing.priceMonthly,
-            newAmountCents: input.priceMonthly,
-          });
-        }
-        if (annualChanged && newAnnualPriceId) {
-          moves.push({
-            interval: 'year',
-            newPriceId: newAnnualPriceId,
-            oldAmountCents: existing.priceAnnual,
-            newAmountCents: input.priceAnnual,
-          });
-        }
-        if (moves.length > 0) {
-          // After the commit, so the plan row already points at the new Prices.
-          const fanOut = this.movePlanSubscribers(existing.id, moves).catch(
-            (error) => {
-              // Before or outside the per-subscriber handling (reading the
-              // subscribers, say): who was reached is unknown (silent #10).
-              this.obs.error(
-                'Course plan price fan-out failed; its subscribers may not have been notified or moved (support: check the start line and retry)',
-                {
-                  errorId: crypto.randomUUID(),
-                  planId: existing.id,
-                  courseId,
-                  moves: moves.map((move) => ({
-                    interval: move.interval,
-                    newPriceId: move.newPriceId,
-                  })),
-                  error: error instanceof Error ? error.message : String(error),
-                }
-              );
-            }
-          );
-          if (this.waitUntil) this.waitUntil(fanOut);
-          else await fanOut;
-        }
+      try {
+        // One transaction: the plan's new Prices and who is due to be told
+        // about them (data design §2.3), so a failure loses nobody.
+        const updated = await this.db.transaction(async (tx) => {
+          const [row] = await tx
+            .update(courseSubscriptionPlans)
+            .set({
+              priceMonthly: input.priceMonthly,
+              priceAnnual: input.priceAnnual,
+              stripePriceMonthlyId: newMonthlyPriceId,
+              stripePriceAnnualId: newAnnualPriceId,
+              // Saving an offer puts it on sale — this is what re-lists a plan
+              // the creator had withdrawn.
+              isActive: true,
+              updatedAt: new Date(),
+            })
+            .where(eq(courseSubscriptionPlans.id, existing.id))
+            .returning();
+          if (!row) {
+            throw new InternalServiceError(
+              'Failed to update course plan prices',
+              {
+                courseId,
+                planId: existing.id,
+              }
+            );
+          }
+          const now = new Date();
+          for (const change of changedPrices) {
+            const recorded = await recordPlanPriceChange(tx, existing.id, {
+              organizationId,
+              ...change,
+              createdByUserId: actorUserId,
+              now,
+            });
+            this.obs.info('Course plan price change recorded', {
+              planId: existing.id,
+              courseId,
+              organizationId,
+              interval: change.interval,
+              priceChangeId: recorded.changeId,
+              supersededId: recorded.supersededId,
+              total: recorded.total,
+            });
+          }
+          return row;
+        });
         return updated;
       } catch (dbError) {
         this.obs.warn(
@@ -1024,263 +1005,6 @@ export class CourseSubscriptionService extends BaseService {
     } catch (error) {
       this.handleError(error, 'savePlanPrices');
     }
-  }
-
-  /**
-   * Move a plan's existing subscribers on each changed interval to its new
-   * Price — at their first renewal at least 30 days after this notice, with no
-   * proration (`schedulePriceChange`). Notice first, then move (D-P3,
-   * Codex-2hxff.43): each subscriber is emailed, and moved only once
-   * notifications-api accepts the email. A notice not accepted, or a move that
-   * fails, is alerted (errorId and ids) for support to retry. Past-due and
-   * paused subscribers get the pending marker and move once active again. One
-   * failed subscriber never stops the rest.
-   *
-   * It runs on `waitUntil`, which the runtime cancels 30 s after the response,
-   * so no batch starts after `PRICE_FAN_OUT_BUDGET_MS` (17 s), across both
-   * intervals, and every Stripe call gives up after 3 s. Both intervals'
-   * subscribers are read first, so every one not reached, on either interval,
-   * is reported in one alert after the end summary (`alertFanOutOutOfTime`).
-   * A start line opens the run.
-   */
-  private async movePlanSubscribers(
-    planId: string,
-    moves: PlanPriceMove[]
-  ): Promise<void> {
-    const noticeAt = new Date();
-    const startedAt = Date.now();
-    const prefix = 'Course plan price fan-out: ';
-    const planned = [];
-    for (const move of moves) {
-      const rows = await this.db
-        .select({
-          id: courseSubscriptions.id,
-          stripeSubscriptionId: courseSubscriptions.stripeSubscriptionId,
-          organizationId: courseSubscriptions.organizationId,
-          userId: courseSubscriptions.userId,
-          userEmail: users.email,
-          userName: users.name,
-          courseTitle: courses.title,
-        })
-        .from(courseSubscriptions)
-        .leftJoin(users, eq(users.id, courseSubscriptions.userId))
-        .leftJoin(courses, eq(courses.id, courseSubscriptions.courseId))
-        .where(
-          and(
-            eq(courseSubscriptions.planId, planId),
-            eq(courseSubscriptions.billingInterval, move.interval),
-            inArray(courseSubscriptions.status, [
-              'active',
-              'cancelling',
-              'past_due',
-              'paused',
-            ])
-          )
-        );
-      planned.push({ move, rows });
-    }
-
-    const counts = {
-      total: planned.reduce((sum, { rows }) => sum + rows.length, 0),
-      updated: 0,
-      unnotified: 0,
-      unhandled: 0,
-      failed: 0,
-    };
-    const summary = {
-      planId,
-      noticeAt: noticeAt.toISOString(),
-      moves: planned.map(({ move, rows }) => ({
-        interval: move.interval,
-        newPriceId: move.newPriceId,
-        total: rows.length,
-      })),
-    };
-    this.obs.info('Course plan price fan-out: starting', {
-      ...summary,
-      total: counts.total,
-    });
-
-    // Everyone the deadline leaves out, on either interval: one alert,
-    // after the end summary.
-    const unreached: Array<Record<string, unknown>> = [];
-    const batchSize = 8;
-    for (const { move, rows } of planned) {
-      for (let i = 0; i < rows.length; i += batchSize) {
-        // The runtime cancels everything 30 s after the response: start no
-        // batch it could cut off, and name every subscriber left (silent #1).
-        if (
-          unreached.length > 0 ||
-          Date.now() - startedAt >= PRICE_FAN_OUT_BUDGET_MS
-        ) {
-          const left = rows.slice(i);
-          counts.unhandled += left.length;
-          unreached.push(
-            ...left.map((row) => ({
-              courseSubscriptionId: row.id,
-              stripeSubscriptionId: row.stripeSubscriptionId,
-              userId: row.userId,
-              organizationId: row.organizationId,
-              interval: move.interval,
-            }))
-          );
-          break;
-        }
-        const batch = rows.slice(i, i + batchSize);
-        // Each accepted notice, so a failure after it can say what was sent.
-        const notified = new Map<string, PriceChangeNotice>();
-        const results = await Promise.allSettled(
-          batch.map((row) =>
-            schedulePriceChange(
-              this.stripe,
-              {
-                stripeSubscriptionId: row.stripeSubscriptionId,
-                newPriceId: move.newPriceId,
-                newAmountCents: move.newAmountCents,
-                interval: move.interval,
-                noticeAt,
-              },
-              async (notice) => {
-                const accepted = await this.sendPlanPriceChangeNotice(
-                  planId,
-                  move,
-                  row,
-                  notice
-                );
-                if (accepted) notified.set(row.id, notice);
-                return accepted;
-              }
-            )
-          )
-        );
-        for (const [idx, result] of results.entries()) {
-          const row = batch[idx];
-          if (!row) continue;
-          if (result.status === 'fulfilled') {
-            const { kind } = result.value;
-            if (kind === 'applied' || kind === 'pending') counts.updated++;
-            // Alerted by sendPlanPriceChangeNotice.
-            else if (kind === 'unnotified') counts.unnotified++;
-            continue;
-          }
-          counts.failed++;
-          const alert = moveFailureAlert(
-            prefix,
-            result.reason,
-            notified.get(row.id),
-            noticeAt
-          );
-          this.obs.error(alert.message, {
-            errorId: crypto.randomUUID(),
-            ...alert.data,
-            planId,
-            interval: move.interval,
-            newPriceId: move.newPriceId,
-            courseSubscriptionId: row.id,
-            stripeSubscriptionId: row.stripeSubscriptionId,
-            userId: row.userId,
-            organizationId: row.organizationId,
-          });
-        }
-      }
-    }
-
-    if (counts.failed > 0 || counts.unnotified > 0 || counts.unhandled > 0) {
-      this.obs.error(
-        'Course plan price fan-out completed with failures (operator review required)',
-        { errorId: crypto.randomUUID(), ...summary, ...counts }
-      );
-    } else {
-      this.obs.info('Course plan price fan-out complete', {
-        ...summary,
-        ...counts,
-      });
-    }
-    // After the summary, and count first: the per-invocation log cap drops
-    // whatever comes last (review A round 2, silent R1).
-    alertFanOutOutOfTime((message, data) => this.obs.error(message, data), {
-      errorId: crypto.randomUUID(),
-      context: summary,
-      subscribers: unreached,
-    });
-  }
-
-  /**
-   * Send one course subscriber the notice of a plan price change and resolve
-   * whether notifications-api accepted it: their move is scheduled only then
-   * (D-P3, Codex-2hxff.43). A notice not accepted (no address, refused,
-   * skipped, or an unknown outcome) is alerted at error with an errorId and
-   * the ids support needs to retry (`noticeFailureAlert`). Never throws.
-   */
-  private async sendPlanPriceChangeNotice(
-    planId: string,
-    move: PlanPriceMove,
-    row: {
-      id: string;
-      stripeSubscriptionId: string;
-      organizationId: string | null;
-      userId: string;
-      userEmail: string | null;
-      userName: string | null;
-      courseTitle: string | null;
-    },
-    notice: PriceChangeNotice
-  ): Promise<boolean> {
-    // The "from" figure is what this subscriber is billed today, read off
-    // their live item: subscribers grandfathered before #589 pay something
-    // other than the plan's previous list price (Codex-2hxff.40).
-    let currentAmountCents = notice.currentAmountCents;
-    if (currentAmountCents === null) {
-      // An error: the email may quote a figure this subscriber is not
-      // billed, and PriceChangeNotice says this never happens.
-      this.obs.error(
-        'Course plan price notice: live price has no unit amount; quoting the plan list price',
-        {
-          errorId: crypto.randomUUID(),
-          planId,
-          courseSubscriptionId: row.id,
-        }
-      );
-      currentAmountCents = move.oldAmountCents;
-    }
-    const failure = await sendPriceChangeNotice(this.mailer, {
-      to: row.userEmail,
-      toName: row.userName || undefined,
-      templateName: 'subscription-tier-price-change',
-      category: 'transactional',
-      userId: row.userId,
-      organizationId: row.organizationId,
-      data: {
-        userName: row.userName || 'there',
-        planName: row.courseTitle || 'your subscription',
-        oldPriceFormatted: `£${(currentAmountCents / 100).toFixed(2)}`,
-        newPriceFormatted: `£${(move.newAmountCents / 100).toFixed(2)}`,
-        billingInterval: move.interval,
-        effectiveDate: notice.effectiveAt.toLocaleDateString('en-GB', {
-          timeZone: 'UTC',
-        }),
-        manageUrl: `${this.webAppUrl ?? ''}/account/subscriptions`,
-      },
-    });
-    if (!failure) return true;
-
-    const alert = noticeFailureAlert(
-      'Course plan price fan-out: ',
-      failure,
-      notice
-    );
-    this.obs.error(alert.message, {
-      errorId: crypto.randomUUID(),
-      ...alert.data,
-      planId,
-      interval: move.interval,
-      newPriceId: move.newPriceId,
-      courseSubscriptionId: row.id,
-      stripeSubscriptionId: row.stripeSubscriptionId,
-      userId: row.userId,
-      organizationId: row.organizationId,
-    });
-    return false;
   }
 
   /**
@@ -3190,10 +2914,13 @@ export class CourseSubscriptionService extends BaseService {
     // the platform fee, or between the slices (the per-slice writer before
     // this), is completed by the redelivery from what the charge has left.
 
+    // The fee in force at the invoice's own time (Codex-2hxff.33, data design
+    // §1.4), like the agreement below.
     const fees = await this.feeConfig.getFeesForCreator(
       organizationId,
       creatorId,
-      'subscription'
+      'subscription',
+      invoiceCreatedAt
     );
 
     const agreement = await findActiveCreatorAgreementShare(this.db, {

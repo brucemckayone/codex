@@ -193,10 +193,13 @@ app.patch(
     handler: async (ctx) => {
       const orgId = ctx.organizationId;
       const { tierId } = ctx.input.params;
+      // A changed price records who is due in the save's transaction, with
+      // the owner who saved it (Codex-2hxff.86); no waitUntil fan-out.
       const tier = await ctx.services.tier.updateTier(
         tierId,
         orgId,
-        ctx.input.body
+        ctx.input.body,
+        ctx.user.id
       );
       await warmTierCache(ctx, orgId);
       return tier;

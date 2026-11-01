@@ -1,9 +1,10 @@
 /**
- * The price fan-outs wait `PRICE_NOTICE_TIMEOUT_MS` for each notice, the
- * figure their budget arithmetic counts on: `PRICE_FAN_OUT_BUDGET_MS` in
- * @codex/subscription is derived from it. So the registry passes that
- * constant, and does not lean on worker-utils' own default (review A round 2,
- * correctness #1).
+ * ecom-api's hourly price-moves step waits `PRICE_NOTICE_TIMEOUT_MS` for each
+ * notice (Codex-2hxff.86): its 8-minute budget and batches of 8 count on it.
+ * So the registry passes that constant to the SubscriptionService mailer the
+ * step sends through, and does not lean on worker-utils' own default (review
+ * A round 2, correctness #1). The course service sends no price notice any
+ * more: the step sends course plans' too.
  *
  * DATABASE-FREE: the DB client is constructed, never queried (same env shape
  * as money-mailer-no-context.test.ts).
@@ -43,14 +44,13 @@ function mailerOf(service: object) {
     .mailer;
 }
 
-describe('the price fan-out notice mailers', () => {
+describe('the price-change notice mailer', () => {
   beforeEach(() => {
     vi.mocked(sendEmailToWorkerAwaited).mockClear();
   });
 
   it.each([
     'subscription',
-    'courseSubscription',
   ] as const)('the %s service waits PRICE_NOTICE_TIMEOUT_MS for each notice', async (name) => {
     const obs = { error: vi.fn(), warn: vi.fn(), info: vi.fn() };
     const env = testEnv();

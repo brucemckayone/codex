@@ -97,10 +97,13 @@ courseMonetisation.put(
       body: upsertCourseSubscriptionPlanSchema,
     },
     handler: async (ctx) => {
+      // A re-price records who is due in the save's transaction, with the
+      // owner who saved it (Codex-2hxff.86); ecom-api's hourly step moves them.
       return ctx.services.courseSubscription.upsertPlan(
         ctx.organizationId,
         ctx.input.params.courseId,
-        ctx.input.body
+        ctx.input.body,
+        ctx.user.id
       );
     },
   })

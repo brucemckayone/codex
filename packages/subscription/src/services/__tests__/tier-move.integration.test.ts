@@ -16,6 +16,8 @@
 import type { VersionedCache } from '@codex/cache';
 import {
   organizations,
+  priceChanges,
+  subscriptionPriceMoves,
   subscriptions,
   subscriptionTiers,
   users,
@@ -200,6 +202,26 @@ describe('waiting tier moves (Codex-2hxff.16)', () => {
   });
 
   afterAll(async () => {
+    // Price moves hang off subscriptions and price changes off tiers (RESTRICT).
+    if (userIds.length > 0) {
+      await db
+        .delete(subscriptionPriceMoves)
+        .where(inArray(subscriptionPriceMoves.userId, userIds));
+    }
+    if (orgIds.length > 0) {
+      await db
+        .update(priceChanges)
+        .set({
+          supersededById: null,
+          supersededAt: null,
+          state: 'done',
+          doneAt: new Date(),
+        })
+        .where(inArray(priceChanges.organizationId, orgIds));
+      await db
+        .delete(priceChanges)
+        .where(inArray(priceChanges.organizationId, orgIds));
+    }
     if (userIds.length > 0) {
       await db
         .delete(subscriptions)
@@ -667,8 +689,115 @@ describe('waiting tier moves (Codex-2hxff.16)', () => {
       expect(stored.amountCents).toBe(2000);
       expect(logged).toHaveBeenCalledWith(
         'tier_move.kept',
-        expect.objectContaining({ heldTierRepriced: true })
+        expect.objectContaining({ heldTierRepriced: true, alreadyTold: true })
       );
+      // The parked change Keep made live again is to the current Price, and a
+      // pending marker is written only after an accepted notice: they were
+      // told, so nothing is recorded to tell them again.
+      expect(
+        await db
+          .select()
+          .from(subscriptionPriceMoves)
+          .where(eq(subscriptionPriceMoves.subscriptionId, row.id))
+      ).toEqual([]);
+    });
+
+    // Part A rule 3 (data design §2.3): a tier repriced while the member was
+    // moving away skipped them, so Keep hands them to the price-change step.
+    describe('on a tier repriced while they waited (Codex-2hxff.86)', () => {
+      async function keptAfterReprice(slug: string) {
+        const { org, basic, premium } = await hollowOak(slug);
+        const { userId, row } = await member(org.id, premium);
+        await service.changeTier(userId, org.id, basic.id, 'month');
+        const repriced = `${premium.stripePriceMonthlyId}_v2`;
+        await db
+          .update(subscriptionTiers)
+          .set({ priceMonthly: 2200, stripePriceMonthlyId: repriced })
+          .where(eq(subscriptionTiers.id, premium.id));
+        return { org, premium, userId, row, repriced };
+      }
+
+      const rowsOf = (subscriptionId: string) =>
+        db
+          .select()
+          .from(subscriptionPriceMoves)
+          .where(eq(subscriptionPriceMoves.subscriptionId, subscriptionId));
+
+      it('no change recorded for the Price yet: Keep writes its own, and one due row for them', async () => {
+        const { org, premium, userId, row, repriced } =
+          await keptAfterReprice('keep-rejoin-own');
+
+        await service.keepCurrentPlan(userId, org.id);
+
+        const [change] = await db
+          .select()
+          .from(priceChanges)
+          .where(eq(priceChanges.tierId, premium.id));
+        expect(change).toMatchObject({
+          organizationId: org.id,
+          kind: 'tier',
+          interval: 'month',
+          // From what they pay now (the held Price), to the tier's current one.
+          fromAmountCents: 2000,
+          newAmountCents: 2200,
+          newStripePriceId: repriced,
+          state: 'running',
+          totalCount: 1,
+          createdByUserId: null,
+        });
+        expect(await rowsOf(row.id)).toEqual([
+          expect.objectContaining({
+            priceChangeId: change?.id,
+            state: 'due',
+            source: 'keep_current_plan',
+            stripeSubscriptionId: row.stripeSubscriptionId,
+            organizationId: org.id,
+            userId,
+            attempts: 0,
+          }),
+        ]);
+      });
+
+      it("hangs the row off the tier's latest change and re-opens it when done", async () => {
+        const { org, premium, userId, row, repriced } =
+          await keptAfterReprice('keep-rejoin-done');
+        const doneAt = new Date(Date.now() - 60_000);
+        const [change] = await db
+          .insert(priceChanges)
+          .values({
+            organizationId: org.id,
+            kind: 'tier',
+            tierId: premium.id,
+            interval: 'month',
+            fromAmountCents: 2000,
+            newAmountCents: 2200,
+            newStripePriceId: repriced,
+            state: 'done',
+            doneAt,
+            totalCount: 4,
+          })
+          .returning();
+
+        await service.keepCurrentPlan(userId, org.id);
+
+        const [after] = await db
+          .select()
+          .from(priceChanges)
+          .where(eq(priceChanges.tierId, premium.id));
+        expect(after).toMatchObject({
+          id: change?.id,
+          state: 'running',
+          doneAt: null,
+          totalCount: 5,
+        });
+        expect(await rowsOf(row.id)).toEqual([
+          expect.objectContaining({
+            priceChangeId: change?.id,
+            state: 'due',
+            source: 'keep_current_plan',
+          }),
+        ]);
+      });
     });
 
     it('Keep, a new move, then Keep again inside 24 hours: the second Keep writes too', async () => {
@@ -1066,6 +1195,98 @@ describe('waiting tier moves (Codex-2hxff.16)', () => {
     expect(current).not.toHaveProperty('pendingTierId');
     const [mine] = await service.getUserSubscriptions(userId);
     expect(mine?.pendingTierChange?.tierId).toBe(basic.id);
+  });
+
+  // T6: a member moving to a repriced tier moves at the price they confirmed,
+  // then pays the new one from a later renewal. `laterPrice` is read from
+  // their price-move row, never from Stripe (Codex-2hxff.86).
+  it('pendingTierChange.laterPrice is the newest change on the target they were told about', async () => {
+    const { org, basic, premium } = await hollowOak('reads-later');
+    const { userId, row } = await member(org.id, premium);
+    await service.changeTier(userId, org.id, basic.id, 'month');
+    const reads = vi.mocked(stripe.subscriptions.retrieve);
+    const laterOf = async () => {
+      const before = reads.mock.calls.length;
+      const [current, [mine]] = await Promise.all([
+        service.getSubscription(userId, org.id),
+        service.getUserSubscriptions(userId),
+      ]);
+      expect(reads.mock.calls.length).toBe(before);
+      expect(mine?.pendingTierChange?.laterPrice).toEqual(
+        current?.pendingTierChange?.laterPrice
+      );
+      return current?.pendingTierChange?.laterPrice;
+    };
+    const change = async (newAmountCents: number, createdAt: Date) =>
+      takeFirst(
+        await db
+          .insert(priceChanges)
+          .values({
+            organizationId: org.id,
+            kind: 'tier',
+            tierId: basic.id,
+            interval: 'month',
+            fromAmountCents: 500,
+            newAmountCents,
+            newStripePriceId: `price_basic_${newAmountCents}`,
+            state: 'running',
+            createdAt,
+          })
+          .returning()
+      );
+    const effectiveAt = new Date(Date.now() + 45 * DAY * 1000);
+
+    // Not told yet: nothing to show.
+    const first = await change(600, new Date(Date.now() - 2 * 3_600_000));
+    await db.insert(subscriptionPriceMoves).values({
+      priceChangeId: first.id,
+      subscriptionId: row.id,
+      stripeSubscriptionId: row.stripeSubscriptionId,
+      organizationId: org.id,
+      userId,
+    });
+    expect(await laterOf()).toBeNull();
+
+    // Told and scheduled.
+    await db
+      .update(subscriptionPriceMoves)
+      .set({
+        state: 'scheduled',
+        scheduledKind: 'pending',
+        noticeAt: new Date(),
+        effectiveAt,
+      })
+      .where(eq(subscriptionPriceMoves.priceChangeId, first.id));
+    expect(await laterOf()).toEqual({
+      amountCents: 600,
+      effectiveAt: effectiveAt.toISOString(),
+    });
+
+    // A newer change replaces it; until they are told, the earlier one stands.
+    await db
+      .update(priceChanges)
+      .set({ state: 'done', doneAt: new Date() })
+      .where(eq(priceChanges.id, first.id));
+    const second = await change(700, new Date(Date.now() - 3_600_000));
+    await db.insert(subscriptionPriceMoves).values({
+      priceChangeId: second.id,
+      subscriptionId: row.id,
+      stripeSubscriptionId: row.stripeSubscriptionId,
+      organizationId: org.id,
+      userId,
+    });
+    expect((await laterOf())?.amountCents).toBe(600);
+
+    // Told about the newer one (its Stripe write still to land): it shows.
+    const later = new Date(effectiveAt.getTime() + 30 * DAY * 1000);
+    await db
+      .update(subscriptionPriceMoves)
+      .set({ state: 'notified', noticeAt: new Date(), effectiveAt: later })
+      .where(eq(subscriptionPriceMoves.priceChangeId, second.id));
+    expect(await laterOf()).toEqual({
+      amountCents: 700,
+      effectiveAt: later.toISOString(),
+    });
   });
 
   // ─── §6.2 Deleting a tier people are moving to (T5) ─────────────────────

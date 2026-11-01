@@ -10,6 +10,7 @@
 
 import {
   organizations,
+  priceChanges,
   stripeConnectAccounts,
   subscriptions,
   subscriptionTiers,
@@ -756,33 +757,63 @@ describe('TierService', () => {
       expect(stripe.prices.update).toHaveBeenCalledOnce(); // archive old
     });
 
-    // Codex-2hxff.3: the interval must reach the fan-out, or an annual edit
-    // moves monthly subscribers onto the annual Price.
-    it('fires the subscriber fan-out once, for ONLY the interval that changed', async () => {
-      const propagator = vi.fn();
-      const withPropagator = new TierService(
-        { db, dbWs: db, environment: 'test', propagator },
-        stripe
-      );
-      const org = await createOrgWithConnect('update-propagate');
-      const tier = await withPropagator.createTier(org.id, {
+    // Codex-2hxff.3: only the interval that changed is repriced, or an annual
+    // edit would move monthly subscribers onto the annual Price. Since
+    // Codex-2hxff.86 the save records the change in its own transaction
+    // (the rules for who is due: price-moves-record.integration.test.ts).
+    it('records one price change, for ONLY the interval that changed, with the owner who saved it', async () => {
+      const org = await createOrgWithConnect('update-record');
+      const tier = await service.createTier(org.id, {
         submissionId: crypto.randomUUID(),
         name: 'T',
         priceMonthly: 499,
         priceAnnual: 4990,
       });
 
-      const updated = await withPropagator.updateTier(tier.id, org.id, {
-        priceAnnual: 5990,
+      const updated = await service.updateTier(
+        tier.id,
+        org.id,
+        { priceAnnual: 5990 },
+        creatorId
+      );
+
+      const changes = await db
+        .select()
+        .from(priceChanges)
+        .where(eq(priceChanges.tierId, tier.id));
+      expect(changes).toEqual([
+        expect.objectContaining({
+          organizationId: org.id,
+          kind: 'tier',
+          interval: 'year',
+          fromAmountCents: 4990,
+          newAmountCents: 5990,
+          newStripePriceId: updated.stripePriceAnnualId,
+          createdByUserId: creatorId,
+          // Nobody subscribes yet: nothing to tell.
+          state: 'done',
+          totalCount: 0,
+        }),
+      ]);
+    });
+
+    it('a name-only edit records no price change', async () => {
+      const org = await createOrgWithConnect('update-name-only');
+      const tier = await service.createTier(org.id, {
+        submissionId: crypto.randomUUID(),
+        name: 'T',
+        priceMonthly: 499,
+        priceAnnual: 4990,
       });
 
-      expect(propagator).toHaveBeenCalledTimes(1);
-      expect(propagator).toHaveBeenCalledWith({
-        tierId: tier.id,
-        newStripePriceId: updated.stripePriceAnnualId,
-        organizationId: org.id,
-        interval: 'year',
-      });
+      await service.updateTier(tier.id, org.id, { name: 'Renamed' });
+
+      expect(
+        await db
+          .select()
+          .from(priceChanges)
+          .where(eq(priceChanges.tierId, tier.id))
+      ).toEqual([]);
     });
 
     it('should create new prices + archive old when annual price changes', async () => {

@@ -131,8 +131,6 @@ export type {
   PayoutWithCreator,
   // A move to a cheaper plan waiting for the renewal (Codex-2hxff.16)
   PendingTierChange,
-  PropagateTierPriceOptions,
-  PropagateTierPriceResult,
   SubscriberListItem,
   SubscriberSubscription,
   SubscriptionCheckoutVerifyResult,
@@ -148,7 +146,4 @@ export {
   SubscriptionService,
 } from './services/subscription-service';
 export { MOVE_TIER_ID_KEY } from './services/tier-move';
-export {
-  type TierPricePropagator,
-  TierService,
-} from './services/tier-service';
+export { TierService } from './services/tier-service';
