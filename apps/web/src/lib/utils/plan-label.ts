@@ -364,6 +364,48 @@ function changeTiming(
     : m.change_plan_cta_timing_downgrade({ downgradePlans, currentPlan, date });
 }
 
+/** What the notice of a waiting move needs (`PendingTierChange`'s fields). */
+export interface WaitingMove {
+  tierName: string;
+  /** The next bill, at the target's price. */
+  amountCents: number;
+  billingInterval: 'month' | 'year';
+  /** A price change on the target after the move (T6); null until .86 fills it. */
+  laterPrice: null | { amountCents: number; effectiveAt: string };
+}
+
+/**
+ * The second line of the waiting-move notice on the pricing and account
+ * pages (Codex-2hxff.16, T3): "You keep Pro until then. Basic is £5.00 a
+ * month after that." When the target's price changes after the move (T6),
+ * it names the later price too, so the page and the 30-day email agree.
+ */
+export function waitingMoveBody(
+  move: WaitingMove,
+  currentPlan: string,
+  formatDate: (iso: string) => string
+): string {
+  const params = {
+    currentPlan,
+    plan: move.tierName,
+    price: formatPrice(move.amountCents),
+  };
+  const later = move.laterPrice;
+  if (later) {
+    const withLater = {
+      ...params,
+      laterPrice: formatPrice(later.amountCents),
+      laterDate: formatDate(later.effectiveAt),
+    };
+    return move.billingInterval === 'year'
+      ? m.pricing_move_notice_body_later_year(withLater)
+      : m.pricing_move_notice_body_later_month(withLater);
+  }
+  return move.billingInterval === 'year'
+    ? m.pricing_move_notice_body_year(params)
+    : m.pricing_move_notice_body_month(params);
+}
+
 /** The pricing page's words when it is opened from an item (U10). */
 export interface PricingHighlight {
   /** "Salt Roads is included with Pro and Premium." */
