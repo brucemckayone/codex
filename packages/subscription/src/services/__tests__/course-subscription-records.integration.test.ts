@@ -276,6 +276,41 @@ describe('course subscription records, currency and errors', () => {
     expect(slice?.creatorOrgAgreementId).toBeNull();
   });
 
+  // Codex-2hxff.33 (data design §1.4): the fee in force at the invoice's own
+  // time, like the agreement, never the fee when its webhook lands.
+  it("resolves the creator's fees at the invoice's own time", async () => {
+    const { sub } = await subscribed(creatorId);
+    const getFeesForCreator = vi.fn(async () => ({
+      platformFeePercent: 1000,
+      orgFeePercent: 1000,
+      minPlatformFeeCents: 0,
+      minTransferCents: 0,
+    }));
+    const atService = new CourseSubscriptionService(
+      {
+        db,
+        environment: 'test',
+        ...createTestMoneyDeps(),
+        feeConfig: { getFeesForCreator } as unknown as FeeConfigService,
+      },
+      stripe
+    );
+    const created = Math.floor(Date.now() / 1000) - 3 * 86_400;
+
+    await atService.handleCourseInvoicePaymentSucceeded(
+      { ...invoiceFor(sub, 'gbp'), created } as Stripe.Invoice,
+      sub
+    );
+
+    expect(getFeesForCreator).toHaveBeenCalledTimes(1);
+    expect(getFeesForCreator).toHaveBeenCalledWith(
+      orgId,
+      creatorId,
+      'subscription',
+      new Date(created * 1000)
+    );
+  });
+
   // Owner decision 2026-10-23, "Keep recorded fee" (Codex-2hxff.49): a replay
   // keeps the first split, and the platform fee recorded, so a fee change
   // between deliveries can neither re-size a slice nor leave the slices short

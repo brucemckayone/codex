@@ -83,6 +83,8 @@ describe('createWebhookServices', () => {
 
       for (const service of [purchase, subscription, courseSubscription]) {
         expect(service.feeConfig).toBe(services.feeConfig);
+      }
+      for (const service of [purchase, subscription]) {
         expect(service.mailer).toBeTypeOf('function');
       }
       for (const service of [subscription, courseSubscription]) {
@@ -92,8 +94,9 @@ describe('createWebhookServices', () => {
       // so the environment is what it must be handed.
       expect(purchase.environment).toBe('production');
       expect(subscription.payoutMailer).toBeTypeOf('function');
-      // The course's off-sale email is its own, fire-and-forget slot; its
-      // `mailer` is the awaited price-change notice (Codex-2hxff.43).
+      // The course's off-sale email is its own, fire-and-forget slot. It
+      // sends no price notice of its own: the hourly step does
+      // (Codex-2hxff.86).
       expect(courseSubscription.offSaleMailer).toBeTypeOf('function');
     } finally {
       release();

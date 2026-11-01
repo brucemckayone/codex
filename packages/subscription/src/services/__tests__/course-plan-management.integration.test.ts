@@ -23,7 +23,9 @@ import {
   courses,
   organizationMemberships,
   organizations,
+  priceChanges,
   stripeConnectAccounts,
+  subscriptionPriceMoves,
 } from '@codex/database/schema';
 import {
   ConflictError,
@@ -61,10 +63,6 @@ import {
   CreatorConnectRequiredError,
 } from '../../errors';
 import { CourseSubscriptionService } from '../course-subscription-service';
-import {
-  FAN_OUT_STRIPE_REQUEST,
-  PRICE_FAN_OUT_BUDGET_MS,
-} from '../pending-price-change';
 
 /**
  * Inspectable handle on the Stripe mock's product/price calls.
@@ -235,8 +233,10 @@ describe('CourseSubscriptionService plan management (Codex-2pryk.2.4.1)', () => 
 
   // Owner decision P-6, "Same rule as tiers" (Codex-2hxff.3): a plan's price
   // change reaches its existing subscribers on THAT interval, at their first
-  // renewal ≥ 30 days after the email. Course plans used to grandfather forever.
-  it("3b. a price change moves that interval's subscribers under the 30-day rule, and emails them", async () => {
+  // renewal ≥ 30 days after the email. Since Codex-2hxff.86 the save only
+  // RECORDS who is due, in its own transaction; ecom-api's hourly step
+  // (price-moves-sweep.integration.test.ts) emails and moves them.
+  it("3b. a price change records a due row for each of that interval's subscribers, and touches no subscription", async () => {
     const courseId = await newCourse();
     await service.upsertPlan(orgId, courseId, {
       priceMonthly: 1500,
@@ -245,96 +245,106 @@ describe('CourseSubscriptionService plan management (Codex-2pryk.2.4.1)', () => 
     const plan = takeFirst(await planRows(courseId));
 
     const ns = createUniqueSlug('cps');
-    const [monthlyUser, annualUser] = await seedTestUsers(db, 2);
+    const [monthlyUser, annualUser, endedUser] = await seedTestUsers(db, 3);
     const seeded = await db
       .insert(courseSubscriptions)
       .values(
         (
           [
-            [monthlyUser, 'month', `sub_${ns}_m`],
-            [annualUser, 'year', `sub_${ns}_y`],
+            [monthlyUser, 'month', `sub_${ns}_m`, null],
+            [annualUser, 'year', `sub_${ns}_y`, null],
+            [endedUser, 'month', `sub_${ns}_e`, new Date()],
           ] as const
-        ).map(([userId, billingInterval, stripeSubscriptionId]) => ({
+        ).map(([userId, billingInterval, stripeSubscriptionId, endedAt]) => ({
           userId: userId as string,
           courseId,
           planId: plan.id,
           organizationId: orgId,
           stripeSubscriptionId,
           stripeCustomerId: `cus_${ns}`,
+          // The ended row's status still says active: the tombstone wins.
           status: 'active',
           billingInterval,
           currentPeriodStart: new Date(),
           currentPeriodEnd: new Date(Date.now() + 10 * 86_400_000),
+          endedAt,
         }))
       )
-      .returning({ id: courseSubscriptions.id });
+      .returning({
+        id: courseSubscriptions.id,
+        stripeSubscriptionId: courseSubscriptions.stripeSubscriptionId,
+      });
 
-    const fanOutStripe = createMockStripe();
-    const renewal = Math.floor(Date.now() / 1000) + 10 * 86_400;
-    const retrieve = vi.fn().mockImplementation(async (id: string) => ({
-      id,
-      status: 'active',
-      billing_cycle_anchor: renewal,
-      metadata: {},
-      items: {
-        data: [
-          {
-            id: `si_${id}`,
-            current_period_end: renewal,
-            price: {
-              id: 'price_old_m',
-              unit_amount: 1500,
-              recurring: { interval: 'month' },
-            },
-          },
-        ],
-      },
-    }));
-    const update = vi.fn().mockResolvedValue({});
-    Object.assign(fanOutStripe.subscriptions, { retrieve, update });
-    const mailer = vi.fn().mockResolvedValue({ accepted: true });
-    const fanOutService = new CourseSubscriptionService(
-      {
-        db,
-        environment: 'test',
-        ...createTestMoneyDeps(),
-        mailer,
-        webAppUrl: 'https://app.test',
-      },
-      fanOutStripe
+    const saveStripe = createMockStripe();
+    const retrieve = vi.fn();
+    const update = vi.fn();
+    Object.assign(saveStripe.subscriptions, { retrieve, update });
+    const saveService = new CourseSubscriptionService(
+      { db, environment: 'test', ...createTestMoneyDeps() },
+      saveStripe
     );
 
     try {
       // Monthly changes; annual stays the same.
-      await fanOutService.upsertPlan(orgId, courseId, {
-        priceMonthly: 1800,
-        priceAnnual: 15000,
+      const saved = await saveService.upsertPlan(
+        orgId,
+        courseId,
+        { priceMonthly: 1800, priceAnnual: 15000 },
+        creatorId
+      );
+
+      // The save reads and writes no subscription at Stripe.
+      expect(retrieve).not.toHaveBeenCalled();
+      expect(update).not.toHaveBeenCalled();
+
+      const changes = await db
+        .select()
+        .from(priceChanges)
+        .where(eq(priceChanges.courseSubscriptionPlanId, plan.id));
+      expect(changes).toHaveLength(1);
+      const change = takeFirst(changes);
+      expect(change).toMatchObject({
+        organizationId: orgId,
+        kind: 'course_plan',
+        tierId: null,
+        interval: 'month',
+        fromAmountCents: 1500,
+        newAmountCents: 1800,
+        newStripePriceId: saved.stripePriceMonthlyId,
+        state: 'running',
+        totalCount: 1,
+        createdByUserId: creatorId,
       });
 
-      // Only the monthly subscriber is read — the annual one is never touched.
-      expect(retrieve).toHaveBeenCalledTimes(1);
-      expect(retrieve).toHaveBeenCalledWith(
-        `sub_${ns}_m`,
-        FAN_OUT_STRIPE_REQUEST
+      // Only the live monthly subscriber is due: not the annual one, not the
+      // ended one.
+      const moves = await db
+        .select()
+        .from(subscriptionPriceMoves)
+        .where(eq(subscriptionPriceMoves.priceChangeId, change.id));
+      const monthly = takeFirst(
+        seeded.filter((row) => row.stripeSubscriptionId === `sub_${ns}_m`)
       );
-      // Renews in 10 days: too soon, so marked pending (no item swap yet).
-      const [, params] = update.mock.calls[0] ?? [];
-      expect(params).not.toHaveProperty('items');
-      expect(params).toMatchObject({
-        metadata: { codex_pending_price_id: expect.any(String) },
-      });
-      expect(mailer).toHaveBeenCalledTimes(1);
-      expect(mailer.mock.calls[0]?.[0]).toMatchObject({
-        templateName: 'subscription-tier-price-change',
-        to: expect.any(String),
-        data: {
-          planName: 'Plan Course',
-          oldPriceFormatted: '£15.00',
-          newPriceFormatted: '£18.00',
-          billingInterval: 'month',
-        },
-      });
+      expect(moves).toEqual([
+        expect.objectContaining({
+          courseSubscriptionId: monthly.id,
+          subscriptionId: null,
+          stripeSubscriptionId: `sub_${ns}_m`,
+          organizationId: orgId,
+          userId: monthlyUser,
+          state: 'due',
+          source: 'price_change',
+          attempts: 0,
+          floorFrom: null,
+        }),
+      ]);
     } finally {
+      await db.delete(subscriptionPriceMoves).where(
+        inArray(
+          subscriptionPriceMoves.courseSubscriptionId,
+          seeded.map((row) => row.id)
+        )
+      );
       await db.delete(courseSubscriptions).where(
         inArray(
           courseSubscriptions.id,
@@ -344,266 +354,110 @@ describe('CourseSubscriptionService plan management (Codex-2pryk.2.4.1)', () => 
     }
   });
 
-  // Codex-2hxff.40: subscribers grandfathered before #589 pay something other
-  // than the plan's previous list price. The notice's "from" figure is what
-  // the subscriber is billed today, read off their live Stripe item.
-  it.each([
-    ['their own live amount, not the list price', 1200, '£12.00', 0],
-    [
-      'the list price, with an error logged, when the live price has no amount',
-      null,
-      '£15.00',
-      1,
-    ],
-  ] as const)('3c. a grandfathered subscriber is quoted %s', async (_label, unitAmount, quoted, errors) => {
+  // Latest wins (docs/payments/subscriptions.md → Price changes): a second
+  // save while the first change is still going out replaces it. Its due and
+  // held rows are superseded; a told row keeps its record.
+  it('3c. a second save supersedes the running change: its due and held rows go, told rows stay', async () => {
     const courseId = await newCourse();
     const plan = await service.upsertPlan(orgId, courseId, {
       priceMonthly: 1500,
       priceAnnual: 15000,
     });
-    const [subscriber] = await seedTestUsers(db, 1);
-    const ns = createUniqueSlug('cpg');
+    const ns = createUniqueSlug('cpl');
+    const users = (await seedTestUsers(db, 3)) as [string, string, string];
     const seeded = await db
       .insert(courseSubscriptions)
-      .values({
-        userId: subscriber as string,
-        courseId,
-        planId: plan.id,
-        organizationId: orgId,
-        stripeSubscriptionId: `sub_${ns}`,
-        stripeCustomerId: `cus_${ns}`,
-        status: 'active',
-        billingInterval: 'month',
-        currentPeriodStart: new Date(),
-        currentPeriodEnd: new Date(Date.now() + 10 * 86_400_000),
-      })
+      .values(
+        users.map((userId, n) => ({
+          userId,
+          courseId,
+          planId: plan.id,
+          organizationId: orgId,
+          stripeSubscriptionId: `sub_${ns}_${n}`,
+          stripeCustomerId: `cus_${ns}_${n}`,
+          status: 'active',
+          billingInterval: 'month',
+          currentPeriodStart: new Date(),
+          currentPeriodEnd: new Date(Date.now() + 10 * 86_400_000),
+        }))
+      )
       .returning({ id: courseSubscriptions.id });
 
-    const fanOutStripe = createMockStripe();
-    const renewal = Math.floor(Date.now() / 1000) + 10 * 86_400;
-    Object.assign(fanOutStripe.subscriptions, {
-      retrieve: vi.fn().mockImplementation(async (id: string) => ({
-        id,
-        status: 'active',
-        billing_cycle_anchor: renewal,
-        metadata: {},
-        items: {
-          data: [
-            {
-              id: `si_${id}`,
-              current_period_end: renewal,
-              price: {
-                id: 'price_grandfathered',
-                unit_amount: unitAmount,
-                recurring: { interval: 'month' },
-              },
-            },
-          ],
-        },
-      })),
-      update: vi.fn().mockResolvedValue({}),
-    });
-    const mailer = vi.fn().mockResolvedValue({ accepted: true });
-    const fanOutService = new CourseSubscriptionService(
-      {
-        db,
-        environment: 'test',
-        ...createTestMoneyDeps(),
-        mailer,
-        webAppUrl: 'https://app.test',
-      },
-      fanOutStripe
-    );
-    const logError = vi.spyOn(
-      (
-        fanOutService as unknown as {
-          obs: { error: (message: string, data?: unknown) => void };
-        }
-      ).obs,
-      'error'
-    );
-
     try {
-      await fanOutService.upsertPlan(orgId, courseId, {
+      await service.upsertPlan(orgId, courseId, {
         priceMonthly: 1800,
         priceAnnual: 15000,
       });
+      const [first] = await db
+        .select()
+        .from(priceChanges)
+        .where(eq(priceChanges.courseSubscriptionPlanId, plan.id));
+      if (!first) throw new Error('no first change');
+      // One told and moved, one held, one still due.
+      const [told, held] = seeded;
+      if (!told || !held) throw new Error('seed');
+      await db
+        .update(subscriptionPriceMoves)
+        .set({
+          state: 'scheduled',
+          scheduledKind: 'pending',
+          noticeAt: new Date(),
+          effectiveAt: new Date(Date.now() + 40 * 86_400_000),
+        })
+        .where(eq(subscriptionPriceMoves.courseSubscriptionId, told.id));
+      await db
+        .update(subscriptionPriceMoves)
+        .set({ state: 'held', heldReason: 'notice_refused', attempts: 3 })
+        .where(eq(subscriptionPriceMoves.courseSubscriptionId, held.id));
 
-      expect(mailer).toHaveBeenCalledTimes(1);
-      expect(mailer.mock.calls[0]?.[0]).toMatchObject({
-        data: { oldPriceFormatted: quoted, newPriceFormatted: '£18.00' },
-      });
-      // An error, with an errorId: the email may quote a figure this
-      // subscriber is not billed (LOW-7).
-      const fallbacks = logError.mock.calls.filter(([message]) =>
-        String(message).includes('live price has no unit amount')
-      );
-      expect(fallbacks).toHaveLength(errors);
-      for (const [, data] of fallbacks) {
-        expect(data).toMatchObject({ errorId: expect.any(String) });
-      }
-    } finally {
-      await db.delete(courseSubscriptions).where(
-        inArray(
-          courseSubscriptions.id,
-          seeded.map((row) => row.id)
-        )
-      );
-    }
-  });
-
-  // Owner decision D-P3 (Codex-2hxff.43), "Notice first, then move": a
-  // subscriber moves only once notifications-api accepts their notice. A
-  // notice not accepted, or a move that fails after it, keeps them on today's
-  // price with an error alert for support.
-  it('3d. notice first, then move: a refused notice and a failed move are each alerted', async () => {
-    const courseId = await newCourse();
-    const plan = await service.upsertPlan(orgId, courseId, {
-      priceMonthly: 1500,
-      priceAnnual: 15000,
-    });
-    const userIds = (await seedTestUsers(db, 3)) as [string, string, string];
-    const [movedUser, refusedUser, failedUser] = userIds;
-    const ns = createUniqueSlug('cpn');
-    const seeded = await db
-      .insert(courseSubscriptions)
-      .values(
-        (
-          [
-            [movedUser, `sub_${ns}_moved`],
-            [refusedUser, `sub_${ns}_refused`],
-            [failedUser, `sub_${ns}_failed`],
-          ] as const
-        ).map(([userId, stripeSubscriptionId]) => ({
-          userId,
-          courseId,
-          planId: plan.id,
-          organizationId: orgId,
-          stripeSubscriptionId,
-          stripeCustomerId: `cus_${stripeSubscriptionId}`,
-          status: 'active',
-          billingInterval: 'month',
-          currentPeriodStart: new Date(),
-          currentPeriodEnd: new Date(Date.now() + 10 * 86_400_000),
-        }))
-      )
-      .returning({
-        id: courseSubscriptions.id,
-        userId: courseSubscriptions.userId,
-      });
-    const rowOf = (userId: string) =>
-      takeFirst(seeded.filter((row) => row.userId === userId));
-
-    const fanOutStripe = createMockStripe();
-    const renewal = Math.floor(Date.now() / 1000) + 10 * 86_400;
-    const update = vi.fn().mockImplementation(async (id: string) => {
-      if (id === `sub_${ns}_failed`) throw new Error('stripe 500');
-      return {};
-    });
-    Object.assign(fanOutStripe.subscriptions, {
-      retrieve: vi.fn().mockImplementation(async (id: string) => ({
-        id,
-        status: 'active',
-        billing_cycle_anchor: renewal,
-        metadata: {},
-        items: {
-          data: [
-            {
-              id: `si_${id}`,
-              current_period_end: renewal,
-              price: {
-                id: 'price_old_m',
-                unit_amount: 1500,
-                recurring: { interval: 'month' },
-              },
-            },
-          ],
-        },
-      })),
-      update,
-    });
-    const mailer = vi.fn(async (params: { userId?: string }) =>
-      params.userId === refusedUser
-        ? { accepted: false as const, status: 422 }
-        : { accepted: true as const }
-    );
-    const fanOutService = new CourseSubscriptionService(
-      {
-        db,
-        environment: 'test',
-        ...createTestMoneyDeps(),
-        mailer,
-        webAppUrl: 'https://app.test',
-      },
-      fanOutStripe
-    );
-    const logError = vi.spyOn(
-      (
-        fanOutService as unknown as {
-          obs: { error: (message: string, data?: unknown) => void };
-        }
-      ).obs,
-      'error'
-    );
-
-    try {
-      await fanOutService.upsertPlan(orgId, courseId, {
-        priceMonthly: 1800,
+      await service.upsertPlan(orgId, courseId, {
+        priceMonthly: 2000,
         priceAnnual: 15000,
       });
 
-      // Every subscriber is told first; only the refused one is never moved.
-      expect(mailer).toHaveBeenCalledTimes(3);
-      const movedIds = update.mock.calls.map(([id]) => id);
-      expect(movedIds).toContain(`sub_${ns}_moved`);
-      expect(movedIds).not.toContain(`sub_${ns}_refused`);
-
-      const notSent = logError.mock.calls.filter(([message]) =>
-        String(message).includes('price-change notice not sent')
-      );
-      expect(notSent).toHaveLength(1);
-      expect(notSent[0]?.[1]).toMatchObject({
-        errorId: expect.any(String),
-        reason: 'refused',
-        status: 422,
-        planId: plan.id,
-        courseSubscriptionId: rowOf(refusedUser).id,
-        stripeSubscriptionId: `sub_${ns}_refused`,
-        userId: refusedUser,
+      const changes = await db
+        .select()
+        .from(priceChanges)
+        .where(eq(priceChanges.courseSubscriptionPlanId, plan.id));
+      const second = takeFirst(changes.filter((c) => c.id !== first.id));
+      const replaced = takeFirst(changes.filter((c) => c.id === first.id));
+      expect(replaced).toMatchObject({
+        state: 'superseded',
+        supersededById: second.id,
+        supersededAt: expect.any(Date),
       });
-
-      // A plain Error is no definite refusal: the move's outcome is unknown,
-      // and the alert keeps what the notice said (silent #7, #8).
-      const moveFailed = logError.mock.calls.filter(([message]) =>
-        String(message).includes("notice sent; the move's outcome is unknown")
-      );
-      expect(moveFailed).toHaveLength(1);
-      expect(moveFailed[0]?.[1]).toMatchObject({
-        errorId: expect.any(String),
-        outcome: 'move_unknown',
-        notified: true,
-        kind: 'pending',
-        noticeAt: expect.any(String),
-        effectiveAt: expect.any(String),
-        planId: plan.id,
-        courseSubscriptionId: rowOf(failedUser).id,
-        userId: failedUser,
+      expect(second).toMatchObject({
+        state: 'running',
+        fromAmountCents: 1800,
+        newAmountCents: 2000,
+        totalCount: 3,
       });
-      // The end summary is an alert with an errorId (silent #10).
+      const oldRows = await db
+        .select({
+          courseSubscriptionId: subscriptionPriceMoves.courseSubscriptionId,
+          state: subscriptionPriceMoves.state,
+        })
+        .from(subscriptionPriceMoves)
+        .where(eq(subscriptionPriceMoves.priceChangeId, first.id));
       expect(
-        logError.mock.calls.find(([message]) =>
-          String(message).includes('completed with failures')
-        )?.[1]
-      ).toMatchObject({
-        errorId: expect.any(String),
-        planId: plan.id,
-        total: 3,
-        updated: 1,
-        unnotified: 1,
-        failed: 1,
-        unhandled: 0,
-      });
+        new Map(oldRows.map((r) => [r.courseSubscriptionId, r.state]))
+      ).toEqual(
+        new Map(
+          seeded.map((row, n) => [row.id, n === 0 ? 'scheduled' : 'superseded'])
+        )
+      );
+      const newRows = await db
+        .select({ state: subscriptionPriceMoves.state })
+        .from(subscriptionPriceMoves)
+        .where(eq(subscriptionPriceMoves.priceChangeId, second.id));
+      expect(newRows.map((r) => r.state)).toEqual(['due', 'due', 'due']);
     } finally {
+      await db.delete(subscriptionPriceMoves).where(
+        inArray(
+          subscriptionPriceMoves.courseSubscriptionId,
+          seeded.map((row) => row.id)
+        )
+      );
       await db.delete(courseSubscriptions).where(
         inArray(
           courseSubscriptions.id,
@@ -613,189 +467,74 @@ describe('CourseSubscriptionService plan management (Codex-2pryk.2.4.1)', () => 
     }
   });
 
-  // Review A, silent #1: the fan-out runs on waitUntil, which the runtime
-  // cancels 30 s after the response. No batch starts after
-  // PRICE_FAN_OUT_BUDGET_MS, across both intervals, and every subscriber not
-  // reached is named in one alert.
-  it('3e. a plan fan-out past its deadline names the rest in one alert, and notifies nobody it does not try to move', async () => {
+  it('3d. a price change with nobody to tell is recorded done at once', async () => {
     const courseId = await newCourse();
     const plan = await service.upsertPlan(orgId, courseId, {
       priceMonthly: 1500,
       priceAnnual: 15000,
     });
-    const [monthlyUser, annualUser] = (await seedTestUsers(db, 2)) as [
-      string,
-      string,
-    ];
-    const ns = createUniqueSlug('cpdl');
-    const seeded = await db
-      .insert(courseSubscriptions)
-      .values(
-        (
-          [
-            [monthlyUser, 'month', `sub_${ns}_m`],
-            [annualUser, 'year', `sub_${ns}_y`],
-          ] as const
-        ).map(([userId, billingInterval, stripeSubscriptionId]) => ({
-          userId,
-          courseId,
-          planId: plan.id,
-          organizationId: orgId,
-          stripeSubscriptionId,
-          stripeCustomerId: `cus_${stripeSubscriptionId}`,
-          status: 'active',
-          billingInterval,
-          currentPeriodStart: new Date(),
-          currentPeriodEnd: new Date(Date.now() + 10 * 86_400_000),
-        }))
+
+    await service.upsertPlan(orgId, courseId, {
+      priceMonthly: 1500,
+      priceAnnual: 16000,
+    });
+
+    const changes = await db
+      .select()
+      .from(priceChanges)
+      .where(eq(priceChanges.courseSubscriptionPlanId, plan.id));
+    expect(changes).toEqual([
+      expect.objectContaining({
+        interval: 'year',
+        state: 'done',
+        doneAt: expect.any(Date),
+        totalCount: 0,
+      }),
+    ]);
+  });
+
+  // One transaction: if recording who is due fails, the plan keeps its old
+  // Prices and the new Stripe Price is archived, so nobody is lost between
+  // the save and the hourly step.
+  it('3e. a recording that fails rolls the plan back and archives the new Price', async () => {
+    const courseId = await newCourse();
+    const plan = await service.upsertPlan(orgId, courseId, {
+      priceMonthly: 1500,
+      priceAnnual: 15000,
+    });
+    const pricesBefore = spies.prices.create.mock.results.length;
+
+    // An owner id with no user row: the change's foreign key refuses it,
+    // inside the save's transaction.
+    await expect(
+      service.upsertPlan(
+        orgId,
+        courseId,
+        { priceMonthly: 1900, priceAnnual: 15000 },
+        'no-such-user'
       )
-      .returning({
-        id: courseSubscriptions.id,
-        userId: courseSubscriptions.userId,
-      });
+    ).rejects.toThrow();
 
-    vi.useFakeTimers({ toFake: ['Date'] });
-    try {
-      vi.setSystemTime(new Date('2026-11-02T10:00:00Z'));
-      const fanOutStripe = createMockStripe();
-      const renewal = Math.floor(Date.now() / 1000) + 10 * 86_400;
-      const retrieve = vi.fn().mockImplementation(async (id: string) => {
-        // The monthly batch runs past the deadline: the annual one never starts.
-        vi.setSystemTime(Date.now() + PRICE_FAN_OUT_BUDGET_MS + 1_000);
-        const interval = id.endsWith('_y') ? 'year' : 'month';
-        return {
-          id,
-          status: 'active',
-          billing_cycle_anchor: renewal,
-          metadata: {},
-          items: {
-            data: [
-              {
-                id: `si_${id}`,
-                current_period_end: renewal,
-                price: {
-                  id: `price_old_${interval}`,
-                  unit_amount: interval === 'year' ? 15000 : 1500,
-                  recurring: { interval },
-                },
-              },
-            ],
-          },
-        };
-      });
-      const update = vi.fn().mockResolvedValue({});
-      Object.assign(fanOutStripe.subscriptions, { retrieve, update });
-      const mailer = vi.fn(async (_params: { userId?: string }) => ({
-        accepted: true as const,
-      }));
-      const fanOutService = new CourseSubscriptionService(
-        {
-          db,
-          environment: 'test',
-          ...createTestMoneyDeps(),
-          mailer,
-          webAppUrl: 'https://app.test',
-        },
-        fanOutStripe
-      );
-      const obs = (
-        fanOutService as unknown as {
-          obs: {
-            error: (message: string, data?: unknown) => void;
-            info: (message: string, data?: unknown) => void;
-          };
-        }
-      ).obs;
-      const logError = vi.spyOn(obs, 'error');
-      const logInfo = vi.spyOn(obs, 'info');
-
-      try {
-        // Both intervals change.
-        await fanOutService.upsertPlan(orgId, courseId, {
-          priceMonthly: 1800,
-          priceAnnual: 18000,
-        });
-
-        expect(
-          logInfo.mock.calls.find(([message]) =>
-            String(message).includes('fan-out: starting')
-          )?.[1]
-        ).toMatchObject({ planId: plan.id, total: 2 });
-        // Only the monthly subscriber was reached: notified, then moved.
-        expect(retrieve.mock.calls.map(([id]) => id)).toEqual([`sub_${ns}_m`]);
-        expect(mailer.mock.calls.map(([params]) => params.userId)).toEqual([
-          monthlyUser,
-        ]);
-        expect(update.mock.calls.map(([id]) => id)).toEqual([`sub_${ns}_m`]);
-        const annual = takeFirst(seeded.filter((r) => r.userId === annualUser));
-        const messages = logError.mock.calls.map(([message]) =>
-          String(message)
-        );
-        const outOfTime = logError.mock.calls.filter(([message]) =>
-          String(message).includes('ran out of time')
-        );
-        // Round 2, silent R1: the log cap drops what comes last, so the end
-        // summary goes first, then the count, then the names: one alert
-        // across both intervals.
-        expect(
-          messages.findIndex((m) => m.includes('completed with failures'))
-        ).toBeGreaterThanOrEqual(0);
-        expect(
-          messages.findIndex((m) => m.includes('ran out of time'))
-        ).toBeGreaterThan(
-          messages.findIndex((m) => m.includes('completed with failures'))
-        );
-        expect(outOfTime).toHaveLength(2);
-        const [count, names] = outOfTime;
-        const context = {
-          errorId: expect.any(String),
-          planId: plan.id,
-          noticeAt: '2026-11-02T10:00:00.000Z',
-          moves: expect.arrayContaining([
-            expect.objectContaining({ interval: 'year', total: 1 }),
-            expect.objectContaining({ interval: 'month', total: 1 }),
-          ]),
-        };
-        expect(count?.[1]).toMatchObject({
-          ...context,
-          unhandled: 1,
-          named: 1,
-          more: 0,
-        });
-        expect(names?.[1]).toMatchObject({
-          ...context,
-          errorId: (count?.[1] as { errorId?: string } | undefined)?.errorId,
-          subscribers: [
-            {
-              courseSubscriptionId: annual.id,
-              stripeSubscriptionId: `sub_${ns}_y`,
-              userId: annualUser,
-              organizationId: orgId,
-              interval: 'year',
-            },
-          ],
-        });
-        expect(
-          logError.mock.calls.find(([message]) =>
-            String(message).includes('completed with failures')
-          )?.[1]
-        ).toMatchObject({
-          errorId: expect.any(String),
-          total: 2,
-          updated: 1,
-          unhandled: 1,
-        });
-      } finally {
-        await db.delete(courseSubscriptions).where(
-          inArray(
-            courseSubscriptions.id,
-            seeded.map((row) => row.id)
-          )
-        );
-      }
-    } finally {
-      vi.useRealTimers();
-    }
+    const minted = (await spies.prices.create.mock.results[pricesBefore]
+      ?.value) as { id: string } | undefined;
+    expect(minted?.id).toBeTruthy();
+    expect(spies.prices.update).toHaveBeenCalledWith(minted?.id, {
+      active: false,
+    });
+    expect(spies.prices.update).toHaveBeenCalledWith(
+      plan.stripePriceMonthlyId,
+      { active: true }
+    );
+    expect(takeFirst(await planRows(courseId))).toMatchObject({
+      priceMonthly: 1500,
+      stripePriceMonthlyId: plan.stripePriceMonthlyId,
+    });
+    expect(
+      await db
+        .select()
+        .from(priceChanges)
+        .where(eq(priceChanges.courseSubscriptionPlanId, plan.id))
+    ).toEqual([]);
   });
 
   it('4. createPlan twice conflicts — the reason upsertPlan exists', async () => {
@@ -1548,6 +1287,37 @@ describe('CourseSubscriptionService plan management (Codex-2pryk.2.4.1)', () => 
 
   afterAll(async () => {
     if (courseIds.length > 0) {
+      // Price changes hang off the plans (RESTRICT), their rows off the changes.
+      const plans = await db
+        .select({ id: courseSubscriptionPlans.id })
+        .from(courseSubscriptionPlans)
+        .where(inArray(courseSubscriptionPlans.courseId, courseIds));
+      const planIds = plans.map((plan) => plan.id);
+      if (planIds.length > 0) {
+        const changes = await db
+          .select({ id: priceChanges.id })
+          .from(priceChanges)
+          .where(inArray(priceChanges.courseSubscriptionPlanId, planIds));
+        const changeIds = changes.map((change) => change.id);
+        if (changeIds.length > 0) {
+          await db
+            .delete(subscriptionPriceMoves)
+            .where(inArray(subscriptionPriceMoves.priceChangeId, changeIds));
+          // A superseded change points at its successor (RESTRICT): unlink.
+          await db
+            .update(priceChanges)
+            .set({
+              supersededById: null,
+              supersededAt: null,
+              state: 'done',
+              doneAt: new Date(),
+            })
+            .where(inArray(priceChanges.id, changeIds));
+          await db
+            .delete(priceChanges)
+            .where(inArray(priceChanges.id, changeIds));
+        }
+      }
       await db
         .delete(courseSubscriptionPlans)
         .where(inArray(courseSubscriptionPlans.courseId, courseIds));

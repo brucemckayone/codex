@@ -8,6 +8,9 @@
  * recipient lookups), agreement emails, and the course-plan and tier price
  * fan-outs (one subscriber read per interval) all died that way, logging at
  * most a warning. Unit tests could not see it — their pool is never torn down.
+ * The price fan-outs are gone since (Codex-2hxff.86): a save records who is
+ * due in its own transaction and ecom-api's hourly step moves them, so the
+ * course subscription service defers nothing and has no hook to pin.
  *
  * So this pins the WIRE: each service's deferral hook must land on the tracker
  * the registry was given. DATABASE-FREE: the DB client is constructed, never
@@ -43,11 +46,7 @@ function waitUntilOf(service: object): (promise: Promise<unknown>) => void {
 }
 
 describe('DB background work is tracked, not plain waitUntil (H1)', () => {
-  for (const name of [
-    'organization',
-    'agreements',
-    'courseSubscription',
-  ] as const) {
+  for (const name of ['organization', 'agreements'] as const) {
     it(`registry.${name} defers onto the tracker`, async () => {
       const ctx = fakeExecutionCtx();
       const tracker = createBackgroundTracker();
