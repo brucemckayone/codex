@@ -115,6 +115,8 @@ const SUMMARY = {
 
 const IMPACT_ONLY_HERE = {
   liveSubscriberCount: 0,
+  movingInCount: 0,
+  lastMoveAt: null,
   onlyHere: {
     films: {
       total: 4,
@@ -476,6 +478,8 @@ describe('Delete Tier: what is only in this tier', () => {
     mountPage();
     land(deleteImpactSlot('basic'), {
       liveSubscriberCount: 0,
+      movingInCount: 0,
+      lastMoveAt: null,
       onlyHere: {
         films: { total: 0, closing: 0, staysForSale: 0, items: [] },
         courses: { total: 0, items: [] },
@@ -549,6 +553,8 @@ function impactWith(closing: number, forSale: number) {
   });
   return {
     liveSubscriberCount: 0,
+    movingInCount: 0,
+    lastMoveAt: null,
     onlyHere: {
       films: {
         total: closing + forSale,
@@ -567,6 +573,8 @@ function impactWith(closing: number, forSale: number) {
 
 const NOTHING_ONLY_HERE = {
   liveSubscriberCount: 0,
+  movingInCount: 0,
+  lastMoveAt: null,
   onlyHere: {
     films: { total: 0, closing: 0, staysForSale: 0, items: [] },
     courses: { total: 0, items: [] },
