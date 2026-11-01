@@ -60,6 +60,7 @@ import type {
   CheckoutSessionVerifyResult,
   SaleListItem,
   SalesStats,
+  UpcomingFeeChange,
 } from '@codex/purchase';
 // `import type` from @codex/shared-types is sanctioned for apps/web — it pulls
 // no runtime value, so the vite server-only module guard is not tripped.
@@ -3260,6 +3261,25 @@ export function createServerApi(
           'admin',
           `/api/admin/support/owed-to-creators/${encodeURIComponent(creditId)}/check`,
           { method: 'POST' }
+        ),
+    },
+
+    /**
+     * The caller's own fee notices (ecom-api, Codex-2hxff.33): the Studio note
+     * about a fee rise that hasn't started.
+     */
+    fees: {
+      /**
+       * With `organizationId`, the owner's rows for that organisation
+       * (Billing, Payouts); without, the caller's creator rows everywhere
+       * (Earnings).
+       */
+      upcoming: (organizationId?: string) =>
+        request<PaginatedListResponse<UpcomingFeeChange>>(
+          'ecom',
+          organizationId
+            ? `/fees/upcoming?${new URLSearchParams({ organizationId })}`
+            : '/fees/upcoming'
         ),
     },
 

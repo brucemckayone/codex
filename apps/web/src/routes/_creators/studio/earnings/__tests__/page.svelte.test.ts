@@ -34,7 +34,20 @@ vi.mock('$lib/remote/subscription.remote', () => ({
   getMyConnectDashboard: vi.fn(),
   syncMyConnect: vi.fn(),
 }));
+// The fee note under the header (Codex-2hxff.33 F5, N4) makes its own read.
+const fees = vi.hoisted(() => ({
+  slot: {
+    current: undefined as unknown,
+    loading: false,
+    error: undefined as unknown,
+    refresh: async () => {},
+  },
+}));
+vi.mock('$lib/remote/billing.remote', () => ({
+  getUpcomingFees: vi.fn(() => fees.slot),
+}));
 
+import { getUpcomingFees } from '$lib/remote/billing.remote';
 import EarningsPage from '../+page.svelte';
 
 const CONNECTED = {
@@ -128,6 +141,48 @@ afterEach(() => {
   component = null;
   document.body.innerHTML = '';
   navigation.goto.mockClear();
+  fees.slot.current = undefined;
+  vi.mocked(getUpcomingFees).mockClear();
+});
+
+describe('the fee note (Codex-2hxff.33 N4)', () => {
+  test("a creator's note: their own share, in every organisation, under the header", () => {
+    fees.slot.current = [
+      {
+        changeId: 'c1',
+        kind: 'announce',
+        scope: 'platform',
+        effectiveFrom: '2026-12-05T00:00:00.000Z',
+        earliestFrom: '2026-12-05T00:00:00.000Z',
+        announcedAt: '2026-11-03T08:00:12.000Z',
+        lines: [
+          {
+            organizationId: '11111111-1111-4111-8111-111111111111',
+            organizationName: 'Hollow Oak Films',
+            as: 'creator',
+            value: 'platformFeePercent',
+            context: 'both',
+            from: 1000,
+            to: 1200,
+            replaced: null,
+          },
+        ],
+      },
+    ];
+    mountPage({
+      earningsSummary: new Promise(() => {}),
+      payouts: new Promise(() => {}),
+      stripeBalance: new Promise(() => {}),
+    });
+    expect(getUpcomingFees).toHaveBeenCalledWith({});
+    const note = document.querySelector('[data-testid="upcoming-fee-note"]');
+    expect(note?.textContent).toContain(
+      "From 5 December 2026, Codex's fee on your sales rises from 10% to 12%."
+    );
+    expect(note?.previousElementSibling?.matches('.earnings-hub__header')).toBe(
+      true
+    );
+  });
 });
 
 describe('a failed read (M1)', () => {
