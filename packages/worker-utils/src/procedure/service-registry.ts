@@ -371,7 +371,7 @@ export async function createServiceRegistry(
 
   /**
    * The deferral hook for background work that TOUCHES THE DATABASE — emails
-   * that look up their recipients, price fan-outs (Codex-2hxff.2 review).
+   * that look up their recipients (Codex-2hxff.2 review).
    *
    * `procedure()` tears this registry's pool down once the work it was TOLD
    * about settles, and plain `executionCtx.waitUntil` tells it nothing: cleanup

@@ -268,7 +268,7 @@ function pendingFields(currentPending: PriceChangeNotice['currentPending']) {
 /**
  * The alert for a notice that was not accepted. The move was not made either
  * way; only a definite refusal may say the notice was not sent (silent #8).
- * `prefix` names the path ("Tier price propagation: ").
+ * `prefix` names the path ("Price moves: ").
  */
 export function noticeFailureAlert(
   prefix: string,

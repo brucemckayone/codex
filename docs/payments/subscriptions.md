@@ -374,125 +374,210 @@ Stripe: put `codex_hold_price_id` back on the item with no proration, and
 remove the `codex_move_*` and `codex_hold_*` keys. The next
 `customer.subscription.updated` mirrors it onto our row.
 
-Not yet (`Codex-2hxff.86`): the price-change fan-out's rules for a subscriber
-moving away from a repriced tier, or to one, and putting a kept subscriber
-back into a price change they were skipped for. Until then a Keep on a tier
-repriced during the wait logs a warning naming the subscription.
+**Price changes while a move waits** (Part A rules 1-3,
+[price changes](#price-changes)):
+
+- Repricing the tier a member is waiting to move **away** from leaves them
+  out. Their row says so (`pending_tier_id` names another tier), and the
+  hourly step checks Stripe's `codex_move_tier_id` again before it writes,
+  since a move can start after the save (`moving_away`).
+- Repricing the tier a member is waiting to move **to** includes them (T6).
+  They move at the price they confirmed, then pay the new one from the first
+  renewal after the move that is also 30 days after their own email
+  (`floor_from` = `pending_tier_from` + 1 second). Theirs is always the
+  pending marker, never a swap now. Their account shows it as
+  `pendingTierChange.laterPrice`, read from their row (no Stripe read).
+- **Keep current plan** on a tier repriced during the wait puts them back on
+  the old price with nobody having told them the new one. So Keep adds a
+  `due` row for them (`source = 'keep_current_plan'`) to the tier's latest
+  change that isn't superseded, if its new Price is the tier's current one,
+  re-opening it if it had finished; with no such change, Keep records one of
+  its own. A row the step had closed as moving away is re-opened: as `due`,
+  or as `notified` (the write only) if they had been told before they left.
+  If the parked price change already names the current Price, they were
+  told: nothing is added. A live change for another Price is an error alert,
+  and nothing is added.
 
 ## Price changes
 
-Owner decisions Q4–Q7 and P-6. They apply to **organisation tiers and course
-plans alike**.
+Owner decisions Q4–Q7, P-6, M1 and M2. They apply to **organisation tiers and
+course plans alike**.
 
 - Studio is the only place a price is set.
 - New subscribers pay the new price straight away.
 - Existing subscribers on **that interval** move to the new price at their
-  **first renewal at least 30 days after** they are emailed about the change.
-  Annual subscribers move at their annual renewal.
+  **first renewal at least 30 days after** they are emailed about the change:
+  each person's 30 days count from their own accepted email (M2). Annual
+  subscribers move at their annual renewal.
 - There is no immediate charge and no proration. Increases and decreases are
   treated the same.
 - **Notice first, then move** (owner decision D-P3, 2026-10-27,
-  `Codex-2hxff.43`): a subscriber's move is scheduled only once the
-  notifications worker has accepted their notice. If it isn't accepted
-  (refused, skipped, no address, or an unknown outcome), they are not moved
-  and support gets an error alert with an errorId and their ids, then retries.
+  `Codex-2hxff.43`): a subscriber's move is written only once the
+  notifications worker has accepted their notice. If it isn't accepted, they
+  are not moved, and the hourly step tries again the next hour. After three
+  tries they are held for support ([held subscribers](#held-subscribers)).
   "No mailer" cannot happen: the services require one in their types
-  (`Codex-2hxff.55`). A notified subscriber whose move then fails is alerted
-  the same way.
+  (`Codex-2hxff.55`).
 - "Not moved" means today's price, **unless** an earlier accepted change is
-  still pending on the subscription: that one still lands, and the alert says
-  so.
+  still pending on the subscription: that one still lands.
 - A price edited in the Stripe Dashboard is logged as drift and is **not**
   applied to any subscriber.
 
-**How it works.** Studio creates a new Stripe Price for the changed interval
-and points the tier (or plan) at it; new checkouts use it at once. Existing
-subscribers on that interval are then each handled by `schedulePriceChange`
-(`packages/subscription/src/services/pending-price-change.ts`), in batches of
-8 after the response, with one notice time for the whole fan-out:
+**Recording (the save).** Studio creates a new Stripe Price for the changed
+interval and points the tier (or plan) at it; new checkouts use it at once.
+In the same transaction (`recordTierPriceChange` / `recordPlanPriceChange`,
+`packages/subscription/src/services/pending-price-change.ts`) the save
+writes one `price_changes` row per interval that changed, and one
+`subscription_price_moves` row per subscriber it reaches: the subscriptions
+on that tier (or plan) and interval that are `active`, `cancelling`,
+`past_due` or `paused`, not ended and not a duplicate, with the waiting-move
+rules [above](#waiting-moves). A recording that fails fails the save, and
+the new Prices are archived again, so nobody is lost between the save and
+the step. A change with nobody to tell is `done` at once.
 
-- It reads the live subscription and works out the move and the renewal that
-  first bills the new price. It then sends the notice and waits for the answer
-  (`sendEmailToWorkerAwaited` in `@codex/worker-utils`). Only a 2xx whose body
-  says `success: true` is accepted; anything else writes nothing to the
-  subscription.
-- The alert names the reason, the tier or plan, the interval, the new Price,
-  any earlier pending change, and the subscription, user and organisation ids.
-  - It says "not sent" only when that is certain: a 4xx refusal, a skip, or
-    no address.
-  - A 5xx, a timeout (5 seconds), a transport failure or an unreadable 2xx is
-    "outcome unknown": the email may have gone out, so check notifications'
-    email audit log before re-sending.
-- A Stripe failure is alerted with the same ids, naming the step that failed.
-  Every Stripe call in the fan-out gives up after 3 seconds, with no retry.
-  - The read fails: "could not read the Stripe subscription; not notified and
-    not moved".
-  - A same-amount write fails (the silent Price-id switch, or clearing a
-    pending change): "same-amount write failed". Nobody is notified, since the
-    amount does not change, but an earlier pending change may still land: the
-    alert names it, so check the Stripe subscription and clear it if it is
-    still there.
-  - After an accepted notice: the alert adds the kind (`applied` or
-    `pending`), the notice time and the date the email quoted.
-    - A definite refusal (a 4xx other than 409 or 429) means the move was not
-      made.
-    - Anything else (a 5xx, a timeout, a 409 or a 429) is "outcome unknown":
-      check the Stripe subscription before retrying.
-- **The 30-second limit.** The fan-out runs after the response, on
-  `waitUntil`, which Cloudflare cancels 30 seconds after the response. So no
-  batch starts after 17 seconds (`PRICE_FAN_OUT_BUDGET_MS`): the last one
-  then needs at most a 3-second read, the 5-second notice and a 3-second
-  write, so it is done by 28 seconds. A start line (with the total) and an end
-  summary bracket each run, for tiers and course plans alike.
-- Every subscriber not reached is reported in ONE error alert after the end
-  summary, with one errorId on every line ("ran out of time"):
-  - first, a line with how many were not reached;
-  - then up to 300 of them by id, at most 200 to a line;
-  - then, for any beyond 300, "and N more: find them with the Stripe query in
-    docs/payments/subscriptions.md". Cloudflare keeps at most 256 KB of logs
-    per request, and a tier's monthly and annual fan-outs share one request.
+- **Latest wins** (owner decision 2026-10-13). A newer save for the same tier
+  (or plan) and interval supersedes the live change in the same statement:
+  its `due` and `held` rows become `superseded`, so nobody not yet told hears
+  about the replaced price, and its held people leave support's list. The
+  open rows of an earlier change that already finished (held, or queued again
+  by support) are superseded too. Someone already told keeps that move until
+  the newer one is written. Two saves of one tier at once queue on the tier
+  row, so the second always supersedes the first.
+- The record, not the log, is the source of truth: `price_changes.state` is
+  `running`, `done`, `stopped` or `superseded`; each person's row is `due`,
+  `notified` (told; the Stripe write still to land), `scheduled`, `unchanged`
+  (already on the new amount), `skipped` (`moving_away`, `other_interval`,
+  `no_items`, `ended`), `held` or `superseded`.
+
+**The hourly step** (`runPriceMoveStep`,
+`packages/subscription/src/services/price-moves-sweep.ts`, `Codex-2hxff.86`).
+ecom-api's existing hourly wake (`0 * * * *`, production) works the rows,
+after the waiting-move backstop and before the bank payout. It does nothing
+on the 08:00 London run, which the bank payout has to itself. No new cron
+and no new Neon wake: it rides the hourly one.
+
+1. **Restart and re-open.** A stopped change support restarted
+   (`restart_requested_at` after `stopped_at`) runs again. A finished change
+   with rows support queued again (Retry, Retry the move) is re-opened, if it
+   is the tier's (or plan's) newest and nothing else is live for it.
+2. **Claim.** Up to 1,500 rows (`PRICE_MOVES_PER_RUN`), `due` or `notified`,
+   whose retry time has come, on running changes, oldest first, in one UPDATE
+   under `FOR UPDATE SKIP LOCKED` (`attempts + 1`, `attempted_at`). A row
+   tried in the last 20 minutes is never claimed, so overlapping runs never
+   work one person twice.
+3. **Work.** Batches of 8, one change per batch, 50 ms apart; no batch starts
+   after 8 minutes (the cron's wall is 15). Claims not worked go back as they
+   were. Per person:
+   - our row is read again: ended (`ended`), switched billing
+     (`other_interval`), or now leaving the tier (`moving_away`) is skipped;
+   - `schedulePriceChange` reads the live subscription, works out the move
+     and the renewal that first bills the new price, sends the notice and
+     waits for the answer (`sendEmailToWorkerAwaited`, 5 seconds). Only a 2xx
+     whose body says `success: true` is accepted; anything else writes
+     nothing to the subscription. Every Stripe call gives up after 3 seconds,
+     with no retry: the next hour is the retry;
+   - a `notified` row retries the write only, with no second email (M1),
+     from its own email: the date it was told, or the next renewal if that
+     has passed (Q5).
+4. **Record.**
+
+   | What happened | The row |
+   |---|---|
+   | Told and written | `scheduled` (`now` or `pending`), with `notice_at` and the date the email gave (`effective_at`) |
+   | Already on the new amount, or skipped | `unchanged` / `skipped`, nobody emailed |
+   | Notice not accepted | `due` again next hour (`last_error`, e.g. `notice_refused_422`, `notice_unknown_503`); held after 3 tries (`no_address`, `notice_refused`, `notice_skipped`, `notice_unknown`) |
+   | Told, then the Stripe write failed | `notified`, the write retried next hour; held after 3 tries as `move_refused` (a 4xx other than 409 or 429) or `move_unknown` |
+   | The read, or a same-amount write, failed before any notice | `due` again; held after 3 tries (`read_failed`, `same_amount_write_failed`) |
+
+   A row support retried that then succeeds closes as `retried_ok`.
+5. **An unknown outcome is checked before anything is sent again.** A notice
+   that got a 5xx or timed out may have gone, and a run may have stopped
+   after its writes without recording them. Such a row is looked for first
+   in notifications' email log (a success for the template and recipient,
+   carrying the row's `priceMoveId`, since a minute before the last try):
+   found, it was told then. Then at Stripe: already on the new Price, or
+   marked pending for it, counts as moved. Only then is it sent again.
+6. **A change stops** when every notice of its first batch in a run was
+   refused with a 4xx that will not go away by itself (not 408, 409, 425 or
+   429: a missing template, a bad worker secret) and none of its notices was
+   ever accepted. It becomes `stopped` (`notices_refused_<status>`, an
+   errorId), nobody is moved, the claims go back, and one alert says to fix
+   the cause and restart.
+7. **Alerts are capped.** At most 50 per-person lines a run, one for each row
+   that becomes held, whose `alert_error_id` is that line's errorId. The rest
+   fold into the run's end alert, whose errorId those rows carry.
+8. **Done.** A change is `done` when no row is `due` or `notified`; held rows
+   don't keep it running.
+
+Budget: about 3 subrequests per person (the Stripe read, the notice, the
+Stripe write), so a full run is about 4,500. 10,000 subscribers take about 7
+runs, 7 to 8 hours with the 08:00 gap.
+
+**At Stripe:**
+
 - If their next renewal is already at least 30 days after the email, their
   subscription is switched to the new Price **now** with
   `proration_behavior: 'none'`. A same-interval switch keeps the billing dates
   and charges nothing; the next renewal simply bills the new price.
 - Otherwise the new Price is recorded on the Stripe subscription's metadata
-  (`codex_pending_price_id`, `codex_pending_price_from` = the email + 30 days).
-  Stripe sends `customer.subscription.updated` at every renewal; once the next
-  renewal is on or after that date, the switch is made as above.
+  (`codex_pending_price_id`, `codex_pending_price_from` = the email + 30 days,
+  or a waiting mover's floor if later). Stripe sends
+  `customer.subscription.updated` at every renewal; once the next renewal is
+  on or after that date, the switch is made as above.
 - Past-due and paused subscribers are only marked pending, and move when they
   are active again. A subscriber already paying the new amount is not emailed.
 - The other interval's subscribers are never touched: switching a monthly
   subscription onto an annual Price would reset its cycle and bill a year.
-- A second change before the first has landed **replaces** it (owner decision
-  2026-10-13, "Latest wins"): one move, to the newest price, at the first
-  renewal at least 30 days after the newest email.
+- A newer pending change overwrites an older one (latest wins): one move, to
+  the newest price, at the first renewal at least 30 days after the newest
+  email.
 - A tier change made now clears a pending price change; cancelling and
   reactivating keep it. A [waiting move](#waiting-moves) parks it, and Keep
   current plan restores it.
 - The notice (`subscription-tier-price-change`) gives the date of the renewal
   that first bills the new price. The "from" figure is what that subscriber is
-  billed today, not the previous list price: a tier quotes the subscription's
-  own snapshot, a course plan its live Stripe item (`Codex-2hxff.40`).
+  billed today, read off their live Stripe item, not the previous list price
+  (`Codex-2hxff.40`).
 - A Price created in the Stripe Dashboard is logged as drift
   (`TierService.recordStripePriceDrift`); the tier keeps its own Price and no
   subscriber moves.
 
-### Held and unreached subscribers
+### Studio progress
 
-The alerts are log lines, and Workers Logs keeps them for about 7 days. After
-that, Stripe is the record. No marker is written for a held subscriber, so the
-only way to find one is to compare each subscription with what it should be on.
+Studio's note on a repriced tier, or a course's Offer panel, reads how the
+change is going: `GET /api/organizations/:id/tiers/price-changes`
+(organization-api) and
+`GET /studio/courses/:courseId/subscription-plan/price-changes?organizationId=`
+(ecom-api). Both are owner/admin only (`requireOrgManagement`), uncached
+(`private`) and one GROUP BY. Each change that is running or stopped, or
+finished or replaced in the last 14 days, gives `total`, `emailed` (every
+accepted notice, a held move failure included), `scheduled`, `held`
+(unresolved: "couldn't be moved yet"), `due`, `retrying` (to try again next
+run), `lastRunAt`, `nextRunAt` and `estimatedDoneAt` (at 1,500 a run,
+skipping 08:00 London), `doneAt`, `supersededById` and `stoppedAt`. The
+counts change only on the hour, so the page reads once per visit and has
+Check again (the cost rule). The public tier list is not touched.
 
-A subscriber on the repriced interval needs a move when **all** of these hold:
+### Held subscribers
 
-- the item's Price is not the tier's (or plan's) current Price for that
-  interval;
-- `metadata.codex_pending_price_id` is absent, or names a different Price
-  (an earlier change that was superseded);
-- the item's `unit_amount` differs from the current price. A same amount needs
-  only the silent Price-id switch.
+Support's list is the record: `held` rows not yet resolved, in Admin › Queue ›
+Price moves, with Retry (a notice never accepted), Retry the move (told;
+Stripe refused), Close and Restart (a stopped change). See
+[operations](operations.md). An engineer can list them with:
 
-To list them:
+```sql
+SELECT m.id, m.held_reason, m.last_error, m.alert_error_id,
+       m.subscription_id, m.course_subscription_id, m.stripe_subscription_id,
+       m.price_change_id, c.state AS change_state
+FROM subscription_price_moves m
+JOIN price_changes c ON c.id = m.price_change_id
+WHERE m.state = 'held' AND m.resolved_at IS NULL;
+```
+
+**Checkouts that straddle a save.** Someone who opened checkout on the old
+Price and paid after the change was not a subscriber when the save recorded
+who is due, so they have no row: they need a notice and a move, and no
+alert names them. To find them:
 
 1. Read the current Price ids and amounts from our database:
    - tiers: `subscription_tiers.stripe_price_monthly_id` /
@@ -502,33 +587,11 @@ To list them:
    `codex_tier_id` and course subscriptions `codex_plan_id`:
    - `metadata['codex_tier_id']:'<tier id>' AND -status:'canceled' AND -status:'unpaid' AND -status:'incomplete_expired' AND -status:'incomplete'`
    - `metadata['codex_plan_id']:'<plan id>' AND -status:'canceled' AND -status:'unpaid' AND -status:'incomplete_expired' AND -status:'incomplete'`
-
-   These are the subscriptions the fan-out moves. It selects our rows that are
-   `active`, `cancelling`, `past_due` or `paused`; Stripe's `canceled`,
-   `unpaid` and `incomplete_expired` are `cancelled` in our database, and
-   `incomplete` is `incomplete` (`resolveStatus`, stripe-status-mapper.ts).
 3. Keep the ones on the interval (`items.data[0].price.recurring.interval`)
-   that meet the three conditions above.
-
-The list also includes anyone who opened checkout on the old Price and paid
-after the change. The fan-out never saw them, since their subscription did not
-exist yet. They need a notice and a move too, but they are neither held nor
-unreached, so no alert names them.
-
-The metadata keys are the ones `pending-price-change.ts` writes:
-`codex_pending_price_id` and `codex_pending_price_from` (unix seconds). A
-subscription with no `codex_pending_price_*` keys is not necessarily held: one
-moved "now" carries none either, but it is already on the current Price.
-
-**A retry needs an engineer today.** Propagation runs only when Studio creates
-a new Price (`TierService.updateTier`, tier-service.ts:647; the same in
-`savePlanPrices`), so re-saving the same price retries nothing. There is also no
-supported way to re-send one subscriber's notice. The fixes are filed:
-
-- `Codex-2hxff.85`: a support tool that re-sends the notice and moves one
-  subscription.
-- `Codex-2hxff.86`: move the fan-out off `waitUntil`, so the 30-second limit
-  no longer applies.
+   whose item is not on the current Price, whose `codex_pending_price_id` is
+   absent or names another Price, and whose `unit_amount` differs from the
+   current price, and that have no `subscription_price_moves` row for the
+   change.
 
 The mechanism is this deferred switch, not Stripe subscription schedules (owner
 decision 2026-10-13): schedules would have had to take over cancel, reactivate
