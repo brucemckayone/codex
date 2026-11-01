@@ -502,11 +502,12 @@
         'Yes. Cancel from your account in a couple of clicks and you keep access through the end of the billing period you have already paid for.',
       order: 1,
     },
+    // Says what Codex-2hxff.16 makes true: an upgrade starts now, a cheaper
+    // plan at the period end.
     {
       id: 'default-change-plan',
-      question: 'Can I switch plans later?',
-      answer:
-        'Anytime. Upgrades and downgrades take effect at the start of your next billing period so you never lose paid time, and the price difference is handled automatically.',
+      question: m.pricing_faq_change_plan_q(),
+      answer: m.pricing_faq_change_plan_a(),
       order: 2,
     },
     {
