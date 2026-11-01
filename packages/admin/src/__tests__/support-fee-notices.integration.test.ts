@@ -167,9 +167,17 @@ describe('SupportService fee notices (real DB)', () => {
 
   it('a waiting rise’s card: what moves at its level, who saved it, who is told and who it waits for, joiners apart', async () => {
     const { organizationId, changeId } = await rise();
-    const [ana, ben, cal, dee, eve, fay] = await people(6);
+    const [ana, ben, cal, dee, eve, fay, gus] = await people(7);
     const toldAt = new Date('2026-11-03T16:00:00Z');
     await notice(changeId, organizationId, ana as string, SENT(FIRST_RUN));
+    // 23:30 UTC on 1 July is 00:30 on 2 July in London (BST): the day is
+    // London's, not UTC's.
+    await notice(
+      changeId,
+      organizationId,
+      gus as string,
+      SENT(new Date('2026-07-01T23:30:00Z'))
+    );
     await notice(changeId, organizationId, ben as string, {
       state: 'told_another_way',
       toldNote: 'Phoned Ben',
@@ -204,7 +212,12 @@ describe('SupportService fee notices (real DB)', () => {
       savedBy: { userId: supportId },
       firstRunAt: FIRST_RUN.toISOString(),
       firstEmailsAt: null,
-      told: { byEmail: 1, anotherWay: 1 },
+      told: { byEmail: 2, anotherWay: 1 },
+      // F2: "410 by email on 3 Nov, 1 by email on 4 Nov". Joiners apart.
+      toldByDay: [
+        { londonDate: '2026-07-02', byEmail: 1, anotherWay: 0 },
+        { londonDate: '2026-11-03', byEmail: 1, anotherWay: 1 },
+      ],
       waitingFor: 1,
       joiners: { total: 2, told: 1, waiting: 1 },
       lastToldAt: null,
@@ -278,6 +291,8 @@ describe('SupportService fee notices (real DB)', () => {
         { organizationId, organizationName: 'Hollow Oak Films', as: 'creator' },
       ],
       onList: false,
+      // F7: when the daily step added this joiner to the list.
+      joinedAt: FIRST_RUN.toISOString(),
       state: 'failed',
       reason: 'refused',
       error: 'HTTP 400',
@@ -288,9 +303,11 @@ describe('SupportService fee notices (real DB)', () => {
       changeEffectiveFrom: null,
     });
     expect(typeof row?.person.email).toBe('string');
-    expect(list.items.find((n) => n.noticeId === gilNotice)?.state).toBe(
-      'unknown'
-    );
+    expect(list.items.find((n) => n.noticeId === gilNotice)).toMatchObject({
+      state: 'unknown',
+      onList: true,
+      joinedAt: null,
+    });
 
     // The badge: the same people, read now (this rise hasn't started).
     const counts = await service.getQueueCounts();
@@ -397,9 +414,17 @@ describe('SupportService fee notices (real DB)', () => {
       409,
       'FEE_NOTICE_ALREADY_TOLD',
     ]);
+    // F6: "already marked as told by Sam Ortiz at 10:41".
+    const [marker] = await db
+      .select({ name: users.name })
+      .from(users)
+      .where(eq(users.id, supportId));
+    expect(marker?.name).toBeTruthy();
     expect(again.context).toMatchObject({
       state: 'told_another_way',
       toldByUserId: supportId,
+      toldByName: marker?.name,
+      toldAt: expect.any(String),
     });
 
     const aside = await failureOf(

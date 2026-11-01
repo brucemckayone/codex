@@ -188,6 +188,7 @@ import type {
   FeeChangeLine,
   FeeNoticeItem,
   FeeToldAnotherWay,
+  FeeToldOnDay,
   HeldPriceMove,
   OwedToCreatorItem,
   PayeeRole,
@@ -2898,8 +2899,9 @@ export class SupportService extends BaseService {
         await readFeeVersions(this.db, { scope: 'platform' }),
         now
       );
-      const [tallies, marks, lines, people, orgs] = await Promise.all([
+      const [tallies, byDay, marks, lines, people, orgs] = await Promise.all([
         this.feeNoticeTallies(ids),
+        this.feeToldByDay(ids),
         this.toldAnotherWayOf(ids),
         Promise.all(
           rows.map((change) => this.feeChangeLines(change, platformNow, now))
@@ -2937,6 +2939,7 @@ export class SupportService extends BaseService {
             byEmail: tally?.byEmail ?? 0,
             anotherWay: tally?.anotherWay ?? 0,
           },
+          toldByDay: byDay.get(change.id) ?? [],
           waitingFor,
           joiners: {
             total: tally?.joiners ?? 0,
@@ -3026,6 +3029,8 @@ export class SupportService extends BaseService {
             as: role.as,
           })),
           onList: notice.onList,
+          // The step inserts a joiner's notice the morning it finds them.
+          joinedAt: notice.onList ? null : notice.createdAt.toISOString(),
           // notToldYet reads only these two.
           state: notice.state === 'unknown' ? 'unknown' : 'failed',
           reason: notice.lastReason,
@@ -3107,6 +3112,15 @@ export class SupportService extends BaseService {
           throw new NotFoundError('No fee notice with this id', { noticeId });
         }
         if (notice.state === 'sent' || notice.state === 'told_another_way') {
+          // Who marked them, by name, for "already marked as told by Sam
+          // Ortiz at 10:41" (F6). A platform-owner route only.
+          const [by] = notice.toldByUserId
+            ? await tx
+                .select({ name: users.name })
+                .from(users)
+                .where(eq(users.id, notice.toldByUserId))
+                .limit(1)
+            : [];
           throw new ConflictError('This person has already been told.', {
             code: 'FEE_NOTICE_ALREADY_TOLD',
             noticeId,
@@ -3114,6 +3128,7 @@ export class SupportService extends BaseService {
             acceptedAt: toIso(notice.acceptedAt),
             toldAt: toIso(notice.toldAt),
             toldByUserId: notice.toldByUserId,
+            toldByName: by?.name ?? null,
           });
         }
         if (notice.state === 'not_needed') {
@@ -3192,6 +3207,48 @@ export class SupportService extends BaseService {
       .where(and(inArray(n.changeId, changeIds), eq(n.kind, 'announce')))
       .groupBy(n.changeId);
     return new Map(rows.map((row) => [row.changeId, row]));
+  }
+
+  /**
+   * Each change's on-list told counts per London calendar day: the day each
+   * email was accepted, or each person was marked told another way.
+   */
+  private async feeToldByDay(
+    changeIds: string[]
+  ): Promise<Map<string, FeeToldOnDay[]>> {
+    const n = feeChangeNotices;
+    const day = sql<string>`to_char((CASE WHEN ${n.state} = 'sent' THEN ${n.acceptedAt} ELSE ${n.toldAt} END) AT TIME ZONE 'Europe/London', 'YYYY-MM-DD')`;
+    const rows = await this.db
+      .select({
+        changeId: n.changeId,
+        londonDate: day,
+        byEmail:
+          sql<number>`count(*) FILTER (WHERE ${n.state} = 'sent')`.mapWith(
+            Number
+          ),
+        anotherWay:
+          sql<number>`count(*) FILTER (WHERE ${n.state} = 'told_another_way')`.mapWith(
+            Number
+          ),
+      })
+      .from(n)
+      .where(
+        and(
+          inArray(n.changeId, changeIds),
+          eq(n.kind, 'announce'),
+          eq(n.onList, true),
+          inArray(n.state, ['sent', 'told_another_way'])
+        )
+      )
+      .groupBy(n.changeId, day)
+      .orderBy(day);
+    const days = new Map<string, FeeToldOnDay[]>();
+    for (const { changeId, ...counts } of rows) {
+      const list = days.get(changeId) ?? [];
+      list.push(counts);
+      days.set(changeId, list);
+    }
+    return days;
   }
 
   /** The latest 20 people marked told another way, per change. */
