@@ -976,7 +976,11 @@ export interface StoppedPriceChange {
   /** Null when the system wrote it (Keep current plan). */
   savedBy: SupportPerson | null;
   stoppedAt: string;
-  /** The run's short code for the cause. */
+  /**
+   * The run's code for the cause, as it wrote it: `template_missing` (a 404
+   * or 422 from notifications-api), `worker_auth` (a 401) or
+   * `notice_refused` (any other 4xx). The page says it in words.
+   */
   stoppedReason: string;
   /** Joins the run's alert line. */
   stoppedErrorId: string;

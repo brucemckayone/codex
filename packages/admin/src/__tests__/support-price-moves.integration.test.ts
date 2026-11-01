@@ -374,7 +374,7 @@ describe('SupportService price moves (real DB)', () => {
     expect((await badge()) - before).toBe(2);
   });
 
-  it('Retry with no accepted email: back to due, three fresh tries, its reason kept, who asked; a finished change runs again; the answer names the next run', async () => {
+  it('Retry with no accepted email: back to due, three fresh tries, its reason kept, who asked; the change is the run’s to re-open; the answer names the next run', async () => {
     const plan = await proTier();
     const c = await change(plan);
     const leah = await subscriber(plan);
@@ -408,10 +408,10 @@ describe('SupportService price moves (real DB)', () => {
       retryRequestedByUserId: supportId,
       resolvedAt: null,
     });
-    // The run claims only a running change's rows.
+    // A row flip only: the run re-opens a finished change with a row to work.
     expect(await changeRow(c.id)).toMatchObject({
-      state: 'running',
-      doneAt: null,
+      state: 'done',
+      doneAt: LAST_TRY,
     });
     const list = await service.listHeldPriceMoves({ page: 1, limit: 50 }, NOW);
     expect(list.items.find((m) => m.moveId === leahMove)?.status).toBe(
@@ -445,7 +445,7 @@ describe('SupportService price moves (real DB)', () => {
     const plan = await proTier();
     const c = await change(plan);
     const people = await Promise.all(
-      Array.from({ length: 6 }, () => subscriber(plan))
+      Array.from({ length: 7 }, () => subscriber(plan))
     );
     const ended = await subscriber(plan, 'cancelled');
     const cases: Array<[MoveValues, string, string]> = [
@@ -472,6 +472,21 @@ describe('SupportService price moves (real DB)', () => {
       ],
       [QUEUED(), 'queued', 'This one is already queued for the next run.'],
       [CLOSED(), 'resolved', 'This one is already closed: no move needed.'],
+      // The run closes a retried row that moved: answered by its state.
+      [
+        {
+          state: 'scheduled',
+          scheduledKind: 'pending',
+          noticeAt: HELD_MOVE.noticeAt,
+          effectiveAt: HELD_MOVE.effectiveAt,
+          retryRequestedAt: new Date('2026-11-04T09:12:00Z'),
+          retryRequestedByUserId: supportId,
+          resolution: 'retried_ok',
+          resolvedAt: new Date('2026-11-04T10:00:40Z'),
+        },
+        'moved',
+        'Their move is already scheduled: the hourly run got there first.',
+      ],
     ];
     for (const [index, [values, reason, message]] of cases.entries()) {
       const id = await move(c, people[index] as Subscriber, values);
@@ -666,7 +681,7 @@ describe('SupportService price moves (real DB)', () => {
       state: 'stopped',
       doneAt: null,
       stoppedAt: new Date('2026-10-30T14:00:30Z'),
-      stoppedReason: 'notice_refused_404',
+      stoppedReason: 'template_missing',
       stoppedErrorId: 'e7f1c2a4',
       totalCount: 3,
     });
@@ -685,7 +700,7 @@ describe('SupportService price moves (real DB)', () => {
       state: 'stopped',
       doneAt: null,
       stoppedAt: new Date('2026-11-02T09:00:20Z'),
-      stoppedReason: 'notice_refused_401',
+      stoppedReason: 'worker_auth',
       stoppedErrorId: 'b0c1d2e3',
       restartRequestedAt: new Date('2026-11-01T13:12:00Z'),
       restartRequestedByUserId: supportId,
@@ -708,7 +723,7 @@ describe('SupportService price moves (real DB)', () => {
       savedAt: SAVED.toISOString(),
       savedBy: expect.objectContaining({ userId: ownerId }),
       stoppedAt: '2026-10-30T14:00:30.000Z',
-      stoppedReason: 'notice_refused_404',
+      stoppedReason: 'template_missing',
       stoppedErrorId: 'e7f1c2a4',
       waiting: 2,
       total: 3,
@@ -883,27 +898,37 @@ describe('SupportService price moves (real DB)', () => {
     expect(refused.context?.reason).toBe('subscription_ended');
   });
 
-  it('Retry while the run marks the change done: Retry waits for the change, then runs it again, so the row is claimed', async () => {
+  it('Retry while a newer save supersedes the row: Retry waits for the row, then answers superseded, and the row stays superseded', async () => {
     const plan = await proTier();
-    const c = await change(plan, { state: 'running', doneAt: null });
+    const c = await change(plan);
     const leah = await subscriber(plan);
     const leahMove = await move(c, leah, HELD_NOTICE);
 
     let blocked = false;
     let retry: Promise<unknown> | undefined;
     await db.transaction(async (tx) => {
-      // The run, finishing the change: nothing due or notified is left.
+      // The save, in flight: a newer price recorded, this row superseded.
+      const [newer] = await tx
+        .insert(priceChanges)
+        .values({
+          organizationId: plan.organizationId,
+          kind: 'tier',
+          tierId: plan.tierId,
+          interval: 'month',
+          fromAmountCents: 1400,
+          newAmountCents: 1500,
+          newStripePriceId: 'price_newer_month',
+          createdByUserId: ownerId,
+          createdAt: new Date('2026-11-04T10:30:00Z'),
+        })
+        .returning({ id: priceChanges.id });
+      if (newer) changeIds.push(newer.id);
       await tx
-        .select({ id: priceChanges.id })
-        .from(priceChanges)
-        .where(eq(priceChanges.id, c.id))
-        .for('update');
+        .update(subscriptionPriceMoves)
+        .set({ state: 'superseded' })
+        .where(eq(subscriptionPriceMoves.id, leahMove));
       const [pidRow] = (await tx.execute(sql`SELECT pg_backend_pid() AS pid`))
         .rows as Array<{ pid: number }>;
-      await tx
-        .update(priceChanges)
-        .set({ state: 'done', doneAt: NOW })
-        .where(eq(priceChanges.id, c.id));
 
       retry = service
         .retryPriceMove(leahMove, supportId, NOW)
@@ -920,11 +945,16 @@ describe('SupportService price moves (real DB)', () => {
     });
 
     expect(blocked).toBe(true);
-    expect(await retry).toMatchObject({ nextRunAt: NEXT_RUN });
-    expect(await changeRow(c.id)).toMatchObject({
-      state: 'running',
-      doneAt: null,
+    const outcome = (await retry) as ServiceError;
+    expect(outcome).toBeInstanceOf(ServiceError);
+    expect(outcome.context).toMatchObject({
+      code: 'PRICE_MOVE_NOT_HELD',
+      reason: 'superseded',
+      newAmountCents: 1500,
     });
-    expect((await moveRow(leahMove))?.state).toBe('due');
+    expect(await moveRow(leahMove)).toMatchObject({
+      state: 'superseded',
+      retryRequestedAt: null,
+    });
   });
 });

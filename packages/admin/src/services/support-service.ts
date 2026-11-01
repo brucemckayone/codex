@@ -96,7 +96,6 @@ import {
   failedRefundRepayBlock,
   feeRiseStartAfter,
   type GbpBalance,
-  isBankPayoutRun,
   issueRefund as issueStripeRefund,
   type LevelFees,
   layerLevelFees,
@@ -105,6 +104,7 @@ import {
   loadClawbackCauses,
   loadClawbackPlanInput,
   nextFeeNoticeRunAfter,
+  nextPriceMovesRunAfter,
   payeeCreditsNeedingAPerson,
   pendingReductionsFor,
   planClawback,
@@ -3382,12 +3382,12 @@ export class SupportService extends BaseService {
    * told, or the next renewal if that has passed, and sends no second email
    * (Q5). Either way it gets three fresh tries and keeps its `held_reason`.
    *
-   * One transaction: the change locked, then the move (the order a newer save
-   * supersedes them in). A finished change goes back to `running`, since the
-   * run claims only a running change's rows. Refused with 409
-   * PRICE_MOVE_NOT_HELD when the row isn't held, the subscription has ended,
-   * or a newer price for the plan replaced this one: Retry would then tell
-   * them about the older price.
+   * A row flip only: the move is locked, checked again, then flipped. The
+   * change is not touched: the run re-opens a finished change that has a row
+   * to work. Refused with 409 PRICE_MOVE_NOT_HELD when the row isn't held,
+   * the subscription has ended, or a newer price for the plan replaced this
+   * one: Retry would then tell them about the older price. A newer save
+   * that lands just after supersedes the flipped row.
    */
   async retryPriceMove(
     moveId: string,
@@ -3397,8 +3397,8 @@ export class SupportService extends BaseService {
     try {
       const read = await this.priceMoveRead(moveId);
       await this.db.transaction(async (tx) => {
-        const { change, move } = await this.lockPriceMove(tx, read, moveId);
-        const newer = await this.newerPriceChange(tx, change);
+        const move = await this.lockPriceMove(tx, moveId);
+        const newer = await this.newerPriceChange(tx, read);
         const refused = refusedPriceMove(move, {
           action: 'retry',
           newer,
@@ -3420,19 +3420,11 @@ export class SupportService extends BaseService {
             updatedAt: now,
           })
           .where(eq(subscriptionPriceMoves.id, moveId));
-        const reopened = change.state === 'done';
-        if (reopened) {
-          await tx
-            .update(priceChanges)
-            .set({ state: 'running', doneAt: null })
-            .where(eq(priceChanges.id, change.id));
-        }
         this.obs.info('Support queued a held price move again', {
           moveId,
-          priceChangeId: change.id,
+          priceChangeId: move.priceChangeId,
           requestedByUserId,
           to: told ? 'notified' : 'due',
-          reopened,
         });
       });
       const move = await this.priceMoveView(moveId, now);
@@ -3447,7 +3439,7 @@ export class SupportService extends BaseService {
    * support's note. It moves nobody; the row stays `held` (which the run never
    * claims) and leaves the Queue. Refused with 409 PRICE_MOVE_NOT_HELD when it
    * isn't held or is closed already. A held row a newer price overtook can be
-   * closed: closing tells nobody anything.
+   * closed: closing tells nobody anything. The move is the only row locked.
    */
   async closePriceMove(
     moveId: string,
@@ -3458,12 +3450,12 @@ export class SupportService extends BaseService {
     try {
       const read = await this.priceMoveRead(moveId);
       await this.db.transaction(async (tx) => {
-        const { change, move } = await this.lockPriceMove(tx, read, moveId);
+        const move = await this.lockPriceMove(tx, moveId);
         const refused = refusedPriceMove(move, { action: 'close' });
         if (refused) {
           const newer =
             refused === 'superseded'
-              ? await this.newerPriceChange(tx, change)
+              ? await this.newerPriceChange(tx, read)
               : undefined;
           throw priceMoveNotHeld(refused, 'close', move, read, newer);
         }
@@ -3480,7 +3472,7 @@ export class SupportService extends BaseService {
           .where(eq(subscriptionPriceMoves.id, moveId));
         this.obs.info('Support closed a held price move', {
           moveId,
-          priceChangeId: change.id,
+          priceChangeId: move.priceChangeId,
           resolution: input.resolution,
           resolvedByUserId,
         });
@@ -3560,35 +3552,34 @@ export class SupportService extends BaseService {
     return read;
   }
 
-  /** The change, then the move, locked for the action's transaction. */
+  /**
+   * The move, locked for Retry's or Close's transaction: the one row either
+   * writes. The state is read again under the lock.
+   */
   private async lockPriceMove(
     tx: Tx,
-    read: PriceMoveRead,
     moveId: string
-  ): Promise<{ change: PriceChange; move: SubscriptionPriceMove }> {
-    const [change] = await tx
-      .select()
-      .from(priceChanges)
-      .where(eq(priceChanges.id, read.move.priceChangeId))
-      .for('update');
+  ): Promise<SubscriptionPriceMove> {
     const [move] = await tx
       .select()
       .from(subscriptionPriceMoves)
       .where(eq(subscriptionPriceMoves.id, moveId))
       .for('update');
-    if (!change || !move) {
+    if (!move) {
       throw new NotFoundError('No price move with this id', { moveId });
     }
-    return { change, move };
+    return move;
   }
 
   /**
-   * The latest change saved after this one for the same tier or plan and
-   * interval: latest wins, so its own rows tell these subscribers instead.
+   * The latest change not superseded, saved after this move's for the same
+   * tier or plan and interval: latest wins, so its own rows tell these
+   * subscribers instead. It reads only what a change never changes (its plan,
+   * interval and save time), so the change needs no lock.
    */
   private async newerPriceChange(
     tx: Tx,
-    change: PriceChange
+    { move, change }: PriceMoveRead
   ): Promise<NewerPriceChange | undefined> {
     const c = priceChanges;
     const samePlan = change.tierId
@@ -3598,7 +3589,7 @@ export class SupportService extends BaseService {
         : undefined;
     if (!samePlan) {
       throw new InternalServiceError('A price change names no tier or plan', {
-        changeId: change.id,
+        changeId: move.priceChangeId,
       });
     }
     const [newer] = await tx
@@ -3612,7 +3603,8 @@ export class SupportService extends BaseService {
         and(
           samePlan,
           eq(c.interval, change.interval),
-          gt(c.createdAt, change.createdAt)
+          gt(c.createdAt, change.createdAt),
+          ne(c.state, 'superseded')
         )
       )
       .orderBy(desc(c.createdAt), desc(c.id))
@@ -3641,6 +3633,7 @@ export class SupportService extends BaseService {
           interval: c.interval,
           fromAmountCents: c.fromAmountCents,
           newAmountCents: c.newAmountCents,
+          createdAt: c.createdAt,
         },
         subscriber: {
           name: users.name,
@@ -4574,6 +4567,7 @@ interface PriceMoveRead {
     | 'interval'
     | 'fromAmountCents'
     | 'newAmountCents'
+    | 'createdAt'
   >;
   subscriber: { name: string; email: string; deletedAt: Date | null };
   organization: { name: string; deletedAt: Date | null };
@@ -4595,20 +4589,6 @@ interface NewerPriceChange {
   id: string;
   createdAt: Date;
   newAmountCents: number;
-}
-
-const HOUR_MS = 60 * 60 * 1000;
-
-/**
- * The hourly run that next works price moves, strictly after `at`: the next
- * top of the hour, or the one after it when that is the 08:00 London run,
- * which belongs to the bank payout (§2.4, `isBankPayoutRun`). London is a
- * whole number of hours from UTC, so its hours turn with UTC's on both sides
- * of a clock change; only which UTC hour is 08:00 London moves.
- */
-export function nextPriceMovesRunAfter(at: Date): Date {
-  const next = new Date((Math.floor(at.getTime() / HOUR_MS) + 1) * HOUR_MS);
-  return isBankPayoutRun(next) ? new Date(next.getTime() + HOUR_MS) : next;
 }
 
 /**
@@ -4680,13 +4660,18 @@ function refusedPriceMove(
       }
     | { action: 'close' }
 ): PriceMoveNotHeldReason | null {
-  if (move.resolvedAt !== null) return 'resolved';
+  // The run closes a retried row `retried_ok` when it ends moved or set
+  // aside: that one is answered by its state, not as support's close.
+  if (move.resolvedAt !== null && move.resolution !== 'retried_ok') {
+    return 'resolved';
+  }
   if (move.state === 'superseded') return 'superseded';
   if (move.state === 'scheduled' || move.state === 'unchanged') return 'moved';
   if (move.state === 'skipped') return 'skipped';
   if (move.state !== 'held') {
     return move.retryRequestedAt !== null ? 'queued' : 'in_progress';
   }
+  if (move.resolvedAt !== null) return 'resolved';
   if (check.action === 'close') return null;
   if (check.newer) return 'superseded';
   if (check.ended) return 'subscription_ended';
