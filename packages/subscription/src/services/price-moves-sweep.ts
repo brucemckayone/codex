@@ -39,7 +39,7 @@
  * the log, is the source of truth; alerts carry ids only.
  */
 
-import { BILLING_INTERVAL } from '@codex/constants';
+import { BILLING_INTERVAL, SUBSCRIPTION_STATUS } from '@codex/constants';
 import {
   courseSubscriptionPlans,
   courseSubscriptions,
@@ -54,7 +54,7 @@ import {
   subscriptionTiers,
   users,
 } from '@codex/database/schema';
-import { isBankPayoutRun } from '@codex/payments';
+import { isBankPayoutRun, nextPriceMovesRunAfter } from '@codex/payments';
 import { type SQL, sql } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import { PriceChangeStageError } from '../errors';
@@ -66,7 +66,6 @@ import {
   type PriceChangeNotice,
   type PriceChangeNoticeMailer,
   type PriceChangeTx,
-  REPRICED_STATUSES,
   schedulePriceChange,
   sendPriceChangeNotice,
 } from './pending-price-change';
@@ -167,6 +166,8 @@ interface MoveRow {
   noticeAt: Date | null;
   effectiveAt: Date | null;
   lastError: string | null;
+  /** Kept on a row support retried. */
+  heldReason: string | null;
   kind: 'tier' | 'course_plan';
   tierId: string | null;
   interval: 'month' | 'year';
@@ -507,7 +508,7 @@ async function loadRows(run: Run, batch: Claim[]): Promise<MoveRow[]> {
     SELECT m."id", m."price_change_id", m."state", m."subscription_id",
            m."course_subscription_id", m."stripe_subscription_id",
            m."user_id", m."organization_id", m."attempts", m."notice_at",
-           m."effective_at", m."last_error",
+           m."effective_at", m."last_error", m."held_reason",
            c."kind", c."tier_id", c."interval", c."from_amount_cents",
            c."new_amount_cents", c."new_stripe_price_id",
            u."email", u."name",
@@ -541,6 +542,7 @@ async function loadRows(run: Run, batch: Claim[]): Promise<MoveRow[]> {
     noticeAt: toDate(r.notice_at),
     effectiveAt: toDate(r.effective_at),
     lastError: (r.last_error as string | null) ?? null,
+    heldReason: (r.held_reason as string | null) ?? null,
     kind: r.kind === 'course_plan' ? 'course_plan' : 'tier',
     tierId: (r.tier_id as string | null) ?? null,
     interval:
@@ -653,6 +655,19 @@ async function firstBatchRefusal(
   return told.rows.length === 0 ? status : null;
 }
 
+/**
+ * The stop's reason code, which support's Queue shows raw and Studio maps: a
+ * missing template (404, 422), a bad worker secret (401), or any other
+ * deterministic 4xx.
+ */
+function stoppedReason(
+  status: number
+): 'template_missing' | 'worker_auth' | 'notice_refused' {
+  if (status === 404 || status === 422) return 'template_missing';
+  if (status === 401) return 'worker_auth';
+  return 'notice_refused';
+}
+
 async function stopChange(
   run: Run,
   changeId: string,
@@ -660,7 +675,7 @@ async function stopChange(
   refused: number
 ): Promise<void> {
   const errorId = crypto.randomUUID();
-  const reason = `notices_refused_${status}`;
+  const reason = stoppedReason(status);
   const updated = await run.deps.db.execute(sql`
     UPDATE ${priceChanges}
        SET "state" = 'stopped', "stopped_reason" = ${reason},
@@ -699,9 +714,11 @@ async function workRow(
   // The last try's outcome is unknown: the notice may have gone (a 5xx or a
   // timeout), or a run may have stopped after its writes without recording
   // them. The email log is checked here, Stripe in `schedulePriceChange`.
+  // A row support retried keeps its held reason, whatever else Retry resets.
   const mayBeTold =
     toldAt !== null ||
     (row.lastError?.startsWith('notice_unknown') ?? false) ||
+    row.heldReason === 'notice_unknown' ||
     (prevAttemptedAt !== null && row.lastError === null);
   // What the notice step saw: the closure's writes, read after the await.
   const seen: {
@@ -811,8 +828,8 @@ function eligibility(
 ): { skip: PriceMoveSkipReason } | { floorFrom: Date | null } {
   if (
     row.subStatus === null ||
-    row.subEndedAt !== null ||
-    !(REPRICED_STATUSES as readonly string[]).includes(row.subStatus)
+    row.subStatus === SUBSCRIPTION_STATUS.CANCELLED ||
+    row.subEndedAt !== null
   ) {
     return { skip: 'ended' };
   }
@@ -1031,7 +1048,8 @@ async function record(
   const mine = sql`"id" = ${row.id}::uuid
        AND "attempted_at" = ${run.now}::timestamptz
        AND "state" IN ('due', 'notified')`;
-  // A row support retried that now succeeds closes as `retried_ok`.
+  // A row support retried that now ends scheduled, unchanged or skipped
+  // closes as `retried_ok`.
   const retriedOk = sql`"resolution" = CASE WHEN "retry_requested_at" IS NOT NULL AND "resolution" IS NULL THEN 'retried_ok' ELSE "resolution" END,
            "resolved_at" = CASE WHEN "retry_requested_at" IS NOT NULL AND "resolution" IS NULL THEN ${run.now}::timestamptz ELSE "resolved_at" END`;
   const now = sql`${run.now}::timestamptz`;
@@ -1072,7 +1090,7 @@ async function record(
       written = await db.execute(sql`
         UPDATE ${subscriptionPriceMoves}
            SET "state" = 'skipped', "skip_reason" = ${result.reason},
-               "next_attempt_at" = NULL, "updated_at" = ${now}
+               "next_attempt_at" = NULL, ${retriedOk}, "updated_at" = ${now}
          WHERE ${mine}
         RETURNING "id"
       `);
@@ -1210,23 +1228,24 @@ function endAlert(run: Run): void {
 
 // ─── The Studio progress read (data design §2.6) ───────────────────────────
 
-const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
 /** A finished or replaced change still shows for this long. */
-const PROGRESS_SHOWN_FOR_MS = 14 * 24 * HOUR_MS;
+const PROGRESS_SHOWN_FOR_MS = 14 * DAY_MS;
 /** Changes a progress read returns at most, newest first. */
 const PROGRESS_LIMIT = 50;
 
 /**
- * The `n`th hourly run after `now` that works price moves: on the hour, and
- * never the 08:00 London run, which the bank payout has to itself.
+ * The run that should finish `remaining` rows at PRICE_MOVES_PER_RUN a run,
+ * counting runs from the next one after `now` (`nextPriceMovesRunAfter`,
+ * which skips the 08:00 London run), or null with nothing left.
  */
-export function priceMoveRunAt(now: Date, n = 1): Date {
-  let at = Math.floor(now.getTime() / HOUR_MS) * HOUR_MS;
-  for (let seen = 0; seen < Math.max(1, n); ) {
-    at += HOUR_MS;
-    if (!isBankPayoutRun(at)) seen += 1;
+export function priceMovesDoneBy(now: Date, remaining: number): Date | null {
+  if (remaining <= 0) return null;
+  let run = nextPriceMovesRunAfter(now);
+  for (let n = 1; n < Math.ceil(remaining / PRICE_MOVES_PER_RUN); n++) {
+    run = nextPriceMovesRunAfter(run);
   }
-  return new Date(at);
+  return run;
 }
 
 /** How far one price change has got, for the Studio note (data design §2.6). */
@@ -1239,24 +1258,26 @@ export interface PriceChangeProgress {
   newAmountCents: number;
   state: PriceChangeState;
   createdAt: string;
-  /** Everyone the change has to tell. */
-  total: number;
-  /** Every accepted notice, a held move failure included: they were told. */
-  emailed: number;
-  /** Told, and moved now or marked to move at a renewal. */
-  scheduled: number;
-  /** Held for support and not yet resolved: "couldn't be moved yet". */
-  held: number;
-  /** Not told yet. */
-  due: number;
-  /** To try again on the next run: a failed notice, or a write after one. */
-  retrying: number;
+  counts: {
+    /** Everyone the change has to tell. */
+    total: number;
+    /** Every accepted notice, a held move failure included: they were told. */
+    emailed: number;
+    /** Told, and moved now or marked to move at a renewal. */
+    scheduled: number;
+    /** Held for support and not yet resolved: "couldn't be moved yet". */
+    held: number;
+    /** Not told yet. */
+    due: number;
+    /** Of `due`, those already tried: "1 to try again at 16:00". */
+    retrying: number;
+  };
   lastRunAt: string | null;
   /** The next run that works it; null unless it is running. */
   nextRunAt: string | null;
   /**
    * The run that should finish it, at PRICE_MOVES_PER_RUN a run and skipping
-   * 08:00 London; null unless it is running.
+   * 08:00 London; null unless it is running with rows due or notified.
    */
   estimatedDoneAt: string | null;
   doneAt: string | null;
@@ -1303,8 +1324,8 @@ export async function readPriceChangeProgress(
            count(m."id") FILTER (WHERE m."state" = 'held'
                                    AND m."resolved_at" IS NULL)::int AS held,
            count(m."id") FILTER (WHERE m."state" = 'due')::int AS due,
-           count(m."id") FILTER (WHERE (m."state" = 'due' AND m."attempts" > 0)
-                                    OR m."state" = 'notified')::int AS retrying,
+           count(m."id") FILTER (WHERE m."state" = 'due'
+                                   AND m."attempts" > 0)::int AS retrying,
            count(m."id") FILTER (WHERE m."state" IN ('due', 'notified'))::int
              AS remaining
       FROM ${priceChanges} c
@@ -1336,21 +1357,19 @@ export async function readPriceChangeProgress(
       newAmountCents: Number(r.new_amount_cents),
       state: r.state as PriceChangeState,
       createdAt: iso(r.created_at) ?? now.toISOString(),
-      total: Number(r.total),
-      emailed: Number(r.emailed),
-      scheduled: Number(r.scheduled),
-      held: Number(r.held),
-      due: Number(r.due),
-      retrying: Number(r.retrying),
+      counts: {
+        total: Number(r.total),
+        emailed: Number(r.emailed),
+        scheduled: Number(r.scheduled),
+        held: Number(r.held),
+        due: Number(r.due),
+        retrying: Number(r.retrying),
+      },
       lastRunAt: iso(r.last_run_at),
-      nextRunAt: running ? priceMoveRunAt(now).toISOString() : null,
-      estimatedDoneAt:
-        running && remaining > 0
-          ? priceMoveRunAt(
-              now,
-              Math.ceil(remaining / PRICE_MOVES_PER_RUN)
-            ).toISOString()
-          : null,
+      nextRunAt: running ? nextPriceMovesRunAfter(now).toISOString() : null,
+      estimatedDoneAt: running
+        ? (priceMovesDoneBy(now, remaining)?.toISOString() ?? null)
+        : null,
       doneAt: iso(r.done_at),
       supersededById: (r.superseded_by_id as string | null) ?? null,
       stoppedAt: iso(r.stopped_at),

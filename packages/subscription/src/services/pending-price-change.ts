@@ -734,7 +734,7 @@ export interface PriceChangeTx {
 }
 
 /** The subscription statuses a price change reaches; the old fan-out's. */
-export const REPRICED_STATUSES = [
+const REPRICED_STATUSES = [
   SUBSCRIPTION_STATUS.ACTIVE,
   SUBSCRIPTION_STATUS.CANCELLING,
   SUBSCRIPTION_STATUS.PAST_DUE,
@@ -773,17 +773,23 @@ type PriceChangeSubject =
   | { kind: 'course_plan'; planId: string };
 
 /**
- * Latest wins (docs/payments/subscriptions.md → Price changes): the live
- * change for the same subject and interval becomes `superseded`, pointing at
- * the new one, and the new one is inserted, in ONE statement. It has to be
- * one: the partial unique index allows a single running or stopped change,
- * so the old one must stop being live before the insert, while its
- * `superseded_by_id` must name a row that exists, which a foreign key checks
- * at the end of the statement. The insert reads the update's whole result
- * (`count(*)`) before it writes, so the update has run first. Then the old
- * change's `due` and `held` rows become `superseded`, as do the open rows of
- * an earlier change that already finished: nobody not yet told hears about
- * the replaced price, and its held people leave support's list.
+ * Latest wins (docs/payments/subscriptions.md → Price changes).
+ *
+ * 1. Every older change for the same subject and interval that isn't
+ *    superseded is locked first: the lock order everywhere is the
+ *    `price_changes` row, then its `subscription_price_moves` rows.
+ * 2. The live (running or stopped) one becomes `superseded`, pointing at the
+ *    new one, and the new one is inserted, in ONE statement. It has to be
+ *    one: the partial unique index allows a single running or stopped
+ *    change, so the old one must stop being live before the insert, while
+ *    its `superseded_by_id` must name a row that exists, which a foreign key
+ *    checks at the end of the statement. The insert reads the update's whole
+ *    result (`count(*)`) before it writes, so the update has run first.
+ * 3. Every `due`, `notified` and unresolved `held` row of those older changes
+ *    becomes `superseded`, a `done` change's included (the change itself
+ *    stays `done`). Nobody hears about a replaced price, its held people
+ *    leave support's list, and a row support retried on an old change is
+ *    never worked: the new change's rows reach the same people.
  */
 async function insertPriceChange(
   tx: PriceChangeTx,
@@ -797,6 +803,15 @@ async function insertPriceChange(
     subject.kind === 'tier'
       ? sql`${priceChanges.tierId} = ${subject.tierId}::uuid`
       : sql`${priceChanges.courseSubscriptionPlanId} = ${subject.planId}::uuid`;
+  const older = await tx.execute(sql`
+    SELECT "id" FROM ${priceChanges}
+     WHERE ${sameSubject}
+       AND ${priceChanges.interval} = ${input.interval}
+       AND ${priceChanges.state} <> 'superseded'
+     ORDER BY "id"
+     FOR UPDATE
+  `);
+  const olderIds = (older.rows as Array<{ id: string }>).map((r) => r.id);
   const result = await tx.execute(sql`
     WITH superseded AS (
       UPDATE ${priceChanges}
@@ -833,27 +848,18 @@ async function insertPriceChange(
     });
   }
   const supersededId = row.superseded_id ?? null;
-  // An earlier change that already finished stays `done`, but its open rows
-  // are superseded too: held people would otherwise stay on support's list,
-  // and a Retry would re-tell a replaced price while this change tells the
-  // new one. Row locks order this against support's Retry, which only takes
-  // a row that is still `held`.
-  const sameSubjectAs =
-    subject.kind === 'tier'
-      ? sql`c."tier_id" = ${subject.tierId}::uuid`
-      : sql`c."course_subscription_plan_id" = ${subject.planId}::uuid`;
-  await tx.execute(sql`
-    UPDATE ${subscriptionPriceMoves} m
-       SET "state" = 'superseded', "updated_at" = ${input.now}::timestamptz
-      FROM ${priceChanges} c
-     WHERE m."price_change_id" = c."id"
-       AND ${sameSubjectAs}
-       AND c."interval" = ${input.interval}
-       AND ((c."id" = ${supersededId}::uuid AND m."state" IN ('due', 'held'))
-            OR (c."state" = 'done'
-                AND (m."state" IN ('due', 'notified')
-                     OR (m."state" = 'held' AND m."resolved_at" IS NULL))))
-  `);
+  if (olderIds.length > 0) {
+    await tx.execute(sql`
+      UPDATE ${subscriptionPriceMoves}
+         SET "state" = 'superseded', "updated_at" = ${input.now}::timestamptz
+       WHERE "price_change_id" IN (${sql.join(
+         olderIds.map((id) => sql`${id}::uuid`),
+         sql`, `
+       )})
+         AND ("state" IN ('due', 'notified')
+              OR ("state" = 'held' AND "resolved_at" IS NULL))
+    `);
+  }
   return { changeId, supersededId };
 }
 

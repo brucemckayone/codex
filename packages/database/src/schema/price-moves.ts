@@ -13,11 +13,14 @@
  *
  * `price_changes.state`:
  * - `running`: rows are still `due` or `notified`;
- * - `done`: none are (held rows don't keep a change running);
+ * - `done`: none are (held rows don't keep a change running). A row support
+ *   retries, or Keep current plan adds, makes it `running` again;
  * - `stopped`: every notice in the first batch was refused with a 4xx, so
- *   nobody moved. Support presses Restart (`restart_requested_*`); the run
- *   restarts a stopped change whose `restart_requested_at` is after its
- *   `stopped_at`, and a later stop writes new `stopped_*`;
+ *   nobody moved. `stopped_reason` is `template_missing` (404, 422),
+ *   `worker_auth` (401) or `notice_refused` (any other 4xx). Support presses
+ *   Restart (`restart_requested_*`); the run restarts a stopped change whose
+ *   `restart_requested_at` is after its `stopped_at`, and a later stop writes
+ *   new `stopped_*`;
  * - `superseded`: a newer price for the same tier and interval replaced it
  *   ("latest wins").
  *
@@ -27,9 +30,19 @@
  *   email);
  * - `scheduled`: told and written (`scheduled_kind` now | pending);
  * - `unchanged`: already on the new price;
- * - `skipped`: not moved, for `skip_reason`;
+ * - `skipped`: not moved, for `skip_reason`:
+ *   - `moving_away`: they have left the tier since the save, or are waiting
+ *     to leave it (a move to another plan, .16 Part A rule 1);
+ *   - `other_interval`: they changed billing period;
+ *   - `no_items`: the Stripe subscription has no item;
+ *   - `ended`: the subscription is cancelled or has `ended_at` set (one set
+ *     to cancel at the period end is still moved: if they reactivate, they
+ *     renew at the new price);
  * - `held`: three tries failed, for `held_reason`; support's Queue lists it;
- * - `superseded`: its change was replaced before it moved.
+ * - `superseded`: a newer price for the tier (or plan) and interval was saved
+ *   before it moved. A save supersedes every `due`, `notified` and unresolved
+ *   `held` row of every older change that isn't already superseded, a `done`
+ *   change's included (the change itself stays `done`).
  *
  * A `held` row that support retries goes back to `due` or `notified` and keeps
  * its `held_reason`, so the Queue can show "Queued for 11:00".
@@ -349,7 +362,7 @@ export type PriceMoveState =
   | 'skipped'
   | 'held'
   | 'superseded';
-/** `moving_away`: waiting to move off the repriced tier (.16, Part A rule 1). */
+/** `moving_away`: left the repriced tier since the save, or waiting to leave it (.16, Part A rule 1). */
 export type PriceMoveSkipReason =
   | 'moving_away'
   | 'other_interval'

@@ -67,16 +67,24 @@ on `SubscriptionService`; `feeConfig`, `mailer` and `offSaleMailer` on
   **NEVER** swap an existing subscriber's Price with a direct
   `subscriptions.update` on a price change — go through `schedulePriceChange`
   (`pending-price-change.ts`): same interval only, no proration, first renewal
-  ≥ 30 days after the email (`Codex-2hxff.3`). Notice first, then move: it
-  writes nothing until the subscriber's notice is accepted by notifications-api
-  (the services' `mailer` is the awaited `PriceChangeNoticeMailer`); a notice
-  not accepted keeps today's price and is alerted (`Codex-2hxff.43`). Both
-  fan-outs run on `waitUntil` (30 s, then cancelled), so neither starts a batch
-  after `PRICE_FAN_OUT_BUDGET_MS` (17 s), and every fan-out Stripe call passes
-  `FAN_OUT_STRIPE_REQUEST` (3 s, no retry). The budget is derived from those
-  named timeouts, so a new Stripe call on a subscriber's path must update
-  `FAN_OUT_STRIPE_CALLS_PER_SUBSCRIBER`. Everyone not reached is counted, and
-  named up to a cap, in one alert (`alertFanOutOutOfTime`).
+  ≥ 30 days after that person's own email (`Codex-2hxff.3`, M2). Notice first,
+  then move: it writes nothing until the subscriber's notice is accepted by
+  notifications-api (the services' `mailer` is the awaited
+  `PriceChangeNoticeMailer`, `Codex-2hxff.43`).
+- **A save never moves anyone itself** (`Codex-2hxff.86`). `updateTier` and
+  `savePlanPrices` record who is due in their own transaction
+  (`recordTierPriceChange` / `recordPlanPriceChange`: one `price_changes` row
+  per interval, one `subscription_price_moves` row per subscriber, latest
+  wins). ecom-api's hourly step (`runPriceMoves` → `price-moves-sweep.ts`)
+  tells and moves them: at most `PRICE_MOVES_PER_RUN` a run, three tries,
+  then `held` for support. The record, not the log, is the source of truth.
+  There is no `waitUntil` fan-out: do not add one.
+- **Lock order:** a `price_changes` row, then its `subscription_price_moves`
+  rows. Any write that changes a change's state (a save's supersede, Keep's
+  re-open, the step's stop, restart and finish) takes the change row first;
+  the step's claim is its own statement and holds no change lock.
+- Every Stripe call on a subscriber's path passes `FAN_OUT_STRIPE_REQUEST`
+  (3 s, no retry): the next hourly run is the retry.
 - If the DB insert fails, the new Stripe Product is archived (orphan prevention),
   unless a live row already uses it. Create keys survive a retry — a tier keys
   on the environment + the dialog's `submissionId`, a course plan on environment

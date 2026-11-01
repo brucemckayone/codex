@@ -419,6 +419,78 @@ describe('recording a tier price change (Codex-2hxff.86)', () => {
     expect(stateOf.get(scheduled.id)).toBe('scheduled');
   });
 
+  // Latest wins over a change still going out: told-but-not-yet-written
+  // people are superseded too (the new change reaches them), while a row
+  // support closed by hand, or one already moved, is history.
+  it('a newer price supersedes the live change: its due, notified and unresolved held rows', async () => {
+    const { org: o, pro } = await org('record-supersede-live');
+    const subs = await Promise.all(
+      Array.from({ length: 5 }, () => subscriber(o.id, pro))
+    );
+    await service.updateTier(pro.id, o.id, { priceMonthly: 1400 });
+    const first = takeFirst(await changesOf(pro.id));
+    const told = new Date(Date.now() - DAY_MS);
+    const [fresh, notified, held, closed, scheduled] = subs as [
+      Sub,
+      Sub,
+      Sub,
+      Sub,
+      Sub,
+    ];
+    const set = (
+      sub: Sub,
+      values: Partial<typeof subscriptionPriceMoves.$inferInsert>
+    ) =>
+      db
+        .update(subscriptionPriceMoves)
+        .set(values)
+        .where(
+          and(
+            eq(subscriptionPriceMoves.priceChangeId, first.id),
+            eq(subscriptionPriceMoves.subscriptionId, sub.id)
+          )
+        );
+    await set(notified, {
+      state: 'notified',
+      noticeAt: told,
+      lastError: 'move_unknown',
+    });
+    await set(held, { state: 'held', heldReason: 'notice_refused' });
+    await set(closed, {
+      state: 'held',
+      heldReason: 'no_address',
+      resolution: 'moved_by_hand',
+      resolvedAt: told,
+      resolvedByUserId: closed.userId,
+      resolutionNote: 'moved at Stripe by hand',
+    });
+    await set(scheduled, {
+      state: 'scheduled',
+      scheduledKind: 'pending',
+      noticeAt: told,
+      effectiveAt: new Date(Date.now() + 30 * DAY_MS),
+    });
+
+    await service.updateTier(pro.id, o.id, { priceMonthly: 1500 });
+
+    const changes = await changesOf(pro.id);
+    const replaced = takeFirst(changes.filter((c) => c.id === first.id));
+    const live = takeFirst(changes.filter((c) => c.id !== first.id));
+    expect(replaced).toMatchObject({
+      state: 'superseded',
+      supersededById: live.id,
+    });
+    const stateOf = new Map(
+      (await movesOf(first.id)).map((r) => [r.subscriptionId, r.state])
+    );
+    expect(stateOf.get(fresh.id)).toBe('superseded');
+    expect(stateOf.get(notified.id)).toBe('superseded');
+    expect(stateOf.get(held.id)).toBe('superseded');
+    expect(stateOf.get(closed.id)).toBe('held');
+    expect(stateOf.get(scheduled.id)).toBe('scheduled');
+    expect(live).toMatchObject({ state: 'running', totalCount: 5 });
+  });
+
   // One transaction: a recording that fails fails the save, and the Stripe
   // Prices are put back, so nobody is lost between the save and the step.
   it('a recording that fails leaves the tier as it was and archives the new Price', async () => {

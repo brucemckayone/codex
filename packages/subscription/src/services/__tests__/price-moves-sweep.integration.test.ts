@@ -45,7 +45,7 @@ import {
 } from '../pending-price-change';
 import {
   type PriceMoveStepOptions,
-  priceMoveRunAt,
+  priceMovesDoneBy,
   readPriceChangeProgress,
   runPriceMoveStep,
 } from '../price-moves-sweep';
@@ -377,7 +377,11 @@ describe('the hourly price-moves step (Codex-2hxff.86)', () => {
     const soon = await subscriber(o.id, pro);
     const later = await subscriber(o.id, pro);
     const pastDue = await subscriber(o.id, pro, { status: 'past_due' });
+    // Set to cancel at the period end: still moved, so a reactivation renews
+    // at the new price.
+    const cancelling = await subscriber(o.id, pro, { status: 'cancelling' });
     onStripe(fake, soon, 10);
+    onStripe(fake, cancelling, 40);
     // Grandfathered: billed 10.00, not the 12.00 list price.
     onStripe(fake, later, 40, { amount: 1000 });
     onStripe(fake, pastDue, 40, { status: 'past_due' });
@@ -388,8 +392,8 @@ describe('the hourly price-moves step (Codex-2hxff.86)', () => {
 
     expect(result).toMatchObject({
       ran: true,
-      claimed: 3,
-      scheduled: 3,
+      claimed: 4,
+      scheduled: 4,
       retrying: 0,
       held: 0,
       done: 1,
@@ -422,8 +426,12 @@ describe('the hourly price-moves step (Codex-2hxff.86)', () => {
       state: 'scheduled',
       scheduledKind: 'pending',
     });
+    expect(await moveOf(changeId, cancelling)).toMatchObject({
+      state: 'scheduled',
+      scheduledKind: 'now',
+    });
 
-    expect(send).toHaveBeenCalledTimes(3);
+    expect(send).toHaveBeenCalledTimes(4);
     const toLater = send.mock.calls.find(
       ([params]) => params.data.priceMoveId === laterRow.id
     )?.[0];
@@ -457,6 +465,7 @@ describe('the hourly price-moves step (Codex-2hxff.86)', () => {
     const fake = fakeStripe();
     const moveAt = new Date(NOW + 40 * DAY_MS);
     const ended = await subscriber(o.id, pro);
+    const endedAt = await subscriber(o.id, pro);
     const switched = await subscriber(o.id, pro);
     const leaving = await subscriber(o.id, pro);
     const leavingAtStripe = await subscriber(o.id, pro);
@@ -466,17 +475,30 @@ describe('the hourly price-moves step (Codex-2hxff.86)', () => {
       pendingTierFrom: moveAt,
       heldAmountCents: 500,
     });
-    for (const sub of [ended, switched, leaving, mover])
+    for (const sub of [ended, endedAt, switched, leaving, mover])
       onStripe(fake, sub, 40);
     onStripe(fake, leavingAtStripe, 40, {
       metadata: { codex_move_tier_id: basic.id },
     });
     const changeId = await reprice(o.id, pro);
-    // Since the save: one ended, one switched billing, one started leaving.
+    // Since the save: two ended, one switched billing, one started leaving.
     await db
       .update(subscriptions)
       .set({ status: 'cancelled' })
       .where(eq(subscriptions.id, ended.id));
+    await db
+      .update(subscriptions)
+      .set({ endedAt: new Date(NOW - HOUR_MS) })
+      .where(eq(subscriptions.id, endedAt.id));
+    // Support had retried the first one: a skip closes it too.
+    await db
+      .update(subscriptionPriceMoves)
+      .set({
+        heldReason: 'notice_refused',
+        retryRequestedAt: new Date(NOW - HOUR_MS),
+        retryRequestedByUserId: ended.userId,
+      })
+      .where(eq(subscriptionPriceMoves.subscriptionId, ended.id));
     await db
       .update(subscriptions)
       .set({ billingInterval: 'year' })
@@ -494,10 +516,17 @@ describe('the hourly price-moves step (Codex-2hxff.86)', () => {
 
     const result = await run([changeId], { fake, send, onMoverScheduled });
 
-    expect(result).toMatchObject({ claimed: 5, skipped: 4, scheduled: 1 });
+    expect(result).toMatchObject({ claimed: 6, skipped: 5, scheduled: 1 });
     expect(await moveOf(changeId, ended)).toMatchObject({
       state: 'skipped',
       skipReason: 'ended',
+      resolution: 'retried_ok',
+      resolvedAt: new Date(NOW),
+    });
+    expect(await moveOf(changeId, endedAt)).toMatchObject({
+      state: 'skipped',
+      skipReason: 'ended',
+      resolution: null,
     });
     expect(await moveOf(changeId, switched)).toMatchObject({
       state: 'skipped',
@@ -681,7 +710,8 @@ describe('the hourly price-moves step (Codex-2hxff.86)', () => {
     const logged = await subscriber(o.id, pro);
     const landed = await subscriber(o.id, pro);
     const lost = await subscriber(o.id, pro);
-    for (const sub of [logged, landed, lost]) onStripe(fake, sub, 10);
+    const retried = await subscriber(o.id, pro);
+    for (const sub of [logged, landed, lost, retried]) onStripe(fake, sub, 10);
     const changeId = await reprice(o.id, pro);
 
     await run([changeId], {
@@ -713,12 +743,39 @@ describe('the hourly price-moves step (Codex-2hxff.86)', () => {
         Math.floor(NOW / 1000) + 31 * DAY_S
       );
     }
+    // Held as unknown, then retried by support: whatever else Retry reset,
+    // the held reason says the email may have gone.
+    const retriedRow = await moveOf(changeId, retried);
+    await db
+      .update(subscriptionPriceMoves)
+      .set({
+        heldReason: 'notice_unknown',
+        lastError: null,
+        attemptedAt: null,
+        attempts: 0,
+        retryRequestedAt: new Date(NOW + 30 * 60 * 1000),
+        retryRequestedByUserId: retried.userId,
+      })
+      .where(eq(subscriptionPriceMoves.id, retriedRow.id));
+    await db.insert(emailAuditLogs).values({
+      templateName: 'subscription-tier-price-change',
+      recipientEmail: await emailOf(retried),
+      status: 'success',
+      metadata: JSON.stringify({ priceMoveId: retriedRow.id }),
+      createdAt: sentAt,
+      updatedAt: sentAt,
+    });
     const send = mailer();
 
     await run([changeId], { fake, send }, 1);
 
     expect(send).toHaveBeenCalledTimes(1);
     expect(send.mock.calls[0]?.[0].to).toBe(await emailOf(lost));
+    expect(await moveOf(changeId, retried)).toMatchObject({
+      state: 'scheduled',
+      noticeAt: sentAt,
+      resolution: 'retried_ok',
+    });
     expect(await moveOf(changeId, logged)).toMatchObject({
       state: 'scheduled',
       scheduledKind: 'pending',
@@ -760,7 +817,7 @@ describe('the hourly price-moves step (Codex-2hxff.86)', () => {
     const stopped = await changeOf(changeId);
     expect(stopped).toMatchObject({
       state: 'stopped',
-      stoppedReason: 'notices_refused_404',
+      stoppedReason: 'template_missing',
       stoppedAt: new Date(NOW),
     });
     for (const row of await movesOf(changeId)) {
@@ -795,6 +852,46 @@ describe('the hourly price-moves step (Codex-2hxff.86)', () => {
     const restarted = await run([changeId], { fake, send }, 2);
     expect(restarted).toMatchObject({ restarted: 1, scheduled: 3, done: 1 });
     expect(send).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([
+    [422, 'template_missing'],
+    [401, 'worker_auth'],
+    [403, 'notice_refused'],
+  ] as const)('a first batch refused with %i stops the change as %s', async (status, reason) => {
+    const { org: o, pro } = await org(`pm-stop-${status}`);
+    const fake = fakeStripe();
+    const sub = await subscriber(o.id, pro);
+    onStripe(fake, sub, 40);
+    const changeId = await reprice(o.id, pro);
+
+    await run([changeId], {
+      fake,
+      send: mailer(() => ({ accepted: false, status })),
+    });
+
+    expect(await changeOf(changeId)).toMatchObject({
+      state: 'stopped',
+      stoppedReason: reason,
+    });
+  });
+
+  it.each([
+    408, 409, 425, 429,
+  ])('a first batch refused with %i is tried again, not stopped', async (status) => {
+    const { org: o, pro } = await org(`pm-no-stop-${status}`);
+    const fake = fakeStripe();
+    const sub = await subscriber(o.id, pro);
+    onStripe(fake, sub, 40);
+    const changeId = await reprice(o.id, pro);
+
+    const result = await run([changeId], {
+      fake,
+      send: mailer(() => ({ accepted: false, status })),
+    });
+
+    expect(result).toMatchObject({ stopped: 0, retrying: 1 });
+    expect((await changeOf(changeId)).state).toBe('running');
   });
 
   it('a refused first batch does not stop a change that already got a notice through', async () => {
@@ -958,6 +1055,54 @@ describe('the hourly price-moves step (Codex-2hxff.86)', () => {
     expect(guarded.reopened).toBe(0);
     expect((await changeOf(older)).state).toBe('done');
     expect(obs.error).not.toHaveBeenCalled();
+  });
+
+  // Support retries a held row on a finished change, then the owner saves a
+  // newer price before the run: the person is told the newest price only.
+  it('Retry, then a newer save, then the run: only the newest price is sent', async () => {
+    const { org: o, pro } = await org('pm-retry-race');
+    const fake = fakeStripe();
+    const sub = await subscriber(o.id, pro);
+    onStripe(fake, sub, 40);
+    const first = await reprice(o.id, pro);
+    await db
+      .update(subscriptionPriceMoves)
+      .set({
+        state: 'due',
+        heldReason: 'notice_refused',
+        lastError: 'notice_refused_422',
+        attempts: 0,
+        retryRequestedAt: new Date(NOW - 2 * HOUR_MS),
+        retryRequestedByUserId: sub.userId,
+      })
+      .where(eq(subscriptionPriceMoves.priceChangeId, first));
+    await db
+      .update(priceChanges)
+      .set({ state: 'done', doneAt: new Date(NOW - DAY_MS) })
+      .where(eq(priceChanges.id, first));
+    const { changeId: newest } = await recordTierPriceChange(db, pro.id, {
+      organizationId: o.id,
+      interval: 'month',
+      fromAmountCents: 1200,
+      newAmountCents: 1500,
+      newStripePriceId: 'price_pm_newest',
+      createdByUserId: null,
+      now: new Date(NOW - HOUR_MS),
+    });
+    const send = mailer();
+
+    const result = await run([first, newest], { fake, send });
+
+    expect(result).toMatchObject({ reopened: 0, claimed: 1, scheduled: 1 });
+    expect(send).toHaveBeenCalledOnce();
+    expect(send.mock.calls[0]?.[0].data).toMatchObject({
+      newPriceFormatted: '£15.00',
+    });
+    expect(fake.live.get(sub.stripeSubscriptionId)?.priceId).toBe(
+      'price_pm_newest'
+    );
+    expect((await moveOf(first, sub)).state).toBe('superseded');
+    expect((await changeOf(first)).state).toBe('done');
   });
 
   it('the 08:00 London run does nothing', async () => {
@@ -1216,12 +1361,17 @@ describe('the hourly price-moves step (Codex-2hxff.86)', () => {
         newAmountCents: 1400,
         state: 'running',
         createdAt: new Date(NOW - DAY_MS).toISOString(),
-        total: 7,
-        emailed: 3,
-        scheduled: 1,
-        held: 1,
-        due: 2,
-        retrying: 2,
+        counts: {
+          total: 7,
+          // Told: scheduled, held after a refused move, and notified.
+          emailed: 3,
+          scheduled: 1,
+          // The closed one is resolved: not "couldn't be moved yet".
+          held: 1,
+          due: 2,
+          // Of the due, the one already tried.
+          retrying: 1,
+        },
         lastRunAt: null,
         // 08:00 London is the bank payout's run.
         nextRunAt: new Date(Date.UTC(2027, 0, 14, 9)).toISOString(),
@@ -1233,7 +1383,7 @@ describe('the hourly price-moves step (Codex-2hxff.86)', () => {
       expect(progress[1]).toMatchObject({
         state: 'done',
         interval: 'year',
-        total: 0,
+        counts: { total: 0 },
         nextRunAt: null,
         estimatedDoneAt: null,
       });
@@ -1311,23 +1461,15 @@ describe('the hourly price-moves step (Codex-2hxff.86)', () => {
       ).toEqual([]);
     });
 
-    it('the run estimate counts 1,500 a run and skips 08:00 London, winter and summer', () => {
+    it('the finish estimate counts 1,500 a run from the next run, skipping 08:00 London', () => {
       const winter = new Date(Date.UTC(2027, 0, 14, 6, 30));
-      expect(priceMoveRunAt(winter).toISOString()).toBe(
-        '2027-01-14T07:00:00.000Z'
-      );
-      expect(priceMoveRunAt(winter, 2).toISOString()).toBe(
-        '2027-01-14T09:00:00.000Z'
-      );
-      // British Summer Time: 08:00 London is 07:00 UTC.
-      const summer = new Date(Date.UTC(2026, 6, 15, 6, 30));
-      expect(priceMoveRunAt(summer).toISOString()).toBe(
-        '2026-07-15T08:00:00.000Z'
-      );
-      // On the hour: that run is under way, so the next is an hour on.
-      expect(
-        priceMoveRunAt(new Date(Date.UTC(2027, 0, 14, 15))).toISOString()
-      ).toBe('2027-01-14T16:00:00.000Z');
+      const at = (n: number) => priceMovesDoneBy(winter, n)?.toISOString();
+      expect(at(0)).toBeUndefined();
+      expect(at(1)).toBe('2027-01-14T07:00:00.000Z');
+      expect(at(1500)).toBe('2027-01-14T07:00:00.000Z');
+      // The second run is 09:00: 08:00 London is the bank payout's.
+      expect(at(1501)).toBe('2027-01-14T09:00:00.000Z');
+      expect(at(4501)).toBe('2027-01-14T11:00:00.000Z');
     });
   });
 });

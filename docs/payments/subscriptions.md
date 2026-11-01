@@ -436,18 +436,29 @@ the new Prices are archived again, so nobody is lost between the save and
 the step. A change with nobody to tell is `done` at once.
 
 - **Latest wins** (owner decision 2026-10-13). A newer save for the same tier
-  (or plan) and interval supersedes the live change in the same statement:
-  its `due` and `held` rows become `superseded`, so nobody not yet told hears
-  about the replaced price, and its held people leave support's list. The
-  open rows of an earlier change that already finished (held, or queued again
-  by support) are superseded too. Someone already told keeps that move until
-  the newer one is written. Two saves of one tier at once queue on the tier
-  row, so the second always supersedes the first.
+  (or plan) and interval supersedes every older change that isn't already
+  superseded. A `running` or `stopped` one becomes `superseded` (with
+  `superseded_by_id`); a `done` one stays `done`. Either way, every `due`,
+  `notified` and unresolved `held` row of those older changes becomes
+  `superseded`: nobody hears about a replaced price, held people leave
+  support's list, and a row support retried on an old change is never
+  worked. The new change's rows reach the same people, so they are told the
+  newest price. Someone already told keeps that move at Stripe until the
+  newer one is written. Two saves of one tier at once queue on the tier row,
+  so the second always supersedes the first.
+- **Lock order.** A `price_changes` row, then its `subscription_price_moves`
+  rows. Every write that changes a change's state takes the change row first:
+  the save's supersede, Keep's re-open, and the step's stop, restart, re-open
+  and finish. The step's claim is its own statement and holds no change lock.
 - The record, not the log, is the source of truth: `price_changes.state` is
   `running`, `done`, `stopped` or `superseded`; each person's row is `due`,
   `notified` (told; the Stripe write still to land), `scheduled`, `unchanged`
-  (already on the new amount), `skipped` (`moving_away`, `other_interval`,
-  `no_items`, `ended`), `held` or `superseded`.
+  (already on the new amount), `skipped`, `held` or `superseded`. A skip
+  says why: `moving_away` (they have left the tier since the save, or are
+  waiting to leave it), `other_interval` (they changed billing period),
+  `no_items`, or `ended` (cancelled, or `ended_at` set). A subscription set
+  to cancel at the period end is still moved: if they reactivate, they renew
+  at the new price.
 
 **The hourly step** (`runPriceMoveStep`,
 `packages/subscription/src/services/price-moves-sweep.ts`, `Codex-2hxff.86`).
@@ -457,9 +468,12 @@ on the 08:00 London run, which the bank payout has to itself. No new cron
 and no new Neon wake: it rides the hourly one.
 
 1. **Restart and re-open.** A stopped change support restarted
-   (`restart_requested_at` after `stopped_at`) runs again. A finished change
-   with rows support queued again (Retry, Retry the move) is re-opened, if it
-   is the tier's (or plan's) newest and nothing else is live for it.
+   (`restart_requested_at` after `stopped_at`) runs again. A `done` change
+   with a `due` or `notified` row is re-opened (`running`, `done_at` NULL):
+   support's Retry is a row flip only, and Keep current plan can add a row to
+   a finished change. Only a tier's (or plan's) newest change with nothing
+   else live is re-opened, so the one-live-change index always holds; after
+   a newer save, an older change has no such rows anyway.
 2. **Claim.** Up to 1,500 rows (`PRICE_MOVES_PER_RUN`), `due` or `notified`,
    whose retry time has come, on running changes, oldest first, in one UPDATE
    under `FOR UPDATE SKIP LOCKED` (`attempts + 1`, `attempted_at`). A row
@@ -469,7 +483,8 @@ and no new Neon wake: it rides the hourly one.
    after 8 minutes (the cron's wall is 15). Claims not worked go back as they
    were. Per person:
    - our row is read again: ended (`ended`), switched billing
-     (`other_interval`), or now leaving the tier (`moving_away`) is skipped;
+     (`other_interval`), or left or leaving the tier (`moving_away`) is
+     skipped;
    - `schedulePriceChange` reads the live subscription, works out the move
      and the renewal that first bills the new price, sends the notice and
      waits for the answer (`sendEmailToWorkerAwaited`, 5 seconds). Only a 2xx
@@ -489,10 +504,13 @@ and no new Neon wake: it rides the hourly one.
    | Told, then the Stripe write failed | `notified`, the write retried next hour; held after 3 tries as `move_refused` (a 4xx other than 409 or 429) or `move_unknown` |
    | The read, or a same-amount write, failed before any notice | `due` again; held after 3 tries (`read_failed`, `same_amount_write_failed`) |
 
-   A row support retried that then succeeds closes as `retried_ok`.
+   `attempts` counts the tries since support's last Retry, which resets it
+   to 0. A retried row that ends `scheduled`, `unchanged` or `skipped`
+   closes as `retried_ok` (`resolved_at` set).
 5. **An unknown outcome is checked before anything is sent again.** A notice
    that got a 5xx or timed out may have gone, and a run may have stopped
-   after its writes without recording them. Such a row is looked for first
+   after its writes without recording them (a retried row says so by its
+   kept `held_reason`, `notice_unknown`). Such a row is looked for first
    in notifications' email log (a success for the template and recipient,
    carrying the row's `priceMoveId`, since a minute before the last try):
    found, it was told then. Then at Stripe: already on the new Price, or
@@ -500,14 +518,17 @@ and no new Neon wake: it rides the hourly one.
 6. **A change stops** when every notice of its first batch in a run was
    refused with a 4xx that will not go away by itself (not 408, 409, 425 or
    429: a missing template, a bad worker secret) and none of its notices was
-   ever accepted. It becomes `stopped` (`notices_refused_<status>`, an
-   errorId), nobody is moved, the claims go back, and one alert says to fix
-   the cause and restart.
+   ever accepted. It becomes `stopped`, nobody is moved, the claims go back,
+   and one alert (with the status and an errorId) says to fix the cause and
+   restart. `stopped_reason`, which support's Queue shows and Studio maps:
+   `template_missing` (404 or 422), `worker_auth` (401) or `notice_refused`
+   (any other).
 7. **Alerts are capped.** At most 50 per-person lines a run, one for each row
    that becomes held, whose `alert_error_id` is that line's errorId. The rest
    fold into the run's end alert, whose errorId those rows carry.
-8. **Done.** A change is `done` when no row is `due` or `notified`; held rows
-   don't keep it running.
+8. **Done.** A change is `done` (with `done_at`) when no row is `due` or
+   `notified`; held rows don't keep it running. That includes a change
+   re-opened for a retried row, once that row is worked.
 
 Budget: about 3 subrequests per person (the Stripe read, the notice, the
 Stripe write), so a full run is about 4,500. 10,000 subscribers take about 7
@@ -550,11 +571,13 @@ change is going: `GET /api/organizations/:id/tiers/price-changes`
 `GET /studio/courses/:courseId/subscription-plan/price-changes?organizationId=`
 (ecom-api). Both are owner/admin only (`requireOrgManagement`), uncached
 (`private`) and one GROUP BY. Each change that is running or stopped, or
-finished or replaced in the last 14 days, gives `total`, `emailed` (every
-accepted notice, a held move failure included), `scheduled`, `held`
-(unresolved: "couldn't be moved yet"), `due`, `retrying` (to try again next
-run), `lastRunAt`, `nextRunAt` and `estimatedDoneAt` (at 1,500 a run,
-skipping 08:00 London), `doneAt`, `supersededById` and `stoppedAt`. The
+finished or replaced in the last 14 days, gives `counts` (`total`;
+`emailed`, every accepted notice, a held move failure included;
+`scheduled`; `held`, unresolved: "couldn't be moved yet"; `due`; and
+`retrying`, the `due` rows already tried: "1 to try again at 16:00"),
+`lastRunAt`, `nextRunAt` and `estimatedDoneAt` (`nextPriceMovesRunAfter`
+in `@codex/payments`, stepped at 1,500 a run, skipping 08:00 London),
+`doneAt`, `supersededById` and `stoppedAt`. The
 counts change only on the hour, so the page reads once per visit and has
 Check again (the cost rule). The public tier list is not touched.
 

@@ -107,8 +107,6 @@ export {
   PRICE_MOVES_PER_RUN,
   type PriceChangeProgress,
   type PriceMoveStepResult,
-  // When the next run is: support's Retry and Restart say so (Codex-2hxff.85)
-  priceMoveRunAt,
 } from './services/price-moves-sweep';
 export {
   calculateRevenueSplit,
