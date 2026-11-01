@@ -27,6 +27,7 @@ import type {
 import type {
   PendingTierChange,
   SubscriberSubscription,
+  UserCourseSubscription,
 } from '@codex/subscription';
 import type { HeroLayout } from '@codex/validation';
 
@@ -146,8 +147,12 @@ type DateAsString<T> = {
 // localStorage entry, means nothing is waiting. While one waits, the row's
 // `amountCents` is the next (cheaper) bill and `heldAmountCents` is what the
 // member pays now.
+//
+// A course subscription (Codex-2hxff.52) is its own row with its own list,
+// `UserCourseSubscription` from GET /subscriptions/courses/mine. Dates are
+// ISO strings there already.
 
-export type { PendingTierChange };
+export type { PendingTierChange, UserCourseSubscription };
 
 /**
  * Subscription with tier and org info, matching backend SubscriptionWithOrg shape.

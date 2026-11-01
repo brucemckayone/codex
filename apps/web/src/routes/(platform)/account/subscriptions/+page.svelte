@@ -15,14 +15,20 @@
   import TextArea from '$lib/components/ui/TextArea/TextArea.svelte';
   import Label from '$lib/components/ui/Label/Label.svelte';
   import {
+    cancelCourseSubscription,
     cancelSubscription,
     keepCurrentPlan,
+    reactivateCourseSubscription,
     reactivateSubscription,
     resumeSubscription,
   } from '$lib/remote/subscription.remote';
   import { openBillingPortal } from '$lib/remote/account.remote';
   import { invalidateCollection } from '$lib/collections';
-  import type { PendingTierChange, UserOrgSubscription } from '$lib/types';
+  import type {
+    PendingTierChange,
+    UserCourseSubscription,
+    UserOrgSubscription,
+  } from '$lib/types';
   import { page } from '$app/state';
   import { buildOrgUrl } from '$lib/utils/subdomain';
   import {
@@ -41,6 +47,17 @@
   // `data.subscriptions` is fully replaced, so optimistic state is naturally
   // reconciled with authoritative server state.
   const subscriptions = $derived(data.subscriptions);
+  // Course subscriptions (Codex-2hxff.52, C1): a second list, loaded beside
+  // the memberships, each with its own failure.
+  const courseSubscriptions = $derived(data.courseSubscriptions);
+  // The empty state is for nothing in EITHER list; a failed list is never
+  // "nothing to show".
+  const nothingToShow = $derived(
+    !data.loadError &&
+      !data.courseLoadError &&
+      subscriptions.length === 0 &&
+      courseSubscriptions.length === 0
+  );
 
   type ChurnReason =
     | 'too_expensive'
@@ -81,6 +98,27 @@
   // Keep current plan, per card (Codex-2hxff.16): the line it came to.
   const keepingIds = new SvelteSet<string>();
   const keepLines = new SvelteMap<string, { tone: 'success' | 'error' | 'info'; text: string }>();
+  // A course subscription's own cancel dialog: no churn reasons, which
+  // course subscriptions have no column to keep.
+  let courseCancelOpen = $state(false);
+  let courseCancelTarget = $state<UserCourseSubscription | null>(null);
+  let courseCancelLoading = $state(false);
+  let courseCancelError = $state('');
+  const courseReactivatingIds = new SvelteSet<string>();
+  const courseReactivateFailedIds = new SvelteSet<string>();
+  /**
+   * A course command's result read as one shape: its union doesn't narrow on
+   * `success` here. On a failure, `code` undefined means no answer came.
+   */
+  type CommandOutcome = {
+    success: boolean;
+    code?: string;
+    detailsCode?: string;
+    status?: number;
+  };
+  // Update card / Update Payment, per card: the portal opening, or its failure.
+  const portalOpeningIds = new SvelteSet<string>();
+  const portalFailedIds = new SvelteSet<string>();
 
   function statusVariant(status: string): 'success' | 'warning' | 'error' | 'neutral' {
     switch (status) {
@@ -339,16 +377,121 @@
     }
   }
 
-  async function handleUpdatePayment() {
+  /** Set to end at the period's close, whichever way the row says it. */
+  function courseCancelling(course: UserCourseSubscription): boolean {
+    return course.status === 'cancelling' || course.cancelAtPeriodEnd;
+  }
+
+  function openCourseCancelDialog(course: UserCourseSubscription) {
+    courseCancelTarget = course;
+    courseCancelError = '';
+    courseCancelOpen = true;
+  }
+
+  /**
+   * Cancel a course subscription at period end. A refusal keeps the dialog
+   * open with fixed copy, never the worker's text: it is still active, and
+   * trying again is safe. With no answer at all, the page reads its lists
+   * again and shows whichever is true.
+   */
+  async function handleCourseCancel() {
+    const target = courseCancelTarget;
+    if (!target || courseCancelLoading) return;
+    courseCancelLoading = true;
+    courseCancelError = '';
+    try {
+      const result: CommandOutcome = await cancelCourseSubscription({
+        courseSubscriptionId: target.id,
+      });
+      if (!result.success && result.code !== undefined) {
+        logger.warn('account: course cancel refused', {
+          courseSubscriptionId: target.id,
+          status: result.status,
+          code: result.detailsCode ?? result.code,
+        });
+        courseCancelError = m.subscription_course_cancel_error();
+        return;
+      }
+      courseCancelOpen = false;
+      courseCancelTarget = null;
+      await invalidate('account:subscriptions');
+    } catch (error) {
+      logger.warn('account: course cancel got no answer', {
+        courseSubscriptionId: target.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      courseCancelOpen = false;
+      courseCancelTarget = null;
+      await invalidate('account:subscriptions').catch(() => {});
+    } finally {
+      courseCancelLoading = false;
+    }
+  }
+
+  /**
+   * Undo a course subscription's cancel. A course taken off sale since the
+   * list was read is refused (COURSE_NOT_ON_SALE): the list is read again,
+   * and the card shows why it ends. So is a press with no answer.
+   */
+  async function handleCourseReactivate(course: UserCourseSubscription) {
+    if (courseReactivatingIds.has(course.id)) return;
+    courseReactivatingIds.add(course.id);
+    courseReactivateFailedIds.delete(course.id);
+    try {
+      const result: CommandOutcome = await reactivateCourseSubscription({
+        courseSubscriptionId: course.id,
+      });
+      if (
+        !result.success &&
+        result.code !== undefined &&
+        result.detailsCode !== 'COURSE_NOT_ON_SALE'
+      ) {
+        logger.warn('account: course reactivate refused', {
+          courseSubscriptionId: course.id,
+          status: result.status,
+          code: result.detailsCode ?? result.code,
+        });
+        courseReactivateFailedIds.add(course.id);
+        return;
+      }
+      await invalidate('account:subscriptions');
+    } catch (error) {
+      logger.warn('account: course reactivate got no answer', {
+        courseSubscriptionId: course.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await invalidate('account:subscriptions').catch(() => {});
+    } finally {
+      courseReactivatingIds.delete(course.id);
+    }
+  }
+
+  /**
+   * Update card / Update Payment: the Stripe portal, locked to cards and
+   * invoices. It changes the card for the buyer's one Stripe customer, so one
+   * update covers every subscription, courses included. A failure says so on
+   * the card that was pressed (it used to be silent).
+   */
+  async function openCardDetails(cardId: string) {
+    if (portalOpeningIds.has(cardId)) return;
+    portalOpeningIds.add(cardId);
+    portalFailedIds.delete(cardId);
     try {
       const result = await openBillingPortal({
         returnUrl: page.url.href,
       });
       if (result?.url) {
         window.location.href = result.url;
+        return;
       }
-    } catch {
-      // Portal session creation failed — silent (Stripe will show its own error)
+      portalFailedIds.add(cardId);
+    } catch (error) {
+      logger.warn('account: billing portal did not open', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      portalFailedIds.add(cardId);
+    } finally {
+      portalOpeningIds.delete(cardId);
     }
   }
 </script>
@@ -361,199 +504,403 @@
 <div class="subscriptions-page">
   <h1 class="page-title">{m.subscription_manage()}</h1>
 
-  {#if data.loadError}
-    <Alert variant="error">
-      {m.subscription_load_error()}
-      <Button variant="ghost" size="sm" onclick={() => invalidateAll()}>
-        {m.common_try_again()}
-      </Button>
-    </Alert>
-  {:else if subscriptions.length === 0}
+  {#if nothingToShow}
     <EmptyState
       title={m.subscription_no_subscriptions()}
       description={m.subscription_no_subscriptions_description()}
     />
   {:else}
-    <div class="subscription-list">
-      {#each subscriptions as sub (sub.id)}
-        <!-- An open chargeback on one of its invoices pauses the plan's access
-             and billing (Codex-2hxff.60). Until the bank settles it, the card
-             says so and offers only Cancel: no tier change, reactivate or
-             payment update. -->
-        {@const disputed = sub.disputedAt != null}
-        <!-- A move to a cheaper plan waiting for the renewal (Codex-2hxff.16). -->
-        {@const move = sub.pendingTierChange ?? null}
-        <Card.Root>
-          <Card.Content>
-            <div
-              class="subscription-card"
-              data-testid="subscription-card"
-              data-org-slug={sub.organization.slug}
-            >
-              <div class="subscription-info">
-                <div class="subscription-org">
-                  {#if sub.organization.logoUrl}
-                    <img
-                      src={sub.organization.logoUrl}
-                      alt={sub.organization.name}
-                      class="org-logo"
-                      width="32"
-                      height="32"
-                    />
-                  {/if}
-                  <div class="org-details">
-                    <span class="org-name">{sub.organization.name}</span>
-                    <span class="tier-name">{sub.tier.name}</span>
+    {#if data.loadError || subscriptions.length > 0}
+      <section class="subscriptions-section" aria-labelledby="subscriptions-memberships">
+        <h2 class="subscriptions-section__title" id="subscriptions-memberships">
+          {m.subscription_section_memberships()}
+        </h2>
+        {#if data.loadError}
+          <Alert variant="error">
+            {m.subscription_load_error()}
+            <Button variant="ghost" size="sm" onclick={() => invalidateAll()}>
+              {m.common_try_again()}
+            </Button>
+          </Alert>
+        {:else}
+          <div class="subscription-list">
+            {#each subscriptions as sub (sub.id)}
+              <!-- An open chargeback on one of its invoices pauses the plan's access
+                   and billing (Codex-2hxff.60). Until the bank settles it, the card
+                   says so and offers only Cancel: no tier change, reactivate or
+                   payment update. -->
+              {@const disputed = sub.disputedAt != null}
+              <!-- A move to a cheaper plan waiting for the renewal (Codex-2hxff.16). -->
+              {@const move = sub.pendingTierChange ?? null}
+              <Card.Root>
+                <Card.Content>
+                  <div
+                    class="subscription-card"
+                    data-testid="subscription-card"
+                    data-org-slug={sub.organization.slug}
+                  >
+                    <div class="subscription-info">
+                      <div class="subscription-org">
+                        {#if sub.organization.logoUrl}
+                          <img
+                            src={sub.organization.logoUrl}
+                            alt={sub.organization.name}
+                            class="org-logo"
+                            width="32"
+                            height="32"
+                          />
+                        {/if}
+                        <div class="org-details">
+                          <span class="org-name">{sub.organization.name}</span>
+                          <span class="tier-name">{sub.tier.name}</span>
+                        </div>
+                      </div>
+                      <Badge
+                        variant={disputed ? 'warning' : statusVariant(sub.status)}
+                        data-testid="subscription-status-badge"
+                      >
+                        {disputed ? m.access_paused_dispute_label() : statusLabel(sub.status)}
+                      </Badge>
+                    </div>
+
+                    {#if disputed}
+                      <Alert variant="warning" data-testid="subscription-dispute-notice">
+                        {m.access_paused_dispute_subscription()}
+                      </Alert>
+                    {:else if sub.status === 'past_due'}
+                      <Alert variant="error">
+                        {m.subscription_past_due_message()}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          loading={portalOpeningIds.has(sub.id)}
+                          onclick={() => openCardDetails(sub.id)}
+                        >
+                          {m.subscription_update_payment()}
+                        </Button>
+                      </Alert>
+                    {:else if sub.status === 'paused'}
+                      <Alert variant="warning">
+                        {m.subscription_paused_message()}
+                      </Alert>
+                    {:else if sub.status === 'cancelling'}
+                      <p class="cancelling-message">
+                        {m.subscription_cancelling_message({
+                          date: formatDate(sub.currentPeriodEnd),
+                        })}
+                      </p>
+                      {#if move}
+                        <!-- The move survives a cancel (T4): reactivating brings
+                             it back, so one quiet line says so (state 6). -->
+                        <p class="subscription-note" data-testid="subscription-move-survives">
+                          {m.subscription_move_survives_cancel({
+                            plan: move.tierName,
+                            date: formatSentenceDate(move.effectiveAt),
+                          })}
+                        </p>
+                      {/if}
+                    {:else if move}
+                      <!-- The pricing page's notice, inside the card (state 5). -->
+                      <Alert variant="info" data-testid="subscription-move-notice">
+                        <div class="subscription-move">
+                          <span class="subscription-move__text">
+                            <b>{m.pricing_move_notice_title({
+                              plan: move.tierName,
+                              date: formatSentenceDate(move.effectiveAt),
+                            })}</b>
+                            <span>{waitingMoveBody(move, sub.tier.name, formatSentenceDate)}</span>
+                          </span>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            loading={keepingIds.has(sub.id)}
+                            data-testid="subscription-keep-button"
+                            onclick={() => handleKeep(sub, move)}
+                          >
+                            {m.pricing_move_keep()}
+                          </Button>
+                        </div>
+                      </Alert>
+                    {/if}
+                    {#if keepLines.has(sub.id)}
+                      {@const line = keepLines.get(sub.id)}
+                      {#if line?.tone === 'success'}
+                        <p class="subscription-done" role="status" data-testid="subscription-keep-line">
+                          {line.text}
+                        </p>
+                      {:else if line}
+                        <Alert variant={line.tone} data-testid="subscription-keep-line">
+                          {line.text}
+                        </Alert>
+                      {/if}
+                    {/if}
+
+                    <div class="subscription-meta">
+                      <!-- While a move waits, the row's amount is the next (cheaper)
+                           bill; what the member pays now is the held amount. -->
+                      <span class="subscription-price">
+                        {formatPrice(sub.heldAmountCents ?? sub.amountCents)}
+                        <span class="billing-interval">/{sub.billingInterval === 'month' ? 'mo' : 'yr'}</span>
+                      </span>
+                      <span class="subscription-period">
+                        {m.subscription_current_period_ends({
+                          date: formatDate(sub.currentPeriodEnd),
+                        })}
+                      </span>
+                    </div>
+
+                    <div class="subscription-actions">
+                      {#if !disputed}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          data-testid="subscription-change-tier-button"
+                          onclick={() => {
+                            const orgUrl = buildOrgUrl(page.url, sub.organization.slug, '/pricing');
+                            window.location.href = orgUrl;
+                          }}
+                        >
+                          {m.subscription_change_tier()}
+                        </Button>
+                      {/if}
+                      {#if sub.status === 'active'}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          data-testid="subscription-cancel-button"
+                          onclick={() => openCancelDialog(sub)}
+                        >
+                          {m.subscription_cancel()}
+                        </Button>
+                      {/if}
+                      {#if sub.status === 'cancelling' && !disputed}
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          loading={reactivatingIds.has(sub.id)}
+                          data-testid="subscription-reactivate-button"
+                          onclick={() => handleReactivate(sub)}
+                        >
+                          {m.subscription_reactivate()}
+                        </Button>
+                      {/if}
+                      {#if sub.status === 'paused' && !disputed}
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          loading={resumingIds.has(sub.id)}
+                          data-testid="subscription-resume-button"
+                          onclick={() => handleResume(sub)}
+                        >
+                          {m.subscription_resume()}
+                        </Button>
+                      {/if}
+                    </div>
+
+                    {#if reactivateErrors.has(sub.id)}
+                      <Alert variant="error">{reactivateErrors.get(sub.id)}</Alert>
+                    {/if}
+                    {#if resumeErrors.has(sub.id)}
+                      <Alert variant="error">{resumeErrors.get(sub.id)}</Alert>
+                    {/if}
+                    {#if portalFailedIds.has(sub.id)}
+                      <Alert variant="error" data-testid="subscription-portal-error">
+                        {m.subscription_portal_error()}
+                      </Alert>
+                    {/if}
                   </div>
-                </div>
-                <Badge
-                  variant={disputed ? 'warning' : statusVariant(sub.status)}
-                  data-testid="subscription-status-badge"
-                >
-                  {disputed ? m.access_paused_dispute_label() : statusLabel(sub.status)}
-                </Badge>
-              </div>
-
-              {#if disputed}
-                <Alert variant="warning" data-testid="subscription-dispute-notice">
-                  {m.access_paused_dispute_subscription()}
-                </Alert>
-              {:else if sub.status === 'past_due'}
-                <Alert variant="error">
-                  {m.subscription_past_due_message()}
-                  <Button variant="ghost" size="sm" onclick={handleUpdatePayment}>
-                    {m.subscription_update_payment()}
-                  </Button>
-                </Alert>
-              {:else if sub.status === 'paused'}
-                <Alert variant="warning">
-                  {m.subscription_paused_message()}
-                </Alert>
-              {:else if sub.status === 'cancelling'}
-                <p class="cancelling-message">
-                  {m.subscription_cancelling_message({
-                    date: formatDate(sub.currentPeriodEnd),
-                  })}
-                </p>
-                {#if move}
-                  <!-- The move survives a cancel (T4): reactivating brings
-                       it back, so one quiet line says so (state 6). -->
-                  <p class="subscription-note" data-testid="subscription-move-survives">
-                    {m.subscription_move_survives_cancel({
-                      plan: move.tierName,
-                      date: formatSentenceDate(move.effectiveAt),
-                    })}
-                  </p>
-                {/if}
-              {:else if move}
-                <!-- The pricing page's notice, inside the card (state 5). -->
-                <Alert variant="info" data-testid="subscription-move-notice">
-                  <div class="subscription-move">
-                    <span class="subscription-move__text">
-                      <b>{m.pricing_move_notice_title({
-                        plan: move.tierName,
-                        date: formatSentenceDate(move.effectiveAt),
-                      })}</b>
-                      <span>{waitingMoveBody(move, sub.tier.name, formatSentenceDate)}</span>
-                    </span>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      loading={keepingIds.has(sub.id)}
-                      data-testid="subscription-keep-button"
-                      onclick={() => handleKeep(sub, move)}
-                    >
-                      {m.pricing_move_keep()}
-                    </Button>
-                  </div>
-                </Alert>
-              {/if}
-              {#if keepLines.has(sub.id)}
-                {@const line = keepLines.get(sub.id)}
-                {#if line?.tone === 'success'}
-                  <p class="subscription-done" role="status" data-testid="subscription-keep-line">
-                    {line.text}
-                  </p>
-                {:else if line}
-                  <Alert variant={line.tone} data-testid="subscription-keep-line">
-                    {line.text}
-                  </Alert>
-                {/if}
-              {/if}
-
-              <div class="subscription-meta">
-                <!-- While a move waits, the row's amount is the next (cheaper)
-                     bill; what the member pays now is the held amount. -->
-                <span class="subscription-price">
-                  {formatPrice(sub.heldAmountCents ?? sub.amountCents)}
-                  <span class="billing-interval">/{sub.billingInterval === 'month' ? 'mo' : 'yr'}</span>
-                </span>
-                <span class="subscription-period">
-                  {m.subscription_current_period_ends({
-                    date: formatDate(sub.currentPeriodEnd),
-                  })}
-                </span>
-              </div>
-
-              <div class="subscription-actions">
-                {#if !disputed}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    data-testid="subscription-change-tier-button"
-                    onclick={() => {
-                      const orgUrl = buildOrgUrl(page.url, sub.organization.slug, '/pricing');
-                      window.location.href = orgUrl;
-                    }}
-                  >
-                    {m.subscription_change_tier()}
-                  </Button>
-                {/if}
-                {#if sub.status === 'active'}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    data-testid="subscription-cancel-button"
-                    onclick={() => openCancelDialog(sub)}
-                  >
-                    {m.subscription_cancel()}
-                  </Button>
-                {/if}
-                {#if sub.status === 'cancelling' && !disputed}
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    loading={reactivatingIds.has(sub.id)}
-                    data-testid="subscription-reactivate-button"
-                    onclick={() => handleReactivate(sub)}
-                  >
-                    {m.subscription_reactivate()}
-                  </Button>
-                {/if}
-                {#if sub.status === 'paused' && !disputed}
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    loading={resumingIds.has(sub.id)}
-                    data-testid="subscription-resume-button"
-                    onclick={() => handleResume(sub)}
-                  >
-                    {m.subscription_resume()}
-                  </Button>
-                {/if}
-              </div>
-
-              {#if reactivateErrors.has(sub.id)}
-                <Alert variant="error">{reactivateErrors.get(sub.id)}</Alert>
-              {/if}
-              {#if resumeErrors.has(sub.id)}
-                <Alert variant="error">{resumeErrors.get(sub.id)}</Alert>
-              {/if}
+                </Card.Content>
+              </Card.Root>
+            {/each}
+          </div>
+        {/if}
+      </section>
+    {/if}
+    {#if data.courseLoadError || courseSubscriptions.length > 0}
+      <section
+        class="subscriptions-section"
+        aria-labelledby="subscriptions-courses"
+        data-testid="course-subscriptions"
+      >
+        <h2 class="subscriptions-section__title" id="subscriptions-courses">
+          {m.subscription_section_courses()}
+        </h2>
+        {#if data.courseLoadError}
+          <Alert variant="error" data-testid="course-subscriptions-load-error">
+            <div class="alert-row">
+              <span>{m.subscription_course_load_error()}</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                onclick={() => invalidate('account:subscriptions')}
+              >
+                {m.common_try_again()}
+              </Button>
             </div>
-          </Card.Content>
-        </Card.Root>
-      {/each}
-    </div>
+          </Alert>
+        {:else}
+          <div class="subscription-list">
+            {#each courseSubscriptions as course (course.id)}
+              <!-- The membership card's layout, for a course: no Change Plan
+                   (a course has one plan). A dispute pauses it as it does a
+                   membership (Codex-2hxff.60): the notice, and only Cancel. -->
+              {@const disputed = course.disputedAt != null}
+              {@const cancelling = courseCancelling(course)}
+              {@const offSale = course.course.offSale}
+              {@const org = course.organization}
+              {@const pastDue = !disputed && course.status === 'past_due'}
+              <!-- Off sale and cancelling: nothing more to pay, and the server
+                   refuses a reactivate, so no actions at all. -->
+              {@const showUpdateCard = !disputed && !pastDue && !(cancelling && offSale)}
+              {@const showReactivate = cancelling && !disputed && course.canReactivate}
+              <Card.Root>
+                <Card.Content>
+                  <div
+                    class="course-subscription-card"
+                    data-testid="course-subscription-card"
+                    data-course-slug={course.course.slug}
+                  >
+                    <div class="subscription-info">
+                      <div class="subscription-org">
+                        {#if org?.logoUrl}
+                          <img
+                            src={org.logoUrl}
+                            alt={org.name}
+                            class="org-logo"
+                            width="32"
+                            height="32"
+                          />
+                        {/if}
+                        <div class="org-details">
+                          <!-- An off-sale course has no page to link to. -->
+                          {#if org && !offSale}
+                            <a
+                              class="org-name"
+                              href={buildOrgUrl(page.url, org.slug, `/journeys/${course.course.slug}`)}
+                              data-testid="course-subscription-title"
+                            >
+                              {course.course.title}
+                            </a>
+                          {:else}
+                            <span class="org-name" data-testid="course-subscription-title">
+                              {course.course.title}
+                            </span>
+                          {/if}
+                          {#if org}
+                            <span class="tier-name">
+                              {m.subscription_course_kind({ org: org.name })}
+                            </span>
+                          {/if}
+                        </div>
+                      </div>
+                      <Badge
+                        variant={disputed ? 'warning' : statusVariant(course.status)}
+                        data-testid="course-subscription-status-badge"
+                      >
+                        {disputed ? m.access_paused_dispute_label() : statusLabel(course.status)}
+                      </Badge>
+                    </div>
+
+                    {#if disputed}
+                      <Alert variant="warning" data-testid="course-subscription-dispute-notice">
+                        {m.access_paused_dispute_subscription()}
+                      </Alert>
+                    {:else if pastDue}
+                      <!-- Update card moves into the alert, so it isn't shown twice. -->
+                      <Alert variant="error">
+                        <div class="alert-row">
+                          <span>{m.subscription_past_due_message()}</span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            loading={portalOpeningIds.has(course.id)}
+                            data-testid="course-subscription-update-card"
+                            onclick={() => openCardDetails(course.id)}
+                          >
+                            {m.subscription_update_card()}
+                          </Button>
+                        </div>
+                      </Alert>
+                    {:else if cancelling}
+                      <p class="cancelling-message" data-testid="course-subscription-cancelling">
+                        {offSale
+                          ? m.subscription_course_off_sale({
+                              date: formatDate(course.currentPeriodEnd),
+                            })
+                          : m.subscription_cancelling_message({
+                              date: formatDate(course.currentPeriodEnd),
+                            })}
+                      </p>
+                    {/if}
+
+                    <div class="subscription-meta">
+                      <!-- No amount until a webhook or the backfill wrote it. -->
+                      {#if course.amountCents != null}
+                        <span class="subscription-price">
+                          {formatPrice(course.amountCents)}
+                          <span class="billing-interval">/{course.billingInterval === 'month' ? 'mo' : 'yr'}</span>
+                        </span>
+                      {/if}
+                      <span class="subscription-period">
+                        {m.subscription_current_period_ends({
+                          date: formatDate(course.currentPeriodEnd),
+                        })}
+                      </span>
+                    </div>
+
+                    {#if showUpdateCard || !cancelling || showReactivate}
+                      <div class="subscription-actions">
+                        {#if showUpdateCard}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            loading={portalOpeningIds.has(course.id)}
+                            data-testid="course-subscription-update-card"
+                            onclick={() => openCardDetails(course.id)}
+                          >
+                            {m.subscription_update_card()}
+                          </Button>
+                        {/if}
+                        {#if !cancelling}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            data-testid="course-subscription-cancel-button"
+                            onclick={() => openCourseCancelDialog(course)}
+                          >
+                            {m.subscription_cancel()}
+                          </Button>
+                        {/if}
+                        {#if showReactivate}
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            loading={courseReactivatingIds.has(course.id)}
+                            data-testid="course-subscription-reactivate-button"
+                            onclick={() => handleCourseReactivate(course)}
+                          >
+                            {m.subscription_reactivate()}
+                          </Button>
+                        {/if}
+                      </div>
+                    {/if}
+
+                    {#if courseReactivateFailedIds.has(course.id)}
+                      <Alert variant="error">{m.subscription_reactivate_error()}</Alert>
+                    {/if}
+                    {#if portalFailedIds.has(course.id)}
+                      <Alert variant="error" data-testid="course-subscription-portal-error">
+                        {m.subscription_portal_error()}
+                      </Alert>
+                    {/if}
+                  </div>
+                </Card.Content>
+              </Card.Root>
+            {/each}
+          </div>
+        {/if}
+      </section>
+    {/if}
   {/if}
 </div>
 
@@ -640,6 +987,54 @@
   </Dialog.Content>
 </Dialog.Root>
 
+<!-- Cancel a course subscription: one plain note in place of the follow
+     notice (there is nothing to follow for a course), and no churn reasons. -->
+<Dialog.Root bind:open={courseCancelOpen}>
+  <Dialog.Content size="sm">
+    <Dialog.Header>
+      <Dialog.Title>{m.subscription_cancel()}</Dialog.Title>
+      {#if courseCancelTarget}
+        <Dialog.Description>
+          {courseCancelTarget.organization
+            ? `${courseCancelTarget.course.title} — ${courseCancelTarget.organization.name}`
+            : courseCancelTarget.course.title}
+        </Dialog.Description>
+      {/if}
+    </Dialog.Header>
+
+    <Dialog.Body>
+      {#if courseCancelTarget}
+        <p class="follow-notice" data-testid="course-cancel-note">
+          {m.subscription_course_cancel_note({
+            date: formatDate(courseCancelTarget.currentPeriodEnd),
+          })}
+        </p>
+      {/if}
+      {#if courseCancelError}
+        <Alert variant="error" data-testid="course-cancel-error">{courseCancelError}</Alert>
+      {/if}
+    </Dialog.Body>
+
+    <Dialog.Footer>
+      <Button
+        variant="ghost"
+        data-testid="course-cancel-dismiss-button"
+        onclick={() => { courseCancelOpen = false; }}
+      >
+        {m.monetisation_cancel()}
+      </Button>
+      <Button
+        variant="destructive"
+        data-testid="course-cancel-confirm-button"
+        onclick={handleCourseCancel}
+        loading={courseCancelLoading}
+      >
+        {m.subscription_cancel_confirm()}
+      </Button>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>
+
 <style>
   .subscriptions-page {
     display: flex;
@@ -656,16 +1051,45 @@
     margin: 0;
   }
 
+  .subscriptions-section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  .subscriptions-section__title {
+    font-family: var(--font-heading);
+    font-size: var(--text-lg);
+    font-weight: var(--font-semibold);
+    color: var(--color-text);
+    margin: 0;
+  }
+
   .subscription-list {
     display: flex;
     flex-direction: column;
     gap: var(--space-4);
   }
 
-  .subscription-card {
+  /* One card layout for both lists. The course card keeps its own class so
+     a `.subscription-card` locator still finds memberships only. */
+  .subscription-card,
+  .course-subscription-card {
     display: flex;
     flex-direction: column;
     gap: var(--space-4);
+  }
+
+  .alert-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2) var(--space-3);
+    justify-content: space-between;
+  }
+
+  a.org-name:hover {
+    text-decoration: underline;
   }
 
   .subscription-info {
