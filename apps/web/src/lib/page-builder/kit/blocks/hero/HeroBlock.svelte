@@ -42,7 +42,6 @@
   frame — its film is the band — so its button opens the theatre (`Watch`).
 -->
 <script lang="ts">
-  import { SvelteSet } from 'svelte/reactivity';
   import { getThumbnailSrcset } from '$lib/utils/image';
   import { pageImageSrcset, storedFocus } from '../../../page-images';
   import { COPY } from '../../model/copy';
@@ -153,32 +152,19 @@
   // (Codex-61zsk.73). A cover's words sit on its picture or the shader, and
   // the shader's ink is proven only against the band, never against a logo
   // drawn for white: both always take the plate. Elsewhere OrgLogo reads the
-  // section's ink. A logo that fails to load takes its row with it, so no
-  // gap stands above the words and nothing below allows for its box (the
-  // poster's drop, Path's stop). Kept by its address, as the rail's `<img>`
-  // is: the page hands over a fresh logo on every save and every brand
-  // editor tick, so a key on the logo itself would put a dead one back each
-  // time and the words would jump. Every address that failed is kept, so a
-  // brand editor opened on another logo and closed again does not put the
-  // dead one back. A re-upload to the same address shows on the next load
-  // (versioning it is Codex-lkggp).
-  const failedLogos = new SvelteSet<string>();
-  const logo = $derived.by(() => {
-    const org = content.hideLogo === true ? null : (page.orgLogo ?? null);
-    return org && !failedLogos.has(org.url) ? org : null;
-  });
+  // section's ink. A logo that fails to load keeps its row: OrgLogo holds its
+  // box and shows nothing, because the failure can land after the page has
+  // painted, and a row taken away then moves every word and section below it
+  // (sell-page-floor's "keeps still as it loads"). So the poster's drop and
+  // Path's stop, which allow for the box, stay true.
+  const logo = $derived(content.hideLogo === true ? null : (page.orgLogo ?? null));
   const logoPlate = $derived(layout === 'cover' || section.scheme === 'atmosphere');
 </script>
 
 {#snippet copy(align: 'start' | 'center')}
   {#if logo}
     <div class="hero__logo hero__enter-c">
-      <OrgLogo
-        logoUrl={logo.url}
-        name={logo.name}
-        plate={logoPlate}
-        onfail={(url) => failedLogos.add(url)}
-      />
+      <OrgLogo logoUrl={logo.url} name={logo.name} plate={logoPlate} />
     </div>
   {/if}
   {#if content.eyebrow}
