@@ -754,15 +754,17 @@ async function workRow(
 
   // Told already: a `notified` row retries the write only, from its email.
   let toldAt = row.state === 'notified' && row.noticeAt ? row.noticeAt : null;
-  // The last try's outcome is unknown: the notice may have gone (a 5xx or a
-  // timeout), or a run may have stopped after its writes without recording
-  // them. The email log is checked here, Stripe in `schedulePriceChange`.
-  // A row support retried keeps its held reason, whatever else Retry resets.
+  // The last try's outcome may be unknown: the notice may have gone (a 5xx
+  // or a timeout), or a run may have stopped after its email or its Stripe
+  // write without recording either, leaving an older try's `last_error` on
+  // the row (review C1, F4). So every reclaim after an earlier try is
+  // checked: the email log here, Stripe in `schedulePriceChange`. A row
+  // support retried keeps its held reason, whatever else Retry resets.
   const mayBeTold =
     toldAt !== null ||
+    prevAttemptedAt !== null ||
     (row.lastError?.startsWith('notice_unknown') ?? false) ||
-    row.heldReason === 'notice_unknown' ||
-    (prevAttemptedAt !== null && row.lastError === null);
+    row.heldReason === 'notice_unknown';
   // What the notice step saw: the closure's writes, read after the await.
   const seen: {
     notice?: PriceChangeNotice;
@@ -920,9 +922,13 @@ function movingAwayAtStripe(
 }
 
 /**
- * M1's rule for an unknown outcome: did the email go after all? A success in
- * the email log for this row, since a minute before its last try, counts as
- * told then, and nothing is sent again.
+ * M1's rule for an unknown outcome: did the email go after all? A log row
+ * for this row's notice, since a minute before its last try, counts as told
+ * then, and nothing is sent again. notifications-api writes the log row
+ * `pending` before the provider call and `success` once the provider has
+ * taken the email, so a row left `pending` (the success write failed, or the
+ * invocation stopped) may have been delivered, and counts too (F4). `failed`
+ * (every attempt failed) and `skipped` (an opt-out, before any send) do not.
  */
 async function foundInEmailLog(
   run: Run,
@@ -937,7 +943,7 @@ async function foundInEmailLog(
     SELECT "updated_at" FROM ${emailAuditLogs}
      WHERE "template_name" = ${NOTICE_TEMPLATE}
        AND "recipient_email" = ${email}
-       AND "status" = 'success'
+       AND "status" IN ('success', 'pending')
        AND "created_at" >= ${since}::timestamptz
        AND strpos("metadata", ${`"priceMoveId":"${row.id}"`}) > 0
      ORDER BY "created_at"

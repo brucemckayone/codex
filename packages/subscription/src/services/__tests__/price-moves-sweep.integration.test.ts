@@ -878,6 +878,64 @@ describe('the hourly price-moves step (Codex-2hxff.86)', () => {
     });
   });
 
+  // Review C1, F4: a run emailed them and stopped before recording it, so
+  // the row still carries an older try's pre-notice error. Every reclaim
+  // after an earlier try checks the email log.
+  it('a run that stopped after its email, on a row with an older error: found in the log (success or pending), not emailed again', async () => {
+    const { org: o, pro } = await org('pm-reclaim');
+    const fake = fakeStripe();
+    const sent = await subscriber(o.id, pro);
+    const pending = await subscriber(o.id, pro);
+    const refused = await subscriber(o.id, pro);
+    for (const sub of [sent, pending, refused]) onStripe(fake, sub, 10);
+    const changeId = await reprice(o.id, pro);
+    // Two hours ago: a run claimed them and stopped mid-batch. The row still
+    // says what the try before it recorded.
+    const stoppedRun = new Date(NOW - 2 * HOUR_MS);
+    const loggedAt = new Date(stoppedRun.getTime() + 3000);
+    for (const [sub, status] of [
+      [sent, 'success'],
+      [pending, 'pending'],
+      [refused, 'failed'],
+    ] as const) {
+      const row = await moveOf(changeId, sub);
+      await db
+        .update(subscriptionPriceMoves)
+        .set({
+          attempts: 2,
+          attemptedAt: stoppedRun,
+          lastError: 'read_failed_500',
+        })
+        .where(eq(subscriptionPriceMoves.id, row.id));
+      await db.insert(emailAuditLogs).values({
+        templateName: 'subscription-tier-price-change',
+        recipientEmail: await emailOf(sub),
+        status,
+        metadata: JSON.stringify({ priceMoveId: row.id }),
+        createdAt: loggedAt,
+        updatedAt: loggedAt,
+      });
+    }
+    const send = mailer();
+
+    await run([changeId], { fake, send });
+
+    // A `failed` log row: every attempt failed, so they are told now.
+    expect(send).toHaveBeenCalledOnce();
+    expect(send.mock.calls[0]?.[0].to).toBe(await emailOf(refused));
+    for (const sub of [sent, pending]) {
+      expect(await moveOf(changeId, sub)).toMatchObject({
+        state: 'scheduled',
+        scheduledKind: 'pending',
+        noticeAt: loggedAt,
+      });
+    }
+    expect(await moveOf(changeId, refused)).toMatchObject({
+      state: 'scheduled',
+      noticeAt: new Date(NOW + SENT_AFTER_MS),
+    });
+  });
+
   it("every notice of a change's first batch refused with a 4xx stops it: nobody moved, the claims go back, one alert; Restart sets it going", async () => {
     const { org: o, pro } = await org('pm-stop');
     const fake = fakeStripe();
