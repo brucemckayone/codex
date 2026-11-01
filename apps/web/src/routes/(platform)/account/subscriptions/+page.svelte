@@ -16,15 +16,22 @@
   import Label from '$lib/components/ui/Label/Label.svelte';
   import {
     cancelSubscription,
+    keepCurrentPlan,
     reactivateSubscription,
     resumeSubscription,
   } from '$lib/remote/subscription.remote';
   import { openBillingPortal } from '$lib/remote/account.remote';
   import { invalidateCollection } from '$lib/collections';
-  import type { UserOrgSubscription } from '$lib/types';
+  import type { PendingTierChange, UserOrgSubscription } from '$lib/types';
   import { page } from '$app/state';
   import { buildOrgUrl } from '$lib/utils/subdomain';
-  import { formatPrice, formatDate } from '$lib/utils/format';
+  import {
+    formatPrice,
+    formatDate,
+    formatSentenceDate,
+  } from '$lib/utils/format';
+  import { waitingMoveBody } from '$lib/utils/plan-label';
+  import { logger } from '$lib/observability';
 
   let { data } = $props();
 
@@ -71,6 +78,9 @@
   const reactivateErrors = new SvelteMap<string, string>();
   const resumingIds = new SvelteSet<string>();
   const resumeErrors = new SvelteMap<string, string>();
+  // Keep current plan, per card (Codex-2hxff.16): the line it came to.
+  const keepingIds = new SvelteSet<string>();
+  const keepLines = new SvelteMap<string, { tone: 'success' | 'error' | 'info'; text: string }>();
 
   function statusVariant(status: string): 'success' | 'warning' | 'error' | 'neutral' {
     switch (status) {
@@ -253,6 +263,82 @@
     }
   }
 
+  /**
+   * Keep current plan on a card with a waiting move (waiting move states
+   * 2-5): one call, nothing charged. The page reads its list again after
+   * any answer, so the card shows what is true; a refusal says the move is
+   * still set.
+   */
+  async function handleKeep(sub: UserOrgSubscription, move: PendingTierChange) {
+    if (keepingIds.has(sub.id)) return;
+    keepingIds.add(sub.id);
+    keepLines.delete(sub.id);
+    const plan = sub.tier.name;
+    try {
+      const result = await keepCurrentPlan({ organizationId: sub.organizationId });
+      if (result.success) {
+        const kept = result.data;
+        keepLines.set(sub.id, {
+          tone: 'success',
+          text: m.pricing_move_kept({
+            plan,
+            date: formatSentenceDate(kept?.currentPeriodEnd ?? sub.currentPeriodEnd),
+            price: formatPrice(kept?.amountCents ?? sub.heldAmountCents ?? sub.amountCents),
+          }),
+        });
+        await Promise.all([
+          invalidate('account:subscriptions'),
+          invalidateCollection('library'),
+          invalidateCollection('subscription'),
+        ]);
+        return;
+      }
+      const failure: { code?: string; detailsCode?: string; status?: number } =
+        'code' in result ? result : {};
+      if (failure.detailsCode === 'MOVE_ALREADY_LANDED') {
+        // The renewal has happened: the card re-reads as the new plan.
+        keepLines.set(sub.id, {
+          tone: 'info',
+          text: m.pricing_move_landed({ plan: move.tierName }),
+        });
+        await invalidate('account:subscriptions');
+        return;
+      }
+      if (failure.code === undefined) {
+        // No answer: it may have kept it. Read the list again.
+        keepLines.set(sub.id, {
+          tone: 'error',
+          text: m.pricing_refusal_change_unconfirmed(),
+        });
+        await invalidate('account:subscriptions');
+        return;
+      }
+      logger.warn('account: keep current plan refused', {
+        status: failure.status,
+        code: failure.detailsCode ?? failure.code,
+      });
+      keepLines.set(sub.id, {
+        tone: 'error',
+        text: m.pricing_move_keep_failed({
+          plan,
+          movingTo: move.tierName,
+          date: formatSentenceDate(move.effectiveAt),
+        }),
+      });
+    } catch (error) {
+      logger.warn('account: keep current plan got no answer', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      keepLines.set(sub.id, {
+        tone: 'error',
+        text: m.pricing_refusal_change_unconfirmed(),
+      });
+      await invalidate('account:subscriptions').catch(() => {});
+    } finally {
+      keepingIds.delete(sub.id);
+    }
+  }
+
   async function handleUpdatePayment() {
     try {
       const result = await openBillingPortal({
@@ -295,6 +381,8 @@
              says so and offers only Cancel: no tier change, reactivate or
              payment update. -->
         {@const disputed = sub.disputedAt != null}
+        <!-- A move to a cheaper plan waiting for the renewal (Codex-2hxff.16). -->
+        {@const move = sub.pendingTierChange ?? null}
         <Card.Root>
           <Card.Content>
             <div
@@ -347,11 +435,57 @@
                     date: formatDate(sub.currentPeriodEnd),
                   })}
                 </p>
+                {#if move}
+                  <!-- The move survives a cancel (T4): reactivating brings
+                       it back, so one quiet line says so (state 6). -->
+                  <p class="subscription-note" data-testid="subscription-move-survives">
+                    {m.subscription_move_survives_cancel({
+                      plan: move.tierName,
+                      date: formatSentenceDate(move.effectiveAt),
+                    })}
+                  </p>
+                {/if}
+              {:else if move}
+                <!-- The pricing page's notice, inside the card (state 5). -->
+                <Alert variant="info" data-testid="subscription-move-notice">
+                  <div class="subscription-move">
+                    <span class="subscription-move__text">
+                      <b>{m.pricing_move_notice_title({
+                        plan: move.tierName,
+                        date: formatSentenceDate(move.effectiveAt),
+                      })}</b>
+                      <span>{waitingMoveBody(move, sub.tier.name, formatSentenceDate)}</span>
+                    </span>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      loading={keepingIds.has(sub.id)}
+                      data-testid="subscription-keep-button"
+                      onclick={() => handleKeep(sub, move)}
+                    >
+                      {m.pricing_move_keep()}
+                    </Button>
+                  </div>
+                </Alert>
+              {/if}
+              {#if keepLines.has(sub.id)}
+                {@const line = keepLines.get(sub.id)}
+                {#if line?.tone === 'success'}
+                  <p class="subscription-done" role="status" data-testid="subscription-keep-line">
+                    {line.text}
+                  </p>
+                {:else if line}
+                  <Alert variant={line.tone} data-testid="subscription-keep-line">
+                    {line.text}
+                  </Alert>
+                {/if}
               {/if}
 
               <div class="subscription-meta">
+                <!-- While a move waits, the row's amount is the next (cheaper)
+                     bill; what the member pays now is the held amount. -->
                 <span class="subscription-price">
-                  {formatPrice(sub.amountCents)}
+                  {formatPrice(sub.heldAmountCents ?? sub.amountCents)}
                   <span class="billing-interval">/{sub.billingInterval === 'month' ? 'mo' : 'yr'}</span>
                 </span>
                 <span class="subscription-period">
@@ -605,6 +739,45 @@
     font-size: var(--text-xs);
     color: var(--color-warning-700);
     margin: 0;
+  }
+
+  .subscription-note {
+    margin: 0;
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
+    line-height: var(--leading-relaxed);
+  }
+
+  .subscription-done {
+    margin: 0;
+    font-size: var(--text-xs);
+    color: var(--color-status-success-text);
+  }
+
+  .subscription-move {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .subscription-move__text {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-0-5);
+    min-width: 0;
+    /* Wraps the button under the words on a phone: the mockup's basis. */
+    flex: 1 1 14rem;
+  }
+
+  .subscription-move__text b {
+    color: var(--color-text);
+    font-weight: var(--font-semibold);
+  }
+
+  .subscription-move__text span {
+    color: var(--color-text-secondary);
   }
 
 

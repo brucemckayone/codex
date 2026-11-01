@@ -720,6 +720,7 @@
   "subscription_update_payment": "Update Payment",
   "subscription_past_due_message": "Your payment method needs to be updated to continue your subscription.",
   "subscription_cancelling_message": "This subscription will end on {date}. You can reactivate to keep your access.",
+  "subscription_move_survives_cancel": "If you reactivate, you'll still move to {plan} on {date}, as you chose.",
   "subscription_disabled_title": "Subscriptions Not Available",
   "subscription_disabled_description": "This organisation does not currently offer subscription plans.",
   "subscription_checkout_error": "Something went wrong starting your subscription. Please try again.",
