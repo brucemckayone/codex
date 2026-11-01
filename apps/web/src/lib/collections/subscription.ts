@@ -54,6 +54,19 @@ export interface SubscriptionItem {
   currentPeriodEnd: string;
   /** Whether cancellation is scheduled */
   cancelAtPeriodEnd: boolean;
+  /**
+   * A move to a cheaper plan waiting for the renewal (Codex-2hxff.16), for
+   * the paywall's "You're moving to Basic on 12 November". `tier` stays the
+   * plan they are on until then. Absent on an entry written before this
+   * field existed: read as nothing waiting until the next refetch (data
+   * design §8), so the widening needs no storage key bump.
+   */
+  pendingTierChange?: {
+    tierId: string;
+    tierName: string;
+    /** ISO: the renewal the move lands on. */
+    effectiveAt: string;
+  } | null;
 }
 
 /**
@@ -139,6 +152,13 @@ export async function loadSubscriptionFromServer(
         status: normaliseSubscriptionStatus(sub.status, sub.cancelAtPeriodEnd),
         currentPeriodEnd: periodEnd,
         cancelAtPeriodEnd: sub.cancelAtPeriodEnd,
+        pendingTierChange: sub.pendingTierChange
+          ? {
+              tierId: sub.pendingTierChange.tierId,
+              tierName: sub.pendingTierChange.tierName,
+              effectiveAt: sub.pendingTierChange.effectiveAt,
+            }
+          : null,
       };
       if (subscriptionCollection.state.has(orgId)) {
         subscriptionCollection.update(orgId, () => item);
