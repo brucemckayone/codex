@@ -40,33 +40,26 @@
      */
     plate: boolean;
     class?: string;
-    /**
-     * Told the address that failed to load, so a parent that sets the logo
-     * in a row of its own can take the row away too.
-     */
-    onfail?: (logoUrl: string) => void;
   }
 
-  const { logoUrl, name, plate, class: className, onfail }: Props = $props();
+  const { logoUrl, name, plate, class: className }: Props = $props();
 
-  // A logo that fails to load leaves nothing, never a broken glyph; another
-  // address (the brand editor swapping it) tries again.
+  // A logo that fails to load shows nothing, never a broken glyph, and keeps
+  // its box: the failure can land after the page has painted, and a box taken
+  // away then moves everything below it. Another address (the brand editor
+  // swapping it) tries again.
   let failed = $state<string | null>(null);
-
-  function fail() {
-    failed = logoUrl;
-    onfail?.(logoUrl);
-  }
 </script>
 
-{#if logoUrl && logoUrl !== failed}
+{#if logoUrl}
   <img
     class="lp-logo {className ?? ''}"
     src={logoUrl}
     alt={name}
     decoding="async"
     data-plate={plate ? '' : undefined}
-    onerror={fail}
+    data-failed={logoUrl === failed ? '' : undefined}
+    onerror={() => (failed = logoUrl)}
   />
 {/if}
 
@@ -106,6 +99,12 @@
   /* Forced: the shader and a cover picture, whose ink does not tell. */
   .lp-logo[data-plate] {
     background: oklch(from var(--lp-ink) 1 0 0);
+  }
+
+  /* Failed: its box stays, so nothing moves; hidden, it draws no plate and
+     says nothing. */
+  .lp-logo[data-failed] {
+    visibility: hidden;
   }
 
   /* The system palette would paint the plate in the user's own ground: it

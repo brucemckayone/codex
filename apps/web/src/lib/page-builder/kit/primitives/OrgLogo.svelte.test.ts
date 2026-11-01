@@ -145,26 +145,30 @@ describe('OrgLogo', () => {
     );
   });
 
-  it('leaves nothing when the logo fails to load, says which, and tries a new one', () => {
-    const failed: string[] = [];
+  // The failure can land after the page has painted: a box taken away then
+  // moves everything below it (sell-page-floor's "keeps still as it loads").
+  it('keeps its box, hidden, when the logo fails to load, and tries a new one', () => {
     const props = $state({
       logoUrl: '/gone.svg',
       name: 'Studio Alpha',
       plate: true,
-      onfail: (url: string) => failed.push(url),
     });
     app = mount(OrgLogo, { target: document.body, props });
     flushSync();
     document.body.querySelector('img')?.dispatchEvent(new Event('error'));
     flushSync();
-    expect(document.body.querySelector('img')).toBeNull();
-    expect(failed).toEqual(['/gone.svg']);
+    const failed = document.body.querySelector('img');
+    expect(failed?.classList.contains('lp-logo')).toBe(true);
+    expect(failed?.hasAttribute('data-failed')).toBe(true);
+    expect(declarations().get('.lp-logo[data-failed]')).toEqual({
+      visibility: 'hidden',
+    });
 
     props.logoUrl = '/new.svg';
     flushSync();
-    expect(document.body.querySelector('img')?.getAttribute('src')).toBe(
-      '/new.svg'
-    );
+    const tried = document.body.querySelector('img');
+    expect(tried?.getAttribute('src')).toBe('/new.svg');
+    expect(tried?.hasAttribute('data-failed')).toBe(false);
   });
 
   describe('its sizes', () => {

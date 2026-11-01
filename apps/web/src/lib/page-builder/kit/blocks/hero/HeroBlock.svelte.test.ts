@@ -1399,30 +1399,30 @@ describe('the org logo above the eyebrow (Codex-61zsk.73)', () => {
     expect(document.body.querySelector('.hero__logo')).toBeNull();
   });
 
-  // An empty row would still take the stack gap above the words, and the
-  // poster (`:has(> .hero__logo)`) and Path would still allow for its box.
+  // The failure can land after the page has painted, and a row taken away
+  // then moves every word and section below it (sell-page-floor's "keeps
+  // still as it loads", PR #677). The row stays, so the poster
+  // (`:has(> .hero__logo)`) and Path still allow for a box that is there.
   it.each([
     'statement',
     'poster',
-  ])('%s: a logo that fails to load takes its row with it', async (layout) => {
+  ])('%s: a logo that fails to load keeps its row, so nothing below it moves', async (layout) => {
     await draw(layout, { eyebrow: 'A four-stage course', heading: 'H' });
-    expect(document.body.querySelector('.hero__logo')).not.toBeNull();
     logo()?.dispatchEvent(new Event('error'));
     flushSync();
-    expect(logo()).toBeNull();
-    expect(document.body.querySelector('.hero__logo')).toBeNull();
-    // The eyebrow heads the words again.
+    expect(logo()?.hasAttribute('data-failed')).toBe(true);
     expect(
       document.body
         .querySelector('.hero__eyebrow')
         ?.previousElementSibling?.classList.contains('hero__logo')
-    ).not.toBe(true);
+    ).toBe(true);
   });
 
   // The page hands over a fresh logo object on every save and every brand
-  // editor tick, at the same address: a failed address stays out through
-  // them all, or the words would jump each time. A new address is tried.
-  it('keeps a failed address out through fresh logos, and tries a new address', async () => {
+  // editor tick, at the same address: a failed logo stays hidden through
+  // them, and its row never goes, so the words never jump. A new address is
+  // tried in the same box.
+  it('keeps a failed logo hidden through fresh logos, its row in place, and tries a new address', async () => {
     const props = $state({
       page: {
         design: { style: 'clean' },
@@ -1445,24 +1445,27 @@ describe('the org logo above the eyebrow (Codex-61zsk.73)', () => {
     expect(logo()?.getAttribute('src')).toBe(LOGO.url);
     logo()?.dispatchEvent(new Event('error'));
     flushSync();
-    expect(document.body.querySelector('.hero__logo')).toBeNull();
+    const row = document.body.querySelector('.hero__logo');
+    expect(logo()?.hasAttribute('data-failed')).toBe(true);
 
     // A save's refetch: the same logo, a fresh object.
     props.orgLogo = { ...LOGO };
     flushSync();
-    expect(document.body.querySelector('.hero__logo')).toBeNull();
+    expect(document.body.querySelector('.hero__logo')).toBe(row);
+    expect(logo()?.hasAttribute('data-failed')).toBe(true);
 
     props.orgLogo = { ...LOGO, url: 'https://cdn.example/logo.svg' };
     flushSync();
     expect(logo()?.getAttribute('src')).toBe('https://cdn.example/logo.svg');
+    expect(logo()?.hasAttribute('data-failed')).toBe(false);
 
     // That one fails too; the brand editor, closed unsaved, goes back to the
-    // first. Every failed address stays out, so neither jumps the words again.
+    // first. The row has held its place throughout.
     logo()?.dispatchEvent(new Event('error'));
     flushSync();
     props.orgLogo = { ...LOGO };
     flushSync();
-    expect(document.body.querySelector('.hero__logo')).toBeNull();
+    expect(document.body.querySelector('.hero__logo')).toBe(row);
   });
 
   it('forces the plate on a cover and on the shader; elsewhere it reads the ink', async () => {
