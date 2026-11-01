@@ -53,7 +53,8 @@ Webhook handlers and the payouts cron get the same graph from
 `createWebhookServices` (Codex-2hxff.54). The money dependencies are
 **required** in the types (Codex-2hxff.55, rule A4): `feeConfig` (a
 `FeeResolver`), `mailer` (the awaited price-change notice) and `payoutMailer`
-on `SubscriptionService`; `feeConfig`, `mailer` and `offSaleMailer` on
+on `SubscriptionService` (its `mailer` also serves the hourly price-moves
+step for course plans); `feeConfig` and `offSaleMailer` on
 `CourseSubscriptionService`. There is no `FEES` fallback. Tests spread
 `createTestMoneyDeps()` from `@codex/test-utils`.
 

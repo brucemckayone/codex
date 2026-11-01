@@ -1105,6 +1105,78 @@ describe('the hourly price-moves step (Codex-2hxff.86)', () => {
     expect((await changeOf(first)).state).toBe('done');
   });
 
+  // Closing a change locks it, then counts its open rows. Keep current plan
+  // takes the change row first and adds a row under it: counted only after
+  // the lock, that row keeps the change running.
+  it('closing a change waits for its lock, then counts: a row added under the lock keeps it running', async () => {
+    const { org: o, basic, pro } = await org('pm-finish-lock');
+    const fake = fakeStripe();
+    const moved = await subscriber(o.id, pro);
+    // Leaving Pro at the save, so not on the change; Keep brings them back.
+    const kept = await subscriber(o.id, pro, {
+      pendingTierId: basic.id,
+      pendingTierFrom: new Date(NOW + 10 * DAY_MS),
+      heldAmountCents: 1200,
+    });
+    const changeId = await reprice(o.id, pro);
+    await db
+      .update(subscriptionPriceMoves)
+      .set({
+        state: 'scheduled',
+        scheduledKind: 'now',
+        noticeAt: new Date(NOW - DAY_MS),
+        effectiveAt: new Date(NOW + 40 * DAY_MS),
+      })
+      .where(eq(subscriptionPriceMoves.subscriptionId, moved.id));
+
+    let release: () => void = () => {};
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let holding: (pid: number) => void = () => {};
+    const held = new Promise<number>((resolve) => {
+      holding = resolve;
+    });
+    const keep = db.transaction(async (tx) => {
+      const pid = await tx.execute(sql`SELECT pg_backend_pid() AS pid`);
+      await tx.execute(
+        sql`SELECT 1 FROM ${priceChanges} WHERE ${priceChanges.id} = ${changeId} FOR UPDATE`
+      );
+      await tx.insert(subscriptionPriceMoves).values({
+        priceChangeId: changeId,
+        subscriptionId: kept.id,
+        stripeSubscriptionId: kept.stripeSubscriptionId,
+        organizationId: o.id,
+        userId: kept.userId,
+        source: 'keep_current_plan',
+      });
+      holding(Number((pid.rows[0] as { pid: number }).pid));
+      await released;
+    });
+    const keepPid = await held;
+
+    const running = run([changeId], { fake, send: mailer() });
+    // Probe, not a sleep: the run's close is waiting on Keep's lock.
+    let blocked = 0;
+    for (let tries = 0; tries < 400 && blocked < 1; tries++) {
+      const probe = await db.execute(sql`
+        SELECT count(*)::int AS n FROM pg_stat_activity
+         WHERE datname = current_database()
+           AND ${keepPid}::int = ANY(pg_blocking_pids(pid))
+      `);
+      blocked = Number((probe.rows[0] as { n: number }).n);
+      if (blocked < 1) await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(blocked).toBe(1);
+    release();
+    await keep;
+    const result = await running;
+
+    expect(result.done).toBe(0);
+    expect((await changeOf(changeId)).state).toBe('running');
+    expect((await moveOf(changeId, kept)).state).toBe('due');
+  });
+
   it('the 08:00 London run does nothing', async () => {
     const { org: o, pro } = await org('pm-eight');
     const fake = fakeStripe();

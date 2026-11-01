@@ -98,8 +98,17 @@ export interface PriceMovesLogger {
   error(message: string, metadata?: Record<string, unknown>): void;
 }
 
+/**
+ * Raw SQL, plus a transaction for the writes that lock a change row before
+ * they read its rows. The lock order everywhere is the `price_changes` row,
+ * then its `subscription_price_moves` rows.
+ */
+export interface PriceMovesDb extends PriceChangeTx {
+  transaction<T>(work: (tx: PriceChangeTx) => Promise<T>): Promise<T>;
+}
+
 export interface PriceMoveStepDeps {
-  db: PriceChangeTx;
+  db: PriceMovesDb;
   stripe: Stripe;
   /** Sends the 30-day notice and reports notifications-api's answer. */
   mailer: PriceChangeNoticeMailer;
@@ -411,10 +420,10 @@ function alertStepFailed(run: Run, stage: string, error: unknown): void {
 }
 
 /**
- * Support's Restart sets a stopped change back to running; a finished change
- * with rows support queued again (Retry, Retry the move) is re-opened. Only a
- * tier or plan's newest change is re-opened, and never beside a live one: the
- * one-live-change index allows a single running or stopped change.
+ * Support's Restart sets a stopped change back to running (one UPDATE of the
+ * change row, nothing else). A finished change with a `due` or `notified`
+ * row (support's Retry flips only the row) is re-opened, each under its own
+ * lock (`reopenIfOpen`).
  */
 async function restartChanges(run: Run): Promise<void> {
   const restarted = await run.deps.db.execute(sql`
@@ -427,25 +436,57 @@ async function restartChanges(run: Run): Promise<void> {
   `);
   run.result.restarted = restarted.rows.length;
 
-  const reopened = await run.deps.db.execute(sql`
-    UPDATE ${priceChanges} c
-       SET "state" = 'running', "done_at" = NULL
+  // Candidates first, unlocked; each is then decided under its own lock.
+  const candidates = await run.deps.db.execute(sql`
+    SELECT DISTINCT c."id"
+      FROM ${priceChanges} c
+      JOIN ${subscriptionPriceMoves} m ON m."price_change_id" = c."id"
      WHERE c."state" = 'done'
-       AND c."id" IN (SELECT m."price_change_id" FROM ${subscriptionPriceMoves} m
-                       WHERE m."state" IN ('due', 'notified'))
-       AND NOT EXISTS (
-         SELECT 1 FROM ${priceChanges} o
-          WHERE o."id" <> c."id"
-            AND o."kind" = c."kind"
-            AND o."tier_id" IS NOT DISTINCT FROM c."tier_id"
-            AND o."course_subscription_plan_id" IS NOT DISTINCT FROM c."course_subscription_plan_id"
-            AND o."interval" = c."interval"
-            AND (o."state" IN ('running', 'stopped')
-                 OR (o."created_at", o."id") > (c."created_at", c."id")))
+       AND m."state" IN ('due', 'notified')
        ${onlyChanges(run, sql`c."id"`)}
-    RETURNING c."id"
   `);
-  run.result.reopened = reopened.rows.length;
+  for (const { id } of candidates.rows as Array<{ id: string }>) {
+    if (await reopenIfOpen(run, id)) run.result.reopened += 1;
+  }
+}
+
+/**
+ * Re-open one finished change (`running`, `done_at` NULL), deciding with its
+ * row locked: it is still `done`, still has a `due` or `notified` row, and is
+ * its tier's (or plan's) newest change with nothing else live, so the
+ * one-live-change index holds. A save that superseded its rows in the
+ * meantime held the lock first, and leaves nothing to re-open.
+ */
+async function reopenIfOpen(run: Run, changeId: string): Promise<boolean> {
+  return run.deps.db.transaction(async (tx) => {
+    const locked = await tx.execute(sql`
+      SELECT "state" FROM ${priceChanges}
+       WHERE "id" = ${changeId}::uuid
+       FOR UPDATE
+    `);
+    if ((locked.rows[0] as { state?: string } | undefined)?.state !== 'done') {
+      return false;
+    }
+    const reopened = await tx.execute(sql`
+      UPDATE ${priceChanges} c
+         SET "state" = 'running', "done_at" = NULL
+       WHERE c."id" = ${changeId}::uuid
+         AND EXISTS (SELECT 1 FROM ${subscriptionPriceMoves} m
+                      WHERE m."price_change_id" = c."id"
+                        AND m."state" IN ('due', 'notified'))
+         AND NOT EXISTS (
+           SELECT 1 FROM ${priceChanges} o
+            WHERE o."id" <> c."id"
+              AND o."kind" = c."kind"
+              AND o."tier_id" IS NOT DISTINCT FROM c."tier_id"
+              AND o."course_subscription_plan_id" IS NOT DISTINCT FROM c."course_subscription_plan_id"
+              AND o."interval" = c."interval"
+              AND (o."state" IN ('running', 'stopped')
+                   OR (o."created_at", o."id") > (c."created_at", c."id")))
+      RETURNING c."id"
+    `);
+    return reopened.rows.length > 0;
+  });
 }
 
 /**
@@ -1187,17 +1228,52 @@ async function finishChanges(run: Run, worked: string[]): Promise<void> {
        WHERE "id" IN (${uuidList(worked)})
     `);
   }
-  const done = await run.deps.db.execute(sql`
-    UPDATE ${priceChanges} c
-       SET "state" = 'done', "done_at" = ${run.now}::timestamptz
+  // Candidates first, unlocked; each is then decided under its own lock.
+  const candidates = await run.deps.db.execute(sql`
+    SELECT c."id" FROM ${priceChanges} c
      WHERE c."state" = 'running'
        AND NOT EXISTS (SELECT 1 FROM ${subscriptionPriceMoves} m
                         WHERE m."price_change_id" = c."id"
                           AND m."state" IN ('due', 'notified'))
        ${onlyChanges(run, sql`c."id"`)}
-    RETURNING c."id"
   `);
-  run.result.done = done.rows.length;
+  for (const { id } of candidates.rows as Array<{ id: string }>) {
+    if (await finishIfDone(run, id)) run.result.done += 1;
+  }
+}
+
+/**
+ * Close one change, deciding with its row locked: lock it, then count its
+ * `due` and `notified` rows, then set `done`. A Keep row added under the
+ * lock (Keep takes the change row first) is counted, so the change stays
+ * running for it; counting before the lock would miss it.
+ */
+async function finishIfDone(run: Run, changeId: string): Promise<boolean> {
+  return run.deps.db.transaction(async (tx) => {
+    const locked = await tx.execute(sql`
+      SELECT "state" FROM ${priceChanges}
+       WHERE "id" = ${changeId}::uuid
+       FOR UPDATE
+    `);
+    if (
+      (locked.rows[0] as { state?: string } | undefined)?.state !== 'running'
+    ) {
+      return false;
+    }
+    const open = await tx.execute(sql`
+      SELECT 1 FROM ${subscriptionPriceMoves}
+       WHERE "price_change_id" = ${changeId}::uuid
+         AND "state" IN ('due', 'notified')
+       LIMIT 1
+    `);
+    if (open.rows.length > 0) return false;
+    await tx.execute(sql`
+      UPDATE ${priceChanges}
+         SET "state" = 'done', "done_at" = ${run.now}::timestamptz
+       WHERE "id" = ${changeId}::uuid
+    `);
+    return true;
+  });
 }
 
 /** One line per run: an alert when anyone was held or a change stopped. */
