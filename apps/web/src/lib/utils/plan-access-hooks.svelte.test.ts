@@ -147,6 +147,69 @@ describe('useSubscriptionContext: covered by set membership', () => {
     expect(read().subCtx.currentPlan).toEqual({ id: BASIC.id, name: 'Basic' });
   });
 
+  it('carries a waiting move from the live entry, and from the stream (Codex-2hxff.16)', async () => {
+    const moving = {
+      tierId: BASIC.id,
+      tierName: 'Basic',
+      effectiveAt: '2026-11-12T09:00:00.000Z',
+    };
+    collectionState.set(ORG, {
+      organizationId: ORG,
+      tier: { id: PRO.id, name: PRO.name, sortOrder: PRO.sortOrder },
+      status: 'active',
+      currentPeriodEnd: '2026-11-12T09:00:00.000Z',
+      cancelAtPeriodEnd: false,
+      pendingTierChange: moving,
+    });
+    const live = subContext({
+      isTierGated: true,
+      includedInTierIds: [BASIC.id],
+    });
+    expect(live().subCtx.pendingPlan).toEqual({
+      id: BASIC.id,
+      name: 'Basic',
+      effectiveAt: '2026-11-12T09:00:00.000Z',
+    });
+    cleanup?.();
+    collectionState.clear();
+
+    const streamed = subContext(
+      { isTierGated: true, includedInTierIds: [BASIC.id] },
+      Promise.resolve({
+        requiresSubscription: true,
+        hasSubscription: true,
+        subscriptionCoversContent: false,
+        tiers: TIERS,
+        tiersFailed: false,
+        currentSubscription: {
+          tier: { id: PRO.id, name: 'Pro' },
+          currentPeriodEnd: '2026-11-12T09:00:00.000Z',
+          pendingTierChange: {
+            ...moving,
+            amountCents: 500,
+            billingInterval: 'month',
+            laterPrice: null,
+          },
+        },
+      })
+    );
+    await settle();
+    expect(streamed().subCtx.pendingPlan).toEqual({
+      id: BASIC.id,
+      name: 'Basic',
+      effectiveAt: '2026-11-12T09:00:00.000Z',
+    });
+  });
+
+  it('an entry written before the field existed reads as nothing waiting', () => {
+    liveSub(PRO);
+    const read = subContext({
+      isTierGated: true,
+      includedInTierIds: [BASIC.id],
+    });
+    expect(read().subCtx.pendingPlan).toBeNull();
+  });
+
   it('a failed plan list is "failed", never an empty "ready"', async () => {
     const read = subContext(
       { isTierGated: true, includedInTierIds: [PRO.id] },

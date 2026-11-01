@@ -17,6 +17,7 @@
 
 import { PRICE_LIMITS } from '@codex/constants';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { formatSentenceDate } from '$lib/utils/format';
 import * as m from '$paraglide/messages';
 import {
   createRawSnippet,
@@ -769,10 +770,9 @@ describe('the paywall names the plans that include it (Codex-2hxff.91)', () => {
     expect(timing()).toBeUndefined();
   });
 
-  test('on a dearer plan a cheaper one beats: Change plan, with how each is billed', () => {
-    // Winter Light: in Basic and Premium, not Pro. Both start now, as
-    // changeTier does today (owner U12): Basic credits the difference to the
-    // next bill. Codex-2hxff.16 moves Basic to the period end.
+  test('on a dearer plan a cheaper one beats: Change plan, with when each starts', () => {
+    // Winter Light: in Basic and Premium, not Pro. Premium starts now; Basic
+    // waits for the end of Pro's period (Codex-2hxff.16, flipping U12).
     render({
       content: gated([BASIC.id, PREMIUM.id]),
       hasAccess: false,
@@ -788,12 +788,17 @@ describe('the paywall names the plans that include it (Codex-2hxff.91)', () => {
     expect(line()).toBe(
       "Your Pro plan doesn't include this. It's included with Basic (£5.00 a month) and Premium (£20.00 a month)."
     );
-    expect(timing()).toContain(
-      'Premium starts straight away, and so does a move to Basic, with credit on your next bill for the difference until your Pro period ends on 12 November'
+    expect(timing()).toBe(
+      m.change_plan_cta_timing({
+        upgradePlans: 'Premium',
+        downgradePlans: 'Basic',
+        currentPlan: 'Pro',
+        date: formatSentenceDate('2026-11-12T09:00:00.000Z'),
+      })
     );
   });
 
-  test('a cheaper plan alone: Change plan, starting now with the difference credited', () => {
+  test('a cheaper plan alone: Change plan, starting at the period end, the plan kept until then', () => {
     render({
       content: gated([BASIC.id]),
       hasAccess: false,
@@ -801,8 +806,42 @@ describe('the paywall names the plans that include it (Codex-2hxff.91)', () => {
       hasSubscription: true,
       plans: plansFor({ id: PREMIUM.id, name: PREMIUM.name }),
     });
-    expect(timing()).toContain(
-      'A move to Basic starts straight away, with credit on your next bill for the difference until your Premium period ends on 12 November'
+    expect(timing()).toBe(
+      m.change_plan_cta_timing_downgrade({
+        downgradePlans: 'Basic',
+        currentPlan: 'Premium',
+        date: formatSentenceDate('2026-11-12T09:00:00.000Z'),
+      })
+    );
+  });
+
+  test('already moving to a plan that includes it: when it opens, and the plan that opens it now (Codex-2hxff.16)', () => {
+    // Winter Light (Basic, Premium); Pro member moving to Basic.
+    const date = formatSentenceDate('2026-11-12T00:00:00.000Z');
+    render({
+      content: gated([BASIC.id, PREMIUM.id]),
+      hasAccess: false,
+      requiresSubscription: true,
+      hasSubscription: true,
+      subscriptionCoversContent: false,
+      plans: {
+        ...plansFor({ id: PRO.id, name: PRO.name }),
+        pendingPlan: {
+          id: BASIC.id,
+          name: BASIC.name,
+          effectiveAt: '2026-11-12T00:00:00.000Z',
+        },
+      },
+    });
+    expect(lockText()).toContain('Change plan to watch');
+    expect(lockText()).toContain(
+      m.plan_cta_moving_short({ currentPlan: 'Pro', date })
+    );
+    expect(line()).toBe(
+      m.change_plan_cta_moving({ targetPlan: 'Basic', date })
+    );
+    expect(timing()).toBe(
+      m.change_plan_cta_moving_now({ upgradePlans: 'Premium', price: '£20.00' })
     );
   });
 

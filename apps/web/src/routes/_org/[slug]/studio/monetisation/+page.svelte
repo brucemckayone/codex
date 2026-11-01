@@ -75,7 +75,7 @@
     syncMyConnect,
   } from '$lib/remote/subscription.remote';
   import { getOrgSettings } from '$lib/remote/org.remote';
-  import { formatDate, formatPrice } from '$lib/utils/format';
+  import { formatDate, formatPrice, formatSentenceDate } from '$lib/utils/format';
   import { randomUuid } from '$lib/utils/random-uuid';
   import { humanizeRequirement } from '$lib/utils/connect-requirement-humanization';
   import {
@@ -597,9 +597,19 @@
   const moveGaps = $derived(
     deleteChoice === 'move' ? itemGaps(deleteMoveTo, moveOptions) : []
   );
+  /**
+   * Refused up front (mockups D6, and C1 M1-M2): someone is on the tier, or
+   * waiting to move to it at their renewal (Codex-2hxff.16, T5). Both come
+   * from the same read as the worker's refusal, so they can't disagree. An
+   * older worker without `movingInCount` counts none.
+   */
+  const deleteRefused = $derived(
+    impact !== null &&
+      (impact.liveSubscriberCount > 0 || impact.movingInCount > 0)
+  );
   const deleteReady = $derived(
     impact !== null &&
-      impact.liveSubscriberCount === 0 &&
+      !deleteRefused &&
       (onlyHereTotal === 0 ||
         deleteChoice === 'keep' ||
         (deleteChoice === 'move' && deleteMoveTo.length > 0))
@@ -1852,26 +1862,59 @@
       <Dialog.Title>{m.monetisation_tiers_delete()}</Dialog.Title>
     </Dialog.Header>
     <Dialog.Body>
-      {#if impact && impact.liveSubscriberCount > 0 && deletingTier}
+      {#if impact && deleteRefused && deletingTier}
         <!-- Refused, said up front (mockup D6): the worker refuses a tier with
-             any subscription that isn't cancelled, and this count comes from
-             the same read, so the dialog and the refusal can't disagree. -->
+             any subscription that isn't cancelled, or anyone waiting to move
+             to it at their renewal (C1 M1-M2), and these counts come from the
+             same read, so the dialog and the refusal can't disagree. Movers
+             who cancelled still count: reactivating brings the move back. -->
+        {@const name = deletingTier.name}
+        {@const subs = impact.liveSubscriberCount}
+        {@const movers = impact.movingInCount}
         <Alert variant="warning" data-testid="tier-delete-refused">
           <span class="alert-icon-row">
             <UsersIcon size={16} aria-hidden="true" />
             <span class="alert-copy">
-              <span>
-                <b>{m.monetisation_tier_delete_refused_title({ name: deletingTier.name })}</b>
-                {impact.liveSubscriberCount === 1
-                  ? m.monetisation_tier_delete_refused_body_one({ name: deletingTier.name })
-                  : m.monetisation_tier_delete_refused_body_other({
-                      count: impact.liveSubscriberCount,
-                      name: deletingTier.name,
-                    })}
-              </span>
-              <a class="alert-link" href="/studio/subscribers?tierId={deletingTier.id}">
-                {m.monetisation_tier_delete_refused_view({ name: deletingTier.name })}
-              </a>
+              {#if subs === 0}
+                <!-- Only movers (M1): they are still on their own tiers until
+                     their date, so this tier's subscriber list is empty and
+                     there is nothing to link to. -->
+                {@const date = impact.lastMoveAt ? formatSentenceDate(impact.lastMoveAt) : null}
+                <span>
+                  <b>{m.monetisation_tier_delete_moving_title({ name })}</b>
+                  {movers === 1
+                    ? date
+                      ? m.monetisation_tier_delete_moving_body_one({ date })
+                      : m.monetisation_tier_delete_moving_body_undated_one()
+                    : date
+                      ? m.monetisation_tier_delete_moving_body_other({ count: movers, date })
+                      : m.monetisation_tier_delete_moving_body_undated_other({ count: movers })}
+                </span>
+              {:else}
+                <span>
+                  <b>{m.monetisation_tier_delete_refused_title({ name })}</b>
+                  {#if movers === 0}
+                    {subs === 1
+                      ? m.monetisation_tier_delete_refused_body_one({ name })
+                      : m.monetisation_tier_delete_refused_body_other({ count: subs, name })}
+                  {:else if subs === 1}
+                    {movers === 1
+                      ? m.monetisation_tier_delete_refused_moving_body_one_one({ name })
+                      : m.monetisation_tier_delete_refused_moving_body_one_other({ name, movers })}
+                  {:else}
+                    {movers === 1
+                      ? m.monetisation_tier_delete_refused_moving_body_other_one({ count: subs, name })
+                      : m.monetisation_tier_delete_refused_moving_body_other_other({
+                          count: subs,
+                          name,
+                          movers,
+                        })}
+                  {/if}
+                </span>
+                <a class="alert-link" href="/studio/subscribers?tierId={deletingTier.id}">
+                  {m.monetisation_tier_delete_refused_view({ name })}
+                </a>
+              {/if}
             </span>
           </span>
         </Alert>
@@ -2076,7 +2119,7 @@
       {/if}
     </Dialog.Body>
     <Dialog.Footer>
-      {#if impact && impact.liveSubscriberCount > 0}
+      {#if deleteRefused}
         <Button variant="ghost" onclick={() => { deleteDialogOpen = false; deletingTier = null; }}>
           {m.monetisation_tier_delete_close()}
         </Button>

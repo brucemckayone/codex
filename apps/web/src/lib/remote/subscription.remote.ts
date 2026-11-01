@@ -52,11 +52,14 @@ function detailsCodeOf(details: unknown): string | undefined {
  * have acted. Returning it skips the `handleError` hook a throw would reach,
  * so it is logged here, where its cause is (Codex-2hxff.66), and the browser
  * gets fixed copy, never `error.message`.
+ *
+ * `ids` name what the command acted on for that log line: the org's id, or
+ * the ids of a command with no org (a course subscription's).
  */
 function toCommandFailure(
   error: unknown,
   commandName: string,
-  organizationId: string
+  ids: string | Record<string, string>
 ): SubscriptionCommandFailure {
   if (ApiError.isApiError(error)) {
     return {
@@ -70,7 +73,7 @@ function toCommandFailure(
   logger.error(
     `subscription command ${commandName} failed with no API answer`,
     {
-      organizationId,
+      ...(typeof ids === 'string' ? { organizationId: ids } : ids),
       errorName: error instanceof Error ? error.name : typeof error,
       reason: error instanceof Error ? error.message : String(error),
     }
@@ -316,6 +319,79 @@ export const resumeSubscription = command(
         'resumeSubscription',
         input.organizationId
       );
+    }
+  }
+);
+
+const keepCurrentPlanCommandSchema = z.object({
+  organizationId: z.string().uuid(),
+});
+
+/**
+ * Keep the current plan: undo a move to a cheaper plan that waits for the
+ * renewal (Codex-2hxff.16). Nothing is charged. After the renewal the move
+ * lands on, the worker refuses with `MOVE_ALREADY_LANDED` (`detailsCode`),
+ * and the page reads the subscription again.
+ */
+export const keepCurrentPlan = command(
+  keepCurrentPlanCommandSchema,
+  async (input) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    try {
+      const result = await api.subscription.keepCurrentPlan(input);
+      return { success: true as const, data: result };
+    } catch (error) {
+      return toCommandFailure(error, 'keepCurrentPlan', input.organizationId);
+    }
+  }
+);
+
+const courseSubscriptionCommandSchema = z.object({
+  courseSubscriptionId: z.string().uuid(),
+});
+
+/**
+ * Cancel one of the user's course subscriptions at period end
+ * (Codex-2hxff.52). Returns the card's new row. Another user's id is a 404.
+ */
+export const cancelCourseSubscription = command(
+  courseSubscriptionCommandSchema,
+  async ({ courseSubscriptionId }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    try {
+      const result =
+        await api.subscription.cancelCourseSubscription(courseSubscriptionId);
+      return { success: true as const, data: result };
+    } catch (error) {
+      return toCommandFailure(error, 'cancelCourseSubscription', {
+        courseSubscriptionId,
+      });
+    }
+  }
+);
+
+/**
+ * Undo a course subscription's cancel before its period ends
+ * (Codex-2hxff.52). A course no longer offered is refused with
+ * `COURSE_NOT_ON_SALE` (`detailsCode`).
+ */
+export const reactivateCourseSubscription = command(
+  courseSubscriptionCommandSchema,
+  async ({ courseSubscriptionId }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    try {
+      const result =
+        await api.subscription.reactivateCourseSubscription(
+          courseSubscriptionId
+        );
+      return { success: true as const, data: result };
+    } catch (error) {
+      return toCommandFailure(error, 'reactivateCourseSubscription', {
+        courseSubscriptionId,
+      });
     }
   }
 );

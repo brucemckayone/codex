@@ -79,7 +79,14 @@ afterEach(() => {
 function mountPage(subscriptions: UserOrgSubscription[]) {
   component = mount(SubscriptionsPage, {
     target: document.body,
-    props: { data: { subscriptions, loadError: false } } as never,
+    props: {
+      data: {
+        subscriptions,
+        loadError: false,
+        courseSubscriptions: [],
+        courseLoadError: false,
+      },
+    } as never,
   });
   flushSync();
 }

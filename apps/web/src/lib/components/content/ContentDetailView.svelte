@@ -75,6 +75,7 @@
   import {
     describePlanPaywall,
     planPaywallCopy,
+    type PendingPlan,
     type PlanListStatus,
     type PlanOption,
     type ViewerPlan,
@@ -171,6 +172,11 @@
       status: PlanListStatus;
       currentPlan: ViewerPlan | null;
       currentPeriodEnd: string | null;
+      /**
+       * Where the viewer's waiting move to a cheaper plan goes
+       * (Codex-2hxff.16): the paywall says when an item in it opens.
+       */
+      pendingPlan?: PendingPlan | null;
     };
     /** True while the access check is still resolving (skeleton state) */
     accessLoading?: boolean;
@@ -414,6 +420,7 @@
       tiersStatus: plans.status,
       currentPlan: hasSubscription ? plans.currentPlan : null,
       currentPeriodEnd: plans.currentPeriodEnd,
+      pendingPlan: hasSubscription ? (plans.pendingPlan ?? null) : null,
     })
   );
   const planCopy = $derived(planPaywallCopy(planPaywall, formatSentenceDate));
