@@ -216,7 +216,7 @@ describe('a membership with a move waiting', () => {
     expect(navigation.invalidate).not.toHaveBeenCalled();
   });
 
-  test('Keep after the renewal (MOVE_ALREADY_LANDED): the list is read again', async () => {
+  test('Keep after the renewal (MOVE_ALREADY_LANDED): the list is read again, and one line names the tier moved to', async () => {
     remote.keepCurrentPlan.mockResolvedValueOnce({
       success: false,
       code: 'CONFLICT',
@@ -224,13 +224,16 @@ describe('a membership with a move waiting', () => {
       message: 'landed',
       status: 409,
     });
-    mountPage([proMoving()]);
+    // A target name of its own, so the line can only come from the move.
+    mountPage([
+      proMoving({ pendingTierChange: { ...MOVE, tierName: 'Supporter' } }),
+    ]);
 
     within('subscription-keep-button')?.click();
     await settle();
 
     expect(clean(within('subscription-keep-line'))).toBe(
-      m.pricing_move_landed({ plan: 'Basic' })
+      m.pricing_move_landed({ plan: 'Supporter' })
     );
     expect(navigation.invalidate).toHaveBeenCalledWith('account:subscriptions');
   });

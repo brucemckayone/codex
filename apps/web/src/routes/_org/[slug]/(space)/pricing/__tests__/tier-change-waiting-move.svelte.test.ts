@@ -753,7 +753,7 @@ describe('Keep current plan from the notice (waiting move states 2-4)', () => {
     );
   });
 
-  test('after the renewal (MOVE_ALREADY_LANDED): the page reads the plan again', async () => {
+  test('after the renewal (MOVE_ALREADY_LANDED): the plan is read again, and one line names the tier moved to', async () => {
     remote.keepCurrentPlan.mockResolvedValueOnce({
       success: false,
       code: 'CONFLICT',
@@ -761,14 +761,20 @@ describe('Keep current plan from the notice (waiting move states 2-4)', () => {
       message: 'landed',
       status: 409,
     });
-    mountPage(moving());
+    // A target name of its own, so the line can only come from the move.
+    mountPage(
+      subscription(PRO, {
+        heldAmountCents: 1200,
+        pendingTierChange: { ...MOVE_TO_BASIC, tierName: 'Supporter' },
+      })
+    );
 
     byTestId('plan-move-keep')?.click();
     await settle();
 
     expect(navigation.invalidateAll).toHaveBeenCalledTimes(1);
     expect(clean(byTestId('plan-move-outcome')?.textContent)).toBe(
-      m.pricing_move_landed({ plan: 'Basic' })
+      m.pricing_move_landed({ plan: 'Supporter' })
     );
   });
 });

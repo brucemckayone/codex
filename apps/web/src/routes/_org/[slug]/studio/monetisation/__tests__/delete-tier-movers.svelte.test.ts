@@ -15,7 +15,7 @@
 
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { SubscriptionTier } from '$lib/types';
-import { formatDate } from '$lib/utils/format';
+import { formatSentenceDate } from '$lib/utils/format';
 import * as m from '$paraglide/messages';
 import {
   flushSync,
@@ -139,9 +139,10 @@ describe('Delete Tier while members are moving to it', () => {
     });
     openDelete('Lite');
 
+    // The sentence date, as the mockup words it ("12 March 2027").
     expect(clean(refused())).toBe(
       `${m.monetisation_tier_delete_moving_title({ name: 'Lite' })} ${m.monetisation_tier_delete_moving_body_other(
-        { count: 3, date: formatDate('2027-03-12T00:00:00.000Z') }
+        { count: 3, date: formatSentenceDate('2027-03-12T00:00:00.000Z') }
       )}`
     );
     expect(refused()?.querySelector('a')).toBeNull();
@@ -160,7 +161,7 @@ describe('Delete Tier while members are moving to it', () => {
 
     expect(clean(refused())).toContain(
       m.monetisation_tier_delete_moving_body_one({
-        date: formatDate('2026-11-12T00:00:00.000Z'),
+        date: formatSentenceDate('2026-11-12T00:00:00.000Z'),
       })
     );
   });

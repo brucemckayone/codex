@@ -75,7 +75,7 @@
     syncMyConnect,
   } from '$lib/remote/subscription.remote';
   import { getOrgSettings } from '$lib/remote/org.remote';
-  import { formatDate, formatPrice } from '$lib/utils/format';
+  import { formatDate, formatPrice, formatSentenceDate } from '$lib/utils/format';
   import { randomUuid } from '$lib/utils/random-uuid';
   import { humanizeRequirement } from '$lib/utils/connect-requirement-humanization';
   import {
@@ -1879,7 +1879,7 @@
                 <!-- Only movers (M1): they are still on their own tiers until
                      their date, so this tier's subscriber list is empty and
                      there is nothing to link to. -->
-                {@const date = impact.lastMoveAt ? formatDate(impact.lastMoveAt) : null}
+                {@const date = impact.lastMoveAt ? formatSentenceDate(impact.lastMoveAt) : null}
                 <span>
                   <b>{m.monetisation_tier_delete_moving_title({ name })}</b>
                   {movers === 1
