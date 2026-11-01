@@ -6,9 +6,9 @@
  * and crons used to build theirs by hand, as eight `new *Service({ db,
  * environment })` sites in ecom-api, and each missed something the registry
  * wires: FeeConfigService (so a configured fee never reached a real sale,
- * Codex-2hxff.7), the money mailers (Codex-2hxff.13), the cache hooks and the
- * tier propagator. This builds the SAME registry, so a dependency added there
- * reaches every path at once.
+ * Codex-2hxff.7), the money mailers (Codex-2hxff.13) and the cache hooks.
+ * This builds the SAME registry, so a dependency added there reaches every
+ * path at once.
  */
 
 import type { ObservabilityClient } from '@codex/observability';
@@ -32,7 +32,7 @@ export interface WebhookServices {
   background: BackgroundTracker['background'];
   /**
    * Close the pool once every background task the services registered (an
-   * email that looks its recipient up, a price fan-out) has settled. Plain
+   * email that looks its recipient up) has settled. Plain
    * `waitUntil(cleanup())` would race those tasks and win, failing their
    * queries (see `createBackgroundTracker`). Scheduled on `waitUntil`, so it
    * never delays the response. Call it once, in `finally`.

@@ -371,7 +371,7 @@ export async function createServiceRegistry(
 
   /**
    * The deferral hook for background work that TOUCHES THE DATABASE — emails
-   * that look up their recipients, price fan-outs (Codex-2hxff.2 review).
+   * that look up their recipients (Codex-2hxff.2 review).
    *
    * `procedure()` tears this registry's pool down once the work it was TOLD
    * about settles, and plain `executionCtx.waitUntil` tells it nothing: cleanup
@@ -1095,9 +1095,9 @@ export async function createServiceRegistry(
 
         // The price-change notice is AWAITED: a subscriber's price moves
         // only once notifications-api accepts their notice (owner decision
-        // D-P3, Codex-2hxff.43). The fan-out already runs after the
-        // response (`dbWaitUntil`), so the send needs no ExecutionContext of
-        // its own.
+        // D-P3, Codex-2hxff.43). ecom-api's hourly price-moves step sends it
+        // (`runPriceMoves`, Codex-2hxff.86), so the send needs no
+        // ExecutionContext of its own.
         const mailer = (params: {
           to: string;
           toName?: string;
@@ -1147,54 +1147,8 @@ export async function createServiceRegistry(
 
     get tier() {
       if (!_tier) {
-        // Q1.2 (Codex-3xyyb): wire a propagator thunk so tier
-        // create/update flows that change the canonical Stripe Price
-        // automatically fan the new Price id out to every active /
-        // cancelling subscription on the tier. The propagator runs on
-        // `executionCtx.waitUntil` so the slow path (one Stripe call
-        // per subscriber, batched) never blocks the request response.
-        // When `executionCtx` is absent (shouldn't happen inside
-        // `procedure()`, but be defensive), we still run propagation
-        // awaited — the tier route handler will simply wait a bit
-        // longer. The inner `propagateTierPriceToActiveSubscriptions`
-        // method owns its own try/catch per sub; any rejection we
-        // surface here is a catastrophic (pre-batch) failure worth
-        // logging via the fire-and-forget tail.
-        const propagator = (args: {
-          tierId: string;
-          newStripePriceId: string;
-          organizationId: string;
-          interval: 'month' | 'year';
-        }): void => {
-          const run = async () => {
-            // Use the lazy getter so the SubscriptionService is only
-            // instantiated if propagation actually fires — tier reads
-            // and tier creates-without-price-change never pay the
-            // construction cost.
-            await registry.subscription.propagateTierPriceToActiveSubscriptions(
-              args.tierId,
-              args.newStripePriceId,
-              // Only the changed interval's subscribers move (Codex-2hxff.3).
-              { organizationId: args.organizationId, interval: args.interval }
-            );
-          };
-          // The fan-out reads subscribers from the DB: `dbWaitUntil` keeps
-          // the pool open until it settles and logs a rejection that
-          // happens before the per-subscriber loop's own logging starts.
-          if (dbWaitUntil) {
-            dbWaitUntil(run());
-          } else {
-            // No hook available — best-effort fire-and-forget via
-            // unawaited promise, still logged.
-            run().catch((error: unknown) => {
-              _obs?.error('Tier price propagation failed', {
-                tierId: args.tierId,
-                error: error instanceof Error ? error.message : String(error),
-              });
-            });
-          }
-        };
-
+        // A price change records who is due in the save's own transaction
+        // (Codex-2hxff.86); ecom-api's hourly step emails and moves them.
         _tier = new TierService(
           {
             db: getSharedDb(),
@@ -1205,7 +1159,6 @@ export async function createServiceRegistry(
             // the connection.
             dbWs: getSharedDb(),
             environment: getEnvironment(),
-            propagator,
           },
           getLazyStripeClient()
         );
@@ -1238,23 +1191,17 @@ export async function createServiceRegistry(
         // Course-sub payouts resolve fees via the same 3-tier fallback chain as
         // purchases/subscriptions; Stripe client is deferred (read-only course
         // pages never construct it) — same pattern as `subscription`/`tier`.
-        // A plan price change runs its fan-out after the response
-        // (Codex-2hxff.3). The fan-out reads subscribers per interval, so it
-        // goes on `dbWaitUntil`, and awaits each notice before that
-        // subscriber moves (D-P3, Codex-2hxff.43). The off-sale email stays
-        // fire-and-forget: the cancel never waits on it.
+        // A plan price change records who is due in the save's own
+        // transaction (Codex-2hxff.86); ecom-api's hourly step emails and
+        // moves them. The off-sale email stays fire-and-forget: the cancel
+        // never waits on it.
         _courseSubscription = new CourseSubscriptionService(
           {
             db: getSharedDb(),
             environment: getEnvironment(),
             feeConfig: registry.feeConfig,
-            mailer: (params) =>
-              sendEmailToWorkerAwaited(env, params, {
-                timeoutMs: PRICE_NOTICE_TIMEOUT_MS,
-              }),
             offSaleMailer: sendAfterResponse,
             webAppUrl: env.WEB_APP_URL,
-            waitUntil: dbWaitUntil,
           },
           getLazyStripeClient()
         );

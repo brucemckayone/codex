@@ -46,6 +46,7 @@ import {
   PAYOUTS_SWEEP_PAYEE_LIMIT,
   runOwedDuplicatesSweep,
   runPayoutsSweep,
+  runPriceMovesSweep,
   runScheduledPayoutsSweep,
   runTierMoveBackstopSweep,
 } from '../payouts-sweep';
@@ -119,7 +120,25 @@ describe('ecom-api payouts-sweep handler', () => {
   let bankPayouts: MockInstance<SubscriptionService['runBankPayouts']>;
   // And the waiting tier moves' backstop (Codex-2hxff.16): nothing due.
   let tierBackstop: MockInstance<SubscriptionService['runTierMoveBackstop']>;
+  // And the price moves (Codex-2hxff.86): nothing claimed.
+  let priceMoves: MockInstance<SubscriptionService['runPriceMoves']>;
   beforeEach(() => {
+    priceMoves = vi
+      .spyOn(SubscriptionService.prototype, 'runPriceMoves')
+      .mockResolvedValue({
+        ran: true,
+        restarted: 0,
+        reopened: 0,
+        claimed: 0,
+        scheduled: 0,
+        unchanged: 0,
+        skipped: 0,
+        retrying: 0,
+        held: 0,
+        stopped: 0,
+        givenBack: 0,
+        done: 0,
+      });
     tierBackstop = vi
       .spyOn(SubscriptionService.prototype, 'runTierMoveBackstop')
       .mockResolvedValue({ checked: 0, applied: 0, left: 0, blocked: 0 });
@@ -434,9 +453,17 @@ describe('ecom-api payouts-sweep handler', () => {
         offSaleCancel,
         owed,
         tierBackstop,
+        priceMoves,
       ]) {
         expect(order(before)).toBeLessThan(bank);
       }
+      // The price moves (Codex-2hxff.86) read a move the backstop just
+      // landed as landed, on the cron's scheduled time: the service skips
+      // the 08:00 London run itself.
+      expect(order(tierBackstop)).toBeLessThan(order(priceMoves));
+      expect(priceMoves).toHaveBeenCalledExactlyOnceWith(
+        new Date(LONDON_EIGHT)
+      );
       // The tier move backstop runs once a wake (Codex-2hxff.16), on the
       // cron's scheduled time: its once-a-day alert counts hours from it.
       expect(tierBackstop).toHaveBeenCalledExactlyOnceWith({
@@ -956,6 +983,51 @@ describe('runTierMoveBackstopSweep', () => {
       {
         errorId: expect.any(String),
         stage: 'backstop',
+        error: 'database unavailable (test)',
+      }
+    );
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// runPriceMovesSweep (Codex-2hxff.86, data design §2.4): the hourly step that
+// tells and moves the people a price change recorded. The service records
+// and alerts; the sweep only hands over the scheduled time and isolates.
+// ─────────────────────────────────────────────────────────────────────────
+
+describe('runPriceMovesSweep', () => {
+  it("hands the service the cron's scheduled time", async () => {
+    const runPriceMoves = vi.fn().mockResolvedValue({ ran: true });
+    const { obs } = makeObs();
+    const at = new Date(Date.UTC(2027, 0, 14, 9));
+
+    await runPriceMovesSweep({ runPriceMoves }, at, obs);
+
+    expect(runPriceMoves).toHaveBeenCalledExactlyOnceWith(at);
+    expect(obs.error).not.toHaveBeenCalled();
+  });
+
+  it('a run that throws is one alert with an errorId, never the cron’s failure', async () => {
+    const { obs } = makeObs();
+    const at = new Date(Date.UTC(2027, 0, 14, 9));
+
+    await expect(
+      runPriceMovesSweep(
+        {
+          runPriceMoves: vi
+            .fn()
+            .mockRejectedValue(new Error('database unavailable (test)')),
+        },
+        at,
+        obs
+      )
+    ).resolves.toBeUndefined();
+
+    expect(obs.error).toHaveBeenCalledExactlyOnceWith(
+      'payouts-sweep cron could not run the price moves',
+      {
+        errorId: expect.any(String),
+        scheduledTime: at.toISOString(),
         error: 'database unavailable (test)',
       }
     );
