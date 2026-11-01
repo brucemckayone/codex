@@ -394,7 +394,7 @@ export class ConnectPlatformNotConfiguredError extends ServiceError {
 }
 
 // ============================================================================
-// Price-change fan-out errors
+// Price-change errors (the hourly price-moves step, Codex-2hxff.86)
 // ============================================================================
 
 /**
@@ -409,13 +409,13 @@ export type PriceChangeStage =
   | 'same_amount_clear';
 
 /**
- * Stripe threw at `stage`, so the fan-out's alert can name the step that
+ * Stripe threw at `stage`, so the step's alert can name the call that
  * failed: a failed write is not a failed read (review A round 2, correctness
  * #2). `cause` is Stripe's own error, and the refused-or-unknown judgement is
  * made on it. `currentPending` is the earlier change the subscription carried,
  * which a failed same-amount write may leave to land.
  *
- * It never reaches a client (the fan-out runs after the response). Its
+ * It never reaches a client (the hourly step runs it; no request waits). Its
  * context holds the stage only: no Stripe message and no date.
  */
 export class PriceChangeStageError extends InternalServiceError {
