@@ -68,7 +68,8 @@ One owner per organisation; it moves only by the owner's offer being accepted. W
 | POST | `/api/organizations/:id/tiers` | `required`, `requireOrgManagement` | body: `createTierSchema` | 201 | |
 | GET | `/api/organizations/:id/tiers` | `optional` | — | 200 | Public — used by storefront pricing page |
 | PATCH | `/api/organizations/:id/tiers/:tierId` | `required`, `requireOrgManagement` | body: `updateTierSchema` | 200 | |
-| DELETE | `/api/organizations/:id/tiers/:tierId` | `required`, `requireOrgManagement` | — | 204 | Fails if active subscribers exist |
+| DELETE | `/api/organizations/:id/tiers/:tierId` | `required`, `requireOrgManagement` | — | 204 | Fails (`TIER_HAS_SUBSCRIBERS`) while it has active subscribers or members waiting to move to it |
+| GET | `/api/organizations/:id/tiers/price-changes` | `required`, `requireOrgManagement` | — | 200 | List envelope, at most 50, newest first: how each tier price change is going (emailed, scheduled, held, still to email), with the next run and a finish estimate. `private`, never cached; Studio reads it once, then Check again (Codex-2hxff.86). Registered before `/:tierId` |
 | POST | `/api/organizations/:id/tiers/reorder` | `required`, `requireOrgManagement` | body: `reorderTiersSchema` | 204 | |
 
 ### Follower Routes (`/api/organizations/:id/followers/*`)
