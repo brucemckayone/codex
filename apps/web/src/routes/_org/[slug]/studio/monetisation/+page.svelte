@@ -41,7 +41,7 @@
     PlusIcon,
     CheckCircleIcon,
     ChevronRightIcon,
-    InfoIcon,
+    MailIcon,
     UsersIcon,
   } from '$lib/components/ui/Icon';
   import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
@@ -1764,7 +1764,7 @@
         </div>
         {#if tierPriceHint}
           <p class="price-hint" id="tier-price-hint" data-testid="tier-price-hint">
-            <InfoIcon size={14} aria-hidden="true" class="price-hint__icon" />
+            <MailIcon size={14} aria-hidden="true" class="price-hint__icon" />
             <span><b>{tierPriceHint.lead}</b> {tierPriceHint.body}</span>
           </p>
         {/if}

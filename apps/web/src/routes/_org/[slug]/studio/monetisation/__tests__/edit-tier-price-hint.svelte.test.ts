@@ -150,6 +150,41 @@ describe('the Edit Tier line about existing subscribers (P1)', () => {
     ).toBe('tier-price-hint');
   });
 
+  test('one subscriber: the singular words', () => {
+    mountPage(1);
+    openEdit();
+    setPrice('tier-price-monthly', 1400);
+    setPrice('tier-price-annual', 14000);
+    expect(hint()?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
+      'Your 1 Pro subscriber will be emailed about the new prices. Emails start at the next hourly run, and each person moves at their first renewal at least 30 days after their own email. New subscribers pay the new prices straight away.'
+    );
+  });
+
+  // The tier's count covers both intervals, so a one-price change names who
+  // is affected without a number.
+  test('only the monthly price changed: those who pay monthly, no count', () => {
+    mountPage(23);
+    openEdit();
+    setPrice('tier-price-monthly', 1400);
+    expect(hint()?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
+      'Your Pro subscribers who pay monthly will be emailed about the new monthly price. Emails start at the next hourly run, and each person moves at their first renewal at least 30 days after their own email. New subscribers pay the new price straight away.'
+    );
+  });
+
+  test('only the annual price changed: those who pay annually, no count', () => {
+    mountPage(23);
+    openEdit();
+    setPrice('tier-price-annual', 14000);
+    expect(hint()?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
+      'Your Pro subscribers who pay annually will be emailed about the new annual price. Emails start at the next hourly run, and each person moves at their first renewal at least 30 days after their own email. New subscribers pay the new price straight away.'
+    );
+    expect(
+      document
+        .querySelector('#tier-price-annual')
+        ?.getAttribute('aria-describedby')
+    ).toBe('tier-price-hint');
+  });
+
   test('a price put back as it was: the line goes', () => {
     mountPage(23);
     openEdit();

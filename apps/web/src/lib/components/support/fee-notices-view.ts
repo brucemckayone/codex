@@ -245,6 +245,8 @@ function toldFact(card: FeeChangeCard): CardFact {
   if (card.effectiveFrom && card.joiners.waiting > 0) {
     return { term, text, small: m.support_queue_fees_told_everyone_listed() };
   }
+  // F2 draws the email count by day ("410 by email on 3 Nov, 1 by email on
+  // 4 Nov"). Until the server sends days, `told_by_email` says the total.
   const parts = [
     ...(card.told.byEmail > 0
       ? [
@@ -419,6 +421,8 @@ export function noticeNext(
     when: runWhen(item.nextTryAt, now),
   });
   if (!item.onList) {
+    // F7 draws the join date ("joined 12 Nov, so this doesn't hold the
+    // date"). Until the server sends it, this key leaves the date out.
     const joiner = m.support_queue_fees_joiner_holds_nothing();
     return where === 'table'
       ? `${address} · ${joiner} · ${tries}`
@@ -573,6 +577,8 @@ export function markRefusalNotice(
         text: answer.message ?? m.support_queue_fees_refused_not_waiting(),
       };
     case 'FEE_NOTICE_ALREADY_TOLD':
+      // F6 draws who marked them ("by Sam Ortiz at 10:41"). The 409 names
+      // nobody yet, so these two keys name only the person told.
       if (answer.state === 'told_another_way' && answer.toldAt) {
         return {
           variant: 'info',

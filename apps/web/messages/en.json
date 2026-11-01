@@ -3492,6 +3492,7 @@
   "fee_note_meta_transfer": "Today every amount is sent, however small. Nothing is lost: it all goes once the total reaches {to}.",
   "fee_note_meta_transfer_earliest": "Today every amount is sent, however small. Nothing is lost: it all goes once the total reaches {to}. The date is set once everyone the change affects has been told, so it can move later but never earlier.",
   "fee_note_meta_emailed": "We emailed you about this on {date}.",
+  "fee_note_meta_emailed_smaller": "We emailed you about this on {date}.",
   "fee_note_list_dated": "From {date},",
   "fee_note_list_earliest": "From {date} at the earliest,",
   "fee_note_list_change": "{change}.",

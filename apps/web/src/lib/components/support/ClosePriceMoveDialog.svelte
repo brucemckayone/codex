@@ -168,6 +168,8 @@
         <p class="text">{words.body}</p>
         <fieldset
           class="choice-list"
+          role="radiogroup"
+          aria-invalid={choiceMissing || undefined}
           aria-describedby={choiceMissing ? choiceErrorId : undefined}
         >
           <legend>{m.support_queue_moves_close_legend()}</legend>
@@ -179,7 +181,6 @@
                 name="{uid}-resolution"
                 value={choice.value}
                 bind:group={resolution}
-                aria-invalid={choiceMissing || undefined}
                 disabled={busy}
                 data-testid="close-choice-{choice.value}"
               />

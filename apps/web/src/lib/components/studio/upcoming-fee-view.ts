@@ -220,10 +220,22 @@ function singleMeta(item: UpcomingFeeChange, parts: number): FeeNoteMeta {
     ? m.fee_note_meta_emailed({ date: formatToldDate(item.announcedAt) })
     : null;
   const withEmailed = (text: string) => (emailed ? `${text} ${emailed}` : text);
+  // N8, a bigger rise replacing a waiting one, draws "This replaces the rise
+  // to 12% we told you about on 3 November, so it has its own 30 days'
+  // notice." The server doesn't link the replaced change yet, so it reads as
+  // N2 below; its branch goes here when that field lands.
   const was = item.kind === 'smaller' ? replacedFigure(item) : null;
   if (was) {
+    // N7 draws the smaller email's own date. Until the server sends it, its
+    // own key says the first announcement's date.
+    const toldSmaller = item.announcedAt
+      ? m.fee_note_meta_emailed_smaller({
+          date: formatToldDate(item.announcedAt),
+        })
+      : null;
+    const text = m.fee_note_meta_smaller({ was: WAS_MARK });
     return {
-      text: withEmailed(m.fee_note_meta_smaller({ was: WAS_MARK })),
+      text: toldSmaller ? `${text} ${toldSmaller}` : text,
       was,
     };
   }
