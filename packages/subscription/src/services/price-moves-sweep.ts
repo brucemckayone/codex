@@ -41,9 +41,11 @@
 
 import { BILLING_INTERVAL } from '@codex/constants';
 import {
+  courseSubscriptionPlans,
   courseSubscriptions,
   courses,
   emailAuditLogs,
+  type PriceChangeState,
   type PriceMoveHeldReason,
   type PriceMoveSkipReason,
   priceChanges,
@@ -1203,5 +1205,155 @@ function endAlert(run: Run): void {
   run.deps.obs.info('Price moves: run finished', {
     ...result,
     scheduledTime: run.now.toISOString(),
+  });
+}
+
+// ─── The Studio progress read (data design §2.6) ───────────────────────────
+
+const HOUR_MS = 60 * 60 * 1000;
+/** A finished or replaced change still shows for this long. */
+const PROGRESS_SHOWN_FOR_MS = 14 * 24 * HOUR_MS;
+/** Changes a progress read returns at most, newest first. */
+const PROGRESS_LIMIT = 50;
+
+/**
+ * The `n`th hourly run after `now` that works price moves: on the hour, and
+ * never the 08:00 London run, which the bank payout has to itself.
+ */
+export function priceMoveRunAt(now: Date, n = 1): Date {
+  let at = Math.floor(now.getTime() / HOUR_MS) * HOUR_MS;
+  for (let seen = 0; seen < Math.max(1, n); ) {
+    at += HOUR_MS;
+    if (!isBankPayoutRun(at)) seen += 1;
+  }
+  return new Date(at);
+}
+
+/** How far one price change has got, for the Studio note (data design §2.6). */
+export interface PriceChangeProgress {
+  id: string;
+  tierId: string | null;
+  courseSubscriptionPlanId: string | null;
+  interval: 'month' | 'year';
+  fromAmountCents: number;
+  newAmountCents: number;
+  state: PriceChangeState;
+  createdAt: string;
+  /** Everyone the change has to tell. */
+  total: number;
+  /** Every accepted notice, a held move failure included: they were told. */
+  emailed: number;
+  /** Told, and moved now or marked to move at a renewal. */
+  scheduled: number;
+  /** Held for support and not yet resolved: "couldn't be moved yet". */
+  held: number;
+  /** Not told yet. */
+  due: number;
+  /** To try again on the next run: a failed notice, or a write after one. */
+  retrying: number;
+  lastRunAt: string | null;
+  /** The next run that works it; null unless it is running. */
+  nextRunAt: string | null;
+  /**
+   * The run that should finish it, at PRICE_MOVES_PER_RUN a run and skipping
+   * 08:00 London; null unless it is running.
+   */
+  estimatedDoneAt: string | null;
+  doneAt: string | null;
+  supersededById: string | null;
+  /** Every first email was refused, so nobody moved; support restarts it. */
+  stoppedAt: string | null;
+}
+
+export type PriceChangeProgressScope =
+  | { kind: 'tier'; organizationId: string }
+  | { kind: 'course_plan'; organizationId: string; courseId: string };
+
+/**
+ * The progress of an organisation's price changes: its live tiers', or one of
+ * its courses' plan. Running or stopped changes, and those finished or
+ * replaced in the last 14 days, newest first. One read: the counts are one
+ * GROUP BY over (`price_change_id`, `state`).
+ */
+export async function readPriceChangeProgress(
+  db: PriceChangeTx,
+  scope: PriceChangeProgressScope,
+  now: Date = new Date()
+): Promise<PriceChangeProgress[]> {
+  const since = new Date(now.getTime() - PROGRESS_SHOWN_FOR_MS);
+  const subject =
+    scope.kind === 'tier'
+      ? sql`JOIN ${subscriptionTiers} t ON t."id" = c."tier_id"
+              AND t."organization_id" = c."organization_id"
+              AND t."deleted_at" IS NULL`
+      : sql`JOIN ${courseSubscriptionPlans} p
+              ON p."id" = c."course_subscription_plan_id"
+              AND p."deleted_at" IS NULL
+            JOIN ${courses} co ON co."id" = p."course_id"
+              AND co."organization_id" = c."organization_id"
+              AND co."id" = ${scope.courseId}::uuid`;
+  const result = await db.execute(sql`
+    SELECT c."id", c."tier_id", c."course_subscription_plan_id", c."interval",
+           c."from_amount_cents", c."new_amount_cents", c."state",
+           c."created_at", c."last_run_at", c."done_at", c."superseded_by_id",
+           c."stopped_at",
+           count(m."id")::int AS total,
+           count(m."id") FILTER (WHERE m."notice_at" IS NOT NULL)::int AS emailed,
+           count(m."id") FILTER (WHERE m."state" = 'scheduled')::int AS scheduled,
+           count(m."id") FILTER (WHERE m."state" = 'held'
+                                   AND m."resolved_at" IS NULL)::int AS held,
+           count(m."id") FILTER (WHERE m."state" = 'due')::int AS due,
+           count(m."id") FILTER (WHERE (m."state" = 'due' AND m."attempts" > 0)
+                                    OR m."state" = 'notified')::int AS retrying,
+           count(m."id") FILTER (WHERE m."state" IN ('due', 'notified'))::int
+             AS remaining
+      FROM ${priceChanges} c
+      ${subject}
+      LEFT JOIN ${subscriptionPriceMoves} m ON m."price_change_id" = c."id"
+     WHERE c."organization_id" = ${scope.organizationId}::uuid
+       AND c."kind" = ${scope.kind}
+       AND (c."state" IN ('running', 'stopped')
+            OR c."done_at" >= ${since}::timestamptz
+            OR c."superseded_at" >= ${since}::timestamptz)
+     GROUP BY c."id"
+     ORDER BY c."created_at" DESC, c."id" DESC
+     LIMIT ${PROGRESS_LIMIT}::int
+  `);
+  const iso = (value: unknown) => toDate(value)?.toISOString() ?? null;
+  return (result.rows as Array<Record<string, unknown>>).map((r) => {
+    const running = r.state === 'running';
+    const remaining = Number(r.remaining);
+    return {
+      id: String(r.id),
+      tierId: (r.tier_id as string | null) ?? null,
+      courseSubscriptionPlanId:
+        (r.course_subscription_plan_id as string | null) ?? null,
+      interval:
+        r.interval === BILLING_INTERVAL.YEAR
+          ? BILLING_INTERVAL.YEAR
+          : BILLING_INTERVAL.MONTH,
+      fromAmountCents: Number(r.from_amount_cents),
+      newAmountCents: Number(r.new_amount_cents),
+      state: r.state as PriceChangeState,
+      createdAt: iso(r.created_at) ?? now.toISOString(),
+      total: Number(r.total),
+      emailed: Number(r.emailed),
+      scheduled: Number(r.scheduled),
+      held: Number(r.held),
+      due: Number(r.due),
+      retrying: Number(r.retrying),
+      lastRunAt: iso(r.last_run_at),
+      nextRunAt: running ? priceMoveRunAt(now).toISOString() : null,
+      estimatedDoneAt:
+        running && remaining > 0
+          ? priceMoveRunAt(
+              now,
+              Math.ceil(remaining / PRICE_MOVES_PER_RUN)
+            ).toISOString()
+          : null,
+      doneAt: iso(r.done_at),
+      supersededById: (r.superseded_by_id as string | null) ?? null,
+      stoppedAt: iso(r.stopped_at),
+    };
   });
 }

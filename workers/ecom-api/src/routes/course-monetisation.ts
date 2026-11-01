@@ -11,6 +11,8 @@
  * a course subscription AND a one-off saw only the one-off at checkout.
  *
  *   PUT    /studio/courses/:courseId/subscription-plan  → create or re-price
+ *   GET    /studio/courses/:courseId/subscription-plan/price-changes
+ *                                                       → how a re-price is going
  *   DELETE /studio/courses/:courseId/subscription-plan  → withdraw from sale
  *   PUT    /studio/courses/:courseId/tier-access        → set the exact tier set
  *
@@ -47,8 +49,8 @@
  * each service method re-resolves the course by `(id, organizationId)`. Without
  * that, an org-A admin could re-price or clear tier access on org B's course.
  *
- * `rateLimit: 'strict'` throughout: these are commerce mutations that create
- * Stripe objects, matching the `/studio/journeys/:pageId/offer` precedent.
+ * `rateLimit: 'strict'` on the mutations: they create Stripe objects, matching
+ * the `/studio/journeys/:pageId/offer` precedent. The one read is `api`.
  */
 
 import type { HonoEnv } from '@codex/shared-types';
@@ -58,7 +60,7 @@ import {
   setCourseTierAccessSchema,
   upsertCourseSubscriptionPlanSchema,
 } from '@codex/validation';
-import { procedure } from '@codex/worker-utils';
+import { PaginatedResult, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 
 const courseMonetisation = new Hono<HonoEnv>();
@@ -105,6 +107,46 @@ courseMonetisation.put(
         ctx.input.body,
         ctx.user.id
       );
+    },
+  })
+);
+
+/**
+ * GET /studio/courses/:courseId/subscription-plan/price-changes?organizationId=
+ *
+ * How the course plan's price changes are going (Codex-2hxff.86, data design
+ * §2.6), for the Offer panel's note: who has been emailed, moved and held,
+ * with the next run and a finish estimate. Uncached (`private`); the counts
+ * change only when the hourly step runs, so the panel reads once and has
+ * Check again (the cost rule). The service scopes by the organisation AND
+ * the course: another organisation's course id reads as nothing.
+ */
+courseMonetisation.get(
+  '/:courseId/subscription-plan/price-changes',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'api',
+      cache: 'private',
+    },
+    input: {
+      params: courseOfferParamsSchema,
+      query: courseMonetisationOrgQuerySchema,
+    },
+    handler: async (ctx) => {
+      const items =
+        await ctx.services.courseSubscription.listPlanPriceChangeProgress(
+          ctx.organizationId,
+          ctx.input.params.courseId
+        );
+      // At most 50, newest first: one page, in the list envelope.
+      return new PaginatedResult(items, {
+        page: 1,
+        limit: items.length,
+        total: items.length,
+        totalPages: 1,
+      });
     },
   })
 );

@@ -88,6 +88,10 @@ import {
   stripeRefusalDetail,
 } from './create-key-refusal';
 import { recordTierPriceChange } from './pending-price-change';
+import {
+  type PriceChangeProgress,
+  readPriceChangeProgress,
+} from './price-moves-sweep';
 
 type SubscriptionTier = typeof subscriptionTiers.$inferSelect;
 
@@ -1162,6 +1166,20 @@ export class TierService extends BaseService {
         )
       )
       .orderBy(subscriptionTiers.sortOrder);
+  }
+
+  /**
+   * How the org's tier price changes are going, for the Studio note
+   * (Codex-2hxff.86, data design §2.6): its live tiers' changes that are
+   * running or stopped, or finished in the last 14 days, newest first. One
+   * read, uncached, and never on the public tier list: the counts change
+   * only when the hourly step runs.
+   */
+  async listPriceChangeProgress(orgId: string): Promise<PriceChangeProgress[]> {
+    return readPriceChangeProgress(this.db, {
+      kind: 'tier',
+      organizationId: orgId,
+    });
   }
 
   /**

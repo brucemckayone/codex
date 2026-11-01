@@ -123,6 +123,10 @@ import {
   stripeRefusalDetail,
 } from './create-key-refusal';
 import { recordPlanPriceChange } from './pending-price-change';
+import {
+  type PriceChangeProgress,
+  readPriceChangeProgress,
+} from './price-moves-sweep';
 import { resolveStatus } from './stripe-status-mapper';
 import {
   cancelAndRefundDuplicate,
@@ -1044,6 +1048,24 @@ export class CourseSubscriptionService extends BaseService {
         )
       ),
     ]);
+  }
+
+  /**
+   * How the course plan's price changes are going, for the Studio note
+   * (Codex-2hxff.86, data design §2.6): running or stopped, or finished in
+   * the last 14 days, newest first. Scoped by the organisation AND the
+   * course, so another organisation's course id reads as nothing. One read,
+   * uncached: the counts change only when the hourly step runs.
+   */
+  async listPlanPriceChangeProgress(
+    organizationId: string,
+    courseId: string
+  ): Promise<PriceChangeProgress[]> {
+    return readPriceChangeProgress(this.db, {
+      kind: 'course_plan',
+      organizationId,
+      courseId,
+    });
   }
 
   /**

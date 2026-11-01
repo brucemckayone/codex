@@ -8,6 +8,7 @@
  * - POST   /                       - Create subscription tier (optionally copying another's items)
  * - GET    /                       - List tiers (public, no auth required)
  * - GET    /access-summary         - Per-tier film/course counts + gaps (studio)
+ * - GET    /price-changes          - How the tiers' price changes are going (studio)
  * - PATCH  /:tierId                - Update tier
  * - DELETE /:tierId?onlyHere=&moveTo= - Soft-delete tier, saying what happens to items only in it
  * - GET    /:tierId/delete-impact  - What deleting it would leave only there (studio)
@@ -148,6 +149,40 @@ app.get(
     input: { params: orgIdParamSchema },
     handler: async (ctx) =>
       ctx.services.planAccess.getAccessSummary(ctx.organizationId),
+  })
+);
+
+/**
+ * GET /api/organizations/:id/tiers/price-changes
+ * How the org's tier price changes are going (Codex-2hxff.86, data design
+ * §2.6): the Studio note's counts of who has been emailed, moved and held,
+ * with the next run and a finish estimate. Owner/admin only and uncached
+ * (`private`): never on the public tier list. The counts change only when
+ * the hourly step runs, so the page reads once per visit and has Check
+ * again (the cost rule). Registered before every `/:tierId` route.
+ */
+app.get(
+  '/price-changes',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'api',
+      cache: 'private',
+    },
+    input: { params: orgIdParamSchema },
+    handler: async (ctx) => {
+      const items = await ctx.services.tier.listPriceChangeProgress(
+        ctx.organizationId
+      );
+      // At most 50, newest first: one page, in the list envelope.
+      return new PaginatedResult(items, {
+        page: 1,
+        limit: items.length,
+        total: items.length,
+        totalPages: 1,
+      });
+    },
   })
 );
 

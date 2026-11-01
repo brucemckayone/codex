@@ -45,6 +45,8 @@ import {
 } from '../pending-price-change';
 import {
   type PriceMoveStepOptions,
+  priceMoveRunAt,
+  readPriceChangeProgress,
   runPriceMoveStep,
 } from '../price-moves-sweep';
 
@@ -1090,6 +1092,242 @@ describe('the hourly price-moves step (Codex-2hxff.86)', () => {
       courseSubscriptionId: courseSub.id,
       state: 'scheduled',
       scheduledKind: 'now',
+    });
+  });
+
+  // The Studio note's read (data design §2.6).
+  describe('the progress read', () => {
+    /** Thu 14 Jan 2027, 07:30 London (GMT): the next run is 09:00. */
+    const BEFORE_EIGHT = new Date(Date.UTC(2027, 0, 14, 7, 30));
+
+    it("counts each state for the org's live tiers, newest first; a finished change shows for 14 days", async () => {
+      const { org: o, basic, pro } = await org('pm-progress');
+      const subs: Sub[] = [];
+      for (let i = 0; i < 7; i++) subs.push(await subscriber(o.id, pro));
+      const running = await reprice(o.id, pro);
+      const [scheduled, heldTold, closed, fresh, retried, notified, skipped] =
+        subs as [Sub, Sub, Sub, Sub, Sub, Sub, Sub];
+      const told = new Date(NOW - DAY_MS);
+      const set = async (
+        sub: Sub,
+        values: Partial<typeof subscriptionPriceMoves.$inferInsert>
+      ) =>
+        db
+          .update(subscriptionPriceMoves)
+          .set(values)
+          .where(eq(subscriptionPriceMoves.subscriptionId, sub.id));
+      await set(scheduled, {
+        state: 'scheduled',
+        scheduledKind: 'now',
+        noticeAt: told,
+        effectiveAt: new Date(NOW + 40 * DAY_MS),
+      });
+      await set(heldTold, {
+        state: 'held',
+        heldReason: 'move_refused',
+        noticeAt: told,
+      });
+      await set(closed, {
+        state: 'held',
+        heldReason: 'no_address',
+        resolution: 'not_needed',
+        resolvedAt: told,
+        resolvedByUserId: closed.userId,
+        resolutionNote: 'left the platform',
+      });
+      await set(retried, { attempts: 1, lastError: 'notice_unknown' });
+      await set(notified, {
+        state: 'notified',
+        noticeAt: told,
+        attempts: 1,
+      });
+      await set(skipped, { state: 'skipped', skipReason: 'moving_away' });
+      // `fresh` is left as recorded: due, never tried.
+      expect(await moveOf(running, fresh)).toMatchObject({
+        state: 'due',
+        attempts: 0,
+      });
+
+      // Basic: one finished 3 days ago (shown), one 20 days ago (not).
+      const recent = await recordTierPriceChange(db, basic.id, {
+        organizationId: o.id,
+        interval: 'year',
+        fromAmountCents: 5000,
+        newAmountCents: 6000,
+        newStripePriceId: 'price_pm_basic_year',
+        createdByUserId: null,
+        now: new Date(NOW - 4 * DAY_MS),
+      });
+      const old = await recordTierPriceChange(db, basic.id, {
+        organizationId: o.id,
+        interval: 'month',
+        fromAmountCents: 500,
+        newAmountCents: 600,
+        newStripePriceId: 'price_pm_basic_month',
+        createdByUserId: null,
+        now: new Date(NOW - 30 * DAY_MS),
+      });
+      await db
+        .update(priceChanges)
+        .set({ doneAt: new Date(BEFORE_EIGHT.getTime() - 3 * DAY_MS) })
+        .where(eq(priceChanges.id, recent.changeId));
+      await db
+        .update(priceChanges)
+        .set({ doneAt: new Date(BEFORE_EIGHT.getTime() - 20 * DAY_MS) })
+        .where(eq(priceChanges.id, old.changeId));
+      // A deleted tier's change, and another org's, are never shown.
+      const gone = takeFirst(
+        await db
+          .insert(subscriptionTiers)
+          .values(createTestTierInput(o.id, { name: 'Gone', sortOrder: 3 }))
+          .returning()
+      );
+      const goneChange = await recordTierPriceChange(db, gone.id, {
+        organizationId: o.id,
+        interval: 'month',
+        fromAmountCents: 100,
+        newAmountCents: 200,
+        newStripePriceId: 'price_pm_gone',
+        createdByUserId: null,
+        now: new Date(NOW - DAY_MS),
+      });
+      await db
+        .update(subscriptionTiers)
+        .set({ deletedAt: new Date(NOW - HOUR_MS) })
+        .where(eq(subscriptionTiers.id, gone.id));
+      const { org: other, pro: otherPro } = await org('pm-progress-other');
+      const otherChange = await reprice(other.id, otherPro);
+
+      const progress = await readPriceChangeProgress(
+        db,
+        { kind: 'tier', organizationId: o.id },
+        BEFORE_EIGHT
+      );
+
+      expect(progress.map((p) => p.id)).toEqual([running, recent.changeId]);
+      expect(progress.map((p) => p.id)).not.toContain(goneChange.changeId);
+      expect(progress.map((p) => p.id)).not.toContain(otherChange);
+      expect(progress[0]).toEqual({
+        id: running,
+        tierId: pro.id,
+        courseSubscriptionPlanId: null,
+        interval: 'month',
+        fromAmountCents: 1200,
+        newAmountCents: 1400,
+        state: 'running',
+        createdAt: new Date(NOW - DAY_MS).toISOString(),
+        total: 7,
+        emailed: 3,
+        scheduled: 1,
+        held: 1,
+        due: 2,
+        retrying: 2,
+        lastRunAt: null,
+        // 08:00 London is the bank payout's run.
+        nextRunAt: new Date(Date.UTC(2027, 0, 14, 9)).toISOString(),
+        estimatedDoneAt: new Date(Date.UTC(2027, 0, 14, 9)).toISOString(),
+        doneAt: null,
+        supersededById: null,
+        stoppedAt: null,
+      });
+      expect(progress[1]).toMatchObject({
+        state: 'done',
+        interval: 'year',
+        total: 0,
+        nextRunAt: null,
+        estimatedDoneAt: null,
+      });
+    });
+
+    it("a course plan's progress is scoped by the org and the course", async () => {
+      const { org: o } = await org('pm-progress-course');
+      const { org: other } = await org('pm-progress-course-other');
+      const creatorId = takeFirst(await seedTestUsers(db, 1));
+      userIds.push(creatorId);
+      const course = async (orgId: string, title: string) => {
+        const row = takeFirst(
+          await db
+            .insert(courses)
+            .values({
+              organizationId: orgId,
+              creatorId,
+              slug: createUniqueSlug('pm-progress-course'),
+              title,
+              status: 'published',
+              priceCents: null,
+            })
+            .returning({ id: courses.id })
+        );
+        courseIds.push(row.id);
+        const plan = takeFirst(
+          await db
+            .insert(courseSubscriptionPlans)
+            .values({
+              courseId: row.id,
+              priceMonthly: 1500,
+              priceAnnual: 15000,
+            })
+            .returning({ id: courseSubscriptionPlans.id })
+        );
+        const { changeId } = await recordPlanPriceChange(db, plan.id, {
+          organizationId: orgId,
+          interval: 'month',
+          fromAmountCents: 1500,
+          newAmountCents: 1800,
+          newStripePriceId: 'price_pm_course',
+          createdByUserId: null,
+          now: new Date(NOW - DAY_MS),
+        });
+        return { courseId: row.id, planId: plan.id, changeId };
+      };
+      const mine = await course(o.id, 'Mine');
+      const sibling = await course(o.id, 'Sibling');
+      const theirs = await course(other.id, 'Theirs');
+
+      const read = (organizationId: string, courseId: string) =>
+        readPriceChangeProgress(
+          db,
+          { kind: 'course_plan', organizationId, courseId },
+          BEFORE_EIGHT
+        );
+
+      expect((await read(o.id, mine.courseId)).map((p) => p.id)).toEqual([
+        mine.changeId,
+      ]);
+      expect(
+        (await read(o.id, mine.courseId))[0]?.courseSubscriptionPlanId
+      ).toBe(mine.planId);
+      expect(await read(o.id, theirs.courseId)).toEqual([]);
+      expect((await read(o.id, sibling.courseId)).map((p) => p.id)).toEqual([
+        sibling.changeId,
+      ]);
+      // The tier read never shows a course plan's change.
+      expect(
+        await readPriceChangeProgress(
+          db,
+          { kind: 'tier', organizationId: o.id },
+          BEFORE_EIGHT
+        )
+      ).toEqual([]);
+    });
+
+    it('the run estimate counts 1,500 a run and skips 08:00 London, winter and summer', () => {
+      const winter = new Date(Date.UTC(2027, 0, 14, 6, 30));
+      expect(priceMoveRunAt(winter).toISOString()).toBe(
+        '2027-01-14T07:00:00.000Z'
+      );
+      expect(priceMoveRunAt(winter, 2).toISOString()).toBe(
+        '2027-01-14T09:00:00.000Z'
+      );
+      // British Summer Time: 08:00 London is 07:00 UTC.
+      const summer = new Date(Date.UTC(2026, 6, 15, 6, 30));
+      expect(priceMoveRunAt(summer).toISOString()).toBe(
+        '2026-07-15T08:00:00.000Z'
+      );
+      // On the hour: that run is under way, so the next is an hour on.
+      expect(
+        priceMoveRunAt(new Date(Date.UTC(2027, 0, 14, 15))).toISOString()
+      ).toBe('2027-01-14T16:00:00.000Z');
     });
   });
 });
