@@ -1405,7 +1405,8 @@ export async function createServiceRegistry(
      * Codex-2hxff.28: platform support's refunds. The shared per-request
      * client, because settling a failed refund is one transaction; the lazy
      * Stripe proxy, so the queue's DB-only reads never need the key. The
-     * purchase service gives a re-paid failed refund's access back (Q5d).
+     * purchase service gives a re-paid failed refund's access back (Q5d);
+     * the fee service's cache is invalidated by "told another way".
      */
     get support() {
       if (!_support) {
@@ -1414,6 +1415,7 @@ export async function createServiceRegistry(
           environment: getEnvironment(),
           stripe: getLazyStripeClient(),
           purchase: registry.purchase,
+          feeConfig: registry.feeConfig,
         });
       }
       return _support;

@@ -11,7 +11,10 @@
  *      added (`on_list = false`, so they never hold the date); anyone on the
  *      list no longer affected and not yet told becomes `not_needed`.
  *   3. SEND: up to FEE_NOTICES_PER_RUN notices in `due`, `failed` or
- *      `unknown`, oldest first, claimed under FOR UPDATE SKIP LOCKED. An
+ *      `unknown`, oldest first, claimed under FOR UPDATE SKIP LOCKED. Each
+ *      send waits FEE_NOTICE_TIMEOUT_MS at most, and no batch starts after
+ *      FEE_SENDS_TIME_BUDGET_MS: the rest are given back for the next
+ *      morning, so the dates and the alert always run. An
  *      `unknown` from an earlier run is first looked for in
  *      `email_audit_logs`: found sent, it counts as told then and nothing is
  *      resent (M1's rule). Each email names a date: the change's, or the
@@ -99,6 +102,19 @@ const LIST_BATCH = 500;
 const SEND_CONCURRENCY = 8;
 /** A notice attempted this recently is not claimed again (overlapping runs). */
 const RECLAIM_AFTER_MS = 12 * 60 * 60 * 1000;
+/**
+ * How long one send may take, as the price-moves step's
+ * PRICE_NOTICE_TIMEOUT_MS. A send still running then is `unknown` (it MAY
+ * have gone), so the next run checks the email log first.
+ */
+const FEE_NOTICE_TIMEOUT_MS = 5_000;
+/**
+ * No send batch starts after this, counted from the step's start, as the
+ * price-moves step's PRICE_MOVES_TIME_BUDGET_MS. The step runs last in the
+ * 08:00 chain, inside the cron's 15-minute wall, and the dates and the alert
+ * run after the sends.
+ */
+export const FEE_SENDS_TIME_BUDGET_MS = 8 * 60 * 1000;
 
 const TEMPLATE_FOR = {
   announce: 'fee-change-notice',
@@ -143,6 +159,10 @@ export interface RunFeeNoticesSweepDeps {
   templateExists?: (name: FeeTemplate) => Promise<boolean>;
   /** Testing only. */
   perRun?: number;
+  /** Real time, for the send budget (testing only). */
+  clock?: () => number;
+  /** Testing only. */
+  sendTimeoutMs?: number;
   /**
    * Testing only: the step touches these changes alone. It otherwise reads
    * every change, and the test database is shared with other suites.
@@ -162,6 +182,8 @@ export interface FeeNoticesSweepResult {
   foundInLog: number;
   /** Follow-ups dropped after their tries. */
   dropped: number;
+  /** Claims given back unsent: the send budget ran out. */
+  givenBack: number;
   dated: number;
   skippedTemplates: FeeTemplate[];
   errors: number;
@@ -172,6 +194,9 @@ interface SweepContext {
   obs: ObservabilityClient;
   mailer: FeeMailer;
   now: Date;
+  /** Real time; no send batch starts once it reaches `sendsUntil`. */
+  clock: () => number;
+  sendsUntil: number;
   environment: EnvName;
   perRun: number;
   enabled: ReadonlySet<FeeTemplate>;
@@ -194,13 +219,20 @@ function scope(ctx: SweepContext) {
 function makeDefaultMailer(deps: {
   notificationsUrl: string;
   workerSecret: string;
+  timeoutMs: number;
 }): FeeMailer {
   return async (params) => {
     let res: Response;
     try {
       res = await workerFetch(
         `${deps.notificationsUrl}/internal/send`,
-        { method: 'POST', body: JSON.stringify(params) },
+        {
+          method: 'POST',
+          body: JSON.stringify(params),
+          // A timeout aborts the request, or the body read below, and
+          // either way the outcome is `unknown`.
+          signal: AbortSignal.timeout(deps.timeoutMs),
+        },
         deps.workerSecret
       );
     } catch (error) {
@@ -659,10 +691,35 @@ async function record(
     .where(eq(feeChangeNotices.id, notice.id));
 }
 
+interface Recipient {
+  name: string;
+  email: string;
+  deletedAt: Date | null;
+}
+
+/** Every claimed notice's person, in one read. */
+async function recipientsOf(
+  ctx: SweepContext,
+  claimed: Claimed[]
+): Promise<Map<string, Recipient>> {
+  const ids = [...new Set(claimed.map((n) => n.userId))];
+  const rows = await ctx.db
+    .select({
+      id: users.id,
+      name: users.name,
+      email: users.email,
+      deletedAt: users.deletedAt,
+    })
+    .from(users)
+    .where(inArray(users.id, ids));
+  return new Map(rows.map(({ id, ...person }) => [id, person]));
+}
+
 async function sendOne(
   ctx: SweepContext,
   notice: Claimed,
-  changes: Map<string, FeeChangeRow>
+  changes: Map<string, FeeChangeRow>,
+  people: Map<string, Recipient>
 ): Promise<void> {
   const change = changes.get(notice.changeId);
   if (!change) return;
@@ -678,15 +735,7 @@ async function sendOne(
     });
     return;
   }
-  const [person] = await ctx.db
-    .select({
-      name: users.name,
-      email: users.email,
-      deletedAt: users.deletedAt,
-    })
-    .from(users)
-    .where(eq(users.id, notice.userId))
-    .limit(1);
+  const person = people.get(notice.userId);
   const email = person && person.deletedAt === null ? person.email : null;
 
   if (notice.state === 'unknown' && email) {
@@ -813,6 +862,40 @@ async function sendOne(
   );
 }
 
+/**
+ * Claims the budget left unsent go back as they were: their try and its time
+ * undone, as the price-moves step does. A follow-up keeps its tries, and an
+ * `unknown` is still checked against the email log from its real last try.
+ * The next morning claims them.
+ */
+async function giveBack(ctx: SweepContext, unsent: Claimed[]): Promise<void> {
+  if (unsent.length === 0) return;
+  const back = await ctx.db.execute(sql`
+    UPDATE ${feeChangeNotices} AS n
+       SET attempts = n.attempts - 1, attempted_at = g.prev,
+           updated_at = ${ctx.now}::timestamptz
+      FROM unnest(
+             ARRAY[${sql.join(
+               unsent.map((c) => sql`${c.id}::uuid`),
+               sql`, `
+             )}]::uuid[],
+             ARRAY[${sql.join(
+               unsent.map((c) => sql`${c.prevAttemptedAt}::timestamptz`),
+               sql`, `
+             )}]::timestamptz[]
+           ) AS g(id, prev)
+     WHERE n.id = g.id
+       AND n.attempted_at = ${ctx.now}::timestamptz
+       AND n.state IN ('due', 'failed', 'unknown')
+    RETURNING n.id
+  `);
+  ctx.result.givenBack = back.rows.length;
+  ctx.obs.warn('fee step: the send budget ran out; the rest go tomorrow', {
+    givenBack: back.rows.length,
+    sent: ctx.result.sent,
+  });
+}
+
 async function sendDue(ctx: SweepContext): Promise<void> {
   const claimed = await claim(ctx);
   if (claimed.length === 0) return;
@@ -822,11 +905,16 @@ async function sendDue(ctx: SweepContext): Promise<void> {
     .from(feeChanges)
     .where(inArray(feeChanges.id, changeIds));
   const changes = new Map(rows.map((c) => [c.id, c]));
+  const people = await recipientsOf(ctx, claimed);
   for (let i = 0; i < claimed.length; i += SEND_CONCURRENCY) {
+    if (ctx.clock() >= ctx.sendsUntil) {
+      await giveBack(ctx, claimed.slice(i));
+      return;
+    }
     await Promise.all(
       claimed.slice(i, i + SEND_CONCURRENCY).map(async (notice) => {
         try {
-          await sendOne(ctx, notice, changes);
+          await sendOne(ctx, notice, changes, people);
         } catch (error) {
           ctx.result.errors += 1;
           ctx.obs.error('fee step: one notice failed', {
@@ -953,10 +1041,13 @@ export async function runFeeNoticesSweep(
     unknown: 0,
     foundInLog: 0,
     dropped: 0,
+    givenBack: 0,
     dated: 0,
     skippedTemplates: [],
     errors: 0,
   };
+  const clock = deps.clock ?? Date.now;
+  const sendsUntil = clock() + FEE_SENDS_TIME_BUDGET_MS;
   try {
     const ctx: SweepContext = {
       db: deps.db,
@@ -966,8 +1057,11 @@ export async function runFeeNoticesSweep(
         makeDefaultMailer({
           notificationsUrl: deps.notificationsUrl,
           workerSecret: deps.workerSecret,
+          timeoutMs: deps.sendTimeoutMs ?? FEE_NOTICE_TIMEOUT_MS,
         }),
       now: deps.now ?? new Date(),
+      clock,
+      sendsUntil,
       environment: deps.environment,
       perRun: deps.perRun ?? FEE_NOTICES_PER_RUN,
       enabled: await enabledTemplates(deps, result),

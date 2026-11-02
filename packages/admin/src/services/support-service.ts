@@ -93,8 +93,10 @@ import {
   DEBT_INVOICE_THRESHOLD_CENTS,
   dateRiseIfAllTold,
   type FeeLevel,
+  type FeeVersionList,
   type FeeVersionValues,
   failedRefundRepayBlock,
+  feeLevelKey,
   feeRiseStartAfter,
   type GbpBalance,
   issueRefund as issueStripeRefund,
@@ -110,6 +112,7 @@ import {
   pendingReductionsFor,
   planClawback,
   readFeeVersions,
+  readFeeVersionsByLevel,
   readGbpBalance,
   recheckPayeeCredit,
   refundWindow,
@@ -122,6 +125,7 @@ import {
   versionInForce,
 } from '@codex/payments';
 import {
+  type FeeConfigService,
   type PurchaseService,
   type RestoredRefundAccess,
   STANDING_REFUND_STATUSES,
@@ -157,6 +161,7 @@ import {
   inArray,
   isNotNull,
   isNull,
+  lte,
   ne,
   or,
   type SQL,
@@ -288,6 +293,8 @@ export interface SupportServiceConfig extends ServiceConfig {
     PurchaseService,
     'restoreAfterFailedRefund' | 'failedRefundRestoreBlock'
   >;
+  /** Makes a level's fee read fresh after "told another way" dates a rise. */
+  feeConfig: Pick<FeeConfigService, 'invalidateLevel'>;
 }
 
 type Tx = Parameters<Parameters<DatabaseClient['transaction']>[0]>[0];
@@ -513,11 +520,13 @@ interface SourceView {
 export class SupportService extends BaseService {
   private readonly stripe: Stripe;
   private readonly purchase: SupportServiceConfig['purchase'];
+  private readonly feeConfig: SupportServiceConfig['feeConfig'];
 
   constructor(config: SupportServiceConfig) {
     super(config);
     this.stripe = config.stripe;
     this.purchase = config.purchase;
+    this.feeConfig = config.feeConfig;
   }
 
   // ==========================================================================
@@ -2904,9 +2913,7 @@ export class SupportService extends BaseService {
         this.feeNoticeTallies(ids),
         this.feeToldByDay(ids),
         this.toldAnotherWayOf(ids),
-        Promise.all(
-          rows.map((change) => this.feeChangeLines(change, platformNow, now))
-        ),
+        this.feeChangeLinesOf(rows, platformNow, now),
         this.peopleById(rows.flatMap((c) => [c.creatorId, c.createdBy])),
         this.organizationsOf(rows.map((c) => c.organizationId)),
       ]);
@@ -3060,8 +3067,8 @@ export class SupportService extends BaseService {
    * phone (§1.6). One transaction: lock the change, then the notice (the
    * order the fee writes and the daily run take them in), refuse with a 409
    * when there is nothing to mark, record the mark, and date the rise when
-   * this was the last person on the list. The caller invalidates the
-   * level's fee cache, so the date shows at once.
+   * this was the last person on the list. After the commit it invalidates
+   * the level's fee cache, so the date shows at once.
    *
    * A second press after a lost answer meets FEE_NOTICE_ALREADY_TOLD, and the
    * page reads that as done.
@@ -3071,7 +3078,7 @@ export class SupportService extends BaseService {
     input: SupportToldAnotherWayInput,
     toldByUserId: string,
     now: Date = new Date()
-  ): Promise<{ result: ToldAnotherWayResult; level: FeeLevel }> {
+  ): Promise<ToldAnotherWayResult> {
     try {
       const [found] = await this.db
         .select({ changeId: feeChangeNotices.changeId })
@@ -3086,7 +3093,7 @@ export class SupportService extends BaseService {
       if (!found) {
         throw new NotFoundError('No fee notice with this id', { noticeId });
       }
-      return await this.db.transaction(async (tx) => {
+      const { result, level } = await this.db.transaction(async (tx) => {
         const [change] = await tx
           .select()
           .from(feeChanges)
@@ -3160,24 +3167,26 @@ export class SupportService extends BaseService {
           toldByUserId,
           dated: dating.dated,
         });
-        return {
-          result: {
-            notice: {
-              noticeId,
-              state: 'told_another_way',
-              toldAt: now.toISOString(),
-              toldBy: toldByUserId,
-              note: input.note,
-            },
-            change: {
-              changeId: change.id,
-              effectiveFrom: toIso(dating.effectiveFrom),
-              waitingFor: dating.dated ? 0 : dating.waitingFor,
-            },
+        const marked: ToldAnotherWayResult = {
+          notice: {
+            noticeId,
+            state: 'told_another_way',
+            toldAt: now.toISOString(),
+            toldBy: toldByUserId,
+            note: input.note,
           },
-          level: feeLevelOfChange(change),
+          change: {
+            changeId: change.id,
+            effectiveFrom: toIso(dating.effectiveFrom),
+            waitingFor: dating.dated ? 0 : dating.waitingFor,
+          },
         };
+        return { result: marked, level: feeLevelOfChange(change) };
       });
+      // Not needed for correctness (a date is 30 days off, and the cache
+      // re-reads hourly while a rise waits); it shows the date at once.
+      this.feeConfig.invalidateLevel(level);
+      return result;
     } catch (error) {
       this.handleError(error, 'markToldAnotherWay');
     }
@@ -3318,105 +3327,144 @@ export class SupportService extends BaseService {
     return days;
   }
 
-  /** The latest 20 people marked told another way, per change. */
+  /** The latest 20 people marked told another way, per change, in one read. */
   private async toldAnotherWayOf(
     changeIds: string[]
   ): Promise<Map<string, FeeToldAnotherWay[]>> {
-    const lists = await Promise.all(
-      changeIds.map((changeId) =>
-        this.db
-          .select({
-            userId: feeChangeNotices.userId,
-            toldByUserId: feeChangeNotices.toldByUserId,
-            toldAt: feeChangeNotices.toldAt,
-            note: feeChangeNotices.toldNote,
-          })
-          .from(feeChangeNotices)
-          .where(
-            and(
-              eq(feeChangeNotices.changeId, changeId),
-              eq(feeChangeNotices.kind, 'announce'),
-              eq(feeChangeNotices.state, 'told_another_way')
-            )
-          )
-          .orderBy(desc(feeChangeNotices.toldAt), asc(feeChangeNotices.id))
-          .limit(TOLD_ANOTHER_WAY_SHOWN)
+    const n = feeChangeNotices;
+    const ranked = this.db
+      .select({
+        changeId: n.changeId,
+        userId: n.userId,
+        toldByUserId: n.toldByUserId,
+        toldAt: n.toldAt,
+        note: n.toldNote,
+        rank: sql<number>`row_number() OVER (PARTITION BY ${n.changeId} ORDER BY ${n.toldAt} DESC, ${n.id})`.as(
+          'rank'
+        ),
+      })
+      .from(n)
+      .where(
+        and(
+          inArray(n.changeId, changeIds),
+          eq(n.kind, 'announce'),
+          eq(n.state, 'told_another_way')
+        )
       )
-    );
+      .as('ranked');
+    const rows = await this.db
+      .select()
+      .from(ranked)
+      .where(lte(ranked.rank, TOLD_ANOTHER_WAY_SHOWN))
+      .orderBy(asc(ranked.rank));
     const people = await this.peopleById(
-      lists.flat().flatMap((row) => [row.userId, row.toldByUserId])
+      rows.flatMap((row) => [row.userId, row.toldByUserId])
     );
-    return new Map(
-      changeIds.map((changeId, index) => [
-        changeId,
-        (lists[index] ?? []).map((row) => ({
-          person: people.get(row.userId) ?? {
-            userId: row.userId,
-            name: '',
-            deleted: true,
-          },
-          by: row.toldByUserId ? (people.get(row.toldByUserId) ?? null) : null,
-          at: toIso(row.toldAt) ?? '',
-          note: row.note ?? '',
-        })),
-      ])
+    const lists = new Map<string, FeeToldAnotherWay[]>(
+      changeIds.map((changeId) => [changeId, []])
     );
+    for (const row of rows) {
+      lists.get(row.changeId)?.push({
+        person: people.get(row.userId) ?? {
+          userId: row.userId,
+          name: '',
+          deleted: true,
+        },
+        by: row.toldByUserId ? (people.get(row.toldByUserId) ?? null) : null,
+        at: toIso(row.toldAt) ?? '',
+        note: row.note ?? '',
+      });
+    }
+    return lists;
   }
 
   /**
-   * What a change moves at its own level, layered over the levels in force
-   * now: what that level's sales pay today, and with the change.
+   * What each change moves at its own level, layered over the levels in
+   * force now: what that level's sales pay today, and with the change. One
+   * read of the changes' versions, and one per scope of the levels below.
    */
-  private async feeChangeLines(
-    change: FeeChangeRow,
+  private async feeChangeLinesOf(
+    changes: FeeChangeRow[],
     platformNow: FeeVersionValues | null,
     now: Date
-  ): Promise<{ lines: FeeChangeLine[]; removed: boolean }> {
-    const level = feeLevelOfChange(change);
-    const [version] = await this.db
-      .select()
-      .from(feeConfigVersions)
-      .where(
-        and(
-          eq(feeConfigVersions.changeId, change.id),
-          isNull(feeConfigVersions.supersededAt)
-        )
-      )
-      .limit(1);
-    const own = version && !version.removed ? version : null;
-    if (level.scope === 'platform') {
-      return {
-        lines: feeLines(layerLevelFees(platformNow), layerLevelFees(own)),
-        removed: false,
-      };
-    }
-    const orgNow = versionInForce(
-      await readFeeVersions(this.db, {
+  ): Promise<Array<{ lines: FeeChangeLine[]; removed: boolean }>> {
+    const orgIds = unique(
+      changes.map((c) => (c.scope === 'platform' ? null : c.organizationId))
+    );
+    const creatorIds = unique(
+      changes.map((c) => (c.scope === 'creator' ? c.creatorId : null))
+    );
+    const none = Promise.resolve(new Map<string, FeeVersionList>());
+    const [versions, orgLevels, creatorLevels] = await Promise.all([
+      this.db
+        .select()
+        .from(feeConfigVersions)
+        .where(
+          and(
+            inArray(
+              feeConfigVersions.changeId,
+              changes.map((c) => c.id)
+            ),
+            isNull(feeConfigVersions.supersededAt)
+          )
+        ),
+      orgIds.length > 0
+        ? readFeeVersionsByLevel(
+            this.db,
+            'org',
+            inArray(feeChanges.organizationId, orgIds)
+          )
+        : none,
+      creatorIds.length > 0
+        ? readFeeVersionsByLevel(
+            this.db,
+            'creator',
+            and(
+              inArray(feeChanges.organizationId, orgIds),
+              inArray(feeChanges.creatorId, creatorIds)
+            )
+          )
+        : none,
+    ]);
+    const versionOf = new Map(versions.map((v) => [v.changeId, v]));
+    const inForce = (lists: Map<string, FeeVersionList>, level: FeeLevel) =>
+      versionInForce(
+        lists.get(feeLevelKey(level)) ?? { versions: [], waiting: false },
+        now
+      );
+
+    return changes.map((change) => {
+      const level = feeLevelOfChange(change);
+      const version = versionOf.get(change.id);
+      const own = version && !version.removed ? version : null;
+      if (level.scope === 'platform') {
+        return {
+          lines: feeLines(layerLevelFees(platformNow), layerLevelFees(own)),
+          removed: false,
+        };
+      }
+      const orgNow = inForce(orgLevels, {
         scope: 'org',
         organizationId: level.organizationId,
-      }),
-      now
-    );
-    if (level.scope === 'org') {
+      });
+      if (level.scope === 'org') {
+        return {
+          lines: feeLines(
+            layerLevelFees(platformNow, orgNow),
+            layerLevelFees(platformNow, own)
+          ),
+          removed: version?.removed ?? false,
+        };
+      }
+      const creatorNow = inForce(creatorLevels, level);
       return {
         lines: feeLines(
-          layerLevelFees(platformNow, orgNow),
-          layerLevelFees(platformNow, own)
+          layerLevelFees(platformNow, orgNow, creatorNow),
+          layerLevelFees(platformNow, orgNow, own)
         ),
         removed: version?.removed ?? false,
       };
-    }
-    const creatorNow = versionInForce(
-      await readFeeVersions(this.db, level),
-      now
-    );
-    return {
-      lines: feeLines(
-        layerLevelFees(platformNow, orgNow, creatorNow),
-        layerLevelFees(platformNow, orgNow, own)
-      ),
-      removed: version?.removed ?? false,
-    };
+    });
   }
 
   private async organizationsOf(
