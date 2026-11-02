@@ -3,7 +3,7 @@
 Where the code does not yet meet this specification, the decisions the
 specification rests on, and what is still undecided.
 
-Last reviewed: 2026-10-20.
+Last reviewed: 2026-11-01.
 
 How the remaining work should be organised in the code, and in what order, is
 in [architecture.md](architecture.md) (agreed by the owner 2026-10-19).
@@ -33,16 +33,12 @@ history.
 
 | Bead | P | What is not true yet | Spec |
 |---|---|---|---|
-| `Codex-2hxff.16` | P2 | Downgrades at period end | [subscriptions](subscriptions.md#changing-tier) |
 | `Codex-2hxff.24` | P3 | Dev and CI Stripe setup mirrors production; customer stub removed | [operations](operations.md#local-development) |
 | `Codex-2hxff.25` | P2 | CI exercises real webhook round trips | [operations](operations.md#testing) |
 | `Codex-2hxff.29` | P2 | Creators' bank payouts are held for the 14-day refund window | [connect-and-payouts](connect-and-payouts.md#payout-timing) |
 | `Codex-2hxff.30` | P2 | A clawback shortfall is recovered from the creator's future earnings | [connect-and-payouts](connect-and-payouts.md#reversals) |
-| `Codex-2hxff.33` | P2 | A fee increase applies 30 days after an email; a decrease at once | [fees-and-splits](fees-and-splits.md#fee-configuration) |
 | `Codex-2hxff.34` | P3 | Creators are reminded monthly about money waiting for them | [connect-and-payouts](connect-and-payouts.md#releasing-pending-money) |
-| `Codex-2hxff.52` | P2 | Pausing, resuming, a failed payment and a trial ending work for course subscriptions as for tiers | [subscriptions](subscriptions.md#lifecycle-and-access) |
-| `Codex-2hxff.85` | P2 | Support can retry a subscriber's price move that was held because their notice wasn't sent; today the alert is the only record | [subscriptions](subscriptions.md#price-changes) |
-| `Codex-2hxff.86` | P2 | A price change reaches every subscriber, however many: the fan-out runs where it can finish, not in `waitUntil`'s 30 s | [subscriptions](subscriptions.md#price-changes) |
+| `Codex-2hxff.89` | P2 | Pausing, resuming and a trial ending are designed end to end, for memberships and course subscriptions | [subscriptions](subscriptions.md#lifecycle-and-access) |
 
 `Codex-2hxff.27` (closed) records the 2026-10-13 repair of production's webhooks.
 
@@ -124,6 +120,30 @@ are not listed above:
   (owner, "Plain message + right action");
 - a list that fails to load says so, with Retry, never an empty state (owner,
   "Same as payout read").
+
+`Codex-2hxff.16`, `.33`, `.52`, `.85` and `.86` (batch C1) are fixed in one
+pull request with migrations `0122`, `0123` and `0124`, and so are not listed
+above:
+- a downgrade waits for the renewal and invoices nothing until then, and the
+  subscriber can keep their current plan instead; plans are compared on the
+  same billing period, a same-price plan switches at once, a billing switch is
+  refused while a move waits, and a tier can't be deleted while members are
+  moving to it;
+- a fee rise applies 30 days after its email and a cut at once (owner, "Rises
+  30 days, cuts now"): a change that makes anything dearer waits whole ("Whole
+  change waits 30 days"), the newest announced change wins ("Newest change
+  wins"), only those it pays less are emailed ("Only those paid less"), and
+  the 30 days start once every email has gone ("Clock starts once all sent");
+  Studio shows the waiting rise, and support's Queue lists anyone not yet told;
+- course subscriptions are listed on Account › Subscriptions with Cancel,
+  Reactivate and Update card, and a course subscription's failed payment and
+  lifecycle emails work as a tier's; pausing and trials wait for their design,
+  `Codex-2hxff.89` (owner, "Leave it for the design");
+- a price change reaches every subscriber from an hourly step, about 1,500 an
+  hour ("Hourly job, a few hours"); Studio shows how it is going, with counts
+  ("Studio note with counts"); a move held because its email wasn't sent is
+  retried, then listed for support, who can retry, close or restart it
+  ("Auto-retry, then support tab").
 
 `Codex-2hxff.7` (fee configuration on every sale path, including the 25p
 minimum), `.8` (partial refunds) and `.9` (disputes) were merged to `dev` and

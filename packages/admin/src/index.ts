@@ -70,6 +70,7 @@ export type {
   FeeChangeLine,
   FeeNoticeItem,
   FeeToldAnotherWay,
+  FeeToldOnDay,
   HeldPriceMove,
   HistoryCredit,
   HistoryLine,

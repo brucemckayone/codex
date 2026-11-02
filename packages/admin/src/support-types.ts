@@ -778,6 +778,14 @@ export interface FeeChangeLine {
   to: number;
 }
 
+/** One London calendar day's told counts on a fee rise's first list. */
+export interface FeeToldOnDay {
+  /** `YYYY-MM-DD`, in Europe/London. */
+  londonDate: string;
+  byEmail: number;
+  anotherWay: number;
+}
+
 /** Someone support marked as told another way, and who marked them. */
 export interface FeeToldAnotherWay {
   person: SupportPerson;
@@ -810,6 +818,12 @@ export interface FeeChangeCard {
   listed: number | null;
   /** On the first list and told: by an accepted email, or another way. */
   told: { byEmail: number; anotherWay: number };
+  /**
+   * The same counts by London calendar day ("410 by email on 3 Nov, 1 by
+   * email on 4 Nov"), oldest first: the day each email was accepted, or each
+   * person was marked. Joiners are under `joiners`, not here.
+   */
+  toldByDay: FeeToldOnDay[];
   /** On the first list and not told yet: the rise waits for them. */
   waitingFor: number;
   /** Joined since the list (F8): told the same date, never holding it. */
@@ -837,6 +851,11 @@ export interface FeeNoticeItem {
   }>;
   /** False for someone who joined after the list was made: no hold (F8). */
   onList: boolean;
+  /**
+   * A joiner (`onList: false`): when the daily step added them to the
+   * change's list. Null for someone on the first list.
+   */
+  joinedAt: string | null;
   /** `failed`: it certainly didn't go. `unknown`: it may have. */
   state: 'failed' | 'unknown';
   reason: 'refused' | 'skipped' | 'no_address' | 'unknown' | null;

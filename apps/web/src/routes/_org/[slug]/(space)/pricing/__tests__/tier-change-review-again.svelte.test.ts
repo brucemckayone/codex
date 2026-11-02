@@ -93,6 +93,7 @@ function preview(
     newRecurringInterval: 'month',
     prorationDate,
     isUpgrade: true,
+    takesEffect: 'now',
     currentPeriodEnd: '2026-11-22T00:00:00.000Z',
   };
 }

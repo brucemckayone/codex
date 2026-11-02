@@ -176,6 +176,7 @@
     status: subscription.tiersStatus,
     currentPlan: subscription.subCtx.currentPlan,
     currentPeriodEnd: subscription.subCtx.currentPeriodEnd,
+    pendingPlan: subscription.subCtx.pendingPlan,
   }}
 >
   {#snippet creatorAttribution()}

@@ -19,6 +19,9 @@ import { ApiError } from '$lib/api/errors';
 const subscriptionApi = vi.hoisted(() => ({
   previewTierChange: vi.fn(),
   changeTier: vi.fn(),
+  keepCurrentPlan: vi.fn(),
+  cancelCourseSubscription: vi.fn(),
+  reactivateCourseSubscription: vi.fn(),
 }));
 
 vi.mock('$lib/server/api', () => ({
@@ -45,8 +48,11 @@ vi.mock('$app/server', () => {
 });
 
 import {
+  cancelCourseSubscription,
   changeSubscriptionTier,
+  keepCurrentPlan,
   previewSubscriptionTierChange,
+  reactivateCourseSubscription,
 } from './subscription.remote';
 
 const INPUT = {
@@ -101,6 +107,90 @@ describe('subscription command failures', () => {
       detailsCode: undefined,
       message: 'Your card was declined.',
       status: 402,
+    });
+  });
+});
+
+/**
+ * Keep current plan and the course commands (Codex-2hxff.16, .52): the page
+ * reads their refusals by `detailsCode` too. Keep after the renewal is
+ * MOVE_ALREADY_LANDED; reactivating a course no longer offered is
+ * COURSE_NOT_ON_SALE. A course command answers with the card's row.
+ */
+describe('Keep current plan and the course commands', () => {
+  const COURSE_SUBSCRIPTION_ID = '00000000-0000-4000-8000-0000000000c1';
+  const call = (run: unknown, input: unknown) =>
+    (run as (input: unknown) => Promise<unknown>)(input);
+
+  it('keepCurrentPlan forwards MOVE_ALREADY_LANDED as detailsCode', async () => {
+    subscriptionApi.keepCurrentPlan.mockRejectedValueOnce(
+      new ApiError(
+        409,
+        'Your plan has already changed at your renewal.',
+        'CONFLICT',
+        { code: 'MOVE_ALREADY_LANDED', organizationId: INPUT.organizationId }
+      )
+    );
+
+    const result = await call(keepCurrentPlan, {
+      organizationId: INPUT.organizationId,
+    });
+
+    expect(subscriptionApi.keepCurrentPlan).toHaveBeenCalledWith({
+      organizationId: INPUT.organizationId,
+    });
+    expect(result).toMatchObject({
+      success: false,
+      code: 'CONFLICT',
+      detailsCode: 'MOVE_ALREADY_LANDED',
+      status: 409,
+    });
+  });
+
+  it('reactivateCourseSubscription forwards COURSE_NOT_ON_SALE as detailsCode', async () => {
+    subscriptionApi.reactivateCourseSubscription.mockRejectedValueOnce(
+      new ApiError(409, 'This course is no longer offered.', 'CONFLICT', {
+        code: 'COURSE_NOT_ON_SALE',
+        courseSubscriptionId: COURSE_SUBSCRIPTION_ID,
+      })
+    );
+
+    const result = await call(reactivateCourseSubscription, {
+      courseSubscriptionId: COURSE_SUBSCRIPTION_ID,
+    });
+
+    expect(subscriptionApi.reactivateCourseSubscription).toHaveBeenCalledWith(
+      COURSE_SUBSCRIPTION_ID
+    );
+    expect(result).toMatchObject({
+      success: false,
+      detailsCode: 'COURSE_NOT_ON_SALE',
+      status: 409,
+    });
+  });
+
+  it('cancelCourseSubscription answers with the row, and no answer is a 500', async () => {
+    const row = { id: COURSE_SUBSCRIPTION_ID, status: 'cancelling' };
+    subscriptionApi.cancelCourseSubscription.mockResolvedValueOnce(row);
+    await expect(
+      call(cancelCourseSubscription, {
+        courseSubscriptionId: COURSE_SUBSCRIPTION_ID,
+      })
+    ).resolves.toEqual({ success: true, data: row });
+
+    subscriptionApi.cancelCourseSubscription.mockRejectedValueOnce(
+      new TypeError('fetch failed')
+    );
+    await expect(
+      call(cancelCourseSubscription, {
+        courseSubscriptionId: COURSE_SUBSCRIPTION_ID,
+      })
+    ).resolves.toEqual({
+      success: false,
+      code: undefined,
+      detailsCode: undefined,
+      message: 'An unexpected error occurred',
+      status: 500,
     });
   });
 });

@@ -103,6 +103,7 @@ import type {
   PriceChangeProgress,
   SubscriberListItem,
   SubscriptionCheckoutVerifyResult,
+  UserCourseSubscription,
 } from '@codex/subscription';
 import {
   buildServiceUrl as getServiceUrl,
@@ -344,6 +345,13 @@ export interface TierDeleteImpactCourse {
 export interface TierDeleteImpact {
   /** Every subscription on the tier that isn't cancelled. > 0 → the delete is refused (`TIER_HAS_SUBSCRIBERS`). */
   liveSubscriberCount: number;
+  /**
+   * Subscriptions waiting to move to the tier at their renewal, not cancelled
+   * (Codex-2hxff.16, T5). > 0 → refused too, as for `liveSubscriberCount`.
+   */
+  movingInCount: number;
+  /** ISO: the latest of those renewals; null with none. */
+  lastMoveAt: string | null;
   onlyHere: {
     films: {
       total: number;
@@ -3753,6 +3761,53 @@ export function createServerApi(
         request<CreatorEarningsSummary>(
           'ecom',
           `/subscriptions/me/earnings-summary${params?.toString() ? `?${params.toString()}` : ''}`
+        ),
+
+      // ── Waiting moves and course subscriptions (Codex-2hxff.16, .52) ────
+
+      /**
+       * Undo a move to a cheaper plan before the renewal it lands on: the
+       * member stays on their plan and nothing is charged. With nothing
+       * waiting it changes nothing. After that renewal: 409
+       * `MOVE_ALREADY_LANDED` in `details.code`.
+       */
+      keepCurrentPlan: (data: { organizationId: string }) =>
+        request<CurrentSubscription>(
+          'ecom',
+          '/subscriptions/keep-current-plan',
+          {
+            method: 'POST',
+            body: JSON.stringify(data),
+          }
+        ),
+
+      /**
+       * The user's own course subscriptions for Account › Subscriptions:
+       * live, not ended, not a duplicate, newest first. Paginated.
+       */
+      listMyCourseSubscriptions: (params?: URLSearchParams) =>
+        request<PaginatedListResponse<UserCourseSubscription>>(
+          'ecom',
+          `/subscriptions/courses/mine${params?.toString() ? `?${params.toString()}` : ''}`
+        ),
+
+      /** Cancel one of the user's course subscriptions at period end. No body. */
+      cancelCourseSubscription: (courseSubscriptionId: string) =>
+        request<UserCourseSubscription>(
+          'ecom',
+          `/subscriptions/courses/${encodeURIComponent(courseSubscriptionId)}/cancel`,
+          { method: 'POST' }
+        ),
+
+      /**
+       * Undo a course subscription's cancel before the period ends. No body.
+       * 409 `COURSE_NOT_ON_SALE` when the course is no longer offered.
+       */
+      reactivateCourseSubscription: (courseSubscriptionId: string) =>
+        request<UserCourseSubscription>(
+          'ecom',
+          `/subscriptions/courses/${encodeURIComponent(courseSubscriptionId)}/reactivate`,
+          { method: 'POST' }
         ),
     },
 

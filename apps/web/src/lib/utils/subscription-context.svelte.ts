@@ -29,8 +29,8 @@
  * Plan access (Codex-2hxff.91): the subscription covers the content when its
  * plan is one of the item's `includedInTierIds` (set membership, never a
  * `sortOrder` ladder), so the live override needs no tier list. The tiers,
- * the viewer's plan and the period end are passed on for the paywall's plan
- * names (`describePlanPaywall`).
+ * the viewer's plan, the period end and any waiting move (Codex-2hxff.16)
+ * are passed on for the paywall's plan names (`describePlanPaywall`).
  */
 
 import { subscriptionStatusGrantsAccess } from '@codex/constants';
@@ -38,7 +38,7 @@ import { untrack } from 'svelte';
 import { browser } from '$app/environment';
 import { subscriptionCollection } from '$lib/collections';
 import type { SubscriptionContext, SubscriptionTier } from '$lib/types';
-import type { PlanListStatus, ViewerPlan } from './plan-label';
+import type { PendingPlan, PlanListStatus, ViewerPlan } from './plan-label';
 
 type ResolvedSubscriptionContext = Pick<
   SubscriptionContext,
@@ -76,6 +76,11 @@ interface SubCtx {
   currentPlan: ViewerPlan | null;
   /** When that plan's period ends (ISO), for the change-plan line. */
   currentPeriodEnd: string | null;
+  /**
+   * Where a move to a cheaper plan goes at the renewal (Codex-2hxff.16):
+   * the paywall says when an item in that plan opens.
+   */
+  pendingPlan: PendingPlan | null;
 }
 
 const NO_SUBSCRIPTION = {
@@ -83,7 +88,20 @@ const NO_SUBSCRIPTION = {
   subscriptionCoversContent: false,
   currentPlan: null,
   currentPeriodEnd: null,
+  pendingPlan: null,
 } as const;
+
+/** The waiting move as the paywall reads it; null when nothing waits. */
+function pendingPlanOf(
+  move:
+    | { tierId: string; tierName: string; effectiveAt: string }
+    | null
+    | undefined
+): PendingPlan | null {
+  return move
+    ? { id: move.tierId, name: move.tierName, effectiveAt: move.effectiveAt }
+    : null;
+}
 
 export function useSubscriptionContext(
   getParams: () => UseSubscriptionContextParams
@@ -142,6 +160,7 @@ export function useSubscriptionContext(
                   ? { id: sub.tier.id, name: sub.tier.name }
                   : null,
                 currentPeriodEnd: sub?.currentPeriodEnd ?? null,
+                pendingPlan: pendingPlanOf(sub?.pendingTierChange),
               };
               resolvedTiers = ctx.tiers ?? [];
               tiersStatus = ctx.tiersFailed ? 'failed' : 'ready';
@@ -196,6 +215,8 @@ export function useSubscriptionContext(
           : true,
         currentPlan: { id: sub.tier.id, name: sub.tier.name },
         currentPeriodEnd: sub.currentPeriodEnd ?? null,
+        // An entry written before the field existed reads as nothing waiting.
+        pendingPlan: pendingPlanOf(sub.pendingTierChange),
       };
     }
     return promiseSubCtx;
