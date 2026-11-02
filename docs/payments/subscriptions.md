@@ -579,6 +579,16 @@ runs, 9 to 10 hours with the 08:00 gap.
   on or after that date, the switch is made as above. If a newer save has
   archived that Price before the step reached them, it is made active again
   first, and the accepted change still lands (F2).
+- **A switch after an early move credits what was paid.** Either way the
+  item carries the new Price for the rest of a period paid at the old one.
+  An upgrade or a switch of billing period then credits the unused time at
+  the OLD price, because Stripe credits the invoiced line: each credit names
+  it in `proration_details.credited_items`. It does not use the item's
+  current Price. So nothing is put back first, and the change-plan dialog's
+  plain preview equals the charge. Proven on test clocks for a rise, a cut,
+  two early moves and the pending path (`Codex-2hxff.95`,
+  `packages/subscription/scripts/test-clock-paid-price.ts`). This holds on
+  the pinned apiVersion: re-run that script before upgrading it.
 - Past-due and paused subscribers are only marked pending, and move when they
   are active again. A subscriber already paying the new amount is not emailed.
 - The other interval's subscribers are never touched: switching a monthly
