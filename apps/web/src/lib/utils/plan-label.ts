@@ -474,12 +474,47 @@ function changeTiming(
 
 /** What the notice of a waiting move needs (`PendingTierChange`'s fields). */
 export interface WaitingMove {
+  /**
+   * What waits (Codex-2hxff.97): a cheaper plan on the same billing, a
+   * switch to monthly billing on the same plan, or both. Only yearly
+   * billing waits to become monthly, so the billing kinds word it monthly.
+   */
+  kind: 'plan' | 'billing' | 'plan_and_billing';
   tierName: string;
   /** The next bill, at the target's price. */
   amountCents: number;
   billingInterval: 'month' | 'year';
   /** A price change on the target after the move (T6); null until .86 fills it. */
   laterPrice: null | { amountCents: number; effectiveAt: string };
+}
+
+/** The notice's title: "Moving to Basic on 12 November". */
+export function waitingMoveTitle(
+  move: Pick<WaitingMove, 'kind' | 'tierName'> & { effectiveAt: string },
+  formatDate: (iso: string) => string
+): string {
+  const date = formatDate(move.effectiveAt);
+  switch (move.kind) {
+    case 'billing':
+      return m.pricing_billing_notice_title_month({ date });
+    case 'plan_and_billing':
+      return m.pricing_move_notice_title_billing_month({
+        plan: move.tierName,
+        date,
+      });
+    default:
+      return m.pricing_move_notice_title({ plan: move.tierName, date });
+  }
+}
+
+/**
+ * The notice's button. One Keep undoes the whole change (Q4); it is "Keep
+ * yearly billing" when the plan stays the same.
+ */
+export function waitingMoveKeepLabel(move: Pick<WaitingMove, 'kind'>): string {
+  return move.kind === 'billing'
+    ? m.pricing_billing_keep()
+    : m.pricing_move_keep();
 }
 
 /**
@@ -499,6 +534,25 @@ export function waitingMoveBody(
     price: formatPrice(move.amountCents),
   };
   const later = move.laterPrice;
+  if (move.kind === 'billing') {
+    const billing = { plan: move.tierName, price: params.price };
+    return later
+      ? m.pricing_billing_notice_body_later_month({
+          ...billing,
+          laterPrice: formatPrice(later.amountCents),
+          laterDate: formatDate(later.effectiveAt),
+        })
+      : m.pricing_billing_notice_body_month(billing);
+  }
+  if (move.kind === 'plan_and_billing') {
+    return later
+      ? m.pricing_move_notice_body_billing_later_month({
+          ...params,
+          laterPrice: formatPrice(later.amountCents),
+          laterDate: formatDate(later.effectiveAt),
+        })
+      : m.pricing_move_notice_body_billing_month(params);
+  }
   if (later) {
     const withLater = {
       ...params,
@@ -512,6 +566,58 @@ export function waitingMoveBody(
   return move.billingInterval === 'year'
     ? m.pricing_move_notice_body_year(params)
     : m.pricing_move_notice_body_month(params);
+}
+
+/**
+ * What Keep came to (page 2 states 3-4; year-to-month-waits A2). `date` and
+ * `price` are formatted already; without either the line names no payment.
+ */
+export function waitingMoveKeptLine(
+  move: Pick<WaitingMove, 'kind'> | null,
+  plan: string,
+  date: string | null,
+  price: string | null
+): string {
+  if (move?.kind === 'billing') {
+    return date && price
+      ? m.pricing_move_kept_billing({ date, price })
+      : m.pricing_move_kept_billing_undated();
+  }
+  return date && price
+    ? m.pricing_move_kept({ plan, date, price })
+    : m.pricing_move_kept_undated({ plan });
+}
+
+/** A refused Keep: what waits is still set. */
+export function waitingMoveKeepFailedLine(
+  move: Pick<WaitingMove, 'kind' | 'tierName'> & { effectiveAt: string },
+  plan: string,
+  formatDate: (iso: string) => string
+): string {
+  const date = formatDate(move.effectiveAt);
+  return move.kind === 'billing'
+    ? m.pricing_move_keep_failed_billing({ date })
+    : m.pricing_move_keep_failed({ plan, movingTo: move.tierName, date });
+}
+
+/** Keep pressed after the renewal it waited for: the change has happened. */
+export function waitingMoveLandedLine(
+  move: Pick<WaitingMove, 'kind' | 'tierName'>
+): string {
+  return move.kind === 'billing'
+    ? m.pricing_move_landed_billing()
+    : m.pricing_move_landed({ plan: move.tierName });
+}
+
+/** Set to cancel: reactivating brings what waits back (T4). */
+export function waitingMoveSurvivesCancelLine(
+  move: Pick<WaitingMove, 'kind' | 'tierName'> & { effectiveAt: string },
+  formatDate: (iso: string) => string
+): string {
+  const date = formatDate(move.effectiveAt);
+  return move.kind === 'billing'
+    ? m.account_billing_change_survives_cancel({ date })
+    : m.subscription_move_survives_cancel({ plan: move.tierName, date });
 }
 
 /** The pricing page's words when it is opened from an item (U10). */

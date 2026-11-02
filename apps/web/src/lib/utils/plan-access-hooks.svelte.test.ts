@@ -186,6 +186,7 @@ describe('useSubscriptionContext: covered by set membership', () => {
           currentPeriodEnd: '2026-11-12T09:00:00.000Z',
           pendingTierChange: {
             ...moving,
+            kind: 'plan',
             amountCents: 500,
             billingInterval: 'month',
             laterPrice: null,
