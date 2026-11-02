@@ -464,10 +464,11 @@ describe('schemes.css ↔ model parity', () => {
     expect(exact).toContain(
       '--lp-mark-ink: rgb(from var(--lp-accent-source) var(--_ol-r) var(--_ol-g) var(--_ol-b));'
     );
-    const step =
-      'calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))';
+    // The step itself is written once, at themes/light.css's foot
+    // (`--_on-fill-step`); rail/contrast.test.ts pins it and every ink.
+    const step = 'calc(255 * var(--_on-fill-step))';
     expect(ORG_BRAND).toContain(
-      `--color-on-interactive: rgb( from var(--color-interactive) ${step} ${step} ${step} );`
+      `--color-on-interactive: rgb(from var(--color-interactive) ${step} ${step} ${step});`
     );
     // The kit's `--_w` is that step, written once from the same fragments.
     expect(EXACT).toContain('--_w: clamp(0, (0.1791 - var(--_y)) * 1e12, 1);');

@@ -18,7 +18,9 @@
   --color-text-muted: var(--color-neutral-400);
   --color-text-disabled: var(--color-neutral-400);
   --color-text-inverse: #ffffff;
-  --color-text-on-brand: #ffffff;
+  /* Chosen from the fill like every ink below, not fixed: a fixed white
+     painted white on the dark theme's salmon primary (#f47d67, 2.6:1). */
+  --color-text-on-brand: oklch(from var(--color-brand-primary) clamp(0, (0.62 - l) * 1000, 1) 0 0);
 
   /* Borders */
   --color-border: var(--color-neutral-200);
@@ -47,6 +49,11 @@
      never see an org override.
      (No :root fallback needed — `:root` is in this rule's selector list.) */
   --color-on-interactive: oklch(from var(--color-interactive) clamp(0, (0.62 - l) * 1000, 1) 0 0);
+  /* The hovered and pressed fills get their own inks: a label chosen for the
+     resting fill can fail on them (Codex-mik4h). */
+  --color-on-interactive-hover: oklch(from var(--color-interactive-hover) clamp(0, (0.62 - l) * 1000, 1) 0 0);
+  --color-on-interactive-active: oklch(from var(--color-interactive-active) clamp(0, (0.62 - l) * 1000, 1) 0 0);
+  --color-text-on-brand-hover: oklch(from var(--color-brand-primary-hover) clamp(0, (0.62 - l) * 1000, 1) 0 0);
 
   /* Focus */
   --color-focus: var(--color-primary-500);
@@ -72,6 +79,7 @@
      saturated red (Codex-1g5lh.18). Same step function and same per-scope
      re-declaration rule as --color-on-interactive above. */
   --color-text-on-accent: oklch(from var(--color-brand-accent) clamp(0, (0.62 - l) * 1000, 1) 0 0);
+  --color-text-on-accent-hover: oklch(from var(--color-brand-accent-hover) clamp(0, (0.62 - l) * 1000, 1) 0 0);
 
   /* Media cover treatments (ContentCard shape system).
      --media-scrim darkens the bottom of a media tile so overlaid text
@@ -93,18 +101,25 @@
    pick the same ink either way; a fill in the band the step misjudged, such
    as a saturated green, no longer gets the weaker one. */
 @supports (color: rgb(from red calc(255 * pow(r / 255, 2)) 0 0)) {
+  /* THE STEP, WRITTEN ONCE for every ink here, in dark.css and in
+     org-brand.css: 1 where the fill's luminance is under 0.1791, 0 above.
+     `r`, `g` and `b` have no value here; the property holds the expression
+     unresolved, and they bind to the fill where an ink substitutes it inside
+     `rgb(from FILL …)`, as the page kit does with `--_y`. Every
+     `--color-*-on-*` ink is `rgb(from FILL S S S)` with
+     S = `calc(255 * var(--_on-fill-step))`. The derivation, the knee and why
+     the ramp is `* 1e12` are in org-brand.css's foot. */
+  :root {
+    --_on-fill-step: clamp(0, (0.1791 - (0.2126 * pow((clamp(0, r, 255) / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((clamp(0, g, 255) / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((clamp(0, b, 255) / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1);
+  }
+
   :root, [data-theme="light"] {
-    --color-on-interactive: rgb(
-      from var(--color-interactive)
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
-    );
-    --color-text-on-accent: rgb(
-      from var(--color-brand-accent)
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
-    );
+    --color-text-on-brand: rgb(from var(--color-brand-primary) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
+    --color-text-on-brand-hover: rgb(from var(--color-brand-primary-hover) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
+    --color-on-interactive: rgb(from var(--color-interactive) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
+    --color-on-interactive-hover: rgb(from var(--color-interactive-hover) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
+    --color-on-interactive-active: rgb(from var(--color-interactive-active) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
+    --color-text-on-accent: rgb(from var(--color-brand-accent) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
+    --color-text-on-accent-hover: rgb(from var(--color-brand-accent-hover) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
   }
 }
