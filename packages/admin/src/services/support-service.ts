@@ -68,6 +68,7 @@ import {
   feeChangeNotices,
   feeChanges,
   feeConfigVersions,
+  organizationMemberships,
   organizations,
   type Payout,
   type PayoutReversal,
@@ -2983,6 +2984,7 @@ export class SupportService extends BaseService {
             notice: feeChangeNotices,
             changeSavedAt: feeChanges.createdAt,
             changeEffectiveFrom: feeChanges.effectiveFrom,
+            changeFirstRunAt: feeChanges.firstRunAt,
             name: users.name,
             email: users.email,
             deletedAt: users.deletedAt,
@@ -3000,9 +3002,14 @@ export class SupportService extends BaseService {
           .innerJoin(feeChanges, eq(feeChanges.id, feeChangeNotices.changeId))
           .where(where),
       ]);
-      const names = await this.organizationNames(
-        rows.flatMap(({ notice }) => notice.roles.map((r) => r.organizationId))
-      );
+      const [names, joined] = await Promise.all([
+        this.organizationNames(
+          rows.flatMap(({ notice }) =>
+            notice.roles.map((r) => r.organizationId)
+          )
+        ),
+        this.joinedSinceAnnounced(rows),
+      ]);
       const nextTryAt = nextFeeNoticeRunAfter(now).toISOString();
       const items = rows.map(
         ({
@@ -3029,8 +3036,7 @@ export class SupportService extends BaseService {
             as: role.as,
           })),
           onList: notice.onList,
-          // The step inserts a joiner's notice the morning it finds them.
-          joinedAt: notice.onList ? null : notice.createdAt.toISOString(),
+          joinedAt: toIso(joined.get(notice.id) ?? null),
           // notToldYet reads only these two.
           state: notice.state === 'unknown' ? 'unknown' : 'failed',
           reason: notice.lastReason,
@@ -3207,6 +3213,67 @@ export class SupportService extends BaseService {
       .where(and(inArray(n.changeId, changeIds), eq(n.kind, 'announce')))
       .groupBy(n.changeId);
     return new Map(rows.map((row) => [row.changeId, row]));
+  }
+
+  /**
+   * F7's "joined 12 Nov": for each joiner, the day they joined one of the
+   * organisations the rise reaches them through, when that is on or after
+   * the rise's first announcement. An older membership means they joined
+   * the LIST, not the organisation (a promotion, say), and an orgless
+   * creator has no membership: both are null, never the notice's own date
+   * (that is `waitingSince`).
+   */
+  private async joinedSinceAnnounced(
+    rows: Array<{
+      notice: {
+        id: string;
+        userId: string;
+        onList: boolean;
+        roles: Array<{ organizationId: string | null }>;
+      };
+      changeFirstRunAt: Date | null;
+    }>
+  ): Promise<Map<string, Date>> {
+    const joiners = rows.filter(
+      ({ notice, changeFirstRunAt }) =>
+        !notice.onList && changeFirstRunAt !== null
+    );
+    const userIds = unique(joiners.map(({ notice }) => notice.userId));
+    const orgIds = unique(
+      joiners.flatMap(({ notice }) =>
+        notice.roles.map((role) => role.organizationId)
+      )
+    );
+    const joined = new Map<string, Date>();
+    if (userIds.length === 0 || orgIds.length === 0) return joined;
+    const memberships = await this.db
+      .select({
+        userId: organizationMemberships.userId,
+        organizationId: organizationMemberships.organizationId,
+        createdAt: organizationMemberships.createdAt,
+      })
+      .from(organizationMemberships)
+      .where(
+        and(
+          inArray(organizationMemberships.userId, userIds),
+          inArray(organizationMemberships.organizationId, orgIds)
+        )
+      );
+    const since = new Map(
+      memberships.map((m) => [`${m.userId}:${m.organizationId}`, m.createdAt])
+    );
+    for (const { notice, changeFirstRunAt } of joiners) {
+      if (!changeFirstRunAt) continue;
+      // The earliest such join: the one that made them a joiner.
+      for (const role of notice.roles) {
+        if (!role.organizationId) continue;
+        const at = since.get(`${notice.userId}:${role.organizationId}`);
+        if (!at || at < changeFirstRunAt) continue;
+        const best = joined.get(notice.id);
+        if (!best || at < best) joined.set(notice.id, at);
+      }
+    }
+    return joined;
   }
 
   /**
