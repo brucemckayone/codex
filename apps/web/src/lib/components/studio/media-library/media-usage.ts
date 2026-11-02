@@ -95,7 +95,7 @@ export function useKey(use: MediaUse): string {
 }
 
 const SLOT_LABELS: Record<
-  Exclude<MediaUseSlot, 'media' | 'org_intro'>,
+  Exclude<MediaUseSlot, 'media' | 'thumbnail' | 'org_intro'>,
   () => string
 > = {
   intro: () => m.studio_builder_media_slot_intro(),
@@ -118,7 +118,9 @@ export function useWhere(use: MediaUse): string {
   }
   if (use.kind === 'course') {
     const slot =
-      use.slot === 'media' || use.slot === 'org_intro'
+      use.slot === 'media' ||
+      use.slot === 'thumbnail' ||
+      use.slot === 'org_intro'
         ? null
         : SLOT_LABELS[use.slot]();
     const what = use.live
@@ -127,10 +129,13 @@ export function useWhere(use: MediaUse): string {
     return [what, slot, org].filter(Boolean).join(' · ');
   }
   const audio = use.kind === 'audio';
+  // Content that plays another item but shows this one's frame (Codex-9seq3).
+  const frame = use.slot === 'thumbnail' ? m.media_use_where_thumbnail() : null;
   if (use.liveReason === 'bought') {
-    return audio
+    const bought = audio
       ? m.media_use_where_bought_audio()
       : m.media_use_where_bought_film();
+    return [bought, frame].filter(Boolean).join(' · ');
   }
   const what = use.live
     ? audio
@@ -139,7 +144,7 @@ export function useWhere(use: MediaUse): string {
     : audio
       ? m.media_use_where_audio_draft()
       : m.media_use_where_film_draft();
-  return [what, org].filter(Boolean).join(' · ');
+  return [what, frame, org].filter(Boolean).join(' · ');
 }
 
 /**
@@ -247,23 +252,45 @@ export function firstOpenableDraft(usage: MediaUsage): MediaUse | null {
 }
 
 /**
+ * Whether the published uses (`live`), or the drafts, of `usage` only show
+ * the item's frame as their thumbnail (Codex-9seq3), every one of them named:
+ * the copy then speaks of a thumbnail, not of media. A mixed list keeps the
+ * media copy, and each row's second line says which use it is.
+ */
+export function onlyThumbnails(usage: MediaUsage, live: boolean): boolean {
+  const group = usage.uses.filter((use) => use.live === live);
+  return (
+    group.length > 0 &&
+    group.length === (live ? usage.live : usage.drafts) &&
+    group.every((use) => use.slot === 'thumbnail')
+  );
+}
+
+/**
  * The toast after a delete that leaves drafts without media (owner round 2,
  * decision 6): "Deleted. 2 drafts need a new media item." with Show them,
  * which opens the first draft the creator can open. No link when none can be.
- * A toast with an action stays until closed (`toast.add`).
+ * A toast with an action stays until closed (`toast.add`). With `thumbnails`
+ * ({@link onlyThumbnails}), the drafts need a new thumbnail instead.
  */
 export function draftsLeftToast(
   drafts: number,
   firstDraft: MediaUse | null,
-  current: URL
+  current: URL,
+  thumbnails = false
 ): ToastData {
   const one = drafts === 1;
   const href = firstDraft ? useHref(firstDraft.link, current) : null;
+  const title = thumbnails
+    ? one
+      ? m.media_delete_toast_drafts_thumbnail_one()
+      : m.media_delete_toast_drafts_thumbnail({ count: drafts })
+    : one
+      ? m.media_delete_toast_drafts_one()
+      : m.media_delete_toast_drafts({ count: drafts });
   return {
     variant: 'success',
-    title: one
-      ? m.media_delete_toast_drafts_one()
-      : m.media_delete_toast_drafts({ count: drafts }),
+    title,
     ...(href && {
       action: {
         label: one

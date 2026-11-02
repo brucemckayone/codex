@@ -275,7 +275,10 @@
         "API_URL": "https://media-api.revelations.studio",
         // The endpoint's max workers; RunPod scales an idle endpoint down to
         // 0 (paused) and media-api raises it back to this (Codex-l2c48.5).
-        "RUNPOD_WORKERS_MAX": "5"
+        "RUNPOD_WORKERS_MAX": "5",
+        // The CDN the posters are served from: the file purge takes a purged
+        // item's posters off its edge cache (Codex-9seq3).
+        "R2_PUBLIC_URL_BASE": "https://cdn-assets.revelations.studio"
       },
       // Bindings are not inherited into a named env — see the default env.
       "ratelimits": [
