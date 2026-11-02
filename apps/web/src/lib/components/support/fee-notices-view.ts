@@ -212,6 +212,45 @@ export interface CardFact {
   smallMono?: string;
 }
 
+const londonDateFormatter = new Intl.DateTimeFormat('en-GB', {
+  day: 'numeric',
+  month: 'short',
+  timeZone: 'UTC',
+});
+
+/** `3 Nov`, for a London calendar day the server sends as `YYYY-MM-DD`. */
+function formatLondonDate(londonDate: string): string {
+  // Noon UTC falls on the same calendar day in London, in any season.
+  return londonDateFormatter.format(new Date(`${londonDate}T12:00:00Z`));
+}
+
+/**
+ * The first list's emails (F2): by day while the rise waits ("410 by email
+ * on 3 Nov, 1 by email on 4 Nov"), the total once it is dated, as F4 draws
+ * it ("411 by email").
+ */
+function toldByEmailLines(card: FeeChangeCard): string[] {
+  if (card.told.byEmail === 0) return [];
+  const days = card.toldByDay.filter((day) => day.byEmail > 0);
+  if (card.effectiveFrom === null && days.length > 0) {
+    return [
+      days
+        .map((day) =>
+          m.support_queue_fees_told_by_email_on({
+            count: day.byEmail.toLocaleString('en-GB'),
+            date: formatLondonDate(day.londonDate),
+          })
+        )
+        .join(', '),
+    ];
+  }
+  return [
+    m.support_queue_fees_told_by_email({
+      count: card.told.byEmail.toLocaleString('en-GB'),
+    }),
+  ];
+}
+
 function toldAnotherWayLines(card: FeeChangeCard): string[] {
   return card.toldAnotherWay.map((told) =>
     m.support_queue_fees_told_another_way_by({
@@ -245,18 +284,7 @@ function toldFact(card: FeeChangeCard): CardFact {
   if (card.effectiveFrom && card.joiners.waiting > 0) {
     return { term, text, small: m.support_queue_fees_told_everyone_listed() };
   }
-  // F2 draws the email count by day ("410 by email on 3 Nov, 1 by email on
-  // 4 Nov"). Until the server sends days, `told_by_email` says the total.
-  const parts = [
-    ...(card.told.byEmail > 0
-      ? [
-          m.support_queue_fees_told_by_email({
-            count: card.told.byEmail.toLocaleString('en-GB'),
-          }),
-        ]
-      : []),
-    ...toldAnotherWayLines(card),
-  ];
+  const parts = [...toldByEmailLines(card), ...toldAnotherWayLines(card)];
   return { term, text, small: parts.length > 0 ? parts.join('; ') : undefined };
 }
 
@@ -421,9 +449,13 @@ export function noticeNext(
     when: runWhen(item.nextTryAt, now),
   });
   if (!item.onList) {
-    // F7 draws the join date ("joined 12 Nov, so this doesn't hold the
-    // date"). Until the server sends it, this key leaves the date out.
-    const joiner = m.support_queue_fees_joiner_holds_nothing();
+    // F7: when they joined. Null for an older membership or an orgless
+    // creator, and the words then leave the date out.
+    const joiner = item.joinedAt
+      ? m.support_queue_fees_joiner_joined({
+          date: formatShortDay(item.joinedAt),
+        })
+      : m.support_queue_fees_joiner_holds_nothing();
     return where === 'table'
       ? `${address} · ${joiner} · ${tries}`
       : capitalise(joiner);
@@ -577,15 +609,21 @@ export function markRefusalNotice(
         text: answer.message ?? m.support_queue_fees_refused_not_waiting(),
       };
     case 'FEE_NOTICE_ALREADY_TOLD':
-      // F6 draws who marked them ("by Sam Ortiz at 10:41"). The 409 names
-      // nobody yet, so these two keys name only the person told.
+      // F6: who marked them, when the 409 can name them.
       if (answer.state === 'told_another_way' && answer.toldAt) {
+        const time = formatTime(answer.toldAt);
         return {
           variant: 'info',
-          text: m.support_queue_fees_refused_already_marked({
-            name: first,
-            time: formatTime(answer.toldAt),
-          }),
+          text: answer.toldByName
+            ? m.support_queue_fees_refused_already_marked_by({
+                name: first,
+                by: answer.toldByName,
+                time,
+              })
+            : m.support_queue_fees_refused_already_marked({
+                name: first,
+                time,
+              }),
         };
       }
       if (answer.state === 'sent' && answer.acceptedAt) {

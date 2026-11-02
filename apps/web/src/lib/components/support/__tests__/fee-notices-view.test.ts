@@ -30,6 +30,10 @@ const JONAH = feeNotice().person;
 
 const DATED = feeChangeCard({
   told: { byEmail: 411, anotherWay: 1 },
+  toldByDay: [
+    { londonDate: '2026-11-03', byEmail: 410, anotherWay: 0 },
+    { londonDate: '2026-11-04', byEmail: 1, anotherWay: 1 },
+  ],
   waitingFor: 0,
   joiners: { total: 1, told: 1, waiting: 0 },
   toldAnotherWay: [
@@ -57,7 +61,7 @@ describe('a fee change card', () => {
       label: 'Waiting for 2',
     });
     expect(changeFacts(card)).toEqual([
-      { term: 'Told', text: '410 of 412', small: '410 by email' },
+      { term: 'Told', text: '410 of 412', small: '410 by email on 3 Nov' },
       { term: 'Joined since', text: 'Nobody yet' },
       {
         term: 'Starts',
@@ -65,6 +69,24 @@ describe('a fee change card', () => {
         strong: '4 December 2026',
       },
     ]);
+  });
+
+  test('F2 the second morning: the emails by day', () => {
+    const [told] = changeFacts(
+      feeChangeCard({
+        told: { byEmail: 411, anotherWay: 0 },
+        toldByDay: [
+          { londonDate: '2026-11-03', byEmail: 410, anotherWay: 0 },
+          { londonDate: '2026-11-04', byEmail: 1, anotherWay: 0 },
+        ],
+        waitingFor: 1,
+      })
+    );
+    expect(told).toEqual({
+      term: 'Told',
+      text: '411 of 412',
+      small: '410 by email on 3 Nov, 1 by email on 4 Nov',
+    });
   });
 
   test('F2 joiners are counted separately: told, not holding the date', () => {
@@ -164,7 +186,26 @@ describe('a person not told yet', () => {
     );
   });
 
-  test('F7 a joiner does not hold the date', () => {
+  test('F7 a joiner: when they joined, and that it does not hold the date', () => {
+    const item = feeNotice({
+      person: { ...JONAH, name: 'Sol Ibarra', email: 'sol@ibarra.film' },
+      onList: false,
+      joinedAt: '2026-11-12T09:30:00.000Z',
+      waitingSince: '2026-11-13T08:00:00.000Z',
+      lastTriedAt: '2026-11-13T08:00:05.000Z',
+      nextTryAt: '2026-11-14T08:00:00.000Z',
+      changeEffectiveFrom: '2026-12-05T00:00:00.000Z',
+    });
+    const now = new Date('2026-11-13T10:00:00.000Z');
+    expect(noticeNext(item, 'table', now)).toBe(
+      "sol@ibarra.film · joined 12 Nov, so this doesn't hold the date · tries again tomorrow at 08:00"
+    );
+    expect(noticeNext(item, 'phone', now)).toBe(
+      "Joined 12 Nov, so this doesn't hold the date"
+    );
+  });
+
+  test('F7 a joiner with no join date: the same words without it', () => {
     const item = feeNotice({
       person: { ...JONAH, name: 'Sol Ibarra', email: 'sol@ibarra.film' },
       onList: false,
@@ -239,7 +280,21 @@ describe('marking someone told another way', () => {
     });
   });
 
-  test('F6 already told: a second mark reads as done', () => {
+  test('F6 already told: who marked them, and when', () => {
+    const answer = failure({
+      status: 409,
+      detailsCode: 'FEE_NOTICE_ALREADY_TOLD',
+      state: 'told_another_way',
+      toldAt: '2026-11-04T10:41:00.000Z',
+      toldByName: 'Sam Ortiz',
+    });
+    expect(markRefusalNotice(feeNotice(), answer, NOW)).toEqual({
+      variant: 'info',
+      text: 'Jonah was already marked as told by Sam Ortiz at 10:41.',
+    });
+  });
+
+  test('F6 already told, by someone the 409 cannot name: no name', () => {
     const answer = failure({
       status: 409,
       detailsCode: 'FEE_NOTICE_ALREADY_TOLD',

@@ -155,6 +155,8 @@ describe('the fee note (Codex-2hxff.33 N4)', () => {
         effectiveFrom: '2026-12-05T00:00:00.000Z',
         earliestFrom: '2026-12-05T00:00:00.000Z',
         announcedAt: '2026-11-03T08:00:12.000Z',
+        smallerToldAt: null,
+        replaces: null,
         lines: [
           {
             organizationId: '11111111-1111-4111-8111-111111111111',
@@ -165,6 +167,7 @@ describe('the fee note (Codex-2hxff.33 N4)', () => {
             from: 1000,
             to: 1200,
             replaced: null,
+            replacesFigure: null,
           },
         ],
       },

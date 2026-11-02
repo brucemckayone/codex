@@ -226,6 +226,7 @@ export function failure(
     state: null,
     toldAt: null,
     acceptedAt: null,
+    toldByName: null,
     ...overrides,
   };
 }

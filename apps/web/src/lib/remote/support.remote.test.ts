@@ -575,6 +575,7 @@ describe('fee notices and price moves (Codex-2hxff.33, .85, .86)', () => {
         state: 'told_another_way',
         toldAt: '2026-11-04T10:41:00.000Z',
         acceptedAt: null,
+        toldByName: 'Sam Ortiz',
       })
     );
     await expect(
@@ -583,6 +584,7 @@ describe('fee notices and price moves (Codex-2hxff.33, .85, .86)', () => {
       detailsCode: 'FEE_NOTICE_ALREADY_TOLD',
       state: 'told_another_way',
       toldAt: '2026-11-04T10:41:00.000Z',
+      toldByName: 'Sam Ortiz',
     });
   });
 
