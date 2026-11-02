@@ -1181,10 +1181,14 @@ export class TierService extends BaseService {
    * only when the hourly step runs.
    */
   async listPriceChangeProgress(orgId: string): Promise<PriceChangeProgress[]> {
-    return readPriceChangeProgress(this.db, {
-      kind: 'tier',
-      organizationId: orgId,
-    });
+    try {
+      return await readPriceChangeProgress(this.db, {
+        kind: 'tier',
+        organizationId: orgId,
+      });
+    } catch (error) {
+      this.handleError(error, 'listPriceChangeProgress');
+    }
   }
 
   /**

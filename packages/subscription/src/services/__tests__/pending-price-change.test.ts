@@ -282,6 +282,101 @@ describe('schedulePriceChange', () => {
     });
   });
 
+  // Codex-2hxff.97: a switch to monthly billing waits for the year's end on
+  // a Stripe schedule, and the item keeps the yearly Price until then.
+  describe('a waiting change of billing, or a schedule attached', () => {
+    const switching = {
+      codex_move_tier_id: '6f1d2c3b-4a59-4e6f-8a7b-9c0d1e2f3a4b',
+      codex_move_at: String(NOTICE_SEC + 40 * DAY),
+      codex_hold_price_id: 'price_year',
+      codex_hold_amount: '12000',
+      codex_move_interval: 'month',
+      codex_move_price_id: 'price_old',
+      codex_move_amount: '500',
+    };
+
+    it('a mover onto the monthly price: judged on phase 2, quoted at what they will pay, the marker only', async () => {
+      const renewal = NOTICE_SEC + 40 * DAY;
+      const { stripe, update } = fakeStripe(
+        fakeSub({
+          renewal,
+          interval: 'year',
+          priceId: 'price_year',
+          unitAmount: 12000,
+          metadata: switching,
+        })
+      );
+
+      const outcome = await schedulePriceChange(
+        stripe,
+        { ...target, floorFrom: new Date((renewal + 1) * 1000) },
+        accept
+      );
+
+      expect(outcome).toMatchObject({
+        kind: 'pending',
+        currentAmountCents: 500,
+      });
+      expect(update.mock.calls[0]?.[1]).not.toHaveProperty('items');
+    });
+
+    it('a change on the yearly price they are leaving: skipped, nothing written', async () => {
+      const { stripe, update } = fakeStripe(
+        fakeSub({
+          renewal: NOTICE_SEC + 40 * DAY,
+          interval: 'year',
+          priceId: 'price_year',
+          unitAmount: 12000,
+          metadata: switching,
+        })
+      );
+
+      const outcome = await schedulePriceChange(
+        stripe,
+        { ...target, interval: 'year', newAmountCents: 13000 },
+        accept
+      );
+
+      expect(outcome).toEqual({ kind: 'skipped', reason: 'other_interval' });
+      expect(update).not.toHaveBeenCalled();
+    });
+
+    it('the same amount as phase 2: no item write (it would split the schedule)', async () => {
+      const { stripe, update } = fakeStripe(
+        fakeSub({
+          renewal: NOTICE_SEC + 40 * DAY,
+          interval: 'year',
+          priceId: 'price_year',
+          unitAmount: 12000,
+          metadata: switching,
+        })
+      );
+
+      const outcome = await schedulePriceChange(
+        stripe,
+        { ...target, newAmountCents: 500 },
+        accept
+      );
+
+      expect(outcome).toEqual({ kind: 'unchanged' });
+      for (const [, params] of update.mock.calls) {
+        expect(params).not.toHaveProperty('items');
+      }
+    });
+
+    it('a schedule attached: the marker, never a swap now, even 30 days out', async () => {
+      const renewal = NOTICE_SEC + 40 * DAY;
+      const sub = fakeSub({ renewal });
+      (sub as unknown as { schedule: string }).schedule = 'sub_sched_1';
+      const { stripe, update } = fakeStripe(sub);
+
+      const outcome = await schedulePriceChange(stripe, target, accept);
+
+      expect(outcome).toMatchObject({ kind: 'pending' });
+      expect(update.mock.calls[0]?.[1]).not.toHaveProperty('items');
+    });
+  });
+
   // The hourly step's last try for this person has an unknown outcome: the
   // email may have gone, or a run stopped after its write. Stripe already
   // carrying the change counts as moved: nothing is sent or written again.

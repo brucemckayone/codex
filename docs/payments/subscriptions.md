@@ -315,12 +315,20 @@ happens (`takesEffect`: `now` or `period_end`).
   and its access, until then. See [waiting moves](#waiting-moves).
 - **Same price** (owner decision Q4): switches now with no proration; nothing
   is charged or credited.
-- **The same tier on the other billing period** switches now, as before: a
-  credit for the unused time, or a charge.
-- **Another tier on the other billing period** switches now when it is not
-  cheaper. A cheaper one is two steps (T1), refused with
-  `TIER_CHANGE_TWO_STEPS` (422) and `details.firstStep`, the same-period
-  change to offer first.
+- **Leaving yearly billing waits for the year's end** (owner decision,
+  `Codex-2hxff.97`): nothing is credited or charged today. See
+  [waiting changes of billing](#waiting-changes-of-billing).
+  - The same tier, yearly to monthly (A), waits.
+  - A cheaper tier on monthly (B) is one waiting change, plan and billing
+    together (Q3).
+  - A dearer or same-price tier on monthly (C) changes the plan **now on
+    yearly billing**, the part-year difference charged as any upgrade, and
+    monthly billing waits for the renewal (Q1). A tier with no yearly Price
+    waits whole instead.
+- **Into yearly billing**, the same tier switches now with a charge.
+  Another tier switches now when it is not cheaper. A cheaper one is two
+  steps (T1), refused with `TIER_CHANGE_TWO_STEPS` (422) and
+  `details.firstStep`, the same-period change to offer first.
 - **A switch into yearly billing starts a new period today** (owner
   decision, `Codex-2hxff.96`), and is next billed a year from the switch, as
   the dialog says. This covers the same tier and another tier on yearly.
@@ -341,17 +349,17 @@ happens (`takesEffect`: `now` or `period_end`).
   - A change-tier for a switch into yearly without the quote is refused
     (400).
   - An upgrade on the same billing period keeps its billing day and its
-    pinned `proration_date`, and so, for now, does a switch into monthly.
-    `Codex-2hxff.97` makes that switch wait for the year's end, like a
-    downgrade.
+    pinned `proration_date`. A switch into monthly starts nothing today: it
+    waits for the year's end (`Codex-2hxff.97`).
 
 Refused before Stripe is written to, each 409 with `details.code`:
 
 | Code | When |
 |---|---|
 | `TIER_CHANGE_CANCELLING` | Set to cancel: reactivate first (owner decision Q2) |
-| `PENDING_MOVE_KEEP_FIRST` | A move waits, and the change would move money now (a dearer plan), or is to the plan they are on: Keep current plan first (T2) |
-| `TIER_CHANGE_INTERVAL_WHILE_MOVING` | A move waits, and the change switches billing period (Q3) |
+| `PENDING_MOVE_KEEP_FIRST` | A move or a change of billing waits, and the change would move money now (a dearer plan), or is to the plan they are on: Keep current plan first (T2) |
+| `TIER_CHANGE_INTERVAL_WHILE_MOVING` | A move waits, and the change switches INTO yearly billing (Q3). A switch to monthly joins the move instead (Q2, `Codex-2hxff.97`) |
+| `SUBSCRIPTION_SCHEDULED_ELSEWHERE` | A Stripe subscription schedule we did not make is attached (one made in the Dashboard, say). Nothing is written; one alert with `details.errorId` for support. Also refuses Keep, cancel and reactivate |
 | `SUBSCRIPTION_DISPUTED` | A chargeback is open ([subscription disputes](subscription-disputes.md)) |
 
 A change made in our UI is the only way to change tier — see
@@ -393,6 +401,12 @@ decision T1). It is the price-change machinery's immediate path
 - **The backstop.** ecom-api's existing hourly wake flips any move whose
   renewal is more than an hour past (at most 50 a run, oldest first), and
   alerts, once, what it could not flip. No new cron.
+- **A stale event.** Stripe delivers events late and out of order. One
+  written before a move was made, delivered after it, carries no move, and
+  mirrored as it is it would clear the row's move: the notice and Keep would
+  vanish while Stripe still makes the change. So an event without a move,
+  onto a row that holds one, is mirrored from the live subscription instead
+  (one Stripe call, only then; `Codex-2hxff.97`, data design §4.4).
 - **Ending.** A move survives a cancel until the subscription ends; the
   tombstone drops it.
 - **Deleting a tier** that subscribers are waiting to move to is refused
@@ -461,6 +475,97 @@ remove the `codex_move_*` and `codex_hold_*` keys. The next
     never an outdated one. Two Keeps on one tier with no change for its Price
     can both write one; the second hits the one-live-change index and runs
     once more, joining the first's.
+
+### Waiting changes of billing
+
+Leaving yearly billing waits for the end of the paid year (owner decision
+2026-11-02, `Codex-2hxff.97`). A switch's credit for the unused year would sit
+on the member's one Stripe customer, and Stripe spends it on their next bill
+from ANY organisation: a test clock showed one org's credit paying another
+org's renewal in full while both creators got £0.
+
+The downgrade's mechanism cannot carry it. Under flexible billing a monthly
+Price put on the item makes the current period a month, cutting the paid
+year short with nothing credited. So a change of billing rides a **Stripe
+subscription schedule**, only while one waits
+(`packages/subscription/src/services/billing-change.ts`). Phase 1 is the
+paid year unchanged; phase 2 is the monthly Price for one month from
+`current_period_end`, `proration_behavior: 'none'`, then `release`. Proven on
+test clocks: nothing is invoiced or credited today, the renewal is one
+`subscription_cycle` invoice at the monthly price with no proration lines,
+and the balance stays £0 throughout.
+
+- **The record.** As a waiting move (`codex_move_tier_id`, `codex_move_at`,
+  the hold), plus `codex_move_interval`, `codex_move_price_id` and
+  `codex_move_amount` (phase 2's Price and amount). The hold is the Price on
+  the item, which never changes during the wait; a price change on the
+  tier being left is parked. Our row mirrors it in the waiting-move columns
+  plus `pending_billing_interval`, `pending_amount_cents` and
+  `stripe_schedule_id` (0125). `amount_cents` stays the yearly price paid
+  now; `pendingTierChange` says `billing` (same plan) or `plan_and_billing`.
+- **The order of writes.** The record on the subscription first, so every
+  later event carries it; then `subscriptionSchedules.create` from the
+  subscription; then its update, which tags it (`codex_billing_change`,
+  `codex_env`; Stripe refuses metadata at a `from_subscription` create, so
+  `subscription_schedule.created` always arrives untagged). Phase 2's
+  metadata sets `codex_tier_id` to the target and clears the move and hold
+  keys, so the tier flips in the same update as the Price. If the schedule
+  steps fail, the record is put back and the error stands. For C the plan has
+  already changed and been paid for, so its record stays and the backstop
+  sets the schedule.
+- **C(b)**: the upgrade's write as ever (the target's yearly Price,
+  `always_invoice`, `error_if_incomplete`, the pinned `proration_date`), with
+  the record in the same update. A declined card reverts it: nothing set.
+- **Latest wins** (Q2). Another monthly choice updates the same schedule's
+  phase 2. A change of billing chosen while a move to a cheaper yearly plan
+  waits joins it: the held Price goes back on the item in the record's write
+  (Keep's write), then the schedule. A cheaper yearly plan chosen while a
+  change of billing waits lets go of the schedule, then waits as a move.
+- **Keep** (Q4: one Keep undoes the whole change). The schedule is released
+  (the year then renews yearly) and one metadata write clears the record and
+  puts a parked price change back. No item write: nothing is charged.
+  `MOVE_ALREADY_LANDED` after the renewal.
+- **The renewal.** The schedule puts the monthly Price on and flips the tier
+  (the invoice is the monthly price). The sync mirrors it; then
+  `applyDueTierMove`, which runs for a row with `stripe_schedule_id` too,
+  releases the schedule (its last phase), freeing the subscription now rather
+  than a month on. If phase 2's metadata were missed, it writes the flip as
+  for any move. A renewal that billed the YEAR again (the schedule was not
+  there) is never flipped: `tier_move.apply_failed`, reason
+  `billing_not_switched`, at most once a day.
+- **Cancel and reactivate** (T4). Stripe refuses `cancel_at_period_end` on a
+  subscription its schedule manages, so cancel releases ours first and keeps
+  the record. Reactivate un-cancels, THEN sets the schedule again (a
+  `from_subscription` on a cancelling subscription turns the cancel off but
+  leaves `cancel_at`). A reactivate whose schedule fails still succeeds; the
+  backstop sets it.
+- **The backstop's second step.** On the same hourly wake: rows with
+  `pending_billing_interval` set and no `stripe_schedule_id`, live, not set
+  to cancel, the renewal still ahead (at most 50, oldest first). Each is
+  re-read and its schedule set again (about three calls). With nothing
+  broken it selects nothing and asks Stripe nothing. What it cannot set is
+  one `billing_change.backstop_failed` alert.
+- **Someone else's schedule** (made in the Dashboard): every write is
+  refused with `SUBSCRIPTION_SCHEDULED_ELSEWHERE`, and a due price change on
+  it waits and alerts.
+- **Price changes during the wait.** A change on the tier and interval the
+  member is leaving skips them (`moving_away` or `other_interval`); one on
+  the target's monthly Price reaches them as a mover, pending from the first
+  renewal after the switch, quoted at phase 2's price. Nothing writes the
+  item while a schedule is attached (an item write splits its phase): the
+  hourly step writes the pending marker instead of a swap now, and a due
+  marker waits for the release, whose own event lands it. A marker for a
+  Price on another interval than the item's is never swapped on: it is
+  dropped, and support told.
+- **Disputes and refunds.** Pausing collection is accepted with a schedule;
+  the renewal still switches to monthly and its invoice is void. A refund or
+  lost dispute cancels the subscription, and the schedule with it.
+- **Rollback.** A schedule already attached still switches the billing at
+  the renewal (it is Stripe's), but older workers' cancel fails with
+  Stripe's 400 on those subscriptions. List them with
+  `SELECT id, stripe_subscription_id, stripe_schedule_id FROM subscriptions
+  WHERE stripe_schedule_id IS NOT NULL`, and release them at Stripe or roll
+  forward (preferred).
 
 ## Price changes
 

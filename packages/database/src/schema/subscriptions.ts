@@ -179,6 +179,21 @@ export const subscriptions = pgTable(
     pendingTierFrom: timestamp('pending_tier_from', { withTimezone: true }),
     heldAmountCents: integer('held_amount_cents'),
 
+    // Leaving yearly billing waits for the year's end too (Codex-2hxff.97). A
+    // waiting change of billing period rides the waiting move above (its tier
+    // is the current one when only the billing changes) plus the interval it
+    // lands on and the first bill after it. Nothing is swapped on Stripe's
+    // item meanwhile, so `amount_cents` stays the price paid now and
+    // `held_amount_cents` equals it. Mirrored from `codex_move_interval` /
+    // `codex_move_amount`.
+    pendingBillingInterval: varchar('pending_billing_interval', { length: 10 }),
+    pendingAmountCents: integer('pending_amount_cents'),
+    // The Stripe subscription schedule that carries the waiting billing
+    // change (`subscription.schedule`), mirrored from every subscription
+    // event. No CHECK: it lingers past the renewal until the release that
+    // follows it.
+    stripeScheduleId: varchar('stripe_schedule_id', { length: 255 }),
+
     // Revenue split snapshot (immutable — calculated at creation, updated on renewal)
     // Platform keeps 10% of gross. Org gets 15% of post-platform. Creators get remainder.
     amountCents: integer('amount_cents').notNull(),
@@ -239,6 +254,14 @@ export const subscriptions = pgTable(
     check(
       'check_subscription_pending_move',
       sql`(${table.pendingTierId} IS NULL) = (${table.pendingTierFrom} IS NULL) AND (${table.pendingTierId} IS NULL) = (${table.heldAmountCents} IS NULL)`
+    ),
+    // A waiting change of billing: interval and amount together, only beside a
+    // waiting move, onto the OTHER interval, never a negative bill. Every
+    // branch is a boolean (IS NULL, or an OR whose NULL side is TRUE), so the
+    // CHECK can never evaluate to NULL and pass by default.
+    check(
+      'check_subscription_pending_billing',
+      sql`(${table.pendingBillingInterval} IS NULL) = (${table.pendingAmountCents} IS NULL) AND (${table.pendingBillingInterval} IS NULL OR ${table.pendingTierId} IS NOT NULL) AND (${table.pendingBillingInterval} IS NULL OR (${table.pendingBillingInterval} IN ('month', 'year') AND ${table.pendingBillingInterval} <> ${table.billingInterval})) AND (${table.pendingAmountCents} IS NULL OR ${table.pendingAmountCents} >= 0)`
     ),
     check('check_sub_amount_positive', sql`${table.amountCents} >= 0`),
     check(

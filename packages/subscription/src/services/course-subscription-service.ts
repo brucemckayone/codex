@@ -1077,11 +1077,15 @@ export class CourseSubscriptionService extends BaseService {
     organizationId: string,
     courseId: string
   ): Promise<PriceChangeProgress[]> {
-    return readPriceChangeProgress(this.db, {
-      kind: 'course_plan',
-      organizationId,
-      courseId,
-    });
+    try {
+      return await readPriceChangeProgress(this.db, {
+        kind: 'course_plan',
+        organizationId,
+        courseId,
+      });
+    } catch (error) {
+      this.handleError(error, 'listPlanPriceChangeProgress');
+    }
   }
 
   /**

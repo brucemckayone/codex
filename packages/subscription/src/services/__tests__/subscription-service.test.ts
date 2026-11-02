@@ -2231,7 +2231,7 @@ describe('SubscriptionService', () => {
       }
     });
 
-    it('previews a switch into monthly as before: proration_date, no anchor, no quote', async () => {
+    it("previews a switch into monthly as waiting for the year's end: no Stripe preview, no quote (Codex-2hxff.97)", async () => {
       const { org, tier1 } = await createFullOrg('preview-into-monthly');
       await db.insert(subscriptions).values(
         createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
@@ -2251,18 +2251,118 @@ describe('SubscriptionService', () => {
         'month'
       );
 
-      const params = (
-        stripe as unknown as {
-          invoices: { createPreview: ReturnType<typeof vi.fn> };
-        }
-      ).invoices.createPreview.mock.calls[0]![0] as {
-        subscription_details: Record<string, unknown>;
-      };
-      expect(params.subscription_details.proration_date).toBe(
-        preview.prorationDate
-      );
-      expect(params.subscription_details.billing_cycle_anchor).toBeUndefined();
+      expect(
+        (
+          stripe as unknown as {
+            invoices: { createPreview: ReturnType<typeof vi.fn> };
+          }
+        ).invoices.createPreview
+      ).not.toHaveBeenCalled();
+      expect(preview).toMatchObject({
+        amountDueCents: 0,
+        prorationLineItems: [],
+        takesEffect: 'period_end',
+        newRecurringAmountCents: tier1.priceMonthly,
+        newRecurringInterval: 'month',
+        billingChange: {
+          interval: 'month',
+          amountCents: tier1.priceMonthly,
+        },
+      });
       expect(preview.quote).toBeUndefined();
+    });
+
+    /** A preview with ordinary lines beside its prorations, as Stripe cuts one. */
+    function stubMixedPreview(
+      amountDueCents: number,
+      lines: Array<{ description: string; amount: number; proration: boolean }>
+    ) {
+      (stripe as unknown as { invoices: unknown }).invoices = {
+        createPreview: vi.fn().mockResolvedValue({
+          amount_due: amountDueCents,
+          total: amountDueCents,
+          lines: {
+            data: lines.map((line) => ({
+              description: line.description,
+              amount: line.amount,
+              parent: {
+                subscription_item_details: { proration: line.proration },
+              },
+            })),
+          },
+        }),
+      };
+    }
+
+    // With the anchor reset, Stripe bills the new year as an ordinary line
+    // beside the credit: the dialog lists every line, so they add up to what
+    // is charged (Codex-2hxff.96, the lead's follow-up).
+    it("a switch into yearly lists every line, the new year's own charge included: they add up to what is charged", async () => {
+      const { org, tier1 } = await createFullOrg('preview-all-lines');
+      await db
+        .insert(subscriptions)
+        .values(createTestSubscriptionInput(otherCreatorId, org.id, tier1.id));
+      stubMixedPreview(4740, [
+        { description: 'Unused time on Tier 1', amount: -250, proration: true },
+        {
+          description: '1 × Tier 1 (at £49.90 / year)',
+          amount: 4990,
+          proration: false,
+        },
+      ]);
+
+      const preview = await service.previewTierChange(
+        otherCreatorId,
+        org.id,
+        tier1.id,
+        'year'
+      );
+
+      expect(preview.prorationLineItems).toEqual([
+        { description: 'Unused time on Tier 1', amountCents: -250 },
+        { description: '1 × Tier 1 (at £49.90 / year)', amountCents: 4990 },
+      ]);
+      const total = preview.prorationLineItems.reduce(
+        (sum, line) => sum + line.amountCents,
+        0
+      );
+      expect(total).toBe(preview.amountDueCents);
+      expect(total).toBe(4740);
+      // The re-check at confirm compares the same full set.
+      expect(preview.quote).toMatch(/^due:4740\|lines:-250,4990\|next:/);
+    });
+
+    it('an upgrade still lists only its proration lines', async () => {
+      const { org, tier1, tier2 } = await createFullOrg(
+        'preview-upgrade-lines'
+      );
+      await db
+        .insert(subscriptions)
+        .values(createTestSubscriptionInput(otherCreatorId, org.id, tier1.id));
+      stubMixedPreview(500, [
+        { description: 'Unused time on Tier 1', amount: -250, proration: true },
+        {
+          description: 'Remaining time on Tier 2',
+          amount: 750,
+          proration: true,
+        },
+        {
+          description: '1 × Tier 2 (at £9.99 / month)',
+          amount: 999,
+          proration: false,
+        },
+      ]);
+
+      const preview = await service.previewTierChange(
+        otherCreatorId,
+        org.id,
+        tier2.id,
+        'month'
+      );
+
+      expect(
+        preview.prorationLineItems.map((line) => line.amountCents)
+      ).toEqual([-250, 750]);
     });
 
     it('throws TierNotFoundError for an unknown tier', async () => {
@@ -2902,6 +3002,53 @@ describe('SubscriptionService', () => {
         expect(writes()).toHaveLength(0);
       });
 
+      it("is refused when only the new year's own line moved, not a proration", async () => {
+        const { org, tierId } = await previewed('ordinary');
+        const mixed = (yearAmount: number) => {
+          (stripe as unknown as { invoices: unknown }).invoices = {
+            createPreview: vi.fn().mockResolvedValue({
+              amount_due: 7233,
+              lines: {
+                data: [
+                  {
+                    description: 'Unused time',
+                    amount: -8767,
+                    parent: { subscription_item_details: { proration: true } },
+                  },
+                  {
+                    description: '1 × the plan (yearly)',
+                    amount: yearAmount,
+                    parent: {
+                      subscription_item_details: { proration: false },
+                    },
+                  },
+                ],
+              },
+            }),
+          };
+        };
+        mixed(16000);
+        const preview = await service.previewTierChange(
+          otherCreatorId,
+          org.id,
+          tierId,
+          'year'
+        );
+        mixed(16001);
+
+        await expect(
+          service.changeTier(
+            otherCreatorId,
+            org.id,
+            tierId,
+            'year',
+            preview.prorationDate,
+            preview.quote
+          )
+        ).rejects.toThrow(TierChangePreviewExpiredError);
+        expect(writes()).toHaveLength(0);
+      });
+
       it('writes with the anchor and no proration_date when the figures hold', async () => {
         const { org, tierId, preview } = await previewed('held');
 
@@ -2936,53 +3083,22 @@ describe('SubscriptionService', () => {
     });
 
     // Every other change made now is pinned to the preview's proration_date,
-    // with no anchor and no re-preview. A switch into monthly stays as it
-    // was; Codex-2hxff.97 makes it wait for the year's end.
-    it.each([
-      {
-        change: 'an upgrade on the same billing',
-        from: 'month',
-        target: 2,
-        to: 'month',
-      },
-      {
-        change: 'a switch into monthly (interval_switch)',
-        from: 'year',
-        target: 1,
-        to: 'month',
-      },
-    ] as const)('$change still pins proration_date, with no re-preview', async ({
-      from,
-      target,
-      to,
-    }) => {
-      const { org, tier1, tier2 } = await createFullOrg(
-        `pinned-${from}-${target}-${to}`
-      );
-      await db.insert(subscriptions).values(
-        createTestSubscriptionInput(
-          otherCreatorId,
-          org.id,
-          tier1.id,
-          from === 'year'
-            ? {
-                amountCents: tier1.priceAnnual,
-                platformFeeCents: 499,
-                organizationFeeCents: 674,
-                creatorPayoutCents: 3817,
-                billingInterval: 'year',
-              }
-            : {}
-        )
-      );
+    // with no anchor and no re-preview. A switch into monthly is not made
+    // now: it waits for the year's end (Codex-2hxff.97,
+    // billing-change.integration.test.ts).
+    it('an upgrade on the same billing still pins proration_date, with no re-preview', async () => {
+      const { org, tier1, tier2 } = await createFullOrg('pinned-month-2-month');
+      await db
+        .insert(subscriptions)
+        .values(createTestSubscriptionInput(otherCreatorId, org.id, tier1.id));
       const createPreview = stubPreviewFigures(500, [-250, 750]);
       const prorationDate = Math.floor(Date.now() / 1000);
 
       await service.changeTier(
         otherCreatorId,
         org.id,
-        (target === 1 ? tier1 : tier2).id,
-        to,
+        tier2.id,
+        'month',
         prorationDate
       );
 

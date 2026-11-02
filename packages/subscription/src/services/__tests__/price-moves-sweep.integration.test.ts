@@ -38,6 +38,7 @@ import { and, eq, inArray, sql } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
+  addMonthsClamped,
   type NoticeDelivery,
   type PriceChangeNoticeMailer,
   recordPlanPriceChange,
@@ -1692,6 +1693,86 @@ describe('the hourly price-moves step (Codex-2hxff.86)', () => {
       // The second run is 09:00: 08:00 London is the bank payout's.
       expect(at(1126)).toBe('2027-01-14T09:00:00.000Z');
       expect(at(3376)).toBe('2027-01-14T11:00:00.000Z');
+    });
+  });
+
+  // Codex-2hxff.97, data design §5.1: a member whose switch to monthly
+  // billing waits for the year's end goes to their tier's MONTHLY price.
+  describe('a waiting change of billing', () => {
+    /** Alex on Pro yearly, switching to Pro monthly at the renewal in 40 days. */
+    async function switchingToMonthly(slug: string) {
+      const { org: o, pro } = await org(slug);
+      const fake = fakeStripe();
+      const renewal = Math.floor(NOW / 1000) + 40 * DAY_S;
+      const sub = await subscriber(o.id, pro, {
+        billingInterval: 'year',
+        amountCents: 12000,
+        creatorPayoutCents: 12000,
+        pendingTierId: pro.id,
+        pendingTierFrom: new Date(renewal * 1000),
+        heldAmountCents: 12000,
+        pendingBillingInterval: 'month',
+        pendingAmountCents: 1200,
+      });
+      onStripe(fake, sub, 40, {
+        priceId: 'price_pm_old_y',
+        amount: 12000,
+        interval: 'year',
+        metadata: {
+          codex_tier_id: pro.id,
+          codex_move_tier_id: pro.id,
+          codex_move_at: String(renewal),
+          codex_hold_price_id: 'price_pm_old_y',
+          codex_hold_amount: '12000',
+          codex_move_interval: 'month',
+          codex_move_price_id: PRICE_OLD,
+          codex_move_amount: '1200',
+        },
+      });
+      return { o, pro, fake, sub, renewal };
+    }
+
+    it('a monthly price change reaches them as a mover: told, pending from the renewal after the switch, the year untouched', async () => {
+      const { o, pro, fake, sub, renewal } =
+        await switchingToMonthly('pm-billing-mover');
+      const changeId = await reprice(o.id, pro);
+      expect((await movesOf(changeId)).map((m) => m.subscriptionId)).toEqual([
+        sub.id,
+      ]);
+      const send = mailer();
+
+      const result = await run([changeId], { fake, send });
+
+      expect(result).toMatchObject({ claimed: 1, scheduled: 1 });
+      expect(send).toHaveBeenCalledOnce();
+      expect(await moveOf(changeId, sub)).toMatchObject({
+        state: 'scheduled',
+        scheduledKind: 'pending',
+        effectiveAt: new Date(addMonthsClamped(renewal, 1) * 1000),
+      });
+      const live = fake.live.get(sub.stripeSubscriptionId);
+      // The year's Price stays on the item; only the marker is written.
+      expect(live?.priceId).toBe('price_pm_old_y');
+      expect(live?.metadata).toMatchObject({
+        codex_pending_price_id: PRICE_NEW,
+        codex_pending_price_from: String(renewal + 1),
+      });
+    });
+
+    it("a yearly price change on the tier they are leaving doesn't reach them", async () => {
+      const { o, pro, sub } = await switchingToMonthly('pm-billing-leaver');
+      const recorded = await recordTierPriceChange(db, pro.id, {
+        organizationId: o.id,
+        interval: 'year',
+        fromAmountCents: 12000,
+        newAmountCents: 13000,
+        newStripePriceId: 'price_pm_new_y',
+        createdByUserId: null,
+        now: new Date(NOW - DAY_MS),
+      });
+
+      const moves = await movesOf(recorded.changeId);
+      expect(moves.map((m) => m.subscriptionId)).not.toContain(sub.id);
     });
   });
 });
