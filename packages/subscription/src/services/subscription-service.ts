@@ -280,11 +280,16 @@ const NOW_CHANGE_KEY_PREFIX = {
   none: 'lateral',
 } as const;
 
-/** A row with no move waiting: the three columns go together (the CHECK). */
+/**
+ * A row with no move waiting: the three columns go together, and a waiting
+ * change of billing only beside them (the CHECKs).
+ */
 const NO_PENDING_MOVE = {
   pendingTierId: null,
   pendingTierFrom: null,
   heldAmountCents: null,
+  pendingBillingInterval: null,
+  pendingAmountCents: null,
 } as const;
 
 /** Waiting moves the hourly backstop flips per run (data design §5.2). */
@@ -336,6 +341,11 @@ export const SUBSCRIBER_HIDDEN_COLUMNS = {
   // stays visible: the account card shows it while a move waits.
   pendingTierId: false,
   pendingTierFrom: false,
+  // A waiting change of billing reaches them the same way (Codex-2hxff.97),
+  // and the schedule carrying it is Stripe's bookkeeping.
+  pendingBillingInterval: false,
+  pendingAmountCents: false,
+  stripeScheduleId: false,
 } as const satisfies Partial<Record<keyof Subscription, false>>;
 
 /**
