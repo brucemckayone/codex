@@ -795,6 +795,88 @@ describe('leaving yearly billing waits for the year (Codex-2hxff.97)', () => {
       ).toBeNull();
     });
 
+    // Part A rule 3, for a change of billing: a yearly price change made
+    // while they waited skipped them (they were leaving it), so Keep hands
+    // them to the price-change step, which gives the usual 30 days' notice.
+    it('Keep yearly billing after a yearly price change made while they waited: one due row, so the notice and 30 days follow', async () => {
+      const { org, pro } = await hollowOak('a-keep-rejoin');
+      const { userId, row } = await yearlyMember(org.id, pro);
+      await service.changeTier(userId, org.id, pro.id, 'month');
+      const repriced = `${pro.stripePriceAnnualId}_v2`;
+      await db
+        .update(subscriptionTiers)
+        .set({ priceAnnual: 13000, stripePriceAnnualId: repriced })
+        .where(eq(subscriptionTiers.id, pro.id));
+
+      await service.keepCurrentPlan(userId, org.id);
+
+      const [change] = await db
+        .select()
+        .from(priceChanges)
+        .where(eq(priceChanges.tierId, pro.id));
+      expect(change).toMatchObject({
+        kind: 'tier',
+        interval: 'year',
+        fromAmountCents: 12000,
+        newAmountCents: 13000,
+        newStripePriceId: repriced,
+        state: 'running',
+      });
+      expect(
+        await db
+          .select()
+          .from(subscriptionPriceMoves)
+          .where(eq(subscriptionPriceMoves.subscriptionId, row.id))
+      ).toEqual([
+        expect.objectContaining({
+          priceChangeId: change?.id,
+          state: 'due',
+          source: 'keep_current_plan',
+        }),
+      ]);
+    });
+
+    it('a yearly price change they were told of before switching is parked by the change, live again on Keep, and nobody is told twice', async () => {
+      const { org, pro } = await hollowOak('a-keep-parked');
+      const { userId, row, periodEnd } = await yearlyMember(org.id, pro);
+      const repriced = `${pro.stripePriceAnnualId}_v2`;
+      await db
+        .update(subscriptionTiers)
+        .set({ priceAnnual: 13000, stripePriceAnnualId: repriced })
+        .where(eq(subscriptionTiers.id, pro.id));
+      const live = liveOf(row.stripeSubscriptionId);
+      live.metadata = {
+        ...live.metadata,
+        codex_pending_price_id: repriced,
+        codex_pending_price_from: String(periodEnd),
+      };
+
+      await service.changeTier(userId, org.id, pro.id, 'month');
+      // Parked: a yearly marker never reaches the monthly item.
+      expect(liveOf(row.stripeSubscriptionId).metadata).toMatchObject({
+        codex_hold_pending_price_id: repriced,
+        codex_hold_pending_price_from: String(periodEnd),
+      });
+      expect(
+        liveOf(row.stripeSubscriptionId).metadata.codex_pending_price_id
+      ).toBeUndefined();
+
+      await service.keepCurrentPlan(userId, org.id);
+
+      const metadata = liveOf(row.stripeSubscriptionId).metadata;
+      expect(metadata).toMatchObject({
+        codex_pending_price_id: repriced,
+        codex_pending_price_from: String(periodEnd),
+      });
+      expect(metadata.codex_hold_pending_price_id).toBeUndefined();
+      expect(
+        await db
+          .select()
+          .from(subscriptionPriceMoves)
+          .where(eq(subscriptionPriceMoves.subscriptionId, row.id))
+      ).toEqual([]);
+    });
+
     it('Keep after the renewal it lands on: refused, the change has happened', async () => {
       const { org, pro } = await hollowOak('a-keep-late');
       const { userId, row, periodEnd } = await yearlyMember(org.id, pro);
