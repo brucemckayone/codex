@@ -44,10 +44,20 @@
   import {
     formatDate,
     formatPrice,
+    formatPriceCompact,
     formatSentenceDate,
   } from '$lib/utils/format';
   import { buildJourneyUrl, buildPlatformUrl } from '$lib/utils/subdomain';
-  import { pricingHighlight, waitingMoveBody } from '$lib/utils/plan-label';
+  import {
+    pricingHighlight,
+    waitingMoveBody,
+    waitingMoveKeepFailedLine,
+    waitingMoveKeepLabel,
+    waitingMoveKeptLine,
+    waitingMoveLandedLine,
+    waitingMoveTitle,
+  } from '$lib/utils/plan-label';
+  import { scheduledElsewhereLine } from '$lib/utils/scheduled-elsewhere';
   import { logger } from '$lib/observability';
   import { emphasise, type MessagePart } from './emphasis';
   import {
@@ -89,6 +99,8 @@
   type CommandFailure = {
     code?: string;
     detailsCode?: string;
+    /** The id support was alerted with (SUBSCRIPTION_SCHEDULED_ELSEWHERE). */
+    errorId?: string;
     status?: number;
     message?: string;
   };
@@ -157,6 +169,15 @@
           ...refusal,
           message: m.pricing_refusal_change_interval_while_moving(),
           refreshPlans: true,
+        };
+      // A Stripe schedule that isn't ours (Codex-2hxff.97): nothing was
+      // written, support has been alerted, and a retry can't help.
+      case 'SUBSCRIPTION_SCHEDULED_ELSEWHERE':
+        return {
+          ...refusal,
+          message:
+            scheduledElsewhereLine(failure) ??
+            m.subscription_refusal_scheduled_elsewhere_no_ref(),
         };
       // Stripe declined the proration invoice during an upgrade. The price
       // update was reverted on Stripe's side — the user is still on their
@@ -341,10 +362,10 @@
   let tierChangeKeepLoading = $state(false);
   let tierChangeKeepError = $state('');
   /**
-   * Step 1 of an upgrade cleared a move to this plan: a declined charge in
-   * step 2 says so, and nothing puts the move back by itself.
+   * Step 1 of an upgrade cleared this waiting change: a declined charge in
+   * step 2 says so, and nothing puts it back by itself.
    */
-  let upgradeClearedMoveTo = $state<string | null>(null);
+  let upgradeClearedMove = $state<PendingTierChange | null>(null);
   /**
    * Another cheaper plan while a move waits: it replaces the move (latest
    * wins, T2), so the dialog says "instead of Basic" (page 1 state 5).
@@ -370,6 +391,13 @@
           : m.pricing_change_title_two_steps_month({ plan: tier.name });
     }
     const preview = tierChangePreview;
+    // Leaving yearly billing waits for the year's end (Codex-2hxff.97): the
+    // same plan is a billing switch, another plan is "billed monthly".
+    if (preview?.billingChange && preview.takesEffect === 'period_end') {
+      return tier.id === currentTierId
+        ? m.pricing_change_title_billing_month()
+        : m.pricing_change_title_two_steps_month({ plan: tier.name });
+    }
     if (preview?.takesEffect === 'period_end') {
       return replacingMove
         ? m.pricing_change_title_instead({ plan: tier.name })
@@ -379,6 +407,14 @@
       ? m.pricing_change_title_upgrade({ plan: tier.name })
       : m.pricing_change_title_switch({ plan: tier.name });
   });
+  /**
+   * A price inside a sentence, as the waiting lines are drawn: "£12 a
+   * month", with pence only when there are some (Codex-2hxff.97). The
+   * summary above keeps "£12.00/mo".
+   */
+  function priceInWords(cents: number): string {
+    return cents % 100 === 0 ? formatPriceCompact(cents) : formatPrice(cents);
+  }
   /** Refused for a reason that won't change: the dialog offers Close only. */
   const tierChangeRefusedForGood = $derived(
     (tierChangePreviewError !== '' && !tierChangePreviewRetryable) ||
@@ -447,11 +483,21 @@
   );
 
   // ── Keep current plan (Codex-2hxff.16, data design §4) ────────────
-  /** What one press of Keep came to. `kept` carries the line it shows. */
+  /**
+   * What one press of Keep came to. `kept` carries the line it shows; `move`
+   * is what waited, whose kind words the line (Codex-2hxff.97).
+   */
   type KeepOutcome =
-    | { kind: 'kept'; plan: string; date: string | null; amountCents: number | null }
+    | {
+        kind: 'kept';
+        move: PendingTierChange | null;
+        plan: string;
+        date: string | null;
+        amountCents: number | null;
+      }
     | { kind: 'failed' }
-    | { kind: 'landed'; movedTo: string | null }
+    | { kind: 'refused'; message: string }
+    | { kind: 'landed'; move: PendingTierChange | null }
     | { kind: 'unconfirmed'; reload: boolean };
   let keepLoading = $state(false);
   /** The line under the notice. Never stored: gone on the next visit. */
@@ -748,7 +794,8 @@
         currentStatus = previousStatus;
         currentCancelAtPeriodEnd = previousCancelAtPeriodEnd;
         reactivateError =
-          result.message || 'Failed to reactivate subscription';
+          scheduledElsewhereLine('code' in result ? result : {}) ??
+          (result.message || 'Failed to reactivate subscription');
         return;
       }
       await Promise.all([
@@ -827,7 +874,7 @@
    */
   function chooseTier(tier: SubscriptionTier, isUpgrade: boolean) {
     keepOutcome = null;
-    upgradeClearedMoveTo = null;
+    upgradeClearedMove = null;
     tierChangeDialogUpgrade = isUpgrade;
     if (moveShown && isUpgrade) {
       resetTierChangeDialog(tier);
@@ -837,12 +884,17 @@
     openTierChangeDialog(tier);
   }
 
-  /** The current plan's "Switch to annual billing" (refused while a move waits, Q3). */
+  /**
+   * The current plan's billing switch. Into yearly it is refused while
+   * anything waits (Q3): it starts a new period today. Into monthly it waits
+   * for the year's end too, so it joins what waits (Codex-2hxff.97, Q2): the
+   * preview says so.
+   */
   function chooseIntervalSwitch(tier: SubscriptionTier) {
     keepOutcome = null;
-    upgradeClearedMoveTo = null;
+    upgradeClearedMove = null;
     tierChangeDialogUpgrade = false;
-    if (moveShown) {
+    if (moveShown && billingInterval === 'year') {
       resetTierChangeDialog(tier);
       tierChangeStep = 'interval_while_moving';
       return;
@@ -942,7 +994,7 @@
     tierChangeNoticeTone = 'warning';
     tierChangeStep = null;
     tierChangeKeepError = '';
-    upgradeClearedMoveTo = null;
+    upgradeClearedMove = null;
   }
 
   /**
@@ -951,7 +1003,7 @@
    * once). Says what it came to; the caller decides where to show it.
    */
   async function runKeep(): Promise<KeepOutcome> {
-    const movedTo = currentPendingMove?.tierName ?? null;
+    const move = currentPendingMove;
     try {
       const result = await keepCurrentPlan({ organizationId: data.org.id });
       if (!result.success) {
@@ -965,9 +1017,12 @@
         ) {
           return await rereadAfterKeep(
             failure.detailsCode === 'MOVE_ALREADY_LANDED' ? 'landed' : 'unconfirmed',
-            movedTo
+            move
           );
         }
+        // A Stripe schedule that isn't ours: a retry can't help.
+        const elsewhere = scheduledElsewhereLine(failure);
+        if (elsewhere) return { kind: 'refused', message: elsewhere };
         logger.warn('pricing: keep current plan refused', {
           status: failure.status,
           code: failure.detailsCode ?? failure.code,
@@ -983,6 +1038,7 @@
       ]);
       return {
         kind: 'kept',
+        move,
         plan,
         date: currentPeriodEnd,
         amountCents: result.data?.amountCents ?? null,
@@ -991,14 +1047,14 @@
       logger.warn('pricing: keep current plan got no answer', {
         error: error instanceof Error ? error.message : String(error),
       });
-      return rereadAfterKeep('unconfirmed', movedTo);
+      return rereadAfterKeep('unconfirmed', move);
     }
   }
 
   /** Read the subscription again after a Keep whose result isn't known here. */
   async function rereadAfterKeep(
     kind: 'landed' | 'unconfirmed',
-    movedTo: string | null
+    move: PendingTierChange | null
   ): Promise<KeepOutcome> {
     try {
       await invalidateAll();
@@ -1011,7 +1067,7 @@
       });
       return { kind: 'unconfirmed', reload: true };
     }
-    return kind === 'landed' ? { kind, movedTo } : { kind, reload: false };
+    return kind === 'landed' ? { kind, move } : { kind, reload: false };
   }
 
   /** Show what Keep came to under the notice (it takes focus). */
@@ -1055,12 +1111,18 @@
       tierChangeKeepError = keepFailedLine(move);
       return;
     }
+    if (outcome.kind === 'refused') {
+      tierChangeKeepError = outcome.message;
+      return;
+    }
     if (outcome.kind === 'kept' && step === 'keep_first' && move) {
       const plan = outcome.plan;
-      upgradeClearedMoveTo = move.tierName;
+      upgradeClearedMove = move;
       await openTierChangeDialog(
         tier,
-        m.pricing_change_move_cancelled({ movingTo: move.tierName, currentPlan: plan }),
+        move.kind === 'billing'
+          ? m.pricing_change_billing_cancelled({ currentPlan: plan })
+          : m.pricing_change_move_cancelled({ movingTo: move.tierName, currentPlan: plan }),
         'info'
       );
       return;
@@ -1072,11 +1134,7 @@
   /** "We couldn't keep Pro just now, so your move to Basic is still set…" */
   function keepFailedLine(move: PendingTierChange | null): string {
     return move
-      ? m.pricing_move_keep_failed({
-          plan: currentPlanName,
-          movingTo: move.tierName,
-          date: formatSentenceDate(move.effectiveAt),
-        })
+      ? waitingMoveKeepFailedLine(move, currentPlanName, formatSentenceDate)
       : m.pricing_refusal_change_refused();
   }
 
@@ -1095,6 +1153,10 @@
     // A move to a cheaper plan waits for the renewal: the member keeps the
     // plan they have, so nothing on the page flips until the server says.
     const waits = tierChangePreview?.takesEffect === 'period_end';
+    // A dearer plan on monthly, from yearly (C(b), Codex-2hxff.97): the plan
+    // changes now, on yearly billing, and monthly billing waits for the
+    // year's end.
+    const billingWaits = tierChangePreview?.billingChange != null;
 
     switchTierLoading = tier.id;
     switchTierError = '';
@@ -1105,7 +1167,7 @@
     // while set to cancel (Q2), and so does the server.
     if (!waits) {
       currentTierId = tier.id;
-      currentBillingInterval = billingInterval;
+      if (!billingWaits) currentBillingInterval = billingInterval;
     }
 
     try {
@@ -1161,8 +1223,8 @@
         }
         return;
       }
-      if (waits) {
-        // The server's row carries the move, for the notice and the cards.
+      if (waits || billingWaits) {
+        // The server's row carries what waits, for the notice and the cards.
         applyCommandSubscription(result.data);
       } else {
         // A change now replaces any waiting move (a same-price switch, Q4);
@@ -1187,7 +1249,7 @@
       switchTierRetryable = false;
       // Whether the upgrade went through is unknown, so the line saying
       // the member is still on their plan would not be true.
-      upgradeClearedMoveTo = null;
+      upgradeClearedMove = null;
       try {
         await invalidateAll();
       } catch (refreshError) {
@@ -1529,10 +1591,7 @@
         <Alert variant="info">
           <div class="plan-move-notice">
             <span class="plan-move-notice__text" id="plan-move-notice-text">
-              <b>{m.pricing_move_notice_title({
-                plan: moveShown.tierName,
-                date: formatSentenceDate(moveShown.effectiveAt),
-              })}</b>
+              <b>{waitingMoveTitle(moveShown, formatSentenceDate)}</b>
               <span>{waitingMoveBody(moveShown, currentPlanName, formatSentenceDate)}</span>
             </span>
             <Button
@@ -1542,7 +1601,7 @@
               onclick={handleKeepFromNotice}
               data-testid="plan-move-keep"
             >
-              {m.pricing_move_keep()}
+              {waitingMoveKeepLabel(moveShown)}
             </Button>
           </div>
         </Alert>
@@ -1561,20 +1620,23 @@
       >
         {#if keepOutcome.kind === 'kept'}
           <Alert variant="success">
-            {keepOutcome.date && keepOutcome.amountCents !== null
-              ? m.pricing_move_kept({
-                  plan: keepOutcome.plan,
-                  date: formatSentenceDate(keepOutcome.date),
-                  price: formatPrice(keepOutcome.amountCents),
-                })
-              : m.pricing_move_kept_undated({ plan: keepOutcome.plan })}
+            {waitingMoveKeptLine(
+              keepOutcome.move,
+              keepOutcome.plan,
+              keepOutcome.date ? formatSentenceDate(keepOutcome.date) : null,
+              keepOutcome.amountCents !== null
+                ? formatPrice(keepOutcome.amountCents)
+                : null
+            )}
           </Alert>
         {:else if keepOutcome.kind === 'failed'}
           <Alert variant="error">{keepFailedLine(keepFailedMove)}</Alert>
+        {:else if keepOutcome.kind === 'refused'}
+          <Alert variant="error">{keepOutcome.message}</Alert>
         {:else if keepOutcome.kind === 'landed'}
           <Alert variant="info">
-            {keepOutcome.movedTo
-              ? m.pricing_move_landed({ plan: keepOutcome.movedTo })
+            {keepOutcome.move
+              ? waitingMoveLandedLine(keepOutcome.move)
               : m.pricing_refusal_change_unconfirmed()}
           </Alert>
         {:else}
@@ -1626,9 +1688,12 @@
             <div class="card__inner">
               {#if isMoveTarget && moveShown}
                 <!-- A quiet label in the slot "Current Plan" uses (waiting
-                     move, state 1). -->
+                     move, state 1). On the plan they're on, billing alone
+                     waits: "Monthly from 12 March" in its place (E1). -->
                 <span class="card__label card__label--moving" data-testid="tier-move-badge">
-                  {m.pricing_move_from({ date: formatSentenceDate(moveShown.effectiveAt) })}
+                  {moveShown.kind === 'billing'
+                    ? m.pricing_billing_from_month({ date: formatSentenceDate(moveShown.effectiveAt) })
+                    : m.pricing_move_from({ date: formatSentenceDate(moveShown.effectiveAt) })}
                 </span>
               {/if}
               {#if isCurrentPlan}
@@ -1659,7 +1724,7 @@
                   >
                     {m.pricing_plan_paused()}
                   </span>
-                {:else}
+                {:else if !isMoveTarget}
                   <span
                     class="card__label card__label--current"
                     data-testid="tier-status-badge"
@@ -1804,7 +1869,27 @@
                   {@const intervalMismatch =
                     currentBillingInterval !== null &&
                     currentBillingInterval !== billingInterval}
-                  {#if intervalMismatch}
+                  {#if isMoveTarget && moveShown}
+                    <!-- Monthly billing on this plan is already chosen: it
+                         starts at the year's end (E1, Codex-2hxff.97). The
+                         notice above offers Keep yearly billing. -->
+                    <Button
+                      variant="secondary"
+                      disabled
+                      class="tier-cta"
+                      data-testid="tier-cta-moving"
+                      aria-describedby="plan-move-notice-text"
+                    >
+                      {m.pricing_move_starts({ date: formatSentenceDate(moveShown.effectiveAt) })}
+                    </Button>
+                    <a
+                      href={manageUrl}
+                      class="tier-secondary"
+                      data-testid="tier-cta-manage"
+                    >
+                      {m.pricing_manage_plan()}
+                    </a>
+                  {:else if intervalMismatch}
                     <Button
                       variant="primary"
                       onclick={() => chooseIntervalSwitch(tier)}
@@ -2231,17 +2316,30 @@
              Continue keeps the current plan (no money moves), then the
              usual upgrade preview is fair to the penny. -->
         <p class="tier-change-wait" data-testid="tier-change-keep-first">
-          {@render emphasised(
-            emphasise(
-              m.pricing_change_keep_first,
-              {
-                movingTo: currentPendingMove.tierName,
-                date: formatSentenceDate(currentPendingMove.effectiveAt),
-                plan: tierChangeDialogTier.name,
-              },
-              ['movingTo']
-            )
-          )}
+          {#if currentPendingMove.kind === 'billing'}
+            {@render emphasised(
+              emphasise(
+                m.pricing_change_keep_first_billing,
+                {
+                  date: formatSentenceDate(currentPendingMove.effectiveAt),
+                  plan: tierChangeDialogTier.name,
+                },
+                ['date']
+              )
+            )}
+          {:else}
+            {@render emphasised(
+              emphasise(
+                m.pricing_change_keep_first,
+                {
+                  movingTo: currentPendingMove.tierName,
+                  date: formatSentenceDate(currentPendingMove.effectiveAt),
+                  plan: tierChangeDialogTier.name,
+                },
+                ['movingTo']
+              )
+            )}
+          {/if}
         </p>
         {#if tierChangeKeepError}
           <Alert variant="error">{tierChangeKeepError}</Alert>
@@ -2337,17 +2435,96 @@
             </ul>
           {/if}
           <div class="tier-change-summary__line tier-change-summary__line--recurring">
-            <dt>
-              {tierChangePreview.newRecurringInterval === 'month'
-                ? m.pricing_change_then_month({ price: formatPrice(tierChangePreview.newRecurringAmountCents) })
-                : m.pricing_change_then_year({ price: formatPrice(tierChangePreview.newRecurringAmountCents) })}
-            </dt>
-            <dd class="tier-change-summary__period">
-              {m.pricing_change_starting({ date: formatSentenceDate(tierChangePreview.currentPeriodEnd) })}
-            </dd>
+            {#if tierChangePreview.billingChange}
+              <!-- The monthly bill waits for the year's end (Codex-2hxff.97). -->
+              <dt>
+                {m.pricing_change_then_month({ price: formatPrice(tierChangePreview.billingChange.amountCents) })}
+              </dt>
+              <dd class="tier-change-summary__period">
+                {m.pricing_change_starting({ date: formatSentenceDate(tierChangePreview.billingChange.effectiveAt) })}
+              </dd>
+            {:else}
+              <dt>
+                {tierChangePreview.newRecurringInterval === 'month'
+                  ? m.pricing_change_then_month({ price: formatPrice(tierChangePreview.newRecurringAmountCents) })
+                  : m.pricing_change_then_year({ price: formatPrice(tierChangePreview.newRecurringAmountCents) })}
+              </dt>
+              <dd class="tier-change-summary__period">
+                {m.pricing_change_starting({ date: formatSentenceDate(tierChangePreview.currentPeriodEnd) })}
+              </dd>
+            {/if}
           </div>
         </dl>
-        {#if tierChangePreview.takesEffect === 'period_end'}
+        {#if tierChangePreview.billingChange}
+          <!-- Leaving yearly billing waits for the end of the year paid for
+               (Codex-2hxff.97, states A1, B1, C1, D1): nothing is credited. -->
+          {@const billing = tierChangePreview.billingChange}
+          {@const replaces = tierChangePreview.replaces}
+          {@const samePlan = tierChangeDialogTier.id === currentTierId}
+          <p class="tier-change-wait" data-testid="tier-change-wait">
+            {#if tierChangePreview.takesEffect === 'now'}
+              {@render emphasised(
+                emphasise(
+                  tierChangePreview.amountDueCents > 0
+                    ? m.pricing_change_upgrade_then_billing_month
+                    : m.pricing_change_same_price_then_billing_month,
+                  {
+                    plan: tierChangeDialogTier.name,
+                    date: formatSentenceDate(billing.effectiveAt),
+                  },
+                  ['plan', 'date']
+                )
+              )}
+            {:else if samePlan}
+              {@render emphasised(
+                emphasise(
+                  m.pricing_change_wait_billing_month,
+                  {
+                    date: formatSentenceDate(billing.effectiveAt),
+                    price: priceInWords(billing.amountCents),
+                  },
+                  ['date', 'price']
+                )
+              )}
+            {:else if replaces && replaces.tierId === tierChangeDialogTier.id && replaces.interval === 'year'}
+              <!-- The same plan, waiting on yearly billing (D1): "instead of
+                   £50 a year". -->
+              {@render emphasised(
+                emphasise(
+                  m.pricing_change_wait_billing_instead,
+                  {
+                    currentPlan: currentPlanName,
+                    date: formatSentenceDate(billing.effectiveAt),
+                    plan: tierChangeDialogTier.name,
+                    price: priceInWords(billing.amountCents),
+                    movingPrice: priceInWords(replaces.amountCents),
+                  },
+                  ['currentPlan', 'date', 'plan', 'price']
+                )
+              )}
+            {:else}
+              {@render emphasised(
+                emphasise(
+                  m.pricing_change_wait_plan_and_billing_month,
+                  {
+                    currentPlan: currentPlanName,
+                    date: formatSentenceDate(billing.effectiveAt),
+                    plan: tierChangeDialogTier.name,
+                    price: priceInWords(billing.amountCents),
+                  },
+                  ['currentPlan', 'date', 'plan', 'price']
+                )
+              )}
+            {/if}
+          </p>
+          {#if tierChangePreview.takesEffect === 'period_end' && !switchTierError && !replaces}
+            <p class="tier-change-aside">
+              {samePlan
+                ? m.pricing_change_wait_aside_billing()
+                : m.pricing_change_wait_aside({ currentPlan: currentPlanName })}
+            </p>
+          {/if}
+        {:else if tierChangePreview.takesEffect === 'period_end'}
           <!-- The decided line (T3): the member keeps what they paid for
                until the renewal, so there is no credit to mention. -->
           <p class="tier-change-wait" data-testid="tier-change-wait">
@@ -2389,14 +2566,18 @@
         {/if}
         {#if switchTierError}
           <Alert variant="error">{switchTierError}</Alert>
-          {#if upgradeClearedMoveTo}
+          {#if upgradeClearedMove}
             <!-- Step 2 refused after step 1 cleared the move (page 1 state
                  8): it is not put back by itself. -->
             <p class="tier-change-aside" data-testid="tier-change-move-cleared">
-              {m.pricing_change_declined_after_keep({
-                currentPlan: currentPlanName,
-                movingTo: upgradeClearedMoveTo,
-              })}
+              {upgradeClearedMove.kind === 'billing'
+                ? m.pricing_change_declined_after_keep_billing({
+                    currentPlan: currentPlanName,
+                  })
+                : m.pricing_change_declined_after_keep({
+                    currentPlan: currentPlanName,
+                    movingTo: upgradeClearedMove.tierName,
+                  })}
             </p>
           {/if}
         {/if}
@@ -2484,7 +2665,10 @@
         >
           {tierChangePreview.takesEffect === 'period_end'
             ? m.pricing_change_confirm_on({
-                date: formatSentenceDate(tierChangePreview.currentPeriodEnd),
+                date: formatSentenceDate(
+                  tierChangePreview.billingChange?.effectiveAt ??
+                    tierChangePreview.currentPeriodEnd
+                ),
               })
             : tierChangePreview.amountDueCents > 0
               ? m.pricing_change_confirm_pay({

@@ -33,6 +33,12 @@ type SubscriptionCommandFailure = {
    * mapping keyed on the top-level code reads what it read before.
    */
   detailsCode: string | undefined;
+  /**
+   * The worker's `details.errorId`: the id support was alerted with, which
+   * the page shows for the member to quote (SUBSCRIPTION_SCHEDULED_ELSEWHERE,
+   * Codex-2hxff.97).
+   */
+  errorId: string | undefined;
   message: string;
   status: number;
 };
@@ -41,6 +47,12 @@ function detailsCodeOf(details: unknown): string | undefined {
   if (!details || typeof details !== 'object') return undefined;
   const code = (details as { code?: unknown }).code;
   return typeof code === 'string' ? code : undefined;
+}
+
+function errorIdOf(details: unknown): string | undefined {
+  if (!details || typeof details !== 'object') return undefined;
+  const errorId = (details as { errorId?: unknown }).errorId;
+  return typeof errorId === 'string' ? errorId : undefined;
 }
 
 /**
@@ -66,6 +78,7 @@ function toCommandFailure(
       success: false,
       code: error.code,
       detailsCode: detailsCodeOf(error.details),
+      errorId: errorIdOf(error.details),
       message: error.message,
       status: error.status,
     };
@@ -82,6 +95,7 @@ function toCommandFailure(
     success: false,
     code: undefined,
     detailsCode: undefined,
+    errorId: undefined,
     message: 'An unexpected error occurred',
     status: 500,
   };

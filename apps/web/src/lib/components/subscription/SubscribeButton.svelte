@@ -47,6 +47,7 @@
   } from '$lib/remote/subscription.remote';
   import { buildPlatformUrl } from '$lib/utils/subdomain';
   import { formatDate } from '$lib/utils/format';
+  import { scheduledElsewhereLine } from '$lib/utils/scheduled-elsewhere';
   import {
     getEffectiveStatus,
     type SubscriptionStatus,
@@ -160,7 +161,8 @@
           // Best-effort; the version-based invalidation will re-reconcile.
         }
         reactivateError =
-          result.message || 'Failed to reactivate subscription';
+          scheduledElsewhereLine('code' in result ? result : {}) ??
+          (result.message || 'Failed to reactivate subscription');
         return;
       }
       await Promise.all([

@@ -183,6 +183,32 @@ describe('AccessRevokedOverlay', () => {
     expect(onreactivated).toHaveBeenCalledTimes(1);
   });
 
+  test('a Stripe schedule that is not ours: the toast gives the id to quote (Codex-2hxff.97)', async () => {
+    vi.mocked(reactivateSubscription).mockResolvedValueOnce({
+      success: false,
+      code: 'CONFLICT',
+      detailsCode: 'SUBSCRIPTION_SCHEDULED_ELSEWHERE',
+      errorId: 'err_7f3a',
+      message:
+        "This subscription can't be changed here just now. Please contact support.",
+      status: 409,
+    } as never);
+
+    component = mount(AccessRevokedOverlay, {
+      target: document.body,
+      props: { reason: 'subscription_deleted', organizationId: ORG_ID },
+    });
+    buttonByLabel('Reactivate')?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    flushSync();
+
+    expect(vi.mocked(toast).error).toHaveBeenCalledWith(
+      'Reactivate failed',
+      m.subscription_refusal_scheduled_elsewhere({ errorId: 'err_7f3a' })
+    );
+  });
+
   test('Reactivate without organizationId surfaces a toast and does NOT call the remote', () => {
     component = mount(AccessRevokedOverlay, {
       target: document.body,
