@@ -903,6 +903,28 @@ describe('PageRenderer', () => {
       flushSync();
       expect(frameOf(root)).toBeNull();
     });
+
+    // The studio copies its frame again only while a render paints it.
+    it('asks for the copy while the canvas or a thumbnail is mounted, and never on a live page or without a shader', async () => {
+      for (const props of [{ edit }, { still: true }]) {
+        await render({
+          page: movingHero(),
+          theme: 'light',
+          orgShader: true,
+          ...props,
+        });
+        expect(shaderStill.wanted).toBe(true);
+        unmount(app);
+        app = null;
+        expect(shaderStill.wanted).toBe(false);
+      }
+      for (const props of [{ orgShader: true }, { edit, orgShader: false }]) {
+        await render({ page: movingHero(), theme: 'light', ...props });
+        expect(shaderStill.wanted, JSON.stringify(props)).toBe(false);
+        unmount(app);
+        app = null;
+      }
+    });
   });
 
   // Codex-61zsk.39: a creator who recommends a path other than the platform's

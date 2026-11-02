@@ -33,10 +33,36 @@ class ShaderStillChannel {
   // after a newer copy started, or after a clear, is dropped, so an older
   // frame can never land over a newer one.
   #ticket = 0;
+  #wanted = 0;
+  #wake: (() => void) | null = null;
 
   /** The latest copy, read reactively; null until one is taken. */
   get current(): ShaderStill | null {
     return this.#still;
+  }
+
+  /** Some render paints the copy (`want`). Copying the frame again is a
+   *  full-viewport draw, so the studio does it for a brand change only then. */
+  get wanted(): boolean {
+    return this.#wanted > 0;
+  }
+
+  /** A render that may paint the copy asks for it while it is mounted, and
+   *  for one now if none is shown; returns the release. */
+  want(): () => void {
+    this.#wanted++;
+    this.#wake?.();
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.#wanted--;
+    };
+  }
+
+  /** ShaderHero: told each time a render asks. */
+  onDemand(wake: (() => void) | null): void {
+    this.#wake = wake;
   }
 
   /** ShaderHero: encodes `copy` (a 2D canvas it has drawn the frame on). */

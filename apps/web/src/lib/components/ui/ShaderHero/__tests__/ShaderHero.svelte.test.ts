@@ -39,9 +39,14 @@ vi.mock('../jfa-sdf', () => ({ destroyJFACache: vi.fn() }));
 // editor would.
 const brand = vi.hoisted(() => ({
   config: { preset: 'glow' } as Record<string, unknown>,
+  /** How many times the shader has read them. */
+  reads: 0,
 }));
 vi.mock('../shader-config', () => ({
-  getShaderConfig: () => brand.config,
+  getShaderConfig: () => {
+    brand.reads++;
+    return brand.config;
+  },
 }));
 
 import ShaderHero from '../ShaderHero.svelte';
@@ -475,7 +480,10 @@ describe('ShaderHero still copy', () => {
     expect(shaderStill.current?.theme).toBe('dark');
   });
 
-  it('copies the frame again in the studio once the brand or the theme changes what it draws', async () => {
+  /** The studio's shader inside its org layout, its first frame copied; the
+   *  wait for changes to settle runs by hand (`settle`), any other timer is
+   *  real. */
+  async function inStudio() {
     const layout = document.createElement('div');
     layout.className = 'org-layout';
     document.body.appendChild(layout);
@@ -483,7 +491,6 @@ describe('ShaderHero still copy', () => {
     await start({ still: true, tone: true }, layout);
     step(1);
     expect(encoded).toBe(1);
-    // The wait for changes to settle runs by hand; any other timer is real.
     let settling: (() => void) | null = null;
     const later = window.setTimeout.bind(window);
     vi.spyOn(window, 'setTimeout').mockImplementation(((
@@ -501,6 +508,14 @@ describe('ShaderHero still copy', () => {
       run?.();
       step(3);
     };
+    return { layout, settle };
+  }
+
+  it('copies the frame again in the studio once the brand or the theme changes what it draws', async () => {
+    const { layout, settle } = await inStudio();
+    // The page editor paints the copy.
+    releases.push(shaderStill.want());
+    expect(renderer.render).toHaveBeenCalledTimes(1);
 
     // A token the shader does not read: nothing is drawn again.
     layout.style.setProperty('--brand-radius', '4px');
@@ -524,6 +539,39 @@ describe('ShaderHero still copy', () => {
     await settle();
     expect(encoded).toBe(3);
     expect(shaderStill.current?.theme).toBe('dark');
+  });
+
+  it('with nothing painting the copy, a brand change drops it and draws nothing until a render asks', async () => {
+    const { layout, settle } = await inStudio();
+
+    // The brand editor, which paints no copy.
+    brand.config = { preset: 'glow', intensity: 0.4 };
+    layout.style.setProperty('--brand-shader-intensity', '0.4');
+    await settle();
+    // The old brand's copy gives way to the glow; no full-viewport draw.
+    expect(shaderStill.current).toBeNull();
+    expect(renderer.render).toHaveBeenCalledTimes(1);
+
+    // The page editor opens.
+    releases.push(shaderStill.want());
+    step(3);
+    expect(renderer.render).toHaveBeenCalledTimes(2);
+    expect(encoded).toBe(2);
+    expect(shaderStill.current).not.toBeNull();
+
+    // A second render asking, with a copy shown, draws nothing more.
+    releases.push(shaderStill.want());
+    step(3);
+    expect(renderer.render).toHaveBeenCalledTimes(2);
+  });
+
+  it('a frozen shader with nothing to draw keeps to the poll that spots a new preset', async () => {
+    brand.config = { preset: 'none' };
+    await start({ still: true, tone: true });
+    const before = brand.reads;
+    step(60);
+    // Once in thirty frames, not every frame.
+    expect(brand.reads - before).toBe(2);
   });
 
   it('goes back to the glow when its context is lost, and copies no blank frame', async () => {

@@ -19,10 +19,9 @@
   An item may have a figure in its mark's place instead (Codex-61zsk.73):
   "24", "£12". It is words, read as the start of the name ("24 practices to
   keep"), so it sits inside the name and is set in the accent's text grade.
-  A picture leads its own tile, so a pictured tile draws no figure, and its
-  mark, if it has one, as before. In the
-  checklist every row's mark stands in a column as wide as the widest
-  figure, level with its name's first line.
+  A picture leads its own tile, so a pictured tile draws its mark, as
+  before, and no figure. In the checklist every row's mark stands in a
+  column as wide as the widest figure, level with its name's first line.
 
   Under the words, before the items, every layout draws the course's facts
   (Codex-61zsk.73): its stages, practices and length, counted from the

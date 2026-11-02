@@ -26,7 +26,7 @@
     type PageStyleId,
     SCHEME_OPTIONS,
   } from '$lib/page-builder/kit';
-  import { atmosphereStill } from '$lib/page-builder/kit/atmosphere-still';
+  import { atmosphereStill, wantStill } from '$lib/page-builder/kit/atmosphere-still';
   import { brandOverridesToStyleAttr } from '$lib/page-builder/render/brand-overrides';
   import * as m from '$paraglide/messages';
 
@@ -74,6 +74,9 @@
 
   const brandStyle = $derived(brandOverridesToStyleAttr(brandOverrides));
   const still = $derived(atmosphereStill({ theme, orgShader, brandOverrides }));
+  $effect(() => {
+    if (orgShader) return wantStill();
+  });
   const fullName = (id: ColourSchemeId) =>
     SCHEME_OPTIONS.find((option) => option.id === id)?.label ?? id;
 </script>

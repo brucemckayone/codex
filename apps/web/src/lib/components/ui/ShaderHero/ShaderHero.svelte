@@ -314,9 +314,12 @@
 
     // A frozen shader reads the brand only when it draws, so a new preset,
     // new colours or the other theme would leave the page editor a copy of
-    // the old. In the studio, a change to the org layout's tokens (the brand
-    // editor writes them inline) or to the site's theme draws the frame
-    // again once the changes settle, if what the shader draws has changed.
+    // the old. In the studio, once a change to the org layout's tokens (the
+    // brand editor writes them inline, and its editing theme as attributes)
+    // or to the site's theme settles, a copy of what the shader no longer
+    // draws gives way to the glow. The frame is drawn again for a new copy
+    // only while a render paints it: each is a full-viewport draw, and the
+    // brand editor, where most changes are made, paints none.
     const STILL_SETTLE_MS = 250;
     let stillSettle = 0;
     const brandObserver = tone
@@ -325,17 +328,30 @@
           clearTimeout(stillSettle);
           stillSettle = window.setTimeout(() => {
             const key = JSON.stringify(getShaderConfig(undefined, presetOverride));
-            if (`${key}|${drawsDark()}` !== stillDrawnKey) redrawFrozen();
+            if (`${key}|${drawsDark()}` === stillDrawnKey) return;
+            clearStill();
+            if (shaderStill.wanted) redrawFrozen();
           }, STILL_SETTLE_MS);
         })
       : null;
     const orgLayoutEl = containerEl?.closest('.org-layout');
     if (brandObserver && orgLayoutEl)
-      brandObserver.observe(orgLayoutEl, { attributes: true, attributeFilter: ['style'] });
+      brandObserver.observe(orgLayoutEl, {
+        attributes: true,
+        attributeFilter: ['style', 'data-editing-theme', 'data-org-brand'],
+      });
     brandObserver?.observe(document.documentElement, {
       attributes: true,
       attributeFilter: ['data-theme'],
     });
+
+    // A render that starts painting the copy, with none shown (the brand
+    // changed while none painted it, or a copy failed), gets the frame drawn
+    // again to copy.
+    if (tone)
+      shaderStill.onDemand(() => {
+        if (isStill && !shaderStill.current) redrawFrozen();
+      });
 
     if (tone)
       shaderTone.onHold((held) => {
@@ -414,8 +430,9 @@
 
       // A frozen shader draws seldom (a resize, a sample, the studio), so the
       // frame it is about to draw reads the brand afresh: the poll's last
-      // read may be minutes and a brand edit old.
-      const config = pollConfig(isFrozen && !hasRenderedStaticFrame);
+      // read may be minutes and a brand edit old. With no renderer it draws
+      // nothing, and its loop keeps to the poll that spots a new preset.
+      const config = pollConfig(isFrozen && !hasRenderedStaticFrame && renderer !== null);
 
       // Switch preset if needed (async — may take a frame).
       // ensureRenderer calls scheduleFrame() on all branches (success AND
@@ -560,6 +577,7 @@
         shaderTone.onHold(null);
         shaderTone.onDemand(null);
         shaderTone.clear();
+        shaderStill.onDemand(null);
         shaderStill.clear();
       }
       cancelAnimationFrame(animFrameId);

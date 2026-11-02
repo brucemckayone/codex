@@ -3,8 +3,11 @@
  * has a moving background and who is looking (#20a), and the studio's frame
  * of that background painted on its tile (#20b).
  */
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { shaderStill } from '$lib/components/ui/ShaderHero/shader-still.svelte';
+import { componentRules } from '$lib/page-builder/kit/blocks/testing';
 import {
   flushSync,
   mount,
@@ -150,5 +153,25 @@ describe('the studio’s still on the Moving tile (#20b)', () => {
       unmount(app);
       app = null;
     }
+  });
+
+  it('asks for the copy while it shows the org’s moving background', () => {
+    render({ orgShader: true });
+    expect(shaderStill.wanted).toBe(true);
+    unmount(app);
+    app = null;
+    expect(shaderStill.wanted).toBe(false);
+    render({ orgShader: false });
+    expect(shaderStill.wanted).toBe(false);
+  });
+
+  // A tile is too small for Poster's or Cinematic's panel card, so it keeps
+  // the band's veil: without this the panel rule would leave the copy bare.
+  it('keeps the band’s veil in a panel Style', () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const rule = componentRules(join(here, 'SchemeSwatches.svelte')).find(
+      (r) => r.selector === '.swatch__page'
+    );
+    expect(rule?.decls.get('--lp-atmosphere-veil')).toBe('section');
   });
 });

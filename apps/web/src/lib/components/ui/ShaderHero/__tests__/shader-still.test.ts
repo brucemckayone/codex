@@ -91,6 +91,27 @@ describe('shaderStill', () => {
     expect(shaderStill.current?.url).toBe('blob:still-1');
     expect(revoked).toEqual([]);
   });
+
+  it('is wanted while any render that paints it is mounted, and tells the shader each time one asks', () => {
+    const asked = vi.fn();
+    shaderStill.onDemand(asked);
+    expect(shaderStill.wanted).toBe(false);
+
+    const canvas = shaderStill.want();
+    const swatch = shaderStill.want();
+    expect(shaderStill.wanted).toBe(true);
+    expect(asked).toHaveBeenCalledTimes(2);
+
+    canvas();
+    canvas(); // a release twice counts once
+    expect(shaderStill.wanted).toBe(true);
+    swatch();
+    expect(shaderStill.wanted).toBe(false);
+
+    shaderStill.onDemand(null);
+    shaderStill.want()();
+    expect(asked).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe('captureStill', () => {

@@ -38,3 +38,13 @@ export function atmosphereStill(band: {
   const still = shaderStill.current;
   return still?.theme === band.theme ? `url("${still.url}")` : undefined;
 }
+
+/**
+ * A render that may paint the frame asks for it while it is mounted (call
+ * in an `$effect`, which runs the release): only then does the studio copy
+ * its frame again after a brand change, since each copy is a full-viewport
+ * draw.
+ */
+export function wantStill(): () => void {
+  return shaderStill.want();
+}

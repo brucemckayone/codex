@@ -79,7 +79,7 @@
     resolveStyle,
     type ThemeGrounds,
   } from './model/resolve';
-  import { atmosphereStill, ownsColours } from './atmosphere-still';
+  import { atmosphereStill, ownsColours, wantStill } from './atmosphere-still';
   import { atmosphereVeil } from './atmosphere-veil';
   import { STYLES } from './model/styles';
   import type { BlockEdit, KitPage } from './model/types';
@@ -297,6 +297,9 @@
   const stillFrame = $derived(
     edit || still ? atmosphereStill({ theme, orgShader, brandOverrides }) : undefined
   );
+  $effect(() => {
+    if ((edit || still) && orgShader) return wantStill();
+  });
 </script>
 
 <svelte:head>

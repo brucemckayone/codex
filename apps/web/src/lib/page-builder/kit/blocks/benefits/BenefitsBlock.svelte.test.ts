@@ -594,12 +594,18 @@ describe('a figure in the mark’s place (Codex-61zsk.73)', () => {
       expect(figured?.decls.get('grid-template-columns')).toBe(
         'minmax(var(--_benefit-figure-col), max-content) minmax(0, 1fr)'
       );
-      // The column is the widest figure's `0`s, counted at the figure's size.
+      // The column is the widest figure's `0`s, counted in the figure's face,
+      // weight and size (a face the kit has not measured counts `1ch`, the
+      // list's own); each row is set in the body's again.
       const list = rule('.benefits-checks[data-figured]');
+      expect(list?.decls.get('font-family')).toBe('var(--lp-font-display)');
+      expect(list?.decls.get('font-weight')).toBe('var(--lp-weight-display)');
       expect(list?.decls.get('font-size')).toBe('var(--_figure-size)');
       expect(list?.decls.get('--_benefit-figure-col')).toBe(
         'calc(var(--_zeros) * var(--lp-zero-display))'
       );
+      expect(figured?.decls.get('font-family')).toBe('var(--lp-font-body)');
+      expect(figured?.decls.get('font-weight')).toBe('var(--lp-weight-body)');
       const name = rule(
         '.benefits-checks li[data-figure] > .benefits-checks__name'
       );
