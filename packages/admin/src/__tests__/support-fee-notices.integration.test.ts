@@ -248,6 +248,135 @@ describe('SupportService fee notices (real DB)', () => {
     });
   });
 
+  it('cards read their marks and fee levels together, not once per card; a creator’s rise layers over their organisation', async () => {
+    const org = await rise();
+    const [cleo, dan, eli] = (await people(3)) as [string, string, string];
+    // Cleo's own fee is 12% today; a rise in it to 18% waits.
+    await seedFeeLevel(
+      db,
+      { scope: 'creator', organizationId: org.organizationId, creatorId: cleo },
+      { orgFeePercent: 1200 }
+    );
+    const [own] = await db
+      .insert(feeChanges)
+      .values({
+        scope: 'creator',
+        organizationId: org.organizationId,
+        creatorId: cleo,
+        kind: 'rise',
+        createdBy: supportId,
+        firstRunAt: FIRST_RUN,
+        listedCount: 0,
+      })
+      .returning({ id: feeChanges.id });
+    const ownId = own?.id as string;
+    await db.insert(feeConfigVersions).values({
+      changeId: ownId,
+      scope: 'creator',
+      orgFeePercent: 1800,
+    });
+    const marked = (at: string, note: string): NoticeValues => ({
+      state: 'told_another_way',
+      toldNote: note,
+      toldByUserId: supportId,
+      toldAt: new Date(at),
+    });
+    await notice(
+      org.changeId,
+      org.organizationId,
+      dan,
+      marked('2026-11-03T10:00:00Z', 'Phoned Dan')
+    );
+    await notice(
+      org.changeId,
+      org.organizationId,
+      eli,
+      marked('2026-11-03T15:00:00Z', 'Phoned Eli')
+    );
+    await notice(
+      ownId,
+      org.organizationId,
+      cleo,
+      marked('2026-11-03T12:00:00Z', 'Phoned Cleo')
+    );
+
+    // The client, recording each select's table and fields.
+    const reads: Array<{ table: unknown; fields: unknown }> = [];
+    const counting = new Proxy(db, {
+      get(target, prop) {
+        if (prop === 'select') {
+          return (fields?: Record<string, unknown>) => {
+            const builder = (
+              target.select as (f?: unknown) => {
+                from: (table: unknown) => unknown;
+              }
+            ).call(target, fields);
+            const from = builder.from.bind(builder);
+            builder.from = (table: unknown) => {
+              reads.push({ table, fields });
+              return from(table);
+            };
+            return builder;
+          };
+        }
+        const value = Reflect.get(target, prop, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const stripe = createMockStripe();
+    const reading = new SupportService({
+      db: counting,
+      environment: 'test',
+      stripe,
+      purchase: new PurchaseService(
+        { db, environment: 'test', ...createTestMoneyDeps() },
+        stripe
+      ),
+      feeConfig: { invalidateLevel },
+    });
+
+    const list = await reading.listFeeChanges({ page: 1, limit: 50 }, NOW);
+    const cardOf = (id: string) => list.items.find((c) => c.changeId === id);
+
+    expect(cardOf(ownId)).toMatchObject({
+      scope: 'creator',
+      creator: { userId: cleo },
+      lines: [
+        { value: 'orgFeePercent', context: 'both', from: 1200, to: 1800 },
+      ],
+    });
+    expect(cardOf(org.changeId)?.lines).toEqual([
+      expect.objectContaining({ from: 1000, to: 1500 }),
+    ]);
+    // Newest mark first, each card its own.
+    expect(
+      cardOf(org.changeId)?.toldAnotherWay.map((m) => m.person.userId)
+    ).toEqual([eli, dan]);
+    expect(cardOf(ownId)?.toldAnotherWay).toEqual([
+      expect.objectContaining({
+        person: expect.objectContaining({ userId: cleo }),
+        at: '2026-11-03T12:00:00.000Z',
+        note: 'Phoned Cleo',
+      }),
+    ]);
+    const markReads = reads.filter(
+      (r) =>
+        (r.fields as { note?: unknown } | undefined)?.note ===
+        feeChangeNotices.toldNote
+    );
+    const versionReads = reads.filter(
+      (r) => r.table === feeConfigVersions && r.fields === undefined
+    );
+    const levelReads = reads.filter(
+      (r) => r.table === feeConfigVersions && r.fields !== undefined
+    );
+    expect(list.items.length).toBeGreaterThanOrEqual(2);
+    expect(markReads).toHaveLength(1);
+    expect(versionReads).toHaveLength(1);
+    // The platform's, then every organisation's and every creator's.
+    expect(levelReads.length).toBeLessThanOrEqual(3);
+  });
+
   it('lists the people not yet told, joiners flagged; never anyone told, set aside, or on a rise that is off or started; the badge counts the same', async () => {
     const { organizationId, changeId } = await rise();
     const [gil, hal, ivy, jo, kay, lia] = await people(6);
