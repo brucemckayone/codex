@@ -6471,6 +6471,14 @@ export const media_use_where_audio_draft = () => `Draft audio`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const media_use_where_thumbnail = () => `Its thumbnail is a frame of this video`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const media_use_where_bought_film = () => `Off sale · people who bought it can still watch`
 
 
@@ -6635,6 +6643,22 @@ export const media_delete_blocked_body_one = (params) => `It’s used by ${param
 
 
 /**
+ * @param {{ uses: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_blocked_body_thumbnail = (params) => `It’s the thumbnail of ${params.uses}. Choose another thumbnail in each place, then you can delete it.`
+
+
+/**
+ * @param {{ uses: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_blocked_body_thumbnail_one = (params) => `It’s the thumbnail of ${params.uses}. Choose another thumbnail there, then you can delete it.`
+
+
+/**
  * 
  * @returns {string}
  */
@@ -6688,6 +6712,22 @@ export const media_delete_drafts_body_one = () => `If you delete it, it will sho
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const media_delete_drafts_body = () => `If you delete it, they’ll show “media missing” until you choose another media item. Nobody else can see drafts.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_drafts_body_thumbnail_one = () => `If you delete it, it will lose its thumbnail after 30 days until you choose another. Nobody else can see drafts.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_drafts_body_thumbnail = () => `If you delete it, they’ll lose their thumbnail after 30 days until you choose another. Nobody else can see drafts.`
 
 
 /**
@@ -6792,6 +6832,22 @@ export const media_delete_toast_drafts_one = () => `Deleted. 1 draft needs a new
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const media_delete_toast_drafts = (params) => `Deleted. ${params.count} drafts need a new media item.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_toast_drafts_thumbnail_one = () => `Deleted. 1 draft needs a new thumbnail.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_toast_drafts_thumbnail = (params) => `Deleted. ${params.count} drafts need a new thumbnail.`
 
 
 /**
