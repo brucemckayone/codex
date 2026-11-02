@@ -50,81 +50,25 @@
  * asserting a value would be a guess dressed as a design.
  */
 import { DEFAULTS } from '$lib/components/ui/ShaderHero/shader-config';
+import { contrastRatio as contrast } from './ink';
 import { hexToOklch, oklchToHex } from './oklch-math';
 import type { BrandPreset } from './types';
 
 // ── Contrast primitives ────────────────────────────────────────────────────
-// Duplicated rather than imported from components/brand-studio/rail/contrast.ts
-// on purpose: this module is imported by the store, and the store must not pull
-// in component-tree code. `presets.test.ts` asserts the two implementations
-// agree, so the duplication cannot silently diverge.
+// The maths and the product's ink rule live in ./ink.ts, a leaf the brand
+// studio's contrast pill reads too, so the presets and the readout cannot
+// drift apart (Codex-6r63f).
 
 /** WCAG 2.x AA floor for normal-size text. Headings are held to this, not the
  *  3:1 large-text allowance — `--color-heading` also paints h3/h4 at body size. */
 export const AA_TEXT_CONTRAST = 4.5;
 
-/** Relative luminance at which org-brand.css flips text-on-brand white → black:
- *  where white and black contrast equally (Codex-6r63f). */
-const TEXT_ON_BRAND_PIVOT = 0.1791;
-
-function linearise(channel: number): number {
-  return channel <= 0.03928
-    ? channel / 12.92
-    : ((channel + 0.055) / 1.055) ** 2.4;
-}
-
-function parseHex(hex: string): [number, number, number] | null {
-  const clean = hex.trim().replace(/^#/, '');
-  const expanded =
-    clean.length === 3
-      ? clean
-          .split('')
-          .map((c) => c + c)
-          .join('')
-      : clean;
-  if (expanded.length !== 6 || !/^[0-9a-fA-F]{6}$/.test(expanded)) return null;
-  return [
-    Number.parseInt(expanded.slice(0, 2), 16),
-    Number.parseInt(expanded.slice(2, 4), 16),
-    Number.parseInt(expanded.slice(4, 6), 16),
-  ];
-}
-
-/** WCAG relative luminance, or null for an unparseable hex. */
-export function luminance(hex: string): number | null {
-  const rgb = parseHex(hex);
-  if (!rgb) return null;
-  const [r, g, b] = rgb.map((c) => linearise(c / 255));
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-}
-
-/** WCAG contrast ratio in 1…21, or null if either hex is unparseable. */
-export function contrast(a: string, b: string): number | null {
-  const la = luminance(a);
-  const lb = luminance(b);
-  if (la === null || lb === null) return null;
-  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
-}
-
-/**
- * The foreground the product auto-places on a brand-coloured surface. Mirrors
- * the org-brand.css luminance rule exactly, its luminance included (every
- * channel through the sRGB power segment, no linear knee): white below the
- * pivot, black at or above it.
- */
-export function inkOn(backgroundHex: string): string {
-  const rgb = parseHex(backgroundHex);
-  if (!rgb) return '#FFFFFF';
-  const [r, g, b] = rgb.map((c) => ((c / 255 + 0.055) / 1.055) ** 2.4);
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b < TEXT_ON_BRAND_PIVOT
-    ? '#FFFFFF'
-    : '#000000';
-}
+export { contrast };
 
 /**
  * Whichever of white/black actually contrasts better with `backgroundHex`.
  *
- * The product now chooses the same way (`inkOn`), so the two agree for every
+ * The product now chooses the same way (`inkOn` in ./ink.ts), so the two agree for every
  * brand bar the hair's-breadth either side of the pivot. A preset still
  * writes `--brand-hero-cta-text` with this one EXPLICITLY: an explicit colour
  * holds in an engine without `pow()` in relative colour, where org-brand.css

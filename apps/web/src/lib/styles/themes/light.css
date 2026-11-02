@@ -41,10 +41,10 @@
      0.62, black above) is the fallback, and the luminance step at the foot of
      this file is the live rule. Keyed to the swatch actually being painted,
      which is what makes it correct for every org brand AND for the platform
-     palette. Declared in each
-     scope that declares --color-interactive: a custom property substitutes
-     var() at computed-value time on the element it is DECLARED on, so a single
-     :root copy would freeze the platform value and never see an org override.
+     palette. Declared in each scope that declares --color-interactive: a
+     custom property substitutes var() at computed-value time on the element it
+     is DECLARED on, so a single :root copy would freeze the platform value and
+     never see an org override.
      (No :root fallback needed — `:root` is in this rule's selector list.) */
   --color-on-interactive: oklch(from var(--color-interactive) clamp(0, (0.62 - l) * 1000, 1) 0 0);
 

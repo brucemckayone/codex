@@ -85,6 +85,14 @@ describe('deriveTextOnBrand (mirrors org-brand.css’s luminance step)', () => {
     expect(deriveTextOnBrand('not-a-colour')).toBe('#FFFFFF');
   });
 
+  // CSS refuses a colour with one bad digit, so the readout must too: it once
+  // read `#ffff0g` as yellow, from the digits before the bad one.
+  test('reads a hex with one bad digit as no colour at all', () => {
+    expect(relativeLuminance('#ffff0g')).toBeNull();
+    expect(evaluateBrandContrast('#ffff0g').ratio).toBeNull();
+    expect(relativeLuminance('#fg0')).toBeNull();
+  });
+
   // Where white and black contrast equally, so the better of the two clears
   // AA on every brand (org-brand.css's foot).
   test('flips where white and black contrast equally', () => {
@@ -111,24 +119,34 @@ describe('deriveTextOnBrand (mirrors org-brand.css’s luminance step)', () => {
 describe('the rule the stylesheets paint', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const styles = join(here, '../../../styles');
-  const STEP =
-    '(0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4)))';
+  // One channel of an ink, built from the pivot the readout uses.
+  const CHANNEL = `calc(255 * clamp(0, (${TEXT_ON_BRAND_LUMINANCE_PIVOT} - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))`;
+  const GUARD =
+    '@supports (color: rgb(from red calc(255 * pow(r / 255, 2)) 0 0))';
+  const count = (css: string, text: string) => css.split(text).length - 1;
+
+  // The step is written out once per channel, many times a file, so every
+  // copy is checked: one drifted copy would hide behind any intact one.
+  function expectEveryChannelIsTheStep(css: string, label: string) {
+    const channels = count(css, 'calc(255 * clamp(0, ');
+    expect(channels, label).toBeGreaterThan(0);
+    expect(count(css, CHANNEL), label).toBe(channels);
+  }
 
   test('org-brand.css chooses the org’s inks by the same luminance step', () => {
     const css = readFileSync(join(styles, 'tokens/org-brand.css'), 'utf8');
-    expect(css).toContain(STEP);
+    expectEveryChannelIsTheStep(css, 'org-brand.css');
     expect(css).toContain('--color-text-on-brand: rgb(');
   });
 
   test('the platform themes choose theirs by it too, under the same guard', () => {
     for (const theme of ['light', 'dark']) {
       const css = readFileSync(join(styles, `themes/${theme}.css`), 'utf8');
-      const guarded = css.slice(
-        css.indexOf(
-          '@supports (color: rgb(from red calc(255 * pow(r / 255, 2)) 0 0))'
-        )
-      );
-      expect(guarded, theme).toContain(STEP);
+      const start = css.indexOf(GUARD);
+      expect(start, theme).toBeGreaterThan(-1);
+      const guarded = css.slice(start);
+      expectEveryChannelIsTheStep(guarded, theme);
+      expect(count(guarded, CHANNEL), theme).toBe(6);
       expect(guarded, theme).toContain('--color-on-interactive: rgb(');
       expect(guarded, theme).toContain('--color-text-on-accent: rgb(');
     }
