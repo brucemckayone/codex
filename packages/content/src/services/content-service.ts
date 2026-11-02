@@ -22,6 +22,8 @@ import {
   isPublicContent,
   MEDIA_STATUS,
   MEDIA_TYPES,
+  ORGANIZATION_ROLES,
+  ORGANIZATION_STATUS,
   PAGINATION,
   requiresPayoutsToPublish,
 } from '@codex/constants';
@@ -37,6 +39,7 @@ import {
   content,
   contentCategories,
   mediaItems,
+  organizationMemberships,
   organizations,
   stripeConnectAccounts,
 } from '@codex/database/schema';
@@ -47,7 +50,11 @@ import {
 } from '@codex/image-processing';
 import { READABLE_ORGANIZATION_COLUMNS } from '@codex/organization';
 import type { ServiceConfig } from '@codex/service-errors';
-import { BaseService, ValidationError } from '@codex/service-errors';
+import {
+  BaseService,
+  ForbiddenError,
+  ValidationError,
+} from '@codex/service-errors';
 import type { PaginatedListResponse } from '@codex/shared-types';
 import type { CreateContentInput, UpdateContentInput } from '@codex/validation';
 import {
@@ -165,6 +172,18 @@ export const PUBLIC_CREATOR_COLUMNS = {
 export const CATALOGUE_CONTENT_COLUMNS = {
   purchaseCount: false,
 } as const satisfies Partial<Record<keyof Content, false>>;
+
+/**
+ * The org roles that may file content into an org's catalogue (Codex-ocal6):
+ * the team. `subscriber` and `member` are the org's audience: they can watch
+ * its content, never publish into it. The same set as the "Team only" access
+ * rule (`MANAGEMENT_ROLES` in @codex/access access-decision.ts).
+ */
+const MANAGEMENT_ROLES: string[] = [
+  ORGANIZATION_ROLES.OWNER,
+  ORGANIZATION_ROLES.ADMIN,
+  ORGANIZATION_ROLES.CREATOR,
+];
 
 /**
  * Content Service Class
@@ -392,12 +411,15 @@ export class ContentService extends BaseService {
    * Security:
    * - Validates media item exists and belongs to creator
    * - Validates content type matches media type
-   * - Enforces organization scoping
+   * - Files into an org only for an active owner/admin/creator of it
+   *   (Codex-ocal6)
    * - Prevents slug conflicts
    *
    * @param input - Content creation data (validated by Zod)
    * @param creatorId - ID of the creator
    * @returns Created content
+   * @throws {ForbiddenError} If `organizationId` names an org the creator is
+   *   not an active owner, admin or creator of
    * @throws {MediaNotFoundError} If media item doesn't exist or doesn't belong to creator
    * @throws {MediaNotReadyError} If media item is not in 'ready' status
    * @throws {ContentTypeMismatchError} If content type doesn't match media type
@@ -425,6 +447,19 @@ export class ContentService extends BaseService {
     try {
       // Step 2: Use transaction for atomicity
       const result = await this.db.transaction(async (tx) => {
+        // Step 2a: the org comes from the request BODY. The route's policy is
+        // roles-only, and requireOrgMembership reads the org from the
+        // subdomain or params, never the body, so this is the only gate
+        // between a creator and another org's catalogue (Codex-ocal6). It runs
+        // first so a non-member learns nothing about media or tiers.
+        if (validated.organizationId) {
+          await this.assertCanFileInOrg(
+            tx as DatabaseTransaction,
+            validated.organizationId,
+            creatorId
+          );
+        }
+
         // Step 3: Validate media item (if provided)
         // Note: For draft creation, we don't require media to be ready
         // The ready check happens during publishing
@@ -659,14 +694,16 @@ export class ContentService extends BaseService {
    * - Checks a CHANGED mediaItemId as create does: the caller's own, not
    *   deleted, the content's type, ready if live (published or ever
    *   released; Codex-vmi6m)
-   * - Maintains organization scoping
+   * - Moves content into an org only for an active owner/admin/creator of
+   *   it (Codex-ocal6)
    *
    * @param id - Content ID
    * @param input - Partial update data
    * @param creatorId - Creator ID (for authorization)
    * @returns Updated content
    * @throws {ContentNotFoundError} If content doesn't exist
-   * @throws {ForbiddenError} If content doesn't belong to creator
+   * @throws {ForbiddenError} If `organizationId` moves the content into an
+   *   org the creator is not an active owner, admin or creator of
    * @throws {MediaNotFoundError} If a newly attached media item isn't the
    *   caller's, or is deleted
    * @throws {MediaNotReadyError} If it isn't ready and the content is live
@@ -753,6 +790,21 @@ export class ContentService extends BaseService {
 
         if (!existing) {
           throw new ContentNotFoundError(id);
+        }
+
+        // Moving the row into a different org needs the same team membership
+        // as create() (Codex-ocal6). An unchanged org is not re-checked: the
+        // studio form sends the current organizationId on every save.
+        if (
+          'organizationId' in validated &&
+          validated.organizationId &&
+          validated.organizationId !== existing.organizationId
+        ) {
+          await this.assertCanFileInOrg(
+            tx as DatabaseTransaction,
+            validated.organizationId,
+            creatorId
+          );
         }
 
         // Route contentBody to the appropriate column (JSON vs legacy text).
@@ -1967,6 +2019,45 @@ export class ContentService extends BaseService {
       };
     } catch (error) {
       this.handleError(error, 'listPublic');
+    }
+  }
+
+  /**
+   * Private helper: refuse unless `userId` may file content into
+   * `organizationId` (Codex-ocal6).
+   *
+   * Allowed: an ACTIVE membership whose role is owner, admin or creator.
+   * `subscriber` and `member` are the audience; `invited` and `inactive` are
+   * not (yet, or any longer) on the team. One message whatever the reason, so
+   * the refusal never says whether an org id exists.
+   *
+   * @param tx - Database transaction
+   * @param organizationId - The org the write would file the content under
+   * @param userId - The creator making the write
+   * @throws {ForbiddenError} If there is no such membership
+   */
+  private async assertCanFileInOrg(
+    tx: DatabaseTransaction,
+    organizationId: string,
+    userId: string
+  ): Promise<void> {
+    const [membership] = await tx
+      .select({ id: organizationMemberships.id })
+      .from(organizationMemberships)
+      .where(
+        and(
+          eq(organizationMemberships.organizationId, organizationId),
+          eq(organizationMemberships.userId, userId),
+          eq(organizationMemberships.status, ORGANIZATION_STATUS.ACTIVE),
+          inArray(organizationMemberships.role, MANAGEMENT_ROLES)
+        )
+      )
+      .limit(1);
+
+    if (!membership) {
+      throw new ForbiddenError(
+        "You can only add content to an organization you're on the team of."
+      );
     }
   }
 

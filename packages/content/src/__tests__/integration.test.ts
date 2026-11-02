@@ -16,10 +16,14 @@
  */
 
 import { CONTENT_STATUS, MEDIA_STATUS } from '@codex/constants';
-import { stripeConnectAccounts } from '@codex/database/schema';
+import {
+  organizationMemberships,
+  stripeConnectAccounts,
+} from '@codex/database/schema';
 import { OrganizationService } from '@codex/organization';
 import {
   createTestConnectAccountInput,
+  createTestMembershipInput,
   createUniqueSlug,
   type Database,
   seedTestUsers,
@@ -806,6 +810,13 @@ describe('Integration Tests', () => {
         },
         creatorId
       );
+      // create() made creator 1 the owner; creator 2 joins the team so they
+      // may file content into it too (Codex-ocal6).
+      await db
+        .insert(organizationMemberships)
+        .values(
+          createTestMembershipInput(org.id, otherCreatorId, { role: 'creator' })
+        );
 
       // Creator 1 media and content
       const media1 = await mediaService.create(

@@ -136,6 +136,15 @@ describe('ContentAccessService Integration', () => {
     }
 
     organizationId = org.id;
+
+    // `userId` files every org item in this suite, so it is on the team
+    // (Codex-ocal6): the service refuses org content from a non-member.
+    await db.insert(organizationMemberships).values({
+      userId,
+      organizationId,
+      role: 'creator',
+      status: 'active',
+    });
   });
 
   afterAll(async () => {
@@ -999,6 +1008,14 @@ describe('ContentAccessService Integration', () => {
           })
           .returning();
         if (!subOrg) throw new Error('Failed to create subscription org');
+        // The creator files this org's items, so they are on its team
+        // (Codex-ocal6).
+        await db.insert(organizationMemberships).values({
+          userId: creatorUserId,
+          organizationId: subOrg.id,
+          role: 'creator',
+          status: 'active',
+        });
 
         const [tier] = await db
           .insert(subscriptionTiers)
@@ -2133,6 +2150,13 @@ describe('ContentAccessService Integration', () => {
         if (!org) {
           throw new Error('Failed to create hybrid test organization');
         }
+        // `userId` files the hybrid items, so is on the team (Codex-ocal6).
+        await db.insert(organizationMemberships).values({
+          userId,
+          organizationId: org.id,
+          role: 'creator',
+          status: 'active',
+        });
 
         const [basicTier] = await db
           .insert(subscriptionTiers)
@@ -3433,6 +3457,13 @@ describe('ContentAccessService Integration', () => {
           },
           userId
         );
+        // Filing into the tier's org needs a team seat (Codex-ocal6).
+        await db.insert(organizationMemberships).values({
+          userId,
+          organizationId: tierOrgId,
+          role: 'creator',
+          status: 'active',
+        });
         const item = await contentService.create(
           {
             organizationId: tierOrgId,
