@@ -20,6 +20,7 @@ import {
   PRICE_CHANGE_NOTICE_SECONDS,
   PRICE_NOTICE_TIMEOUT_MS,
   type PriceChangeNotice,
+  platformWriteMetadata,
   schedulePriceChange,
   sendPriceChangeNotice,
 } from '../pending-price-change';
@@ -1115,6 +1116,7 @@ describe('applyDuePendingPriceChange', () => {
     expect(await applyDuePendingPriceChange(stripe, sub)).toBe(true);
     expect(prices.update).toHaveBeenCalledExactlyOnceWith('price_new', {
       active: true,
+      metadata: { codex_platform_write: expect.any(String) },
     });
     expect(order).toEqual(['activate', 'swap']);
   });
@@ -1229,5 +1231,17 @@ describe('firstRenewalOnOrAfter', () => {
         earliest: at('2026-11-12T12:00:00Z'),
       })
     ).toBe(at('2027-10-25T09:00:00Z'));
+  });
+});
+
+describe('platformWriteMetadata', () => {
+  // The price.updated webhook knows our write by the key CHANGING, so two
+  // writes to the same Price must never carry the same value.
+  it('gives every write a fresh codex_platform_write', () => {
+    const first = platformWriteMetadata();
+    const second = platformWriteMetadata();
+    expect(Object.keys(first)).toEqual(['codex_platform_write']);
+    expect(first.codex_platform_write).toEqual(expect.any(String));
+    expect(second.codex_platform_write).not.toBe(first.codex_platform_write);
   });
 });

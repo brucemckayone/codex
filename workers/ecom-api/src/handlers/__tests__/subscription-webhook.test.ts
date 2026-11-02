@@ -27,7 +27,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { StripeWebhookEnv } from '../../types';
 
 // Mock modules before imports
-vi.mock('@codex/subscription', () => ({
+vi.mock('@codex/subscription', async (importOriginal) => ({
+  // The REAL predicate: the price.updated tests prove the platform's own
+  // writes stay quiet, and a stand-in here would only test the stand-in.
+  isPlatformPriceWrite: (
+    await importOriginal<typeof import('@codex/subscription')>()
+  ).isPlatformPriceWrite,
   // The renewal-time price swap (Codex-2hxff.3).
   applyDuePendingPriceChange: vi.fn().mockResolvedValue(false),
   PENDING_PRICE_ID_KEY: 'codex_pending_price_id',
@@ -971,6 +976,88 @@ describe('handleSubscriptionWebhook', () => {
       await handleSubscriptionWebhook(event, mockStripe, context);
 
       expect(mock._obs.error).not.toHaveBeenCalled();
+    });
+
+    // The platform's own Price writes (a re-price's archive, a held Price
+    // made billable again) carry a fresh `codex_platform_write`. The
+    // `previous_attributes` shapes are the ones Stripe TEST mode sent on
+    // 2026-11-02: it lists only the changed keys, and a key that is new shows
+    // as null.
+    const ORG_KEYS = { codex_organization_id: 'org-2', interval: 'month' };
+    function priceEvent(
+      object: Record<string, unknown>,
+      previous: Record<string, unknown>
+    ): Stripe.Event {
+      return {
+        id: `evt_test_${Date.now()}`,
+        type: STRIPE_EVENTS.PRICE_UPDATED,
+        data: {
+          object: { id: 'price_tier_abc', ...object },
+          previous_attributes: previous,
+        },
+      } as unknown as Stripe.Event;
+    }
+    async function alerted(event: Stripe.Event): Promise<boolean> {
+      const { context, mock } = createContext();
+      await handleSubscriptionWebhook(event, mockStripe, context);
+      return mock._obs.error.mock.calls.some(
+        ([message]) =>
+          message === 'Codex-managed tier Price edited in Stripe Dashboard'
+      );
+    }
+
+    it.each([
+      {
+        name: 'our first write (the archive)',
+        object: {
+          active: false,
+          metadata: { ...ORG_KEYS, codex_platform_write: 'w1' },
+        },
+        previous: { active: true, metadata: { codex_platform_write: null } },
+      },
+      {
+        name: 'our later write (made billable again)',
+        object: {
+          active: true,
+          metadata: { ...ORG_KEYS, codex_platform_write: 'w2' },
+        },
+        previous: { active: false, metadata: { codex_platform_write: 'w1' } },
+      },
+    ])('stays quiet for $name', async ({ object, previous }) => {
+      expect(await alerted(priceEvent(object, previous))).toBe(false);
+    });
+
+    it.each([
+      {
+        name: 'a hand archive of a Price we wrote before',
+        object: {
+          active: false,
+          metadata: { ...ORG_KEYS, codex_platform_write: 'w1' },
+        },
+        previous: { active: true },
+      },
+      {
+        name: 'a nickname edit',
+        object: {
+          nickname: 'Pro',
+          metadata: { ...ORG_KEYS, codex_platform_write: 'w1' },
+        },
+        previous: { nickname: null },
+      },
+      {
+        name: 'a metadata edit beside our key',
+        object: {
+          metadata: { ...ORG_KEYS, codex_platform_write: 'w1', note: 'x' },
+        },
+        previous: { metadata: { note: null } },
+      },
+      {
+        name: 'our key removed by hand',
+        object: { metadata: { ...ORG_KEYS } },
+        previous: { metadata: { codex_platform_write: 'w1' } },
+      },
+    ])('still alerts on $name', async ({ object, previous }) => {
+      expect(await alerted(priceEvent(object, previous))).toBe(true);
     });
   });
 

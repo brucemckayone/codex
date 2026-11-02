@@ -509,9 +509,14 @@ describe('recording a tier price change (Codex-2hxff.86)', () => {
     ).rejects.toThrow();
 
     const newPrice = (await minted.mock.results[0]?.value) as { id: string };
-    expect(archived).toHaveBeenCalledWith(newPrice.id, { active: false });
+    const ours = { codex_platform_write: expect.any(String) };
+    expect(archived).toHaveBeenCalledWith(newPrice.id, {
+      active: false,
+      metadata: ours,
+    });
     expect(archived).toHaveBeenCalledWith(pro.stripePriceMonthlyId, {
       active: true,
+      metadata: ours,
     });
     const [tierNow] = await db
       .select()

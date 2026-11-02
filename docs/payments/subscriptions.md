@@ -596,6 +596,13 @@ runs, 9 to 10 hours with the 08:00 gap.
 - A Price created in the Stripe Dashboard is logged as drift
   (`TierService.recordStripePriceDrift`); the tier keeps its own Price and no
   subscriber moves.
+- A tier Price edited in the Dashboard (archived, renamed, its metadata
+  changed) raises "Codex-managed tier Price edited in Stripe Dashboard"; no
+  sync-back. The platform's own Price updates (a re-price's archive and its
+  rollback, `ensurePriceActive`) each write a fresh `codex_platform_write`
+  metadata value, and the `price.updated` arm skips an event whose
+  `previous_attributes.metadata` shows that key changing
+  (`isPlatformPriceWrite`). Before this, every Studio re-price raised it.
 - **Backstop** (F1). Every Price a tier bills is on that tier's Stripe
   Product, so the subscription sync raises an error alert (ids only, no
   write) when an item's Price is on neither the member's tier's Product nor

@@ -799,6 +799,7 @@ describe('waiting tier moves (Codex-2hxff.16)', () => {
 
         expect(stripe.prices.update).toHaveBeenCalledExactlyOnceWith(held, {
           active: true,
+          metadata: { codex_platform_write: expect.any(String) },
         });
         expect(liveOf(row.stripeSubscriptionId).items.data[0]?.price.id).toBe(
           held

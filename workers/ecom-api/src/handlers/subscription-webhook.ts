@@ -40,6 +40,7 @@ import type {
 import {
   applyDuePendingPriceChange,
   CourseSubscriptionService,
+  isPlatformPriceWrite,
   MOVE_TIER_ID_KEY,
   PENDING_PRICE_ID_KEY,
 } from '@codex/subscription';
@@ -722,7 +723,13 @@ export async function handleSubscriptionWebhook(
         // therefore detect-only: an archive-without-replacement (operator
         // error) or a metadata/nickname edit is logged as obs.error so
         // operators see the drift but no sync-back happens here.
+        //
+        // The platform's own updates (a re-price's archive, a held Price made
+        // billable again) are not drift: each writes a fresh
+        // `codex_platform_write`, which this event shows changing. Alerting
+        // on every re-price would train people to ignore the real one.
         const price = event.data.object as Stripe.Price;
+        if (isPlatformPriceWrite(event)) break;
         if (price.metadata?.codex_organization_id) {
           obs?.error('Codex-managed tier Price edited in Stripe Dashboard', {
             stripePriceId: price.id,

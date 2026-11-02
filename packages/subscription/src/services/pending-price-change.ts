@@ -415,7 +415,44 @@ export async function ensurePriceActive(
 ): Promise<void> {
   const price = await stripe.prices.retrieve(priceId);
   if (price.active) return;
-  await stripe.prices.update(priceId, { active: true });
+  await stripe.prices.update(priceId, {
+    active: true,
+    metadata: platformWriteMetadata(),
+  });
+}
+
+/**
+ * Metadata key: a fresh value on every Price update the platform makes (a
+ * tier or course plan re-price's archive and its rollback,
+ * `ensurePriceActive`). Its `price.updated` event shows the key changing in
+ * `previous_attributes`, which a Stripe Dashboard edit never does, so the
+ * webhook stays quiet for ours and still alerts on theirs.
+ */
+const PLATFORM_WRITE_KEY = 'codex_platform_write';
+
+/** The metadata every platform Price update writes. */
+export function platformWriteMetadata(): Record<string, string> {
+  return { [PLATFORM_WRITE_KEY]: crypto.randomUUID() };
+}
+
+/**
+ * A `price.updated` event made by the platform's own write. Stripe lists
+ * only the changed keys in `previous_attributes.metadata`, a new key as
+ * null, so ours names `codex_platform_write` and the Price now holds a
+ * different value. A Dashboard edit leaves the key out (it alerts, even on
+ * a Price we wrote before), and a hand removal leaves no value (it alerts).
+ */
+export function isPlatformPriceWrite(event: {
+  data: { object: unknown; previous_attributes?: unknown };
+}): boolean {
+  type WithMetadata = { metadata?: Record<string, string | null> | null };
+  const previous = (event.data.previous_attributes as WithMetadata | undefined)
+    ?.metadata;
+  if (!previous || !(PLATFORM_WRITE_KEY in previous)) return false;
+  const now = (event.data.object as WithMetadata | null)?.metadata?.[
+    PLATFORM_WRITE_KEY
+  ];
+  return typeof now === 'string' && previous[PLATFORM_WRITE_KEY] !== now;
 }
 
 /**
