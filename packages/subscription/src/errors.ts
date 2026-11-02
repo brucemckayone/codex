@@ -218,21 +218,24 @@ export class TierChangeCancellingError extends ConflictError {
  * waits (T2). The item already carries the cheaper Price, so Stripe would
  * credit the unused time at the cheaper rate and over-charge: the client keeps
  * the current plan first (`POST /subscriptions/keep-current-plan`), then
- * previews the change again.
+ * previews the change again. The same while a change of billing waits for
+ * the year's end (Codex-2hxff.97): a dearer plan, or the current one on its
+ * current billing, is Keep first.
  */
 export class PendingMoveKeepFirstError extends ConflictError {
   constructor(organizationId: string, newTierId: string) {
     super(
-      'Your move to a cheaper plan is still set. Keep your current plan first, then change.',
+      'A change to your plan is already set for your renewal. Keep your current plan first, then change.',
       { code: 'PENDING_MOVE_KEEP_FIRST', organizationId, newTierId }
     );
   }
 }
 
 /**
- * A switch of billing period on the same plan while a move to a cheaper plan
- * waits (Q3): the move keeps the billing period, and the switch would change
- * it today, so both cannot hold.
+ * A switch INTO yearly billing while a move to a cheaper plan waits (Q3,
+ * narrowed by Q2 of Codex-2hxff.97): the switch starts a new period today
+ * and the move waits for the renewal, so both cannot hold. A switch to
+ * monthly billing waits for the year's end, so it joins the move instead.
  */
 export class TierChangeIntervalWhileMovingError extends ConflictError {
   constructor(organizationId: string) {
@@ -244,9 +247,10 @@ export class TierChangeIntervalWhileMovingError extends ConflictError {
 }
 
 /**
- * A cheaper plan on another billing period (T1, Q1): plan first, then
+ * A cheaper plan on yearly billing, from monthly (T1, Q1): plan first, then
  * billing. `firstStep` is the change the dialog offers instead: the target
- * plan on the member's current billing period.
+ * plan on the member's current billing period. From yearly, a cheaper plan on
+ * monthly billing is one waiting change instead (Codex-2hxff.97, Q3).
  */
 export class TierChangeTwoStepsError extends BusinessLogicError {
   constructor(
@@ -256,6 +260,23 @@ export class TierChangeTwoStepsError extends BusinessLogicError {
     super(
       'Moving to a cheaper plan on another billing period takes two steps: the plan first, then the billing.',
       { code: 'TIER_CHANGE_TWO_STEPS', organizationId, firstStep }
+    );
+  }
+}
+
+/**
+ * The Stripe subscription carries a subscription schedule that is not ours
+ * (Codex-2hxff.97, data design §3.4): one made in the Stripe Dashboard, for
+ * example. Our only schedules carry a change of billing period waiting for
+ * the year's end, and a write through someone else's schedule would change
+ * or split it. Nothing is written; support is alerted with the same
+ * `errorId`, which the client shows beside its fixed words.
+ */
+export class SubscriptionScheduledElsewhereError extends ConflictError {
+  constructor(organizationId: string, errorId: string) {
+    super(
+      "This subscription can't be changed here just now. Please contact support.",
+      { code: 'SUBSCRIPTION_SCHEDULED_ELSEWHERE', organizationId, errorId }
     );
   }
 }

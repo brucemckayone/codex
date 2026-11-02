@@ -122,7 +122,11 @@ import {
   createKeyRefusal,
   stripeRefusalDetail,
 } from './create-key-refusal';
-import { recordPlanPriceChange } from './pending-price-change';
+import { alertIfCreditPaid } from './credit-paid-invoice';
+import {
+  platformWriteMetadata,
+  recordPlanPriceChange,
+} from './pending-price-change';
 import {
   type PriceChangeProgress,
   readPriceChangeProgress,
@@ -889,6 +893,7 @@ export class CourseSubscriptionService extends BaseService {
         createdPriceIds.push(price.id);
         await this.stripe.prices.update(stripePriceMonthlyId, {
           active: false,
+          metadata: platformWriteMetadata(),
         });
         archivedPriceIds.push(stripePriceMonthlyId);
       }
@@ -912,6 +917,7 @@ export class CourseSubscriptionService extends BaseService {
         createdPriceIds.push(price.id);
         await this.stripe.prices.update(stripePriceAnnualId, {
           active: false,
+          metadata: platformWriteMetadata(),
         });
         archivedPriceIds.push(stripePriceAnnualId);
       }
@@ -1027,25 +1033,35 @@ export class CourseSubscriptionService extends BaseService {
   ): Promise<void> {
     await Promise.all([
       ...createdPriceIds.map((id) =>
-        this.stripe.prices.update(id, { active: false }).catch((err) =>
-          this.obs.error('Failed to archive new course price during rollback', {
-            courseId,
-            stripePriceId: id,
-            error: err instanceof Error ? err.message : String(err),
+        this.stripe.prices
+          .update(id, {
+            active: false,
+            metadata: platformWriteMetadata(),
           })
-        )
+          .catch((err) =>
+            this.obs.error(
+              'Failed to archive new course price during rollback',
+              {
+                courseId,
+                stripePriceId: id,
+                error: err instanceof Error ? err.message : String(err),
+              }
+            )
+          )
       ),
       ...archivedPriceIds.map((id) =>
-        this.stripe.prices.update(id, { active: true }).catch((err) =>
-          this.obs.error(
-            'Failed to restore archived course price during rollback',
-            {
-              courseId,
-              stripePriceId: id,
-              error: err instanceof Error ? err.message : String(err),
-            }
+        this.stripe.prices
+          .update(id, { active: true, metadata: platformWriteMetadata() })
+          .catch((err) =>
+            this.obs.error(
+              'Failed to restore archived course price during rollback',
+              {
+                courseId,
+                stripePriceId: id,
+                error: err instanceof Error ? err.message : String(err),
+              }
+            )
           )
-        )
       ),
     ]);
   }
@@ -2371,6 +2387,21 @@ export class CourseSubscriptionService extends BaseService {
     const presence = await this.ensureDataPresent(stripeSub);
     if (!presence) return;
     const { row } = presence;
+    // Customer credit paid some or all of this bill: the course's payouts are
+    // made on what the card paid, nothing when the credit covered it all, so
+    // support is told once per invoice (Codex-2hxff.97). Before the
+    // duplicate check, so a duplicate's bill is covered too. It never
+    // throws, and changes nothing here.
+    await alertIfCreditPaid(
+      { stripe: this.stripe, obs: this.obs },
+      stripeInvoice,
+      {
+        stripeSubscriptionId: stripeSub.id,
+        subscriptionId: row.id,
+        organizationId: row.organizationId,
+        kind: 'course',
+      }
+    );
     if (isDuplicateSubscription(row)) {
       await this.settleDuplicate(row);
       await this.refundDuplicateInvoice(row, stripeInvoice);

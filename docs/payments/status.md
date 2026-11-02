@@ -139,7 +139,7 @@ above:
   Reactivate and Update card, and a course subscription's failed payment and
   lifecycle emails work as a tier's; pausing and trials wait for their design,
   `Codex-2hxff.89` (owner, "Leave it for the design");
-- a price change reaches every subscriber from an hourly step, about 1,500 an
+- a price change reaches every subscriber from an hourly step, about 1,100 an
   hour ("Hourly job, a few hours"); Studio shows how it is going, with counts
   ("Studio note with counts"); a move held because its email wasn't sent is
   retried, then listed for support, who can retry, close or restart it

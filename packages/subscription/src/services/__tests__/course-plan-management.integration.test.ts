@@ -224,9 +224,11 @@ describe('CourseSubscriptionService plan management (Codex-2pryk.2.4.1)', () => 
     expect(updated.stripePriceAnnualId).toBe(first.stripePriceAnnualId);
     // The superseded monthly Price is archived, not deleted: an archived Price
     // still bills whoever is on it until their 30-day move (Codex-2hxff.3).
+    // The nonce marks it as our write, so the price.updated webhook stays
+    // quiet about it.
     expect(spies.prices.update).toHaveBeenCalledWith(
       first.stripePriceMonthlyId,
-      { active: false }
+      { active: false, metadata: { codex_platform_write: expect.any(String) } }
     );
     expect(await planRows(courseId)).toHaveLength(1);
   });
@@ -518,12 +520,14 @@ describe('CourseSubscriptionService plan management (Codex-2pryk.2.4.1)', () => 
     const minted = (await spies.prices.create.mock.results[pricesBefore]
       ?.value) as { id: string } | undefined;
     expect(minted?.id).toBeTruthy();
+    const ours = { codex_platform_write: expect.any(String) };
     expect(spies.prices.update).toHaveBeenCalledWith(minted?.id, {
       active: false,
+      metadata: ours,
     });
     expect(spies.prices.update).toHaveBeenCalledWith(
       plan.stripePriceMonthlyId,
-      { active: true }
+      { active: true, metadata: ours }
     );
     expect(takeFirst(await planRows(courseId))).toMatchObject({
       priceMonthly: 1500,

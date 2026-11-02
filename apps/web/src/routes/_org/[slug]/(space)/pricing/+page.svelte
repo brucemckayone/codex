@@ -1118,6 +1118,10 @@
         // against Date.now() if omitted — meaning a slow-clicking user
         // could be charged a different amount than they confirmed.
         prorationDate: tierChangePreview?.prorationDate,
+        // A switch into yearly billing cannot be pinned that way: its figures
+        // go back to be re-checked, and a difference is refused as an
+        // expired preview below (Codex-2hxff.96).
+        ...(tierChangePreview?.quote && { quote: tierChangePreview.quote }),
       });
       if (!result.success) {
         currentTierId = previousTierId;
@@ -1125,9 +1129,10 @@
         // `in` narrows to the failure: apps/web is not `strict`, so the
         // `!result.success` above does not.
         if ('code' in result && result.code === 'TIER_CHANGE_PREVIEW_EXPIRED') {
-          // The preview is only good for 10 minutes and nothing changed
-          // (Codex-2hxff.15): show a fresh one and ask again, so the
-          // subscriber pays what they confirmed.
+          // The preview is only good for 10 minutes, or a switch to yearly
+          // billing's figures moved since it (Codex-2hxff.15, .96), and nothing
+          // changed: show a fresh one and ask again, so the subscriber pays
+          // what they confirmed.
           await openTierChangeDialog(
             tier,
             m.subscription_tier_change_preview_expired()

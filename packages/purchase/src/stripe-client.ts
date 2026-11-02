@@ -27,6 +27,10 @@ import Stripe from 'stripe';
  * Stripe API version
  * Internal constant - updated when upgrading Stripe API version
  * Current: 2025-10-29.clover (pinned by Stripe Node v19.3.1)
+ *
+ * Before an upgrade, run packages/subscription/scripts/test-clock-paid-price.ts
+ * on the new version: a switch after an early price move relies on Stripe
+ * crediting the invoiced line, not the item's current Price (Codex-2hxff.95).
  */
 const STRIPE_API_VERSION = '2025-10-29.clover';
 

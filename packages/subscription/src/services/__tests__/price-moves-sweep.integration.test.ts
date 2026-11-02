@@ -44,6 +44,7 @@ import {
   recordTierPriceChange,
 } from '../pending-price-change';
 import {
+  PRICE_MOVES_PER_RUN,
   type PriceMoveStepOptions,
   priceMovesDoneBy,
   readPriceChangeProgress,
@@ -561,6 +562,96 @@ describe('the hourly price-moves step (Codex-2hxff.86)', () => {
     expect(send).toHaveBeenCalledTimes(1);
   });
 
+  // Review C1, F1: a change of plan that lands while their email is being
+  // sent is never written over. Stripe is read again after the notice.
+  describe('a change of plan made during their email (review C1, F1)', () => {
+    /**
+     * One Pro member, renewing in 40 days, whose `during` lands while their
+     * email is being sent. Stripe is read again after the notice.
+     */
+    async function during(
+      slug: string,
+      change: (live: Live, tiers: { basic: Tier; renewal: string }) => void
+    ) {
+      const { org: o, basic, pro } = await org(slug);
+      const fake = fakeStripe();
+      const sub = await subscriber(o.id, pro);
+      onStripe(fake, sub, 40, { metadata: { codex_tier_id: pro.id } });
+      const changeId = await reprice(o.id, pro);
+      const renewal = String(Math.floor(NOW / 1000) + 40 * DAY_S);
+      const send = vi.fn<PriceChangeNoticeMailer>(async () => {
+        const live = fake.live.get(sub.stripeSubscriptionId);
+        if (live) change(live, { basic, renewal });
+        return { accepted: true };
+      });
+      const result = await run([changeId], { fake, send });
+      expect(send).toHaveBeenCalledOnce();
+      return {
+        result,
+        row: await moveOf(changeId, sub),
+        live: fake.live.get(sub.stripeSubscriptionId),
+      };
+    }
+    const sentAt = new Date(NOW + SENT_AFTER_MS);
+
+    it("a move to a cheaper tier (A to B): skipped as told, and A's new Price is never written over B's", async () => {
+      const { result, row, live } = await during('pm-during-down', (l, t) => {
+        l.priceId = 'price_pm_basic';
+        l.amount = 500;
+        Object.assign(l.metadata, {
+          codex_move_tier_id: t.basic.id,
+          codex_move_at: t.renewal,
+          codex_hold_price_id: PRICE_OLD,
+          codex_hold_amount: '1200',
+        });
+      });
+
+      expect(result).toMatchObject({ claimed: 1, skipped: 1, scheduled: 0 });
+      expect(row).toMatchObject({
+        state: 'skipped',
+        skipReason: 'moving_away',
+        noticeAt: sentAt,
+        effectiveAt: new Date(NOW + 40 * DAY_MS),
+      });
+      expect(live?.priceId).toBe('price_pm_basic');
+      expect(live?.metadata).not.toHaveProperty('codex_pending_price_id');
+    });
+
+    it('an upgrade (A to C): skipped as told; no A Price and no pending marker on the C-bound subscription', async () => {
+      const { result, row, live } = await during('pm-during-up', (l) => {
+        l.priceId = 'price_pm_top';
+        l.amount = 2000;
+        l.metadata.codex_tier_id = crypto.randomUUID();
+      });
+
+      expect(result).toMatchObject({ claimed: 1, skipped: 1, scheduled: 0 });
+      expect(row).toMatchObject({
+        state: 'skipped',
+        skipReason: 'moving_away',
+        noticeAt: sentAt,
+      });
+      expect(live?.priceId).toBe('price_pm_top');
+      expect(live?.metadata).not.toHaveProperty('codex_pending_price_id');
+    });
+
+    it('still on the tier, but past due by the time they were told: decided again, the marker and not a swap', async () => {
+      const { result, row, live } = await during('pm-during-pastdue', (l) => {
+        l.status = 'past_due';
+      });
+
+      expect(result).toMatchObject({ claimed: 1, scheduled: 1 });
+      expect(row).toMatchObject({
+        state: 'scheduled',
+        scheduledKind: 'pending',
+        noticeAt: sentAt,
+      });
+      expect(live).toMatchObject({
+        priceId: PRICE_OLD,
+        metadata: { codex_pending_price_id: PRICE_NEW },
+      });
+    });
+  });
+
   it('a notice refused for one person is tried each hour, then held for support with its own alert line', async () => {
     const { org: o, pro } = await org('pm-retry');
     const fake = fakeStripe();
@@ -790,6 +881,64 @@ describe('the hourly price-moves step (Codex-2hxff.86)', () => {
     expect(await moveOf(changeId, lost)).toMatchObject({
       state: 'scheduled',
       noticeAt: new Date(NOW + HOUR_MS + SENT_AFTER_MS),
+    });
+  });
+
+  // Review C1, F4: a run emailed them and stopped before recording it, so
+  // the row still carries an older try's pre-notice error. Every reclaim
+  // after an earlier try checks the email log.
+  it('a run that stopped after its email, on a row with an older error: found in the log (success or pending), not emailed again', async () => {
+    const { org: o, pro } = await org('pm-reclaim');
+    const fake = fakeStripe();
+    const sent = await subscriber(o.id, pro);
+    const pending = await subscriber(o.id, pro);
+    const refused = await subscriber(o.id, pro);
+    for (const sub of [sent, pending, refused]) onStripe(fake, sub, 10);
+    const changeId = await reprice(o.id, pro);
+    // Two hours ago: a run claimed them and stopped mid-batch. The row still
+    // says what the try before it recorded.
+    const stoppedRun = new Date(NOW - 2 * HOUR_MS);
+    const loggedAt = new Date(stoppedRun.getTime() + 3000);
+    for (const [sub, status] of [
+      [sent, 'success'],
+      [pending, 'pending'],
+      [refused, 'failed'],
+    ] as const) {
+      const row = await moveOf(changeId, sub);
+      await db
+        .update(subscriptionPriceMoves)
+        .set({
+          attempts: 2,
+          attemptedAt: stoppedRun,
+          lastError: 'read_failed_500',
+        })
+        .where(eq(subscriptionPriceMoves.id, row.id));
+      await db.insert(emailAuditLogs).values({
+        templateName: 'subscription-tier-price-change',
+        recipientEmail: await emailOf(sub),
+        status,
+        metadata: JSON.stringify({ priceMoveId: row.id }),
+        createdAt: loggedAt,
+        updatedAt: loggedAt,
+      });
+    }
+    const send = mailer();
+
+    await run([changeId], { fake, send });
+
+    // A `failed` log row: every attempt failed, so they are told now.
+    expect(send).toHaveBeenCalledOnce();
+    expect(send.mock.calls[0]?.[0].to).toBe(await emailOf(refused));
+    for (const sub of [sent, pending]) {
+      expect(await moveOf(changeId, sub)).toMatchObject({
+        state: 'scheduled',
+        scheduledKind: 'pending',
+        noticeAt: loggedAt,
+      });
+    }
+    expect(await moveOf(changeId, refused)).toMatchObject({
+      state: 'scheduled',
+      noticeAt: new Date(NOW + SENT_AFTER_MS),
     });
   });
 
@@ -1533,15 +1682,16 @@ describe('the hourly price-moves step (Codex-2hxff.86)', () => {
       ).toEqual([]);
     });
 
-    it('the finish estimate counts 1,500 a run from the next run, skipping 08:00 London', () => {
+    it('the finish estimate counts 1,125 a run from the next run, skipping 08:00 London', () => {
       const winter = new Date(Date.UTC(2027, 0, 14, 6, 30));
       const at = (n: number) => priceMovesDoneBy(winter, n)?.toISOString();
+      expect(PRICE_MOVES_PER_RUN).toBe(1125);
       expect(at(0)).toBeUndefined();
       expect(at(1)).toBe('2027-01-14T07:00:00.000Z');
-      expect(at(1500)).toBe('2027-01-14T07:00:00.000Z');
+      expect(at(1125)).toBe('2027-01-14T07:00:00.000Z');
       // The second run is 09:00: 08:00 London is the bank payout's.
-      expect(at(1501)).toBe('2027-01-14T09:00:00.000Z');
-      expect(at(4501)).toBe('2027-01-14T11:00:00.000Z');
+      expect(at(1126)).toBe('2027-01-14T09:00:00.000Z');
+      expect(at(3376)).toBe('2027-01-14T11:00:00.000Z');
     });
   });
 });

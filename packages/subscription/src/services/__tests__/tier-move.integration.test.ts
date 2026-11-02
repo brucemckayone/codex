@@ -61,6 +61,13 @@ const DAY = 86_400;
 
 type Tier = typeof subscriptionTiers.$inferSelect;
 
+interface FakePrice {
+  amount: number;
+  interval: 'month' | 'year';
+  /** A re-price archives the old Price. */
+  archived?: boolean;
+}
+
 interface LiveItem {
   id: string;
   price: {
@@ -84,11 +91,10 @@ interface LiveSubscription {
 
 /**
  * Stripe's subscriptions, held in memory. `prices` maps a Price id to its
- * amount and interval, as Stripe's Price objects would.
+ * amount and interval, as Stripe's Price objects would, and whether it is
+ * archived: Stripe refuses an archived Price on an item (F2).
  */
-function liveStripe(
-  prices: Map<string, { amount: number; interval: 'month' | 'year' }>
-) {
+function liveStripe(prices: Map<string, FakePrice>) {
   const stripe = createMockStripe();
   const live = new Map<string, LiveSubscription>();
   const keys = new Map<string, { params: string; response: unknown }>();
@@ -138,6 +144,14 @@ function liveStripe(
       const priceId = params.items[0].price;
       const price = prices.get(priceId);
       if (!price) throw new Error(`no such Price ${priceId}`);
+      if (price.archived) {
+        throw Object.assign(
+          new Error(
+            'The price specified is inactive. This field only accepts active prices.'
+          ),
+          { type: 'StripeInvalidRequestError', statusCode: 400 }
+        );
+      }
       item.price = {
         id: priceId,
         unit_amount: price.amount,
@@ -155,6 +169,23 @@ function liveStripe(
     if (key) keys.set(key, { params: asSent, response });
     return response;
   }) as unknown as typeof stripe.subscriptions.update);
+
+  const priceOf = (id: string) => {
+    const price = prices.get(id);
+    if (!price) throw new Error(`no such Price ${id}`);
+    return price;
+  };
+  (stripe.prices as unknown as Record<string, unknown>).retrieve = vi.fn(
+    async (id: string) => ({ id, active: !priceOf(id).archived })
+  );
+  vi.mocked(stripe.prices.update).mockImplementation((async (
+    id: string,
+    params: { active?: boolean }
+  ) => {
+    const price = priceOf(id);
+    if (params.active !== undefined) price.archived = !params.active;
+    return { id, active: !price.archived };
+  }) as unknown as typeof stripe.prices.update);
 
   const createPreview = vi.fn().mockResolvedValue({
     amount_due: 336,
@@ -177,10 +208,7 @@ describe('waiting tier moves (Codex-2hxff.16)', () => {
   let createPreview: ReturnType<typeof vi.fn>;
   let service: SubscriptionService;
   let invalidate: ReturnType<typeof vi.fn>;
-  const prices = new Map<
-    string,
-    { amount: number; interval: 'month' | 'year' }
-  >();
+  const prices = new Map<string, FakePrice>();
 
   beforeAll(() => {
     db = setupTestDatabase();
@@ -758,6 +786,97 @@ describe('waiting tier moves (Codex-2hxff.16)', () => {
         ]);
       });
 
+      // Review C1, F2: the re-price archived the held Price, and Stripe
+      // refuses an archived Price on an item.
+      it('the held Price was archived by the re-price: Keep makes it billable again, puts it back, and leaves it active', async () => {
+        const { org, premium, userId, row } =
+          await keptAfterReprice('keep-archived');
+        const held = premium.stripePriceMonthlyId ?? 'price_missing';
+        const price = prices.get(held);
+        if (price) price.archived = true;
+
+        await service.keepCurrentPlan(userId, org.id);
+
+        expect(stripe.prices.update).toHaveBeenCalledExactlyOnceWith(held, {
+          active: true,
+          metadata: { codex_platform_write: expect.any(String) },
+        });
+        expect(liveOf(row.stripeSubscriptionId).items.data[0]?.price.id).toBe(
+          held
+        );
+        expect(prices.get(held)?.archived).toBe(false);
+        expect((await rowOf(row.id)).pendingTierId).toBeNull();
+      });
+
+      it('a held Price still active is not written to', async () => {
+        const { org, userId } = await keptAfterReprice('keep-active');
+
+        await service.keepCurrentPlan(userId, org.id);
+
+        expect(stripe.prices.update).not.toHaveBeenCalled();
+      });
+
+      // Review C1, F3: a second Keep on the same tier wrote its change of
+      // its own first (uq_price_changes_live_tier). Run once more, Keep
+      // joins it instead of alerting.
+      it("a live-change conflict is run once more, and joins the other Keep's change", async () => {
+        const { org, premium, userId, row } =
+          await keptAfterReprice('keep-rejoin-retry');
+        // The other Keep's insert won the race: the first try conflicts.
+        let conflicts = 1;
+        const conflicted = new Proxy(db, {
+          get(target, prop) {
+            if (prop === 'transaction' && conflicts > 0) {
+              return async () => {
+                conflicts -= 1;
+                throw Object.assign(
+                  new Error(
+                    'duplicate key value violates unique constraint "uq_price_changes_live_tier"'
+                  ),
+                  { code: '23505', constraint: 'uq_price_changes_live_tier' }
+                );
+              };
+            }
+            const value = Reflect.get(target, prop, target);
+            return typeof value === 'function' ? value.bind(target) : value;
+          },
+        });
+        const keeping = new SubscriptionService(
+          {
+            db: conflicted,
+            environment: 'test',
+            ...createTestMoneyDeps(),
+            cache: { invalidate } as unknown as VersionedCache,
+            waitUntil: () => {},
+          },
+          stripe
+        );
+        const errors = vi.spyOn(
+          (
+            keeping as unknown as {
+              obs: { error: (m: string, d?: unknown) => void };
+            }
+          ).obs,
+          'error'
+        );
+
+        await keeping.keepCurrentPlan(userId, org.id);
+
+        expect(conflicts).toBe(0);
+        const [change] = await db
+          .select()
+          .from(priceChanges)
+          .where(eq(priceChanges.tierId, premium.id));
+        expect(await rowsOf(row.id)).toEqual([
+          expect.objectContaining({
+            priceChangeId: change?.id,
+            state: 'due',
+            source: 'keep_current_plan',
+          }),
+        ]);
+        expect(errors).not.toHaveBeenCalled();
+      });
+
       it("hangs the row off the tier's latest change and re-opens it when done", async () => {
         const { org, premium, userId, row, repriced } =
           await keptAfterReprice('keep-rejoin-done');
@@ -1185,6 +1304,7 @@ describe('waiting tier moves (Codex-2hxff.16)', () => {
     expect(current?.heldAmountCents).toBe(2000);
     expect(current?.amountCents).toBe(500);
     expect(current?.pendingTierChange).toEqual({
+      kind: 'plan',
       tierId: basic.id,
       tierName: 'Basic',
       amountCents: 500,
@@ -1315,5 +1435,72 @@ describe('waiting tier moves (Codex-2hxff.16)', () => {
       .from(subscriptionTiers)
       .where(eq(subscriptionTiers.id, basic.id));
     expect(still?.deletedAt).toBeNull();
+  });
+
+  // Review C1, F1's backstop: every Price a tier bills is on its own Stripe
+  // Product, so the sync alerts on an item Price from any other Product.
+  describe("an item billing another tier's Product", () => {
+    function errorsSpy() {
+      const obs = (
+        service as unknown as {
+          obs: { error: (m: string, d?: unknown) => void };
+        }
+      ).obs;
+      return vi.spyOn(obs, 'error');
+    }
+    /** The live subscription as its webhook carries it, item Price on `product`. */
+    function payload(stripeSubscriptionId: string, product: string | null) {
+      const sub = structuredClone(liveOf(stripeSubscriptionId));
+      const [item] = sub.items.data;
+      if (item && product) Object.assign(item.price, { product });
+      return sub as unknown as Stripe.Subscription;
+    }
+    const offTier = (calls: unknown[][]) =>
+      calls.filter(([message]) =>
+        String(message).includes("a Price from another tier's Product")
+      );
+
+    it('alerts, ids only, and the sync still mirrors what Stripe holds', async () => {
+      const { org, pro, premium } = await hollowOak('off-tier-alert');
+      const { row } = await member(org.id, pro);
+      const errors = errorsSpy();
+
+      await service.handleSubscriptionUpdated(
+        payload(row.stripeSubscriptionId, premium.stripeProductId)
+      );
+
+      const [alert] = offTier(errors.mock.calls);
+      expect(alert?.[1]).toMatchObject({
+        errorId: expect.any(String),
+        subscriptionId: row.id,
+        stripeSubscriptionId: row.stripeSubscriptionId,
+        tierId: pro.id,
+        waitingTierId: null,
+        stripeProductId: premium.stripeProductId,
+      });
+      expect(JSON.stringify(alert)).not.toContain('@');
+      expect((await rowOf(row.id)).tierId).toBe(pro.id);
+    });
+
+    it("is quiet on the member's own tier, on a waiting move's tier, and with no Product in the payload", async () => {
+      const { org, basic, pro } = await hollowOak('off-tier-quiet');
+      const { userId, row } = await member(org.id, pro);
+      const errors = errorsSpy();
+
+      await service.handleSubscriptionUpdated(
+        payload(row.stripeSubscriptionId, pro.stripeProductId)
+      );
+      // Waiting to move to Basic: the item carries Basic's Price (T1).
+      await service.changeTier(userId, org.id, basic.id, 'month');
+      await service.handleSubscriptionUpdated(
+        payload(row.stripeSubscriptionId, basic.stripeProductId)
+      );
+      await service.handleSubscriptionUpdated(
+        payload(row.stripeSubscriptionId, null)
+      );
+
+      expect(offTier(errors.mock.calls)).toEqual([]);
+      expect((await rowOf(row.id)).pendingTierId).toBe(basic.id);
+    });
   });
 });

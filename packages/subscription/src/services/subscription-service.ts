@@ -113,10 +113,12 @@ import {
 } from '@codex/purchase';
 import {
   BaseService,
+  describeThrown,
   InternalServiceError,
   NotFoundError,
   type ServiceConfig,
   ServiceUnavailableError,
+  ValidationError,
 } from '@codex/service-errors';
 import type { PaginatedListResponse } from '@codex/shared-types';
 import { buildOrgUrlFromEnv } from '@codex/urls';
@@ -150,9 +152,11 @@ import {
   TierChangeTwoStepsError,
   TierNotFoundError,
 } from '../errors';
+import { alertIfCreditPaid } from './credit-paid-invoice';
 import {
   addMonthsClamped,
   CLEAR_PENDING_PRICE_METADATA,
+  ensurePriceActive,
   type PriceChangeNoticeMailer,
   rejoinTierPriceChange,
 } from './pending-price-change';
@@ -197,7 +201,9 @@ import {
   MOVE_TIER_ID_KEY,
   moveMetadata,
   readWaitingMove,
+  startsNewPeriod,
   type TierChangeKind,
+  tierChangeQuote,
   type WaitingMove,
 } from './tier-move';
 
@@ -342,16 +348,32 @@ export type SubscriberSubscription = Omit<
 >;
 
 /**
- * A move to a cheaper plan that waits for the renewal (Codex-2hxff.16, data
- * design §2.3), as the pricing page, the paywall and the account card read
- * it: "Moving to Basic on 12 November · Keep current plan". Until then the
- * member keeps the current tier, and `heldAmountCents` is what they pay.
+ * A change that waits for the renewal (Codex-2hxff.16, data design §2.3), as
+ * the pricing page, the paywall and the account card read it: "Moving to
+ * Basic on 12 November · Keep current plan". Until then the member keeps the
+ * current tier, and `heldAmountCents` is what they pay.
+ *
+ * Leaving yearly billing waits for the year's end too (Codex-2hxff.97): a
+ * change of billing alone, or of plan and billing together. One Keep undoes
+ * the whole change (Q4).
  */
 export interface PendingTierChange {
+  /**
+   * What waits: `plan`, a move to a cheaper plan on the same billing;
+   * `billing`, a switch to monthly billing on the same plan ("Keep yearly
+   * billing"); `plan_and_billing`, another plan billed monthly ("Keep current
+   * plan").
+   */
+  kind: 'plan' | 'billing' | 'plan_and_billing';
   tierId: string;
   tierName: string;
-  /** The next bill, at the target's price (= the row's `amountCents`). */
+  /**
+   * The next bill, at the target's price on `billingInterval`. For a plan
+   * move it is the row's `amountCents`; for a change of billing the row's
+   * `amountCents` is still the yearly price paid now.
+   */
   amountCents: number;
+  /** The billing the change lands on: the waiting interval for a change of billing. */
   billingInterval: 'month' | 'year';
   /** ISO: the renewal the move lands on (`pending_tier_from`). */
   effectiveAt: string;
@@ -767,9 +789,10 @@ export interface TierChangePreview {
   /** True when the change charges now (the part-period difference). */
   isUpgrade: boolean;
   /**
-   * When the change happens (Codex-2hxff.16): `now`, or `period_end` for a
+   * When the PLAN changes (Codex-2hxff.16): `now`, or `period_end` for a
    * move to a cheaper plan, which keeps the current plan, and charges
-   * nothing, until the renewal.
+   * nothing, until the renewal. A change of billing that waits says so in
+   * `billingChange`.
    */
   takesEffect: 'now' | 'period_end';
   /**
@@ -778,6 +801,36 @@ export interface TierChangePreview {
    * Stripe starts afresh today, so its next bill is one new period away.
    */
   currentPeriodEnd: Date;
+  /**
+   * Set for a switch into yearly billing only: what the dialog shows, which
+   * the page passes back to `changeTier()` to be re-checked before the write
+   * (`tierChangeQuote`, Codex-2hxff.96).
+   */
+  quote?: string;
+  /**
+   * The part that waits for the end of the paid year when leaving yearly
+   * billing (Codex-2hxff.97; states A, B and C(b)), or null. `amountCents` is
+   * the monthly bill from `effectiveAt` (ISO), the renewal. For A and B the
+   * plan waits with it (`takesEffect: 'period_end'`, nothing due today); for
+   * C(b) the plan changes now on yearly billing (`takesEffect: 'now'`, the
+   * upgrade's figures above) and only the billing waits.
+   */
+  billingChange: null | {
+    interval: 'month';
+    amountCents: number;
+    effectiveAt: string;
+  };
+  /**
+   * The waiting change this one replaces (latest wins), or null: for "then
+   * £5 a month instead of £50 a year" (state D). `interval` and
+   * `amountCents` are what the waiting change would bill.
+   */
+  replaces: null | {
+    tierId: string;
+    tierName: string;
+    interval: 'month' | 'year';
+    amountCents: number;
+  };
 }
 
 /**
@@ -2182,6 +2235,24 @@ export class SubscriptionService extends BaseService {
       stripeSubscriptionId: stripeSubId,
     });
 
+    // Customer credit paid some or all of this bill: its creator is paid on
+    // what the card paid, nothing when the credit covered it all, so support
+    // is told once per invoice (Codex-2hxff.97). Before the no-charge return
+    // below and the duplicate check, so both are covered. It never throws,
+    // and changes nothing here.
+    await alertIfCreditPaid(
+      { stripe: this.stripe, obs: this.obs },
+      stripeInvoice,
+      {
+        stripeSubscriptionId: stripeSubId,
+        subscriptionId: null,
+        organizationId:
+          stripeInvoice.parent?.subscription_details?.metadata
+            ?.codex_organization_id ?? null,
+        kind: 'tier',
+      }
+    );
+
     // Resolve the source charge for transfers. Webhook payloads in Stripe
     // 2024+ do NOT include expanded `payments.data` by default — the field
     // is only populated when explicitly expanded on retrieve. Without the
@@ -2775,6 +2846,12 @@ export class SubscriptionService extends BaseService {
       status: mapped.status,
       cancelAtPeriodEnd: mapped.cancelAtPeriodEnd,
     });
+    await this.alertIfPriceOffTier(
+      stripeSubscription,
+      sub.id,
+      newTierId ?? sub.tierId,
+      mapped.pendingTierId
+    );
 
     // Orchestrator hook: tier changes, status flips (active ↔ cancelling
     // ↔ past_due) all affect library visibility + subscription badge —
@@ -2794,6 +2871,57 @@ export class SubscriptionService extends BaseService {
       return {};
     }
     return { userId: sub.userId, orgId: sub.organizationId };
+  }
+
+  /**
+   * The backstop for a price written over a change of plan (review C1, F1):
+   * every Price a tier bills is on that tier's Stripe Product, so an item
+   * Price on neither the member's tier's Product nor their waiting tier's is
+   * a wrong bill. An alert, ids only; nothing is written, and the sync above
+   * has mirrored the amount as Stripe holds it. A payload without the
+   * Product, or a tier without one, is not checked.
+   */
+  private async alertIfPriceOffTier(
+    stripeSubscription: Stripe.Subscription,
+    subscriptionId: string,
+    tierId: string | null,
+    waitingTierId: string | null
+  ): Promise<void> {
+    const price = stripeSubscription.items?.data?.[0]?.price;
+    const product =
+      typeof price?.product === 'string' ? price.product : price?.product?.id;
+    const tierIds = [tierId, waitingTierId].filter(
+      (id): id is string => id !== null
+    );
+    if (!price || !product || tierIds.length === 0) return;
+    try {
+      const tiers = await this.db
+        .select({ stripeProductId: subscriptionTiers.stripeProductId })
+        .from(subscriptionTiers)
+        .where(inArray(subscriptionTiers.id, tierIds));
+      const products = tiers.flatMap((t) =>
+        t.stripeProductId ? [t.stripeProductId] : []
+      );
+      if (products.length === 0 || products.includes(product)) return;
+      this.obs.error(
+        "Subscription bills a Price from another tier's Product: a price move or plan change may have been written over (support: check the Stripe subscription)",
+        {
+          errorId: crypto.randomUUID(),
+          subscriptionId,
+          stripeSubscriptionId: stripeSubscription.id,
+          tierId,
+          waitingTierId,
+          stripePriceId: price.id,
+          stripeProductId: product,
+        }
+      );
+    } catch (error) {
+      this.obs.error('Off-tier price check failed; the sync stands', {
+        errorId: crypto.randomUUID(),
+        subscriptionId,
+        error: describeThrown(error),
+      });
+    }
   }
 
   /**
@@ -3258,7 +3386,10 @@ export class SubscriptionService extends BaseService {
    * The returned `prorationDate` MUST be passed back to `changeTier()` so the
    * commit-time proration calculation matches the preview to the penny —
    * otherwise Stripe re-runs the calc against `Date.now()` and the user gets
-   * charged a different amount than they confirmed.
+   * charged a different amount than they confirmed. A switch into yearly
+   * billing cannot be pinned that way (Stripe refuses `proration_date` with
+   * `billing_cycle_anchor: 'now'`), so its preview also returns a `quote` the
+   * page echoes back, and the commit re-checks it (Codex-2hxff.96).
    *
    * Reuses the same tier-existence + price-configured guards as `changeTier()`
    * so a preview that succeeds is a strong signal the commit will too,
@@ -3293,51 +3424,91 @@ export class SubscriptionService extends BaseService {
           isUpgrade: false,
           takesEffect: plan.kind === 'downgrade' ? 'period_end' : 'now',
           currentPeriodEnd: periodEnd,
+          billingChange: null,
+          replaces: null,
         };
       }
 
-      const preview = await this.stripe.invoices.createPreview({
-        subscription: plan.sub.stripeSubscriptionId,
-        subscription_details: {
-          items: [{ id: plan.item.id, price: plan.newPriceId }],
-          proration_date: prorationDate,
-          proration_behavior: 'always_invoice',
-        },
-      });
-
-      const prorationLineItems = preview.lines.data
-        .filter(
-          (line) => line.parent?.subscription_item_details?.proration === true
-        )
-        .map((line) => ({
-          description: line.description,
-          amountCents: line.amount,
-        }));
-
+      const shown = await this.previewNow(plan, prorationDate);
       return {
-        amountDueCents: preview.amount_due,
-        prorationLineItems,
+        ...shown,
         newRecurringAmountCents: plan.newRecurringAmount,
         newRecurringInterval: billingInterval,
         prorationDate,
         isUpgrade: nowProration(plan) === 'always_invoice',
         takesEffect: 'now',
-        // A switch of billing period starts a new period today, so the new
-        // price is next billed one new period from now, not at the old
-        // period's end.
-        currentPeriodEnd:
-          plan.kind === 'upgrade'
-            ? periodEnd
-            : new Date(
-                addMonthsClamped(
-                  prorationDate,
-                  billingInterval === BILLING_INTERVAL.YEAR ? 12 : 1
-                ) * 1000
-              ),
+        billingChange: null,
+        replaces: null,
       };
     } catch (error) {
       this.handleError(error, 'previewTierChange');
     }
+  }
+
+  /**
+   * Stripe's preview of a change made now at `at` (unix seconds), and what
+   * the dialog shows from it. The preview and the confirm's re-check both
+   * call this, so they ask Stripe the same question.
+   *
+   * Most changes are pinned to `at` by `proration_date`, which the write
+   * repeats. A switch into yearly billing starts a new period today: it
+   * passes `billing_cycle_anchor: 'now'` instead, because Stripe refuses
+   * `proration_date` with it, so its credit runs to the moment of the write.
+   * Its `quote` holds what the dialog showed, for the re-check
+   * (Codex-2hxff.96). A switch of billing period is next billed one new
+   * period from `at`; an upgrade, at the old period's end.
+   */
+  private async previewNow(
+    plan: TierChangePlan,
+    at: number
+  ): Promise<
+    Pick<
+      TierChangePreview,
+      'amountDueCents' | 'prorationLineItems' | 'currentPeriodEnd' | 'quote'
+    >
+  > {
+    const newPeriod = startsNewPeriod(plan.kind, plan.billingInterval);
+    const preview = await this.stripe.invoices.createPreview({
+      subscription: plan.sub.stripeSubscriptionId,
+      subscription_details: {
+        items: [{ id: plan.item.id, price: plan.newPriceId }],
+        proration_behavior: 'always_invoice',
+        ...(newPeriod
+          ? { billing_cycle_anchor: 'now' as const }
+          : { proration_date: at }),
+      },
+    });
+
+    const prorationLineItems = preview.lines.data
+      .filter(
+        (line) => line.parent?.subscription_item_details?.proration === true
+      )
+      .map((line) => ({
+        description: line.description,
+        amountCents: line.amount,
+      }));
+    const currentPeriodEnd =
+      plan.kind === 'upgrade'
+        ? new Date(plan.item.current_period_end * 1000)
+        : new Date(
+            addMonthsClamped(
+              at,
+              plan.billingInterval === BILLING_INTERVAL.YEAR ? 12 : 1
+            ) * 1000
+          );
+
+    return {
+      amountDueCents: preview.amount_due,
+      prorationLineItems,
+      currentPeriodEnd,
+      ...(newPeriod && {
+        quote: tierChangeQuote({
+          amountDueCents: preview.amount_due,
+          lineAmountsCents: prorationLineItems.map((line) => line.amountCents),
+          nextBillAt: currentPeriodEnd,
+        }),
+      }),
+    };
   }
 
   /**
@@ -3376,13 +3547,21 @@ export class SubscriptionService extends BaseService {
    * older one, one from the future, or one before the current period throws
    * `TierChangePreviewExpiredError` before Stripe is touched (Codex-2hxff.15,
    * SUB-12).
+   *
+   * A switch into yearly billing also needs the preview's `quote`: it cannot
+   * be pinned to the preview's date, so it is previewed again just before
+   * the write, and any difference from what the dialog showed throws
+   * `TierChangePreviewExpiredError` before Stripe is written to
+   * (Codex-2hxff.96). The page then shows the fresh figures to confirm. A
+   * drift in the second between that re-check and the write is accepted.
    */
   async changeTier(
     userId: string,
     orgId: string,
     newTierId: string,
     billingInterval: 'month' | 'year',
-    prorationDate?: number
+    prorationDate?: number,
+    quote?: string
   ): Promise<{ userId: string; orgId: string; subscription: Subscription }> {
     try {
       const plan = await this.planTierChange(
@@ -3396,6 +3575,22 @@ export class SubscriptionService extends BaseService {
       );
       const effectiveProrationDate =
         prorationDate ?? Math.floor(Date.now() / 1000);
+
+      if (startsNewPeriod(plan.kind, plan.billingInterval)) {
+        if (!quote) {
+          throw new ValidationError(
+            'A switch to yearly billing needs the quote its preview returned.',
+            { newTierId }
+          );
+        }
+        const now = await this.previewNow(plan, Math.floor(Date.now() / 1000));
+        if (now.quote !== quote) {
+          throw new TierChangePreviewExpiredError({
+            prorationDate: effectiveProrationDate,
+            newTierId,
+          });
+        }
+      }
 
       if (plan.kind === 'downgrade') {
         await this.scheduleTierMove(plan, effectiveProrationDate);
@@ -3541,6 +3736,7 @@ export class SubscriptionService extends BaseService {
     const { userId, organizationId: orgId } = sub;
     const proration = nowProration(plan);
     const chargesNow = proration === 'always_invoice';
+    const newPeriod = startsNewPeriod(plan.kind, plan.billingInterval);
 
     try {
       await this.stripe.subscriptions.update(
@@ -3550,9 +3746,15 @@ export class SubscriptionService extends BaseService {
           proration_behavior: proration,
           // Pin proration to the preview's timestamp so the customer pays
           // exactly what the dialog showed them.
-          ...(proration !== 'none' && {
-            proration_date: effectiveProrationDate,
-          }),
+          ...(proration !== 'none' &&
+            !newPeriod && {
+              proration_date: effectiveProrationDate,
+            }),
+          // A switch into yearly billing starts its new period now, as the
+          // dialog said (Codex-2hxff.96). Stripe refuses proration_date with
+          // this anchor, so the credit runs to this write; `changeTier`
+          // re-checked the dialog's figures just before it.
+          ...(newPeriod && { billing_cycle_anchor: 'now' as const }),
           // A charge now must clear before the subscription changes. On 402
           // Stripe reverts the price update; we map it to
           // SubscriptionPaymentRequiredError and the row stays untouched.
@@ -4057,6 +4259,9 @@ export class SubscriptionService extends BaseService {
         throw new MoveAlreadyLandedError(orgId);
       }
 
+      // The held tier may have been repriced while the move waited, which
+      // archived the held Price (Part A rule 3, F2).
+      await ensurePriceActive(this.stripe, move.holdPriceId);
       await this.stripe.subscriptions.update(
         sub.stripeSubscriptionId,
         {
@@ -4101,24 +4306,7 @@ export class SubscriptionService extends BaseService {
         );
       }
 
-      const repricedTo = await this.heldTierRepriced(sub, move.holdPriceId);
-      // A parked change to the current Price came from an accepted notice
-      // (a pending marker is written only then), and Keep has just made it
-      // live again: they were told, so they need no second email.
-      const alreadyTold =
-        repricedTo !== null &&
-        move.parkedPendingPrice?.priceId === repricedTo.priceId;
-      this.obs.info('tier_move.kept', {
-        subscriptionId: sub.id,
-        organizationId: orgId,
-        tierId: sub.tierId,
-        droppedTierId: move.tierId,
-        heldTierRepriced: repricedTo !== null,
-        alreadyTold,
-      });
-      if (repricedTo && !alreadyTold) {
-        await this.rejoinPriceChange(sub, move.holdAmountCents, repricedTo);
-      }
+      await this.rejoinPriceChange(sub, move);
 
       this.invalidateIfConfigured(userId, orgId, 'tier_move_kept');
       return { userId, orgId, subscription: sub };
@@ -4128,43 +4316,15 @@ export class SubscriptionService extends BaseService {
   }
 
   /**
-   * Whether the tier a member kept was repriced while their move waited: the
-   * Price put back is not the tier's current Price for their billing. If so,
-   * the tier's current Price and its amount; otherwise null. The price-change
-   * step skips a member moving away (data design §6.1), so this one has had
-   * no notice.
-   */
-  private async heldTierRepriced(
-    sub: Subscription,
-    heldPriceId: string
-  ): Promise<{ priceId: string; amountCents: number } | null> {
-    const [tier] = await this.db
-      .select({
-        monthly: subscriptionTiers.stripePriceMonthlyId,
-        annual: subscriptionTiers.stripePriceAnnualId,
-        priceMonthly: subscriptionTiers.priceMonthly,
-        priceAnnual: subscriptionTiers.priceAnnual,
-      })
-      .from(subscriptionTiers)
-      .where(eq(subscriptionTiers.id, sub.tierId))
-      .limit(1);
-    if (!tier) return null;
-    const current =
-      sub.billingInterval === BILLING_INTERVAL.YEAR
-        ? { priceId: tier.annual, amountCents: tier.priceAnnual }
-        : { priceId: tier.monthly, amountCents: tier.priceMonthly };
-    return current.priceId !== null && current.priceId !== heldPriceId
-      ? { priceId: current.priceId, amountCents: current.amountCents }
-      : null;
-  }
-
-  /**
    * Rejoin a price change the member was skipped for while moving away
    * (Part A rule 3; data design §2.3): one `due` row in
    * `subscription_price_moves` (`source = 'keep_current_plan'`), so the
    * hourly step gives them the usual 30-day notice and then moves them,
    * rather than leaving them on the old price unnoticed
-   * (`rejoinTierPriceChange`).
+   * (`rejoinTierPriceChange`). Whether the kept tier was repriced is decided
+   * there, under the tier row's lock, so a save running at the same time is
+   * seen (review C1, F3); a second Keep's change of its own on the same tier
+   * (`uq_price_changes_live_tier`) runs it once more, onto the first's.
    *
    * Keep has already put them back at Stripe and on our row, so a failure
    * here does not fail it: it is one error alert with an errorId and the
@@ -4172,8 +4332,7 @@ export class SubscriptionService extends BaseService {
    */
   private async rejoinPriceChange(
     sub: Subscription,
-    heldAmountCents: number,
-    current: { priceId: string; amountCents: number }
+    move: WaitingMove
   ): Promise<void> {
     const ids = {
       subscriptionId: sub.id,
@@ -4181,12 +4340,10 @@ export class SubscriptionService extends BaseService {
       organizationId: sub.organizationId,
       tierId: sub.tierId,
       billingInterval: sub.billingInterval,
-      currentPriceId: current.priceId,
+      heldPriceId: move.holdPriceId,
     };
-    try {
-      const result = await (
-        this.db as typeof import('@codex/database').dbWs
-      ).transaction((tx) =>
+    const rejoin = () =>
+      (this.db as typeof import('@codex/database').dbWs).transaction((tx) =>
         rejoinTierPriceChange(tx, {
           subscriptionId: sub.id,
           stripeSubscriptionId: sub.stripeSubscriptionId,
@@ -4195,12 +4352,26 @@ export class SubscriptionService extends BaseService {
           tierId: sub.tierId,
           interval:
             sub.billingInterval === BILLING_INTERVAL.YEAR ? 'year' : 'month',
-          currentPriceId: current.priceId,
-          currentAmountCents: current.amountCents,
-          heldAmountCents,
+          heldPriceId: move.holdPriceId,
+          heldAmountCents: move.holdAmountCents,
+          parkedPendingPriceId: move.parkedPendingPrice?.priceId ?? null,
           now: new Date(),
         })
       );
+    try {
+      const result = await rejoin().catch((error: unknown) => {
+        if (isUniqueViolation(error)) return rejoin();
+        throw error;
+      });
+      this.obs.info('tier_move.kept', {
+        ...ids,
+        droppedTierId: move.tierId,
+        heldTierRepriced: result.outcome !== 'not_repriced',
+        alreadyTold: result.outcome === 'already_told',
+        rejoined: result.outcome,
+        ...('changeId' in result && { priceChangeId: result.changeId }),
+        ...(result.outcome === 'due' && { priceMoveId: result.moveId }),
+      });
       if (result.outcome === 'live_change_mismatch') {
         this.obs.error(
           'tier_move.kept: the kept tier was repriced, but its live price change is for another Price, so no notice was recorded; the member stays on the old price (support: check the tier and add them to its price change)',
@@ -4210,21 +4381,14 @@ export class SubscriptionService extends BaseService {
             priceChangeId: result.changeId,
           }
         );
-        return;
       }
-      this.obs.info('tier_move.kept: rejoined the price change', {
-        ...ids,
-        priceChangeId: result.changeId,
-        outcome: result.outcome,
-        ...(result.outcome === 'due' && { priceMoveId: result.moveId }),
-      });
     } catch (error) {
       this.obs.error(
         "tier_move.kept: the kept tier was repriced, and the price-change notice could not be recorded; the member stays on the old price (support: add them to the tier's price change)",
         {
           errorId: crypto.randomUUID(),
           ...ids,
-          error: error instanceof Error ? error.message : String(error),
+          error: describeThrown(error),
         }
       );
     }
@@ -4564,6 +4728,7 @@ export class SubscriptionService extends BaseService {
     for (const target of targets) {
       if (!target.tierId || !target.effectiveAt) continue;
       found.set(target.id, {
+        kind: 'plan',
         tierId: target.tierId,
         tierName: target.tierName,
         amountCents: target.amountCents,
