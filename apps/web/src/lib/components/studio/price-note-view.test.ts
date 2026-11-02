@@ -367,7 +367,8 @@ describe('when there is no note', () => {
       [doneOn('2026-10-30T15:01:00.000Z')],
       '2026-11-02T09:00:00.000Z'
     );
-    expect(note?.meta).toBe('Finished on 30 Oct at 15:01.');
+    // The full month in sentences, as the fee note and the mockups.
+    expect(note?.meta).toBe('Finished on 30 October at 15:01.');
   });
 
   test('dismissed: gone, by any of its changes', () => {
@@ -440,6 +441,173 @@ describe('the Edit Tier warning while emails go out (P8)', () => {
         })
       ).toBeNull();
     }
+  });
+
+  const membersYear = (counts: Partial<PriceChangeProgress['counts']>) =>
+    members({
+      id: 'members-9-year',
+      interval: 'year',
+      fromAmountCents: 8000,
+      newAmountCents: 9000,
+      counts: { total: 1240, ...counts },
+    });
+
+  test('both moved prices still going out: one warning, both prices, the counts summed', () => {
+    expect(
+      stillGoingOutHint({
+        changes: [
+          members({ counts: { total: 5000, emailed: 3600, due: 1400 } }),
+          membersYear({ emailed: 900, due: 340 }),
+        ],
+        saved: { monthly: 900, annual: 9000 },
+        next: { monthly: 1000, annual: 10000 },
+      })
+    ).toEqual({
+      kind: 'going_out',
+      lead: 'Emails about £9.00/mo or £90.00/yr are still going out: 4,500 of 6,240 sent.',
+      body: 'If you save new prices, they replace £9.00/mo or £90.00/yr, and all 6,240 are emailed about the new prices instead, including the 4,500 already told about £9.00/mo or £90.00/yr.',
+    });
+  });
+
+  test('both moved, only one still sending: the one-price words', () => {
+    const hint = stillGoingOutHint({
+      changes: [
+        members({ counts: { total: 5000, emailed: 3600, due: 1400 } }),
+        membersYear({ emailed: 1240, scheduled: 1240, due: 0 }),
+      ],
+      saved: { monthly: 900, annual: 9000 },
+      next: { monthly: 1000, annual: 10000 },
+    });
+    expect(hint?.lead).toBe(
+      'Emails about £9.00/mo are still going out: 3,600 of 5,000 sent.'
+    );
+  });
+});
+
+describe('a newer save replaces a recent done note (owner decision C)', () => {
+  // Members went £9 → £10 on 30 Oct and finished at 18:01; on 2 Nov it goes
+  // £10 → £12. Nobody has moved yet: each move waits 30 days.
+  const finished = (
+    over: Parameters<typeof members>[0] = {}
+  ): PriceChangeProgress =>
+    members({
+      id: 'members-10',
+      fromAmountCents: 900,
+      newAmountCents: 1000,
+      state: 'done',
+      doneAt: '2026-10-30T18:01:00.000Z',
+      lastRunAt: '2026-10-30T18:00:00.000Z',
+      nextRunAt: null,
+      estimatedDoneAt: null,
+      ...over,
+      counts: { emailed: 6240, scheduled: 6240, due: 0, ...over.counts },
+    });
+  const newer = (over: Parameters<typeof members>[0] = {}) =>
+    members({
+      id: 'members-12',
+      fromAmountCents: 1000,
+      newAmountCents: 1200,
+      createdAt: '2026-11-02T16:21:00.000Z',
+      nextRunAt: '2026-11-02T17:00:00.000Z',
+      ...over,
+    });
+  const AFTER_SAVE = '2026-11-02T16:21:30.000Z';
+  const P9 = {
+    lead: 'New price saved: £12.00/mo. It replaces £10.00/mo.',
+    text: "We'll start emailing all 6,240 Members subscribers about £12.00 at 17:00, including the 6,240 already told about £10.00. Each moves at their first renewal at least 30 days after their own email.",
+  };
+
+  test('within 14 days of the finish: only the newer note, in the P9 words', () => {
+    const result = notes([newer(), finished()], AFTER_SAVE, {
+      subject: MEMBERS,
+    });
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ ids: ['members-12'], ...P9 });
+  });
+
+  test('the done note dismissed: the newer note still says what it replaced', () => {
+    const result = notes([newer(), finished()], AFTER_SAVE, {
+      subject: MEMBERS,
+      isDismissed: (key) => key === 'price-change:members-10',
+    });
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject(P9);
+  });
+
+  test('finished more than 14 days before the save: a plain save (P2)', () => {
+    const result = notes(
+      [
+        newer(),
+        finished({
+          createdAt: '2026-10-09T13:20:00.000Z',
+          doneAt: '2026-10-19T16:20:00.000Z',
+        }),
+      ],
+      AFTER_SAVE,
+      { subject: MEMBERS }
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      lead: 'New price saved.',
+      text: "We'll start emailing your 6,240 Members subscribers about it at 17:00. Each moves to £12.00/mo at their first renewal at least 30 days after their own email, and keeps paying £10.00/mo until then.",
+    });
+  });
+
+  test('both intervals replaced: the both-prices words', () => {
+    const done = {
+      state: 'done' as const,
+      doneAt: '2026-10-30T15:01:00.000Z',
+      nextRunAt: null,
+      estimatedDoneAt: null,
+    };
+    const next = {
+      createdAt: '2026-11-02T10:00:00.000Z',
+      nextRunAt: '2026-11-02T11:00:00.000Z',
+    };
+    const result = notes(
+      [
+        change({
+          ...next,
+          id: 'pro-16',
+          fromAmountCents: 1400,
+          newAmountCents: 1600,
+        }),
+        proYear({
+          ...next,
+          id: 'pro-160',
+          fromAmountCents: 14000,
+          newAmountCents: 16000,
+        }),
+        change({ ...done, counts: { emailed: 19, scheduled: 19, due: 0 } }),
+        proYear({ ...done, counts: { emailed: 4, scheduled: 4, due: 0 } }),
+      ],
+      '2026-11-02T10:00:30.000Z'
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      lead: 'New prices saved: £16.00/mo or £160.00/yr. They replace £14.00/mo or £140.00/yr.',
+      text: "We'll start emailing all 23 Pro subscribers about £16.00/mo or £160.00/yr at 11:00, including the 23 already told about £14.00/mo or £140.00/yr. Each moves at their first renewal at least 30 days after their own email.",
+    });
+  });
+
+  test('a running change in between: the words name it, the done note still goes', () => {
+    const between = members({
+      id: 'members-11',
+      fromAmountCents: 1000,
+      newAmountCents: 1100,
+      createdAt: '2026-11-02T14:00:00.000Z',
+      state: 'superseded',
+      supersededById: 'members-12',
+      counts: { emailed: 1500, due: 4740 },
+    });
+    const result = notes([newer(), between, finished()], AFTER_SAVE, {
+      subject: MEMBERS,
+    });
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      lead: 'New price saved: £12.00/mo. It replaces £11.00/mo.',
+      text: "We'll start emailing all 6,240 Members subscribers about £12.00 at 17:00, including the 1,500 already told about £11.00. Each moves at their first renewal at least 30 days after their own email.",
+    });
   });
 });
 

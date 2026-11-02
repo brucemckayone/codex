@@ -3508,6 +3508,8 @@
   "price_note_edit_body_one": "Emails start at the next hourly run, and each person moves at their first renewal at least 30 days after their own email. New subscribers pay the new price straight away.",
   "price_note_going_out_lead": "Emails about {to} are still going out: {emailed} of {total} sent.",
   "price_note_going_out_body": "If you save a new price, it replaces {amount}, and all {total} are emailed about the new price instead, including the {emailed} already told about {amount}.",
+  "price_note_going_out_lead_both": "Emails about {to} are still going out: {emailed} of {total} sent.",
+  "price_note_going_out_body_both": "If you save new prices, they replace {old}, and all {total} are emailed about the new prices instead, including the {emailed} already told about {old}.",
   "price_note_per_month": "{price}/mo",
   "price_note_per_year": "{price}/yr",
   "price_note_or": "{first} or {second}",

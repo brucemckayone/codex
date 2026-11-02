@@ -89,8 +89,10 @@ export function editTierHint(input: {
 /**
  * P8: a price the creator is changing again while its emails are still
  * going out. Saving replaces it (latest wins), so everyone is emailed about
- * the new price, the people already told included. Monthly is checked
- * first; null when no moved price has a change still sending.
+ * the new price, the people already told included. When both moved prices
+ * are still sending, one warning names both, its counts summed ("monthly
+ * and annual are counted together"). Latest wins per interval, so a price
+ * left as it was is never part of it. Null when no moved price is sending.
  */
 export function stillGoingOutHint(input: {
   /** This tier's (or plan's) changes, as the progress read gave them. */
@@ -102,6 +104,7 @@ export function stillGoingOutHint(input: {
     ['month', input.next.monthly, input.saved.monthly],
     ['year', input.next.annual, input.saved.annual],
   ];
+  const sending: PriceChangeProgress[] = [];
   for (const [interval, next, saved] of intervals) {
     if (!moved(next, saved)) continue;
     const change = input.changes.find(
@@ -111,21 +114,35 @@ export function stillGoingOutHint(input: {
         c.counts.emailed > 0 &&
         c.counts.due > 0
     );
-    if (!change) continue;
-    const amount = formatPrice(change.newAmountCents);
-    const total = count(change.counts.total);
-    const emailed = count(change.counts.emailed);
+    if (change) sending.push(change);
+  }
+  const [first] = sending;
+  if (!first) return null;
+  const sum = (field: keyof PriceChangeProgress['counts']) =>
+    count(sending.reduce((n, c) => n + c.counts[field], 0));
+  const total = sum('total');
+  const emailed = sum('emailed');
+  if (sending.length > 1) {
+    const old = prices(sending, (c) => c.newAmountCents);
     return {
       kind: 'going_out',
-      lead: m.price_note_going_out_lead({
-        to: perInterval(change.newAmountCents, interval),
-        emailed,
-        total,
-      }),
-      body: m.price_note_going_out_body({ amount, total, emailed }),
+      lead: m.price_note_going_out_lead_both({ to: old, emailed, total }),
+      body: m.price_note_going_out_body_both({ old, total, emailed }),
     };
   }
-  return null;
+  return {
+    kind: 'going_out',
+    lead: m.price_note_going_out_lead({
+      to: perInterval(first.newAmountCents, first.interval),
+      emailed,
+      total,
+    }),
+    body: m.price_note_going_out_body({
+      amount: formatPrice(first.newAmountCents),
+      total,
+      emailed,
+    }),
+  };
 }
 
 // ── The note after saving ─────────────────────────────────────────────────
@@ -171,8 +188,17 @@ export const dismissalKey = (changeId: string) => `price-change:${changeId}`;
 /**
  * The notes for one subject's changes, newest first: one per save. A
  * replaced change has no note of its own (the newer one says it replaced
- * it), nor does a change with nobody to tell. A finished note goes 14 days
- * after its last email (Q8), or when dismissed (`isDismissed`).
+ * it, P9), nor does a change with nobody to tell. A finished note goes 14
+ * days after its last email (Q8), or when dismissed (`isDismissed`).
+ *
+ * A newer save also replaces a DONE change's note (owner decision,
+ * 2026-11-01): the done change for the same subject and interval that
+ * finished within 14 days before the newer save. The server links only
+ * running and stopped changes (`supersededById`), so the done one is found
+ * here: the newest such. Inside that window nobody has moved yet, since
+ * each move waits 30 days after the person's email. Outside it, the newer
+ * note reads as a plain save (P2). The link is a fact about the price, so
+ * it holds after the done note was dismissed.
  */
 export function priceChangeNotes(input: {
   /** Every change the read gave, so a replaced one can be found. */
@@ -185,26 +211,40 @@ export function priceChangeNotes(input: {
   isDismissed?: (key: string) => boolean;
 }): PriceNoteView[] {
   const groups = new Map<string, PriceChangeProgress[]>();
+  const doneReplaced = new Map<string, PriceChangeProgress>();
   for (const change of input.changes) {
     if (change.state === 'superseded' || change.counts.total === 0) continue;
-    const key = `${change.tierId ?? change.courseSubscriptionPlanId}:${change.createdAt}`;
+    const key = `${subjectOf(change)}:${change.createdAt}`;
     groups.set(key, [...(groups.get(key) ?? []), change]);
+    const done = doneChangeReplacedBy(change, input.all);
+    if (done) doneReplaced.set(change.id, done);
   }
+  const replacedIds = new Set([...doneReplaced.values()].map((c) => c.id));
   const views: PriceNoteView[] = [];
   for (const [key, group] of groups) {
     const ids = group.map((c) => c.id);
+    if (ids.some((id) => replacedIds.has(id))) continue;
     if (
       input.isDismissed &&
       ids.some((id) => input.isDismissed?.(dismissalKey(id)))
     ) {
       continue;
     }
+    // What each change replaced, for the P9 words: the change it superseded
+    // (one per interval), else the done one. A done change behind a
+    // superseded one has no note either, but the words name the latest.
+    const replaced = group.flatMap((change) => {
+      const superseded = input.all.filter(
+        (c) => c.supersededById === change.id
+      );
+      if (superseded.length > 0) return superseded;
+      const done = doneReplaced.get(change.id);
+      return done ? [done] : [];
+    });
     const view = noteFor({
       key,
       group: sortByInterval(group),
-      replaced: input.all.filter(
-        (c) => c.supersededById !== null && ids.includes(c.supersededById)
-      ),
+      replaced,
       subject: input.subject,
       now: input.now,
       check: input.check?.key === key ? input.check : null,
@@ -212,6 +252,35 @@ export function priceChangeNotes(input: {
     if (view) views.push(view);
   }
   return views;
+}
+
+function subjectOf(change: PriceChangeProgress): string | null {
+  return change.tierId ?? change.courseSubscriptionPlanId;
+}
+
+/**
+ * The done change `newer` replaces: same subject and interval, saved before
+ * it, and finished within 14 days before it was saved. The newest one.
+ */
+function doneChangeReplacedBy(
+  newer: PriceChangeProgress,
+  all: readonly PriceChangeProgress[]
+): PriceChangeProgress | null {
+  const savedAt = Date.parse(newer.createdAt);
+  let found: PriceChangeProgress | null = null;
+  for (const c of all) {
+    if (c.id === newer.id || c.state !== 'done' || !c.doneAt) continue;
+    if (subjectOf(c) !== subjectOf(newer) || c.interval !== newer.interval) {
+      continue;
+    }
+    const since = savedAt - Date.parse(c.doneAt);
+    if (Date.parse(c.createdAt) >= savedAt || since < 0) continue;
+    if (since >= DONE_SHOWN_FOR_MS) continue;
+    if (!found || Date.parse(c.createdAt) > Date.parse(found.createdAt)) {
+      found = c;
+    }
+  }
+  return found;
 }
 
 function noteFor(input: {
@@ -356,7 +425,7 @@ function noteFor(input: {
       daysFrom(doneAt, now) === 0
         ? m.price_note_finished_today({ time: clock(doneAt) })
         : m.price_note_finished_on({
-            date: shortDay(doneAt),
+            date: dayMonth(doneAt),
             time: clock(doneAt),
           })
     );
@@ -601,9 +670,11 @@ const clockFormatter = new Intl.DateTimeFormat('en-GB', {
   minute: '2-digit',
   timeZone: TIME_ZONE,
 });
-const shortDayFormatter = new Intl.DateTimeFormat('en-GB', {
+// The full month in sentences, as the fee note (`upcoming-fee-view.ts`)
+// and the Studio mockups write it: "on 3 November".
+const dayMonthFormatter = new Intl.DateTimeFormat('en-GB', {
   day: 'numeric',
-  month: 'short',
+  month: 'long',
   timeZone: TIME_ZONE,
 });
 const londonDayKey = new Intl.DateTimeFormat('en-CA', {
@@ -618,9 +689,9 @@ function clock(iso: string): string {
   return clockFormatter.format(new Date(iso));
 }
 
-/** `2 Nov` */
-function shortDay(iso: string): string {
-  return shortDayFormatter.format(new Date(iso));
+/** `2 November` */
+function dayMonth(iso: string): string {
+  return dayMonthFormatter.format(new Date(iso));
 }
 
 /** London days from `now`'s to `iso`'s: 0 today, 1 tomorrow, -1 yesterday. */
@@ -629,20 +700,23 @@ function daysFrom(iso: string, now: Date): number {
   return Math.round((day(new Date(iso)) - day(now)) / DAY_MS);
 }
 
-/** A time ahead: `18:00`, `09:00 tomorrow`, `09:00 on 3 Nov`. */
+/** A time ahead: `18:00`, `09:00 tomorrow`, `09:00 on 3 November`. */
 function when(iso: string, now: Date): string {
   const days = daysFrom(iso, now);
   const time = clock(iso);
   if (days === 0) return time;
   if (days === 1) return m.price_note_when_tomorrow({ time });
-  return m.price_note_when_on({ time, date: shortDay(iso) });
+  return m.price_note_when_on({ time, date: dayMonth(iso) });
 }
 
-/** A run behind: `the 16:00 run`, `yesterday's 23:00 run`. */
+/**
+ * A run behind: `the 16:00 run`, `yesterday's 23:00 run`, `the 23:00 run on
+ * 31 October`.
+ */
 function runPhrase(iso: string, now: Date): string {
   const days = daysFrom(iso, now);
   const time = clock(iso);
   if (days === 0) return m.price_note_run_today({ time });
   if (days === -1) return m.price_note_run_yesterday({ time });
-  return m.price_note_run_on({ time, date: shortDay(iso) });
+  return m.price_note_run_on({ time, date: dayMonth(iso) });
 }
