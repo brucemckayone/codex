@@ -26,7 +26,7 @@ const ZERO = runWeight('0');
 
 /**
  * How wide a figure is drawn, in its face's `0`s, rounded up: the
- * checklist's column for its widest (call 10). Its digits are tabular, each
+ * checklist's column for its widest. Its digits are tabular, each
  * a `0`; any other glyph is weighed as a heading's are (`model/faces.ts`),
  * one the table does not know as its widest letter, so "98%" is reckoned a
  * little wide, never narrow.

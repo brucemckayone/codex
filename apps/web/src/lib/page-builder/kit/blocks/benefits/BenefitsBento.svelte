@@ -41,6 +41,7 @@
 
 <ul class="benefits-bento" data-count={items.length}>
   {#each items as item, index (index)}
+    {@const figure = images[index] ? undefined : item.figure}
     <li
       class="benefits-bento__tile"
       data-tile={tiles[index]}
@@ -72,14 +73,8 @@
         </div>
       {/if}
       <div class="benefits-bento__words">
-        {#if item.mark}<span class="benefits-bento__mark"><Mark mark={item.mark} /></span>{/if}
-        <Heading
-          {level}
-          size="title"
-          text={item.title}
-          type="benefits"
-          lead={images[index] ? undefined : item.figure}
-        />
+        {#if item.mark && !figure}<span class="benefits-bento__mark"><Mark mark={item.mark} /></span>{/if}
+        <Heading {level} size="title" text={item.title} type="benefits" lead={figure} />
         {#if item.detail}<p class="benefits-bento__detail">{item.detail}</p>{/if}
       </div>
     </li>

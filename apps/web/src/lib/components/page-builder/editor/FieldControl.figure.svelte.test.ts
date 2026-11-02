@@ -59,7 +59,7 @@ describe('the figure field', () => {
       input.getAttribute('aria-describedby') ?? ''
     );
     expect(described?.textContent).toContain(
-      'Up to 4 characters, like 24 or 98%. It shows instead of the mark, so write the name to read on from it.'
+      'Up to 4 characters with a digit, like 24 or 98%. It shows instead of the mark, so write the name to read on from it.'
     );
   });
 

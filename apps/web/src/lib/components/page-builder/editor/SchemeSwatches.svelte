@@ -189,6 +189,13 @@
     inline-size: 100%;
   }
 
+  /* A tile is too small for a panel Style's card (Poster, Cinematic): its
+     inset outgrows the tile, so no card is drawn. The tile keeps the band's
+     own veil, over the glow or the still alike (Codex-61zsk.73). */
+  .swatch__page {
+    --lp-atmosphere-veil: section;
+  }
+
   /* A band in miniature: the kit's section rules paint it (ground, ink,
      surface); only its box is the swatch's. The line is a border, not an
      inset shadow, so the section's surface layer cannot cover it. The

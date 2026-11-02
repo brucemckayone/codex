@@ -19,7 +19,8 @@
   An item may have a figure in its mark's place instead (Codex-61zsk.73):
   "24", "£12". It is words, read as the start of the name ("24 practices to
   keep"), so it sits inside the name and is set in the accent's text grade.
-  A picture leads its own tile, so a pictured tile draws no figure. In the
+  A picture leads its own tile, so a pictured tile draws no figure, and its
+  mark, if it has one, as before. In the
   checklist every row's mark stands in a column as wide as the widest
   figure, level with its name's first line.
 
@@ -132,7 +133,7 @@
       <ul class="benefits-rows">
         {#each items as item, index (index)}
           <li>
-            {#if item.mark}<span class="benefits__mark"><Mark mark={item.mark} /></span>{/if}
+            {#if item.mark && !item.figure}<span class="benefits__mark"><Mark mark={item.mark} /></span>{/if}
             <p class="benefits-rows__name">{#if item.figure}<span class="benefits__figure">{item.figure}</span>{' '}{/if}{item.title}</p>
             {#if item.detail}<p class="benefits__detail">{item.detail}</p>{/if}
           </li>
@@ -179,6 +180,7 @@
     {:else}
       <ul class="benefits-grid" data-count={items.length} data-pictured={pictured ? '' : undefined}>
         {#each items as item, index (index)}
+          {@const figure = tileImages[index] ? undefined : item.figure}
           <li>
             {#if pictured}
               <Media
@@ -190,14 +192,8 @@
                 focus={storedFocus(item.image)}
               />
             {/if}
-            {#if item.mark}<span class="benefits__mark"><Mark mark={item.mark} /></span>{/if}
-            <Heading
-              level={itemLevel}
-              size="title"
-              text={item.title}
-              type="benefits"
-              lead={tileImages[index] ? undefined : item.figure}
-            />
+            {#if item.mark && !figure}<span class="benefits__mark"><Mark mark={item.mark} /></span>{/if}
+            <Heading level={itemLevel} size="title" text={item.title} type="benefits" lead={figure} />
             {#if item.detail}<p class="benefits__detail">{item.detail}</p>{/if}
           </li>
         {/each}
@@ -407,14 +403,20 @@
     initial-value: 0px;
   }
 
+  /* The list is set as the figure is, face and weight too: a face the kit
+     has not measured counts its `0` as `1ch`, which is the list's own. */
   .benefits-checks[data-figured] {
     --_benefit-figure-col: calc(var(--_zeros) * var(--lp-zero-display));
+    font-family: var(--lp-font-display);
     font-size: var(--_figure-size);
+    font-weight: var(--lp-weight-display);
   }
 
   .benefits-checks[data-figured] li {
     grid-template-columns: minmax(var(--_benefit-figure-col), max-content) minmax(0, 1fr);
     gap: 0 var(--space-4);
+    font-family: var(--lp-font-body);
+    font-weight: var(--lp-weight-body);
   }
 
   /* One line of text, the figure and the words, so it is read as one; its

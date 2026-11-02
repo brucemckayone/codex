@@ -466,10 +466,13 @@ describe('a figure in the mark’s place (Codex-61zsk.73)', () => {
       expect(read({ figure: 24 })).toEqual({ title: 'T' });
     });
 
-    it('lets a figure win over a mark: the mark is dropped', () => {
+    // A tile with a picture draws its mark, not its figure, so both are
+    // kept and the layout draws the one it shows.
+    it('keeps both a figure and a mark', () => {
       expect(read({ figure: '24', mark: 'heart' })).toEqual({
         title: 'T',
         figure: '24',
+        mark: 'heart',
       });
     });
 
@@ -512,7 +515,7 @@ describe('a figure in the mark’s place (Codex-61zsk.73)', () => {
   it.each([
     'grid',
     'bento',
-  ])('%s: never draws a figure on a tile with a picture', async (layout) => {
+  ])('%s: never draws a figure on a tile with a picture, which keeps its mark', async (layout) => {
     await render(
       {
         items: [
@@ -525,6 +528,9 @@ describe('a figure in the mark’s place (Codex-61zsk.73)', () => {
     const [pictured, plain] = all('li');
     expect(pictured?.querySelector('img')).not.toBeNull();
     expect(pictured?.querySelector('.lp-heading__lead')).toBeNull();
+    expect(
+      pictured?.querySelector('.benefits__mark svg, .benefits-bento__mark svg')
+    ).not.toBeNull();
     expect(nameOf(pictured)?.textContent).toBe('practices to keep');
     expect(plain?.querySelector('.lp-heading__lead')?.textContent).toBe('6');
   });
@@ -665,12 +671,23 @@ describe('a figure in the mark’s place (Codex-61zsk.73)', () => {
     const field = fields.find((f) => f.key === 'figure');
     expect(field).toMatchObject({
       label: 'Or a number',
-      hint: 'Up to 4 characters, like 24 or 98%. It shows instead of the mark, so write the name to read on from it.',
+      hint: 'Up to 4 characters with a digit, like 24 or 98%. It shows instead of the mark, so write the name to read on from it.',
       control: 'text',
       maxLength: 4,
     });
     // In every layout: a mark is drawn in all four.
     expect(field?.layouts).toBeUndefined();
+  });
+
+  // The owner, 2026-11-02: a pictured tile draws no number, so its picture
+  // says so before it is added.
+  it('says a picture takes the number’s place', () => {
+    const image = benefitsDefinition.fields
+      .find((f) => f.key === 'items')
+      ?.itemFields?.find((f) => f.key === 'image');
+    expect(image?.hint).toBe(
+      'Optional. Shown with this item in the grid and in the mixed tiles, in place of its number.'
+    );
   });
 
   it('starts a new section, and the sample, without one', () => {
