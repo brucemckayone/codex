@@ -7,7 +7,8 @@
     cover     — the image fills the band; luminous words over a scrim. On a
                 Moving background with no image, the band is the section's:
                 the org's shader (or its glow) under the scheme's own veil
-    centered  — centred words over a wide image
+    centered  — centred words over a framed picture, as wide as the page's
+                reading measure and never bled (Codex-61zsk.73)
     poster    — the headline at full size set round a picture that runs off
                 the band's edge (HeroPoster)
 
@@ -115,9 +116,17 @@
     if (!still) return '';
     return still === ownStill ? ownSrcset : getThumbnailSrcset(still);
   }
-  const frameSizes = $derived(
-    layout === 'split' ? '(min-width: 50rem) 50vw, 100vw' : '100vw'
-  );
+  // The centred hero's frame is the reading measure from where the column
+  // outgrows it, about 50rem: 58 to 62 of the body's `0`s, which each
+  // Style's face and body size set between 47.5rem (Studio) and 54.3rem
+  // (Bold) on a 1280px laptop, so the hint is the widest, rounded up
+  // (Codex-61zsk.73). Below that it fills the column. Never a `min()`:
+  // Safari before 26.4 reads a `sizes` with one as 100vw.
+  const FRAME_SIZES: Partial<Record<string, string>> = {
+    split: '(min-width: 50rem) 50vw, 100vw',
+    centered: '(min-width: 50rem) 56rem, 100vw',
+  };
+  const frameSizes = $derived(FRAME_SIZES[layout] ?? '100vw');
 
   // The streamed preview once it settles, for the layouts whose shape depends
   // on whether there is media at all (cover, poster; split and centered on
@@ -405,8 +414,9 @@
     }
   }
 
-  /* Bold's media is full-bleed and meets the next band. */
-  :global(.lp[data-lp-style='bold']) :is(.hero-statement__media, .hero-centered__media) {
+  /* Bold's statement picture is full-bleed and meets the next band. The
+     centred hero's stays framed inside the page (Codex-61zsk.73). */
+  :global(.lp[data-lp-style='bold']) .hero-statement__media {
     grid-column: bleed;
     margin-block-end: calc(-1 * var(--lp-pad));
   }
@@ -562,9 +572,21 @@
     max-inline-size: calc(var(--lp-measure-lead) * var(--lp-measure-unit));
   }
 
+  /* The picture supports the words rather than outweighing them
+     (Codex-61zsk.73): framed under them, centred, as wide as the page's
+     reading measure, so it is set in the body's face and size, as a
+     paragraph is, to count its `0`s (58 to 62, by type). A phone's column
+     is narrower than that, so there it fills the column, inside the
+     gutters. */
   .hero-centered__media {
     --_ratio: 4 / 3;
+    --lp-measure-unit: var(--lp-zero-body);
+    justify-self: center;
     inline-size: 100%;
+    max-inline-size: calc(var(--lp-measure) * var(--lp-measure-unit));
+    font-family: var(--lp-font-body);
+    font-size: var(--lp-size-body);
+    font-weight: var(--lp-weight-body);
   }
 
   /* A centred line across a wide band steps down a little; a phone keeps
@@ -575,7 +597,7 @@
     }
 
     .hero-centered__media {
-      --_ratio: 16 / 7;
+      --_ratio: 3 / 2;
     }
   }
 
