@@ -101,11 +101,17 @@
     border-radius: var(--radius-full);
     background-color: var(--color-text-inverse);
     box-shadow: var(--shadow-sm);
-    transition: transform var(--duration-normal) var(--ease-out);
+    transition:
+      transform var(--duration-normal) var(--ease-out),
+      background-color var(--duration-normal) var(--ease-out);
     transform: translateX(var(--space-0-5));
   }
 
+  /* On the checked track the thumb takes the track's own ink, so it holds 3:1
+     on every brand: a white thumb on a pale brand was 1.53:1 (owner, Codex-mik4h:
+     "Thumb takes the track's ink when checked"). */
   .switch[data-state="checked"] .thumb {
+    background-color: var(--color-on-interactive);
     transform: translateX(var(--space-5-5));
   }
 </style>
