@@ -7,26 +7,30 @@
  * it, warning the admin when that pair drops below the AA floor.
  *
  * HONESTY NOTE — the foreground derivation mirrors the *real* product rule.
- * `org-brand.css` computes `--color-text-on-brand` as:
+ * `org-brand.css` chooses `--color-text-on-brand` by the brand's relative
+ * LUMINANCE, in the `@supports` block at its foot: pure white when it sits
+ * below 0.1791, where white and black contrast equally (each 4.58:1), pure
+ * black at or above. `deriveTextOnBrand` reproduces that rule, luminance and
+ * all, so the readout reflects what visitors actually see — not a guess
+ * (Codex-6r63f). Chosen that way, the label clears AA on every sRGB brand:
+ * the floor is 4.57:1.
  *
- *   oklch(from var(--brand-color) clamp(0, (0.62 - l) * 1000, 1) 0 0)
- *
- * i.e. pure white when the brand's OKLCH lightness `l < 0.62`, pure black
- * otherwise. `deriveTextOnBrand` reproduces exactly that threshold so the
- * readout reflects what visitors actually see — not a guess.
+ * An engine without `pow()` inside relative colour (Chrome before 125) keeps
+ * the file's older fallback, an OKLCH lightness step at 0.62, which picks the
+ * weaker ink for some greens and teals. The readout reports what every current
+ * browser paints, not that fallback.
  */
-import { hexToOklch } from '$lib/brand-editor/oklch-math';
 
 /** WCAG 2.x AA contrast floor for normal-size body text. */
 export const AA_CONTRAST_THRESHOLD = 4.5;
 /** WCAG 2.x AAA contrast floor for normal-size body text. */
 export const AAA_CONTRAST_THRESHOLD = 7;
 /**
- * OKLCH lightness at which the product flips text-on-brand from white to black
- * (see module header / org-brand.css). Kept as a named constant so the rule
- * has one source of truth shared with any test.
+ * Relative luminance at which the product flips text-on-brand from white to
+ * black (see module header / org-brand.css): sqrt(1.05 * 0.05) - 0.05. Kept as
+ * a named constant so the rule has one source of truth shared with any test.
  */
-export const TEXT_ON_BRAND_LIGHTNESS_PIVOT = 0.62;
+export const TEXT_ON_BRAND_LUMINANCE_PIVOT = 0.1791;
 
 const WHITE = '#FFFFFF';
 const BLACK = '#000000';
@@ -83,15 +87,35 @@ export function contrastRatio(a: string, b: string): number | null {
 }
 
 /**
+ * Luminance as `org-brand.css` computes it to choose the ink: every channel
+ * through the sRGB curve's power segment, without WCAG's linear knee, which
+ * relative colour cannot branch on. The two differ only for channels under
+ * about 4%, and move the decision by under 0.001 (the file explains why the
+ * offset must stay).
+ */
+function inkLuminance({
+  r,
+  g,
+  b,
+}: {
+  r: number;
+  g: number;
+  b: number;
+}): number {
+  const curve = (channel: number) => ((channel / 255 + 0.055) / 1.055) ** 2.4;
+  return 0.2126 * curve(r) + 0.7152 * curve(g) + 0.0722 * curve(b);
+}
+
+/**
  * The text colour the product auto-places on a given brand colour. Mirrors the
- * `org-brand.css` OKLCH rule: white below the lightness pivot, black at/above.
+ * `org-brand.css` luminance rule: white below the pivot, black at/above.
  * Falls back to white for an unparseable brand hex (matches the CSS fallback,
  * where a bad `--brand-color` resolves through `--color-primary-500`).
  */
 export function deriveTextOnBrand(brandHex: string): string {
-  const oklch = hexToOklch(brandHex);
-  if (!oklch) return WHITE;
-  return oklch.l < TEXT_ON_BRAND_LIGHTNESS_PIVOT ? WHITE : BLACK;
+  const rgb = parseHex(brandHex);
+  if (!rgb) return WHITE;
+  return inkLuminance(rgb) < TEXT_ON_BRAND_LUMINANCE_PIVOT ? WHITE : BLACK;
 }
 
 export interface BrandContrastResult {

@@ -149,6 +149,25 @@ describe('the contrast gate is not vacuous', () => {
       expect(inkOn(brand)).toBe(railDeriveTextOnBrand(brand));
     }
   });
+
+  // Both mirror org-brand.css's luminance step (Codex-6r63f): they must agree
+  // on every brand, not on four, or the presets and the readout drift apart.
+  it('picks the same ink as the rail on every brand across the sRGB cube', () => {
+    const levels = Array.from({ length: 16 }, (_, i) =>
+      (i * 17).toString(16).padStart(2, '0')
+    );
+    const disagree: string[] = [];
+    for (const r of levels)
+      for (const g of levels)
+        for (const b of levels) {
+          const brand = `#${r}${g}${b}`;
+          if (inkOn(brand) !== railDeriveTextOnBrand(brand))
+            disagree.push(brand);
+        }
+    expect(disagree).toEqual([]);
+    // The case the old lightness step got wrong.
+    expect(inkOn('#059669')).toBe('#000000');
+  });
 });
 
 // ── 1. Contrast, both themes ───────────────────────────────────────────────

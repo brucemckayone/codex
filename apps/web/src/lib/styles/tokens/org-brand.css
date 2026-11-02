@@ -646,16 +646,16 @@
  * Firefox has not shipped it and its result is UA-defined, so it cannot be
  * modelled by a test. Revisit when Firefox ships it.
  *
- * LOCKSTEP OBLIGATIONS — both are handed off, neither is done here:
- *   1. `lib/components/brand-studio/rail/contrast.ts` models this rule to warn
- *      a creator in the brand editor, and its header quotes the OKLCH form.
- *      It now describes only the fallback, so the rail understates the ink on a
- *      green brand (it would report 3.77 where the product now paints 5.57).
- *   2. `themes/light.css` / `themes/dark.css` carry the same-shape
- *      `--color-on-interactive` for the PLATFORM path. Neither platform primary
- *      is inside the failing band today (#c24129 → 5.14, #f47d67 → 7.96), so
- *      that twin is latent rather than live — but it must move for the same
- *      reason, and the two must not drift.
+ * LOCKSTEP — these move with this rule (Codex-6r63f moved both):
+ *   1. `lib/components/brand-studio/rail/contrast.ts` (`deriveTextOnBrand`)
+ *      and `lib/brand-editor/preset-axes.ts` (`inkOn`) model it, luminance and
+ *      all, so the brand editor's readout says what visitors see.
+ *      `rail/contrast.test.ts` pins this block's expression and pivot to them.
+ *   2. `themes/light.css` / `themes/dark.css` carry the same step, under the
+ *      same guard, for the PLATFORM path's `--color-on-interactive` and
+ *      `--color-text-on-accent`. Neither platform primary is in the band the
+ *      fallback misjudges (#c24129 → 5.14, #f47d67 → 7.96), so nothing there
+ *      changed colour; the two must not drift.
  */
 @supports (color: rgb(from red calc(255 * pow(r / 255, 2)) 0 0)) {
   /* The page-override twin is NOT optional here (Codex-acwap). This block and

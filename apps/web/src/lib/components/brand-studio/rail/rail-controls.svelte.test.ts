@@ -4,7 +4,7 @@
  * These prove the store-facing behaviours end-to-end against jsdom-safe pieces:
  *   - a REUSED field component (BrandEditorShape) writes the store's pending;
  *   - the change-ledger's per-field Reset reverts only its field;
- *   - the editing-theme + contrast readout flags a low-contrast pair.
+ *   - the editing-theme + contrast readout reads the ink the product paints.
  *
  * No module mocks needed — none of these three touch Melt, canvas, or a remote
  * form. The store is the module-level singleton, reset via close()/open().
@@ -136,9 +136,29 @@ describe('EditingThemeContrast', () => {
     document.body.innerHTML = '';
   });
 
-  test('flags a low-contrast brand colour (mid-grey fails AA)', () => {
+  // The old lightness step put white on mid grey and the pill warned; the
+  // product paints black there, so the pill passes (Codex-6r63f).
+  test('reads mid grey as the product paints it: black ink, passes AA', () => {
     brandEditor.close();
     brandEditor.open(ORG_ID, makeSaved({ primaryColor: '#808080' }));
+
+    component = mount(EditingThemeContrast, { target: document.body });
+    flushSync();
+
+    const readout = document.querySelector('.contrast');
+    expect(readout?.getAttribute('data-passes-aa')).toBe('true');
+    expect(readout?.classList.contains('contrast--warn')).toBe(false);
+    expect(
+      document.querySelector<HTMLElement>('.contrast__sample')?.style.color
+    ).toBe('rgb(0, 0, 0)');
+    expect(document.querySelector('.contrast__ratio')?.textContent).toBe(
+      '5.32:1'
+    );
+  });
+
+  test('warns when the colour cannot be read', () => {
+    brandEditor.close();
+    brandEditor.open(ORG_ID, makeSaved({ primaryColor: 'not-a-colour' }));
 
     component = mount(EditingThemeContrast, { target: document.body });
     flushSync();

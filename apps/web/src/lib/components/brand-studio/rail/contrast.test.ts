@@ -1,11 +1,14 @@
 /**
  * Contrast helper tests (Codex-cijzb · WP-1.5).
  *
- * The maths is small and load-bearing (the rail's AA warning depends on it), so
- * it is proven directly. Assertions are unconditional and the failing-AA case
- * is a genuine failure — if `deriveTextOnBrand` picked the wrong foreground the
- * verdict would flip and the test would break.
+ * The maths is small and load-bearing (the rail's AA readout depends on it), so
+ * it is proven directly. `deriveTextOnBrand` must pick the ink the product
+ * paints (Codex-6r63f): if it picked the other, the green cases below would
+ * read the weaker ink and the verdicts would flip.
  */
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
 import {
   AA_CONTRAST_THRESHOLD,
@@ -14,7 +17,18 @@ import {
   evaluateBrandContrast,
   formatContrastRatio,
   relativeLuminance,
+  TEXT_ON_BRAND_LUMINANCE_PIVOT,
 } from './contrast';
+
+/** 16 levels a channel: 4 096 brands across the whole sRGB cube. */
+function everyBrand(): string[] {
+  const levels = Array.from({ length: 16 }, (_, i) =>
+    (i * 17).toString(16).padStart(2, '0')
+  );
+  return levels.flatMap((r) =>
+    levels.flatMap((g) => levels.map((b) => `#${r}${g}${b}`))
+  );
+}
 
 describe('relativeLuminance', () => {
   test('black is 0 and white is 1', () => {
@@ -49,7 +63,7 @@ describe('contrastRatio', () => {
   });
 });
 
-describe('deriveTextOnBrand (mirrors org-brand.css l < 0.62 pivot)', () => {
+describe('deriveTextOnBrand (mirrors org-brand.css’s luminance step)', () => {
   test('picks black text on a light brand colour', () => {
     expect(deriveTextOnBrand('#FFFFFF')).toBe('#000000');
     expect(deriveTextOnBrand('#FDE68A')).toBe('#000000'); // light amber
@@ -60,8 +74,64 @@ describe('deriveTextOnBrand (mirrors org-brand.css l < 0.62 pivot)', () => {
     expect(deriveTextOnBrand('#1A1A2E')).toBe('#FFFFFF'); // deep navy
   });
 
+  // The band the old OKLCH lightness step misjudged: it put white on these.
+  test('picks black on a mid-lightness saturated green, as the product paints', () => {
+    expect(deriveTextOnBrand('#059669')).toBe('#000000');
+    expect(contrastRatio('#059669', '#000000') as number).toBeCloseTo(5.57, 2);
+    expect(deriveTextOnBrand('#01A221')).toBe('#000000');
+  });
+
   test('falls back to white for an unparseable brand hex', () => {
     expect(deriveTextOnBrand('not-a-colour')).toBe('#FFFFFF');
+  });
+
+  // Where white and black contrast equally, so the better of the two clears
+  // AA on every brand (org-brand.css's foot).
+  test('flips where white and black contrast equally', () => {
+    expect(TEXT_ON_BRAND_LUMINANCE_PIVOT).toBeCloseTo(
+      Math.sqrt(1.05 * 0.05) - 0.05,
+      4
+    );
+  });
+
+  test('clears AA on every brand across the sRGB cube', () => {
+    let floor = Number.POSITIVE_INFINITY;
+    const failing: string[] = [];
+    for (const brand of everyBrand()) {
+      const { ratio, passesAA } = evaluateBrandContrast(brand);
+      floor = Math.min(floor, ratio as number);
+      if (!passesAA) failing.push(brand);
+    }
+    expect(failing).toEqual([]);
+    expect(floor).toBeGreaterThanOrEqual(4.57);
+  });
+});
+
+// The readout is only honest while it computes what the stylesheets do.
+describe('the rule the stylesheets paint', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const styles = join(here, '../../../styles');
+  const STEP =
+    '(0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4)))';
+
+  test('org-brand.css chooses the org’s inks by the same luminance step', () => {
+    const css = readFileSync(join(styles, 'tokens/org-brand.css'), 'utf8');
+    expect(css).toContain(STEP);
+    expect(css).toContain('--color-text-on-brand: rgb(');
+  });
+
+  test('the platform themes choose theirs by it too, under the same guard', () => {
+    for (const theme of ['light', 'dark']) {
+      const css = readFileSync(join(styles, `themes/${theme}.css`), 'utf8');
+      const guarded = css.slice(
+        css.indexOf(
+          '@supports (color: rgb(from red calc(255 * pow(r / 255, 2)) 0 0))'
+        )
+      );
+      expect(guarded, theme).toContain(STEP);
+      expect(guarded, theme).toContain('--color-on-interactive: rgb(');
+      expect(guarded, theme).toContain('--color-text-on-accent: rgb(');
+    }
   });
 });
 
@@ -76,14 +146,13 @@ describe('evaluateBrandContrast', () => {
     expect(result.passesAA).toBe(true);
   });
 
-  test('mid-grey #808080 FAILS AA — auto-contrast picks white but 3.95:1 < 4.5:1', () => {
+  // The old lightness step put white on a plain mid grey, at 3.95:1; the
+  // luminance step paints black, and the readout says so (Codex-6r63f).
+  test('mid-grey #808080 passes AA: the product paints black on it, 5.32:1', () => {
     const result = evaluateBrandContrast('#808080');
-    // The pivot puts this just below 0.62 → white text is chosen…
-    expect(result.text).toBe('#FFFFFF');
-    // …but white-on-mid-grey is below the AA floor, so the rail must warn.
-    expect(result.ratio).not.toBeNull();
-    expect(result.ratio as number).toBeLessThan(AA_CONTRAST_THRESHOLD);
-    expect(result.passesAA).toBe(false);
+    expect(result.text).toBe('#000000');
+    expect(result.ratio as number).toBeCloseTo(5.32, 2);
+    expect(result.passesAA).toBe(true);
   });
 
   test('reports null ratio + failing verdicts for a bad hex', () => {
