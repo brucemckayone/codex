@@ -348,16 +348,32 @@ export type SubscriberSubscription = Omit<
 >;
 
 /**
- * A move to a cheaper plan that waits for the renewal (Codex-2hxff.16, data
- * design §2.3), as the pricing page, the paywall and the account card read
- * it: "Moving to Basic on 12 November · Keep current plan". Until then the
- * member keeps the current tier, and `heldAmountCents` is what they pay.
+ * A change that waits for the renewal (Codex-2hxff.16, data design §2.3), as
+ * the pricing page, the paywall and the account card read it: "Moving to
+ * Basic on 12 November · Keep current plan". Until then the member keeps the
+ * current tier, and `heldAmountCents` is what they pay.
+ *
+ * Leaving yearly billing waits for the year's end too (Codex-2hxff.97): a
+ * change of billing alone, or of plan and billing together. One Keep undoes
+ * the whole change (Q4).
  */
 export interface PendingTierChange {
+  /**
+   * What waits: `plan`, a move to a cheaper plan on the same billing;
+   * `billing`, a switch to monthly billing on the same plan ("Keep yearly
+   * billing"); `plan_and_billing`, another plan billed monthly ("Keep current
+   * plan").
+   */
+  kind: 'plan' | 'billing' | 'plan_and_billing';
   tierId: string;
   tierName: string;
-  /** The next bill, at the target's price (= the row's `amountCents`). */
+  /**
+   * The next bill, at the target's price on `billingInterval`. For a plan
+   * move it is the row's `amountCents`; for a change of billing the row's
+   * `amountCents` is still the yearly price paid now.
+   */
   amountCents: number;
+  /** The billing the change lands on: the waiting interval for a change of billing. */
   billingInterval: 'month' | 'year';
   /** ISO: the renewal the move lands on (`pending_tier_from`). */
   effectiveAt: string;
@@ -773,9 +789,10 @@ export interface TierChangePreview {
   /** True when the change charges now (the part-period difference). */
   isUpgrade: boolean;
   /**
-   * When the change happens (Codex-2hxff.16): `now`, or `period_end` for a
+   * When the PLAN changes (Codex-2hxff.16): `now`, or `period_end` for a
    * move to a cheaper plan, which keeps the current plan, and charges
-   * nothing, until the renewal.
+   * nothing, until the renewal. A change of billing that waits says so in
+   * `billingChange`.
    */
   takesEffect: 'now' | 'period_end';
   /**
@@ -790,6 +807,30 @@ export interface TierChangePreview {
    * (`tierChangeQuote`, Codex-2hxff.96).
    */
   quote?: string;
+  /**
+   * The part that waits for the end of the paid year when leaving yearly
+   * billing (Codex-2hxff.97; states A, B and C(b)), or null. `amountCents` is
+   * the monthly bill from `effectiveAt` (ISO), the renewal. For A and B the
+   * plan waits with it (`takesEffect: 'period_end'`, nothing due today); for
+   * C(b) the plan changes now on yearly billing (`takesEffect: 'now'`, the
+   * upgrade's figures above) and only the billing waits.
+   */
+  billingChange: null | {
+    interval: 'month';
+    amountCents: number;
+    effectiveAt: string;
+  };
+  /**
+   * The waiting change this one replaces (latest wins), or null: for "then
+   * £5 a month instead of £50 a year" (state D). `interval` and
+   * `amountCents` are what the waiting change would bill.
+   */
+  replaces: null | {
+    tierId: string;
+    tierName: string;
+    interval: 'month' | 'year';
+    amountCents: number;
+  };
 }
 
 /**
@@ -3383,6 +3424,8 @@ export class SubscriptionService extends BaseService {
           isUpgrade: false,
           takesEffect: plan.kind === 'downgrade' ? 'period_end' : 'now',
           currentPeriodEnd: periodEnd,
+          billingChange: null,
+          replaces: null,
         };
       }
 
@@ -3394,6 +3437,8 @@ export class SubscriptionService extends BaseService {
         prorationDate,
         isUpgrade: nowProration(plan) === 'always_invoice',
         takesEffect: 'now',
+        billingChange: null,
+        replaces: null,
       };
     } catch (error) {
       this.handleError(error, 'previewTierChange');
@@ -4683,6 +4728,7 @@ export class SubscriptionService extends BaseService {
     for (const target of targets) {
       if (!target.tierId || !target.effectiveAt) continue;
       found.set(target.id, {
+        kind: 'plan',
         tierId: target.tierId,
         tierName: target.tierName,
         amountCents: target.amountCents,

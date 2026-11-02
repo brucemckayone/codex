@@ -197,7 +197,24 @@ export type TierChangeKind =
   /** Another tier on the same billing at the same price (Q4): now, nothing charged or credited. */
   | 'lateral'
   /** Another tier on the same billing, cheaper (T1): waits for the period end. */
-  | 'downgrade';
+  | 'downgrade'
+  /**
+   * The same tier, from yearly to monthly billing (Codex-2hxff.97, state A):
+   * waits for the end of the paid year. Nothing is charged or credited today.
+   */
+  | 'billing_wait'
+  /**
+   * A cheaper tier on monthly billing, from yearly (state B, Q3): one waiting
+   * change, plan and billing together at the end of the paid year.
+   */
+  | 'move_with_billing'
+  /**
+   * A dearer or same-price tier on monthly billing, from yearly (state C(b),
+   * Q1): the plan changes now on yearly billing (an upgrade's part-year
+   * charge, or nothing at the same price), and monthly billing waits for the
+   * end of the year.
+   */
+  | 'change_then_billing_wait';
 
 /** Why a change of plan is refused before Stripe is written to. */
 export type TierChangeRefusal =

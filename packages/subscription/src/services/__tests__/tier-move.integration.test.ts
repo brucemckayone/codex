@@ -1304,6 +1304,7 @@ describe('waiting tier moves (Codex-2hxff.16)', () => {
     expect(current?.heldAmountCents).toBe(2000);
     expect(current?.amountCents).toBe(500);
     expect(current?.pendingTierChange).toEqual({
+      kind: 'plan',
       tierId: basic.id,
       tierName: 'Basic',
       amountCents: 500,
