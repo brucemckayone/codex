@@ -169,6 +169,11 @@ export interface UpcomingFeeLine {
   to: number;
   /** A smaller rise: the figure the reader was first told. */
   replaced: number | null;
+  /**
+   * A bigger rise (F2): the figure the rise it replaces told the reader.
+   * Null when they weren't told that one, or it didn't move this value.
+   */
+  replacesFigure: number | null;
 }
 
 export interface UpcomingFeeChange {
@@ -181,6 +186,13 @@ export interface UpcomingFeeChange {
   earliestFrom: string;
   /** When the reader was told: their email accepted, or support's mark. */
   announcedAt: string | null;
+  /** A rise made smaller (Q2): when its short email to the reader was accepted. */
+  smallerToldAt: string | null;
+  /**
+   * A bigger rise replacing a waiting one (F2): that rise, and when the
+   * reader was told about it (null if they never were).
+   */
+  replaces: { changeId: string; announcedAt: string | null } | null;
   lines: UpcomingFeeLine[];
 }
 
@@ -695,20 +707,50 @@ export class FeeConfigService extends BaseService {
         )
         .orderBy(feeChanges.createdAt);
 
+      type Notice = (typeof notices)[number]['notice'];
       const byChange = new Map<
         string,
-        {
-          change: FeeChangeRow;
-          announce?: (typeof notices)[number]['notice'];
-          smaller: boolean;
-        }
+        { change: FeeChangeRow; announce?: Notice; smaller?: Notice }
       >();
       for (const { notice, change } of notices) {
-        const entry = byChange.get(change.id) ?? { change, smaller: false };
+        const entry = byChange.get(change.id) ?? { change };
         if (notice.kind === 'announce') entry.announce = notice;
-        else entry.smaller = true;
+        else entry.smaller = notice;
         byChange.set(change.id, entry);
       }
+
+      // F2: what the reader was told about each rise a bigger one replaced.
+      // Only a notice that reached them counts (an accepted email or
+      // support's mark): a failed one told them nothing.
+      const replacedIds = [
+        ...new Set(
+          [...byChange.values()].flatMap(({ change }) =>
+            change.replacesChangeId ? [change.replacesChangeId] : []
+          )
+        ),
+      ];
+      const toldBefore = new Map(
+        (replacedIds.length === 0
+          ? []
+          : await this.db
+              .select({
+                changeId: feeChangeNotices.changeId,
+                acceptedAt: feeChangeNotices.acceptedAt,
+                toldAt: feeChangeNotices.toldAt,
+                beforeValues: feeChangeNotices.beforeValues,
+                afterValues: feeChangeNotices.afterValues,
+              })
+              .from(feeChangeNotices)
+              .where(
+                and(
+                  eq(feeChangeNotices.userId, userId),
+                  eq(feeChangeNotices.kind, 'announce'),
+                  inArray(feeChangeNotices.changeId, replacedIds),
+                  inArray(feeChangeNotices.state, ['sent', 'told_another_way'])
+                )
+              )
+        ).map((row) => [row.changeId, row])
+      );
 
       const items: UpcomingFeeChange[] = [];
       const orgIds = new Set<string>();
@@ -722,10 +764,14 @@ export class FeeConfigService extends BaseService {
             ? role.as === 'owner' && role.organizationId === organizationId
             : role.as === 'creator';
         const told = smaller ? (announce?.afterValues ?? []) : [];
+        const replaced = change.replacesChangeId
+          ? toldBefore.get(change.replacesChangeId)
+          : undefined;
         const lines = linesFor(
           payee.before.filter(keep),
           payee.after.filter(keep),
-          told
+          told,
+          replaced ?? null
         );
         if (lines.length === 0) continue;
         for (const line of lines) {
@@ -743,6 +789,16 @@ export class FeeConfigService extends BaseService {
           // support's mark is (§1.8), so a failed email leaves this null.
           announcedAt:
             (announce?.acceptedAt ?? announce?.toldAt)?.toISOString() ?? null,
+          smallerToldAt:
+            (smaller?.acceptedAt ?? smaller?.toldAt)?.toISOString() ?? null,
+          replaces: change.replacesChangeId
+            ? {
+                changeId: change.replacesChangeId,
+                announcedAt:
+                  (replaced?.acceptedAt ?? replaced?.toldAt)?.toISOString() ??
+                  null,
+              }
+            : null,
           lines,
         });
       }
@@ -1341,20 +1397,44 @@ const LINE_VALUES: ReadonlyArray<keyof FeeValues> = [
 /**
  * One line per value that moves in each role, merged across the two kinds
  * of sale when they move alike. `told` is what the reader was first told,
- * for a smaller rise's "not 12%".
+ * for a smaller rise's "not 12%". `replacedTold` is what they were told
+ * about the rise a bigger one replaced (F2), for "This replaces the rise to
+ * 12%": a value that rise didn't move has no figure.
  */
 function linesFor(
   before: FeeNoticeRoleValues[],
   after: FeeNoticeRoleValues[],
-  told: FeeNoticeRoleValues[]
+  told: FeeNoticeRoleValues[],
+  replacedTold: {
+    beforeValues: FeeNoticeRoleValues[];
+    afterValues: FeeNoticeRoleValues[];
+  } | null
 ): UpcomingFeeLine[] {
   const lines: UpcomingFeeLine[] = [];
+  const roleIn = (list: FeeNoticeRoleValues[], role: FeeNoticeRoleValues) =>
+    list.find(
+      (t) => t.organizationId === role.organizationId && t.as === role.as
+    );
   before.forEach((role, index) => {
     const next = after[index];
     if (!next) return;
-    const was = told.find(
-      (t) => t.organizationId === role.organizationId && t.as === role.as
-    );
+    const was = roleIn(told, role);
+    const prevFrom = replacedTold
+      ? roleIn(replacedTold.beforeValues, role)
+      : undefined;
+    const prevTo = replacedTold
+      ? roleIn(replacedTold.afterValues, role)
+      : undefined;
+    const figures = (
+      ctx: 'oneOff' | 'subscription',
+      value: keyof FeeValues
+    ) => ({
+      replaced: was ? was[ctx][value] : null,
+      replacesFigure:
+        prevFrom && prevTo && prevTo[ctx][value] !== prevFrom[ctx][value]
+          ? prevTo[ctx][value]
+          : null,
+    });
     for (const value of LINE_VALUES) {
       const oneOff = { from: role.oneOff[value], to: next.oneOff[value] };
       const sub = {
@@ -1373,7 +1453,7 @@ function linesFor(
             ...base,
             context: 'both',
             ...oneOff,
-            replaced: was ? was.oneOff[value] : null,
+            ...figures('oneOff', value),
           });
         }
         continue;
@@ -1383,7 +1463,7 @@ function linesFor(
           ...base,
           context: 'one_off',
           ...oneOff,
-          replaced: was ? was.oneOff[value] : null,
+          ...figures('oneOff', value),
         });
       }
       if (sub.from !== sub.to) {
@@ -1391,7 +1471,7 @@ function linesFor(
           ...base,
           context: 'subscription',
           ...sub,
-          replaced: was ? was.subscription[value] : null,
+          ...figures('subscription', value),
         });
       }
     }
