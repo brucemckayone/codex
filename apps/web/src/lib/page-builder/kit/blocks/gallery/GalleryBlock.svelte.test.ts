@@ -134,10 +134,33 @@ describe('GalleryBlock', () => {
       expect(drifting[0].querySelector('.lp-media img')).not.toBeNull();
     });
 
-    it('sets its captions on the pictures, on the media colours', async () => {
-      await render({ items: pictures(3) });
-      for (const caption of all('figcaption')) {
-        expect(caption.hasAttribute('data-lp-on-media')).toBe(true);
+    // p3n §4: a caption over a small tile took most of its picture; only the
+    // broad tiles keep theirs on the picture, the rest have it beneath.
+    it('lays captions on the broad tiles, on the media colours, and under every other', async () => {
+      const captioned = pictures(8).map((item, i) => ({
+        ...item,
+        caption: `Caption ${i + 1}`,
+      }));
+      await render({ items: captioned });
+      expect(
+        all('li').map((li) => [
+          li.getAttribute('data-tile'),
+          li.querySelector('figure')?.getAttribute('data-caption'),
+        ])
+      ).toEqual([
+        ['large', 'over'],
+        ['small', 'under'],
+        ['small', 'under'],
+        ['tall', 'under'],
+        ['tall', 'under'],
+        ['block', 'under'],
+        ['wide', 'over'],
+        ['wide', 'over'],
+      ]);
+      for (const figure of all('figure')) {
+        expect(
+          figure.querySelector('figcaption')?.hasAttribute('data-lp-on-media')
+        ).toBe(figure.getAttribute('data-caption') === 'over');
       }
     });
   });
@@ -152,7 +175,8 @@ describe('GalleryBlock', () => {
       expect(region.getAttribute('aria-label')).toBe(HEADING);
       expect(region.tabIndex).toBe(0);
       expect(region.id).toBe('gallery-pictures');
-      const [previous, next] = all('button');
+      // The strip's own buttons, not its pictures' (each is a button too).
+      const [previous, next] = all('.lp-strip__move');
       expect(previous.getAttribute('aria-label')).toBe(GALLERY_COPY.previous);
       expect(next.getAttribute('aria-label')).toBe(GALLERY_COPY.next);
       for (const button of [previous, next]) {
@@ -160,7 +184,7 @@ describe('GalleryBlock', () => {
       }
       await rerender({ items: pictures(4) }, { layout: 'strip' });
       expect(one('[role="region"]')?.getAttribute('aria-label')).toBe(
-        GALLERY_COPY.strip
+        GALLERY_COPY.pictures
       );
     });
 

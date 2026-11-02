@@ -14,7 +14,7 @@ import {
 } from '$tests/utils/component-test-utils.svelte';
 import { sampleContext, samplePage } from './model/sample';
 import PageRenderer from './PageRenderer.svelte';
-import type { KitPageContext, PageEdit } from './page-context';
+import type { KitPageContext, OrgLogoSource, PageEdit } from './page-context';
 
 // Every context PageRenderer provides, exactly as it provides it.
 const provided: KitPageContext[] = [];
@@ -42,7 +42,11 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
-async function render(props: { still?: boolean; edit?: PageEdit | null }) {
+async function render(props: {
+  still?: boolean;
+  edit?: PageEdit | null;
+  orgLogo?: OrgLogoSource | null;
+}) {
   app = mount(PageRenderer, {
     target: document.body,
     props: {
@@ -72,5 +76,49 @@ describe('the page context', () => {
 
   it('is still on the canvas, which the editor never plays', async () => {
     expect((await render({ edit: { commit: () => {} } }))?.still).toBe(true);
+  });
+});
+
+// Codex-61zsk.73: the hero's logo comes from the mount, as plain data.
+describe('the page context’s logo', () => {
+  const logo = { url: 'https://cdn.test/logo.svg', name: 'Studio Alpha' };
+
+  it('is none when the mount passes none', async () => {
+    expect((await render({}))?.orgLogo).toBeNull();
+  });
+
+  it('is the logo the mount passes, on the public page, a thumbnail and the canvas', async () => {
+    expect((await render({ orgLogo: logo }))?.orgLogo).toEqual(logo);
+    if (app) unmount(app);
+    expect((await render({ orgLogo: logo, still: true }))?.orgLogo).toEqual(
+      logo
+    );
+    if (app) unmount(app);
+    expect(
+      (await render({ orgLogo: logo, edit: { commit: () => {} } }))?.orgLogo
+    ).toEqual(logo);
+  });
+
+  // The brand editor swaps or removes the logo while the page is up.
+  it('follows the mount as the logo changes', async () => {
+    const props = $state<{
+      page: ReturnType<typeof samplePage>;
+      context: ReturnType<typeof sampleContext>;
+      orgLogo: OrgLogoSource | null;
+    }>({
+      page: samplePage('bold', ['hero']),
+      context: sampleContext(),
+      orgLogo: logo,
+    });
+    app = mount(PageRenderer, { target: document.body, props });
+    flushSync();
+    await tick();
+    const context = provided.at(-1);
+    props.orgLogo = { ...logo, url: 'https://cdn.test/new.png' };
+    flushSync();
+    expect(context?.orgLogo?.url).toBe('https://cdn.test/new.png');
+    props.orgLogo = null;
+    flushSync();
+    expect(context?.orgLogo).toBeNull();
   });
 });

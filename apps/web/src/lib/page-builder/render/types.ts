@@ -39,7 +39,10 @@ export interface PreviewMedia {
   playlistUrl: string;
   /** Optional decorative poster shown before play. */
   posterUrl?: string | null;
-  /** Advisory duration (seconds) for a "N sec preview" affordance. */
+  /**
+   * The whole media's length (seconds), advisory. What the preview plays is
+   * `previewSeconds` (`kit/model/films.ts`, `filmPlays`).
+   */
   durationSeconds?: number | null;
   /**
    * The server says the FULL film may be asked for (owner P10, "Full film
@@ -52,6 +55,22 @@ export interface PreviewMedia {
    * stays the preview.
    */
   fullFilm?: boolean;
+  /**
+   * Video or audio, so a line can say "watch" or "listen" and an audio clip
+   * gets the Preview block's listening card (Codex-61zsk.73).
+   *
+   * OPTIONAL-additive: an older worker deployment omits it, and no line
+   * names a kind.
+   */
+  mediaType?: 'video' | 'audio';
+  /**
+   * How long the public preview runs, as the transcoder cuts it (up to 30s,
+   * from a tenth of the way in). Null when the media's length is unknown.
+   *
+   * OPTIONAL-additive: an older worker deployment omits it, and a clip that
+   * plays its preview says no length.
+   */
+  previewSeconds?: number | null;
 }
 
 /**

@@ -18,6 +18,18 @@ export interface StatFigure extends StatItem {
   key: string;
 }
 
+/** The most characters a figure has and still sits in a true circle. */
+const ROUND_FIGURE_MAX = 4;
+
+/**
+ * A figure too long for a circle round it ("4,000+", "6 weeks"): ringed, it
+ * would stretch the circle into a flat ellipse, so a Style that rings its
+ * figures draws a pill round this one instead (Studio).
+ */
+export function isLongFigure(value: string): boolean {
+  return value.length > ROUND_FIGURE_MAX;
+}
+
 function count(value: number): string {
   return value.toLocaleString('en-GB');
 }

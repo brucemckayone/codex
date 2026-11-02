@@ -167,13 +167,17 @@
     box-shadow: inset 0 0 0 var(--lp-border) var(--lp-button-line);
   }
 
+  /* At the size of the lines it flips between, so it reads as the section's
+     choice rather than a small control under a large headline; in the body
+     face, so it stays a control (Codex-61zsk.73). A long label wraps,
+     balanced, and the tab grows past its touch target, never under it. */
   .tf-toggle__tab {
     min-block-size: var(--tap-target-min);
     padding: var(--space-2) var(--space-5);
     border-radius: var(--lp-radius-button);
     color: var(--lp-ink);
     font-family: var(--lp-font-body);
-    font-size: var(--lp-button-size);
+    font-size: var(--lp-size-title);
     font-weight: var(--lp-button-weight);
     letter-spacing: var(--lp-button-tracking);
     line-height: var(--lp-leading-title);

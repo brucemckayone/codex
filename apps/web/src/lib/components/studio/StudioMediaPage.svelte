@@ -294,7 +294,14 @@
         refreshAfterChange();
         // Owner round 2, decision 6: say which drafts lost their media.
         if (outcome.drafts > 0) {
-          toast.add(draftsLeftToast(outcome.drafts, outcome.firstDraft, page.url));
+          toast.add(
+            draftsLeftToast(
+              outcome.drafts,
+              outcome.firstDraft,
+              page.url,
+              outcome.thumbnails
+            )
+          );
         }
         return;
       case 'gone':

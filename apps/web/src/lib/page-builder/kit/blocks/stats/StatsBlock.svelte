@@ -5,12 +5,15 @@
   the curriculum the page renders), then the creator's. Two layouts:
     row  — the heading, then the figures side by side, divided by fine rules
            (Bold's are hard ink)
-    grid — the heading on one side, the figures in tiles on the other
+    grid — the heading, then the figures in tiles across the column
 
-  Big figures in tabular numerals over quiet labels. Every figure in a block
-  is set at one size — the largest at which its longest value fits its cell —
-  so "4,000+" and "6" stand at the same height. No figures: the public page
-  shows only the words; the canvas says how to add some.
+  Figures at display size in tabular numerals, over labels in full ink, in
+  either layout; four go as two pairs, never four small ones. Every figure in
+  a block is set at one size — the largest at which its longest value fits
+  its cell, never past the display size — so "4,000+" and "6" stand at the
+  same height. A figure longer than a circle holds is marked `data-long`,
+  for a Style that rings its figures (Studio's pill). No figures: the public
+  page shows only the words; the canvas says how to add some.
 
   A figure that is one amount counts up the first time it comes into view
   (`motion/count-up.ts`); its HTML is always the final value.
@@ -24,7 +27,7 @@
   import Heading from '../../primitives/Heading.svelte';
   import Text from '../../primitives/Text.svelte';
   import { STATS_PROMPT, statsDefinition } from './definition';
-  import { statFigures } from './figures';
+  import { isLongFigure, statFigures } from './figures';
 
   const { props, section, context, edit }: BlockProps = $props();
 
@@ -82,6 +85,7 @@
           <span
             class="stat__value"
             data-lp-count={parseFigure(figure.value) ? '' : undefined}
+            data-long={isLongFigure(figure.value) ? '' : undefined}
             {@attach countUp(figure.value)}>{figure.value}</span
           >
           <span class="stat__label">{figure.label}</span>
@@ -139,8 +143,9 @@
     --_cols: 1;
   }
 
-  /* Each cell is a query container: the figure's size is `1em` (the layout's
-     largest) or whatever fits the longest value in the cell, if smaller. */
+  /* Each cell is a query container: the figure's size is `1em` (the display
+     size, in either layout) or whatever fits the longest value in the cell,
+     if smaller. The cell's own size reads the section, never the cell. */
   .stat {
     container-type: inline-size;
     position: relative;
@@ -148,7 +153,7 @@
     align-content: start;
     gap: var(--space-4);
     margin: 0;
-    font-size: var(--_figure, var(--lp-size-price));
+    font-size: var(--lp-size-display);
   }
 
   .stat__value {
@@ -163,11 +168,13 @@
     color: var(--lp-ink);
   }
 
+  /* In full ink: what a figure counts is half the claim. Its measure keeps a
+     label of a few words to two lines. */
   .stat__label {
     max-inline-size: calc(26 * var(--lp-measure-unit));
     font-size: var(--_stat-label);
     line-height: var(--lp-leading-body);
-    color: var(--lp-ink-soft);
+    color: var(--lp-ink);
   }
 
   .stats__prompt {
@@ -182,10 +189,6 @@
   }
 
   /* ── row ───────────────────────────────────────────────────────────────── */
-  .stats[data-layout='row'] {
-    --_figure: var(--lp-size-display);
-  }
-
   /* A rule in the gap before every cell; the first of each line falls outside
      the list and is clipped, however the figures wrap. */
   .stats[data-layout='row'] .stats__list {
@@ -204,13 +207,11 @@
     border-inline-start: var(--lp-rule) var(--border-style) var(--lp-ink);
   }
 
+  /* Three, five or six go three across; two and four keep two, so four make
+     two pairs at the display size instead of four small figures. */
   @container (min-width: 48rem) {
     .stats[data-layout='row'] .stats__list:is([data-count='3'], [data-count='5'], [data-count='6']) {
       --_cols: 3;
-    }
-
-    .stats[data-layout='row'] .stats__list[data-count='4'] {
-      --_cols: 4;
     }
 
     .stats[data-layout='row'] .stats__list {
@@ -260,15 +261,11 @@
     padding-block: var(--space-8);
   }
 
+  /* Three, five or six tiles go three across later than a row's figures do:
+     a tile's padding and border take some 50px from its figure's room, so
+     at 48rem a tile would hold about 170px against a row cell's 200, and at
+     56rem it has the room a row cell had at 48rem. */
   @container (min-width: 56rem) {
-    .stats[data-layout='grid']:has(> .stats__head):has(> .stats__list) {
-      grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
-      align-items: start;
-      column-gap: calc(var(--lp-gap) * 1.5);
-      /* The heading's room is its share (louder's fit, 03 X62). */
-      --lp-heading-column: calc((var(--lp-column) - var(--lp-gap) * 1.5) * 5 / 12);
-    }
-
     .stats[data-layout='grid'] .stats__list:is([data-count='3'], [data-count='5'], [data-count='6']) {
       --_cols: 3;
     }

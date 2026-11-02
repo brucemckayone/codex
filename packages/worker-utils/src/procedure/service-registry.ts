@@ -706,6 +706,22 @@ export async function createServiceRegistry(
           db: getSharedDb(),
           environment: getEnvironment(),
           r2: mediaR2,
+          // The posters' bucket, for the daily file purge (Codex-9seq3). No
+          // MEDIA_BUCKET fallback, unlike the image getters: no poster is
+          // there, so a fallback would purge nothing and stamp it done.
+          assets: env.ASSETS_BUCKET
+            ? new R2Service(env.ASSETS_BUCKET)
+            : undefined,
+          // Takes purged posters off the edge, with both secrets set, as
+          // identity's account deletion does (Codex-kk9nv.15).
+          cdnPurger:
+            env.CF_ZONE_ID && env.CF_API_TOKEN
+              ? new CdnCachePurger({
+                  zoneId: env.CF_ZONE_ID,
+                  apiToken: env.CF_API_TOKEN,
+                })
+              : undefined,
+          assetsPublicUrlBase: env.R2_PUBLIC_URL_BASE,
           mediaStatus: getMediaStatusPublisher(),
         });
       }

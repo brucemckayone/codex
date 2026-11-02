@@ -20,7 +20,13 @@ import {
 } from '$tests/utils/component-test-utils.svelte';
 import type { JourneySalesContext, SellPreview } from '../../../render/types';
 import { COPY } from '../../model/copy';
-import { type ColourSchemeId, SECTION_LAYOUTS } from '../../model/ids';
+import { heroFacts } from '../../model/facts';
+import {
+  type ColourSchemeId,
+  PAGE_STYLE_IDS,
+  type PageStyleId,
+  SECTION_LAYOUTS,
+} from '../../model/ids';
 import {
   headingRuns,
   isLongHeading,
@@ -29,6 +35,7 @@ import {
 import { type SampleOfferState, sampleContext } from '../../model/sample';
 import type { BlockEdit, KitPage, ResolvedSection } from '../../model/types';
 import PageRenderer from '../../PageRenderer.svelte';
+import { type CssRule, componentRules, sheetRules } from '../testing';
 import HeroBlock from './HeroBlock.svelte';
 
 let app: ReturnType<typeof mount> | null = null;
@@ -287,12 +294,13 @@ describe('HeroBlock', () => {
       expect(document.body.querySelector('img, video')).toBeNull();
     });
 
-    // Codex-61zsk.13: one 800px image across a cover band upscales.
+    // Codex-61zsk.13: one 800px image across a cover band upscales. The
+    // centred hero's frame is the reading measure (Codex-61zsk.73).
     const DRAWN_AT: Record<string, string> = {
       statement: '100vw',
       split: '(min-width: 50rem) 50vw, 100vw',
       cover: '100vw',
-      centered: '100vw',
+      centered: '(min-width: 50rem) 56rem, 100vw',
       poster: '(min-width: 56rem) 46vw, 100vw',
     };
 
@@ -318,6 +326,8 @@ describe('HeroBlock', () => {
       );
       expect(DRAWN_AT[layout], layout).toBeDefined();
       expect(img?.getAttribute('sizes')).toBe(DRAWN_AT[layout]);
+      // Safari before 26.4 reads a `sizes` with a math function as 100vw.
+      expect(img?.getAttribute('sizes')).not.toMatch(/\b(min|max|clamp)\(/);
     });
 
     it('offers no xl for an image uploaded before there was one', async () => {
@@ -1258,5 +1268,382 @@ describe('HeroBlock', () => {
       expect(document.body.querySelector('.lp-film')).toBeNull();
       expect(document.body.querySelector('[role="dialog"]')).toBeNull();
     });
+  });
+});
+
+describe('a focal point on the course still (Codex-61zsk.73)', () => {
+  const CDN = 'https://cdn.test';
+  const KEY = 'org-1/media-thumbnails/hero-1';
+  const STILL = `${CDN}/${KEY}/lg.webp`;
+  const POINT = { x: 20, y: 30, of: KEY };
+  /** The pictures drawn from the course still, at every size. */
+  const stills = () =>
+    [...document.body.querySelectorAll<HTMLImageElement>('img')].filter((img) =>
+      img.getAttribute('src')?.startsWith(`${CDN}/${KEY}/`)
+    );
+
+  it.each(
+    SECTION_LAYOUTS.hero
+  )('%s: crops the still round the point set on it', async (layout) => {
+    await render(
+      { heading: 'H', stillFocus: POINT },
+      { layout, context: sampleContext({ media: { heroImageUrl: STILL } }) }
+    );
+    expect(stills().length, layout).toBeGreaterThan(0);
+    for (const img of stills())
+      expect(img.style.objectPosition).toBe('20% 30%');
+  });
+
+  it.each(
+    SECTION_LAYOUTS.hero
+  )('%s: draws another still from the centre, as before', async (layout) => {
+    await render(
+      {
+        heading: 'H',
+        stillFocus: { ...POINT, of: 'org-1/media-thumbnails/old' },
+      },
+      { layout, context: sampleContext({ media: { heroImageUrl: STILL } }) }
+    );
+    expect(stills().length, layout).toBeGreaterThan(0);
+    for (const img of stills()) expect(img.style.objectPosition).toBe('');
+  });
+
+  it('steers the still on first paint, before the stream settles', async () => {
+    const context = {
+      ...sampleContext({ course: { heroImageUrl: STILL } }),
+      sellPreview: new Promise<never>(() => {}),
+    };
+    await render(
+      { heading: 'H', stillFocus: POINT },
+      { layout: 'split', context }
+    );
+    expect(stills()).toHaveLength(1);
+    expect(stills()[0].style.objectPosition).toBe('20% 30%');
+  });
+
+  it('a still with no point draws from the centre', async () => {
+    await render(
+      { heading: 'H' },
+      {
+        layout: 'split',
+        context: sampleContext({ media: { heroImageUrl: STILL } }),
+      }
+    );
+    expect(stills()[0].style.objectPosition).toBe('');
+  });
+
+  it('the creator’s own image keeps its own point, never the still’s', async () => {
+    const image = {
+      key: 'landing-pages/p1/images/i1',
+      focus: { x: 70, y: 40 },
+    };
+    await render(
+      { heading: 'H', image, stillFocus: POINT },
+      {
+        layout: 'split',
+        context: sampleContext({
+          media: { heroImageUrl: STILL },
+          mediaBaseUrl: CDN,
+        }),
+      }
+    );
+    const img = document.body.querySelector('img');
+    expect(img?.getAttribute('src')).toBe(`${CDN}/${image.key}/lg.webp`);
+    expect(img?.style.objectPosition).toBe('70% 40%');
+  });
+});
+
+describe('the org logo above the eyebrow (Codex-61zsk.73)', () => {
+  const LOGO = { url: 'https://cdn.example/logo.png', name: 'Studio Alpha' };
+
+  async function draw(
+    layout: string,
+    props: Record<string, unknown>,
+    options: { orgLogo?: typeof LOGO | null; orgShader?: boolean } = {}
+  ) {
+    const page: KitPage = {
+      design: { style: 'clean' },
+      sections: [
+        { id: 'hero-1', type: 'hero', enabled: true, variant: layout, props },
+      ],
+    };
+    app = mount(PageRenderer, {
+      target: document.body,
+      props: {
+        page,
+        context: sampleContext({ media: { heroImageUrl: '/hero.jpg' } }),
+        sticky: false,
+        orgLogo: options.orgLogo === undefined ? LOGO : options.orgLogo,
+        orgShader: options.orgShader ?? false,
+      },
+    });
+    flushSync();
+    await tick();
+    await Promise.resolve();
+    flushSync();
+  }
+
+  const logo = () => document.body.querySelector<HTMLImageElement>('.lp-logo');
+
+  it.each(
+    SECTION_LAYOUTS.hero
+  )('%s: draws the logo first, above the eyebrow, named and never a link', async (layout) => {
+    await draw(layout, { eyebrow: 'A four-stage course', heading: 'H' });
+    const img = logo();
+    expect(img?.getAttribute('src')).toBe(LOGO.url);
+    expect(img?.getAttribute('alt')).toBe('Studio Alpha');
+    expect(img?.closest('a')).toBeNull();
+    const wrapper = img?.closest('.hero__logo');
+    const eyebrow = document.body.querySelector('.hero__eyebrow');
+    expect(wrapper?.nextElementSibling).toBe(eyebrow);
+  });
+
+  it('draws nothing when the creator hides it, or the org has none', async () => {
+    await draw('statement', { heading: 'H', hideLogo: true });
+    expect(logo()).toBeNull();
+    unmount(app);
+    app = null;
+    await draw('statement', { heading: 'H' }, { orgLogo: null });
+    expect(logo()).toBeNull();
+    expect(document.body.querySelector('.hero__logo')).toBeNull();
+  });
+
+  // The failure can land after the page has painted, and a row taken away
+  // then moves every word and section below it (sell-page-floor's "keeps
+  // still as it loads", PR #677). The row stays, so the poster
+  // (`:has(> .hero__logo)`) and Path still allow for a box that is there.
+  it.each([
+    'statement',
+    'poster',
+  ])('%s: a logo that fails to load keeps its row, so nothing below it moves', async (layout) => {
+    await draw(layout, { eyebrow: 'A four-stage course', heading: 'H' });
+    logo()?.dispatchEvent(new Event('error'));
+    flushSync();
+    expect(logo()?.hasAttribute('data-failed')).toBe(true);
+    expect(
+      document.body
+        .querySelector('.hero__eyebrow')
+        ?.previousElementSibling?.classList.contains('hero__logo')
+    ).toBe(true);
+  });
+
+  // The page hands over a fresh logo object on every save and every brand
+  // editor tick, at the same address: a failed logo stays hidden through
+  // them, and its row never goes, so the words never jump. A new address is
+  // tried in the same box.
+  it('keeps a failed logo hidden through fresh logos, its row in place, and tries a new address', async () => {
+    const props = $state({
+      page: {
+        design: { style: 'clean' },
+        sections: [
+          {
+            id: 'hero-1',
+            type: 'hero',
+            enabled: true,
+            variant: 'statement',
+            props: { heading: 'H' },
+          },
+        ],
+      } satisfies KitPage,
+      context: sampleContext({ media: { heroImageUrl: '/hero.jpg' } }),
+      sticky: false,
+      orgLogo: { ...LOGO },
+    });
+    app = mount(PageRenderer, { target: document.body, props });
+    flushSync();
+    expect(logo()?.getAttribute('src')).toBe(LOGO.url);
+    logo()?.dispatchEvent(new Event('error'));
+    flushSync();
+    const row = document.body.querySelector('.hero__logo');
+    expect(logo()?.hasAttribute('data-failed')).toBe(true);
+
+    // A save's refetch: the same logo, a fresh object.
+    props.orgLogo = { ...LOGO };
+    flushSync();
+    expect(document.body.querySelector('.hero__logo')).toBe(row);
+    expect(logo()?.hasAttribute('data-failed')).toBe(true);
+
+    props.orgLogo = { ...LOGO, url: 'https://cdn.example/logo.svg' };
+    flushSync();
+    expect(logo()?.getAttribute('src')).toBe('https://cdn.example/logo.svg');
+    expect(logo()?.hasAttribute('data-failed')).toBe(false);
+
+    // That one fails too; the brand editor, closed unsaved, goes back to the
+    // first. The row has held its place throughout.
+    logo()?.dispatchEvent(new Event('error'));
+    flushSync();
+    props.orgLogo = { ...LOGO };
+    flushSync();
+    expect(document.body.querySelector('.hero__logo')).toBe(row);
+  });
+
+  it('forces the plate on a cover and on the shader; elsewhere it reads the ink', async () => {
+    await draw('cover', { heading: 'H' });
+    expect(logo()?.hasAttribute('data-plate')).toBe(true);
+    unmount(app);
+    app = null;
+    await draw('statement', { heading: 'H' }, { orgShader: true });
+    expect(logo()?.hasAttribute('data-plate')).toBe(true);
+    unmount(app);
+    app = null;
+    await draw('statement', { heading: 'H' });
+    expect(logo()?.hasAttribute('data-plate')).toBe(false);
+  });
+
+  it('spans the statement grid with the eyebrow and headline, and joins the poster’s drop', () => {
+    const hero = cssRules('HeroBlock.svelte');
+    const span = [...hero].find(([selector]) =>
+      selector.includes('.hero-statement > .hero__logo')
+    );
+    expect(span?.[1].get('grid-column')).toBe('1 / -1');
+    const poster = cssRules('HeroPoster.svelte');
+    const drop = [...poster].find(([selector]) =>
+      selector.includes('.hero__logo)) .hero-poster__media')
+    );
+    // The kit's box, the one OrgLogo draws (kit.css `--lp-logo-box`).
+    expect(drop?.[1].get('--_logo')).toBe(
+      'calc(var(--lp-logo-box) + var(--lp-stack))'
+    );
+  });
+});
+
+describe('the facts line under the lede (Codex-61zsk.73)', () => {
+  it('draws the course facts on the shared line, one unbroken fact each, after the words', async () => {
+    const context = sampleContext({ media: { heroImageUrl: '/hero.jpg' } });
+    await render({ heading: 'H', body: 'The words.' }, { context });
+    const expected = heroFacts(context);
+    expect(expected.length).toBeGreaterThan(1);
+    const line = document.body.querySelector('.hero__lede > .lp-facts');
+    expect(line?.classList.contains('hero__facts')).toBe(true);
+    expect(line?.previousElementSibling?.classList.contains('lp-text')).toBe(
+      true
+    );
+    const facts = [...(line?.querySelectorAll('.lp-facts__fact') ?? [])];
+    expect(facts.map((fact) => fact.textContent?.replace(/^, /, ''))).toEqual(
+      expected
+    );
+    // The old run's dots were spans of their own, which a wrap could strand.
+    expect(line?.querySelector('[aria-hidden="true"]')).toBeNull();
+  });
+
+  it('keeps one stack between the lede’s words and the line', () => {
+    const rule = [...cssRules('HeroBlock.svelte')].find(([selector]) =>
+      selector.includes('> :global(.hero__facts)')
+    );
+    expect(rule?.[0]).toContain('.hero__lede:has(> :global(.lp-text))');
+    expect(rule?.[1].get('margin-block-start')).toBe('var(--lp-stack)');
+  });
+});
+
+// Codex-61zsk.73: the centred hero drew the statement's picture, the full
+// column (past it in Bold and Poster), so the two layouts differed only in
+// alignment. Its picture now supports the words: framed under them at the
+// reading measure. Source assertions, the weaker instrument: jsdom lays
+// nothing out, so the lead's browser pass measures the paint.
+describe('the centred hero’s framed picture (Codex-61zsk.73)', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const hero = componentRules(join(here, 'HeroBlock.svelte'));
+  const sheet = (style: PageStyleId) =>
+    sheetRules(join(here, `../../styles/style-${style}.css`));
+  const framing = (rules: CssRule[]) =>
+    rules.filter((rule) => rule.selector.includes('.hero-centered__media'));
+  const own = hero.filter((rule) => rule.selector === '.hero-centered__media');
+
+  it('sits under the words, beside them in the section’s column, in its ratio', async () => {
+    await render(
+      { heading: 'H', body: 'Six calm weeks.' },
+      {
+        layout: 'centered',
+        context: sampleContext({ course: { heroImageUrl: '/hero.jpg' } }),
+      }
+    );
+    const words = document.body.querySelector('.hero-centered');
+    const frame = document.body.querySelector('.hero-centered__media');
+    expect(frame?.querySelector('img')?.getAttribute('src')).toBe('/hero.jpg');
+    expect(words?.nextElementSibling).toBe(frame);
+    expect(
+      frame
+        ?.querySelector<HTMLElement>('.lp-media')
+        ?.style.getPropertyValue('aspect-ratio')
+    ).toBe('var(--_ratio)');
+  });
+
+  it('is as wide as the reading measure, centred: 4:3 on a phone, 3:2 wide', () => {
+    const base = own.find((rule) => rule.within.length === 0)?.decls;
+    expect(base?.get('justify-self')).toBe('center');
+    expect(base?.get('inline-size')).toBe('100%');
+    expect(base?.get('max-inline-size')).toBe(
+      'calc(var(--lp-measure) * var(--lp-measure-unit))'
+    );
+    // Counted in the body's `0`s at the body's size, as a paragraph's is.
+    expect(base?.get('--lp-measure-unit')).toBe('var(--lp-zero-body)');
+    expect(base?.get('font-family')).toBe('var(--lp-font-body)');
+    expect(base?.get('font-size')).toBe('var(--lp-size-body)');
+    expect(base?.get('font-weight')).toBe('var(--lp-weight-body)');
+    expect(base?.get('--_ratio')).toBe('4 / 3');
+    expect(
+      own
+        .filter((rule) => rule.within.length > 0)
+        .map((rule) => [rule.within, rule.decls.get('--_ratio')])
+    ).toEqual([[['@container (min-width: 48rem)'], '3 / 2']]);
+  });
+
+  it('is never bled: no rule, in any Style, pulls it to the band’s edge or foot', () => {
+    const moves = (rule: CssRule) =>
+      [...rule.decls.keys()].some(
+        (property) =>
+          property.startsWith('margin') ||
+          property === 'grid-column' ||
+          property === 'inline-size' ||
+          property === 'max-inline-size' ||
+          property === 'justify-self'
+      );
+    expect(
+      framing(hero).filter(
+        (rule) => rule.selector !== '.hero-centered__media' && moves(rule)
+      )
+    ).toEqual([]);
+    for (const style of PAGE_STYLE_IDS)
+      expect(framing(sheet(style)).filter(moves), style).toEqual([]);
+    // The statement still bleeds in Bold and meets Poster's foot.
+    expect(
+      hero
+        .find(
+          (rule) =>
+            rule.selector ===
+            ":global(.lp[data-lp-style='bold']) .hero-statement__media"
+        )
+        ?.decls.get('grid-column')
+    ).toBe('bleed');
+    expect(
+      sheet('poster')
+        .find(
+          (rule) =>
+            rule.selector.endsWith(' .hero-statement__media') &&
+            rule.decls.has('margin-block-end')
+        )
+        ?.decls.get('margin-block-end')
+    ).toBe('calc(-1 * var(--lp-pad))');
+  });
+
+  it('keeps Studio’s print, its paper frame and its tilt, and Poster’s block', () => {
+    const studio = framing(sheet('studio'));
+    expect(
+      studio.some(
+        (rule) =>
+          rule.decls.get('border') ===
+          'var(--_print-edge) solid var(--_print-paper)'
+      )
+    ).toBe(true);
+    expect(studio.some((rule) => rule.decls.get('rotate') === '-1.4deg')).toBe(
+      true
+    );
+    expect(
+      framing(sheet('poster')).some(
+        (rule) =>
+          rule.selector.endsWith('::before') &&
+          rule.decls.get('background') === 'var(--_poster-block)'
+      )
+    ).toBe(true);
   });
 });

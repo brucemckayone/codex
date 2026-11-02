@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   B2_PATH_CONFIG,
@@ -7,6 +8,7 @@ import {
   getHlsVariantKey,
   getHlsVariantSegmentKey,
   getMediaThumbnailKey,
+  getMediaThumbnailPrefix,
   getMediaThumbnailUrl,
   getMezzanineKey,
   getMezzaninePrefix,
@@ -264,4 +266,44 @@ describe('HLS preview layout — pinned against the public CDN gate', () => {
     expect(PATH_CONFIG.HLS_PREVIEW_SUBFOLDER).toBe('preview');
     expect(PATH_CONFIG.HLS_FOLDER).toBe('hls');
   });
+});
+
+/**
+ * The poster folder media's file purge deletes, against what the handler
+ * reports writing (Codex-9seq3). The contract fixtures are pinned to the
+ * handler by its own test (tests/unit/test_contract_fixtures.py), so a layout
+ * change on either side fails one of the two, and a deleted video's posters
+ * can't drift out of the purge again.
+ */
+describe('the poster folder holds every poster the handler writes', () => {
+  /** tests/unit/_jobs.py MEDIA_ID: the item the fixtures were written for. */
+  const FIXTURE_MEDIA_ID = '550e8400-e29b-41d4-a716-446655440000';
+  const FIXTURES = new URL(
+    '../../../../infrastructure/runpod/tests/fixtures/contract/',
+    import.meta.url
+  );
+
+  for (const name of ['completed-video-flat', 'completed-video-sized']) {
+    it(`${name}: every poster key is inside getMediaThumbnailPrefix`, () => {
+      const body = JSON.parse(
+        readFileSync(new URL(`${name}.json`, FIXTURES), 'utf8')
+      ) as {
+        creatorId: string;
+        output: {
+          thumbnailKey: string;
+          thumbnailVariants: Record<string, string>;
+        };
+      };
+      const folder = getMediaThumbnailPrefix(body.creatorId, FIXTURE_MEDIA_ID);
+      const keys = [
+        body.output.thumbnailKey,
+        ...Object.values(body.output.thumbnailVariants),
+      ];
+
+      expect(keys.length).toBeGreaterThanOrEqual(4);
+      for (const key of keys) {
+        expect(key.slice(0, folder.length)).toBe(folder);
+      }
+    });
+  }
 });

@@ -400,9 +400,10 @@
   margin-block-start: var(--_off);
 }
 
-/* A hero's wide picture meets the sheet's foot, so the next sheet's cut runs
-   across it. */
-:is(.lp, #lp-style)[data-lp-style='poster'] :is(.hero-statement__media, .hero-centered__media) {
+/* The statement's wide picture meets the sheet's foot, so the next sheet's
+   cut runs across it. The centred hero's is framed under its words, block and
+   all, and stops at the foot as every Style's does (Codex-61zsk.73). */
+:is(.lp, #lp-style)[data-lp-style='poster'] .hero-statement__media {
   margin-block-end: calc(-1 * var(--lp-pad));
 }
 

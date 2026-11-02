@@ -27,6 +27,7 @@
   import { Disclosures, stepFocus } from '../faq/disclosure.svelte';
   import Sign from '../faq/Sign.svelte';
   import { CURRICULUM_COPY } from './copy';
+  import { focusedStage, keepPlace } from './fold-focus';
   import Practices from './Practices.svelte';
 
   interface Props {
@@ -54,27 +55,12 @@
   });
 
   const atPhoneWidth = phoneWidth((next, root) => {
-    const focused = folds && !next ? focusedStage(root) : -1;
+    const focused = folds && !next ? focusedStage(root, '.timeline__stage') : -1;
     phone = next;
-    if (focused >= 0) void tick().then(() => keepPlace(root, focused));
+    if (focused >= 0) {
+      void tick().then(() => keepPlace(root, focused, '.timeline__stage', '.timeline__words'));
+    }
   });
-
-  /** Which stage holds the visitor's focus, if any. */
-  function focusedStage(root: HTMLElement): number {
-    const active = document.activeElement;
-    const stage = active && root.contains(active) ? active.closest('.timeline__stage') : null;
-    return stage ? [...root.querySelectorAll('.timeline__stage')].indexOf(stage) : -1;
-  }
-
-  /** The fold gave way under a visitor's focus: their stage's words take it. */
-  function keepPlace(root: HTMLElement, index: number) {
-    const words = root.querySelectorAll<HTMLElement>('.timeline__stage')[index];
-    const target = words?.querySelector<HTMLElement>('.timeline__words') ?? words;
-    if (!target) return;
-    target.tabIndex = -1;
-    target.addEventListener('blur', () => target.removeAttribute('tabindex'), { once: true });
-    target.focus({ preventScroll: true });
-  }
 </script>
 
 <ol

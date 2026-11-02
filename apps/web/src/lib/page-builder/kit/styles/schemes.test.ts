@@ -5343,3 +5343,93 @@ describe('the §5 floors on the fallback path — a measured known limit (Codex-
     );
   });
 });
+
+// ── the editor's still (Codex-61zsk.73, #20b) ───────────────────────────────
+/*
+ * In the studio the canvas and its thumbnails paint the studio's own frame of
+ * the org's shader on a Moving band, once it has been copied, in place of the
+ * glow. A copy is a backdrop like any frame of the shader, so §5 covers it
+ * exactly when it is drawn under the floor `--_atmos-floor` (the pole's
+ * proven veil, the band's, or a Style's thicker one: §5 and the band tests
+ * above), in the band's own ground; the live page's thinner veil is measured
+ * over the shader on the page (03 X54), never over a copy.
+ */
+describe('the editor’s still — the studio’s frame under the proven veil', () => {
+  const at = SURFACES.indexOf(
+    '@supports (color: rgb(from red r g b / 0.5)) { .lp[data-lp-shader-still]'
+  );
+  const STILL = SURFACES.slice(at);
+  const BAND =
+    ".lp-section[data-lp-scheme='atmosphere']:not([data-lp-on-media]) > .lp-surface::before";
+  const body = (selector: string, from = STILL) => {
+    const start = from.indexOf(`${selector} {`);
+    if (start < 0) return '';
+    const open = start + selector.length + 2;
+    return from.slice(open, from.indexOf('}', open));
+  };
+
+  it('is drawn only where the root carries a copy, so a band without one keeps its glow', () => {
+    expect(at).toBeGreaterThan(0);
+    // The glow is untouched: a band whose root has no copy still draws it.
+    expect(body(BAND, SURFACES)).toContain('radial-gradient(');
+    // Every rule that reads the copy is keyed on the root's flag.
+    const reads = SURFACES.split('}').filter((rule) =>
+      rule.includes('--lp-shader-still')
+    );
+    expect(reads.length).toBeGreaterThan(0);
+    for (const rule of reads)
+      expect(rule).toContain('.lp[data-lp-shader-still]');
+  });
+
+  it('fills the band from the frame’s centre under the floor, in the band’s own ground', () => {
+    const paint = body(`.lp[data-lp-shader-still] ${BAND}`);
+    expect(paint).toContain(
+      '--_still-veil: linear-gradient(rgb(from var(--lp-bg) r g b / var(--_atmos-floor)) 0 0);'
+    );
+    expect(paint).toContain(
+      'background: var(--_still-veil), var(--lp-shader-still) center / cover no-repeat;'
+    );
+    // Over the glow's whole box, and none of its blur, fade or drift.
+    for (const rule of [
+      'inset: 0;',
+      'opacity: 1;',
+      'filter: none;',
+      'animation: none;',
+    ])
+      expect(paint).toContain(rule);
+    // Never the live veil, which only the page's own measure may thin.
+    expect(STILL).not.toMatch(/--_atmos-(s|thin|need|veil)\b/);
+    // The floor it draws is the one §5 proves, or thicker.
+    expect(CODE).toContain(
+      '--_atmos-floor: max(var(--_atmos-min), var(--_band-veil), var(--lp-atmosphere-scrim, 0));'
+    );
+  });
+
+  it('is never a live page’s: nothing in it reads the live flag or the org layout', () => {
+    expect(STILL).not.toContain('data-lp-atmosphere');
+    expect(STILL).not.toContain('.org-layout');
+  });
+
+  it('leaves the band unveiled only where the panel’s card is drawn, which is the veil', () => {
+    const PANEL_BAND =
+      ".lp-section[data-lp-scheme='atmosphere']:not([data-lp-on-media], :has(> .lp-inner > .lp-bleed))";
+    const panel = STILL.slice(
+      STILL.indexOf('@container lp-page style(--lp-atmosphere-veil: panel)')
+    );
+    expect(
+      body(
+        `.lp[data-lp-shader-still] ${PANEL_BAND} > .lp-surface::before`,
+        panel
+      )
+    ).toBe(' --_still-veil: none; ');
+    // The same band condition the card itself is drawn under.
+    expect(SURFACES).toContain(`${PANEL_BAND} > .lp-surface::after {`);
+  });
+
+  it('draws no picture behind the words in forced colours', () => {
+    const forced = STILL.slice(STILL.indexOf('@media (forced-colors: active)'));
+    expect(body(`.lp[data-lp-shader-still] ${BAND}`, forced)).toBe(
+      ' background: none; '
+    );
+  });
+});

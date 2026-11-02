@@ -23,6 +23,12 @@
  *   dropped unless they changed in the last RESYNC_GRACE_MS.
  * - alarm: an item waiting for the transcoder is retried at 1, 3 and
  *   10 minutes (RETRY_DELAYS_MS); after that the hourly cron carries on.
+ *   A job RunPod accepted that has sent no progress is asked about at 2, 5
+ *   and 10 minutes after its dispatch (UNSTARTED_CHECKS_MS, Codex-t359w):
+ *   still queued shows on its tile, ended fails it then, not at the hourly
+ *   reconcile 45 minutes or more later. Its first tick cancels the asks. A
+ *   last ask RunPod leaves unanswered is asked again every 5 minutes, to
+ *   30 minutes after dispatch: the reconcile never says a job is queued.
  */
 
 import type {
@@ -37,7 +43,13 @@ import {
 import { messageForLog } from '@codex/database';
 import { ObservabilityClient } from '@codex/observability';
 import type { Bindings } from '@codex/shared-types';
-import type { MediaStatusFeed, RetryDueReport } from '@codex/transcoding';
+import {
+  type MediaStatusFeed,
+  type RetryDueReport,
+  UNSTARTED_CHECKS_MS,
+  type UnstartedJob,
+  type UnstartedOutcome,
+} from '@codex/transcoding';
 import {
   MEDIA_STATUS_CLIENT_MESSAGE_MAX_BYTES,
   MEDIA_STATUS_PROTOCOL_VERSION,
@@ -67,6 +79,45 @@ export const RETRY_DELAYS_MS = [60_000, 180_000, 600_000] as const;
 
 /** A resync never drops a row changed this recently: a write raced its read. */
 export const RESYNC_GRACE_MS = 5 * 60_000;
+
+/** One alarm's asks of RunPod, all of them: each call is bounded inside it. */
+const CHECK_BUDGET_MS = 20_000;
+
+/** A last ask left unanswered is asked again this much later... */
+const UNANSWERED_REASK_MS = 5 * 60_000;
+/** ...until this long after the dispatch. */
+const UNANSWERED_REASK_UNTIL_MS = 30 * 60_000;
+
+/**
+ * Columns added after `items` first shipped (Codex-t359w). An object made
+ * before has none of them, and CREATE TABLE IF NOT EXISTS leaves its table
+ * as it is.
+ */
+const ADDED_COLUMNS = [
+  ['check_at', 'INTEGER'],
+  ['checks', 'INTEGER NOT NULL DEFAULT 0'],
+  ['queued', 'TEXT'],
+] as const;
+
+type Sql = DurableObjectState['storage']['sql'];
+
+/**
+ * Add the columns a table made before lacks. Read from a SELECT's column
+ * names rather than a PRAGMA, which Durable Object SQLite does not all
+ * allow. Only constant names reach it, never input.
+ */
+export function addMissingColumns(
+  sql: Sql,
+  table: string,
+  columns: readonly (readonly [column: string, type: string])[]
+): void {
+  const held = new Set(sql.exec(`SELECT * FROM ${table} LIMIT 0`).columnNames);
+  for (const [column, type] of columns) {
+    if (!held.has(column)) {
+      sql.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    }
+  }
+}
 
 /** One client message a second per socket; the uploading tab sends one per 2 s. */
 const CLIENT_MESSAGE_INTERVAL_MS = 1_000;
@@ -99,9 +150,24 @@ interface Row extends Record<string, string | number | null> {
   upload_socket: string | null;
   retry_at: number | null;
   retries: number;
+  /** Epoch ms of the next ask about a job with no progress (Codex-t359w). */
+  check_at: number | null;
+  /** The asks made so far, 0 to UNSTARTED_CHECKS_MS.length. */
+  checks: number;
+  /** What the asks found of a job still queued at RunPod, else null. */
+  queued: QueuedState;
   version: number;
   updated_at: number;
 }
+
+type QueuedState = Exclude<MediaItemState['queued'], undefined>;
+
+/** A row the alarm asks RunPod about. */
+type DueAsk = Pick<Row, 'media_id' | 'job_id' | 'checks' | 'updated_at'>;
+
+type AlarmServices = Awaited<
+  ReturnType<typeof createWebhookServices>
+>['services'];
 
 interface SocketAttachment {
   creatorId: string;
@@ -137,6 +203,7 @@ function itemState(row: Row, socketId: string): MediaItemState {
             stopped: row.upload_socket === null,
           },
     retryAt: row.retry_at,
+    queued: row.queued,
     version: row.version,
   };
 }
@@ -160,8 +227,17 @@ function isSameChange(held: Row, change: MediaStatusChange): boolean {
   );
 }
 
+/** Whether a write moved a time the alarm keys on. */
+function movesAlarm(held: Row | null, row: Row): boolean {
+  return (
+    (held?.retry_at ?? null) !== row.retry_at ||
+    (held?.check_at ?? null) !== row.check_at
+  );
+}
+
 /** The row a change leaves. */
 function nextRow(held: Row | null, change: MediaStatusChange): Row {
+  const progress = progressOf(held, change);
   return {
     media_id: change.mediaId,
     creator_id: change.creatorId,
@@ -169,13 +245,49 @@ function nextRow(held: Row | null, change: MediaStatusChange): Row {
     error_code: change.errorCode,
     attempts: change.attempts,
     job_id: change.jobId,
-    ...progressOf(held, change),
+    ...progress,
     ...uploadOf(held, change),
     retry_at: nextRetryAt(held, change),
     retries: held?.retries ?? 0,
+    ...checksOf(held, change, progress.step),
     version: (held?.version ?? 0) + 1,
     updated_at: change.at,
   };
+}
+
+/**
+ * The early asks about a job with no progress (Codex-t359w). A new job with
+ * no step yet is asked about UNSTARTED_CHECKS_MS after its job-id write
+ * (`change.at`); the same job keeps the schedule it has. A tick that came
+ * before the job-id write means it has started: nothing to ask.
+ */
+function checksOf(
+  held: Row | null,
+  change: MediaStatusChange,
+  step: string | null
+): Pick<Row, 'check_at' | 'checks' | 'queued'> {
+  const none = { check_at: null, checks: 0, queued: null };
+  if (change.lifecycle !== MEDIA_STATUS.TRANSCODING || change.jobId === null) {
+    return none;
+  }
+  if (
+    held?.lifecycle === MEDIA_STATUS.TRANSCODING &&
+    held.job_id === change.jobId
+  ) {
+    return {
+      check_at: held.check_at,
+      checks: held.checks,
+      queued: held.queued,
+    };
+  }
+  if (step !== null) return none;
+  return { ...none, check_at: nextCheckAt(change.at, 0) };
+}
+
+/** The ask after `checks` asks of a job dispatched at `dispatchedAt`; null after the last. */
+function nextCheckAt(dispatchedAt: number, checks: number): number | null {
+  const after = UNSTARTED_CHECKS_MS[checks];
+  return after === undefined ? null : dispatchedAt + after;
 }
 
 /** A new claim starts at 0; the job-id write keeps the ticks so far. */
@@ -241,12 +353,19 @@ export class MediaStatusObject {
       upload_socket TEXT,
       retry_at INTEGER,
       retries INTEGER NOT NULL DEFAULT 0,
+      check_at INTEGER,
+      checks INTEGER NOT NULL DEFAULT 0,
+      queued TEXT,
       version INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     )`);
+    addMissingColumns(sql, 'items', ADDED_COLUMNS);
     sql.exec('CREATE INDEX IF NOT EXISTS items_creator ON items (creator_id)');
     sql.exec(
       'CREATE INDEX IF NOT EXISTS items_retry ON items (retry_at) WHERE retry_at IS NOT NULL'
+    );
+    sql.exec(
+      'CREATE INDEX IF NOT EXISTS items_check ON items (check_at) WHERE check_at IS NOT NULL'
     );
     // Tickets already presented, until they expire: a ticket is single-use,
     // so one copied out of a request log is dead once its tab has used it.
@@ -398,8 +517,9 @@ export class MediaStatusObject {
       this.write(row);
     }
     this.broadcast(row);
-    // A terminal row's retry_at is null: its alarm moves only if it had one.
-    if ((held?.retry_at ?? null) !== row.retry_at) await this.rescheduleAlarm();
+    // A terminal row's retry_at and check_at are null: the alarm moves only
+    // if it had one.
+    if (movesAlarm(held, row)) await this.rescheduleAlarm();
   }
 
   /** Whether a change tells the held row anything; the suspect ones logged. */
@@ -429,11 +549,16 @@ export class MediaStatusObject {
     if (held && held.creator_id === creatorId) await this.remove(held);
   }
 
-  /** A tick for the row's own job (or one not yet stored), when it moves. */
+  /**
+   * A tick for the row's own job (or one not yet stored), when it moves. The
+   * job has started, so its early asks stop (Codex-t359w); an alarm already
+   * set for one finds nothing due and moves on.
+   */
   applyProgress(tick: MediaProgressTick): void {
     const rows = this.state.storage.sql
       .exec<Row>(
-        `UPDATE items SET step = ?, progress = ?, version = version + 1
+        `UPDATE items SET step = ?, progress = ?, check_at = NULL, queued = NULL,
+           version = version + 1
          WHERE media_id = ? AND lifecycle = ?
            AND (job_id IS NULL OR job_id = ?)
            AND (step IS NOT ? OR progress IS NOT ?)
@@ -478,7 +603,9 @@ export class MediaStatusObject {
       type: 'removed',
       mediaId: held.media_id,
     }));
-    if (held.retry_at !== null) await this.rescheduleAlarm();
+    if (held.retry_at !== null || held.check_at !== null) {
+      await this.rescheduleAlarm();
+    }
   }
 
   // ==========================================================================
@@ -570,55 +697,245 @@ export class MediaStatusObject {
   }
 
   // ==========================================================================
-  // Alarm: waiting uploads retried within minutes
+  // Alarm: waiting uploads retried, and unstarted jobs asked about, within
+  // minutes
   // ==========================================================================
 
-  /** The earliest due retry's alarm. Invoked by workerd, so no static caller. */
+  /**
+   * The earliest due retry's or ask's alarm. Invoked by workerd, so no
+   * static caller.
+   */
   // fallow-ignore-next-line unused-class-member
   async alarm(): Promise<void> {
     const now = Date.now();
-    const due = this.state.storage.sql
+    const due = this.takeDueRetries(now);
+    const jobs = this.takeDueAsks(now);
+    // Also when nothing was due: the alarm may have been set for an ask a
+    // tick has since cancelled, and the next due item needs one of its own.
+    let rescheduleFailed: unknown = null;
+    try {
+      await this.rescheduleAlarm();
+    } catch (error) {
+      rescheduleFailed = error;
+      this.obs.error('media_status.alarm_reschedule_failed', {
+        due: due.length + jobs.length,
+        error: messageForLog(error),
+      });
+    }
+    if (due.length > 0) {
+      try {
+        const report = await this.retry(due);
+        this.obs.info('media_status.alarm_retried', { ...report });
+      } catch (error) {
+        this.obs.error('media_status.alarm_retry_failed', {
+          due: due.length,
+          fallback: 'hourly_cron',
+          error: messageForLog(error),
+        });
+      }
+    }
+    if (jobs.length > 0) {
+      try {
+        await this.ask(jobs);
+      } catch (error) {
+        this.obs.error('media_status.alarm_asked_not_kept', {
+          mediaIds: jobs.map((job) => job.mediaId),
+          fallback: 'hourly_reconcile_ended_jobs_only',
+          error: messageForLog(error),
+        });
+      }
+    }
+    // Thrown after the work, so workerd retries the alarm: everything due
+    // was moved on above, so the retry only sets it again.
+    if (rescheduleFailed !== null) throw rescheduleFailed;
+  }
+
+  /**
+   * The retries due, counted and cleared first, so a retry that throws
+   * cannot loop. One that fails is the hourly cron's (its waiting step
+   * retries the same rows).
+   */
+  private takeDueRetries(now: number): string[] {
+    const sql = this.state.storage.sql;
+    const due = sql
       .exec<{ media_id: string }>(
         'SELECT media_id FROM items WHERE retry_at IS NOT NULL AND retry_at <= ?',
         now
       )
       .toArray()
       .map((row) => row.media_id);
-    if (due.length === 0) return;
-    // Counted and cleared first, so a retry that throws cannot loop. One that
-    // fails is the hourly cron's (its waiting step retries the same rows).
     for (const mediaId of due) {
-      this.state.storage.sql.exec(
+      sql.exec(
         'UPDATE items SET retry_at = NULL, retries = retries + 1 WHERE media_id = ?',
         mediaId
       );
     }
-    try {
-      await this.rescheduleAlarm();
-    } catch (error) {
-      this.obs.error('media_status.alarm_reschedule_failed', {
-        due: due.length,
-        error: messageForLog(error),
+    return due;
+  }
+
+  /** The asks due, each counted and the next one set before RunPod is asked, for the same reason. */
+  private takeDueAsks(now: number): UnstartedJob[] {
+    const sql = this.state.storage.sql;
+    const asks = sql
+      .exec<DueAsk>(
+        `SELECT media_id, job_id, checks, updated_at FROM items
+         WHERE check_at IS NOT NULL AND check_at <= ?`,
+        now
+      )
+      .toArray();
+    const jobs: UnstartedJob[] = [];
+    for (const ask of asks) {
+      const next = nextCheckAt(ask.updated_at, ask.checks + 1);
+      sql.exec(
+        'UPDATE items SET check_at = ?, checks = ? WHERE media_id = ?',
+        next,
+        ask.checks + 1,
+        ask.media_id
+      );
+      if (ask.job_id === null) continue;
+      jobs.push({
+        mediaId: ask.media_id,
+        jobId: ask.job_id,
+        dispatchedAt: ask.updated_at,
+        last: next === null,
       });
     }
+    return jobs;
+  }
+
+  /** The cron's claim and dispatch, for the due items, with the cron's stop after a refusal. */
+  async retry(mediaIds: readonly string[]): Promise<RetryDueReport> {
+    return this.withServices((services) =>
+      services.transcodingMaintenance.retryDue(mediaIds)
+    );
+  }
+
+  /**
+   * What RunPod says of the jobs due an ask, kept on their rows: still
+   * queued shows on the tile, overdue after the last ask. A job that ended is
+   * failed by the service, whose publish removes its row here.
+   */
+  private async ask(jobs: readonly UnstartedJob[]): Promise<void> {
+    let outcomes: ReadonlyMap<string, UnstartedOutcome>;
     try {
-      const report = await this.retry(due);
-      this.obs.info('media_status.alarm_retried', { ...report });
+      outcomes = await this.withServices((services) =>
+        services.transcodingMaintenance.checkUnstarted(
+          jobs,
+          Date.now() + CHECK_BUDGET_MS
+        )
+      );
     } catch (error) {
-      this.obs.error('media_status.alarm_retry_failed', {
-        due: due.length,
-        fallback: 'hourly_cron',
+      // Nothing was learned: each job waits for its next ask, a last one too.
+      this.obs.error('media_status.alarm_ask_failed', {
+        mediaIds: jobs.map((job) => job.mediaId),
+        fallback: 'next_ask',
         error: messageForLog(error),
       });
+      outcomes = new Map<string, UnstartedOutcome>(
+        jobs.map((job) => [job.mediaId, 'ask_later'])
+      );
+    }
+    await this.applyAsked(jobs, outcomes);
+  }
+
+  /**
+   * What the asks found, kept on the rows. Public for its test: no test can
+   * reach RunPod (the test env's RUNPOD_DIRECT_URL makes every ask go
+   * unanswered), so the outcomes are given to it directly.
+   */
+  async applyAsked(
+    jobs: readonly UnstartedJob[],
+    outcomes: ReadonlyMap<string, UnstartedOutcome>
+  ): Promise<void> {
+    const counts: Record<UnstartedOutcome, number> = {
+      queued: 0,
+      running: 0,
+      failed: 0,
+      requeued: 0,
+      gone: 0,
+      ask_later: 0,
+    };
+    for (const job of jobs) {
+      const found = outcomes.get(job.mediaId);
+      if (found === undefined) {
+        // checkUnstarted answers for every job it is given.
+        this.obs.error('media_status.alarm_outcome_missing', {
+          mediaId: job.mediaId,
+          runpodJobId: job.jobId,
+        });
+      }
+      const outcome = found ?? 'ask_later';
+      counts[outcome]++;
+      this.keepAsked(job, outcome);
+    }
+    await this.rescheduleAlarm();
+    this.obs.info('media_status.alarm_asked', counts);
+  }
+
+  /** What one ask found, kept on its row (an ended job's is the service's to write). */
+  private keepAsked(job: UnstartedJob, outcome: UnstartedOutcome): void {
+    if (outcome === 'queued') {
+      this.setQueued(job, job.last ? 'overdue' : 'waiting');
+    } else if (outcome === 'running' || outcome === 'gone') {
+      // Nothing more to ask: a worker has the job (its steps follow), or the
+      // row moved on.
+      this.state.storage.sql.exec(
+        'UPDATE items SET check_at = NULL WHERE media_id = ? AND job_id = ?',
+        job.mediaId,
+        job.jobId
+      );
+      this.setQueued(job, null);
+    } else if (outcome === 'ask_later' && job.last) {
+      this.askAgainLater(job);
     }
   }
 
   /**
-   * The cron's claim and dispatch, for the due items, with the cron's stop
-   * after a refusal. Its writes publish to this object directly (localFeed),
-   * not back through a stub.
+   * A last ask RunPod left unanswered, asked again: still queued then is
+   * what the tile and the owner must hear, and the reconcile never says it.
    */
-  async retry(mediaIds: readonly string[]): Promise<RetryDueReport> {
+  private askAgainLater(job: UnstartedJob): void {
+    const at = Date.now() + UNANSWERED_REASK_MS;
+    if (at > job.dispatchedAt + UNANSWERED_REASK_UNTIL_MS) {
+      this.obs.warn('media_status.early_check_gave_up', {
+        mediaId: job.mediaId,
+        runpodJobId: job.jobId,
+        fallback: 'hourly_reconcile_ended_jobs_only',
+      });
+      return;
+    }
+    this.state.storage.sql.exec(
+      `UPDATE items SET check_at = ?
+       WHERE media_id = ? AND job_id = ? AND step IS NULL`,
+      at,
+      job.mediaId,
+      job.jobId
+    );
+  }
+
+  /** What its tile says of a job not yet started, told once per change. */
+  private setQueued(job: UnstartedJob, queued: QueuedState): void {
+    const rows = this.state.storage.sql
+      .exec<Row>(
+        `UPDATE items SET queued = ?, version = version + 1
+         WHERE media_id = ? AND job_id = ? AND step IS NULL AND queued IS NOT ?
+         RETURNING *`,
+        queued,
+        job.mediaId,
+        job.jobId,
+        queued
+      )
+      .toArray();
+    for (const row of rows) this.broadcast(row);
+  }
+
+  /**
+   * The services the alarm runs, released after `work`. Their writes
+   * publish to this object directly (localFeed), not back through a stub.
+   */
+  private async withServices<T>(
+    work: (services: AlarmServices) => Promise<T>
+  ): Promise<T> {
     const webhook = await createWebhookServices(
       this.env,
       {
@@ -629,7 +946,7 @@ export class MediaStatusObject {
       { obs: this.obs, mediaStatus: this.localFeed }
     );
     try {
-      return await webhook.services.transcodingMaintenance.retryDue(mediaIds);
+      return await work(webhook.services);
     } finally {
       webhook.release();
     }
@@ -678,11 +995,15 @@ export class MediaStatusObject {
     );
   }
 
-  /** One alarm, at the earliest due retry. */
+  /** One alarm, at the earliest due retry or ask. */
   private async rescheduleAlarm(): Promise<void> {
     const next = this.state.storage.sql
       .exec<{ at: number | null }>(
-        'SELECT MIN(retry_at) AS at FROM items WHERE retry_at IS NOT NULL'
+        `SELECT MIN(at) AS at FROM (
+           SELECT retry_at AS at FROM items WHERE retry_at IS NOT NULL
+           UNION ALL
+           SELECT check_at AS at FROM items WHERE check_at IS NOT NULL
+         )`
       )
       .one().at;
     const current = await this.state.storage.getAlarm();
@@ -719,16 +1040,17 @@ export class MediaStatusObject {
     this.state.storage.sql.exec(
       `INSERT INTO items (media_id, creator_id, lifecycle, error_code, attempts,
          job_id, step, progress, upload_pct, upload_socket, retry_at,
-         retries, version, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         retries, check_at, checks, queued, version, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (media_id) DO UPDATE SET
          creator_id = excluded.creator_id, lifecycle = excluded.lifecycle,
          error_code = excluded.error_code, attempts = excluded.attempts,
          job_id = excluded.job_id, step = excluded.step,
          progress = excluded.progress, upload_pct = excluded.upload_pct,
          upload_socket = excluded.upload_socket, retry_at = excluded.retry_at,
-         retries = excluded.retries, version = excluded.version,
-         updated_at = excluded.updated_at`,
+         retries = excluded.retries, check_at = excluded.check_at,
+         checks = excluded.checks, queued = excluded.queued,
+         version = excluded.version, updated_at = excluded.updated_at`,
       row.media_id,
       row.creator_id,
       row.lifecycle,
@@ -741,6 +1063,9 @@ export class MediaStatusObject {
       row.upload_socket,
       row.retry_at,
       row.retries,
+      row.check_at,
+      row.checks,
+      row.queued,
       row.version,
       row.updated_at
     );

@@ -22,7 +22,11 @@ import type {
   MediaUse,
 } from '@codex/shared-types';
 import { remoteErrorCode, remoteErrorStatus } from '$lib/remote/query-result';
-import { firstOpenableDraft, newlyLiveUse } from './media-usage';
+import {
+  firstOpenableDraft,
+  newlyLiveUse,
+  onlyThumbnails,
+} from './media-usage';
 
 /** The item the dialog names (its card), from the library row. */
 export interface DeleteTarget {
@@ -64,8 +68,16 @@ export type DeleteView =
   | 'unused';
 
 export type DeleteOutcome =
-  /** Gone. `drafts` were left without media; `firstDraft` is the toast's link. */
-  | { kind: 'deleted'; drafts: number; firstDraft: MediaUse | null }
+  /**
+   * Gone. `drafts` were left without media (or, with `thumbnails`, only
+   * without their thumbnail); `firstDraft` is the toast's link.
+   */
+  | {
+      kind: 'deleted';
+      drafts: number;
+      firstDraft: MediaUse | null;
+      thumbnails: boolean;
+    }
   /** 404: another tab already deleted it. */
   | { kind: 'gone' }
   /** 409: refused, and the dialog has redrawn. */
@@ -190,6 +202,7 @@ export class MediaDeleteFlow {
         kind: 'deleted',
         drafts: shown.drafts,
         firstDraft: firstOpenableDraft(shown),
+        thumbnails: onlyThumbnails(shown, false),
       };
     } catch (thrown) {
       error = thrown;

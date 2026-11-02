@@ -9,6 +9,7 @@ import {
 import { SECTION_LAYOUTS } from '../../model/ids';
 import { sampleContext } from '../../model/sample';
 import type { BlockEdit, ResolvedSection } from '../../model/types';
+import { curriculumDefinition } from '../curriculum/definition';
 import { STORY_COPY } from './copy';
 import { STORY_EMPTY, type StoryStep, storyDefinition } from './definition';
 import StoryBlock from './StoryBlock.svelte';
@@ -512,7 +513,10 @@ describe('StoryBlock: every size a picture has (Codex-61zsk.66)', () => {
   it.each([
     ['chapters', '100vw'],
     ['strip', '(min-width: 82.35rem) 28rem, (min-width: 47.06rem) 34vw, 16rem'],
-    ['scroll', '(min-width: 82rem) 41rem, (min-width: 48rem) 50vw, 100vw'],
+    // Seven twelfths from 48rem, where the square frame takes 7fr beside the
+    // words' 5fr (it was a half beside a 4:3 frame); a plain list, since
+    // old Safari reads a min() or clamp() in `sizes` as 100vw.
+    ['scroll', '(min-width: 82rem) 47.56rem, (min-width: 48rem) 58vw, 100vw'],
   ])('%s: offers the set, at the width its layout draws it', async (layout, sizes) => {
     await render({ steps: moments(3) }, { layout });
     const first = all('img').filter((img) =>
@@ -524,5 +528,80 @@ describe('StoryBlock: every size a picture has (Codex-61zsk.66)', () => {
       expect(img.getAttribute('srcset')).toBe(SET);
       expect(img.getAttribute('sizes')).toBe(sizes);
     }
+  });
+});
+
+// The starter was "How {course} unfolds", the curriculum's own word for
+// word, and its moments echoed the before and after. A story tells what
+// changes for the member, not the syllabus.
+describe('StoryBlock: the starter tells the member’s arc', () => {
+  const ARC = [
+    {
+      heading: 'You arrive as you are.',
+      body: 'No experience needed: the first session asks for twenty quiet minutes and nothing else.',
+    },
+    {
+      heading: 'It starts to feel like yours.',
+      body: 'Somewhere in the middle, the practice stops being something you follow and becomes something you do.',
+    },
+    {
+      heading: 'You leave with it.',
+      body: 'What you learn here keeps going after the last session: a practice you can come back to on your own.',
+    },
+  ];
+  const course = {
+    courseTitle: 'Steady Ground',
+    courseLede: '  Calmer mornings in six weeks.  ',
+  };
+
+  it('heads the arc, and takes the course’s lede as its body', () => {
+    const starter = storyDefinition.starter(course);
+    expect(starter).toEqual({
+      eyebrow: 'Your way through',
+      heading: 'What changes for you',
+      body: 'Calmer mornings in six weeks.',
+      steps: ARC,
+    });
+    // It survives its own reader.
+    expect(storyDefinition.coerce(starter)).toEqual(starter);
+  });
+
+  it('leaves the body out when the course has no lede', () => {
+    for (const courseLede of [undefined, null, '   ']) {
+      const starter = storyDefinition.starter({ courseTitle: 'X', courseLede });
+      expect(starter).not.toHaveProperty('body');
+      expect(starter.steps).toEqual(ARC);
+    }
+  });
+
+  it('never repeats the curriculum’s heading, and its moments are words only', () => {
+    const starter = storyDefinition.starter(course);
+    expect(starter.heading).not.toBe(
+      curriculumDefinition.starter(course).heading
+    );
+    expect(starter.steps?.every((step) => step.image === undefined)).toBe(true);
+    // Fresh moments for each page, never one shared between two.
+    expect(storyDefinition.starter(course).steps).not.toBe(starter.steps);
+  });
+
+  it('gives the gallery’s sample the same arc', () => {
+    expect(SAMPLE.eyebrow).toBe('Your way through');
+    expect(SAMPLE.heading).toBe('What changes for you');
+    expect(SAMPLE.steps).toEqual(ARC);
+  });
+});
+
+describe('StoryBlock: where the scroll cuts a picture', () => {
+  const crops = () =>
+    storyDefinition.fields
+      .find((field) => field.key === 'steps')
+      ?.itemFields?.find((field) => field.key === 'image')?.focalLayouts
+      ?.scroll;
+
+  it('is square wide and 4:5 on a phone, as the frame and the moments draw it', () => {
+    expect(crops()).toEqual([
+      { at: 'wide', ratio: '1 / 1' },
+      { at: 'phone', ratio: '4 / 5' },
+    ]);
   });
 });

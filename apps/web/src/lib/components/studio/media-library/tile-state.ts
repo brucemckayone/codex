@@ -44,6 +44,11 @@ export type TileView =
   | { kind: 'waiting'; cause: 'service'; retryInSeconds: number | null }
   /** The transcoder is set up wrong; it resumes once the owner fixes it. */
   | { kind: 'waiting'; cause: 'config' }
+  /**
+   * RunPod accepted the job but no worker has started it (Codex-t359w).
+   * `overdue`: still so at the last ask, and the team has been told.
+   */
+  | { kind: 'waiting'; cause: 'transcoder'; overdue: boolean }
   | { kind: 'processing'; step: TranscodingStep | null; pct: number | null }
   | { kind: 'ready' }
   | {
@@ -105,8 +110,17 @@ export function describeTile(
     case 'transcoding': {
       const step = live?.step ?? null;
       const pct = live?.progress ?? null;
-      // The object tracks it but no report has come: the job is starting.
-      if (live && step === null) return { kind: 'starting' };
+      // The object tracks it but no report has come: the job is starting,
+      // or RunPod has told the object it is still queued.
+      if (live && step === null) {
+        return live.queued
+          ? {
+              kind: 'waiting',
+              cause: 'transcoder',
+              overdue: live.queued === 'overdue',
+            }
+          : { kind: 'starting' };
+      }
       return { kind: 'processing', step, pct };
     }
 

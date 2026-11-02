@@ -91,9 +91,14 @@ export const textDefinition: BlockDefinition<TextProps> = {
       layouts: ['statement', 'centered'],
     },
   ],
+  // A section added from now on reads its words before its picture, so a
+  // picture it is given never outweighs them (Codex-61zsk.73). Stored, not
+  // made the default: an absent key still draws before, so a saved section
+  // keeps its order, and Before stays the first choice it can go back to.
   starter: ({ courseTitle }) => ({
     heading: `Why I made ${courseTitle}`,
     body: `I created ${courseTitle} to share what has helped the people I work with most.\n\nIt is the course I wish I had been given when I started.`,
+    imageAt: 'after',
   }),
   sample: {
     heading: 'It started with one quiet morning',

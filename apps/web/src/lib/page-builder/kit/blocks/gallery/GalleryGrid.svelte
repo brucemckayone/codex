@@ -7,14 +7,15 @@
   to a row — or one, when there are captions to read.
 -->
 <script lang="ts">
-  import { gridColumns, type Picture } from './arrange';
+  import { gridColumns, type OpenPicture, type Picture } from './arrange';
   import GalleryPicture from './GalleryPicture.svelte';
 
   interface Props {
     pictures: readonly Picture[];
+    onopen?: OpenPicture;
   }
 
-  const { pictures }: Props = $props();
+  const { pictures, onopen }: Props = $props();
 
   const captioned = $derived(pictures.some((picture) => picture.caption));
 </script>
@@ -26,7 +27,7 @@
   data-captioned={captioned ? '' : undefined}
 >
   {#each pictures as picture, index (index)}
-    <li><GalleryPicture {picture} /></li>
+    <li><GalleryPicture {picture} {index} count={pictures.length} {onopen} /></li>
   {/each}
 </ul>
 
