@@ -161,6 +161,7 @@ export {
   RefundKeySpentError,
   RefundWindowClosedError,
   StripeRefusedRefundError,
+  ThumbnailMediaDeletedError,
   TierRequiredToPublishError,
   ValidationError,
   wrapError,

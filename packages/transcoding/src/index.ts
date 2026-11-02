@@ -91,11 +91,17 @@ export {
   getWaveformImageKey,
   getWaveformKey,
   isValidR2Key,
-  mediaIdOfCreatorPoster,
   PATH_CONFIG,
   parseR2Key,
   type ThumbnailSize,
 } from './paths';
+// Poster frames used as content thumbnails (Codex-tqvmx)
+export {
+  holdsPosterFolderOf,
+  type PosterFrameSource,
+  playedMediaItemId,
+  posterFramesOf,
+} from './poster-frames';
 // Services
 export {
   type AlertLedger,

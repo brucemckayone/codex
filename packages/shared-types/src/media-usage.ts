@@ -58,10 +58,11 @@ export type MediaUseLink =
   | { to: 'brand'; orgSlug: string };
 
 /**
- * The video a content item's thumbnail is a frame of, when that is another of
- * its creator's videos than the one it plays (Codex-tqvmx). Only the Studio's
- * single read (`GET /api/content/:id`) sends it: the editor warns while
- * `deletedAt` is set, and publish refuses (`THUMBNAIL_MEDIA_DELETED`).
+ * The creator's video a content item's thumbnail is a frame of, a deleted one
+ * first when it holds several (Codex-tqvmx). It can be the one the item
+ * plays. Only the Studio's single read (`GET /api/content/:id`) sends it: the
+ * editor warns while `deletedAt` is set and it isn't the media the form
+ * plays, which is what publish refuses (`THUMBNAIL_MEDIA_DELETED`).
  */
 export interface ThumbnailFrame {
   mediaItemId: string;

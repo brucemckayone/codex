@@ -102,8 +102,9 @@ export interface ContentWithRelations extends Content {
   organization?: ReadableOrganization | null;
   mediaItem?: ServedMediaItem | null;
   /**
-   * The other video its thumbnail is a frame of (Codex-tqvmx); null when it
-   * isn't one. Populated by `ContentService.get` only.
+   * The creator's video its thumbnail is a frame of, its own included
+   * (Codex-tqvmx); null when it isn't one. Populated by `ContentService.get`
+   * only.
    */
   thumbnailFrame?: ThumbnailFrame | null;
   /**

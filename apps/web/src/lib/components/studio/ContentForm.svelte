@@ -452,15 +452,20 @@
 
   /**
    * The deleted video the saved thumbnail is a frame of, while the form still
-   * holds that thumbnail (Codex-tqvmx). Publishing is refused by the worker
-   * too (`THUMBNAIL_MEDIA_DELETED`); choosing another clears it before saving.
+   * holds that thumbnail (Codex-tqvmx). Unless it is the media the form plays,
+   * which the Media section warns about: the worker refuses every other one
+   * (`THUMBNAIL_MEDIA_DELETED`), so picking new media in place of a deleted
+   * video whose frame is the thumbnail shows it here. Written content plays
+   * none. Choosing another thumbnail clears it before saving.
    */
-  const deletedFrame = $derived(
-    content?.thumbnailFrame?.deletedAt &&
-      (form.fields.thumbnailUrl?.value() ?? '') === (content.thumbnailUrl ?? '')
-      ? { title: content.thumbnailFrame.title, deletedAt: content.thumbnailFrame.deletedAt }
-      : null
-  );
+  const deletedFrame = $derived.by(() => {
+    const frame = content?.thumbnailFrame;
+    const played = contentTypeVal === 'video' || contentTypeVal === 'audio' ? selectedMediaId : '';
+    const sameThumbnail = (form.fields.thumbnailUrl?.value() ?? '') === (content?.thumbnailUrl ?? '');
+    return frame?.deletedAt && sameThumbnail && frame.mediaItemId !== played
+      ? { title: frame.title, deletedAt: frame.deletedAt }
+      : null;
+  });
 
   // ── Readiness checks ─────────────────────────────────────────────────
   const readinessChecks = $derived.by(() => {

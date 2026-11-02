@@ -49,7 +49,11 @@ import { READABLE_ORGANIZATION_COLUMNS } from '@codex/organization';
 import type { ServiceConfig } from '@codex/service-errors';
 import { BaseService, ValidationError } from '@codex/service-errors';
 import type { PaginatedListResponse } from '@codex/shared-types';
-import { mediaIdOfCreatorPoster } from '@codex/transcoding';
+import {
+  type PosterFrameSource,
+  playedMediaItemId,
+  posterFramesOf,
+} from '@codex/transcoding';
 import type { CreateContentInput, UpdateContentInput } from '@codex/validation';
 import {
   createContentSchema,
@@ -193,51 +197,32 @@ export interface ContentServiceConfig extends ServiceConfig {
   r2PublicUrlBase?: string;
 }
 
-/** What the frame checks read of a content row. */
-interface FrameSource {
-  thumbnailUrl: string | null;
-  mediaItemId: string | null;
-  creatorId: string;
-}
-
-/**
- * The creator's other video a content thumbnail is a frame of (Codex-tqvmx):
- * the Studio's "use the video's frame" saves the poster's URL. Null when the
- * thumbnail isn't a frame of the creator's, or is the content's own video's,
- * which is checked with the video.
- */
-function frameMediaId(row: FrameSource): string | null {
-  const id = row.thumbnailUrl
-    ? mediaIdOfCreatorPoster(row.thumbnailUrl, row.creatorId)
-    : null;
-  return id !== null && id !== row.mediaItemId ? id : null;
-}
-
 /**
  * Refuse a thumbnail that is a frame of one of the creator's deleted videos
  * (Codex-tqvmx): the purge removes that frame 30 days after the delete, and
  * a live thumbnail would then 404, or keep the purge skipping its video every
  * week. A locking read, taken after the row's and its own media's locks: a
  * delete that committed first is seen here, and one that waits on this lock
- * then finds a live use of the frame (the usage lookup's `thumbnail` slot),
- * and refuses. A frame of no video of the creator's isn't this check's
- * (Codex-p0uuc).
+ * then finds a live use of the frame (the usage lookup's `thumbnail` slot,
+ * which matches URLs by the same test), and refuses. A frame of no video of
+ * the creator's isn't this check's (Codex-p0uuc).
  */
 async function assertThumbnailFrameNotDeleted(
   tx: DatabaseTransaction,
   contentId: string,
-  row: FrameSource
+  source: PosterFrameSource,
+  action: 'publish' | 'save'
 ): Promise<void> {
-  const frameId = frameMediaId(row);
-  if (frameId === null) return;
-  const [frame] = await tx
+  const frames = posterFramesOf(source);
+  if (frames === undefined) return;
+  const rows = await tx
     .select({ deletedAt: mediaItems.deletedAt })
     .from(mediaItems)
-    .where(
-      and(eq(mediaItems.id, frameId), eq(mediaItems.creatorId, row.creatorId))
-    )
+    .where(frames)
     .for('key share');
-  if (frame?.deletedAt) throw new ThumbnailMediaDeletedError(contentId);
+  if (rows.some((row) => row.deletedAt !== null)) {
+    throw new ThumbnailMediaDeletedError(contentId, action);
+  }
 }
 
 export class ContentService extends BaseService {
@@ -692,10 +677,15 @@ export class ContentService extends BaseService {
       // pre-tick them: the editor refuses to save a set it never read.
       const [wired] = await withTierWire(this.db, [result]);
 
-      // The other video its thumbnail is a frame of (Codex-tqvmx), so the
-      // editor can warn before publish refuses a deleted one.
-      const frameId = frameMediaId(result);
-      const [frame] = frameId
+      // The video its thumbnail is a frame of, a deleted one first
+      // (Codex-tqvmx). Its own video's too: the editor warns unless that is
+      // the media the form plays, the one frame publish doesn't refuse.
+      const frames = posterFramesOf({
+        thumbnailUrl: result.thumbnailUrl,
+        creatorId: result.creatorId,
+        exceptMediaItemId: null,
+      });
+      const [frame] = frames
         ? await this.db
             .select({
               mediaItemId: mediaItems.id,
@@ -703,12 +693,8 @@ export class ContentService extends BaseService {
               deletedAt: mediaItems.deletedAt,
             })
             .from(mediaItems)
-            .where(
-              and(
-                eq(mediaItems.id, frameId),
-                eq(mediaItems.creatorId, result.creatorId)
-              )
-            )
+            .where(frames)
+            .orderBy(sql`${mediaItems.deletedAt} DESC NULLS LAST`)
             .limit(1)
         : [];
       return {
@@ -1030,14 +1016,22 @@ export class ContentService extends BaseService {
           (existing.status === CONTENT_STATUS.PUBLISHED ||
             existing.publishedAt !== null)
         ) {
-          await assertThumbnailFrameNotDeleted(tx as DatabaseTransaction, id, {
-            thumbnailUrl: sentThumbnailUrl,
-            mediaItemId:
-              restValidated.mediaItemId === undefined
-                ? existing.mediaItemId
-                : restValidated.mediaItemId,
-            creatorId,
-          });
+          await assertThumbnailFrameNotDeleted(
+            tx as DatabaseTransaction,
+            id,
+            {
+              thumbnailUrl: sentThumbnailUrl,
+              creatorId,
+              exceptMediaItemId: playedMediaItemId({
+                contentType: restValidated.contentType ?? existing.contentType,
+                mediaItemId:
+                  restValidated.mediaItemId === undefined
+                    ? existing.mediaItemId
+                    : restValidated.mediaItemId,
+              }),
+            },
+            'save'
+          );
         }
 
         // Codex-2hxff.14: publish() refuses priced or tier content whose
@@ -1396,11 +1390,17 @@ export class ContentService extends BaseService {
           }
         }
 
-        // Any type: written content can show a video's frame too.
+        // Any type: written content can show a video's frame too, and one of
+        // the video it links but doesn't play, which nothing above checks.
         await assertThumbnailFrameNotDeleted(
           tx as DatabaseTransaction,
           id,
-          existing
+          {
+            thumbnailUrl: existing.thumbnailUrl,
+            creatorId: existing.creatorId,
+            exceptMediaItemId: playedMediaItemId(existing),
+          },
+          'publish'
         );
 
         // Subscriber content needs at least one tier to go live (Codex-2hxff.91,

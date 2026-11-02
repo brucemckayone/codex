@@ -977,8 +977,69 @@ describe('media in use (Codex-6sbn1)', () => {
       expect(await thumbnailOf(draft)).toBe(frameOf(ownerId, gone));
     });
 
-    it('the studio read names the other video the thumbnail is a frame of', async () => {
+    it('refuses a frame of the video written content links but doesn’t play', async () => {
+      const gone = await seedMedia(ownerId);
+      await markDeleted(gone);
+      const essay = await seedContent(ownerId, {
+        contentType: 'written',
+        mediaItemId: gone,
+        thumbnailUrl: frameOf(ownerId, gone),
+      });
+
+      const refusal = await contents
+        .publish(essay, ownerId)
+        .catch((error: unknown) => error);
+      expect(refusal).toBeInstanceOf(ThumbnailMediaDeletedError);
+    });
+
+    it('judges a URL as the delete guard does: every poster folder in it, with the id as the transcoder writes it', async () => {
       const playing = await seedMedia(ownerId);
+      const live = { status: 'published' as const, publishedAt: new Date() };
+
+      // A URL holding two folders: the guard counts the second's video as
+      // used, so publish refuses the URL once that video is deleted.
+      const first = await seedMedia(ownerId);
+      const second = await seedMedia(ownerId);
+      const twoFolders = `${cdn}/${getMediaThumbnailPrefix(ownerId, first)}${getMediaThumbnailPrefix(ownerId, second)}lg.webp`;
+      await seedContent(ownerId, {
+        mediaItemId: playing,
+        thumbnailUrl: twoFolders,
+        ...live,
+      });
+      expect((await media.getUsage(second, ownerId)).live).toBe(1);
+      await markDeleted(second);
+      const draft = await seedContent(ownerId, {
+        mediaItemId: playing,
+        thumbnailUrl: twoFolders,
+      });
+      await expect(contents.publish(draft, ownerId)).rejects.toBeInstanceOf(
+        ThumbnailMediaDeletedError
+      );
+
+      // An upper-cased id is no folder the transcoder writes: the guard
+      // counts no use, so publish mustn't lock one either, or a delete it
+      // held up would then go through under live content.
+      const shouted = await seedMedia(ownerId);
+      const shoutedUrl = frameOf(ownerId, shouted.toUpperCase());
+      await seedContent(ownerId, {
+        mediaItemId: playing,
+        thumbnailUrl: shoutedUrl,
+        ...live,
+      });
+      expect((await media.getUsage(shouted, ownerId)).total).toBe(0);
+      await markDeleted(shouted);
+      const shoutedDraft = await seedContent(ownerId, {
+        mediaItemId: playing,
+        thumbnailUrl: shoutedUrl,
+      });
+      expect((await contents.publish(shoutedDraft, ownerId)).status).toBe(
+        'published'
+      );
+    });
+
+    it('the studio read names the video the thumbnail is a frame of, a deleted one first', async () => {
+      const playing = await seedMedia(ownerId);
+      const kept = await seedMedia(ownerId);
       const gone = await seedMedia(ownerId, { title: 'First cut' });
       await markDeleted(gone);
       const draft = await seedContent(ownerId, {
@@ -993,16 +1054,30 @@ describe('media in use (Codex-6sbn1)', () => {
       });
       expect(read?.thumbnailFrame?.deletedAt).toBeInstanceOf(Date);
 
-      // Its own video's frame, another creator's video's id under this
-      // creator's folder (whose title it must not read), or no thumbnail:
-      // none.
+      const both = await seedContent(ownerId, {
+        mediaItemId: playing,
+        thumbnailUrl: `${cdn}/${getMediaThumbnailPrefix(ownerId, kept)}${getMediaThumbnailPrefix(ownerId, gone)}lg.webp`,
+      });
+      expect(
+        (await contents.get(both, ownerId))?.thumbnailFrame?.mediaItemId
+      ).toBe(gone);
+
+      // Its own video's frame is named too: the editor leaves that one to
+      // the Media section while the form still plays it.
+      const own = await seedContent(ownerId, {
+        mediaItemId: playing,
+        thumbnailUrl: frameOf(ownerId, playing),
+      });
+      expect((await contents.get(own, ownerId))?.thumbnailFrame).toMatchObject({
+        mediaItemId: playing,
+        deletedAt: null,
+      });
+
+      // Another creator's video's id under this creator's folder (whose
+      // title it must not read), or no thumbnail: none.
       const theirs = await seedMedia(otherId, { title: 'Their cut' });
       await markDeleted(theirs);
-      for (const thumbnailUrl of [
-        frameOf(ownerId, playing),
-        frameOf(ownerId, theirs),
-        null,
-      ]) {
+      for (const thumbnailUrl of [frameOf(ownerId, theirs), null]) {
         const id = await seedContent(ownerId, {
           mediaItemId: playing,
           thumbnailUrl,

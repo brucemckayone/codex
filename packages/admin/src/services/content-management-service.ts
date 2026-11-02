@@ -27,10 +27,12 @@ import {
   BusinessLogicError,
   NotFoundError,
 } from '@codex/service-errors';
+import { playedMediaItemId, posterFramesOf } from '@codex/transcoding';
 import { and, count, desc, eq, isNull, sql } from 'drizzle-orm';
 import {
   CreatorPayoutsRequiredError,
   MediaDeletedError,
+  ThumbnailMediaDeletedError,
   TierRequiredToPublishError,
 } from '../errors';
 import type {
@@ -136,6 +138,8 @@ export class AdminContentManagementService extends BaseService {
    * @throws {CreatorPayoutsRequiredError} Priced or tier content whose
    *   creator's Connect account is not charges + payouts enabled
    * @throws {MediaDeletedError} Its media item was deleted (Codex-6sbn1)
+   * @throws {ThumbnailMediaDeletedError} Its thumbnail is a frame of one of
+   *   the creator's deleted videos (Codex-tqvmx)
    * @throws {NotFoundError} Its media item is not the content creator's
    *   (Codex-vmi6m)
    */
@@ -232,6 +236,25 @@ export class AdminContentManagementService extends BaseService {
               mediaItemId: existing.mediaItem.id,
               mediaStatus: existing.mediaItem.status,
             });
+          }
+        }
+
+        // ContentService.publish's thumbnail gate (Codex-tqvmx): no frame of
+        // the creator's deleted videos, matched by the test the media delete
+        // guard counts uses with. A locking read after the media's, as there.
+        const frames = posterFramesOf({
+          thumbnailUrl: existing.thumbnailUrl,
+          creatorId: existing.creatorId,
+          exceptMediaItemId: playedMediaItemId(existing),
+        });
+        if (frames) {
+          const rows = await tx
+            .select({ deletedAt: schema.mediaItems.deletedAt })
+            .from(schema.mediaItems)
+            .where(frames)
+            .for('key share');
+          if (rows.some((row) => row.deletedAt !== null)) {
+            throw new ThumbnailMediaDeletedError(contentId);
           }
         }
 

@@ -77,6 +77,12 @@ const MEDIA_ITEM = {
   deletedAt: null,
 };
 
+const OTHER_ITEM = {
+  ...MEDIA_ITEM,
+  id: '55555555-5555-4555-8555-555555555555',
+  title: 'Spring Light',
+};
+
 const DRAFT = {
   id: '11111111-1111-4111-8111-111111111111',
   title: 'Winter Light',
@@ -123,14 +129,18 @@ describe("ContentForm · a draft whose thumbnail is a deleted video's frame", ()
     component = undefined;
   });
 
-  function render(deletedAt: string | null) {
+  function render(
+    deletedAt: string | null,
+    { frameId = FRAME_ID, mediaDeletedAt = null as string | null } = {}
+  ) {
     component = mount(ContentForm, {
       target: document.body,
       props: {
         content: {
           ...DRAFT,
+          mediaItem: { ...MEDIA_ITEM, deletedAt: mediaDeletedAt },
           thumbnailFrame: {
-            mediaItemId: FRAME_ID,
+            mediaItemId: frameId,
             title: 'Winter Light (first cut)',
             deletedAt,
           },
@@ -138,7 +148,7 @@ describe("ContentForm · a draft whose thumbnail is a deleted video's frame", ()
         } as any,
         organizationId: '22222222-2222-4222-8222-222222222222',
         orgSlug: 'studio-alpha',
-        mediaItems: [MEDIA_ITEM],
+        mediaItems: [MEDIA_ITEM, OTHER_ITEM],
       },
     });
     flushSync();
@@ -166,5 +176,18 @@ describe("ContentForm · a draft whose thumbnail is a deleted video's frame", ()
     render(null);
     expect(document.body.textContent).not.toContain(WARNING);
     expect(publishButton()?.disabled).toBe(false);
+  });
+
+  it('a frame of the deleted video it plays is the Media section’s warning, until other media is picked', () => {
+    const deletedAt = '2026-11-02T09:00:00.000Z';
+    render(deletedAt, { frameId: MEDIA_ID, mediaDeletedAt: deletedAt });
+    expect(document.body.textContent).not.toContain(WARNING);
+
+    // The publish would still refuse the frame: it's no longer the played media.
+    fake.fields.mediaItemId.set(OTHER_ITEM.id);
+    flushSync();
+    expect(document.body.textContent).toContain(WARNING);
+    expect(document.body.textContent).toContain(CHECK);
+    expect(publishButton()?.disabled).toBe(true);
   });
 });

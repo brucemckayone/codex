@@ -119,13 +119,16 @@ export class MediaDeletedError extends BusinessLogicError {
  * Publishing content, or saving live content, whose thumbnail is a frame of
  * one of the creator's deleted videos (Codex-tqvmx): the purge removes that
  * frame 30 days after the delete, and a live thumbnail would 404. 422
- * `BUSINESS_LOGIC_ERROR`; the editor matches
- * `details.code: 'THUMBNAIL_MEDIA_DELETED'`.
+ * `BUSINESS_LOGIC_ERROR` with `details.code: 'THUMBNAIL_MEDIA_DELETED'`; the
+ * editor shows the message, worded for the publish or the save it refused.
+ * `@codex/admin` has a twin for its publish: keep the two in step.
  */
 export class ThumbnailMediaDeletedError extends BusinessLogicError {
-  constructor(contentId: string) {
+  constructor(contentId: string, action: 'publish' | 'save') {
     super(
-      'Choose another thumbnail before you publish: it’s a frame of a deleted video.',
+      action === 'publish'
+        ? 'Choose another thumbnail before you publish: it’s a frame of a deleted video.'
+        : 'Choose another thumbnail: live content can’t show a frame of a deleted video.',
       { contentId, code: ERROR_CODES.THUMBNAIL_MEDIA_DELETED }
     );
   }

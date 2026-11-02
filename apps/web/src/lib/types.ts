@@ -45,8 +45,9 @@ export interface ContentWithRelations
   organization?: Organization | null;
   mediaItem?: ServedMediaItem | null;
   /**
-   * The other video its thumbnail is a frame of (Codex-tqvmx). Only the
-   * single read sends it; absent from a content-api older than the check.
+   * The creator's video its thumbnail is a frame of, its own included
+   * (Codex-tqvmx). Only the single read sends it; absent from a content-api
+   * older than the check.
    */
   thumbnailFrame?: ThumbnailFrame | null;
   /**
