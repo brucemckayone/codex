@@ -6,12 +6,15 @@
  * draws (the canvas, each thumbnail, the Moving swatch) paints it under the
  * proven veil in place of the glow (`kit/atmosphere-still.ts`). A channel
  * beside `shaderTone`, so no second WebGL context and nothing polled: a copy
- * is taken only when the studio draws its frame again (a resize, a remount).
+ * is taken only when the studio draws its frame again (a resize, a remount,
+ * a brand change while a render paints the copy).
  */
+
+import { untrack } from 'svelte';
 
 export type StillTheme = 'light' | 'dark';
 
-export interface ShaderStill {
+interface ShaderStill {
   /** An object URL of the copy, revoked when a newer one replaces it. */
   url: string;
   /** The theme whose colours the shader drew it in: the other theme's bands
@@ -33,12 +36,20 @@ class ShaderStillChannel {
   // after a newer copy started, or after a clear, is dropped, so an older
   // frame can never land over a newer one.
   #ticket = 0;
+  // The ticket of the encode under way, or 0.
+  #encoding = 0;
   #wanted = 0;
   #wake: (() => void) | null = null;
 
   /** The latest copy, read reactively; null until one is taken. */
   get current(): ShaderStill | null {
     return this.#still;
+  }
+
+  /** A copy is being encoded (`toBlob` is asynchronous): drawing the frame
+   *  again now would be a second full-viewport draw for the same copy. */
+  get encoding(): boolean {
+    return this.#encoding !== 0;
   }
 
   /** Some render paints the copy (`want`). Copying the frame again is a
@@ -51,7 +62,9 @@ class ShaderStillChannel {
    *  for one now if none is shown; returns the release. */
   want(): () => void {
     this.#wanted++;
-    this.#wake?.();
+    // Asked from a render's `$effect`: what the shader reads to decide must
+    // not make that effect run again with each copy.
+    untrack(() => this.#wake?.());
     let released = false;
     return () => {
       if (released) return;
@@ -68,13 +81,15 @@ class ShaderStillChannel {
   /** ShaderHero: encodes `copy` (a 2D canvas it has drawn the frame on). */
   take(copy: HTMLCanvasElement, theme: StillTheme): void {
     const ticket = ++this.#ticket;
+    this.#encoding = ticket;
     // A null blob (an encoder that cannot) leaves whatever is shown, and a
     // band with no still keeps its glow: the glow is the designed fallback,
     // so there is nothing to report.
     copy.toBlob(
       (blob) => {
-        if (!blob || ticket !== this.#ticket) return;
-        this.#replace({ url: URL.createObjectURL(blob), theme });
+        if (ticket !== this.#ticket) return;
+        this.#encoding = 0;
+        if (blob) this.#replace({ url: URL.createObjectURL(blob), theme });
       },
       'image/webp',
       STILL_QUALITY
@@ -84,6 +99,7 @@ class ShaderStillChannel {
   /** ShaderHero: the frame is gone (another shader, the studio left, unmounted). */
   clear(): void {
     this.#ticket++;
+    this.#encoding = 0;
     this.#replace(null);
   }
 

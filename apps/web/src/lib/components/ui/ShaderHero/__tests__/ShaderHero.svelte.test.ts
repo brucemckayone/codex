@@ -565,6 +565,38 @@ describe('ShaderHero still copy', () => {
     expect(renderer.render).toHaveBeenCalledTimes(2);
   });
 
+  it('draws no second frame for a copy still being encoded, and draws again once for a copy that failed', async () => {
+    // The encoder answers later, as a browser's does.
+    const encodes: BlobCallback[] = [];
+    vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation(
+      (done: BlobCallback) => {
+        encodes.push(done);
+      }
+    );
+    box = { width: 1200, height: 800 };
+    await start({ still: true, tone: true });
+    step(1);
+    expect(renderer.render).toHaveBeenCalledTimes(1);
+
+    // The page editor mounts while the first copy is encoding.
+    releases.push(shaderStill.want());
+    step(3);
+    expect(renderer.render).toHaveBeenCalledTimes(1);
+
+    // That copy fails: the next render to ask gets the frame drawn again.
+    encodes.shift()?.(null);
+    releases.push(shaderStill.want());
+    step(3);
+    expect(renderer.render).toHaveBeenCalledTimes(2);
+
+    // It fails again: the same brand is not drawn for a third time.
+    encodes.shift()?.(null);
+    releases.push(shaderStill.want());
+    step(3);
+    expect(renderer.render).toHaveBeenCalledTimes(2);
+    expect(shaderStill.current).toBeNull();
+  });
+
   it('a frozen shader with nothing to draw keeps to the poll that spots a new preset', async () => {
     brand.config = { preset: 'none' };
     await start({ still: true, tone: true });

@@ -165,6 +165,25 @@ describe('the studio’s still on the Moving tile (#20b)', () => {
     expect(shaderStill.wanted).toBe(false);
   });
 
+  // Asked from its `$effect`: the shader reading the copy to decide must not
+  // make the swatch ask again with every copy that lands.
+  it('asks once, however many copies land', () => {
+    // As the shader's does, it reads the copy shown.
+    const asked = vi.fn(() => shaderStill.current);
+    shaderStill.onDemand(asked);
+    try {
+      render({ orgShader: true });
+      expect(asked).toHaveBeenCalledTimes(1);
+      copyFrame('light');
+      copyFrame('light');
+      shaderStill.clear();
+      flushSync();
+      expect(asked).toHaveBeenCalledTimes(1);
+    } finally {
+      shaderStill.onDemand(null);
+    }
+  });
+
   // A tile is too small for Poster's or Cinematic's panel card, so it keeps
   // the band's veil: without this the panel rule would leave the copy bare.
   it('keeps the band’s veil in a panel Style', () => {

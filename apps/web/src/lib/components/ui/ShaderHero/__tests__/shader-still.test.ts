@@ -92,6 +92,26 @@ describe('shaderStill', () => {
     expect(revoked).toEqual([]);
   });
 
+  it('says a copy is encoding from its take until it lands, fails or is cleared, a newer one’s too', () => {
+    expect(shaderStill.encoding).toBe(false);
+    shaderStill.take(copyCanvas(), 'light');
+    expect(shaderStill.encoding).toBe(true);
+    finish([0]);
+    expect(shaderStill.encoding).toBe(false);
+
+    shaderStill.take(copyCanvas(), 'light');
+    finish([1], null);
+    expect(shaderStill.encoding).toBe(false);
+
+    shaderStill.take(copyCanvas(), 'light');
+    shaderStill.take(copyCanvas(), 'light');
+    // The older finishing says nothing about the newer, still encoding.
+    finish([2]);
+    expect(shaderStill.encoding).toBe(true);
+    shaderStill.clear();
+    expect(shaderStill.encoding).toBe(false);
+  });
+
   it('is wanted while any render that paints it is mounted, and tells the shader each time one asks', () => {
     const asked = vi.fn();
     shaderStill.onDemand(asked);

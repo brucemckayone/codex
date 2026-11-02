@@ -345,12 +345,17 @@
       attributeFilter: ['data-theme'],
     });
 
-    // A render that starts painting the copy, with none shown (the brand
-    // changed while none painted it, or a copy failed), gets the frame drawn
-    // again to copy.
+    // A render that starts painting the copy, with none shown or being made
+    // (the brand changed while none painted it, or a copy failed), gets the
+    // frame drawn again to copy: once for each brand drawn, so a copy that
+    // cannot be made is not drawn for again on every mount.
+    let demandedKey = '';
     if (tone)
       shaderStill.onDemand(() => {
-        if (isStill && !shaderStill.current) redrawFrozen();
+        if (!isStill || shaderStill.current || shaderStill.encoding) return;
+        if (demandedKey === stillDrawnKey) return;
+        demandedKey = stillDrawnKey;
+        redrawFrozen();
       });
 
     if (tone)
