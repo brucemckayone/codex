@@ -12,6 +12,7 @@ import {
   MediaDeletedError,
   MediaInUseError,
   MediaUsageChangedError,
+  ThumbnailMediaDeletedError,
 } from '../../errors';
 import {
   assertMediaDeletable,
@@ -278,6 +279,18 @@ describe('the refusals send two counts and nothing else', () => {
     expect(mapped.response.error.details).toEqual({
       contentId: 'content-1',
       code: 'MEDIA_DELETED',
+    });
+  });
+
+  it("a deleted video's frame as the thumbnail is the same 422, with its own code (Codex-tqvmx)", () => {
+    const mapped = mapErrorToResponse(
+      new ThumbnailMediaDeletedError('content-1')
+    );
+    expect(mapped.statusCode).toBe(422);
+    expect(mapped.response.error.code).toBe('BUSINESS_LOGIC_ERROR');
+    expect(mapped.response.error.details).toEqual({
+      contentId: 'content-1',
+      code: 'THUMBNAIL_MEDIA_DELETED',
     });
   });
 });

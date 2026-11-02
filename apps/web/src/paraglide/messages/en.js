@@ -8319,6 +8319,22 @@ export const studio_content_form_media_deleted_on = (params) => `Deleted from yo
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_content_form_thumbnail_frame_deleted_title = () => `This thumbnail is a frame of a deleted video.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_form_thumbnail_frame_deleted_body = () => `Choose another thumbnail before you publish. The frame stops showing 30 days after its video was deleted.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const studio_content_form_media_hint = () => `No ready media available. Upload files in the Media library first.`
 
 
@@ -8656,6 +8672,14 @@ export const studio_content_form_ready_tier_ticked = () => `At least one tier ti
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_content_form_ready_media_deleted = () => `Choose another media item: the last one was deleted`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_form_ready_thumbnail_frame_deleted = () => `Choose another thumbnail: its video was deleted`
 
 
 /**

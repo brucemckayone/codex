@@ -18,6 +18,7 @@ import {
   getUserAvatarKey,
   getWaveformKey,
   isValidR2Key,
+  mediaIdOfCreatorPoster,
   PATH_CONFIG,
   parseR2Key,
 } from '../paths';
@@ -306,4 +307,36 @@ describe('the poster folder holds every poster the handler writes', () => {
       }
     });
   }
+});
+
+describe('mediaIdOfCreatorPoster (Codex-tqvmx)', () => {
+  const id = '550e8400-e29b-41d4-a716-446655440000';
+  const cdn = 'https://cdn-assets.revelations.studio';
+
+  it('reads the media id out of either poster layout in the creator’s folder', () => {
+    expect(
+      mediaIdOfCreatorPoster(
+        `${cdn}/user_1/media-thumbnails/${id}/lg.webp`,
+        'user_1'
+      )
+    ).toBe(id);
+    expect(
+      mediaIdOfCreatorPoster(
+        `${cdn}/user_1/media-thumbnails/${id}/1920x1080-0a1b2c3d/md.webp`,
+        'user_1'
+      )
+    ).toBe(id);
+  });
+
+  it('null for another creator’s folder, a segment that is no id, a bare folder, or any other URL', () => {
+    for (const url of [
+      `${cdn}/user_2/media-thumbnails/${id}/lg.webp`,
+      `${cdn}/xuser_1/media-thumbnails/${id}/lg.webp`,
+      `${cdn}/user_1/media-thumbnails/not-a-uuid/lg.webp`,
+      `${cdn}/user_1/media-thumbnails/${id}`,
+      `${cdn}/user_1/content-thumbnails/c1/1920x1080-0a1b2c3d/lg.webp`,
+    ]) {
+      expect(mediaIdOfCreatorPoster(url, 'user_1')).toBeNull();
+    }
+  });
 });

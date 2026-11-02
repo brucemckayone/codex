@@ -49,6 +49,7 @@ import { READABLE_ORGANIZATION_COLUMNS } from '@codex/organization';
 import type { ServiceConfig } from '@codex/service-errors';
 import { BaseService, ValidationError } from '@codex/service-errors';
 import type { PaginatedListResponse } from '@codex/shared-types';
+import { mediaIdOfCreatorPoster } from '@codex/transcoding';
 import type { CreateContentInput, UpdateContentInput } from '@codex/validation';
 import {
   createContentSchema,
@@ -81,6 +82,7 @@ import {
   MediaNotFoundError,
   MediaNotReadyError,
   SlugConflictError,
+  ThumbnailMediaDeletedError,
   TierRequiredToPublishError,
 } from '../errors';
 import type {
@@ -189,6 +191,53 @@ export const CATALOGUE_CONTENT_COLUMNS = {
 export interface ContentServiceConfig extends ServiceConfig {
   /** Public asset CDN base — the `R2_PUBLIC_URL_BASE` worker binding. */
   r2PublicUrlBase?: string;
+}
+
+/** What the frame checks read of a content row. */
+interface FrameSource {
+  thumbnailUrl: string | null;
+  mediaItemId: string | null;
+  creatorId: string;
+}
+
+/**
+ * The creator's other video a content thumbnail is a frame of (Codex-tqvmx):
+ * the Studio's "use the video's frame" saves the poster's URL. Null when the
+ * thumbnail isn't a frame of the creator's, or is the content's own video's,
+ * which is checked with the video.
+ */
+function frameMediaId(row: FrameSource): string | null {
+  const id = row.thumbnailUrl
+    ? mediaIdOfCreatorPoster(row.thumbnailUrl, row.creatorId)
+    : null;
+  return id !== null && id !== row.mediaItemId ? id : null;
+}
+
+/**
+ * Refuse a thumbnail that is a frame of one of the creator's deleted videos
+ * (Codex-tqvmx): the purge removes that frame 30 days after the delete, and
+ * a live thumbnail would then 404, or keep the purge skipping its video every
+ * week. A locking read, taken after the row's and its own media's locks: a
+ * delete that committed first is seen here, and one that waits on this lock
+ * then finds a live use of the frame (the usage lookup's `thumbnail` slot),
+ * and refuses. A frame of no video of the creator's isn't this check's
+ * (Codex-p0uuc).
+ */
+async function assertThumbnailFrameNotDeleted(
+  tx: DatabaseTransaction,
+  contentId: string,
+  row: FrameSource
+): Promise<void> {
+  const frameId = frameMediaId(row);
+  if (frameId === null) return;
+  const [frame] = await tx
+    .select({ deletedAt: mediaItems.deletedAt })
+    .from(mediaItems)
+    .where(
+      and(eq(mediaItems.id, frameId), eq(mediaItems.creatorId, row.creatorId))
+    )
+    .for('key share');
+  if (frame?.deletedAt) throw new ThumbnailMediaDeletedError(contentId);
 }
 
 export class ContentService extends BaseService {
@@ -642,9 +691,30 @@ export class ContentService extends BaseService {
       // The item's tiers (Codex-2hxff.91), so the editor's tier picker can
       // pre-tick them: the editor refuses to save a set it never read.
       const [wired] = await withTierWire(this.db, [result]);
+
+      // The other video its thumbnail is a frame of (Codex-tqvmx), so the
+      // editor can warn before publish refuses a deleted one.
+      const frameId = frameMediaId(result);
+      const [frame] = frameId
+        ? await this.db
+            .select({
+              mediaItemId: mediaItems.id,
+              title: mediaItems.title,
+              deletedAt: mediaItems.deletedAt,
+            })
+            .from(mediaItems)
+            .where(
+              and(
+                eq(mediaItems.id, frameId),
+                eq(mediaItems.creatorId, result.creatorId)
+              )
+            )
+            .limit(1)
+        : [];
       return {
         ...(wired ?? result),
         categoryIds: membershipRows.map((row) => row.categoryId),
+        thumbnailFrame: frame ?? null,
       };
     } catch (error) {
       this.handleError(error, 'get');
@@ -946,6 +1016,28 @@ export class ContentService extends BaseService {
             existing.status === CONTENT_STATUS.PUBLISHED ||
               existing.publishedAt !== null
           );
+        }
+
+        // Codex-tqvmx: live content must not take a deleted video's frame as
+        // its thumbnail, which publish refuses too. Only a CHANGED thumbnail
+        // the row will keep is checked, as the media above: a draft may hold
+        // one until it publishes. After the media's lock, as publish orders
+        // them.
+        if (
+          sentThumbnailUrl != null &&
+          sentThumbnailUrl !== existing.thumbnailUrl &&
+          !keepStoredThumbnail &&
+          (existing.status === CONTENT_STATUS.PUBLISHED ||
+            existing.publishedAt !== null)
+        ) {
+          await assertThumbnailFrameNotDeleted(tx as DatabaseTransaction, id, {
+            thumbnailUrl: sentThumbnailUrl,
+            mediaItemId:
+              restValidated.mediaItemId === undefined
+                ? existing.mediaItemId
+                : restValidated.mediaItemId,
+            creatorId,
+          });
         }
 
         // Codex-2hxff.14: publish() refuses priced or tier content whose
@@ -1303,6 +1395,13 @@ export class ContentService extends BaseService {
             throw new MediaNotReadyError(existing.mediaItem.id);
           }
         }
+
+        // Any type: written content can show a video's frame too.
+        await assertThumbnailFrameNotDeleted(
+          tx as DatabaseTransaction,
+          id,
+          existing
+        );
 
         // Subscriber content needs at least one tier to go live (Codex-2hxff.91,
         // owner U2). Saving it with none is allowed (closed); publishing it is

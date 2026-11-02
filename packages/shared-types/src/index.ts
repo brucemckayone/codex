@@ -104,6 +104,7 @@ export type {
   MediaUseLink,
   MediaUseLiveReason,
   MediaUseSlot,
+  ThumbnailFrame,
 } from './media-usage';
 // Organization and Member types
 export type { OrgMemberContext, OrgMemberRole } from './member-types';

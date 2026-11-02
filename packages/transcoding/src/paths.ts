@@ -346,6 +346,31 @@ export function getMediaThumbnailPrefix(
   return `${creatorId}/${PATH_CONFIG.MEDIA_THUMBNAILS_FOLDER}/${mediaId}/`;
 }
 
+const MEDIA_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The media id whose poster folder ({@link getMediaThumbnailPrefix}) holds
+ * `url`, when that folder is `creatorId`'s; otherwise null. A content
+ * thumbnail is such a URL when the Studio's "use the video's frame" set it
+ * (Codex-tqvmx). Another creator's folder is null: their posters aren't the
+ * caller's to check or to count.
+ *
+ * @example
+ * mediaIdOfCreatorPoster('https://cdn/user-123/media-thumbnails/<uuid>/lg.webp', 'user-123')
+ * // Returns: '<uuid>'
+ */
+export function mediaIdOfCreatorPoster(
+  url: string,
+  creatorId: string
+): string | null {
+  const marker = `/${creatorId}/${PATH_CONFIG.MEDIA_THUMBNAILS_FOLDER}/`;
+  const at = url.indexOf(marker);
+  if (at < 0) return null;
+  const [id = '', ...rest] = url.slice(at + marker.length).split('/');
+  return rest.length > 0 && MEDIA_ID_PATTERN.test(id) ? id : null;
+}
+
 /**
  * Generate R2 key for auto-generated media thumbnail
  * Stored in ASSETS_BUCKET for public CDN access

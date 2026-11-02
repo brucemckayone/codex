@@ -23,6 +23,7 @@ import type {
   IntroFilm,
   MediaUsageCounts,
   MyMembershipResponse,
+  ThumbnailFrame,
 } from '@codex/shared-types';
 import type { SubscriberSubscription } from '@codex/subscription';
 import type { HeroLayout } from '@codex/validation';
@@ -43,6 +44,11 @@ export interface ContentWithRelations
   };
   organization?: Organization | null;
   mediaItem?: ServedMediaItem | null;
+  /**
+   * The other video its thumbnail is a frame of (Codex-tqvmx). Only the
+   * single read sends it; absent from a content-api older than the check.
+   */
+  thumbnailFrame?: ThumbnailFrame | null;
   /**
    * The exact set of tiers that include this item (Codex-2hxff.91), ordered
    * by tier `sortOrder`, inactive tiers included; `[]` when not gated.

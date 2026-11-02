@@ -91,6 +91,7 @@ export {
   getWaveformImageKey,
   getWaveformKey,
   isValidR2Key,
+  mediaIdOfCreatorPoster,
   PATH_CONFIG,
   parseR2Key,
   type ThumbnailSize,
