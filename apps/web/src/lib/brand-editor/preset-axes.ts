@@ -68,12 +68,12 @@ export { contrast };
 /**
  * Whichever of white/black actually contrasts better with `backgroundHex`.
  *
- * The product now chooses the same way (`inkOn` in ./ink.ts), so the two agree for every
- * brand bar the hair's-breadth either side of the pivot. A preset still
- * writes `--brand-hero-cta-text` with this one EXPLICITLY: an explicit colour
- * holds in an engine without `pow()` in relative colour, where org-brand.css
- * falls back to its older OKLCH lightness step and would put white on a green
- * like `#059669` (3.77:1, where black gives 5.57:1).
+ * A preset writes `--brand-hero-cta-text` with this because it also writes a
+ * coloured `--brand-hero-cta-bg`, and the page's default label,
+ * `color-mix(in oklch, var(--color-brand-primary) 75%, black)`, assumes the
+ * default white button. It agrees with the stylesheets' own ink rule (`inkOn`
+ * in ./ink.ts) bar 1 491 colours just under the exact pivot, where `inkOn`
+ * takes black and white would be at most 0.025 better; neither fails AA there.
  */
 export function bestInkOn(backgroundHex: string): string {
   const white = contrast('#FFFFFF', backgroundHex);

@@ -247,7 +247,7 @@ const ratio = (a: Rgb, b: Rgb) => {
 function ink(bgIn: Rgb, t: number): Rgb {
   const L = clip(bgIn).map(kneeLin);
   const y = 0.2126 * L[0] + 0.7152 * L[1] + 0.0722 * L[2];
-  const w = Math.min(1, Math.max(0, (0.1791 - y) * 1e6));
+  const w = Math.min(1, Math.max(0, (0.1791 - y) * 1e9));
   const yt =
     w * Math.min(1, t * (y + 0.05) - 0.05) +
     (1 - w) * Math.max(0, (y + 0.05) / t - 0.05);

@@ -3,8 +3,8 @@
  *
  * The rail's live readout of the contrast between the brand colour and the
  * text the product places on it. The rule and the maths live in
- * `$lib/brand-editor/ink.ts`, the one copy the presets use too, so the readout
- * reports the ink the page actually paints (Codex-6r63f). That rule clears AA
+ * `$lib/brand-editor/ink.ts`, whose contrast maths the presets share, so the
+ * readout reports the ink the page actually paints (Codex-6r63f). That rule clears AA
  * on every sRGB brand (floor 4.57:1), so the warn state now shows only for a
  * colour that cannot be read; what else it should warn about is Codex-mik4h.
  */

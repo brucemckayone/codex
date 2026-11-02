@@ -102,7 +102,7 @@ describe('deriveTextOnBrand (mirrors org-brand.css’s luminance step)', () => {
     );
   });
 
-  test('clears AA on every brand across the sRGB cube', () => {
+  test('clears AA on every brand of a 4 096-colour lattice of the sRGB cube', () => {
     let floor = Number.POSITIVE_INFINITY;
     const failing: string[] = [];
     for (const brand of everyBrand()) {
@@ -119,8 +119,11 @@ describe('deriveTextOnBrand (mirrors org-brand.css’s luminance step)', () => {
 describe('the rule the stylesheets paint', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const styles = join(here, '../../../styles');
+  // The step's steepness as the stylesheets write it (a string: `${1e9}` would
+  // print 1000000000).
+  const RAMP = '1e9';
   // One channel of an ink, built from the pivot the readout uses.
-  const CHANNEL = `calc(255 * clamp(0, (${TEXT_ON_BRAND_LUMINANCE_PIVOT} - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))`;
+  const CHANNEL = `calc(255 * clamp(0, (${TEXT_ON_BRAND_LUMINANCE_PIVOT} - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * ${RAMP}, 1))`;
   const GUARD =
     '@supports (color: rgb(from red calc(255 * pow(r / 255, 2)) 0 0))';
   const count = (css: string, text: string) => css.split(text).length - 1;
@@ -150,6 +153,35 @@ describe('the rule the stylesheets paint', () => {
       expect(guarded, theme).toContain('--color-on-interactive: rgb(');
       expect(guarded, theme).toContain('--color-text-on-accent: rgb(');
     }
+  });
+
+  // `clamp(0, (pivot - Y) * m, 1)` is a ramp 1/m wide, and a fill inside it
+  // is painted a GREY ink while the readout reports white. Counted over every
+  // 8-bit colour, in the stylesheets' own luminance and summation order.
+  function coloursInsideTheRamp(multiplier: number): number {
+    const levels = Array.from(
+      { length: 256 },
+      (_, c) => ((c / 255 + 0.055) / 1.055) ** 2.4
+    );
+    const red = levels.map((level) => 0.2126 * level);
+    const green = levels.map((level) => 0.7152 * level);
+    const blue = levels.map((level) => 0.0722 * level);
+    let inside = 0;
+    for (const yr of red)
+      for (const yg of green)
+        for (const yb of blue) {
+          const ramp =
+            (TEXT_ON_BRAND_LUMINANCE_PIVOT - (yr + yg + yb)) * multiplier;
+          if (ramp > 0 && ramp < 1) inside++;
+        }
+    return inside;
+  }
+
+  test('no 8-bit colour sits inside the step’s ramp, so every ink is pure', () => {
+    // The counter can see the defect: at `* 1e6` 32 colours were inside,
+    // #b747b5 among them, painted grey at about 1.07:1.
+    expect(coloursInsideTheRamp(1e6)).toBe(32);
+    expect(coloursInsideTheRamp(Number(RAMP))).toBe(0);
   });
 });
 
