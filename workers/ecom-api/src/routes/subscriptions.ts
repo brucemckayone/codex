@@ -201,7 +201,9 @@ subscriptions.get(
  * the subscription. Powers the proration confirmation dialog.
  *
  * The returned `prorationDate` MUST be passed back to /change-tier so the
- * commit-time proration matches the preview to the penny.
+ * commit-time proration matches the preview to the penny. A switch into
+ * yearly billing also returns a `quote`, passed back as well: change-tier re-checks it
+ * before the write (Codex-2hxff.96).
  */
 subscriptions.post(
   '/preview-tier-change',
@@ -236,7 +238,8 @@ subscriptions.post(
         ctx.input.body.organizationId,
         ctx.input.body.newTierId,
         ctx.input.body.billingInterval,
-        ctx.input.body.prorationDate
+        ctx.input.body.prorationDate,
+        ctx.input.body.quote
       );
       return await ctx.services.subscription.getSubscription(
         ctx.user.id,

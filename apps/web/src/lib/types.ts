@@ -214,6 +214,12 @@ export interface TierChangePreview {
    */
   takesEffect: 'now' | 'period_end';
   currentPeriodEnd: string;
+  /**
+   * A switch into yearly billing only: what the dialog shows, passed back
+   * unchanged to the change-tier commit, which previews again and refuses
+   * any difference (Codex-2hxff.96).
+   */
+  quote?: string;
 }
 
 /**

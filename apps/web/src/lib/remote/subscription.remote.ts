@@ -187,6 +187,11 @@ const changeTierCommandSchema = z.object({
    * Omitted by `previewSubscriptionTierChange` itself (preview computes its own).
    */
   prorationDate: z.number().int().positive().optional(),
+  /**
+   * A switch into yearly billing: the preview's `quote`, passed back unchanged.
+   * The server re-checks it before the write (Codex-2hxff.96).
+   */
+  quote: z.string().max(512).optional(),
 });
 
 /**

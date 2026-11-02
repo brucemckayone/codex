@@ -34,6 +34,7 @@ import type { FeeConfigService } from '@codex/purchase';
 import {
   InternalServiceError,
   UnsupportedCurrencyError,
+  ValidationError,
 } from '@codex/service-errors';
 import {
   createMockStripe,
@@ -69,6 +70,7 @@ import {
   SubscriptionCheckoutError,
   SubscriptionNotFoundError,
   SubscriptionPaymentRequiredError,
+  TierChangePreviewExpiredError,
   TierNotFoundError,
 } from '../../errors';
 import {
@@ -2157,6 +2159,112 @@ describe('SubscriptionService', () => {
       );
     });
 
+    // A switch of billing period starts a new period today (owner,
+    // Codex-2hxff.96). Flexible billing mode keeps the old billing day unless
+    // the call resets the anchor, and Stripe refuses proration_date with it:
+    // the preview returns a quote for the commit to re-check instead.
+    it.each([
+      {
+        change: 'the same tier, annual (interval_switch)',
+        target: 1,
+        interval: 'year',
+        switches: true,
+      },
+      {
+        change: 'another tier, annual (cross_period_change)',
+        target: 2,
+        interval: 'year',
+        switches: true,
+      },
+      {
+        change: 'another tier, monthly (upgrade)',
+        target: 2,
+        interval: 'month',
+        switches: false,
+      },
+    ] as const)('previews $change: anchor and quote only for a switch into yearly', async ({
+      target,
+      interval,
+      switches,
+    }) => {
+      const { org, tier1, tier2 } = await createFullOrg(
+        `preview-anchor-${target}-${interval}`
+      );
+      await db
+        .insert(subscriptions)
+        .values(createTestSubscriptionInput(otherCreatorId, org.id, tier1.id));
+      stubCreatePreview(500, [
+        { description: 'Unused time', amount: -250 },
+        { description: 'Remaining time', amount: 750 },
+      ]);
+
+      const preview = await service.previewTierChange(
+        otherCreatorId,
+        org.id,
+        (target === 1 ? tier1 : tier2).id,
+        interval
+      );
+
+      const createPreviewMock = (
+        stripe as unknown as {
+          invoices: { createPreview: ReturnType<typeof vi.fn> };
+        }
+      ).invoices.createPreview;
+      const params = createPreviewMock.mock.calls[0]![0] as {
+        subscription_details: Record<string, unknown>;
+      };
+      if (switches) {
+        expect(params.subscription_details.billing_cycle_anchor).toBe('now');
+        expect(params.subscription_details.proration_date).toBeUndefined();
+        // Every line, the amount due and the next bill's London date.
+        expect(preview.quote).toMatch(
+          /^due:500\|lines:-250,750\|next:\d{4}-\d{2}-\d{2}$/
+        );
+      } else {
+        expect(
+          params.subscription_details.billing_cycle_anchor
+        ).toBeUndefined();
+        expect(params.subscription_details.proration_date).toBe(
+          preview.prorationDate
+        );
+        expect(preview.quote).toBeUndefined();
+      }
+    });
+
+    it('previews a switch into monthly as before: proration_date, no anchor, no quote', async () => {
+      const { org, tier1 } = await createFullOrg('preview-into-monthly');
+      await db.insert(subscriptions).values(
+        createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+          amountCents: tier1.priceAnnual,
+          platformFeeCents: 499,
+          organizationFeeCents: 674,
+          creatorPayoutCents: 3817,
+          billingInterval: 'year',
+        })
+      );
+      stubCreatePreview(0, [{ description: 'Unused time', amount: -4000 }]);
+
+      const preview = await service.previewTierChange(
+        otherCreatorId,
+        org.id,
+        tier1.id,
+        'month'
+      );
+
+      const params = (
+        stripe as unknown as {
+          invoices: { createPreview: ReturnType<typeof vi.fn> };
+        }
+      ).invoices.createPreview.mock.calls[0]![0] as {
+        subscription_details: Record<string, unknown>;
+      };
+      expect(params.subscription_details.proration_date).toBe(
+        preview.prorationDate
+      );
+      expect(params.subscription_details.billing_cycle_anchor).toBeUndefined();
+      expect(preview.quote).toBeUndefined();
+    });
+
     it('throws TierNotFoundError for an unknown tier', async () => {
       const { org, tier1 } = await createFullOrg('preview-bad-tier');
       await db
@@ -2188,6 +2296,25 @@ describe('SubscriptionService', () => {
   // ─── changeTier ───────────────────────────────────────────────────
 
   describe('changeTier', () => {
+    /**
+     * Stub the invoice preview with these figures (amount due, proration
+     * lines), for a switch of billing period's preview and its re-check.
+     */
+    function stubPreviewFigures(amountDueCents: number, lineAmounts: number[]) {
+      const createPreview = vi.fn().mockResolvedValue({
+        amount_due: amountDueCents,
+        lines: {
+          data: lineAmounts.map((amount, i) => ({
+            description: `line ${i}`,
+            amount,
+            parent: { subscription_item_details: { proration: true } },
+          })),
+        },
+      });
+      (stripe as unknown as { invoices: unknown }).invoices = { createPreview };
+      return createPreview;
+    }
+
     it('upgrade: invoices the proration immediately with payment_behavior=error_if_incomplete', async () => {
       const { org, tier1, tier2 } = await createFullOrg('change-tier-up');
       // Subscribe on tier1 (priceMonthly=499, default split sums correctly).
@@ -2691,7 +2818,22 @@ describe('SubscriptionService', () => {
         })
       );
 
-      await service.changeTier(otherCreatorId, org.id, tier2.id, 'year');
+      // A switch of billing period confirms the figures its dialog showed.
+      stubPreviewFigures(0, [-250]);
+      const { prorationDate, quote } = await service.previewTierChange(
+        otherCreatorId,
+        org.id,
+        tier2.id,
+        'year'
+      );
+      await service.changeTier(
+        otherCreatorId,
+        org.id,
+        tier2.id,
+        'year',
+        prorationDate,
+        quote
+      );
 
       const { eq, and } = await import('drizzle-orm');
       const updated = takeFirst(
@@ -2707,6 +2849,151 @@ describe('SubscriptionService', () => {
       );
       expect(updated.amountCents).toBe(tier2.priceAnnual);
       expect(updated.billingInterval).toBe('year');
+    });
+
+    // A switch into yearly billing cannot be pinned by proration_date (Stripe
+    // refuses it with billing_cycle_anchor 'now'), so the commit previews it
+    // again and refuses any figure the dialog did not show (Codex-2hxff.96).
+    describe.each([
+      { change: 'the same tier, annual (interval_switch)', target: 1 },
+      { change: 'another tier, annual (cross_period_change)', target: 2 },
+    ] as const)('a switch to $change', ({ target }) => {
+      async function previewed(name: string) {
+        const { org, tier1, tier2 } = await createFullOrg(
+          `recheck-${name}-${target}`
+        );
+        await db
+          .insert(subscriptions)
+          .values(
+            createTestSubscriptionInput(otherCreatorId, org.id, tier1.id)
+          );
+        const tierId = (target === 1 ? tier1 : tier2).id;
+        stubPreviewFigures(0, [-8767, 1500]);
+        const preview = await service.previewTierChange(
+          otherCreatorId,
+          org.id,
+          tierId,
+          'year'
+        );
+        return { org, tierId, preview };
+      }
+      const writes = () =>
+        (
+          stripe.subscriptions.update as unknown as {
+            mock: { calls: unknown[][] };
+          }
+        ).mock.calls;
+
+      it('is refused, with no Stripe write, when a re-preview differs', async () => {
+        const { org, tierId, preview } = await previewed('moved');
+        // The credit ran on by 2p between the dialog and the confirm.
+        stubPreviewFigures(0, [-8765, 1500]);
+
+        await expect(
+          service.changeTier(
+            otherCreatorId,
+            org.id,
+            tierId,
+            'year',
+            preview.prorationDate,
+            preview.quote
+          )
+        ).rejects.toThrow(TierChangePreviewExpiredError);
+        expect(writes()).toHaveLength(0);
+      });
+
+      it('writes with the anchor and no proration_date when the figures hold', async () => {
+        const { org, tierId, preview } = await previewed('held');
+
+        await service.changeTier(
+          otherCreatorId,
+          org.id,
+          tierId,
+          'year',
+          preview.prorationDate,
+          preview.quote
+        );
+
+        const params = writes()[0]![1] as Record<string, unknown>;
+        expect(params.billing_cycle_anchor).toBe('now');
+        expect(params.proration_date).toBeUndefined();
+      });
+
+      it('is refused without the quote', async () => {
+        const { org, tierId, preview } = await previewed('no-quote');
+
+        await expect(
+          service.changeTier(
+            otherCreatorId,
+            org.id,
+            tierId,
+            'year',
+            preview.prorationDate
+          )
+        ).rejects.toThrow(ValidationError);
+        expect(writes()).toHaveLength(0);
+      });
+    });
+
+    // Every other change made now is pinned to the preview's proration_date,
+    // with no anchor and no re-preview. A switch into monthly stays as it
+    // was; Codex-2hxff.97 makes it wait for the year's end.
+    it.each([
+      {
+        change: 'an upgrade on the same billing',
+        from: 'month',
+        target: 2,
+        to: 'month',
+      },
+      {
+        change: 'a switch into monthly (interval_switch)',
+        from: 'year',
+        target: 1,
+        to: 'month',
+      },
+    ] as const)('$change still pins proration_date, with no re-preview', async ({
+      from,
+      target,
+      to,
+    }) => {
+      const { org, tier1, tier2 } = await createFullOrg(
+        `pinned-${from}-${target}-${to}`
+      );
+      await db.insert(subscriptions).values(
+        createTestSubscriptionInput(
+          otherCreatorId,
+          org.id,
+          tier1.id,
+          from === 'year'
+            ? {
+                amountCents: tier1.priceAnnual,
+                platformFeeCents: 499,
+                organizationFeeCents: 674,
+                creatorPayoutCents: 3817,
+                billingInterval: 'year',
+              }
+            : {}
+        )
+      );
+      const createPreview = stubPreviewFigures(500, [-250, 750]);
+      const prorationDate = Math.floor(Date.now() / 1000);
+
+      await service.changeTier(
+        otherCreatorId,
+        org.id,
+        (target === 1 ? tier1 : tier2).id,
+        to,
+        prorationDate
+      );
+
+      const params = (
+        stripe.subscriptions.update as unknown as {
+          mock: { calls: unknown[][] };
+        }
+      ).mock.calls[0]![1] as Record<string, unknown>;
+      expect(params.proration_date).toBe(prorationDate);
+      expect(params.billing_cycle_anchor).toBeUndefined();
+      expect(createPreview).not.toHaveBeenCalled();
     });
 
     // Codex-0g6yq: return shape carries { userId, orgId } so the route handler

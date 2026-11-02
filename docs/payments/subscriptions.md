@@ -291,6 +291,29 @@ happens (`takesEffect`: `now` or `period_end`).
   cheaper. A cheaper one is two steps (T1), refused with
   `TIER_CHANGE_TWO_STEPS` (422) and `details.firstStep`, the same-period
   change to offer first.
+- **A switch into yearly billing starts a new period today** (owner
+  decision, `Codex-2hxff.96`), and is next billed a year from the switch, as
+  the dialog says. This covers the same tier and another tier on yearly.
+  - Our subscriptions are in Stripe's flexible billing mode, the default
+    from API 2025-09-30.clover. It never resets the billing anchor by itself:
+    a monthly member switching to yearly mid-month kept the old billing day
+    and was charged a part-year.
+  - So both the preview and the write pass `billing_cycle_anchor: 'now'`.
+    Stripe refuses `proration_date` with that anchor, so the credit runs to
+    the moment of the write, not the preview.
+  - To keep "pays exactly what the dialog showed", the preview returns a
+    `quote` (every line's amount, the amount due and the next bill's London
+    date). The page echoes it to change-tier, which previews again just
+    before the write. Any difference is refused with
+    `TIER_CHANGE_PREVIEW_EXPIRED`, nothing is written, and the page shows the
+    fresh figures to confirm.
+  - A drift in the second between that re-check and the write is accepted.
+  - A change-tier for a switch into yearly without the quote is refused
+    (400).
+  - An upgrade on the same billing period keeps its billing day and its
+    pinned `proration_date`, and so, for now, does a switch into monthly.
+    `Codex-2hxff.97` makes that switch wait for the year's end, like a
+    downgrade.
 
 Refused before Stripe is written to, each 409 with `details.code`:
 
