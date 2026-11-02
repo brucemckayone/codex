@@ -785,7 +785,12 @@ export interface SubscriptionCheckoutVerifyResult {
 export interface TierChangePreview {
   /** Net amount the customer pays NOW (proration delta, in pence). */
   amountDueCents: number;
-  /** Proration line items (charges and credits) the customer sees. */
+  /**
+   * The lines the customer sees: the proration charges and credits, and for
+   * a switch into yearly billing every line of the invoice, the new year's
+   * own charge included, so the lines add up to what is charged
+   * (Codex-2hxff.96).
+   */
   prorationLineItems: Array<{
     description: string | null;
     amountCents: number;
@@ -3465,7 +3470,10 @@ export class SubscriptionService extends BaseService {
    * passes `billing_cycle_anchor: 'now'` instead, because Stripe refuses
    * `proration_date` with it, so its credit runs to the moment of the write.
    * Its `quote` holds what the dialog showed, for the re-check
-   * (Codex-2hxff.96). A switch of billing period is next billed one new
+   * (Codex-2hxff.96). Stripe bills that new period as an ordinary line beside
+   * the credit, not a proration, so it shows every line of the invoice: the
+   * lines then add up to the charge, and the re-check compares them all. A
+   * switch of billing period is next billed one new
    * period from `at`; an upgrade, at the old period's end.
    */
   private async previewNow(
@@ -3491,7 +3499,9 @@ export class SubscriptionService extends BaseService {
 
     const prorationLineItems = preview.lines.data
       .filter(
-        (line) => line.parent?.subscription_item_details?.proration === true
+        (line) =>
+          newPeriod ||
+          line.parent?.subscription_item_details?.proration === true
       )
       .map((line) => ({
         description: line.description,
