@@ -16,6 +16,21 @@ price-change email check were removed once production had applied all three
 `packages/database/scripts/migration-preflight.ts` still name R2, R5 and R6:
 read those sections with `git log -p -- docs/payments/release-checklist.md`.
 
+**Standing check: a release that changes the Stripe `apiVersion`.** It isn't
+removed after one release. Before merging a change to the pin in
+`packages/purchase/src/stripe-client.ts`, run the switch-credit proof in Stripe
+TEST mode:
+
+    pnpm exec tsx --env-file=.env.dev packages/subscription/scripts/test-clock-paid-price.ts
+
+It must pass and leave 0 test clocks. It proves that a switch after an early
+price move credits what the member paid. Stripe credits the invoiced line
+(`credited_items`), not the item's current Price (`Codex-2hxff.95`). If a new
+version breaks that, the plan-change dialog would charge differently from what
+the member paid for. The script makes TEST-mode objects only, tagged
+`codex_env: 'test-clock'`, which production's webhook ignores. `.env.dev`'s
+test key is production's Stripe account, so its webhooks do see the events.
+
 ---
 
 ## After the deploy: payouts waiting for support (migration `0111`)
