@@ -41,12 +41,24 @@
     PlusIcon,
     CheckCircleIcon,
     ChevronRightIcon,
+    MailIcon,
+    AlertTriangleIcon,
     UsersIcon,
   } from '$lib/components/ui/Icon';
   import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
   import { toast } from '$lib/components/ui/Toast/toast-store';
   import PlanPicker from '$lib/components/studio/plan-picker/PlanPicker.svelte';
   import PlanGuidanceNote from '$lib/components/studio/plan-picker/PlanGuidanceNote.svelte';
+  import PriceChangeNote from '$lib/components/studio/PriceChangeNote.svelte';
+  import {
+    dismissalKey,
+    editTierHint,
+    type PriceNoteCheck,
+    type PriceNoteView,
+    priceChangeNotes,
+    stillGoingOutHint,
+  } from '$lib/components/studio/price-note-view';
+  import { dismiss, isDismissed } from '$lib/collections/dismissals';
   import {
     countsAnd,
     countsDot,
@@ -73,6 +85,7 @@
     getMyConnectDashboard,
     updateSubscriptionFeature,
     syncMyConnect,
+    getTierPriceChanges,
   } from '$lib/remote/subscription.remote';
   import { getOrgSettings } from '$lib/remote/org.remote';
   import { formatDate, formatPrice, formatSentenceDate } from '$lib/utils/format';
@@ -119,6 +132,10 @@
   const connectQuery = $derived(getMyConnectStatus());
   const settingsQuery = $derived(orgId ? getOrgSettings(orgId) : null);
   const statsQuery = $derived(orgId ? getSubscriptionStats(orgId) : null);
+  // How each tier's price change is going (Codex-2hxff.86). Beside the tier
+  // list, not before it: the note slot stays empty until it lands. A save's
+  // `invalidateAll()` re-reads it once; otherwise only Check again does.
+  const priceChangesQuery = $derived(orgId ? getTierPriceChanges(orgId) : null);
 
   // Derived data from queries (with safe defaults)
   const tiers = $derived(
@@ -380,6 +397,69 @@
     }
     return map;
   });
+
+  // ─── Price-change notes (Codex-2hxff.85 M3, .86) ───────────────────────
+  // What Check again saw, so a read that found the same run can say so (P6).
+  let priceCheck = $state<PriceNoteCheck | null>(null);
+  let priceReading = $state(false);
+  // Dismissals live in localStorage, which nothing here tracks: bumped on
+  // each, so the notes re-derive.
+  let priceDismissTick = $state(0);
+  const priceChangesFailed = $derived(Boolean(priceChangesQuery?.error));
+
+  const priceNotesByTier = $derived.by(() => {
+    void priceDismissTick;
+    const all = priceChangesQuery?.current ?? [];
+    const now = new Date();
+    const map = new Map<string, PriceNoteView[]>();
+    for (const tier of tiers) {
+      const notes = priceChangeNotes({
+        all,
+        changes: all.filter((change) => change.tierId === tier.id),
+        subject: { kind: 'tier', name: tier.name },
+        now,
+        check: priceCheck,
+        // Q8: a finished note stays until dismissed or 14 days pass.
+        isDismissed: (key) => isDismissed(key, 14),
+      });
+      if (notes.length > 0) map.set(tier.id, notes);
+    }
+    return map;
+  });
+
+  /**
+   * Check again (one note) or Try again (the failed read): one read per
+   * press, never two at once (the cost rule).
+   */
+  async function readPriceChanges(note?: PriceNoteView) {
+    const query = priceChangesQuery;
+    if (!query || priceReading) return;
+    priceReading = true;
+    const at = new Date().toISOString();
+    try {
+      await query.refresh();
+      priceCheck =
+        note && !query.error
+          ? { key: note.key, at, lastRunAt: note.lastRunAt }
+          : null;
+    } catch {
+      // The query keeps the error, and the failed line says so (P10).
+      priceCheck = null;
+    } finally {
+      priceReading = false;
+    }
+  }
+
+  function dismissPriceNote(note: PriceNoteView, tierId: string) {
+    for (const id of note.ids) dismiss(dismissalKey(id));
+    priceDismissTick += 1;
+    // The button leaves with the note: focus goes to its tier's Edit.
+    void tick().then(() =>
+      document
+        .querySelector<HTMLElement>(`[data-tier-edit="${tierId}"]`)
+        ?.focus()
+    );
+  }
 
   const statBand = $derived<MoneyStat[]>([
     {
@@ -848,6 +928,36 @@
       createInFlightId !== null && createInFlightId === tierSubmissionId;
     tierDialogOpen = true;
   }
+
+  /**
+   * The Edit Tier dialog's one quiet line before saving new prices
+   * (Codex-2hxff.85, owner decision Q7): who will be emailed, when it starts,
+   * and the 30-day rule (P1). Only when a price differs from the saved one
+   * and the tier has subscribers; the count is the tier row's. When that
+   * price's emails are still going out, it warns that the save replaces
+   * them (P8). A failed progress read can't know, so it says P1.
+   */
+  const tierPriceHint = $derived.by(() => {
+    const tier = editingTier;
+    if (!tier) return null;
+    const saved = { monthly: tier.priceMonthly, annual: tier.priceAnnual };
+    const next = { monthly: tierPriceMonthly, annual: tierPriceAnnual };
+    return (
+      stillGoingOutHint({
+        changes: (priceChangesQuery?.current ?? []).filter(
+          (change) => change.tierId === tier.id
+        ),
+        saved,
+        next,
+      }) ??
+      editTierHint({
+        name: tier.name,
+        subscribers: subscribersByTier.get(tier.id)?.count ?? 0,
+        saved,
+        next,
+      })
+    );
+  });
 
   function openEditTier(tier: SubscriptionTier) {
     editingTier = tier;
@@ -1555,9 +1665,22 @@
              `.tier-info { flex: 1 }` absorbed every pixel of an 1808px column.
              Now the meaning-bearing clusters pack together on the left and only
              the row ACTIONS take the conventional right edge. -->
+        {#if priceChangesFailed}
+          <!-- P10: which tier changed is in the read that failed, so the
+               line sits once above the list, never as "no change". -->
+          <div class="tier-price-failed">
+            <PriceChangeNote
+              failed
+              busy={priceReading}
+              onTryAgain={() => readPriceChanges()}
+              data-testid="price-change-note-failed"
+            />
+          </div>
+        {/if}
         <div class="tier-list">
           {#each tiers as tier, i (tier.id)}
             {@const tierStats = subscribersByTier.get(tier.id)}
+            {@const priceNotes = priceNotesByTier.get(tier.id) ?? []}
             {@const saving = annualSavingPercent(tier)}
             {@const access = summaryByTier.get(tier.id)}
             {@const rowGaps = (access?.missingFromCheaper ?? []).filter((gap) =>
@@ -1635,6 +1758,7 @@
                   size="sm"
                   onclick={() => openEditTier(tier)}
                   aria-label={m.monetisation_tiers_edit_aria({ name: tier.name })}
+                  data-tier-edit={tier.id}
                 >
                   <EditIcon size={14} />
                 </Button>
@@ -1674,6 +1798,21 @@
                             })}
                       </b>
                     </PlanGuidanceNote>
+                  {/each}
+                </div>
+              {/if}
+              <!-- How a saved price change is going (M3, .86), in the
+                   guidance note's slot. Newest first, one per save. -->
+              {#if priceNotes.length > 0}
+                <div class="tier-price-notes">
+                  {#each priceNotes as note (note.key)}
+                    <PriceChangeNote
+                      view={note}
+                      name={tier.name}
+                      busy={priceReading}
+                      onCheckAgain={() => readPriceChanges(note)}
+                      onDismiss={() => dismissPriceNote(note, tier.id)}
+                    />
                   {/each}
                 </div>
               {/if}
@@ -1735,6 +1874,7 @@
               min={100}
               step={1}
               required
+              aria-describedby={tierPriceHint ? 'tier-price-hint' : undefined}
             />
             <span class="form-hint">{formatPrice(tierPriceMonthly)}</span>
           </div>
@@ -1747,10 +1887,26 @@
               min={100}
               step={1}
               required
+              aria-describedby={tierPriceHint ? 'tier-price-hint' : undefined}
             />
             <span class="form-hint">{formatPrice(tierPriceAnnual)}</span>
           </div>
         </div>
+        {#if tierPriceHint}
+          <p
+            class="price-hint"
+            id="tier-price-hint"
+            data-testid="tier-price-hint"
+            data-kind={tierPriceHint.kind}
+          >
+            {#if tierPriceHint.kind === 'going_out'}
+              <AlertTriangleIcon size={14} aria-hidden="true" class="price-hint__icon" />
+            {:else}
+              <MailIcon size={14} aria-hidden="true" class="price-hint__icon" />
+            {/if}
+            <span><b>{tierPriceHint.lead}</b> {tierPriceHint.body}</span>
+          </p>
+        {/if}
 
         <!-- "Include everything from…" (Codex-2hxff.91): copies a tier's films
              and courses in the same server command as the create. Create only,
@@ -2558,6 +2714,27 @@
     color: var(--color-text-muted);
   }
 
+  /* Edit Tier's quiet line about existing subscribers (Codex-2hxff.85 P1). */
+  .price-hint {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: var(--space-2);
+    align-items: start;
+    margin: 0;
+    font-size: var(--text-xs);
+    line-height: var(--leading-normal);
+    color: var(--color-text-secondary);
+  }
+
+  .price-hint :global(.price-hint__icon) {
+    margin-top: var(--space-0-5);
+  }
+
+  .price-hint b {
+    color: var(--color-text);
+    font-weight: var(--font-semibold);
+  }
+
   /* Delete confirm */
   .delete-confirm {
     margin: 0;
@@ -2575,7 +2752,8 @@
   }
 
   /* The guidance notes span the row under its clusters. */
-  .tier-gaps {
+  .tier-gaps,
+  .tier-price-notes {
     grid-column: 1 / -1;
     display: flex;
     flex-direction: column;
@@ -2583,9 +2761,14 @@
   }
 
   @media (--breakpoint-sm) {
-    .tier-gaps {
+    .tier-gaps,
+    .tier-price-notes {
       grid-column: 2 / -1;
     }
+  }
+
+  .tier-price-failed {
+    margin-bottom: var(--space-3);
   }
 
   /* A radio group in the content editor's access-card look: the create

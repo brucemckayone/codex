@@ -32,6 +32,7 @@
   import * as m from '$paraglide/messages';
   import RevenueKindsLine from '$lib/components/studio/analytics/RevenueKindsLine.svelte';
   import StatCard from '$lib/components/studio/StatCard.svelte';
+  import UpcomingFeeNote from '$lib/components/studio/UpcomingFeeNote.svelte';
   import Button from '$lib/components/ui/Button/Button.svelte';
   import * as Table from '$lib/components/ui/Table';
   import { Alert, Card, EmptyState, PageHeader } from '$lib/components/ui';
@@ -173,6 +174,10 @@
        subscription is billed" — a product with no column behind it
        (`organizations` has no plan/tier/subscription; `subscription_tiers` are
        fan→org). New value listed for billing_description in the WP report. -->
+
+  <!-- A fee rise that hasn't started, before the figures (Codex-2hxff.33 F5).
+       Its own read, beside the revenue read; nothing shows while it runs. -->
+  <UpcomingFeeNote organizationId={data.org.id} />
 
   {#if revenueError}
     <Alert variant="error">Could not load the revenue summary: {revenueError}</Alert>

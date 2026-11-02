@@ -51,6 +51,7 @@ export { default as LifeBuoyIcon } from './LifeBuoyIcon.svelte';
 export { default as LinkIcon } from './LinkIcon.svelte';
 export { default as LockIcon } from './LockIcon.svelte';
 export { default as LogInIcon } from './LogInIcon.svelte';
+export { default as MailIcon } from './MailIcon.svelte';
 export { default as MaximizeIcon } from './MaximizeIcon.svelte';
 export { default as MenuIcon } from './MenuIcon.svelte';
 export { default as MinusCircleIcon } from './MinusCircleIcon.svelte';

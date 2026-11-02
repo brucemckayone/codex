@@ -39,8 +39,21 @@ export interface SupportCommandFailure {
   maxCents: number | null;
   /** `CHARGE_HAS_CHARGEBACK`: the dispute's current status. */
   disputeStatus: string | null;
-  /** `REPAY_BLOCKED_BY_LATER_CAUSE`: `chargeback` or `later_refunds`. */
+  /**
+   * `REPAY_BLOCKED_BY_LATER_CAUSE`: `chargeback` or `later_refunds`.
+   * `PRICE_MOVE_NOT_HELD`: why there is nothing to retry or close.
+   */
   reason: string | null;
+  /** `FEE_CHANGE_NOT_WAITING`: `cancelled`, `cut_below_today` or `replaced_by_bigger`. */
+  voidReason: string | null;
+  /** `FEE_CHANGE_NOT_WAITING`: when the rise was called off (ISO). */
+  voidedAt: string | null;
+  /** `FEE_NOTICE_ALREADY_TOLD`: `sent` or `told_another_way`. */
+  state: string | null;
+  /** `FEE_NOTICE_ALREADY_TOLD`: when they were marked told (ISO). */
+  toldAt: string | null;
+  /** `FEE_NOTICE_ALREADY_TOLD`: when their email went through (ISO). */
+  acceptedAt: string | null;
 }
 
 function field<T extends 'string' | 'number'>(
@@ -71,6 +84,11 @@ export function toSupportFailure(error: unknown): SupportCommandFailure {
       maxCents: field(details, 'maxCents', 'number'),
       disputeStatus: field(details, 'disputeStatus', 'string'),
       reason: field(details, 'reason', 'string'),
+      voidReason: field(details, 'voidReason', 'string'),
+      voidedAt: field(details, 'voidedAt', 'string'),
+      state: field(details, 'state', 'string'),
+      toldAt: field(details, 'toldAt', 'string'),
+      acceptedAt: field(details, 'acceptedAt', 'string'),
     };
   }
   return {
@@ -85,5 +103,10 @@ export function toSupportFailure(error: unknown): SupportCommandFailure {
     maxCents: null,
     disputeStatus: null,
     reason: null,
+    voidReason: null,
+    voidedAt: null,
+    state: null,
+    toldAt: null,
+    acceptedAt: null,
   };
 }

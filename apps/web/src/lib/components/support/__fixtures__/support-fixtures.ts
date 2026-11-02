@@ -11,11 +11,15 @@ import type {
   CreatorDebtItem,
   CreatorDebtPerson,
   FailedRefundItem,
+  FeeChangeCard,
+  FeeNoticeItem,
+  HeldPriceMove,
   HistoryLine,
   OwedToCreatorItem,
   RefundPreview,
   RefundRow,
   Slice,
+  StoppedPriceChange,
   StripeHeldTakeBack,
 } from '@codex/admin';
 
@@ -453,5 +457,154 @@ export function list<T>(items: T[]) {
       total: items.length,
       totalPages: Math.max(1, Math.ceil(items.length / 20)),
     },
+  };
+}
+
+// ── Fee notices and price moves (Codex-2hxff.33, .85, .86) ──────────────
+// Batch C1 Part B's story: on Mon 2 Nov 2026 at 14:20 Jordan Reid raises
+// Codex's fee from 10% to 12%; the 08:00 run on Tue 3 Nov emails the 412
+// people it affects, and 2 emails don't go through.
+
+/** Tue 3 Nov 2026, 10:00 London (winter: London is UTC). */
+export const FEE_NOW = new Date('2026-11-03T10:00:00.000Z');
+
+export const JORDAN = {
+  userId: 'user-jordan',
+  name: 'Jordan Reid',
+  deleted: false,
+};
+
+export function feeChangeCard(
+  overrides: Partial<FeeChangeCard> = {}
+): FeeChangeCard {
+  return {
+    changeId: '33333333-3333-4333-8333-333333333333',
+    scope: 'platform',
+    organization: null,
+    creator: null,
+    lines: [
+      { value: 'platformFeePercent', context: 'both', from: 1000, to: 1200 },
+    ],
+    removed: false,
+    replacesChangeId: null,
+    savedAt: '2026-11-02T14:20:00.000Z',
+    savedBy: JORDAN,
+    firstRunAt: '2026-11-03T08:00:00.000Z',
+    firstEmailsAt: null,
+    listed: 412,
+    told: { byEmail: 410, anotherWay: 0 },
+    waitingFor: 2,
+    joiners: { total: 0, told: 0, waiting: 0 },
+    toldAnotherWay: [],
+    lastToldAt: null,
+    effectiveFrom: null,
+    earliestFrom: '2026-12-04T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+export function feeNotice(
+  overrides: Partial<FeeNoticeItem> = {}
+): FeeNoticeItem {
+  return {
+    noticeId: '44444444-4444-4444-8444-444444444444',
+    changeId: '33333333-3333-4333-8333-333333333333',
+    person: {
+      userId: 'user-jonah',
+      name: 'Jonah Reyes',
+      deleted: false,
+      email: 'jonah@reyesfilms.co.uk',
+    },
+    roles: [
+      {
+        organizationId: 'org-hollow',
+        organizationName: 'Hollow Oak Films',
+        as: 'creator',
+      },
+      {
+        organizationId: 'org-north',
+        organizationName: 'Northlight Collective',
+        as: 'creator',
+      },
+    ],
+    onList: true,
+    state: 'failed',
+    reason: 'refused',
+    error: 'HTTP 400',
+    attempts: 1,
+    waitingSince: '2026-11-03T08:00:00.000Z',
+    lastTriedAt: '2026-11-03T08:00:05.000Z',
+    nextTryAt: '2026-11-04T08:00:00.000Z',
+    changeSavedAt: '2026-11-02T14:20:00.000Z',
+    changeEffectiveFrom: null,
+    ...overrides,
+  };
+}
+
+export function heldMove(
+  overrides: Partial<HeldPriceMove> = {}
+): HeldPriceMove {
+  return {
+    moveId: '55555555-5555-4555-8555-555555555555',
+    priceChangeId: '66666666-6666-4666-8666-666666666666',
+    status: 'held',
+    action: 'retry',
+    subscriber: {
+      userId: 'user-leah',
+      name: 'Leah Ortiz',
+      deleted: false,
+      email: 'leah@ortizphoto.co.uk',
+    },
+    organization: {
+      id: 'org-hollow',
+      name: 'Hollow Oak Films',
+      deleted: false,
+    },
+    plan: { kind: 'tier', id: 'tier-pro', name: 'Pro', interval: 'month' },
+    fromAmountCents: 1200,
+    newAmountCents: 1400,
+    heldReason: 'notice_refused',
+    lastError: 'HTTP 400',
+    alertErrorId: 'e1a2b3c4',
+    attempts: 3,
+    lastTriedAt: '2026-10-30T17:00:04.000Z',
+    noticeAt: null,
+    effectiveAt: null,
+    subscriptionEnded: false,
+    retry: null,
+    queuedFor: null,
+    resolution: null,
+    createdAt: '2026-10-30T14:12:00.000Z',
+    ...overrides,
+  };
+}
+
+export function stoppedChange(
+  overrides: Partial<StoppedPriceChange> = {}
+): StoppedPriceChange {
+  return {
+    changeId: '77777777-7777-4777-8777-777777777777',
+    organization: {
+      id: 'org-north',
+      name: 'Northlight Collective',
+      deleted: false,
+    },
+    plan: {
+      kind: 'tier',
+      id: 'tier-members',
+      name: 'Members',
+      interval: 'month',
+    },
+    fromAmountCents: 800,
+    newAmountCents: 900,
+    savedAt: '2026-10-30T13:20:00.000Z',
+    savedBy: { userId: 'user-tom', name: 'Tom Ellison', deleted: false },
+    stoppedAt: '2026-10-30T14:00:41.000Z',
+    stoppedReason: 'template_missing',
+    stoppedErrorId: 'e7f1c2a4',
+    waiting: 6240,
+    total: 6240,
+    restart: null,
+    ...overrides,
   };
 }
