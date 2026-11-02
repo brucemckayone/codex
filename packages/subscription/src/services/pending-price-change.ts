@@ -49,6 +49,7 @@ import { InternalServiceError } from '@codex/service-errors';
 import { type SQL, sql } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import { type PriceChangeStage, PriceChangeStageError } from '../errors';
+import { isOurSchedule, readWaitingBilling } from './billing-change';
 
 /** Metadata key: the Price the subscription moves to at a later renewal. */
 export const PENDING_PRICE_ID_KEY = 'codex_pending_price_id';
@@ -413,9 +414,16 @@ export async function ensurePriceActive(
   stripe: Stripe,
   priceId: string
 ): Promise<void> {
-  const price = await stripe.prices.retrieve(priceId);
+  await activateIfArchived(stripe, await stripe.prices.retrieve(priceId));
+}
+
+/** {@link ensurePriceActive} for a Price already read. */
+async function activateIfArchived(
+  stripe: Stripe,
+  price: Pick<Stripe.Price, 'id' | 'active'>
+): Promise<void> {
   if (price.active) return;
-  await stripe.prices.update(priceId, {
+  await stripe.prices.update(price.id, {
     active: true,
     metadata: platformWriteMetadata(),
   });
@@ -544,18 +552,21 @@ export async function schedulePriceChange(
 
 /**
  * What a move reads off a live subscription: its status, the item and its
- * Price, and every `codex_*` key (the tier, a waiting move and its hold, the
- * pending marker). Two reads that differ here had a change land between them.
+ * Price, its schedule, and every `codex_*` key (the tier, a waiting move and
+ * its hold, the pending marker). Two reads that differ here had a change
+ * land between them.
  */
 function liveState(subscription: Stripe.Subscription): string {
   const item = subscription.items.data[0];
   const keys = Object.entries(subscription.metadata ?? {})
     .filter(([key]) => key.startsWith('codex_'))
     .sort(([a], [b]) => a.localeCompare(b));
+  const schedule = subscription.schedule;
   return JSON.stringify([
     subscription.status,
     item?.id ?? null,
     item?.price.id ?? null,
+    typeof schedule === 'string' ? schedule : (schedule?.id ?? null),
     keys,
   ]);
 }
@@ -605,13 +616,24 @@ async function decideMove(
   }
   const item = subscription.items.data[0];
   if (!item) return skipped('no_items');
-  if (item.price.recurring?.interval !== target.interval) {
+  // A waiting change of billing (Codex-2hxff.97) bills its interval from the
+  // renewal, at phase 2's Price, while the item still carries the year.
+  const billing = readWaitingBilling(subscription.metadata);
+  const billed = billing
+    ? { priceId: billing.priceId, amountCents: billing.amountCents }
+    : { priceId: item.price.id, amountCents: item.price.unit_amount };
+  if (
+    (billing?.interval ?? item.price.recurring?.interval) !== target.interval
+  ) {
     // An interval change resets the billing cycle and charges at once — the
     // bug this replaces. Never cross intervals.
     return skipped('other_interval');
   }
   const skip = target.skipLive?.(subscription) ?? null;
   if (skip) return skipped(skip);
+  // A schedule manages the item, and an item write would split its phase
+  // (proof P4): only the pending marker is written while one is attached.
+  const scheduled = Boolean(subscription.schedule);
 
   // An earlier change this subscription already carries, if any.
   const pendingPriceId = subscription.metadata?.[PENDING_PRICE_ID_KEY];
@@ -623,13 +645,13 @@ async function decideMove(
 
   // Before the same-amount path: a subscription already on the new Price
   // would read as "same amount", and one already told would be told again.
-  if (mayBeTold && item.price.id === target.newPriceId) {
+  if (mayBeTold && billed.priceId === target.newPriceId) {
     return {
       kind: 'landed',
       outcome: {
         kind: 'applied',
         effectiveAt: new Date(item.current_period_end * 1000),
-        currentAmountCents: item.price.unit_amount,
+        currentAmountCents: billed.amountCents,
       },
     };
   }
@@ -646,7 +668,7 @@ async function decideMove(
             earliest: Math.floor(currentPending.from.getTime() / 1000),
           }) * 1000
         ),
-        currentAmountCents: item.price.unit_amount,
+        currentAmountCents: billed.amountCents,
       },
     };
   }
@@ -655,8 +677,10 @@ async function decideMove(
   // subscription on the tier's current Price id, drop any pending change, and
   // tell nobody — nothing they pay changes. A failed write here leaves that
   // pending change in place, so the error carries it.
-  if (item.price.unit_amount === target.newAmountCents) {
+  if (billed.amountCents === target.newAmountCents) {
     if (
+      !billing &&
+      !scheduled &&
       item.price.id !== target.newPriceId &&
       canSwapNow(subscription.status)
     ) {
@@ -698,6 +722,7 @@ async function decideMove(
   const nextRenewal = item.current_period_end;
   const applied =
     !target.floorFrom &&
+    !scheduled &&
     nextRenewal >= earliest &&
     canSwapNow(subscription.status);
   return {
@@ -717,7 +742,7 @@ async function decideMove(
               earliest,
             })) * 1000
       ),
-      currentAmountCents: item.price.unit_amount,
+      currentAmountCents: billed.amountCents,
       currentPending,
     },
   };
@@ -808,9 +833,51 @@ export async function applyDuePendingPriceChange(
   if (!canSwapNow(subscription.status)) return false;
   if (item.current_period_end < from) return false;
 
+  // A schedule manages the item: an item write would split its phase (proof
+  // P4). Ours lets go once its change of billing has landed
+  // (`applyDueTierMove`), and the release's own event brings this back, so a
+  // due change waits for it. Someone else's never lets go: support is told.
+  const scheduleId =
+    typeof subscription.schedule === 'string'
+      ? subscription.schedule
+      : (subscription.schedule?.id ?? null);
+  if (scheduleId) {
+    const schedule = await stripe.subscriptionSchedules.retrieve(scheduleId);
+    if (isOurSchedule(schedule, subscription.metadata)) return false;
+    throw new InternalServiceError(
+      'A due price change waits on a subscription managed by a Stripe schedule that is not ours (support: release the schedule, then the next renewal applies it)',
+      { stripeSubscriptionId: subscription.id, pendingPriceId, scheduleId }
+    );
+  }
+
+  // Never a Price of another billing period: a marker left from before a
+  // change of billing would put a yearly Price on a monthly item (proof P4).
+  // It can never apply, so it is dropped, and support told.
+  const price = await stripe.prices.retrieve(pendingPriceId);
+  const priceInterval = price.recurring?.interval;
+  const itemInterval = item.price.recurring?.interval;
+  if (priceInterval && itemInterval && priceInterval !== itemInterval) {
+    await stripe.subscriptions.update(
+      subscription.id,
+      { metadata: CLEAR_PENDING_PRICE_METADATA },
+      {
+        idempotencyKey: `price-change-drop:${subscription.id}:${pendingPriceId}`,
+      }
+    );
+    throw new InternalServiceError(
+      "A pending price change was for another billing period than the subscription's; it was dropped, not applied (support: check the member's price)",
+      {
+        stripeSubscriptionId: subscription.id,
+        pendingPriceId,
+        priceInterval,
+        itemInterval,
+      }
+    );
+  }
+
   // An accepted change still lands when a newer save has archived its Price
   // before the step reached this subscriber (F2, correctness #6).
-  await ensurePriceActive(stripe, pendingPriceId);
+  await activateIfArchived(stripe, price);
   await stripe.subscriptions.update(
     subscription.id,
     {
@@ -1062,6 +1129,9 @@ async function settleTotal(
  * 2. someone waiting to move TO it is included, with `floor_from` =
  *    `pending_tier_from` + 1 s: they move at the price they confirmed, and
  *    the new one starts at a later renewal.
+ * A waiting change of billing (Codex-2hxff.97) moves them to the tier on its
+ * own interval: they are reached by a change on that interval, and left out
+ * of one on the interval they are leaving, their own tier's included.
  */
 export async function recordTierPriceChange(
   tx: PriceChangeTx,
@@ -1087,12 +1157,13 @@ export async function recordTierPriceChange(
              ${input.now}::timestamptz, ${input.now}::timestamptz
         FROM ${subscriptions} s
        WHERE s."organization_id" = ${input.organizationId}::uuid
-         AND s."billing_interval" = ${input.interval}
          AND s."status" IN (${repricedStatusList()})
          AND s."ended_at" IS NULL
          AND s."duplicate_of_subscription_id" IS NULL
-         AND ((s."tier_id" = ${tierId}::uuid AND s."pending_tier_id" IS NULL)
-              OR s."pending_tier_id" = ${tierId}::uuid)
+         AND ((s."tier_id" = ${tierId}::uuid AND s."pending_tier_id" IS NULL
+               AND s."billing_interval" = ${input.interval})
+              OR (s."pending_tier_id" = ${tierId}::uuid
+                  AND COALESCE(s."pending_billing_interval", s."billing_interval") = ${input.interval}))
       RETURNING 1
     `,
     input.now

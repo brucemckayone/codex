@@ -1,7 +1,11 @@
 /**
  * Waiting tier moves — a move to a cheaper plan waits for the end of the
  * period the member has paid for (Codex-2hxff.16, owner decisions T1-T6 and
- * Q1-Q4; docs/payments/subscriptions.md → Changing tier).
+ * Q1-Q4; docs/payments/subscriptions.md → Changing tier). Leaving yearly
+ * billing waits for the year's end the same way, with the change of billing
+ * on a Stripe schedule (Codex-2hxff.97, billing-change.ts): its record is a
+ * waiting move plus `codex_move_interval` / `codex_move_price_id` /
+ * `codex_move_amount`.
  *
  * The mechanism is the price-change machinery's IMMEDIATE path, not a Stripe
  * subscription schedule (owner decision T1): a same-interval swap with
@@ -31,6 +35,12 @@
 
 import { londonDate } from '@codex/payments';
 import {
+  billingMetadata,
+  CLEAR_BILLING_METADATA,
+  readWaitingBilling,
+  type WaitingBilling,
+} from './billing-change';
+import {
   PENDING_PRICE_FROM_KEY,
   PENDING_PRICE_ID_KEY,
 } from './pending-price-change';
@@ -48,10 +58,14 @@ const HOLD_PENDING_PRICE_ID_KEY = 'codex_hold_pending_price_id';
 /** Metadata key: its `codex_pending_price_from`. */
 const HOLD_PENDING_PRICE_FROM_KEY = 'codex_hold_pending_price_from';
 
-/** Setting a metadata key to '' deletes it in Stripe. */
+/**
+ * Setting a metadata key to '' deletes it in Stripe. A waiting change of
+ * billing's own keys go with the move.
+ */
 export const CLEAR_MOVE_METADATA: Record<string, string> = {
   [MOVE_TIER_ID_KEY]: '',
   [MOVE_AT_KEY]: '',
+  ...CLEAR_BILLING_METADATA,
 };
 
 /** Clears the hold marker, parked price change included. */
@@ -71,6 +85,13 @@ export interface WaitingMove {
   holdAmountCents: number;
   /** A price change on the tier being left, parked until Keep or the flip. */
   parkedPendingPrice: { priceId: string; from: string } | null;
+  /**
+   * Set when the billing period changes too (Codex-2hxff.97): the move then
+   * waits on a Stripe schedule, and nothing is swapped on the item meanwhile
+   * (the hold is the item's own Price). `tierId` is the current tier when
+   * only the billing changes.
+   */
+  billing: WaitingBilling | null;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -112,6 +133,7 @@ export function readWaitingMove(
     holdAmountCents,
     parkedPendingPrice:
       parkedId && parkedFrom ? { priceId: parkedId, from: parkedFrom } : null,
+    billing: readWaitingBilling(metadata),
   };
 }
 
@@ -153,7 +175,54 @@ export function moveMetadata(args: {
     }),
     [PENDING_PRICE_ID_KEY]: '',
     [PENDING_PRICE_FROM_KEY]: '',
+    // A move on the same billing replaces a waiting change of billing.
+    ...CLEAR_BILLING_METADATA,
   };
+}
+
+/**
+ * The record of a waiting change of billing (Codex-2hxff.97, data design
+ * §2.1): a waiting move's keys plus the interval, phase 2's Price and its
+ * amount. The hold is the Price and amount on the item, which the change
+ * never swaps (written so `readWaitingMove`'s all-or-none rule holds; Keep
+ * puts nothing back). A price change parked from the tier being left stays
+ * parked, and the live one is cleared, as for a move: a live marker on the
+ * yearly Price would outlive the switch (proof P4). `tierId` is the member's
+ * tier now: the current one, or the target for C(b), whose plan changes now.
+ */
+export function billingChangeMetadata(args: {
+  tierId: string;
+  userId: string;
+  organizationId: string;
+  targetTierId: string;
+  moveAt: number;
+  hold: { priceId: string; amountCents: number };
+  parkedPendingPrice: { priceId: string; from: string } | null;
+  billing: WaitingBilling;
+}): Record<string, string> {
+  return {
+    codex_tier_id: args.tierId,
+    codex_user_id: args.userId,
+    codex_organization_id: args.organizationId,
+    [MOVE_TIER_ID_KEY]: args.targetTierId,
+    [MOVE_AT_KEY]: String(args.moveAt),
+    [HOLD_PRICE_ID_KEY]: args.hold.priceId,
+    [HOLD_AMOUNT_KEY]: String(args.hold.amountCents),
+    [HOLD_PENDING_PRICE_ID_KEY]: args.parkedPendingPrice?.priceId ?? '',
+    [HOLD_PENDING_PRICE_FROM_KEY]: args.parkedPendingPrice?.from ?? '',
+    [PENDING_PRICE_ID_KEY]: '',
+    [PENDING_PRICE_FROM_KEY]: '',
+    ...billingMetadata(args.billing),
+  };
+}
+
+/** A live `codex_pending_price_*` marker, as a move parks it. */
+export function livePendingPrice(
+  metadata: Record<string, string> | null | undefined
+): { priceId: string; from: string } | null {
+  const priceId = metadata?.[PENDING_PRICE_ID_KEY];
+  const from = metadata?.[PENDING_PRICE_FROM_KEY];
+  return priceId && from ? { priceId, from } : null;
 }
 
 /**
@@ -172,11 +241,15 @@ export function keepMetadata(move: WaitingMove): Record<string, string> {
 
 /**
  * The flip's metadata (§5.1): the tier becomes the target and the move and
- * hold keys go (a parked price change belonged to the tier they left).
+ * hold keys go (a parked price change belonged to the tier they left). It is
+ * also phase 2's metadata on a change of billing's schedule, so Stripe flips
+ * the tier in the same update that puts the monthly Price on (proof P6).
  * `codex_pending_price_*` is left alone: a price change on the target (T6)
  * lands later through `applyDuePendingPriceChange`, as usual.
  */
-export function flipMetadata(move: WaitingMove): Record<string, string> {
+export function flipMetadata(
+  move: Pick<WaitingMove, 'tierId'>
+): Record<string, string> {
   return {
     codex_tier_id: move.tierId,
     ...CLEAR_MOVE_METADATA,
@@ -243,14 +316,25 @@ export interface TierChangeFacts {
    * compares plans on the same period, as the pricing page's buttons do (Q1).
    */
   targetAmountOnCurrentIntervalCents: number;
-  moveWaiting: boolean;
+  /**
+   * The target tier has a Stripe Price on the member's current billing
+   * period. A dearer plan on monthly billing, from yearly, changes now on
+   * yearly billing (C(b)); without a yearly Price the whole change waits
+   * instead (C(a), data design §2.3).
+   */
+  targetOnCurrentInterval: boolean;
+  /**
+   * What already waits for the renewal: a move to a cheaper plan on the same
+   * billing (`plan`), or a change of billing (`billing`, Codex-2hxff.97).
+   */
+  waiting: null | { kind: 'plan' | 'billing'; tierId: string };
   cancelling: boolean;
 }
 
 /**
- * Classify a change of plan (data design §1, every row). "Up or down" is
- * judged by price, on the member's current billing period (Q1). A dispute is
- * refused before this (`assertNotDisputed`).
+ * Classify a change of plan (data design §1, every row; Codex-2hxff.97 §3.1).
+ * "Up or down" is judged by price, on the member's current billing period
+ * (Q1). A dispute is refused before this (`assertNotDisputed`).
  */
 export function classifyTierChange(
   facts: TierChangeFacts
@@ -260,32 +344,61 @@ export function classifyTierChange(
   const sameBilling = facts.targetInterval === facts.currentInterval;
   const target = facts.targetAmountOnCurrentIntervalCents;
   const paid = facts.currentAmountCents;
+  const waiting = facts.waiting !== null;
+
+  if (!sameBilling && facts.targetInterval === 'month') {
+    // Leaving yearly billing waits for the year's end, with nothing credited
+    // (Codex-2hxff.97). It joins or replaces whatever already waits, since
+    // both land on the same renewal (latest wins, Q2); a dearer plan while
+    // something waits is still Keep first.
+    if (facts.targetTierId === facts.currentTierId) {
+      return { kind: 'billing_wait' };
+    }
+    if (target < paid) return { kind: 'move_with_billing' };
+    if (target > paid && waiting) return { refused: 'keep_first' };
+    // A dearer or same-price plan starts now on yearly billing (Q1), unless
+    // it has no yearly Price: then the whole change waits (C(a)).
+    return facts.targetOnCurrentInterval
+      ? { kind: 'change_then_billing_wait' }
+      : { kind: 'move_with_billing' };
+  }
 
   if (!sameBilling) {
+    // Into yearly billing: a new period starts today (Codex-2hxff.96), so
+    // nothing may be waiting for the renewal.
     if (facts.targetTierId === facts.currentTierId) {
-      return facts.moveWaiting
+      return waiting
         ? { refused: 'interval_while_moving' }
         : { kind: 'interval_switch' };
     }
     if (target < paid) return { refused: 'two_steps' };
     // Money moves at once, worked out from the item, which carries the
     // cheaper Price while a move waits.
-    return facts.moveWaiting
+    return waiting
       ? { refused: 'keep_first' }
       : { kind: 'cross_period_change' };
   }
 
-  // The plan they are on while a move waits is Keep current plan, which
+  // The plan they are on while something waits is Keep current plan, which
   // puts back the exact Price paid and any parked price change; a switch
   // now would put the tier's current Price on and lose both.
-  if (facts.moveWaiting && facts.targetTierId === facts.currentTierId) {
+  if (waiting && facts.targetTierId === facts.currentTierId) {
     return { refused: 'keep_first' };
   }
   if (target > paid) {
-    return facts.moveWaiting ? { refused: 'keep_first' } : { kind: 'upgrade' };
+    return waiting ? { refused: 'keep_first' } : { kind: 'upgrade' };
   }
   if (target < paid) return { kind: 'downgrade' };
   return { kind: 'lateral' };
+}
+
+/** A change of plan that leaves yearly billing at the year's end (Codex-2hxff.97). */
+export function waitsForBilling(kind: TierChangeKind): boolean {
+  return (
+    kind === 'billing_wait' ||
+    kind === 'move_with_billing' ||
+    kind === 'change_then_billing_wait'
+  );
 }
 
 /**

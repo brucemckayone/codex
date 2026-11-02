@@ -127,6 +127,7 @@ import {
   and,
   desc,
   eq,
+  gt,
   inArray,
   isNotNull,
   isNull,
@@ -146,12 +147,19 @@ import {
   SubscriptionCheckoutError,
   SubscriptionNotFoundError,
   SubscriptionPaymentRequiredError,
+  SubscriptionScheduledElsewhereError,
   TierChangeCancellingError,
   TierChangeIntervalWhileMovingError,
   TierChangePreviewExpiredError,
   TierChangeTwoStepsError,
   TierNotFoundError,
 } from '../errors';
+import {
+  billingScheduleUpdate,
+  isOurSchedule,
+  onLastPhase,
+  scheduleIdOf,
+} from './billing-change';
 import { alertIfCreditPaid } from './credit-paid-invoice';
 import {
   addMonthsClamped,
@@ -193,11 +201,13 @@ import {
   type RefundedCharge,
 } from './subscription-refund';
 import {
+  billingChangeMetadata,
   CLEAR_HOLD_METADATA,
   CLEAR_MOVE_METADATA,
   classifyTierChange,
   flipMetadata,
   keepMetadata,
+  livePendingPrice,
   MOVE_TIER_ID_KEY,
   moveMetadata,
   readWaitingMove,
@@ -205,6 +215,7 @@ import {
   type TierChangeKind,
   tierChangeQuote,
   type WaitingMove,
+  waitsForBilling,
 } from './tier-move';
 
 type Subscription = typeof subscriptions.$inferSelect;
@@ -253,8 +264,16 @@ interface TierChangePlan {
   newRecurringAmount: number;
   live: Stripe.Subscription;
   item: Stripe.SubscriptionItem;
-  /** The move to a cheaper plan already waiting, if any. */
+  /** The change already waiting (a move, or a change of billing), if any. */
   move: WaitingMove | null;
+  /**
+   * The monthly Price and amount a change leaving yearly billing waits for
+   * (Codex-2hxff.97). For C(b), `newPriceId` and `newRecurringAmount` are the
+   * target's YEARLY Price, put on now.
+   */
+  billing: { priceId: string; amountCents: number } | null;
+  /** Our schedule, when one is attached (`isOurSchedule`). */
+  schedule: Stripe.SubscriptionSchedule | null;
 }
 
 /**
@@ -264,10 +283,16 @@ interface TierChangePlan {
  * otherwise a credit for the unused time.
  */
 function nowProration(
-  plan: Pick<TierChangePlan, 'kind' | 'newRecurringAmount' | 'sub'>
+  plan: Pick<TierChangePlan, 'kind' | 'newRecurringAmount' | 'sub' | 'move'>
 ): 'always_invoice' | 'create_prorations' | 'none' {
   if (plan.kind === 'upgrade') return 'always_invoice';
   if (plan.kind === 'lateral' || plan.kind === 'downgrade') return 'none';
+  // C(b): the plan now on yearly billing, as an upgrade (dearer) or a
+  // same-price switch, against what the year was paid at.
+  if (plan.kind === 'change_then_billing_wait') {
+    const paid = plan.move?.holdAmountCents ?? plan.sub.amountCents;
+    return plan.newRecurringAmount > paid ? 'always_invoice' : 'none';
+  }
   return plan.newRecurringAmount > plan.sub.amountCents
     ? 'always_invoice'
     : 'create_prorations';
@@ -2753,18 +2778,29 @@ export class SubscriptionService extends BaseService {
   async handleSubscriptionUpdated(
     stripeSubscription: Stripe.Subscription
   ): Promise<WebhookHandlerResult | undefined> {
-    return this.syncFromStripe(stripeSubscription, 'subscription_updated');
+    return this.syncFromStripe(stripeSubscription, 'subscription_updated', {
+      fromEvent: true,
+    });
   }
 
   /**
    * Mirror a Stripe subscription onto our row: the webhook's update, and the
    * waiting-move paths that re-read the live subscription (the flip, Keep).
    * `reason` tags the cache bump.
+   *
+   * An event's snapshot can be stale: one written before a waiting change
+   * was made, delivered after (Codex-2hxff.97, data design §4.4). Mirrored
+   * as it is, it would clear the row's change, and the notice and Keep would
+   * vanish until the next event, while Stripe still makes the change. So an
+   * event without a waiting change, onto a row that holds one, is decided on
+   * the LIVE subscription instead: one Stripe call, only then.
    */
   private async syncFromStripe(
-    stripeSubscription: Stripe.Subscription,
-    reason: InvalidationReason
+    snapshot: Stripe.Subscription,
+    reason: InvalidationReason,
+    options: { fromEvent?: boolean } = {}
   ): Promise<WebhookHandlerResult | undefined> {
+    let stripeSubscription = snapshot;
     const stripeSubId = stripeSubscription.id;
 
     // Ordering race #3 (Codex-1hvda): customer.subscription.updated can arrive
@@ -2786,6 +2822,15 @@ export class SubscriptionService extends BaseService {
     // A duplicate is refunded and an ended subscription stays ended: a stale
     // payload saying `active` brings neither back (Codex-2hxff.15).
     if (await this.isInert(sub)) return undefined;
+
+    if (
+      options.fromEvent &&
+      sub.pendingTierId &&
+      !readWaitingMove(snapshot.metadata)
+    ) {
+      stripeSubscription =
+        await this.stripe.subscriptions.retrieve(stripeSubId);
+    }
 
     // Shared mapper prevents field drift (V1/V2/V5 in the audit). Passing
     // `sub.status` as the fallback preserves DB state if Stripe reports a
@@ -2833,10 +2878,14 @@ export class SubscriptionService extends BaseService {
       ...(mapped.currentPeriodEnd && {
         currentPeriodEnd: mapped.currentPeriodEnd,
       }),
-      // The waiting move, all three or none (the row's CHECK).
+      // The waiting move, all three or none (the row's CHECK), and a change
+      // of billing beside it.
       pendingTierId: mapped.pendingTierId,
       pendingTierFrom: mapped.pendingTierFrom,
       heldAmountCents: mapped.heldAmountCents,
+      pendingBillingInterval: mapped.pendingBillingInterval,
+      pendingAmountCents: mapped.pendingAmountCents,
+      stripeScheduleId: mapped.stripeScheduleId,
       updatedAt: new Date(),
     };
     if (revives(sub.status, mapped.status)) {
@@ -2865,7 +2914,11 @@ export class SubscriptionService extends BaseService {
       stripeSubscription,
       sub.id,
       newTierId ?? sub.tierId,
-      mapped.pendingTierId
+      // A landed change of billing whose flip is still to be written bills
+      // its target's Price already (not mirrored as waiting, but not off-tier).
+      mapped.pendingTierId ??
+        readWaitingMove(stripeSubscription.metadata)?.tierId ??
+        null
     );
 
     // Orchestrator hook: tier changes, status flips (active ↔ cancelling
@@ -3426,6 +3479,40 @@ export class SubscriptionService extends BaseService {
       );
       const prorationDate = Math.floor(Date.now() / 1000);
       const periodEnd = new Date(plan.item.current_period_end * 1000);
+      const replaces = await this.replacedChange(plan);
+
+      // Leaving yearly billing (Codex-2hxff.97): the monthly bill starts at
+      // the renewal. For A and B the plan waits with it and nothing happens
+      // today, so Stripe is not asked; the period end is the live one, never
+      // a month from today (nothing starts today). For C(b) the plan changes
+      // now on yearly billing, previewed as any change now.
+      if (plan.billing) {
+        const billingChange = {
+          interval: BILLING_INTERVAL.MONTH,
+          amountCents: plan.billing.amountCents,
+          effectiveAt: periodEnd.toISOString(),
+        };
+        const charges = nowProration(plan) === 'always_invoice';
+        const shown =
+          plan.kind === 'change_then_billing_wait' && charges
+            ? await this.previewNow(plan, prorationDate)
+            : {
+                amountDueCents: 0,
+                prorationLineItems: [],
+                currentPeriodEnd: periodEnd,
+              };
+        return {
+          ...shown,
+          newRecurringAmountCents: plan.billing.amountCents,
+          newRecurringInterval: BILLING_INTERVAL.MONTH,
+          prorationDate,
+          isUpgrade: plan.kind === 'change_then_billing_wait' && charges,
+          takesEffect:
+            plan.kind === 'change_then_billing_wait' ? 'now' : 'period_end',
+          billingChange,
+          replaces,
+        };
+      }
 
       // Nothing is prorated: a move waits for the renewal (it reads only the
       // live period end), and a same-price switch moves no money (Q4).
@@ -3440,7 +3527,7 @@ export class SubscriptionService extends BaseService {
           takesEffect: plan.kind === 'downgrade' ? 'period_end' : 'now',
           currentPeriodEnd: periodEnd,
           billingChange: null,
-          replaces: null,
+          replaces,
         };
       }
 
@@ -3453,7 +3540,7 @@ export class SubscriptionService extends BaseService {
         isUpgrade: nowProration(plan) === 'always_invoice',
         takesEffect: 'now',
         billingChange: null,
-        replaces: null,
+        replaces,
       };
     } catch (error) {
       this.handleError(error, 'previewTierChange');
@@ -3508,7 +3595,7 @@ export class SubscriptionService extends BaseService {
         amountCents: line.amount,
       }));
     const currentPeriodEnd =
-      plan.kind === 'upgrade'
+      plan.kind === 'upgrade' || plan.kind === 'change_then_billing_wait'
         ? new Date(plan.item.current_period_end * 1000)
         : new Date(
             addMonthsClamped(
@@ -3528,6 +3615,42 @@ export class SubscriptionService extends BaseService {
           nextBillAt: currentPeriodEnd,
         }),
       }),
+    };
+  }
+
+  /**
+   * The waiting change a pick replaces (latest wins), for the dialog's
+   * "instead of": its tier, and what it would bill. A move to a cheaper plan
+   * bills the Price already on the item; a change of billing, phase 2's.
+   * Refused picks never reach here, so any waiting change is replaced.
+   */
+  private async replacedChange(
+    plan: TierChangePlan
+  ): Promise<TierChangePreview['replaces']> {
+    const { move } = plan;
+    if (!move) return null;
+    const [tier] = await this.db
+      .select({ name: subscriptionTiers.name })
+      .from(subscriptionTiers)
+      .where(
+        and(
+          eq(subscriptionTiers.id, move.tierId),
+          eq(subscriptionTiers.organizationId, plan.sub.organizationId)
+        )
+      )
+      .limit(1);
+    return {
+      tierId: move.tierId,
+      tierName: tier?.name ?? '',
+      interval:
+        move.billing?.interval ??
+        (plan.sub.billingInterval === BILLING_INTERVAL.YEAR
+          ? BILLING_INTERVAL.YEAR
+          : BILLING_INTERVAL.MONTH),
+      amountCents:
+        move.billing?.amountCents ??
+        plan.item.price.unit_amount ??
+        plan.sub.amountCents,
     };
   }
 
@@ -3612,7 +3735,21 @@ export class SubscriptionService extends BaseService {
         }
       }
 
-      if (plan.kind === 'downgrade') {
+      if (plan.billing) {
+        await this.waitForBillingChange(
+          plan,
+          plan.billing,
+          effectiveProrationDate
+        );
+        // C(b) changes the plan now, and so the library.
+        this.invalidateIfConfigured(
+          userId,
+          orgId,
+          plan.kind === 'change_then_billing_wait'
+            ? 'change_tier'
+            : 'tier_move_scheduled'
+        );
+      } else if (plan.kind === 'downgrade') {
         await this.scheduleTierMove(plan, effectiveProrationDate);
         this.invalidateIfConfigured(userId, orgId, 'tier_move_scheduled');
       } else {
@@ -3693,6 +3830,9 @@ export class SubscriptionService extends BaseService {
       throw new SubscriptionCheckoutError('No subscription item found');
     }
 
+    // A schedule we did not make is never written through (§3.4).
+    const schedule = await this.ourScheduleOrThrow(live, orgId);
+
     // The move as Stripe holds it: the row can lag a write by a webhook.
     const move = readWaitingMove(live.metadata);
     const currentInterval =
@@ -3703,6 +3843,10 @@ export class SubscriptionService extends BaseService {
       interval === BILLING_INTERVAL.MONTH
         ? newTier.priceMonthly
         : newTier.priceAnnual;
+    const priceIdOn = (interval: 'month' | 'year') =>
+      interval === BILLING_INTERVAL.MONTH
+        ? newTier.stripePriceMonthlyId
+        : newTier.stripePriceAnnualId;
 
     const verdict = classifyTierChange({
       currentTierId: sub.tierId,
@@ -3711,7 +3855,11 @@ export class SubscriptionService extends BaseService {
       targetTierId: newTierId,
       targetInterval: billingInterval,
       targetAmountOnCurrentIntervalCents: priceOn(currentInterval),
-      moveWaiting: move !== null,
+      targetOnCurrentInterval: priceIdOn(currentInterval) !== null,
+      waiting: move && {
+        kind: move.billing ? 'billing' : 'plan',
+        tierId: move.tierId,
+      },
       cancelling: live.cancel_at_period_end === true,
     });
     if ('refused' in verdict) {
@@ -3730,17 +3878,71 @@ export class SubscriptionService extends BaseService {
       }
     }
 
+    const billing = waitsForBilling(verdict.kind)
+      ? { priceId: newPriceId, amountCents: priceOn(billingInterval) }
+      : null;
+    // C(b): the plan changes now on the member's current (yearly) billing.
+    const nowOnYear = verdict.kind === 'change_then_billing_wait';
+    const yearPriceId = priceIdOn(currentInterval);
     return {
       kind: verdict.kind,
       sub,
       newTierId,
-      newPriceId,
+      newPriceId: nowOnYear && yearPriceId ? yearPriceId : newPriceId,
       billingInterval,
-      newRecurringAmount: priceOn(billingInterval),
+      newRecurringAmount: nowOnYear
+        ? priceOn(currentInterval)
+        : priceOn(billingInterval),
       live,
       item,
       move,
+      billing,
+      schedule,
     };
+  }
+
+  /**
+   * The schedule attached to `live`, when it is ours (billing-change.ts), or
+   * null with none attached. Someone else's (one made in the Stripe
+   * Dashboard, say) is refused before anything is written, with one alert
+   * for support: writing through it would change or split its phases.
+   */
+  private async ourScheduleOrThrow(
+    live: Stripe.Subscription,
+    organizationId: string
+  ): Promise<Stripe.SubscriptionSchedule | null> {
+    const scheduleId = scheduleIdOf(live);
+    if (!scheduleId) return null;
+    const schedule =
+      await this.stripe.subscriptionSchedules.retrieve(scheduleId);
+    if (isOurSchedule(schedule, live.metadata)) return schedule;
+    const errorId = crypto.randomUUID();
+    this.obs.error(
+      'Subscription is managed by a Stripe schedule that is not ours; nothing was changed (support: docs/payments/subscriptions.md → Waiting changes of billing)',
+      {
+        errorId,
+        stripeSubscriptionId: live.id,
+        stripeScheduleId: scheduleId,
+        organizationId,
+      }
+    );
+    throw new SubscriptionScheduledElsewhereError(organizationId, errorId);
+  }
+
+  /**
+   * Let go of our schedule (Stripe's `release`): the subscription keeps its
+   * items as they stand and nothing is invoiced (proof P2). `key` makes a
+   * retry replay.
+   */
+  private async releaseSchedule(
+    schedule: Pick<Stripe.SubscriptionSchedule, 'id'>,
+    key: string
+  ): Promise<void> {
+    await this.stripe.subscriptionSchedules.release(
+      schedule.id,
+      {},
+      { idempotencyKey: key }
+    );
   }
 
   /**
@@ -3751,6 +3953,101 @@ export class SubscriptionService extends BaseService {
   private async changeTierNow(
     plan: TierChangePlan,
     effectiveProrationDate: number
+  ): Promise<void> {
+    const { sub, newTierId, newPriceId, billingInterval } = plan;
+    const { userId, organizationId: orgId } = sub;
+    const proration = nowProration(plan);
+
+    // An item write would split a schedule's phase (proof P4). Ours carries a
+    // change of billing this one replaces, or lingers from one that landed.
+    if (plan.schedule) {
+      await this.releaseSchedule(
+        plan.schedule,
+        `billing-release-now_${plan.schedule.id}_${effectiveProrationDate}`
+      );
+    }
+
+    await this.writeChangeNow(
+      plan,
+      effectiveProrationDate,
+      {
+        codex_tier_id: newTierId,
+        codex_user_id: userId,
+        codex_organization_id: orgId,
+        // A pending price change belonged to the OLD tier's Price; the
+        // new tier's Price supersedes it (Codex-2hxff.3). A same-price
+        // switch also replaces a waiting move (latest wins, Q4).
+        ...CLEAR_PENDING_PRICE_METADATA,
+        ...CLEAR_MOVE_METADATA,
+        ...CLEAR_HOLD_METADATA,
+      },
+      // One key per subscription, target price and preview: a double
+      // click replays, while upgrade → downgrade → the same upgrade with
+      // a fresh preview makes three changes (Codex-2hxff.15, SUB-12).
+      `${NOW_CHANGE_KEY_PREFIX[proration]}_${sub.id}_${newPriceId}_${effectiveProrationDate}`
+    );
+
+    // BUG-020: Stripe succeeded — now the local record. If this write fails,
+    // customer.subscription.updated reconciles from Stripe's metadata; it is
+    // logged, not rethrown. The amount is mirrored at once so the account
+    // page shows the new price without waiting for the webhook, with the
+    // split recomputed: the row's CHECK requires
+    // amount_cents = platform_fee + org_fee + creator_payout (Codex-m644n).
+    const newSplit = await this.computeSubscriptionSplit(
+      orgId,
+      plan.newRecurringAmount
+    );
+    try {
+      await this.db
+        .update(subscriptions)
+        .set({
+          tierId: newTierId,
+          billingInterval,
+          amountCents: plan.newRecurringAmount,
+          platformFeeCents: newSplit.platformFeeCents,
+          organizationFeeCents: newSplit.organizationFeeCents,
+          creatorPayoutCents: newSplit.creatorPayoutCents,
+          ...NO_PENDING_MOVE,
+          ...(plan.schedule && { stripeScheduleId: null }),
+          updatedAt: new Date(),
+        })
+        .where(eq(subscriptions.id, sub.id));
+    } catch (dbError) {
+      this.obs.error(
+        'changeTier: DB update failed after Stripe succeeded — webhook will reconcile',
+        {
+          subscriptionId: sub.id,
+          stripeSubscriptionId: sub.stripeSubscriptionId,
+          oldTierId: sub.tierId,
+          newTierId,
+          billingInterval,
+          error: (dbError as Error).message,
+        }
+      );
+    }
+
+    this.obs.info('Subscription tier changed', {
+      subscriptionId: sub.id,
+      oldTierId: sub.tierId,
+      newTierId,
+      billingInterval,
+      kind: plan.kind,
+      // A same-price switch replaced a waiting move (latest wins).
+      replacedMoveTierId: plan.move?.tierId ?? null,
+    });
+  }
+
+  /**
+   * The Stripe write of a change made now: the target Price on the item,
+   * prorated as `nowProration` says and pinned to the preview's date, with
+   * `metadata`. A charge must clear first: on 402 Stripe reverts the update
+   * and this throws `SubscriptionPaymentRequiredError`, nothing changed.
+   */
+  private async writeChangeNow(
+    plan: TierChangePlan,
+    effectiveProrationDate: number,
+    metadata: Record<string, string>,
+    idempotencyKey: string
   ): Promise<void> {
     const { sub, newTierId, newPriceId, billingInterval, item } = plan;
     const { userId, organizationId: orgId } = sub;
@@ -3781,24 +4078,9 @@ export class SubscriptionService extends BaseService {
           ...(chargesNow && {
             payment_behavior: 'error_if_incomplete' as const,
           }),
-          metadata: {
-            codex_tier_id: newTierId,
-            codex_user_id: userId,
-            codex_organization_id: orgId,
-            // A pending price change belonged to the OLD tier's Price; the
-            // new tier's Price supersedes it (Codex-2hxff.3). A same-price
-            // switch also replaces a waiting move (latest wins, Q4).
-            ...CLEAR_PENDING_PRICE_METADATA,
-            ...CLEAR_MOVE_METADATA,
-            ...CLEAR_HOLD_METADATA,
-          },
+          metadata,
         },
-        // One key per subscription, target price and preview: a double
-        // click replays, while upgrade → downgrade → the same upgrade with
-        // a fresh preview makes three changes (Codex-2hxff.15, SUB-12).
-        {
-          idempotencyKey: `${NOW_CHANGE_KEY_PREFIX[proration]}_${sub.id}_${newPriceId}_${effectiveProrationDate}`,
-        }
+        { idempotencyKey }
       );
     } catch (stripeError) {
       const statusCode = (stripeError as { statusCode?: number })?.statusCode;
@@ -3839,54 +4121,6 @@ export class SubscriptionService extends BaseService {
       }
       throw stripeError;
     }
-
-    // BUG-020: Stripe succeeded — now the local record. If this write fails,
-    // customer.subscription.updated reconciles from Stripe's metadata; it is
-    // logged, not rethrown. The amount is mirrored at once so the account
-    // page shows the new price without waiting for the webhook, with the
-    // split recomputed: the row's CHECK requires
-    // amount_cents = platform_fee + org_fee + creator_payout (Codex-m644n).
-    const newSplit = await this.computeSubscriptionSplit(
-      orgId,
-      plan.newRecurringAmount
-    );
-    try {
-      await this.db
-        .update(subscriptions)
-        .set({
-          tierId: newTierId,
-          billingInterval,
-          amountCents: plan.newRecurringAmount,
-          platformFeeCents: newSplit.platformFeeCents,
-          organizationFeeCents: newSplit.organizationFeeCents,
-          creatorPayoutCents: newSplit.creatorPayoutCents,
-          ...NO_PENDING_MOVE,
-          updatedAt: new Date(),
-        })
-        .where(eq(subscriptions.id, sub.id));
-    } catch (dbError) {
-      this.obs.error(
-        'changeTier: DB update failed after Stripe succeeded — webhook will reconcile',
-        {
-          subscriptionId: sub.id,
-          stripeSubscriptionId: sub.stripeSubscriptionId,
-          oldTierId: sub.tierId,
-          newTierId,
-          billingInterval,
-          error: (dbError as Error).message,
-        }
-      );
-    }
-
-    this.obs.info('Subscription tier changed', {
-      subscriptionId: sub.id,
-      oldTierId: sub.tierId,
-      newTierId,
-      billingInterval,
-      kind: plan.kind,
-      // A same-price switch replaced a waiting move (latest wins).
-      replacedMoveTierId: plan.move?.tierId ?? null,
-    });
   }
 
   /**
@@ -3908,6 +4142,16 @@ export class SubscriptionService extends BaseService {
     const moveAt = item.current_period_end;
     const heldAmountCents =
       move?.holdAmountCents ?? item.price.unit_amount ?? sub.amountCents;
+
+    // A cheaper plan on the current billing replaces a waiting change of
+    // billing (Codex-2hxff.97, §2.4): its schedule goes first (an item write
+    // would split its phase, proof P4), then the move below keeps its hold.
+    if (plan.schedule) {
+      await this.releaseSchedule(
+        plan.schedule,
+        `billing-release-move_${plan.schedule.id}_${effectiveProrationDate}`
+      );
+    }
 
     await this.stripe.subscriptions.update(
       sub.stripeSubscriptionId,
@@ -3949,6 +4193,9 @@ export class SubscriptionService extends BaseService {
           pendingTierId: newTierId,
           pendingTierFrom: new Date(moveAt * 1000),
           heldAmountCents,
+          pendingBillingInterval: null,
+          pendingAmountCents: null,
+          ...(plan.schedule && { stripeScheduleId: null }),
           amountCents: plan.newRecurringAmount,
           platformFeeCents: split.platformFeeCents,
           organizationFeeCents: split.organizationFeeCents,
@@ -3979,6 +4226,293 @@ export class SubscriptionService extends BaseService {
       replacedTierId: move?.tierId ?? null,
       moveAt: new Date(moveAt * 1000).toISOString(),
     });
+  }
+
+  /**
+   * A change that leaves yearly billing at the year's end (Codex-2hxff.97,
+   * data design §2): A, the same plan; B, a cheaper plan (Q3); C(b), a dearer
+   * or same-price plan now on yearly billing (Q1). Nothing is credited: the
+   * paid year runs on, and a Stripe schedule puts the monthly Price on at the
+   * renewal, flipping the tier in the same update (proofs P1, P5, P6).
+   *
+   * 1. The record on the subscription first, so every later event snapshot
+   *    carries it (§4.4). C(b) writes it with its change now. A waiting move
+   *    it replaces (D, Q2) has its held Price put back in the same write, as
+   *    Keep's would (proof P7).
+   * 2. The schedule from the subscription, unless ours is attached: a
+   *    waiting change of billing is then replaced in place (latest wins,
+   *    §2.4). C(b) writes the item, so it lets ours go first.
+   * 3. Its phases: the paid year as it stands, then the monthly Price.
+   *
+   * If 2 or 3 fails for A or B, the record is put back as it was and the
+   * error stands: nothing changed. C(b)'s plan has changed and been paid for,
+   * so its record stays and the hourly backstop makes the schedule (§5.2).
+   */
+  private async waitForBillingChange(
+    plan: TierChangePlan,
+    billing: { priceId: string; amountCents: number },
+    effectiveProrationDate: number
+  ): Promise<void> {
+    const { sub, item, live, move, newTierId } = plan;
+    const planNow = plan.kind === 'change_then_billing_wait';
+    const moveAt = item.current_period_end;
+    // What the item carries for the rest of the year: C(b)'s new yearly
+    // Price, a replaced move's held Price (put back), or the Price on it.
+    const hold = planNow
+      ? { priceId: plan.newPriceId, amountCents: plan.newRecurringAmount }
+      : move
+        ? { priceId: move.holdPriceId, amountCents: move.holdAmountCents }
+        : {
+            priceId: item.price.id,
+            amountCents: item.price.unit_amount ?? sub.amountCents,
+          };
+    const putBack = !planNow && move !== null && move.billing === null;
+    const record = billingChangeMetadata({
+      tierId: planNow ? newTierId : sub.tierId,
+      userId: sub.userId,
+      organizationId: sub.organizationId,
+      targetTierId: newTierId,
+      moveAt,
+      hold,
+      // C(b) leaves the tier now, so a price change on it goes (as any change
+      // now); otherwise one on the tier being left stays parked.
+      parkedPendingPrice: planNow
+        ? null
+        : move
+          ? move.parkedPendingPrice
+          : livePendingPrice(live.metadata),
+      billing: {
+        interval: BILLING_INTERVAL.MONTH,
+        priceId: billing.priceId,
+        amountCents: billing.amountCents,
+      },
+    });
+
+    let schedule = plan.schedule;
+    if (schedule && (planNow || move?.billing == null)) {
+      await this.releaseSchedule(
+        schedule,
+        `billing-release-change_${schedule.id}_${effectiveProrationDate}`
+      );
+      schedule = null;
+    }
+
+    // Step 1.
+    if (planNow) {
+      await this.writeChangeNow(
+        plan,
+        effectiveProrationDate,
+        record,
+        `${NOW_CHANGE_KEY_PREFIX[nowProration(plan)]}-billing_${sub.id}_${plan.newPriceId}_${effectiveProrationDate}`
+      );
+    } else {
+      if (putBack && move)
+        await ensurePriceActive(this.stripe, move.holdPriceId);
+      await this.stripe.subscriptions.update(
+        sub.stripeSubscriptionId,
+        {
+          ...(putBack &&
+            move && {
+              items: [{ id: item.id, price: move.holdPriceId }],
+              proration_behavior: 'none' as const,
+            }),
+          metadata: record,
+        },
+        {
+          idempotencyKey: `billing_${sub.id}_${billing.priceId}_${moveAt}_${effectiveProrationDate}`,
+        }
+      );
+    }
+
+    // Steps 2 and 3.
+    let scheduleId: string | null = null;
+    try {
+      scheduleId = await this.setBillingSchedule({
+        subscriptionId: sub.id,
+        stripeSubscriptionId: sub.stripeSubscriptionId,
+        schedule,
+        priceId: billing.priceId,
+        targetTierId: newTierId,
+        moveAt,
+        stamp: effectiveProrationDate,
+      });
+    } catch (error) {
+      if (!planNow) {
+        await this.putBackRecord(plan, record, putBack, effectiveProrationDate);
+        throw error;
+      }
+      this.obs.warn(
+        'billing_change.schedule_failed: the plan changed now; the hourly backstop sets the change of billing',
+        {
+          subscriptionId: sub.id,
+          stripeSubscriptionId: sub.stripeSubscriptionId,
+          organizationId: sub.organizationId,
+          error: describeThrown(error),
+        }
+      );
+    }
+
+    const split = await this.computeSubscriptionSplit(
+      sub.organizationId,
+      hold.amountCents
+    );
+    try {
+      await this.db
+        .update(subscriptions)
+        .set({
+          ...(planNow && { tierId: newTierId }),
+          amountCents: hold.amountCents,
+          platformFeeCents: split.platformFeeCents,
+          organizationFeeCents: split.organizationFeeCents,
+          creatorPayoutCents: split.creatorPayoutCents,
+          pendingTierId: newTierId,
+          pendingTierFrom: new Date(moveAt * 1000),
+          heldAmountCents: hold.amountCents,
+          pendingBillingInterval: BILLING_INTERVAL.MONTH,
+          pendingAmountCents: billing.amountCents,
+          stripeScheduleId: scheduleId,
+          updatedAt: new Date(),
+        })
+        .where(eq(subscriptions.id, sub.id));
+    } catch (dbError) {
+      // As for any change (BUG-020): customer.subscription.updated mirrors
+      // the record and the schedule from Stripe.
+      this.obs.error(
+        'changeTier: DB update failed after the change of billing was written — webhook will reconcile',
+        {
+          subscriptionId: sub.id,
+          stripeSubscriptionId: sub.stripeSubscriptionId,
+          tierId: sub.tierId,
+          pendingTierId: newTierId,
+          error: describeThrown(dbError),
+        }
+      );
+    }
+
+    this.obs.info(
+      move ? 'billing_change.replaced' : 'billing_change.scheduled',
+      {
+        subscriptionId: sub.id,
+        organizationId: sub.organizationId,
+        kind: plan.kind,
+        tierId: sub.tierId,
+        pendingTierId: newTierId,
+        replacedTierId: move?.tierId ?? null,
+        stripeScheduleId: scheduleId,
+        moveAt: new Date(moveAt * 1000).toISOString(),
+      }
+    );
+  }
+
+  /**
+   * A waiting change of billing's schedule (§2.2 steps 2-3): made from the
+   * subscription, or `schedule` (ours) updated in place, its phases the paid
+   * year as it stands and then `priceId` for a month with the flip. A schedule
+   * made here whose update fails is let go (best effort), so no half-made
+   * one is left attached. Never while the subscription is set to cancel:
+   * `from_subscription` would undo the cancel (proof P10). Returns its id.
+   */
+  private async setBillingSchedule(args: {
+    subscriptionId: string;
+    stripeSubscriptionId: string;
+    schedule: Stripe.SubscriptionSchedule | null;
+    priceId: string;
+    targetTierId: string;
+    moveAt: number;
+    /** What makes each attempt's keys its own: the preview's date, or the row's version. */
+    stamp: number | string;
+  }): Promise<string> {
+    const created = args.schedule
+      ? null
+      : await this.stripe.subscriptionSchedules.create(
+          { from_subscription: args.stripeSubscriptionId },
+          {
+            idempotencyKey: `billing-sched_${args.subscriptionId}_${args.moveAt}_${args.stamp}`,
+          }
+        );
+    const base = args.schedule ?? created;
+    if (!base) {
+      throw new InternalServiceError('No subscription schedule to update', {
+        subscriptionId: args.subscriptionId,
+      });
+    }
+    try {
+      await this.stripe.subscriptionSchedules.update(
+        base.id,
+        billingScheduleUpdate({
+          schedule: base,
+          priceId: args.priceId,
+          flip: flipMetadata({ tierId: args.targetTierId }),
+          environment: this.environment,
+          envKey: STRIPE_ENV_METADATA_KEY,
+          subscriptionId: args.subscriptionId,
+        }),
+        {
+          idempotencyKey: `billing-sched-set_${base.id}_${args.priceId}_${args.moveAt}_${args.stamp}`,
+        }
+      );
+    } catch (error) {
+      if (created) {
+        await this.releaseSchedule(
+          created,
+          `billing-undo-sched_${created.id}`
+        ).catch((releaseError: unknown) =>
+          this.obs.warn('billing_change.undo_release_failed', {
+            subscriptionId: args.subscriptionId,
+            stripeScheduleId: created.id,
+            error: describeThrown(releaseError),
+          })
+        );
+      }
+      throw error;
+    }
+    return base.id;
+  }
+
+  /**
+   * Put a subscription's metadata back as it was before a change of billing
+   * whose schedule could not be set (§2.2): every key the record wrote takes
+   * its earlier value, or goes. A replaced move's cheaper Price goes back on
+   * the item too. Best effort: a failure here is one alert, and the hourly
+   * backstop finishes the schedule from the record, since the member asked
+   * for it.
+   */
+  private async putBackRecord(
+    plan: TierChangePlan,
+    record: Record<string, string>,
+    putBack: boolean,
+    effectiveProrationDate: number
+  ): Promise<void> {
+    const { sub, item, live } = plan;
+    const earlier = Object.fromEntries(
+      Object.keys(record).map((key) => [key, live.metadata?.[key] ?? ''])
+    );
+    try {
+      await this.stripe.subscriptions.update(
+        sub.stripeSubscriptionId,
+        {
+          ...(putBack && {
+            items: [{ id: item.id, price: item.price.id }],
+            proration_behavior: 'none' as const,
+          }),
+          metadata: earlier,
+        },
+        {
+          idempotencyKey: `billing-undo_${sub.id}_${item.current_period_end}_${effectiveProrationDate}`,
+        }
+      );
+    } catch (error) {
+      this.obs.error(
+        'billing_change.undo_failed: a change of billing was recorded but its schedule could not be set; the hourly backstop sets it (support: docs/payments/subscriptions.md → Waiting changes of billing)',
+        {
+          errorId: crypto.randomUUID(),
+          subscriptionId: sub.id,
+          stripeSubscriptionId: sub.stripeSubscriptionId,
+          organizationId: sub.organizationId,
+          error: describeThrown(error),
+        }
+      );
+    }
   }
 
   /**
@@ -4024,6 +4558,20 @@ export class SubscriptionService extends BaseService {
     try {
       const sub = await this.getSubscriptionOrThrow(userId, orgId);
 
+      // Stripe refuses `cancel_at_period_end` on a subscription its schedule
+      // manages (proof P3). Ours, carrying a waiting change of billing, is let
+      // go first; the record stays, so a reactivate sets it again (T4).
+      const live = await this.stripe.subscriptions.retrieve(
+        sub.stripeSubscriptionId
+      );
+      const schedule = await this.ourScheduleOrThrow(live, orgId);
+      if (schedule) {
+        await this.releaseSchedule(
+          schedule,
+          `billing-release-cancel_${schedule.id}_${sub.updatedAt.getTime()}`
+        );
+      }
+
       await this.stripe.subscriptions.update(sub.stripeSubscriptionId, {
         cancel_at_period_end: true,
       });
@@ -4034,6 +4582,7 @@ export class SubscriptionService extends BaseService {
           status: SUBSCRIPTION_STATUS.CANCELLING,
           cancelReason: reason ?? null,
           churnReason: churnReason ?? null,
+          ...(schedule && { stripeScheduleId: null }),
           updatedAt: new Date(),
         })
         .where(eq(subscriptions.id, sub.id));
@@ -4201,9 +4750,10 @@ export class SubscriptionService extends BaseService {
         );
       }
 
-      await this.stripe.subscriptions.update(sub.stripeSubscriptionId, {
-        cancel_at_period_end: false,
-      });
+      const reactivated = await this.stripe.subscriptions.update(
+        sub.stripeSubscriptionId,
+        { cancel_at_period_end: false }
+      );
 
       await this.db
         .update(subscriptions)
@@ -4218,6 +4768,10 @@ export class SubscriptionService extends BaseService {
         subscriptionId: sub.id,
         organizationId: orgId,
       });
+
+      // A change of billing that survived the cancel waits again (T4): its
+      // schedule is set once the cancel is undone, never before (proof P10).
+      await this.rescheduleBillingChange(sub, reactivated, 'reactivate');
 
       // Orchestrator hook: reactivation restores access — bump both
       // caches so other devices drop the CANCELLING badge immediately.
@@ -4261,6 +4815,7 @@ export class SubscriptionService extends BaseService {
       const live = await this.stripe.subscriptions.retrieve(
         sub.stripeSubscriptionId
       );
+      const schedule = await this.ourScheduleOrThrow(live, orgId);
       const move = readWaitingMove(live.metadata);
       if (!move) {
         // Nothing waits at Stripe. A row still showing a move lags it (a
@@ -4277,6 +4832,20 @@ export class SubscriptionService extends BaseService {
       }
       if (item.current_period_start >= move.at) {
         throw new MoveAlreadyLandedError(orgId);
+      }
+
+      if (move.billing) {
+        await this.keepYearlyBilling(sub, move, schedule);
+        this.invalidateIfConfigured(userId, orgId, 'tier_move_kept');
+        return { userId, orgId, subscription: sub };
+      }
+      // A plan move's Keep writes the item: one of our schedules left over
+      // from a change of billing that landed is let go first (proof P4).
+      if (schedule) {
+        await this.releaseSchedule(
+          schedule,
+          `billing-release-keep_${schedule.id}_${sub.updatedAt.getTime()}`
+        );
       }
 
       // The held tier may have been repriced while the move waited, which
@@ -4332,6 +4901,120 @@ export class SubscriptionService extends BaseService {
       return { userId, orgId, subscription: sub };
     } catch (error) {
       this.handleError(error, 'keepCurrentPlan');
+    }
+  }
+
+  /**
+   * Keep current plan for a waiting change of billing (Codex-2hxff.97, data
+   * design §3.5; Q4: one Keep undoes the whole change). The schedule goes
+   * (proof P2: the year then renews yearly), then one metadata write clears
+   * the record and puts a parked price change back. No item write: the item
+   * never changed, so nothing is charged and the amount stands.
+   */
+  private async keepYearlyBilling(
+    sub: Subscription,
+    move: WaitingMove,
+    schedule: Stripe.SubscriptionSchedule | null
+  ): Promise<void> {
+    if (schedule) {
+      await this.releaseSchedule(
+        schedule,
+        `billing-keep_${schedule.id}_${sub.updatedAt.getTime()}`
+      );
+    }
+    await this.stripe.subscriptions.update(
+      sub.stripeSubscriptionId,
+      { metadata: keepMetadata(move) },
+      {
+        idempotencyKey: `keep-billing_${sub.id}_${move.at}_${sub.updatedAt.getTime()}`,
+      }
+    );
+    try {
+      await this.db
+        .update(subscriptions)
+        .set({
+          ...NO_PENDING_MOVE,
+          stripeScheduleId: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(subscriptions.id, sub.id));
+    } catch (dbError) {
+      // As for a tier change (BUG-020): customer.subscription.updated
+      // mirrors the cleared change from Stripe.
+      this.obs.error(
+        'keepCurrentPlan: DB update failed after Stripe succeeded — webhook will reconcile',
+        {
+          subscriptionId: sub.id,
+          stripeSubscriptionId: sub.stripeSubscriptionId,
+          error: describeThrown(dbError),
+        }
+      );
+    }
+    await this.rejoinPriceChange(sub, move);
+  }
+
+  /**
+   * Set the schedule again for a change of billing whose record survived
+   * (§4.3, §5.2): after a reactivate, or by the hourly backstop. Only while
+   * the change still waits, nothing is attached and the subscription is not
+   * set to cancel (`from_subscription` would undo that, proof P10). Phase
+   * 2's Price may have been archived by a re-price since (proof P12): it is
+   * made billable first. Never throws: a failure is a warning, and the
+   * backstop sets it within the hour. `skipped`: there was nothing to set.
+   */
+  private async rescheduleBillingChange(
+    sub: Pick<Subscription, 'id' | 'stripeSubscriptionId' | 'organizationId'>,
+    live: Stripe.Subscription | undefined,
+    reason: 'reactivate' | 'backstop'
+  ): Promise<'set' | 'skipped' | 'failed'> {
+    const move = readWaitingMove(live?.metadata);
+    const item = live?.items?.data?.[0];
+    if (
+      !live ||
+      !move?.billing ||
+      !item ||
+      item.current_period_start >= move.at ||
+      live.cancel_at_period_end ||
+      scheduleIdOf(live) !== null
+    ) {
+      return 'skipped';
+    }
+    try {
+      await ensurePriceActive(this.stripe, move.billing.priceId);
+      const scheduleId = await this.setBillingSchedule({
+        subscriptionId: sub.id,
+        stripeSubscriptionId: sub.stripeSubscriptionId,
+        schedule: null,
+        priceId: move.billing.priceId,
+        targetTierId: move.tierId,
+        moveAt: move.at,
+        // One attempt per renewal of the record and run: a retry after a
+        // failure is a new attempt, not a replay of the failed one.
+        stamp: `${reason}-${Date.now()}`,
+      });
+      await this.db
+        .update(subscriptions)
+        .set({ stripeScheduleId: scheduleId, updatedAt: new Date() })
+        .where(eq(subscriptions.id, sub.id));
+      this.obs.info('billing_change.rescheduled', {
+        subscriptionId: sub.id,
+        organizationId: sub.organizationId,
+        stripeScheduleId: scheduleId,
+        reason,
+      });
+      return 'set';
+    } catch (error) {
+      this.obs.warn(
+        'billing_change.reschedule_failed: the hourly backstop sets it again',
+        {
+          subscriptionId: sub.id,
+          stripeSubscriptionId: sub.stripeSubscriptionId,
+          organizationId: sub.organizationId,
+          reason,
+          error: describeThrown(error),
+        }
+      );
+      return 'failed';
     }
   }
 
@@ -4453,9 +5136,13 @@ export class SubscriptionService extends BaseService {
     options: { alertIfBlocked?: boolean } = {}
   ): Promise<'applied' | 'not_due' | 'none' | 'blocked'> {
     const row = await this.findByStripeId(eventSubscription.id);
+    // A change of billing flips by its schedule at the renewal, and the sync
+    // before this has already cleared the row's move: the schedule mirrored
+    // on the row is what is left to let go of (Codex-2hxff.97, §4.1).
     if (
       !eventSubscription.metadata?.[MOVE_TIER_ID_KEY] &&
-      !row?.pendingTierId
+      !row?.pendingTierId &&
+      !row?.stripeScheduleId
     ) {
       return 'none';
     }
@@ -4465,19 +5152,49 @@ export class SubscriptionService extends BaseService {
     if (endedAtStripeStatus(live.status)) {
       // Ended at Stripe: the move survives a cancel only until then (T4).
       // Dropped from the row too, or the backstop would pick it every hour.
-      if (row?.pendingTierId) {
+      if (row?.pendingTierId || row?.stripeScheduleId) {
         await this.db
           .update(subscriptions)
-          .set({ ...NO_PENDING_MOVE, updatedAt: new Date() })
+          .set({
+            ...NO_PENDING_MOVE,
+            stripeScheduleId: null,
+            updatedAt: new Date(),
+          })
           .where(eq(subscriptions.id, row.id));
       }
       return 'none';
     }
+    const scheduleId = scheduleIdOf(live);
+    const schedule = scheduleId
+      ? await this.stripe.subscriptionSchedules.retrieve(scheduleId)
+      : null;
+    const ours =
+      schedule !== null && isOurSchedule(schedule, live.metadata)
+        ? schedule
+        : null;
     const move = readWaitingMove(live.metadata);
     if (!move) {
+      // A change of billing that landed: Stripe flipped the tier and cleared
+      // the record with phase 2's metadata (proof P6). Letting go of the
+      // schedule now frees the subscription for cancel and price changes,
+      // rather than a month on when the phase ends.
+      if (ours && onLastPhase(ours)) {
+        await this.releaseSchedule(ours, `billing-release_${ours.id}`);
+        await this.syncFromStripe(
+          { ...live, schedule: null },
+          'tier_move_applied'
+        );
+        this.obs.info('billing_change.applied', {
+          subscriptionId: row?.id ?? null,
+          stripeSubscriptionId: live.id,
+          stripeScheduleId: ours.id,
+          tierId: live.metadata?.codex_tier_id ?? null,
+        });
+        return 'applied';
+      }
       // Flipped or kept already: a row still showing the move lags Stripe (a
       // stale event), so mirror it from the live subscription.
-      if (row?.pendingTierId && !row.endedAt) {
+      if ((row?.pendingTierId || row?.stripeScheduleId) && !row.endedAt) {
         await this.syncFromStripe(live, 'tier_move_applied');
       }
       return 'none';
@@ -4505,12 +5222,46 @@ export class SubscriptionService extends BaseService {
       return 'blocked';
     }
 
+    // A change of billing whose renewal billed the year again: its schedule
+    // was not there to switch the Price (let go by a cancel, say, and not
+    // set again). Flipping the tier now would bill the old plan's yearly
+    // Price on the new plan, so it is left for support, as a deleted target.
+    const billedInterval = item.price.recurring?.interval;
+    if (
+      move.billing &&
+      billedInterval &&
+      billedInterval !== move.billing.interval
+    ) {
+      if (options.alertIfBlocked ?? true) {
+        this.obs.error('tier_move.apply_failed', {
+          errorId: crypto.randomUUID(),
+          reason: 'billing_not_switched',
+          subscriptionId: row?.id ?? null,
+          stripeSubscriptionId: live.id,
+          organizationId,
+          tierId: live.metadata?.codex_tier_id ?? row?.tierId ?? null,
+          targetTierId: move.tierId,
+          message:
+            'A waiting change of billing passed its renewal without its schedule; the renewal billed the old billing period (support: docs/payments/subscriptions.md → Waiting changes of billing)',
+        });
+      }
+      return 'blocked';
+    }
+
+    // Phase 2's metadata missed (or a plan move): the flip as ever. Our
+    // schedule, its change landed, is let go after it.
     const flipped = await this.stripe.subscriptions.update(
       live.id,
       { metadata: flipMetadata(move) },
       { idempotencyKey: `move-apply:${live.id}:${move.tierId}:${move.at}` }
     );
-    await this.syncFromStripe(flipped, 'tier_move_applied');
+    if (ours) {
+      await this.releaseSchedule(ours, `billing-release_${ours.id}`);
+    }
+    await this.syncFromStripe(
+      ours ? { ...flipped, schedule: null } : flipped,
+      'tier_move_applied'
+    );
     this.obs.info('tier_move.applied', {
       subscriptionId: row?.id ?? null,
       stripeSubscriptionId: live.id,
@@ -4561,6 +5312,9 @@ export class SubscriptionService extends BaseService {
     applied: number;
     left: number;
     blocked: number;
+    /** Waiting changes of billing found without their schedule, and set again. */
+    billingChecked: number;
+    rescheduled: number;
   }> {
     const limit = options.limit ?? TIER_MOVE_BACKSTOP_LIMIT;
     const now = options.now ?? new Date();
@@ -4595,7 +5349,13 @@ export class SubscriptionService extends BaseService {
         stage: 'backstop_select',
         error: error instanceof Error ? error.message : String(error),
       });
-      return { checked: 0, applied: 0, left: 0, blocked: 0 };
+      return {
+        checked: 0,
+        applied: 0,
+        left: 0,
+        blocked: 0,
+        ...(await this.restoreBillingSchedules(now, limit)),
+      };
     }
 
     let applied = 0;
@@ -4651,7 +5411,111 @@ export class SubscriptionService extends BaseService {
         left,
       });
     }
-    return { checked: rows.length, applied, left: left.length, blocked };
+    return {
+      checked: rows.length,
+      applied,
+      left: left.length,
+      blocked,
+      ...(await this.restoreBillingSchedules(now, limit)),
+    };
+  }
+
+  /**
+   * The backstop's second step (Codex-2hxff.97, data design §5.2): a waiting
+   * change of billing whose schedule is missing. A reactivate or a C(b)
+   * whose schedule write failed leaves one, as does an undo that could not
+   * clear the record (the member asked for the change). Selected:
+   * `pending_billing_interval` set, no `stripe_schedule_id`, live and not
+   * set to cancel, the renewal still ahead; oldest first, at most `limit`.
+   * With nothing broken it selects nothing and asks Stripe nothing. Each is
+   * re-read live: a schedule there is mirrored only; else it is set again
+   * (about three calls). Never throws; what is left is alerted once a run.
+   */
+  private async restoreBillingSchedules(
+    now: Date,
+    limit: number
+  ): Promise<{ billingChecked: number; rescheduled: number }> {
+    let rows: Array<
+      Pick<Subscription, 'id' | 'stripeSubscriptionId' | 'organizationId'>
+    >;
+    try {
+      rows = await this.db
+        .select({
+          id: subscriptions.id,
+          stripeSubscriptionId: subscriptions.stripeSubscriptionId,
+          organizationId: subscriptions.organizationId,
+        })
+        .from(subscriptions)
+        .where(
+          and(
+            isNotNull(subscriptions.pendingBillingInterval),
+            isNull(subscriptions.stripeScheduleId),
+            inArray(subscriptions.status, [
+              SUBSCRIPTION_STATUS.ACTIVE,
+              SUBSCRIPTION_STATUS.PAST_DUE,
+            ]),
+            eq(subscriptions.cancelAtPeriodEnd, false),
+            gt(subscriptions.pendingTierFrom, now)
+          )
+        )
+        .orderBy(subscriptions.pendingTierFrom)
+        .limit(limit);
+    } catch (error) {
+      this.obs.error('billing_change.backstop_failed', {
+        errorId: crypto.randomUUID(),
+        stage: 'select',
+        error: describeThrown(error),
+      });
+      return { billingChecked: 0, rescheduled: 0 };
+    }
+
+    let rescheduled = 0;
+    const left: Array<{
+      subscriptionId: string;
+      stripeSubscriptionId: string;
+      outcome: string;
+    }> = [];
+    for (const row of rows) {
+      try {
+        const live = await this.stripe.subscriptions.retrieve(
+          row.stripeSubscriptionId
+        );
+        const outcome = await this.rescheduleBillingChange(
+          row,
+          live,
+          'backstop'
+        );
+        if (outcome === 'set') {
+          rescheduled += 1;
+        } else if (outcome === 'failed') {
+          left.push({
+            subscriptionId: row.id,
+            stripeSubscriptionId: row.stripeSubscriptionId,
+            outcome,
+          });
+        } else {
+          // Nothing to set at Stripe (a schedule there, the record gone, or
+          // set to cancel): the row lags it.
+          await this.syncFromStripe(live, 'tier_move_scheduled');
+        }
+      } catch (error) {
+        left.push({
+          subscriptionId: row.id,
+          stripeSubscriptionId: row.stripeSubscriptionId,
+          outcome: `failed: ${stripeErrorCode(error) ?? describeThrown(error)}`,
+        });
+      }
+    }
+    if (left.length > 0) {
+      this.obs.error('billing_change.backstop_failed', {
+        errorId: crypto.randomUUID(),
+        stage: 'reschedule',
+        message:
+          'Waiting changes of billing have no schedule and could not be given one; each member renews on yearly billing unless one is set before the renewal (support: docs/payments/subscriptions.md → Waiting changes of billing)',
+        left,
+      });
+    }
+    return { billingChecked: rows.length, rescheduled };
   }
 
   /**
@@ -4732,10 +5596,13 @@ export class SubscriptionService extends BaseService {
     const targets = await this.db
       .select({
         id: subscriptions.id,
+        currentTierId: subscriptions.tierId,
         tierId: subscriptions.pendingTierId,
         effectiveAt: subscriptions.pendingTierFrom,
         amountCents: subscriptions.amountCents,
         billingInterval: subscriptions.billingInterval,
+        pendingBillingInterval: subscriptions.pendingBillingInterval,
+        pendingAmountCents: subscriptions.pendingAmountCents,
         tierName: subscriptionTiers.name,
       })
       .from(subscriptions)
@@ -4747,13 +5614,21 @@ export class SubscriptionService extends BaseService {
     const later = await this.laterPrices(moving);
     for (const target of targets) {
       if (!target.tierId || !target.effectiveAt) continue;
+      // A change of billing lands on its own interval and first bill; the
+      // row's amount is still the yearly price paid now (Codex-2hxff.97).
+      const billing = target.pendingBillingInterval !== null;
+      const interval = target.pendingBillingInterval ?? target.billingInterval;
       found.set(target.id, {
-        kind: 'plan',
+        kind: !billing
+          ? 'plan'
+          : target.tierId === target.currentTierId
+            ? 'billing'
+            : 'plan_and_billing',
         tierId: target.tierId,
         tierName: target.tierName,
-        amountCents: target.amountCents,
+        amountCents: target.pendingAmountCents ?? target.amountCents,
         billingInterval:
-          target.billingInterval === BILLING_INTERVAL.YEAR
+          interval === BILLING_INTERVAL.YEAR
             ? BILLING_INTERVAL.YEAR
             : BILLING_INTERVAL.MONTH,
         effectiveAt: target.effectiveAt.toISOString(),
@@ -4770,7 +5645,9 @@ export class SubscriptionService extends BaseService {
    * told about gives it: `scheduled`, or `notified` (told, the Stripe write
    * still to land) on a change still running. A row still `due` hasn't been
    * told, so it shows nothing yet; until then an earlier change they were
-   * told about still stands, as it does at Stripe. One read, by row id
+   * told about still stands, as it does at Stripe. Only a change on the
+   * interval the move lands on counts: a change of billing leaves the
+   * other one's prices behind (Codex-2hxff.97). One read, by row id
    * (`idx_price_moves_subscription`).
    */
   private async laterPrices(
@@ -4787,6 +5664,7 @@ export class SubscriptionService extends BaseService {
          sql`, `
        )})
          AND c."tier_id" = s."pending_tier_id"
+         AND c."interval" = COALESCE(s."pending_billing_interval", s."billing_interval")
          AND m."effective_at" IS NOT NULL
          AND (m."state" = 'scheduled'
               OR (m."state" = 'notified' AND c."state" = 'running'))
