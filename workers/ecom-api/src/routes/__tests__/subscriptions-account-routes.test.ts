@@ -360,7 +360,8 @@ describe.each([
     expect(((await res.json()) as { data: { id: string } }).data.id).toBe(
       COURSE_SUB_ID
     );
-    expect(served.policy).toEqual({ auth: 'required' });
+    // A Stripe write per toggle: the strict preset, as keep-current-plan.
+    expect(served.policy).toEqual({ auth: 'required', rateLimit: 'strict' });
   });
 
   it('no session: 401', async () => {
