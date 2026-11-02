@@ -29,6 +29,7 @@
  * "swap at a later renewal", and is never used for the move itself.
  */
 
+import { londonDate } from '@codex/payments';
 import {
   PENDING_PRICE_FROM_KEY,
   PENDING_PRICE_ID_KEY,
@@ -268,4 +269,39 @@ export function classifyTierChange(
   }
   if (target < paid) return { kind: 'downgrade' };
   return { kind: 'lateral' };
+}
+
+/**
+ * A switch INTO yearly billing. It starts a new period today (owner
+ * decision, Codex-2hxff.96), so its preview and its write pass
+ * `billing_cycle_anchor: 'now'`. Our subscriptions are in Stripe's flexible
+ * billing mode (the default from API 2025-09-30.clover), which never resets
+ * the anchor by itself. A switch into monthly is not one: it is made as
+ * before, and Codex-2hxff.97 makes it wait for the year's end.
+ */
+export function startsNewPeriod(
+  kind: TierChangeKind,
+  targetInterval: 'month' | 'year'
+): boolean {
+  return (
+    (kind === 'interval_switch' || kind === 'cross_period_change') &&
+    targetInterval === 'year'
+  );
+}
+
+/**
+ * What the dialog showed for a switch into yearly billing, as one string the
+ * page echoes back to change-tier: every line's amount, the amount due today
+ * and the next bill's London date (Codex-2hxff.96, "re-check at confirm").
+ * Stripe refuses `proration_date` with `billing_cycle_anchor: 'now'`, so the
+ * write cannot be pinned to the preview. It is previewed again just before
+ * the write and refused when this string differs. The format is
+ * `tierChangeQuoteSchema` in @codex/validation.
+ */
+export function tierChangeQuote(figures: {
+  amountDueCents: number;
+  lineAmountsCents: number[];
+  nextBillAt: Date;
+}): string {
+  return `due:${figures.amountDueCents}|lines:${figures.lineAmountsCents.join(',')}|next:${londonDate(figures.nextBillAt)}`;
 }

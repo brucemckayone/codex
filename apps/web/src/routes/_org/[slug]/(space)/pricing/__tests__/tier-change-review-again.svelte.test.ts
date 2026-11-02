@@ -8,6 +8,11 @@
  * says so, fetches a fresh preview and asks the subscriber to confirm again;
  * that confirmation sends the fresh preview's proration date.
  *
+ * A switch into yearly billing is refused the same way when its figures
+ * moved since the dialog (Codex-2hxff.96): it cannot be pinned by the
+ * proration date, so every confirm echoes its preview's quote for the server
+ * to re-check.
+ *
  * Mounts the real `+page.svelte`; `$app/*`, the remote modules (they import
  * `$app/server`) and the collections are mocked.
  */
@@ -207,6 +212,79 @@ describe('tier change: an expired preview', () => {
       newTierId: PLATINUM.id,
       billingInterval: 'month',
       prorationDate: 1_790_000_900,
+    });
+  });
+
+  test('a switch to yearly whose figures moved: each confirm echoes its own quote', async () => {
+    const annual = (
+      amountDueCents: number,
+      prorationDate: number,
+      quote: string
+    ): TierChangePreview => ({
+      ...preview(amountDueCents, prorationDate),
+      newRecurringAmountCents: GOLD.priceAnnual,
+      newRecurringInterval: 'year',
+      currentPeriodEnd: '2027-11-02T00:00:00.000Z',
+      quote,
+    });
+    const shown = annual(
+      9500,
+      1_790_000_000,
+      'due:9500|lines:-500|next:2027-11-02'
+    );
+    const fresh = annual(
+      9502,
+      1_790_000_300,
+      'due:9502|lines:-498|next:2027-11-02'
+    );
+    remote.previewSubscriptionTierChange
+      .mockResolvedValueOnce({ success: true, data: shown })
+      .mockResolvedValueOnce({ success: true, data: fresh });
+    remote.changeSubscriptionTier
+      .mockResolvedValueOnce({
+        success: false,
+        code: 'TIER_CHANGE_PREVIEW_EXPIRED',
+        message: 'Prices changed. Review the change again.',
+        status: 409,
+      })
+      .mockResolvedValueOnce({ success: true, data: {} });
+    mountPage();
+
+    // Annual billing: Gold's own card offers the switch of billing period.
+    Array.from(
+      document.querySelectorAll<HTMLButtonElement>(
+        '.billing-toggle [role="radio"]'
+      )
+    )[1]?.click();
+    flushSync();
+    byTestId('tier-cta-switch-interval')?.click();
+    await settle();
+    byTestId('tier-change-dialog-confirm')?.click();
+    await settle();
+
+    expect(remote.changeSubscriptionTier).toHaveBeenNthCalledWith(1, {
+      organizationId: ORG.id,
+      newTierId: GOLD.id,
+      billingInterval: 'year',
+      prorationDate: 1_790_000_000,
+      quote: shown.quote,
+    });
+    // Refused, nothing changed: the fresh figures wait on a new confirm.
+    expect(byTestId('tier-change-notice')?.textContent?.trim()).toBe(
+      m.subscription_tier_change_preview_expired()
+    );
+    expect(remote.previewSubscriptionTierChange).toHaveBeenCalledTimes(2);
+    expect(remote.changeSubscriptionTier).toHaveBeenCalledTimes(1);
+
+    byTestId('tier-change-dialog-confirm')?.click();
+    await settle();
+
+    expect(remote.changeSubscriptionTier).toHaveBeenLastCalledWith({
+      organizationId: ORG.id,
+      newTierId: GOLD.id,
+      billingInterval: 'year',
+      prorationDate: 1_790_000_300,
+      quote: fresh.quote,
     });
   });
 
