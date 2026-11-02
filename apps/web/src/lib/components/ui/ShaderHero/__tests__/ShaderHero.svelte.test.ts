@@ -40,6 +40,7 @@ vi.mock('../shader-config', () => ({
 }));
 
 import ShaderHero from '../ShaderHero.svelte';
+import { shaderStill } from '../shader-still.svelte';
 import { shaderTone } from '../shader-tone';
 
 let frames: FrameRequestCallback[] = [];
@@ -49,6 +50,8 @@ let app: ReturnType<typeof mount> | null = null;
 let clock = 0;
 let releases: (() => void)[] = [];
 const toneDraws = vi.fn();
+/** Copies of the studio's frame encoded (`shaderStill`, Codex-61zsk.73). */
+let encoded = 0;
 
 /** Run the frames queued so far (those they queue run on the next step). */
 function step(count = 1) {
@@ -103,6 +106,23 @@ beforeEach(() => {
           }),
         }
       : {}) as unknown as HTMLCanvasElement['getContext']);
+  // The still's copy is encoded at once, to an object URL jsdom lacks.
+  encoded = 0;
+  vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation(
+    (done: BlobCallback) => {
+      encoded++;
+      done(new Blob(['frame']));
+    }
+  );
+  let made = 0;
+  Object.defineProperty(URL, 'createObjectURL', {
+    configurable: true,
+    value: () => `blob:still-${++made}`,
+  });
+  Object.defineProperty(URL, 'revokeObjectURL', {
+    configurable: true,
+    value: () => {},
+  });
   clock = 0;
   vi.spyOn(performance, 'now').mockImplementation(() => clock);
   for (const [side, size] of [
@@ -132,6 +152,7 @@ afterEach(() => {
   releases = [];
   if (app) unmount(app);
   app = null;
+  shaderStill.clear();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -305,5 +326,92 @@ describe('ShaderHero tone', () => {
     step(3);
     expect(renderer.render).toHaveBeenCalledTimes(2);
     expect(shaderTone.grid.samples).toBe(1);
+  });
+});
+
+// Codex-61zsk.73 (#20b): the studio's one frame, copied for the page editor.
+describe('ShaderHero still copy', () => {
+  it('copies the studio’s frame in the task that draws it, and again when a resize redraws it', async () => {
+    box = { width: 1200, height: 800 };
+    await start({ still: true, tone: true });
+    step(1);
+    expect(renderer.render).toHaveBeenCalledTimes(1);
+    // Read from the WebGL canvas itself, straight after the draw.
+    expect(toneDraws).toHaveBeenCalledTimes(1);
+    expect(toneDraws.mock.calls[0]?.[0]).toBe(document.querySelector('canvas'));
+    expect(shaderStill.current).toEqual({
+      url: 'blob:still-1',
+      theme: 'light',
+    });
+
+    step(3);
+    expect(encoded).toBe(1);
+
+    box = { width: 900, height: 700 };
+    for (const callback of resizeCallbacks) callback([], {} as ResizeObserver);
+    step(3);
+    expect(renderer.render).toHaveBeenCalledTimes(2);
+    expect(encoded).toBe(2);
+    expect(shaderStill.current?.url).toBe('blob:still-2');
+  });
+
+  it('names the theme the shader drew in, from the sentinel its config reads', async () => {
+    box = { width: 1200, height: 800 };
+    await start({ still: true, tone: true });
+    (document.querySelector('.shader-hero') as HTMLElement).style.setProperty(
+      '--brand-shader-is-dark',
+      '1'
+    );
+    step(1);
+    expect(shaderStill.current?.theme).toBe('dark');
+  });
+
+  it('copies nothing while the shader moves, or from a shader that is not the org layout’s', async () => {
+    box = { width: 1200, height: 800 };
+    await start({ tone: true });
+    step(3);
+    unmount(app!);
+    app = null;
+    // The moving shader's next frame was queued; it never runs once gone.
+    frames = [];
+    await start({ still: true });
+    step(3);
+    expect(renderer.render).toHaveBeenCalledTimes(4);
+    expect(encoded).toBe(0);
+    expect(shaderStill.current).toBeNull();
+  });
+
+  it('drops the copy on leaving the studio and on unmount', async () => {
+    box = { width: 1200, height: 800 };
+    const props = $state({ still: true, tone: true });
+    await start(props);
+    step(1);
+    expect(shaderStill.current).not.toBeNull();
+
+    props.still = false;
+    flushSync();
+    expect(shaderStill.current).toBeNull();
+
+    props.still = true;
+    flushSync();
+    step(1);
+    expect(shaderStill.current).not.toBeNull();
+
+    unmount(app!);
+    app = null;
+    expect(shaderStill.current).toBeNull();
+  });
+
+  it('keeps the glow when no copy can be made', async () => {
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(((
+      kind: string
+    ) =>
+      kind === '2d' ? null : {}) as unknown as HTMLCanvasElement['getContext']);
+    box = { width: 1200, height: 800 };
+    await start({ still: true, tone: true });
+    step(3);
+    expect(renderer.render).toHaveBeenCalledTimes(1);
+    expect(encoded).toBe(0);
+    expect(shaderStill.current).toBeNull();
   });
 });

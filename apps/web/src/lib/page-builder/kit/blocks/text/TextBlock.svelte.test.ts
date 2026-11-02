@@ -8,6 +8,7 @@ import {
 import { COPY } from '../../model/copy';
 import { SECTION_LAYOUTS } from '../../model/ids';
 import { type SampleOfferState, sampleContext } from '../../model/sample';
+import { starterSection } from '../../model/template';
 import type { BlockEdit, ResolvedSection } from '../../model/types';
 import { TEXT_EMPTY, textDefinition } from './definition';
 import TextBlock from './TextBlock.svelte';
@@ -283,6 +284,31 @@ describe('TextBlock', () => {
           document.body.querySelector('.text__head img')?.getAttribute('src')
         ).toBe(url);
         expect(document.body.querySelector('[data-at]')).toBeNull();
+      });
+
+      // Codex-61zsk.73: a section added from the gallery, a starter page or
+      // a recipe stores the order, and draws it once it is given a picture.
+      it('a new section starts with the words first, stored so it survives', async () => {
+        const course = { courseTitle: 'Steady Ground' };
+        const starter = textDefinition.starter(course);
+        expect(starter.imageAt).toBe('after');
+        expect(starterSection('text', course, () => 'text-1').props).toEqual(
+          starter
+        );
+        expect(textDefinition.coerce(starter).imageAt).toBe('after');
+        await render(
+          { ...starter, ctaLabel: 'Join', image },
+          { layout: 'statement', mediaBaseUrl: CDN }
+        );
+        expect(order()).toEqual(['head', 'body', 'picture', 'ask']);
+      });
+
+      it('a saved section with no order keeps its picture first', async () => {
+        await render(
+          { ...SAMPLE, ctaLabel: 'Join', image },
+          { layout: 'centered', mediaBaseUrl: CDN }
+        );
+        expect(order()).toEqual(['picture', 'head', 'body', 'ask']);
       });
 
       it('reads only "after", and is offered only where it moves', () => {

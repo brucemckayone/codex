@@ -21,6 +21,7 @@
   import { getShaderConfig, type ShaderPresetId } from './shader-config';
   import { loadRenderer } from './load-renderer';
   import type { ShaderRenderer, MouseState } from './renderer-types';
+  import { captureStill, shaderStill } from './shader-still.svelte';
   import { shaderTone, toneViewport } from './shader-tone';
   import { averageCells, visibleBufferRegion } from './tone-grid';
 
@@ -38,7 +39,9 @@
      * shader sits far behind the content and its motion buys nothing: the
      * studio, behind an 80% cover and a 60px blur. There every frame costs a
      * full-viewport render (on a CPU-rendered context, as in CI, ~8s per
-     * click). Turning it off resumes the motion.
+     * click). Turning it off resumes the motion. With `tone` (the org
+     * layout's shader, so the studio's), that one frame is also copied for
+     * the page editor's Moving bands (`shaderStill`, Codex-61zsk.73).
      */
     still?: boolean;
     /**
@@ -155,6 +158,9 @@
     motionQuery.addEventListener('change', onMotionChange);
     applyStill = (next) => {
       isStill = next;
+      // Out of the studio the shader moves on, so the copy is no longer its
+      // frame; back in, the frame drawn on freezing is copied afresh.
+      if (!isStill) clearStill();
       setFrozen(isReducedMotion || isStill || isHeld);
     };
 
@@ -263,6 +269,29 @@
       );
     }
 
+    // ── Still (Codex-61zsk.73) ─────────────────────────────────
+    // The studio's one frame, copied straight after it is drawn (as a tone
+    // sample is, and for the same reason) for the page editor's Moving
+    // bands. Only the studio's: the org layout's shader (`tone`) while it is
+    // `still`. A resize redraws it and so copies it again; the old copy
+    // stays on screen until the new one is ready.
+    function copyStill() {
+      if (!tone || !isStill || !canvasEl || !containerEl) return;
+      const width = containerEl.getBoundingClientRect().width;
+      // The sentinel the shader's own config reads (`org-brand.css`): the
+      // theme whose colours it drew in.
+      const dark =
+        getComputedStyle(containerEl).getPropertyValue('--brand-shader-is-dark').trim() === '1';
+      captureStill(canvasEl, {
+        theme: dark ? 'dark' : 'light',
+        blur: width > 0 ? blurRadius() / width : 0,
+      });
+    }
+
+    function clearStill() {
+      if (tone) shaderStill.clear();
+    }
+
     if (tone)
       shaderTone.onHold((held) => {
         isHeld = held;
@@ -292,6 +321,8 @@
 
       currentPreset = preset;
       clearTone();
+      // Another shader, or none: the copy is of one that is gone.
+      clearStill();
 
       if (preset === 'none') {
         // Hide canvas so CSS gradient fallback shows through.
@@ -369,6 +400,7 @@
         frozenElapsed ??= (performance.now() - startTime) / 1000;
         renderer.render(gl!, frozenElapsed, mouse, config, canvasEl!.width, canvasEl!.height);
         sampleTone();
+        copyStill();
         return; // no re-prime — static frame is final
       }
 
@@ -479,6 +511,7 @@
         shaderTone.onHold(null);
         shaderTone.onDemand(null);
         shaderTone.clear();
+        shaderStill.clear();
       }
       cancelAnimationFrame(animFrameId);
       if (renderer) renderer.destroy(gl!);

@@ -7,10 +7,15 @@
   kit paints it exactly as it paints the section: its scheme's colours, the
   colours a textured Style moves them to, the texture itself, and the glow a
   Moving background shows where the organisation's own cannot (every still
-  render, this one included). The buttons around the tiles stay studio chrome.
+  render, this one included), or the studio's own frame of it once that has
+  been copied (`atmosphere-still.ts`, Codex-61zsk.73). The buttons around the
+  tiles stay studio chrome.
 
   "Moving" says what it is in words as well: in its tooltip, to assistive
-  tech, and on screen once chosen, since a touch has no hover.
+  tech, and on screen once chosen, since a touch has no hover. An org with
+  no moving background is told so there, and pointed to Brand: with a link
+  for an admin or owner, and without one for a creator, whom Brand turns
+  away (`studio/brand/+page.server.ts`).
 -->
 <script lang="ts">
   import { CheckIcon } from '$lib/components/ui/Icon';
@@ -21,6 +26,7 @@
     type PageStyleId,
     SCHEME_OPTIONS,
   } from '$lib/page-builder/kit';
+  import { atmosphereStill } from '$lib/page-builder/kit/atmosphere-still';
   import { brandOverridesToStyleAttr } from '$lib/page-builder/render/brand-overrides';
   import * as m from '$paraglide/messages';
 
@@ -36,6 +42,10 @@
     chosen: boolean;
     onChoose: (scheme: ColourSchemeId) => void;
     onReset: () => void;
+    /** The org has a moving background (`orgShader`, as the canvas draws it). */
+    orgShader?: boolean;
+    /** The viewer may open Brand: an admin or owner. */
+    canEditBrand?: boolean;
   }
 
   const {
@@ -47,6 +57,8 @@
     chosen,
     onChoose,
     onReset,
+    orgShader = false,
+    canEditBrand = false,
   }: Props = $props();
 
   const uid = $props.id();
@@ -61,6 +73,7 @@
   };
 
   const brandStyle = $derived(brandOverridesToStyleAttr(brandOverrides));
+  const still = $derived(atmosphereStill({ theme, orgShader, brandOverrides }));
   const fullName = (id: ColourSchemeId) =>
     SCHEME_OPTIONS.find((option) => option.id === id)?.label ?? id;
 </script>
@@ -86,8 +99,10 @@
           class="lp swatch__lp"
           data-lp-style={style}
           data-lp-theme={theme}
+          data-lp-shader-still={moving && still ? '' : undefined}
           data-org-brand={brandStyle ? '' : undefined}
           style={brandStyle}
+          style:--lp-shader-still={moving ? still : undefined}
           aria-hidden="true"
         >
           <span class="lp-page swatch__page">
@@ -109,7 +124,15 @@
     {/each}
   </div>
   <p class="swatches__note" id="{uid}-moving" hidden={value !== 'atmosphere'}>
-    {m.studio_page_editor_scheme_atmosphere_hint()}
+    {#if orgShader}
+      {m.studio_page_editor_scheme_atmosphere_hint()}
+    {:else if canEditBrand}
+      {m.studio_page_editor_scheme_atmosphere_none()}
+      <a class="swatches__link" href="/studio/brand">{m.studio_page_editor_scheme_atmosphere_add()}</a>
+    {:else}
+      {m.studio_page_editor_scheme_atmosphere_none()}
+      {m.studio_page_editor_scheme_atmosphere_ask()}
+    {/if}
   </p>
   {#if chosen}
     <button type="button" class="swatches__reset" onclick={onReset}>
@@ -231,6 +254,23 @@
     font-size: var(--text-xs);
     line-height: var(--leading-normal);
     color: var(--color-text-secondary);
+  }
+
+  /* The studio's link colour, underlined, closing the note's sentence. */
+  .swatches__link {
+    color: var(--color-interactive);
+    text-decoration: underline;
+    text-underline-offset: var(--space-0-5);
+  }
+
+  .swatches__link:hover {
+    color: var(--color-interactive-hover);
+  }
+
+  .swatches__link:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-text);
+    outline-offset: var(--focus-offset);
+    border-radius: var(--radius-xs);
   }
 
   .swatches__reset {

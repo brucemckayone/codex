@@ -38,7 +38,9 @@
   ATMOSPHERE (03 §5.1): `data-lp-atmosphere` marks a live page with a "Moving
   background" section, so the org layout clears the stack above its shader
   for this page only. Never set while editing or still — the canvas and
-  thumbnails sit inside the studio, and there `atmosphere` draws its glow.
+  thumbnails sit inside the studio, and there `atmosphere` draws its glow,
+  or the studio's own frame of the shader once it has been copied
+  (`data-lp-shader-still`, `atmosphere-still.ts`; Codex-61zsk.73).
   While it is set, the root also keeps each section's veil as thin as the
   Style asks wherever the shader drawn behind it allows (`atmosphere-veil.ts`,
   03 X54).
@@ -77,6 +79,7 @@
     resolveStyle,
     type ThemeGrounds,
   } from './model/resolve';
+  import { atmosphereStill, ownsColours } from './atmosphere-still';
   import { atmosphereVeil } from './atmosphere-veil';
   import { STYLES } from './model/styles';
   import type { BlockEdit, KitPage } from './model/types';
@@ -282,13 +285,17 @@
   const signature = $derived(sections.map((s) => `${s.id}:${s.layout}`).join('|'));
   // The org's shader draws in the ORG's colours, so a page with its own
   // colours shows the glow (which follows them) rather than clash (03 X11).
-  const ownColours = $derived(
-    Boolean(brandOverrides?.primaryColor || brandOverrides?.secondaryColor)
-  );
+  const ownColours = $derived(ownsColours(brandOverrides));
   const atmosphere = $derived(
     edit || still || ownColours || !sections.some((s) => s.scheme === 'atmosphere')
       ? undefined
       : (STYLES[style].atmosphere ?? 'soft')
+  );
+  // The studio's frame of the shader, where the canvas or a thumbnail would
+  // otherwise draw the glow (Codex-61zsk.73). Never on a live page, which
+  // draws the shader itself.
+  const stillFrame = $derived(
+    edit || still ? atmosphereStill({ theme, orgShader, brandOverrides }) : undefined
   );
 </script>
 
@@ -307,12 +314,14 @@
   data-lp-still={still || edit ? '' : undefined}
   data-lp-editing={edit ? '' : undefined}
   data-lp-atmosphere={atmosphere}
+  data-lp-shader-still={stillFrame ? '' : undefined}
   data-org-brand={brandStyle ? '' : undefined}
   data-org-bg={pageBg ? '' : undefined}
   data-page-bg={pageBg}
   data-ground-light={grounds.light}
   data-ground-dark={grounds.dark}
   style={brandStyle}
+  style:--lp-shader-still={stillFrame}
   {@attach entrances(still || !!edit || dials?.motion === 'still')}
   {@attach atmosphereVeil(!!atmosphere)}
 >

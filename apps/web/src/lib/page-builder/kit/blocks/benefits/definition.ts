@@ -17,6 +17,7 @@ import {
   readText,
 } from '../../model/read';
 import type { BlockDefinition } from '../../model/types';
+import { FIGURE_MAX, readFigure } from './figure';
 
 export interface BenefitItem {
   title: string;
@@ -25,6 +26,11 @@ export interface BenefitItem {
   image?: ImageRef;
   /** An icon above its name; in `checklist`, in place of the tick (Codex-61zsk.58). */
   mark?: MarkId;
+  /**
+   * A short number in the mark's place, read as the start of the name
+   * (Codex-61zsk.73, `figure.ts`). Never with a mark: the figure wins.
+   */
+  figure?: string;
 }
 
 export type BenefitsProps = {
@@ -103,6 +109,13 @@ export const benefitsDefinition: BlockDefinition<BenefitsProps> = {
           hint: 'Optional. A small icon above its name; in the checklist, in place of the tick. Choose it again to take it away.',
           control: 'mark',
           options: MARK_OPTIONS,
+        },
+        {
+          key: 'figure',
+          label: 'Or a number',
+          hint: 'Up to 4 characters, like 24 or 98%. It shows instead of the mark, so write the name to read on from it.',
+          control: 'text',
+          maxLength: FIGURE_MAX,
         },
         {
           key: 'image',
@@ -184,12 +197,14 @@ export const benefitsDefinition: BlockDefinition<BenefitsProps> = {
         'items',
         (entry) => {
           const title = readText(entry, 'title', 80);
+          const figure = readFigure(entry.figure);
           return title
             ? compact({
                 title,
                 detail: readText(entry, 'detail', 160),
                 image: isImageRef(entry.image) ? entry.image : undefined,
-                mark: readOneOf(entry, 'mark', MARKS),
+                mark: figure ? undefined : readOneOf(entry, 'mark', MARKS),
+                figure,
               })
             : null;
         },

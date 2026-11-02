@@ -28,7 +28,8 @@
       reading still applies, so an unknown one draws nothing new)
     ?faces=1 (each testimonials section's first written quote gets a photo,
       so the course's own show their initials)   ?marks=1 (each benefit
-      takes the kit's marks in turn)
+      takes the kit's marks in turn)   ?figures=1 (each benefit takes a
+      figure in its mark's place: 6, 24, £12, 98%)
     ?film=<HLS URL> (every clip, the intro, reel, guide and hero, plays this
       stream, so the players can be pressed here: a real local preview, e.g.
       dev-cdn's `{creatorId}/hls/{mediaId}/preview/preview.m3u8`)
@@ -221,9 +222,16 @@
     };
   });
 
-  /** `?faces=1`, `?marks=1`: the items' own controls, drawn on the sample (Codex-61zsk.58). */
+  /**
+   * `?faces=1`, `?marks=1`, `?figures=1`: the items' own controls, drawn on
+   * the sample (Codex-61zsk.58, .73). A figure takes its mark's place, so
+   * `figures` with `marks` shows the figures.
+   */
   const faces = $derived(param('faces') === '1');
   const marks = $derived(param('marks') === '1');
+  const figures = $derived(param('figures') === '1');
+  /** The kinds of figure a creator types, in turn. */
+  const SAMPLE_FIGURES = ['6', '24', '£12', '98%'] as const;
 
   /** Each entry of a section's `items`, changed by `edit`. */
   function eachItem(
@@ -232,6 +240,29 @@
   ): KitSection {
     const items = Array.isArray(section.props.items) ? section.props.items : [];
     return { ...section, props: { ...section.props, items: items.map(edit) } };
+  }
+
+  /** A section with the items' asked-for controls drawn on it. */
+  function withItemControls(section: KitSection): KitSection {
+    if (faces && section.type === 'testimonials') {
+      return eachItem(section, (entry, index) =>
+        index === 0 ? { ...entry, photo: pictures[0].image } : entry
+      );
+    }
+    if (section.type !== 'benefits') return section;
+    if (figures) {
+      return eachItem(section, (entry, index) => ({
+        ...entry,
+        figure: SAMPLE_FIGURES[index % SAMPLE_FIGURES.length],
+      }));
+    }
+    if (marks) {
+      return eachItem(section, (entry, index) => ({
+        ...entry,
+        mark: MARKS[index % MARKS.length],
+      }));
+    }
+    return section;
   }
 
   /** `?dials=colour:muted,corners:rounder`: unknown dials and steps are dropped. */
@@ -269,22 +300,8 @@
         }
       : pictured;
     const itemised =
-      faces || marks
-        ? {
-            ...controlled,
-            sections: controlled.sections.map((section) =>
-              faces && section.type === 'testimonials'
-                ? eachItem(section, (entry, index) =>
-                    index === 0 ? { ...entry, photo: pictures[0].image } : entry
-                  )
-                : marks && section.type === 'benefits'
-                  ? eachItem(section, (entry, index) => ({
-                      ...entry,
-                      mark: MARKS[index % MARKS.length],
-                    }))
-                  : section
-            ),
-          }
+      faces || marks || figures
+        ? { ...controlled, sections: controlled.sections.map(withItemControls) }
         : controlled;
     const sample = dials ? { ...itemised, design: { ...itemised.design, dials } } : itemised;
     if (!only) return sample;

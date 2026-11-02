@@ -21,7 +21,12 @@ import {
 import type { JourneySalesContext, SellPreview } from '../../../render/types';
 import { COPY } from '../../model/copy';
 import { heroFacts } from '../../model/facts';
-import { type ColourSchemeId, SECTION_LAYOUTS } from '../../model/ids';
+import {
+  type ColourSchemeId,
+  PAGE_STYLE_IDS,
+  type PageStyleId,
+  SECTION_LAYOUTS,
+} from '../../model/ids';
 import {
   headingRuns,
   isLongHeading,
@@ -30,6 +35,7 @@ import {
 import { type SampleOfferState, sampleContext } from '../../model/sample';
 import type { BlockEdit, KitPage, ResolvedSection } from '../../model/types';
 import PageRenderer from '../../PageRenderer.svelte';
+import { type CssRule, componentRules, sheetRules } from '../testing';
 import HeroBlock from './HeroBlock.svelte';
 
 let app: ReturnType<typeof mount> | null = null;
@@ -288,12 +294,13 @@ describe('HeroBlock', () => {
       expect(document.body.querySelector('img, video')).toBeNull();
     });
 
-    // Codex-61zsk.13: one 800px image across a cover band upscales.
+    // Codex-61zsk.13: one 800px image across a cover band upscales. The
+    // centred hero's frame is the reading measure (Codex-61zsk.73).
     const DRAWN_AT: Record<string, string> = {
       statement: '100vw',
       split: '(min-width: 50rem) 50vw, 100vw',
       cover: '100vw',
-      centered: '100vw',
+      centered: '(min-width: 50rem) 56rem, 100vw',
       poster: '(min-width: 56rem) 46vw, 100vw',
     };
 
@@ -319,6 +326,8 @@ describe('HeroBlock', () => {
       );
       expect(DRAWN_AT[layout], layout).toBeDefined();
       expect(img?.getAttribute('sizes')).toBe(DRAWN_AT[layout]);
+      // Safari before 26.4 reads a `sizes` with a math function as 100vw.
+      expect(img?.getAttribute('sizes')).not.toMatch(/\b(min|max|clamp)\(/);
     });
 
     it('offers no xl for an image uploaded before there was one', async () => {
@@ -1523,5 +1532,118 @@ describe('the facts line under the lede (Codex-61zsk.73)', () => {
     );
     expect(rule?.[0]).toContain('.hero__lede:has(> :global(.lp-text))');
     expect(rule?.[1].get('margin-block-start')).toBe('var(--lp-stack)');
+  });
+});
+
+// Codex-61zsk.73: the centred hero drew the statement's picture, the full
+// column (past it in Bold and Poster), so the two layouts differed only in
+// alignment. Its picture now supports the words: framed under them at the
+// reading measure. Source assertions, the weaker instrument: jsdom lays
+// nothing out, so the lead's browser pass measures the paint.
+describe('the centred hero’s framed picture (Codex-61zsk.73)', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const hero = componentRules(join(here, 'HeroBlock.svelte'));
+  const sheet = (style: PageStyleId) =>
+    sheetRules(join(here, `../../styles/style-${style}.css`));
+  const framing = (rules: CssRule[]) =>
+    rules.filter((rule) => rule.selector.includes('.hero-centered__media'));
+  const own = hero.filter((rule) => rule.selector === '.hero-centered__media');
+
+  it('sits under the words, beside them in the section’s column, in its ratio', async () => {
+    await render(
+      { heading: 'H', body: 'Six calm weeks.' },
+      {
+        layout: 'centered',
+        context: sampleContext({ course: { heroImageUrl: '/hero.jpg' } }),
+      }
+    );
+    const words = document.body.querySelector('.hero-centered');
+    const frame = document.body.querySelector('.hero-centered__media');
+    expect(frame?.querySelector('img')?.getAttribute('src')).toBe('/hero.jpg');
+    expect(words?.nextElementSibling).toBe(frame);
+    expect(
+      frame
+        ?.querySelector<HTMLElement>('.lp-media')
+        ?.style.getPropertyValue('aspect-ratio')
+    ).toBe('var(--_ratio)');
+  });
+
+  it('is as wide as the reading measure, centred: 4:3 on a phone, 3:2 wide', () => {
+    const base = own.find((rule) => rule.within.length === 0)?.decls;
+    expect(base?.get('justify-self')).toBe('center');
+    expect(base?.get('inline-size')).toBe('100%');
+    expect(base?.get('max-inline-size')).toBe(
+      'calc(var(--lp-measure) * var(--lp-measure-unit))'
+    );
+    // Counted in the body's `0`s at the body's size, as a paragraph's is.
+    expect(base?.get('--lp-measure-unit')).toBe('var(--lp-zero-body)');
+    expect(base?.get('font-family')).toBe('var(--lp-font-body)');
+    expect(base?.get('font-size')).toBe('var(--lp-size-body)');
+    expect(base?.get('font-weight')).toBe('var(--lp-weight-body)');
+    expect(base?.get('--_ratio')).toBe('4 / 3');
+    expect(
+      own
+        .filter((rule) => rule.within.length > 0)
+        .map((rule) => [rule.within, rule.decls.get('--_ratio')])
+    ).toEqual([[['@container (min-width: 48rem)'], '3 / 2']]);
+  });
+
+  it('is never bled: no rule, in any Style, pulls it to the band’s edge or foot', () => {
+    const moves = (rule: CssRule) =>
+      [...rule.decls.keys()].some(
+        (property) =>
+          property.startsWith('margin') ||
+          property === 'grid-column' ||
+          property === 'inline-size' ||
+          property === 'max-inline-size' ||
+          property === 'justify-self'
+      );
+    expect(
+      framing(hero).filter(
+        (rule) => rule.selector !== '.hero-centered__media' && moves(rule)
+      )
+    ).toEqual([]);
+    for (const style of PAGE_STYLE_IDS)
+      expect(framing(sheet(style)).filter(moves), style).toEqual([]);
+    // The statement still bleeds in Bold and meets Poster's foot.
+    expect(
+      hero
+        .find(
+          (rule) =>
+            rule.selector ===
+            ":global(.lp[data-lp-style='bold']) .hero-statement__media"
+        )
+        ?.decls.get('grid-column')
+    ).toBe('bleed');
+    expect(
+      sheet('poster')
+        .find(
+          (rule) =>
+            rule.selector.endsWith(' .hero-statement__media') &&
+            rule.decls.has('margin-block-end')
+        )
+        ?.decls.get('margin-block-end')
+    ).toBe('calc(-1 * var(--lp-pad))');
+  });
+
+  it('keeps Studio’s print, its paper frame and its tilt, and Poster’s block', () => {
+    const studio = framing(sheet('studio'));
+    expect(
+      studio.some(
+        (rule) =>
+          rule.decls.get('border') ===
+          'var(--_print-edge) solid var(--_print-paper)'
+      )
+    ).toBe(true);
+    expect(studio.some((rule) => rule.decls.get('rotate') === '-1.4deg')).toBe(
+      true
+    );
+    expect(
+      framing(sheet('poster')).some(
+        (rule) =>
+          rule.selector.endsWith('::before') &&
+          rule.decls.get('background') === 'var(--_poster-block)'
+      )
+    ).toBe(true);
   });
 });

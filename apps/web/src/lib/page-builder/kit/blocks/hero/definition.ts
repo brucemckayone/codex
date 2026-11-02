@@ -41,8 +41,11 @@ const HERO_CROPS: Readonly<Record<string, readonly FocalCrop[]>> = {
     { at: 'wide', ratio: '15 / 8' },
     { at: 'phone', ratio: '2 / 3' },
   ],
+  // Framed under the words at the reading measure (Codex-61zsk.73). A point
+  // is a point on the picture, not a crop, so the ones set on the old 16 / 7
+  // band carry over.
   centered: [
-    { at: 'wide', ratio: '16 / 7' },
+    { at: 'wide', ratio: '3 / 2' },
     { at: 'phone', ratio: '4 / 3' },
   ],
   poster: [
@@ -137,7 +140,7 @@ export const heroDefinition: BlockDefinition<HeroProps> = {
     layout(
       'centered',
       'Centred',
-      'Everything centred, with a wide image underneath.'
+      'Everything centred, with your image framed underneath.'
     ),
     layout(
       'poster',

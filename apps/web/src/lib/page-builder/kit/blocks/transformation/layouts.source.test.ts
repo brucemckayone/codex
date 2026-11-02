@@ -10,6 +10,8 @@
  *      the display face at title size, over the before side's body lines.
  *   3. A toggle drawn as the columns is the columns in every Style's own
  *      treatment too: Soft centres its head over either.
+ *   4. The phone switch's tabs are at the size of the lines they flip
+ *      between, in the body face (Codex-61zsk.73).
  *
  * A SOURCE test, the weaker instrument: it proves the rules, not the paint.
  * The paint is measured in a browser by `e2e/page-kit/type-rank.spec.ts`.
@@ -17,7 +19,8 @@
  */
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { componentRules } from '../testing';
+import { PAGE_STYLE_IDS } from '../../model/ids';
+import { componentRules, sheetRules } from '../testing';
 
 const rulesOf = (file: string) =>
   componentRules(join(import.meta.dirname, file));
@@ -66,6 +69,39 @@ describe('the transformation layouts', () => {
           r.decls.has('font-size')
       )
     ).toEqual([]);
+  });
+
+  // Codex-61zsk.73: at the button's size (17px) the switch was smaller than
+  // the lines it flips between.
+  it('sets the phone switch’s tabs at title size in the body face, never under the touch target', () => {
+    const tab = toggle.filter((r) => r.selector === '.tf-toggle__tab');
+    expect(tab).toHaveLength(1);
+    expect(tab[0].within).toEqual([]);
+    expect(tab[0].decls.get('font-size')).toBe('var(--lp-size-title)');
+    expect(tab[0].decls.get('font-family')).toBe('var(--lp-font-body)');
+    expect(tab[0].decls.get('min-block-size')).toBe('var(--tap-target-min)');
+    expect(tab[0].decls.get('text-wrap')).toBe('balance');
+    // No state of a tab, and no Style, sets it at another size; Poster
+    // keeps it in capitals.
+    expect(
+      toggle.filter(
+        (r) =>
+          r.selector.includes('.tf-toggle__tab') && r.decls.has('font-size')
+      )
+    ).toHaveLength(1);
+    for (const style of PAGE_STYLE_IDS) {
+      const sheet = sheetRules(
+        join(import.meta.dirname, `../../styles/style-${style}.css`)
+      ).filter((r) => r.selector.includes('.tf-toggle__tab'));
+      expect(
+        sheet.filter((r) => r.decls.has('font-size')),
+        style
+      ).toEqual([]);
+      expect(
+        sheet.some((r) => r.decls.get('text-transform') === 'uppercase'),
+        style
+      ).toBe(style === 'poster');
+    }
   });
 
   it('centres a Soft head over a toggle drawn as the columns, as over the columns', () => {

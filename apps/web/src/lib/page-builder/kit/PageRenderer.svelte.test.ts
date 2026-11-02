@@ -1,5 +1,6 @@
 import { tick } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { shaderStill } from '$lib/components/ui/ShaderHero/shader-still.svelte';
 import { shaderTone } from '$lib/components/ui/ShaderHero/shader-tone';
 import {
   flushSync,
@@ -787,6 +788,120 @@ describe('PageRenderer', () => {
         edit: { commit: () => {} },
       });
       expect(publicMarkup(editingRoot)).toBe(publicHtml);
+    });
+  });
+
+  // Codex-61zsk.73 (#20b): the studio's own frame of the shader, in place of
+  // the glow, wherever the editor draws a Moving band.
+  describe('the studio’s still of the moving background', () => {
+    function movingHero(): KitPage {
+      const page = samplePage('bold');
+      return {
+        ...page,
+        sections: page.sections.map((s) =>
+          s.type === 'hero'
+            ? { ...s, design: { scheme: 'atmosphere' as const } }
+            : s
+        ),
+      };
+    }
+
+    /** The studio copies its frame, drawn in `theme`'s colours. */
+    function copyFrame(theme: 'light' | 'dark') {
+      shaderStill.take(
+        {
+          toBlob: (done: BlobCallback) => done(new Blob(['frame'])),
+        } as unknown as HTMLCanvasElement,
+        theme
+      );
+      flushSync();
+    }
+
+    const edit: PageEdit = { commit: () => {} };
+    const frameOf = (root: HTMLElement) =>
+      root.hasAttribute('data-lp-shader-still')
+        ? root.style.getPropertyValue('--lp-shader-still')
+        : null;
+
+    beforeEach(() => {
+      let made = 0;
+      Object.defineProperty(URL, 'createObjectURL', {
+        configurable: true,
+        value: () => `blob:still-${++made}`,
+      });
+      Object.defineProperty(URL, 'revokeObjectURL', {
+        configurable: true,
+        value: () => {},
+      });
+    });
+
+    afterEach(() => shaderStill.clear());
+
+    it('paints it on the canvas and in a still thumbnail, in the theme it was drawn in', async () => {
+      copyFrame('dark');
+      for (const props of [{ edit }, { still: true }]) {
+        const root = await render({
+          page: movingHero(),
+          theme: 'dark',
+          orgShader: true,
+          ...props,
+        });
+        expect(frameOf(root)).toBe('url("blob:still-1")');
+        unmount(app);
+        app = null;
+      }
+    });
+
+    it('keeps the glow on a live page, in the other theme or none, without a shader, and on a page in its own colours', async () => {
+      copyFrame('light');
+      for (const props of [
+        { theme: 'light' },
+        { edit, theme: 'dark' },
+        { still: true },
+        { edit, theme: 'light', orgShader: false },
+        { edit, theme: 'light', brandOverrides: { primaryColor: '#0D9488' } },
+      ]) {
+        const root = await render({
+          page: movingHero(),
+          orgShader: true,
+          ...props,
+        });
+        expect(frameOf(root), JSON.stringify(props)).toBeNull();
+        unmount(app);
+        app = null;
+      }
+      // Fonts alone leave the shader's colours as they are, and the page's
+      // own brand scope keeps every input beside the frame.
+      const fonts = await render({
+        page: movingHero(),
+        edit,
+        theme: 'light',
+        orgShader: true,
+        brandOverrides: { fontHeading: 'Syne' },
+      });
+      expect(frameOf(fonts)).toBe('url("blob:still-1")');
+      expect(fonts.style.getPropertyValue('--brand-font-heading')).not.toBe('');
+    });
+
+    it('takes the glow’s place when it arrives, the page drawn exactly as before', async () => {
+      const root = await render({
+        page: movingHero(),
+        edit,
+        theme: 'light',
+        orgShader: true,
+      });
+      expect(frameOf(root)).toBeNull();
+      const before = root.innerHTML;
+
+      copyFrame('light');
+      expect(frameOf(root)).toBe('url("blob:still-1")');
+      expect(root.innerHTML).toBe(before);
+      // A newer copy replaces it in place; a cleared one leaves the glow.
+      copyFrame('light');
+      expect(frameOf(root)).toBe('url("blob:still-2")');
+      shaderStill.clear();
+      flushSync();
+      expect(frameOf(root)).toBeNull();
     });
   });
 

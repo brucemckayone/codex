@@ -18,6 +18,14 @@
   `build` makes it enter as ONE element as it scrolls into view
   (`styles/motion.css`). Its text is never split into words or letters: the
   canvas must keep identical markup, and a screen reader must meet one line.
+
+  A `lead` is read as the start of the heading, before its words and as part
+  of it (a benefit's figure: "24 practices to keep", Codex-61zsk.73). It is
+  drawn on a line of its own, in the face and size its block gives it, so it
+  is never weighed with the words; the space between them is real text,
+  spoken but not drawn.
+  A heading edited in place has none, or the canvas would write the lead
+  into its words.
 -->
 <script lang="ts">
   import type { SectionTypeId } from '../model/ids';
@@ -26,13 +34,11 @@
   import type { Build } from '../motion/attributes';
   import { editAttrs } from './edit';
 
-  interface Props {
+  interface Common {
     level: 1 | 2 | 3 | 4;
     size?: 'display' | 'heading' | 'title';
     text: string;
     type: SectionTypeId;
-    /** The props key this heading edits inline on the canvas. */
-    field?: string;
     edit?: BlockEdit | null;
     build?: Build;
     id?: string;
@@ -41,12 +47,23 @@
     placeholder?: string;
   }
 
+  type Props = Common &
+    (
+      | {
+          /** The props key this heading edits inline on the canvas. */
+          field?: string;
+          lead?: never;
+        }
+      | { field?: never; lead?: string }
+    );
+
   const {
     level,
     size = 'heading',
     text,
     type,
     field,
+    lead,
     edit = null,
     build,
     id,
@@ -74,7 +91,7 @@
   style:--lp-heading-run-text={run?.text}
   style:--lp-heading-run-chars={run?.chars}
   data-placeholder={edit && !text ? placeholder : undefined}
-  {...attrs}>{text}</svelte:element
+  {...attrs}>{#if lead}<span class="lp-heading__lead">{lead}</span>{' '}{/if}{text}</svelte:element
 >
 
 <style>
@@ -103,6 +120,11 @@
     text-wrap: balance;
     overflow-wrap: break-word;
     hyphens: manual;
+  }
+
+  /* Its own line, so the words' run (above) is the whole of what shares one. */
+  .lp-heading__lead {
+    display: block;
   }
 
   /* An empty heading on the canvas shows what to type, in the soft ink. */

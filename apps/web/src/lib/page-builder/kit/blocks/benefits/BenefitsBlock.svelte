@@ -16,6 +16,13 @@
   in the mark ink (03 §5: a drawn mark, never the text grade); in the
   checklist it takes the tick's place, in the tick's own box and ink.
 
+  An item may have a figure in its mark's place instead (Codex-61zsk.73):
+  "24", "£12". It is words, read as the start of the name ("24 practices to
+  keep"), so it sits inside the name and is set in the accent's text grade.
+  A picture leads its own tile, so a pictured tile draws no figure. In the
+  checklist every row's mark stands in a column as wide as the widest
+  figure, level with its name's first line.
+
   Under the words, before the items, every layout draws the course's facts
   (Codex-61zsk.73): its stages, practices and length, counted from the
   curriculum, never typed. A new switch says HIDE (`hideFacts`), so every
@@ -39,6 +46,7 @@
   import BenefitsBento from './BenefitsBento.svelte';
   import { gridCardSizes } from './grid-sizes';
   import { BENEFITS_EMPTY, benefitsDefinition } from './definition';
+  import { figureZeros } from './figure';
 
   const { props, section, context, edit }: BlockProps = $props();
 
@@ -73,6 +81,11 @@
     items.map((item) => pageImageSrcset(item.image, context.mediaBaseUrl))
   );
   const gridSizes = $derived(gridCardSizes(items.length, page.style));
+  // The widest figure in the checklist, in its face's `0`s: the width of the
+  // column every row's mark stands in. None: the list draws as it always has.
+  const figureColumn = $derived(
+    Math.max(0, ...items.map((item) => (item.figure ? figureZeros(item.figure) : 0)))
+  );
 </script>
 
 {#snippet words()}
@@ -120,7 +133,7 @@
         {#each items as item, index (index)}
           <li>
             {#if item.mark}<span class="benefits__mark"><Mark mark={item.mark} /></span>{/if}
-            <p class="benefits-rows__name">{item.title}</p>
+            <p class="benefits-rows__name">{#if item.figure}<span class="benefits__figure">{item.figure}</span>{' '}{/if}{item.title}</p>
             {#if item.detail}<p class="benefits__detail">{item.detail}</p>{/if}
           </li>
         {/each}
@@ -133,16 +146,25 @@
     {#if items.length === 0}
       {@render empty()}
     {:else if layout === 'checklist'}
-      <ul class="benefits-checks">
+      <ul
+        class="benefits-checks"
+        data-figured={figureColumn > 0 ? '' : undefined}
+        style:--_zeros={figureColumn > 0 ? figureColumn : undefined}
+      >
         {#each items as item, index (index)}
-          <li>
-            <span class="benefits-checks__mark" aria-hidden="true">
-              {#if item.mark}<Mark mark={item.mark} />{:else}<CheckIcon size="1em" />{/if}
-            </span>
-            <div>
-              <p class="benefits-checks__name">{item.title}</p>
+          <li data-figure={item.figure ? '' : undefined}>
+            {#if item.figure}
+              <p class="benefits-checks__name"><span class="benefits__figure">{item.figure}</span>{' '}<span class="benefits-checks__words">{item.title}</span></p>
               {#if item.detail}<p class="benefits__detail">{item.detail}</p>{/if}
-            </div>
+            {:else}
+              <span class="benefits-checks__mark" aria-hidden="true">
+                {#if item.mark}<Mark mark={item.mark} />{:else}<CheckIcon size="1em" />{/if}
+              </span>
+              <div>
+                <p class="benefits-checks__name">{item.title}</p>
+                {#if item.detail}<p class="benefits__detail">{item.detail}</p>{/if}
+              </div>
+            {/if}
           </li>
         {/each}
       </ul>
@@ -169,7 +191,13 @@
               />
             {/if}
             {#if item.mark}<span class="benefits__mark"><Mark mark={item.mark} /></span>{/if}
-            <Heading level={itemLevel} size="title" text={item.title} type="benefits" />
+            <Heading
+              level={itemLevel}
+              size="title"
+              text={item.title}
+              type="benefits"
+              lead={tileImages[index] ? undefined : item.figure}
+            />
             {#if item.detail}<p class="benefits__detail">{item.detail}</p>{/if}
           </li>
         {/each}
@@ -233,6 +261,32 @@
     stroke: var(--lp-mark-ink);
   }
 
+  /* An item's figure, in its mark's place (Codex-61zsk.73): set as the
+     guide's credential figures are (`Credentials.svelte`), in the display
+     face halfway from title to heading, its figures lining and tabular. It
+     is words, the start of the name, so it takes the accent's text grade,
+     never the mark ink (a graphic's 3:1). Each layout keeps the step under
+     it that its mark had. The bento's names are reached here too. */
+  .benefits {
+    --_figure-size: calc(
+      (var(--lp-size-title) + var(--lp-size-heading) * var(--lp-drama-held, 1)) / 2
+    );
+  }
+
+  .benefits__figure,
+  .benefits :global(.lp-heading__lead) {
+    display: block;
+    font-family: var(--lp-font-display);
+    font-size: var(--_figure-size);
+    font-weight: var(--lp-weight-display);
+    font-synthesis: none;
+    font-variant-numeric: lining-nums tabular-nums;
+    line-height: var(--lp-leading-display);
+    letter-spacing: var(--lp-tracking-display);
+    white-space: nowrap;
+    color: var(--lp-accent);
+  }
+
   /* global.css caps every `p` at 65ch; the prompt spans its region. */
   .benefits__empty {
     max-inline-size: none;
@@ -280,6 +334,10 @@
   /* The picture leads the tile; its name keeps the tile's own rhythm under it. */
   .benefits-grid[data-pictured] :global(.lp-media) {
     margin-block-end: var(--space-2);
+  }
+
+  .benefits-grid :global(.lp-heading__lead) {
+    margin-block-end: var(--space-3);
   }
 
   @container (min-width: 36rem) {
@@ -336,6 +394,43 @@
     margin-block-start: var(--space-1-5);
   }
 
+  /* A list with a figure in it stands every row's mark in one column, as
+     wide as its widest figure: `--_zeros` of the figure face's `0`s
+     (`figure.ts`), counted on the list, which takes the figure's size for
+     it, and carried down to the rows as a length (registered, so the `em`
+     is the figure's, not a row's). A figure wider than reckoned widens its
+     own row, never runs into its name. The name keeps further from a
+     figure than from a tick. */
+  @property --_benefit-figure-col {
+    syntax: '<length>';
+    inherits: true;
+    initial-value: 0px;
+  }
+
+  .benefits-checks[data-figured] {
+    --_benefit-figure-col: calc(var(--_zeros) * var(--lp-zero-display));
+    font-size: var(--_figure-size);
+  }
+
+  .benefits-checks[data-figured] li {
+    grid-template-columns: minmax(var(--_benefit-figure-col), max-content) minmax(0, 1fr);
+    gap: 0 var(--space-4);
+  }
+
+  /* One line of text, the figure and the words, so it is read as one; its
+     two parts take the row's two columns, level on the name's first line. */
+  .benefits-checks li[data-figure] > .benefits-checks__name {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: subgrid;
+    align-items: baseline;
+    max-inline-size: none;
+  }
+
+  .benefits-checks li[data-figure] > .benefits__detail {
+    grid-column: 2;
+  }
+
   @container (min-width: 40rem) {
     .benefits-checks {
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -353,6 +448,10 @@
     gap: var(--space-2);
     padding-block: var(--space-5);
     border-block-end: var(--lp-border) var(--border-style) var(--lp-line);
+  }
+
+  .benefits-rows .benefits__figure {
+    margin-block-end: var(--space-2);
   }
 
   /* Ink named outright, and no "title" in the class: org-brand.css paints any

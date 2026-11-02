@@ -1,0 +1,40 @@
+/**
+ * The editor's moving background (Codex-61zsk.73, #20b): where a still
+ * render (the canvas, a thumbnail, the Moving swatch) draws a Moving band,
+ * it paints the studio's own frame of the org's shader (`shaderStill`) in
+ * place of the glow, under the proven veil (`styles/surfaces.css`). Only
+ * where the live page would show that frame: the org has a shader, the page
+ * keeps the org's colours (03 X11), and the frame was drawn in the theme the
+ * band is in. Anywhere else, and until the frame is copied, the glow.
+ */
+
+import { shaderStill } from '$lib/components/ui/ShaderHero/shader-still.svelte';
+import type { BrandTokenOverrides } from '$lib/page-builder';
+
+/**
+ * The page sets its own colours. The org's shader draws in the ORG's, so
+ * such a page shows the glow, which follows the page's, rather than clash
+ * (03 X11). Fonts alone leave the shader's colours as they are.
+ */
+export function ownsColours(
+  overrides: BrandTokenOverrides | null | undefined
+): boolean {
+  return Boolean(overrides?.primaryColor || overrides?.secondaryColor);
+}
+
+/**
+ * The frame to paint, as a CSS image (`--lp-shader-still`), or undefined for
+ * the glow. Reactive: read in a `$derived`, it follows each new copy. A
+ * render with no `theme` follows the viewer's, which is not known here, so
+ * it keeps the glow.
+ */
+export function atmosphereStill(band: {
+  theme: 'light' | 'dark' | undefined;
+  orgShader: boolean;
+  brandOverrides: BrandTokenOverrides | null | undefined;
+}): string | undefined {
+  if (!band.orgShader || !band.theme || ownsColours(band.brandOverrides))
+    return undefined;
+  const still = shaderStill.current;
+  return still?.theme === band.theme ? `url("${still.url}")` : undefined;
+}
