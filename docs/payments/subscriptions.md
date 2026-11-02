@@ -397,6 +397,17 @@ remove the `codex_move_*` and `codex_hold_*` keys. The next
   If the parked price change already names the current Price, they were
   told: nothing is added. A live change for another Price is an error alert,
   and nothing is added.
+  - The held Price Keep puts back was archived by that re-price, and Stripe
+    refuses an archived Price on an item. Keep makes it active again first
+    (`ensurePriceActive`: read, and written only if archived) and leaves it
+    active. Checkout always uses the tier's current Price and the portal is
+    locked, so nobody new can reach it (review C1, F2).
+  - Whether the tier was repriced, and the change to hang the row off, are
+    read under a share lock on the tier row, which a save takes first
+    (F3). A save in flight is waited for, so Keep joins the newest change,
+    never an outdated one. Two Keeps on one tier with no change for its Price
+    can both write one; the second hits the one-live-change index and runs
+    once more, joining the first's.
 
 ## Price changes
 
@@ -474,7 +485,7 @@ and no new Neon wake: it rides the hourly one.
    a finished change. Only a tier's (or plan's) newest change with nothing
    else live is re-opened, so the one-live-change index always holds; after
    a newer save, an older change has no such rows anyway.
-2. **Claim.** Up to 1,500 rows (`PRICE_MOVES_PER_RUN`), `due` or `notified`,
+2. **Claim.** Up to 1,125 rows (`PRICE_MOVES_PER_RUN`), `due` or `notified`,
    whose retry time has come, on running changes, oldest first, in one UPDATE
    under `FOR UPDATE SKIP LOCKED` (`attempts + 1`, `attempted_at`). A row
    tried in the last 20 minutes is never claimed, so overlapping runs never
@@ -491,6 +502,20 @@ and no new Neon wake: it rides the hourly one.
      whose body says `success: true` is accepted; anything else writes
      nothing to the subscription. Every Stripe call gives up after 3 seconds,
      with no retry: the next hour is the retry;
+   - at Stripe, a tier's member is leaving if `codex_move_tier_id` names
+     another tier, or, with no move waiting, `codex_tier_id` does (an
+     upgrade, or Keep from a move onto this tier): `moving_away`;
+   - the member can change plan during the email (review C1, F1). So once
+     the notice is accepted, Stripe is read again. If the status, the item,
+     its Price or any `codex_*` key changed, the move is decided again on
+     what is there now, the same way and against the same notice time, and
+     nothing is written over their change: someone now leaving is
+     `skipped`. No second notice is sent, and the row records `notice_at`
+     either way. The 30-day rule is judged against that same notice time,
+     never the second read's, so a switch from now to pending (or back)
+     still names the first renewal 30 days after the email. A change
+     between that read and the write is left to the sync's backstop
+     ([At Stripe](#price-changes));
    - a `notified` row retries the write only, with no second email (M1),
      from its own email: the date it was told, or the next renewal if that
      has passed (Q5).
@@ -499,7 +524,7 @@ and no new Neon wake: it rides the hourly one.
    | What happened | The row |
    |---|---|
    | Told and written | `scheduled` (`now` or `pending`), with `notice_at` and the date the email gave (`effective_at`) |
-   | Already on the new amount, or skipped | `unchanged` / `skipped`, nobody emailed |
+   | Already on the new amount, or skipped | `unchanged` / `skipped`, nobody emailed; told, then found changed (F1): `notice_at` and `effective_at` kept |
    | Notice not accepted | `due` again next hour (`last_error`, e.g. `notice_refused_422`, `notice_unknown_503`); held after 3 tries (`no_address`, `notice_refused`, `notice_skipped`, `notice_unknown`) |
    | Told, then the Stripe write failed | `notified`, the write retried next hour; held after 3 tries as `move_refused` (a 4xx other than 409 or 429) or `move_unknown` |
    | The read, or a same-amount write, failed before any notice | `due` again; held after 3 tries (`read_failed`, `same_amount_write_failed`) |
@@ -509,12 +534,17 @@ and no new Neon wake: it rides the hourly one.
    closes as `retried_ok` (`resolved_at` set).
 5. **An unknown outcome is checked before anything is sent again.** A notice
    that got a 5xx or timed out may have gone, and a run may have stopped
-   after its writes without recording them (a retried row says so by its
-   kept `held_reason`, `notice_unknown`). Such a row is looked for first
-   in notifications' email log (a success for the template and recipient,
-   carrying the row's `priceMoveId`, since a minute before the last try):
-   found, it was told then. Then at Stripe: already on the new Price, or
-   marked pending for it, counts as moved. Only then is it sent again.
+   after its email or its Stripe write without recording either, leaving an
+   older try's `last_error` on the row. So every row tried before (and a
+   retried row whose kept `held_reason` is `notice_unknown`) is looked for
+   first in notifications' email log: a row for the template and recipient,
+   carrying the row's `priceMoveId`, since a minute before the last try,
+   `success` or `pending` (F4). Found, it was told then. Then at Stripe:
+   already on the new Price, or marked pending for it, counts as moved.
+   Only then is it sent again. notifications-api writes the log row
+   `pending` before the provider call and `success` after it, so one left
+   `pending` may have been delivered; `failed` (every attempt failed) and
+   `skipped` (an opt-out) do not count.
 6. **A change stops** when every notice of its first batch in a run was
    refused with a 4xx that will not go away by itself (not 408, 409, 425 or
    429: a missing template, a bad worker secret) and none of its notices was
@@ -530,9 +560,11 @@ and no new Neon wake: it rides the hourly one.
    `notified`; held rows don't keep it running. That includes a change
    re-opened for a retried row, once that row is worked.
 
-Budget: about 3 subrequests per person (the Stripe read, the notice, the
-Stripe write), so a full run is about 4,500. 10,000 subscribers take about 7
-runs, 7 to 8 hours with the 08:00 gap.
+Budget: about 4 subrequests per person (the Stripe read, the notice, the
+read again after it, the Stripe write), so a full run of 1,125 is about
+4,500. With the same wake's other sweeps (about 4,000) that is 8,500, under
+the paid plan's default 10,000 per invocation. 10,000 subscribers take 9
+runs, 9 to 10 hours with the 08:00 gap.
 
 **At Stripe:**
 
@@ -544,7 +576,9 @@ runs, 7 to 8 hours with the 08:00 gap.
   (`codex_pending_price_id`, `codex_pending_price_from` = the email + 30 days,
   or a waiting mover's floor if later). Stripe sends
   `customer.subscription.updated` at every renewal; once the next renewal is
-  on or after that date, the switch is made as above.
+  on or after that date, the switch is made as above. If a newer save has
+  archived that Price before the step reached them, it is made active again
+  first, and the accepted change still lands (F2).
 - Past-due and paused subscribers are only marked pending, and move when they
   are active again. A subscriber already paying the new amount is not emailed.
 - The other interval's subscribers are never touched: switching a monthly
@@ -562,6 +596,10 @@ runs, 7 to 8 hours with the 08:00 gap.
 - A Price created in the Stripe Dashboard is logged as drift
   (`TierService.recordStripePriceDrift`); the tier keeps its own Price and no
   subscriber moves.
+- **Backstop** (F1). Every Price a tier bills is on that tier's Stripe
+  Product, so the subscription sync raises an error alert (ids only, no
+  write) when an item's Price is on neither the member's tier's Product nor
+  their waiting tier's: a move or a plan change may have been written over.
 
 ### Studio progress
 
@@ -576,7 +614,7 @@ finished or replaced in the last 14 days, gives `counts` (`total`;
 `scheduled`; `held`, unresolved: "couldn't be moved yet"; `due`; and
 `retrying`, the `due` rows already tried: "1 to try again at 16:00"),
 `lastRunAt`, `nextRunAt` and `estimatedDoneAt` (`nextPriceMovesRunAfter`
-in `@codex/payments`, stepped at 1,500 a run, skipping 08:00 London),
+in `@codex/payments`, stepped at 1,125 a run, skipping 08:00 London),
 `doneAt`, `supersededById` and `stoppedAt`. The
 counts change only on the hour, so the page reads once per visit and has
 Check again (the cost rule). The public tier list is not touched.

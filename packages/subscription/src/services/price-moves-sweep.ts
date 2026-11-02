@@ -34,7 +34,7 @@
  *
  * Budget: about 4 subrequests per person (the Stripe read, the
  * notifications-api call, the Stripe read again after it (F1), the Stripe
- * write), so a full run is about 6,000.
+ * write), so a full run of PRICE_MOVES_PER_RUN is about 4,500.
  *
  * Never throws: it runs inside `waitUntil` from `scheduled()`. The record, not
  * the log, is the source of truth; alerts carry ids only.
@@ -72,8 +72,15 @@ import {
 } from './pending-price-change';
 import { MOVE_TIER_ID_KEY } from './tier-move';
 
-/** People a run claims at most; the rest wait an hour (§2.4 budget). */
-export const PRICE_MOVES_PER_RUN = 1500;
+/**
+ * People a run claims at most; the rest wait an hour. Sized to the
+ * subrequest budget (§2.4): about 4 per person (the Stripe read, the
+ * notice, the read again after it (F1), the write) × 1,125 = 4,500, and
+ * the same wake's other sweeps take about 4,000 more, so 8,500: the design's
+ * envelope, under the paid plan's default 10,000 per invocation (ecom-api
+ * sets no `limits`).
+ */
+export const PRICE_MOVES_PER_RUN = 1125;
 /** People worked at once: one batch, all on one change. */
 export const PRICE_MOVES_BATCH_SIZE = 8;
 /** No batch starts after this; the cron's wall is 15 minutes. */
