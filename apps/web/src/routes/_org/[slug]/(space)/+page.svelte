@@ -1232,8 +1232,11 @@
 
   .hero__cta--primary {
     background: var(--brand-hero-cta-bg, white);
-    /* Mix brand with black to guarantee WCAG AA contrast on white background */
-    color: var(--brand-hero-cta-text, color-mix(in oklch, var(--color-brand-primary) 75%, black));
+    /* The brand mixed with black, then held at OKLCH lightness 0.5 or below:
+       the mix alone left a pale brand at 2.74:1 on the white button. Measured
+       over a 4 096-colour lattice in Chrome and WebKit: every brand clears AA
+       (worst 5.27:1), and no seeded org's label moves (Codex-mik4h). */
+    color: var(--brand-hero-cta-text, oklch(from color-mix(in oklch, var(--color-brand-primary) 75%, black) min(l, 0.5) c h));
     box-shadow: var(--shadow-md);
   }
 

@@ -216,8 +216,12 @@
 
   /* ─── BLIND SPOT FIXES ─────────────────────────────────────────── */
   /* These tokens were NOT re-derived from brand inputs. They stayed
-     hardcoded neutral-gray regardless of org branding. */
-  --color-text-tertiary: oklch(from var(--brand-color, var(--color-primary-500)) calc(l * 0.6 + 0.2) calc(c * 0.1) h);
+     hardcoded neutral-gray regardless of org branding.
+     Tertiary text is held at OKLCH lightness 0.54 or below: unheld, a pale
+     brand's faint text was 2.1:1. Measured over a 4 096-colour lattice in
+     Chrome and WebKit, it clears AA on the page, surface and card (worst
+     4.76:1), and OBB's and studio-beta's are unchanged (Codex-mik4h). */
+  --color-text-tertiary: oklch(from var(--brand-color, var(--color-primary-500)) min(calc(l * 0.6 + 0.2), 0.54) calc(c * 0.1) h);
   --color-text-disabled: oklch(from var(--brand-bg, white) clamp(0.4, abs(0.45 - l) + 0.4, 0.7) calc(c * 0.05) h);
   --color-border-hover: oklch(from var(--brand-bg, white) calc(l - 0.15) calc(c * 0.3) h);
   --color-surface-variant: oklch(from var(--brand-bg, white) calc(l - 0.04) calc(c * 0.4) h);
@@ -463,7 +467,10 @@
   --media-glyph: oklch(from var(--color-brand-accent) 0.97 calc(c * 0.06) h);
 
   /* ─── BLIND SPOT FIXES (DARK) ──────────────────────────────────── */
-  --color-text-tertiary: oklch(from var(--brand-color-dark, var(--brand-color, var(--color-primary-400))) calc(l * 0.5 + 0.3) calc(c * 0.1) h);
+  /* Held at OKLCH lightness 0.66 or above: unheld, it failed for all three
+     seeded orgs (OBB 3.54:1). Measured the same way, it clears AA on the page
+     and surface (worst 4.77:1). */
+  --color-text-tertiary: oklch(from var(--brand-color-dark, var(--brand-color, var(--color-primary-400))) max(calc(l * 0.5 + 0.3), 0.66) calc(c * 0.1) h);
   --color-text-disabled: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) clamp(0.3, abs(0.5 - l) + 0.3, 0.5) 0 0);
   --color-border-hover: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) calc(l + 0.15) calc(c * 0.3) h);
   --color-surface-variant: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) calc(l + 0.06) calc(c * 0.4) h);
