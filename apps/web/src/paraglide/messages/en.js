@@ -19647,6 +19647,30 @@ export const studio_page_editor_scheme_atmosphere_hint = () => `Your organisatio
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_scheme_atmosphere_none = () => `No moving background yet, so a soft glow of your colours stands in.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_scheme_atmosphere_add = () => `Add one in Brand`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_scheme_atmosphere_ask = () => `An admin can add one in Brand.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const studio_page_editor_spacing_title = () => `Spacing`
 
 

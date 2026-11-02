@@ -173,7 +173,7 @@ function fragments(): string[] {
   out.push(
     '--_y: (0.2126 * var(--_lr) + 0.7152 * var(--_lg) + 0.0722 * var(--_lb));'
   );
-  out.push('--_w: clamp(0, (0.1791 - var(--_y)) * 1e6, 1);');
+  out.push('--_w: clamp(0, (0.1791 - var(--_y)) * 1e12, 1);');
   for (const [level, t] of Object.entries(INK)) {
     out.push(
       `--_t-${level}: (var(--_w) * min(1, ${t} * (var(--_y) + 0.05) - 0.05) + (1 - var(--_w)) * max(0, (var(--_y) + 0.05) / ${t} - 0.05));`
@@ -465,12 +465,12 @@ describe('schemes.css ↔ model parity', () => {
       '--lp-mark-ink: rgb(from var(--lp-accent-source) var(--_ol-r) var(--_ol-g) var(--_ol-b));'
     );
     const step =
-      'calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))';
+      'calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))';
     expect(ORG_BRAND).toContain(
       `--color-on-interactive: rgb( from var(--color-interactive) ${step} ${step} ${step} );`
     );
     // The kit's `--_w` is that step, written once from the same fragments.
-    expect(EXACT).toContain('--_w: clamp(0, (0.1791 - var(--_y)) * 1e6, 1);');
+    expect(EXACT).toContain('--_w: clamp(0, (0.1791 - var(--_y)) * 1e12, 1);');
     expect(EXACT).toContain(
       '--_lr: pow((clamp(0, r, 255) / 255 + 0.055) / 1.055, 2.4);'
     );
@@ -600,7 +600,7 @@ const inGamut = (rgb: Rgb) => rgb.every((c) => c >= -1e-6 && c <= 1 + 1e-6);
 function ink(bgIn: Rgb, t: number): Rgb {
   const L = clip(bgIn).map(kneeLin);
   const y = 0.2126 * L[0] + 0.7152 * L[1] + 0.0722 * L[2];
-  const w = Math.min(1, Math.max(0, (0.1791 - y) * 1e6));
+  const w = Math.min(1, Math.max(0, (0.1791 - y) * 1e12));
   const yt =
     w * Math.min(1, t * (y + 0.05) - 0.05) +
     (1 - w) * Math.max(0, (y + 0.05) / t - 0.05);
@@ -617,7 +617,7 @@ function ink(bgIn: Rgb, t: number): Rgb {
 function pivot(fill: Rgb): Rgb {
   const L = clip(fill).map(kneeLin);
   const y = 0.2126 * L[0] + 0.7152 * L[1] + 0.0722 * L[2];
-  const w = Math.min(1, Math.max(0, (0.1791 - y) * 1e6));
+  const w = Math.min(1, Math.max(0, (0.1791 - y) * 1e12));
   return [w, w, w];
 }
 
@@ -3896,7 +3896,7 @@ describe('the org’s real ground — its pole, its band, and a soft band that s
     expect(INK_CROSSOVER).toBeCloseTo(Math.sqrt(1.05 * 0.05) - 0.05, 4);
     // The kit's inks switch at the same point.
     expect(CODE).toContain(
-      `--_w: clamp(0, (${INK_CROSSOVER} - var(--_y)) * 1e6, 1);`
+      `--_w: clamp(0, (${INK_CROSSOVER} - var(--_y)) * 1e12, 1);`
     );
     let light = 0;
     let dark = 0;
@@ -5340,6 +5340,96 @@ describe('the §5 floors on the fallback path — a measured known limit (Codex-
   it('generated sweep of the sRGB cube: misses exactly the known list, and nothing else', () => {
     expect(tabulate(fallbackSweepMisses())).toEqual(
       KNOWN_FALLBACK_MISSES.sweep
+    );
+  });
+});
+
+// ── the editor's still (Codex-61zsk.73, #20b) ───────────────────────────────
+/*
+ * In the studio the canvas and its thumbnails paint the studio's own frame of
+ * the org's shader on a Moving band, once it has been copied, in place of the
+ * glow. A copy is a backdrop like any frame of the shader, so §5 covers it
+ * exactly when it is drawn under the floor `--_atmos-floor` (the pole's
+ * proven veil, the band's, or a Style's thicker one: §5 and the band tests
+ * above), in the band's own ground; the live page's thinner veil is measured
+ * over the shader on the page (03 X54), never over a copy.
+ */
+describe('the editor’s still — the studio’s frame under the proven veil', () => {
+  const at = SURFACES.indexOf(
+    '@supports (color: rgb(from red r g b / 0.5)) { .lp[data-lp-shader-still]'
+  );
+  const STILL = SURFACES.slice(at);
+  const BAND =
+    ".lp-section[data-lp-scheme='atmosphere']:not([data-lp-on-media]) > .lp-surface::before";
+  const body = (selector: string, from = STILL) => {
+    const start = from.indexOf(`${selector} {`);
+    if (start < 0) return '';
+    const open = start + selector.length + 2;
+    return from.slice(open, from.indexOf('}', open));
+  };
+
+  it('is drawn only where the root carries a copy, so a band without one keeps its glow', () => {
+    expect(at).toBeGreaterThan(0);
+    // The glow is untouched: a band whose root has no copy still draws it.
+    expect(body(BAND, SURFACES)).toContain('radial-gradient(');
+    // Every rule that reads the copy is keyed on the root's flag.
+    const reads = SURFACES.split('}').filter((rule) =>
+      rule.includes('--lp-shader-still')
+    );
+    expect(reads.length).toBeGreaterThan(0);
+    for (const rule of reads)
+      expect(rule).toContain('.lp[data-lp-shader-still]');
+  });
+
+  it('fills the band from the frame’s centre under the floor, in the band’s own ground', () => {
+    const paint = body(`.lp[data-lp-shader-still] ${BAND}`);
+    expect(paint).toContain(
+      '--_still-veil: linear-gradient(rgb(from var(--lp-bg) r g b / var(--_atmos-floor)) 0 0);'
+    );
+    expect(paint).toContain(
+      'background: var(--_still-veil), var(--lp-shader-still) center / cover no-repeat;'
+    );
+    // Over the glow's whole box, and none of its blur, fade or drift.
+    for (const rule of [
+      'inset: 0;',
+      'opacity: 1;',
+      'filter: none;',
+      'animation: none;',
+    ])
+      expect(paint).toContain(rule);
+    // Never the live veil, which only the page's own measure may thin.
+    expect(STILL).not.toMatch(/--_atmos-(s|thin|need|veil)\b/);
+    // The floor it draws is the one §5 proves, or thicker.
+    expect(CODE).toContain(
+      '--_atmos-floor: max(var(--_atmos-min), var(--_band-veil), var(--lp-atmosphere-scrim, 0));'
+    );
+  });
+
+  it('is never a live page’s: nothing in it reads the live flag or the org layout', () => {
+    expect(STILL).not.toContain('data-lp-atmosphere');
+    expect(STILL).not.toContain('.org-layout');
+  });
+
+  it('leaves the band unveiled only where the panel’s card is drawn, which is the veil', () => {
+    const PANEL_BAND =
+      ".lp-section[data-lp-scheme='atmosphere']:not([data-lp-on-media], :has(> .lp-inner > .lp-bleed))";
+    const panel = STILL.slice(
+      STILL.indexOf('@container lp-page style(--lp-atmosphere-veil: panel)')
+    );
+    expect(
+      body(
+        `.lp[data-lp-shader-still] ${PANEL_BAND} > .lp-surface::before`,
+        panel
+      )
+    ).toBe(' --_still-veil: none; ');
+    // The same band condition the card itself is drawn under.
+    expect(SURFACES).toContain(`${PANEL_BAND} > .lp-surface::after {`);
+  });
+
+  it('draws no picture behind the words in forced colours', () => {
+    const forced = STILL.slice(STILL.indexOf('@media (forced-colors: active)'));
+    expect(body(`.lp[data-lp-shader-still] ${BAND}`, forced)).toBe(
+      ' background: none; '
     );
   });
 });

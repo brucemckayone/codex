@@ -154,6 +154,14 @@
     };
   });
 
+  // Who may open Brand, where an org with no moving background is pointed
+  // (Codex-61zsk.73): the role the studio layout already resolved, the one
+  // Brand's own guard reads (`studio/brand/+page.server.ts`).
+  const canEditBrand = $derived.by(() => {
+    const role: unknown = appPage.data.userRole;
+    return role === 'admin' || role === 'owner';
+  });
+
   /** A hidden section is not on the page, so it has no neighbour to step back from. */
   function resolvedIn(target: KitPage) {
     return resolveSections(target, drawn).find((s) => s.id === section.id);
@@ -371,6 +379,8 @@
         chosen={section.design?.scheme !== undefined}
         onChoose={(next) => pageBuilder.setSectionStyle(section.id, { scheme: next })}
         onReset={() => pageBuilder.setSectionStyle(section.id, { scheme: undefined })}
+        orgShader={drawn.orgShader}
+        {canEditBrand}
       />
       {#if joinNote}
         <p class="section-inspector__hint" data-note="join">{joinNote}</p>
