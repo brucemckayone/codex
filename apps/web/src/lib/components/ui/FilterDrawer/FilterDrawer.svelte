@@ -436,7 +436,9 @@
     height: var(--space-5);
     padding: 0 var(--space-2);
     background: var(--color-interactive-subtle, var(--color-surface-secondary));
-    color: var(--color-interactive);
+    /* `--color-text`, as the selected row's label (below): brand ink on a brand
+       tint has no inverting side (Codex-mik4h). The tint carries the brand. */
+    color: var(--color-text);
     border-radius: var(--radius-full);
     font-family: var(--font-sans);
     font-size: var(--text-xs);
@@ -637,18 +639,19 @@
     outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: var(--focus-offset, 1px);
   }
-  /* --color-text-on-brand, NOT --color-text-inverse: `inverse` flips with the
-     THEME, `on-brand` is derived from the brand fill this pill is painted
-     with. In dark theme they diverge, so the active pill took near-black text
-     while the Apply button beside it — same brand fill — took white. On a blue
-     brand in dark theme that was black-on-#2563EB at 3.53:1, a WCAG AA fail;
-     on-brand gives 5.9:1. */
+  /* --color-on-interactive, NOT --color-text-inverse: `inverse` flips with the
+     THEME, `on-interactive` is derived from the `--color-interactive` fill this
+     pill is painted with. In dark theme they diverge, so the active pill took
+     near-black text while the Apply button beside it — same fill — took white.
+     On a blue brand in dark theme that was black-on-#2563EB at 3.53:1, a WCAG
+     AA fail. The hover fill takes its own ink for the same reason. */
   :global(.filter-drawer__pill.is-active) {
-    color: var(--color-text-on-brand);
+    color: var(--color-on-interactive);
     background: var(--color-interactive);
     border-color: var(--color-interactive);
   }
   :global(.filter-drawer__pill.is-active:hover) {
+    color: var(--color-on-interactive-hover);
     background: var(--color-interactive-hover);
     border-color: var(--color-interactive-hover);
   }
@@ -714,11 +717,12 @@
   }
   .filter-drawer__btn--primary {
     background: var(--color-interactive);
-    color: var(--color-text-on-brand);
+    color: var(--color-on-interactive);
     box-shadow: var(--shadow-sm);
   }
   .filter-drawer__btn--primary:hover {
     background: var(--color-interactive-hover);
+    color: var(--color-on-interactive-hover);
     box-shadow: var(--shadow-md);
   }
   .filter-drawer__btn:active {

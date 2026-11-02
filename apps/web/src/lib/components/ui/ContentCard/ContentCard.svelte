@@ -1049,9 +1049,13 @@
 
   /* Featured callout — a compact branded pill (sparkle + "Featured") in the
      bottom-left corner. Replaces the bare sparkle so the flag reads as a
-     deliberate label, not a stray glyph. Darkened-brand background keeps the
-     near-white glyph + label legible over any cover on either theme. */
+     deliberate label, not a stray glyph. The darkened-brand fill is a mix no
+     token names, so the label takes the luminance step from that fill itself,
+     as every `--color-*-on-*` ink does (`--_on-fill-step`, light.css): >= 4.58:1
+     for every brand. The near-white glyph it had failed on a pale brand, 1.57:1
+     at worst (Codex-mik4h). */
   .cc__featured-pill {
+    --_pill-fill: color-mix(in oklab, var(--color-brand-primary) 78%, var(--color-neutral-900));
     position: absolute;
     bottom: var(--space-2);
     left: var(--space-2);
@@ -1065,12 +1069,17 @@
     font-weight: var(--font-semibold);
     line-height: var(--leading-tight);
     letter-spacing: var(--tracking-wide);
-    color: var(--media-glyph);
-    background: color-mix(in oklab, var(--color-brand-primary) 78%, var(--color-neutral-900));
+    color: oklch(from var(--_pill-fill) clamp(0, (0.62 - l) * 1000, 1) 0 0);
+    background: var(--_pill-fill);
     border-radius: var(--radius-full);
     box-shadow: var(--shadow-sm);
     backdrop-filter: blur(var(--blur-sm));
     -webkit-backdrop-filter: blur(var(--blur-sm));
+  }
+  @supports (color: rgb(from red calc(255 * pow(r / 255, 2)) 0 0)) {
+    .cc__featured-pill {
+      color: rgb(from var(--_pill-fill) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
+    }
   }
 
   :global(.cc__featured-pill-icon) {
@@ -1294,7 +1303,7 @@
 
   .cc:hover .cc__resume-pill {
     background: var(--color-interactive);
-    color: var(--color-text-inverse);
+    color: var(--color-on-interactive);
   }
 
   /* Creator row */

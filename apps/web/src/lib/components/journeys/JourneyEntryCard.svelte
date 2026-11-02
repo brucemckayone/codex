@@ -1015,7 +1015,7 @@
     padding: var(--space-2-5) var(--space-5);
     border-radius: var(--radius-full);
     background: var(--color-interactive);
-    color: var(--color-text-on-brand);
+    color: var(--color-on-interactive);
   }
 
   /* ── Row silhouette ───────────────────────────────────────────────────────

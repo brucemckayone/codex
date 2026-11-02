@@ -412,7 +412,7 @@
   .fine-tune__group-badge {
     font-size: calc(var(--text-xs) * 0.8);
     font-weight: var(--font-semibold);
-    color: var(--color-text-on-brand);
+    color: var(--color-on-interactive);
     background: var(--color-interactive);
     border-radius: var(--radius-full);
     padding: 0 var(--space-1-5);
@@ -546,7 +546,7 @@
 
   .fine-tune__blend-option--active {
     background: var(--color-interactive);
-    color: var(--color-text-on-brand);
+    color: var(--color-on-interactive);
   }
 
   .fine-tune__select {

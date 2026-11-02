@@ -713,6 +713,7 @@
 
   .co-cta:hover {
     background: var(--color-brand-primary-hover);
+    color: var(--color-text-on-brand-hover);
   }
 
   .co-cta:active {

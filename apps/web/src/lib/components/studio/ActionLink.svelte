@@ -95,6 +95,7 @@
 
   .action-link[data-variant='primary']:hover {
     background-color: var(--color-interactive-hover);
+    color: var(--color-on-interactive-hover);
   }
 
   .action-link[data-variant='secondary'] {

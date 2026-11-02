@@ -85,7 +85,7 @@
     justify-content: center;
     padding: var(--space-2) var(--space-4);
     background: var(--color-interactive);
-    color: var(--color-text-on-brand);
+    color: var(--color-on-interactive);
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
     border: none;

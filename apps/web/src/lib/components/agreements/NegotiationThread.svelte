@@ -386,11 +386,12 @@
 
   .negotiation-thread__btn--primary {
     background: var(--color-interactive);
-    color: var(--color-text-on-brand);
+    color: var(--color-on-interactive);
   }
 
   .negotiation-thread__btn--primary:hover {
     background: var(--color-interactive-hover);
+    color: var(--color-on-interactive-hover);
   }
 
   .negotiation-thread__btn--secondary {

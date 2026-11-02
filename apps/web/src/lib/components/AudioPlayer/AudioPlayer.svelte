@@ -1419,7 +1419,7 @@
     padding: var(--space-2) var(--space-4);
     font-size: var(--text-sm);
     background: var(--color-primary-500);
-    color: var(--color-text-on-primary, var(--color-player-text));
+    color: var(--color-text-on-brand);
     border: none;
     border-radius: var(--radius-md);
     cursor: pointer;
@@ -1545,7 +1545,7 @@
     height: var(--space-10);
     padding: 0;
     background: var(--color-primary-500);
-    color: var(--color-text-on-primary, var(--color-player-text));
+    color: var(--color-text-on-brand);
     border: none;
     border-radius: var(--radius-full);
     cursor: pointer;
@@ -1555,6 +1555,7 @@
 
   .audio-mini-player__btn:hover {
     background: var(--color-primary-600, var(--color-primary-500));
+    color: var(--color-text-on-brand-hover);
     transform: scale(1.05);
   }
 

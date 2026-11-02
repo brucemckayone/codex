@@ -299,7 +299,7 @@
 
   .type-btn.active {
     background: var(--color-interactive);
-    color: var(--color-text-on-brand);
+    color: var(--color-on-interactive);
     border-color: var(--color-interactive);
   }
 

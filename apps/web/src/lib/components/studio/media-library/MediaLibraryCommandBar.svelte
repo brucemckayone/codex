@@ -504,7 +504,7 @@
     padding: 0 var(--space-4);
     font-size: var(--text-sm);
     font-weight: var(--font-semibold);
-    color: var(--color-text-on-brand, var(--color-background));
+    color: var(--color-on-interactive);
     background-color: var(--color-interactive);
     border: none;
     border-radius: var(--radius-full, 9999px);
@@ -517,6 +517,7 @@
 
   .upload-btn:hover {
     background-color: var(--color-interactive-hover);
+    color: var(--color-on-interactive-hover);
   }
 
   .upload-btn:focus-visible {

@@ -993,7 +993,7 @@
     padding: var(--space-2) var(--space-4);
     border-radius: var(--radius-full);
     background-color: var(--color-interactive);
-    color: var(--color-text-on-brand, var(--color-background));
+    color: var(--color-on-interactive);
     font-size: var(--text-sm);
     font-weight: var(--font-semibold);
     text-decoration: none;
@@ -1002,6 +1002,7 @@
 
   .journeys__create:hover {
     background-color: var(--color-interactive-hover);
+    color: var(--color-on-interactive-hover);
   }
 
   .journeys__create:focus-visible {
@@ -1229,14 +1230,14 @@
   /*
     The pressed state has to be legible without colour alone, because "Feature"
     and "Featured" differ by two characters. A filled brand chip carries it:
-    `--color-text-on-brand` auto-derives its own contrast from the brand hue
-    (org-brand.css), so it stays readable on any org's palette rather than
-    assuming a light one.
+    `--color-on-interactive` auto-derives its own contrast from the fill it
+    sits on (org-brand.css), so it stays readable on any org's palette rather
+    than assuming a light one.
   */
   .journey-row__action--feature[aria-pressed='true'] {
     border-color: transparent;
     background-color: var(--color-interactive);
-    color: var(--color-text-on-brand, var(--color-background));
+    color: var(--color-on-interactive);
   }
 
   /* `--color-error-600` matches the studio's existing error-text convention
@@ -1252,12 +1253,12 @@
   .journey-row__action--primary {
     border-color: transparent;
     background-color: var(--color-interactive);
-    color: var(--color-text-on-brand, var(--color-background));
+    color: var(--color-on-interactive);
   }
 
   .journey-row__action--primary:hover {
     background-color: var(--color-interactive-hover);
-    color: var(--color-text-on-brand, var(--color-background));
+    color: var(--color-on-interactive-hover);
   }
 
   .journey-row__action:focus-visible {
@@ -1371,7 +1372,7 @@
     padding: var(--space-2) var(--space-4);
     border-radius: var(--radius-full);
     background-color: var(--color-interactive);
-    color: var(--color-text-on-brand, var(--color-background));
+    color: var(--color-on-interactive);
     font-size: var(--text-sm);
     font-weight: var(--font-semibold);
     text-decoration: none;
@@ -1379,5 +1380,6 @@
 
   .journeys__empty-cta:hover {
     background-color: var(--color-interactive-hover);
+    color: var(--color-on-interactive-hover);
   }
 </style>

@@ -3234,6 +3234,22 @@
     overflow: hidden;
   }
 
+  /* Lit from above on the label's side (Codex-mik4h). The 8% lift toward white
+     put a white label under AA at the top of a brand near the luminance pivot
+     (4.11:1 at worst). So a black label keeps the lift at the top, and a white
+     label keeps the brand at the top and deepens 8% toward black at the
+     bottom: each end moves AWAY from the label, so the whole ribbon holds what
+     the label holds on the brand, >= 4.58:1. */
+  @supports (color: rgb(from red calc(255 * pow(r / 255, 2)) 0 0)) {
+    .card__ribbon {
+      background: linear-gradient(
+        180deg,
+        rgb(from var(--color-brand-primary) calc(r + 0.08 * (1 - var(--_on-fill-step)) * (255 - r)) calc(g + 0.08 * (1 - var(--_on-fill-step)) * (255 - g)) calc(b + 0.08 * (1 - var(--_on-fill-step)) * (255 - b))),
+        rgb(from var(--color-brand-primary) calc(r * (1 - 0.08 * var(--_on-fill-step))) calc(g * (1 - 0.08 * var(--_on-fill-step))) calc(b * (1 - 0.08 * var(--_on-fill-step))))
+      );
+    }
+  }
+
   /* One-shot diagonal shine after entrance — draws the eye to the
      recommended tier once, then stays quiet. Disabled under reduced motion. */
   @media (prefers-reduced-motion: no-preference) {

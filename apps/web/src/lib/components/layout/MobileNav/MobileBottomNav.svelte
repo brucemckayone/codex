@@ -156,7 +156,11 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		color: var(--color-text-inverse);
+		/* The icon is a graphic (3:1). The interactive colour's own ink holds
+		   across the gradient under it, darker stop included: worst 3.63:1 over
+		   every brand. `--color-text-inverse` follows the page, so it was white
+		   on a pale brand, 1.12:1 at worst (Codex-mik4h). */
+		color: var(--color-on-interactive);
 		box-shadow: var(--shadow-lg),
 			0 0 0 var(--space-1) color-mix(in oklch, var(--color-interactive) 20%, transparent);
 		transition: transform var(--duration-normal) var(--ease-spring),

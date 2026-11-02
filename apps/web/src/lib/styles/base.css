@@ -330,7 +330,7 @@ button:disabled {
  * ======================================== */
 ::selection {
   background-color: var(--color-brand-primary);
-  color: var(--color-text-inverse);
+  color: var(--color-text-on-brand);
 }
 
 /* ========================================

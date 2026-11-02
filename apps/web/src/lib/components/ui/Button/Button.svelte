@@ -123,8 +123,11 @@
     border: none;
   }
 
+  /* The hover fill gets its own ink: the resting one was picked for the
+     resting fill and can fail on the shifted swatch for mid-tone brands. */
   .button[data-variant="primary"]:hover:not(:disabled) {
     background-color: var(--color-interactive-hover);
+    color: var(--color-on-interactive-hover);
   }
 
   /* Variant: Secondary */
@@ -160,15 +163,17 @@
     background-color: var(--color-error-600);
   }
 
-  /* Variant: Accent */
+  /* Variant: Accent. Same rule as primary: the label ink is derived from the
+     accent fill it sits on, not the page's `--color-text-inverse`. */
   .button[data-variant="accent"] {
     background-color: var(--color-brand-accent);
-    color: var(--color-text-inverse);
+    color: var(--color-text-on-accent);
     border: none;
   }
 
   .button[data-variant="accent"]:hover:not(:disabled) {
     background-color: var(--color-brand-accent-hover);
+    color: var(--color-text-on-accent-hover);
   }
 
   .button-content {

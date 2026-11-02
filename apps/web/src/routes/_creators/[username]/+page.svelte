@@ -338,7 +338,7 @@
     padding: var(--space-2) var(--space-6);
     font-size: var(--text-sm);
     font-weight: var(--font-semibold);
-    color: var(--color-text-on-brand);
+    color: var(--color-on-interactive);
     background: var(--color-interactive);
     border: none;
     border-radius: var(--radius-md);
@@ -349,6 +349,7 @@
 
   .follow-btn:hover {
     background: var(--color-interactive-hover);
+    color: var(--color-on-interactive-hover);
   }
 
   /* ── Organizations Section ── */
