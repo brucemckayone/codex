@@ -100,6 +100,8 @@ function preview(
     isUpgrade: true,
     takesEffect: 'now',
     currentPeriodEnd: '2026-11-22T00:00:00.000Z',
+    billingChange: null,
+    replaces: null,
   };
 }
 

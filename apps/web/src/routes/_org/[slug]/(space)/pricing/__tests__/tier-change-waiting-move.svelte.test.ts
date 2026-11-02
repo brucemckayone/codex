@@ -103,6 +103,7 @@ const PERIOD_END = '2026-11-12T00:00:00.000Z';
 const DATE = formatSentenceDate(PERIOD_END);
 
 const MOVE_TO_BASIC: PendingTierChange = {
+  kind: 'plan',
   tierId: BASIC.id,
   tierName: 'Basic',
   amountCents: 500,
@@ -139,6 +140,8 @@ const WAIT_PREVIEW: TierChangePreview = {
   isUpgrade: false,
   takesEffect: 'period_end',
   currentPeriodEnd: PERIOD_END,
+  billingChange: null,
+  replaces: null,
 };
 
 /** Pro → Premium now, after Keep. */
@@ -157,6 +160,8 @@ const UPGRADE_PREVIEW: TierChangePreview = {
   isUpgrade: true,
   takesEffect: 'now',
   currentPeriodEnd: PERIOD_END,
+  billingChange: null,
+  replaces: null,
 };
 
 let component: ReturnType<typeof mount> | null = null;

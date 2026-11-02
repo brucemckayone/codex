@@ -110,6 +110,8 @@ const PREVIEW: TierChangePreview = {
   isUpgrade: true,
   takesEffect: 'now',
   currentPeriodEnd: '2026-11-22T00:00:00.000Z',
+  billingChange: null,
+  replaces: null,
 };
 
 /** A failure as the subscription remote returns it. */

@@ -53,6 +53,7 @@ const PERIOD_END = '2026-11-12T00:00:00.000Z';
 const DATE = formatSentenceDate(PERIOD_END);
 
 const MOVE: PendingTierChange = {
+  kind: 'plan',
   tierId: 'tier-basic',
   tierName: 'Basic',
   amountCents: 500,
