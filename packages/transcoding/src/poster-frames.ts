@@ -32,6 +32,16 @@ export function holdsPosterFolderOf(url: SQLWrapper | string): SQL {
 }
 
 /**
+ * How many poster folders `url` names: its `/media-thumbnails/` segments.
+ * Each is a frame of the creator's video only when {@link posterFramesOf}
+ * finds that video, so a URL whose count exceeds the videos found names a
+ * folder that isn't the creator's (Codex-p0uuc).
+ */
+export function posterFolderCount(url: string): number {
+  return url.split(POSTER_FOLDER).length - 1;
+}
+
+/**
  * The media item a content row plays, which its publish checks as its media:
  * a video or audio item's own. Written content plays none, though it can
  * still hold a link, so a frame of that linked video is checked as a frame.

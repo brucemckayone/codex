@@ -48,6 +48,7 @@ import {
   MediaNotReadyError,
   MediaUsageChangedError,
   ThumbnailMediaDeletedError,
+  ValidationError,
 } from '../../errors';
 import { ContentService } from '../content-service';
 import { MediaItemService } from '../media-service';
@@ -1085,6 +1086,95 @@ describe('media in use (Codex-6sbn1)', () => {
         expect((await contents.get(id, ownerId))?.thumbnailFrame).toBeNull();
       }
     });
+  });
+
+  describe("a poster-frame thumbnail is the creator's own video's (Codex-p0uuc)", () => {
+    const cdn = 'https://cdn-assets.example';
+    const frameOf = (creatorId: string, mediaId: string) =>
+      `${cdn}/${getMediaThumbnailPrefix(creatorId, mediaId)}1920x1080-0a1b2c3d/lg.webp`;
+    const written = () => ({
+      title: 'Poster check',
+      slug: createUniqueSlug('poster-check'),
+      contentType: 'written' as const,
+      contentBody: 'Body text',
+      tags: [],
+    });
+    let editor: ContentService;
+    beforeAll(() => {
+      editor = new ContentService({
+        db,
+        environment: 'test',
+        r2PublicUrlBase: cdn,
+      });
+    });
+
+    async function refusal(write: Promise<unknown>) {
+      const error = await write.then(
+        () => null,
+        (e: unknown) => e
+      );
+      expect(error).toBeInstanceOf(ValidationError);
+      expect((error as ValidationError).context).toMatchObject({
+        field: 'thumbnailUrl',
+      });
+    }
+
+    it("refuses another creator's poster, an id that isn't the creator's video, or a URL naming one such folder among its own", async () => {
+      const mine = await seedMedia(ownerId);
+      const theirs = await seedMedia(otherId);
+      for (const thumbnailUrl of [
+        frameOf(otherId, theirs),
+        frameOf(ownerId, theirs),
+        frameOf(ownerId, '0f0e0d0c-0b0a-4908-8706-050403020100'),
+        `${cdn}/${getMediaThumbnailPrefix(ownerId, mine)}${getMediaThumbnailPrefix(otherId, theirs)}lg.webp`,
+      ]) {
+        await refusal(editor.create({ ...written(), thumbnailUrl }, ownerId));
+      }
+    });
+
+    it("takes a frame of the creator's own video, a deleted one in a draft too, and any other asset URL", async () => {
+      const kept = await seedMedia(ownerId);
+      const gone = await seedMedia(ownerId);
+      await markPosterVideoDeleted(gone);
+      for (const thumbnailUrl of [
+        frameOf(ownerId, kept),
+        frameOf(ownerId, gone),
+        `${cdn}/${ownerId}/content-thumbnails/c1/1920x1080-0a1b2c3d/lg.webp`,
+      ]) {
+        const created = await editor.create(
+          { ...written(), thumbnailUrl },
+          ownerId
+        );
+        expect(created.thumbnailUrl).toBe(thumbnailUrl);
+      }
+    });
+
+    it("refuses a save that sets another creator's poster, and takes the creator's own", async () => {
+      const mine = await seedMedia(ownerId);
+      const theirs = await seedMedia(otherId);
+      const created = await editor.create(written(), ownerId);
+
+      await refusal(
+        editor.update(
+          created.id,
+          { thumbnailUrl: frameOf(otherId, theirs) },
+          ownerId
+        )
+      );
+      const saved = await editor.update(
+        created.id,
+        { thumbnailUrl: frameOf(ownerId, mine) },
+        ownerId
+      );
+      expect(saved.thumbnailUrl).toBe(frameOf(ownerId, mine));
+    });
+
+    async function markPosterVideoDeleted(id: string) {
+      await db
+        .update(mediaItems)
+        .set({ deletedAt: new Date() })
+        .where(eq(mediaItems.id, id));
+    }
   });
 
   describe('the purge and restore', () => {

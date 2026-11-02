@@ -100,6 +100,7 @@ export {
   holdsPosterFolderOf,
   type PosterFrameSource,
   playedMediaItemId,
+  posterFolderCount,
   posterFramesOf,
 } from './poster-frames';
 // Services

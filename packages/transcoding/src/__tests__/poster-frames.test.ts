@@ -6,7 +6,11 @@
  */
 import { PgDialect } from 'drizzle-orm/pg-core';
 import { describe, expect, it } from 'vitest';
-import { playedMediaItemId, posterFramesOf } from '../poster-frames';
+import {
+  playedMediaItemId,
+  posterFolderCount,
+  posterFramesOf,
+} from '../poster-frames';
 
 const id = '550e8400-e29b-41d4-a716-446655440000';
 const cdn = 'https://cdn-assets.revelations.studio';
@@ -41,6 +45,22 @@ describe('posterFramesOf', () => {
         })
       ).toBeUndefined();
     }
+  });
+});
+
+describe('posterFolderCount', () => {
+  it('counts the poster folders a URL names', () => {
+    expect(
+      posterFolderCount(`${cdn}/user_1/content-thumbnails/c1/lg.webp`)
+    ).toBe(0);
+    expect(
+      posterFolderCount(`${cdn}/user_1/media-thumbnails/${id}/lg.webp`)
+    ).toBe(1);
+    expect(
+      posterFolderCount(
+        `${cdn}/user_1/media-thumbnails/${id}/user_2/media-thumbnails/${id}/lg.webp`
+      )
+    ).toBe(2);
   });
 });
 

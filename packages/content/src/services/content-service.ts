@@ -52,6 +52,7 @@ import type { PaginatedListResponse } from '@codex/shared-types';
 import {
   type PosterFrameSource,
   playedMediaItemId,
+  posterFolderCount,
   posterFramesOf,
 } from '@codex/transcoding';
 import type { CreateContentInput, UpdateContentInput } from '@codex/validation';
@@ -195,6 +196,41 @@ export const CATALOGUE_CONTENT_COLUMNS = {
 export interface ContentServiceConfig extends ServiceConfig {
   /** Public asset CDN base — the `R2_PUBLIC_URL_BASE` worker binding. */
   r2PublicUrlBase?: string;
+}
+
+/**
+ * Refuse a thumbnail URL naming a poster folder that isn't one of the
+ * caller's videos' (Codex-p0uuc). Another creator's poster URL is public in
+ * any page's HTML and passes the host check, but the purge deletes it with
+ * that creator's video and the usage lookup never counts it, so the
+ * thumbnail would break unannounced. Every folder must be one of the
+ * caller's videos', found by the test the delete guard counts uses with:
+ * deleted ones too, since a draft may hold a frame of its own deleted video
+ * until it publishes (Codex-tqvmx). Like the host check, every sent URL is
+ * checked, a re-sent one too.
+ */
+async function assertOwnPosterFolders(
+  tx: DatabaseTransaction,
+  creatorId: string,
+  thumbnailUrl: string | null | undefined
+): Promise<void> {
+  if (thumbnailUrl == null) return;
+  const folders = posterFolderCount(thumbnailUrl);
+  if (folders === 0) return;
+  const frames = posterFramesOf({
+    thumbnailUrl,
+    creatorId,
+    exceptMediaItemId: null,
+  });
+  const own = frames
+    ? await tx.select({ id: mediaItems.id }).from(mediaItems).where(frames)
+    : [];
+  if (own.length !== folders) {
+    throw new ValidationError(
+      'Choose a frame of one of your own videos as the thumbnail.',
+      { field: 'thumbnailUrl' }
+    );
+  }
 }
 
 /**
@@ -473,6 +509,14 @@ export class ContentService extends BaseService {
             false // requireReady = false for draft creation
           );
         }
+
+        // Codex-p0uuc: a poster-frame thumbnail must be of the caller's own
+        // video. Mirrored in update().
+        await assertOwnPosterFolders(
+          tx as DatabaseTransaction,
+          creatorId,
+          validated.thumbnailUrl
+        );
 
         // Step 3b: the tiers the item starts in, checked against its org
         // before anything is written (refine (a) guarantees the org).
@@ -1003,6 +1047,14 @@ export class ContentService extends BaseService {
               existing.publishedAt !== null
           );
         }
+
+        // Codex-p0uuc: a poster-frame thumbnail must be of the caller's own
+        // video, as create() checks.
+        await assertOwnPosterFolders(
+          tx as DatabaseTransaction,
+          creatorId,
+          sentThumbnailUrl
+        );
 
         // Codex-tqvmx: live content must not take a deleted video's frame as
         // its thumbnail, which publish refuses too. Only a CHANGED thumbnail
