@@ -442,7 +442,9 @@ remove the `codex_move_*` and `codex_hold_*` keys. The next
 `customer.subscription.updated` mirrors it onto our row.
 
 **Price changes while a move waits** (Part A rules 1-3,
-[price changes](#price-changes)):
+[price changes](#price-changes)). A waiting change of billing is a waiting
+move, so these rules cover it too; see
+[waiting changes of billing](#waiting-changes-of-billing):
 
 - Repricing the tier a member is waiting to move **away** from leaves them
   out. Their row says so (`pending_tier_id` names another tier), and the
@@ -551,12 +553,27 @@ and the balance stays £0 throughout.
 - **Price changes during the wait.** A change on the tier and interval the
   member is leaving skips them (`moving_away` or `other_interval`); one on
   the target's monthly Price reaches them as a mover, pending from the first
-  renewal after the switch, quoted at phase 2's price. Nothing writes the
-  item while a schedule is attached (an item write splits its phase): the
-  hourly step writes the pending marker instead of a swap now, and a due
-  marker waits for the release, whose own event lands it. A marker for a
-  Price on another interval than the item's is never swapped on: it is
-  dropped, and support told.
+  renewal after the switch, quoted at phase 2's price.
+  - **Part A rule 2 holds here too: they switch at the price they
+    confirmed.** The renewal that starts monthly billing always bills phase
+    2's Price, the one the dialog showed. A monthly price change made during
+    the wait first bills at a later monthly renewal: the first one after the
+    switch that is also 30 days after their own email. Its email names that
+    date. Example: Pro yearly to Pro monthly at £12, with Pro monthly
+    repriced to £13 during the wait. The year's end bills £12, and the next
+    month bills £13 (the test clock's case A). Phase 2 is never rewritten to
+    the new Price.
+  - A yearly change they were told of before the switch is parked by the
+    record. The flip drops it at the renewal, so the yearly price is never
+    billed. Keep puts it back live, with its own date, and nobody is told
+    twice. A yearly change made during the wait skipped them, so Keep adds a
+    `due` row for them, and the usual 30 days' notice follows (Part A
+    rule 3).
+  - Nothing writes the item while a schedule is attached (an item write
+    splits its phase): the hourly step writes the pending marker instead of
+    a swap now, and a due marker waits for the release, whose own event
+    lands it. A marker for a Price on another interval than the item's is
+    never swapped on: it is dropped, and support told.
 - **Disputes and refunds.** Pausing collection is accepted with a schedule;
   the renewal still switches to monthly and its invoice is void. A refund or
   lost dispute cancels the subscription, and the schedule with it.
