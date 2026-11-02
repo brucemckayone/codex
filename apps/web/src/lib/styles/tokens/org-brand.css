@@ -617,6 +617,20 @@
  * 4.58:1 — this derivation cannot produce an AA failure for ANY sRGB fill.
  * Swept: 0 failures out of 16 777 216, floor 4.57:1.
  *
+ * THE `* 1e12` IS WHAT MAKES IT A STEP. `clamp(0, (0.1791 - Y) * m, 1)` is a
+ * ramp 1/m wide, and a fill inside it gets a GREY ink. At `* 1e6`, 32 of the
+ * 8-bit colours sat inside it: #b747b5 painted grey at 1.03:1 in WebKit 26 and
+ * 1.15:1 in Chrome 156 while the readout said white at 4.58 (Codex-6r63f
+ * review). Measured on the 132 colours nearest the pivot, grey inks by
+ * multiplier, 1e6 / 1e8 / 1e9 / 1e12: WebKit 33 / 1 / 0 / 0, Chrome
+ * 32 / 0 / 0 / 0. 1e9 already measures clean, but engines compute Y about 1e-8
+ * away from double precision, and two colours (#1d8811, #97687b) sit within
+ * that of the pivot; at 1e12 the ramp is ten thousand times narrower than the
+ * error. Raising it moves no other colour, because outside the ramp the clamp
+ * is already 0 or 1, so unlike the OKLCH steps journey-palette.css warns
+ * about, steeper is strictly better here. `rail/contrast.test.ts` sweeps every
+ * 8-bit colour against it.
+ *
  * THE KNEE IS DROPPED, THE OFFSET IS NOT, AND THAT DISTINCTION IS THE WHOLE
  * ACCURACY BUDGET. `pow((c + 0.055) / 1.055, 2.4)` is sRGB's transfer function
  * exactly for c >= 0.04045 and over-estimates by at most 0.00083 below it, which
@@ -626,10 +640,11 @@
  * re-introduces 468 738 AA failures (2.79%) with a worst case of 4.14:1 on a mid
  * grey. Both forms were swept before this one was chosen.
  *
- * `r`, `g` and `b` are in scope ONLY inside the `rgb(from …)` function — the
- * same constraint `page-builder/journey-palette.css` documents for `l` — so the
- * expression cannot be hoisted into a helper property and is written once per
- * channel. They are numbers in 0–255, hence the `/ 255`.
+ * `r`, `g` and `b` take values only inside the `rgb(from …)` function, and they
+ * are numbers in 0–255, hence the `/ 255`. The expression is written once per
+ * channel, though it could be hoisted: a custom property holds unresolved
+ * tokens, which bind when substituted inside `rgb(from …)`, as
+ * `page-builder/kit/styles/schemes.css` does (`--_lr` … `--_y`). Codex-pyx1s.
  *
  * WHY @supports RATHER THAN EDITING THE DECLARATIONS ABOVE. Relative colour
  * needs Chrome 119+ / Firefox 128+ / Safari 16.4+ (this file's header) but
@@ -646,16 +661,17 @@
  * Firefox has not shipped it and its result is UA-defined, so it cannot be
  * modelled by a test. Revisit when Firefox ships it.
  *
- * LOCKSTEP OBLIGATIONS — both are handed off, neither is done here:
- *   1. `lib/components/brand-studio/rail/contrast.ts` models this rule to warn
- *      a creator in the brand editor, and its header quotes the OKLCH form.
- *      It now describes only the fallback, so the rail understates the ink on a
- *      green brand (it would report 3.77 where the product now paints 5.57).
- *   2. `themes/light.css` / `themes/dark.css` carry the same-shape
- *      `--color-on-interactive` for the PLATFORM path. Neither platform primary
- *      is inside the failing band today (#c24129 → 5.14, #f47d67 → 7.96), so
- *      that twin is latent rather than live — but it must move for the same
- *      reason, and the two must not drift.
+ * LOCKSTEP — these move with this rule (Codex-6r63f moved both):
+ *   1. `lib/brand-editor/ink.ts` (`inkOn`, which `rail/contrast.ts` re-exports
+ *      as `deriveTextOnBrand`) models it, luminance and all, so the brand
+ *      editor's readout says what visitors see. `rail/contrast.test.ts` pins
+ *      every copy of this block's expression to its own literal, built from
+ *      ink.ts's pivot constant, and sweeps every 8-bit colour against the ramp.
+ *   2. `themes/light.css` / `themes/dark.css` carry the same step, under the
+ *      same guard, for the PLATFORM path's `--color-on-interactive` and
+ *      `--color-text-on-accent`. Neither platform primary is in the band the
+ *      fallback misjudges (#c24129 → 5.14, #f47d67 → 7.98), so nothing there
+ *      changed colour; the two must not drift.
  */
 @supports (color: rgb(from red calc(255 * pow(r / 255, 2)) 0 0)) {
   /* The page-override twin is NOT optional here (Codex-acwap). This block and
@@ -669,21 +685,21 @@
   :where([data-org-brand]) [style*='--brand-'] {
     --color-text-on-brand: rgb(
       from var(--brand-color, var(--color-primary-500))
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
     );
     --color-on-interactive: rgb(
       from var(--color-interactive)
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
     );
     --color-text-on-accent: rgb(
       from var(--color-brand-accent)
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
     );
   }
 
@@ -693,7 +709,8 @@
      text is identical to the light copy: a custom property substitutes its
      `var()`s on the element where it is DECLARED, and `--color-interactive` is
      re-declared from the dark brand in the rule above, so a single copy would
-     freeze the light reading. Same reason themes/light.css:43-46 gives. */
+     freeze the light reading. Same reason themes/light.css gives in its
+     `--color-on-interactive` comment. */
   .dark [data-org-brand],
   .dark :where([data-org-brand]) [style*='--brand-'],
   [data-theme='dark'] [data-org-brand],
@@ -701,21 +718,21 @@
   [data-editing-theme='dark'][data-org-brand] {
     --color-text-on-brand: rgb(
       from var(--brand-color-dark, var(--brand-color, var(--color-primary-400)))
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
     );
     --color-on-interactive: rgb(
       from var(--color-interactive)
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
     );
     --color-text-on-accent: rgb(
       from var(--color-brand-accent)
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
     );
   }
 }
