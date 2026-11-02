@@ -43,6 +43,7 @@ import {
   priceChanges,
   subscriptionPriceMoves,
   subscriptions,
+  subscriptionTiers,
 } from '@codex/database/schema';
 import { InternalServiceError } from '@codex/service-errors';
 import { type SQL, sql } from 'drizzle-orm';
@@ -396,6 +397,65 @@ export const FAN_OUT_STRIPE_REQUEST = {
 export const PRICE_NOTICE_TIMEOUT_MS = 5_000;
 
 /**
+ * Make a Price billable before an item write that may put an old one back
+ * (review C1, F2): Keep's held Price, a pending marker's Price. A re-price
+ * archives the tier's old Price, and Stripe refuses an archived Price on a
+ * subscription item. The Price is read first and made active only when it
+ * is not, so a live one costs no write and no `price.updated` event. It is
+ * left active: two members keeping the same held Price would race a
+ * re-archive, and an active old Price is out of customers' reach (checkout
+ * uses the tier's current Price, and the portal is locked).
+ *
+ * Not for a price move's own new Price: that is the tier's current Price
+ * while its change runs, and a save that archives it supersedes the move.
+ */
+export async function ensurePriceActive(
+  stripe: Stripe,
+  priceId: string
+): Promise<void> {
+  const price = await stripe.prices.retrieve(priceId);
+  if (price.active) return;
+  await stripe.prices.update(priceId, {
+    active: true,
+    metadata: platformWriteMetadata(),
+  });
+}
+
+/**
+ * Metadata key: a fresh value on every Price update the platform makes (a
+ * tier or course plan re-price's archive and its rollback,
+ * `ensurePriceActive`). Its `price.updated` event shows the key changing in
+ * `previous_attributes`, which a Stripe Dashboard edit never does, so the
+ * webhook stays quiet for ours and still alerts on theirs.
+ */
+const PLATFORM_WRITE_KEY = 'codex_platform_write';
+
+/** The metadata every platform Price update writes. */
+export function platformWriteMetadata(): Record<string, string> {
+  return { [PLATFORM_WRITE_KEY]: crypto.randomUUID() };
+}
+
+/**
+ * A `price.updated` event made by the platform's own write. Stripe lists
+ * only the changed keys in `previous_attributes.metadata`, a new key as
+ * null, so ours names `codex_platform_write` and the Price now holds a
+ * different value. A Dashboard edit leaves the key out (it alerts, even on
+ * a Price we wrote before), and a hand removal leaves no value (it alerts).
+ */
+export function isPlatformPriceWrite(event: {
+  data: { object: unknown; previous_attributes?: unknown };
+}): boolean {
+  type WithMetadata = { metadata?: Record<string, string | null> | null };
+  const previous = (event.data.previous_attributes as WithMetadata | undefined)
+    ?.metadata;
+  if (!previous || !(PLATFORM_WRITE_KEY in previous)) return false;
+  const now = (event.data.object as WithMetadata | null)?.metadata?.[
+    PLATFORM_WRITE_KEY
+  ];
+  return typeof now === 'string' && previous[PLATFORM_WRITE_KEY] !== now;
+}
+
+/**
  * Stripe statuses where an item swap is safe. A paused subscription is never
  * swapped (it can trigger a reactivation path); a past-due one is retrying an
  * invoice. Both get the pending marker instead, and move when they are active.
@@ -425,9 +485,18 @@ async function atStage<T>(
  * true; otherwise nothing is written and the outcome is `unnotified`. A
  * subscriber whose amount does not change is not notified (`unchanged`).
  *
+ * The notice takes seconds, and the member can change plan meanwhile: a move
+ * to a cheaper tier puts that tier's Price on the item, an upgrade moves
+ * `codex_tier_id` (review C1, F1). So once the notice is accepted the
+ * subscription is read again. If anything the move reads changed
+ * (`liveState`), the move is decided again on the fresh state, the same way,
+ * and never written over the member's change: someone now leaving the tier is
+ * `skipped`. Their notice was accepted either way, and the caller records it.
+ *
  * Every Stripe call passes `FAN_OUT_STRIPE_REQUEST`. One that throws before
- * the notice rejects with a `PriceChangeStageError` naming it; a write after
- * an accepted notice rejects with Stripe's own error.
+ * the notice rejects with a `PriceChangeStageError` naming it; after an
+ * accepted notice, the second read rejects with a `read` stage error and a
+ * write with Stripe's own error.
  *
  * A write retried after an accepted notice passes a `notify` that resolves
  * true at once (no second email, M1) and that notice's `noticeAt`.
@@ -440,31 +509,109 @@ export async function schedulePriceChange(
   target: PriceChangeTarget,
   notify: SendPriceChangeNotice
 ): Promise<PriceChangeOutcome> {
-  const subscription = await atStage('read', null, () =>
-    stripe.subscriptions.retrieve(
-      target.stripeSubscriptionId,
-      FAN_OUT_STRIPE_REQUEST
-    )
+  const read = () =>
+    atStage('read', null, () =>
+      stripe.subscriptions.retrieve(
+        target.stripeSubscriptionId,
+        FAN_OUT_STRIPE_REQUEST
+      )
+    );
+  const live = await read();
+  const decided = await decideMove(
+    stripe,
+    target,
+    live,
+    target.mayBeTold === true
   );
+  if (decided.kind === 'done') return decided.outcome;
+  if (decided.kind === 'landed') return { ...decided.outcome, landed: true };
+
+  // Notice first, then move (D-P3): no write until the notice is accepted.
+  if (!(await notify(decided.notice))) {
+    return { kind: 'unnotified' };
+  }
+
+  const fresh = await read();
+  if (liveState(fresh) === liveState(live)) {
+    return writeMove(stripe, target, decided);
+  }
+  // Told just now, so a subscription found already carrying the change is
+  // moved, not `landed`.
+  const again = await decideMove(stripe, target, fresh, true);
+  if (again.kind !== 'move') return again.outcome;
+  return writeMove(stripe, target, again);
+}
+
+/**
+ * What a move reads off a live subscription: its status, the item and its
+ * Price, and every `codex_*` key (the tier, a waiting move and its hold, the
+ * pending marker). Two reads that differ here had a change land between them.
+ */
+function liveState(subscription: Stripe.Subscription): string {
+  const item = subscription.items.data[0];
+  const keys = Object.entries(subscription.metadata ?? {})
+    .filter(([key]) => key.startsWith('codex_'))
+    .sort(([a], [b]) => a.localeCompare(b));
+  return JSON.stringify([
+    subscription.status,
+    item?.id ?? null,
+    item?.price.id ?? null,
+    keys,
+  ]);
+}
+
+type ScheduledOutcome = Extract<
+  PriceChangeOutcome,
+  { kind: 'applied' | 'pending' }
+>;
+
+/** What one read of the live subscription calls for. */
+type MoveDecision =
+  /** Nothing to tell: skipped, or the same amount (its writes made). */
+  | { kind: 'done'; outcome: PriceChangeOutcome }
+  /** It already carries this change (`mayBeTold`): nothing to send or write. */
+  | { kind: 'landed'; outcome: ScheduledOutcome }
+  /** Tell them, then write. */
+  | {
+      kind: 'move';
+      subscriptionId: string;
+      itemId: string;
+      /** Unix seconds: the earliest renewal the new price may bill. */
+      earliest: number;
+      notice: PriceChangeNotice;
+    };
+
+/**
+ * Decide the move from one read of the live subscription. The same-amount
+ * path writes here: it tells nobody, so it has nothing to wait for.
+ */
+async function decideMove(
+  stripe: Stripe,
+  target: PriceChangeTarget,
+  subscription: Stripe.Subscription,
+  mayBeTold: boolean
+): Promise<MoveDecision> {
+  const skipped = (reason: PriceMoveSkipReason): MoveDecision => ({
+    kind: 'done',
+    outcome: { kind: 'skipped', reason },
+  });
   // Ended at Stripe: there is no renewal to reprice, and Stripe refuses
   // writes to a cancelled subscription.
   if (
     subscription.status === 'canceled' ||
     subscription.status === 'incomplete_expired'
   ) {
-    return { kind: 'skipped', reason: 'ended' };
+    return skipped('ended');
   }
   const item = subscription.items.data[0];
-  if (!item) {
-    return { kind: 'skipped', reason: 'no_items' };
-  }
+  if (!item) return skipped('no_items');
   if (item.price.recurring?.interval !== target.interval) {
     // An interval change resets the billing cycle and charges at once — the
     // bug this replaces. Never cross intervals.
-    return { kind: 'skipped', reason: 'other_interval' };
+    return skipped('other_interval');
   }
   const skip = target.skipLive?.(subscription) ?? null;
-  if (skip) return { kind: 'skipped', reason: skip };
+  if (skip) return skipped(skip);
 
   // An earlier change this subscription already carries, if any.
   const pendingPriceId = subscription.metadata?.[PENDING_PRICE_ID_KEY];
@@ -476,27 +623,31 @@ export async function schedulePriceChange(
 
   // Before the same-amount path: a subscription already on the new Price
   // would read as "same amount", and one already told would be told again.
-  if (target.mayBeTold && item.price.id === target.newPriceId) {
+  if (mayBeTold && item.price.id === target.newPriceId) {
     return {
-      kind: 'applied',
-      effectiveAt: new Date(item.current_period_end * 1000),
-      currentAmountCents: item.price.unit_amount,
-      landed: true,
+      kind: 'landed',
+      outcome: {
+        kind: 'applied',
+        effectiveAt: new Date(item.current_period_end * 1000),
+        currentAmountCents: item.price.unit_amount,
+      },
     };
   }
-  if (target.mayBeTold && currentPending?.priceId === target.newPriceId) {
+  if (mayBeTold && currentPending?.priceId === target.newPriceId) {
     return {
-      kind: 'pending',
-      effectiveAt: new Date(
-        firstRenewalOnOrAfter({
-          nextRenewal: item.current_period_end,
-          anchor: subscription.billing_cycle_anchor,
-          interval: target.interval,
-          earliest: Math.floor(currentPending.from.getTime() / 1000),
-        }) * 1000
-      ),
-      currentAmountCents: item.price.unit_amount,
-      landed: true,
+      kind: 'landed',
+      outcome: {
+        kind: 'pending',
+        effectiveAt: new Date(
+          firstRenewalOnOrAfter({
+            nextRenewal: item.current_period_end,
+            anchor: subscription.billing_cycle_anchor,
+            interval: target.interval,
+            earliest: Math.floor(currentPending.from.getTime() / 1000),
+          }) * 1000
+        ),
+        currentAmountCents: item.price.unit_amount,
+      },
     };
   }
 
@@ -535,7 +686,7 @@ export async function schedulePriceChange(
         )
       );
     }
-    return { kind: 'unchanged' };
+    return { kind: 'done', outcome: { kind: 'unchanged' } };
   }
 
   // 30 days from their own notice, and for a member moving onto the tier,
@@ -545,47 +696,54 @@ export async function schedulePriceChange(
     target.floorFrom ? Math.ceil(target.floorFrom.getTime() / 1000) : 0
   );
   const nextRenewal = item.current_period_end;
-  const move =
+  const applied =
     !target.floorFrom &&
     nextRenewal >= earliest &&
-    canSwapNow(subscription.status)
-      ? {
-          kind: 'applied' as const,
-          effectiveAt: new Date(nextRenewal * 1000),
-          currentAmountCents: item.price.unit_amount,
-        }
-      : {
-          kind: 'pending' as const,
-          effectiveAt: new Date(
-            firstRenewalOnOrAfter({
+    canSwapNow(subscription.status);
+  return {
+    kind: 'move',
+    subscriptionId: subscription.id,
+    itemId: item.id,
+    earliest,
+    notice: {
+      kind: applied ? 'applied' : 'pending',
+      effectiveAt: new Date(
+        (applied
+          ? nextRenewal
+          : firstRenewalOnOrAfter({
               nextRenewal,
               anchor: subscription.billing_cycle_anchor,
               interval: target.interval,
               earliest,
-            }) * 1000
-          ),
-          currentAmountCents: item.price.unit_amount,
-        };
+            })) * 1000
+      ),
+      currentAmountCents: item.price.unit_amount,
+      currentPending,
+    },
+  };
+}
 
-  // Notice first, then move (D-P3): no write until the notice is accepted.
-  if (!(await notify({ ...move, currentPending }))) {
-    return { kind: 'unnotified' };
-  }
-
-  if (move.kind === 'applied') {
+/** Write a decided move: the new Price now, or the pending marker. */
+async function writeMove(
+  stripe: Stripe,
+  target: PriceChangeTarget,
+  move: Extract<MoveDecision, { kind: 'move' }>
+): Promise<ScheduledOutcome> {
+  const { kind, effectiveAt, currentAmountCents } = move.notice;
+  if (kind === 'applied') {
     await stripe.subscriptions.update(
-      subscription.id,
+      move.subscriptionId,
       {
-        items: [{ id: item.id, price: target.newPriceId }],
+        items: [{ id: move.itemId, price: target.newPriceId }],
         proration_behavior: 'none',
         metadata: CLEAR_PENDING_PRICE_METADATA,
       },
       {
         ...FAN_OUT_STRIPE_REQUEST,
-        idempotencyKey: `price-change-now:${subscription.id}:${target.newPriceId}`,
+        idempotencyKey: `price-change-now:${move.subscriptionId}:${target.newPriceId}`,
       }
     );
-    return move;
+    return { kind, effectiveAt, currentAmountCents };
   }
 
   // Latest wins: this overwrites any earlier pending change. No idempotency
@@ -593,16 +751,16 @@ export async function schedulePriceChange(
   // notice time, so a newer change within Stripe's 24h key window would
   // reuse a key with different parameters and be refused.
   await stripe.subscriptions.update(
-    subscription.id,
+    move.subscriptionId,
     {
       metadata: {
         [PENDING_PRICE_ID_KEY]: target.newPriceId,
-        [PENDING_PRICE_FROM_KEY]: String(earliest),
+        [PENDING_PRICE_FROM_KEY]: String(move.earliest),
       },
     },
     FAN_OUT_STRIPE_REQUEST
   );
-  return move;
+  return { kind, effectiveAt, currentAmountCents };
 }
 
 /**
@@ -650,6 +808,9 @@ export async function applyDuePendingPriceChange(
   if (!canSwapNow(subscription.status)) return false;
   if (item.current_period_end < from) return false;
 
+  // An accepted change still lands when a newer save has archived its Price
+  // before the step reached this subscriber (F2, correctness #6).
+  await ensurePriceActive(stripe, pendingPriceId);
   await stripe.subscriptions.update(
     subscription.id,
     {
@@ -977,7 +1138,7 @@ export async function recordPlanPriceChange(
   return { changeId, total, supersededId };
 }
 
-/** One member who pressed Keep current plan on a tier repriced while they waited. */
+/** One member who pressed Keep current plan. */
 export interface RejoinPriceChangeInput {
   subscriptionId: string;
   stripeSubscriptionId: string;
@@ -985,15 +1146,22 @@ export interface RejoinPriceChangeInput {
   userId: string;
   tierId: string;
   interval: 'month' | 'year';
-  /** The tier's current Price for the interval, and its amount. */
-  currentPriceId: string;
-  currentAmountCents: number;
-  /** What they pay now: the held Price Keep put back. */
+  /** The Price Keep put back, and its amount: what they pay now. */
+  heldPriceId: string;
   heldAmountCents: number;
+  /** The held tier's price change Keep made live again (parked by the move), or null. */
+  parkedPendingPriceId: string | null;
   now: Date;
 }
 
 export type RejoinPriceChangeResult =
+  /** The tier's current Price is the one put back: nothing to tell. */
+  | { outcome: 'not_repriced' }
+  /**
+   * The change Keep made live again is to the current Price. A pending marker
+   * is written only after an accepted notice, so they were told.
+   */
+  | { outcome: 'already_told' }
   /** A row now waits for the hourly step: written, or re-opened from `skipped`. */
   | { outcome: 'due'; changeId: string; moveId: string }
   /** The change already has them as due, told or held: nothing written. */
@@ -1006,24 +1174,60 @@ export type RejoinPriceChangeResult =
   | { outcome: 'live_change_mismatch'; changeId: string };
 
 /**
- * Keep current plan, on a tier repriced while the member was moving away
- * (Part A rule 3; data design §2.3): they are back at the old price and
- * nobody has told them the new one, so the change gets one `due` row for
- * them, `source = 'keep_current_plan'`. It hangs off the tier and interval's
- * latest change that isn't superseded, if that change's new Price is the
- * tier's current one; a `done` change goes back to `running`. With no such
- * change (the price was set before price moves were recorded), Keep writes a
- * change of its own for the current Price. The hourly step then treats the
- * row like any other: notice first, 30 days from their own email. A row the
- * change already has for them is re-opened only from `skipped` (the step
- * found them moving away): as `due`, or as `notified` if they had been told
- * before they left (the write only, from that email). Any other row is left
- * alone, or they would get a second email.
+ * Keep current plan (Part A rule 3; data design §2.3). A tier repriced while
+ * the member was moving away skipped them (they were left out of its rows, or
+ * the step found them leaving), so they are back at the old price and nobody
+ * has told them the new one: the change gets one `due` row for them,
+ * `source = 'keep_current_plan'`. It hangs off the tier and interval's latest
+ * change that isn't superseded, if that change's new Price is the tier's
+ * current one; a `done` change goes back to `running`. With no such change
+ * (the price was set before price moves were recorded), Keep writes a change
+ * of its own for the current Price. The hourly step then treats the row like
+ * any other: notice first, 30 days from their own email. A row the change
+ * already has for them is re-opened only from `skipped`: as `due`, or as
+ * `notified` if they had been told before they left (the write only, from
+ * that email). Any other row is left alone, or they would get a second email.
+ *
+ * A save of the tier can run at the same time (review C1, F3). The tier row
+ * is share-locked first, as a save updates it first: a save in flight is
+ * waited for, and none can start until this commits, so the tier's current
+ * Price and its latest change are read as they stand, under the lock. Two
+ * Keeps on one tier can still both insert a change of their own; the second
+ * hits `uq_price_changes_live_tier`, and the caller runs this again, when it
+ * finds the first one's change.
  */
 export async function rejoinTierPriceChange(
   tx: PriceChangeTx,
   input: RejoinPriceChangeInput
 ): Promise<RejoinPriceChangeResult> {
+  const tierRow = await tx.execute(sql`
+    SELECT "stripe_price_monthly_id", "stripe_price_annual_id",
+           "price_monthly", "price_annual"
+      FROM ${subscriptionTiers}
+     WHERE ${subscriptionTiers.id} = ${input.tierId}::uuid
+     FOR SHARE
+  `);
+  const [tier] = tierRow.rows as Array<{
+    stripe_price_monthly_id: string | null;
+    stripe_price_annual_id: string | null;
+    price_monthly: number;
+    price_annual: number;
+  }>;
+  const current =
+    input.interval === 'year'
+      ? { priceId: tier?.stripe_price_annual_id, amount: tier?.price_annual }
+      : { priceId: tier?.stripe_price_monthly_id, amount: tier?.price_monthly };
+  if (
+    !current.priceId ||
+    current.amount === undefined ||
+    current.priceId === input.heldPriceId
+  ) {
+    return { outcome: 'not_repriced' };
+  }
+  if (input.parkedPendingPriceId === current.priceId) {
+    return { outcome: 'already_told' };
+  }
+
   const latest = await tx.execute(sql`
     SELECT "id", "state", "new_stripe_price_id"
       FROM ${priceChanges}
@@ -1041,7 +1245,7 @@ export async function rejoinTierPriceChange(
   }>;
 
   let changeId: string;
-  if (found && found.new_stripe_price_id === input.currentPriceId) {
+  if (found && found.new_stripe_price_id === current.priceId) {
     changeId = found.id;
   } else if (
     found &&
@@ -1056,8 +1260,8 @@ export async function rejoinTierPriceChange(
         "new_stripe_price_id", "created_at")
       VALUES (${changeId}::uuid, ${input.organizationId}::uuid, 'tier',
         ${input.tierId}::uuid, ${input.interval},
-        ${input.heldAmountCents}::int, ${input.currentAmountCents}::int,
-        ${input.currentPriceId}, ${input.now}::timestamptz)
+        ${input.heldAmountCents}::int, ${Number(current.amount)}::int,
+        ${current.priceId}, ${input.now}::timestamptz)
     `);
   }
 

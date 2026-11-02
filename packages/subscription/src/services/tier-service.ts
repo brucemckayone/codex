@@ -87,7 +87,10 @@ import {
   createKeyRefusal,
   stripeRefusalDetail,
 } from './create-key-refusal';
-import { recordTierPriceChange } from './pending-price-change';
+import {
+  platformWriteMetadata,
+  recordTierPriceChange,
+} from './pending-price-change';
 import {
   type PriceChangeProgress,
   readPriceChangeProgress,
@@ -588,6 +591,7 @@ export class TierService extends BaseService {
           if (existing.stripePriceMonthlyId) {
             await this.stripe.prices.update(existing.stripePriceMonthlyId, {
               active: false,
+              metadata: platformWriteMetadata(),
             });
             archivedOldMonthlyId = existing.stripePriceMonthlyId;
           }
@@ -614,6 +618,7 @@ export class TierService extends BaseService {
           if (existing.stripePriceAnnualId) {
             await this.stripe.prices.update(existing.stripePriceAnnualId, {
               active: false,
+              metadata: platformWriteMetadata(),
             });
             archivedOldAnnualId = existing.stripePriceAnnualId;
           }
@@ -1580,7 +1585,10 @@ export class TierService extends BaseService {
     // Archive newly created prices
     if (createdNewMonthlyId) {
       try {
-        await this.stripe.prices.update(createdNewMonthlyId, { active: false });
+        await this.stripe.prices.update(createdNewMonthlyId, {
+          active: false,
+          metadata: platformWriteMetadata(),
+        });
         this.obs.info('New monthly price archived after DB failure', {
           stripePriceId: createdNewMonthlyId,
           tierId,
@@ -1601,7 +1609,10 @@ export class TierService extends BaseService {
 
     if (createdNewAnnualId) {
       try {
-        await this.stripe.prices.update(createdNewAnnualId, { active: false });
+        await this.stripe.prices.update(createdNewAnnualId, {
+          active: false,
+          metadata: platformWriteMetadata(),
+        });
         this.obs.info('New annual price archived after DB failure', {
           stripePriceId: createdNewAnnualId,
           tierId,
@@ -1623,7 +1634,10 @@ export class TierService extends BaseService {
     // Restore old prices that were archived
     if (archivedOldMonthlyId) {
       try {
-        await this.stripe.prices.update(archivedOldMonthlyId, { active: true });
+        await this.stripe.prices.update(archivedOldMonthlyId, {
+          active: true,
+          metadata: platformWriteMetadata(),
+        });
         this.obs.info('Old monthly price restored after DB failure', {
           stripePriceId: archivedOldMonthlyId,
           tierId,
@@ -1644,7 +1658,10 @@ export class TierService extends BaseService {
 
     if (archivedOldAnnualId) {
       try {
-        await this.stripe.prices.update(archivedOldAnnualId, { active: true });
+        await this.stripe.prices.update(archivedOldAnnualId, {
+          active: true,
+          metadata: platformWriteMetadata(),
+        });
         this.obs.info('Old annual price restored after DB failure', {
           stripePriceId: archivedOldAnnualId,
           tierId,

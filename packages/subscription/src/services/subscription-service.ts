@@ -113,6 +113,7 @@ import {
 } from '@codex/purchase';
 import {
   BaseService,
+  describeThrown,
   InternalServiceError,
   NotFoundError,
   type ServiceConfig,
@@ -153,6 +154,7 @@ import {
 import {
   addMonthsClamped,
   CLEAR_PENDING_PRICE_METADATA,
+  ensurePriceActive,
   type PriceChangeNoticeMailer,
   rejoinTierPriceChange,
 } from './pending-price-change';
@@ -2775,6 +2777,12 @@ export class SubscriptionService extends BaseService {
       status: mapped.status,
       cancelAtPeriodEnd: mapped.cancelAtPeriodEnd,
     });
+    await this.alertIfPriceOffTier(
+      stripeSubscription,
+      sub.id,
+      newTierId ?? sub.tierId,
+      mapped.pendingTierId
+    );
 
     // Orchestrator hook: tier changes, status flips (active ↔ cancelling
     // ↔ past_due) all affect library visibility + subscription badge —
@@ -2794,6 +2802,57 @@ export class SubscriptionService extends BaseService {
       return {};
     }
     return { userId: sub.userId, orgId: sub.organizationId };
+  }
+
+  /**
+   * The backstop for a price written over a change of plan (review C1, F1):
+   * every Price a tier bills is on that tier's Stripe Product, so an item
+   * Price on neither the member's tier's Product nor their waiting tier's is
+   * a wrong bill. An alert, ids only; nothing is written, and the sync above
+   * has mirrored the amount as Stripe holds it. A payload without the
+   * Product, or a tier without one, is not checked.
+   */
+  private async alertIfPriceOffTier(
+    stripeSubscription: Stripe.Subscription,
+    subscriptionId: string,
+    tierId: string | null,
+    waitingTierId: string | null
+  ): Promise<void> {
+    const price = stripeSubscription.items?.data?.[0]?.price;
+    const product =
+      typeof price?.product === 'string' ? price.product : price?.product?.id;
+    const tierIds = [tierId, waitingTierId].filter(
+      (id): id is string => id !== null
+    );
+    if (!price || !product || tierIds.length === 0) return;
+    try {
+      const tiers = await this.db
+        .select({ stripeProductId: subscriptionTiers.stripeProductId })
+        .from(subscriptionTiers)
+        .where(inArray(subscriptionTiers.id, tierIds));
+      const products = tiers.flatMap((t) =>
+        t.stripeProductId ? [t.stripeProductId] : []
+      );
+      if (products.length === 0 || products.includes(product)) return;
+      this.obs.error(
+        "Subscription bills a Price from another tier's Product: a price move or plan change may have been written over (support: check the Stripe subscription)",
+        {
+          errorId: crypto.randomUUID(),
+          subscriptionId,
+          stripeSubscriptionId: stripeSubscription.id,
+          tierId,
+          waitingTierId,
+          stripePriceId: price.id,
+          stripeProductId: product,
+        }
+      );
+    } catch (error) {
+      this.obs.error('Off-tier price check failed; the sync stands', {
+        errorId: crypto.randomUUID(),
+        subscriptionId,
+        error: describeThrown(error),
+      });
+    }
   }
 
   /**
@@ -4057,6 +4116,9 @@ export class SubscriptionService extends BaseService {
         throw new MoveAlreadyLandedError(orgId);
       }
 
+      // The held tier may have been repriced while the move waited, which
+      // archived the held Price (Part A rule 3, F2).
+      await ensurePriceActive(this.stripe, move.holdPriceId);
       await this.stripe.subscriptions.update(
         sub.stripeSubscriptionId,
         {
@@ -4101,24 +4163,7 @@ export class SubscriptionService extends BaseService {
         );
       }
 
-      const repricedTo = await this.heldTierRepriced(sub, move.holdPriceId);
-      // A parked change to the current Price came from an accepted notice
-      // (a pending marker is written only then), and Keep has just made it
-      // live again: they were told, so they need no second email.
-      const alreadyTold =
-        repricedTo !== null &&
-        move.parkedPendingPrice?.priceId === repricedTo.priceId;
-      this.obs.info('tier_move.kept', {
-        subscriptionId: sub.id,
-        organizationId: orgId,
-        tierId: sub.tierId,
-        droppedTierId: move.tierId,
-        heldTierRepriced: repricedTo !== null,
-        alreadyTold,
-      });
-      if (repricedTo && !alreadyTold) {
-        await this.rejoinPriceChange(sub, move.holdAmountCents, repricedTo);
-      }
+      await this.rejoinPriceChange(sub, move);
 
       this.invalidateIfConfigured(userId, orgId, 'tier_move_kept');
       return { userId, orgId, subscription: sub };
@@ -4128,43 +4173,15 @@ export class SubscriptionService extends BaseService {
   }
 
   /**
-   * Whether the tier a member kept was repriced while their move waited: the
-   * Price put back is not the tier's current Price for their billing. If so,
-   * the tier's current Price and its amount; otherwise null. The price-change
-   * step skips a member moving away (data design §6.1), so this one has had
-   * no notice.
-   */
-  private async heldTierRepriced(
-    sub: Subscription,
-    heldPriceId: string
-  ): Promise<{ priceId: string; amountCents: number } | null> {
-    const [tier] = await this.db
-      .select({
-        monthly: subscriptionTiers.stripePriceMonthlyId,
-        annual: subscriptionTiers.stripePriceAnnualId,
-        priceMonthly: subscriptionTiers.priceMonthly,
-        priceAnnual: subscriptionTiers.priceAnnual,
-      })
-      .from(subscriptionTiers)
-      .where(eq(subscriptionTiers.id, sub.tierId))
-      .limit(1);
-    if (!tier) return null;
-    const current =
-      sub.billingInterval === BILLING_INTERVAL.YEAR
-        ? { priceId: tier.annual, amountCents: tier.priceAnnual }
-        : { priceId: tier.monthly, amountCents: tier.priceMonthly };
-    return current.priceId !== null && current.priceId !== heldPriceId
-      ? { priceId: current.priceId, amountCents: current.amountCents }
-      : null;
-  }
-
-  /**
    * Rejoin a price change the member was skipped for while moving away
    * (Part A rule 3; data design §2.3): one `due` row in
    * `subscription_price_moves` (`source = 'keep_current_plan'`), so the
    * hourly step gives them the usual 30-day notice and then moves them,
    * rather than leaving them on the old price unnoticed
-   * (`rejoinTierPriceChange`).
+   * (`rejoinTierPriceChange`). Whether the kept tier was repriced is decided
+   * there, under the tier row's lock, so a save running at the same time is
+   * seen (review C1, F3); a second Keep's change of its own on the same tier
+   * (`uq_price_changes_live_tier`) runs it once more, onto the first's.
    *
    * Keep has already put them back at Stripe and on our row, so a failure
    * here does not fail it: it is one error alert with an errorId and the
@@ -4172,8 +4189,7 @@ export class SubscriptionService extends BaseService {
    */
   private async rejoinPriceChange(
     sub: Subscription,
-    heldAmountCents: number,
-    current: { priceId: string; amountCents: number }
+    move: WaitingMove
   ): Promise<void> {
     const ids = {
       subscriptionId: sub.id,
@@ -4181,12 +4197,10 @@ export class SubscriptionService extends BaseService {
       organizationId: sub.organizationId,
       tierId: sub.tierId,
       billingInterval: sub.billingInterval,
-      currentPriceId: current.priceId,
+      heldPriceId: move.holdPriceId,
     };
-    try {
-      const result = await (
-        this.db as typeof import('@codex/database').dbWs
-      ).transaction((tx) =>
+    const rejoin = () =>
+      (this.db as typeof import('@codex/database').dbWs).transaction((tx) =>
         rejoinTierPriceChange(tx, {
           subscriptionId: sub.id,
           stripeSubscriptionId: sub.stripeSubscriptionId,
@@ -4195,12 +4209,26 @@ export class SubscriptionService extends BaseService {
           tierId: sub.tierId,
           interval:
             sub.billingInterval === BILLING_INTERVAL.YEAR ? 'year' : 'month',
-          currentPriceId: current.priceId,
-          currentAmountCents: current.amountCents,
-          heldAmountCents,
+          heldPriceId: move.holdPriceId,
+          heldAmountCents: move.holdAmountCents,
+          parkedPendingPriceId: move.parkedPendingPrice?.priceId ?? null,
           now: new Date(),
         })
       );
+    try {
+      const result = await rejoin().catch((error: unknown) => {
+        if (isUniqueViolation(error)) return rejoin();
+        throw error;
+      });
+      this.obs.info('tier_move.kept', {
+        ...ids,
+        droppedTierId: move.tierId,
+        heldTierRepriced: result.outcome !== 'not_repriced',
+        alreadyTold: result.outcome === 'already_told',
+        rejoined: result.outcome,
+        ...('changeId' in result && { priceChangeId: result.changeId }),
+        ...(result.outcome === 'due' && { priceMoveId: result.moveId }),
+      });
       if (result.outcome === 'live_change_mismatch') {
         this.obs.error(
           'tier_move.kept: the kept tier was repriced, but its live price change is for another Price, so no notice was recorded; the member stays on the old price (support: check the tier and add them to its price change)',
@@ -4210,21 +4238,14 @@ export class SubscriptionService extends BaseService {
             priceChangeId: result.changeId,
           }
         );
-        return;
       }
-      this.obs.info('tier_move.kept: rejoined the price change', {
-        ...ids,
-        priceChangeId: result.changeId,
-        outcome: result.outcome,
-        ...(result.outcome === 'due' && { priceMoveId: result.moveId }),
-      });
     } catch (error) {
       this.obs.error(
         "tier_move.kept: the kept tier was repriced, and the price-change notice could not be recorded; the member stays on the old price (support: add them to the tier's price change)",
         {
           errorId: crypto.randomUUID(),
           ...ids,
-          error: error instanceof Error ? error.message : String(error),
+          error: describeThrown(error),
         }
       );
     }

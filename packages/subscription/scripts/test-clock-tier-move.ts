@@ -20,6 +20,11 @@
  *   B. Move, Keep current plan, then the renewal.
  *      The Keep (keepCurrentPlan) puts the exact held Price back with no
  *      proration: nothing is invoiced, and the renewal bills £20.
+ *   C. Move, Premium repriced while it waits, then Keep (review C1, F2).
+ *      The re-price archives the held Price (TierService.updateTier), and
+ *      Stripe refuses an archived Price on an item: Keep's write is refused
+ *      as it stands, and goes through once `ensurePriceActive` has made the
+ *      Price active again. The renewal bills the held £20, not the new £22.
  *
  * Run from the repo root, with the dev TEST key in .env.dev:
  *
@@ -39,6 +44,7 @@
 
 import { randomUUID } from 'node:crypto';
 import Stripe from 'stripe';
+import { ensurePriceActive } from '../src/services/pending-price-change';
 import {
   flipMetadata,
   keepMetadata,
@@ -50,6 +56,7 @@ const STRIPE_API_VERSION = '2025-10-29.clover' as const;
 const TAG = { codex_env: 'test-clock' };
 const PREMIUM_PENCE = 2000;
 const BASIC_PENCE = 500;
+const REPRICED_PENCE = 2200;
 const ADVANCE_WAIT_MS = 120_000;
 const ADVANCE_STEP_MS = 3_000;
 
@@ -308,6 +315,105 @@ async function scenarioKeep(
   );
 }
 
+async function scenarioKeepAfterReprice(
+  stripe: Stripe,
+  prices: { premium: string; basic: string },
+  product: string,
+  extraPrices: string[],
+  clocks: string[]
+): Promise<void> {
+  console.log(
+    '\nC. Move to Basic, Premium repriced while it waits, then Keep (F2)'
+  );
+  const fixture = await subscribedToPremium(
+    stripe,
+    prices,
+    'keep after reprice'
+  );
+  clocks.push(fixture.clockId);
+  const moved = await moveToBasic(stripe, fixture, prices.basic);
+  const move = readWaitingMove(moved.metadata);
+  const item = moved.items.data[0];
+  if (!move || !item) {
+    check('the move is readable from the metadata', false);
+    return;
+  }
+
+  // TierService.updateTier: a new Premium Price, and the old one archived.
+  const repriced = await stripe.prices.create({
+    product,
+    currency: 'gbp',
+    unit_amount: REPRICED_PENCE,
+    recurring: { interval: 'month' },
+    nickname: 'Premium repriced',
+    metadata: TAG,
+  });
+  extraPrices.push(repriced.id);
+  await stripe.prices.update(prices.premium, { active: false });
+
+  const keep: Stripe.SubscriptionUpdateParams = {
+    items: [{ id: item.id, price: move.holdPriceId }],
+    proration_behavior: 'none',
+    metadata: keepMetadata(move),
+  };
+  // keepCurrentPlan's write as it stood before F2.
+  const refusal = await stripe.subscriptions
+    .update(moved.id, keep, {
+      idempotencyKey: `keep_unfixed_${moved.id}_${Date.now()}`,
+    })
+    .then(
+      () => null,
+      (error: unknown) =>
+        error as { statusCode?: number; code?: string; message?: string }
+    );
+  check(
+    'without ensurePriceActive, Stripe refuses the archived held Price',
+    refusal !== null && refusal.statusCode === 400,
+    refusal
+      ? `${refusal.statusCode} ${refusal.code ?? '-'}: ${refusal.message}`
+      : 'it was accepted'
+  );
+
+  await ensurePriceActive(stripe, move.holdPriceId);
+  const kept = await stripe.subscriptions.update(moved.id, keep, {
+    idempotencyKey: `keep_${moved.id}_${move.holdPriceId}_${move.at}_${Date.now()}`,
+  });
+  check(
+    'with ensurePriceActive, Keep puts the exact held Price back',
+    kept.items.data[0]?.price.id === prices.premium &&
+      readWaitingMove(kept.metadata) === null
+  );
+  check(
+    'the held Price is left active',
+    (await stripe.prices.retrieve(prices.premium)).active
+  );
+
+  await advance(stripe, fixture.clockId, move.at + 3600);
+  const renewed = await stripe.subscriptions.retrieve(fixture.subscription.id, {
+    expand: ['latest_invoice'],
+  });
+  const latest = renewed.latest_invoice as Stripe.Invoice | null;
+  check(
+    'the renewal billed the held £20, not the repriced £22',
+    latest?.billing_reason === 'subscription_cycle' &&
+      latest.amount_paid === PREMIUM_PENCE,
+    `${latest?.billing_reason} ${latest?.amount_paid}`
+  );
+}
+
+/** Clocks of this run Stripe still holds (each deleted one reads as missing). */
+async function clocksLeft(stripe: Stripe, clocks: string[]): Promise<number> {
+  let left = 0;
+  for (const clockId of clocks) {
+    const found = await stripe.testHelpers.testClocks.retrieve(clockId).then(
+      (clock) => !(clock as { deleted?: boolean }).deleted,
+      () => false
+    );
+    if (found) left += 1;
+  }
+  return left;
+}
+
 async function main(): Promise<void> {
   const key = process.env.STRIPE_SECRET_KEY ?? '';
   if (!key.startsWith('sk_test_') && !key.startsWith('rk_test_')) {
@@ -333,17 +439,29 @@ async function main(): Promise<void> {
     basic: (await price(BASIC_PENCE, 'Basic')).id,
   };
   const clocks: string[] = [];
+  const extraPrices: string[] = [];
   try {
     await scenarioMoveLands(stripe, prices, clocks);
     await scenarioKeep(stripe, prices, clocks);
+    // Last: it archives Premium's Price, then makes it active again.
+    await scenarioKeepAfterReprice(
+      stripe,
+      prices,
+      product.id,
+      extraPrices,
+      clocks
+    );
   } finally {
     for (const clockId of clocks) {
       await stripe.testHelpers.testClocks.del(clockId).catch(() => {});
     }
-    for (const priceId of Object.values(prices)) {
+    for (const priceId of [...Object.values(prices), ...extraPrices]) {
       await stripe.prices.update(priceId, { active: false }).catch(() => {});
     }
     await stripe.products.update(product.id, { active: false }).catch(() => {});
+    const left = await clocksLeft(stripe, clocks);
+    console.log(`\nTest clocks left behind: ${left}`);
+    if (left > 0) failures.push('test clocks left behind');
   }
 
   console.log(

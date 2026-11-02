@@ -15,6 +15,7 @@
  * afterAll, children first: the new foreign keys all RESTRICT.
  */
 
+import { isUniqueViolation } from '@codex/database';
 import {
   organizations,
   priceChanges,
@@ -46,7 +47,10 @@ import {
   it,
   vi,
 } from 'vitest';
-import { rejoinTierPriceChange } from '../pending-price-change';
+import {
+  recordTierPriceChange,
+  rejoinTierPriceChange,
+} from '../pending-price-change';
 import { TierService } from '../tier-service';
 
 type Tier = typeof subscriptionTiers.$inferSelect;
@@ -505,9 +509,14 @@ describe('recording a tier price change (Codex-2hxff.86)', () => {
     ).rejects.toThrow();
 
     const newPrice = (await minted.mock.results[0]?.value) as { id: string };
-    expect(archived).toHaveBeenCalledWith(newPrice.id, { active: false });
+    const ours = { codex_platform_write: expect.any(String) };
+    expect(archived).toHaveBeenCalledWith(newPrice.id, {
+      active: false,
+      metadata: ours,
+    });
     expect(archived).toHaveBeenCalledWith(pro.stripePriceMonthlyId, {
       active: true,
+      metadata: ours,
     });
     const [tierNow] = await db
       .select()
@@ -522,9 +531,19 @@ describe('recording a tier price change (Codex-2hxff.86)', () => {
 
   // Keep current plan's row (Part A rule 3), at the record level.
   describe('rejoinTierPriceChange', () => {
+    /**
+     * A Pro member back at the price they paid (Keep has run), while Pro was
+     * repriced 1200 → 1400: the tier row carries the new Price, and change X
+     * records it.
+     */
     async function keptMember(slug: string) {
-      const { org: o, pro } = await org(slug);
+      const { org: o, basic, pro } = await org(slug);
       const sub = await subscriber(o.id, pro);
+      const heldPriceId = pro.stripePriceMonthlyId ?? 'price_pro_1200';
+      await db
+        .update(subscriptionTiers)
+        .set({ priceMonthly: 1400, stripePriceMonthlyId: 'price_pro_1400' })
+        .where(eq(subscriptionTiers.id, pro.id));
       const change = takeFirst(
         await db
           .insert(priceChanges)
@@ -548,15 +567,16 @@ describe('recording a tier price change (Codex-2hxff.86)', () => {
         userId: sub.userId,
         tierId: pro.id,
         interval: 'month' as const,
-        currentPriceId: 'price_pro_1400',
-        currentAmountCents: 1400,
+        heldPriceId,
         heldAmountCents: 1200,
+        parkedPendingPriceId: null,
         now: new Date(),
       };
-      return { sub, change, input };
+      return { o, basic, pro, sub, change, input };
     }
 
-    const rejoin = (input: Parameters<typeof rejoinTierPriceChange>[1]) =>
+    type RejoinInput = Parameters<typeof rejoinTierPriceChange>[1];
+    const rejoin = (input: RejoinInput) =>
       db.transaction((tx) => rejoinTierPriceChange(tx, input));
 
     it('re-opens a row the step closed as moving away, without counting them twice', async () => {
@@ -653,9 +673,13 @@ describe('recording a tier price change (Codex-2hxff.86)', () => {
     });
 
     it('a live change for another Price: nothing written, the caller alerts', async () => {
-      const { change, input } = await keptMember('rejoin-mismatch');
+      const { pro, change, input } = await keptMember('rejoin-mismatch');
+      await db
+        .update(subscriptionTiers)
+        .set({ stripePriceMonthlyId: 'price_other' })
+        .where(eq(subscriptionTiers.id, pro.id));
 
-      const result = await rejoin({ ...input, currentPriceId: 'price_other' });
+      const result = await rejoin(input);
 
       expect(result).toEqual({
         outcome: 'live_change_mismatch',
@@ -663,6 +687,186 @@ describe('recording a tier price change (Codex-2hxff.86)', () => {
       });
       expect(await movesOf(change.id)).toEqual([]);
       expect(await changesOf(input.tierId)).toHaveLength(1);
+    });
+
+    it.each([
+      [
+        'the tier is on the Price put back',
+        (input: RejoinInput): RejoinInput => ({
+          ...input,
+          heldPriceId: 'price_pro_1400',
+        }),
+        'not_repriced',
+      ],
+      [
+        'the change Keep made live again is to the current Price',
+        (input: RejoinInput): RejoinInput => ({
+          ...input,
+          parkedPendingPriceId: 'price_pro_1400',
+        }),
+        'already_told',
+      ],
+    ] as const)('nothing to tell when %s', async (_label, adjust, outcome) => {
+      const { change, input } = await keptMember(`rejoin-${outcome}`);
+
+      const result = await rejoin(adjust(input));
+
+      expect(result).toEqual({ outcome });
+      expect(await movesOf(change.id)).toEqual([]);
+    });
+
+    // Review C1, F3: a save of the tier in flight. Under READ COMMITTED the
+    // latest-change read used to block on the change the save holds, then
+    // drop it or keep a stale one, while the save's new change was not in
+    // its snapshot; and the tier's current Price was read before it.
+    it.each([
+      ['running (someone else to tell)', true],
+      ['done at once (nobody else to tell)', false],
+    ])("Keep during a save: it waits for the save, then joins the save's change, %s", async (_label, othersOnTier) => {
+      const { o, basic, pro, sub, change, input } = await keptMember(
+        `rejoin-race-${othersOnTier}`
+      );
+      await db
+        .update(priceChanges)
+        .set({ state: 'done', doneAt: new Date() })
+        .where(eq(priceChanges.id, change.id));
+      if (othersOnTier) await subscriber(o.id, pro);
+      // Still moving away to Basic when the save records who is due, so the
+      // save leaves them out; Keep clears it before its rejoin.
+      await db
+        .update(subscriptions)
+        .set({
+          pendingTierId: basic.id,
+          pendingTierFrom: new Date(Date.now() + 5 * DAY_MS),
+          heldAmountCents: 1200,
+        })
+        .where(eq(subscriptions.id, sub.id));
+
+      let release: () => void = () => {};
+      const released = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let holding: (pid: number) => void = () => {};
+      const held = new Promise<number>((resolve) => {
+        holding = resolve;
+      });
+      // The save: the tier row first, then latest wins and its rows.
+      const save = db.transaction(async (tx) => {
+        const pid = await tx.execute(sql`SELECT pg_backend_pid() AS pid`);
+        await tx
+          .update(subscriptionTiers)
+          .set({ priceMonthly: 1600, stripePriceMonthlyId: 'price_pro_1600' })
+          .where(eq(subscriptionTiers.id, pro.id));
+        await recordTierPriceChange(tx, pro.id, {
+          organizationId: o.id,
+          interval: 'month',
+          fromAmountCents: 1400,
+          newAmountCents: 1600,
+          newStripePriceId: 'price_pro_1600',
+          createdByUserId: null,
+          now: new Date(),
+        });
+        holding(Number((pid.rows[0] as { pid: number }).pid));
+        await released;
+      });
+      const savePid = await held;
+      await db
+        .update(subscriptions)
+        .set({
+          pendingTierId: null,
+          pendingTierFrom: null,
+          heldAmountCents: null,
+        })
+        .where(eq(subscriptions.id, sub.id));
+
+      const keeping = rejoin(input);
+      // Probe, not a sleep: Keep is waiting on the save's lock.
+      let blocked = 0;
+      for (let tries = 0; tries < 400 && blocked < 1; tries++) {
+        const probe = await db.execute(sql`
+          SELECT count(*)::int AS n FROM pg_stat_activity
+           WHERE datname = current_database()
+             AND ${savePid}::int = ANY(pg_blocking_pids(pid))
+        `);
+        blocked = Number((probe.rows[0] as { n: number }).n);
+        if (blocked < 1) await new Promise((r) => setTimeout(r, 25));
+      }
+      expect(blocked).toBe(1);
+      release();
+      await save;
+      const result = await keeping;
+
+      const changes = await changesOf(pro.id);
+      const newest = changes.find(
+        (c) => c.newStripePriceId === 'price_pro_1600'
+      );
+      expect(result).toMatchObject({ outcome: 'due', changeId: newest?.id });
+      expect(newest?.state).toBe('running');
+      expect(changes.filter((c) => c.state === 'running')).toHaveLength(1);
+      expect(changes).toHaveLength(2);
+      expect(
+        (await movesOf(newest?.id ?? '')).find(
+          (m) => m.subscriptionId === sub.id
+        )
+      ).toMatchObject({ state: 'due', source: 'keep_current_plan' });
+    });
+
+    // Two Keeps on one tier with no change for its Price yet: both write a
+    // change of their own. The second waits on the first's insert, then hits
+    // the live-change index; run again, it joins the first's change.
+    it("a second Keep's own change hits the live-change index; run again, it joins the first's", async () => {
+      const { o, pro, input } = await keptMember('rejoin-two-keeps');
+      await db.delete(priceChanges).where(eq(priceChanges.tierId, pro.id));
+      const other = await subscriber(o.id, pro);
+      const otherInput = {
+        ...input,
+        subscriptionId: other.id,
+        stripeSubscriptionId: other.stripeSubscriptionId,
+        userId: other.userId,
+      };
+
+      let release: () => void = () => {};
+      const released = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let holding: (pid: number) => void = () => {};
+      const held = new Promise<number>((resolve) => {
+        holding = resolve;
+      });
+      const first = db.transaction(async (tx) => {
+        const pid = await tx.execute(sql`SELECT pg_backend_pid() AS pid`);
+        const result = await rejoinTierPriceChange(tx, input);
+        holding(Number((pid.rows[0] as { pid: number }).pid));
+        await released;
+        return result;
+      });
+      const firstPid = await held;
+      const second = rejoin(otherInput).catch((error: unknown) => error);
+      let blocked = 0;
+      for (let tries = 0; tries < 400 && blocked < 1; tries++) {
+        const probe = await db.execute(sql`
+          SELECT count(*)::int AS n FROM pg_stat_activity
+           WHERE datname = current_database()
+             AND ${firstPid}::int = ANY(pg_blocking_pids(pid))
+        `);
+        blocked = Number((probe.rows[0] as { n: number }).n);
+        if (blocked < 1) await new Promise((r) => setTimeout(r, 25));
+      }
+      expect(blocked).toBe(1);
+      release();
+      const firstResult = await first;
+      expect(isUniqueViolation(await second)).toBe(true);
+
+      const again = await rejoin(otherInput);
+
+      expect(firstResult).toMatchObject({ outcome: 'due' });
+      expect(again).toMatchObject({
+        outcome: 'due',
+        changeId: 'changeId' in firstResult ? firstResult.changeId : '',
+      });
+      expect(await changesOf(pro.id)).toEqual([
+        expect.objectContaining({ state: 'running', totalCount: 2 }),
+      ]);
     });
   });
 });

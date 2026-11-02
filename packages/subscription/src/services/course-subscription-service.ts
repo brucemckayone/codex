@@ -122,7 +122,10 @@ import {
   createKeyRefusal,
   stripeRefusalDetail,
 } from './create-key-refusal';
-import { recordPlanPriceChange } from './pending-price-change';
+import {
+  platformWriteMetadata,
+  recordPlanPriceChange,
+} from './pending-price-change';
 import {
   type PriceChangeProgress,
   readPriceChangeProgress,
@@ -889,6 +892,7 @@ export class CourseSubscriptionService extends BaseService {
         createdPriceIds.push(price.id);
         await this.stripe.prices.update(stripePriceMonthlyId, {
           active: false,
+          metadata: platformWriteMetadata(),
         });
         archivedPriceIds.push(stripePriceMonthlyId);
       }
@@ -912,6 +916,7 @@ export class CourseSubscriptionService extends BaseService {
         createdPriceIds.push(price.id);
         await this.stripe.prices.update(stripePriceAnnualId, {
           active: false,
+          metadata: platformWriteMetadata(),
         });
         archivedPriceIds.push(stripePriceAnnualId);
       }
@@ -1027,25 +1032,35 @@ export class CourseSubscriptionService extends BaseService {
   ): Promise<void> {
     await Promise.all([
       ...createdPriceIds.map((id) =>
-        this.stripe.prices.update(id, { active: false }).catch((err) =>
-          this.obs.error('Failed to archive new course price during rollback', {
-            courseId,
-            stripePriceId: id,
-            error: err instanceof Error ? err.message : String(err),
+        this.stripe.prices
+          .update(id, {
+            active: false,
+            metadata: platformWriteMetadata(),
           })
-        )
+          .catch((err) =>
+            this.obs.error(
+              'Failed to archive new course price during rollback',
+              {
+                courseId,
+                stripePriceId: id,
+                error: err instanceof Error ? err.message : String(err),
+              }
+            )
+          )
       ),
       ...archivedPriceIds.map((id) =>
-        this.stripe.prices.update(id, { active: true }).catch((err) =>
-          this.obs.error(
-            'Failed to restore archived course price during rollback',
-            {
-              courseId,
-              stripePriceId: id,
-              error: err instanceof Error ? err.message : String(err),
-            }
+        this.stripe.prices
+          .update(id, { active: true, metadata: platformWriteMetadata() })
+          .catch((err) =>
+            this.obs.error(
+              'Failed to restore archived course price during rollback',
+              {
+                courseId,
+                stripePriceId: id,
+                error: err instanceof Error ? err.message : String(err),
+              }
+            )
           )
-        )
       ),
     ]);
   }

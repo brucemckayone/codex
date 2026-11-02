@@ -97,6 +97,8 @@ export {
 } from './services/course-subscription-service';
 export {
   applyDuePendingPriceChange,
+  // price.updated skips the platform's own Price updates (no false alert).
+  isPlatformPriceWrite,
   PENDING_PRICE_FROM_KEY,
   PENDING_PRICE_ID_KEY,
   PRICE_NOTICE_TIMEOUT_MS,
