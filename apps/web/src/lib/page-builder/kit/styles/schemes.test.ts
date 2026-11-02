@@ -173,7 +173,7 @@ function fragments(): string[] {
   out.push(
     '--_y: (0.2126 * var(--_lr) + 0.7152 * var(--_lg) + 0.0722 * var(--_lb));'
   );
-  out.push('--_w: clamp(0, (0.1791 - var(--_y)) * 1e9, 1);');
+  out.push('--_w: clamp(0, (0.1791 - var(--_y)) * 1e12, 1);');
   for (const [level, t] of Object.entries(INK)) {
     out.push(
       `--_t-${level}: (var(--_w) * min(1, ${t} * (var(--_y) + 0.05) - 0.05) + (1 - var(--_w)) * max(0, (var(--_y) + 0.05) / ${t} - 0.05));`
@@ -465,12 +465,12 @@ describe('schemes.css ↔ model parity', () => {
       '--lp-mark-ink: rgb(from var(--lp-accent-source) var(--_ol-r) var(--_ol-g) var(--_ol-b));'
     );
     const step =
-      'calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e9, 1))';
+      'calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))';
     expect(ORG_BRAND).toContain(
       `--color-on-interactive: rgb( from var(--color-interactive) ${step} ${step} ${step} );`
     );
     // The kit's `--_w` is that step, written once from the same fragments.
-    expect(EXACT).toContain('--_w: clamp(0, (0.1791 - var(--_y)) * 1e9, 1);');
+    expect(EXACT).toContain('--_w: clamp(0, (0.1791 - var(--_y)) * 1e12, 1);');
     expect(EXACT).toContain(
       '--_lr: pow((clamp(0, r, 255) / 255 + 0.055) / 1.055, 2.4);'
     );
@@ -600,7 +600,7 @@ const inGamut = (rgb: Rgb) => rgb.every((c) => c >= -1e-6 && c <= 1 + 1e-6);
 function ink(bgIn: Rgb, t: number): Rgb {
   const L = clip(bgIn).map(kneeLin);
   const y = 0.2126 * L[0] + 0.7152 * L[1] + 0.0722 * L[2];
-  const w = Math.min(1, Math.max(0, (0.1791 - y) * 1e9));
+  const w = Math.min(1, Math.max(0, (0.1791 - y) * 1e12));
   const yt =
     w * Math.min(1, t * (y + 0.05) - 0.05) +
     (1 - w) * Math.max(0, (y + 0.05) / t - 0.05);
@@ -617,7 +617,7 @@ function ink(bgIn: Rgb, t: number): Rgb {
 function pivot(fill: Rgb): Rgb {
   const L = clip(fill).map(kneeLin);
   const y = 0.2126 * L[0] + 0.7152 * L[1] + 0.0722 * L[2];
-  const w = Math.min(1, Math.max(0, (0.1791 - y) * 1e9));
+  const w = Math.min(1, Math.max(0, (0.1791 - y) * 1e12));
   return [w, w, w];
 }
 
@@ -3896,7 +3896,7 @@ describe('the org’s real ground — its pole, its band, and a soft band that s
     expect(INK_CROSSOVER).toBeCloseTo(Math.sqrt(1.05 * 0.05) - 0.05, 4);
     // The kit's inks switch at the same point.
     expect(CODE).toContain(
-      `--_w: clamp(0, (${INK_CROSSOVER} - var(--_y)) * 1e9, 1);`
+      `--_w: clamp(0, (${INK_CROSSOVER} - var(--_y)) * 1e12, 1);`
     );
     let light = 0;
     let dark = 0;

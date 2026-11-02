@@ -119,9 +119,9 @@ describe('deriveTextOnBrand (mirrors org-brand.css’s luminance step)', () => {
 describe('the rule the stylesheets paint', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const styles = join(here, '../../../styles');
-  // The step's steepness as the stylesheets write it (a string: `${1e9}` would
-  // print 1000000000).
-  const RAMP = '1e9';
+  // The step's steepness as the stylesheets write it (a string: `${1e12}`
+  // would print 1000000000000).
+  const RAMP = '1e12';
   // One channel of an ink, built from the pivot the readout uses.
   const CHANNEL = `calc(255 * clamp(0, (${TEXT_ON_BRAND_LUMINANCE_PIVOT} - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * ${RAMP}, 1))`;
   const GUARD =
@@ -177,9 +177,12 @@ describe('the rule the stylesheets paint', () => {
     return inside;
   }
 
+  // This proves the double-precision model. Engines compute Y about 1e-8 away
+  // from it, so the stylesheets' ramp is kept ten thousand times narrower than
+  // that, and WebKit 26 and Chrome 156 were measured painting no grey at it.
   test('no 8-bit colour sits inside the step’s ramp, so every ink is pure', () => {
     // The counter can see the defect: at `* 1e6` 32 colours were inside,
-    // #b747b5 among them, painted grey at about 1.07:1.
+    // #b747b5 among them, measured grey at 1.03:1 (WebKit) and 1.15:1 (Chrome).
     expect(coloursInsideTheRamp(1e6)).toBe(32);
     expect(coloursInsideTheRamp(Number(RAMP))).toBe(0);
   });

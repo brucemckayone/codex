@@ -6,9 +6,9 @@
  * choose the text on a brand fill by its relative LUMINANCE: pure white below
  * 0.1791, where white and black contrast equally (each 4.58:1), pure black at
  * or above. Chosen that way, the label clears AA on every sRGB colour: the
- * floor is 4.57:1. (It is a true step only because its ramp, `* 1e9`, is
- * narrower than any 8-bit colour's distance from the pivot; the tests sweep
- * that.) An engine that fails the stylesheets' `@supports` test (org-brand.css
+ * floor is 4.57:1. (It is a true step only because its ramp, `* 1e12`, is
+ * narrower than any 8-bit colour's distance from the pivot, and than the
+ * engines' rounding; org-brand.css records the measurements.) An engine that fails the stylesheets' `@supports` test (org-brand.css
  * records Chrome before 125) keeps their older fallback, an OKLCH lightness
  * step at 0.62, which picks the weaker ink for some greens and teals. This
  * module models what every current browser paints, not that fallback.
@@ -76,9 +76,10 @@ export function contrastRatio(a: string, b: string): number | null {
  * differ only for channels under about 4%, and move the decision by under
  * 0.001. White for an unparseable hex: a default, not a model of the page. A
  * malformed `--brand-color` does not fall back to the platform primary (a
- * `var()` fallback applies only when the property is unset), so the fill and
- * its ink are invalid where they are used and paint no defined ink.
- * `contrastRatio` gives no ratio for it, so nothing reports it as read.
+ * `var()` fallback applies only when the property is unset or itself invalid,
+ * and a malformed colour is neither), so the fill and its label resolve as
+ * unset where they are used: no fill, an inherited colour, no ink chosen for
+ * it. `contrastRatio` gives no ratio for it, so nothing reports it as read.
  */
 export function inkOn(fillHex: string): string {
   const rgb = parseHex(fillHex);
