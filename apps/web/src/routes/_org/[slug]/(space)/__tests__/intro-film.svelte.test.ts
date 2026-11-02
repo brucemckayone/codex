@@ -34,7 +34,8 @@ import {
 const attached: string[] = [];
 const requestOrgFilm = vi.fn();
 
-vi.mock('$app/environment', () => ({ browser: true }));
+// `dev` too: the player core logs through `$lib/observability`, which reads it.
+vi.mock('$app/environment', () => ({ browser: true, dev: true }));
 vi.mock('$app/navigation', () => ({ replaceState: vi.fn() }));
 vi.mock('$app/state', () => ({
   page: {

@@ -26,7 +26,7 @@
  */
 import type { OfferPath } from '../../../offer-paths';
 import { COPY } from '../../model/copy';
-import type { CourseFacts } from '../../model/facts';
+import { type CourseFacts, lengthFact } from '../../model/facts';
 import { compact, readItems, readOneOf, readText } from '../../model/read';
 import { PRICING_COPY } from './copy';
 
@@ -86,9 +86,7 @@ export function factLine(
     case 'practices':
       return COPY.course.practices(facts.practices);
     case 'length':
-      return facts.seconds === null
-        ? null
-        : PRICING_COPY.length(facts.seconds, facts.kinds);
+      return lengthFact(facts);
     case 'mix':
       return PRICING_COPY.mix(facts.kinds);
   }

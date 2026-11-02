@@ -246,6 +246,9 @@ describe('Inspector — section', () => {
     }
   });
 
+  // This org has no moving background and the viewer no role, so the note
+  // says what stands in and who can add one (Codex-61zsk.73); the tooltip
+  // still says what Moving is.
   it('says in words what Moving does: tooltip, description, and on screen once chosen', () => {
     render([{ id: 'f', type: 'faq', enabled: true, props: {} }]);
     const hint =
@@ -255,7 +258,10 @@ describe('Inspector — section', () => {
     const note = document.getElementById(
       moving.getAttribute('aria-describedby') ?? ''
     );
-    expect(note?.textContent?.trim()).toBe(hint);
+    expect(note?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
+      'No moving background yet, so a soft glow of your colours stands in. An admin can add one in Brand.'
+    );
+    expect(note?.querySelector('a')).toBeNull();
     expect(note?.hidden).toBe(true);
 
     click('.swatch[data-scheme="atmosphere"]');
@@ -453,8 +459,14 @@ describe('Inspector — section', () => {
           '.item__fields .field__label, .item__fields .image__label'
         ),
       ].map((label) => label.textContent?.trim());
-    // A mark is offered in every layout; the picture only where it is drawn.
-    expect(labels()).toEqual(['Item', 'One line about it', 'Mark']);
+    // A mark, or a number in its place, is offered in every layout; the
+    // picture only where it is drawn.
+    expect(labels()).toEqual([
+      'Item',
+      'One line about it',
+      'Mark',
+      'Or a number',
+    ]);
 
     pageBuilder.setSectionLayout('b', 'grid');
     flushSync();

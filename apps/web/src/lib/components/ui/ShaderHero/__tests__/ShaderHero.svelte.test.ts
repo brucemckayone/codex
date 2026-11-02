@@ -35,11 +35,23 @@ vi.mock('../load-renderer', () => ({
   loadRenderer: vi.fn(async () => renderer),
 }));
 vi.mock('../jfa-sdf', () => ({ destroyJFACache: vi.fn() }));
-vi.mock('../shader-config', () => ({
-  getShaderConfig: () => ({ preset: 'glow' }),
+// What the brand's tokens say the shader draws; a test edits it as the brand
+// editor would.
+const brand = vi.hoisted(() => ({
+  config: { preset: 'glow' } as Record<string, unknown>,
+  /** How many times the shader has read them. */
+  reads: 0,
+}));
+vi.mock('../shader-config', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../shader-config')>()),
+  getShaderConfig: () => {
+    brand.reads++;
+    return brand.config;
+  },
 }));
 
 import ShaderHero from '../ShaderHero.svelte';
+import { shaderStill } from '../shader-still.svelte';
 import { shaderTone } from '../shader-tone';
 
 let frames: FrameRequestCallback[] = [];
@@ -49,6 +61,11 @@ let app: ReturnType<typeof mount> | null = null;
 let clock = 0;
 let releases: (() => void)[] = [];
 const toneDraws = vi.fn();
+/** Copies of the studio's frame encoded (`shaderStill`, Codex-61zsk.73). */
+let encoded = 0;
+let contextLost = false;
+/** The WebGL context's stand-in. */
+const webgl = { isContextLost: () => contextLost };
 
 /** Run the frames queued so far (those they queue run on the next step). */
 function step(count = 1) {
@@ -60,8 +77,11 @@ function step(count = 1) {
 }
 
 /** Mount, then let the async renderer load and its first frame queue. */
-async function start(props: { still?: boolean; tone?: boolean }) {
-  app = mount(ShaderHero, { target: document.body, props });
+async function start(
+  props: { still?: boolean; tone?: boolean },
+  target: HTMLElement = document.body
+) {
+  app = mount(ShaderHero, { target, props });
   flushSync();
   await tick();
   await Promise.resolve();
@@ -92,6 +112,8 @@ beforeEach(() => {
   // The WebGL context is a stand-in; the 2D one the samples are drawn on
   // counts its draws and reads back a mid grey.
   toneDraws.mockClear();
+  brand.config = { preset: 'glow' };
+  contextLost = false;
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(((
     kind: string
   ) =>
@@ -102,7 +124,24 @@ beforeEach(() => {
             data: new Uint8ClampedArray(w * h * 4).fill(128),
           }),
         }
-      : {}) as unknown as HTMLCanvasElement['getContext']);
+      : webgl) as unknown as HTMLCanvasElement['getContext']);
+  // The still's copy is encoded at once, to an object URL jsdom lacks.
+  encoded = 0;
+  vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation(
+    (done: BlobCallback) => {
+      encoded++;
+      done(new Blob(['frame']));
+    }
+  );
+  let made = 0;
+  Object.defineProperty(URL, 'createObjectURL', {
+    configurable: true,
+    value: () => `blob:still-${++made}`,
+  });
+  Object.defineProperty(URL, 'revokeObjectURL', {
+    configurable: true,
+    value: () => {},
+  });
   clock = 0;
   vi.spyOn(performance, 'now').mockImplementation(() => clock);
   for (const [side, size] of [
@@ -132,6 +171,9 @@ afterEach(() => {
   releases = [];
   if (app) unmount(app);
   app = null;
+  shaderStill.clear();
+  document.body.innerHTML = '';
+  document.documentElement.removeAttribute('data-theme');
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -305,5 +347,281 @@ describe('ShaderHero tone', () => {
     step(3);
     expect(renderer.render).toHaveBeenCalledTimes(2);
     expect(shaderTone.grid.samples).toBe(1);
+  });
+});
+
+// Codex-61zsk.73 (#20b): the studio's one frame, copied for the page editor.
+describe('ShaderHero still copy', () => {
+  it('copies the studio’s frame in the task that draws it, and again when a resize redraws it', async () => {
+    box = { width: 1200, height: 800 };
+    await start({ still: true, tone: true });
+    step(1);
+    expect(renderer.render).toHaveBeenCalledTimes(1);
+    // Read from the WebGL canvas itself, straight after the draw.
+    expect(toneDraws).toHaveBeenCalledTimes(1);
+    expect(toneDraws.mock.calls[0]?.[0]).toBe(document.querySelector('canvas'));
+    expect(shaderStill.current).toEqual({
+      url: 'blob:still-1',
+      theme: 'light',
+    });
+
+    step(3);
+    expect(encoded).toBe(1);
+
+    box = { width: 900, height: 700 };
+    for (const callback of resizeCallbacks) callback([], {} as ResizeObserver);
+    step(3);
+    expect(renderer.render).toHaveBeenCalledTimes(2);
+    expect(encoded).toBe(2);
+    expect(shaderStill.current?.url).toBe('blob:still-2');
+  });
+
+  it('names the theme the shader drew in, from the sentinel its config reads', async () => {
+    box = { width: 1200, height: 800 };
+    await start({ still: true, tone: true });
+    (document.querySelector('.shader-hero') as HTMLElement).style.setProperty(
+      '--brand-shader-is-dark',
+      '1'
+    );
+    step(1);
+    expect(shaderStill.current?.theme).toBe('dark');
+  });
+
+  it('copies nothing while the shader moves, or from a shader that is not the org layout’s', async () => {
+    box = { width: 1200, height: 800 };
+    await start({ tone: true });
+    step(3);
+    unmount(app!);
+    app = null;
+    // The moving shader's next frame was queued; it never runs once gone.
+    frames = [];
+    await start({ still: true });
+    step(3);
+    expect(renderer.render).toHaveBeenCalledTimes(4);
+    expect(encoded).toBe(0);
+    expect(shaderStill.current).toBeNull();
+  });
+
+  it('drops the copy on leaving the studio and on unmount', async () => {
+    box = { width: 1200, height: 800 };
+    const props = $state({ still: true, tone: true });
+    await start(props);
+    step(1);
+    expect(shaderStill.current).not.toBeNull();
+
+    props.still = false;
+    flushSync();
+    expect(shaderStill.current).toBeNull();
+
+    props.still = true;
+    flushSync();
+    step(1);
+    expect(shaderStill.current).not.toBeNull();
+
+    unmount(app!);
+    app = null;
+    expect(shaderStill.current).toBeNull();
+  });
+
+  it('keeps the glow when no copy can be made', async () => {
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(((
+      kind: string
+    ) =>
+      kind === '2d'
+        ? null
+        : webgl) as unknown as HTMLCanvasElement['getContext']);
+    box = { width: 1200, height: 800 };
+    await start({ still: true, tone: true });
+    step(3);
+    expect(renderer.render).toHaveBeenCalledTimes(1);
+    expect(encoded).toBe(0);
+    expect(shaderStill.current).toBeNull();
+  });
+
+  it('copies the frame on entering the studio when reduced motion had already frozen it', async () => {
+    vi.spyOn(window, 'matchMedia').mockReturnValue({
+      matches: true,
+      addEventListener() {},
+      removeEventListener() {},
+    } as unknown as MediaQueryList);
+    box = { width: 1200, height: 800 };
+    const props = $state({ still: false, tone: true });
+    await start(props);
+    step(3);
+    // Frozen for the viewer's sake, out of the studio: no copy.
+    expect(renderer.render).toHaveBeenCalledTimes(1);
+    expect(shaderStill.current).toBeNull();
+
+    props.still = true;
+    flushSync();
+    step(3);
+    expect(renderer.render).toHaveBeenCalledTimes(2);
+    expect(shaderStill.current).not.toBeNull();
+  });
+
+  it('draws a frozen frame in the brand as it is now, not as it last polled', async () => {
+    box = { width: 1200, height: 800 };
+    await start({ still: true, tone: true });
+    step(1);
+    expect(shaderStill.current?.theme).toBe('light');
+
+    // The brand changes, then a resize redraws the frame.
+    brand.config = { preset: 'glow', intensity: 0.4 };
+    (document.querySelector('.shader-hero') as HTMLElement).style.setProperty(
+      '--brand-shader-is-dark',
+      '1'
+    );
+    box = { width: 900, height: 700 };
+    for (const callback of resizeCallbacks) callback([], {} as ResizeObserver);
+    step(1);
+    expect(renderer.render.mock.calls[1]?.[3]).toEqual({
+      preset: 'glow',
+      intensity: 0.4,
+    });
+    expect(shaderStill.current?.theme).toBe('dark');
+  });
+
+  /** The studio's shader inside its org layout, its first frame copied; the
+   *  wait for changes to settle runs by hand (`settle`), any other timer is
+   *  real. */
+  async function inStudio() {
+    const layout = document.createElement('div');
+    layout.className = 'org-layout';
+    document.body.appendChild(layout);
+    box = { width: 1200, height: 800 };
+    await start({ still: true, tone: true }, layout);
+    step(1);
+    expect(encoded).toBe(1);
+    let settling: (() => void) | null = null;
+    const later = window.setTimeout.bind(window);
+    vi.spyOn(window, 'setTimeout').mockImplementation(((
+      callback: () => void,
+      ms?: number
+    ) => {
+      if (ms !== 250) return later(callback, ms);
+      settling = callback;
+      return 1;
+    }) as typeof window.setTimeout);
+    const settle = async () => {
+      await Promise.resolve();
+      const run: (() => void) | null = settling;
+      settling = null;
+      run?.();
+      step(3);
+    };
+    return { layout, settle };
+  }
+
+  it('copies the frame again in the studio once the brand or the theme changes what it draws', async () => {
+    const { layout, settle } = await inStudio();
+    // The page editor paints the copy.
+    releases.push(shaderStill.want());
+    expect(renderer.render).toHaveBeenCalledTimes(1);
+
+    // A token the shader does not read: nothing is drawn again.
+    layout.style.setProperty('--brand-radius', '4px');
+    await settle();
+    expect(renderer.render).toHaveBeenCalledTimes(1);
+    expect(encoded).toBe(1);
+
+    // A new shader setting, as the brand editor writes it.
+    brand.config = { preset: 'glow', intensity: 0.4 };
+    layout.style.setProperty('--brand-shader-intensity', '0.4');
+    await settle();
+    expect(renderer.render).toHaveBeenCalledTimes(2);
+    expect(encoded).toBe(2);
+
+    // The other theme.
+    (document.querySelector('.shader-hero') as HTMLElement).style.setProperty(
+      '--brand-shader-is-dark',
+      '1'
+    );
+    document.documentElement.setAttribute('data-theme', 'dark');
+    await settle();
+    expect(encoded).toBe(3);
+    expect(shaderStill.current?.theme).toBe('dark');
+  });
+
+  it('with nothing painting the copy, a brand change drops it and draws nothing until a render asks', async () => {
+    const { layout, settle } = await inStudio();
+
+    // The brand editor, which paints no copy.
+    brand.config = { preset: 'glow', intensity: 0.4 };
+    layout.style.setProperty('--brand-shader-intensity', '0.4');
+    await settle();
+    // The old brand's copy gives way to the glow; no full-viewport draw.
+    expect(shaderStill.current).toBeNull();
+    expect(renderer.render).toHaveBeenCalledTimes(1);
+
+    // The page editor opens.
+    releases.push(shaderStill.want());
+    step(3);
+    expect(renderer.render).toHaveBeenCalledTimes(2);
+    expect(encoded).toBe(2);
+    expect(shaderStill.current).not.toBeNull();
+
+    // A second render asking, with a copy shown, draws nothing more.
+    releases.push(shaderStill.want());
+    step(3);
+    expect(renderer.render).toHaveBeenCalledTimes(2);
+  });
+
+  it('draws no second frame for a copy still being encoded, and draws again once for a copy that failed', async () => {
+    // The encoder answers later, as a browser's does.
+    const encodes: BlobCallback[] = [];
+    vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation(
+      (done: BlobCallback) => {
+        encodes.push(done);
+      }
+    );
+    box = { width: 1200, height: 800 };
+    await start({ still: true, tone: true });
+    step(1);
+    expect(renderer.render).toHaveBeenCalledTimes(1);
+
+    // The page editor mounts while the first copy is encoding.
+    releases.push(shaderStill.want());
+    step(3);
+    expect(renderer.render).toHaveBeenCalledTimes(1);
+
+    // That copy fails: the next render to ask gets the frame drawn again.
+    encodes.shift()?.(null);
+    releases.push(shaderStill.want());
+    step(3);
+    expect(renderer.render).toHaveBeenCalledTimes(2);
+
+    // It fails again: the same brand is not drawn for a third time.
+    encodes.shift()?.(null);
+    releases.push(shaderStill.want());
+    step(3);
+    expect(renderer.render).toHaveBeenCalledTimes(2);
+    expect(shaderStill.current).toBeNull();
+  });
+
+  it('a frozen shader with nothing to draw keeps to the poll that spots a new preset', async () => {
+    brand.config = { preset: 'none' };
+    await start({ still: true, tone: true });
+    const before = brand.reads;
+    step(60);
+    // Once in thirty frames, not every frame.
+    expect(brand.reads - before).toBe(2);
+  });
+
+  it('goes back to the glow when its context is lost, and copies no blank frame', async () => {
+    box = { width: 1200, height: 800 };
+    await start({ still: true, tone: true });
+    step(1);
+    expect(shaderStill.current).not.toBeNull();
+
+    contextLost = true;
+    document
+      .querySelector('canvas')
+      ?.dispatchEvent(new Event('webglcontextlost'));
+    expect(shaderStill.current).toBeNull();
+    box = { width: 900, height: 700 };
+    for (const callback of resizeCallbacks) callback([], {} as ResizeObserver);
+    step(3);
+    expect(encoded).toBe(1);
+    expect(shaderStill.current).toBeNull();
   });
 });

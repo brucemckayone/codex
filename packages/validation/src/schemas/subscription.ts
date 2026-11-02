@@ -296,6 +296,17 @@ export const createSubscriptionCheckoutSchema = z.object({
 // Subscription Management Schemas
 // ============================================================================
 
+/**
+ * What a switch into yearly billing's dialog showed, as `previewTierChange()`
+ * returns it: the amount due, every line's amount and the next bill's London
+ * date (`tierChangeQuote` in @codex/subscription, Codex-2hxff.96). The page
+ * echoes it unchanged; the commit re-previews and refuses any difference.
+ */
+export const tierChangeQuoteSchema = z
+  .string()
+  .max(512)
+  .regex(/^due:-?\d+\|lines:(-?\d+(,-?\d+)*)?\|next:\d{4}-\d{2}-\d{2}$/);
+
 export const changeTierSchema = z.object({
   organizationId: uuidSchema,
   newTierId: uuidSchema,
@@ -307,6 +318,12 @@ export const changeTierSchema = z.object({
    * calculation against `Date.now()` if omitted.
    */
   prorationDate: z.number().int().positive().optional(),
+  /**
+   * The preview's `quote`. Required by `changeTier()` for a switch into
+   * yearly billing, which cannot be pinned by `prorationDate`; every other
+   * change leaves it out.
+   */
+  quote: tierChangeQuoteSchema.optional(),
 });
 
 export const cancelSubscriptionSchema = z.object({

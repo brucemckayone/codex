@@ -56,6 +56,8 @@ export {
   TranscodingServiceError,
   ValidationError,
 } from './errors';
+// When the status object asks RunPod about a job with no progress (Codex-t359w)
+export { UNSTARTED_CHECKS_MS } from './maintenance-rules';
 // Live media status (Codex-l2c48.9): where lifecycle changes are published
 export {
   type MediaStatusFeed,
@@ -76,6 +78,7 @@ export {
   getHlsVariantKey,
   getHlsVariantSegmentKey,
   getMediaThumbnailKey,
+  getMediaThumbnailPrefix,
   getMediaThumbnailUrl,
   getMezzanineKey,
   getMezzaninePrefix,
@@ -102,6 +105,8 @@ export {
   TranscodingMaintenance,
   TranscodingService,
   type TranscodingServiceFullConfig,
+  type UnstartedJob,
+  type UnstartedOutcome,
 } from './services';
 
 // Types

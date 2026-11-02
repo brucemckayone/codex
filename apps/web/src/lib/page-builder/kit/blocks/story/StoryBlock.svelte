@@ -43,15 +43,16 @@
   );
   // Every size each picture has, at the width its layout draws it
   // (Codex-61zsk.66): a chapter spans the band; a scroll moment, and the
-  // frame over the pictures' column, take a half from 48rem; a strip card is
-  // the strip's item, which Clean widens to 28rem.
+  // frame over the pictures' column, take seven twelfths from 48rem (the
+  // frame is that or less: square, and no taller than 80% of the viewport);
+  // a strip card is the strip's item, which Clean widens to 28rem.
   const srcsets = $derived(
     steps.map((step) => pageImageSrcset(step.image, context.mediaBaseUrl))
   );
   const sizes = $derived.by(() => {
     if (layout === 'chapters') return '100vw';
     if (layout === 'strip') return clampedSizes(16, { vw: 34 }, 28);
-    return columnSizes(1, [[48, 0.5]]);
+    return columnSizes(1, [[48, 0.58]]);
   });
   // A moment's heading sits one level under the section heading, or takes its
   // level when there is none, so the outline never skips a step.

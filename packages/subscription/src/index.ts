@@ -67,6 +67,7 @@ export {
   PendingMoveKeepFirstError,
   SubscriptionCheckoutError,
   SubscriptionNotFoundError,
+  SubscriptionScheduledElsewhereError,
   type SubscriptionServiceError,
   TierChangeCancellingError,
   TierChangeIntervalWhileMovingError,

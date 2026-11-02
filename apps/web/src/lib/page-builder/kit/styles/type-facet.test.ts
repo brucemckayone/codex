@@ -41,7 +41,7 @@ const KIT = dirname(STYLES);
 const TYPE_PROPERTY =
   /^(font|font-[a-z-]+|letter-spacing|line-height|text-transform|hyphens|hyphenate-[a-z-]+)$/;
 const TYPE_TOKEN =
-  /^--lp-(size|leading|tracking|weight|case|font)-|^--lp-(display-scale|type-fit|heading-face|heading-run)$|^--lp-button-(size|weight|tracking)$|^--lp-measure|^--_figure$/;
+  /^--lp-(size|leading|tracking|weight|case|font)-|^--lp-(display-scale|type-fit|heading-face|heading-run)$|^--lp-button-(size|weight|tracking)$|^--lp-measure/;
 
 /** A line's measure: so many of the face's own `0`s (Codex-61zsk.64). */
 const MEASURE = /^calc\(\d+(\.\d+)? \* var\(--lp-measure-unit\)\)$/;

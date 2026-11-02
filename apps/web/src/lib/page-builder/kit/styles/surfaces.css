@@ -90,7 +90,9 @@
    thumbnail — the section is its ground plus the kit's glow: the two lights
    of the `.lp-atmos` recipe, in the brand's two hues at a lightness near the
    ground's (`--_glow-l` per pole), so they read as colour and the words keep
-   every floor (`schemes.test.ts` measures the glow itself). */
+   every floor (`schemes.test.ts` measures the glow itself). The canvas and
+   thumbnails paint the studio's frame of the shader over it once one has
+   been copied (THE STILL, below). */
 .lp-section[data-lp-scheme='atmosphere']:not([data-lp-on-media]) > .lp-surface::before {
   --_glow-a: oklch(from var(--lp-brand) var(--_glow-l) min(c, var(--_glow-c)) h);
   /* Mostly the second colour, but never a grey: an achromatic second colour
@@ -364,5 +366,49 @@
     margin-block-start: 0;
     padding-block-start: var(--lp-pad);
     mask: none;
+  }
+}
+
+/* ── the still (Codex-61zsk.73, #20b) ────────────────────────────────────── */
+/* The editor's canvas and thumbnails sit in the studio, where the shader is
+   behind an opaque cover, so a Moving band there draws the glow — unless the
+   studio's own frame of the shader has been copied (`atmosphere-still.ts`,
+   on the root as `--lp-shader-still`). Then the glow's layer paints that
+   frame instead, cropped from its centre to fill the band, so every band and
+   thumbnail shows the same middle of it, under the PROVEN veil
+   (`--_atmos-floor`) in the band's own ground: never the live page's
+   thinner one, which is measured over the shader drawn on the page, not over
+   a copy. The §5 proof covers it as it covers the shader: every ink holds
+   over black and white behind that veil (`schemes.test.ts`). It is the
+   glow's own layer, out of the flow, so the frame arriving moves nothing.
+   Where the panel's card is drawn, the band is left unveiled around it, as
+   the live page is: the card is the veil. */
+@supports (color: rgb(from red r g b / 0.5)) {
+  .lp[data-lp-shader-still]
+    .lp-section[data-lp-scheme='atmosphere']:not([data-lp-on-media])
+    > .lp-surface::before {
+    --_still-veil: linear-gradient(rgb(from var(--lp-bg) r g b / var(--_atmos-floor)) 0 0);
+    inset: 0;
+    opacity: 1;
+    background: var(--_still-veil), var(--lp-shader-still) center / cover no-repeat;
+    filter: none;
+    animation: none;
+  }
+
+  @container lp-page style(--lp-atmosphere-veil: panel) {
+    .lp[data-lp-shader-still]
+      .lp-section[data-lp-scheme='atmosphere']:not([data-lp-on-media], :has(> .lp-inner > .lp-bleed))
+      > .lp-surface::before {
+      --_still-veil: none;
+    }
+  }
+}
+
+/* A picture behind the words is what forced colours take away. */
+@media (forced-colors: active) {
+  .lp[data-lp-shader-still]
+    .lp-section[data-lp-scheme='atmosphere']:not([data-lp-on-media])
+    > .lp-surface::before {
+    background: none;
   }
 }

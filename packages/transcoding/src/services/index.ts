@@ -11,6 +11,8 @@ export {
   type MaintenanceReport,
   type RetryDueReport,
   TranscodingMaintenance,
+  type UnstartedJob,
+  type UnstartedOutcome,
 } from './transcoding-maintenance';
 export {
   TranscodingService,

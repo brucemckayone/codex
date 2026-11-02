@@ -34,6 +34,8 @@
 
 import type Hls from 'hls.js';
 import type { ErrorData } from 'hls.js';
+import { playErrorName } from '$lib/components/player/start';
+import { logger } from '$lib/observability';
 
 /**
  * Return type of `createHlsPlayer`.
@@ -242,7 +244,9 @@ export async function createHlsPlayer(
    * hls.js's media recovery detaches and re-attaches the element, which
    * pauses it with no `pause` event, so a film that was playing would freeze
    * under its Pause button. It plays on once the element is attached again;
-   * hls.js seeks it back to where it stood.
+   * hls.js seeks it back to where it stood. A player ignores the AbortError
+   * the recovery gives its own pending play, so a refused play-on is logged
+   * here, by the error's name alone (never its message or the URL).
    */
   const recover = (swapCodec: boolean) => {
     const wasPlaying = !media.paused;
@@ -250,7 +254,11 @@ export async function createHlsPlayer(
     hls.recoverMediaError();
     if (!wasPlaying) return;
     hls.once(HlsJs.Events.MEDIA_ATTACHED, () => {
-      media.play().catch(() => {});
+      media.play().catch((error: unknown) => {
+        logger.warn('player.recover_play_failed', {
+          name: playErrorName(error),
+        });
+      });
     });
   };
 

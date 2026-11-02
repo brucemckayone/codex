@@ -40,11 +40,7 @@ export const statsDefinition: BlockDefinition<StatsProps> = {
       'In a row',
       'Big numbers side by side under your heading, divided by fine lines.'
     ),
-    layout(
-      'grid',
-      'Tiles',
-      'Your heading on one side and the numbers in tiles on the other.'
-    ),
+    layout('grid', 'Tiles', 'Big numbers in tiles under your heading.'),
   ],
   fields: [
     eyebrowField,

@@ -41,8 +41,14 @@
   import * as m from '$paraglide/messages';
   import { MAX_TRANSCODING_ATTEMPTS } from '@codex/constants';
   import { remoteErrorStatus } from '$lib/remote/query-result';
-  import { describeTile, tilePill, type TileFailure, type TilePill } from './tile-state';
   import MediaUseChip from './MediaUseChip.svelte';
+  import {
+    describeTile,
+    tilePill,
+    type TileFailure,
+    type TilePill,
+    type TileView,
+  } from './tile-state';
 
   // MediaItemWithRelations doesn't declare thumbnailUrl on the base schema
   // (only thumbnailKey) — but the public content API resolves keys to CDN
@@ -94,6 +100,15 @@
     failed: () => m.media_status_failed(),
   };
 
+  type WaitingCause = Extract<TileView, { kind: 'waiting' }>['cause'];
+
+  /** The bar's label while a tile waits, by why it waits. */
+  const WAITING_STEP: Record<WaitingCause, () => string> = {
+    service: () => m.media_tile_waiting_service_step(),
+    config: () => m.media_tile_waiting_config_step(),
+    transcoder: () => m.media_tile_queued_step(),
+  };
+
   /**
    * The bar over the thumbnail; `pct` null draws it indeterminate. Its
    * colour and icon follow the tile's `data-status` (the pill).
@@ -115,13 +130,7 @@
           pct: view.pct,
         };
       case 'waiting':
-        return {
-          label:
-            view.cause === 'config'
-              ? m.media_tile_waiting_config_step()
-              : m.media_tile_waiting_service_step(),
-          pct: null,
-        };
+        return { label: WAITING_STEP[view.cause](), pct: null };
       default:
         return null;
     }
@@ -134,6 +143,9 @@
         return m.media_tile_stopped();
       case 'waiting':
         if (view.cause === 'config') return m.media_tile_waiting_config();
+        if (view.cause === 'transcoder') {
+          return view.overdue ? m.media_tile_queued_overdue() : m.media_tile_queued();
+        }
         return view.retryInSeconds
           ? m.media_tile_waiting_service({ time: formatDuration(view.retryInSeconds) })
           : m.media_tile_waiting_service_later();

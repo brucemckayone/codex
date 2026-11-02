@@ -167,6 +167,11 @@ jobs:
           RUNPOD_ENDPOINT_ID: ${{ secrets.RUNPOD_ENDPOINT_ID }}
           RUNPOD_WEBHOOK_SECRET: ${{ secrets.RUNPOD_WEBHOOK_SECRET }}
           WORKER_SHARED_SECRET: ${{ secrets.WORKER_SHARED_SECRET }}
+          # The file purge's edge eviction of a purged item's posters
+          # (Codex-9seq3): the same zone and Cache Purge token as identity-api's.
+          # Unset, the purge logs the skipped eviction at error.
+          CF_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_CACHE_PURGE_TOKEN }}
           R2_BUCKET_MEDIA: ${{ vars.R2_BUCKET_MEDIA }}
           R2_BUCKET_ASSETS: ${{ vars.R2_BUCKET_ASSETS }}
           R2_BUCKET_PLATFORM: ${{ vars.R2_BUCKET_PLATFORM }}
@@ -549,6 +554,18 @@ jobs:
           DOCKER_IMAGE: ghcr.io/${{ github.repository_owner }}/codex-transcoder
           IMAGE_TAG: ${{ steps.transcoder.outputs.tag }}
         run: python infrastructure/runpod/scripts/update_runpod_endpoint.py
+
+      # The first job after an image switch waits for a worker to fetch and
+      # start the new image: 2m20s on 2026-10-31, while the next worker took
+      # seconds (Codex-t359w). A ping takes that wait here, not in a creator's
+      # upload, and proves the image starts: red when no worker answers within
+      # 10 minutes. The health step below still runs.
+      - name: Warm the transcoder
+        timeout-minutes: 12
+        env:
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+          RUNPOD_ENDPOINT_ID: ${{ secrets.RUNPOD_ENDPOINT_ID }}
+        run: python infrastructure/runpod/scripts/update_runpod_endpoint.py --warm
 
       # Its own step, and run whatever failed before it: red when the endpoint
       # is paused or its settings cannot be read, while the step above, which

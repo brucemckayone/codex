@@ -52,7 +52,7 @@
     still: string | null;
     /** The still's stored sizes: a page image's (`pageImageSrcset`), or the three a journey still has (`getThumbnailSrcset`). */
     srcset?: string;
-    /** Where its subject is, when it is the creator's page image (`storedFocus`). */
+    /** Where its subject is: the creator's page image's point (`storedFocus`), or the course still's on this page (`stillFocusFor`). */
     focus?: { x: number; y: number };
     clip: PreviewMedia | null;
     alt: string;
@@ -244,12 +244,14 @@
       block-size: var(--lp-pad);
     }
 
-    /* The drop is one headline line (and the label, when there is one) plus
-       the shape's own margin, which reaches up as well as out — so the first
-       line runs the full width above the picture. */
+    /* The drop is one headline line (and the logo and the label, when there
+       are) plus the shape's own margin, which reaches up as well as out — so
+       the first line runs the full width above the picture. */
     .hero-poster__media {
       --_line: calc(var(--_display) * var(--lp-leading-display));
-      --_drop: calc(var(--_line) + var(--lp-gap) + var(--space-2));
+      --_logo: 0px;
+      --_label: 0px;
+      --_drop: calc(var(--_logo) + var(--_label) + var(--_line) + var(--lp-gap) + var(--space-2));
       /* Its share of the column is the 0.54 the measure above leaves. */
       float: inline-end;
       inline-size: calc(46% + var(--_inset));
@@ -265,9 +267,12 @@
     }
 
     .hero-poster:has(> :global(.hero__eyebrow)) .hero-poster__media {
-      --_drop: calc(
-        var(--lp-size-label) * 1.5 + var(--lp-stack) + var(--_line) + var(--lp-gap) + var(--space-2)
-      );
+      --_label: calc(var(--lp-size-label) * 1.5 + var(--lp-stack));
+    }
+
+    /* OrgLogo's box, as the kit sizes it, and the stack under it. */
+    .hero-poster:has(> :global(.hero__logo)) .hero-poster__media {
+      --_logo: calc(var(--lp-logo-box) + var(--lp-stack));
     }
 
     .hero-poster__reveal {
@@ -283,8 +288,8 @@
     /* In a block container (the float needs one) the pieces part by margins. */
     .hero-poster[data-pictured]
       > :global(
-        :is(.hero__eyebrow, .hero__headline, .hero__lede, .hero__actions)
-          ~ :is(.hero__headline, .hero__lede, .hero__actions)
+        :is(.hero__logo, .hero__eyebrow, .hero__headline, .hero__lede, .hero__actions)
+          ~ :is(.hero__eyebrow, .hero__headline, .hero__lede, .hero__actions)
       ) {
       margin-block-start: var(--lp-stack);
     }

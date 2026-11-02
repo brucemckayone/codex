@@ -7,7 +7,8 @@
     cover     — the image fills the band; luminous words over a scrim. On a
                 Moving background with no image, the band is the section's:
                 the org's shader (or its glow) under the scheme's own veil
-    centered  — centred words over a wide image
+    centered  — centred words over a framed picture, as wide as the page's
+                reading measure and never bled (Codex-61zsk.73)
     poster    — the headline at full size set round a picture that runs off
                 the band's edge (HeroPoster)
 
@@ -43,22 +44,24 @@
 -->
 <script lang="ts">
   import { getThumbnailSrcset } from '$lib/utils/image';
-  import { pageImageSrcset, resolvePageImageUrl, storedFocus } from '../../../page-images';
-  import type { PreviewMedia, SellPreview } from '../../../render/types';
+  import { pageImageSrcset, storedFocus } from '../../../page-images';
   import { COPY } from '../../model/copy';
   import { heroFacts } from '../../model/facts';
   import { headingLength, headingRuns } from '../../model/long-heading';
+  import { stillFocusFor } from '../../model/still-focus';
   import type { BlockProps } from '../../model/types';
   import { getKitPage } from '../../page-context';
   import ButtonRow from '../../primitives/ButtonRow.svelte';
   import Eyebrow from '../../primitives/Eyebrow.svelte';
+  import FactsLine from '../../primitives/FactsLine.svelte';
   import Heading from '../../primitives/Heading.svelte';
   import InlineFilm from '../../primitives/InlineFilm.svelte';
   import Media from '../../primitives/Media.svelte';
+  import OrgLogo from '../../primitives/OrgLogo.svelte';
   import Text from '../../primitives/Text.svelte';
   import WatchButton from '../../primitives/WatchButton.svelte';
   import Watch from '../video/Watch.svelte';
-  import { heroDefinition } from './definition';
+  import { type HeroMedia, heroDefinition, heroMedia } from './definition';
   import HeroPoster from './HeroPoster.svelte';
   import { settled as settledValue } from './settled.svelte';
 
@@ -76,28 +79,36 @@
   const facts = $derived(heroFacts(context));
   const watchLabel = $derived(content.watchLabel ?? COPY.hero.watch);
 
-  interface HeroMedia {
-    still: string | null;
-    clip: PreviewMedia | null;
-  }
+  /** What a frame draws: a still and the clip over it. */
+  type Framed = Pick<HeroMedia, 'still' | 'clip'>;
 
+  // The still and clip, read as the inspector reads them (`heroMedia`). The
+  // uploaded hero still rides the AWAITED envelope, so it is in the
+  // server-rendered HTML (the page's largest paint); the streamed preview can
+  // only add a clip, or a media-item poster when nothing was uploaded.
+  const awaited = $derived(heroMedia(content, undefined, context));
+  const syncStill = $derived(awaited.still);
   // The creator's own image (contract A5) replaces the course still — never
   // the clip, which keeps playing wherever it did, over this as its poster.
-  const ownStill = $derived(
-    mode === 'none' ? null : resolvePageImageUrl(content.image, 'lg', context.mediaBaseUrl)
-  );
+  const ownStill = $derived(awaited.own ? awaited.still : null);
   // Decorative unless described; only the creator's image can carry words.
   const alt = $derived(ownStill ? (content.image?.alt ?? '') : '');
   // The creator's image offers every size it has, at the width its layout
   // draws it: one 800px image across a cover band upscales (Codex-61zsk.13).
-  // Wherever there is one, it is the still every layout draws (`pick`); a
+  // Wherever there is one, it is the still every layout draws; a
   // course still from the journey is not a page image, so it has none.
   const ownSrcset = $derived(
     ownStill ? pageImageSrcset(content.image, context.mediaBaseUrl) : ''
   );
   // Where the creator placed the image's subject, so a layout's crop keeps it
-  // (Codex-61zsk.58); a course still from the journey has none.
+  // (Codex-61zsk.58).
   const ownFocus = $derived(ownStill ? storedFocus(content.image) : undefined);
+  // A course still from the journey is no page image, so its point is kept
+  // on this page instead, and steers only the still it was set on
+  // (`stillFocus`, Codex-61zsk.73). A playing clip is never cropped by it.
+  function focusOf(still: string | null): { x: number; y: number } | undefined {
+    return ownStill ? ownFocus : stillFocusFor(content.stillFocus, still);
+  }
   // The journey's own still (its uploaded hero, or a clip's poster) is no
   // page image: it offers the three sizes every still has, named in its URL,
   // instead of the one large file across the band (Codex-61zsk.66).
@@ -105,24 +116,17 @@
     if (!still) return '';
     return still === ownStill ? ownSrcset : getThumbnailSrcset(still);
   }
-  const frameSizes = $derived(
-    layout === 'split' ? '(min-width: 50rem) 50vw, 100vw' : '100vw'
-  );
-
-  // The uploaded hero still rides the AWAITED envelope, so it is in the
-  // server-rendered HTML (the page's largest paint); the streamed preview can
-  // only add a clip, or a media-item poster when nothing was uploaded.
-  const syncStill = $derived(
-    mode === 'none' ? null : (ownStill ?? context.course.heroImageUrl ?? null)
-  );
-
-  function pick(preview: SellPreview | null): HeroMedia {
-    if (mode === 'none') return { still: null, clip: null };
-    return {
-      still: ownStill ?? preview?.heroImageUrl ?? syncStill,
-      clip: mode === 'image' ? null : (preview?.heroClip ?? null),
-    };
-  }
+  // The centred hero's frame is the reading measure from where the column
+  // outgrows it, about 50rem: 58 to 62 of the body's `0`s, which each
+  // Style's face and body size set between 47.5rem (Studio) and 54.3rem
+  // (Bold) on a 1280px laptop, so the hint is the widest, rounded up
+  // (Codex-61zsk.73). Below that it fills the column. Never a `min()`:
+  // Safari before 26.4 reads a `sizes` with one as 100vw.
+  const FRAME_SIZES: Partial<Record<string, string>> = {
+    split: '(min-width: 50rem) 50vw, 100vw',
+    centered: '(min-width: 50rem) 56rem, 100vw',
+  };
+  const frameSizes = $derived(FRAME_SIZES[layout] ?? '100vw');
 
   // The streamed preview once it settles, for the layouts whose shape depends
   // on whether there is media at all (cover, poster; split and centered on
@@ -130,9 +134,7 @@
   // (`settled.svelte.ts`). Until it settles, and on the server, the media is
   // the synchronous still.
   const preview = $derived(settledValue(context.sellPreview));
-  const settled = $derived<HeroMedia>(
-    preview === undefined ? { still: syncStill, clip: null } : pick(preview)
-  );
+  const settled = $derived<Framed>(heroMedia(content, preview, context));
   const pending = $derived(preview === undefined && !syncStill);
   const hasMedia = $derived(Boolean(settled.still || settled.clip));
   // Where the page is looked at rather than read, a picture's place is kept
@@ -155,9 +157,25 @@
   const coverOwnsBand = $derived(
     section.scheme !== 'atmosphere' || hasMedia || heroComing
   );
+  // The org's logo above the eyebrow, unless the creator hides it
+  // (Codex-61zsk.73). A cover's words sit on its picture or the shader, and
+  // the shader's ink is proven only against the band, never against a logo
+  // drawn for white: both always take the plate. Elsewhere OrgLogo reads the
+  // section's ink. A logo that fails to load keeps its row: OrgLogo holds its
+  // box and shows nothing, because the failure can land after the page has
+  // painted, and a row taken away then moves every word and section below it
+  // (sell-page-floor's "keeps still as it loads"). So the poster's drop and
+  // Path's stop, which allow for the box, stay true.
+  const logo = $derived(content.hideLogo === true ? null : (page.orgLogo ?? null));
+  const logoPlate = $derived(layout === 'cover' || section.scheme === 'atmosphere');
 </script>
 
 {#snippet copy(align: 'start' | 'center')}
+  {#if logo}
+    <div class="hero__logo hero__enter-c">
+      <OrgLogo logoUrl={logo.url} name={logo.name} plate={logoPlate} />
+    </div>
+  {/if}
   {#if content.eyebrow}
     <div class="hero__eyebrow hero__enter-c">
       <Eyebrow text={content.eyebrow} type="hero" {edit} />
@@ -182,12 +200,7 @@
       {#if content.body}
         <Text text={content.body} size="lead" type="hero" field="body" {edit} />
       {/if}
-      {#if facts.length > 0}
-        <p class="hero__facts">
-          {#each facts as fact, i (fact)}{#if i > 0}<span aria-hidden="true">{' · '}</span
-              >{/if}<span>{fact}</span>{/each}
-        </p>
-      {/if}
+      <FactsLine {facts} class="hero__facts" />
     </div>
   {/if}
   <div class="hero__actions hero__enter-c">
@@ -206,7 +219,7 @@
 
 <!-- A clip plays in the frame; while it is up, the ambient loop under the
      player rests and the still stands in for it. -->
-{#snippet frame(media: HeroMedia, pending: boolean, ratio: string)}
+{#snippet frame(media: Framed, pending: boolean, ratio: string)}
   {#if media.clip}
     {@const clip = media.clip}
     <InlineFilm {clip} label={watchLabel} title={heading} {edit}>
@@ -216,7 +229,7 @@
           clip={up ? null : clip}
           srcset={srcsetOf(media.still)}
           sizes={frameSizes}
-          focus={ownFocus}
+          focus={focusOf(media.still)}
           {ratio}
           {pending}
           priority
@@ -232,7 +245,7 @@
       image={media.still}
       srcset={srcsetOf(media.still)}
       sizes={frameSizes}
-      focus={ownFocus}
+      focus={focusOf(media.still)}
       {ratio}
       {pending}
       priority
@@ -252,7 +265,7 @@
           clip={settled.clip}
           srcset={srcsetOf(settled.still)}
           sizes="100vw"
-          focus={ownFocus}
+          focus={focusOf(settled.still)}
           priority
           {alt}
         />
@@ -292,7 +305,7 @@
   <HeroPoster
     still={settled.still}
     srcset={srcsetOf(settled.still)}
-    focus={ownFocus}
+    focus={focusOf(settled.still)}
     clip={settled.clip}
     reserve={(previewing || heroComing) && mode !== 'none'}
     {alt}
@@ -335,7 +348,7 @@
       </div>
     {/if}
   {:then preview}
-    {@const media = pick(preview)}
+    {@const media = heroMedia(content, preview, context)}
     {#if media.still || media.clip}
       <div class="hero-statement__media hero__enter-m">
         {@render frame(media, false, 'var(--_ratio)')}
@@ -345,18 +358,8 @@
 {/if}
 
 <style>
-  /* ── the facts line: small, in the soft ink, its figures lined up ──────── */
-  .hero__facts {
-    margin: 0;
-    font-family: var(--lp-font-body);
-    font-size: var(--lp-size-small);
-    line-height: var(--lp-leading-body);
-    font-variant-numeric: tabular-nums;
-    color: var(--lp-ink-soft);
-    text-wrap: balance;
-  }
-
-  .hero__lede:has(> :global(.lp-text)) > .hero__facts {
+  /* ── the facts line (`FactsLine`), a stack below the lede's words ───────── */
+  .hero__lede:has(> :global(.lp-text)) > :global(.hero__facts) {
     margin-block-start: var(--lp-stack);
   }
 
@@ -384,6 +387,7 @@
       align-items: end;
     }
 
+    .hero-statement > .hero__logo,
     .hero-statement > .hero__eyebrow,
     .hero-statement > .hero__headline {
       grid-column: 1 / -1;
@@ -410,8 +414,9 @@
     }
   }
 
-  /* Bold's media is full-bleed and meets the next band. */
-  :global(.lp[data-lp-style='bold']) :is(.hero-statement__media, .hero-centered__media) {
+  /* Bold's statement picture is full-bleed and meets the next band. The
+     centred hero's stays framed inside the page (Codex-61zsk.73). */
+  :global(.lp[data-lp-style='bold']) .hero-statement__media {
     grid-column: bleed;
     margin-block-end: calc(-1 * var(--lp-pad));
   }
@@ -567,9 +572,21 @@
     max-inline-size: calc(var(--lp-measure-lead) * var(--lp-measure-unit));
   }
 
+  /* The picture supports the words rather than outweighing them
+     (Codex-61zsk.73): framed under them, centred, as wide as the page's
+     reading measure, so it is set in the body's face and size, as a
+     paragraph is, to count its `0`s (58 to 62, by type). A phone's column
+     is narrower than that, so there it fills the column, inside the
+     gutters. */
   .hero-centered__media {
     --_ratio: 4 / 3;
+    --lp-measure-unit: var(--lp-zero-body);
+    justify-self: center;
     inline-size: 100%;
+    max-inline-size: calc(var(--lp-measure) * var(--lp-measure-unit));
+    font-family: var(--lp-font-body);
+    font-size: var(--lp-size-body);
+    font-weight: var(--lp-weight-body);
   }
 
   /* A centred line across a wide band steps down a little; a phone keeps
@@ -580,7 +597,7 @@
     }
 
     .hero-centered__media {
-      --_ratio: 16 / 7;
+      --_ratio: 3 / 2;
     }
   }
 

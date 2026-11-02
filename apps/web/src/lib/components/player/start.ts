@@ -27,11 +27,21 @@ export function playNow(media: HTMLMediaElement): Promise<void> {
   }
 }
 
+/**
+ * What a failed `play()` was, by its name alone (`NotAllowedError`,
+ * `AbortError`): all a log may carry, never its message.
+ */
+export function playErrorName(error: unknown): string {
+  return typeof error === 'object' &&
+    error !== null &&
+    'name' in error &&
+    typeof error.name === 'string'
+    ? error.name
+    : 'unknown';
+}
+
 const refused = (error: unknown): boolean =>
-  typeof error === 'object' &&
-  error !== null &&
-  'name' in error &&
-  error.name === 'NotAllowedError';
+  playErrorName(error) === 'NotAllowedError';
 
 async function attempt(play: Promise<void>): Promise<Attempt> {
   try {

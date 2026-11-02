@@ -169,7 +169,7 @@
       .pricing[data-layout='cards'] > .pricing__head,
       .problem[data-layout='list'] > .problem__head
     ):has(> .lp-text)
-    > :not(.lp-heading, .lp-text) {
+    > :not(.lp-heading, .lp-text, .lp-facts) {
     grid-column: 1 / -1;
   }
 
@@ -184,8 +184,10 @@
       .tm:not([data-layout='quote']) > .tm__head,
       .pricing[data-layout='cards'] > .pricing__head,
       .problem[data-layout='list'] > .problem__head
-    )
-    > .lp-text {
+    ):has(> .lp-text)
+    > :is(.lp-text, .lp-facts) {
+    /* A facts line sits under the lead; a head with no lead has no second
+       column for it to sit in, hence the `:has()` (Codex-61zsk.73). */
     grid-column: 2;
   }
 }

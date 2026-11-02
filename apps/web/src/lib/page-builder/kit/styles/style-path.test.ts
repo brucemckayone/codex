@@ -75,6 +75,26 @@ describe('Path’s stops sit on their headings (03 X24)', () => {
     );
   });
 
+  // The org's logo heads the hero's words (Codex-61zsk.73); a stop that
+  // left it out sat a logo's box and a stack gap above the headline.
+  it('counts the org’s logo above the hero’s headline, as the kit sizes its box', () => {
+    const heroes = onHeadings.filter(({ rule }) =>
+      rule.selector.includes("[data-lp-type='hero']")
+    );
+    // Calibrated: the hero's own and the split hero's.
+    expect(heroes).toHaveLength(2);
+    const blind = heroes
+      .filter(({ value }) => !value.includes('var(--_path-logo, 0px)'))
+      .map(({ rule }) => rule.selector);
+    expect(blind).toEqual([]);
+    const logos = declared('--_path-logo');
+    expect(logos).toHaveLength(1);
+    expect(logos[0].rule.selector).toContain(
+      ".lp-section[data-lp-type='hero']:has(.hero__logo)"
+    );
+    expect(logos[0].value).toBe('calc(var(--lp-logo-box) + var(--lp-stack))');
+  });
+
   it('sets the closing band’s target below the band’s own padding, on the ask’s line', () => {
     const band = onHeadings.filter(({ rule }) =>
       rule.selector.includes(".cta[data-layout='band']")

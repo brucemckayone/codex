@@ -41,13 +41,21 @@
     resolveStyle,
     SIMPLE_SECTIONS,
   } from '$lib/page-builder/kit';
+  import { settled } from '$lib/page-builder/kit/blocks/hero/settled.svelte';
   import { drawsIncluded } from '$lib/page-builder/kit/blocks/pricing/included';
   import { courseFacts } from '$lib/page-builder/kit/model/facts';
+  import {
+    placeStillFocus,
+    readStillFocus,
+    STILL_FOCUS_KEY,
+    stillCrops,
+    stillFocusFor,
+  } from '$lib/page-builder/kit/model/still-focus';
   import { deriveOfferPaths } from '$lib/page-builder/offer-paths';
   import type { OfferChoices } from './offer-field';
   import { orgGrounds, orgShader } from '$lib/page-builder/org-grounds';
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
-  import { isImageRef } from '$lib/page-builder/page-images';
+  import { isImageRef, withFocus } from '$lib/page-builder/page-images';
   import { pageGrounds } from '$lib/page-builder/render/brand-overrides';
   import type { JourneySalesContext } from '$lib/page-builder/render/types';
   import * as m from '$paraglide/messages';
@@ -146,6 +154,14 @@
     };
   });
 
+  // Who may open Brand, where an org with no moving background is pointed
+  // (Codex-61zsk.73): the role the studio layout already resolved, the one
+  // Brand's own guard reads (`studio/brand/+page.server.ts`).
+  const canEditBrand = $derived.by(() => {
+    const role: unknown = appPage.data.userRole;
+    return role === 'admin' || role === 'owner';
+  });
+
   /** A hidden section is not on the page, so it has no neighbour to step back from. */
   function resolvedIn(target: KitPage) {
     return resolveSections(target, drawn).find((s) => s.id === section.id);
@@ -226,6 +242,22 @@
         : field
     )
   );
+  // The course still the section draws, read as its block reads it from the
+  // streamed preview, so the point is placed on the picture the canvas shows
+  // (Codex-61zsk.73). Offered under the field the definition names, when it
+  // is on screen, or in a group of its own; not at all with no still.
+  const stillFocus = $derived.by(() => {
+    const spec = definition.stillFocus;
+    if (!spec) return null;
+    const still = spec.still(section.props, settled(context.sellPreview), context);
+    if (!still) return null;
+    return {
+      still,
+      under: fields.some((field) => field.key === spec.under) ? spec.under : undefined,
+      crops: stillCrops(spec.focalLayouts, layout, style),
+      point: stillFocusFor(readStillFocus(valueOf(STILL_FOCUS_KEY)), still),
+    };
+  });
   // The entry this layout draws larger than the rest, its row tagged "Leads"
   // (Codex-61zsk.58); the definition knows, nothing is stored.
   const leading = $derived(definition.leadingItem?.(section.props, layout, context) ?? null);
@@ -265,6 +297,16 @@
     pageBuilder.updateMeta('sections', sections);
   }
 </script>
+
+<!-- A course still's point is kept with the section, with the still it was set on. -->
+{#snippet stillControl(target: NonNullable<typeof stillFocus>)}
+  <FocalPointField
+    still={target.still}
+    focus={target.point}
+    crops={target.crops}
+    onChange={(next) => writeProp(STILL_FOCUS_KEY, placeStillFocus(target.still, next))}
+  />
+{/snippet}
 
 <div class="section-inspector" data-type={section.type}>
   <header class="section-inspector__head">
@@ -337,6 +379,8 @@
         chosen={section.design?.scheme !== undefined}
         onChoose={(next) => pageBuilder.setSectionStyle(section.id, { scheme: next })}
         onReset={() => pageBuilder.setSectionStyle(section.id, { scheme: undefined })}
+        orgShader={drawn.orgShader}
+        {canEditBrand}
       />
       {#if joinNote}
         <p class="section-inspector__hint" data-note="join">{joinNote}</p>
@@ -363,11 +407,12 @@
         labelledby="{id}-background"
       />
       {#if isImageRef(background)}
+        {@const image = background}
         <FocalPointField
-          image={background}
+          {image}
           mediaBaseUrl={context.mediaBaseUrl}
           crops={BACKGROUND_CROPS}
-          onChange={(next) => writeProp(BACKGROUND.key, next)}
+          onChange={(next) => writeProp(BACKGROUND.key, withFocus(image, next))}
         />
       {/if}
     </div>
@@ -406,6 +451,9 @@
             leading={field.key === 'items' ? leading : null}
             {offerPaths}
           />
+          {#if stillFocus && field.key === stillFocus.under}
+            {@render stillControl(stillFocus)}
+          {/if}
         {/each}
         {#if included}
           <IncludedField
@@ -416,6 +464,15 @@
           />
         {/if}
       </div>
+    </section>
+  {/if}
+
+  {#if stillFocus && !stillFocus.under}
+    <section class="section-inspector__group" aria-labelledby="{id}-still" data-control="still-focus">
+      <h3 class="section-inspector__group-title" id="{id}-still">
+        {m.studio_page_editor_focus_still_title()}
+      </h3>
+      {@render stillControl(stillFocus)}
     </section>
   {/if}
 
