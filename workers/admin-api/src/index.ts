@@ -1093,15 +1093,11 @@ app.post(
       body: supportToldAnotherWaySchema,
     },
     handler: async (ctx) => {
-      const { result, level } = await ctx.services.support.markToldAnotherWay(
+      return await ctx.services.support.markToldAnotherWay(
         ctx.input.params.noticeId,
         ctx.input.body,
         ctx.user.id
       );
-      // Not needed for correctness (a date is 30 days off, and the cache
-      // re-reads hourly while a rise waits); it shows the date at once.
-      ctx.services.feeConfig.invalidateLevel(level);
-      return result;
     },
   })
 );

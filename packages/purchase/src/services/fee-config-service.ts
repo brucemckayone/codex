@@ -827,7 +827,7 @@ export class FeeConfigService extends BaseService {
   // ── Cache ───────────────────────────────────────────────────────────────
 
   /**
-   * Make a level's next read fresh. Every write here calls it; admin-api's
+   * Make a level's next read fresh. Every write here calls it; support's
    * "told another way" calls it too, since a mark can date a rise (§1.6).
    */
   invalidateLevel(level: FeeLevel): void {

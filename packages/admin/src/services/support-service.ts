@@ -122,6 +122,7 @@ import {
   versionInForce,
 } from '@codex/payments';
 import {
+  type FeeConfigService,
   type PurchaseService,
   type RestoredRefundAccess,
   STANDING_REFUND_STATUSES,
@@ -288,6 +289,8 @@ export interface SupportServiceConfig extends ServiceConfig {
     PurchaseService,
     'restoreAfterFailedRefund' | 'failedRefundRestoreBlock'
   >;
+  /** Makes a level's fee read fresh after "told another way" dates a rise. */
+  feeConfig: Pick<FeeConfigService, 'invalidateLevel'>;
 }
 
 type Tx = Parameters<Parameters<DatabaseClient['transaction']>[0]>[0];
@@ -513,11 +516,13 @@ interface SourceView {
 export class SupportService extends BaseService {
   private readonly stripe: Stripe;
   private readonly purchase: SupportServiceConfig['purchase'];
+  private readonly feeConfig: SupportServiceConfig['feeConfig'];
 
   constructor(config: SupportServiceConfig) {
     super(config);
     this.stripe = config.stripe;
     this.purchase = config.purchase;
+    this.feeConfig = config.feeConfig;
   }
 
   // ==========================================================================
@@ -3060,8 +3065,8 @@ export class SupportService extends BaseService {
    * phone (§1.6). One transaction: lock the change, then the notice (the
    * order the fee writes and the daily run take them in), refuse with a 409
    * when there is nothing to mark, record the mark, and date the rise when
-   * this was the last person on the list. The caller invalidates the
-   * level's fee cache, so the date shows at once.
+   * this was the last person on the list. After the commit it invalidates
+   * the level's fee cache, so the date shows at once.
    *
    * A second press after a lost answer meets FEE_NOTICE_ALREADY_TOLD, and the
    * page reads that as done.
@@ -3071,7 +3076,7 @@ export class SupportService extends BaseService {
     input: SupportToldAnotherWayInput,
     toldByUserId: string,
     now: Date = new Date()
-  ): Promise<{ result: ToldAnotherWayResult; level: FeeLevel }> {
+  ): Promise<ToldAnotherWayResult> {
     try {
       const [found] = await this.db
         .select({ changeId: feeChangeNotices.changeId })
@@ -3086,7 +3091,7 @@ export class SupportService extends BaseService {
       if (!found) {
         throw new NotFoundError('No fee notice with this id', { noticeId });
       }
-      return await this.db.transaction(async (tx) => {
+      const { result, level } = await this.db.transaction(async (tx) => {
         const [change] = await tx
           .select()
           .from(feeChanges)
@@ -3160,24 +3165,26 @@ export class SupportService extends BaseService {
           toldByUserId,
           dated: dating.dated,
         });
-        return {
-          result: {
-            notice: {
-              noticeId,
-              state: 'told_another_way',
-              toldAt: now.toISOString(),
-              toldBy: toldByUserId,
-              note: input.note,
-            },
-            change: {
-              changeId: change.id,
-              effectiveFrom: toIso(dating.effectiveFrom),
-              waitingFor: dating.dated ? 0 : dating.waitingFor,
-            },
+        const marked: ToldAnotherWayResult = {
+          notice: {
+            noticeId,
+            state: 'told_another_way',
+            toldAt: now.toISOString(),
+            toldBy: toldByUserId,
+            note: input.note,
           },
-          level: feeLevelOfChange(change),
+          change: {
+            changeId: change.id,
+            effectiveFrom: toIso(dating.effectiveFrom),
+            waitingFor: dating.dated ? 0 : dating.waitingFor,
+          },
         };
+        return { result: marked, level: feeLevelOfChange(change) };
       });
+      // Not needed for correctness (a date is 30 days off, and the cache
+      // re-reads hourly while a rise waits); it shows the date at once.
+      this.feeConfig.invalidateLevel(level);
+      return result;
     } catch (error) {
       this.handleError(error, 'markToldAnotherWay');
     }

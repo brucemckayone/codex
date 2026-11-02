@@ -30,7 +30,7 @@ import {
   teardownTestDatabase,
 } from '@codex/test-utils';
 import { eq, inArray, sql } from 'drizzle-orm';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { SupportService } from '../services/support-service';
 
 async function failureOf(promise: Promise<unknown>): Promise<ServiceError> {
@@ -49,6 +49,8 @@ describe('SupportService fee notices (real DB)', () => {
   let db: Database;
   let service: SupportService;
   let supportId: string;
+  /** The fee cache: a mark that can date a rise makes its level's read fresh. */
+  const invalidateLevel = vi.fn();
   const orgIds: string[] = [];
   const userIds: string[] = [];
 
@@ -66,6 +68,7 @@ describe('SupportService fee notices (real DB)', () => {
         { db, environment: 'test', ...createTestMoneyDeps() },
         stripe
       ),
+      feeConfig: { invalidateLevel },
     });
     [supportId] = (await seedTestUsers(db, 1)) as [string];
     userIds.push(supportId);
@@ -360,7 +363,7 @@ describe('SupportService fee notices (real DB)', () => {
     expect(counts.feeNotices).toBeGreaterThanOrEqual(4);
   });
 
-  it('marking the last person told another way dates the rise from the mark, in the same answer', async () => {
+  it('marking the last person told another way dates the rise from the mark, in the same answer, and makes the level’s fee read fresh', async () => {
     const { organizationId, changeId } = await rise();
     const [kit, lou] = await people(2);
     await notice(changeId, organizationId, kit as string, SENT(FIRST_RUN));
@@ -371,7 +374,8 @@ describe('SupportService fee notices (real DB)', () => {
       FAILED
     );
 
-    const { result, level } = await service.markToldAnotherWay(
+    invalidateLevel.mockClear();
+    const result = await service.markToldAnotherWay(
       louNotice,
       { note: 'Phoned Lou' },
       supportId,
@@ -395,7 +399,9 @@ describe('SupportService fee notices (real DB)', () => {
     expect(feeRiseStartAfter(NOW).toISOString()).toBe(
       '2026-12-05T00:00:00.000Z'
     );
-    expect(level).toEqual({ scope: 'org', organizationId });
+    expect(invalidateLevel.mock.calls).toEqual([
+      [{ scope: 'org', organizationId }],
+    ]);
     const [row] = await db
       .select()
       .from(feeChangeNotices)
@@ -419,7 +425,7 @@ describe('SupportService fee notices (real DB)', () => {
     );
     await notice(changeId, organizationId, ned as string, FAILED);
 
-    const { result } = await service.markToldAnotherWay(
+    const result = await service.markToldAnotherWay(
       maxNotice,
       { note: 'Emailed from my own address' },
       supportId,
@@ -432,7 +438,7 @@ describe('SupportService fee notices (real DB)', () => {
     });
   });
 
-  it('refuses with 409 a second mark, a rise that is off, and someone set aside; 404 for a follow-up or no notice', async () => {
+  it('refuses with 409 a second mark, a rise that is off, and someone set aside; 404 for a follow-up or no notice; a refusal leaves the fee cache alone', async () => {
     const { organizationId, changeId } = await rise();
     const [oz, pat, quin] = await people(3);
     const ozNotice = await notice(
@@ -451,6 +457,7 @@ describe('SupportService fee notices (real DB)', () => {
     });
 
     await service.markToldAnotherWay(ozNotice, { note: 'Phoned' }, supportId);
+    invalidateLevel.mockClear();
     const again = await failureOf(
       service.markToldAnotherWay(ozNotice, { note: 'Phoned' }, supportId)
     );
@@ -502,6 +509,7 @@ describe('SupportService fee notices (real DB)', () => {
       );
       expect(missing.statusCode).toBe(404);
     }
+    expect(invalidateLevel).not.toHaveBeenCalled();
   });
 
   it('two marks of one person at once: the second waits for the first, then answers 409, never a second mark', async () => {
