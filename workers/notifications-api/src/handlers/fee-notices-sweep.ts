@@ -659,10 +659,35 @@ async function record(
     .where(eq(feeChangeNotices.id, notice.id));
 }
 
+interface Recipient {
+  name: string;
+  email: string;
+  deletedAt: Date | null;
+}
+
+/** Every claimed notice's person, in one read. */
+async function recipientsOf(
+  ctx: SweepContext,
+  claimed: Claimed[]
+): Promise<Map<string, Recipient>> {
+  const ids = [...new Set(claimed.map((n) => n.userId))];
+  const rows = await ctx.db
+    .select({
+      id: users.id,
+      name: users.name,
+      email: users.email,
+      deletedAt: users.deletedAt,
+    })
+    .from(users)
+    .where(inArray(users.id, ids));
+  return new Map(rows.map(({ id, ...person }) => [id, person]));
+}
+
 async function sendOne(
   ctx: SweepContext,
   notice: Claimed,
-  changes: Map<string, FeeChangeRow>
+  changes: Map<string, FeeChangeRow>,
+  people: Map<string, Recipient>
 ): Promise<void> {
   const change = changes.get(notice.changeId);
   if (!change) return;
@@ -678,15 +703,7 @@ async function sendOne(
     });
     return;
   }
-  const [person] = await ctx.db
-    .select({
-      name: users.name,
-      email: users.email,
-      deletedAt: users.deletedAt,
-    })
-    .from(users)
-    .where(eq(users.id, notice.userId))
-    .limit(1);
+  const person = people.get(notice.userId);
   const email = person && person.deletedAt === null ? person.email : null;
 
   if (notice.state === 'unknown' && email) {
@@ -822,11 +839,12 @@ async function sendDue(ctx: SweepContext): Promise<void> {
     .from(feeChanges)
     .where(inArray(feeChanges.id, changeIds));
   const changes = new Map(rows.map((c) => [c.id, c]));
+  const people = await recipientsOf(ctx, claimed);
   for (let i = 0; i < claimed.length; i += SEND_CONCURRENCY) {
     await Promise.all(
       claimed.slice(i, i + SEND_CONCURRENCY).map(async (notice) => {
         try {
-          await sendOne(ctx, notice, changes);
+          await sendOne(ctx, notice, changes, people);
         } catch (error) {
           ctx.result.errors += 1;
           ctx.obs.error('fee step: one notice failed', {

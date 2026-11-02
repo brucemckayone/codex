@@ -464,4 +464,47 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
     });
     expect((await changeOf(changeId))?.effectiveFrom).toBeNull();
   });
+
+  it('reads every recipient in one query, however many it sends', async () => {
+    const ada = await person('Ada Moss');
+    const ben = await person('Ben Cole');
+    const cy = await person('Cy Park');
+    const changeId = await rise(await organisation(ada.id, ben.id, cy.id));
+    // The client, counting reads of people's addresses.
+    let addressReads = 0;
+    const counting = new Proxy(db, {
+      get(target, prop) {
+        if (prop === 'select') {
+          return (fields?: Record<string, unknown>) => {
+            if (fields?.email === users.email) addressReads += 1;
+            return (target.select as (f?: unknown) => unknown).call(
+              target,
+              fields
+            );
+          };
+        }
+        const value = Reflect.get(target, prop, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const mailer = mailerAnswering();
+
+    const result = await runFeeNoticesSweep({
+      db: counting,
+      obs,
+      environment: 'development',
+      workerSecret: 'unused',
+      notificationsUrl: 'http://unused.test',
+      now: NOV_3,
+      mailer,
+      templateExists: async () => true,
+      onlyChanges: [changeId],
+    });
+
+    expect(result).toMatchObject({ listed: 3, sent: 3 });
+    expect(mailer.mock.calls.map(([params]) => params.to).sort()).toEqual(
+      [ada.email, ben.email, cy.email].sort()
+    );
+    expect(addressReads).toBe(1);
+  });
 });
