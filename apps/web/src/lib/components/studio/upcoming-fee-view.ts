@@ -13,7 +13,10 @@
  *   that it can only move later (owner decision Q1).
  * - N5 a mixed change (F1): one sentence, one date for every part.
  * - N6 two changes: one line per change, each with its own date.
- * - N7 a smaller rise (F2): the figure first told, struck through.
+ * - N7 a smaller rise (F2): the figure first told, struck through, and when
+ *   its own short email went.
+ * - N8 a bigger rise replacing a waiting one: the rise it replaces, and
+ *   when the reader was told about that one.
  * - N9 a minimum transfer switched on (F9).
  *
  * Seeing the note isn't being told: a person whose email failed sees it too,
@@ -177,6 +180,23 @@ function capitalise(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
+/**
+ * N8: the rise this one replaces, as the reader was told it: its figure and
+ * when they were told. Null when they were never told it (`announcedAt`) or
+ * it didn't move a value this note names; the note then reads as plain.
+ */
+function replacesWords(
+  item: UpcomingFeeChange
+): { figure: string; date: string } | null {
+  const toldAt = item.replaces?.announcedAt;
+  const line = item.lines.find((l) => l.replacesFigure !== null);
+  if (!toldAt || !line || line.replacesFigure === null) return null;
+  return {
+    figure: formatFeeValue(line.value, line.replacesFigure),
+    date: formatToldDate(toldAt),
+  };
+}
+
 /** The first figure a smaller rise replaced, as first told (N7). */
 function replacedFigure(item: UpcomingFeeChange): string | null {
   const line = item.lines.find((l) => l.replaced !== null);
@@ -220,17 +240,13 @@ function singleMeta(item: UpcomingFeeChange, parts: number): FeeNoteMeta {
     ? m.fee_note_meta_emailed({ date: formatToldDate(item.announcedAt) })
     : null;
   const withEmailed = (text: string) => (emailed ? `${text} ${emailed}` : text);
-  // N8, a bigger rise replacing a waiting one, draws "This replaces the rise
-  // to 12% we told you about on 3 November, so it has its own 30 days'
-  // notice." The server doesn't link the replaced change yet, so it reads as
-  // N2 below; its branch goes here when that field lands.
   const was = item.kind === 'smaller' ? replacedFigure(item) : null;
   if (was) {
-    // N7 draws the smaller email's own date. Until the server sends it, its
-    // own key says the first announcement's date.
-    const toldSmaller = item.announcedAt
-      ? m.fee_note_meta_emailed_smaller({
-          date: formatToldDate(item.announcedAt),
+    // N7: when the smaller rise's own email went. Until it is accepted
+    // there is nothing to say, so the line leaves it out.
+    const toldSmaller = item.smallerToldAt
+      ? m.fee_note_meta_emailed_it({
+          date: formatToldDate(item.smallerToldAt),
         })
       : null;
     const text = m.fee_note_meta_smaller({ was: WAS_MARK });
@@ -238,6 +254,14 @@ function singleMeta(item: UpcomingFeeChange, parts: number): FeeNoteMeta {
       text: toldSmaller ? `${text} ${toldSmaller}` : text,
       was,
     };
+  }
+  const replaces = replacesWords(item);
+  if (replaces) {
+    const text = m.fee_note_meta_replaces(replaces);
+    const toldAt = item.announcedAt
+      ? m.fee_note_meta_emailed_it({ date: formatToldDate(item.announcedAt) })
+      : null;
+    return { text: toldAt ? `${text} ${toldAt}` : text, was: null };
   }
   const transferTo = transferOnTo(item);
   if (transferTo) {

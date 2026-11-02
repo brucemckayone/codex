@@ -19,6 +19,7 @@ const line = (over: Partial<UpcomingFeeLine> = {}): UpcomingFeeLine => ({
   from: 1000,
   to: 1200,
   replaced: null,
+  replacesFigure: null,
   ...over,
 });
 
@@ -30,6 +31,8 @@ const change = (over: Partial<UpcomingFeeChange> = {}): UpcomingFeeChange => ({
   effectiveFrom: '2026-12-05T00:00:00.000Z',
   earliestFrom: '2026-12-05T00:00:00.000Z',
   announcedAt: '2026-11-03T08:00:12.000Z',
+  smallerToldAt: null,
+  replaces: null,
   lines: [line()],
   ...over,
 });
@@ -137,9 +140,13 @@ describe('feeNoteView', () => {
     });
   });
 
-  test('N7 a smaller rise keeps the date and names the figure first told', () => {
+  test('N7 a smaller rise keeps the date, names the figure first told, and when its email went', () => {
     const view = single([
-      change({ kind: 'smaller', lines: [line({ to: 1100, replaced: 1200 })] }),
+      change({
+        kind: 'smaller',
+        smallerToldAt: '2026-11-06T08:00:00.000Z',
+        lines: [line({ to: 1100, replaced: 1200 })],
+      }),
     ]);
     expect(view.lead).toBe(
       "From 5 December 2026, Codex's fee rises from 10% to 11% of each sale."
@@ -147,7 +154,17 @@ describe('feeNoteView', () => {
     expect(view.meta.was).toBe('12%');
     expect(view.meta.text.split(WAS_MARK)).toEqual([
       "That's less than the ",
-      " we first told you about, and the date hasn't changed. We emailed you about this on 3 November.",
+      " we first told you about, and the date hasn't changed. We emailed you about it on 6 November.",
+    ]);
+  });
+
+  test('N7 before its short email is accepted: no "We emailed you" yet', () => {
+    const view = single([
+      change({ kind: 'smaller', lines: [line({ to: 1100, replaced: 1200 })] }),
+    ]);
+    expect(view.meta.text.split(WAS_MARK)).toEqual([
+      "That's less than the ",
+      " we first told you about, and the date hasn't changed.",
     ]);
   });
 
@@ -162,6 +179,29 @@ describe('feeNoteView', () => {
     ]);
     expect(view.lead).toBe(
       "Codex's fee rises from 10% to 14% of each sale, from 7 December 2026 at the earliest."
+    );
+  });
+
+  const bigger = (toldAt: string | null) =>
+    change({
+      changeId: 'c2',
+      effectiveFrom: null,
+      earliestFrom: '2026-12-07T00:00:00.000Z',
+      announcedAt: '2026-11-06T08:00:00.000Z',
+      replaces: { changeId: 'c1', announcedAt: toldAt },
+      lines: [line({ to: 1400, replacesFigure: 1200 })],
+    });
+
+  test('N8 names the rise it replaces and when we told them about it', () => {
+    expect(single([bigger('2026-11-03T08:00:12.000Z')]).meta).toEqual({
+      text: "This replaces the rise to 12% we told you about on 3 November, so it has its own 30 days' notice. Sales before it keep today's fee. We emailed you about it on 6 November.",
+      was: null,
+    });
+  });
+
+  test('N8 for someone never told the replaced rise: the plain words', () => {
+    expect(single([bigger(null)]).meta.text).toBe(
+      "The date is set once everyone the rise affects has been told, so it can move later but never earlier. Sales before it keep today's fee. We emailed you about this on 6 November."
     );
   });
 

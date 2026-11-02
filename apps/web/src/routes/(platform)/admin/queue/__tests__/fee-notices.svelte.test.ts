@@ -216,6 +216,36 @@ describe('the tab', () => {
     ).toBe(m.support_queue_fees_joined_later());
   });
 
+  test('F7 a joiner says when they joined', () => {
+    mountAt('/admin/queue?tab=fees');
+    land(
+      [DATED_CARD],
+      [feeNotice({ onList: false, joinedAt: '2026-11-12T09:30:00.000Z' })]
+    );
+    expect(
+      document.querySelector('[data-testid="fee-notice-row"]')?.textContent
+    ).toContain("joined 12 Nov, so this doesn't hold the date");
+  });
+
+  test('F2 the card counts the emails by day', () => {
+    mountAt('/admin/queue?tab=fees');
+    land([
+      feeChangeCard({
+        told: { byEmail: 411, anotherWay: 0 },
+        toldByDay: [
+          { londonDate: '2026-11-03', byEmail: 410, anotherWay: 0 },
+          { londonDate: '2026-11-04', byEmail: 1, anotherWay: 0 },
+        ],
+        waitingFor: 1,
+      }),
+    ]);
+    expect(
+      document
+        .querySelector('[data-testid="fee-change-card"]')
+        ?.textContent?.replace(/\s+/g, ' ')
+    ).toContain('411 of 412 410 by email on 3 Nov, 1 by email on 4 Nov');
+  });
+
   test('F8 a dated rise with nobody waiting: the card stays, the list says so', () => {
     mountAt('/admin/queue?tab=fees');
     land([DATED_CARD], []);
@@ -342,5 +372,31 @@ describe('told another way', () => {
       m.support_queue_fees_refused_cancelled_lead({ time: '10:40' })
     );
     expect(feeNoticesSlot().refresh).toHaveBeenCalledTimes(1);
+  });
+
+  test('F6 already marked by someone else: the notice names them', async () => {
+    markToldAnotherWay.mockResolvedValue(
+      failure({
+        status: 409,
+        code: 'CONFLICT',
+        detailsCode: 'FEE_NOTICE_ALREADY_TOLD',
+        message: 'This person has already been told.',
+        state: 'told_another_way',
+        toldAt: '2026-11-04T10:41:00.000Z',
+        toldByName: 'Sam Ortiz',
+      })
+    );
+    mountAt('/admin/queue?tab=fees');
+    land([LAST_CARD], [feeNotice()]);
+    openMark();
+    typeNote('Phoned Jonah.');
+    document
+      .querySelector<HTMLButtonElement>('[data-testid="settle-submit"]')
+      ?.click();
+    await answered();
+    expect(dialog()).toBeNull();
+    expect(notice()?.textContent).toContain(
+      'Jonah was already marked as told by Sam Ortiz at 10:41.'
+    );
   });
 });

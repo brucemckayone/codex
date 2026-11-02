@@ -47,6 +47,8 @@ const RISE: UpcomingFeeChange = {
   effectiveFrom: '2026-12-05T00:00:00.000Z',
   earliestFrom: '2026-12-05T00:00:00.000Z',
   announcedAt: '2026-11-03T08:00:12.000Z',
+  smallerToldAt: null,
+  replaces: null,
   lines: [
     {
       organizationId: ORG,
@@ -57,6 +59,7 @@ const RISE: UpcomingFeeChange = {
       from: 1000,
       to: 1200,
       replaced: null,
+      replacesFigure: null,
     },
   ],
 };
@@ -125,6 +128,7 @@ describe('UpcomingFeeNote', () => {
       {
         ...RISE,
         kind: 'smaller',
+        smallerToldAt: '2026-11-06T08:00:00.000Z',
         lines: [{ ...RISE.lines[0], to: 1100, replaced: 1200 }],
       },
     ];
@@ -133,7 +137,26 @@ describe('UpcomingFeeNote', () => {
     const meta = note()?.querySelector('.fee-note__meta');
     expect(meta?.querySelector('.fee-note__was')?.textContent).toBe('12%');
     expect(meta?.textContent).toBe(
-      "That's less than the 12% we first told you about, and the date hasn't changed. We emailed you about this on 3 November."
+      "That's less than the 12% we first told you about, and the date hasn't changed. We emailed you about it on 6 November."
+    );
+  });
+
+  test('N8 a bigger rise says which rise it replaces', () => {
+    fees.slot.current = [
+      {
+        ...RISE,
+        changeId: 'c2',
+        effectiveFrom: null,
+        earliestFrom: '2026-12-07T00:00:00.000Z',
+        announcedAt: '2026-11-06T08:00:00.000Z',
+        replaces: { changeId: 'c1', announcedAt: '2026-11-03T08:00:12.000Z' },
+        lines: [{ ...RISE.lines[0], to: 1400, replacesFigure: 1200 }],
+      },
+    ];
+    fees.slot.loading = false;
+    render({ organizationId: ORG });
+    expect(note()?.querySelector('.fee-note__meta')?.textContent).toBe(
+      "This replaces the rise to 12% we told you about on 3 November, so it has its own 30 days' notice. Sales before it keep today's fee. We emailed you about it on 6 November."
     );
   });
 

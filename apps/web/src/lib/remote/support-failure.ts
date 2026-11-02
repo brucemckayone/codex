@@ -54,6 +54,8 @@ export interface SupportCommandFailure {
   toldAt: string | null;
   /** `FEE_NOTICE_ALREADY_TOLD`: when their email went through (ISO). */
   acceptedAt: string | null;
+  /** `FEE_NOTICE_ALREADY_TOLD`: who marked them told, by name. */
+  toldByName: string | null;
 }
 
 function field<T extends 'string' | 'number'>(
@@ -89,6 +91,7 @@ export function toSupportFailure(error: unknown): SupportCommandFailure {
       state: field(details, 'state', 'string'),
       toldAt: field(details, 'toldAt', 'string'),
       acceptedAt: field(details, 'acceptedAt', 'string'),
+      toldByName: field(details, 'toldByName', 'string'),
     };
   }
   return {
@@ -108,5 +111,6 @@ export function toSupportFailure(error: unknown): SupportCommandFailure {
     state: null,
     toldAt: null,
     acceptedAt: null,
+    toldByName: null,
   };
 }
