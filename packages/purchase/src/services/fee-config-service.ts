@@ -73,6 +73,7 @@ import {
 import {
   BaseService,
   ConflictError,
+  InternalServiceError,
   NotFoundError,
   type ServiceConfig,
   ValidationError,
@@ -907,7 +908,7 @@ export class FeeConfigService extends BaseService {
           }
           case 'cancelled':
           case 'cut_below_today': {
-            if (!pending) throw new Error('unreachable: no waiting rise');
+            if (!pending) throw noWaitingRise(level, outcome);
             await voidPending(tx, pending.change.id, outcome, now);
             voidedChangeId = pending.change.id;
             auditChangeId = pending.change.id;
@@ -923,7 +924,7 @@ export class FeeConfigService extends BaseService {
           }
           case 'smaller':
           case 'same_as_waiting': {
-            if (!pending) throw new Error('unreachable: no waiting rise');
+            if (!pending) throw noWaitingRise(level, outcome);
             // Same change, so it keeps its list, its clock and its date.
             await tx
               .update(feeConfigVersions)
@@ -939,7 +940,7 @@ export class FeeConfigService extends BaseService {
             break;
           }
           case 'bigger': {
-            if (!pending) throw new Error('unreachable: no waiting rise');
+            if (!pending) throw noWaitingRise(level, outcome);
             await voidPending(tx, pending.change.id, 'replaced_by_bigger', now);
             voidedChangeId = pending.change.id;
             change = await insertChange(tx, level, 'rise', now, author, {
@@ -1248,6 +1249,18 @@ async function lowerLevelsNow(
   return (raw) => [platform, org, raw];
 }
 
+/**
+ * `classifyFeeWrite` answers cancelled, smaller or bigger only when given a
+ * waiting rise, so reaching one of those without it means the level's state
+ * and the classifier disagree. The write's transaction rolls back.
+ */
+function noWaitingRise(level: FeeLevel, outcome: string): InternalServiceError {
+  return new InternalServiceError('Fee write found no waiting rise', {
+    ...level,
+    outcome,
+  });
+}
+
 async function insertChange(
   tx: Tx,
   level: FeeLevel,
@@ -1269,7 +1282,12 @@ async function insertChange(
       createdAt: now,
     })
     .returning();
-  if (!row) throw new Error('fee change insert returned no row');
+  if (!row) {
+    throw new InternalServiceError('Fee change insert wrote no row', {
+      ...level,
+      kind,
+    });
+  }
   return row;
 }
 
