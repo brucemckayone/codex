@@ -42,7 +42,8 @@ const brand = vi.hoisted(() => ({
   /** How many times the shader has read them. */
   reads: 0,
 }));
-vi.mock('../shader-config', () => ({
+vi.mock('../shader-config', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../shader-config')>()),
   getShaderConfig: () => {
     brand.reads++;
     return brand.config;

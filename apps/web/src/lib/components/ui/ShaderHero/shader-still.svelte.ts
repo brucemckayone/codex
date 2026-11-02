@@ -36,8 +36,7 @@ class ShaderStillChannel {
   // after a newer copy started, or after a clear, is dropped, so an older
   // frame can never land over a newer one.
   #ticket = 0;
-  // The ticket of the encode under way, or 0.
-  #encoding = 0;
+  #encoding = false;
   #wanted = 0;
   #wake: (() => void) | null = null;
 
@@ -49,7 +48,7 @@ class ShaderStillChannel {
   /** A copy is being encoded (`toBlob` is asynchronous): drawing the frame
    *  again now would be a second full-viewport draw for the same copy. */
   get encoding(): boolean {
-    return this.#encoding !== 0;
+    return this.#encoding;
   }
 
   /** Some render paints the copy (`want`). Copying the frame again is a
@@ -81,14 +80,14 @@ class ShaderStillChannel {
   /** ShaderHero: encodes `copy` (a 2D canvas it has drawn the frame on). */
   take(copy: HTMLCanvasElement, theme: StillTheme): void {
     const ticket = ++this.#ticket;
-    this.#encoding = ticket;
+    this.#encoding = true;
     // A null blob (an encoder that cannot) leaves whatever is shown, and a
     // band with no still keeps its glow: the glow is the designed fallback,
     // so there is nothing to report.
     copy.toBlob(
       (blob) => {
         if (ticket !== this.#ticket) return;
-        this.#encoding = 0;
+        this.#encoding = false;
         if (blob) this.#replace({ url: URL.createObjectURL(blob), theme });
       },
       'image/webp',
@@ -99,7 +98,7 @@ class ShaderStillChannel {
   /** ShaderHero: the frame is gone (another shader, the studio left, unmounted). */
   clear(): void {
     this.#ticket++;
-    this.#encoding = 0;
+    this.#encoding = false;
     this.#replace(null);
   }
 

@@ -19,6 +19,7 @@
 -->
 <script lang="ts">
   import { CheckIcon } from '$lib/components/ui/Icon';
+  import { shaderStill } from '$lib/components/ui/ShaderHero/shader-still.svelte';
   import type { BrandTokenOverrides } from '$lib/page-builder';
   import {
     COLOUR_SCHEME_IDS,
@@ -26,7 +27,7 @@
     type PageStyleId,
     SCHEME_OPTIONS,
   } from '$lib/page-builder/kit';
-  import { atmosphereStill, wantStill } from '$lib/page-builder/kit/atmosphere-still';
+  import { atmosphereStill, paintsStill } from '$lib/page-builder/kit/atmosphere-still';
   import { brandOverridesToStyleAttr } from '$lib/page-builder/render/brand-overrides';
   import * as m from '$paraglide/messages';
 
@@ -75,7 +76,7 @@
   const brandStyle = $derived(brandOverridesToStyleAttr(brandOverrides));
   const still = $derived(atmosphereStill({ theme, orgShader, brandOverrides }));
   $effect(() => {
-    if (orgShader) return wantStill();
+    if (paintsStill({ theme, orgShader, brandOverrides })) return shaderStill.want();
   });
   const fullName = (id: ColourSchemeId) =>
     SCHEME_OPTIONS.find((option) => option.id === id)?.label ?? id;
@@ -86,6 +87,7 @@
     {#each COLOUR_SCHEME_IDS as id (id)}
       {@const isDefault = id === styleDefault}
       {@const moving = id === 'atmosphere'}
+      {@const tileStill = moving ? still : undefined}
       <button
         type="button"
         class="swatch"
@@ -102,10 +104,10 @@
           class="lp swatch__lp"
           data-lp-style={style}
           data-lp-theme={theme}
-          data-lp-shader-still={moving && still ? '' : undefined}
+          data-lp-shader-still={tileStill ? '' : undefined}
           data-org-brand={brandStyle ? '' : undefined}
           style={brandStyle}
-          style:--lp-shader-still={moving ? still : undefined}
+          style:--lp-shader-still={tileStill}
           aria-hidden="true"
         >
           <span class="lp-page swatch__page">

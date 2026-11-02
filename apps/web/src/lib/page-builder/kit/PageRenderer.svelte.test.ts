@@ -925,6 +925,34 @@ describe('PageRenderer', () => {
         app = null;
       }
     });
+
+    // Each copy is a full-viewport draw: a render that could never paint it
+    // does not ask the studio to keep one.
+    it('never asks for it without a Moving band, without a theme, or in the page’s own colours', async () => {
+      const page = samplePage('bold');
+      // Every band on the page's own ground: none is Moving.
+      const plain: KitPage = {
+        ...page,
+        sections: page.sections.map((s) => ({
+          ...s,
+          design: { scheme: 'base' as const },
+        })),
+      };
+      for (const props of [
+        { page: plain, theme: 'light' as const },
+        { page: movingHero() },
+        {
+          page: movingHero(),
+          theme: 'light' as const,
+          brandOverrides: { primaryColor: '#0D9488' },
+        },
+      ]) {
+        await render({ edit, orgShader: true, ...props });
+        expect(shaderStill.wanted, JSON.stringify(props)).toBe(false);
+        unmount(app);
+        app = null;
+      }
+    });
   });
 
   // Codex-61zsk.39: a creator who recommends a path other than the platform's

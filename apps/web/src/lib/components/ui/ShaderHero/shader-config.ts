@@ -842,6 +842,17 @@ function num(val: string | null, fallback: number): number {
 }
 
 /**
+ * Dark mode is signalled by a stylesheet-only sentinel set under the org
+ * brand's dark gate (org-brand.css). When dark, every shader read prefers
+ * the key's `--brand-*-dark` value so a dark-only hero effect activates.
+ */
+export function shaderIsDark(style: CSSStyleDeclaration | null): boolean {
+  return (
+    !!style && style.getPropertyValue('--brand-shader-is-dark').trim() === '1'
+  );
+}
+
+/**
  * Read shader configuration from CSS custom properties on the org layout element.
  * Returns a fully typed ShaderConfig with defaults for any missing values.
  */
@@ -852,12 +863,7 @@ export function getShaderConfig(
   const el = orgLayoutEl ?? document.querySelector('.org-layout');
   // Cache getComputedStyle once — avoids forced reflow on each property read
   const style = el ? getComputedStyle(el) : null;
-
-  // Dark mode is signalled by a stylesheet-only sentinel set under the org
-  // brand's dark gate (org-brand.css). When dark, every shader read prefers
-  // the key's `--brand-*-dark` value so a dark-only hero effect activates.
-  const isDark =
-    !!style && style.getPropertyValue('--brand-shader-is-dark').trim() === '1';
+  const isDark = shaderIsDark(style);
 
   const preset =
     presetOverride ??

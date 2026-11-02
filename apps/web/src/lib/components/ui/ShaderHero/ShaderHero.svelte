@@ -18,7 +18,7 @@
   import { onMount } from 'svelte';
   import { browser } from '$app/environment';
   import { destroyJFACache } from './jfa-sdf';
-  import { getShaderConfig, type ShaderPresetId } from './shader-config';
+  import { getShaderConfig, type ShaderPresetId, shaderIsDark } from './shader-config';
   import { loadRenderer } from './load-renderer';
   import type { ShaderRenderer, MouseState } from './renderer-types';
   import { captureStill, shaderStill } from './shader-still.svelte';
@@ -167,6 +167,7 @@
     applyStill = (next) => {
       const entering = next && !isStill;
       isStill = next;
+      watchBrand(isStill);
       // Out of the studio the shader moves on, so the copy is no longer its
       // frame; back in, the frame drawn on freezing is copied afresh.
       if (!isStill) clearStill();
@@ -286,13 +287,9 @@
     // What the copy was drawn from: the brand's shader settings and theme.
     let stillDrawnKey = '';
 
-    /** The sentinel the shader's own config reads (`org-brand.css`): the
-     *  theme whose colours it draws in. */
+    /** The theme whose colours it draws in, from the sentinel its config reads. */
     function drawsDark(): boolean {
-      return (
-        !!containerEl &&
-        getComputedStyle(containerEl).getPropertyValue('--brand-shader-is-dark').trim() === '1'
-      );
+      return shaderIsDark(containerEl ? getComputedStyle(containerEl) : null);
     }
 
     function copyStill() {
@@ -319,31 +316,38 @@
     // or to the site's theme settles, a copy of what the shader no longer
     // draws gives way to the glow. The frame is drawn again for a new copy
     // only while a render paints it: each is a full-viewport draw, and the
-    // brand editor, where most changes are made, paints none.
+    // brand editor, where most changes are made, paints none. Watched only
+    // while still: out of the studio there is no copy to keep.
     const STILL_SETTLE_MS = 250;
     let stillSettle = 0;
+    const orgLayoutEl = containerEl?.closest('.org-layout') ?? null;
     const brandObserver = tone
       ? new MutationObserver(() => {
-          if (!isStill) return;
           clearTimeout(stillSettle);
           stillSettle = window.setTimeout(() => {
-            const key = JSON.stringify(getShaderConfig(undefined, presetOverride));
+            const key = JSON.stringify(getShaderConfig(orgLayoutEl, presetOverride));
             if (`${key}|${drawsDark()}` === stillDrawnKey) return;
             clearStill();
             if (shaderStill.wanted) redrawFrozen();
           }, STILL_SETTLE_MS);
         })
       : null;
-    const orgLayoutEl = containerEl?.closest('.org-layout');
-    if (brandObserver && orgLayoutEl)
-      brandObserver.observe(orgLayoutEl, {
+    function watchBrand(on: boolean) {
+      if (!brandObserver) return;
+      brandObserver.disconnect();
+      clearTimeout(stillSettle);
+      if (!on) return;
+      if (orgLayoutEl)
+        brandObserver.observe(orgLayoutEl, {
+          attributes: true,
+          attributeFilter: ['style', 'data-editing-theme', 'data-org-brand'],
+        });
+      brandObserver.observe(document.documentElement, {
         attributes: true,
-        attributeFilter: ['style', 'data-editing-theme', 'data-org-brand'],
+        attributeFilter: ['data-theme'],
       });
-    brandObserver?.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['data-theme'],
-    });
+    }
+    watchBrand(isStill);
 
     // A render that starts painting the copy, with none shown or being made
     // (the brand changed while none painted it, or a copy failed), gets the
@@ -595,8 +599,7 @@
       document.removeEventListener('visibilitychange', onVisibilityChange);
       motionQuery.removeEventListener('change', onMotionChange);
       resizeObserver.disconnect();
-      brandObserver?.disconnect();
-      clearTimeout(stillSettle);
+      watchBrand(false);
       canvasEl?.removeEventListener('webglcontextlost', clearStill);
       detachPointerListeners();
     };

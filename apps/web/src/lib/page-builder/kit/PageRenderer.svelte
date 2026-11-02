@@ -55,6 +55,7 @@
   Nothing is staged while still.
 -->
 <script lang="ts">
+  import { shaderStill } from '$lib/components/ui/ShaderHero/shader-still.svelte';
   import { shaderTone } from '$lib/components/ui/ShaderHero/shader-tone';
   import type { BrandTokenOverrides } from '$lib/page-builder';
   import {
@@ -79,7 +80,7 @@
     resolveStyle,
     type ThemeGrounds,
   } from './model/resolve';
-  import { atmosphereStill, ownsColours, wantStill } from './atmosphere-still';
+  import { atmosphereStill, ownsColours, paintsStill } from './atmosphere-still';
   import { atmosphereVeil } from './atmosphere-veil';
   import { STYLES } from './model/styles';
   import type { BlockEdit, KitPage } from './model/types';
@@ -286,19 +287,22 @@
   // The org's shader draws in the ORG's colours, so a page with its own
   // colours shows the glow (which follows them) rather than clash (03 X11).
   const ownColours = $derived(ownsColours(brandOverrides));
+  const moving = $derived(sections.some((s) => s.scheme === 'atmosphere'));
   const atmosphere = $derived(
-    edit || still || ownColours || !sections.some((s) => s.scheme === 'atmosphere')
-      ? undefined
-      : (STYLES[style].atmosphere ?? 'soft')
+    edit || still || ownColours || !moving ? undefined : (STYLES[style].atmosphere ?? 'soft')
   );
   // The studio's frame of the shader, where the canvas or a thumbnail would
   // otherwise draw the glow (Codex-61zsk.73). Never on a live page, which
-  // draws the shader itself.
+  // draws the shader itself; asked for only by a render with a Moving band
+  // that could paint it.
+  const paintsFrame = $derived(
+    (edit || still) && moving && paintsStill({ theme, orgShader, brandOverrides })
+  );
   const stillFrame = $derived(
-    edit || still ? atmosphereStill({ theme, orgShader, brandOverrides }) : undefined
+    paintsFrame ? atmosphereStill({ theme, orgShader, brandOverrides }) : undefined
   );
   $effect(() => {
-    if ((edit || still) && orgShader) return wantStill();
+    if (paintsFrame) return shaderStill.want();
   });
 </script>
 
