@@ -215,6 +215,36 @@ invoice is rejected (and acknowledged, as a permanent error) with the row
 untouched — and the invoice is
 split and paid out exactly like a sale ([fees-and-splits.md](fees-and-splits.md#organisation-subscription-invoice)).
 
+**A bill paid by customer credit raises a support alert** (`Codex-2hxff.97`,
+owner: "Alert support").
+- **Why:** each member has one Stripe customer across every organisation, so
+  credit left on its balance pays their next bill anywhere: another tier,
+  another org, a course. The split uses what the card paid (`amount_paid`),
+  so that bill's creator is paid on the card part only, and nothing when the
+  credit covered it all.
+- **When:** an invoice whose `starting_balance` is below 0 and whose `total`
+  is above 0.
+- **What:** one error, "Customer credit paid a subscription invoice …". It
+  carries the invoice, the Stripe subscription, our row (course only), the
+  org, the pence the credit covered and `amount_paid`, and nothing about the
+  person.
+- **What doesn't change:** the split, the payouts and access.
+- **Where:** `alertIfCreditPaid` (`credit-paid-invoice.ts`), called by
+  `handleInvoicePaymentSucceeded` before its no-charge return and its
+  duplicate check, and by `handleCourseInvoicePaymentSucceeded` as soon as
+  the row is found. Both places come before the duplicate check, so a
+  duplicate's bill alerts too.
+- **Once per invoice:** after alerting, the invoice is marked at Stripe
+  (`codex_credit_alerted`, the time). A replay re-reads the invoice and stays
+  silent. Nothing handles `invoice.updated`, so the mark can't loop back.
+- **It fails toward alerting:**
+  - an invoice it can't re-read alerts anyway;
+  - the alert is logged before the mark;
+  - a failed mark is a warning;
+  - it never throws out of the handler.
+- **Open gap:** cancelling a duplicate doesn't give back credit that paid
+  it. That's `Codex-2hxff.98`, outside C1.
+
 ### Cancelling, reactivating, resuming
 
 | Route | Effect |

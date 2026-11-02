@@ -122,6 +122,7 @@ import {
   createKeyRefusal,
   stripeRefusalDetail,
 } from './create-key-refusal';
+import { alertIfCreditPaid } from './credit-paid-invoice';
 import {
   platformWriteMetadata,
   recordPlanPriceChange,
@@ -2386,6 +2387,21 @@ export class CourseSubscriptionService extends BaseService {
     const presence = await this.ensureDataPresent(stripeSub);
     if (!presence) return;
     const { row } = presence;
+    // Customer credit paid some or all of this bill: the course's payouts are
+    // made on what the card paid, nothing when the credit covered it all, so
+    // support is told once per invoice (Codex-2hxff.97). Before the
+    // duplicate check, so a duplicate's bill is covered too. It never
+    // throws, and changes nothing here.
+    await alertIfCreditPaid(
+      { stripe: this.stripe, obs: this.obs },
+      stripeInvoice,
+      {
+        stripeSubscriptionId: stripeSub.id,
+        subscriptionId: row.id,
+        organizationId: row.organizationId,
+        kind: 'course',
+      }
+    );
     if (isDuplicateSubscription(row)) {
       await this.settleDuplicate(row);
       await this.refundDuplicateInvoice(row, stripeInvoice);

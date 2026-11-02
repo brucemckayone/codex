@@ -4028,6 +4028,64 @@ describe('SubscriptionService', () => {
       });
     });
 
+    // Codex-2hxff.97: a member's credit from another subscription paid this
+    // bill, so its creator is paid nothing; support is told once.
+    it('a bill the credit paid in full: one support alert, the invoice marked, no payout', async () => {
+      const { org, tier1 } = await createFullOrg('credit-paid-in-full');
+      const sub = takeFirst(
+        await db
+          .insert(subscriptions)
+          .values(
+            createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+              status: 'active',
+            })
+          )
+          .returning()
+      );
+      const update = vi.fn().mockResolvedValue({});
+      Object.assign(stripe.invoices, { update });
+      const error = vi.spyOn(
+        (service as unknown as { obs: { error: (...a: unknown[]) => void } })
+          .obs,
+        'error'
+      );
+      const invoice = createMockStripeInvoice({
+        amount_paid: 0,
+        total: 1000,
+        starting_balance: -6493,
+        payments: { data: [] },
+        parent: {
+          subscription_details: {
+            subscription: sub.stripeSubscriptionId,
+            metadata: { codex_organization_id: org.id },
+          },
+        },
+      }) as unknown as Stripe.Invoice;
+
+      await service.handleInvoicePaymentSucceeded(invoice);
+
+      const alerts = error.mock.calls.filter(([message]) =>
+        String(message).startsWith('Customer credit paid')
+      );
+      expect(alerts).toEqual([
+        [
+          expect.any(String),
+          expect.objectContaining({
+            invoiceId: invoice.id,
+            stripeSubscriptionId: sub.stripeSubscriptionId,
+            organizationId: org.id,
+            kind: 'tier',
+            creditCoveredCents: 1000,
+            amountPaidCents: 0,
+          }),
+        ],
+      ]);
+      expect(update).toHaveBeenCalledWith(invoice.id, {
+        metadata: { codex_credit_alerted: expect.any(String) },
+      });
+      expect(stripe.transfers.create).not.toHaveBeenCalled();
+    });
+
     it('should skip if no subscription ID in invoice', async () => {
       const mockInvoice = createMockStripeInvoice({
         parent: null,

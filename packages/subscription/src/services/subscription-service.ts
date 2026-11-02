@@ -152,6 +152,7 @@ import {
   TierChangeTwoStepsError,
   TierNotFoundError,
 } from '../errors';
+import { alertIfCreditPaid } from './credit-paid-invoice';
 import {
   addMonthsClamped,
   CLEAR_PENDING_PRICE_METADATA,
@@ -2192,6 +2193,24 @@ export class SubscriptionService extends BaseService {
       invoiceId: stripeInvoice.id,
       stripeSubscriptionId: stripeSubId,
     });
+
+    // Customer credit paid some or all of this bill: its creator is paid on
+    // what the card paid, nothing when the credit covered it all, so support
+    // is told once per invoice (Codex-2hxff.97). Before the no-charge return
+    // below and the duplicate check, so both are covered. It never throws,
+    // and changes nothing here.
+    await alertIfCreditPaid(
+      { stripe: this.stripe, obs: this.obs },
+      stripeInvoice,
+      {
+        stripeSubscriptionId: stripeSubId,
+        subscriptionId: null,
+        organizationId:
+          stripeInvoice.parent?.subscription_details?.metadata
+            ?.codex_organization_id ?? null,
+        kind: 'tier',
+      }
+    );
 
     // Resolve the source charge for transfers. Webhook payloads in Stripe
     // 2024+ do NOT include expanded `payments.data` by default — the field
