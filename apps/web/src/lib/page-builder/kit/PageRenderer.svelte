@@ -38,7 +38,9 @@
   ATMOSPHERE (03 §5.1): `data-lp-atmosphere` marks a live page with a "Moving
   background" section, so the org layout clears the stack above its shader
   for this page only. Never set while editing or still — the canvas and
-  thumbnails sit inside the studio, and there `atmosphere` draws its glow.
+  thumbnails sit inside the studio, and there `atmosphere` draws its glow,
+  or the studio's own frame of the shader once it has been copied
+  (`data-lp-shader-still`, `atmosphere-still.ts`; Codex-61zsk.73).
   While it is set, the root also keeps each section's veil as thin as the
   Style asks wherever the shader drawn behind it allows (`atmosphere-veil.ts`,
   03 X54).
@@ -53,6 +55,7 @@
   Nothing is staged while still.
 -->
 <script lang="ts">
+  import { shaderStill } from '$lib/components/ui/ShaderHero/shader-still.svelte';
   import { shaderTone } from '$lib/components/ui/ShaderHero/shader-tone';
   import type { BrandTokenOverrides } from '$lib/page-builder';
   import {
@@ -62,6 +65,7 @@
   } from '../render/brand-overrides';
   import type { JourneySalesContext } from '../render/types';
   import { settled } from './blocks/hero/settled.svelte';
+  import { instructorDefinition } from './blocks/instructor/definition';
   import { priceWithCadence } from './model/copy';
   import { filmToShow } from './model/films';
   import { brandFontsHref } from './model/fonts';
@@ -76,11 +80,17 @@
     resolveStyle,
     type ThemeGrounds,
   } from './model/resolve';
+  import { atmosphereStill, ownsColours, paintsStill } from './atmosphere-still';
   import { atmosphereVeil } from './atmosphere-veil';
   import { STYLES } from './model/styles';
   import type { BlockEdit, KitPage } from './model/types';
   import { entrances } from './motion/entrances';
-  import { type KitPageContext, type PageEdit, setKitPage } from './page-context';
+  import {
+    type KitPageContext,
+    type OrgLogoSource,
+    type PageEdit,
+    setKitPage,
+  } from './page-context';
   import { BLOCKS } from './registry';
   import SectionShell from './SectionShell.svelte';
   import StickyCta from './StickyCta.svelte';
@@ -123,6 +133,12 @@
      */
     orgShader?: boolean;
     /**
+     * The org's logo and name, as the org layout's rail shows them: the brand
+     * editor's pending logo while it is open (`render/org-logo.ts`). Plain
+     * data, as above. Absent or null: no logo.
+     */
+    orgLogo?: OrgLogoSource | null;
+    /**
      * The kit gallery's proof (03 X73): draw this Type whether or not this
      * Style may take it yet, so a pair is measured before it is offered. A
      * page never passes it.
@@ -147,6 +163,7 @@
     sticky = true,
     orgGrounds = {},
     orgShader = false,
+    orgLogo = null,
     proofType,
     requestFilm,
   }: Props = $props();
@@ -223,6 +240,12 @@
     get offerProps() {
       return offerProps;
     },
+    get guideName() {
+      return guideName;
+    },
+    get orgLogo() {
+      return orgLogo;
+    },
     anchorOf(id: string) {
       return anchors.get(id);
     },
@@ -241,6 +264,12 @@
   const heroProps = $derived(
     propsById.get(sections.find((s) => s.type === 'hero')?.id ?? '') ?? {}
   );
+  /** The About you section's name: who the Video block says is speaking. */
+  const guideName = $derived(
+    instructorDefinition.coerce(
+      propsById.get(sections.find((s) => s.type === 'instructor')?.id ?? '') ?? {}
+    ).name
+  );
   const stickyLabel = $derived(
     readText(offerProps, 'ctaLabel') ?? readText(heroProps, 'ctaLabel')
   );
@@ -257,14 +286,24 @@
   const signature = $derived(sections.map((s) => `${s.id}:${s.layout}`).join('|'));
   // The org's shader draws in the ORG's colours, so a page with its own
   // colours shows the glow (which follows them) rather than clash (03 X11).
-  const ownColours = $derived(
-    Boolean(brandOverrides?.primaryColor || brandOverrides?.secondaryColor)
-  );
+  const ownColours = $derived(ownsColours(brandOverrides));
+  const moving = $derived(sections.some((s) => s.scheme === 'atmosphere'));
   const atmosphere = $derived(
-    edit || still || ownColours || !sections.some((s) => s.scheme === 'atmosphere')
-      ? undefined
-      : (STYLES[style].atmosphere ?? 'soft')
+    edit || still || ownColours || !moving ? undefined : (STYLES[style].atmosphere ?? 'soft')
   );
+  // The studio's frame of the shader, where the canvas or a thumbnail would
+  // otherwise draw the glow (Codex-61zsk.73). Never on a live page, which
+  // draws the shader itself; asked for only by a render with a Moving band
+  // that could paint it.
+  const paintsFrame = $derived(
+    (edit || still) && moving && paintsStill({ theme, orgShader, brandOverrides })
+  );
+  const stillFrame = $derived(
+    paintsFrame ? atmosphereStill({ theme, orgShader, brandOverrides }) : undefined
+  );
+  $effect(() => {
+    if (paintsFrame) return shaderStill.want();
+  });
 </script>
 
 <svelte:head>
@@ -282,12 +321,14 @@
   data-lp-still={still || edit ? '' : undefined}
   data-lp-editing={edit ? '' : undefined}
   data-lp-atmosphere={atmosphere}
+  data-lp-shader-still={stillFrame ? '' : undefined}
   data-org-brand={brandStyle ? '' : undefined}
   data-org-bg={pageBg ? '' : undefined}
   data-page-bg={pageBg}
   data-ground-light={grounds.light}
   data-ground-dark={grounds.dark}
   style={brandStyle}
+  style:--lp-shader-still={stillFrame}
   {@attach entrances(still || !!edit || dials?.motion === 'still')}
   {@attach atmosphereVeil(!!atmosphere)}
 >

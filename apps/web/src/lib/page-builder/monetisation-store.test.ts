@@ -27,11 +27,17 @@ const getCourseMonetisation =
   vi.fn<(input: { courseId: string }) => Promise<JourneyMonetisation | null>>();
 const updateCourseMonetisation =
   vi.fn<(input: unknown) => Promise<JourneyMonetisation>>();
+const priceChangesRefresh = vi.fn(async () => {});
+const getCoursePlanPriceChanges = vi.fn((_input: { courseId: string }) => ({
+  refresh: priceChangesRefresh,
+}));
 
 vi.mock('$lib/remote/journeys.remote', () => ({
   getCourseMonetisation: (input: { courseId: string }) =>
     getCourseMonetisation(input),
   updateCourseMonetisation: (input: unknown) => updateCourseMonetisation(input),
+  getCoursePlanPriceChanges: (input: { courseId: string }) =>
+    getCoursePlanPriceChanges(input),
 }));
 
 // Imported AFTER the mock so the store binds to the fakes.
@@ -60,6 +66,8 @@ beforeEach(() => {
   monetisation.close();
   getCourseMonetisation.mockReset();
   updateCourseMonetisation.mockReset();
+  getCoursePlanPriceChanges.mockClear();
+  priceChangesRefresh.mockClear();
 });
 
 describe('monetisation store · load', () => {
@@ -294,6 +302,73 @@ describe('monetisation store · save', () => {
       subscriptionEnabled: false,
       subscriptionPriceCents: null,
     });
+  });
+
+  it('re-reads the price changes once after re-pricing a plan on sale (Codex-2hxff.86)', async () => {
+    getCourseMonetisation.mockResolvedValue(
+      makeState({ subscription: { priceMonthly: 1200, priceAnnual: 12000 } })
+    );
+    await monetisation.open(COURSE_ID);
+    updateCourseMonetisation.mockResolvedValue(
+      makeState({ subscription: { priceMonthly: 1500, priceAnnual: 12000 } })
+    );
+
+    monetisation.setPriceMonthly(1500);
+    await monetisation.save();
+
+    // The save recorded who is due; the Offer panel's note reads it once.
+    expect(getCoursePlanPriceChanges).toHaveBeenCalledWith({
+      courseId: COURSE_ID,
+    });
+    expect(priceChangesRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('a re-read that fails cannot fail the save that landed', async () => {
+    getCourseMonetisation.mockResolvedValue(
+      makeState({ subscription: { priceMonthly: 1200, priceAnnual: 12000 } })
+    );
+    await monetisation.open(COURSE_ID);
+    updateCourseMonetisation.mockResolvedValue(
+      makeState({ subscription: { priceMonthly: 1500, priceAnnual: 12000 } })
+    );
+    getCoursePlanPriceChanges.mockImplementationOnce(() => {
+      throw new Error('no query');
+    });
+
+    monetisation.setPriceMonthly(1500);
+    await expect(monetisation.save()).resolves.toBeUndefined();
+    expect(monetisation.isDirty).toBe(false);
+  });
+
+  it('reads no price changes after a save that moved no price', async () => {
+    getCourseMonetisation.mockResolvedValue(
+      makeState({ subscription: { priceMonthly: 1200, priceAnnual: 12000 } })
+    );
+    await monetisation.open(COURSE_ID);
+    updateCourseMonetisation.mockResolvedValue(
+      makeState({
+        subscription: { priceMonthly: 1200, priceAnnual: 12000 },
+        tierIds: [TIER_A],
+      })
+    );
+
+    monetisation.toggleTier(TIER_A);
+    await monetisation.save();
+
+    expect(priceChangesRefresh).not.toHaveBeenCalled();
+  });
+
+  it('reads no price changes after putting a plan on sale: nobody pays it yet', async () => {
+    updateCourseMonetisation.mockResolvedValue(
+      makeState({ subscription: { priceMonthly: 1200, priceAnnual: 12000 } })
+    );
+
+    monetisation.setSubscriptionEnabled(true);
+    monetisation.setPriceMonthly(1200);
+    monetisation.setPriceAnnual(12000);
+    await monetisation.save();
+
+    expect(priceChangesRefresh).not.toHaveBeenCalled();
   });
 
   it('skips the rate-limited mutation when nothing changed', async () => {

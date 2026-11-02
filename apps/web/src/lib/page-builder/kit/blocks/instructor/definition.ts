@@ -1,10 +1,13 @@
+import type { SellPreview } from '../../../render/types';
 import {
   bodyField,
   eyebrowField,
   headingField,
   layout,
 } from '../../model/fields';
+import { PAGE_STYLE_IDS, type PageStyleId } from '../../model/ids';
 import { compact, readText, readTextList } from '../../model/read';
+import { readStillFocus, type StillFocus } from '../../model/still-focus';
 import type { BlockDefinition } from '../../model/types';
 import { optionalCtaFields } from '../video/definition';
 
@@ -18,7 +21,22 @@ export type InstructorProps = {
   role?: string;
   credentials?: string[];
   quote?: string;
+  /** Where the portrait is cropped round on this page (`model/still-focus.ts`). */
+  stillFocus?: StillFocus;
 };
+
+/** The Styles that draw the centred portrait square; the rest keep it 4:5. */
+const SQUARE_CENTRED: readonly PageStyleId[] = ['bold', 'soft'];
+const UPRIGHT_CENTRED = PAGE_STYLE_IDS.filter(
+  (style) => !SQUARE_CENTRED.includes(style)
+);
+
+/** The guide's portrait, else the frame of their clip: the still the portrait draws. */
+export function guideStill(
+  preview: SellPreview | null | undefined
+): string | null {
+  return preview?.guidePortraitUrl ?? preview?.guideClip?.posterUrl ?? null;
+}
 
 /** The canvas's words for a portrait slot with nothing in it (creator-facing, A1). */
 export const INSTRUCTOR_PROMPT =
@@ -69,7 +87,7 @@ export const instructorDefinition: BlockDefinition<InstructorProps> = {
     {
       key: 'credentials',
       label: 'Credentials',
-      hint: 'Short facts about you, like "Twelve years teaching".',
+      hint: 'Short facts about you, like "12 years teaching".',
       control: 'list',
       maxItems: 6,
     },
@@ -107,9 +125,11 @@ export const instructorDefinition: BlockDefinition<InstructorProps> = {
     body: 'I have taught breath and movement for twelve years, first in studios and now online. This course is everything I teach in my one-to-one sessions, in the order I teach it.',
     name: 'Maya Linden',
     role: 'Breathwork teacher',
+    // Two that lead with a figure and one that does not, so the sample
+    // shows the ledger's both kinds of row (Codex-61zsk.73).
     credentials: [
-      'Twelve years teaching',
-      'Over 4,000 students',
+      '12 years teaching',
+      '4,000+ students',
       'Trained in Mysore and London',
     ],
     quote:
@@ -126,5 +146,28 @@ export const instructorDefinition: BlockDefinition<InstructorProps> = {
       role: readText(raw, 'role', 80),
       credentials: readTextList(raw, 'credentials', 6),
       quote: readText(raw, 'quote', 240),
+      stillFocus: readStillFocus(raw.stillFocus),
     }),
+  // The portrait's frame in each layout, on every screen: split 4/5; the
+  // quote's sign-off square; centred 4/5, but square where Bold and Soft draw
+  // it so (InstructorBlock's Style rules).
+  stillFocus: {
+    focalLayouts: {
+      split: [
+        { at: 'wide', ratio: '4 / 5' },
+        { at: 'phone', ratio: '4 / 5' },
+      ],
+      centered: [
+        { at: 'wide', ratio: '4 / 5', styles: UPRIGHT_CENTRED },
+        { at: 'phone', ratio: '4 / 5', styles: UPRIGHT_CENTRED },
+        { at: 'wide', ratio: '1 / 1', styles: SQUARE_CENTRED },
+        { at: 'phone', ratio: '1 / 1', styles: SQUARE_CENTRED },
+      ],
+      quote: [
+        { at: 'wide', ratio: '1 / 1' },
+        { at: 'phone', ratio: '1 / 1' },
+      ],
+    },
+    still: (_raw, preview) => guideStill(preview),
+  },
 };

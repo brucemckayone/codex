@@ -432,3 +432,52 @@ describe('InstructorBlock: every size the portrait has (Codex-61zsk.66)', () => 
     expect(img?.hasAttribute('srcset')).toBe(false);
   });
 });
+
+describe('InstructorBlock: a focal point on the portrait (Codex-61zsk.73)', () => {
+  const KEY = 'c1/media-thumbnails/m1';
+  const STILL = `https://cdn.test/${KEY}/lg.webp`;
+  const POINT = { x: 12, y: 10, of: KEY };
+  const framed = () =>
+    document.body.querySelector<HTMLImageElement>('.guide__portrait img');
+
+  it.each(
+    SECTION_LAYOUTS.instructor
+  )('%s: crops the portrait round the point set on it', async (layout) => {
+    await render(
+      { ...GUIDE, stillFocus: POINT },
+      { layout, media: { guidePortraitUrl: STILL } }
+    );
+    expect(framed()?.getAttribute('src')).toBe(STILL);
+    expect(framed()?.style.objectPosition).toBe('12% 10%');
+  });
+
+  it('crops the clip’s frame where that is the portrait, with its play button', async () => {
+    const frame = 'https://cdn.test/c1/media-thumbnails/clip-1/lg.webp';
+    await render(
+      { ...GUIDE, stillFocus: { ...POINT, of: 'c1/media-thumbnails/clip-1' } },
+      {
+        layout: 'split',
+        media: { guideClip: { playlistUrl: '/hello.m3u8', posterUrl: frame } },
+      }
+    );
+    expect(playButton()).toBeDefined();
+    expect(framed()?.getAttribute('src')).toBe(frame);
+    expect(framed()?.style.objectPosition).toBe('12% 10%');
+  });
+
+  it.each(
+    SECTION_LAYOUTS.instructor
+  )('%s: draws a new portrait from the centre until a point is set on it', async (layout) => {
+    await render(
+      { ...GUIDE, stillFocus: { ...POINT, of: 'c1/media-thumbnails/old' } },
+      { layout, media: { guidePortraitUrl: STILL } }
+    );
+    expect(framed()?.getAttribute('src')).toBe(STILL);
+    expect(framed()?.style.objectPosition).toBe('');
+  });
+
+  it('a portrait with no point draws from the centre', async () => {
+    await render(GUIDE, { media: { guidePortraitUrl: STILL } });
+    expect(framed()?.style.objectPosition).toBe('');
+  });
+});

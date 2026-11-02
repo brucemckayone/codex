@@ -336,10 +336,20 @@ test.describe('strip · Bone Deep', () => {
     const { starts, max } = await geometry();
     expect(max, 'the row must be wider than the screen').toBeGreaterThan(0);
 
-    // From the region, Tab reaches the buttons: the resting one too.
+    // From the region, Tab steps into its pictures, each a button that opens
+    // the lightbox (Codex-61zsk.73), and past the last of them reaches the
+    // buttons: the resting one too. The last picture is focused without
+    // scrolling the row, so the row is still at its start for the steps below.
+    const pictures = region().locator('.gallery-picture__open');
     await region().focus();
     await page.keyboard.press('Tab');
+    await expect(pictures.first()).toBeFocused();
+    await pictures
+      .last()
+      .evaluate((open) => (open as HTMLElement).focus({ preventScroll: true }));
+    await page.keyboard.press('Tab');
     await expect(previous).toBeFocused();
+    await expect(previous).toHaveAttribute('aria-disabled', 'true');
     await page.keyboard.press('Tab');
     await expect(next).toBeFocused();
     await expectFocusRing(next);

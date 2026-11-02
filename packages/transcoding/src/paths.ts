@@ -331,6 +331,22 @@ export function getUserAvatarBaseKey(userId: string): string {
 }
 
 /**
+ * The ASSETS_BUCKET folder of a media item's poster frames: both layouts the
+ * transcoder writes, `{size}.webp` and `{w}x{h}-{nonce}/{size}.webp`, are
+ * inside it. Media's daily file purge deletes it (Codex-9seq3).
+ *
+ * @example
+ * getMediaThumbnailPrefix('user-123', 'media-456')
+ * // Returns: 'user-123/media-thumbnails/media-456/'
+ */
+export function getMediaThumbnailPrefix(
+  creatorId: string,
+  mediaId: string
+): string {
+  return `${creatorId}/${PATH_CONFIG.MEDIA_THUMBNAILS_FOLDER}/${mediaId}/`;
+}
+
+/**
  * Generate R2 key for auto-generated media thumbnail
  * Stored in ASSETS_BUCKET for public CDN access
  *
@@ -351,7 +367,7 @@ export function getMediaThumbnailKey(
   mediaId: string,
   size: ThumbnailSize
 ): string {
-  return `${creatorId}/${PATH_CONFIG.MEDIA_THUMBNAILS_FOLDER}/${mediaId}/${size}.webp`;
+  return `${getMediaThumbnailPrefix(creatorId, mediaId)}${size}.webp`;
 }
 
 /**

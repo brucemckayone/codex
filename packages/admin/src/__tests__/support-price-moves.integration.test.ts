@@ -20,7 +20,7 @@ import {
   subscriptionTiers,
   users,
 } from '@codex/database/schema';
-import { PurchaseService } from '@codex/purchase';
+import { FeeConfigService, PurchaseService } from '@codex/purchase';
 import { ServiceError } from '@codex/service-errors';
 import {
   createMockStripe,
@@ -91,6 +91,7 @@ describe('SupportService price moves (real DB)', () => {
         { db, environment: 'test', ...createTestMoneyDeps() },
         stripe
       ),
+      feeConfig: new FeeConfigService({ db, environment: 'test' }),
     });
     [supportId, ownerId] = (await seedTestUsers(db, 2)) as [string, string];
     userIds.push(supportId, ownerId);

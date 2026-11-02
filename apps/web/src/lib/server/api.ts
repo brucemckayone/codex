@@ -31,16 +31,23 @@ import type {
   CustomerListItem,
   DashboardStats,
   FailedRefundItem,
+  FeeChangeCard,
+  FeeNoticeItem,
   FollowerStats,
+  HeldPriceMove,
   OwedToCreatorItem,
+  PriceChangeRestarted,
+  PriceMoveRetried,
   RefundPreview,
   ResolvedCreatorDebt,
   ResolvedFailedRefund,
   ResolvedOwedToCreator,
   RevenueStats,
+  StoppedPriceChange,
   SubscriberStats,
   SupportQueueCounts,
   SupportRefundResult,
+  ToldAnotherWayResult,
   TopContentItem,
 } from '@codex/admin';
 import type {
@@ -60,6 +67,7 @@ import type {
   CheckoutSessionVerifyResult,
   SaleListItem,
   SalesStats,
+  UpcomingFeeChange,
 } from '@codex/purchase';
 // `import type` from @codex/shared-types is sanctioned for apps/web — it pulls
 // no runtime value, so the vite server-only module guard is not tripped.
@@ -92,6 +100,7 @@ import type {
   CreatorPayoutRow,
   PayoutSummary,
   PayoutWithCreator,
+  PriceChangeProgress,
   SubscriberListItem,
   SubscriptionCheckoutVerifyResult,
   UserCourseSubscription,
@@ -116,11 +125,13 @@ import type {
   ResumeSubscriptionInput,
   SalesFilm,
   SupportChargeSearchQuery,
+  SupportClosePriceMoveInput,
   SupportIssueRefundInput,
   SupportQueueQuery,
   SupportResolveCreatorDebtInput,
   SupportResolveCreditInput,
   SupportResolveFailedRefundInput,
+  SupportToldAnotherWayInput,
   UpdateBrandingInput,
   UpdateCategoryInput,
   UpdateContactInput,
@@ -2728,6 +2739,21 @@ export function createServerApi(
           )}/tier-access?organizationId=${encodeURIComponent(organizationId)}`,
           { method: 'PUT', body: JSON.stringify({ tierIds }) }
         ),
+
+      /**
+       * How the course plan's price changes are going (Codex-2hxff.86), for
+       * the Offer panel's note. As `tiers.priceChanges`, scoped to the
+       * organisation and the course.
+       */
+      planPriceChanges: (organizationId: string, courseId: string) =>
+        request<PaginatedListResponse<PriceChangeProgress>>(
+          'ecom',
+          `/studio/courses/${encodeURIComponent(
+            courseId
+          )}/subscription-plan/price-changes?organizationId=${encodeURIComponent(
+            organizationId
+          )}`
+        ),
     },
 
     /**
@@ -3269,6 +3295,105 @@ export function createServerApi(
           `/api/admin/support/owed-to-creators/${encodeURIComponent(creditId)}/check`,
           { method: 'POST' }
         ),
+
+      /**
+       * Fee rises that haven't started, oldest first, with how many are told
+       * (Codex-2hxff.33). Each stays until its date.
+       */
+      listFeeChanges: ({ page, limit }: SupportQueueQuery) =>
+        request<PaginatedListResponse<FeeChangeCard>>(
+          'admin',
+          `/api/admin/support/queue/fee-changes?${new URLSearchParams({
+            page: String(page),
+            limit: String(limit),
+          })}`
+        ),
+
+      /** The people a fee rise is waiting for: their email failed or may not have gone. */
+      listFeeNotices: ({ page, limit }: SupportQueueQuery) =>
+        request<PaginatedListResponse<FeeNoticeItem>>(
+          'admin',
+          `/api/admin/support/queue/fee-notices?${new URLSearchParams({
+            page: String(page),
+            limit: String(limit),
+          })}`
+        ),
+
+      /** Support told them another way (a note is required); may date the rise. */
+      markToldAnotherWay: (
+        noticeId: string,
+        body: SupportToldAnotherWayInput
+      ) =>
+        request<ToldAnotherWayResult>(
+          'admin',
+          `/api/admin/support/fee-notices/${encodeURIComponent(noticeId)}/told-another-way`,
+          { method: 'POST', body: JSON.stringify(body) }
+        ),
+
+      /**
+       * Subscribers held from a new price, and those Retry queued, oldest
+       * first (Codex-2hxff.85, .86).
+       */
+      listHeldPriceMoves: ({ page, limit }: SupportQueueQuery) =>
+        request<PaginatedListResponse<HeldPriceMove>>(
+          'admin',
+          `/api/admin/support/queue/price-moves?${new URLSearchParams({
+            page: String(page),
+            limit: String(limit),
+          })}`
+        ),
+
+      /** Price changes the run stopped: every first email was refused. */
+      listStoppedPriceChanges: ({ page, limit }: SupportQueueQuery) =>
+        request<PaginatedListResponse<StoppedPriceChange>>(
+          'admin',
+          `/api/admin/support/queue/price-changes-stopped?${new URLSearchParams(
+            { page: String(page), limit: String(limit) }
+          )}`
+        ),
+
+      /** Queue a held move for the next run. The route takes no body. */
+      retryPriceMove: (moveId: string) =>
+        request<PriceMoveRetried>(
+          'admin',
+          `/api/admin/support/price-moves/${encodeURIComponent(moveId)}/retry`,
+          { method: 'POST' }
+        ),
+
+      /** Take a held move off the list without a retry. It moves nobody. */
+      closePriceMove: (moveId: string, body: SupportClosePriceMoveInput) =>
+        request<HeldPriceMove>(
+          'admin',
+          `/api/admin/support/price-moves/${encodeURIComponent(moveId)}/close`,
+          { method: 'POST', body: JSON.stringify(body) }
+        ),
+
+      /** After the cause is fixed, the next run restarts it. No body. */
+      restartPriceChange: (changeId: string) =>
+        request<PriceChangeRestarted>(
+          'admin',
+          `/api/admin/support/price-changes/${encodeURIComponent(changeId)}/restart`,
+          { method: 'POST' }
+        ),
+    },
+
+    /**
+     * The caller's own fee notices (ecom-api, Codex-2hxff.33): the Studio note
+     * about a fee rise that hasn't started.
+     */
+    fees: {
+      /**
+       * With `organizationId`, the owner's rows for that organisation
+       * (Billing, Payouts); without, the caller's creator rows everywhere
+       * (Earnings).
+       */
+      upcoming: (organizationId?: string) =>
+        request<PaginatedListResponse<UpcomingFeeChange>>(
+          'ecom',
+          organizationId
+            ? `/fees/upcoming?${new URLSearchParams({ organizationId })}`
+            : '/fees/upcoming'
+        ),
     },
 
     /**
@@ -3382,6 +3507,18 @@ export function createServerApi(
           'org',
           `/api/organizations/${orgId}/tiers/${tierId}/items`,
           { method: 'POST', body: JSON.stringify(delta) }
+        ),
+
+      /**
+       * How the tiers' price changes are going (Codex-2hxff.86): who has been
+       * emailed, moved and held, per change and interval. Owner/admin only,
+       * uncached. Running and stopped changes, and those done or replaced in
+       * the last 14 days, newest first, one page.
+       */
+      priceChanges: (orgId: string) =>
+        request<PaginatedListResponse<PriceChangeProgress>>(
+          'org',
+          `/api/organizations/${orgId}/tiers/price-changes`
         ),
 
       /**

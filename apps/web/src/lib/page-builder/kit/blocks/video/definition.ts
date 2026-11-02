@@ -6,7 +6,8 @@ import {
   layout,
   noteField,
 } from '../../model/fields';
-import { compact, readText } from '../../model/read';
+import { compact, readBool, readText } from '../../model/read';
+import { readStillFocus, type StillFocus } from '../../model/still-focus';
 import type { BlockDefinition, BlockField } from '../../model/types';
 
 export type VideoProps = {
@@ -16,6 +17,16 @@ export type VideoProps = {
   ctaLabel?: string;
   note?: string;
   caption?: string;
+  /** Who speaks in the film; the page's guide when blank (Codex-61zsk.73). */
+  speaker?: string;
+  /**
+   * Leave the speaker off, so the line gives the length alone. A switch
+   * writes `true` or nothing, so the key says HIDE: absent, every section,
+   * an existing one too, names who speaks.
+   */
+  hideSpeaker?: boolean;
+  /** Where the film's poster is cropped round on this page (`model/still-focus.ts`). */
+  stillFocus?: StillFocus;
 };
 
 /**
@@ -71,6 +82,19 @@ export const videoDefinition: BlockDefinition<VideoProps> = {
       inline: true,
       maxLength: 140,
     },
+    {
+      key: 'speaker',
+      label: 'Speaker',
+      hint: "Optional. Leave it blank to use the guide's name from your About you section.",
+      control: 'text',
+      maxLength: 60,
+    },
+    {
+      key: 'hideSpeaker',
+      label: "Hide who's speaking",
+      hint: "Shows the film's length only.",
+      control: 'toggle',
+    },
     ...optionalCtaFields,
     {
       key: 'introVideoMediaId',
@@ -97,5 +121,18 @@ export const videoDefinition: BlockDefinition<VideoProps> = {
       ctaLabel: readText(raw, 'ctaLabel', 40),
       note: readText(raw, 'note', 120),
       caption: readText(raw, 'caption', 140),
+      speaker: readText(raw, 'speaker', 60),
+      hideSpeaker: readBool(raw, 'hideSpeaker'),
+      stillFocus: readStillFocus(raw.stillFocus),
     }),
+  // The film's poster. Every screen is 16:9, a film's own shape, so the
+  // poster is shown whole, except in Bold's theatre from a wide screen, 21:9:
+  // only there does a point steer it, and elsewhere the control explains
+  // itself (VideoBlock's `--_ratio`).
+  stillFocus: {
+    focalLayouts: {
+      theatre: [{ at: 'wide', ratio: '21 / 9', styles: ['bold'] }],
+    },
+    still: (_raw, preview) => preview?.intro?.posterUrl ?? null,
+  },
 };

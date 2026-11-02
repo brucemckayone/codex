@@ -24,7 +24,7 @@ import {
   setupTestDatabase,
   teardownTestDatabase,
 } from '@codex/test-utils';
-import { inArray } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { FeeConfigService } from '../services/fee-config-service';
 
@@ -138,6 +138,8 @@ describe('FeeConfigService.listUpcomingForUser (real DB)', () => {
       // Q1: the earliest it can be, if the last person is told today.
       earliestFrom: feeRiseStartAfter(NOW).toISOString(),
       announcedAt: accepted.toISOString(),
+      smallerToldAt: null,
+      replaces: null,
       lines: [
         {
           organizationId,
@@ -148,6 +150,7 @@ describe('FeeConfigService.listUpcomingForUser (real DB)', () => {
           from: 1000,
           to: 1500,
           replaced: null,
+          replacesFigure: null,
         },
       ],
     });
@@ -163,7 +166,7 @@ describe('FeeConfigService.listUpcomingForUser (real DB)', () => {
     expect(item?.announcedAt).toBeNull();
   });
 
-  it('a rise made smaller says the figure it replaced (Q2)', async () => {
+  it('a rise made smaller says the figure it replaced (Q2), and when its short email went (N7)', async () => {
     const { organizationId, creator } = await organisation();
     const changeId = await rise(organizationId, { orgFeePercent: 1200 });
     const role = { organizationId, as: 'creator' as const };
@@ -179,21 +182,136 @@ describe('FeeConfigService.listUpcomingForUser (real DB)', () => {
       roles: [role],
       afterValues: [{ ...role, oneOff: told(1500), subscription: told(1500) }],
     });
-    await db.insert(feeChangeNotices).values({
-      changeId,
-      userId: creator,
-      kind: 'smaller',
-      onList: false,
-      roles: [role],
-      beforeValues: [],
-      afterValues: [],
-    });
+    const [smaller] = await db
+      .insert(feeChangeNotices)
+      .values({
+        changeId,
+        userId: creator,
+        kind: 'smaller',
+        onList: false,
+        roles: [role],
+        beforeValues: [],
+        afterValues: [],
+      })
+      .returning({ id: feeChangeNotices.id });
 
     const [item] = await svc.listUpcomingForUser(creator, undefined, NOW);
     expect(item).toMatchObject({
       kind: 'smaller',
+      announcedAt: FIRST_RUN.toISOString(),
+      // Its short email hasn't gone yet.
+      smallerToldAt: null,
       lines: [{ value: 'orgFeePercent', from: 1000, to: 1200, replaced: 1500 }],
     });
+
+    // "We emailed you about it on 6 November": the SMALLER email's time.
+    const smallerAt = new Date('2026-11-06T08:00:00Z');
+    await db
+      .update(feeChangeNotices)
+      .set({ state: 'sent', acceptedAt: smallerAt, attempts: 1 })
+      .where(eq(feeChangeNotices.id, smaller?.id as string));
+    const [after] = await svc.listUpcomingForUser(creator, undefined, NOW);
+    expect(after).toMatchObject({
+      announcedAt: FIRST_RUN.toISOString(),
+      smallerToldAt: smallerAt.toISOString(),
+    });
+  });
+
+  it('a bigger rise says the waiting rise it replaced, when the reader was told it, and its figure (N8, F2)', async () => {
+    const { organizationId, creator } = await organisation();
+    const role = { organizationId, as: 'creator' as const };
+    const values = (platformFeePercent: number, orgFeePercent: number) => ({
+      platformFeePercent,
+      orgFeePercent,
+      minPlatformFeeCents: 25,
+      minTransferCents: 0,
+    });
+    const roleValues = (platform: number, org: number) => [
+      {
+        ...role,
+        oneOff: values(platform, org),
+        subscription: values(platform, org),
+      },
+    ];
+    // The first rise, to 12%, told on 3 Nov, then replaced by a bigger one.
+    const first = await rise(
+      organizationId,
+      { orgFeePercent: 1200 },
+      { voidedAt: NOW, voidReason: 'replaced_by_bigger' }
+    );
+    await announce(first, creator, {
+      state: 'sent',
+      acceptedAt: FIRST_RUN,
+      roles: [role],
+      beforeValues: roleValues(1000, 1000),
+      afterValues: roleValues(1000, 1200),
+    });
+    // The bigger one also raises our fee, which the first didn't move.
+    const bigger = await rise(
+      organizationId,
+      { orgFeePercent: 1500, platformFeePercent: 1500 },
+      { replacesChangeId: first }
+    );
+    await announce(bigger, creator, { state: 'sent', acceptedAt: NOW });
+
+    const [item, ...more] = await svc.listUpcomingForUser(
+      creator,
+      undefined,
+      NOW
+    );
+    expect(more).toEqual([]);
+    expect(item).toMatchObject({
+      changeId: bigger,
+      replaces: { changeId: first, announcedAt: FIRST_RUN.toISOString() },
+    });
+    const line = (value: string) => item?.lines.find((l) => l.value === value);
+    expect(line('orgFeePercent')).toMatchObject({
+      to: 1500,
+      replacesFigure: 1200,
+    });
+    expect(line('platformFeePercent')).toMatchObject({
+      to: 1500,
+      replacesFigure: null,
+    });
+  });
+
+  it('a bigger rise whose first rise never reached the reader names it, but not as told (N8)', async () => {
+    const { organizationId, creator } = await organisation();
+    const first = await rise(
+      organizationId,
+      { orgFeePercent: 1200 },
+      { voidedAt: NOW, voidReason: 'replaced_by_bigger' }
+    );
+    // Their email failed, then the void set it aside. The list still holds
+    // the figures it would have told them.
+    const role = { organizationId, as: 'creator' as const };
+    const values = (orgFeePercent: number) => ({
+      platformFeePercent: 1000,
+      orgFeePercent,
+      minPlatformFeeCents: 25,
+      minTransferCents: 0,
+    });
+    await announce(first, creator, {
+      state: 'not_needed',
+      attempts: 1,
+      roles: [role],
+      beforeValues: [
+        { ...role, oneOff: values(1000), subscription: values(1000) },
+      ],
+      afterValues: [
+        { ...role, oneOff: values(1200), subscription: values(1200) },
+      ],
+    });
+    const bigger = await rise(
+      organizationId,
+      { orgFeePercent: 1500 },
+      { replacesChangeId: first }
+    );
+    await announce(bigger, creator, { state: 'sent', acceptedAt: NOW });
+
+    const [item] = await svc.listUpcomingForUser(creator, undefined, NOW);
+    expect(item?.replaces).toEqual({ changeId: first, announcedAt: null });
+    expect(item?.lines[0]?.replacesFigure).toBeNull();
   });
 
   it("the owner's filter: an organisation-fee rise raises their share, so Billing shows nothing (F3); the creator's read shows nothing for an organisation they don't own", async () => {

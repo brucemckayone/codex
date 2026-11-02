@@ -303,7 +303,8 @@ subscriptions.get(
 subscriptions.post(
   '/courses/:courseSubscriptionId/cancel',
   procedure({
-    policy: { auth: 'required' },
+    // Each toggle is a fresh Stripe write: the strict preset, as change-tier.
+    policy: { auth: 'required', rateLimit: 'strict' },
     input: { params: courseSubscriptionParamsSchema },
     handler: async (ctx) => {
       return await ctx.services.courseSubscription.cancelForUser(
@@ -323,7 +324,8 @@ subscriptions.post(
 subscriptions.post(
   '/courses/:courseSubscriptionId/reactivate',
   procedure({
-    policy: { auth: 'required' },
+    // Each toggle is a fresh Stripe write: the strict preset, as change-tier.
+    policy: { auth: 'required', rateLimit: 'strict' },
     input: { params: courseSubscriptionParamsSchema },
     handler: async (ctx) => {
       return await ctx.services.courseSubscription.reactivateForUser(

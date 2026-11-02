@@ -13,6 +13,11 @@
  * Anything else is a DRAFT use: a delete goes ahead after a warning, and the
  * draft keeps its link to the deleted item, so a restore heals it.
  *
+ * The item's creator's content whose thumbnail is a frame of it is a use too
+ * (`thumbnail`, Codex-9seq3): the Studio's "use the video's frame" saves the
+ * poster's URL, and the purge deletes the posters. It is counted only while
+ * the content plays another item; its own item is already its `media` use.
+ *
  * Never cached: this is the guard, and a stale "not in use" would let a
  * delete through.
  */
@@ -22,6 +27,7 @@ import {
   content,
   courses,
   landingPages,
+  mediaItems,
   organizationMemberships,
   organizations,
 } from '@codex/database/schema';
@@ -33,6 +39,7 @@ import type {
   MediaUseLiveReason,
   MediaUseSlot,
 } from '@codex/shared-types';
+import { PATH_CONFIG } from '@codex/transcoding';
 import { inArray, type SQL, sql } from 'drizzle-orm';
 import {
   MediaInUseError,
@@ -73,6 +80,9 @@ export const MEDIA_JSON_REFERENCES = ['courses.guide.portraitMediaId'] as const;
 const UUID_PATTERN =
   '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$';
 
+/** The folder segment between a poster's creator and media ids (`getMediaThumbnailPrefix`). */
+const POSTER_FOLDER = `/${PATH_CONFIG.MEDIA_THUMBNAILS_FOLDER}/`;
+
 /** One use, as the lookup returns it. */
 export interface MediaUseRow {
   media_id: string;
@@ -109,6 +119,13 @@ export interface SqlExecutor {
  * Soft-deleted content and courses are not uses, nor are courses and intro
  * videos of a deleted org (nobody can reach them). The course columns have
  * no indexes: one lateral unpivot reads `courses` once, not once per id.
+ *
+ * A thumbnail use starts from the media row: only its OWN creator's content,
+ * holding a URL inside exactly the folder the purge deletes,
+ * `/{creatorId}/media-thumbnails/{mediaId}/`. Any URL on the CDN passes the
+ * thumbnail's write check, so another creator could otherwise publish one of
+ * this creator's poster URLs and make the video impossible to delete. Their
+ * thumbnail breaks after the purge instead: it was never theirs.
  */
 function usesQuery(mediaIds: readonly string[]): SQL {
   const ids = [...mediaIds];
@@ -125,6 +142,22 @@ function usesQuery(mediaIds: readonly string[]): SQL {
       FROM ${content}
       LEFT JOIN ${organizations} ON ${organizations.id} = ${content.organizationId}
      WHERE ${inArray(content.mediaItemId, ids)} AND ${content.deletedAt} IS NULL
+    UNION ALL
+    SELECT ${mediaItems.id}, 'content'::text, 'thumbnail'::text, ${content.id}, ${content.title}::text,
+           ${content.contentType}::text,
+           ${content.organizationId}, ${organizations.name}::text,
+           ${organizations.slug}::text, ${content.creatorId}::text,
+           (${content.status} = 'published' OR ${content.publishedAt} IS NOT NULL),
+           CASE WHEN ${content.status} = 'published' THEN 'published'
+                WHEN ${content.publishedAt} IS NOT NULL THEN 'bought' END,
+           NULL::uuid
+      FROM ${mediaItems}
+      JOIN ${content} ON ${content.creatorId} = ${mediaItems.creatorId}
+       AND strpos(${content.thumbnailUrl},
+                  '/' || ${mediaItems.creatorId} || ${POSTER_FOLDER}::text || ${mediaItems.id}::text || '/') > 0
+      LEFT JOIN ${organizations} ON ${organizations.id} = ${content.organizationId}
+     WHERE ${inArray(mediaItems.id, ids)} AND ${content.deletedAt} IS NULL
+       AND ${content.mediaItemId} IS DISTINCT FROM ${mediaItems.id}
     UNION ALL
     SELECT s.media_id, 'course'::text, s.slot, ${courses.id}, ${courses.title}::text,
            NULL::text, ${courses.organizationId}, ${organizations.name}::text,

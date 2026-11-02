@@ -8,6 +8,10 @@
   (A5: offered for every item here, so every tile honours it). The lead's
   picture is the layout's moving one: it drifts gently inside its frame.
 
+  An item's figure leads its name where its mark would sit (Codex-61zsk.73),
+  on a tile with no picture, set as BenefitsBlock sets every layout's; the
+  lead tile's is as large as its name.
+
   Wide, six columns; from 36rem, two, the lead across both; narrower, one.
 -->
 <script lang="ts">
@@ -37,6 +41,7 @@
 
 <ul class="benefits-bento" data-count={items.length}>
   {#each items as item, index (index)}
+    {@const figure = images[index] ? undefined : item.figure}
     <li
       class="benefits-bento__tile"
       data-tile={tiles[index]}
@@ -68,8 +73,8 @@
         </div>
       {/if}
       <div class="benefits-bento__words">
-        {#if item.mark}<span class="benefits-bento__mark"><Mark mark={item.mark} /></span>{/if}
-        <Heading {level} size="title" text={item.title} type="benefits" />
+        {#if item.mark && !figure}<span class="benefits-bento__mark"><Mark mark={item.mark} /></span>{/if}
+        <Heading {level} size="title" text={item.title} type="benefits" lead={figure} />
         {#if item.detail}<p class="benefits-bento__detail">{item.detail}</p>{/if}
       </div>
     </li>
@@ -173,6 +178,17 @@
     --lp-tracking-title: var(--lp-tracking-heading);
     --lp-measure-unit: var(--lp-zero-heading);
     max-inline-size: calc(18 * var(--lp-measure-unit));
+  }
+
+  /* A figure keeps the step its mark had above the name. */
+  .benefits-bento__words :global(.lp-heading__lead) {
+    margin-block-end: var(--space-2);
+  }
+
+  /* The lead's figure stands at its name's heading size: halfway from
+     title to heading, it would be smaller than the words it leads. */
+  .benefits-bento__tile[data-lead] :global(.lp-heading__lead) {
+    font-size: 1em;
   }
 
   /* global.css caps every `p` at 65ch and spaces it; a tile sets its own. */

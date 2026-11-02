@@ -22,6 +22,7 @@
  * the manifest and `loadSource` would never be called.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { logger } from '$lib/observability';
 
 const loadSource = vi.fn();
 const attachMedia = vi.fn();
@@ -322,6 +323,24 @@ describe('createHlsPlayer — recovery', () => {
     (media as { paused: boolean }).paused = true;
     report({ type: 'mediaError', details: 'bufferAppendError' });
     expect(once).not.toHaveBeenCalled();
+  });
+
+  // A player ignores the AbortError the recovery gives its own pending play,
+  // so a play-on refused here is the only trace a recovery failed.
+  it('a recovered film whose play-on is refused logs it, by the error’s name alone', async () => {
+    const warned = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    const { media, report } = await player();
+    (media as { paused: boolean }).paused = false;
+    vi.mocked(media.play).mockRejectedValueOnce(
+      new DOMException(`Not now: ${MANIFEST}`, 'NotAllowedError')
+    );
+    report({ type: 'mediaError', details: 'bufferAppendError' });
+    const [, attached] = once.mock.calls[0] as [string, () => void];
+    attached();
+    await vi.waitFor(() => expect(warned).toHaveBeenCalledTimes(1));
+    expect(warned).toHaveBeenCalledWith('player.recover_play_failed', {
+      name: 'NotAllowedError',
+    });
   });
 
   it('a media error past recovery is a media fault, not a browser gap', async () => {

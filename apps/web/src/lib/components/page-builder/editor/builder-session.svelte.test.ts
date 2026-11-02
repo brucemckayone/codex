@@ -66,6 +66,8 @@ vi.mock('$lib/remote/journeys.remote', () => ({
     remotes.getCourseMonetisation(input),
   updateCourseMonetisation: (input: unknown) =>
     remotes.updateCourseMonetisation(input),
+  // The store re-reads the plan's price changes after a re-price.
+  getCoursePlanPriceChanges: () => ({ refresh: async () => {} }),
 }));
 vi.mock('$lib/remote/media.remote', () => ({
   listMedia: vi.fn(async () => ({ items: [] })),

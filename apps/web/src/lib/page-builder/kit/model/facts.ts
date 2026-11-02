@@ -3,10 +3,10 @@
  * curriculum it renders (`context.stages`).
  *
  * `courseFacts` is the ONE count of the course's shape (Codex-61zsk.73): the
- * hero's facts line, the pricing block's "What's included", the numbers
- * block's live figures and the checkout's summary all read their stages,
- * practices, length and mix of kinds from it, so no two of them can disagree
- * about the course, nor with its curriculum section.
+ * hero's and the benefits' facts lines, the pricing block's "What's
+ * included", the numbers block's live figures and the checkout's summary all
+ * read their stages, practices, length and mix of kinds from it, so no two of
+ * them can disagree about the course, nor with its curriculum section.
  */
 import type {
   JourneyContentType,
@@ -41,7 +41,7 @@ export interface CourseFacts {
 const KINDS: readonly JourneyContentType[] = ['video', 'audio', 'written'];
 
 /** The kinds a practice is played for a length, rather than read. */
-export const TIMED: readonly JourneyContentType[] = ['video', 'audio'];
+const TIMED: readonly JourneyContentType[] = ['video', 'audio'];
 
 /** A length somebody measured, as the curriculum's own length line reads one. */
 function measured(seconds: number | null | undefined): seconds is number {
@@ -79,6 +79,26 @@ export function courseFacts(stages: readonly FactStage[]): CourseFacts {
 }
 
 /**
+ * How long the course's timed practices run, naming the kinds that were
+ * timed so a course with readings never claims their time too: "5 hr 40 min
+ * of video and audio". Nothing where `courseFacts` cannot tell it. The
+ * benefits line and pricing's "What's included" both say it, in these words.
+ */
+export function lengthFact(course: CourseFacts): string | null {
+  if (course.seconds === null) return null;
+  const timed = TIMED.filter((kind) => course.kinds[kind] > 0);
+  return COPY.course.length(course.seconds, timed);
+}
+
+/** The course's shape, a count of nothing left out: "3 stages · 4 practices". */
+function shapeFacts({ stages, practices }: CourseFacts): string[] {
+  const facts: string[] = [];
+  if (stages > 0) facts.push(COPY.course.stages(stages));
+  if (practices > 0) facts.push(COPY.course.practices(practices));
+  return facts;
+}
+
+/**
  * The hero's facts line (3b round 1): the course's shape and its way in, so a
  * visitor knows both at once — "3 stages · 4 practices · from £15 per month".
  *
@@ -89,10 +109,7 @@ export function courseFacts(stages: readonly FactStage[]): CourseFacts {
  * left out, and a page with nothing to say draws no line at all.
  */
 export function heroFacts(context: JourneySalesContext): string[] {
-  const facts: string[] = [];
-  const { stages, practices } = courseFacts(context.stages);
-  if (stages > 0) facts.push(COPY.course.stages(stages));
-  if (practices > 0) facts.push(COPY.course.practices(practices));
+  const facts = shapeFacts(courseFacts(context.stages));
 
   const view = pricingView(context, {});
   const [first, ...rest] = view.paths;
@@ -104,5 +121,22 @@ export function heroFacts(context: JourneySalesContext): string[] {
     const price = priceWithCadence(lowest);
     facts.push(rest.length > 0 ? COPY.hero.from(price) : price);
   }
+  return facts;
+}
+
+/**
+ * The benefits' facts line (Codex-61zsk.73): what the course holds — "6
+ * stages · 24 practices · 2 hr 41 min of video and audio". No price: that
+ * belongs to the offer.
+ *
+ * The length is told only when `courseFacts` can tell it (every video and
+ * audio practice measured), naming the kinds that were timed. A count of
+ * nothing is left out, and a course with nothing to count draws no line.
+ */
+export function benefitsFacts(context: JourneySalesContext): string[] {
+  const course = courseFacts(context.stages);
+  const facts = shapeFacts(course);
+  const length = lengthFact(course);
+  if (length) facts.push(length);
   return facts;
 }

@@ -467,6 +467,38 @@ describe('setup faults', () => {
       '6 uploads never finished'
     );
   });
+
+  it('says RunPod has no worker for a job still queued at the last ask (Codex-t359w)', async () => {
+    const { alerts, mailer, settled } = setup();
+
+    alerts.jobNotStarted('media-7');
+    await settled();
+
+    const [owner] = sent(mailer, 'transcoding-owner-alert');
+    expect(owner?.to).toBe(PLATFORM_SUPPORT_EMAIL);
+    expect(owner?.data.headline).toBe(
+      'Uploads are waiting: RunPod has no worker for them'
+    );
+    expect(owner?.data.summary).toContain('queued at RunPod for 10 minutes');
+    expect(owner?.data.details).toContain('media-7');
+    expect(sent(mailer, 'transcoding-failed')).toHaveLength(0);
+  });
+
+  it('mails a job not started once a day, however many are queued', async () => {
+    const ledger = memoryLedger();
+    const { alerts, mailer, settled } = setup({ ledger });
+
+    alerts.jobNotStarted('media-7');
+    alerts.jobNotStarted('media-8');
+    await settled();
+
+    expect(mailer).toHaveBeenCalledTimes(1);
+    expect(ledger.claim).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^transcoding-alert:job_not_started:\d{4}-\d{2}-\d{2}$/
+      )
+    );
+  });
 });
 
 describe('setup faults: once per fault per UTC day', () => {

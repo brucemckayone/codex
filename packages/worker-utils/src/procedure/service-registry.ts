@@ -706,6 +706,22 @@ export async function createServiceRegistry(
           db: getSharedDb(),
           environment: getEnvironment(),
           r2: mediaR2,
+          // The posters' bucket, for the daily file purge (Codex-9seq3). No
+          // MEDIA_BUCKET fallback, unlike the image getters: no poster is
+          // there, so a fallback would purge nothing and stamp it done.
+          assets: env.ASSETS_BUCKET
+            ? new R2Service(env.ASSETS_BUCKET)
+            : undefined,
+          // Takes purged posters off the edge, with both secrets set, as
+          // identity's account deletion does (Codex-kk9nv.15).
+          cdnPurger:
+            env.CF_ZONE_ID && env.CF_API_TOKEN
+              ? new CdnCachePurger({
+                  zoneId: env.CF_ZONE_ID,
+                  apiToken: env.CF_API_TOKEN,
+                })
+              : undefined,
+          assetsPublicUrlBase: env.R2_PUBLIC_URL_BASE,
           mediaStatus: getMediaStatusPublisher(),
         });
       }
@@ -1389,7 +1405,8 @@ export async function createServiceRegistry(
      * Codex-2hxff.28: platform support's refunds. The shared per-request
      * client, because settling a failed refund is one transaction; the lazy
      * Stripe proxy, so the queue's DB-only reads never need the key. The
-     * purchase service gives a re-paid failed refund's access back (Q5d).
+     * purchase service gives a re-paid failed refund's access back (Q5d);
+     * the fee service's cache is invalidated by "told another way".
      */
     get support() {
       if (!_support) {
@@ -1398,6 +1415,7 @@ export async function createServiceRegistry(
           environment: getEnvironment(),
           stripe: getLazyStripeClient(),
           purchase: registry.purchase,
+          feeConfig: registry.feeConfig,
         });
       }
       return _support;

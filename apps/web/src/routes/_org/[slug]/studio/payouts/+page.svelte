@@ -40,6 +40,7 @@
   import AvatarFallback from '$lib/components/ui/Avatar/AvatarFallback.svelte';
   import KPICard from '$lib/components/studio/analytics/KPICard.svelte';
   import CreatorBreakdownRail from '$lib/components/studio/payouts/CreatorBreakdownRail.svelte';
+  import UpcomingFeeNote from '$lib/components/studio/UpcomingFeeNote.svelte';
   import {
     getMyConnectStatus,
     getMyStripeBalance,
@@ -629,6 +630,10 @@
       title={m.payouts_title()}
       description={m.payouts_description()}
     />
+
+    <!-- A fee rise that hasn't started (Codex-2hxff.33 F5, N3): the same
+         note and read as Billing, above the bank payouts and money held. -->
+    {#if orgId}<UpcomingFeeNote organizationId={orgId} />{/if}
 
     <div class="payouts-grid">
     <div class="payouts-main">

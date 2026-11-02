@@ -17,12 +17,19 @@ import type {
   CheckedOwedToCreator,
   CreatorDebtPerson,
   FailedRefundItem,
+  FeeChangeCard,
+  FeeNoticeItem,
+  HeldPriceMove,
   OwedToCreatorItem,
+  PriceChangeRestarted,
+  PriceMoveRetried,
   RefundPreview,
   ResolvedCreatorDebt,
   ResolvedFailedRefund,
   ResolvedOwedToCreator,
+  StoppedPriceChange,
   SupportQueueCounts,
+  ToldAnotherWayResult,
 } from '@codex/admin';
 import { type Mock, vi } from 'vitest';
 import type { SupportCommandFailure } from '$lib/remote/support-failure';
@@ -70,6 +77,13 @@ const previews = new Map<string, QuerySlot<RefundPreview>>();
 const failedLists = new Map<string, QuerySlot<Paginated<FailedRefundItem>>>();
 const debtLists = new Map<string, QuerySlot<Paginated<CreatorDebtPerson>>>();
 const owedLists = new Map<string, QuerySlot<Paginated<OwedToCreatorItem>>>();
+const feeChangeLists = new Map<string, QuerySlot<Paginated<FeeChangeCard>>>();
+const feeNoticeLists = new Map<string, QuerySlot<Paginated<FeeNoticeItem>>>();
+const heldMoveLists = new Map<string, QuerySlot<Paginated<HeldPriceMove>>>();
+const stoppedChangeLists = new Map<
+  string,
+  QuerySlot<Paginated<StoppedPriceChange>>
+>();
 let counts = makeSlot<SupportQueueCounts>();
 
 export interface PreviewArgs {
@@ -105,6 +119,20 @@ export const listOwedToCreators = vi.fn(
   (args: { page?: number; limit?: number }) =>
     slotFor(owedLists, String(args.page ?? 1))
 );
+export const listFeeChanges = vi.fn((args: { page?: number; limit?: number }) =>
+  slotFor(feeChangeLists, String(args.page ?? 1))
+);
+export const listFeeNotices = vi.fn((args: { page?: number; limit?: number }) =>
+  slotFor(feeNoticeLists, String(args.page ?? 1))
+);
+export const listHeldPriceMoves = vi.fn(
+  (args: { page?: number; limit?: number }) =>
+    slotFor(heldMoveLists, String(args.page ?? 1))
+);
+export const listStoppedPriceChanges = vi.fn(
+  (args: { page?: number; limit?: number }) =>
+    slotFor(stoppedChangeLists, String(args.page ?? 1))
+);
 
 // ── command() ───────────────────────────────────────────────────────────
 type IssueInput = {
@@ -139,6 +167,24 @@ export const resolveOwedToCreator: Mock<
 export const checkOwedToCreator: Mock<
   (input: { creditId: string }) => Promise<Answer<CheckedOwedToCreator>>
 > = vi.fn();
+export const markToldAnotherWay: Mock<
+  (input: {
+    noticeId: string;
+    body: { note: string };
+  }) => Promise<Answer<ToldAnotherWayResult>>
+> = vi.fn();
+export const retryPriceMove: Mock<
+  (input: { moveId: string }) => Promise<Answer<PriceMoveRetried>>
+> = vi.fn();
+export const closePriceMove: Mock<
+  (input: {
+    moveId: string;
+    body: { resolution: string; note: string };
+  }) => Promise<Answer<HeldPriceMove>>
+> = vi.fn();
+export const restartPriceChange: Mock<
+  (input: { changeId: string }) => Promise<Answer<PriceChangeRestarted>>
+> = vi.fn();
 
 // ── test controls ───────────────────────────────────────────────────────
 export const chargeSlot = (chargeId: string) => slotFor(charges, chargeId);
@@ -149,6 +195,13 @@ export const previewSlot = (args: PreviewArgs) =>
 export const failedSlot = (page = 1) => slotFor(failedLists, String(page));
 export const debtsSlot = (page = 1) => slotFor(debtLists, String(page));
 export const owedSlot = (page = 1) => slotFor(owedLists, String(page));
+export const feeChangesSlot = (page = 1) =>
+  slotFor(feeChangeLists, String(page));
+export const feeNoticesSlot = (page = 1) =>
+  slotFor(feeNoticeLists, String(page));
+export const heldMovesSlot = (page = 1) => slotFor(heldMoveLists, String(page));
+export const stoppedChangesSlot = (page = 1) =>
+  slotFor(stoppedChangeLists, String(page));
 export const countsSlot = () => counts;
 export const previewKeysAsked = () => [...previews.keys()];
 
@@ -168,6 +221,12 @@ export function failure(
     maxCents: null,
     disputeStatus: null,
     reason: null,
+    voidReason: null,
+    voidedAt: null,
+    state: null,
+    toldAt: null,
+    acceptedAt: null,
+    toldByName: null,
     ...overrides,
   };
 }
@@ -192,6 +251,10 @@ export function reset() {
   failedLists.clear();
   debtLists.clear();
   owedLists.clear();
+  feeChangeLists.clear();
+  feeNoticeLists.clear();
+  heldMoveLists.clear();
+  stoppedChangeLists.clear();
   counts = makeSlot<SupportQueueCounts>();
   for (const fn of [
     getSupportCharge,
@@ -201,6 +264,10 @@ export function reset() {
     listFailedRefunds,
     listCreatorDebts,
     listOwedToCreators,
+    listFeeChanges,
+    listFeeNotices,
+    listHeldPriceMoves,
+    listStoppedPriceChanges,
   ]) {
     fn.mockClear();
   }
@@ -209,4 +276,8 @@ export function reset() {
   resolveCreatorDebt.mockReset();
   resolveOwedToCreator.mockReset();
   checkOwedToCreator.mockReset();
+  markToldAnotherWay.mockReset();
+  retryPriceMove.mockReset();
+  closePriceMove.mockReset();
+  restartPriceChange.mockReset();
 }

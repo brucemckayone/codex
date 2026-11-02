@@ -23,11 +23,13 @@ import { AUTH_ROLES } from '@codex/constants';
 import {
   stripeChargeIdSchema,
   supportChargeSearchQuerySchema,
+  supportClosePriceMoveSchema,
   supportIssueRefundSchema,
   supportQueueQuerySchema,
   supportResolveCreatorDebtSchema,
   supportResolveCreditSchema,
   supportResolveFailedRefundSchema,
+  supportToldAnotherWaySchema,
 } from '@codex/validation';
 import { error, type RequestEvent } from '@sveltejs/kit';
 import { z } from 'zod';
@@ -119,7 +121,7 @@ export const getRefundPreview = query(
 );
 
 /**
- * The queue's three counts, for the nav badge. It takes nothing, but has a
+ * The queue's counts, one per tab, for the nav badge. It takes nothing, but has a
  * schema all the same: kit refuses an argument to a schema-less query with a
  * 400 before the guard could run.
  */
@@ -155,6 +157,48 @@ export const listOwedToCreators = query(
   async (input) => {
     const api = supportApi();
     return forwardClientErrors(() => api.listOwedToCreators(input));
+  }
+);
+
+/**
+ * Fee rises that haven't started, with how many are told (Codex-2hxff.33):
+ * Queue › Fee notices' cards. Each stays until its date.
+ */
+export const listFeeChanges = query(
+  ownerOnly(supportQueueQuerySchema),
+  async (input) => {
+    const api = supportApi();
+    return forwardClientErrors(() => api.listFeeChanges(input));
+  }
+);
+
+/** The people a fee rise is waiting for, oldest first. Joiners too, flagged. */
+export const listFeeNotices = query(
+  ownerOnly(supportQueueQuerySchema),
+  async (input) => {
+    const api = supportApi();
+    return forwardClientErrors(() => api.listFeeNotices(input));
+  }
+);
+
+/**
+ * Subscribers held from a new price after their automatic tries, and those
+ * Retry queued until the run takes them (Codex-2hxff.85, .86).
+ */
+export const listHeldPriceMoves = query(
+  ownerOnly(supportQueueQuerySchema),
+  async (input) => {
+    const api = supportApi();
+    return forwardClientErrors(() => api.listHeldPriceMoves(input));
+  }
+);
+
+/** Price changes the run stopped because every first email was refused. */
+export const listStoppedPriceChanges = query(
+  ownerOnly(supportQueueQuerySchema),
+  async (input) => {
+    const api = supportApi();
+    return forwardClientErrors(() => api.listStoppedPriceChanges(input));
   }
 );
 
@@ -251,6 +295,88 @@ export const checkOwedToCreator = command(
     const api = supportApi();
     try {
       const result = await api.checkOwedToCreator(creditId);
+      return { outcome: 'done' as const, result };
+    } catch (error) {
+      return toSupportFailure(error);
+    }
+  }
+);
+
+/**
+ * Mark a person told another way, with the required note (Codex-2hxff.33).
+ * Refusals come back by code: `FEE_CHANGE_NOT_WAITING` (the rise started or
+ * was called off), `FEE_NOTICE_ALREADY_TOLD` (a second press after a lost
+ * answer reads as done) or `FEE_NOTICE_NOT_NEEDED`.
+ */
+export const markToldAnotherWay = command(
+  ownerOnly(
+    z.object({
+      noticeId: z.string().uuid(),
+      body: supportToldAnotherWaySchema,
+    })
+  ),
+  async ({ noticeId, body }) => {
+    const api = supportApi();
+    try {
+      const result = await api.markToldAnotherWay(noticeId, body);
+      return { outcome: 'done' as const, result };
+    } catch (error) {
+      return toSupportFailure(error);
+    }
+  }
+);
+
+/**
+ * Queue a held price move for the next hourly run: the email again if none
+ * was accepted, else the Stripe write only (Q5). A database flip: nothing is
+ * sent from here. Refused with `PRICE_MOVE_NOT_HELD` and its `reason`.
+ */
+export const retryPriceMove = command(
+  ownerOnly(z.object({ moveId: z.string().uuid() })),
+  async ({ moveId }) => {
+    const api = supportApi();
+    try {
+      const result = await api.retryPriceMove(moveId);
+      return { outcome: 'done' as const, result };
+    } catch (error) {
+      return toSupportFailure(error);
+    }
+  }
+);
+
+/**
+ * Close a held price move without a retry: moved by hand, or not needed,
+ * with the required note. It moves nobody.
+ */
+export const closePriceMove = command(
+  ownerOnly(
+    z.object({
+      moveId: z.string().uuid(),
+      body: supportClosePriceMoveSchema,
+    })
+  ),
+  async ({ moveId, body }) => {
+    const api = supportApi();
+    try {
+      const result = await api.closePriceMove(moveId, body);
+      return { outcome: 'done' as const, result };
+    } catch (error) {
+      return toSupportFailure(error);
+    }
+  }
+);
+
+/**
+ * Restart a stopped price change once its cause is fixed (Q6): the next run
+ * sets it running. A repeat answers the change unchanged; one that isn't
+ * stopped is refused with `PRICE_CHANGE_NOT_STOPPED`.
+ */
+export const restartPriceChange = command(
+  ownerOnly(z.object({ changeId: z.string().uuid() })),
+  async ({ changeId }) => {
+    const api = supportApi();
+    try {
+      const result = await api.restartPriceChange(changeId);
       return { outcome: 'done' as const, result };
     } catch (error) {
       return toSupportFailure(error);

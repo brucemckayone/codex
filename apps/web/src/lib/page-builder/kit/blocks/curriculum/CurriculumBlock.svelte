@@ -75,7 +75,7 @@
   {:else if layout === 'accordion'}
     <StageAccordion {stages} {level} anchor={section.anchor} />
   {:else if layout === 'cards'}
-    <StageCards {stages} {level} />
+    <StageCards {stages} {level} anchor={section.anchor} />
   {:else if layout === 'map'}
     <StageMap {stages} {level} />
   {:else if layout === 'layered'}

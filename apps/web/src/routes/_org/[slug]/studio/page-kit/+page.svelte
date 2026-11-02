@@ -28,10 +28,14 @@
       reading still applies, so an unknown one draws nothing new)
     ?faces=1 (each testimonials section's first written quote gets a photo,
       so the course's own show their initials)   ?marks=1 (each benefit
-      takes the kit's marks in turn)
+      takes the kit's marks in turn)   ?figures=1 (each benefit takes a
+      figure in its mark's place: 6, 24, £12, 98%)
     ?film=<HLS URL> (every clip, the intro, reel, guide and hero, plays this
       stream, so the players can be pressed here: a real local preview, e.g.
       dev-cdn's `{creatorId}/hls/{mediaId}/preview/preview.m3u8`)
+      &kind=audio (the clips are sound, so the preview draws its listening
+      card)   &length=<seconds> (the media's length, with the preview cut
+      from it as the transcoder does, so the lines can say how long)
     ?edit=1 (inline-edit attributes on)   ?chrome=0 (hide the studio chrome)
 -->
 <script lang="ts">
@@ -41,6 +45,7 @@
   import { brandEditor } from '$lib/brand-editor';
   import type { BrandTokenOverrides } from '$lib/page-builder';
   import { orgGrounds, orgShader } from '$lib/page-builder/org-grounds';
+  import { orgLogo } from '$lib/page-builder/render/org-logo';
   import {
     COLOUR_SCHEME_IDS,
     isColourSchemeId,
@@ -136,6 +141,10 @@
   const shader = $derived(
     orgShader(page.data.org, brandEditor.isOpen ? brandEditor.pending : null)
   );
+  // The org's logo, which the hero sets above its words (Codex-61zsk.73).
+  const logo = $derived(
+    orgLogo(page.data.org, brandEditor.isOpen ? brandEditor.pending : null)
+  );
   const param = (key: string) => params.get(key) ?? '';
 
   const style = $derived.by(() => {
@@ -200,12 +209,29 @@
   /** `?film=<HLS URL>`: the one stream every clip plays, its poster the hero's photo. */
   const clip = $derived.by(() => {
     const playlistUrl = param('film');
-    return playlistUrl ? { playlistUrl, posterUrl: image } : null;
+    if (!playlistUrl) return null;
+    const seconds = Number(param('length'));
+    const length = Number.isFinite(seconds) && seconds > 0 ? seconds : null;
+    return {
+      playlistUrl,
+      posterUrl: image,
+      mediaType: param('kind') === 'audio' ? ('audio' as const) : ('video' as const),
+      durationSeconds: length,
+      // As the transcoder cuts it (`@codex/access` previewLength).
+      previewSeconds: length === null ? null : Math.min(30, length - Math.floor(length / 10)),
+    };
   });
 
-  /** `?faces=1`, `?marks=1`: the items' own controls, drawn on the sample (Codex-61zsk.58). */
+  /**
+   * `?faces=1`, `?marks=1`, `?figures=1`: the items' own controls, drawn on
+   * the sample (Codex-61zsk.58, .73). A figure takes its mark's place, so
+   * `figures` with `marks` shows the figures.
+   */
   const faces = $derived(param('faces') === '1');
   const marks = $derived(param('marks') === '1');
+  const figures = $derived(param('figures') === '1');
+  /** The kinds of figure a creator types, in turn. */
+  const SAMPLE_FIGURES = ['6', '24', '£12', '98%'] as const;
 
   /** Each entry of a section's `items`, changed by `edit`. */
   function eachItem(
@@ -214,6 +240,29 @@
   ): KitSection {
     const items = Array.isArray(section.props.items) ? section.props.items : [];
     return { ...section, props: { ...section.props, items: items.map(edit) } };
+  }
+
+  /** A section with the items' asked-for controls drawn on it. */
+  function withItemControls(section: KitSection): KitSection {
+    if (faces && section.type === 'testimonials') {
+      return eachItem(section, (entry, index) =>
+        index === 0 ? { ...entry, photo: pictures[0].image } : entry
+      );
+    }
+    if (section.type !== 'benefits') return section;
+    if (figures) {
+      return eachItem(section, (entry, index) => ({
+        ...entry,
+        figure: SAMPLE_FIGURES[index % SAMPLE_FIGURES.length],
+      }));
+    }
+    if (marks) {
+      return eachItem(section, (entry, index) => ({
+        ...entry,
+        mark: MARKS[index % MARKS.length],
+      }));
+    }
+    return section;
   }
 
   /** `?dials=colour:muted,corners:rounder`: unknown dials and steps are dropped. */
@@ -251,22 +300,8 @@
         }
       : pictured;
     const itemised =
-      faces || marks
-        ? {
-            ...controlled,
-            sections: controlled.sections.map((section) =>
-              faces && section.type === 'testimonials'
-                ? eachItem(section, (entry, index) =>
-                    index === 0 ? { ...entry, photo: pictures[0].image } : entry
-                  )
-                : marks && section.type === 'benefits'
-                  ? eachItem(section, (entry, index) => ({
-                      ...entry,
-                      mark: MARKS[index % MARKS.length],
-                    }))
-                  : section
-            ),
-          }
+      faces || marks || figures
+        ? { ...controlled, sections: controlled.sections.map(withItemControls) }
         : controlled;
     const sample = dials ? { ...itemised, design: { ...itemised.design, dials } } : itemised;
     if (!only) return sample;
@@ -408,6 +443,7 @@
     {edit}
     orgGrounds={grounds}
     orgShader={shader}
+    orgLogo={logo}
     {proofType}
   />
 </div>

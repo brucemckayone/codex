@@ -871,6 +871,23 @@ export const getCourseMonetisation = query(
   }
 );
 
+/**
+ * How the course plan's price changes are going (Codex-2hxff.86), for the
+ * Offer panel's note. Throws rather than answering `[]` off an org host: an
+ * empty list would read as "nothing is going out".
+ */
+export const getCoursePlanPriceChanges = query(
+  monetisationSchema,
+  async ({ courseId }) => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) error(400, 'Price changes are read within an organization');
+    const page = await withServiceErrors(() =>
+      ctx.api.courses.planPriceChanges(ctx.orgId, courseId)
+    );
+    return page.items;
+  }
+);
+
 const courseOfferSchema = z.object({ courseId: z.string().uuid() });
 
 /**

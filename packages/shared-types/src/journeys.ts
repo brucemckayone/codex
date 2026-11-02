@@ -1278,7 +1278,10 @@ export interface CourseSellPreviewClip {
   playlistUrl: string;
   /** Optional decorative poster shown before play. */
   posterUrl: string | null;
-  /** Advisory duration (seconds) for a "N sec preview" affordance. */
+  /**
+   * The whole media's length (seconds), advisory. What the preview plays is
+   * `previewSeconds`.
+   */
   durationSeconds: number | null;
   /**
    * The FULL film may be asked for (owner P10, "Full film unless it's paid"):
@@ -1292,6 +1295,23 @@ export interface CourseSellPreviewClip {
    * stays the preview.
    */
   fullFilm?: boolean;
+  /**
+   * What the media is, so the page can say "watch" or "listen" and give an
+   * audio clip its listening card (Codex-61zsk.73).
+   *
+   * OPTIONAL-additive: an older worker deployment omits it, and the page
+   * names no kind.
+   */
+  mediaType?: 'video' | 'audio';
+  /**
+   * How long the public preview runs, as the transcoder cuts it: from a
+   * tenth of the way in, for up to 30 seconds (`previewLength`). Null when
+   * the media's length is unknown.
+   *
+   * OPTIONAL-additive: an older worker deployment omits it, and a clip that
+   * plays its preview says no length.
+   */
+  previewSeconds?: number | null;
 }
 
 /**

@@ -12,7 +12,7 @@
  * - Soft deletes only (sets deleted_at)
  */
 
-import type { R2Service } from '@codex/cloudflare-clients';
+import type { CdnCachePurger, R2Service } from '@codex/cloudflare-clients';
 import {
   MEDIA_STATUS,
   MIME_TO_EXTENSION,
@@ -40,6 +40,7 @@ import {
 import type { MediaUsage, PaginatedListResponse } from '@codex/shared-types';
 import {
   getHlsPrefix,
+  getMediaThumbnailPrefix,
   getOriginalKey,
   isValidR2Key,
   type MediaStatusPublisher,
@@ -99,16 +100,29 @@ export interface MediaFilesPurgeReport {
 }
 
 /**
- * The MEDIA_BUCKET folders a media item's files live in: the original, the
- * HLS ladder (its 30-second preview is inside it), the poster and the
- * waveform.
+ * Every folder a media item's files live in, with its bucket. MEDIA_BUCKET
+ * holds the original, the HLS ladder (its 30-second preview is inside it) and
+ * the waveform. The poster frames are in ASSETS_BUCKET, where the transcoder
+ * writes them for the public CDN; until Codex-9seq3 the purge looked for them
+ * in a MEDIA_BUCKET `thumbnails/` folder nothing writes, so a deleted video's
+ * posters stayed public for good.
  */
-function mediaFilePrefixes(creatorId: string, mediaId: string): string[] {
+function mediaFileFolders(
+  creatorId: string,
+  mediaId: string,
+  buckets: { media: R2Service; assets: R2Service }
+): { r2: R2Service; prefix: string }[] {
   return [
-    `${creatorId}/${PATH_CONFIG.ORIGINALS_FOLDER}/${mediaId}/`,
-    getHlsPrefix(creatorId, mediaId),
-    `${creatorId}/${PATH_CONFIG.THUMBNAILS_FOLDER}/${mediaId}/`,
-    `${creatorId}/${PATH_CONFIG.WAVEFORMS_FOLDER}/${mediaId}/`,
+    {
+      r2: buckets.media,
+      prefix: `${creatorId}/${PATH_CONFIG.ORIGINALS_FOLDER}/${mediaId}/`,
+    },
+    { r2: buckets.media, prefix: getHlsPrefix(creatorId, mediaId) },
+    {
+      r2: buckets.media,
+      prefix: `${creatorId}/${PATH_CONFIG.WAVEFORMS_FOLDER}/${mediaId}/`,
+    },
+    { r2: buckets.assets, prefix: getMediaThumbnailPrefix(creatorId, mediaId) },
   ];
 }
 
@@ -177,6 +191,20 @@ interface MediaItemServiceConfig extends ServiceConfig {
   /** R2Service with signing config for presigned upload URLs. Optional in dev. */
   r2?: R2Service;
   /**
+   * ASSETS_BUCKET, where the transcoder writes the poster frames. Only the
+   * daily file purge uses it, and without it the purge removes nothing.
+   */
+  assets?: R2Service;
+  /**
+   * Takes a purged item's posters off Cloudflare's edge (Codex-9seq3): they
+   * are stored `immutable` for a year, and an R2 delete doesn't evict them.
+   * Absent, or without `assetsPublicUrlBase`: the purge logs the skipped
+   * eviction, at error in production.
+   */
+  cdnPurger?: Pick<CdnCachePurger, 'purgePrefixes'>;
+  /** `R2_PUBLIC_URL_BASE`, the CDN the posters are served from. */
+  assetsPublicUrlBase?: string;
+  /**
    * Live status for the creator's studio tabs (Codex-l2c48.9): told after a
    * write returned its row. Absent: nothing is published.
    */
@@ -199,11 +227,17 @@ interface MediaItemServiceConfig extends ServiceConfig {
  */
 export class MediaItemService extends BaseService {
   private readonly r2?: R2Service;
+  private readonly assets?: R2Service;
+  private readonly cdnPurger?: Pick<CdnCachePurger, 'purgePrefixes'>;
+  private readonly assetsPublicUrlBase?: string;
   private readonly mediaStatus?: MediaStatusPublisher;
 
   constructor(config: MediaItemServiceConfig) {
     super(config);
     this.r2 = config.r2;
+    this.assets = config.assets;
+    this.cdnPurger = config.cdnPurger;
+    this.assetsPublicUrlBase = config.assetsPublicUrlBase;
     this.mediaStatus = config.mediaStatus;
   }
   /**
@@ -631,11 +665,13 @@ export class MediaItemService extends BaseService {
    * 2. the claim, a conditional update stamping `filesPurgeStartedAt` on a
    *    row still deleted and still due (zero rows: restored, or deleted
    *    again, meanwhile). From here a restore is refused;
-   * 3. list and delete each of its prefixes in MEDIA_BUCKET, then stamp
-   *    `filesPurgedAt`;
+   * 3. list and delete each of its folders (in MEDIA_BUCKET, and its posters
+   *    in ASSETS_BUCKET), then stamp `filesPurgedAt`;
    * 4. on any failure, due again in a day. Only an item no R2 delete was
    *    sent for gets its claim back (restorable again); a half-removed one
    *    keeps it, and that later run finishes it.
+   *
+   * Then one edge-cache purge for the posters of every item it finished.
    *
    * Idempotent: the claim is conditional, and an absent key or an empty
    * prefix is not an error, so a finishing run deletes what is left.
@@ -652,13 +688,16 @@ export class MediaItemService extends BaseService {
       objectsDeleted: 0,
       durationMs: 0,
     };
-    const r2 = this.r2;
-    if (!r2) {
+    // Both buckets or nothing: a run with one would stamp items purged and
+    // leave the other bucket's files behind for good.
+    const { r2, assets } = this;
+    if (!r2 || !assets) {
       this.obs.error('media.files_purge_unavailable', {
-        reason: 'no media bucket',
+        reason: r2 ? 'no assets bucket' : 'no media bucket',
       });
       return report;
     }
+    const purgedItems: { id: string; creatorId: string }[] = [];
 
     try {
       const due = await this.db
@@ -716,13 +755,18 @@ export class MediaItemService extends BaseService {
         const progress: PurgeProgress = { attempted: false, deleted: 0 };
         let prefix = '';
         try {
-          for (prefix of mediaFilePrefixes(item.creatorId, item.id)) {
-            await deletePrefix(r2, prefix, progress);
+          for (const folder of mediaFileFolders(item.creatorId, item.id, {
+            media: r2,
+            assets,
+          })) {
+            prefix = folder.prefix;
+            await deletePrefix(folder.r2, prefix, progress);
           }
           await this.db
             .update(mediaItems)
             .set({ filesPurgedAt: new Date() })
             .where(eq(mediaItems.id, item.id));
+          purgedItems.push(item);
           report.purged++;
           report.objectsDeleted += progress.deleted;
           this.obs.info('media.files_purged', {
@@ -749,9 +793,53 @@ export class MediaItemService extends BaseService {
       });
     }
 
+    // After the R2 deletes: an edge purged first could fetch them back.
+    await this.purgePosterEdgeCache(purgedItems);
+
     report.durationMs = Date.now() - startedAt;
     this.obs.info('media.files_purge_run', { ...report });
     return report;
+  }
+
+  /**
+   * Take the purged items' posters off Cloudflare's edge, in one request (a
+   * run purges at most 25 items, and one request takes 100 prefixes), each
+   * prefix `{host}{path}/{creatorId}/media-thumbnails/{mediaId}`: the form a
+   * prefix purge takes, covering both poster layouts. Best effort and never
+   * throws: the files are already gone. Browser caches can't be purged.
+   */
+  private async purgePosterEdgeCache(
+    items: readonly { id: string; creatorId: string }[]
+  ): Promise<void> {
+    if (items.length === 0) return;
+    const skipped = 'media.files_edge_purge_skipped';
+    if (!this.cdnPurger || !this.assetsPublicUrlBase) {
+      // In production, the posters stay public until the edge evicts them.
+      const level = this.environment === 'production' ? 'error' : 'warn';
+      this.obs[level](skipped, {
+        reason: 'no CDN purge configured',
+        items: items.length,
+      });
+      return;
+    }
+    try {
+      const { host, pathname } = new URL(this.assetsPublicUrlBase);
+      const base = `${host}${pathname.replace(/\/+$/, '')}`;
+      const result = await this.cdnPurger.purgePrefixes(
+        items.map(
+          (item) =>
+            `${base}/${getMediaThumbnailPrefix(item.creatorId, item.id).replace(/\/$/, '')}`
+        )
+      );
+      if (!result.ok) {
+        this.obs.error(skipped, { reason: result.reason, items: items.length });
+      }
+    } catch (error) {
+      this.obs.error(skipped, {
+        reason: messageForLog(error),
+        items: items.length,
+      });
+    }
   }
 
   /**

@@ -73,7 +73,10 @@
 
    ── THE MARKS (hand-drawn, for a Style to place; masks, so no colour) ────
      --lp-mark-underline   under a heading (stretches to any width)
-     --lp-mark-circle      round a number (stretches to any box)
+     --lp-mark-circle      round a number (stretches to any box; a square
+                           one keeps it a circle)
+     --lp-mark-pill        round a number too long for a circle (stretches
+                           to any box)
      --lp-mark-scribble    a frame round an image (stretches to any box)
      --lp-mark-arrow       pointing up and right (keep its 3 / 2 shape)
    The pen keeps one width however far a mark stretches. A Style draws one
@@ -110,6 +113,7 @@
 .lp {
   --lp-mark-underline: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 20' preserveAspectRatio='none' fill='none' stroke='currentColor' stroke-width='3' stroke-linecap='round'%3E%3Cpath vector-effect='non-scaling-stroke' d='M3 12C46 6 98 8 138 7S185 5 197 8'/%3E%3Cpath vector-effect='non-scaling-stroke' d='M20 16C68 11 126 12 180 11'/%3E%3C/svg%3E");
   --lp-mark-circle: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 120' preserveAspectRatio='none' fill='none' stroke='currentColor' stroke-width='3' stroke-linecap='round'%3E%3Cpath vector-effect='non-scaling-stroke' d='M116 10C62 6 14 28 9 61C4 96 56 113 104 111C158 109 195 88 191 55C187 22 141 5 84 15'/%3E%3C/svg%3E");
+  --lp-mark-pill: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 300 100' preserveAspectRatio='none' fill='none' stroke='currentColor' stroke-width='3' stroke-linecap='round'%3E%3Cpath vector-effect='non-scaling-stroke' d='M60 5C150 1 230 3 268 7C306 11 306 89 268 94C200 100 100 99 40 95C-6 91 -6 10 66 6'/%3E%3C/svg%3E");
   --lp-mark-scribble: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200' preserveAspectRatio='none' fill='none' stroke='currentColor' stroke-width='3' stroke-linecap='round'%3E%3Cpath vector-effect='non-scaling-stroke' d='M4 9C62 5 138 4 196 7M191 3C195 68 196 132 193 197M197 192C138 195 62 196 3 193M8 198C4 132 3 68 6 2'/%3E%3C/svg%3E");
   --lp-mark-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 80' fill='none' stroke='currentColor' stroke-width='5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 66C26 32 60 18 104 25M88 10L105 25L89 41'/%3E%3C/svg%3E");
 }

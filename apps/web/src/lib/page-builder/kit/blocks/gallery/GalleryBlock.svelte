@@ -14,6 +14,15 @@
   `figcaption`, not a stand-in for the alt. A picture drawn wider than the
   medium file takes the large one (`pictureVariant`).
 
+  OPENING. Every picture, in every layout, is a button that opens the set in
+  the lightbox (GalleryLightbox, p3n §4) on that picture; closing it gives
+  focus back to the tile. The lightbox exists only while open, so the page's
+  markup and the canvas's stay the same, and on the canvas or a thumbnail a
+  press opens nothing: a click there belongs to the editor. A browser with no
+  modal `<dialog>` (Safari before 15.4), or one whose dialog refuses to open,
+  opens the picture's large file in a tab of its own instead, and where it
+  refuses the tab too, in this one.
+
   EMPTY. The public page keeps only the words. Wherever the section is only
   being looked at — the canvas, the layout picker, the section gallery, any
   still thumbnail (`.lp[data-lp-still]`) — the layout draws itself in the kit's
@@ -21,6 +30,7 @@
   points at a made-up image. While editing, the prompt sits over them.
 -->
 <script lang="ts">
+  import { logger } from '$lib/observability';
   import { hasHead } from '../../model/read';
   import { pageImageSrcset, resolvePageImageUrl, storedFocus } from '../../../page-images';
   import type { BlockProps } from '../../model/types';
@@ -28,9 +38,17 @@
   import Eyebrow from '../../primitives/Eyebrow.svelte';
   import Heading from '../../primitives/Heading.svelte';
   import Text from '../../primitives/Text.svelte';
-  import { type Picture, pictureSizes, pictureVariant } from './arrange';
+  import {
+    fullPicture,
+    type OpenPicture,
+    type Picture,
+    pictureSizes,
+    pictureVariant,
+  } from './arrange';
+  import { GALLERY_COPY } from './copy';
   import { GALLERY_EMPTY, galleryDefinition } from './definition';
   import GalleryGrid from './GalleryGrid.svelte';
+  import GalleryLightbox from './GalleryLightbox.svelte';
   import GalleryMosaic from './GalleryMosaic.svelte';
   import GalleryStrip from './GalleryStrip.svelte';
 
@@ -57,20 +75,71 @@
       alt: item.image.alt ?? '',
       caption: item.caption,
       focus: storedFocus(item.image),
+      full: fullPicture(item.image, context.mediaBaseUrl),
     }))
   );
   const plates = $derived<Picture[]>(
     Array.from({ length: PLATES[layout] }, () => ({ url: null, alt: '' }))
   );
+  /** Every picture has a file to show large: none do without a CDN base. */
+  const opens = $derived(pictures.every((picture) => picture.full));
+  /** The strip's and the lightbox's name for a screen reader: the heading, when there is one. */
+  const name = $derived(content.heading ?? GALLERY_COPY.pictures);
+
+  /** The picture the lightbox opened on, from 0; `null` while it is closed. */
+  let shown = $state<number | null>(null);
+  /** The tile it opened from, which takes focus back when it closes. */
+  let opener: HTMLElement | null = null;
+
+  /** Whether this browser can show the lightbox: a modal `<dialog>`. */
+  function modals() {
+    return (
+      typeof HTMLDialogElement === 'function' &&
+      typeof HTMLDialogElement.prototype.showModal === 'function'
+    );
+  }
+
+  /**
+   * Picture `index`'s large file without the lightbox: in a tab of its own,
+   * cut loose from this page once open. `noopener` would do that, but then
+   * the browser answers `null` whether it opened one or not, and a refused
+   * popup would show nothing; refused, the file opens in this tab. Heard at
+   * `warn`, the lowest level production sends on, and before a refusal takes
+   * the visitor off the page: the sink's keepalive send outlives that.
+   */
+  function inTab(index: number) {
+    const file = pictures[index]?.full;
+    if (!file) return;
+    const tab = window.open(file.url, '_blank');
+    logger.warn('gallery.lightbox_tab_fallback', { opened: Boolean(tab) });
+    if (tab) tab.opener = null;
+    else location.assign(file.url);
+  }
+
+  const open: OpenPicture = (index, from) => {
+    if (edit || page.still) return;
+    if (!modals()) {
+      inTab(index);
+      return;
+    }
+    opener = from;
+    shown = index;
+  };
+
+  function close() {
+    shown = null;
+    opener?.focus();
+    opener = null;
+  }
 </script>
 
-{#snippet arrangement(set: readonly Picture[])}
+{#snippet arrangement(set: readonly Picture[], onopen?: OpenPicture)}
   {#if layout === 'strip'}
-    <GalleryStrip pictures={set} label={content.heading} anchor={section.anchor} />
+    <GalleryStrip pictures={set} label={name} anchor={section.anchor} {onopen} />
   {:else if layout === 'grid'}
-    <GalleryGrid pictures={set} />
+    <GalleryGrid pictures={set} {onopen} />
   {:else}
-    <GalleryMosaic pictures={set} />
+    <GalleryMosaic pictures={set} {onopen} />
   {/if}
 {/snippet}
 
@@ -94,7 +163,10 @@
   {/if}
 
   {#if pictures.length > 0}
-    {@render arrangement(pictures)}
+    {@render arrangement(pictures, opens ? open : undefined)}
+    {#if shown !== null}
+      <GalleryLightbox {pictures} start={shown} label={name} onclose={close} onfail={inTab} />
+    {/if}
   {:else}
     <div class="gallery__empty">
       <div class="gallery__plates" aria-hidden="true" inert>{@render arrangement(plates)}</div>
