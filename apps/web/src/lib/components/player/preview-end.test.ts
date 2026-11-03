@@ -29,6 +29,7 @@ const gate = (over: Partial<PreviewEndGate> = {}): PreviewEndGate => ({
   needsSubscription: false,
   needsPurchase: false,
   isFree: false,
+  isAudio: false,
   pricingHref: PRICING,
   signInHref: SIGN_IN,
   purchaseLabel: 'Purchase for £4.99',
@@ -160,6 +161,18 @@ describe('followers only', () => {
       href: '/login',
       label: m.checkout_signin_to_purchase(),
     });
+  });
+});
+
+test('free audio, signed out: Sign in to listen, as the paywall says (W7)', () => {
+  expect(
+    describePreviewEnd(
+      gate({ isFree: true, isAuthenticated: false, isAudio: true })
+    ).action
+  ).toEqual({
+    kind: 'link',
+    href: '/login',
+    label: m.content_detail_signin_listen_cta(),
   });
 });
 

@@ -94,8 +94,7 @@
     <button
       type="button"
       class="fee-check-failed__retry"
-      aria-busy={retrying}
-      disabled={retrying}
+      aria-busy={retrying || undefined}
       onclick={retry}
     >
       {m.fee_note_try_again()}
@@ -176,7 +175,9 @@
     cursor: pointer;
   }
 
-  .fee-check-failed__retry:disabled {
+  /* Busy, not disabled: a disabled button drops focus on press (W6), as
+     PriceChangeNote guards its own. `retry` ignores a press while busy. */
+  .fee-check-failed__retry[aria-busy='true'] {
     cursor: progress;
   }
 

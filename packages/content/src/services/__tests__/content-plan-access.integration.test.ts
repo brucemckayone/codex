@@ -18,6 +18,7 @@ import {
   content,
   contentCategories,
   contentTierAccess,
+  organizationMemberships,
   organizations,
   stripeConnectAccounts,
   subscriptionTiers,
@@ -25,6 +26,7 @@ import {
 import { ValidationError } from '@codex/service-errors';
 import {
   createTestConnectAccountInput,
+  createTestMembershipInput,
   createTestOrganizationInput,
   createTestTierInput,
   createUniqueSlug,
@@ -75,6 +77,15 @@ describe('ContentService — plan access (Codex-2hxff.91)', () => {
       orgIds.push(org.id);
     }
     [orgId, otherOrgId] = orgIds as [string, string];
+    // On both teams, so each case is decided by the tier rule it names, not
+    // by the org-membership gate (Codex-ocal6).
+    await db
+      .insert(organizationMemberships)
+      .values(
+        orgIds.map((id) =>
+          createTestMembershipInput(id, creatorId, { role: 'creator' })
+        )
+      );
 
     const tier = async (org: string, sortOrder: number, deleted = false) =>
       takeFirst(
@@ -618,6 +629,11 @@ describe('ContentService — plan access (Codex-2hxff.91)', () => {
           .returning()
       ).id;
       orgIds.push(u13OrgId);
+      await db
+        .insert(organizationMemberships)
+        .values(
+          createTestMembershipInput(u13OrgId, creatorId, { role: 'creator' })
+        );
       const tier = async (
         sortOrder: number,
         overrides: { isActive?: boolean; deletedAt?: Date } = {}

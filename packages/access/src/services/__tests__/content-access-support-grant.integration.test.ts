@@ -107,6 +107,15 @@ describe('support grants — access and library (Codex-2hxff.21)', () => {
     if (!org || !otherOrg) throw new Error('Failed to seed orgs');
     organizationId = org.id;
     otherOrganizationId = otherOrg.id;
+
+    // The creator files every item into `org`, so is on its team
+    // (Codex-ocal6). `otherOrg` is only a library filter.
+    await db.insert(organizationMemberships).values({
+      userId: creatorId,
+      organizationId,
+      role: 'creator',
+      status: 'active',
+    });
   });
 
   afterAll(async () => {
@@ -311,6 +320,13 @@ describe('support grants — access and library (Codex-2hxff.21)', () => {
       role: 'admin',
       status: 'active',
     });
+    // The creator files this org's items, so is on its team (Codex-ocal6).
+    await db.insert(organizationMemberships).values({
+      userId: creatorId,
+      organizationId: memberOrg.id,
+      role: 'creator',
+      status: 'active',
+    });
     const granted = await createPaidContent('member-granted', memberOrg.id);
     const other = await createPaidContent('member-other', memberOrg.id);
 
@@ -351,6 +367,13 @@ describe('support grants — access and library (Codex-2hxff.21)', () => {
       .values({ name: 'Doomed Org', slug: createUniqueSlug('grant-doomed') })
       .returning();
     if (!doomedOrg) throw new Error('Failed to seed org');
+    // The creator files this org's items, so is on its team (Codex-ocal6).
+    await db.insert(organizationMemberships).values({
+      userId: creatorId,
+      organizationId: doomedOrg.id,
+      role: 'creator',
+      status: 'active',
+    });
     const item = await createPaidContent('doomed-granted', doomedOrg.id);
     await grant(customer, item.id, doomedOrg.id);
     expect((await library(customer)).items).toHaveLength(1);

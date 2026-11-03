@@ -706,6 +706,29 @@ describe('fee notices and price moves (Codex-2hxff.33, .85, .86)', () => {
     expect(api.retryPriceMove).toHaveBeenCalledWith(UUID);
   });
 
+  it('a not-held answer carries the codes the Queue words it from (W4)', async () => {
+    api.closePriceMove.mockRejectedValue(
+      new ApiError(409, 'Already closed.', 'CONFLICT', {
+        code: 'PRICE_MOVE_NOT_HELD',
+        reason: 'resolved',
+        skipReason: 'moving_away',
+        resolution: 'moved_by_hand',
+        supersededAt: '2026-11-04T10:30:00.000Z',
+      })
+    );
+    await expect(
+      remote.closePriceMove({
+        moveId: UUID,
+        body: { resolution: 'not_needed', note: 'Cancelled.' },
+      })
+    ).resolves.toMatchObject({
+      reason: 'resolved',
+      skipReason: 'moving_away',
+      resolution: 'moved_by_hand',
+      supersededAt: '2026-11-04T10:30:00.000Z',
+    });
+  });
+
   it('Close sends its reason and note; Restart sends only the change', async () => {
     api.closePriceMove.mockResolvedValue({ moveId: UUID, status: 'closed' });
     api.restartPriceChange.mockResolvedValue({

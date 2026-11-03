@@ -171,6 +171,8 @@ async function settle() {
   for (let i = 0; i < 8; i++) await Promise.resolve();
   flushSync();
 }
+/** Melt restores focus a tick and a millisecond after the dialog closes. */
+const afterFocus = () => new Promise((resolve) => setTimeout(resolve, 20));
 
 const byTestId = (id: string) =>
   document.querySelector<HTMLElement>(`[data-testid="${id}"]`);
@@ -336,6 +338,21 @@ describe('Cancel Subscription', () => {
     });
     expect(navigation.invalidate).toHaveBeenCalledWith('account:subscriptions');
     expect(byTestId('course-cancel-note')).toBeNull();
+    // Cancel turns into Reactivate once the list is read again: focus goes
+    // to the course's card, which stays (W6).
+    await afterFocus();
+    expect(document.activeElement).toBe(courseCard(DOC));
+  });
+
+  test("Keep it (the dialog's dismiss): focus goes back to Cancel (W6)", async () => {
+    mountPage({ courseSubscriptions: [documentary()] });
+    const cancel = within(courseCard(DOC), 'course-subscription-cancel-button');
+    cancel?.focus();
+    await openDialog();
+    byTestId('course-cancel-dismiss-button')?.click();
+    await settle();
+    await afterFocus();
+    expect(document.activeElement).toBe(cancel);
   });
 
   test("refused: fixed copy, never the worker's text, and the dialog stays (state 4)", async () => {

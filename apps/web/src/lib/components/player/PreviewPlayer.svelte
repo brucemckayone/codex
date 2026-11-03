@@ -241,15 +241,21 @@
   /*
    * The core's end layer, under the words: the last frame shows through one
    * uniform veil over the whole frame, never a patch behind the words, with a
-   * blur (owner polish (b)). No player token sits between the overlay (0.6)
-   * and the heavy one (0.8), so the veil is composed from the opacity scale:
+   * blur (owner polish (b)). The veil is the midpoint of the two player
+   * overlay tokens, so an org that tunes them (Fine-tune › Control and Heavy
+   * Overlay) tunes it too (W3). By default they are 0.6 and 0.8 black, so it
+   * computes to 0.7 black (oklab(0 0 0 / 0.7) in Chrome, the approved veil):
    * 0.6 gives the line 4.4:1 over a white frame, 0.8 hides the frame. The
    * veil alone carries the contrast (the title 8.5:1, the line 6.2:1 over
    * white), so without backdrop-filter it is the flat-panel fallback.
    */
   .preview-player :global(.player .player__ended) {
     padding: 0;
-    background: hsl(0 0% 0% / var(--opacity-70));
+    background: color-mix(
+      in oklab,
+      var(--color-player-overlay),
+      var(--color-player-overlay-heavy)
+    );
     -webkit-backdrop-filter: blur(var(--blur-md));
     backdrop-filter: blur(var(--blur-md));
   }

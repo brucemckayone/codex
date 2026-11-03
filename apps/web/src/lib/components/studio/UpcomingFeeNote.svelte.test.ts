@@ -187,6 +187,30 @@ describe('UpcomingFeeNote', () => {
     expect(retry?.textContent?.trim()).toBe(m.fee_note_try_again());
   });
 
+  test('Try again keeps focus while it reads: busy, never disabled (W6)', async () => {
+    fees.slot.loading = false;
+    fees.slot.error = { status: 500, body: { message: 'Internal Error' } };
+    let land: () => void = () => {};
+    fees.slot.refresh.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          land = resolve;
+        })
+    );
+    render({ organizationId: ORG });
+    const retry = failedLine()?.querySelector('button');
+    retry?.focus();
+    retry?.click();
+    flushSync();
+    expect(retry?.getAttribute('aria-busy')).toBe('true');
+    expect(retry?.disabled).toBe(false);
+    expect(document.activeElement).toBe(retry);
+    // A second press while it reads asks nothing more.
+    retry?.click();
+    expect(fees.slot.refresh).toHaveBeenCalledTimes(1);
+    land();
+  });
+
   test('Try again reads once per press, and nothing re-reads by itself', async () => {
     fees.slot.loading = false;
     fees.slot.error = { status: 500, body: { message: 'Internal Error' } };
