@@ -371,6 +371,9 @@ export async function runPriceMoveStep(
   const unworked: Claim[] = [];
   const stopped = new Set<string>();
   const started = new Set<string>();
+  // The batch being worked, if one throws: every row is worked (emailed,
+  // written at Stripe) before any is recorded.
+  let inFlight: Claim[] = [];
   try {
     for (const [index, batch] of batches.entries()) {
       const changeId = batch[0]?.priceChangeId;
@@ -385,7 +388,9 @@ export async function runPriceMoveStep(
       }
       const firstBatch = !started.has(changeId);
       started.add(changeId);
+      inFlight = batch;
       const stop = await workBatch(run, batch, firstBatch);
+      inFlight = [];
       if (stop) {
         stopped.add(changeId);
         unworked.push(...stop.giveBack);
@@ -395,12 +400,19 @@ export async function runPriceMoveStep(
       }
     }
   } catch (error) {
-    // A batch that threw past its own guards: everything not yet recorded
-    // goes back, so nobody waits out the reclaim window.
-    alertStepFailed(run, 'work', error);
+    // A batch that threw past its own guards (review C1, SF-1). Its rows may
+    // have been emailed or written at Stripe without being recorded, so they
+    // keep this run's `attempted_at`: their reclaim then sees a try
+    // (`mayBeTold`) and checks the email log and Stripe before telling
+    // anyone. Only claims no batch started go back, so nobody else waits
+    // out the reclaim window.
+    const kept = new Set(inFlight.map((c) => c.id));
+    alertStepFailed(run, 'work', error, { inFlightPriceMoveIds: [...kept] });
     const queued = new Set(unworked.map((c) => c.id));
     unworked.push(
-      ...claims.filter((c) => !queued.has(c.id) && !run.recorded.has(c.id))
+      ...claims.filter(
+        (c) => !queued.has(c.id) && !run.recorded.has(c.id) && !kept.has(c.id)
+      )
     );
   }
 
@@ -422,11 +434,17 @@ async function isolated(
   }
 }
 
-function alertStepFailed(run: Run, stage: string, error: unknown): void {
+function alertStepFailed(
+  run: Run,
+  stage: string,
+  error: unknown,
+  context: Record<string, unknown> = {}
+): void {
   run.deps.obs.error('Price moves: a step of the run failed', {
     errorId: crypto.randomUUID(),
     stage,
     scheduledTime: run.now.toISOString(),
+    ...context,
     error: error instanceof Error ? error.message : String(error),
   });
 }

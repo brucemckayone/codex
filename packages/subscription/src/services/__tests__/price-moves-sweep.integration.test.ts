@@ -34,7 +34,8 @@ import {
   takeFirst,
   teardownTestDatabase,
 } from '@codex/test-utils';
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, type SQL, sql } from 'drizzle-orm';
+import { PgDialect } from 'drizzle-orm/pg-core';
 import type Stripe from 'stripe';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
@@ -316,6 +317,7 @@ describe('the hourly price-moves step (Codex-2hxff.86)', () => {
         userId: string;
         organizationId: string;
       }) => void;
+      db?: typeof db;
     },
     hours = 0,
     options: Partial<PriceMoveStepOptions> = {}
@@ -323,7 +325,7 @@ describe('the hourly price-moves step (Codex-2hxff.86)', () => {
     const now = NOW + hours * HOUR_MS;
     return runPriceMoveStep(
       {
-        db,
+        db: deps.db ?? db,
         stripe: deps.fake.stripe,
         mailer: deps.send,
         obs: deps.obs ?? logger(),
@@ -941,6 +943,93 @@ describe('the hourly price-moves step (Codex-2hxff.86)', () => {
       state: 'scheduled',
       noticeAt: new Date(NOW + SENT_AFTER_MS),
     });
+  });
+
+  // Review C1, SF-1: a batch's rows are all worked (emailed, written at
+  // Stripe) before any is recorded, so a record that throws leaves rows
+  // emailed but unrecorded. They keep this run's claim; only the batches
+  // never started go back.
+  it('a record that throws mid-batch keeps that batch claimed and gives back only the batches never started; nobody is emailed twice', async () => {
+    const { org: o, pro } = await org('pm-mid-batch');
+    const fake = fakeStripe();
+    const subs: Sub[] = [];
+    for (let i = 0; i < 4; i++) subs.push(await subscriber(o.id, pro));
+    // Renewing within the 30 days: each gets the pending marker, so a row
+    // given back would be decided again from scratch and emailed again.
+    for (const sub of subs) onStripe(fake, sub, 10);
+    const changeId = await reprice(o.id, pro);
+    const emailBySub = new Map<string, string>();
+    for (const sub of subs) emailBySub.set(sub.id, await emailOf(sub));
+    // The first record of the first batch fails, as a dropped connection
+    // would; the second row of that batch has been emailed by then.
+    const dialect = new PgDialect();
+    let scheduledWrites = 0;
+    const blipping = new Proxy(db, {
+      get(target, prop, receiver) {
+        if (prop !== 'execute') return Reflect.get(target, prop, receiver);
+        return (query: SQL) => {
+          const text = dialect.sqlToQuery(query).sql;
+          if (text.includes(`SET "state" = 'scheduled'`)) {
+            scheduledWrites += 1;
+            if (scheduledWrites === 1) {
+              return Promise.reject(
+                new Error('Connection terminated unexpectedly')
+              );
+            }
+          }
+          return target.execute(query);
+        };
+      },
+    });
+    const obs = logger();
+    const send = mailer();
+
+    const first = await run([changeId], { fake, send, obs, db: blipping }, 0, {
+      batchSize: 2,
+    });
+
+    expect(first).toMatchObject({ claimed: 4, givenBack: 2 });
+    expect(send).toHaveBeenCalledTimes(2);
+    const rows = await movesOf(changeId);
+    const kept = rows.filter((row) => row.attempts === 1);
+    const back = rows.filter((row) => row.attempts === 0);
+    expect(kept).toHaveLength(2);
+    expect(back).toHaveLength(2);
+    // The batch that threw keeps this run's claim, so its reclaim checks.
+    for (const row of kept) {
+      expect(row).toMatchObject({ state: 'due', attemptedAt: new Date(NOW) });
+    }
+    for (const row of back) {
+      expect(row).toMatchObject({ state: 'due', attemptedAt: null });
+    }
+    const emailsOf = (list: typeof rows) =>
+      new Set(list.map((row) => emailBySub.get(row.subscriptionId)));
+    expect(new Set(send.mock.calls.map(([notice]) => notice.to))).toEqual(
+      emailsOf(kept)
+    );
+    const workAlerts = obs.error.mock.calls.filter(
+      ([message, context]) =>
+        String(message).includes('a step of the run failed') &&
+        context?.stage === 'work'
+    );
+    expect(workAlerts).toHaveLength(1);
+    expect(workAlerts[0]?.[1]).toMatchObject({
+      errorId: expect.any(String),
+      inFlightPriceMoveIds: expect.arrayContaining(kept.map((row) => row.id)),
+    });
+
+    // An hour on: the kept rows are found at Stripe (their marker) and not
+    // emailed again; the two given back are told now.
+    const again = mailer();
+    await run([changeId], { fake, send: again }, 1);
+
+    expect(again).toHaveBeenCalledTimes(2);
+    expect(new Set(again.mock.calls.map(([notice]) => notice.to))).toEqual(
+      emailsOf(back)
+    );
+    for (const row of await movesOf(changeId)) {
+      expect(row.state).toBe('scheduled');
+    }
   });
 
   it("every notice of a change's first batch refused with a 4xx stops it: nobody moved, the claims go back, one alert; Restart sets it going", async () => {
