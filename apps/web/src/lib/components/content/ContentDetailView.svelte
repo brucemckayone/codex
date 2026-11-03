@@ -1039,6 +1039,7 @@
           contentId={content.id}
           contentTitle={content.title}
           end={previewEnd}
+          audio={isAudio}
           follow={{
             following: isAlreadyFollowing,
             busy: followInFlight,
