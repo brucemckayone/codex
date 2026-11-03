@@ -836,17 +836,21 @@ export class FeeConfigService extends BaseService {
    */
   invalidateLevel(level: FeeLevel): void {
     if (!this.cache) return;
-    const p = this.cache.invalidate(feeLevelKey(level)).catch((error) => {
-      // The write has landed, but the level's old list is still served
-      // until its TTL (up to a day), so a cut would bill the old fee unseen.
-      this.obs.error(
-        'Fee cache not cleared: this level reads its old fees until the cache expires',
-        {
-          errorId: crypto.randomUUID(),
-          ...level,
-          error: error instanceof Error ? error.message : String(error),
-        }
-      );
+    // invalidate never rejects (it logs and resolves), so a failure comes
+    // back through onError. The write has landed, but the level's old list
+    // is still served until its TTL (up to a day): a cut would bill the old
+    // fee unseen.
+    const p = this.cache.invalidate(feeLevelKey(level), {
+      onError: (error) => {
+        this.obs.error(
+          'Fee cache not cleared: this level reads its old fees until the cache expires',
+          {
+            errorId: crypto.randomUUID(),
+            ...level,
+            error: error instanceof Error ? error.message : String(error),
+          }
+        );
+      },
     });
     if (this.waitUntil) {
       this.waitUntil(p);
