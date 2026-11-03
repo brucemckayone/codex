@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tick } from 'svelte';
@@ -13,9 +14,10 @@ import { benefitsFacts } from '../../model/facts';
 import { SECTION_LAYOUTS } from '../../model/ids';
 import { type SampleOfferState, sampleContext } from '../../model/sample';
 import type { BlockEdit, ResolvedSection } from '../../model/types';
-import { sheetRules } from '../testing';
+import { componentRules, sheetRules } from '../testing';
 import BenefitsBlock from './BenefitsBlock.svelte';
 import { BENEFITS_EMPTY, benefitsDefinition } from './definition';
+import { figureZeros } from './figure';
 
 let app: ReturnType<typeof mount> | null = null;
 
@@ -417,6 +419,289 @@ describe('a mark for each item (Codex-61zsk.58)', () => {
       expect(lead?.(raw, layout, sampleContext()), layout).toBe(
         layout === 'bento' ? 1 : null
       );
+  });
+});
+
+describe('a figure in the mark’s place (Codex-61zsk.73)', () => {
+  const ITEMS = [
+    {
+      title: 'practices to keep',
+      detail: 'Sessions you can return to.',
+      figure: '24',
+      mark: 'heart',
+    },
+    { title: 'Audio', detail: 'For the walk.', mark: 'moon' },
+  ];
+  const CDN = 'https://cdn.test';
+  const image = { key: 'landing-pages/p1/images/b1', alt: 'The journal' };
+  const figures = () => all('.benefits__figure, .lp-heading__lead');
+  const nameOf = (item: Element | undefined) =>
+    item?.querySelector(
+      '.lp-heading, .benefits-rows__name, .benefits-checks__name'
+    );
+  const here = dirname(fileURLToPath(import.meta.url));
+
+  describe('what a stored item keeps', () => {
+    const read = (entry: Record<string, unknown>) =>
+      benefitsDefinition.coerce({ items: [{ title: 'T', ...entry }] })
+        .items?.[0];
+
+    it('keeps a figure of up to four characters with a digit in it', () => {
+      expect(read({ figure: '98%' })).toEqual({ title: 'T', figure: '98%' });
+      expect(read({ figure: ' £12 ' })?.figure).toBe('£12');
+    });
+
+    it('drops one too long to keep whole, and the item keeps its mark', () => {
+      expect(read({ figure: '1,000', mark: 'heart' })).toEqual({
+        title: 'T',
+        mark: 'heart',
+      });
+    });
+
+    it('drops one with no digit, and the item keeps its mark', () => {
+      expect(read({ figure: 'ten', mark: 'heart' })).toEqual({
+        title: 'T',
+        mark: 'heart',
+      });
+      expect(read({ figure: 24 })).toEqual({ title: 'T' });
+    });
+
+    // A tile with a picture draws its mark, not its figure, so both are
+    // kept and the layout draws the one it shows.
+    it('keeps both a figure and a mark', () => {
+      expect(read({ figure: '24', mark: 'heart' })).toEqual({
+        title: 'T',
+        figure: '24',
+        mark: 'heart',
+      });
+    });
+
+    it('reads a saved item, which has none, exactly as before', () => {
+      const item = read({ detail: 'D', mark: 'heart' });
+      expect(item).toEqual({ title: 'T', detail: 'D', mark: 'heart' });
+      expect(item).not.toHaveProperty('figure');
+    });
+  });
+
+  it.each(
+    SECTION_LAYOUTS.benefits
+  )('%s: draws the figure in its mark’s place, read as the start of its name', async (layout) => {
+    await render({ items: ITEMS }, { layout });
+    const drawn = figures();
+    expect(drawn).toHaveLength(1);
+    expect(drawn[0]?.textContent).toBe('24');
+    const [figured, marked] = all('li');
+    // No mark and no tick beside it; the other item keeps its own mark.
+    expect(figured?.querySelector('svg')).toBeNull();
+    expect(marked?.querySelector('svg')).not.toBeNull();
+    // Inside the name, before its words, and never hidden from a reader.
+    const name = nameOf(figured);
+    expect(name?.contains(drawn[0] ?? null)).toBe(true);
+    expect(name?.textContent).toBe('24 practices to keep');
+    expect(drawn[0]?.closest('[aria-hidden]')).toBeNull();
+  });
+
+  it.each([
+    'grid',
+    'bento',
+  ])('%s: the name that leads with it is a heading that says it first', async (layout) => {
+    await render({ heading: 'H', items: ITEMS }, { layout });
+    expect(all('h3').map((h) => h.textContent)).toEqual([
+      '24 practices to keep',
+      'Audio',
+    ]);
+  });
+
+  it.each([
+    'grid',
+    'bento',
+  ])('%s: never draws a figure on a tile with a picture, which keeps its mark', async (layout) => {
+    await render(
+      {
+        items: [
+          { ...ITEMS[0], image },
+          { title: 'guided weeks', figure: '6' },
+        ],
+      },
+      { layout, mediaBaseUrl: CDN }
+    );
+    const [pictured, plain] = all('li');
+    expect(pictured?.querySelector('img')).not.toBeNull();
+    expect(pictured?.querySelector('.lp-heading__lead')).toBeNull();
+    expect(
+      pictured?.querySelector('.benefits__mark svg, .benefits-bento__mark svg')
+    ).not.toBeNull();
+    expect(nameOf(pictured)?.textContent).toBe('practices to keep');
+    expect(plain?.querySelector('.lp-heading__lead')?.textContent).toBe('6');
+  });
+
+  describe('the checklist', () => {
+    it('stands every row’s mark in one column, as wide as its widest figure', async () => {
+      await render(
+        {
+          items: [
+            { title: 'guided weeks', figure: '6' },
+            { title: 'finish all six weeks', figure: '98%' },
+            { title: 'Audio' },
+          ],
+        },
+        { layout: 'checklist' }
+      );
+      const list = one('.benefits-checks') as HTMLElement;
+      expect(list.hasAttribute('data-figured')).toBe(true);
+      expect(list.style.getPropertyValue('--_zeros')).toBe(
+        String(figureZeros('98%'))
+      );
+      const rows = all('.benefits-checks li');
+      expect(rows.map((row) => row.hasAttribute('data-figure'))).toEqual([
+        true,
+        true,
+        false,
+      ]);
+      // A row with no figure keeps its tick, decorative, in the same column.
+      expect(
+        rows[2]
+          ?.querySelector('.benefits-checks__mark')
+          ?.getAttribute('aria-hidden')
+      ).toBe('true');
+    });
+
+    it('with no figure, draws as it always has', async () => {
+      await render(SAMPLE, { layout: 'checklist' });
+      const list = one('.benefits-checks') as HTMLElement;
+      expect(list.hasAttribute('data-figured')).toBe(false);
+      expect(list.style.getPropertyValue('--_zeros')).toBe('');
+      for (const row of all('.benefits-checks li')) {
+        expect(row.hasAttribute('data-figure')).toBe(false);
+        expect(row.children).toHaveLength(2);
+        expect(
+          row.querySelector(':scope > .benefits-checks__mark')
+        ).not.toBeNull();
+        expect(
+          row.querySelector(':scope > div > .benefits-checks__name')
+        ).not.toBeNull();
+      }
+    });
+
+    it('sets the figure level with its name’s first line, the name further from it than from a tick', () => {
+      const rules = componentRules(join(here, 'BenefitsBlock.svelte'));
+      const rule = (selector: string) =>
+        rules.find((r) => r.selector === selector && r.within.length === 0);
+      const tick = rule('.benefits-checks li');
+      const figured = rule('.benefits-checks[data-figured] li');
+      expect(tick?.decls.get('gap')).toBe('var(--space-2)');
+      expect(figured?.decls.get('gap')).toBe('0 var(--space-4)');
+      expect(figured?.decls.get('grid-template-columns')).toBe(
+        'minmax(var(--_benefit-figure-col), max-content) minmax(0, 1fr)'
+      );
+      // The column is the widest figure's `0`s, counted in the figure's face,
+      // weight and size (a face the kit has not measured counts `1ch`, the
+      // list's own); each row is set in the body's again.
+      const list = rule('.benefits-checks[data-figured]');
+      expect(list?.decls.get('font-family')).toBe('var(--lp-font-display)');
+      expect(list?.decls.get('font-weight')).toBe('var(--lp-weight-display)');
+      expect(list?.decls.get('font-size')).toBe('var(--_figure-size)');
+      expect(list?.decls.get('--_benefit-figure-col')).toBe(
+        'calc(var(--_zeros) * var(--lp-zero-display))'
+      );
+      expect(figured?.decls.get('font-family')).toBe('var(--lp-font-body)');
+      expect(figured?.decls.get('font-weight')).toBe('var(--lp-weight-body)');
+      const name = rule(
+        '.benefits-checks li[data-figure] > .benefits-checks__name'
+      );
+      expect(name?.decls.get('grid-template-columns')).toBe('subgrid');
+      expect(name?.decls.get('align-items')).toBe('baseline');
+    });
+
+    it('carries the column down as a registered length, so its `em` is the figure’s', () => {
+      const source = readFileSync(join(here, 'BenefitsBlock.svelte'), 'utf8');
+      expect(source).toMatch(
+        /@property --_benefit-figure-col \{\s*syntax: '<length>';\s*inherits: true;/
+      );
+    });
+  });
+
+  it('is set as the credential figures are, in the accent’s text grade, never the mark ink', () => {
+    const rules = componentRules(join(here, 'BenefitsBlock.svelte'));
+    const figure = rules.find(
+      (r) =>
+        r.selector === '.benefits__figure, .benefits :global(.lp-heading__lead)'
+    );
+    expect(figure?.decls.get('font-family')).toBe('var(--lp-font-display)');
+    expect(figure?.decls.get('font-size')).toBe('var(--_figure-size)');
+    expect(figure?.decls.get('font-variant-numeric')).toBe(
+      'lining-nums tabular-nums'
+    );
+    expect(figure?.decls.get('color')).toBe('var(--lp-accent)');
+    const size = rules.find(
+      (r) => r.selector === '.benefits' && r.decls.has('--_figure-size')
+    );
+    // Halfway from title to heading, as `Credentials.svelte` sets its own.
+    expect(size?.decls.get('--_figure-size')).toBe(
+      'calc( (var(--lp-size-title) + var(--lp-size-heading) * var(--lp-drama-held, 1)) / 2 )'
+    );
+    for (const rule of rules.filter((r) => /figure|lead/.test(r.selector)))
+      expect([...rule.decls.values()].join(' '), rule.selector).not.toContain(
+        '--lp-mark-ink'
+      );
+  });
+
+  it('bento: the lead tile’s figure stands at its name’s heading size', () => {
+    const lead = componentRules(join(here, 'BenefitsBento.svelte')).find(
+      (r) =>
+        r.selector ===
+        '.benefits-bento__tile[data-lead] :global(.lp-heading__lead)'
+    );
+    expect(lead?.decls.get('font-size')).toBe('1em');
+  });
+
+  it('Studio draws no circle round one: its ringed figures are named, and a benefit’s is not among them', () => {
+    const rings = sheetRules(
+      join(here, '../../styles/style-studio.css')
+    ).filter((r) =>
+      [...r.decls.values()].some((value) =>
+        /--lp-mark-(circle|pill)/.test(value)
+      )
+    );
+    expect(rings.length).toBeGreaterThan(0);
+    for (const ring of rings)
+      expect(ring.selector).not.toMatch(/benefits|lp-heading__lead/);
+  });
+
+  it('is offered under the mark, as text of up to four characters', () => {
+    const fields =
+      benefitsDefinition.fields.find((f) => f.key === 'items')?.itemFields ??
+      [];
+    const keys = fields.map((f) => f.key);
+    expect(keys.indexOf('figure')).toBe(keys.indexOf('mark') + 1);
+    const field = fields.find((f) => f.key === 'figure');
+    expect(field).toMatchObject({
+      label: 'Or a number',
+      hint: 'Up to 4 characters with a digit, like 24 or 98%. It shows instead of the mark, so write the name to read on from it.',
+      control: 'text',
+      maxLength: 4,
+    });
+    // In every layout: a mark is drawn in all four.
+    expect(field?.layouts).toBeUndefined();
+  });
+
+  // The owner, 2026-11-02: a pictured tile draws no number, so its picture
+  // says so before it is added.
+  it('says a picture takes the number’s place', () => {
+    const image = benefitsDefinition.fields
+      .find((f) => f.key === 'items')
+      ?.itemFields?.find((f) => f.key === 'image');
+    expect(image?.hint).toBe(
+      'Optional. Shown with this item in the grid and in the mixed tiles, in place of its number.'
+    );
+  });
+
+  it('starts a new section, and the sample, without one', () => {
+    const starter = benefitsDefinition.starter({
+      courseTitle: 'Steady Ground',
+    });
+    for (const item of [...(starter.items ?? []), ...(SAMPLE.items ?? [])])
+      expect(item).not.toHaveProperty('figure');
   });
 });
 

@@ -156,6 +156,22 @@ export const adminFixture = {
     };
   },
 
+  /**
+   * Seat a user on an org's team as an active `creator`.
+   *
+   * Filing content into an org needs an ACTIVE owner, admin or creator
+   * membership of it (Codex-ocal6), so a test whose creator files content into
+   * a platform owner's org must seat them first, as a real org invite would.
+   */
+  async addTeamMember(organizationId: string, userId: string): Promise<void> {
+    await dbHttp.insert(schema.organizationMemberships).values({
+      organizationId,
+      userId,
+      role: 'creator',
+      status: 'active',
+    });
+  },
+
   // ============================================================================
   // Analytics API Helpers
   // ============================================================================

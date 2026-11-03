@@ -6471,6 +6471,14 @@ export const media_use_where_audio_draft = () => `Draft audio`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const media_use_where_thumbnail = () => `Its thumbnail is a frame of this video`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const media_use_where_bought_film = () => `Off sale · people who bought it can still watch`
 
 
@@ -6635,6 +6643,22 @@ export const media_delete_blocked_body_one = (params) => `It’s used by ${param
 
 
 /**
+ * @param {{ uses: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_blocked_body_thumbnail = (params) => `It’s the thumbnail of ${params.uses}. Choose another thumbnail in each place, then you can delete it.`
+
+
+/**
+ * @param {{ uses: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_blocked_body_thumbnail_one = (params) => `It’s the thumbnail of ${params.uses}. Choose another thumbnail there, then you can delete it.`
+
+
+/**
  * 
  * @returns {string}
  */
@@ -6688,6 +6712,22 @@ export const media_delete_drafts_body_one = () => `If you delete it, it will sho
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const media_delete_drafts_body = () => `If you delete it, they’ll show “media missing” until you choose another media item. Nobody else can see drafts.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_drafts_body_thumbnail_one = () => `If you delete it, it will lose its thumbnail after 30 days until you choose another. Nobody else can see drafts.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_drafts_body_thumbnail = () => `If you delete it, they’ll lose their thumbnail after 30 days until you choose another. Nobody else can see drafts.`
 
 
 /**
@@ -6792,6 +6832,22 @@ export const media_delete_toast_drafts_one = () => `Deleted. 1 draft needs a new
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const media_delete_toast_drafts = (params) => `Deleted. ${params.count} drafts need a new media item.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_toast_drafts_thumbnail_one = () => `Deleted. 1 draft needs a new thumbnail.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_toast_drafts_thumbnail = (params) => `Deleted. ${params.count} drafts need a new thumbnail.`
 
 
 /**
@@ -8263,6 +8319,22 @@ export const studio_content_form_media_deleted_on = (params) => `Deleted from yo
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_content_form_thumbnail_frame_deleted_title = () => `This thumbnail is a frame of a deleted video.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_form_thumbnail_frame_deleted_body = () => `Choose another thumbnail before you publish. The frame stops showing 30 days after its video was deleted.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const studio_content_form_media_hint = () => `No ready media available. Upload files in the Media library first.`
 
 
@@ -8600,6 +8672,14 @@ export const studio_content_form_ready_tier_ticked = () => `At least one tier ti
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_content_form_ready_media_deleted = () => `Choose another media item: the last one was deleted`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_form_ready_thumbnail_frame_deleted = () => `Choose another thumbnail: its video was deleted`
 
 
 /**
@@ -19560,6 +19640,30 @@ export const studio_page_editor_scheme_atmosphere = () => `Moving`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_page_editor_scheme_atmosphere_hint = () => `Your organisation’s moving background, set in Brand. Without one, a soft glow of your colours.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_scheme_atmosphere_none = () => `No moving background yet, so a soft glow of your colours stands in.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_scheme_atmosphere_add = () => `Add one in Brand`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_scheme_atmosphere_ask = () => `An admin can add one in Brand.`
 
 
 /**

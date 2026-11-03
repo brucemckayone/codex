@@ -97,6 +97,22 @@ export class MediaDeletedError extends BusinessLogicError {
   }
 }
 
+/**
+ * An admin publish of content whose thumbnail is a frame of one of the
+ * creator's deleted videos (422, Codex-tqvmx). The twin of `@codex/content`'s
+ * `ThumbnailMediaDeletedError` as its publish words it; the message and
+ * `code: 'THUMBNAIL_MEDIA_DELETED'` are copied verbatim — keep them in step.
+ * The context carries the content id only (it is sent to the client).
+ */
+export class ThumbnailMediaDeletedError extends BusinessLogicError {
+  constructor(contentId: string) {
+    super(
+      'Choose another thumbnail before you publish: it’s a frame of a deleted video.',
+      { contentId, code: 'THUMBNAIL_MEDIA_DELETED' }
+    );
+  }
+}
+
 // ============================================================================
 // Support refunds (Codex-2hxff.28; data design §1's error table)
 //

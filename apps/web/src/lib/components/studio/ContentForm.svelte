@@ -450,6 +450,23 @@
       : null
   );
 
+  /**
+   * The deleted video the saved thumbnail is a frame of, while the form still
+   * holds that thumbnail (Codex-tqvmx). Unless it is the media the form plays,
+   * which the Media section warns about: the worker refuses every other one
+   * (`THUMBNAIL_MEDIA_DELETED`), so picking new media in place of a deleted
+   * video whose frame is the thumbnail shows it here. Written content plays
+   * none. Choosing another thumbnail clears it before saving.
+   */
+  const deletedFrame = $derived.by(() => {
+    const frame = content?.thumbnailFrame;
+    const played = contentTypeVal === 'video' || contentTypeVal === 'audio' ? selectedMediaId : '';
+    const sameThumbnail = (form.fields.thumbnailUrl?.value() ?? '') === (content?.thumbnailUrl ?? '');
+    return frame?.deletedAt && sameThumbnail && frame.mediaItemId !== played
+      ? { title: frame.title, deletedAt: frame.deletedAt }
+      : null;
+  });
+
   // ── Readiness checks ─────────────────────────────────────────────────
   const readinessChecks = $derived.by(() => {
     const checks = [
@@ -465,6 +482,9 @@
     }
     if (contentTypeVal === 'written') {
       checks.push({ label: 'Content body written', met: !!contentBodyVal.trim() });
+    }
+    if (deletedFrame) {
+      checks.push({ label: m.studio_content_form_ready_thumbnail_frame_deleted(), met: false });
     }
     if (accessTypeVal === 'paid') {
       checks.push({ label: 'Price set for paid content', met: priceMeetsMinimum });
@@ -514,7 +534,11 @@
       label: contentTypeVal === 'written' ? 'Body' : 'Notes',
       ready: contentTypeVal === 'written' ? bodyReady : undefined,
     });
-    list.push({ id: 'section-thumbnail', label: 'Thumbnail' });
+    list.push({
+      id: 'section-thumbnail',
+      label: 'Thumbnail',
+      ...(deletedFrame && { ready: false, warn: true }),
+    });
     list.push({ id: 'section-access', label: 'Access & price', ready: accessReady });
     list.push({ id: 'section-organize', label: 'Organize' });
     list.push({ id: 'section-review', label: 'Review & publish' });
@@ -718,7 +742,12 @@
         description="16:9 image used across discovery and library surfaces."
         optional
       >
-        <ThumbnailUpload {form} {mediaThumbnailUrl} contentId={content?.id ?? null} />
+        <ThumbnailUpload
+          {form}
+          {mediaThumbnailUrl}
+          contentId={content?.id ?? null}
+          {deletedFrame}
+        />
       </FormSection>
 
       <FormSection

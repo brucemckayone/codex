@@ -81,12 +81,16 @@ vi.mock('$lib/remote/page-images.remote', () => {
   return { uploadPageImageForm: { for: () => instance } };
 });
 
-/** The org the layout loaded: its shader preset and its backgrounds. */
-const layout = vi.hoisted(() => ({ org: null as unknown }));
+/** The org the layout loaded (its shader preset and its backgrounds), and
+ *  the viewer's role in it, as the studio layout resolves it. */
+const layout = vi.hoisted(() => ({
+  org: null as unknown,
+  userRole: undefined as string | undefined,
+}));
 vi.mock('$app/state', () => ({
   page: {
     get data() {
-      return { org: layout.org };
+      return { org: layout.org, userRole: layout.userRole };
     },
   },
 }));
@@ -110,6 +114,7 @@ beforeEach(() => {
   remote.result = undefined;
   remote.finish = null;
   layout.org = null;
+  layout.userRole = undefined;
 });
 
 afterEach(() => {
@@ -334,6 +339,65 @@ describe('the colour the canvas draws for the hero', () => {
     layout.org = org({ 'shader-preset': 'glow' }, '#D2C3A8');
     render([hero('h')], 'h');
     expect(swatches()).toEqual({ value: ['base'], default: ['base'] });
+  });
+});
+
+// Codex-61zsk.73 (#20a): the Moving note, for an org with no moving background.
+describe('the Moving note, by who is looking', () => {
+  const org = (preset: string) => ({
+    brandColors: {},
+    brandFineTune: {
+      tokenOverrides: JSON.stringify({ 'shader-preset': preset }),
+    },
+  });
+  const note = () =>
+    document.body.querySelector<HTMLElement>('.swatches__note');
+
+  function chooseMoving() {
+    document.body
+      .querySelector<HTMLButtonElement>(".swatch[data-scheme='atmosphere']")
+      ?.click();
+    flushSync();
+  }
+
+  it('links an admin or owner to Brand', () => {
+    for (const role of ['admin', 'owner']) {
+      layout.org = org('none');
+      layout.userRole = role;
+      render([hero('h')], 'h');
+      chooseMoving();
+      expect(note()?.hidden).toBe(false);
+      expect(note()?.querySelector('a')?.getAttribute('href'), role).toBe(
+        '/studio/brand'
+      );
+      unmount(app);
+      app = null;
+      pageBuilder.close();
+    }
+  });
+
+  it('gives a creator, or a role not yet known, no link', () => {
+    for (const role of ['creator', undefined]) {
+      layout.org = org('none');
+      layout.userRole = role;
+      render([hero('h')], 'h');
+      chooseMoving();
+      expect(note()?.textContent, String(role)).toContain(
+        'An admin can add one in Brand.'
+      );
+      expect(note()?.querySelector('a')).toBeNull();
+      unmount(app);
+      app = null;
+      pageBuilder.close();
+    }
+  });
+
+  it('keeps today’s note where the org has one', () => {
+    layout.org = org('glow');
+    layout.userRole = 'admin';
+    render([hero('h')], 'h');
+    expect(note()?.textContent).toContain('set in Brand');
+    expect(note()?.querySelector('a')).toBeNull();
   });
 });
 

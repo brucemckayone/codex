@@ -78,6 +78,7 @@ export {
   getHlsVariantKey,
   getHlsVariantSegmentKey,
   getMediaThumbnailKey,
+  getMediaThumbnailPrefix,
   getMediaThumbnailUrl,
   getMezzanineKey,
   getMezzaninePrefix,
@@ -94,6 +95,14 @@ export {
   parseR2Key,
   type ThumbnailSize,
 } from './paths';
+// Poster frames used as content thumbnails (Codex-tqvmx)
+export {
+  holdsPosterFolderOf,
+  type PosterFrameSource,
+  playedMediaItemId,
+  posterFolderCount,
+  posterFramesOf,
+} from './poster-frames';
 // Services
 export {
   type AlertLedger,

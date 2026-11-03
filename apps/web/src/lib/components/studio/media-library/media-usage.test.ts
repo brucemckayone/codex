@@ -8,6 +8,7 @@ import {
   firstOpenableDraft,
   liveUsesPhrase,
   newlyLiveUse,
+  onlyThumbnails,
   unlistedCounts,
   useAction,
   useHref,
@@ -129,6 +130,20 @@ describe('useWhere', () => {
   it('personal content has no org part', () => {
     expect(useWhere(use({ orgName: null }))).toBe('Published film');
   });
+
+  it('a film that only shows the frame says so, published, bought or draft (Codex-9seq3)', () => {
+    const frame = (over: Partial<MediaUse> = {}) =>
+      useWhere(use({ slot: 'thumbnail', ...over }));
+    expect(frame()).toBe(
+      'Published film · Its thumbnail is a frame of this video · Hollow Oak Films'
+    );
+    expect(frame({ liveReason: 'bought' })).toBe(
+      'Off sale · people who bought it can still watch · Its thumbnail is a frame of this video'
+    );
+    expect(frame({ live: false, liveReason: null, orgName: null })).toBe(
+      'Draft film · Its thumbnail is a frame of this video'
+    );
+  });
 });
 
 describe('liveUsesPhrase', () => {
@@ -229,5 +244,42 @@ describe('draftsLeftToast', () => {
       variant: 'success',
       title: 'Deleted. 1 draft needs a new media item.',
     });
+  });
+
+  it('drafts that only showed the frame need a new thumbnail (Codex-9seq3)', () => {
+    expect(draftsLeftToast(1, draft, STUDIO, true).title).toBe(
+      'Deleted. 1 draft needs a new thumbnail.'
+    );
+    expect(draftsLeftToast(3, draft, STUDIO, true).title).toBe(
+      'Deleted. 3 drafts need a new thumbnail.'
+    );
+  });
+});
+
+describe('onlyThumbnails (Codex-9seq3)', () => {
+  const frame = (over: Partial<MediaUse> = {}) =>
+    use({ slot: 'thumbnail', ...over });
+  const draftFrame = frame({ live: false, liveReason: null });
+
+  it('true when every use in the group only shows the frame', () => {
+    expect(onlyThumbnails(usage([frame(), frame()]), true)).toBe(true);
+    expect(onlyThumbnails(usage([draftFrame, frame()]), false)).toBe(true);
+  });
+
+  it('false for a mixed group, and for a group with nothing in it', () => {
+    expect(onlyThumbnails(usage([frame(), use()]), true)).toBe(false);
+    expect(onlyThumbnails(usage([frame()]), false)).toBe(false);
+  });
+
+  it('false when some of the group is unnamed: a hidden draft, or past the cap', () => {
+    expect(
+      onlyThumbnails(
+        usage([draftFrame], { drafts: 2, hidden: 1, total: 2 }),
+        false
+      )
+    ).toBe(false);
+    expect(onlyThumbnails(usage([frame()], { live: 2, total: 2 }), true)).toBe(
+      false
+    );
   });
 });

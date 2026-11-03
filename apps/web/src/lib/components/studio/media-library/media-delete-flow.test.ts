@@ -144,6 +144,7 @@ describe('MediaDeleteFlow', () => {
       kind: 'deleted',
       drafts: 1,
       firstDraft: drafts.uses[0],
+      thumbnails: false,
     });
   });
 

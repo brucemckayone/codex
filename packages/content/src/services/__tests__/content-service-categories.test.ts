@@ -26,9 +26,11 @@ import {
   categories,
   content,
   contentCategories,
+  organizationMemberships,
   organizations,
 } from '@codex/database/schema';
 import {
+  createTestMembershipInput,
   createTestOrganizationInput,
   createUniqueSlug,
   type Database,
@@ -78,6 +80,14 @@ describe('ContentService — category tagging (WP-5)', () => {
     );
     orgAId = orgA.id;
     orgBId = orgB.id;
+
+    // Content is filed into org A only, so the creator is on org A's team
+    // (Codex-ocal6). Org B just supplies the out-of-space categories.
+    await db
+      .insert(organizationMemberships)
+      .values(
+        createTestMembershipInput(orgAId, creatorId, { role: 'creator' })
+      );
   });
 
   afterAll(async () => {

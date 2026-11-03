@@ -7,12 +7,14 @@
  * - the delete guard (MEDIA_IN_USE, MEDIA_USAGE_CHANGED) and the 30 days;
  * - the race, both orders, on the content attach path;
  * - publish refusing a deleted item, and PATCH checking what it attaches;
- * - the daily purge and support's restore.
+ * - the daily purge (both buckets: the posters are in ASSETS_BUCKET) and
+ *   support's restore;
+ * - content whose thumbnail is the item's frame, as a use (Codex-9seq3).
  *
  * DB-backed. Every row it writes is its own and is deleted in afterAll.
  */
 
-import type { R2Service } from '@codex/cloudflare-clients';
+import type { CdnPurgeResult, R2Service } from '@codex/cloudflare-clients';
 import {
   brandingSettings,
   content,
@@ -35,7 +37,7 @@ import {
   takeFirst,
   teardownTestDatabase,
 } from '@codex/test-utils';
-import { getHlsPrefix } from '@codex/transcoding';
+import { getHlsPrefix, getMediaThumbnailPrefix } from '@codex/transcoding';
 import { eq, inArray, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
@@ -45,6 +47,8 @@ import {
   MediaNotFoundError,
   MediaNotReadyError,
   MediaUsageChangedError,
+  ThumbnailMediaDeletedError,
+  ValidationError,
 } from '../../errors';
 import { ContentService } from '../content-service';
 import { MediaItemService } from '../media-service';
@@ -427,6 +431,76 @@ describe('media in use (Codex-6sbn1)', () => {
       expect(byId.get(unused)).toEqual({ total: 0, live: 0 });
       expect(statements).toBe(1);
     });
+
+    // "Use the video's frame" saves the poster's URL as the thumbnail, and
+    // the purge deletes the posters (Codex-9seq3).
+    it("counts content whose thumbnail is the item's frame, once, and a live one blocks the delete", async () => {
+      const poster = await seedMedia(ownerId);
+      const playing = await seedMedia(ownerId);
+      const cdn = 'https://cdn-assets.example';
+      const frame = (folder: string) =>
+        `${cdn}/${ownerId}/media-thumbnails/${poster}/${folder}lg.webp`;
+      const now = new Date();
+      await seedContent(ownerId, {
+        organizationId: orgAId,
+        mediaItemId: playing,
+        title: 'Swapped film',
+        status: 'published',
+        publishedAt: now,
+        thumbnailUrl: frame('1920x1080-0a1b2c3d/'),
+      });
+      // The flat poster layout, on a draft with no media yet.
+      await seedContent(ownerId, {
+        title: 'Flat frame',
+        thumbnailUrl: frame(''),
+      });
+      // Its own item's frame: that is already its `media` use.
+      await seedContent(ownerId, {
+        mediaItemId: poster,
+        title: 'Own frame',
+        thumbnailUrl: frame('1920x1080-0a1b2c3d/'),
+      });
+      // Not uses: deleted content, and an uploaded thumbnail.
+      await seedContent(ownerId, {
+        mediaItemId: playing,
+        title: 'Deleted',
+        thumbnailUrl: frame(''),
+        deletedAt: now,
+      });
+      await seedContent(ownerId, {
+        title: 'Uploaded',
+        thumbnailUrl: `${cdn}/${ownerId}/content-thumbnails/c1/1920x1080-0a1b2c3d/lg.webp`,
+      });
+      // Nor another creator's published film holding the poster's URL (any
+      // CDN URL passes the thumbnail check): it would make the owner's video
+      // undeletable. Nor a URL naming the id under another creator's folder,
+      // which isn't the folder the purge deletes.
+      await seedContent(otherId, {
+        organizationId: orgBId,
+        title: 'Their film, my frame',
+        status: 'published',
+        publishedAt: now,
+        thumbnailUrl: frame(''),
+      });
+      await seedContent(ownerId, {
+        title: 'Wrong folder',
+        thumbnailUrl: `${cdn}/${otherId}/media-thumbnails/${poster}/lg.webp`,
+      });
+
+      const usage = await media.getUsage(poster, ownerId);
+
+      expect(usage).toMatchObject({ total: 3, live: 1, drafts: 2 });
+      expect(
+        usage.uses.map((use) => [use.slot, use.title, use.live, use.link?.to])
+      ).toEqual([
+        ['thumbnail', 'Swapped film', true, 'content'],
+        ['thumbnail', 'Flat frame', false, 'content'],
+        ['media', 'Own frame', false, 'content'],
+      ]);
+      await expect(
+        media.delete(poster, ownerId, usage.fingerprint)
+      ).rejects.toBeInstanceOf(MediaInUseError);
+    });
   });
 
   describe('the delete guard', () => {
@@ -619,6 +693,50 @@ describe('media in use (Codex-6sbn1)', () => {
       expect((await mediaRow(film))?.deletedAt).toBeNull();
     });
 
+    // Codex-tqvmx. Publish's shape: the frame's video locked FOR KEY SHARE, then the row
+    // written live, still open. The delete's FOR UPDATE waits; once publish
+    // commits, the usage lookup finds a live use of the frame, and refuses.
+    it('a delete that starts while a publish holds the frame waits, then refuses MEDIA_IN_USE', async () => {
+      const playing = await seedMedia(ownerId);
+      const frame = await seedMedia(ownerId);
+      const draft = await seedContent(ownerId, {
+        mediaItemId: playing,
+        thumbnailUrl: `https://cdn-assets.example/${getMediaThumbnailPrefix(ownerId, frame)}lg.webp`,
+      });
+      let release = () => {};
+      const released = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let holding = (_pid: number) => {};
+      const held = new Promise<number>((resolve) => {
+        holding = resolve;
+      });
+
+      const publishing = db.transaction(async (tx) => {
+        await tx
+          .select({ id: mediaItems.id })
+          .from(mediaItems)
+          .where(eq(mediaItems.id, frame))
+          .for('key share');
+        await tx
+          .update(content)
+          .set({ status: 'published', publishedAt: new Date() })
+          .where(eq(content.id, draft));
+        holding(await backendPid(tx));
+        await released;
+      });
+      const publisher = await held;
+
+      const deleting = media.delete(frame, ownerId);
+      const early = await untilBlockedBy(publisher, deleting);
+      release();
+      await publishing;
+
+      expect(early).toBe('waiting');
+      await expect(deleting).rejects.toBeInstanceOf(MediaInUseError);
+      expect((await mediaRow(frame))?.deletedAt).toBeNull();
+    });
+
     // Publish locks its row before it reads the media, as update() does. An
     // unlocked read let a PATCH that swapped the media in between make the
     // publish go live on the new item, checked only as a draft attach.
@@ -765,6 +883,300 @@ describe('media in use (Codex-6sbn1)', () => {
     });
   });
 
+  describe("a thumbnail that is a deleted video's frame (Codex-tqvmx)", () => {
+    const cdn = 'https://cdn-assets.example';
+    const frameOf = (creatorId: string, mediaId: string) =>
+      `${cdn}/${getMediaThumbnailPrefix(creatorId, mediaId)}1920x1080-0a1b2c3d/lg.webp`;
+
+    async function markDeleted(id: string) {
+      await db
+        .update(mediaItems)
+        .set({ deletedAt: new Date() })
+        .where(eq(mediaItems.id, id));
+    }
+
+    it('refuses to publish it, for any content type', async () => {
+      const playing = await seedMedia(ownerId);
+      const gone = await seedMedia(ownerId);
+      await markDeleted(gone);
+      const film = await seedContent(ownerId, {
+        mediaItemId: playing,
+        thumbnailUrl: frameOf(ownerId, gone),
+      });
+      const essay = await seedContent(ownerId, {
+        contentType: 'written',
+        thumbnailUrl: frameOf(ownerId, gone),
+      });
+
+      for (const id of [film, essay]) {
+        const refusal = await contents
+          .publish(id, ownerId)
+          .catch((error: unknown) => error);
+        expect(refusal).toBeInstanceOf(ThumbnailMediaDeletedError);
+        expect((refusal as ThumbnailMediaDeletedError).context).toEqual({
+          contentId: id,
+          code: 'THUMBNAIL_MEDIA_DELETED',
+        });
+      }
+    });
+
+    it('publishes a frame of a video still in the library, of the one it plays, or of another creator', async () => {
+      const playing = await seedMedia(ownerId);
+      const kept = await seedMedia(ownerId);
+      // Another creator's poster URL isn't this check's (Codex-p0uuc).
+      const theirs = await seedMedia(otherId);
+      await markDeleted(theirs);
+      for (const thumbnailUrl of [
+        frameOf(ownerId, kept),
+        frameOf(ownerId, playing),
+        frameOf(otherId, theirs),
+        // Their video's id under this creator's folder: not this creator's.
+        frameOf(ownerId, theirs),
+      ]) {
+        const id = await seedContent(ownerId, {
+          mediaItemId: playing,
+          thumbnailUrl,
+        });
+        expect((await contents.publish(id, ownerId)).status).toBe('published');
+      }
+    });
+
+    it('refuses a save that gives live content such a frame; a draft can save it', async () => {
+      const editor = new ContentService({
+        db,
+        environment: 'test',
+        r2PublicUrlBase: cdn,
+      });
+      const playing = await seedMedia(ownerId);
+      const gone = await seedMedia(ownerId);
+      await markDeleted(gone);
+      const live = await seedContent(ownerId, {
+        mediaItemId: playing,
+        status: 'published',
+        publishedAt: new Date(),
+      });
+      const draft = await seedContent(ownerId, { mediaItemId: playing });
+      const thumbnailOf = async (id: string) =>
+        (
+          await db
+            .select({ thumbnailUrl: content.thumbnailUrl })
+            .from(content)
+            .where(eq(content.id, id))
+        )[0]?.thumbnailUrl;
+
+      const refusal = await editor
+        .update(live, { thumbnailUrl: frameOf(ownerId, gone) }, ownerId)
+        .catch((error: unknown) => error);
+      expect(refusal).toBeInstanceOf(ThumbnailMediaDeletedError);
+      expect(await thumbnailOf(live)).toBeNull();
+
+      await editor.update(
+        draft,
+        { thumbnailUrl: frameOf(ownerId, gone) },
+        ownerId
+      );
+      expect(await thumbnailOf(draft)).toBe(frameOf(ownerId, gone));
+    });
+
+    it('refuses a frame of the video written content links but doesn’t play', async () => {
+      const gone = await seedMedia(ownerId);
+      await markDeleted(gone);
+      const essay = await seedContent(ownerId, {
+        contentType: 'written',
+        mediaItemId: gone,
+        thumbnailUrl: frameOf(ownerId, gone),
+      });
+
+      const refusal = await contents
+        .publish(essay, ownerId)
+        .catch((error: unknown) => error);
+      expect(refusal).toBeInstanceOf(ThumbnailMediaDeletedError);
+    });
+
+    it('judges a URL as the delete guard does: every poster folder in it, with the id as the transcoder writes it', async () => {
+      const playing = await seedMedia(ownerId);
+      const live = { status: 'published' as const, publishedAt: new Date() };
+
+      // A URL holding two folders: the guard counts the second's video as
+      // used, so publish refuses the URL once that video is deleted.
+      const first = await seedMedia(ownerId);
+      const second = await seedMedia(ownerId);
+      const twoFolders = `${cdn}/${getMediaThumbnailPrefix(ownerId, first)}${getMediaThumbnailPrefix(ownerId, second)}lg.webp`;
+      await seedContent(ownerId, {
+        mediaItemId: playing,
+        thumbnailUrl: twoFolders,
+        ...live,
+      });
+      expect((await media.getUsage(second, ownerId)).live).toBe(1);
+      await markDeleted(second);
+      const draft = await seedContent(ownerId, {
+        mediaItemId: playing,
+        thumbnailUrl: twoFolders,
+      });
+      await expect(contents.publish(draft, ownerId)).rejects.toBeInstanceOf(
+        ThumbnailMediaDeletedError
+      );
+
+      // An upper-cased id is no folder the transcoder writes: the guard
+      // counts no use, so publish mustn't lock one either, or a delete it
+      // held up would then go through under live content.
+      const shouted = await seedMedia(ownerId);
+      const shoutedUrl = frameOf(ownerId, shouted.toUpperCase());
+      await seedContent(ownerId, {
+        mediaItemId: playing,
+        thumbnailUrl: shoutedUrl,
+        ...live,
+      });
+      expect((await media.getUsage(shouted, ownerId)).total).toBe(0);
+      await markDeleted(shouted);
+      const shoutedDraft = await seedContent(ownerId, {
+        mediaItemId: playing,
+        thumbnailUrl: shoutedUrl,
+      });
+      expect((await contents.publish(shoutedDraft, ownerId)).status).toBe(
+        'published'
+      );
+    });
+
+    it('the studio read names the video the thumbnail is a frame of, a deleted one first', async () => {
+      const playing = await seedMedia(ownerId);
+      const kept = await seedMedia(ownerId);
+      const gone = await seedMedia(ownerId, { title: 'First cut' });
+      await markDeleted(gone);
+      const draft = await seedContent(ownerId, {
+        mediaItemId: playing,
+        thumbnailUrl: frameOf(ownerId, gone),
+      });
+
+      const read = await contents.get(draft, ownerId);
+      expect(read?.thumbnailFrame).toMatchObject({
+        mediaItemId: gone,
+        title: 'First cut',
+      });
+      expect(read?.thumbnailFrame?.deletedAt).toBeInstanceOf(Date);
+
+      const both = await seedContent(ownerId, {
+        mediaItemId: playing,
+        thumbnailUrl: `${cdn}/${getMediaThumbnailPrefix(ownerId, kept)}${getMediaThumbnailPrefix(ownerId, gone)}lg.webp`,
+      });
+      expect(
+        (await contents.get(both, ownerId))?.thumbnailFrame?.mediaItemId
+      ).toBe(gone);
+
+      // Its own video's frame is named too: the editor leaves that one to
+      // the Media section while the form still plays it.
+      const own = await seedContent(ownerId, {
+        mediaItemId: playing,
+        thumbnailUrl: frameOf(ownerId, playing),
+      });
+      expect((await contents.get(own, ownerId))?.thumbnailFrame).toMatchObject({
+        mediaItemId: playing,
+        deletedAt: null,
+      });
+
+      // Another creator's video's id under this creator's folder (whose
+      // title it must not read), or no thumbnail: none.
+      const theirs = await seedMedia(otherId, { title: 'Their cut' });
+      await markDeleted(theirs);
+      for (const thumbnailUrl of [frameOf(ownerId, theirs), null]) {
+        const id = await seedContent(ownerId, {
+          mediaItemId: playing,
+          thumbnailUrl,
+        });
+        expect((await contents.get(id, ownerId))?.thumbnailFrame).toBeNull();
+      }
+    });
+  });
+
+  describe("a poster-frame thumbnail is the creator's own video's (Codex-p0uuc)", () => {
+    const cdn = 'https://cdn-assets.example';
+    const frameOf = (creatorId: string, mediaId: string) =>
+      `${cdn}/${getMediaThumbnailPrefix(creatorId, mediaId)}1920x1080-0a1b2c3d/lg.webp`;
+    const written = () => ({
+      title: 'Poster check',
+      slug: createUniqueSlug('poster-check'),
+      contentType: 'written' as const,
+      contentBody: 'Body text',
+      tags: [],
+    });
+    let editor: ContentService;
+    beforeAll(() => {
+      editor = new ContentService({
+        db,
+        environment: 'test',
+        r2PublicUrlBase: cdn,
+      });
+    });
+
+    async function refusal(write: Promise<unknown>) {
+      const error = await write.then(
+        () => null,
+        (e: unknown) => e
+      );
+      expect(error).toBeInstanceOf(ValidationError);
+      expect((error as ValidationError).context).toMatchObject({
+        field: 'thumbnailUrl',
+      });
+    }
+
+    it("refuses another creator's poster, an id that isn't the creator's video, or a URL naming one such folder among its own", async () => {
+      const mine = await seedMedia(ownerId);
+      const theirs = await seedMedia(otherId);
+      for (const thumbnailUrl of [
+        frameOf(otherId, theirs),
+        frameOf(ownerId, theirs),
+        frameOf(ownerId, '0f0e0d0c-0b0a-4908-8706-050403020100'),
+        `${cdn}/${getMediaThumbnailPrefix(ownerId, mine)}${getMediaThumbnailPrefix(otherId, theirs)}lg.webp`,
+      ]) {
+        await refusal(editor.create({ ...written(), thumbnailUrl }, ownerId));
+      }
+    });
+
+    it("takes a frame of the creator's own video, a deleted one in a draft too, and any other asset URL", async () => {
+      const kept = await seedMedia(ownerId);
+      const gone = await seedMedia(ownerId);
+      await markPosterVideoDeleted(gone);
+      for (const thumbnailUrl of [
+        frameOf(ownerId, kept),
+        frameOf(ownerId, gone),
+        `${cdn}/${ownerId}/content-thumbnails/c1/1920x1080-0a1b2c3d/lg.webp`,
+      ]) {
+        const created = await editor.create(
+          { ...written(), thumbnailUrl },
+          ownerId
+        );
+        expect(created.thumbnailUrl).toBe(thumbnailUrl);
+      }
+    });
+
+    it("refuses a save that sets another creator's poster, and takes the creator's own", async () => {
+      const mine = await seedMedia(ownerId);
+      const theirs = await seedMedia(otherId);
+      const created = await editor.create(written(), ownerId);
+
+      await refusal(
+        editor.update(
+          created.id,
+          { thumbnailUrl: frameOf(otherId, theirs) },
+          ownerId
+        )
+      );
+      const saved = await editor.update(
+        created.id,
+        { thumbnailUrl: frameOf(ownerId, mine) },
+        ownerId
+      );
+      expect(saved.thumbnailUrl).toBe(frameOf(ownerId, mine));
+    });
+
+    async function markPosterVideoDeleted(id: string) {
+      await db
+        .update(mediaItems)
+        .set({ deletedAt: new Date() })
+        .where(eq(mediaItems.id, id));
+    }
+  });
+
   describe('the purge and restore', () => {
     function stubR2(
       files: Record<string, string[]>,
@@ -790,6 +1202,37 @@ describe('media in use (Codex-6sbn1)', () => {
       return { r2: r2 as unknown as R2Service, deleted, listed };
     }
 
+    /** The edge-cache purge's stand-in: records each request's prefixes. */
+    function stubEdge(result: CdnPurgeResult = { ok: true }) {
+      const requests: string[][] = [];
+      return {
+        requests,
+        purgePrefixes: vi.fn(async (prefixes: readonly string[]) => {
+          requests.push([...prefixes]);
+          return result;
+        }),
+      };
+    }
+
+    /**
+     * The purge, over a media bucket and the posters' (ASSETS_BUCKET), and the
+     * edge cache in front of the posters' CDN.
+     */
+    function purger(
+      r2: R2Service,
+      assets: R2Service = stubR2({}).r2,
+      edge: ReturnType<typeof stubEdge> = stubEdge()
+    ) {
+      return new MediaItemService({
+        db,
+        environment: 'test',
+        r2,
+        assets,
+        cdnPurger: edge,
+        assetsPublicUrlBase: 'https://cdn-assets.example/',
+      });
+    }
+
     async function seedDeleted(
       overrides: Partial<typeof mediaItems.$inferInsert> = {}
     ): Promise<string> {
@@ -803,40 +1246,56 @@ describe('media in use (Codex-6sbn1)', () => {
     it('removes a due item’s files, prefix by prefix in batches, and claims it once', async () => {
       const due = await seedDeleted();
       const hls = getHlsPrefix(ownerId, due);
+      const posters = getMediaThumbnailPrefix(ownerId, due);
       const { r2, deleted, listed } = stubR2({
         [`${ownerId}/originals/${due}/`]: [
           `${ownerId}/originals/${due}/media.mp4`,
         ],
         [hls]: [`${hls}master.m3u8`, `${hls}1080p/segment_001.ts`],
       });
-      const svc = new MediaItemService({ db, environment: 'test', r2 });
+      const assets = stubR2({
+        [posters]: [
+          `${posters}sm.webp`,
+          `${posters}2160x3840-7ae9d61f/sm.webp`,
+          `${posters}2160x3840-7ae9d61f/xl.webp`,
+        ],
+      });
+      const edge = stubEdge();
+      const svc = purger(r2, assets.r2, edge);
 
       const report = await svc.purgeDueFiles({ deadline: Date.now() + 60_000 });
 
-      expect(listed).toEqual(
-        expect.arrayContaining([
-          `${ownerId}/originals/${due}/`,
-          hls,
-          `${ownerId}/thumbnails/${due}/`,
-          `${ownerId}/waveforms/${due}/`,
-        ])
-      );
+      const mine = (prefixes: string[]) =>
+        prefixes.filter((prefix) => prefix.includes(due));
+      expect(mine(listed)).toEqual([
+        `${ownerId}/originals/${due}/`,
+        hls,
+        `${ownerId}/waveforms/${due}/`,
+      ]);
       expect(deleted).toContainEqual([
         `${hls}master.m3u8`,
         `${hls}1080p/segment_001.ts`,
       ]);
+      // Its posters are in the public bucket, both layouts (Codex-9seq3).
+      expect(mine(assets.listed)).toEqual([posters]);
+      expect(assets.deleted).toContainEqual([
+        `${posters}sm.webp`,
+        `${posters}2160x3840-7ae9d61f/sm.webp`,
+        `${posters}2160x3840-7ae9d61f/xl.webp`,
+      ]);
       expect(report.purged).toBeGreaterThanOrEqual(1);
+      // Then off the edge: one request for the run, no scheme, both layouts.
+      expect(edge.requests).toHaveLength(1);
+      expect(edge.requests[0]).toContain(
+        `cdn-assets.example/${ownerId}/media-thumbnails/${due}`
+      );
       const row = await mediaRow(due);
       expect(row?.filesPurgeStartedAt).toBeInstanceOf(Date);
       expect(row?.filesPurgedAt).toBeInstanceOf(Date);
 
       // A second run lists nothing of it.
       const again = stubR2({});
-      await new MediaItemService({
-        db,
-        environment: 'test',
-        r2: again.r2,
-      }).purgeDueFiles({
+      await purger(again.r2).purgeDueFiles({
         deadline: Date.now() + 60_000,
       });
       expect(again.listed.some((prefix) => prefix.includes(due))).toBe(false);
@@ -852,7 +1311,7 @@ describe('media in use (Codex-6sbn1)', () => {
       const legacy = await seedDeleted({ filesPurgeAfter: null });
       const restored = await seedDeleted({ deletedAt: null });
       const { r2, listed } = stubR2({});
-      const svc = new MediaItemService({ db, environment: 'test', r2 });
+      const svc = purger(r2);
       // `obs` is protected: reached through a structural cast.
       const { obs } = svc as unknown as {
         obs: { error: (event: string, data: unknown) => void };
@@ -875,6 +1334,113 @@ describe('media in use (Codex-6sbn1)', () => {
       expect(inAWeek).toBeGreaterThan(7 * DAY_MS - 60_000);
     });
 
+    it('never touches an item whose frame a live film shows as its thumbnail (Codex-9seq3)', async () => {
+      const shown = await seedDeleted();
+      await seedContent(ownerId, {
+        mediaItemId: await seedMedia(ownerId),
+        status: 'published',
+        publishedAt: new Date(),
+        thumbnailUrl: `https://cdn-assets.example/${getMediaThumbnailPrefix(ownerId, shown)}1920x1080-0a1b2c3d/lg.webp`,
+      });
+      const mediaBucket = stubR2({});
+      const assets = stubR2({});
+      const svc = purger(mediaBucket.r2, assets.r2);
+      const { obs } = svc as unknown as {
+        obs: { error: (event: string, data: unknown) => void };
+      };
+      const errors = vi.spyOn(obs, 'error');
+
+      await svc.purgeDueFiles({ deadline: Date.now() + 60_000 });
+
+      // Reached and skipped, not merely left out of the run's 25.
+      expect(errors).toHaveBeenCalledWith('media.files_purge_skipped_in_use', {
+        mediaItemId: shown,
+        live: 1,
+      });
+      for (const listed of [mediaBucket.listed, assets.listed]) {
+        expect(listed.some((prefix) => prefix.includes(shown))).toBe(false);
+      }
+      expect(await mediaRow(shown)).toMatchObject({
+        filesPurgeStartedAt: null,
+        filesPurgedAt: null,
+      });
+    });
+
+    it('keeps an item purged when the edge purge fails, or is not configured, and says so', async () => {
+      const failing = await seedDeleted();
+      const svc = purger(
+        stubR2({}).r2,
+        stubR2({}).r2,
+        stubEdge({ ok: false, reason: 'HTTP 403' })
+      );
+      const { obs } = svc as unknown as {
+        obs: {
+          error: (event: string, data: unknown) => void;
+          warn: (event: string, data: unknown) => void;
+        };
+      };
+      const errors = vi.spyOn(obs, 'error');
+
+      await svc.purgeDueFiles({ deadline: Date.now() + 60_000 });
+
+      expect((await mediaRow(failing))?.filesPurgedAt).toBeInstanceOf(Date);
+      expect(errors).toHaveBeenCalledWith(
+        'media.files_edge_purge_skipped',
+        expect.objectContaining({ reason: 'HTTP 403' })
+      );
+
+      // No purger at all (local, or the token not yet set): logged, at warn
+      // outside production, and the item is still purged.
+      const unconfigured = await seedDeleted();
+      const bare = new MediaItemService({
+        db,
+        environment: 'test',
+        r2: stubR2({}).r2,
+        assets: stubR2({}).r2,
+      });
+      const warns = vi.spyOn(
+        (bare as unknown as { obs: typeof obs }).obs,
+        'warn'
+      );
+
+      await bare.purgeDueFiles({ deadline: Date.now() + 60_000 });
+
+      expect((await mediaRow(unconfigured))?.filesPurgedAt).toBeInstanceOf(
+        Date
+      );
+      expect(warns).toHaveBeenCalledWith(
+        'media.files_edge_purge_skipped',
+        expect.objectContaining({ reason: 'no CDN purge configured' })
+      );
+    });
+
+    it('removes nothing without the posters’ bucket: no claim, and the item stays due', async () => {
+      const due = await seedDeleted();
+      const { r2, listed } = stubR2({});
+      const svc = new MediaItemService({ db, environment: 'test', r2 });
+      const { obs } = svc as unknown as {
+        obs: { error: (event: string, data: unknown) => void };
+      };
+      const errors = vi.spyOn(obs, 'error');
+
+      const report = await svc.purgeDueFiles({ deadline: Date.now() + 60_000 });
+
+      expect(errors).toHaveBeenCalledWith('media.files_purge_unavailable', {
+        reason: 'no assets bucket',
+      });
+      expect(report).toMatchObject({ due: 0, purged: 0 });
+      expect(listed).toEqual([]);
+      expect(await mediaRow(due)).toMatchObject({
+        filesPurgeStartedAt: null,
+        filesPurgedAt: null,
+      });
+      // Leave nothing due for a later run.
+      await db
+        .update(mediaItems)
+        .set({ filesPurgedAt: new Date() })
+        .where(eq(mediaItems.id, due));
+    });
+
     it('does not stall behind 25 items something live uses: the 26th is purged on the next run', async () => {
       const longAgo = Date.now() - 400 * DAY_MS;
       const stuck: string[] = [];
@@ -892,8 +1458,7 @@ describe('media in use (Codex-6sbn1)', () => {
       const twentySixth = await seedDeleted({
         filesPurgeAfter: new Date(longAgo + 60_000),
       });
-      const svc = () =>
-        new MediaItemService({ db, environment: 'test', r2: stubR2({}).r2 });
+      const svc = () => purger(stubR2({}).r2);
 
       const first = await svc().purgeDueFiles({
         deadline: Date.now() + 60_000,
@@ -914,7 +1479,7 @@ describe('media in use (Codex-6sbn1)', () => {
         {},
         new Set([`${ownerId}/originals/${whole}/`]) // the first prefix
       );
-      const svc = new MediaItemService({ db, environment: 'test', r2 });
+      const svc = purger(r2);
 
       const report = await svc.purgeDueFiles({ deadline: Date.now() + 60_000 });
 
@@ -939,7 +1504,7 @@ describe('media in use (Codex-6sbn1)', () => {
         { [`${ownerId}/originals/${half}/`]: [original] },
         new Set([getHlsPrefix(ownerId, half)])
       );
-      const svc = new MediaItemService({ db, environment: 'test', r2 });
+      const svc = purger(r2);
 
       const report = await svc.purgeDueFiles({ deadline: Date.now() + 60_000 });
 
@@ -961,11 +1526,9 @@ describe('media in use (Codex-6sbn1)', () => {
         .update(mediaItems)
         .set({ filesPurgeAfter: new Date(Date.now() - 1000) })
         .where(eq(mediaItems.id, half));
-      await new MediaItemService({
-        db,
-        environment: 'test',
-        r2: stubR2({}).r2,
-      }).purgeDueFiles({ deadline: Date.now() + 60_000 });
+      await purger(stubR2({}).r2).purgeDueFiles({
+        deadline: Date.now() + 60_000,
+      });
       const finished = await mediaRow(half);
       expect(finished?.filesPurgedAt).toBeInstanceOf(Date);
       expect(finished?.filesPurgeStartedAt).toEqual(claimedAt);
@@ -991,9 +1554,7 @@ describe('media in use (Codex-6sbn1)', () => {
           .where(eq(mediaItems.id, again));
       });
 
-      await new MediaItemService({ db, environment: 'test', r2 }).purgeDueFiles(
-        { deadline: Date.now() + 60_000 }
-      );
+      await purger(r2).purgeDueFiles({ deadline: Date.now() + 60_000 });
 
       expect((await mediaRow(first))?.filesPurgedAt).toBeInstanceOf(Date);
       expect(listed.some((prefix) => prefix.includes(again))).toBe(false);
@@ -1006,11 +1567,9 @@ describe('media in use (Codex-6sbn1)', () => {
     it('claims nothing once the deadline has passed', async () => {
       const due = await seedDeleted();
       const { r2, listed } = stubR2({});
-      await new MediaItemService({ db, environment: 'test', r2 }).purgeDueFiles(
-        {
-          deadline: Date.now() - 1,
-        }
-      );
+      await purger(r2).purgeDueFiles({
+        deadline: Date.now() - 1,
+      });
       expect(listed).toEqual([]);
       expect((await mediaRow(due))?.filesPurgedAt).toBeNull();
       // Leave nothing due for a later run.

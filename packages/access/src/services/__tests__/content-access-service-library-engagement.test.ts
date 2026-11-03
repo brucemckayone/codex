@@ -93,6 +93,17 @@ describe('ContentAccessService.listUserLibrary — relationship buckets', () => 
     if (!primary || !secondary) throw new Error('Failed to seed orgs');
     organizationId = primary.id;
     otherOrgId = secondary.id;
+
+    // The creator files items into both orgs, so is on both teams
+    // (Codex-ocal6): the service refuses org content from a non-member.
+    await db.insert(organizationMemberships).values(
+      [organizationId, otherOrgId].map((orgId) => ({
+        userId: creatorUserId,
+        organizationId: orgId,
+        role: 'creator',
+        status: 'active',
+      }))
+    );
   });
 
   afterAll(async () => {

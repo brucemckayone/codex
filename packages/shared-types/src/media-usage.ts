@@ -15,11 +15,14 @@
 export type MediaUseKind = 'film' | 'audio' | 'course' | 'intro';
 
 /**
- * Which field holds the item: the content's one media item, a course page's
- * five sell-media slots, or the org's intro video.
+ * Which field holds the item: the content's one media item, content whose
+ * thumbnail is a frame of the item while it plays another (`thumbnail`,
+ * Codex-9seq3), a course page's five sell-media slots, or the org's intro
+ * video.
  */
 export type MediaUseSlot =
   | 'media'
+  | 'thumbnail'
   | 'intro'
   | 'reel'
   | 'guide_video'
@@ -53,6 +56,19 @@ export type MediaUseLink =
       orgSlug: string;
     }
   | { to: 'brand'; orgSlug: string };
+
+/**
+ * The creator's video a content item's thumbnail is a frame of, a deleted one
+ * first when it holds several (Codex-tqvmx). It can be the one the item
+ * plays. Only the Studio's single read (`GET /api/content/:id`) sends it: the
+ * editor warns while `deletedAt` is set and it isn't the media the form
+ * plays, which is what publish refuses (`THUMBNAIL_MEDIA_DELETED`).
+ */
+export interface ThumbnailFrame {
+  mediaItemId: string;
+  title: string;
+  deletedAt: Date | string | null;
+}
 
 /** One use the caller may see named. */
 export interface MediaUse {

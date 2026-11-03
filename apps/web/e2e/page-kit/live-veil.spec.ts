@@ -25,7 +25,9 @@ import {
   expectSellPageRendered,
   journeyFixture,
   journeyUrl,
+  orgUrl,
 } from '../helpers/journeys';
+import { captureSeededCreatorCookies } from '../helpers/subscription';
 
 type Theme = 'light' | 'dark';
 
@@ -272,6 +274,31 @@ async function measure({
   });
 }
 
+type Hero = NonNullable<ReturnType<typeof readHero>>;
+
+/**
+ * The words (and marks, and buttons) hidden, the veil and the shader left:
+ * each ink held over what it is seen against.
+ */
+async function heldOverShader(page: Page, hero: Hero) {
+  await page.addStyleTag({
+    content: `${HERO} * { color: transparent !important; -webkit-text-fill-color: transparent !important; text-shadow: none !important; }
+        ${HERO}::before, ${HERO}::after, ${HERO} *::before, ${HERO} *::after, ${HERO} .lp-button { visibility: hidden !important; }`,
+  });
+  await page.evaluate(
+    () =>
+      new Promise((done) =>
+        requestAnimationFrame(() => requestAnimationFrame(done))
+      )
+  );
+  const png = (await page.screenshot()).toString('base64');
+  return page.evaluate(measure, {
+    png,
+    lines: hero.lines,
+    bounds: hero.bounds,
+  });
+}
+
 /** Every Style that asks for the hazy look, and so for the thinner veil. */
 const HAZY = (Object.keys(STYLES) as (keyof typeof STYLES)[]).filter(
   (style) => STYLES[style].atmosphere === 'hazy'
@@ -318,27 +345,114 @@ for (const style of HAZY)
       expect(Number(hero.need), detail).toBeLessThanOrEqual(hero.floor);
       expect(hero.lines.length, detail).toBeGreaterThan(3);
 
-      // The words (and marks, and buttons) hidden, the veil and the shader
-      // left: what each ink is seen against.
-      await page.addStyleTag({
-        content: `${HERO} * { color: transparent !important; -webkit-text-fill-color: transparent !important; text-shadow: none !important; }
-        ${HERO}::before, ${HERO}::after, ${HERO} *::before, ${HERO} *::after, ${HERO} .lp-button { visibility: hidden !important; }`,
-      });
-      await page.evaluate(
-        () =>
-          new Promise((done) =>
-            requestAnimationFrame(() => requestAnimationFrame(done))
-          )
-      );
-      const png = (await page.screenshot()).toString('base64');
-      const held = await page.evaluate(measure, {
-        png,
-        lines: hero.lines,
-        bounds: hero.bounds,
-      });
+      const held = await heldOverShader(page, hero);
       await page.context().close();
 
       const short = held.filter((l) => l.worst < l.floor);
       expect(short, `veil ${hero.need}: ${JSON.stringify(held)}`).toEqual([]);
     });
   }
+
+// ── a framed hero picture on the shader (Codex-61zsk.73, #20c) ─────────────
+/*
+ * Since phase 3's first batch a framed hero (split, statement, centred or
+ * poster) sits on its band's one uniform veil, the shader under it. No
+ * seeded page draws a split on a shader (studio-alpha's are Cinematic's cover
+ * and Quiet's centred, and a split would need a database write), so this
+ * drives the page kit's gallery, which stands in for a live page
+ * (`org-layout--kit-gallery`): Studio's split, studio-alpha's own brand, a
+ * picture in its print frame. Every ink on the veil, the words beside the
+ * frame among them, is held to its floor over the pixels drawn. The gallery
+ * is a development route that a production build (CI's) does not serve, so,
+ * like the kit's other gallery specs, this is opt-in.
+ */
+test.describe('a framed hero picture on the shader', () => {
+  test.skip(
+    !process.env.LIVE_VEIL_FRAME,
+    'opt-in: LIVE_VEIL_FRAME=1 (a development route)'
+  );
+
+  for (const theme of ['light', 'dark'] as const)
+    test(`studio-alpha ('glow'), Studio's split hero with a picture, ${theme}: every ink beside the frame holds over the shader drawn`, async ({
+      browser,
+      baseURL,
+    }) => {
+      const url = orgUrl(
+        baseURL as string,
+        'studio-alpha',
+        `/studio/page-kit?style=studio&brand=org&only=hero&layout=split&scheme=atmosphere&img=1&theme=${theme}&chrome=0`
+      );
+      const context = await browser.newContext({
+        viewport: { width: 1440, height: 900 },
+        colorScheme: theme,
+        reducedMotion: 'reduce',
+      });
+      await context.addCookies([
+        ...(await captureSeededCreatorCookies()),
+        { name: 'theme', value: theme, url: new URL(url).origin },
+      ]);
+      const page = await context.newPage();
+      const response = await page.goto(url);
+      expect(
+        response?.status(),
+        'the page kit gallery is a development route: run this against a dev server'
+      ).not.toBe(404);
+      await expect(
+        page.locator('.org-layout[data-hero-shader-active]')
+      ).toHaveCount(1);
+      await expect(page.locator(".lp[data-lp-atmosphere='hazy']")).toHaveCount(
+        1
+      );
+      await expect(page.locator(`${HERO}[data-lp-layout='split']`)).toHaveCount(
+        1
+      );
+      // The picture is in, so its frame is drawn where the page draws it.
+      const picture = page.locator(`${HERO} img`).first();
+      await expect
+        .poll(
+          () =>
+            picture.evaluate(
+              (img) =>
+                img instanceof HTMLImageElement &&
+                img.complete &&
+                img.naturalWidth > 0
+            ),
+          {
+            message: 'the sample photo did not load (is the dev CDN seeded?)',
+            timeout: 30_000,
+          }
+        )
+        .toBe(true);
+
+      await expect
+        .poll(async () => (await page.evaluate(readHero, HERO))?.need, {
+          timeout: 15_000,
+        })
+        .not.toBe('');
+      const hero = await page.evaluate(readHero, HERO);
+      const detail = JSON.stringify(hero);
+      expect(hero, detail).not.toBeNull();
+      if (!hero) return;
+      expect(hero.lines.length, detail).toBeGreaterThan(3);
+      // The headline sits beside the frame, on the same band: what is held is
+      // the veil round a framed picture, not a band with nothing beside it.
+      const frame = await picture.boundingBox();
+      const headline = hero.lines.find((l) => l.name.startsWith('h1'));
+      expect(frame, detail).not.toBeNull();
+      expect(headline, detail).toBeDefined();
+      if (!frame || !headline) return;
+      const [left = 0, top = 0, right = 0, bottom = 0] = headline.box;
+      expect(right <= frame.x || left >= frame.x + frame.width, detail).toBe(
+        true
+      );
+      expect(top < frame.y + frame.height && bottom > frame.y, detail).toBe(
+        true
+      );
+
+      const held = await heldOverShader(page, hero);
+      await context.close();
+
+      const short = held.filter((l) => l.worst < l.floor);
+      expect(short, `veil ${hero.need}: ${JSON.stringify(held)}`).toEqual([]);
+    });
+});

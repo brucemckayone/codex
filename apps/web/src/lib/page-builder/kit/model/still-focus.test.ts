@@ -321,6 +321,28 @@ describe('which still each section draws', () => {
     }
   });
 
+  // HeroBlock frames the centred hero's picture under its words, 3:2 wide
+  // and 4:3 on a phone, in every Style (Codex-61zsk.73), on the course still
+  // and the creator's own image alike.
+  it('the centred hero is cut 3:2 wide and 4:3 on a phone, in every Style', () => {
+    const own = DEFINITIONS.hero.fields.find((field) => field.key === 'image');
+    for (const layouts of [
+      DEFINITIONS.hero.stillFocus?.focalLayouts ?? {},
+      own?.focalLayouts ?? {},
+    ])
+      for (const style of PAGE_STYLE_IDS)
+        expect(
+          stillCrops(layouts, 'centered', style).map(({ at, ratio }) => [
+            at,
+            ratio,
+          ]),
+          style
+        ).toEqual([
+          ['wide', '3 / 2'],
+          ['phone', '4 / 3'],
+        ]);
+  });
+
   // InstructorBlock draws the centred portrait 4:5, and square in Bold and
   // Soft: the preview shows each Style the crop its page draws.
   it('the guide’s centred portrait is cut square only where Bold and Soft draw it so', () => {
