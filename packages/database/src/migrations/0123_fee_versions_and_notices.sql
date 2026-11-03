@@ -18,8 +18,10 @@
 --      tables do, as 0106 does for copy).
 -- MIGRATE (the first deploy): the resolver reads versions; admin-api writes
 -- versions and changes, and keeps the three old "current row" tables in step
--- with the values in force NOW (never a waiting rise), so code rolled back
--- to before this reads the right fee, and a waiting rise simply never starts.
+-- with the values in force NOW (never a waiting rise; notifications-api's
+-- daily run writes a dated rise into them on the morning it starts), so
+-- code rolled back to before this reads the right fee, and a waiting rise
+-- simply never starts.
 -- CONTRACT (a later release): stop writing fee_config_platform, _org and
 -- _org_creator, then drop or rename them. The audit log stays.
 --

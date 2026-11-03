@@ -237,35 +237,88 @@ two columns on `fee_config_audit_log`, and the `fee-change-notice` and
 before. It is additive and runs before the workers deploy; old workers never
 read the new tables.
 
-### R14 — after the deploy: the backfill matches the fee rows
+### R14 — after the deploy: the old fee rows match the versions
 
-Expect each pair to be equal, and both template rows to exist:
+**Change no fee between the merge and the deploy summary.** Until admin-api
+deploys, the old admin-api writes only the old `fee_config_*` rows, which
+the new resolver never reads.
+
+Each level's old row should hold the values of its version in force. Expect
+the first query to list nothing, and both template rows to exist:
 
 ```sql
 BEGIN TRANSACTION READ ONLY;
-SELECT
-  (SELECT count(*) FROM fee_config_platform)    AS platform_rows,
-  (SELECT count(*) FROM fee_changes WHERE scope = 'platform') AS platform_changes,
-  (SELECT count(*) FROM fee_config_org)         AS org_rows,
-  (SELECT count(*) FROM fee_changes WHERE scope = 'org')      AS org_changes,
-  (SELECT count(*) FROM fee_config_org_creator) AS override_rows,
-  (SELECT count(*) FROM fee_changes WHERE scope = 'creator')  AS override_changes;
+WITH in_force AS (
+  -- Each level's version in force now: the newest dated, not voided one.
+  SELECT DISTINCT ON (c.scope, c.organization_id, c.creator_id)
+         c.scope, c.organization_id, c.creator_id, v.removed,
+         v.platform_fee_percent, v.subscription_org_fee_percent,
+         v.one_off_org_fee_percent, v.org_fee_percent,
+         v.min_platform_fee_cents, v.min_transfer_cents, v.notes
+    FROM fee_changes c
+    JOIN fee_config_versions v
+      ON v.change_id = c.id AND v.superseded_at IS NULL
+   WHERE c.voided_at IS NULL AND c.effective_from <= now()
+   ORDER BY c.scope, c.organization_id, c.creator_id,
+            c.effective_from DESC, c.created_at DESC
+), live AS (
+  -- A removed version means the level has no old row.
+  SELECT * FROM in_force WHERE NOT removed
+)
+SELECT 'platform' AS level, NULL::uuid AS organization_id,
+       NULL::text AS creator_id
+  FROM (SELECT * FROM live WHERE scope = 'platform') f
+  FULL JOIN fee_config_platform p ON true
+ WHERE (p.id IS NOT NULL, p.platform_fee_percent,
+        p.subscription_org_fee_percent, p.one_off_org_fee_percent,
+        p.min_platform_fee_cents, p.min_transfer_cents)
+       IS DISTINCT FROM
+       (f.scope IS NOT NULL, f.platform_fee_percent,
+        f.subscription_org_fee_percent, f.one_off_org_fee_percent,
+        f.min_platform_fee_cents, f.min_transfer_cents)
+UNION ALL
+SELECT 'org', coalesce(o.organization_id, f.organization_id), NULL
+  FROM (SELECT * FROM live WHERE scope = 'org') f
+  FULL JOIN fee_config_org o ON o.organization_id = f.organization_id
+ WHERE (o.organization_id IS NOT NULL, o.platform_fee_percent,
+        o.org_fee_percent, o.min_platform_fee_cents, o.min_transfer_cents)
+       IS DISTINCT FROM
+       (f.organization_id IS NOT NULL, f.platform_fee_percent,
+        f.org_fee_percent, f.min_platform_fee_cents, f.min_transfer_cents)
+UNION ALL
+SELECT 'creator', coalesce(x.organization_id, f.organization_id),
+       coalesce(x.creator_id, f.creator_id)
+  FROM (SELECT * FROM live WHERE scope = 'creator') f
+  FULL JOIN fee_config_org_creator x
+    ON x.organization_id = f.organization_id AND x.creator_id = f.creator_id
+ WHERE (x.creator_id IS NOT NULL, x.platform_fee_percent, x.org_fee_percent,
+        x.min_platform_fee_cents, x.min_transfer_cents, x.notes)
+       IS DISTINCT FROM
+       (f.creator_id IS NOT NULL, f.platform_fee_percent, f.org_fee_percent,
+        f.min_platform_fee_cents, f.min_transfer_cents, f.notes);
 SELECT name, status FROM email_templates
  WHERE name IN ('fee-change-notice', 'fee-change-cancelled')
    AND scope = 'global' AND deleted_at IS NULL;
 ROLLBACK;
 ```
 
-Run it before anyone changes a fee in the new admin routes: after that, a
-level has more than one change by design. A mismatch means a fee row the
-backfill skipped. Don't fix it with SQL ([why](operations.md#changing-fees)):
-save that level's values again through its admin route, which writes the
-change, the version and the audit rows together.
+It compares values, not counts, so a fee edited through the old admin-api in
+the deploy window shows here even though every level still has one row and
+one change. Each level it lists is one where the two disagree. Don't fix it
+with SQL ([why](operations.md#changing-fees)). Through the new admin route,
+save the level's values as its old row has them, or remove the level if its
+old row is gone: either writes the change, the version, the audit rows and
+the old row together. Then run it again.
+
+The query holds at any time, not only after the deploy. Its one expected
+exception: a level whose dated rise started since midnight, listed until the
+08:00 fee step writes the rise into its old row (R15).
 
 ### R15 — the first 08:00 run
 
 The morning after the deploy, read notifications-api's `fee step completed`
-log line. With no rise saved it reads all zeros. Look for any
+log line. With no rise saved it reads all zeros. Its `mirrored` count is the
+levels whose old fee row took a dated rise that started since the last run. Look for any
 `fee step: template missing` warning (the templates didn't arrive: R14's
 second query) or `fee step part failed` error.
 
@@ -276,10 +329,15 @@ both.
 
 ### Rollback
 
-`0123` stays. See [Changing fees › Rollback](operations.md#changing-fees):
-the old workers read the old `fee_config_*` rows (kept at the values in force
-now), so sales keep the right fee, and a waiting rise doesn't start until the
-roll forward. Don't change fees while rolled back.
+`0123` stays. See [Changing fees › Rollback](operations.md#changing-fees).
+The old workers read the old `fee_config_*` rows. Every admin save keeps them
+at the values in force then, and the 08:00 fee step writes a dated rise into
+them on the morning it starts, so sales keep the right fee. Before rolling
+back, run R14's first query: it should list nothing. A level whose rise
+started since midnight is listed until the 08:00 run, so roll back after it.
+While rolled back the fee step stops: a waiting rise doesn't start, and one
+whose date falls in the rollback starts only at the roll forward. Don't change
+fees while rolled back.
 
 ---
 
