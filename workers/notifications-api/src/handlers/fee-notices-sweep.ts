@@ -182,6 +182,11 @@ export interface RunFeeNoticesSweepDeps {
   templateExists?: (name: FeeTemplate) => Promise<boolean>;
   /** Testing only. */
   perRun?: number;
+  /**
+   * Testing only: failed notices named one by one in a run before the rest
+   * fold into one error. Default: ALERT_NAMED.
+   */
+  alertNamed?: number;
   /** Real time, for the send budget (testing only). */
   clock?: () => number;
   /**
@@ -236,6 +241,10 @@ interface SweepContext {
   payees: Map<string, Promise<Map<string, AffectedPayee>>>;
   orgNames: Map<string, { name: string; slug: string }>;
   onlyChanges: readonly string[] | null;
+  alertNamed: number;
+  /** Notices whose send threw this run, and the changes of those not named. */
+  noticeFailures: number;
+  foldedChangeIds: Set<string>;
 }
 
 /** `onlyChanges` as a filter on `fee_changes`; none in production. */
@@ -997,6 +1006,11 @@ async function sendDue(ctx: SweepContext): Promise<void> {
           await sendOne(ctx, notice, changes, people);
         } catch (error) {
           ctx.result.errors += 1;
+          ctx.noticeFailures += 1;
+          if (ctx.noticeFailures > ctx.alertNamed) {
+            ctx.foldedChangeIds.add(notice.changeId);
+            return;
+          }
           ctx.obs.error('fee step: one notice failed', {
             errorId: crypto.randomUUID(),
             feeNoticeId: notice.id,
@@ -1007,6 +1021,22 @@ async function sendDue(ctx: SweepContext): Promise<void> {
       })
     );
   }
+}
+
+/**
+ * One cause (a database blip, say) fails every notice it reaches: the first
+ * ALERT_NAMED are named one by one and the rest fold into this one error
+ * with their count, as the price-moves step does (review cycle 2, L4).
+ */
+async function alertFoldedFailures(ctx: SweepContext): Promise<void> {
+  const notNamed = ctx.noticeFailures - ctx.alertNamed;
+  if (notNamed <= 0) return;
+  ctx.obs.error('fee step: more notices failed than are named one by one', {
+    errorId: crypto.randomUUID(),
+    failed: ctx.noticeFailures,
+    notNamed,
+    changeIds: [...ctx.foldedChangeIds].slice(0, ALERT_NAMED),
+  });
 }
 
 // ─── 4. Dates ────────────────────────────────────────────────────────────────
@@ -1309,6 +1339,9 @@ export async function runFeeNoticesSweep(
       payees: new Map(),
       orgNames: new Map(),
       onlyChanges: deps.onlyChanges ?? null,
+      alertNamed: deps.alertNamed ?? ALERT_NAMED,
+      noticeFailures: 0,
+      foldedChangeIds: new Set(),
     };
     let listedThisRun: Set<string> = new Set();
     // Each part is isolated: one failing never stops the others.
@@ -1322,6 +1355,8 @@ export async function runFeeNoticesSweep(
       ['joiners', () => addJoiners(ctx, listedThisRun)],
       ['templates', () => alertMissingTemplates(ctx)],
       ['sends', () => sendDue(ctx)],
+      // Its own part: it runs however the sends ended.
+      ['send failures', () => alertFoldedFailures(ctx)],
       ['dates', () => dateRises(ctx)],
       ['old rows', () => mirrorStartedRises(ctx)],
       ['alert', () => alertNotTold(ctx)],

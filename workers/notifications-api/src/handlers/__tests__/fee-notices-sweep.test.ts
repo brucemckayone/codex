@@ -640,6 +640,46 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
     );
   });
 
+  it('one cause failing many notices names the first few and folds the rest into one alert', async () => {
+    const ids: string[] = [];
+    for (const name of ['Ann Roe', 'Bo Lee', 'Cal Fox', 'Dee Ash']) {
+      ids.push((await person(name)).id);
+    }
+    const changeId = await rise(await organisation(...ids));
+    // Thrown before its promise exists, so the send's own catch never sees
+    // it: each notice fails as a database blip inside its send would.
+    const mailer = vi.fn((): Promise<FeeNoticeDelivery> => {
+      throw new Error('the send broke');
+    });
+
+    const result = await runFeeNoticesSweep({
+      db,
+      obs,
+      environment: 'development',
+      workerSecret: 'unused',
+      notificationsUrl: 'http://unused.test',
+      now: NOV_3,
+      mailer,
+      templateExists: async () => true,
+      onlyChanges: [changeId],
+      alertNamed: 2,
+    });
+
+    expect(result).toMatchObject({ listed: 4, sent: 0, errors: 4 });
+    expect(errorsFor(changeId, 'fee step: one notice failed')).toHaveLength(2);
+    const folded = obsLog.error.mock.calls.filter(
+      ([message, context]) =>
+        String(message).startsWith('fee step: more notices failed') &&
+        (context as { changeIds: string[] }).changeIds.includes(changeId)
+    );
+    expect(folded).toHaveLength(1);
+    expect(folded[0]?.[1]).toMatchObject({
+      errorId: expect.any(String),
+      failed: 4,
+      notNamed: 2,
+    });
+  });
+
   it('a send that outlasts its timeout is unknown, so the next run checks the email log first', async () => {
     const kim = await person('Kim Slow');
     const changeId = await rise(await organisation(kim.id));
