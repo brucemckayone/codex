@@ -22,7 +22,10 @@
  *      rise made smaller is announced with its smaller figure.
  *   4. DATE: a rise whose list has nobody left waiting is dated the first UK
  *      midnight at least 30 days after the last of them was told
- *      (`dateRiseIfAllTold`, shared with support's "told another way").
+ *      (`dateRiseIfAllTold`, shared with support's "told another way"). A
+ *      rise whose date has come puts its values in its level's old
+ *      `fee_config_*` row (`mirrorLegacyFeeRow`, as every admin write does),
+ *      so code rolled back to before 0123 charges the fee sales pay.
  *   5. FOLLOW-UPS: `smaller` (Q2) and `cancelled` (F2) emails go the same
  *      way. They hold nothing, so after 3 failed mornings they are dropped
  *      (`not_needed`) with a log line, and never reach support.
@@ -48,7 +51,10 @@ import {
   gte,
   inArray,
   isNull,
+  lt,
+  lte,
   messageForLog,
+  or,
   sql,
 } from '@codex/database';
 import {
@@ -60,6 +66,9 @@ import {
   type FeeNoticeRoleValues,
   feeChangeNotices,
   feeChanges,
+  feeConfigOrg,
+  feeConfigOrgCreator,
+  feeConfigPlatform,
   organizations,
   users,
 } from '@codex/database/schema';
@@ -71,8 +80,11 @@ import {
   dateRiseIfAllTold,
   dbFeeVersionReader,
   FEE_NOTICE_OPEN_STATES,
+  type FeeLevel,
   feeRiseStartAfter,
+  lockFeeLevel,
   londonDate,
+  mirrorLegacyFeeRow,
   resolveFeesAt,
   WAITING_RISE,
 } from '@codex/payments';
@@ -185,6 +197,8 @@ export interface FeeNoticesSweepResult {
   /** Claims given back unsent: the send budget ran out. */
   givenBack: number;
   dated: number;
+  /** Levels whose old fee row took a rise that has started. */
+  mirrored: number;
   skippedTemplates: FeeTemplate[];
   errors: number;
 }
@@ -961,6 +975,115 @@ async function dateRises(ctx: SweepContext): Promise<void> {
   }
 }
 
+/**
+ * A dated rise that has started puts its values in its level's old current
+ * row (`fee_config_*`), so code rolled back to before 0123 charges the fee
+ * sales pay. A level is due when a rise there started after its row was last
+ * written, or it has no row: a missed morning is caught the next one, and a
+ * level once mirrored is not again.
+ */
+async function mirrorStartedRises(ctx: SweepContext): Promise<void> {
+  const started = and(
+    eq(feeChanges.kind, 'rise'),
+    isNull(feeChanges.voidedAt),
+    lte(feeChanges.effectiveFrom, ctx.now),
+    scope(ctx)
+  );
+  const [platform, orgs, creators] = await Promise.all([
+    ctx.db
+      .select({ id: feeChanges.id })
+      .from(feeChanges)
+      .leftJoin(feeConfigPlatform, eq(feeConfigPlatform.id, 'singleton'))
+      .where(
+        and(
+          eq(feeChanges.scope, 'platform'),
+          started,
+          or(
+            isNull(feeConfigPlatform.updatedAt),
+            lt(feeConfigPlatform.updatedAt, feeChanges.effectiveFrom)
+          )
+        )
+      )
+      .limit(1),
+    ctx.db
+      .selectDistinct({ organizationId: feeChanges.organizationId })
+      .from(feeChanges)
+      .leftJoin(
+        feeConfigOrg,
+        eq(feeConfigOrg.organizationId, feeChanges.organizationId)
+      )
+      .where(
+        and(
+          eq(feeChanges.scope, 'org'),
+          started,
+          or(
+            isNull(feeConfigOrg.updatedAt),
+            lt(feeConfigOrg.updatedAt, feeChanges.effectiveFrom)
+          )
+        )
+      ),
+    ctx.db
+      .selectDistinct({
+        organizationId: feeChanges.organizationId,
+        creatorId: feeChanges.creatorId,
+      })
+      .from(feeChanges)
+      .leftJoin(
+        feeConfigOrgCreator,
+        and(
+          eq(feeConfigOrgCreator.organizationId, feeChanges.organizationId),
+          eq(feeConfigOrgCreator.creatorId, feeChanges.creatorId)
+        )
+      )
+      .where(
+        and(
+          eq(feeChanges.scope, 'creator'),
+          started,
+          or(
+            isNull(feeConfigOrgCreator.updatedAt),
+            lt(feeConfigOrgCreator.updatedAt, feeChanges.effectiveFrom)
+          )
+        )
+      ),
+  ]);
+  const levels: FeeLevel[] = [];
+  if (platform.length > 0) levels.push({ scope: 'platform' });
+  for (const { organizationId } of orgs) {
+    if (organizationId) levels.push({ scope: 'org', organizationId });
+  }
+  for (const { organizationId, creatorId } of creators) {
+    if (organizationId && creatorId) {
+      levels.push({ scope: 'creator', organizationId, creatorId });
+    }
+  }
+  for (const level of levels) {
+    try {
+      // The level's lock, as an admin write takes it: a save mirrors in its
+      // own transaction, and the two take turns.
+      const wrote = await ctx.db.transaction(async (tx) => {
+        await lockFeeLevel(tx, level);
+        return mirrorLegacyFeeRow(tx, level, null, ctx.now);
+      });
+      if (wrote) {
+        ctx.result.mirrored += 1;
+        ctx.obs.info('fee step: a started rise is in the old fee row', {
+          ...level,
+        });
+      }
+    } catch (error) {
+      ctx.result.errors += 1;
+      ctx.obs.error(
+        'fee step: a started rise could not reach the old fee row',
+        {
+          errorId: crypto.randomUUID(),
+          ...level,
+          error: messageForLog(error),
+        }
+      );
+    }
+  }
+}
+
 // ─── 6. The alert ────────────────────────────────────────────────────────────
 
 async function alertNotTold(ctx: SweepContext): Promise<void> {
@@ -1043,6 +1166,7 @@ export async function runFeeNoticesSweep(
     dropped: 0,
     givenBack: 0,
     dated: 0,
+    mirrored: 0,
     skippedTemplates: [],
     errors: 0,
   };
@@ -1082,6 +1206,7 @@ export async function runFeeNoticesSweep(
       ['joiners', () => addJoiners(ctx, listedThisRun)],
       ['sends', () => sendDue(ctx)],
       ['dates', () => dateRises(ctx)],
+      ['old rows', () => mirrorStartedRises(ctx)],
       ['alert', () => alertNotTold(ctx)],
     ];
     for (const [part, run] of parts) {

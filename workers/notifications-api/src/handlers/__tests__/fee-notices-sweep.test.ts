@@ -22,6 +22,7 @@ import {
   emailAuditLogs,
   feeChangeNotices,
   feeChanges,
+  feeConfigOrg,
   feeConfigVersions,
   organizationMemberships,
   organizations,
@@ -624,5 +625,102 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
     } finally {
       fetchSpy.mockRestore();
     }
+  });
+
+  it('a rise whose date has come goes into the old fee row, once; one dated tomorrow waits for its morning', async () => {
+    const SAVED = new Date('2026-09-01T10:00:00Z');
+    /**
+     * An organisation at 10% since 1970, its old row saying so (written when
+     * the rise was saved), and a rise to 15% dated `from`.
+     */
+    async function datedRise(from: Date) {
+      const organizationId = await organisation();
+      const [cut] = await db
+        .insert(feeChanges)
+        .values({
+          scope: 'org',
+          organizationId,
+          kind: 'cut',
+          effectiveFrom: new Date(0),
+        })
+        .returning({ id: feeChanges.id });
+      await db.insert(feeConfigVersions).values({
+        changeId: cut?.id as string,
+        scope: 'org',
+        orgFeePercent: 1000,
+      });
+      const [rise] = await db
+        .insert(feeChanges)
+        .values({
+          scope: 'org',
+          organizationId,
+          kind: 'rise',
+          firstRunAt: SAVED,
+          listedCount: 0,
+          effectiveFrom: from,
+        })
+        .returning({ id: feeChanges.id });
+      await db.insert(feeConfigVersions).values({
+        changeId: rise?.id as string,
+        scope: 'org',
+        orgFeePercent: 1500,
+      });
+      await db.insert(feeConfigOrg).values({
+        organizationId,
+        orgFeePercent: 1000,
+        version: 1,
+        updatedAt: SAVED,
+      });
+      return { organizationId, changeId: rise?.id as string };
+    }
+    const oldRow = async (organizationId: string) => {
+      const [row] = await db
+        .select()
+        .from(feeConfigOrg)
+        .where(eq(feeConfigOrg.organizationId, organizationId));
+      return row;
+    };
+    // NOV_3 is 08:00 on 3 November: one rise started at midnight, one starts
+    // at the next.
+    const begun = await datedRise(new Date('2026-11-03T00:00:00Z'));
+    const coming = await datedRise(new Date('2026-11-04T00:00:00Z'));
+    const both = (now: Date) =>
+      runFeeNoticesSweep({
+        db,
+        obs,
+        environment: 'development',
+        workerSecret: 'unused',
+        notificationsUrl: 'http://unused.test',
+        now,
+        mailer: mailerAnswering(),
+        templateExists: async () => true,
+        onlyChanges: [begun.changeId, coming.changeId],
+      });
+
+    expect(await both(NOV_3)).toMatchObject({ mirrored: 1, errors: 0 });
+    expect(await oldRow(begun.organizationId)).toMatchObject({
+      orgFeePercent: 1500,
+      version: 2,
+      updatedAt: NOV_3,
+      updatedBy: null,
+    });
+    expect(await oldRow(coming.organizationId)).toMatchObject({
+      orgFeePercent: 1000,
+      version: 1,
+      updatedAt: SAVED,
+    });
+
+    // Again the same morning: nothing to do.
+    expect(await both(NOV_3)).toMatchObject({ mirrored: 0, errors: 0 });
+    expect((await oldRow(begun.organizationId))?.version).toBe(2);
+
+    // The next morning the other has begun.
+    expect(await both(NOV_4)).toMatchObject({ mirrored: 1, errors: 0 });
+    expect(await oldRow(coming.organizationId)).toMatchObject({
+      orgFeePercent: 1500,
+      version: 2,
+      updatedAt: NOV_4,
+    });
+    expect((await oldRow(begun.organizationId))?.version).toBe(2);
   });
 });
