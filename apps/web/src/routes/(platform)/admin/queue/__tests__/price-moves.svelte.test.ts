@@ -245,15 +245,15 @@ describe('Retry', () => {
     expect(countsSlot().refresh).toHaveBeenCalledTimes(1);
   });
 
-  test('M6 nothing to retry: the reason, in the server’s words', async () => {
+  test('M6 nothing to retry: the reason, in en.json’s words (W4)', async () => {
     retryPriceMove.mockResolvedValue(
       failure({
         status: 409,
         code: 'CONFLICT',
         detailsCode: 'PRICE_MOVE_NOT_HELD',
         reason: 'superseded',
-        message:
-          'A newer price for Pro replaced this one at 10:30, so they are emailed about that instead.',
+        supersededAt: '2026-11-04T10:30:00.000Z',
+        message: 'Server words, not en.json.',
       })
     );
     mountAt('/admin/queue?tab=moves');
@@ -267,8 +267,9 @@ describe('Retry', () => {
       m.support_queue_moves_nothing_to_retry({ name: 'Leah Ortiz' })
     );
     expect(notice()?.textContent).toContain(
-      'A newer price for Pro replaced this one at 10:30'
+      'A newer price for Pro replaced this one on 4 Nov at 10:30'
     );
+    expect(notice()?.textContent).not.toContain('Server words');
     expect(heldMovesSlot().refresh).toHaveBeenCalledTimes(1);
   });
 
