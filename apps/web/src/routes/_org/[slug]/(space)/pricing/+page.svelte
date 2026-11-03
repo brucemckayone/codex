@@ -355,7 +355,7 @@
    *   states 6-8): the item carries the cheaper Price until then, so a
    *   preview would credit the wrong amount.
    * - `interval_while_moving`: a billing switch while a move waits (Q3).
-   * - `two_steps`: a cheaper plan on another billing period (T1, Q1).
+   * - `two_steps`: a cheaper plan on yearly billing, from monthly (T1, Q1).
    */
   type TierChangeStep = 'keep_first' | 'interval_while_moving' | 'two_steps';
   let tierChangeStep = $state<TierChangeStep | null>(null);
@@ -386,9 +386,7 @@
           ? m.pricing_change_title_billing_year()
           : m.pricing_change_title_billing_month();
       case 'two_steps':
-        return billingInterval === 'year'
-          ? m.pricing_change_title_two_steps_year({ plan: tier.name })
-          : m.pricing_change_title_two_steps_month({ plan: tier.name });
+        return m.pricing_change_title_two_steps_year({ plan: tier.name });
     }
     const preview = tierChangePreview;
     // Leaving yearly billing waits for the year's end (Codex-2hxff.97): the
@@ -1138,9 +1136,13 @@
       : m.pricing_refusal_change_refused();
   }
 
-  /** Step 2 of two (T1): the plan first, on the billing the member has now. */
+  /**
+   * The first of two steps (T1): the plan first, on the monthly billing the
+   * member has now. Two steps are asked only from monthly (contract
+   * 90bef17e), so this holds even before the page knows their billing.
+   */
   function startFirstStep(tier: SubscriptionTier) {
-    if (currentBillingInterval) billingInterval = currentBillingInterval;
+    billingInterval = 'month';
     tierChangeDialogUpgrade = false;
     openTierChangeDialog(tier);
   }
@@ -2357,9 +2359,11 @@
           <Alert variant="error">{tierChangeKeepError}</Alert>
         {/if}
       {:else if tierChangeStep === 'two_steps' && tierChangeDialogTier}
-        <!-- A cheaper plan on another billing period (T1, page 1 state 10):
-             the plan first, on the billing the member has now. -->
-        {@const firstInterval = currentBillingInterval ?? billingInterval}
+        <!-- A cheaper plan on yearly billing, from monthly (T1, page 1
+             state 10): the plan first, on the monthly billing the member
+             has now. Only that way round takes two steps (contract
+             90bef17e): leaving yearly billing waits for the year's end
+             (Codex-2hxff.97), so there is no "to monthly" second step. -->
         <p class="tier-change-wait">{m.pricing_change_two_steps_lede()}</p>
         <ol class="tier-change-steps" data-testid="tier-change-two-steps">
           <li>
@@ -2367,10 +2371,7 @@
               emphasise(
                 m.pricing_change_two_steps_first,
                 {
-                  target:
-                    firstInterval === 'year'
-                      ? m.pricing_change_plan_on_billing_year({ plan: tierChangeDialogTier.name })
-                      : m.pricing_change_plan_on_billing_month({ plan: tierChangeDialogTier.name }),
+                  target: m.pricing_change_plan_on_billing_month({ plan: tierChangeDialogTier.name }),
                   currentPlan: currentPlanName,
                   date: currentPeriodEnd ? formatSentenceDate(currentPeriodEnd) : '',
                 },
@@ -2379,29 +2380,16 @@
             )}
           </li>
           <li>
-            {#if billingInterval === 'month'}
-              {@render emphasised(
-                emphasise(
-                  m.pricing_change_two_steps_second_to_month,
-                  {
-                    plan: tierChangeDialogTier.name,
-                    billing: m.pricing_change_billing_month(),
-                  },
-                  ['billing']
-                )
-              )}
-            {:else}
-              {@render emphasised(
-                emphasise(
-                  m.pricing_change_two_steps_second_to_year,
-                  {
-                    plan: tierChangeDialogTier.name,
-                    billing: m.pricing_change_billing_year(),
-                  },
-                  ['billing']
-                )
-              )}
-            {/if}
+            {@render emphasised(
+              emphasise(
+                m.pricing_change_two_steps_second_to_year,
+                {
+                  plan: tierChangeDialogTier.name,
+                  billing: m.pricing_change_billing_year(),
+                },
+                ['billing']
+              )
+            )}
           </li>
         </ol>
       {:else if tierChangePreviewLoading}
@@ -2633,9 +2621,7 @@
           data-testid="tier-change-dialog-first-step"
           onclick={() => startFirstStep(tier)}
         >
-          {(currentBillingInterval ?? billingInterval) === 'year'
-            ? m.pricing_change_start_first_step_year({ plan: tier.name })
-            : m.pricing_change_start_first_step_month({ plan: tier.name })}
+          {m.pricing_change_start_first_step_month({ plan: tier.name })}
         </Button>
       {:else if tierChangeRefusedForGood}
         <!-- Refused for a reason a retry won't change (Codex-2hxff.69): the

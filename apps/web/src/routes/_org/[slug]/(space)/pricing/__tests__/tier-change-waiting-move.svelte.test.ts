@@ -599,7 +599,10 @@ describe('while a move waits', () => {
 });
 
 describe('two steps, and a refusal the page has no move for', () => {
-  test('a cheaper plan on another billing period: plan first (page 1 state 10)', async () => {
+  // Two steps are asked only from monthly, for a cheaper plan on yearly
+  // (contract 90bef17e). Leaving yearly billing waits for the year's end
+  // instead (Codex-2hxff.97), so there is no "to monthly" second step.
+  test('a cheaper plan on yearly billing, from monthly: plan first (page 1 state 10)', async () => {
     remote.previewSubscriptionTierChange
       .mockResolvedValueOnce({
         success: false,
@@ -608,44 +611,50 @@ describe('two steps, and a refusal the page has no move for', () => {
         message: 'two steps',
         status: 422,
       })
-      .mockResolvedValueOnce({
-        success: true,
-        data: {
-          ...WAIT_PREVIEW,
-          newRecurringInterval: 'year',
-          newRecurringAmountCents: 5000,
-        },
-      });
-    // Jo: Pro yearly, picks Basic monthly.
-    mountPage(subscription(PRO, { billingInterval: 'year' }));
+      .mockResolvedValueOnce({ success: true, data: WAIT_PREVIEW });
+    // Jo: Pro monthly, picks Basic yearly.
+    mountPage(subscription(PRO));
+    const annual = Array.from(
+      document.querySelectorAll<HTMLButtonElement>(
+        '.billing-toggle [role="radio"]'
+      )
+    )[1];
+    annual?.click();
+    flushSync();
 
     cardButton('Basic')?.click();
     await settle();
 
+    expect(remote.previewSubscriptionTierChange).toHaveBeenCalledWith(
+      expect.objectContaining({ newTierId: BASIC.id, billingInterval: 'year' })
+    );
     expect(bodyText()).toContain(
-      m.pricing_change_title_two_steps_month({ plan: 'Basic' })
+      m.pricing_change_title_two_steps_year({ plan: 'Basic' })
     );
     const steps = Array.from(
       byTestId('tier-change-two-steps')?.querySelectorAll('li') ?? []
     ).map((li) => clean(li.textContent));
     expect(steps).toEqual([
       m.pricing_change_two_steps_first({
-        target: m.pricing_change_plan_on_billing_year({ plan: 'Basic' }),
+        target: m.pricing_change_plan_on_billing_month({ plan: 'Basic' }),
         currentPlan: 'Pro',
         date: DATE,
       }),
-      m.pricing_change_two_steps_second_to_month({
+      m.pricing_change_two_steps_second_to_year({
         plan: 'Basic',
-        billing: m.pricing_change_billing_month(),
+        billing: m.pricing_change_billing_year(),
       }),
     ]);
+    expect(clean(byTestId('tier-change-dialog-first-step')?.textContent)).toBe(
+      m.pricing_change_start_first_step_month({ plan: 'Basic' })
+    );
 
     byTestId('tier-change-dialog-first-step')?.click();
     await settle();
 
-    // Step 1 is Basic on the billing Jo has now.
+    // Step 1 is Basic on the monthly billing Jo has now.
     expect(remote.previewSubscriptionTierChange).toHaveBeenLastCalledWith(
-      expect.objectContaining({ newTierId: BASIC.id, billingInterval: 'year' })
+      expect.objectContaining({ newTierId: BASIC.id, billingInterval: 'month' })
     );
     expect(byTestId('tier-change-wait')).not.toBeNull();
   });
