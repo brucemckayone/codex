@@ -990,7 +990,7 @@
     gap: var(--space-1);
     font-size: var(--text-sm);
     font-weight: var(--font-semibold);
-    color: var(--color-interactive-active);
+    color: var(--color-link-active);
   }
 
   .jec__arrow {

@@ -218,14 +218,38 @@ describe('EditingThemeContrast', () => {
     flushSync();
 
     const listed = rows();
-    // Links, focus outline, focus halo, hovered buttons.
-    expect(listed).toHaveLength(4);
+    // Links, hovered and pressed links (they move too), focus outline, focus
+    // halo, hovered buttons.
+    expect(listed).toHaveLength(5);
     expect(listed[0].dataset.moved).toBe('true');
     expect(detailOf(listed[0])).toMatch(
       /^Darkened a lot to read on light pages/
     );
     const moved = listed.filter((row) => row.dataset.moved === 'true').length;
     expect(moved).toBeGreaterThan(0);
+    expect(
+      document.querySelector('.contrast__adjusted')?.textContent?.trim()
+    ).toBe(`${moved} adjusted`);
+  });
+
+  test('an interactive override lists the labels in the brand colour, and counts them', () => {
+    brandEditor.close();
+    brandEditor.open(
+      ORG_ID,
+      makeSaved({
+        primaryColor: '#FDE68A',
+        tokenOverrides: { interactive: '#1D4ED8' },
+      })
+    );
+
+    component = mount(EditingThemeContrast, { target: document.body });
+    flushSync();
+
+    const labels = rows().find((row) =>
+      row.textContent?.includes('Labels in your brand colour')
+    );
+    expect(labels?.dataset.moved).toBe('true');
+    const moved = rows().filter((row) => row.dataset.moved === 'true').length;
     expect(
       document.querySelector('.contrast__adjusted')?.textContent?.trim()
     ).toBe(`${moved} adjusted`);

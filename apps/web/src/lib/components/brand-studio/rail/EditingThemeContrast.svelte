@@ -15,9 +15,10 @@
   stay compact).
 
   Below it, the colours the page nudges against its hardest ground (links, the
-  focus outline and halo; `./legibility.ts`, the twin of org-brand.css's rule)
-  are listed with what was moved and how far, and the pill counts them (owner,
-  Codex-mik4h: "Adjust it, say so").
+  focus outline and halo, and hovered links or brand-coloured labels when they
+  move apart from the links; `./legibility.ts`, the twin of org-brand.css's
+  rule) are listed with what was moved and how far, and the pill counts them
+  (owner, Codex-mik4h: "Adjust it, say so").
 
   Epic: Codex-cijzb · WP-1.5 + rail-UX overhaul (compacted).
 -->
@@ -68,6 +69,8 @@
   const rows = $derived(
     [
       { label: m.brand_legibility_links(), nudge: legibility.link, floor: LINK_FLOOR },
+      { label: m.brand_legibility_link_states(), nudge: legibility.linkStates, floor: LINK_FLOOR },
+      { label: m.brand_legibility_brand_text(), nudge: legibility.brandText, floor: LINK_FLOOR },
       { label: m.brand_legibility_focus(), nudge: legibility.focus, floor: MARK_FLOOR },
       { label: m.brand_legibility_halo(), nudge: legibility.halo, floor: MARK_FLOOR },
     ].filter((row): row is Row => row.nudge !== null)

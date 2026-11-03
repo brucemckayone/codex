@@ -1811,6 +1811,8 @@
   "brand_legibility_adjusted": "{count} adjusted",
   "brand_legibility_title": "How your colours read",
   "brand_legibility_links": "Links and tabs",
+  "brand_legibility_link_states": "Hovered and pressed links",
+  "brand_legibility_brand_text": "Labels in your brand colour",
   "brand_legibility_focus": "Focus outline",
   "brand_legibility_halo": "Focus halo",
   "brand_legibility_hover": "Hovered buttons",

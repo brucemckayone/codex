@@ -34,9 +34,21 @@ export interface LegibilityInputs {
 
 export interface Legibility {
   link: Nudge | null;
+  /**
+   * Hovered and pressed links, only when one of them moved: the one that
+   * moved further. Each follows its own fill, which an override can set apart
+   * from the resting link.
+   */
+  linkStates: Nudge | null;
+  /**
+   * Labels in the brand colour, only when an `interactive` or
+   * `interactive-hover` override sets the links apart from them: the resting
+   * or hovered label, whichever moved further, else the resting one.
+   */
+  brandText: Nudge | null;
   focus: Nudge | null;
   halo: Nudge | null;
-  /** How many of the three the page moved. */
+  /** How many of them the page moved. */
   adjusted: number;
 }
 
@@ -72,22 +84,54 @@ export function hoverFill(
   return oklchStep(brand, theme === 'dark' ? 0.08 : -0.08, 1);
 }
 
+/** A button's pressed fill: `oklch(from BRAND calc(l ∓ 0.15) c h)`. */
+function pressedFill(brand: string, theme: 'light' | 'dark'): string | null {
+  return oklchStep(brand, theme === 'dark' ? 0.15 : -0.15, 1);
+}
+
+/** Of several nudges, the one that moved furthest: the lowest as picked. */
+function furthest(nudges: (Nudge | null)[]): Nudge | null {
+  let pick: Nudge | null = null;
+  for (const nudge of nudges) {
+    if (nudge?.moved && (pick === null || nudge.before < pick.before)) {
+      pick = nudge;
+    }
+  }
+  return pick;
+}
+
 export function legibilityFor(inputs: LegibilityInputs): Legibility {
   const ground = groundFor(inputs);
   const overrides = inputs.overrides ?? {};
   const focusSource = overrides.focus ?? inputs.brand;
   const haloFrom =
     overrides['focus-ring'] ?? haloSource(inputs.brand, inputs.theme);
+  const asLink = (hex: string | null | undefined) =>
+    hex ? nudgeForGround(hex, ground, LINK_FLOOR) : null;
 
-  const link = nudgeForGround(
-    overrides.interactive ?? inputs.brand,
-    ground,
-    LINK_FLOOR
+  // The hover and pressed fills follow the brand colour, not the
+  // `interactive` override (org-brand.css), unless overridden themselves.
+  const brandHover = hoverFill(inputs.brand, inputs.theme);
+  const link = asLink(overrides.interactive ?? inputs.brand);
+  const linkStates = furthest([
+    asLink(overrides['interactive-hover'] ?? brandHover),
+    asLink(
+      overrides['interactive-active'] ?? pressedFill(inputs.brand, inputs.theme)
+    ),
+  ]);
+  const setApart = Boolean(
+    overrides.interactive || overrides['interactive-hover']
   );
+  const brandText = setApart
+    ? (furthest([asLink(inputs.brand), asLink(brandHover)]) ??
+      asLink(inputs.brand))
+    : null;
   const focus = nudgeForGround(focusSource, ground, MARK_FLOOR);
   const halo = haloFrom ? nudgeForGround(haloFrom, ground, MARK_FLOOR) : null;
-  const adjusted = [link, focus, halo].filter((n) => n?.moved).length;
-  return { link, focus, halo, adjusted };
+  const adjusted = [link, linkStates, brandText, focus, halo].filter(
+    (n) => n?.moved
+  ).length;
+  return { link, linkStates, brandText, focus, halo, adjusted };
 }
 
 /** A move is "a lot" when the colour as picked was under two thirds of its floor. */

@@ -372,7 +372,7 @@
     align-items: center;
     justify-content: center;
     background-color: var(--color-brand-primary-subtle);
-    color: var(--color-interactive-active);
+    color: var(--color-link-active);
     font-size: var(--text-xs);
     font-weight: var(--font-semibold);
   }

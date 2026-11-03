@@ -1,5 +1,9 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  clearTokenOverrides,
   darkTokenOverridesToCssVars,
   injectBrandVars,
   previewFont,
@@ -281,5 +285,49 @@ describe('brand fonts do not self-reference --font-sans (no CSS var cycle)', () 
     expect(el.style.getPropertyValue('--brand-font-heading')).not.toContain(
       'var(--font-sans)'
     );
+  });
+});
+
+/**
+ * The org layout binds its brand inputs with `style:`, which Svelte re-sets
+ * only when a value changes, and clears the token overrides right after
+ * hydration. An input the clear removes stays gone until reload: the ground
+ * numbers did, so every org page nudged against the platform's (Codex-mik4h).
+ */
+describe('clearTokenOverrides keeps what the org layout binds', () => {
+  const layout = readFileSync(
+    join(
+      dirname(fileURLToPath(import.meta.url)),
+      '../../routes/_org/[slug]/+layout.svelte'
+    ),
+    'utf8'
+  );
+  // Written by the layout and read nowhere, so clearing it changes nothing.
+  const INERT = new Set(['--brand-shader-logo-url']);
+  const bound = [...layout.matchAll(/style:(--[\w-]+)=/g)]
+    .map(([, prop]) => prop)
+    .filter((prop) => !INERT.has(prop));
+
+  it('keeps every bound input, the ground numbers among them, and clears the overrides', () => {
+    expect(bound).toEqual(
+      expect.arrayContaining([
+        '--brand-bg',
+        '--brand-bg-dark',
+        '--brand-ground-y',
+        '--brand-ground-dark-y',
+      ])
+    );
+    const el = document.createElement('div');
+    for (const prop of bound) el.style.setProperty(prop, '1');
+    el.style.setProperty('--color-interactive', '#2563eb');
+    el.style.setProperty('--brand-glass-tint', '#abc');
+
+    clearTokenOverrides(el);
+
+    expect(bound.filter((prop) => !el.style.getPropertyValue(prop))).toEqual(
+      []
+    );
+    expect(el.style.getPropertyValue('--color-interactive')).toBe('');
+    expect(el.style.getPropertyValue('--brand-glass-tint')).toBe('');
   });
 });

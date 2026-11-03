@@ -14511,6 +14511,22 @@ export const brand_legibility_links = () => `Links and tabs`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const brand_legibility_link_states = () => `Hovered and pressed links`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const brand_legibility_brand_text = () => `Labels in your brand colour`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const brand_legibility_focus = () => `Focus outline`
 
 

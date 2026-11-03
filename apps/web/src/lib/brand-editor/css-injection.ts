@@ -708,9 +708,17 @@ export function injectDarkTokenOverrides(
 /**
  * Remove all previously injected token override CSS properties from an element.
  * Call before re-injecting to ensure removed overrides don't linger.
+ *
+ * Keeps the inputs the org layout binds with `style:`, the ground numbers
+ * among them: Svelte re-sets a `style:` property only when its value changes,
+ * so one cleared here stays gone until reload. The layout calls this right
+ * after hydration (Codex-mik4h).
  */
 export function clearTokenOverrides(el: HTMLElement): void {
-  removeOverrideVars(el, new Set([...BASE_VAR_PROPS, ...DARK_VAR_PROPS]));
+  removeOverrideVars(
+    el,
+    new Set([...BASE_VAR_PROPS, ...DARK_VAR_PROPS, ...GROUND_VAR_PROPS])
+  );
 }
 
 /**
