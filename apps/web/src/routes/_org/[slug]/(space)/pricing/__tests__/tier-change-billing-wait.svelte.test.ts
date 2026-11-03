@@ -13,8 +13,10 @@
  * - E1/E2: the notice, the cards and Keep, in billing words.
  * - A Stripe schedule that isn't ours refuses with an id to quote.
  *
- * Until the server's mechanism lands it sends `billingChange: null` and
- * kind 'plan', so these drive the page with the contract's shapes.
+ * The fixtures are the server's own shapes (`previewTierChange`,
+ * `pendingTierChanges`): the monthly bill in `billingChange` and in the
+ * recurring fields alike, the live period end, and `replaces` whenever a
+ * change waits.
  *
  * Mounts the real `+page.svelte`, mocked as in
  * `tier-change-waiting-move.svelte.test.ts`.
@@ -580,7 +582,9 @@ describe('C(b): a dearer plan on monthly starts now on yearly billing', () => {
 
     answer({
       success: true,
+      // The server holds the yearly price on the item while billing waits.
       data: yearly(PREMIUM, {
+        heldAmountCents: 20000,
         pendingTierChange: {
           ...BILLING_WAITS,
           tierId: PREMIUM.id,

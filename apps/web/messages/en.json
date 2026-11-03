@@ -432,10 +432,6 @@
   "studio_view_analytics": "View all analytics",
   "player_preview_label": "Preview",
   "player_preview_ended": "Preview ended",
-  "player_preview_cta": "Get full access to continue watching",
-  "purchase_sign_in": "Sign in to watch",
-  "purchase_cta_title": "Purchase to Watch",
-  "purchase_cta_description": "Get full access to this content",
   "subscribe_cta_title": "Subscribe to Watch",
   "subscribe_cta_description": "Subscribe to get access to this content",
   "upgrade_cta_title": "Upgrade to Watch",
@@ -645,10 +641,8 @@
   "pricing_change_two_steps_lede": "This takes two steps:",
   "pricing_change_two_steps_first": "Move to {target}. You keep {currentPlan} until {date}, and nothing is charged today.",
   "pricing_change_plan_on_billing_month": "{plan} on monthly billing",
-  "pricing_change_plan_on_billing_year": "{plan} on yearly billing",
   "pricing_change_billing_month": "monthly billing",
   "pricing_change_billing_year": "yearly billing",
-  "pricing_change_two_steps_second_to_month": "Once {plan} has started, switch it to {billing}. The unused part of that year is credited to your bills.",
   "pricing_change_two_steps_second_to_year": "Once {plan} has started, switch it to {billing}.",
   "pricing_change_cancel": "Cancel",
   "pricing_change_continue": "Continue",
@@ -658,7 +652,6 @@
   "pricing_change_confirm_on": "Switch on {date}",
   "pricing_change_keep_plan": "Keep {plan}",
   "pricing_change_start_first_step_month": "Start with {plan} monthly",
-  "pricing_change_start_first_step_year": "Start with {plan} yearly",
   "pricing_move_from": "From {date}",
   "pricing_move_starts": "Starts {date}",
   "pricing_move_notice_title": "Moving to {plan} on {date}",
@@ -3701,5 +3694,6 @@
   "pricing_move_landed_billing": "Your switch to monthly billing has already happened at your renewal, so you're billed monthly now.",
   "account_billing_change_survives_cancel": "If you reactivate, you'll still switch to monthly billing on {date}, as you chose.",
   "subscription_refusal_scheduled_elsewhere": "This subscription can't be changed here just now. Please contact support and quote this reference: {errorId}.",
-  "subscription_refusal_scheduled_elsewhere_no_ref": "This subscription can't be changed here just now. Please contact support."
+  "subscription_refusal_scheduled_elsewhere_no_ref": "This subscription can't be changed here just now. Please contact support.",
+  "player_preview_watch_again": "Watch preview again"
 }
