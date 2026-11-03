@@ -936,4 +936,80 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
     });
     expect(alertsNaming(ora.id)).toHaveLength(2);
   });
+
+  /** The email log's line for a notice's send, `at`. */
+  async function logged(
+    noticeId: string,
+    email: string,
+    status: 'success' | 'pending',
+    at: Date
+  ) {
+    const [log] = await db
+      .insert(emailAuditLogs)
+      .values({
+        templateName: 'fee-change-notice',
+        recipientEmail: email,
+        status,
+        metadata: JSON.stringify({ feeNoticeId: noticeId }),
+        createdAt: at,
+        updatedAt: at,
+      })
+      .returning({ id: emailAuditLogs.id });
+    if (log) logIds.push(log.id);
+  }
+
+  it('a send still pending in the email log counts as told: it may have gone', async () => {
+    const pam = await person('Pam Pending');
+    const changeId = await rise(await organisation(pam.id));
+    await run(
+      changeId,
+      NOV_3,
+      mailerAnswering({ [pam.id]: { accepted: false, status: 503 } })
+    );
+    const notice = await noticeOf(changeId, pam.id);
+    const loggedAt = new Date(NOV_3.getTime() + 60 * 1000);
+    await logged(notice?.id as string, pam.email, 'pending', loggedAt);
+
+    const mailer = mailerAnswering();
+    expect(await run(changeId, NOV_4, mailer)).toMatchObject({
+      foundInLog: 1,
+      sent: 0,
+    });
+    expect(mailFor(mailer, pam.id)).toEqual([]);
+    expect(await noticeOf(changeId, pam.id)).toMatchObject({
+      state: 'sent',
+      acceptedAt: loggedAt,
+    });
+  });
+
+  it('a run cut off after sending leaves the notice due, and the next one checks the log before sending again', async () => {
+    const ray = await person('Ray Cutoff');
+    const changeId = await rise(await organisation(ray.id));
+    // The list is made; then a run claims Ray, sends, and dies before
+    // recording: the notice is still `due`, with its try stamped.
+    await run(
+      changeId,
+      NOV_3,
+      mailerAnswering(),
+      async (name) => name !== 'fee-change-notice'
+    );
+    const notice = await noticeOf(changeId, ray.id);
+    await db
+      .update(feeChangeNotices)
+      .set({ attemptedAt: NOV_3, attempts: 1 })
+      .where(eq(feeChangeNotices.id, notice?.id as string));
+    const loggedAt = new Date(NOV_3.getTime() + 60 * 1000);
+    await logged(notice?.id as string, ray.email, 'success', loggedAt);
+
+    const mailer = mailerAnswering();
+    expect(await run(changeId, NOV_4, mailer)).toMatchObject({
+      foundInLog: 1,
+      sent: 0,
+    });
+    expect(mailFor(mailer, ray.id)).toEqual([]);
+    expect(await noticeOf(changeId, ray.id)).toMatchObject({
+      state: 'sent',
+      acceptedAt: loggedAt,
+    });
+  });
 });

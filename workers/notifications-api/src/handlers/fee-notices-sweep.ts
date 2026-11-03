@@ -14,11 +14,11 @@
  *      `unknown`, oldest first, claimed under FOR UPDATE SKIP LOCKED. Each
  *      send waits FEE_NOTICE_TIMEOUT_MS at most, and no batch starts after
  *      FEE_SENDS_TIME_BUDGET_MS: the rest are given back for the next
- *      morning, so the dates and the alert always run. An
- *      `unknown` from an earlier run is first looked for in
- *      `email_audit_logs`: found sent, it counts as told then and nothing is
- *      resent (M1's rule). Each email names a date: the change's, or the
- *      earliest it can be (Q1). The words are worked out at send time, so a
+ *      morning, so the dates and the alert always run. A notice tried on
+ *      an earlier run is first looked for in `email_audit_logs`: found sent
+ *      or pending, it counts as told then and nothing is resent (M1's rule,
+ *      with F4's: on every reclaim). Each email names a date: the change's,
+ *      or the earliest it can be (Q1). The words are worked out at send time, so a
  *      rise made smaller is announced with its smaller figure.
  *   4. DATE: a rise whose list has nobody left waiting is dated the first UK
  *      midnight at least 30 days after the last of them was told
@@ -602,8 +602,11 @@ async function claim(ctx: SweepContext): Promise<Claimed[]> {
 }
 
 /**
- * M1's rule for an `unknown`: did the email go after all? A success in the
- * email log for this notice, since its last try, counts as told then.
+ * Did the email go after all? Asked on every claim after an earlier try,
+ * whatever that try recorded (F4's rule, as the price-moves step): a run cut
+ * off after sending leaves the notice `due`. A `success` or `pending` row in
+ * the email log for this notice since its last try counts as told then: a
+ * `pending` one may have gone.
  */
 async function foundSent(
   ctx: SweepContext,
@@ -620,7 +623,7 @@ async function foundSent(
       and(
         eq(emailAuditLogs.templateName, TEMPLATE_FOR[notice.kind]),
         eq(emailAuditLogs.recipientEmail, email),
-        eq(emailAuditLogs.status, 'success'),
+        inArray(emailAuditLogs.status, ['success', 'pending']),
         gte(emailAuditLogs.createdAt, since),
         sql`strpos(${emailAuditLogs.metadata}, ${`"feeNoticeId":"${notice.id}"`}) > 0`
       )
@@ -775,7 +778,7 @@ async function sendOne(
   const person = people.get(notice.userId);
   const email = person && person.deletedAt === null ? person.email : null;
 
-  if (notice.state === 'unknown' && email) {
+  if (notice.prevAttemptedAt !== null && email) {
     const at = await foundSent(ctx, notice, email);
     if (at) {
       await record(ctx, notice, {
