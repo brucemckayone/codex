@@ -83,6 +83,8 @@ const answered = async () => {
   for (let i = 0; i < 5; i++) await Promise.resolve();
   flushSync();
 };
+/** Melt restores focus a tick and a millisecond after the dialog closes. */
+const afterFocus = () => new Promise((resolve) => setTimeout(resolve, 20));
 
 function typeNote(value: string) {
   const area = document.querySelector<HTMLTextAreaElement>(
@@ -323,6 +325,43 @@ describe('told another way', () => {
     expect(feeChangesSlot().refresh).toHaveBeenCalledTimes(1);
     expect(feeNoticesSlot().refresh).toHaveBeenCalledTimes(1);
     expect(countsSlot().refresh).toHaveBeenCalledTimes(1);
+    // The notice takes focus, so it is read out (W2).
+    await afterFocus();
+    expect(document.activeElement).toBe(notice());
+  });
+
+  test('"from now" is when the dialog opens, not when the page loaded (W2)', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-11-04T09:00:00.000Z'));
+      mountAt('/admin/queue?tab=fees');
+      land([LAST_CARD], [feeNotice()]);
+      vi.setSystemTime(new Date('2026-11-04T10:42:00.000Z'));
+      openMark();
+      expect(dialog()?.textContent).toContain('10:42');
+      expect(dialog()?.textContent).not.toContain('09:00');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test('Cancel puts focus back on the row’s button (W2)', async () => {
+    mountAt('/admin/queue?tab=fees');
+    land([LAST_CARD], [feeNotice()]);
+    const mark = document.querySelector<HTMLButtonElement>(
+      '[data-testid="fee-notice-row"] [data-testid="fee-notice-mark"]'
+    );
+    mark?.focus();
+    openMark();
+    const cancel = [
+      ...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button'),
+    ].find((b) => b.textContent?.trim() === m.support_confirm_cancel());
+    cancel?.focus();
+    cancel?.click();
+    flushSync();
+    await afterFocus();
+    expect(dialog()).toBeNull();
+    expect(document.activeElement).toBe(mark);
   });
 
   test('F5 the save failed: the dialog stays, with the note, and says nothing changed', async () => {
