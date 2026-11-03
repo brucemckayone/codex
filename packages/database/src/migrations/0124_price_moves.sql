@@ -10,6 +10,18 @@
 -- one subscriber per change; ecom-api's hourly step claims due and notified
 -- rows. Every CHECK is written so it never evaluates to NULL. FKs RESTRICT:
 -- money history outlives its user, tier and plan (all soft-deleted).
+--
+-- The runner applies this file as ONE implicit transaction, and each FK from
+-- the two new tables holds a SHARE ROW EXCLUSIVE lock on its parent
+-- (organizations, users, subscription_tiers, course_subscription_plans,
+-- subscriptions, course_subscriptions) until the file commits: writes to
+-- those wait, reads don't. lock_timeout bounds only the WAIT for each lock: if
+-- a long transaction is open on one of those tables, the migration fails
+-- after 5s and rolls back whole, instead of holding a queue of sign-ups and
+-- subscription and organisation writes behind its own wait; re-run it once
+-- the database is quiet (as 0111). The new tables are empty, so validating
+-- the FKs is instant.
+SET lock_timeout = '5s';--> statement-breakpoint
 
 CREATE TABLE "price_changes" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
@@ -108,4 +120,5 @@ CREATE INDEX "idx_price_moves_claim" ON "subscription_price_moves" USING btree (
 CREATE INDEX "idx_price_moves_change_state" ON "subscription_price_moves" USING btree ("price_change_id","state");--> statement-breakpoint
 CREATE INDEX "idx_price_moves_held_open" ON "subscription_price_moves" USING btree ("state") WHERE "subscription_price_moves"."state" = 'held' AND "subscription_price_moves"."resolved_at" IS NULL;--> statement-breakpoint
 CREATE INDEX "idx_price_moves_subscription" ON "subscription_price_moves" USING btree ("subscription_id") WHERE "subscription_price_moves"."subscription_id" IS NOT NULL;--> statement-breakpoint
-CREATE INDEX "idx_price_moves_course_subscription" ON "subscription_price_moves" USING btree ("course_subscription_id") WHERE "subscription_price_moves"."course_subscription_id" IS NOT NULL;
+CREATE INDEX "idx_price_moves_course_subscription" ON "subscription_price_moves" USING btree ("course_subscription_id") WHERE "subscription_price_moves"."course_subscription_id" IS NOT NULL;--> statement-breakpoint
+RESET lock_timeout;
