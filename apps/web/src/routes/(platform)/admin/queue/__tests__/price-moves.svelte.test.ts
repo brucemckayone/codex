@@ -360,6 +360,19 @@ describe('Close', () => {
 });
 
 describe('a stopped change', () => {
+  test('its card title sits under the section head, a level down (W8)', () => {
+    mountAt('/admin/queue?tab=moves');
+    land([heldMove()], [stoppedChange()]);
+    const levels = [...document.querySelectorAll('h2, h3, h4')]
+      .filter((h) => h.matches('.queue-subhead, .change-card__title'))
+      .map((h) => h.tagName);
+    expect(levels).toEqual(['H2', 'H3', 'H2']);
+    expect(
+      document.querySelector('[data-testid="stopped-price-change"] h3')
+        ?.textContent
+    ).toBeTruthy();
+  });
+
   test('M7 one card, with Restart; M8 Restart queues it for the run', async () => {
     restartPriceChange.mockResolvedValue({
       outcome: 'done',

@@ -14,6 +14,8 @@
   @prop {CardFact[]} facts
   @prop {'stopped'} [tone]
   @prop {Snippet} [actions]
+  @prop {3|4} [headingLevel=3] - The title's level: under the tab's section
+    heads (h2), never beside them, so a heading list tells section from card.
 -->
 <script lang="ts">
   import type { Snippet } from 'svelte';
@@ -28,14 +30,26 @@
     tone?: 'stopped';
     actions?: Snippet;
     testid?: string;
+    headingLevel?: 3 | 4;
   }
 
-  const { title, sub, badge, facts, tone, actions, testid }: Props = $props();
+  const {
+    title,
+    sub,
+    badge,
+    facts,
+    tone,
+    actions,
+    testid,
+    headingLevel = 3,
+  }: Props = $props();
+
+  const titleTag = $derived(`h${headingLevel}` as 'h3' | 'h4');
 </script>
 
 <li class="change-card" data-tone={tone} data-testid={testid}>
   <div class="change-card__head">
-    <h2 class="change-card__title">{title}</h2>
+    <svelte:element this={titleTag} class="change-card__title">{title}</svelte:element>
     <p class="change-card__sub">{sub}</p>
   </div>
   <Badge variant={badge.variant} class="change-card__badge">{badge.label}</Badge>

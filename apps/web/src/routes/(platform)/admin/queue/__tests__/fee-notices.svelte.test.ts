@@ -135,6 +135,15 @@ function openMark() {
 }
 
 describe('the tab', () => {
+  test('a rise’s card title is a level below the section heads, never beside them (W8)', () => {
+    mountAt('/admin/queue?tab=fees');
+    land([LAST_CARD], [feeNotice()]);
+    const card = document.querySelector('.change-card');
+    expect(card).not.toBeNull();
+    expect(card?.querySelector('h3.change-card__title')).not.toBeNull();
+    expect(card?.querySelector('h2')).toBeNull();
+  });
+
   test('only its two reads load, with its own intro', () => {
     mountAt('/admin/queue?tab=fees');
     expect(listFeeChanges).toHaveBeenCalledWith({ page: 1, limit: 20 });
