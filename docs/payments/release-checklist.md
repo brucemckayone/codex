@@ -445,8 +445,15 @@ UPDATE subscriptions
 ```
 
 After the roll forward, the next event for each of them mirrors the waiting
-move still recorded in the Stripe subscription's metadata back into its row:
-a released change of billing comes back, and the hourly backstop sets its
-schedule again. Don't change prices while
+move still recorded in the Stripe subscription's metadata back into its row.
+A released change of billing comes back only while its renewal is still
+ahead: the hourly backstop then sets its schedule again. If the renewal
+passes first (during the rollback, say), Stripe bills the member another
+year at the yearly price. The hourly step never flips that row: it alerts
+`tier_move.apply_failed`, reason `billing_not_switched`, once a day until
+support clears the record (subscriptions.md › Waiting changes of billing ›
+Runbook). So roll back only when no listed `pending_tier_from` with a
+`pending_billing_interval` falls inside the planned window, or decide those
+members with the owner first. Don't change prices while
 rolled back: the old fan-out writes no price moves, so the hourly step can't
 see its subscribers after the roll forward.
