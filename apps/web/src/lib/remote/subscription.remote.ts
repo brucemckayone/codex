@@ -206,6 +206,13 @@ const changeTierCommandSchema = z.object({
    * The server re-checks it before the write (Codex-2hxff.96).
    */
   quote: z.string().max(512).optional(),
+  /**
+   * A change that waits for the renewal (a cheaper plan, or leaving yearly
+   * billing): the preview's `newRecurringAmountCents`, passed back unchanged.
+   * The server refuses a different price with TIER_CHANGE_PREVIEW_EXPIRED
+   * (review C1 cycle 2, L4).
+   */
+  newRecurringAmountCents: z.number().int().nonnegative().optional(),
 });
 
 /**
