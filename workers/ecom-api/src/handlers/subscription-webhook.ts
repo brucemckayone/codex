@@ -31,6 +31,7 @@
 import { AccessRevocation, type RevocationReason } from '@codex/access';
 import { invalidateUserLibrary, VersionedCache } from '@codex/cache';
 import { STRIPE_EVENTS } from '@codex/constants';
+import { ServiceError } from '@codex/service-errors';
 import type {
   CourseSubscriptionWebhookResult,
   SubscriptionService,
@@ -65,6 +66,9 @@ import {
  * subscriber who was emailed a date billed the old price. It is logged at
  * error level, with what is needed to act on it, and the event acknowledged.
  * The marker stays: every later renewal reports it again until it is resolved.
+ * A typed refusal's own ids come with it (review C1, SF-2): the schedule
+ * that holds the subscription, or the intervals of a marker dropped for
+ * another billing period, whose one trace is this alert.
  */
 async function applyPendingPriceChangeOrReport(
   c: Context<StripeWebhookEnv>,
@@ -76,6 +80,8 @@ async function applyPendingPriceChangeOrReport(
   } catch (error) {
     if (isTransientError(error)) throw error;
     c.get('obs')?.error('Pending price change could not be applied', {
+      ...(error instanceof ServiceError ? error.context : {}),
+      errorId: crypto.randomUUID(),
       subscriptionId: subscription.id,
       pendingPriceId: subscription.metadata?.[PENDING_PRICE_ID_KEY],
       errorType: (error as { type?: string }).type,
