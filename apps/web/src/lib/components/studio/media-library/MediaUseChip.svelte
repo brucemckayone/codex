@@ -153,7 +153,7 @@
   }
 
   .use-row :global(.use-chip > svg:first-child) {
-    color: var(--color-interactive);
+    color: var(--color-link);
   }
 
   .use-row :global(.use-chip[data-tone='draft']) {

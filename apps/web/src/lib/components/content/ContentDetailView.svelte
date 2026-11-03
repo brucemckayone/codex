@@ -1596,14 +1596,14 @@
   }
 
   .content-detail__breadcrumb-link {
-    color: var(--color-interactive);
+    color: var(--color-link);
     text-decoration: none;
     font-weight: var(--font-medium);
     transition: var(--transition-colors);
   }
 
   .content-detail__breadcrumb-link:hover {
-    color: var(--color-interactive-hover);
+    color: var(--color-link-hover);
   }
 
   .content-detail__breadcrumb-link:focus-visible {
@@ -1881,7 +1881,7 @@
   }
 
   :global(.content-detail__creator-link:hover) {
-    color: var(--color-interactive);
+    color: var(--color-link);
   }
 
   .content-detail__completed-badge {
@@ -2210,7 +2210,7 @@
     padding: var(--space-2) var(--space-4);
     font-size: var(--text-sm);
     font-weight: var(--font-semibold);
-    color: var(--color-interactive);
+    color: var(--color-link);
     text-decoration: none;
     border: var(--border-width) var(--border-style) var(--color-border);
     border-radius: var(--radius-md);
@@ -2218,7 +2218,7 @@
   }
 
   .content-detail__journey-cta:hover {
-    color: var(--color-interactive-hover);
+    color: var(--color-link-hover);
     background: var(--color-surface-secondary);
   }
 

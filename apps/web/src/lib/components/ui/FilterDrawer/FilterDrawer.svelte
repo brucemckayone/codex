@@ -593,7 +593,7 @@
   }
   :global(.filter-drawer__option-check) {
     display: inline-flex;
-    color: var(--color-interactive);
+    color: var(--color-link);
   }
 
   /* ── Pill grid ──────────────────────────────────────────────────── */
@@ -691,7 +691,7 @@
     transition: var(--transition-colors);
   }
   .filter-drawer__clear:hover {
-    color: var(--color-interactive);
+    color: var(--color-link);
     text-decoration: underline;
   }
   .filter-drawer__clear:focus-visible {

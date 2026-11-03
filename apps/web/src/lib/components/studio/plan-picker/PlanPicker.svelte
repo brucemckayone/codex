@@ -251,7 +251,7 @@
   }
 
   .tier__above[aria-current='true'] {
-    color: var(--color-interactive);
+    color: var(--color-link);
     text-decoration: none;
   }
 

@@ -1129,7 +1129,7 @@
   }
 
   .journey-row__title:hover {
-    color: var(--color-interactive);
+    color: var(--color-link);
   }
 
   .journey-row__status {

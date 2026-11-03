@@ -306,7 +306,7 @@
 	}
 
 	.sheet__link--primary {
-		color: var(--color-interactive);
+		color: var(--color-link);
 	}
 
 	.sheet__user {

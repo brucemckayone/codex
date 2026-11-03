@@ -347,7 +347,7 @@
   }
 
   .title:hover {
-    color: var(--color-interactive);
+    color: var(--color-link);
   }
 
   .title:focus-visible {

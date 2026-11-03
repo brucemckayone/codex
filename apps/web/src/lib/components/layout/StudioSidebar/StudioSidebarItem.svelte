@@ -129,7 +129,7 @@
 
   .studio-rail__item--active {
     background-color: color-mix(in oklch, var(--color-interactive) 15%, transparent);
-    color: var(--color-interactive);
+    color: var(--color-link);
   }
 
   .studio-rail__item--loading {

@@ -245,6 +245,6 @@
   }
 
   .hero-fx__preset-card--active .hero-fx__preset-label {
-    color: var(--color-interactive);
+    color: var(--color-link);
   }
 </style>

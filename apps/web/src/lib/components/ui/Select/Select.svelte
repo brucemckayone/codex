@@ -189,7 +189,7 @@
   }
 
   .check-icon {
-    color: var(--color-interactive);
+    color: var(--color-link);
   }
 
 </style>

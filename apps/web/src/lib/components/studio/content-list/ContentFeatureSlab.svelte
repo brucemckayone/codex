@@ -389,7 +389,7 @@
 
   .slab-title-link:hover {
     background-size: 100% var(--border-width);
-    color: var(--color-interactive);
+    color: var(--color-link);
   }
 
   .slab-title-link:focus-visible {
@@ -518,7 +518,7 @@
     font-family: var(--font-sans);
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
-    color: var(--color-interactive);
+    color: var(--color-link);
     text-decoration: none;
     border-radius: var(--radius-full, 9999px);
     transition: background-color var(--duration-fast) var(--ease-out);

@@ -150,7 +150,7 @@
   }
 
   .finish__reminder-link {
-    color: var(--color-interactive);
+    color: var(--color-link);
     text-decoration: underline;
   }
 

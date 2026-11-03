@@ -229,7 +229,7 @@
   }
 
   .back-link:hover {
-    color: var(--color-interactive);
+    color: var(--color-link);
   }
 
   /* ── Filters ── */
@@ -314,13 +314,13 @@
   /* ── Empty State ── */
   .empty-state__clear {
     font-size: var(--text-sm);
-    color: var(--color-interactive);
+    color: var(--color-link);
     text-decoration: none;
     transition: var(--transition-colors);
   }
 
   .empty-state__clear:hover {
-    color: var(--color-interactive-hover);
+    color: var(--color-link-hover);
   }
 
   /* ── Responsive ── */

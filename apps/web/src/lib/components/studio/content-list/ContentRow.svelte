@@ -311,7 +311,7 @@
     z-index: 1;
   }
 
-  .row-title-link:hover { color: var(--color-interactive); }
+  .row-title-link:hover { color: var(--color-link); }
 
   .row-title-link:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
@@ -476,7 +476,7 @@
     font-weight: var(--font-semibold);
     text-transform: uppercase;
     letter-spacing: var(--tracking-wider);
-    color: var(--color-interactive);
+    color: var(--color-link);
     text-decoration: none;
     transition: background-color var(--duration-fast) var(--ease-out);
   }

@@ -330,7 +330,7 @@
   }
 
   .quick-action-link:hover :global(.quick-action-icon) {
-    color: var(--color-interactive);
+    color: var(--color-link);
   }
 
   .quick-action-label {

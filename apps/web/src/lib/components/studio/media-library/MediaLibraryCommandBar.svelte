@@ -132,7 +132,7 @@
     transition: var(--transition-colors);
   }
 
-  .breadcrumb:hover { color: var(--color-interactive); }
+  .breadcrumb:hover { color: var(--color-link); }
 
   .breadcrumb:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);

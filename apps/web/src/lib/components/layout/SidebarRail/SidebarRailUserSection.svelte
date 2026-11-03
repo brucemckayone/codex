@@ -363,7 +363,7 @@
 	}
 
 	.register-link:hover {
-		color: var(--color-interactive);
+		color: var(--color-link);
 	}
 
 	/* Tooltip for collapsed unauth state */

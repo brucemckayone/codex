@@ -3298,7 +3298,7 @@
   }
 
   .card__label--current {
-    color: var(--color-interactive);
+    color: var(--color-link);
     background: color-mix(in srgb, var(--color-interactive) 10%, var(--color-surface));
     border: var(--border-width) var(--border-style) color-mix(in srgb, var(--color-interactive) 20%, transparent);
   }

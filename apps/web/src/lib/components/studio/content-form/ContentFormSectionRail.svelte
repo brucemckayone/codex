@@ -188,7 +188,7 @@
   }
 
   .rail-link[data-active] .rail-ordinal {
-    color: var(--color-interactive);
+    color: var(--color-link);
     font-weight: var(--font-semibold);
   }
 

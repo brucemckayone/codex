@@ -110,7 +110,7 @@
     padding: var(--space-2) var(--space-4);
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
-    color: var(--color-interactive);
+    color: var(--color-link);
     text-decoration: none;
     border-radius: var(--radius-md);
     transition: var(--transition-colors);
@@ -118,7 +118,7 @@
 
   .empty-cta:hover {
     background-color: var(--color-interactive-subtle);
-    color: var(--color-interactive-hover);
+    color: var(--color-link-hover);
   }
 
   .empty-cta:focus-visible {

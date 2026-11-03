@@ -104,7 +104,7 @@
     align-self: flex-start;
     font-size: var(--text-sm);
     font-weight: var(--font-semibold);
-    color: var(--color-interactive);
+    color: var(--color-link);
     text-decoration: underline;
     text-underline-offset: var(--space-0-5);
     border-radius: var(--radius-sm);

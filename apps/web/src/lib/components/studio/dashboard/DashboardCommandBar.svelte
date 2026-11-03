@@ -250,7 +250,7 @@
 
   .action--secondary:hover {
     border-color: var(--color-interactive);
-    color: var(--color-interactive);
+    color: var(--color-link);
   }
 
   .action--primary {
