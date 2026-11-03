@@ -12,6 +12,7 @@ import {
   organizations,
   priceChanges,
   stripeConnectAccounts,
+  subscriptionPriceMoves,
   subscriptions,
   subscriptionTiers,
 } from '@codex/database/schema';
@@ -59,6 +60,8 @@ describe('TierService', () => {
   let stripe: Stripe;
   let service: TierService;
   let creatorId: string;
+  /** Every organisation this file makes; what hangs off them goes in afterAll. */
+  const madeOrgIds: string[] = [];
 
   beforeAll(async () => {
     db = setupTestDatabase();
@@ -82,6 +85,23 @@ describe('TierService', () => {
   });
 
   afterAll(async () => {
+    // A price change, a price move and a subscription RESTRICT their
+    // organisation and tier (0124), so they go first. The tiers go with the
+    // organisations.
+    if (madeOrgIds.length > 0) {
+      await db
+        .delete(subscriptionPriceMoves)
+        .where(inArray(subscriptionPriceMoves.organizationId, madeOrgIds));
+      await db
+        .delete(priceChanges)
+        .where(inArray(priceChanges.organizationId, madeOrgIds));
+      await db
+        .delete(subscriptions)
+        .where(inArray(subscriptions.organizationId, madeOrgIds));
+      await db
+        .delete(organizations)
+        .where(inArray(organizations.id, madeOrgIds));
+    }
     await teardownTestDatabase();
   });
 
@@ -97,6 +117,7 @@ describe('TierService', () => {
         )
         .returning()
     );
+    madeOrgIds.push(org.id);
     // Upsert on userId (uq_stripe_connect_user, Codex-69t7c) so scoping tests
     // that build two orgs for the same creator reuse the one account.
     await db
@@ -135,6 +156,7 @@ describe('TierService', () => {
         )
         .returning()
     );
+    madeOrgIds.push(org.id);
     return org;
   }
 
@@ -212,6 +234,7 @@ describe('TierService', () => {
           )
           .returning()
       );
+      madeOrgIds.push(org.id);
       await db.insert(stripeConnectAccounts).values(
         createTestConnectAccountInput(org.id, creatorId, {
           chargesEnabled: false,
@@ -264,6 +287,7 @@ describe('TierService', () => {
           )
           .returning()
       );
+      madeOrgIds.push(org.id);
 
       // Primary owner: Connect NOT ready
       await db.insert(stripeConnectAccounts).values(
