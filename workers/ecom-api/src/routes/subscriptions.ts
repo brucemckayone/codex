@@ -343,7 +343,9 @@ subscriptions.post(
 subscriptions.post(
   '/cancel',
   procedure({
-    policy: { auth: 'required' },
+    // Strict: a waiting change of billing makes this a schedule release and
+    // a write at Stripe (Codex-2hxff.97), as the course pair's (9b39d7c4).
+    policy: { auth: 'required', rateLimit: 'strict' },
     input: { body: cancelSubscriptionSchema },
     handler: async (ctx) => {
       // `cancelSubscription` owns its own cache invalidation via the
@@ -369,7 +371,8 @@ subscriptions.post(
 subscriptions.post(
   '/reactivate',
   procedure({
-    policy: { auth: 'required' },
+    // Strict: each one can set a fresh Stripe schedule (Codex-2hxff.97).
+    policy: { auth: 'required', rateLimit: 'strict' },
     input: { body: reactivateSubscriptionSchema },
     handler: async (ctx) => {
       // `reactivateSubscription` owns its own cache invalidation via the
