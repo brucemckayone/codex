@@ -1,5 +1,6 @@
 import { browser } from '$app/environment';
 import { withFallback } from './font-fallbacks';
+import { GROUND_VAR_PROPS, groundLuminanceVars } from './ground';
 import type { BrandEditorState, CssVarMapping } from './types';
 
 /**
@@ -29,6 +30,11 @@ export const BRAND_PREFIX_KEYS = new Set([
   'shadow-color',
   // Heading color — consumed by org-brand.css heading selector
   'heading-color',
+  // Focus colours — INPUTS to org-brand.css, which nudges them against the
+  // page ground; as an inline --color-focus* they would beat that rule and
+  // paint as picked (Codex-mik4h)
+  'focus',
+  'focus-ring',
   // Hero layout — logo scale consumed by hero CSS via var()
   'hero-logo-scale',
   // Hero text and color tokens (WP-02)
@@ -580,6 +586,22 @@ export function injectBrandVars(state: BrandEditorState): void {
       state.darkOverrides?.[field as keyof typeof state.darkOverrides];
     if (darkVal) {
       el.style.setProperty(prop, darkVal);
+    } else {
+      el.style.removeProperty(prop);
+    }
+  }
+
+  // The page ground's luminance (Codex-mik4h): org-brand.css nudges the link
+  // and focus colours against it. Written last, so the stale-override sweep
+  // above never clears it.
+  const ground = groundLuminanceVars({
+    background: state.backgroundColor,
+    backgroundDark: state.darkOverrides?.backgroundColor,
+  });
+  for (const prop of GROUND_VAR_PROPS) {
+    const value = ground[prop];
+    if (value) {
+      el.style.setProperty(prop, value);
     } else {
       el.style.removeProperty(prop);
     }

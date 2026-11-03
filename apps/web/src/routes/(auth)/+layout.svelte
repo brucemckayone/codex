@@ -15,6 +15,7 @@
   import { setContext } from 'svelte';
   import AuthShaderPane from '$lib/components/auth/AuthShaderPane.svelte';
   import { NavigationProgress } from '$lib/components/ui/Feedback/NavigationProgress';
+  import { groundLuminanceVars } from '$lib/brand-editor/ground';
   import {
     darkTokenOverridesToCssVars,
     parseDarkColorOverrides,
@@ -55,6 +56,10 @@
   const brandAccentDark = $derived(darkColorOverrides?.accentColor ?? undefined);
   const brandBackgroundDark = $derived(
     darkColorOverrides?.backgroundColor ?? undefined
+  );
+  // The page ground's luminance, as the org layout writes it (Codex-mik4h).
+  const groundVars = $derived(
+    groundLuminanceVars({ background: brandBackground, backgroundDark: brandBackgroundDark })
   );
 
   const brandFontBody = $derived(branding?.brandFonts?.body ?? undefined);
@@ -128,6 +133,8 @@
   style:--brand-secondary-dark={brandSecondaryDark}
   style:--brand-accent-dark={brandAccentDark}
   style:--brand-bg-dark={brandBackgroundDark}
+  style:--brand-ground-y={groundVars['--brand-ground-y']}
+  style:--brand-ground-dark-y={groundVars['--brand-ground-dark-y']}
   style:--brand-density={brandDensity}
   style:--brand-radius={brandRadius}
   style:--brand-font-body={brandFontBody ? `'${brandFontBody}'` : undefined}

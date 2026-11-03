@@ -27,6 +27,7 @@
   // Every brand face's own fallback, so a face on its way draws on its lines (Codex-61zsk.61).
   import '$lib/styles/tokens/font-fallbacks.css';
   import { withFallback } from '$lib/brand-editor/font-fallbacks';
+  import { groundLuminanceVars } from '$lib/brand-editor/ground';
   import { brandEditor, initBrandPreviewBridge, injectTokenOverrides, injectDarkTokenOverrides, clearTokenOverrides, parseDarkColorOverrides, tokenOverridesToCssVars, darkTokenOverridesToCssVars } from '$lib/brand-editor';
   import { getStaleKeys, resolveStaleCacheTargets, updateStoredVersions } from '$lib/client/version-manifest';
   import { invalidateCollection, loadSubscriptionFromServer, subscriptionCollection } from '$lib/collections';
@@ -87,6 +88,11 @@
   const brandSecondaryDark = $derived(darkColorOverrides?.secondaryColor ?? undefined);
   const brandAccentDark = $derived(darkColorOverrides?.accentColor ?? undefined);
   const brandBackgroundDark = $derived(darkColorOverrides?.backgroundColor ?? undefined);
+  // The page ground's luminance, which org-brand.css nudges links and focus
+  // colours against (Codex-mik4h).
+  const groundVars = $derived(
+    groundLuminanceVars({ background: brandBackground, backgroundDark: brandBackgroundDark })
+  );
 
   const brandFontBody = $derived(data.org?.brandFonts?.body ?? undefined);
   const brandFontHeading = $derived(data.org?.brandFonts?.heading ?? undefined);
@@ -473,6 +479,8 @@
   style:--brand-secondary-dark={brandSecondaryDark}
   style:--brand-accent-dark={brandAccentDark}
   style:--brand-bg-dark={brandBackgroundDark}
+  style:--brand-ground-y={groundVars['--brand-ground-y']}
+  style:--brand-ground-dark-y={groundVars['--brand-ground-dark-y']}
   style:--brand-density={brandDensity}
   style:--brand-radius={brandRadius}
   style:--brand-font-body={brandFontBody ? withFallback(brandFontBody, `'${brandFontBody}'`) : undefined}

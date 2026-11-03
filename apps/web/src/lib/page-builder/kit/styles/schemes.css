@@ -542,7 +542,7 @@
   :root:not(.dark, [data-theme='dark']) [data-editing-theme='dark'] .lp:not([data-lp-theme='light'])
 ):is([data-org-brand] .lp, [data-org-brand]) {
   --_org-heading: var(--brand-heading-color-dark, var(--brand-heading-color, var(--_org-ink)));
-  --_org-focus: var(--brand-color-dark, var(--brand-color, var(--color-primary-400)));
+  --_org-focus: var(--brand-focus, var(--brand-color-dark, var(--brand-color, var(--color-primary-400))));
   --_org-button: var(--brand-color-dark, var(--brand-color, var(--color-primary-400)));
 }
 
@@ -593,7 +593,7 @@
   [data-editing-theme='dark'] .lp[data-lp-theme='light']
 ):is([data-org-brand] .lp, [data-org-brand]) {
   --_org-heading: var(--brand-heading-color, var(--_org-ink));
-  --_org-focus: var(--brand-color, var(--color-primary-500));
+  --_org-focus: var(--brand-focus, var(--brand-color, var(--color-primary-500)));
   --_org-button: var(--brand-color, var(--color-primary-500));
 }
 

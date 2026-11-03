@@ -63,9 +63,22 @@
   --color-interactive-subtle: oklch(from var(--brand-color, var(--color-primary-500)) 0.97 calc(c * 0.15) h);
 
   /* ─── FOCUS ─────────────────────────────────────────────────────────── */
-  --color-focus: var(--brand-color, var(--color-primary-500));
-  --color-focus-ring: oklch(from var(--brand-color, var(--color-primary-500)) calc(l + 0.15) calc(c * 0.5) h);
-  --color-border-focus: var(--brand-color, var(--color-primary-500));
+  /* A fine-tune focus colour arrives as `--brand-focus` / `--brand-focus-ring`
+     (BRAND_PREFIX_KEYS), an INPUT, so the block at the foot of the file can
+     nudge it against the page like the brand's own (Codex-mik4h). As an
+     inline `--color-focus` it would beat that rule and paint as picked. */
+  --_focus-src: var(--brand-focus, var(--brand-color, var(--color-primary-500)));
+  --_focus-ring-src: var(--brand-focus-ring, oklch(from var(--brand-color, var(--color-primary-500)) calc(l + 0.15) calc(c * 0.5) h));
+  --color-focus: var(--_focus-src);
+  --color-focus-ring: var(--_focus-ring-src);
+  --color-border-focus: var(--_focus-src);
+
+  /* ─── LINKS ─────────────────────────────────────────────────────────── */
+  /* The brand's interactive colour used as TEXT on the page. The FALLBACK:
+     the block at the foot of the file nudges it against the page ground, and
+     buttons keep `--color-interactive` exactly (owner, Codex-mik4h). */
+  --color-link: var(--color-interactive);
+  --color-link-hover: var(--color-interactive-hover);
 
   /* ─── TEXT ON BRAND ───────────────────────────────────────────────────
      THIS IS THE FALLBACK. An OKLCH-lightness step picks the WRONG ink for
@@ -422,7 +435,8 @@
   /* Dark primary: use explicit dark override if set, otherwise auto-derive from light */
   --color-brand-primary: var(--brand-color-dark, var(--brand-color, var(--color-primary-400)));
   --color-interactive: var(--brand-color-dark, var(--brand-color, var(--color-primary-400)));
-  --color-focus: var(--brand-color-dark, var(--brand-color, var(--color-primary-400)));
+  --_focus-src: var(--brand-focus, var(--brand-color-dark, var(--brand-color, var(--color-primary-400))));
+  --color-focus: var(--_focus-src);
   --color-primary-500: var(--brand-color-dark, var(--brand-color, var(--color-primary-400)));
 
   --color-brand-primary-hover: oklch(from var(--brand-color-dark, var(--brand-color, var(--color-primary-400))) calc(l + 0.08) c h);
@@ -431,7 +445,8 @@
   --color-interactive-hover: oklch(from var(--brand-color-dark, var(--brand-color, var(--color-primary-400))) calc(l + 0.08) c h);
   --color-interactive-active: oklch(from var(--brand-color-dark, var(--brand-color, var(--color-primary-400))) calc(l + 0.15) c h);
   --color-interactive-subtle: oklch(from var(--brand-color-dark, var(--brand-color, var(--color-primary-400))) 0.15 calc(c * 0.2) h);
-  --color-focus-ring: oklch(from var(--brand-color-dark, var(--brand-color, var(--color-primary-400))) calc(l - 0.1) calc(c * 0.5) h);
+  --_focus-ring-src: var(--brand-focus-ring, oklch(from var(--brand-color-dark, var(--brand-color, var(--color-primary-400))) calc(l - 0.1) calc(c * 0.5) h));
+  --color-focus-ring: var(--_focus-ring-src);
   --color-primary-100: oklch(from var(--brand-color-dark, var(--brand-color, var(--color-primary-400))) 0.25 calc(c * 0.3) h);
   --color-primary-50: oklch(from var(--brand-color-dark, var(--brand-color, var(--color-primary-400))) 0.18 calc(c * 0.2) h);
 
@@ -455,7 +470,7 @@
   --color-on-interactive-hover: oklch(from var(--color-interactive-hover) clamp(0, (0.62 - l) * 1000, 1) 0 0);
   --color-on-interactive-active: oklch(from var(--color-interactive-active) clamp(0, (0.62 - l) * 1000, 1) 0 0);
   --color-text-on-brand-hover: oklch(from var(--color-brand-primary-hover) clamp(0, (0.62 - l) * 1000, 1) 0 0);
-  --color-border-focus: var(--brand-color-dark, var(--brand-color, var(--color-primary-400)));
+  --color-border-focus: var(--_focus-src);
   --color-primary-600: oklch(from var(--brand-color-dark, var(--brand-color, var(--color-primary-400))) calc(l + 0.08) c h);
 
   /* Dark secondary/accent overrides */
@@ -739,6 +754,58 @@
     --color-text-on-brand-hover: rgb(from var(--color-brand-primary-hover) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
     --color-text-on-accent: rgb(from var(--color-brand-accent) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
     --color-text-on-accent-hover: rgb(from var(--color-brand-accent-hover) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
+
+    /* LINKS AND FOCUS, NUDGED AGAINST THE PAGE (Codex-mik4h; owner: "Adjust it,
+       say so", "A new link colour; buttons keep yours"). Each keeps its hue and
+       moves in LINEAR light only as far as the page needs, the page kit's move
+       (page-builder/kit/styles/schemes.css): darkened on a light ground,
+       lightened on a dark one, to 4.59:1 for link text and 3.06:1 for the
+       focus outline and halo (the floors plus the kit's 2%). A colour that
+       already holds is painted exactly as picked.
+
+       CSS cannot read the brand's channels and the ground's in one expression,
+       so the ground arrives as a NUMBER: `--brand-ground-y` (and its dark twin,
+       below), its relative luminance, written beside the `--brand-*` inputs
+       by every writer (brand-editor/ground.ts). Absent, the page is the
+       platform's: the #fafafa page binds in light, the #262626 surface in dark.
+       `--_gw` is 1 on a dark ground (lighten), 0 on a light one (darken), the
+       same true step at 0.1791 as the inks. The fragments are declared once:
+       this rule and its dark twin match the same element, so each reads that
+       element's ground and colours in either theme. The five tokens are
+       restated in the dark twin, which out-ranks the dark fallbacks above.
+
+       brand-editor/ground-nudge.ts is the TypeScript twin the brand studio's
+       pill reports from; ground-nudge-css.test.ts generates these fragments
+       from the same function and fails if this text drifts. */
+    --_gy: var(--brand-ground-y, 0.956);
+    --_gw: clamp(0, (0.1791 - var(--_gy)) * 1e12, 1);
+    --_gl-t: calc(var(--_gw) * min(1, 4.59 * (var(--_gy) + 0.05) - 0.05) + (1 - var(--_gw)) * max(0, (var(--_gy) + 0.05) / 4.59 - 0.05));
+    --_gl-dk: min(1, var(--_gl-t) / max(var(--_lum), 1e-6));
+    --_gl-s: max(1, var(--_gl-t) / max(var(--_lum), 1e-6));
+    --_gl-1r: min(1, var(--_lin-r) * var(--_gl-s));
+    --_gl-1g: min(1, var(--_lin-g) * var(--_gl-s));
+    --_gl-1b: min(1, var(--_lin-b) * var(--_gl-s));
+    --_gl-y1: (0.2126 * var(--_gl-1r) + 0.7152 * var(--_gl-1g) + 0.0722 * var(--_gl-1b));
+    --_gl-k: max(0, (var(--_gl-t) - var(--_gl-y1)) / max(1 - var(--_gl-y1), 1e-6));
+    --_gl-r: max(0, 255 * (1.055 * pow(var(--_gw) * (var(--_gl-1r) + var(--_gl-k) * (1 - var(--_gl-1r))) + (1 - var(--_gw)) * var(--_lin-r) * var(--_gl-dk), 1 / 2.4) - 0.055));
+    --_gl-g: max(0, 255 * (1.055 * pow(var(--_gw) * (var(--_gl-1g) + var(--_gl-k) * (1 - var(--_gl-1g))) + (1 - var(--_gw)) * var(--_lin-g) * var(--_gl-dk), 1 / 2.4) - 0.055));
+    --_gl-b: max(0, 255 * (1.055 * pow(var(--_gw) * (var(--_gl-1b) + var(--_gl-k) * (1 - var(--_gl-1b))) + (1 - var(--_gw)) * var(--_lin-b) * var(--_gl-dk), 1 / 2.4) - 0.055));
+    --_gm-t: calc(var(--_gw) * min(1, 3.06 * (var(--_gy) + 0.05) - 0.05) + (1 - var(--_gw)) * max(0, (var(--_gy) + 0.05) / 3.06 - 0.05));
+    --_gm-dk: min(1, var(--_gm-t) / max(var(--_lum), 1e-6));
+    --_gm-s: max(1, var(--_gm-t) / max(var(--_lum), 1e-6));
+    --_gm-1r: min(1, var(--_lin-r) * var(--_gm-s));
+    --_gm-1g: min(1, var(--_lin-g) * var(--_gm-s));
+    --_gm-1b: min(1, var(--_lin-b) * var(--_gm-s));
+    --_gm-y1: (0.2126 * var(--_gm-1r) + 0.7152 * var(--_gm-1g) + 0.0722 * var(--_gm-1b));
+    --_gm-k: max(0, (var(--_gm-t) - var(--_gm-y1)) / max(1 - var(--_gm-y1), 1e-6));
+    --_gm-r: max(0, 255 * (1.055 * pow(var(--_gw) * (var(--_gm-1r) + var(--_gm-k) * (1 - var(--_gm-1r))) + (1 - var(--_gw)) * var(--_lin-r) * var(--_gm-dk), 1 / 2.4) - 0.055));
+    --_gm-g: max(0, 255 * (1.055 * pow(var(--_gw) * (var(--_gm-1g) + var(--_gm-k) * (1 - var(--_gm-1g))) + (1 - var(--_gw)) * var(--_lin-g) * var(--_gm-dk), 1 / 2.4) - 0.055));
+    --_gm-b: max(0, 255 * (1.055 * pow(var(--_gw) * (var(--_gm-1b) + var(--_gm-k) * (1 - var(--_gm-1b))) + (1 - var(--_gw)) * var(--_lin-b) * var(--_gm-dk), 1 / 2.4) - 0.055));
+    --color-link: rgb(from var(--color-interactive) var(--_gl-r) var(--_gl-g) var(--_gl-b));
+    --color-link-hover: rgb(from var(--color-interactive-hover) var(--_gl-r) var(--_gl-g) var(--_gl-b));
+    --color-focus: rgb(from var(--_focus-src) var(--_gm-r) var(--_gm-g) var(--_gm-b));
+    --color-focus-ring: rgb(from var(--_focus-ring-src) var(--_gm-r) var(--_gm-g) var(--_gm-b));
+    --color-border-focus: rgb(from var(--_focus-src) var(--_gm-r) var(--_gm-g) var(--_gm-b));
   }
 
   /* The dark twin keeps Codex-5wgwf's correction — the ink is derived from the
@@ -761,5 +828,12 @@
     --color-text-on-brand-hover: rgb(from var(--color-brand-primary-hover) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
     --color-text-on-accent: rgb(from var(--color-brand-accent) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
     --color-text-on-accent-hover: rgb(from var(--color-brand-accent-hover) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
+    /* The dark page's ground; the light rule's fragments read it. */
+    --_gy: var(--brand-ground-dark-y, 0.0194);
+    --color-link: rgb(from var(--color-interactive) var(--_gl-r) var(--_gl-g) var(--_gl-b));
+    --color-link-hover: rgb(from var(--color-interactive-hover) var(--_gl-r) var(--_gl-g) var(--_gl-b));
+    --color-focus: rgb(from var(--_focus-src) var(--_gm-r) var(--_gm-g) var(--_gm-b));
+    --color-focus-ring: rgb(from var(--_focus-ring-src) var(--_gm-r) var(--_gm-g) var(--_gm-b));
+    --color-border-focus: rgb(from var(--_focus-src) var(--_gm-r) var(--_gm-g) var(--_gm-b));
   }
 }

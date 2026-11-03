@@ -123,12 +123,30 @@ describe('the rule the stylesheets paint', () => {
   // would print 1000000000000).
   const RAMP = '1e12';
   // The step, written once at themes/light.css's foot, built from the pivot
-  // the readout uses. Each channel is clamped to the gamut first, so a hovered
-  // fill pushed past black or white still has a luminance (unclamped, 1 605 of
-  // the lattice's 8 192 hovered fills took a NaN and black ink, 878 of them
-  // where white was needed, as low as 1.11:1; 15 dark ones lightened past 255
-  // took the wrong ink, as low as 4.21:1).
-  const STEP = `--_on-fill-step: clamp(0, (${TEXT_ON_BRAND_LUMINANCE_PIVOT} - (0.2126 * pow((clamp(0, r, 255) / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((clamp(0, g, 255) / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((clamp(0, b, 255) / 255 + 0.055) / 1.055, 2.4))) * ${RAMP}, 1);`;
+  // the readout uses, over the luminance terms written beside it. Each channel
+  // is clamped to the gamut first, so a hovered fill pushed past black or
+  // white still has a luminance (unclamped, 1 605 of the lattice's 8 192
+  // hovered fills took a NaN and black ink, 878 of them where white was
+  // needed, as low as 1.11:1; 15 dark ones lightened past 255 took the wrong
+  // ink, as low as 4.21:1).
+  const linear = (c: string) =>
+    `--_lin-${c}: pow((clamp(0, ${c}, 255) / 255 + 0.055) / 1.055, 2.4);`;
+  const STEP = [
+    linear('r'),
+    linear('g'),
+    linear('b'),
+    '--_lum: (0.2126 * var(--_lin-r) + 0.7152 * var(--_lin-g) + 0.0722 * var(--_lin-b));',
+    `--_on-fill-step: clamp(0, (${TEXT_ON_BRAND_LUMINANCE_PIVOT} - var(--_lum)) * ${RAMP}, 1);`,
+  ];
+  // Colours nudged against the page (Codex-mik4h) are declared in the same
+  // guarded blocks but are not inks; ground-nudge-css.test.ts pins them.
+  const NUDGED = [
+    '--color-link',
+    '--color-link-hover',
+    '--color-focus',
+    '--color-focus-ring',
+    '--color-border-focus',
+  ];
   const S = 'calc(255 * var(--_on-fill-step))';
   const GUARD =
     '@supports (color: rgb(from red calc(255 * pow(r / 255, 2)) 0 0))';
@@ -158,7 +176,12 @@ describe('the rule the stylesheets paint', () => {
     file: string,
     scopes: number
   ) {
-    const inks = block.match(/--color-[a-z-]+: rgb\(from [^;]+\);/g) ?? [];
+    const inks = (
+      block.match(/--color-[a-z-]+: rgb\(from [^;]+\);/g) ?? []
+    ).filter(
+      (declaration) =>
+        !NUDGED.some((name) => declaration.startsWith(`${name}:`))
+    );
     for (const ink of inks) expect(ink, file).toMatch(`${S} ${S} ${S});`);
     for (const name of INKS)
       expect(count(block, `${name}: rgb(from `), `${file} ${name}`).toBe(
@@ -170,9 +193,11 @@ describe('the rule the stylesheets paint', () => {
   }
 
   test('the step is written once, at light.css’s foot, from the readout’s pivot', () => {
-    expect(count(guarded('themes/light.css'), STEP)).toBe(1);
+    for (const line of STEP)
+      expect(count(guarded('themes/light.css'), line), line).toBe(1);
     for (const file of ['themes/dark.css', 'tokens/org-brand.css'])
-      expect(count(guarded(file), '--_on-fill-step:'), file).toBe(0);
+      for (const name of ['--_on-fill-step:', '--_lum:', '--_lin-r:'])
+        expect(count(guarded(file), name), `${file} ${name}`).toBe(0);
   });
 
   test('org-brand.css chooses the org’s inks by it, light and dark', () => {

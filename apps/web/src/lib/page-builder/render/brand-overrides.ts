@@ -26,6 +26,7 @@ import {
   tokenOverridesToCssVars,
 } from '$lib/brand-editor';
 import { withFallback } from '$lib/brand-editor/font-fallbacks';
+import { groundLuminance } from '$lib/brand-editor/ground';
 import type { BrandTokenOverrides } from '$lib/page-builder';
 
 /**
@@ -136,6 +137,14 @@ export function brandOverridesToCssVars(
     const darkProp = CORE_DARK[field];
     if (light && !(darkProp in out)) out[darkProp] = light;
   }
+
+  // Each background the page sets brings its luminance, so the links and focus
+  // colours org-brand.css nudges read this page's ground (Codex-mik4h). Per
+  // theme, as the backgrounds are: the other theme inherits the org's number.
+  const groundLight = groundLuminance(out['--brand-bg']);
+  if (groundLight) out['--brand-ground-y'] = groundLight;
+  const groundDark = groundLuminance(out['--brand-bg-dark']);
+  if (groundDark) out['--brand-ground-dark-y'] = groundDark;
 
   // ── Fine-tune token overrides (canonical prefix split + null-skip) ──
   if (overrides.tokenOverrides) {

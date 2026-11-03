@@ -2793,8 +2793,9 @@ describe('the org is the source — its tokens, drawn exactly unless a floor fai
     for (const chain of [
       '--color-heading: var(--brand-heading-color, var(--color-text-primary));',
       '--color-heading: var(--brand-heading-color-dark, var(--brand-heading-color, var(--color-text-primary)));',
-      '--color-focus: var(--brand-color, var(--color-primary-500));',
-      '--color-focus: var(--brand-color-dark, var(--brand-color, var(--color-primary-400)));',
+      // A fine-tune focus colour is the input, ahead of the brand (Codex-mik4h).
+      '--_focus-src: var(--brand-focus, var(--brand-color, var(--color-primary-500)));',
+      '--_focus-src: var(--brand-focus, var(--brand-color-dark, var(--brand-color, var(--color-primary-400))));',
     ])
       expect(ORG_BRAND).toContain(chain);
   });
@@ -2904,7 +2905,7 @@ describe('the org is the source — its tokens, drawn exactly unless a floor fai
       expect(branded['--_org-heading']).toBe(
         asPreview(chain('--color-heading'))
       );
-      expect(branded['--_org-focus']).toBe(asPreview(chain('--color-focus')));
+      expect(branded['--_org-focus']).toBe(asPreview(chain('--_focus-src')));
       expect(branded['--_org-button']).toBe(
         asPreview(chain('--color-interactive'))
       );
