@@ -37,12 +37,14 @@
      Derived FROM the fill, not from the page: --color-text-inverse inverts the
      PAGE background, so on a dark page it hands you dark ink and then paints it
      onto a saturated brand fill — 3.82:1 on studio-alpha dark, measured. Same
-     step function as --color-text-on-brand (white below L 0.62, black above),
-     but keyed to the swatch actually being painted, which is what makes it
-     correct for every org brand AND for the platform palette. Declared in each
-     scope that declares --color-interactive: a custom property substitutes
-     var() at computed-value time on the element it is DECLARED on, so a single
-     :root copy would freeze the platform value and never see an org override.
+     step function as org-brand.css's --color-text-on-brand: this OKLCH step
+     (white below L 0.62, black above) is the fallback, and the luminance step
+     at the foot of this file is the live rule. Keyed to the swatch actually
+     being painted, which is what makes it correct for every org brand AND for
+     the platform palette. Declared in each scope that declares --color-interactive: a
+     custom property substitutes var() at computed-value time on the element it
+     is DECLARED on, so a single :root copy would freeze the platform value and
+     never see an org override.
      (No :root fallback needed — `:root` is in this rule's selector list.) */
   --color-on-interactive: oklch(from var(--color-interactive) clamp(0, (0.62 - l) * 1000, 1) 0 0);
 
@@ -80,4 +82,29 @@
      lazily at the card, so org overrides flow through automatically). */
   --media-scrim: color-mix(in oklab, black 64%, var(--color-background));
   --media-glyph: oklch(from var(--color-brand-accent) 0.97 calc(c * 0.06) h);
+}
+
+/* The platform twin of org-brand.css's luminance step (Codex-6r63f): the ink
+   on a filled control is chosen by which side of 0.1791 the fill's relative
+   luminance sits, where white and black contrast equally, so it clears AA on
+   any fill (floor 4.57:1). Read org-brand.css's foot for the derivation and
+   why it is guarded: an engine without pow() in relative colour keeps the
+   OKLCH step above rather than losing the colour. The platform's own fills
+   pick the same ink either way; a fill in the band the step misjudged, such
+   as a saturated green, no longer gets the weaker one. */
+@supports (color: rgb(from red calc(255 * pow(r / 255, 2)) 0 0)) {
+  :root, [data-theme="light"] {
+    --color-on-interactive: rgb(
+      from var(--color-interactive)
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
+    );
+    --color-text-on-accent: rgb(
+      from var(--color-brand-accent)
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
+    );
+  }
 }
