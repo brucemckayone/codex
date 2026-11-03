@@ -4281,6 +4281,8 @@ describe('SubscriptionService', () => {
         email: {
           to: 'renewed-by-credit@example.com',
           templateName: 'subscription-renewed',
+          // The bill, not the £0.00 the card paid (cycle 2, L5).
+          data: { priceFormatted: '£10.00' },
         },
       });
       expect(bump).toHaveBeenCalledWith(

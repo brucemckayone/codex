@@ -2816,7 +2816,11 @@ export class CourseSubscriptionService extends BaseService {
       data: {
         userName: context.userName,
         planName: context.courseTitle,
-        priceFormatted: formatPounds(stripeInvoice.amount_paid ?? 0),
+        // The bill, not what the card paid: credit may have paid some or all
+        // of it (review C1 cycle 2, L5). `amount_paid` stays the payouts'.
+        priceFormatted: formatPounds(
+          stripeInvoice.total ?? stripeInvoice.amount_paid ?? 0
+        ),
         billingDate: new Date().toLocaleDateString('en-GB'),
         nextBillingDate: nextPeriodEnd.toLocaleDateString('en-GB'),
         manageUrl: this.accountSubscriptionsUrl(),

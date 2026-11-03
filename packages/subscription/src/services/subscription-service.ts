@@ -2526,7 +2526,9 @@ export class SubscriptionService extends BaseService {
         data: {
           userName: stripeInvoice.customer_name || 'there',
           planName: stripeInvoice.lines.data[0]?.description || 'Subscription',
-          priceFormatted: `£${((stripeInvoice.amount_paid ?? 0) / 100).toFixed(2)}`,
+          // The bill, not what the card paid: credit may have paid some or
+          // all of it (review C1 cycle 2, L5). `amount_paid` stays the split's.
+          priceFormatted: `£${((stripeInvoice.total ?? stripeInvoice.amount_paid ?? 0) / 100).toFixed(2)}`,
           billingDate: new Date().toLocaleDateString('en-GB'),
           nextBillingDate,
           manageUrl: `${webAppUrl || ''}/account/subscriptions`,
