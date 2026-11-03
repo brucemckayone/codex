@@ -65,6 +65,23 @@ export interface CourseFilmStreamResponse {
 export type OrgFilmStreamResponse = CourseFilmStreamResponse;
 
 /**
+ * Response for GET /api/media/:id/preview (Codex-a6ofh.1.5): a creator's OWN
+ * media, signed for the studio's player whatever uses it, paid content
+ * included. The content stream's shape, under the preview proxies.
+ */
+export interface MediaPreviewResponse {
+  /** The preview master-proxy URL, carrying its preview token. */
+  playlistUrl: string;
+  /** An audio item's presigned waveform, for the player's scrubber; else null. */
+  waveformUrl: string | null;
+  /** ISO 8601. The token's expiry: after it no playlist under it loads. */
+  expiresAt: string;
+  mediaType: 'video' | 'audio';
+  /** The rungs the transcode wrote, for the quality menu; omitted if none recorded. */
+  readyVariants?: string[];
+}
+
+/**
  * How a reader still holds an item that has left the storefront: it decides
  * the note the detail page shows them (Codex-ov2ii). Mapped from the arm of
  * the access decision that granted, so the note can never give a reason the

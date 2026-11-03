@@ -10,9 +10,11 @@
  * - PATCH  /api/media/:id    - Update media
  * - GET    /api/media        - List with filters (each item's usage counts)
  * - GET    /api/media/:id/usage - Where the item is used
+ * - GET    /api/media/:id/preview - The owner's own media, signed to play (15 min)
  * - DELETE /api/media/:id    - Soft delete, refused while anything live uses it
  */
 
+import type { MediaPreviewResponse } from '@codex/access';
 import {
   AUTH_ROLES,
   FILE_SIZES,
@@ -119,6 +121,35 @@ app.get(
         ctx.user.id
       );
     },
+  })
+);
+
+/**
+ * GET /api/media/:id/preview
+ * The creator's OWN media, signed for the studio's player (Codex-a6ofh.1.5):
+ * the library drawer's and the editor's media card's preview, whatever uses
+ * the media, paid content included. The read is creator-scoped, and that is
+ * the gate; another creator's item is the same 404 as an unknown id.
+ *
+ * The URL opens the preview proxies (`/api/access/media/:id/hls/...`) with a
+ * 15-minute preview token, which no content or film proxy accepts. `fresh`
+ * (`private, no-store`): the body is a credential. Default `api` limit
+ * (data-design §1.2).
+ *
+ * Returns: MediaPreviewResponse (200); 404 not found; 422 not ready
+ * Security: Authenticated users, own media only, API rate limit (100 req/min)
+ * @returns {MediaPreviewResponse}
+ */
+app.get(
+  '/:id/preview',
+  procedure({
+    policy: { auth: 'required', cache: 'fresh' },
+    input: { params: createIdParamsSchema() },
+    handler: async (ctx): Promise<MediaPreviewResponse> =>
+      ctx.services.access.getMediaPreviewStream(
+        ctx.user.id,
+        ctx.input.params.id
+      ),
   })
 );
 

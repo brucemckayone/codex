@@ -134,6 +134,28 @@ export function rewriteFilmMasterPlaylist(
   return rewriteVariantUris(text, `${base}${filmHlsPath(scope)}`, token);
 }
 
+/** The media preview proxies' HLS root for a media item (Codex-a6ofh.1.5). */
+export function mediaPreviewHlsPath(mediaId: string): string {
+  return `/api/access/media/${encodeURIComponent(mediaId)}/hls`;
+}
+
+/**
+ * {@link rewriteMasterPlaylist} for a creator's preview of their own media:
+ * each variant points at the preview variant proxy, which accepts only a
+ * preview token minted for that media.
+ */
+export function rewriteMediaPreviewMasterPlaylist(
+  text: string,
+  options: { contentApiBaseUrl: string; mediaId: string; token: string }
+): string {
+  const base = options.contentApiBaseUrl.replace(/\/+$/, '');
+  return rewriteVariantUris(
+    text,
+    `${base}${mediaPreviewHlsPath(options.mediaId)}`,
+    options.token
+  );
+}
+
 /** Point each variant URI at `${hlsBase}/<variant>/index.m3u8`, token propagated. */
 function rewriteVariantUris(
   text: string,

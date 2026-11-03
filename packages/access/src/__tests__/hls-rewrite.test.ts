@@ -3,14 +3,17 @@ import {
   collectVariantSegments,
   rewriteFilmMasterPlaylist,
   rewriteMasterPlaylist,
+  rewriteMediaPreviewMasterPlaylist,
   rewriteVariantPlaylist,
 } from '../hls-rewrite';
 import {
   signFilmToken,
   signHlsToken,
+  signMediaPreviewToken,
   signOrgFilmToken,
   verifyFilmToken,
   verifyHlsToken,
+  verifyMediaPreviewToken,
   verifyOrgFilmToken,
 } from '../hls-token';
 
@@ -440,5 +443,137 @@ describe('org film token sign/verify (Codex-376dl)', () => {
     expect(await verifyOrgFilmToken(orgless, SECRET)).toEqual(MALFORMED);
 
     expect(await verifyOrgFilmToken('not-a-token', SECRET)).toEqual(MALFORMED);
+  });
+});
+
+describe('rewriteMediaPreviewMasterPlaylist (Codex-a6ofh.1.5)', () => {
+  it('points each variant at the PREVIEW variant proxy, keyed by the media, token propagated', () => {
+    const mediaId = '55555555-5555-4555-8555-555555555555';
+    const master = ['#EXTM3U', '720p/index.m3u8', '128k/index.m3u8', ''].join(
+      '\n'
+    );
+
+    const lines = rewriteMediaPreviewMasterPlaylist(master, {
+      contentApiBaseUrl: `${BASE}/`,
+      mediaId,
+      token: TOKEN,
+    }).split('\n');
+
+    expect(lines[0]).toBe('#EXTM3U');
+    expect(lines[1]).toBe(
+      `${BASE}/api/access/media/${mediaId}/hls/720p/index.m3u8?token=tok.sig`
+    );
+    // An audio rung, as an audio item's master names it.
+    expect(lines[2]).toBe(
+      `${BASE}/api/access/media/${mediaId}/hls/128k/index.m3u8?token=tok.sig`
+    );
+  });
+});
+
+describe('media preview token sign/verify (Codex-a6ofh.1.5)', () => {
+  const SECRET = 'test-worker-shared-secret';
+  const media = {
+    creatorId: 'user_abc',
+    mediaId: '22222222-2222-4222-8222-222222222222',
+  };
+  const inTenMinutes = () => Math.floor(Date.now() / 1000) + 600;
+  const SIGNATURE = { ok: false, reason: 'signature' };
+  const MALFORMED = { ok: false, reason: 'malformed' };
+
+  it('verifies a freshly-signed preview token', async () => {
+    const exp = inTenMinutes();
+    const token = await signMediaPreviewToken({ ...media, exp }, SECRET);
+    expect(await verifyMediaPreviewToken(token, SECRET)).toEqual({
+      ok: true,
+      payload: { ...media, exp },
+    });
+  });
+
+  // Four kinds now share the secret: the domain alone keeps them apart. A
+  // preview is minted after an OWNERSHIP check, never a viewer's access
+  // decision, so it must open no content or film route, nor they a preview.
+  it('a preview token is no content, course film or org film token', async () => {
+    const token = await signMediaPreviewToken(
+      { ...media, exp: inTenMinutes() },
+      SECRET
+    );
+    expect(await verifyHlsToken(token, SECRET)).toBeNull();
+    expect(await verifyFilmToken(token, SECRET)).toEqual(SIGNATURE);
+    expect(await verifyOrgFilmToken(token, SECRET)).toEqual(SIGNATURE);
+  });
+
+  it('no content, course film or org film token is a preview token', async () => {
+    const exp = inTenMinutes();
+    const content = await signHlsToken({ ...media, exp }, SECRET);
+    const course = await signFilmToken(
+      { ...media, courseId: '33333333-3333-4333-8333-333333333333', exp },
+      SECRET
+    );
+    const org = await signOrgFilmToken(
+      {
+        ...media,
+        organizationId: '44444444-4444-4444-8444-444444444444',
+        exp,
+      },
+      SECRET
+    );
+    for (const token of [content, course, org]) {
+      expect(await verifyMediaPreviewToken(token, SECRET)).toEqual(SIGNATURE);
+    }
+  });
+
+  // The forgery a creator holding a real preview would try: the proxies build
+  // R2 keys from the token's creatorId and the path's media with no DB read,
+  // so the signature is the only cross-tenant gate on those routes.
+  it("rejects a preview re-pointed at another creator's media, its signature kept", async () => {
+    const exp = inTenMinutes();
+    const token = await signMediaPreviewToken({ ...media, exp }, SECRET);
+    const [, sig] = token.split('.');
+    const forgedPayload = btoa(
+      JSON.stringify({
+        creatorId: 'user_victim',
+        mediaId: '99999999-9999-4999-8999-999999999999',
+        exp,
+      })
+    )
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+    expect(
+      await verifyMediaPreviewToken(`${forgedPayload}.${sig}`, SECRET)
+    ).toEqual(SIGNATURE);
+  });
+
+  it('rejects another secret, an expired token, a missing field and a malformed token', async () => {
+    const live = await signMediaPreviewToken(
+      { ...media, exp: inTenMinutes() },
+      SECRET
+    );
+    expect(await verifyMediaPreviewToken(live, 'wrong-secret')).toEqual(
+      SIGNATURE
+    );
+
+    const expired = await signMediaPreviewToken(
+      { ...media, exp: Math.floor(Date.now() / 1000) - 1 },
+      SECRET
+    );
+    expect(await verifyMediaPreviewToken(expired, SECRET)).toEqual({
+      ok: false,
+      reason: 'expired',
+    });
+
+    const mediumless = await signMediaPreviewToken(
+      { creatorId: media.creatorId, exp: inTenMinutes() } as Parameters<
+        typeof signMediaPreviewToken
+      >[0],
+      SECRET
+    );
+    expect(await verifyMediaPreviewToken(mediumless, SECRET)).toEqual(
+      MALFORMED
+    );
+
+    expect(await verifyMediaPreviewToken('not-a-token', SECRET)).toEqual(
+      MALFORMED
+    );
   });
 });

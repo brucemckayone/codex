@@ -29,11 +29,19 @@ import {
   collectVariantSegments,
   type FilmScope,
   filmHlsPath,
+  mediaPreviewHlsPath,
   rewriteFilmMasterPlaylist,
   rewriteMasterPlaylist,
+  rewriteMediaPreviewMasterPlaylist,
   rewriteVariantPlaylist,
 } from '../../hls-rewrite';
-import { signFilmToken, signHlsToken, signOrgFilmToken } from '../../hls-token';
+import {
+  signFilmToken,
+  signHlsToken,
+  signMediaPreviewToken,
+  signOrgFilmToken,
+} from '../../hls-token';
+import type { MediaPreviewResponse } from '../../types';
 import type { R2Signer } from './r2-signer';
 
 /**
@@ -86,6 +94,12 @@ export interface StreamingResponse {
   readyVariants?: string[];
 }
 
+/** A media item as the stream resolvers read it. */
+type MediaResolutionItem = NonNullable<MediaResolutionContent['mediaItem']>;
+
+/** A media item that can stream: everything a URL is minted from. */
+type StreamableMedia = Extract<StreamingTarget, { r2Key: string }>;
+
 /**
  * Resolve an access-granted content record to its streamable target. Assumes
  * the access decision has already passed. Returns the `'written'` variant when
@@ -116,30 +130,47 @@ export function resolveStreamableMedia(
       readyVariants: null,
     };
   }
+  return resolveStreamableMediaItem(obs, contentRecord.mediaItem, {
+    contentId,
+  });
+}
 
+/**
+ * The media half of {@link resolveStreamableMedia}: a media item that is
+ * ready, has its HLS master and is video or audio, as the descriptor a URL is
+ * minted from. Shared by a content stream and a creator's preview of their own
+ * media (Codex-a6ofh.1.5); `logIds` says which asked (`{ contentId }` or
+ * `{ creatorId }`) on every line it logs.
+ *
+ * @throws {MediaNotReadyForStreamingError} media status !== 'ready'
+ * @throws {R2SigningError} media ready but HLS master playlist key missing
+ * @throws {InvalidContentTypeError} media type is neither video nor audio
+ */
+export function resolveStreamableMediaItem(
+  obs: ObservabilityClient,
+  mediaItem: MediaResolutionItem,
+  logIds: Record<string, string>
+): StreamableMedia {
   // Verify media is ready for streaming (status='ready' with transcoding outputs)
-  const mediaStatus = contentRecord.mediaItem.status;
+  const mediaStatus = mediaItem.status;
   if (mediaStatus !== MEDIA_STATUS.READY) {
     obs.warn('Media not ready for streaming', {
-      contentId,
-      mediaItemId: contentRecord.mediaItem.id,
+      ...logIds,
+      mediaItemId: mediaItem.id,
       status: mediaStatus,
     });
-    throw new MediaNotReadyForStreamingError(
-      contentRecord.mediaItem.id,
-      mediaStatus
-    );
+    throw new MediaNotReadyForStreamingError(mediaItem.id, mediaStatus);
   }
 
   // Extract HLS master playlist key for streaming
   // Database constraint ensures this exists when status='ready'
-  const r2Key = contentRecord.mediaItem.hlsMasterPlaylistKey;
+  const r2Key = mediaItem.hlsMasterPlaylistKey;
 
   if (!r2Key) {
     // This should never happen due to database constraint, but defensive check
     obs.error('Media marked ready but missing HLS key', {
-      contentId,
-      mediaItemId: contentRecord.mediaItem.id,
+      ...logIds,
+      mediaItemId: mediaItem.id,
     });
     throw new R2SigningError(
       new Error('Media marked as ready but HLS master playlist key is missing')
@@ -147,17 +178,20 @@ export function resolveStreamableMedia(
   }
 
   // Validate media type (defense-in-depth)
-  const mediaType = contentRecord.mediaItem.mediaType;
+  const mediaType = mediaItem.mediaType;
 
   if (
     !([MEDIA_TYPES.VIDEO, MEDIA_TYPES.AUDIO] as string[]).includes(mediaType)
   ) {
     obs.error('Invalid media type', {
       mediaType,
-      contentId,
-      mediaItemId: contentRecord.mediaItem.id,
+      ...logIds,
+      mediaItemId: mediaItem.id,
     });
-    throw new InvalidContentTypeError(contentId, mediaType);
+    throw new InvalidContentTypeError(
+      logIds.contentId ?? mediaItem.id,
+      mediaType
+    );
   }
 
   // Return data for R2 signing (outside transaction).
@@ -172,11 +206,11 @@ export function resolveStreamableMedia(
     // parsed from the R2 key) so the minted token + R2 key builders
     // are independent of the key's exact byte shape. They feed the
     // proxy routes' R2 key construction with no extra DB hit.
-    creatorId: contentRecord.mediaItem.creatorId,
-    mediaId: contentRecord.mediaItem.id,
+    creatorId: mediaItem.creatorId,
+    mediaId: mediaItem.id,
     mediaType: mediaType as 'video' | 'audio',
-    waveformKey: contentRecord.mediaItem.waveformKey,
-    readyVariants: contentRecord.mediaItem.readyVariants ?? null,
+    waveformKey: mediaItem.waveformKey,
+    readyVariants: mediaItem.readyVariants ?? null,
   };
 }
 
@@ -334,6 +368,35 @@ export async function getHlsMasterPlaylist(
   });
 }
 
+/** An unknown error as the mint-failure log lines record it. */
+function errorFields(err: unknown): {
+  errorName: string | undefined;
+  errorMessage: string;
+  errorStack: string | undefined;
+} {
+  return {
+    errorName: err instanceof Error ? err.name : undefined,
+    errorMessage: err instanceof Error ? err.message : String(err),
+    errorStack: err instanceof Error ? err.stack : undefined,
+  };
+}
+
+/**
+ * The streaming proxy settings left unbound, by NAME only, never a value: one
+ * of them is the signing secret.
+ */
+function unboundProxyConfig(
+  contentApiBaseUrl: string | undefined,
+  hlsTokenSecret: string | undefined
+): string {
+  return [
+    contentApiBaseUrl ? null : 'contentApiBaseUrl',
+    hlsTokenSecret ? null : 'hlsTokenSecret',
+  ]
+    .filter((name) => name !== null)
+    .join('/');
+}
+
 /** The one message a film-stream failure gives its anonymous caller. */
 const FILM_STREAM_UNAVAILABLE = 'Streaming is unavailable';
 
@@ -371,9 +434,7 @@ export function filmStreamFailure(
   obs.error(`Failed to mint ${log.name} stream`, {
     ...log.ids,
     ...fields,
-    errorName: err instanceof Error ? err.name : undefined,
-    errorMessage: err instanceof Error ? err.message : String(err),
-    errorStack: err instanceof Error ? err.stack : undefined,
+    ...errorFields(err),
   });
   return new InternalServiceError(FILM_STREAM_UNAVAILABLE, undefined, {
     cause: err,
@@ -422,16 +483,11 @@ export async function buildFilmStreamResponse(
   const { contentApiBaseUrl, hlsTokenSecret, obs } = deps;
   const log = filmLog(scope);
   if (!contentApiBaseUrl || !hlsTokenSecret) {
-    // Field NAMES only, never a value: one of them is the signing secret.
-    const missing = [
-      contentApiBaseUrl ? null : 'contentApiBaseUrl',
-      hlsTokenSecret ? null : 'hlsTokenSecret',
-    ].filter((name) => name !== null);
     obs.error(`Failed to mint ${log.name} stream`, {
       ...log.ids,
       mediaItemId: film.mediaId,
       errorName: 'MisconfiguredStreamingProxy',
-      errorMessage: `missing ${missing.join('/')}`,
+      errorMessage: `missing ${unboundProxyConfig(contentApiBaseUrl, hlsTokenSecret)}`,
     });
     throw new InternalServiceError(FILM_STREAM_UNAVAILABLE);
   }
@@ -452,9 +508,7 @@ export async function buildFilmStreamResponse(
     obs.error(`Failed to mint ${log.name} stream`, {
       ...log.ids,
       mediaItemId: film.mediaId,
-      errorName: err instanceof Error ? err.name : undefined,
-      errorMessage: err instanceof Error ? err.message : String(err),
-      errorStack: err instanceof Error ? err.stack : undefined,
+      ...errorFields(err),
     });
     throw new InternalServiceError(FILM_STREAM_UNAVAILABLE, undefined, {
       cause: err,
@@ -493,6 +547,95 @@ export async function getFilmHlsMasterPlaylist(
   return rewriteFilmMasterPlaylist(text, {
     contentApiBaseUrl,
     scope: input.scope,
+    token: input.token,
+  });
+}
+
+/**
+ * Mint a creator's preview of their OWN media (Codex-a6ofh.1.5): a preview
+ * token and the URL of the preview master proxy it opens, with an audio item's
+ * waveform presigned as the content stream's is. The caller has read the media
+ * as this creator's, and ready; this only signs.
+ *
+ * @throws {R2SigningError} proxy misconfigured, or signing failed
+ */
+export async function buildMediaPreviewResponse(
+  media: StreamableMedia,
+  deps: {
+    r2: R2Signer;
+    contentApiBaseUrl: string | undefined;
+    hlsTokenSecret: string | undefined;
+    obs: ObservabilityClient;
+  },
+  expirySeconds: number
+): Promise<MediaPreviewResponse> {
+  const { r2, contentApiBaseUrl, hlsTokenSecret, obs } = deps;
+  if (!contentApiBaseUrl || !hlsTokenSecret) {
+    obs.error('Failed to mint media preview', {
+      mediaItemId: media.mediaId,
+      errorName: 'MisconfiguredStreamingProxy',
+      errorMessage: `missing ${unboundProxyConfig(contentApiBaseUrl, hlsTokenSecret)}`,
+    });
+    throw new R2SigningError(
+      new Error('HLS streaming proxy is not configured')
+    );
+  }
+
+  try {
+    const exp = Math.floor(Date.now() / 1000) + expirySeconds;
+    const token = await signMediaPreviewToken(
+      { creatorId: media.creatorId, mediaId: media.mediaId, exp },
+      hlsTokenSecret
+    );
+    const base = contentApiBaseUrl.replace(/\/+$/, '');
+    const waveformUrl =
+      media.mediaType === 'audio' && media.waveformKey
+        ? await r2.generateSignedUrl(media.waveformKey, expirySeconds)
+        : null;
+    return {
+      playlistUrl: `${base}${mediaPreviewHlsPath(media.mediaId)}/master.m3u8?token=${encodeURIComponent(token)}`,
+      waveformUrl,
+      expiresAt: toIso(new Date(exp * 1000)),
+      mediaType: media.mediaType,
+      // As the content stream's: absent, not null, when none is recorded.
+      readyVariants: media.readyVariants ?? undefined,
+    };
+  } catch (err) {
+    obs.error('Failed to mint media preview', {
+      mediaItemId: media.mediaId,
+      ...errorFields(err),
+    });
+    throw new R2SigningError(err);
+  }
+}
+
+/**
+ * {@link getHlsMasterPlaylist} for a media preview: the variants point at the
+ * preview variant proxy. Auth is the preview token the route verified
+ * (`verifyMediaPreviewToken`, its media matching the path), so no DB read.
+ *
+ * @returns Rewritten master playlist text, or `null` when the master object
+ *          is absent in R2 (route maps to 404).
+ */
+export async function getMediaPreviewHlsMasterPlaylist(
+  deps: { r2: R2Signer; contentApiBaseUrl: string | undefined },
+  input: { creatorId: string; mediaId: string; token: string }
+): Promise<string | null> {
+  const { r2, contentApiBaseUrl } = deps;
+  if (!contentApiBaseUrl) {
+    throw new R2SigningError(
+      new Error('HLS streaming proxy is not configured (contentApiBaseUrl)')
+    );
+  }
+
+  const text = await r2.getObjectText(
+    getHlsMasterKey(input.creatorId, input.mediaId)
+  );
+  if (text === null) return null;
+
+  return rewriteMediaPreviewMasterPlaylist(text, {
+    contentApiBaseUrl,
+    mediaId: input.mediaId,
     token: input.token,
   });
 }
