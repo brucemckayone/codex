@@ -551,6 +551,12 @@
 {:else if tab === 'fees' && feeNotices}
   {@const cards = feeChanges?.items ?? []}
   {#if cards.length > 0}
+    <!-- The cards' section head, so their h3s sit under an h2 (C2-W3). -->
+    <h2 class="queue-subhead">
+      {m.support_queue_fees_subhead_rises({
+        count: String(feeChanges?.pagination.total ?? cards.length),
+      })}
+    </h2>
     <FeeChangeCards {cards} />
     <h2 class="queue-subhead">
       {m.support_queue_fees_subhead({ count: String(feeNotices.pagination.total) })}

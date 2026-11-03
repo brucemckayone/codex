@@ -3250,6 +3250,7 @@
   "support_queue_tab_fees": "Fee notices",
   "support_queue_fees_intro": "A fee rise starts 30 days after everyone it affects has been told. These people's emails haven't gone through, so the rise is waiting for them. The 08:00 run tries again every day; if you reach someone another way, mark them as told.",
   "support_queue_fees_subhead": "Not told yet · {count}",
+  "support_queue_fees_subhead_rises": "Fee rises · {count}",
   "support_queue_fees_col_since": "Waiting since",
   "support_queue_fees_col_who": "Who",
   "support_queue_fees_col_rise": "Fee rise",
