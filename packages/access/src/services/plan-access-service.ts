@@ -427,13 +427,14 @@ export class PlanAccessService extends BaseService {
 
       const [subs, films, courseRows] = await Promise.all([
         // The same rows `TierService.deleteTier` refuses on: on the tier, and
-        // waiting to move to it (Codex-2hxff.16), neither cancelled.
+        // waiting to move to it (Codex-2hxff.16), neither cancelled. A change
+        // of billing alone names the tier it is on: a subscriber, not a mover.
         this.db
           .select({
             count: sql<number>`count(*) FILTER (WHERE ${subscriptions.tierId} = ${tierId})::int`,
-            movingIn: sql<number>`count(*) FILTER (WHERE ${subscriptions.pendingTierId} = ${tierId})::int`,
+            movingIn: sql<number>`count(*) FILTER (WHERE ${subscriptions.pendingTierId} = ${tierId} AND ${subscriptions.tierId} <> ${tierId})::int`,
             lastMoveAt:
-              sql<Date | null>`max(${subscriptions.pendingTierFrom}) FILTER (WHERE ${subscriptions.pendingTierId} = ${tierId})`.mapWith(
+              sql<Date | null>`max(${subscriptions.pendingTierFrom}) FILTER (WHERE ${subscriptions.pendingTierId} = ${tierId} AND ${subscriptions.tierId} <> ${tierId})`.mapWith(
                 subscriptions.pendingTierFrom
               ),
           })

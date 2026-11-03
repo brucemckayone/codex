@@ -904,12 +904,14 @@ export class TierService extends BaseService {
       // Anyone on the tier, and anyone waiting to move to it at their renewal
       // (Codex-2hxff.16, T5): they would land on a deleted tier. A cancelled
       // mover who could still reactivate counts too, since the move comes
-      // back with them (T4). The same rows `PlanAccessService.getDeleteImpact`
+      // back with them (T4). A change of billing alone keeps them on the tier
+      // (`pending_tier_id` is the tier itself, Codex-2hxff.97): a subscriber,
+      // never a mover too. The same rows `PlanAccessService.getDeleteImpact`
       // counts for the dialog.
       const [counts] = await this.db
         .select({
           subscribers: sql<number>`count(*) FILTER (WHERE ${subscriptions.tierId} = ${tierId})::int`,
-          movingIn: sql<number>`count(*) FILTER (WHERE ${subscriptions.pendingTierId} = ${tierId})::int`,
+          movingIn: sql<number>`count(*) FILTER (WHERE ${subscriptions.pendingTierId} = ${tierId} AND ${subscriptions.tierId} <> ${tierId})::int`,
         })
         .from(subscriptions)
         .where(

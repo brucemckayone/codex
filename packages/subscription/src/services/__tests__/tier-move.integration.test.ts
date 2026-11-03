@@ -1437,6 +1437,38 @@ describe('waiting tier moves (Codex-2hxff.16)', () => {
     expect(still?.deletedAt).toBeNull();
   });
 
+  // Review C1 cycle 2, L7: a change of billing alone names the tier the
+  // member is on (Codex-2hxff.97): one subscriber, not a mover as well.
+  it('deleteTier counts a member waiting only to switch billing once, as a subscriber', async () => {
+    const { org, premium } = await hollowOak('delete-billing-only');
+    const { row } = await member(org.id, premium);
+    await db
+      .update(subscriptions)
+      .set({
+        billingInterval: 'year',
+        pendingTierId: premium.id,
+        pendingTierFrom: new Date(Date.now() + 40 * 24 * 60 * 60 * 1000),
+        heldAmountCents: row.amountCents,
+        pendingBillingInterval: 'month',
+        pendingAmountCents: 2000,
+      })
+      .where(eq(subscriptions.id, row.id));
+    const tiers = new TierService(
+      { db, dbWs: db, environment: 'test' },
+      stripe
+    );
+
+    const refused = await tiers
+      .deleteTier(premium.id, org.id, { onlyHere: 'keep' })
+      .catch((error: unknown) => error);
+
+    expect(refused).toBeInstanceOf(TierHasSubscribersError);
+    expect((refused as TierHasSubscribersError).context).toMatchObject({
+      subscriberCount: 1,
+      movingInCount: 0,
+    });
+  });
+
   // Review C1, F1's backstop: every Price a tier bills is on its own Stripe
   // Product, so the sync alerts on an item Price from any other Product.
   describe("an item billing another tier's Product", () => {
