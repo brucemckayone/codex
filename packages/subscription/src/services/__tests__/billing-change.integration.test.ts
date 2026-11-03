@@ -1086,6 +1086,334 @@ describe('leaving yearly billing waits for the year (Codex-2hxff.97)', () => {
     });
   });
 
+  // Review C1 cycle 2, L2: our schedule left half made (untagged, the paid
+  // year only, so the year would renew yearly), or carrying an earlier
+  // choice, is finished in place; never against a later cancel or Keep.
+  describe("a schedule that doesn't carry the waiting change", () => {
+    const down = (message: string) =>
+      Object.assign(new Error(message), { statusCode: 500 });
+    const spy = () => vi.fn<(...args: unknown[]) => void>();
+    let alert = spy();
+    let sent = spy();
+
+    beforeEach(() => {
+      const internals = service as unknown as Record<string, unknown> & {
+        obs: { error: (...args: unknown[]) => void };
+      };
+      alert = spy();
+      internals.obs.error = alert;
+      sent = spy();
+      internals.mailer = sent;
+      internals.payoutMailer = sent;
+    });
+
+    /** One customer.subscription.updated, in the webhook's order. */
+    async function eventPass(id: string) {
+      const event = structuredClone(
+        liveOf(id)
+      ) as unknown as Stripe.Subscription;
+      await service.handleSubscriptionUpdated(event);
+      await applyDuePendingPriceChange(fake.stripe, event);
+      return service.applyDueTierMove(event);
+    }
+
+    /** Pro yearly to Basic monthly, its schedule left half made (SF-3's path). */
+    async function halfMade(slug: string) {
+      const { org, pro, basic } = await hollowOak(slug);
+      const { userId, row, periodEnd } = await yearlyMember(org.id, pro);
+      fake.subscriptionSchedules.update.mockRejectedValueOnce(
+        down('Stripe is down')
+      );
+      fake.subscriptionSchedules.release.mockRejectedValueOnce(
+        down('Stripe is still down')
+      );
+      await expect(
+        service.changeTier(userId, org.id, basic.id, 'month')
+      ).rejects.toThrow();
+      const schedule = scheduleOf(row.stripeSubscriptionId);
+      expect(schedule.metadata).toEqual({});
+      expect(schedule.phases).toHaveLength(1);
+      alert.mockClear();
+      return { org, pro, basic, userId, row, periodEnd, schedule };
+    }
+
+    it('the next event finishes it in place, the event that update fires writes nothing, and the renewal bills Basic monthly', async () => {
+      const { basic, row, periodEnd, schedule } = await halfMade('l2-finish');
+      const before = fake.writes.length;
+
+      expect(await eventPass(row.stripeSubscriptionId)).toBe('not_due');
+
+      expect(fake.writes.slice(before)).toEqual(['schedule:update']);
+      expect(fake.subscriptionSchedules.update).toHaveBeenLastCalledWith(
+        schedule.id,
+        expect.anything(),
+        {
+          idempotencyKey: `billing-sched-set_${schedule.id}_${basic.stripePriceMonthlyId}_${periodEnd}_finish-none`,
+        }
+      );
+      const finished = scheduleOf(row.stripeSubscriptionId);
+      expect(finished.metadata).toMatchObject({
+        codex_billing_change: 'waiting',
+        codex_subscription_id: row.id,
+      });
+      expect(finished.phases).toHaveLength(2);
+      expect(finished.phases[1]).toMatchObject({
+        items: [{ price: basic.stripePriceMonthlyId }],
+        metadata: { codex_tier_id: basic.id },
+      });
+
+      // Our update's own event: finished, so no write (no loop).
+      const settled = fake.writes.length;
+      expect(await eventPass(row.stripeSubscriptionId)).toBe('not_due');
+      expect(fake.writes.length).toBe(settled);
+
+      const renewed = fake.renew(row.stripeSubscriptionId);
+      await service.handleSubscriptionUpdated(renewed);
+      expect(await service.applyDueTierMove(renewed)).toBe('applied');
+      expect(await rowOf(row.id)).toMatchObject({
+        tierId: basic.id,
+        billingInterval: 'month',
+        amountCents: 500,
+        pendingBillingInterval: null,
+      });
+      expect(alert).not.toHaveBeenCalled();
+      expect(sent).not.toHaveBeenCalled();
+    });
+
+    it("an update in place that failed, its record not put back: the next event moves phase 2 to the record's choice", async () => {
+      const { org, pro, basic } = await hollowOak('l2-earlier');
+      const { userId, row, periodEnd } = await yearlyMember(org.id, pro);
+      await service.changeTier(userId, org.id, pro.id, 'month');
+      const schedule = scheduleOf(row.stripeSubscriptionId);
+      // Basic monthly next: the record goes on, the phase update fails, and
+      // putting the record back fails too.
+      fake.subscriptionSchedules.update.mockRejectedValueOnce(
+        down('Stripe is down')
+      );
+      const update = vi.mocked(fake.stripe.subscriptions.update);
+      const realUpdate = update.getMockImplementation()!;
+      let calls = 0;
+      update.mockImplementation(((...args: Parameters<typeof realUpdate>) => {
+        calls += 1;
+        return calls === 2
+          ? Promise.reject(down('Stripe is still down'))
+          : realUpdate(...args);
+      }) as typeof realUpdate);
+      await expect(
+        service.changeTier(userId, org.id, basic.id, 'month')
+      ).rejects.toThrow();
+      update.mockImplementation(realUpdate);
+      expect(liveOf(row.stripeSubscriptionId).metadata).toMatchObject({
+        codex_move_tier_id: basic.id,
+        codex_move_price_id: basic.stripePriceMonthlyId,
+      });
+      expect(scheduleOf(row.stripeSubscriptionId).phases[1]).toMatchObject({
+        items: [{ price: pro.stripePriceMonthlyId }],
+      });
+
+      await eventPass(row.stripeSubscriptionId);
+
+      const fixed = scheduleOf(row.stripeSubscriptionId);
+      expect(fixed.id).toBe(schedule.id);
+      expect(fixed.phases[1]).toMatchObject({
+        items: [{ price: basic.stripePriceMonthlyId }],
+        metadata: { codex_tier_id: basic.id },
+      });
+      expect(fake.subscriptionSchedules.update).toHaveBeenLastCalledWith(
+        schedule.id,
+        expect.anything(),
+        {
+          idempotencyKey: `billing-sched-set_${schedule.id}_${basic.stripePriceMonthlyId}_${periodEnd}_finish-${pro.stripePriceMonthlyId}`,
+        }
+      );
+    });
+
+    it('never against a cancel moved onto it: it is let go and the cancel put back, not finished', async () => {
+      const { row, schedule } = await halfMade('l2-cancel-moved');
+      // L1's leftover: a Cancel moved onto the schedule (P10), not put back.
+      const held = fake.schedules.get(schedule.id);
+      if (!held) throw new Error('no schedule');
+      held.end_behavior = 'cancel';
+      const before = fake.writes.length;
+
+      await eventPass(row.stripeSubscriptionId);
+
+      expect(fake.writes.slice(before)).toEqual([
+        'schedule:release',
+        'cancel:true',
+      ]);
+      expect(liveOf(row.stripeSubscriptionId)).toMatchObject({
+        schedule: null,
+        cancel_at_period_end: true,
+      });
+    });
+
+    it('never against a subscription set to cancel: it is let go and the record kept, not finished', async () => {
+      const { row } = await halfMade('l2-cancelling');
+      liveOf(row.stripeSubscriptionId).cancel_at_period_end = true;
+      const before = fake.writes.length;
+
+      await eventPass(row.stripeSubscriptionId);
+
+      expect(fake.writes.slice(before)).toEqual(['schedule:release']);
+      const after = liveOf(row.stripeSubscriptionId);
+      expect(after.schedule).toBeNull();
+      expect(after.cancel_at_period_end).toBe(true);
+      expect(after.metadata.codex_move_interval).toBe('month');
+    });
+
+    it('never against Keep: Keep lets it go, and the next event and the backstop set nothing', async () => {
+      const { org, userId, row } = await halfMade('l2-keep');
+      await service.keepCurrentPlan(userId, org.id);
+      const before = fake.writes.length;
+
+      await eventPass(row.stripeSubscriptionId);
+      await service.runTierMoveBackstop({ limit: 50 });
+
+      expect(fake.writes.slice(before)).toEqual([]);
+      expect(liveOf(row.stripeSubscriptionId).schedule).toBeNull();
+    });
+
+    it('a create whose answer was lost is taken up and finished: the change is set and nothing is put back', async () => {
+      const { org, pro } = await hollowOak('l2-adopt');
+      const { userId, row } = await yearlyMember(org.id, pro);
+      const create = fake.subscriptionSchedules.create;
+      const realCreate = create.getMockImplementation()!;
+      create.mockImplementationOnce(async (params, options) => {
+        await realCreate(params, options);
+        throw Object.assign(new Error('socket hang up'), {
+          type: 'StripeConnectionError',
+        });
+      });
+
+      await service.changeTier(userId, org.id, pro.id, 'month');
+
+      expect(fake.writes).toEqual([
+        'update:metadata',
+        'schedule:create',
+        'schedule:update',
+      ]);
+      const schedule = scheduleOf(row.stripeSubscriptionId);
+      expect(schedule.metadata).toMatchObject({
+        codex_billing_change: 'waiting',
+      });
+      expect(schedule.phases[1]).toMatchObject({
+        items: [{ price: pro.stripePriceMonthlyId }],
+      });
+      expect(await rowOf(row.id)).toMatchObject({
+        pendingBillingInterval: 'month',
+        stripeScheduleId: schedule.id,
+      });
+    });
+
+    it('a refusal is never taken up, even with a schedule there beside our record (one made in the Dashboard meanwhile)', async () => {
+      const { org, pro } = await hollowOak('l2-refused');
+      const { userId, row } = await yearlyMember(org.id, pro);
+      const create = fake.subscriptionSchedules.create;
+      const realCreate = create.getMockImplementation()!;
+      create.mockImplementationOnce(async (params, options) => {
+        await realCreate(params, options);
+        throw Object.assign(
+          new Error('The subscription already has a schedule attached.'),
+          { type: 'StripeInvalidRequestError', statusCode: 400 }
+        );
+      });
+
+      await expect(
+        service.changeTier(userId, org.id, pro.id, 'month')
+      ).rejects.toThrow();
+
+      expect(fake.writes).toEqual([
+        'update:metadata',
+        'schedule:create',
+        'update:metadata',
+      ]);
+      expect(liveOf(row.stripeSubscriptionId).metadata).not.toHaveProperty(
+        'codex_move_interval'
+      );
+    });
+
+    it("a lost answer is not taken up when the schedule there carries a tag that isn't ours", async () => {
+      const { org, pro } = await hollowOak('l2-foreign');
+      const { userId, row } = await yearlyMember(org.id, pro);
+      const create = fake.subscriptionSchedules.create;
+      const realCreate = create.getMockImplementation()!;
+      create.mockImplementationOnce(async (params, options) => {
+        const made = (await realCreate(params, options)) as FakeSchedule;
+        const stored = fake.schedules.get(made.id);
+        if (stored) stored.metadata = { made_by: 'dashboard' };
+        throw Object.assign(new Error('socket hang up'), {
+          type: 'StripeConnectionError',
+        });
+      });
+
+      await expect(
+        service.changeTier(userId, org.id, pro.id, 'month')
+      ).rejects.toThrow();
+
+      expect(fake.writes).toEqual([
+        'update:metadata',
+        'schedule:create',
+        'update:metadata',
+      ]);
+      expect(liveOf(row.stripeSubscriptionId).metadata).not.toHaveProperty(
+        'codex_move_interval'
+      );
+    });
+
+    it('the hourly backstop finishes one it finds half made beside a row without it', async () => {
+      const { org, pro } = await hollowOak('l2-backstop');
+      const { userId, row } = await yearlyMember(org.id, pro);
+      await service.changeTier(userId, org.id, pro.id, 'month');
+      await service.cancelSubscription(userId, org.id);
+      fake.subscriptionSchedules.update.mockRejectedValueOnce(
+        down('Stripe is down')
+      );
+      fake.subscriptionSchedules.release.mockRejectedValueOnce(
+        down('Stripe is still down')
+      );
+      await service.reactivateSubscription(userId, org.id);
+      const half = scheduleOf(row.stripeSubscriptionId);
+      expect(half.phases).toHaveLength(1);
+      expect((await rowOf(row.id)).stripeScheduleId).toBeNull();
+
+      const run = await service.runTierMoveBackstop({ limit: 50 });
+
+      expect(run.rescheduled).toBeGreaterThanOrEqual(1);
+      const finished = scheduleOf(row.stripeSubscriptionId);
+      expect(finished.id).toBe(half.id);
+      expect(finished.phases[1]).toMatchObject({
+        items: [{ price: pro.stripePriceMonthlyId }],
+      });
+      expect((await rowOf(row.id)).stripeScheduleId).toBe(half.id);
+    });
+
+    it('a finish that fails is one error alert with its ids: nothing thrown, no email', async () => {
+      const { row, schedule } = await halfMade('l2-finish-fails');
+      fake.subscriptionSchedules.update.mockRejectedValueOnce(
+        down('Stripe is down again')
+      );
+
+      await expect(eventPass(row.stripeSubscriptionId)).resolves.toBe(
+        'not_due'
+      );
+
+      expect(alert.mock.calls).toEqual([
+        [
+          expect.stringContaining('billing_change.finish_failed'),
+          expect.objectContaining({
+            errorId: expect.any(String),
+            subscriptionId: row.id,
+            stripeSubscriptionId: row.stripeSubscriptionId,
+            stripeScheduleId: schedule.id,
+          }),
+        ],
+      ]);
+      expect(sent).not.toHaveBeenCalled();
+      expect(scheduleOf(row.stripeSubscriptionId).phases).toHaveLength(1);
+    });
+  });
+
   // ─── B: a cheaper plan on monthly, one waiting change (Q3) ─────────────
 
   describe('B: Pro yearly to Basic monthly', () => {

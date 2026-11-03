@@ -39,7 +39,14 @@
  *        script clears the card through the API (`default_payment_method:
  *        ''`); the portal drive showed only that the portal clears each
  *        subscription's own card (.52 §10), not how.
- *   `--only=card` runs Clock 3 alone.
+ *   Clock 4, one member whose schedule is left half made (review C1 cycle 2,
+ *   L2):
+ *     H. Pro monthly, with the schedule's update and its undo both failing
+ *        once (forced): the schedule is left as `from_subscription` made it,
+ *        untagged with the paid year only, which would release at the year's
+ *        end and bill another year. The next event finishes it in place, and
+ *        the renewal bills £12 monthly with nothing credited.
+ *   `--only=card,half` (any of one, two, card, half) runs only those clocks.
  *
  * Run from the repo root, through the throwaway-database wrapper, with the
  * dev TEST key in .env.dev:
@@ -373,7 +380,8 @@ async function change(
     target.id,
     interval,
     preview.prorationDate,
-    preview.quote
+    preview.quote,
+    preview.newRecurringAmountCents
   );
   return preview;
 }
@@ -787,6 +795,82 @@ async function clockCard(kit: Kit): Promise<void> {
   await renewalBilled(kit, m, pro.monthlyPence, 'month');
 }
 
+/**
+ * The next call to `resource[method]` fails as Stripe being down would,
+ * then the method is itself again. Returns the undo, for a call that never
+ * came.
+ */
+function failOnce(resource: object, method: string, message: string) {
+  const target = resource as Record<string, unknown>;
+  const real = target[method];
+  const undo = () => {
+    target[method] = real;
+  };
+  target[method] = async () => {
+    undo();
+    throw Object.assign(new Error(message), { statusCode: 500 });
+  };
+  return undo;
+}
+
+async function clockHalfMade(kit: Kit): Promise<void> {
+  console.log('Clock 4: a schedule left half made is finished (L2)');
+  const { clockId, t0, members } = await clockWith(kit, 'H half made', ['H']);
+  const [h] = members;
+  if (!h) throw new Error('member');
+  const { pro } = kit.tiers;
+  const today = t0 + 230 * DAY;
+  await advance(kit, clockId, today);
+
+  const undoUpdate = failOnce(
+    kit.stripe.subscriptionSchedules,
+    'update',
+    'Stripe is down (forced)'
+  );
+  const undoRelease = failOnce(
+    kit.stripe.subscriptionSchedules,
+    'release',
+    'Stripe is still down (forced)'
+  );
+  const failed = await change(kit, h, pro, 'month').then(
+    () => false,
+    () => true
+  );
+  undoUpdate();
+  undoRelease();
+  check('H: the change reports its failure', failed);
+  const scheduleOf = async () => {
+    const sub = await live(kit, h);
+    const id =
+      typeof sub.schedule === 'string' ? sub.schedule : sub.schedule?.id;
+    if (!id) throw new Error('no schedule attached');
+    return kit.stripe.subscriptionSchedules.retrieve(id);
+  };
+  const half = await scheduleOf();
+  check(
+    'H: the schedule is left half made: untagged, the paid year only',
+    Object.keys(half.metadata ?? {}).length === 0 && half.phases.length === 1,
+    `${half.phases.length} phases`
+  );
+
+  // Its customer.subscription.updated, in the webhook's order.
+  const event = await live(kit, h);
+  await kit.service.handleSubscriptionUpdated(event);
+  await applyDuePendingPriceChange(kit.stripe, event);
+  await kit.service.applyDueTierMove(event);
+  await waiting(kit, h, pro, pro.annual);
+  check(
+    'H: finished in place: the same schedule',
+    (await scheduleOf()).id === half.id
+  );
+  check('H: nothing invoiced today', (await newInvoices(kit, h)).length === 0);
+  await noCredit(kit, h, 'today');
+
+  await advanceTo(kit, clockId, today, h.renewal + 3 * HOUR);
+  await renewal(kit, h);
+  await renewalBilled(kit, h, pro.monthlyPence, 'month');
+}
+
 async function main(): Promise<void> {
   const key = process.env.STRIPE_SECRET_KEY ?? '';
   if (!key.startsWith('sk_test_') && !key.startsWith('rk_test_')) {
@@ -829,11 +913,15 @@ async function main(): Promise<void> {
       stripe
     );
     const kit: Kit = { ...base, service, orgId: org.id, tiers };
-    if (!process.argv.includes('--only=card')) {
-      await clockOne(kit);
-      await clockTwo(kit);
-    }
-    await clockCard(kit);
+    const only = process.argv
+      .find((arg) => arg.startsWith('--only='))
+      ?.slice('--only='.length)
+      .split(',');
+    const runs = (name: string) => !only || only.includes(name);
+    if (runs('one')) await clockOne(kit);
+    if (runs('two')) await clockTwo(kit);
+    if (runs('card')) await clockCard(kit);
+    if (runs('half')) await clockHalfMade(kit);
   } finally {
     frozen = 0;
     for (const clockId of base.clocks) {
