@@ -54,6 +54,8 @@ const NUDGED = [
   `--color-link: rgb(from var(--color-interactive) ${channels('gl')}`,
   `--color-link-hover: rgb(from var(--color-interactive-hover) ${channels('gl')}`,
   `--color-link-active: rgb(from var(--color-interactive-active) ${channels('gl')}`,
+  `--color-brand-text: rgb(from var(--color-brand-primary) ${channels('gl')}`,
+  `--color-brand-text-hover: rgb(from var(--color-brand-primary-hover) ${channels('gl')}`,
   `--color-focus: rgb(from var(--_focus-src) ${channels('gm')}`,
   `--color-focus-ring: rgb(from var(--_focus-ring-src) ${channels('gm')}`,
   `--color-border-focus: rgb(from var(--_focus-src) ${channels('gm')}`,
@@ -108,6 +110,9 @@ describe('the ground nudge org-brand.css paints', () => {
     expect(count(fallback, '--color-link: var(--color-interactive);')).toBe(1);
     expect(
       count(fallback, '--color-link-active: var(--color-interactive-active);')
+    ).toBe(1);
+    expect(
+      count(fallback, '--color-brand-text: var(--color-brand-primary);')
     ).toBe(1);
     expect(count(fallback, '--color-focus: var(--_focus-src);')).toBe(2);
   });

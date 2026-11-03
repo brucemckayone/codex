@@ -144,6 +144,8 @@ describe('the rule the stylesheets paint', () => {
     '--color-link',
     '--color-link-hover',
     '--color-link-active',
+    '--color-brand-text',
+    '--color-brand-text-hover',
     '--color-focus',
     '--color-focus-ring',
     '--color-border-focus',

@@ -81,6 +81,11 @@
   --color-link: var(--color-interactive);
   --color-link-hover: var(--color-interactive-hover);
   --color-link-active: var(--color-interactive-active);
+  /* The brand colour as a LABEL on the page or a faint tint (badges, icons):
+     nudged like the link, from the brand colour rather than the interactive
+     one, so an interactive override never moves it. */
+  --color-brand-text: var(--color-brand-primary);
+  --color-brand-text-hover: var(--color-brand-primary-hover);
 
   /* ─── TEXT ON BRAND ───────────────────────────────────────────────────
      THIS IS THE FALLBACK. An OKLCH-lightness step picks the WRONG ink for
@@ -776,7 +781,7 @@
        `--_gw` is 1 on a dark ground (lighten), 0 on a light one (darken), the
        same true step at 0.1791 as the inks. The fragments are declared once:
        this rule and its dark twin match the same element, so each reads that
-       element's ground and colours in either theme. The six tokens are
+       element's ground and colours in either theme. The eight tokens are
        restated in the dark twin, which out-ranks the dark fallbacks above.
 
        brand-editor/ground-nudge.ts is the TypeScript twin the brand studio's
@@ -809,6 +814,8 @@
     --color-link: rgb(from var(--color-interactive) var(--_gl-r) var(--_gl-g) var(--_gl-b));
     --color-link-hover: rgb(from var(--color-interactive-hover) var(--_gl-r) var(--_gl-g) var(--_gl-b));
     --color-link-active: rgb(from var(--color-interactive-active) var(--_gl-r) var(--_gl-g) var(--_gl-b));
+    --color-brand-text: rgb(from var(--color-brand-primary) var(--_gl-r) var(--_gl-g) var(--_gl-b));
+    --color-brand-text-hover: rgb(from var(--color-brand-primary-hover) var(--_gl-r) var(--_gl-g) var(--_gl-b));
     --color-focus: rgb(from var(--_focus-src) var(--_gm-r) var(--_gm-g) var(--_gm-b));
     --color-focus-ring: rgb(from var(--_focus-ring-src) var(--_gm-r) var(--_gm-g) var(--_gm-b));
     --color-border-focus: rgb(from var(--_focus-src) var(--_gm-r) var(--_gm-g) var(--_gm-b));
@@ -839,6 +846,8 @@
     --color-link: rgb(from var(--color-interactive) var(--_gl-r) var(--_gl-g) var(--_gl-b));
     --color-link-hover: rgb(from var(--color-interactive-hover) var(--_gl-r) var(--_gl-g) var(--_gl-b));
     --color-link-active: rgb(from var(--color-interactive-active) var(--_gl-r) var(--_gl-g) var(--_gl-b));
+    --color-brand-text: rgb(from var(--color-brand-primary) var(--_gl-r) var(--_gl-g) var(--_gl-b));
+    --color-brand-text-hover: rgb(from var(--color-brand-primary-hover) var(--_gl-r) var(--_gl-g) var(--_gl-b));
     --color-focus: rgb(from var(--_focus-src) var(--_gm-r) var(--_gm-g) var(--_gm-b));
     --color-focus-ring: rgb(from var(--_focus-ring-src) var(--_gm-r) var(--_gm-g) var(--_gm-b));
     --color-border-focus: rgb(from var(--_focus-src) var(--_gm-r) var(--_gm-g) var(--_gm-b));

@@ -37,6 +37,11 @@
   --color-link: var(--color-interactive);
   --color-link-hover: var(--color-interactive-hover);
   --color-link-active: var(--color-interactive-active);
+  /* The brand colour as a LABEL on the page or a faint tint (badges, icons):
+     nudged like the link, from the brand colour rather than the interactive
+     one, so an interactive override never moves it. */
+  --color-brand-text: var(--color-brand-primary);
+  --color-brand-text-hover: var(--color-brand-primary-hover);
 
   /* See light.css for the derivation and why it is repeated in every scope that
      declares --color-interactive. Note the dark platform fill is
