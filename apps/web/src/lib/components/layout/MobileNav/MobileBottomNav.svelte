@@ -157,8 +157,8 @@
 		align-items: center;
 		justify-content: center;
 		/* The icon is a graphic (3:1). The interactive colour's own ink holds
-		   across the gradient under it: 3.37:1 at worst, at the darker stop, over
-		   every brand. `--color-text-inverse` follows the page, so it was white
+		   across the gradient under it, over 3:1 for every brand at the darker
+		   stop. `--color-text-inverse` follows the page, so it was white
 		   on a pale brand, 1:1 on a white one (Codex-mik4h). */
 		color: var(--color-on-interactive);
 		box-shadow: var(--shadow-lg),

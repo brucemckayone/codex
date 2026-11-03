@@ -12,21 +12,32 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const lib = join(here, '../..');
-const ROOTS = [join(lib, 'styles'), join(lib, 'page-builder')];
+const src = join(here, '../../..');
+const ROOTS = [join(src, 'lib'), join(src, 'routes')];
 
-function cssFiles(dir: string): string[] {
+function styleFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
     const path = join(dir, name);
-    if (statSync(path).isDirectory()) return cssFiles(path);
-    return name.endsWith('.css') ? [path] : [];
+    if (statSync(path).isDirectory()) return styleFiles(path);
+    return name.endsWith('.css') || name.endsWith('.svelte') ? [path] : [];
   });
 }
 
-/** Every `--name: value;` in a stylesheet whose value names `--name` itself. */
+/** A stylesheet whole, or a Svelte component's `<style>` blocks. */
+function styles(path: string): string {
+  const text = readFileSync(path, 'utf8');
+  if (path.endsWith('.css')) return text;
+  return [...text.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)]
+    .map(([, css]) => css)
+    .join('\n');
+}
+
+/** Every `--name: value` in CSS whose value names `--name` itself. */
 function selfReferences(css: string): string[] {
   const found: string[] = [];
-  for (const [, name, value] of css.matchAll(/(--[\w-]+)\s*:\s*([^;{}]*);/g)) {
+  for (const [, name, value] of css.matchAll(
+    /(--[\w-]+)\s*:\s*([^;{}]*)[;}]/g
+  )) {
     if (value.includes(`var(${name})`) || value.includes(`var(${name},`))
       found.push(name);
   }
@@ -34,18 +45,29 @@ function selfReferences(css: string): string[] {
 }
 
 describe('custom properties', () => {
-  test('the check sees a self-reference', () => {
+  test('the check sees a self-reference, with or without its semicolon', () => {
     expect(
       selfReferences('a { --x: var(--brand, var(--x)); --y: var(--x); }')
     ).toEqual(['--x']);
+    expect(selfReferences('a { --y: 1px; --x: var(--x) }')).toEqual(['--x']);
   });
 
-  test('none names itself, in any stylesheet the app and the page kit ship', () => {
-    const files = ROOTS.flatMap(cssFiles);
-    expect(files.length).toBeGreaterThan(5);
+  test('the scan reads a component’s style blocks, not its markup', () => {
+    const switchFile = join(src, 'lib/components/ui/Switch/Switch.svelte');
+    expect(styleFiles(join(src, 'lib/components/ui/Switch'))).toContain(
+      switchFile
+    );
+    const css = styles(switchFile);
+    expect(css).toContain('.switch[data-state="checked"] .thumb');
+    expect(css).not.toContain('<script');
+  });
+
+  test('none names itself, in any stylesheet or component style under lib and routes', () => {
+    const files = ROOTS.flatMap(styleFiles);
+    expect(files.length).toBeGreaterThan(100);
     const hits = files.flatMap((file) =>
-      selfReferences(readFileSync(file, 'utf8')).map(
-        (name) => `${relative(lib, file)} ${name}`
+      selfReferences(styles(file)).map(
+        (name) => `${relative(src, file)} ${name}`
       )
     );
     expect(hits).toEqual([]);

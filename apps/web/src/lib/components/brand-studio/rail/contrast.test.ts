@@ -124,9 +124,9 @@ describe('the rule the stylesheets paint', () => {
   const RAMP = '1e12';
   // The step, written once at themes/light.css's foot, built from the pivot
   // the readout uses. Each channel is clamped to the gamut first, so a hovered
-  // fill pushed past black or white still has a luminance (unclamped, about
-  // 890 of the lattice's 8 192 hovered fills took a NaN and black ink, as low
-  // as 1.11:1).
+  // fill pushed past black or white still has a luminance (unclamped, 1 605 of
+  // the lattice's 8 192 hovered fills took a NaN and black ink; about 890 of
+  // them needed white, as low as 1.11:1).
   const STEP = `--_on-fill-step: clamp(0, (${TEXT_ON_BRAND_LUMINANCE_PIVOT} - (0.2126 * pow((clamp(0, r, 255) / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((clamp(0, g, 255) / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((clamp(0, b, 255) / 255 + 0.055) / 1.055, 2.4))) * ${RAMP}, 1);`;
   const S = 'calc(255 * var(--_on-fill-step))';
   const GUARD =

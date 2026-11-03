@@ -15,7 +15,7 @@
  * The holds are read from the stylesheets and run through a model of the
  * engines' resolution (OKLCH to sRGB, clipped to the gamut). The model was
  * calibrated against Chrome 156 and WebKit 26 painting the real stylesheets
- * over the same 4 096-colour lattice: identical worst cases, and failure
+ * over the same 4 096-colour lattice: the same worst cases to two decimals, and failure
  * counts within a few colours at each boundary. A hold loosened in the CSS
  * fails here.
  */
@@ -143,7 +143,7 @@ describe('brand-tinted text that must stay readable', () => {
     expect(held.worst).toBeGreaterThanOrEqual(4.5);
   });
 
-  test('tertiary text clears AA on the dark page and surface for every brand', () => {
+  test('tertiary text clears AA on the dark page, surface and card for every brand', () => {
     const x = hold(
       ORG_BRAND,
       /--color-text-tertiary: oklch\(from var\(--brand-color-dark, var\(--brand-color, var\(--color-primary-400\)\)\) max\(calc\(l \* 0\.5 \+ 0\.3\), ([\d.]+)\) calc\(c \* 0\.1\) h\);/,

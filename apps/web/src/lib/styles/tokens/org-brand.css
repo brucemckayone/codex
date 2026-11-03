@@ -93,8 +93,10 @@
   /* No fallback: one naming this property is a self-reference, a cycle that
      WebKit computes EMPTY even with a brand colour set (every direct
      `var(--color-primary-500)` on an org page painted nothing in Safari;
-     Chrome resolved it). This scope applies only where `--brand-color` is
-     set (`data-org-brand` is gated on it), so none is needed. */
+     Chrome resolved it). The org layout sets `data-org-brand` only with a
+     brand colour, but a page root with its own brand overrides sets it too,
+     and on an org with no brand colour that root has no `--brand-color`: the
+     property is invalid there, as the self-reference was (Codex-g8mz7). */
   --color-primary-500: var(--brand-color);
   --color-primary-600: oklch(from var(--brand-color, var(--color-primary-500)) calc(l - 0.08) c h);
   --color-primary-100: oklch(from var(--brand-color, var(--color-primary-500)) 0.94 calc(c * 0.25) h);
@@ -682,9 +684,10 @@
  * `page-builder/kit/styles/schemes.css` does (`--_lr` … `--_y`). They are
  * numbers in 0–255, hence the `/ 255`, and each is clamped to 0–255 first: a
  * hovered fill pushed past black or white is out of gamut, and a negative
- * channel turned the power into NaN (unclamped, about 890 of the lattice's
- * 8 192 hovered fills, all light-theme and darkened, took a NaN and black
- * ink, as low as 1.11:1; none after, and an in-gamut fill is unchanged).
+ * channel turned the power into NaN (unclamped, 1 605 of the lattice's 8 192
+ * hovered fills, all light-theme and darkened, took a NaN and so black ink;
+ * about 890 of them needed white, as low as 1.11:1; none after, and an
+ * in-gamut fill is unchanged).
  *
  * WHY @supports RATHER THAN EDITING THE DECLARATIONS ABOVE. Relative colour
  * needs Chrome 119+ / Firefox 128+ / Safari 16.4+ (this file's header) but

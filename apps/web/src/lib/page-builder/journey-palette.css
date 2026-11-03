@@ -517,12 +517,9 @@
    inline: pre and post both resolve `#000000` at 9.28:1. The fix changes behaviour
    only where an org's light and dark brands straddle L 0.62.
 
-   What DOES fail AA on brand surfaces is a different token: the surfaces painting
-   `--color-brand-primary` mostly consume `--color-text-inverse` (see
-   `Button.svelte`'s primary variant) or `--media-glyph`, neither of which
-   auto-contrasts. That is tracked separately, and repointing them is not a
-   one-liner. (`--color-text-on-brand` is chosen from its fill on the
-   platform path too since Codex-mik4h.) */
+   Labels on brand fills take that fill's own ink (`--color-text-on-brand`,
+   `--color-on-interactive`, `--color-text-on-accent`), chosen by luminance on
+   the platform path too since Codex-mik4h. */
 .journey-palette--page,
 .journey-palette--page .jp-sec {
   --color-background: var(--jp-ink);
@@ -600,8 +597,8 @@
    `r`, `g` and `b` are in scope ONLY inside `rgb(from …)` — the same constraint
    this file documents for `l`. It is written once per channel here, though a
    custom property can hold it unresolved for them to bind later, as
-   themes/light.css's `--_on-fill-step` does (Codex-6lvmi tracks moving this
-   file onto it).
+   themes/light.css's `--_on-fill-step` does. (Codex-6lvmi tracks this copy's
+   `* 1e6` ramp; moving it onto the shared step would fix that too.)
 
    SELECTOR LIST AND ORDER, both load-bearing. It repeats the shared block's list
    verbatim so the override reaches the palette ROOT *and* every `.jp-sec`: the

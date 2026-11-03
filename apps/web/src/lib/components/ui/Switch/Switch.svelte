@@ -108,7 +108,7 @@
   }
 
   /* On the checked track the thumb takes the track's own ink, so it holds 3:1
-     on every brand: a white thumb on a pale brand was 1.53:1 (owner, Codex-mik4h:
+     on every brand: a white thumb on a pale brand fell to 1:1 (owner, Codex-mik4h:
      "Thumb takes the track's ink when checked"). */
   .switch[data-state="checked"] .thumb {
     background-color: var(--color-on-interactive);

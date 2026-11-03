@@ -224,7 +224,7 @@
 
 /* The hover fill is a brand mix no token names, so the glyph takes the
    luminance step from that fill itself, as every `--color-*-on-*` ink does
-   (`--_on-fill-step`, light.css): 4.57:1 at worst, painted. The light player
+   (`--_on-fill-step`, light.css): AA for every brand. The light player
    ink failed 3:1 on a pale brand's hover fill, 2.14:1 at worst (Codex-mik4h). */
 .video-player-play-overlay:hover .video-player-play-overlay-icon,
 .video-player-play-overlay:focus-visible .video-player-play-overlay-icon {
