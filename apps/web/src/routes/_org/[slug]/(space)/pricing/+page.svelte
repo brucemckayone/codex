@@ -850,7 +850,6 @@
     }
   }
 
-  /** The dialog opened afresh on `tier`, with nothing loaded yet. */
   /** The button that opened the change dialog, for `tierChangeCloseFocus`. */
   let tierChangeOpener: HTMLElement | null = null;
 
@@ -878,6 +877,7 @@
     );
   }
 
+  /** The dialog opened afresh on `tier`, with nothing loaded yet. */
   function resetTierChangeDialog(tier: SubscriptionTier) {
     // A step inside the dialog opens it again: keep the first opener.
     if (!tierChangeDialogOpen) {
