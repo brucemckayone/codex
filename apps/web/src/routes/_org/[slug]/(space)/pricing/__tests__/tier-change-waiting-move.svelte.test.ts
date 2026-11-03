@@ -380,9 +380,20 @@ describe('while a move waits', () => {
   });
 
   test('another cheaper plan replaces it: "instead of Basic" (page 1 state 5)', async () => {
+    // As the server sends it: any pick while a move waits names the move it
+    // replaces (`replacedChange`); this dialog says so from the move it has.
     remote.previewSubscriptionTierChange.mockResolvedValueOnce({
       success: true,
-      data: { ...WAIT_PREVIEW, newRecurringAmountCents: 1200 },
+      data: {
+        ...WAIT_PREVIEW,
+        newRecurringAmountCents: 1200,
+        replaces: {
+          tierId: BASIC.id,
+          tierName: 'Basic',
+          interval: 'month',
+          amountCents: 500,
+        },
+      },
     });
     // Sam: Premium, moving to Basic, picks Pro.
     mountPage(
