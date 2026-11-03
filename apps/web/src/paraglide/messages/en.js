@@ -6463,7 +6463,7 @@ export const media_upload_error_direct = () => `The upload didn't reach storage.
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const media_upload_try_again_named = (params) => `Try uploading ${params.name} again`
+export const media_upload_try_again_named = (params) => `Try again: upload ${params.name}`
 
 
 /**
@@ -8391,22 +8391,6 @@ export const branding_film_load_failed = () => `Couldn't load your film.`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const branding_film_library_failed = () => `Couldn't load your videos.`
-
-
-/**
- * @param {{ shown: NonNullable<unknown>, total: NonNullable<unknown> }} params
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const branding_film_library_capped = (params) => `Showing ${params.shown} of your ${params.total} finished videos.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const branding_film_save_failed = () => `Couldn't save the film. Try again.`
 
 
@@ -9103,23 +9087,7 @@ export const studio_content_form_thumbnail_uploaded = () => `Thumbnail uploaded`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const media_picker_placeholder = () => `Select media...`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const media_picker_search = () => `Search media...`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const media_picker_no_media = () => `No media attached`
 
 
 /**
@@ -9143,23 +9111,239 @@ export const media_picker_empty_title = () => `No media available`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const media_picker_empty_desc = () => `Upload files in the Media library to attach them to content.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const media_picker_go_to_library = () => `Go to Media library`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const media_picker_no_results = () => `No media matches your search`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_picker_title_video = () => `Choose a video`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_picker_title_audio = () => `Choose audio`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_picker_title_any = () => `Choose media`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_picker_lead_video = () => `Only videos can go here.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_picker_lead_audio = () => `Only audio can go here.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_picker_lead_any = () => `A video or an audio file can go here.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_picker_lead_ready = () => `Only media that's ready to play is shown.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_picker_segment_all = () => `All`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_picker_upload_video = () => `Upload a new video`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_picker_upload_audio = () => `Upload new audio`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_picker_upload_any = () => `Upload a new file`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_picker_upload_hint = () => `It's attached straight away. Publishing waits until it's ready.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_picker_upload_wrong_type = () => `That file can't go here, so it's uploading to your library only.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_picker_upload_waiting = () => `Waiting to upload`
+
+
+/**
+ * @param {{ pct: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_picker_uploading = (params) => `Uploading · ${params.pct}%`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_picker_upload_discard = () => `Discard upload`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_picker_upload_discard_named = (params) => `Discard upload ${params.name}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_picker_chosen_gone = () => `This media was deleted, or isn't yours to use.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_picker_chosen_failed = () => `Couldn't load the chosen media.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_picker_change = () => `Change`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_picker_change_named = (params) => `Change ${params.name}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_picker_list_failed = () => `Couldn't load your media. Your files are safe.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_picker_list_stale = () => `Couldn't refresh this list. It may be out of date.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_picker_more_failed = () => `Couldn't load more. Try again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_picker_clear_search = () => `Clear search`
+
+
+/**
+ * @param {{ title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_picker_selected = (params) => `Selected: ${params.title}`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_picker_ready_named = (params) => `${params.name} is ready`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_picker_open_library = () => `Open library`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_picker_attach = () => `Attach`
 
 
 /**

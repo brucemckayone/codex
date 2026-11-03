@@ -35,7 +35,7 @@
   import { toast } from '$lib/components/ui/Toast/toast-store';
   import { logger } from '$lib/observability';
   import { deleteMedia, getMediaSummary, getMediaUsage, listMedia } from '$lib/remote/media.remote';
-  import { queryErrorMessage, readFreshQuery, remoteErrorStatus } from '$lib/remote/query-result';
+  import { readFreshQuery, remoteErrorStatus } from '$lib/remote/query-result';
   import { applyFilterPatch, filterHref } from '$lib/utils/filter-url';
   import { formatFileSize } from '$lib/utils/format';
   import * as m from '$paraglide/messages';
@@ -52,6 +52,7 @@
   import { retryMediaTranscoding } from './media-retry';
   import { describeTile } from './tile-state';
   import MediaDeleteDialog from './MediaDeleteDialog.svelte';
+  import { logReadFailure } from './log-read-failure';
   import { MediaDeleteFlow } from './media-delete-flow.svelte';
   import { draftsLeftToast } from './media-usage';
   import MediaLibraryCommandBar from './MediaLibraryCommandBar.svelte';
@@ -117,21 +118,13 @@
     return status !== undefined && status < 500 && status !== 408 && status !== 429;
   });
 
-  /** A failed read, logged with its status: an outage is an error, a refusal a warning. */
-  function logFailure(event: string, error: unknown, extra: Record<string, unknown> = {}) {
-    const status = remoteErrorStatus(error);
-    const fields = { ...extra, status, error: queryErrorMessage(error) };
-    if (status === undefined || status >= 500) logger.error(event, fields);
-    else logger.warn(event, fields);
-  }
-
   // The summary decorates the header. A failed read (first or refetch) drops
   // the sums, so stale numbers never read as current, and the attention slot
   // says it couldn't check, with its own Try again. Logged on each failure.
   const sums = $derived(summary.error == null ? summary.current : undefined);
   const summaryFailed = $derived(summary.error != null);
   $effect(() => {
-    if (summary.error != null) logFailure('studio_media.summary_failed', summary.error);
+    if (summary.error != null) logReadFailure('studio_media.summary_failed', summary.error);
   });
 
   let summaryRetrying = $state(false);
@@ -160,7 +153,7 @@
       const next = await listMedia(args);
       if (key === listKey) extra = { key, pages: [...pages, next] };
     } catch (error) {
-      logFailure('studio_media.show_more_failed', error);
+      logReadFailure('studio_media.show_more_failed', error);
       if (key === listKey) moreFailedFor = key;
     } finally {
       if (moreLoadingFor === key) moreLoadingFor = null;
@@ -321,7 +314,7 @@
 
   /** After this page's own change; a refetch that fails keeps the rows and says so. */
   function refreshAfterChange() {
-    refresh().catch((error) => logFailure('studio_media.refresh_failed', error));
+    refresh().catch((error) => logReadFailure('studio_media.refresh_failed', error));
   }
 
   // The error card's and the stale notice's Try again: it shows it is
@@ -336,7 +329,7 @@
       await refresh();
     } catch (error) {
       retryFailed = true;
-      logFailure('studio_media.retry_failed', error);
+      logReadFailure('studio_media.retry_failed', error);
     } finally {
       retrying = false;
     }
@@ -479,7 +472,7 @@
       const result = await runBulkDelete(ids, {
         readUsage: (id) => readFreshQuery(getMediaUsage(id)),
         remove: (input) => deleteMedia(input),
-        onFailure: (id, error) => logFailure('studio_media.bulk_delete_failed', error, { mediaId: id }),
+        onFailure: (id, error) => logReadFailure('studio_media.bulk_delete_failed', error, { mediaId: id }),
       });
       bulkResult = [
         result.deleted.length > 0 ? m.media_bulk_deleted({ count: result.deleted.length }) : '',

@@ -40,3 +40,21 @@ export function tileReason(view: TileView): string | null {
       return null;
   }
 }
+
+/**
+ * Why the queue refused a file, by name: the tray says it, and so does the
+ * picker, whose modal covers the tray (Codex-a6ofh.1.8).
+ */
+export function rejectionReason(
+  name: string,
+  reason: 'type' | 'empty' | 'too_large'
+): string {
+  switch (reason) {
+    case 'empty':
+      return m.media_upload_rejected_empty({ name });
+    case 'too_large':
+      return m.media_upload_rejected_too_large({ name });
+    default:
+      return m.media_upload_rejected_type({ name });
+  }
+}

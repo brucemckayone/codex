@@ -55,6 +55,7 @@ vi.mock('$lib/client/upload-queue.svelte', async (importOriginal) => {
         held.completes.push(() => resolve({}));
       }),
     deleteMedia: async () => ({}),
+    readUsage: async () => ({ fingerprint: 'fp' }),
     renameMedia: async (id, title) => {
       held.renames.push([id, title]);
     },
@@ -206,7 +207,11 @@ describe('UploadTray', () => {
         []),
     ];
     expect(links.map((a) => [text(a), a.getAttribute('href')])).toEqual([
-      ['Create content from this', `/studio/content/new?media=${mediaId}`],
+      // The type rides along: the editor opens as video content at once.
+      [
+        'Create content from this',
+        `/studio/content/new?media=${mediaId}&type=video`,
+      ],
       ['View', '/studio/media'],
     ]);
     expect(text(document.querySelector('.dock-summary'))).toBe(
@@ -255,7 +260,7 @@ describe('UploadTray', () => {
       (b) => text(b) === 'Try again'
     );
     expect(tryAgain?.getAttribute('aria-label')).toBe(
-      'Try uploading small again'
+      'Try again: upload small'
     );
     expect(text(document.querySelector('.dock-summary'))).toBe(
       '0 active 0 done 1 failed'

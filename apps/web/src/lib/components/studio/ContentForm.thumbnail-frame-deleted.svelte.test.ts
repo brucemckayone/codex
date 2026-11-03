@@ -52,6 +52,24 @@ vi.mock('$lib/remote/library.remote', () => ({
   getStreamingUrl: () => ({ current: undefined, loading: false }),
 }));
 
+// The by-id read the media picker and the media section share
+// (Codex-a6ofh.1.8): what `library.items` holds reads back; anything else
+// is a 404, as a deleted item is.
+const library = vi.hoisted(() => ({ items: [] as { id: string }[] }));
+vi.mock('$lib/remote/media.remote', () => ({
+  getMediaItem: (id: string) => {
+    const item = library.items.find((entry) => entry.id === id);
+    return item
+      ? { current: item, error: undefined, refresh: async () => {} }
+      : { current: undefined, error: { status: 404 }, refresh: async () => {} };
+  },
+  listMedia: () => ({
+    current: undefined,
+    error: undefined,
+    refresh: async () => {},
+  }),
+}));
+
 vi.mock('$lib/remote/categories.remote', () => ({
   getCategories: () => ({ current: [], loading: false }),
   createCategoryInline: vi.fn(),
@@ -133,6 +151,7 @@ describe("ContentForm · a draft whose thumbnail is a deleted video's frame", ()
     deletedAt: string | null,
     { frameId = FRAME_ID, mediaDeletedAt = null as string | null } = {}
   ) {
+    library.items = [MEDIA_ITEM, OTHER_ITEM];
     component = mount(ContentForm, {
       target: document.body,
       props: {
@@ -148,7 +167,6 @@ describe("ContentForm · a draft whose thumbnail is a deleted video's frame", ()
         } as any,
         organizationId: '22222222-2222-4222-8222-222222222222',
         orgSlug: 'studio-alpha',
-        mediaItems: [MEDIA_ITEM, OTHER_ITEM],
       },
     });
     flushSync();

@@ -22,7 +22,7 @@
   import { tileReason } from './tile-copy';
   import { describeTile, tilePill } from './tile-state';
 
-  type MediaRow = MediaItemWithRelations & { thumbnailUrl?: string | null };
+  type MediaRow = MediaItemWithRelations;
 
   interface Props {
     items: MediaRow[];

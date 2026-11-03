@@ -28,8 +28,10 @@ import {
   completeUpload,
   createMedia,
   deleteMedia,
+  getMediaUsage,
   updateMedia,
 } from '$lib/remote/media.remote';
+import { readFreshQuery } from '$lib/remote/query-result';
 import { measureMediaDuration } from '$lib/utils/media-duration';
 
 export type UploadStatus =
@@ -96,7 +98,9 @@ export interface UploadQueueDeps {
     id: string;
     durationSeconds?: number;
   }) => Promise<unknown>;
-  deleteMedia: (input: { id: string }) => Promise<unknown>;
+  deleteMedia: (input: { id: string; usage?: string }) => Promise<unknown>;
+  /** The item's usage fingerprint, read fresh: a delete sends it back. */
+  readUsage: (id: string) => Promise<{ fingerprint: string }>;
   renameMedia: (id: string, title: string) => Promise<unknown>;
   send: (request: UploadRequest) => UploadTransfer;
   measureDuration: (file: File) => Promise<number | null>;
@@ -170,6 +174,11 @@ export class UploadQueue {
    * being made and then deleted, so closing the tab must still be guarded.
    */
   readonly #running = new Set<string>();
+  /**
+   * Deletes of let-go media rows still on their way (a usage read, then the
+   * delete): closing the tab now would leave the row behind, so the guard holds.
+   */
+  readonly #discarding = new Set<Promise<void>>();
   /** Bumped by {@link reset}: an upload begun before it belongs to the last user. */
   #generation = 0;
   #releaseGuard: (() => void) | null = null;
@@ -182,6 +191,7 @@ export class UploadQueue {
   get pending(): boolean {
     return (
       this.#running.size > 0 ||
+      this.#discarding.size > 0 ||
       this.items.some((item) => PENDING.has(item.status))
     );
   }
@@ -231,8 +241,13 @@ export class UploadQueue {
     this.#syncGuard();
   }
 
-  /** Queue the files the platform takes; the rest become rejections. */
-  add(files: FileList | File[]): void {
+  /**
+   * Queue the files the platform takes; the rest become rejections. Returns
+   * the queued rows' keys, so a caller can follow its own upload (the media
+   * picker attaches the id the moment createMedia returns it).
+   */
+  add(files: FileList | File[]): string[] {
+    const queued: string[] = [];
     for (const file of Array.from(files)) {
       const check = checkMediaFile(file);
       if (check.ok === false) {
@@ -243,8 +258,10 @@ export class UploadQueue {
         });
         continue;
       }
+      const key = this.#deps.makeKey();
+      queued.push(key);
       this.items.push({
-        key: this.#deps.makeKey(),
+        key,
         file,
         mimeType: check.mimeType,
         mediaType: check.mediaType,
@@ -259,6 +276,7 @@ export class UploadQueue {
     }
     this.#syncGuard();
     this.#process();
+    return queued;
   }
 
   /**
@@ -305,6 +323,8 @@ export class UploadQueue {
     if (!item || (item.status !== 'done' && item.status !== 'error')) return;
     if (item.status === 'error') this.#discard(item.id);
     this.#drop(key);
+    // A discard just begun holds the unload guard until its delete lands.
+    this.#syncGuard();
   }
 
   clearCompleted(): void {
@@ -569,23 +589,63 @@ export class UploadQueue {
 
   /**
    * A media row the tray let go of. Left alone it would sit in `uploading`
-   * until the hourly check failed it. No `usage`: nothing uses a half-made
-   * upload, and with no uses the worker deletes without a fingerprint
-   * (Codex-6sbn1).
+   * until the hourly check failed it. The delete carries a fresh usage
+   * fingerprint (Codex-6sbn1): a draft may use the row already.
    */
   #discard(mediaId: string | null): Promise<void> {
     if (!mediaId) return Promise.resolve();
-    return this.#deps
-      .deleteMedia({ id: mediaId })
+    // A draft may have saved it by now: the media picker attaches the id the
+    // moment createMedia returns it (Codex-a6ofh.1.8), and a delete without
+    // the usage fingerprint is refused (409) once anything uses the item. A
+    // half-made upload is never live, so with the fingerprint it goes, and
+    // that draft says "media missing" (data-design §1.4).
+    // Two requests: a user switch (reset()) between them leaves the row for
+    // the hourly check, as reset() leaves its own.
+    const generation = this.#generation;
+    const switched = () => generation !== this.#generation;
+    const leftForTheHourlyCheck = (
+      stage: 'skipped' | 'failed',
+      error?: string
+    ) =>
+      logger.warn(
+        'Media upload: a user switch left a discard to the hourly check',
+        {
+          mediaId,
+          stage,
+          ...(error === undefined ? {} : { error }),
+        }
+      );
+    const discard: Promise<void> = this.#deps
+      .readUsage(mediaId)
+      .then((usage) => {
+        if (!switched())
+          return this.#deps.deleteMedia({
+            id: mediaId,
+            usage: usage.fingerprint,
+          });
+        leftForTheHourlyCheck('skipped');
+      })
       .then(() => undefined)
       .catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        if (switched()) {
+          leftForTheHourlyCheck('failed', message);
+          return;
+        }
         // The row now shows in the library as an upload that never finished,
         // until the hourly check fails it: worth an error, not a warning.
         logger.error('Media upload: could not remove the abandoned attempt', {
           mediaId,
-          error: error instanceof Error ? error.message : String(error),
+          error: message,
         });
+      })
+      .finally(() => {
+        this.#discarding.delete(discard);
+        this.#syncGuard();
       });
+    // Held until the delete lands or fails: callers sync the guard after.
+    this.#discarding.add(discard);
+    return discard;
   }
 
   #syncGuard(): void {
@@ -631,6 +691,7 @@ export const uploadQueue = new UploadQueue({
   createMedia: (input) => createMedia(input),
   completeUpload: (input) => completeUpload(input),
   deleteMedia: (input) => deleteMedia(input),
+  readUsage: (id) => readFreshQuery(getMediaUsage(id)),
   renameMedia: (id, title) => updateMedia({ id, data: { title } }),
   send: xhrTransfer,
   measureDuration: measureMediaDuration,

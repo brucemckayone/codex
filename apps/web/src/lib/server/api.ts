@@ -2913,7 +2913,7 @@ export function createServerApi(
        * - limit: number (1-100, default: 24)
        * - search: title or description, ≤255 (optional; gate it, Codex-k618q)
        * - status: 'uploading' | 'uploaded' | 'transcoding' | 'ready' | 'failed',
-       *   or a group: 'processing' | 'attention' (MEDIA_STATUS_GROUPS) (optional)
+       *   or a group: 'processing' | 'attention' | 'attachable' (MEDIA_STATUS_GROUPS) (optional)
        * - mediaType: 'video' | 'audio' (optional)
        * - usage: 'any' | 'used' | 'unused' (default: 'any')
        * - sortBy: 'createdAt' | 'uploadedAt' | 'title' | 'durationSeconds' |

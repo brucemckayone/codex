@@ -194,7 +194,7 @@ describe('media library list filters (Codex-a6ofh.1.4)', () => {
       });
       const uploaded = await seedMedia(creatorId, { status: 'uploaded' });
       const transcoding = await seedMedia(creatorId, { status: 'transcoding' });
-      await seedMedia(creatorId, { status: 'ready' });
+      const ready = await seedMedia(creatorId, { status: 'ready' });
       const failed = await seedMedia(creatorId, { status: 'failed' });
 
       const processing = await listed(creatorId, { status: 'processing' });
@@ -204,6 +204,14 @@ describe('media library list filters (Codex-a6ofh.1.4)', () => {
       const attention = await listed(creatorId, { status: 'attention' });
       expect(sorted(attention.ids)).toEqual(sorted([failed, stalled]));
       expect(attention.total).toBe(2);
+
+      // What the picker offers a draft (Codex-a6ofh.1.8): ready, or on its
+      // way to ready. Never failed, and never an upload still in progress.
+      const attachable = await listed(creatorId, { status: 'attachable' });
+      expect(sorted(attachable.ids)).toEqual(
+        sorted([ready, uploaded, transcoding])
+      );
+      expect(attachable.total).toBe(3);
 
       // A raw status still means only itself.
       expect(

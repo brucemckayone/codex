@@ -1,15 +1,16 @@
 <!--
   @component NewContentPage
 
-  Page wrapper for creating new content. Passes organizationId
-  and available media items to the ContentForm component.
-  Fetches media items client-side to avoid __data.json round-trips.
+  Page wrapper for creating new content. Passes organizationId to the
+  ContentForm, and the media a piece starts with from "Create content from
+  this" (`?media=&type=`). The media picker reads the library itself, on open
+  (Codex-a6ofh.1.8), so nothing here waits for it.
 -->
 <script lang="ts">
-  import { listMedia } from '$lib/remote/media.remote';
+  import { page } from '$app/state';
   import { Breadcrumb } from '$lib/components/ui/Breadcrumb';
   import ContentForm from '$lib/components/studio/ContentForm.svelte';
-  import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
+  import { readNewContentMedia } from '$lib/components/studio/media-library/library-url';
 
   let { data } = $props();
 
@@ -21,13 +22,7 @@
     { label: 'New Content' },
   ];
 
-  // Media is personal (decision 1A): the list takes no org.
-  const mediaQuery = $derived(listMedia({
-    status: 'ready',
-    limit: 50,
-    sortBy: 'createdAt',
-    sortOrder: 'desc',
-  }));
+  const initialMedia = $derived(readNewContentMedia(page.url));
 </script>
 
 <svelte:head>
@@ -36,26 +31,7 @@
 
 <div class="new-content-page">
   <Breadcrumb items={breadcrumbs} />
-  {#if mediaQuery.loading}
-    <div class="form-skeleton">
-      <div class="form-skeleton-main">
-        <Skeleton width="60%" height="var(--space-10)" />
-        <Skeleton width="100%" height="var(--space-32)" />
-        <div class="form-skeleton-row">
-          <Skeleton width="45%" height="var(--space-10)" />
-          <Skeleton width="45%" height="var(--space-10)" />
-        </div>
-        <Skeleton width="100%" height="var(--space-24)" />
-      </div>
-      <div class="form-skeleton-sidebar">
-        <Skeleton width="100%" height="var(--space-10)" />
-        <Skeleton width="100%" height="var(--space-10)" />
-        <Skeleton width="60%" height="var(--space-8)" />
-      </div>
-    </div>
-  {:else}
-    <ContentForm {organizationId} {orgSlug} mediaItems={mediaQuery.current?.items ?? []} />
-  {/if}
+  <ContentForm {organizationId} {orgSlug} {initialMedia} />
 </div>
 
 <style>
@@ -63,38 +39,5 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-4);
-  }
-
-  .form-skeleton {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: var(--space-6);
-  }
-
-  @media (--breakpoint-md) {
-    .form-skeleton {
-      grid-template-columns: 2fr 1fr;
-    }
-  }
-
-  .form-skeleton-main {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-  }
-
-  .form-skeleton-row {
-    display: flex;
-    gap: var(--space-4);
-  }
-
-  .form-skeleton-sidebar {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-    padding: var(--space-4);
-    border: var(--border-width) var(--border-style) var(--color-border);
-    border-radius: var(--radius-md);
-    background: var(--color-surface);
   }
 </style>

@@ -166,6 +166,17 @@ export interface MediaListItem extends MediaItemWithRelations {
 }
 
 /**
+ * A media item as content-api SERVES it: its poster resolved to the CDN
+ * (`thumbnailUrl`, from `thumbnailKey`, null without one). The list rows and
+ * the single read both send it (Codex-a6ofh.1.8), so a surface showing one
+ * item from either read shows the same picture. The service returns the row;
+ * the route adds the URL.
+ */
+export type ServedMedia<
+  T extends MediaItemWithRelations = MediaItemWithRelations,
+> = T & { thumbnailUrl: string | null };
+
+/**
  * Re-export database types for convenience
  */
 export type { Content, MediaItem };
@@ -280,13 +291,15 @@ export type DeleteContentResponse = null;
  * Response for GET /api/media/:id
  * Returns a single media item with full relations
  */
-export type MediaResponse = SingleItemResponse<MediaItemWithRelations>;
+export type MediaResponse = SingleItemResponse<ServedMedia>;
 
 /**
  * Response for GET /api/media
  * Returns paginated list of media items with relations
  */
-export type MediaListResponse = PaginatedListResponse<MediaListItem>;
+export type MediaListResponse = PaginatedListResponse<
+  ServedMedia<MediaListItem>
+>;
 
 /**
  * Response for GET /api/media/:id/usage (Codex-6sbn1)

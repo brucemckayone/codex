@@ -15,7 +15,7 @@
  * - DELETE /api/media/:id    - Soft delete, refused while anything live uses it
  */
 
-import type { MediaPreviewResponse } from '@codex/access';
+import { type MediaPreviewResponse, publicUrl } from '@codex/access';
 import {
   AUTH_ROLES,
   FILE_SIZES,
@@ -117,7 +117,12 @@ app.get(
       if (!media) {
         throw new MediaNotFoundError(ctx.input.params.id);
       }
-      return media;
+      // The picker shows the chosen item from this read alone (Codex-a6ofh.1.8):
+      // its poster resolves as the list rows' do (`publicUrl`, @codex/access).
+      return {
+        ...media,
+        thumbnailUrl: publicUrl(ctx.env.R2_PUBLIC_URL_BASE, media.thumbnailKey),
+      };
     },
   })
 );
@@ -228,13 +233,9 @@ app.get(
         page,
         limit,
       });
-      const cdnBase = ctx.env.R2_PUBLIC_URL_BASE;
       const items = result.items.map((item) => ({
         ...item,
-        thumbnailUrl:
-          item.thumbnailKey && cdnBase
-            ? `${cdnBase}/${item.thumbnailKey}`
-            : null,
+        thumbnailUrl: publicUrl(ctx.env.R2_PUBLIC_URL_BASE, item.thumbnailKey),
       }));
       return new PaginatedResult(items, result.pagination);
     },

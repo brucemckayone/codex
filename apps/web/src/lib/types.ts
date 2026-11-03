@@ -66,6 +66,8 @@ export interface ContentWithRelations
 
 /** As content-api serves it: never the transcoder's raw detail. */
 export interface MediaItemWithRelations extends ServedMediaItem {
+  /** Its poster on the CDN: content-api resolves it on the list and the single read. */
+  thumbnailUrl?: string | null;
   creator?: {
     id: string;
     email: string;

@@ -900,7 +900,13 @@ describe('Query Schemas', () => {
     });
 
     it('takes a status group as well as a raw status, and nothing else', () => {
-      for (const status of ['processing', 'attention', 'uploading', 'failed']) {
+      for (const status of [
+        'processing',
+        'attention',
+        'attachable',
+        'uploading',
+        'failed',
+      ]) {
         expect(mediaQuerySchema.parse({ status }).status).toBe(status);
       }
       expect(mediaQuerySchema.safeParse({ status: 'stalled' }).success).toBe(

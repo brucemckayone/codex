@@ -147,3 +147,33 @@ export function readOpenItem(url: URL): string | null {
   const id = url.searchParams.get('item');
   return id && UUID.test(id) ? id : null;
 }
+
+/** The media a new piece starts with: "Create content from this" (Codex-a6ofh.1.8). */
+export interface NewContentMedia {
+  id: string;
+  mediaType: 'video' | 'audio';
+}
+
+/**
+ * Where "Create content from this" goes. The type rides along so the editor
+ * opens as video or audio content at once, without first reading the item.
+ */
+export function newContentHref(media: NewContentMedia): string {
+  const params = new URLSearchParams({
+    media: media.id,
+    type: media.mediaType,
+  });
+  return `/studio/content/new?${params}`;
+}
+
+/**
+ * The media `/studio/content/new` starts with, or null. Both halves must be
+ * well formed: a hand-edited link starts a blank piece, never a broken one.
+ */
+export function readNewContentMedia(url: URL): NewContentMedia | null {
+  const id = url.searchParams.get('media');
+  const mediaType = url.searchParams.get('type');
+  if (!id || !UUID.test(id)) return null;
+  if (mediaType !== 'video' && mediaType !== 'audio') return null;
+  return { id, mediaType };
+}

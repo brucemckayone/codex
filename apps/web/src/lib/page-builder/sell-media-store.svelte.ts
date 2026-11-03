@@ -30,7 +30,6 @@ import {
   getJourneySellMedia,
   updateJourneySellMedia,
 } from '$lib/remote/journeys.remote';
-import { listMedia } from '$lib/remote/media.remote';
 import { readFreshQuery } from '$lib/remote/query-result';
 import { remoteErrorMessage } from './builder-save';
 
@@ -52,15 +51,6 @@ export type JourneySellMediaSlot =
   | 'guidePortraitMediaId'
   | 'heroMediaId'
   | 'signatureMediaId';
-
-/** The `media_items` projection the pickers render (matches `MediaPicker`). */
-export interface SellMediaOption {
-  id: string;
-  title: string;
-  mediaType: string;
-  durationSeconds?: number | null;
-  fileSizeBytes?: number | null;
-}
 
 /**
  * Which media TYPES each slot can hold — the single source of truth for the P3
@@ -84,7 +74,7 @@ export interface SellMediaOption {
  * that — not this — is the boundary.
  */
 export const SLOT_ACCEPTS: Readonly<
-  Record<JourneySellMediaSlot, readonly string[]>
+  Record<JourneySellMediaSlot, readonly ('video' | 'audio')[]>
 > = {
   // Stills — a frame is required.
   heroMediaId: ['video'],
@@ -205,12 +195,6 @@ class SellMediaStore {
    * slots, and refreshed from a save's echo when it carries it.
    */
   #missing = $state<ReadonlyMap<string, string>>(new Map());
-  /**
-   * The VIEWER's own ready media, for the pickers (`GET /api/media` is
-   * creator-scoped). `#previewOnly` covers exactly this plus the course's film
-   * slots (`findPreviewOnlyMedia`).
-   */
-  #options = $state<SellMediaOption[]>([]);
   #loading = $state(false);
   #coverBusy = $state(false);
   #heroImageBusy = $state(false);
@@ -251,12 +235,13 @@ class SellMediaStore {
    *
    * The "visibly" half is now true: {@link loadError} carries the reason and
    * `PageMediaPanel` renders it above the slots, so a read failure is no longer
-   * indistinguishable from an empty library. It is NOT yet true that the picker
-   * refuses the pick — `MediaPicker` takes no `disabled` prop, so the panel cannot
-   * lock the six slots the way `PagePricingPanel` locks its tier set on
-   * `!monetisation.loaded`. Until it can, the honest reading of this state is
-   * "the reason is on screen and the pick will not persist", which is what the
-   * panel now says.
+   * indistinguishable from nothing attached. It is NOT yet true that the picker
+   * refuses the pick: `MediaPickerDialog` takes `disabled`, but `!loaded` is also
+   * true after a failed read, so wiring it would leave every slot dead rather
+   * than briefly locked the way `PagePricingPanel` locks its tier set on
+   * `!monetisation.loaded`. Until `setSlot` guards it, the honest reading of
+   * this state is "the reason is on screen and the pick will not persist",
+   * which is what the panel says.
    */
   #loaded = $state(false);
 
@@ -278,9 +263,6 @@ class SellMediaStore {
    */
   get signatureImageUrl(): string | null {
     return this.#signatureImageUrl;
-  }
-  get options(): SellMediaOption[] {
-    return this.#options;
   }
   get loading(): boolean {
     return this.#loading;
@@ -349,28 +331,26 @@ class SellMediaStore {
   }
 
   /**
-   * The picker options this slot may actually hold — see {@link SLOT_ACCEPTS}.
+   * The media types this slot may hold — see {@link SLOT_ACCEPTS}.
    *
-   * Every surface with a sell-media picker calls THIS rather than reading
-   * `options` directly, so the panel and the per-section inspector cannot drift
-   * into offering different lists for the same slot. That drift is the same
-   * two-sources-of-truth problem this whole store exists to prevent.
+   * Every surface with a sell-media picker passes THIS to the picker rather
+   * than its own list, so the panel and the per-section inspector cannot drift
+   * into offering different media for the same slot. The picker reads the
+   * creator's library itself, searched and paged on the server
+   * (Codex-a6ofh.1.8), so there is no 100-item read here to fall short.
    */
-  optionsFor(slot: JourneySellMediaSlot): SellMediaOption[] {
-    const accepts = SLOT_ACCEPTS[slot];
-    if (!accepts) return this.#options;
-    return this.#options.filter((option) => accepts.includes(option.mediaType));
+  acceptsFor(slot: JourneySellMediaSlot): readonly ('video' | 'audio')[] {
+    return SLOT_ACCEPTS[slot];
   }
 
   /**
-   * Load the page's persisted media + the org's picker options.
+   * Load the page's persisted media.
    *
-   * The two reads are independent, so a failure in one must not blank the other:
-   * a media library that fails to list should still let the creator SEE which
-   * clips are already attached (and vice versa). Both therefore fail soft to
-   * their empty shape rather than throwing into the route's load — but the reason
-   * is now KEPT ({@link loadError}), because "the read failed" and "you have no
-   * ready media" are different facts and used to render identically.
+   * The read fails soft to the empty shape rather than throwing into the
+   * route's load, but the reason is KEPT ({@link loadError}), because "the read
+   * failed" and "nothing is attached" are different facts and used to render
+   * identically. The pickers read the creator's library themselves, on open
+   * (Codex-a6ofh.1.8), so a library hiccup is theirs to say, not this store's.
    *
    * `hasCourse: false` skips the attached-media read entirely rather than making
    * a request that is guaranteed to fail: the slots live on the SUBJECT COURSE,
@@ -388,28 +368,18 @@ class SellMediaStore {
     this.#loading = true;
     this.#loadError = null;
     this.#loaded = false;
-    /** Reasons, in the order the reads are declared. */
+    /** Why the read failed, if it did. */
     const failures: string[] = [];
     try {
-      const [media, library] = await Promise.all([
-        hasCourse
-          ? getJourneySellMedia({ pageId }).catch((err) => {
-              failures.push(
-                remoteErrorMessage(err) ??
-                  'Could not read the media attached to this journey.'
-              );
-              return null;
-            })
-          : Promise.resolve(null),
-        // `status: 'ready'` — an un-transcoded item has no playable rendition, so
-        // offering it would let a creator attach a clip that renders as nothing.
-        listMedia({ status: 'ready', limit: 100 }).catch((err) => {
-          failures.push(
-            remoteErrorMessage(err) ?? 'Could not list your media library.'
-          );
-          return null;
-        }),
-      ]);
+      const media = hasCourse
+        ? await getJourneySellMedia({ pageId }).catch((err) => {
+            failures.push(
+              remoteErrorMessage(err) ??
+                'Could not read the media attached to this journey.'
+            );
+            return null;
+          })
+        : null;
 
       if (media) {
         const slots: SellMediaSlots = {
@@ -439,14 +409,6 @@ class SellMediaStore {
         // Optional-additive: an older worker omits it, and no slot says missing.
         this.#missing = toMissing(media.missingMedia ?? []);
       }
-
-      this.#options = (library?.items ?? []).map((item) => ({
-        id: item.id,
-        title: item.title,
-        mediaType: item.mediaType,
-        durationSeconds: item.durationSeconds,
-        fileSizeBytes: item.fileSizeBytes,
-      }));
 
       // A RESOLVE establishes the baseline, `null` included: a course with no
       // media row legitimately reads as six empty slots, and that IS the truth to
@@ -629,7 +591,6 @@ class SellMediaStore {
     this.#signatureImageUrl = null;
     this.#previewOnly = new Set();
     this.#missing = new Map();
-    this.#options = [];
     this.#loading = false;
     this.#coverBusy = false;
     this.#heroImageBusy = false;

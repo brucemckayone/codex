@@ -43,10 +43,8 @@
     type TileView,
   } from './tile-state';
 
-  // MediaItemWithRelations doesn't declare thumbnailUrl on the base schema
-  // (only thumbnailKey) — but the public content API resolves keys to CDN
-  // URLs elsewhere; support it optionally for forward-compat.
-  type MediaTileItem = MediaItemWithRelations & { thumbnailUrl?: string | null };
+  // The row as content-api serves it, its poster (`thumbnailUrl`) resolved.
+  type MediaTileItem = MediaItemWithRelations;
 
   interface Props {
     /** Media item to render */

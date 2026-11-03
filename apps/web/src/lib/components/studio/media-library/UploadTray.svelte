@@ -25,22 +25,13 @@
   } from '$lib/components/ui/Icon';
   import { formatFileSize } from '$lib/utils/format';
   import * as m from '$paraglide/messages';
+  import { newContentHref } from './library-url';
+  import { rejectionReason } from './tile-copy';
 
   const items = $derived(uploadQueue.items);
   const rejections = $derived(uploadQueue.rejections);
   const counts = $derived(uploadQueue.counts);
   const visible = $derived(items.length > 0 || rejections.length > 0);
-
-  function rejectionReason(name: string, reason: 'type' | 'empty' | 'too_large'): string {
-    switch (reason) {
-      case 'empty':
-        return m.media_upload_rejected_empty({ name });
-      case 'too_large':
-        return m.media_upload_rejected_too_large({ name });
-      default:
-        return m.media_upload_rejected_type({ name });
-    }
-  }
 
   /** A finished upload's state: live where the media page's socket knows it. */
   function uploadedState(item: UploadItem): 'processing' | 'ready' | 'failed' | 'uploaded' {
@@ -208,7 +199,7 @@
               <div class="queue-item-next">
                 <!-- Not for media whose processing failed: nothing could play it. -->
                 {#if uploadedState(item) !== 'failed'}
-                  <a href={`/studio/content/new?media=${item.id}`}>{m.media_tray_create_content()}</a>
+                  <a href={newContentHref({ id: item.id, mediaType: item.mediaType })}>{m.media_tray_create_content()}</a>
                 {/if}
                 <a href="/studio/media">{m.media_tray_view()}</a>
               </div>

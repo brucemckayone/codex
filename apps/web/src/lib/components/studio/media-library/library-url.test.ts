@@ -9,7 +9,9 @@ import {
   LIBRARY_SORTS,
   LIBRARY_STATUSES,
   libraryListArgs,
+  newContentHref,
   readLibraryState,
+  readNewContentMedia,
 } from './library-url';
 
 const at = (query: string) =>
@@ -136,5 +138,25 @@ describe('activeFilterCount / isNarrowed', () => {
     expect(narrowedAt('?q=ho')).toBe(false);
     expect(narrowedAt('?q=hono')).toBe(true);
     expect(narrowedAt('?usage=unused')).toBe(true);
+  });
+});
+
+describe('new content from a media item (Codex-a6ofh.1.8)', () => {
+  const ID = '6b000000-0000-4000-8000-000000000001';
+  const read = (href: string) =>
+    readNewContentMedia(new URL(href, 'https://studio.test'));
+
+  it('round-trips: the link the tray and drawer write is the one the editor reads', () => {
+    expect(read(newContentHref({ id: ID, mediaType: 'audio' }))).toEqual({
+      id: ID,
+      mediaType: 'audio',
+    });
+  });
+
+  it('starts a blank piece from a hand-edited link, never a broken one', () => {
+    expect(read(`/studio/content/new?media=${ID}`)).toBeNull();
+    expect(read(`/studio/content/new?media=${ID}&type=written`)).toBeNull();
+    expect(read('/studio/content/new?media=x&type=video')).toBeNull();
+    expect(read('/studio/content/new')).toBeNull();
   });
 });

@@ -20,7 +20,7 @@
   import { FilmIcon, MusicIcon } from '$lib/components/ui/Icon';
   import * as m from '$paraglide/messages';
 
-  type MediaTileItem = MediaItemWithRelations & { thumbnailUrl?: string | null };
+  type MediaTileItem = MediaItemWithRelations;
 
   export type UploadGhost = {
     /** Stable key for {#each} — parent owns (e.g. file.name + index) */

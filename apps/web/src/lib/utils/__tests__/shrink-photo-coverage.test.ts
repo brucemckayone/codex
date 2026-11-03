@@ -20,6 +20,8 @@ const NOT_A_STILL: Record<string, string> = {
     'a logo is stored as uploaded and never decoded (owner: "Leave logos out")',
   'lib/components/studio/MediaUpload.svelte':
     'video and audio, which the transcoder handles',
+  'lib/components/studio/media-library/MediaPickerDialog.svelte':
+    'video and audio only (mediaFileAccept), handed to the upload queue and the transcoder',
   'routes/shader-gallery/+page.svelte': 'an audio file for a dev-only page',
 };
 

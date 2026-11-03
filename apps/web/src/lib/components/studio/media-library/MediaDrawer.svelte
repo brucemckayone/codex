@@ -19,9 +19,8 @@
   import { RefreshCwIcon, TrashIcon } from '$lib/components/ui/Icon';
   import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
   import { toast } from '$lib/components/ui/Toast/toast-store';
-  import { logger } from '$lib/observability';
   import { getMediaItem, getMediaUsage, updateMedia } from '$lib/remote/media.remote';
-  import { queryErrorMessage, readFreshQuery, remoteErrorStatus } from '$lib/remote/query-result';
+  import { readFreshQuery, remoteErrorStatus } from '$lib/remote/query-result';
   import type { MediaItemWithRelations } from '$lib/types';
   import * as m from '$paraglide/messages';
   import {
@@ -32,8 +31,10 @@
     type SaveRefusal,
     saveStatusText,
   } from './drawer-save';
+  import { newContentHref } from './library-url';
   import { mediaFacts } from './media-facts';
   import MediaPreviewPlayer from './MediaPreviewPlayer.svelte';
+  import { logReadFailure } from './log-read-failure';
   import { retryMediaTranscoding } from './media-retry';
   import MediaStatusPill from './MediaStatusPill.svelte';
   import MediaUsesList from './MediaUsesList.svelte';
@@ -58,13 +59,6 @@
   let failed = $state<{ id: string; status: number | undefined } | null>(null);
   let usage = $state<{ id: string; value: MediaUsage | null; failed: boolean } | null>(null);
 
-  function logRead(event: string, id: string, error: unknown) {
-    const status = remoteErrorStatus(error);
-    const fields = { mediaId: id, status, error: queryErrorMessage(error) };
-    if (status === undefined || status >= 500) logger.error(event, fields);
-    else logger.warn(event, fields);
-  }
-
   async function load(id: string) {
     loaded = null;
     failed = null;
@@ -80,14 +74,14 @@
     if (mediaId !== id) return;
     if (item.status === 'rejected') {
       failed = { id, status: remoteErrorStatus(item.reason) };
-      logRead('media_drawer.read_failed', id, item.reason);
+      logReadFailure('media_drawer.read_failed', item.reason, { mediaId: id });
       return;
     }
     loaded = { id, media: item.value };
     titleDraft = item.value.title;
     descriptionDraft = item.value.description ?? '';
     usage = { id, value: uses.status === 'fulfilled' ? uses.value : null, failed: uses.status === 'rejected' };
-    if (uses.status === 'rejected') logRead('media_drawer.usage_failed', id, uses.reason);
+    if (uses.status === 'rejected') logReadFailure('media_drawer.usage_failed', uses.reason, { mediaId: id });
   }
 
   async function reloadUsage(id: string) {
@@ -96,7 +90,7 @@
       const value = await readFreshQuery(getMediaUsage(id));
       if (mediaId === id) usage = { id, value, failed: false };
     } catch (error) {
-      logRead('media_drawer.usage_failed', id, error);
+      logReadFailure('media_drawer.usage_failed', error, { mediaId: id });
       if (mediaId === id) usage = { id, value: null, failed: true };
     }
   }
@@ -167,7 +161,7 @@
       if (shown()) saves[field] = 'saved';
       onChanged();
     } catch (error) {
-      logRead('media_drawer.save_failed', snapshot.id, error);
+      logReadFailure('media_drawer.save_failed', error, { mediaId: snapshot.id });
       if (!shown()) {
         toast.error(m.media_drawer_save_failed_named({ title: snapshot.media.title }));
         return;
@@ -308,7 +302,12 @@
       {@render usedInSection(media.id)}
 
       <div class="drawer-actions">
-        <a class="drawer-create" href={`/studio/content/new?media=${media.id}`}>{m.media_tray_create_content()}</a>
+        <a
+          class="drawer-create"
+          href={newContentHref({ id: media.id, mediaType: media.mediaType === 'audio' ? 'audio' : 'video' })}
+        >
+          {m.media_tray_create_content()}
+        </a>
         <Button variant="destructive" onclick={() => onDelete(media)}>
           <TrashIcon size={14} />
           {m.media_action_delete()}

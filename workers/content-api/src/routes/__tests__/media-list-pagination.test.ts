@@ -28,7 +28,7 @@ const USER = {
   role: 'creator',
 };
 
-const mediaSpies = { list: vi.fn(), summary: vi.fn() };
+const mediaSpies = { list: vi.fn(), summary: vi.fn(), get: vi.fn() };
 
 vi.mock('@codex/content', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@codex/content')>();
@@ -180,5 +180,45 @@ describe('GET /api/media/summary (Codex-a6ofh.1.6)', () => {
   it('needs a session', async () => {
     expect((await get('/summary', false)).status).toBe(401);
     expect(mediaSpies.summary).not.toHaveBeenCalled();
+  });
+});
+
+// The picker shows the chosen item from the single read alone
+// (Codex-a6ofh.1.8), so it resolves the poster as the list rows do.
+describe('GET /api/media/:id sends its poster', () => {
+  const ID = '6b000000-0000-4000-8000-000000000001';
+  const KEY = `creator-1/media-thumbnails/${ID}/md.webp`;
+
+  beforeEach(() => mediaSpies.get.mockReset());
+
+  async function read(cdnBase: string | undefined) {
+    mediaSpies.get.mockResolvedValue({
+      id: ID,
+      title: 'Tour',
+      thumbnailKey: KEY,
+    });
+    return buildApp().fetch(
+      new Request(`http://content-api.test/api/media/${ID}`),
+      { ...testEnv, R2_PUBLIC_URL_BASE: cdnBase } as typeof env,
+      createExecutionContext()
+    );
+  }
+
+  it("as the CDN URL the list rows send, for the caller's own item", async () => {
+    const res = await read('https://cdn.test');
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: { thumbnailUrl: string | null };
+    };
+    expect(body.data.thumbnailUrl).toBe(`https://cdn.test/${KEY}`);
+    expect(mediaSpies.get).toHaveBeenCalledWith(ID, USER.id);
+  });
+
+  it('as null when no CDN base is configured, never a relative key', async () => {
+    const res = await read(undefined);
+    const body = (await res.json()) as {
+      data: { thumbnailUrl: string | null };
+    };
+    expect(body.data.thumbnailUrl).toBeNull();
   });
 });

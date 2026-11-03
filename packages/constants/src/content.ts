@@ -43,12 +43,23 @@ export const MEDIA_UPLOAD_STALLED_AFTER_MS =
  *
  * Coupled: `MediaItemService.summary()` counts `failed` (eq FAILED) and
  * `stopped` (the stall) so the header's "N need attention" equals what the
- * `attention` filter lists. A status added here must be counted there too
- * (the media-list-filters integration test pins the equality).
+ * `attention` filter lists. A status added to `attention` must be counted
+ * there too (the media-list-filters integration test pins the equality).
  */
 export const MEDIA_STATUS_GROUPS = {
   processing: [MEDIA_STATUS.UPLOADED, MEDIA_STATUS.TRANSCODING],
   attention: [MEDIA_STATUS.FAILED],
+  /**
+   * What the media picker OFFERS a draft (Codex-a6ofh.1.8, its "All"):
+   * ready, and processing on its way to ready; never a failed or stopped
+   * item. An offer, not the attach rule: `ContentService.validateMediaItem`
+   * is that, and it asks for ready once content is live.
+   */
+  attachable: [
+    MEDIA_STATUS.READY,
+    MEDIA_STATUS.UPLOADED,
+    MEDIA_STATUS.TRANSCODING,
+  ],
 } as const;
 
 export type MediaStatusGroup = keyof typeof MEDIA_STATUS_GROUPS;

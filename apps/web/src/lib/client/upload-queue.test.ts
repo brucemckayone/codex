@@ -68,6 +68,7 @@ function harness(
     createMedia: vi.fn(async () => ({ id: `media-${++ids}`, presignedUrl })),
     completeUpload: vi.fn(async () => ({})),
     deleteMedia: vi.fn(async () => ({})),
+    readUsage: vi.fn(async () => ({ fingerprint: 'fp-1' })),
     renameMedia: vi.fn(async () => ({})),
     send: vi.fn((request: UploadRequest) => {
       let resolve!: () => void;
@@ -128,6 +129,18 @@ describe('UploadQueue: adding files', () => {
       ['clip-final.mkv', 'type'],
       ['empty.mov', 'empty'],
     ]);
+  });
+
+  // The media picker follows the row it queued (Codex-a6ofh.1.8).
+  it("returns the queued rows' keys, and none for a rejected file", () => {
+    const { queue } = harness({
+      createMedia: vi.fn(() => new Promise<Created>(() => {})),
+    });
+    const mkv = new File(['x'], 'clip.mkv', { type: 'video/x-matroska' });
+    const keys = queue.add([video('a.mov'), mkv, video('b.mov')]);
+    expect(keys).toEqual(queue.items.map((item) => item.key));
+    expect(keys).toHaveLength(2);
+    expect(queue.rejections.map((r) => r.key)).not.toContain(keys[0]);
   });
 
   it('runs two at a time and starts the next when one finishes', async () => {
@@ -269,6 +282,169 @@ describe('UploadQueue: cancel', () => {
     expect(deps.deleteMedia).not.toHaveBeenCalled();
   });
 
+  // The picker attaches the id the moment createMedia returns it, so a draft
+  // may have saved it; a delete without the fingerprint is then refused (409).
+  it('deletes a half-made row with a fresh usage fingerprint: a draft may already use it', async () => {
+    const { queue, deps } = harness();
+    queue.add([video('a.mov')]);
+    await flush();
+    queue.cancel('row-1');
+    await flush();
+    expect(deps.readUsage).toHaveBeenCalledWith('media-1');
+    expect(deps.deleteMedia).toHaveBeenCalledWith({
+      id: 'media-1',
+      usage: 'fp-1',
+    });
+  });
+
+  it('holds the unload guard until a let-go row is really deleted', async () => {
+    let finishDelete!: () => void;
+    const { queue, release } = harness({
+      deleteMedia: vi.fn(
+        () =>
+          new Promise<unknown>((resolve) => {
+            finishDelete = () => resolve({});
+          })
+      ),
+    });
+    queue.add([video('a.mov')]);
+    await flush();
+    queue.cancel('row-1');
+    await flush();
+    // The row has left the tray, but its delete is still on its way.
+    expect(queue.items).toHaveLength(0);
+    expect(queue.pending).toBe(true);
+    expect(release).not.toHaveBeenCalled();
+    finishDelete();
+    await flush();
+    expect(queue.pending).toBe(false);
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it('removing a failed row holds the guard until its delete settles, even one refused', async () => {
+    let refuseDelete!: () => void;
+    const { queue, deps, transfers, release } = harness({
+      completeUpload: vi.fn().mockRejectedValue(new Error('500')),
+      deleteMedia: vi.fn(
+        () =>
+          new Promise<unknown>((_, reject) => {
+            refuseDelete = () => reject(new Error('503'));
+          })
+      ),
+    });
+    queue.add([video('a.mov')]);
+    await flush();
+    transfers[0]?.resolve();
+    await flush();
+    expect(queue.items[0]?.status).toBe('error');
+    const holds = (deps.guard as ReturnType<typeof vi.fn>).mock.calls.length;
+    const released = release.mock.calls.length;
+    expect(queue.pending).toBe(false);
+
+    queue.remove('row-1');
+    await flush();
+    // remove() itself takes the guard: nothing else would.
+    expect(queue.items).toHaveLength(0);
+    expect(queue.pending).toBe(true);
+    expect(deps.guard).toHaveBeenCalledTimes(holds + 1);
+    expect(release).toHaveBeenCalledTimes(released);
+
+    refuseDelete();
+    await flush();
+    expect(queue.pending).toBe(false);
+    expect(release).toHaveBeenCalledTimes(released + 1);
+  });
+
+  it('a discard that straddles a user switch deletes nothing as the new user', async () => {
+    const { logger } = await import('$lib/observability');
+    const error = vi.spyOn(logger, 'error').mockImplementation(() => {});
+    error.mockClear(); // the module's logger mock keeps earlier tests' calls
+    let finishRead!: () => void;
+    const { queue, deps } = harness({
+      readUsage: vi.fn(
+        () =>
+          new Promise<{ fingerprint: string }>((resolve) => {
+            finishRead = () => resolve({ fingerprint: 'fp-1' });
+          })
+      ),
+    });
+    queue.add([video('a.mov')]);
+    await flush();
+    queue.cancel('row-1');
+    await flush();
+    expect(deps.readUsage).toHaveBeenCalledWith('media-1');
+
+    queue.reset();
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    warn.mockClear();
+    finishRead();
+    await flush();
+    // The row is the last user's: left for the hourly check, and no alarm.
+    expect(deps.deleteMedia).not.toHaveBeenCalled();
+    expect(error).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      'Media upload: a user switch left a discard to the hourly check',
+      { mediaId: 'media-1', stage: 'skipped' }
+    );
+    expect(queue.pending).toBe(false);
+    error.mockRestore();
+    warn.mockRestore();
+  });
+
+  it('a delete that fails after a user switch is a warning with its reason, not an error', async () => {
+    const { logger } = await import('$lib/observability');
+    const error = vi.spyOn(logger, 'error').mockImplementation(() => {});
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    let refuseDelete!: () => void;
+    const { queue, deps } = harness({
+      deleteMedia: vi.fn(
+        () =>
+          new Promise<unknown>((_, reject) => {
+            refuseDelete = () => reject(new Error('401'));
+          })
+      ),
+    });
+    queue.add([video('a.mov')]);
+    await flush();
+    queue.cancel('row-1');
+    await flush();
+    expect(deps.deleteMedia).toHaveBeenCalledTimes(1);
+
+    queue.reset();
+    error.mockClear();
+    warn.mockClear();
+    refuseDelete();
+    await flush();
+    expect(error).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      'Media upload: a user switch left a discard to the hourly check',
+      { mediaId: 'media-1', stage: 'failed', error: '401' }
+    );
+    expect(queue.pending).toBe(false);
+    error.mockRestore();
+    warn.mockRestore();
+  });
+
+  it('a usage read that fails deletes nothing, and is logged as the error it is', async () => {
+    const { logger } = await import('$lib/observability');
+    const error = vi.spyOn(logger, 'error').mockImplementation(() => {});
+    const { queue, deps } = harness({
+      readUsage: vi.fn(async () => {
+        throw new Error('usage down');
+      }),
+    });
+    queue.add([video('a.mov')]);
+    await flush();
+    queue.cancel('row-1');
+    await flush();
+    expect(deps.deleteMedia).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledWith(
+      'Media upload: could not remove the abandoned attempt',
+      expect.objectContaining({ mediaId: 'media-1', error: 'usage down' })
+    );
+    error.mockRestore();
+  });
+
   it('aborts an uploading row, deletes its half-made media row, and frees the slot', async () => {
     const { queue, deps, transfers } = harness();
     queue.add([video('a.mov'), video('b.mov'), video('c.mov')]);
@@ -277,7 +453,10 @@ describe('UploadQueue: cancel', () => {
     await flush();
 
     expect(transfers[0]?.aborted).toBe(true);
-    expect(deps.deleteMedia).toHaveBeenCalledWith({ id: 'media-1' });
+    expect(deps.deleteMedia).toHaveBeenCalledWith({
+      id: 'media-1',
+      usage: 'fp-1',
+    });
     expect(queue.items.map((i) => i.key)).toEqual(['row-2', 'row-3']);
     // The aborted transfer is not a failure, and the third file started.
     expect(queue.items.some((i) => i.status === 'error')).toBe(false);
@@ -301,7 +480,10 @@ describe('UploadQueue: cancel', () => {
 
     finishCreate({ id: 'media-late', presignedUrl: 'https://r2.example/put' });
     await flush();
-    expect(deps.deleteMedia).toHaveBeenCalledWith({ id: 'media-late' });
+    expect(deps.deleteMedia).toHaveBeenCalledWith({
+      id: 'media-late',
+      usage: 'fp-1',
+    });
     expect(deps.send).not.toHaveBeenCalled();
   });
 
@@ -356,8 +538,12 @@ describe('UploadQueue: try again and remove', () => {
     expect(queue.items[0]?.status).toBe('error');
 
     queue.retry('row-1');
-    expect(deps.deleteMedia).toHaveBeenCalledWith({ id: 'media-1' });
+    // The delete waits for a fresh usage read (a draft may use the row).
     await flush();
+    expect(deps.deleteMedia).toHaveBeenCalledWith({
+      id: 'media-1',
+      usage: 'fp-1',
+    });
     expect(deps.createMedia).toHaveBeenCalledTimes(2);
     transfers[1]?.resolve();
     await flush();
@@ -379,9 +565,14 @@ describe('UploadQueue: try again and remove', () => {
     expect(queue.items.map((i) => i.status)).toEqual(['error', 'done']);
 
     queue.remove('row-2');
+    await flush();
     expect(deps.deleteMedia).not.toHaveBeenCalled();
     queue.remove('row-1');
-    expect(deps.deleteMedia).toHaveBeenCalledWith({ id: 'media-1' });
+    await flush();
+    expect(deps.deleteMedia).toHaveBeenCalledWith({
+      id: 'media-1',
+      usage: 'fp-1',
+    });
     expect(queue.items).toHaveLength(0);
   });
 
