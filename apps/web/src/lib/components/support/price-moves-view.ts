@@ -14,6 +14,7 @@ import type {
   PriceMoveRetried,
   StoppedPriceChange,
 } from '@codex/admin';
+import { PRICE_EMAILS_PER_RUN } from '$lib/components/studio/price-note-view';
 import type { SupportCommandFailure } from '$lib/remote/support-failure';
 import { formatPrice } from '$lib/utils/format';
 import * as m from '$paraglide/messages';
@@ -343,6 +344,14 @@ export function stoppedBadge(change: StoppedPriceChange): CardBadge {
     : { variant: 'warning', label: m.support_queue_moves_badge_stopped() };
 }
 
+/**
+ * How many the hourly run emails, as the Studio note says it ("1,125"): the
+ * server's `PRICE_MOVES_PER_RUN`, through the note's `PRICE_EMAILS_PER_RUN`.
+ */
+function perRun(): string {
+  return PRICE_EMAILS_PER_RUN.toLocaleString('en-GB');
+}
+
 /** The run's hour: "14:00", whatever minute it stopped at. */
 function runHour(iso: string): string {
   return `${formatTime(iso).slice(0, 2)}:00`;
@@ -363,6 +372,7 @@ export function stoppedFacts(change: StoppedPriceChange): CardFact[] {
         name: personName(change.restart.by),
         time: formatTime(change.restart.requestedAt),
         run: formatTime(change.restart.at),
+        perRun: perRun(),
       })
     : m.support_queue_moves_stopped_next();
   return [
@@ -398,6 +408,7 @@ export function restartedNotice(
       org: change.organization.name,
       count: change.waiting.toLocaleString('en-GB'),
       plan: change.plan.name,
+      perRun: perRun(),
       saver,
     }),
   };

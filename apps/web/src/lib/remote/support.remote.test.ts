@@ -52,6 +52,11 @@ vi.mock('$lib/server/api', () => ({
   serverApiUrl: vi.fn(() => 'http://localhost:42073'),
 }));
 
+const loggerError = vi.hoisted(() => vi.fn());
+vi.mock('$lib/observability', () => ({
+  logger: { error: loggerError, warn: vi.fn(), info: vi.fn(), debug: vi.fn() },
+}));
+
 // The request's user, which each test can change.
 const event = vi.hoisted(() => ({
   locals: { user: { role: 'platform_owner' } as { role: string } | null },
@@ -422,6 +427,99 @@ describe('issueSupportRefund', () => {
       status: 500,
       detailsCode: null,
     });
+  });
+});
+
+// A failure with no answer behind it (a dropped fetch, a body that would not
+// parse) skips the `handleError` hook a throw would reach, so it is logged
+// where its cause is: the command, the ids, the status and the error's name,
+// never the error's text, which can quote a person's name (SF-10).
+describe('a command with no answer behind it is logged', () => {
+  const NO_ANSWER: [
+    string,
+    keyof typeof api,
+    unknown,
+    Record<string, string>,
+  ][] = [
+    ['issueSupportRefund', 'issueRefund', REFUND_INPUT, { chargeId: CHARGE }],
+    [
+      'resolveFailedRefund',
+      'resolveFailedRefund',
+      { refundId: UUID, body: { resolution: 'refunded_elsewhere', note: '' } },
+      { refundId: UUID },
+    ],
+    [
+      'resolveCreatorDebt',
+      'resolveCreatorDebt',
+      { reviewId: UUID, body: { resolution: 'platform_absorbed', note: '' } },
+      { reviewId: UUID },
+    ],
+    [
+      'resolveOwedToCreator',
+      'resolveOwedToCreator',
+      { creditId: UUID, body: { action: 'repay', note: '' } },
+      { creditId: UUID },
+    ],
+    [
+      'checkOwedToCreator',
+      'checkOwedToCreator',
+      { creditId: UUID },
+      { creditId: UUID },
+    ],
+    [
+      'markToldAnotherWay',
+      'markToldAnotherWay',
+      { noticeId: UUID, body: { note: 'Phoned them.' } },
+      { noticeId: UUID },
+    ],
+    ['retryPriceMove', 'retryPriceMove', { moveId: UUID }, { moveId: UUID }],
+    [
+      'closePriceMove',
+      'closePriceMove',
+      { moveId: UUID, body: { resolution: 'not_needed', note: 'Cancelled.' } },
+      { moveId: UUID },
+    ],
+    [
+      'restartPriceChange',
+      'restartPriceChange',
+      { changeId: UUID },
+      { changeId: UUID },
+    ],
+  ];
+
+  beforeEach(() => loggerError.mockClear());
+
+  it.each(
+    NO_ANSWER
+  )('%s: its name, its ids, the status and the error’s name', async (name, method, input, ids) => {
+    api[method].mockRejectedValue(
+      new SyntaxError(
+        'Unexpected token, "{"toldByName":"Jo Bloggs"" is not valid JSON'
+      )
+    );
+    await expect(remote[name](input)).resolves.toMatchObject({
+      outcome: 'failed',
+      status: 500,
+    });
+    expect(loggerError).toHaveBeenCalledOnce();
+    expect(loggerError).toHaveBeenCalledWith(
+      `support command ${name} failed with no API answer`,
+      { ...ids, status: 500, errorName: 'SyntaxError' }
+    );
+    expect(JSON.stringify(loggerError.mock.calls)).not.toContain('Jo Bloggs');
+  });
+
+  it('a worker’s own answer is not logged here: the worker logs it', async () => {
+    api.markToldAnotherWay.mockRejectedValue(
+      new ApiError(409, 'Already told', 'CONFLICT', {
+        code: 'FEE_NOTICE_ALREADY_TOLD',
+      })
+    );
+    await remote.markToldAnotherWay({
+      noticeId: UUID,
+      body: { note: 'Phoned them.' },
+    });
+    expect(loggerError).not.toHaveBeenCalled();
   });
 });
 

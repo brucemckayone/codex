@@ -210,7 +210,7 @@ describe('the note on the tier row (P2 to P10)', () => {
       note?.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')
     ).toBe('72');
     expect(text(note?.querySelector('[data-testid="price-note-meta"]'))).toBe(
-      'We email about 1,500 an hour, so the rest by about 18:00. Our support team is handling the 7. As of the 16:00 run.'
+      'We email about 1,125 an hour, so the rest by about 18:00. Our support team is handling the 7. As of the 16:00 run.'
     );
     expect(
       button(note as HTMLElement, 'Check again').getAttribute('aria-label')
@@ -251,7 +251,7 @@ describe('the note on the tier row (P2 to P10)', () => {
       expect(
         text(row('Members').querySelector('[data-testid="price-note-meta"]'))
       ).toBe(
-        'Checked at 16:30: nothing has changed since the 16:00 run. The next 1,500 go at 17:00, and the rest by about 18:00.'
+        'Checked at 16:30: nothing has changed since the 16:00 run. The next 1,125 go at 17:00, and the rest by about 18:00.'
       )
     );
     // The line is polite: it is rewritten in place.
