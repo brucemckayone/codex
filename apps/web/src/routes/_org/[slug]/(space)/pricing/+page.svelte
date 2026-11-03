@@ -2827,7 +2827,7 @@
     font-weight: var(--font-semibold);
     letter-spacing: var(--tracking-wider);
     text-transform: var(--text-transform-label);
-    color: var(--color-brand-primary);
+    color: var(--color-brand-text);
     margin: 0;
     opacity: 0;
     transform: translateY(var(--space-2));
@@ -3426,7 +3426,7 @@
 
   /* Featured tier: price amount in brand color for visual anchor */
   .card--featured .card__price-amount {
-    color: var(--color-brand-primary);
+    color: var(--color-brand-text);
   }
 
   .card__price-interval {
@@ -3495,7 +3495,7 @@
     height: var(--space-6);
     border-radius: var(--radius-full);
     background: color-mix(in srgb, var(--color-brand-primary) 12%, transparent);
-    color: var(--color-brand-primary);
+    color: var(--color-brand-text);
     margin-top: calc(-1 * var(--space-0-5));
   }
 
@@ -3633,7 +3633,7 @@
     font-weight: var(--font-semibold);
     letter-spacing: var(--tracking-wider);
     text-transform: var(--text-transform-label);
-    color: var(--color-brand-primary);
+    color: var(--color-brand-text);
     margin: 0;
   }
 
@@ -3802,7 +3802,7 @@
     font-weight: var(--font-semibold);
     /* Hover variant = brand color with -0.08L OKLCH — darker for legibility
        on light surfaces without abandoning brand identity. */
-    color: var(--color-brand-primary-hover);
+    color: var(--color-brand-text-hover);
     background: color-mix(in srgb, var(--color-brand-primary) 10%, var(--color-surface));
     border: var(--border-width) var(--border-style) color-mix(in srgb, var(--color-brand-primary) 30%, transparent);
     border-radius: var(--radius-full);
@@ -3905,7 +3905,7 @@
     font-weight: var(--font-semibold);
     letter-spacing: var(--tracking-wider);
     text-transform: var(--text-transform-label);
-    color: var(--color-brand-primary);
+    color: var(--color-brand-text);
     margin: 0;
   }
 
@@ -3981,7 +3981,7 @@
   }
 
   .faq__list :global(.accordion-trigger:hover) {
-    color: var(--color-brand-primary);
+    color: var(--color-brand-text);
     text-decoration: none;
     background: color-mix(in srgb, var(--color-brand-primary) 4%, transparent);
   }
@@ -3992,7 +3992,7 @@
   }
 
   .faq__list :global(.accordion-trigger[aria-expanded="true"]) {
-    color: var(--color-brand-primary);
+    color: var(--color-brand-text);
   }
 
   /* Left-edge brand indicator — fills in on hover, stays lit when open.
@@ -4019,7 +4019,7 @@
   }
 
   .faq__list :global(.accordion-chevron) {
-    color: var(--color-brand-primary);
+    color: var(--color-brand-text);
     opacity: 1;
     height: var(--space-4);
     width: var(--space-4);
@@ -4093,7 +4093,7 @@
     height: var(--space-5);
     border-radius: var(--radius-full);
     background: color-mix(in srgb, var(--color-brand-primary) 10%, transparent);
-    color: var(--color-brand-primary);
+    color: var(--color-brand-text);
     flex-shrink: 0;
   }
 

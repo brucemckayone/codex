@@ -354,7 +354,7 @@
 
   .meta-chip--access[data-access='paid'],
   .meta-chip--access[data-access='subscribers'] {
-    color: var(--color-brand-primary, var(--color-interactive));
+    color: var(--color-brand-text);
     background: color-mix(in srgb, var(--color-brand-primary, var(--color-interactive)) 10%, var(--color-surface));
   }
 

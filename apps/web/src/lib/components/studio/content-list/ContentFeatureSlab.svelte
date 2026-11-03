@@ -325,7 +325,7 @@
     font-weight: var(--font-semibold);
     text-transform: uppercase;
     letter-spacing: var(--tracking-wider);
-    color: var(--color-brand-primary, var(--color-interactive));
+    color: var(--color-brand-text);
   }
 
   .slab-status-pill {
@@ -448,8 +448,8 @@
     text-transform: capitalize;
   }
 
-  .meta-access[data-access='paid'] { color: var(--color-brand-primary, var(--color-interactive)); }
-  .meta-access[data-access='subscribers'] { color: var(--color-brand-primary, var(--color-interactive)); }
+  .meta-access[data-access='paid'] { color: var(--color-brand-text); }
+  .meta-access[data-access='subscribers'] { color: var(--color-brand-text); }
 
   /* ── Actions ────────────────────────────────────────────── */
   .slab-actions {
