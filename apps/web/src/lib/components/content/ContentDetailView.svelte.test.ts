@@ -43,6 +43,15 @@ vi.mock('$lib/components/VideoPlayer/hls', () => ({
 vi.mock('$lib/remote/subscription.remote', () => ({
   reactivateSubscription: vi.fn(),
 }));
+// The paywall's SubscribeButton reads the member's row from here: empty
+// unless a test seeds one.
+const { subscriptionRows } = vi.hoisted(() => ({
+  subscriptionRows: new Map<string, unknown>(),
+}));
+vi.mock('$lib/collections', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('$lib/collections')>()),
+  subscriptionCollection: { state: subscriptionRows, update: vi.fn() },
+}));
 vi.mock('$lib/remote/account.remote', () => ({ openBillingPortal: vi.fn() }));
 vi.mock('$lib/collections/progress', () => ({ updateLocalProgress: vi.fn() }));
 vi.mock('$lib/components/ui/Toast', () => ({
@@ -125,6 +134,7 @@ afterEach(async () => {
   if (component) unmount(component);
   component = null;
   document.body.innerHTML = '';
+  subscriptionRows.clear();
 });
 
 describe('access with nothing to play', () => {
@@ -424,7 +434,10 @@ describe('Buy only when a purchase opens the item (Codex-2hxff.14)', () => {
     test('sellable content is offered for sale when the preview ends', async () => {
       render({ content: withPreview(SELLABLE), hasAccess: false });
       const overlay = await endPreview();
-      expect(overlay.querySelector('form')).not.toBeNull();
+      expect(overlay.dataset.action).toBe('buy');
+      expect(overlay.querySelector('form button')?.textContent?.trim()).toBe(
+        'Purchase for £9.00'
+      );
     });
 
     test.each([
@@ -440,6 +453,230 @@ describe('Buy only when a purchase opens the item (Codex-2hxff.14)', () => {
       const overlay = await endPreview();
       expect(overlay.querySelector('form')).toBeNull();
       expect(overlay.textContent).not.toContain('Purchase to Watch');
+    });
+
+    // The end screen says what the paywall under it says (Codex-2hxff.99):
+    // the lock's line and the paywall's first action.
+    describe('the end screen, beside a plan', () => {
+      const PRO = {
+        id: 'tier-pro',
+        name: 'Pro',
+        priceMonthly: 1200,
+        sortOrder: 2,
+      };
+      const PREMIUM = {
+        id: 'tier-premium',
+        name: 'Premium',
+        priceMonthly: 2000,
+        sortOrder: 3,
+      };
+      const BASIC = {
+        id: 'tier-basic',
+        name: 'Basic',
+        priceMonthly: 500,
+        sortOrder: 1,
+      };
+      const plans = (
+        currentPlan: { id: string; name: string } | null,
+        status: 'loading' | 'ready' = 'ready'
+      ) => ({
+        tiers: [BASIC, PRO, PREMIUM],
+        status,
+        currentPlan,
+        currentPeriodEnd: currentPlan ? '2026-11-12T09:00:00.000Z' : null,
+      });
+      const gatedPreview = (
+        ids: string[],
+        extra: Record<string, unknown> = {}
+      ) => withPreview({ isTierGated: true, includedInTierIds: ids, ...extra });
+      // The film travels to Pricing, so its plans are marked there (U10).
+      const PRICING =
+        '/pricing?for=morning-somatic-flow&returnTo=%2Fcontent%2Fmorning-somatic-flow';
+      const line = (overlay: HTMLElement) =>
+        overlay.querySelector('.preview-player__cta-description')?.textContent;
+
+      test('signed in with no plan: the plan line, and Subscribe to pricing with the item marked', async () => {
+        render({
+          content: gatedPreview([PRO.id, PREMIUM.id]),
+          hasAccess: false,
+          requiresSubscription: true,
+          hasSubscription: false,
+          plans: plans(null),
+        });
+        const overlay = await endPreview();
+        expect(overlay.dataset.action).toBe('plan');
+        expect(line(overlay)).toBe('Included with Pro and above.');
+        expect(
+          overlay
+            .querySelector('[data-testid="subscribe-button-subscribe"]')
+            ?.getAttribute('href')
+        ).toBe(PRICING);
+        // "or purchase for" stays in the paywall (owner: "Plan button only").
+        expect(overlay.querySelector('form')).toBeNull();
+      });
+
+      test('signed out: See plans with the item marked, and Sign in back to this page', async () => {
+        render({
+          content: gatedPreview([PRO.id, PREMIUM.id]),
+          hasAccess: false,
+          isAuthenticated: false,
+          requiresSubscription: true,
+          hasSubscription: false,
+          plans: plans(null),
+        });
+        const overlay = await endPreview();
+        const seePlans = overlay.querySelector('a.preview-player__cta-button');
+        expect(seePlans?.textContent?.trim()).toBe('See plans');
+        expect(seePlans?.getAttribute('href')).toBe(PRICING);
+        const signIn = overlay.querySelector('.preview-player__cta-more a');
+        expect(signIn?.textContent?.trim()).toBe('Sign in');
+        expect(signIn?.getAttribute('href')).toBe(
+          '/login?redirect=%2Fcontent%2Fmorning-somatic-flow'
+        );
+      });
+
+      const member = (current: { id: string; name: string }) => {
+        subscriptionRows.set('org-1', {
+          organizationId: 'org-1',
+          tier: { ...current, sortOrder: 1 },
+          status: 'active',
+          currentPeriodEnd: '2026-11-12T09:00:00.000Z',
+          cancelAtPeriodEnd: false,
+        });
+        return plans(current);
+      };
+      const step = (overlay: HTMLElement) =>
+        overlay.querySelector('[data-testid="subscribe-button-upgrade"]');
+
+      test('on a plan every including plan beats on price: its line, and Upgrade to Watch', async () => {
+        render({
+          content: gatedPreview([PRO.id, PREMIUM.id]),
+          hasAccess: false,
+          requiresSubscription: true,
+          hasSubscription: true,
+          subscriptionCoversContent: false,
+          plans: member({ id: BASIC.id, name: BASIC.name }),
+        });
+        const overlay = await endPreview();
+        expect(overlay.dataset.action).toBe('plan');
+        expect(line(overlay)).toBe(
+          'Not in your Basic plan. Included with Pro and above.'
+        );
+        expect(step(overlay)?.textContent?.trim()).toBe(m.upgrade_cta_title());
+        expect(step(overlay)?.getAttribute('href')).toBe(PRICING);
+        // The words it ended on before, whatever the gate.
+        expect(overlay.textContent).not.toContain(
+          'Get full access to this content'
+        );
+      });
+
+      test('on a plan a cheaper one beats: Change Plan, and Manage plan stays in the paywall', async () => {
+        render({
+          content: gatedPreview([BASIC.id, PREMIUM.id]),
+          hasAccess: false,
+          requiresSubscription: true,
+          hasSubscription: true,
+          subscriptionCoversContent: false,
+          plans: member({ id: PRO.id, name: PRO.name }),
+        });
+        const overlay = await endPreview();
+        expect(step(overlay)?.textContent?.trim()).toBe(
+          m.subscription_change_tier()
+        );
+        expect(
+          overlay.querySelector('[data-testid="subscribe-button-manage"]')
+        ).toBeNull();
+        expect(
+          document
+            .getElementById('purchase-label-sub')
+            ?.closest('section')
+            ?.querySelector('[data-testid="subscribe-button-manage"]')
+        ).not.toBeNull();
+      });
+
+      test('while the plan names load: no line yet, never a stale one', async () => {
+        render({
+          content: gatedPreview([PRO.id]),
+          hasAccess: false,
+          requiresSubscription: true,
+          plans: plans(null, 'loading'),
+        });
+        const overlay = await endPreview();
+        expect(line(overlay)).toBeUndefined();
+        expect(overlay.dataset.action).toBe('plan');
+      });
+
+      test('closed with no price: its line, and no button at all', async () => {
+        render({
+          content: gatedPreview([]),
+          hasAccess: false,
+          requiresSubscription: true,
+          plans: plans(null),
+        });
+        const overlay = await endPreview();
+        expect(overlay.dataset.action).toBe('none');
+        expect(line(overlay)).toBe(m.unavailable_cta_description());
+        expect(overlay.querySelector('form')).toBeNull();
+        expect(overlay.querySelector('.preview-player__cta-button')).toBeNull();
+        expect(
+          overlay.querySelector('[data-testid="subscribe-button"]')
+        ).toBeNull();
+      });
+
+      test('closed with a one-time price: Buy, as the paywall sells it', async () => {
+        render({
+          content: gatedPreview([], SELLABLE),
+          hasAccess: false,
+          requiresSubscription: true,
+          plans: plans(null),
+        });
+        const overlay = await endPreview();
+        expect(overlay.dataset.action).toBe('buy');
+      });
+
+      test('an item with no preview keeps the lock', () => {
+        render({
+          content: makeContent({
+            isTierGated: true,
+            includedInTierIds: [PRO.id],
+          }),
+          hasAccess: false,
+          requiresSubscription: true,
+          plans: plans(null),
+        });
+        expect(document.querySelector('.preview-player')).toBeNull();
+        expect(
+          player().querySelector('.content-detail__preview-cta')?.textContent
+        ).toContain('Subscribe to Watch');
+      });
+    });
+
+    test('free, signed out: Sign in to watch when the preview ends', async () => {
+      render({
+        content: withPreview({}),
+        hasAccess: false,
+        isAuthenticated: false,
+      });
+      const overlay = await endPreview();
+      const cta = overlay.querySelector('a.preview-player__cta-button');
+      expect(cta?.textContent?.trim()).toBe(
+        m.content_detail_signin_watch_cta()
+      );
+      expect(cta?.getAttribute('href')).toBe('/login');
+    });
+
+    test('followers only, signed in: Follow when the preview ends', async () => {
+      render({
+        content: withPreview({ isFollowerGated: true }),
+        hasAccess: false,
+      });
+      const overlay = await endPreview();
+      expect(overlay.dataset.action).toBe('follow');
+      expect(
+        overlay
+          .querySelector('button.preview-player__cta-button')
+          ?.textContent?.trim()
+      ).toBe(m.org_follow());
     });
   });
 });

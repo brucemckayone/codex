@@ -126,6 +126,14 @@ describe('paused by a payment dispute (Codex-2hxff.60)', () => {
         })
         .returning()
     ).id;
+    // The creator files every item into this org, so is on its team
+    // (Codex-ocal6): the service refuses org content from a non-member.
+    await db.insert(organizationMemberships).values({
+      userId: creatorId,
+      organizationId,
+      role: 'creator',
+      status: 'active',
+    });
     tierId = takeFirst(
       await db
         .insert(subscriptionTiers)

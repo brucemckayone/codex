@@ -4202,6 +4202,96 @@ describe('SubscriptionService', () => {
       expect(stripe.transfers.create).not.toHaveBeenCalled();
     });
 
+    // Review C1, SF-12: with no charge nothing is paid out, but the renewal
+    // stands: the row, the receipt and the cache bump, as a course
+    // subscription's renewal does.
+    it('a renewal credit paid in full: alerted and nothing paid out, and still renewed, with its receipt and the cache bump', async () => {
+      const { org, tier1 } = await createFullOrg('credit-paid-renewal');
+      const sub = takeFirst(
+        await db
+          .insert(subscriptions)
+          .values(
+            createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+              status: 'active',
+            })
+          )
+          .returning()
+      );
+      Object.assign(stripe.invoices, {
+        update: vi.fn().mockResolvedValue({}),
+      });
+      const retrieve = stripe.subscriptions.retrieve as ReturnType<
+        typeof vi.fn
+      >;
+      const live = retrieve.getMockImplementation() as
+        | ((id: string) => Promise<Stripe.Subscription>)
+        | undefined;
+      let renewedTo = 0;
+      retrieve.mockImplementationOnce(async (id: string) => {
+        const renewed = await live?.(id);
+        renewedTo = renewed?.items.data[0]?.current_period_end ?? 0;
+        return renewed;
+      });
+      const bump = vi.spyOn(
+        service as unknown as {
+          invalidateIfConfigured: (...a: unknown[]) => void;
+        },
+        'invalidateIfConfigured'
+      );
+      const error = vi.spyOn(
+        (service as unknown as { obs: { error: (...a: unknown[]) => void } })
+          .obs,
+        'error'
+      );
+      const invoice = createMockStripeInvoice({
+        amount_paid: 0,
+        total: 1000,
+        starting_balance: -6493,
+        billing_reason: 'subscription_cycle',
+        customer_email: 'renewed-by-credit@example.com',
+        payments: { data: [] },
+        parent: {
+          subscription_details: {
+            subscription: sub.stripeSubscriptionId,
+            metadata: { codex_organization_id: org.id },
+          },
+        },
+      }) as unknown as Stripe.Invoice;
+
+      const result = await service.handleInvoicePaymentSucceeded(invoice);
+
+      expect(
+        error.mock.calls.filter(([message]) =>
+          String(message).startsWith('Customer credit paid')
+        )
+      ).toHaveLength(1);
+      expect(stripe.transfers.create).not.toHaveBeenCalled();
+      expect(renewedTo).toBeGreaterThan(0);
+      const { eq } = await import('drizzle-orm');
+      const row = takeFirst(
+        await db
+          .select()
+          .from(subscriptions)
+          .where(eq(subscriptions.id, sub.id))
+      );
+      expect(row.currentPeriodEnd).toEqual(new Date(renewedTo * 1000));
+      expect(result).toMatchObject({
+        userId: otherCreatorId,
+        orgId: org.id,
+        email: {
+          to: 'renewed-by-credit@example.com',
+          templateName: 'subscription-renewed',
+        },
+      });
+      expect(bump).toHaveBeenCalledWith(
+        otherCreatorId,
+        org.id,
+        'payment_succeeded'
+      );
+      bump.mockRestore();
+      error.mockRestore();
+    });
+
     it('should skip if no subscription ID in invoice', async () => {
       const mockInvoice = createMockStripeInvoice({
         parent: null,
@@ -12074,6 +12164,12 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
       revenueType: 'subscription',
       status: 'active',
       currentProposalId: proposal.id,
+      // As acceptance does (agreement-service.ts), the proposal's start, on
+      // the same clock as the invoice's moment. The column's default is the
+      // database's clock, which runs a few ms apart from this one: an
+      // agreement made "now" could read as starting after an invoice handled
+      // just after it, and the creators got nothing (an intermittent fail).
+      effectiveFrom: proposal.proposedEffectiveFrom,
     });
     return userId;
   }

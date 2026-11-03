@@ -40,7 +40,11 @@
   // import boundary (Expected to find metadata for remote file).
   // VideoPlayer and AudioPlayer are heavy but don't touch remote
   // files, so they're dynamically loaded further down.
-  import { PreviewPlayer, deriveAccessState } from '$lib/components/player';
+  import {
+    PreviewPlayer,
+    deriveAccessState,
+    describePreviewEnd,
+  } from '$lib/components/player';
   import SubscribeButton from '$lib/components/subscription/SubscribeButton.svelte';
   import {
     formatPrice,
@@ -590,6 +594,33 @@
   });
 
   /**
+   * The preview's end screen (Codex-2hxff.99): the lock's own line and the
+   * paywall's first action, in this view's gate-chain order, so the two
+   * can't drift. Plan links mark the item (U10).
+   */
+  const previewEnd = $derived(
+    describePreviewEnd({
+      line: lockCtaSubtext,
+      isAuthenticated: !!isAuthenticated,
+      organizationId: content.organizationId ?? null,
+      hasSubscription: !!hasSubscription,
+      upgradeOnly: planPaywall.kind === 'upgrade',
+      accessCheckFailed,
+      isTeamOnly,
+      isCourseOnly,
+      isFollowersOnly,
+      isClosed,
+      needsSubscription,
+      needsPurchase,
+      isFree,
+      isAudio,
+      pricingHref,
+      signInHref: `/login?redirect=${encodeURIComponent(page.url.pathname)}`,
+      purchaseLabel: m.checkout_purchase_button({ price: displayPrice(priceCents) }),
+    })
+  );
+
+  /**
    * Access passed but there is nothing to play: the media is still
    * processing, a published item has no media, or (for public content) the
    * stream call failed. An anonymous visitor reaches it only when there is no
@@ -1007,8 +1038,12 @@
           poster={largestThumbnailUrl}
           contentId={content.id}
           contentTitle={content.title}
-          {accessState}
-          canPurchase={isSellable}
+          end={previewEnd}
+          follow={{
+            following: isAlreadyFollowing,
+            busy: followInFlight,
+            onfollow: handleFollow,
+          }}
           autoplay={true}
         />
         {#snippet failed(_error, _reset)}

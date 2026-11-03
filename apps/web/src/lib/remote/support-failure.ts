@@ -13,11 +13,20 @@
  * type. They are client-facing by design (a ServiceError's context is sent as
  * `details`), and hold ids, codes, counts and amounts only.
  *
+ * Anything but an `ApiError` had no answer behind it: the fetch to admin-api
+ * threw (a dropped connection) or the success body would not parse, so the
+ * worker may still have acted. Returning it skips the `handleError` hook a
+ * throw would reach, so it is logged here, as `toCommandFailure` does
+ * (subscription.remote.ts, Codex-2hxff.66): the command, the ids it acted
+ * on, the status and the error's name. Never the error's text: a parse
+ * error quotes the body, which can name a person.
+ *
  * A plain module, not part of the `.remote.ts` file, so it can be tested
  * without `$app/server`.
  */
 
 import { ApiError } from '$lib/api/errors';
+import { logger } from '$lib/observability';
 
 export interface SupportCommandFailure {
   /** A string discriminant: apps/web has strictNullChecks off. */
@@ -27,7 +36,11 @@ export interface SupportCommandFailure {
   code: string | null;
   /** The worker's `details.code`: the support error's own code. */
   detailsCode: string | null;
-  /** The worker's text, for a 4xx only: a 5xx may carry internals. */
+  /**
+   * The worker's text, for a 4xx only: a 5xx may carry internals. No page
+   * shows it: each words a refusal from its codes in en.json (W4), so a
+   * change to a service's message can't change support's screen.
+   */
   message: string | null;
   /** `STRIPE_REFUSED`: Stripe's code, such as `charge_disputed`. */
   stripeCode: string | null;
@@ -44,6 +57,12 @@ export interface SupportCommandFailure {
    * `PRICE_MOVE_NOT_HELD`: why there is nothing to retry or close.
    */
   reason: string | null;
+  /** `PRICE_MOVE_NOT_HELD` `skipped`: why the run set it aside, such as `moving_away`. */
+  skipReason: string | null;
+  /** `PRICE_MOVE_NOT_HELD` `resolved`: how support closed it, such as `moved_by_hand`. */
+  resolution: string | null;
+  /** `PRICE_MOVE_NOT_HELD` `superseded`: when the newer price was saved (ISO). */
+  supersededAt: string | null;
   /** `FEE_CHANGE_NOT_WAITING`: `cancelled`, `cut_below_today` or `replaced_by_bigger`. */
   voidReason: string | null;
   /** `FEE_CHANGE_NOT_WAITING`: when the rise was called off (ISO). */
@@ -70,7 +89,15 @@ function field<T extends 'string' | 'number'>(
     : null;
 }
 
-export function toSupportFailure(error: unknown): SupportCommandFailure {
+/**
+ * `commandName` and `ids` name the command and what it acted on, for the
+ * no-answer log line only: ids, never an email or a note.
+ */
+export function toSupportFailure(
+  error: unknown,
+  commandName: string,
+  ids: Record<string, string>
+): SupportCommandFailure {
   if (ApiError.isApiError(error)) {
     const details = error.details;
     const isClientError = error.status >= 400 && error.status < 500;
@@ -86,6 +113,9 @@ export function toSupportFailure(error: unknown): SupportCommandFailure {
       maxCents: field(details, 'maxCents', 'number'),
       disputeStatus: field(details, 'disputeStatus', 'string'),
       reason: field(details, 'reason', 'string'),
+      skipReason: field(details, 'skipReason', 'string'),
+      resolution: field(details, 'resolution', 'string'),
+      supersededAt: field(details, 'supersededAt', 'string'),
       voidReason: field(details, 'voidReason', 'string'),
       voidedAt: field(details, 'voidedAt', 'string'),
       state: field(details, 'state', 'string'),
@@ -94,6 +124,11 @@ export function toSupportFailure(error: unknown): SupportCommandFailure {
       toldByName: field(details, 'toldByName', 'string'),
     };
   }
+  logger.error(`support command ${commandName} failed with no API answer`, {
+    ...ids,
+    status: 500,
+    errorName: error instanceof Error ? error.name : typeof error,
+  });
   return {
     outcome: 'failed',
     status: 500,
@@ -106,6 +141,9 @@ export function toSupportFailure(error: unknown): SupportCommandFailure {
     maxCents: null,
     disputeStatus: null,
     reason: null,
+    skipReason: null,
+    resolution: null,
+    supersededAt: null,
     voidReason: null,
     voidedAt: null,
     state: null,

@@ -65,6 +65,7 @@ export { default as PlusIcon } from './PlusIcon.svelte';
 export { default as ReceiptIcon } from './ReceiptIcon.svelte';
 export { default as RedoIcon } from './RedoIcon.svelte';
 export { default as RefreshCwIcon } from './RefreshCwIcon.svelte';
+export { default as RotateCcwIcon } from './RotateCcwIcon.svelte';
 export { default as SearchIcon } from './SearchIcon.svelte';
 export { default as SearchMinusIcon } from './SearchMinusIcon.svelte';
 export { default as SearchXIcon } from './SearchXIcon.svelte';

@@ -80,6 +80,13 @@
     size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl';
     /** Whether to render the inline status badge (Ends/Payment failed/Paused). */
     showBadge?: boolean;
+    /**
+     * Whether to render Manage plan beside the action. The preview's end
+     * screen leaves it out (Codex-2hxff.99, owner: "Plan button only"): it
+     * offers the step that opens the item, and the paywall under it keeps
+     * Manage plan.
+     */
+    showManage?: boolean;
     /** Optional container class for positioning in the parent layout. */
     class?: string;
   }
@@ -92,6 +99,7 @@
     changePlan = false,
     size = 'md',
     showBadge = true,
+    showManage = true,
     class: className = '',
   }: Props = $props();
 
@@ -305,25 +313,29 @@
           {changePlan ? m.subscription_change_tier() : m.upgrade_cta_title()}
         </Button>
       </a>
-      <a
-        href={manageUrl}
-        class="subscribe-button__manage"
-        data-testid="subscribe-button-manage"
-      >
-        {m.pricing_manage_plan()}
-      </a>
+      {#if showManage}
+        <a
+          href={manageUrl}
+          class="subscribe-button__manage"
+          data-testid="subscribe-button-manage"
+        >
+          {m.pricing_manage_plan()}
+        </a>
+      {/if}
     {:else}
       <!-- Subscribed & active — non-interactive confirmation -->
       <Badge variant="success" class="subscribe-button__badge">
         {m.subscription_badge()}
       </Badge>
-      <a
-        href={manageUrl}
-        class="subscribe-button__manage"
-        data-testid="subscribe-button-manage"
-      >
-        {m.pricing_manage_plan()}
-      </a>
+      {#if showManage}
+        <a
+          href={manageUrl}
+          class="subscribe-button__manage"
+          data-testid="subscribe-button-manage"
+        >
+          {m.pricing_manage_plan()}
+        </a>
+      {/if}
     {/if}
   {:else if status === 'cancelling'}
     {#if showBadge && endsLabel}
@@ -340,13 +352,15 @@
     >
       {m.pricing_reactivate_plan()}
     </Button>
-    <a
-      href={manageUrl}
-      class="subscribe-button__manage"
-      data-testid="subscribe-button-manage"
-    >
-      {m.pricing_manage_plan()}
-    </a>
+    {#if showManage}
+      <a
+        href={manageUrl}
+        class="subscribe-button__manage"
+        data-testid="subscribe-button-manage"
+      >
+        {m.pricing_manage_plan()}
+      </a>
+    {/if}
     {#if reactivateError}
       <p class="subscribe-button__error" role="alert">
         {reactivateError}
@@ -367,13 +381,15 @@
     >
       {m.pricing_update_payment()}
     </Button>
-    <a
-      href={manageUrl}
-      class="subscribe-button__manage"
-      data-testid="subscribe-button-manage"
-    >
-      {m.pricing_manage_plan()}
-    </a>
+    {#if showManage}
+      <a
+        href={manageUrl}
+        class="subscribe-button__manage"
+        data-testid="subscribe-button-manage"
+      >
+        {m.pricing_manage_plan()}
+      </a>
+    {/if}
   {:else if status === 'paused'}
     {#if showBadge}
       <Badge variant="warning" class="subscribe-button__badge">
@@ -395,13 +411,15 @@
     >
       {m.pricing_resume_plan()}
     </Button>
-    <a
-      href={manageUrl}
-      class="subscribe-button__manage"
-      data-testid="subscribe-button-manage"
-    >
-      {m.pricing_manage_plan()}
-    </a>
+    {#if showManage}
+      <a
+        href={manageUrl}
+        class="subscribe-button__manage"
+        data-testid="subscribe-button-manage"
+      >
+        {m.pricing_manage_plan()}
+      </a>
+    {/if}
     {#if resumeError}
       <p class="subscribe-button__error" role="alert">
         {resumeError}

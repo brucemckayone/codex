@@ -14,7 +14,7 @@
 
 import type { KVNamespace } from '@cloudflare/workers-types';
 import { STRIPE_EVENTS } from '@codex/constants';
-import { AfterCommitError } from '@codex/service-errors';
+import { AfterCommitError, InternalServiceError } from '@codex/service-errors';
 import {
   createMockHonoContext,
   createMockStripeSubscription,
@@ -427,6 +427,51 @@ describe('handleSubscriptionWebhook', () => {
           pendingPriceId: 'price_gone',
           errorType: 'StripeInvalidRequestError',
           errorCode: 'resource_missing',
+        })
+      );
+    });
+
+    // Review C1, SF-2: a typed refusal brings its own ids (the schedule that
+    // holds the subscription, or a dropped marker's intervals), with an errorId.
+    it.each([
+      {
+        refusal: 'a schedule that is not ours',
+        context: {
+          stripeSubscriptionId: 'sub_swap_typed',
+          pendingPriceId: 'price_next',
+          scheduleId: 'sub_sched_dashboard',
+        },
+      },
+      {
+        refusal: 'a marker for another billing period, dropped',
+        context: {
+          stripeSubscriptionId: 'sub_swap_typed',
+          pendingPriceId: 'price_next',
+          priceInterval: 'year',
+          itemInterval: 'month',
+        },
+      },
+    ])('$refusal: its ids and an errorId reach the alert', async ({
+      context: refusalContext,
+    }) => {
+      vi.mocked(applyDuePendingPriceChange).mockRejectedValueOnce(
+        new InternalServiceError('Refused', refusalContext)
+      );
+      const event = createEvent(STRIPE_EVENTS.SUBSCRIPTION_UPDATED, {
+        id: 'sub_swap_typed',
+        status: 'active',
+        metadata: { codex_pending_price_id: 'price_next' },
+      });
+      const { context, mock } = createContext();
+
+      await handleSubscriptionWebhook(event, mockStripe, context);
+
+      expect(mock._obs.error).toHaveBeenCalledWith(
+        'Pending price change could not be applied',
+        expect.objectContaining({
+          ...refusalContext,
+          errorId: expect.any(String),
+          subscriptionId: 'sub_swap_typed',
         })
       );
     });

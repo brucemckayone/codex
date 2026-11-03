@@ -22,6 +22,7 @@
 import {
   content,
   mediaItems,
+  organizationMemberships,
   organizations,
   stripeConnectAccounts,
   subscriptionTiers,
@@ -29,6 +30,7 @@ import {
 import {
   createTestConnectAccountInput,
   createTestMediaItemInput,
+  createTestMembershipInput,
   createTestOrganizationInput,
   createTestTierInput,
   createUniqueSlug,
@@ -82,6 +84,20 @@ describe('ContentService', () => {
   afterAll(async () => {
     await teardownTestDatabase();
   });
+
+  /**
+   * Put creators on an org's team: the service files content into an org only
+   * for an active owner, admin or creator of it (Codex-ocal6).
+   */
+  async function joinTeam(orgId: string, ...userIds: string[]): Promise<void> {
+    await db
+      .insert(organizationMemberships)
+      .values(
+        userIds.map((userId) =>
+          createTestMembershipInput(orgId, userId, { role: 'creator' })
+        )
+      );
+  }
 
   describe('create', () => {
     describe('valid content creation', () => {
@@ -189,6 +205,7 @@ describe('ContentService', () => {
             .values(createTestOrganizationInput())
             .returning()
         );
+        await joinTeam(org.id, creatorId);
 
         const media = takeFirst(
           await db
@@ -292,12 +309,14 @@ describe('ContentService', () => {
             .values(createTestOrganizationInput())
             .returning()
         );
+        await joinTeam(org.id, creatorId);
         const otherOrg = takeFirst(
           await db
             .insert(organizations)
             .values(createTestOrganizationInput())
             .returning()
         );
+        await joinTeam(otherOrg.id, creatorId);
 
         const tier = takeFirst(
           await db
@@ -610,6 +629,7 @@ describe('ContentService', () => {
             .values(createTestOrganizationInput())
             .returning()
         );
+        await joinTeam(org.id, creatorId);
 
         const media = takeFirst(
           await db
@@ -660,6 +680,7 @@ describe('ContentService', () => {
             .values(createTestOrganizationInput())
             .returning()
         );
+        await joinTeam(org1.id, creatorId);
 
         const org2 = takeFirst(
           await db
@@ -667,6 +688,7 @@ describe('ContentService', () => {
             .values(createTestOrganizationInput())
             .returning()
         );
+        await joinTeam(org2.id, creatorId);
 
         const media = takeFirst(
           await db
@@ -720,6 +742,7 @@ describe('ContentService', () => {
             .values(createTestOrganizationInput())
             .returning()
         );
+        await joinTeam(org.id, creatorId);
 
         const media = takeFirst(
           await db
@@ -2146,6 +2169,7 @@ describe('ContentService', () => {
           .values(createTestOrganizationInput())
           .returning()
       );
+      await joinTeam(org.id, creatorId);
 
       const freeArticle = await service.create(
         {

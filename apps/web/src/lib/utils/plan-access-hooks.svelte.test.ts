@@ -183,6 +183,8 @@ describe('useSubscriptionContext: covered by set membership', () => {
         tiersFailed: false,
         currentSubscription: {
           tier: { id: PRO.id, name: 'Pro' },
+          status: 'active',
+          cancelAtPeriodEnd: false,
           currentPeriodEnd: '2026-11-12T09:00:00.000Z',
           pendingTierChange: {
             ...moving,
@@ -199,6 +201,64 @@ describe('useSubscriptionContext: covered by set membership', () => {
       id: BASIC.id,
       name: 'Basic',
       effectiveAt: '2026-11-12T09:00:00.000Z',
+    });
+  });
+
+  // waiting-move.html state 6: a cancelling plan ends at the renewal the
+  // move would land on, and the move goes with it. The server still sends
+  // the move for a cancelling or past-due row, so the hook drops it.
+  describe('a plan that is not carrying on drops its waiting move', () => {
+    const moving = {
+      tierId: BASIC.id,
+      tierName: 'Basic',
+      effectiveAt: '2026-11-12T09:00:00.000Z',
+    };
+    const item = { isTierGated: true, includedInTierIds: [BASIC.id] };
+
+    it.each([
+      ['cancelling', { status: 'cancelling', cancelAtPeriodEnd: true }],
+      ['past due', { status: 'past_due', cancelAtPeriodEnd: false }],
+    ])('the live entry, %s: nothing waits', (_label, state) => {
+      collectionState.set(ORG, {
+        organizationId: ORG,
+        tier: { id: PRO.id, name: PRO.name, sortOrder: PRO.sortOrder },
+        currentPeriodEnd: '2026-11-12T09:00:00.000Z',
+        pendingTierChange: moving,
+        ...state,
+      });
+      expect(subContext(item)().subCtx.pendingPlan).toBeNull();
+    });
+
+    it.each([
+      ['set to cancel', { status: 'active', cancelAtPeriodEnd: true }],
+      ['cancelling', { status: 'cancelling', cancelAtPeriodEnd: true }],
+      ['past due', { status: 'past_due', cancelAtPeriodEnd: false }],
+    ])('the streamed row, %s: nothing waits', async (_label, state) => {
+      const read = subContext(
+        item,
+        Promise.resolve({
+          requiresSubscription: true,
+          hasSubscription: true,
+          subscriptionCoversContent: false,
+          tiers: TIERS,
+          tiersFailed: false,
+          currentSubscription: {
+            tier: { id: PRO.id, name: 'Pro' },
+            currentPeriodEnd: '2026-11-12T09:00:00.000Z',
+            pendingTierChange: {
+              ...moving,
+              kind: 'plan',
+              amountCents: 500,
+              billingInterval: 'month',
+              laterPrice: null,
+            },
+            ...state,
+          },
+        })
+      );
+      await settle();
+      expect(read().subCtx.hasSubscription).toBe(true);
+      expect(read().subCtx.pendingPlan).toBeNull();
     });
   });
 

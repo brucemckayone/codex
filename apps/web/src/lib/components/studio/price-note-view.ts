@@ -30,7 +30,7 @@ const DONE_SHOWN_FOR_MS = 14 * DAY_MS;
  * (`@codex/subscription`, not imported: it would bring the service package
  * into the browser). A test pins the two together.
  */
-export const PRICE_EMAILS_PER_RUN = 1500;
+export const PRICE_EMAILS_PER_RUN = 1125;
 
 export interface EditTierHint {
   /** `emailed` is P1, with the mail icon; `going_out` is P8, a warning. */
