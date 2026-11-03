@@ -301,6 +301,68 @@ describe('a cheaper plan waits for the renewal (page 1 states 1-3)', () => {
     expect(document.activeElement).toBe(byTestId('plan-move-keep'));
   });
 
+  // C2-W2: a change made now turns the card's button into a disabled
+  // "Current plan" in another branch, and nothing waits, so focus goes to the
+  // now-current plan's Manage plan link.
+  test('an upgrade made now: focus goes to the new plan’s Manage plan', async () => {
+    remote.previewSubscriptionTierChange.mockResolvedValueOnce({
+      success: true,
+      data: UPGRADE_PREVIEW,
+    });
+    remote.changeSubscriptionTier.mockResolvedValueOnce({
+      success: true,
+      data: subscription(PREMIUM),
+    });
+    mountPage(subscription(PRO));
+
+    cardButton('Premium')?.focus();
+    cardButton('Premium')?.click();
+    await settle();
+    byTestId('tier-change-dialog-confirm')?.click();
+    await settle();
+    await afterFocus();
+
+    expect(card('Premium').classList.contains('card--current')).toBe(true);
+    expect(document.activeElement).toBe(
+      card('Premium').querySelector('[data-testid="tier-cta-manage"]')
+    );
+  });
+
+  test('a switch into yearly: focus goes to the plan’s Manage plan', async () => {
+    remote.previewSubscriptionTierChange.mockResolvedValueOnce({
+      success: true,
+      data: {
+        ...UPGRADE_PREVIEW,
+        newRecurringAmountCents: 12000,
+        newRecurringInterval: 'year',
+        quote: 'due:336|lines:-503,839|next:2027-11-02',
+      },
+    });
+    remote.changeSubscriptionTier.mockResolvedValueOnce({
+      success: true,
+      data: subscription(PRO, { billingInterval: 'year', amountCents: 12000 }),
+    });
+    mountPage(subscription(PRO));
+    Array.from(
+      document.querySelectorAll<HTMLButtonElement>(
+        '.billing-toggle [role="radio"]'
+      )
+    )[1]?.click();
+    flushSync();
+
+    byTestId('tier-cta-switch-interval')?.focus();
+    byTestId('tier-cta-switch-interval')?.click();
+    await settle();
+    byTestId('tier-change-dialog-confirm')?.click();
+    await settle();
+    await afterFocus();
+
+    expect(byTestId('tier-cta-switch-interval')).toBeNull();
+    expect(document.activeElement).toBe(
+      card('Pro').querySelector('[data-testid="tier-cta-manage"]')
+    );
+  });
+
   test('Cancel puts focus back on the card’s button (W6)', async () => {
     remote.previewSubscriptionTierChange.mockResolvedValueOnce({
       success: true,

@@ -861,8 +861,10 @@
    * clear it on every open, so a line set now came from this dialog), else
    * back to the button that opened it while it can still take focus
    * (Cancel, Escape, a change refused), else the notice's Keep (a change set
-   * to wait swaps the button for a disabled "Starts {date}"). Without it,
-   * focus fell to <body>.
+   * to wait swaps the button for a disabled "Starts {date}"), else the
+   * current plan's Manage plan link: an upgrade, or a switch into yearly,
+   * turns the card's button into a disabled "Current plan" in another branch,
+   * and nothing waits (C2-W2). Without it, focus fell to <body>.
    */
   function tierChangeCloseFocus(): HTMLElement | null {
     if (keepOutcome) {
@@ -870,7 +872,10 @@
     }
     const back = tierChangeOpener;
     if (back?.isConnected && !back.matches(':disabled')) return back;
-    return document.querySelector<HTMLElement>('[data-testid="plan-move-keep"]');
+    return (
+      document.querySelector<HTMLElement>('[data-testid="plan-move-keep"]') ??
+      document.querySelector<HTMLElement>('.card--current [data-testid="tier-cta-manage"]')
+    );
   }
 
   function resetTierChangeDialog(tier: SubscriptionTier) {
