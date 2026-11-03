@@ -30,7 +30,7 @@
   import type { FeeChangeCard, FeeNoticeItem } from '@codex/admin';
   import type { CreateDialogProps } from '@melt-ui/svelte';
   import { SUPPORT_NOTE_MAX_LENGTH } from '@codex/validation';
-  import { tick } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import * as m from '$paraglide/messages';
   import { Alert, Button, Label } from '$lib/components/ui';
   import * as Dialog from '$lib/components/ui/Dialog';
@@ -75,8 +75,15 @@
     if (note.trim() !== '') noteMissing = false;
   });
 
-  // "From now" is when the dialog opened.
-  const words = $derived(item && open ? markWords(item, card, new Date()) : null);
+  // "From now" is when the dialog opened, captured as it opens. The words
+  // hang on the person only, never on `open`: gating the dialog on `open`
+  // unmounted it in the same flush that closed it, before Melt saw the close,
+  // so `closeFocus` never ran and focus fell to <body> (W2).
+  let openedAt = $state(new Date());
+  $effect.pre(() => {
+    if (open) untrack(() => (openedAt = new Date()));
+  });
+  const words = $derived(item ? markWords(item, card, openedAt) : null);
   const follows = $derived(words?.follows?.split(DATE_MARK) ?? null);
 
   async function handleSubmit() {

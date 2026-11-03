@@ -851,7 +851,31 @@
   }
 
   /** The dialog opened afresh on `tier`, with nothing loaded yet. */
+  /** The button that opened the change dialog, for `tierChangeCloseFocus`. */
+  let tierChangeOpener: HTMLElement | null = null;
+
+  /**
+   * Where focus goes as the change dialog closes (W6): back to the button
+   * that opened it while it can still take focus (Cancel, Escape, a change
+   * refused), else the notice's Keep (a change set to wait swaps the button
+   * for a disabled "Starts {date}"), else Keep's outcome line. Without it,
+   * focus fell to <body>.
+   */
+  function tierChangeCloseFocus(): HTMLElement | null {
+    const back = tierChangeOpener;
+    if (back?.isConnected && !back.matches(':disabled')) return back;
+    return (
+      document.querySelector<HTMLElement>('[data-testid="plan-move-keep"]') ??
+      document.querySelector<HTMLElement>('[data-testid="plan-move-outcome"]')
+    );
+  }
+
   function resetTierChangeDialog(tier: SubscriptionTier) {
+    // A step inside the dialog opens it again: keep the first opener.
+    if (!tierChangeDialogOpen) {
+      tierChangeOpener =
+        document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    }
     tierChangeDialogTier = tier;
     tierChangeDialogOpen = true;
     tierChangePreview = null;
@@ -2301,7 +2325,7 @@
      ═══════════════════════════════════════════════════════════════════ -->
 {#snippet emphasised(parts: MessagePart[])}{#each parts as part, i (i)}{#if part.strong}<b>{part.text}</b>{:else}{part.text}{/if}{/each}{/snippet}
 
-<Dialog.Root bind:open={tierChangeDialogOpen}>
+<Dialog.Root bind:open={tierChangeDialogOpen} closeFocus={tierChangeCloseFocus}>
   <Dialog.Content size="sm">
     <Dialog.Header>
       <Dialog.Title>{tierChangeTitle}</Dialog.Title>

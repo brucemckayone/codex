@@ -84,6 +84,39 @@ describe('PriceChangeNote', () => {
     expect(note?.querySelectorAll('button')).toHaveLength(0);
   });
 
+  test('a Check again that finds it done turns into Dismiss in place, keeping focus (W6)', () => {
+    const onCheckAgain = vi.fn();
+    const onDismiss = vi.fn();
+    const props = $state<Record<string, unknown>>({
+      view: view({ action: 'check' }),
+      name: 'Pro',
+      busy: false,
+      onCheckAgain,
+      onDismiss,
+    });
+    component = mount(PriceChangeNote, { target: document.body, props });
+    flushSync();
+    const check = document.querySelector<HTMLButtonElement>(
+      '[data-testid="price-change-note"] button'
+    );
+    check?.focus();
+    check?.click();
+    expect(onCheckAgain).toHaveBeenCalledOnce();
+
+    // The read lands: the change is done.
+    props.view = view({ icon: 'mail', action: 'dismiss' });
+    flushSync();
+    const after = document.querySelector<HTMLButtonElement>(
+      '[data-testid="price-change-note"] button'
+    );
+    expect(after).toBe(check);
+    expect(after?.textContent?.trim()).toBe('Dismiss');
+    expect(document.activeElement).toBe(after);
+    after?.click();
+    expect(onDismiss).toHaveBeenCalledOnce();
+    expect(onCheckAgain).toHaveBeenCalledOnce();
+  });
+
   test('a press while a read is out does nothing', () => {
     const onCheckAgain = vi.fn();
     const note = render({

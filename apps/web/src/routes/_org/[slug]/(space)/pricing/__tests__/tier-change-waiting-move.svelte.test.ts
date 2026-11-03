@@ -205,6 +205,8 @@ async function settle() {
   for (let i = 0; i < 8; i++) await Promise.resolve();
   flushSync();
 }
+/** Melt restores focus a tick and a millisecond after the dialog closes. */
+const afterFocus = () => new Promise((resolve) => setTimeout(resolve, 20));
 
 const byTestId = (id: string) =>
   document.querySelector<HTMLElement>(`[data-testid="${id}"]`);
@@ -272,6 +274,7 @@ describe('a cheaper plan waits for the renewal (page 1 states 1-3)', () => {
     });
     mountPage(subscription(PRO));
 
+    cardButton('Basic')?.focus();
     cardButton('Basic')?.click();
     await settle();
     byTestId('tier-change-dialog-confirm')?.click();
@@ -293,6 +296,26 @@ describe('a cheaper plan waits for the renewal (page 1 states 1-3)', () => {
       m.pricing_move_starts({ date: DATE })
     );
     expect(basic?.disabled).toBe(true);
+    // The button that opened it can't take focus now: the notice's Keep does (W6).
+    await afterFocus();
+    expect(document.activeElement).toBe(byTestId('plan-move-keep'));
+  });
+
+  test('Cancel puts focus back on the card’s button (W6)', async () => {
+    remote.previewSubscriptionTierChange.mockResolvedValueOnce({
+      success: true,
+      data: WAIT_PREVIEW,
+    });
+    mountPage(subscription(PRO));
+
+    const basic = cardButton('Basic');
+    basic?.focus();
+    basic?.click();
+    await settle();
+    byTestId('tier-change-dialog-cancel')?.click();
+    await settle();
+    await afterFocus();
+    expect(document.activeElement).toBe(basic);
   });
 
   test('a confirm that a retry can fix: "We couldn\'t change your plan." and Switch on stays', async () => {

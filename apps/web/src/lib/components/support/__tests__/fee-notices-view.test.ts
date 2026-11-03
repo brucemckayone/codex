@@ -307,6 +307,31 @@ describe('marking someone told another way', () => {
     });
   });
 
+  // W4: never the worker's `message`; en.json is the only source.
+  test.each([
+    [
+      'FEE_CHANGE_NOT_WAITING',
+      'warning',
+      'Nothing to mark: this fee rise has started, or was cancelled or replaced.',
+    ],
+    ['FEE_NOTICE_ALREADY_TOLD', 'info', 'This person has already been told.'],
+    [
+      'FEE_NOTICE_NOT_NEEDED',
+      'info',
+      'This person is no longer paid less, so no notice is needed.',
+    ],
+  ])('%s with nothing more to say: en.json’s words, never the worker’s (W4)', (detailsCode, variant, text) => {
+    const answer = failure({
+      status: 409,
+      detailsCode,
+      message: 'Server words, not en.json.',
+    });
+    expect(markRefusalNotice(feeNotice(), answer, NOW)).toEqual({
+      variant,
+      text,
+    });
+  });
+
   test('a save that failed keeps the dialog open', () => {
     expect(
       markRefusalNotice(feeNotice(), failure({ status: 500 }), NOW)

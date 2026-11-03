@@ -245,15 +245,15 @@ describe('Retry', () => {
     expect(countsSlot().refresh).toHaveBeenCalledTimes(1);
   });
 
-  test('M6 nothing to retry: the reason, in the server’s words', async () => {
+  test('M6 nothing to retry: the reason, in en.json’s words (W4)', async () => {
     retryPriceMove.mockResolvedValue(
       failure({
         status: 409,
         code: 'CONFLICT',
         detailsCode: 'PRICE_MOVE_NOT_HELD',
         reason: 'superseded',
-        message:
-          'A newer price for Pro replaced this one at 10:30, so they are emailed about that instead.',
+        supersededAt: '2026-11-04T10:30:00.000Z',
+        message: 'Server words, not en.json.',
       })
     );
     mountAt('/admin/queue?tab=moves');
@@ -267,8 +267,9 @@ describe('Retry', () => {
       m.support_queue_moves_nothing_to_retry({ name: 'Leah Ortiz' })
     );
     expect(notice()?.textContent).toContain(
-      'A newer price for Pro replaced this one at 10:30'
+      'A newer price for Pro replaced this one on 4 Nov at 10:30'
     );
+    expect(notice()?.textContent).not.toContain('Server words');
     expect(heldMovesSlot().refresh).toHaveBeenCalledTimes(1);
   });
 
@@ -359,6 +360,19 @@ describe('Close', () => {
 });
 
 describe('a stopped change', () => {
+  test('its card title sits under the section head, a level down (W8)', () => {
+    mountAt('/admin/queue?tab=moves');
+    land([heldMove()], [stoppedChange()]);
+    const levels = [...document.querySelectorAll('h2, h3, h4')]
+      .filter((h) => h.matches('.queue-subhead, .change-card__title'))
+      .map((h) => h.tagName);
+    expect(levels).toEqual(['H2', 'H3', 'H2']);
+    expect(
+      document.querySelector('[data-testid="stopped-price-change"] h3')
+        ?.textContent
+    ).toBeTruthy();
+  });
+
   test('M7 one card, with Restart; M8 Restart queues it for the run', async () => {
     restartPriceChange.mockResolvedValue({
       outcome: 'done',

@@ -606,7 +606,7 @@ export function markRefusalNotice(
       }
       return {
         variant: 'warning',
-        text: answer.message ?? m.support_queue_fees_refused_not_waiting(),
+        text: m.support_queue_fees_refused_not_waiting(),
       };
     case 'FEE_NOTICE_ALREADY_TOLD':
       // F6: who marked them, when the 409 can name them.
@@ -637,12 +637,12 @@ export function markRefusalNotice(
       }
       return {
         variant: 'info',
-        text: answer.message ?? m.support_queue_fees_refused_already_told(),
+        text: m.support_queue_fees_refused_already_told(),
       };
     case 'FEE_NOTICE_NOT_NEEDED':
       return {
         variant: 'info',
-        text: answer.message ?? m.support_queue_fees_refused_not_needed(),
+        text: m.support_queue_fees_refused_not_needed(),
       };
     default:
       return null;

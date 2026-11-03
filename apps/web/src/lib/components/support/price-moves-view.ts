@@ -239,9 +239,68 @@ export function retriedNotice(
 }
 
 /**
- * A refusal of Retry or Close, as a notice (M6). Its `message` is already
- * the server's plain words. A Retry already queued is a second press after a
- * lost answer: it reads as done.
+ * Why Retry or Close found nothing to do, from the 409's codes (W4): never
+ * the worker's `message`, so en.json stays the only source of these words.
+ */
+function notHeldText(
+  item: HeldPriceMove,
+  action: 'retry' | 'close',
+  answer: SupportCommandFailure
+): string {
+  switch (answer.reason) {
+    case 'superseded':
+      return answer.supersededAt
+        ? m.support_queue_moves_not_held_superseded_at({
+            plan: item.plan.name,
+            date: formatShortDay(answer.supersededAt),
+            time: formatTime(answer.supersededAt),
+          })
+        : m.support_queue_moves_not_held_superseded({ plan: item.plan.name });
+    case 'moved':
+      return answer.state === 'unchanged'
+        ? m.support_queue_moves_not_held_on_price()
+        : m.support_queue_moves_not_held_scheduled();
+    case 'skipped':
+      switch (answer.skipReason) {
+        case 'moving_away':
+          return m.support_queue_moves_not_held_moving_away();
+        case 'other_interval':
+          return m.support_queue_moves_not_held_other_interval();
+        case 'no_items':
+          return m.support_queue_moves_not_held_no_items();
+        case 'ended':
+          return m.support_queue_moves_not_held_ended_first();
+        default:
+          return m.support_queue_moves_not_held_skipped();
+      }
+    case 'subscription_ended':
+      return m.support_queue_moves_not_held_ended();
+    case 'resolved':
+      switch (answer.resolution) {
+        case 'moved_by_hand':
+          return m.support_queue_moves_not_held_closed_by_hand();
+        case 'not_needed':
+          return m.support_queue_moves_not_held_closed_not_needed();
+        case 'retried_ok':
+          return m.support_queue_moves_not_held_closed_retried();
+        default:
+          return m.support_queue_moves_not_held_closed();
+      }
+    case 'queued':
+      return action === 'retry'
+        ? m.support_queue_moves_not_held_queued()
+        : m.support_queue_moves_not_held_queued_close();
+    case 'in_progress':
+      return m.support_queue_moves_not_held_in_progress();
+    default:
+      return m.support_queue_moves_not_held();
+  }
+}
+
+/**
+ * A refusal of Retry or Close, as a notice (M6), worded from its reason. A
+ * Retry already queued is a second press after a lost answer: it reads as
+ * done.
  */
 export function moveRefusalNotice(
   item: HeldPriceMove,
@@ -249,7 +308,7 @@ export function moveRefusalNotice(
   answer: SupportCommandFailure
 ): SettleNotice | null {
   if (answer.detailsCode !== 'PRICE_MOVE_NOT_HELD') return null;
-  const text = answer.message ?? m.support_queue_moves_not_held();
+  const text = notHeldText(item, action, answer);
   if (answer.reason === 'queued' && action === 'retry') {
     return { variant: 'info', text };
   }
@@ -414,13 +473,18 @@ export function restartedNotice(
   };
 }
 
-/** Restart refused: the change isn't stopped. The server's words. */
+/** Restart refused: the change isn't stopped, worded from its state (W4). */
 export function restartRefusalNotice(
   answer: SupportCommandFailure
 ): SettleNotice | null {
   if (answer.detailsCode !== 'PRICE_CHANGE_NOT_STOPPED') return null;
-  return {
-    variant: 'info',
-    text: answer.message ?? m.support_queue_moves_not_stopped(),
-  };
+  const text =
+    answer.state === 'running'
+      ? m.support_queue_moves_not_stopped_running()
+      : answer.state === 'done'
+        ? m.support_queue_moves_not_stopped_done()
+        : answer.state === 'superseded'
+          ? m.support_queue_moves_not_stopped_superseded()
+          : m.support_queue_moves_not_stopped();
+  return { variant: 'info', text };
 }

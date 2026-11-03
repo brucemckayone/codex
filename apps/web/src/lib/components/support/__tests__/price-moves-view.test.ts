@@ -21,6 +21,7 @@ import {
   moveRefusalNotice,
   queuedLine,
   restartedNotice,
+  restartRefusalNotice,
   retriedNotice,
   stoppedBadge,
   stoppedFacts,
@@ -164,32 +165,164 @@ describe('the answers', () => {
     });
   });
 
-  test('M6 nothing to retry: the server’s plain words', () => {
-    const answer = failure({
+  // W4: the words come from the 409's codes, never the worker's `message`,
+  // so en.json stays their only source. Each answer carries a message the
+  // page must not show.
+  const SERVER = 'Server words, not en.json.';
+  const notHeld = (over: Parameters<typeof failure>[0]) =>
+    failure({
       status: 409,
       detailsCode: 'PRICE_MOVE_NOT_HELD',
+      message: SERVER,
+      ...over,
+    });
+
+  test('M6 nothing to retry: why, from its reason', () => {
+    const answer = notHeld({
       reason: 'superseded',
-      message:
-        'A newer price for Pro replaced this one at 10:30, so they are emailed about that instead.',
+      supersededAt: '2026-11-04T10:30:00.000Z',
     });
     expect(moveRefusalNotice(heldMove(), 'retry', answer)).toEqual({
       variant: 'warning',
       lead: 'Nothing to retry for Leah Ortiz.',
-      text: 'A newer price for Pro replaced this one at 10:30, so they are emailed about that instead.',
+      text: 'A newer price for Pro replaced this one on 4 Nov at 10:30, so they are emailed about that instead.',
     });
   });
 
   test('a second Retry after a lost answer reads as done', () => {
-    const answer = failure({
-      status: 409,
-      detailsCode: 'PRICE_MOVE_NOT_HELD',
-      reason: 'queued',
-      message: 'This one is already queued for the next run.',
-    });
-    expect(moveRefusalNotice(heldMove(), 'retry', answer)).toEqual({
+    expect(
+      moveRefusalNotice(heldMove(), 'retry', notHeld({ reason: 'queued' }))
+    ).toEqual({
       variant: 'info',
       text: 'This one is already queued for the next run.',
     });
+  });
+
+  test.each([
+    [
+      'superseded, no date',
+      { reason: 'superseded' },
+      'retry',
+      'A newer price for Pro replaced this one, so they are emailed about that instead.',
+    ],
+    [
+      'moved, already on it',
+      { reason: 'moved', state: 'unchanged' },
+      'retry',
+      'They are already on the new price.',
+    ],
+    [
+      'moved, scheduled',
+      { reason: 'moved', state: 'scheduled' },
+      'retry',
+      'Their move is already scheduled: the hourly run got there first.',
+    ],
+    [
+      'skipped, moving away',
+      { reason: 'skipped', skipReason: 'moving_away' },
+      'retry',
+      'They are moving to another plan, so this price no longer applies to them.',
+    ],
+    [
+      'skipped, another interval',
+      { reason: 'skipped', skipReason: 'other_interval' },
+      'retry',
+      'They now pay on another billing interval, so this price no longer applies to them.',
+    ],
+    [
+      'skipped, nothing to move',
+      { reason: 'skipped', skipReason: 'no_items' },
+      'retry',
+      'The run found nothing on their subscription to move.',
+    ],
+    [
+      'skipped, ended first',
+      { reason: 'skipped', skipReason: 'ended' },
+      'retry',
+      'Their subscription ended before the run reached them, so there is nothing to move.',
+    ],
+    [
+      'skipped, unknown why',
+      { reason: 'skipped' },
+      'retry',
+      'The hourly run set this one aside, so there is nothing to move.',
+    ],
+    [
+      'subscription ended',
+      { reason: 'subscription_ended' },
+      'retry',
+      'Their subscription has ended, so there is nothing to move. Close it as not needed.',
+    ],
+    [
+      'closed by hand',
+      { reason: 'resolved', resolution: 'moved_by_hand' },
+      'close',
+      'This one is already closed: moved by hand.',
+    ],
+    [
+      'closed, not needed',
+      { reason: 'resolved', resolution: 'not_needed' },
+      'close',
+      'This one is already closed: no move needed.',
+    ],
+    [
+      'closed after a retry',
+      { reason: 'resolved', resolution: 'retried_ok' },
+      'close',
+      'This one is already closed: moved after a retry.',
+    ],
+    [
+      'closed, unknown how',
+      { reason: 'resolved' },
+      'close',
+      'This one is already closed.',
+    ],
+    [
+      'queued, then Close',
+      { reason: 'queued' },
+      'close',
+      'This one is queued for the next run. If the run holds it again, close it then.',
+    ],
+    [
+      'still running',
+      { reason: 'in_progress' },
+      'retry',
+      "The hourly run is still working on this one: it isn't held.",
+    ],
+    [
+      'a reason this page has no words for',
+      { reason: 'new_reason' },
+      'retry',
+      'There is nothing to do for this one.',
+    ],
+  ] as const)('%s: worded from its codes (W4)', (_label, over, action, text) => {
+    const notice = moveRefusalNotice(heldMove(), action, notHeld(over));
+    expect(notice?.text).toBe(text);
+    expect(JSON.stringify(notice)).not.toContain(SERVER);
+  });
+
+  test.each([
+    [
+      'running',
+      'This price change is running: the hourly run is already emailing its subscribers.',
+    ],
+    ['done', 'This price change has finished: there is nothing to restart.'],
+    [
+      'superseded',
+      'A newer price replaced this one, so there is nothing to restart.',
+    ],
+    [null, "This price change isn't stopped."],
+  ])('Restart refused, %s: worded from its state (W4)', (state, text) => {
+    expect(
+      restartRefusalNotice(
+        failure({
+          status: 409,
+          detailsCode: 'PRICE_CHANGE_NOT_STOPPED',
+          message: SERVER,
+          state,
+        })
+      )
+    ).toEqual({ variant: 'info', text });
   });
 
   test('M5 Close: closing moves nobody', () => {

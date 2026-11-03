@@ -36,7 +36,11 @@ export interface SupportCommandFailure {
   code: string | null;
   /** The worker's `details.code`: the support error's own code. */
   detailsCode: string | null;
-  /** The worker's text, for a 4xx only: a 5xx may carry internals. */
+  /**
+   * The worker's text, for a 4xx only: a 5xx may carry internals. No page
+   * shows it: each words a refusal from its codes in en.json (W4), so a
+   * change to a service's message can't change support's screen.
+   */
   message: string | null;
   /** `STRIPE_REFUSED`: Stripe's code, such as `charge_disputed`. */
   stripeCode: string | null;
@@ -53,6 +57,12 @@ export interface SupportCommandFailure {
    * `PRICE_MOVE_NOT_HELD`: why there is nothing to retry or close.
    */
   reason: string | null;
+  /** `PRICE_MOVE_NOT_HELD` `skipped`: why the run set it aside, such as `moving_away`. */
+  skipReason: string | null;
+  /** `PRICE_MOVE_NOT_HELD` `resolved`: how support closed it, such as `moved_by_hand`. */
+  resolution: string | null;
+  /** `PRICE_MOVE_NOT_HELD` `superseded`: when the newer price was saved (ISO). */
+  supersededAt: string | null;
   /** `FEE_CHANGE_NOT_WAITING`: `cancelled`, `cut_below_today` or `replaced_by_bigger`. */
   voidReason: string | null;
   /** `FEE_CHANGE_NOT_WAITING`: when the rise was called off (ISO). */
@@ -103,6 +113,9 @@ export function toSupportFailure(
       maxCents: field(details, 'maxCents', 'number'),
       disputeStatus: field(details, 'disputeStatus', 'string'),
       reason: field(details, 'reason', 'string'),
+      skipReason: field(details, 'skipReason', 'string'),
+      resolution: field(details, 'resolution', 'string'),
+      supersededAt: field(details, 'supersededAt', 'string'),
       voidReason: field(details, 'voidReason', 'string'),
       voidedAt: field(details, 'voidedAt', 'string'),
       state: field(details, 'state', 'string'),
@@ -128,6 +141,9 @@ export function toSupportFailure(
     maxCents: null,
     disputeStatus: null,
     reason: null,
+    skipReason: null,
+    resolution: null,
+    supersededAt: null,
     voidReason: null,
     voidedAt: null,
     state: null,
