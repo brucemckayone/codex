@@ -133,6 +133,9 @@ describe('mapStripeSubscriptionStatus', () => {
       pendingTierId: null,
       pendingTierFrom: null,
       heldAmountCents: null,
+      pendingBillingInterval: null,
+      pendingAmountCents: null,
+      stripeScheduleId: null,
     });
   });
 
@@ -189,6 +192,55 @@ describe('mapStripeSubscriptionStatus', () => {
       mapped.pendingTierFrom,
       mapped.heldAmountCents,
     ]).toEqual([null, null, null]);
+  });
+
+  // ─── A waiting change of billing (Codex-2hxff.97, §2.1, §4.4) ──────────
+
+  const SWITCHING = {
+    codex_tier_id: 'tier-pro',
+    codex_move_tier_id: TARGET_TIER,
+    codex_move_at: '1702000000',
+    codex_hold_price_id: 'price_pro_yearly',
+    codex_hold_amount: '12000',
+    codex_move_interval: 'month',
+    codex_move_price_id: 'price_basic_monthly',
+    codex_move_amount: '500',
+  };
+
+  it('mirrors a waiting change of billing and its schedule; the yearly price stays the amount', () => {
+    const sub = makeSubscription(
+      { metadata: SWITCHING, schedule: 'sub_sched_1' },
+      { interval: 'year', unit_amount: 12000 }
+    );
+
+    const mapped = mapStripeSubscriptionStatus(sub, SUBSCRIPTION_STATUS.ACTIVE);
+
+    expect(mapped).toMatchObject({
+      billingInterval: 'year',
+      amountCents: 12000,
+      pendingTierId: TARGET_TIER,
+      heldAmountCents: 12000,
+      pendingBillingInterval: 'month',
+      pendingAmountCents: 500,
+      stripeScheduleId: 'sub_sched_1',
+    });
+  });
+
+  it('a change of billing whose item is already monthly has landed: not mirrored as waiting (the CHECK)', () => {
+    // Phase 2's metadata missed: the record is still there, the Price moved.
+    const sub = makeSubscription(
+      { metadata: SWITCHING },
+      { interval: 'month', unit_amount: 500 }
+    );
+
+    const mapped = mapStripeSubscriptionStatus(sub, SUBSCRIPTION_STATUS.ACTIVE);
+
+    expect([
+      mapped.pendingTierId,
+      mapped.pendingBillingInterval,
+      mapped.pendingAmountCents,
+    ]).toEqual([null, null, null]);
+    expect(mapped.billingInterval).toBe('month');
   });
 
   it('returns billingInterval null for non-mapped Stripe intervals (day/week)', () => {

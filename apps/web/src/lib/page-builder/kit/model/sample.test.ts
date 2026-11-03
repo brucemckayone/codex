@@ -63,6 +63,20 @@ describe('withSamplePictures', () => {
     expect(gallery.every((item) => isImageRef(item.image))).toBe(true);
   });
 
+  // The story's sample tells the member's arc, as its starter does, so the
+  // scroll is judged on the moments a new page opens with.
+  it('tells the story as the member’s arc, a picture beside each moment', () => {
+    const story = props(pictured, 'story');
+    expect(story.heading).toBe('What changes for you');
+    const steps = story.steps as { heading: string; image?: unknown }[];
+    expect(steps.map((step) => step.heading)).toEqual([
+      'You arrive as you are.',
+      'It starts to feel like yours.',
+      'You leave with it.',
+    ]);
+    expect(steps.every((step) => isImageRef(step.image))).toBe(true);
+  });
+
   it('deals the pictures in turn down the page, so a gallery never repeats one', () => {
     const dealt = picturesIn(pictured.sections);
     expect(dealt).toEqual(

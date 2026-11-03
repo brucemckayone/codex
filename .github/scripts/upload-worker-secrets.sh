@@ -40,8 +40,9 @@ set -e
 #     worker-to-worker HMAC call: auth, content-api, ecom-api, organization-api,
 #     identity-api, notifications-api, media-api — NOT admin-api)
 #   - RESEND_API_KEY (secret, notifications-api only)
-#   - CF_ZONE_ID, CF_API_TOKEN (secrets, identity-api only — the CDN cache purge
-#     that takes a deleted account's avatars off the edge, Codex-kk9nv.15. The
+#   - CF_ZONE_ID, CF_API_TOKEN (secrets, identity-api and media-api — the CDN
+#     cache purge that takes a deleted account's avatars (Codex-kk9nv.15) and a
+#     purged media item's posters (Codex-9seq3) off the edge. The
 #     token needs only the zone's Cache Purge permission. Empty = purge skipped,
 #     logged at error in production. Set them here, never by `wrangler secret
 #     put`: every deploy re-uploads this JSON and would blank a manual value.)
@@ -264,13 +265,17 @@ EOF
     # ${VAR:?msg} aborts the deploy with a clear message. media-api secrets are
     # uploaded ONLY for production (deploy-production.yml), where all are required,
     # so this guard never runs in preview/test. (Codex-fc5oh.6)
+    # CF_ZONE_ID + CF_API_TOKEN are optional (see header): the file purge's
+    # edge eviction of posters, skipped and logged while they are empty.
     SECRETS_JSON=$(cat <<EOF
 {
   "DATABASE_URL":"${DATABASE_URL:?DATABASE_URL is required for media-api}",
   "RUNPOD_API_KEY":"${RUNPOD_API_KEY:?RUNPOD_API_KEY is required for media-api transcoding}",
   "RUNPOD_ENDPOINT_ID":"${RUNPOD_ENDPOINT_ID:?RUNPOD_ENDPOINT_ID is required for media-api transcoding}",
   "RUNPOD_WEBHOOK_SECRET":"${RUNPOD_WEBHOOK_SECRET:?RUNPOD_WEBHOOK_SECRET is required for media-api transcoding}",
-  "WORKER_SHARED_SECRET":"${WORKER_SHARED_SECRET:?WORKER_SHARED_SECRET is required for media-api}"
+  "WORKER_SHARED_SECRET":"${WORKER_SHARED_SECRET:?WORKER_SHARED_SECRET is required for media-api}",
+  "CF_ZONE_ID":"${CF_ZONE_ID:-}",
+  "CF_API_TOKEN":"${CF_API_TOKEN:-}"
 }
 EOF
 )

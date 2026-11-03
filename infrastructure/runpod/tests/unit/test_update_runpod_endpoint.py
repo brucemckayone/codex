@@ -88,6 +88,12 @@ def _patch_post(monkeypatch, responses):
     return post
 
 
+def _patch_get(monkeypatch, response=None, **kwargs):
+    get = MagicMock(return_value=response, **kwargs)
+    monkeypatch.setattr(script.requests, "get", get)
+    return get
+
+
 class TestUpdateEndpoint:
     def test_swaps_the_image_and_keeps_the_template_env(
         self, deploy_env, monkeypatch, capsys
@@ -318,13 +324,8 @@ class TestCheckEndpointHealth:
         monkeypatch.setenv("RUNPOD_ENDPOINT_ID", "ep-1")
         monkeypatch.setattr(script.time, "sleep", MagicMock())
 
-    def _patch_get(self, monkeypatch, response=None, **kwargs):
-        get = MagicMock(return_value=response, **kwargs)
-        monkeypatch.setattr(script.requests, "get", get)
-        return get
-
     def test_a_healthy_endpoint_passes_and_prints_its_config(self, monkeypatch, capsys):
-        get = self._patch_get(monkeypatch, _response(payload=HEALTHY_V2))
+        get = _patch_get(monkeypatch, _response(payload=HEALTHY_V2))
 
         assert script.check_endpoint_health() == 0
 
@@ -337,14 +338,14 @@ class TestCheckEndpointHealth:
         assert "::error::" not in out
 
     def test_a_paused_endpoint_fails_the_step(self, monkeypatch, capsys):
-        self._patch_get(monkeypatch, _response(payload=_v2(max=0)))
+        _patch_get(monkeypatch, _response(payload=_v2(max=0)))
 
         assert script.check_endpoint_health() == 2
 
         assert "::error::Endpoint ep-1 is PAUSED" in capsys.readouterr().out
 
     def test_settings_warnings_do_not_fail_the_step(self, monkeypatch, capsys):
-        self._patch_get(monkeypatch, _response(payload=_v2(idleTimeout=600)))
+        _patch_get(monkeypatch, _response(payload=_v2(idleTimeout=600)))
 
         assert script.check_endpoint_health() == 0
 
@@ -369,7 +370,7 @@ class TestCheckEndpointHealth:
         self, monkeypatch, capsys, kwargs, named
     ):
         response = kwargs.pop("response", None)
-        get = self._patch_get(monkeypatch, response, **kwargs)
+        get = _patch_get(monkeypatch, response, **kwargs)
 
         assert script.check_endpoint_health() == 3
 
@@ -381,7 +382,7 @@ class TestCheckEndpointHealth:
     def test_a_body_that_is_not_json_fails_the_step(self, monkeypatch, capsys):
         response = _response()
         response.json.side_effect = ValueError("not json")
-        self._patch_get(monkeypatch, response)
+        _patch_get(monkeypatch, response)
 
         assert script.check_endpoint_health() == 3
 
@@ -391,7 +392,7 @@ class TestCheckEndpointHealth:
         self, monkeypatch, capsys
     ):
         body = {**HEALTHY_V2, "workers": {"min": 0, "max": 5}}
-        self._patch_get(monkeypatch, _response(payload=body))
+        _patch_get(monkeypatch, _response(payload=body))
 
         assert script.check_endpoint_health() == 0
 
@@ -400,7 +401,7 @@ class TestCheckEndpointHealth:
         assert "::warning::idleTimeout could not be read" in out
 
     def test_one_failed_read_is_retried(self, monkeypatch, capsys):
-        get = self._patch_get(
+        get = _patch_get(
             monkeypatch,
             side_effect=[
                 requests.ConnectionError("blip"),
@@ -417,11 +418,167 @@ class TestCheckEndpointHealth:
 
     def test_missing_env_exits_1(self, monkeypatch):
         monkeypatch.delenv("RUNPOD_ENDPOINT_ID")
-        get = self._patch_get(monkeypatch)
+        get = _patch_get(monkeypatch)
 
         assert script.check_endpoint_health() == 1
 
         get.assert_not_called()
+
+
+# The handler's ping branch answers {"status": "pong"}.
+PONG = {"id": "job-1", "status": "COMPLETED", "output": {"status": "pong"}}
+
+
+class TestWarmTranscoder:
+    @pytest.fixture(autouse=True)
+    def _env(self, monkeypatch):
+        monkeypatch.setenv("RUNPOD_API_KEY", "key")
+        monkeypatch.setenv("RUNPOD_ENDPOINT_ID", "ep-1")
+        # Each poll's sleep moves a fake clock, so the deadline is reached in
+        # as many polls as the real wait would take, without waiting.
+        self.clock = 0.0
+
+        def sleep(seconds):
+            self.clock += seconds
+
+        monkeypatch.setattr(script.time, "monotonic", lambda: self.clock)
+        monkeypatch.setattr(script.time, "sleep", sleep)
+
+    def _patch(self, monkeypatch, statuses, sent=None):
+        post = _patch_post(monkeypatch, [_response(payload=sent or {"id": "job-1"})])
+        return post, _patch_get(monkeypatch, side_effect=statuses)
+
+    def test_a_worker_answering_passes_and_prints_the_queue_time(
+        self, monkeypatch, capsys
+    ):
+        post, get = self._patch(
+            monkeypatch,
+            [
+                _response(payload={"id": "job-1", "status": "IN_QUEUE"}),
+                _response(payload={**PONG, "delayTime": 95_400}),
+            ],
+        )
+
+        assert script.warm_transcoder() == 0
+
+        assert post.call_args.args[0] == "https://api.runpod.ai/v2/ep-1/run"
+        body = post.call_args.kwargs["json"]
+        assert body["input"] == {"ping": True}
+        # Normal priority: a low-priority job never starts a worker.
+        assert "lowPriority" not in body["policy"]
+        assert body["policy"]["ttl"] > script.WARM_WAIT_S * 1000
+        assert get.call_args.args[0] == "https://api.runpod.ai/v2/ep-1/status/job-1"
+        out = capsys.readouterr().out
+        assert "answered after 95s" in out
+        assert "::error::" not in out
+
+    def test_no_worker_within_the_wait_fails_the_step(self, monkeypatch, capsys):
+        queued = _response(payload={"id": "job-1", "status": "IN_QUEUE"})
+        _, get = self._patch(monkeypatch, [queued] * 1000)
+
+        assert script.warm_transcoder() == 4
+
+        assert get.call_count == script.WARM_WAIT_S // script.WARM_POLL_S
+        out = capsys.readouterr().out
+        assert "::error::No worker answered" in out
+        assert "last state: IN_QUEUE" in out
+        # The state is printed when it changes, not on every poll.
+        assert out.count("⏳ IN_QUEUE") == 1
+
+    @pytest.mark.parametrize("state", ["FAILED", "CANCELLED", "TIMED_OUT"])
+    def test_a_ping_that_ends_any_other_way_fails_the_step(
+        self, monkeypatch, capsys, state
+    ):
+        self._patch(
+            monkeypatch,
+            [_response(payload={"id": "job-1", "status": state, "error": "boom"})],
+        )
+
+        assert script.warm_transcoder() == 4
+
+        assert f"::error::The warm-up ping ended {state}: boom" in (
+            capsys.readouterr().out
+        )
+
+    def test_a_failed_status_read_is_asked_again(self, monkeypatch, capsys):
+        _, get = self._patch(
+            monkeypatch,
+            [
+                requests.ConnectionError("reset"),
+                _response(status=502),
+                _response(payload=["not", "an", "object"]),
+                _response(payload=PONG),
+            ],
+        )
+
+        assert script.warm_transcoder() == 0
+
+        assert get.call_count == 4
+        out = capsys.readouterr().out
+        assert out.count("Status read failed") == 3
+        assert "an unreported time" in out
+
+    def test_a_completed_ping_without_its_pong_fails_the_step(
+        self, monkeypatch, capsys
+    ):
+        # A real job's error dict is COMPLETED too: the ping ran the wrong path.
+        self._patch(
+            monkeypatch,
+            [_response(payload={**PONG, "output": {"error": "KeyError"}})],
+        )
+
+        assert script.warm_transcoder() == 4
+
+        assert "completed without its pong" in capsys.readouterr().out
+
+    def test_a_status_never_read_is_named_as_the_cause(self, monkeypatch, capsys):
+        self._patch(monkeypatch, [_response(status=403)] * 1000)
+
+        assert script.warm_transcoder() == 4
+
+        out = capsys.readouterr().out
+        assert "its status could not be read: 403 Client Error" in out
+        assert "check the endpoint's workers" not in out
+
+    def test_runpods_text_cannot_start_a_workflow_command(self, monkeypatch, capsys):
+        error = "boom\n::warning::forged 100%"
+        self._patch(
+            monkeypatch,
+            [_response(payload={"id": "job-1", "status": "FAILED", "error": error})],
+        )
+
+        assert script.warm_transcoder() == 4
+
+        out = capsys.readouterr().out
+        assert "boom%0A::warning::forged 100%25" in out
+        assert "\n::warning::" not in out
+
+    @pytest.mark.parametrize(
+        "answer",
+        [
+            _response(status=401),
+            _response(payload={"status": "IN_QUEUE"}),
+            _response(payload=None),
+        ],
+    )
+    def test_a_ping_not_accepted_with_a_job_id_fails_before_any_poll(
+        self, monkeypatch, capsys, answer
+    ):
+        _patch_post(monkeypatch, [answer])
+        get = _patch_get(monkeypatch)
+
+        assert script.warm_transcoder() == 4
+
+        get.assert_not_called()
+        assert "::error::The warm-up ping was" in capsys.readouterr().out
+
+    def test_missing_env_exits_1_before_any_call(self, monkeypatch):
+        monkeypatch.delenv("RUNPOD_API_KEY")
+        post = _patch_post(monkeypatch, [])
+
+        assert script.warm_transcoder() == 1
+
+        post.assert_not_called()
 
 
 class TestMain:
@@ -443,3 +600,12 @@ class TestMain:
         assert script.main([]) == 0
         update.assert_called_once()
         health.assert_not_called()
+
+    def test_warm_flag_runs_only_the_warm_up(self, monkeypatch):
+        warm = MagicMock(return_value=4)
+        update = MagicMock()
+        monkeypatch.setattr(script, "warm_transcoder", warm)
+        monkeypatch.setattr(script, "update_endpoint", update)
+
+        assert script.main(["--warm"]) == 4
+        update.assert_not_called()

@@ -5,18 +5,21 @@
   grid whose tiles are fixed shapes (`arrange.ts` designs every count from one
   to twelve, and `arrange.test.ts` packs each one). Wide, four columns; below
   48rem, two: the first picture across both, pairs under it, and a last one
-  left alone takes its row. Captions sit on each picture's foot. The first
-  picture is the layout's moving one: it drifts gently against the scroll.
+  left alone takes its row. A broad tile carries its caption on the picture's
+  foot, any other beneath it (`mosaicCaption`); on a phone only the first
+  keeps its caption in view. The first picture is the layout's moving one: it
+  drifts gently against the scroll.
 -->
 <script lang="ts">
-  import { mosaicTiles, type Picture } from './arrange';
+  import { mosaicCaption, mosaicTiles, type OpenPicture, type Picture } from './arrange';
   import GalleryPicture from './GalleryPicture.svelte';
 
   interface Props {
     pictures: readonly Picture[];
+    onopen?: OpenPicture;
   }
 
-  const { pictures }: Props = $props();
+  const { pictures, onopen }: Props = $props();
 
   const tiles = $derived(mosaicTiles(pictures.length));
 </script>
@@ -25,7 +28,15 @@
   <ul class="gallery-mosaic__tiles" data-count={pictures.length}>
     {#each pictures as picture, index (index)}
       <li data-tile={tiles[index]}>
-        <GalleryPicture {picture} captionAt="over" fill drift={index === 0} />
+        <GalleryPicture
+          {picture}
+          captionAt={mosaicCaption(tiles[index])}
+          fill
+          drift={index === 0}
+          {index}
+          count={pictures.length}
+          {onopen}
+        />
       </li>
     {/each}
   </ul>
@@ -64,6 +75,20 @@
 
     .gallery-mosaic__tiles > li:last-child:nth-child(even) {
       grid-column: span 2;
+    }
+
+    /* The tiles past the first are about 170px here: a caption would take
+       half its picture. It leaves the view (a screen reader still hears it
+       in its figure) and the lightbox shows it under the picture. */
+    .gallery-mosaic__tiles > li:not(:first-child) :global(.gallery-picture__caption) {
+      position: absolute;
+      inline-size: 1px;
+      block-size: 1px;
+      margin: -1px;
+      padding: 0;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
     }
   }
 

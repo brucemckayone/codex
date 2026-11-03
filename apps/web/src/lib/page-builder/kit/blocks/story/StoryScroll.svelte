@@ -2,15 +2,21 @@
   @component StoryScroll
 
   The `scroll` layout. Each moment's words sit beside its own picture — the
-  form every visitor gets without JavaScript, on a narrow screen, under
-  reduced motion and on the still canvas.
+  form every visitor gets without JavaScript, under reduced motion and on the
+  still canvas. From a container of about 48rem the words take five twelfths
+  and the pictures, square, the other seven; every moment's name is drawn at
+  the heading's size, so nothing changes size as the moments pass. A phone
+  keeps one column, each picture first at 4:5, its names at a title's size.
 
-  Otherwise, from a container of about 48rem, a sticky frame over the
-  pictures' column shows the ACTIVE moment's picture (the one crossing the
-  middle of the viewport) and crossfades as the moments pass. The pictures in
-  the moments stay where they are, invisible, so nothing moves when the frame
-  takes over and a screen reader still meets each picture with its moment.
-  A moment without a picture keeps the last one showing.
+  Otherwise, from 48rem, a sticky square frame over the pictures' column
+  shows the ACTIVE moment's picture (the one crossing the middle of the
+  viewport) and crossfades as the moments pass. It is at most 80% of the
+  viewport's height and sticks centred in it. The pictures in the moments
+  stay where they are, invisible, so nothing moves when the frame takes over
+  and a screen reader still meets each picture with its moment; each is as
+  wide as the column, so a pictured moment is never shorter than the frame
+  and reaches the middle of the screen while its picture shows. A moment
+  without a picture keeps the last one showing.
 -->
 <script lang="ts">
   import type { Attachment } from 'svelte/attachments';
@@ -79,7 +85,6 @@
               srcset={srcsets[index]}
               {sizes}
               alt={step.image?.alt ?? ''}
-              ratio="4 / 3"
               focus={storedFocus(step.image)}
             />
           </div>
@@ -102,10 +107,10 @@
 
 <style>
   .story-scroll {
-    /* One column of the wide layout, and the frame's height at 4:3. */
-    --_col: calc(
-      (min(100cqi - 2 * var(--lp-gutter), var(--lp-container)) - var(--lp-gap)) / 2
-    );
+    /* The pictures' seven twelfths of the wide layout, and the frame's side:
+       that, but never taller than 80% of the viewport. */
+    --_col: calc((var(--lp-column) - var(--lp-gap)) * 7 / 12);
+    --_frame: min(var(--_col), 80svh);
     display: grid;
   }
 
@@ -129,14 +134,19 @@
     order: -1;
   }
 
+  .story-scroll__media :global(.lp-media) {
+    aspect-ratio: 4 / 5;
+  }
+
   .story-scroll__frame {
     display: none;
   }
 
-  /* Wide: the words on one side, their picture on the other, level with it. */
+  /* Wide: the words on one side, their square picture on the other, level
+     with it. */
   @container (min-width: 48rem) {
     .story-scroll {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
       column-gap: var(--lp-gap);
     }
 
@@ -155,10 +165,21 @@
       align-items: center;
     }
 
-    /* Its title's room (03 X71): half the column, less the step's own gap,
-       which places it (a subgrid's gap stands in for its parents'). */
+    /* Its title's room (03 X71): the words' five twelfths of the column, and
+       the half of the page's gap that the step's own narrower gap gives back
+       (a subgrid's gap stands in for its parents').
+       Every moment's name is drawn at the heading's size, weight, leading and
+       tracking, through the title's own rule, so it is fitted as every name
+       is. The one being read is told by its ink alone, never by its size, so
+       nothing reflows as the moments pass. */
     .story-scroll__step > :global(.story-words) {
-      --lp-title-column: calc((var(--lp-column) - var(--_gap)) / 2);
+      --lp-title-column: calc(
+        (var(--lp-column) - var(--lp-gap)) * 5 / 12 + (var(--lp-gap) - var(--_gap)) / 2
+      );
+      --lp-title-lift: 1;
+      --lp-weight-title: var(--lp-weight-heading);
+      --lp-leading-title: var(--lp-leading-heading);
+      --lp-tracking-title: var(--lp-tracking-heading);
       grid-column: 1;
       grid-row: 1;
     }
@@ -168,21 +189,28 @@
       grid-column: 2;
       grid-row: 1;
     }
+
+    .story-scroll__media :global(.lp-media) {
+      aspect-ratio: 1;
+    }
   }
 
   /* ── the frame (motion only) ───────────────────────────────────────────── */
   @media (prefers-reduced-motion: no-preference) {
     @container (min-width: 48rem) {
+      /* Square, and centred in the viewport as it sticks. */
       :global(.lp:not([data-lp-still], [data-lp-motion])) .story-scroll[data-live] .story-scroll__frame {
         position: sticky;
         z-index: 1;
-        inset-block-start: max(var(--space-6), calc(50svh - var(--_col) * 3 / 8));
+        inset-block-start: max(var(--space-6), calc((100svh - var(--_frame)) / 2));
         display: grid;
         grid-column: 2;
         grid-row: 1;
         align-self: start;
-        aspect-ratio: 4 / 3;
-        max-block-size: calc(100svh - 2 * var(--space-6));
+        justify-self: center;
+        inline-size: var(--_frame);
+        max-inline-size: 100%;
+        aspect-ratio: 1;
         overflow: hidden;
         border-radius: var(--lp-radius-media);
       }

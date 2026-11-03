@@ -42,7 +42,7 @@
   import { getThumbnailUrl } from '$lib/utils/image';
   import * as m from '$paraglide/messages';
   import type { MediaDeleteFlow } from './media-delete-flow.svelte';
-  import { liveUsesPhrase, splitUses } from './media-usage';
+  import { liveUsesPhrase, onlyThumbnails, splitUses } from './media-usage';
   import MediaUsesList from './MediaUsesList.svelte';
   import MediaUsesSkeleton from './MediaUsesSkeleton.svelte';
 
@@ -91,7 +91,14 @@
   const blockedBody = $derived.by(() => {
     if (!usage) return '';
     const uses = liveUsesPhrase(usage);
-    return splitUses(usage.uses).live.length === 1
+    const one = splitUses(usage.uses).live.length === 1;
+    // Every published use only shows its frame (Codex-9seq3).
+    if (onlyThumbnails(usage, true)) {
+      return one
+        ? m.media_delete_blocked_body_thumbnail_one({ uses })
+        : m.media_delete_blocked_body_thumbnail({ uses });
+    }
+    return one
       ? m.media_delete_blocked_body_one({ uses })
       : m.media_delete_blocked_body({ uses });
   });
@@ -248,9 +255,13 @@
                       ? m.media_delete_drafts_title_one()
                       : m.media_delete_drafts_title({ count: usage.drafts })}
                   </b>
-                  {usage.drafts === 1
-                    ? m.media_delete_drafts_body_one()
-                    : m.media_delete_drafts_body()}
+                  {onlyThumbnails(usage, false)
+                    ? usage.drafts === 1
+                      ? m.media_delete_drafts_body_thumbnail_one()
+                      : m.media_delete_drafts_body_thumbnail()
+                    : usage.drafts === 1
+                      ? m.media_delete_drafts_body_one()
+                      : m.media_delete_drafts_body()}
                 </span>
               </p>
             </Alert>

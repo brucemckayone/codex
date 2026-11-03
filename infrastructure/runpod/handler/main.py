@@ -812,17 +812,28 @@ def validate_streams(probe_data: dict[str, Any], media_type: str) -> None:
         )
 
 
+# NVENC's driver refuses a frame below its minimum size ("Frame Dimension less
+# than the minimum supported value": 144x144 fails and 145x145 opens, FFmpeg
+# trac #9251), and that minimum varies by driver and GPU. The probe encoded
+# 16x16, so every worker read "no GPU" and encoded on its CPU (Codex-dlzgf).
+GPU_PROBE_SIZE = "640x360"
+
+
 def check_gpu_available() -> bool:
-    """Check if NVIDIA GPU encoder is actually usable (not just listed)."""
+    """Whether h264_nvenc can open and encode a frame here, not just whether
+    ffmpeg lists it. A "no" moves every encode of the job to the CPU, so the
+    reason goes to the worker log."""
     try:
         result = subprocess.run(
             [
                 "ffmpeg",
-                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
                 "-f",
                 "lavfi",
                 "-i",
-                "nullsrc=s=16x16:d=0.1",
+                f"nullsrc=s={GPU_PROBE_SIZE}:d=0.1",
                 "-c:v",
                 "h264_nvenc",
                 "-f",
@@ -831,11 +842,17 @@ def check_gpu_available() -> bool:
             ],
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=10,
         )
-        return result.returncode == 0
-    except Exception:
+    except Exception as e:
+        print(f"GPU probe could not run: {e!r}")
         return False
+    if result.returncode != 0:
+        reason = result.stderr.strip()[-500:] or "no output"
+        print(f"GPU probe failed (exit {result.returncode}): {reason}")
+        return False
+    return True
 
 
 # =============================================================================

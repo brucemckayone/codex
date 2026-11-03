@@ -6031,6 +6031,30 @@ export const media_tile_waiting_config = () => `Our processing service needs att
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const media_tile_queued_step = () => `Waiting for a transcoder`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_tile_queued = () => `Our processing service is starting a machine for this, which can take a few minutes after an update. It will begin on its own; you don't need to do anything.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_tile_queued_overdue = () => `This is taking longer than usual: our processing service hasn't got a machine free. We've told the team; it will begin on its own.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const media_tile_stopped = () => `The upload stopped before it finished. Upload the file again.`
 
 
@@ -6447,6 +6471,14 @@ export const media_use_where_audio_draft = () => `Draft audio`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const media_use_where_thumbnail = () => `Its thumbnail is a frame of this video`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const media_use_where_bought_film = () => `Off sale · people who bought it can still watch`
 
 
@@ -6611,6 +6643,22 @@ export const media_delete_blocked_body_one = (params) => `It’s used by ${param
 
 
 /**
+ * @param {{ uses: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_blocked_body_thumbnail = (params) => `It’s the thumbnail of ${params.uses}. Choose another thumbnail in each place, then you can delete it.`
+
+
+/**
+ * @param {{ uses: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_blocked_body_thumbnail_one = (params) => `It’s the thumbnail of ${params.uses}. Choose another thumbnail there, then you can delete it.`
+
+
+/**
  * 
  * @returns {string}
  */
@@ -6664,6 +6712,22 @@ export const media_delete_drafts_body_one = () => `If you delete it, it will sho
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const media_delete_drafts_body = () => `If you delete it, they’ll show “media missing” until you choose another media item. Nobody else can see drafts.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_drafts_body_thumbnail_one = () => `If you delete it, it will lose its thumbnail after 30 days until you choose another. Nobody else can see drafts.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_drafts_body_thumbnail = () => `If you delete it, they’ll lose their thumbnail after 30 days until you choose another. Nobody else can see drafts.`
 
 
 /**
@@ -6768,6 +6832,22 @@ export const media_delete_toast_drafts_one = () => `Deleted. 1 draft needs a new
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const media_delete_toast_drafts = (params) => `Deleted. ${params.count} drafts need a new media item.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_toast_drafts_thumbnail_one = () => `Deleted. 1 draft needs a new thumbnail.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_delete_toast_drafts_thumbnail = (params) => `Deleted. ${params.count} drafts need a new thumbnail.`
 
 
 /**
@@ -19543,6 +19623,30 @@ export const studio_page_editor_scheme_atmosphere_hint = () => `Your organisatio
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_scheme_atmosphere_none = () => `No moving background yet, so a soft glow of your colours stands in.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_scheme_atmosphere_add = () => `Add one in Brand`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_scheme_atmosphere_ask = () => `An admin can add one in Brand.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const studio_page_editor_spacing_title = () => `Spacing`
 
 
@@ -20760,6 +20864,30 @@ export const studio_page_editor_focus_crop_tablet = () => `Tablet`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_page_editor_focus_crop_phone = () => `Phone`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_focus_still_title = () => `Picture crop`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_focus_still_saved = () => `Saved on this page. Another page using this still sets its own.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_focus_still_inactive = () => `This layout shows the picture whole, so it needs no focal point.`
 
 
 /**

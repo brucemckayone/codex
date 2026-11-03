@@ -17,6 +17,12 @@ export interface FullFilm {
   expiresAt?: string;
 }
 
+/** The org's logo file, and the org's name, which is what it says. */
+export interface OrgLogoSource {
+  url: string;
+  name: string;
+}
+
 export interface KitPageContext {
   readonly style: PageStyleId;
   /**
@@ -35,6 +41,21 @@ export interface KitPageContext {
    * pricing section, and for a block mounted on its own.
    */
   readonly offerProps: Readonly<Record<string, unknown>>;
+  /**
+   * The page's guide: its About you section's name, which the Video block
+   * says is speaking unless the creator names someone else (Codex-61zsk.73).
+   * Absent with no such section or no name, and for a block mounted on its
+   * own.
+   */
+  readonly guideName?: string;
+  /**
+   * The org's logo, which the hero sets above its words (Codex-61zsk.73): the
+   * one the org layout's rail shows, so the brand editor's unsaved logo, or
+   * its removal, previews here too (`render/org-logo.ts`). `null` or absent
+   * where there is none: no logo, no org, a block mounted on its own. Nothing
+   * stands in for a missing logo.
+   */
+  readonly orgLogo?: OrgLogoSource | null;
   /**
    * The anchor (`id`) of a section this page draws, by section id, so a
    * Button can jump to it (03 X64). `undefined` for a section the page does
@@ -78,6 +99,7 @@ export function getKitPage(): KitPageContext {
       style: DEFAULT_PAGE_STYLE,
       still: false,
       offerProps: {},
+      orgLogo: null,
       anchorOf: () => undefined,
     }
   );

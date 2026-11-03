@@ -39,7 +39,7 @@ import { buildCreatorsUrl } from '@codex/urls';
 import type { TranscodingOwnerAlertData } from '@codex/validation';
 import { and, eq, isNull } from 'drizzle-orm';
 import type { RunPodDispatchOutcome } from '../dispatch';
-import { GIVE_UP_AFTER_MS } from '../maintenance-rules';
+import { GIVE_UP_AFTER_MS, UNSTARTED_CHECKS_MS } from '../maintenance-rules';
 import { isPassingFailure, type RunPodApiFailureReason } from '../runpod-api';
 import type { EndpointWakeOutcome } from './transcoding-service';
 
@@ -210,6 +210,26 @@ export class TranscodingAlerts extends BaseService {
         headline: 'The daily keep-alive ping was refused',
         summary: `RunPod answered the keep-alive ping with ${reason}. Without a request every 7 days RunPod pauses the endpoint.`,
         details: CHECK_SECRETS,
+      }
+    );
+  }
+
+  /**
+   * RunPod still had a job queued at the last early ask (Codex-t359w): it has
+   * no worker for it, because no GPUs are free or the image will not start.
+   */
+  jobNotStarted(mediaId: string): void {
+    // The last ask: a tuple index, so a shorter schedule fails to compile.
+    const minutes = UNSTARTED_CHECKS_MS[2] / 60_000;
+    this.setupFault(
+      { event: 'job_not_started', mediaId },
+      {
+        headline: 'Uploads are waiting: RunPod has no worker for them',
+        summary: `A transcoding job has been queued at RunPod for ${minutes} minutes without a worker taking it. It starts by itself once RunPod has one; until then new uploads may wait too.`,
+        details: [
+          `Media:    ${mediaId}`,
+          'Check:    the RunPod console: workers, GPU availability, and whether the current image starts',
+        ].join('\n'),
       }
     );
   }

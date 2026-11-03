@@ -15,11 +15,14 @@
 export type MediaUseKind = 'film' | 'audio' | 'course' | 'intro';
 
 /**
- * Which field holds the item: the content's one media item, a course page's
- * five sell-media slots, or the org's intro video.
+ * Which field holds the item: the content's one media item, content whose
+ * thumbnail is a frame of the item while it plays another (`thumbnail`,
+ * Codex-9seq3), a course page's five sell-media slots, or the org's intro
+ * video.
  */
 export type MediaUseSlot =
   | 'media'
+  | 'thumbnail'
   | 'intro'
   | 'reel'
   | 'guide_video'

@@ -9,8 +9,8 @@
  *     owner 200; support's routes are `cache: 'fresh'`; the two POSTs read
  *     the `strict` preset;
  *   - inputs are validated before any service call (a note is required);
- *   - the mark invalidates the fee cache for the change's level, and its
- *     answer is `{ notice, change }`;
+ *   - the mark's answer is `{ notice, change }`, straight from the service
+ *     (which invalidates the level's fee cache: support-fee-notices pins it);
  *   - a removal answers 200 with its `change`, not 204: taking a lower fee
  *     away is a rise, and the caller needs to know it waits.
  *
@@ -132,7 +132,6 @@ const CHANGE_ID = '823e4567-e89b-12d3-a456-426614174007';
 const NOTICE_ID = '923e4567-e89b-12d3-a456-426614174008';
 const PLATFORM_OWNER = { id: 'support_user', role: 'platform_owner' };
 const PAGE = { page: 1, limit: 20, total: 1, totalPages: 1 };
-const LEVEL = { scope: 'org', organizationId: ORG };
 const CHANGE = {
   id: CHANGE_ID,
   scope: 'org',
@@ -176,9 +175,7 @@ function supportMock() {
       items: [{ noticeId: NOTICE_ID }],
       pagination: PAGE,
     }),
-    markToldAnotherWay: vi
-      .fn()
-      .mockResolvedValue({ result: MARKED, level: LEVEL }),
+    markToldAnotherWay: vi.fn().mockResolvedValue(MARKED),
   };
 }
 
@@ -189,7 +186,6 @@ function feeConfigMock() {
       voidedAt: '2026-11-04T10:40:00.000Z',
       voidReason: 'cancelled',
     }),
-    invalidateLevel: vi.fn(),
     updatePlatformFees: vi.fn().mockResolvedValue(written(CHANGE)),
     getPlatformRow: vi.fn().mockResolvedValue({ platformFeePercent: 1000 }),
     updateOrgFees: vi.fn().mockResolvedValue(written(CHANGE)),
@@ -311,7 +307,7 @@ describe('Queue › Fee notices', () => {
     expect(support.listFeeNotices).toHaveBeenCalledWith({ page: 2, limit: 10 });
   });
 
-  it('marking passes the trimmed note and who marked, invalidates the level, and answers { notice, change }', async () => {
+  it('marking passes the trimmed note and who marked, and answers { notice, change }', async () => {
     const res = await call('POST', MARK, { note: '  Phoned Jonah  ' });
 
     expect(res.status).toBe(200);
@@ -321,7 +317,6 @@ describe('Queue › Fee notices', () => {
       { note: 'Phoned Jonah' },
       PLATFORM_OWNER.id
     );
-    expect(feeConfig.invalidateLevel).toHaveBeenCalledWith(LEVEL);
   });
 
   it.each([
@@ -332,7 +327,6 @@ describe('Queue › Fee notices', () => {
   ])('refuses %s with 400, before the service', async (_label, body) => {
     expect((await call('POST', MARK, body)).status).toBe(400);
     expect(support.markToldAnotherWay).not.toHaveBeenCalled();
-    expect(feeConfig.invalidateLevel).not.toHaveBeenCalled();
   });
 
   it('refuses a notice id that is not one', async () => {
@@ -345,7 +339,7 @@ describe('Queue › Fee notices', () => {
     expect(support.markToldAnotherWay).not.toHaveBeenCalled();
   });
 
-  it("a 409 from the mark passes through, and the cache isn't touched", async () => {
+  it('a 409 from the mark passes through', async () => {
     support.markToldAnotherWay.mockRejectedValueOnce(
       Object.assign(new Error('already told'), {
         statusCode: 409,
@@ -353,7 +347,6 @@ describe('Queue › Fee notices', () => {
       })
     );
     expect((await call('POST', MARK, { note: 'Phoned' })).status).toBe(409);
-    expect(feeConfig.invalidateLevel).not.toHaveBeenCalled();
   });
 });
 

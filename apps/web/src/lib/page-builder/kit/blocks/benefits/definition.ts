@@ -11,11 +11,13 @@ import { MARK_OPTIONS, MARKS, type MarkId } from '../../model/marks';
 import {
   compact,
   firstItem,
+  readBool,
   readItems,
   readOneOf,
   readText,
 } from '../../model/read';
 import type { BlockDefinition } from '../../model/types';
+import { FIGURE_MAX, readFigure } from './figure';
 
 export interface BenefitItem {
   title: string;
@@ -24,6 +26,12 @@ export interface BenefitItem {
   image?: ImageRef;
   /** An icon above its name; in `checklist`, in place of the tick (Codex-61zsk.58). */
   mark?: MarkId;
+  /**
+   * A short number in the mark's place, read as the start of the name
+   * (Codex-61zsk.73, `figure.ts`). Where it is drawn the mark is not; a tile
+   * with a picture draws no figure, so it draws its mark.
+   */
+  figure?: string;
 }
 
 export type BenefitsProps = {
@@ -33,6 +41,12 @@ export type BenefitsProps = {
   ctaLabel?: string;
   note?: string;
   items?: BenefitItem[];
+  /**
+   * Leave the course's facts line off (Codex-61zsk.73). A switch writes
+   * `true` or nothing, so the key says HIDE: absent, every section, an
+   * existing one too, shows the facts.
+   */
+  hideFacts?: boolean;
 };
 
 /** The canvas prompt where the items would be — shown only while editing. */
@@ -71,6 +85,12 @@ export const benefitsDefinition: BlockDefinition<BenefitsProps> = {
     headingField(120),
     { ...bodyField, maxLength: 500 },
     {
+      key: 'hideFacts',
+      label: 'Hide the course facts',
+      hint: 'The line under your words: your stages, practices and total length, counted from the course.',
+      control: 'toggle',
+    },
+    {
       key: 'items',
       label: 'What is included',
       hint: 'A short name for each thing, and a line about it if you like.',
@@ -92,9 +112,16 @@ export const benefitsDefinition: BlockDefinition<BenefitsProps> = {
           options: MARK_OPTIONS,
         },
         {
+          key: 'figure',
+          label: 'Or a number',
+          hint: 'Up to 4 characters with a digit, like 24 or 98%. It shows instead of the mark, so write the name to read on from it.',
+          control: 'text',
+          maxLength: FIGURE_MAX,
+        },
+        {
           key: 'image',
           label: 'Image',
-          hint: 'Optional. Shown with this item in the grid and in the mixed tiles.',
+          hint: 'Optional. Shown with this item in the grid and in the mixed tiles, in place of its number.',
           control: 'image',
           layouts: ['grid', 'bento'],
           // Each layout's frame at 1440 and 390, in the Style that cuts it
@@ -171,17 +198,20 @@ export const benefitsDefinition: BlockDefinition<BenefitsProps> = {
         'items',
         (entry) => {
           const title = readText(entry, 'title', 80);
+          const figure = readFigure(entry.figure);
           return title
             ? compact({
                 title,
                 detail: readText(entry, 'detail', 160),
                 image: isImageRef(entry.image) ? entry.image : undefined,
                 mark: readOneOf(entry, 'mark', MARKS),
+                figure,
               })
             : null;
         },
         9
       ),
+      hideFacts: readBool(raw, 'hideFacts'),
     }),
   // The mixed tiles' first tile is the large, filled one.
   leadingItem: (raw, layout) =>

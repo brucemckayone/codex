@@ -18,9 +18,10 @@
   import { onMount } from 'svelte';
   import { browser } from '$app/environment';
   import { destroyJFACache } from './jfa-sdf';
-  import { getShaderConfig, type ShaderPresetId } from './shader-config';
+  import { getShaderConfig, type ShaderPresetId, shaderIsDark } from './shader-config';
   import { loadRenderer } from './load-renderer';
   import type { ShaderRenderer, MouseState } from './renderer-types';
+  import { captureStill, shaderStill } from './shader-still.svelte';
   import { shaderTone, toneViewport } from './shader-tone';
   import { averageCells, visibleBufferRegion } from './tone-grid';
 
@@ -38,7 +39,9 @@
      * shader sits far behind the content and its motion buys nothing: the
      * studio, behind an 80% cover and a 60px blur. There every frame costs a
      * full-viewport render (on a CPU-rendered context, as in CI, ~8s per
-     * click). Turning it off resumes the motion.
+     * click). Turning it off resumes the motion. With `tone` (the org
+     * layout's shader, so the studio's), that one frame is also copied for
+     * the page editor's Moving bands (`shaderStill`, Codex-61zsk.73).
      */
     still?: boolean;
     /**
@@ -148,14 +151,30 @@
         scheduleFrame();
       }
     }
+    /** A frozen shader has no next frame, so one that must show something
+     *  new (a resize cleared it, a page asks for a sample, the studio wants
+     *  its copy) draws its static frame again. */
+    function redrawFrozen() {
+      if (!isFrozen || !hasRenderedStaticFrame) return;
+      hasRenderedStaticFrame = false;
+      scheduleFrame();
+    }
     const onMotionChange = (e: MediaQueryListEvent) => {
       isReducedMotion = e.matches;
       setFrozen(isReducedMotion || isStill || isHeld);
     };
     motionQuery.addEventListener('change', onMotionChange);
     applyStill = (next) => {
+      const entering = next && !isStill;
       isStill = next;
+      watchBrand(isStill);
+      // Out of the studio the shader moves on, so the copy is no longer its
+      // frame; back in, the frame drawn on freezing is copied afresh.
+      if (!isStill) clearStill();
       setFrozen(isReducedMotion || isStill || isHeld);
+      // Frozen already (reduced motion, a held page), it froze with no copy
+      // taken and freezing again draws nothing, so it draws its frame again.
+      if (entering) redrawFrozen();
     };
 
     // Renderer factory is imported from ./load-renderer — single source of
@@ -176,12 +195,8 @@
         canvasEl.height = h;
         renderer?.resize(gl!, w, h);
         clearTone();
-        // Resizing clears the canvas, and a frozen one has no next frame to
-        // repaint it, so it draws its static frame again.
-        if (isFrozen && hasRenderedStaticFrame) {
-          hasRenderedStaticFrame = false;
-          scheduleFrame();
-        }
+        // Resizing clears the canvas.
+        redrawFrozen();
       }
     }
 
@@ -194,10 +209,10 @@
     let cachedConfig = getShaderConfig(undefined, presetOverride);
     let cachedConfigKey = JSON.stringify(cachedConfig);
 
-    function pollConfig() {
+    function pollConfig(fresh: boolean) {
       // Poll every 30 frames (~0.5s at 60fps) to avoid getComputedStyle overhead
       configPollCounter++;
-      if (configPollCounter >= 30) {
+      if (fresh || configPollCounter >= 30) {
         configPollCounter = 0;
         cachedConfig = getShaderConfig(undefined, presetOverride);
         const key = JSON.stringify(cachedConfig);
@@ -263,6 +278,90 @@
       );
     }
 
+    // ── Still (Codex-61zsk.73) ─────────────────────────────────
+    // The studio's one frame, copied straight after it is drawn (as a tone
+    // sample is, and for the same reason) for the page editor's Moving
+    // bands. Only the studio's: the org layout's shader (`tone`) while it is
+    // `still`. A resize redraws it and so copies it again; the old copy
+    // stays on screen until the new one is ready.
+    // What the copy was drawn from: the brand's shader settings and theme.
+    let stillDrawnKey = '';
+
+    /** The theme whose colours it draws in, from the sentinel its config reads. */
+    function drawsDark(): boolean {
+      return shaderIsDark(containerEl ? getComputedStyle(containerEl) : null);
+    }
+
+    function copyStill() {
+      if (!tone || !isStill || !canvasEl || !containerEl) return;
+      // A lost context draws nothing: its copy would be blank, not the frame.
+      if (gl?.isContextLost()) return;
+      const width = containerEl.getBoundingClientRect().width;
+      const dark = drawsDark();
+      stillDrawnKey = `${cachedConfigKey}|${dark}`;
+      captureStill(canvasEl, {
+        theme: dark ? 'dark' : 'light',
+        blur: width > 0 ? blurRadius() / width : 0,
+      });
+    }
+
+    function clearStill() {
+      if (tone) shaderStill.clear();
+    }
+
+    // A frozen shader reads the brand only when it draws, so a new preset,
+    // new colours or the other theme would leave the page editor a copy of
+    // the old. In the studio, once a change to the org layout's tokens (the
+    // brand editor writes them inline, and its editing theme as attributes)
+    // or to the site's theme settles, a copy of what the shader no longer
+    // draws gives way to the glow. The frame is drawn again for a new copy
+    // only while a render paints it: each is a full-viewport draw, and the
+    // brand editor, where most changes are made, paints none. Watched only
+    // while still: out of the studio there is no copy to keep.
+    const STILL_SETTLE_MS = 250;
+    let stillSettle = 0;
+    const orgLayoutEl = containerEl?.closest('.org-layout') ?? null;
+    const brandObserver = tone
+      ? new MutationObserver(() => {
+          clearTimeout(stillSettle);
+          stillSettle = window.setTimeout(() => {
+            const key = JSON.stringify(getShaderConfig(orgLayoutEl, presetOverride));
+            if (`${key}|${drawsDark()}` === stillDrawnKey) return;
+            clearStill();
+            if (shaderStill.wanted) redrawFrozen();
+          }, STILL_SETTLE_MS);
+        })
+      : null;
+    function watchBrand(on: boolean) {
+      if (!brandObserver) return;
+      brandObserver.disconnect();
+      clearTimeout(stillSettle);
+      if (!on) return;
+      if (orgLayoutEl)
+        brandObserver.observe(orgLayoutEl, {
+          attributes: true,
+          attributeFilter: ['style', 'data-editing-theme', 'data-org-brand'],
+        });
+      brandObserver.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ['data-theme'],
+      });
+    }
+    watchBrand(isStill);
+
+    // A render that starts painting the copy, with none shown or being made
+    // (the brand changed while none painted it, or a copy failed), gets the
+    // frame drawn again to copy: once for each brand drawn, so a copy that
+    // cannot be made is not drawn for again on every mount.
+    let demandedKey = '';
+    if (tone)
+      shaderStill.onDemand(() => {
+        if (!isStill || shaderStill.current || shaderStill.encoding) return;
+        if (demandedKey === stillDrawnKey) return;
+        demandedKey = stillDrawnKey;
+        redrawFrozen();
+      });
+
     if (tone)
       shaderTone.onHold((held) => {
         isHeld = held;
@@ -274,10 +373,7 @@
     if (tone)
       shaderTone.onDemand(() => {
         nextToneAt = 0;
-        if (isFrozen && hasRenderedStaticFrame) {
-          hasRenderedStaticFrame = false;
-          scheduleFrame();
-        }
+        redrawFrozen();
       });
 
     // ── Preset switching ───────────────────────────────────────
@@ -292,6 +388,8 @@
 
       currentPreset = preset;
       clearTone();
+      // Another shader, or none: the copy is of one that is gone.
+      clearStill();
 
       if (preset === 'none') {
         // Hide canvas so CSS gradient fallback shows through.
@@ -339,7 +437,11 @@
     function frame() {
       animFrameId = 0; // this callback has fired — clear handle before deciding to re-prime
 
-      const config = pollConfig();
+      // A frozen shader draws seldom (a resize, a sample, the studio), so the
+      // frame it is about to draw reads the brand afresh: the poll's last
+      // read may be minutes and a brand edit old. With no renderer it draws
+      // nothing, and its loop keeps to the poll that spots a new preset.
+      const config = pollConfig(isFrozen && !hasRenderedStaticFrame && renderer !== null);
 
       // Switch preset if needed (async — may take a frame).
       // ensureRenderer calls scheduleFrame() on all branches (success AND
@@ -369,6 +471,7 @@
         frozenElapsed ??= (performance.now() - startTime) / 1000;
         renderer.render(gl!, frozenElapsed, mouse, config, canvasEl!.width, canvasEl!.height);
         sampleTone();
+        copyStill();
         return; // no re-prime — static frame is final
       }
 
@@ -467,6 +570,10 @@
     const resizeObserver = new ResizeObserver(() => resize());
     if (containerEl) resizeObserver.observe(containerEl);
 
+    // A lost context (a GPU reset, or the browser reclaiming its oldest)
+    // shows nothing, so the page editor's bands go back to the glow.
+    canvasEl?.addEventListener('webglcontextlost', clearStill);
+
     // ── Start ──────────────────────────────────────────────────
     // ensureRenderer() calls scheduleFrame() on success — no need to re-prime here.
     const initialConfig = getShaderConfig(undefined, presetOverride);
@@ -479,6 +586,8 @@
         shaderTone.onHold(null);
         shaderTone.onDemand(null);
         shaderTone.clear();
+        shaderStill.onDemand(null);
+        shaderStill.clear();
       }
       cancelAnimationFrame(animFrameId);
       if (renderer) renderer.destroy(gl!);
@@ -490,6 +599,8 @@
       document.removeEventListener('visibilitychange', onVisibilityChange);
       motionQuery.removeEventListener('change', onMotionChange);
       resizeObserver.disconnect();
+      watchBrand(false);
+      canvasEl?.removeEventListener('webglcontextlost', clearStill);
       detachPointerListeners();
     };
   });

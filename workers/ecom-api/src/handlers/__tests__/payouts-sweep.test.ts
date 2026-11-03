@@ -141,7 +141,14 @@ describe('ecom-api payouts-sweep handler', () => {
       });
     tierBackstop = vi
       .spyOn(SubscriptionService.prototype, 'runTierMoveBackstop')
-      .mockResolvedValue({ checked: 0, applied: 0, left: 0, blocked: 0 });
+      .mockResolvedValue({
+        checked: 0,
+        applied: 0,
+        left: 0,
+        blocked: 0,
+        billingChecked: 0,
+        rescheduled: 0,
+      });
     bankPayouts = vi
       .spyOn(SubscriptionService.prototype, 'runBankPayouts')
       .mockResolvedValue(null);

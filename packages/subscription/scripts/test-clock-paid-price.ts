@@ -59,7 +59,9 @@
  *   - the credit's `credited_items` names the paid invoice and its line;
  *   - the dialog's lines and amount due (the fresh ones after a refused
  *     confirm) equal the invoice cut now, to the penny, or where none is
- *     cut, the upcoming invoice's lines with 0 due;
+ *     cut, the upcoming invoice's lines with 0 due. A switch into yearly
+ *     billing lists every line (the new year is an ordinary line beside the
+ *     credit), and its lines add up to the amount due and the invoice;
  *   - a switch into yearly billing starts its new period at the write and is
  *     next billed on the dialog's London date; an upgrade keeps its billing
  *     day.
@@ -344,9 +346,13 @@ async function switchAndCheck(kit: Kit, run: Switch): Promise<void> {
           : { proration_date: at }),
       },
     });
+    // A switch into yearly billing lists every line: Stripe bills the new
+    // year as an ordinary line beside the credit (previewNow).
     const lines = preview.lines.data
       .filter(
-        (line) => line.parent?.subscription_item_details?.proration === true
+        (line) =>
+          newPeriod ||
+          line.parent?.subscription_item_details?.proration === true
       )
       .map((line) => ({
         description: line.description,
@@ -487,10 +493,13 @@ async function switchAndCheck(kit: Kit, run: Switch): Promise<void> {
     `credited ${credited?.invoice ?? 'none'}, paid ${paid.invoice}`
   );
 
+  // The dialog shows the prorations, or for a switch into yearly billing
+  // every line of the invoice, the new year's own charge included.
+  const listed = newPeriod ? chargedLines : prorations;
   const sameLines =
-    shown.lines.length === prorations.length &&
+    shown.lines.length === listed.length &&
     shown.lines.every((line) =>
-      prorations.some(
+      listed.some(
         (charge) =>
           charge.description === line.description &&
           charge.amount === line.amountCents
@@ -501,8 +510,19 @@ async function switchAndCheck(kit: Kit, run: Switch): Promise<void> {
       ? 'every dialog line is on the invoice cut now, to the penny, and no other'
       : 'every dialog line is on the upcoming invoice, and no other',
     sameLines,
-    `dialog ${shown.lines.map((line) => line.amountCents).join(', ')}; charged ${prorations.map((line) => line.amount).join(', ')}`
+    `dialog ${shown.lines.map((line) => line.amountCents).join(', ')}; charged ${listed.map((line) => line.amount).join(', ')}`
   );
+  if (newPeriod) {
+    const sum = shown.lines.reduce(
+      (total, line) => total + line.amountCents,
+      0
+    );
+    check(
+      "the dialog's lines add up to its amount due and to the invoice cut now",
+      sum === shown.amountDueCents && sum === cutNow?.amount_due,
+      `lines ${sum}, dialog due ${shown.amountDueCents}, invoice ${cutNow?.amount_due ?? 'none'}`
+    );
+  }
   check(
     cutNow
       ? 'the dialog amount due equals the invoice cut now'

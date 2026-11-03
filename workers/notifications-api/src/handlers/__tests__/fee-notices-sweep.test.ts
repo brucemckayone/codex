@@ -37,6 +37,7 @@ import type { Bindings } from '@codex/shared-types';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { FEE_RULE_SENTENCE, formatPercent } from '../fee-notice-copy';
 import {
+  FEE_SENDS_TIME_BUDGET_MS,
   type FeeMailerParams,
   type FeeNoticeDelivery,
   runFeeNoticesSweep,
@@ -463,5 +464,165 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
       attempts: 0,
     });
     expect((await changeOf(changeId))?.effectiveFrom).toBeNull();
+  });
+
+  it('reads every recipient in one query, however many it sends', async () => {
+    const ada = await person('Ada Moss');
+    const ben = await person('Ben Cole');
+    const cy = await person('Cy Park');
+    const changeId = await rise(await organisation(ada.id, ben.id, cy.id));
+    // The client, counting reads of people's addresses.
+    let addressReads = 0;
+    const counting = new Proxy(db, {
+      get(target, prop) {
+        if (prop === 'select') {
+          return (fields?: Record<string, unknown>) => {
+            if (fields?.email === users.email) addressReads += 1;
+            return (target.select as (f?: unknown) => unknown).call(
+              target,
+              fields
+            );
+          };
+        }
+        const value = Reflect.get(target, prop, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const mailer = mailerAnswering();
+
+    const result = await runFeeNoticesSweep({
+      db: counting,
+      obs,
+      environment: 'development',
+      workerSecret: 'unused',
+      notificationsUrl: 'http://unused.test',
+      now: NOV_3,
+      mailer,
+      templateExists: async () => true,
+      onlyChanges: [changeId],
+    });
+
+    expect(result).toMatchObject({ listed: 3, sent: 3 });
+    expect(mailer.mock.calls.map(([params]) => params.to).sort()).toEqual(
+      [ada.email, ben.email, cy.email].sort()
+    );
+    expect(addressReads).toBe(1);
+  });
+
+  it('starts no send batch once the budget is spent: the rest go back untouched, go the next morning, and the alert still runs', async () => {
+    // Nine people: a batch of eight, then one.
+    const everyone: Array<{ id: string; email: string }> = [];
+    for (const name of ['Ann', 'Bo', 'Cal', 'Dee', 'Eli', 'Fay', 'Gus']) {
+      everyone.push(await person(`${name} Budget`));
+    }
+    everyone.push(await person('Hal Budget'), await person('Ivy Budget'));
+    const changeId = await rise(
+      await organisation(...everyone.map((p) => p.id))
+    );
+    // The budget is spent during the first batch, whose first email fails.
+    let clockMs = 0;
+    let refused: string | undefined;
+    const mailer = vi.fn(
+      async (params: FeeMailerParams): Promise<FeeNoticeDelivery> => {
+        clockMs = FEE_SENDS_TIME_BUDGET_MS;
+        if (refused) return { accepted: true };
+        refused = params.userId;
+        return { accepted: false, status: 400 };
+      }
+    );
+
+    const day1 = await runFeeNoticesSweep({
+      db,
+      obs,
+      environment: 'development',
+      workerSecret: 'unused',
+      notificationsUrl: 'http://unused.test',
+      now: NOV_3,
+      mailer,
+      templateExists: async () => true,
+      clock: () => clockMs,
+      onlyChanges: [changeId],
+    });
+
+    expect(day1).toMatchObject({
+      listed: 9,
+      sent: 7,
+      failed: 1,
+      givenBack: 1,
+      dated: 0,
+    });
+    expect(mailer).toHaveBeenCalledTimes(8);
+    const mailed = new Set(mailer.mock.calls.map(([p]) => p.userId));
+    const [unsent, ...others] = everyone.filter((p) => !mailed.has(p.id));
+    expect(others).toEqual([]);
+    // Their claim is undone: no try spent, no time stamped.
+    expect(await noticeOf(changeId, unsent?.id as string)).toMatchObject({
+      state: 'due',
+      attempts: 0,
+      attemptedAt: null,
+    });
+    // The parts after the sends still ran: the alert names the refused one.
+    expect(alertsNaming(refused as string)).toHaveLength(1);
+
+    const day2 = await run(changeId, NOV_4, mailerAnswering());
+    expect(day2).toMatchObject({ sent: 2, givenBack: 0, dated: 1 });
+    expect(await noticeOf(changeId, unsent?.id as string)).toMatchObject({
+      state: 'sent',
+      attempts: 1,
+      acceptedAt: NOV_4,
+    });
+    expect((await changeOf(changeId))?.effectiveFrom).toEqual(
+      feeRiseStartAfter(NOV_4)
+    );
+  });
+
+  it('a send that outlasts its timeout is unknown, so the next run checks the email log first', async () => {
+    const kim = await person('Kim Slow');
+    const changeId = await rise(await organisation(kim.id));
+    // notifications-api answering after 2 s, unless the request is aborted.
+    const realFetch = globalThis.fetch;
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation((input, init) => {
+        if (!String(input).startsWith('http://notifications.test/')) {
+          return realFetch(input, init);
+        }
+        return new Promise<Response>((resolve, reject) => {
+          const answered = setTimeout(
+            () => resolve(Response.json({ data: { success: true } })),
+            2_000
+          );
+          init?.signal?.addEventListener('abort', () => {
+            clearTimeout(answered);
+            reject(init.signal?.reason);
+          });
+        });
+      });
+    try {
+      const result = await runFeeNoticesSweep({
+        db,
+        obs,
+        environment: 'development',
+        workerSecret: 'test-secret',
+        notificationsUrl: 'http://notifications.test',
+        now: NOV_3,
+        sendTimeoutMs: 50,
+        templateExists: async () => true,
+        onlyChanges: [changeId],
+      });
+
+      expect(result).toMatchObject({ sent: 0, unknown: 1 });
+      expect(
+        fetchSpy.mock.calls.filter(([input]) =>
+          String(input).startsWith('http://notifications.test/')
+        )
+      ).toHaveLength(1);
+      expect(await noticeOf(changeId, kim.id)).toMatchObject({
+        state: 'unknown',
+        lastReason: 'unknown',
+      });
+    } finally {
+      fetchSpy.mockRestore();
+    }
   });
 });

@@ -9,6 +9,7 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  billingChangeMetadata,
   classifyTierChange,
   flipMetadata,
   keepMetadata,
@@ -31,6 +32,11 @@ const ANNUAL: Record<string, number> = {
   [PREMIUM]: 20000,
 };
 
+/** A move to Basic waiting for the renewal, on the same billing. */
+const PLAN_MOVE = { kind: 'plan', tierId: BASIC } as const;
+/** A switch to monthly billing waiting for the year's end (Codex-2hxff.97). */
+const BILLING_WAIT = { kind: 'billing', tierId: PRO } as const;
+
 /** A change from Pro on `from` to `tier` on `to`. */
 function facts(
   tier: string,
@@ -46,7 +52,8 @@ function facts(
     targetTierId: tier,
     targetInterval: to,
     targetAmountOnCurrentIntervalCents: onCurrent[tier] ?? 0,
-    moveWaiting: false,
+    targetOnCurrentInterval: true,
+    waiting: null,
     cancelling: false,
     ...overrides,
   };
@@ -62,7 +69,7 @@ describe('classifyTierChange (data design §1)', () => {
 
     it('dearer while a move waits: refused, keep the current plan first (T2)', () => {
       expect(
-        classifyTierChange(facts(PREMIUM, 'month', { moveWaiting: true }))
+        classifyTierChange(facts(PREMIUM, 'month', { waiting: PLAN_MOVE }))
       ).toEqual({ refused: 'keep_first' });
     });
 
@@ -74,7 +81,7 @@ describe('classifyTierChange (data design §1)', () => {
 
     it('cheaper while a move waits: a downgrade again, which replaces it (latest wins, T2)', () => {
       expect(
-        classifyTierChange(facts(BASIC, 'month', { moveWaiting: true }))
+        classifyTierChange(facts(BASIC, 'month', { waiting: PLAN_MOVE }))
       ).toEqual({ kind: 'downgrade' });
     });
 
@@ -93,7 +100,7 @@ describe('classifyTierChange (data design §1)', () => {
         classifyTierChange(
           facts('tier-pro-plus', 'month', {
             targetAmountOnCurrentIntervalCents: 1200,
-            moveWaiting: true,
+            waiting: PLAN_MOVE,
           })
         )
       ).toEqual({ kind: 'lateral' });
@@ -101,7 +108,7 @@ describe('classifyTierChange (data design §1)', () => {
 
     it('their own plan while a move waits: refused, keep the current plan (Keep restores the exact Price)', () => {
       expect(
-        classifyTierChange(facts(PRO, 'month', { moveWaiting: true }))
+        classifyTierChange(facts(PRO, 'month', { waiting: PLAN_MOVE }))
       ).toEqual({ refused: 'keep_first' });
     });
 
@@ -122,7 +129,8 @@ describe('classifyTierChange (data design §1)', () => {
           targetTierId: PRO,
           targetInterval: 'month',
           targetAmountOnCurrentIntervalCents: 1200,
-          moveWaiting: true,
+          targetOnCurrentInterval: true,
+          waiting: PLAN_MOVE,
           cancelling: false,
         })
       ).toEqual({ kind: 'downgrade' });
@@ -130,9 +138,9 @@ describe('classifyTierChange (data design §1)', () => {
   });
 
   describe('the same tier on the other billing period', () => {
-    it('yearly to monthly: switches now with credit, as today (T1)', () => {
+    it("yearly to monthly: waits for the year's end, nothing credited (Codex-2hxff.97, A)", () => {
       expect(classifyTierChange(facts(PRO, 'month', { from: 'year' }))).toEqual(
-        { kind: 'interval_switch' }
+        { kind: 'billing_wait' }
       );
     });
 
@@ -142,13 +150,19 @@ describe('classifyTierChange (data design §1)', () => {
       });
     });
 
-    it.each([
-      ['yearly to monthly', 'year', 'month'],
-      ['monthly to yearly', 'month', 'year'],
-    ] as const)('%s while a move waits: refused (Q3)', (_, from, to) => {
+    it('monthly to yearly while a move waits: refused (Q3)', () => {
       expect(
-        classifyTierChange(facts(PRO, to, { from, moveWaiting: true }))
+        classifyTierChange(facts(PRO, 'year', { waiting: PLAN_MOVE }))
       ).toEqual({ refused: 'interval_while_moving' });
+    });
+
+    it.each([
+      ['a move to a cheaper plan', PLAN_MOVE],
+      ['a change of billing', BILLING_WAIT],
+    ] as const)('yearly to monthly while %s waits: joins it, the latest choice wins (Q2)', (_, waiting) => {
+      expect(
+        classifyTierChange(facts(PRO, 'month', { from: 'year', waiting }))
+      ).toEqual({ kind: 'billing_wait' });
     });
   });
 
@@ -161,29 +175,76 @@ describe('classifyTierChange (data design §1)', () => {
       });
     });
 
-    it('cheaper from yearly: two steps too', () => {
+    it('cheaper from yearly: one waiting change, plan and billing together (Codex-2hxff.97, B, Q3)', () => {
       expect(
         classifyTierChange(facts(BASIC, 'month', { from: 'year' }))
-      ).toEqual({ refused: 'two_steps' });
+      ).toEqual({ kind: 'move_with_billing' });
     });
 
-    it('dearer: now, with Stripe proration across periods', () => {
+    it.each([
+      ['a move to a cheaper plan', PLAN_MOVE],
+      ['a change of billing', BILLING_WAIT],
+    ] as const)('cheaper from yearly while %s waits: replaces it (Q2)', (_, waiting) => {
+      expect(
+        classifyTierChange(facts(BASIC, 'month', { from: 'year', waiting }))
+      ).toEqual({ kind: 'move_with_billing' });
+    });
+
+    it('dearer from yearly: the plan now on yearly billing, monthly from the renewal (C(b), Q1)', () => {
       // Pro yearly (£120) to Premium monthly (£20): Premium is dearer on the
       // yearly period (£200 > £120), though £20 < £120.
       expect(
         classifyTierChange(facts(PREMIUM, 'month', { from: 'year' }))
-      ).toEqual({ kind: 'cross_period_change' });
+      ).toEqual({ kind: 'change_then_billing_wait' });
+    });
+
+    it('dearer from yearly with no yearly Price: the whole change waits (C(a))', () => {
+      expect(
+        classifyTierChange(
+          facts(PREMIUM, 'month', {
+            from: 'year',
+            targetOnCurrentInterval: false,
+          })
+        )
+      ).toEqual({ kind: 'move_with_billing' });
+    });
+
+    it.each([
+      ['a move to a cheaper plan', PLAN_MOVE],
+      ['a change of billing', BILLING_WAIT],
+    ] as const)('dearer from yearly while %s waits: refused, keep first', (_, waiting) => {
+      expect(
+        classifyTierChange(facts(PREMIUM, 'month', { from: 'year', waiting }))
+      ).toEqual({ refused: 'keep_first' });
+    });
+
+    it('the same price from yearly while something waits: the plan now, replacing it', () => {
+      expect(
+        classifyTierChange(
+          facts('tier-pro-plus', 'month', {
+            from: 'year',
+            targetAmountOnCurrentIntervalCents: 12000,
+            waiting: BILLING_WAIT,
+          })
+        )
+      ).toEqual({ kind: 'change_then_billing_wait' });
+    });
+
+    it('monthly to a cheaper yearly plan: still two steps', () => {
+      expect(classifyTierChange(facts(BASIC, 'year'))).toEqual({
+        refused: 'two_steps',
+      });
     });
 
     it('dearer while a move waits: refused, keep first', () => {
       expect(
-        classifyTierChange(facts(PREMIUM, 'year', { moveWaiting: true }))
+        classifyTierChange(facts(PREMIUM, 'year', { waiting: PLAN_MOVE }))
       ).toEqual({ refused: 'keep_first' });
     });
 
     it('cheaper while a move waits: two steps (step 1 replaces the move)', () => {
       expect(
-        classifyTierChange(facts(BASIC, 'year', { moveWaiting: true }))
+        classifyTierChange(facts(BASIC, 'year', { waiting: PLAN_MOVE }))
       ).toEqual({ refused: 'two_steps' });
     });
   });
@@ -196,6 +257,47 @@ describe('classifyTierChange (data design §1)', () => {
   ] as const)('%s while set to cancel: refused, reactivate first (Q2)', (_, tier, to) => {
     expect(classifyTierChange(facts(tier, to, { cancelling: true }))).toEqual({
       refused: 'cancelling',
+    });
+  });
+
+  it('leaving yearly billing while set to cancel: refused, reactivate first', () => {
+    expect(
+      classifyTierChange(
+        facts(PRO, 'month', { from: 'year', cancelling: true })
+      )
+    ).toEqual({ refused: 'cancelling' });
+  });
+
+  describe('on yearly billing while a change of billing waits (Codex-2hxff.97)', () => {
+    const yearly = (tier: string, amount?: number) =>
+      facts(tier, 'year', {
+        from: 'year',
+        waiting: BILLING_WAIT,
+        ...(amount !== undefined && {
+          targetAmountOnCurrentIntervalCents: amount,
+        }),
+      });
+
+    it('a cheaper plan on yearly: a downgrade, which replaces it (§2.4)', () => {
+      expect(classifyTierChange(yearly(BASIC))).toEqual({ kind: 'downgrade' });
+    });
+
+    it('their own plan on yearly: keep first (Keep yearly billing)', () => {
+      expect(classifyTierChange(yearly(PRO))).toEqual({
+        refused: 'keep_first',
+      });
+    });
+
+    it('a dearer plan on yearly: keep first', () => {
+      expect(classifyTierChange(yearly(PREMIUM))).toEqual({
+        refused: 'keep_first',
+      });
+    });
+
+    it('the same price on yearly: lateral, which replaces it', () => {
+      expect(classifyTierChange(yearly('tier-pro-plus', 12000))).toEqual({
+        kind: 'lateral',
+      });
     });
   });
 });
@@ -235,6 +337,10 @@ describe('the waiting move metadata', () => {
       codex_hold_pending_price_from: '1705000000',
       codex_pending_price_id: '',
       codex_pending_price_from: '',
+      // A move on the same billing replaces a waiting change of billing.
+      codex_move_interval: '',
+      codex_move_price_id: '',
+      codex_move_amount: '',
     });
   });
 
@@ -264,6 +370,9 @@ describe('the waiting move metadata', () => {
     expect(keepMetadata(move)).toEqual({
       codex_move_tier_id: '',
       codex_move_at: '',
+      codex_move_interval: '',
+      codex_move_price_id: '',
+      codex_move_amount: '',
       codex_hold_price_id: '',
       codex_hold_amount: '',
       codex_hold_pending_price_id: '',
@@ -304,5 +413,95 @@ describe('the waiting move metadata', () => {
     expect(written.codex_move_tier_id).toBe('');
     expect(written.codex_hold_price_id).toBe('');
     expect(written).not.toHaveProperty('codex_pending_price_id');
+  });
+});
+
+describe('a waiting change of billing, as metadata (Codex-2hxff.97, §2.1)', () => {
+  const TARGET = '6f1d2c3b-4a59-4e6f-8a7b-9c0d1e2f3a4b';
+  const record = billingChangeMetadata({
+    tierId: PRO,
+    userId: 'user-1',
+    organizationId: 'org-1',
+    targetTierId: TARGET,
+    moveAt: 1_702_000_000,
+    hold: { priceId: 'price_pro_y', amountCents: 12000 },
+    parkedPendingPrice: { priceId: 'price_pro_y_v2', from: '1705000000' },
+    billing: {
+      interval: 'month',
+      priceId: 'price_basic_m',
+      amountCents: 500,
+    },
+  });
+
+  it('the record: the move, the item’s own Price held, the price change parked, and the billing keys', () => {
+    expect(record).toEqual({
+      codex_tier_id: PRO,
+      codex_user_id: 'user-1',
+      codex_organization_id: 'org-1',
+      codex_move_tier_id: TARGET,
+      codex_move_at: '1702000000',
+      codex_hold_price_id: 'price_pro_y',
+      codex_hold_amount: '12000',
+      codex_hold_pending_price_id: 'price_pro_y_v2',
+      codex_hold_pending_price_from: '1705000000',
+      // A live marker on the yearly Price would outlive the switch (P4).
+      codex_pending_price_id: '',
+      codex_pending_price_from: '',
+      codex_move_interval: 'month',
+      codex_move_price_id: 'price_basic_m',
+      codex_move_amount: '500',
+    });
+  });
+
+  it('reads back as a waiting move with its billing', () => {
+    expect(readWaitingMove(record)).toEqual({
+      tierId: TARGET,
+      at: 1_702_000_000,
+      holdPriceId: 'price_pro_y',
+      holdAmountCents: 12000,
+      parkedPendingPrice: { priceId: 'price_pro_y_v2', from: '1705000000' },
+      billing: {
+        interval: 'month',
+        priceId: 'price_basic_m',
+        amountCents: 500,
+      },
+    });
+  });
+
+  it('a plan move reads with no billing; half the billing keys read as none', () => {
+    const { codex_move_amount: _amount, ...half } = record;
+    expect(readWaitingMove(half)?.billing).toBeNull();
+    expect(
+      readWaitingMove({ ...record, codex_move_interval: 'week' })?.billing
+    ).toBeNull();
+  });
+
+  it('Keep clears all of it and puts the parked price change back', () => {
+    const move = readWaitingMove(record);
+    expect(move).not.toBeNull();
+    if (!move) return;
+    const kept = { ...record, ...keepMetadata(move) };
+    const left = Object.fromEntries(
+      Object.entries(kept).filter(([, value]) => value !== '')
+    );
+    expect(left).toEqual({
+      codex_tier_id: PRO,
+      codex_user_id: 'user-1',
+      codex_organization_id: 'org-1',
+      codex_pending_price_id: 'price_pro_y_v2',
+      codex_pending_price_from: '1705000000',
+    });
+  });
+
+  it("phase 2's flip: the target tier, every move and hold key gone, a price change on the target left alone", () => {
+    const flip = flipMetadata({ tierId: TARGET });
+    expect(flip.codex_tier_id).toBe(TARGET);
+    for (const key of Object.keys(record)) {
+      if (key.startsWith('codex_move_') || key.startsWith('codex_hold_')) {
+        expect(flip[key]).toBe('');
+      }
+    }
+    expect(flip).not.toHaveProperty('codex_pending_price_id');
+    expect(flip).not.toHaveProperty('codex_pending_price_from');
   });
 });

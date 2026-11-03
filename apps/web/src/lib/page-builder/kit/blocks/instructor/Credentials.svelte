@@ -4,18 +4,37 @@
   The guide's credentials — an unordered set, so never numbered. `ledger`
   sets them in ruled columns (a hard ink rule in Bold); `chips` centres them
   as outlined labels, for a layout that reads down the middle.
+
+  In the ledger, a credential that leads with a figure ("20 years teaching",
+  `model/credential-figure.ts`) sets the figure on its own line, the words
+  under it (Codex-61zsk.73). Chips stay as written: short labels.
 -->
 <script lang="ts">
+  import { credentialFigure } from '../../model/credential-figure';
+
   interface Props {
     items: readonly string[];
     variant?: 'ledger' | 'chips';
   }
 
   const { items, variant = 'ledger' }: Props = $props();
+
+  const rows = $derived(
+    items.map((text) => ({
+      text,
+      lead: variant === 'ledger' ? credentialFigure(text) : null,
+    }))
+  );
 </script>
 
+<!-- A led row still reads as one phrase: the space between its two lines is
+     real text, so it is spoken and copied, but never drawn. -->
 <ul class="creds" data-variant={variant}>
-  {#each items as item, index (index)}<li>{item}</li>{/each}
+  {#each rows as row, index (index)}<li>
+      {#if row.lead}<span class="creds__figure">{row.lead.figure}</span>{' '}<span
+          class="creds__words">{row.lead.words}</span
+        >{:else}{row.text}{/if}
+    </li>{/each}
 </ul>
 
 <style>
@@ -58,6 +77,37 @@
 
   :global(.lp[data-lp-style='bold']) .creds[data-variant='ledger'] li {
     border-block-start: var(--lp-rule) var(--border-style) var(--lp-ink);
+  }
+
+  /* A leading figure in the display face, halfway from title to heading.
+     Since #657 the item size is never under the lead's, so a figure at title
+     size barely stood over its own words (smaller than them on a phone);
+     halfway leads them clearly and still sits under the section heading.
+     It sits in a column's room, which louder's fit cannot see, so its half
+     of the heading follows the dial down and never up. Every row keeps its
+     rule above, level at the top, led or not. */
+  .creds__figure {
+    display: block;
+    font-family: var(--lp-font-display);
+    font-size: calc(
+      (var(--lp-size-title) + var(--lp-size-heading) * var(--lp-drama-held, 1)) / 2
+    );
+    font-weight: var(--lp-weight-display);
+    font-synthesis: none;
+    font-variant-numeric: lining-nums tabular-nums;
+    line-height: var(--lp-leading-display);
+    letter-spacing: var(--lp-tracking-display);
+  }
+
+  .creds__words {
+    display: block;
+  }
+
+  /* Under the quote layout's centrepiece the list keeps the body's size and
+     the heading is a title, so the figure takes the item's: it leads its
+     words and never matches the heading. */
+  :global(.guide-quote__more) .creds__figure {
+    font-size: var(--lp-size-item);
   }
 
   /* Bold's Type sets a credential semibold, in a list or as a chip (03 X73). */

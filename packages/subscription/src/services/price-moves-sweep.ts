@@ -59,6 +59,7 @@ import { isBankPayoutRun, nextPriceMovesRunAfter } from '@codex/payments';
 import { type SQL, sql } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import { PriceChangeStageError } from '../errors';
+import { MOVE_INTERVAL_KEY } from './billing-change';
 import {
   isDefinitiveStripeRefusal,
   moveFailureAlert,
@@ -200,6 +201,8 @@ interface MoveRow {
   subTierId: string | null;
   pendingTierId: string | null;
   pendingTierFrom: Date | null;
+  /** The interval a waiting change of billing lands on (Codex-2hxff.97). */
+  pendingBillingInterval: string | null;
 }
 
 /** When a person was told, and the date their notice named. */
@@ -566,7 +569,8 @@ async function loadRows(run: Run, batch: Claim[]): Promise<MoveRow[]> {
            COALESCE(s."status", cs."status") AS sub_status,
            COALESCE(s."ended_at", cs."ended_at") AS sub_ended_at,
            COALESCE(s."billing_interval", cs."billing_interval") AS sub_interval,
-           s."tier_id" AS sub_tier_id, s."pending_tier_id", s."pending_tier_from"
+           s."tier_id" AS sub_tier_id, s."pending_tier_id", s."pending_tier_from",
+           s."pending_billing_interval"
       FROM ${subscriptionPriceMoves} m
       JOIN ${priceChanges} c ON c."id" = m."price_change_id"
       LEFT JOIN ${users} u ON u."id" = m."user_id"
@@ -611,6 +615,8 @@ async function loadRows(run: Run, batch: Claim[]): Promise<MoveRow[]> {
     subTierId: (r.sub_tier_id as string | null) ?? null,
     pendingTierId: (r.pending_tier_id as string | null) ?? null,
     pendingTierFrom: toDate(r.pending_tier_from),
+    pendingBillingInterval:
+      (r.pending_billing_interval as string | null) ?? null,
   }));
 }
 
@@ -894,6 +900,24 @@ function eligibility(
   ) {
     return { skip: 'ended' };
   }
+  // A waiting change of billing (Codex-2hxff.97) goes to its tier on its
+  // interval: a change there finds them as a mover, after the change lands;
+  // the tier and interval they are leaving, and any other, skip them.
+  if (row.kind === 'tier' && row.pendingBillingInterval !== null) {
+    if (
+      row.pendingTierId === row.tierId &&
+      row.pendingBillingInterval === row.interval
+    ) {
+      return {
+        floorFrom: row.pendingTierFrom
+          ? new Date(row.pendingTierFrom.getTime() + 1000)
+          : null,
+      };
+    }
+    return {
+      skip: row.subInterval === row.interval ? 'moving_away' : 'other_interval',
+    };
+  }
   if (row.subInterval !== row.interval) return { skip: 'other_interval' };
   if (row.kind === 'tier') {
     if (row.pendingTierId !== null && row.pendingTierId === row.tierId) {
@@ -915,13 +939,18 @@ function eligibility(
  * (or during the notice, F1). A live `codex_move_tier_id` naming another tier
  * means they are leaving; with no move waiting, a `codex_tier_id` naming
  * another tier means they have left (an upgrade, or Keep from a move onto
- * this tier).
+ * this tier). A waiting change of billing onto another interval leaves this
+ * one, on the same tier too (Codex-2hxff.97).
  */
 function movingAwayAtStripe(
   row: MoveRow
 ): (live: Stripe.Subscription) => PriceMoveSkipReason | null {
   return (live) => {
     const movingTo = live.metadata?.[MOVE_TIER_ID_KEY];
+    const movingInterval = live.metadata?.[MOVE_INTERVAL_KEY];
+    if (movingTo && movingInterval && movingInterval !== row.interval) {
+      return 'moving_away';
+    }
     if (movingTo) return movingTo === row.tierId ? null : 'moving_away';
     const on = live.metadata?.codex_tier_id;
     return on && on !== row.tierId ? 'moving_away' : null;

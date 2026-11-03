@@ -21,6 +21,18 @@
 export const NOTHING_MOVES = "[data-lp-still], [data-lp-motion='still']";
 export const NOTHING_FOLLOWS = '[data-lp-still], [data-lp-motion]';
 
+/**
+ * Whether `el` is where motion stops: on a page `NOTHING_MOVES` covers, or
+ * under reduced motion. The page is read first, so a still page never asks
+ * the media query.
+ */
+export function holdsStill(el: Element): boolean {
+  return (
+    el.closest(NOTHING_MOVES) !== null ||
+    matchMedia('(prefers-reduced-motion: reduce)').matches
+  );
+}
+
 /** `data-lp-reveal` and `--lp-media-reveal`: how an element enters. */
 export const REVEALS = ['rise', 'fade', 'wipe', 'scale'] as const;
 
