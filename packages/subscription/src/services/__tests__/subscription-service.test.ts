@@ -4223,11 +4223,13 @@ describe('SubscriptionService', () => {
       const retrieve = stripe.subscriptions.retrieve as ReturnType<
         typeof vi.fn
       >;
-      const live = retrieve.getMockImplementation();
+      const live = retrieve.getMockImplementation() as
+        | ((id: string) => Promise<Stripe.Subscription>)
+        | undefined;
       let renewedTo = 0;
       retrieve.mockImplementationOnce(async (id: string) => {
         const renewed = await live?.(id);
-        renewedTo = renewed.items.data[0].current_period_end;
+        renewedTo = renewed?.items.data[0]?.current_period_end ?? 0;
         return renewed;
       });
       const bump = vi.spyOn(
