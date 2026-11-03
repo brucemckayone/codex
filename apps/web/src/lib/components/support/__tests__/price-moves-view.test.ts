@@ -4,6 +4,7 @@
  */
 
 import { describe, expect, test } from 'vitest';
+import { PRICE_EMAILS_PER_RUN } from '$lib/components/studio/price-note-view';
 import {
   heldMove,
   JORDAN,
@@ -27,6 +28,9 @@ import {
   stoppedTitle,
   whyHeld,
 } from '../price-moves-view';
+
+/** The run's size, as the Studio note says it: "1,125". */
+const PER_RUN = PRICE_EMAILS_PER_RUN.toLocaleString('en-GB');
 
 const OWEN = heldMove({
   action: 'retry_move',
@@ -241,12 +245,12 @@ describe('a stopped change', () => {
       label: 'Restarts at 14:00',
     });
     expect(stoppedFacts(change)[2].text).toBe(
-      'Restarted by Jordan Reid at 13:12. The 14:00 run carries on, about 1,500 an hour.'
+      `Restarted by Jordan Reid at 13:12. The 14:00 run carries on, about ${PER_RUN} an hour.`
     );
     expect(restartedNotice(change, '2026-11-05T14:00:00.000Z')).toEqual({
       variant: 'success',
       lead: 'Restarted.',
-      text: "The 14:00 run starts emailing Northlight Collective's 6,240 Members subscribers again, about 1,500 an hour, and Tom's Studio note shows the progress.",
+      text: `The 14:00 run starts emailing Northlight Collective's 6,240 Members subscribers again, about ${PER_RUN} an hour, and Tom's Studio note shows the progress.`,
     });
   });
 });

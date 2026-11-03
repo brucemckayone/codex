@@ -272,7 +272,7 @@ through the new route after rolling forward.
 
 A new tier or course-plan price emails every subscriber first, and moves each
 one only after their own email is accepted; their 30 days count from it.
-ecom-api's hourly run does this, about 1,500 people a run, skipping the 08:00
+ecom-api's hourly run does this, up to 1,125 people a run, skipping the 08:00
 London run, which belongs to the bank payout ([Subscriptions](subscriptions.md)).
 Admin › Queue › Price moves (`Codex-2hxff.85`) lists the people it couldn't
 move. The record is the source of truth, not the alerts: the run names at most
