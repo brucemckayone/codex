@@ -1075,6 +1075,12 @@ describe('the hourly price-moves step (Codex-2hxff.86)', () => {
       priceChangeId: changeId,
       status: 404,
     });
+    // Its own alert is the one: the run's end line repeats nothing (SF-4).
+    expect(
+      obs.error.mock.calls.filter(([message]) =>
+        String(message).includes('run finished with people held')
+      )
+    ).toEqual([]);
 
     // A stopped change is left alone until support restarts it.
     const idle = await run([changeId], { fake, send: mailer() }, 1);
@@ -1432,6 +1438,48 @@ describe('the hourly price-moves step (Codex-2hxff.86)', () => {
       state: 'due',
       attempts: 0,
     });
+  });
+
+  // Review C1, SF-4: one alert per need. Held rows within the cap and a
+  // stopped change have their own; the end line is info, not a second alert.
+  it('held within the cap: each held row alerts once, and the run ends on an info line', async () => {
+    const { org: o, pro } = await org('pm-held-once');
+    const fake = fakeStripe();
+    const subs = [await subscriber(o.id, pro), await subscriber(o.id, pro)];
+    for (const sub of subs) onStripe(fake, sub, 40);
+    const changeId = await reprice(o.id, pro);
+    // Their third try: a failure now holds them. One was told already, so
+    // the change is not stopped (step 5) for refusing everyone.
+    await db
+      .update(subscriptionPriceMoves)
+      .set({ attempts: 2, lastError: 'notice_refused_422' })
+      .where(eq(subscriptionPriceMoves.priceChangeId, changeId));
+    await db
+      .update(subscriptionPriceMoves)
+      .set({ noticeAt: new Date(NOW - DAY_MS), state: 'notified' })
+      .where(eq(subscriptionPriceMoves.subscriptionId, takeFirst(subs).id));
+    for (const sub of subs) {
+      fake.failWrites.set(sub.stripeSubscriptionId, stripeError(400));
+    }
+    const obs = logger();
+
+    const result = await run(
+      [changeId],
+      { fake, send: mailer(() => ({ accepted: false, status: 422 })), obs },
+      0
+    );
+
+    expect(result.held).toBe(2);
+    const rows = await movesOf(changeId);
+    const lines = obs.error.mock.calls.filter(([, data]) =>
+      rows.some((r) => r.id === data?.priceMoveId)
+    );
+    expect(lines).toHaveLength(2);
+    expect(obs.error).toHaveBeenCalledTimes(2);
+    expect(obs.info).toHaveBeenCalledWith(
+      'Price moves: run finished',
+      expect.objectContaining({ held: 2 })
+    );
   });
 
   it("alert lines are capped per run; the rest carry the end alert's id", async () => {

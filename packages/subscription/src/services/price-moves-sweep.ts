@@ -1358,14 +1358,20 @@ async function finishIfDone(run: Run, changeId: string): Promise<boolean> {
   });
 }
 
-/** One line per run: an alert when anyone was held or a change stopped. */
+/**
+ * One line per run. Each held row (up to the per-run cap) and each stopped
+ * change has already had its own alert, so this is an alert only when held
+ * rows past the cap were folded into it and carry its errorId; otherwise it
+ * is the run's info line (review C1, SF-4: alert only when a person is
+ * needed, and once).
+ */
 function endAlert(run: Run): void {
   const { result } = run;
   if (result.claimed === 0 && result.restarted === 0 && result.reopened === 0) {
     return;
   }
   const folded = result.held - run.alertLines;
-  if (result.held > 0 || result.stopped > 0) {
+  if (folded > 0) {
     run.deps.obs.error(
       'Price moves: run finished with people held for support (Admin › Queue › Price moves)',
       {
