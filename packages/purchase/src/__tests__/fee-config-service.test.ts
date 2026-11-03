@@ -146,6 +146,44 @@ describe('FeeConfigService — reads go through the version cache', () => {
   });
 });
 
+describe('FeeConfigService — a failed cache clear is seen', () => {
+  it('logs an error naming the level when the invalidate rejects', async () => {
+    const pending: Promise<unknown>[] = [];
+    const svc = new FeeConfigService({
+      db: untouchable,
+      environment: 'test',
+      cache: {
+        invalidate: vi.fn(async () => {
+          throw new Error('KV unavailable');
+        }),
+      } as unknown as VersionedCache,
+      waitUntil: (p) => pending.push(p),
+    });
+    const logged = vi
+      .spyOn(
+        (svc as unknown as { obs: { error: (...a: unknown[]) => void } }).obs,
+        'error'
+      )
+      .mockImplementation(() => {});
+
+    svc.invalidateLevel({
+      scope: 'creator',
+      organizationId: 'org-1',
+      creatorId: 'cr-1',
+    });
+    await Promise.all(pending);
+
+    expect(logged).toHaveBeenCalledTimes(1);
+    expect(logged.mock.calls[0]?.[1]).toMatchObject({
+      errorId: expect.any(String),
+      scope: 'creator',
+      organizationId: 'org-1',
+      creatorId: 'cr-1',
+      error: 'KV unavailable',
+    });
+  });
+});
+
 describe('FeeConfigService — input guards reject before the database', () => {
   const svc = new FeeConfigService({ db: untouchable, environment: 'test' });
 
