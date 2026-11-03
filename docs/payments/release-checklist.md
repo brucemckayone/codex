@@ -318,9 +318,10 @@ exception: a level whose dated rise started since midnight, listed until the
 
 The morning after the deploy, read notifications-api's `fee step completed`
 log line. With no rise saved it reads all zeros. Its `mirrored` count is the
-levels whose old fee row took a dated rise that started since the last run. Look for any
-`fee step: template missing` warning (the templates didn't arrive: R14's
-second query) or `fee step part failed` error.
+levels whose old fee row took a dated rise that started since the last run.
+Look for any `fee step: template missing` line (the templates didn't arrive:
+R14's second query): a warning while nothing waits on it, an alert naming
+the changes once a rise does. Look too for a `fee step part failed` error.
 
 The fee cache's key types changed (`fee:*` to `fee-versions:*`, because the
 payload changed). Nothing to purge: the old slots had the default 10-minute

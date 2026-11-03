@@ -508,6 +508,26 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
       attempts: 0,
     });
     expect((await changeOf(changeId))?.effectiveFrom).toBeNull();
+
+    // A person is needed: one alert a run, naming the rise that waits.
+    const alerts = () =>
+      obsLog.error.mock.calls.filter(
+        ([message, context]) =>
+          String(message).startsWith('fee step: template missing') &&
+          (context as { changeIds: string[] }).changeIds.includes(changeId)
+      );
+    expect(alerts()).toHaveLength(1);
+    expect(alerts()[0]?.[1]).toMatchObject({
+      errorId: expect.any(String),
+      templateName: 'fee-change-notice',
+    });
+    await run(
+      changeId,
+      NOV_4,
+      mailer,
+      async (name) => name !== 'fee-change-notice'
+    );
+    expect(alerts()).toHaveLength(2);
   });
 
   it('reads every recipient in one query, however many it sends', async () => {

@@ -1130,7 +1130,47 @@ async function mirrorStartedRises(ctx: SweepContext): Promise<void> {
   }
 }
 
-// ─── 6. The alert ────────────────────────────────────────────────────────────
+// ─── 6. The alerts ───────────────────────────────────────────────────────────
+
+/**
+ * A missing template holds its emails untried, and a rise waits for them, so
+ * a person is needed: one alert per missing template a run meets, naming the
+ * changes waiting on it (50 at most). One nothing waits on yet is a warning.
+ */
+async function alertMissingTemplates(ctx: SweepContext): Promise<void> {
+  for (const templateName of ctx.result.skippedTemplates) {
+    const kinds = (Object.keys(TEMPLATE_FOR) as NoticeKind[]).filter(
+      (kind) => TEMPLATE_FOR[kind] === templateName
+    );
+    const waiting = await ctx.db
+      .selectDistinct({ changeId: feeChangeNotices.changeId })
+      .from(feeChangeNotices)
+      .innerJoin(feeChanges, eq(feeChanges.id, feeChangeNotices.changeId))
+      .where(
+        and(
+          inArray(feeChangeNotices.kind, kinds),
+          inArray(feeChangeNotices.state, [...FEE_NOTICE_OPEN_STATES]),
+          or(eq(feeChangeNotices.kind, 'cancelled'), notStarted(ctx.now)),
+          scope(ctx)
+        )
+      )
+      .limit(ALERT_NAMED);
+    if (waiting.length === 0) {
+      ctx.obs.warn('fee step: template missing; nothing waits on it yet', {
+        templateName,
+      });
+      continue;
+    }
+    ctx.obs.error(
+      'fee step: template missing, so its emails wait and every rise waiting on them with them. Restore it in Admin › Templates',
+      {
+        errorId: crypto.randomUUID(),
+        templateName,
+        changeIds: waiting.map((w) => w.changeId),
+      }
+    );
+  }
+}
 
 async function alertNotTold(ctx: SweepContext): Promise<void> {
   const where = and(
@@ -1188,10 +1228,8 @@ async function enabledTemplates(
     if (await exists(name)) {
       enabled.add(name);
     } else {
+      // Reported by the `templates` part, which knows what waits on it.
       result.skippedTemplates.push(name);
-      deps.obs.warn('fee step: template missing, its emails wait', {
-        templateName: name,
-      });
     }
   }
   return enabled;
@@ -1250,6 +1288,7 @@ export async function runFeeNoticesSweep(
         },
       ],
       ['joiners', () => addJoiners(ctx, listedThisRun)],
+      ['templates', () => alertMissingTemplates(ctx)],
       ['sends', () => sendDue(ctx)],
       ['dates', () => dateRises(ctx)],
       ['old rows', () => mirrorStartedRises(ctx)],
