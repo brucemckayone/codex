@@ -485,13 +485,25 @@ const updateTierCommandSchema = z.object({
 
 /**
  * Update an existing subscription tier.
+ *
+ * A refusal is RETURNED, not thrown, as `createTier`'s is: Edit Tier says
+ * `YEARLY_PRICE_BELOW_MONTHLY` (owner: "Refuse yearly below monthly") at the
+ * yearly price, and a thrown 4xx reaches the browser as a sanitised 500 with
+ * no code.
  */
 export const updateTier = command(
   updateTierCommandSchema,
   async ({ orgId, tierId, ...data }) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
-    return api.tiers.update(orgId, tierId, data);
+    try {
+      return {
+        success: true as const,
+        tier: await api.tiers.update(orgId, tierId, data),
+      };
+    } catch (error) {
+      return toCommandFailure(error, 'updateTier', orgId);
+    }
   }
 );
 
