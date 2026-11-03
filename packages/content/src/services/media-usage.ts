@@ -39,7 +39,7 @@ import type {
   MediaUseLiveReason,
   MediaUseSlot,
 } from '@codex/shared-types';
-import { PATH_CONFIG } from '@codex/transcoding';
+import { holdsPosterFolderOf } from '@codex/transcoding';
 import { inArray, type SQL, sql } from 'drizzle-orm';
 import {
   MediaInUseError,
@@ -80,9 +80,6 @@ export const MEDIA_JSON_REFERENCES = ['courses.guide.portraitMediaId'] as const;
 const UUID_PATTERN =
   '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$';
 
-/** The folder segment between a poster's creator and media ids (`getMediaThumbnailPrefix`). */
-const POSTER_FOLDER = `/${PATH_CONFIG.MEDIA_THUMBNAILS_FOLDER}/`;
-
 /** One use, as the lookup returns it. */
 export interface MediaUseRow {
   media_id: string;
@@ -122,10 +119,12 @@ export interface SqlExecutor {
  *
  * A thumbnail use starts from the media row: only its OWN creator's content,
  * holding a URL inside exactly the folder the purge deletes,
- * `/{creatorId}/media-thumbnails/{mediaId}/`. Any URL on the CDN passes the
- * thumbnail's write check, so another creator could otherwise publish one of
- * this creator's poster URLs and make the video impossible to delete. Their
- * thumbnail breaks after the purge instead: it was never theirs.
+ * `/{creatorId}/media-thumbnails/{mediaId}/`, by the same test the publish
+ * gates use (`holdsPosterFolderOf`), so a URL they let go live is a use here.
+ * Any URL on the CDN passes the thumbnail's write check, so another creator
+ * could otherwise publish one of this creator's poster URLs and make the
+ * video impossible to delete. Their thumbnail breaks after the purge instead:
+ * it was never theirs.
  */
 function usesQuery(mediaIds: readonly string[]): SQL {
   const ids = [...mediaIds];
@@ -153,8 +152,7 @@ function usesQuery(mediaIds: readonly string[]): SQL {
            NULL::uuid
       FROM ${mediaItems}
       JOIN ${content} ON ${content.creatorId} = ${mediaItems.creatorId}
-       AND strpos(${content.thumbnailUrl},
-                  '/' || ${mediaItems.creatorId} || ${POSTER_FOLDER}::text || ${mediaItems.id}::text || '/') > 0
+       AND ${holdsPosterFolderOf(content.thumbnailUrl)}
       LEFT JOIN ${organizations} ON ${organizations.id} = ${content.organizationId}
      WHERE ${inArray(mediaItems.id, ids)} AND ${content.deletedAt} IS NULL
        AND ${content.mediaItemId} IS DISTINCT FROM ${mediaItems.id}

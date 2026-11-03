@@ -112,9 +112,11 @@
      painted onto the saturated brand fill this button actually wears —
      measured 3.82:1 on studio-alpha dark and 3.47:1 on studio-beta dark at
      17px/500, both under the 4.5:1 AA floor. `--color-on-interactive` is
-     derived FROM `--color-interactive` (white below OKLCH L 0.62, black above),
-     so the label always contrasts with the swatch beneath it, for every org
-     brand and for the platform palette in both themes. */
+     derived FROM `--color-interactive` by its relative luminance (white below
+     0.1791, black above; an OKLCH-lightness fallback where `pow()` in relative
+     colour is unsupported, see themes/light.css), so the label clears AA on
+     the swatch beneath it, for every org brand and for the platform palette in
+     both themes. */
   .button[data-variant="primary"] {
     background-color: var(--color-interactive);
     color: var(--color-on-interactive);

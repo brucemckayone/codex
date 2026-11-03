@@ -56,6 +56,12 @@ import {
   ValidationError,
 } from '@codex/service-errors';
 import type { PaginatedListResponse } from '@codex/shared-types';
+import {
+  type PosterFrameSource,
+  playedMediaItemId,
+  posterFolderCount,
+  posterFramesOf,
+} from '@codex/transcoding';
 import type { CreateContentInput, UpdateContentInput } from '@codex/validation';
 import {
   createContentSchema,
@@ -88,6 +94,7 @@ import {
   MediaNotFoundError,
   MediaNotReadyError,
   SlugConflictError,
+  ThumbnailMediaDeletedError,
   TierRequiredToPublishError,
 } from '../errors';
 import type {
@@ -208,6 +215,69 @@ const MANAGEMENT_ROLES: string[] = [
 export interface ContentServiceConfig extends ServiceConfig {
   /** Public asset CDN base — the `R2_PUBLIC_URL_BASE` worker binding. */
   r2PublicUrlBase?: string;
+}
+
+/**
+ * Refuse a thumbnail URL naming a poster folder that isn't one of the
+ * caller's videos' (Codex-p0uuc). Another creator's poster URL is public in
+ * any page's HTML and passes the host check, but the purge deletes it with
+ * that creator's video and the usage lookup never counts it, so the
+ * thumbnail would break unannounced. Every folder must be one of the
+ * caller's videos', found by the test the delete guard counts uses with:
+ * deleted ones too, since a draft may hold a frame of its own deleted video
+ * until it publishes (Codex-tqvmx). Like the host check, every sent URL is
+ * checked, a re-sent one too.
+ */
+async function assertOwnPosterFolders(
+  tx: DatabaseTransaction,
+  creatorId: string,
+  thumbnailUrl: string | null | undefined
+): Promise<void> {
+  if (thumbnailUrl == null) return;
+  const folders = posterFolderCount(thumbnailUrl);
+  if (folders === 0) return;
+  const frames = posterFramesOf({
+    thumbnailUrl,
+    creatorId,
+    exceptMediaItemId: null,
+  });
+  const own = frames
+    ? await tx.select({ id: mediaItems.id }).from(mediaItems).where(frames)
+    : [];
+  if (own.length !== folders) {
+    throw new ValidationError(
+      'Choose a frame of one of your own videos as the thumbnail.',
+      { field: 'thumbnailUrl' }
+    );
+  }
+}
+
+/**
+ * Refuse a thumbnail that is a frame of one of the creator's deleted videos
+ * (Codex-tqvmx): the purge removes that frame 30 days after the delete, and
+ * a live thumbnail would then 404, or keep the purge skipping its video every
+ * week. A locking read, taken after the row's and its own media's locks: a
+ * delete that committed first is seen here, and one that waits on this lock
+ * then finds a live use of the frame (the usage lookup's `thumbnail` slot,
+ * which matches URLs by the same test), and refuses. A frame of no video of
+ * the creator's isn't this check's (Codex-p0uuc).
+ */
+async function assertThumbnailFrameNotDeleted(
+  tx: DatabaseTransaction,
+  contentId: string,
+  source: PosterFrameSource,
+  action: 'publish' | 'save'
+): Promise<void> {
+  const frames = posterFramesOf(source);
+  if (frames === undefined) return;
+  const rows = await tx
+    .select({ deletedAt: mediaItems.deletedAt })
+    .from(mediaItems)
+    .where(frames)
+    .for('key share');
+  if (rows.some((row) => row.deletedAt !== null)) {
+    throw new ThumbnailMediaDeletedError(contentId, action);
+  }
 }
 
 export class ContentService extends BaseService {
@@ -475,6 +545,14 @@ export class ContentService extends BaseService {
           );
         }
 
+        // Codex-p0uuc: a poster-frame thumbnail must be of the caller's own
+        // video. Mirrored in update().
+        await assertOwnPosterFolders(
+          tx as DatabaseTransaction,
+          creatorId,
+          validated.thumbnailUrl
+        );
+
         // Step 3b: the tiers the item starts in, checked against its org
         // before anything is written (refine (a) guarantees the org).
         const orgId = validated.organizationId || null;
@@ -677,9 +755,31 @@ export class ContentService extends BaseService {
       // The item's tiers (Codex-2hxff.91), so the editor's tier picker can
       // pre-tick them: the editor refuses to save a set it never read.
       const [wired] = await withTierWire(this.db, [result]);
+
+      // The video its thumbnail is a frame of, a deleted one first
+      // (Codex-tqvmx). Its own video's too: the editor warns unless that is
+      // the media the form plays, the one frame publish doesn't refuse.
+      const frames = posterFramesOf({
+        thumbnailUrl: result.thumbnailUrl,
+        creatorId: result.creatorId,
+        exceptMediaItemId: null,
+      });
+      const [frame] = frames
+        ? await this.db
+            .select({
+              mediaItemId: mediaItems.id,
+              title: mediaItems.title,
+              deletedAt: mediaItems.deletedAt,
+            })
+            .from(mediaItems)
+            .where(frames)
+            .orderBy(sql`${mediaItems.deletedAt} DESC NULLS LAST`)
+            .limit(1)
+        : [];
       return {
         ...(wired ?? result),
         categoryIds: membershipRows.map((row) => row.categoryId),
+        thumbnailFrame: frame ?? null,
       };
     } catch (error) {
       this.handleError(error, 'get');
@@ -997,6 +1097,44 @@ export class ContentService extends BaseService {
             // buyers after it goes off sale, so it needs a playable item too.
             existing.status === CONTENT_STATUS.PUBLISHED ||
               existing.publishedAt !== null
+          );
+        }
+
+        // Codex-p0uuc: a poster-frame thumbnail must be of the caller's own
+        // video, as create() checks.
+        await assertOwnPosterFolders(
+          tx as DatabaseTransaction,
+          creatorId,
+          sentThumbnailUrl
+        );
+
+        // Codex-tqvmx: live content must not take a deleted video's frame as
+        // its thumbnail, which publish refuses too. Only a CHANGED thumbnail
+        // the row will keep is checked, as the media above: a draft may hold
+        // one until it publishes. After the media's lock, as publish orders
+        // them.
+        if (
+          sentThumbnailUrl != null &&
+          sentThumbnailUrl !== existing.thumbnailUrl &&
+          !keepStoredThumbnail &&
+          (existing.status === CONTENT_STATUS.PUBLISHED ||
+            existing.publishedAt !== null)
+        ) {
+          await assertThumbnailFrameNotDeleted(
+            tx as DatabaseTransaction,
+            id,
+            {
+              thumbnailUrl: sentThumbnailUrl,
+              creatorId,
+              exceptMediaItemId: playedMediaItemId({
+                contentType: restValidated.contentType ?? existing.contentType,
+                mediaItemId:
+                  restValidated.mediaItemId === undefined
+                    ? existing.mediaItemId
+                    : restValidated.mediaItemId,
+              }),
+            },
+            'save'
           );
         }
 
@@ -1355,6 +1493,19 @@ export class ContentService extends BaseService {
             throw new MediaNotReadyError(existing.mediaItem.id);
           }
         }
+
+        // Any type: written content can show a video's frame too, and one of
+        // the video it links but doesn't play, which nothing above checks.
+        await assertThumbnailFrameNotDeleted(
+          tx as DatabaseTransaction,
+          id,
+          {
+            thumbnailUrl: existing.thumbnailUrl,
+            creatorId: existing.creatorId,
+            exceptMediaItemId: playedMediaItemId(existing),
+          },
+          'publish'
+        );
 
         // Subscriber content needs at least one tier to go live (Codex-2hxff.91,
         // owner U2). Saving it with none is allowed (closed); publishing it is
