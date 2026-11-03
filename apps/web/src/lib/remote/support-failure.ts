@@ -13,11 +13,20 @@
  * type. They are client-facing by design (a ServiceError's context is sent as
  * `details`), and hold ids, codes, counts and amounts only.
  *
+ * Anything but an `ApiError` had no answer behind it: the fetch to admin-api
+ * threw (a dropped connection) or the success body would not parse, so the
+ * worker may still have acted. Returning it skips the `handleError` hook a
+ * throw would reach, so it is logged here, as `toCommandFailure` does
+ * (subscription.remote.ts, Codex-2hxff.66): the command, the ids it acted
+ * on, the status and the error's name. Never the error's text: a parse
+ * error quotes the body, which can name a person.
+ *
  * A plain module, not part of the `.remote.ts` file, so it can be tested
  * without `$app/server`.
  */
 
 import { ApiError } from '$lib/api/errors';
+import { logger } from '$lib/observability';
 
 export interface SupportCommandFailure {
   /** A string discriminant: apps/web has strictNullChecks off. */
@@ -70,7 +79,15 @@ function field<T extends 'string' | 'number'>(
     : null;
 }
 
-export function toSupportFailure(error: unknown): SupportCommandFailure {
+/**
+ * `commandName` and `ids` name the command and what it acted on, for the
+ * no-answer log line only: ids, never an email or a note.
+ */
+export function toSupportFailure(
+  error: unknown,
+  commandName: string,
+  ids: Record<string, string>
+): SupportCommandFailure {
   if (ApiError.isApiError(error)) {
     const details = error.details;
     const isClientError = error.status >= 400 && error.status < 500;
@@ -94,6 +111,11 @@ export function toSupportFailure(error: unknown): SupportCommandFailure {
       toldByName: field(details, 'toldByName', 'string'),
     };
   }
+  logger.error(`support command ${commandName} failed with no API answer`, {
+    ...ids,
+    status: 500,
+    errorName: error instanceof Error ? error.name : typeof error,
+  });
   return {
     outcome: 'failed',
     status: 500,
