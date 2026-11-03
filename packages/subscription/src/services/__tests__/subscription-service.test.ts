@@ -12164,6 +12164,12 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
       revenueType: 'subscription',
       status: 'active',
       currentProposalId: proposal.id,
+      // As acceptance does (agreement-service.ts), the proposal's start, on
+      // the same clock as the invoice's moment. The column's default is the
+      // database's clock, which runs a few ms apart from this one: an
+      // agreement made "now" could read as starting after an invoice handled
+      // just after it, and the creators got nothing (an intermittent fail).
+      effectiveFrom: proposal.proposedEffectiveFrom,
     });
     return userId;
   }
