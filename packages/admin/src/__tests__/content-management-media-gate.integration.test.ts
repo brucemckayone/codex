@@ -25,9 +25,10 @@ import {
   takeFirst,
   teardownTestDatabase,
 } from '@codex/test-utils';
+import { getMediaThumbnailPrefix } from '@codex/transcoding';
 import { eq, inArray, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { MediaDeletedError } from '../errors';
+import { MediaDeletedError, ThumbnailMediaDeletedError } from '../errors';
 import { AdminContentManagementService } from '../services/content-management-service';
 
 describe('AdminContentManagementService.publishContent media gate', () => {
@@ -54,7 +55,10 @@ describe('AdminContentManagementService.publishContent media gate', () => {
     return row.id;
   }
 
-  async function seedDraft(mediaItemId: string): Promise<string> {
+  async function seedDraft(
+    mediaItemId: string,
+    thumbnailUrl: string | null = null
+  ): Promise<string> {
     return takeFirst(
       await db
         .insert(contentTable)
@@ -62,6 +66,7 @@ describe('AdminContentManagementService.publishContent media gate', () => {
           creatorId,
           organizationId: orgId,
           mediaItemId,
+          thumbnailUrl,
           title: 'Media gate film',
           slug: createUniqueSlug('media-gate'),
           contentType: 'video',
@@ -119,6 +124,32 @@ describe('AdminContentManagementService.publishContent media gate', () => {
       code: 'MEDIA_DELETED',
     });
     expect(await statusOf(draft)).toBe(CONTENT_STATUS.DRAFT);
+  });
+
+  it("refuses a draft whose thumbnail is a frame of the creator's deleted video, as ContentService.publish does (Codex-tqvmx)", async () => {
+    const film = await seedMedia(creatorId);
+    const gone = await seedMedia(creatorId, { deletedAt: new Date() });
+    const kept = await seedMedia(creatorId);
+    const frameOf = (mediaId: string) =>
+      `https://cdn-assets.example/${getMediaThumbnailPrefix(creatorId, mediaId)}1920x1080-0a1b2c3d/lg.webp`;
+
+    const draft = await seedDraft(film, frameOf(gone));
+    const refusal = await service
+      .publishContent(orgId, draft)
+      .catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(ThumbnailMediaDeletedError);
+    expect((refusal as ThumbnailMediaDeletedError).context).toEqual({
+      contentId: draft,
+      code: 'THUMBNAIL_MEDIA_DELETED',
+    });
+    expect(await statusOf(draft)).toBe(CONTENT_STATUS.DRAFT);
+
+    // A frame of a video still in the library, or of the one it plays.
+    for (const thumbnailUrl of [frameOf(kept), frameOf(film)]) {
+      const ok = await seedDraft(film, thumbnailUrl);
+      await service.publishContent(orgId, ok);
+      expect(await statusOf(ok)).toBe(CONTENT_STATUS.PUBLISHED);
+    }
   });
 
   it("refuses a draft holding another creator's media", async () => {
