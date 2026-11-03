@@ -195,6 +195,8 @@ describe('a membership with a move waiting', () => {
       m.pricing_move_kept({ plan: 'Pro', date: DATE, price: formatPrice(1200) })
     );
     expect(navigation.invalidate).toHaveBeenCalledWith('account:subscriptions');
+    // The Keep button goes with the notice; the line takes focus (W6).
+    expect(document.activeElement).toBe(within('subscription-keep-line'));
   });
 
   test('Keep refused: the move is still set, and the words say so', async () => {

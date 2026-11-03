@@ -126,27 +126,23 @@
           {m.price_note_try_again()}
         </button>
       </div>
-    {:else if view?.action === 'check'}
+    {:else if view?.action === 'check' || view?.action === 'dismiss'}
+      <!-- One button for both: a Check again that finds the change done
+           turns into Dismiss in place, so focus stays on it (W6). -->
+      {@const dismiss = view.action === 'dismiss'}
       <div class="price-note__actions">
         <button
           type="button"
           class="price-note__action"
-          aria-busy={busy || undefined}
-          aria-label={name ? m.price_note_check_again_aria({ name }) : undefined}
-          onclick={() => press(onCheckAgain)}
+          aria-busy={(!dismiss && busy) || undefined}
+          aria-label={name
+            ? dismiss
+              ? m.price_note_dismiss_aria({ name })
+              : m.price_note_check_again_aria({ name })
+            : undefined}
+          onclick={() => (dismiss ? onDismiss?.() : press(onCheckAgain))}
         >
-          {m.price_note_check_again()}
-        </button>
-      </div>
-    {:else if view?.action === 'dismiss'}
-      <div class="price-note__actions">
-        <button
-          type="button"
-          class="price-note__action"
-          aria-label={name ? m.price_note_dismiss_aria({ name }) : undefined}
-          onclick={() => onDismiss?.()}
-        >
-          {m.price_note_dismiss()}
+          {dismiss ? m.price_note_dismiss() : m.price_note_check_again()}
         </button>
       </div>
     {/if}

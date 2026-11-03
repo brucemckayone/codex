@@ -6,6 +6,7 @@
 -->
 <script lang="ts">
   import { invalidate, invalidateAll } from '$app/navigation';
+  import type { Attachment } from 'svelte/attachments';
   import { SvelteMap, SvelteSet } from 'svelte/reactivity';
   import * as m from '$paraglide/messages';
   import Button from '$lib/components/ui/Button/Button.svelte';
@@ -399,11 +400,44 @@
     return course.status === 'cancelling' || course.cancelAtPeriodEnd;
   }
 
+  /** The course whose Cancel dialog closed last, and whether it went through. */
+  let courseCancelFocusId: string | null = null;
+  let courseCancelDone = false;
+
   function openCourseCancelDialog(course: UserCourseSubscription) {
     courseCancelTarget = course;
     courseCancelError = '';
+    courseCancelFocusId = course.id;
+    courseCancelDone = false;
     courseCancelOpen = true;
   }
+
+  /**
+   * Where focus goes as the course Cancel dialog closes (W6). Kept open
+   * (Dismiss, Escape): its Cancel button. Cancelled: the course's card,
+   * which stays while the list is read again and Cancel turns into
+   * Reactivate; the button would go from under the focus.
+   */
+  function courseCancelCloseFocus(): HTMLElement | null {
+    const card = [
+      ...document.querySelectorAll<HTMLElement>('[data-testid="course-subscription-card"]'),
+    ].find((el) => el.dataset.courseId === courseCancelFocusId);
+    if (!card) return null;
+    if (courseCancelDone) return card;
+    return (
+      card.querySelector<HTMLElement>(
+        '[data-testid="course-subscription-cancel-button"]:not(:disabled)'
+      ) ?? card
+    );
+  }
+
+  /**
+   * Keep's line takes focus as it appears (W6), as the pricing page's does:
+   * the Keep button goes with the notice once the list is read again.
+   */
+  const focusOnAppear: Attachment<HTMLElement> = (node) => {
+    node.focus();
+  };
 
   /**
    * Cancel a course subscription at period end. A refusal keeps the dialog
@@ -429,6 +463,7 @@
         courseCancelError = m.subscription_course_cancel_error();
         return;
       }
+      courseCancelDone = true;
       courseCancelOpen = false;
       courseCancelTarget = null;
       await invalidate('account:subscriptions');
@@ -437,6 +472,7 @@
         courseSubscriptionId: target.id,
         error: error instanceof Error ? error.message : String(error),
       });
+      courseCancelDone = true;
       courseCancelOpen = false;
       courseCancelTarget = null;
       await invalidate('account:subscriptions').catch(() => {});
@@ -635,15 +671,21 @@
                     {/if}
                     {#if keepLines.has(sub.id)}
                       {@const line = keepLines.get(sub.id)}
-                      {#if line?.tone === 'success'}
-                        <p class="subscription-done" role="status" data-testid="subscription-keep-line">
-                          {line.text}
-                        </p>
-                      {:else if line}
-                        <Alert variant={line.tone} data-testid="subscription-keep-line">
-                          {line.text}
-                        </Alert>
-                      {/if}
+                      <!-- Keyed so each press's line is new and takes focus. -->
+                      {#key line}
+                        <div
+                          class="subscription-keep-line"
+                          tabindex="-1"
+                          {@attach focusOnAppear}
+                          data-testid="subscription-keep-line"
+                        >
+                          {#if line?.tone === 'success'}
+                            <p class="subscription-done" role="status">{line.text}</p>
+                          {:else if line}
+                            <Alert variant={line.tone}>{line.text}</Alert>
+                          {/if}
+                        </div>
+                      {/key}
                     {/if}
 
                     <div class="subscription-meta">
@@ -768,8 +810,10 @@
                 <Card.Content>
                   <div
                     class="course-subscription-card"
+                    tabindex="-1"
                     data-testid="course-subscription-card"
                     data-course-slug={course.course.slug}
+                    data-course-id={course.id}
                   >
                     <div class="subscription-info">
                       <div class="subscription-org">
@@ -1000,7 +1044,7 @@
 
 <!-- Cancel a course subscription: one plain note in place of the follow
      notice (there is nothing to follow for a course), and no churn reasons. -->
-<Dialog.Root bind:open={courseCancelOpen}>
+<Dialog.Root bind:open={courseCancelOpen} closeFocus={courseCancelCloseFocus}>
   <Dialog.Content size="sm">
     <Dialog.Header>
       <Dialog.Title>{m.subscription_cancel()}</Dialog.Title>
@@ -1181,6 +1225,13 @@
     font-size: var(--text-xs);
     color: var(--color-text-secondary);
     line-height: var(--leading-relaxed);
+  }
+
+  /* Focused as it appears, to be read out; the line is the change shown, as
+     the pricing page's outcome line. */
+  .subscription-keep-line:focus,
+  .course-subscription-card:focus {
+    outline: none;
   }
 
   .subscription-done {
