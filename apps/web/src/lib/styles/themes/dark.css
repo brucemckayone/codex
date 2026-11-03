@@ -36,6 +36,7 @@
   --color-interactive-subtle: var(--color-primary-900);
   --color-link: var(--color-interactive);
   --color-link-hover: var(--color-interactive-hover);
+  --color-link-active: var(--color-interactive-active);
 
   /* See light.css for the derivation and why it is repeated in every scope that
      declares --color-interactive. Note the dark platform fill is

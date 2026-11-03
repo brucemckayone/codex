@@ -160,7 +160,7 @@
     gap: var(--space-1);
     padding: var(--space-1) var(--space-2);
     background-color: var(--color-interactive-subtle);
-    color: var(--color-interactive-active);
+    color: var(--color-link-active);
     border-radius: var(--radius-full, 9999px);
     font-size: var(--text-xs);
     font-weight: var(--font-medium);

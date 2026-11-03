@@ -337,7 +337,7 @@
 
 	.filter-list a.active {
 		background-color: var(--color-interactive-subtle);
-		color: var(--color-interactive-active);
+		color: var(--color-link-active);
 	}
 
 	/* Table */

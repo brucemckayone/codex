@@ -53,6 +53,7 @@ const channels = (x: string) =>
 const NUDGED = [
   `--color-link: rgb(from var(--color-interactive) ${channels('gl')}`,
   `--color-link-hover: rgb(from var(--color-interactive-hover) ${channels('gl')}`,
+  `--color-link-active: rgb(from var(--color-interactive-active) ${channels('gl')}`,
   `--color-focus: rgb(from var(--_focus-src) ${channels('gm')}`,
   `--color-focus-ring: rgb(from var(--_focus-ring-src) ${channels('gm')}`,
   `--color-border-focus: rgb(from var(--_focus-src) ${channels('gm')}`,
@@ -105,6 +106,9 @@ describe('the ground nudge org-brand.css paints', () => {
   test('outside the guard, links are the interactive colour and focus is its source', () => {
     const fallback = ORG_BRAND.slice(0, ORG_BRAND.indexOf(GUARD));
     expect(count(fallback, '--color-link: var(--color-interactive);')).toBe(1);
+    expect(
+      count(fallback, '--color-link-active: var(--color-interactive-active);')
+    ).toBe(1);
     expect(count(fallback, '--color-focus: var(--_focus-src);')).toBe(2);
   });
 });

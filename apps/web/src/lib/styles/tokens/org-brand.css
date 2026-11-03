@@ -80,6 +80,7 @@
      buttons keep `--color-interactive` exactly (owner, Codex-mik4h). */
   --color-link: var(--color-interactive);
   --color-link-hover: var(--color-interactive-hover);
+  --color-link-active: var(--color-interactive-active);
 
   /* ─── TEXT ON BRAND ───────────────────────────────────────────────────
      THIS IS THE FALLBACK. An OKLCH-lightness step picks the WRONG ink for
@@ -775,7 +776,7 @@
        `--_gw` is 1 on a dark ground (lighten), 0 on a light one (darken), the
        same true step at 0.1791 as the inks. The fragments are declared once:
        this rule and its dark twin match the same element, so each reads that
-       element's ground and colours in either theme. The five tokens are
+       element's ground and colours in either theme. The six tokens are
        restated in the dark twin, which out-ranks the dark fallbacks above.
 
        brand-editor/ground-nudge.ts is the TypeScript twin the brand studio's
@@ -807,6 +808,7 @@
     --_gm-b: max(0, 255 * (1.055 * pow(var(--_gw) * (var(--_gm-1b) + var(--_gm-k) * (1 - var(--_gm-1b))) + (1 - var(--_gw)) * var(--_lin-b) * var(--_gm-dk), 1 / 2.4) - 0.055));
     --color-link: rgb(from var(--color-interactive) var(--_gl-r) var(--_gl-g) var(--_gl-b));
     --color-link-hover: rgb(from var(--color-interactive-hover) var(--_gl-r) var(--_gl-g) var(--_gl-b));
+    --color-link-active: rgb(from var(--color-interactive-active) var(--_gl-r) var(--_gl-g) var(--_gl-b));
     --color-focus: rgb(from var(--_focus-src) var(--_gm-r) var(--_gm-g) var(--_gm-b));
     --color-focus-ring: rgb(from var(--_focus-ring-src) var(--_gm-r) var(--_gm-g) var(--_gm-b));
     --color-border-focus: rgb(from var(--_focus-src) var(--_gm-r) var(--_gm-g) var(--_gm-b));
@@ -836,6 +838,7 @@
     --_gy: var(--brand-ground-dark-y, 0.0844);
     --color-link: rgb(from var(--color-interactive) var(--_gl-r) var(--_gl-g) var(--_gl-b));
     --color-link-hover: rgb(from var(--color-interactive-hover) var(--_gl-r) var(--_gl-g) var(--_gl-b));
+    --color-link-active: rgb(from var(--color-interactive-active) var(--_gl-r) var(--_gl-g) var(--_gl-b));
     --color-focus: rgb(from var(--_focus-src) var(--_gm-r) var(--_gm-g) var(--_gm-b));
     --color-focus-ring: rgb(from var(--_focus-ring-src) var(--_gm-r) var(--_gm-g) var(--_gm-b));
     --color-border-focus: rgb(from var(--_focus-src) var(--_gm-r) var(--_gm-g) var(--_gm-b));

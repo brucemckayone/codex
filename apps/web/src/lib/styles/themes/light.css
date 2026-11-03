@@ -35,9 +35,11 @@
   --color-interactive-active: var(--color-primary-700);
   --color-interactive-subtle: var(--color-primary-50);
   /* The interactive colour as TEXT on the page. The platform's already reads
-     on its own grounds; an org's is nudged against its page (org-brand.css). */
+     on its own grounds; an org's is nudged against its hardest surface
+     (org-brand.css). */
   --color-link: var(--color-interactive);
   --color-link-hover: var(--color-interactive-hover);
+  --color-link-active: var(--color-interactive-active);
 
   /* Ink for text sitting ON --color-interactive (filled primary controls).
      Derived FROM the fill, not from the page: --color-text-inverse inverts the

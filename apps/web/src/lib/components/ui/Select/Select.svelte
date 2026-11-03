@@ -185,7 +185,7 @@
 
   .select-option:global([aria-selected="true"]) {
     background-color: var(--color-interactive-subtle);
-    color: var(--color-interactive-active);
+    color: var(--color-link-active);
   }
 
   .check-icon {

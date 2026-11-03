@@ -1849,7 +1849,7 @@
     font-weight: var(--font-medium);
     border-radius: var(--radius-sm);
     background: var(--color-brand-primary-subtle);
-    color: var(--color-interactive-active);
+    color: var(--color-link-active);
     text-transform: var(--text-transform-label, uppercase);
     letter-spacing: var(--tracking-wider);
   }
@@ -2184,7 +2184,7 @@
     font-weight: var(--font-semibold);
     text-transform: var(--text-transform-label, uppercase);
     letter-spacing: var(--tracking-wider);
-    color: var(--color-interactive-active);
+    color: var(--color-link-active);
     margin: 0;
   }
 

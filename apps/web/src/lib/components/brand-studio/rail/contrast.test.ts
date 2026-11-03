@@ -143,6 +143,7 @@ describe('the rule the stylesheets paint', () => {
   const NUDGED = [
     '--color-link',
     '--color-link-hover',
+    '--color-link-active',
     '--color-focus',
     '--color-focus-ring',
     '--color-border-focus',
