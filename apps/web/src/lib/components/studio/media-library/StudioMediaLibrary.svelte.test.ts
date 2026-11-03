@@ -75,6 +75,17 @@ const listMedia = vi.hoisted(() =>
   })
 );
 
+const getMediaItem = vi.hoisted(() =>
+  vi.fn(() => ({
+    ready: false,
+    loading: true,
+    current: undefined,
+    refresh: vi.fn(),
+    // biome-ignore lint/suspicious/noThenProperty: a thenable stands in for kit's query
+    then: () => undefined,
+  }))
+);
+
 vi.mock('$lib/remote/media.remote', () => ({
   listMedia,
   getMediaSummary: vi.fn(() => ({
@@ -94,6 +105,9 @@ vi.mock('$lib/remote/media.remote', () => ({
   deleteMedia: vi.fn(),
   updateMedia: vi.fn(),
   retryTranscoding: vi.fn(),
+  // The drawer's read: left pending, so the drawer shows its skeleton.
+  getMediaItem: getMediaItem,
+  getMediaPreview: vi.fn(),
 }));
 
 vi.mock('$lib/client/media-status.svelte', () => ({
@@ -176,6 +190,7 @@ beforeEach(() => {
   s.later.clear();
   listMedia.mockClear();
   goto.mockClear();
+  getMediaItem.mockClear();
   s.refreshFirst.mockClear();
   s.refreshSummary.mockClear();
 });
@@ -470,5 +485,87 @@ describe('StudioMediaLibrary: the list row explains a failure (review, Codex-a6o
     expect(row?.querySelector('.row-kind')?.textContent).toMatch(
       /Video\s+·\s+\S/
     );
+  });
+});
+
+describe('StudioMediaLibrary: the drawer and bulk (Codex-a6ofh.1.7)', () => {
+  const ID = '6b000000-0000-4000-8000-000000000001';
+
+  test('a link with ?item= opens that item, and the list is not read again for it', () => {
+    s.first.current = listOf([item(1)], 1);
+    render(`?item=${ID}`);
+    expect(getMediaItem).toHaveBeenCalledWith(ID);
+    expect(listMedia).toHaveBeenCalledTimes(1);
+  });
+
+  test('a junk ?item= opens nothing', () => {
+    s.first.current = listOf([item(1)], 1);
+    render('?item=not-an-id');
+    expect(getMediaItem).not.toHaveBeenCalled();
+  });
+
+  test("a tile's title opens its drawer through the URL", async () => {
+    s.first.current = listOf([item(1, { title: 'Studio tour b-roll' })], 1);
+    render('?sort=title');
+    button('Studio tour b-roll')?.click();
+    await settle();
+    expect(goto).toHaveBeenCalledWith(
+      `/studio/media?sort=title&item=${ID}`,
+      expect.anything()
+    );
+  });
+
+  test('selecting rows in the list shows what is chosen and caps a delete at 15', () => {
+    const rows = Array.from({ length: 16 }, (_, i) => item(i + 1));
+    s.first.current = listOf(rows, 16);
+    render('?view=list');
+
+    document
+      .querySelector<HTMLInputElement>('input[aria-label="Select Item 1"]')
+      ?.click();
+    flushSync();
+    expect(document.querySelector('.selbar')?.textContent).toContain(
+      '1 selected · 1.0 MB'
+    );
+    expect(button('Delete 1')?.disabled).toBe(false);
+
+    document
+      .querySelector<HTMLInputElement>('input[aria-label="Select all shown"]')
+      ?.click();
+    flushSync();
+    expect(text()).toContain('16 selected');
+    expect(button('Delete 16')?.disabled).toBe(true);
+    expect(text()).toContain('Delete up to 15 at a time.');
+  });
+
+  // An upload running here shows as a ghost, not a row: select-all must
+  // never sweep it into a delete the creator was not shown it in.
+  test('select all takes only the rows shown, never an upload running here', async () => {
+    const { uploadQueue } = await import('$lib/client/upload-queue.svelte');
+    const uploading = item(2, {
+      status: 'uploading',
+      title: 'Members workshop',
+    });
+    (uploadQueue.items as unknown[]).push({
+      key: 'k1',
+      id: uploading.id,
+      title: 'Members workshop',
+      mediaType: 'video',
+      progress: 38,
+      status: 'uploading',
+    });
+    try {
+      s.first.current = listOf([item(1), uploading], 2);
+      render('?view=list');
+      document
+        .querySelector<HTMLInputElement>('input[aria-label="Select all shown"]')
+        ?.click();
+      flushSync();
+      expect(document.querySelector('.selbar')?.textContent).toContain(
+        '1 selected'
+      );
+    } finally {
+      (uploadQueue.items as unknown[]).length = 0;
+    }
   });
 });

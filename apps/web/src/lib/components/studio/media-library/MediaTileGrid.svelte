@@ -39,11 +39,12 @@
     items: MediaTileItem[];
     ghosts?: UploadGhost[];
     onCancelUpload?: (key: string) => void;
+    onOpen?: (id: string) => void;
     onEdit?: (id: string) => void;
     onDelete?: (id: string) => void;
   }
 
-  const { items, ghosts = [], onCancelUpload, onEdit, onDelete }: Props = $props();
+  const { items, ghosts = [], onCancelUpload, onOpen, onEdit, onDelete }: Props = $props();
 
   const activeGhosts = $derived(ghosts.filter((g) => g.status !== 'done'));
 </script>
@@ -106,6 +107,7 @@
     <div role="listitem">
       <MediaTile
         {media}
+        {onOpen}
         {onEdit}
         {onDelete}
       />

@@ -27,12 +27,31 @@
   interface Props {
     items: MediaRow[];
     ghosts?: UploadGhost[];
+    /** Bulk selection (M2): with these, each row and the header get a checkbox. */
+    selected?: ReadonlySet<string>;
+    onToggle?: (id: string) => void;
+    onToggleAll?: (on: boolean) => void;
     onCancelUpload?: (key: string) => void;
+    onOpen?: (id: string) => void;
     onEdit?: (id: string) => void;
     onDelete?: (id: string) => void;
   }
 
-  const { items, ghosts = [], onCancelUpload, onEdit, onDelete }: Props = $props();
+  const {
+    items,
+    ghosts = [],
+    selected,
+    onToggle,
+    onToggleAll,
+    onCancelUpload,
+    onOpen,
+    onEdit,
+    onDelete,
+  }: Props = $props();
+
+  const selectable = $derived(selected !== undefined && onToggle !== undefined);
+  const allOn = $derived(selectable && items.length > 0 && items.every((i) => selected?.has(i.id)));
+  const someOn = $derived(selectable && !allOn && items.some((i) => selected?.has(i.id)));
 
   const activeGhosts = $derived(ghosts.filter((g) => g.status !== 'done'));
 
@@ -60,6 +79,7 @@
 
 {#snippet ghostRow(ghost: UploadGhost)}
   <Table.Row class="ghost-row">
+    {#if selectable}<Table.Cell class="col-select"></Table.Cell>{/if}
     <Table.Cell class="col-media">
       <div class="row-media">
         <span class="row-thumb row-thumb--ghost" aria-hidden="true">
@@ -98,7 +118,17 @@
   {@const pill = tilePill(view)}
   {@const reason = tileReason(view)}
   {@const kind = media.mediaType === 'video' ? m.media_type_video() : m.media_type_audio()}
-  <Table.Row data-status={pill}>
+  <Table.Row data-status={pill} data-selected={selected?.has(media.id) || undefined}>
+    {#if selectable}
+      <Table.Cell class="col-select">
+        <input
+          type="checkbox"
+          checked={selected?.has(media.id) ?? false}
+          aria-label={m.media_select_row({ title: media.title })}
+          onchange={() => onToggle?.(media.id)}
+        />
+      </Table.Cell>
+    {/if}
     <Table.Cell class="col-media">
       <div class="row-media">
         <span class="row-thumb" aria-hidden="true">
@@ -118,7 +148,13 @@
           {/if}
         </span>
         <span class="row-text">
-          <span class="row-title" title={media.title}>{media.title}</span>
+          {#if onOpen}
+            <button type="button" class="row-title row-open" title={media.title} onclick={() => onOpen(media.id)}>
+              {media.title}
+            </button>
+          {:else}
+            <span class="row-title" title={media.title}>{media.title}</span>
+          {/if}
           <!-- One expression: a block's leading space is trimmed ("Video· …"). -->
           <span class="row-kind" data-status={pill}>{reason ? `${kind} · ${reason}` : kind}</span>
         </span>
@@ -145,6 +181,17 @@
 <Table.Root class="media-table">
   <Table.Header>
     <Table.Row>
+      {#if selectable}
+        <Table.Head class="col-select">
+          <input
+            type="checkbox"
+            checked={allOn}
+            indeterminate={someOn}
+            aria-label={m.media_select_all()}
+            onchange={(event) => onToggleAll?.(event.currentTarget.checked)}
+          />
+        </Table.Head>
+      {/if}
       <Table.Head class="col-media">{m.media_col_media()}</Table.Head>
       <Table.Head>{m.media_col_status()}</Table.Head>
       <Table.Head>{m.media_col_used()}</Table.Head>
@@ -190,6 +237,34 @@
 
   :global(.media-table .col-muted) {
     color: var(--color-text-muted);
+  }
+
+  :global(.media-table .col-select) {
+    width: var(--space-10);
+  }
+
+  :global(.media-table tr[data-selected]) {
+    background: var(--color-interactive-subtle);
+  }
+
+  .row-open {
+    max-width: 100%;
+    padding: 0;
+    border: none;
+    background: none;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .row-open:hover {
+    color: var(--color-interactive);
+  }
+
+  .row-open:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-0-5);
+    border-radius: var(--radius-sm);
   }
 
   :global(.media-table .col-actions) {

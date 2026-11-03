@@ -18,34 +18,39 @@
   would make a screen reader read every tick.
 -->
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import { boundSearchParam, gateSearchQuery } from '@codex/validation';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import { mediaStatus } from '$lib/client/media-status.svelte';
   import { uploadQueue } from '$lib/client/upload-queue.svelte';
-  import EditMediaDialog from '$lib/components/studio/EditMediaDialog.svelte';
   import MediaUpload from '$lib/components/studio/MediaUpload.svelte';
   import { Button } from '$lib/components/ui';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import { MOBILE_QUERY } from '$lib/components/ui/FilterDrawer/breakpoint';
   import { AlertTriangleIcon, FilmIcon, SearchXIcon, UploadIcon } from '$lib/components/ui/Icon';
+  import ConfirmDialog from '$lib/components/ui/Feedback/ConfirmDialog.svelte';
   import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
   import { toast } from '$lib/components/ui/Toast/toast-store';
   import { logger } from '$lib/observability';
-  import { deleteMedia, getMediaSummary, getMediaUsage, listMedia, updateMedia } from '$lib/remote/media.remote';
+  import { deleteMedia, getMediaSummary, getMediaUsage, listMedia } from '$lib/remote/media.remote';
   import { queryErrorMessage, readFreshQuery, remoteErrorStatus } from '$lib/remote/query-result';
   import { applyFilterPatch, filterHref } from '$lib/utils/filter-url';
   import { formatFileSize } from '$lib/utils/format';
   import * as m from '$paraglide/messages';
   import { attentionLine, soleFacetLabel } from './library-options';
+  import { MEDIA_BULK_DELETE_MAX, runBulkDelete } from './bulk-delete';
   import {
     isNarrowed,
     LIBRARY_DEFAULTS,
     libraryListArgs,
     readLibraryState,
+    readOpenItem,
   } from './library-url';
+  import MediaDrawer from './MediaDrawer.svelte';
+  import { retryMediaTranscoding } from './media-retry';
+  import { describeTile } from './tile-state';
   import MediaDeleteDialog from './MediaDeleteDialog.svelte';
   import { MediaDeleteFlow } from './media-delete-flow.svelte';
   import { draftsLeftToast } from './media-usage';
@@ -68,6 +73,8 @@
 
   // ── The view, from the URL ────────────────────────────────────────────
   const view = $derived(readLibraryState(page.url));
+  /** The drawer's item (`?item=`, Codex-a6ofh.1.7). Not a facet: no refetch. */
+  const openItem = $derived(readOpenItem(page.url));
   // The search floor (Codex-k618q) sits on the query argument: below
   // SEARCH_MIN_QUERY_LENGTH this is null and the list asks for no pattern.
   // Bounded first (Codex-osuqt): an over-long `?q=` is cut to the API's 255,
@@ -111,9 +118,9 @@
   });
 
   /** A failed read, logged with its status: an outage is an error, a refusal a warning. */
-  function logFailure(event: string, error: unknown) {
+  function logFailure(event: string, error: unknown, extra: Record<string, unknown> = {}) {
     const status = remoteErrorStatus(error);
-    const fields = { status, error: queryErrorMessage(error) };
+    const fields = { ...extra, status, error: queryErrorMessage(error) };
     if (status === undefined || status >= 500) logger.error(event, fields);
     else logger.warn(event, fields);
   }
@@ -364,21 +371,17 @@
     })
   );
 
-  // ── Edit ──────────────────────────────────────────────────────────────
-  let showEditDialog = $state(false);
-  let editTarget = $state<MediaItem | null>(null);
-
-  function handleEdit(id: string) {
-    const media = fetched.find((item) => item.id === id);
-    if (!media) return;
-    editTarget = media;
-    showEditDialog = true;
+  // ── The drawer (Codex-a6ofh.1.7) ──────────────────────────────────────
+  // Edit lives in the drawer now (mockup M3): title and description in place.
+  function openDrawer(id: string) {
+    setParams({ item: id });
   }
 
-  async function handleSave(id: string, updateData: { title?: string; description?: string | null }) {
-    await updateMedia({ id, data: updateData });
-    refreshAfterChange();
+  function closeDrawer() {
+    setParams({ item: null });
   }
+
+  const openPoster = $derived(fetched.find((item) => item.id === openItem)?.thumbnailUrl ?? null);
 
   // ── Delete (Codex-6sbn1) ──────────────────────────────────────────────
   // Never a cached read: the chip's popover may hold the same query, minutes old.
@@ -392,16 +395,109 @@
 
   function handleDelete(id: string) {
     const media = fetched.find((item) => item.id === id);
-    if (!media) return;
+    if (media) startDelete(media);
+  }
+
+  /** From a row, a tile or the drawer (which may show an item not loaded here). */
+  function startDelete(media: Pick<MediaItem, 'id' | 'title' | 'mediaType' | 'durationSeconds' | 'fileSizeBytes'> & {
+    thumbnailUrl?: string | null;
+    usage?: MediaItem['usage'];
+  }) {
+    // The drawer gives way to the delete dialog: one dialog at a time.
+    if (openItem === media.id) closeDrawer();
     deleteFlow.open({
       id: media.id,
       title: media.title,
       mediaType: media.mediaType,
       durationSeconds: media.durationSeconds,
       fileSizeBytes: media.fileSizeBytes,
-      thumbnailUrl: media.thumbnailUrl,
+      thumbnailUrl: media.thumbnailUrl ?? null,
       usage: media.usage,
     });
+  }
+
+  // ── Bulk (list view, mockup M2; data-design §1.3) ─────────────────────
+  let selected = $state<Set<string>>(new Set());
+  // A changed view starts a fresh selection, and its old result line goes.
+  $effect(() => {
+    void listKey;
+    untrack(() => {
+      selected = new Set();
+      bulkResult = '';
+    });
+  });
+  // Only rows the creator can see: an upload running here is a ghost, not a
+  // row, and must never be swept into a delete it was not shown in.
+  const selection = $derived(items.filter((item) => selected.has(item.id)));
+  const selectionBytes = $derived(selection.reduce((sum, item) => sum + (item.fileSizeBytes ?? 0), 0));
+  const retryable = $derived(
+    selection.filter((item) => {
+      const tile = describeTile(item, mediaStatus.items.get(item.id), 0);
+      return tile.kind === 'failed' && tile.canRetry;
+    })
+  );
+
+  function toggle(id: string) {
+    if (selected.size === 0) bulkResult = '';
+    const next = new Set(selected);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    selected = next;
+  }
+
+  function toggleAll(on: boolean) {
+    if (on && selected.size === 0) bulkResult = '';
+    selected = on ? new Set(items.map((item) => item.id)) : new Set();
+  }
+
+  let bulkBusy = $state(false);
+  let bulkConfirmOpen = $state(false);
+  let bulkResult = $state('');
+
+  async function bulkRetry() {
+    if (bulkBusy) return;
+    bulkBusy = true;
+    try {
+      // Each one tells its own refusal (media-retry.ts); the socket the rest.
+      for (const item of retryable) await retryMediaTranscoding(item.id);
+    } finally {
+      bulkBusy = false;
+    }
+  }
+
+  async function bulkDelete() {
+    const ids = selection.map((item) => item.id);
+    if (bulkBusy) return;
+    if (ids.length === 0 || ids.length > MEDIA_BULK_DELETE_MAX) {
+      // The rows moved under the open confirm (a refetch, another tab).
+      bulkResult = m.media_bulk_nothing();
+      bulkConfirmOpen = false;
+      return;
+    }
+    bulkBusy = true;
+    try {
+      const result = await runBulkDelete(ids, {
+        readUsage: (id) => readFreshQuery(getMediaUsage(id)),
+        remove: (input) => deleteMedia(input),
+        onFailure: (id, error) => logFailure('studio_media.bulk_delete_failed', error, { mediaId: id }),
+      });
+      bulkResult = [
+        result.deleted.length > 0 ? m.media_bulk_deleted({ count: result.deleted.length }) : '',
+        result.draftsAffected > 0 ? m.media_bulk_drafts({ count: result.draftsAffected }) : '',
+        result.blocked.length > 0 ? m.media_bulk_blocked({ count: result.blocked.length }) : '',
+        result.changed.length > 0 ? m.media_bulk_changed({ count: result.changed.length }) : '',
+        result.rateLimited.length > 0 ? m.media_bulk_rate_limited({ count: result.rateLimited.length }) : '',
+        result.failed.length > 0 ? m.media_bulk_failed({ count: result.failed.length }) : '',
+      ]
+        .filter(Boolean)
+        .join(' ');
+      // What stayed stays selected, so the creator can see what it was.
+      selected = new Set([...result.blocked, ...result.changed, ...result.rateLimited, ...result.failed]);
+      refreshAfterChange();
+    } finally {
+      bulkBusy = false;
+      bulkConfirmOpen = false;
+    }
   }
 
   async function confirmDelete() {
@@ -527,11 +623,42 @@
     </div>
   {/if}
   {#if layout === 'list'}
+    {#if selection.length > 0}
+      <div class="selbar" role="region" aria-label={m.media_bulk_label()}>
+        <span class="selbar-count">
+          {m.media_bulk_selected({ count: selection.length, size: formatFileSize(selectionBytes) || '0 KB' })}
+        </span>
+        {#if retryable.length > 0}
+          <Button size="sm" variant="secondary" disabled={bulkBusy} onclick={bulkRetry}>
+            {m.media_bulk_retry({ count: retryable.length })}
+          </Button>
+        {/if}
+        <Button
+          size="sm"
+          variant="destructive"
+          disabled={bulkBusy || selection.length > MEDIA_BULK_DELETE_MAX}
+          onclick={() => (bulkConfirmOpen = true)}
+        >
+          {m.media_bulk_delete({ count: selection.length })}
+        </Button>
+        {#if selection.length > MEDIA_BULK_DELETE_MAX}
+          <span class="selbar-note">{m.media_bulk_cap({ max: MEDIA_BULK_DELETE_MAX })}</span>
+        {/if}
+        <Button size="sm" variant="ghost" onclick={() => toggleAll(false)}>{m.media_bulk_clear()}</Button>
+      </div>
+    {/if}
+    {#if bulkResult}
+      <p class="bulk-result" role="status">{bulkResult}</p>
+    {/if}
     <MediaTable
       {items}
       ghosts={ghostItems}
+      {selected}
+      onToggle={toggle}
+      onToggleAll={toggleAll}
       onCancelUpload={(key) => uploadQueue.cancel(key)}
-      onEdit={handleEdit}
+      onOpen={openDrawer}
+      onEdit={openDrawer}
       onDelete={handleDelete}
     />
   {:else}
@@ -539,7 +666,8 @@
       {items}
       ghosts={ghostItems}
       onCancelUpload={(key) => uploadQueue.cancel(key)}
-      onEdit={handleEdit}
+      onOpen={openDrawer}
+      onEdit={openDrawer}
       onDelete={handleDelete}
     />
   {/if}
@@ -624,7 +752,23 @@
      that shows it lives in the studio layout. -->
 <MediaUpload bind:triggerPicker />
 
-<EditMediaDialog bind:open={showEditDialog} media={editTarget} onSave={handleSave} />
+<MediaDrawer
+  mediaId={openItem}
+  poster={openPoster}
+  onClose={closeDrawer}
+  onDelete={startDelete}
+  onChanged={refreshAfterChange}
+/>
+
+<ConfirmDialog
+  bind:open={bulkConfirmOpen}
+  title={m.media_bulk_confirm_title({ count: selection.length })}
+  description={m.media_bulk_confirm_body()}
+  confirmText={m.media_bulk_delete({ count: selection.length })}
+  variant="destructive"
+  awaitConfirm
+  onConfirm={bulkDelete}
+/>
 
 <!-- Delete: reads where the item is used first (Codex-6sbn1) -->
 <MediaDeleteDialog flow={deleteFlow} onConfirm={confirmDelete} focusAfterDelete={() => libraryBody} />
@@ -760,6 +904,31 @@
     margin: var(--space-2) 0 0;
     font-size: var(--text-xs);
     color: var(--color-text-muted);
+  }
+
+  .selbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    border: var(--border-width) var(--border-style) var(--color-interactive);
+    border-radius: var(--radius-md);
+    background: var(--color-interactive-subtle);
+  }
+
+  .selbar-count {
+    flex: 1;
+    font-size: var(--text-sm);
+    font-weight: var(--font-semibold);
+    color: var(--color-text);
+  }
+
+  .selbar-note,
+  .bulk-result {
+    margin: 0;
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
   }
 
   .show-more {

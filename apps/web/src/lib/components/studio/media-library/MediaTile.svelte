@@ -51,13 +51,15 @@
   interface Props {
     /** Media item to render */
     media: MediaTileItem;
-    /** Edit action callback — parent opens EditMediaDialog */
+    /** The whole tile opens the detail drawer (mockup M1 note 8). */
+    onOpen?: (id: string) => void;
+    /** Edit action callback — the library opens the media drawer */
     onEdit?: (id: string) => void;
     /** Delete action callback — parent opens confirm Dialog */
     onDelete?: (id: string) => void;
   }
 
-  const { media, onEdit, onDelete }: Props = $props();
+  const { media, onOpen, onEdit, onDelete }: Props = $props();
 
   // ── Live state ──────────────────────────────────────────────────────────
   const live = $derived(mediaStatus.items.get(media.id));
@@ -235,7 +237,15 @@
 
   <div class="tile-body">
     <div class="tile-header">
-      <h3 class="tile-title" title={media.title}>{media.title}</h3>
+      <h3 class="tile-title" title={media.title}>
+        {#if onOpen}
+          <!-- Stretched over the tile: the whole tile opens it, and the
+               tile's own buttons sit above the stretch. -->
+          <button type="button" class="tile-open" onclick={() => onOpen(media.id)}>{media.title}</button>
+        {:else}
+          {media.title}
+        {/if}
+      </h3>
       <MediaActionsMenu
         title={media.title}
         onEdit={onEdit && (() => onEdit(media.id))}
@@ -291,6 +301,7 @@
 
 <style>
   .tile {
+    position: relative;
     display: flex;
     flex-direction: column;
     gap: var(--space-3);
@@ -487,6 +498,42 @@
     justify-content: center;
     color: var(--color-status-error-text);
     background: color-mix(in srgb, var(--color-status-error-surface) 80%, transparent);
+  }
+
+  /* ── Open (the whole tile) ────────────────────────────── */
+  .tile-open {
+    display: inline;
+    padding: 0;
+    border: none;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .tile-open::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: var(--radius-lg);
+  }
+
+  .tile-open:focus-visible {
+    outline: none;
+  }
+
+  .tile-open:focus-visible::after {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-0-5);
+  }
+
+  /* The tile's own controls stay above the stretched open button. */
+  .tile :global(.media-actions-trigger),
+  .tile :global(.use-chip),
+  .tile-cta {
+    position: relative;
+    z-index: 1;
   }
 
   /* ── Body (title + meta) ──────────────────────────────── */

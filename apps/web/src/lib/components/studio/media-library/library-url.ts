@@ -136,3 +136,14 @@ export function isNarrowed(
 ): boolean {
   return activeFilterCount(state) > 0 || search !== null;
 }
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The item the drawer shows (`?item=<id>`, Codex-a6ofh.1.7), or null. Only
+ * an id shape opens it: a hand-typed `?item=x` would be refused by the read.
+ */
+export function readOpenItem(url: URL): string | null {
+  const id = url.searchParams.get('item');
+  return id && UUID.test(id) ? id : null;
+}

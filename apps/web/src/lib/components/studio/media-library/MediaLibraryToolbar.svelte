@@ -38,7 +38,8 @@
     type LibraryOption,
   } from './library-options';
 
-  export type LibraryPatch = Partial<Record<keyof LibraryState, string | null>>;
+  /** A URL write: the view's params, and the drawer's `item` (not a facet). */
+  export type LibraryPatch = Partial<Record<keyof LibraryState | 'item', string | null>>;
 
   interface Props {
     /** The view the URL describes. */

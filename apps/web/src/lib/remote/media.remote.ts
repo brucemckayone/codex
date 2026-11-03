@@ -92,13 +92,16 @@ const updateMediaSchema = z.object({
 });
 
 /**
- * Update media item metadata
+ * Update media item metadata: the drawer's title and description, saved on
+ * blur. A 4xx keeps its status (404: deleted meanwhile; 429: too many saves),
+ * so the drawer can say which, rather than every refusal reading as an
+ * outage the creator retries forever (Codex-a6ofh.1.7).
  */
 export const updateMedia = command(updateMediaSchema, async ({ id, data }) => {
   const { platform, cookies } = getRequestEvent();
   const api = createServerApi(platform, cookies);
 
-  return api.media.update(id, data);
+  return forwardClientErrors(() => api.media.update(id, data));
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -139,6 +142,32 @@ export const getMediaUsage = query(z.string().uuid(), async (id) => {
   const { platform, cookies } = getRequestEvent();
   const api = createServerApi(platform, cookies);
   return forwardClientErrors(() => api.media.usage(id));
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Media Drawer (Codex-a6ofh.1.7)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * One media item, for the library's detail drawer, which re-reads it on every
+ * open. A 4xx keeps its status: 404 is another creator's id, or a deleted one.
+ */
+export const getMediaItem = query(z.string().uuid(), async (id) => {
+  const { platform, cookies } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+  return forwardClientErrors(() => api.media.get(id));
+});
+
+/**
+ * A signed preview of the creator's own media (Codex-a6ofh.1.5): a command,
+ * not a query, because each call mints a 15-minute token, so a cached one
+ * would expire under the player. Minted only when the creator presses Play.
+ * A 422 (`MEDIA_NOT_READY`) keeps its status.
+ */
+export const getMediaPreview = command(z.string().uuid(), async (id) => {
+  const { platform, cookies } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+  return forwardClientErrors(() => api.media.preview(id));
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

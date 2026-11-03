@@ -13,6 +13,7 @@ import type {
   ContentHeld,
   CourseEntryResponse,
   CourseFilmStreamResponse,
+  MediaPreviewResponse,
   OrgFilmStreamResponse,
   PlaybackProgressResponse,
   StreamingUrlResponse,
@@ -2960,6 +2961,13 @@ export function createServerApi(
        */
       usage: (id: string) =>
         request<MediaUsage>('content', `/api/media/${id}/usage`),
+
+      /**
+       * The owner's own media, signed to play for 15 minutes (Codex-a6ofh.1.5):
+       * the media drawer's preview. Never cached; a 422 means not ready yet.
+       */
+      preview: (id: string) =>
+        request<MediaPreviewResponse>('content', `/api/media/${id}/preview`),
 
       /**
        * Soft delete a media item. `usage` is the fingerprint of the uses the
