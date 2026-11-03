@@ -9,6 +9,7 @@
  * - GET    /api/media/:id    - Get by ID
  * - PATCH  /api/media/:id    - Update media
  * - GET    /api/media        - List with filters (each item's usage counts)
+ * - GET    /api/media/summary - The whole library: count, size, needs attention
  * - GET    /api/media/:id/usage - Where the item is used
  * - GET    /api/media/:id/preview - The owner's own media, signed to play (15 min)
  * - DELETE /api/media/:id    - Soft delete, refused while anything live uses it
@@ -38,7 +39,7 @@ import {
 import { messageForLog } from '@codex/database';
 import { workerFetch } from '@codex/security';
 import { ConflictError, InternalServiceError } from '@codex/service-errors';
-import type { HonoEnv } from '@codex/shared-types';
+import type { HonoEnv, MediaLibrarySummary } from '@codex/shared-types';
 import { createIdParamsSchema, uploadCompleteSchema } from '@codex/validation';
 import {
   binaryUploadProcedure,
@@ -71,6 +72,27 @@ app.post(
     handler: async (ctx): Promise<CreateMediaResponse['data']> => {
       return await ctx.services.media.create(ctx.input.body, ctx.user.id);
     },
+  })
+);
+
+/**
+ * GET /api/media/summary
+ * The creator's whole library in four numbers (Codex-a6ofh.1.6): the library
+ * header ("12 items · 6.4 GB", "5 of 12") and its needs-attention line, which
+ * the paged list cannot give because its total is its filter's.
+ *
+ * Registered ABOVE `/:id`: Hono matches in order, and `/:id` would read
+ * "summary" as an id and refuse it as a 400.
+ *
+ * Returns: MediaLibrarySummary (200)
+ * Security: Authenticated users, own media only, API rate limit (100 req/min)
+ */
+app.get(
+  '/summary',
+  procedure({
+    policy: { auth: 'required' },
+    handler: async (ctx): Promise<MediaLibrarySummary> =>
+      ctx.services.media.summary(ctx.user.id),
   })
 );
 

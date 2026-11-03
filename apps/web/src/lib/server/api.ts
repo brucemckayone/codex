@@ -78,6 +78,7 @@ import type {
   ContactSettingsResponse,
   CourseOffer,
   FeatureSettingsResponse,
+  MediaLibrarySummary,
   MediaUsage,
   OrganizationPublicStatsResponse,
   OrganizationWithRole,
@@ -2929,6 +2930,13 @@ export function createServerApi(
             MediaItemWithRelations & { thumbnailUrl: string | null }
           >
         >('content', `/api/media${params ? `?${params}` : ''}`),
+
+      /**
+       * The whole library in four numbers (Codex-a6ofh.1.6): the library
+       * header ("12 items · 6.4 GB") and its needs-attention line.
+       */
+      summary: () =>
+        request<MediaLibrarySummary>('content', '/api/media/summary'),
 
       /**
        * Get a single media item by ID

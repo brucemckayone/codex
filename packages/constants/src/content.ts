@@ -40,6 +40,11 @@ export const MEDIA_UPLOAD_STALLED_AFTER_MS =
  * drift. `attention` is also every upload stalled past
  * {@link MEDIA_UPLOAD_STALLED_AFTER_MS}: a rule on time, not a status, so the
  * reader applies it beside these.
+ *
+ * Coupled: `MediaItemService.summary()` counts `failed` (eq FAILED) and
+ * `stopped` (the stall) so the header's "N need attention" equals what the
+ * `attention` filter lists. A status added here must be counted there too
+ * (the media-list-filters integration test pins the equality).
  */
 export const MEDIA_STATUS_GROUPS = {
   processing: [MEDIA_STATUS.UPLOADED, MEDIA_STATUS.TRANSCODING],

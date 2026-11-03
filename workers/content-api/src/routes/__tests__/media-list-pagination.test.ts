@@ -28,7 +28,7 @@ const USER = {
   role: 'creator',
 };
 
-const mediaSpies = { list: vi.fn() };
+const mediaSpies = { list: vi.fn(), summary: vi.fn() };
 
 vi.mock('@codex/content', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@codex/content')>();
@@ -48,19 +48,21 @@ const testEnv = {
   ENVIRONMENT: 'development',
 } as unknown as typeof env;
 
-function buildApp() {
+function buildApp(signedIn = true) {
   const app = new Hono<{ Variables: Record<string, unknown> }>();
   app.use('*', async (c, next) => {
-    c.set('user', USER);
-    c.set('session', { id: 'sess_test', userId: USER.id });
+    if (signedIn) {
+      c.set('user', USER);
+      c.set('session', { id: 'sess_test', userId: USER.id });
+    }
     await next();
   });
   app.route('/api/media', media);
   return app;
 }
 
-async function get(query: string): Promise<Response> {
-  return buildApp().fetch(
+async function get(query: string, signedIn = true): Promise<Response> {
+  return buildApp(signedIn).fetch(
     new Request(`http://content-api.test/api/media${query}`),
     testEnv,
     createExecutionContext()
@@ -151,5 +153,32 @@ describe('GET /api/media pages by the requested page and limit', () => {
     // One enum, so the refusal lists the groups beside the raw statuses.
     expect(JSON.stringify(body.error.details)).toContain('attention');
     expect(mediaSpies.list).not.toHaveBeenCalled();
+  });
+});
+
+describe('GET /api/media/summary (Codex-a6ofh.1.6)', () => {
+  beforeEach(() => {
+    mediaSpies.summary.mockReset();
+    mediaSpies.summary.mockResolvedValue({
+      total: 12,
+      totalBytes: 6_871_947_673,
+      failed: 1,
+      stopped: 1,
+    });
+  });
+
+  // Registered above `/:id`, which would read "summary" as an id and 400.
+  it("answers the caller's own summary, never reading 'summary' as an id", async () => {
+    const res = await get('/summary');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      data: { total: 12, totalBytes: 6_871_947_673, failed: 1, stopped: 1 },
+    });
+    expect(mediaSpies.summary).toHaveBeenCalledWith(USER.id);
+  });
+
+  it('needs a session', async () => {
+    expect((await get('/summary', false)).status).toBe(401);
+    expect(mediaSpies.summary).not.toHaveBeenCalled();
   });
 });

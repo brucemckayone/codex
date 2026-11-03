@@ -12,6 +12,7 @@
 
 import {
   deleteMediaInputSchema,
+  mediaQuerySchema,
   updateMediaItemSchema,
 } from '@codex/validation';
 import { z } from 'zod';
@@ -23,43 +24,36 @@ import { forwardClientErrors } from '$lib/server/forward-client-errors';
 // Media List Query
 // ─────────────────────────────────────────────────────────────────────────────
 
-const mediaListQuerySchema = z.object({
-  organizationId: z.string().uuid().optional(),
-  page: z.coerce.number().min(1).optional().default(1),
-  limit: z.coerce.number().min(1).max(100).optional().default(12),
-  status: z
-    .enum(['uploading', 'uploaded', 'transcoding', 'ready', 'failed'])
-    .optional(),
-  mediaType: z.enum(['video', 'audio']).optional(),
-  sortBy: z.enum(['createdAt', 'uploadedAt', 'title']).optional(),
-  sortOrder: z.enum(['asc', 'desc']).optional(),
-});
-
 /**
- * List media items with pagination and filtering
+ * List the creator's media: the library (search, status groups, usage, the
+ * sorts, 24 a page) and the pickers.
  *
- * Usage:
- * ```svelte
- * <script>
- *   const media = await listMedia({ page: 1, limit: 12 });
- * </script>
- * ```
+ * Its args ARE content-api's `mediaQuerySchema` (Codex-a6ofh.1.6), so the two
+ * cannot drift: the hand copy this replaced lagged the API by a search, two
+ * status groups, the usage filter and two sorts, and capped nothing the API
+ * refuses. Media is personal (decision 1A), so there is no organizationId.
+ * `search` must reach here gated (`gateSearchQuery`, Codex-k618q).
  */
-export const listMedia = query(mediaListQuerySchema, async (params) => {
+export const listMedia = query(mediaQuerySchema, async (params) => {
   const { platform, cookies } = getRequestEvent();
   const api = createServerApi(platform, cookies);
 
   const searchParams = new URLSearchParams();
-  searchParams.set('page', String(params.page));
-  searchParams.set('limit', String(params.limit));
-  if (params.organizationId)
-    searchParams.set('organizationId', params.organizationId);
-  if (params.status) searchParams.set('status', params.status);
-  if (params.mediaType) searchParams.set('mediaType', params.mediaType);
-  if (params.sortBy) searchParams.set('sortBy', params.sortBy);
-  if (params.sortOrder) searchParams.set('sortOrder', params.sortOrder);
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined) searchParams.set(key, String(value));
+  }
+  return api.media.list(searchParams);
+});
 
-  return api.media.list(searchParams.toString() ? searchParams : undefined);
+/**
+ * The whole library in four numbers (Codex-a6ofh.1.6): `{ total, totalBytes,
+ * failed, stopped }`, for the library header and its needs-attention line.
+ * The paged list cannot give them: its total is its filter's.
+ */
+export const getMediaSummary = query(async () => {
+  const { platform, cookies } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+  return api.media.summary();
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

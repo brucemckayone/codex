@@ -41,7 +41,11 @@ import {
   type ServiceConfig,
   ValidationError,
 } from '@codex/service-errors';
-import type { MediaUsage, PaginatedListResponse } from '@codex/shared-types';
+import type {
+  MediaLibrarySummary,
+  MediaUsage,
+  PaginatedListResponse,
+} from '@codex/shared-types';
 import {
   getHlsPrefix,
   getMediaThumbnailPrefix,
@@ -257,13 +261,18 @@ function mediaStatusCondition(
 
   const byStatus = inArray(mediaItems.status, [...MEDIA_STATUS_GROUPS[status]]);
   if (status !== 'attention') return byStatus;
-  const stalledBefore = new Date(now.getTime() - MEDIA_UPLOAD_STALLED_AFTER_MS);
-  const stalled = and(
-    eq(mediaItems.status, MEDIA_STATUS.UPLOADING),
-    lt(mediaItems.createdAt, stalledBefore)
-  );
   // Plain SQL, never `or()`: it cannot come back undefined to be dropped.
-  return sql`(${byStatus} or ${stalled})`;
+  return sql`(${byStatus} or ${stalledUpload(now)})`;
+}
+
+/**
+ * An upload that stopped before it finished: still `uploading` past
+ * `MEDIA_UPLOAD_STALLED_AFTER_MS` from the row's creation. The `attention`
+ * filter and the summary's `stopped` count read this one boundary.
+ */
+function stalledUpload(now: Date): SQL {
+  const stalledBefore = new Date(now.getTime() - MEDIA_UPLOAD_STALLED_AFTER_MS);
+  return sql`(${eq(mediaItems.status, MEDIA_STATUS.UPLOADING)} and ${lt(mediaItems.createdAt, stalledBefore)})`;
 }
 
 /**
@@ -1034,6 +1043,45 @@ export class MediaItemService extends BaseService {
       };
     } catch (error) {
       this.handleError(error, 'list');
+    }
+  }
+
+  /**
+   * The creator's whole library in four numbers (Codex-a6ofh.1.6): the
+   * library header and its needs-attention line, which the paged list cannot
+   * give (its total is its filter's). One scan of the creator's live rows.
+   */
+  async summary(creatorId: string): Promise<MediaLibrarySummary> {
+    try {
+      const [row] = await this.db
+        .select({
+          total: sql<number>`count(*)`.mapWith(Number),
+          // sum() of a bigint is numeric, which arrives as a string.
+          totalBytes:
+            sql<number>`coalesce(sum(${mediaItems.fileSizeBytes}), 0)`.mapWith(
+              Number
+            ),
+          failed:
+            sql<number>`count(*) filter (where ${eq(mediaItems.status, MEDIA_STATUS.FAILED)})`.mapWith(
+              Number
+            ),
+          stopped:
+            sql<number>`count(*) filter (where ${stalledUpload(new Date())})`.mapWith(
+              Number
+            ),
+        })
+        .from(mediaItems)
+        .where(scopedNotDeleted(mediaItems, creatorId));
+      // An aggregate with no GROUP BY always returns one row; zeros here
+      // would tell the creator their library is empty.
+      if (!row) {
+        throw new InternalServiceError('Media summary returned no row', {
+          creatorId,
+        });
+      }
+      return row;
+    } catch (error) {
+      this.handleError(error, 'summary');
     }
   }
 

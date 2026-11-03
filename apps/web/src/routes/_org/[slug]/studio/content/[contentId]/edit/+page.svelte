@@ -20,8 +20,8 @@
   const contentId = $derived(page.params.contentId);
 
   const contentQuery = $derived(getContent(contentId));
+  // Media is personal (decision 1A): the list takes no org.
   const mediaQuery = $derived(listMedia({
-    organizationId: data.org.id,
     status: 'ready',
     limit: 50,
     sortBy: 'createdAt',

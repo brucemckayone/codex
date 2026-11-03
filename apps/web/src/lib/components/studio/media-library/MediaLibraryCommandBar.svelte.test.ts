@@ -20,17 +20,9 @@ function render(live: MediaStatusConnection, onLiveResume = vi.fn()) {
   component = mount(MediaLibraryCommandBar, {
     target: document.body,
     props: {
-      total: 3,
       live,
       onLiveResume,
-      mediaType: 'all',
-      status: 'all',
-      searchValue: '',
       onUploadClick: vi.fn(),
-      onSearchInput: vi.fn(),
-      onSearchClear: vi.fn(),
-      onMediaTypeChange: vi.fn(),
-      onStatusChange: vi.fn(),
     },
   });
   flushSync();

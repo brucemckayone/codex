@@ -12,6 +12,10 @@
  * test seeds one use through EVERY blocking column of
  * `MEDIA_REFERENCE_COLUMNS`, and fails when a new one is added without a case
  * here.
+ *
+ * And the summary beside the list (Codex-a6ofh.1.6): the header's
+ * whole-library count, size and needs-attention numbers, which must agree
+ * with the attention filter they link to.
  */
 
 import { MEDIA_UPLOAD_STALLED_AFTER_MS } from '@codex/constants';
@@ -436,6 +440,71 @@ describe('media library list filters (Codex-a6ofh.1.4)', () => {
         ascending.push(...result.items.map((item) => item.id));
       }
       expect(ascending).toEqual(sorted(ids));
+    });
+  });
+
+  describe('summary (Codex-a6ofh.1.6)', () => {
+    it("counts and sizes the creator's live library, with what needs attention", async () => {
+      const creatorId = await newCreator();
+      const other = await newCreator();
+      const now = Date.now();
+      await seedMedia(creatorId, { fileSizeBytes: 3 * 1024 ** 3 });
+      await seedMedia(creatorId, { status: 'failed', fileSizeBytes: 1024 });
+      await seedMedia(creatorId, {
+        status: 'uploading',
+        fileSizeBytes: 2048,
+        createdAt: new Date(now - MEDIA_UPLOAD_STALLED_AFTER_MS - 60_000),
+      });
+      // Not stopped yet: inside the boundary the attention group uses too.
+      await seedMedia(creatorId, {
+        status: 'uploading',
+        fileSizeBytes: null,
+        createdAt: new Date(now - MEDIA_UPLOAD_STALLED_AFTER_MS + 60_000),
+      });
+      // Neither counts: another creator's, and this creator's deleted one.
+      await seedMedia(other, { status: 'failed', fileSizeBytes: 999 });
+      await seedMedia(creatorId, {
+        status: 'failed',
+        fileSizeBytes: 999,
+        deletedAt: new Date(),
+      });
+
+      expect(await media.summary(creatorId)).toEqual({
+        total: 4,
+        // bigint sums arrive as numbers, past 2^31, and a null size adds 0.
+        totalBytes: 3 * 1024 ** 3 + 1024 + 2048,
+        failed: 1,
+        stopped: 1,
+      });
+    });
+
+    it('is all zeros for an empty library, never an error', async () => {
+      const creatorId = await newCreator();
+      expect(await media.summary(creatorId)).toEqual({
+        total: 0,
+        totalBytes: 0,
+        failed: 0,
+        stopped: 0,
+      });
+    });
+
+    // The header's "2 need attention" and its "Show them" list must agree.
+    it('needs attention exactly as many as the attention filter lists', async () => {
+      const creatorId = await newCreator();
+      await seedMedia(creatorId, { status: 'failed' });
+      await seedMedia(creatorId, { status: 'failed' });
+      await seedMedia(creatorId, {
+        status: 'uploading',
+        createdAt: new Date(
+          Date.now() - MEDIA_UPLOAD_STALLED_AFTER_MS - 60_000
+        ),
+      });
+      await seedMedia(creatorId, { status: 'ready' });
+
+      const sums = await media.summary(creatorId);
+      const attention = await listed(creatorId, { status: 'attention' });
+      expect(sums.failed + sums.stopped).toBe(attention.total);
+      expect(attention.total).toBe(3);
     });
   });
 });

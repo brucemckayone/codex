@@ -153,6 +153,12 @@ describe('every landed client gate is still wired', () => {
       file: 'routes/_org/[slug]/studio/monetisation/tiers/[tierId]/+page.svelte',
       shape: 'hold',
     },
+    // The studio media library (Codex-a6ofh.1.6): both studios' one
+    // component, which issues `listMedia` from the client.
+    {
+      file: 'lib/components/studio/media-library/StudioMediaLibrary.svelte',
+      shape: 'arg',
+    },
   ];
 
   for (const { file, shape } of GATED_SURFACES) {
@@ -192,10 +198,6 @@ describe('every landed client gate is still wired', () => {
    * wrong if the surface starts hitting the API.
    */
   const CLIENT_ONLY_SEARCH = [
-    // Filters the CURRENT page's media items in memory (`filteredItems`) and
-    // sends no `search`. `GET /api/media` takes one since Codex-a6ofh.1.4;
-    // the library that sends it (E1.6) must leave this list and gate it.
-    'lib/components/studio/StudioMediaPage.svelte',
     // Filters the hydrated TanStack DB library collection in memory; the web
     // client never sends `search` to `getUserLibrary`.
     'routes/(platform)/library/+page.svelte',
@@ -251,10 +253,15 @@ describe('every landed client gate is still wired', () => {
 
   it('the helper-patch detector sees the REAL filterHref writer (calibration on source)', async () => {
     // Strings alone prove the regex, not that it meets the code: the media
-    // page writes `q` through filterHref, so the detector must see it. When
-    // that page stops writing `q` (E1.6 replaces it), point this at the file
-    // that does.
-    const src = await readFile(join(SRC_ROOT, CLIENT_ONLY_SEARCH[0]), 'utf8');
+    // library writes `q` through filterHref, so the detector must see it. If
+    // it stops writing `q` that way, point this at a file that does.
+    const src = await readFile(
+      join(
+        SRC_ROOT,
+        'lib/components/studio/media-library/StudioMediaLibrary.svelte'
+      ),
+      'utf8'
+    );
     expect(HELPER_PATCH_KEY.test(src)).toBe(true);
   });
 
