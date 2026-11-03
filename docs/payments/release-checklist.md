@@ -341,16 +341,24 @@ fees while rolled back.
 
 ---
 
-## Waiting moves, course amounts and price moves (migrations `0122` and `0124`)
+## Waiting moves, course amounts and price moves (migrations `0122`, `0124` and `0125`)
 
 `0122` adds the waiting-move columns on `subscriptions` (`Codex-2hxff.16`) and
 `course_subscriptions.amount_cents` (`Codex-2hxff.52`). `0124` adds
 `price_changes` and `subscription_price_moves` (`Codex-2hxff.85`, `.86`;
-[Subscriptions › Price changes](subscriptions.md#price-changes)). Both are
+[Subscriptions › Price changes](subscriptions.md#price-changes)). `0125` adds
+`pending_billing_interval`, `pending_amount_cents` and `stripe_schedule_id` on
+`subscriptions`: a change from yearly to monthly billing waits for the year's
+end, on a Stripe subscription schedule (`Codex-2hxff.97`). All three are
 additive and run before the workers deploy; old workers never read the new
-columns or tables. Neither backfills anything: no move can wait before `.16`
-ships, and a price change saved before the deploy either finished its fan-out
-or raised an alert.
+columns or tables. None backfills anything: no move or change of billing can
+wait before `.16` and `.97` ship, and a price change saved before the deploy
+either finished its fan-out or raised an alert.
+
+`0125`'s CHECK is the only one in this batch that ties a new column to an old
+one: a waiting interval must differ from `billing_interval`. New code clears
+the waiting change in the same write that lands it. Old code doesn't know it
+exists, which matters only on a rollback (below).
 
 ### R16 — after the deploy: the course amount backfill (only with the owner's OK)
 
@@ -393,9 +401,51 @@ the price moves` error.
 
 ### Rollback
 
-`0122` and `0124` stay. The old workers know nothing of a waiting move, so
-before rolling back, count them:
-`SELECT count(*) FROM subscriptions WHERE pending_tier_id IS NOT NULL`. If it
-isn't 0, decide with the owner first. Don't change prices while rolled back:
-the old fan-out writes no price moves, so the hourly step can't see its
-subscribers after the roll forward.
+`0122`, `0124` and `0125` stay. Rolling forward is preferred: the old workers
+know nothing of a waiting move or change of billing.
+
+- **A waiting change of billing breaks the old webhook.** Its schedule is
+  Stripe's, so at the year's end it still switches the item to the monthly
+  Price. The old `customer.subscription.updated` handler then writes
+  `billing_interval = 'month'` and leaves `pending_billing_interval` at
+  `'month'`, which fails `check_subscription_pending_billing` (23514) on every
+  retry, so the row stops following Stripe. The old cancel also fails, with
+  Stripe's 400, while a schedule is attached.
+- **A waiting move to a cheaper plan** already bills the cheaper price at the
+  renewal, and the old code never flips the tier, so the member keeps the
+  dearer plan at the cheaper price until the roll forward.
+
+So before any rollback, list every subscription with a waiting move, a
+waiting change of billing or a schedule:
+
+```sql
+BEGIN TRANSACTION READ ONLY;
+SELECT id, stripe_subscription_id, stripe_schedule_id,
+       pending_tier_id, pending_tier_from, pending_billing_interval
+  FROM subscriptions
+ WHERE pending_tier_id IS NOT NULL
+    OR pending_billing_interval IS NOT NULL
+    OR stripe_schedule_id IS NOT NULL
+ ORDER BY pending_tier_from NULLS LAST;
+ROLLBACK;
+```
+
+If it lists anyone, decide with the owner first. To roll back anyway, for
+each row: release its schedule at Stripe if it has one (the member then stays
+on yearly billing), then clear the six columns, so nothing waits that the old
+code can't see:
+
+```sql
+UPDATE subscriptions
+   SET pending_tier_id = NULL, pending_tier_from = NULL,
+       held_amount_cents = NULL, pending_billing_interval = NULL,
+       pending_amount_cents = NULL, stripe_schedule_id = NULL
+ WHERE id = '<row id>';
+```
+
+After the roll forward, the next event for each of them mirrors the waiting
+move still recorded in the Stripe subscription's metadata back into its row:
+a released change of billing comes back, and the hourly backstop sets its
+schedule again. Don't change prices while
+rolled back: the old fan-out writes no price moves, so the hourly step can't
+see its subscribers after the roll forward.
