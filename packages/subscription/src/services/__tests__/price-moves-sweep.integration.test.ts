@@ -1003,7 +1003,7 @@ describe('the hourly price-moves step (Codex-2hxff.86)', () => {
       expect(row).toMatchObject({ state: 'due', attemptedAt: null });
     }
     const emailsOf = (list: typeof rows) =>
-      new Set(list.map((row) => emailBySub.get(row.subscriptionId)));
+      new Set(list.map((row) => emailBySub.get(row.subscriptionId ?? '')));
     expect(new Set(send.mock.calls.map(([notice]) => notice.to))).toEqual(
       emailsOf(kept)
     );
