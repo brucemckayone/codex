@@ -334,7 +334,8 @@ async function insertNotices(
   db: DatabaseWs | Parameters<Parameters<DatabaseWs['transaction']>[0]>[0],
   changeId: string,
   payees: AffectedPayee[],
-  onList: boolean
+  onList: boolean,
+  now: Date
 ): Promise<number> {
   let inserted = 0;
   for (let i = 0; i < payees.length; i += LIST_BATCH) {
@@ -349,6 +350,9 @@ async function insertNotices(
           roles: payee.roles,
           beforeValues: payee.before,
           afterValues: payee.after,
+          // The run's clock, as attempted_at: foundSent searches the email
+          // log from it.
+          createdAt: now,
         }))
       )
       .onConflictDoNothing({
@@ -388,7 +392,7 @@ async function makeLists(ctx: SweepContext): Promise<Set<string>> {
           return null;
         }
         const payees = await affectedPayees(tx, change, ctx.now);
-        await insertNotices(tx, id, payees, true);
+        await insertNotices(tx, id, payees, true, ctx.now);
         await tx
           .update(feeChanges)
           .set({ firstRunAt: ctx.now, listedCount: payees.length })
@@ -474,7 +478,13 @@ async function addJoiners(
       const joiners = [...affected.values()].filter(
         (p) => !known.has(p.userId)
       );
-      const added = await insertNotices(ctx.db, change.id, joiners, false);
+      const added = await insertNotices(
+        ctx.db,
+        change.id,
+        joiners,
+        false,
+        ctx.now
+      );
       ctx.result.joinersAdded += added;
 
       const gone = existing
@@ -537,6 +547,7 @@ interface Claimed {
   afterValues: FeeNoticeRoleValues[];
   quotedFrom: string | null;
   prevAttemptedAt: Date | null;
+  createdAt: Date;
 }
 
 async function claim(ctx: SweepContext): Promise<Claimed[]> {
@@ -578,7 +589,7 @@ async function claim(ctx: SweepContext): Promise<Claimed[]> {
     WHERE n.id = picked.id
     RETURNING n.id, n.change_id, n.user_id, n.kind, n.on_list, n.state,
       n.attempts, n.roles, n.before_values, n.after_values, n.quoted_from,
-      picked.prev_attempted_at
+      picked.prev_attempted_at, n.created_at
   `);
   type Row = {
     id: string;
@@ -593,6 +604,7 @@ async function claim(ctx: SweepContext): Promise<Claimed[]> {
     after_values: FeeNoticeRoleValues[];
     quoted_from: string | Date | null;
     prev_attempted_at: string | Date | null;
+    created_at: string | Date;
   };
   return (result.rows as Row[]).map((row) => ({
     id: row.id,
@@ -612,6 +624,7 @@ async function claim(ctx: SweepContext): Promise<Claimed[]> {
     prevAttemptedAt: row.prev_attempted_at
       ? new Date(row.prev_attempted_at)
       : null,
+    createdAt: new Date(row.created_at),
   }));
 }
 
@@ -619,17 +632,17 @@ async function claim(ctx: SweepContext): Promise<Claimed[]> {
  * Did the email go after all? Asked on every claim after an earlier try,
  * whatever that try recorded (F4's rule, as the price-moves step): a run cut
  * off after sending leaves the notice `due`. A `success` or `pending` row in
- * the email log for this notice since its last try counts as told then: a
- * `pending` one may have gone.
+ * the email log for this notice counts as told then: a `pending` one may
+ * have gone. The search starts at the notice's making, not its last try, so
+ * a morning that failed before recording can't hide an earlier morning's
+ * send (review cycle 2, L6); its feeNoticeId pins the row either way.
  */
 async function foundSent(
   ctx: SweepContext,
   notice: Claimed,
   email: string
 ): Promise<Date | null> {
-  const since = notice.prevAttemptedAt
-    ? new Date(notice.prevAttemptedAt.getTime() - 60 * 1000)
-    : new Date(0);
+  const since = new Date(notice.createdAt.getTime() - 60 * 1000);
   const [row] = await ctx.db
     .select({ at: emailAuditLogs.updatedAt })
     .from(emailAuditLogs)

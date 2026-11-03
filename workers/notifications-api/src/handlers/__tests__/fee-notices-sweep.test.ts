@@ -70,9 +70,10 @@ const {
   readFeeVersionsByLevel: realReadFeeVersionsByLevel,
 } = await vi.importActual<typeof import('@codex/payments')>('@codex/payments');
 
-// 3 and 4 Nov 2026, 08:00 London (GMT): two mornings' runs.
+// 3, 4 and 5 Nov 2026, 08:00 London (GMT): the mornings' runs.
 const NOV_3 = new Date('2026-11-03T08:00:00Z');
 const NOV_4 = new Date('2026-11-04T08:00:00Z');
+const NOV_5 = new Date('2026-11-05T08:00:00Z');
 
 describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
   let db: DatabaseWs;
@@ -1236,6 +1237,37 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
     expect(await noticeOf(changeId, ray.id)).toMatchObject({
       state: 'sent',
       acceptedAt: loggedAt,
+    });
+  });
+
+  it('two failed mornings in a row still find the first one’s send in the log: it is never sent twice', async () => {
+    const sid = await person('Sid Twice');
+    const changeId = await rise(await organisation(sid.id));
+    // Morning one: the send goes, but its answer is lost.
+    await run(
+      changeId,
+      NOV_3,
+      mailerAnswering({ [sid.id]: { accepted: false, status: 503 } })
+    );
+    const notice = await noticeOf(changeId, sid.id);
+    const sentAt = new Date(NOV_3.getTime() + 60 * 1000);
+    await logged(notice?.id as string, sid.email, 'success', sentAt);
+    // Morning two: a run claims it, then fails inside its log check, so
+    // only that try is stamped.
+    await db
+      .update(feeChangeNotices)
+      .set({ attemptedAt: NOV_4, attempts: 2 })
+      .where(eq(feeChangeNotices.id, notice?.id as string));
+
+    const mailer = mailerAnswering();
+    expect(await run(changeId, NOV_5, mailer)).toMatchObject({
+      foundInLog: 1,
+      sent: 0,
+    });
+    expect(mailFor(mailer, sid.id)).toEqual([]);
+    expect(await noticeOf(changeId, sid.id)).toMatchObject({
+      state: 'sent',
+      acceptedAt: sentAt,
     });
   });
 });
