@@ -1,7 +1,7 @@
 // @vitest-environment node
 /**
- * org-brand.css nudges links and focus colours against the page ground
- * (Codex-mik4h). The fragments are generated here, from the same floors the
+ * org-brand.css nudges links and focus colours against the hardest ground
+ * they sit on (Codex-mik4h). The fragments are generated here, from the same floors the
  * brand studio's pill reports with (`ground-nudge.ts`); the test fails if the
  * stylesheet's text drifts from them, so the page and the pill cannot
  * disagree about what was moved.

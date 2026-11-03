@@ -65,7 +65,7 @@
   /* ─── FOCUS ─────────────────────────────────────────────────────────── */
   /* A fine-tune focus colour arrives as `--brand-focus` / `--brand-focus-ring`
      (BRAND_PREFIX_KEYS), an INPUT, so the block at the foot of the file can
-     nudge it against the page like the brand's own (Codex-mik4h). As an
+     nudge it against the ground like the brand's own (Codex-mik4h). As an
      inline `--color-focus` it would beat that rule and paint as picked. */
   --_focus-src: var(--brand-focus, var(--brand-color, var(--color-primary-500)));
   --_focus-ring-src: var(--brand-focus-ring, oklch(from var(--brand-color, var(--color-primary-500)) calc(l + 0.15) calc(c * 0.5) h));
@@ -75,7 +75,8 @@
 
   /* ─── LINKS ─────────────────────────────────────────────────────────── */
   /* The brand's interactive colour used as TEXT on the page. The FALLBACK:
-     the block at the foot of the file nudges it against the page ground, and
+     the block at the foot of the file nudges it against the hardest ground
+     it sits on, and
      buttons keep `--color-interactive` exactly (owner, Codex-mik4h). */
   --color-link: var(--color-interactive);
   --color-link-hover: var(--color-interactive-hover);
@@ -755,9 +756,10 @@
     --color-text-on-accent: rgb(from var(--color-brand-accent) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
     --color-text-on-accent-hover: rgb(from var(--color-brand-accent-hover) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
 
-    /* LINKS AND FOCUS, NUDGED AGAINST THE PAGE (Codex-mik4h; owner: "Adjust it,
-       say so", "A new link colour; buttons keep yours"). Each keeps its hue and
-       moves in LINEAR light only as far as the page needs, the page kit's move
+    /* LINKS AND FOCUS, NUDGED AGAINST THE GROUND (Codex-mik4h; owner: "Adjust
+       it, say so", "A new link colour; buttons keep yours"). Each keeps its hue
+       and moves in LINEAR light only as far as the ground needs, the page kit's
+       move
        (page-builder/kit/styles/schemes.css): darkened on a light ground,
        lightened on a dark one, to 4.59:1 for link text and 3.06:1 for the
        focus outline and halo (the floors plus the kit's 2%). A colour that
@@ -765,9 +767,11 @@
 
        CSS cannot read the brand's channels and the ground's in one expression,
        so the ground arrives as a NUMBER: `--brand-ground-y` (and its dark twin,
-       below), its relative luminance, written beside the `--brand-*` inputs
-       by every writer (brand-editor/ground.ts). Absent, the page is the
-       platform's: the #fafafa page binds in light, the #262626 surface in dark.
+       below), the relative luminance of the HARDEST surface painted from the
+       org's background, the darkest on a light page and the lightest on a dark
+       one (owner: "Every surface"), written beside the `--brand-*` inputs by
+       every writer (brand-editor/ground.ts). Absent, the surfaces are the
+       platform's: its #e5e5e5 panel binds in light, its #525252 panel in dark.
        `--_gw` is 1 on a dark ground (lighten), 0 on a light one (darken), the
        same true step at 0.1791 as the inks. The fragments are declared once:
        this rule and its dark twin match the same element, so each reads that
@@ -777,7 +781,7 @@
        brand-editor/ground-nudge.ts is the TypeScript twin the brand studio's
        pill reports from; ground-nudge-css.test.ts generates these fragments
        from the same function and fails if this text drifts. */
-    --_gy: var(--brand-ground-y, 0.956);
+    --_gy: var(--brand-ground-y, 0.7835);
     --_gw: clamp(0, (0.1791 - var(--_gy)) * 1e12, 1);
     --_gl-t: calc(var(--_gw) * min(1, 4.59 * (var(--_gy) + 0.05) - 0.05) + (1 - var(--_gw)) * max(0, (var(--_gy) + 0.05) / 4.59 - 0.05));
     --_gl-dk: min(1, var(--_gl-t) / max(var(--_lum), 1e-6));
@@ -828,8 +832,8 @@
     --color-text-on-brand-hover: rgb(from var(--color-brand-primary-hover) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
     --color-text-on-accent: rgb(from var(--color-brand-accent) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
     --color-text-on-accent-hover: rgb(from var(--color-brand-accent-hover) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
-    /* The dark page's ground; the light rule's fragments read it. */
-    --_gy: var(--brand-ground-dark-y, 0.0194);
+    /* The dark ground; the light rule's fragments read it. */
+    --_gy: var(--brand-ground-dark-y, 0.0844);
     --color-link: rgb(from var(--color-interactive) var(--_gl-r) var(--_gl-g) var(--_gl-b));
     --color-link-hover: rgb(from var(--color-interactive-hover) var(--_gl-r) var(--_gl-g) var(--_gl-b));
     --color-focus: rgb(from var(--_focus-src) var(--_gm-r) var(--_gm-g) var(--_gm-b));

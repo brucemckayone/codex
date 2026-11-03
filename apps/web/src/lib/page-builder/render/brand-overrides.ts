@@ -138,12 +138,12 @@ export function brandOverridesToCssVars(
     if (light && !(darkProp in out)) out[darkProp] = light;
   }
 
-  // Each background the page sets brings its luminance, so the links and focus
-  // colours org-brand.css nudges read this page's ground (Codex-mik4h). Per
-  // theme, as the backgrounds are: the other theme inherits the org's number.
-  const groundLight = groundLuminance(out['--brand-bg']);
+  // Each background the page sets brings its binding ground, so the links and
+  // focus colours org-brand.css nudges read this page's surfaces (Codex-mik4h).
+  // Per theme, as the backgrounds are: the other theme inherits the org's number.
+  const groundLight = groundLuminance(out['--brand-bg'], 'light');
   if (groundLight) out['--brand-ground-y'] = groundLight;
-  const groundDark = groundLuminance(out['--brand-bg-dark']);
+  const groundDark = groundLuminance(out['--brand-bg-dark'], 'dark');
   if (groundDark) out['--brand-ground-dark-y'] = groundDark;
 
   // ── Fine-tune token overrides (canonical prefix split + null-skip) ──

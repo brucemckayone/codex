@@ -9,21 +9,33 @@
   + org-brand.css): it derives the black/white text the product places on the
   brand colour and reports that pair's ratio. The luminance rule clears AA on
   every brand (floor 4.57:1), so the warn state now shows only for a colour that
-  cannot be read; what else it should warn about is Codex-mik4h. Both the toggle's
-  pressed state and the readout re-derive from the store, so flipping the editing
-  theme instantly re-evaluates against the dark palette. The full verdict lives
-  in the pill's `title` (kept off-screen to stay compact).
+  cannot be read. Both the toggle's pressed state and the readout re-derive from
+  the store, so flipping the editing theme instantly re-evaluates against the
+  dark palette. The full verdict lives in the pill's `title` (kept off-screen to
+  stay compact).
+
+  Below it, the colours the page nudges against its hardest ground (links, the
+  focus outline and halo; `./legibility.ts`, the twin of org-brand.css's rule)
+  are listed with what was moved and how far, and the pill counts them (owner,
+  Codex-mik4h: "Adjust it, say so").
 
   Epic: Codex-cijzb · WP-1.5 + rail-UX overhaul (compacted).
 -->
 <script lang="ts">
   import { BRAND_DEFAULT_PRIMARY, brandEditor } from '$lib/brand-editor';
+  import {
+    LINK_FLOOR,
+    MARK_FLOOR,
+    type Nudge,
+  } from '$lib/brand-editor/ground-nudge';
   import { MoonIcon, SunIcon } from '$lib/components/ui/Icon';
+  import * as m from '$paraglide/messages';
   import {
     AA_CONTRAST_THRESHOLD,
     evaluateBrandContrast,
     formatContrastRatio,
   } from './contrast';
+  import { hoverFill, legibilityFor, movedALot } from './legibility';
 
   const editingTheme = $derived(brandEditor.editingTheme);
 
@@ -34,6 +46,60 @@
   );
 
   const contrast = $derived(evaluateBrandContrast(brandColor));
+
+  // The same inputs the page's nudge reads: the light background sets the
+  // ground, the dark one overrides it in dark, and the fine-tune overrides.
+  const pending = $derived(brandEditor.pending);
+  const legibility = $derived(
+    legibilityFor({
+      theme: editingTheme,
+      brand: brandColor,
+      background: pending?.backgroundColor,
+      backgroundDark: pending?.darkOverrides?.backgroundColor,
+      overrides: pending?.tokenOverrides,
+    })
+  );
+
+  interface Row {
+    label: string;
+    nudge: Nudge;
+    floor: number;
+  }
+  const rows = $derived(
+    [
+      { label: m.brand_legibility_links(), nudge: legibility.link, floor: LINK_FLOOR },
+      { label: m.brand_legibility_focus(), nudge: legibility.focus, floor: MARK_FLOOR },
+      { label: m.brand_legibility_halo(), nudge: legibility.halo, floor: MARK_FLOOR },
+    ].filter((row): row is Row => row.nudge !== null)
+  );
+
+  const hover = $derived.by(() => {
+    const fill = hoverFill(brandColor, editingTheme);
+    return fill ? evaluateBrandContrast(fill) : null;
+  });
+
+  // Dark pages paint the light brand until a dark-mode one is picked.
+  const usesLightBrand = $derived(
+    editingTheme === 'dark' && !pending?.darkOverrides?.primaryColor
+  );
+
+  /** What the page did to one colour, in the words the owner reviewed. */
+  function detail({ nudge, floor }: Row): string {
+    const ratios = {
+      before: formatContrastRatio(nudge.before),
+      after: formatContrastRatio(nudge.after),
+    };
+    if (!nudge.moved) return m.brand_legibility_as_picked({ ratio: ratios.after });
+    const lot = movedALot(nudge, floor);
+    if (nudge.lighten) {
+      return lot
+        ? m.brand_legibility_lightened_lot(ratios)
+        : m.brand_legibility_lightened_little(ratios);
+    }
+    return lot
+      ? m.brand_legibility_darkened_lot(ratios)
+      : m.brand_legibility_darkened_little(ratios);
+  }
 
   // Full sentence for the pill's tooltip / screen readers (the visible pill only
   // shows the ratio + AA badge to stay to one line).
@@ -88,8 +154,48 @@
     <span class="contrast__badge" class:contrast__badge--warn={!contrast.passesAA}>
       {contrast.passesAA ? 'AA' : '!'}
     </span>
+    {#if legibility.adjusted > 0}
+      <span class="contrast__adjusted">
+        {m.brand_legibility_adjusted({ count: legibility.adjusted })}
+      </span>
+    {/if}
     <span class="sr-only">{verdict}</span>
   </div>
+
+  {#if rows.length > 0}
+    <ul class="legibility" aria-label={m.brand_legibility_title()}>
+      {#each rows as row (row.label)}
+        <li class="legibility__row" data-moved={row.nudge.moved}>
+          <span
+            class="legibility__swatch"
+            aria-hidden="true"
+            style:background={row.nudge.hex}
+          ></span>
+          <span class="legibility__text">
+            <span class="legibility__label">{row.label}</span>
+            <span class="legibility__detail">{detail(row)}</span>
+          </span>
+        </li>
+      {/each}
+      {#if hover}
+        <li class="legibility__row">
+          <span
+            class="legibility__swatch"
+            aria-hidden="true"
+            style:background={hover.brand}
+            style:color={hover.text}>Aa</span
+          >
+          <span class="legibility__text">
+            <span class="legibility__label">{m.brand_legibility_hover()}</span>
+            <span class="legibility__detail">{m.brand_legibility_hover_detail()}</span>
+          </span>
+        </li>
+      {/if}
+    </ul>
+    {#if usesLightBrand}
+      <p class="legibility__hint">{m.brand_legibility_set_dark()}</p>
+    {/if}
+  {/if}
 </div>
 
 <style>
@@ -207,6 +313,71 @@
 
   .contrast__badge--warn {
     --_badge-fill: var(--color-warning);
+  }
+
+  /* How many colours the page nudged: the status info chip, whose text holds
+     on its surface in both themes (status.css). */
+  .contrast__adjusted {
+    padding: 0 var(--space-2);
+    font-size: var(--text-xs);
+    font-weight: var(--font-semibold);
+    color: var(--color-status-info-text);
+    background: var(--color-status-info-surface);
+    border: var(--border-width) var(--border-style) var(--color-status-info-border);
+    border-radius: var(--radius-full);
+    white-space: nowrap;
+  }
+
+  /* The checklist takes the row below the toggle and the pill. */
+  .legibility {
+    flex-basis: 100%;
+    display: grid;
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .legibility__row {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .legibility__swatch {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--space-5);
+    height: var(--space-5);
+    border: var(--border-width) var(--border-style) var(--color-border);
+    border-radius: var(--radius-sm);
+    font-size: var(--text-xs);
+    font-weight: var(--font-semibold);
+    line-height: 1;
+  }
+
+  .legibility__text {
+    display: grid;
+    min-width: 0;
+  }
+
+  .legibility__label {
+    font-size: var(--text-xs);
+    font-weight: var(--font-medium);
+    color: var(--color-text);
+  }
+
+  .legibility__detail,
+  .legibility__hint {
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
+  }
+
+  .legibility__hint {
+    flex-basis: 100%;
+    margin: 0;
   }
 
   @supports (color: rgb(from red calc(255 * pow(r / 255, 2)) 0 0)) {

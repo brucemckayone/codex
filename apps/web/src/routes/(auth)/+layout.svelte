@@ -57,7 +57,7 @@
   const brandBackgroundDark = $derived(
     darkColorOverrides?.backgroundColor ?? undefined
   );
-  // The page ground's luminance, as the org layout writes it (Codex-mik4h).
+  // The binding ground's luminance, as the org layout writes it (Codex-mik4h).
   const groundVars = $derived(
     groundLuminanceVars({ background: brandBackground, backgroundDark: brandBackgroundDark })
   );

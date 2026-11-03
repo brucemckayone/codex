@@ -591,8 +591,8 @@ export function injectBrandVars(state: BrandEditorState): void {
     }
   }
 
-  // The page ground's luminance (Codex-mik4h): org-brand.css nudges the link
-  // and focus colours against it. Written last, so the stale-override sweep
+  // The binding ground's luminance (Codex-mik4h): org-brand.css nudges the
+  // link and focus colours against it. Written last, so the stale-override sweep
   // above never clears it.
   const ground = groundLuminanceVars({
     background: state.backgroundColor,

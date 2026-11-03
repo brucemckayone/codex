@@ -88,8 +88,9 @@
   const brandSecondaryDark = $derived(darkColorOverrides?.secondaryColor ?? undefined);
   const brandAccentDark = $derived(darkColorOverrides?.accentColor ?? undefined);
   const brandBackgroundDark = $derived(darkColorOverrides?.backgroundColor ?? undefined);
-  // The page ground's luminance, which org-brand.css nudges links and focus
-  // colours against (Codex-mik4h).
+  // The binding ground's luminance, the hardest surface painted from the
+  // background, which org-brand.css nudges links and focus colours against
+  // (Codex-mik4h).
   const groundVars = $derived(
     groundLuminanceVars({ background: brandBackground, backgroundDark: brandBackgroundDark })
   );

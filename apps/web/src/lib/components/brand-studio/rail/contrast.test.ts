@@ -176,9 +176,9 @@ describe('the rule the stylesheets paint', () => {
     file: string,
     scopes: number
   ) {
-    const inks = (
-      block.match(/--color-[a-z-]+: rgb\(from [^;]+\);/g) ?? []
-    ).filter(
+    const declared: string[] =
+      block.match(/--color-[a-z-]+: rgb\(from [^;]+\);/g) ?? [];
+    const inks = declared.filter(
       (declaration) =>
         !NUDGED.some((name) => declaration.startsWith(`${name}:`))
     );

@@ -3,7 +3,8 @@
  * TypeScript, so the brand studio can say what it moved (Codex-mik4h).
  *
  * The owner chose "Adjust it, say so": keep the colour's hue and move it in
- * LINEAR light only as far as it needs to read on the page ground, the page
+ * LINEAR light only as far as it needs to read on its ground (`ground.ts`:
+ * the hardest surface the colour sits on), the page
  * kit's move (`schemes.css`, "moved only as far as each floor needs"):
  *   - on a light ground (luminance at or above the 0.1791 pivot) the colour
  *     is darkened, its linear channels scaled down to the target luminance;

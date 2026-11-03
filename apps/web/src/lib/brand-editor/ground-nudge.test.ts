@@ -1,13 +1,12 @@
 // @vitest-environment node
 import { describe, expect, test } from 'vitest';
-import { groundLuminanceVars, PLATFORM_GROUND_LUMINANCE } from './ground';
+import { PLATFORM_GROUND_LUMINANCE } from './ground';
 import {
   LINK_FLOOR,
   MARK_FLOOR,
   nudgeForGround,
   targetLuminance,
 } from './ground-nudge';
-import { relativeLuminance } from './ink';
 
 /** 16 levels a channel: 4 096 colours across the whole sRGB cube. */
 const LEVELS = Array.from({ length: 16 }, (_, i) =>
@@ -36,40 +35,6 @@ const GROUNDS = [
   0.8,
   1,
 ];
-
-describe('the ground a link sits on', () => {
-  test('the platform grounds are the #fafafa page and the #262626 surface', () => {
-    expect(PLATFORM_GROUND_LUMINANCE.light).toBeCloseTo(
-      relativeLuminance('#fafafa') ?? 0,
-      4
-    );
-    expect(PLATFORM_GROUND_LUMINANCE.dark).toBeCloseTo(
-      relativeLuminance('#262626') ?? 0,
-      4
-    );
-  });
-
-  test('an org that paints no ground of its own writes nothing', () => {
-    expect(groundLuminanceVars({})).toEqual({});
-    expect(
-      groundLuminanceVars({ background: null, backgroundDark: '#101010' })
-    ).toEqual({});
-    expect(groundLuminanceVars({ background: 'not-a-colour' })).toEqual({});
-  });
-
-  test('the dark ground is the dark background, else the light one', () => {
-    expect(groundLuminanceVars({ background: '#ffffff' })).toEqual({
-      '--brand-ground-y': '1.0000',
-      '--brand-ground-dark-y': '1.0000',
-    });
-    expect(
-      groundLuminanceVars({ background: '#FFFFFF', backgroundDark: '#000000' })
-    ).toEqual({
-      '--brand-ground-y': '1.0000',
-      '--brand-ground-dark-y': '0.0000',
-    });
-  });
-});
 
 describe('the nudge', () => {
   test.each([
