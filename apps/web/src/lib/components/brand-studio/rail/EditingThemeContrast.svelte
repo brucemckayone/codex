@@ -7,7 +7,9 @@
 
   The readout mirrors the product's real auto-contrast rule (see `./contrast.ts`
   + org-brand.css): it derives the black/white text the product places on the
-  brand colour and warns when that pair drops below AA (4.5:1). Both the toggle's
+  brand colour and reports that pair's ratio. The luminance rule clears AA on
+  every brand (floor 4.57:1), so the warn state now shows only for a colour that
+  cannot be read; what else it should warn about is Codex-mik4h. Both the toggle's
   pressed state and the readout re-derive from the store, so flipping the editing
   theme instantly re-evaluates against the dark palette. The full verdict lives
   in the pill's `title` (kept off-screen to stay compact).

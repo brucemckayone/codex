@@ -15,6 +15,8 @@
   @prop {ContentForm} form - The active form instance
   @prop {string | null} [mediaThumbnailUrl] - Auto-extracted thumbnail URL from media
   @prop {string | null} [contentId] - Content ID (required for file upload, null in create mode)
+  @prop {{ title: string; deletedAt: string | Date } | null} [deletedFrame] - The deleted video the
+    saved thumbnail is a frame of (Codex-tqvmx): warned about until another is chosen
 -->
 <script lang="ts">
   import { untrack } from 'svelte';
@@ -27,6 +29,7 @@
   import { toast } from '$lib/components/ui/Toast/toast-store';
   import { coverCropSizes, getThumbnailSrcset } from '$lib/utils/image';
   import type { createContentForm, updateContentForm } from '$lib/remote/content.remote';
+  import DeletedVideoNotice from './DeletedVideoNotice.svelte';
 
   type ContentForm = typeof createContentForm | typeof updateContentForm;
 
@@ -34,9 +37,15 @@
     form: ContentForm;
     mediaThumbnailUrl?: string | null;
     contentId?: string | null;
+    deletedFrame?: { title: string; deletedAt: string | Date } | null;
   }
 
-  const { form, mediaThumbnailUrl = null, contentId = null }: Props = $props();
+  const {
+    form,
+    mediaThumbnailUrl = null,
+    contentId = null,
+    deletedFrame = null,
+  }: Props = $props();
 
   let uploading = $state(false);
   let validationError = $state<string | null>(null);
@@ -167,6 +176,16 @@
   <!-- Always submit the thumbnailUrl value -->
   <input type="hidden" name="thumbnailUrl" value={thumbnailValue} />
 
+  {#if deletedFrame}
+    <div class="frame-missing">
+      <DeletedVideoNotice
+        title={m.studio_content_form_thumbnail_frame_deleted_title()}
+        body={m.studio_content_form_thumbnail_frame_deleted_body()}
+        video={deletedFrame}
+      />
+    </div>
+  {/if}
+
   <div class="thumbnail-zone">
     {#if hasCustomThumbnail}
       <!-- Thumbnail preview with change/remove overlay -->
@@ -270,6 +289,13 @@
 </section>
 
 <style>
+  .frame-missing {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin-bottom: var(--space-3);
+  }
+
   .form-card {
     padding: var(--space-6);
     border-radius: var(--radius-lg);

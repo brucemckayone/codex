@@ -157,6 +157,7 @@ export {
   type MediaUseCounts,
   NotFoundError,
   SlugConflictError,
+  ThumbnailMediaDeletedError,
   TierRequiredToPublishError,
   ValidationError,
   wrapError,
