@@ -17,6 +17,7 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
+  import { filterHref } from '$lib/utils/filter-url';
   import MediaUpload, { type UploadItem } from '$lib/components/studio/MediaUpload.svelte';
   import MediaLibraryCommandBar from '$lib/components/studio/media-library/MediaLibraryCommandBar.svelte';
   import MediaFeatureSlab from '$lib/components/studio/media-library/MediaFeatureSlab.svelte';
@@ -161,38 +162,38 @@
     searchValue = value;
     if (searchDebounce) clearTimeout(searchDebounce);
     searchDebounce = setTimeout(() => {
-      const params = new URLSearchParams(page.url.searchParams);
-      if (value.trim()) {
-        params.set('q', value);
-      } else {
-        params.delete('q');
-      }
-      params.delete('page');
-      const qs = params.toString();
-      void goto(`/studio/media${qs ? `?${qs}` : ''}`, { keepFocus: true, noScroll: true });
+      void goto(filterHref(page.url, { q: value.trim() ? value : null }), {
+        keepFocus: true,
+        noScroll: true,
+      });
     }, 200);
   }
 
   function handleSearchClear() {
     searchValue = '';
-    const params = new URLSearchParams(page.url.searchParams);
-    params.delete('q');
-    params.delete('page');
-    const qs = params.toString();
-    void goto(`/studio/media${qs ? `?${qs}` : ''}`, { keepFocus: true, noScroll: true });
+    // A search still waiting out its debounce would otherwise fire after this
+    // and put the typed text back in the URL, undoing the Clear.
+    if (searchDebounce) {
+      clearTimeout(searchDebounce);
+      searchDebounce = null;
+    }
+    void goto(filterHref(page.url, { q: null }), {
+      keepFocus: true,
+      noScroll: true,
+    });
   }
 
   // ── Filter application ────────────────────────────────────────────────
-  function setUrlParam(key: string, value: string, allSentinel = 'all') {
-    const params = new URLSearchParams(page.url.searchParams);
-    if (value === allSentinel) {
-      params.delete(key);
-    } else {
-      params.set(key, value);
-    }
-    params.delete('page');
-    const qs = params.toString();
-    void goto(`/studio/media${qs ? `?${qs}` : ''}`, { invalidateAll: true });
+  // 'all' is each filter's unfiltered state, so it leaves the URL bare.
+  const FILTER_DEFAULTS: Record<string, string> = {
+    mediaType: 'all',
+    status: 'all',
+  };
+
+  function setUrlParam(key: string, value: string) {
+    void goto(filterHref(page.url, { [key]: value }, FILTER_DEFAULTS), {
+      invalidateAll: true,
+    });
   }
 
   function handleMediaTypeChange(value: MediaType) {
