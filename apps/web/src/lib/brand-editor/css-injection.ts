@@ -401,8 +401,9 @@ const CSS_VAR_MAPPINGS: CssVarMapping[] = [
 /**
  * Override keys that are stored but no longer painted. `text-on-brand` ("On
  * Brand") is retired (owner, Codex-mik4h): every label is chosen from the
- * fill under it, at rest and on hover, and no one colour reads on both, so a
- * saved value is ignored rather than half-applied.
+ * fill under it, at rest and on hover, and no one saved colour is sure to
+ * read on both for every brand, so a saved value is ignored rather than
+ * half-applied.
  */
 const RETIRED_OVERRIDE_KEYS = new Set(['text-on-brand']);
 

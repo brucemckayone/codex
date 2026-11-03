@@ -1051,9 +1051,9 @@
      bottom-left corner. Replaces the bare sparkle so the flag reads as a
      deliberate label, not a stray glyph. The darkened-brand fill is a mix no
      token names, so the label takes the luminance step from that fill itself,
-     as every `--color-*-on-*` ink does (`--_on-fill-step`, light.css): AA
+     as every `--color-on-*` / `--color-text-on-*` ink does (`--_on-fill-step`, light.css): AA
      for every brand. The near-white glyph it had failed on a pale brand, 1.57:1
-     at worst (Codex-mik4h). */
+     with the default accent (Codex-mik4h). */
   .cc__featured-pill {
     --_pill-fill: color-mix(in oklab, var(--color-brand-primary) 78%, var(--color-neutral-900));
     position: absolute;

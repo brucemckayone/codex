@@ -106,7 +106,7 @@
      `r`, `g` and `b` have no value here; the property holds the expression
      unresolved, and they bind to the fill where an ink substitutes it inside
      `rgb(from FILL …)`, as the page kit does with `--_y`. Every
-     `--color-*-on-*` ink is `rgb(from FILL S S S)` with
+     `--color-on-*` / `--color-text-on-*` ink is `rgb(from FILL S S S)` with
      S = `calc(255 * var(--_on-fill-step))`, and so is the label of a fill no
      token names, in the components that paint one (grep `--_on-fill-step`).
      The derivation, the knee and why the ramp is `* 1e12` are in

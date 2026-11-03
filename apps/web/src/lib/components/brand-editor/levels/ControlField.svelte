@@ -188,7 +188,8 @@
 
   /* On the checked track the thumb takes the track's own ink, as Switch's
      does (owner, Codex-mik4h: "Thumb takes the track's ink when checked"):
-     the inverse text colour was 1.30:1 on a pale brand. */
+     the inverse text colour fell to 1:1 on a white brand in light, and on a
+     near-black one in dark. */
   .hero-fx__toggle--on .hero-fx__toggle-thumb {
     transform: translateX(var(--space-5));
     background: var(--color-on-interactive);

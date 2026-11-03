@@ -204,8 +204,8 @@
     left: 32%;
     width: 25%;
     height: 50%;
-    /* The fill's own ink: the surface colour was 1.30:1 on a pale brand
-       (Codex-mik4h). */
+    /* The fill's own ink: the surface colour fell to 1:1 on a white brand,
+       and on a dark one in dark (Codex-mik4h). */
     border: solid var(--color-on-interactive);
     border-width: 0 var(--border-width-thick) var(--border-width-thick) 0;
     transform: rotate(45deg);

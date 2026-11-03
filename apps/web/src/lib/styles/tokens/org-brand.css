@@ -685,9 +685,10 @@
  * numbers in 0–255, hence the `/ 255`, and each is clamped to 0–255 first: a
  * hovered fill pushed past black or white is out of gamut, and a negative
  * channel turned the power into NaN (unclamped, 1 605 of the lattice's 8 192
- * hovered fills, all light-theme and darkened, took a NaN and so black ink;
- * about 890 of them needed white, as low as 1.11:1; none after, and an
- * in-gamut fill is unchanged).
+ * hovered fills, all light-theme and darkened, took a NaN and so black ink,
+ * 878 of them where white was needed, as low as 1.11:1; and 15 dark-theme
+ * fills lightened past 255 took the wrong ink, as low as 4.21:1. None after,
+ * and an in-gamut fill is unchanged).
  *
  * WHY @supports RATHER THAN EDITING THE DECLARATIONS ABOVE. Relative colour
  * needs Chrome 119+ / Firefox 128+ / Safari 16.4+ (this file's header) but

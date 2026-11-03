@@ -15,9 +15,9 @@
  * The holds are read from the stylesheets and run through a model of the
  * engines' resolution (OKLCH to sRGB, clipped to the gamut). The model was
  * calibrated against Chrome 156 and WebKit 26 painting the real stylesheets
- * over the same 4 096-colour lattice: the same worst cases to two decimals, and failure
- * counts within a few colours at each boundary. A hold loosened in the CSS
- * fails here.
+ * over the same 4 096-colour lattice: the same worst cases within 0.005,
+ * and failure counts within a few colours at each boundary. A hold loosened
+ * in the CSS fails here.
  */
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
