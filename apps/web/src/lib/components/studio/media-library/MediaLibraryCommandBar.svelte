@@ -18,6 +18,7 @@
   presentational plus parent-owned search debounce.
 -->
 <script lang="ts">
+  import { tick } from 'svelte';
   import * as m from '$paraglide/messages';
   import { UploadIcon, SearchIcon, XIcon } from '$lib/components/ui/Icon';
   import Badge from '$lib/components/ui/Badge/Badge.svelte';
@@ -33,9 +34,11 @@
     loading?: boolean;
     /**
      * The live status socket (Codex-l2c48.7). Shown while it is live, or
-     * while the tiles may lag (reconnecting, polling); hidden otherwise.
+     * while the tiles may lag (reconnecting, polling, paused); hidden otherwise.
      */
     live?: MediaStatusConnection;
+    /** Refresh, offered once the fallback has paused (Codex-a6ofh.1.3). */
+    onLiveResume?: () => void;
     /** Active media-type filter */
     mediaType: MediaTypeFilter;
     /** Active status filter */
@@ -66,6 +69,7 @@
     onSearchClear,
     onMediaTypeChange,
     onStatusChange,
+    onLiveResume,
   }: Props = $props();
 
   // TODO i18n — "studio_media_eyebrow" = "Studio"
@@ -95,11 +99,23 @@
     live: () => m.media_live_live(),
     reconnecting: () => m.media_live_reconnecting(),
     polling: () => m.media_live_polling(),
+    // The fallback spent its few refetches: nothing runs until Refresh.
+    paused: () => m.media_live_paused(),
     // The session ended, or the ticket was refused twice in a row: nothing
     // reconnects until the page loads again.
     stopped: () => m.media_live_stopped(),
   };
   const liveLabel = $derived(LIVE_LABELS[live]);
+
+  let liveStatus = $state<HTMLElement | null>(null);
+
+  async function resumeLive() {
+    onLiveResume?.();
+    // Refresh goes once the store leaves 'paused': keep focus on the status
+    // it changed, never <body> (WCAG 2.4.3).
+    await tick();
+    liveStatus?.focus();
+  }
 
   // TODO i18n — studio_media_count_label = "items"
   const countLabel = 'items';
@@ -125,9 +141,17 @@
       <span class="count-label">{countLabel}</span>
     </span>
     {#if liveLabel}
-      <Badge class="live-chip" variant={live === 'live' ? 'success' : 'warning'} data-state={live}>
-        {liveLabel()}
-      </Badge>
+      <!-- A status region: a screen reader hears it pause, reconnect, recover. -->
+      <div class="live-status" role="status" tabindex="-1" bind:this={liveStatus}>
+        <Badge class="live-chip" variant={live === 'live' ? 'success' : 'warning'} data-state={live}>
+          {liveLabel()}
+        </Badge>
+      </div>
+      {#if live === 'paused' && onLiveResume}
+        <button type="button" class="live-resume" onclick={resumeLive}>
+          {m.media_live_resume()}
+        </button>
+      {/if}
     {/if}
   </div>
 
@@ -348,6 +372,40 @@
 
   @keyframes live-chip-blink {
     50% { opacity: 0.2; }
+  }
+
+  .live-status {
+    display: inline-flex;
+    border-radius: var(--radius-sm);
+  }
+
+  .live-status:focus {
+    outline: none;
+  }
+
+  .live-status:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-0-5);
+  }
+
+  .live-resume {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    padding: var(--space-0-5) var(--space-1);
+    font: inherit;
+    font-size: var(--text-xs);
+    font-weight: var(--font-medium);
+    color: var(--color-interactive);
+    text-decoration: underline;
+    text-underline-offset: var(--space-0-5);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+  }
+
+  .live-resume:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-0-5);
   }
 
   /* ── Dual segmented filters ─────────────────────────────── */

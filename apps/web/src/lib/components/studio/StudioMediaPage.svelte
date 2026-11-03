@@ -258,7 +258,13 @@
   }
 
   // A finished upload, whichever page started it, belongs in this list.
-  onMount(() => uploadQueue.onComplete(() => refreshAfterChange()));
+  // Paused, it is the creator's own work to watch: resume() refetches too.
+  onMount(() =>
+    uploadQueue.onComplete(() => {
+      if (mediaStatus.connection === 'paused') mediaStatus.resume('action');
+      else refreshAfterChange();
+    })
+  );
 
   function handleEdit(id: string) {
     const media = data.mediaItems.find((item) => item.id === id);
@@ -340,6 +346,7 @@
   <MediaLibraryCommandBar
     total={totalItems}
     live={mediaStatus.connection}
+    onLiveResume={() => mediaStatus.resume()}
     mediaType={activeMediaType}
     status={activeStatus}
     searchValue={searchValue}

@@ -174,7 +174,9 @@
       await retryTranscoding(media.id);
       // What happens next arrives over the socket; without one, the list
       // (and its refetch drops the held `failed` this tile still shows).
-      if (mediaStatus.connection !== 'live') mediaStatus.refreshList();
+      // Paused, the creator's Try again asks to watch it: start again.
+      if (mediaStatus.connection === 'paused') mediaStatus.resume('action');
+      else if (mediaStatus.connection !== 'live') mediaStatus.refreshList();
     } catch (error) {
       const status = remoteErrorStatus(error);
       // A 4xx refused this retry (the state moved, no tries left); anything

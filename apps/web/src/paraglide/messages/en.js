@@ -6899,6 +6899,22 @@ export const media_live_stopped = () => `Reload for live updates`
 
 
 /**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_live_paused = () => `Live progress paused`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_live_resume = () => `Refresh`
+
+
+/**
  * @param {{ title: NonNullable<unknown> }} params
  * @returns {string}
  */
