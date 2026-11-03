@@ -3679,5 +3679,6 @@
   "pricing_move_landed_billing": "Your switch to monthly billing has already happened at your renewal, so you're billed monthly now.",
   "account_billing_change_survives_cancel": "If you reactivate, you'll still switch to monthly billing on {date}, as you chose.",
   "subscription_refusal_scheduled_elsewhere": "This subscription can't be changed here just now. Please contact support and quote this reference: {errorId}.",
-  "subscription_refusal_scheduled_elsewhere_no_ref": "This subscription can't be changed here just now. Please contact support."
+  "subscription_refusal_scheduled_elsewhere_no_ref": "This subscription can't be changed here just now. Please contact support.",
+  "player_preview_watch_again": "Watch preview again"
 }

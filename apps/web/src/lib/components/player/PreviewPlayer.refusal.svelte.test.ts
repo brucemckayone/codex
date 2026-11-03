@@ -57,11 +57,18 @@ async function buyAndGet(result: Record<string, unknown>) {
       previewUrl: 'https://cdn.example.test/c1/preview/master.m3u8',
       contentId: 'c1',
       contentTitle: 'Rootwork',
-      accessState: { status: 'locked', reason: 'purchase_required' },
-      canPurchase: true,
+      end: {
+        line: null,
+        action: { kind: 'buy', label: 'Purchase for £4.99' },
+        signIn: null,
+      },
     },
   });
   await new Promise((resolve) => setTimeout(resolve, 0));
+  // Buy is on the end screen, once the clip has played out.
+  document
+    .querySelector('.preview-player video')
+    ?.dispatchEvent(new Event('ended'));
   flushSync();
   expect(alert()).toBeNull();
   document
