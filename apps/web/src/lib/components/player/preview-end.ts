@@ -60,6 +60,8 @@ export interface PreviewEndGate {
   needsSubscription: boolean;
   needsPurchase: boolean;
   isFree: boolean;
+  /** Audio says "listen" where video says "watch", as the paywall does. */
+  isAudio: boolean;
   /** Pricing with the item marked: `/pricing?for=…&returnTo=…` (U10). */
   pricingHref: string;
   /** `/login?redirect=…`, back to this item. */
@@ -126,7 +128,9 @@ export function describePreviewEnd(gate: PreviewEndGate): PreviewEnd {
     return end({
       kind: 'link',
       href: '/login',
-      label: m.content_detail_signin_watch_cta(),
+      label: gate.isAudio
+        ? m.content_detail_signin_listen_cta()
+        : m.content_detail_signin_watch_cta(),
     });
   }
   return end({ kind: 'none' });

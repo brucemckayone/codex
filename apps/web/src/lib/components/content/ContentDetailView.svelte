@@ -613,6 +613,7 @@
       needsSubscription,
       needsPurchase,
       isFree,
+      isAudio,
       pricingHref,
       signInHref: `/login?redirect=${encodeURIComponent(page.url.pathname)}`,
       purchaseLabel: m.checkout_purchase_button({ price: displayPrice(priceCents) }),
