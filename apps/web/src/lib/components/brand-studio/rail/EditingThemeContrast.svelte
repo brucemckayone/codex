@@ -195,8 +195,9 @@
     font-size: var(--text-xs);
     font-weight: var(--font-bold);
     /* No token names an ink for the status fills, so the label takes the
-       luminance step from its own fill, as every `--color-on-*` / `--color-text-on-*` ink does
-       (`--_on-fill-step`, light.css). It was the brand's ink (Codex-mik4h). */
+       luminance step from its own fill, as every `--color-on-*` /
+       `--color-text-on-*` ink does (`--_on-fill-step`, light.css). It was the
+       brand's ink (Codex-mik4h). */
     --_badge-fill: var(--color-success);
     color: oklch(from var(--_badge-fill) clamp(0, (0.62 - l) * 1000, 1) 0 0);
     background: var(--_badge-fill);

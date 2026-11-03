@@ -644,7 +644,8 @@
      pill is painted with. In dark theme they diverge, so the active pill took
      near-black text while the Apply button beside it — same fill — took white.
      On a blue brand in dark theme that was near-black (#171717) on #2563EB at
-     3.47:1, a WCAG AA fail. The hover fill takes its own ink for the same reason. */
+     3.47:1, a WCAG AA fail. The hover fill takes its own ink for the same
+     reason. */
   :global(.filter-drawer__pill.is-active) {
     color: var(--color-on-interactive);
     background: var(--color-interactive);
