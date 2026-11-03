@@ -3066,6 +3066,47 @@ describe('SubscriptionService', () => {
         expect(params.proration_date).toBeUndefined();
       });
 
+      // Cycle 2, L3: invoiced at once, even when the year bills no more than
+      // the month (a tier saved before "Refuse yearly below monthly"), so the
+      // write is prorated as the preview was.
+      it('is invoiced at once even when the year costs no more than the month', async () => {
+        const { org, tier1, tier2 } = await createFullOrg(
+          `recheck-cheap-year-${target}`
+        );
+        const tier = target === 1 ? tier1 : tier2;
+        // The target's year (£4.50) is below the member's month (£4.99): the
+        // old rule's create_prorations case. Written to the row directly, as
+        // the service now refuses to save it.
+        await db
+          .update(subscriptionTiers)
+          .set({ priceAnnual: 450 })
+          .where(eq(subscriptionTiers.id, tier.id));
+        await db
+          .insert(subscriptions)
+          .values(
+            createTestSubscriptionInput(otherCreatorId, org.id, tier1.id)
+          );
+        stubPreviewFigures(0, [-8767, 1500]);
+        const preview = await service.previewTierChange(
+          otherCreatorId,
+          org.id,
+          tier.id,
+          'year'
+        );
+
+        await service.changeTier(
+          otherCreatorId,
+          org.id,
+          tier.id,
+          'year',
+          preview.prorationDate,
+          preview.quote
+        );
+
+        const params = writes()[0]![1] as Record<string, unknown>;
+        expect(params.proration_behavior).toBe('always_invoice');
+      });
+
       it('is refused without the quote', async () => {
         const { org, tierId, preview } = await previewed('no-quote');
 

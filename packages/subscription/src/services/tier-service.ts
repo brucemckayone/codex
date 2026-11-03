@@ -77,6 +77,7 @@ import {
 } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
+  assertYearlyNotBelowMonthly,
   ConnectAccountNotReadyError,
   TierHasOnlyItemsError,
   TierHasSubscribersError,
@@ -250,6 +251,7 @@ export class TierService extends BaseService {
     orgId: string,
     input: CreateTierInput
   ): Promise<SubscriptionTier> {
+    assertYearlyNotBelowMonthly(input);
     // Validate Connect account is ready
     await this.requireActiveConnect(orgId);
 
@@ -545,6 +547,11 @@ export class TierService extends BaseService {
   ): Promise<SubscriptionTier> {
     try {
       const existing = await this.getTierOrThrow(tierId, orgId);
+      // Either price alone is checked against the stored other one.
+      assertYearlyNotBelowMonthly({
+        priceMonthly: input.priceMonthly ?? existing.priceMonthly,
+        priceAnnual: input.priceAnnual ?? existing.priceAnnual,
+      });
 
       // Check if prices changed — need new Stripe Prices
       const monthlyChanged =

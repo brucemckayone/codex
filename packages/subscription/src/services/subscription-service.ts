@@ -278,12 +278,18 @@ interface TierChangePlan {
 
 /**
  * How a change that happens now is prorated. An upgrade charges the
- * part-period difference; a same-price switch moves no money (Q4); a switch
- * of billing period is as before: a charge when the new bill is dearer,
- * otherwise a credit for the unused time.
+ * part-period difference; a same-price switch moves no money (Q4). A switch
+ * into yearly starts a new period today (.96) and is always invoiced at once,
+ * the unused month against the year (review C1 cycle 2, L3): with the year
+ * never below the month (`YearlyPriceBelowMonthlyError`) that bill is never
+ * negative, so nothing is left as credit on the member's one customer. Any
+ * other switch of billing period is as before.
  */
 function nowProration(
-  plan: Pick<TierChangePlan, 'kind' | 'newRecurringAmount' | 'sub' | 'move'>
+  plan: Pick<
+    TierChangePlan,
+    'kind' | 'newRecurringAmount' | 'sub' | 'move' | 'billingInterval'
+  >
 ): 'always_invoice' | 'create_prorations' | 'none' {
   if (plan.kind === 'upgrade') return 'always_invoice';
   if (plan.kind === 'lateral' || plan.kind === 'downgrade') return 'none';
@@ -293,6 +299,7 @@ function nowProration(
     const paid = plan.move?.holdAmountCents ?? plan.sub.amountCents;
     return plan.newRecurringAmount > paid ? 'always_invoice' : 'none';
   }
+  if (startsNewPeriod(plan.kind, plan.billingInterval)) return 'always_invoice';
   return plan.newRecurringAmount > plan.sub.amountCents
     ? 'always_invoice'
     : 'create_prorations';
