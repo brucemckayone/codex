@@ -103,6 +103,19 @@ function pendingPlanOf(
     : null;
 }
 
+/**
+ * A waiting move shows only while the plan carries on to the renewal it
+ * lands on. A cancelling plan ends there and the move goes with it, so the
+ * paywall must not say "Yours from {date}" (waiting-move.html state 6; the
+ * pricing page's `moveShown` is gated the same way). The live entry's status
+ * is already `cancelling`; the server's row says it with `cancelAtPeriodEnd`.
+ */
+function moveStands(
+  sub: { status?: string; cancelAtPeriodEnd?: boolean | null } | null
+): boolean {
+  return sub?.status === 'active' && !sub.cancelAtPeriodEnd;
+}
+
 export function useSubscriptionContext(
   getParams: () => UseSubscriptionContextParams
 ) {
@@ -160,7 +173,9 @@ export function useSubscriptionContext(
                   ? { id: sub.tier.id, name: sub.tier.name }
                   : null,
                 currentPeriodEnd: sub?.currentPeriodEnd ?? null,
-                pendingPlan: pendingPlanOf(sub?.pendingTierChange),
+                pendingPlan: moveStands(sub)
+                  ? pendingPlanOf(sub?.pendingTierChange)
+                  : null,
               };
               resolvedTiers = ctx.tiers ?? [];
               tiersStatus = ctx.tiersFailed ? 'failed' : 'ready';
@@ -216,7 +231,9 @@ export function useSubscriptionContext(
         currentPlan: { id: sub.tier.id, name: sub.tier.name },
         currentPeriodEnd: sub.currentPeriodEnd ?? null,
         // An entry written before the field existed reads as nothing waiting.
-        pendingPlan: pendingPlanOf(sub.pendingTierChange),
+        pendingPlan: moveStands(sub)
+          ? pendingPlanOf(sub.pendingTierChange)
+          : null,
       };
     }
     return promiseSubCtx;
