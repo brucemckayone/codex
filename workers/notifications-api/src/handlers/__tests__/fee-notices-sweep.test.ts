@@ -30,12 +30,21 @@ import {
 } from '@codex/database/schema';
 import type { ObservabilityClient } from '@codex/observability';
 import {
+  affectedPayees,
   dbFeeVersionReader,
   feeRiseStartAfter,
   resolveFeesAt,
 } from '@codex/payments';
 import type { Bindings } from '@codex/shared-types';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
 import { FEE_RULE_SENTENCE, formatPercent } from '../fee-notice-copy';
 import {
   FEE_SENDS_TIME_BUDGET_MS,
@@ -43,6 +52,14 @@ import {
   type FeeNoticeDelivery,
   runFeeNoticesSweep,
 } from '../fee-notices-sweep';
+
+// Who a rise affects, real unless a test makes one read of it fail.
+vi.mock('@codex/payments', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@codex/payments')>();
+  return { ...actual, affectedPayees: vi.fn(actual.affectedPayees) };
+});
+const { affectedPayees: realAffectedPayees } =
+  await vi.importActual<typeof import('@codex/payments')>('@codex/payments');
 
 // 3 and 4 Nov 2026, 08:00 London (GMT): two mornings' runs.
 const NOV_3 = new Date('2026-11-03T08:00:00Z');
@@ -62,6 +79,32 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
   beforeAll(() => {
     ({ db, cleanup } = createPerRequestDbClient(env as unknown as Bindings));
   });
+
+  afterEach(() => {
+    vi.mocked(affectedPayees).mockImplementation(realAffectedPayees);
+  });
+
+  /**
+   * The next read of who a rise affects made on the step's own client fails
+   * (a list is made in a transaction, so it reads on another).
+   */
+  function failOnePayeeRead() {
+    let failed = false;
+    vi.mocked(affectedPayees).mockImplementation((client, ...rest) => {
+      if (!failed && client === db) {
+        failed = true;
+        return Promise.reject(new Error('payee read timed out'));
+      }
+      return realAffectedPayees(client, ...rest);
+    });
+  }
+
+  const errorsFor = (changeId: string, startsWith: string) =>
+    obsLog.error.mock.calls.filter(
+      ([message, context]) =>
+        String(message).startsWith(startsWith) &&
+        (context as { changeId?: string }).changeId === changeId
+    );
 
   afterAll(async () => {
     if (logIds.length > 0) {
@@ -722,5 +765,60 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
       updatedAt: NOV_4,
     });
     expect((await oldRow(begun.organizationId))?.version).toBe(2);
+  });
+
+  it('one failed read of who a rise affects is one alert, and its claims go back untried', async () => {
+    const una = await person('Una Read');
+    const vic = await person('Vic Read');
+    const changeId = await rise(await organisation(una.id, vic.id));
+    failOnePayeeRead();
+    const mailer = mailerAnswering();
+
+    const day1 = await run(changeId, NOV_3, mailer);
+
+    expect(day1).toMatchObject({ listed: 2, sent: 0, givenBack: 2 });
+    expect(mailer).not.toHaveBeenCalled();
+    expect(
+      errorsFor(changeId, 'fee step: could not read who a fee rise affects')
+    ).toHaveLength(1);
+    expect(errorsFor(changeId, 'fee step: one notice failed')).toEqual([]);
+    for (const who of [una, vic]) {
+      expect(await noticeOf(changeId, who.id)).toMatchObject({
+        state: 'due',
+        attempts: 0,
+        attemptedAt: null,
+      });
+    }
+
+    // The next morning they go.
+    expect(await run(changeId, NOV_4, mailerAnswering())).toMatchObject({
+      sent: 2,
+      givenBack: 0,
+    });
+  });
+
+  it('a failed read is not kept: after the joiners step misses it, the sends read again', async () => {
+    const wes = await person('Wes Read');
+    const xia = await person('Xia Read');
+    const changeId = await rise(await organisation(wes.id, xia.id));
+    await run(
+      changeId,
+      NOV_3,
+      mailerAnswering({
+        [wes.id]: { accepted: false, status: 400 },
+        [xia.id]: { accepted: false, status: 400 },
+      })
+    );
+    failOnePayeeRead();
+
+    const day2 = await run(changeId, NOV_4, mailerAnswering());
+
+    expect(
+      errorsFor(changeId, 'fee step: joiners could not be added')
+    ).toHaveLength(1);
+    expect(day2).toMatchObject({ sent: 2, givenBack: 0 });
+    expect(
+      errorsFor(changeId, 'fee step: could not read who a fee rise affects')
+    ).toEqual([]);
   });
 });

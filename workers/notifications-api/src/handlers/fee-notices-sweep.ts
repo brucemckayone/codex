@@ -399,10 +399,16 @@ function payeesOf(
 ): Promise<Map<string, AffectedPayee>> {
   let found = ctx.payees.get(change.id);
   if (!found) {
-    found = affectedPayees(ctx.db, change, ctx.now).then(
+    const reading = affectedPayees(ctx.db, change, ctx.now).then(
       (list) => new Map(list.map((p) => [p.userId, p]))
     );
-    ctx.payees.set(change.id, found);
+    // A failed read is never kept: the next part reads again, rather than
+    // every notice of the change failing on the one rejection.
+    reading.catch(() => {
+      if (ctx.payees.get(change.id) === reading) ctx.payees.delete(change.id);
+    });
+    ctx.payees.set(change.id, reading);
+    found = reading;
   }
   return found;
 }
@@ -882,8 +888,8 @@ async function sendOne(
  * `unknown` is still checked against the email log from its real last try.
  * The next morning claims them.
  */
-async function giveBack(ctx: SweepContext, unsent: Claimed[]): Promise<void> {
-  if (unsent.length === 0) return;
+async function giveBack(ctx: SweepContext, unsent: Claimed[]): Promise<number> {
+  if (unsent.length === 0) return 0;
   const back = await ctx.db.execute(sql`
     UPDATE ${feeChangeNotices} AS n
        SET attempts = n.attempts - 1, attempted_at = g.prev,
@@ -903,11 +909,46 @@ async function giveBack(ctx: SweepContext, unsent: Claimed[]): Promise<void> {
        AND n.state IN ('due', 'failed', 'unknown')
     RETURNING n.id
   `);
-  ctx.result.givenBack = back.rows.length;
-  ctx.obs.warn('fee step: the send budget ran out; the rest go tomorrow', {
-    givenBack: back.rows.length,
-    sent: ctx.result.sent,
-  });
+  ctx.result.givenBack += back.rows.length;
+  return back.rows.length;
+}
+
+/**
+ * Who each change affects, read once before any of its emails: an
+ * announcement or a smaller-rise email needs it. A change whose read fails
+ * has its claims given back, untried, with one alert naming it, not one per
+ * notice: they go the next morning.
+ */
+async function withoutUnreadChanges(
+  ctx: SweepContext,
+  claimed: Claimed[],
+  changes: Map<string, FeeChangeRow>
+): Promise<Claimed[]> {
+  const unread = new Set<string>();
+  for (const changeId of new Set(
+    claimed.filter((n) => n.kind !== 'cancelled').map((n) => n.changeId)
+  )) {
+    const change = changes.get(changeId);
+    if (!change) continue;
+    try {
+      await payeesOf(ctx, change);
+    } catch (error) {
+      unread.add(changeId);
+      const ofChange = claimed.filter((n) => n.changeId === changeId);
+      const givenBack = await giveBack(ctx, ofChange);
+      ctx.result.errors += 1;
+      ctx.obs.error(
+        'fee step: could not read who a fee rise affects; its emails go tomorrow',
+        {
+          errorId: crypto.randomUUID(),
+          changeId,
+          givenBack,
+          error: messageForLog(error),
+        }
+      );
+    }
+  }
+  return claimed.filter((n) => !unread.has(n.changeId));
 }
 
 async function sendDue(ctx: SweepContext): Promise<void> {
@@ -919,14 +960,19 @@ async function sendDue(ctx: SweepContext): Promise<void> {
     .from(feeChanges)
     .where(inArray(feeChanges.id, changeIds));
   const changes = new Map(rows.map((c) => [c.id, c]));
-  const people = await recipientsOf(ctx, claimed);
-  for (let i = 0; i < claimed.length; i += SEND_CONCURRENCY) {
+  const sendable = await withoutUnreadChanges(ctx, claimed, changes);
+  const people = await recipientsOf(ctx, sendable);
+  for (let i = 0; i < sendable.length; i += SEND_CONCURRENCY) {
     if (ctx.clock() >= ctx.sendsUntil) {
-      await giveBack(ctx, claimed.slice(i));
+      const givenBack = await giveBack(ctx, sendable.slice(i));
+      ctx.obs.warn('fee step: the send budget ran out; the rest go tomorrow', {
+        givenBack,
+        sent: ctx.result.sent,
+      });
       return;
     }
     await Promise.all(
-      claimed.slice(i, i + SEND_CONCURRENCY).map(async (notice) => {
+      sendable.slice(i, i + SEND_CONCURRENCY).map(async (notice) => {
         try {
           await sendOne(ctx, notice, changes, people);
         } catch (error) {
