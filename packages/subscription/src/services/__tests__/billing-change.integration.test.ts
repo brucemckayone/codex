@@ -984,6 +984,52 @@ describe('leaving yearly billing waits for the year (Codex-2hxff.97)', () => {
     });
   });
 
+  // Review C1 cycle 2, L1: a Cancel that lands between the backstop's read
+  // and its from_subscription create is put back, and no schedule is set.
+  describe('a Cancel during the backstop', () => {
+    it("the create finds the subscription set to cancel: the schedule goes, the cancel is back, and it's skipped", async () => {
+      const { org, pro } = await hollowOak('backstop-cancel-race');
+      const { userId, row } = await yearlyMember(org.id, pro);
+      await service.changeTier(userId, org.id, pro.id, 'month');
+      // The schedule lost (as a reactivate whose create failed leaves it).
+      const lost = scheduleOf(row.stripeSubscriptionId);
+      lost.status = 'released';
+      liveOf(row.stripeSubscriptionId).schedule = null;
+      await db
+        .update(subscriptions)
+        .set({ stripeScheduleId: null })
+        .where(eq(subscriptions.id, row.id));
+      // The backstop reads the subscription not cancelling; the member's
+      // Cancel lands right after, before the create.
+      const retrieve = vi.mocked(fake.stripe.subscriptions.retrieve);
+      const real = retrieve.getMockImplementation();
+      let raced = false;
+      retrieve.mockImplementation((async (id: string) => {
+        if (id === row.stripeSubscriptionId && !raced) {
+          raced = true;
+          const before = structuredClone(liveOf(id));
+          liveOf(id).cancel_at_period_end = true;
+          return before;
+        }
+        return real?.(id);
+      }) as unknown as typeof fake.stripe.subscriptions.retrieve);
+      fake.writes.length = 0;
+
+      const result = await service.runTierMoveBackstop({ limit: 50 });
+
+      expect(result.rescheduled).toBe(0);
+      expect(fake.writes).toEqual([
+        'schedule:create',
+        'schedule:release',
+        'cancel:true',
+      ]);
+      const after = liveOf(row.stripeSubscriptionId);
+      expect(after.schedule).toBeNull();
+      expect(after.cancel_at_period_end).toBe(true);
+      expect((await rowOf(row.id)).stripeScheduleId).toBeNull();
+    });
+  });
+
   // ─── B: a cheaper plan on monthly, one waiting change (Q3) ─────────────
 
   describe('B: Pro yearly to Basic monthly', () => {

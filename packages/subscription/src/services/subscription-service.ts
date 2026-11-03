@@ -4392,6 +4392,12 @@ export class SubscriptionService extends BaseService {
         }
       );
     }
+    if (scheduleId === null && !planNow) {
+      // Set to cancel since the read (cycle 2, L1): nothing was set, and the
+      // record goes, as for any change refused while cancelling.
+      await this.putBackRecord(plan, record, putBack, effectiveProrationDate);
+      throw new TierChangeCancellingError(sub.organizationId);
+    }
 
     const split = await this.computeSubscriptionSplit(
       sub.organizationId,
@@ -4454,7 +4460,9 @@ export class SubscriptionService extends BaseService {
    * `onLeftAttached` runs: the caller then keeps the record beside it, so
    * the untagged schedule still reads as ours (`isOurSchedule`; review C1,
    * SF-3). Never while the subscription is set to cancel:
-   * `from_subscription` would undo the cancel (proof P10). Returns its id.
+   * `from_subscription` would undo the cancel (proof P10), so a cancel that
+   * lands after the caller's read is put back and nothing is set (null).
+   * Returns its id.
    */
   private async setBillingSchedule(args: {
     subscriptionId: string;
@@ -4467,7 +4475,7 @@ export class SubscriptionService extends BaseService {
     stamp: number | string;
     /** The update failed and so did letting go of the schedule made for it. */
     onLeftAttached?: () => void;
-  }): Promise<string> {
+  }): Promise<string | null> {
     const created = args.schedule
       ? null
       : await this.stripe.subscriptionSchedules.create(
@@ -4476,6 +4484,43 @@ export class SubscriptionService extends BaseService {
             idempotencyKey: `billing-sched_${args.subscriptionId}_${args.moveAt}_${args.stamp}`,
           }
         );
+    // A Cancel that landed after the caller read the subscription (review
+    // C1 cycle 2, L1): `from_subscription` moved it onto the schedule
+    // (`end_behavior: 'cancel'`) and turned the subscription's own flag off
+    // (proof P10), and the phase update would clear it for good. A member
+    // set to cancel gets no schedule: let go of it, put the cancel back, and
+    // set nothing (null). A failure here is one alert: the cancel may be lost.
+    if (created?.end_behavior === 'cancel') {
+      try {
+        await this.releaseSchedule(
+          created,
+          `billing-undo-cancelled_${created.id}`
+        );
+        await this.stripe.subscriptions.update(
+          args.stripeSubscriptionId,
+          { cancel_at_period_end: true },
+          { idempotencyKey: `billing-recancel_${created.id}` }
+        );
+      } catch (error) {
+        this.obs.error(
+          'billing_change.cancel_restore_failed: a schedule was made from a subscription set to cancel, and putting the cancel back failed; the member may now renew (support: release the schedule if still attached, and set the subscription to cancel at its period end)',
+          {
+            errorId: crypto.randomUUID(),
+            subscriptionId: args.subscriptionId,
+            stripeSubscriptionId: args.stripeSubscriptionId,
+            stripeScheduleId: created.id,
+            error: describeThrown(error),
+          }
+        );
+        throw error;
+      }
+      this.obs.info('billing_change.skipped_cancelling', {
+        subscriptionId: args.subscriptionId,
+        stripeSubscriptionId: args.stripeSubscriptionId,
+        stripeScheduleId: created.id,
+      });
+      return null;
+    }
     const base = args.schedule ?? created;
     if (!base) {
       throw new InternalServiceError('No subscription schedule to update', {
@@ -5049,6 +5094,9 @@ export class SubscriptionService extends BaseService {
         // failure is a new attempt, not a replay of the failed one.
         stamp: `${reason}-${Date.now()}`,
       });
+      // Set to cancel since the read (cycle 2, L1): the cancel is back, and
+      // a cancelling subscription gets no schedule until it is reactivated.
+      if (scheduleId === null) return 'skipped';
       await this.db
         .update(subscriptions)
         .set({ stripeScheduleId: scheduleId, updatedAt: new Date() })
