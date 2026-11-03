@@ -13,12 +13,14 @@
  * the row at a 404, so an own-folder URL that differs from the row is ignored.
  */
 
-import { content as contentTable } from '@codex/database/schema';
+import { content as contentTable, mediaItems } from '@codex/database/schema';
 import {
+  createTestMediaItemInput,
   createUniqueSlug,
   type Database,
   seedTestUsers,
   setupTestDatabase,
+  takeFirst,
   teardownTestDatabase,
 } from '@codex/test-utils';
 import { eq } from 'drizzle-orm';
@@ -31,6 +33,8 @@ describe('ContentService.updateReportingDroppedThumbnail', () => {
   let db: Database;
   let service: ContentService;
   let creatorId: string;
+  // A frame must be of the creator's own video (Codex-p0uuc).
+  let posterMediaId: string;
 
   beforeAll(async () => {
     db = setupTestDatabase();
@@ -40,9 +44,18 @@ describe('ContentService.updateReportingDroppedThumbnail', () => {
       r2PublicUrlBase: CDN,
     });
     [creatorId] = await seedTestUsers(db, 1);
+    posterMediaId = takeFirst(
+      await db
+        .insert(mediaItems)
+        .values(createTestMediaItemInput(creatorId, { status: 'ready' }))
+        .returning({ id: mediaItems.id })
+    ).id;
   });
 
   afterAll(async () => {
+    if (db && posterMediaId) {
+      await db.delete(mediaItems).where(eq(mediaItems.id, posterMediaId));
+    }
     await teardownTestDatabase();
   });
 
@@ -77,7 +90,7 @@ describe('ContentService.updateReportingDroppedThumbnail', () => {
     const row = await contentWithThumbnail((id) =>
       ownFolderUrl(id, '1200x800-0a1b2c3d')
     );
-    const poster = `${CDN}/${creatorId}/media-thumbnails/m-1/lg.webp`;
+    const poster = `${CDN}/${creatorId}/media-thumbnails/${posterMediaId}/lg.webp`;
 
     const { content, droppedThumbnailUrl } =
       await service.updateReportingDroppedThumbnail(
@@ -154,7 +167,7 @@ describe('ContentService.updateReportingDroppedThumbnail', () => {
       await service.updateReportingDroppedThumbnail(
         row.id,
         {
-          thumbnailUrl: `${CDN}/${creatorId}/media-thumbnails/m-1/lg.webp`,
+          thumbnailUrl: `${CDN}/${creatorId}/media-thumbnails/${posterMediaId}/lg.webp`,
         },
         creatorId
       );

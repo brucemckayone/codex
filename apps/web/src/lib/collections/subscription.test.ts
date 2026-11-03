@@ -52,6 +52,7 @@ describe('loadSubscriptionFromServer', () => {
   it('stores a waiting move beside the plan the member keeps', async () => {
     remote.getCurrentSubscription.mockResolvedValueOnce(
       current({
+        kind: 'plan',
         tierId: 'tier-basic',
         tierName: 'Basic',
         amountCents: 500,

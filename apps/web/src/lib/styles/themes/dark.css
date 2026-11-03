@@ -37,7 +37,9 @@
      declares --color-interactive. Note the dark platform fill is
      --color-primary-400 (#f47d67, L 0.72) — LIGHTER than the 0.62 threshold, so
      this hands back dark ink, where the hardcoded `--color-text-on-brand:
-     #ffffff` one rule up would have painted white on salmon. */
+     #ffffff` one rule up would have painted white on salmon. This OKLCH step
+     is the fallback; the luminance step at the foot of this file is the live
+     rule, and picks the same dark ink here. */
   --color-on-interactive: oklch(from var(--color-interactive) clamp(0, (0.62 - l) * 1000, 1) 0 0);
 
   /* Focus */
@@ -66,4 +68,29 @@
      scrim deeper, --media-glyph stays a near-white brand-tinted ink. */
   --media-scrim: color-mix(in oklab, black 64%, var(--color-background));
   --media-glyph: oklch(from var(--color-brand-accent) 0.97 calc(c * 0.06) h);
+}
+
+/* The platform twin of org-brand.css's luminance step (Codex-6r63f): the ink
+   on a filled control is chosen by which side of 0.1791 the fill's relative
+   luminance sits, where white and black contrast equally, so it clears AA on
+   any fill (floor 4.57:1). Read org-brand.css's foot for the derivation and
+   why it is guarded: an engine without pow() in relative colour keeps the
+   OKLCH step above rather than losing the colour. The platform's own fills
+   pick the same ink either way; a fill in the band the step misjudged, such
+   as a saturated green, no longer gets the weaker one. */
+@supports (color: rgb(from red calc(255 * pow(r / 255, 2)) 0 0)) {
+  [data-theme="dark"] {
+    --color-on-interactive: rgb(
+      from var(--color-interactive)
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
+    );
+    --color-text-on-accent: rgb(
+      from var(--color-brand-accent)
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
+    );
+  }
 }

@@ -20,6 +20,8 @@ const subscriptionApi = vi.hoisted(() => ({
   previewTierChange: vi.fn(),
   changeTier: vi.fn(),
   keepCurrentPlan: vi.fn(),
+  cancel: vi.fn(),
+  reactivate: vi.fn(),
   cancelCourseSubscription: vi.fn(),
   reactivateCourseSubscription: vi.fn(),
 }));
@@ -49,10 +51,12 @@ vi.mock('$app/server', () => {
 
 import {
   cancelCourseSubscription,
+  cancelSubscription,
   changeSubscriptionTier,
   keepCurrentPlan,
   previewSubscriptionTierChange,
   reactivateCourseSubscription,
+  reactivateSubscription,
 } from './subscription.remote';
 
 const INPUT = {
@@ -108,6 +112,77 @@ describe('subscription command failures', () => {
       message: 'Your card was declined.',
       status: 402,
     });
+  });
+});
+
+/**
+ * A Stripe schedule that isn't ours (Codex-2hxff.97): the worker refuses a
+ * change, its preview, cancel, reactivate and Keep with
+ * SUBSCRIPTION_SCHEDULED_ELSEWHERE and the `errorId` support was alerted
+ * with. The page shows that id for the member to quote, so each failure
+ * carries it.
+ */
+describe('a schedule that is not ours', () => {
+  const ORG_ONLY = { organizationId: INPUT.organizationId };
+  const elsewhere = () =>
+    new ApiError(
+      409,
+      "This subscription can't be changed here just now. Please contact support.",
+      'CONFLICT',
+      {
+        code: 'SUBSCRIPTION_SCHEDULED_ELSEWHERE',
+        organizationId: INPUT.organizationId,
+        errorId: 'err_7f3a',
+      }
+    );
+
+  it.each([
+    [
+      'previewSubscriptionTierChange',
+      previewSubscriptionTierChange,
+      'previewTierChange',
+      INPUT,
+    ],
+    ['changeSubscriptionTier', changeSubscriptionTier, 'changeTier', INPUT],
+    ['cancelSubscription', cancelSubscription, 'cancel', ORG_ONLY],
+    ['reactivateSubscription', reactivateSubscription, 'reactivate', ORG_ONLY],
+    ['keepCurrentPlan', keepCurrentPlan, 'keepCurrentPlan', ORG_ONLY],
+  ] as const)('%s forwards details.errorId', async (_name, run, method, input) => {
+    subscriptionApi[method].mockRejectedValueOnce(elsewhere());
+
+    const result = await (
+      run as unknown as (input: unknown) => Promise<unknown>
+    )(input);
+
+    expect(result).toMatchObject({
+      success: false,
+      code: 'CONFLICT',
+      detailsCode: 'SUBSCRIPTION_SCHEDULED_ELSEWHERE',
+      errorId: 'err_7f3a',
+      status: 409,
+    });
+  });
+
+  it('carries no errorId when the details have none, or with no answer', async () => {
+    subscriptionApi.changeTier.mockRejectedValueOnce(disputed());
+    const refused = await (
+      changeSubscriptionTier as unknown as (input: unknown) => Promise<{
+        errorId?: string;
+      }>
+    )(INPUT);
+    expect(refused.errorId).toBeUndefined();
+
+    subscriptionApi.keepCurrentPlan.mockRejectedValueOnce(
+      new TypeError('fetch failed')
+    );
+    const unanswered = await (
+      keepCurrentPlan as unknown as (input: unknown) => Promise<{
+        errorId?: string;
+        code?: string;
+      }>
+    )(ORG_ONLY);
+    expect(unanswered.code).toBeUndefined();
+    expect(unanswered.errorId).toBeUndefined();
   });
 });
 

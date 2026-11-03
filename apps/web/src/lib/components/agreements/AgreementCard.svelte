@@ -587,10 +587,10 @@
   /* `--color-on-interactive`, NOT `--color-text-on-brand`. The latter is a
      hardcoded `#ffffff` in both platform themes, and the dark platform fill is
      `--color-primary-400` (#f47d67, OKLCH L 0.72) — so this painted white on
-     salmon. `--color-on-interactive` is derived FROM the fill (white below
-     L 0.62, black above), so the label contrasts with the swatch under it for
-     every org brand and both themes. dark.css documents this trap directly
-     above its own derivation. */
+     salmon. `--color-on-interactive` is derived FROM the fill by its relative
+     luminance (white below 0.1791, black above; see themes/light.css), so the
+     label clears AA on the swatch under it for every org brand and both
+     themes. dark.css documents this trap directly above its own derivation. */
   .agreement-card__btn--primary {
     background: var(--color-interactive);
     color: var(--color-on-interactive);

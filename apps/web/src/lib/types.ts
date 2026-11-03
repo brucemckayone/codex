@@ -23,6 +23,7 @@ import type {
   IntroFilm,
   MediaUsageCounts,
   MyMembershipResponse,
+  ThumbnailFrame,
 } from '@codex/shared-types';
 import type {
   PendingTierChange,
@@ -47,6 +48,12 @@ export interface ContentWithRelations
   };
   organization?: Organization | null;
   mediaItem?: ServedMediaItem | null;
+  /**
+   * The creator's video its thumbnail is a frame of, its own included
+   * (Codex-tqvmx). Only the single read sends it; absent from a content-api
+   * older than the check.
+   */
+  thumbnailFrame?: ThumbnailFrame | null;
   /**
    * The exact set of tiers that include this item (Codex-2hxff.91), ordered
    * by tier `sortOrder`, inactive tiers included; `[]` when not gated.
@@ -220,6 +227,28 @@ export interface TierChangePreview {
    * any difference (Codex-2hxff.96).
    */
   quote?: string;
+  /**
+   * Leaving yearly billing waits for the year's end (Codex-2hxff.97): the
+   * monthly bill from `effectiveAt` (ISO), or null. With `takesEffect:
+   * 'period_end'` the plan waits with it, and nothing is due today; with
+   * `'now'` the plan changes today on yearly billing (the upgrade's figures
+   * above), and only the billing waits.
+   */
+  billingChange: null | {
+    interval: 'month';
+    amountCents: number;
+    effectiveAt: string;
+  };
+  /**
+   * The waiting change this one replaces (latest wins), or null: what it
+   * would have billed, for "instead of £50 a year".
+   */
+  replaces: null | {
+    tierId: string;
+    tierName: string;
+    interval: 'month' | 'year';
+    amountCents: number;
+  };
 }
 
 /**

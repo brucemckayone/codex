@@ -36,7 +36,16 @@
     formatDate,
     formatSentenceDate,
   } from '$lib/utils/format';
-  import { waitingMoveBody } from '$lib/utils/plan-label';
+  import {
+    waitingMoveBody,
+    waitingMoveKeepFailedLine,
+    waitingMoveKeepLabel,
+    waitingMoveKeptLine,
+    waitingMoveLandedLine,
+    waitingMoveSurvivesCancelLine,
+    waitingMoveTitle,
+  } from '$lib/utils/plan-label';
+  import { scheduledElsewhereLine } from '$lib/utils/scheduled-elsewhere';
   import { logger } from '$lib/observability';
 
   let { data } = $props();
@@ -181,7 +190,9 @@
           existing.status = previousStatus;
           existing.cancelAtPeriodEnd = previousCancelAtPeriodEnd ?? false;
         }
-        cancelError = result.message || 'Failed to cancel subscription';
+        cancelError =
+          scheduledElsewhereLine('code' in result ? result : {}) ??
+          (result.message || 'Failed to cancel subscription');
         return;
       }
       cancelDialogOpen = false;
@@ -230,7 +241,8 @@
         }
         reactivateErrors.set(
           sub.id,
-          result.message || m.subscription_reactivate_error()
+          scheduledElsewhereLine('code' in result ? result : {}) ??
+            (result.message || m.subscription_reactivate_error())
         );
         return;
       }
@@ -318,11 +330,12 @@
         const kept = result.data;
         keepLines.set(sub.id, {
           tone: 'success',
-          text: m.pricing_move_kept({
+          text: waitingMoveKeptLine(
+            move,
             plan,
-            date: formatSentenceDate(kept?.currentPeriodEnd ?? sub.currentPeriodEnd),
-            price: formatPrice(kept?.amountCents ?? sub.heldAmountCents ?? sub.amountCents),
-          }),
+            formatSentenceDate(kept?.currentPeriodEnd ?? sub.currentPeriodEnd),
+            formatPrice(kept?.amountCents ?? sub.heldAmountCents ?? sub.amountCents)
+          ),
         });
         await Promise.all([
           invalidate('account:subscriptions'),
@@ -331,13 +344,17 @@
         ]);
         return;
       }
-      const failure: { code?: string; detailsCode?: string; status?: number } =
-        'code' in result ? result : {};
+      const failure: {
+        code?: string;
+        detailsCode?: string;
+        errorId?: string;
+        status?: number;
+      } = 'code' in result ? result : {};
       if (failure.detailsCode === 'MOVE_ALREADY_LANDED') {
         // The renewal has happened: the card re-reads as the new plan.
         keepLines.set(sub.id, {
           tone: 'info',
-          text: m.pricing_move_landed({ plan: move.tierName }),
+          text: waitingMoveLandedLine(move),
         });
         await invalidate('account:subscriptions');
         return;
@@ -357,11 +374,11 @@
       });
       keepLines.set(sub.id, {
         tone: 'error',
-        text: m.pricing_move_keep_failed({
-          plan,
-          movingTo: move.tierName,
-          date: formatSentenceDate(move.effectiveAt),
-        }),
+        // A Stripe schedule that isn't ours (Codex-2hxff.97): a retry can't
+        // help, so not "Please try again".
+        text:
+          scheduledElsewhereLine(failure) ??
+          waitingMoveKeepFailedLine(move, plan, formatSentenceDate),
       });
     } catch (error) {
       logger.warn('account: keep current plan got no answer', {
@@ -593,10 +610,7 @@
                         <!-- The move survives a cancel (T4): reactivating brings
                              it back, so one quiet line says so (state 6). -->
                         <p class="subscription-note" data-testid="subscription-move-survives">
-                          {m.subscription_move_survives_cancel({
-                            plan: move.tierName,
-                            date: formatSentenceDate(move.effectiveAt),
-                          })}
+                          {waitingMoveSurvivesCancelLine(move, formatSentenceDate)}
                         </p>
                       {/if}
                     {:else if move}
@@ -604,10 +618,7 @@
                       <Alert variant="info" data-testid="subscription-move-notice">
                         <div class="subscription-move">
                           <span class="subscription-move__text">
-                            <b>{m.pricing_move_notice_title({
-                              plan: move.tierName,
-                              date: formatSentenceDate(move.effectiveAt),
-                            })}</b>
+                            <b>{waitingMoveTitle(move, formatSentenceDate)}</b>
                             <span>{waitingMoveBody(move, sub.tier.name, formatSentenceDate)}</span>
                           </span>
                           <Button
@@ -617,7 +628,7 @@
                             data-testid="subscription-keep-button"
                             onclick={() => handleKeep(sub, move)}
                           >
-                            {m.pricing_move_keep()}
+                            {waitingMoveKeepLabel(move)}
                           </Button>
                         </div>
                       </Alert>

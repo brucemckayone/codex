@@ -455,6 +455,9 @@ importers:
       '@codex/subscription':
         specifier: workspace:*
         version: link:../subscription
+      '@codex/transcoding':
+        specifier: workspace:*
+        version: link:../transcoding
       '@codex/validation':
         specifier: workspace:*
         version: link:../validation
