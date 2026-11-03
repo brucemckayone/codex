@@ -131,10 +131,11 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  */
 const FEE_NOTICE_TIMEOUT_MS = 5_000;
 /**
- * No send batch starts after this, counted from the step's start, as the
- * price-moves step's PRICE_MOVES_TIME_BUDGET_MS. The step runs last in the
- * 08:00 chain, inside the cron's 15-minute wall, and the dates and the alert
- * run after the sends.
+ * No send batch starts after this, counted from the 08:00 invocation's start
+ * (the step's own start when it has none), as the price-moves step's
+ * PRICE_MOVES_TIME_BUDGET_MS. The step runs last in the 08:00 chain, after
+ * the agreement and money sweeps, inside the cron's 15-minute wall, and the
+ * dates and the alert run after the sends.
  */
 export const FEE_SENDS_TIME_BUDGET_MS = 8 * 60 * 1000;
 
@@ -183,6 +184,12 @@ export interface RunFeeNoticesSweepDeps {
   perRun?: number;
   /** Real time, for the send budget (testing only). */
   clock?: () => number;
+  /**
+   * When the 08:00 invocation started (ms since the epoch): the send budget
+   * counts from it, because the sweeps before this step use the same wall.
+   * Default: the step's own start.
+   */
+  wakeStartedAt?: number;
   /** Testing only. */
   sendTimeoutMs?: number;
   /**
@@ -1277,7 +1284,7 @@ export async function runFeeNoticesSweep(
     errors: 0,
   };
   const clock = deps.clock ?? Date.now;
-  const sendsUntil = clock() + FEE_SENDS_TIME_BUDGET_MS;
+  const sendsUntil = (deps.wakeStartedAt ?? clock()) + FEE_SENDS_TIME_BUDGET_MS;
   try {
     const ctx: SweepContext = {
       db: deps.db,
@@ -1346,7 +1353,8 @@ export async function runFeeNoticesSweep(
  * production has the cron.
  */
 export async function runScheduledFeeNoticesSweep(
-  env: Bindings
+  env: Bindings,
+  wake: { startedAt?: number } = {}
 ): Promise<FeeNoticesSweepResult | null> {
   const obs = new ObservabilityClient(
     'notifications-api',
@@ -1374,6 +1382,7 @@ export async function runScheduledFeeNoticesSweep(
       environment,
       workerSecret: env.WORKER_SHARED_SECRET,
       notificationsUrl: getServiceUrl('notifications', env),
+      wakeStartedAt: wake.startedAt,
     });
   } finally {
     await cleanup().catch((error: unknown) => {

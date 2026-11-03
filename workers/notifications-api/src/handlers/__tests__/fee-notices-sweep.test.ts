@@ -899,4 +899,41 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
     });
     expect(alertsNaming(late.id)).toHaveLength(1);
   });
+
+  it('the send budget counts from the wake: spent by the sweeps before, the claims go back and the alert still runs', async () => {
+    const ora = await person('Ora Wake');
+    const changeId = await rise(await organisation(ora.id));
+    await run(
+      changeId,
+      NOV_3,
+      mailerAnswering({ [ora.id]: { accepted: false, status: 400 } })
+    );
+    expect(alertsNaming(ora.id)).toHaveLength(1);
+    const mailer = mailerAnswering();
+    const now = Date.now();
+
+    const day2 = await runFeeNoticesSweep({
+      db,
+      obs,
+      environment: 'development',
+      workerSecret: 'unused',
+      notificationsUrl: 'http://unused.test',
+      now: NOV_4,
+      mailer,
+      templateExists: async () => true,
+      clock: () => now,
+      // The agreement and money sweeps took the whole budget.
+      wakeStartedAt: now - FEE_SENDS_TIME_BUDGET_MS,
+      onlyChanges: [changeId],
+    });
+
+    expect(day2).toMatchObject({ sent: 0, givenBack: 1 });
+    expect(mailer).not.toHaveBeenCalled();
+    expect(await noticeOf(changeId, ora.id)).toMatchObject({
+      state: 'failed',
+      attempts: 1,
+      attemptedAt: NOV_3,
+    });
+    expect(alertsNaming(ora.id)).toHaveLength(2);
+  });
 });

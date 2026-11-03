@@ -77,6 +77,17 @@ describe('dispatchScheduled at 08:00', () => {
     expect(order).toEqual(['agreements', 'money', 'fees']);
   });
 
+  it('hands the fee step the wake’s start, taken before the sweeps ahead of it', async () => {
+    const before = Date.now();
+    await fire('0 8 * * *');
+    const [, wake] = runFeeStep.mock.calls[0] as unknown as [
+      unknown,
+      { startedAt?: number } | undefined,
+    ];
+    expect(wake?.startedAt).toBeGreaterThanOrEqual(before);
+    expect(wake?.startedAt).toBeLessThanOrEqual(Date.now());
+  });
+
   it('a failing money sweep does not stop the fee step', async () => {
     failMoney.value = true;
     await fire('0 8 * * *');
