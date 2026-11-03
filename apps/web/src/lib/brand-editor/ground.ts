@@ -133,9 +133,24 @@ export function groundLuminance(
 }
 
 /**
+ * A background the page may paint: one whose ground this module can measure.
+ * Any other form (rgb(), a colour name, var(…)) the API may have stored is
+ * ignored, so every writer paints the platform's in its place and the nudge
+ * never reads a ground it cannot see (owner, Codex-mik4h: "Ignore it, like On
+ * Brand"). The stored value is untouched.
+ */
+export function paintableBackground(
+  colour: string | null | undefined
+): string | undefined {
+  return colour && relativeLuminance(colour) !== null ? colour : undefined;
+}
+
+/**
  * The `--brand-ground-y` / `--brand-ground-dark-y` inputs for an org's
  * backgrounds. Empty when the org paints no ground of its own, or its
- * background is not a hex colour (the page then paints the platform's).
+ * background is not a hex colour (the page then paints the platform's). An
+ * unpaintable dark background falls back to the light one, as the stylesheet
+ * does once the writers drop it (`paintableBackground`).
  */
 export function groundLuminanceVars({
   background,

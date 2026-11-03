@@ -331,3 +331,59 @@ describe('clearTokenOverrides keeps what the org layout binds', () => {
     expect(el.style.getPropertyValue('--brand-glass-tint')).toBe('');
   });
 });
+
+// Owner, Codex-mik4h: "Ignore it, like On Brand". The editor paints only a
+// background the nudge can measure, as the layouts do.
+describe('injectBrandVars paints only a background it can measure', () => {
+  const state: BrandEditorState = {
+    primaryColor: '#3355ff',
+    secondaryColor: null,
+    accentColor: null,
+    backgroundColor: null,
+    fontBody: null,
+    fontHeading: null,
+    radius: 0.5,
+    density: 1,
+    logoUrl: null,
+    tokenOverrides: {},
+    darkOverrides: null,
+    darkTokenOverrides: null,
+    heroLayout: 'default',
+  };
+
+  afterEach(() => {
+    for (const el of document.querySelectorAll('.org-layout')) el.remove();
+  });
+
+  function layout(): HTMLElement {
+    const el = document.createElement('div');
+    el.className = 'org-layout';
+    document.body.appendChild(el);
+    return el;
+  }
+
+  it('ignores a light background in a form it cannot measure', () => {
+    const el = layout();
+    injectBrandVars({ ...state, backgroundColor: 'rgb(30 30 46)' });
+
+    expect(el.hasAttribute('data-org-bg')).toBe(false);
+    expect(el.style.getPropertyValue('--brand-bg')).toBe('');
+    expect(el.style.getPropertyValue('--brand-ground-y')).toBe('');
+    expect(el.style.getPropertyValue('--brand-color')).toBe('#3355ff');
+  });
+
+  it('drops a dark background it cannot measure, so dark reads the light one', () => {
+    const el = layout();
+    injectBrandVars({
+      ...state,
+      backgroundColor: '#ffffff',
+      darkOverrides: { backgroundColor: 'rgb(20 20 20)' },
+    });
+
+    expect(el.hasAttribute('data-org-bg')).toBe(true);
+    expect(el.style.getPropertyValue('--brand-bg')).toBe('#ffffff');
+    expect(el.style.getPropertyValue('--brand-bg-dark')).toBe('');
+    // White's dark surfaces all clip to white (ground.test.ts).
+    expect(el.style.getPropertyValue('--brand-ground-dark-y')).toBe('1.0000');
+  });
+});

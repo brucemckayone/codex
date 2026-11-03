@@ -26,7 +26,7 @@ import {
   tokenOverridesToCssVars,
 } from '$lib/brand-editor';
 import { withFallback } from '$lib/brand-editor/font-fallbacks';
-import { groundLuminance } from '$lib/brand-editor/ground';
+import { groundLuminance, paintableBackground } from '$lib/brand-editor/ground';
 import type { BrandTokenOverrides } from '$lib/page-builder';
 
 /**
@@ -104,6 +104,7 @@ export function brandOverridesToCssVars(
   for (const [field, prop] of Object.entries(CORE_LIGHT)) {
     const value = (overrides as Record<string, unknown>)[field];
     if (typeof value !== 'string' || value.trim().length === 0) continue;
+    if (field === 'backgroundColor' && !paintableBackground(value)) continue;
     out[prop] = FONT_FIELDS.has(field) ? quoteFamily(value) : value;
   }
 
@@ -122,6 +123,7 @@ export function brandOverridesToCssVars(
     for (const [field, prop] of Object.entries(CORE_DARK)) {
       const value = (overrides.darkOverrides as Record<string, unknown>)[field];
       if (typeof value !== 'string' || value.trim().length === 0) continue;
+      if (field === 'backgroundColor' && !paintableBackground(value)) continue;
       out[prop] = value;
     }
   }

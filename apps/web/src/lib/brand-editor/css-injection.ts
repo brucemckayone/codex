@@ -1,6 +1,10 @@
 import { browser } from '$app/environment';
 import { withFallback } from './font-fallbacks';
-import { GROUND_VAR_PROPS, groundLuminanceVars } from './ground';
+import {
+  GROUND_VAR_PROPS,
+  groundLuminanceVars,
+  paintableBackground,
+} from './ground';
 import type { BrandEditorState, CssVarMapping } from './types';
 
 /**
@@ -379,7 +383,7 @@ const CSS_VAR_MAPPINGS: CssVarMapping[] = [
   },
   {
     property: '--brand-bg',
-    getValue: (s) => s.backgroundColor ?? undefined,
+    getValue: (s) => paintableBackground(s.backgroundColor),
   },
   {
     property: '--brand-radius',
@@ -525,8 +529,9 @@ export function injectBrandVars(state: BrandEditorState): void {
     }
   }
 
-  // Handle background attribute separately
-  if (state.backgroundColor) {
+  // Handle background attribute separately. A background the nudge cannot
+  // measure is not painted (`paintableBackground`, Codex-mik4h).
+  if (paintableBackground(state.backgroundColor)) {
     if (!el.hasAttribute('data-org-bg')) {
       el.setAttribute('data-org-bg', '');
     }
@@ -582,8 +587,10 @@ export function injectBrandVars(state: BrandEditorState): void {
     backgroundColor: '--brand-bg-dark',
   };
   for (const [field, prop] of Object.entries(darkVarMap)) {
-    const darkVal =
+    const stored =
       state.darkOverrides?.[field as keyof typeof state.darkOverrides];
+    const darkVal =
+      field === 'backgroundColor' ? paintableBackground(stored) : stored;
     if (darkVal) {
       el.style.setProperty(prop, darkVal);
     } else {

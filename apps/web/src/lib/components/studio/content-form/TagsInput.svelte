@@ -176,7 +176,10 @@
     padding: 0;
     border: none;
     background: none;
-    color: var(--color-interactive);
+    /* The pill's tint carries the brand; its label takes the page's text
+       colour (owner, Codex-mik4h: "Neutral text on tints"). The brand colour
+       here failed AA for 2 799 of 4 101 brands on a light page. */
+    color: var(--color-text);
     cursor: pointer;
     border-radius: var(--radius-full, 9999px);
     font-size: var(--text-sm);
@@ -184,9 +187,20 @@
     transition: var(--transition-colors);
   }
 
+  /* The hover fill is the focus-ring colour, which no token names an ink for,
+     so the glyph takes the luminance step from that fill itself
+     (`--_on-fill-step`, light.css). The pressed brand colour it had was under
+     4.5:1 on the ring for every brand; page text would fail 618 of 4 101 in
+     light and all of them in dark. */
   .tag-remove:hover {
-    background-color: var(--color-focus-ring);
-    color: var(--color-interactive-active);
+    --_remove-fill: var(--color-focus-ring);
+    background-color: var(--_remove-fill);
+    color: oklch(from var(--_remove-fill) clamp(0, (0.62 - l) * 1000, 1) 0 0);
+  }
+  @supports (color: rgb(from red calc(255 * pow(r / 255, 2)) 0 0)) {
+    .tag-remove:hover {
+      color: rgb(from var(--_remove-fill) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
+    }
   }
 
   .tag-input {

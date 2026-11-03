@@ -9,6 +9,7 @@ import {
   groundLuminanceVars,
   ORG_SURFACE_STEPS,
   PLATFORM_GROUND_LUMINANCE,
+  paintableBackground,
 } from './ground';
 import { relativeLuminance, TEXT_ON_BRAND_LUMINANCE_PIVOT } from './ink';
 
@@ -155,5 +156,30 @@ describe('the inputs an org’s backgrounds write', () => {
       '--brand-ground-y': luminance('#ebebeb').toFixed(4),
       '--brand-ground-dark-y': luminance('#020202').toFixed(4),
     });
+  });
+});
+
+// Owner, Codex-mik4h: "Ignore it, like On Brand". The writers paint only a
+// background this module can measure, so the page and its nudge agree.
+describe('a background the page may paint', () => {
+  test.each([
+    '#fff',
+    '#FFF8E7',
+    ' #1e1e2e ',
+  ])('is one this module measures: %s', (colour) => {
+    expect(paintableBackground(colour)).toBe(colour);
+  });
+
+  test.each([
+    'rgb(30 30 46)',
+    'navy',
+    'var(--x)',
+    'oklch(0.2 0.02 280)',
+    '#12345',
+    '',
+    null,
+    undefined,
+  ])('is not anything else: %s', (colour) => {
+    expect(paintableBackground(colour)).toBeUndefined();
   });
 });

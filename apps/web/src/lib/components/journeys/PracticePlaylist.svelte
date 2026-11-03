@@ -205,7 +205,11 @@
   .playlist__stage--done .playlist__rn {
     border-color: transparent;
     background: color-mix(in oklab, var(--color-brand-primary) 20%, transparent);
-    color: var(--color-brand-text);
+    /* The tint carries the brand; the numeral takes the page's text colour
+       (owner, Codex-mik4h: "Neutral text on tints"). On a light page the
+       brand colour on its own 20% tint failed AA for 3 180 of 4 101 brands,
+       and 1 034 even nudged. */
+    color: var(--color-text);
   }
 
   .playlist__name {

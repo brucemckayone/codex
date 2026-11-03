@@ -27,7 +27,7 @@
   // Every brand face's own fallback, so a face on its way draws on its lines (Codex-61zsk.61).
   import '$lib/styles/tokens/font-fallbacks.css';
   import { withFallback } from '$lib/brand-editor/font-fallbacks';
-  import { groundLuminanceVars } from '$lib/brand-editor/ground';
+  import { groundLuminanceVars, paintableBackground } from '$lib/brand-editor/ground';
   import { brandEditor, initBrandPreviewBridge, injectTokenOverrides, injectDarkTokenOverrides, clearTokenOverrides, parseDarkColorOverrides, tokenOverridesToCssVars, darkTokenOverridesToCssVars } from '$lib/brand-editor';
   import { getStaleKeys, resolveStaleCacheTargets, updateStoredVersions } from '$lib/client/version-manifest';
   import { invalidateCollection, loadSubscriptionFromServer, subscriptionCollection } from '$lib/collections';
@@ -72,7 +72,8 @@
   const brandPrimary = $derived(data.org?.brandColors?.primary ?? undefined);
   const brandSecondary = $derived(data.org?.brandColors?.secondary ?? undefined);
   const brandAccent = $derived(data.org?.brandColors?.accent ?? undefined);
-  const brandBackground = $derived(data.org?.brandColors?.background ?? undefined);
+  // A background the nudge cannot measure is not painted (`paintableBackground`).
+  const brandBackground = $derived(paintableBackground(data.org?.brandColors?.background));
 
   // Dark-mode color overrides — parsed once from the JSON string stored in
   // branding_settings.dark_mode_overrides (Partial<ThemeColors> shape).
@@ -87,7 +88,7 @@
   const brandPrimaryDark = $derived(darkColorOverrides?.primaryColor ?? undefined);
   const brandSecondaryDark = $derived(darkColorOverrides?.secondaryColor ?? undefined);
   const brandAccentDark = $derived(darkColorOverrides?.accentColor ?? undefined);
-  const brandBackgroundDark = $derived(darkColorOverrides?.backgroundColor ?? undefined);
+  const brandBackgroundDark = $derived(paintableBackground(darkColorOverrides?.backgroundColor));
   // The binding ground's luminance, the hardest surface painted from the
   // background, which org-brand.css nudges links and focus colours against
   // (Codex-mik4h).

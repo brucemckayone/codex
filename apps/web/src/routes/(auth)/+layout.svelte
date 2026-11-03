@@ -15,7 +15,7 @@
   import { setContext } from 'svelte';
   import AuthShaderPane from '$lib/components/auth/AuthShaderPane.svelte';
   import { NavigationProgress } from '$lib/components/ui/Feedback/NavigationProgress';
-  import { groundLuminanceVars } from '$lib/brand-editor/ground';
+  import { groundLuminanceVars, paintableBackground } from '$lib/brand-editor/ground';
   import {
     darkTokenOverridesToCssVars,
     parseDarkColorOverrides,
@@ -36,7 +36,8 @@
   const brandPrimary = $derived(branding?.brandColors?.primary ?? undefined);
   const brandSecondary = $derived(branding?.brandColors?.secondary ?? undefined);
   const brandAccent = $derived(branding?.brandColors?.accent ?? undefined);
-  const brandBackground = $derived(branding?.brandColors?.background ?? undefined);
+  // A background the nudge cannot measure is not painted (`paintableBackground`).
+  const brandBackground = $derived(paintableBackground(branding?.brandColors?.background));
   // Dark-mode colour overrides. org-brand.css gates its dark tokens on
   // `var(--brand-bg-dark, var(--brand-bg, …))`, so WITHOUT these the dark rules
   // still match but fall straight back to the LIGHT brand colours. That is what
@@ -55,7 +56,7 @@
   );
   const brandAccentDark = $derived(darkColorOverrides?.accentColor ?? undefined);
   const brandBackgroundDark = $derived(
-    darkColorOverrides?.backgroundColor ?? undefined
+    paintableBackground(darkColorOverrides?.backgroundColor)
   );
   // The binding ground's luminance, as the org layout writes it (Codex-mik4h).
   const groundVars = $derived(

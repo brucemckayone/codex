@@ -123,6 +123,29 @@ describe('brandOverridesToCssVars', () => {
     expect(vars).not.toHaveProperty('--brand-color');
   });
 
+  // Owner, Codex-mik4h: "Ignore it, like On Brand". A background the nudge
+  // cannot measure is not painted, so the page keeps the org's ground and
+  // the org's ground number together.
+  it('paints only a background it can measure, in each theme', () => {
+    const vars = brandOverridesToCssVars({
+      primaryColor: '#3355ff',
+      backgroundColor: 'rgb(30 30 46)',
+      darkOverrides: { backgroundColor: 'navy' },
+    });
+    expect(vars['--brand-color']).toBe('#3355ff');
+    for (const prop of [
+      '--brand-bg',
+      '--brand-bg-dark',
+      '--brand-ground-y',
+      '--brand-ground-dark-y',
+    ]) {
+      expect(vars).not.toHaveProperty(prop);
+    }
+    expect(
+      brandOverridesToCssVars({ backgroundColor: '#1e1e2e' })
+    ).toMatchObject({ '--brand-bg': '#1e1e2e', '--brand-ground-y': '0.0252' });
+  });
+
   describe('keeps every value inside its own declaration', () => {
     it.each([
       ['a second declaration', 'red; position: fixed; inset: 0'],
