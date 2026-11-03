@@ -81,10 +81,15 @@ import {
   dbFeeVersionReader,
   FEE_NOTICE_OPEN_STATES,
   type FeeLevel,
+  type FeeVersionList,
+  type FeeVersionReader,
+  feeLevelKey,
   feeRiseStartAfter,
   lockFeeLevel,
   londonDate,
   mirrorLegacyFeeRow,
+  readFeeVersions,
+  readFeeVersionsByLevel,
   resolveFeesAt,
   WAITING_RISE,
 } from '@codex/payments';
@@ -682,28 +687,55 @@ function studioUrlFor(
 }
 
 /**
- * A role's fees in force now, for the cancelled email's "stays at": a
+ * Where a role's fees resolve, for the cancelled email's "stays at": a
  * creator's own override layers over their organisation's; an owner's share
  * moved with a creator's override only under a creator-scope change.
  */
-async function feesNow(
-  ctx: SweepContext,
+function feeScopeOf(
   userId: string,
   role: FeeNoticeRole,
   change: FeeChangeRow
-): Promise<FeeNoticeRoleValues> {
-  const read = dbFeeVersionReader(ctx.db);
+): { organizationId: string | null; creatorId: string | null } {
   const creatorId =
     role.as === 'creator'
       ? userId
       : change.scope === 'creator'
         ? change.creatorId
         : null;
-  const params = {
+  return {
     organizationId: role.organizationId,
     creatorId: role.organizationId ? creatorId : null,
-    at: ctx.now,
   };
+}
+
+/** The levels `resolveFeesAt` reads for a scope. */
+function levelsOf(scope: {
+  organizationId: string | null;
+  creatorId: string | null;
+}): FeeLevel[] {
+  const levels: FeeLevel[] = [{ scope: 'platform' }];
+  if (scope.organizationId) {
+    levels.push({ scope: 'org', organizationId: scope.organizationId });
+    if (scope.creatorId) {
+      levels.push({
+        scope: 'creator',
+        organizationId: scope.organizationId,
+        creatorId: scope.creatorId,
+      });
+    }
+  }
+  return levels;
+}
+
+/** A role's fees in force now. */
+async function feesNow(
+  ctx: SweepContext,
+  read: FeeVersionReader,
+  userId: string,
+  role: FeeNoticeRole,
+  change: FeeChangeRow
+): Promise<FeeNoticeRoleValues> {
+  const params = { ...feeScopeOf(userId, role, change), at: ctx.now };
   const [oneOff, subscription] = await Promise.all([
     resolveFeesAt(read, { ...params, ctx: 'one_off' }),
     resolveFeesAt(read, { ...params, ctx: 'subscription' }),
@@ -711,22 +743,145 @@ async function feesNow(
   return { ...role, oneOff, subscription };
 }
 
-async function announceOf(ctx: SweepContext, notice: Claimed) {
-  const [row] = await ctx.db
-    .select({
-      acceptedAt: feeChangeNotices.acceptedAt,
-      toldAt: feeChangeNotices.toldAt,
-    })
-    .from(feeChangeNotices)
-    .where(
-      and(
-        eq(feeChangeNotices.changeId, notice.changeId),
-        eq(feeChangeNotices.userId, notice.userId),
-        eq(feeChangeNotices.kind, 'announce')
-      )
-    )
-    .limit(1);
-  return row ?? null;
+/** What the follow-up emails need, read once for the batch. */
+interface FollowUpReads {
+  /** Each person's announcement of each change, by `changeId:userId`. */
+  announces: Map<string, { acceptedAt: Date | null; toldAt: Date | null }>;
+  /** Fee versions for a cancelled email's "stays at". */
+  read: FeeVersionReader;
+}
+
+const isFollowUp = (notice: Claimed) =>
+  notice.kind === 'cancelled' || notice.kind === 'smaller';
+
+const distinct = (values: Array<string | null>): string[] => [
+  ...new Set(values.filter((v): v is string => v !== null)),
+];
+
+/**
+ * The follow-ups' reads, once for the batch rather than once a notice
+ * (review cycle 2, L5): each one's announcement in one query, and the fee
+ * levels the cancelled ones resolve through, one query per scope (as
+ * support's fee cards read them). A level not read here is read when
+ * asked, so the up-front set only saves reads, never decides an answer.
+ */
+async function readFollowUps(
+  ctx: SweepContext,
+  notices: Claimed[],
+  changes: Map<string, FeeChangeRow>
+): Promise<FollowUpReads> {
+  const live = dbFeeVersionReader(ctx.db);
+  const followUps = notices.filter(isFollowUp);
+  if (followUps.length === 0) return { announces: new Map(), read: live };
+  const levels = followUps.flatMap((notice) => {
+    const change = changes.get(notice.changeId);
+    if (notice.kind !== 'cancelled' || !change) return [];
+    return notice.roles.flatMap((role) =>
+      levelsOf(feeScopeOf(notice.userId, role, change))
+    );
+  });
+  const orgIds = distinct(
+    levels.map((l) => (l.scope === 'platform' ? null : l.organizationId))
+  );
+  const creatorIds = distinct(
+    levels.map((l) => (l.scope === 'creator' ? l.creatorId : null))
+  );
+  const none = Promise.resolve(new Map<string, FeeVersionList>());
+  const [announced, platform, orgLevels, creatorLevels] = await Promise.all([
+    ctx.db
+      .select({
+        changeId: feeChangeNotices.changeId,
+        userId: feeChangeNotices.userId,
+        acceptedAt: feeChangeNotices.acceptedAt,
+        toldAt: feeChangeNotices.toldAt,
+      })
+      .from(feeChangeNotices)
+      .where(
+        and(
+          eq(feeChangeNotices.kind, 'announce'),
+          inArray(
+            feeChangeNotices.changeId,
+            distinct(followUps.map((n) => n.changeId))
+          ),
+          inArray(
+            feeChangeNotices.userId,
+            distinct(followUps.map((n) => n.userId))
+          )
+        )
+      ),
+    levels.length > 0 ? readFeeVersions(ctx.db, { scope: 'platform' }) : null,
+    orgIds.length > 0
+      ? readFeeVersionsByLevel(
+          ctx.db,
+          'org',
+          inArray(feeChanges.organizationId, orgIds)
+        )
+      : none,
+    creatorIds.length > 0
+      ? readFeeVersionsByLevel(
+          ctx.db,
+          'creator',
+          and(
+            inArray(feeChanges.organizationId, orgIds),
+            inArray(feeChanges.creatorId, creatorIds)
+          )
+        )
+      : none,
+  ]);
+  const lists = new Map([...orgLevels, ...creatorLevels]);
+  if (platform) lists.set(feeLevelKey({ scope: 'platform' }), platform);
+  const readUpFront = new Set(levels.map(feeLevelKey));
+  return {
+    announces: new Map(
+      announced.map(({ changeId, userId, ...at }) => [
+        `${changeId}:${userId}`,
+        at,
+      ])
+    ),
+    read: async (level) => {
+      const key = feeLevelKey(level);
+      if (!readUpFront.has(key)) return live(level);
+      return lists.get(key) ?? { versions: [], waiting: false };
+    },
+  };
+}
+
+/**
+ * A failed batch read gives the follow-ups back, untried, with one alert,
+ * so a blip spends none of their tries; the announcements go on (SF-8's
+ * rule for a failed payee read).
+ */
+async function withFollowUpReads(
+  ctx: SweepContext,
+  claimed: Claimed[],
+  changes: Map<string, FeeChangeRow>
+): Promise<{ sendable: Claimed[]; reads: FollowUpReads }> {
+  try {
+    return {
+      sendable: claimed,
+      reads: await readFollowUps(ctx, claimed, changes),
+    };
+  } catch (error) {
+    const followUps = claimed.filter(isFollowUp);
+    const givenBack = await giveBack(ctx, followUps);
+    ctx.result.errors += 1;
+    ctx.obs.error(
+      'fee step: could not read what the follow-up emails need; they go tomorrow',
+      {
+        errorId: crypto.randomUUID(),
+        givenBack,
+        changeIds: distinct(followUps.map((n) => n.changeId)).slice(
+          0,
+          ALERT_NAMED
+        ),
+        error: messageForLog(error),
+      }
+    );
+    return {
+      sendable: claimed.filter((n) => !isFollowUp(n)),
+      reads: { announces: new Map(), read: dbFeeVersionReader(ctx.db) },
+    };
+  }
 }
 
 async function record(
@@ -768,7 +923,8 @@ async function sendOne(
   ctx: SweepContext,
   notice: Claimed,
   changes: Map<string, FeeChangeRow>,
-  people: Map<string, Recipient>
+  people: Map<string, Recipient>,
+  reads: FollowUpReads
 ): Promise<void> {
   const change = changes.get(notice.changeId);
   if (!change) return;
@@ -803,11 +959,14 @@ async function sendOne(
 
   let data: Record<string, string>;
   let told: Partial<FeeChangeNoticeRow> = {};
+  const announce =
+    reads.announces.get(`${notice.changeId}:${notice.userId}`) ?? null;
   if (notice.kind === 'cancelled') {
-    const announce = await announceOf(ctx, notice);
     const names = await namesOf(ctx, notice.roles);
     const now = await Promise.all(
-      notice.roles.map((role) => feesNow(ctx, notice.userId, role, change))
+      notice.roles.map((role) =>
+        feesNow(ctx, reads.read, notice.userId, role, change)
+      )
     );
     data = feeChangeCancelledData({
       userName: greetingName(person?.name),
@@ -831,8 +990,6 @@ async function sendOne(
     }
     const names = await namesOf(ctx, payee.roles);
     const startsOn = change.effectiveFrom ?? feeRiseStartAfter(ctx.now);
-    const announce =
-      notice.kind === 'smaller' ? await announceOf(ctx, notice) : null;
     data = feeChangeNoticeData({
       userName: greetingName(person?.name),
       kind: notice.kind,
@@ -844,7 +1001,10 @@ async function sendOne(
       dated: change.effectiveFrom !== null,
       joiner: !notice.onList,
       replaces: change.replacesChangeId !== null,
-      announcedAt: announce?.acceptedAt ?? announce?.toldAt ?? null,
+      announcedAt:
+        notice.kind === 'smaller'
+          ? (announce?.acceptedAt ?? announce?.toldAt ?? null)
+          : null,
       studioUrl: studioUrlFor(ctx, payee.roles, names),
     });
     // What they are told, kept as told (Studio's "not 12%" reads it).
@@ -989,7 +1149,12 @@ async function sendDue(ctx: SweepContext): Promise<void> {
     .from(feeChanges)
     .where(inArray(feeChanges.id, changeIds));
   const changes = new Map(rows.map((c) => [c.id, c]));
-  const sendable = await withoutUnreadChanges(ctx, claimed, changes);
+  const { sendable, reads } = await withFollowUpReads(
+    ctx,
+    await withoutUnreadChanges(ctx, claimed, changes),
+    changes
+  );
+  if (sendable.length === 0) return;
   const people = await recipientsOf(ctx, sendable);
   for (let i = 0; i < sendable.length; i += SEND_CONCURRENCY) {
     if (ctx.clock() >= ctx.sendsUntil) {
@@ -1003,7 +1168,7 @@ async function sendDue(ctx: SweepContext): Promise<void> {
     await Promise.all(
       sendable.slice(i, i + SEND_CONCURRENCY).map(async (notice) => {
         try {
-          await sendOne(ctx, notice, changes, people);
+          await sendOne(ctx, notice, changes, people, reads);
         } catch (error) {
           ctx.result.errors += 1;
           ctx.noticeFailures += 1;
