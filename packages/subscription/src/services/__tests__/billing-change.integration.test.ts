@@ -1052,6 +1052,59 @@ describe('leaving yearly billing waits for the year (Codex-2hxff.97)', () => {
       ]);
       expect((await rowOf(row.id)).pendingTierId).toBeNull();
     });
+
+    // Review C1, SF-3: the update fails, and so does letting go of the
+    // schedule made for it. The record stays beside the untagged schedule,
+    // so it still reads as ours, never "scheduled elsewhere".
+    it('the update fails and so does letting go of its schedule: one alert, the record kept, and Keep still reaches it', async () => {
+      const { org, pro, basic } = await hollowOak('b-stranded');
+      const { userId, row } = await yearlyMember(org.id, pro);
+      fake.subscriptionSchedules.update.mockRejectedValueOnce(
+        Object.assign(new Error('Stripe is down'), { statusCode: 500 })
+      );
+      fake.subscriptionSchedules.release.mockRejectedValueOnce(
+        Object.assign(new Error('Stripe is still down'), { statusCode: 500 })
+      );
+      const alert = vi.spyOn(
+        (service as unknown as { obs: { error: (...a: unknown[]) => void } })
+          .obs,
+        'error'
+      );
+
+      await expect(
+        service.changeTier(userId, org.id, basic.id, 'month')
+      ).rejects.toThrow();
+
+      const stripeSide = liveOf(row.stripeSubscriptionId);
+      expect(stripeSide.schedule).not.toBeNull();
+      expect(stripeSide.metadata).toMatchObject({
+        codex_move_tier_id: basic.id,
+        codex_move_interval: 'month',
+      });
+      const stranded = alert.mock.calls.filter(([message]) =>
+        String(message).includes('billing_change.undo_release_failed')
+      );
+      expect(stranded).toEqual([
+        [
+          expect.any(String),
+          expect.objectContaining({
+            errorId: expect.any(String),
+            subscriptionId: row.id,
+            stripeSubscriptionId: row.stripeSubscriptionId,
+            stripeScheduleId: stripeSide.schedule,
+          }),
+        ],
+      ]);
+      alert.mockRestore();
+
+      // Stripe answers again: the member's own Keep lets go of it.
+      await service.keepCurrentPlan(userId, org.id);
+
+      const kept = liveOf(row.stripeSubscriptionId);
+      expect(kept.schedule).toBeNull();
+      expect(kept.metadata.codex_move_interval).toBeUndefined();
+      expect(kept.items.data[0]?.price.id).toBe(pro.stripePriceAnnualId);
+    });
   });
 
   // ─── C(b): a dearer plan now, monthly later (Q1) ───────────────────────

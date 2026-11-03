@@ -4326,6 +4326,7 @@ export class SubscriptionService extends BaseService {
 
     // Steps 2 and 3.
     let scheduleId: string | null = null;
+    let leftAttached = false;
     try {
       scheduleId = await this.setBillingSchedule({
         subscriptionId: sub.id,
@@ -4335,10 +4336,23 @@ export class SubscriptionService extends BaseService {
         targetTierId: newTierId,
         moveAt,
         stamp: effectiveProrationDate,
+        onLeftAttached: () => {
+          leftAttached = true;
+        },
       });
     } catch (error) {
       if (!planNow) {
-        await this.putBackRecord(plan, record, putBack, effectiveProrationDate);
+        // A schedule still attached keeps the record beside it, so it reads
+        // as ours: Keep, Cancel and a retry reach it, never "scheduled
+        // elsewhere" (review C1, SF-3). setBillingSchedule has alerted.
+        if (!leftAttached) {
+          await this.putBackRecord(
+            plan,
+            record,
+            putBack,
+            effectiveProrationDate
+          );
+        }
         throw error;
       }
       this.obs.warn(
@@ -4408,8 +4422,11 @@ export class SubscriptionService extends BaseService {
    * A waiting change of billing's schedule (§2.2 steps 2-3): made from the
    * subscription, or `schedule` (ours) updated in place, its phases the paid
    * year as it stands and then `priceId` for a month with the flip. A schedule
-   * made here whose update fails is let go (best effort), so no half-made
-   * one is left attached. Never while the subscription is set to cancel:
+   * made here whose update fails is let go, so no half-made one is left
+   * attached. If that release fails too, it is one error alert and
+   * `onLeftAttached` runs: the caller then keeps the record beside it, so
+   * the untagged schedule still reads as ours (`isOurSchedule`; review C1,
+   * SF-3). Never while the subscription is set to cancel:
    * `from_subscription` would undo the cancel (proof P10). Returns its id.
    */
   private async setBillingSchedule(args: {
@@ -4421,6 +4438,8 @@ export class SubscriptionService extends BaseService {
     moveAt: number;
     /** What makes each attempt's keys its own: the preview's date, or the row's version. */
     stamp: number | string;
+    /** The update failed and so did letting go of the schedule made for it. */
+    onLeftAttached?: () => void;
   }): Promise<string> {
     const created = args.schedule
       ? null
@@ -4453,16 +4472,27 @@ export class SubscriptionService extends BaseService {
       );
     } catch (error) {
       if (created) {
-        await this.releaseSchedule(
+        const released = await this.releaseSchedule(
           created,
           `billing-undo-sched_${created.id}`
-        ).catch((releaseError: unknown) =>
-          this.obs.warn('billing_change.undo_release_failed', {
-            subscriptionId: args.subscriptionId,
-            stripeScheduleId: created.id,
-            error: describeThrown(releaseError),
-          })
+        ).then(
+          () => true,
+          (releaseError: unknown) => {
+            this.obs.error(
+              "billing_change.undo_release_failed: our own schedule is left half made on the member's subscription, untagged, with the change's record kept beside it (support: release this schedule in Stripe; the hourly backstop then sets the change again from the record)",
+              {
+                errorId: crypto.randomUUID(),
+                subscriptionId: args.subscriptionId,
+                stripeSubscriptionId: args.stripeSubscriptionId,
+                stripeScheduleId: created.id,
+                updateError: describeThrown(error),
+                error: describeThrown(releaseError),
+              }
+            );
+            return false;
+          }
         );
+        if (!released) args.onLeftAttached?.();
       }
       throw error;
     }
