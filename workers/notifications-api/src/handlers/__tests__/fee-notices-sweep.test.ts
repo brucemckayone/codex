@@ -841,4 +841,62 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
       errorsFor(changeId, 'fee step: could not read who a fee rise affects')
     ).toEqual([]);
   });
+
+  it('a send with no answer is not alerted while the mornings can mend it; its third morning is', async () => {
+    const kit = await person('Kit Quiet');
+    const changeId = await rise(await organisation(kit.id));
+    const noAnswer = mailerAnswering({
+      [kit.id]: { accepted: false, status: 503 },
+    });
+
+    await run(changeId, NOV_3, noAnswer);
+    expect(await noticeOf(changeId, kit.id)).toMatchObject({
+      state: 'unknown',
+      attempts: 1,
+    });
+    expect(alertsNaming(kit.id)).toEqual([]);
+
+    await run(changeId, NOV_4, noAnswer);
+    expect(alertsNaming(kit.id)).toEqual([]);
+
+    await run(changeId, new Date('2026-11-05T08:00:00Z'), noAnswer);
+    expect(await noticeOf(changeId, kit.id)).toMatchObject({
+      state: 'unknown',
+      attempts: 3,
+    });
+    expect(alertsNaming(kit.id)).toHaveLength(1);
+  });
+
+  it('a joiner with no answer is alerted at once when the rise starts too soon for more mornings', async () => {
+    const lia = await person('Lia Dated');
+    const org = await organisation(lia.id);
+    const changeId = await rise(org);
+    // Lia is told on 3 November: the rise starts on 4 December.
+    await run(changeId, NOV_3, mailerAnswering());
+    expect((await changeOf(changeId))?.effectiveFrom).toEqual(
+      new Date('2026-12-04T00:00:00Z')
+    );
+    const noAnswer = (userId: string) =>
+      mailerAnswering({ [userId]: { accepted: false, status: 503 } });
+
+    // A joiner a fortnight before: their mornings can still mend it.
+    const early = await person('Mo Early');
+    await join(org, early.id);
+    await run(changeId, new Date('2026-11-20T08:00:00Z'), noAnswer(early.id));
+    expect(await noticeOf(changeId, early.id)).toMatchObject({
+      state: 'unknown',
+      attempts: 1,
+    });
+    expect(alertsNaming(early.id)).toEqual([]);
+
+    // A joiner two days before: a person is needed now.
+    const late = await person('Nia Late');
+    await join(org, late.id);
+    await run(changeId, new Date('2026-12-02T08:00:00Z'), noAnswer(late.id));
+    expect(await noticeOf(changeId, late.id)).toMatchObject({
+      state: 'unknown',
+      attempts: 1,
+    });
+    expect(alertsNaming(late.id)).toHaveLength(1);
+  });
 });

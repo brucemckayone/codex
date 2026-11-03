@@ -115,6 +115,16 @@ const SEND_CONCURRENCY = 8;
 /** A notice attempted this recently is not claimed again (overlapping runs). */
 const RECLAIM_AFTER_MS = 12 * 60 * 60 * 1000;
 /**
+ * The owner's rule is to alert only when a person is needed. An `unknown`
+ * send (a 5xx or a timeout: it may have gone, and each morning checks the
+ * email log, then tries again) is named in the alert only after this many
+ * mornings, as a price move is held after PRICE_MOVE_TRIES, or once its rise
+ * starts within this many days, too soon for the mornings left. A `failed`
+ * one (refused, skipped, no address) can't mend itself: it is named at once.
+ */
+const UNKNOWN_TRIES_BEFORE_ALERT = 3;
+const DAY_MS = 24 * 60 * 60 * 1000;
+/**
  * How long one send may take, as the price-moves step's
  * PRICE_NOTICE_TIMEOUT_MS. A send still running then is `unknown` (it MAY
  * have gone), so the next run checks the email log first.
@@ -1173,9 +1183,21 @@ async function alertMissingTemplates(ctx: SweepContext): Promise<void> {
 }
 
 async function alertNotTold(ctx: SweepContext): Promise<void> {
+  const soon = new Date(
+    ctx.now.getTime() + UNKNOWN_TRIES_BEFORE_ALERT * DAY_MS
+  );
   const where = and(
     eq(feeChangeNotices.kind, 'announce'),
-    inArray(feeChangeNotices.state, ['failed', 'unknown']),
+    or(
+      eq(feeChangeNotices.state, 'failed'),
+      and(
+        eq(feeChangeNotices.state, 'unknown'),
+        or(
+          gte(feeChangeNotices.attempts, UNKNOWN_TRIES_BEFORE_ALERT),
+          lte(feeChanges.effectiveFrom, soon)
+        )
+      )
+    ),
     notStarted(ctx.now),
     scope(ctx)
   );
