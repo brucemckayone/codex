@@ -81,7 +81,8 @@ afterEach(() => {
 
 async function render(
   end: PreviewEnd,
-  follow?: { following: boolean; busy: boolean; onfollow: () => void }
+  follow?: { following: boolean; busy: boolean; onfollow: () => void },
+  audio = false
 ) {
   component = mount(PreviewPlayer, {
     target: document.body,
@@ -91,6 +92,7 @@ async function render(
       contentTitle: 'Winter Light',
       end,
       follow,
+      audio,
     },
   });
   // Let the async HLS init settle, so a failure there (which swaps the whole
@@ -307,6 +309,24 @@ describe('followers only', () => {
     );
     expect(button?.textContent?.trim()).toBe(m.org_following());
     expect(button?.disabled).toBe(true);
+  });
+});
+
+describe('the replay’s words (C2-W4)', () => {
+  test('video: Watch preview again', async () => {
+    await render(BUY);
+    const el = await endClip();
+    expect(replayButton(el).textContent?.trim()).toBe('Watch preview again');
+  });
+
+  test('audio: Listen to preview again, the owner’s words', async () => {
+    await render(BUY, undefined, true);
+    const el = await endClip();
+    const listen = [...el.querySelectorAll('button')].find(
+      (b) => b.textContent?.trim() === m.player_preview_listen_again()
+    );
+    expect(listen?.textContent?.trim()).toBe('Listen to preview again');
+    expect(el.textContent).not.toContain('Watch preview again');
   });
 });
 

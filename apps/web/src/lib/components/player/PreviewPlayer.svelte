@@ -18,6 +18,7 @@
   @prop {string} [contentTitle] - Content title for display
   @prop {PreviewEnd} end - What the end screen says and offers
   @prop {object} [follow] - Follow's state and handler, for a follow action
+  @prop {boolean} [audio] - An audio item: "Listen to preview again"
 -->
 <script lang="ts">
   import { tick } from 'svelte';
@@ -47,6 +48,8 @@
     follow?: { following: boolean; busy: boolean; onfollow: () => void };
     /** When true, attempts muted autoplay after HLS init. Default: false */
     autoplay?: boolean;
+    /** An audio item: the replay says "Listen", as the paywall does (C2-W4). */
+    audio?: boolean;
   }
 
   const {
@@ -57,6 +60,7 @@
     end,
     follow,
     autoplay = false,
+    audio = false,
   }: Props = $props();
 
   let root = $state<HTMLElement | null>(null);
@@ -221,7 +225,7 @@
           onclick={() => watchAgain(replay)}
         >
           <RotateCcwIcon size={14} aria-hidden="true" />
-          {m.player_preview_watch_again()}
+          {audio ? m.player_preview_listen_again() : m.player_preview_watch_again()}
         </button>
       </div>
     </div>
