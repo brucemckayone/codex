@@ -18,7 +18,8 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import { filterHref } from '$lib/utils/filter-url';
-  import MediaUpload, { type UploadItem } from '$lib/components/studio/MediaUpload.svelte';
+  import MediaUpload from '$lib/components/studio/MediaUpload.svelte';
+  import { uploadQueue } from '$lib/client/upload-queue.svelte';
   import MediaLibraryCommandBar from '$lib/components/studio/media-library/MediaLibraryCommandBar.svelte';
   import MediaFeatureSlab from '$lib/components/studio/media-library/MediaFeatureSlab.svelte';
   import MediaTileGrid, { type UploadGhost } from '$lib/components/studio/media-library/MediaTileGrid.svelte';
@@ -65,16 +66,17 @@
   const { data, studioName, class: className, onRefresh }: Props = $props();
 
   // ── Upload surface wiring ─────────────────────────────────────────────
-  let uploadQueue: UploadItem[] = $state([]);
+  // The queue is the studio's own store (Codex-a6ofh.1.2), so an upload
+  // started here keeps going, and shows in the tray, after the page unmounts.
   let triggerPicker: (() => void) | null = $state(null);
 
-  // Turn UploadItem[] into UploadGhost[] for the grid
+  // The queue's rows as ghost tiles in the grid, under their (editable) titles.
   const ghostItems = $derived<UploadGhost[]>(
-    uploadQueue
+    uploadQueue.items
       .filter((u) => u.status === 'uploading' || u.status === 'completing' || u.status === 'error')
-      .map((u, i) => ({
-        key: `${u.file.name}-${i}-${u.id ?? 'pending'}`,
-        name: u.file.name,
+      .map((u) => ({
+        key: u.key,
+        name: u.title,
         mediaType: u.mediaType,
         progress: u.progress,
         status: u.status,
@@ -90,7 +92,7 @@
   // live channel can refetch the list while the upload is still running.
   const uploadingHere = $derived(
     new Set(
-      uploadQueue
+      uploadQueue.items
         .filter((u) => u.id !== null && u.status !== 'done' && u.status !== 'queued')
         .map((u) => u.id as string)
     )
@@ -255,9 +257,8 @@
     });
   }
 
-  function handleUploadComplete() {
-    refreshAfterChange();
-  }
+  // A finished upload, whichever page started it, belongs in this list.
+  onMount(() => uploadQueue.onComplete(() => refreshAfterChange()));
 
   function handleEdit(id: string) {
     const media = data.mediaItems.find((item) => item.id === id);
@@ -409,13 +410,9 @@
   </div>
 </div>
 
-<!-- Upload surface (drop overlay + floating dock). Logic is self-contained;
-     parent reads queue as ghosts and owns the picker trigger. -->
-<MediaUpload
-  onUploadComplete={handleUploadComplete}
-  bind:uploadingItems={uploadQueue}
-  bind:triggerPicker
-/>
+<!-- Drop overlay + file input. The queue is the studio's store, and the tray
+     that shows it lives in the studio layout. -->
+<MediaUpload bind:triggerPicker />
 
 <!-- Edit Media Dialog -->
 <EditMediaDialog
