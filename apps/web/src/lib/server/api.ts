@@ -2906,12 +2906,16 @@ export function createServerApi(
       /**
        * List media items with filters and pagination
        *
-       * Query parameters (from MediaQueryInput):
+       * Query parameters (from MediaQueryInput, Codex-a6ofh.1.4):
        * - page: number (default: 1)
-       * - limit: number (1-100, default: 20)
-       * - status: 'uploading' | 'uploaded' | 'transcoding' | 'ready' | 'failed' (optional)
+       * - limit: number (1-100, default: 24)
+       * - search: title or description, ≤255 (optional; gate it, Codex-k618q)
+       * - status: 'uploading' | 'uploaded' | 'transcoding' | 'ready' | 'failed',
+       *   or a group: 'processing' | 'attention' (MEDIA_STATUS_GROUPS) (optional)
        * - mediaType: 'video' | 'audio' (optional)
-       * - sortBy: 'createdAt' | 'uploadedAt' | 'title' (optional)
+       * - usage: 'any' | 'used' | 'unused' (default: 'any')
+       * - sortBy: 'createdAt' | 'uploadedAt' | 'title' | 'durationSeconds' |
+       *   'fileSizeBytes' (optional)
        * - sortOrder: 'asc' | 'desc' (optional)
        *
        * Each row also carries its poster's CDN URL, or null with none: the

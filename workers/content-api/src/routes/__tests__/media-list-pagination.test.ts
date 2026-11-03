@@ -107,7 +107,7 @@ describe('GET /api/media pages by the requested page and limit', () => {
     const res = await get('');
 
     expect(res.status).toBe(200);
-    expect(listCall().pagination).toEqual({ page: 1, limit: 20 });
+    expect(listCall().pagination).toEqual({ page: 1, limit: 24 });
   });
 
   it('passes a limit of 100 through (the page builder film slots)', async () => {
@@ -124,5 +124,32 @@ describe('GET /api/media pages by the requested page and limit', () => {
     const { filters, pagination } = listCall();
     expect(pagination).toEqual({ page: 3, limit: 7 });
     expect(filters).toMatchObject({ status: 'ready', mediaType: 'video' });
+  });
+
+  it('passes the search, a status group, the usage filter and a new sort to the service (Codex-a6ofh.1.4)', async () => {
+    const res = await get(
+      '?search=%2050%25%20&status=attention&usage=unused&sortBy=durationSeconds'
+    );
+
+    expect(res.status).toBe(200);
+    expect(listCall().filters).toMatchObject({
+      search: '50%',
+      status: 'attention',
+      usage: 'unused',
+      sortBy: 'durationSeconds',
+    });
+  });
+
+  it('refuses a usage or status the API does not know, before the service runs, naming what it takes', async () => {
+    expect((await get('?usage=some')).status).toBe(400);
+    const res = await get('?status=stalled');
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as {
+      error: { code: string; details?: unknown };
+    };
+    expect(body.error.code).toBe('VALIDATION_ERROR');
+    // One enum, so the refusal lists the groups beside the raw statuses.
+    expect(JSON.stringify(body.error.details)).toContain('attention');
+    expect(mediaSpies.list).not.toHaveBeenCalled();
   });
 });

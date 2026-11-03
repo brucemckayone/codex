@@ -5,6 +5,7 @@
  * All types are inferred from database schema or explicitly defined.
  */
 
+import type { MediaStatusGroup } from '@codex/constants';
 import type { DatabaseClient, dbHttp } from '@codex/database';
 import type {
   Content,
@@ -82,9 +83,25 @@ export interface ContentFilters {
  * Media item query filters
  */
 export interface MediaItemFilters {
-  status?: 'uploading' | 'uploaded' | 'transcoding' | 'ready' | 'failed';
+  /** A raw status, or one of `MEDIA_STATUS_GROUPS` (Codex-a6ofh.1.4). */
+  status?:
+    | 'uploading'
+    | 'uploaded'
+    | 'transcoding'
+    | 'ready'
+    | 'failed'
+    | MediaStatusGroup;
   mediaType?: 'video' | 'audio';
-  sortBy?: 'createdAt' | 'uploadedAt' | 'title';
+  /** Matched in the title or description; empty is no search. */
+  search?: string;
+  /** By what uses the item: the library chip's own reference set. */
+  usage?: 'any' | 'used' | 'unused';
+  sortBy?:
+    | 'createdAt'
+    | 'uploadedAt'
+    | 'title'
+    | 'durationSeconds'
+    | 'fileSizeBytes';
   sortOrder?: SortOrder;
 }
 

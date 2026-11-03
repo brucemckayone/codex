@@ -14,9 +14,13 @@
 
 import type { CdnCachePurger, R2Service } from '@codex/cloudflare-clients';
 import {
+  MEDIA_LIBRARY_PAGE_SIZE,
   MEDIA_STATUS,
+  MEDIA_STATUS_GROUPS,
+  MEDIA_UPLOAD_STALLED_AFTER_MS,
+  MEDIA_UPLOAD_URL_TTL_SECONDS,
+  type MediaStatusGroup,
   MIME_TO_EXTENSION,
-  PAGINATION,
   TRANSCODING_ERROR_CODES,
   TRANSCODING_ERROR_MAX_LENGTH,
 } from '@codex/constants';
@@ -57,7 +61,21 @@ import {
   createMediaItemSchema,
   updateMediaItemSchema,
 } from '@codex/validation';
-import { and, asc, desc, eq, isNotNull, isNull, lte } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  ilike,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  lte,
+  notInArray,
+  type SQL,
+  sql,
+} from 'drizzle-orm';
 import { MediaNotFoundError } from '../errors';
 import type {
   MediaItem,
@@ -70,6 +88,7 @@ import type {
 import {
   assertMediaDeletable,
   countMediaUses,
+  listUsedMediaIds,
   readMediaUses,
   summariseMediaUsage,
 } from './media-usage';
@@ -212,6 +231,42 @@ interface MediaItemServiceConfig extends ServiceConfig {
 }
 
 /**
+ * Escape a search for `ILIKE`, whose escape character is the backslash: the
+ * backslash first, then `%` and `_`, so each matches only itself.
+ */
+function escapeLikePattern(search: string): string {
+  return search.replace(/[\\%_]/g, (char) => `\\${char}`);
+}
+
+function isMediaStatusGroup(status: string): status is MediaStatusGroup {
+  return Object.hasOwn(MEDIA_STATUS_GROUPS, status);
+}
+
+/**
+ * The `status` filter (Codex-a6ofh.1.4): a raw status, or a group of them,
+ * read from `MEDIA_STATUS_GROUPS` itself (the schema takes its names from
+ * there too), so a new group filters by its statuses and never as a status
+ * no row has. `attention` is also every upload stalled past
+ * `MEDIA_UPLOAD_STALLED_AFTER_MS`, counted from the row's creation.
+ */
+function mediaStatusCondition(
+  status: NonNullable<MediaItemFilters['status']>,
+  now: Date
+): SQL {
+  if (!isMediaStatusGroup(status)) return eq(mediaItems.status, status);
+
+  const byStatus = inArray(mediaItems.status, [...MEDIA_STATUS_GROUPS[status]]);
+  if (status !== 'attention') return byStatus;
+  const stalledBefore = new Date(now.getTime() - MEDIA_UPLOAD_STALLED_AFTER_MS);
+  const stalled = and(
+    eq(mediaItems.status, MEDIA_STATUS.UPLOADING),
+    lt(mediaItems.createdAt, stalledBefore)
+  );
+  // Plain SQL, never `or()`: it cannot come back undefined to be dropped.
+  return sql`(${byStatus} or ${stalled})`;
+}
+
+/**
  * Media Item Service Class
  *
  * Handles all media item-related business logic:
@@ -325,7 +380,7 @@ export class MediaItemService extends BaseService {
           presignedUrl = await this.r2.generateSignedUploadUrl(
             newMediaItem.r2Key,
             newMediaItem.mimeType,
-            3600
+            MEDIA_UPLOAD_URL_TTL_SECONDS
           );
         } catch (err) {
           // Log so signing config issues are visible — but don't fail the create
@@ -875,10 +930,16 @@ export class MediaItemService extends BaseService {
    * - Scoped to creator (only shows own media)
    * - Excludes soft-deleted media
    *
-   * Features:
-   * - Pagination (page, limit)
-   * - Filtering (status, mediaType)
-   * - Sorting (by createdAt, uploadedAt, title)
+   * Features (Codex-a6ofh.1.4, data-design §1.1):
+   * - Pagination (page, limit); the total counts exactly the filtered rows
+   * - Search in title or description, LIKE-escaped
+   * - Status: a raw status or a `MEDIA_STATUS_GROUPS` group (`attention`
+   *   includes stalled uploads); media type
+   * - Usage: any, used or unused, by the chip's own reference set. It reads
+   *   its own snapshot, so a use added or removed while the request runs can
+   *   leave one row's chip disagreeing with the filter, until the next read
+   * - Sorting by createdAt, uploadedAt, title, durationSeconds or
+   *   fileSizeBytes; unmeasured last, id breaks ties
    *
    * @param creatorId - Creator ID (for authorization)
    * @param filters - Query filters
@@ -894,28 +955,48 @@ export class MediaItemService extends BaseService {
     filters: MediaItemFilters = {},
     pagination: PaginationParams = {
       page: 1,
-      limit: PAGINATION.DEFAULT,
+      limit: MEDIA_LIBRARY_PAGE_SIZE,
     }
   ): Promise<PaginatedListResponse<MediaListItem>> {
     try {
-      // Build WHERE conditions
-      const whereConditions = [scopedNotDeleted(mediaItems, creatorId)];
+      // Every condition goes here, before `where`: the count reads the same
+      // one, so the total always matches the filtered rows.
+      const whereConditions: SQL[] = [scopedNotDeleted(mediaItems, creatorId)];
 
-      // Add filters
       if (filters.status) {
-        whereConditions.push(eq(mediaItems.status, filters.status));
+        whereConditions.push(mediaStatusCondition(filters.status, new Date()));
       }
       if (filters.mediaType) {
         whereConditions.push(eq(mediaItems.mediaType, filters.mediaType));
       }
+      if (filters.search) {
+        const pattern = `%${escapeLikePattern(filters.search)}%`;
+        // Plain SQL, never `or()`: `and()` drops an undefined condition, and
+        // a dropped search would list every row.
+        whereConditions.push(
+          sql`(${ilike(mediaItems.title, pattern)} or ${ilike(mediaItems.description, pattern)})`
+        );
+      }
+      if (filters.usage === 'used' || filters.usage === 'unused') {
+        const used = await listUsedMediaIds(this.db, creatorId);
+        whereConditions.push(
+          filters.usage === 'used'
+            ? inArray(mediaItems.id, used)
+            : notInArray(mediaItems.id, used)
+        );
+      }
 
-      // Determine sort column and order
-      const sortColumn = filters.sortBy || 'createdAt';
+      // Determine sort column and order. A duration is null until the
+      // transcode measures it: last either way, never first. The id breaks
+      // ties, so pages keep their rows (many items share a duration).
+      const sortColumn = mediaItems[filters.sortBy || 'createdAt'];
       const sortOrder = filters.sortOrder || 'desc';
       const orderByClause =
         sortOrder === 'desc'
-          ? desc(mediaItems[sortColumn])
-          : asc(mediaItems[sortColumn]);
+          ? sql`${sortColumn} desc nulls last`
+          : sql`${sortColumn} asc nulls last`;
+      const tieBreak =
+        sortOrder === 'desc' ? desc(mediaItems.id) : asc(mediaItems.id);
 
       const where = and(...whereConditions);
       const page = await paginatedQuery({
@@ -926,7 +1007,7 @@ export class MediaItemService extends BaseService {
             where,
             limit,
             offset,
-            orderBy: [orderByClause],
+            orderBy: [orderByClause, tieBreak],
             columns: MEDIA_ITEM_RESPONSE_COLUMNS,
             with: {
               creator: {

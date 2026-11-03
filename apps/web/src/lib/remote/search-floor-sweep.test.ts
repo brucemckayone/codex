@@ -192,8 +192,9 @@ describe('every landed client gate is still wired', () => {
    * wrong if the surface starts hitting the API.
    */
   const CLIENT_ONLY_SEARCH = [
-    // Filters the CURRENT page's media items in memory (`filteredItems`);
-    // `mediaQuerySchema` has no `search` field, so nothing is sent.
+    // Filters the CURRENT page's media items in memory (`filteredItems`) and
+    // sends no `search`. `GET /api/media` takes one since Codex-a6ofh.1.4;
+    // the library that sends it (E1.6) must leave this list and gate it.
     'lib/components/studio/StudioMediaPage.svelte',
     // Filters the hydrated TanStack DB library collection in memory; the web
     // client never sends `search` to `getUserLibrary`.
