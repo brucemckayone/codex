@@ -169,6 +169,12 @@ describe('PurchaseService Integration', () => {
       throw new Error('Failed to create test organization');
     }
     organizationId = org.id;
+    // userId files content into this org, so is on its team (Codex-ocal6).
+    await db
+      .insert(schema.organizationMemberships)
+      .values(
+        createTestMembershipInput(organizationId, userId, { role: 'creator' })
+      );
   });
 
   afterAll(async () => {
@@ -1452,6 +1458,12 @@ describe('PurchaseService Integration', () => {
           .returning()
       );
       await setTestOrganisationPayee(db, org2.id, otherUserId);
+      // otherUserId files content into this org, so is on its team (Codex-ocal6).
+      await db
+        .insert(schema.organizationMemberships)
+        .values(
+          createTestMembershipInput(org2.id, otherUserId, { role: 'creator' })
+        );
 
       const stripeAccountId = `acct_disabled_${Date.now()}`;
       await db.insert(schema.stripeConnectAccounts).values({
@@ -1812,6 +1824,12 @@ describe('PurchaseService Integration', () => {
               slug: createUniqueSlug(`wp10-org-${titleSuffix}`),
             })
             .returning()
+        );
+        // creatorId files content into this org, so is on its team (Codex-ocal6).
+        await db.insert(schema.organizationMemberships).values(
+          createTestMembershipInput(localOrg.id, creatorId, {
+            role: 'creator',
+          })
         );
         await db.insert(schema.stripeConnectAccounts).values({
           userId: creatorId,
@@ -2195,6 +2213,14 @@ describe('PurchaseService Integration', () => {
         },
         userId
       );
+      // userId files this org's item, so is on its team (Codex-ocal6). A
+      // creator seat is not ownership: the payee still comes from the
+      // ownership period set above.
+      await db
+        .insert(schema.organizationMemberships)
+        .values(
+          createTestMembershipInput(multiOrg.id, userId, { role: 'creator' })
+        );
       const content = await contentService.create(
         {
           organizationId: multiOrg.id,
@@ -2261,6 +2287,13 @@ describe('PurchaseService Integration', () => {
         },
         userId
       );
+      // userId files this org's item, so is on its team (Codex-ocal6). A
+      // creator seat is not ownership, so the org still has no owner.
+      await db
+        .insert(schema.organizationMemberships)
+        .values(
+          createTestMembershipInput(ownerless.id, userId, { role: 'creator' })
+        );
       const content = await contentService.create(
         {
           organizationId: ownerless.id,
@@ -2917,6 +2950,14 @@ describe('PurchaseService Integration', () => {
         },
         userId
       );
+      // userId files this org's item, so is on its team (Codex-ocal6). A
+      // creator seat is not ownership: the payee still comes from the
+      // ownership period set above.
+      await db
+        .insert(schema.organizationMemberships)
+        .values(
+          createTestMembershipInput(refundOrg.id, userId, { role: 'creator' })
+        );
       const content = await contentService.create(
         {
           organizationId: refundOrg.id,
@@ -3222,6 +3263,14 @@ describe('PurchaseService Integration', () => {
         },
         userId
       );
+      // userId files this org's item, so is on its team (Codex-ocal6). A
+      // creator seat is not ownership: the payee still comes from the
+      // ownership period set above.
+      await db
+        .insert(schema.organizationMemberships)
+        .values(
+          createTestMembershipInput(partialOrg.id, userId, { role: 'creator' })
+        );
       const content = await contentService.create(
         {
           organizationId: partialOrg.id,
@@ -3440,6 +3489,14 @@ describe('PurchaseService Integration', () => {
         },
         userId
       );
+      // userId files this org's item, so is on its team (Codex-ocal6). A
+      // creator seat is not ownership: the payee still comes from the
+      // ownership period set above.
+      await db
+        .insert(schema.organizationMemberships)
+        .values(
+          createTestMembershipInput(sentinelOrg.id, userId, { role: 'creator' })
+        );
       const content = await contentService.create(
         {
           organizationId: sentinelOrg.id,
@@ -3613,6 +3670,14 @@ describe('PurchaseService Integration', () => {
         },
         userId
       );
+      // userId files this org's item, so is on its team (Codex-ocal6). A
+      // creator seat is not ownership: the payee still comes from the
+      // ownership period set above.
+      await db
+        .insert(schema.organizationMemberships)
+        .values(
+          createTestMembershipInput(pendingOrg.id, userId, { role: 'creator' })
+        );
       const content = await contentService.create(
         {
           organizationId: pendingOrg.id,
@@ -3789,6 +3854,14 @@ describe('PurchaseService Integration', () => {
         },
         userId
       );
+      // userId files this org's item, so is on its team (Codex-ocal6). A
+      // creator seat is not ownership: the payee still comes from the
+      // ownership period set above.
+      await db
+        .insert(schema.organizationMemberships)
+        .values(
+          createTestMembershipInput(landedOrg.id, userId, { role: 'creator' })
+        );
       const content = await contentService.create(
         {
           organizationId: landedOrg.id,
@@ -4151,6 +4224,14 @@ describe('PurchaseService Integration', () => {
       if (!salesOrg || !otherOrg) throw new Error('Failed to seed orgs');
       salesOrgId = salesOrg.id;
       otherOrgId = otherOrg.id;
+      // userId files content into both orgs, so is on both teams (Codex-ocal6).
+      await db
+        .insert(schema.organizationMemberships)
+        .values(
+          [salesOrgId, otherOrgId].map((orgId) =>
+            createTestMembershipInput(orgId, userId, { role: 'creator' })
+          )
+        );
 
       // Two pieces of content on salesOrg, one on otherOrg.
       async function makeContent(
@@ -4392,6 +4473,12 @@ describe('PurchaseService Integration', () => {
         .returning();
       if (!org) throw new Error('Failed to seed stats org');
       statsOrgId = org.id;
+      // userId files the stats item, so is on the team (Codex-ocal6).
+      await db
+        .insert(schema.organizationMemberships)
+        .values(
+          createTestMembershipInput(statsOrgId, userId, { role: 'creator' })
+        );
 
       const media = await mediaService.create(
         {
@@ -5483,6 +5570,12 @@ describe('PurchaseService Integration', () => {
 
       if (!org) throw new Error('Failed to create verify test organization');
       verifyOrgId = org.id;
+      // verifyUserId files content into this org, so is on its team (Codex-ocal6).
+      await db.insert(schema.organizationMemberships).values(
+        createTestMembershipInput(verifyOrgId, verifyUserId, {
+          role: 'creator',
+        })
+      );
 
       // Create content
       const media = await mediaService.create(
@@ -6920,6 +7013,14 @@ describe('PurchaseService Integration', () => {
         },
         userId
       );
+      // userId files this org's item, so is on its team (Codex-ocal6). A
+      // creator seat is not ownership: the payee still comes from the
+      // ownership period set above.
+      await db
+        .insert(schema.organizationMemberships)
+        .values(
+          createTestMembershipInput(mixedOrg.id, userId, { role: 'creator' })
+        );
       const orgContent = await contentService.create(
         {
           organizationId: mixedOrg.id,
