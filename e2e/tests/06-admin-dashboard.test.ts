@@ -238,6 +238,7 @@ describe('Admin Dashboard', () => {
             password: 'SecurePassword123!',
             role: 'creator',
           });
+        await adminFixture.addTeamMember(admin.organization.id, creator.id);
 
         // Create media item
         const testMediaId = `e2e-revenue-${Date.now()}`;
@@ -404,6 +405,7 @@ describe('Admin Dashboard', () => {
             password: 'SecurePassword123!',
             role: 'creator',
           });
+        await adminFixture.addTeamMember(admin1.organization.id, creator.id);
 
         const testMediaId = `e2e-scope-${Date.now()}`;
         const mediaResponse = await httpClient.post(
@@ -560,6 +562,7 @@ describe('Admin Dashboard', () => {
             password: 'SecurePassword123!',
             role: 'creator',
           });
+        await adminFixture.addTeamMember(admin.organization.id, creator.id);
 
         const testMediaId = `e2e-distinct-${Date.now()}`;
         const mediaResponse = await httpClient.post(
@@ -802,11 +805,13 @@ describe('Admin Dashboard', () => {
         });
 
         // Create some content
-        const { cookie: creatorCookie } = await authFixture.registerUser({
-          email: `creator-list-${Date.now()}@example.com`,
-          password: 'SecurePassword123!',
-          role: 'creator',
-        });
+        const { cookie: creatorCookie, user: creator } =
+          await authFixture.registerUser({
+            email: `creator-list-${Date.now()}@example.com`,
+            password: 'SecurePassword123!',
+            role: 'creator',
+          });
+        await adminFixture.addTeamMember(admin.organization.id, creator.id);
 
         // Create 3 content items
         for (let i = 0; i < 3; i++) {
@@ -852,11 +857,13 @@ describe('Admin Dashboard', () => {
           orgSlug: `filter-org-${Date.now()}`,
         });
 
-        const { cookie: creatorCookie } = await authFixture.registerUser({
-          email: `creator-filter-${Date.now()}@example.com`,
-          password: 'SecurePassword123!',
-          role: 'creator',
-        });
+        const { cookie: creatorCookie, user: creator } =
+          await authFixture.registerUser({
+            email: `creator-filter-${Date.now()}@example.com`,
+            password: 'SecurePassword123!',
+            role: 'creator',
+          });
+        await adminFixture.addTeamMember(admin.organization.id, creator.id);
 
         // Create draft content
         const draftResponse = await httpClient.post(
@@ -939,11 +946,13 @@ describe('Admin Dashboard', () => {
           orgSlug: `publish-org-${Date.now()}`,
         });
 
-        const { cookie: creatorCookie } = await authFixture.registerUser({
-          email: `creator-publish-${Date.now()}@example.com`,
-          password: 'SecurePassword123!',
-          role: 'creator',
-        });
+        const { cookie: creatorCookie, user: creator } =
+          await authFixture.registerUser({
+            email: `creator-publish-${Date.now()}@example.com`,
+            password: 'SecurePassword123!',
+            role: 'creator',
+          });
+        await adminFixture.addTeamMember(admin.organization.id, creator.id);
 
         // Create draft content
         const contentResponse = await httpClient.post(
@@ -985,11 +994,13 @@ describe('Admin Dashboard', () => {
           orgSlug: `unpublish-org-${Date.now()}`,
         });
 
-        const { cookie: creatorCookie } = await authFixture.registerUser({
-          email: `creator-unpublish-${Date.now()}@example.com`,
-          password: 'SecurePassword123!',
-          role: 'creator',
-        });
+        const { cookie: creatorCookie, user: creator } =
+          await authFixture.registerUser({
+            email: `creator-unpublish-${Date.now()}@example.com`,
+            password: 'SecurePassword123!',
+            role: 'creator',
+          });
+        await adminFixture.addTeamMember(admin.organization.id, creator.id);
 
         // Create and publish content
         const contentResponse = await httpClient.post(
@@ -1043,11 +1054,13 @@ describe('Admin Dashboard', () => {
           orgSlug: `delete-org-${Date.now()}`,
         });
 
-        const { cookie: creatorCookie } = await authFixture.registerUser({
-          email: `creator-delete-${Date.now()}@example.com`,
-          password: 'SecurePassword123!',
-          role: 'creator',
-        });
+        const { cookie: creatorCookie, user: creator } =
+          await authFixture.registerUser({
+            email: `creator-delete-${Date.now()}@example.com`,
+            password: 'SecurePassword123!',
+            role: 'creator',
+          });
+        await adminFixture.addTeamMember(admin.organization.id, creator.id);
 
         // Create content
         const contentResponse = await httpClient.post(
@@ -1106,11 +1119,13 @@ describe('Admin Dashboard', () => {
           orgSlug: `cross-org-2-${Date.now()}`,
         });
 
-        const { cookie: creatorCookie } = await authFixture.registerUser({
-          email: `creator-cross-${Date.now()}@example.com`,
-          password: 'SecurePassword123!',
-          role: 'creator',
-        });
+        const { cookie: creatorCookie, user: creator } =
+          await authFixture.registerUser({
+            email: `creator-cross-${Date.now()}@example.com`,
+            password: 'SecurePassword123!',
+            role: 'creator',
+          });
+        await adminFixture.addTeamMember(admin1.organization.id, creator.id);
 
         // Content in admin1's org
         const contentResponse = await httpClient.post(
@@ -1180,6 +1195,7 @@ describe('Admin Dashboard', () => {
             password: 'SecurePassword123!',
             role: 'creator',
           });
+        await adminFixture.addTeamMember(admin.organization.id, creator.id);
 
         const testMediaId = `e2e-customers-${Date.now()}`;
         const mediaResponse = await httpClient.post(
@@ -1313,6 +1329,7 @@ describe('Admin Dashboard', () => {
             password: 'SecurePassword123!',
             role: 'creator',
           });
+        await adminFixture.addTeamMember(admin.organization.id, creator.id);
 
         const testMediaId = `e2e-details-${Date.now()}`;
         const mediaResponse = await httpClient.post(
@@ -1445,6 +1462,7 @@ describe('Admin Dashboard', () => {
           password: 'SecurePassword123!',
           role: 'creator',
         });
+      await adminFixture.addTeamMember(admin.organization.id, creator.id);
 
       // First content (for initial purchase)
       const testMediaId1 = `e2e-grant-1-${Date.now()}`;
@@ -1662,6 +1680,7 @@ describe('Admin Dashboard', () => {
           password: 'SecurePassword123!',
           role: 'creator',
         });
+      await adminFixture.addTeamMember(admin.organization.id, creator.id);
 
       const testMediaId = `e2e-idem-${Date.now()}`;
       const mediaResponse = await httpClient.post(

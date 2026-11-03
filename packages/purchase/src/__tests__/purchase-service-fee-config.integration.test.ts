@@ -16,9 +16,14 @@
  */
 
 import { ContentService, MediaItemService } from '@codex/content';
-import { organizations, stripeConnectAccounts } from '@codex/database/schema';
+import {
+  organizationMemberships,
+  organizations,
+  stripeConnectAccounts,
+} from '@codex/database/schema';
 import {
   createTestConnectAccountInput,
+  createTestMembershipInput,
   createTestMoneyDeps,
   createUniqueSlug,
   type Database,
@@ -90,6 +95,13 @@ describe('PurchaseService × FeeConfigService integration', () => {
       .returning();
     if (!org) throw new Error('Failed to create test organization');
     organizationId = org.id;
+    // `creatorId` files every item into this org, so is on its team
+    // (Codex-ocal6): the service refuses org content from a non-member.
+    await db.insert(organizationMemberships).values(
+      createTestMembershipInput(organizationId, creatorId, {
+        role: 'creator',
+      })
+    );
   });
 
   afterAll(async () => {
