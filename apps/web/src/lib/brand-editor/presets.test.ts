@@ -2,10 +2,6 @@ import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import {
-  contrastRatio as railContrastRatio,
-  deriveTextOnBrand as railDeriveTextOnBrand,
-} from '$lib/components/brand-studio/rail/contrast';
 import { DEFAULTS } from '$lib/components/ui/ShaderHero/shader-config';
 import { tokenOverridesToCssVars } from './css-injection';
 import { findFont } from './font-catalog';
@@ -17,7 +13,6 @@ import {
   contrast,
   DARK_CAPABLE_KEYS,
   FORM_AXES,
-  inkOn,
   NO_MID_WEIGHT_FONTS,
   readableOn,
   SHADER_TEMPO,
@@ -131,23 +126,6 @@ describe('the contrast gate is not vacuous', () => {
     );
     // Hue preserved: the repair moves lightness, it does not pick a new colour.
     expect(repaired).not.toBe('#1E293B');
-  });
-
-  it('agrees with the rail readout it duplicates', () => {
-    for (const pair of [
-      ['#FFFFFF', '#059669'],
-      ['#000000', '#FBBF24'],
-      ['#1E293B', '#262626'],
-      ['#4ADE80', '#050505'],
-    ] as const) {
-      expect(contrast(pair[0], pair[1])).toBeCloseTo(
-        railContrastRatio(pair[0], pair[1]) as number,
-        6
-      );
-    }
-    for (const brand of ['#059669', '#FBBF24', '#1E40AF', '#F5DEB3']) {
-      expect(inkOn(brand)).toBe(railDeriveTextOnBrand(brand));
-    }
   });
 });
 

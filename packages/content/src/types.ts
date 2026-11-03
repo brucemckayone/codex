@@ -40,6 +40,7 @@ import type {
   PublicMediaItem,
   SingleItemResponse,
   SortOrder,
+  ThumbnailFrame,
 } from '@codex/shared-types';
 
 // The catalogue's wire types live in shared-types, so content-api, this
@@ -100,6 +101,12 @@ export interface ContentWithRelations extends Content {
   /** Never the payee's user id: every read leaves it out (Codex-kk6zx). */
   organization?: ReadableOrganization | null;
   mediaItem?: ServedMediaItem | null;
+  /**
+   * The creator's video its thumbnail is a frame of, its own included
+   * (Codex-tqvmx); null when it isn't one. Populated by `ContentService.get`
+   * only.
+   */
+  thumbnailFrame?: ThumbnailFrame | null;
   /**
    * Ids of the `categories` (topic taxonomy) this content belongs to (WP-5).
    * Populated by `ContentService.get` so the studio edit form can pre-select

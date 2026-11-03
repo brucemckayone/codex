@@ -10,6 +10,9 @@ export const ERROR_CODES = {
   MEDIA_IN_USE: 'MEDIA_IN_USE',
   MEDIA_USAGE_CHANGED: 'MEDIA_USAGE_CHANGED',
   MEDIA_DELETED: 'MEDIA_DELETED',
+  // A publish, or a save to live content, refused because its thumbnail is a
+  // frame of a deleted video (Codex-tqvmx).
+  THUMBNAIL_MEDIA_DELETED: 'THUMBNAIL_MEDIA_DELETED',
   CONTENT_NOT_FOUND: 'CONTENT_NOT_FOUND',
   VALIDATION_ERROR: 'VALIDATION_ERROR',
   INTERNAL_ERROR: 'INTERNAL_ERROR',
