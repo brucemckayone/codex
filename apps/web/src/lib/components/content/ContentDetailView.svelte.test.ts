@@ -565,7 +565,9 @@ describe('Buy only when a purchase opens the item (Codex-2hxff.14)', () => {
         expect(step(overlay)?.textContent?.trim()).toBe(m.upgrade_cta_title());
         expect(step(overlay)?.getAttribute('href')).toBe(PRICING);
         // The words it ended on before, whatever the gate.
-        expect(overlay.textContent).not.toContain(m.purchase_cta_description());
+        expect(overlay.textContent).not.toContain(
+          'Get full access to this content'
+        );
       });
 
       test('on a plan a cheaper one beats: Change Plan, and Manage plan stays in the paywall', async () => {
