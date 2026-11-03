@@ -22,8 +22,23 @@
 
 import { FEES } from '@codex/constants';
 import type { DatabaseClient } from '@codex/database';
-import { feeChanges, feeConfigVersions } from '@codex/database/schema';
-import { and, desc, eq, isNotNull, isNull, type SQL, sql } from 'drizzle-orm';
+import {
+  feeChanges,
+  feeConfigOrg,
+  feeConfigOrgCreator,
+  feeConfigPlatform,
+  feeConfigVersions,
+} from '@codex/database/schema';
+import {
+  and,
+  desc,
+  eq,
+  isNotNull,
+  isNull,
+  lte,
+  type SQL,
+  sql,
+} from 'drizzle-orm';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -531,4 +546,169 @@ export function exampleOneOffSplit(
     platformCents = floor;
   }
   return { platformCents, orgCents, creatorCents: creator };
+}
+
+// ─── Writing a level ─────────────────────────────────────────────────────────
+
+/**
+ * Writes at one level take turns: admin-api's saves (the second classifies
+ * against the first) and notifications-api's daily mirror. An advisory lock,
+ * because a level with no change yet has no row to lock (the pattern of
+ * agreement-service.ts and payout-ledger.ts).
+ */
+export async function lockFeeLevel(
+  tx: Queryable,
+  level: FeeLevel
+): Promise<void> {
+  await tx.execute(
+    sql`SELECT pg_advisory_xact_lock(hashtext(${`fee-level:${feeLevelKey(level)}`}))`
+  );
+}
+
+/**
+ * Set a level's old "current row" (`fee_config_platform`, `_org`,
+ * `_org_creator`) to the values in force at `now`, never a waiting rise, so
+ * code rolled back to before migration 0123 reads the fee sales pay (§6.1
+ * Migrate). A removed version, or none, deletes the row, as the old code did.
+ * Every admin write calls it in its transaction; notifications-api's daily
+ * run calls it once a dated rise has started. Hold the level's lock. Answers
+ * whether it wrote anything (a delete of a row already gone writes nothing).
+ */
+export async function mirrorLegacyFeeRow(
+  tx: Queryable,
+  level: FeeLevel,
+  author: string | null,
+  now: Date
+): Promise<boolean> {
+  const [inForce] = await tx
+    .select({
+      platformFeePercent: feeConfigVersions.platformFeePercent,
+      oneOffOrgFeePercent: feeConfigVersions.oneOffOrgFeePercent,
+      subscriptionOrgFeePercent: feeConfigVersions.subscriptionOrgFeePercent,
+      orgFeePercent: feeConfigVersions.orgFeePercent,
+      minPlatformFeeCents: feeConfigVersions.minPlatformFeeCents,
+      minTransferCents: feeConfigVersions.minTransferCents,
+      notes: feeConfigVersions.notes,
+      removed: feeConfigVersions.removed,
+    })
+    .from(feeChanges)
+    .innerJoin(
+      feeConfigVersions,
+      and(
+        eq(feeConfigVersions.changeId, feeChanges.id),
+        isNull(feeConfigVersions.supersededAt)
+      )
+    )
+    .where(
+      and(
+        feeLevelWhere(level),
+        isNull(feeChanges.voidedAt),
+        lte(feeChanges.effectiveFrom, now)
+      )
+    )
+    .orderBy(desc(feeChanges.effectiveFrom), desc(feeChanges.createdAt))
+    .limit(1);
+  const raw = inForce && !inForce.removed ? inForce : null;
+  const stamp = { updatedBy: author, updatedAt: now };
+  if (level.scope === 'platform') {
+    if (!raw) {
+      const gone = await tx
+        .delete(feeConfigPlatform)
+        .where(eq(feeConfigPlatform.id, 'singleton'))
+        .returning();
+      return gone.length > 0;
+    }
+    const values = {
+      platformFeePercent:
+        raw.platformFeePercent ?? CODE_DEFAULT_PLATFORM.platformFeePercent ?? 0,
+      subscriptionOrgFeePercent:
+        raw.subscriptionOrgFeePercent ??
+        CODE_DEFAULT_PLATFORM.subscriptionOrgFeePercent ??
+        0,
+      oneOffOrgFeePercent:
+        raw.oneOffOrgFeePercent ??
+        CODE_DEFAULT_PLATFORM.oneOffOrgFeePercent ??
+        0,
+      minPlatformFeeCents:
+        raw.minPlatformFeeCents ??
+        CODE_DEFAULT_PLATFORM.minPlatformFeeCents ??
+        0,
+      minTransferCents: raw.minTransferCents ?? 0,
+    };
+    await tx
+      .insert(feeConfigPlatform)
+      .values({ id: 'singleton', ...values, version: 1, ...stamp })
+      .onConflictDoUpdate({
+        target: feeConfigPlatform.id,
+        set: {
+          ...values,
+          version: sql`${feeConfigPlatform.version} + 1`,
+          ...stamp,
+        },
+      });
+    return true;
+  }
+  const values = {
+    platformFeePercent: raw?.platformFeePercent ?? null,
+    orgFeePercent: raw?.orgFeePercent ?? null,
+    minPlatformFeeCents: raw?.minPlatformFeeCents ?? null,
+    minTransferCents: raw?.minTransferCents ?? null,
+  };
+  if (level.scope === 'org') {
+    if (!raw) {
+      const gone = await tx
+        .delete(feeConfigOrg)
+        .where(eq(feeConfigOrg.organizationId, level.organizationId))
+        .returning();
+      return gone.length > 0;
+    }
+    await tx
+      .insert(feeConfigOrg)
+      .values({
+        organizationId: level.organizationId,
+        ...values,
+        version: 1,
+        ...stamp,
+      })
+      .onConflictDoUpdate({
+        target: feeConfigOrg.organizationId,
+        set: {
+          ...values,
+          version: sql`${feeConfigOrg.version} + 1`,
+          ...stamp,
+        },
+      });
+    return true;
+  }
+  const where = and(
+    eq(feeConfigOrgCreator.organizationId, level.organizationId),
+    eq(feeConfigOrgCreator.creatorId, level.creatorId)
+  );
+  if (!raw) {
+    const gone = await tx.delete(feeConfigOrgCreator).where(where).returning();
+    return gone.length > 0;
+  }
+  await tx
+    .insert(feeConfigOrgCreator)
+    .values({
+      organizationId: level.organizationId,
+      creatorId: level.creatorId,
+      ...values,
+      notes: raw.notes,
+      version: 1,
+      ...stamp,
+    })
+    .onConflictDoUpdate({
+      target: [
+        feeConfigOrgCreator.organizationId,
+        feeConfigOrgCreator.creatorId,
+      ],
+      set: {
+        ...values,
+        notes: raw.notes,
+        version: sql`${feeConfigOrgCreator.version} + 1`,
+        ...stamp,
+      },
+    });
+  return true;
 }

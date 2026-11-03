@@ -586,11 +586,17 @@ and the balance stays £0 throughout.
   the renewal still switches to monthly and its invoice is void. A refund or
   lost dispute cancels the subscription, and the schedule with it.
 - **Rollback.** A schedule already attached still switches the billing at
-  the renewal (it is Stripe's), but older workers' cancel fails with
-  Stripe's 400 on those subscriptions. List them with
-  `SELECT id, stripe_subscription_id, stripe_schedule_id FROM subscriptions
-  WHERE stripe_schedule_id IS NOT NULL`, and release them at Stripe or roll
-  forward (preferred).
+  the renewal (it is Stripe's). The older workers' webhook then writes
+  `billing_interval = 'month'` beside `pending_billing_interval = 'month'`,
+  which fails `check_subscription_pending_billing` (0125) on every retry, so
+  the row stops following Stripe; their cancel also fails, with Stripe's
+  400. Roll forward instead (preferred), or before any rollback list every
+  waiting move, change of billing and schedule, release each schedule at
+  Stripe AND clear the six waiting columns (`pending_tier_id`,
+  `pending_tier_from`, `held_amount_cents`, `pending_billing_interval`,
+  `pending_amount_cents`, `stripe_schedule_id`). The queries are in the
+  [release checklist](release-checklist.md) (0122, 0124 and 0125 ›
+  Rollback).
 
 ## Price changes
 

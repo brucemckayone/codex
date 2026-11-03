@@ -220,7 +220,7 @@ export const issueSupportRefund = command(
       const result = await api.issueRefund(chargeId, body);
       return { outcome: 'done' as const, result };
     } catch (error) {
-      return toSupportFailure(error);
+      return toSupportFailure(error, 'issueSupportRefund', { chargeId });
     }
   }
 );
@@ -239,7 +239,7 @@ export const resolveFailedRefund = command(
       const result = await api.resolveFailedRefund(refundId, body);
       return { outcome: 'done' as const, result };
     } catch (error) {
-      return toSupportFailure(error);
+      return toSupportFailure(error, 'resolveFailedRefund', { refundId });
     }
   }
 );
@@ -258,7 +258,7 @@ export const resolveCreatorDebt = command(
       const result = await api.resolveCreatorDebt(reviewId, body);
       return { outcome: 'done' as const, result };
     } catch (error) {
-      return toSupportFailure(error);
+      return toSupportFailure(error, 'resolveCreatorDebt', { reviewId });
     }
   }
 );
@@ -280,7 +280,7 @@ export const resolveOwedToCreator = command(
       const result = await api.resolveOwedToCreator(creditId, body);
       return { outcome: 'done' as const, result };
     } catch (error) {
-      return toSupportFailure(error);
+      return toSupportFailure(error, 'resolveOwedToCreator', { creditId });
     }
   }
 );
@@ -297,7 +297,7 @@ export const checkOwedToCreator = command(
       const result = await api.checkOwedToCreator(creditId);
       return { outcome: 'done' as const, result };
     } catch (error) {
-      return toSupportFailure(error);
+      return toSupportFailure(error, 'checkOwedToCreator', { creditId });
     }
   }
 );
@@ -321,7 +321,7 @@ export const markToldAnotherWay = command(
       const result = await api.markToldAnotherWay(noticeId, body);
       return { outcome: 'done' as const, result };
     } catch (error) {
-      return toSupportFailure(error);
+      return toSupportFailure(error, 'markToldAnotherWay', { noticeId });
     }
   }
 );
@@ -339,7 +339,7 @@ export const retryPriceMove = command(
       const result = await api.retryPriceMove(moveId);
       return { outcome: 'done' as const, result };
     } catch (error) {
-      return toSupportFailure(error);
+      return toSupportFailure(error, 'retryPriceMove', { moveId });
     }
   }
 );
@@ -361,7 +361,7 @@ export const closePriceMove = command(
       const result = await api.closePriceMove(moveId, body);
       return { outcome: 'done' as const, result };
     } catch (error) {
-      return toSupportFailure(error);
+      return toSupportFailure(error, 'closePriceMove', { moveId });
     }
   }
 );
@@ -379,7 +379,7 @@ export const restartPriceChange = command(
       const result = await api.restartPriceChange(changeId);
       return { outcome: 'done' as const, result };
     } catch (error) {
-      return toSupportFailure(error);
+      return toSupportFailure(error, 'restartPriceChange', { changeId });
     }
   }
 );

@@ -251,6 +251,41 @@ describe('SubscribeButton', () => {
     expect(screen.getByTestId('subscribe-button-manage')).toBeTruthy();
   });
 
+  // The preview's end screen offers the step that opens the item and leaves
+  // Manage plan to the paywall under it (Codex-2hxff.99, "Plan button only").
+  test.each([
+    [
+      'active + upgradeRequired',
+      { status: 'active' as const },
+      'subscribe-button-upgrade',
+    ],
+    [
+      'cancelling',
+      { status: 'active' as const, cancelAtPeriodEnd: true },
+      'subscribe-button-reactivate',
+    ],
+    [
+      'past_due',
+      { status: 'past_due' as const },
+      'subscribe-button-update-payment',
+    ],
+    ['paused', { status: 'paused' as const }, 'subscribe-button-resume'],
+  ])('%s, showManage false → the step only, no Manage plan', (_label, state, step) => {
+    seed(state);
+    component = mount(SubscribeButton, {
+      target: document.body,
+      props: {
+        organizationId: ORG_ID,
+        isAuthenticated: true,
+        upgradeRequired: true,
+        showManage: false,
+      },
+    });
+
+    expect(screen.getByTestId(step)).toBeTruthy();
+    expect(screen.getByTestId('subscribe-button-manage')).toBeNull();
+  });
+
   test('paused → clicking Resume calls resumeSubscription and optimistically flips to active (Codex-7h4vo)', async () => {
     const { resumeSubscription } = await import(
       '$lib/remote/subscription.remote'

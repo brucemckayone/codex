@@ -215,6 +215,12 @@ export async function cleanupDatabase(db: Database): Promise<void> {
   await db.delete(schema.payoutReversals);
   await db.delete(schema.payouts);
   await db.delete(schema.purchases);
+  // Codex-2hxff.85/.86 (0124): a price move RESTRICTs its subscription or
+  // course subscription, organisation, user and change; a price change
+  // RESTRICTs its organisation, tier or course plan and users. Its
+  // superseded_by self-FK is fine in one DELETE.
+  await db.delete(schema.subscriptionPriceMoves);
+  await db.delete(schema.priceChanges);
   // Codex-2hxff.23: subscriptions, course subscriptions and the legacy
   // pending_payouts RESTRICT their user, organisation and course (money
   // history is never deleted with its owner), so they go before all three.
@@ -269,6 +275,12 @@ export async function cleanupDatabaseComplete(db: Database): Promise<void> {
   await db.delete(schema.payoutReversals);
   await db.delete(schema.payouts);
   await db.delete(schema.purchases);
+  // Codex-2hxff.85/.86 (0124): a price move RESTRICTs its subscription or
+  // course subscription, organisation, user and change; a price change
+  // RESTRICTs its organisation, tier or course plan and users. Its
+  // superseded_by self-FK is fine in one DELETE.
+  await db.delete(schema.subscriptionPriceMoves);
+  await db.delete(schema.priceChanges);
   // Codex-2hxff.23: subscriptions, course subscriptions and the legacy
   // pending_payouts RESTRICT their user, organisation and course (money
   // history is never deleted with its owner), so they go before all three.
@@ -293,6 +305,10 @@ export async function cleanupDatabaseComplete(db: Database): Promise<void> {
   // Filled by a trigger from the delete above (Codex-2hxff.47); no FK.
   await db.delete(schema.stripeConnectAccountHistory);
   await db.delete(schema.organizations);
+  // Codex-2hxff.33 (0123): a fee notice RESTRICTs the support user who marked
+  // it told another way. An organisation's notices went with its fee changes
+  // above; a platform change's stay, so they go before the users.
+  await db.delete(schema.feeChangeNotices);
   await db.delete(schema.users);
 }
 

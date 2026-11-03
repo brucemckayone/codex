@@ -14,15 +14,18 @@
  *      `unknown`, oldest first, claimed under FOR UPDATE SKIP LOCKED. Each
  *      send waits FEE_NOTICE_TIMEOUT_MS at most, and no batch starts after
  *      FEE_SENDS_TIME_BUDGET_MS: the rest are given back for the next
- *      morning, so the dates and the alert always run. An
- *      `unknown` from an earlier run is first looked for in
- *      `email_audit_logs`: found sent, it counts as told then and nothing is
- *      resent (M1's rule). Each email names a date: the change's, or the
- *      earliest it can be (Q1). The words are worked out at send time, so a
+ *      morning, so the dates and the alert always run. A notice tried on
+ *      an earlier run is first looked for in `email_audit_logs`: found sent
+ *      or pending, it counts as told then and nothing is resent (M1's rule,
+ *      with F4's: on every reclaim). Each email names a date: the change's,
+ *      or the earliest it can be (Q1). The words are worked out at send time, so a
  *      rise made smaller is announced with its smaller figure.
  *   4. DATE: a rise whose list has nobody left waiting is dated the first UK
  *      midnight at least 30 days after the last of them was told
- *      (`dateRiseIfAllTold`, shared with support's "told another way").
+ *      (`dateRiseIfAllTold`, shared with support's "told another way"). A
+ *      rise whose date has come puts its values in its level's old
+ *      `fee_config_*` row (`mirrorLegacyFeeRow`, as every admin write does),
+ *      so code rolled back to before 0123 charges the fee sales pay.
  *   5. FOLLOW-UPS: `smaller` (Q2) and `cancelled` (F2) emails go the same
  *      way. They hold nothing, so after 3 failed mornings they are dropped
  *      (`not_needed`) with a log line, and never reach support.
@@ -48,7 +51,10 @@ import {
   gte,
   inArray,
   isNull,
+  lt,
+  lte,
   messageForLog,
+  or,
   sql,
 } from '@codex/database';
 import {
@@ -60,6 +66,9 @@ import {
   type FeeNoticeRoleValues,
   feeChangeNotices,
   feeChanges,
+  feeConfigOrg,
+  feeConfigOrgCreator,
+  feeConfigPlatform,
   organizations,
   users,
 } from '@codex/database/schema';
@@ -71,8 +80,11 @@ import {
   dateRiseIfAllTold,
   dbFeeVersionReader,
   FEE_NOTICE_OPEN_STATES,
+  type FeeLevel,
   feeRiseStartAfter,
+  lockFeeLevel,
   londonDate,
+  mirrorLegacyFeeRow,
   resolveFeesAt,
   WAITING_RISE,
 } from '@codex/payments';
@@ -103,16 +115,27 @@ const SEND_CONCURRENCY = 8;
 /** A notice attempted this recently is not claimed again (overlapping runs). */
 const RECLAIM_AFTER_MS = 12 * 60 * 60 * 1000;
 /**
+ * The owner's rule is to alert only when a person is needed. An `unknown`
+ * send (a 5xx or a timeout: it may have gone, and each morning checks the
+ * email log, then tries again) is named in the alert only after this many
+ * mornings, as a price move is held after PRICE_MOVE_TRIES, or once its rise
+ * starts within this many days, too soon for the mornings left. A `failed`
+ * one (refused, skipped, no address) can't mend itself: it is named at once.
+ */
+const UNKNOWN_TRIES_BEFORE_ALERT = 3;
+const DAY_MS = 24 * 60 * 60 * 1000;
+/**
  * How long one send may take, as the price-moves step's
  * PRICE_NOTICE_TIMEOUT_MS. A send still running then is `unknown` (it MAY
  * have gone), so the next run checks the email log first.
  */
 const FEE_NOTICE_TIMEOUT_MS = 5_000;
 /**
- * No send batch starts after this, counted from the step's start, as the
- * price-moves step's PRICE_MOVES_TIME_BUDGET_MS. The step runs last in the
- * 08:00 chain, inside the cron's 15-minute wall, and the dates and the alert
- * run after the sends.
+ * No send batch starts after this, counted from the 08:00 invocation's start
+ * (the step's own start when it has none), as the price-moves step's
+ * PRICE_MOVES_TIME_BUDGET_MS. The step runs last in the 08:00 chain, after
+ * the agreement and money sweeps, inside the cron's 15-minute wall, and the
+ * dates and the alert run after the sends.
  */
 export const FEE_SENDS_TIME_BUDGET_MS = 8 * 60 * 1000;
 
@@ -161,6 +184,12 @@ export interface RunFeeNoticesSweepDeps {
   perRun?: number;
   /** Real time, for the send budget (testing only). */
   clock?: () => number;
+  /**
+   * When the 08:00 invocation started (ms since the epoch): the send budget
+   * counts from it, because the sweeps before this step use the same wall.
+   * Default: the step's own start.
+   */
+  wakeStartedAt?: number;
   /** Testing only. */
   sendTimeoutMs?: number;
   /**
@@ -185,6 +214,8 @@ export interface FeeNoticesSweepResult {
   /** Claims given back unsent: the send budget ran out. */
   givenBack: number;
   dated: number;
+  /** Levels whose old fee row took a rise that has started. */
+  mirrored: number;
   skippedTemplates: FeeTemplate[];
   errors: number;
 }
@@ -385,10 +416,16 @@ function payeesOf(
 ): Promise<Map<string, AffectedPayee>> {
   let found = ctx.payees.get(change.id);
   if (!found) {
-    found = affectedPayees(ctx.db, change, ctx.now).then(
+    const reading = affectedPayees(ctx.db, change, ctx.now).then(
       (list) => new Map(list.map((p) => [p.userId, p]))
     );
-    ctx.payees.set(change.id, found);
+    // A failed read is never kept: the next part reads again, rather than
+    // every notice of the change failing on the one rejection.
+    reading.catch(() => {
+      if (ctx.payees.get(change.id) === reading) ctx.payees.delete(change.id);
+    });
+    ctx.payees.set(change.id, reading);
+    found = reading;
   }
   return found;
 }
@@ -565,8 +602,11 @@ async function claim(ctx: SweepContext): Promise<Claimed[]> {
 }
 
 /**
- * M1's rule for an `unknown`: did the email go after all? A success in the
- * email log for this notice, since its last try, counts as told then.
+ * Did the email go after all? Asked on every claim after an earlier try,
+ * whatever that try recorded (F4's rule, as the price-moves step): a run cut
+ * off after sending leaves the notice `due`. A `success` or `pending` row in
+ * the email log for this notice since its last try counts as told then: a
+ * `pending` one may have gone.
  */
 async function foundSent(
   ctx: SweepContext,
@@ -583,7 +623,7 @@ async function foundSent(
       and(
         eq(emailAuditLogs.templateName, TEMPLATE_FOR[notice.kind]),
         eq(emailAuditLogs.recipientEmail, email),
-        eq(emailAuditLogs.status, 'success'),
+        inArray(emailAuditLogs.status, ['success', 'pending']),
         gte(emailAuditLogs.createdAt, since),
         sql`strpos(${emailAuditLogs.metadata}, ${`"feeNoticeId":"${notice.id}"`}) > 0`
       )
@@ -738,7 +778,7 @@ async function sendOne(
   const person = people.get(notice.userId);
   const email = person && person.deletedAt === null ? person.email : null;
 
-  if (notice.state === 'unknown' && email) {
+  if (notice.prevAttemptedAt !== null && email) {
     const at = await foundSent(ctx, notice, email);
     if (at) {
       await record(ctx, notice, {
@@ -868,8 +908,8 @@ async function sendOne(
  * `unknown` is still checked against the email log from its real last try.
  * The next morning claims them.
  */
-async function giveBack(ctx: SweepContext, unsent: Claimed[]): Promise<void> {
-  if (unsent.length === 0) return;
+async function giveBack(ctx: SweepContext, unsent: Claimed[]): Promise<number> {
+  if (unsent.length === 0) return 0;
   const back = await ctx.db.execute(sql`
     UPDATE ${feeChangeNotices} AS n
        SET attempts = n.attempts - 1, attempted_at = g.prev,
@@ -889,11 +929,46 @@ async function giveBack(ctx: SweepContext, unsent: Claimed[]): Promise<void> {
        AND n.state IN ('due', 'failed', 'unknown')
     RETURNING n.id
   `);
-  ctx.result.givenBack = back.rows.length;
-  ctx.obs.warn('fee step: the send budget ran out; the rest go tomorrow', {
-    givenBack: back.rows.length,
-    sent: ctx.result.sent,
-  });
+  ctx.result.givenBack += back.rows.length;
+  return back.rows.length;
+}
+
+/**
+ * Who each change affects, read once before any of its emails: an
+ * announcement or a smaller-rise email needs it. A change whose read fails
+ * has its claims given back, untried, with one alert naming it, not one per
+ * notice: they go the next morning.
+ */
+async function withoutUnreadChanges(
+  ctx: SweepContext,
+  claimed: Claimed[],
+  changes: Map<string, FeeChangeRow>
+): Promise<Claimed[]> {
+  const unread = new Set<string>();
+  for (const changeId of new Set(
+    claimed.filter((n) => n.kind !== 'cancelled').map((n) => n.changeId)
+  )) {
+    const change = changes.get(changeId);
+    if (!change) continue;
+    try {
+      await payeesOf(ctx, change);
+    } catch (error) {
+      unread.add(changeId);
+      const ofChange = claimed.filter((n) => n.changeId === changeId);
+      const givenBack = await giveBack(ctx, ofChange);
+      ctx.result.errors += 1;
+      ctx.obs.error(
+        'fee step: could not read who a fee rise affects; its emails go tomorrow',
+        {
+          errorId: crypto.randomUUID(),
+          changeId,
+          givenBack,
+          error: messageForLog(error),
+        }
+      );
+    }
+  }
+  return claimed.filter((n) => !unread.has(n.changeId));
 }
 
 async function sendDue(ctx: SweepContext): Promise<void> {
@@ -905,14 +980,19 @@ async function sendDue(ctx: SweepContext): Promise<void> {
     .from(feeChanges)
     .where(inArray(feeChanges.id, changeIds));
   const changes = new Map(rows.map((c) => [c.id, c]));
-  const people = await recipientsOf(ctx, claimed);
-  for (let i = 0; i < claimed.length; i += SEND_CONCURRENCY) {
+  const sendable = await withoutUnreadChanges(ctx, claimed, changes);
+  const people = await recipientsOf(ctx, sendable);
+  for (let i = 0; i < sendable.length; i += SEND_CONCURRENCY) {
     if (ctx.clock() >= ctx.sendsUntil) {
-      await giveBack(ctx, claimed.slice(i));
+      const givenBack = await giveBack(ctx, sendable.slice(i));
+      ctx.obs.warn('fee step: the send budget ran out; the rest go tomorrow', {
+        givenBack,
+        sent: ctx.result.sent,
+      });
       return;
     }
     await Promise.all(
-      claimed.slice(i, i + SEND_CONCURRENCY).map(async (notice) => {
+      sendable.slice(i, i + SEND_CONCURRENCY).map(async (notice) => {
         try {
           await sendOne(ctx, notice, changes, people);
         } catch (error) {
@@ -961,12 +1041,173 @@ async function dateRises(ctx: SweepContext): Promise<void> {
   }
 }
 
-// ─── 6. The alert ────────────────────────────────────────────────────────────
+/**
+ * A dated rise that has started puts its values in its level's old current
+ * row (`fee_config_*`), so code rolled back to before 0123 charges the fee
+ * sales pay. A level is due when a rise there started after its row was last
+ * written, or it has no row: a missed morning is caught the next one, and a
+ * level once mirrored is not again.
+ */
+async function mirrorStartedRises(ctx: SweepContext): Promise<void> {
+  const started = and(
+    eq(feeChanges.kind, 'rise'),
+    isNull(feeChanges.voidedAt),
+    lte(feeChanges.effectiveFrom, ctx.now),
+    scope(ctx)
+  );
+  const [platform, orgs, creators] = await Promise.all([
+    ctx.db
+      .select({ id: feeChanges.id })
+      .from(feeChanges)
+      .leftJoin(feeConfigPlatform, eq(feeConfigPlatform.id, 'singleton'))
+      .where(
+        and(
+          eq(feeChanges.scope, 'platform'),
+          started,
+          or(
+            isNull(feeConfigPlatform.updatedAt),
+            lt(feeConfigPlatform.updatedAt, feeChanges.effectiveFrom)
+          )
+        )
+      )
+      .limit(1),
+    ctx.db
+      .selectDistinct({ organizationId: feeChanges.organizationId })
+      .from(feeChanges)
+      .leftJoin(
+        feeConfigOrg,
+        eq(feeConfigOrg.organizationId, feeChanges.organizationId)
+      )
+      .where(
+        and(
+          eq(feeChanges.scope, 'org'),
+          started,
+          or(
+            isNull(feeConfigOrg.updatedAt),
+            lt(feeConfigOrg.updatedAt, feeChanges.effectiveFrom)
+          )
+        )
+      ),
+    ctx.db
+      .selectDistinct({
+        organizationId: feeChanges.organizationId,
+        creatorId: feeChanges.creatorId,
+      })
+      .from(feeChanges)
+      .leftJoin(
+        feeConfigOrgCreator,
+        and(
+          eq(feeConfigOrgCreator.organizationId, feeChanges.organizationId),
+          eq(feeConfigOrgCreator.creatorId, feeChanges.creatorId)
+        )
+      )
+      .where(
+        and(
+          eq(feeChanges.scope, 'creator'),
+          started,
+          or(
+            isNull(feeConfigOrgCreator.updatedAt),
+            lt(feeConfigOrgCreator.updatedAt, feeChanges.effectiveFrom)
+          )
+        )
+      ),
+  ]);
+  const levels: FeeLevel[] = [];
+  if (platform.length > 0) levels.push({ scope: 'platform' });
+  for (const { organizationId } of orgs) {
+    if (organizationId) levels.push({ scope: 'org', organizationId });
+  }
+  for (const { organizationId, creatorId } of creators) {
+    if (organizationId && creatorId) {
+      levels.push({ scope: 'creator', organizationId, creatorId });
+    }
+  }
+  for (const level of levels) {
+    try {
+      // The level's lock, as an admin write takes it: a save mirrors in its
+      // own transaction, and the two take turns.
+      const wrote = await ctx.db.transaction(async (tx) => {
+        await lockFeeLevel(tx, level);
+        return mirrorLegacyFeeRow(tx, level, null, ctx.now);
+      });
+      if (wrote) {
+        ctx.result.mirrored += 1;
+        ctx.obs.info('fee step: a started rise is in the old fee row', {
+          ...level,
+        });
+      }
+    } catch (error) {
+      ctx.result.errors += 1;
+      ctx.obs.error(
+        'fee step: a started rise could not reach the old fee row',
+        {
+          errorId: crypto.randomUUID(),
+          ...level,
+          error: messageForLog(error),
+        }
+      );
+    }
+  }
+}
+
+// ─── 6. The alerts ───────────────────────────────────────────────────────────
+
+/**
+ * A missing template holds its emails untried, and a rise waits for them, so
+ * a person is needed: one alert per missing template a run meets, naming the
+ * changes waiting on it (50 at most). One nothing waits on yet is a warning.
+ */
+async function alertMissingTemplates(ctx: SweepContext): Promise<void> {
+  for (const templateName of ctx.result.skippedTemplates) {
+    const kinds = (Object.keys(TEMPLATE_FOR) as NoticeKind[]).filter(
+      (kind) => TEMPLATE_FOR[kind] === templateName
+    );
+    const waiting = await ctx.db
+      .selectDistinct({ changeId: feeChangeNotices.changeId })
+      .from(feeChangeNotices)
+      .innerJoin(feeChanges, eq(feeChanges.id, feeChangeNotices.changeId))
+      .where(
+        and(
+          inArray(feeChangeNotices.kind, kinds),
+          inArray(feeChangeNotices.state, [...FEE_NOTICE_OPEN_STATES]),
+          or(eq(feeChangeNotices.kind, 'cancelled'), notStarted(ctx.now)),
+          scope(ctx)
+        )
+      )
+      .limit(ALERT_NAMED);
+    if (waiting.length === 0) {
+      ctx.obs.warn('fee step: template missing; nothing waits on it yet', {
+        templateName,
+      });
+      continue;
+    }
+    ctx.obs.error(
+      'fee step: template missing, so its emails wait and every rise waiting on them with them. Restore it in Admin › Templates',
+      {
+        errorId: crypto.randomUUID(),
+        templateName,
+        changeIds: waiting.map((w) => w.changeId),
+      }
+    );
+  }
+}
 
 async function alertNotTold(ctx: SweepContext): Promise<void> {
+  const soon = new Date(
+    ctx.now.getTime() + UNKNOWN_TRIES_BEFORE_ALERT * DAY_MS
+  );
   const where = and(
     eq(feeChangeNotices.kind, 'announce'),
-    inArray(feeChangeNotices.state, ['failed', 'unknown']),
+    or(
+      eq(feeChangeNotices.state, 'failed'),
+      and(
+        eq(feeChangeNotices.state, 'unknown'),
+        or(
+          gte(feeChangeNotices.attempts, UNKNOWN_TRIES_BEFORE_ALERT),
+          lte(feeChanges.effectiveFrom, soon)
+        )
+      )
+    ),
     notStarted(ctx.now),
     scope(ctx)
   );
@@ -1019,10 +1260,8 @@ async function enabledTemplates(
     if (await exists(name)) {
       enabled.add(name);
     } else {
+      // Reported by the `templates` part, which knows what waits on it.
       result.skippedTemplates.push(name);
-      deps.obs.warn('fee step: template missing, its emails wait', {
-        templateName: name,
-      });
     }
   }
   return enabled;
@@ -1043,11 +1282,12 @@ export async function runFeeNoticesSweep(
     dropped: 0,
     givenBack: 0,
     dated: 0,
+    mirrored: 0,
     skippedTemplates: [],
     errors: 0,
   };
   const clock = deps.clock ?? Date.now;
-  const sendsUntil = clock() + FEE_SENDS_TIME_BUDGET_MS;
+  const sendsUntil = (deps.wakeStartedAt ?? clock()) + FEE_SENDS_TIME_BUDGET_MS;
   try {
     const ctx: SweepContext = {
       db: deps.db,
@@ -1080,8 +1320,10 @@ export async function runFeeNoticesSweep(
         },
       ],
       ['joiners', () => addJoiners(ctx, listedThisRun)],
+      ['templates', () => alertMissingTemplates(ctx)],
       ['sends', () => sendDue(ctx)],
       ['dates', () => dateRises(ctx)],
+      ['old rows', () => mirrorStartedRises(ctx)],
       ['alert', () => alertNotTold(ctx)],
     ];
     for (const [part, run] of parts) {
@@ -1114,7 +1356,8 @@ export async function runFeeNoticesSweep(
  * production has the cron.
  */
 export async function runScheduledFeeNoticesSweep(
-  env: Bindings
+  env: Bindings,
+  wake: { startedAt?: number } = {}
 ): Promise<FeeNoticesSweepResult | null> {
   const obs = new ObservabilityClient(
     'notifications-api',
@@ -1142,6 +1385,7 @@ export async function runScheduledFeeNoticesSweep(
       environment,
       workerSecret: env.WORKER_SHARED_SECRET,
       notificationsUrl: getServiceUrl('notifications', env),
+      wakeStartedAt: wake.startedAt,
     });
   } finally {
     await cleanup().catch((error: unknown) => {
