@@ -62,6 +62,7 @@ import {
   SubscriptionPaymentRequiredError,
   SubscriptionScheduledElsewhereError,
   TierChangeIntervalWhileMovingError,
+  TierChangePreviewExpiredError,
 } from '../../errors';
 import { applyDuePendingPriceChange } from '../pending-price-change';
 import { SubscriptionService } from '../subscription-service';
@@ -732,6 +733,61 @@ describe('leaving yearly billing waits for the year (Codex-2hxff.97)', () => {
         effectiveAt: new Date(periodEnd * 1000).toISOString(),
       });
       expect(current?.amountCents).toBe(12000);
+    });
+
+    it('a monthly price saved between the preview and confirm is refused before Stripe; the fresh preview’s goes through (review C1 cycle 2, L4)', async () => {
+      const { org, pro } = await hollowOak('a-repriced');
+      const { userId, row } = await yearlyMember(org.id, pro);
+      const preview = await service.previewTierChange(
+        userId,
+        org.id,
+        pro.id,
+        'month'
+      );
+
+      // The creator saves Pro monthly at £15 while the dialog shows £12.
+      const repriced = `${pro.stripePriceMonthlyId}_repriced`;
+      prices.set(repriced, { amount: 1500, interval: 'month' });
+      await db
+        .update(subscriptionTiers)
+        .set({ priceMonthly: 1500, stripePriceMonthlyId: repriced })
+        .where(eq(subscriptionTiers.id, pro.id));
+
+      const refused = await service
+        .changeTier(
+          userId,
+          org.id,
+          pro.id,
+          'month',
+          preview.prorationDate,
+          undefined,
+          preview.newRecurringAmountCents
+        )
+        .catch((error: unknown) => error);
+      expect(refused).toBeInstanceOf(TierChangePreviewExpiredError);
+      expect(fake.writes).toEqual([]);
+      expect((await rowOf(row.id)).pendingBillingInterval).toBeNull();
+
+      const fresh = await service.previewTierChange(
+        userId,
+        org.id,
+        pro.id,
+        'month'
+      );
+      expect(fresh.billingChange?.amountCents).toBe(1500);
+      await service.changeTier(
+        userId,
+        org.id,
+        pro.id,
+        'month',
+        fresh.prorationDate,
+        undefined,
+        fresh.newRecurringAmountCents
+      );
+      expect(scheduleOf(row.stripeSubscriptionId).phases[1]).toMatchObject({
+        items: [{ price: repriced }],
+      });
+      expect((await rowOf(row.id)).pendingAmountCents).toBe(1500);
     });
 
     it('the renewal: the schedule bills Pro monthly, we let go of it, and the row mirrors it', async () => {

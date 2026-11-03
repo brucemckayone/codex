@@ -239,7 +239,8 @@ subscriptions.post(
         ctx.input.body.newTierId,
         ctx.input.body.billingInterval,
         ctx.input.body.prorationDate,
-        ctx.input.body.quote
+        ctx.input.body.quote,
+        ctx.input.body.newRecurringAmountCents
       );
       return await ctx.services.subscription.getSubscription(
         ctx.user.id,

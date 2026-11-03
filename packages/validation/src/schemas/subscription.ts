@@ -324,6 +324,13 @@ export const changeTierSchema = z.object({
    * change leaves it out.
    */
   quote: tierChangeQuoteSchema.optional(),
+  /**
+   * The preview's `newRecurringAmountCents`. For a change that waits for
+   * the renewal (a cheaper plan, or leaving yearly billing), `changeTier()`
+   * refuses it with `TIER_CHANGE_PREVIEW_EXPIRED` when the price read at
+   * confirm differs; like `prorationDate`, it is not checked when omitted.
+   */
+  newRecurringAmountCents: z.number().int().nonnegative().optional(),
 });
 
 export const cancelSubscriptionSchema = z.object({

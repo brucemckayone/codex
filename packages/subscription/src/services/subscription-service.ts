@@ -3731,6 +3731,13 @@ export class SubscriptionService extends BaseService {
    * `TierChangePreviewExpiredError` before Stripe is written to
    * (Codex-2hxff.96). The page then shows the fresh figures to confirm. A
    * drift in the second between that re-check and the write is accepted.
+   *
+   * A change that waits for the renewal (a cheaper plan, or leaving yearly
+   * billing) bills the price read now, at the renewal, with no notice. When
+   * the page passes the preview's `newRecurringAmountCents`, a different
+   * price (one saved since the preview) throws
+   * `TierChangePreviewExpiredError` before Stripe is written to, so the
+   * member confirms the price they will pay (review C1 cycle 2, L4).
    */
   async changeTier(
     userId: string,
@@ -3738,7 +3745,8 @@ export class SubscriptionService extends BaseService {
     newTierId: string,
     billingInterval: 'month' | 'year',
     prorationDate?: number,
-    quote?: string
+    quote?: string,
+    newRecurringAmountCents?: number
   ): Promise<{ userId: string; orgId: string; subscription: Subscription }> {
     try {
       const plan = await this.planTierChange(
@@ -3767,6 +3775,20 @@ export class SubscriptionService extends BaseService {
             newTierId,
           });
         }
+      }
+
+      const waitingAmount =
+        plan.billing?.amountCents ??
+        (plan.kind === 'downgrade' ? plan.newRecurringAmount : null);
+      if (
+        waitingAmount !== null &&
+        newRecurringAmountCents !== undefined &&
+        newRecurringAmountCents !== waitingAmount
+      ) {
+        throw new TierChangePreviewExpiredError({
+          prorationDate: effectiveProrationDate,
+          newTierId,
+        });
       }
 
       if (plan.billing) {
