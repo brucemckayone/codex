@@ -605,6 +605,8 @@ describe('while a move waits', () => {
     )[1];
     annual?.click();
     flushSync();
+    // A keyboard user: the switch has focus as they press it.
+    byTestId('tier-cta-switch-interval')?.focus();
     byTestId('tier-cta-switch-interval')?.click();
     await settle();
 
@@ -629,6 +631,10 @@ describe('while a move waits', () => {
     expect(clean(byTestId('plan-move-outcome')?.textContent)).toBe(
       m.pricing_move_kept({ plan: 'Pro', date: DATE, price: formatPrice(1200) })
     );
+    // The line keeps the focus it took, so it is read out: the dialog's
+    // close doesn't send it back to the switch (C2-W1).
+    await afterFocus();
+    expect(document.activeElement).toBe(byTestId('plan-move-outcome'));
   });
 });
 

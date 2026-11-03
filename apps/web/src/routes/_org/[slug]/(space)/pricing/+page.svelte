@@ -855,19 +855,22 @@
   let tierChangeOpener: HTMLElement | null = null;
 
   /**
-   * Where focus goes as the change dialog closes (W6): back to the button
-   * that opened it while it can still take focus (Cancel, Escape, a change
-   * refused), else the notice's Keep (a change set to wait swaps the button
-   * for a disabled "Starts {date}"), else Keep's outcome line. Without it,
+   * Where focus goes as the change dialog closes (W6): Keep's outcome line
+   * when the dialog's own Keep set one (it took focus as it appeared, and
+   * Melt calls this a moment later; `chooseTier` and `chooseIntervalSwitch`
+   * clear it on every open, so a line set now came from this dialog), else
+   * back to the button that opened it while it can still take focus
+   * (Cancel, Escape, a change refused), else the notice's Keep (a change set
+   * to wait swaps the button for a disabled "Starts {date}"). Without it,
    * focus fell to <body>.
    */
   function tierChangeCloseFocus(): HTMLElement | null {
+    if (keepOutcome) {
+      return document.querySelector<HTMLElement>('[data-testid="plan-move-outcome"]');
+    }
     const back = tierChangeOpener;
     if (back?.isConnected && !back.matches(':disabled')) return back;
-    return (
-      document.querySelector<HTMLElement>('[data-testid="plan-move-keep"]') ??
-      document.querySelector<HTMLElement>('[data-testid="plan-move-outcome"]')
-    );
+    return document.querySelector<HTMLElement>('[data-testid="plan-move-keep"]');
   }
 
   function resetTierChangeDialog(tier: SubscriptionTier) {
