@@ -521,8 +521,8 @@
    `--color-brand-primary` mostly consume `--color-text-inverse` (see
    `Button.svelte`'s primary variant) or `--media-glyph`, neither of which
    auto-contrasts. That is tracked separately, and repointing them is not a
-   one-liner — `--color-text-on-brand` is only auto-contrasting under
-   `[data-org-brand]`; on the platform path it is a static `#ffffff`. */
+   one-liner. (`--color-text-on-brand` is chosen from its fill on the
+   platform path too since Codex-mik4h.) */
 .journey-palette--page,
 .journey-palette--page .jp-sec {
   --color-background: var(--jp-ink);
@@ -598,8 +598,10 @@
    The difference is unmeasurable anyway — OKLCH L 0.05 is luminance 0.000125.
 
    `r`, `g` and `b` are in scope ONLY inside `rgb(from …)` — the same constraint
-   this file documents for `l` — so the expression cannot be hoisted into a helper
-   property and is written once per channel.
+   this file documents for `l`. It is written once per channel here, though a
+   custom property can hold it unresolved for them to bind later, as
+   themes/light.css's `--_on-fill-step` does (Codex-6lvmi tracks moving this
+   file onto it).
 
    SELECTOR LIST AND ORDER, both load-bearing. It repeats the shared block's list
    verbatim so the override reaches the palette ROOT *and* every `.jp-sec`: the

@@ -1418,7 +1418,7 @@
   .audio-player__error-retry {
     padding: var(--space-2) var(--space-4);
     font-size: var(--text-sm);
-    background: var(--color-primary-500);
+    background: var(--color-brand-primary);
     color: var(--color-text-on-brand);
     border: none;
     border-radius: var(--radius-md);
@@ -1544,7 +1544,7 @@
     width: var(--space-10);
     height: var(--space-10);
     padding: 0;
-    background: var(--color-primary-500);
+    background: var(--color-brand-primary);
     color: var(--color-text-on-brand);
     border: none;
     border-radius: var(--radius-full);
@@ -1554,7 +1554,7 @@
   }
 
   .audio-mini-player__btn:hover {
-    background: var(--color-primary-600, var(--color-primary-500));
+    background: var(--color-brand-primary-hover);
     color: var(--color-text-on-brand-hover);
     transform: scale(1.05);
   }

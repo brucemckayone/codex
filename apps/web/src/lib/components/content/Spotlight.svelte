@@ -1079,10 +1079,8 @@
     padding: 0 var(--space-6);
     height: var(--space-12);
     font-family: var(--font-sans);
-    /* Bumped to semibold + text-lg so the label reaches WCAG AA
-       large-text threshold (3:1). `--color-on-interactive` is the
-       luminance-clamped ink derived from this exact fill, so it already
-       accounts for dark vs light brand palettes. */
+    /* `--color-on-interactive` is the luminance-chosen ink derived from this
+       exact fill, so it clears AA on dark and light brand palettes alike. */
     font-size: var(--text-lg);
     font-weight: var(--font-semibold);
     color: var(--color-on-interactive);

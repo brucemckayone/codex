@@ -45,7 +45,6 @@
         { key: 'text-secondary', name: 'Secondary', auto: 'Descriptions, labels — slightly muted' },
         { key: 'text-tertiary', name: 'Tertiary', auto: 'Navigation hints, footer text — more muted' },
         { key: 'text-muted', name: 'Placeholders', auto: 'Input placeholders, subtle hints' },
-        { key: 'text-on-brand', name: 'On Brand', auto: 'Auto contrast — black or white based on your primary' },
       ],
     },
     {
@@ -535,7 +534,9 @@
     transition: var(--transition-colors);
   }
 
-  .fine-tune__blend-option:hover {
+  /* Not the selected option: `:hover` out-ranks `--active`, and repainted
+     its fill under the active label (white on near-white, 1.09:1). */
+  .fine-tune__blend-option:hover:not(.fine-tune__blend-option--active) {
     background: var(--color-surface-secondary);
   }
 

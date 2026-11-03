@@ -944,7 +944,7 @@
      dark), and `--color-border-strong` gave the outline only 1.49:1. A state
      indicator needs 3:1, so the selected pill was effectively invisible — and
      with `category` now a server facet, discovering that state costs a
-     navigation. Its label is derived from that fill by luminance, >= 4.58:1
+     navigation. Its label is derived from that fill by luminance, >= 4.57:1
      for every brand.
      And the semibold step means state is not signalled by colour ALONE, which
      the old rule's text-colour-only cue was. */

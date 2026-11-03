@@ -18,8 +18,8 @@
   --color-text-muted: var(--color-neutral-400);
   --color-text-disabled: var(--color-neutral-400);
   --color-text-inverse: #ffffff;
-  /* Chosen from the fill like every ink below, not fixed: a fixed white
-     painted white on the dark theme's salmon primary (#f47d67, 2.6:1). */
+  /* Chosen from the fill like every ink below: a fixed white was 2.6:1 on the
+     dark theme's #f47d67. */
   --color-text-on-brand: oklch(from var(--color-brand-primary) clamp(0, (0.62 - l) * 1000, 1) 0 0);
 
   /* Borders */
@@ -107,8 +107,10 @@
      unresolved, and they bind to the fill where an ink substitutes it inside
      `rgb(from FILL …)`, as the page kit does with `--_y`. Every
      `--color-*-on-*` ink is `rgb(from FILL S S S)` with
-     S = `calc(255 * var(--_on-fill-step))`. The derivation, the knee and why
-     the ramp is `* 1e12` are in org-brand.css's foot. */
+     S = `calc(255 * var(--_on-fill-step))`, and so is the label of a fill no
+     token names, in the components that paint one (grep `--_on-fill-step`).
+     The derivation, the knee and why the ramp is `* 1e12` are in
+     org-brand.css's foot. */
   :root {
     --_on-fill-step: clamp(0, (0.1791 - (0.2126 * pow((clamp(0, r, 255) / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((clamp(0, g, 255) / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((clamp(0, b, 255) / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1);
   }

@@ -83,13 +83,19 @@
   /* The hovered and pressed fills move 0.08 / 0.15 in lightness, so a label
      chosen for the RESTING fill can fail on them (studio-beta, dark, hovered:
      3.77:1; Codex-mik4h). Each has its own ink, chosen from the fill actually
-     painted; a control's :hover / :active rule sets its label from these. */
+     painted; a :hover rule sets its label from these. The -active ink is
+     there for a pressed fill, which no control paints yet. */
   --color-on-interactive-hover: oklch(from var(--color-interactive-hover) clamp(0, (0.62 - l) * 1000, 1) 0 0);
   --color-on-interactive-active: oklch(from var(--color-interactive-active) clamp(0, (0.62 - l) * 1000, 1) 0 0);
   --color-text-on-brand-hover: oklch(from var(--color-brand-primary-hover) clamp(0, (0.62 - l) * 1000, 1) 0 0);
 
   /* ─── LEGACY PRIMARY ────────────────────────────────────────────────── */
-  --color-primary-500: var(--brand-color, var(--color-primary-500));
+  /* No fallback: one naming this property is a self-reference, a cycle that
+     WebKit computes EMPTY even with a brand colour set (every direct
+     `var(--color-primary-500)` on an org page painted nothing in Safari;
+     Chrome resolved it). This scope applies only where `--brand-color` is
+     set (`data-org-brand` is gated on it), so none is needed. */
+  --color-primary-500: var(--brand-color);
   --color-primary-600: oklch(from var(--brand-color, var(--color-primary-500)) calc(l - 0.08) c h);
   --color-primary-100: oklch(from var(--brand-color, var(--color-primary-500)) 0.94 calc(c * 0.25) h);
   --color-primary-50: oklch(from var(--brand-color, var(--color-primary-500)) 0.97 calc(c * 0.15) h);
@@ -217,10 +223,11 @@
   /* ─── BLIND SPOT FIXES ─────────────────────────────────────────── */
   /* These tokens were NOT re-derived from brand inputs. They stayed
      hardcoded neutral-gray regardless of org branding.
-     Tertiary text is held at OKLCH lightness 0.54 or below: unheld, a pale
-     brand's faint text was 2.1:1. Measured over a 4 096-colour lattice in
+     Tertiary text is held at OKLCH lightness 0.54 or below: unheld, it fell
+     to 1.78:1 for a white brand. Measured over a 4 096-colour lattice in
      Chrome and WebKit, it clears AA on the page, surface and card (worst
-     4.76:1), and OBB's and studio-beta's are unchanged (Codex-mik4h). */
+     4.76:1), and studio-beta's is unchanged (Codex-mik4h). An org with its
+     own background takes the [data-org-bg] rule below instead. */
   --color-text-tertiary: oklch(from var(--brand-color, var(--color-primary-500)) min(calc(l * 0.6 + 0.2), 0.54) calc(c * 0.1) h);
   --color-text-disabled: oklch(from var(--brand-bg, white) clamp(0.4, abs(0.45 - l) + 0.4, 0.7) calc(c * 0.05) h);
   --color-border-hover: oklch(from var(--brand-bg, white) calc(l - 0.15) calc(c * 0.3) h);
@@ -456,8 +463,9 @@
      one line up; a single copy would freeze the light reading. */
   --color-text-on-accent: oklch(from var(--color-brand-accent) clamp(0, (0.62 - l) * 1000, 1) 0 0);
   /* The hovered accent was never re-derived here, so in dark the purchase
-     button's hover switched to the LIGHT accent (Codex-mik4h). It now moves
-     the dark accent the way the primary hovers above move theirs. */
+     button's hover was the LIGHT accent darkened (`--brand-accent`, l - 0.08),
+     another colour from a dark accent (Codex-mik4h). It now moves the dark
+     accent the way the primary hovers above move theirs. */
   --color-brand-accent-hover: oklch(from var(--color-brand-accent) calc(l + 0.08) c h);
   --color-text-on-accent-hover: oklch(from var(--color-brand-accent-hover) clamp(0, (0.62 - l) * 1000, 1) 0 0);
 
@@ -467,10 +475,11 @@
   --media-glyph: oklch(from var(--color-brand-accent) 0.97 calc(c * 0.06) h);
 
   /* ─── BLIND SPOT FIXES (DARK) ──────────────────────────────────── */
-  /* Held at OKLCH lightness 0.66 or above: unheld, it failed for all three
-     seeded orgs (OBB 3.54:1). Measured the same way, it clears AA on the page
-     and surface (worst 4.77:1). */
-  --color-text-tertiary: oklch(from var(--brand-color-dark, var(--brand-color, var(--color-primary-400))) max(calc(l * 0.5 + 0.3), 0.66) calc(c * 0.1) h);
+  /* Held at OKLCH lightness 0.75 or above: unheld, studio-beta's was 3.45:1
+     on the surface. Measured the same way, it clears AA on the page, the
+     surface and the #404040 card (worst 4.58:1). An org with its own
+     background takes the [data-org-bg] rule below instead. */
+  --color-text-tertiary: oklch(from var(--brand-color-dark, var(--brand-color, var(--color-primary-400))) max(calc(l * 0.5 + 0.3), 0.75) calc(c * 0.1) h);
   --color-text-disabled: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) clamp(0.3, abs(0.5 - l) + 0.3, 0.5) 0 0);
   --color-border-hover: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) calc(l + 0.15) calc(c * 0.3) h);
   --color-surface-variant: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) calc(l + 0.06) calc(c * 0.4) h);
@@ -602,8 +611,8 @@
  * (Codex-kdsuo, and the mechanism the bead does not name)
  * ═══════════════════════════════════════════════════════════════════════════
  *
- * The step above picks the label with `clamp(0, (0.62 - l) * 1000, 1)` — on
- * OKLCH LIGHTNESS. WCAG contrast is computed on RELATIVE LUMINANCE, and the two
+ * The fallback above picks the label with `clamp(0, (0.62 - l) * 1000, 1)` —
+ * on OKLCH LIGHTNESS. WCAG contrast is computed on RELATIVE LUMINANCE, and the two
  * quantities disagree by enough to invert the decision: OKLCH lightness is
  * perceptual and near hue-independent, while luminance weights green at 0.7152
  * against blue at 0.0722. So a green or teal brand sitting at the SAME OKLCH
@@ -673,8 +682,9 @@
  * `page-builder/kit/styles/schemes.css` does (`--_lr` … `--_y`). They are
  * numbers in 0–255, hence the `/ 255`, and each is clamped to 0–255 first: a
  * hovered fill pushed past black or white is out of gamut, and a negative
- * channel turned the power into NaN (880 of 8 208 hovered fills took a label
- * at 1.11:1 before the clamp, none after; an in-gamut fill is unchanged).
+ * channel turned the power into NaN (unclamped, about 890 of the lattice's
+ * 8 192 hovered fills, all light-theme and darkened, took a NaN and black
+ * ink, as low as 1.11:1; none after, and an in-gamut fill is unchanged).
  *
  * WHY @supports RATHER THAN EDITING THE DECLARATIONS ABOVE. Relative colour
  * needs Chrome 119+ / Firefox 128+ / Safari 16.4+ (this file's header) but
@@ -715,13 +725,7 @@
      fallback pivot, so a page-level override would repaint the fill on the
      luminance rule's promise while its label was still chosen by the rule this
      block exists to replace. The derivation itself is untouched — only the
-     scopes it reaches.
-
-     Each ink is `rgb(from FILL S S S)` with S = `calc(255 * var(--_on-fill-step))`,
-     the step written ONCE in themes/light.css (its foot): 1 where the fill's
-     luminance is under 0.1791, 0 above. The custom property holds the
-     expression unresolved, and its `r` / `g` / `b` bind to FILL when it is
-     substituted here, as page-builder/kit/styles/schemes.css does with `--_y`. */
+     scopes it reaches. (The step: `--_on-fill-step`; see WRITTEN ONCE above.) */
   [data-org-brand],
   :where([data-org-brand]) [style*='--brand-'] {
     --color-text-on-brand: rgb(from var(--brand-color, var(--color-primary-500)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));

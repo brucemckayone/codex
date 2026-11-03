@@ -6,10 +6,11 @@
  * Two derivations tint text from the org's brand colour, and both failed for
  * a pale or a dark brand until each was held at an OKLCH lightness:
  *   - the org hero's default button label, the brand mixed 75% with black on
- *     the white default button (a pale brand: 2.74:1), held at `min(l, X)`;
+ *     the white default button (2.22:1 for a white brand; 1 222 of the
+ *     lattice under AA), held at `min(l, X)`;
  *   - `--color-text-tertiary` for an org without its own background, held at
- *     `min(…, X)` in light (pale brands 2.1:1) and `max(…, X)` in dark (all
- *     three seeded orgs failed, OBB 3.54:1).
+ *     `min(…, X)` in light (1.78:1 for a white brand) and `max(…, X)` in dark
+ *     (studio-beta 3.45:1 on the surface).
  *
  * The holds are read from the stylesheets and run through a model of the
  * engines' resolution (OKLCH to sRGB, clipped to the gamut). The model was
@@ -99,11 +100,13 @@ function hold(source: string, pattern: RegExp, label: string): number {
 }
 
 const WHITE: Rgb = [255, 255, 255];
-// The platform grounds an org without its own background sits on.
+// The platform grounds an org without its own background sits on: page,
+// surface and card (light's card is white, dark's #404040).
 const LIGHT_GROUNDS: Rgb[] = [[250, 250, 250], WHITE];
 const DARK_GROUNDS: Rgb[] = [
   [23, 23, 23],
   [38, 38, 38],
+  [64, 64, 64],
 ];
 
 describe('brand-tinted text that must stay readable', () => {

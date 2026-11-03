@@ -3236,10 +3236,12 @@
 
   /* Lit from above on the label's side (Codex-mik4h). The 8% lift toward white
      put a white label under AA at the top of a brand near the luminance pivot
-     (4.11:1 at worst). So a black label keeps the lift at the top, and a white
-     label keeps the brand at the top and deepens 8% toward black at the
-     bottom: each end moves AWAY from the label, so the whole ribbon holds what
-     the label holds on the brand, >= 4.58:1. */
+     (3.95:1 at worst; 241 of the 4 096 lattice). So a black label's ribbon
+     lifts 8% toward white at the top, and a white label's keeps the brand at
+     the top and deepens 8% toward black at the bottom: each end moves AWAY
+     from the label, so the whole ribbon holds what the label holds on the
+     brand (the step's floor, 4.57:1). Engines without `pow()` in relative
+     colour keep the gradient above. */
   @supports (color: rgb(from red calc(255 * pow(r / 255, 2)) 0 0)) {
     .card__ribbon {
       background: linear-gradient(

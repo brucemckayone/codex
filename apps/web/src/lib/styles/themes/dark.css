@@ -39,9 +39,9 @@
      declares --color-interactive. Note the dark platform fill is
      --color-primary-400 (#f47d67, L 0.72) — LIGHTER than the 0.62 threshold, so
      this hands back dark ink, where a fixed white would have painted white on
-     salmon (which is why --color-text-on-brand is now derived too). This OKLCH
-     step is the fallback; the luminance step at the foot of this file is the
-     live rule, and picks the same dark ink here. */
+     salmon (which is why --color-text-on-brand is derived too). This OKLCH
+     step is the fallback; the luminance inks at the foot of this file are the
+     live rule, and pick the same dark ink here. */
   --color-on-interactive: oklch(from var(--color-interactive) clamp(0, (0.62 - l) * 1000, 1) 0 0);
   /* Re-declared because the hovered and pressed fills are (see light.css). */
   --color-on-interactive-hover: oklch(from var(--color-interactive-hover) clamp(0, (0.62 - l) * 1000, 1) 0 0);

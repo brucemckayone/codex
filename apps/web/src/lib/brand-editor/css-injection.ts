@@ -398,6 +398,23 @@ const CSS_VAR_MAPPINGS: CssVarMapping[] = [
   },
 ];
 
+/**
+ * Override keys that are stored but no longer painted. `text-on-brand` ("On
+ * Brand") is retired (owner, Codex-mik4h): every label is chosen from the
+ * fill under it, at rest and on hover, and no one colour reads on both, so a
+ * saved value is ignored rather than half-applied.
+ */
+const RETIRED_OVERRIDE_KEYS = new Set(['text-on-brand']);
+
+/**
+ * Whether an override key becomes a CSS custom property: not an
+ * attribute-only key (`hero-hide-*` drive data-* attributes, set by the org
+ * layout) and not a retired one.
+ */
+function emitsCssVar(key: string): boolean {
+  return !key.startsWith('hero-hide-') && !RETIRED_OVERRIDE_KEYS.has(key);
+}
+
 /** CSS properties set by the base CSS_VAR_MAPPINGS (not token overrides). */
 const BASE_VAR_PROPS = new Set(CSS_VAR_MAPPINGS.map((m) => m.property));
 
@@ -525,12 +542,9 @@ export function injectBrandVars(state: BrandEditorState): void {
   const overrides = state.tokenOverrides ?? {};
   for (const [key, value] of Object.entries(overrides)) {
     if (value == null) continue;
-    // Skip keys that drive attribute-only behaviour (e.g. hero-hide-* are
-    // applied as data-hero-hide-* attributes by the org layout, NOT as CSS
-    // custom properties — emitting --color-hero-hide-* would just pollute
-    // the inline style for no consumer). Future attribute-only key families
-    // (e.g. data-layout-*) should be added here.
-    if (key.startsWith('hero-hide-')) continue;
+    // Skip attribute-only and retired keys (emitsCssVar). Future
+    // attribute-only key families (e.g. data-layout-*) belong there.
+    if (!emitsCssVar(key)) continue;
     const prop = BRAND_PREFIX_KEYS.has(key)
       ? `--brand-${key}`
       : `--color-${key}`;
@@ -544,7 +558,7 @@ export function injectBrandVars(state: BrandEditorState): void {
   const darkOverrides = state.darkTokenOverrides ?? {};
   for (const [key, value] of Object.entries(darkOverrides)) {
     if (value == null) continue;
-    if (key.startsWith('hero-hide-')) continue;
+    if (!emitsCssVar(key)) continue;
     const baseProp = BRAND_PREFIX_KEYS.has(key)
       ? `--brand-${key}`
       : `--color-${key}`;
@@ -594,9 +608,8 @@ export function tokenOverridesToCssVars(
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(overrides)) {
     if (value == null) continue;
-    // Skip attribute-only keys — these are consumed via data-* attributes,
-    // not CSS custom properties (see injectBrandVars for the same filter).
-    if (key.startsWith('hero-hide-')) continue;
+    // Skip attribute-only and retired keys (emitsCssVar).
+    if (!emitsCssVar(key)) continue;
     const prop = BRAND_PREFIX_KEYS.has(key)
       ? `--brand-${key}`
       : `--color-${key}`;
@@ -644,7 +657,7 @@ export function darkTokenOverridesToCssVars(
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(overrides)) {
     if (value == null) continue;
-    if (key.startsWith('hero-hide-')) continue;
+    if (!emitsCssVar(key)) continue;
     const baseProp = BRAND_PREFIX_KEYS.has(key)
       ? `--brand-${key}`
       : `--color-${key}`;

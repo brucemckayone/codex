@@ -584,9 +584,9 @@
     outline-offset: var(--space-0-5);
   }
 
-  /* `--color-on-interactive`, NOT `--color-text-on-brand`. The latter is derived
-     from `--color-brand-primary`, and the dark platform fill is
-     `--color-primary-400` (#f47d67, OKLCH L 0.72), a different colour.
+  /* `--color-on-interactive`, NOT `--color-text-on-brand`: the latter is chosen
+     from `--color-brand-primary`, the same swatch today but not the token this
+     button paints, and a fine-tune override can set `--color-interactive` alone.
      `--color-on-interactive` is derived FROM the fill by its relative
      luminance (white below 0.1791, black above; see themes/light.css), so the
      label clears AA on the swatch under it for every org brand and both
