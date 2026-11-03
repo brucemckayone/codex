@@ -231,13 +231,15 @@ card (what moves, who is told, the earliest date) and each person whose email
 didn't go through.
 
 **Each morning.** notifications-api logs `fee step completed` with the counts
-(lists made, sent, failed, unknown, joiners, dated). When anyone is not yet
-told, it raises one error alert, `fee step: people not yet told about a fee
+(lists made, sent, failed, unknown, joiners, dated). When someone needs a
+person, it raises one error alert, `fee step: people not yet told about a fee
 rise`, naming up to 50 notice and user ids; the queue is the lasting record,
 so a missed alert loses nothing. A send that failed outright (refused, skipped,
-no address) is tried again the next morning. One with no answer
-(a 5xx, a timeout) may have gone, so the next run first looks in
-`email_audit_logs` and only sends again if nothing is there. A follow-up email
+no address) is named at once, and tried again the next morning. One with no
+answer (a 5xx, a timeout) may have gone, so the next run first looks in
+`email_audit_logs` and only sends again if nothing is there. It is named only
+after three such mornings, or at once when its rise starts within three days,
+since the mornings themselves usually mend it. A follow-up email
 (made smaller, cancelled) holds nothing: it is dropped after three failed
 mornings with a warning, and never reaches the queue.
 
@@ -255,12 +257,16 @@ later. Nothing moves a date earlier: the 30 days count from the last person
 told.
 
 **Rollback.** Migration `0123` stays if the workers roll back. The old
-workers read the old `fee_config_*` rows, which hold the values in force now,
-so sales keep the right fee and a waiting rise simply never starts; the fee
-step and the queue tab stop until the roll forward. Don't change fees while
-rolled back: the old routes write only the old tables, and the new resolver
-never sees those writes. Save them again through the new route after rolling
-forward.
+workers read the old `fee_config_*` rows. Every admin save keeps them at the
+values in force then, and the 08:00 fee step writes a dated rise into them on
+the morning it starts, so sales keep the right fee. Before rolling back,
+check that they agree (R14 in [the release checklist](release-checklist.md)):
+a level whose rise started since midnight disagrees until the 08:00 run. The
+fee step and the queue tab stop until the roll forward, so a waiting rise
+never starts, and one whose date falls in the rollback starts only at the
+roll forward. Don't change fees while rolled back: the old routes write only
+the old tables, and the new resolver never sees those writes. Save them again
+through the new route after rolling forward.
 
 ## Held price moves
 

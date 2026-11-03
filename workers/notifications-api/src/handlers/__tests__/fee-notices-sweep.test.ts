@@ -22,6 +22,7 @@ import {
   emailAuditLogs,
   feeChangeNotices,
   feeChanges,
+  feeConfigOrg,
   feeConfigVersions,
   organizationMemberships,
   organizations,
@@ -29,12 +30,21 @@ import {
 } from '@codex/database/schema';
 import type { ObservabilityClient } from '@codex/observability';
 import {
+  affectedPayees,
   dbFeeVersionReader,
   feeRiseStartAfter,
   resolveFeesAt,
 } from '@codex/payments';
 import type { Bindings } from '@codex/shared-types';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
 import { FEE_RULE_SENTENCE, formatPercent } from '../fee-notice-copy';
 import {
   FEE_SENDS_TIME_BUDGET_MS,
@@ -42,6 +52,14 @@ import {
   type FeeNoticeDelivery,
   runFeeNoticesSweep,
 } from '../fee-notices-sweep';
+
+// Who a rise affects, real unless a test makes one read of it fail.
+vi.mock('@codex/payments', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@codex/payments')>();
+  return { ...actual, affectedPayees: vi.fn(actual.affectedPayees) };
+});
+const { affectedPayees: realAffectedPayees } =
+  await vi.importActual<typeof import('@codex/payments')>('@codex/payments');
 
 // 3 and 4 Nov 2026, 08:00 London (GMT): two mornings' runs.
 const NOV_3 = new Date('2026-11-03T08:00:00Z');
@@ -61,6 +79,32 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
   beforeAll(() => {
     ({ db, cleanup } = createPerRequestDbClient(env as unknown as Bindings));
   });
+
+  afterEach(() => {
+    vi.mocked(affectedPayees).mockImplementation(realAffectedPayees);
+  });
+
+  /**
+   * The next read of who a rise affects made on the step's own client fails
+   * (a list is made in a transaction, so it reads on another).
+   */
+  function failOnePayeeRead() {
+    let failed = false;
+    vi.mocked(affectedPayees).mockImplementation((client, ...rest) => {
+      if (!failed && client === db) {
+        failed = true;
+        return Promise.reject(new Error('payee read timed out'));
+      }
+      return realAffectedPayees(client, ...rest);
+    });
+  }
+
+  const errorsFor = (changeId: string, startsWith: string) =>
+    obsLog.error.mock.calls.filter(
+      ([message, context]) =>
+        String(message).startsWith(startsWith) &&
+        (context as { changeId?: string }).changeId === changeId
+    );
 
   afterAll(async () => {
     if (logIds.length > 0) {
@@ -464,6 +508,26 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
       attempts: 0,
     });
     expect((await changeOf(changeId))?.effectiveFrom).toBeNull();
+
+    // A person is needed: one alert a run, naming the rise that waits.
+    const alerts = () =>
+      obsLog.error.mock.calls.filter(
+        ([message, context]) =>
+          String(message).startsWith('fee step: template missing') &&
+          (context as { changeIds: string[] }).changeIds.includes(changeId)
+      );
+    expect(alerts()).toHaveLength(1);
+    expect(alerts()[0]?.[1]).toMatchObject({
+      errorId: expect.any(String),
+      templateName: 'fee-change-notice',
+    });
+    await run(
+      changeId,
+      NOV_4,
+      mailer,
+      async (name) => name !== 'fee-change-notice'
+    );
+    expect(alerts()).toHaveLength(2);
   });
 
   it('reads every recipient in one query, however many it sends', async () => {
@@ -624,5 +688,328 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
     } finally {
       fetchSpy.mockRestore();
     }
+  });
+
+  it('a rise whose date has come goes into the old fee row, once; one dated tomorrow waits for its morning', async () => {
+    const SAVED = new Date('2026-09-01T10:00:00Z');
+    /**
+     * An organisation at 10% since 1970, its old row saying so (written when
+     * the rise was saved), and a rise to 15% dated `from`.
+     */
+    async function datedRise(from: Date) {
+      const organizationId = await organisation();
+      const [cut] = await db
+        .insert(feeChanges)
+        .values({
+          scope: 'org',
+          organizationId,
+          kind: 'cut',
+          effectiveFrom: new Date(0),
+        })
+        .returning({ id: feeChanges.id });
+      await db.insert(feeConfigVersions).values({
+        changeId: cut?.id as string,
+        scope: 'org',
+        orgFeePercent: 1000,
+      });
+      const [rise] = await db
+        .insert(feeChanges)
+        .values({
+          scope: 'org',
+          organizationId,
+          kind: 'rise',
+          firstRunAt: SAVED,
+          listedCount: 0,
+          effectiveFrom: from,
+        })
+        .returning({ id: feeChanges.id });
+      await db.insert(feeConfigVersions).values({
+        changeId: rise?.id as string,
+        scope: 'org',
+        orgFeePercent: 1500,
+      });
+      await db.insert(feeConfigOrg).values({
+        organizationId,
+        orgFeePercent: 1000,
+        version: 1,
+        updatedAt: SAVED,
+      });
+      return { organizationId, changeId: rise?.id as string };
+    }
+    const oldRow = async (organizationId: string) => {
+      const [row] = await db
+        .select()
+        .from(feeConfigOrg)
+        .where(eq(feeConfigOrg.organizationId, organizationId));
+      return row;
+    };
+    // NOV_3 is 08:00 on 3 November: one rise started at midnight, one starts
+    // at the next.
+    const begun = await datedRise(new Date('2026-11-03T00:00:00Z'));
+    const coming = await datedRise(new Date('2026-11-04T00:00:00Z'));
+    const both = (now: Date) =>
+      runFeeNoticesSweep({
+        db,
+        obs,
+        environment: 'development',
+        workerSecret: 'unused',
+        notificationsUrl: 'http://unused.test',
+        now,
+        mailer: mailerAnswering(),
+        templateExists: async () => true,
+        onlyChanges: [begun.changeId, coming.changeId],
+      });
+
+    expect(await both(NOV_3)).toMatchObject({ mirrored: 1, errors: 0 });
+    expect(await oldRow(begun.organizationId)).toMatchObject({
+      orgFeePercent: 1500,
+      version: 2,
+      updatedAt: NOV_3,
+      updatedBy: null,
+    });
+    expect(await oldRow(coming.organizationId)).toMatchObject({
+      orgFeePercent: 1000,
+      version: 1,
+      updatedAt: SAVED,
+    });
+
+    // Again the same morning: nothing to do.
+    expect(await both(NOV_3)).toMatchObject({ mirrored: 0, errors: 0 });
+    expect((await oldRow(begun.organizationId))?.version).toBe(2);
+
+    // The next morning the other has begun.
+    expect(await both(NOV_4)).toMatchObject({ mirrored: 1, errors: 0 });
+    expect(await oldRow(coming.organizationId)).toMatchObject({
+      orgFeePercent: 1500,
+      version: 2,
+      updatedAt: NOV_4,
+    });
+    expect((await oldRow(begun.organizationId))?.version).toBe(2);
+  });
+
+  it('one failed read of who a rise affects is one alert, and its claims go back untried', async () => {
+    const una = await person('Una Read');
+    const vic = await person('Vic Read');
+    const changeId = await rise(await organisation(una.id, vic.id));
+    failOnePayeeRead();
+    const mailer = mailerAnswering();
+
+    const day1 = await run(changeId, NOV_3, mailer);
+
+    expect(day1).toMatchObject({ listed: 2, sent: 0, givenBack: 2 });
+    expect(mailer).not.toHaveBeenCalled();
+    expect(
+      errorsFor(changeId, 'fee step: could not read who a fee rise affects')
+    ).toHaveLength(1);
+    expect(errorsFor(changeId, 'fee step: one notice failed')).toEqual([]);
+    for (const who of [una, vic]) {
+      expect(await noticeOf(changeId, who.id)).toMatchObject({
+        state: 'due',
+        attempts: 0,
+        attemptedAt: null,
+      });
+    }
+
+    // The next morning they go.
+    expect(await run(changeId, NOV_4, mailerAnswering())).toMatchObject({
+      sent: 2,
+      givenBack: 0,
+    });
+  });
+
+  it('a failed read is not kept: after the joiners step misses it, the sends read again', async () => {
+    const wes = await person('Wes Read');
+    const xia = await person('Xia Read');
+    const changeId = await rise(await organisation(wes.id, xia.id));
+    await run(
+      changeId,
+      NOV_3,
+      mailerAnswering({
+        [wes.id]: { accepted: false, status: 400 },
+        [xia.id]: { accepted: false, status: 400 },
+      })
+    );
+    failOnePayeeRead();
+
+    const day2 = await run(changeId, NOV_4, mailerAnswering());
+
+    expect(
+      errorsFor(changeId, 'fee step: joiners could not be added')
+    ).toHaveLength(1);
+    expect(day2).toMatchObject({ sent: 2, givenBack: 0 });
+    expect(
+      errorsFor(changeId, 'fee step: could not read who a fee rise affects')
+    ).toEqual([]);
+  });
+
+  it('a send with no answer is not alerted while the mornings can mend it; its third morning is', async () => {
+    const kit = await person('Kit Quiet');
+    const changeId = await rise(await organisation(kit.id));
+    const noAnswer = mailerAnswering({
+      [kit.id]: { accepted: false, status: 503 },
+    });
+
+    await run(changeId, NOV_3, noAnswer);
+    expect(await noticeOf(changeId, kit.id)).toMatchObject({
+      state: 'unknown',
+      attempts: 1,
+    });
+    expect(alertsNaming(kit.id)).toEqual([]);
+
+    await run(changeId, NOV_4, noAnswer);
+    expect(alertsNaming(kit.id)).toEqual([]);
+
+    await run(changeId, new Date('2026-11-05T08:00:00Z'), noAnswer);
+    expect(await noticeOf(changeId, kit.id)).toMatchObject({
+      state: 'unknown',
+      attempts: 3,
+    });
+    expect(alertsNaming(kit.id)).toHaveLength(1);
+  });
+
+  it('a joiner with no answer is alerted at once when the rise starts too soon for more mornings', async () => {
+    const lia = await person('Lia Dated');
+    const org = await organisation(lia.id);
+    const changeId = await rise(org);
+    // Lia is told on 3 November: the rise starts on 4 December.
+    await run(changeId, NOV_3, mailerAnswering());
+    expect((await changeOf(changeId))?.effectiveFrom).toEqual(
+      new Date('2026-12-04T00:00:00Z')
+    );
+    const noAnswer = (userId: string) =>
+      mailerAnswering({ [userId]: { accepted: false, status: 503 } });
+
+    // A joiner a fortnight before: their mornings can still mend it.
+    const early = await person('Mo Early');
+    await join(org, early.id);
+    await run(changeId, new Date('2026-11-20T08:00:00Z'), noAnswer(early.id));
+    expect(await noticeOf(changeId, early.id)).toMatchObject({
+      state: 'unknown',
+      attempts: 1,
+    });
+    expect(alertsNaming(early.id)).toEqual([]);
+
+    // A joiner two days before: a person is needed now.
+    const late = await person('Nia Late');
+    await join(org, late.id);
+    await run(changeId, new Date('2026-12-02T08:00:00Z'), noAnswer(late.id));
+    expect(await noticeOf(changeId, late.id)).toMatchObject({
+      state: 'unknown',
+      attempts: 1,
+    });
+    expect(alertsNaming(late.id)).toHaveLength(1);
+  });
+
+  it('the send budget counts from the wake: spent by the sweeps before, the claims go back and the alert still runs', async () => {
+    const ora = await person('Ora Wake');
+    const changeId = await rise(await organisation(ora.id));
+    await run(
+      changeId,
+      NOV_3,
+      mailerAnswering({ [ora.id]: { accepted: false, status: 400 } })
+    );
+    expect(alertsNaming(ora.id)).toHaveLength(1);
+    const mailer = mailerAnswering();
+    const now = Date.now();
+
+    const day2 = await runFeeNoticesSweep({
+      db,
+      obs,
+      environment: 'development',
+      workerSecret: 'unused',
+      notificationsUrl: 'http://unused.test',
+      now: NOV_4,
+      mailer,
+      templateExists: async () => true,
+      clock: () => now,
+      // The agreement and money sweeps took the whole budget.
+      wakeStartedAt: now - FEE_SENDS_TIME_BUDGET_MS,
+      onlyChanges: [changeId],
+    });
+
+    expect(day2).toMatchObject({ sent: 0, givenBack: 1 });
+    expect(mailer).not.toHaveBeenCalled();
+    expect(await noticeOf(changeId, ora.id)).toMatchObject({
+      state: 'failed',
+      attempts: 1,
+      attemptedAt: NOV_3,
+    });
+    expect(alertsNaming(ora.id)).toHaveLength(2);
+  });
+
+  /** The email log's line for a notice's send, `at`. */
+  async function logged(
+    noticeId: string,
+    email: string,
+    status: 'success' | 'pending',
+    at: Date
+  ) {
+    const [log] = await db
+      .insert(emailAuditLogs)
+      .values({
+        templateName: 'fee-change-notice',
+        recipientEmail: email,
+        status,
+        metadata: JSON.stringify({ feeNoticeId: noticeId }),
+        createdAt: at,
+        updatedAt: at,
+      })
+      .returning({ id: emailAuditLogs.id });
+    if (log) logIds.push(log.id);
+  }
+
+  it('a send still pending in the email log counts as told: it may have gone', async () => {
+    const pam = await person('Pam Pending');
+    const changeId = await rise(await organisation(pam.id));
+    await run(
+      changeId,
+      NOV_3,
+      mailerAnswering({ [pam.id]: { accepted: false, status: 503 } })
+    );
+    const notice = await noticeOf(changeId, pam.id);
+    const loggedAt = new Date(NOV_3.getTime() + 60 * 1000);
+    await logged(notice?.id as string, pam.email, 'pending', loggedAt);
+
+    const mailer = mailerAnswering();
+    expect(await run(changeId, NOV_4, mailer)).toMatchObject({
+      foundInLog: 1,
+      sent: 0,
+    });
+    expect(mailFor(mailer, pam.id)).toEqual([]);
+    expect(await noticeOf(changeId, pam.id)).toMatchObject({
+      state: 'sent',
+      acceptedAt: loggedAt,
+    });
+  });
+
+  it('a run cut off after sending leaves the notice due, and the next one checks the log before sending again', async () => {
+    const ray = await person('Ray Cutoff');
+    const changeId = await rise(await organisation(ray.id));
+    // The list is made; then a run claims Ray, sends, and dies before
+    // recording: the notice is still `due`, with its try stamped.
+    await run(
+      changeId,
+      NOV_3,
+      mailerAnswering(),
+      async (name) => name !== 'fee-change-notice'
+    );
+    const notice = await noticeOf(changeId, ray.id);
+    await db
+      .update(feeChangeNotices)
+      .set({ attemptedAt: NOV_3, attempts: 1 })
+      .where(eq(feeChangeNotices.id, notice?.id as string));
+    const loggedAt = new Date(NOV_3.getTime() + 60 * 1000);
+    await logged(notice?.id as string, ray.email, 'success', loggedAt);
+
+    const mailer = mailerAnswering();
+    expect(await run(changeId, NOV_4, mailer)).toMatchObject({
+      foundInLog: 1,
+      sent: 0,
+    });
+    expect(mailFor(mailer, ray.id)).toEqual([]);
+    expect(await noticeOf(changeId, ray.id)).toMatchObject({
+      state: 'sent',
+      acceptedAt: loggedAt,
+    });
   });
 });

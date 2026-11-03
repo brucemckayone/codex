@@ -228,9 +228,12 @@ owner: "Alert support").
   carries the invoice, the Stripe subscription, our row (course only), the
   org, the pence the credit covered and `amount_paid`, and nothing about the
   person.
-- **What doesn't change:** the split, the payouts and access.
+- **What doesn't change:** the split, the payouts and access. A bill the
+  credit paid in full has no charge, so nothing is paid out; the renewal
+  still stands, for a tier as for a course: the row's period, the
+  `subscription-renewed` email and the cache bump (review C1, SF-12).
 - **Where:** `alertIfCreditPaid` (`credit-paid-invoice.ts`), called by
-  `handleInvoicePaymentSucceeded` before its no-charge return and its
+  `handleInvoicePaymentSucceeded` before its no-charge path and its
   duplicate check, and by `handleCourseInvoicePaymentSucceeded` as soon as
   the row is found. Both places come before the duplicate check, so a
   duplicate's bill alerts too.
@@ -514,7 +517,12 @@ and the balance stays £0 throughout.
   keys, so the tier flips in the same update as the Price. If the schedule
   steps fail, the record is put back and the error stands. For C the plan has
   already changed and been paid for, so its record stays and the backstop
-  sets the schedule.
+  sets the schedule. If the update fails AND letting go of the schedule just
+  made for it fails too, the record stays beside that untagged schedule, so
+  it still reads as ours (never `SUBSCRIPTION_SCHEDULED_ELSEWHERE`), and one
+  `billing_change.undo_release_failed` error alert with an errorId names the
+  schedule: support releases it, and the backstop sets the change again from
+  the record. Until then the member's Keep, Cancel or a retry reaches it.
 - **C(b)**: the upgrade's write as ever (the target's yearly Price,
   `always_invoice`, `error_if_incomplete`, the pinned `proration_date`), with
   the record in the same update. A declined card reverts it: nothing set.
@@ -578,11 +586,17 @@ and the balance stays £0 throughout.
   the renewal still switches to monthly and its invoice is void. A refund or
   lost dispute cancels the subscription, and the schedule with it.
 - **Rollback.** A schedule already attached still switches the billing at
-  the renewal (it is Stripe's), but older workers' cancel fails with
-  Stripe's 400 on those subscriptions. List them with
-  `SELECT id, stripe_subscription_id, stripe_schedule_id FROM subscriptions
-  WHERE stripe_schedule_id IS NOT NULL`, and release them at Stripe or roll
-  forward (preferred).
+  the renewal (it is Stripe's). The older workers' webhook then writes
+  `billing_interval = 'month'` beside `pending_billing_interval = 'month'`,
+  which fails `check_subscription_pending_billing` (0125) on every retry, so
+  the row stops following Stripe; their cancel also fails, with Stripe's
+  400. Roll forward instead (preferred), or before any rollback list every
+  waiting move, change of billing and schedule, release each schedule at
+  Stripe AND clear the six waiting columns (`pending_tier_id`,
+  `pending_tier_from`, `held_amount_cents`, `pending_billing_interval`,
+  `pending_amount_cents`, `stripe_schedule_id`). The queries are in the
+  [release checklist](release-checklist.md) (0122, 0124 and 0125 ›
+  Rollback).
 
 ## Price changes
 
@@ -730,7 +744,13 @@ and no new Neon wake: it rides the hourly one.
    (any other).
 7. **Alerts are capped.** At most 50 per-person lines a run, one for each row
    that becomes held, whose `alert_error_id` is that line's errorId. The rest
-   fold into the run's end alert, whose errorId those rows carry.
+   fold into the run's end alert, whose errorId those rows carry. The end
+   line is an error only when rows were folded into it; otherwise it is the
+   info line `Price moves: run finished`, since each held row and each
+   stopped change has alerted already (review C1, SF-4).
+   A batch that throws while recording keeps its claims (its rows may have
+   been emailed already), so their reclaim checks the email log and Stripe
+   before telling anyone; only claims no batch started go back (SF-1).
 8. **Done.** A change is `done` (with `done_at`) when no row is `due` or
    `notified`; held rows don't keep it running. That includes a change
    re-opened for a retried row, once that row is worked.

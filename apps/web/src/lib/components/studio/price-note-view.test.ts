@@ -210,7 +210,7 @@ describe('the note after saving (P2 to P9)', () => {
         { value: '1,740', label: 'still to email' },
         { value: '7', label: "couldn't be moved yet" },
       ],
-      meta: 'We email about 1,500 an hour, so the rest by about 18:00. Our support team is handling the 7. As of the 16:00 run.',
+      meta: 'We email about 1,125 an hour, so the rest by about 18:00. Our support team is handling the 7. As of the 16:00 run.',
       action: 'check',
       lastRunAt: '2026-10-30T16:00:00.000Z',
     });
@@ -229,7 +229,7 @@ describe('the note after saving (P2 to P9)', () => {
       },
     });
     expect(note?.meta).toBe(
-      'Checked at 16:30: nothing has changed since the 16:00 run. The next 1,500 go at 17:00, and the rest by about 18:00.'
+      'Checked at 16:30: nothing has changed since the 16:00 run. The next 1,125 go at 17:00, and the rest by about 18:00.'
     );
   });
 
@@ -252,7 +252,7 @@ describe('the note after saving (P2 to P9)', () => {
       },
     });
     expect(note?.meta).toBe(
-      'We email about 1,500 an hour, so the rest by about 18:00. Our support team is handling the 7. As of the 17:00 run.'
+      'We email about 1,125 an hour, so the rest by about 18:00. Our support team is handling the 7. As of the 17:00 run.'
     );
   });
 

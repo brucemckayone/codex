@@ -18,8 +18,10 @@
 --      tables do, as 0106 does for copy).
 -- MIGRATE (the first deploy): the resolver reads versions; admin-api writes
 -- versions and changes, and keeps the three old "current row" tables in step
--- with the values in force NOW (never a waiting rise), so code rolled back
--- to before this reads the right fee, and a waiting rise simply never starts.
+-- with the values in force NOW (never a waiting rise; notifications-api's
+-- daily run writes a dated rise into them on the morning it starts), so
+-- code rolled back to before this reads the right fee, and a waiting rise
+-- simply never starts.
 -- CONTRACT (a later release): stop writing fee_config_platform, _org and
 -- _org_creator, then drop or rename them. The audit log stays.
 --
@@ -34,6 +36,17 @@
 -- classifying write locks the level first (pg_advisory_xact_lock), and under
 -- that lock a dated rise that hasn't started counts as pending too, so a
 -- level has at most one pending rise (F2).
+--
+-- The runner applies this file as ONE implicit transaction, and each FK holds
+-- a SHARE ROW EXCLUSIVE lock on users or organizations (writes wait, reads
+-- don't), and the new columns an ACCESS EXCLUSIVE one on
+-- fee_config_audit_log, until the file commits. lock_timeout bounds only the
+-- WAIT for each lock: if a long transaction is open on one of those tables,
+-- the migration fails after 5s and rolls back whole, instead of holding a
+-- queue of sign-ups and profile and organisation writes behind its own wait;
+-- re-run it once the database is quiet (as 0111). The FKs come from new,
+-- empty tables, so validating them is instant.
+SET lock_timeout = '5s';--> statement-breakpoint
 
 CREATE TABLE "fee_change_notices" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
@@ -251,3 +264,5 @@ WHERE NOT EXISTS (
   SELECT 1 FROM "email_templates"
   WHERE "name" = $tpl$fee-change-cancelled$tpl$ AND "scope" = 'global' AND "deleted_at" IS NULL
 );
+--> statement-breakpoint
+RESET lock_timeout;

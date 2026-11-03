@@ -19,7 +19,9 @@
  * The old "current row" tables (`fee_config_platform`, `_org`,
  * `_org_creator`) are kept in step with the values in force NOW, never a
  * waiting rise, so code rolled back to before migration 0123 reads the right
- * fee (§6.1 Migrate). Nothing reads them here any more.
+ * fee (§6.1 Migrate): every write here mirrors its level
+ * (`mirrorLegacyFeeRow`, @codex/payments), and notifications-api's daily run
+ * does on the morning a dated rise starts. Nothing reads them here any more.
  *
  * Caching: @codex/cache VersionedCache, one slot per level holding its
  * version list (`FEE_VERSIONS_*`). One day, or one hour while a rise there
@@ -65,6 +67,8 @@ import {
   feeLevelWhere,
   feeRiseStartAfter,
   layerLevelFees,
+  lockFeeLevel,
+  mirrorLegacyFeeRow,
   nextFeeNoticeRunAfter,
   readFeeVersions,
   resolveFeesAt,
@@ -554,7 +558,7 @@ export class FeeConfigService extends BaseService {
       const level = levelOf(found);
       const now = new Date();
       const voided = await this.db.transaction(async (tx) => {
-        await lockLevel(tx, level);
+        await lockFeeLevel(tx, level);
         const state = await this.levelState(tx, level, now);
         if (!state.pending || state.pending.change.id !== changeId) {
           throw notWaiting(changeId);
@@ -569,7 +573,7 @@ export class FeeConfigService extends BaseService {
           changeId,
           now
         );
-        await this.mirrorLegacyRow(tx, level, cancelledBy, now);
+        await mirrorLegacyFeeRow(tx, level, cancelledBy, now);
         const [row] = await tx
           .select()
           .from(feeChanges)
@@ -832,7 +836,18 @@ export class FeeConfigService extends BaseService {
    */
   invalidateLevel(level: FeeLevel): void {
     if (!this.cache) return;
-    const p = this.cache.invalidate(feeLevelKey(level)).catch(() => {});
+    const p = this.cache.invalidate(feeLevelKey(level)).catch((error) => {
+      // The write has landed, but the level's old list is still served
+      // until its TTL (up to a day), so a cut would bill the old fee unseen.
+      this.obs.error(
+        'Fee cache not cleared: this level reads its old fees until the cache expires',
+        {
+          errorId: crypto.randomUUID(),
+          ...level,
+          error: error instanceof Error ? error.message : String(error),
+        }
+      );
+    });
     if (this.waitUntil) {
       this.waitUntil(p);
     }
@@ -873,7 +888,7 @@ export class FeeConfigService extends BaseService {
     const columns = columnsOf(level);
     const result = await this.db.transaction(
       async (tx): Promise<FeeWriteResult> => {
-        await lockLevel(tx, level);
+        await lockFeeLevel(tx, level);
         const state = await this.levelState(tx, level, now);
         const today = state.inForce?.raw ?? emptyOrDefault(level);
         const base = state.pending?.raw ?? today;
@@ -954,7 +969,7 @@ export class FeeConfigService extends BaseService {
         }
 
         await writeAudit(tx, level, diff, author, auditChangeId, auditFrom);
-        await this.mirrorLegacyRow(tx, level, author, now);
+        await mirrorLegacyFeeRow(tx, level, author, now);
 
         const [fresh] = change
           ? await tx
@@ -1019,121 +1034,6 @@ export class FeeConfigService extends BaseService {
       }
     }
     return { inForce, pending };
-  }
-
-  /**
-   * The old current row at this level, set to the values in force now. A
-   * removed version (or none) deletes it, as the old code did.
-   */
-  private async mirrorLegacyRow(
-    tx: Tx,
-    level: FeeLevel,
-    author: string,
-    now: Date
-  ): Promise<void> {
-    const { inForce } = await this.levelState(tx, level, now);
-    const raw = inForce && !inForce.raw.removed ? inForce.raw : null;
-    const stamp = { updatedBy: author, updatedAt: now };
-    if (level.scope === 'platform') {
-      if (!raw) {
-        await tx
-          .delete(feeConfigPlatform)
-          .where(eq(feeConfigPlatform.id, 'singleton'));
-        return;
-      }
-      const values = {
-        platformFeePercent:
-          raw.platformFeePercent ??
-          CODE_DEFAULT_PLATFORM.platformFeePercent ??
-          0,
-        subscriptionOrgFeePercent:
-          raw.subscriptionOrgFeePercent ??
-          CODE_DEFAULT_PLATFORM.subscriptionOrgFeePercent ??
-          0,
-        oneOffOrgFeePercent:
-          raw.oneOffOrgFeePercent ??
-          CODE_DEFAULT_PLATFORM.oneOffOrgFeePercent ??
-          0,
-        minPlatformFeeCents:
-          raw.minPlatformFeeCents ??
-          CODE_DEFAULT_PLATFORM.minPlatformFeeCents ??
-          0,
-        minTransferCents: raw.minTransferCents ?? 0,
-      };
-      await tx
-        .insert(feeConfigPlatform)
-        .values({ id: 'singleton', ...values, version: 1, ...stamp })
-        .onConflictDoUpdate({
-          target: feeConfigPlatform.id,
-          set: {
-            ...values,
-            version: sql`${feeConfigPlatform.version} + 1`,
-            ...stamp,
-          },
-        });
-      return;
-    }
-    const values = {
-      platformFeePercent: raw?.platformFeePercent ?? null,
-      orgFeePercent: raw?.orgFeePercent ?? null,
-      minPlatformFeeCents: raw?.minPlatformFeeCents ?? null,
-      minTransferCents: raw?.minTransferCents ?? null,
-    };
-    if (level.scope === 'org') {
-      if (!raw) {
-        await tx
-          .delete(feeConfigOrg)
-          .where(eq(feeConfigOrg.organizationId, level.organizationId));
-        return;
-      }
-      await tx
-        .insert(feeConfigOrg)
-        .values({
-          organizationId: level.organizationId,
-          ...values,
-          version: 1,
-          ...stamp,
-        })
-        .onConflictDoUpdate({
-          target: feeConfigOrg.organizationId,
-          set: {
-            ...values,
-            version: sql`${feeConfigOrg.version} + 1`,
-            ...stamp,
-          },
-        });
-      return;
-    }
-    const where = and(
-      eq(feeConfigOrgCreator.organizationId, level.organizationId),
-      eq(feeConfigOrgCreator.creatorId, level.creatorId)
-    );
-    if (!raw) {
-      await tx.delete(feeConfigOrgCreator).where(where);
-      return;
-    }
-    await tx
-      .insert(feeConfigOrgCreator)
-      .values({
-        organizationId: level.organizationId,
-        creatorId: level.creatorId,
-        ...values,
-        notes: raw.notes,
-        version: 1,
-        ...stamp,
-      })
-      .onConflictDoUpdate({
-        target: [
-          feeConfigOrgCreator.organizationId,
-          feeConfigOrgCreator.creatorId,
-        ],
-        set: {
-          ...values,
-          notes: raw.notes,
-          version: sql`${feeConfigOrgCreator.version} + 1`,
-          ...stamp,
-        },
-      });
   }
 
   // ── Input guards ────────────────────────────────────────────────────────
@@ -1208,17 +1108,6 @@ function emptyOrDefault(level: FeeLevel): LevelRaw {
   return level.scope === 'platform'
     ? { ...CODE_DEFAULT_PLATFORM, notes: null, removed: false }
     : { ...EMPTY_LEVEL };
-}
-
-/**
- * Two saves at one level take turns: the second classifies against the
- * first. An advisory lock, because a level with no change yet has no row to
- * lock (the pattern of agreement-service.ts and payout-ledger.ts).
- */
-async function lockLevel(tx: Tx, level: FeeLevel): Promise<void> {
-  await tx.execute(
-    sql`SELECT pg_advisory_xact_lock(hashtext(${`fee-level:${feeLevelKey(level)}`}))`
-  );
 }
 
 /**

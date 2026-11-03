@@ -402,6 +402,9 @@ export function dispatchScheduled(
   const cronExpression = controller.cron;
 
   if (cronExpression === '0 8 * * *') {
+    // The wake's start: the fee step's send budget counts from it, because
+    // the two sweeps before it share the cron's wall.
+    const startedAt = Date.now();
     ctx.waitUntil(
       runScheduledAgreementExpiringSweep(env)
         .catch((error: unknown) => {
@@ -423,7 +426,7 @@ export function dispatchScheduled(
         })
         // The fee step (Codex-2hxff.33) runs last, on the same wake: a rise
         // waits for it, so a failure here only moves a date later.
-        .then(() => runScheduledFeeNoticesSweep(env))
+        .then(() => runScheduledFeeNoticesSweep(env, { startedAt }))
         .catch((error: unknown) => {
           new ObservabilityClient(
             'notifications-api',

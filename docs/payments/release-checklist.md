@@ -237,37 +237,91 @@ two columns on `fee_config_audit_log`, and the `fee-change-notice` and
 before. It is additive and runs before the workers deploy; old workers never
 read the new tables.
 
-### R14 — after the deploy: the backfill matches the fee rows
+### R14 — after the deploy: the old fee rows match the versions
 
-Expect each pair to be equal, and both template rows to exist:
+**Change no fee between the merge and the deploy summary.** Until admin-api
+deploys, the old admin-api writes only the old `fee_config_*` rows, which
+the new resolver never reads.
+
+Each level's old row should hold the values of its version in force. Expect
+the first query to list nothing, and both template rows to exist:
 
 ```sql
 BEGIN TRANSACTION READ ONLY;
-SELECT
-  (SELECT count(*) FROM fee_config_platform)    AS platform_rows,
-  (SELECT count(*) FROM fee_changes WHERE scope = 'platform') AS platform_changes,
-  (SELECT count(*) FROM fee_config_org)         AS org_rows,
-  (SELECT count(*) FROM fee_changes WHERE scope = 'org')      AS org_changes,
-  (SELECT count(*) FROM fee_config_org_creator) AS override_rows,
-  (SELECT count(*) FROM fee_changes WHERE scope = 'creator')  AS override_changes;
+WITH in_force AS (
+  -- Each level's version in force now: the newest dated, not voided one.
+  SELECT DISTINCT ON (c.scope, c.organization_id, c.creator_id)
+         c.scope, c.organization_id, c.creator_id, v.removed,
+         v.platform_fee_percent, v.subscription_org_fee_percent,
+         v.one_off_org_fee_percent, v.org_fee_percent,
+         v.min_platform_fee_cents, v.min_transfer_cents, v.notes
+    FROM fee_changes c
+    JOIN fee_config_versions v
+      ON v.change_id = c.id AND v.superseded_at IS NULL
+   WHERE c.voided_at IS NULL AND c.effective_from <= now()
+   ORDER BY c.scope, c.organization_id, c.creator_id,
+            c.effective_from DESC, c.created_at DESC
+), live AS (
+  -- A removed version means the level has no old row.
+  SELECT * FROM in_force WHERE NOT removed
+)
+SELECT 'platform' AS level, NULL::uuid AS organization_id,
+       NULL::text AS creator_id
+  FROM (SELECT * FROM live WHERE scope = 'platform') f
+  FULL JOIN fee_config_platform p ON true
+ WHERE (p.id IS NOT NULL, p.platform_fee_percent,
+        p.subscription_org_fee_percent, p.one_off_org_fee_percent,
+        p.min_platform_fee_cents, p.min_transfer_cents)
+       IS DISTINCT FROM
+       (f.scope IS NOT NULL, f.platform_fee_percent,
+        f.subscription_org_fee_percent, f.one_off_org_fee_percent,
+        f.min_platform_fee_cents, f.min_transfer_cents)
+UNION ALL
+SELECT 'org', coalesce(o.organization_id, f.organization_id), NULL
+  FROM (SELECT * FROM live WHERE scope = 'org') f
+  FULL JOIN fee_config_org o ON o.organization_id = f.organization_id
+ WHERE (o.organization_id IS NOT NULL, o.platform_fee_percent,
+        o.org_fee_percent, o.min_platform_fee_cents, o.min_transfer_cents)
+       IS DISTINCT FROM
+       (f.organization_id IS NOT NULL, f.platform_fee_percent,
+        f.org_fee_percent, f.min_platform_fee_cents, f.min_transfer_cents)
+UNION ALL
+SELECT 'creator', coalesce(x.organization_id, f.organization_id),
+       coalesce(x.creator_id, f.creator_id)
+  FROM (SELECT * FROM live WHERE scope = 'creator') f
+  FULL JOIN fee_config_org_creator x
+    ON x.organization_id = f.organization_id AND x.creator_id = f.creator_id
+ WHERE (x.creator_id IS NOT NULL, x.platform_fee_percent, x.org_fee_percent,
+        x.min_platform_fee_cents, x.min_transfer_cents, x.notes)
+       IS DISTINCT FROM
+       (f.creator_id IS NOT NULL, f.platform_fee_percent, f.org_fee_percent,
+        f.min_platform_fee_cents, f.min_transfer_cents, f.notes);
 SELECT name, status FROM email_templates
  WHERE name IN ('fee-change-notice', 'fee-change-cancelled')
    AND scope = 'global' AND deleted_at IS NULL;
 ROLLBACK;
 ```
 
-Run it before anyone changes a fee in the new admin routes: after that, a
-level has more than one change by design. A mismatch means a fee row the
-backfill skipped. Don't fix it with SQL ([why](operations.md#changing-fees)):
-save that level's values again through its admin route, which writes the
-change, the version and the audit rows together.
+It compares values, not counts, so a fee edited through the old admin-api in
+the deploy window shows here even though every level still has one row and
+one change. Each level it lists is one where the two disagree. Don't fix it
+with SQL ([why](operations.md#changing-fees)). Through the new admin route,
+save the level's values as its old row has them, or remove the level if its
+old row is gone: either writes the change, the version, the audit rows and
+the old row together. Then run it again.
+
+The query holds at any time, not only after the deploy. Its one expected
+exception: a level whose dated rise started since midnight, listed until the
+08:00 fee step writes the rise into its old row (R15).
 
 ### R15 — the first 08:00 run
 
 The morning after the deploy, read notifications-api's `fee step completed`
-log line. With no rise saved it reads all zeros. Look for any
-`fee step: template missing` warning (the templates didn't arrive: R14's
-second query) or `fee step part failed` error.
+log line. With no rise saved it reads all zeros. Its `mirrored` count is the
+levels whose old fee row took a dated rise that started since the last run.
+Look for any `fee step: template missing` line (the templates didn't arrive:
+R14's second query): a warning while nothing waits on it, an alert naming
+the changes once a rise does. Look too for a `fee step part failed` error.
 
 The fee cache's key types changed (`fee:*` to `fee-versions:*`, because the
 payload changed). Nothing to purge: the old slots had the default 10-minute
@@ -276,23 +330,36 @@ both.
 
 ### Rollback
 
-`0123` stays. See [Changing fees › Rollback](operations.md#changing-fees):
-the old workers read the old `fee_config_*` rows (kept at the values in force
-now), so sales keep the right fee, and a waiting rise doesn't start until the
-roll forward. Don't change fees while rolled back.
+`0123` stays. See [Changing fees › Rollback](operations.md#changing-fees).
+The old workers read the old `fee_config_*` rows. Every admin save keeps them
+at the values in force then, and the 08:00 fee step writes a dated rise into
+them on the morning it starts, so sales keep the right fee. Before rolling
+back, run R14's first query: it should list nothing. A level whose rise
+started since midnight is listed until the 08:00 run, so roll back after it.
+While rolled back the fee step stops: a waiting rise doesn't start, and one
+whose date falls in the rollback starts only at the roll forward. Don't change
+fees while rolled back.
 
 ---
 
-## Waiting moves, course amounts and price moves (migrations `0122` and `0124`)
+## Waiting moves, course amounts and price moves (migrations `0122`, `0124` and `0125`)
 
 `0122` adds the waiting-move columns on `subscriptions` (`Codex-2hxff.16`) and
 `course_subscriptions.amount_cents` (`Codex-2hxff.52`). `0124` adds
 `price_changes` and `subscription_price_moves` (`Codex-2hxff.85`, `.86`;
-[Subscriptions › Price changes](subscriptions.md#price-changes)). Both are
+[Subscriptions › Price changes](subscriptions.md#price-changes)). `0125` adds
+`pending_billing_interval`, `pending_amount_cents` and `stripe_schedule_id` on
+`subscriptions`: a change from yearly to monthly billing waits for the year's
+end, on a Stripe subscription schedule (`Codex-2hxff.97`). All three are
 additive and run before the workers deploy; old workers never read the new
-columns or tables. Neither backfills anything: no move can wait before `.16`
-ships, and a price change saved before the deploy either finished its fan-out
-or raised an alert.
+columns or tables. None backfills anything: no move or change of billing can
+wait before `.16` and `.97` ship, and a price change saved before the deploy
+either finished its fan-out or raised an alert.
+
+`0125`'s CHECK is the only one in this batch that ties a new column to an old
+one: a waiting interval must differ from `billing_interval`. New code clears
+the waiting change in the same write that lands it. Old code doesn't know it
+exists, which matters only on a rollback (below).
 
 ### R16 — after the deploy: the course amount backfill (only with the owner's OK)
 
@@ -335,9 +402,51 @@ the price moves` error.
 
 ### Rollback
 
-`0122` and `0124` stay. The old workers know nothing of a waiting move, so
-before rolling back, count them:
-`SELECT count(*) FROM subscriptions WHERE pending_tier_id IS NOT NULL`. If it
-isn't 0, decide with the owner first. Don't change prices while rolled back:
-the old fan-out writes no price moves, so the hourly step can't see its
-subscribers after the roll forward.
+`0122`, `0124` and `0125` stay. Rolling forward is preferred: the old workers
+know nothing of a waiting move or change of billing.
+
+- **A waiting change of billing breaks the old webhook.** Its schedule is
+  Stripe's, so at the year's end it still switches the item to the monthly
+  Price. The old `customer.subscription.updated` handler then writes
+  `billing_interval = 'month'` and leaves `pending_billing_interval` at
+  `'month'`, which fails `check_subscription_pending_billing` (23514) on every
+  retry, so the row stops following Stripe. The old cancel also fails, with
+  Stripe's 400, while a schedule is attached.
+- **A waiting move to a cheaper plan** already bills the cheaper price at the
+  renewal, and the old code never flips the tier, so the member keeps the
+  dearer plan at the cheaper price until the roll forward.
+
+So before any rollback, list every subscription with a waiting move, a
+waiting change of billing or a schedule:
+
+```sql
+BEGIN TRANSACTION READ ONLY;
+SELECT id, stripe_subscription_id, stripe_schedule_id,
+       pending_tier_id, pending_tier_from, pending_billing_interval
+  FROM subscriptions
+ WHERE pending_tier_id IS NOT NULL
+    OR pending_billing_interval IS NOT NULL
+    OR stripe_schedule_id IS NOT NULL
+ ORDER BY pending_tier_from NULLS LAST;
+ROLLBACK;
+```
+
+If it lists anyone, decide with the owner first. To roll back anyway, for
+each row: release its schedule at Stripe if it has one (the member then stays
+on yearly billing), then clear the six columns, so nothing waits that the old
+code can't see:
+
+```sql
+UPDATE subscriptions
+   SET pending_tier_id = NULL, pending_tier_from = NULL,
+       held_amount_cents = NULL, pending_billing_interval = NULL,
+       pending_amount_cents = NULL, stripe_schedule_id = NULL
+ WHERE id = '<row id>';
+```
+
+After the roll forward, the next event for each of them mirrors the waiting
+move still recorded in the Stripe subscription's metadata back into its row:
+a released change of billing comes back, and the hourly backstop sets its
+schedule again. Don't change prices while
+rolled back: the old fan-out writes no price moves, so the hourly step can't
+see its subscribers after the roll forward.

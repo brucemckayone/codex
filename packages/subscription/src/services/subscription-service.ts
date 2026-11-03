@@ -2277,7 +2277,7 @@ export class SubscriptionService extends BaseService {
 
     // Customer credit paid some or all of this bill: its creator is paid on
     // what the card paid, nothing when the credit covered it all, so support
-    // is told once per invoice (Codex-2hxff.97). Before the no-charge return
+    // is told once per invoice (Codex-2hxff.97). Before the no-charge path
     // below and the duplicate check, so both are covered. It never throws,
     // and changes nothing here.
     await alertIfCreditPaid(
@@ -2298,16 +2298,20 @@ export class SubscriptionService extends BaseService {
     // is only populated when explicitly expanded on retrieve. Without the
     // expand-fallback chain below, every real invoice.payment_succeeded
     // event silently skipped transfers (Codex-zdbhg).
+    //
+    // No charge (credit paid it all, alerted above, or Stripe names none):
+    // nothing is paid out, as before. The renewal itself still stands, so
+    // the row, the receipt and the cache bump go on, as a course
+    // subscription's do (review C1, SF-12).
     const sourceTransaction = await resolveInvoiceCharge(
       this.stripe,
       stripeInvoice
     );
     if (!sourceTransaction) {
       this.obs.warn(
-        'Invoice has no charge or payment intent, skipping transfers',
-        { invoiceId: stripeInvoice.id }
+        'Invoice has no charge or payment intent: renewal recorded, no transfers',
+        { invoiceId: stripeInvoice.id, stripeSubscriptionId: stripeSubId }
       );
-      return;
     }
 
     // Self-heal: if the subscription row is missing, retrieve from Stripe
@@ -2326,6 +2330,9 @@ export class SubscriptionService extends BaseService {
     // refunded (Codex-2hxff.15) — this one too, though it cleared after the
     // duplicate was settled.
     if (isDuplicateSubscription(sub)) {
+      // Without a charge there is nothing of this invoice's to refund, and
+      // a duplicate renews nothing: left as it always was.
+      if (!sourceTransaction) return;
       await this.settleDuplicate(sub);
       await this.refundDuplicateInvoice(
         sub,
@@ -2407,7 +2414,7 @@ export class SubscriptionService extends BaseService {
           await this.retireRevived(
             sub,
             keptId,
-            reviving
+            reviving && sourceTransaction
               ? { invoiceId: stripeInvoice.id, chargeId: sourceTransaction }
               : undefined,
             stripeSub
@@ -2433,6 +2440,11 @@ export class SubscriptionService extends BaseService {
     // the slices exist (reverseEarlierRefunds, below).
     const current = (await this.rereadUnderLock(sub)) ?? sub;
     const ended = current.endedAt != null;
+    if (!sourceTransaction) {
+      return ended
+        ? {}
+        : this.renewalResult(sub, stripeInvoice, subItem, webAppUrl);
+    }
     if (
       (ended || !isLiveStatus(status)) &&
       (await this.refundedInFull(sourceTransaction))
@@ -2479,7 +2491,20 @@ export class SubscriptionService extends BaseService {
     // No renewal email and no access cleared for an ended subscription.
     if (ended) return finish({});
 
-    // Build renewal email only for recurring invoices (not first payment)
+    return finish(this.renewalResult(sub, stripeInvoice, subItem, webAppUrl));
+  }
+
+  /**
+   * What a paid invoice of a live subscription returns, with or without a
+   * payout: the renewal email (recurring invoices only, not the first
+   * payment) and the cache bump.
+   */
+  private renewalResult(
+    sub: Subscription,
+    stripeInvoice: Stripe.Invoice,
+    subItem: Stripe.SubscriptionItem | undefined,
+    webAppUrl?: string
+  ): WebhookHandlerResult {
     let email: WebhookEmailPayload | undefined;
     if (
       stripeInvoice.billing_reason === 'subscription_cycle' &&
@@ -2518,7 +2543,7 @@ export class SubscriptionService extends BaseService {
       'payment_succeeded'
     );
 
-    return finish({ userId: sub.userId, orgId: sub.organizationId, email });
+    return { userId: sub.userId, orgId: sub.organizationId, email };
   }
 
   /**
@@ -4326,6 +4351,7 @@ export class SubscriptionService extends BaseService {
 
     // Steps 2 and 3.
     let scheduleId: string | null = null;
+    let leftAttached = false;
     try {
       scheduleId = await this.setBillingSchedule({
         subscriptionId: sub.id,
@@ -4335,10 +4361,23 @@ export class SubscriptionService extends BaseService {
         targetTierId: newTierId,
         moveAt,
         stamp: effectiveProrationDate,
+        onLeftAttached: () => {
+          leftAttached = true;
+        },
       });
     } catch (error) {
       if (!planNow) {
-        await this.putBackRecord(plan, record, putBack, effectiveProrationDate);
+        // A schedule still attached keeps the record beside it, so it reads
+        // as ours: Keep, Cancel and a retry reach it, never "scheduled
+        // elsewhere" (review C1, SF-3). setBillingSchedule has alerted.
+        if (!leftAttached) {
+          await this.putBackRecord(
+            plan,
+            record,
+            putBack,
+            effectiveProrationDate
+          );
+        }
         throw error;
       }
       this.obs.warn(
@@ -4408,8 +4447,11 @@ export class SubscriptionService extends BaseService {
    * A waiting change of billing's schedule (§2.2 steps 2-3): made from the
    * subscription, or `schedule` (ours) updated in place, its phases the paid
    * year as it stands and then `priceId` for a month with the flip. A schedule
-   * made here whose update fails is let go (best effort), so no half-made
-   * one is left attached. Never while the subscription is set to cancel:
+   * made here whose update fails is let go, so no half-made one is left
+   * attached. If that release fails too, it is one error alert and
+   * `onLeftAttached` runs: the caller then keeps the record beside it, so
+   * the untagged schedule still reads as ours (`isOurSchedule`; review C1,
+   * SF-3). Never while the subscription is set to cancel:
    * `from_subscription` would undo the cancel (proof P10). Returns its id.
    */
   private async setBillingSchedule(args: {
@@ -4421,6 +4463,8 @@ export class SubscriptionService extends BaseService {
     moveAt: number;
     /** What makes each attempt's keys its own: the preview's date, or the row's version. */
     stamp: number | string;
+    /** The update failed and so did letting go of the schedule made for it. */
+    onLeftAttached?: () => void;
   }): Promise<string> {
     const created = args.schedule
       ? null
@@ -4453,16 +4497,27 @@ export class SubscriptionService extends BaseService {
       );
     } catch (error) {
       if (created) {
-        await this.releaseSchedule(
+        const released = await this.releaseSchedule(
           created,
           `billing-undo-sched_${created.id}`
-        ).catch((releaseError: unknown) =>
-          this.obs.warn('billing_change.undo_release_failed', {
-            subscriptionId: args.subscriptionId,
-            stripeScheduleId: created.id,
-            error: describeThrown(releaseError),
-          })
+        ).then(
+          () => true,
+          (releaseError: unknown) => {
+            this.obs.error(
+              "billing_change.undo_release_failed: our own schedule is left half made on the member's subscription, untagged, with the change's record kept beside it (support: release this schedule in Stripe; the hourly backstop then sets the change again from the record)",
+              {
+                errorId: crypto.randomUUID(),
+                subscriptionId: args.subscriptionId,
+                stripeSubscriptionId: args.stripeSubscriptionId,
+                stripeScheduleId: created.id,
+                updateError: describeThrown(error),
+                error: describeThrown(releaseError),
+              }
+            );
+            return false;
+          }
         );
+        if (!released) args.onLeftAttached?.();
       }
       throw error;
     }

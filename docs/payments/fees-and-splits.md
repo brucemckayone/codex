@@ -60,7 +60,9 @@ Each value is looked up in this order; the first one set wins, column by column:
 The old "current row" tables (`fee_config_platform`, `fee_config_org`,
 `fee_config_org_creator`) are still written, with the values **in force now**
 (never a waiting rise), so code rolled back to before migration `0123` reads
-the right fee. Nothing new reads them; a later release stops writing them.
+the right fee. Every admin save writes its level's row, and notifications-api's
+08:00 fee step writes a dated rise into it on the morning the rise starts.
+Nothing new reads them; a later release stops writing them.
 
 ### Notice of a change
 
