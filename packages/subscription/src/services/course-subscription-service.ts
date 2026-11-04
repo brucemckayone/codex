@@ -109,6 +109,7 @@ import {
 import type Stripe from 'stripe';
 import {
   AlreadyCourseSubscribedError,
+  assertYearlyNotBelowMonthly,
   ConnectAccountNotReadyError,
   CourseNotOnSaleError,
   CourseSubscriptionPlanExistsError,
@@ -438,6 +439,7 @@ export class CourseSubscriptionService extends BaseService {
     courseId: string,
     input: { priceMonthly: number; priceAnnual: number }
   ): Promise<typeof courseSubscriptionPlans.$inferSelect> {
+    assertYearlyNotBelowMonthly(input);
     // Read once: the keys' UTC hour, and a refusal's retryAfter, both come
     // from this instant.
     const keyedAt = Date.now();
@@ -821,6 +823,7 @@ export class CourseSubscriptionService extends BaseService {
     input: { priceMonthly: number; priceAnnual: number },
     actorUserId: string | null = null
   ): Promise<typeof courseSubscriptionPlans.$inferSelect> {
+    assertYearlyNotBelowMonthly(input);
     try {
       const course = await this.getCourseInOrgOrThrow(organizationId, courseId);
 
@@ -2816,7 +2819,11 @@ export class CourseSubscriptionService extends BaseService {
       data: {
         userName: context.userName,
         planName: context.courseTitle,
-        priceFormatted: formatPounds(stripeInvoice.amount_paid ?? 0),
+        // The bill, not what the card paid: credit may have paid some or all
+        // of it (review C1 cycle 2, L5). `amount_paid` stays the payouts'.
+        priceFormatted: formatPounds(
+          stripeInvoice.total ?? stripeInvoice.amount_paid ?? 0
+        ),
         billingDate: new Date().toLocaleDateString('en-GB'),
         nextBillingDate: nextPeriodEnd.toLocaleDateString('en-GB'),
         manageUrl: this.accountSubscriptionsUrl(),

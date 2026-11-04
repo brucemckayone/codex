@@ -11,6 +11,7 @@ import {
   InternalServiceError,
   NotFoundError,
   ServiceError,
+  ValidationError,
 } from '@codex/service-errors';
 
 // Re-export base error classes for convenience
@@ -84,6 +85,32 @@ export class TierSortOrderConflictError extends ConflictError {
       sortOrder,
       code: 'TIER_SORT_ORDER_CONFLICT',
     });
+  }
+}
+
+/**
+ * A yearly price below the monthly one, refused on save (owner decision
+ * 2026-11-03, "Refuse yearly below monthly"; review C1 cycle 2, L3). A
+ * monthly member who switched to such a year would be credited more unused
+ * time than the year costs, and that credit sits on their one Stripe
+ * customer, which pays their next bill anywhere. Tiers and course plans.
+ */
+export class YearlyPriceBelowMonthlyError extends ValidationError {
+  constructor(prices: { priceMonthly: number; priceAnnual: number }) {
+    super("The yearly price can't be less than the monthly price.", {
+      code: 'YEARLY_PRICE_BELOW_MONTHLY',
+      ...prices,
+    });
+  }
+}
+
+/** Refuse a yearly price below the monthly one, before anything is written. */
+export function assertYearlyNotBelowMonthly(prices: {
+  priceMonthly: number;
+  priceAnnual: number;
+}): void {
+  if (prices.priceAnnual < prices.priceMonthly) {
+    throw new YearlyPriceBelowMonthlyError(prices);
   }
 }
 

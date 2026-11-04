@@ -156,15 +156,20 @@ import {
 } from '../errors';
 import {
   billingScheduleUpdate,
+  isHalfMadeSchedule,
   isOurSchedule,
   onLastPhase,
+  phaseTwoPriceId,
   scheduleIdOf,
+  scheduleNeedsFinishing,
+  type WaitingBilling,
 } from './billing-change';
 import { alertIfCreditPaid } from './credit-paid-invoice';
 import {
   addMonthsClamped,
   CLEAR_PENDING_PRICE_METADATA,
   ensurePriceActive,
+  isDefinitiveStripeRefusal,
   type PriceChangeNoticeMailer,
   rejoinTierPriceChange,
 } from './pending-price-change';
@@ -278,12 +283,18 @@ interface TierChangePlan {
 
 /**
  * How a change that happens now is prorated. An upgrade charges the
- * part-period difference; a same-price switch moves no money (Q4); a switch
- * of billing period is as before: a charge when the new bill is dearer,
- * otherwise a credit for the unused time.
+ * part-period difference; a same-price switch moves no money (Q4). A switch
+ * into yearly starts a new period today (.96) and is always invoiced at once,
+ * the unused month against the year (review C1 cycle 2, L3): with the year
+ * never below the month (`YearlyPriceBelowMonthlyError`) that bill is never
+ * negative, so nothing is left as credit on the member's one customer. Any
+ * other switch of billing period is as before.
  */
 function nowProration(
-  plan: Pick<TierChangePlan, 'kind' | 'newRecurringAmount' | 'sub' | 'move'>
+  plan: Pick<
+    TierChangePlan,
+    'kind' | 'newRecurringAmount' | 'sub' | 'move' | 'billingInterval'
+  >
 ): 'always_invoice' | 'create_prorations' | 'none' {
   if (plan.kind === 'upgrade') return 'always_invoice';
   if (plan.kind === 'lateral' || plan.kind === 'downgrade') return 'none';
@@ -293,6 +304,7 @@ function nowProration(
     const paid = plan.move?.holdAmountCents ?? plan.sub.amountCents;
     return plan.newRecurringAmount > paid ? 'always_invoice' : 'none';
   }
+  if (startsNewPeriod(plan.kind, plan.billingInterval)) return 'always_invoice';
   return plan.newRecurringAmount > plan.sub.amountCents
     ? 'always_invoice'
     : 'create_prorations';
@@ -2526,7 +2538,9 @@ export class SubscriptionService extends BaseService {
         data: {
           userName: stripeInvoice.customer_name || 'there',
           planName: stripeInvoice.lines.data[0]?.description || 'Subscription',
-          priceFormatted: `£${((stripeInvoice.amount_paid ?? 0) / 100).toFixed(2)}`,
+          // The bill, not what the card paid: credit may have paid some or
+          // all of it (review C1 cycle 2, L5). `amount_paid` stays the split's.
+          priceFormatted: `£${((stripeInvoice.total ?? stripeInvoice.amount_paid ?? 0) / 100).toFixed(2)}`,
           billingDate: new Date().toLocaleDateString('en-GB'),
           nextBillingDate,
           manageUrl: `${webAppUrl || ''}/account/subscriptions`,
@@ -3722,6 +3736,13 @@ export class SubscriptionService extends BaseService {
    * `TierChangePreviewExpiredError` before Stripe is written to
    * (Codex-2hxff.96). The page then shows the fresh figures to confirm. A
    * drift in the second between that re-check and the write is accepted.
+   *
+   * A change that waits for the renewal (a cheaper plan, or leaving yearly
+   * billing) bills the price read now, at the renewal, with no notice. When
+   * the page passes the preview's `newRecurringAmountCents`, a different
+   * price (one saved since the preview) throws
+   * `TierChangePreviewExpiredError` before Stripe is written to, so the
+   * member confirms the price they will pay (review C1 cycle 2, L4).
    */
   async changeTier(
     userId: string,
@@ -3729,7 +3750,8 @@ export class SubscriptionService extends BaseService {
     newTierId: string,
     billingInterval: 'month' | 'year',
     prorationDate?: number,
-    quote?: string
+    quote?: string,
+    newRecurringAmountCents?: number
   ): Promise<{ userId: string; orgId: string; subscription: Subscription }> {
     try {
       const plan = await this.planTierChange(
@@ -3758,6 +3780,20 @@ export class SubscriptionService extends BaseService {
             newTierId,
           });
         }
+      }
+
+      const waitingAmount =
+        plan.billing?.amountCents ??
+        (plan.kind === 'downgrade' ? plan.newRecurringAmount : null);
+      if (
+        waitingAmount !== null &&
+        newRecurringAmountCents !== undefined &&
+        newRecurringAmountCents !== waitingAmount
+      ) {
+        throw new TierChangePreviewExpiredError({
+          prorationDate: effectiveProrationDate,
+          newTierId,
+        });
       }
 
       if (plan.billing) {
@@ -4390,6 +4426,12 @@ export class SubscriptionService extends BaseService {
         }
       );
     }
+    if (scheduleId === null && !planNow) {
+      // Set to cancel since the read (cycle 2, L1): nothing was set, and the
+      // record goes, as for any change refused while cancelling.
+      await this.putBackRecord(plan, record, putBack, effectiveProrationDate);
+      throw new TierChangeCancellingError(sub.organizationId);
+    }
 
     const split = await this.computeSubscriptionSplit(
       sub.organizationId,
@@ -4452,7 +4494,9 @@ export class SubscriptionService extends BaseService {
    * `onLeftAttached` runs: the caller then keeps the record beside it, so
    * the untagged schedule still reads as ours (`isOurSchedule`; review C1,
    * SF-3). Never while the subscription is set to cancel:
-   * `from_subscription` would undo the cancel (proof P10). Returns its id.
+   * `from_subscription` would undo the cancel (proof P10), so a cancel that
+   * lands after the caller's read is put back and nothing is set (null).
+   * Returns its id.
    */
   private async setBillingSchedule(args: {
     subscriptionId: string;
@@ -4465,15 +4509,39 @@ export class SubscriptionService extends BaseService {
     stamp: number | string;
     /** The update failed and so did letting go of the schedule made for it. */
     onLeftAttached?: () => void;
-  }): Promise<string> {
+  }): Promise<string | null> {
     const created = args.schedule
       ? null
-      : await this.stripe.subscriptionSchedules.create(
-          { from_subscription: args.stripeSubscriptionId },
+      : await this.createBillingSchedule(args);
+    // A Cancel that landed after the caller read the subscription (review
+    // C1 cycle 2, L1): `from_subscription` moved it onto the schedule
+    // (`end_behavior: 'cancel'`) and turned the subscription's own flag off
+    // (proof P10), and the phase update would clear it for good. A member
+    // set to cancel gets no schedule: let go of it, put the cancel back, and
+    // set nothing (null). A failure here is one alert: the cancel may be lost.
+    if (created?.end_behavior === 'cancel') {
+      try {
+        await this.restoreCancel(created, args.stripeSubscriptionId);
+      } catch (error) {
+        this.obs.error(
+          'billing_change.cancel_restore_failed: a schedule was made from a subscription set to cancel, and putting the cancel back failed; the member may now renew (support: release the schedule if still attached, and set the subscription to cancel at its period end)',
           {
-            idempotencyKey: `billing-sched_${args.subscriptionId}_${args.moveAt}_${args.stamp}`,
+            errorId: crypto.randomUUID(),
+            subscriptionId: args.subscriptionId,
+            stripeSubscriptionId: args.stripeSubscriptionId,
+            stripeScheduleId: created.id,
+            error: describeThrown(error),
           }
         );
+        throw error;
+      }
+      this.obs.info('billing_change.skipped_cancelling', {
+        subscriptionId: args.subscriptionId,
+        stripeSubscriptionId: args.stripeSubscriptionId,
+        stripeScheduleId: created.id,
+      });
+      return null;
+    }
     const base = args.schedule ?? created;
     if (!base) {
       throw new InternalServiceError('No subscription schedule to update', {
@@ -4522,6 +4590,131 @@ export class SubscriptionService extends BaseService {
       throw error;
     }
     return base.id;
+  }
+
+  /**
+   * The schedule made from the subscription, keyed per attempt. A create
+   * whose answer was lost (a timeout or a 5xx, not a refusal:
+   * `isDefinitiveStripeRefusal`) may have been made, so the subscription is
+   * read again: an untagged schedule attached beside our record is the one
+   * we made, taken up rather than left as an orphan that reads as someone
+   * else's once the record is put back (review C1 cycle 2, L2). Anything
+   * else throws the create's error, as before.
+   */
+  private async createBillingSchedule(args: {
+    subscriptionId: string;
+    stripeSubscriptionId: string;
+    moveAt: number;
+    stamp: number | string;
+  }): Promise<Stripe.SubscriptionSchedule> {
+    try {
+      return await this.stripe.subscriptionSchedules.create(
+        { from_subscription: args.stripeSubscriptionId },
+        {
+          idempotencyKey: `billing-sched_${args.subscriptionId}_${args.moveAt}_${args.stamp}`,
+        }
+      );
+    } catch (error) {
+      if (isDefinitiveStripeRefusal(error)) throw error;
+      const made = await this.lostScheduleOf(args.stripeSubscriptionId).catch(
+        (readError: unknown) => {
+          this.obs.warn('billing_change.create_reread_failed', {
+            subscriptionId: args.subscriptionId,
+            stripeSubscriptionId: args.stripeSubscriptionId,
+            error: describeThrown(readError),
+          });
+          return null;
+        }
+      );
+      if (!made) throw error;
+      this.obs.warn('billing_change.create_adopted', {
+        subscriptionId: args.subscriptionId,
+        stripeSubscriptionId: args.stripeSubscriptionId,
+        stripeScheduleId: made.id,
+        error: describeThrown(error),
+      });
+      return made;
+    }
+  }
+
+  /** The half-made schedule of ours attached to the subscription now, or null. */
+  private async lostScheduleOf(
+    stripeSubscriptionId: string
+  ): Promise<Stripe.SubscriptionSchedule | null> {
+    const live = await this.stripe.subscriptions.retrieve(stripeSubscriptionId);
+    const scheduleId = scheduleIdOf(live);
+    if (!scheduleId) return null;
+    const schedule =
+      await this.stripe.subscriptionSchedules.retrieve(scheduleId);
+    return isHalfMadeSchedule(schedule, live.metadata) ? schedule : null;
+  }
+
+  /**
+   * Let go of a schedule that ends in a cancel and put the cancel back on
+   * the subscription (proof P10: `from_subscription` moved it there).
+   */
+  private async restoreCancel(
+    schedule: Pick<Stripe.SubscriptionSchedule, 'id'>,
+    stripeSubscriptionId: string
+  ): Promise<void> {
+    await this.releaseSchedule(
+      schedule,
+      `billing-undo-cancelled_${schedule.id}`
+    );
+    await this.stripe.subscriptions.update(
+      stripeSubscriptionId,
+      { cancel_at_period_end: true },
+      { idempotencyKey: `billing-recancel_${schedule.id}` }
+    );
+  }
+
+  /**
+   * Finish our schedule when it does not carry the waiting change its
+   * record describes (`scheduleNeedsFinishing`; review C1 cycle 2, L2): it
+   * is updated in place to the record, under a key of its own per repair
+   * (the schedule, what phase 2 held, and the record's Price). A finished
+   * one is left alone, so our update's own event writes nothing.
+   *
+   * Never against the member's later choice. A schedule that ends in a
+   * cancel is let go and the cancel put back, as the create's check does
+   * (cycle 2, L1); one on a subscription set to cancel is let go and the
+   * record kept, as Cancel does. A Keep clears the record, and with it this
+   * call: `billing` is read from the live subscription. Throws Stripe's
+   * errors; the callers alert.
+   */
+  private async finishBillingSchedule(
+    sub: Pick<Subscription, 'id'>,
+    live: Stripe.Subscription,
+    schedule: Stripe.SubscriptionSchedule,
+    move: WaitingMove,
+    billing: WaitingBilling
+  ): Promise<'finished' | 'released' | 'none'> {
+    const flip = flipMetadata({ tierId: move.tierId });
+    if (!scheduleNeedsFinishing(schedule, billing.priceId, flip)) {
+      return 'none';
+    }
+    if (schedule.end_behavior === 'cancel') {
+      await this.restoreCancel(schedule, live.id);
+      return 'released';
+    }
+    if (live.cancel_at_period_end) {
+      await this.releaseSchedule(
+        schedule,
+        `billing-release-cancel_${schedule.id}`
+      );
+      return 'released';
+    }
+    await ensurePriceActive(this.stripe, billing.priceId);
+    await this.setBillingSchedule({
+      subscriptionId: sub.id,
+      stripeSubscriptionId: live.id,
+      schedule,
+      priceId: billing.priceId,
+      targetTierId: move.tierId,
+      moveAt: move.at,
+      stamp: `finish-${phaseTwoPriceId(schedule) ?? 'none'}`,
+    });
+    return 'finished';
   }
 
   /**
@@ -5014,39 +5207,62 @@ export class SubscriptionService extends BaseService {
    * the change still waits, nothing is attached and the subscription is not
    * set to cancel (`from_subscription` would undo that, proof P10). Phase
    * 2's Price may have been archived by a re-price since (proof P12): it is
-   * made billable first. Never throws: a failure is a warning, and the
-   * backstop sets it within the hour. `skipped`: there was nothing to set.
+   * made billable first. One of ours already attached but half made, or
+   * carrying an earlier choice, is finished in place instead
+   * (`finishBillingSchedule`, review C1 cycle 2, L2), or let go for a cancel
+   * (`released`). Never throws: a failure is a warning, and the backstop
+   * sets it within the hour. `skipped`: there was nothing to set.
    */
   private async rescheduleBillingChange(
     sub: Pick<Subscription, 'id' | 'stripeSubscriptionId' | 'organizationId'>,
     live: Stripe.Subscription | undefined,
     reason: 'reactivate' | 'backstop'
-  ): Promise<'set' | 'skipped' | 'failed'> {
+  ): Promise<'set' | 'skipped' | 'failed' | 'released'> {
     const move = readWaitingMove(live?.metadata);
     const item = live?.items?.data?.[0];
     if (
       !live ||
       !move?.billing ||
       !item ||
-      item.current_period_start >= move.at ||
-      live.cancel_at_period_end ||
-      scheduleIdOf(live) !== null
+      item.current_period_start >= move.at
     ) {
       return 'skipped';
     }
+    const attachedId = scheduleIdOf(live);
+    if (attachedId === null && live.cancel_at_period_end) return 'skipped';
     try {
-      await ensurePriceActive(this.stripe, move.billing.priceId);
-      const scheduleId = await this.setBillingSchedule({
-        subscriptionId: sub.id,
-        stripeSubscriptionId: sub.stripeSubscriptionId,
-        schedule: null,
-        priceId: move.billing.priceId,
-        targetTierId: move.tierId,
-        moveAt: move.at,
-        // One attempt per renewal of the record and run: a retry after a
-        // failure is a new attempt, not a replay of the failed one.
-        stamp: `${reason}-${Date.now()}`,
-      });
+      let scheduleId: string | null;
+      if (attachedId !== null) {
+        const schedule =
+          await this.stripe.subscriptionSchedules.retrieve(attachedId);
+        if (!isOurSchedule(schedule, live.metadata)) return 'skipped';
+        const outcome = await this.finishBillingSchedule(
+          sub,
+          live,
+          schedule,
+          move,
+          move.billing
+        );
+        if (outcome === 'released') return 'released';
+        if (outcome === 'none') return 'skipped';
+        scheduleId = schedule.id;
+      } else {
+        await ensurePriceActive(this.stripe, move.billing.priceId);
+        scheduleId = await this.setBillingSchedule({
+          subscriptionId: sub.id,
+          stripeSubscriptionId: sub.stripeSubscriptionId,
+          schedule: null,
+          priceId: move.billing.priceId,
+          targetTierId: move.tierId,
+          moveAt: move.at,
+          // One attempt per renewal of the record and run: a retry after a
+          // failure is a new attempt, not a replay of the failed one.
+          stamp: `${reason}-${Date.now()}`,
+        });
+      }
+      // Set to cancel since the read (cycle 2, L1): the cancel is back, and
+      // a cancelling subscription gets no schedule until it is reactivated.
+      if (scheduleId === null) return 'skipped';
       await this.db
         .update(subscriptions)
         .set({ stripeScheduleId: scheduleId, updatedAt: new Date() })
@@ -5256,7 +5472,45 @@ export class SubscriptionService extends BaseService {
     }
 
     const item = live.items.data[0];
-    if (!item || item.current_period_start < move.at) return 'not_due';
+    if (!item || item.current_period_start < move.at) {
+      // Before the renewal, our schedule is finished if it does not carry
+      // the change yet (review C1 cycle 2, L2). A failure is one alert and
+      // waits for the member's next event; nothing here is due to flip.
+      if (item && row && ours && move.billing) {
+        try {
+          const outcome = await this.finishBillingSchedule(
+            row,
+            live,
+            ours,
+            move,
+            move.billing
+          );
+          if (outcome !== 'none') {
+            this.obs.info('billing_change.finished', {
+              subscriptionId: row.id,
+              stripeSubscriptionId: live.id,
+              stripeScheduleId: ours.id,
+              outcome,
+            });
+          }
+        } catch (error) {
+          this.obs.error(
+            'billing_change.finish_failed: our schedule does not carry the waiting change of billing and could not be finished, or let go for a cancel; unless it is, the year renews yearly, or the cancel is lost (support: docs/payments/subscriptions.md → Waiting changes of billing)',
+            {
+              errorId: crypto.randomUUID(),
+              subscriptionId: row.id,
+              stripeSubscriptionId: live.id,
+              stripeScheduleId: ours.id,
+              organizationId: row.organizationId,
+              endBehavior: ours.end_behavior,
+              cancelAtPeriodEnd: live.cancel_at_period_end,
+              error: describeThrown(error),
+            }
+          );
+        }
+      }
+      return 'not_due';
+    }
 
     const organizationId =
       row?.organizationId ?? live.metadata?.codex_organization_id ?? null;
@@ -5548,11 +5802,13 @@ export class SubscriptionService extends BaseService {
             stripeSubscriptionId: row.stripeSubscriptionId,
             outcome,
           });
-        } else {
+        } else if (outcome === 'skipped') {
           // Nothing to set at Stripe (a schedule there, the record gone, or
           // set to cancel): the row lags it.
           await this.syncFromStripe(live, 'tier_move_scheduled');
         }
+        // 'released': let go for a cancel; `live` still shows it attached,
+        // and the events the release and the cancel fire mirror them.
       } catch (error) {
         left.push({
           subscriptionId: row.id,

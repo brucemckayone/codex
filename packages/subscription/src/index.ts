@@ -78,6 +78,7 @@ export {
   TierNotFoundError,
   TierSortOrderConflictError,
   wrapError,
+  YearlyPriceBelowMonthlyError,
 } from './errors';
 
 // Services

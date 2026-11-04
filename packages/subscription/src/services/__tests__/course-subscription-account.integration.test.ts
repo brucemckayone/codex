@@ -526,6 +526,37 @@ describe('course subscriptions on the account page (Codex-2hxff.52)', () => {
       });
     });
 
+    // Review C1 cycle 2, L5: credit paid the renewal in full. The receipt
+    // names the bill, not the £0.00 the card paid.
+    it('a cycle renewal that credit paid in full: the receipt names the bill', async () => {
+      const me = await subscriber();
+      const sub = stripeSub(me, await course('Credit Course'));
+      await created(sub);
+
+      const renewal = await service.handleCourseInvoicePaymentSucceeded(
+        createMockStripeInvoice({
+          amount_paid: 0,
+          total: 5000,
+          starting_balance: -5000,
+          currency: 'gbp',
+          billing_reason: 'subscription_cycle',
+          payments: { data: [] },
+          parent: {
+            subscription_details: {
+              subscription: sub.id,
+              metadata: { type: COURSE_SUBSCRIPTION_METADATA_TYPE },
+            },
+          },
+        }) as unknown as Stripe.Invoice,
+        sub
+      );
+
+      expect(renewal?.email).toMatchObject({
+        templateName: 'subscription-renewed',
+        data: { planName: 'Credit Course', priceFormatted: '£50.00' },
+      });
+    });
+
     it('ended: the cancellation once, with Resubscribe on the course page; a redelivery sends none', async () => {
       const me = await subscriber();
       const target = await course('Ending Course');

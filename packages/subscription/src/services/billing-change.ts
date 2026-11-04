@@ -105,8 +105,52 @@ export function isOurSchedule(
   subscriptionMetadata: Record<string, string> | null | undefined
 ): boolean {
   if (schedule.metadata?.[BILLING_CHANGE_KEY]) return true;
+  return isHalfMadeSchedule(schedule, subscriptionMetadata);
+}
+
+/**
+ * Ours and half made: untagged, beside our record. Never one with a tag of
+ * any kind, ours included.
+ */
+export function isHalfMadeSchedule(
+  schedule: Pick<Stripe.SubscriptionSchedule, 'metadata'>,
+  subscriptionMetadata: Record<string, string> | null | undefined
+): boolean {
   const untagged = Object.keys(schedule.metadata ?? {}).length === 0;
   return untagged && readWaitingBilling(subscriptionMetadata) !== null;
+}
+
+/**
+ * Our schedule does not carry the waiting change its record describes
+ * (review C1 cycle 2, L2): half made (untagged, the paid year only, so it
+ * lets go at the year's end and the year renews yearly), or phase 2 an
+ * earlier choice's (an update in place that failed, its record not put
+ * back). Finished reads as our update writes it: tagged, two phases, and
+ * phase 2 `priceId` with `flip` as its metadata. So the event that update
+ * fires finds nothing to do.
+ */
+export function scheduleNeedsFinishing(
+  schedule: Pick<Stripe.SubscriptionSchedule, 'metadata' | 'phases'>,
+  priceId: string,
+  flip: Record<string, string>
+): boolean {
+  if (!schedule.metadata?.[BILLING_CHANGE_KEY]) return true;
+  const [, next, ...more] = schedule.phases;
+  if (!next || more.length > 0) return true;
+  const price = next.items[0]?.price;
+  if (!price || priceIdOf(price) !== priceId) return true;
+  // '' deletes a key, so a missing key reads as ''.
+  return Object.entries(flip).some(
+    ([key, value]) => (next.metadata?.[key] ?? '') !== value
+  );
+}
+
+/** Phase 2's Price, or null for a schedule with the paid year only. */
+export function phaseTwoPriceId(
+  schedule: Pick<Stripe.SubscriptionSchedule, 'phases'>
+): string | null {
+  const price = schedule.phases[1]?.items[0]?.price;
+  return price ? priceIdOf(price) : null;
 }
 
 /**
