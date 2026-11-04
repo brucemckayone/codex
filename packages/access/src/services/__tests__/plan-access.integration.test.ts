@@ -1105,5 +1105,32 @@ describe('plan access — decision, library, checklist (Codex-2hxff.91)', () => 
       const elsewhere = await plans.getDeleteImpact(orgId, pro);
       expect(elsewhere).toMatchObject({ movingInCount: 0, lastMoveAt: null });
     });
+
+    // Review C1 cycle 2, L7: a change of billing alone names the tier the
+    // member is on (Codex-2hxff.97). They are one subscriber, not a mover too.
+    it('a member waiting only to switch billing counts once, as a subscriber, with no move date', async () => {
+      // Its own org: this describe's tiers carry the movers above.
+      const ownOrg = await org('billing-only');
+      const only = await tier(ownOrg, 1, { priceMonthly: 500 });
+      const [userId] = (await seedTestUsers(db, 1)) as [string];
+      await db.insert(subscriptions).values(
+        createTestSubscriptionInput(userId, ownOrg, only, {
+          billingInterval: 'year',
+          pendingTierId: only,
+          pendingTierFrom: daysFromNow(40),
+          heldAmountCents: 5000,
+          pendingBillingInterval: 'month',
+          pendingAmountCents: 500,
+        })
+      );
+
+      const impact = await plans.getDeleteImpact(ownOrg, only);
+
+      expect(impact).toMatchObject({
+        liveSubscriberCount: 1,
+        movingInCount: 0,
+        lastMoveAt: null,
+      });
+    });
   });
 });

@@ -142,6 +142,14 @@ describe('the tab', () => {
     expect(card).not.toBeNull();
     expect(card?.querySelector('h3.change-card__title')).not.toBeNull();
     expect(card?.querySelector('h2')).toBeNull();
+    // The rises have their own section head above them (C2-W3).
+    const heads = [...document.querySelectorAll('h2, h3')].filter((h) =>
+      h.matches('.queue-subhead, .change-card__title')
+    );
+    expect(heads.map((h) => h.tagName)).toEqual(['H2', 'H3', 'H2']);
+    expect(heads[0].textContent?.trim()).toBe(
+      m.support_queue_fees_subhead_rises({ count: '1' })
+    );
   });
 
   test('only its two reads load, with its own intro', () => {

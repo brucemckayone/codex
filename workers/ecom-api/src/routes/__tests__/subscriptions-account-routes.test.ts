@@ -177,6 +177,8 @@ function services() {
   return {
     subscription: {
       keepCurrentPlan: vi.fn().mockResolvedValue(undefined),
+      cancelSubscription: vi.fn().mockResolvedValue(undefined),
+      reactivateSubscription: vi.fn().mockResolvedValue(undefined),
       getSubscription: vi.fn().mockResolvedValue({
         id: 'sub-row',
         heldAmountCents: null,
@@ -291,6 +293,47 @@ describe('POST /subscriptions/keep-current-plan', () => {
       error: { details?: { code?: string } };
     };
     expect(body.error.details?.code).toBe('MOVE_ALREADY_LANDED');
+  });
+});
+
+// ─── POST /subscriptions/cancel and /reactivate ──────────────────────────────
+
+// Review C1 cycle 2, backend L1: with a waiting change of billing each one
+// releases or sets a Stripe schedule, so both take the strict preset, as the
+// course pair does (9b39d7c4).
+describe('POST /subscriptions/cancel and /subscriptions/reactivate', () => {
+  it('cancel: the strict preset, for the caller', async () => {
+    const { app, mocks } = buildApp();
+
+    const res = await app.request(
+      post('/subscriptions/cancel', { organizationId: ORG_ID })
+    );
+
+    expect(res.status).toBe(200);
+    expect(mocks.subscription.cancelSubscription).toHaveBeenCalledWith(
+      USER_ID,
+      ORG_ID,
+      undefined,
+      undefined
+    );
+    expect(served.policy).toEqual({ auth: 'required', rateLimit: 'strict' });
+  });
+
+  it('reactivate: the strict preset, for the caller', async () => {
+    const { app, mocks } = buildApp();
+
+    // The route then clears the access-revocation key, which needs worker
+    // bindings this harness does not give it: the policy and the call are
+    // what this pins.
+    await app.request(
+      post('/subscriptions/reactivate', { organizationId: ORG_ID })
+    );
+
+    expect(mocks.subscription.reactivateSubscription).toHaveBeenCalledWith(
+      USER_ID,
+      ORG_ID
+    );
+    expect(served.policy).toEqual({ auth: 'required', rateLimit: 'strict' });
   });
 });
 

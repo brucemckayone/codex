@@ -343,6 +343,19 @@ export function coursePlanRetryMessage(err: unknown): string | undefined {
   return m.course_plan_retry_after({ time: formatLocalClockTime(at) });
 }
 
+/**
+ * The creator's copy for a course plan price the worker refused by its
+ * code, from en.json and never the worker's text: a yearly price below the
+ * monthly one (`YEARLY_PRICE_BELOW_MONTHLY`, owner: "Refuse yearly below
+ * monthly"). The Offer panel says it at the yearly price too. Undefined for
+ * any other error.
+ */
+export function coursePlanPriceRefusal(err: unknown): string | undefined {
+  return remoteErrorCode(err) === 'YEARLY_PRICE_BELOW_MONTHLY'
+    ? m.price_refusal_yearly_below_monthly()
+    : undefined;
+}
+
 /** Normalise the render-side {@link PageOffer} into the total persisted bag. */
 export function toPersistedOffer(offer: PageOffer): PersistedPageOffer {
   return {
@@ -465,7 +478,10 @@ export async function saveBuilderDraft(
       await deps.monetisation.save();
       monetisationSaved = true;
     } catch (err) {
-      const why = coursePlanRetryMessage(err) ?? remoteErrorMessage(err);
+      const why =
+        coursePlanRetryMessage(err) ??
+        coursePlanPriceRefusal(err) ??
+        remoteErrorMessage(err);
       return {
         outcome: 'failed',
         stage: 'monetisation',

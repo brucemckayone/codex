@@ -52,6 +52,7 @@ import {
   ConnectAccountNotReadyError,
   TierHasSubscribersError,
   TierNotFoundError,
+  YearlyPriceBelowMonthlyError,
 } from '../../errors';
 import { TierService } from '../tier-service';
 
@@ -730,6 +731,55 @@ describe('TierService', () => {
   });
 
   // ─── updateTier ─────────────────────────────────────────────────────
+
+  // Review C1 cycle 2, L3 (owner 2026-11-03: "Refuse yearly below monthly").
+  describe('a yearly price below the monthly one', () => {
+    it('is refused on create, with its own code, before Stripe is asked', async () => {
+      const org = await createOrgWithConnect('yearly-below-create');
+      (stripe.products.create as ReturnType<typeof vi.fn>).mockClear();
+
+      const refused = await service
+        .createTier(org.id, {
+          submissionId: crypto.randomUUID(),
+          name: 'Cheap year',
+          priceMonthly: 1200,
+          priceAnnual: 500,
+        })
+        .catch((error: unknown) => error);
+
+      expect(refused).toBeInstanceOf(YearlyPriceBelowMonthlyError);
+      expect((refused as YearlyPriceBelowMonthlyError).context).toMatchObject({
+        code: 'YEARLY_PRICE_BELOW_MONTHLY',
+        priceMonthly: 1200,
+        priceAnnual: 500,
+      });
+      expect(stripe.products.create).not.toHaveBeenCalled();
+    });
+
+    it('is refused on an update that sends one price, against the stored other; equal is fine', async () => {
+      const org = await createOrgWithConnect('yearly-below-update');
+      const tier = await service.createTier(org.id, {
+        submissionId: crypto.randomUUID(),
+        name: 'T',
+        priceMonthly: 499,
+        priceAnnual: 4990,
+      });
+      (stripe.prices.create as ReturnType<typeof vi.fn>).mockClear();
+
+      await expect(
+        service.updateTier(tier.id, org.id, { priceMonthly: 5000 })
+      ).rejects.toThrow(YearlyPriceBelowMonthlyError);
+      await expect(
+        service.updateTier(tier.id, org.id, { priceAnnual: 400 })
+      ).rejects.toThrow(YearlyPriceBelowMonthlyError);
+      expect(stripe.prices.create).not.toHaveBeenCalled();
+
+      const equal = await service.updateTier(tier.id, org.id, {
+        priceMonthly: 4990,
+      });
+      expect(equal.priceMonthly).toBe(4990);
+    });
+  });
 
   describe('updateTier', () => {
     it('should update name/desc without touching Stripe prices', async () => {
