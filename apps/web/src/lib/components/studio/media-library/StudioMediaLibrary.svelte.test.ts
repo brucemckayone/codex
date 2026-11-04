@@ -41,6 +41,8 @@ type Summary = {
 
 const s = vi.hoisted(() => ({
   url: new URL('https://studio.test/studio/media'),
+  // `navigating.to`: a navigation in flight, or none.
+  to: null as { url: URL } | null,
   first: { current: undefined as unknown, error: undefined as unknown },
   later: new Map<number, unknown>(),
   summary: { current: undefined as unknown, error: undefined as unknown },
@@ -52,7 +54,11 @@ vi.mock('$app/state', () => ({
   get page() {
     return { url: s.url };
   },
-  navigating: { to: null },
+  navigating: {
+    get to() {
+      return s.to;
+    },
+  },
 }));
 
 const goto = vi.hoisted(() => vi.fn(async () => {}));
@@ -186,6 +192,7 @@ function button(name: string | RegExp): HTMLButtonElement | undefined {
 }
 
 beforeEach(() => {
+  s.to = null;
   s.first = { current: undefined, error: undefined };
   s.summary = { current: undefined, error: undefined };
   s.later.clear();
@@ -296,6 +303,66 @@ describe('StudioMediaLibrary: URL writes (runaway, Codex-a6ofh.1.7)', () => {
     shown?.click();
     await settle();
     expect(goto).not.toHaveBeenCalled();
+  });
+
+  const viewRadio = (checked: boolean) =>
+    document.querySelector<HTMLButtonElement>(
+      `.segment--icons [role="radio"][aria-checked="${checked}"]`
+    );
+  const inFlight = (path: string) => {
+    s.to = { url: new URL(`https://studio.test${path}`) };
+  };
+
+  // The page still shows grid while a navigation to list is under way: grid
+  // is a change from where the URL is going, so it navigates.
+  test('choosing what the page shows, during a navigation away from it, navigates', async () => {
+    s.first.current = listOf([item(1)]);
+    render();
+    await settle();
+    inFlight('/studio/media?view=list');
+    viewRadio(true)?.click();
+    await settle();
+    expect(goto).toHaveBeenCalledWith('/studio/media', expect.anything());
+  });
+
+  test('a facet changed during a navigation builds on it, never drops it', async () => {
+    s.first.current = listOf([item(1)]);
+    render();
+    await settle();
+    inFlight('/studio/media?usage=unused');
+    viewRadio(false)?.click();
+    await settle();
+    expect(goto).toHaveBeenCalledWith(
+      '/studio/media?usage=unused&view=list',
+      expect.anything()
+    );
+  });
+
+  // A navigation to another page is not this library's URL.
+  test('a write that changes nothing, during a navigation to another page, navigates nowhere', async () => {
+    s.first.current = listOf([item(1)]);
+    render('?view=list');
+    await settle();
+    inFlight('/studio/content');
+    viewRadio(true)?.click();
+    await settle();
+    expect(goto).not.toHaveBeenCalled();
+  });
+});
+
+describe('StudioMediaLibrary: a stalled upload (review, Codex-a6ofh.1.6)', () => {
+  // The server counts it as stopped (the summary); the tile must agree, on
+  // the surface's own clock, with no live report for it.
+  test('an upload past the stall line, with no live report, reads as stopped', () => {
+    s.first.current = listOf([
+      item(1, { status: 'uploading', createdAt: '2026-01-01T00:00:00.000Z' }),
+      item(2, { status: 'uploading', createdAt: new Date().toISOString() }),
+    ]);
+    render();
+    const pills = [...document.querySelectorAll('.tile-grid .tile')].map((t) =>
+      t.getAttribute('data-status')
+    );
+    expect(pills).toEqual(['stopped', 'uploading']);
   });
 });
 

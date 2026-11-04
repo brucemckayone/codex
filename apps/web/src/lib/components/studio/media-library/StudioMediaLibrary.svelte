@@ -239,6 +239,16 @@
    */
   let pendingUrl: URL | null = null;
 
+  /**
+   * The library URL as it is about to be: a navigation in flight to this page
+   * is newer than `page.url`, so a facet changed during it builds on it rather
+   * than dropping it. One to another page is not this library's URL.
+   */
+  function currentUrl(): URL {
+    const to = navigating?.to?.url;
+    return to && to.pathname === page.url.pathname ? to : page.url;
+  }
+
   function setParams(patch: LibraryPatch) {
     const clean: Record<string, string | null> = {};
     for (const [key, value] of Object.entries(patch)) {
@@ -248,16 +258,15 @@
       applyFilterPatch(pendingUrl, clean, LIBRARY_DEFAULTS);
       return;
     }
-    const url = applyFilterPatch(new URL(page.url), clean, LIBRARY_DEFAULTS);
+    const url = applyFilterPatch(new URL(currentUrl()), clean, LIBRARY_DEFAULTS);
     pendingUrl = url;
     queueMicrotask(() => {
       pendingUrl = null;
       // A write that changes nothing navigates nowhere. A navigation re-runs
       // whatever reads `page`, so an echo that writes the same URL back
-      // (the drawer's close did) would loop without ever yielding. Compared
-      // with where the URL is going: one in flight is newer than `page.url`.
+      // (the drawer's close did) would loop without ever yielding.
       const href = `${url.pathname}${url.search}`;
-      const shown = navigating?.to?.url ?? page.url;
+      const shown = currentUrl();
       if (href === `${shown.pathname}${shown.search}`) return;
       void goto(href, { keepFocus: true, noScroll: true });
     });
