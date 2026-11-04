@@ -779,6 +779,33 @@ describe('TierService', () => {
       });
       expect(equal.priceMonthly).toBe(4990);
     });
+
+    // Review C1 cycle 3, N3: a tier saved before the rule is renamed or
+    // marked Recommended without a repricing; a price sent is still checked.
+    it('a tier saved before the rule takes an edit that sends no price', async () => {
+      const org = await createOrgWithConnect('yearly-below-legacy');
+      const tier = await service.createTier(org.id, {
+        submissionId: crypto.randomUUID(),
+        name: 'Legacy',
+        priceMonthly: 1200,
+        priceAnnual: 12000,
+      });
+      await db
+        .update(subscriptionTiers)
+        .set({ priceAnnual: 500 })
+        .where(eq(subscriptionTiers.id, tier.id));
+
+      const renamed = await service.updateTier(tier.id, org.id, {
+        name: 'Legacy, renamed',
+        isRecommended: true,
+      });
+
+      expect(renamed.name).toBe('Legacy, renamed');
+      expect(renamed.priceAnnual).toBe(500);
+      await expect(
+        service.updateTier(tier.id, org.id, { priceMonthly: 1100 })
+      ).rejects.toThrow(YearlyPriceBelowMonthlyError);
+    });
   });
 
   describe('updateTier', () => {
