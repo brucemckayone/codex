@@ -72,6 +72,7 @@
     toggleTierId,
   } from '$lib/components/studio/plan-picker/select-from-tier';
   import { onMount, tick } from 'svelte';
+  import type { Attachment } from 'svelte/attachments';
   import {
     listTiers,
     getMyConnectStatus,
@@ -498,6 +499,17 @@
   let tierFormError = $state('');
   let tierFormLoading = $state(false);
   /**
+   * The prices a save was refused for as a yearly price below the monthly
+   * one (YEARLY_PRICE_BELOW_MONTHLY; owner: "Refuse yearly below monthly").
+   * The yearly price says so while those prices stand.
+   */
+  let tierYearlyRefused = $state<{ monthly: number; annual: number } | null>(null);
+  const tierYearlyBelow = $derived(
+    tierYearlyRefused !== null &&
+      tierYearlyRefused.monthly === tierPriceMonthly &&
+      tierYearlyRefused.annual === tierPriceAnnual
+  );
+  /**
    * "Include everything from…" (Codex-2hxff.91): the tier whose films and
    * courses the new tier starts with, or `null` for Nothing. It starts on the
    * dearest existing tier (owner decision U3), which is what a new top tier
@@ -904,6 +916,7 @@
     if (!connectReady || tiersFailed) return;
     editingTier = null;
     tierFormError = '';
+    tierYearlyRefused = null;
     if (unsettledCreate && !resumable(unsettledCreate)) unsettledCreate = null;
     if (unsettledCreate) {
       // Resume the unsettled attempt: its values and its id are kept, so an
@@ -966,6 +979,7 @@
     tierPriceMonthly = tier.priceMonthly;
     tierPriceAnnual = tier.priceAnnual;
     tierFormError = '';
+    tierYearlyRefused = null;
     // A create still in flight does not hold up this dialog's Save.
     tierFormLoading = false;
     tierDialogOpen = true;
@@ -989,15 +1003,34 @@
     }
     tierFormLoading = true;
     tierFormError = '';
+    tierYearlyRefused = null;
+    const tierId = editingTier.id;
+    const sent = { monthly: tierPriceMonthly, annual: tierPriceAnnual };
     try {
-      await updateTier({
+      const result = await updateTier({
         orgId,
-        tierId: editingTier.id,
+        tierId,
         name: tierName,
         description: tierDescription || undefined,
-        priceMonthly: tierPriceMonthly,
-        priceAnnual: tierPriceAnnual,
+        priceMonthly: sent.monthly,
+        priceAnnual: sent.annual,
       });
+      // `in`, not `result.success`: see `submitCreate`.
+      if (!('tier' in result)) {
+        if (result.detailsCode === 'YEARLY_PRICE_BELOW_MONTHLY') {
+          // Only while the dialog still edits this tier: a late answer
+          // must not mark another tier's prices.
+          if (tierDialogOpen && editingTier?.id === tierId) showYearlyRefusal(sent);
+        } else {
+          tierFormError = m.monetisation_tier_save_error();
+        }
+        logRawError(
+          'tier save refused',
+          `${result.status} ${result.detailsCode ?? result.code ?? 'unknown'}`,
+          result.status >= 500 ? 'error' : 'warn'
+        );
+        return;
+      }
       tierDialogOpen = false;
       await invalidateAll();
     } catch (error) {
@@ -1013,6 +1046,29 @@
       tierFormLoading = false;
     }
   }
+
+  /**
+   * A yearly price below the monthly one, refused on save: said at the
+   * yearly price (`aria-describedby`), which takes focus. The server refuses
+   * before Stripe is asked, so nothing was saved.
+   */
+  function showYearlyRefusal(sent: { monthly: number; annual: number }) {
+    tierYearlyRefused = sent;
+  }
+
+  /**
+   * The yearly price takes focus once for each refusal, as the line appears.
+   * Typing back to the refused prices shows the line again without moving
+   * focus.
+   */
+  let focusedYearlyRefusal: object | null = null;
+  const focusOnYearlyRefusal: Attachment<HTMLInputElement> = (node) => {
+    const refusal = tierYearlyRefused;
+    if (refusal && refusal !== focusedYearlyRefusal) {
+      focusedYearlyRefusal = refusal;
+      node.focus();
+    }
+  };
 
   /**
    * Send a create, and act on its answer.
@@ -1071,7 +1127,7 @@
     } else if (!('tier' in result)) {
       // `in`, not `result.success`: a boolean discriminant does not narrow
       // with strictNullChecks off.
-      refuseCreate(result, attemptId, shown);
+      refuseCreate(result, attemptId, shown, values);
     } else {
       if (tierSubmissionId === attemptId) unsettledCreate = null;
       if (shown) tierDialogOpen = false;
@@ -1088,6 +1144,9 @@
    *   (only a retry from elsewhere can do that). Mint a new one.
    * - `SUBMISSION_IN_PROGRESS` (409): the first is still at Stripe. Keep the
    *   id; a retry in a moment returns its tier.
+   * - `YEARLY_PRICE_BELOW_MONTHLY` (400, owner: "Refuse yearly below
+   *   monthly"): refused before Stripe, so nothing was made. Said at the
+   *   yearly price, not in the dialog's error line.
    * - Anything else keeps the id. A 500 repeat reuses the first attempt's
    *   Stripe objects, and our own 400/403/404/422 gates run before any Stripe
    *   call.
@@ -1109,9 +1168,17 @@
       detailsCode: string | undefined;
     },
     attemptId: string,
-    shown: boolean
+    shown: boolean,
+    values: TierCreateValues
   ) {
     const code = failure.detailsCode;
+    if (code === 'YEARLY_PRICE_BELOW_MONTHLY') {
+      if (shown) {
+        showYearlyRefusal({ monthly: values.priceMonthly, annual: values.priceAnnual });
+      }
+      logRawError('tier create refused', `${failure.status} ${code}`, 'warn');
+      return;
+    }
     // Only while the refused id is still the dialog's: a reopen since may
     // have minted a new one, which this refusal says nothing about.
     if (
@@ -1233,11 +1300,21 @@
 
   async function handleToggleRecommended(tier: SubscriptionTier) {
     try {
-      await updateTier({
+      const result = await updateTier({
         orgId,
         tierId: tier.id,
         isRecommended: !tier.isRecommended,
       });
+      // A refusal is returned, never thrown (see `updateTier`).
+      if (!('tier' in result)) {
+        toast.error(m.monetisation_tier_update_error());
+        logRawError(
+          'recommended toggle refused',
+          `${result.status} ${result.detailsCode ?? result.code ?? 'unknown'}`,
+          result.status >= 500 ? 'error' : 'warn'
+        );
+        return;
+      }
       await invalidateAll();
       toast.success(
         tier.isRecommended
@@ -1887,9 +1964,26 @@
               min={100}
               step={1}
               required
-              aria-describedby={tierPriceHint ? 'tier-price-hint' : undefined}
+              aria-invalid={tierYearlyBelow || undefined}
+              {@attach focusOnYearlyRefusal}
+              aria-describedby={[
+                tierYearlyBelow && 'tier-price-annual-refusal',
+                tierPriceHint && 'tier-price-hint',
+              ]
+                .filter(Boolean)
+                .join(' ') || undefined}
             />
             <span class="form-hint">{formatPrice(tierPriceAnnual)}</span>
+            {#if tierYearlyBelow}
+              <p
+                class="form-refusal"
+                id="tier-price-annual-refusal"
+                data-testid="tier-yearly-refusal"
+              >
+                <AlertTriangleIcon size={14} aria-hidden="true" class="form-refusal__icon" />
+                <span>{m.price_refusal_yearly_below_monthly()}</span>
+              </p>
+            {/if}
           </div>
         </div>
         {#if tierPriceHint}
@@ -2707,6 +2801,23 @@
     .form-row {
       grid-template-columns: 1fr;
     }
+  }
+
+  /* A save refused at its field (a yearly price below the monthly one): the
+     words and an icon, never the colour alone. */
+  .form-refusal {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: var(--space-2);
+    align-items: start;
+    margin: 0;
+    font-size: var(--text-xs);
+    line-height: var(--leading-normal);
+    color: var(--color-error);
+  }
+
+  .form-refusal :global(.form-refusal__icon) {
+    margin-top: var(--space-0-5);
   }
 
   .form-hint {

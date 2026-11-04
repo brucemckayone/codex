@@ -1218,6 +1218,14 @@
         // go back to be re-checked, and a difference is refused as an
         // expired preview below (Codex-2hxff.96).
         ...(tierChangePreview?.quote && { quote: tierChangePreview.quote }),
+        // A change that waits bills, at the renewal and with no notice, the
+        // price read at confirm. The one the dialog showed goes back, and a
+        // price saved since is refused as an expired preview below (on a
+        // billing wait it is `billingChange.amountCents`; review C1 cycle 2, L4).
+        ...((waits || billingWaits) &&
+          tierChangePreview && {
+            newRecurringAmountCents: tierChangePreview.newRecurringAmountCents,
+          }),
       });
       if (!result.success) {
         currentTierId = previousTierId;

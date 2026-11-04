@@ -158,6 +158,27 @@ describe('the course plan refusals reach the builder', () => {
     expect(err.body).toEqual({ message, code: 'COURSE_PLAN_IN_PROGRESS' });
   });
 
+  it('a 400 YEARLY_PRICE_BELOW_MONTHLY arrives with its code, for the builder to word', async () => {
+    const message = "The yearly price can't be less than the monthly price.";
+    courses.upsertSubscriptionPlan.mockRejectedValueOnce(
+      new ApiError(400, message, 'VALIDATION_ERROR', {
+        code: 'YEARLY_PRICE_BELOW_MONTHLY',
+        priceMonthly: 1200,
+        priceAnnual: 1000,
+      })
+    );
+
+    const err = (await save().catch((e: unknown) => e)) as {
+      status: number;
+      body: Record<string, unknown>;
+    };
+
+    expect(err.status).toBe(400);
+    // Its prices stay on the server; the panel has its own.
+    expect(err.body).toEqual({ message, code: 'YEARLY_PRICE_BELOW_MONTHLY' });
+    expect(courses.setTierAccess).not.toHaveBeenCalled();
+  });
+
   it('a 5xx without one of the plan codes still propagates untouched', async () => {
     const raw = new ApiError(
       500,

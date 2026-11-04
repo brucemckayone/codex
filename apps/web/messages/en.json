@@ -3716,5 +3716,6 @@
   "subscription_refusal_scheduled_elsewhere": "This subscription can't be changed here just now. Please contact support and quote this reference: {errorId}.",
   "subscription_refusal_scheduled_elsewhere_no_ref": "This subscription can't be changed here just now. Please contact support.",
   "player_preview_watch_again": "Watch preview again",
-  "player_preview_listen_again": "Listen to preview again"
+  "player_preview_listen_again": "Listen to preview again",
+  "price_refusal_yearly_below_monthly": "The yearly price can't be less than the monthly price."
 }

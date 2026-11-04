@@ -450,3 +450,54 @@ describe('monetisation store · the "and above" shortcut (Codex-2hxff.91)', () =
     );
   });
 });
+
+describe('monetisation store · a yearly price below the monthly one', () => {
+  // As `updateCourseMonetisation` forwards it: the code in the error body.
+  const YEARLY_BELOW = {
+    status: 400,
+    body: {
+      message: "The yearly price can't be less than the monthly price.",
+      code: 'YEARLY_PRICE_BELOW_MONTHLY',
+    },
+  };
+
+  beforeEach(async () => {
+    getCourseMonetisation.mockResolvedValue(makeState());
+    await monetisation.open(COURSE_ID);
+    monetisation.setSubscriptionEnabled(true);
+    monetisation.setPriceMonthly(1200);
+    monetisation.setPriceAnnual(1000);
+  });
+
+  it('is kept for the prices it refused, while the draft holds them', async () => {
+    updateCourseMonetisation.mockRejectedValueOnce(YEARLY_BELOW);
+
+    await expect(monetisation.save()).rejects.toBe(YEARLY_BELOW);
+
+    expect(monetisation.yearlyRefusal).toEqual({ monthly: 1200, annual: 1000 });
+    monetisation.setPriceAnnual(12000);
+    expect(monetisation.yearlyRefusal).toBeNull();
+    // Back to the refused prices: the same refusal, not a new one.
+    monetisation.setPriceAnnual(1000);
+    expect(monetisation.yearlyRefusal).toEqual({ monthly: 1200, annual: 1000 });
+  });
+
+  it('a save that lands clears it; another refusal never sets it', async () => {
+    updateCourseMonetisation.mockRejectedValueOnce(YEARLY_BELOW);
+    await expect(monetisation.save()).rejects.toBe(YEARLY_BELOW);
+    monetisation.setPriceAnnual(12000);
+    updateCourseMonetisation.mockResolvedValueOnce(
+      makeState({ subscription: { priceMonthly: 1200, priceAnnual: 12000 } })
+    );
+    await monetisation.save();
+    monetisation.setPriceAnnual(1000);
+    expect(monetisation.yearlyRefusal).toBeNull();
+
+    updateCourseMonetisation.mockRejectedValueOnce({
+      status: 422,
+      body: { message: 'Connect a payout account first.' },
+    });
+    await expect(monetisation.save()).rejects.toMatchObject({ status: 422 });
+    expect(monetisation.yearlyRefusal).toBeNull();
+  });
+});

@@ -51,6 +51,8 @@ import {
   reset,
 } from '$lib/components/studio/__fixtures__/subscription-remote.mock.svelte';
 import { monetisation } from '$lib/page-builder/monetisation-store.svelte';
+import { updateCourseMonetisation } from '$lib/remote/journeys.remote';
+import * as m from '$paraglide/messages';
 import PagePricingPanel from './PagePricingPanel.svelte';
 
 function change(
@@ -169,5 +171,75 @@ describe('the Offer panel note (P11)', () => {
       'Emails about £15.00/mo are still going out: 20 of 30 sent. If you save a new price, it replaces £15.00, and all 30 are emailed about the new price instead, including the 20 already told about £15.00.'
     );
     expect(monthly.getAttribute('aria-describedby')).toBe('plan-price-hint');
+  });
+});
+
+/**
+ * A yearly price below the monthly one, refused on save (owner decision
+ * 2026-11-03, "Refuse yearly below monthly"): said from en.json at the
+ * yearly price, as its `aria-describedby`.
+ */
+describe('the Offer panel: a yearly price below the monthly one', () => {
+  const YEARLY_BELOW = {
+    status: 400,
+    body: {
+      message: 'Worker: yearly below monthly.',
+      code: 'YEARLY_PRICE_BELOW_MONTHLY',
+    },
+  };
+  const annual = () =>
+    document.querySelector<HTMLInputElement>(
+      `input[aria-label="${m.studio_builder_pricing_annual_aria()}"]`
+    );
+  const refusalLine = () =>
+    document.querySelector<HTMLElement>('[data-testid="plan-yearly-refusal"]');
+
+  function typeAnnual(pounds: string) {
+    const input = annual();
+    if (!input) throw new Error('no annual price');
+    input.value = pounds;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+  }
+
+  /** The builder's Save: its monetisation leg, refused. */
+  async function saveRefused() {
+    vi.mocked(updateCourseMonetisation).mockRejectedValueOnce(YEARLY_BELOW);
+    await monetisation.save().catch(() => {});
+    flushSync();
+  }
+
+  test('refused while the panel is open: at the yearly price, which takes focus', async () => {
+    typeAnnual('10');
+    await saveRefused();
+
+    const line = refusalLine();
+    expect(text(line)).toBe(m.price_refusal_yearly_below_monthly());
+    expect(document.body.textContent).not.toContain(YEARLY_BELOW.body.message);
+    expect(annual()?.getAttribute('aria-describedby')?.split(' ')).toContain(
+      line?.id
+    );
+    expect(annual()?.getAttribute('aria-invalid')).toBe('true');
+    expect(document.activeElement).toBe(annual());
+
+    typeAnnual('150');
+    expect(refusalLine()).toBeNull();
+    expect(annual()?.hasAttribute('aria-describedby')).toBe(false);
+    expect(annual()?.hasAttribute('aria-invalid')).toBe(false);
+  });
+
+  test('a refusal already standing when the tab opens is shown, never focused', async () => {
+    typeAnnual('10');
+    if (component) unmount(component);
+    await saveRefused();
+    const outside = document.createElement('button');
+    document.body.appendChild(outside);
+    outside.focus();
+
+    component = mount(PagePricingPanel, { target: document.body });
+    flushSync();
+
+    expect(text(refusalLine())).toBe(m.price_refusal_yearly_below_monthly());
+    expect(document.activeElement).toBe(outside);
   });
 });

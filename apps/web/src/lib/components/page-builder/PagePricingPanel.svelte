@@ -49,6 +49,7 @@
   import { monetisation } from '$lib/page-builder/monetisation-store.svelte';
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
   import { getCoursePlanPriceChanges } from '$lib/remote/journeys.remote';
+  import type { Attachment } from 'svelte/attachments';
 
   const offer = $derived(pageBuilder.pending?.offer ?? {});
   const isCoursePage = $derived(pageBuilder.pending?.subjectType === 'course');
@@ -197,6 +198,28 @@
       },
       next: { monthly: draft.priceMonthlyCents, annual: draft.priceAnnualCents },
     })
+  );
+
+  /**
+   * A save refused for a yearly price below the monthly one (owner: "Refuse
+   * yearly below monthly"): said at the yearly price while those prices
+   * stand. A refusal that lands while the panel is open moves focus to the
+   * field; one already standing when the tab opens is shown, never focused,
+   * so moving between tabs doesn't jump into the form.
+   */
+  const yearlyRefusal = $derived(monetisation.yearlyRefusal);
+  let focusedYearlyRefusal: object | null = monetisation.yearlyRefusal;
+  const focusOnYearlyRefusal: Attachment<HTMLInputElement> = (node) => {
+    const refusal = yearlyRefusal;
+    if (refusal && refusal !== focusedYearlyRefusal) {
+      focusedYearlyRefusal = refusal;
+      node.focus();
+    }
+  };
+  const annualDescribedBy = $derived(
+    [yearlyRefusal && 'plan-yearly-refusal', planHint && 'plan-price-hint']
+      .filter(Boolean)
+      .join(' ') || undefined
   );
 
   /** Check again or Try again: one read per press, never two at once. */
@@ -351,15 +374,23 @@
             £<input
               inputmode="decimal"
               aria-label={m.studio_builder_pricing_annual_aria()}
-              aria-describedby={planHint ? 'plan-price-hint' : undefined}
+              aria-describedby={annualDescribedBy}
+              aria-invalid={yearlyRefusal ? true : undefined}
               disabled={locked}
               value={shown('annual')}
               oninput={(e) => setPounds('annual', e.currentTarget.value)}
               onblur={() => commitPounds('annual')}
+              {@attach focusOnYearlyRefusal}
             />
           </span>
         </label>
       </div>
+      {#if yearlyRefusal}
+        <p class="field-refusal" id="plan-yearly-refusal" data-testid="plan-yearly-refusal">
+          <AlertTriangleIcon size={14} aria-hidden="true" />
+          <span>{m.price_refusal_yearly_below_monthly()}</span>
+        </p>
+      {/if}
       {#if planHint}
         <p class="price-hint" id="plan-price-hint" data-testid="plan-price-hint">
           <AlertTriangleIcon size={14} aria-hidden="true" />
@@ -656,6 +687,21 @@
   .price-hint b {
     color: var(--color-text);
     font-weight: var(--font-semibold);
+  }
+  /* A save refused at the yearly price: the words and an icon, never the
+     colour alone. */
+  .field-refusal {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: var(--space-2);
+    align-items: start;
+    margin: 0;
+    font-size: var(--text-xs);
+    line-height: var(--leading-normal);
+    color: var(--color-error);
+  }
+  .field-refusal > :global(svg) {
+    margin-top: var(--space-0-5);
   }
 
   .field {
