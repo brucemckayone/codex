@@ -507,3 +507,53 @@ describe('creator content detail: a thrown access check fails closed and is logg
     );
   });
 });
+
+// The player's first state is `data.hasAccess`, read before the streamed check
+// lands. It was null, read as false, so a free video with a preview clip
+// autoplayed the locked preview until the stream URL arrived (Codex-i8x6z).
+describe('creator content detail: a signed-in reader of a public piece starts unlocked (Codex-i8x6z)', () => {
+  const STREAM = 'https://content-api.test/hls/master.m3u8?token=t';
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetPublicProfile.mockResolvedValue({
+      id: 'creator-1',
+      name: 'Alex',
+      image: null,
+    });
+  });
+
+  it('hasAccess is true while the streamed access check is still in flight', async () => {
+    mockGetPublicContent.mockResolvedValue({
+      items: [row({ contentType: 'video', contentBody: null })],
+    });
+    let answer: (value: unknown) => void = () => {};
+    mockGetStreamingUrl.mockReturnValueOnce(
+      new Promise((resolve) => {
+        answer = resolve;
+      })
+    );
+    const { load } = await import('../+page.server');
+
+    // Returns with /stream unanswered: the check is streamed, not awaited.
+    const data = (await load(event({ id: 'u1' }))) as {
+      hasAccess: boolean | null;
+      accessAndProgress: Promise<{
+        hasAccess: boolean;
+        streamingUrl: string | null;
+      }>;
+    };
+
+    expect(data.hasAccess).toBe(true);
+    answer(
+      granted({
+        streamingUrl: STREAM,
+        expiresAt: '2026-11-04T22:00:00.000Z',
+        contentType: 'video',
+      })
+    );
+    const access = await data.accessAndProgress;
+    expect(access.hasAccess).toBe(true);
+    expect(access.streamingUrl).toBe(STREAM);
+  });
+});
