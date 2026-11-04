@@ -572,14 +572,17 @@
   @supports (color: oklch(from red l c h)) {
     .subscribe-cta__aurora {
       /* Same three glows with each one's OKLCH lightness capped at 0.7 (as
-         asked; sRGB clipping paints up to 0.72), so a pale secondary or accent
-         (default amber, grey) can no longer wash white text out. A glow
+         asked; none clips, so they paint at most 0.70), so a pale secondary or
+         accent (default amber, grey) can no longer wash white text out. A glow
          already darker than 0.7 is unchanged.
          WHY @supports, here and on the five blocks below: each of these holds a
          var(), so an engine without relative colour would accept it at parse
          time and void the whole property at computed time (background: none,
          color: inherited), not fall back. Guarded, such an engine keeps the
-         rule's own declarations, the banner as it was. */
+         rule's own declarations, the banner as it was. Chromium 119-121 pass
+         the test yet read l on a 0-100 scale; modelled, not run, the caps then
+         darken the glows and the +N tile and hold the veil at its 0.58 cap,
+         and no line reads worse than the banner as it was. */
       background:
         radial-gradient(
           ellipse 55% 75% at 22% 25%,
@@ -955,8 +958,9 @@
   @supports (color: oklch(from red l c h)) {
     .subscribe-cta__cta-glow {
       /* The same glow with the brand's OKLCH lightness capped at 0.7, as the
-         aurora's are: it sits ABOVE the veil, so on a pale brand it would light
-         the "Cancel anytime" line however dark the banner gets. */
+         aurora's are (sRGB clipping paints up to 0.72, #00FFFF): it sits ABOVE
+         the veil, so on a pale brand it would light the "Cancel anytime" line
+         however dark the banner gets. */
       background: radial-gradient(
         ellipse 60% 60% at 50% 50%,
         color-mix(
