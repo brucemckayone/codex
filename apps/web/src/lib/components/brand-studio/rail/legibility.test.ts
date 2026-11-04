@@ -5,6 +5,7 @@ import { LINK_FLOOR, nudgeForGround } from '$lib/brand-editor/ground-nudge';
 import { hoverFill, legibilityFor } from './legibility';
 
 const LIGHT = PLATFORM_GROUND_LUMINANCE.light;
+const DARK = PLATFORM_GROUND_LUMINANCE.dark;
 const PALE = '#FDE68A';
 const DEEP = '#1D4ED8';
 
@@ -52,5 +53,18 @@ describe('what the pill lists beyond the resting link (Codex-mik4h)', () => {
     expect(l.linkStates).toEqual(nudgeForGround(PALE, LIGHT, LINK_FLOOR));
     // The labels keep the brand's own hover, which reads: listed as picked.
     expect(l.brandText?.moved).toBe(false);
+  });
+
+  test('shows the label that moved furthest, even one from beyond the ground', () => {
+    // A near-black brand on a dark page starts at a HIGHER ratio resting
+    // (2.62:1) than hovered (2.35:1), yet the resting label moves further:
+    // the page paints it, so the row shows it.
+    const NEAR_BLACK = '#000024';
+    const l = legibilityFor({
+      theme: 'dark',
+      brand: NEAR_BLACK,
+      overrides: { interactive: DEEP },
+    });
+    expect(l.brandText).toEqual(nudgeForGround(NEAR_BLACK, DARK, LINK_FLOOR));
   });
 });

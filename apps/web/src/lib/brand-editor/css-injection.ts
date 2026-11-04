@@ -602,8 +602,8 @@ export function injectBrandVars(state: BrandEditorState): void {
   // link and focus colours against it. Written last, so the stale-override sweep
   // above never clears it.
   const ground = groundLuminanceVars({
-    background: state.backgroundColor,
-    backgroundDark: state.darkOverrides?.backgroundColor,
+    background: paintableBackground(state.backgroundColor),
+    backgroundDark: paintableBackground(state.darkOverrides?.backgroundColor),
   });
   for (const prop of GROUND_VAR_PROPS) {
     const value = ground[prop];
@@ -716,15 +716,22 @@ export function injectDarkTokenOverrides(
  * Remove all previously injected token override CSS properties from an element.
  * Call before re-injecting to ensure removed overrides don't linger.
  *
- * Keeps the inputs the org layout binds with `style:`, the ground numbers
- * among them: Svelte re-sets a `style:` property only when its value changes,
- * so one cleared here stays gone until reload. The layout calls this right
- * after hydration (Codex-mik4h).
+ * Keeps every input the org layout binds with `style:`, the ground numbers
+ * and the shader's logo among them: Svelte re-sets a `style:` property only
+ * when its value changes, so one cleared here stays gone until reload. The
+ * layout calls this right after hydration (Codex-mik4h). ShaderHero reads the
+ * logo as `--brand-${key}` (shader-config.ts `readBrandVar`); cleared, the
+ * pulse preset lost the org's logo.
  */
 export function clearTokenOverrides(el: HTMLElement): void {
   removeOverrideVars(
     el,
-    new Set([...BASE_VAR_PROPS, ...DARK_VAR_PROPS, ...GROUND_VAR_PROPS])
+    new Set([
+      ...BASE_VAR_PROPS,
+      ...DARK_VAR_PROPS,
+      ...GROUND_VAR_PROPS,
+      '--brand-shader-logo-url',
+    ])
   );
 }
 

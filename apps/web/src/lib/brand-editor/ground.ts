@@ -133,16 +133,19 @@ export function groundLuminance(
 }
 
 /**
- * A background the page may paint: one whose ground this module can measure.
- * Any other form (rgb(), a colour name, var(…)) the API may have stored is
- * ignored, so every writer paints the platform's in its place and the nudge
- * never reads a ground it cannot see (owner, Codex-mik4h: "Ignore it, like On
- * Brand"). The stored value is untouched.
+ * A background the page may paint: one whose ground this module can measure,
+ * as the `#RGB` / `#RRGGBB` both CSS and the nudge read, trimmed. Any other
+ * form the API may have stored (rgb(), a colour name, var(…), a bare or
+ * 8-digit hex) is ignored, so every writer paints the platform's in its place
+ * and the nudge never reads a ground it cannot see (owner, Codex-mik4h:
+ * "Ignore it, like On Brand"). Writers paint the value this returns; the
+ * stored value is untouched.
  */
 export function paintableBackground(
   colour: string | null | undefined
 ): string | undefined {
-  return colour && relativeLuminance(colour) !== null ? colour : undefined;
+  const hex = colour?.trim();
+  return hex && /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(hex) ? hex : undefined;
 }
 
 /**

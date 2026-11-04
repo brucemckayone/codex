@@ -10,6 +10,7 @@ import {
   revertFontPreview,
   tokenOverridesToCssVars,
 } from './css-injection';
+import { groundLuminance } from './ground';
 import type { BrandEditorState } from './types';
 
 /**
@@ -302,11 +303,9 @@ describe('clearTokenOverrides keeps what the org layout binds', () => {
     ),
     'utf8'
   );
-  // Written by the layout and read nowhere, so clearing it changes nothing.
-  const INERT = new Set(['--brand-shader-logo-url']);
-  const bound = [...layout.matchAll(/style:(--[\w-]+)=/g)]
-    .map(([, prop]) => prop)
-    .filter((prop) => !INERT.has(prop));
+  const bound = [...layout.matchAll(/style:(--[\w-]+)=/g)].map(
+    ([, prop]) => prop
+  );
 
   it('keeps every bound input, the ground numbers among them, and clears the overrides', () => {
     expect(bound).toEqual(
@@ -315,6 +314,7 @@ describe('clearTokenOverrides keeps what the org layout binds', () => {
         '--brand-bg-dark',
         '--brand-ground-y',
         '--brand-ground-dark-y',
+        '--brand-shader-logo-url',
       ])
     );
     const el = document.createElement('div');
@@ -385,5 +385,38 @@ describe('injectBrandVars paints only a background it can measure', () => {
     expect(el.style.getPropertyValue('--brand-bg-dark')).toBe('');
     // White's dark surfaces all clip to white (ground.test.ts).
     expect(el.style.getPropertyValue('--brand-ground-dark-y')).toBe('1.0000');
+  });
+});
+
+describe('injectBrandVars paints the canonical hex', () => {
+  afterEach(() => {
+    for (const el of document.querySelectorAll('.org-layout')) el.remove();
+  });
+
+  it('trims a padded background and measures the ground from what it paints', () => {
+    const el = document.createElement('div');
+    el.className = 'org-layout';
+    document.body.appendChild(el);
+    injectBrandVars({
+      primaryColor: '#3355ff',
+      secondaryColor: null,
+      accentColor: null,
+      backgroundColor: '#ffffff',
+      fontBody: null,
+      fontHeading: null,
+      radius: 0.5,
+      density: 1,
+      logoUrl: null,
+      tokenOverrides: {},
+      darkOverrides: { backgroundColor: ' #000000 ' },
+      darkTokenOverrides: null,
+      heroLayout: 'default',
+    });
+
+    expect(el.style.getPropertyValue('--brand-bg-dark')).toBe('#000000');
+    // Measured from the trimmed black, not borrowed from the light white.
+    expect(el.style.getPropertyValue('--brand-ground-dark-y')).toBe(
+      groundLuminance('#000000', 'dark')
+    );
   });
 });

@@ -789,6 +789,14 @@
        from the same function and fails if this text drifts. */
     --_gy: var(--brand-ground-y, 0.7835);
     --_gw: clamp(0, (0.1791 - var(--_gy)) * 1e12, 1);
+    /* The -subtle chips take the GROUND's side, not the theme's: the light
+       chip on a light page, the dark chip on a dark one, whichever theme
+       paints it. Fixed per theme, a light org page in dark mode (or a dark
+       one in light) got chips on the wrong side, and every label on them
+       failed, 4 101 / 4 101 brands (Codex-mik4h). Where page and theme agree
+       these are the theme's own values. The dark twin restates them. */
+    --color-brand-primary-subtle: oklch(from var(--brand-color, var(--color-primary-500)) calc(0.96 - 0.78 * var(--_gw)) calc(c * (0.2 + 0.1 * var(--_gw))) h);
+    --color-interactive-subtle: oklch(from var(--brand-color, var(--color-primary-500)) calc(0.97 - 0.82 * var(--_gw)) calc(c * (0.15 + 0.05 * var(--_gw))) h);
     --_gl-t: calc(var(--_gw) * min(1, 4.59 * (var(--_gy) + 0.05) - 0.05) + (1 - var(--_gw)) * max(0, (var(--_gy) + 0.05) / 4.59 - 0.05));
     --_gl-dk: min(1, var(--_gl-t) / max(var(--_lum), 1e-6));
     --_gl-s: max(1, var(--_gl-t) / max(var(--_lum), 1e-6));
@@ -843,6 +851,8 @@
     --color-text-on-accent-hover: rgb(from var(--color-brand-accent-hover) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
     /* The dark ground; the light rule's fragments read it. */
     --_gy: var(--brand-ground-dark-y, 0.0844);
+    --color-brand-primary-subtle: oklch(from var(--brand-color-dark, var(--brand-color, var(--color-primary-400))) calc(0.96 - 0.78 * var(--_gw)) calc(c * (0.2 + 0.1 * var(--_gw))) h);
+    --color-interactive-subtle: oklch(from var(--brand-color-dark, var(--brand-color, var(--color-primary-400))) calc(0.97 - 0.82 * var(--_gw)) calc(c * (0.15 + 0.05 * var(--_gw))) h);
     --color-link: rgb(from var(--color-interactive) var(--_gl-r) var(--_gl-g) var(--_gl-b));
     --color-link-hover: rgb(from var(--color-interactive-hover) var(--_gl-r) var(--_gl-g) var(--_gl-b));
     --color-link-active: rgb(from var(--color-interactive-active) var(--_gl-r) var(--_gl-g) var(--_gl-b));

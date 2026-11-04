@@ -163,11 +163,12 @@ describe('the inputs an org’s backgrounds write', () => {
 // background this module can measure, so the page and its nudge agree.
 describe('a background the page may paint', () => {
   test.each([
-    '#fff',
-    '#FFF8E7',
-    ' #1e1e2e ',
-  ])('is one this module measures: %s', (colour) => {
-    expect(paintableBackground(colour)).toBe(colour);
+    ['#fff', '#fff'],
+    ['#FFF8E7', '#FFF8E7'],
+    // Painted as the canonical form the nudge measures, never as stored.
+    [' #1e1e2e ', '#1e1e2e'],
+  ])('is one this module measures: %j', (colour, painted) => {
+    expect(paintableBackground(colour)).toBe(painted);
   });
 
   test.each([
@@ -176,6 +177,9 @@ describe('a background the page may paint', () => {
     'var(--x)',
     'oklch(0.2 0.02 280)',
     '#12345',
+    // CSS cannot paint a bare hex; the nudge cannot read an 8-digit one.
+    '112233',
+    '#11223344',
     '',
     null,
     undefined,

@@ -190,8 +190,8 @@
   /* The hover fill is the focus-ring colour, which no token names an ink for,
      so the glyph takes the luminance step from that fill itself
      (`--_on-fill-step`, light.css). The pressed brand colour it had was under
-     4.5:1 on the ring for every brand; page text would fail 618 of 4 101 in
-     light and all of them in dark. */
+     4.5:1 on the ring for every brand in light and all but a few dozen in dark;
+     page text would fail 618 of 4 101 in light and all of them in dark. */
   .tag-remove:hover {
     --_remove-fill: var(--color-focus-ring);
     background-color: var(--_remove-fill);

@@ -21,6 +21,7 @@ import {
   type Nudge,
   nudgeForGround,
 } from '$lib/brand-editor/ground-nudge';
+import { relativeLuminance } from '$lib/brand-editor/ink';
 
 export interface LegibilityInputs {
   theme: 'light' | 'dark';
@@ -89,12 +90,29 @@ function pressedFill(brand: string, theme: 'light' | 'dark'): string | null {
   return oklchStep(brand, theme === 'dark' ? 0.15 : -0.15, 1);
 }
 
-/** Of several nudges, the one that moved furthest: the lowest as picked. */
-function furthest(nudges: (Nudge | null)[]): Nudge | null {
+/** How far a nudge moved its colour, in luminance. */
+function distance(source: string, nudge: Nudge): number {
+  return Math.abs(
+    (relativeLuminance(nudge.hex) ?? 0) - (relativeLuminance(source) ?? 0)
+  );
+}
+
+/**
+ * Of several colours and their nudges, the nudge that moved its colour
+ * furthest. Not the lowest as picked: a colour beyond the ground (a near-black
+ * brand on a dark page) starts at a higher ratio yet moves further.
+ */
+function furthest(
+  pairs: [string | null | undefined, Nudge | null][]
+): Nudge | null {
   let pick: Nudge | null = null;
-  for (const nudge of nudges) {
-    if (nudge?.moved && (pick === null || nudge.before < pick.before)) {
+  let far = -1;
+  for (const [source, nudge] of pairs) {
+    if (!source || !nudge?.moved) continue;
+    const moved = distance(source, nudge);
+    if (moved > far) {
       pick = nudge;
+      far = moved;
     }
   }
   return pick;
@@ -108,14 +126,17 @@ export function legibilityFor(inputs: LegibilityInputs): Legibility {
     overrides['focus-ring'] ?? haloSource(inputs.brand, inputs.theme);
   const asLink = (hex: string | null | undefined) =>
     hex ? nudgeForGround(hex, ground, LINK_FLOOR) : null;
+  const pair = (
+    hex: string | null | undefined
+  ): [string | null | undefined, Nudge | null] => [hex, asLink(hex)];
 
   // The hover and pressed fills follow the brand colour, not the
   // `interactive` override (org-brand.css), unless overridden themselves.
   const brandHover = hoverFill(inputs.brand, inputs.theme);
   const link = asLink(overrides.interactive ?? inputs.brand);
   const linkStates = furthest([
-    asLink(overrides['interactive-hover'] ?? brandHover),
-    asLink(
+    pair(overrides['interactive-hover'] ?? brandHover),
+    pair(
       overrides['interactive-active'] ?? pressedFill(inputs.brand, inputs.theme)
     ),
   ]);
@@ -123,8 +144,7 @@ export function legibilityFor(inputs: LegibilityInputs): Legibility {
     overrides.interactive || overrides['interactive-hover']
   );
   const brandText = setApart
-    ? (furthest([asLink(inputs.brand), asLink(brandHover)]) ??
-      asLink(inputs.brand))
+    ? (furthest([pair(inputs.brand), pair(brandHover)]) ?? asLink(inputs.brand))
     : null;
   const focus = nudgeForGround(focusSource, ground, MARK_FLOOR);
   const halo = haloFrom ? nudgeForGround(haloFrom, ground, MARK_FLOOR) : null;

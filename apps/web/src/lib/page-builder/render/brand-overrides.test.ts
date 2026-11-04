@@ -144,6 +144,13 @@ describe('brandOverridesToCssVars', () => {
     expect(
       brandOverridesToCssVars({ backgroundColor: '#1e1e2e' })
     ).toMatchObject({ '--brand-bg': '#1e1e2e', '--brand-ground-y': '0.0252' });
+    // Painted as the canonical hex, with its ground; a bare hex not at all.
+    expect(
+      brandOverridesToCssVars({ backgroundColor: ' #1e1e2e ' })
+    ).toMatchObject({ '--brand-bg': '#1e1e2e', '--brand-ground-y': '0.0252' });
+    expect(
+      brandOverridesToCssVars({ backgroundColor: '112233' })
+    ).not.toHaveProperty('--brand-bg');
   });
 
   describe('keeps every value inside its own declaration', () => {

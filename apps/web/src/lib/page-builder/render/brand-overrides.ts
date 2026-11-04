@@ -104,8 +104,11 @@ export function brandOverridesToCssVars(
   for (const [field, prop] of Object.entries(CORE_LIGHT)) {
     const value = (overrides as Record<string, unknown>)[field];
     if (typeof value !== 'string' || value.trim().length === 0) continue;
-    if (field === 'backgroundColor' && !paintableBackground(value)) continue;
-    out[prop] = FONT_FIELDS.has(field) ? quoteFamily(value) : value;
+    // A background is painted only as the canonical hex the nudge measures.
+    const painted =
+      field === 'backgroundColor' ? paintableBackground(value) : value;
+    if (!painted) continue;
+    out[prop] = FONT_FIELDS.has(field) ? quoteFamily(painted) : painted;
   }
 
   // ── Numeric inputs: radius + density feed the radius/spacing scales ──
@@ -123,8 +126,10 @@ export function brandOverridesToCssVars(
     for (const [field, prop] of Object.entries(CORE_DARK)) {
       const value = (overrides.darkOverrides as Record<string, unknown>)[field];
       if (typeof value !== 'string' || value.trim().length === 0) continue;
-      if (field === 'backgroundColor' && !paintableBackground(value)) continue;
-      out[prop] = value;
+      const painted =
+        field === 'backgroundColor' ? paintableBackground(value) : value;
+      if (!painted) continue;
+      out[prop] = painted;
     }
   }
 
