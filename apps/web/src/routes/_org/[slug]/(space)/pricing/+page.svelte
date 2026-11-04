@@ -4157,7 +4157,11 @@
     width: 100%;
     max-width: 44rem;
     padding: var(--space-2) var(--space-2) var(--space-2) var(--space-5);
-    background: color-mix(in srgb, var(--color-surface) 88%, transparent);
+    /* 94% solid. Content scrolling behind still moves it a little, so the
+       nudge counts this glass at its hardest among the surfaces links and the
+       eyebrow must read on (brand-editor/ground.ts STICKY_GLASS_OPACITY;
+       owner, Codex-mik4h: "Brand text, glass at 94%"). */
+    background: color-mix(in srgb, var(--color-surface) 94%, transparent);
     backdrop-filter: blur(var(--blur-xl));
     -webkit-backdrop-filter: blur(var(--blur-xl));
     border: var(--border-width) var(--border-style) color-mix(in srgb, var(--color-border) 60%, transparent);
@@ -4203,7 +4207,7 @@
     font-weight: var(--font-semibold);
     letter-spacing: var(--tracking-wider);
     text-transform: var(--text-transform-label);
-    color: var(--color-brand-primary);
+    color: var(--color-brand-text);
     line-height: var(--leading-tight);
   }
 

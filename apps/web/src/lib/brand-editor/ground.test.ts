@@ -5,11 +5,13 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
 import {
   bindingLuminance,
+  glassLuminance,
   groundLuminance,
   groundLuminanceVars,
   ORG_SURFACE_STEPS,
   PLATFORM_GROUND_LUMINANCE,
   paintableBackground,
+  STICKY_GLASS_OPACITY,
 } from './ground';
 import { relativeLuminance, TEXT_ON_BRAND_LUMINANCE_PIVOT } from './ink';
 
@@ -143,18 +145,20 @@ describe('the inputs an org’s backgrounds write', () => {
   });
 
   test('each theme’s hardest surface, from the dark background, else the light one', () => {
-    // White's darkest light panel is the tertiary, oklch(0.94 0 0) = #ebebeb;
-    // its dark surfaces all clip to white. Black's lightest dark panel is the
-    // tertiary, oklch(0.08 0 0) = #020202.
+    // White's darkest light panel is the tertiary, oklch(0.94 0 0) = #ebebeb.
+    // Its dark surfaces all clip to white, so in dark the sticky glass binds:
+    // 94% white over black content, #f0f0f0. Black's lightest dark surface is
+    // that glass too, 94% black over white content, #0f0f0f (its tertiary
+    // panel, oklch(0.08 0 0), is #020202).
     expect(groundLuminanceVars({ background: '#ffffff' })).toEqual({
       '--brand-ground-y': luminance('#ebebeb').toFixed(4),
-      '--brand-ground-dark-y': '1.0000',
+      '--brand-ground-dark-y': luminance('#f0f0f0').toFixed(4),
     });
     expect(
       groundLuminanceVars({ background: '#FFFFFF', backgroundDark: '#000000' })
     ).toEqual({
       '--brand-ground-y': luminance('#ebebeb').toFixed(4),
-      '--brand-ground-dark-y': luminance('#020202').toFixed(4),
+      '--brand-ground-dark-y': luminance('#0f0f0f').toFixed(4),
     });
   });
 });
@@ -185,5 +189,31 @@ describe('a background the page may paint', () => {
     undefined,
   ])('is not anything else: %s', (colour) => {
     expect(paintableBackground(colour)).toBeUndefined();
+  });
+});
+
+// Owner, Codex-mik4h: "Brand text, glass at 94%". The sticky subscribe bar's
+// glass is a surface its eyebrow and any link must read on.
+describe('the sticky glass', () => {
+  const src = join(dirname(fileURLToPath(import.meta.url)), '../..');
+  test.each([
+    'lib/components/subscription/SubscribeStickyBar.svelte',
+    'routes/_org/[slug]/(space)/pricing/+page.svelte',
+  ])('is the opacity %s paints', (path) => {
+    const css = readFileSync(join(src, path), 'utf8');
+    const rule = css.match(/\.sticky-bar__inner \{[^}]*\}/)?.[0] ?? '';
+    const opacity = rule.match(
+      /color-mix\(in srgb, var\(--color-surface\) (\d+)%, transparent\)/
+    )?.[1];
+    expect(Number(opacity) / 100).toBe(STICKY_GLASS_OPACITY);
+  });
+
+  test('never binds on the platform: its fallbacks are its panels', () => {
+    expect(glassLuminance('#ffffff')).toBeGreaterThan(
+      PLATFORM_GROUND_LUMINANCE.light
+    );
+    expect(glassLuminance('#262626')).toBeLessThan(
+      PLATFORM_GROUND_LUMINANCE.dark
+    );
   });
 });

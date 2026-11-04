@@ -383,8 +383,10 @@ describe('injectBrandVars paints only a background it can measure', () => {
     expect(el.hasAttribute('data-org-bg')).toBe(true);
     expect(el.style.getPropertyValue('--brand-bg')).toBe('#ffffff');
     expect(el.style.getPropertyValue('--brand-bg-dark')).toBe('');
-    // White's dark surfaces all clip to white (ground.test.ts).
-    expect(el.style.getPropertyValue('--brand-ground-dark-y')).toBe('1.0000');
+    // In dark, white binds at the sticky glass over dark content (ground.test.ts).
+    expect(el.style.getPropertyValue('--brand-ground-dark-y')).toBe(
+      groundLuminance('#ffffff', 'dark')
+    );
   });
 });
 

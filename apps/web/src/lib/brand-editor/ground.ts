@@ -9,7 +9,8 @@
  * this module only measures.
  *
  * One link colour sits on the page and on every panel and card painted from
- * it, so the number is the HARDEST of those surfaces (owner, 2026-11-03:
+ * it, and on the sticky subscribe bar's glass, so the number is the HARDEST
+ * of those surfaces (owner, 2026-11-03:
  * "Every surface (Recommended)", and for dark mode's lighter panel, "Yes,
  * every surface (Recommended)"): the darkest on a light page, where links are
  * darkened, the lightest on a dark one, where they are lightened.
@@ -22,7 +23,7 @@
  * all call it, and the pill reads the same numbers.
  */
 import { relativeLuminance, TEXT_ON_BRAND_LUMINANCE_PIVOT } from './ink';
-import { hexToOklch, oklchToSrgb, srgbToHex } from './oklch-math';
+import { hexToOklch, hexToSrgb, oklchToSrgb, srgbToHex } from './oklch-math';
 
 type Theme = 'light' | 'dark';
 
@@ -66,6 +67,15 @@ export const ORG_SURFACE_STEPS: Record<
     '--color-surface-variant': [0.06, 0.4],
   },
 };
+
+/**
+ * The sticky subscribe bar's glass (SubscribeStickyBar and the pricing page's
+ * copy): `color-mix(in srgb, var(--color-surface) 94%, transparent)`. It is a
+ * surface links sit on like any other (owner, Codex-mik4h: "Brand text, glass
+ * at 94%"), counted at its hardest: over black content on a light page, over
+ * white on a dark one. A pin test keeps this equal to both stylesheets.
+ */
+export const STICKY_GLASS_OPACITY = 0.94;
 
 /** The inputs this module writes, light then dark. */
 export const GROUND_VAR_PROPS = [
@@ -119,6 +129,21 @@ function surfaceLuminances(ground: string, theme: Theme): number[] | null {
 }
 
 /**
+ * The sticky glass over the content that moves it furthest toward the link:
+ * black under a light page, white under a dark one, composited in sRGB as
+ * the engines paint it.
+ */
+export function glassLuminance(ground: string): number | null {
+  const rgb = hexToSrgb(ground);
+  const page = relativeLuminance(ground);
+  if (!rgb || page === null) return null;
+  const under = page < TEXT_ON_BRAND_LUMINANCE_PIVOT ? 255 : 0;
+  const over = (channel: number) =>
+    channel * STICKY_GLASS_OPACITY + under * (1 - STICKY_GLASS_OPACITY);
+  return relativeLuminance(srgbToHex(over(rgb.r), over(rgb.g), over(rgb.b)));
+}
+
+/**
  * The binding ground for one theme as the stylesheet reads it, a bare
  * number to 4 decimals, or undefined for a colour that is not hex.
  */
@@ -128,8 +153,12 @@ export function groundLuminance(
 ): string | undefined {
   const page = colour ? relativeLuminance(colour) : null;
   const surfaces = colour ? surfaceLuminances(colour, theme) : null;
-  if (page === null || surfaces === null) return undefined;
-  return bindingLuminance(Number(page.toFixed(4)), surfaces).toFixed(4);
+  const glass = colour ? glassLuminance(colour) : null;
+  if (page === null || surfaces === null || glass === null) return undefined;
+  return bindingLuminance(Number(page.toFixed(4)), [
+    ...surfaces,
+    glass,
+  ]).toFixed(4);
 }
 
 /**

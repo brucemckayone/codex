@@ -7,6 +7,7 @@
  * contract (so `JourneyRenderer` renders a plain wrapper with no overrides).
  */
 import { describe, expect, it } from 'vitest';
+import { groundLuminance } from '$lib/brand-editor/ground';
 import type { BrandTokenOverrides } from '$lib/page-builder';
 import {
   brandOverrideLogo,
@@ -143,11 +144,17 @@ describe('brandOverridesToCssVars', () => {
     }
     expect(
       brandOverridesToCssVars({ backgroundColor: '#1e1e2e' })
-    ).toMatchObject({ '--brand-bg': '#1e1e2e', '--brand-ground-y': '0.0252' });
+    ).toMatchObject({
+      '--brand-bg': '#1e1e2e',
+      '--brand-ground-y': groundLuminance('#1e1e2e', 'light'),
+    });
     // Painted as the canonical hex, with its ground; a bare hex not at all.
     expect(
       brandOverridesToCssVars({ backgroundColor: ' #1e1e2e ' })
-    ).toMatchObject({ '--brand-bg': '#1e1e2e', '--brand-ground-y': '0.0252' });
+    ).toMatchObject({
+      '--brand-bg': '#1e1e2e',
+      '--brand-ground-y': groundLuminance('#1e1e2e', 'light'),
+    });
     expect(
       brandOverridesToCssVars({ backgroundColor: '112233' })
     ).not.toHaveProperty('--brand-bg');
