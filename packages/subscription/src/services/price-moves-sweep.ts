@@ -94,6 +94,8 @@ export const PRICE_MOVE_ALERT_LINES = 50;
 const RECLAIM_AFTER_MS = 20 * 60 * 1000;
 /** A failed try is tried again on the next hourly run. */
 const RETRY_AFTER_MS = 60 * 60 * 1000;
+/** A subscriber with an open chargeback is looked at again a day on. */
+const DISPUTED_RETRY_AFTER_MS = 24 * 60 * 60 * 1000;
 /** Pause between batches, to stay under Stripe's per-account rate limit. */
 const INTER_BATCH_DELAY_MS = 50;
 /** The email log is searched from a minute before the last try. */
@@ -156,6 +158,11 @@ export interface PriceMoveStepResult {
   skipped: number;
   /** Failed this run, tried again next hour. */
   retrying: number;
+  /**
+   * Paused for an open chargeback (owner: "Wait while disputed"): no email
+   * and no write, left as it was, looked at again a day on, not a try.
+   */
+  deferred: number;
   held: number;
   stopped: number;
   /** Claims given back unworked: the budget ran out, or their change stopped. */
@@ -197,6 +204,8 @@ interface MoveRow {
   planName: string | null;
   subStatus: string | null;
   subEndedAt: Date | null;
+  /** An open chargeback: billing is paused (Codex-2hxff.60). */
+  subDisputedAt: Date | null;
   subInterval: string | null;
   subTierId: string | null;
   pendingTierId: string | null;
@@ -221,6 +230,8 @@ type RowResult =
     }
   /** `told`: emailed this try, before the move was decided again (F1). */
   | { kind: 'unchanged'; told?: Told | null }
+  /** An open chargeback: the claim is undone, the row waits a day. */
+  | { kind: 'deferred'; prevAttemptedAt: Date | null }
   | { kind: 'skipped'; reason: PriceMoveSkipReason; told?: Told | null }
   | {
       kind: 'failed';
@@ -307,6 +318,7 @@ export async function runPriceMoveStep(
     unchanged: 0,
     skipped: 0,
     retrying: 0,
+    deferred: 0,
     held: 0,
     stopped: 0,
     givenBack: 0,
@@ -586,6 +598,7 @@ async function loadRows(run: Run, batch: Claim[]): Promise<MoveRow[]> {
            COALESCE(t."name", co."title") AS plan_name,
            COALESCE(s."status", cs."status") AS sub_status,
            COALESCE(s."ended_at", cs."ended_at") AS sub_ended_at,
+           COALESCE(s."disputed_at", cs."disputed_at") AS sub_disputed_at,
            COALESCE(s."billing_interval", cs."billing_interval") AS sub_interval,
            s."tier_id" AS sub_tier_id, s."pending_tier_id", s."pending_tier_from",
            s."pending_billing_interval"
@@ -629,6 +642,7 @@ async function loadRows(run: Run, batch: Claim[]): Promise<MoveRow[]> {
     planName: (r.plan_name as string | null) ?? null,
     subStatus: (r.sub_status as string | null) ?? null,
     subEndedAt: toDate(r.sub_ended_at),
+    subDisputedAt: toDate(r.sub_disputed_at),
     subInterval: (r.sub_interval as string | null) ?? null,
     subTierId: (r.sub_tier_id as string | null) ?? null,
     pendingTierId: (r.pending_tier_id as string | null) ?? null,
@@ -707,6 +721,7 @@ async function firstBatchRefusal(
     ({ result }) =>
       result.kind !== 'unchanged' &&
       result.kind !== 'skipped' &&
+      result.kind !== 'deferred' &&
       result.noticeSent
   );
   if (sent.length === 0) return null;
@@ -782,6 +797,11 @@ async function workRow(
 ): Promise<RowResult> {
   const eligible = eligibility(row);
   if ('skip' in eligible) return { kind: 'skipped', reason: eligible.skip };
+  // Owner: "Wait while disputed". Billing is paused for an open chargeback
+  // (Codex-2hxff.60), so they are not told, and nothing is written at
+  // Stripe. Not a skip, which is for good: once the dispute ends they are
+  // told as anyone, with their 30 days from that email.
+  if (row.subDisputedAt !== null) return { kind: 'deferred', prevAttemptedAt };
 
   // Told already: a `notified` row retries the write only, from its email.
   let toldAt = row.state === 'notified' && row.noticeAt ? row.noticeAt : null;
@@ -1208,6 +1228,23 @@ async function record(
       `);
       if (written.rows.length > 0) run.result.unchanged += 1;
       break;
+    case 'deferred': {
+      // The claim undone (one fewer try, the earlier `attempted_at`), so a
+      // dispute never counts toward a hold; looked at again a day on, so it
+      // takes one claim a day, not one an hour.
+      const nextAt = new Date(run.now.getTime() + DISPUTED_RETRY_AFTER_MS);
+      written = await db.execute(sql`
+        UPDATE ${subscriptionPriceMoves}
+           SET "attempts" = "attempts" - 1,
+               "attempted_at" = ${result.prevAttemptedAt}::timestamptz,
+               "next_attempt_at" = ${nextAt}::timestamptz,
+               "updated_at" = ${now}
+         WHERE ${mine}
+        RETURNING "id"
+      `);
+      if (written.rows.length > 0) run.result.deferred += 1;
+      break;
+    }
     case 'skipped':
       written = await db.execute(sql`
         UPDATE ${subscriptionPriceMoves}

@@ -3737,12 +3737,14 @@ export class SubscriptionService extends BaseService {
    * (Codex-2hxff.96). The page then shows the fresh figures to confirm. A
    * drift in the second between that re-check and the write is accepted.
    *
-   * A change that waits for the renewal (a cheaper plan, or leaving yearly
-   * billing) bills the price read now, at the renewal, with no notice. When
-   * the page passes the preview's `newRecurringAmountCents`, a different
-   * price (one saved since the preview) throws
-   * `TierChangePreviewExpiredError` before Stripe is written to, so the
-   * member confirms the price they will pay (review C1 cycle 2, L4).
+   * Every change bills the price read now: a change that waits, at the
+   * renewal with no notice, and a change made now, at once (a cheaper plan
+   * repriced past the current one is an upgrade by confirm). When the page
+   * passes the preview's `newRecurringAmountCents`, a different price (one
+   * saved since the preview) throws `TierChangePreviewExpiredError` before
+   * Stripe is written to, so the member confirms the price they will pay
+   * (review C1 cycle 2, L4; cycle 3, L4-a). For C(b) it is the monthly bill
+   * the change waits for.
    */
   async changeTier(
     userId: string,
@@ -3782,13 +3784,10 @@ export class SubscriptionService extends BaseService {
         }
       }
 
-      const waitingAmount =
-        plan.billing?.amountCents ??
-        (plan.kind === 'downgrade' ? plan.newRecurringAmount : null);
       if (
-        waitingAmount !== null &&
         newRecurringAmountCents !== undefined &&
-        newRecurringAmountCents !== waitingAmount
+        newRecurringAmountCents !==
+          (plan.billing?.amountCents ?? plan.newRecurringAmount)
       ) {
         throw new TierChangePreviewExpiredError({
           prorationDate: effectiveProrationDate,
@@ -5210,7 +5209,7 @@ export class SubscriptionService extends BaseService {
    * made billable first. One of ours already attached but half made, or
    * carrying an earlier choice, is finished in place instead
    * (`finishBillingSchedule`, review C1 cycle 2, L2), or let go for a cancel
-   * (`released`). Never throws: a failure is a warning, and the backstop
+   * or a Keep that landed after the read (`released`). Never throws: a failure is a warning, and the backstop
    * sets it within the hour. `skipped`: there was nothing to set.
    */
   private async rescheduleBillingChange(
@@ -5259,10 +5258,27 @@ export class SubscriptionService extends BaseService {
           // failure is a new attempt, not a replay of the failed one.
           stamp: `${reason}-${Date.now()}`,
         });
+        // A Keep that landed after our read cleared the record and found no
+        // schedule to let go (cycle 3, L2-a): the record is read again, and
+        // the schedule made from the stale one goes.
+        if (scheduleId !== null) {
+          const after = await this.stripe.subscriptions.retrieve(
+            sub.stripeSubscriptionId
+          );
+          if (!readWaitingMove(after.metadata)?.billing) {
+            await this.releaseSchedule(
+              { id: scheduleId },
+              `billing-undo-kept_${scheduleId}`
+            );
+            return 'released';
+          }
+        }
       }
       // Set to cancel since the read (cycle 2, L1): the cancel is back, and
       // a cancelling subscription gets no schedule until it is reactivated.
-      if (scheduleId === null) return 'skipped';
+      // `released`, as the finish's: `live` is from before the cancel, so
+      // it is not mirrored over the row (cycle 3).
+      if (scheduleId === null) return 'released';
       await this.db
         .update(subscriptions)
         .set({ stripeScheduleId: scheduleId, updatedAt: new Date() })

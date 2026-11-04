@@ -533,6 +533,76 @@ describe('waiting tier moves (Codex-2hxff.16)', () => {
       expect((await rowOf(row.id)).amountCents).toBe(700);
     });
 
+    // Review C1 cycle 3, L4-a: the amount is compared for a change made now
+    // too, so one that turned dearer since its preview never charges unseen.
+    it('previewed as a downgrade, an upgrade at confirm (Basic raised past Premium): refused, nothing charged', async () => {
+      const { org, basic, premium } = await hollowOak('move-turned-upgrade');
+      const { userId } = await member(org.id, premium);
+      const preview = await service.previewTierChange(
+        userId,
+        org.id,
+        basic.id,
+        'month'
+      );
+      expect(preview.takesEffect).toBe('period_end');
+
+      const repriced = `${basic.stripePriceMonthlyId}_repriced`;
+      prices.set(repriced, { amount: 2500, interval: 'month' });
+      await db
+        .update(subscriptionTiers)
+        .set({ priceMonthly: 2500, stripePriceMonthlyId: repriced })
+        .where(eq(subscriptionTiers.id, basic.id));
+
+      const refused = await service
+        .changeTier(
+          userId,
+          org.id,
+          basic.id,
+          'month',
+          preview.prorationDate,
+          undefined,
+          preview.newRecurringAmountCents
+        )
+        .catch((error: unknown) => error);
+
+      expect(refused).toBeInstanceOf(TierChangePreviewExpiredError);
+      expect(updates()).toHaveLength(0);
+    });
+
+    it('an upgrade whose price moved since its preview: refused, nothing charged', async () => {
+      const { org, basic, premium } = await hollowOak('upgrade-repriced');
+      const { userId } = await member(org.id, basic);
+      const preview = await service.previewTierChange(
+        userId,
+        org.id,
+        premium.id,
+        'month'
+      );
+      expect(preview.isUpgrade).toBe(true);
+
+      const repriced = `${premium.stripePriceMonthlyId}_repriced`;
+      prices.set(repriced, { amount: 2200, interval: 'month' });
+      await db
+        .update(subscriptionTiers)
+        .set({ priceMonthly: 2200, stripePriceMonthlyId: repriced })
+        .where(eq(subscriptionTiers.id, premium.id));
+
+      const refused = await service
+        .changeTier(
+          userId,
+          org.id,
+          premium.id,
+          'month',
+          preview.prorationDate,
+          undefined,
+          preview.newRecurringAmountCents
+        )
+        .catch((error: unknown) => error);
+
+      expect(refused).toBeInstanceOf(TierChangePreviewExpiredError);
+      expect(updates()).toHaveLength(0);
+    });
+
     it('latest wins: another cheaper plan replaces the move and KEEPS the first hold keys (T2)', async () => {
       const { org, basic, pro, premium } = await hollowOak('move-replace');
       const { userId, row } = await member(org.id, premium);

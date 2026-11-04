@@ -1043,7 +1043,7 @@ describe('leaving yearly billing waits for the year (Codex-2hxff.97)', () => {
   // Review C1 cycle 2, L1: a Cancel that lands between the backstop's read
   // and its from_subscription create is put back, and no schedule is set.
   describe('a Cancel during the backstop', () => {
-    it("the create finds the subscription set to cancel: the schedule goes, the cancel is back, and it's skipped", async () => {
+    it('the create finds the subscription set to cancel: the schedule goes, the cancel is back, and the row stays cancelling', async () => {
       const { org, pro } = await hollowOak('backstop-cancel-race');
       const { userId, row } = await yearlyMember(org.id, pro);
       await service.changeTier(userId, org.id, pro.id, 'month');
@@ -1065,6 +1065,11 @@ describe('leaving yearly billing waits for the year (Codex-2hxff.97)', () => {
           raced = true;
           const before = structuredClone(liveOf(id));
           liveOf(id).cancel_at_period_end = true;
+          // The Cancel's own write marks the row cancelling.
+          await db
+            .update(subscriptions)
+            .set({ status: 'cancelling', cancelAtPeriodEnd: true })
+            .where(eq(subscriptions.id, row.id));
           return before;
         }
         return real?.(id);
@@ -1082,7 +1087,13 @@ describe('leaving yearly billing waits for the year (Codex-2hxff.97)', () => {
       const after = liveOf(row.stripeSubscriptionId);
       expect(after.schedule).toBeNull();
       expect(after.cancel_at_period_end).toBe(true);
-      expect((await rowOf(row.id)).stripeScheduleId).toBeNull();
+      // Cycle 3, L1 nit: the backstop's read, from before the Cancel, is
+      // not mirrored back over the row.
+      expect(await rowOf(row.id)).toMatchObject({
+        stripeScheduleId: null,
+        status: 'cancelling',
+        cancelAtPeriodEnd: true,
+      });
     });
   });
 
@@ -1272,6 +1283,51 @@ describe('leaving yearly billing waits for the year (Codex-2hxff.97)', () => {
 
       expect(fake.writes.slice(before)).toEqual([]);
       expect(liveOf(row.stripeSubscriptionId).schedule).toBeNull();
+    });
+
+    // Cycle 3, L2-a: the backstop reads, the member presses Keep (nothing to
+    // let go yet), then the backstop creates from its stale read.
+    it('never against a Keep between the backstop’s read and its create: the schedule made goes', async () => {
+      const { org, pro } = await hollowOak('l2a-keep-race');
+      const { userId, row } = await yearlyMember(org.id, pro);
+      await service.changeTier(userId, org.id, pro.id, 'month');
+      // The schedule lost (as a reactivate whose create failed leaves it).
+      scheduleOf(row.stripeSubscriptionId).status = 'released';
+      liveOf(row.stripeSubscriptionId).schedule = null;
+      await db
+        .update(subscriptions)
+        .set({ stripeScheduleId: null })
+        .where(eq(subscriptions.id, row.id));
+      const retrieve = vi.mocked(fake.stripe.subscriptions.retrieve);
+      const real = retrieve.getMockImplementation();
+      let raced = false;
+      retrieve.mockImplementation((async (id: string) => {
+        if (id === row.stripeSubscriptionId && !raced) {
+          raced = true;
+          const before = structuredClone(liveOf(id));
+          await service.keepCurrentPlan(userId, org.id);
+          return before;
+        }
+        return real?.(id);
+      }) as unknown as typeof fake.stripe.subscriptions.retrieve);
+      fake.writes.length = 0;
+
+      const result = await service.runTierMoveBackstop({ limit: 50 });
+
+      expect(result.rescheduled).toBe(0);
+      expect(fake.writes).toEqual([
+        'update:metadata',
+        'schedule:create',
+        'schedule:update',
+        'schedule:release',
+      ]);
+      const after = liveOf(row.stripeSubscriptionId);
+      expect(after.schedule).toBeNull();
+      expect(after.metadata).not.toHaveProperty('codex_move_interval');
+      expect(await rowOf(row.id)).toMatchObject({
+        pendingBillingInterval: null,
+        stripeScheduleId: null,
+      });
     });
 
     it('a create whose answer was lost is taken up and finished: the change is set and nothing is put back', async () => {
