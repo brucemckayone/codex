@@ -202,7 +202,7 @@
     font: inherit;
     font-size: var(--text-xs);
     font-weight: var(--font-medium);
-    color: var(--color-interactive);
+    color: var(--color-link);
     text-decoration: underline;
     text-underline-offset: var(--space-0-5);
     border-radius: var(--radius-sm);

@@ -915,7 +915,7 @@
 
   .picker-segment button[aria-checked='true'] {
     background: var(--color-interactive-subtle);
-    color: var(--color-interactive);
+    color: var(--color-link);
     font-weight: var(--font-semibold);
   }
 
@@ -999,7 +999,7 @@
 
   .picker-library {
     font-size: var(--text-sm);
-    color: var(--color-interactive);
+    color: var(--color-link);
   }
 
   @media (max-width: 39.9375rem) {
