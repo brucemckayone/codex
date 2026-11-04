@@ -1250,6 +1250,9 @@ async function voidPending(
  * Q2 (A): a waiting rise made smaller sends one short email to everyone
  * already told. Someone told about an earlier smaller figure is told again;
  * someone not told yet simply gets the announcement with the new figures.
+ * A row told again starts a new round at `now`: the daily step's email-log
+ * check searches from created_at, so the last round's email can't count as
+ * this one's (review cycle 3, N1).
  */
 async function queueSmallerNotices(
   tx: Tx,
@@ -1267,7 +1270,7 @@ async function queueSmallerNotices(
     ON CONFLICT (change_id, user_id, kind) DO UPDATE
       SET state = 'due', attempts = 0, attempted_at = NULL, accepted_at = NULL,
           last_reason = NULL, last_error = NULL, alert_error_id = NULL,
-          updated_at = ${now}
+          created_at = ${now}, updated_at = ${now}
       WHERE ${feeChangeNotices}.state NOT IN ('due', 'failed', 'unknown')
   `);
 }
