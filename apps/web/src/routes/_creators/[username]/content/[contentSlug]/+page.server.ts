@@ -272,7 +272,8 @@ export const load: PageServerLoad = async ({
       content: pageContent,
       contentBodyHtml: publicBodyHtml,
       contentBodyUnavailable: publicBodyUnavailable,
-      hasAccess: null,
+      // Public never resolves false (fetchAccess); false autoplayed the preview (Codex-i8x6z).
+      hasAccess: true,
       streamingUrl: null,
       progress: null,
       // fetchAccess catches a failed request itself, so this sees only a
