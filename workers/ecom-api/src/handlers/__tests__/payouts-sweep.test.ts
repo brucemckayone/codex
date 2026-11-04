@@ -134,6 +134,7 @@ describe('ecom-api payouts-sweep handler', () => {
         unchanged: 0,
         skipped: 0,
         retrying: 0,
+        deferred: 0,
         held: 0,
         stopped: 0,
         givenBack: 0,

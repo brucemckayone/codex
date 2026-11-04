@@ -1599,6 +1599,157 @@ describe('the hourly price-moves step (Codex-2hxff.86)', () => {
     });
   });
 
+  // Owner: "Wait while disputed" (review C1 cycle 3, D1). Billing is paused
+  // for an open chargeback, so the run neither tells them nor writes, and
+  // the row waits: due, a day on, not a try. Never a skip (that is for good).
+  describe('an open chargeback', () => {
+    it('waits: no email, no Stripe call, due a day on and not a try; once it ends, told as anyone with 30 days', async () => {
+      const { org: o, pro } = await org('pm-disputed');
+      const fake = fakeStripe();
+      const disputed = await subscriber(o.id, pro, {
+        disputedAt: new Date(NOW - DAY_MS),
+      });
+      const other = await subscriber(o.id, pro);
+      onStripe(fake, disputed, 40);
+      onStripe(fake, other, 40);
+      const changeId = await reprice(o.id, pro);
+      const send = mailer();
+      const obs = logger();
+      const reads = vi.mocked(fake.stripe.subscriptions.retrieve);
+
+      const first = await run([changeId], { fake, send, obs });
+
+      expect(first).toMatchObject({
+        claimed: 2,
+        scheduled: 1,
+        deferred: 1,
+        skipped: 0,
+        retrying: 0,
+        held: 0,
+        done: 0,
+      });
+      expect(send.mock.calls.map(([params]) => params.to)).toEqual([
+        await emailOf(other),
+      ]);
+      const onDisputed = ([id]: unknown[]) =>
+        id === disputed.stripeSubscriptionId;
+      expect(reads.mock.calls.filter(onDisputed)).toEqual([]);
+      expect(fake.update.mock.calls.filter(onDisputed)).toEqual([]);
+      expect(await moveOf(changeId, disputed)).toMatchObject({
+        state: 'due',
+        attempts: 0,
+        attemptedAt: null,
+        nextAttemptAt: new Date(NOW + DAY_MS),
+        noticeAt: null,
+        skipReason: null,
+        heldReason: null,
+      });
+      expect(obs.error).not.toHaveBeenCalled();
+      expect((await changeOf(changeId)).state).toBe('running');
+
+      // The next hourly run doesn't claim it again.
+      expect(await run([changeId], { fake, send, obs }, 1)).toMatchObject({
+        claimed: 0,
+      });
+
+      // The dispute won: the run a day on tells them, 30 days from that email.
+      await db
+        .update(subscriptions)
+        .set({ disputedAt: null })
+        .where(eq(subscriptions.id, disputed.id));
+      const dayOn = await run([changeId], { fake, send, obs }, 24);
+
+      expect(dayOn).toMatchObject({ claimed: 1, scheduled: 1, deferred: 0 });
+      const told = await moveOf(changeId, disputed);
+      const sentAt = NOW + DAY_MS + SENT_AFTER_MS;
+      expect(told).toMatchObject({
+        state: 'scheduled',
+        noticeAt: new Date(sentAt),
+      });
+      expect(told.effectiveAt?.getTime()).toBeGreaterThanOrEqual(
+        sentAt + 30 * DAY_MS
+      );
+      expect(send).toHaveBeenCalledTimes(2);
+    });
+
+    it('waits for a course subscription too', async () => {
+      const { org: o } = await org('pm-disputed-course');
+      const fake = fakeStripe();
+      const creatorId = takeFirst(await seedTestUsers(db, 1));
+      userIds.push(creatorId);
+      const course = takeFirst(
+        await db
+          .insert(courses)
+          .values({
+            organizationId: o.id,
+            creatorId,
+            slug: createUniqueSlug('pm-disputed-course'),
+            title: 'Night Swimming',
+            status: 'published',
+            priceCents: null,
+          })
+          .returning({ id: courses.id })
+      );
+      courseIds.push(course.id);
+      const plan = takeFirst(
+        await db
+          .insert(courseSubscriptionPlans)
+          .values({
+            courseId: course.id,
+            priceMonthly: 1200,
+            priceAnnual: 12000,
+            stripePriceMonthlyId: PRICE_OLD,
+          })
+          .returning({ id: courseSubscriptionPlans.id })
+      );
+      const userId = takeFirst(await seedTestUsers(db, 1));
+      userIds.push(userId);
+      const ns = createUniqueSlug('pm-cs-disputed');
+      const courseSub = takeFirst(
+        await db
+          .insert(courseSubscriptions)
+          .values({
+            userId,
+            courseId: course.id,
+            planId: plan.id,
+            organizationId: o.id,
+            stripeSubscriptionId: `sub_${ns}`,
+            stripeCustomerId: `cus_${ns}`,
+            status: 'active',
+            billingInterval: 'month',
+            currentPeriodStart: new Date(NOW - DAY_MS),
+            currentPeriodEnd: new Date(NOW + 40 * DAY_MS),
+            disputedAt: new Date(NOW - DAY_MS),
+          })
+          .returning()
+      );
+      onStripe(fake, courseSub, 40);
+      const { changeId } = await recordPlanPriceChange(db, plan.id, {
+        organizationId: o.id,
+        interval: 'month',
+        fromAmountCents: 1200,
+        newAmountCents: 1400,
+        newStripePriceId: PRICE_NEW,
+        createdByUserId: null,
+        now: new Date(NOW - DAY_MS),
+      });
+      const send = mailer();
+
+      const result = await run([changeId], { fake, send });
+
+      expect(result).toMatchObject({ claimed: 1, deferred: 1, scheduled: 0 });
+      expect(send).not.toHaveBeenCalled();
+      expect(fake.update).not.toHaveBeenCalled();
+      const [row] = await movesOf(changeId);
+      expect(row).toMatchObject({
+        courseSubscriptionId: courseSub.id,
+        state: 'due',
+        attempts: 0,
+        nextAttemptAt: new Date(NOW + DAY_MS),
+      });
+    });
+  });
+
   // The Studio note's read (data design §2.6).
   describe('the progress read', () => {
     /** Thu 14 Jan 2027, 07:30 London (GMT): the next run is 09:00. */

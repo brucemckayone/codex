@@ -819,6 +819,13 @@ runs, 9 to 10 hours with the 08:00 gap.
   the pinned apiVersion: re-run that script before upgrading it.
 - Past-due and paused subscribers are only marked pending, and move when they
   are active again. A subscriber already paying the new amount is not emailed.
+- **An open chargeback waits** (owner: "Wait while disputed"). A subscriber
+  or course subscriber with `disputed_at` set is neither emailed nor written
+  at Stripe. Their row stays `due` (or `notified`), looked at again a day on.
+  It is not counted as a try, a failure or a hold, and no alert is raised.
+  It takes one claim a day while the dispute lasts. Once the dispute ends
+  they are told as anyone, with 30 days from that email. A lost dispute
+  ends the subscription, and the row is skipped as `ended`.
 - The other interval's subscribers are never touched: switching a monthly
   subscription onto an annual Price would reset its cycle and bill a year.
 - A newer pending change overwrites an older one (latest wins): one move, to
