@@ -24,6 +24,7 @@
   import { browser } from '$app/environment';
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
+  import UpcomingFeeNote from '$lib/components/studio/UpcomingFeeNote.svelte';
   import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
   import { toast } from '$lib/components/ui/Toast/toast-store';
   import {
@@ -179,6 +180,11 @@
     <h1 class="page-title earnings-hub__title">{m.earnings_page_title()}</h1>
     <p class="earnings-hub__subtitle">{m.earnings_page_subtitle()}</p>
   </header>
+
+  <!-- A fee rise that hasn't started, on the creator's own sales in every
+       organisation (Codex-2hxff.33 F5, N4; owner decision Q3: Billing and
+       Payouts are owner-only, and this is the money page every creator has). -->
+  <UpcomingFeeNote />
 
   <!-- ── Connect-return banner ────────────────────────────────────────────── -->
   {#if returnBanner === 'success'}

@@ -90,7 +90,10 @@ const PREVIEW: TierChangePreview = {
   newRecurringInterval: 'month',
   prorationDate: 1_790_000_000,
   isUpgrade: true,
+  takesEffect: 'now',
   currentPeriodEnd: '2026-11-22T00:00:00.000Z',
+  billingChange: null,
+  replaces: null,
 };
 
 /** What the remote returns for the worker's 409 on a disputed plan. */

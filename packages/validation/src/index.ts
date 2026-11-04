@@ -28,6 +28,8 @@ export * from './schemas/agreements';
 export * from './schemas/course-commerce';
 // Fee configuration schemas (Codex-m644n)
 export * from './schemas/fee-config';
+// Dated fee changes: cancel, upcoming fees (Codex-2hxff.33)
+export * from './schemas/fees';
 // File upload schemas
 export * from './schemas/file-upload';
 // Journey member-surface route schemas (Codex-2pryk Round-D)

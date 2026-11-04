@@ -38,7 +38,7 @@ import {
   repayDispute,
   reverseCharge,
 } from '@codex/payments';
-import { PurchaseService } from '@codex/purchase';
+import { FeeConfigService, PurchaseService } from '@codex/purchase';
 import { ServiceError } from '@codex/service-errors';
 import {
   createMockStripe,
@@ -332,6 +332,7 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
         { db, environment: 'test', ...createTestMoneyDeps() },
         fake.stripe
       ),
+      feeConfig: new FeeConfigService({ db, environment: 'test' }),
     });
     const log = (
       service as unknown as {

@@ -34,6 +34,7 @@ import type { FeeConfigService } from '@codex/purchase';
 import {
   InternalServiceError,
   UnsupportedCurrencyError,
+  ValidationError,
 } from '@codex/service-errors';
 import {
   createMockStripe,
@@ -69,12 +70,9 @@ import {
   SubscriptionCheckoutError,
   SubscriptionNotFoundError,
   SubscriptionPaymentRequiredError,
+  TierChangePreviewExpiredError,
   TierNotFoundError,
 } from '../../errors';
-import {
-  FAN_OUT_STRIPE_REQUEST,
-  PRICE_FAN_OUT_BUDGET_MS,
-} from '../pending-price-change';
 import {
   SUBSCRIBER_HIDDEN_COLUMNS,
   SubscriptionService,
@@ -2161,6 +2159,212 @@ describe('SubscriptionService', () => {
       );
     });
 
+    // A switch of billing period starts a new period today (owner,
+    // Codex-2hxff.96). Flexible billing mode keeps the old billing day unless
+    // the call resets the anchor, and Stripe refuses proration_date with it:
+    // the preview returns a quote for the commit to re-check instead.
+    it.each([
+      {
+        change: 'the same tier, annual (interval_switch)',
+        target: 1,
+        interval: 'year',
+        switches: true,
+      },
+      {
+        change: 'another tier, annual (cross_period_change)',
+        target: 2,
+        interval: 'year',
+        switches: true,
+      },
+      {
+        change: 'another tier, monthly (upgrade)',
+        target: 2,
+        interval: 'month',
+        switches: false,
+      },
+    ] as const)('previews $change: anchor and quote only for a switch into yearly', async ({
+      target,
+      interval,
+      switches,
+    }) => {
+      const { org, tier1, tier2 } = await createFullOrg(
+        `preview-anchor-${target}-${interval}`
+      );
+      await db
+        .insert(subscriptions)
+        .values(createTestSubscriptionInput(otherCreatorId, org.id, tier1.id));
+      stubCreatePreview(500, [
+        { description: 'Unused time', amount: -250 },
+        { description: 'Remaining time', amount: 750 },
+      ]);
+
+      const preview = await service.previewTierChange(
+        otherCreatorId,
+        org.id,
+        (target === 1 ? tier1 : tier2).id,
+        interval
+      );
+
+      const createPreviewMock = (
+        stripe as unknown as {
+          invoices: { createPreview: ReturnType<typeof vi.fn> };
+        }
+      ).invoices.createPreview;
+      const params = createPreviewMock.mock.calls[0]![0] as {
+        subscription_details: Record<string, unknown>;
+      };
+      if (switches) {
+        expect(params.subscription_details.billing_cycle_anchor).toBe('now');
+        expect(params.subscription_details.proration_date).toBeUndefined();
+        // Every line, the amount due and the next bill's London date.
+        expect(preview.quote).toMatch(
+          /^due:500\|lines:-250,750\|next:\d{4}-\d{2}-\d{2}$/
+        );
+      } else {
+        expect(
+          params.subscription_details.billing_cycle_anchor
+        ).toBeUndefined();
+        expect(params.subscription_details.proration_date).toBe(
+          preview.prorationDate
+        );
+        expect(preview.quote).toBeUndefined();
+      }
+    });
+
+    it("previews a switch into monthly as waiting for the year's end: no Stripe preview, no quote (Codex-2hxff.97)", async () => {
+      const { org, tier1 } = await createFullOrg('preview-into-monthly');
+      await db.insert(subscriptions).values(
+        createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+          amountCents: tier1.priceAnnual,
+          platformFeeCents: 499,
+          organizationFeeCents: 674,
+          creatorPayoutCents: 3817,
+          billingInterval: 'year',
+        })
+      );
+      stubCreatePreview(0, [{ description: 'Unused time', amount: -4000 }]);
+
+      const preview = await service.previewTierChange(
+        otherCreatorId,
+        org.id,
+        tier1.id,
+        'month'
+      );
+
+      expect(
+        (
+          stripe as unknown as {
+            invoices: { createPreview: ReturnType<typeof vi.fn> };
+          }
+        ).invoices.createPreview
+      ).not.toHaveBeenCalled();
+      expect(preview).toMatchObject({
+        amountDueCents: 0,
+        prorationLineItems: [],
+        takesEffect: 'period_end',
+        newRecurringAmountCents: tier1.priceMonthly,
+        newRecurringInterval: 'month',
+        billingChange: {
+          interval: 'month',
+          amountCents: tier1.priceMonthly,
+        },
+      });
+      expect(preview.quote).toBeUndefined();
+    });
+
+    /** A preview with ordinary lines beside its prorations, as Stripe cuts one. */
+    function stubMixedPreview(
+      amountDueCents: number,
+      lines: Array<{ description: string; amount: number; proration: boolean }>
+    ) {
+      (stripe as unknown as { invoices: unknown }).invoices = {
+        createPreview: vi.fn().mockResolvedValue({
+          amount_due: amountDueCents,
+          total: amountDueCents,
+          lines: {
+            data: lines.map((line) => ({
+              description: line.description,
+              amount: line.amount,
+              parent: {
+                subscription_item_details: { proration: line.proration },
+              },
+            })),
+          },
+        }),
+      };
+    }
+
+    // With the anchor reset, Stripe bills the new year as an ordinary line
+    // beside the credit: the dialog lists every line, so they add up to what
+    // is charged (Codex-2hxff.96, the lead's follow-up).
+    it("a switch into yearly lists every line, the new year's own charge included: they add up to what is charged", async () => {
+      const { org, tier1 } = await createFullOrg('preview-all-lines');
+      await db
+        .insert(subscriptions)
+        .values(createTestSubscriptionInput(otherCreatorId, org.id, tier1.id));
+      stubMixedPreview(4740, [
+        { description: 'Unused time on Tier 1', amount: -250, proration: true },
+        {
+          description: '1 × Tier 1 (at £49.90 / year)',
+          amount: 4990,
+          proration: false,
+        },
+      ]);
+
+      const preview = await service.previewTierChange(
+        otherCreatorId,
+        org.id,
+        tier1.id,
+        'year'
+      );
+
+      expect(preview.prorationLineItems).toEqual([
+        { description: 'Unused time on Tier 1', amountCents: -250 },
+        { description: '1 × Tier 1 (at £49.90 / year)', amountCents: 4990 },
+      ]);
+      const total = preview.prorationLineItems.reduce(
+        (sum, line) => sum + line.amountCents,
+        0
+      );
+      expect(total).toBe(preview.amountDueCents);
+      expect(total).toBe(4740);
+      // The re-check at confirm compares the same full set.
+      expect(preview.quote).toMatch(/^due:4740\|lines:-250,4990\|next:/);
+    });
+
+    it('an upgrade still lists only its proration lines', async () => {
+      const { org, tier1, tier2 } = await createFullOrg(
+        'preview-upgrade-lines'
+      );
+      await db
+        .insert(subscriptions)
+        .values(createTestSubscriptionInput(otherCreatorId, org.id, tier1.id));
+      stubMixedPreview(500, [
+        { description: 'Unused time on Tier 1', amount: -250, proration: true },
+        {
+          description: 'Remaining time on Tier 2',
+          amount: 750,
+          proration: true,
+        },
+        {
+          description: '1 × Tier 2 (at £9.99 / month)',
+          amount: 999,
+          proration: false,
+        },
+      ]);
+
+      const preview = await service.previewTierChange(
+        otherCreatorId,
+        org.id,
+        tier2.id,
+        'month'
+      );
+
+      expect(
+        preview.prorationLineItems.map((line) => line.amountCents)
+      ).toEqual([-250, 750]);
+    });
+
     it('throws TierNotFoundError for an unknown tier', async () => {
       const { org, tier1 } = await createFullOrg('preview-bad-tier');
       await db
@@ -2192,6 +2396,25 @@ describe('SubscriptionService', () => {
   // ─── changeTier ───────────────────────────────────────────────────
 
   describe('changeTier', () => {
+    /**
+     * Stub the invoice preview with these figures (amount due, proration
+     * lines), for a switch of billing period's preview and its re-check.
+     */
+    function stubPreviewFigures(amountDueCents: number, lineAmounts: number[]) {
+      const createPreview = vi.fn().mockResolvedValue({
+        amount_due: amountDueCents,
+        lines: {
+          data: lineAmounts.map((amount, i) => ({
+            description: `line ${i}`,
+            amount,
+            parent: { subscription_item_details: { proration: true } },
+          })),
+        },
+      });
+      (stripe as unknown as { invoices: unknown }).invoices = { createPreview };
+      return createPreview;
+    }
+
     it('upgrade: invoices the proration immediately with payment_behavior=error_if_incomplete', async () => {
       const { org, tier1, tier2 } = await createFullOrg('change-tier-up');
       // Subscribe on tier1 (priceMonthly=499, default split sums correctly).
@@ -2260,7 +2483,7 @@ describe('SubscriptionService', () => {
       ).toBe(updated.amountCents);
     });
 
-    it('downgrade (Phase 1 fallback): keeps create_prorations, NO payment_behavior, its own idempotency key', async () => {
+    it('downgrade waits for the renewal (Codex-2hxff.16): no proration, NO payment_behavior, its own idempotency key', async () => {
       const { org, tier1, tier2 } = await createFullOrg('change-tier-down');
       // Subscribe on tier2 (priceMonthly=999) — split must sum to 999.
       const sub = takeFirst(
@@ -2286,15 +2509,29 @@ describe('SubscriptionService', () => {
         }
       ).mock.calls[0]!;
       const params = updateCall[1] as Record<string, unknown>;
-      expect(params.proration_behavior).toBe('create_prorations');
+      // The cheaper Price goes on the item for the next bill; nothing is
+      // credited or charged today, and access stays on tier2 until then.
+      expect(params.proration_behavior).toBe('none');
       expect(params.payment_behavior).toBeUndefined();
-      // Phase 1 downgrade still updates the local row immediately —
-      // Phase 2 replaces this with a scheduled change.
-      expect(params.proration_date).toEqual(expect.any(Number));
-      // A downgrade has a key too (Codex-2hxff.15, SUB-12): a retried one
-      // must not credit the customer twice.
+      expect(params.proration_date).toBeUndefined();
+      expect(params.metadata).toMatchObject({
+        codex_tier_id: tier2.id,
+        codex_move_tier_id: tier1.id,
+      });
+      // A move has a key too (Codex-2hxff.15, SUB-12), per preview: a
+      // retried one replays, a new one is a new write.
       expect(updateCall[2]).toEqual({
-        idempotencyKey: `downgrade_${sub.id}_${tier1.stripePriceMonthlyId}_${params.proration_date}`,
+        idempotencyKey: expect.stringMatching(
+          new RegExp(`^move_${sub.id}_${tier1.stripePriceMonthlyId}_\\d+_\\d+$`)
+        ),
+      });
+      const stored = await db.query.subscriptions.findFirst({
+        where: eq(subscriptions.id, sub.id),
+      });
+      expect(stored).toMatchObject({
+        tierId: tier2.id,
+        pendingTierId: tier1.id,
+        heldAmountCents: tier2.priceMonthly,
       });
     });
 
@@ -2681,7 +2918,22 @@ describe('SubscriptionService', () => {
         })
       );
 
-      await service.changeTier(otherCreatorId, org.id, tier2.id, 'year');
+      // A switch of billing period confirms the figures its dialog showed.
+      stubPreviewFigures(0, [-250]);
+      const { prorationDate, quote } = await service.previewTierChange(
+        otherCreatorId,
+        org.id,
+        tier2.id,
+        'year'
+      );
+      await service.changeTier(
+        otherCreatorId,
+        org.id,
+        tier2.id,
+        'year',
+        prorationDate,
+        quote
+      );
 
       const { eq, and } = await import('drizzle-orm');
       const updated = takeFirst(
@@ -2697,6 +2949,208 @@ describe('SubscriptionService', () => {
       );
       expect(updated.amountCents).toBe(tier2.priceAnnual);
       expect(updated.billingInterval).toBe('year');
+    });
+
+    // A switch into yearly billing cannot be pinned by proration_date (Stripe
+    // refuses it with billing_cycle_anchor 'now'), so the commit previews it
+    // again and refuses any figure the dialog did not show (Codex-2hxff.96).
+    describe.each([
+      { change: 'the same tier, annual (interval_switch)', target: 1 },
+      { change: 'another tier, annual (cross_period_change)', target: 2 },
+    ] as const)('a switch to $change', ({ target }) => {
+      async function previewed(name: string) {
+        const { org, tier1, tier2 } = await createFullOrg(
+          `recheck-${name}-${target}`
+        );
+        await db
+          .insert(subscriptions)
+          .values(
+            createTestSubscriptionInput(otherCreatorId, org.id, tier1.id)
+          );
+        const tierId = (target === 1 ? tier1 : tier2).id;
+        stubPreviewFigures(0, [-8767, 1500]);
+        const preview = await service.previewTierChange(
+          otherCreatorId,
+          org.id,
+          tierId,
+          'year'
+        );
+        return { org, tierId, preview };
+      }
+      const writes = () =>
+        (
+          stripe.subscriptions.update as unknown as {
+            mock: { calls: unknown[][] };
+          }
+        ).mock.calls;
+
+      it('is refused, with no Stripe write, when a re-preview differs', async () => {
+        const { org, tierId, preview } = await previewed('moved');
+        // The credit ran on by 2p between the dialog and the confirm.
+        stubPreviewFigures(0, [-8765, 1500]);
+
+        await expect(
+          service.changeTier(
+            otherCreatorId,
+            org.id,
+            tierId,
+            'year',
+            preview.prorationDate,
+            preview.quote
+          )
+        ).rejects.toThrow(TierChangePreviewExpiredError);
+        expect(writes()).toHaveLength(0);
+      });
+
+      it("is refused when only the new year's own line moved, not a proration", async () => {
+        const { org, tierId } = await previewed('ordinary');
+        const mixed = (yearAmount: number) => {
+          (stripe as unknown as { invoices: unknown }).invoices = {
+            createPreview: vi.fn().mockResolvedValue({
+              amount_due: 7233,
+              lines: {
+                data: [
+                  {
+                    description: 'Unused time',
+                    amount: -8767,
+                    parent: { subscription_item_details: { proration: true } },
+                  },
+                  {
+                    description: '1 × the plan (yearly)',
+                    amount: yearAmount,
+                    parent: {
+                      subscription_item_details: { proration: false },
+                    },
+                  },
+                ],
+              },
+            }),
+          };
+        };
+        mixed(16000);
+        const preview = await service.previewTierChange(
+          otherCreatorId,
+          org.id,
+          tierId,
+          'year'
+        );
+        mixed(16001);
+
+        await expect(
+          service.changeTier(
+            otherCreatorId,
+            org.id,
+            tierId,
+            'year',
+            preview.prorationDate,
+            preview.quote
+          )
+        ).rejects.toThrow(TierChangePreviewExpiredError);
+        expect(writes()).toHaveLength(0);
+      });
+
+      it('writes with the anchor and no proration_date when the figures hold', async () => {
+        const { org, tierId, preview } = await previewed('held');
+
+        await service.changeTier(
+          otherCreatorId,
+          org.id,
+          tierId,
+          'year',
+          preview.prorationDate,
+          preview.quote
+        );
+
+        const params = writes()[0]![1] as Record<string, unknown>;
+        expect(params.billing_cycle_anchor).toBe('now');
+        expect(params.proration_date).toBeUndefined();
+      });
+
+      // Cycle 2, L3: invoiced at once, even when the year bills no more than
+      // the month (a tier saved before "Refuse yearly below monthly"), so the
+      // write is prorated as the preview was.
+      it('is invoiced at once even when the year costs no more than the month', async () => {
+        const { org, tier1, tier2 } = await createFullOrg(
+          `recheck-cheap-year-${target}`
+        );
+        const tier = target === 1 ? tier1 : tier2;
+        // The target's year (£4.50) is below the member's month (£4.99): the
+        // old rule's create_prorations case. Written to the row directly, as
+        // the service now refuses to save it.
+        await db
+          .update(subscriptionTiers)
+          .set({ priceAnnual: 450 })
+          .where(eq(subscriptionTiers.id, tier.id));
+        await db
+          .insert(subscriptions)
+          .values(
+            createTestSubscriptionInput(otherCreatorId, org.id, tier1.id)
+          );
+        stubPreviewFigures(0, [-8767, 1500]);
+        const preview = await service.previewTierChange(
+          otherCreatorId,
+          org.id,
+          tier.id,
+          'year'
+        );
+
+        await service.changeTier(
+          otherCreatorId,
+          org.id,
+          tier.id,
+          'year',
+          preview.prorationDate,
+          preview.quote
+        );
+
+        const params = writes()[0]![1] as Record<string, unknown>;
+        expect(params.proration_behavior).toBe('always_invoice');
+      });
+
+      it('is refused without the quote', async () => {
+        const { org, tierId, preview } = await previewed('no-quote');
+
+        await expect(
+          service.changeTier(
+            otherCreatorId,
+            org.id,
+            tierId,
+            'year',
+            preview.prorationDate
+          )
+        ).rejects.toThrow(ValidationError);
+        expect(writes()).toHaveLength(0);
+      });
+    });
+
+    // Every other change made now is pinned to the preview's proration_date,
+    // with no anchor and no re-preview. A switch into monthly is not made
+    // now: it waits for the year's end (Codex-2hxff.97,
+    // billing-change.integration.test.ts).
+    it('an upgrade on the same billing still pins proration_date, with no re-preview', async () => {
+      const { org, tier1, tier2 } = await createFullOrg('pinned-month-2-month');
+      await db
+        .insert(subscriptions)
+        .values(createTestSubscriptionInput(otherCreatorId, org.id, tier1.id));
+      const createPreview = stubPreviewFigures(500, [-250, 750]);
+      const prorationDate = Math.floor(Date.now() / 1000);
+
+      await service.changeTier(
+        otherCreatorId,
+        org.id,
+        tier2.id,
+        'month',
+        prorationDate
+      );
+
+      const params = (
+        stripe.subscriptions.update as unknown as {
+          mock: { calls: unknown[][] };
+        }
+      ).mock.calls[0]![1] as Record<string, unknown>;
+      expect(params.proration_date).toBe(prorationDate);
+      expect(params.billing_cycle_anchor).toBeUndefined();
+      expect(createPreview).not.toHaveBeenCalled();
     });
 
     // Codex-0g6yq: return shape carries { userId, orgId } so the route handler
@@ -3138,6 +3592,9 @@ describe('SubscriptionService', () => {
     'disputedAt',
     'endedAt',
     'amountCents',
+    // What the current period was paid at while a move to a cheaper plan
+    // waits ("Premium £20 until 1 Dec"); the target is `pendingTierChange`.
+    'heldAmountCents',
     'createdAt',
     'updatedAt',
   ];
@@ -3497,6 +3954,59 @@ describe('SubscriptionService', () => {
       expect(after.status).toBe(expected);
     });
 
+    // Codex-2hxff.33 (data design §1.4): an invoice's split resolves the fee
+    // in force at `invoice.created`, not when its webhook lands, so a fee
+    // change dated in between never re-prices it.
+    it('resolves every fee at the invoice’s own time', async () => {
+      const { org, tier1 } = await createFullOrg('invoice-fee-at');
+      const sub = takeFirst(
+        await db
+          .insert(subscriptions)
+          .values(
+            createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+              status: 'active',
+            })
+          )
+          .returning()
+      );
+      const fees = createTestMoneyDeps().feeConfig;
+      const feeConfig = {
+        getFeesForCreator: vi.fn(fees.getFeesForCreator.bind(fees)),
+        getFeesForOrg: vi.fn(fees.getFeesForOrg.bind(fees)),
+        getFeesPlatform: vi.fn(fees.getFeesPlatform.bind(fees)),
+      } as unknown as FeeConfigService;
+      const atService = new SubscriptionService(
+        {
+          db,
+          environment: 'test' as const,
+          ...createTestMoneyDeps(),
+          feeConfig,
+        },
+        stripe
+      );
+      const created = Math.floor(Date.now() / 1000) - 3 * 86_400;
+
+      await atService.handleInvoicePaymentSucceeded(
+        createMockStripeInvoice({
+          amount_paid: 499,
+          created,
+          parent: {
+            subscription_details: { subscription: sub.stripeSubscriptionId },
+          },
+        }) as unknown as Stripe.Invoice
+      );
+
+      const calls = [
+        ...vi.mocked(feeConfig.getFeesForOrg).mock.calls.map((c) => c[2]),
+        ...vi.mocked(feeConfig.getFeesForCreator).mock.calls.map((c) => c[3]),
+        ...vi.mocked(feeConfig.getFeesPlatform).mock.calls.map((c) => c[1]),
+      ];
+      expect(calls.length).toBeGreaterThan(0);
+      for (const at of calls) {
+        expect(at).toEqual(new Date(created * 1000));
+      }
+    });
+
     it('should update period dates and execute revenue transfers', async () => {
       const { org, tier1 } = await createFullOrg('invoice-success');
       const sub = takeFirst(
@@ -3673,6 +4183,156 @@ describe('SubscriptionService', () => {
         expect(pool[0]?.reason).toBe('connect_not_ready');
         expect(pool[0]?.userId).toBe(ownerId);
       });
+    });
+
+    // Codex-2hxff.97: a member's credit from another subscription paid this
+    // bill, so its creator is paid nothing; support is told once.
+    it('a bill the credit paid in full: one support alert, the invoice marked, no payout', async () => {
+      const { org, tier1 } = await createFullOrg('credit-paid-in-full');
+      const sub = takeFirst(
+        await db
+          .insert(subscriptions)
+          .values(
+            createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+              status: 'active',
+            })
+          )
+          .returning()
+      );
+      const update = vi.fn().mockResolvedValue({});
+      Object.assign(stripe.invoices, { update });
+      const error = vi.spyOn(
+        (service as unknown as { obs: { error: (...a: unknown[]) => void } })
+          .obs,
+        'error'
+      );
+      const invoice = createMockStripeInvoice({
+        amount_paid: 0,
+        total: 1000,
+        starting_balance: -6493,
+        payments: { data: [] },
+        parent: {
+          subscription_details: {
+            subscription: sub.stripeSubscriptionId,
+            metadata: { codex_organization_id: org.id },
+          },
+        },
+      }) as unknown as Stripe.Invoice;
+
+      await service.handleInvoicePaymentSucceeded(invoice);
+
+      const alerts = error.mock.calls.filter(([message]) =>
+        String(message).startsWith('Customer credit paid')
+      );
+      expect(alerts).toEqual([
+        [
+          expect.any(String),
+          expect.objectContaining({
+            invoiceId: invoice.id,
+            stripeSubscriptionId: sub.stripeSubscriptionId,
+            organizationId: org.id,
+            kind: 'tier',
+            creditCoveredCents: 1000,
+            amountPaidCents: 0,
+          }),
+        ],
+      ]);
+      expect(update).toHaveBeenCalledWith(invoice.id, {
+        metadata: { codex_credit_alerted: expect.any(String) },
+      });
+      expect(stripe.transfers.create).not.toHaveBeenCalled();
+    });
+
+    // Review C1, SF-12: with no charge nothing is paid out, but the renewal
+    // stands: the row, the receipt and the cache bump, as a course
+    // subscription's renewal does.
+    it('a renewal credit paid in full: alerted and nothing paid out, and still renewed, with its receipt and the cache bump', async () => {
+      const { org, tier1 } = await createFullOrg('credit-paid-renewal');
+      const sub = takeFirst(
+        await db
+          .insert(subscriptions)
+          .values(
+            createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+              status: 'active',
+            })
+          )
+          .returning()
+      );
+      Object.assign(stripe.invoices, {
+        update: vi.fn().mockResolvedValue({}),
+      });
+      const retrieve = stripe.subscriptions.retrieve as ReturnType<
+        typeof vi.fn
+      >;
+      const live = retrieve.getMockImplementation() as
+        | ((id: string) => Promise<Stripe.Subscription>)
+        | undefined;
+      let renewedTo = 0;
+      retrieve.mockImplementationOnce(async (id: string) => {
+        const renewed = await live?.(id);
+        renewedTo = renewed?.items.data[0]?.current_period_end ?? 0;
+        return renewed;
+      });
+      const bump = vi.spyOn(
+        service as unknown as {
+          invalidateIfConfigured: (...a: unknown[]) => void;
+        },
+        'invalidateIfConfigured'
+      );
+      const error = vi.spyOn(
+        (service as unknown as { obs: { error: (...a: unknown[]) => void } })
+          .obs,
+        'error'
+      );
+      const invoice = createMockStripeInvoice({
+        amount_paid: 0,
+        total: 1000,
+        starting_balance: -6493,
+        billing_reason: 'subscription_cycle',
+        customer_email: 'renewed-by-credit@example.com',
+        payments: { data: [] },
+        parent: {
+          subscription_details: {
+            subscription: sub.stripeSubscriptionId,
+            metadata: { codex_organization_id: org.id },
+          },
+        },
+      }) as unknown as Stripe.Invoice;
+
+      const result = await service.handleInvoicePaymentSucceeded(invoice);
+
+      expect(
+        error.mock.calls.filter(([message]) =>
+          String(message).startsWith('Customer credit paid')
+        )
+      ).toHaveLength(1);
+      expect(stripe.transfers.create).not.toHaveBeenCalled();
+      expect(renewedTo).toBeGreaterThan(0);
+      const { eq } = await import('drizzle-orm');
+      const row = takeFirst(
+        await db
+          .select()
+          .from(subscriptions)
+          .where(eq(subscriptions.id, sub.id))
+      );
+      expect(row.currentPeriodEnd).toEqual(new Date(renewedTo * 1000));
+      expect(result).toMatchObject({
+        userId: otherCreatorId,
+        orgId: org.id,
+        email: {
+          to: 'renewed-by-credit@example.com',
+          templateName: 'subscription-renewed',
+          // The bill, not the £0.00 the card paid (cycle 2, L5).
+          data: { priceFormatted: '£10.00' },
+        },
+      });
+      expect(bump).toHaveBeenCalledWith(
+        otherCreatorId,
+        org.id,
+        'payment_succeeded'
+      );
+      bump.mockRestore();
+      error.mockRestore();
     });
 
     it('should skip if no subscription ID in invoice', async () => {
@@ -5833,6 +6493,50 @@ describe('SubscriptionService', () => {
       expect(result?.userId).toBeUndefined();
       expect(result?.orgId).toBeUndefined();
     });
+
+    // Owner Q5 (Codex-2hxff.16, 2026-10-30): the payment-failed email names
+    // the next retry. After Stripe's LAST one there is none, Stripe ends the
+    // subscription, and the cancellation email follows instead.
+    it.each([
+      ['a retry is scheduled', 1_793_000_000, true],
+      ['no retry is left', null, false],
+    ] as const)('payment-failed email only while a retry is left (Q5): %s', async (_, nextAttempt, emailed) => {
+      const { org, tier1 } = await createFullOrg(
+        `invoice-failed-q5-${emailed ? 'retry' : 'last'}`
+      );
+      const sub = takeFirst(
+        await db
+          .insert(subscriptions)
+          .values(createTestSubscriptionInput(otherCreatorId, org.id, tier1.id))
+          .returning()
+      );
+      const mockInvoice = createMockStripeInvoice({
+        amount_due: 499,
+        customer_email: 'q5@example.com',
+        customer_name: 'Q Five',
+        next_payment_attempt: nextAttempt,
+        parent: {
+          subscription_details: { subscription: sub.stripeSubscriptionId },
+        },
+      }) as unknown as Stripe.Invoice;
+
+      const result = await service.handleInvoicePaymentFailed(mockInvoice);
+
+      // The status and the cache bump happen either way.
+      expect(result?.userId).toBe(otherCreatorId);
+      if (emailed) {
+        expect(result?.email).toMatchObject({
+          templateName: 'payment-failed',
+          data: {
+            retryDate: new Date(1_793_000_000 * 1000).toLocaleDateString(
+              'en-GB'
+            ),
+          },
+        });
+      } else {
+        expect(result?.email).toBeUndefined();
+      }
+    });
   });
 
   // ─── Webhook ordering self-heal (Codex-t7psp) ─────────────────────
@@ -6388,895 +7092,6 @@ describe('SubscriptionService', () => {
           .where(eq(subscriptions.id, sub.id))
       );
       expect(after.status).toBe('active');
-    });
-  });
-
-  // ─── propagateTierPriceToActiveSubscriptions (Codex-2hxff.3) ─────────────
-  //
-  // A Studio price change reaches existing subscribers on THAT interval at
-  // their first renewal ≥ 30 days after the notice, with no proration. Stripe
-  // is mocked per subscription so each case controls the next renewal, status
-  // and current amount.
-
-  describe('propagateTierPriceToActiveSubscriptions', () => {
-    const DAY = 24 * 60 * 60;
-
-    /**
-     * A subscriber moves only once their notice is accepted (D-P3,
-     * Codex-2hxff.43), so the cases about the move itself run on a service
-     * whose every notice is accepted.
-     */
-    let notifying: SubscriptionService;
-    beforeEach(() => {
-      notifying = new SubscriptionService(
-        {
-          db,
-          environment: 'test',
-          ...createTestMoneyDeps(),
-          mailer: vi.fn().mockResolvedValue({ accepted: true }),
-        },
-        stripe
-      );
-    });
-
-    interface FakeSub {
-      /** Days from now to the subscription's next renewal. */
-      renewsInDays: number;
-      status?: string;
-      interval?: 'month' | 'year';
-      /** What the subscription bills today, in pence. */
-      unitAmount?: number;
-      /** The subscription's Stripe metadata (an earlier pending change). */
-      metadata?: Record<string, string>;
-    }
-
-    /** Mock Stripe retrieve/update keyed by stripe subscription id. */
-    function wireStripeSubs(
-      stripeClient: Stripe,
-      subs: Record<string, FakeSub>
-    ) {
-      const nowSec = Math.floor(Date.now() / 1000);
-      const retrieveSpy = vi.fn().mockImplementation(async (id: string) => {
-        const sub = subs[id] ?? { renewsInDays: 10 };
-        const renewal = nowSec + sub.renewsInDays * DAY;
-        return {
-          id,
-          status: sub.status ?? 'active',
-          billing_cycle_anchor: renewal,
-          metadata: sub.metadata ?? {},
-          items: {
-            data: [
-              {
-                id: `si_${id}`,
-                current_period_end: renewal,
-                price: {
-                  id: 'price_old',
-                  unit_amount: sub.unitAmount ?? 399,
-                  recurring: { interval: sub.interval ?? 'month' },
-                },
-              },
-            ],
-          },
-        };
-      });
-      const updateSpy = vi
-        .fn()
-        .mockImplementation(async (id: string) => ({ id }));
-      const subsApi = stripeClient.subscriptions as unknown as {
-        retrieve: ReturnType<typeof vi.fn>;
-        update: ReturnType<typeof vi.fn>;
-      };
-      subsApi.retrieve = retrieveSpy;
-      subsApi.update = updateSpy;
-      return { retrieveSpy, updateSpy };
-    }
-
-    function updateFor(updateSpy: ReturnType<typeof vi.fn>, id: string) {
-      const call = updateSpy.mock.calls.find(([subId]) => subId === id);
-      return call as
-        | [string, Record<string, unknown>, { idempotencyKey: string }]
-        | undefined;
-    }
-
-    async function seedSub(
-      orgId: string,
-      tierId: string,
-      overrides: Partial<typeof subscriptions.$inferInsert>
-    ) {
-      const [uid] = await seedTestUsers(db, 1);
-      return takeFirst(
-        await db
-          .insert(subscriptions)
-          .values(
-            createTestSubscriptionInput(uid as string, orgId, tierId, overrides)
-          )
-          .returning()
-      );
-    }
-
-    it('no subscribers on the interval → zero counts, no Stripe calls', async () => {
-      const { org, tier1 } = await createFullOrg('propagate-empty');
-      const { retrieveSpy, updateSpy } = wireStripeSubs(stripe, {});
-
-      const result = await notifying.propagateTierPriceToActiveSubscriptions(
-        tier1.id,
-        'price_new_abc',
-        { organizationId: org.id, interval: 'month' }
-      );
-
-      expect(result).toEqual({
-        total: 0,
-        updated: 0,
-        applied: 0,
-        pending: 0,
-        unnotified: 0,
-        unhandled: 0,
-        failed: 0,
-      });
-      expect(retrieveSpy).not.toHaveBeenCalled();
-      expect(updateSpy).not.toHaveBeenCalled();
-    });
-
-    // The bug: an annual price edit moved every MONTHLY subscriber onto the
-    // annual Price — an interval change, which Stripe bills at once.
-    it('an annual price change never touches monthly subscribers', async () => {
-      const { org, tier1 } = await createFullOrg('propagate-interval');
-      const ns = createUniqueSlug('prop_iv');
-      const monthly = await seedSub(org.id, tier1.id, {
-        billingInterval: 'month',
-        stripeSubscriptionId: `sub_${ns}_m`,
-      });
-      const annual = await seedSub(org.id, tier1.id, {
-        billingInterval: 'year',
-        stripeSubscriptionId: `sub_${ns}_y`,
-      });
-      const { retrieveSpy, updateSpy } = wireStripeSubs(stripe, {
-        [annual.stripeSubscriptionId]: { renewsInDays: 200, interval: 'year' },
-      });
-
-      const result = await notifying.propagateTierPriceToActiveSubscriptions(
-        tier1.id,
-        'price_new_annual',
-        { organizationId: org.id, interval: 'year', interBatchDelayMs: 0 }
-      );
-
-      expect(result.total).toBe(1);
-      expect(retrieveSpy).toHaveBeenCalledTimes(1);
-      expect(retrieveSpy).toHaveBeenCalledWith(
-        annual.stripeSubscriptionId,
-        FAN_OUT_STRIPE_REQUEST
-      );
-      expect(
-        updateFor(updateSpy, monthly.stripeSubscriptionId)
-      ).toBeUndefined();
-    });
-
-    it('next renewal ≥ 30 days away → swapped now, no proration, nothing charged', async () => {
-      const { org, tier1 } = await createFullOrg('propagate-now');
-      const sub = await seedSub(org.id, tier1.id, {
-        billingInterval: 'year',
-        stripeSubscriptionId: `sub_${createUniqueSlug('prop_now')}`,
-      });
-      const { updateSpy } = wireStripeSubs(stripe, {
-        [sub.stripeSubscriptionId]: { renewsInDays: 200, interval: 'year' },
-      });
-
-      const result = await notifying.propagateTierPriceToActiveSubscriptions(
-        tier1.id,
-        'price_new_now',
-        { organizationId: org.id, interval: 'year' }
-      );
-
-      expect(result).toMatchObject({ updated: 1, applied: 1, pending: 0 });
-      const [, params] = updateFor(updateSpy, sub.stripeSubscriptionId) ?? [];
-      expect(params).toMatchObject({
-        items: [
-          { id: `si_${sub.stripeSubscriptionId}`, price: 'price_new_now' },
-        ],
-        proration_behavior: 'none',
-      });
-    });
-
-    it('next renewal < 30 days away → marked pending from notice + 30 days, price untouched', async () => {
-      const { org, tier1 } = await createFullOrg('propagate-pending');
-      const sub = await seedSub(org.id, tier1.id, {
-        billingInterval: 'month',
-        stripeSubscriptionId: `sub_${createUniqueSlug('prop_pend')}`,
-      });
-      const { updateSpy } = wireStripeSubs(stripe, {
-        [sub.stripeSubscriptionId]: { renewsInDays: 10 },
-      });
-      const before = Math.floor(Date.now() / 1000);
-
-      const result = await notifying.propagateTierPriceToActiveSubscriptions(
-        tier1.id,
-        'price_new_later',
-        { organizationId: org.id, interval: 'month' }
-      );
-
-      expect(result).toMatchObject({ updated: 1, applied: 0, pending: 1 });
-      const [, params] = updateFor(updateSpy, sub.stripeSubscriptionId) ?? [];
-      expect(params).not.toHaveProperty('items');
-      const metadata = (params as { metadata: Record<string, string> })
-        .metadata;
-      expect(metadata.codex_pending_price_id).toBe('price_new_later');
-      const from = Number(metadata.codex_pending_price_from);
-      expect(from).toBeGreaterThanOrEqual(before + 30 * DAY);
-      expect(from).toBeLessThanOrEqual(before + 30 * DAY + 60);
-    });
-
-    it('past-due and paused subscribers get the pending marker only; cancelled and incomplete are untouched', async () => {
-      const { org, tier1 } = await createFullOrg('propagate-status-guard');
-      const ns = createUniqueSlug('prop_st');
-      const seedWith = (status: string) =>
-        seedSub(org.id, tier1.id, {
-          status,
-          billingInterval: 'year',
-          stripeSubscriptionId: `sub_${ns}_${status}`,
-        });
-      const rows = {
-        active: await seedWith('active'),
-        past_due: await seedWith('past_due'),
-        paused: await seedWith('paused'),
-        cancelled: await seedWith('cancelled'),
-        incomplete: await seedWith('incomplete'),
-      };
-      const stripeSubs: Record<string, FakeSub> = {};
-      for (const status of ['active', 'past_due', 'paused'] as const) {
-        stripeSubs[rows[status].stripeSubscriptionId] = {
-          renewsInDays: 200,
-          interval: 'year',
-          status,
-        };
-      }
-      const { retrieveSpy, updateSpy } = wireStripeSubs(stripe, stripeSubs);
-
-      await notifying.propagateTierPriceToActiveSubscriptions(
-        tier1.id,
-        'price_new_status',
-        { organizationId: org.id, interval: 'year', interBatchDelayMs: 0 }
-      );
-
-      // Active: swapped now.
-      expect(
-        updateFor(updateSpy, rows.active.stripeSubscriptionId)?.[1]
-      ).toHaveProperty('items');
-      // Past-due and paused: pending marker only, never an item swap.
-      for (const status of ['past_due', 'paused'] as const) {
-        const params = updateFor(
-          updateSpy,
-          rows[status].stripeSubscriptionId
-        )?.[1];
-        expect(params).not.toHaveProperty('items');
-        expect(params).toMatchObject({
-          metadata: { codex_pending_price_id: 'price_new_status' },
-        });
-      }
-      // Cancelled and incomplete: never even read.
-      for (const status of ['cancelled', 'incomplete'] as const) {
-        expect(retrieveSpy).not.toHaveBeenCalledWith(
-          rows[status].stripeSubscriptionId
-        );
-      }
-    });
-
-    it('one failure does not abort the batch', async () => {
-      const { org, tier1 } = await createFullOrg('propagate-partial');
-      const ns = createUniqueSlug('prop_fail');
-      const ok = await seedSub(org.id, tier1.id, {
-        billingInterval: 'year',
-        stripeSubscriptionId: `sub_${ns}_ok`,
-      });
-      const bad = await seedSub(org.id, tier1.id, {
-        billingInterval: 'year',
-        stripeSubscriptionId: `sub_${ns}_bad`,
-      });
-      const { updateSpy } = wireStripeSubs(stripe, {
-        [ok.stripeSubscriptionId]: { renewsInDays: 200, interval: 'year' },
-        [bad.stripeSubscriptionId]: { renewsInDays: 200, interval: 'year' },
-      });
-      updateSpy.mockImplementation(async (id: string) => {
-        if (id === bad.stripeSubscriptionId) throw new Error('stripe 500');
-        return { id };
-      });
-
-      const result = await notifying.propagateTierPriceToActiveSubscriptions(
-        tier1.id,
-        'price_new_partial',
-        { organizationId: org.id, interval: 'year', interBatchDelayMs: 0 }
-      );
-
-      expect(result).toMatchObject({ total: 2, updated: 1, failed: 1 });
-    });
-
-    it('re-running the fan-out is harmless: the same pending marker, no conflicting idempotency key', async () => {
-      const { org, tier1 } = await createFullOrg('propagate-idem');
-      const sub = await seedSub(org.id, tier1.id, {
-        billingInterval: 'month',
-        stripeSubscriptionId: `sub_${createUniqueSlug('prop_idem')}`,
-      });
-      const { updateSpy } = wireStripeSubs(stripe, {
-        [sub.stripeSubscriptionId]: { renewsInDays: 10 },
-      });
-
-      for (let run = 0; run < 2; run++) {
-        await notifying.propagateTierPriceToActiveSubscriptions(
-          tier1.id,
-          'price_new_idem',
-          { organizationId: org.id, interval: 'month' }
-        );
-      }
-
-      expect(updateSpy).toHaveBeenCalledTimes(2);
-      for (const [, params, opts] of updateSpy.mock.calls) {
-        expect(params).toMatchObject({
-          metadata: { codex_pending_price_id: 'price_new_idem' },
-        });
-        // `from` moves with the notice time, so a key would collide on re-run.
-        // Only the fan-out's timeout options (round 2): no idempotency key.
-        expect(opts).toEqual(FAN_OUT_STRIPE_REQUEST);
-        expect(opts).not.toHaveProperty('idempotencyKey');
-      }
-    });
-
-    describe('price-change notice email', () => {
-      function buildServiceWithMailer() {
-        const mailer = vi.fn().mockResolvedValue({ accepted: true });
-        const serviceWithMailer = new SubscriptionService(
-          {
-            db,
-            environment: 'test',
-            ...createTestMoneyDeps(),
-            mailer,
-            webAppUrl: 'https://app.example.test',
-          },
-          stripe
-        );
-        return { serviceWithMailer, mailer };
-      }
-
-      it('names the renewal that first bills the new price', async () => {
-        const { org, tier1 } = await createFullOrg('propagate-email-date');
-        const sub = await seedSub(org.id, tier1.id, {
-          billingInterval: 'year',
-          stripeSubscriptionId: `sub_${createUniqueSlug('prop_mail')}`,
-        });
-        wireStripeSubs(stripe, {
-          [sub.stripeSubscriptionId]: { renewsInDays: 200, interval: 'year' },
-        });
-        const { serviceWithMailer, mailer } = buildServiceWithMailer();
-
-        await serviceWithMailer.propagateTierPriceToActiveSubscriptions(
-          tier1.id,
-          'price_new_mail',
-          { organizationId: org.id, interval: 'year' }
-        );
-
-        expect(mailer).toHaveBeenCalledTimes(1);
-        const [params] = mailer.mock.calls[0] ?? [];
-        const renewal = new Date(
-          (Math.floor(Date.now() / 1000) + 200 * DAY) * 1000
-        );
-        expect(params).toMatchObject({
-          templateName: 'subscription-tier-price-change',
-          category: 'transactional',
-          data: {
-            planName: tier1.name,
-            oldPriceFormatted: '£4.99',
-            // tier1's annual price — the interval that changed.
-            newPriceFormatted: '£49.90',
-            billingInterval: 'year',
-            effectiveDate: renewal.toLocaleDateString('en-GB', {
-              timeZone: 'UTC',
-            }),
-            manageUrl: 'https://app.example.test/account/subscriptions',
-          },
-        });
-      });
-
-      it('a pending change quotes a date at least 30 days after the notice', async () => {
-        const { org, tier1 } = await createFullOrg('propagate-email-pending');
-        const sub = await seedSub(org.id, tier1.id, {
-          billingInterval: 'month',
-          stripeSubscriptionId: `sub_${createUniqueSlug('prop_mail_p')}`,
-        });
-        wireStripeSubs(stripe, {
-          [sub.stripeSubscriptionId]: { renewsInDays: 10 },
-        });
-        const { serviceWithMailer, mailer } = buildServiceWithMailer();
-
-        await serviceWithMailer.propagateTierPriceToActiveSubscriptions(
-          tier1.id,
-          'price_new_mail_p',
-          { organizationId: org.id, interval: 'month' }
-        );
-
-        const [params] = mailer.mock.calls[0] ?? [];
-        const [day, month, year] = String(params.data.effectiveDate)
-          .split('/')
-          .map(Number);
-        const quoted = Date.UTC(year as number, (month as number) - 1, day);
-        expect(quoted).toBeGreaterThanOrEqual(Date.now() + 29 * DAY * 1000);
-      });
-
-      it('no email when the amount is unchanged, or when the subscription cannot be read', async () => {
-        const { org, tier1 } = await createFullOrg('propagate-email-none');
-        const ns = createUniqueSlug('prop_mail_n');
-        const same = await seedSub(org.id, tier1.id, {
-          billingInterval: 'year',
-          stripeSubscriptionId: `sub_${ns}_same`,
-        });
-        const failing = await seedSub(org.id, tier1.id, {
-          billingInterval: 'year',
-          stripeSubscriptionId: `sub_${ns}_fail`,
-        });
-        const { retrieveSpy } = wireStripeSubs(stripe, {
-          // Already billing tier1's annual amount: nothing they pay changes.
-          [same.stripeSubscriptionId]: {
-            renewsInDays: 200,
-            interval: 'year',
-            unitAmount: 4990,
-          },
-        });
-        const read = retrieveSpy.getMockImplementation();
-        retrieveSpy.mockImplementation(async (id: string) => {
-          if (id === failing.stripeSubscriptionId)
-            throw new Error('stripe 500');
-          return read?.(id);
-        });
-        const { serviceWithMailer, mailer } = buildServiceWithMailer();
-
-        await serviceWithMailer.propagateTierPriceToActiveSubscriptions(
-          tier1.id,
-          'price_new_same',
-          { organizationId: org.id, interval: 'year', interBatchDelayMs: 0 }
-        );
-
-        expect(mailer).not.toHaveBeenCalled();
-      });
-    });
-
-    // Owner decision D-P3 (Codex-2hxff.43), "Notice first, then move": a
-    // subscriber's price moves only once notifications-api has accepted their
-    // notice. Otherwise they stay on today's price and support is alerted.
-    describe('notice first, then move (D-P3)', () => {
-      /** The service's error log: where support's alerts go. */
-      function errorLogOf(svc: SubscriptionService) {
-        return vi.spyOn(
-          (
-            svc as unknown as {
-              obs: { error: (message: string, data?: unknown) => void };
-            }
-          ).obs,
-          'error'
-        );
-      }
-
-      it('every notice refused → nobody moves, and each subscriber is alerted with an errorId and their ids', async () => {
-        const { org, tier1 } = await createFullOrg('propagate-all-refused');
-        const ns = createUniqueSlug('prop_nm');
-        const now = await seedSub(org.id, tier1.id, {
-          billingInterval: 'year',
-          stripeSubscriptionId: `sub_${ns}_now`,
-        });
-        const later = await seedSub(org.id, tier1.id, {
-          billingInterval: 'year',
-          stripeSubscriptionId: `sub_${ns}_later`,
-        });
-        const { updateSpy } = wireStripeSubs(stripe, {
-          [now.stripeSubscriptionId]: { renewsInDays: 200, interval: 'year' },
-          [later.stripeSubscriptionId]: { renewsInDays: 10, interval: 'year' },
-        });
-        const refusing = new SubscriptionService(
-          {
-            db,
-            environment: 'test',
-            ...createTestMoneyDeps(),
-            mailer: vi.fn(async () => ({
-              accepted: false as const,
-              status: 422,
-            })),
-          },
-          stripe
-        );
-        const errors = errorLogOf(refusing);
-
-        const result = await refusing.propagateTierPriceToActiveSubscriptions(
-          tier1.id,
-          'price_new_nm',
-          { organizationId: org.id, interval: 'year', interBatchDelayMs: 0 }
-        );
-
-        expect(result).toMatchObject({ total: 2, updated: 0, unnotified: 2 });
-        expect(updateSpy).not.toHaveBeenCalled();
-        const alerts = errors.mock.calls.filter(([message]) =>
-          String(message).includes('price-change notice not sent')
-        );
-        expect(alerts).toHaveLength(2);
-        // The end summary is an alert too, with its own errorId (silent #10).
-        expect(
-          errors.mock.calls.find(([message]) =>
-            String(message).includes('completed with failures')
-          )?.[1]
-        ).toMatchObject({ errorId: expect.any(String), unnotified: 2 });
-        for (const row of [now, later]) {
-          expect(
-            alerts.find(
-              ([, data]) =>
-                (data as { subscriptionId?: string }).subscriptionId === row.id
-            )?.[1]
-          ).toMatchObject({
-            errorId: expect.any(String),
-            reason: 'refused',
-            status: 422,
-            tierId: tier1.id,
-            newStripePriceId: 'price_new_nm',
-            stripeSubscriptionId: row.stripeSubscriptionId,
-            userId: row.userId,
-            organizationId: org.id,
-          });
-        }
-      });
-
-      it.each([
-        [
-          'refused',
-          { accepted: false, status: 422 },
-          { reason: 'refused', status: 422 },
-          'price-change notice not sent',
-        ],
-        // May have been delivered: "outcome unknown", never "not sent" (silent #8).
-        [
-          'not answered',
-          { accepted: false, error: 'timeout' },
-          { reason: 'unknown', error: 'timeout' },
-          'price-change notice outcome unknown',
-        ],
-      ] as const)('a notice %s keeps that subscriber from moving; the others move', async (_label, delivery, failure, says) => {
-        const { org, tier1 } = await createFullOrg('propagate-refused');
-        const ns = createUniqueSlug('prop_ref');
-        const accepted = await seedSub(org.id, tier1.id, {
-          billingInterval: 'year',
-          stripeSubscriptionId: `sub_${ns}_ok`,
-        });
-        const refused = await seedSub(org.id, tier1.id, {
-          billingInterval: 'year',
-          stripeSubscriptionId: `sub_${ns}_no`,
-        });
-        const { updateSpy } = wireStripeSubs(stripe, {
-          [accepted.stripeSubscriptionId]: {
-            renewsInDays: 200,
-            interval: 'year',
-          },
-          [refused.stripeSubscriptionId]: {
-            renewsInDays: 200,
-            interval: 'year',
-          },
-        });
-        const mailer = vi.fn(async (params: { userId?: string }) =>
-          params.userId === refused.userId
-            ? delivery
-            : { accepted: true as const }
-        );
-        const svc = new SubscriptionService(
-          { db, environment: 'test', ...createTestMoneyDeps(), mailer },
-          stripe
-        );
-        const errors = errorLogOf(svc);
-
-        const result = await svc.propagateTierPriceToActiveSubscriptions(
-          tier1.id,
-          'price_new_ref',
-          { organizationId: org.id, interval: 'year', interBatchDelayMs: 0 }
-        );
-
-        expect(result).toMatchObject({
-          total: 2,
-          updated: 1,
-          applied: 1,
-          unnotified: 1,
-          failed: 0,
-        });
-        expect(mailer).toHaveBeenCalledTimes(2);
-        expect(
-          updateFor(updateSpy, accepted.stripeSubscriptionId)
-        ).toBeDefined();
-        expect(
-          updateFor(updateSpy, refused.stripeSubscriptionId)
-        ).toBeUndefined();
-        const alerts = errors.mock.calls.filter(([message]) =>
-          String(message).includes('price-change notice')
-        );
-        expect(alerts).toHaveLength(1);
-        expect(String(alerts[0]?.[0])).toContain(says);
-        expect(alerts[0]?.[1]).toMatchObject({
-          errorId: expect.any(String),
-          ...failure,
-          subscriptionId: refused.id,
-          stripeSubscriptionId: refused.stripeSubscriptionId,
-          userId: refused.userId,
-        });
-      });
-
-      it('the notice is accepted before the move is written', async () => {
-        const { org, tier1 } = await createFullOrg('propagate-order');
-        const sub = await seedSub(org.id, tier1.id, {
-          billingInterval: 'month',
-          stripeSubscriptionId: `sub_${createUniqueSlug('prop_ord')}`,
-        });
-        const { updateSpy } = wireStripeSubs(stripe, {
-          [sub.stripeSubscriptionId]: { renewsInDays: 10 },
-        });
-        const order: string[] = [];
-        updateSpy.mockImplementation(async (id: string) => {
-          order.push('move');
-          return { id };
-        });
-        const svc = new SubscriptionService(
-          {
-            db,
-            environment: 'test',
-            ...createTestMoneyDeps(),
-            mailer: vi.fn(async () => {
-              order.push('notice');
-              return { accepted: true as const };
-            }),
-          },
-          stripe
-        );
-
-        await svc.propagateTierPriceToActiveSubscriptions(
-          tier1.id,
-          'price_new_ord',
-          { organizationId: org.id, interval: 'month' }
-        );
-
-        expect(order).toEqual(['notice', 'move']);
-      });
-
-      it.each([
-        [
-          'refused by Stripe',
-          Object.assign(new Error('No such price'), { statusCode: 400 }),
-          'move_refused',
-          'Stripe refused the move; the subscriber is kept on the old price',
-        ],
-        // A 5xx may have applied it: "outcome unknown" (silent #8).
-        [
-          'an unknown outcome',
-          Object.assign(new Error('stripe 500'), { statusCode: 500 }),
-          'move_unknown',
-          "the move's outcome is unknown",
-        ],
-      ] as const)('a notified subscriber whose move then fails (%s) is alerted with what their notice said', async (_label, failure, outcome, says) => {
-        const { org, tier1 } = await createFullOrg('propagate-move-fails');
-        const sub = await seedSub(org.id, tier1.id, {
-          billingInterval: 'year',
-          stripeSubscriptionId: `sub_${createUniqueSlug('prop_mf')}`,
-        });
-        const { updateSpy } = wireStripeSubs(stripe, {
-          [sub.stripeSubscriptionId]: { renewsInDays: 200, interval: 'year' },
-        });
-        updateSpy.mockRejectedValue(failure);
-        const mailer = vi.fn().mockResolvedValue({ accepted: true });
-        const svc = new SubscriptionService(
-          { db, environment: 'test', ...createTestMoneyDeps(), mailer },
-          stripe
-        );
-        const errors = errorLogOf(svc);
-
-        const result = await svc.propagateTierPriceToActiveSubscriptions(
-          tier1.id,
-          'price_new_mf',
-          { organizationId: org.id, interval: 'year', interBatchDelayMs: 0 }
-        );
-
-        expect(result).toMatchObject({ total: 1, updated: 0, failed: 1 });
-        expect(mailer).toHaveBeenCalledTimes(1);
-        const alert = errors.mock.calls.find(([message]) =>
-          String(message).includes('notice sent')
-        );
-        expect(String(alert?.[0])).toContain(says);
-        // The kind, the notice time and the date the email quoted (silent #7).
-        expect(alert?.[1]).toMatchObject({
-          errorId: expect.any(String),
-          outcome,
-          notified: true,
-          kind: 'applied',
-          noticeAt: expect.any(String),
-          effectiveAt: expect.any(String),
-          tierId: tier1.id,
-          newStripePriceId: 'price_new_mf',
-          subscriptionId: sub.id,
-          stripeSubscriptionId: sub.stripeSubscriptionId,
-          userId: sub.userId,
-        });
-      });
-
-      // Review A, correctness #6: an earlier accepted change still lands.
-      it('a refused notice names the earlier pending change the subscriber lands on', async () => {
-        const { org, tier1 } = await createFullOrg('propagate-earlier');
-        const sub = await seedSub(org.id, tier1.id, {
-          billingInterval: 'month',
-          stripeSubscriptionId: `sub_${createUniqueSlug('prop_ear')}`,
-        });
-        const from = Math.floor(Date.now() / 1000) + 9 * DAY;
-        wireStripeSubs(stripe, {
-          [sub.stripeSubscriptionId]: {
-            renewsInDays: 10,
-            metadata: {
-              codex_pending_price_id: 'price_earlier',
-              codex_pending_price_from: String(from),
-            },
-          },
-        });
-        const svc = new SubscriptionService(
-          {
-            db,
-            environment: 'test',
-            ...createTestMoneyDeps(),
-            mailer: vi.fn(async () => ({
-              accepted: false as const,
-              status: 422,
-            })),
-          },
-          stripe
-        );
-        const errors = errorLogOf(svc);
-
-        await svc.propagateTierPriceToActiveSubscriptions(
-          tier1.id,
-          'price_new_ear',
-          { organizationId: org.id, interval: 'month' }
-        );
-
-        const alert = errors.mock.calls.find(([message]) =>
-          String(message).includes('price-change notice not sent')
-        );
-        expect(String(alert?.[0])).toContain(
-          'earlier accepted change to price_earlier'
-        );
-        expect(String(alert?.[0])).not.toContain('old price');
-        expect(alert?.[1]).toMatchObject({
-          currentPendingPriceId: 'price_earlier',
-          currentPendingFrom: new Date(from * 1000).toISOString(),
-        });
-      });
-
-      // Review A, silent #1: the runtime cancels waitUntil work 30 s after the
-      // response. No batch starts after PRICE_FAN_OUT_BUDGET_MS, and every
-      // subscriber not reached is named in one alert.
-      it('a fan-out past its deadline names the rest in one alert, and notifies nobody it does not try to move', async () => {
-        const { org, tier1 } = await createFullOrg('propagate-deadline');
-        const ns = createUniqueSlug('prop_dl');
-        const rows = [];
-        for (let n = 0; n < 5; n++) {
-          rows.push(
-            await seedSub(org.id, tier1.id, {
-              billingInterval: 'year',
-              stripeSubscriptionId: `sub_${ns}_${n}`,
-            })
-          );
-        }
-        vi.useFakeTimers({ toFake: ['Date'] });
-        try {
-          vi.setSystemTime(new Date('2026-11-02T10:00:00Z'));
-          const { retrieveSpy, updateSpy } = wireStripeSubs(
-            stripe,
-            Object.fromEntries(
-              rows.map((row) => [
-                row.stripeSubscriptionId,
-                { renewsInDays: 200, interval: 'year' as const },
-              ])
-            )
-          );
-          const read = retrieveSpy.getMockImplementation();
-          retrieveSpy.mockImplementation(async (id: string) => {
-            // The second batch runs past the deadline.
-            if (retrieveSpy.mock.calls.length === 3) {
-              vi.setSystemTime(Date.now() + PRICE_FAN_OUT_BUDGET_MS + 1_000);
-            }
-            return read?.(id);
-          });
-          const mailer = vi.fn(async (_params: { userId?: string }) => ({
-            accepted: true as const,
-          }));
-          const svc = new SubscriptionService(
-            { db, environment: 'test', ...createTestMoneyDeps(), mailer },
-            stripe
-          );
-          const errors = errorLogOf(svc);
-          const infos = vi.spyOn(
-            (
-              svc as unknown as {
-                obs: { info: (message: string, data?: unknown) => void };
-              }
-            ).obs,
-            'info'
-          );
-
-          const result = await svc.propagateTierPriceToActiveSubscriptions(
-            tier1.id,
-            'price_new_dl',
-            {
-              organizationId: org.id,
-              interval: 'year',
-              batchSize: 2,
-              interBatchDelayMs: 0,
-            }
-          );
-
-          expect(result).toMatchObject({ total: 5, updated: 4, unhandled: 1 });
-          expect(
-            infos.mock.calls.find(([message]) =>
-              String(message).includes('starting')
-            )?.[1]
-          ).toMatchObject({ total: 5, tierId: tier1.id });
-          const read4 = new Set(retrieveSpy.mock.calls.map(([id]) => id));
-          expect(read4.size).toBe(4);
-          const [left] = rows.filter(
-            (row) => !read4.has(row.stripeSubscriptionId)
-          );
-          const messages = errors.mock.calls.map(([message]) =>
-            String(message)
-          );
-          const outOfTime = errors.mock.calls.filter(([message]) =>
-            String(message).includes('ran out of time')
-          );
-          // Round 2, silent R1: the log cap drops what comes last, so the
-          // end summary goes first, then the count, then the names.
-          expect(
-            messages.findIndex((m) => m.includes('ran out of time'))
-          ).toBeGreaterThan(
-            messages.findIndex((m) => m.includes('completed with failures'))
-          );
-          expect(
-            messages.findIndex((m) => m.includes('completed with failures'))
-          ).toBeGreaterThanOrEqual(0);
-          expect(outOfTime).toHaveLength(2);
-          const [count, names] = outOfTime;
-          const context = {
-            errorId: expect.any(String),
-            tierId: tier1.id,
-            interval: 'year',
-            newStripePriceId: 'price_new_dl',
-            noticeAt: '2026-11-02T10:00:00.000Z',
-          };
-          expect(count?.[1]).toEqual({
-            ...context,
-            unhandled: 1,
-            named: 1,
-            more: 0,
-            chunks: 1,
-          });
-          expect(names?.[1]).toMatchObject({
-            ...context,
-            errorId: (count?.[1] as { errorId?: string } | undefined)?.errorId,
-            subscribers: [
-              {
-                subscriptionId: left?.id,
-                stripeSubscriptionId: left?.stripeSubscriptionId,
-                userId: left?.userId,
-                organizationId: org.id,
-              },
-            ],
-          });
-          // Everyone notified had their move attempted; the one left out was
-          // neither notified nor moved.
-          const notifiedUsers = new Set(
-            mailer.mock.calls.map(([params]) => params.userId)
-          );
-          expect(notifiedUsers.size).toBe(4);
-          for (const row of rows) {
-            expect(notifiedUsers.has(row.userId)).toBe(row !== left);
-            expect(
-              updateFor(updateSpy, row.stripeSubscriptionId) !== undefined
-            ).toBe(row !== left);
-          }
-        } finally {
-          vi.useRealTimers();
-        }
-      });
     });
   });
 
@@ -12392,6 +12207,12 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
       revenueType: 'subscription',
       status: 'active',
       currentProposalId: proposal.id,
+      // As acceptance does (agreement-service.ts), the proposal's start, on
+      // the same clock as the invoice's moment. The column's default is the
+      // database's clock, which runs a few ms apart from this one: an
+      // agreement made "now" could read as starting after an invoice handled
+      // just after it, and the creators got nothing (an intermittent fail).
+      effectiveFrom: proposal.proposedEffectiveFrom,
     });
     return userId;
   }

@@ -296,6 +296,17 @@ export const createSubscriptionCheckoutSchema = z.object({
 // Subscription Management Schemas
 // ============================================================================
 
+/**
+ * What a switch into yearly billing's dialog showed, as `previewTierChange()`
+ * returns it: the amount due, every line's amount and the next bill's London
+ * date (`tierChangeQuote` in @codex/subscription, Codex-2hxff.96). The page
+ * echoes it unchanged; the commit re-previews and refuses any difference.
+ */
+export const tierChangeQuoteSchema = z
+  .string()
+  .max(512)
+  .regex(/^due:-?\d+\|lines:(-?\d+(,-?\d+)*)?\|next:\d{4}-\d{2}-\d{2}$/);
+
 export const changeTierSchema = z.object({
   organizationId: uuidSchema,
   newTierId: uuidSchema,
@@ -307,6 +318,18 @@ export const changeTierSchema = z.object({
    * calculation against `Date.now()` if omitted.
    */
   prorationDate: z.number().int().positive().optional(),
+  /**
+   * The preview's `quote`. Required by `changeTier()` for a switch into
+   * yearly billing, which cannot be pinned by `prorationDate`; every other
+   * change leaves it out.
+   */
+  quote: tierChangeQuoteSchema.optional(),
+  /**
+   * The preview's `newRecurringAmountCents`. For any change, `changeTier()`
+   * refuses it with `TIER_CHANGE_PREVIEW_EXPIRED` when the price read at
+   * confirm differs; like `prorationDate`, it is not checked when omitted.
+   */
+  newRecurringAmountCents: z.number().int().nonnegative().optional(),
 });
 
 export const cancelSubscriptionSchema = z.object({
@@ -339,6 +362,26 @@ export const reactivateSubscriptionSchema = z.object({
 export const resumeSubscriptionSchema = z.object({
   organizationId: uuidSchema,
 });
+
+/**
+ * `POST /subscriptions/keep-current-plan`: undo a move to a cheaper plan
+ * before it lands at the renewal (Codex-2hxff.16).
+ */
+export const keepCurrentPlanSchema = z.object({
+  organizationId: uuidSchema,
+});
+
+/**
+ * The one course subscription a cancel or reactivate acts on
+ * (Codex-2hxff.52). The service scopes it to the caller: another user's id
+ * reads as not found.
+ */
+export const courseSubscriptionParamsSchema = z.object({
+  courseSubscriptionId: uuidSchema,
+});
+
+/** `GET /subscriptions/courses/mine`: the caller's own course subscriptions. */
+export const listMyCourseSubscriptionsQuerySchema = paginationSchema;
 
 // ============================================================================
 // Query Schemas
@@ -523,6 +566,13 @@ export type ReactivateSubscriptionInput = z.infer<
   typeof reactivateSubscriptionSchema
 >;
 export type ResumeSubscriptionInput = z.infer<typeof resumeSubscriptionSchema>;
+export type KeepCurrentPlanInput = z.infer<typeof keepCurrentPlanSchema>;
+export type CourseSubscriptionParams = z.infer<
+  typeof courseSubscriptionParamsSchema
+>;
+export type ListMyCourseSubscriptionsQueryInput = z.infer<
+  typeof listMyCourseSubscriptionsQuerySchema
+>;
 export type PayoutStatusFilter = z.infer<typeof payoutStatusFilterEnum>;
 export type PayoutSourceFilter = z.infer<typeof payoutSourceFilterEnum>;
 export type ListPayoutsQueryInput = z.infer<typeof listPayoutsQuerySchema>;

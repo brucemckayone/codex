@@ -6,6 +6,7 @@
  * Uses `query()` for revenue and top content analytics.
  */
 
+import { upcomingFeesQuerySchema } from '@codex/validation';
 import { z } from 'zod';
 import { getRequestEvent, query } from '$app/server';
 import { createServerApi } from '$lib/server/api';
@@ -70,3 +71,26 @@ export const getTopContent = query(topContentQuerySchema, async (params) => {
 
   return api.analytics.getTopContent(searchParams);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Upcoming Fees Query (Codex-2hxff.33)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The caller's fee rises that haven't started, for the Studio note
+ * (`UpcomingFeeNote`). Billing and Payouts pass `organizationId` (the owner's
+ * rows there); Earnings passes `{}` (the caller's creator rows everywhere).
+ *
+ * Read once per visit: the note's Try again is the only re-read, and nothing
+ * re-checks by itself (the cost rule). A person has a handful at most, so the
+ * worker answers one page and this returns its items.
+ */
+export const getUpcomingFees = query(
+  upcomingFeesQuerySchema,
+  async ({ organizationId }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    const result = await api.fees.upcoming(organizationId);
+    return result.items;
+  }
+);

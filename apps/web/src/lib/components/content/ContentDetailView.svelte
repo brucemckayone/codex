@@ -40,7 +40,11 @@
   // import boundary (Expected to find metadata for remote file).
   // VideoPlayer and AudioPlayer are heavy but don't touch remote
   // files, so they're dynamically loaded further down.
-  import { PreviewPlayer, deriveAccessState } from '$lib/components/player';
+  import {
+    PreviewPlayer,
+    deriveAccessState,
+    describePreviewEnd,
+  } from '$lib/components/player';
   import SubscribeButton from '$lib/components/subscription/SubscribeButton.svelte';
   import {
     formatPrice,
@@ -75,6 +79,7 @@
   import {
     describePlanPaywall,
     planPaywallCopy,
+    type PendingPlan,
     type PlanListStatus,
     type PlanOption,
     type ViewerPlan,
@@ -171,6 +176,11 @@
       status: PlanListStatus;
       currentPlan: ViewerPlan | null;
       currentPeriodEnd: string | null;
+      /**
+       * Where the viewer's waiting move to a cheaper plan goes
+       * (Codex-2hxff.16): the paywall says when an item in it opens.
+       */
+      pendingPlan?: PendingPlan | null;
     };
     /** True while the access check is still resolving (skeleton state) */
     accessLoading?: boolean;
@@ -414,6 +424,7 @@
       tiersStatus: plans.status,
       currentPlan: hasSubscription ? plans.currentPlan : null,
       currentPeriodEnd: plans.currentPeriodEnd,
+      pendingPlan: hasSubscription ? (plans.pendingPlan ?? null) : null,
     })
   );
   const planCopy = $derived(planPaywallCopy(planPaywall, formatSentenceDate));
@@ -581,6 +592,33 @@
     if (needsPurchase) return m.content_detail_purchase_cta_description();
     return m.content_detail_locked_cta_description();
   });
+
+  /**
+   * The preview's end screen (Codex-2hxff.99): the lock's own line and the
+   * paywall's first action, in this view's gate-chain order, so the two
+   * can't drift. Plan links mark the item (U10).
+   */
+  const previewEnd = $derived(
+    describePreviewEnd({
+      line: lockCtaSubtext,
+      isAuthenticated: !!isAuthenticated,
+      organizationId: content.organizationId ?? null,
+      hasSubscription: !!hasSubscription,
+      upgradeOnly: planPaywall.kind === 'upgrade',
+      accessCheckFailed,
+      isTeamOnly,
+      isCourseOnly,
+      isFollowersOnly,
+      isClosed,
+      needsSubscription,
+      needsPurchase,
+      isFree,
+      isAudio,
+      pricingHref,
+      signInHref: `/login?redirect=${encodeURIComponent(page.url.pathname)}`,
+      purchaseLabel: m.checkout_purchase_button({ price: displayPrice(priceCents) }),
+    })
+  );
 
   /**
    * Access passed but there is nothing to play: the media is still
@@ -1000,8 +1038,13 @@
           poster={largestThumbnailUrl}
           contentId={content.id}
           contentTitle={content.title}
-          {accessState}
-          canPurchase={isSellable}
+          end={previewEnd}
+          audio={isAudio}
+          follow={{
+            following: isAlreadyFollowing,
+            busy: followInFlight,
+            onfollow: handleFollow,
+          }}
           autoplay={true}
         />
         {#snippet failed(_error, _reset)}

@@ -97,12 +97,16 @@ export {
   type AuditLogEntry,
   type AuditLogFilters,
   type CreatorOverrideUpdate,
+  type FeeChangeSummary,
   type FeeConfig,
   FeeConfigService,
   type FeeConfigUpdate,
   type FeeContext,
   type FeeResolver,
+  type FeeWriteResult,
   type PlatformFeeConfigUpdate,
+  type UpcomingFeeChange,
+  type UpcomingFeeLine,
 } from './services/fee-config-service';
 // Service
 export {

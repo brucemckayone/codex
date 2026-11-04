@@ -159,6 +159,8 @@ describe('PurchaseService × FeeConfigService integration', () => {
 
     const content = await makePaidContent(2000, 'fee-override');
     const piId = `pi_fee_override_${Date.now()}`;
+    // The checkout started a while before the webhook landed.
+    const offerAt = new Date(Date.now() - 60 * 60 * 1000);
 
     const purchase = await svc.completePurchase(piId, {
       customerId,
@@ -166,13 +168,17 @@ describe('PurchaseService × FeeConfigService integration', () => {
       organizationId,
       amountPaidCents: 2000,
       currency: 'gbp',
+      offerAt,
     });
 
-    // FeeConfigService MUST have been consulted with (orgId, creatorId, 'one_off').
+    // FeeConfigService MUST have been consulted with (orgId, creatorId,
+    // 'one_off') AT THE CHECKOUT'S START, so a late webhook gets the fee of
+    // its own time (Codex-2hxff.33).
     expect(feeConfig.getFeesForCreator).toHaveBeenCalledWith(
       organizationId,
       creatorId,
-      'one_off'
+      'one_off',
+      offerAt
     );
 
     // 12% of 2000 = 240. Org gets 0. Creator gets 1760.

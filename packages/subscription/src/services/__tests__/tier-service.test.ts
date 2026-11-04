@@ -10,7 +10,9 @@
 
 import {
   organizations,
+  priceChanges,
   stripeConnectAccounts,
+  subscriptionPriceMoves,
   subscriptions,
   subscriptionTiers,
 } from '@codex/database/schema';
@@ -50,6 +52,7 @@ import {
   ConnectAccountNotReadyError,
   TierHasSubscribersError,
   TierNotFoundError,
+  YearlyPriceBelowMonthlyError,
 } from '../../errors';
 import { TierService } from '../tier-service';
 
@@ -58,6 +61,8 @@ describe('TierService', () => {
   let stripe: Stripe;
   let service: TierService;
   let creatorId: string;
+  /** Every organisation this file makes; what hangs off them goes in afterAll. */
+  const madeOrgIds: string[] = [];
 
   beforeAll(async () => {
     db = setupTestDatabase();
@@ -81,6 +86,23 @@ describe('TierService', () => {
   });
 
   afterAll(async () => {
+    // A price change, a price move and a subscription RESTRICT their
+    // organisation and tier (0124), so they go first. The tiers go with the
+    // organisations.
+    if (madeOrgIds.length > 0) {
+      await db
+        .delete(subscriptionPriceMoves)
+        .where(inArray(subscriptionPriceMoves.organizationId, madeOrgIds));
+      await db
+        .delete(priceChanges)
+        .where(inArray(priceChanges.organizationId, madeOrgIds));
+      await db
+        .delete(subscriptions)
+        .where(inArray(subscriptions.organizationId, madeOrgIds));
+      await db
+        .delete(organizations)
+        .where(inArray(organizations.id, madeOrgIds));
+    }
     await teardownTestDatabase();
   });
 
@@ -96,6 +118,7 @@ describe('TierService', () => {
         )
         .returning()
     );
+    madeOrgIds.push(org.id);
     // Upsert on userId (uq_stripe_connect_user, Codex-69t7c) so scoping tests
     // that build two orgs for the same creator reuse the one account.
     await db
@@ -134,6 +157,7 @@ describe('TierService', () => {
         )
         .returning()
     );
+    madeOrgIds.push(org.id);
     return org;
   }
 
@@ -211,6 +235,7 @@ describe('TierService', () => {
           )
           .returning()
       );
+      madeOrgIds.push(org.id);
       await db.insert(stripeConnectAccounts).values(
         createTestConnectAccountInput(org.id, creatorId, {
           chargesEnabled: false,
@@ -263,6 +288,7 @@ describe('TierService', () => {
           )
           .returning()
       );
+      madeOrgIds.push(org.id);
 
       // Primary owner: Connect NOT ready
       await db.insert(stripeConnectAccounts).values(
@@ -706,6 +732,118 @@ describe('TierService', () => {
 
   // ─── updateTier ─────────────────────────────────────────────────────
 
+  // Review C1 cycle 2, L3 (owner 2026-11-03: "Refuse yearly below monthly").
+  describe('a yearly price below the monthly one', () => {
+    it('is refused on create, with its own code, before Stripe is asked', async () => {
+      const org = await createOrgWithConnect('yearly-below-create');
+      (stripe.products.create as ReturnType<typeof vi.fn>).mockClear();
+
+      const refused = await service
+        .createTier(org.id, {
+          submissionId: crypto.randomUUID(),
+          name: 'Cheap year',
+          priceMonthly: 1200,
+          priceAnnual: 500,
+        })
+        .catch((error: unknown) => error);
+
+      expect(refused).toBeInstanceOf(YearlyPriceBelowMonthlyError);
+      expect((refused as YearlyPriceBelowMonthlyError).context).toMatchObject({
+        code: 'YEARLY_PRICE_BELOW_MONTHLY',
+        priceMonthly: 1200,
+        priceAnnual: 500,
+      });
+      expect(stripe.products.create).not.toHaveBeenCalled();
+    });
+
+    it('is refused on an update that sends one price, against the stored other; equal is fine', async () => {
+      const org = await createOrgWithConnect('yearly-below-update');
+      const tier = await service.createTier(org.id, {
+        submissionId: crypto.randomUUID(),
+        name: 'T',
+        priceMonthly: 499,
+        priceAnnual: 4990,
+      });
+      (stripe.prices.create as ReturnType<typeof vi.fn>).mockClear();
+
+      await expect(
+        service.updateTier(tier.id, org.id, { priceMonthly: 5000 })
+      ).rejects.toThrow(YearlyPriceBelowMonthlyError);
+      await expect(
+        service.updateTier(tier.id, org.id, { priceAnnual: 400 })
+      ).rejects.toThrow(YearlyPriceBelowMonthlyError);
+      expect(stripe.prices.create).not.toHaveBeenCalled();
+
+      const equal = await service.updateTier(tier.id, org.id, {
+        priceMonthly: 4990,
+      });
+      expect(equal.priceMonthly).toBe(4990);
+    });
+
+    // Review C1 cycle 3, N3: a tier saved before the rule is renamed or
+    // marked Recommended without a repricing; a price sent is still checked.
+    it('a tier saved before the rule takes an edit that sends no price', async () => {
+      const org = await createOrgWithConnect('yearly-below-legacy');
+      const tier = await service.createTier(org.id, {
+        submissionId: crypto.randomUUID(),
+        name: 'Legacy',
+        priceMonthly: 1200,
+        priceAnnual: 12000,
+      });
+      await db
+        .update(subscriptionTiers)
+        .set({ priceAnnual: 500 })
+        .where(eq(subscriptionTiers.id, tier.id));
+
+      const renamed = await service.updateTier(tier.id, org.id, {
+        name: 'Legacy, renamed',
+        isRecommended: true,
+      });
+
+      expect(renamed.name).toBe('Legacy, renamed');
+      expect(renamed.priceAnnual).toBe(500);
+      await expect(
+        service.updateTier(tier.id, org.id, { priceMonthly: 1100 })
+      ).rejects.toThrow(YearlyPriceBelowMonthlyError);
+    });
+
+    // Cycle 4, N3: Edit Tier sends both prices on every save, as they stand.
+    it('a tier saved before the rule is renamed with both prices sent unchanged; changing one still refuses', async () => {
+      const org = await createOrgWithConnect('yearly-below-legacy-edit');
+      const tier = await service.createTier(org.id, {
+        submissionId: crypto.randomUUID(),
+        name: 'Legacy',
+        priceMonthly: 1200,
+        priceAnnual: 12000,
+      });
+      await db
+        .update(subscriptionTiers)
+        .set({ priceAnnual: 1000 })
+        .where(eq(subscriptionTiers.id, tier.id));
+      (stripe.prices.create as ReturnType<typeof vi.fn>).mockClear();
+
+      const renamed = await service.updateTier(tier.id, org.id, {
+        name: 'Legacy, renamed',
+        priceMonthly: 1200,
+        priceAnnual: 1000,
+      });
+
+      expect(renamed).toMatchObject({
+        name: 'Legacy, renamed',
+        priceMonthly: 1200,
+        priceAnnual: 1000,
+      });
+      expect(stripe.prices.create).not.toHaveBeenCalled();
+      await expect(
+        service.updateTier(tier.id, org.id, {
+          name: 'Legacy, renamed',
+          priceMonthly: 1200,
+          priceAnnual: 1100,
+        })
+      ).rejects.toThrow(YearlyPriceBelowMonthlyError);
+    });
+  });
+
   describe('updateTier', () => {
     it('should update name/desc without touching Stripe prices', async () => {
       const org = await createOrgWithConnect('update-name');
@@ -756,33 +894,63 @@ describe('TierService', () => {
       expect(stripe.prices.update).toHaveBeenCalledOnce(); // archive old
     });
 
-    // Codex-2hxff.3: the interval must reach the fan-out, or an annual edit
-    // moves monthly subscribers onto the annual Price.
-    it('fires the subscriber fan-out once, for ONLY the interval that changed', async () => {
-      const propagator = vi.fn();
-      const withPropagator = new TierService(
-        { db, dbWs: db, environment: 'test', propagator },
-        stripe
-      );
-      const org = await createOrgWithConnect('update-propagate');
-      const tier = await withPropagator.createTier(org.id, {
+    // Codex-2hxff.3: only the interval that changed is repriced, or an annual
+    // edit would move monthly subscribers onto the annual Price. Since
+    // Codex-2hxff.86 the save records the change in its own transaction
+    // (the rules for who is due: price-moves-record.integration.test.ts).
+    it('records one price change, for ONLY the interval that changed, with the owner who saved it', async () => {
+      const org = await createOrgWithConnect('update-record');
+      const tier = await service.createTier(org.id, {
         submissionId: crypto.randomUUID(),
         name: 'T',
         priceMonthly: 499,
         priceAnnual: 4990,
       });
 
-      const updated = await withPropagator.updateTier(tier.id, org.id, {
-        priceAnnual: 5990,
+      const updated = await service.updateTier(
+        tier.id,
+        org.id,
+        { priceAnnual: 5990 },
+        creatorId
+      );
+
+      const changes = await db
+        .select()
+        .from(priceChanges)
+        .where(eq(priceChanges.tierId, tier.id));
+      expect(changes).toEqual([
+        expect.objectContaining({
+          organizationId: org.id,
+          kind: 'tier',
+          interval: 'year',
+          fromAmountCents: 4990,
+          newAmountCents: 5990,
+          newStripePriceId: updated.stripePriceAnnualId,
+          createdByUserId: creatorId,
+          // Nobody subscribes yet: nothing to tell.
+          state: 'done',
+          totalCount: 0,
+        }),
+      ]);
+    });
+
+    it('a name-only edit records no price change', async () => {
+      const org = await createOrgWithConnect('update-name-only');
+      const tier = await service.createTier(org.id, {
+        submissionId: crypto.randomUUID(),
+        name: 'T',
+        priceMonthly: 499,
+        priceAnnual: 4990,
       });
 
-      expect(propagator).toHaveBeenCalledTimes(1);
-      expect(propagator).toHaveBeenCalledWith({
-        tierId: tier.id,
-        newStripePriceId: updated.stripePriceAnnualId,
-        organizationId: org.id,
-        interval: 'year',
-      });
+      await service.updateTier(tier.id, org.id, { name: 'Renamed' });
+
+      expect(
+        await db
+          .select()
+          .from(priceChanges)
+          .where(eq(priceChanges.tierId, tier.id))
+      ).toEqual([]);
     });
 
     it('should create new prices + archive old when annual price changes', async () => {

@@ -33,6 +33,7 @@ import {
   timestamp,
   uuid,
 } from 'drizzle-orm/pg-core';
+import { feeChanges } from './fee-changes';
 import { organizations } from './organizations';
 import { users } from './users';
 
@@ -280,6 +281,16 @@ export const feeConfigAuditLog = pgTable(
     changedAt: timestamp('changed_at', { withTimezone: true })
       .defaultNow()
       .notNull(),
+
+    /**
+     * The change this column line belongs to (Codex-2hxff.33), and when it
+     * applies: NULL on a rise still waiting for its emails. Both NULL on
+     * rows written before 0123.
+     */
+    changeId: uuid('change_id').references(() => feeChanges.id, {
+      onDelete: 'set null',
+    }),
+    effectiveFrom: timestamp('effective_from', { withTimezone: true }),
   },
   (table) => [
     index('idx_fee_config_audit_scope').on(table.scope, table.changedAt),

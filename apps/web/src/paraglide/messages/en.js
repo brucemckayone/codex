@@ -3479,38 +3479,6 @@ export const player_preview_ended = () => `Preview ended`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const player_preview_cta = () => `Get full access to continue watching`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const purchase_sign_in = () => `Sign in to watch`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const purchase_cta_title = () => `Purchase to Watch`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const purchase_cta_description = () => `Get full access to this content`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const subscribe_cta_title = () => `Subscribe to Watch`
 
 
@@ -3607,7 +3575,7 @@ export const change_plan_cta_plan_with_price = (params) => `${params.plan} (${pa
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const change_plan_cta_timing = (params) => `${params.upgradePlans} starts straight away, and so does a move to ${params.downgradePlans}, with credit on your next bill for the difference until your ${params.currentPlan} period ends on ${params.date}.`
+export const change_plan_cta_timing = (params) => `${params.upgradePlans} starts straight away; a move to ${params.downgradePlans} starts when your ${params.currentPlan} period ends on ${params.date}.`
 
 
 /**
@@ -3615,7 +3583,7 @@ export const change_plan_cta_timing = (params) => `${params.upgradePlans} starts
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const change_plan_cta_timing_downgrade = (params) => `A move to ${params.downgradePlans} starts straight away, with credit on your next bill for the difference until your ${params.currentPlan} period ends on ${params.date}.`
+export const change_plan_cta_timing_downgrade = (params) => `A move to ${params.downgradePlans} starts when your ${params.currentPlan} period ends on ${params.date}, and you keep ${params.currentPlan} until then.`
 
 
 /**
@@ -3623,7 +3591,39 @@ export const change_plan_cta_timing_downgrade = (params) => `A move to ${params.
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const change_plan_cta_timing_downgrade_undated = (params) => `A move to ${params.downgradePlans} starts straight away, with credit on your next bill for the difference until your current ${params.currentPlan} period ends.`
+export const change_plan_cta_timing_downgrade_undated = (params) => `A move to ${params.downgradePlans} starts when your current ${params.currentPlan} period ends, and you keep ${params.currentPlan} until then.`
+
+
+/**
+ * @param {{ samePricePlans: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const change_plan_cta_timing_same_price = (params) => `A switch to ${params.samePricePlans} starts straight away.`
+
+
+/**
+ * @param {{ targetPlan: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const change_plan_cta_moving = (params) => `You're moving to ${params.targetPlan} on ${params.date}, so you can watch this from then.`
+
+
+/**
+ * @param {{ upgradePlans: NonNullable<unknown>, price: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const change_plan_cta_moving_now = (params) => `${params.upgradePlans} includes it now, from ${params.price} a month.`
+
+
+/**
+ * @param {{ currentPlan: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const plan_cta_moving_short = (params) => `Not in your ${params.currentPlan} plan. Yours from ${params.date}.`
 
 
 /**
@@ -4379,6 +4379,78 @@ export const monetisation_tier_delete_refused_view = (params) => `View ${params.
 
 
 /**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_refused_moving_body_one_one = (params) => `1 subscription on ${params.name} hasn't ended yet, and 1 more subscriber is moving to it at their renewal. You can delete it once every subscription on it has ended.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, movers: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_refused_moving_body_one_other = (params) => `1 subscription on ${params.name} hasn't ended yet, and ${params.movers} more subscribers are moving to it at their renewal. You can delete it once every subscription on it has ended.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown>, name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_refused_moving_body_other_one = (params) => `${params.count} subscriptions on ${params.name} haven't ended yet, and 1 more subscriber is moving to it at their renewal. You can delete it once every subscription on it has ended.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown>, name: NonNullable<unknown>, movers: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_refused_moving_body_other_other = (params) => `${params.count} subscriptions on ${params.name} haven't ended yet, and ${params.movers} more subscribers are moving to it at their renewal. You can delete it once every subscription on it has ended.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_moving_title = (params) => `${params.name} can't be deleted yet.`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_moving_body_one = (params) => `1 subscriber is moving to this plan at their renewal, on ${params.date}. You can delete it once nobody subscribes to it or is moving to it.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_moving_body_other = (params) => `${params.count} subscribers are moving to this plan at their renewal, the last on ${params.date}. You can delete it once nobody subscribes to it or is moving to it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_moving_body_undated_one = () => `1 subscriber is moving to this plan at their renewal. You can delete it once nobody subscribes to it or is moving to it.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_delete_moving_body_undated_other = (params) => `${params.count} subscribers are moving to this plan at their renewal. You can delete it once nobody subscribes to it or is moving to it.`
+
+
+/**
  * 
  * @returns {string}
  */
@@ -4871,6 +4943,390 @@ export const pricing_refusal_close = () => `Close`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const pricing_refusal_change_cancelling = () => `Reactivate your subscription to change plan.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_refusal_change_keep_first = () => `A change to your plan is already set for your renewal. Keep your current plan first, then change.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_refusal_change_interval_while_moving = () => `Your move to a cheaper plan is still set. Change how often you are billed once it has started, or keep your current plan first.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_reactivate_to_change = () => `Reactivate to change plan`
+
+
+/**
+ * @param {{ plan: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_change_title_switch = (params) => `Switch to ${params.plan}`
+
+
+/**
+ * @param {{ plan: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_change_title_upgrade = (params) => `Upgrade to ${params.plan}`
+
+
+/**
+ * @param {{ plan: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_change_title_instead = (params) => `Switch to ${params.plan} instead`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_change_title_billing_month = () => `Switch to monthly billing`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_change_title_billing_year = () => `Switch to annual billing`
+
+
+/**
+ * @param {{ plan: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_change_title_two_steps_month = (params) => `Switch to ${params.plan}, billed monthly`
+
+
+/**
+ * @param {{ plan: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_change_title_two_steps_year = (params) => `Switch to ${params.plan}, billed yearly`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_change_charged_today = () => `Charged today`
+
+
+/**
+ * @param {{ price: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_change_then_month = (params) => `Then ${params.price}/mo`
+
+
+/**
+ * @param {{ price: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_change_then_year = (params) => `Then ${params.price}/yr`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_change_starting = (params) => `starting ${params.date}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_change_credit_note = () => `No charge today. The credit above will apply to your next invoice.`
+
+
+/**
+ * @param {{ currentPlan: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_change_wait = (params) => `You keep ${params.currentPlan} until ${params.date}; nothing is charged today.`
+
+
+/**
+ * @param {{ currentPlan: NonNullable<unknown>, date: NonNullable<unknown>, plan: NonNullable<unknown>, movingTo: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_change_wait_instead = (params) => `You keep ${params.currentPlan} until ${params.date}, then move to ${params.plan} instead of ${params.movingTo}; nothing is charged today.`
+
+
+/**
+ * @param {{ currentPlan: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_change_wait_aside = (params) => `Changed your mind before then? Keep ${params.currentPlan} from this page or from your account.`
+
+
+/**
+ * @param {{ movingTo: NonNullable<unknown>, date: NonNullable<unknown>, plan: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_change_keep_first = (params) => `Upgrading cancels your move to ${params.movingTo} on ${params.date}. ${params.plan} starts straight away, and we'll show you the charge before you confirm.`
+
+
+/**
+ * @param {{ movingTo: NonNullable<unknown>, currentPlan: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_change_move_cancelled = (params) => `Your move to ${params.movingTo} is cancelled. You're on ${params.currentPlan} until you confirm.`
+
+
+/**
+ * @param {{ currentPlan: NonNullable<unknown>, movingTo: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_change_declined_after_keep = (params) => `You're still on ${params.currentPlan}. Your move to ${params.movingTo} was cancelled in the first step, so pick ${params.movingTo} again if you'd still like it.`
+
+
+/**
+ * @param {{ movingTo: NonNullable<unknown>, date: NonNullable<unknown>, currentPlan: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_change_interval_while_moving = (params) => `Your move to ${params.movingTo} is set for ${params.date}. You can change how often you're billed once ${params.movingTo} has started, or keep ${params.currentPlan} first and then switch.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_change_two_steps_lede = () => `This takes two steps:`
+
+
+/**
+ * @param {{ target: NonNullable<unknown>, currentPlan: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_change_two_steps_first = (params) => `Move to ${params.target}. You keep ${params.currentPlan} until ${params.date}, and nothing is charged today.`
+
+
+/**
+ * @param {{ plan: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_change_plan_on_billing_month = (params) => `${params.plan} on monthly billing`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_change_billing_year = () => `yearly billing`
+
+
+/**
+ * @param {{ plan: NonNullable<unknown>, billing: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_change_two_steps_second_to_year = (params) => `Once ${params.plan} has started, switch it to ${params.billing}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_change_cancel = () => `Cancel`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_change_continue = () => `Continue`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_change_try_again = () => `Try again`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_change_confirm_switch = () => `Confirm switch`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_change_confirm_pay = (params) => `Confirm and pay ${params.amount}`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_change_confirm_on = (params) => `Switch on ${params.date}`
+
+
+/**
+ * @param {{ plan: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_change_keep_plan = (params) => `Keep ${params.plan}`
+
+
+/**
+ * @param {{ plan: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_change_start_first_step_month = (params) => `Start with ${params.plan} monthly`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_move_from = (params) => `From ${params.date}`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_move_starts = (params) => `Starts ${params.date}`
+
+
+/**
+ * @param {{ plan: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_move_notice_title = (params) => `Moving to ${params.plan} on ${params.date}`
+
+
+/**
+ * @param {{ currentPlan: NonNullable<unknown>, plan: NonNullable<unknown>, price: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_move_notice_body_month = (params) => `You keep ${params.currentPlan} until then. ${params.plan} is ${params.price} a month after that.`
+
+
+/**
+ * @param {{ currentPlan: NonNullable<unknown>, plan: NonNullable<unknown>, price: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_move_notice_body_year = (params) => `You keep ${params.currentPlan} until then. ${params.plan} is ${params.price} a year after that.`
+
+
+/**
+ * @param {{ currentPlan: NonNullable<unknown>, plan: NonNullable<unknown>, price: NonNullable<unknown>, laterPrice: NonNullable<unknown>, laterDate: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_move_notice_body_later_month = (params) => `You keep ${params.currentPlan} until then. ${params.plan} is ${params.price} a month after that, then ${params.laterPrice} a month from ${params.laterDate}.`
+
+
+/**
+ * @param {{ currentPlan: NonNullable<unknown>, plan: NonNullable<unknown>, price: NonNullable<unknown>, laterPrice: NonNullable<unknown>, laterDate: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_move_notice_body_later_year = (params) => `You keep ${params.currentPlan} until then. ${params.plan} is ${params.price} a year after that, then ${params.laterPrice} a year from ${params.laterDate}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_move_keep = () => `Keep current plan`
+
+
+/**
+ * @param {{ plan: NonNullable<unknown>, date: NonNullable<unknown>, price: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_move_kept = (params) => `You're staying on ${params.plan}. Your next payment on ${params.date} is ${params.price}.`
+
+
+/**
+ * @param {{ plan: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_move_kept_undated = (params) => `You're staying on ${params.plan}.`
+
+
+/**
+ * @param {{ plan: NonNullable<unknown>, movingTo: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_move_keep_failed = (params) => `We couldn't keep ${params.plan} just now, so your move to ${params.movingTo} is still set for ${params.date}. Please try again.`
+
+
+/**
+ * @param {{ plan: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_move_landed = (params) => `Your move to ${params.plan} has already happened at your renewal, so you're on ${params.plan} now.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const pricing_catalogue_eyebrow = () => `Inside the library`
 
 
@@ -5032,6 +5488,22 @@ export const pricing_portals_subtitle = () => `Structured journeys with a beginn
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const pricing_portals_rail_label = () => `Guided portals`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_faq_change_plan_q = () => `Can I switch plans later?`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_faq_change_plan_a = () => `Anytime. An upgrade starts straight away and you pay the difference for the rest of the period. A move to a cheaper plan starts when your current period ends, so you keep what you've paid for.`
 
 
 /**
@@ -5360,6 +5832,86 @@ export const subscription_past_due_message = () => `Your payment method needs to
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const subscription_cancelling_message = (params) => `This subscription will end on ${params.date}. You can reactivate to keep your access.`
+
+
+/**
+ * @param {{ plan: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_move_survives_cancel = (params) => `If you reactivate, you'll still move to ${params.plan} on ${params.date}, as you chose.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_section_memberships = () => `Memberships`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_section_courses = () => `Course subscriptions`
+
+
+/**
+ * @param {{ org: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_course_kind = (params) => `${params.org} · course`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_update_card = () => `Update card`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_course_off_sale = (params) => `This course is no longer offered, so your subscription ends on ${params.date}. You keep the course until then and won't be charged again.`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_course_cancel_note = (params) => `You keep the course until ${params.date}, and you won't be charged again. Your progress is kept if you subscribe again later.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_course_cancel_error = () => `We couldn't cancel this subscription just now, so it's still active. Please try again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_portal_error = () => `We couldn't open your card details just now. Please try again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_course_load_error = () => `We couldn't load your course subscriptions. Please try again.`
 
 
 /**
@@ -24399,7 +24951,7 @@ export const support_queue_title = () => `Queue`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const support_queue_description = () => `Money the automatic refund path couldn't settle. Oldest first. Each one needs a person to decide.`
+export const support_queue_description = () => `Money and notices our automatic runs couldn't finish. Oldest first. Each one needs a person to decide.`
 
 
 /**
@@ -25447,6 +25999,1694 @@ export const support_queue_owed_empty_body = () => `When a take-back reaches Str
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const support_queue_tab_fees = () => `Fee notices`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_intro = () => `A fee rise starts 30 days after everyone it affects has been told. These people's emails haven't gone through, so the rise is waiting for them. The 08:00 run tries again every day; if you reach someone another way, mark them as told.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_subhead = (params) => `Not told yet · ${params.count}`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_subhead_rises = (params) => `Fee rises · ${params.count}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_col_since = () => `Waiting since`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_col_who = () => `Who`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_col_rise = () => `Fee rise`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_joined_later = () => `Joined later`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_action_mark = () => `Told another way`
+
+
+/**
+ * @param {{ roles: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_waiting_since_line = (params) => `${params.roles} · waiting since ${params.date}`
+
+
+/**
+ * @param {{ time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_when_today = (params) => `today at ${params.time}`
+
+
+/**
+ * @param {{ time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_when_tomorrow = (params) => `tomorrow at ${params.time}`
+
+
+/**
+ * @param {{ date: NonNullable<unknown>, time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_when_on = (params) => `on ${params.date} at ${params.time}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_value_platform = () => `Codex's fee`
+
+
+/**
+ * @param {{ org: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_value_org = (params) => `${params.org}'s share`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_value_org_default = () => `Organisations' share`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_value_min_fee = () => `Minimum fee`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_value_min_transfer = () => `Minimum transfer`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_context_one_off = () => `(one-off sales)`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_context_subscription = () => `(subscription payments)`
+
+
+/**
+ * @param {{ label: NonNullable<unknown>, from: NonNullable<unknown>, to: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_title_each_sale = (params) => `${params.label}: ${params.from} → ${params.to} of each sale`
+
+
+/**
+ * @param {{ label: NonNullable<unknown>, from: NonNullable<unknown>, to: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_title_line = (params) => `${params.label}: ${params.from} → ${params.to}`
+
+
+/**
+ * @param {{ label: NonNullable<unknown>, from: NonNullable<unknown>, to: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_short_line = (params) => `${params.label} ${params.from} → ${params.to}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_whom_platform = () => `Everyone without their own fee setting`
+
+
+/**
+ * @param {{ org: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_whom_org = (params) => `${params.org}, everyone without their own fee setting`
+
+
+/**
+ * @param {{ creator: NonNullable<unknown>, org: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_whom_creator = (params) => `${params.creator} in ${params.org}`
+
+
+/**
+ * @param {{ when: NonNullable<unknown>, name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_saved_by = (params) => `saved ${params.when} by ${params.name}`
+
+
+/**
+ * @param {{ when: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_saved = (params) => `saved ${params.when}`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_badge_starts = (params) => `Starts ${params.date}`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_badge_first_emails = (params) => `First emails ${params.date}`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_badge_waiting = (params) => `Waiting for ${params.count}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_fact_told = () => `Told`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_fact_joined = () => `Joined since`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_fact_starts = () => `Starts`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_told_nobody_yet = () => `Nobody yet`
+
+
+/**
+ * @param {{ time: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_first_emails_at = (params) => `The first emails go at ${params.time} on ${params.date}`
+
+
+/**
+ * @param {{ told: NonNullable<unknown>, listed: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_told_of = (params) => `${params.told} of ${params.listed}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_told_everyone_listed = () => `everyone on the first list`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_told_by_email = (params) => `${params.count} by email`
+
+
+/**
+ * @param {{ count: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_told_by_email_on = (params) => `${params.count} by email on ${params.date}`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, by: NonNullable<unknown>, date: NonNullable<unknown>, time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_told_another_way_by = (params) => `${params.name} told another way by ${params.by}, ${params.date} ${params.time}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_joined_nobody = () => `Nobody yet`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_joined_told = (params) => `${params.count}, told by email`
+
+
+/**
+ * @param {{ count: NonNullable<unknown>, told: NonNullable<unknown>, waiting: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_joined_some_waiting = (params) => `${params.count}: ${params.told} told by email, ${params.waiting} waiting`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_starts_once_told = () => `Once everyone is told. If the last person is told today:`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_starts_midnight = () => `, 00:00 UK`
+
+
+/**
+ * @param {{ told: NonNullable<unknown>, end: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_starts_told_by = (params) => `Everyone was told by ${params.told}; the 30 days end on ${params.end}`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_starts_set_on = (params) => `Set on ${params.date}; a joiner can't move it`
+
+
+/**
+ * @param {{ orgs: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_role_creator = (params) => `Creator · ${params.orgs}`
+
+
+/**
+ * @param {{ orgs: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_role_owner = (params) => `Owner · ${params.orgs}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_role_orgless = () => `own sales`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_rise_unknown = () => `A fee rise`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_rise_starts = (params) => `starts ${params.date}`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_rise_saved = (params) => `saved ${params.date}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_what_refused = () => `The mail service refused the email: the address doesn't accept mail.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_what_unknown = () => `No answer from the mail service, so it may have gone.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_what_no_address = () => `We couldn't find an email address for this account.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_what_skipped = () => `The mail service skipped it: this address has bounced before.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_no_address_on_file = () => `no address on file`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_tried_once = (params) => `tried ${params.date}`
+
+
+/**
+ * @param {{ first: NonNullable<unknown>, last: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_tried_twice = (params) => `tried ${params.first} and ${params.last}`
+
+
+/**
+ * @param {{ count: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_tried_times = (params) => `tried ${params.count} times since ${params.date}`
+
+
+/**
+ * @param {{ when: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_tries_again = (params) => `tries again ${params.when}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_unknown_next_today = () => `today's run checks our email log first and sends again only if it finds nothing`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_unknown_next_tomorrow = () => `tomorrow's run checks our email log first and sends again only if it finds nothing`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_unknown_next_later = () => `the next run checks our email log first and sends again only if it finds nothing`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_joiner_holds_nothing = () => `joined after the first emails, so this doesn't hold the date`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_joiner_joined = (params) => `joined ${params.date}, so this doesn't hold the date`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_mark_title = (params) => `Mark ${params.name} as told?`
+
+
+/**
+ * @param {{ rise: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_mark_description = (params) => `${params.rise} · saved ${params.date}`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, when: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_mark_counts = (params) => `Use this when you've told ${params.name} about the rise another way, for example on the phone. It counts as their notice from now, ${params.when}.`
+
+
+/**
+ * @param {{ date: NonNullable<unknown>, time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_mark_when = (params) => `${params.date} at ${params.time}`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_mark_last = (params) => `${params.name} is the last person this rise is waiting for, so it will start on ${params.date}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_mark_others_one = () => `The rise is still waiting for 1 other person.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_mark_others = (params) => `The rise is still waiting for ${params.count} other people.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_mark_joiner = (params) => `${params.name} joined after the first emails, so this doesn't change the date.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_note_label = () => `How did you tell them?`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_note_hint = () => `Required. Kept with the record.`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_mark_placeholder = (params) => `For example: phoned on ${params.date} and read out the change`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_mark_submit = (params) => `Mark ${params.name} as told`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_mark_failed_lead = () => `We couldn't save that, so nothing has changed.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_mark_failed = () => `Try again in a moment; your note is kept.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_try_again = () => `Try again`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_marked_lead = (params) => `${params.name} is marked as told.`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_marked_dated = (params) => `Everyone this rise affects has now been told, so it starts on ${params.date}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_marked_waiting_one = () => `The rise is still waiting for 1 more person.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_marked_waiting = (params) => `The rise is still waiting for ${params.count} more people.`
+
+
+/**
+ * @param {{ time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_refused_cancelled_lead = (params) => `Nothing to mark: this rise was cancelled at ${params.time},`
+
+
+/**
+ * @param {{ when: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_refused_cancelled = (params) => `so nobody needs telling. Everyone who was told about it is emailed that it's off at ${params.when}.`
+
+
+/**
+ * @param {{ time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_off_today = (params) => `${params.time} today`
+
+
+/**
+ * @param {{ time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_off_tomorrow = (params) => `${params.time} tomorrow`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_refused_not_waiting = () => `Nothing to mark: this fee rise has started, or was cancelled or replaced.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_refused_already_marked = (params) => `${params.name} was already marked as told at ${params.time}.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, by: NonNullable<unknown>, time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_refused_already_marked_by = (params) => `${params.name} was already marked as told by ${params.by} at ${params.time}.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_refused_already_sent = (params) => `${params.name}'s email went through at ${params.time}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_refused_already_told = () => `This person has already been told.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_refused_not_needed = () => `This person is no longer paid less, so no notice is needed.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_empty_rise_title = () => `Nobody is waiting for this rise`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_empty_rise_body = (params) => `Everyone it affects has been told. Anyone who joins before ${params.date} is emailed on their first morning.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_empty_waiting_title = () => `No emails have failed`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_empty_waiting_body = () => `The rise is waiting for the 08:00 run to email everyone it affects.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_empty_title = () => `No fee notices waiting`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_empty_body = () => `When a fee-rise email can't be delivered, the person waits here, because the rise can't start until everyone is told.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_tab_moves = () => `Price moves`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_intro = () => `We couldn't move these subscribers to a new price, so each one is still on their old price. The hourly run has tried each three times. Retry queues another round for the next run; nobody moves until their email has gone through.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_subhead_stopped = (params) => `Stopped price changes · ${params.count}`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_subhead_held = (params) => `Held · ${params.count}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_col_since = () => `Held since`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_col_subscriber = () => `Subscriber`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_col_move = () => `Price move`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_col_why = () => `Why it's held`
+
+
+/**
+ * @param {{ place: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_held_since_line = (params) => `${params.place} · held since ${params.date}`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_plan_monthly = (params) => `${params.name}, monthly`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_plan_annual = (params) => `${params.name}, annual`
+
+
+/**
+ * @param {{ from: NonNullable<unknown>, to: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_amounts = (params) => `${params.from} → ${params.to}`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_per_month = (params) => `${params.amount}/mo`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_per_year = (params) => `${params.amount}/yr`
+
+
+/**
+ * @param {{ org: NonNullable<unknown>, plan: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_place = (params) => `${params.org} · ${params.plan}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_no_address_on_file = () => `no address on file`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_tried_times = (params) => `Tried ${params.count} times`
+
+
+/**
+ * @param {{ count: NonNullable<unknown>, date: NonNullable<unknown>, time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_tried_last = (params) => `Tried ${params.count} times, last on ${params.date} at ${params.time}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_why_refused = () => `The email was refused: the address doesn't accept mail.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_why_unknown = () => `We couldn't tell whether the email went, and our email log has no record of it.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_why_unknown_sub = (params) => `Tried ${params.count} times, checking the log first each time`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_why_no_address = () => `We couldn't find an email address for this account.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_why_no_address_sub = (params) => `Tried ${params.count} times · add an address to the account, then retry`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_why_skipped = () => `The mail service skipped it: this address has bounced before.`
+
+
+/**
+ * @param {{ date: NonNullable<unknown>, time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_why_move_refused = (params) => `Emailed on ${params.date} at ${params.time}, then Stripe refused the move.`
+
+
+/**
+ * @param {{ date: NonNullable<unknown>, time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_why_move_unknown = (params) => `Emailed on ${params.date} at ${params.time}; we couldn't tell whether Stripe made the move, and Stripe still shows the old price.`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_told_date = (params) => `They were told ${params.date}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_stripe_said = () => `Stripe:`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_checked_stripe = (params) => `checked Stripe ${params.count} times`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_why_read_failed = () => `We couldn't read their subscription from Stripe.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_why_same_amount = () => `Their new price is the same amount, so no email was needed, but Stripe refused the change.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_why_other = () => `We couldn't move them to the new price.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_why_ended = () => `Their subscription has ended, so there is nothing to move.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_why_ended_sub = () => `Close it as not needed.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_why_refused_again = () => `The email was refused again: the address doesn't accept mail.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_retried_by = (params) => `Retried by ${params.name} on ${params.date}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_refused_again_hint = () => `retrying won't fix this address: reach them another way, then Close…`
+
+
+/**
+ * @param {{ time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_queued = (params) => `Queued for ${params.time}`
+
+
+/**
+ * @param {{ time: NonNullable<unknown>, name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_queued_by = (params) => `Queued for ${params.time} · ${params.name}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_action_retry = () => `Retry`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_action_retry_move = () => `Retry the move`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_action_close = () => `Close…`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_action_restart = () => `Restart`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_action_failed = () => `It couldn't be queued, and nothing changed. Try again in a moment.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_retried_lead = (params) => `${params.name} is queued for the ${params.time} run.`
+
+
+/**
+ * @param {{ time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_retried = (params) => `It emails them again and, once the email goes through, schedules their move for their first renewal at least 30 days after it. Come back after ${params.time} to see how it went.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_retried_move_lead = (params) => `${params.name}'s move is queued for the ${params.time} run.`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_retried_move = (params) => `No new email: Stripe is asked again to move them on ${params.date}, the date they were told. If that renewal has passed by then, they move at the next one.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_retried_move_undated = () => `No new email: Stripe is asked again to move them on the date they were told. If that renewal has passed by then, they move at the next one.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_nothing_to_retry = (params) => `Nothing to retry for ${params.name}.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_nothing_to_close = (params) => `Nothing to close for ${params.name}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_not_held = () => `There is nothing to do for this one.`
+
+
+/**
+ * @param {{ plan: NonNullable<unknown>, date: NonNullable<unknown>, time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_not_held_superseded_at = (params) => `A newer price for ${params.plan} replaced this one on ${params.date} at ${params.time}, so they are emailed about that instead.`
+
+
+/**
+ * @param {{ plan: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_not_held_superseded = (params) => `A newer price for ${params.plan} replaced this one, so they are emailed about that instead.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_not_held_on_price = () => `They are already on the new price.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_not_held_scheduled = () => `Their move is already scheduled: the hourly run got there first.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_not_held_moving_away = () => `They are moving to another plan, so this price no longer applies to them.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_not_held_other_interval = () => `They now pay on another billing interval, so this price no longer applies to them.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_not_held_no_items = () => `The run found nothing on their subscription to move.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_not_held_ended_first = () => `Their subscription ended before the run reached them, so there is nothing to move.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_not_held_skipped = () => `The hourly run set this one aside, so there is nothing to move.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_not_held_ended = () => `Their subscription has ended, so there is nothing to move. Close it as not needed.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_not_held_closed_by_hand = () => `This one is already closed: moved by hand.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_not_held_closed_not_needed = () => `This one is already closed: no move needed.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_not_held_closed_retried = () => `This one is already closed: moved after a retry.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_not_held_closed = () => `This one is already closed.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_not_held_queued = () => `This one is already queued for the next run.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_not_held_queued_close = () => `This one is queued for the next run. If the run holds it again, close it then.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_not_held_in_progress = () => `The hourly run is still working on this one: it isn't held.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_close_title = (params) => `Close ${params.name}'s held move?`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, price: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_close_body = (params) => `Closing takes ${params.name} off this list. It doesn't move them: they stay on ${params.price} unless you've changed it yourself.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_close_legend = () => `Why are you closing it?`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_close_by_hand = () => `I told them and moved them by hand in Stripe`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_close_by_hand_hint = () => `Only after they have been told the new price and date.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_close_not_needed = () => `No move is needed`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_close_not_needed_hint = () => `They have cancelled, been refunded, or the move was replaced.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_close_choose = () => `Choose why you're closing it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_close_note_label = () => `Note for the record`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_close_submit = () => `Close it`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_closed_lead = (params) => `${params.name}'s held move is closed`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_closed_by_hand = () => `as moved by hand.`
+
+
+/**
+ * @param {{ price: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_closed_not_needed = (params) => `as no move needed. They stay on ${params.price}.`
+
+
+/**
+ * @param {{ place: NonNullable<unknown>, amounts: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_stopped_title = (params) => `Stopped: ${params.place} · ${params.amounts}`
+
+
+/**
+ * @param {{ when: NonNullable<unknown>, name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_stopped_saved_by = (params) => `Saved ${params.when} by ${params.name}`
+
+
+/**
+ * @param {{ when: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_stopped_saved = (params) => `Saved ${params.when}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_badge_stopped = () => `Stopped`
+
+
+/**
+ * @param {{ time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_badge_restarts = (params) => `Restarts at ${params.time}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_fact_what = () => `What happened`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_fact_waiting = () => `Waiting`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_fact_next = () => `Next`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_stopped_template_missing = () => `Every email in the first batch was refused (the email template wasn't found), so the run stopped this change. Nobody was emailed and nobody was moved.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_stopped_worker_auth = () => `Every email in the first batch was refused (401: our email service didn't accept the run's key), so the run stopped this change. Nobody was emailed and nobody was moved.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_stopped_notice_refused = () => `Every email in the first batch was refused by our email service, so the run stopped this change. Nobody was emailed and nobody was moved.`
+
+
+/**
+ * @param {{ run: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_stopped_run = (params) => `${params.run} run, ${params.date} · error`
+
+
+/**
+ * @param {{ count: NonNullable<unknown>, price: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_stopped_waiting = (params) => `${params.count} subscribers, all on ${params.price}`
+
+
+/**
+ * @param {{ price: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_stopped_waiting_one = (params) => `1 subscriber, on ${params.price}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_stopped_next = () => `Fix the cause, then restart. The run carries on from where it stopped.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, time: NonNullable<unknown>, run: NonNullable<unknown>, perRun: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_stopped_next_restarted = (params) => `Restarted by ${params.name} at ${params.time}. The ${params.run} run carries on, about ${params.perRun} an hour.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_restarted_lead = () => `Restarted.`
+
+
+/**
+ * @param {{ time: NonNullable<unknown>, org: NonNullable<unknown>, count: NonNullable<unknown>, plan: NonNullable<unknown>, perRun: NonNullable<unknown>, saver: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_restarted = (params) => `The ${params.time} run starts emailing ${params.org}'s ${params.count} ${params.plan} subscribers again, about ${params.perRun} an hour, and ${params.saver} shows the progress.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_restarted_note_of = (params) => `${params.name}'s Studio note`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_restarted_note_org = () => `the organisation's Studio note`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_not_stopped = () => `This price change isn't stopped.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_not_stopped_running = () => `This price change is running: the hourly run is already emailing its subscribers.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_not_stopped_done = () => `This price change has finished: there is nothing to restart.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_not_stopped_superseded = () => `A newer price replaced this one, so there is nothing to restart.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_empty_title = () => `No held price moves`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_moves_empty_body = () => `When a subscriber can't be emailed about a new price, or Stripe refuses their move, they wait here after three automatic tries. They stay on their old price meanwhile.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const support_col_found = () => `Found`
 
 
@@ -26336,3 +28576,1187 @@ export const support_debts_collected = (params) => `Stripe collected ${params.am
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const support_credit_sibling_unfinished = () => `Another take-back on this sale is still running. Try again once it has finished.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_sales_owner = () => `each sale`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_sales_owner_one_off = () => `each one-off sale`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_sales_owner_subscription = () => `each subscription payment`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_sales_creator = () => `your sales`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_sales_creator_one_off = () => `your one-off sales`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_sales_creator_subscription = () => `your subscription payments`
+
+
+/**
+ * @param {{ sales: NonNullable<unknown>, org: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_sales_in_org = (params) => `${params.sales} in ${params.org}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_sales_orgless = () => `your own sales`
+
+
+/**
+ * @param {{ from: NonNullable<unknown>, to: NonNullable<unknown>, sales: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_clause_platform_owner_rises = (params) => `Codex's fee rises from ${params.from} to ${params.to} of ${params.sales}`
+
+
+/**
+ * @param {{ from: NonNullable<unknown>, to: NonNullable<unknown>, sales: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_clause_platform_owner_falls = (params) => `Codex's fee falls from ${params.from} to ${params.to} of ${params.sales}`
+
+
+/**
+ * @param {{ sales: NonNullable<unknown>, from: NonNullable<unknown>, to: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_clause_platform_creator_rises = (params) => `Codex's fee on ${params.sales} rises from ${params.from} to ${params.to}`
+
+
+/**
+ * @param {{ sales: NonNullable<unknown>, from: NonNullable<unknown>, to: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_clause_platform_creator_falls = (params) => `Codex's fee on ${params.sales} falls from ${params.from} to ${params.to}`
+
+
+/**
+ * @param {{ from: NonNullable<unknown>, to: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_clause_min_fee_rises = (params) => `the minimum fee rises from ${params.from} to ${params.to}`
+
+
+/**
+ * @param {{ from: NonNullable<unknown>, to: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_clause_min_fee_falls = (params) => `the minimum fee falls from ${params.from} to ${params.to}`
+
+
+/**
+ * @param {{ sales: NonNullable<unknown>, from: NonNullable<unknown>, to: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_clause_min_fee_on_rises = (params) => `the minimum fee on ${params.sales} rises from ${params.from} to ${params.to}`
+
+
+/**
+ * @param {{ sales: NonNullable<unknown>, from: NonNullable<unknown>, to: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_clause_min_fee_on_falls = (params) => `the minimum fee on ${params.sales} falls from ${params.from} to ${params.to}`
+
+
+/**
+ * @param {{ org: NonNullable<unknown>, sales: NonNullable<unknown>, from: NonNullable<unknown>, to: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_clause_org_owner_rises = (params) => `${params.org}'s share of ${params.sales} rises from ${params.from} to ${params.to} of what's left after Codex's fee`
+
+
+/**
+ * @param {{ org: NonNullable<unknown>, sales: NonNullable<unknown>, from: NonNullable<unknown>, to: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_clause_org_owner_falls = (params) => `${params.org}'s share of ${params.sales} falls from ${params.from} to ${params.to} of what's left after Codex's fee`
+
+
+/**
+ * @param {{ org: NonNullable<unknown>, sales: NonNullable<unknown>, from: NonNullable<unknown>, to: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_clause_org_creator_rises = (params) => `${params.org}'s share of ${params.sales} there rises from ${params.from} to ${params.to} of what's left after Codex's fee, on sales not covered by a revenue-share agreement`
+
+
+/**
+ * @param {{ org: NonNullable<unknown>, sales: NonNullable<unknown>, from: NonNullable<unknown>, to: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_clause_org_creator_falls = (params) => `${params.org}'s share of ${params.sales} there falls from ${params.from} to ${params.to} of what's left after Codex's fee, on sales not covered by a revenue-share agreement`
+
+
+/**
+ * @param {{ to: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_clause_transfer_on = (params) => `an amount under ${params.to} waits until you're owed at least ${params.to} before it's sent`
+
+
+/**
+ * @param {{ from: NonNullable<unknown>, to: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_clause_transfer_rises = (params) => `the minimum transfer rises from ${params.from} to ${params.to}: an amount under ${params.to} waits until you're owed at least ${params.to}`
+
+
+/**
+ * @param {{ from: NonNullable<unknown>, to: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_clause_transfer_falls = (params) => `the minimum transfer falls from ${params.from} to ${params.to}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_and = () => `and`
+
+
+/**
+ * @param {{ date: NonNullable<unknown>, change: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_lead_dated = (params) => `From ${params.date}, ${params.change}.`
+
+
+/**
+ * @param {{ change: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_lead_earliest = (params) => `${params.change}, from ${params.date} at the earliest.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_meta_dated = () => `Sales before then keep today's fee, and a subscription payment follows the date its invoice was raised.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_meta_earliest = () => `The date is set once everyone the rise affects has been told, so it can move later but never earlier. Sales before it keep today's fee.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_meta_mixed = () => `Both parts start on the same day. Sales before then keep today's fees.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_meta_mixed_earliest = () => `Both parts start on the same day. The date is set once everyone the change affects has been told, so it can move later but never earlier. Sales before it keep today's fees.`
+
+
+/**
+ * @param {{ was: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_meta_smaller = (params) => `That's less than the ${params.was} we first told you about, and the date hasn't changed.`
+
+
+/**
+ * @param {{ to: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_meta_transfer = (params) => `Today every amount is sent, however small. Nothing is lost: it all goes once the total reaches ${params.to}.`
+
+
+/**
+ * @param {{ to: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_meta_transfer_earliest = (params) => `Today every amount is sent, however small. Nothing is lost: it all goes once the total reaches ${params.to}. The date is set once everyone the change affects has been told, so it can move later but never earlier.`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_meta_emailed = (params) => `We emailed you about this on ${params.date}.`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_meta_emailed_it = (params) => `We emailed you about it on ${params.date}.`
+
+
+/**
+ * @param {{ figure: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_meta_replaces = (params) => `This replaces the rise to ${params.figure} we told you about on ${params.date}, so it has its own 30 days' notice. Sales before it keep today's fee.`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_list_dated = (params) => `From ${params.date},`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_list_earliest = (params) => `From ${params.date} at the earliest,`
+
+
+/**
+ * @param {{ change: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_list_change = (params) => `${params.change}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_meta_list = () => `Sales before each date keep today's fees. We emailed you about each change.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_meta_list_unsent = () => `Sales before each date keep today's fees.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_check_failed = () => `We couldn't check for upcoming fee changes.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const fee_note_try_again = () => `Try again`
+
+
+/**
+ * @param {{ count: NonNullable<unknown>, name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_edit_lead = (params) => `Your ${params.count} ${params.name} subscribers will be emailed about the new prices.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_edit_lead_one = (params) => `Your 1 ${params.name} subscriber will be emailed about the new prices.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_edit_body = () => `Emails start at the next hourly run, and each person moves at their first renewal at least 30 days after their own email. New subscribers pay the new prices straight away.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_edit_lead_monthly = (params) => `Your ${params.name} subscribers who pay monthly will be emailed about the new monthly price.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_edit_lead_annual = (params) => `Your ${params.name} subscribers who pay annually will be emailed about the new annual price.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_edit_body_one = () => `Emails start at the next hourly run, and each person moves at their first renewal at least 30 days after their own email. New subscribers pay the new price straight away.`
+
+
+/**
+ * @param {{ to: NonNullable<unknown>, emailed: NonNullable<unknown>, total: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_going_out_lead = (params) => `Emails about ${params.to} are still going out: ${params.emailed} of ${params.total} sent.`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, total: NonNullable<unknown>, emailed: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_going_out_body = (params) => `If you save a new price, it replaces ${params.amount}, and all ${params.total} are emailed about the new price instead, including the ${params.emailed} already told about ${params.amount}.`
+
+
+/**
+ * @param {{ to: NonNullable<unknown>, emailed: NonNullable<unknown>, total: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_going_out_lead_both = (params) => `Emails about ${params.to} are still going out: ${params.emailed} of ${params.total} sent.`
+
+
+/**
+ * @param {{ old: NonNullable<unknown>, total: NonNullable<unknown>, emailed: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_going_out_body_both = (params) => `If you save new prices, they replace ${params.old}, and all ${params.total} are emailed about the new prices instead, including the ${params.emailed} already told about ${params.old}.`
+
+
+/**
+ * @param {{ price: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_per_month = (params) => `${params.price}/mo`
+
+
+/**
+ * @param {{ price: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_per_year = (params) => `${params.price}/yr`
+
+
+/**
+ * @param {{ first: NonNullable<unknown>, second: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_or = (params) => `${params.first} or ${params.second}`
+
+
+/**
+ * @param {{ time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_when_tomorrow = (params) => `${params.time} tomorrow`
+
+
+/**
+ * @param {{ time: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_when_on = (params) => `${params.time} on ${params.date}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_when_next_run = () => `the next hourly run`
+
+
+/**
+ * @param {{ time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_run_today = (params) => `the ${params.time} run`
+
+
+/**
+ * @param {{ time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_run_yesterday = (params) => `yesterday's ${params.time} run`
+
+
+/**
+ * @param {{ time: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_run_on = (params) => `the ${params.time} run on ${params.date}`
+
+
+/**
+ * @param {{ count: NonNullable<unknown>, name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_who_tier = (params) => `your ${params.count} ${params.name} subscribers`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_who_tier_one = (params) => `your 1 ${params.name} subscriber`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_who_course = (params) => `the ${params.count} people subscribed to this course`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_who_course_one = () => `the 1 person subscribed to this course`
+
+
+/**
+ * @param {{ count: NonNullable<unknown>, name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_who_all_tier = (params) => `all ${params.count} ${params.name} subscribers`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_who_all_course = (params) => `all ${params.count} people subscribed to this course`
+
+
+/**
+ * @param {{ count: NonNullable<unknown>, name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_count_tier = (params) => `${params.count} ${params.name} subscribers`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_count_course = (params) => `${params.count} people subscribed to this course`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_everyone_tier = (params) => `your ${params.name} subscribers`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_everyone_course = () => `the people subscribed to this course`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_saved_lead_tier = () => `New prices saved.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_saved_lead_tier_one_price = () => `New price saved.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_saved_lead_course = () => `New course prices saved.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_saved_lead_course_one_price = () => `New course price saved.`
+
+
+/**
+ * @param {{ who: NonNullable<unknown>, time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_saved_start_tier = (params) => `We'll start emailing ${params.who} about them at ${params.time}.`
+
+
+/**
+ * @param {{ who: NonNullable<unknown>, time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_saved_start_tier_one_price = (params) => `We'll start emailing ${params.who} about it at ${params.time}.`
+
+
+/**
+ * @param {{ who: NonNullable<unknown>, time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_saved_start_course = (params) => `We'll start emailing ${params.who} at ${params.time}.`
+
+
+/**
+ * @param {{ to: NonNullable<unknown>, from: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_saved_moves_to = (params) => `Each moves to ${params.to} at their first renewal at least 30 days after their own email, and keeps paying ${params.from} until then.`
+
+
+/**
+ * @param {{ to: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_saved_moves_to_course = (params) => `Each moves to ${params.to} at their first renewal at least 30 days after their own email.`
+
+
+/**
+ * @param {{ to: NonNullable<unknown>, old: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_replaces_lead = (params) => `New price saved: ${params.to}. It replaces ${params.old}.`
+
+
+/**
+ * @param {{ to: NonNullable<unknown>, old: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_replaces_lead_both = (params) => `New prices saved: ${params.to}. They replace ${params.old}.`
+
+
+/**
+ * @param {{ who: NonNullable<unknown>, to: NonNullable<unknown>, time: NonNullable<unknown>, told: NonNullable<unknown>, old: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_replaces_start = (params) => `We'll start emailing ${params.who} about ${params.to} at ${params.time}, including the ${params.told} already told about ${params.old}.`
+
+
+/**
+ * @param {{ who: NonNullable<unknown>, to: NonNullable<unknown>, time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_replaces_start_none_told = (params) => `We'll start emailing ${params.who} about ${params.to} at ${params.time}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_moves = () => `Each moves at their first renewal at least 30 days after their own email.`
+
+
+/**
+ * @param {{ from: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_moves_keeps = (params) => `Each moves at their first renewal at least 30 days after their own email, and keeps paying ${params.from} until then.`
+
+
+/**
+ * @param {{ who: NonNullable<unknown>, to: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_running_lead = (params) => `Emailing ${params.who} about ${params.to}.`
+
+
+/**
+ * @param {{ perRun: NonNullable<unknown>, time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_running_rate = (params) => `We email about ${params.perRun} an hour, so the rest by about ${params.time}.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_running_held = (params) => `Our support team is handling the ${params.count}.`
+
+
+/**
+ * @param {{ run: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_running_as_of = (params) => `As of ${params.run}.`
+
+
+/**
+ * @param {{ time: NonNullable<unknown>, run: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_checked = (params) => `Checked at ${params.time}: nothing has changed since ${params.run}.`
+
+
+/**
+ * @param {{ perRun: NonNullable<unknown>, time: NonNullable<unknown>, done: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_checked_next = (params) => `The next ${params.perRun} go at ${params.time}, and the rest by about ${params.done}.`
+
+
+/**
+ * @param {{ time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_checked_rest = (params) => `The rest go at ${params.time}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_count_emailed = () => `emailed`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_count_scheduled = () => `moves scheduled`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_count_to_email = () => `still to email`
+
+
+/**
+ * @param {{ time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_count_retrying = (params) => `to try again at ${params.time}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_count_held = () => `couldn't be moved yet`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_count_not_emailed = () => `couldn't be emailed`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_count_waiting = () => `waiting`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_what_prices = () => `the new prices`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_what_price = () => `the new price`
+
+
+/**
+ * @param {{ who: NonNullable<unknown>, what: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_done_all = (params) => `All ${params.who} have been emailed about ${params.what}.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, what: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_done_one_tier = (params) => `Your 1 ${params.name} subscriber has been emailed about ${params.what}.`
+
+
+/**
+ * @param {{ what: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_done_one_course = (params) => `The 1 person subscribed to this course has been emailed about ${params.what}.`
+
+
+/**
+ * @param {{ emailed: NonNullable<unknown>, who: NonNullable<unknown>, what: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_done_some = (params) => `${params.emailed} of ${params.who} have been emailed about ${params.what}.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown>, from: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_done_held_not_emailed = (params) => `Our support team is handling the ${params.count} we couldn't email; they keep paying ${params.from} until then.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown>, from: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_done_held_not_moved = (params) => `Our support team is handling the ${params.count} we couldn't move yet; they keep paying ${params.from} until then.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown>, from: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_done_held_both = (params) => `Our support team is handling the ${params.count} we couldn't email or move; they keep paying ${params.from} until then.`
+
+
+/**
+ * @param {{ time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_finished_today = (params) => `Finished at ${params.time}.`
+
+
+/**
+ * @param {{ date: NonNullable<unknown>, time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_finished_on = (params) => `Finished on ${params.date} at ${params.time}.`
+
+
+/**
+ * @param {{ who: NonNullable<unknown>, to: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_paused_lead = (params) => `We've paused emailing ${params.who} about ${params.to}.`
+
+
+/**
+ * @param {{ from: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_paused_body = (params) => `Our first emails couldn't be sent, so nobody has been moved and everyone keeps paying ${params.from} for now. Our support team has been told and will restart it; you don't need to do anything.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_load_failed = () => `We couldn't load how your price change is going.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_try_again = () => `Try again`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_check_again = () => `Check again`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_check_again_aria = (params) => `Check again how the ${params.name} price change is going`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_dismiss = () => `Dismiss`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_dismiss_aria = (params) => `Dismiss the ${params.name} price note`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_note_bar_label = () => `Emails sent`
+
+
+/**
+ * @param {{ date: NonNullable<unknown>, price: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_change_wait_billing_month = (params) => `You keep yearly billing until ${params.date}, then pay ${params.price} a month. Nothing is charged today.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_change_wait_aside_billing = () => `Changed your mind before then? Keep yearly billing from this page or from your account.`
+
+
+/**
+ * @param {{ currentPlan: NonNullable<unknown>, date: NonNullable<unknown>, plan: NonNullable<unknown>, price: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_change_wait_plan_and_billing_month = (params) => `You keep ${params.currentPlan}, billed yearly, until ${params.date}, then move to ${params.plan} at ${params.price} a month. Nothing is charged today.`
+
+
+/**
+ * @param {{ currentPlan: NonNullable<unknown>, date: NonNullable<unknown>, plan: NonNullable<unknown>, price: NonNullable<unknown>, movingPrice: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_change_wait_billing_instead = (params) => `You keep ${params.currentPlan}, billed yearly, until ${params.date}, then move to ${params.plan} at ${params.price} a month instead of ${params.movingPrice} a year. Nothing is charged today.`
+
+
+/**
+ * @param {{ plan: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_change_upgrade_then_billing_month = (params) => `${params.plan} starts now. Today you pay the difference for the rest of your year; monthly billing starts on ${params.date}.`
+
+
+/**
+ * @param {{ plan: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_change_same_price_then_billing_month = (params) => `${params.plan} starts now, and nothing is charged today; monthly billing starts on ${params.date}.`
+
+
+/**
+ * @param {{ date: NonNullable<unknown>, plan: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_change_keep_first_billing = (params) => `Upgrading cancels your switch to monthly billing on ${params.date}. ${params.plan} starts straight away, and we'll show you the charge before you confirm.`
+
+
+/**
+ * @param {{ currentPlan: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_change_billing_cancelled = (params) => `Your switch to monthly billing is cancelled. You're on ${params.currentPlan}, billed yearly, until you confirm.`
+
+
+/**
+ * @param {{ currentPlan: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_change_declined_after_keep_billing = (params) => `You're still on ${params.currentPlan}, billed yearly. Your switch to monthly billing was cancelled in the first step, so switch again if you'd still like it.`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_billing_notice_title_month = (params) => `Switching to monthly billing on ${params.date}`
+
+
+/**
+ * @param {{ plan: NonNullable<unknown>, price: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_billing_notice_body_month = (params) => `You keep yearly billing until then. ${params.plan} is ${params.price} a month after that.`
+
+
+/**
+ * @param {{ plan: NonNullable<unknown>, price: NonNullable<unknown>, laterPrice: NonNullable<unknown>, laterDate: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_billing_notice_body_later_month = (params) => `You keep yearly billing until then. ${params.plan} is ${params.price} a month after that, then ${params.laterPrice} a month from ${params.laterDate}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_billing_keep = () => `Keep yearly billing`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_billing_from_month = (params) => `Monthly from ${params.date}`
+
+
+/**
+ * @param {{ plan: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_move_notice_title_billing_month = (params) => `Moving to ${params.plan}, billed monthly, on ${params.date}`
+
+
+/**
+ * @param {{ currentPlan: NonNullable<unknown>, plan: NonNullable<unknown>, price: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_move_notice_body_billing_month = (params) => `You keep ${params.currentPlan}, billed yearly, until then. ${params.plan} is ${params.price} a month after that.`
+
+
+/**
+ * @param {{ currentPlan: NonNullable<unknown>, plan: NonNullable<unknown>, price: NonNullable<unknown>, laterPrice: NonNullable<unknown>, laterDate: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_move_notice_body_billing_later_month = (params) => `You keep ${params.currentPlan}, billed yearly, until then. ${params.plan} is ${params.price} a month after that, then ${params.laterPrice} a month from ${params.laterDate}.`
+
+
+/**
+ * @param {{ date: NonNullable<unknown>, price: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_move_kept_billing = (params) => `You're staying on yearly billing. Your next payment on ${params.date} is ${params.price}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_move_kept_billing_undated = () => `You're staying on yearly billing.`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_move_keep_failed_billing = (params) => `We couldn't keep yearly billing just now, so your switch to monthly billing is still set for ${params.date}. Please try again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_move_landed_billing = () => `Your switch to monthly billing has already happened at your renewal, so you're billed monthly now.`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const account_billing_change_survives_cancel = (params) => `If you reactivate, you'll still switch to monthly billing on ${params.date}, as you chose.`
+
+
+/**
+ * @param {{ errorId: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_refusal_scheduled_elsewhere = (params) => `This subscription can't be changed here just now. Please contact support and quote this reference: ${params.errorId}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_refusal_scheduled_elsewhere_no_ref = () => `This subscription can't be changed here just now. Please contact support.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const player_preview_watch_again = () => `Watch preview again`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const player_preview_listen_again = () => `Listen to preview again`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_refusal_yearly_below_monthly = () => `The yearly price can't be less than the monthly price.`

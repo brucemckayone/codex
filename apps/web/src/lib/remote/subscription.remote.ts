@@ -33,6 +33,12 @@ type SubscriptionCommandFailure = {
    * mapping keyed on the top-level code reads what it read before.
    */
   detailsCode: string | undefined;
+  /**
+   * The worker's `details.errorId`: the id support was alerted with, which
+   * the page shows for the member to quote (SUBSCRIPTION_SCHEDULED_ELSEWHERE,
+   * Codex-2hxff.97).
+   */
+  errorId: string | undefined;
   message: string;
   status: number;
 };
@@ -41,6 +47,12 @@ function detailsCodeOf(details: unknown): string | undefined {
   if (!details || typeof details !== 'object') return undefined;
   const code = (details as { code?: unknown }).code;
   return typeof code === 'string' ? code : undefined;
+}
+
+function errorIdOf(details: unknown): string | undefined {
+  if (!details || typeof details !== 'object') return undefined;
+  const errorId = (details as { errorId?: unknown }).errorId;
+  return typeof errorId === 'string' ? errorId : undefined;
 }
 
 /**
@@ -52,17 +64,21 @@ function detailsCodeOf(details: unknown): string | undefined {
  * have acted. Returning it skips the `handleError` hook a throw would reach,
  * so it is logged here, where its cause is (Codex-2hxff.66), and the browser
  * gets fixed copy, never `error.message`.
+ *
+ * `ids` name what the command acted on for that log line: the org's id, or
+ * the ids of a command with no org (a course subscription's).
  */
 function toCommandFailure(
   error: unknown,
   commandName: string,
-  organizationId: string
+  ids: string | Record<string, string>
 ): SubscriptionCommandFailure {
   if (ApiError.isApiError(error)) {
     return {
       success: false,
       code: error.code,
       detailsCode: detailsCodeOf(error.details),
+      errorId: errorIdOf(error.details),
       message: error.message,
       status: error.status,
     };
@@ -70,7 +86,7 @@ function toCommandFailure(
   logger.error(
     `subscription command ${commandName} failed with no API answer`,
     {
-      organizationId,
+      ...(typeof ids === 'string' ? { organizationId: ids } : ids),
       errorName: error instanceof Error ? error.name : typeof error,
       reason: error instanceof Error ? error.message : String(error),
     }
@@ -79,6 +95,7 @@ function toCommandFailure(
     success: false,
     code: undefined,
     detailsCode: undefined,
+    errorId: undefined,
     message: 'An unexpected error occurred',
     status: 500,
   };
@@ -184,6 +201,18 @@ const changeTierCommandSchema = z.object({
    * Omitted by `previewSubscriptionTierChange` itself (preview computes its own).
    */
   prorationDate: z.number().int().positive().optional(),
+  /**
+   * A switch into yearly billing: the preview's `quote`, passed back unchanged.
+   * The server re-checks it before the write (Codex-2hxff.96).
+   */
+  quote: z.string().max(512).optional(),
+  /**
+   * Every change: the preview's `newRecurringAmountCents`, passed back
+   * unchanged. The server refuses a different price with
+   * TIER_CHANGE_PREVIEW_EXPIRED, for a change made now as for one that waits
+   * (review C1 cycle 2, L4; cycle 3, L4-a).
+   */
+  newRecurringAmountCents: z.number().int().nonnegative().optional(),
 });
 
 /**
@@ -320,6 +349,79 @@ export const resumeSubscription = command(
   }
 );
 
+const keepCurrentPlanCommandSchema = z.object({
+  organizationId: z.string().uuid(),
+});
+
+/**
+ * Keep the current plan: undo a move to a cheaper plan that waits for the
+ * renewal (Codex-2hxff.16). Nothing is charged. After the renewal the move
+ * lands on, the worker refuses with `MOVE_ALREADY_LANDED` (`detailsCode`),
+ * and the page reads the subscription again.
+ */
+export const keepCurrentPlan = command(
+  keepCurrentPlanCommandSchema,
+  async (input) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    try {
+      const result = await api.subscription.keepCurrentPlan(input);
+      return { success: true as const, data: result };
+    } catch (error) {
+      return toCommandFailure(error, 'keepCurrentPlan', input.organizationId);
+    }
+  }
+);
+
+const courseSubscriptionCommandSchema = z.object({
+  courseSubscriptionId: z.string().uuid(),
+});
+
+/**
+ * Cancel one of the user's course subscriptions at period end
+ * (Codex-2hxff.52). Returns the card's new row. Another user's id is a 404.
+ */
+export const cancelCourseSubscription = command(
+  courseSubscriptionCommandSchema,
+  async ({ courseSubscriptionId }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    try {
+      const result =
+        await api.subscription.cancelCourseSubscription(courseSubscriptionId);
+      return { success: true as const, data: result };
+    } catch (error) {
+      return toCommandFailure(error, 'cancelCourseSubscription', {
+        courseSubscriptionId,
+      });
+    }
+  }
+);
+
+/**
+ * Undo a course subscription's cancel before its period ends
+ * (Codex-2hxff.52). A course no longer offered is refused with
+ * `COURSE_NOT_ON_SALE` (`detailsCode`).
+ */
+export const reactivateCourseSubscription = command(
+  courseSubscriptionCommandSchema,
+  async ({ courseSubscriptionId }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    try {
+      const result =
+        await api.subscription.reactivateCourseSubscription(
+          courseSubscriptionId
+        );
+      return { success: true as const, data: result };
+    } catch (error) {
+      return toCommandFailure(error, 'reactivateCourseSubscription', {
+        courseSubscriptionId,
+      });
+    }
+  }
+);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Admin: Tier CRUD Commands
 // ─────────────────────────────────────────────────────────────────────────────
@@ -383,13 +485,25 @@ const updateTierCommandSchema = z.object({
 
 /**
  * Update an existing subscription tier.
+ *
+ * A refusal is RETURNED, not thrown, as `createTier`'s is: Edit Tier says
+ * `YEARLY_PRICE_BELOW_MONTHLY` (owner: "Refuse yearly below monthly") at the
+ * yearly price, and a thrown 4xx reaches the browser as a sanitised 500 with
+ * no code.
  */
 export const updateTier = command(
   updateTierCommandSchema,
   async ({ orgId, tierId, ...data }) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
-    return api.tiers.update(orgId, tierId, data);
+    try {
+      return {
+        success: true as const,
+        tier: await api.tiers.update(orgId, tierId, data),
+      };
+    } catch (error) {
+      return toCommandFailure(error, 'updateTier', orgId);
+    }
   }
 );
 
@@ -502,6 +616,17 @@ export const setTierItems = command(
     }
   }
 );
+
+/**
+ * How the org's tier price changes are going (Codex-2hxff.86), for the note
+ * on each tier row. Read once per visit, and again only when the owner
+ * presses Check again or saves: the counts change only on the hourly run.
+ */
+export const getTierPriceChanges = query(z.string().uuid(), async (orgId) => {
+  const { platform, cookies } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+  return (await api.tiers.priceChanges(orgId)).items;
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Admin: Feature Toggle

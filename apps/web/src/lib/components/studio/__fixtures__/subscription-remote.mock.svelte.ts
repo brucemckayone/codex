@@ -161,6 +161,8 @@ let stats = makeSlot<SubscriptionStats>(TWO_SUBSCRIBERS);
 let accessSummary = makeSlot<unknown>();
 let deleteImpacts = new Map<string, QuerySlot<unknown>>();
 let tierItems = new Map<string, QuerySlot<unknown>>();
+/** The tiers' price changes (Codex-2hxff.86): answered, none, by default. */
+let priceChanges = makeSlot<unknown[]>([]);
 let subscribers = makeSlot<{
   items: unknown[];
   pagination: {
@@ -201,6 +203,7 @@ export function reset() {
   accessSummary = makeSlot<unknown>();
   deleteImpacts = new Map();
   tierItems = new Map();
+  priceChanges = makeSlot<unknown[]>([]);
   subscribers = makeSlot({
     items: [],
     pagination: { page: 1, limit: 20, total: 0, totalPages: 0 },
@@ -213,6 +216,7 @@ export const orgPayoutSlot = () => orgPayout;
 export const tiersSlot = () => tiers;
 export const statsSlot = () => stats;
 export const accessSummarySlot = () => accessSummary;
+export const priceChangesSlot = () => priceChanges;
 
 /** The delete-impact slot for one tier (made on first read, still loading). */
 export function deleteImpactSlot(tierId: string): QuerySlot<unknown> {
@@ -254,3 +258,4 @@ export const listTierItems = vi.fn(
     tierItemsSlot(tierItemsKey(args))
 );
 export const listSubscribers = vi.fn((_args: unknown) => subscribers);
+export const getTierPriceChanges = vi.fn((_orgId: string) => priceChanges);

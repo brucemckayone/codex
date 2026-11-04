@@ -1,20 +1,16 @@
 /**
  * The 30-day price-change rule (Codex-2hxff.3) against a mocked Stripe.
- * The fan-out services are covered in subscription-service.test.ts; this file
- * pins the per-subscription decision, the notice-first order (D-P3,
- * Codex-2hxff.43) and the renewal-date arithmetic.
+ * The hourly step that works the recorded rows is covered in
+ * price-moves-sweep.integration.test.ts; this file pins the per-subscription
+ * decision, the notice-first order (D-P3, Codex-2hxff.43), the waiting-move
+ * rules (Codex-2hxff.16, Part A rules 1 and 2) and the renewal-date
+ * arithmetic.
  */
 import Stripe from 'stripe';
 import { describe, expect, it, vi } from 'vitest';
 import { PriceChangeStageError } from '../../errors';
 import {
-  alertFanOutOutOfTime,
   applyDuePendingPriceChange,
-  FAN_OUT_ALERT_CHUNK,
-  FAN_OUT_ALERT_MAX_NAMED,
-  FAN_OUT_ALERT_NAME_BYTES,
-  FAN_OUT_DEADLINE_MS,
-  FAN_OUT_STRIPE_CALLS_PER_SUBSCRIBER,
   FAN_OUT_STRIPE_REQUEST,
   FAN_OUT_STRIPE_TIMEOUT_MS,
   firstRenewalOnOrAfter,
@@ -22,13 +18,11 @@ import {
   moveFailureAlert,
   noticeFailureAlert,
   PRICE_CHANGE_NOTICE_SECONDS,
-  PRICE_FAN_OUT_BUDGET_MS,
   PRICE_NOTICE_TIMEOUT_MS,
   type PriceChangeNotice,
+  platformWriteMetadata,
   schedulePriceChange,
   sendPriceChangeNotice,
-  WAIT_UNTIL_LIMIT_MS,
-  WORKER_LOG_LIMIT_BYTES,
 } from '../pending-price-change';
 
 const DAY = 24 * 60 * 60;
@@ -64,15 +58,26 @@ function fakeSub(opts: {
   } as unknown as Stripe.Subscription;
 }
 
-function fakeStripe(subscription: Stripe.Subscription) {
+function fakeStripe(
+  subscription: Stripe.Subscription,
+  archived: readonly string[] = []
+) {
   const update = vi.fn().mockResolvedValue({});
+  const prices = {
+    retrieve: vi.fn(async (id: string) => ({
+      id,
+      active: !archived.includes(id),
+    })),
+    update: vi.fn(async (id: string) => ({ id, active: true })),
+  };
   const stripe = {
     subscriptions: {
       retrieve: vi.fn().mockResolvedValue(subscription),
       update,
     },
+    prices,
   } as unknown as Stripe;
-  return { stripe, update };
+  return { stripe, update, prices };
 }
 
 const target = {
@@ -149,8 +154,452 @@ describe('schedulePriceChange', () => {
 
     const outcome = await schedulePriceChange(stripe, target, accept);
 
-    expect(outcome.kind).toBe('skipped');
+    expect(outcome).toEqual({ kind: 'skipped', reason: 'other_interval' });
     expect(update).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['canceled', 'ended'],
+    ['incomplete_expired', 'ended'],
+  ] as const)('a %s subscription is skipped (%s): no notice, no write', async (status, reason) => {
+    const { stripe, update } = fakeStripe(
+      fakeSub({ renewal: NOTICE_SEC + 40 * DAY, status })
+    );
+    const notify = vi.fn().mockResolvedValue(true);
+
+    const outcome = await schedulePriceChange(stripe, target, notify);
+
+    expect(outcome).toEqual({ kind: 'skipped', reason });
+    expect(notify).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('a subscription with no items is skipped (no_items)', async () => {
+    const sub = fakeSub({ renewal: NOTICE_SEC + 40 * DAY });
+    (sub.items as { data: unknown[] }).data = [];
+    const { stripe, update } = fakeStripe(sub);
+
+    const outcome = await schedulePriceChange(stripe, target, accept);
+
+    expect(outcome).toEqual({ kind: 'skipped', reason: 'no_items' });
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  // Part A rule 1 (Codex-2hxff.16): the live subscription is checked before
+  // the email, as a move away can start after the row was written.
+  it('skipLive names a reason: nobody is notified and nothing is written', async () => {
+    const live = fakeSub({
+      renewal: NOTICE_SEC + 40 * DAY,
+      metadata: { codex_move_tier_id: 'tier_cheaper' },
+    });
+    const { stripe, update } = fakeStripe(live);
+    const notify = vi.fn().mockResolvedValue(true);
+    const skipLive = vi.fn(() => 'moving_away' as const);
+
+    const outcome = await schedulePriceChange(
+      stripe,
+      { ...target, skipLive },
+      notify
+    );
+
+    expect(outcome).toEqual({ kind: 'skipped', reason: 'moving_away' });
+    expect(skipLive).toHaveBeenCalledWith(live);
+    expect(notify).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  // Part A rule 2: a member waiting to move TO the repriced tier moves at the
+  // price they confirmed; the new one starts at a renewal after the move, 30
+  // days after their own notice, and is never swapped in now.
+  describe('a member moving onto the tier (floorFrom)', () => {
+    it('is left pending even when the next renewal is ≥ 30 days away', async () => {
+      const renewal = NOTICE_SEC + 40 * DAY;
+      const { stripe, update } = fakeStripe(fakeSub({ renewal }));
+      // The move lands at this renewal; the floor is one second after it.
+      const floorFrom = new Date((renewal + 1) * 1000);
+
+      const outcome = await schedulePriceChange(
+        stripe,
+        { ...target, floorFrom },
+        accept
+      );
+
+      // The first renewal after the move: one month on.
+      expect(outcome).toMatchObject({
+        kind: 'pending',
+        effectiveAt: new Date(
+          firstRenewalOnOrAfter({
+            nextRenewal: renewal,
+            anchor: renewal,
+            interval: 'month',
+            earliest: renewal + 1,
+          }) * 1000
+        ),
+      });
+      expect(update.mock.calls[0]?.[1]).toEqual({
+        metadata: {
+          codex_pending_price_id: 'price_new',
+          codex_pending_price_from: String(renewal + 1),
+        },
+      });
+    });
+
+    it('never swaps now, even when the floor has passed and the renewal is ≥ 30 days away', async () => {
+      const renewal = NOTICE_SEC + 40 * DAY;
+      const { stripe, update } = fakeStripe(fakeSub({ renewal }));
+
+      const outcome = await schedulePriceChange(
+        stripe,
+        { ...target, floorFrom: new Date((NOTICE_SEC + 5 * DAY) * 1000) },
+        accept
+      );
+
+      expect(outcome).toMatchObject({
+        kind: 'pending',
+        effectiveAt: new Date(renewal * 1000),
+      });
+      expect(update.mock.calls[0]?.[1]).not.toHaveProperty('items');
+    });
+
+    it('the earliest date is max(notice + 30 days, floor): a floor before it changes nothing', async () => {
+      const renewal = NOTICE_SEC + 10 * DAY;
+      const { stripe, update } = fakeStripe(fakeSub({ renewal }));
+
+      await schedulePriceChange(
+        stripe,
+        { ...target, floorFrom: new Date((renewal + 1) * 1000) },
+        accept
+      );
+
+      expect(update.mock.calls[0]?.[1]).toEqual({
+        metadata: {
+          codex_pending_price_id: 'price_new',
+          codex_pending_price_from: String(
+            NOTICE_SEC + PRICE_CHANGE_NOTICE_SECONDS
+          ),
+        },
+      });
+    });
+  });
+
+  // Codex-2hxff.97: a switch to monthly billing waits for the year's end on
+  // a Stripe schedule, and the item keeps the yearly Price until then.
+  describe('a waiting change of billing, or a schedule attached', () => {
+    const switching = {
+      codex_move_tier_id: '6f1d2c3b-4a59-4e6f-8a7b-9c0d1e2f3a4b',
+      codex_move_at: String(NOTICE_SEC + 40 * DAY),
+      codex_hold_price_id: 'price_year',
+      codex_hold_amount: '12000',
+      codex_move_interval: 'month',
+      codex_move_price_id: 'price_old',
+      codex_move_amount: '500',
+    };
+
+    it('a mover onto the monthly price: judged on phase 2, quoted at what they will pay, the marker only', async () => {
+      const renewal = NOTICE_SEC + 40 * DAY;
+      const { stripe, update } = fakeStripe(
+        fakeSub({
+          renewal,
+          interval: 'year',
+          priceId: 'price_year',
+          unitAmount: 12000,
+          metadata: switching,
+        })
+      );
+
+      const outcome = await schedulePriceChange(
+        stripe,
+        { ...target, floorFrom: new Date((renewal + 1) * 1000) },
+        accept
+      );
+
+      expect(outcome).toMatchObject({
+        kind: 'pending',
+        currentAmountCents: 500,
+      });
+      expect(update.mock.calls[0]?.[1]).not.toHaveProperty('items');
+    });
+
+    it('a change on the yearly price they are leaving: skipped, nothing written', async () => {
+      const { stripe, update } = fakeStripe(
+        fakeSub({
+          renewal: NOTICE_SEC + 40 * DAY,
+          interval: 'year',
+          priceId: 'price_year',
+          unitAmount: 12000,
+          metadata: switching,
+        })
+      );
+
+      const outcome = await schedulePriceChange(
+        stripe,
+        { ...target, interval: 'year', newAmountCents: 13000 },
+        accept
+      );
+
+      expect(outcome).toEqual({ kind: 'skipped', reason: 'other_interval' });
+      expect(update).not.toHaveBeenCalled();
+    });
+
+    it('the same amount as phase 2: no item write (it would split the schedule)', async () => {
+      const { stripe, update } = fakeStripe(
+        fakeSub({
+          renewal: NOTICE_SEC + 40 * DAY,
+          interval: 'year',
+          priceId: 'price_year',
+          unitAmount: 12000,
+          metadata: switching,
+        })
+      );
+
+      const outcome = await schedulePriceChange(
+        stripe,
+        { ...target, newAmountCents: 500 },
+        accept
+      );
+
+      expect(outcome).toEqual({ kind: 'unchanged' });
+      for (const [, params] of update.mock.calls) {
+        expect(params).not.toHaveProperty('items');
+      }
+    });
+
+    it('a schedule attached: the marker, never a swap now, even 30 days out', async () => {
+      const renewal = NOTICE_SEC + 40 * DAY;
+      const sub = fakeSub({ renewal });
+      (sub as unknown as { schedule: string }).schedule = 'sub_sched_1';
+      const { stripe, update } = fakeStripe(sub);
+
+      const outcome = await schedulePriceChange(stripe, target, accept);
+
+      expect(outcome).toMatchObject({ kind: 'pending' });
+      expect(update.mock.calls[0]?.[1]).not.toHaveProperty('items');
+    });
+  });
+
+  // The hourly step's last try for this person has an unknown outcome: the
+  // email may have gone, or a run stopped after its write. Stripe already
+  // carrying the change counts as moved: nothing is sent or written again.
+  describe('a try whose outcome is unknown (mayBeTold)', () => {
+    it('already on the new Price: moved, from the next renewal; not told again, nothing written', async () => {
+      const renewal = NOTICE_SEC + 10 * DAY;
+      const { stripe, update } = fakeStripe(
+        fakeSub({ renewal, priceId: 'price_new', unitAmount: 700 })
+      );
+      const notify = vi.fn().mockResolvedValue(true);
+
+      const outcome = await schedulePriceChange(
+        stripe,
+        { ...target, mayBeTold: true },
+        notify
+      );
+
+      expect(outcome).toEqual({
+        kind: 'applied',
+        effectiveAt: new Date(renewal * 1000),
+        currentAmountCents: 700,
+        landed: true,
+      });
+      expect(notify).not.toHaveBeenCalled();
+      expect(update).not.toHaveBeenCalled();
+    });
+
+    it('marked pending for the new Price: moved, from the first renewal the marker allows; not told again', async () => {
+      const renewal = NOTICE_SEC + 10 * DAY;
+      const from = NOTICE_SEC + 31 * DAY;
+      const { stripe, update } = fakeStripe(
+        fakeSub({
+          renewal,
+          metadata: {
+            codex_pending_price_id: 'price_new',
+            codex_pending_price_from: String(from),
+          },
+        })
+      );
+      const notify = vi.fn().mockResolvedValue(true);
+
+      const outcome = await schedulePriceChange(
+        stripe,
+        { ...target, mayBeTold: true },
+        notify
+      );
+
+      expect(outcome).toEqual({
+        kind: 'pending',
+        effectiveAt: new Date(
+          firstRenewalOnOrAfter({
+            nextRenewal: renewal,
+            anchor: renewal,
+            interval: 'month',
+            earliest: from,
+          }) * 1000
+        ),
+        currentAmountCents: 500,
+        landed: true,
+      });
+      expect(notify).not.toHaveBeenCalled();
+      expect(update).not.toHaveBeenCalled();
+    });
+
+    it('carrying another change: told and written as usual', async () => {
+      const { stripe, update } = fakeStripe(
+        fakeSub({
+          renewal: NOTICE_SEC + 10 * DAY,
+          metadata: {
+            codex_pending_price_id: 'price_older',
+            codex_pending_price_from: String(NOTICE_SEC + DAY),
+          },
+        })
+      );
+      const notify = vi.fn().mockResolvedValue(true);
+
+      const outcome = await schedulePriceChange(
+        stripe,
+        { ...target, mayBeTold: true },
+        notify
+      );
+
+      expect(outcome.kind).toBe('pending');
+      expect(outcome).not.toHaveProperty('landed');
+      expect(notify).toHaveBeenCalledOnce();
+      expect(update).toHaveBeenCalledOnce();
+    });
+  });
+
+  // Review C1, F1: the member can change plan while their notice is being
+  // sent. The subscription is read again after the notice, and their change
+  // is never written over.
+  describe('a change of plan during the notice', () => {
+    /** Stripe as it stands; `during` lands inside the notice. */
+    function changingStripe(
+      before: Stripe.Subscription,
+      during: Stripe.Subscription
+    ) {
+      let current = before;
+      const update = vi.fn().mockResolvedValue({});
+      const stripe = {
+        subscriptions: {
+          retrieve: vi.fn(async () => current),
+          update,
+        },
+      } as unknown as Stripe;
+      const notify = vi.fn(async () => {
+        current = during;
+        return true;
+      });
+      return { stripe, update, notify };
+    }
+    /** The sweep's rule for a tier row on `tier_a`. */
+    const leavingTierA = (live: Stripe.Subscription) => {
+      const movingTo = live.metadata?.codex_move_tier_id;
+      if (movingTo) return movingTo === 'tier_a' ? null : 'moving_away';
+      const on = live.metadata?.codex_tier_id;
+      return on && on !== 'tier_a' ? 'moving_away' : null;
+    };
+    const renewal = NOTICE_SEC + 40 * DAY;
+    const onTierA = fakeSub({ renewal, metadata: { codex_tier_id: 'tier_a' } });
+
+    it.each([
+      [
+        'a move to a cheaper tier',
+        fakeSub({
+          renewal,
+          priceId: 'price_b',
+          unitAmount: 300,
+          metadata: {
+            codex_tier_id: 'tier_a',
+            codex_move_tier_id: 'tier_b',
+            codex_move_at: String(renewal),
+            codex_hold_price_id: 'price_old',
+            codex_hold_amount: '500',
+          },
+        }),
+      ],
+      [
+        'an upgrade',
+        fakeSub({
+          renewal,
+          priceId: 'price_c',
+          unitAmount: 900,
+          metadata: { codex_tier_id: 'tier_c' },
+        }),
+      ],
+    ])('%s: skipped, and nothing is written over it', async (_label, during) => {
+      const { stripe, update, notify } = changingStripe(onTierA, during);
+
+      const outcome = await schedulePriceChange(
+        stripe,
+        { ...target, skipLive: leavingTierA },
+        notify
+      );
+
+      expect(notify).toHaveBeenCalledOnce();
+      expect(outcome).toEqual({ kind: 'skipped', reason: 'moving_away' });
+      expect(stripe.subscriptions.retrieve).toHaveBeenCalledTimes(2);
+      expect(update).not.toHaveBeenCalled();
+    });
+
+    it('a change that leaves them on the tier: the move is decided again, on what is there now', async () => {
+      // Past due by the time the notice is accepted: no swap now, the marker.
+      const { stripe, update, notify } = changingStripe(
+        onTierA,
+        fakeSub({
+          renewal,
+          status: 'past_due',
+          metadata: { codex_tier_id: 'tier_a' },
+        })
+      );
+
+      const outcome = await schedulePriceChange(
+        stripe,
+        { ...target, skipLive: leavingTierA },
+        notify
+      );
+
+      expect(outcome).toMatchObject({ kind: 'pending' });
+      expect(update).toHaveBeenCalledOnce();
+      expect(update.mock.calls[0]?.[1]).not.toHaveProperty('items');
+    });
+
+    it('found already on the new Price once told: moved, and not "landed" (the email went now)', async () => {
+      const { stripe, update, notify } = changingStripe(
+        onTierA,
+        fakeSub({
+          renewal,
+          priceId: 'price_new',
+          unitAmount: 700,
+          metadata: { codex_tier_id: 'tier_a' },
+        })
+      );
+
+      const outcome = await schedulePriceChange(stripe, target, notify);
+
+      expect(outcome).toEqual({
+        kind: 'applied',
+        effectiveAt: new Date(renewal * 1000),
+        currentAmountCents: 700,
+      });
+      expect(update).not.toHaveBeenCalled();
+    });
+
+    it('nothing changed: the move is written from the first read', async () => {
+      const { stripe, update, notify } = changingStripe(onTierA, onTierA);
+
+      const outcome = await schedulePriceChange(
+        stripe,
+        { ...target, skipLive: leavingTierA },
+        notify
+      );
+
+      expect(outcome).toMatchObject({ kind: 'applied' });
+      expect(update).toHaveBeenCalledWith(
+        'sub_1',
+        expect.objectContaining({
+          items: [{ id: 'si_1', price: 'price_new' }],
+        }),
+        expect.anything()
+      );
+    });
   });
 
   it('a past-due subscription is marked pending even when its renewal is far off', async () => {
@@ -316,16 +765,18 @@ describe('schedulePriceChange', () => {
   });
 
   // Review A round 2, correctness #1 / silent R2: the SDK's defaults (80 s,
-  // two retries) let one slow call outlast the 30 s waitUntil budget, so
-  // every call on a subscriber's path carries its own timeout, and the path
-  // makes no more calls than the budget arithmetic counts.
+  // two retries) would let one slow call hold up a whole batch of the hourly
+  // step, so every call on a subscriber's path carries its own timeout. The
+  // path makes one read and at most one write, and a second read after an
+  // accepted notice (F1).
   describe('every Stripe call has a 3 s timeout and no retry', () => {
     it.each([
-      ['a swap now', fakeSub({ renewal: NOTICE_SEC + 40 * DAY })],
-      ['a pending marker', fakeSub({ renewal: NOTICE_SEC + 10 * DAY })],
+      ['a swap now', fakeSub({ renewal: NOTICE_SEC + 40 * DAY }), 2],
+      ['a pending marker', fakeSub({ renewal: NOTICE_SEC + 10 * DAY }), 2],
       [
         'a same-amount swap',
         fakeSub({ renewal: NOTICE_SEC + 10 * DAY, unitAmount: 700 }),
+        1,
       ],
       [
         'a same-amount clear',
@@ -338,8 +789,9 @@ describe('schedulePriceChange', () => {
             codex_pending_price_from: String(NOTICE_SEC + 5 * DAY),
           },
         }),
+        1,
       ],
-    ])('%s', async (_label, subscription) => {
+    ])('%s', async (_label, subscription, reads) => {
       const { stripe, update } = fakeStripe(subscription);
       const retrieve = vi.mocked(stripe.subscriptions.retrieve);
 
@@ -349,27 +801,17 @@ describe('schedulePriceChange', () => {
         timeout: 3_000,
         maxNetworkRetries: 0,
       });
-      expect(retrieve).toHaveBeenCalledWith('sub_1', FAN_OUT_STRIPE_REQUEST);
+      expect(retrieve).toHaveBeenCalledTimes(reads);
+      for (const call of retrieve.mock.calls) {
+        expect(call).toEqual(['sub_1', FAN_OUT_STRIPE_REQUEST]);
+      }
       expect(update).toHaveBeenCalledTimes(1);
       expect(update.mock.calls[0]?.[2]).toMatchObject(FAN_OUT_STRIPE_REQUEST);
-      expect(retrieve.mock.calls.length + update.mock.calls.length).toBe(
-        FAN_OUT_STRIPE_CALLS_PER_SUBSCRIBER
-      );
     });
 
-    it('the budget leaves the last batch its worst case inside 28 s', () => {
+    it('a subscriber waits at most 3 s per Stripe call and 5 s for the notice', () => {
       expect(FAN_OUT_STRIPE_TIMEOUT_MS).toBe(3_000);
       expect(PRICE_NOTICE_TIMEOUT_MS).toBe(5_000);
-      expect(FAN_OUT_STRIPE_CALLS_PER_SUBSCRIBER).toBe(2);
-      expect(PRICE_FAN_OUT_BUDGET_MS).toBe(17_000);
-      // Latest start + a read and a write at their timeout + the notice.
-      expect(
-        PRICE_FAN_OUT_BUDGET_MS +
-          FAN_OUT_STRIPE_CALLS_PER_SUBSCRIBER * FAN_OUT_STRIPE_TIMEOUT_MS +
-          PRICE_NOTICE_TIMEOUT_MS
-      ).toBeLessThanOrEqual(FAN_OUT_DEADLINE_MS);
-      expect(FAN_OUT_DEADLINE_MS).toBe(28_000);
-      expect(FAN_OUT_DEADLINE_MS).toBeLessThan(WAIT_UNTIL_LIMIT_MS);
     });
 
     // What stripe-node throws when the timeout fires (RequestSender): a
@@ -728,126 +1170,6 @@ describe('the price-change alerts', () => {
   });
 });
 
-// Review A, silent #1: one alert, one errorId, at most 200 ids per line.
-// Round 2, silent R1: Cloudflare keeps 256 KB of logs per invocation and
-// drops the rest, so the count comes first and the names are capped.
-describe('alertFanOutOutOfTime', () => {
-  const subscribersOf = (length: number) =>
-    Array.from({ length }, (_, n) => ({ subscriptionId: `sub_${n}` }));
-
-  it('counts first, names at most 300 in lines of 200, then points to the query', () => {
-    const logError = vi.fn();
-    const subscribers = subscribersOf(1_234);
-
-    alertFanOutOutOfTime(logError, {
-      errorId: 'err_1',
-      context: { tierId: 'tier_1' },
-      subscribers,
-    });
-
-    expect(FAN_OUT_ALERT_CHUNK).toBe(200);
-    expect(FAN_OUT_ALERT_MAX_NAMED).toBe(300);
-    const [first, ...rest] = logError.mock.calls;
-    const tail = rest.pop();
-    expect(String(first?.[0])).toContain(
-      'ran out of time; 1234 subscribers were not notified or moved'
-    );
-    expect(first?.[1]).toEqual({
-      errorId: 'err_1',
-      tierId: 'tier_1',
-      unhandled: 1_234,
-      named: 300,
-      more: 934,
-      chunks: 2,
-    });
-    expect(rest.map(([, data]) => data.subscribers.length)).toEqual([200, 100]);
-    for (const [n, [message, data]] of rest.entries()) {
-      expect(String(message)).toContain(
-        'ran out of time; these subscribers were not notified or moved'
-      );
-      expect(data).toMatchObject({
-        errorId: 'err_1',
-        tierId: 'tier_1',
-        chunk: n + 1,
-        chunks: 2,
-      });
-    }
-    expect(rest.flatMap(([, data]) => data.subscribers)).toEqual(
-      subscribers.slice(0, 300)
-    );
-    expect(String(tail?.[0])).toContain(
-      'and 934 more: find them with the Stripe query in docs/payments/subscriptions.md'
-    );
-    expect(tail?.[1]).toEqual({
-      errorId: 'err_1',
-      tierId: 'tier_1',
-      more: 934,
-    });
-  });
-
-  it('names everyone, with no "more" line, when they fit', () => {
-    const logError = vi.fn();
-    const subscribers = subscribersOf(250);
-
-    alertFanOutOutOfTime(logError, {
-      errorId: 'err_2',
-      context: {},
-      subscribers,
-    });
-
-    expect(logError).toHaveBeenCalledTimes(3);
-    expect(logError.mock.calls[0]?.[1]).toMatchObject({
-      unhandled: 250,
-      named: 250,
-      more: 0,
-    });
-    expect(
-      logError.mock.calls.slice(1).flatMap(([, data]) => data.subscribers)
-    ).toEqual(subscribers);
-  });
-
-  it('logs nothing when everyone was reached', () => {
-    const logError = vi.fn();
-
-    alertFanOutOutOfTime(logError, {
-      errorId: 'err_3',
-      context: {},
-      subscribers: [],
-    });
-
-    expect(logError).not.toHaveBeenCalled();
-  });
-
-  it("a tier's two capped alerts fit the log limit with room to spare", () => {
-    // Real id shapes: a row uuid, a Stripe id, a 32-character user id and an
-    // organisation uuid; a course plan's entry adds its interval.
-    const uuid = '0b5c1f6e-2d4a-4c3b-9f1e-7a8d6c5b4e3f';
-    const tierName = {
-      subscriptionId: uuid,
-      stripeSubscriptionId: 'sub_1QabcdEFGHijklMNOPqrstuv',
-      userId: 'aB3dE5gH7jK9mN1pQ3sT5vW7yZ9bC1dF',
-      organizationId: uuid,
-    };
-    const courseName = {
-      courseSubscriptionId: uuid,
-      stripeSubscriptionId: tierName.stripeSubscriptionId,
-      userId: tierName.userId,
-      organizationId: uuid,
-      interval: 'month',
-    };
-    for (const name of [tierName, courseName]) {
-      // Each name plus the comma that joins it to the next.
-      expect(JSON.stringify(name).length + 1).toBeLessThanOrEqual(
-        FAN_OUT_ALERT_NAME_BYTES
-      );
-    }
-    // A tier's monthly and annual fan-outs share one invocation.
-    expect(
-      2 * FAN_OUT_ALERT_MAX_NAMED * FAN_OUT_ALERT_NAME_BYTES
-    ).toBeLessThanOrEqual(WORKER_LOG_LIMIT_BYTES * 0.6);
-  });
-});
-
 describe('applyDuePendingPriceChange', () => {
   const pending = {
     codex_pending_price_id: 'price_new',
@@ -856,9 +1178,10 @@ describe('applyDuePendingPriceChange', () => {
 
   it('swaps once the next renewal reaches the pending date', async () => {
     const sub = fakeSub({ renewal: NOTICE_SEC + 41 * DAY, metadata: pending });
-    const { stripe, update } = fakeStripe(sub);
+    const { stripe, update, prices } = fakeStripe(sub);
 
     expect(await applyDuePendingPriceChange(stripe, sub)).toBe(true);
+    expect(prices.update).not.toHaveBeenCalled();
     expect(update).toHaveBeenCalledWith(
       'sub_1',
       {
@@ -870,6 +1193,28 @@ describe('applyDuePendingPriceChange', () => {
     );
   });
 
+  // Review C1, F2: a newer save archived the pending Price before the step
+  // reached this subscriber. Their accepted change still lands.
+  it('a pending Price a newer save archived is made billable first, then swapped in', async () => {
+    const sub = fakeSub({ renewal: NOTICE_SEC + 41 * DAY, metadata: pending });
+    const { stripe, update, prices } = fakeStripe(sub, ['price_new']);
+    const order: string[] = [];
+    prices.update.mockImplementation(async (id: string) => {
+      order.push('activate');
+      return { id, active: true };
+    });
+    update.mockImplementation(async () => {
+      order.push('swap');
+      return {};
+    });
+
+    expect(await applyDuePendingPriceChange(stripe, sub)).toBe(true);
+    expect(prices.update).toHaveBeenCalledExactlyOnceWith('price_new', {
+      active: true,
+      metadata: { codex_platform_write: expect.any(String) },
+    });
+    expect(order).toEqual(['activate', 'swap']);
+  });
   it('waits while the next renewal is still too soon', async () => {
     const sub = fakeSub({ renewal: NOTICE_SEC + 11 * DAY, metadata: pending });
     const { stripe, update } = fakeStripe(sub);
@@ -981,5 +1326,17 @@ describe('firstRenewalOnOrAfter', () => {
         earliest: at('2026-11-12T12:00:00Z'),
       })
     ).toBe(at('2027-10-25T09:00:00Z'));
+  });
+});
+
+describe('platformWriteMetadata', () => {
+  // The price.updated webhook knows our write by the key CHANGING, so two
+  // writes to the same Price must never carry the same value.
+  it('gives every write a fresh codex_platform_write', () => {
+    const first = platformWriteMetadata();
+    const second = platformWriteMetadata();
+    expect(Object.keys(first)).toEqual(['codex_platform_write']);
+    expect(first.codex_platform_write).toEqual(expect.any(String));
+    expect(second.codex_platform_write).not.toBe(first.codex_platform_write);
   });
 });

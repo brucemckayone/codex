@@ -202,11 +202,132 @@ can generate an external-account update code from the connected account's page
 |---|---|---|---|
 | Payouts sweep | ecom-api | `0 * * * *` | Production only |
 | Agreement review reminders | notifications-api | `0 8 * * *` | Production only |
+| Fee notices (the daily fee step, after the agreement and money sweeps) | notifications-api | `0 8 * * *` | Production only |
 
 Both run at minute `0` so they share one database wake
 ([why](connect-and-payouts.md#releasing-pending-money)). The daily bank payout
 (`Codex-2hxff.29`) is not a cron of its own: it is the payouts sweep's run whose
-London hour is 8, last in that wake.
+London hour is 8, last in that wake. The price-move step (`Codex-2hxff.86`)
+rides the same sweep, on every run but that one
+([held price moves](#held-price-moves)).
+
+## Changing fees
+
+Fees change only through admin-api's `/api/admin/fees/*` routes
+([Fees and splits](fees-and-splits.md#changing-fees)). **Never edit
+`fee_changes`, `fee_config_versions`, `fee_change_notices` or the old
+`fee_config_*` tables with SQL**, not even to fix a typo: a SQL edit skips the
+notice a rise owes the people it pays less, breaks the dated history a replayed
+invoice is split by, and is not in the audit log. To undo a waiting rise, save
+the old value again (or `POST /api/admin/fees/changes/:changeId/cancel`):
+everyone already told is emailed that it's off.
+
+**After saving a rise.** The answer's `change` has `kind: 'rise'` and
+`effectiveFrom: null`: it waits. The next 08:00 run (UTC) makes its list and
+emails everyone it pays less. The date is set the first morning nobody on the
+list is still waiting, to the first UK midnight at least 30 days after the last
+of them was told. Until then, Admin › Queue › Fee notices shows the rise's
+card (what moves, who is told, the earliest date) and each person whose email
+didn't go through.
+
+**Each morning.** notifications-api logs `fee step completed` with the counts
+(lists made, sent, failed, unknown, joiners, dated). When someone needs a
+person, it raises one error alert, `fee step: people not yet told about a fee
+rise`, naming up to 50 notice and user ids; the queue is the lasting record,
+so a missed alert loses nothing. A send that failed outright (refused, skipped,
+no address) is named at once, and tried again the next morning. One with no
+answer (a 5xx, a timeout) may have gone, so the next run first looks in
+`email_audit_logs` and only sends again if nothing is there. It is named only
+after three such mornings, or at once when its rise starts within three days,
+since the mornings themselves usually mend it. A follow-up email
+(made smaller, cancelled) holds nothing: it is dropped after three failed
+mornings with a warning, and never reaches the queue.
+
+**Told another way.** If support reaches someone another way (the phone,
+their other address), they press Told another way on that row and say how in
+the note. That counts as the person's notice from then. When they were the
+last person the rise waited for, the same transaction sets the date, and the
+answer says so. A second press answers 409 `FEE_NOTICE_ALREADY_TOLD`, which
+the page reads as done; a rise cancelled meanwhile answers 409
+`FEE_CHANGE_NOT_WAITING`. A joiner's row is tagged Joined later: it never
+holds the date, but they still need telling.
+
+**If a rise must start later or not at all**, cancel it and save it again
+later. Nothing moves a date earlier: the 30 days count from the last person
+told.
+
+**Rollback.** Migration `0123` stays if the workers roll back. The old
+workers read the old `fee_config_*` rows. Every admin save keeps them at the
+values in force then, and the 08:00 fee step writes a dated rise into them on
+the morning it starts, so sales keep the right fee. Before rolling back,
+check that they agree (R14 in [the release checklist](release-checklist.md)):
+a level whose rise started since midnight disagrees until the 08:00 run. The
+fee step and the queue tab stop until the roll forward, so a waiting rise
+never starts, and one whose date falls in the rollback starts only at the
+roll forward. Don't change fees while rolled back: the old routes write only
+the old tables, and the new resolver never sees those writes. Save them again
+through the new route after rolling forward.
+
+## Held price moves
+
+A new tier or course-plan price emails every subscriber first, and moves each
+one only after their own email is accepted; their 30 days count from it.
+ecom-api's hourly run does this, up to 1,125 people a run, skipping the 08:00
+London run, which belongs to the bank payout ([Subscriptions](subscriptions.md)).
+Admin › Queue › Price moves (`Codex-2hxff.85`) lists the people it couldn't
+move. The record is the source of truth, not the alerts: the run names at most
+50 people per run in its alert lines.
+
+**Held.** After three hourly tries, a person is held, listed with why, and kept
+on their old price. Each row has one action:
+
+- **Retry**, when no email went through (refused, skipped, no address, or no
+  record that it went). Fix the cause first, for example the address on their
+  account. The next run emails them again, with three fresh tries, and their
+  move is scheduled 30 days after the new email.
+- **Retry the move**, when the email went through and Stripe then refused the
+  move or never answered. The next run asks Stripe again for the date they
+  were told, or their next renewal if that date has passed (later than told,
+  never earlier), and sends no second email.
+
+Both are database writes for the next run: admin-api can't send email or
+change a subscription. The answer gives that run (`nextRunAt`: the next top of
+the hour, or the one after when that is the 08:00 London run), and the row
+shows Queued until the run finishes with it, so come back after it. A support
+retry gets three tries of its own; a row the run holds again says who retried
+it.
+
+**Close…** takes a row off the list without a retry, as moved by hand (told,
+then changed in Stripe) or not needed (cancelled, refunded or replaced), with a
+note. Closing moves nobody. Move someone by hand only once they have been told
+the new price and the date.
+
+**409 `PRICE_MOVE_NOT_HELD`** means there is nothing to retry or close, and
+`details.reason` says why:
+
+- `superseded`: a newer price for the plan replaced this one, and they are
+  emailed about that instead;
+- `moved`: the run got there first;
+- `skipped`: the run set it aside (they are moving to another plan, for
+  example);
+- `subscription_ended`: Retry only; close it as not needed;
+- `resolved`: it is closed already;
+- `queued`: it is already queued, which is also what a second press after a
+  lost answer gets;
+- `in_progress`: the run is still working on it, and it was never held.
+
+**A stopped price change.** If every email in a change's first batch is
+refused with a 4xx (a missing template, a bad worker secret), the run stops the
+whole change with one alert, and nobody is emailed or moved. The queue shows
+one card for it, with the cause and the error id that joins the alert line.
+Fix the cause, then press Restart: the next run sets the change running again
+and carries on where it stopped. A Restart pressed before a later stop doesn't
+count, so press it again. A change that isn't stopped answers 409
+`PRICE_CHANGE_NOT_STOPPED`.
+
+**The badge** counts held people not closed, and stopped changes nobody has
+restarted. A Retry or a Restart takes its row off the badge at once; the list
+keeps it, queued, until the run takes it.
 
 ## Payout schedule backfill
 

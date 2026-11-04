@@ -31,13 +31,18 @@
 import { AccessRevocation, type RevocationReason } from '@codex/access';
 import { invalidateUserLibrary, VersionedCache } from '@codex/cache';
 import { STRIPE_EVENTS } from '@codex/constants';
+import { ServiceError } from '@codex/service-errors';
 import type {
   CourseSubscriptionWebhookResult,
+  SubscriptionService,
+  WebhookEmailPayload,
   WebhookHandlerResult,
 } from '@codex/subscription';
 import {
   applyDuePendingPriceChange,
   CourseSubscriptionService,
+  isPlatformPriceWrite,
+  MOVE_TIER_ID_KEY,
   PENDING_PRICE_ID_KEY,
 } from '@codex/subscription';
 import { createWebhookServices, sendEmailToWorker } from '@codex/worker-utils';
@@ -61,6 +66,9 @@ import {
  * subscriber who was emailed a date billed the old price. It is logged at
  * error level, with what is needed to act on it, and the event acknowledged.
  * The marker stays: every later renewal reports it again until it is resolved.
+ * A typed refusal's own ids come with it (review C1, SF-2): the schedule
+ * that holds the subscription, or the intervals of a marker dropped for
+ * another billing period, whose one trace is this alert.
  */
 async function applyPendingPriceChangeOrReport(
   c: Context<StripeWebhookEnv>,
@@ -72,6 +80,8 @@ async function applyPendingPriceChangeOrReport(
   } catch (error) {
     if (isTransientError(error)) throw error;
     c.get('obs')?.error('Pending price change could not be applied', {
+      ...(error instanceof ServiceError ? error.context : {}),
+      errorId: crypto.randomUUID(),
       subscriptionId: subscription.id,
       pendingPriceId: subscription.metadata?.[PENDING_PRICE_ID_KEY],
       errorType: (error as { type?: string }).type,
@@ -79,6 +89,53 @@ async function applyPendingPriceChangeOrReport(
       error: error instanceof Error ? error.message : String(error),
     });
   }
+}
+
+/**
+ * Flip a move to a cheaper plan whose renewal has happened (Codex-2hxff.16,
+ * data design §5.1), with the same failure rule as the price swap above. A
+ * transient Stripe failure is rethrown, so Stripe redelivers. A permanent one
+ * is one error alert with an errorId and the ids, and the event is
+ * acknowledged: the member keeps the dearer plan at the cheaper price (in
+ * their favour) until the hourly backstop or support flips it.
+ */
+async function applyDueTierMoveOrReport(
+  c: Context<StripeWebhookEnv>,
+  service: Pick<SubscriptionService, 'applyDueTierMove'>,
+  subscription: Stripe.Subscription
+): Promise<void> {
+  try {
+    await service.applyDueTierMove(subscription);
+  } catch (error) {
+    if (isTransientError(error)) throw error;
+    c.get('obs')?.error('tier_move.apply_failed', {
+      errorId: crypto.randomUUID(),
+      stripeSubscriptionId: subscription.id,
+      pendingTierId: subscription.metadata?.[MOVE_TIER_ID_KEY] ?? null,
+      errorType: (error as { type?: string }).type,
+      errorCode: (error as { code?: string }).code,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
+ * An invoice's subscription as the invoice names it, and whether it is a
+ * course subscription: Stripe copies the subscription's metadata onto the
+ * invoice, so an org invoice costs no extra retrieve to tell apart.
+ */
+function invoiceSubscription(invoice: Stripe.Invoice): {
+  course: boolean;
+  stripeSubscriptionId: string | null;
+} {
+  const subDetails = invoice.parent?.subscription_details;
+  return {
+    course: (subDetails?.metadata?.type ?? null) === 'course_subscription',
+    stripeSubscriptionId:
+      typeof subDetails?.subscription === 'string'
+        ? subDetails.subscription
+        : (subDetails?.subscription?.id ?? null),
+  };
 }
 
 /**
@@ -193,12 +250,13 @@ function clearAccess(
 }
 
 /**
- * Dispatch email notification from a webhook handler result.
+ * Dispatch email notification from a webhook handler result, a member's or,
+ * since Codex-2hxff.52, a course subscriber's.
  * Fire-and-forget via sendEmailToWorker (uses waitUntil internally).
  */
 function dispatchEmail(
   c: Context<StripeWebhookEnv>,
-  result: WebhookHandlerResult | undefined
+  result: { email?: WebhookEmailPayload } | undefined
 ): void {
   if (result?.email) {
     sendEmailToWorker(c.env, c.executionCtx, result.email);
@@ -243,9 +301,9 @@ export async function handleSubscriptionWebhook(
     // TierService serves `product.updated` / `price.created` from the
     // Dashboard. Studio is the only place a price is set, so a Price created
     // in the Dashboard is logged as drift and never moves a subscriber
-    // (Codex-2hxff.3). The registry's TierService carries a propagator, but
-    // only `updateTier` (Studio) fires it; the two methods this webhook calls,
-    // `applyStripeProductUpdate` and `recordStripePriceDrift`, never do.
+    // (Codex-2hxff.3). Only `updateTier` (Studio) records a price change for
+    // the hourly step to work (Codex-2hxff.86); the two methods this webhook
+    // calls, `applyStripeProductUpdate` and `recordStripePriceDrift`, never do.
     const tierService = services.tier;
 
     // Codex-2pryk WP-6: course-specific subscriptions flow through this SAME
@@ -341,6 +399,8 @@ export async function handleSubscriptionWebhook(
               subscription
             );
           invalidateCourseBuyer(courseResult);
+          // The welcome, naming the course (Codex-2hxff.52, C4).
+          dispatchEmail(c, courseResult);
           // The open checkout is paid, as for an org subscription below.
           await service.markCheckoutSessionCompleted(session.id);
           obs?.info('Course subscription created from checkout', {
@@ -381,6 +441,8 @@ export async function handleSubscriptionWebhook(
               subscription
             );
           invalidateCourseBuyer(courseResult);
+          // Set only when this update ended it: the cancellation email.
+          dispatchEmail(c, courseResult);
           await applyPendingPriceChangeOrReport(c, stripe, subscription);
           obs?.info('Course subscription updated', {
             subscriptionId: subscription.id,
@@ -447,6 +509,11 @@ export async function handleSubscriptionWebhook(
         // (Codex-2hxff.3).
         await applyPendingPriceChangeOrReport(c, stripe, subscription);
 
+        // The same renewal lands a move to a cheaper plan (Codex-2hxff.16):
+        // the tier flips to the target. After the DB sync, and after the
+        // price swap, so it reads the subscription as both left it.
+        await applyDueTierMoveOrReport(c, service, subscription);
+
         obs?.info('Subscription updated', {
           subscriptionId: subscription.id,
         });
@@ -464,6 +531,8 @@ export async function handleSubscriptionWebhook(
               subscription
             );
           invalidateCourseBuyer(courseResult);
+          // The cancellation email, on the first end (Codex-2hxff.52, C4).
+          dispatchEmail(c, courseResult);
           obs?.info('Course subscription deleted', {
             subscriptionId: subscription.id,
           });
@@ -543,18 +612,16 @@ export async function handleSubscriptionWebhook(
         // subscription_details metadata (Stripe copies the subscription's
         // metadata onto the invoice) so org invoices pay NO extra retrieve. Only
         // the course path retrieves the full subscription (for period + items).
-        const subDetails = invoice.parent?.subscription_details;
-        const subMetaType = subDetails?.metadata?.type ?? null;
-        if (subMetaType === 'course_subscription') {
-          const stripeSubId =
-            typeof subDetails?.subscription === 'string'
-              ? subDetails.subscription
-              : (subDetails?.subscription?.id ?? null);
+        const paidFor = invoiceSubscription(invoice);
+        if (paidFor.course) {
+          const stripeSubId = paidFor.stripeSubscriptionId;
           if (stripeSubId) {
             const courseSub = await stripe.subscriptions.retrieve(stripeSubId);
             // A clawback that failed after the payout committed
             // (Codex-2hxff.67) is rethrown after the library bump, which is
-            // safe to repeat; nothing here must not be: see settleAfterCommit.
+            // safe to repeat. A transient one is rethrown before the renewal
+            // email, which the redelivery sends once, any other after it, as
+            // for members below: see settleAfterCommit.
             const { value: courseResult, failure } = await settleAfterCommit(
               () =>
                 courseSubService.handleCourseInvoicePaymentSucceeded(
@@ -563,6 +630,9 @@ export async function handleSubscriptionWebhook(
                 )
             );
             invalidateCourseBuyer(courseResult);
+            rethrowIfTransient(failure);
+            // The renewal receipt, naming the course (Codex-2hxff.52, C4).
+            dispatchEmail(c, courseResult);
             obs?.info('Course subscription invoice payment succeeded', {
               invoiceId: invoice.id,
             });
@@ -659,7 +729,13 @@ export async function handleSubscriptionWebhook(
         // therefore detect-only: an archive-without-replacement (operator
         // error) or a metadata/nickname edit is logged as obs.error so
         // operators see the drift but no sync-back happens here.
+        //
+        // The platform's own updates (a re-price's archive, a held Price made
+        // billable again) are not drift: each writes a fresh
+        // `codex_platform_write`, which this event shows changing. Alerting
+        // on every re-price would train people to ignore the real one.
         const price = event.data.object as Stripe.Price;
+        if (isPlatformPriceWrite(event)) break;
         if (price.metadata?.codex_organization_id) {
           obs?.error('Codex-managed tier Price edited in Stripe Dashboard', {
             stripePriceId: price.id,
@@ -677,6 +753,23 @@ export async function handleSubscriptionWebhook(
           invoiceId: invoice.id,
           amountDue: invoice.amount_due,
         });
+
+        // Course-sub branch (Codex-2hxff.52, C2), discriminated as for a paid
+        // invoice: the members' payment-failed email, naming the course.
+        // Status moves to past due through the `customer.subscription.updated`
+        // Stripe sends with it; access continues while Stripe retries (P-3).
+        const failedFor = invoiceSubscription(invoice);
+        if (failedFor.course) {
+          if (failedFor.stripeSubscriptionId) {
+            const courseResult =
+              await courseSubService.handleCourseInvoicePaymentFailed(
+                invoice,
+                failedFor.stripeSubscriptionId
+              );
+            dispatchEmail(c, courseResult);
+          }
+          break;
+        }
 
         // `handleInvoicePaymentFailed` owns its own cache invalidation
         // via the orchestrator hook inside SubscriptionService. The

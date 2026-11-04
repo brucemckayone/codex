@@ -122,12 +122,41 @@ describe('the tab', () => {
       failedRefunds: 2,
       creatorDebts: 1,
       owedToCreators: 6,
+      feeNotices: 0,
+      priceMoves: 0,
     };
     flushSync();
     const badges = [
       ...document.querySelectorAll('nav a [data-variant="warning"]'),
     ].map((b) => b.textContent);
     expect(badges).toEqual(['2', '1', '6']);
+  });
+
+  test('Price moves and Fee notices carry theirs too, in the drawn order', () => {
+    mountAt('/admin/queue');
+    // The counts on 4 Nov (batch C1 Part B pages 5 and 6).
+    countsSlot().current = {
+      failedRefunds: 2,
+      creatorDebts: 1,
+      owedToCreators: 6,
+      feeNotices: 1,
+      priceMoves: 10,
+    };
+    flushSync();
+    const links = [...document.querySelectorAll('nav a')];
+    expect(links.slice(-2).map((a) => a.getAttribute('href'))).toEqual([
+      '/admin/queue?tab=moves',
+      '/admin/queue?tab=fees',
+    ]);
+    expect(
+      links
+        .slice(-2)
+        .map((a) => a.textContent?.includes(m.support_queue_tab_moves()))
+    ).toEqual([true, false]);
+    const badges = [
+      ...document.querySelectorAll('nav a [data-variant="warning"]'),
+    ].map((b) => b.textContent);
+    expect(badges).toEqual(['2', '1', '6', '10', '1']);
   });
 });
 

@@ -495,6 +495,26 @@ describe('saveBuilderDraft · monetisation leg', () => {
     });
   });
 
+  it("a yearly price below the monthly one is worded from en.json, never the worker's text", async () => {
+    const workerText = 'Worker: yearly below monthly.';
+    const deps = makeDeps({
+      monetisation: makeMonetisation({
+        save: vi.fn<() => Promise<unknown>>().mockRejectedValue({
+          status: 400,
+          body: { message: workerText, code: 'YEARLY_PRICE_BELOW_MONTHLY' },
+        }),
+      }),
+    });
+
+    const result = await saveBuilderDraft(deps);
+
+    expect(result).toEqual({
+      outcome: 'failed',
+      stage: 'monetisation',
+      message: `Page saved, but the pricing was not: ${m.price_refusal_yearly_below_monthly()}`,
+    });
+  });
+
   it('names the leg when the refusal carries no message', async () => {
     const deps = makeDeps({
       monetisation: makeMonetisation({

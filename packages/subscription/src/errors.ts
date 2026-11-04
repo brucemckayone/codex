@@ -11,6 +11,7 @@ import {
   InternalServiceError,
   NotFoundError,
   ServiceError,
+  ValidationError,
 } from '@codex/service-errors';
 
 // Re-export base error classes for convenience
@@ -40,11 +41,17 @@ export class TierNotFoundError extends NotFoundError {
   }
 }
 
+/**
+ * A tier someone is on, or is waiting to move to at their renewal
+ * (Codex-2hxff.16, decision T5), cannot be deleted. Counts only: the context
+ * is sent to the client.
+ */
 export class TierHasSubscribersError extends BusinessLogicError {
-  constructor(tierId: string, subscriberCount: number) {
+  constructor(tierId: string, subscriberCount: number, movingInCount = 0) {
     super('Cannot delete tier with active subscribers', {
       tierId,
       subscriberCount,
+      movingInCount,
       code: 'TIER_HAS_SUBSCRIBERS',
     });
   }
@@ -78,6 +85,32 @@ export class TierSortOrderConflictError extends ConflictError {
       sortOrder,
       code: 'TIER_SORT_ORDER_CONFLICT',
     });
+  }
+}
+
+/**
+ * A yearly price below the monthly one, refused on save (owner decision
+ * 2026-11-03, "Refuse yearly below monthly"; review C1 cycle 2, L3). A
+ * monthly member who switched to such a year would be credited more unused
+ * time than the year costs, and that credit sits on their one Stripe
+ * customer, which pays their next bill anywhere. Tiers and course plans.
+ */
+export class YearlyPriceBelowMonthlyError extends ValidationError {
+  constructor(prices: { priceMonthly: number; priceAnnual: number }) {
+    super("The yearly price can't be less than the monthly price.", {
+      code: 'YEARLY_PRICE_BELOW_MONTHLY',
+      ...prices,
+    });
+  }
+}
+
+/** Refuse a yearly price below the monthly one, before anything is written. */
+export function assertYearlyNotBelowMonthly(prices: {
+  priceMonthly: number;
+  priceAnnual: number;
+}): void {
+  if (prices.priceAnnual < prices.priceMonthly) {
+    throw new YearlyPriceBelowMonthlyError(prices);
   }
 }
 
@@ -187,8 +220,126 @@ export class TierChangePreviewExpiredError extends ServiceError {
 }
 
 // ============================================================================
+// Tier change refusals (Codex-2hxff.16, owner decisions T1-T4, Q1-Q4)
+// ============================================================================
+//
+// Each is refused before Stripe is written to, with its own code in the
+// context (sent to the client as `details`, as SUBSCRIPTION_DISPUTED is), so
+// the pricing dialog can say why. Ids only.
+
+/**
+ * A change of plan while the subscription is set to cancel (Q2): the member
+ * reactivates first. Picking a plan never reactivates it.
+ */
+export class TierChangeCancellingError extends ConflictError {
+  constructor(organizationId: string) {
+    super('Reactivate your subscription to change plan.', {
+      code: 'TIER_CHANGE_CANCELLING',
+      organizationId,
+    });
+  }
+}
+
+/**
+ * A change that starts now and moves money, while a move to a cheaper plan
+ * waits (T2). The item already carries the cheaper Price, so Stripe would
+ * credit the unused time at the cheaper rate and over-charge: the client keeps
+ * the current plan first (`POST /subscriptions/keep-current-plan`), then
+ * previews the change again. The same while a change of billing waits for
+ * the year's end (Codex-2hxff.97): a dearer plan, or the current one on its
+ * current billing, is Keep first.
+ */
+export class PendingMoveKeepFirstError extends ConflictError {
+  constructor(organizationId: string, newTierId: string) {
+    super(
+      'A change to your plan is already set for your renewal. Keep your current plan first, then change.',
+      { code: 'PENDING_MOVE_KEEP_FIRST', organizationId, newTierId }
+    );
+  }
+}
+
+/**
+ * A switch INTO yearly billing while a move to a cheaper plan waits (Q3,
+ * narrowed by Q2 of Codex-2hxff.97): the switch starts a new period today
+ * and the move waits for the renewal, so both cannot hold. A switch to
+ * monthly billing waits for the year's end, so it joins the move instead.
+ */
+export class TierChangeIntervalWhileMovingError extends ConflictError {
+  constructor(organizationId: string) {
+    super(
+      'Your move to a cheaper plan is still set. Change how often you are billed once it has started, or keep your current plan first.',
+      { code: 'TIER_CHANGE_INTERVAL_WHILE_MOVING', organizationId }
+    );
+  }
+}
+
+/**
+ * A cheaper plan on yearly billing, from monthly (T1, Q1): plan first, then
+ * billing. `firstStep` is the change the dialog offers instead: the target
+ * plan on the member's current billing period. From yearly, a cheaper plan on
+ * monthly billing is one waiting change instead (Codex-2hxff.97, Q3).
+ */
+export class TierChangeTwoStepsError extends BusinessLogicError {
+  constructor(
+    organizationId: string,
+    firstStep: { tierId: string; billingInterval: 'month' | 'year' }
+  ) {
+    super(
+      'Moving to a cheaper plan on another billing period takes two steps: the plan first, then the billing.',
+      { code: 'TIER_CHANGE_TWO_STEPS', organizationId, firstStep }
+    );
+  }
+}
+
+/**
+ * The Stripe subscription carries a subscription schedule that is not ours
+ * (Codex-2hxff.97, data design §3.4): one made in the Stripe Dashboard, for
+ * example. Our only schedules carry a change of billing period waiting for
+ * the year's end, and a write through someone else's schedule would change
+ * or split it. Nothing is written; support is alerted with the same
+ * `errorId`, which the client shows beside its fixed words.
+ */
+export class SubscriptionScheduledElsewhereError extends ConflictError {
+  constructor(organizationId: string, errorId: string) {
+    super(
+      "This subscription can't be changed here just now. Please contact support.",
+      { code: 'SUBSCRIPTION_SCHEDULED_ELSEWHERE', organizationId, errorId }
+    );
+  }
+}
+
+/**
+ * Keep current plan after the renewal the move lands on (§4): the cheaper
+ * bill has been raised, so the held Price is never put back. The page reads
+ * the subscription again.
+ */
+export class MoveAlreadyLandedError extends ConflictError {
+  constructor(organizationId: string) {
+    super('Your plan has already changed at your renewal.', {
+      code: 'MOVE_ALREADY_LANDED',
+      organizationId,
+    });
+  }
+}
+
+// ============================================================================
 // Course Subscription Errors (Codex-2pryk WP-6 · SPEC §7)
 // ============================================================================
+
+/**
+ * Reactivating a course subscription whose course is no longer offered
+ * (Codex-2hxff.52): the off-sale sweep cancelled it, and reactivating would
+ * undo that. A plan that was only switched off (course still on sale) may be
+ * reactivated (owner Q6).
+ */
+export class CourseNotOnSaleError extends ConflictError {
+  constructor(courseSubscriptionId: string) {
+    super('This course is no longer offered.', {
+      code: 'COURSE_NOT_ON_SALE',
+      courseSubscriptionId,
+    });
+  }
+}
 
 export class CourseSubscriptionPlanNotFoundError extends NotFoundError {
   constructor(courseId: string, context?: Record<string, unknown>) {
@@ -291,7 +442,7 @@ export class ConnectPlatformNotConfiguredError extends ServiceError {
 }
 
 // ============================================================================
-// Price-change fan-out errors
+// Price-change errors (the hourly price-moves step, Codex-2hxff.86)
 // ============================================================================
 
 /**
@@ -306,13 +457,13 @@ export type PriceChangeStage =
   | 'same_amount_clear';
 
 /**
- * Stripe threw at `stage`, so the fan-out's alert can name the step that
+ * Stripe threw at `stage`, so the step's alert can name the call that
  * failed: a failed write is not a failed read (review A round 2, correctness
  * #2). `cause` is Stripe's own error, and the refused-or-unknown judgement is
  * made on it. `currentPending` is the earlier change the subscription carried,
  * which a failed same-amount write may leave to land.
  *
- * It never reaches a client (the fan-out runs after the response). Its
+ * It never reaches a client (the hourly step runs it; no request waits). Its
  * context holds the stage only: no Stripe message and no date.
  */
 export class PriceChangeStageError extends InternalServiceError {

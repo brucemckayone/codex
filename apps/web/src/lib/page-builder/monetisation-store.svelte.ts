@@ -34,8 +34,10 @@ import { selectFromTier } from '$lib/components/studio/plan-picker/select-from-t
 import type { JourneyTierOption } from '$lib/page-builder/journey-queries';
 import {
   getCourseMonetisation,
+  getCoursePlanPriceChanges,
   updateCourseMonetisation,
 } from '$lib/remote/journeys.remote';
+import { remoteErrorCode } from '$lib/remote/query-result';
 
 /**
  * The editable monetisation draft. Prices are GBP pence; `null` = not set.
@@ -93,12 +95,40 @@ class MonetisationStore {
    */
   #loaded = $state(false);
   #loadError = $state<string | null>(null);
+  /**
+   * The prices the last save was refused for as a yearly price below the
+   * monthly one (YEARLY_PRICE_BELOW_MONTHLY; owner: "Refuse yearly below
+   * monthly"), so the Offer panel can say it at the yearly price.
+   */
+  #yearlyRefused = $state<{
+    monthly: number | null;
+    annual: number | null;
+  } | null>(null);
 
   get courseId(): string | null {
     return this.#courseId;
   }
+  /**
+   * That refusal while the draft still holds its prices, else null. A new
+   * object for each refusal, so the panel moves focus once per refusal.
+   */
+  get yearlyRefusal(): {
+    monthly: number | null;
+    annual: number | null;
+  } | null {
+    const refused = this.#yearlyRefused;
+    return refused &&
+      refused.monthly === this.#pending.priceMonthlyCents &&
+      refused.annual === this.#pending.priceAnnualCents
+      ? refused
+      : null;
+  }
   get draft(): MonetisationDraft {
     return this.#pending;
+  }
+  /** The persisted baseline: what a price the creator types is compared to. */
+  get saved(): MonetisationDraft {
+    return this.#saved;
   }
   get tierOptions(): JourneyTierOption[] {
     return this.#tierOptions;
@@ -172,6 +202,7 @@ class MonetisationStore {
     this.#courseId = courseId;
     this.#loadError = null;
     this.#loaded = false;
+    this.#yearlyRefused = null;
     if (!courseId) return;
 
     this.#loading = true;
@@ -248,18 +279,37 @@ class MonetisationStore {
     const courseId = this.#courseId;
     if (!courseId || !this.#loaded || !this.isDirty) return;
 
+    const was = {
+      onSale: this.#saved.subscriptionEnabled,
+      monthly: this.#saved.priceMonthlyCents,
+      annual: this.#saved.priceAnnualCents,
+    };
     // Frozen: the creator can keep typing while Stripe answers.
     const sent: MonetisationDraft = {
       ...this.#pending,
       tierIds: [...this.#pending.tierIds],
     };
-    const persisted = await updateCourseMonetisation({
-      courseId,
-      subscriptionEnabled: sent.subscriptionEnabled,
-      subscriptionPriceMonthly: sent.priceMonthlyCents,
-      subscriptionPriceAnnual: sent.priceAnnualCents,
-      tierIds: sent.tierIds,
-    });
+    let persisted: Awaited<ReturnType<typeof updateCourseMonetisation>>;
+    try {
+      persisted = await updateCourseMonetisation({
+        courseId,
+        subscriptionEnabled: sent.subscriptionEnabled,
+        subscriptionPriceMonthly: sent.priceMonthlyCents,
+        subscriptionPriceAnnual: sent.priceAnnualCents,
+        tierIds: sent.tierIds,
+      });
+    } catch (err) {
+      // Kept for the panel's yearly price; the caller still reports the
+      // failed save.
+      if (remoteErrorCode(err) === 'YEARLY_PRICE_BELOW_MONTHLY') {
+        this.#yearlyRefused = {
+          monthly: sent.priceMonthlyCents,
+          annual: sent.priceAnnualCents,
+        };
+      }
+      throw err;
+    }
+    this.#yearlyRefused = null;
 
     this.#adopt(
       {
@@ -270,6 +320,25 @@ class MonetisationStore {
       },
       sent
     );
+
+    // A re-price records who is due in the save (Codex-2hxff.86), so the
+    // Offer panel's price-change note re-reads once, on the panel's own
+    // query. The save has landed whatever the read does: a failed read is
+    // the query's error, which the note shows (P10), never a failed save.
+    const plan = persisted.subscription;
+    if (
+      was.onSale &&
+      plan &&
+      (plan.priceMonthly !== was.monthly || plan.priceAnnual !== was.annual)
+    ) {
+      try {
+        void getCoursePlanPriceChanges({ courseId })
+          .refresh()
+          .catch(() => {});
+      } catch {
+        // As above: the note reads again on its next Check again.
+      }
+    }
   }
 
   /** Reset to the closed state (the route calls this on destroy). */
@@ -281,6 +350,7 @@ class MonetisationStore {
     this.#loading = false;
     this.#loaded = false;
     this.#loadError = null;
+    this.#yearlyRefused = null;
   }
 
   /**

@@ -9,6 +9,8 @@
 
 import { SUBSCRIPTION_STATUS } from '@codex/constants';
 import type Stripe from 'stripe';
+import { scheduleIdOf } from './billing-change';
+import { readWaitingMove } from './tier-move';
 
 type SubscriptionStatus =
   (typeof SUBSCRIPTION_STATUS)[keyof typeof SUBSCRIPTION_STATUS];
@@ -26,6 +28,21 @@ interface MappedStripeSubscription {
   tierId: string | null;
   currentPeriodStart: Date | null;
   currentPeriodEnd: Date | null;
+  /**
+   * A move to a cheaper tier that waits for the renewal (Codex-2hxff.16),
+   * from `codex_move_*` / `codex_hold_*`: all three, or all null.
+   */
+  pendingTierId: string | null;
+  pendingTierFrom: Date | null;
+  heldAmountCents: number | null;
+  /**
+   * A waiting change of billing (Codex-2hxff.97), from `codex_move_interval`
+   * / `codex_move_amount`: both, or both null; only beside a waiting move.
+   */
+  pendingBillingInterval: BillingInterval | null;
+  pendingAmountCents: number | null;
+  /** `subscription.schedule`, by id. */
+  stripeScheduleId: string | null;
 }
 
 /**
@@ -85,6 +102,13 @@ export function mapStripeSubscriptionStatus(
 
   const periodStart = item?.current_period_start ?? 0;
   const periodEnd = item?.current_period_end ?? 0;
+  const read = readWaitingMove(stripeSubscription.metadata);
+  // A change of billing whose item is already on its interval has landed;
+  // only its flip metadata is missing, which `applyDueTierMove` writes. It is
+  // not mirrored as waiting: the row would hold a change onto the interval it
+  // is billed on (`check_subscription_pending_billing`).
+  const move =
+    read?.billing && billingInterval === read.billing.interval ? null : read;
 
   return {
     status: resolveStatus(
@@ -98,5 +122,11 @@ export function mapStripeSubscriptionStatus(
     tierId: stripeSubscription.metadata?.codex_tier_id ?? null,
     currentPeriodStart: periodStart > 0 ? new Date(periodStart * 1000) : null,
     currentPeriodEnd: periodEnd > 0 ? new Date(periodEnd * 1000) : null,
+    pendingTierId: move?.tierId ?? null,
+    pendingTierFrom: move ? new Date(move.at * 1000) : null,
+    heldAmountCents: move?.holdAmountCents ?? null,
+    pendingBillingInterval: move?.billing?.interval ?? null,
+    pendingAmountCents: move?.billing?.amountCents ?? null,
+    stripeScheduleId: scheduleIdOf(stripeSubscription),
   };
 }

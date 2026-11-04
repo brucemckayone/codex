@@ -61,7 +61,7 @@ describe('Admin API Worker', () => {
 
   describe('Fee Config Routes — auth gate (Codex-m644n)', () => {
     interface FeeRoute {
-      method: 'GET' | 'PATCH' | 'PUT' | 'DELETE';
+      method: 'GET' | 'PATCH' | 'PUT' | 'DELETE' | 'POST';
       path: string;
       body?: unknown;
     }
@@ -98,6 +98,11 @@ describe('Admin API Worker', () => {
         path: `/api/admin/fees/org/${ORG}/creator/${CREATOR}`,
       },
       { method: 'GET', path: '/api/admin/fees/audit-log' },
+      // Codex-2hxff.33: cancel a fee rise that hasn't started.
+      {
+        method: 'POST',
+        path: '/api/admin/fees/changes/00000000-0000-0000-0000-000000000004/cancel',
+      },
     ];
 
     it.each(
@@ -226,6 +231,30 @@ describe('Admin API Worker', () => {
       {
         method: 'POST',
         path: `/api/admin/support/owed-to-creators/${ID}/check`,
+      },
+      // Codex-2hxff.33: Fee notices.
+      { method: 'GET', path: '/api/admin/support/queue/fee-changes' },
+      { method: 'GET', path: '/api/admin/support/queue/fee-notices' },
+      {
+        method: 'POST',
+        path: `/api/admin/support/fee-notices/${ID}/told-another-way`,
+        body: { note: 'Phoned them' },
+      },
+      // Codex-2hxff.85, .86: Price moves.
+      { method: 'GET', path: '/api/admin/support/queue/price-moves' },
+      {
+        method: 'GET',
+        path: '/api/admin/support/queue/price-changes-stopped',
+      },
+      { method: 'POST', path: `/api/admin/support/price-moves/${ID}/retry` },
+      {
+        method: 'POST',
+        path: `/api/admin/support/price-moves/${ID}/close`,
+        body: { resolution: 'not_needed', note: 'Phoned them' },
+      },
+      {
+        method: 'POST',
+        path: `/api/admin/support/price-changes/${ID}/restart`,
       },
     ])('rejects anonymous $method $path with 401', async ({
       method,

@@ -37,11 +37,24 @@ const api = vi.hoisted(() => ({
   listOwedToCreators: vi.fn(),
   resolveOwedToCreator: vi.fn(),
   checkOwedToCreator: vi.fn(),
+  listFeeChanges: vi.fn(),
+  listFeeNotices: vi.fn(),
+  markToldAnotherWay: vi.fn(),
+  listHeldPriceMoves: vi.fn(),
+  listStoppedPriceChanges: vi.fn(),
+  retryPriceMove: vi.fn(),
+  closePriceMove: vi.fn(),
+  restartPriceChange: vi.fn(),
 }));
 
 vi.mock('$lib/server/api', () => ({
   createServerApi: vi.fn(() => ({ support: api })),
   serverApiUrl: vi.fn(() => 'http://localhost:42073'),
+}));
+
+const loggerError = vi.hoisted(() => vi.fn());
+vi.mock('$lib/observability', () => ({
+  logger: { error: loggerError, warn: vi.fn(), info: vi.fn(), debug: vi.fn() },
 }));
 
 // The request's user, which each test can change.
@@ -138,6 +151,17 @@ const CALLS: [string, unknown][] = [
     { creditId: UUID, body: { action: 'repay', note: '' } },
   ],
   ['checkOwedToCreator', { creditId: UUID }],
+  ['listFeeChanges', { page: 1, limit: 20 }],
+  ['listFeeNotices', { page: 1, limit: 20 }],
+  ['markToldAnotherWay', { noticeId: UUID, body: { note: 'Phoned them.' } }],
+  ['listHeldPriceMoves', { page: 1, limit: 20 }],
+  ['listStoppedPriceChanges', { page: 1, limit: 20 }],
+  ['retryPriceMove', { moveId: UUID }],
+  [
+    'closePriceMove',
+    { moveId: UUID, body: { resolution: 'not_needed', note: 'Cancelled.' } },
+  ],
+  ['restartPriceChange', { changeId: UUID }],
 ];
 
 describe('the owner guard', () => {
@@ -179,11 +203,15 @@ describe('the owner guard', () => {
       failedRefunds: 0,
       creatorDebts: 0,
       owedToCreators: 0,
+      feeNotices: 0,
+      priceMoves: 0,
     });
     await expect(remote.getSupportQueueCounts()).resolves.toEqual({
       failedRefunds: 0,
       creatorDebts: 0,
       owedToCreators: 0,
+      feeNotices: 0,
+      priceMoves: 0,
     });
   });
 });
@@ -279,6 +307,35 @@ describe('the input schemas', () => {
     );
   });
 
+  it('told another way needs a note; Close needs a reason and a note', async () => {
+    expect(
+      await accepts('markToldAnotherWay', {
+        noticeId: UUID,
+        body: { note: '   ' },
+      })
+    ).toBe(false);
+    expect(
+      await accepts('markToldAnotherWay', {
+        noticeId: 'not-a-uuid',
+        body: { note: 'Phoned them.' },
+      })
+    ).toBe(false);
+    expect(
+      await accepts('closePriceMove', {
+        moveId: UUID,
+        body: { resolution: 'retried_ok', note: 'x' },
+      })
+    ).toBe(false);
+    expect(
+      await accepts('closePriceMove', {
+        moveId: UUID,
+        body: { resolution: 'moved_by_hand', note: '' },
+      })
+    ).toBe(false);
+    expect(await accepts('retryPriceMove', { moveId: 'sub_1Q' })).toBe(false);
+    expect(await accepts('restartPriceChange', { changeId: 'x' })).toBe(false);
+  });
+
   it('a debt is never settled as dispute_won from here', async () => {
     expect(
       await accepts('resolveCreatorDebt', {
@@ -370,6 +427,99 @@ describe('issueSupportRefund', () => {
       status: 500,
       detailsCode: null,
     });
+  });
+});
+
+// A failure with no answer behind it (a dropped fetch, a body that would not
+// parse) skips the `handleError` hook a throw would reach, so it is logged
+// where its cause is: the command, the ids, the status and the error's name,
+// never the error's text, which can quote a person's name (SF-10).
+describe('a command with no answer behind it is logged', () => {
+  const NO_ANSWER: [
+    string,
+    keyof typeof api,
+    unknown,
+    Record<string, string>,
+  ][] = [
+    ['issueSupportRefund', 'issueRefund', REFUND_INPUT, { chargeId: CHARGE }],
+    [
+      'resolveFailedRefund',
+      'resolveFailedRefund',
+      { refundId: UUID, body: { resolution: 'refunded_elsewhere', note: '' } },
+      { refundId: UUID },
+    ],
+    [
+      'resolveCreatorDebt',
+      'resolveCreatorDebt',
+      { reviewId: UUID, body: { resolution: 'platform_absorbed', note: '' } },
+      { reviewId: UUID },
+    ],
+    [
+      'resolveOwedToCreator',
+      'resolveOwedToCreator',
+      { creditId: UUID, body: { action: 'repay', note: '' } },
+      { creditId: UUID },
+    ],
+    [
+      'checkOwedToCreator',
+      'checkOwedToCreator',
+      { creditId: UUID },
+      { creditId: UUID },
+    ],
+    [
+      'markToldAnotherWay',
+      'markToldAnotherWay',
+      { noticeId: UUID, body: { note: 'Phoned them.' } },
+      { noticeId: UUID },
+    ],
+    ['retryPriceMove', 'retryPriceMove', { moveId: UUID }, { moveId: UUID }],
+    [
+      'closePriceMove',
+      'closePriceMove',
+      { moveId: UUID, body: { resolution: 'not_needed', note: 'Cancelled.' } },
+      { moveId: UUID },
+    ],
+    [
+      'restartPriceChange',
+      'restartPriceChange',
+      { changeId: UUID },
+      { changeId: UUID },
+    ],
+  ];
+
+  beforeEach(() => loggerError.mockClear());
+
+  it.each(
+    NO_ANSWER
+  )('%s: its name, its ids, the status and the error’s name', async (name, method, input, ids) => {
+    api[method].mockRejectedValue(
+      new SyntaxError(
+        'Unexpected token, "{"toldByName":"Jo Bloggs"" is not valid JSON'
+      )
+    );
+    await expect(remote[name](input)).resolves.toMatchObject({
+      outcome: 'failed',
+      status: 500,
+    });
+    expect(loggerError).toHaveBeenCalledOnce();
+    expect(loggerError).toHaveBeenCalledWith(
+      `support command ${name} failed with no API answer`,
+      { ...ids, status: 500, errorName: 'SyntaxError' }
+    );
+    expect(JSON.stringify(loggerError.mock.calls)).not.toContain('Jo Bloggs');
+  });
+
+  it('a worker’s own answer is not logged here: the worker logs it', async () => {
+    api.markToldAnotherWay.mockRejectedValue(
+      new ApiError(409, 'Already told', 'CONFLICT', {
+        code: 'FEE_NOTICE_ALREADY_TOLD',
+      })
+    );
+    await remote.markToldAnotherWay({
+      noticeId: UUID,
+      body: { note: 'Phoned them.' },
+    });
+    expect(loggerError).not.toHaveBeenCalled();
   });
 });
 
@@ -483,6 +633,122 @@ describe('money owed back to a payee', () => {
       result: { outcome: 'still_unknown' },
     });
     expect(api.checkOwedToCreator).toHaveBeenCalledWith(UUID);
+  });
+});
+
+describe('fee notices and price moves (Codex-2hxff.33, .85, .86)', () => {
+  it('a mark on a rise that was called off reaches the page by its code, with why', async () => {
+    api.markToldAnotherWay.mockRejectedValue(
+      new ApiError(
+        409,
+        'Nothing to mark: this fee rise has started, or was cancelled or replaced.',
+        'CONFLICT',
+        {
+          code: 'FEE_CHANGE_NOT_WAITING',
+          changeId: UUID,
+          voidedAt: '2026-11-04T10:40:00.000Z',
+          voidReason: 'cancelled',
+          effectiveFrom: null,
+        }
+      )
+    );
+    await expect(
+      remote.markToldAnotherWay({ noticeId: UUID, body: { note: 'Phoned.' } })
+    ).resolves.toMatchObject({
+      outcome: 'failed',
+      status: 409,
+      detailsCode: 'FEE_CHANGE_NOT_WAITING',
+      voidReason: 'cancelled',
+      voidedAt: '2026-11-04T10:40:00.000Z',
+    });
+    expect(api.markToldAnotherWay).toHaveBeenCalledWith(UUID, {
+      note: 'Phoned.',
+    });
+  });
+
+  it('a second mark answers FEE_NOTICE_ALREADY_TOLD with when', async () => {
+    api.markToldAnotherWay.mockRejectedValue(
+      new ApiError(409, 'This person has already been told.', 'CONFLICT', {
+        code: 'FEE_NOTICE_ALREADY_TOLD',
+        state: 'told_another_way',
+        toldAt: '2026-11-04T10:41:00.000Z',
+        acceptedAt: null,
+        toldByName: 'Sam Ortiz',
+      })
+    );
+    await expect(
+      remote.markToldAnotherWay({ noticeId: UUID, body: { note: 'Phoned.' } })
+    ).resolves.toMatchObject({
+      detailsCode: 'FEE_NOTICE_ALREADY_TOLD',
+      state: 'told_another_way',
+      toldAt: '2026-11-04T10:41:00.000Z',
+      toldByName: 'Sam Ortiz',
+    });
+  });
+
+  it('a Retry with nothing held answers its reason and the plain message', async () => {
+    api.retryPriceMove.mockRejectedValue(
+      new ApiError(
+        409,
+        'A newer price for Pro replaced this one at 10:30, so they are emailed about that instead.',
+        'CONFLICT',
+        { code: 'PRICE_MOVE_NOT_HELD', reason: 'superseded' }
+      )
+    );
+    await expect(
+      remote.retryPriceMove({ moveId: UUID })
+    ).resolves.toMatchObject({
+      detailsCode: 'PRICE_MOVE_NOT_HELD',
+      reason: 'superseded',
+      message:
+        'A newer price for Pro replaced this one at 10:30, so they are emailed about that instead.',
+    });
+    expect(api.retryPriceMove).toHaveBeenCalledWith(UUID);
+  });
+
+  it('a not-held answer carries the codes the Queue words it from (W4)', async () => {
+    api.closePriceMove.mockRejectedValue(
+      new ApiError(409, 'Already closed.', 'CONFLICT', {
+        code: 'PRICE_MOVE_NOT_HELD',
+        reason: 'resolved',
+        skipReason: 'moving_away',
+        resolution: 'moved_by_hand',
+        supersededAt: '2026-11-04T10:30:00.000Z',
+      })
+    );
+    await expect(
+      remote.closePriceMove({
+        moveId: UUID,
+        body: { resolution: 'not_needed', note: 'Cancelled.' },
+      })
+    ).resolves.toMatchObject({
+      reason: 'resolved',
+      skipReason: 'moving_away',
+      resolution: 'moved_by_hand',
+      supersededAt: '2026-11-04T10:30:00.000Z',
+    });
+  });
+
+  it('Close sends its reason and note; Restart sends only the change', async () => {
+    api.closePriceMove.mockResolvedValue({ moveId: UUID, status: 'closed' });
+    api.restartPriceChange.mockResolvedValue({
+      change: { changeId: UUID },
+      nextRunAt: '2026-10-30T14:00:00.000Z',
+    });
+    await expect(
+      remote.closePriceMove({
+        moveId: UUID,
+        body: { resolution: 'not_needed', note: 'Cancelled.' },
+      })
+    ).resolves.toMatchObject({ outcome: 'done', result: { status: 'closed' } });
+    expect(api.closePriceMove).toHaveBeenCalledWith(UUID, {
+      resolution: 'not_needed',
+      note: 'Cancelled.',
+    });
+    await expect(
+      remote.restartPriceChange({ changeId: UUID })
+    ).resolves.toMatchObject({ outcome: 'done' });
+    expect(api.restartPriceChange).toHaveBeenCalledWith(UUID);
   });
 });
 

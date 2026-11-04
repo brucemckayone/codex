@@ -131,31 +131,29 @@ export const CacheType = {
   USER_SESSION: 'user:session',
 
   /**
-   * Fee config — platform singleton row.
-   * Version-bumped on every UPDATE. Reads cached by entity version.
-   * Used by FeeConfigService in @codex/purchase. (Codex-m644n)
+   * Fee versions — the platform level's dated versions, newest first, plus
+   * whether a rise there is waiting (`FeeVersionList`, `@codex/payments`).
+   * Read by FeeConfigService in @codex/purchase (Codex-2hxff.33).
    *
-   * NOTE: "NO TTL" is what these three keys WANT, not what they get.
-   * `FeeConfigService.readPlatformFees`/`readOrgFees`/`readCreatorOverride`
-   * pass no options, so each slot expires on `DEFAULT_TTL` (600s) and every
-   * 10-minute window with traffic in it costs another KV write — for config
-   * that changes maybe monthly, and on a path that runs on every purchase.
-   * Their invalidation is complete (every mutation calls `invalidateAsync`), so
-   * a long explicit `ttl` is both safe and much cheaper. See Codex-kgrdp.5.
+   * New keys, not the old `fee:platform`/`fee:org`/`fee:override`: the
+   * payload changed from one current row to a list, and a reshaped payload
+   * needs a key the old slots can't answer. Those carried the 600 s default
+   * TTL, so they are gone within ten minutes of the deploy.
+   *
+   * TTL: one day, or one hour while a rise at the level waits. Every admin
+   * write and support's "told another way" invalidate the level; only
+   * notifications-api's daily run, which has no CACHE_KV, sets a date
+   * without invalidating, and the hour bounds how late a reader sees it (the
+   * date is at least 30 days away). A dated version needs no invalidation at
+   * its start: it is already in the list (data design §5).
    */
-  FEE_CONFIG_PLATFORM: 'fee:platform',
+  FEE_VERSIONS_PLATFORM: 'fee-versions:platform',
 
-  /**
-   * Fee config — per-org override row.
-   * Version-bumped on every UPDATE. See the TTL note on FEE_CONFIG_PLATFORM.
-   */
-  FEE_CONFIG_ORG: 'fee:org',
+  /** Fee versions — one organisation's. See FEE_VERSIONS_PLATFORM. */
+  FEE_VERSIONS_ORG: 'fee-versions:org',
 
-  /**
-   * Fee config — per-creator-per-org override row.
-   * Version-bumped on every UPDATE. See the TTL note on FEE_CONFIG_PLATFORM.
-   */
-  FEE_CONFIG_OVERRIDE: 'fee:override',
+  /** Fee versions — one creator's in one organisation. See FEE_VERSIONS_PLATFORM. */
+  FEE_VERSIONS_OVERRIDE: 'fee-versions:override',
 
   // --- Collection version identifiers ---
   // These IDs are passed to cache.invalidate() to bump a collection version.

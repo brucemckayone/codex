@@ -25,7 +25,11 @@ import type {
   MyMembershipResponse,
   ThumbnailFrame,
 } from '@codex/shared-types';
-import type { SubscriberSubscription } from '@codex/subscription';
+import type {
+  PendingTierChange,
+  SubscriberSubscription,
+  UserCourseSubscription,
+} from '@codex/subscription';
 import type { HeroLayout } from '@codex/validation';
 
 /**
@@ -144,6 +148,18 @@ type DateAsString<T> = {
 // @codex/subscription: the row without the org's fee split or the internal
 // bookkeeping fields, which the service leaves out of what a subscriber
 // receives (`SUBSCRIBER_HIDDEN_COLUMNS`, Codex-mbs2l).
+//
+// A move to a cheaper plan that waits for the renewal (Codex-2hxff.16) comes
+// as `pendingTierChange`. Null, or absent from an older worker or an old
+// localStorage entry, means nothing is waiting. While one waits, the row's
+// `amountCents` is the next (cheaper) bill and `heldAmountCents` is what the
+// member pays now.
+//
+// A course subscription (Codex-2hxff.52) is its own row with its own list,
+// `UserCourseSubscription` from GET /subscriptions/courses/mine. Dates are
+// ISO strings there already.
+
+export type { PendingTierChange, UserCourseSubscription };
 
 /**
  * Subscription with tier and org info, matching backend SubscriptionWithOrg shape.
@@ -164,6 +180,7 @@ export interface UserOrgSubscription
     slug: string;
     logoUrl: string | null;
   };
+  pendingTierChange?: PendingTierChange | null;
 }
 
 /**
@@ -175,6 +192,7 @@ export interface UserOrgSubscription
 export interface CurrentSubscription
   extends DateAsString<SubscriberSubscription> {
   tier: DateAsString<SubscriptionTier>;
+  pendingTierChange?: PendingTierChange | null;
 }
 
 /**
@@ -197,7 +215,40 @@ export interface TierChangePreview {
   newRecurringInterval: 'month' | 'year';
   prorationDate: number;
   isUpgrade: boolean;
+  /**
+   * `period_end` for a move to a cheaper plan (Codex-2hxff.16): nothing is
+   * charged, and the member keeps the current plan until `currentPeriodEnd`.
+   */
+  takesEffect: 'now' | 'period_end';
   currentPeriodEnd: string;
+  /**
+   * A switch into yearly billing only: what the dialog shows, passed back
+   * unchanged to the change-tier commit, which previews again and refuses
+   * any difference (Codex-2hxff.96).
+   */
+  quote?: string;
+  /**
+   * Leaving yearly billing waits for the year's end (Codex-2hxff.97): the
+   * monthly bill from `effectiveAt` (ISO), or null. With `takesEffect:
+   * 'period_end'` the plan waits with it, and nothing is due today; with
+   * `'now'` the plan changes today on yearly billing (the upgrade's figures
+   * above), and only the billing waits.
+   */
+  billingChange: null | {
+    interval: 'month';
+    amountCents: number;
+    effectiveAt: string;
+  };
+  /**
+   * The waiting change this one replaces (latest wins), or null: what it
+   * would have billed, for "instead of £50 a year".
+   */
+  replaces: null | {
+    tierId: string;
+    tierName: string;
+    interval: 'month' | 'year';
+    amountCents: number;
+  };
 }
 
 /**
