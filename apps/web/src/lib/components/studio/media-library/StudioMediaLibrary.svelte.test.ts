@@ -52,6 +52,7 @@ vi.mock('$app/state', () => ({
   get page() {
     return { url: s.url };
   },
+  navigating: { to: null },
 }));
 
 const goto = vi.hoisted(() => vi.fn(async () => {}));
@@ -288,9 +289,11 @@ describe('StudioMediaLibrary: URL writes (runaway, Codex-a6ofh.1.7)', () => {
     s.first.current = listOf([item(1)]);
     render('?view=list');
     await settle();
-    document
-      .querySelector<HTMLButtonElement>('[role="radio"][aria-checked="true"]')
-      ?.click();
+    const shown = document.querySelector<HTMLButtonElement>(
+      '.segment--icons [role="radio"][aria-checked="true"]'
+    );
+    expect(shown).not.toBeNull();
+    shown?.click();
     await settle();
     expect(goto).not.toHaveBeenCalled();
   });

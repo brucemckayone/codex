@@ -3,7 +3,6 @@
  * the dialog so each rule is tested on its own: following an upload the
  * field started, and what the chosen item's status line says.
  */
-import { MEDIA_UPLOAD_STALLED_AFTER_MS } from '@codex/constants';
 import type { MediaItemState } from '@codex/validation';
 import { describeTile, type TileMedia, type TileView } from './tile-state';
 
@@ -74,22 +73,13 @@ export function followUpload(
 /**
  * The chosen item's state, by the library's own rules (`describeTile`), so a
  * failed or stopped item reads as it does on its tile, never as processing.
- * The single read has no live upload state, so an upload past
- * {@link MEDIA_UPLOAD_STALLED_AFTER_MS} reads as stopped here too, as the
- * library's attention filter counts it.
+ * The dialog's `now` is a real clock (its one stall timer), so it is also the
+ * clock the stall rule reads.
  */
 export function chosenView(
-  media: TileMedia & { createdAt?: string | Date | null },
+  media: TileMedia,
   live: MediaItemState | undefined,
   now: number
 ): TileView {
-  const view = describeTile(media, live, now);
-  if (view.kind !== 'uploading' || live?.upload || !media.createdAt)
-    return view;
-  return now > stallsAt(media.createdAt) ? { kind: 'stopped' } : view;
-}
-
-/** When an upload begun at `createdAt` reads as stopped (epoch ms). */
-export function stallsAt(createdAt: string | Date): number {
-  return new Date(createdAt).getTime() + MEDIA_UPLOAD_STALLED_AFTER_MS;
+  return describeTile(media, live, now, now);
 }

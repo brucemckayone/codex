@@ -22,7 +22,7 @@
   import { MediaQuery } from 'svelte/reactivity';
   import { boundSearchParam, gateSearchQuery } from '@codex/validation';
   import { goto } from '$app/navigation';
-  import { page } from '$app/state';
+  import { navigating, page } from '$app/state';
   import { mediaStatus } from '$lib/client/media-status.svelte';
   import { uploadQueue } from '$lib/client/upload-queue.svelte';
   import MediaUpload from '$lib/components/studio/MediaUpload.svelte';
@@ -254,9 +254,11 @@
       pendingUrl = null;
       // A write that changes nothing navigates nowhere. A navigation re-runs
       // whatever reads `page`, so an echo that writes the same URL back
-      // (the drawer's close did) would loop without ever yielding.
+      // (the drawer's close did) would loop without ever yielding. Compared
+      // with where the URL is going: one in flight is newer than `page.url`.
       const href = `${url.pathname}${url.search}`;
-      if (href === `${page.url.pathname}${page.url.search}`) return;
+      const shown = navigating?.to?.url ?? page.url;
+      if (href === `${shown.pathname}${shown.search}`) return;
       void goto(href, { keepFocus: true, noScroll: true });
     });
   }

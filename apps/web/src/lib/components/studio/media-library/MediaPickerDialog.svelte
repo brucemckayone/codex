@@ -34,9 +34,9 @@
   import type { LibrarySort } from './library-url';
   import { logReadFailure } from './log-read-failure';
   import { type PickerSegment, pickerListArgs } from './picker-args';
-  import { chosenView, type Following, followUpload, stallsAt } from './picker-state';
+  import { chosenView, type Following, followUpload } from './picker-state';
   import { rejectionReason, tileReason } from './tile-copy';
-  import { tilePill } from './tile-state';
+  import { stallsAt, tilePill } from './tile-state';
 
   type MediaKind = 'video' | 'audio';
 
