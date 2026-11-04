@@ -109,9 +109,9 @@ import {
 } from './content-tier-access';
 import {
   assertCanFileInOrg,
-  assertContentFilled,
   assertCreatorCanBePaid,
   assertPublishable,
+  assertSaveKeepsContentFilled,
   assertThumbnailFrameNotDeleted,
 } from './publish-gate';
 
@@ -998,14 +998,15 @@ export class ContentService extends BaseService {
           );
         }
 
-        // A LIVE piece stays complete (Codex-a6ofh.2.1, review): its next
-        // state must hold what publishing it needed, media, an article's
+        // A LIVE piece stays complete (Codex-a6ofh.2.1, review): a save may
+        // not open a gap publishing it would refuse, media, an article's
         // body, a price of at least £1, since those rules left the schema for
         // publish(). Judged on the whole row, the partial overlaid on it,
-        // because the studio resends some fields and not others. Drafts are
-        // left to publish(), and so is a piece taken off sale.
+        // because the studio resends some fields and not others; a gap the
+        // row already had doesn't block an unrelated edit. Drafts are left to
+        // publish(), and so is a piece taken off sale.
         if (existing.status === CONTENT_STATUS.PUBLISHED) {
-          assertContentFilled({
+          assertSaveKeepsContentFilled(existing, {
             id,
             contentType: restValidated.contentType ?? existing.contentType,
             mediaItemId:
@@ -2061,7 +2062,7 @@ export class ContentService extends BaseService {
 
     // Only check ready status when required (e.g., during publishing)
     if (requireReady && mediaItem.status !== MEDIA_STATUS.READY) {
-      throw new MediaNotReadyError(mediaItemId);
+      throw new MediaNotReadyError(mediaItemId, mediaItem.status);
     }
 
     // Validate content type matches media type

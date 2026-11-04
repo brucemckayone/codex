@@ -55,17 +55,36 @@ describe('hasArticleBody', () => {
     ['a hex NBSP entity', '<p>&#xA0;</p>'],
     ['a script', '<script>alert(1)</script>'],
     ['a style', '<style>p { color: red }</style><p></p>'],
-    ['a zero-width space', '<p>​</p>'],
+    ['a zero-width space', '<p>\u200B</p>'],
   ])('is false for legacy HTML holding only %s', (_label, body) => {
     expect(hasArticleBody(body)).toBe(false);
   });
 
   it('is false for a doc whose only text is zero-width', () => {
-    expect(hasArticleBody(doc(paragraph(text('​﻿'))))).toBe(false);
+    expect(hasArticleBody(doc(paragraph(text('\u200B\uFEFF'))))).toBe(false);
   });
 
   it('still reads words beside a script', () => {
     expect(hasArticleBody('<script>x</script><p>Words</p>')).toBe(true);
+  });
+
+  // A browser reads an unclosed script to the end of the document.
+  it('reads words before an unclosed script, and none inside it', () => {
+    expect(hasArticleBody('<p>Words</p><script>never closed')).toBe(true);
+    expect(hasArticleBody('<script>words, never shown')).toBe(false);
+  });
+
+  // Review (Codex-a6ofh.2.1): the old patterns rescanned to the end from
+  // every unclosed opener, quadratic (40,000 '<' took 2.3 s), and this runs
+  // inside publish's row lock. 200,000 of either is linear work now.
+  it.each([
+    ['unclosed tag openers', '<'.repeat(200_000)],
+    ['unclosed script openers', '<script '.repeat(25_000)],
+    ['unclosed style openers', '<style>'.repeat(25_000)],
+  ])('is linear on %s', (_label, body) => {
+    const started = performance.now();
+    hasArticleBody(body);
+    expect(performance.now() - started).toBeLessThan(1000);
   });
 
   it('treats a brace that is not a doc as text', () => {

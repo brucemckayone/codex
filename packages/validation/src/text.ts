@@ -57,17 +57,40 @@ export function hasArticleBody(
   if (doc) return isReadableDoc(doc);
   if (/<img\b/i.test(value)) return true;
   // What the renderer would show: a script's or style's contents never, an
-  // entity space as a space.
-  const text = value
-    .replace(/<(script|style)\b[\s\S]*?<\/\1\s*>/gi, '')
-    .replace(/<[^>]*>/g, '')
+  // entity space as a space. Linear on any input (review, Codex-a6ofh.2.1):
+  // `/<[^>]*>/` and a lazy block regex rescan to the end from every opener
+  // left unclosed, which is quadratic, and this runs inside publish's lock.
+  const text = stripScriptsAndStyles(value)
+    .replace(/<[^<>]*>/g, '')
     .replace(/&(?:nbsp|#160|#x0*a0);/gi, ' ');
   return !isBlank(text);
 }
 
+/**
+ * `value` without its script and style blocks. One scan: each opener is
+ * found from where the last block ended, then its own closer, so no
+ * character is read twice. An unclosed block runs to the end, as a browser
+ * reads it, so nothing after it shows.
+ */
+function stripScriptsAndStyles(value: string): string {
+  const opener = /<(script|style)(?![\w-])/gi;
+  let out = '';
+  let at = 0;
+  for (let open = opener.exec(value); open; open = opener.exec(value)) {
+    out += value.slice(at, open.index);
+    const closer = new RegExp(`</${open[1]}`, 'gi');
+    closer.lastIndex = opener.lastIndex;
+    if (!closer.exec(value)) return out;
+    const end = value.indexOf('>', closer.lastIndex);
+    at = end === -1 ? value.length : end + 1;
+    opener.lastIndex = at;
+  }
+  return out + value.slice(at);
+}
+
 /** Nothing but whitespace, an NBSP or a zero-width character. */
 function isBlank(text: string): boolean {
-  return text.replace(/[​-‍﻿]/g, '').trim() === '';
+  return text.replace(/[\u200B-\u200D\uFEFF]/g, '').trim() === '';
 }
 
 function isReadableDoc(doc: Record<string, unknown>): boolean {

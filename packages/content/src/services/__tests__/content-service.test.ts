@@ -1599,6 +1599,65 @@ describe('ContentService', () => {
       expect(updated.title).toBe('Retitled');
     });
 
+    // A piece live before these rules may already miss one (the old update
+    // rule only caught a flag and a price sent together). That gap doesn't
+    // block an unrelated edit; a NEW gap still does.
+    it('lets a live piece with an old gap take an edit, but not open another', async () => {
+      const id = await liveArticle();
+      await db
+        .update(content)
+        .set({ isPurchasable: true, priceCents: null })
+        .where(eq(content.id, id));
+
+      const retitled = await service.update(
+        id,
+        { title: 'Still unpriced' },
+        creatorId
+      );
+      expect(retitled.title).toBe('Still unpriced');
+
+      await expect(
+        service.update(id, { contentBody: '' }, creatorId)
+      ).rejects.toMatchObject({
+        statusCode: 422,
+        context: { code: 'BODY_REQUIRED' },
+      });
+    });
+
+    it("refuses moving a live video onto media that isn't ready, naming its status", async () => {
+      const [ready, transcoding] = await db
+        .insert(mediaItems)
+        .values([
+          createTestMediaItemInput(creatorId, {
+            mediaType: 'video',
+            status: 'ready',
+          }),
+          createTestMediaItemInput(creatorId, {
+            mediaType: 'video',
+            status: 'transcoding',
+          }),
+        ])
+        .returning();
+      if (!ready || !transcoding) throw new Error('failed to seed media');
+      const draft = await service.create(
+        {
+          title: 'Live video, new cut',
+          slug: createUniqueSlug('live-recut'),
+          contentType: 'video',
+          mediaItemId: ready.id,
+          tags: [],
+        },
+        creatorId
+      );
+      await service.publish(draft.id, creatorId);
+
+      await expect(
+        service.update(draft.id, { mediaItemId: transcoding.id }, creatorId)
+      ).rejects.toMatchObject({
+        context: { code: 'MEDIA_NOT_READY', mediaStatus: 'transcoding' },
+      });
+    });
+
     it('saves a draft with no body and an unpriced sale', async () => {
       const draft = await service.create(
         {

@@ -329,10 +329,18 @@ describe('ContentService — org membership on create/update/publish (Codex-ocal
         holding(await backendPid(tx));
         await released;
       });
-      const remover = await held;
+      // A removal that fails before it holds the lock ends the test, rather
+      // than leaving it waiting on `held` until vitest's timeout.
+      const remover = await Promise.race([
+        held,
+        removing.then(() => {
+          throw new Error('the removal ended before it held the membership');
+        }),
+      ]);
 
+      let publishing: Promise<unknown> | undefined;
       try {
-        const publishing = service.publish(draft.id, creatorId);
+        publishing = service.publish(draft.id, creatorId);
         const early = await untilBlockedBy(remover, publishing);
         release();
         await removing;
@@ -351,6 +359,9 @@ describe('ContentService — org membership on create/update/publish (Codex-ocal
       } finally {
         release();
         await removing.catch(() => {});
+        // Settled before the restore, so a publish still running can't land
+        // on the restored membership.
+        await publishing?.catch(() => {});
         await setTeamMembership(db, leavingOrgId, creatorId, {
           status: 'active',
         });

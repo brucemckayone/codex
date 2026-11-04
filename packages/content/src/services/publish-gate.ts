@@ -86,31 +86,28 @@ type FilledRow = Pick<
   | 'priceCents'
 >;
 
+/** A rule a live piece holds: its media, an article's body, a price. */
+type ContentGap = 'media' | 'body' | 'price';
+
 /**
- * Refuse a row missing what a live piece of its type holds: a video or audio
- * piece its media, an article something to read, a piece for sale a price of
- * at least £1. publish() asks of the saved row; update() of a LIVE row's next
- * state, so a save can't take a live piece below what publishing it needed
- * (Codex-a6ofh.2.1: these rules left the create schema for publish, and a
- * live save had never checked them).
+ * What a live piece of the row's type holds that this row doesn't, in the
+ * order publish names them: a video or audio piece's media, an article's
+ * something to read, a piece for sale's price of at least £1
+ * (Codex-a6ofh.2.1: these rules left the create schema for publish).
  *
- * @throws {MediaRequiredToPublishError} Video or audio with no media
- * @throws {ContentBodyRequiredError} An article with nothing to read
- * @throws {PriceRequiredToPublishError} For sale with no price, or under £1
  * @throws {ValidationError} A content type with no rule here: refused, never
  *   waved through
  */
-export function assertContentFilled(row: FilledRow): void {
+function contentGaps(row: FilledRow): ContentGap[] {
+  const gaps: ContentGap[] = [];
   switch (row.contentType) {
     case CONTENT_TYPES.VIDEO:
     case CONTENT_TYPES.AUDIO:
-      if (!row.mediaItemId) {
-        throw new MediaRequiredToPublishError(row.id, row.contentType);
-      }
+      if (!row.mediaItemId) gaps.push('media');
       break;
     case CONTENT_TYPES.WRITTEN:
       if (!hasArticleBody(row.contentBodyJson ?? row.contentBody)) {
-        throw new ContentBodyRequiredError(row.id);
+        gaps.push('body');
       }
       break;
     default:
@@ -119,10 +116,52 @@ export function assertContentFilled(row: FilledRow): void {
         { contentId: row.id }
       );
   }
-
   if (row.isPurchasable && (row.priceCents ?? 0) < PRICE_LIMITS.MIN_CENTS) {
-    throw new PriceRequiredToPublishError(row.id);
+    gaps.push('price');
   }
+  return gaps;
+}
+
+function gapError(row: FilledRow, gap: ContentGap) {
+  switch (gap) {
+    case 'media':
+      return new MediaRequiredToPublishError(row.id, row.contentType);
+    case 'body':
+      return new ContentBodyRequiredError(row.id);
+    case 'price':
+      return new PriceRequiredToPublishError(row.id);
+  }
+}
+
+/**
+ * Refuse a row missing what a live piece of its type holds (`contentGaps`).
+ * publish() asks it of the saved row.
+ *
+ * @throws {MediaRequiredToPublishError} Video or audio with no media
+ * @throws {ContentBodyRequiredError} An article with nothing to read
+ * @throws {PriceRequiredToPublishError} For sale with no price, or under £1
+ */
+export function assertContentFilled(row: FilledRow): void {
+  const [gap] = contentGaps(row);
+  if (gap) throw gapError(row, gap);
+}
+
+/**
+ * Refuse a save of a LIVE piece that opens a gap it didn't have: detaching
+ * its media, emptying its body, unpricing it. A live save had never checked
+ * these. A gap the row already has (a piece live before the rules) doesn't
+ * block an unrelated edit such as a title; publishing it again still refuses
+ * (review, Codex-a6ofh.2.1).
+ *
+ * @throws {MediaRequiredToPublishError | ContentBodyRequiredError | PriceRequiredToPublishError}
+ */
+export function assertSaveKeepsContentFilled(
+  current: FilledRow,
+  next: FilledRow
+): void {
+  const had = new Set(contentGaps(current));
+  const opened = contentGaps(next).find((gap) => !had.has(gap));
+  if (opened) throw gapError(next, opened);
 }
 
 /**
