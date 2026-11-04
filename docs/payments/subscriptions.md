@@ -537,7 +537,13 @@ and the balance stays £0 throughout.
   It never overrides a later choice. One that ends in a cancel (a Cancel moved
   onto it, P10) is let go and the cancel put back. One on a subscription set
   to cancel is let go and the record kept, as Cancel does. Keep clears the
-  record, so there is nothing to finish. A failed finish is one
+  record, so there is nothing to finish. Before the renewal, our schedule
+  never stands without its record: the record is written before the
+  create, and every path that clears it lets go first. So one found without
+  it is let go on the next event. That happens when a Keep crosses a
+  backstop's create (`billing_change.released_without_record`, a warning).
+  If the backstop's own let-go after a Keep fails, that is one
+  `billing_change.kept_release_failed` error alert. A failed finish is one
   `billing_change.finish_failed` error alert with an errorId and the
   schedule's ids, and no email. The next event tries again. If none comes
   before the renewal, support finishes or releases the schedule.
