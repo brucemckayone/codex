@@ -26,7 +26,7 @@ import {
   tokenOverridesToCssVars,
 } from '$lib/brand-editor';
 import { withFallback } from '$lib/brand-editor/font-fallbacks';
-import { groundLuminance, paintableBackground } from '$lib/brand-editor/ground';
+import { groundLuminance, paintableColour } from '$lib/brand-editor/ground';
 import type { BrandTokenOverrides } from '$lib/page-builder';
 
 /**
@@ -104,9 +104,8 @@ export function brandOverridesToCssVars(
   for (const [field, prop] of Object.entries(CORE_LIGHT)) {
     const value = (overrides as Record<string, unknown>)[field];
     if (typeof value !== 'string' || value.trim().length === 0) continue;
-    // A background is painted only as the canonical hex the nudge measures.
-    const painted =
-      field === 'backgroundColor' ? paintableBackground(value) : value;
+    // A colour is painted only as the canonical hex the nudge measures.
+    const painted = FONT_FIELDS.has(field) ? value : paintableColour(value);
     if (!painted) continue;
     out[prop] = FONT_FIELDS.has(field) ? quoteFamily(painted) : painted;
   }
@@ -125,9 +124,7 @@ export function brandOverridesToCssVars(
   if (overrides.darkOverrides) {
     for (const [field, prop] of Object.entries(CORE_DARK)) {
       const value = (overrides.darkOverrides as Record<string, unknown>)[field];
-      if (typeof value !== 'string' || value.trim().length === 0) continue;
-      const painted =
-        field === 'backgroundColor' ? paintableBackground(value) : value;
+      const painted = typeof value === 'string' && paintableColour(value);
       if (!painted) continue;
       out[prop] = painted;
     }

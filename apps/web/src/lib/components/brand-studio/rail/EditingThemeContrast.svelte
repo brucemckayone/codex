@@ -24,6 +24,7 @@
 -->
 <script lang="ts">
   import { BRAND_DEFAULT_PRIMARY, brandEditor } from '$lib/brand-editor';
+  import { paintableColour } from '$lib/brand-editor/ground';
   import {
     LINK_FLOOR,
     MARK_FLOOR,
@@ -42,8 +43,11 @@
 
   // The active editing theme's brand colour (dark reads darkOverrides, falling
   // back to the light value) — reactive to both edits and the theme toggle.
+  // A dark one the page would not paint falls back too, as the page's does.
   const brandColor = $derived(
-    brandEditor.getThemeColor('primaryColor') ?? BRAND_DEFAULT_PRIMARY
+    paintableColour(brandEditor.getThemeColor('primaryColor')) ??
+      brandEditor.pending?.primaryColor ??
+      BRAND_DEFAULT_PRIMARY
   );
 
   const contrast = $derived(evaluateBrandContrast(brandColor));

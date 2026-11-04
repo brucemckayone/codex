@@ -82,7 +82,8 @@ export const STICKY_GLASS_OPACITY = 0.94;
  * fixed lightness, so their luminance is bounded whatever the brand. The
  * hardest, `--color-brand-primary-subtle`, is at least 0.826 as a light chip
  * (oklch 0.96, c×0.2) and at most 0.0075 as a dark one (0.18, c×0.3), over
- * every 8-bit brand; a test re-derives both. Counted like any surface, at its
+ * every 8-bit brand, the only kind a writer paints (`paintableColour`); a test
+ * re-derives both from the stylesheet. Counted like any surface, at its
  * bound: the chip's brand is not one of this module's inputs.
  */
 export const CHIP_LUMINANCE = { light: 0.826, dark: 0.0075 } as const;
@@ -157,38 +158,39 @@ export function glassLuminance(ground: string): number | null {
 /**
  * The binding ground for one theme as the stylesheet reads it, a bare
  * number to 4 decimals, or undefined for a background the page would not
- * paint (`paintableBackground`): every caller reads the same ground.
+ * paint (`paintableColour`): every caller reads the same ground.
  */
 export function groundLuminance(
   colour: string | null | undefined,
   theme: Theme
 ): string | undefined {
-  const hex = paintableBackground(colour);
+  const hex = paintableColour(colour);
   const page = hex ? relativeLuminance(hex) : null;
   const surfaces = hex ? surfaceLuminances(hex, theme) : null;
   const glass = hex ? glassLuminance(hex) : null;
   if (page === null || surfaces === null || glass === null) return undefined;
+  // Rounded as written, so the chip takes the side the stylesheet reads.
+  const written = Number(page.toFixed(4));
   const chip =
-    page < TEXT_ON_BRAND_LUMINANCE_PIVOT
+    written < TEXT_ON_BRAND_LUMINANCE_PIVOT
       ? CHIP_LUMINANCE.dark
       : CHIP_LUMINANCE.light;
-  return bindingLuminance(Number(page.toFixed(4)), [
-    ...surfaces,
-    glass,
-    chip,
-  ]).toFixed(4);
+  return bindingLuminance(written, [...surfaces, glass, chip]).toFixed(4);
 }
 
 /**
- * A background the page may paint: one whose ground this module can measure,
- * as the `#RGB` / `#RRGGBB` both CSS and the nudge read, trimmed. Any other
- * form the API may have stored (rgb(), a colour name, var(…), a bare or
- * 8-digit hex) is ignored, so every writer paints the platform's in its place
- * and the nudge never reads a ground it cannot see (owner, Codex-mik4h:
- * "Ignore it, like On Brand"). Writers paint the value this returns; the
- * stored value is untouched.
+ * A background or brand colour the page may paint: one this module can
+ * measure and bound, as the `#RGB` / `#RRGGBB` both CSS and the nudge read,
+ * trimmed. Any other form the API may have stored (rgb(), a colour name,
+ * var(…), a wide-gamut colour, a bare or 8-digit hex) is ignored, so every
+ * writer paints the fallback in its place: the platform's background, the
+ * light brand for a dark one, the org's for a page's. The nudge then never
+ * reads a ground it cannot see, nor sits links on a chip CHIP_LUMINANCE does
+ * not bound (owner, Codex-mik4h: "Ignore it, like On Brand", and for brand
+ * colours, "Same rule as backgrounds"). Writers paint the value this returns;
+ * the stored value is untouched.
  */
-export function paintableBackground(
+export function paintableColour(
   colour: string | null | undefined
 ): string | undefined {
   const hex = colour?.trim();
@@ -200,7 +202,7 @@ export function paintableBackground(
  * backgrounds. Empty when the org paints no ground of its own, or its
  * background is not a hex colour (the page then paints the platform's). An
  * unpaintable dark background falls back to the light one, as the stylesheet
- * does once the writers drop it (`paintableBackground`).
+ * does once the writers drop it (`paintableColour`).
  */
 export function groundLuminanceVars({
   background,

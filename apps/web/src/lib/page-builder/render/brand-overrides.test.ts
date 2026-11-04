@@ -124,6 +124,26 @@ describe('brandOverridesToCssVars', () => {
     expect(vars).not.toHaveProperty('--brand-color');
   });
 
+  // Owner, Codex-mik4h: "Same rule as backgrounds". A brand colour the chip
+  // bound cannot hold is not painted, so the page keeps the org's.
+  it('paints only a brand colour that is a hex, in each theme', () => {
+    const vars = brandOverridesToCssVars({
+      primaryColor: 'oklch(0.6 0.4 0)',
+      secondaryColor: '#334455',
+      fontBody: 'Inter',
+      darkOverrides: {
+        primaryColor: 'color(display-p3 1 0 0.4)',
+        accentColor: ' #aabbcc ',
+      },
+    });
+    expect(vars).not.toHaveProperty('--brand-color');
+    expect(vars).not.toHaveProperty('--brand-color-dark');
+    expect(vars['--brand-secondary']).toBe('#334455');
+    expect(vars['--brand-secondary-dark']).toBe('#334455');
+    expect(vars['--brand-accent-dark']).toBe('#aabbcc');
+    expect(vars).toHaveProperty('--brand-font-body');
+  });
+
   // Owner, Codex-mik4h: "Ignore it, like On Brand". A background the nudge
   // cannot measure is not painted, so the page keeps the org's ground and
   // the org's ground number together.
@@ -169,8 +189,13 @@ describe('brandOverridesToCssVars', () => {
       ['markup', '<b>red</b>'],
       ['a newline', 'red\nposition: fixed'],
     ])('drops a value carrying %s', (_label, value) => {
-      const vars = brandOverridesToCssVars({ primaryColor: value });
+      // A colour, which must be a hex, and a token, which only the filter stops.
+      const vars = brandOverridesToCssVars({
+        primaryColor: value,
+        tokenOverrides: { 'heading-weight': value },
+      });
       expect(vars).not.toHaveProperty('--brand-color');
+      expect(vars).not.toHaveProperty('--brand-heading-weight');
       expect(Object.values(vars).join(' ')).not.toContain(value);
     });
 
@@ -187,12 +212,12 @@ describe('brandOverridesToCssVars', () => {
     it('keeps the colours, families and numbers the brand controls write', () => {
       expect(
         brandOverridesToCssVars({
-          primaryColor: 'oklch(0.62 0.19 35 / 90%)',
+          primaryColor: '#d9663f',
           fontHeading: 'Playfair Display',
           radius: 0.5,
         })
       ).toMatchObject({
-        '--brand-color': 'oklch(0.62 0.19 35 / 90%)',
+        '--brand-color': '#d9663f',
         '--brand-font-heading': `"Playfair Display", 'Playfair Display-fallback'`,
         '--brand-radius': '0.5rem',
       });

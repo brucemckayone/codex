@@ -388,6 +388,24 @@ describe('injectBrandVars paints only a background it can measure', () => {
       groundLuminance('#ffffff', 'dark')
     );
   });
+
+  // Owner, Codex-mik4h: "Same rule as backgrounds". A dark brand colour the
+  // chip bound cannot hold is not painted, so dark reads the light brand.
+  it('drops a dark brand colour that is not a hex, so dark reads the light one', () => {
+    const el = layout();
+    injectBrandVars({
+      ...state,
+      darkOverrides: {
+        primaryColor: 'oklch(0.6 0.4 0)',
+        secondaryColor: 'color(display-p3 1 0 0.4)',
+        accentColor: ' #aabbcc ',
+      },
+    });
+
+    expect(el.style.getPropertyValue('--brand-color-dark')).toBe('');
+    expect(el.style.getPropertyValue('--brand-secondary-dark')).toBe('');
+    expect(el.style.getPropertyValue('--brand-accent-dark')).toBe('#aabbcc');
+  });
 });
 
 describe('injectBrandVars paints the canonical hex', () => {

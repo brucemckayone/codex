@@ -12,7 +12,7 @@ import {
   ORG_SURFACE_STEPS,
   oklchStep,
   PLATFORM_GROUND_LUMINANCE,
-  paintableBackground,
+  paintableColour,
   STICKY_GLASS_OPACITY,
 } from './ground';
 import { relativeLuminance, TEXT_ON_BRAND_LUMINANCE_PIVOT } from './ink';
@@ -184,43 +184,88 @@ describe('the inputs an org’s backgrounds write', () => {
 });
 
 // The -subtle chips' luminance bound holds for every brand. Re-derived on a
-// 32-level lattice of brands, painted as the engines paint the chip tokens.
+// 32-level lattice of brands, painted as the stylesheet paints the chips.
 describe('the chips labels sit on', () => {
+  type Side = readonly [l: number, k: number];
+  const TOKENS = [
+    '--color-brand-primary-subtle',
+    '--color-interactive-subtle',
+  ] as const;
+
+  /**
+   * A chip's step `[L, dL, K, dK]` in each `[data-org-bg]` rule: lightness
+   * `calc(L - dL * var(--_gw))`, chroma `calc(c * (K + dK * var(--_gw)))`.
+   */
+  function chipSteps(token: string): number[][] {
+    const stepped = new RegExp(
+      `${token}: oklch\\(from [^;]+ calc\\(([\\d.]+) - ([\\d.]+) \\* var\\(--_gw\\)\\) calc\\(c \\* \\(([\\d.]+) \\+ ([\\d.]+) \\* var\\(--_gw\\)\\)\\) h\\);`,
+      'g'
+    );
+    return [...ORG_BRAND.matchAll(stepped)].map((m) => m.slice(1).map(Number));
+  }
+
+  /** A chip's two sides: light at a `--_gw` of 0, dark at 1. */
+  function sides([l, dl, k, dk]: number[]): Record<'light' | 'dark', Side> {
+    const at = (n: number) => Number(n.toFixed(4));
+    return { light: [l, k], dark: [at(l - dl), at(k + dk)] };
+  }
+
+  test.each(
+    TOKENS
+  )('%s: the light rule and its dark twin step alike', (token) => {
+    const steps = chipSteps(token);
+    expect(steps).toHaveLength(2);
+    expect(steps[1]).toEqual(steps[0]);
+  });
+
   const levels = Array.from({ length: 32 }, (_, i) =>
     Math.round((i * 255) / 31)
   );
-  const chips: Record<'light' | 'dark', number[]> = { light: [], dark: [] };
-  for (const r of levels) {
-    for (const g of levels) {
-      for (const b of levels) {
-        // --color-brand-primary-subtle: oklch 0.96, c×0.2 light; 0.18, c×0.3 dark.
-        const brand = srgbToHex(r, g, b);
-        const l = hexToOklch(brand)?.l ?? Number.NaN;
-        chips.light.push(luminance(oklchStep(brand, 0.96 - l, 0.2) ?? ''));
-        chips.dark.push(luminance(oklchStep(brand, 0.18 - l, 0.3) ?? ''));
+  /** Each chip's luminance over the lattice, per side. */
+  function paint(sides: Record<'light' | 'dark', Side>) {
+    const out: Record<'light' | 'dark', number[]> = { light: [], dark: [] };
+    for (const r of levels) {
+      for (const g of levels) {
+        for (const b of levels) {
+          const brand = srgbToHex(r, g, b);
+          const l = hexToOklch(brand)?.l ?? Number.NaN;
+          for (const side of ['light', 'dark'] as const) {
+            const [cl, k] = sides[side];
+            out[side].push(luminance(oklchStep(brand, cl - l, k) ?? ''));
+          }
+        }
       }
     }
+    return out;
   }
 
+  const [primary, interactive] = TOKENS.map((token) =>
+    paint(sides(chipSteps(token)[0] ?? []))
+  );
+
   test('a light chip is never darker, a dark one never lighter, than its bound', () => {
-    expect(Math.min(...chips.light)).toBeGreaterThanOrEqual(
-      CHIP_LUMINANCE.light
+    for (const chips of [primary, interactive]) {
+      expect(Math.min(...chips.light)).toBeGreaterThanOrEqual(
+        CHIP_LUMINANCE.light
+      );
+      expect(Math.max(...chips.dark)).toBeLessThanOrEqual(CHIP_LUMINANCE.dark);
+    }
+    // Tight on the hardest chip, so it costs no link more than it needs.
+    expect(Math.min(...primary.light) - CHIP_LUMINANCE.light).toBeLessThan(
+      0.01
     );
-    expect(Math.max(...chips.dark)).toBeLessThanOrEqual(CHIP_LUMINANCE.dark);
-    // Tight, so the chip costs no link more than it needs.
-    expect(Math.min(...chips.light) - CHIP_LUMINANCE.light).toBeLessThan(0.01);
-    expect(CHIP_LUMINANCE.dark - Math.max(...chips.dark)).toBeLessThan(0.002);
+    expect(CHIP_LUMINANCE.dark - Math.max(...primary.dark)).toBeLessThan(0.002);
   });
 });
 
-describe('a background the page may paint', () => {
+describe('a background or brand colour the page may paint', () => {
   test.each([
     ['#fff', '#fff'],
     ['#FFF8E7', '#FFF8E7'],
     // Painted as the canonical form the nudge measures, never as stored.
     [' #1e1e2e ', '#1e1e2e'],
   ])('is one this module measures: %j', (colour, painted) => {
-    expect(paintableBackground(colour)).toBe(painted);
+    expect(paintableColour(colour)).toBe(painted);
   });
 
   test.each([
@@ -228,6 +273,9 @@ describe('a background the page may paint', () => {
     'navy',
     'var(--x)',
     'oklch(0.2 0.02 280)',
+    // Past sRGB, so past the chip bound too.
+    'oklch(0.6 0.4 0)',
+    'color(display-p3 1 0 0.4)',
     '#12345',
     // CSS cannot paint a bare hex; the nudge cannot read an 8-digit one.
     '112233',
@@ -236,7 +284,7 @@ describe('a background the page may paint', () => {
     null,
     undefined,
   ])('is not anything else: %s', (colour) => {
-    expect(paintableBackground(colour)).toBeUndefined();
+    expect(paintableColour(colour)).toBeUndefined();
   });
 });
 

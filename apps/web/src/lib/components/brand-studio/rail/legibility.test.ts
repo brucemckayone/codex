@@ -1,6 +1,9 @@
 // @vitest-environment node
 import { describe, expect, test } from 'vitest';
-import { PLATFORM_GROUND_LUMINANCE } from '$lib/brand-editor/ground';
+import {
+  groundLuminanceVars,
+  PLATFORM_GROUND_LUMINANCE,
+} from '$lib/brand-editor/ground';
 import { LINK_FLOOR, nudgeForGround } from '$lib/brand-editor/ground-nudge';
 import { groundFor, hoverFill, legibilityFor } from './legibility';
 
@@ -76,6 +79,13 @@ describe('the ground the pill measures against', () => {
       brand: DEEP,
       background: '#000000',
     });
+    // The number the page's writers emit, not the platform's.
+    expect(black).toBe(
+      Number(
+        groundLuminanceVars({ background: '#000000' })['--brand-ground-dark-y']
+      )
+    );
+    expect(black).not.toBe(DARK);
     expect(
       groundFor({ theme: 'dark', brand: DEEP, background: ' #000000 ' })
     ).toBe(black);

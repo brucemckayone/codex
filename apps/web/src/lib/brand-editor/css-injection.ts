@@ -3,7 +3,7 @@ import { withFallback } from './font-fallbacks';
 import {
   GROUND_VAR_PROPS,
   groundLuminanceVars,
-  paintableBackground,
+  paintableColour,
 } from './ground';
 import type { BrandEditorState, CssVarMapping } from './types';
 
@@ -383,7 +383,7 @@ const CSS_VAR_MAPPINGS: CssVarMapping[] = [
   },
   {
     property: '--brand-bg',
-    getValue: (s) => paintableBackground(s.backgroundColor),
+    getValue: (s) => paintableColour(s.backgroundColor),
   },
   {
     property: '--brand-radius',
@@ -530,8 +530,8 @@ export function injectBrandVars(state: BrandEditorState): void {
   }
 
   // Handle background attribute separately. A background the nudge cannot
-  // measure is not painted (`paintableBackground`, Codex-mik4h).
-  if (paintableBackground(state.backgroundColor)) {
+  // measure is not painted (`paintableColour`, Codex-mik4h).
+  if (paintableColour(state.backgroundColor)) {
     if (!el.hasAttribute('data-org-bg')) {
       el.setAttribute('data-org-bg', '');
     }
@@ -587,10 +587,10 @@ export function injectBrandVars(state: BrandEditorState): void {
     backgroundColor: '--brand-bg-dark',
   };
   for (const [field, prop] of Object.entries(darkVarMap)) {
-    const stored =
-      state.darkOverrides?.[field as keyof typeof state.darkOverrides];
-    const darkVal =
-      field === 'backgroundColor' ? paintableBackground(stored) : stored;
+    // Painted only as a hex, as the page's layouts do (`paintableColour`).
+    const darkVal = paintableColour(
+      state.darkOverrides?.[field as keyof typeof state.darkOverrides]
+    );
     if (darkVal) {
       el.style.setProperty(prop, darkVal);
     } else {
@@ -602,8 +602,8 @@ export function injectBrandVars(state: BrandEditorState): void {
   // link and focus colours against it. Written last, so the stale-override sweep
   // above never clears it.
   const ground = groundLuminanceVars({
-    background: paintableBackground(state.backgroundColor),
-    backgroundDark: paintableBackground(state.darkOverrides?.backgroundColor),
+    background: paintableColour(state.backgroundColor),
+    backgroundDark: paintableColour(state.darkOverrides?.backgroundColor),
   });
   for (const prop of GROUND_VAR_PROPS) {
     const value = ground[prop];

@@ -15,7 +15,7 @@
   import { setContext } from 'svelte';
   import AuthShaderPane from '$lib/components/auth/AuthShaderPane.svelte';
   import { NavigationProgress } from '$lib/components/ui/Feedback/NavigationProgress';
-  import { groundLuminanceVars, paintableBackground } from '$lib/brand-editor/ground';
+  import { groundLuminanceVars, paintableColour } from '$lib/brand-editor/ground';
   import {
     darkTokenOverridesToCssVars,
     parseDarkColorOverrides,
@@ -36,8 +36,8 @@
   const brandPrimary = $derived(branding?.brandColors?.primary ?? undefined);
   const brandSecondary = $derived(branding?.brandColors?.secondary ?? undefined);
   const brandAccent = $derived(branding?.brandColors?.accent ?? undefined);
-  // A background the nudge cannot measure is not painted (`paintableBackground`).
-  const brandBackground = $derived(paintableBackground(branding?.brandColors?.background));
+  // A background the nudge cannot measure is not painted (`paintableColour`).
+  const brandBackground = $derived(paintableColour(branding?.brandColors?.background));
   // Dark-mode colour overrides. org-brand.css gates its dark tokens on
   // `var(--brand-bg-dark, var(--brand-bg, …))`, so WITHOUT these the dark rules
   // still match but fall straight back to the LIGHT brand colours. That is what
@@ -50,13 +50,14 @@
   const darkColorOverrides = $derived(
     parseDarkColorOverrides(branding?.brandFineTune?.darkModeOverrides)
   );
-  const brandPrimaryDark = $derived(darkColorOverrides?.primaryColor ?? undefined);
+  // Painted only as a hex, as the org layout does (`paintableColour`).
+  const brandPrimaryDark = $derived(paintableColour(darkColorOverrides?.primaryColor));
   const brandSecondaryDark = $derived(
-    darkColorOverrides?.secondaryColor ?? undefined
+    paintableColour(darkColorOverrides?.secondaryColor)
   );
-  const brandAccentDark = $derived(darkColorOverrides?.accentColor ?? undefined);
+  const brandAccentDark = $derived(paintableColour(darkColorOverrides?.accentColor));
   const brandBackgroundDark = $derived(
-    paintableBackground(darkColorOverrides?.backgroundColor)
+    paintableColour(darkColorOverrides?.backgroundColor)
   );
   // The binding ground's luminance, as the org layout writes it (Codex-mik4h).
   const groundVars = $derived(

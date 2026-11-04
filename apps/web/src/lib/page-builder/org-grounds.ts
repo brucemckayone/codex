@@ -10,7 +10,7 @@
  */
 import type { BrandEditorState } from '$lib/brand-editor';
 import { parseDarkColorOverrides } from '$lib/brand-editor';
-import { paintableBackground } from '$lib/brand-editor/ground';
+import { paintableColour } from '$lib/brand-editor/ground';
 import type { OrganizationData } from '$lib/types';
 import type { ThemeGrounds } from './kit/model/resolve';
 
@@ -23,13 +23,13 @@ export function orgGrounds(
 ): ThemeGrounds {
   if (pending) {
     return {
-      light: paintableBackground(pending.backgroundColor),
-      dark: paintableBackground(pending.darkOverrides?.backgroundColor),
+      light: paintableColour(pending.backgroundColor),
+      dark: paintableColour(pending.darkOverrides?.backgroundColor),
     };
   }
   return {
-    light: paintableBackground(org?.brandColors?.background),
-    dark: paintableBackground(
+    light: paintableColour(org?.brandColors?.background),
+    dark: paintableColour(
       parseDarkColorOverrides(org?.brandFineTune?.darkModeOverrides)
         ?.backgroundColor
     ),
