@@ -1043,7 +1043,7 @@ describe('leaving yearly billing waits for the year (Codex-2hxff.97)', () => {
   // Review C1 cycle 2, L1: a Cancel that lands between the backstop's read
   // and its from_subscription create is put back, and no schedule is set.
   describe('a Cancel during the backstop', () => {
-    it("the create finds the subscription set to cancel: the schedule goes, the cancel is back, and it's skipped", async () => {
+    it('the create finds the subscription set to cancel: the schedule goes, the cancel is back, and the row stays cancelling', async () => {
       const { org, pro } = await hollowOak('backstop-cancel-race');
       const { userId, row } = await yearlyMember(org.id, pro);
       await service.changeTier(userId, org.id, pro.id, 'month');
@@ -1065,6 +1065,11 @@ describe('leaving yearly billing waits for the year (Codex-2hxff.97)', () => {
           raced = true;
           const before = structuredClone(liveOf(id));
           liveOf(id).cancel_at_period_end = true;
+          // The Cancel's own write marks the row cancelling.
+          await db
+            .update(subscriptions)
+            .set({ status: 'cancelling', cancelAtPeriodEnd: true })
+            .where(eq(subscriptions.id, row.id));
           return before;
         }
         return real?.(id);
@@ -1082,7 +1087,13 @@ describe('leaving yearly billing waits for the year (Codex-2hxff.97)', () => {
       const after = liveOf(row.stripeSubscriptionId);
       expect(after.schedule).toBeNull();
       expect(after.cancel_at_period_end).toBe(true);
-      expect((await rowOf(row.id)).stripeScheduleId).toBeNull();
+      // Cycle 3, L1 nit: the backstop's read, from before the Cancel, is
+      // not mirrored back over the row.
+      expect(await rowOf(row.id)).toMatchObject({
+        stripeScheduleId: null,
+        status: 'cancelling',
+        cancelAtPeriodEnd: true,
+      });
     });
   });
 

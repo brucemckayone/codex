@@ -5262,7 +5262,9 @@ export class SubscriptionService extends BaseService {
       }
       // Set to cancel since the read (cycle 2, L1): the cancel is back, and
       // a cancelling subscription gets no schedule until it is reactivated.
-      if (scheduleId === null) return 'skipped';
+      // `released`, as the finish's: `live` is from before the cancel, so
+      // it is not mirrored over the row (cycle 3).
+      if (scheduleId === null) return 'released';
       await this.db
         .update(subscriptions)
         .set({ stripeScheduleId: scheduleId, updatedAt: new Date() })
