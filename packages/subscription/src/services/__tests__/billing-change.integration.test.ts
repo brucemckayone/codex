@@ -1330,6 +1330,92 @@ describe('leaving yearly billing waits for the year (Codex-2hxff.97)', () => {
       });
     });
 
+    // Cycle 4, L2-a: a Keep whose read came before the create and whose clear
+    // came after the backstop's re-read leaves our schedule with no record.
+    it('ours with its record gone before the renewal: the next event lets go of it, and the year renews yearly', async () => {
+      const { org, pro } = await hollowOak('l2a-unrecorded');
+      const { userId, row } = await yearlyMember(org.id, pro);
+      await service.changeTier(userId, org.id, pro.id, 'month');
+      const schedule = scheduleOf(row.stripeSubscriptionId);
+      const sub = liveOf(row.stripeSubscriptionId);
+      for (const key of Object.keys(sub.metadata)) {
+        if (key.startsWith('codex_move_') || key.startsWith('codex_hold_')) {
+          delete sub.metadata[key];
+        }
+      }
+      const before = fake.writes.length;
+
+      await eventPass(row.stripeSubscriptionId);
+
+      expect(fake.writes.slice(before)).toEqual(['schedule:release']);
+      expect(fake.subscriptionSchedules.release).toHaveBeenLastCalledWith(
+        schedule.id,
+        {},
+        { idempotencyKey: `billing-release-unrecorded_${schedule.id}` }
+      );
+      expect(liveOf(row.stripeSubscriptionId).schedule).toBeNull();
+      expect(await rowOf(row.id)).toMatchObject({
+        stripeScheduleId: null,
+        pendingBillingInterval: null,
+      });
+      const renewed = fake.renew(row.stripeSubscriptionId);
+      expect(renewed.items.data[0]?.price.id).toBe(pro.stripePriceAnnualId);
+    });
+
+    it('the backstop’s own release after a Keep fails: one alert that names the schedule left attached, and the next event lets go of it', async () => {
+      const { org, pro } = await hollowOak('l2a-release-fails');
+      const { userId, row } = await yearlyMember(org.id, pro);
+      await service.changeTier(userId, org.id, pro.id, 'month');
+      scheduleOf(row.stripeSubscriptionId).status = 'released';
+      liveOf(row.stripeSubscriptionId).schedule = null;
+      await db
+        .update(subscriptions)
+        .set({ stripeScheduleId: null })
+        .where(eq(subscriptions.id, row.id));
+      const retrieve = vi.mocked(fake.stripe.subscriptions.retrieve);
+      const real = retrieve.getMockImplementation();
+      let raced = false;
+      retrieve.mockImplementation((async (id: string) => {
+        if (id === row.stripeSubscriptionId && !raced) {
+          raced = true;
+          const before = structuredClone(liveOf(id));
+          await service.keepCurrentPlan(userId, org.id);
+          return before;
+        }
+        return real?.(id);
+      }) as unknown as typeof fake.stripe.subscriptions.retrieve);
+      fake.subscriptionSchedules.release.mockRejectedValueOnce(
+        down('Stripe is down')
+      );
+      alert.mockClear();
+
+      const result = await service.runTierMoveBackstop({ limit: 50 });
+
+      expect(result.rescheduled).toBe(0);
+      const left = liveOf(row.stripeSubscriptionId).schedule;
+      expect(left).not.toBeNull();
+      const ofThisMember = alert.mock.calls.filter(
+        ([, data]) =>
+          (data as { stripeSubscriptionId?: string } | undefined)
+            ?.stripeSubscriptionId === row.stripeSubscriptionId ||
+          JSON.stringify(data ?? {}).includes(row.stripeSubscriptionId)
+      );
+      expect(ofThisMember).toEqual([
+        [
+          expect.stringContaining('billing_change.kept_release_failed'),
+          expect.objectContaining({
+            errorId: expect.any(String),
+            subscriptionId: row.id,
+            stripeScheduleId: left,
+          }),
+        ],
+      ]);
+
+      await eventPass(row.stripeSubscriptionId);
+
+      expect(liveOf(row.stripeSubscriptionId).schedule).toBeNull();
+    });
+
     it('a create whose answer was lost is taken up and finished: the change is set and nothing is put back', async () => {
       const { org, pro } = await hollowOak('l2-adopt');
       const { userId, row } = await yearlyMember(org.id, pro);

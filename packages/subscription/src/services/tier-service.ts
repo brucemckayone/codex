@@ -547,15 +547,6 @@ export class TierService extends BaseService {
   ): Promise<SubscriptionTier> {
     try {
       const existing = await this.getTierOrThrow(tierId, orgId);
-      // A price sent is checked, either alone against the stored other one.
-      // An edit with no price (a rename) passes even on a tier saved before
-      // the rule (review C1 cycle 3, N3).
-      if (input.priceMonthly !== undefined || input.priceAnnual !== undefined) {
-        assertYearlyNotBelowMonthly({
-          priceMonthly: input.priceMonthly ?? existing.priceMonthly,
-          priceAnnual: input.priceAnnual ?? existing.priceAnnual,
-        });
-      }
 
       // Check if prices changed — need new Stripe Prices
       const monthlyChanged =
@@ -564,6 +555,17 @@ export class TierService extends BaseService {
       const annualChanged =
         input.priceAnnual !== undefined &&
         input.priceAnnual !== existing.priceAnnual;
+
+      // A changed price is checked, either alone against the stored other
+      // one. An edit that changes no price (a rename, which Edit Tier sends
+      // with both prices as they stand) passes even on a tier saved before
+      // the rule (review C1 cycle 3 and 4, N3).
+      if (monthlyChanged || annualChanged) {
+        assertYearlyNotBelowMonthly({
+          priceMonthly: input.priceMonthly ?? existing.priceMonthly,
+          priceAnnual: input.priceAnnual ?? existing.priceAnnual,
+        });
+      }
 
       let newMonthlyPriceId = existing.stripePriceMonthlyId;
       let newAnnualPriceId = existing.stripePriceAnnualId;

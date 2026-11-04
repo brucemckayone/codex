@@ -5209,14 +5209,15 @@ export class SubscriptionService extends BaseService {
    * made billable first. One of ours already attached but half made, or
    * carrying an earlier choice, is finished in place instead
    * (`finishBillingSchedule`, review C1 cycle 2, L2), or let go for a cancel
-   * or a Keep that landed after the read (`released`). Never throws: a failure is a warning, and the backstop
+   * or a Keep that landed after the read (`released`; `unreleased` when that
+   * release failed, alerted once, and left to the next event). Never throws: a failure is a warning, and the backstop
    * sets it within the hour. `skipped`: there was nothing to set.
    */
   private async rescheduleBillingChange(
     sub: Pick<Subscription, 'id' | 'stripeSubscriptionId' | 'organizationId'>,
     live: Stripe.Subscription | undefined,
     reason: 'reactivate' | 'backstop'
-  ): Promise<'set' | 'skipped' | 'failed' | 'released'> {
+  ): Promise<'set' | 'skipped' | 'failed' | 'released' | 'unreleased'> {
     const move = readWaitingMove(live?.metadata);
     const item = live?.items?.data?.[0];
     if (
@@ -5266,10 +5267,28 @@ export class SubscriptionService extends BaseService {
             sub.stripeSubscriptionId
           );
           if (!readWaitingMove(after.metadata)?.billing) {
-            await this.releaseSchedule(
-              { id: scheduleId },
-              `billing-undo-kept_${scheduleId}`
-            );
+            try {
+              await this.releaseSchedule(
+                { id: scheduleId },
+                `billing-undo-kept_${scheduleId}`
+              );
+            } catch (error) {
+              // The schedule stands beside no record. The next event lets go
+              // of it (applyDueTierMove, cycle 4); until then it is alerted.
+              this.obs.error(
+                'billing_change.kept_release_failed: a schedule was set from a change of billing the member then kept, and letting go of it failed; it is attached with no record beside it, and the next event lets go of it (support: if it is still attached, release it in Stripe, or the member moves to monthly at the renewal)',
+                {
+                  errorId: crypto.randomUUID(),
+                  subscriptionId: sub.id,
+                  stripeSubscriptionId: sub.stripeSubscriptionId,
+                  organizationId: sub.organizationId,
+                  stripeScheduleId: scheduleId,
+                  reason,
+                  error: describeThrown(error),
+                }
+              );
+              return 'unreleased';
+            }
             return 'released';
           }
         }
@@ -5478,6 +5497,28 @@ export class SubscriptionService extends BaseService {
           tierId: live.metadata?.codex_tier_id ?? null,
         });
         return 'applied';
+      }
+      // Ours, with its record gone before the renewal: a Keep that crossed a
+      // backstop's create (review C1 cycle 4, L2-a). Until the renewal our
+      // schedule never stands without its record (the record is written
+      // before the create, and every path that clears it lets go first), so
+      // it goes now; else the member who kept yearly billing would move to
+      // monthly at the renewal. Keep's own metadata write brings it here.
+      if (ours) {
+        await this.releaseSchedule(
+          ours,
+          `billing-release-unrecorded_${ours.id}`
+        );
+        await this.syncFromStripe(
+          { ...live, schedule: null },
+          'tier_move_kept'
+        );
+        this.obs.warn('billing_change.released_without_record', {
+          subscriptionId: row?.id ?? null,
+          stripeSubscriptionId: live.id,
+          stripeScheduleId: ours.id,
+        });
+        return 'none';
       }
       // Flipped or kept already: a row still showing the move lags Stripe (a
       // stale event), so mirror it from the live subscription.
@@ -5823,8 +5864,9 @@ export class SubscriptionService extends BaseService {
           // set to cancel): the row lags it.
           await this.syncFromStripe(live, 'tier_move_scheduled');
         }
-        // 'released': let go for a cancel; `live` still shows it attached,
-        // and the events the release and the cancel fire mirror them.
+        // 'released' (let go for a cancel or a Keep) and 'unreleased' (that
+        // release failed, alerted): `live` is stale, and the events that
+        // follow mirror them.
       } catch (error) {
         left.push({
           subscriptionId: row.id,
