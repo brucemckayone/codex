@@ -182,19 +182,19 @@ export function groundLuminance(
  * A background or brand colour the page may paint: one this module can
  * measure and bound, as the `#RGB` / `#RRGGBB` both CSS and the nudge read,
  * trimmed. Any other form the API may have stored (rgb(), a colour name,
- * var(…), a wide-gamut colour, a bare or 8-digit hex) is ignored, so every
- * writer paints the fallback in its place: the platform's background, the
- * light brand for a dark one, the org's for a page's. The nudge then never
- * reads a ground it cannot see, nor sits links on a chip CHIP_LUMINANCE does
- * not bound (owner, Codex-mik4h: "Ignore it, like On Brand", and for brand
+ * var(…), a wide-gamut colour, a bare or 8-digit hex, or not a string at all,
+ * since the dark overrides are free JSON) is ignored, so every writer paints
+ * the fallback in its place: the platform's background, the light brand for a
+ * dark one, the org's for a page's. The nudge then never reads a ground it
+ * cannot see, nor sits links on a stylesheet chip CHIP_LUMINANCE does not
+ * bound (owner, Codex-mik4h: "Ignore it, like On Brand", and for brand
  * colours, "Same rule as backgrounds"). Writers paint the value this returns;
  * the stored value is untouched.
  */
-export function paintableColour(
-  colour: string | null | undefined
-): string | undefined {
-  const hex = colour?.trim();
-  return hex && /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(hex) ? hex : undefined;
+export function paintableColour(colour: unknown): string | undefined {
+  if (typeof colour !== 'string') return undefined;
+  const hex = colour.trim();
+  return /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(hex) ? hex : undefined;
 }
 
 /**

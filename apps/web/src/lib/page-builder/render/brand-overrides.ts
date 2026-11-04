@@ -124,7 +124,7 @@ export function brandOverridesToCssVars(
   if (overrides.darkOverrides) {
     for (const [field, prop] of Object.entries(CORE_DARK)) {
       const value = (overrides.darkOverrides as Record<string, unknown>)[field];
-      const painted = typeof value === 'string' && paintableColour(value);
+      const painted = paintableColour(value);
       if (!painted) continue;
       out[prop] = painted;
     }

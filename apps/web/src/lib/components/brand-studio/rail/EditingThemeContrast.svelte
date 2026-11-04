@@ -85,9 +85,11 @@
     return fill ? evaluateBrandContrast(fill) : null;
   });
 
-  // Dark pages paint the light brand until a dark-mode one is picked.
+  // Dark pages paint the light brand until a dark-mode one is picked, or
+  // when the saved one is not a colour the page paints.
   const usesLightBrand = $derived(
-    editingTheme === 'dark' && !pending?.darkOverrides?.primaryColor
+    editingTheme === 'dark' &&
+      !paintableColour(pending?.darkOverrides?.primaryColor)
   );
 
   /** What the page did to one colour, in the words the owner reviewed. */

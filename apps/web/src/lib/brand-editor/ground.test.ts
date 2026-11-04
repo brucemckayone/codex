@@ -193,8 +193,9 @@ describe('the chips labels sit on', () => {
   ] as const;
 
   /**
-   * A chip's step `[L, dL, K, dK]` in each `[data-org-bg]` rule: lightness
-   * `calc(L - dL * var(--_gw))`, chroma `calc(c * (K + dK * var(--_gw)))`.
+   * A chip's step `[L, dL, K, dK]` in the guarded `[data-org-brand]` rule and
+   * its dark twin: lightness `calc(L - dL * var(--_gw))`, chroma
+   * `calc(c * (K + dK * var(--_gw)))`.
    */
   function chipSteps(token: string): number[][] {
     const stepped = new RegExp(
@@ -283,6 +284,10 @@ describe('a background or brand colour the page may paint', () => {
     '',
     null,
     undefined,
+    // The dark overrides are free JSON: a value need not be a string.
+    123,
+    true,
+    { hex: '#ffffff' },
   ])('is not anything else: %s', (colour) => {
     expect(paintableColour(colour)).toBeUndefined();
   });
