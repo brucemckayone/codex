@@ -625,7 +625,14 @@ not set again), so the member asked for monthly and was billed another year
 at the yearly price. The hourly step leaves the row and alerts once a day
 until the record goes. Keep current plan is refused now
 (`MOVE_ALREADY_LANDED`). Support tells the member, then clears the record by
-hand at Stripe: remove the `codex_move_*` and `codex_hold_*` keys. The item
+hand at Stripe, in one metadata edit. First, if `codex_hold_pending_price_id`
+is set, write it and `codex_hold_pending_price_from` back as
+`codex_pending_price_id` and `codex_pending_price_from`, as Keep does
+(`keepMetadata`, `tier-move.ts`): they hold a price change the wait parked,
+and removing them drops that change with no alert. Then remove the other
+`codex_move_*` and `codex_hold_*` keys. Keep also puts such a member back
+into that price change's hourly step (`rejoinPriceChange`), which a hand
+edit can't, so tell the owner. The item
 already holds the yearly Price, so nothing else is written. The next
 `customer.subscription.updated` mirrors it onto our row and the alert stops.
 The member can then choose monthly again, which waits for the new year's
