@@ -52,8 +52,9 @@ vi.mock('$lib/components/ui/Toast', () => ({
 // media-chrome and hls, a load slow enough on CI that the file ended with it
 // still in flight and vitest failed the run on "Closing rpc while 'fetch' was
 // pending". Stub them, and settle every dynamic import before teardown.
+const mockVideoPlayer = vi.hoisted(() => vi.fn());
 vi.mock('$lib/components/VideoPlayer/VideoPlayer.svelte', () => ({
-  default: () => {},
+  default: mockVideoPlayer,
 }));
 vi.mock('$lib/components/AudioPlayer', () => ({ AudioPlayer: () => {} }));
 
@@ -89,24 +90,25 @@ const SELLABLE = { isPurchasable: true, priceCents: 900 };
 
 let component: ReturnType<typeof mount> | null = null;
 
+const defaultProps = () => ({
+  contentBodyHtml: null,
+  hasAccess: false,
+  streamingUrl: null,
+  waveformUrl: null,
+  progress: null,
+  isAuthenticated: true,
+  formResult: null,
+  creatorName: 'Luzura',
+  titleSuffix: 'Of Blood and Bones',
+  purchaseForm: createRawSnippet(() => ({
+    render: () => `<form class="${PURCHASE_FORM}"></form>`,
+  })),
+});
+
 function render(props: Partial<Props> & { content: Content }) {
   component = mount(ContentDetailView, {
     target: document.body,
-    props: {
-      contentBodyHtml: null,
-      hasAccess: false,
-      streamingUrl: null,
-      waveformUrl: null,
-      progress: null,
-      isAuthenticated: true,
-      formResult: null,
-      creatorName: 'Luzura',
-      titleSuffix: 'Of Blood and Bones',
-      purchaseForm: createRawSnippet(() => ({
-        render: () => `<form class="${PURCHASE_FORM}"></form>`,
-      })),
-      ...props,
-    } as Props,
+    props: { ...defaultProps(), ...props } as Props,
   });
   flushSync();
 }
@@ -189,6 +191,49 @@ describe('access with nothing to play', () => {
       "This video isn't ready to play yet"
     );
     expect(player().textContent).not.toContain('Sign in to watch');
+  });
+});
+
+// A signed-in reader of a free video: access is known, the stream URL is still
+// on its way. The slot waits on a skeleton, then plays the film, and never
+// mounts the locked preview in between (Codex-i8x6z).
+describe('a free video while its stream URL loads (Codex-i8x6z)', () => {
+  test('shows the skeleton, never the preview, then the player', async () => {
+    const STREAM = 'https://content-api.test/hls/master.m3u8?token=t';
+    mockVideoPlayer.mockClear();
+    const props = $state({
+      ...defaultProps(),
+      content: makeContent({
+        mediaItem: {
+          id: 'm1',
+          durationSeconds: 754,
+          thumbnailUrl: null,
+          hlsPreviewUrl: 'https://cdn.example.test/c1/preview/preview.m3u8',
+        },
+      }),
+      hasAccess: true,
+      accessLoading: true,
+      streamingUrl: null as string | null,
+    });
+    component = mount(ContentDetailView, {
+      target: document.body,
+      props: props as Props,
+    });
+    flushSync();
+
+    expect(document.querySelector('.preview-player')).toBeNull();
+    expect(
+      player().querySelector('.content-detail__player-skeleton')
+    ).not.toBeNull();
+
+    props.accessLoading = false;
+    props.streamingUrl = STREAM;
+    flushSync();
+    await vi.dynamicImportSettled();
+    flushSync();
+
+    expect(document.querySelector('.preview-player')).toBeNull();
+    expect(mockVideoPlayer.mock.lastCall?.[1].src).toBe(STREAM);
   });
 });
 
