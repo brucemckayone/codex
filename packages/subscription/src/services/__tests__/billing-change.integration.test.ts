@@ -1285,6 +1285,51 @@ describe('leaving yearly billing waits for the year (Codex-2hxff.97)', () => {
       expect(liveOf(row.stripeSubscriptionId).schedule).toBeNull();
     });
 
+    // Cycle 3, L2-a: the backstop reads, the member presses Keep (nothing to
+    // let go yet), then the backstop creates from its stale read.
+    it('never against a Keep between the backstop’s read and its create: the schedule made goes', async () => {
+      const { org, pro } = await hollowOak('l2a-keep-race');
+      const { userId, row } = await yearlyMember(org.id, pro);
+      await service.changeTier(userId, org.id, pro.id, 'month');
+      // The schedule lost (as a reactivate whose create failed leaves it).
+      scheduleOf(row.stripeSubscriptionId).status = 'released';
+      liveOf(row.stripeSubscriptionId).schedule = null;
+      await db
+        .update(subscriptions)
+        .set({ stripeScheduleId: null })
+        .where(eq(subscriptions.id, row.id));
+      const retrieve = vi.mocked(fake.stripe.subscriptions.retrieve);
+      const real = retrieve.getMockImplementation();
+      let raced = false;
+      retrieve.mockImplementation((async (id: string) => {
+        if (id === row.stripeSubscriptionId && !raced) {
+          raced = true;
+          const before = structuredClone(liveOf(id));
+          await service.keepCurrentPlan(userId, org.id);
+          return before;
+        }
+        return real?.(id);
+      }) as unknown as typeof fake.stripe.subscriptions.retrieve);
+      fake.writes.length = 0;
+
+      const result = await service.runTierMoveBackstop({ limit: 50 });
+
+      expect(result.rescheduled).toBe(0);
+      expect(fake.writes).toEqual([
+        'update:metadata',
+        'schedule:create',
+        'schedule:update',
+        'schedule:release',
+      ]);
+      const after = liveOf(row.stripeSubscriptionId);
+      expect(after.schedule).toBeNull();
+      expect(after.metadata).not.toHaveProperty('codex_move_interval');
+      expect(await rowOf(row.id)).toMatchObject({
+        pendingBillingInterval: null,
+        stripeScheduleId: null,
+      });
+    });
+
     it('a create whose answer was lost is taken up and finished: the change is set and nothing is put back', async () => {
       const { org, pro } = await hollowOak('l2-adopt');
       const { userId, row } = await yearlyMember(org.id, pro);

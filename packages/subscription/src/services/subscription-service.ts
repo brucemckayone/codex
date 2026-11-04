@@ -5209,7 +5209,7 @@ export class SubscriptionService extends BaseService {
    * made billable first. One of ours already attached but half made, or
    * carrying an earlier choice, is finished in place instead
    * (`finishBillingSchedule`, review C1 cycle 2, L2), or let go for a cancel
-   * (`released`). Never throws: a failure is a warning, and the backstop
+   * or a Keep that landed after the read (`released`). Never throws: a failure is a warning, and the backstop
    * sets it within the hour. `skipped`: there was nothing to set.
    */
   private async rescheduleBillingChange(
@@ -5258,6 +5258,21 @@ export class SubscriptionService extends BaseService {
           // failure is a new attempt, not a replay of the failed one.
           stamp: `${reason}-${Date.now()}`,
         });
+        // A Keep that landed after our read cleared the record and found no
+        // schedule to let go (cycle 3, L2-a): the record is read again, and
+        // the schedule made from the stale one goes.
+        if (scheduleId !== null) {
+          const after = await this.stripe.subscriptions.retrieve(
+            sub.stripeSubscriptionId
+          );
+          if (!readWaitingMove(after.metadata)?.billing) {
+            await this.releaseSchedule(
+              { id: scheduleId },
+              `billing-undo-kept_${scheduleId}`
+            );
+            return 'released';
+          }
+        }
       }
       // Set to cancel since the read (cycle 2, L1): the cancel is back, and
       // a cancelling subscription gets no schedule until it is reactivated.
