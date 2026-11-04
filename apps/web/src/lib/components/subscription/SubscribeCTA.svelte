@@ -569,6 +569,59 @@
     opacity: 0.9;
     will-change: transform;
   }
+  @supports (color: oklch(from red l c h)) {
+    .subscribe-cta__aurora {
+      /* Same three glows with each one's OKLCH lightness capped at 0.7 (as
+         asked; sRGB clipping paints up to 0.72), so a pale secondary or accent
+         (default amber, grey) can no longer wash white text out. A glow
+         already darker than 0.7 is unchanged.
+         WHY @supports, here and on the five blocks below: each of these holds a
+         var(), so an engine without relative colour would accept it at parse
+         time and void the whole property at computed time (background: none,
+         color: inherited), not fall back. Guarded, such an engine keeps the
+         rule's own declarations, the banner as it was. */
+      background:
+        radial-gradient(
+          ellipse 55% 75% at 22% 25%,
+          oklch(
+            from color-mix(
+              in oklch,
+              var(--color-brand-primary, var(--color-interactive)) 55%,
+              hsl(0 0% 100%) 45%
+            )
+            min(l, 0.7) c h
+          )
+            0%,
+          transparent 62%
+        ),
+        radial-gradient(
+          ellipse 50% 65% at 82% 78%,
+          oklch(
+            from color-mix(
+              in oklch,
+              var(--color-brand-secondary, var(--color-interactive)) 50%,
+              hsl(0 0% 100%) 45%
+            )
+            min(l, 0.7) c h
+          )
+            0%,
+          transparent 60%
+        ),
+        radial-gradient(
+          ellipse 35% 45% at 62% 18%,
+          oklch(
+            from color-mix(
+              in oklch,
+              var(--color-brand-accent, var(--color-interactive)) 48%,
+              hsl(0 0% 100%) 45%
+            )
+            min(l, 0.7) c h
+          )
+            0%,
+          transparent 65%
+        );
+    }
+  }
 
   @media (prefers-reduced-motion: no-preference) {
     .subscribe-cta__aurora {
@@ -607,6 +660,30 @@
       hsl(0 0% 0% / 0.08) 100%
     );
   }
+  @supports (color: oklch(from red l c h)) {
+    .subscribe-cta__veil {
+      /* Plus one FLAT black layer over the whole banner (the background-color,
+         under the radial) whose alpha rises with the brand's lightness: l³ is
+         OKLCH's stand-in for luminance. It is 0 below l ≈ 0.27, so deep brands are
+         untouched, and it tops out at 0.58 for pale brands, where "Cancel
+         anytime" is the line that needs it: 4.52:1 on a pale brand with no
+         preview strip, the tightest line in production. Uniform on purpose: it
+         darkens the whole poster, never patches behind words. Measured, not
+         modelled: every line clears its floor on the 216-colour lattice +
+         named brands, both themes, Chrome + WebKit, 390/768/1280px. */
+      background:
+        radial-gradient(
+          ellipse 55% 75% at 50% 50%,
+          hsl(0 0% 0% / 0.35) 0%,
+          hsl(0 0% 0% / 0.22) 55%,
+          hsl(0 0% 0% / 0.08) 100%
+        ),
+        oklch(
+          from var(--color-brand-primary, var(--color-interactive)) 0 0 0 /
+            clamp(0, calc((l * l * l - 0.02) * 1.3), 0.58)
+        );
+    }
+  }
 
   /* ── Body ───────────────────────────────────────────────────
      Centered column for the headline stack; the value-prop grid and
@@ -639,6 +716,17 @@
        their branding. */
     color: color-mix(in srgb, var(--color-interactive) 55%, hsl(0 0% 100%) 45%);
     line-height: var(--leading-tight);
+  }
+  @supports (color: oklch(from red l c h)) {
+    .subscribe-cta__eyebrow {
+      /* Same tint, raised to at least OKLCH 0.86 before sRGB clipping (it
+         paints at 0.80 or lighter): on a black brand the rule's mix is a mid
+         grey that reads 4.43:1 even on pure black. */
+      color: oklch(
+        from color-mix(in srgb, var(--color-interactive) 55%, hsl(0 0% 100%) 45%)
+          max(l, 0.86) c h
+      );
+    }
   }
 
   .subscribe-cta__title {
@@ -762,6 +850,17 @@
     background: hsl(0 0% 100% / 0.06);
     border: var(--border-width) var(--border-style) hsl(0 0% 100% / 0.1);
   }
+  @supports (color: oklch(from red l c h)) {
+    .subscribe-cta__prop-icon {
+      /* Same tint, raised to at least OKLCH 0.85 before sRGB clipping (it
+         paints at 0.78 or lighter), so the 3:1 icon floor holds over the
+         aurora on deep brands. */
+      color: oklch(
+        from color-mix(in srgb, var(--color-interactive) 60%, hsl(0 0% 100%) 40%)
+          max(l, 0.85) c h
+      );
+    }
+  }
 
   .subscribe-cta__prop-heading {
     font-size: var(--text-sm);
@@ -852,6 +951,29 @@
     pointer-events: none;
     z-index: -1;
     filter: blur(var(--blur-md));
+  }
+  @supports (color: oklch(from red l c h)) {
+    .subscribe-cta__cta-glow {
+      /* The same glow with the brand's OKLCH lightness capped at 0.7, as the
+         aurora's are: it sits ABOVE the veil, so on a pale brand it would light
+         the "Cancel anytime" line however dark the banner gets. */
+      background: radial-gradient(
+        ellipse 60% 60% at 50% 50%,
+        color-mix(
+            in srgb,
+            oklch(from var(--color-interactive) min(l, 0.7) c h) 25%,
+            transparent
+          )
+          0%,
+        color-mix(
+            in srgb,
+            oklch(from var(--color-interactive) min(l, 0.7) c h) 12%,
+            transparent
+          )
+          55%,
+        transparent 100%
+      );
+    }
   }
 
   .subscribe-cta__meta {
@@ -973,6 +1095,18 @@
       var(--color-brand-primary, var(--color-interactive)) 45%,
       hsl(0 0% 100% / 0.2)
     );
+  }
+  @supports (color: oklch(from red l c h)) {
+    .subscribe-cta__preview-thumb--more {
+      /* An opaque fill of its own: the brand shaded (L and C scale together) to
+         at most OKLCH 0.5, so the white "+N" reads on the tile itself (5.4:1 or
+         more for any brand) instead of depending on the banner behind it. A
+         brand already darker than 0.5 shows as itself. */
+      background: oklch(
+        from var(--color-brand-primary, var(--color-interactive))
+          min(l, 0.5) calc(c * min(1, 0.5 / l)) h
+      );
+    }
   }
 
   .subscribe-cta__preview-more-count {
