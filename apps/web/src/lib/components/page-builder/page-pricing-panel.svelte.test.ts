@@ -242,4 +242,38 @@ describe('the Offer panel: a yearly price below the monthly one', () => {
     expect(text(refusalLine())).toBe(m.price_refusal_yearly_below_monthly());
     expect(document.activeElement).toBe(outside);
   });
+
+  test('an autosave refusal while typing in the monthly price: said, and focus stays (C3-W2)', async () => {
+    typeAnnual('10');
+    const monthly = document.querySelector<HTMLInputElement>(
+      `input[aria-label="${m.studio_builder_pricing_monthly_aria()}"]`
+    );
+    monthly?.focus();
+    expect(document.activeElement).toBe(monthly);
+
+    await saveRefused();
+
+    const line = refusalLine();
+    expect(text(line)).toBe(m.price_refusal_yearly_below_monthly());
+    expect(annual()?.getAttribute('aria-describedby')?.split(' ')).toContain(
+      line?.id
+    );
+    expect(annual()?.getAttribute('aria-invalid')).toBe('true');
+    expect(document.activeElement).toBe(monthly);
+  });
+
+  test('nor while typing anywhere else on the page (C3-W2)', async () => {
+    typeAnnual('10');
+    const editable = document.createElement('div');
+    editable.setAttribute('contenteditable', 'true');
+    editable.tabIndex = 0;
+    document.body.appendChild(editable);
+    editable.focus();
+    expect(document.activeElement).toBe(editable);
+
+    await saveRefused();
+
+    expect(text(refusalLine())).toBe(m.price_refusal_yearly_below_monthly());
+    expect(document.activeElement).toBe(editable);
+  });
 });
