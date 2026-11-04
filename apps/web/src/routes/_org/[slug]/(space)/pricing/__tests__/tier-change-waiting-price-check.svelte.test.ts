@@ -1,14 +1,15 @@
 /**
- * Pricing → Change plan: a change that waits confirms the price the dialog
- * showed (review C1 cycle 2, L4).
+ * Pricing → Change plan: every change confirms the price the dialog showed
+ * (review C1 cycle 2, L4; cycle 3, L4-a).
  *
  * A cheaper plan (.16) or leaving yearly billing (.97) bills, at the renewal
- * and with no notice, the price read at confirm. So every waiting change's
- * confirm echoes its preview's `newRecurringAmountCents` (on a billing wait,
- * `billingChange.amountCents`), and the server refuses a price saved since
- * with TIER_CHANGE_PREVIEW_EXPIRED. The page then shows "Prices changed —
- * please review again" with the fresh figures, and the next confirm echoes
- * the fresh price. A change made now leaves the field out.
+ * and with no notice, the price read at confirm. A change made now does too:
+ * a lateral or cheaper move that a price saved since turned into an upgrade
+ * charges its part-period unseen. So every confirm echoes its preview's
+ * `newRecurringAmountCents` (on a billing wait, `billingChange.amountCents`),
+ * and the server refuses a price saved since with TIER_CHANGE_PREVIEW_EXPIRED.
+ * The page then shows "Prices changed — please review again" with the fresh
+ * figures, and the next confirm echoes the fresh price.
  *
  * Mounts the real `+page.svelte`; `$app/*`, the remote modules and the
  * collections are mocked, as in tier-change-billing-wait.
@@ -88,6 +89,8 @@ const PREMIUM = tier(
   2000,
   3
 );
+/** At Pro's price: a move to it is lateral, made now. */
+const STUDIO = tier('00000000-0000-4000-8000-0000000000b4', 'Studio', 1200, 4);
 
 const RENEWAL = '2027-03-12T00:00:00.000Z';
 
@@ -145,6 +148,20 @@ function upgradeThenMonthlyPreview(cents: number): TierChangePreview {
   };
 }
 
+/** A change made now, on monthly billing: an upgrade, or a lateral move. */
+function nowPreview(
+  cents: number,
+  amountDueCents: number,
+  isUpgrade: boolean
+): TierChangePreview {
+  return {
+    ...downgradePreview(cents),
+    amountDueCents,
+    isUpgrade,
+    takesEffect: 'now',
+  };
+}
+
 let component: ReturnType<typeof mount> | null = null;
 
 beforeEach(() => {
@@ -163,7 +180,7 @@ function mountPage(current: Record<string, unknown>) {
     props: {
       data: {
         org: ORG,
-        tiers: [BASIC, PRO, PREMIUM],
+        tiers: [BASIC, PRO, PREMIUM, STUDIO],
         currentSubscription: { data: current, loadError: false },
         isAuthenticated: true,
         enableSubscriptions: true,
@@ -204,7 +221,7 @@ const EXPIRED = {
   status: 409,
 };
 
-describe('a waiting change confirms the price the dialog showed', () => {
+describe('every change confirms the price the dialog showed', () => {
   test.each([
     {
       kind: 'a cheaper plan (.16)',
@@ -281,30 +298,59 @@ describe('a waiting change confirms the price the dialog showed', () => {
     );
   });
 
-  test('a change made now leaves the price out', async () => {
-    remote.previewSubscriptionTierChange.mockResolvedValueOnce({
-      success: true,
-      data: {
-        ...downgradePreview(2000),
-        amountDueCents: 800,
-        isUpgrade: true,
-        takesEffect: 'now',
-      },
-    });
-    remote.changeSubscriptionTier.mockResolvedValueOnce({
-      success: true,
-      data: onPro('month'),
-    });
+  test.each([
+    {
+      kind: 'an upgrade made now',
+      open: () => cardButton('Premium')?.click(),
+      tierId: PREMIUM.id,
+      shown: nowPreview(2000, 800, true),
+      fresh: nowPreview(2100, 900, true),
+    },
+    {
+      kind: 'a lateral move that a price saved since made an upgrade',
+      open: () => cardButton('Studio')?.click(),
+      tierId: STUDIO.id,
+      shown: nowPreview(1200, 0, false),
+      fresh: nowPreview(1500, 300, true),
+    },
+  ])('$kind: echoed, and a price saved since is reviewed again (L4-a)', async (c) => {
+    remote.previewSubscriptionTierChange
+      .mockResolvedValueOnce({ success: true, data: c.shown })
+      .mockResolvedValueOnce({ success: true, data: c.fresh });
+    remote.changeSubscriptionTier
+      .mockResolvedValueOnce(EXPIRED)
+      .mockResolvedValueOnce({ success: true, data: onPro('month') });
     mountPage(onPro('month'));
 
-    cardButton('Premium')?.click();
+    c.open();
     await settle();
     byTestId('tier-change-dialog-confirm')?.click();
     await settle();
 
-    expect(remote.changeSubscriptionTier).toHaveBeenCalledOnce();
-    expect(remote.changeSubscriptionTier.mock.calls[0][0]).not.toHaveProperty(
-      'newRecurringAmountCents'
+    expect(remote.changeSubscriptionTier).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        newTierId: c.tierId,
+        billingInterval: 'month',
+        newRecurringAmountCents: c.shown.newRecurringAmountCents,
+      })
+    );
+    // Refused, nothing changed: the fresh figures wait on a new confirm.
+    expect(clean(byTestId('tier-change-notice')?.textContent)).toBe(
+      m.subscription_tier_change_preview_expired()
+    );
+    expect(remote.previewSubscriptionTierChange).toHaveBeenCalledTimes(2);
+    expect(document.body.textContent).not.toContain(EXPIRED.message);
+    expect(remote.changeSubscriptionTier).toHaveBeenCalledTimes(1);
+
+    byTestId('tier-change-dialog-confirm')?.click();
+    await settle();
+
+    expect(remote.changeSubscriptionTier).toHaveBeenCalledTimes(2);
+    expect(remote.changeSubscriptionTier).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        newRecurringAmountCents: c.fresh.newRecurringAmountCents,
+      })
     );
   });
 });
