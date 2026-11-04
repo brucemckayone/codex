@@ -23,6 +23,7 @@ import {
   emailAuditLogs,
   feeChangeNotices,
   feeChanges,
+  feeConfigAuditLog,
   feeConfigOrg,
   feeConfigVersions,
   organizationMemberships,
@@ -38,6 +39,7 @@ import {
   resolveFeesAt,
 } from '@codex/payments';
 import type { Bindings } from '@codex/shared-types';
+import { createServiceRegistry } from '@codex/worker-utils';
 import {
   afterAll,
   afterEach,
@@ -136,6 +138,11 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
       await db.delete(emailAuditLogs).where(inArray(emailAuditLogs.id, logIds));
     }
     if (orgIds.length > 0) {
+      // The fee writes' audit rows: an org's removal would null their scope,
+      // which their CHECK refuses, and they name the writer.
+      await db
+        .delete(feeConfigAuditLog)
+        .where(inArray(feeConfigAuditLog.scopeOrgId, orgIds));
       // Versions and notices cascade with their change.
       await db
         .delete(feeChanges)
@@ -1269,5 +1276,84 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
       state: 'sent',
       acceptedAt: sentAt,
     });
+  });
+
+  it('a rise made smaller twice: the second round’s timed-out email still goes, never taken for the first round’s', async () => {
+    const tia = await person('Tia Round');
+    const admin = await person('Abe Admin');
+    const org = await organisation(tia.id);
+    const changeId = await rise(org);
+    const smallerOf = async () => {
+      const [row] = await db
+        .select()
+        .from(feeChangeNotices)
+        .where(
+          and(
+            eq(feeChangeNotices.changeId, changeId),
+            eq(feeChangeNotices.userId, tia.id),
+            eq(feeChangeNotices.kind, 'smaller')
+          )
+        );
+      if (!row) throw new Error('no smaller notice');
+      return row;
+    };
+    // The writes stamp the real clock, so the mornings here are set from it.
+    const hour = 60 * 60 * 1000;
+    const t0 = Date.now();
+    await run(changeId, new Date(t0 - 3 * hour), mailerAnswering());
+    // The fee writes as a route makes them, through the registry.
+    const { registry, cleanup: closeRegistry } = await createServiceRegistry(
+      env as unknown as Bindings
+    );
+    try {
+      // Round one: made smaller, queued and told two hours ago.
+      await registry.feeConfig.updateOrgFees(
+        org,
+        { orgFeePercent: 1300 },
+        admin.id
+      );
+      const roundOne = new Date(t0 - 2 * hour);
+      const first = await smallerOf();
+      await db
+        .update(feeChangeNotices)
+        .set({
+          state: 'sent',
+          attempts: 1,
+          attemptedAt: roundOne,
+          acceptedAt: roundOne,
+          createdAt: roundOne,
+        })
+        .where(eq(feeChangeNotices.id, first.id));
+      await logged(
+        first.id,
+        tia.email,
+        'success',
+        new Date(roundOne.getTime() + 60 * 1000)
+      );
+      // Round two: smaller again, the same row told again.
+      await registry.feeConfig.updateOrgFees(
+        org,
+        { orgFeePercent: 1200 },
+        admin.id
+      );
+    } finally {
+      await closeRegistry();
+    }
+    const firstTry = new Date();
+    await run(
+      changeId,
+      firstTry,
+      mailerAnswering({ [tia.id]: { accepted: false, status: 503 } })
+    );
+    expect(await smallerOf()).toMatchObject({ state: 'unknown' });
+
+    const mailer = mailerAnswering();
+    expect(
+      await run(changeId, new Date(firstTry.getTime() + 13 * hour), mailer)
+    ).toMatchObject({ foundInLog: 0, sent: 1 });
+    expect(mailFor(mailer, tia.id).map((p) => p.templateName)).toEqual([
+      'fee-change-notice',
+    ]);
+    expect(await smallerOf()).toMatchObject({ state: 'sent' });
   });
 });
