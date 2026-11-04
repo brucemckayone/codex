@@ -273,6 +273,29 @@ describe('StudioMediaLibrary: empty is two different things', () => {
   });
 });
 
+describe('StudioMediaLibrary: URL writes (runaway, Codex-a6ofh.1.7)', () => {
+  // A write that changes nothing must navigate nowhere: in a browser each
+  // navigation re-runs what reads `page`, and the closed drawer's echo wrote
+  // the same URL back forever (9.8 GB).
+  test('opening the library navigates nowhere', async () => {
+    s.first.current = listOf([item(1)]);
+    render();
+    await settle();
+    expect(goto).not.toHaveBeenCalled();
+  });
+
+  test('choosing the view already shown navigates nowhere', async () => {
+    s.first.current = listOf([item(1)]);
+    render('?view=list');
+    await settle();
+    document
+      .querySelector<HTMLButtonElement>('[role="radio"][aria-checked="true"]')
+      ?.click();
+    await settle();
+    expect(goto).not.toHaveBeenCalled();
+  });
+});
+
 describe('StudioMediaLibrary: header and attention', () => {
   test('narrowed by one facet: "5 of 12 · Unused"', () => {
     s.first.current = listOf([item(1)], 5);

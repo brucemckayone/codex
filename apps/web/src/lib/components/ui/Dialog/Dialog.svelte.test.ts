@@ -92,6 +92,37 @@ describe('Dialog', () => {
 
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
+
+  // Melt calls its onOpenChange on every set of its store, false to false
+  // included. Reported, a closed dialog said "closed" on mount and a close
+  // said it twice; the media drawer's close wrote the URL, and the page
+  // navigated in a loop (Codex-a6ofh.1.7).
+  test('a closed dialog reports nothing on mount', () => {
+    const onOpenChange = vi.fn();
+    component = mount(DialogHarness, {
+      target: document.body,
+      props: { open: false, onOpenChange },
+    });
+    flushSync();
+
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
+  test('a close is reported once', () => {
+    const onOpenChange = vi.fn();
+    component = mount(DialogHarness, {
+      target: document.body,
+      props: { open: true, onOpenChange },
+    });
+    flushSync();
+    onOpenChange.mockClear();
+
+    document.querySelector<HTMLButtonElement>('.dialog-close')?.click();
+    flushSync();
+
+    expect(onOpenChange).toHaveBeenCalledTimes(1);
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
 });
 
 describe('Dialog dismissible', () => {

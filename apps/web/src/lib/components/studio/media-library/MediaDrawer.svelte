@@ -246,7 +246,13 @@
   </section>
 {/snippet}
 
-<Dialog.Root open={mediaId !== null} onOpenChange={(open) => !open && onClose()}>
+<!--
+  Close only a drawer that is open. Melt reports every `set` of its open store
+  as a change, even false to false, so the Dialog's mount-time sync fires
+  onOpenChange(false) on a closed drawer. Passed on, that wrote the URL, the
+  navigation re-ran the sync, and the page spun (9.8 GB in Chrome).
+-->
+<Dialog.Root open={mediaId !== null} onOpenChange={(open) => !open && mediaId !== null && onClose()}>
   <Dialog.Content class="media-drawer">
     {#if failed && failed.id === mediaId}
       <Dialog.Header>

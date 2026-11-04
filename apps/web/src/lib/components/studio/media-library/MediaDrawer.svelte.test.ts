@@ -146,6 +146,56 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
+describe('MediaDrawer: closing (runaway, Codex-a6ofh.1.7)', () => {
+  /**
+   * Melt reports every `set` of its open store as a change, false to false
+   * included, so the Dialog's mount-time sync fires onOpenChange(false) on a
+   * closed drawer. Passed to onClose, that wrote the URL; in a browser the
+   * navigation re-ran the sync and the library page spun at 9.8 GB.
+   */
+  function mountWith(mediaId: string | null) {
+    const onClose = vi.fn();
+    props.mediaId = mediaId;
+    component = mount(MediaDrawer, {
+      target: document.body,
+      props: {
+        get mediaId() {
+          return props.mediaId;
+        },
+        onClose,
+        onDelete,
+        onChanged,
+      },
+    });
+    flushSync();
+    return onClose;
+  }
+
+  test('a closed drawer never asks to close', async () => {
+    const onClose = mountWith(null);
+    await settle();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  test('a drawer the URL already closed does not ask again', async () => {
+    const onClose = mountWith(MEDIA_ID);
+    await settle();
+    props.mediaId = null;
+    flushSync();
+    await settle();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  test('closing an open drawer asks once', async () => {
+    const onClose = mountWith(MEDIA_ID);
+    await settle();
+    document.querySelector<HTMLButtonElement>('.dialog-close')?.click();
+    flushSync();
+    await settle();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('MediaDrawer: reads', () => {
   test('shows the item: its facts, and that nothing uses it yet', async () => {
     render();

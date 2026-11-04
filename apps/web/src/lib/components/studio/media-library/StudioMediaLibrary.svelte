@@ -252,7 +252,12 @@
     pendingUrl = url;
     queueMicrotask(() => {
       pendingUrl = null;
-      void goto(`${url.pathname}${url.search}`, { keepFocus: true, noScroll: true });
+      // A write that changes nothing navigates nowhere. A navigation re-runs
+      // whatever reads `page`, so an echo that writes the same URL back
+      // (the drawer's close did) would loop without ever yielding.
+      const href = `${url.pathname}${url.search}`;
+      if (href === `${page.url.pathname}${page.url.search}`) return;
+      void goto(href, { keepFocus: true, noScroll: true });
     });
   }
 
