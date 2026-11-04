@@ -481,8 +481,11 @@
     height: var(--space-10);
     padding: 0 var(--space-4);
     border-radius: var(--radius-md);
+    /* Each fill brings its own ink, computed from it (Codex-mik4h): a pale
+       brand gets dark text, and a hover or press that shifts the fill keeps
+       the label legible. */
     background: var(--color-interactive);
-    color: var(--color-text-on-brand, var(--color-background));
+    color: var(--color-on-interactive);
     font-size: var(--text-sm);
     font-weight: var(--font-semibold);
     text-decoration: none;
@@ -491,6 +494,12 @@
 
   .drawer-create:hover {
     background: var(--color-interactive-hover);
+    color: var(--color-on-interactive-hover);
+  }
+
+  .drawer-create:active {
+    background: var(--color-interactive-active);
+    color: var(--color-on-interactive-active);
   }
 
   .drawer-create:focus-visible {
