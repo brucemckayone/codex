@@ -1672,6 +1672,57 @@ describe('the hourly price-moves step (Codex-2hxff.86)', () => {
       expect(send).toHaveBeenCalledTimes(2);
     });
 
+    // Cycle 4: told before the dispute opened, its write still to come.
+    it('a row already told waits too: no write while disputed; once it ends, the write runs from the original email, 30 days on', async () => {
+      const { org: o, pro } = await org('pm-disputed-told');
+      const fake = fakeStripe();
+      const sub = await subscriber(o.id, pro);
+      onStripe(fake, sub, 40);
+      fake.failWrites.set(sub.stripeSubscriptionId, stripeError(500));
+      const changeId = await reprice(o.id, pro);
+      const send = mailer();
+      const told = new Date(NOW + SENT_AFTER_MS);
+      await run([changeId], { fake, send });
+      expect(await moveOf(changeId, sub)).toMatchObject({
+        state: 'notified',
+        noticeAt: told,
+        attempts: 1,
+      });
+
+      // The chargeback opens; Stripe answers again.
+      await db
+        .update(subscriptions)
+        .set({ disputedAt: new Date(NOW + 30 * 60 * 1000) })
+        .where(eq(subscriptions.id, sub.id));
+      fake.failWrites.delete(sub.stripeSubscriptionId);
+      const writes = fake.update.mock.calls.length;
+
+      const disputed = await run([changeId], { fake, send }, 1);
+
+      expect(disputed).toMatchObject({ claimed: 1, deferred: 1, scheduled: 0 });
+      expect(fake.update.mock.calls.length).toBe(writes);
+      expect(await moveOf(changeId, sub)).toMatchObject({
+        state: 'notified',
+        noticeAt: told,
+        attempts: 1,
+        nextAttemptAt: new Date(NOW + HOUR_MS + DAY_MS),
+      });
+
+      await db
+        .update(subscriptions)
+        .set({ disputedAt: null })
+        .where(eq(subscriptions.id, sub.id));
+      const after = await run([changeId], { fake, send }, 25);
+
+      expect(after).toMatchObject({ claimed: 1, scheduled: 1 });
+      const moved = await moveOf(changeId, sub);
+      expect(moved).toMatchObject({ state: 'scheduled', noticeAt: told });
+      expect(moved.effectiveAt?.getTime()).toBeGreaterThanOrEqual(
+        told.getTime() + 30 * DAY_MS
+      );
+      expect(send).toHaveBeenCalledTimes(1);
+    });
+
     it('waits for a course subscription too', async () => {
       const { org: o } = await org('pm-disputed-course');
       const fake = fakeStripe();
