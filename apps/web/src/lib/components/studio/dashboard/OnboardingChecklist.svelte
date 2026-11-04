@@ -307,7 +307,7 @@
     font-family: inherit;
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
-    color: var(--color-text-on-brand);
+    color: var(--color-on-interactive);
     background-color: var(--color-interactive);
     border: var(--border-width) var(--border-style) transparent;
     border-radius: var(--radius-md);
@@ -319,6 +319,7 @@
 
   .onboarding__cta:hover {
     background-color: var(--color-interactive-hover);
+    color: var(--color-on-interactive-hover);
   }
 
   .onboarding__cta:focus-visible {

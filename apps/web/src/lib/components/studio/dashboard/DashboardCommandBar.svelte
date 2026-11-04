@@ -255,11 +255,12 @@
 
   .action--primary {
     background: var(--color-interactive);
-    color: var(--color-text-on-brand, var(--color-background));
+    color: var(--color-on-interactive);
   }
 
   .action--primary:hover {
     background: var(--color-interactive-hover);
+    color: var(--color-on-interactive-hover);
   }
 
   @media (--below-md) {

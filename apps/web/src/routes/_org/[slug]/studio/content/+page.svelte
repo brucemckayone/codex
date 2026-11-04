@@ -344,12 +344,12 @@
   }
 
   .empty-cta--solid {
-    color: var(--color-text-on-brand, var(--color-background));
+    color: var(--color-on-interactive);
     background-color: var(--color-interactive);
   }
 
   .empty-cta--solid:hover {
-    color: var(--color-text-on-brand, var(--color-background));
+    color: var(--color-on-interactive-hover);
     background-color: var(--color-interactive-hover);
   }
 </style>

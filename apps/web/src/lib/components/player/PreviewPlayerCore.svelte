@@ -1141,6 +1141,7 @@
   @media (hover: hover) {
     .player__play:hover {
       background: var(--color-brand-primary-hover, var(--color-primary-600));
+      color: var(--color-text-on-brand-hover, var(--color-text-on-brand));
     }
   }
 

@@ -537,7 +537,7 @@
     align-items: center;
     justify-content: center;
     background-color: var(--color-interactive);
-    color: var(--color-text-on-brand);
+    color: var(--color-on-interactive);
     font-family: var(--font-heading);
     font-size: var(--text-base);
     font-weight: var(--font-bold);

@@ -3234,6 +3234,24 @@
     overflow: hidden;
   }
 
+  /* Lit from above on the label's side (Codex-mik4h). The 8% lift toward white
+     put a white label under AA at the top of a brand near the luminance pivot
+     (3.95:1 at worst; 241 of the 4 096 lattice). So a black label's ribbon
+     lifts 8% toward white at the top, and a white label's keeps the brand at
+     the top and deepens 8% toward black at the bottom: each end moves AWAY
+     from the label, so the whole ribbon holds what the label holds on the
+     brand (the step's floor, 4.57:1). Engines without `pow()` in relative
+     colour keep the gradient above. */
+  @supports (color: rgb(from red calc(255 * pow(r / 255, 2)) 0 0)) {
+    .card__ribbon {
+      background: linear-gradient(
+        180deg,
+        rgb(from var(--color-brand-primary) calc(r + 0.08 * (1 - var(--_on-fill-step)) * (255 - r)) calc(g + 0.08 * (1 - var(--_on-fill-step)) * (255 - g)) calc(b + 0.08 * (1 - var(--_on-fill-step)) * (255 - b))),
+        rgb(from var(--color-brand-primary) calc(r * (1 - 0.08 * var(--_on-fill-step))) calc(g * (1 - 0.08 * var(--_on-fill-step))) calc(b * (1 - 0.08 * var(--_on-fill-step))))
+      );
+    }
+  }
+
   /* One-shot diagonal shine after entrance — draws the eye to the
      recommended tier once, then stays quiet. Disabled under reduced motion. */
   @media (prefers-reduced-motion: no-preference) {

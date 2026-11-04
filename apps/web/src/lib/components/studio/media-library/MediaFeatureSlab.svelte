@@ -462,13 +462,14 @@
 
   .action-btn--primary {
     background: var(--color-interactive);
-    color: var(--color-text-on-brand, var(--color-background));
+    color: var(--color-on-interactive);
     border-color: var(--color-interactive);
   }
 
   .action-btn--primary:hover {
     background: var(--color-interactive-hover);
     border-color: var(--color-interactive-hover);
+    color: var(--color-on-interactive-hover);
   }
 
   .action-btn--muted {

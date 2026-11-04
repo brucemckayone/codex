@@ -299,11 +299,12 @@
 
   .filter-bar__pill[data-active='true'] {
     background: var(--color-interactive);
-    color: var(--color-text-on-brand);
+    color: var(--color-on-interactive);
   }
 
   .filter-bar__pill[data-active='true']:hover {
     background: var(--color-interactive-hover);
+    color: var(--color-on-interactive-hover);
   }
 
   .filter-bar__pill:focus-visible {

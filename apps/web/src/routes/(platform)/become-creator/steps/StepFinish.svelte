@@ -119,12 +119,13 @@
   }
 
   .finish__cta--primary {
-    color: var(--color-text-on-brand);
+    color: var(--color-on-interactive);
     background-color: var(--color-interactive);
   }
 
   .finish__cta--primary:hover {
     background-color: var(--color-interactive-hover);
+    color: var(--color-on-interactive-hover);
   }
 
   .finish__cta--secondary {

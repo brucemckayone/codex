@@ -806,7 +806,7 @@
     padding: var(--space-3) var(--space-4);
     font-size: var(--text-sm);
     font-weight: var(--font-semibold);
-    color: var(--color-text-on-brand);
+    color: var(--color-on-interactive);
     background: var(--color-interactive);
     border-radius: var(--radius-lg);
     text-decoration: none;
@@ -816,5 +816,6 @@
 
   .drawer-profile-link:hover {
     background: var(--color-interactive-hover);
+    color: var(--color-on-interactive-hover);
   }
 </style>

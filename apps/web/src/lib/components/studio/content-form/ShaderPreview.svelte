@@ -264,7 +264,9 @@
     font-weight: var(--font-semibold);
     text-transform: uppercase;
     letter-spacing: var(--tracking-wide);
-    color: var(--color-text-inverse);
+    /* Text over media on a fixed dark scrim. `--color-text-inverse` follows
+       the page, so it was near-black here in dark (Codex-mik4h). */
+    color: var(--media-glyph);
     background: color-mix(in srgb, black 50%, transparent);
     border-radius: var(--radius-sm);
     pointer-events: none;

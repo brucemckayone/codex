@@ -487,14 +487,15 @@
   }
 
   /* Decorative affordance (aria-hidden). The accessible action is the title
-     anchor covering the slide. */
+     anchor covering the slide. The pill paints its own brand fill, so its
+     label takes the fill's ink, not the photo ink the rest of the body uses. */
   .feature-carousel__cta {
     align-self: flex-start;
     margin-top: var(--space-2);
     padding: var(--space-2) var(--space-4);
     border-radius: var(--radius-full);
     background: var(--color-brand-primary);
-    color: var(--media-glyph);
+    color: var(--color-text-on-brand);
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
   }

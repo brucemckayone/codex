@@ -2101,6 +2101,7 @@
 
   :global(.content-detail__purchase-btn:hover:not(:disabled)) {
     background: var(--color-brand-accent-hover);
+    color: var(--color-text-on-accent-hover);
   }
 
   :global(.content-detail__purchase-btn:disabled) {
@@ -2235,7 +2236,7 @@
 
   .content-detail__journey--free .content-detail__journey-cta:hover {
     background: var(--color-brand-accent-hover);
-    color: var(--color-text-on-accent);
+    color: var(--color-text-on-accent-hover);
   }
 
   .content-detail__journey-arrow {

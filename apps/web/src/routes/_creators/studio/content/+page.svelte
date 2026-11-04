@@ -77,7 +77,7 @@
     padding: var(--space-2) var(--space-4);
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
-    color: var(--color-text-on-brand);
+    color: var(--color-on-interactive);
     background-color: var(--color-interactive);
     border: none;
     border-radius: var(--radius-md);
@@ -88,6 +88,7 @@
 
   .create-btn:hover {
     background-color: var(--color-interactive-hover);
+    color: var(--color-on-interactive-hover);
   }
 
   .create-btn:focus-visible {

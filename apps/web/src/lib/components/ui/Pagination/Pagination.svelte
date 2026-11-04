@@ -313,7 +313,7 @@
 
   .pagination__page.active {
     background: var(--color-interactive);
-    color: var(--color-text-inverse);
+    color: var(--color-on-interactive);
     border-color: var(--color-interactive);
   }
 
