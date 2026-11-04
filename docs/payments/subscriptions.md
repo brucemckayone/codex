@@ -615,7 +615,21 @@ and the balance stays £0 throughout.
   `pending_tier_from`, `held_amount_cents`, `pending_billing_interval`,
   `pending_amount_cents`, `stripe_schedule_id`). The queries are in the
   [release checklist](release-checklist.md) (0122, 0124 and 0125 ›
-  Rollback).
+  Rollback). A change whose renewal passes before the roll forward is billed
+  another year: see the runbook below.
+
+**Runbook: a change of billing that billed the year again**
+(`tier_move.apply_failed`, reason `billing_not_switched`). The renewal came
+with no schedule to switch the Price (released for a rollback, or let go and
+not set again), so the member asked for monthly and was billed another year
+at the yearly price. The hourly step leaves the row and alerts once a day
+until the record goes. Keep current plan is refused now
+(`MOVE_ALREADY_LANDED`). Support tells the member, then clears the record by
+hand at Stripe: remove the `codex_move_*` and `codex_hold_*` keys. The item
+already holds the yearly Price, so nothing else is written. The next
+`customer.subscription.updated` mirrors it onto our row and the alert stops.
+The member can then choose monthly again, which waits for the new year's
+end. Whether to refund that year is decided with the owner.
 
 ## Price changes
 

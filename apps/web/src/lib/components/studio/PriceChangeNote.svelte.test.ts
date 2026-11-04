@@ -84,7 +84,8 @@ describe('PriceChangeNote', () => {
     expect(note?.querySelectorAll('button')).toHaveLength(0);
   });
 
-  test('a Check again that finds it done turns into Dismiss in place, keeping focus (W6)', () => {
+  /** A note whose Check again goes out as the pages' reads do: busy while out. */
+  function mountChecking() {
     const onCheckAgain = vi.fn();
     const onDismiss = vi.fn();
     const props = $state<Record<string, unknown>>({
@@ -94,27 +95,75 @@ describe('PriceChangeNote', () => {
       onCheckAgain,
       onDismiss,
     });
+    onCheckAgain.mockImplementation(() => {
+      props.busy = true;
+    });
     component = mount(PriceChangeNote, { target: document.body, props });
     flushSync();
-    const check = document.querySelector<HTMLButtonElement>(
+    const button = document.querySelector<HTMLButtonElement>(
       '[data-testid="price-change-note"] button'
     );
-    check?.focus();
-    check?.click();
+    const status = document.querySelector<HTMLElement>(
+      '[data-testid="price-note-status"]'
+    );
+    expect(button).not.toBeNull();
+    expect(status).not.toBeNull();
+    /** The read lands with `next`. */
+    const land = (next: PriceNoteView) => {
+      props.view = next;
+      props.busy = false;
+      flushSync();
+    };
+    return { props, button, status, land, onCheckAgain, onDismiss };
+  }
+
+  test('a Check again that finds it done: Dismiss in place, focus on the status line (W6, C2-W6)', () => {
+    const { button, status, land, onCheckAgain, onDismiss } = mountChecking();
+    button?.focus();
+    button?.click();
+    flushSync();
     expect(onCheckAgain).toHaveBeenCalledOnce();
 
-    // The read lands: the change is done.
-    props.view = view({ icon: 'mail', action: 'dismiss' });
-    flushSync();
+    land(view({ icon: 'mail', action: 'dismiss' }));
     const after = document.querySelector<HTMLButtonElement>(
       '[data-testid="price-change-note"] button'
     );
-    expect(after).toBe(check);
+    expect(after).toBe(button);
     expect(after?.textContent?.trim()).toBe('Dismiss');
-    expect(document.activeElement).toBe(after);
+    expect(document.activeElement).toBe(status);
+
+    // A second press lands on the words, not on Dismiss.
+    (document.activeElement as HTMLElement).click();
+    expect(onDismiss).not.toHaveBeenCalled();
     after?.click();
     expect(onDismiss).toHaveBeenCalledOnce();
     expect(onCheckAgain).toHaveBeenCalledOnce();
+  });
+
+  test('a Check again that finds it still going keeps focus; a later read that finishes it moves nothing (C2-W6)', () => {
+    const { props, button, land } = mountChecking();
+    button?.focus();
+    button?.click();
+    flushSync();
+    land(view({ action: 'check', meta: 'Checked just now.' }));
+    expect(document.activeElement).toBe(button);
+
+    // Another note's Check again goes out, and its read finishes this one.
+    const elsewhere = document.createElement('button');
+    document.body.appendChild(elsewhere);
+    elsewhere.focus();
+    props.busy = true;
+    flushSync();
+    land(view({ icon: 'mail', action: 'dismiss' }));
+    expect(document.activeElement).toBe(elsewhere);
+  });
+
+  test('a note that opens done takes no focus (C2-W6)', () => {
+    const outside = document.createElement('button');
+    document.body.appendChild(outside);
+    outside.focus();
+    render({ view: view({ action: 'dismiss' }), name: 'Pro' });
+    expect(document.activeElement).toBe(outside);
   });
 
   test('a press while a read is out does nothing', () => {

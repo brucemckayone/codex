@@ -6,8 +6,7 @@
  * (fee-config-service-writes and fee-config-classify integration suites).
  */
 
-import type { VersionedCache } from '@codex/cache';
-import { CacheType } from '@codex/cache';
+import { CacheType, VersionedCache } from '@codex/cache';
 import type { FeeVersionList } from '@codex/payments';
 import { ValidationError } from '@codex/service-errors';
 import { describe, expect, it, vi } from 'vitest';
@@ -147,16 +146,22 @@ describe('FeeConfigService — reads go through the version cache', () => {
 });
 
 describe('FeeConfigService — a failed cache clear is seen', () => {
-  it('logs an error naming the level when the invalidate rejects', async () => {
+  it('logs an error naming the level when the version write fails', async () => {
+    // The real class: its invalidate logs and resolves, never rejects, so
+    // only its onError hook can tell the service (review cycle 2, L3).
+    const cache = new VersionedCache({
+      kv: {
+        get: vi.fn(async () => null),
+        put: vi.fn(async () => {
+          throw new Error('KV unavailable');
+        }),
+      } as unknown as ConstructorParameters<typeof VersionedCache>[0]['kv'],
+    });
     const pending: Promise<unknown>[] = [];
     const svc = new FeeConfigService({
       db: untouchable,
       environment: 'test',
-      cache: {
-        invalidate: vi.fn(async () => {
-          throw new Error('KV unavailable');
-        }),
-      } as unknown as VersionedCache,
+      cache,
       waitUntil: (p) => pending.push(p),
     });
     const logged = vi

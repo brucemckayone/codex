@@ -3250,6 +3250,7 @@
   "support_queue_tab_fees": "Fee notices",
   "support_queue_fees_intro": "A fee rise starts 30 days after everyone it affects has been told. These people's emails haven't gone through, so the rise is waiting for them. The 08:00 run tries again every day; if you reach someone another way, mark them as told.",
   "support_queue_fees_subhead": "Not told yet · {count}",
+  "support_queue_fees_subhead_rises": "Fee rises · {count}",
   "support_queue_fees_col_since": "Waiting since",
   "support_queue_fees_col_who": "Who",
   "support_queue_fees_col_rise": "Fee rise",
@@ -3714,5 +3715,7 @@
   "account_billing_change_survives_cancel": "If you reactivate, you'll still switch to monthly billing on {date}, as you chose.",
   "subscription_refusal_scheduled_elsewhere": "This subscription can't be changed here just now. Please contact support and quote this reference: {errorId}.",
   "subscription_refusal_scheduled_elsewhere_no_ref": "This subscription can't be changed here just now. Please contact support.",
-  "player_preview_watch_again": "Watch preview again"
+  "player_preview_watch_again": "Watch preview again",
+  "player_preview_listen_again": "Listen to preview again",
+  "price_refusal_yearly_below_monthly": "The yearly price can't be less than the monthly price."
 }

@@ -25,6 +25,7 @@
     MailIcon,
     PauseIcon,
   } from '$lib/components/ui/Icon';
+  import type { Attachment } from 'svelte/attachments';
   import * as m from '$paraglide/messages';
   import type { PriceNoteView } from './price-note-view';
 
@@ -78,6 +79,30 @@
     if (busy) return;
     handler?.();
   }
+
+  /**
+   * Check again was pressed on this note. A read that lands with the change
+   * still going clears it, so a later read (another note's Check again)
+   * never moves focus here.
+   */
+  let checked = $state(false);
+  $effect(() => {
+    if (!busy && view?.action !== 'dismiss') checked = false;
+  });
+  /**
+   * The press found the change done. The status line takes focus, so a
+   * second Enter lands on the words, never on Dismiss unseen (C2-W6).
+   */
+  const landedDone = $derived(checked && view?.action === 'dismiss');
+  const focusOnAppear: Attachment<HTMLElement> = (node) => {
+    node.focus();
+  };
+
+  function check() {
+    if (busy) return;
+    checked = true;
+    onCheckAgain?.();
+  }
 </script>
 
 {#if shown}
@@ -89,7 +114,12 @@
     data-testid={testId}
   >
     <span class="price-note__icon" aria-hidden="true"><Icon size="1em" /></span>
-    <p class="price-note__text">
+    <p
+      class="price-note__text"
+      tabindex="-1"
+      {@attach landedDone ? focusOnAppear : undefined}
+      data-testid="price-note-status"
+    >
       {#if shown.lead}<b>{shown.lead}</b>{' '}{/if}{shown.text}
     </p>
     {#if shown.bar !== null}
@@ -128,7 +158,8 @@
       </div>
     {:else if view?.action === 'check' || view?.action === 'dismiss'}
       <!-- One button for both: a Check again that finds the change done
-           turns into Dismiss in place, so focus stays on it (W6). -->
+           turns into Dismiss in place (W6), and focus moves to the status
+           line above (C2-W6). -->
       {@const dismiss = view.action === 'dismiss'}
       <div class="price-note__actions">
         <button
@@ -140,7 +171,7 @@
               ? m.price_note_dismiss_aria({ name })
               : m.price_note_check_again_aria({ name })
             : undefined}
-          onclick={() => (dismiss ? onDismiss?.() : press(onCheckAgain))}
+          onclick={() => (dismiss ? onDismiss?.() : check())}
         >
           {dismiss ? m.price_note_dismiss() : m.price_note_check_again()}
         </button>
@@ -187,6 +218,12 @@
 
   .price-note__text b {
     font-weight: var(--font-semibold);
+  }
+
+  /* Focused only as a read lands (C2-W6), as the pricing page's outcome
+     lines are: a line of words, not a control. */
+  .price-note__text:focus {
+    outline: none;
   }
 
   .price-note__bar,

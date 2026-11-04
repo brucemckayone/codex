@@ -13,6 +13,7 @@
 
 import { env } from 'cloudflare:test';
 import {
+  and,
   createPerRequestDbClient,
   type DatabaseWs,
   eq,
@@ -33,6 +34,7 @@ import {
   affectedPayees,
   dbFeeVersionReader,
   feeRiseStartAfter,
+  readFeeVersionsByLevel,
   resolveFeesAt,
 } from '@codex/payments';
 import type { Bindings } from '@codex/shared-types';
@@ -53,17 +55,25 @@ import {
   runFeeNoticesSweep,
 } from '../fee-notices-sweep';
 
-// Who a rise affects, real unless a test makes one read of it fail.
+// Who a rise affects, and the fee levels a batch reads: real unless a test
+// makes one read fail.
 vi.mock('@codex/payments', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@codex/payments')>();
-  return { ...actual, affectedPayees: vi.fn(actual.affectedPayees) };
+  return {
+    ...actual,
+    affectedPayees: vi.fn(actual.affectedPayees),
+    readFeeVersionsByLevel: vi.fn(actual.readFeeVersionsByLevel),
+  };
 });
-const { affectedPayees: realAffectedPayees } =
-  await vi.importActual<typeof import('@codex/payments')>('@codex/payments');
+const {
+  affectedPayees: realAffectedPayees,
+  readFeeVersionsByLevel: realReadFeeVersionsByLevel,
+} = await vi.importActual<typeof import('@codex/payments')>('@codex/payments');
 
-// 3 and 4 Nov 2026, 08:00 London (GMT): two mornings' runs.
+// 3, 4 and 5 Nov 2026, 08:00 London (GMT): the mornings' runs.
 const NOV_3 = new Date('2026-11-03T08:00:00Z');
 const NOV_4 = new Date('2026-11-04T08:00:00Z');
+const NOV_5 = new Date('2026-11-05T08:00:00Z');
 
 describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
   let db: DatabaseWs;
@@ -82,7 +92,22 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
 
   afterEach(() => {
     vi.mocked(affectedPayees).mockImplementation(realAffectedPayees);
+    vi.mocked(readFeeVersionsByLevel).mockImplementation(
+      realReadFeeVersionsByLevel
+    );
   });
+
+  /** The next by-level fee read made on the step's own client fails. */
+  function failOneLevelRead() {
+    let failed = false;
+    vi.mocked(readFeeVersionsByLevel).mockImplementation((client, ...rest) => {
+      if (!failed && client === db) {
+        failed = true;
+        return Promise.reject(new Error('version read timed out'));
+      }
+      return realReadFeeVersionsByLevel(client, ...rest);
+    });
+  }
 
   /**
    * The next read of who a rise affects made on the step's own client fails
@@ -640,6 +665,208 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
     );
   });
 
+  it('one cause failing many notices names the first few and folds the rest into one alert', async () => {
+    const ids: string[] = [];
+    for (const name of ['Ann Roe', 'Bo Lee', 'Cal Fox', 'Dee Ash']) {
+      ids.push((await person(name)).id);
+    }
+    const changeId = await rise(await organisation(...ids));
+    // Thrown before its promise exists, so the send's own catch never sees
+    // it: each notice fails as a database blip inside its send would.
+    const mailer = vi.fn((): Promise<FeeNoticeDelivery> => {
+      throw new Error('the send broke');
+    });
+
+    const result = await runFeeNoticesSweep({
+      db,
+      obs,
+      environment: 'development',
+      workerSecret: 'unused',
+      notificationsUrl: 'http://unused.test',
+      now: NOV_3,
+      mailer,
+      templateExists: async () => true,
+      onlyChanges: [changeId],
+      alertNamed: 2,
+    });
+
+    expect(result).toMatchObject({ listed: 4, sent: 0, errors: 4 });
+    expect(errorsFor(changeId, 'fee step: one notice failed')).toHaveLength(2);
+    const folded = obsLog.error.mock.calls.filter(
+      ([message, context]) =>
+        String(message).startsWith('fee step: more notices failed') &&
+        (context as { changeIds: string[] }).changeIds.includes(changeId)
+    );
+    expect(folded).toHaveLength(1);
+    expect(folded[0]?.[1]).toMatchObject({
+      errorId: expect.any(String),
+      failed: 4,
+      notNamed: 2,
+    });
+  });
+
+  /**
+   * A rise cancelled after its email: each person was told on 3 November,
+   * and their cancellation email is due.
+   */
+  async function cancelledFor(
+    organizationId: string,
+    ...people: string[]
+  ): Promise<string> {
+    const changeId = await rise(organizationId);
+    await db
+      .update(feeChanges)
+      .set({
+        firstRunAt: NOV_3,
+        listedCount: people.length,
+        voidedAt: NOV_3,
+        voidReason: 'cancelled',
+      })
+      .where(eq(feeChanges.id, changeId));
+    const read = dbFeeVersionReader(db);
+    const at = { organizationId, creatorId: people[0], at: NOV_4 };
+    const role = { organizationId, as: 'creator' as const };
+    const now = {
+      ...role,
+      oneOff: await resolveFeesAt(read, { ...at, ctx: 'one_off' }),
+      subscription: await resolveFeesAt(read, { ...at, ctx: 'subscription' }),
+    };
+    const told = {
+      changeId,
+      onList: true,
+      roles: [role],
+      beforeValues: [now],
+      afterValues: [
+        {
+          ...now,
+          oneOff: {
+            ...now.oneOff,
+            orgFeePercent: now.oneOff.orgFeePercent + 500,
+          },
+        },
+      ],
+      quotedFrom: '2026-12-04',
+    };
+    await db.insert(feeChangeNotices).values(
+      people.flatMap((userId) => [
+        {
+          ...told,
+          userId,
+          kind: 'announce' as const,
+          state: 'sent' as const,
+          acceptedAt: NOV_3,
+        },
+        { ...told, userId, kind: 'cancelled' as const },
+      ])
+    );
+    return changeId;
+  }
+
+  it('reads what the follow-ups need once for the batch, however many it sends', async () => {
+    const ids: string[] = [];
+    for (const name of ['Eve Hart', 'Finn Shaw', 'Gus Lane']) {
+      ids.push((await person(name)).id);
+    }
+    const changeId = await cancelledFor(await organisation(...ids), ...ids);
+    // The client, counting announcement reads and fee-version reads.
+    let announceReads = 0;
+    let versionReads = 0;
+    const counting = new Proxy(db, {
+      get(target, prop) {
+        if (prop === 'select') {
+          return (fields?: Record<string, unknown>) => {
+            if (
+              fields?.acceptedAt === feeChangeNotices.acceptedAt &&
+              fields?.toldAt === feeChangeNotices.toldAt
+            ) {
+              announceReads += 1;
+            }
+            if (
+              fields?.platformFeePercent ===
+              feeConfigVersions.platformFeePercent
+            ) {
+              versionReads += 1;
+            }
+            return (target.select as (f?: unknown) => unknown).call(
+              target,
+              fields
+            );
+          };
+        }
+        const value = Reflect.get(target, prop, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const mailer = mailerAnswering();
+
+    const result = await runFeeNoticesSweep({
+      db: counting,
+      obs,
+      environment: 'development',
+      workerSecret: 'unused',
+      notificationsUrl: 'http://unused.test',
+      now: NOV_4,
+      mailer,
+      templateExists: async () => true,
+      onlyChanges: [changeId],
+    });
+
+    expect(result).toMatchObject({ sent: 3 });
+    expect(announceReads).toBe(1);
+    // The platform, the organisation and the creators' overrides: one each.
+    expect(versionReads).toBe(3);
+    for (const id of ids) {
+      expect(mailFor(mailer, id)[0]?.data.announcedOn).toMatch(/3 November/);
+    }
+  });
+
+  it('a failed read of what the follow-ups need gives them back untried, with one alert; announcements still go', async () => {
+    const hal = await person('Hal Webb');
+    const ida = await person('Ida Rae');
+    const cancelledId = await cancelledFor(await organisation(hal.id), hal.id);
+    const riseId = await rise(await organisation(ida.id));
+    failOneLevelRead();
+    const mailer = mailerAnswering();
+
+    const result = await runFeeNoticesSweep({
+      db,
+      obs,
+      environment: 'development',
+      workerSecret: 'unused',
+      notificationsUrl: 'http://unused.test',
+      now: NOV_4,
+      mailer,
+      templateExists: async () => true,
+      onlyChanges: [cancelledId, riseId],
+    });
+
+    expect(result).toMatchObject({ sent: 1, givenBack: 1 });
+    expect(mailFor(mailer, ida.id)).toHaveLength(1);
+    expect(mailFor(mailer, hal.id)).toEqual([]);
+    const [cancellation] = await db
+      .select()
+      .from(feeChangeNotices)
+      .where(
+        and(
+          eq(feeChangeNotices.changeId, cancelledId),
+          eq(feeChangeNotices.kind, 'cancelled')
+        )
+      );
+    expect(cancellation).toMatchObject({
+      state: 'due',
+      attempts: 0,
+      attemptedAt: null,
+    });
+    const alerts = obsLog.error.mock.calls.filter(
+      ([message, context]) =>
+        String(message).startsWith(
+          'fee step: could not read what the follow-up emails need'
+        ) &&
+        (context as { changeIds: string[] }).changeIds.includes(cancelledId)
+    );
+    expect(alerts).toHaveLength(1);
+  });
+
   it('a send that outlasts its timeout is unknown, so the next run checks the email log first', async () => {
     const kim = await person('Kim Slow');
     const changeId = await rise(await organisation(kim.id));
@@ -1010,6 +1237,37 @@ describe('runFeeNoticesSweep', { timeout: 60_000 }, () => {
     expect(await noticeOf(changeId, ray.id)).toMatchObject({
       state: 'sent',
       acceptedAt: loggedAt,
+    });
+  });
+
+  it('two failed mornings in a row still find the first one’s send in the log: it is never sent twice', async () => {
+    const sid = await person('Sid Twice');
+    const changeId = await rise(await organisation(sid.id));
+    // Morning one: the send goes, but its answer is lost.
+    await run(
+      changeId,
+      NOV_3,
+      mailerAnswering({ [sid.id]: { accepted: false, status: 503 } })
+    );
+    const notice = await noticeOf(changeId, sid.id);
+    const sentAt = new Date(NOV_3.getTime() + 60 * 1000);
+    await logged(notice?.id as string, sid.email, 'success', sentAt);
+    // Morning two: a run claims it, then fails inside its log check, so
+    // only that try is stamped.
+    await db
+      .update(feeChangeNotices)
+      .set({ attemptedAt: NOV_4, attempts: 2 })
+      .where(eq(feeChangeNotices.id, notice?.id as string));
+
+    const mailer = mailerAnswering();
+    expect(await run(changeId, NOV_5, mailer)).toMatchObject({
+      foundInLog: 1,
+      sent: 0,
+    });
+    expect(mailFor(mailer, sid.id)).toEqual([]);
+    expect(await noticeOf(changeId, sid.id)).toMatchObject({
+      state: 'sent',
+      acceptedAt: sentAt,
     });
   });
 });
