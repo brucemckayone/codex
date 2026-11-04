@@ -205,7 +205,9 @@
    * yearly below monthly"): said at the yearly price while those prices
    * stand. A refusal that lands while the panel is open moves focus to the
    * field; one already standing when the tab opens is shown, never focused,
-   * so moving between tabs doesn't jump into the form.
+   * so moving between tabs doesn't jump into the form. Autosave can land it
+   * while the creator is typing elsewhere, so then focus stays where it is
+   * and the line and `aria-describedby` say it (WCAG 3.2.2; C3-W2).
    */
   const yearlyRefusal = $derived(monetisation.yearlyRefusal);
   let focusedYearlyRefusal: object | null = monetisation.yearlyRefusal;
@@ -213,9 +215,18 @@
     const refusal = yearlyRefusal;
     if (refusal && refusal !== focusedYearlyRefusal) {
       focusedYearlyRefusal = refusal;
-      node.focus();
+      if (!typingIn(document.activeElement)) node.focus();
     }
   };
+
+  /** A field or editable region the creator may be typing in. */
+  function typingIn(el: Element | null): boolean {
+    return Boolean(
+      el?.closest(
+        'input, textarea, select, [contenteditable]:not([contenteditable="false"])'
+      )
+    );
+  }
   const annualDescribedBy = $derived(
     [yearlyRefusal && 'plan-yearly-refusal', planHint && 'plan-price-hint']
       .filter(Boolean)
