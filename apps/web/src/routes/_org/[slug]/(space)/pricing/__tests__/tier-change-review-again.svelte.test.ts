@@ -11,7 +11,8 @@
  * A switch into yearly billing is refused the same way when its figures
  * moved since the dialog (Codex-2hxff.96): it cannot be pinned by the
  * proration date, so every confirm echoes its preview's quote for the server
- * to re-check.
+ * to re-check. Every confirm also echoes the price the dialog showed
+ * (review C1 cycle 3, L4-a), as tier-change-waiting-price-check pins.
  *
  * Mounts the real `+page.svelte`; `$app/*`, the remote modules (they import
  * `$app/server`) and the collections are mocked.
@@ -192,6 +193,7 @@ describe('tier change: an expired preview', () => {
       newTierId: PLATINUM.id,
       billingInterval: 'month',
       prorationDate: 1_790_000_000,
+      newRecurringAmountCents: 3000,
     });
     expect(remote.previewSubscriptionTierChange).toHaveBeenCalledTimes(2);
     expect(byTestId('tier-change-notice')?.textContent?.trim()).toBe(
@@ -214,6 +216,7 @@ describe('tier change: an expired preview', () => {
       newTierId: PLATINUM.id,
       billingInterval: 'month',
       prorationDate: 1_790_000_900,
+      newRecurringAmountCents: 3000,
     });
   });
 
@@ -270,6 +273,7 @@ describe('tier change: an expired preview', () => {
       billingInterval: 'year',
       prorationDate: 1_790_000_000,
       quote: shown.quote,
+      newRecurringAmountCents: GOLD.priceAnnual,
     });
     // Refused, nothing changed: the fresh figures wait on a new confirm.
     expect(byTestId('tier-change-notice')?.textContent?.trim()).toBe(
@@ -287,6 +291,7 @@ describe('tier change: an expired preview', () => {
       billingInterval: 'year',
       prorationDate: 1_790_000_300,
       quote: fresh.quote,
+      newRecurringAmountCents: GOLD.priceAnnual,
     });
   });
 
