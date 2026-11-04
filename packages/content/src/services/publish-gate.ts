@@ -141,7 +141,7 @@ function gapError(row: FilledRow, gap: ContentGap) {
  * @throws {ContentBodyRequiredError} An article with nothing to read
  * @throws {PriceRequiredToPublishError} For sale with no price, or under £1
  */
-export function assertContentFilled(row: FilledRow): void {
+function assertContentFilled(row: FilledRow): void {
   const [gap] = contentGaps(row);
   if (gap) throw gapError(row, gap);
 }

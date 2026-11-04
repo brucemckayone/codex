@@ -685,9 +685,9 @@ export const updateContentSchema = baseContentSchema
   })
   // No price rule here (Codex-a6ofh.2.1): a draft may be for sale with no
   // price yet, as create allows. A live piece's next state must still have
-  // one, and ContentService.update() refuses it with the publish gate's
-  // PRICE_REQUIRED (assertContentFilled), so every save is judged on the
-  // whole row rather than on what a partial happens to send.
+  // one, and ContentService.update() refuses a save that drops it with the
+  // publish gate's PRICE_REQUIRED (assertSaveKeepsContentFilled), so every
+  // save is judged on the whole row, not on what a partial happens to send.
   .refine(
     (data) => {
       // Mirror of the create-schema invariant: an update that EXPLICITLY marks
