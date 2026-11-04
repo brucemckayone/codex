@@ -26019,6 +26019,14 @@ export const support_queue_fees_subhead = (params) => `Not told yet · ${params.
 
 
 /**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_fees_subhead_rises = (params) => `Fee rises · ${params.count}`
+
+
+/**
  * 
  * @returns {string}
  */
@@ -29736,3 +29744,19 @@ export const subscription_refusal_scheduled_elsewhere_no_ref = () => `This subsc
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const player_preview_watch_again = () => `Watch preview again`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const player_preview_listen_again = () => `Listen to preview again`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const price_refusal_yearly_below_monthly = () => `The yearly price can't be less than the monthly price.`
