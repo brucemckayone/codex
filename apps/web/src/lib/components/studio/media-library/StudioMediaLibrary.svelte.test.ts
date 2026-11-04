@@ -338,6 +338,52 @@ describe('StudioMediaLibrary: URL writes (runaway, Codex-a6ofh.1.7)', () => {
     );
   });
 
+  // The whole cycle: the write starts a navigation, repeats while it is in
+  // flight (an echo), and again once it has landed. One navigation, ever.
+  test('the same write, in flight and after landing, navigates once', async () => {
+    s.first.current = listOf([item(1)]);
+    render();
+    await settle();
+    goto.mockImplementationOnce(async (href: string) => {
+      inFlight(href);
+    });
+    viewRadio(false)?.click();
+    await settle();
+    expect(goto).toHaveBeenCalledTimes(1);
+    expect(goto).toHaveBeenCalledWith(
+      '/studio/media?view=list',
+      expect.anything()
+    );
+
+    viewRadio(false)?.click();
+    await settle();
+    s.url = new URL('https://studio.test/studio/media?view=list');
+    s.to = null;
+    viewRadio(false)?.click();
+    await settle();
+    expect(goto).toHaveBeenCalledTimes(1);
+  });
+
+  // The search box writes through the same path as the facets.
+  test('a search typed during a facet navigation keeps the facet', async () => {
+    s.first.current = listOf([item(1)]);
+    render();
+    await settle();
+    inFlight('/studio/media?usage=unused');
+    const box = document.querySelector<HTMLInputElement>(
+      'input[type="search"]'
+    );
+    expect(box).not.toBeNull();
+    box!.value = 'intro';
+    box!.dispatchEvent(new Event('input', { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    await settle();
+    expect(goto).toHaveBeenCalledWith(
+      '/studio/media?usage=unused&q=intro',
+      expect.anything()
+    );
+  });
+
   // A navigation to another page is not this library's URL.
   test('a write that changes nothing, during a navigation to another page, navigates nowhere', async () => {
     s.first.current = listOf([item(1)]);

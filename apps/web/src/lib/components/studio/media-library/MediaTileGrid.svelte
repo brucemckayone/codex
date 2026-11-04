@@ -283,6 +283,19 @@
       flex-direction: column;
       align-items: start;
     }
+
+    /* The row's thumbnail is narrow: the desktop inset and tracking cut
+       "Uploading" to "Uploadi…". Same as MediaTile's overlay. */
+    .ghost-progress {
+      left: var(--space-1);
+      right: var(--space-1);
+      bottom: var(--space-1);
+      padding: var(--space-1) var(--space-1-5);
+    }
+
+    .ghost-progress-step {
+      letter-spacing: var(--tracking-normal);
+    }
   }
 
   .ghost-name {

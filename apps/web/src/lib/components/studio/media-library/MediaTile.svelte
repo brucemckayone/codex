@@ -655,5 +655,18 @@
     .thumb-type-chip {
       display: none;
     }
+
+    /* The row's thumbnail is narrow: the desktop inset and tracking cut a
+       one-word step short. Same as MediaTileGrid's upload ghost. */
+    .thumb-progress {
+      left: var(--space-1);
+      right: var(--space-1);
+      bottom: var(--space-1);
+      padding: var(--space-1) var(--space-1-5);
+    }
+
+    .thumb-progress-step {
+      letter-spacing: var(--tracking-normal);
+    }
   }
 </style>

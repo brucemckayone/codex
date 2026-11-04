@@ -36,7 +36,7 @@
   import { logger } from '$lib/observability';
   import { deleteMedia, getMediaSummary, getMediaUsage, listMedia } from '$lib/remote/media.remote';
   import { readFreshQuery, remoteErrorStatus } from '$lib/remote/query-result';
-  import { applyFilterPatch, filterHref } from '$lib/utils/filter-url';
+  import { applyFilterPatch } from '$lib/utils/filter-url';
   import { formatFileSize } from '$lib/utils/format';
   import * as m from '$paraglide/messages';
   import { attentionLine, soleFacetLabel } from './library-options';
@@ -242,11 +242,13 @@
   /**
    * The library URL as it is about to be: a navigation in flight to this page
    * is newer than `page.url`, so a facet changed during it builds on it rather
-   * than dropping it. One to another page is not this library's URL.
+   * than dropping it. One to another page is not this library's URL. Every
+   * write goes through `setParams`, the search box's too, so all build on it.
    */
   function currentUrl(): URL {
     const to = navigating?.to?.url;
-    return to && to.pathname === page.url.pathname ? to : page.url;
+    const here = page.url;
+    return to && to.origin === here.origin && to.pathname === here.pathname ? to : here;
   }
 
   function setParams(patch: LibraryPatch) {
@@ -286,12 +288,7 @@
   function handleSearchInput(value: string) {
     searchValue = value;
     if (searchDebounce) clearTimeout(searchDebounce);
-    searchDebounce = setTimeout(() => {
-      void goto(filterHref(page.url, { q: value.trim() ? value : null }, LIBRARY_DEFAULTS), {
-        keepFocus: true,
-        noScroll: true,
-      });
-    }, 200);
+    searchDebounce = setTimeout(() => setParams({ q: value.trim() ? value : null }), 200);
   }
 
   function handleSearchClear() {
@@ -302,7 +299,7 @@
       clearTimeout(searchDebounce);
       searchDebounce = null;
     }
-    void goto(filterHref(page.url, { q: null }, LIBRARY_DEFAULTS), { keepFocus: true, noScroll: true });
+    setParams({ q: null });
   }
 
   // ── Refetch ───────────────────────────────────────────────────────────
