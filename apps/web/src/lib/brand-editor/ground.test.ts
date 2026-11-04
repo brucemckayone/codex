@@ -5,15 +5,18 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
 import {
   bindingLuminance,
+  CHIP_LUMINANCE,
   glassLuminance,
   groundLuminance,
   groundLuminanceVars,
   ORG_SURFACE_STEPS,
+  oklchStep,
   PLATFORM_GROUND_LUMINANCE,
   paintableBackground,
   STICKY_GLASS_OPACITY,
 } from './ground';
 import { relativeLuminance, TEXT_ON_BRAND_LUMINANCE_PIVOT } from './ink';
+import { hexToOklch, srgbToHex } from './oklch-math';
 
 const styles = join(dirname(fileURLToPath(import.meta.url)), '../styles');
 const sheet = (path: string) =>
@@ -145,26 +148,71 @@ describe('the inputs an org’s backgrounds write', () => {
   });
 
   test('each theme’s hardest surface, from the dark background, else the light one', () => {
-    // White's darkest light panel is the tertiary, oklch(0.94 0 0) = #ebebeb.
-    // Its dark surfaces all clip to white, so in dark the sticky glass binds:
-    // 94% white over black content, #f0f0f0. Black's lightest dark surface is
-    // that glass too, 94% black over white content, #0f0f0f (its tertiary
-    // panel, oklch(0.08 0 0), is #020202).
+    // White's hardest light surface is its brand-primary chip, at its bound
+    // (0.826, under the #ebebeb tertiary panel's 0.831); in dark its panels
+    // all clip to white and the chip binds again, below the sticky glass
+    // (#f0f0f0). Black's hardest dark surface is the dark chip's bound, over
+    // both the glass (#0f0f0f) and the tertiary panel (#020202).
+    expect(luminance('#ebebeb')).toBeGreaterThan(CHIP_LUMINANCE.light);
+    expect(luminance('#0f0f0f')).toBeLessThan(CHIP_LUMINANCE.dark);
     expect(groundLuminanceVars({ background: '#ffffff' })).toEqual({
-      '--brand-ground-y': luminance('#ebebeb').toFixed(4),
-      '--brand-ground-dark-y': luminance('#f0f0f0').toFixed(4),
+      '--brand-ground-y': CHIP_LUMINANCE.light.toFixed(4),
+      '--brand-ground-dark-y': CHIP_LUMINANCE.light.toFixed(4),
     });
     expect(
       groundLuminanceVars({ background: '#FFFFFF', backgroundDark: '#000000' })
     ).toEqual({
-      '--brand-ground-y': luminance('#ebebeb').toFixed(4),
-      '--brand-ground-dark-y': luminance('#0f0f0f').toFixed(4),
+      '--brand-ground-y': CHIP_LUMINANCE.light.toFixed(4),
+      '--brand-ground-dark-y': CHIP_LUMINANCE.dark.toFixed(4),
     });
+    // A cream page's own panels are harder than the chip, which then changes
+    // nothing.
+    expect(Number(groundLuminance('#E8E0D0', 'light'))).toBeLessThan(
+      CHIP_LUMINANCE.light
+    );
+  });
+
+  test('reads only a background the page would paint', () => {
+    expect(groundLuminance(' #000000 ', 'dark')).toBe(
+      groundLuminance('#000000', 'dark')
+    );
+    expect(groundLuminance('000000', 'dark')).toBeUndefined();
+    expect(
+      groundLuminanceVars({ background: '#FFFFFF', backgroundDark: '101418' })
+    ).toEqual(groundLuminanceVars({ background: '#FFFFFF' }));
   });
 });
 
-// Owner, Codex-mik4h: "Ignore it, like On Brand". The writers paint only a
-// background this module can measure, so the page and its nudge agree.
+// The -subtle chips' luminance bound holds for every brand. Re-derived on a
+// 32-level lattice of brands, painted as the engines paint the chip tokens.
+describe('the chips labels sit on', () => {
+  const levels = Array.from({ length: 32 }, (_, i) =>
+    Math.round((i * 255) / 31)
+  );
+  const chips: Record<'light' | 'dark', number[]> = { light: [], dark: [] };
+  for (const r of levels) {
+    for (const g of levels) {
+      for (const b of levels) {
+        // --color-brand-primary-subtle: oklch 0.96, c×0.2 light; 0.18, c×0.3 dark.
+        const brand = srgbToHex(r, g, b);
+        const l = hexToOklch(brand)?.l ?? Number.NaN;
+        chips.light.push(luminance(oklchStep(brand, 0.96 - l, 0.2) ?? ''));
+        chips.dark.push(luminance(oklchStep(brand, 0.18 - l, 0.3) ?? ''));
+      }
+    }
+  }
+
+  test('a light chip is never darker, a dark one never lighter, than its bound', () => {
+    expect(Math.min(...chips.light)).toBeGreaterThanOrEqual(
+      CHIP_LUMINANCE.light
+    );
+    expect(Math.max(...chips.dark)).toBeLessThanOrEqual(CHIP_LUMINANCE.dark);
+    // Tight, so the chip costs no link more than it needs.
+    expect(Math.min(...chips.light) - CHIP_LUMINANCE.light).toBeLessThan(0.01);
+    expect(CHIP_LUMINANCE.dark - Math.max(...chips.dark)).toBeLessThan(0.002);
+  });
+});
+
 describe('a background the page may paint', () => {
   test.each([
     ['#fff', '#fff'],

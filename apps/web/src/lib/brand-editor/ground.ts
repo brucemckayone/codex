@@ -9,8 +9,8 @@
  * this module only measures.
  *
  * One link colour sits on the page and on every panel and card painted from
- * it, and on the sticky subscribe bar's glass, so the number is the HARDEST
- * of those surfaces (owner, 2026-11-03:
+ * it, on the -subtle chips and on the sticky subscribe bar's glass, so the
+ * number is the HARDEST of those surfaces (owner, 2026-11-03:
  * "Every surface (Recommended)", and for dark mode's lighter panel, "Yes,
  * every surface (Recommended)"): the darkest on a light page, where links are
  * darkened, the lightest on a dark one, where they are lightened.
@@ -77,6 +77,16 @@ export const ORG_SURFACE_STEPS: Record<
  */
 export const STICKY_GLASS_OPACITY = 0.94;
 
+/**
+ * The -subtle chips labels sit on (org-brand.css) take the ground's side at a
+ * fixed lightness, so their luminance is bounded whatever the brand. The
+ * hardest, `--color-brand-primary-subtle`, is at least 0.826 as a light chip
+ * (oklch 0.96, c×0.2) and at most 0.0075 as a dark one (0.18, c×0.3), over
+ * every 8-bit brand; a test re-derives both. Counted like any surface, at its
+ * bound: the chip's brand is not one of this module's inputs.
+ */
+export const CHIP_LUMINANCE = { light: 0.826, dark: 0.0075 } as const;
+
 /** The inputs this module writes, light then dark. */
 export const GROUND_VAR_PROPS = [
   '--brand-ground-y',
@@ -130,8 +140,9 @@ function surfaceLuminances(ground: string, theme: Theme): number[] | null {
 
 /**
  * The sticky glass over the content that moves it furthest toward the link:
- * black under a light page, white under a dark one, composited in sRGB as
- * the engines paint it.
+ * black under a light page, white under a dark one, composited in sRGB.
+ * Within 1/255 of both engines, which composite the round-tripped surface
+ * rather than the hex.
  */
 export function glassLuminance(ground: string): number | null {
   const rgb = hexToSrgb(ground);
@@ -145,19 +156,26 @@ export function glassLuminance(ground: string): number | null {
 
 /**
  * The binding ground for one theme as the stylesheet reads it, a bare
- * number to 4 decimals, or undefined for a colour that is not hex.
+ * number to 4 decimals, or undefined for a background the page would not
+ * paint (`paintableBackground`): every caller reads the same ground.
  */
 export function groundLuminance(
   colour: string | null | undefined,
   theme: Theme
 ): string | undefined {
-  const page = colour ? relativeLuminance(colour) : null;
-  const surfaces = colour ? surfaceLuminances(colour, theme) : null;
-  const glass = colour ? glassLuminance(colour) : null;
+  const hex = paintableBackground(colour);
+  const page = hex ? relativeLuminance(hex) : null;
+  const surfaces = hex ? surfaceLuminances(hex, theme) : null;
+  const glass = hex ? glassLuminance(hex) : null;
   if (page === null || surfaces === null || glass === null) return undefined;
+  const chip =
+    page < TEXT_ON_BRAND_LUMINANCE_PIVOT
+      ? CHIP_LUMINANCE.dark
+      : CHIP_LUMINANCE.light;
   return bindingLuminance(Number(page.toFixed(4)), [
     ...surfaces,
     glass,
+    chip,
   ]).toFixed(4);
 }
 

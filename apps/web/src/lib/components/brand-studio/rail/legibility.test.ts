@@ -2,7 +2,7 @@
 import { describe, expect, test } from 'vitest';
 import { PLATFORM_GROUND_LUMINANCE } from '$lib/brand-editor/ground';
 import { LINK_FLOOR, nudgeForGround } from '$lib/brand-editor/ground-nudge';
-import { hoverFill, legibilityFor } from './legibility';
+import { groundFor, hoverFill, legibilityFor } from './legibility';
 
 const LIGHT = PLATFORM_GROUND_LUMINANCE.light;
 const DARK = PLATFORM_GROUND_LUMINANCE.dark;
@@ -66,5 +66,31 @@ describe('what the pill lists beyond the resting link (Codex-mik4h)', () => {
       overrides: { interactive: DEEP },
     });
     expect(l.brandText).toEqual(nudgeForGround(NEAR_BLACK, DARK, LINK_FLOOR));
+  });
+});
+
+describe('the ground the pill measures against', () => {
+  test('is the one the page paints, never a background it ignores', () => {
+    const black = groundFor({
+      theme: 'dark',
+      brand: DEEP,
+      background: '#000000',
+    });
+    expect(
+      groundFor({ theme: 'dark', brand: DEEP, background: ' #000000 ' })
+    ).toBe(black);
+    // A bare hex is no ground the page paints, so the platform's stands.
+    expect(
+      groundFor({ theme: 'dark', brand: DEEP, background: '000000' })
+    ).toBe(DARK);
+    // An unpaintable dark background falls back to the light one.
+    expect(
+      groundFor({
+        theme: 'dark',
+        brand: DEEP,
+        background: '#000000',
+        backgroundDark: '101418',
+      })
+    ).toBe(black);
   });
 });
