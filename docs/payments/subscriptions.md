@@ -521,8 +521,26 @@ and the balance stays £0 throughout.
   made for it fails too, the record stays beside that untagged schedule, so
   it still reads as ours (never `SUBSCRIPTION_SCHEDULED_ELSEWHERE`), and one
   `billing_change.undo_release_failed` error alert with an errorId names the
-  schedule: support releases it, and the backstop sets the change again from
-  the record. Until then the member's Keep, Cancel or a retry reaches it.
+  schedule. The next event finishes it (below). Until then the member's Keep,
+  Cancel or a retry reaches it. A create whose answer was lost (a timeout or a
+  5xx, never a refusal) re-reads the subscription: an untagged schedule there
+  beside our record is the one we made, and is taken up and finished
+  (`billing_change.create_adopted`, a warning), not left as an orphan.
+- **A schedule that doesn't carry the change** (review C1 cycle 2, L2). Ours
+  left half made (untagged, the paid year only, so it would let go at the
+  year's end and the year would renew yearly), or holding an earlier choice's
+  phase 2 (an update in place that failed, its record not put back), is
+  updated in place to the record. This happens on the member's next
+  `customer.subscription.updated` before the renewal, or in the backstop for a
+  row without its schedule id. Finished means tagged, two phases, and phase 2
+  the record's Price and flip, so the event our update fires writes nothing.
+  It never overrides a later choice. One that ends in a cancel (a Cancel moved
+  onto it, P10) is let go and the cancel put back. One on a subscription set
+  to cancel is let go and the record kept, as Cancel does. Keep clears the
+  record, so there is nothing to finish. A failed finish is one
+  `billing_change.finish_failed` error alert with an errorId and the
+  schedule's ids, and no email. The next event tries again. If none comes
+  before the renewal, support finishes or releases the schedule.
 - **C(b)**: the upgrade's write as ever (the target's yearly Price,
   `always_invoice`, `error_if_incomplete`, the pinned `proration_date`), with
   the record in the same update. A declined card reverts it: nothing set.
@@ -552,9 +570,10 @@ and the balance stays £0 throughout.
 - **The backstop's second step.** On the same hourly wake: rows with
   `pending_billing_interval` set and no `stripe_schedule_id`, live, not set
   to cancel, the renewal still ahead (at most 50, oldest first). Each is
-  re-read and its schedule set again (about three calls). With nothing
-  broken it selects nothing and asks Stripe nothing. What it cannot set is
-  one `billing_change.backstop_failed` alert.
+  re-read and its schedule set again (about three calls), or, when one of
+  ours is already attached, finished (above). With nothing broken it selects
+  nothing and asks Stripe nothing. What it cannot set is one
+  `billing_change.backstop_failed` alert.
 - **Someone else's schedule** (made in the Dashboard): every write is
   refused with `SUBSCRIPTION_SCHEDULED_ELSEWHERE`, and a due price change on
   it waits and alerts.
@@ -596,7 +615,21 @@ and the balance stays £0 throughout.
   `pending_tier_from`, `held_amount_cents`, `pending_billing_interval`,
   `pending_amount_cents`, `stripe_schedule_id`). The queries are in the
   [release checklist](release-checklist.md) (0122, 0124 and 0125 ›
-  Rollback).
+  Rollback). A change whose renewal passes before the roll forward is billed
+  another year: see the runbook below.
+
+**Runbook: a change of billing that billed the year again**
+(`tier_move.apply_failed`, reason `billing_not_switched`). The renewal came
+with no schedule to switch the Price (released for a rollback, or let go and
+not set again), so the member asked for monthly and was billed another year
+at the yearly price. The hourly step leaves the row and alerts once a day
+until the record goes. Keep current plan is refused now
+(`MOVE_ALREADY_LANDED`). Support tells the member, then clears the record by
+hand at Stripe: remove the `codex_move_*` and `codex_hold_*` keys. The item
+already holds the yearly Price, so nothing else is written. The next
+`customer.subscription.updated` mirrors it onto our row and the alert stops.
+The member can then choose monthly again, which waits for the new year's
+end. Whether to refund that year is decided with the owner.
 
 ## Price changes
 

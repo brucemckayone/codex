@@ -334,6 +334,50 @@ describe('VersionedCache', () => {
 
       await expect(errorCache.invalidate('user-123')).resolves.not.toThrow();
     });
+
+    it('tells an onError hook of a failed write, once, and still resolves', async () => {
+      const failure = new Error('KV unavailable');
+      const errorCache = new VersionedCache({
+        kv: {
+          get: vi.fn(),
+          put: vi.fn().mockRejectedValue(failure),
+        } as unknown as KVNamespace,
+      });
+      const onError = vi.fn();
+
+      await expect(
+        errorCache.invalidate('user-123', { onError })
+      ).resolves.toBeUndefined();
+
+      expect(onError).toHaveBeenCalledTimes(1);
+      expect(onError).toHaveBeenCalledWith(failure);
+    });
+
+    it('never calls onError when the write lands', async () => {
+      const onError = vi.fn();
+
+      await cache.invalidate('user-123', { onError });
+
+      expect(mockKV.put).toHaveBeenCalled();
+      expect(onError).not.toHaveBeenCalled();
+    });
+
+    it('still resolves when the onError hook itself throws', async () => {
+      const errorCache = new VersionedCache({
+        kv: {
+          get: vi.fn(),
+          put: vi.fn().mockRejectedValue(new Error('KV unavailable')),
+        } as unknown as KVNamespace,
+      });
+
+      await expect(
+        errorCache.invalidate('user-123', {
+          onError: () => {
+            throw new Error('the hook failed');
+          },
+        })
+      ).resolves.toBeUndefined();
+    });
   });
 
   describe('invalidation contract', () => {

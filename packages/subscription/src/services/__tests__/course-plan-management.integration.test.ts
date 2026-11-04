@@ -61,6 +61,7 @@ import {
   ConnectAccountNotReadyError,
   CourseSubscriptionPlanExistsError,
   CreatorConnectRequiredError,
+  YearlyPriceBelowMonthlyError,
 } from '../../errors';
 import { CourseSubscriptionService } from '../course-subscription-service';
 
@@ -182,6 +183,33 @@ describe('CourseSubscriptionService plan management (Codex-2pryk.2.4.1)', () => 
     // And it is readable as THE live plan (what getCourseOffer joins on).
     const live = await service.getPlanForCourse(courseId);
     expect(live?.id).toBe(plan.id);
+  });
+
+  // Review C1 cycle 2, L3 (owner 2026-11-03: "Refuse yearly below monthly").
+  it('a yearly price below the monthly one is refused, on create and on a re-price, before Stripe is asked', async () => {
+    const courseId = await newCourse();
+    const pricesBefore = spies.prices.create.mock.calls.length;
+
+    await expect(
+      service.upsertPlan(orgId, courseId, {
+        priceMonthly: 1200,
+        priceAnnual: 500,
+      })
+    ).rejects.toThrow(YearlyPriceBelowMonthlyError);
+    expect(spies.prices.create.mock.calls.length).toBe(pricesBefore);
+
+    await service.upsertPlan(orgId, courseId, {
+      priceMonthly: 1200,
+      priceAnnual: 12000,
+    });
+    const afterCreate = spies.prices.create.mock.calls.length;
+    await expect(
+      service.upsertPlan(orgId, courseId, {
+        priceMonthly: 1200,
+        priceAnnual: 1100,
+      })
+    ).rejects.toThrow(YearlyPriceBelowMonthlyError);
+    expect(spies.prices.create.mock.calls.length).toBe(afterCreate);
   });
 
   it('2. re-saving identical prices creates no new Stripe price (no churn)', async () => {

@@ -27,6 +27,26 @@
  *     K. Pro monthly, then Keep yearly billing: the renewal bills £120 yearly.
  *     R. Pro monthly, cancel, reactivate: the change survives; the renewal
  *        bills £12 monthly.
+ *   Clock 3, one member whose subscription carries its own card, as Checkout
+ *   sets it (review C1 cycle 2, M1):
+ *     M. Pro monthly: the schedule copies the subscription's card (card A).
+ *        Then Update card as the portal does it: card B the customer's
+ *        default, the subscription's own card cleared. Stripe clears the
+ *        schedule's copy with it, so the renewal that starts monthly billing
+ *        charges card B, with no step of ours. The card A check first shows
+ *        the proof can fail.
+ *        NOT proven here: that the hosted portal makes this same call. The
+ *        script clears the card through the API (`default_payment_method:
+ *        ''`); the portal drive showed only that the portal clears each
+ *        subscription's own card (.52 §10), not how.
+ *   Clock 4, one member whose schedule is left half made (review C1 cycle 2,
+ *   L2):
+ *     H. Pro monthly, with the schedule's update and its undo both failing
+ *        once (forced): the schedule is left as `from_subscription` made it,
+ *        untagged with the paid year only, which would release at the year's
+ *        end and bill another year. The next event finishes it in place, and
+ *        the renewal bills £12 monthly with nothing credited.
+ *   `--only=card,half` (any of one, two, card, half) runs only those clocks.
  *
  * Run from the repo root, through the throwaway-database wrapper, with the
  * dev TEST key in .env.dev:
@@ -123,6 +143,8 @@ interface Member {
   renewal: number;
   /** Invoices seen so far. */
   invoices: Set<string>;
+  /** The subscription's own card, when it was given one (Clock 3). */
+  cardId?: string;
 }
 
 /** The service's "now" is the clock's: its previews and pins are the clock's. */
@@ -204,7 +226,8 @@ async function tier(
 async function clockWith(
   kit: Kit,
   name: string,
-  labels: string[]
+  labels: string[],
+  options: { ownCard?: boolean } = {}
 ): Promise<{ clockId: string; t0: number; members: Member[] }> {
   const t0 = Math.floor(realNow() / 1000);
   const clock = await kit.stripe.testHelpers.testClocks.create({
@@ -217,15 +240,31 @@ async function clockWith(
   for (const label of labels) {
     const [userId] = await seedTestUsers(kit.db, 1);
     kit.userIds.push(userId);
+    // Checkout sets the card on the subscription, not the customer: the
+    // ownCard members are made that way.
     const customer = await kit.stripe.customers.create({
       test_clock: clock.id,
       payment_method: 'pm_card_visa',
-      invoice_settings: { default_payment_method: 'pm_card_visa' },
+      ...(!options.ownCard && {
+        invoice_settings: { default_payment_method: 'pm_card_visa' },
+      }),
       metadata: TAG,
     });
+    const cardId = options.ownCard
+      ? (
+          await kit.stripe.paymentMethods.list({
+            customer: customer.id,
+            type: 'card',
+          })
+        ).data[0]?.id
+      : undefined;
+    if (cardId) {
+      await kit.stripe.paymentMethods.update(cardId, { metadata: TAG });
+    }
     const sub = await kit.stripe.subscriptions.create({
       customer: customer.id,
       items: [{ price: kit.tiers.pro.annual }],
+      ...(cardId && { default_payment_method: cardId }),
       metadata: {
         ...TAG,
         codex_tier_id: kit.tiers.pro.id,
@@ -270,6 +309,7 @@ async function clockWith(
       rowId: row.id,
       renewal: item.current_period_end,
       invoices,
+      cardId,
     });
   }
   return { clockId: clock.id, t0, members };
@@ -340,7 +380,8 @@ async function change(
     target.id,
     interval,
     preview.prorationDate,
-    preview.quote
+    preview.quote,
+    preview.newRecurringAmountCents
   );
   return preview;
 }
@@ -663,6 +704,173 @@ async function clocksLeft(stripe: Stripe, clocks: string[]): Promise<number> {
   return left;
 }
 
+const cardOf = (
+  card: string | Stripe.PaymentMethod | null | undefined
+): string | null => (typeof card === 'string' ? card : (card?.id ?? null));
+
+async function clockCard(kit: Kit): Promise<void> {
+  console.log('Clock 3: Update card while a change of billing waits (M1)');
+  const { clockId, t0, members } = await clockWith(kit, 'M card', ['M'], {
+    ownCard: true,
+  });
+  const [m] = members;
+  if (!m?.cardId) throw new Error('member or card');
+  const { pro } = kit.tiers;
+  const today = t0 + 230 * DAY;
+  await advance(kit, clockId, today);
+
+  await change(kit, m, pro, 'month');
+  await waiting(kit, m, pro, pro.annual);
+  const scheduleOf = async () => {
+    const sub = await live(kit, m);
+    const id =
+      typeof sub.schedule === 'string' ? sub.schedule : sub.schedule?.id;
+    if (!id) throw new Error('no schedule attached');
+    return kit.stripe.subscriptionSchedules.retrieve(id);
+  };
+  check(
+    "M: the schedule copied the subscription's own card",
+    cardOf((await scheduleOf()).default_settings.default_payment_method) ===
+      m.cardId
+  );
+
+  // Update card, as the portal does it: card B the customer's default, and
+  // the subscription's own card cleared.
+  const cardB = await kit.stripe.paymentMethods.attach('pm_card_mastercard', {
+    customer: m.customerId,
+  });
+  await kit.stripe.paymentMethods.update(cardB.id, { metadata: TAG });
+  await kit.stripe.customers.update(m.customerId, {
+    invoice_settings: { default_payment_method: cardB.id },
+  });
+  await kit.stripe.subscriptions.update(m.subscriptionId, {
+    default_payment_method: '',
+  });
+  const cleared = cardOf(
+    (await scheduleOf()).default_settings.default_payment_method
+  );
+  check(
+    "M: clearing the subscription's card cleared the schedule's copy too",
+    cleared === null,
+    `the schedule holds ${cleared === m.cardId ? 'card A (the old one)' : (cleared ?? 'no card')}`
+  );
+  // Its customer.subscription.updated, in the webhook's order: nothing of
+  // ours touches the schedule's card.
+  const event = await live(kit, m);
+  await kit.service.handleSubscriptionUpdated(event);
+  await applyDuePendingPriceChange(kit.stripe, event);
+  await kit.service.applyDueTierMove(event);
+  const after = await scheduleOf();
+  const held = cardOf(after.default_settings.default_payment_method);
+  check(
+    'M: after the webhook the schedule still holds no card, and keeps its two phases',
+    held === null && after.phases.length === 2,
+    `card ${held === m.cardId ? 'A (the old one)' : (held ?? 'none')}; ${after.phases.length} phases`
+  );
+
+  await advanceTo(kit, clockId, today, m.renewal + 3 * HOUR);
+  await renewal(kit, m);
+  // The cycle invoice's payment, and the card its PaymentIntent used.
+  const cycle = (
+    await kit.stripe.invoices.list({
+      subscription: m.subscriptionId,
+      limit: 20,
+    })
+  ).data.filter((invoice) => invoice.billing_reason === 'subscription_cycle');
+  const paid = cycle[0]
+    ? await kit.stripe.invoices.retrieve(cycle[0].id, { expand: ['payments'] })
+    : null;
+  const intent = paid?.payments?.data[0]?.payment?.payment_intent;
+  const intentId = typeof intent === 'string' ? intent : intent?.id;
+  const paidWith = intentId
+    ? cardOf(
+        (await kit.stripe.paymentIntents.retrieve(intentId)).payment_method
+      )
+    : null;
+  check(
+    'M: the renewal charged card B, the customer default, not the card replaced',
+    cycle.length === 1 && paidWith === cardB.id,
+    `${cycle.length} cycle invoices; charged ${paidWith === m.cardId ? 'card A (the old one)' : paidWith === cardB.id ? 'card B' : (paidWith ?? 'nothing found')}`
+  );
+  await renewalBilled(kit, m, pro.monthlyPence, 'month');
+}
+
+/**
+ * The next call to `resource[method]` fails as Stripe being down would,
+ * then the method is itself again. Returns the undo, for a call that never
+ * came.
+ */
+function failOnce(resource: object, method: string, message: string) {
+  const target = resource as Record<string, unknown>;
+  const real = target[method];
+  const undo = () => {
+    target[method] = real;
+  };
+  target[method] = async () => {
+    undo();
+    throw Object.assign(new Error(message), { statusCode: 500 });
+  };
+  return undo;
+}
+
+async function clockHalfMade(kit: Kit): Promise<void> {
+  console.log('Clock 4: a schedule left half made is finished (L2)');
+  const { clockId, t0, members } = await clockWith(kit, 'H half made', ['H']);
+  const [h] = members;
+  if (!h) throw new Error('member');
+  const { pro } = kit.tiers;
+  const today = t0 + 230 * DAY;
+  await advance(kit, clockId, today);
+
+  const undoUpdate = failOnce(
+    kit.stripe.subscriptionSchedules,
+    'update',
+    'Stripe is down (forced)'
+  );
+  const undoRelease = failOnce(
+    kit.stripe.subscriptionSchedules,
+    'release',
+    'Stripe is still down (forced)'
+  );
+  const failed = await change(kit, h, pro, 'month').then(
+    () => false,
+    () => true
+  );
+  undoUpdate();
+  undoRelease();
+  check('H: the change reports its failure', failed);
+  const scheduleOf = async () => {
+    const sub = await live(kit, h);
+    const id =
+      typeof sub.schedule === 'string' ? sub.schedule : sub.schedule?.id;
+    if (!id) throw new Error('no schedule attached');
+    return kit.stripe.subscriptionSchedules.retrieve(id);
+  };
+  const half = await scheduleOf();
+  check(
+    'H: the schedule is left half made: untagged, the paid year only',
+    Object.keys(half.metadata ?? {}).length === 0 && half.phases.length === 1,
+    `${half.phases.length} phases`
+  );
+
+  // Its customer.subscription.updated, in the webhook's order.
+  const event = await live(kit, h);
+  await kit.service.handleSubscriptionUpdated(event);
+  await applyDuePendingPriceChange(kit.stripe, event);
+  await kit.service.applyDueTierMove(event);
+  await waiting(kit, h, pro, pro.annual);
+  check(
+    'H: finished in place: the same schedule',
+    (await scheduleOf()).id === half.id
+  );
+  check('H: nothing invoiced today', (await newInvoices(kit, h)).length === 0);
+  await noCredit(kit, h, 'today');
+
+  await advanceTo(kit, clockId, today, h.renewal + 3 * HOUR);
+  await renewal(kit, h);
+  await renewalBilled(kit, h, pro.monthlyPence, 'month');
+}
+
 async function main(): Promise<void> {
   const key = process.env.STRIPE_SECRET_KEY ?? '';
   if (!key.startsWith('sk_test_') && !key.startsWith('rk_test_')) {
@@ -705,8 +913,15 @@ async function main(): Promise<void> {
       stripe
     );
     const kit: Kit = { ...base, service, orgId: org.id, tiers };
-    await clockOne(kit);
-    await clockTwo(kit);
+    const only = process.argv
+      .find((arg) => arg.startsWith('--only='))
+      ?.slice('--only='.length)
+      .split(',');
+    const runs = (name: string) => !only || only.includes(name);
+    if (runs('one')) await clockOne(kit);
+    if (runs('two')) await clockTwo(kit);
+    if (runs('card')) await clockCard(kit);
+    if (runs('half')) await clockHalfMade(kit);
   } finally {
     frozen = 0;
     for (const clockId of base.clocks) {

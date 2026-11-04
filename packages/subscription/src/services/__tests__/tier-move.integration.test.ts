@@ -51,6 +51,7 @@ import {
   PendingMoveKeepFirstError,
   TierChangeCancellingError,
   TierChangeIntervalWhileMovingError,
+  TierChangePreviewExpiredError,
   TierChangeTwoStepsError,
   TierHasSubscribersError,
 } from '../../errors';
@@ -476,6 +477,60 @@ describe('waiting tier moves (Codex-2hxff.16)', () => {
         currentPeriodEnd: new Date(periodEnd * 1000),
       });
       expect(createPreview).not.toHaveBeenCalled();
+    });
+
+    it('a price saved between the preview and confirm is refused before Stripe; the fresh preview’s goes through (review C1 cycle 2, L4)', async () => {
+      const { org, basic, premium } = await hollowOak('move-repriced');
+      const { userId, row } = await member(org.id, premium);
+      const preview = await service.previewTierChange(
+        userId,
+        org.id,
+        basic.id,
+        'month'
+      );
+
+      // The creator saves Basic at £7 while the dialog shows £5: a new Price.
+      const repriced = `${basic.stripePriceMonthlyId}_repriced`;
+      prices.set(repriced, { amount: 700, interval: 'month' });
+      await db
+        .update(subscriptionTiers)
+        .set({ priceMonthly: 700, stripePriceMonthlyId: repriced })
+        .where(eq(subscriptionTiers.id, basic.id));
+
+      const refused = await service
+        .changeTier(
+          userId,
+          org.id,
+          basic.id,
+          'month',
+          preview.prorationDate,
+          undefined,
+          preview.newRecurringAmountCents
+        )
+        .catch((error: unknown) => error);
+      expect(refused).toBeInstanceOf(TierChangePreviewExpiredError);
+      expect(updates()).toHaveLength(0);
+      expect((await rowOf(row.id)).pendingTierId).toBeNull();
+
+      const fresh = await service.previewTierChange(
+        userId,
+        org.id,
+        basic.id,
+        'month'
+      );
+      expect(fresh.newRecurringAmountCents).toBe(700);
+      await service.changeTier(
+        userId,
+        org.id,
+        basic.id,
+        'month',
+        fresh.prorationDate,
+        undefined,
+        fresh.newRecurringAmountCents
+      );
+      expect(updates()).toHaveLength(1);
+      expect(updates()[0]?.[1]).toMatchObject({ items: [{ price: repriced }] });
+      expect((await rowOf(row.id)).amountCents).toBe(700);
     });
 
     it('latest wins: another cheaper plan replaces the move and KEEPS the first hold keys (T2)', async () => {
@@ -1435,6 +1490,38 @@ describe('waiting tier moves (Codex-2hxff.16)', () => {
       .from(subscriptionTiers)
       .where(eq(subscriptionTiers.id, basic.id));
     expect(still?.deletedAt).toBeNull();
+  });
+
+  // Review C1 cycle 2, L7: a change of billing alone names the tier the
+  // member is on (Codex-2hxff.97): one subscriber, not a mover as well.
+  it('deleteTier counts a member waiting only to switch billing once, as a subscriber', async () => {
+    const { org, premium } = await hollowOak('delete-billing-only');
+    const { row } = await member(org.id, premium);
+    await db
+      .update(subscriptions)
+      .set({
+        billingInterval: 'year',
+        pendingTierId: premium.id,
+        pendingTierFrom: new Date(Date.now() + 40 * 24 * 60 * 60 * 1000),
+        heldAmountCents: row.amountCents,
+        pendingBillingInterval: 'month',
+        pendingAmountCents: 2000,
+      })
+      .where(eq(subscriptions.id, row.id));
+    const tiers = new TierService(
+      { db, dbWs: db, environment: 'test' },
+      stripe
+    );
+
+    const refused = await tiers
+      .deleteTier(premium.id, org.id, { onlyHere: 'keep' })
+      .catch((error: unknown) => error);
+
+    expect(refused).toBeInstanceOf(TierHasSubscribersError);
+    expect((refused as TierHasSubscribersError).context).toMatchObject({
+      subscriberCount: 1,
+      movingInCount: 0,
+    });
   });
 
   // Review C1, F1's backstop: every Price a tier bills is on its own Stripe
