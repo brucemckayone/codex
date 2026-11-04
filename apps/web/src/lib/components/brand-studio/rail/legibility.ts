@@ -120,7 +120,12 @@ function furthest(
 
 export function legibilityFor(inputs: LegibilityInputs): Legibility {
   const ground = groundFor(inputs);
-  const overrides = inputs.overrides ?? {};
+  // Stored as the API took them: only a string can be a colour.
+  const overrides: Record<string, string> = Object.fromEntries(
+    Object.entries(inputs.overrides ?? {}).filter(
+      (entry): entry is [string, string] => typeof entry[1] === 'string'
+    )
+  );
   const focusSource = overrides.focus ?? inputs.brand;
   const haloFrom =
     overrides['focus-ring'] ?? haloSource(inputs.brand, inputs.theme);

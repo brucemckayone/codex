@@ -51,9 +51,11 @@ export function targetLuminance(groundY: number, floor: number) {
 }
 
 function parse(hex: string): Channels | null {
-  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex.trim());
   if (!m) return null;
-  const n = Number.parseInt(m[1], 16);
+  // #RGB is #RRGGBB, as CSS paints it.
+  const digits = m[1].length === 3 ? m[1].replace(/./g, '$&$&') : m[1];
+  const n = Number.parseInt(digits, 16);
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 

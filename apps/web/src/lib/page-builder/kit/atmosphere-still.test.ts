@@ -12,5 +12,6 @@ describe('a page that owns its colours', () => {
     expect(ownsColours({ fontBody: 'Inter' })).toBe(false);
     // Owner, Codex-mik4h: "Same rule as backgrounds". The org's colours paint.
     expect(ownsColours({ primaryColor: 'oklch(0.6 0.4 0)' })).toBe(false);
+    expect(ownsColours({ secondaryColor: 'navy' })).toBe(false);
   });
 });

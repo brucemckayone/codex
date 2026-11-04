@@ -104,3 +104,15 @@ describe('the ground the pill measures against', () => {
     ).toBe(black);
   });
 });
+
+describe('the overrides the pill reads', () => {
+  test('skips a stored value that is not a string, as no colour', () => {
+    // The API stores fine-tune overrides as it took them.
+    const stored = JSON.parse(
+      '{"interactive": 123, "focus": {"hex": "#000000"}, "focus-ring": true}'
+    );
+    expect(
+      legibilityFor({ theme: 'light', brand: PALE, overrides: stored })
+    ).toEqual(legibilityFor({ theme: 'light', brand: PALE }));
+  });
+});

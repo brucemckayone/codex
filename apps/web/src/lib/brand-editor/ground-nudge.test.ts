@@ -113,4 +113,11 @@ describe('the nudge', () => {
   test('a colour that is not hex is not nudged', () => {
     expect(nudgeForGround('oklch(0.5 0.1 30)', 1, LINK_FLOOR)).toBeNull();
   });
+
+  test('a 3-digit hex is nudged as the colour CSS paints', () => {
+    const ground = PLATFORM_GROUND_LUMINANCE.dark;
+    expect(nudgeForGround('#13a', ground, LINK_FLOOR)).toEqual(
+      nudgeForGround('#1133aa', ground, LINK_FLOOR)
+    );
+  });
 });
