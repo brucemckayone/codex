@@ -366,7 +366,8 @@ const baseContentSchema = z.object({
   description: optionalTextSchema(10000, 'Description'),
   contentType: contentTypeEnum,
 
-  // Media reference (required for video/audio, optional for written)
+  // Media reference. A video or audio draft may have none yet; it needs one
+  // to publish (Codex-a6ofh.2.1). Written content has none.
   mediaItemId: uuidSchema.optional().nullable(),
 
   // Written content body (Phase 2+) — limit raised for Tiptap JSON overhead
@@ -467,53 +468,15 @@ const baseContentSchema = z.object({
  * - Validates mediaItemId exists and belongs to creator (service layer)
  * - Validates content type matches media type (service layer)
  * - Slug uniqueness per organization (database constraint)
+ *
+ * A draft needs only a title and a type (Codex-a6ofh.2.1, owner 4A): the
+ * studio creates the row on the first thing typed and autosaves the rest.
+ * What a piece needs to go LIVE (its media, an article's body, a price of at
+ * least £1 when it is for sale) is checked when it publishes, by
+ * `assertPublishable` in @codex/content. The rules kept here are the
+ * structural ones: a row that breaks them is wrong even as a draft.
  */
 export const createContentSchema = baseContentSchema
-  .refine(
-    (data) => {
-      // Video/audio content MUST have mediaItemId
-      if (
-        ([CONTENT_TYPES.VIDEO, CONTENT_TYPES.AUDIO] as string[]).includes(
-          data.contentType
-        )
-      ) {
-        return !!data.mediaItemId;
-      }
-      return true;
-    },
-    {
-      message: 'Media item is required for video and audio content',
-      path: ['mediaItemId'],
-    }
-  )
-  .refine(
-    (data) => {
-      // Written content MUST have contentBody
-      if (data.contentType === CONTENT_TYPES.WRITTEN) {
-        return !!data.contentBody && data.contentBody.length > 0;
-      }
-      return true;
-    },
-    {
-      message: 'Content body is required for written content',
-      path: ['contentBody'],
-    }
-  )
-  .refine(
-    (data) => {
-      // Purchasable content requires a price (SPEC §6.1 — priceCents pairs
-      // with isPurchasable). `priceCentsSchema` already refuses 1p–99p, so any
-      // positive price that reaches here is at least £1.00.
-      if (data.isPurchasable) {
-        return !!data.priceCents && data.priceCents > 0;
-      }
-      return true;
-    },
-    {
-      message: 'Purchasable content requires a price of at least £1.00',
-      path: ['priceCents'],
-    }
-  )
   .refine(
     (data) => {
       // Follower-gated content requires an organisation (followers are org-scoped).
@@ -720,20 +683,11 @@ export const updateContentSchema = baseContentSchema
       'Send either includedInTierId (legacy) or isTierGated / includedInTierIds, not both',
     path: ['includedInTierId'],
   })
-  .refine(
-    (data) => {
-      // If a caller marks content purchasable AND sends a price in the same
-      // payload, the price must be positive. A price-only or flag-only partial
-      // is validated defensively in ContentService.update().
-      if (!data.isPurchasable) return true;
-      if (data.priceCents === undefined) return true;
-      return !!data.priceCents && data.priceCents > 0;
-    },
-    {
-      message: 'Purchasable content requires a price of at least £1.00',
-      path: ['priceCents'],
-    }
-  )
+  // No price rule here (Codex-a6ofh.2.1): a draft may be for sale with no
+  // price yet, as create allows. A live piece's next state must still have
+  // one, and ContentService.update() refuses it with the publish gate's
+  // PRICE_REQUIRED (assertContentFilled), so every save is judged on the
+  // whole row rather than on what a partial happens to send.
   .refine(
     (data) => {
       // Mirror of the create-schema invariant: an update that EXPLICITLY marks

@@ -5,10 +5,15 @@
  * SHARE, so a media delete running at the same moment is ordered against the
  * publish.
  *
+ * Since Codex-a6ofh.2.1 both paths call one `assertPublishable`, so the admin
+ * publish also refuses what a creator's would: no media, an empty article, a
+ * piece for sale under £1, and a creator no longer on the org's team.
+ *
  * DB-backed; every row it writes is its own and is deleted in afterAll.
  */
 
 import { CONTENT_STATUS } from '@codex/constants';
+import { MediaDeletedError, ThumbnailMediaDeletedError } from '@codex/content';
 import {
   content as contentTable,
   mediaItems,
@@ -20,7 +25,9 @@ import {
   createTestOrganizationInput,
   createUniqueSlug,
   type Database,
+  joinTeam,
   seedTestUsers,
+  setTeamMembership,
   setupTestDatabase,
   takeFirst,
   teardownTestDatabase,
@@ -28,7 +35,6 @@ import {
 import { getMediaThumbnailPrefix } from '@codex/transcoding';
 import { eq, inArray, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { MediaDeletedError, ThumbnailMediaDeletedError } from '../errors';
 import { AdminContentManagementService } from '../services/content-management-service';
 
 describe('AdminContentManagementService.publishContent media gate', () => {
@@ -55,9 +61,8 @@ describe('AdminContentManagementService.publishContent media gate', () => {
     return row.id;
   }
 
-  async function seedDraft(
-    mediaItemId: string,
-    thumbnailUrl: string | null = null
+  async function seedContent(
+    values: Partial<typeof contentTable.$inferInsert>
   ): Promise<string> {
     return takeFirst(
       await db
@@ -65,16 +70,22 @@ describe('AdminContentManagementService.publishContent media gate', () => {
         .values({
           creatorId,
           organizationId: orgId,
-          mediaItemId,
-          thumbnailUrl,
           title: 'Media gate film',
           slug: createUniqueSlug('media-gate'),
           contentType: 'video',
           status: CONTENT_STATUS.DRAFT,
           priceCents: 0,
+          ...values,
         })
         .returning({ id: contentTable.id })
     ).id;
+  }
+
+  function seedDraft(
+    mediaItemId: string,
+    thumbnailUrl: string | null = null
+  ): Promise<string> {
+    return seedContent({ mediaItemId, thumbnailUrl });
   }
 
   async function statusOf(id: string) {
@@ -95,6 +106,8 @@ describe('AdminContentManagementService.publishContent media gate', () => {
         .values(createTestOrganizationInput())
         .returning({ id: organizations.id })
     ).id;
+    // The creator is on the team: publish checks it (Codex-a6ofh.2.1).
+    await joinTeam(db, orgId, creatorId);
   });
 
   afterAll(async () => {
@@ -219,5 +232,65 @@ describe('AdminContentManagementService.publishContent media gate', () => {
     expect(early).toBe('waiting');
     await expect(publishing).rejects.toBeInstanceOf(MediaDeletedError);
     expect(await statusOf(draft)).toBe(CONTENT_STATUS.DRAFT);
+  });
+
+  // ── The rest of the shared gate (Codex-a6ofh.2.1) ─────────────────────────
+
+  it.each([
+    ['a video with no media', { mediaItemId: null }, 'MEDIA_REQUIRED'],
+    [
+      'an article with nothing written',
+      { contentType: 'written', contentBody: null },
+      'BODY_REQUIRED',
+    ],
+    [
+      'a piece for sale with no price',
+      {
+        contentType: 'written',
+        contentBody: 'Body',
+        isPurchasable: true,
+        priceCents: null,
+      },
+      'PRICE_REQUIRED',
+    ],
+  ] as const)('refuses %s, with the code ContentService.publish gives', async (_case, values, code) => {
+    const draft = await seedContent(values);
+
+    await expect(service.publishContent(orgId, draft)).rejects.toMatchObject({
+      statusCode: 422,
+      context: { code },
+    });
+    expect(await statusOf(draft)).toBe(CONTENT_STATUS.DRAFT);
+  });
+
+  it('refuses media still processing, with MEDIA_NOT_READY', async () => {
+    const film = await seedMedia(creatorId, { status: 'transcoding' });
+    const draft = await seedDraft(film);
+
+    await expect(service.publishContent(orgId, draft)).rejects.toMatchObject({
+      statusCode: 422,
+      context: { code: 'MEDIA_NOT_READY' },
+    });
+  });
+
+  it("refuses a draft whose creator has left the org's team", async () => {
+    const draft = await seedContent({
+      contentType: 'written',
+      contentBody: 'Body',
+    });
+    await setTeamMembership(db, orgId, creatorId, { status: 'inactive' });
+    try {
+      await expect(service.publishContent(orgId, draft)).rejects.toMatchObject({
+        statusCode: 403,
+        context: { code: 'NOT_ON_ORG_TEAM' },
+      });
+      expect(await statusOf(draft)).toBe(CONTENT_STATUS.DRAFT);
+    } finally {
+      await setTeamMembership(db, orgId, creatorId, { status: 'active' });
+    }
+
+    // Back on the team, the same draft goes live.
+    await service.publishContent(orgId, draft);
+    expect(await statusOf(draft)).toBe(CONTENT_STATUS.PUBLISHED);
   });
 });

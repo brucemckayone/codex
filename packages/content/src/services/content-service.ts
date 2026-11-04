@@ -22,10 +22,7 @@ import {
   isPublicContent,
   MEDIA_STATUS,
   MEDIA_TYPES,
-  ORGANIZATION_ROLES,
-  ORGANIZATION_STATUS,
   PAGINATION,
-  requiresPayoutsToPublish,
 } from '@codex/constants';
 import {
   isUniqueViolation,
@@ -39,9 +36,7 @@ import {
   content,
   contentCategories,
   mediaItems,
-  organizationMemberships,
   organizations,
-  stripeConnectAccounts,
 } from '@codex/database/schema';
 import {
   type ImageProcessingResult,
@@ -50,14 +45,9 @@ import {
 } from '@codex/image-processing';
 import { READABLE_ORGANIZATION_COLUMNS } from '@codex/organization';
 import type { ServiceConfig } from '@codex/service-errors';
-import {
-  BaseService,
-  ForbiddenError,
-  ValidationError,
-} from '@codex/service-errors';
+import { BaseService, ValidationError } from '@codex/service-errors';
 import type { PaginatedListResponse } from '@codex/shared-types';
 import {
-  type PosterFrameSource,
   playedMediaItemId,
   posterFolderCount,
   posterFramesOf,
@@ -67,6 +57,7 @@ import {
   createContentSchema,
   createPlatformImageUrlSchema,
   PLATFORM_IMAGE_URL_MESSAGE,
+  parseTiptapDoc,
   updateContentSchema,
 } from '@codex/validation';
 import {
@@ -85,17 +76,12 @@ import {
   sql,
 } from 'drizzle-orm';
 import {
-  BusinessLogicError,
   ContentNotFoundError,
   ContentTypeMismatchError,
-  CreatorPayoutsRequiredError,
   InternalServiceError,
-  MediaDeletedError,
   MediaNotFoundError,
   MediaNotReadyError,
   SlugConflictError,
-  ThumbnailMediaDeletedError,
-  TierRequiredToPublishError,
 } from '../errors';
 import type {
   CatalogueContentRow,
@@ -114,7 +100,6 @@ import {
   type ContentTierWire,
   clearTicks,
   expandLegacyTier,
-  hasAnyTick,
   notClosedToNewViewers,
   readTickIds,
   replaceTicks,
@@ -122,6 +107,13 @@ import {
   syncLegacyIncludedInTierId,
   withTierWire,
 } from './content-tier-access';
+import {
+  assertCanFileInOrg,
+  assertContentFilled,
+  assertCreatorCanBePaid,
+  assertPublishable,
+  assertThumbnailFrameNotDeleted,
+} from './publish-gate';
 
 /**
  * The media_items columns `listPublic` selects (Codex-ve5eh). It used to load
@@ -181,18 +173,6 @@ export const CATALOGUE_CONTENT_COLUMNS = {
 } as const satisfies Partial<Record<keyof Content, false>>;
 
 /**
- * The org roles that may file content into an org's catalogue (Codex-ocal6):
- * the team. `subscriber` and `member` are the org's audience: they can watch
- * its content, never publish into it. The same set as the "Team only" access
- * rule (`MANAGEMENT_ROLES` in @codex/access access-decision.ts).
- */
-const MANAGEMENT_ROLES: string[] = [
-  ORGANIZATION_ROLES.OWNER,
-  ORGANIZATION_ROLES.ADMIN,
-  ORGANIZATION_ROLES.CREATOR,
-];
-
-/**
  * Content Service Class
  *
  * Handles all content-related business logic:
@@ -249,34 +229,6 @@ async function assertOwnPosterFolders(
       'Choose a frame of one of your own videos as the thumbnail.',
       { field: 'thumbnailUrl' }
     );
-  }
-}
-
-/**
- * Refuse a thumbnail that is a frame of one of the creator's deleted videos
- * (Codex-tqvmx): the purge removes that frame 30 days after the delete, and
- * a live thumbnail would then 404, or keep the purge skipping its video every
- * week. A locking read, taken after the row's and its own media's locks: a
- * delete that committed first is seen here, and one that waits on this lock
- * then finds a live use of the frame (the usage lookup's `thumbnail` slot,
- * which matches URLs by the same test), and refuses. A frame of no video of
- * the creator's isn't this check's (Codex-p0uuc).
- */
-async function assertThumbnailFrameNotDeleted(
-  tx: DatabaseTransaction,
-  contentId: string,
-  source: PosterFrameSource,
-  action: 'publish' | 'save'
-): Promise<void> {
-  const frames = posterFramesOf(source);
-  if (frames === undefined) return;
-  const rows = await tx
-    .select({ deletedAt: mediaItems.deletedAt })
-    .from(mediaItems)
-    .where(frames)
-    .for('key share');
-  if (rows.some((row) => row.deletedAt !== null)) {
-    throw new ThumbnailMediaDeletedError(contentId, action);
   }
 }
 
@@ -342,65 +294,10 @@ export class ContentService extends BaseService {
     contentBodyJson: Record<string, unknown> | null;
   } {
     if (!raw) return { contentBody: null, contentBodyJson: null };
-    if (raw.startsWith('{')) {
-      try {
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === 'object' && parsed.type === 'doc') {
-          return { contentBody: null, contentBodyJson: parsed };
-        }
-      } catch {
-        // Not valid JSON — treat as plain text
-      }
-    }
-    return { contentBody: raw, contentBodyJson: null };
-  }
-
-  /**
-   * Whether the creator's Stripe Connect account can receive money.
-   *
-   * DB-only readiness check: `charges_enabled` + `payouts_enabled` on
-   * `stripe_connect_accounts` are kept in sync by Stripe's `account.updated`
-   * webhook, so this needs no live Stripe call (content-api has no
-   * STRIPE_SECRET_KEY binding) and mirrors the backend gate the subscription
-   * domain uses (`chargesEnabled && payoutsEnabled`). One account per user is
-   * enforced by a unique(userId) constraint, so `.limit(1)` is exact.
-   */
-  private async isCreatorConnectReady(
-    tx: DatabaseTransaction,
-    creatorId: string
-  ): Promise<boolean> {
-    const [account] = await tx
-      .select({
-        chargesEnabled: stripeConnectAccounts.chargesEnabled,
-        payoutsEnabled: stripeConnectAccounts.payoutsEnabled,
-      })
-      .from(stripeConnectAccounts)
-      .where(eq(stripeConnectAccounts.userId, creatorId))
-      .limit(1);
-
-    return !!account && account.chargesEnabled && account.payoutsEnabled;
-  }
-
-  /**
-   * Refuse to put content that earns money on sale while its creator can't be
-   * paid. `requiresPayoutsToPublish` decides what earns money — any price or
-   * any tier, whether or not the row is marked purchasable (owner rule,
-   * Codex-2hxff.14) — so publish() and update() both ask here. Free, followers
-   * and team content passes without a lookup.
-   *
-   * @throws {CreatorPayoutsRequiredError} When the row needs payouts and the
-   *   creator's Connect account is not charges + payouts enabled
-   */
-  private async assertCreatorCanBePaid(
-    tx: DatabaseTransaction,
-    creatorId: string,
-    row: { priceCents: number | null; isTierGated: boolean }
-  ): Promise<void> {
-    if (!requiresPayoutsToPublish(row)) return;
-    if (await this.isCreatorConnectReady(tx, creatorId)) return;
-    throw new CreatorPayoutsRequiredError(
-      (row.priceCents ?? 0) > 0 ? 'paid' : 'included_in_tier'
-    );
+    const doc = parseTiptapDoc(raw);
+    return doc
+      ? { contentBody: null, contentBodyJson: doc }
+      : { contentBody: raw, contentBodyJson: null };
   }
 
   /**
@@ -488,7 +385,7 @@ export class ContentService extends BaseService {
    * @param input - Content creation data (validated by Zod)
    * @param creatorId - ID of the creator
    * @returns Created content
-   * @throws {ForbiddenError} If `organizationId` names an org the creator is
+   * @throws {NotOnOrgTeamError} If `organizationId` names an org the creator is
    *   not an active owner, admin or creator of
    * @throws {MediaNotFoundError} If media item doesn't exist or doesn't belong to creator
    * @throws {MediaNotReadyError} If media item is not in 'ready' status
@@ -523,7 +420,7 @@ export class ContentService extends BaseService {
         // between a creator and another org's catalogue (Codex-ocal6). It runs
         // first so a non-member learns nothing about media or tiers.
         if (validated.organizationId) {
-          await this.assertCanFileInOrg(
+          await assertCanFileInOrg(
             tx as DatabaseTransaction,
             validated.organizationId,
             creatorId
@@ -802,7 +699,7 @@ export class ContentService extends BaseService {
    * @param creatorId - Creator ID (for authorization)
    * @returns Updated content
    * @throws {ContentNotFoundError} If content doesn't exist
-   * @throws {ForbiddenError} If `organizationId` moves the content into an
+   * @throws {NotOnOrgTeamError} If `organizationId` moves the content into an
    *   org the creator is not an active owner, admin or creator of
    * @throws {MediaNotFoundError} If a newly attached media item isn't the
    *   caller's, or is deleted
@@ -900,7 +797,7 @@ export class ContentService extends BaseService {
           validated.organizationId &&
           validated.organizationId !== existing.organizationId
         ) {
-          await this.assertCanFileInOrg(
+          await assertCanFileInOrg(
             tx as DatabaseTransaction,
             validated.organizationId,
             creatorId
@@ -922,8 +819,9 @@ export class ContentService extends BaseService {
           includedInTierId: sentLegacyTierId,
           ...restValidated
         } = validated;
-        const bodyFields =
-          _rawBody !== undefined ? this.parseContentBody(_rawBody) : {};
+        const sentBody =
+          _rawBody !== undefined ? this.parseContentBody(_rawBody) : undefined;
+        const bodyFields = sentBody ?? {};
         previousThumbnailUrl = existing.thumbnailUrl;
 
         // A URL in this content's own thumbnail folders is written only by an
@@ -1100,6 +998,30 @@ export class ContentService extends BaseService {
           );
         }
 
+        // A LIVE piece stays complete (Codex-a6ofh.2.1, review): its next
+        // state must hold what publishing it needed, media, an article's
+        // body, a price of at least £1, since those rules left the schema for
+        // publish(). Judged on the whole row, the partial overlaid on it,
+        // because the studio resends some fields and not others. Drafts are
+        // left to publish(), and so is a piece taken off sale.
+        if (existing.status === CONTENT_STATUS.PUBLISHED) {
+          assertContentFilled({
+            id,
+            contentType: restValidated.contentType ?? existing.contentType,
+            mediaItemId:
+              restValidated.mediaItemId === undefined
+                ? existing.mediaItemId
+                : restValidated.mediaItemId,
+            contentBody: sentBody ? sentBody.contentBody : existing.contentBody,
+            contentBodyJson: sentBody
+              ? sentBody.contentBodyJson
+              : existing.contentBodyJson,
+            isPurchasable:
+              restValidated.isPurchasable ?? existing.isPurchasable,
+            priceCents: effPriceCents ?? null,
+          });
+        }
+
         // Codex-p0uuc: a poster-frame thumbnail must be of the caller's own
         // video, as create() checks.
         await assertOwnPosterFolders(
@@ -1163,11 +1085,10 @@ export class ContentService extends BaseService {
             (effGated && !existing.isTierGated) ||
             (!existing.isPurchasable && restValidated.isPurchasable === true);
           if (opensAWayToPay) {
-            await this.assertCreatorCanBePaid(
-              tx as DatabaseTransaction,
-              creatorId,
-              { priceCents: nextPriceCents, isTierGated: effGated }
-            );
+            await assertCreatorCanBePaid(tx as DatabaseTransaction, creatorId, {
+              priceCents: nextPriceCents,
+              isTierGated: effGated,
+            });
           }
         }
 
@@ -1403,15 +1324,17 @@ export class ContentService extends BaseService {
    * Business Logic:
    * - Sets status to 'published'
    * - Sets publishedAt timestamp
-   * - Validates content is ready (has media if video/audio)
+   * - Refuses unless `assertPublishable` passes (./publish-gate.ts): the
+   *   org's team, media, body, price, thumbnail, tier and payouts rules
    * - Idempotent (returns success if already published)
    *
    * @param id - Content ID
    * @param creatorId - Creator ID (for authorization)
    * @returns Published content
    * @throws {ContentNotFoundError} If content doesn't exist
-   * @throws {BusinessLogicError} If content is not ready to publish
-   * @throws {MediaDeletedError} If its media item was deleted (Codex-6sbn1)
+   * @throws {BusinessLogicError} (422) A rule refused it; `details.code` names
+   *   which (see `assertPublishable`)
+   * @throws {NotOnOrgTeamError} (403) The creator is not on the org's team
    * @throws {MediaNotFoundError} If its media item is another creator's
    *   (Codex-vmi6m)
    */
@@ -1449,85 +1372,9 @@ export class ContentService extends BaseService {
           return existing;
         }
 
-        // Validate content is ready to publish
-        if (
-          [CONTENT_TYPES.VIDEO, CONTENT_TYPES.AUDIO].includes(
-            existing.contentType as
-              | typeof CONTENT_TYPES.VIDEO
-              | typeof CONTENT_TYPES.AUDIO
-          )
-        ) {
-          if (!existing.mediaItem) {
-            throw new BusinessLogicError(
-              'Cannot publish content without media',
-              {
-                contentId: id,
-                contentType: existing.contentType,
-              }
-            );
-          }
-          // A draft keeps its link to a deleted item (Codex-6sbn1), and must
-          // not go live on it. A locking read, so a delete running now is
-          // ordered against this publish: one that committed first is seen
-          // here; one that waits on this lock then sees a published use, and
-          // refuses. Scoped to the content's creator: a row that took another
-          // creator's item through the old PATCH hole (Codex-vmi6m) must not
-          // go live streaming their file.
-          const [media] = await tx
-            .select({ deletedAt: mediaItems.deletedAt })
-            .from(mediaItems)
-            .where(
-              and(
-                eq(mediaItems.id, existing.mediaItem.id),
-                eq(mediaItems.creatorId, existing.creatorId)
-              )
-            )
-            .for('key share');
-          if (!media) {
-            throw new MediaNotFoundError(existing.mediaItem.id);
-          }
-          if (media.deletedAt) {
-            throw new MediaDeletedError(id);
-          }
-          if (existing.mediaItem.status !== MEDIA_STATUS.READY) {
-            throw new MediaNotReadyError(existing.mediaItem.id);
-          }
-        }
-
-        // Any type: written content can show a video's frame too, and one of
-        // the video it links but doesn't play, which nothing above checks.
-        await assertThumbnailFrameNotDeleted(
-          tx as DatabaseTransaction,
-          id,
-          {
-            thumbnailUrl: existing.thumbnailUrl,
-            creatorId: existing.creatorId,
-            exceptMediaItemId: playedMediaItemId(existing),
-          },
-          'publish'
-        );
-
-        // Subscriber content needs at least one tier to go live (Codex-2hxff.91,
-        // owner U2). Saving it with none is allowed (closed); publishing it is
-        // not. A paid item whose tiers are optional stays on sale, so it may.
-        if (
-          existing.isTierGated &&
-          !existing.isPurchasable &&
-          !(await hasAnyTick(tx as DatabaseTransaction, id))
-        ) {
-          throw new TierRequiredToPublishError(id);
-        }
-
-        // Content that earns money needs a payout-ready Connect account before
-        // it can go live: publishing without a payout destination strands
-        // buyer funds in a pending payout indefinitely. Any price or tier
-        // counts, purchasable or not (Codex-2hxff.14 — the old gate only saw
-        // a price on a row marked purchasable).
-        await this.assertCreatorCanBePaid(
-          tx as DatabaseTransaction,
-          creatorId,
-          existing
-        );
+        // Every rule a piece must pass to go live (Codex-a6ofh.2.1), shared
+        // with the platform owner's publish so the two can't drift apart.
+        await assertPublishable(tx as DatabaseTransaction, existing);
 
         // Publish content
         const [published] = await tx
@@ -1567,12 +1414,6 @@ export class ContentService extends BaseService {
         wired ?? { ...result, includedInTierIds: [], includedInTierId: null }
       );
     } catch (error) {
-      if (
-        error instanceof ContentNotFoundError ||
-        error instanceof BusinessLogicError
-      ) {
-        throw error;
-      }
       this.handleError(error, 'publish');
     }
   }
@@ -2170,45 +2011,6 @@ export class ContentService extends BaseService {
       };
     } catch (error) {
       this.handleError(error, 'listPublic');
-    }
-  }
-
-  /**
-   * Private helper: refuse unless `userId` may file content into
-   * `organizationId` (Codex-ocal6).
-   *
-   * Allowed: an ACTIVE membership whose role is owner, admin or creator.
-   * `subscriber` and `member` are the audience; `invited` and `inactive` are
-   * not (yet, or any longer) on the team. One message whatever the reason, so
-   * the refusal never says whether an org id exists.
-   *
-   * @param tx - Database transaction
-   * @param organizationId - The org the write would file the content under
-   * @param userId - The creator making the write
-   * @throws {ForbiddenError} If there is no such membership
-   */
-  private async assertCanFileInOrg(
-    tx: DatabaseTransaction,
-    organizationId: string,
-    userId: string
-  ): Promise<void> {
-    const [membership] = await tx
-      .select({ id: organizationMemberships.id })
-      .from(organizationMemberships)
-      .where(
-        and(
-          eq(organizationMemberships.organizationId, organizationId),
-          eq(organizationMemberships.userId, userId),
-          eq(organizationMemberships.status, ORGANIZATION_STATUS.ACTIVE),
-          inArray(organizationMemberships.role, MANAGEMENT_ROLES)
-        )
-      )
-      .limit(1);
-
-    if (!membership) {
-      throw new ForbiddenError(
-        "You can only add content to an organization you're on the team of."
-      );
     }
   }
 

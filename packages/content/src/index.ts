@@ -71,6 +71,7 @@ export type {
   WaitUntilFn,
 } from './services';
 export {
+  assertPublishable,
   assertTiersInOrg,
   CATALOGUE_CONTENT_COLUMNS,
   CategoriesService,
@@ -142,6 +143,7 @@ export {
   CategoryNotFoundError,
   CategorySlugConflictError,
   ConflictError,
+  ContentBodyRequiredError,
   ContentNotFoundError,
   ContentServiceError,
   ContentTypeMismatchError,
@@ -154,9 +156,12 @@ export {
   MediaNotFoundError,
   MediaNotReadyError,
   MediaOwnershipError,
+  MediaRequiredToPublishError,
   MediaUsageChangedError,
   type MediaUseCounts,
   NotFoundError,
+  NotOnOrgTeamError,
+  PriceRequiredToPublishError,
   SlugConflictError,
   ThumbnailMediaDeletedError,
   TierRequiredToPublishError,

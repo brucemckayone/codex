@@ -13,6 +13,15 @@ export const ERROR_CODES = {
   // A publish, or a save to live content, refused because its thumbnail is a
   // frame of a deleted video (Codex-tqvmx).
   THUMBNAIL_MEDIA_DELETED: 'THUMBNAIL_MEDIA_DELETED',
+  // The `details.code` of the other publish refusals (Codex-a6ofh.2.1): a
+  // video or audio piece with no media, an article with nothing to read, a
+  // piece for sale under £1, and a creator no longer on the org's team (also
+  // a create or a move into an org they aren't on). The editor's publish
+  // checklist maps each code to its row.
+  MEDIA_REQUIRED: 'MEDIA_REQUIRED',
+  BODY_REQUIRED: 'BODY_REQUIRED',
+  PRICE_REQUIRED: 'PRICE_REQUIRED',
+  NOT_ON_ORG_TEAM: 'NOT_ON_ORG_TEAM',
   CONTENT_NOT_FOUND: 'CONTENT_NOT_FOUND',
   VALIDATION_ERROR: 'VALIDATION_ERROR',
   INTERNAL_ERROR: 'INTERNAL_ERROR',
