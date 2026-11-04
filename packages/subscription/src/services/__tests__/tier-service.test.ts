@@ -806,6 +806,42 @@ describe('TierService', () => {
         service.updateTier(tier.id, org.id, { priceMonthly: 1100 })
       ).rejects.toThrow(YearlyPriceBelowMonthlyError);
     });
+
+    // Cycle 4, N3: Edit Tier sends both prices on every save, as they stand.
+    it('a tier saved before the rule is renamed with both prices sent unchanged; changing one still refuses', async () => {
+      const org = await createOrgWithConnect('yearly-below-legacy-edit');
+      const tier = await service.createTier(org.id, {
+        submissionId: crypto.randomUUID(),
+        name: 'Legacy',
+        priceMonthly: 1200,
+        priceAnnual: 12000,
+      });
+      await db
+        .update(subscriptionTiers)
+        .set({ priceAnnual: 1000 })
+        .where(eq(subscriptionTiers.id, tier.id));
+      (stripe.prices.create as ReturnType<typeof vi.fn>).mockClear();
+
+      const renamed = await service.updateTier(tier.id, org.id, {
+        name: 'Legacy, renamed',
+        priceMonthly: 1200,
+        priceAnnual: 1000,
+      });
+
+      expect(renamed).toMatchObject({
+        name: 'Legacy, renamed',
+        priceMonthly: 1200,
+        priceAnnual: 1000,
+      });
+      expect(stripe.prices.create).not.toHaveBeenCalled();
+      await expect(
+        service.updateTier(tier.id, org.id, {
+          name: 'Legacy, renamed',
+          priceMonthly: 1200,
+          priceAnnual: 1100,
+        })
+      ).rejects.toThrow(YearlyPriceBelowMonthlyError);
+    });
   });
 
   describe('updateTier', () => {
