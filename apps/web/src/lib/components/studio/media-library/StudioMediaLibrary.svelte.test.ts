@@ -61,7 +61,10 @@ vi.mock('$app/state', () => ({
   },
 }));
 
-const goto = vi.hoisted(() => vi.fn(async () => {}));
+// Typed like kit's goto, so a test can stand in for the navigation it starts.
+const goto = vi.hoisted(() =>
+  vi.fn(async (_href: string, _opts?: Record<string, unknown>) => {})
+);
 vi.mock('$app/navigation', () => ({ goto }));
 
 const listMedia = vi.hoisted(() =>

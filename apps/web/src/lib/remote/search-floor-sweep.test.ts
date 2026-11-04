@@ -53,12 +53,20 @@ const HELPER_PATCH_KEY =
   /\b(?:filterHref|applyFilterPatch)\([^;]*?\{[^}]*?\b(?:q|search)\b\s*[:,}]/;
 
 /**
+ * A `q` / `search` key in a patch handed to a page's own batching writer:
+ * the media library's `setParams({ q: … })`, which applies it with
+ * applyFilterPatch out of this regex's sight (Codex-a6ofh.1.7).
+ */
+const SET_PARAMS_KEY = /\bsetParams\(\s*\{[^}]*?\b(?:q|search)\b\s*[:,}]/;
+
+/**
  * Does this source put a `q` / `search` param on a URL it navigates to? The
  * shapes apps/web uses: a template `?q=${…}`; `params.set('q', …)`; a helper
  * patch object (HELPER_PATCH_KEY; the studio list pages since Codex-a6ofh.1.1);
- * and a page's own `setUrlParam('q', …)` wrapper called with a literal key. A
- * detector blind to a shape passes by seeing nothing, so the calibration tests
- * below pin each one, including against a REAL source file.
+ * a page's own `setUrlParam('q', …)` wrapper called with a literal key; and a
+ * `setParams({ q })` patch (SET_PARAMS_KEY). A detector blind to a shape passes
+ * by seeing nothing, so the calibration tests below pin each one, and the
+ * setParams writer against a REAL source file too.
  *
  * KNOWN GAPS, so a pass is never read as proof: a computed key
  * (`{ [key]: value }`, `params.set(key, …)`), a patch built elsewhere and
@@ -70,6 +78,7 @@ function writesSearchParam(src: string): boolean {
     /\?q=\$\{/.test(src) ||
     /(?:searchParams|params)\.set\(\s*['"](?:q|search)['"]/.test(src) ||
     HELPER_PATCH_KEY.test(src) ||
+    SET_PARAMS_KEY.test(src) ||
     /\bsetUrlParam\(\s*['"](?:q|search)['"]/.test(src)
   );
 }
@@ -240,21 +249,30 @@ describe('every landed client gate is still wired', () => {
     ).toBe(true);
     expect(writesSearchParam('goto(filterHref(page.url, { q }))')).toBe(true);
     expect(writesSearchParam("setUrlParam('search', term)")).toBe(true);
+    expect(
+      writesSearchParam('setParams({ q: value.trim() ? value : null })')
+    ).toBe(true);
+    expect(writesSearchParam('setParams({ q: null, status: null })')).toBe(
+      true
+    );
     // Negatives: other params.
     expect(writesSearchParam("params.set('status', s)")).toBe(false);
     expect(writesSearchParam('goto(filterHref(page.url, { status: s }))')).toBe(
       false
     );
+    expect(writesSearchParam("setParams({ status: 'attention' })")).toBe(false);
     // Not asserted either way: a computed key (`{ [key]: value }`), which the
     // studio pages use inside setUrlParam. It is a KNOWN GAP (see
     // writesSearchParam), not correct behaviour; the literal-key call above is
     // what catches a `setUrlParam('search', …)` added to one of those pages.
   });
 
-  it('the helper-patch detector sees the REAL filterHref writer (calibration on source)', async () => {
+  it('the patch detector sees the REAL setParams writer (calibration on source)', async () => {
     // Strings alone prove the regex, not that it meets the code: the media
-    // library writes `q` through filterHref, so the detector must see it. If
+    // library writes `q` through setParams, so the detector must see it. If
     // it stops writing `q` that way, point this at a file that does.
+    // HELPER_PATCH_KEY has no real writer left since Codex-a6ofh.1.7 (the
+    // library moved off filterHref); the strings above still pin it.
     const src = await readFile(
       join(
         SRC_ROOT,
@@ -262,7 +280,7 @@ describe('every landed client gate is still wired', () => {
       ),
       'utf8'
     );
-    expect(HELPER_PATCH_KEY.test(src)).toBe(true);
+    expect(SET_PARAMS_KEY.test(src)).toBe(true);
   });
 
   for (const rel of CLIENT_ONLY_SEARCH) {
