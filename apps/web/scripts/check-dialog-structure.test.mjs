@@ -366,6 +366,132 @@ test('CATCHES .dialog-form styled bare, inside a combinator, or around a descend
   }
 });
 
+test('CATCHES a class a page hands a Dialog part, restyled through :global', () => {
+  writeFixture(
+    'src/routes/drawer/+page.svelte',
+    `${IMPORT}
+<Dialog.Root>
+  <Dialog.Content class="my-drawer">
+    <Dialog.Header class="my-head"><Dialog.Title>T</Dialog.Title></Dialog.Header>
+    <Dialog.Body class="my-body {wide ? 'is-wide' : 'is-narrow'}"><p>x</p></Dialog.Body>
+    <Dialog.Footer class={\`my-foot \${tone}\`}><p>y</p></Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>
+
+<style>
+  :global(.my-drawer) { position: fixed; }
+  .wrap :global(.my-head) { padding: 0; }
+  :global(.is-narrow:hover) { overflow: hidden; }
+  :global(.my-foot) { border: none; }
+  :global {
+    .my-body { gap: 0; }
+  }
+  .page {
+    :global(.my-drawer > .my-body) { display: block; }
+  }
+</style>
+`
+  );
+
+  const result = scan();
+  assert.deepEqual(summary(result), [
+    'part-class@14',
+    'part-class@15',
+    'part-class@16',
+    'part-class@17',
+    'part-class@19',
+    'part-class@22',
+  ]);
+  assert.match(result.violations[0].detail, /restyles Dialog\.Content through its class \.my-drawer/);
+  assert.match(result.violations[2].detail, /Dialog\.Body through its class \.is-narrow/);
+  assert.match(result.violations[3].detail, /Dialog\.Footer through its class \.my-foot/);
+});
+
+test('ALLOWS a part class as an ancestor, a Title class, scoped CSS and the Form spacing case', () => {
+  writeFixture(
+    'src/routes/drawer/+page.svelte',
+    `${IMPORT}
+<Dialog.Root>
+  <Dialog.Content class="my-drawer">
+    <Dialog.Header><Dialog.Title class="my-title">T</Dialog.Title></Dialog.Header>
+    <Dialog.Form class="my-form"><Dialog.Body><p class="row">x</p></Dialog.Body></Dialog.Form>
+  </Dialog.Content>
+</Dialog.Root>
+<p class="my-drawer">a page element of the same name</p>
+
+<style>
+  :global(.my-drawer .section-heading) { color: red; }
+  .row :global(.my-title) { font-size: 2rem; }
+  :global(.dialog-form.my-form) { gap: var(--space-4); }
+  :global(.other:not(.my-drawer)) { color: red; }
+  .my-drawer { color: red; }
+</style>
+`
+  );
+
+  assert.deepEqual(summary(scan()), []);
+});
+
+test('CATCHES the Form class without .dialog-form, and today\'s drawer patterns', () => {
+  writeFixture(
+    'src/routes/tier/+page.svelte',
+    `${IMPORT}
+<Dialog.Root>
+  <Dialog.Content><Dialog.Form class="tier-form"><Dialog.Body>x</Dialog.Body></Dialog.Form></Dialog.Content>
+</Dialog.Root>
+
+<style>
+  :global(.tier-form) { gap: 0; }
+</style>
+`
+  );
+  // FilterDrawer before Codex-vlphc.3: its own classes on Header and Body.
+  writeFixture(
+    'src/lib/components/ui/FilterDrawer/FilterDrawer.svelte',
+    `${IMPORT}
+<Dialog.Root>
+  <Dialog.Content class="filter-drawer">
+    <Dialog.Header class="filter-drawer__head"><Dialog.Title>T</Dialog.Title></Dialog.Header>
+    <Dialog.Body class="filter-drawer__body">x</Dialog.Body>
+  </Dialog.Content>
+</Dialog.Root>
+
+<style>
+  :global(.filter-drawer__head) { padding: var(--space-5) var(--space-6) var(--space-4); }
+  :global(.filter-drawer__body) { flex: 1 1 auto; overflow-y: auto; display: flex; }
+</style>
+`
+  );
+  // A hand-built drawer with the Dialog class dropped from its override,
+  // the one step that used to get it past global-style.
+  writeFixture(
+    'src/lib/components/studio/Drawer.svelte',
+    `${IMPORT}
+<Dialog.Root>
+  <Dialog.Content class="drawer-content"><Dialog.Body>x</Dialog.Body></Dialog.Content>
+</Dialog.Root>
+
+<style>
+  :global(.drawer-content) { position: fixed; overflow-y: auto; }
+  @media (max-width: 1px) {
+    :global(.drawer-content) { max-width: 100%; }
+  }
+</style>
+`
+  );
+
+  assert.deepEqual(
+    scan().violations.map((v) => `${v.file} ${v.rule}@${v.line}`),
+    [
+      'src/lib/components/studio/Drawer.svelte part-class@10',
+      'src/lib/components/studio/Drawer.svelte part-class@12',
+      'src/lib/components/ui/FilterDrawer/FilterDrawer.svelte part-class@13',
+      'src/lib/components/ui/FilterDrawer/FilterDrawer.svelte part-class@14',
+      'src/routes/tier/+page.svelte part-class@10',
+    ]
+  );
+});
+
 test('does NOT flag the Dialog styling itself inside ui/Dialog/', () => {
   writeFixture(
     'src/lib/components/ui/Dialog/DialogExtra.svelte',
