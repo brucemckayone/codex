@@ -19,6 +19,7 @@
  * - No cleanup needed - fresh database for this file
  */
 
+import { CacheType } from '@codex/cache';
 import {
   content,
   mediaItems,
@@ -50,6 +51,7 @@ import {
   describe,
   expect,
   it,
+  vi,
 } from 'vitest';
 import {
   ContentNotFoundError,
@@ -1676,6 +1678,96 @@ describe('ContentService', () => {
         creatorId
       );
       expect(updated.status).toBe('draft');
+    });
+  });
+
+  // Drafts autosave (Codex-a6ofh.2.2), so an update to a draft that was never
+  // live must not stale catalogues it has never been in.
+  describe('update bumps the catalogue only for a piece that has been live', () => {
+    let watched: ContentService;
+    const invalidate = vi.fn(async (_key: string) => undefined);
+
+    beforeEach(() => {
+      invalidate.mockClear();
+      watched = new ContentService({ db, environment: 'test' });
+      watched.setCache({ invalidate } as unknown as Parameters<
+        ContentService['setCache']
+      >[0]);
+    });
+
+    async function orgArticle(): Promise<{ id: string; orgId: string }> {
+      const org = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
+      await joinTeam(db, org.id, creatorId);
+      const draft = await watched.create(
+        {
+          title: 'Catalogue article',
+          slug: createUniqueSlug('catalogue-article'),
+          contentType: 'written',
+          contentBody: 'Words',
+          organizationId: org.id,
+          tags: [],
+        },
+        creatorId
+      );
+      return { id: draft.id, orgId: org.id };
+    }
+
+    it('a draft that was never live bumps nothing', async () => {
+      const { id } = await orgArticle();
+      invalidate.mockClear();
+
+      await watched.update(id, { title: 'Still a draft' }, creatorId);
+
+      expect(invalidate).not.toHaveBeenCalled();
+    });
+
+    // Unpublishing keeps publishedAt: its buyers still have it. (A live
+    // piece takes the same branch; hasBeenLive's own test, in
+    // @codex/constants, covers the rule.)
+    it('an unpublished piece bumps the published catalogue and its org', async () => {
+      const { id, orgId } = await orgArticle();
+      await watched.publish(id, creatorId);
+      await watched.unpublish(id, creatorId);
+      invalidate.mockClear();
+
+      await watched.update(id, { title: 'Edited after going live' }, creatorId);
+
+      expect(invalidate).toHaveBeenCalledWith(
+        CacheType.COLLECTION_CONTENT_PUBLISHED
+      );
+      expect(invalidate).toHaveBeenCalledWith(
+        CacheType.COLLECTION_ORG_CONTENT(orgId)
+      );
+    });
+
+    // trigger_unpublish_on_org_delete (migration 0004) resets status and
+    // publishedAt as the row leaves its org, so the row it returns reads as
+    // a draft that was never live. Its buyers still hold it.
+    it('a live piece moved out of its org still counts as live', async () => {
+      const { id } = await orgArticle();
+      await watched.publish(id, creatorId);
+      invalidate.mockClear();
+
+      const moved = await watched.updateReportingDroppedThumbnail(
+        id,
+        { organizationId: null },
+        creatorId
+      );
+
+      expect(moved.content).toMatchObject({
+        status: 'draft',
+        publishedAt: null,
+        organizationId: null,
+      });
+      expect(moved.hasBeenLive).toBe(true);
+      expect(invalidate).toHaveBeenCalledWith(
+        CacheType.COLLECTION_CONTENT_PUBLISHED
+      );
     });
   });
 

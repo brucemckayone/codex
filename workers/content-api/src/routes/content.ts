@@ -318,12 +318,15 @@ app.patch(
       body: updateContentSchema,
     },
     handler: async (ctx): Promise<UpdateContentResponse['data']> => {
-      const { content: result, droppedThumbnailUrl } =
-        await ctx.services.content.updateReportingDroppedThumbnail(
-          ctx.input.params.id,
-          ctx.input.body,
-          ctx.user.id
-        );
+      const {
+        content: result,
+        droppedThumbnailUrl,
+        hasBeenLive,
+      } = await ctx.services.content.updateReportingDroppedThumbnail(
+        ctx.input.params.id,
+        ctx.input.body,
+        ctx.user.id
+      );
       // The editor's "use media thumbnail" moves the row off an uploaded
       // thumbnail without the DELETE route; its folder goes here instead
       // (Codex-kk9nv.5). Only this content's own folder is ever deleted.
@@ -334,6 +337,10 @@ app.patch(
           droppedThumbnailUrl
         );
       }
+      // A draft that was never live is in no cache (see `hasBeenLive` in
+      // @codex/constants; the service judges it from the row before the
+      // update).
+      if (!hasBeenLive) return result;
       // Fan per-user library invalidation (Codex-c01do). Covers access-config
       // edits — the most common cause of stale accessType flags in library UI.
       fanContentInvalidation(

@@ -734,6 +734,22 @@ export const updateContentSchema = baseContentSchema
 export type UpdateContentInput = z.infer<typeof updateContentSchema>;
 
 /**
+ * What the studio sends to start a draft (Codex-a6ofh.2.2): the row is made
+ * on the first thing the creator adds, from the type, the title and whatever
+ * else they have added so far. The slug is not asked for: the studio makes it
+ * from the title. `createContentSchema` still validates the whole create at
+ * the worker; this only keeps the studio's limits the same as its.
+ */
+export const contentDraftSchema = baseContentSchema.pick({
+  contentType: true,
+  organizationId: true,
+  title: true,
+  description: true,
+  contentBody: true,
+  mediaItemId: true,
+});
+
+/**
  * Publish Content Input
  * Simple schema for status change operations
  */

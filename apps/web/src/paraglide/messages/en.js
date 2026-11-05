@@ -10943,6 +10943,70 @@ export const studio_content_form_slug_preview = () => `URL preview`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_content_draft_title_needed = () => `Give it a title to save it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_draft_save_failed = () => `Couldn’t save your changes.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_draft_confirm_leave = () => `Your latest changes couldn’t be saved. Leave anyway?`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_draft_confirm_leave_untitled = () => `It needs a title before it can be saved. Leave anyway?`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_draft_confirm_leave_live = () => `Leave without updating? Your changes will be lost.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_draft_confirm_leave_slow = () => `Your changes haven’t finished saving. Leave anyway?`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_draft_signed_out = () => `You’ve been signed out. Sign in again in another tab, then try again. Your changes are still here.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_draft_closed_unsaved = () => `Your last changes weren’t saved when the editor closed.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const seo_default_site_name = () => `Revelations`
 
 

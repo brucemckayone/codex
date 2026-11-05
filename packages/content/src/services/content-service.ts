@@ -19,6 +19,7 @@ import {
   CONTENT_ACCESS_TYPE,
   CONTENT_STATUS,
   CONTENT_TYPES,
+  hasBeenLive,
   isPublicContent,
   MEDIA_STATUS,
   MEDIA_TYPES,
@@ -726,6 +727,11 @@ export class ContentService extends BaseService {
    * off, or null. Each upload goes to a new folder (Codex-kk9nv.5), so nothing
    * would ever overwrite the old one; this service has no R2 binding, so the
    * content-api PATCH route deletes it.
+   *
+   * `hasBeenLive` says whether any cache can hold the piece, so whether the
+   * route fans out invalidation. It is judged from the row as it was before
+   * this update (see `hasBeenLive` in `@codex/constants`): an update cannot
+   * make a piece live, and moving it out of its org resets the row.
    */
   async updateReportingDroppedThumbnail(
     id: string,
@@ -734,6 +740,7 @@ export class ContentService extends BaseService {
   ): Promise<{
     content: Content & ContentTierWire;
     droppedThumbnailUrl: string | null;
+    hasBeenLive: boolean;
   }> {
     // Validate input
     const validated = updateContentSchema.parse(input);
@@ -745,6 +752,7 @@ export class ContentService extends BaseService {
 
     // Read inside the transaction; only meaningful once it has committed.
     let previousThumbnailUrl: string | null = null;
+    let wasLive = false;
 
     try {
       const result = await this.db.transaction(async (tx) => {
@@ -823,6 +831,7 @@ export class ContentService extends BaseService {
           _rawBody !== undefined ? this.parseContentBody(_rawBody) : undefined;
         const bodyFields = sentBody ?? {};
         previousThumbnailUrl = existing.thumbnailUrl;
+        wasLive = hasBeenLive(existing);
 
         // A URL in this content's own thumbnail folders is written only by an
         // upload. One the payload sends that differs from the row's names an
@@ -1188,9 +1197,16 @@ export class ContentService extends BaseService {
         throw new ContentNotFoundError(id);
       }
 
-      // Bump content catalogue version keys (fire-and-forget; invalidate swallows errors)
-      void this.cache?.invalidate(CacheType.COLLECTION_CONTENT_PUBLISHED);
-      if (result.organizationId) {
+      // Bump content catalogue version keys (fire-and-forget; invalidate
+      // swallows errors), unless the piece was never live. Judged from the
+      // row before the update: moving a piece out of its org fires
+      // trigger_unpublish_on_org_delete (migration 0004), which resets its
+      // status and publishedAt, and its buyers still hold it. An update
+      // cannot set either, so the row after it can only read less live.
+      if (wasLive) {
+        void this.cache?.invalidate(CacheType.COLLECTION_CONTENT_PUBLISHED);
+      }
+      if (wasLive && result.organizationId) {
         void this.cache?.invalidate(
           CacheType.COLLECTION_ORG_CONTENT(result.organizationId)
         );
@@ -1218,6 +1234,7 @@ export class ContentService extends BaseService {
           includedInTierId: result.legacyIncludedInTierId,
         },
         droppedThumbnailUrl: thumbnailMoved ? previousThumbnailUrl : null,
+        hasBeenLive: wasLive,
       };
     } catch (error) {
       if (error instanceof ContentNotFoundError) {

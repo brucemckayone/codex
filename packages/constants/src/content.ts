@@ -9,6 +9,41 @@ export const CONTENT_STATUS = {
   ARCHIVED: 'archived',
 } as const;
 
+/** What {@link hasBeenLive} reads of a piece; the web sends `publishedAt` as a string. */
+export interface PublicationState {
+  status: string;
+  publishedAt: Date | string | null;
+}
+
+/**
+ * Whether a piece has ever been in front of anyone outside its team: it is
+ * not a draft, or it was published once. Unpublishing keeps `publishedAt`
+ * (`ContentService.unpublish`) and its buyers keep it (the access rule's
+ * "published now, or once"); an archived piece has left the catalogue, and
+ * its buyers keep that too.
+ *
+ * Two sides read it (Codex-a6ofh.2.2):
+ * - The studio editor autosaves only a piece for which this is false. Any
+ *   other piece waits for Update, so no buyer sees an edit half-typed (owner,
+ *   2026-11-05).
+ * - The content service and the PATCH route skip cache invalidation for that
+ *   same piece. It is in no public list, detail page or topic count, so each
+ *   autosave would otherwise write the catalogue version keys, past KV's one
+ *   write a second per key, and keep those catalogues uncached while anyone
+ *   types. (A support grant can still put such a draft on a grantee's shelf;
+ *   the access fan-out has never reached grantees.)
+ *
+ * Broader than "released" in `@codex/access` (published or `publishedAt`),
+ * which leaves out an archived row with no `publishedAt`. Counting more
+ * pieces as live only costs a cache bump. Narrower in one case: moving a
+ * piece out of its org fires trigger_unpublish_on_org_delete (migration
+ * 0004), which resets both fields, so every save after the move reads it as
+ * never live though its buyers keep its card (Codex-gff1x).
+ */
+export function hasBeenLive(piece: PublicationState): boolean {
+  return piece.status !== CONTENT_STATUS.DRAFT || piece.publishedAt != null;
+}
+
 export const MEDIA_STATUS = {
   UPLOADING: 'uploading',
   UPLOADED: 'uploaded',

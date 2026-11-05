@@ -26,6 +26,11 @@
  * (so the orgId -> slug resolve returns a known slug), and
  * `invalidateContentAccess` (the per-user library fanout is a separate concern
  * with its own tests). The assertions read the REAL keys out of KV.
+ *
+ * A SAVE (PATCH) runs the same fan-out, except for a draft that was never
+ * live (Codex-a6ofh.2.2): drafts autosave every few seconds, and such a draft
+ * is in no cache. The service decides that (`hasBeenLive`, from the row
+ * before the update; its own tests cover the rule). Its own describe below.
  */
 
 import {
@@ -59,6 +64,7 @@ function freshIds() {
 const contentSpies = {
   publish: vi.fn(),
   unpublish: vi.fn(),
+  updateReportingDroppedThumbnail: vi.fn(),
   // The registry calls setCache() on the constructed instance whenever CACHE_KV
   // is bound (it is, in env=test) — service-registry.ts:431. Same reason
   // public-routes.test.ts carries it.
@@ -68,6 +74,10 @@ const contentSpies = {
 /** Resolves orgId -> slug for `invalidateOrgSlugCache`. */
 let resolvedSlug = '';
 
+const { invalidateContentAccess } = vi.hoisted(() => ({
+  invalidateContentAccess: vi.fn(async () => undefined),
+}));
+
 vi.mock('@codex/content', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@codex/content')>();
   return {
@@ -75,7 +85,7 @@ vi.mock('@codex/content', async (importOriginal) => {
     ContentService: vi.fn(() => contentSpies),
     // The per-user library fanout is not what this file is about, and it would
     // otherwise issue real `resolveAffectedUsers` queries.
-    invalidateContentAccess: vi.fn(async () => undefined),
+    invalidateContentAccess,
   };
 });
 
@@ -125,6 +135,21 @@ async function publish(contentId: string): Promise<Response> {
     ec
   );
   // MANDATORY: every bump is registered on waitUntil.
+  await waitOnExecutionContext(ec);
+  return res;
+}
+
+async function save(contentId: string): Promise<Response> {
+  const ec = createExecutionContext();
+  const res = await buildApp().fetch(
+    new Request(`http://content-api.test/api/content/${contentId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'A better title' }),
+    }),
+    testEnv,
+    ec
+  );
   await waitOnExecutionContext(ec);
   return res;
 }
@@ -235,5 +260,63 @@ describe('POST /:id/publish fans the version bump out', () => {
 
     const res = await publish(contentId);
     expect(res.status).toBe(200);
+  });
+});
+
+describe('PATCH /:id fans out only for a piece that has been live', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function saved(hasBeenLive: boolean) {
+    const ids = freshIds();
+    resolvedSlug = ids.slug;
+    contentSpies.updateReportingDroppedThumbnail.mockResolvedValue({
+      content: {
+        id: ids.contentId,
+        organizationId: ids.orgId,
+        creatorId: USER.id,
+        status: 'draft',
+        publishedAt: null,
+      },
+      droppedThumbnailUrl: null,
+      hasBeenLive,
+    });
+    return ids;
+  }
+
+  it('a draft that was never live bumps no key and fans out nothing', async () => {
+    const ids = saved(false);
+
+    expect((await save(ids.contentId)).status).toBe(200);
+
+    for (const key of [
+      `org:${ids.orgId}:content`,
+      ids.slug,
+      `categories:org:${ids.orgId}`,
+      `org:${ids.orgId}:journeys`,
+    ]) {
+      expect(await cacheKv().get(versionKey(key))).toBeNull();
+    }
+    expect(invalidateContentAccess).not.toHaveBeenCalled();
+  });
+
+  // Read from the service, not the returned row: moving a piece out of its
+  // org resets the row's status and publishedAt, and its buyers still hold it.
+  it('a piece that has been live bumps its org and fans out, whatever the row now says', async () => {
+    const ids = saved(true);
+
+    expect((await save(ids.contentId)).status).toBe(200);
+
+    expect(
+      await cacheKv().get(versionKey(`org:${ids.orgId}:content`))
+    ).not.toBeNull();
+    expect(await cacheKv().get(versionKey(ids.slug))).not.toBeNull();
+    expect(invalidateContentAccess).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contentId: ids.contentId,
+        reason: 'content_updated',
+      })
+    );
   });
 });

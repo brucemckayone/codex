@@ -12,15 +12,19 @@
 
 import {
   checkContentSlugSchema,
+  contentDraftSchema,
   contentQuerySchema,
   PAGINATION_MAX_LIMIT,
   PAGINATION_MAX_PAGE,
   publicContentArgsSchema,
+  updateContentSchema,
 } from '@codex/validation';
 import { z } from 'zod';
 import { command, form, getRequestEvent, query } from '$app/server';
 import { createServerApi } from '$lib/server/api';
+import { ApiError } from '$lib/server/errors';
 import { forwardClientErrors } from '$lib/server/forward-client-errors';
+import { contentSlugFromTitle } from '$lib/utils/content-slug';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Content List Query
@@ -345,6 +349,67 @@ export const unpublishContent = command(z.string().uuid(), async (id) => {
   const { platform, cookies } = getRequestEvent();
   const api = createServerApi(platform, cookies);
   return forwardClientErrors(() => api.content.unpublish(id));
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Draft saving (Codex-a6ofh.2.2)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Save the fields the editor changed, and only those, as a PATCH.
+ *
+ * A command, not {@link updateContentForm}: drafts autosave a moment after the
+ * creator stops typing, and the form refreshes `listContent` on every save.
+ * This refreshes nothing, and sends nothing back: the editor already holds
+ * what it saved, and the row would carry the whole body again. A refusal
+ * keeps its message and code through {@link forwardClientErrors}. A live
+ * piece's Update sends its changes the same way.
+ */
+export const saveContent = command(
+  z.object({ id: z.string().uuid(), patch: updateContentSchema }),
+  async ({ id, patch }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    await forwardClientErrors(() => api.content.update(id, patch));
+  }
+);
+
+const isSlugTaken = (err: unknown) =>
+  ApiError.isApiError(err) && err.status === 409;
+
+/**
+ * Create a draft from the first thing the creator adds (owner 4A): its type,
+ * a title and whatever else they have added so far. Returns only the new id.
+ *
+ * The slug comes from the title. A create refuses a taken slug with a 409, so
+ * a taken one is tried again as `-2` to `-5`, then once with a random suffix,
+ * and that last refusal is the creator's. Refreshes no list, like
+ * {@link saveContent}.
+ */
+export const createContentDraft = command(contentDraftSchema, async (draft) => {
+  const { platform, cookies } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+  const base = contentSlugFromTitle(draft.title, draft.contentType);
+  const create = async (slug: string) => {
+    const created = await api.content.create({ ...draft, slug });
+    return { id: created.id };
+  };
+  return forwardClientErrors(async () => {
+    for (const slug of [
+      base,
+      `${base}-2`,
+      `${base}-3`,
+      `${base}-4`,
+      `${base}-5`,
+    ]) {
+      try {
+        return await create(slug);
+      } catch (err) {
+        if (!isSlugTaken(err)) throw err;
+      }
+    }
+    return create(`${base}-${crypto.randomUUID().slice(0, 6)}`);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
