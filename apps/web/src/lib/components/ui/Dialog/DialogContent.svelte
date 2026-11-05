@@ -1,9 +1,11 @@
 <!--
   @component Dialog.Content
 
-  The panel. Its direct children are Dialog.Header, Dialog.Body,
-  Dialog.Footer and Dialog.Form only (scripts/check-dialog-structure.mjs
-  fails CI otherwise): every scroll and spacing rule below assumes them.
+  The panel. Its direct children are the parts, in this order: Dialog.Header,
+  Dialog.Toolbar (optional), Dialog.Body, Dialog.Footer, with a Dialog.Form
+  wrapping the Toolbar / Body / Footer run when they submit together.
+  scripts/check-dialog-structure.mjs fails CI on anything else: every scroll
+  and spacing rule below assumes them.
 
   @prop {'sm' | 'md' | 'lg'} [size='md'] - max-width: 28 / 42 / 56rem. A
     drawer keeps it as its width, so a drawer is 42rem unless it says `sm`.

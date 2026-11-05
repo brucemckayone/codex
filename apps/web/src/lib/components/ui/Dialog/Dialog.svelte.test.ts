@@ -430,5 +430,6 @@ describe('Dialog compound component integration', () => {
     expect(exports.Footer).toBeDefined();
     expect(exports.Body).toBeDefined();
     expect(exports.Form).toBeDefined();
+    expect(exports.Toolbar).toBeDefined();
   });
 });

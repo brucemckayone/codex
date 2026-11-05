@@ -2,7 +2,8 @@
   @component Dialog.Form
 
   The `<form>` for a dialog whose Body and Footer submit together:
-  Dialog.Content > Dialog.Header, Dialog.Form > (Dialog.Body, Dialog.Footer).
+  Dialog.Content > Dialog.Header, Dialog.Form > (Dialog.Toolbar optional,
+  Dialog.Body, Dialog.Footer).
 
   Dialog.Content is a flex column capped at 85vh with `overflow: hidden`, and
   only Dialog.Body scrolls. Any element between the two must pass the column
