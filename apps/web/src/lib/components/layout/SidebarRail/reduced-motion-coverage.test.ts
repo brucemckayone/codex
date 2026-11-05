@@ -31,12 +31,11 @@ const CSS_GATED = [
   'layout/MobileNav/MobileBottomNav.svelte',
 ];
 
-const JS_TRANSITION_GATED = ['layout/MobileNav/MobileBottomSheet.svelte'];
-
 // Each surface and the Dialog.Content `motion` it moves by.
 const DIALOG_MOTION = [
   ['search/CommandPaletteSearch.svelte', 'drop'],
   ['command-palette/CommandPalette.svelte', 'none'],
+  ['layout/MobileNav/MobileBottomSheet.svelte', 'rise'],
 ];
 
 describe('Codex-rf1l9 — nav redesign honours prefers-reduced-motion', () => {
@@ -45,16 +44,6 @@ describe('Codex-rf1l9 — nav redesign honours prefers-reduced-motion', () => {
   )('%s contains @media (prefers-reduced-motion: reduce) gate', (rel) => {
     const src = readSource(rel);
     expect(src).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)/);
-  });
-
-  test.each(
-    JS_TRANSITION_GATED
-  )('%s wires prefersReducedMotion state via matchMedia', (rel) => {
-    const src = readSource(rel);
-    expect(src).toContain('prefersReducedMotion');
-    expect(src).toMatch(
-      /matchMedia\(\s*['"]\(prefers-reduced-motion:\s*reduce\)['"]\s*\)/
-    );
   });
 
   test('SidebarRailItem stagger delay collapses to 0ms under reduced-motion', () => {
@@ -68,14 +57,6 @@ describe('Codex-rf1l9 — nav redesign honours prefers-reduced-motion', () => {
     expect(match).not.toBeNull();
     expect(match![0]).toContain('transition-delay: 0ms');
     expect(match![0]).toContain('transform: none');
-  });
-
-  test('MobileBottomSheet fly transition zeroes y-translate under reduced-motion', () => {
-    // fly={{ y: 400 }} is a 400px slide-up — must collapse to y: 0 (or
-    // equivalent duration: 0) when the user opts out of motion.
-    const src = readSource('layout/MobileNav/MobileBottomSheet.svelte');
-    expect(src).toMatch(/y:\s*prefersReducedMotion\s*\?\s*0\s*:/);
-    expect(src).toMatch(/duration:\s*prefersReducedMotion\s*\?\s*0\s*:/);
   });
 
   test.each(

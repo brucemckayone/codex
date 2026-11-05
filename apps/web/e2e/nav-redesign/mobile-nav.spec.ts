@@ -66,6 +66,8 @@ test.describe('Mobile bottom nav (platform)', () => {
     // Click backdrop area at top of viewport (above the sheet)
     await page.mouse.click(180, 60);
     await expect(sheet).toBeHidden();
+    // Focus goes back to More, not to the top of the page (Codex-vlphc.4).
+    await expect(moreBtn).toBeFocused();
   });
 });
 
