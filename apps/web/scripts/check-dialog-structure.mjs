@@ -74,21 +74,6 @@ const WEB_ROOT = fileURLToPath(new URL('..', import.meta.url));
  */
 export const ALLOWLIST = [
   {
-    file: 'src/lib/components/command-palette/CommandPalette.svelte',
-    rule: 'own-dialog',
-    reason: 'M4: hand-built overlay; moves to the shared Dialog',
-  },
-  {
-    file: 'src/lib/components/search/CommandPaletteSearch.svelte',
-    rule: 'own-dialog',
-    reason: 'M4: hand-built overlay; moves to the shared Dialog',
-  },
-  {
-    file: 'src/lib/components/layout/MobileNav/MobileBottomSheet.svelte',
-    rule: 'own-dialog',
-    reason: 'M4: hand-built bottom sheet; moves to variant="drawer" sheet or keeps a reason',
-  },
-  {
     file: 'src/lib/components/ui/Dialog/DialogScrollControl.stories.svelte',
     rule: 'content-child',
     reason: 'Permanent: the calibration control, the raw wrapper this gate bans; the scroll proof must read it CLIPPED',

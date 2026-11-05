@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { browser } from '$app/environment';
 	import { page } from '$app/state';
-	import { fade, fly } from 'svelte/transition';
+	import * as Dialog from '$lib/components/ui/Dialog';
 	import { SearchIcon, XIcon } from '$lib/components/ui/Icon';
 	import { Spinner } from '$lib/components/ui/Feedback/Spinner';
 	import { buildContentUrl, buildCreatorsUrl } from '$lib/utils/subdomain';
@@ -99,21 +99,6 @@
 	}
 
 	let recentSearches = $state<string[]>(readRecent());
-
-	// ── Reduced-motion preference (WCAG 2.3.3) ────────────────
-	// Svelte JS transitions bypass CSS media queries — gate fly translate
-	// reactively so the panel slides only when the user opts in to motion.
-	let prefersReducedMotion = $state(false);
-	$effect(() => {
-		if (!browser) return;
-		const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
-		prefersReducedMotion = mq.matches;
-		const handler = (e: MediaQueryListEvent) => {
-			prefersReducedMotion = e.matches;
-		};
-		mq.addEventListener('change', handler);
-		return () => mq.removeEventListener('change', handler);
-	});
 
 	// ── Derived ───────────────────────────────────────────────
 	const searchUrl = $derived(scope === 'org' ? '/explore' : '/discover');
@@ -305,9 +290,6 @@
 				navigate(`${searchUrl}?q=${encodeURIComponent(gatedQuery)}`);
 				break;
 			}
-			case 'Escape':
-				open = false;
-				break;
 		}
 	}
 
@@ -327,9 +309,14 @@
 	}
 
 	// ── Focus management ──────────────────────────────────────
+	// The dialog moves focus to the search box (its first tabbable) and, on
+	// close, back to whatever held it when the palette opened: the button that
+	// opened it, or the field Cmd+K was pressed in. It is read here, before
+	// the panel mounts and takes focus.
+	let opener: HTMLElement | null = null;
 	$effect(() => {
 		if (open) {
-			requestAnimationFrame(() => inputEl?.focus());
+			opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 			query = '';
 			activeIndex = -1;
 			resetSearch();
@@ -348,185 +335,154 @@
 
 <svelte:window onkeydown={handleGlobalKeydown} />
 
-{#if open}
-	<!-- Backdrop -->
-	<div
-		class="palette-backdrop"
-		role="presentation"
-		onclick={() => {
-			open = false;
-		}}
-		transition:fade={{ duration: prefersReducedMotion ? 0 : 150 }}
-	></div>
-
-	<!-- Panel -->
-	<div
-		class="palette"
-		role="dialog"
+<Dialog.Root bind:open closeFocus={() => opener}>
+	<Dialog.Content
+		placement="top"
+		maxWidth="var(--container-sm)"
+		surface="base"
+		overlay="dim"
+		motion="drop"
+		flush
+		closeButton={false}
 		aria-label="Search"
-		transition:fly={{
-			y: prefersReducedMotion ? 0 : -20,
-			duration: prefersReducedMotion ? 0 : 200,
-		}}
 	>
-		<!-- Input -->
-		<div class="palette__input-wrapper">
-			<SearchIcon size={20} class="palette__search-icon" />
-			<input
-				bind:this={inputEl}
-				type="search"
-				id="command-palette-search-input"
-				name="q"
-				autocomplete="off"
-				class="palette__input"
-				placeholder={m.command_palette_placeholder()}
-				bind:value={query}
-				oninput={handleInput}
-				onkeydown={handleKeydown}
-				role="combobox"
-				aria-controls="palette-results"
-				aria-expanded={allItems.length > 0}
-				aria-autocomplete="list"
-				aria-activedescendant={activeIndex >= 0 ? `palette-item-${activeIndex}` : undefined}
-			/>
-			{#if query}
-				<button
-					class="palette__clear"
-					onclick={() => {
-						query = '';
-						inputEl?.focus();
-						resetSearch();
-					}}
-				>
-					<XIcon size={16} />
-				</button>
-			{/if}
-			<kbd class="palette__esc">Esc</kbd>
-		</div>
+		<Dialog.Toolbar>
+			<div class="palette__input-wrapper">
+				<SearchIcon size={20} class="palette__search-icon" />
+				<input
+					bind:this={inputEl}
+					type="search"
+					id="command-palette-search-input"
+					name="q"
+					autocomplete="off"
+					class="palette__input"
+					placeholder={m.command_palette_placeholder()}
+					bind:value={query}
+					oninput={handleInput}
+					onkeydown={handleKeydown}
+					role="combobox"
+					aria-controls="palette-results"
+					aria-expanded={allItems.length > 0}
+					aria-autocomplete="list"
+					aria-activedescendant={activeIndex >= 0 ? `palette-item-${activeIndex}` : undefined}
+				/>
+				{#if query}
+					<button
+						class="palette__clear"
+						onclick={() => {
+							query = '';
+							inputEl?.focus();
+							resetSearch();
+						}}
+					>
+						<XIcon size={16} />
+					</button>
+				{/if}
+				<kbd class="palette__esc">Esc</kbd>
+			</div>
+		</Dialog.Toolbar>
 
-		<!-- Results -->
-		<div class="palette__results" id="palette-results" role="listbox">
-			{#if !query.trim() && recentSearches.length > 0}
-				<div class="palette__group">
-					<div class="palette__group-header">
-						<span>{m.command_palette_recent()}</span>
-						<button class="palette__group-clear" onclick={clearRecent}
-							>{m.search_clear_button()}</button
-						>
-					</div>
-					{#each recentSearches as term, i (term)}
-						<button
-							class="palette__item"
-							class:palette__item--active={activeIndex === i}
-							role="option"
-							id="palette-item-{i}"
-							aria-selected={activeIndex === i}
-							onclick={() => selectItem({ type: 'recent', term, index: i })}
-						>
-							<SearchIcon size={14} />
-							<span>{term}</span>
-						</button>
-					{/each}
-				</div>
-			{/if}
-
-			{#if loading}
-				<div class="palette__loading">
-					<Spinner size="sm" />
-				</div>
-			{/if}
-
-			{#if showResults}
-				{#if results.content.length > 0}
+		<Dialog.Body>
+			<div class="palette__results" id="palette-results" role="listbox">
+				{#if !query.trim() && recentSearches.length > 0}
 					<div class="palette__group">
 						<div class="palette__group-header">
-							<span>{m.command_palette_content()}</span>
-						</div>
-						{#each results.content as item, i (item.id)}
-							{@const flatIdx = contentFlatIndex(i)}
-							<button
-								class="palette__item palette__item--content"
-								class:palette__item--active={activeIndex === flatIdx}
-								role="option"
-								id="palette-item-{flatIdx}"
-								aria-selected={activeIndex === flatIdx}
-								onclick={() => selectItem({ type: 'content', item, index: i })}
+							<span>{m.command_palette_recent()}</span>
+							<button class="palette__group-clear" onclick={clearRecent}
+								>{m.search_clear_button()}</button
 							>
-								{#if item.thumbnailUrl}
-									<img src={getThumbnailUrl(item.thumbnailUrl, 'sm')} alt="" class="palette__thumb" />
-								{:else}
-									<div class="palette__thumb palette__thumb--empty"></div>
-								{/if}
-								<div class="palette__item-info">
-									<span class="palette__item-title">{item.title}</span>
-									<span class="palette__item-type">{item.contentType}</span>
-								</div>
+						</div>
+						{#each recentSearches as term, i (term)}
+							<button
+								class="palette__item"
+								class:palette__item--active={activeIndex === i}
+								role="option"
+								id="palette-item-{i}"
+								aria-selected={activeIndex === i}
+								onclick={() => selectItem({ type: 'recent', term, index: i })}
+							>
+								<SearchIcon size={14} />
+								<span>{term}</span>
 							</button>
 						{/each}
 					</div>
 				{/if}
 
-				{#if results.creators.length > 0}
-					<div class="palette__group">
-						<div class="palette__group-header">
-							<span>{m.command_palette_creators()}</span>
-						</div>
-						{#each results.creators as creator, i (creator.username ?? creator.name)}
-							{@const flatIdx = creatorFlatIndex(i)}
-							<button
-								class="palette__item palette__item--creator"
-								class:palette__item--active={activeIndex === flatIdx}
-								role="option"
-								id="palette-item-{flatIdx}"
-								aria-selected={activeIndex === flatIdx}
-								onclick={() => selectItem({ type: 'creator', item: creator, index: i })}
-							>
-								<span class="palette__item-title">{creator.name}</span>
-							</button>
-						{/each}
+				{#if loading}
+					<div class="palette__loading">
+						<Spinner size="sm" />
 					</div>
 				{/if}
 
-				{#if results.content.length === 0 && results.creators.length === 0}
-					<div class="palette__empty">{m.command_palette_no_results()}</div>
-				{/if}
-			{/if}
-		</div>
+				{#if showResults}
+					{#if results.content.length > 0}
+						<div class="palette__group">
+							<div class="palette__group-header">
+								<span>{m.command_palette_content()}</span>
+							</div>
+							{#each results.content as item, i (item.id)}
+								{@const flatIdx = contentFlatIndex(i)}
+								<button
+									class="palette__item palette__item--content"
+									class:palette__item--active={activeIndex === flatIdx}
+									role="option"
+									id="palette-item-{flatIdx}"
+									aria-selected={activeIndex === flatIdx}
+									onclick={() => selectItem({ type: 'content', item, index: i })}
+								>
+									{#if item.thumbnailUrl}
+										<img src={getThumbnailUrl(item.thumbnailUrl, 'sm')} alt="" class="palette__thumb" />
+									{:else}
+										<div class="palette__thumb palette__thumb--empty"></div>
+									{/if}
+									<div class="palette__item-info">
+										<span class="palette__item-title">{item.title}</span>
+										<span class="palette__item-type">{item.contentType}</span>
+									</div>
+								</button>
+							{/each}
+						</div>
+					{/if}
 
-		<!-- Footer -->
-		<div class="palette__footer">
-			<span class="palette__hint"><kbd>↑↓</kbd> Navigate</span>
-			<span class="palette__hint"><kbd>↵</kbd> Select</span>
-			<span class="palette__hint"><kbd>Esc</kbd> Close</span>
-		</div>
-	</div>
-{/if}
+					{#if results.creators.length > 0}
+						<div class="palette__group">
+							<div class="palette__group-header">
+								<span>{m.command_palette_creators()}</span>
+							</div>
+							{#each results.creators as creator, i (creator.username ?? creator.name)}
+								{@const flatIdx = creatorFlatIndex(i)}
+								<button
+									class="palette__item palette__item--creator"
+									class:palette__item--active={activeIndex === flatIdx}
+									role="option"
+									id="palette-item-{flatIdx}"
+									aria-selected={activeIndex === flatIdx}
+									onclick={() => selectItem({ type: 'creator', item: creator, index: i })}
+								>
+									<span class="palette__item-title">{creator.name}</span>
+								</button>
+							{/each}
+						</div>
+					{/if}
+
+					{#if results.content.length === 0 && results.creators.length === 0}
+						<div class="palette__empty">{m.command_palette_no_results()}</div>
+					{/if}
+				{/if}
+			</div>
+		</Dialog.Body>
+
+		<Dialog.Footer>
+			<div class="palette__footer">
+				<span class="palette__hint"><kbd>↑↓</kbd> Navigate</span>
+				<span class="palette__hint"><kbd>↵</kbd> Select</span>
+				<span class="palette__hint"><kbd>Esc</kbd> Close</span>
+			</div>
+		</Dialog.Footer>
+	</Dialog.Content>
+</Dialog.Root>
 
 <style>
-	.palette-backdrop {
-		position: fixed;
-		inset: 0;
-		background: color-mix(in oklch, var(--color-overlay) 50%, transparent);
-		z-index: var(--z-modal-backdrop);
-	}
-
-	.palette {
-		position: fixed;
-		top: 15vh;
-		left: 50%;
-		transform: translateX(-50%);
-		width: min(640px, calc(100vw - var(--space-8)));
-		max-height: 70vh;
-		display: flex;
-		flex-direction: column;
-		background: var(--color-surface);
-		border: var(--border-width) var(--border-style) var(--color-border);
-		border-radius: var(--radius-xl);
-		box-shadow: var(--shadow-xl);
-		z-index: var(--z-modal);
-		overflow: hidden;
-	}
-
 	.palette__input-wrapper {
 		display: flex;
 		align-items: center;

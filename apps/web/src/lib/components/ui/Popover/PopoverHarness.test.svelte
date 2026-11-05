@@ -15,7 +15,8 @@
 
   let {
     open = $bindable(false),
-    defaultOpen = false,
+    // Unset unless a test sets it, as on every page that uses the popover.
+    defaultOpen,
     onOpenChange,
     closeFocus,
     forceVisible = false,

@@ -52,7 +52,12 @@
 	}: Props = $props();
 
 	const builder = createPopover({
-		defaultOpen: untrack(() => defaultOpen),
+		// Melt's own default when unset. Left `undefined`, it overrode Melt's
+		// `false`, and the sync below then set it to `false`: a close as the
+		// page mounted, so Melt sent focus to the trigger (or to `closeFocus`)
+		// on every page with a popover. A popover bound open still opens
+		// through that sync, after its trigger is there to anchor it.
+		defaultOpen: untrack(() => defaultOpen ?? false),
 		onOpenChange: ({ next }) => {
 			if (open !== next) {
 				open = next;

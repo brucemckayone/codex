@@ -28,6 +28,11 @@ test.describe('Command palette', () => {
     const input = palette.getByRole('combobox');
     await expect(input).toBeFocused();
 
+    // A modal: Tab stays inside. The box is its only stop until there are
+    // recents or results, so focus wraps back to it (Codex-vlphc.4).
+    await page.keyboard.press('Tab');
+    await expect(input).toBeFocused();
+
     // Toggle close via Esc
     await page.keyboard.press('Escape');
     await expect(palette).toBeHidden();

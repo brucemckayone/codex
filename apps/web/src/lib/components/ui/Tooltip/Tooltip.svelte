@@ -16,8 +16,16 @@
 		openDelay,
 		closeDelay,
 		closeOnPointerDown,
-		escapeBehavior,
-		portal = true, // Default to true for Storybook compatibility
+		// Melt's default too. Its Escape handler spreads `{ behaviorType:
+		// undefined }` over its own 'close', so without this Escape never
+		// closed a tooltip, and one must close without moving the pointer
+		// (WCAG 1.4.13).
+		escapeBehavior = 'close',
+		// Rendered in place. This was `true`, read as "portal to body", but
+		// Melt's portal takes a selector or an element and does nothing with
+		// `true`; and `true` failed the type check. `null` is Melt's own "no
+		// portal".
+		portal = null,
 		forceVisible = true,
 		defaultOpen,
 		open = $bindable(),
