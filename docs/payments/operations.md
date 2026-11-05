@@ -362,9 +362,11 @@ form, the preview and the route alike. It usually lasts seconds; at most an hour
 while a step is retried.
 
 **No 14-day limit** (owner Q7, "Lift the limit for it"). A late-won payment
-stays refundable from the charge page whenever the buyer asks: the window shows
-open, and the refund is taken back from the creators like any other. Nothing
-about it is automatic.
+stays refundable from the charge page whenever the buyer asks, and the refund
+is taken back from the creators like any other. Nothing about it is automatic.
+The charge's refund window says so with `liftedByLateWin`: `isOpen` is true,
+and `closesAt` keeps the 14-day date, which has passed. Anything that reads
+`isOpen` or `closesAt` must allow for it.
 
 **Alerts** (ids, codes and counts only; Q6). A late win that works logs
 "Late win: loss undone" at info and alerts nobody. Each of these is an error

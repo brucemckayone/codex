@@ -202,3 +202,28 @@ Lock order, always: the dispute (the transition's write; a share lock in every g
 ### An applied late win
 
 A row settled by hand under release step R18 (`status = 'won'`, `late_won_at` and `outcome_applied_at` set, `buyer_told_at` null) is an applied late win. Nothing re-pays, restores, refunds or emails it again: every step needs `outcome_applied_at` null, and the email claim needs the outcome to have been applied by the undo itself, after `late_won_at`. A hand settlement keeps the loss's applied time, which is earlier. The mark never writes a time before `late_won_at` (`GREATEST`), so a mark run by a worker whose clock is behind the one that recorded the late win cannot pass for a hand settlement.
+
+### How the reconcile finds a late win
+
+The webhook undoes a late win when Stripe's event arrives. One whose event was missed is found by the hourly reconcile (§4, `dispute-reconcile.ts`), which reads each dispute live from Stripe and runs it through the webhook's own `processDispute`:
+
+| Source | Finds |
+|---|---|
+| 1. Stripe's events of the last 4 days | An applied loss whose furthest snapshot says won (`needsSettling`). A late win already undone, or settled by hand under R18, is won and applied, and is left alone |
+| 2. Our final rows whose outcome was never applied | A late win being undone whose step failed: retried every run, and alerted at error with an errorId each time |
+| 3. Our lost rows (owner Q3) | A late win whose events are older than source 1's 4 days |
+
+Source 3, in order:
+
+1. `findLostDisputesToRecheck` reads our lost rows opened (`stripe_created_at`) in the last 12 months and not written in the last 15 minutes (the webhook's), newest first, at most 300: what the pages below can list. None, and Stripe isn't called.
+2. Stripe's disputes created since the oldest of them are listed newest first, 100 a page, at most 3 pages. Production and development share one Stripe sandbox, so the list holds the other's disputes too; only our rows are acted on.
+3. Each of ours that Stripe has as `won` is settled, at most 10 a run (`LATE_WIN_LIMIT`), skipping any the first two sources settled this run. The rest wait for the next run.
+
+Reaching the page limit, failing to read a page, and failing to read our rows are each alerted at error with an errorId ([operations](operations.md#late-wins)). A page that cannot be read still leaves the late wins found on the pages before it to be settled.
+
+**The 08:00 London run** pays the banks and has no subrequests to spare, so it does no late-win work (`lateWins: !isBankPayoutRun(scheduledTime)`, `payouts-sweep.ts`): no source 3, and source 1 leaves applied losses alone. Source 2 still runs, so a late win already being undone is retried. The next hour's run picks up the rest. Source 3 costs at most about 125 subrequests a run: 3 list pages, and at most 10 undos of about 12 each ([the budget](connect-and-payouts.md#payout-timing)).
+
+**Limits.**
+
+- A lost row opened more than 12 months ago is never re-checked (owner Q3): a late win that old, whose events were missed, is left to a person.
+- With more than 300 lost rows in 12 months, the oldest past 300 are not read. The page-limit alert fires whenever Stripe's list since the oldest of the 300 holds more than 300 disputes, which it does unless every dispute in that span is one of those lost rows.
