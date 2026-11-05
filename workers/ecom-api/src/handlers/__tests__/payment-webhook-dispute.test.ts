@@ -462,7 +462,8 @@ describe('handlePaymentWebhook — disputes', () => {
 
     expect(purchase.processLostDispute).toHaveBeenCalledWith(
       'pi_test_dispute',
-      1999
+      1999,
+      'dp_test_dispute'
     );
     expect(mockReverseSubscription).toHaveBeenCalledWith(charge);
     expect(purchase.clawBackPurchaseCharge).toHaveBeenCalledWith(

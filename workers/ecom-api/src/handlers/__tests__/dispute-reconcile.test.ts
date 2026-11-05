@@ -429,7 +429,8 @@ describe('runDisputeReconcile', () => {
 
     expect(purchase.processLostDispute).toHaveBeenCalledWith(
       'pi_dp_lost',
-      1999
+      1999,
+      'dp_lost'
     );
     expect(subscription.reverseSubscriptionPayoutsForCharge).toHaveBeenCalled();
     expect(purchase.clawBackPurchaseCharge).toHaveBeenCalled();

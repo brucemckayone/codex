@@ -916,9 +916,12 @@ export async function processDispute(
 
   if (status === 'lost') {
     if (paymentIntentId) {
+      // The dispute is re-checked inside the loss (FOR SHARE): one a late
+      // win overtook is no longer lost, and nothing is refunded (§4.8).
       const ended = await purchase.processLostDispute(
         paymentIntentId,
-        recorded.amountCents
+        recorded.amountCents,
+        dispute.id
       );
       effects.invalidateLibrary(ended?.userId);
       // Written when it opened, unless it opened already lost: again here.
