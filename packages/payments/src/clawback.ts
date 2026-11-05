@@ -510,6 +510,10 @@ type StepResult = { failure?: unknown };
  * is a `ServiceUnavailableError`, which is transient too. A step Stripe
  * refused is left `failed` without rejecting (see `reverseTransfer`); the
  * hourly retry takes it.
+ *
+ * It waits, with a `ServiceUnavailableError`, while a chargeback on the
+ * charge is won and not yet applied (`waitForWinToSettle`), unless the
+ * caller is that win's own settlement.
  */
 export async function reverseCharge(
   deps: ClawbackDeps,
@@ -524,6 +528,12 @@ export async function reverseCharge(
     refunds:
       | readonly ClawbackRefund[]
       | (() => Promise<readonly ClawbackRefund[]>);
+    /**
+     * The won dispute this call settles: its re-pay's own clawback, or the
+     * late win's refund of a first payment (Codex-2hxff.70). It does not
+     * wait for itself.
+     */
+    settlingDisputeId?: string;
   }
 ): Promise<void> {
   const { charge, source } = input;
@@ -537,6 +547,9 @@ export async function reverseCharge(
     deps.db,
     typeof input.refunds === 'function' ? await input.refunds() : input.refunds
   );
+  if (refunds.length > 0) {
+    await waitForWinToSettle(deps.db, charge.id, input.settlingDisputeId);
+  }
   const chargebacks = await chargebacksFor(deps.db, charge.id);
   if (refunds.length === 0 && chargebacks.length === 0) return;
   assertChargeAmount(charge);
@@ -567,6 +580,45 @@ export async function reverseCharge(
         cause:
           failures.length === 1 ? failures[0] : new AggregateError(failures),
       }
+    );
+  }
+}
+
+/**
+ * A refund is not clawed back while a chargeback on its charge is won and its
+ * outcome not yet applied (Codex-2hxff.70; late-win data design §4.7). The
+ * win's re-pay must run first: refunds are shared before chargebacks
+ * (`inClawbackOrder`), so a refund clawed back while the dispute's steps
+ * still stand, nothing re-paid, would take each share a second time. After
+ * the re-pay it comes off the re-pay rows (`clawBackRepaidShare`). A late
+ * win's undo can take an hour or more (its own refund may be pending at
+ * Stripe), and a normal win has the same short window.
+ *
+ * A `ServiceUnavailableError`: Stripe redelivers, and the hourly retry tries
+ * again. The win's own settlement names its dispute and is let through.
+ */
+async function waitForWinToSettle(
+  db: Client,
+  chargeId: string,
+  settlingDisputeId: string | undefined
+): Promise<void> {
+  const conditions: SQL[] = [
+    eq(disputes.stripeChargeId, chargeId),
+    eq(disputes.status, 'won'),
+    isNull(disputes.outcomeAppliedAt),
+  ];
+  if (settlingDisputeId) {
+    conditions.push(ne(disputes.stripeDisputeId, settlingDisputeId));
+  }
+  const [settling] = await db
+    .select({ id: disputes.stripeDisputeId })
+    .from(disputes)
+    .where(and(...conditions))
+    .limit(1);
+  if (settling) {
+    throw new ServiceUnavailableError(
+      "A chargeback on this charge was just won and is being paid back; the refund's clawback waits for it",
+      { chargeId, disputeId: settling.id }
     );
   }
 }

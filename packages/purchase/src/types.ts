@@ -303,6 +303,27 @@ export type LateWinRestoreOutcome =
   | 'still_refunded'
   | 'dispute_holds';
 
+/** What `PurchaseService.restoreAfterLateWin` did, for the caller's effects. */
+export interface LateWinRestore {
+  outcome: LateWinRestoreOutcome;
+  /** The buyer, for the library bump and, on `restored`, the streaming block. */
+  userId: string;
+  orgId: string | null;
+  purchaseId: string;
+  /**
+   * The `purchase-access-restored` email's facts, on `restored` only; null
+   * otherwise. `paidAt` is the purchase date (ISO). `itemPath` is the item's
+   * page, as the receipt links it (`/content/:id`, `/courses/:id`).
+   */
+  email: {
+    contentTitle: string;
+    amountCents: number;
+    paidAt: string;
+    itemPath: string;
+    isCourse: boolean;
+  } | null;
+}
+
 /**
  * The late win's refund of a buyer's first payment, when they had bought
  * the item again (Q1; design §4.5): none needed, made and waiting for
