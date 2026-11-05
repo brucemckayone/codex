@@ -17,7 +17,8 @@
     hand-built drawers did: Dialog.Body and Dialog.Form lay their children
     straight into it (`display: contents`), so a section, a `margin-top:
     auto` actions row or a sticky bar sits exactly where it would as a direct
-    child. Below the sm breakpoint it fills the screen.
+    child. The built-in close button stays pinned at the top right while it
+    scrolls. Below the sm breakpoint it fills the screen.
   @prop {boolean} [sheet=false] - drawer only: below the sm breakpoint, a
     bottom sheet instead (full width, at most 90vh, rounded top, slides up),
     padded `--space-5 --space-4`.
@@ -130,7 +131,8 @@
   /**
    * What scrolls: `dialog` and `floating` scroll Body, `drawer` the whole
    * panel. Body, Form and Footer read it; in `drawer` Body and Form stop
-   * being a box. The parts read `flush` from here too.
+   * being a box, and the close button turns sticky. The parts read `flush`
+   * from here too.
    */
   const layout = $derived(!drawer ? 'dialog' : floating ? 'floating' : 'drawer');
   setContext('DIALOG_LAYOUT', {
@@ -230,6 +232,7 @@
           <button
             use:melt={$close}
             class="dialog-close"
+            data-layout={layout}
             aria-label="Close"
             disabled={dismissible ? !dismissible.current : false}
           >
@@ -338,8 +341,13 @@
   /* ── Drawer variant ───────────────────────────────────────────────
      The common part of the three hand-built drawers' `:global()` rules
      (Customer, Media, Creator). Width stays with data-size: their own
-     max-width lost to it on specificity, so `md` is what they render. */
+     max-width lost to it on specificity, so `md` is what they render. The
+     padding and gap are properties so the sticky close button below can
+     sit against them. */
   .dialog-content[data-variant='drawer'] {
+    --drawer-pad-block: var(--space-6);
+    --drawer-pad-inline: var(--space-6);
+    --drawer-gap: var(--space-5);
     position: fixed;
     top: 0;
     right: 0;
@@ -347,8 +355,8 @@
     left: auto;
     height: 100%;
     max-height: 100vh;
-    gap: var(--space-5);
-    padding: var(--space-6);
+    gap: var(--drawer-gap);
+    padding: var(--drawer-pad-block) var(--drawer-pad-inline);
     overflow-x: hidden;
     overflow-y: auto;
     border: none;
@@ -359,8 +367,10 @@
   }
 
   .dialog-content[data-variant='drawer'][data-flush] {
+    --drawer-pad-block: 0px;
+    --drawer-pad-inline: 0px;
+    --drawer-gap: 0px;
     gap: normal;
-    padding: 0;
   }
 
   .dialog-overlay[data-variant='drawer']:not([data-floating]) {
@@ -396,7 +406,8 @@
       max-width: none;
       height: auto;
       max-height: 90vh;
-      padding: var(--space-5) var(--space-4);
+      --drawer-pad-block: var(--space-5);
+      --drawer-pad-inline: var(--space-4);
       border-left: none;
       border-top: var(--border-width) var(--border-style) var(--color-border);
       border-radius: var(--radius-modal) var(--radius-modal) 0 0;
@@ -404,7 +415,8 @@
     }
 
     .dialog-content[data-variant='drawer'][data-sheet][data-flush] {
-      padding: 0;
+      --drawer-pad-block: 0px;
+      --drawer-pad-inline: 0px;
     }
 
     /* The floating sheet keeps its glass edge and round corners, inset
@@ -468,6 +480,26 @@
     outline: none;
     box-shadow: var(--shadow-focus-ring);
     border-color: var(--color-border-focus);
+  }
+
+  /* A drawer that scrolls as a whole would scroll an absolute close button
+     out of sight (Creator measured it at y=-618). Here it is sticky and laid
+     out first (`order`, so the DOM order, the tab order and the first focus
+     stay as they are). Its margins put it where the absolute one sat,
+     --space-3 in from the panel's top and right edges, and hand back the
+     height and gap it takes in the column, so nothing below it moves. A
+     sticky `top` counts from the panel's content edge, inside its padding,
+     hence the padding taken off. */
+  .dialog-close[data-layout='drawer'] {
+    position: sticky;
+    order: -1;
+    flex: none;
+    align-self: flex-end;
+    top: calc(var(--space-3) - var(--drawer-pad-block));
+    right: auto;
+    margin-block: calc(var(--space-3) - var(--drawer-pad-block))
+      calc(var(--drawer-pad-block) - var(--space-3) - var(--space-8) - var(--drawer-gap));
+    margin-inline-end: calc(var(--space-3) - var(--drawer-pad-inline));
   }
 
   .dialog-close:active {
