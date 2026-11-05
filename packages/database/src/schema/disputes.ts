@@ -30,6 +30,11 @@ import { subscriptions } from './subscriptions';
  * `warning_closed` and `prevented` are final. `outcome_applied_at` is set once
  * a final status has been acted on, so a redelivery stops there. A `lost`
  * dispute keeps holding until then: its held slices are cancelled, not paid.
+ *
+ * **A late win** is the one way back (Codex-2hxff.70; late-win data design
+ * §3): Stripe can turn a lost dispute into a won one, and the row then moves
+ * lost → won once. `late_won_at` marks it, and the loss's applied time is
+ * kept in `lost_applied_at` when the undo clears `outcome_applied_at`.
  */
 export const disputes = pgTable(
   'disputes',
@@ -65,6 +70,26 @@ export const disputes = pgTable(
     }).notNull(),
     /** When a final status was acted on: re-paid (won) or cancelled (lost). */
     outcomeAppliedAt: timestamp('outcome_applied_at', { withTimezone: true }),
+    /**
+     * When the row moved lost → won: a late win, for the undo's extra step,
+     * support's history and the logs. Null for every other dispute.
+     */
+    lateWonAt: timestamp('late_won_at', { withTimezone: true }),
+    /**
+     * The loss's `outcome_applied_at`, kept when a late win clears that
+     * column. Null when the loss never finished. Support's "lost on …".
+     */
+    lostAppliedAt: timestamp('lost_applied_at', { withTimezone: true }),
+    /**
+     * The `re_` refund a late win made for a buyer who had bought the item
+     * again (Q1), so a re-run finds it and the refund email words it.
+     */
+    lateWinRefundId: varchar('late_win_refund_id', { length: 255 }),
+    /**
+     * The buyer's "access is back" email, claimed by a conditional update
+     * before it is sent, so a redelivery never sends a second one.
+     */
+    buyerToldAt: timestamp('buyer_told_at', { withTimezone: true }),
 
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()
@@ -93,6 +118,20 @@ export const disputes = pgTable(
     check(
       'check_disputes_status',
       sql`${table.status} IN ('warning_needs_response', 'warning_under_review', 'warning_closed', 'needs_response', 'under_review', 'won', 'lost', 'prevented')`
+    ),
+    // A late win is a won row, and only a late win keeps a loss date or a
+    // late-win refund. `status` is NOT NULL, so none of these can be NULL.
+    check(
+      'check_disputes_late_won_status',
+      sql`${table.lateWonAt} IS NULL OR ${table.status} = 'won'`
+    ),
+    check(
+      'check_disputes_late_win_refund',
+      sql`${table.lateWinRefundId} IS NULL OR ${table.lateWonAt} IS NOT NULL`
+    ),
+    check(
+      'check_disputes_lost_applied',
+      sql`${table.lostAppliedAt} IS NULL OR ${table.lateWonAt} IS NOT NULL`
     ),
   ]
 );

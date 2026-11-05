@@ -457,3 +457,45 @@ Runbook). So roll back only when no listed `pending_tier_from` with a
 members with the owner first. Don't change prices while
 rolled back: the old fan-out writes no price moves, so the hourly step can't
 see its subscribers after the roll forward.
+
+---
+
+## A late win undoes a lost chargeback (migration `0126`)
+
+`0126` adds four nullable columns and three CHECKs to `disputes`, and the
+`purchase-access-restored` email (`Codex-2hxff.70`;
+[dispute record](dispute-record.md)). It is additive and runs before the
+workers deploy. The old workers never read the columns, and they still only
+alert a late win and leave its row `lost`, which every CHECK allows. No
+backfill. `0126` stays on a rollback.
+
+### R18 — before the deploy: lost chargebacks already settled by hand
+
+From this release the hourly reconcile undoes any lost dispute that Stripe
+now shows as won, including one alerted under the old "alert only" rule that
+a person has already put right by hand. Before deploying, list the rows it
+could pick up and check each in Stripe:
+
+```sql
+BEGIN TRANSACTION READ ONLY;
+SELECT stripe_dispute_id, stripe_charge_id, purchase_id, subscription_id,
+       course_subscription_id, amount_cents, stripe_created_at, outcome_applied_at
+  FROM disputes
+ WHERE status = 'lost'
+   AND stripe_created_at >= now() - interval '12 months'
+ ORDER BY stripe_created_at;
+ROLLBACK;
+```
+
+**Expect none:** production runs on Stripe test keys and has had no late-win
+alert.
+
+For any that Stripe shows as won and that was already put right by hand,
+record it as an applied late win, so nothing runs twice. This one writes: run
+it only with the owner's OK, in one transaction, with the ids from the list:
+
+```sql
+UPDATE disputes
+   SET status = 'won', late_won_at = now(), lost_applied_at = outcome_applied_at
+ WHERE stripe_dispute_id IN ('du_…') AND status = 'lost';
+```
