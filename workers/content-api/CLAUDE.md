@@ -71,6 +71,8 @@ fetcher. All three log `r2_public_base.missing` on every request with no base
 | GET | `/api/media/:id` | `auth: 'required'` | any | Get media by ID |
 | PATCH | `/api/media/:id` | `auth: 'required'` | creator, admin | Update media |
 | GET | `/api/media` | `auth: 'required'` | any | List own media (paginated); each item carries `usage: { total, live }` (Codex-6sbn1) |
+| GET | `/api/media/summary` | `auth: 'required'` | any | The caller's whole library in four numbers (`MediaLibrarySummary`: `total`, `totalBytes`, `failed`, `stopped`) for the library header, which the paged list cannot give since its total is its filter's. Registered above `/:id` (Codex-a6ofh.1.6) |
+| GET | `/api/media/:id/preview` | `auth: 'required'`, `cache: 'fresh'` | any | The caller's OWN item signed for the studio's player (`MediaPreviewResponse`): a 15-minute preview token for the `/api/access/media/:id/hls/...` proxies, which no content or film proxy accepts. Another creator's item is the same 404 as an unknown id; 422 while not ready (Codex-a6ofh.1.5) |
 | GET | `/api/media/:id/usage` | `auth: 'required'` | any | Where the caller's item is used (`MediaUsage`): uses named only where the caller can see them, plus the delete's `fingerprint`. Never cached |
 | POST | `/api/media/:id/upload` | `auth: 'required'` | creator, admin | Binary upload fallback (local dev) |
 | POST | `/api/media/:id/upload-complete` | `auth: 'required'` | creator, admin | Mark upload done; triggers transcoding |
