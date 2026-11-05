@@ -344,6 +344,7 @@ describe('SupportService price moves (real DB)', () => {
       subscriptionEnded: false,
       retry: null,
       queuedFor: null,
+      waitsForDispute: false,
       resolution: null,
       createdAt: SAVED.toISOString(),
     });

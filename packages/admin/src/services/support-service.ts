@@ -5043,6 +5043,8 @@ function heldPriceMoveOf(
       status === 'queued'
         ? queuedRunFor(now, move.nextAttemptAt).toISOString()
         : null,
+    // Filled by the late-win undo (Codex-2hxff.70, D1-a).
+    waitsForDispute: false,
     resolution:
       move.resolvedAt &&
       (closedBy === 'moved_by_hand' || closedBy === 'not_needed')

@@ -575,6 +575,7 @@ export function heldMove(
     subscriptionEnded: false,
     retry: null,
     queuedFor: null,
+    waitsForDispute: false,
     resolution: null,
     createdAt: '2026-10-30T14:12:00.000Z',
     ...overrides,
