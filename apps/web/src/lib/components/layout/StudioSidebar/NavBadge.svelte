@@ -24,7 +24,7 @@
     padding: 0 var(--space-1);
     border-radius: var(--radius-full);
     background-color: var(--color-interactive);
-    color: var(--color-text-on-brand);
+    color: var(--color-on-interactive);
     font-size: var(--text-xs);
     font-weight: var(--font-semibold);
     line-height: var(--leading-none);

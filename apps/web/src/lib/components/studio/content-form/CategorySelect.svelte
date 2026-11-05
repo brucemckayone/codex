@@ -257,6 +257,6 @@
       var(--color-interactive) 20%,
       var(--color-surface)
     );
-    color: var(--color-brand-primary-subtle);
+    color: var(--color-text);
   }
 </style>

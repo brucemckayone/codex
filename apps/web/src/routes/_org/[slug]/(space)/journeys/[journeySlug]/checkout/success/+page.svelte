@@ -256,6 +256,7 @@
 
   .ret__cta:hover {
     background: var(--color-brand-primary-hover);
+    color: var(--color-text-on-brand-hover);
   }
 
   .ret__link {

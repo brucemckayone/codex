@@ -13,6 +13,7 @@ import type {
   ContentHeld,
   CourseEntryResponse,
   CourseFilmStreamResponse,
+  MediaPreviewResponse,
   OrgFilmStreamResponse,
   PlaybackProgressResponse,
   StreamingUrlResponse,
@@ -78,6 +79,7 @@ import type {
   ContactSettingsResponse,
   CourseOffer,
   FeatureSettingsResponse,
+  MediaLibrarySummary,
   MediaUsage,
   OrganizationPublicStatsResponse,
   OrganizationWithRole,
@@ -2906,12 +2908,16 @@ export function createServerApi(
       /**
        * List media items with filters and pagination
        *
-       * Query parameters (from MediaQueryInput):
+       * Query parameters (from MediaQueryInput, Codex-a6ofh.1.4):
        * - page: number (default: 1)
-       * - limit: number (1-100, default: 20)
-       * - status: 'uploading' | 'uploaded' | 'transcoding' | 'ready' | 'failed' (optional)
+       * - limit: number (1-100, default: 24)
+       * - search: title or description, ≤255 (optional; gate it, Codex-k618q)
+       * - status: 'uploading' | 'uploaded' | 'transcoding' | 'ready' | 'failed',
+       *   or a group: 'processing' | 'attention' | 'attachable' (MEDIA_STATUS_GROUPS) (optional)
        * - mediaType: 'video' | 'audio' (optional)
-       * - sortBy: 'createdAt' | 'uploadedAt' | 'title' (optional)
+       * - usage: 'any' | 'used' | 'unused' (default: 'any')
+       * - sortBy: 'createdAt' | 'uploadedAt' | 'title' | 'durationSeconds' |
+       *   'fileSizeBytes' (optional)
        * - sortOrder: 'asc' | 'desc' (optional)
        *
        * Each row also carries its poster's CDN URL, or null with none: the
@@ -2925,6 +2931,13 @@ export function createServerApi(
             MediaItemWithRelations & { thumbnailUrl: string | null }
           >
         >('content', `/api/media${params ? `?${params}` : ''}`),
+
+      /**
+       * The whole library in four numbers (Codex-a6ofh.1.6): the library
+       * header ("12 items · 6.4 GB") and its needs-attention line.
+       */
+      summary: () =>
+        request<MediaLibrarySummary>('content', '/api/media/summary'),
 
       /**
        * Get a single media item by ID
@@ -2948,6 +2961,13 @@ export function createServerApi(
        */
       usage: (id: string) =>
         request<MediaUsage>('content', `/api/media/${id}/usage`),
+
+      /**
+       * The owner's own media, signed to play for 15 minutes (Codex-a6ofh.1.5):
+       * the media drawer's preview. Never cached; a 422 means not ready yet.
+       */
+      preview: (id: string) =>
+        request<MediaPreviewResponse>('content', `/api/media/${id}/preview`),
 
       /**
        * Soft delete a media item. `usage` is the fingerprint of the uses the

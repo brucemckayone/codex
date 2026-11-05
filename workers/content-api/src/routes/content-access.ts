@@ -3,6 +3,7 @@ import {
   type CourseFilmStreamResponse,
   createContentAccessService,
   type FilmTokenPayload,
+  type MediaPreviewTokenPayload,
   type OrgFilmStreamResponse,
   type OrgFilmTokenPayload,
   type PlaybackProgressResponse,
@@ -11,6 +12,7 @@ import {
   type UpdatePlaybackProgressResponse,
   verifyFilmToken,
   verifyHlsToken,
+  verifyMediaPreviewToken,
   verifyOrgFilmToken,
 } from '@codex/access';
 import { CACHE_PRESETS } from '@codex/constants';
@@ -53,10 +55,10 @@ const app = new Hono<HonoEnv>();
  * a shared cache's or the viewer's own browser's — outlives the credential
  * inside it. Not merely per-viewer, per-REQUEST.
  *
- * NAMED RATHER THAN SPELLED OUT. The six HLS playlist proxies (content, course
- * film and org film, master and variant) are plain Hono handlers, not
- * `procedure()` calls, so they cannot declare `policy.cache` and must set the
- * header themselves. Using the preset is what keeps the value on the same
+ * NAMED RATHER THAN SPELLED OUT. The eight HLS playlist proxies (content,
+ * course film, org film and media preview, master and variant) are plain Hono
+ * handlers, not `procedure()` calls, so they cannot declare `policy.cache` and
+ * must set the header themselves. Using the preset is what keeps the value on the same
  * dial as every other response in the platform: the string is unchanged
  * (byte-identical to the literal this replaced), but the reasoning above now
  * sits beside the five siblings it is being chosen over, and a central change
@@ -70,7 +72,7 @@ const HLS_PLAYLIST_HEADERS = {
 /**
  * Count against the HLS token the caller presented.
  *
- * The six playlist proxies carry no session: the video player authenticates with the
+ * The eight playlist proxies carry no session: the video player authenticates with the
  * short-lived token in the query string, so `sessionSubject()` names nothing
  * and — when the player is reached through a worker hop — `trustedIpSubject()`
  * names nothing either. The token is the one subject this surface can ALWAYS
@@ -110,9 +112,10 @@ const hlsStreamingRateLimit = createMiddleware<HonoEnv>((c, next) =>
 type PlaylistService = ReturnType<typeof createContentAccessService>['service'];
 
 /**
- * The shared tail of the six HLS playlist proxies (content, course film and
- * org film, master and variant), once each has parsed and verified its own
- * token (kept explicit in each route, because that is where they differ): a
+ * The shared tail of the eight HLS playlist proxies (content, course film, org
+ * film and media preview, master and variant), once each has parsed and
+ * verified its own token (kept explicit in each route, because that is where
+ * they differ): a
  * per-request access service, the read, a 404 for a playlist missing from R2,
  * the playlist headers, and the DB cleanup after the response.
  *
@@ -138,11 +141,12 @@ async function servePlaylist(
   }
 }
 
-/** Why a film proxy answered 403. */
+/** Why a film (or media preview) proxy answered 403. */
 type FilmRefusal =
   | TokenRefusal
   | 'course-mismatch'
   | 'org-mismatch'
+  | 'media-mismatch'
   | 'no-token'
   | 'bad-path'
   | 'bad-variant';
@@ -153,14 +157,18 @@ type FilmRefusal =
  * one. Expiry is routine (a paused film, a tab left open), so it is debug.
  * Every other reason is a link no player builds from a minted token (forged or
  * tampered, a content token, another course's, a path or rung that does not
- * exist), so it warns. `film` names the proxies: a course sales film's, or an
- * org intro film's (Codex-376dl).
+ * exist), so it warns. `film` names the proxies: a course sales film's, an
+ * org intro film's (Codex-376dl), or a creator's media preview's
+ * (Codex-a6ofh.1.5).
  */
 function logRefusal(
   c: Context<HonoEnv>,
-  film: 'course_film' | 'org_film',
+  film: 'course_film' | 'org_film' | 'media_preview',
   reason: FilmRefusal,
-  ids: { courseId?: string } | { organizationId?: string }
+  ids:
+    | { courseId?: string }
+    | { organizationId?: string }
+    | { mediaId?: string }
 ): void {
   const obs = c.get('obs');
   if (reason === 'expired') {
@@ -186,6 +194,15 @@ function logOrgFilmRefusal(
   organizationId?: string
 ): void {
   logRefusal(c, 'org_film', reason, { organizationId });
+}
+
+/** {@link logRefusal} for the media preview proxies. */
+function logPreviewRefusal(
+  c: Context<HonoEnv>,
+  reason: FilmRefusal,
+  mediaId?: string
+): void {
+  logRefusal(c, 'media_preview', reason, { mediaId });
 }
 
 /**
@@ -227,6 +244,31 @@ async function verifiedOrgFilmToken(
   }
   if (check.payload.organizationId !== organizationId) {
     logOrgFilmRefusal(c, 'org-mismatch', organizationId);
+    return null;
+  }
+  return check.payload;
+}
+
+/**
+ * A media preview token's payload when it verifies AND was minted for the
+ * media in the path, else `null` with the reason logged. A content or film
+ * token is a `signature` refusal here: each kind signs its own domain.
+ */
+async function verifiedPreviewToken(
+  c: Context<HonoEnv>,
+  mediaId: string,
+  token: string
+): Promise<MediaPreviewTokenPayload | null> {
+  const check = await verifyMediaPreviewToken(
+    token,
+    c.env.WORKER_SHARED_SECRET
+  );
+  if (!check.ok) {
+    logPreviewRefusal(c, check.reason, mediaId);
+    return null;
+  }
+  if (check.payload.mediaId !== mediaId) {
+    logPreviewRefusal(c, 'media-mismatch', mediaId);
     return null;
   }
   return check.payload;
@@ -755,6 +797,95 @@ app.get(
       service.getHlsVariantPlaylist({
         creatorId: payload.creatorId,
         mediaId: payload.mediaId,
+        variant,
+        expirySeconds: presignWindow(payload.exp),
+      })
+    );
+  }
+);
+
+/**
+ * GET /api/access/media/:id/hls/master.m3u8?token=...
+ *
+ * A creator's media PREVIEW master playlist proxy (Codex-a6ofh.1.5), opened
+ * only by a preview token minted for the media in the path, after the
+ * creator-scoped read in `GET /api/media/:id/preview`. A content or film
+ * token is refused here, as a preview token is on their routes.
+ *
+ * On an invalid, expired or foreign token → 403; on a missing playlist → 404.
+ */
+app.get('/media/:id/hls/master.m3u8', hlsStreamingRateLimit, async (c) => {
+  const paramsResult = createIdParamsSchema().safeParse({
+    id: c.req.param('id'),
+  });
+  const queryResult = hlsProxyQuerySchema.safeParse({
+    token: c.req.query('token'),
+  });
+  if (!paramsResult.success) {
+    logPreviewRefusal(c, 'bad-path');
+    return c.text('Invalid request', 403);
+  }
+  const { id: mediaId } = paramsResult.data;
+  if (!queryResult.success) {
+    logPreviewRefusal(c, 'no-token', mediaId);
+    return c.text('Invalid request', 403);
+  }
+  const { token } = queryResult.data;
+
+  const payload = await verifiedPreviewToken(c, mediaId, token);
+  if (!payload) {
+    return c.text('Invalid or expired streaming token', 403);
+  }
+
+  return servePlaylist(c, (service) =>
+    service.getMediaPreviewMasterPlaylist({
+      creatorId: payload.creatorId,
+      mediaId,
+      token,
+    })
+  );
+});
+
+/**
+ * GET /api/access/media/:id/hls/:variant/index.m3u8?token=...
+ *
+ * The media preview's variant playlist proxy: segments presigned for the
+ * token's remaining life, behind the preview master's checks.
+ */
+app.get(
+  '/media/:id/hls/:variant/index.m3u8',
+  hlsStreamingRateLimit,
+  async (c) => {
+    const paramsResult = hlsVariantParamsSchema.safeParse({
+      id: c.req.param('id'),
+      variant: c.req.param('variant'),
+    });
+    const queryResult = hlsProxyQuerySchema.safeParse({
+      token: c.req.query('token'),
+    });
+    if (!paramsResult.success) {
+      const badVariant = paramsResult.error.issues.some(
+        (issue) => issue.path[0] === 'variant'
+      );
+      logPreviewRefusal(c, badVariant ? 'bad-variant' : 'bad-path');
+      return c.text('Invalid request', 403);
+    }
+    const { id: mediaId, variant } = paramsResult.data;
+    if (!queryResult.success) {
+      logPreviewRefusal(c, 'no-token', mediaId);
+      return c.text('Invalid request', 403);
+    }
+    const { token } = queryResult.data;
+
+    const payload = await verifiedPreviewToken(c, mediaId, token);
+    if (!payload) {
+      return c.text('Invalid or expired streaming token', 403);
+    }
+
+    return servePlaylist(c, (service) =>
+      service.getHlsVariantPlaylist({
+        creatorId: payload.creatorId,
+        mediaId,
         variant,
         expirySeconds: presignWindow(payload.exp),
       })

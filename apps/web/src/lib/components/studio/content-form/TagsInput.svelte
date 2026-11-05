@@ -212,7 +212,7 @@
 
   :global([data-theme='dark']) .tag-pill {
     background-color: color-mix(in srgb, var(--color-interactive) 20%, var(--color-surface));
-    color: var(--color-brand-primary-subtle);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark']) .tag-remove:hover {

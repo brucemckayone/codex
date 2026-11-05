@@ -80,8 +80,24 @@
      See themes/light.css for why this is re-declared per scope. */
   --color-on-interactive: oklch(from var(--color-interactive) clamp(0, (0.62 - l) * 1000, 1) 0 0);
 
+  /* The hovered and pressed fills move 0.08 / 0.15 in lightness, so a label
+     chosen for the RESTING fill can fail on them (studio-beta, dark, hovered:
+     3.77:1; Codex-mik4h). Each has its own ink, chosen from the fill actually
+     painted; a :hover rule sets its label from these. The -active ink is
+     there for a pressed fill, which no control paints yet. */
+  --color-on-interactive-hover: oklch(from var(--color-interactive-hover) clamp(0, (0.62 - l) * 1000, 1) 0 0);
+  --color-on-interactive-active: oklch(from var(--color-interactive-active) clamp(0, (0.62 - l) * 1000, 1) 0 0);
+  --color-text-on-brand-hover: oklch(from var(--color-brand-primary-hover) clamp(0, (0.62 - l) * 1000, 1) 0 0);
+
   /* ─── LEGACY PRIMARY ────────────────────────────────────────────────── */
-  --color-primary-500: var(--brand-color, var(--color-primary-500));
+  /* No fallback: one naming this property is a self-reference, a cycle that
+     WebKit computes EMPTY even with a brand colour set (every direct
+     `var(--color-primary-500)` on an org page painted nothing in Safari;
+     Chrome resolved it). The org layout sets `data-org-brand` only with a
+     brand colour, but a page root with its own brand overrides sets it too,
+     and on an org with no brand colour that root has no `--brand-color`: the
+     property is invalid there, as the self-reference was (Codex-g8mz7). */
+  --color-primary-500: var(--brand-color);
   --color-primary-600: oklch(from var(--brand-color, var(--color-primary-500)) calc(l - 0.08) c h);
   --color-primary-100: oklch(from var(--brand-color, var(--color-primary-500)) 0.94 calc(c * 0.25) h);
   --color-primary-50: oklch(from var(--brand-color, var(--color-primary-500)) 0.97 calc(c * 0.15) h);
@@ -99,6 +115,7 @@
      accent actually painted, like --color-on-interactive. THE FALLBACK — the
      live rule is the relative-luminance step in the @supports block below. */
   --color-text-on-accent: oklch(from var(--color-brand-accent) clamp(0, (0.62 - l) * 1000, 1) 0 0);
+  --color-text-on-accent-hover: oklch(from var(--color-brand-accent-hover) clamp(0, (0.62 - l) * 1000, 1) 0 0);
 
   /* ─── MEDIA COVER TREATMENTS (ContentCard shape system) ─────────────── */
   /* Scrim darkens the media bottom for legible overlaid text; glyph is a
@@ -207,8 +224,13 @@
 
   /* ─── BLIND SPOT FIXES ─────────────────────────────────────────── */
   /* These tokens were NOT re-derived from brand inputs. They stayed
-     hardcoded neutral-gray regardless of org branding. */
-  --color-text-tertiary: oklch(from var(--brand-color, var(--color-primary-500)) calc(l * 0.6 + 0.2) calc(c * 0.1) h);
+     hardcoded neutral-gray regardless of org branding.
+     Tertiary text is held at OKLCH lightness 0.54 or below: unheld, it fell
+     to 1.78:1 for a white brand. Measured over a 4 096-colour lattice in
+     Chrome and WebKit, it clears AA on the page, surface and card (worst
+     4.76:1), and studio-beta's is unchanged (Codex-mik4h). An org with its
+     own background takes the [data-org-bg] rule below instead. */
+  --color-text-tertiary: oklch(from var(--brand-color, var(--color-primary-500)) min(calc(l * 0.6 + 0.2), 0.54) calc(c * 0.1) h);
   --color-text-disabled: oklch(from var(--brand-bg, white) clamp(0.4, abs(0.45 - l) + 0.4, 0.7) calc(c * 0.05) h);
   --color-border-hover: oklch(from var(--brand-bg, white) calc(l - 0.15) calc(c * 0.3) h);
   --color-surface-variant: oklch(from var(--brand-bg, white) calc(l - 0.04) calc(c * 0.4) h);
@@ -429,6 +451,10 @@
   /* Same correction, one token over: --color-interactive is re-declared above
      from the DARK brand, so re-deriving the ink here keeps the pair in step. */
   --color-on-interactive: oklch(from var(--color-interactive) clamp(0, (0.62 - l) * 1000, 1) 0 0);
+  /* The hovered and pressed fills are re-declared above, so their inks are too. */
+  --color-on-interactive-hover: oklch(from var(--color-interactive-hover) clamp(0, (0.62 - l) * 1000, 1) 0 0);
+  --color-on-interactive-active: oklch(from var(--color-interactive-active) clamp(0, (0.62 - l) * 1000, 1) 0 0);
+  --color-text-on-brand-hover: oklch(from var(--color-brand-primary-hover) clamp(0, (0.62 - l) * 1000, 1) 0 0);
   --color-border-focus: var(--brand-color-dark, var(--brand-color, var(--color-primary-400)));
   --color-primary-600: oklch(from var(--brand-color-dark, var(--brand-color, var(--color-primary-400))) calc(l + 0.08) c h);
 
@@ -438,6 +464,12 @@
   /* Re-derived because --color-brand-accent is re-declared from the dark accent
      one line up; a single copy would freeze the light reading. */
   --color-text-on-accent: oklch(from var(--color-brand-accent) clamp(0, (0.62 - l) * 1000, 1) 0 0);
+  /* The hovered accent was never re-derived here, so in dark the purchase
+     button's hover was the LIGHT accent darkened (`--brand-accent`, l - 0.08),
+     another colour from a dark accent (Codex-mik4h). It now moves the dark
+     accent the way the primary hovers above move theirs. */
+  --color-brand-accent-hover: oklch(from var(--color-brand-accent) calc(l + 0.08) c h);
+  --color-text-on-accent-hover: oklch(from var(--color-brand-accent-hover) clamp(0, (0.62 - l) * 1000, 1) 0 0);
 
   /* Media cover treatments re-derive under the dark accent (scrim uses the
      dark --color-background from the [data-org-bg] rule below). */
@@ -445,7 +477,11 @@
   --media-glyph: oklch(from var(--color-brand-accent) 0.97 calc(c * 0.06) h);
 
   /* ─── BLIND SPOT FIXES (DARK) ──────────────────────────────────── */
-  --color-text-tertiary: oklch(from var(--brand-color-dark, var(--brand-color, var(--color-primary-400))) calc(l * 0.5 + 0.3) calc(c * 0.1) h);
+  /* Held at OKLCH lightness 0.75 or above: unheld, studio-beta's was 3.45:1
+     on the surface. Measured the same way, it clears AA on the page, the
+     surface and the #404040 card (worst 4.58:1). An org with its own
+     background takes the [data-org-bg] rule below instead. */
+  --color-text-tertiary: oklch(from var(--brand-color-dark, var(--brand-color, var(--color-primary-400))) max(calc(l * 0.5 + 0.3), 0.75) calc(c * 0.1) h);
   --color-text-disabled: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) clamp(0.3, abs(0.5 - l) + 0.3, 0.5) 0 0);
   --color-border-hover: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) calc(l + 0.15) calc(c * 0.3) h);
   --color-surface-variant: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) calc(l + 0.06) calc(c * 0.4) h);
@@ -577,8 +613,8 @@
  * (Codex-kdsuo, and the mechanism the bead does not name)
  * ═══════════════════════════════════════════════════════════════════════════
  *
- * The step above picks the label with `clamp(0, (0.62 - l) * 1000, 1)` — on
- * OKLCH LIGHTNESS. WCAG contrast is computed on RELATIVE LUMINANCE, and the two
+ * The fallback above picks the label with `clamp(0, (0.62 - l) * 1000, 1)` —
+ * on OKLCH LIGHTNESS. WCAG contrast is computed on RELATIVE LUMINANCE, and the two
  * quantities disagree by enough to invert the decision: OKLCH lightness is
  * perceptual and near hue-independent, while luminance weights green at 0.7152
  * against blue at 0.0722. So a green or teal brand sitting at the SAME OKLCH
@@ -640,11 +676,19 @@
  * re-introduces 468 738 AA failures (2.79%) with a worst case of 4.14:1 on a mid
  * grey. Both forms were swept before this one was chosen.
  *
- * `r`, `g` and `b` take values only inside the `rgb(from …)` function, and they
- * are numbers in 0–255, hence the `/ 255`. The expression is written once per
- * channel, though it could be hoisted: a custom property holds unresolved
- * tokens, which bind when substituted inside `rgb(from …)`, as
- * `page-builder/kit/styles/schemes.css` does (`--_lr` … `--_y`). Codex-pyx1s.
+ * WRITTEN ONCE. The step is `--_on-fill-step`, defined on :root at
+ * themes/light.css's foot, and every ink is `rgb(from FILL S S S)` with
+ * S = `calc(255 * var(--_on-fill-step))`. `r`, `g` and `b` take values only
+ * inside `rgb(from …)`; the custom property holds the expression unresolved,
+ * and they bind to FILL where it is substituted, as
+ * `page-builder/kit/styles/schemes.css` does (`--_lr` … `--_y`). They are
+ * numbers in 0–255, hence the `/ 255`, and each is clamped to 0–255 first: a
+ * hovered fill pushed past black or white is out of gamut, and a negative
+ * channel turned the power into NaN (unclamped, 1 605 of the lattice's 8 192
+ * hovered fills, all light-theme and darkened, took a NaN and so black ink,
+ * 878 of them where white was needed, as low as 1.11:1; and 15 dark-theme
+ * fills lightened past 255 took the wrong ink, as low as 4.21:1. None after,
+ * and an in-gamut fill is unchanged).
  *
  * WHY @supports RATHER THAN EDITING THE DECLARATIONS ABOVE. Relative colour
  * needs Chrome 119+ / Firefox 128+ / Safari 16.4+ (this file's header) but
@@ -665,13 +709,18 @@
  *   1. `lib/brand-editor/ink.ts` (`inkOn`, which `rail/contrast.ts` re-exports
  *      as `deriveTextOnBrand`) models it, luminance and all, so the brand
  *      editor's readout says what visitors see. `rail/contrast.test.ts` pins
- *      every copy of this block's expression to its own literal, built from
- *      ink.ts's pivot constant, and sweeps every 8-bit colour against the ramp.
- *   2. `themes/light.css` / `themes/dark.css` carry the same step, under the
- *      same guard, for the PLATFORM path's `--color-on-interactive` and
- *      `--color-text-on-accent`. Neither platform primary is in the band the
- *      fallback misjudges (#c24129 → 5.14, #f47d67 → 7.98), so nothing there
- *      changed colour; the two must not drift.
+ *      the one definition of the step to ink.ts's pivot constant, pins every
+ *      ink in every guarded scope to it, and sweeps every 8-bit colour against
+ *      the ramp.
+ *   2. `themes/light.css` / `themes/dark.css` hold the step (light.css) and the
+ *      PLATFORM path's inks, under the same guard. The platform fills pick the
+ *      same inks under either rule (#c24129 → 5.14, #f47d67 → 7.98).
+ *
+ * INKS FOR THE STATES (Codex-mik4h). The hovered and pressed fills move 0.08 /
+ * 0.15 in lightness, so a label chosen for the resting fill failed on them
+ * (studio-beta, dark, hovered: 3.77:1). `--color-on-interactive-hover`,
+ * `-active`, `--color-text-on-brand-hover` and `--color-text-on-accent-hover`
+ * are chosen from the fill each state paints; worst over the lattice, 4.56:1.
  */
 @supports (color: rgb(from red calc(255 * pow(r / 255, 2)) 0 0)) {
   /* The page-override twin is NOT optional here (Codex-acwap). This block and
@@ -680,59 +729,37 @@
      fallback pivot, so a page-level override would repaint the fill on the
      luminance rule's promise while its label was still chosen by the rule this
      block exists to replace. The derivation itself is untouched — only the
-     scopes it reaches. */
+     scopes it reaches. (The step: `--_on-fill-step`; see WRITTEN ONCE above.) */
   [data-org-brand],
   :where([data-org-brand]) [style*='--brand-'] {
-    --color-text-on-brand: rgb(
-      from var(--brand-color, var(--color-primary-500))
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
-    );
-    --color-on-interactive: rgb(
-      from var(--color-interactive)
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
-    );
-    --color-text-on-accent: rgb(
-      from var(--color-brand-accent)
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
-    );
+    --color-text-on-brand: rgb(from var(--brand-color, var(--color-primary-500)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
+    --color-on-interactive: rgb(from var(--color-interactive) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
+    --color-on-interactive-hover: rgb(from var(--color-interactive-hover) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
+    --color-on-interactive-active: rgb(from var(--color-interactive-active) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
+    --color-text-on-brand-hover: rgb(from var(--color-brand-primary-hover) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
+    --color-text-on-accent: rgb(from var(--color-brand-accent) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
+    --color-text-on-accent-hover: rgb(from var(--color-brand-accent-hover) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
   }
 
   /* The dark twin keeps Codex-5wgwf's correction — the ink is derived from the
      colour ACTUALLY BEING PAINTED, `--brand-color-dark` first — and replaces
-     only the pivot. `--color-on-interactive` must be restated even though its
-     text is identical to the light copy: a custom property substitutes its
-     `var()`s on the element where it is DECLARED, and `--color-interactive` is
-     re-declared from the dark brand in the rule above, so a single copy would
-     freeze the light reading. Same reason themes/light.css gives in its
+     only the pivot. Every ink must be restated even where its text is
+     identical to the light copy: a custom property substitutes its `var()`s on
+     the element where it is DECLARED, and the fills are re-declared from the
+     dark brand in the rule above, so a single copy would freeze the light
+     reading. Same reason themes/light.css gives in its
      `--color-on-interactive` comment. */
   .dark [data-org-brand],
   .dark :where([data-org-brand]) [style*='--brand-'],
   [data-theme='dark'] [data-org-brand],
   [data-theme='dark'] :where([data-org-brand]) [style*='--brand-'],
   [data-editing-theme='dark'][data-org-brand] {
-    --color-text-on-brand: rgb(
-      from var(--brand-color-dark, var(--brand-color, var(--color-primary-400)))
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
-    );
-    --color-on-interactive: rgb(
-      from var(--color-interactive)
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
-    );
-    --color-text-on-accent: rgb(
-      from var(--color-brand-accent)
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
-    );
+    --color-text-on-brand: rgb(from var(--brand-color-dark, var(--brand-color, var(--color-primary-400))) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
+    --color-on-interactive: rgb(from var(--color-interactive) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
+    --color-on-interactive-hover: rgb(from var(--color-interactive-hover) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
+    --color-on-interactive-active: rgb(from var(--color-interactive-active) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
+    --color-text-on-brand-hover: rgb(from var(--color-brand-primary-hover) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
+    --color-text-on-accent: rgb(from var(--color-brand-accent) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
+    --color-text-on-accent-hover: rgb(from var(--color-brand-accent-hover) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
   }
 }

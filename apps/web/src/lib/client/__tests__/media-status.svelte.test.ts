@@ -16,9 +16,11 @@ import {
   type MediaStatusSubscriber,
   POLL_INTERVAL_MS,
   POLLING_SOCKET_RETRY_MS,
+  POLLS_BEFORE_PAUSE,
   RECONNECT_DELAYS_MS,
   REFRESH_DEBOUNCE_MS,
   SILENCE_LIMIT_MS,
+  STABLE_LIVE_MS,
   type StatusSocket,
   TICKET_TIMEOUT_MS,
   UPLOAD_REPORT_INTERVAL_MS,
@@ -499,16 +501,25 @@ describe('recovering', () => {
     await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
     expect(p.refresh).toHaveBeenCalledTimes(2);
 
-    // One socket attempt per 5 min; a snapshot ends the polling.
+    // One socket attempt at 5 min, inside the budget; a snapshot ends the
+    // polling.
     const opened = h.sockets.length;
-    await vi.advanceTimersByTimeAsync(POLLING_SOCKET_RETRY_MS);
+    await vi.advanceTimersByTimeAsync(
+      POLLING_SOCKET_RETRY_MS - POLL_INTERVAL_MS - REFRESH_DEBOUNCE_MS - 1
+    );
+    expect(h.sockets).toHaveLength(opened);
+    await vi.advanceTimersByTimeAsync(1);
+    await settle();
     expect(h.sockets).toHaveLength(opened + 1);
+    // The poll that fell due with the retry refetches first, on its own.
+    await vi.advanceTimersByTimeAsync(REFRESH_DEBOUNCE_MS);
+    const refreshes = p.refresh.mock.calls.length;
     h.last().open();
     h.last().receive(snapshot([]));
     expect(h.store.connection).toBe('live');
-    const refreshes = p.refresh.mock.calls.length;
     await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS * 2);
-    // Only the reconnect's own refetch, no more polling.
+    // Only the reconnect's own refetch (polling may have missed changes),
+    // and no more polling.
     expect(p.refresh.mock.calls.length).toBe(refreshes + 1);
   });
 
@@ -712,6 +723,234 @@ describe('recovering', () => {
     await vi.advanceTimersByTimeAsync(RECONNECT_DELAYS_MS[1]);
     expect(h.sockets).toHaveLength(3);
     expect(h.ticket).toHaveBeenCalledTimes(3);
+  });
+});
+
+/** Fails five connects in a row, so the store polls the list. */
+async function failToPolling(h: ReturnType<typeof harness>) {
+  await settle();
+  for (let failure = 1; failure < FAILURES_BEFORE_POLLING; failure++) {
+    h.last().drop();
+    await vi.advanceTimersByTimeAsync(RECONNECT_DELAYS_MS[failure - 1]);
+  }
+  h.last().drop();
+  expect(h.store.connection).toBe('polling');
+}
+
+/** Polls through the whole budget (its socket retry never answers). */
+async function failToPaused(h: ReturnType<typeof harness>) {
+  await failToPolling(h);
+  await vi.advanceTimersByTimeAsync(POLLS_BEFORE_PAUSE * POLL_INTERVAL_MS);
+  expect(h.store.connection).toBe('paused');
+}
+
+describe('the fallback is bounded (Codex-a6ofh.1.3)', () => {
+  it('refetches six times, a minute apart, then pauses with nothing left running', async () => {
+    const warn = vi.spyOn(logger, 'warn');
+    const h = harness();
+    const p = page();
+    h.store.register(p);
+    await failToPolling(h);
+
+    // The socket retry at 5 min fails too; that does not refill the budget.
+    await vi.advanceTimersByTimeAsync(POLLING_SOCKET_RETRY_MS);
+    await settle();
+    expect(h.sockets).toHaveLength(FAILURES_BEFORE_POLLING + 1);
+    h.last().drop();
+    expect(h.store.connection).toBe('polling');
+
+    await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS + REFRESH_DEBOUNCE_MS);
+    expect(p.refresh).toHaveBeenCalledTimes(POLLS_BEFORE_PAUSE);
+    expect(h.store.connection).toBe('paused');
+    expect(warn).toHaveBeenCalledWith(
+      'media_status.paused',
+      expect.objectContaining({ failures: FAILURES_BEFORE_POLLING + 1 })
+    );
+    expect(vi.getTimerCount()).toBe(0);
+
+    await vi.advanceTimersByTimeAsync(30 * 60_000);
+    expect(p.refresh).toHaveBeenCalledTimes(POLLS_BEFORE_PAUSE);
+    expect(h.ticket).toHaveBeenCalledTimes(FAILURES_BEFORE_POLLING + 1);
+  });
+
+  it('a hidden tab spends none of it and runs no timer; shown, it refetches once and carries on', async () => {
+    const h = harness();
+    const p = page();
+    h.store.register(p);
+    await failToPolling(h);
+    await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS + REFRESH_DEBOUNCE_MS);
+    expect(p.refresh).toHaveBeenCalledTimes(2);
+
+    setVisibility('hidden');
+    await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(p.refresh).toHaveBeenCalledTimes(2);
+    expect(h.ticket).toHaveBeenCalledTimes(FAILURES_BEFORE_POLLING);
+    expect(h.store.connection).toBe('polling');
+
+    setVisibility('visible');
+    document.dispatchEvent(new Event('visibilitychange'));
+    await vi.advanceTimersByTimeAsync(REFRESH_DEBOUNCE_MS);
+    expect(p.refresh).toHaveBeenCalledTimes(3);
+
+    // Three refetches were left, and the socket retry still lands inside
+    // them, at the last one: not 5 min out, past the pause.
+    await vi.advanceTimersByTimeAsync(
+      3 * POLL_INTERVAL_MS - REFRESH_DEBOUNCE_MS
+    );
+    await settle();
+    expect(h.sockets).toHaveLength(FAILURES_BEFORE_POLLING + 1);
+    await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS + REFRESH_DEBOUNCE_MS);
+    expect(p.refresh).toHaveBeenCalledTimes(POLLS_BEFORE_PAUSE);
+    expect(h.store.connection).toBe('paused');
+  });
+
+  it('Refresh refetches the list and tries the socket again, backing off afresh', async () => {
+    const info = vi.spyOn(logger, 'info');
+    const h = harness();
+    const p = page();
+    h.store.register(p);
+    await failToPaused(h);
+    const opened = h.sockets.length;
+    const refreshes = p.refresh.mock.calls.length;
+
+    h.store.resume();
+    // Never 'connecting', which has no chip: the creator sees it try.
+    expect(h.store.connection).toBe('reconnecting');
+    expect(info).toHaveBeenCalledWith('media_status.resumed', {
+      via: 'refresh',
+    });
+    await settle();
+    expect(h.sockets).toHaveLength(opened + 1);
+    await vi.advanceTimersByTimeAsync(REFRESH_DEBOUNCE_MS);
+    expect(p.refresh).toHaveBeenCalledTimes(refreshes + 1);
+
+    // The failure count starts again: the next drop waits 1 s, it does not
+    // fall straight back to polling.
+    h.last().drop();
+    expect(h.store.connection).toBe('reconnecting');
+    await vi.advanceTimersByTimeAsync(RECONNECT_DELAYS_MS[0]);
+    expect(h.sockets).toHaveLength(opened + 2);
+    h.last().open();
+    h.last().receive(snapshot([]));
+    expect(h.store.connection).toBe('live');
+
+    // Refresh does nothing unless paused.
+    h.store.resume();
+    await settle();
+    expect(h.sockets).toHaveLength(opened + 2);
+  });
+
+  it('a socket that drops right after its snapshot is a failed connect: it cannot flap for ever', async () => {
+    const h = harness();
+    const p = page();
+    h.store.register(p);
+    await settle();
+    for (let failure = 1; failure <= FAILURES_BEFORE_POLLING; failure++) {
+      h.last().open();
+      h.last().receive(snapshot([]));
+      h.last().drop();
+      if (failure < FAILURES_BEFORE_POLLING) {
+        // The backoff grows, as for any failed connect: 1, 2, 5, 10 s.
+        await vi.advanceTimersByTimeAsync(RECONNECT_DELAYS_MS[failure - 1]);
+      }
+    }
+    expect(h.store.connection).toBe('polling');
+
+    await vi.advanceTimersByTimeAsync(POLLS_BEFORE_PAUSE * POLL_INTERVAL_MS);
+    expect(h.store.connection).toBe('paused');
+    await vi.advanceTimersByTimeAsync(30 * 60_000);
+    // Five flaps, then the one socket retry the budget holds.
+    expect(h.ticket).toHaveBeenCalledTimes(FAILURES_BEFORE_POLLING + 1);
+  });
+
+  it('a socket retry that reaches a snapshot, then drops at once, does not refill the budget', async () => {
+    const h = harness();
+    const p = page();
+    h.store.register(p);
+    await failToPolling(h);
+    await vi.advanceTimersByTimeAsync(POLLING_SOCKET_RETRY_MS);
+    await settle();
+    h.last().open();
+    h.last().receive(snapshot([]));
+    expect(h.store.connection).toBe('live');
+
+    h.last().drop();
+    // The budget was spent while polling: back to polling is straight to paused.
+    expect(h.store.connection).toBe('paused');
+    // Once the last poll's refetch (a one-shot debounce) has landed.
+    await vi.advanceTimersByTimeAsync(REFRESH_DEBOUNCE_MS);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('a socket that stayed live a minute starts the backoff, and the budget, afresh', async () => {
+    const h = harness();
+    const p = page();
+    h.store.register(p);
+    await failToPolling(h);
+    await vi.advanceTimersByTimeAsync(POLLING_SOCKET_RETRY_MS);
+    await settle();
+    h.last().open();
+    h.last().receive(snapshot([]));
+    await vi.advanceTimersByTimeAsync(STABLE_LIVE_MS);
+    h.last().receive('pong');
+
+    const opened = h.sockets.length;
+    h.last().drop();
+    expect(h.store.connection).toBe('reconnecting');
+    await vi.advanceTimersByTimeAsync(RECONNECT_DELAYS_MS[0]);
+    expect(h.sockets).toHaveLength(opened + 1);
+
+    // Four more failures (five in a row) poll again, with a whole budget.
+    for (let failure = 2; failure < FAILURES_BEFORE_POLLING; failure++) {
+      h.last().drop();
+      await vi.advanceTimersByTimeAsync(RECONNECT_DELAYS_MS[failure - 1]);
+    }
+    h.last().drop();
+    expect(h.store.connection).toBe('polling');
+    const refreshes = p.refresh.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(
+      (POLLS_BEFORE_PAUSE - 1) * POLL_INTERVAL_MS + REFRESH_DEBOUNCE_MS
+    );
+    expect(p.refresh.mock.calls.length - refreshes).toBe(POLLS_BEFORE_PAUSE);
+  });
+
+  it('a socket retry that fails while no page is open leaves nothing to pause the next visit', async () => {
+    const h = harness();
+    const release = h.store.register(page());
+    await failToPolling(h);
+    await vi.advanceTimersByTimeAsync(POLLING_SOCKET_RETRY_MS - 10_000);
+    // The creator leaves; the store lingers for 30 s.
+    release();
+    await vi.advanceTimersByTimeAsync(10_000);
+    await settle();
+    h.last().drop();
+    expect(h.store.connection).toBe('idle');
+    // The last poll's one-shot refetch lands, still inside the linger.
+    await vi.advanceTimersByTimeAsync(REFRESH_DEBOUNCE_MS);
+
+    // Back within the linger: a fresh visit, with its own backoff, and no
+    // tick of the old fallback refetching (spending its budget) meanwhile.
+    const again = page();
+    h.store.register(again);
+    await settle();
+    expect(h.store.connection).toBe('reconnecting');
+    h.last().drop();
+    await vi.advanceTimersByTimeAsync(2 * POLL_INTERVAL_MS);
+    expect(again.refresh).not.toHaveBeenCalled();
+    expect(h.store.connection).toBe('reconnecting');
+  });
+
+  it('a page opened again while paused connects again', async () => {
+    const h = harness();
+    const release = h.store.register(page());
+    await failToPaused(h);
+    const opened = h.sockets.length;
+    release();
+    h.store.register(page());
+    await settle();
+    expect(h.sockets).toHaveLength(opened + 1);
   });
 });
 

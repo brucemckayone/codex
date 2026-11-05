@@ -231,6 +231,17 @@ describe('Media Item Schemas', () => {
   });
 
   describe('updateMediaItemSchema', () => {
+    it('allows the 5,000-character description create allows (Codex-a6ofh.1.4)', () => {
+      expect(
+        updateMediaItemSchema.safeParse({ description: 'd'.repeat(5000) })
+          .success
+      ).toBe(true);
+      expect(
+        updateMediaItemSchema.safeParse({ description: 'd'.repeat(5001) })
+          .success
+      ).toBe(false);
+    });
+
     it('accepts what a creator may edit', () => {
       const result = updateMediaItemSchema.parse({
         title: 'Retitled',
@@ -881,8 +892,46 @@ describe('Query Schemas', () => {
       const result = mediaQuerySchema.parse({});
 
       expect(result.page).toBe(1);
-      expect(result.limit).toBe(20);
+      // 24 divides into the library's 4, 3 and 2 columns (Codex-a6ofh.1.4).
+      expect(result.limit).toBe(24);
       expect(result.sortBy).toBe('createdAt');
+      expect(result.usage).toBe('any');
+      expect(result.search).toBeUndefined();
+    });
+
+    it('takes a status group as well as a raw status, and nothing else', () => {
+      for (const status of [
+        'processing',
+        'attention',
+        'attachable',
+        'uploading',
+        'failed',
+      ]) {
+        expect(mediaQuerySchema.parse({ status }).status).toBe(status);
+      }
+      expect(mediaQuerySchema.safeParse({ status: 'stalled' }).success).toBe(
+        false
+      );
+    });
+
+    it('takes the usage filter, the two new sorts, and bounds the search', () => {
+      const result = mediaQuerySchema.parse({
+        usage: 'unused',
+        sortBy: 'fileSizeBytes',
+        search: '  50% off  ',
+      });
+      expect(result).toMatchObject({
+        usage: 'unused',
+        sortBy: 'fileSizeBytes',
+        search: '50% off',
+      });
+      expect(mediaQuerySchema.parse({ sortBy: 'durationSeconds' }).sortBy).toBe(
+        'durationSeconds'
+      );
+      expect(mediaQuerySchema.safeParse({ usage: 'some' }).success).toBe(false);
+      expect(
+        mediaQuerySchema.safeParse({ search: 'x'.repeat(256) }).success
+      ).toBe(false);
     });
 
     it('should validate with filters', () => {

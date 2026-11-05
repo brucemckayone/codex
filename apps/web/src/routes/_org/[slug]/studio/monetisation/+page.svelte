@@ -2956,10 +2956,11 @@
     background: var(--color-surface);
   }
 
+  /* The gap ring takes the fill's ink, as AccessSection's does (Codex-mik4h). */
   .choice-card[data-selected] .choice-check {
     border-color: var(--color-interactive);
     background-color: var(--color-interactive);
-    box-shadow: inset 0 0 0 var(--space-1) var(--color-surface);
+    box-shadow: inset 0 0 0 var(--space-1) var(--color-on-interactive);
   }
 
   .choice-detail {

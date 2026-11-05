@@ -51,7 +51,14 @@
   const dialog = createDialog({
     // We omit the 'open' property from the initial options to avoid type errors with runes
     // and instead sync it via the states object and $effect.
-    onOpenChange: ({ next }) => {
+    onOpenChange: ({ curr, next }) => {
+      // Only a real change is one. Melt calls this on every `set` of its
+      // store, false to false included, and the sync effect below sets it on
+      // mount and again after each change it reports. Passed on, a closed
+      // dialog said "closed" on mount and a close said it twice; a consumer
+      // whose close writes the URL then navigated in a loop (the media
+      // drawer, Codex-a6ofh.1.7: 9.8 GB in Chrome).
+      if (next === curr) return next;
       // Melt closing on its own (Escape, a press outside, the close button)
       // while not dismissible: refused. Our own `open = false` has already
       // set the prop, so it passes. This is the one guard for every path, and

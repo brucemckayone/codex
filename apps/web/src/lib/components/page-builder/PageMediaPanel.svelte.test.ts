@@ -38,6 +38,12 @@ vi.mock('$lib/remote/journeys.remote', async () => {
 });
 
 vi.mock('$lib/remote/media.remote', () => ({
+  // The picker reads its chosen item by id (Codex-a6ofh.1.8); never loaded here.
+  getMediaItem: () => ({
+    current: undefined,
+    error: undefined,
+    refresh: async () => {},
+  }),
   listMedia: async () => ({ items: [] }),
 }));
 

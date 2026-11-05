@@ -38,6 +38,20 @@ describe('tokenOverridesToCssVars', () => {
     expect(result['--color-surface-secondary']).toBe('#fafafa');
   });
 
+  // The retired 'On Brand' key (Codex-mik4h): every label is chosen from its
+  // own fill, so a saved value must not repaint them inline.
+  it('ignores a saved text-on-brand, light and dark', () => {
+    expect(
+      tokenOverridesToCssVars({
+        'text-on-brand': '#ffd700',
+        'text-secondary': '#555555',
+      })
+    ).toEqual({ '--color-text-secondary': '#555555' });
+    expect(darkTokenOverridesToCssVars({ 'text-on-brand': '#ffd700' })).toEqual(
+      {}
+    );
+  });
+
   it('skips hero-hide-* keys (attribute-only, no CSS consumer)', () => {
     const result = tokenOverridesToCssVars({
       'hero-hide-title': '1',

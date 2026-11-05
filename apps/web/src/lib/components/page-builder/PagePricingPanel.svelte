@@ -622,12 +622,23 @@
   }
 
   .way--on .way__sw {
-    background-color: color-mix(in oklab, var(--color-interactive) 55%, var(--color-surface-secondary));
+    --_track: color-mix(in oklab, var(--color-interactive) 55%, var(--color-surface-secondary));
+    background-color: var(--_track);
   }
 
+  /* The checked thumb takes its track's ink (owner, Codex-mik4h: "Thumb takes
+     the track's ink when checked"). The track is a mix no token names, so the
+     ink is the luminance step taken from it (`--_on-fill-step`, light.css). A
+     brand thumb on the brand's own mix was under 3:1 for 3 680 of the 4 096
+     lattice brands in light and all of them in dark, down to 1:1. */
   .way--on .way__sw::after {
     transform: translateX(calc(var(--sw-w) - var(--sw-h)));
-    background-color: var(--color-interactive);
+    background-color: oklch(from var(--_track) clamp(0, (0.62 - l) * 1000, 1) 0 0);
+  }
+  @supports (color: rgb(from red calc(255 * pow(r / 255, 2)) 0 0)) {
+    .way--on .way__sw::after {
+      background-color: rgb(from var(--_track) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
+    }
   }
 
   .way__sw:focus-visible {

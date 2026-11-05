@@ -5,6 +5,7 @@
  * All types are inferred from database schema or explicitly defined.
  */
 
+import type { MediaStatusGroup } from '@codex/constants';
 import type { DatabaseClient, dbHttp } from '@codex/database';
 import type {
   Content,
@@ -82,9 +83,25 @@ export interface ContentFilters {
  * Media item query filters
  */
 export interface MediaItemFilters {
-  status?: 'uploading' | 'uploaded' | 'transcoding' | 'ready' | 'failed';
+  /** A raw status, or one of `MEDIA_STATUS_GROUPS` (Codex-a6ofh.1.4). */
+  status?:
+    | 'uploading'
+    | 'uploaded'
+    | 'transcoding'
+    | 'ready'
+    | 'failed'
+    | MediaStatusGroup;
   mediaType?: 'video' | 'audio';
-  sortBy?: 'createdAt' | 'uploadedAt' | 'title';
+  /** Matched in the title or description; empty is no search. */
+  search?: string;
+  /** By what uses the item: the library chip's own reference set. */
+  usage?: 'any' | 'used' | 'unused';
+  sortBy?:
+    | 'createdAt'
+    | 'uploadedAt'
+    | 'title'
+    | 'durationSeconds'
+    | 'fileSizeBytes';
   sortOrder?: SortOrder;
 }
 
@@ -147,6 +164,17 @@ export interface MediaItemWithRelations extends ServedMediaItem {
 export interface MediaListItem extends MediaItemWithRelations {
   usage: MediaUsageCounts;
 }
+
+/**
+ * A media item as content-api SERVES it: its poster resolved to the CDN
+ * (`thumbnailUrl`, from `thumbnailKey`, null without one). The list rows and
+ * the single read both send it (Codex-a6ofh.1.8), so a surface showing one
+ * item from either read shows the same picture. The service returns the row;
+ * the route adds the URL.
+ */
+export type ServedMedia<
+  T extends MediaItemWithRelations = MediaItemWithRelations,
+> = T & { thumbnailUrl: string | null };
 
 /**
  * Re-export database types for convenience
@@ -263,13 +291,15 @@ export type DeleteContentResponse = null;
  * Response for GET /api/media/:id
  * Returns a single media item with full relations
  */
-export type MediaResponse = SingleItemResponse<MediaItemWithRelations>;
+export type MediaResponse = SingleItemResponse<ServedMedia>;
 
 /**
  * Response for GET /api/media
  * Returns paginated list of media items with relations
  */
-export type MediaListResponse = PaginatedListResponse<MediaListItem>;
+export type MediaListResponse = PaginatedListResponse<
+  ServedMedia<MediaListItem>
+>;
 
 /**
  * Response for GET /api/media/:id/usage (Codex-6sbn1)

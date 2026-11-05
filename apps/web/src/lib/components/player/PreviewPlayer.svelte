@@ -350,6 +350,7 @@
 
   .preview-player__cta-button:hover {
     background-color: var(--color-interactive-hover);
+    color: var(--color-on-interactive-hover);
   }
 
   .preview-player__cta-button:focus-visible {

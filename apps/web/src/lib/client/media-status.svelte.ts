@@ -13,7 +13,11 @@
  *   - Each connect fetches a fresh single-use ticket (`getMediaStatusTicket`).
  *   - A drop reconnects after 1, 2, 5, 10, then 30 s, jittered. Five failed
  *     connects in a row (a proxy that blocks WebSockets) fall back to
- *     refetching the list every 60 s, with one socket attempt every 5 min.
+ *     refetching the list: six times a visit, 60 s apart, only while the
+ *     tab is visible, with a socket attempt among them. Then it pauses, and
+ *     nothing runs until the creator's Refresh (`resume()`) or a new visit.
+ *     A socket that drops within a minute of its snapshot counts as a
+ *     failed connect too, so one that flaps cannot reconnect for ever.
  *     A connect that hangs, or a socket that never sends a snapshot this
  *     page can read (a newer protocol after a deploy), counts as failed.
  *     So does a socket the browser shut without a close event: Chromium
@@ -50,8 +54,21 @@ export const RECONNECT_DELAYS_MS = [1_000, 2_000, 5_000, 10_000, 30_000];
 /** Failed connects in a row before the list is polled instead. */
 export const FAILURES_BEFORE_POLLING = 5;
 export const POLL_INTERVAL_MS = 60_000;
-/** While polling, how often a socket is tried again. */
+/**
+ * Refetches the fallback makes, 60 s apart and only while the tab is visible,
+ * before it pauses and waits for the creator's Refresh (owner rule: no
+ * open-ended polling, Codex-a6ofh.1.3). It used to poll for as long as the
+ * tab stayed open.
+ */
+export const POLLS_BEFORE_PAUSE = 6;
+/** While polling, when a socket is tried again: capped by the budget left. */
 export const POLLING_SOCKET_RETRY_MS = 5 * 60_000;
+/**
+ * A socket live this long has proved itself: its drop starts the backoff,
+ * and the fallback's budget, afresh. One that drops sooner is a failed
+ * connect (Codex-a6ofh.1.3).
+ */
+export const STABLE_LIVE_MS = 60_000;
 /** The object answers 'ping' with 'pong' without waking (auto-response). */
 export const HEARTBEAT_MS = 30_000;
 /** Nothing heard for this long, pongs included: the socket is dead. */
@@ -85,6 +102,8 @@ export type MediaStatusConnection =
   | 'live'
   | 'reconnecting'
   | 'polling'
+  /** The fallback spent its budget: nothing runs until Refresh (or a new visit). */
+  | 'paused'
   | 'stopped';
 
 /** What a page tells the store about its list. */
@@ -162,6 +181,20 @@ export function createMediaStatus(transport: MediaStatusTransport) {
   let generation = 0;
   let failures = 0;
   let authRefusals = 0;
+  /**
+   * Refetches the fallback may still make this visit before it pauses.
+   * Refilled only by a new visit, Refresh, or a socket that proved itself.
+   */
+  let pollsLeft = POLLS_BEFORE_PAUSE;
+  /**
+   * This visit has shown the fallback: a connect after it reads as
+   * reconnecting, so the chip (and a Refresh's feedback) stays on screen.
+   */
+  let fellBack = false;
+  /** When this connection's socket sent its first snapshot. */
+  let liveSince = 0;
+  /** The fallback is suspended while the tab is hidden: no timer runs. */
+  let pollingHidden = false;
   let lastFailure: ConnectFailure | null = null;
   /** A snapshot after a drop refetches the list: changes may have been missed. */
   let wasLive = false;
@@ -354,8 +387,9 @@ export function createMediaStatus(transport: MediaStatusTransport) {
     switch (message.type) {
       case 'snapshot':
         applySnapshot(message.items);
-        failures = 0;
+        // `failures` is reset only once the socket proves itself (closed()).
         lastFailure = null;
+        if (!snapshotSeen) liveSince = Date.now();
         snapshotSeen = true;
         wasLive = true;
         connection = 'live';
@@ -381,9 +415,7 @@ export function createMediaStatus(transport: MediaStatusTransport) {
   async function connect(): Promise<void> {
     reconnectTimer = clear(reconnectTimer);
     const mine = ++generation;
-    if (connection !== 'polling') {
-      connection = wasLive ? 'reconnecting' : 'connecting';
-    }
+    if (connection !== 'polling') connection = waiting();
 
     let ticket: MediaStatusTicket;
     try {
@@ -466,6 +498,10 @@ export function createMediaStatus(transport: MediaStatusTransport) {
       end('session_closed');
       return;
     }
+    if (snapshotSeen && Date.now() - liveSince >= STABLE_LIVE_MS) {
+      failures = 0;
+      pollsLeft = POLLS_BEFORE_PAUSE;
+    }
     lastFailure = {
       stage: snapshotSeen ? 'socket' : 'connect',
       closeCode: code,
@@ -483,7 +519,10 @@ export function createMediaStatus(transport: MediaStatusTransport) {
   /** A connect that did not reach a snapshot, or a socket that dropped. */
   function failed(): void {
     if (subscribers.size === 0) {
-      // Lingering with no page: the next register() connects afresh.
+      // Lingering with no page: the next register() connects afresh, and
+      // no tick of this fallback may pause that visit.
+      stopPolling();
+      reconnectTimer = clear(reconnectTimer);
       connection = 'idle';
       return;
     }
@@ -492,7 +531,7 @@ export function createMediaStatus(transport: MediaStatusTransport) {
       startPolling();
       return;
     }
-    connection = wasLive ? 'reconnecting' : 'connecting';
+    connection = waiting();
     const base =
       RECONNECT_DELAYS_MS[
         Math.min(failures - 1, RECONNECT_DELAYS_MS.length - 1)
@@ -527,21 +566,97 @@ export function createMediaStatus(transport: MediaStatusTransport) {
     heartbeatTimer = clearEvery(heartbeatTimer);
   }
 
+  /** Between connects: shown as reconnecting once there is a chip to keep. */
+  function waiting(): MediaStatusConnection {
+    return wasLive || fellBack ? 'reconnecting' : 'connecting';
+  }
+
+  /**
+   * Five connects failed: refetch the list instead, from what is left of
+   * this visit's budget. Coming back here (a failed socket retry, or one that
+   * dropped before it proved itself) never refills it.
+   */
   function startPolling(): void {
     if (connection !== 'polling') {
       logger.warn('media_status.polling', { failures, ...lastFailure });
+      connection = 'polling';
+      fellBack = true;
+      pollTick();
     }
-    connection = 'polling';
-    scheduleRefresh();
-    if (pollTimer === null) {
-      pollTimer = setInterval(scheduleRefresh, POLL_INTERVAL_MS);
-    }
+    armPolling();
+  }
+
+  function armPolling(): void {
+    if (pollingHidden || connection !== 'polling') return;
+    if (pollTimer === null) pollTimer = setInterval(pollTick, POLL_INTERVAL_MS);
     reconnectTimer = clear(reconnectTimer);
-    reconnectTimer = setTimeout(() => void connect(), POLLING_SOCKET_RETRY_MS);
+    // The socket retry lands while the budget lasts: at 5 min, or sooner
+    // when a hidden spell left less. A spent budget retries nothing more.
+    const retryIn = Math.min(
+      POLLING_SOCKET_RETRY_MS,
+      pollsLeft * POLL_INTERVAL_MS
+    );
+    if (retryIn > 0) {
+      reconnectTimer = setTimeout(() => void connect(), retryIn);
+    }
+  }
+
+  /**
+   * One step of the fallback. The tick after the last refetch pauses, so the
+   * socket retry at 5 min still gets its chance before nothing runs.
+   */
+  function pollTick(): void {
+    // A tick that outlived its fallback must never pause a newer visit.
+    if (connection !== 'polling') {
+      pollTimer = clearEvery(pollTimer);
+      return;
+    }
+    if (
+      typeof document !== 'undefined' &&
+      document.visibilityState === 'hidden'
+    ) {
+      suspendPolling();
+      return;
+    }
+    if (pollsLeft <= 0) {
+      pause();
+      return;
+    }
+    pollsLeft -= 1;
+    scheduleRefresh();
+  }
+
+  /** A hidden tab spends none of the budget and runs no timer until shown. */
+  function suspendPolling(): void {
+    if (pollingHidden) return;
+    pollingHidden = true;
+    pollTimer = clearEvery(pollTimer);
+    reconnectTimer = clear(reconnectTimer);
+    document.addEventListener('visibilitychange', onPollingVisible);
+  }
+
+  function onPollingVisible(): void {
+    if (document.visibilityState !== 'visible') return;
+    document.removeEventListener('visibilitychange', onPollingVisible);
+    pollingHidden = false;
+    if (connection !== 'polling') return;
+    pollTick();
+    armPolling();
   }
 
   function stopPolling(): void {
     pollTimer = clearEvery(pollTimer);
+    if (pollingHidden) {
+      document.removeEventListener('visibilitychange', onPollingVisible);
+      pollingHidden = false;
+    }
+  }
+
+  /** The budget is spent: stop everything, and show the creator a Refresh. */
+  function pause(): void {
+    logger.warn('media_status.paused', { failures, ...lastFailure });
+    stop();
+    connection = 'paused';
   }
 
   function closeSocket(): void {
@@ -586,10 +701,20 @@ export function createMediaStatus(transport: MediaStatusTransport) {
     }
     failures = 0;
     authRefusals = 0;
+    pollsLeft = POLLS_BEFORE_PAUSE;
+    fellBack = false;
     lastFailure = null;
     wasLive = false;
     connection = 'idle';
     syncClock();
+  }
+
+  /** The creator asked again (a visit, Refresh): a whole budget, a new try. */
+  function startAfresh(): void {
+    failures = 0;
+    authRefusals = 0;
+    pollsLeft = POLLS_BEFORE_PAUSE;
+    void connect();
   }
 
   // ── The countdown clock ─────────────────────────────────────────────────
@@ -645,10 +770,16 @@ export function createMediaStatus(transport: MediaStatusTransport) {
     register(subscriber: MediaStatusSubscriber): () => void {
       subscribers.add(subscriber);
       lingerTimer = clear(lingerTimer);
-      if (connection === 'idle' || connection === 'stopped') {
-        failures = 0;
-        authRefusals = 0;
-        void connect();
+      // A page opened again is the creator asking afresh, as Refresh is.
+      if (connection === 'paused') {
+        logger.info('media_status.resumed', { via: 'visit' });
+      }
+      if (
+        connection === 'idle' ||
+        connection === 'stopped' ||
+        connection === 'paused'
+      ) {
+        startAfresh();
       }
       return () => {
         if (!subscribers.delete(subscriber) || subscribers.size > 0) return;
@@ -692,6 +823,19 @@ export function createMediaStatus(transport: MediaStatusTransport) {
     endUpload(mediaId: string): void {
       uploads.delete(mediaId);
       sentPct.delete(mediaId);
+    },
+
+    /**
+     * The creator pressed Refresh once the fallback paused, or acted on an
+     * item (`'action'`: a Try again, a finished upload) they will want to
+     * watch: refetch the list now and try the socket again. If that fails
+     * too, it earns a fresh, equally bounded fallback. No-op unless paused.
+     */
+    resume(via: 'refresh' | 'action' = 'refresh'): void {
+      if (connection !== 'paused') return;
+      logger.info('media_status.resumed', { via });
+      scheduleRefresh();
+      startAfresh();
     },
 
     /** A different user signed in on this origin: start again as them. */

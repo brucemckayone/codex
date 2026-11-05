@@ -21,14 +21,13 @@
   import { describeThrown } from '$lib/client-log';
   import { Button } from '$lib/components/ui';
   import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
-  import MediaPicker from '$lib/components/studio/MediaPicker.svelte';
+  import MediaPickerDialog from '$lib/components/studio/media-library/MediaPickerDialog.svelte';
   import {
     getIntroFilm,
     linkIntroVideo,
     unlinkIntroVideo,
   } from '$lib/remote/branding.remote';
   import { logger } from '$lib/observability';
-  import { listMedia } from '$lib/remote/media.remote';
   import { isFirstLoad, queryErrorMessage } from '$lib/remote/query-result';
   import { formatDuration } from '$lib/utils/format';
   import { getThumbnailUrl } from '$lib/utils/image';
@@ -51,25 +50,6 @@
   const picking = $derived(
     film?.current === null || (chosen !== null && changing)
   );
-
-  // The library is read only while the picker is up, so a studio with a
-  // film already chosen asks for nothing until its creator wants to change it.
-  const library = $derived(
-    picking ? listMedia({ status: 'ready', mediaType: 'video', limit: 100 }) : null
-  );
-  const libraryError = $derived(queryErrorMessage(library?.error));
-  const videos = $derived(
-    (library?.current?.items ?? []).map((item) => ({
-      id: item.id,
-      title: item.title,
-      mediaType: item.mediaType,
-      durationSeconds: item.durationSeconds,
-      fileSizeBytes: item.fileSizeBytes,
-      thumbnailUrl: item.thumbnailUrl,
-    }))
-  );
-  // The read takes the first 100: say so when there are more.
-  const libraryTotal = $derived(library?.current?.pagination?.total ?? 0);
 
   let busy = $state(false);
   let saveError = $state<string | null>(null);
@@ -189,31 +169,18 @@
     {#if picking}
       <div class="hero-film__field">
         <span class="hero-film__label">{m.branding_film_label()}</span>
-        {#if libraryError}
-          <p class="hero-film__error" role="alert">{m.branding_film_library_failed()}</p>
-          <Button variant="secondary" size="sm" onclick={() => reread(library, 'library')}>
-            {m.common_try_again()}
-          </Button>
-        {:else if isFirstLoad(library)}
-          <!-- Not an empty picker: that would say there are no videos. -->
-          <Skeleton height="var(--space-10)" aria-hidden="true" />
-        {:else}
-          <MediaPicker
-            mediaItems={videos}
-            value={chosen?.mediaItemId ?? null}
-            onchange={pick}
-            name="introVideoMediaItemId"
-            ariaLabel={m.branding_film_choose()}
-            disabled={busy}
-            thumbnails
-            showLibraryLink
-          />
-          {#if libraryTotal > videos.length}
-            <p class="hero-film__note">
-              {m.branding_film_library_capped({ shown: videos.length, total: libraryTotal })}
-            </p>
-          {/if}
-        {/if}
+        <!-- The chosen film shows above, with what visitors get: this offers
+             its replacement, so it starts empty. The library is read only
+             when the dialog opens, searched and paged on the server
+             (Codex-a6ofh.1.8), so no first-100 cut-off. Ready videos only:
+             an unfinished one has nothing for a visitor to play. -->
+        <MediaPickerDialog
+          value={null}
+          onchange={pick}
+          mediaTypes={['video']}
+          ariaLabel={m.branding_film_choose()}
+          disabled={busy}
+        />
         <p class="hero-film__note">
           {m.branding_film_upload_lead()}
           <a href="/studio/media">{m.branding_film_upload_link()}</a>.

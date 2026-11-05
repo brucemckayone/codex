@@ -168,12 +168,14 @@
 
   .bubble-btn:hover {
     background-color: var(--color-neutral-800);
-    color: var(--color-text-on-brand);
+    /* A fixed dark tile, so a fixed light neutral: a brand's ink goes black
+       on a pale brand (Codex-mik4h). */
+    color: var(--color-neutral-50);
   }
 
   .bubble-btn[data-active] {
     background-color: var(--color-interactive-hover);
-    color: var(--color-text-on-brand);
+    color: var(--color-on-interactive-hover);
   }
 
   .bubble-separator {
@@ -191,7 +193,7 @@
     border: var(--border-width) var(--border-style) var(--color-neutral-600);
     border-radius: var(--radius-sm);
     background-color: var(--color-neutral-800);
-    color: var(--color-text-on-brand);
+    color: var(--color-neutral-50);
     outline: none;
   }
 

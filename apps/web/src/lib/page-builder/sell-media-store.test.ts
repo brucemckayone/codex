@@ -455,21 +455,26 @@ describe('sell-media store · read failure', () => {
     expect(sellMedia.loaded).toBe(true);
   });
 
-  it('keeps the LIBRARY failure reason instead of rendering it as "no media"', async () => {
+  // The picker reads the creator's library itself, searched and paged on the
+  // server (Codex-a6ofh.1.8): the store's old 100-item read is gone, so a
+  // library past 100 is never cut short here, and its failure is the picker's.
+  it('never reads the library: the pickers do, on open', async () => {
     getJourneySellMedia.mockResolvedValue(PERSISTED);
-    listMedia.mockRejectedValue({
-      status: 500,
-      body: { message: 'Media service unavailable' },
-    });
 
     await sellMedia.open(PAGE_ID);
 
-    expect(sellMedia.options).toEqual([]);
-    // An empty list with a reason beside it is a different fact from an empty
-    // list without one, and only the store can tell them apart.
-    expect(sellMedia.loadError).toBe('Media service unavailable');
-    // Fail-soft holds: the attached media still hydrated.
+    expect(listMedia).not.toHaveBeenCalled();
+    expect(sellMedia.loaded).toBe(true);
     expect(sellMedia.slot('heroMediaId')).toBe(PERSISTED.heroMediaId);
+  });
+
+  it('tells each picker what its slot holds: a still needs a frame, a clip may be audio', () => {
+    expect(sellMedia.acceptsFor('heroMediaId')).toEqual(['video']);
+    expect(sellMedia.acceptsFor('guidePortraitMediaId')).toEqual(['video']);
+    expect(sellMedia.acceptsFor('introVideoMediaId')).toEqual([
+      'video',
+      'audio',
+    ]);
   });
 
   it('a failed ATTACHED-media read leaves no baseline, so a pick cannot wipe the rest', async () => {
@@ -500,8 +505,6 @@ describe('sell-media store · read failure', () => {
     expect(getJourneySellMedia).not.toHaveBeenCalled();
     expect(sellMedia.loadError).toBeNull();
     expect(sellMedia.loaded).toBe(false);
-    // The library still loads: those options are org-wide, not course-scoped.
-    expect(listMedia).toHaveBeenCalledTimes(1);
   });
 
   it('close() forgets a previous failure', async () => {

@@ -424,12 +424,13 @@
 
   .subscription-success__btn--primary {
     background: var(--color-interactive);
-    color: var(--color-text-inverse);
+    color: var(--color-on-interactive);
     width: 100%;
   }
 
   .subscription-success__btn--primary:hover {
     background: var(--color-interactive-hover);
+    color: var(--color-on-interactive-hover);
   }
 
   .subscription-success__btn--secondary {

@@ -95,6 +95,8 @@ export type {
   SectionProps,
   StoredEntitlementSource,
 } from './journeys';
+// The media library's whole-library numbers (Codex-a6ofh.1.6)
+export type { MediaLibrarySummary } from './media-library';
 // Where a media item is used (Codex-6sbn1)
 export type {
   MediaUsage,

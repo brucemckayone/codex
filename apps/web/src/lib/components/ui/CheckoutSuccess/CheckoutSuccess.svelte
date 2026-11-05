@@ -728,12 +728,13 @@
 
   .checkout-success__btn--primary {
     background: var(--color-interactive);
-    color: var(--color-text-inverse);
+    color: var(--color-on-interactive);
     width: 100%;
   }
 
   .checkout-success__btn--primary:hover {
     background: var(--color-interactive-hover);
+    color: var(--color-on-interactive-hover);
   }
 
   .checkout-success__btn--secondary {
@@ -758,8 +759,11 @@
     cursor: progress;
   }
 
+  /* Hover is suppressed while held, so the ink reverts with the fill: the
+     spinner draws in currentColor. */
   .checkout-success__btn--held:hover {
     background: var(--color-interactive);
+    color: var(--color-on-interactive);
   }
 
   .checkout-success__btn--held .checkout-success__btn-label {

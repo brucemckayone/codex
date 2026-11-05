@@ -11,6 +11,7 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
+  import { filterHref } from '$lib/utils/filter-url';
   import * as m from '$paraglide/messages';
   import {
     Alert,
@@ -152,12 +153,7 @@
   };
 
   function setUrlParam(key: string, value: string | null) {
-    const params = new URLSearchParams(page.url.searchParams);
-    if (value && value !== URL_DEFAULTS[key]) params.set(key, value);
-    else params.delete(key);
-    if (key !== 'page') params.delete('page');
-    const qs = params.toString();
-    goto(`/studio/sales${qs ? `?${qs}` : ''}`, {
+    goto(filterHref(page.url, { [key]: value }, URL_DEFAULTS), {
       replaceState: true,
       keepFocus: true,
     });

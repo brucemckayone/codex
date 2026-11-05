@@ -25,6 +25,7 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
+  import { filterHref } from '$lib/utils/filter-url';
   import * as m from '$paraglide/messages';
   import { tick } from 'svelte';
   import { Alert, Badge, Button, EmptyState, PageHeader, Skeleton } from '$lib/components/ui';
@@ -307,12 +308,7 @@
 
   // ── Handlers ─────────────────────────────────────────────────────────
   function setUrlParam(key: string, value: string | null) {
-    const params = new URLSearchParams(page.url.searchParams);
-    if (value) params.set(key, value);
-    else params.delete(key);
-    if (key !== 'page') params.delete('page'); // any filter change resets page
-    const qs = params.toString();
-    goto(`/studio/subscribers${qs ? `?${qs}` : ''}`, {
+    goto(filterHref(page.url, { [key]: value }), {
       replaceState: true,
       keepFocus: true,
     });

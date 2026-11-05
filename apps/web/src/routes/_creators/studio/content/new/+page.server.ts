@@ -1,33 +1,13 @@
 /**
  * New Content Page (Creator Studio) - Server Load
  *
- * Loads available media items for the media picker.
- * Media is always creator-scoped, so no organizationId filter needed.
+ * Personal content: no organization. The media picker reads the creator's
+ * library itself, on open, searched and paged on the server
+ * (Codex-a6ofh.1.8), so no media list is loaded here.
  */
-import { createServerApi } from '$lib/server/api';
 import type { PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({ platform, cookies }) => {
-  try {
-    const api = createServerApi(platform, cookies);
-    const params = new URLSearchParams();
-    params.set('status', 'ready');
-    params.set('limit', '50');
-    params.set('sortBy', 'createdAt');
-    params.set('sortOrder', 'desc');
-
-    const mediaResult = await api.media.list(params);
-
-    return {
-      organizationId: null,
-      orgSlug: null,
-      mediaItems: mediaResult?.items ?? [],
-    };
-  } catch {
-    return {
-      organizationId: null,
-      orgSlug: null,
-      mediaItems: [],
-    };
-  }
-};
+export const load: PageServerLoad = () => ({
+  organizationId: null,
+  orgSlug: null,
+});

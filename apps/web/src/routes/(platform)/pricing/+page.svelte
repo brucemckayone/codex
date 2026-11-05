@@ -193,11 +193,12 @@
 
   .plan-cta-primary {
     background-color: var(--color-interactive);
-    color: var(--color-text-inverse);
+    color: var(--color-on-interactive);
   }
 
   .plan-cta-primary:hover {
     background-color: var(--color-interactive-hover);
+    color: var(--color-on-interactive-hover);
   }
 
   .plan-cta-secondary {

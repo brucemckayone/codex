@@ -34,7 +34,7 @@
   panel and the inspectors can never disagree about what is pending.
 
   THE STILL SLOTS (hero, portrait) OFFER VIDEO ONLY, via
-  `sellMedia.optionsFor(slot)`. An audio item has no frame by construction — the
+  `sellMedia.acceptsFor(slot)`. An audio item has no frame by construction — the
   transcoder writes
   `thumbnailKey: null` for anything that is not a video — so picking one for a
   still used to save cleanly, show no error, and leave the section drawing its
@@ -55,7 +55,7 @@
 <script lang="ts">
   import { MAX_IMAGE_SIZE_BYTES } from '@codex/validation';
   import * as m from '$paraglide/messages';
-  import MediaPicker from '$lib/components/studio/MediaPicker.svelte';
+  import MediaPickerDialog from '$lib/components/studio/media-library/MediaPickerDialog.svelte';
   import { UnlinkIcon } from '$lib/components/ui/Icon';
   import { toast } from '$lib/components/ui/Toast/toast-store';
   import { sellMedia } from '$lib/page-builder/sell-media-store.svelte';
@@ -169,11 +169,12 @@
     a failed read makes "No cover" a claim the store cannot support either.
 
     IT DOES NOT LOCK THE CONTROLS, unlike the pricing panel's `locked`, and that is
-    a gap rather than a choice: `MediaPicker` takes no `disabled` prop, so the
-    slots stay pickable while `sellMedia.loaded` is false — and such a pick lands
-    in the pending draft and is then dropped rather than persisted (see the store's
-    `#loaded`). The message is what tells the creator that; the lock needs a prop on
-    a component this panel does not own.
+    a gap rather than a choice: `MediaPickerDialog` takes `disabled`, but
+    `sellMedia.loaded` is also false after a failed read, so wiring it would leave
+    every slot dead. The slots stay pickable, and such a pick lands in the pending
+    draft and is then dropped rather than persisted (see the store's `#loaded`).
+    The message is what tells the creator that; the lock needs a guard in
+    `setSlot` first.
   -->
   {#if sellMedia.loadError}
     <p class="panel__warn" role="alert">{sellMedia.loadError}</p>
@@ -527,42 +528,32 @@
       {@const slotLabelId = `jm-${entry.slot}`}
       {@const missing = sellMedia.missingTitle(entry.slot)}
       <!--
-        `role="group"` + `aria-labelledby`: `MediaPicker` renders a combobox input
-        plus a clear button (plus a preview button once something is chosen), so a
-        `<label>` wrapping it would label none of them — and Melt's own
-        `aria-labelledby` on the input points at a `$label` element the picker never
-        renders, so it DANGLES and the widget's name falls through to the shared
-        placeholder "Select media...". Every slot in `SLOTS` named identically is
-        not a name — and the count is deliberately not written out here, because a
-        stated number goes stale the first time a slot is added.
-        The full fix is a label prop on `MediaPicker` (handed off); a named group is
-        what this panel can do, and the section inspector does the same.
+        `role="group"` + `aria-labelledby`: the picker renders a Choose (or
+        Change) button plus a Remove button, so a `<label>` wrapping it would
+        label neither. The group names the FIELD; the picker's `ariaLabel` names
+        its button, so every slot in `SLOTS` is told apart. The count is
+        deliberately not written out here, because a stated number goes stale the
+        first time a slot is added.
       -->
       <div class="panel__field" role="group" aria-labelledby={slotLabelId}>
         <span class="panel__label" id={slotLabelId}>{entry.label()}</span>
         <!--
-          `optionsFor`, not `options`: the STILL slots offer video only.
-          An audio item has `thumbnailKey: null` by construction, so offering one
-          here let a creator pick something that could only ever resolve to
-          nothing — saved clean, no error, section unchanged. The accept-list
-          lives in the store so this panel and the section inspectors cannot
-          disagree; the server re-checks it regardless.
+          `acceptsFor`: the STILL slots offer video only. An audio item has
+          `thumbnailKey: null` by construction, so offering one here let a
+          creator pick something that could only ever resolve to nothing —
+          saved clean, no error, section unchanged. The accept-list lives in the
+          store so this panel and the section inspectors cannot disagree; the
+          server re-checks it regardless. `entry.label()` is the visible label,
+          so the button's name cannot drift from it.
+          NO `disabled` here on purpose — see the note above the load error.
+          `setSlot` is unguarded and `save()` no-ops on an unloaded store, so a
+          pick made during the read IS silently discarded; the fix belongs in
+          the store, and `!loaded` is also true after a failed read. Filed.
         -->
-        <!-- Same reasoning as the section inspector's picker: the wrapper's
-             `role="group"` names the FIELD, while Melt's dangling
-             `aria-labelledby` left the TRIGGER falling through to the shared
-             "Select media…" placeholder — four slots, one name between them.
-             `entry.label()` is the visible label, so they cannot drift.
-             NO `disabled` here on purpose — see the note at the section inspector's
-             picker. `setSlot` is unguarded and `save()` no-ops on an unloaded store,
-             so a pick made during the read IS silently discarded; the fix belongs in
-             the store, and `!loaded` is also true after a failed read. Filed. -->
-        <MediaPicker
-          mediaItems={sellMedia.optionsFor(entry.slot)}
+        <MediaPickerDialog
+          mediaTypes={sellMedia.acceptsFor(entry.slot)}
           value={sellMedia.slot(entry.slot)}
-          name={`journey-media-${entry.slot}`}
           ariaLabel={entry.label()}
-          showLibraryLink
           onchange={(mediaItemId) => sellMedia.setSlot(entry.slot, mediaItemId)}
         />
         <span class="panel__hint">{entry.hint()}</span>

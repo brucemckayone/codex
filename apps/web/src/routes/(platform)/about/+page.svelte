@@ -95,7 +95,7 @@
     align-items: center;
     padding: var(--space-3) var(--space-6);
     background-color: var(--color-interactive);
-    color: var(--color-text-inverse);
+    color: var(--color-on-interactive);
     border-radius: var(--radius-lg);
     font-size: var(--text-base);
     font-weight: var(--font-semibold);
@@ -105,5 +105,6 @@
 
   .cta:hover {
     background-color: var(--color-interactive-hover);
+    color: var(--color-on-interactive-hover);
   }
 </style>

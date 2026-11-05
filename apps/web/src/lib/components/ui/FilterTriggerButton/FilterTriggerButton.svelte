@@ -138,7 +138,7 @@
     height: var(--space-4);
     padding: 0 var(--space-1);
     background: var(--color-interactive);
-    color: var(--color-text-on-brand);
+    color: var(--color-on-interactive);
     border: var(--border-width) var(--border-style) var(--color-surface);
     border-radius: var(--radius-full);
     font-family: var(--font-sans);

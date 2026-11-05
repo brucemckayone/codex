@@ -184,11 +184,12 @@
 
   .btn-primary {
     background: var(--color-interactive);
-    color: var(--color-text-on-brand);
+    color: var(--color-on-interactive);
   }
 
   .btn-primary:hover {
     background: var(--color-interactive-hover);
+    color: var(--color-on-interactive-hover);
   }
 
   .btn-secondary {

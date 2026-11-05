@@ -341,6 +341,7 @@
 
   .access-revoked__btn--primary:hover:not(:disabled) {
     background: var(--color-brand-accent-hover, var(--color-primary-600));
+    color: var(--color-text-on-accent-hover);
   }
 
   .access-revoked__btn--secondary {
