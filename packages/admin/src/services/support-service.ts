@@ -5104,9 +5104,9 @@ function heldPriceMoveOf(
       status === 'queued'
         ? queuedRunFor(now, move.nextAttemptAt).toISOString()
         : null,
-    // Owner D1, "Wait while disputed": the run defers a live member with an
-    // open chargeback by a day, after its ended check, so a row nothing
-    // will run (closed, or the subscription ended) is not waiting for it.
+    // Owner D1, "Wait while disputed", mirroring the sweep: it defers a live
+    // member with an open chargeback by a day, after its ended check, so a
+    // row nothing will run (closed, or the subscription ended) is not waiting.
     waitsForDispute: status !== 'closed' && !ended && row.subscriptionDisputed,
     resolution:
       move.resolvedAt &&

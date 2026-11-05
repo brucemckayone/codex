@@ -1003,7 +1003,9 @@ export interface HeldPriceMove {
   /**
    * The member has an open chargeback, so the run waits for it to end
    * (owner D1, "Wait while disputed") and moves `queuedFor` a day on each
-   * time. Filled by the late-win undo (Codex-2hxff.70, D1-a).
+   * time. It mirrors the price-moves sweep, in the sweep's own order: true
+   * only for a row not closed, on a subscription that hasn't ended, whose
+   * tier or course subscription has `disputed_at` set (Codex-2hxff.70, D1-a).
    */
   waitsForDispute: boolean;
   /** Close's record. Null in the list. */
