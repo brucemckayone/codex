@@ -28,7 +28,10 @@
 		positioning,
 		disableFocusTrap,
 		arrowSize,
-		escapeBehavior,
+		// Melt's default too, for the same reason as `closeOnOutsideClick`: its
+		// Escape handler spreads `{ behaviorType: undefined }` over its own
+		// 'close', so without this Escape never closed a popover.
+		escapeBehavior = 'close',
 		// Default to Melt's own default (true). Without it this is `undefined`
 		// and the $effect below `.set(undefined)`s it, disabling the
 		// interact-outside listener so the popover never closes on outside click.

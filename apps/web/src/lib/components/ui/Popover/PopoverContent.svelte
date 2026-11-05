@@ -33,10 +33,14 @@
 </script>
 
 {#if $open}
+	<!-- Melt's content carries no role, while its trigger says
+	     `aria-haspopup="dialog"`: the panel is that non-modal dialog, so its
+	     `aria-label` names something. A consumer's own `role` (in `rest`) wins. -->
 	<div
 		{...$content}
 		use:content
 		class="popover-content {className ?? ''}"
+		role="dialog"
 		transition:fly={motion}
 		{...rest}
 	>

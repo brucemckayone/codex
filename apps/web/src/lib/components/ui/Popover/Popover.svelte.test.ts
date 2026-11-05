@@ -130,6 +130,18 @@ describe('PopoverTrigger', () => {
     expect(trigger?.getAttribute('data-state')).toBe('open');
   });
 
+  // Popover.Root's default. Melt derives its own aria-expanded from
+  // visibility there, which is always on, so a closed popover said "true".
+  test('under forceVisible, a closed popover says aria-expanded="false"', () => {
+    component = mount(PopoverHarness, {
+      target: document.body,
+      props: { open: false, forceVisible: true },
+    });
+    flushSync();
+    const trigger = document.querySelector('[data-testid="popover-trigger"]');
+    expect(trigger?.getAttribute('aria-expanded')).toBe('false');
+  });
+
   test('aria-controls references the popover content id when open', () => {
     component = mount(PopoverHarness, {
       target: document.body,
@@ -170,6 +182,16 @@ describe('PopoverContent', () => {
 
     const content = document.querySelector('[data-testid="popover-content"]');
     expect(content?.getAttribute('tabindex')).toBe('-1');
+  });
+
+  test('is a dialog, so its aria-label names it', () => {
+    component = mount(PopoverHarness, {
+      target: document.body,
+      props: { open: true },
+    });
+    flushSync();
+    const content = document.querySelector('[data-testid="popover-content"]');
+    expect(content?.getAttribute('role')).toBe('dialog');
   });
 
   test('has data-state="open" when popover is open', () => {
@@ -220,6 +242,25 @@ describe('Popover focus on close', () => {
     expect(document.activeElement).toBe(
       document.querySelector('[data-testid="popover-trigger"]')
     );
+  });
+
+  test('Escape closes it', async () => {
+    const onOpenChange = vi.fn();
+    component = mount(PopoverHarness, {
+      target: document.body,
+      props: { open: true, onOpenChange },
+    });
+    flushSync();
+    await settle();
+    // From inside the panel, as a key press is: Melt ignores one whose target
+    // is not an element.
+    document
+      .querySelector('[data-testid="popover-content"]')
+      ?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })
+      );
+    flushSync();
+    expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
   test('goes where closeFocus says', async () => {

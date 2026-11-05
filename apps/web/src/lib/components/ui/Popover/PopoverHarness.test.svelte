@@ -10,6 +10,7 @@
     defaultOpen?: boolean;
     onOpenChange?: (open: boolean) => void;
     closeFocus?: CreatePopoverProps['closeFocus'];
+    forceVisible?: boolean;
   }
 
   let {
@@ -17,10 +18,11 @@
     defaultOpen = false,
     onOpenChange,
     closeFocus,
+    forceVisible = false,
   }: Props = $props();
 </script>
 
-<Popover bind:open {defaultOpen} {onOpenChange} {closeFocus} forceVisible={false}>
+<Popover bind:open {defaultOpen} {onOpenChange} {closeFocus} {forceVisible}>
   <PopoverTrigger data-testid="popover-trigger">Open popover</PopoverTrigger>
   <PopoverContent data-testid="popover-content">
     <p>Popover body text</p>
