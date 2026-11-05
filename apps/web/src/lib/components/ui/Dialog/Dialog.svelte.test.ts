@@ -519,6 +519,28 @@ describe('DialogContent', () => {
     expect(document.querySelector('.dialog-overlay')).toBeNull();
   });
 
+  // A drawer that scrolls as a whole pins its close button (sticky, keyed
+  // on this attribute); a floating drawer and a dialog clip, so theirs stays
+  // absolute.
+  test.each([
+    [{}, 'dialog'],
+    [{ variant: 'drawer' }, 'drawer'],
+    [{ variant: 'drawer', sheet: true }, 'drawer'],
+    [{ variant: 'drawer', floating: true }, 'floating'],
+  ] as const)('the close button of %o reads the %s layout', (props, expected) => {
+    component = mount(DialogHarness, {
+      target: document.body,
+      props: { open: true, ...props },
+    });
+    flushSync();
+
+    const content = document.querySelector('.dialog-content');
+    const close = document.querySelector('.dialog-close');
+    expect(close?.getAttribute('data-layout')).toBe(expected);
+    // Still last in the panel: the tab order and Melt's first focus are unchanged.
+    expect(content?.lastElementChild).toBe(close);
+  });
+
   test('closeButton={false} drops the built-in close button', () => {
     component = mount(DialogHarness, {
       target: document.body,
