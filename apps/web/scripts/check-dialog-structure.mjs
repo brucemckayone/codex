@@ -166,8 +166,13 @@ const DIALOG_CLASSES = [
 // `.dialog-content-wrapper`, which is listed on its own.
 const DIALOG_CLASS_RE = new RegExp(`\\.(${DIALOG_CLASSES.join('|')})(?![\\w-])`);
 
-const CONTENT_CHILDREN = new Set(['Header', 'Body', 'Footer', 'Form']);
-const FORM_CHILDREN = new Set(['Body', 'Footer']);
+/** The parts each container part may hold directly, and the rule's name. */
+const CHILD_RULES = {
+  Content: { rule: 'content-child', allowed: new Set(['Header', 'Body', 'Footer', 'Form']) },
+  Form: { rule: 'form-child', allowed: new Set(['Body', 'Footer']) },
+};
+
+const SCANNED_EXTS = ['.svelte', '.css', '.ts', '.js'];
 
 // Nodes that render no element of their own: look through to their children.
 const TRANSPARENT_BLOCKS = {
@@ -180,6 +185,20 @@ const TRANSPARENT_BLOCKS = {
 };
 // Nodes that render nothing at all.
 const SILENT_NODES = new Set(['Comment', 'ConstTag', 'DebugTag', 'DeclareTag']);
+
+/**
+ * Depth-first over a Svelte or ESTree AST. `enter(node)` returning false
+ * skips that node's children.
+ */
+function walk(node, enter) {
+  if (Array.isArray(node)) {
+    for (const item of node) walk(item, enter);
+  } else if (node && typeof node.type === 'string' && enter(node) !== false) {
+    for (const [key, value] of Object.entries(node)) {
+      if (key !== 'metadata' && value && typeof value === 'object') walk(value, enter);
+    }
+  }
+}
 
 function walkFiles(dir, exts, files = []) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -235,29 +254,32 @@ function resolveSpecifier(importer, spec, ctx) {
   return null;
 }
 
-/** Local name -> { namespace: true } | { part: 'Content' } for one file. */
+const reexportDetail = (spec) => `re-exports the Dialog module ('${spec}'), which hides it from this check`;
+
+/** One import's bindings: local name -> { namespace: true } | { part }. */
+function bindImport(stmt, target, bindings) {
+  for (const s of stmt.specifiers) {
+    if (s.type === 'ImportNamespaceSpecifier' && target.module) {
+      bindings.set(s.local.name, { namespace: true });
+    } else if (s.type === 'ImportSpecifier' && target.module) {
+      bindings.set(s.local.name, { part: s.imported.name ?? s.imported.value });
+    } else if (s.type === 'ImportDefaultSpecifier' && target.part) {
+      bindings.set(s.local.name, { part: target.part });
+    }
+  }
+}
+
+/**
+ * Local name -> Dialog binding for one file. Any other statement with a
+ * `source` that reaches the Dialog is a re-export, which fails loudly.
+ */
 function collectBindings(file, programs, ctx, report) {
   const bindings = new Map();
-  for (const program of programs) {
-    for (const stmt of program.body) {
-      const isReexport =
-        (stmt.type === 'ExportNamedDeclaration' || stmt.type === 'ExportAllDeclaration') && stmt.source;
-      if (isReexport && resolveSpecifier(file, stmt.source.value, ctx)) {
-        report(stmt.start, 'alias', `re-exports the Dialog module ('${stmt.source.value}'), which hides it from this check`);
-      }
-      if (stmt.type !== 'ImportDeclaration') continue;
-      const target = resolveSpecifier(file, stmt.source.value, ctx);
-      if (!target) continue;
-      for (const s of stmt.specifiers) {
-        if (target.part) {
-          if (s.type === 'ImportDefaultSpecifier') bindings.set(s.local.name, { part: target.part });
-        } else if (s.type === 'ImportNamespaceSpecifier') {
-          bindings.set(s.local.name, { namespace: true });
-        } else if (s.type === 'ImportSpecifier') {
-          bindings.set(s.local.name, { part: s.imported.name ?? s.imported.value });
-        }
-      }
-    }
+  for (const stmt of programs.flatMap((program) => program.body)) {
+    const target = stmt.source ? resolveSpecifier(file, stmt.source.value, ctx) : null;
+    if (!target) continue;
+    if (stmt.type === 'ImportDeclaration') bindImport(stmt, target, bindings);
+    else report(stmt.start, 'alias', reexportDetail(stmt.source.value));
   }
   return bindings;
 }
@@ -266,20 +288,12 @@ function collectBindings(file, programs, ctx, report) {
 function checkScriptReferences(programs, bindings, report) {
   const namespaces = new Set([...bindings].filter(([, b]) => b.namespace).map(([name]) => name));
   if (namespaces.size === 0) return;
-  const visit = (node) => {
-    if (!node || typeof node.type !== 'string') return;
-    if (node.type === 'ImportDeclaration') return;
+  walk(programs, (node) => {
+    if (node.type === 'ImportDeclaration') return false;
     if (node.type === 'Identifier' && namespaces.has(node.name)) {
       report(node.start, 'alias', `'${node.name}' is read in script; use its parts as <${node.name}.X> tags only`);
-      return;
     }
-    for (const [key, value] of Object.entries(node)) {
-      if (key === 'type' || key === 'loc' || key === 'start' || key === 'end') continue;
-      if (Array.isArray(value)) value.forEach(visit);
-      else if (value && typeof value === 'object') visit(value);
-    }
-  };
-  programs.forEach(visit);
+  });
 }
 
 /** The Dialog part a markup node renders, or null. */
@@ -291,19 +305,13 @@ function partOf(node, bindings) {
   return ns?.namespace ? node.name.slice(dot + 1) : null;
 }
 
-function collectSnippets(fragment, snippets = new Map()) {
-  const visit = (node) => {
-    if (!node || typeof node !== 'object') return;
-    if (Array.isArray(node)) return node.forEach(visit);
+function collectSnippets(fragment) {
+  const snippets = new Map();
+  walk(fragment, (node) => {
     if (node.type === 'SnippetBlock' && !snippets.has(node.expression.name)) {
       snippets.set(node.expression.name, node);
     }
-    for (const [key, value] of Object.entries(node)) {
-      if (key === 'type' || key === 'metadata') continue;
-      if (value && typeof value === 'object') visit(value);
-    }
-  };
-  visit(fragment);
+  });
   return snippets;
 }
 
@@ -319,27 +327,32 @@ function renderCallee(tag) {
  * cannot follow.
  */
 function* directChildren(fragment, snippets, onUnknown, seen = new Set()) {
-  if (!fragment) return;
-  for (const node of fragment.nodes) {
-    if (node.type === 'Text') {
-      if (node.data.trim() !== '') yield node;
-    } else if (SILENT_NODES.has(node.type)) {
-      // renders nothing
-    } else if (TRANSPARENT_BLOCKS[node.type]) {
+  for (const node of fragment?.nodes ?? []) {
+    if (TRANSPARENT_BLOCKS[node.type]) {
       for (const inner of TRANSPARENT_BLOCKS[node.type](node)) {
         yield* directChildren(inner, snippets, onUnknown, seen);
       }
     } else if (node.type === 'RenderTag') {
-      const name = renderCallee(node);
-      const snippet = name && snippets.get(name);
-      if (!snippet) onUnknown(node, name);
-      else if (!seen.has(snippet)) {
-        yield* directChildren(snippet.body, snippets, onUnknown, new Set([...seen, snippet]));
-      }
-    } else {
+      yield* renderedChildren(node, snippets, onUnknown, seen);
+    } else if (rendersSomething(node)) {
       yield node;
     }
   }
+}
+
+/** A local snippet's top level, as if written in place of its {@render}. */
+function* renderedChildren(tag, snippets, onUnknown, seen) {
+  const name = renderCallee(tag);
+  const snippet = name && snippets.get(name);
+  if (!snippet) onUnknown(tag, name);
+  else if (!seen.has(snippet)) {
+    yield* directChildren(snippet.body, snippets, onUnknown, new Set([...seen, snippet]));
+  }
+}
+
+function rendersSomething(node) {
+  if (node.type === 'Text') return node.data.trim() !== '';
+  return !SILENT_NODES.has(node.type);
 }
 
 function describe(node) {
@@ -349,33 +362,26 @@ function describe(node) {
   return node.name ? `<${node.name}>` : node.type;
 }
 
+/** content-child / form-child for one Dialog.Content or Dialog.Form node. */
+function checkChildren(node, part, { bindings, snippets, report }) {
+  const { rule, allowed } = CHILD_RULES[part];
+  const want = [...allowed].map((p) => `Dialog.${p}`).join(' / ');
+  const onUnknown = (tag, name) =>
+    report(tag.start, rule, `{@render ${name ?? '…'}()} directly in Dialog.${part} renders what this check cannot see`);
+  for (const child of directChildren(node.fragment, snippets, onUnknown)) {
+    if (allowed.has(partOf(child, bindings))) continue;
+    // A Text node starts at the whitespace before its words.
+    const at = child.type === 'Text' ? child.start + child.data.search(/\S/) : child.start;
+    report(at, rule, `${describe(child)} is a direct child of Dialog.${part}; only ${want}`);
+  }
+}
+
 function checkMarkup(ast, bindings, report) {
-  const snippets = collectSnippets(ast.fragment);
-  const visit = (node) => {
-    if (!node || typeof node !== 'object') return;
-    if (Array.isArray(node)) return node.forEach(visit);
+  const scope = { bindings, snippets: collectSnippets(ast.fragment), report };
+  walk(ast.fragment, (node) => {
     const part = partOf(node, bindings);
-    const allowed = part === 'Content' ? CONTENT_CHILDREN : part === 'Form' ? FORM_CHILDREN : null;
-    if (allowed) {
-      const rule = part === 'Content' ? 'content-child' : 'form-child';
-      const onUnknown = (tag, name) =>
-        report(tag.start, rule, `{@render ${name ?? '…'}()} directly in Dialog.${part} renders what this check cannot see`);
-      for (const child of directChildren(node.fragment, snippets, onUnknown)) {
-        const childPart = partOf(child, bindings);
-        if (!allowed.has(childPart)) {
-          const want = [...allowed].map((p) => `Dialog.${p}`).join(' / ');
-          // A Text node starts at the whitespace before its words.
-          const at = child.type === 'Text' ? child.start + child.data.search(/\S/) : child.start;
-          report(at, rule, `${describe(child)} is a direct child of Dialog.${part}; only ${want}`);
-        }
-      }
-    }
-    for (const [key, value] of Object.entries(node)) {
-      if (key === 'type' || key === 'metadata') continue;
-      if (value && typeof value === 'object') visit(value);
-    }
-  };
-  visit(ast.fragment);
+    if (CHILD_RULES[part]) checkChildren(node, part, scope);
+  });
 }
 
 function staticAttrValue(attr) {
@@ -386,26 +392,21 @@ function staticAttrValue(attr) {
     .join('');
 }
 
+/** What a hand-built modal attribute claims, or null. */
+function ownDialogAttr(attr) {
+  if (attr.type !== 'Attribute') return null;
+  if (attr.name === 'aria-modal') return 'aria-modal';
+  return attr.name === 'role' && /\b(alert)?dialog\b/.test(staticAttrValue(attr)) ? 'role="dialog"' : null;
+}
+
 function checkOwnDialog(ast, report) {
-  const visit = (node) => {
-    if (!node || typeof node !== 'object') return;
-    if (Array.isArray(node)) return node.forEach(visit);
-    if (Array.isArray(node.attributes) && node.fragment) {
-      for (const attr of node.attributes) {
-        if (attr.type !== 'Attribute') continue;
-        if (attr.name === 'aria-modal') {
-          report(attr.start, 'own-dialog', `${describe(node)} sets aria-modal; build the modal from Dialog.Root/Content`);
-        } else if (attr.name === 'role' && /\b(alert)?dialog\b/.test(staticAttrValue(attr))) {
-          report(attr.start, 'own-dialog', `${describe(node)} sets role="dialog"; build the modal from Dialog.Root/Content`);
-        }
-      }
+  walk(ast.fragment, (node) => {
+    if (!Array.isArray(node.attributes) || !node.fragment) return;
+    for (const attr of node.attributes) {
+      const claim = ownDialogAttr(attr);
+      if (claim) report(attr.start, 'own-dialog', `${describe(node)} sets ${claim}; build the modal from Dialog.Root/Content`);
     }
-    for (const [key, value] of Object.entries(node)) {
-      if (key === 'type' || key === 'metadata' || key === 'attributes') continue;
-      if (value && typeof value === 'object') visit(value);
-    }
-  };
-  visit(ast.fragment);
+  });
 }
 
 function checkSvelteCss(css, source, report) {
@@ -435,6 +436,49 @@ function checkCssFile(source, report) {
   }
 }
 
+/** .ts/.js: only a re-export can smuggle the module past the check. */
+function checkReexports(file, source, ctx, report) {
+  for (const m of source.matchAll(/export\s+[^'";]*?\s+from\s+(['"])([^'"]+)\1/g)) {
+    if (resolveSpecifier(file, m[2], ctx)) report(m.index, 'alias', reexportDetail(m[2]));
+  }
+}
+
+function checkSvelteFile(file, source, ctx, report) {
+  let ast;
+  try {
+    ast = parse(source, { modern: true, filename: file });
+  } catch (error) {
+    report(error.position?.[0] ?? 0, 'parse', `does not parse, so it cannot be checked: ${error.message.split('\n')[0]}`);
+    return;
+  }
+  const programs = [ast.module?.content, ast.instance?.content].filter(Boolean);
+  const bindings = collectBindings(file, programs, ctx, report);
+  checkScriptReferences(programs, bindings, report);
+  checkMarkup(ast, bindings, report);
+  if (ast.css && !isInside(ctx.dialogDir, file)) checkSvelteCss(ast.css, source, report);
+  if (!isInside(ctx.uiDir, file)) checkOwnDialog(ast, report);
+}
+
+/** Every rule that applies to one file, by its kind and where it lives. */
+function scanFile(file, source, ctx, report) {
+  if (file.endsWith('.svelte')) checkSvelteFile(file, source, ctx, report);
+  else if (isInside(ctx.dialogDir, file)) return;
+  else if (file.endsWith('.css')) checkCssFile(source, report);
+  else checkReexports(file, source, ctx, report);
+}
+
+/** Waive what the allowlist names; an entry that waives nothing is stale. */
+function applyAllowlist(found, allowlist) {
+  const used = new Set();
+  const violations = found.filter((v) => {
+    const entry = allowlist.find((a) => a.file === v.file && a.rule === v.rule);
+    if (entry) used.add(entry);
+    return !entry;
+  });
+  const stale = allowlist.filter((a) => !used.has(a));
+  return { violations, allowlisted: found.length - violations.length, stale };
+}
+
 /**
  * Core scan, pure over the tree it is pointed at. Paths in the result are
  * relative to `cwd`, with forward slashes, as the allowlist spells them.
@@ -447,57 +491,18 @@ export function collectViolations({ srcRoot = join(WEB_ROOT, 'src'), cwd = WEB_R
   const libRoot = join(srcRoot, 'lib');
   const uiDir = join(libRoot, 'components', 'ui');
   const dialogDir = join(uiDir, 'Dialog');
-  const ctx = { libRoot, dialogDir, partFiles: readPartFiles(dialogDir) };
+  const ctx = { libRoot, uiDir, dialogDir, partFiles: readPartFiles(dialogDir) };
 
   const found = [];
-  let filesScanned = 0;
-  const rel = (file) => relative(cwd, file).split(sep).join('/');
-
-  for (const file of walkFiles(srcRoot, ['.svelte', '.css', '.ts', '.js'])) {
-    filesScanned += 1;
+  const files = walkFiles(srcRoot, SCANNED_EXTS);
+  for (const file of files) {
     const source = readFileSync(file, 'utf8');
-    const report = (offset, rule, detail) => found.push({ file: rel(file), line: lineOf(source, offset), rule, detail });
-    const inDialogDir = isInside(dialogDir, file);
-
-    if (file.endsWith('.css')) {
-      if (!inDialogDir) checkCssFile(source, report);
-      continue;
-    }
-    if (!file.endsWith('.svelte')) {
-      // .ts/.js: only a re-export can smuggle the module past the check.
-      if (!inDialogDir && /\bexport\b[^;]*\bfrom\b/.test(source)) {
-        for (const m of source.matchAll(/export\s+[^'";]*?\s+from\s+(['"])([^'"]+)\1/g)) {
-          if (resolveSpecifier(file, m[2], ctx)) {
-            report(m.index, 'alias', `re-exports the Dialog module ('${m[2]}'), which hides it from this check`);
-          }
-        }
-      }
-      continue;
-    }
-
-    let ast;
-    try {
-      ast = parse(source, { modern: true, filename: file });
-    } catch (error) {
-      report(error.position?.[0] ?? 0, 'parse', `does not parse, so it cannot be checked: ${error.message.split('\n')[0]}`);
-      continue;
-    }
-    const programs = [ast.module?.content, ast.instance?.content].filter(Boolean);
-    const bindings = collectBindings(file, programs, ctx, report);
-    checkScriptReferences(programs, bindings, report);
-    checkMarkup(ast, bindings, report);
-    if (ast.css && !inDialogDir) checkSvelteCss(ast.css, source, report);
-    if (!isInside(uiDir, file)) checkOwnDialog(ast, report);
+    const name = relative(cwd, file).split(sep).join('/');
+    scanFile(file, source, ctx, (offset, rule, detail) =>
+      found.push({ file: name, line: lineOf(source, offset), rule, detail })
+    );
   }
-
-  const used = new Set();
-  const violations = found.filter((v) => {
-    const entry = allowlist.find((a) => a.file === v.file && a.rule === v.rule);
-    if (entry) used.add(entry);
-    return !entry;
-  });
-  const stale = allowlist.filter((a) => !used.has(a));
-  return { violations, allowlisted: found.length - violations.length, stale, filesScanned };
+  return { ...applyAllowlist(found, allowlist), filesScanned: files.length };
 }
 
 function main() {
