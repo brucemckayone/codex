@@ -255,6 +255,79 @@ describe('DialogContent', () => {
     const content = document.querySelector('.dialog-content');
     expect(content?.getAttribute('data-size')).toBe('lg');
   });
+
+  test('defaults to the dialog variant, and Body learns it from Content', () => {
+    component = mount(DialogHarness, {
+      target: document.body,
+      props: { open: true, sheet: true, flush: true },
+    });
+
+    flushSync();
+
+    const content = document.querySelector('.dialog-content');
+    expect(content?.getAttribute('data-variant')).toBe('dialog');
+    // sheet and flush are drawer-only: a dialog ignores them.
+    expect(content?.hasAttribute('data-sheet')).toBe(false);
+    expect(content?.hasAttribute('data-flush')).toBe(false);
+    expect(
+      document.querySelector('.dialog-body')?.getAttribute('data-variant')
+    ).toBe('dialog');
+  });
+
+  test('a drawer marks the panel, the overlay, its Body and its Footer', () => {
+    component = mount(DialogHarness, {
+      target: document.body,
+      props: {
+        open: true,
+        variant: 'drawer',
+        sheet: true,
+        flush: true,
+        size: 'sm',
+      },
+    });
+
+    flushSync();
+
+    const content = document.querySelector('.dialog-content');
+    expect(content?.getAttribute('data-variant')).toBe('drawer');
+    expect(content?.getAttribute('data-size')).toBe('sm');
+    expect(content?.hasAttribute('data-sheet')).toBe(true);
+    expect(content?.hasAttribute('data-flush')).toBe(true);
+    expect(
+      document.querySelector('.dialog-overlay')?.getAttribute('data-variant')
+    ).toBe('drawer');
+    expect(
+      document.querySelector('.dialog-body')?.getAttribute('data-variant')
+    ).toBe('drawer');
+    expect(
+      document.querySelector('.dialog-footer')?.getAttribute('data-variant')
+    ).toBe('drawer');
+  });
+
+  test('a drawer marks a Dialog.Form too', () => {
+    component = mount(DialogHarness, {
+      target: document.body,
+      props: { open: true, variant: 'drawer', withForm: true },
+    });
+
+    flushSync();
+
+    const form = document.querySelector('.dialog-content > form.dialog-form');
+    expect(form?.getAttribute('data-variant')).toBe('drawer');
+    expect(form?.querySelector('.dialog-body')).toBeTruthy();
+  });
+
+  test('closeButton={false} drops the built-in close button', () => {
+    component = mount(DialogHarness, {
+      target: document.body,
+      props: { open: true, variant: 'drawer', closeButton: false },
+    });
+
+    flushSync();
+
+    expect(document.querySelector('.dialog-content')).toBeTruthy();
+    expect(document.querySelector('.dialog-close')).toBeNull();
+  });
 });
 
 describe('DialogTitle', () => {
@@ -356,5 +429,6 @@ describe('Dialog compound component integration', () => {
     expect(exports.Header).toBeDefined();
     expect(exports.Footer).toBeDefined();
     expect(exports.Body).toBeDefined();
+    expect(exports.Form).toBeDefined();
   });
 });
