@@ -35,8 +35,14 @@ It is shaped like `refunds`.
 | `stripe_dispute_id` | unique; `dp_…` |
 | `stripe_charge_id`, `purchase_id` (nullable) | as `refunds`; null for a subscription invoice |
 | `amount_cents`, `currency`, `reason` | the disputed amount |
-| `status` | Stripe's, forward only (`warning_*`, `needs_response`, `under_review`, `won`, `lost`, `prevented`); a late win, `lost` → `won`, is alerted and not written (§4). It also says whether money moved: a chargeback status means Stripe took it, an inquiry's means it did not |
+| `status` | Stripe's, forward only (`warning_*`, `needs_response`, `under_review`, `won`, `lost`, `prevented`), with one way back: a late win, `lost` → `won`, written once (§10). It also says whether money moved: a chargeback status means Stripe took it, an inquiry's means it did not |
 | `outcome_applied_at` | when won or lost handling finished. A redelivery finds it and stops |
+| `late_won_at` | when the row moved `lost` → `won`: a late win (§10). Null for every other dispute |
+| `lost_applied_at` | the loss's `outcome_applied_at`, kept when the late win clears that column; null when the loss never finished. Support's "lost on …" |
+| `late_win_refund_id` | the `re_…` refund the late win made of a first payment, for a buyer who had bought the item again (§10) |
+| `buyer_told_at` | the buyer's "access is back" email was claimed, before it was sent, so it goes once |
+
+Checks (0126), none of which can be NULL: `late_won_at` is set only on a `won` row, and `late_win_refund_id` and `lost_applied_at` only on a late win.
 
 ### The reversal: `payout_reversals` with `cause_type = 'dispute'`
 
@@ -95,7 +101,7 @@ The dispute endpoint already takes `charge.dispute.created`, `.updated` and `.cl
 | Lost (`lost`) | Ends for good: the purchase becomes `refunded` (Q3) and leaves the library, and the streaming block is written with reason `'refund'`, for a dispute that opened already lost and was never paused. A subscription is cancelled | Reversals stand; held slices are cut by the dispute's share, and become `cancelled_by_dispute` when nothing is left (Q3) |
 | Lost after a partial refund | As lost | As lost; Stripe reinstates the refunded part, and the refunds already clawed it back |
 
-**A late win** (Stripe turns `lost` into `won`; owner decision 2026-10-25, "alert only") is only alerted: each such event logs at error with an `errorId` and ids only ("late win on a lost dispute: re-pay creators and restore the buyer by hand"). The record stays `lost`, its `outcome_applied_at` untouched, so nothing reads a win: the loss's refund, reversals, ended access and support's refund block all stand until a person acts. `Codex-2hxff.70` will later record `won` together with the undo.
+**A late win** (Stripe turns `lost` into `won`) is recorded and the loss undone (Codex-2hxff.70, §10). It replaces "alert only" (owner decision 2026-10-25), under which the row stayed `lost` and a person undid the loss by hand.
 
 **Missed events are settled by the hourly reconcile** (Codex-2hxff.58). Before the payouts drain, the cron reads Stripe's `charge.dispute.*` events from the last 4 days, leaving the last 15 minutes to the webhook. It runs the webhook's own handling (`processDispute`) for any dispute that has no row, or whose unapplied row is final or would move to a later stage (inquiry, then chargeback, then closed). It then re-reads from Stripe every final row of ours whose outcome was never applied, whatever its age, skipping rows touched in the last 15 minutes (the webhook may still be handling them). Each dispute is read live from Stripe before it is acted on. An open chargeback is re-run while its events are in the window, since nothing records that opening it finished; every step is idempotent and the re-run writes no second streaming block. A failure opening a chargeback is alerted at error with an errorId and returned to Stripe for redelivery; after the 4-day window it waits for the dispute's close. A step that keeps failing is retried every hour and alerted at error with an errorId each time (owner decision 2026-10-23, "Retry hourly, alert"; no new state).
 
@@ -135,3 +141,62 @@ These are accepted for now; each is rare.
 - **The library's undim is cached** (Codex-2hxff.60). The label is decided when the library is fetched, and the client keeps the row until the next library version bump. A covering grant that lapses by its expiry bumps nothing, so the card stays undimmed while the stream refuses.
 - **A share larger than a re-paid slice's unpaid re-pay rows** is left to a person (`slice_repaid`), for the part they cannot carry, rather than reversed from the slice's own transfer.
 - **`prevented` is a closed inquiry.** Stripe defines it as a dispute "prevented from becoming a formal chargeback" (Dispute Preventions, 2025-08-27), so nothing is restored or re-paid, and the held slices are released. A `prevented` dispute that has a dispute reversal step anyway is alerted at error with an errorId (Codex-2hxff.59).
+- **A late win finds its purchase by the dispute's `purchase_id`.** A dispute first recorded before its purchase existed has none, and nothing fills it in later, so its late win restores no purchase (§10). A dispute comes days after the sale, so this needs the dispute to beat the purchase's own events.
+
+## 10. A late win (Codex-2hxff.70)
+
+Stripe can turn a lost dispute into a won one, weeks or months later: the issuer reverses itself, or the cardholder withdraws the dispute. The money comes back to the platform. The late win undoes the loss as a win, then marks it applied. Owner decisions Q1–Q6 (2026-10-31) are all as the late-win design recommends; Q7 (support may refund a late-won payment past the 14-day window) is support's.
+
+### States
+
+| State | `status` | `outcome_applied_at` | `late_won_at` | Holds the drain? |
+|---|---|---|---|---|
+| Lost, being applied | `lost` | null | null | Yes |
+| Lost, applied | `lost` | set | null | No |
+| Won late, being undone | `won` | null | set | Its re-pay rows only (`isDrainablePayout`) |
+| Won late, undone | `won` | set | set | No |
+
+### The record
+
+- **lost → won** is one statement, after the forward-only upsert refuses it (`recordDispute`, `recordLateWin`): `status = 'won'`, `late_won_at = $now`, `lost_applied_at = outcome_applied_at`, `outcome_applied_at = NULL`, `updated_at = $now`, `WHERE status = 'lost'`. Every SET reads the row as it was, and `$now` is a bound instant. A second delivery matches no row and reads the row as it stands. Writing `updated_at` gives the webhook the reconcile's 15-minute grace; after it the hourly retry of unapplied final rows takes the undo, so a failed step is retried every hour.
+- **won → lost** is refused: Stripe documents no such move. The row comes back with `refusedLost: true`, and the caller alerts only if the live dispute says lost (an older `lost` event arriving after the late win's `won` is the harmless case).
+- Every other move out of a final status is still refused silently.
+
+### The undo, in order
+
+Each step keys on the row being a late win being undone (won, `late_won_at` set, `outcome_applied_at` null), and each Stripe call that can fail comes before the outcome is marked, so a failure is retried with nothing marked.
+
+1. **The buyer** (`restoreAfterLateWin`). One transaction: the dispute under a share lock, then the purchase under its row lock. The won dispute no longer holds, so its disputed mark is cleared, and support's failed-refund rule decides (`accessKeptReason`), so the two cannot disagree. The refund fields always come from the refunds that still stand (`standingRefundFields`), never the disputed amount the loss added.
+
+   | The purchase | Outcome | Written |
+   |---|---|---|
+   | Refunded by the loss, nothing else in the way | `restored` | `completed`, `refunded_at` cleared, the refund fields restated (a refund made before the dispute still counts), the content access row and the entitlement (by `source_ref`) restored |
+   | Still completed: the loss never finished | `restored` | Its access back, as a normal win |
+   | The buyer bought it again since | `rebought` | Stays refunded, refund fields restated, its entitlement still revoked; the shared content access row is the new purchase's and is left alone |
+   | A duplicate payment | `duplicate` | Its disputed mark cleared; nothing else |
+   | Refunds that still stand cover what was paid | `still_refunded` | Stays refunded, refund fields restated |
+   | Another chargeback on it is open or lost | `dispute_holds` | Nothing: that dispute decides |
+
+2. **A subscription invoice**: the normal win's restore, unchanged ([subscription-disputes.md](subscription-disputes.md#a-late-win)).
+3. **The money** (`repayWonDispute`): the normal win's re-pay, without the mark. Every done step the loss left is paid back by a new pending row: a reversal, a cancellation (the slice stays `cancelled_by_dispute`, the one writer `tookTheSlice` relies on) and a reduction. The re-pay rows stay held until the outcome is applied.
+4. **A buyer who bought it again** (`refundFirstPaymentAfterLateWin`; owner decision Q1). After the re-pay, whatever is left of the first charge is refunded: reason `duplicate`, key `late_win_refund_${disputeId}`, metadata `codex_late_win_dispute`. Its id is written once (`late_win_refund_id IS NULL`), so a re-run reads it and never makes another. The undo then records the charge's refunds, restates the purchase's refund fields, and claws the refund back as the win's own (`settlingDisputeId`). Each share comes off its slice's held, unpaid re-pay row, so the creators net nothing for the first payment and keep the second sale. A refund Stripe reports pending is waited for: nothing is marked, and the next delivery or hourly run finishes it. A refusal is a `LateWinRefundRefusedError` (a retry), with Stripe's code. A refund that fails later is a failed refund like any other.
+5. **The outcome is marked** (`markDisputeOutcomeApplied`).
+6. **The buyer's email** (`claimLateWinBuyerEmail`): `restored` only, claimed once on `buyer_told_at`, after the mark.
+
+Re-pay first, then the refund: the engine shares refunds before chargebacks (`inClawbackOrder`), so a refund clawed back while the loss's steps still stood, with nothing re-paid, would take each share a second time from a slice a partial loss had only cut. In that order, what an unpaid re-pay row cannot carry is the documented `slice_repaid` limit (§9), never a second take from the slice.
+
+### A refund made while the undo runs
+
+`reverseCharge` waits, with a `ServiceUnavailableError`, before clawing back a refund while a chargeback on the charge is won and not yet applied, so Stripe redelivers and the hourly retry tries again. The win's own settlement names its dispute and is let through: the re-pay's clawback of a refund recorded first (`clawBackRefundsUnderDispute`), and the late win's own refund. A normal win has the same short window, and the same wait covers it.
+
+### The loss racing the late win
+
+Lock order, always: the dispute (the transition's write; a share lock in every guard), then the purchase, then content access and entitlements, then each step, then payouts.
+
+- **The purchase.** `processLostDispute` reads the dispute under a share lock before it writes the purchase, and does nothing unless it is still lost. A late win landing during a re-run of an unfinished loss then waits for the loss to commit, and its restore runs after.
+- **The subscription.** `cancelLostDisputeSubscription` ends access under a share lock on the dispute, and reads it again just before the Stripe cancel, which cannot be undone. Once the dispute is no longer lost it writes and cancels nothing.
+- **The loss's unfinished steps** cannot run after the win: a won dispute no longer takes money (`disputeStillClawed`), so a step not yet claimed is cancelled, and a claimed one is settled by the re-pay.
+
+### An applied late win
+
+A row settled by hand under release step R18 (`status = 'won'`, `late_won_at` and `outcome_applied_at` set, `buyer_told_at` null) is an applied late win. Nothing re-pays, restores, refunds or emails it again: every step needs `outcome_applied_at` null, and the email claim needs the outcome to have been applied by the undo itself, after `late_won_at`. A hand settlement keeps the loss's applied time, which is earlier. The mark never writes a time before `late_won_at` (`GREATEST`), so a mark run by a worker whose clock is behind the one that recorded the late win cannot pass for a hand settlement.
