@@ -29,6 +29,9 @@
     gap: var(--space-4);
     padding: var(--space-4) var(--space-6);
     overflow-y: auto;
+    /* The page behind is scroll-locked: a scroll that reaches the end stops
+       here rather than chaining out (FilterDrawer set this on its own). */
+    overscroll-behavior-y: contain;
     flex: 1;
     min-height: 0;
   }
