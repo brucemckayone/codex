@@ -73,13 +73,13 @@
     duration tokens make `auto`.
 -->
 <script lang="ts">
-  import { browser } from '$app/environment';
   import { type createDialog, melt } from '@melt-ui/svelte';
   import { getContext, setContext, type Snippet } from 'svelte';
   import type { HTMLAttributes } from 'svelte/elements';
   import { prefersReducedMotion } from 'svelte/motion';
   import { fade, fly } from 'svelte/transition';
   import { XIcon } from '$lib/components/ui/Icon';
+  import { forwardBrandTokens } from '$lib/utils/portal-brand';
 
   interface Props extends HTMLAttributes<HTMLDivElement> {
     children: Snippet;
@@ -161,41 +161,6 @@
   const panelMotion = (node: Element) =>
     travel ? fly(node, { y: travel.y, duration: travel.duration }) : {};
   const overlayMotion = (node: Element) => (travel ? fade(node, { duration: travel.overlay }) : {});
-
-  /**
-   * Forward org brand tokens into the portalled dialog.
-   *
-   * Melt UI portals render at <body>, escaping the .org-layout subtree that
-   * carries [data-org-brand], [data-org-bg] and --brand-* inline styles.
-   * This action copies those attributes + styles onto the portal container
-   * so the full org-brand.css derivation engine activates inside the dialog.
-   */
-  function forwardBrandTokens(node: HTMLElement) {
-    if (!browser) return;
-
-    const orgLayout = document.querySelector<HTMLElement>('.org-layout');
-    if (!orgLayout) return;
-
-    // Copy data attributes that activate org-brand.css rules
-    if (orgLayout.hasAttribute('data-org-brand')) {
-      node.setAttribute('data-org-brand', '');
-    }
-    if (orgLayout.hasAttribute('data-org-bg')) {
-      node.setAttribute('data-org-bg', '');
-    }
-
-    // Copy the --brand-* inline custom properties
-    const style = orgLayout.style;
-    for (let i = 0; i < style.length; i++) {
-      const prop = style[i];
-      if (prop.startsWith('--brand-')) {
-        node.style.setProperty(prop, style.getPropertyValue(prop));
-      }
-    }
-
-    // Inherit the org font so text renders correctly
-    node.style.fontFamily = 'inherit';
-  }
 </script>
 
 {#if $open}
