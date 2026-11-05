@@ -991,9 +991,10 @@ type RecordedDispute = NonNullable<
  *    cancelled stays ended, and its subscriber is not emailed (Q2).
  * 3. Every step the dispute wrote is re-paid, the loss's own included. The
  *    re-pay rows are held until the outcome is marked.
- * 4. A buyer who bought it again has their first payment refunded (Q1),
- *    after the re-pay, so the refund comes off the held re-pay rows. One
- *    Stripe has pending waits, unmarked, for its settling.
+ * 4. A payment the buyer made twice is refunded: the first payment of a
+ *    buyer who bought it again (Q1), or a duplicate payment (owner, "Refund
+ *    it"). After the re-pay, so the refund comes off the held re-pay rows.
+ *    One Stripe has pending waits, unmarked, for its settling.
  * 5. The outcome is marked, then logged at info (Q6: ids and counts only).
  * 6. A buyer whose access came back is told, once (Q5).
  */
@@ -1015,13 +1016,13 @@ async function undoLateWin(
   const repaid = await purchase.repayWonDispute(dispute.id);
 
   const refund: LateWinRefundStep =
-    restored?.outcome === 'rebought'
+    restored?.outcome === 'rebought' || restored?.outcome === 'duplicate'
       ? await refundFirstPayment(deps, dispute.id, charge, recorded.purchaseId)
       : 'none';
   if (refund === 'pending') {
     // Waiting is not a fault (§11): refund.updated or the next run ends it.
     obs?.info(
-      'Late win: the first payment’s refund is pending at Stripe; the outcome is marked once it settles',
+      'Late win: its refund is pending at Stripe; the outcome is marked once it settles',
       { disputeId: dispute.id, purchaseId: recorded.purchaseId }
     );
     return 'acted';
@@ -1068,8 +1069,9 @@ async function restoreSubscriptionAfterWin(
 }
 
 /**
- * The late win's refund of the first payment of a buyer who bought the item
- * again (Q1; design §4.5). A refusal is alerted at error with Stripe's code
+ * The late win's refund of a payment the buyer made twice: the first payment
+ * of a buyer who bought the item again (Q1; design §4.5), or a duplicate
+ * payment (owner, "Refund it"). A refusal is alerted at error with Stripe's code
  * on every try (owner decision 2026-10-23, "Retry hourly, alert"), then
  * rethrown: nothing is marked, so its re-pay rows stay held and the
  * reconcile tries it again.
@@ -1090,7 +1092,7 @@ async function refundFirstPayment(
     const stripeCode = stripeCodeOf(error);
     if (stripeCode) {
       deps.obs?.error(
-        'Late win: Stripe refused the refund of the first payment of a buyer who bought the item again. Nothing is marked; it is retried hourly',
+        'Late win: Stripe refused the refund of a payment the buyer made twice (bought again, or a duplicate). Nothing is marked; it is retried hourly',
         { errorId: crypto.randomUUID(), disputeId, purchaseId, stripeCode }
       );
     }

@@ -1131,6 +1131,33 @@ describe('handlePaymentWebhook — disputes', () => {
       );
     });
 
+    it('a late-won duplicate payment is refunded too (owner, "Refund it"): after the re-pay, for this dispute and charge, then marked; nobody is emailed', async () => {
+      recordedLateWin();
+      restoredAs('duplicate');
+
+      const bundle = await deliver();
+
+      expect(calls).toEqual([
+        'restore purchase',
+        'restore',
+        'repay',
+        'refund',
+        'mark',
+      ]);
+      expect(purchase.refundFirstPaymentAfterLateWin).toHaveBeenCalledWith(
+        'dp_test_dispute',
+        { id: 'ch_test', amountCents: 1999 },
+        'test'
+      );
+      expect(purchase.claimLateWinBuyerEmail).not.toHaveBeenCalled();
+      expect(sendEmailToWorker).not.toHaveBeenCalled();
+      expect(mockClear).not.toHaveBeenCalled();
+      expect(bundle.mock._obs.info).toHaveBeenCalledWith(
+        'Late win: loss undone',
+        expect.objectContaining({ outcome: 'duplicate', refund: 'done' })
+      );
+    });
+
     it('nothing is marked while the refund is pending at Stripe: its re-pay rows stay held for the next delivery or run', async () => {
       recordedLateWin();
       restoredAs('rebought');
@@ -1174,15 +1201,15 @@ describe('handlePaymentWebhook — disputes', () => {
       expect(purchase.markDisputeOutcomeApplied).not.toHaveBeenCalled();
     });
 
-    it('a duplicate payment, refunds that still stand, or another dispute holding it: the loss is undone and marked, and nobody is refunded or emailed', async () => {
-      for (const outcome of ['duplicate', 'still_refunded', 'dispute_holds']) {
+    it('refunds that still stand, or another dispute holding it: the loss is undone and marked, and nobody is refunded or emailed', async () => {
+      for (const outcome of ['still_refunded', 'dispute_holds']) {
         recordedLateWin();
         restoredAs(outcome);
 
         await deliver();
       }
 
-      expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledTimes(3);
+      expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledTimes(2);
       expect(purchase.refundFirstPaymentAfterLateWin).not.toHaveBeenCalled();
       expect(purchase.claimLateWinBuyerEmail).not.toHaveBeenCalled();
       expect(sendEmailToWorker).not.toHaveBeenCalled();

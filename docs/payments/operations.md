@@ -343,8 +343,9 @@ A chargeback lost and then decided for us after all (a "late win",
 `Codex-2hxff.70`) is undone automatically: the buyer gets the item back (unless
 they bought it again, the payment was a duplicate, refunds still cover it, or
 another chargeback holds it), the creators are paid back by new payouts, a
-buyer who bought it again has their first payment refunded, and a buyer whose
-access came back is emailed once. A subscription the loss cancelled stays ended
+buyer who bought it again has their first payment refunded, a duplicate
+payment is refunded (owner, "Refund it"), and a buyer whose access came back
+is emailed once. A subscription the loss cancelled stays ended
 and its subscriber isn't emailed. The webhook does it when Stripe's event
 arrives; the hourly reconcile catches one whose events were missed, from
 Stripe's events of the last 4 days and, on every run but the 08:00 London one,
@@ -371,7 +372,7 @@ with an `errorId`, unless it says otherwise:
 
 | Alert | What it means | What to do |
 |---|---|---|
-| Late win: Stripe refused the refund of the first payment… | The refund for a buyer who bought it again was refused (`stripeCode`). Nothing is marked, the creators' pay-back stays held, and it is retried hourly, alerting each time | Look the charge up in Stripe; if it can't be refunded, refund the buyer another way |
+| Late win: Stripe refused the refund of a payment the buyer made twice… | The refund for a buyer who bought it again, or of a duplicate payment, was refused (`stripeCode`). Nothing is marked, the creators' pay-back stays held, and it is retried hourly, alerting each time | Look the charge up in Stripe; if it can't be refunded, refund the buyer another way |
 | A won dispute was reported lost: nothing changed, check it in Stripe | Stripe now says lost a dispute we hold as won. Nothing was changed | Check the dispute in Stripe's Dashboard |
 | The hourly late-win check read its page limit of Stripe's disputes | More than 300 disputes since our oldest lost one: the older ones weren't re-checked this run | None by itself; if it repeats, the check needs a wider limit |
 | The hourly late-win check could not read a page of Stripe's disputes / could not re-check lost disputes for a late win | A Stripe or database read failed; the next run retries | None unless it repeats |
