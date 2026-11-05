@@ -1437,9 +1437,10 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
       expect(after.refundable.blocked).toBeNull();
     });
 
-    it("a late win's history lines carry the loss date and the step's kind; a normal win's do not (S3)", async () => {
+    it("a late win's history lines carry the loss date and the step's kind; a normal win's and a plain loss's do not (S3)", async () => {
       const late = await purchaseCharge(30 * DAY);
       const normal = await purchaseCharge();
+      const plainLoss = await purchaseCharge(30 * DAY);
       const lateId = (
         await lateWin(late.chargeId, late.purchase.id, { undone: true })
       ).id;
@@ -1449,6 +1450,14 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
         normal.purchase.id
       );
       await applyOutcome(normalId);
+      // Lost and applied, never won: the web reads lostOn as "being paid
+      // back", so a plain loss's lines must not carry it.
+      const plainLossId = await dispute(
+        plainLoss.chargeId,
+        'lost',
+        plainLoss.purchase.id
+      );
+      await applyOutcome(plainLossId);
       const lostOn = takeFirst(
         await db
           .select({ at: disputes.lostAppliedAt })
@@ -1482,6 +1491,22 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
           kind: 'transfer_reversal',
           status: 'done',
         },
+        {
+          payoutId: plainLoss.org.id,
+          causeType: 'dispute',
+          causeId: plainLossId,
+          amountCents: 135,
+          kind: 'cancellation',
+          status: 'done',
+        },
+        {
+          payoutId: plainLoss.creator.id,
+          causeType: 'dispute',
+          causeId: plainLossId,
+          amountCents: 765,
+          kind: 'transfer_reversal',
+          status: 'done',
+        },
       ]);
 
       const lineOf = async (chargeId: string, payoutId: string) =>
@@ -1502,6 +1527,12 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
       expect(normalLine?.causeId).toBe(normalId);
       expect(normalLine).not.toHaveProperty('lostOn');
       expect(normalLine).not.toHaveProperty('stepKind');
+      for (const payoutId of [plainLoss.org.id, plainLoss.creator.id]) {
+        const lossLine = await lineOf(plainLoss.chargeId, payoutId);
+        expect(lossLine?.causeId).toBe(plainLossId);
+        expect(lossLine).not.toHaveProperty('lostOn');
+        expect(lossLine).not.toHaveProperty('stepKind');
+      }
     });
   });
 

@@ -294,6 +294,27 @@ describe('a chargeback won after it was lost (Codex-2hxff.70, late-win design §
     expect(takenCents).toBe(100);
   });
 
+  it('a plain loss, never won, carries neither: the page reads lostOn as "being paid back"', () => {
+    const { history } = sliceHistory(
+      SLICE,
+      [
+        step({
+          causeType: 'dispute',
+          causeId: 'du_lost',
+          kind: 'cancellation',
+        }),
+        step({ causeType: 'dispute', causeId: 'du_lost' }),
+      ],
+      // Only a late win is in lateWins; this one is lost and stays lost.
+      context({ lateWins: new Map([['du_late', { lostOn: LOST_ON }]]) })
+    );
+    expect(history).toHaveLength(2);
+    for (const line of history) {
+      expect(line).not.toHaveProperty('lostOn');
+      expect(line).not.toHaveProperty('stepKind');
+    }
+  });
+
   it('a late win whose loss never finished carries a null loss date, still with its kind', () => {
     const { history } = sliceHistory(
       SLICE,
