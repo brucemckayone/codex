@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Snippet } from 'svelte';
+  import { getContext, type Snippet } from 'svelte';
   import type { HTMLAttributes } from 'svelte/elements';
 
   interface Props extends HTMLAttributes<HTMLDivElement> {
@@ -7,9 +7,15 @@
   }
 
   const { children, class: className, ...restProps }: Props = $props();
+  // Set by Dialog.Content; absent when Header is mounted on its own.
+  const layout = getContext<{ flush: boolean } | undefined>('DIALOG_LAYOUT');
 </script>
 
-<div class="dialog-header {className ?? ''}" {...restProps}>
+<div
+  class="dialog-header {className ?? ''}"
+  data-flush={layout?.flush ? '' : undefined}
+  {...restProps}
+>
   {@render children()}
 </div>
 
@@ -21,5 +27,11 @@
     text-align: left;
     padding: var(--space-6) var(--space-6) var(--space-4);
     border-bottom: var(--border-width) var(--border-style) var(--color-border-subtle);
+  }
+
+  .dialog-header[data-flush] {
+    display: block;
+    padding: 0;
+    border-bottom: none;
   }
 </style>

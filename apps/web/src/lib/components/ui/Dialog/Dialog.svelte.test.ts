@@ -266,7 +266,8 @@ describe('DialogContent', () => {
 
     const content = document.querySelector('.dialog-content');
     expect(content?.getAttribute('data-variant')).toBe('dialog');
-    // sheet, flush and floating are drawer-only: a dialog ignores them.
+    // sheet and floating are drawer-only, and a dialog's panel has no
+    // padding for flush to drop (flush strips its parts instead).
     expect(content?.hasAttribute('data-sheet')).toBe(false);
     expect(content?.hasAttribute('data-flush')).toBe(false);
     expect(content?.hasAttribute('data-floating')).toBe(false);
@@ -348,6 +349,174 @@ describe('DialogContent', () => {
     const footer = document.querySelector('.dialog-footer');
     expect(footer?.getAttribute('data-layout')).toBe('floating');
     expect(footer?.getAttribute('data-align')).toBe('between');
+  });
+
+  test('a flush dialog makes every part a bare box; without flush none is', () => {
+    component = mount(DialogHarness, {
+      target: document.body,
+      props: { open: true, flush: true, withToolbar: true },
+    });
+    flushSync();
+
+    const parts = [
+      '.dialog-header',
+      '.dialog-toolbar',
+      '.dialog-body',
+      '.dialog-footer',
+    ];
+    for (const part of parts) {
+      expect(
+        document.querySelector(part)?.hasAttribute('data-flush'),
+        part
+      ).toBe(true);
+    }
+    unmount(component);
+    document.body.innerHTML = '';
+
+    component = mount(DialogHarness, {
+      target: document.body,
+      props: { open: true, withToolbar: true },
+    });
+    flushSync();
+
+    for (const part of parts) {
+      expect(
+        document.querySelector(part)?.hasAttribute('data-flush'),
+        part
+      ).toBe(false);
+    }
+  });
+
+  test('placement, radius and motion mark a dialog; a drawer ignores them', () => {
+    const props = {
+      open: true,
+      placement: 'top',
+      radius: 'lg',
+      motion: 'drop',
+    } as const;
+    component = mount(DialogHarness, { target: document.body, props });
+    flushSync();
+
+    const content = document.querySelector('.dialog-content');
+    const overlay = document.querySelector('.dialog-overlay');
+    expect(
+      document
+        .querySelector('.dialog-content-wrapper')
+        ?.getAttribute('data-placement')
+    ).toBe('top');
+    expect(content?.getAttribute('data-placement')).toBe('top');
+    expect(content?.getAttribute('data-radius')).toBe('lg');
+    expect(content?.getAttribute('data-motion')).toBe('drop');
+    expect(overlay?.getAttribute('data-motion')).toBe('drop');
+    unmount(component);
+    document.body.innerHTML = '';
+
+    component = mount(DialogHarness, {
+      target: document.body,
+      props: { ...props, variant: 'drawer' },
+    });
+    flushSync();
+
+    const drawer = document.querySelector('.dialog-content');
+    expect(
+      document
+        .querySelector('.dialog-content-wrapper')
+        ?.hasAttribute('data-placement')
+    ).toBe(false);
+    for (const attr of ['data-placement', 'data-radius', 'data-motion']) {
+      expect(drawer?.hasAttribute(attr), attr).toBe(false);
+    }
+    expect(
+      document.querySelector('.dialog-overlay')?.hasAttribute('data-motion')
+    ).toBe(false);
+  });
+
+  test('the defaults add no placement, radius, overlay or motion mark', () => {
+    component = mount(DialogHarness, {
+      target: document.body,
+      props: { open: true },
+    });
+    flushSync();
+
+    const content = document.querySelector('.dialog-content');
+    expect(
+      document
+        .querySelector('.dialog-content-wrapper')
+        ?.hasAttribute('data-placement')
+    ).toBe(false);
+    for (const attr of [
+      'data-placement',
+      'data-radius',
+      'data-motion',
+      'style',
+    ]) {
+      expect(content?.hasAttribute(attr), attr).toBe(false);
+    }
+    expect(content?.getAttribute('data-surface')).toBe('elevated');
+    const overlay = document.querySelector('.dialog-overlay');
+    expect(overlay?.hasAttribute('data-overlay')).toBe(false);
+    expect(overlay?.hasAttribute('data-motion')).toBe(false);
+  });
+
+  test.each([
+    [{}, 'elevated'],
+    [{ surface: 'base' }, 'base'],
+    [{ surface: 'glass' }, 'glass'],
+    [{ variant: 'drawer' }, 'elevated'],
+    [{ variant: 'drawer', floating: true }, 'glass'],
+    [{ variant: 'drawer', floating: true, surface: 'base' }, 'base'],
+  ] as const)('surface %o reads %s', (props, expected) => {
+    component = mount(DialogHarness, {
+      target: document.body,
+      props: { open: true, ...props },
+    });
+    flushSync();
+
+    expect(
+      document.querySelector('.dialog-content')?.getAttribute('data-surface')
+    ).toBe(expected);
+  });
+
+  test('overlay dim and dark mark the overlay, on a drawer too', () => {
+    component = mount(DialogHarness, {
+      target: document.body,
+      props: { open: true, variant: 'drawer', overlay: 'dark' },
+    });
+    flushSync();
+
+    expect(
+      document.querySelector('.dialog-overlay')?.getAttribute('data-overlay')
+    ).toBe('dark');
+  });
+
+  test("maxWidth and maxHeight set the panel's own limits", () => {
+    component = mount(DialogHarness, {
+      target: document.body,
+      props: { open: true, maxWidth: '35rem', maxHeight: '60vh' },
+    });
+    flushSync();
+
+    // A plain length: jsdom's CSSOM drops min(). The browser proof covers it.
+    const content = document.querySelector<HTMLElement>('.dialog-content');
+    expect(content?.style.maxWidth).toBe('35rem');
+    expect(content?.style.maxHeight).toBe('60vh');
+  });
+
+  // The motion transitions return no config for every other panel, and
+  // Svelte finishes such a transition at once: a default dialog must still
+  // leave the DOM in the same flush as its close.
+  test('a dialog with the default motion is gone as soon as it closes', () => {
+    component = mount(DialogHarness, {
+      target: document.body,
+      props: { open: true },
+    });
+    flushSync();
+
+    document.querySelector<HTMLButtonElement>('.dialog-close')?.click();
+    flushSync();
+
+    expect(document.querySelector('.dialog-content')).toBeNull();
+    expect(document.querySelector('.dialog-overlay')).toBeNull();
   });
 
   test('closeButton={false} drops the built-in close button', () => {
