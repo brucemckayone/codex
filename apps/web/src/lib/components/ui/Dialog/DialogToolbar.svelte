@@ -13,7 +13,7 @@
     box above a row of chips).
 -->
 <script lang="ts">
-  import type { Snippet } from 'svelte';
+  import { getContext, type Snippet } from 'svelte';
   import type { HTMLAttributes } from 'svelte/elements';
 
   interface Props extends HTMLAttributes<HTMLDivElement> {
@@ -22,9 +22,16 @@
   }
 
   const { children, direction = 'row', class: className, ...restProps }: Props = $props();
+  // Set by Dialog.Content; absent when Toolbar is mounted on its own.
+  const layout = getContext<{ flush: boolean } | undefined>('DIALOG_LAYOUT');
 </script>
 
-<div class="dialog-toolbar {className ?? ''}" data-direction={direction} {...restProps}>
+<div
+  class="dialog-toolbar {className ?? ''}"
+  data-direction={direction}
+  data-flush={layout?.flush ? '' : undefined}
+  {...restProps}
+>
   {@render children()}
 </div>
 
@@ -43,5 +50,11 @@
     flex-direction: column;
     flex-wrap: nowrap;
     align-items: stretch;
+  }
+
+  /* Flush: a bare box around the page's own row (a palette's search row). */
+  .dialog-toolbar[data-flush] {
+    display: block;
+    padding: 0;
   }
 </style>

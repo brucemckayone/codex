@@ -21,8 +21,12 @@
   @prop {boolean} [sheet=false] - drawer only: below the sm breakpoint, a
     bottom sheet instead (full width, at most 90vh, rounded top, slides up),
     padded `--space-5 --space-4`.
-  @prop {boolean} [flush=false] - drawer only: no padding and no gap, for a
-    panel whose first child runs edge to edge (a hero photo).
+  @prop {boolean} [flush=false] - nothing is padded or spaced. A drawer's
+    panel drops its padding and gap (a hero photo runs edge to edge). Header,
+    Toolbar, Body and Footer become bare block boxes, with no padding, gap,
+    rule, tray or flex layout of their own (Body still takes the rest of the
+    panel and scrolls), so each holds one row the page lays out itself: a
+    command palette's search row, results and key hints.
   @prop {boolean} [floating=false] - drawer only: a glass panel that floats
     `--space-3` in from the edge, `--container-drawer` wide, rounded and
     shadowed. Only Dialog.Body scrolls, as in a dialog, so Header and Footer
@@ -31,12 +35,49 @@
   @prop {boolean} [closeButton=true] - false drops the built-in close button,
     for a panel that renders its own. It must then render a visible one:
     Escape and a press outside are not enough on a touch screen.
+
+  The rest set the look of a panel that isn't a plain centred dialog. A
+  command palette and a phone's bottom sheet are dialogs too: they get the
+  focus trap, scroll lock, Escape and focus return from here.
+
+  @prop {'center' | 'top' | 'bottom'} [placement='center'] - dialog only.
+    `top`: the panel's top edge is 15vh down, centred across (a command
+    palette), at most 70vh. `bottom`: a sheet that floats `--space-2` above
+    the bottom edge and in from each side, full width whatever `size` says,
+    at most 70vh, at every viewport width.
+  @prop {string} [maxWidth] - the panel's max-width as a CSS length, over
+    `size`, for a width off the 28 / 42 / 56rem scale. The `--space-4`
+    gutter (`--space-2` at the bottom) still applies, so `40rem` is
+    min(40rem, 100vw − 2rem). Use tokens where one exists.
+  @prop {string} [maxHeight] - the panel's max-height as a CSS length, over
+    the 85vh (70vh at top and bottom) default.
+  @prop {'modal' | 'lg'} [radius='modal'] - dialog only: the corner,
+    `--radius-modal` or the smaller `--radius-lg`.
+  @prop {'elevated' | 'base' | 'glass'} [surface] - the panel's fill.
+    `elevated` (`--color-surface-elevated`) is a dialog's and a drawer's;
+    `base` is the page's own `--color-surface`; `glass` is
+    `--material-glass` with a `--blur-xl` backdrop and a glass edge, the
+    default for `floating`.
+  @prop {'blur' | 'dim' | 'dark'} [overlay='blur'] - what covers the page.
+    `blur`: `--color-surface-overlay` over a `--blur-md` blur. `dim`:
+    `--color-overlay` at half strength, no blur. `dark`: `--color-overlay`,
+    no blur.
+  @prop {'auto' | 'drop' | 'rise' | 'none'} [motion='auto'] - dialog only.
+    `auto`: the panel lifts in and the overlay fades in, on open only.
+    `drop`: the panel falls 20px into place over 200ms while the overlay
+    fades over 150ms, and leaves the same way (a command palette). `rise`:
+    the panel rises 400px into place over 300ms while the overlay fades over
+    200ms, and leaves the same way (a bottom sheet). `none`: it appears and
+    goes at once. Under reduced motion `drop` and `rise` are instant, as the
+    duration tokens make `auto`.
 -->
 <script lang="ts">
   import { browser } from '$app/environment';
   import { type createDialog, melt } from '@melt-ui/svelte';
   import { getContext, setContext, type Snippet } from 'svelte';
   import type { HTMLAttributes } from 'svelte/elements';
+  import { prefersReducedMotion } from 'svelte/motion';
+  import { fade, fly } from 'svelte/transition';
   import { XIcon } from '$lib/components/ui/Icon';
 
   interface Props extends HTMLAttributes<HTMLDivElement> {
@@ -47,6 +88,13 @@
     flush?: boolean;
     floating?: boolean;
     closeButton?: boolean;
+    placement?: 'center' | 'top' | 'bottom';
+    maxWidth?: string;
+    maxHeight?: string;
+    radius?: 'modal' | 'lg';
+    surface?: 'elevated' | 'base' | 'glass';
+    overlay?: 'blur' | 'dim' | 'dark';
+    motion?: 'auto' | 'drop' | 'rise' | 'none';
   }
 
   const {
@@ -57,6 +105,13 @@
     flush = false,
     floating = false,
     closeButton = true,
+    placement = 'center',
+    maxWidth,
+    maxHeight,
+    radius = 'modal',
+    surface,
+    overlay: overlayStyle = 'blur',
+    motion = 'auto',
     class: className,
     ...restProps
   }: Props = $props();
@@ -69,17 +124,41 @@
   const drawer = $derived(variant === 'drawer');
   /** A drawer-only prop as a data attribute: present, or absent. */
   const drawerFlag = (on: boolean) => (drawer && on ? '' : undefined);
+  /** A dialog-only prop as a data attribute: absent at its default. */
+  const dialogValue = <T extends string>(value: T, fallback: T) =>
+    !drawer && value !== fallback ? value : undefined;
   /**
    * What scrolls: `dialog` and `floating` scroll Body, `drawer` the whole
    * panel. Body, Form and Footer read it; in `drawer` Body and Form stop
-   * being a box.
+   * being a box. The parts read `flush` from here too.
    */
   const layout = $derived(!drawer ? 'dialog' : floating ? 'floating' : 'drawer');
   setContext('DIALOG_LAYOUT', {
     get current() {
       return layout;
     },
+    get flush() {
+      return flush;
+    },
   });
+  const fill = $derived(surface ?? (drawer && floating ? 'glass' : 'elevated'));
+
+  /** `drop` and `rise`: the panel's fly and the overlay's fade, both ways. */
+  const TRAVEL = {
+    drop: { y: -20, duration: 200, overlay: 150 },
+    rise: { y: 400, duration: 300, overlay: 200 },
+  } as const;
+  const travel = $derived(
+    !drawer && (motion === 'drop' || motion === 'rise') && !prefersReducedMotion.current
+      ? TRAVEL[motion]
+      : undefined
+  );
+  // A JS transition, not a keyframe: it plays on close as well, which CSS
+  // can't before the node is removed. Every other panel gets `{}`, which
+  // Svelte finishes at once, so it still opens and closes synchronously.
+  const panelMotion = (node: Element) =>
+    travel ? fly(node, { y: travel.y, duration: travel.duration }) : {};
+  const overlayMotion = (node: Element) => (travel ? fade(node, { duration: travel.overlay }) : {});
 
   /**
    * Forward org brand tokens into the portalled dialog.
@@ -124,8 +203,11 @@
       class="dialog-overlay"
       data-variant={variant}
       data-floating={drawerFlag(floating)}
+      data-overlay={overlayStyle === 'blur' ? undefined : overlayStyle}
+      data-motion={dialogValue(motion, 'auto')}
+      transition:overlayMotion
     ></div>
-    <div class="dialog-content-wrapper">
+    <div class="dialog-content-wrapper" data-placement={dialogValue(placement, 'center')}>
       <div
         use:melt={$content}
         class="dialog-content {className ?? ''}"
@@ -134,6 +216,13 @@
         data-sheet={drawerFlag(sheet)}
         data-flush={drawerFlag(flush)}
         data-floating={drawerFlag(floating)}
+        data-placement={dialogValue(placement, 'center')}
+        data-radius={dialogValue(radius, 'modal')}
+        data-surface={fill}
+        data-motion={dialogValue(motion, 'auto')}
+        style:max-width={maxWidth}
+        style:max-height={maxHeight}
+        transition:panelMotion
         {...restProps}
       >
         {@render children()}
@@ -164,6 +253,20 @@
     animation: overlay-in var(--duration-normal) var(--ease-out) both;
   }
 
+  .dialog-overlay[data-overlay='dim'],
+  .dialog-overlay[data-overlay='dark'] {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .dialog-overlay[data-overlay='dim'] {
+    background: color-mix(in srgb, var(--color-overlay) 50%, transparent);
+  }
+
+  .dialog-overlay[data-overlay='dark'] {
+    background: var(--color-overlay);
+  }
+
   /* ── Centering wrapper ────────────────────────────────────────────── */
   .dialog-content-wrapper {
     position: fixed;
@@ -173,6 +276,16 @@
     align-items: center;
     justify-content: center;
     padding: var(--space-4);
+  }
+
+  .dialog-content-wrapper[data-placement='top'] {
+    align-items: flex-start;
+    padding-top: 15vh;
+  }
+
+  .dialog-content-wrapper[data-placement='bottom'] {
+    align-items: flex-end;
+    padding: var(--space-2);
   }
 
   /* ── Content panel ────────────────────────────────────────────────── */
@@ -199,6 +312,27 @@
   }
   .dialog-content[data-size='lg'] {
     max-width: 56rem;
+  }
+
+  .dialog-content[data-placement='top'],
+  .dialog-content[data-placement='bottom'] {
+    max-height: 70vh;
+  }
+
+  /* A sheet is full width (0,2,0, after data-size). */
+  .dialog-content[data-placement='bottom'] {
+    max-width: none;
+  }
+
+  .dialog-content[data-radius='lg'] {
+    border-radius: var(--radius-lg);
+  }
+
+  /* `drop`, `rise` and `none` run no keyframe: drop and rise are Svelte
+     transitions, so they play on close as well. */
+  .dialog-overlay[data-motion],
+  .dialog-content[data-motion] {
+    animation: none;
   }
 
   /* ── Drawer variant ───────────────────────────────────────────────
@@ -247,9 +381,6 @@
     gap: normal;
     padding: 0;
     overflow: hidden;
-    background: var(--material-glass);
-    backdrop-filter: blur(var(--blur-xl));
-    -webkit-backdrop-filter: blur(var(--blur-xl));
     border: var(--border-width) var(--border-style) var(--material-glass-border);
     border-radius: var(--radius-xl);
     animation-duration: var(--duration-slow);
@@ -290,6 +421,20 @@
       animation-name: drawer-rise;
       animation-timing-function: var(--ease-spring);
     }
+  }
+
+  /* ── Surface ──────────────────────────────────────────────────────────
+     After the drawer rules: glass recolours the drawer's edge too. A
+     floating drawer is glass unless it says otherwise. */
+  .dialog-content[data-surface='base'] {
+    background: var(--color-surface);
+  }
+
+  .dialog-content[data-surface='glass'] {
+    background: var(--material-glass);
+    backdrop-filter: blur(var(--blur-xl));
+    -webkit-backdrop-filter: blur(var(--blur-xl));
+    border-color: var(--material-glass-border);
   }
 
   /* ── Close button ─────────────────────────────────────────────────── */

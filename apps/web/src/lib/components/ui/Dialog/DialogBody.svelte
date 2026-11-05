@@ -8,12 +8,17 @@
 
   const { children, class: className, ...restProps }: Props = $props();
   // Set by Dialog.Content; absent when Body is mounted on its own.
-  const layout = getContext<{ current: 'dialog' | 'drawer' | 'floating' } | undefined>(
-    'DIALOG_LAYOUT'
-  );
+  const layout = getContext<
+    { current: 'dialog' | 'drawer' | 'floating'; flush: boolean } | undefined
+  >('DIALOG_LAYOUT');
 </script>
 
-<div class="dialog-body {className ?? ''}" data-layout={layout?.current} {...restProps}>
+<div
+  class="dialog-body {className ?? ''}"
+  data-layout={layout?.current}
+  data-flush={layout?.flush ? '' : undefined}
+  {...restProps}
+>
   {@render children()}
 </div>
 
@@ -26,6 +31,13 @@
     overflow-y: auto;
     flex: 1;
     min-height: 0;
+  }
+
+  /* Flush: a bare box that still takes the rest of the panel and scrolls.
+     Before the drawer rule, which outranks it at the same specificity. */
+  .dialog-body[data-flush] {
+    display: block;
+    padding: 0;
   }
 
   /* In a drawer the whole panel scrolls and spaces its children, so Body

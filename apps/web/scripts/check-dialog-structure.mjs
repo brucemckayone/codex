@@ -19,9 +19,11 @@
  *                  rule in a .css file) names a class the Dialog renders:
  *                  restyling the primitive from outside is how the four
  *                  hand-built drawers forked it. One exception: a rule whose
- *                  subject is `.dialog-form` (a page's own class on its
- *                  Dialog.Form) may set spacing, never layout (display,
- *                  position, flex*, overflow*, height/min/max, block-size).
+ *                  selector is exactly `.dialog-form` plus the page's own
+ *                  class (`:global(.dialog-form.tier-form)`) may set spacing
+ *                  (gap, padding*, margin*) and nothing else. Bare
+ *                  `.dialog-form`, a combinator, or any other property
+ *                  (display, flex*, overflow*, height, position…) fails.
  *   own-dialog     Outside lib/components/ui/, no element sets
  *                  role="dialog"/"alertdialog" or aria-modal: a modal is
  *                  built from the shared parts, not by hand.
@@ -112,16 +114,6 @@ export const ALLOWLIST = [
     reason: 'M4: hand-built bottom sheet; moves to variant="drawer" sheet or keeps a reason',
   },
   {
-    file: 'src/lib/components/editor/EditorToolbar.svelte',
-    rule: 'own-dialog',
-    reason: 'M4: the link popover sets role="dialog"; M4 decides Dialog or a non-modal popover',
-  },
-  {
-    file: 'src/lib/components/AudioPlayer/ImmersiveShaderPlayer.svelte',
-    rule: 'own-dialog',
-    reason: 'M4 (report-only): a full-screen player, not a panel; M4 classifies it',
-  },
-  {
     file: 'src/lib/components/ui/Dialog/DialogScrollControl.stories.svelte',
     rule: 'content-child',
     reason: 'Permanent: the calibration control, the raw wrapper this gate bans; the scroll proof must read it CLIPPED',
@@ -146,10 +138,11 @@ const DIALOG_CLASSES = [
 // `.dialog-content-wrapper`, which is listed on its own.
 const DIALOG_CLASS_RE = new RegExp(`\\.(${DIALOG_CLASSES.join('|')})(?![\\w-])`, 'g');
 
-// What a page may not set on its own Dialog.Form class: anything that
-// decides whether the form passes the panel's column down to Body.
-const FORM_LAYOUT_PROP =
-  /^(display|position|height|min-height|max-height|(min-|max-)?block-size|flex(-[a-z-]+)?|overflow(-[a-z-]+)?)$/;
+// All a page may set on its own Dialog.Form class. Anything else could
+// decide whether the form passes the panel's column down to Body.
+const SPACING_PROP = /^(gap|row-gap|column-gap|padding(-[a-z]+)*|margin(-[a-z]+)*)$/;
+// Two or more classes and nothing else: `.dialog-form` plus the page's own.
+const OWN_FORM_COMPOUND = /^(?:\.[\w-]+){2,}$/;
 
 /** The parts each container part may hold directly, and the rule's name. */
 const CHILD_RULES = {
@@ -394,16 +387,15 @@ function checkOwnDialog(ast, report) {
   });
 }
 
-/** The last compound of each selector in a list, with `:global` unwrapped. */
-function subjects(prelude) {
+/** Each selector in a list, with `:global(...)` / `:global` unwrapped. */
+function selectors(prelude) {
   const plain = prelude.replace(/:global\(((?:[^()]|\([^()]*\))*)\)/g, '$1').replace(/:global\b/g, '');
-  return plain.split(',').map((selector) => selector.trim().split(/\s*[>+~]\s*|\s+/).pop() ?? '');
+  return plain.split(',').map((selector) => selector.trim());
 }
 
 /**
  * Why a global rule breaks the Dialog, or null. Naming any Dialog class is a
- * restyle, except a `.dialog-form` that only gets spacing, or that only
- * scopes its descendants.
+ * restyle, except `.dialog-form.<own-class>` on its own, with spacing only.
  */
 function restyleDetail(prelude, properties) {
   const classes = [...prelude.matchAll(DIALOG_CLASS_RE)].map((m) => m[1]);
@@ -411,9 +403,11 @@ function restyleDetail(prelude, properties) {
   const other = classes.find((c) => c !== 'dialog-form');
   if (other) return `${text} restyles the Dialog's .${other}`;
   if (classes.length === 0) return null;
-  const formIsSubject = subjects(prelude).some((compound) => /\.dialog-form(?![\w-])/.test(compound));
-  const layout = formIsSubject ? properties.filter((p) => FORM_LAYOUT_PROP.test(p)) : [];
-  return layout.length ? `${text} sets ${layout.join(', ')} on .dialog-form; only spacing may change` : null;
+  const loose = selectors(prelude).find((s) => /\.dialog-form(?![\w-])/.test(s) && !OWN_FORM_COMPOUND.test(s));
+  if (loose !== undefined) return `${text}: style a Dialog.Form only as .dialog-form.<your-class>, with nothing around it`;
+  const notSpacing = properties.filter((p) => !SPACING_PROP.test(p));
+  if (notSpacing.length === 0) return null;
+  return `${text} sets ${notSpacing.join(', ')} on .dialog-form; only gap, padding and margin may change`;
 }
 
 function checkSvelteCss(css, source, report) {
