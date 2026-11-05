@@ -541,6 +541,29 @@ describe('DialogContent', () => {
     expect(content?.lastElementChild).toBe(close);
   });
 
+  // The portal escapes .org-layout to <body>, so it carries the org's brand
+  // scope with it and no font of its own: an inline value beats
+  // [data-org-brand]'s brand font with <body>'s Inter.
+  test('a portal under an org brand carries its scope and sets no font', () => {
+    const layout = document.createElement('div');
+    layout.className = 'org-layout';
+    layout.setAttribute('data-org-brand', '');
+    layout.style.setProperty('--brand-font-body', 'Georgia');
+    document.body.appendChild(layout);
+
+    component = mount(DialogHarness, {
+      target: layout,
+      props: { open: true },
+    });
+    flushSync();
+
+    const portal = document.querySelector('.dialog-overlay')?.parentElement;
+    expect(portal?.parentElement).toBe(document.body);
+    expect(portal?.hasAttribute('data-org-brand')).toBe(true);
+    expect(portal?.style.getPropertyValue('--brand-font-body')).toBe('Georgia');
+    expect(portal?.style.fontFamily).toBe('');
+  });
+
   test('closeButton={false} drops the built-in close button', () => {
     component = mount(DialogHarness, {
       target: document.body,
