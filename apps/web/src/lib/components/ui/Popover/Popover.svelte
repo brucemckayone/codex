@@ -38,7 +38,10 @@
 		closeOnOutsideClick = true,
 		preventScroll,
 		preventTextSelectionOverflow,
-		portal = true, // Portal to body required for Storybook iframe rendering
+		// Rendered in place. This was `true`, read as "portal to body", but Melt's
+		// portal takes a selector or an element and does nothing with `true`; and
+		// `true` failed the type check. `null` is Melt's own "no portal".
+		portal = null,
 		forceVisible = true,
 		openFocus,
 		closeFocus,
