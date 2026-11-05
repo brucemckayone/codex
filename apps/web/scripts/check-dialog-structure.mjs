@@ -138,11 +138,6 @@ export const ALLOWLIST = [
     reason: 'M4: the link popover sets role="dialog"; M4 decides Dialog or a non-modal popover',
   },
   {
-    file: 'src/lib/components/AudioPlayer/ImmersiveShaderPlayer.svelte',
-    rule: 'own-dialog',
-    reason: 'M4 (report-only): a full-screen player, not a panel; M4 classifies it',
-  },
-  {
     file: 'src/lib/components/ui/Dialog/DialogScrollControl.stories.svelte',
     rule: 'content-child',
     reason: 'Permanent: the calibration control, the raw wrapper this gate bans; the scroll proof must read it CLIPPED',
