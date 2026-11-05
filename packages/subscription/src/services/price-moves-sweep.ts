@@ -79,7 +79,9 @@ import { MOVE_TIER_ID_KEY } from './tier-move';
  * notice, the read again after it (F1), the write) × 1,125 = 4,500, and
  * the same wake's other sweeps take about 4,000 more, so 8,500: the design's
  * envelope, under the paid plan's default 10,000 per invocation (ecom-api
- * sets no `limits`).
+ * sets no `limits`). The dispute reconcile's late-win check adds ≲125 on
+ * top (3 list pages, and at most 10 undos of about 12 each; Codex-2hxff.70),
+ * about 8,625 in all. Like this sweep, it skips the 08:00 London run.
  */
 export const PRICE_MOVES_PER_RUN = 1125;
 /** People worked at once: one batch, all on one change. */

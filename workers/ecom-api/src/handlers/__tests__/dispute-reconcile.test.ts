@@ -7,6 +7,7 @@
  * | ------------------------------ | -------------------------------------------------------- |
  * | Stripe's events, last 4 days   | no row; final or open chargeback; or a later stage       |
  * | Our final, unapplied rows      | always                                                   |
+ * | Our lost rows, last 12 months  | Stripe has it as won now (a late win; Codex-2hxff.70)    |
  *
  * Each dispute is re-read from Stripe and handled as it is now. An open
  * chargeback is re-run (its opening may have failed) but writes no second
@@ -28,6 +29,9 @@ import {
   DISPUTE_EVENT_WINDOW_MS,
   DISPUTE_RECONCILE_GRACE_MS,
   DISPUTE_RECONCILE_LIMIT,
+  LATE_WIN_LIMIT,
+  LATE_WIN_MAX_PAGES,
+  LATE_WIN_PAGE_SIZE,
   runDisputeReconcile,
 } from '../dispute-reconcile';
 
@@ -51,6 +55,10 @@ interface Row {
   amountCents: number;
   outcomeAppliedAt: Date | null;
   updatedAt: Date;
+  /** Stripe's `created`: source 3 reads lost rows by it. */
+  stripeCreatedAt: Date;
+  /** Set by the lost → won move (Codex-2hxff.70). */
+  lateWonAt: Date | null;
 }
 
 function dispute(
@@ -91,6 +99,8 @@ function ledger(
         amountCents: 1999,
         outcomeAppliedAt: null,
         updatedAt: new Date(NOW.getTime() - 10 * 24 * 3600 * 1000),
+        stripeCreatedAt: new Date(NOW.getTime() - 40 * 24 * 3600 * 1000),
+        lateWonAt: null,
         ...row,
       },
     ])
@@ -117,6 +127,23 @@ function ledger(
         .slice(0, limit)
         .map(({ stripeDisputeId, status }) => ({ stripeDisputeId, status }))
     ),
+    // Source 3 (Codex-2hxff.70): lost rows opened since `since`, not written
+    // since `updatedBefore`.
+    findLostDisputesToRecheck: vi.fn(
+      async (query: { since: Date; updatedBefore: Date; limit: number }) =>
+        [...rows.values()]
+          .filter(
+            (row) =>
+              row.status === 'lost' &&
+              row.stripeCreatedAt >= query.since &&
+              row.updatedAt < query.updatedBefore
+          )
+          .slice(0, query.limit)
+          .map(({ stripeDisputeId, stripeCreatedAt }) => ({
+            stripeDisputeId,
+            stripeCreatedAt,
+          }))
+    ),
     recordDispute: vi.fn(
       async (d: {
         stripeDisputeId: string;
@@ -131,9 +158,18 @@ function ledger(
             amountCents: d.amountCents,
             outcomeAppliedAt: null,
             updatedAt: new Date(),
+            stripeCreatedAt: new Date(),
+            lateWonAt: null,
           });
         } else if ((RANK[d.status] ?? -1) > (RANK[row.status] ?? -1)) {
           row.status = d.status;
+          row.updatedAt = new Date();
+        } else if (row.status === 'lost' && d.status === 'won') {
+          // The late win's move (Codex-2hxff.70): the outcome is cleared
+          // for the undo, which marks it again.
+          row.status = 'won';
+          row.lateWonAt = new Date();
+          row.outcomeAppliedAt = null;
           row.updatedAt = new Date();
         }
         return { ...rows.get(d.stripeDisputeId) };
@@ -156,6 +192,19 @@ function ledger(
       accessEnded: true,
     }),
     countDisputeReversalSteps: vi.fn().mockResolvedValue(0),
+    // The late win's undo (Codex-2hxff.70), faked against the contract.
+    restoreAfterLateWin: vi.fn().mockResolvedValue({
+      outcome: 'restored',
+      userId: 'user_1',
+      orgId: 'org_1',
+      purchaseId: 'purchase_1',
+      email: null,
+    }),
+    repayWonDispute: vi
+      .fn()
+      .mockResolvedValue({ repaid: 1, cancelled: 0, debtsClosed: 0 }),
+    refundFirstPaymentAfterLateWin: vi.fn().mockResolvedValue('none'),
+    claimLateWinBuyerEmail: vi.fn().mockResolvedValue(true),
   };
   return { rows, purchase };
 }
@@ -179,9 +228,12 @@ function stripeStub(
     events?: Stripe.Event[];
     disputes?: Stripe.Dispute[];
     chargeMetadata?: Record<string, string>;
+    /** `disputes.list`'s pages, newest first (source 3). */
+    listed?: Stripe.Dispute[][];
   } = {}
 ) {
   const events = options.events ?? [];
+  const pages = options.listed ?? [[]];
   return {
     events: {
       list: vi.fn().mockResolvedValue({
@@ -198,6 +250,18 @@ function stripeStub(
             .object as Stripe.Dispute | undefined);
         if (!found) throw new Error(`No such dispute: ${id}`);
         return found;
+      }),
+      list: vi.fn(async (params: { starting_after?: string }) => {
+        const at = params.starting_after
+          ? pages.findIndex(
+              (page) => page[page.length - 1]?.id === params.starting_after
+            ) + 1
+          : 0;
+        return {
+          object: 'list',
+          data: pages[at] ?? [],
+          has_more: at < pages.length - 1,
+        };
       }),
     },
     charges: {
@@ -216,6 +280,8 @@ function reconcile(parts: {
   stripe: ReturnType<typeof stripeStub>;
   subscription?: ReturnType<typeof subscriptionStub>;
   environment?: string;
+  /** Off on the 08:00 London run (Codex-2hxff.70). */
+  lateWins?: boolean;
 }) {
   const effects = {
     invalidateLibrary: vi.fn(),
@@ -223,6 +289,7 @@ function reconcile(parts: {
     clearRevocation: vi.fn(),
   };
   const obs = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+  const mail = vi.fn();
   const subscription = parts.subscription ?? subscriptionStub();
   const run = () =>
     runDisputeReconcile({
@@ -232,9 +299,12 @@ function reconcile(parts: {
       environment: parts.environment ?? 'development',
       obs: obs as never,
       effects,
+      mail,
+      webAppUrl: 'https://revelations.studio',
+      lateWins: parts.lateWins ?? true,
       now: NOW,
     });
-  return { run, effects, obs, subscription };
+  return { run, effects, obs, subscription, mail };
 }
 
 describe('runDisputeReconcile', () => {
@@ -279,7 +349,13 @@ describe('runDisputeReconcile', () => {
     expect(purchase.settleWonDispute).toHaveBeenCalledWith('dp_won');
     expect(effects.clearRevocation).toHaveBeenCalledWith('user_1', 'org_1');
     expect(rows.get('dp_won')?.outcomeAppliedAt).toBeInstanceOf(Date);
-    expect(result).toEqual({ fromEvents: 1, fromRows: 0, acted: 1, failed: 0 });
+    expect(result).toEqual({
+      fromEvents: 1,
+      fromRows: 0,
+      fromLostRows: 0,
+      acted: 1,
+      failed: 0,
+    });
   });
 
   it("a dispute is handled as Stripe has it now, not as an event's snapshot had it", async () => {
@@ -502,13 +578,25 @@ describe('runDisputeReconcile', () => {
     expect(purchase.processLostDispute).toHaveBeenCalledOnce();
     expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledOnce();
     expect(rows.get('dp_old')?.outcomeAppliedAt).toBeInstanceOf(Date);
-    expect(first).toEqual({ fromEvents: 0, fromRows: 1, acted: 1, failed: 0 });
+    expect(first).toEqual({
+      fromEvents: 0,
+      fromRows: 1,
+      fromLostRows: 0,
+      acted: 1,
+      failed: 0,
+    });
 
     const second = await run();
 
     expect(purchase.processLostDispute).toHaveBeenCalledOnce();
     expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledOnce();
-    expect(second).toEqual({ fromEvents: 0, fromRows: 0, acted: 0, failed: 0 });
+    expect(second).toEqual({
+      fromEvents: 0,
+      fromRows: 0,
+      fromLostRows: 0,
+      acted: 0,
+      failed: 0,
+    });
   });
 
   it('an outcome step that keeps failing is retried every run and alerted at error with an errorId each time (owner decision 2026-10-23)', async () => {
@@ -554,7 +642,13 @@ describe('runDisputeReconcile', () => {
     const result = await reconcile({ purchase, stripe }).run();
 
     expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith('dp_b');
-    expect(result).toEqual({ fromEvents: 2, fromRows: 0, acted: 1, failed: 1 });
+    expect(result).toEqual({
+      fromEvents: 2,
+      fromRows: 0,
+      fromLostRows: 0,
+      acted: 1,
+      failed: 1,
+    });
   });
 
   it("another environment's dispute is ignored and never recorded", async () => {
@@ -815,5 +909,232 @@ describe('runDisputeReconcile', () => {
       { errorId: expect.any(String), limit: DISPUTE_RECONCILE_LIMIT }
     );
     expect(result.fromRows).toBe(DISPUTE_RECONCILE_LIMIT);
+  });
+
+  // ── late wins: a loss Stripe now has as won (Codex-2hxff.70; late-win data
+  // design §5, §10) ─────────────────────────────────────────────────────
+
+  describe('late wins (Codex-2hxff.70)', () => {
+    const DAY_MS = 24 * 3600 * 1000;
+    const APPLIED = new Date(NOW.getTime() - 20 * DAY_MS);
+    const ago = (days: number) => new Date(NOW.getTime() - days * DAY_MS);
+    const lostRow = (id: string, createdDaysAgo = 40) => ({
+      stripeDisputeId: id,
+      status: 'lost',
+      outcomeAppliedAt: APPLIED,
+      stripeCreatedAt: ago(createdDaysAgo),
+    });
+
+    it('source 1: an applied loss whose event says won is re-read, recorded won and undone', async () => {
+      const { rows, purchase } = ledger([lostRow('dp_late')]);
+      const stripe = stripeStub({ events: [event(dispute('dp_late', 'won'))] });
+
+      const result = await reconcile({ purchase, stripe }).run();
+
+      expect(stripe.disputes.retrieve).toHaveBeenCalledWith('dp_late');
+      expect(purchase.restoreAfterLateWin).toHaveBeenCalledWith('dp_late');
+      expect(purchase.repayWonDispute).toHaveBeenCalledWith('dp_late');
+      expect(purchase.settleWonDispute).not.toHaveBeenCalled();
+      expect(rows.get('dp_late')).toMatchObject({
+        status: 'won',
+        lateWonAt: expect.any(Date),
+        outcomeAppliedAt: expect.any(Date),
+      });
+      expect(result).toMatchObject({ fromEvents: 1, acted: 1, failed: 0 });
+    });
+
+    it('source 1 leaves alone a late win already applied, undone or settled by hand (release step R18), and an applied loss its event still calls lost', async () => {
+      const { purchase } = ledger([
+        {
+          stripeDisputeId: 'dp_r18',
+          status: 'won',
+          outcomeAppliedAt: APPLIED,
+          lateWonAt: APPLIED,
+        },
+        lostRow('dp_still_lost'),
+      ]);
+      const stripe = stripeStub({
+        events: [
+          event(dispute('dp_r18', 'won')),
+          event(dispute('dp_still_lost', 'lost')),
+        ],
+      });
+
+      await reconcile({ purchase, stripe }).run();
+
+      expect(stripe.disputes.retrieve).not.toHaveBeenCalled();
+      expect(purchase.restoreAfterLateWin).not.toHaveBeenCalled();
+      expect(purchase.repayWonDispute).not.toHaveBeenCalled();
+      expect(purchase.refundFirstPaymentAfterLateWin).not.toHaveBeenCalled();
+      expect(purchase.claimLateWinBuyerEmail).not.toHaveBeenCalled();
+    });
+
+    it('source 3 reads Stripe nothing while we hold no lost dispute from the last 12 months, nor one the webhook wrote in the last 15 minutes', async () => {
+      const { purchase } = ledger([
+        lostRow('dp_old', 400),
+        {
+          ...lostRow('dp_fresh'),
+          updatedAt: new Date(NOW.getTime() - 5 * 60 * 1000),
+        },
+      ]);
+      const stripe = stripeStub({
+        listed: [[dispute('dp_old', 'won'), dispute('dp_fresh', 'won')]],
+      });
+
+      await reconcile({ purchase, stripe }).run();
+
+      expect(purchase.findLostDisputesToRecheck).toHaveBeenCalledWith({
+        since: new Date('2025-10-23T12:00:00Z'),
+        updatedBefore: new Date(NOW.getTime() - DISPUTE_RECONCILE_GRACE_MS),
+        limit: LATE_WIN_PAGE_SIZE * LATE_WIN_MAX_PAGES,
+      });
+      expect(stripe.disputes.list).not.toHaveBeenCalled();
+      expect(purchase.restoreAfterLateWin).not.toHaveBeenCalled();
+    });
+
+    it("source 3 lists Stripe's disputes once from the oldest of our lost rows, and settles only ours that Stripe has as won", async () => {
+      const { rows, purchase } = ledger([
+        lostRow('dp_won_now', 40),
+        lostRow('dp_still_lost', 100),
+      ]);
+      const stripe = stripeStub({
+        listed: [
+          [
+            dispute('dp_won_now', 'won'),
+            dispute('dp_still_lost', 'lost'),
+            // The other environment's, and any other dispute we hold no row of.
+            dispute('dp_not_ours', 'won'),
+          ],
+        ],
+        disputes: [dispute('dp_won_now', 'won')],
+      });
+      const { run } = reconcile({ purchase, stripe });
+
+      const result = await run();
+
+      expect(stripe.disputes.list).toHaveBeenCalledExactlyOnceWith({
+        created: { gte: seconds(ago(100)) },
+        limit: LATE_WIN_PAGE_SIZE,
+      });
+      expect(stripe.disputes.retrieve).toHaveBeenCalledExactlyOnceWith(
+        'dp_won_now'
+      );
+      expect(purchase.restoreAfterLateWin).toHaveBeenCalledExactlyOnceWith(
+        'dp_won_now'
+      );
+      expect(rows.get('dp_won_now')?.status).toBe('won');
+      expect(rows.get('dp_still_lost')?.status).toBe('lost');
+      expect(rows.has('dp_not_ours')).toBe(false);
+      expect(result).toMatchObject({ fromLostRows: 1, acted: 1, failed: 0 });
+    });
+
+    it(`source 3 settles at most ${LATE_WIN_LIMIT} a run; the rest wait an hour`, async () => {
+      const ids = Array.from(
+        { length: LATE_WIN_LIMIT + 2 },
+        (_, i) => `dp_many_${i}`
+      );
+      const { purchase } = ledger(ids.map((id) => lostRow(id)));
+      const stripe = stripeStub({
+        listed: [ids.map((id) => dispute(id, 'won'))],
+      });
+      stripe.disputes.retrieve.mockImplementation(async (id: string) =>
+        dispute(id, 'won')
+      );
+
+      const result = await reconcile({ purchase, stripe }).run();
+
+      expect(result.fromLostRows).toBe(LATE_WIN_LIMIT);
+      expect(purchase.restoreAfterLateWin).toHaveBeenCalledTimes(
+        LATE_WIN_LIMIT
+      );
+    });
+
+    it(`source 3 reads at most ${LATE_WIN_MAX_PAGES} pages, each after the last of the one before, and alerts past them`, async () => {
+      const ids = ['dp_pg0', 'dp_pg1', 'dp_pg2', 'dp_pg3'];
+      const { purchase } = ledger(ids.map((id) => lostRow(id)));
+      const stripe = stripeStub({
+        listed: ids.map((id) => [dispute(id, 'won')]),
+      });
+      stripe.disputes.retrieve.mockImplementation(async (id: string) =>
+        dispute(id, 'won')
+      );
+      const { run, obs } = reconcile({ purchase, stripe });
+
+      await run();
+
+      expect(stripe.disputes.list).toHaveBeenCalledTimes(LATE_WIN_MAX_PAGES);
+      expect(stripe.disputes.list.mock.calls[1]?.[0]).toMatchObject({
+        starting_after: 'dp_pg0',
+      });
+      expect(obs.error).toHaveBeenCalledWith(
+        expect.stringContaining("read its page limit of Stripe's disputes"),
+        {
+          errorId: expect.any(String),
+          pages: LATE_WIN_MAX_PAGES,
+          pageSize: LATE_WIN_PAGE_SIZE,
+        }
+      );
+      // The three pages read are still settled; the fourth waits.
+      expect(purchase.restoreAfterLateWin.mock.calls.map(([id]) => id)).toEqual(
+        ['dp_pg0', 'dp_pg1', 'dp_pg2']
+      );
+    });
+
+    it("a page of Stripe's disputes that fails is alerted, and the late wins on the pages before it are still settled", async () => {
+      const { purchase } = ledger([lostRow('dp_first'), lostRow('dp_second')]);
+      const stripe = stripeStub({
+        listed: [[dispute('dp_first', 'won')], [dispute('dp_second', 'won')]],
+        disputes: [dispute('dp_first', 'won')],
+      });
+      const firstPage = stripe.disputes.list.getMockImplementation();
+      if (!firstPage) throw new Error('the list stub has no implementation');
+      stripe.disputes.list
+        .mockImplementationOnce(firstPage)
+        .mockRejectedValueOnce(new Error('Stripe down (test)'));
+      const { run, obs } = reconcile({ purchase, stripe });
+
+      await run();
+
+      expect(obs.error).toHaveBeenCalledWith(
+        expect.stringContaining("could not read a page of Stripe's disputes"),
+        expect.objectContaining({ errorId: expect.any(String), page: 1 })
+      );
+      expect(purchase.restoreAfterLateWin).toHaveBeenCalledExactlyOnceWith(
+        'dp_first'
+      );
+    });
+
+    it('a dispute source 1 already tried this run is not tried again by source 3', async () => {
+      const { rows, purchase } = ledger([lostRow('dp_twice')]);
+      const stripe = stripeStub({
+        events: [event(dispute('dp_twice', 'won'))],
+        listed: [[dispute('dp_twice', 'won')]],
+      });
+      // Source 1's re-read fails, so the row is still lost when source 3
+      // lists it won: once a run is enough, the next run retries.
+      stripe.disputes.retrieve.mockRejectedValueOnce(new Error('down (test)'));
+
+      const result = await reconcile({ purchase, stripe }).run();
+
+      expect(stripe.disputes.list).toHaveBeenCalledOnce();
+      expect(stripe.disputes.retrieve).toHaveBeenCalledTimes(1);
+      expect(rows.get('dp_twice')?.status).toBe('lost');
+      expect(result).toMatchObject({ fromLostRows: 0, failed: 1 });
+    });
+
+    it('the 08:00 London run (lateWins off) does no late-win work: no lost-row read, no Stripe list, and source 1 leaves applied losses alone', async () => {
+      const { rows, purchase } = ledger([lostRow('dp_late')]);
+      const stripe = stripeStub({
+        events: [event(dispute('dp_late', 'won'))],
+        listed: [[dispute('dp_late', 'won')]],
+      });
+
+      await reconcile({ purchase, stripe, lateWins: false }).run();
+
+      expect(purchase.findLostDisputesToRecheck).not.toHaveBeenCalled();
+      expect(stripe.disputes.list).not.toHaveBeenCalled();
+      expect(stripe.disputes.retrieve).not.toHaveBeenCalled();
+      expect(rows.get('dp_late')?.status).toBe('lost');
+    });
   });
 });
