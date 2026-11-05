@@ -44,6 +44,7 @@ import {
   CHARGE_ID,
   chargeDetail,
   historyLine,
+  LIFTED_WINDOW,
   NOW,
   preview,
   slice,
@@ -139,6 +140,21 @@ describe('loading the charge', () => {
     );
     expect(text()).toContain(m.support_split_title({ amount: '£24.00' }));
     expect(text()).toContain(m.support_refunds_card_title());
+    expect(review()).not.toBeNull();
+  });
+
+  test('a window a late win lifted (Q7): the header says there is no time limit, and no part of the page prints the passed date', () => {
+    mountCharge();
+    chargeSlot(CHARGE_ID).current = chargeDetail({ window: LIFTED_WINDOW });
+    flushSync();
+    expect(
+      document
+        .querySelector('.page-header__actions')
+        ?.textContent?.replace(/\s+/g, ' ')
+        .trim()
+    ).toBe('No time limit: the chargeback was won late');
+    expect(text()).not.toContain('17 Sep');
+    expect(text()).not.toMatch(/days? left/);
     expect(review()).not.toBeNull();
   });
 

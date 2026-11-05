@@ -127,7 +127,11 @@ export function chargeDetail(
       slug: 'studio-alpha',
       deleted: false,
     },
-    window: { closesAt: '2026-11-01T14:32:00.000Z', isOpen: true },
+    window: {
+      closesAt: '2026-11-01T14:32:00.000Z',
+      isOpen: true,
+      liftedByLateWin: false,
+    },
     refundable: { maxCents: 2000, blocked: null },
     refundCount: 1,
     slices: SLICES,
@@ -203,7 +207,11 @@ export function chargeSummary(
     refundedCents: 400,
     paidAt: '2026-10-18T13:32:00.000Z',
     chargeback: null,
-    window: { closesAt: '2026-11-01T14:32:00.000Z', isOpen: true },
+    window: {
+      closesAt: '2026-11-01T14:32:00.000Z',
+      isOpen: true,
+      liftedByLateWin: false,
+    },
     ...overrides,
   };
 }
@@ -255,6 +263,16 @@ export function historyLine(overrides: Partial<HistoryLine> = {}): HistoryLine {
     ...overrides,
   };
 }
+
+/**
+ * A window a late-won chargeback lifted (owner Q7, Codex-2hxff.70): open, its
+ * 14-day date (17 Sep, 20:14 London) long past, so no page may print it.
+ */
+export const LIFTED_WINDOW = {
+  closesAt: '2026-09-17T19:14:00.000Z',
+  isOpen: true,
+  liftedByLateWin: true,
+};
 
 /** A chargeback on the charge, as `ChargebacksCard` lists it: open, by default. */
 export function chargebackRow(

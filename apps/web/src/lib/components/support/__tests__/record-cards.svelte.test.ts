@@ -19,6 +19,7 @@ import {
   chargeDetail,
   creatorDebt,
   historyLine,
+  LIFTED_WINDOW,
   lateWonChargeback,
   lateWonHistoryLine,
   NOW,
@@ -62,6 +63,16 @@ describe('The charge', () => {
     );
     expect(text()).toContain('ch_3QeT8xLk2vRb09aZ');
     expect(text()).toContain('pi_3QeT8xLk2vRb09aZ');
+  });
+
+  test('a window a late win lifted (Q7): no time limit, and never its passed date', () => {
+    render(ChargeSummaryCard, {
+      detail: chargeDetail({ window: LIFTED_WINDOW }),
+      now: NOW,
+    });
+    expect(text()).toContain('No time limit: the chargeback was won late');
+    expect(text()).not.toContain('17 Sep');
+    expect(text()).not.toMatch(/days? left/);
   });
 
   test('an invoice: the plan, and that it is the current period’s payment', () => {

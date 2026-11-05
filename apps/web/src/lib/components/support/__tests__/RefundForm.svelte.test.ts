@@ -33,6 +33,7 @@ vi.mock(
 import {
   CHARGE_ID,
   chargeDetail,
+  LIFTED_WINDOW,
   lateWonChargeback,
   preview,
 } from '../__fixtures__/support-fixtures';
@@ -760,6 +761,7 @@ describe('a blocked charge', () => {
         window: {
           closesAt: '2026-10-17T07:15:00.000Z',
           isOpen: blocked !== 'window_closed',
+          liftedByLateWin: false,
         },
       }),
     });
@@ -785,6 +787,23 @@ describe('a blocked charge', () => {
       'info'
     );
     expect(review()).toBeNull();
+  });
+
+  test('a window a late win lifted (Q7): the form is open, says there is no time limit, and never prints the passed date', () => {
+    mountForm({
+      detail: chargeDetail({
+        window: LIFTED_WINDOW,
+        chargebacks: [lateWonChargeback()],
+      }),
+    });
+    const text = document.body.textContent?.replace(/\s+/g, ' ') ?? '';
+    // £4.00 was refunded before, so £20.00 is left.
+    expect(text).toContain(
+      '£20.00 is left to refund. No time limit: the chargeback was won late.'
+    );
+    expect(text).not.toContain('17 Sep');
+    expect(text).not.toContain('The window closes');
+    expect(review()).not.toBeNull();
   });
 
   test('an inquiry does not block, and the form says what a full refund does to it', () => {

@@ -410,6 +410,25 @@
     }
   }
 
+  /**
+   * What the form can refund, and until when. A window a late-won chargeback
+   * lifted (owner Q7) has no end, and its `closesAt` has passed: no date.
+   */
+  const refundableText = $derived.by(() => {
+    const amount = formatPrice(maxCents);
+    const partly = detail.charge.refundedCents > 0;
+    if (detail.window.liftedByLateWin) {
+      return partly
+        ? m.support_form_left_lifted({ amount })
+        : m.support_form_can_lifted({ amount });
+    }
+    return (partly ? m.support_form_left : m.support_form_can)({
+      amount,
+      date: formatDay(detail.window.closesAt),
+      time: formatTime(detail.window.closesAt),
+    });
+  });
+
   function capitalise(text: string): string {
     return text.charAt(0).toUpperCase() + text.slice(1);
   }
@@ -513,13 +532,7 @@
   <Card.Header>
     <Card.Title level={2}>{m.support_form_title()}</Card.Title>
     {#if !detail.refundable.blocked}
-      <Card.Description>
-        {(detail.charge.refundedCents > 0 ? m.support_form_left : m.support_form_can)({
-          amount: formatPrice(maxCents),
-          date: formatDay(detail.window.closesAt),
-          time: formatTime(detail.window.closesAt),
-        })}
-      </Card.Description>
+      <Card.Description>{refundableText}</Card.Description>
     {/if}
   </Card.Header>
   <Card.Content>
