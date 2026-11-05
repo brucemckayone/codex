@@ -11,13 +11,17 @@
  * Playwright's click()/fill() scroll in code, and code scrolls through
  * `overflow: hidden`. So the rule is enforced on the SOURCE, not the screen:
  *
- *   content-child  A Dialog.Content's direct child is Dialog.Header, Body,
- *                  Footer or Form. Nothing else.
- *   form-child     A Dialog.Form's direct child is Dialog.Body or Footer.
+ *   content-child  A Dialog.Content's direct child is Dialog.Header, Toolbar,
+ *                  Body, Footer or Form. Nothing else.
+ *   form-child     A Dialog.Form's direct child is Dialog.Toolbar, Body or
+ *                  Footer.
  *   global-style   Outside ui/Dialog/, no `:global(...)` selector (and no
  *                  rule in a .css file) names a class the Dialog renders:
- *                  restyling the primitive from outside is how the three
- *                  hand-built drawers forked it.
+ *                  restyling the primitive from outside is how the four
+ *                  hand-built drawers forked it. One exception: a rule whose
+ *                  subject is `.dialog-form` (a page's own class on its
+ *                  Dialog.Form) may set spacing, never layout (display,
+ *                  position, flex*, overflow*, height/min/max, block-size).
  *   own-dialog     Outside lib/components/ui/, no element sets
  *                  role="dialog"/"alertdialog" or aria-modal: a modal is
  *                  built from the shared parts, not by hand.
@@ -100,22 +104,22 @@ export const ALLOWLIST = [
   {
     file: 'src/lib/components/ui/FilterDrawer/FilterDrawer.svelte',
     rule: 'global-style',
-    reason: 'UNOWNED: a fourth drawer (floating glass rail) the audit missed; restyles .dialog-content/.dialog-footer/.dialog-title',
+    reason: 'M3: the fourth drawer (glass rail); moves to variant="drawer" floating sheet + Footer align="between"',
   },
   {
     file: 'src/lib/components/studio/media-library/MediaPickerDialog.svelte',
     rule: 'content-child',
-    reason: 'UNOWNED: a working hand-written .picker-form (Header inside it); moves to Dialog.Form, Header outside',
+    reason: 'M2: a working hand-written .picker-form + .picker-tools; moves to Dialog.Form + Dialog.Toolbar, Header outside',
   },
   {
     file: 'src/lib/components/studio/ownership/OwnershipOfferDialog.svelte',
     rule: 'content-child',
-    reason: 'UNOWNED: a working display:contents form (Header inside it); moves to Dialog.Form, Header outside',
+    reason: 'M2: a working display:contents form (Header inside it); moves to Dialog.Form, Header outside',
   },
   {
     file: 'src/routes/_org/[slug]/studio/journeys/[id]/curriculum/+page.svelte',
     rule: 'content-child',
-    reason: 'UNOWNED: the picker search bar sits between Header and Body; works today, belongs in Header or Body',
+    reason: 'M2: the picker search bar sits between Header and Body; moves to Dialog.Toolbar direction="column"',
   },
   {
     file: 'src/lib/components/command-palette/CommandPalette.svelte',
@@ -158,18 +162,24 @@ const DIALOG_CLASSES = [
   'dialog-header',
   'dialog-title',
   'dialog-description',
+  'dialog-toolbar',
   'dialog-body',
   'dialog-form',
   'dialog-footer',
 ];
 // A class token, not a prefix: `.dialog-content` must not match inside
 // `.dialog-content-wrapper`, which is listed on its own.
-const DIALOG_CLASS_RE = new RegExp(`\\.(${DIALOG_CLASSES.join('|')})(?![\\w-])`);
+const DIALOG_CLASS_RE = new RegExp(`\\.(${DIALOG_CLASSES.join('|')})(?![\\w-])`, 'g');
+
+// What a page may not set on its own Dialog.Form class: anything that
+// decides whether the form passes the panel's column down to Body.
+const FORM_LAYOUT_PROP =
+  /^(display|position|height|min-height|max-height|(min-|max-)?block-size|flex(-[a-z-]+)?|overflow(-[a-z-]+)?)$/;
 
 /** The parts each container part may hold directly, and the rule's name. */
 const CHILD_RULES = {
-  Content: { rule: 'content-child', allowed: new Set(['Header', 'Body', 'Footer', 'Form']) },
-  Form: { rule: 'form-child', allowed: new Set(['Body', 'Footer']) },
+  Content: { rule: 'content-child', allowed: new Set(['Header', 'Toolbar', 'Body', 'Footer', 'Form']) },
+  Form: { rule: 'form-child', allowed: new Set(['Toolbar', 'Body', 'Footer']) },
 };
 
 const SCANNED_EXTS = ['.svelte', '.css', '.ts', '.js'];
@@ -409,30 +419,52 @@ function checkOwnDialog(ast, report) {
   });
 }
 
+/** The last compound of each selector in a list, with `:global` unwrapped. */
+function subjects(prelude) {
+  const plain = prelude.replace(/:global\(((?:[^()]|\([^()]*\))*)\)/g, '$1').replace(/:global\b/g, '');
+  return plain.split(',').map((selector) => selector.trim().split(/\s*[>+~]\s*|\s+/).pop() ?? '');
+}
+
+/**
+ * Why a global rule breaks the Dialog, or null. Naming any Dialog class is a
+ * restyle, except a `.dialog-form` that only gets spacing, or that only
+ * scopes its descendants.
+ */
+function restyleDetail(prelude, properties) {
+  const classes = [...prelude.matchAll(DIALOG_CLASS_RE)].map((m) => m[1]);
+  const text = prelude.replace(/\s+/g, ' ').trim();
+  const other = classes.find((c) => c !== 'dialog-form');
+  if (other) return `${text} restyles the Dialog's .${other}`;
+  if (classes.length === 0) return null;
+  const formIsSubject = subjects(prelude).some((compound) => /\.dialog-form(?![\w-])/.test(compound));
+  const layout = formIsSubject ? properties.filter((p) => FORM_LAYOUT_PROP.test(p)) : [];
+  return layout.length ? `${text} sets ${layout.join(', ')} on .dialog-form; only spacing may change` : null;
+}
+
 function checkSvelteCss(css, source, report) {
   const visit = (node, inGlobal) => {
-    if (node.type === 'Rule') {
-      const prelude = source.slice(node.prelude.start, node.prelude.end);
-      const global = inGlobal || prelude.includes(':global');
-      const hit = global && prelude.match(DIALOG_CLASS_RE);
-      if (hit) report(node.start, 'global-style', `${prelude.replace(/\s+/g, ' ').trim()} restyles the Dialog's .${hit[1]}`);
-      for (const child of node.block.children) visit(child, global);
-    } else if (node.type === 'Atrule' && node.block) {
-      for (const child of node.block.children) visit(child, inGlobal);
+    if (node.type === 'Atrule') {
+      for (const child of node.block?.children ?? []) visit(child, inGlobal);
+      return;
     }
+    if (node.type !== 'Rule') return;
+    const prelude = source.slice(node.prelude.start, node.prelude.end);
+    const global = inGlobal || prelude.includes(':global');
+    const properties = node.block.children.filter((c) => c.type === 'Declaration').map((c) => c.property);
+    const detail = global && restyleDetail(prelude, properties);
+    if (detail) report(node.start, 'global-style', detail);
+    for (const child of node.block.children) visit(child, global);
   };
   for (const node of css.children) visit(node, false);
 }
 
-/** A .css file is global through and through: any rule naming the classes. */
+/** A .css file is global through and through: every innermost rule counts. */
 function checkCssFile(source, report) {
   const stripped = source.replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, ' '));
-  for (const m of stripped.matchAll(/([^{}]+)\{/g)) {
-    const hit = m[1].match(DIALOG_CLASS_RE);
-    if (hit && !m[1].trim().startsWith('@')) {
-      const offset = m.index + m[1].search(/\S/);
-      report(offset, 'global-style', `${m[1].replace(/\s+/g, ' ').trim()} restyles the Dialog's .${hit[1]}`);
-    }
+  for (const m of stripped.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const properties = m[2].split(';').map((d) => d.split(':')[0].trim().toLowerCase()).filter(Boolean);
+    const detail = restyleDetail(m[1], properties);
+    if (detail) report(m.index + m[1].search(/\S/), 'global-style', detail);
   }
 }
 

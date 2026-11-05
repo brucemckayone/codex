@@ -8,10 +8,12 @@
 
   const { children, class: className, ...restProps }: Props = $props();
   // Set by Dialog.Content; absent when Body is mounted on its own.
-  const variant = getContext<{ current: 'dialog' | 'drawer' } | undefined>('DIALOG_VARIANT');
+  const layout = getContext<{ current: 'dialog' | 'drawer' | 'floating' } | undefined>(
+    'DIALOG_LAYOUT'
+  );
 </script>
 
-<div class="dialog-body {className ?? ''}" data-variant={variant?.current} {...restProps}>
+<div class="dialog-body {className ?? ''}" data-layout={layout?.current} {...restProps}>
   {@render children()}
 </div>
 
@@ -27,8 +29,9 @@
   }
 
   /* In a drawer the whole panel scrolls and spaces its children, so Body
-     adds no box of its own: its children are the panel's. */
-  .dialog-body[data-variant='drawer'] {
+     adds no box of its own: its children are the panel's. (A floating
+     drawer scrolls Body, as a dialog does.) */
+  .dialog-body[data-layout='drawer'] {
     display: contents;
   }
 </style>

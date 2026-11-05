@@ -16,7 +16,9 @@
     variant?: 'dialog' | 'drawer';
     sheet?: boolean;
     flush?: boolean;
+    floating?: boolean;
     closeButton?: boolean;
+    footerAlign?: 'end' | 'between';
     /** Wrap the Body in Dialog.Form. */
     withForm?: boolean;
   }
@@ -29,7 +31,9 @@
     variant,
     sheet,
     flush,
+    floating,
     closeButton,
+    footerAlign,
     withForm = false,
   }: Props = $props();
 </script>
@@ -42,7 +46,7 @@
 {/snippet}
 
 <Dialog bind:open {onOpenChange} {dismissible}>
-  <DialogContent {size} {variant} {sheet} {flush} {closeButton}>
+  <DialogContent {size} {variant} {sheet} {flush} {floating} {closeButton}>
     <DialogHeader>
       <DialogTitle>Dialog Title</DialogTitle>
       <DialogDescription>Dialog description text</DialogDescription>
@@ -52,6 +56,6 @@
     {:else}
       {@render body()}
     {/if}
-    <DialogFooter><span>Footer</span></DialogFooter>
+    <DialogFooter align={footerAlign}><span>Footer</span></DialogFooter>
   </DialogContent>
 </Dialog>

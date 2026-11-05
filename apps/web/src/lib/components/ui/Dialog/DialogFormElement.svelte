@@ -2,7 +2,8 @@
   @component Dialog.Form
 
   The `<form>` for a dialog whose Body and Footer submit together:
-  Dialog.Content > Dialog.Header, Dialog.Form > (Dialog.Body, Dialog.Footer).
+  Dialog.Content > Dialog.Header, Dialog.Form > (Dialog.Toolbar optional,
+  Dialog.Body, Dialog.Footer).
 
   Dialog.Content is a flex column capped at 85vh with `overflow: hidden`, and
   only Dialog.Body scrolls. Any element between the two must pass the column
@@ -25,10 +26,12 @@
 
   const { children, class: className, ...restProps }: Props = $props();
   // Set by Dialog.Content; absent when Form is mounted on its own.
-  const variant = getContext<{ current: 'dialog' | 'drawer' } | undefined>('DIALOG_VARIANT');
+  const layout = getContext<{ current: 'dialog' | 'drawer' | 'floating' } | undefined>(
+    'DIALOG_LAYOUT'
+  );
 </script>
 
-<form class="dialog-form {className ?? ''}" data-variant={variant?.current} {...restProps}>
+<form class="dialog-form {className ?? ''}" data-layout={layout?.current} {...restProps}>
   {@render children()}
 </form>
 
@@ -40,7 +43,7 @@
     min-height: 0;
   }
 
-  .dialog-form[data-variant='drawer'] {
+  .dialog-form[data-layout='drawer'] {
     display: contents;
   }
 </style>
