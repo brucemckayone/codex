@@ -31,6 +31,11 @@ export type ChargebackState = 'inquiry' | 'open' | 'won' | 'lost';
 export interface SupportRefundWindow {
   closesAt: string;
   isOpen: boolean;
+  /**
+   * A late-won chargeback lifted the window (owner Q7, Codex-2hxff.70):
+   * `isOpen` is true and `closesAt` keeps the 14-day date, which has passed.
+   */
+  liftedByLateWin: boolean;
 }
 
 /** A person named on a record: a payee, or whoever issued a refund. */

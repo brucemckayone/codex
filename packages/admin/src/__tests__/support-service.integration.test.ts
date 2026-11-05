@@ -1524,12 +1524,23 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
       );
       created.stripeRefundIds.push(made.refund.id);
 
-      expect(detail.window.isOpen).toBe(true);
+      // Lifted: open, its 14-day date kept (and passed).
+      const closesAt = new Date(
+        ((fake.charges.get(chargeId)?.created ?? 0) + 14 * DAY) * 1000
+      ).toISOString();
+      expect(detail.window).toEqual({
+        closesAt,
+        isOpen: true,
+        liftedByLateWin: true,
+      });
       expect(detail.refundable).toEqual({ maxCents: 1000, blocked: null });
       expect(found.items).toEqual([
         expect.objectContaining({
           chargeId,
-          window: expect.objectContaining({ isOpen: true }),
+          window: expect.objectContaining({
+            isOpen: true,
+            liftedByLateWin: true,
+          }),
         }),
       ]);
       // Taken back from the creators like any refund: the engine's own plan.
@@ -1537,6 +1548,27 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
       expect(preview.payeesGiveBackCents).toBeGreaterThan(0);
       expect(made.refund.amountCents).toBe(1000);
       expect(fake.stripe.refunds.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('a late win inside the 14 days lifts nothing: the window is open by itself', async () => {
+      const { chargeId, purchase } = await purchaseCharge();
+      await lateWin(chargeId, purchase.id, { undone: true });
+
+      const detail = await service.getChargeDetail(chargeId);
+      const found = await service.searchCharges({
+        lookup: purchase.id,
+        page: 1,
+        limit: 20,
+      });
+
+      expect(detail.window).toMatchObject({
+        isOpen: true,
+        liftedByLateWin: false,
+      });
+      expect(found.items[0]?.window).toMatchObject({
+        isOpen: true,
+        liftedByLateWin: false,
+      });
     });
 
     it('a normal win, or none, past the 14 days is still closed everywhere', async () => {
@@ -1556,9 +1588,15 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
           service.issueRefund(chargeId, refundInput(100), supportId)
         );
 
-        expect(detail.window.isOpen).toBe(false);
+        expect(detail.window).toMatchObject({
+          isOpen: false,
+          liftedByLateWin: false,
+        });
         expect(detail.refundable.blocked).toBe('window_closed');
-        expect(found.items[0]?.window.isOpen).toBe(false);
+        expect(found.items[0]?.window).toMatchObject({
+          isOpen: false,
+          liftedByLateWin: false,
+        });
         expect(route.context).toMatchObject({ code: 'REFUND_WINDOW_CLOSED' });
       }
       expect(fake.stripe.refunds.create).not.toHaveBeenCalled();
@@ -1581,7 +1619,10 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
         ).items.find((row) => row.chargeId === invoice.chargeId);
       const id = await dispute(invoice.chargeId, 'won');
       await applyOutcome(id);
-      expect((await search())?.window.isOpen).toBe(false);
+      expect((await search())?.window).toMatchObject({
+        isOpen: false,
+        liftedByLateWin: false,
+      });
 
       await db
         .update(disputes)
@@ -1593,7 +1634,11 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
         .where(eq(disputes.stripeDisputeId, id));
       const detail = await service.getChargeDetail(invoice.chargeId);
 
-      expect((await search())?.window.isOpen).toBe(true);
+      expect((await search())?.window).toMatchObject({
+        isOpen: true,
+        liftedByLateWin: true,
+      });
+      expect(detail.window.liftedByLateWin).toBe(true);
       expect(detail.refundable.blocked).toBeNull();
     });
   });

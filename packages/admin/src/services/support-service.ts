@@ -219,6 +219,7 @@ import type {
   SupportPerson,
   SupportQueueCounts,
   SupportRefundResult,
+  SupportRefundWindow,
   SystemDecision,
   ToldAnotherWayResult,
 } from '../support-types';
@@ -987,12 +988,21 @@ export class SupportService extends BaseService {
     return balance && typeof balance !== 'string' ? balance.fee : null;
   }
 
-  /** The 14-day window; a late-won payment's stays open (owner Q7). */
-  private windowView(createdSeconds: number, now: Date, lateWon: boolean) {
+  /**
+   * The 14-day window. A late-won payment's is lifted once it has closed
+   * (owner Q7): open, its closing date kept.
+   */
+  private windowView(
+    createdSeconds: number,
+    now: Date,
+    lateWon: boolean
+  ): SupportRefundWindow {
     const window = refundWindow(createdSeconds, now);
+    const liftedByLateWin = lateWon && !window.isOpen;
     return {
       closesAt: window.closesAt.toISOString(),
-      isOpen: window.isOpen || lateWon,
+      isOpen: window.isOpen || liftedByLateWin,
+      liftedByLateWin,
     };
   }
 
