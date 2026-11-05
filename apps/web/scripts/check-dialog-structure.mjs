@@ -74,16 +74,6 @@ export const ALLOWLIST = [
     reason: 'M2: the FAQ dialog has a raw .faq-edit-form and no Body; it moves to Dialog.Form',
   },
   {
-    file: 'src/lib/components/ui/CreatorCard/CreatorProfileDrawer.svelte',
-    rule: 'content-child',
-    reason: 'M3: hand-built drawer, sections straight in Content; moves to variant="drawer"',
-  },
-  {
-    file: 'src/lib/components/ui/CreatorCard/CreatorProfileDrawer.svelte',
-    rule: 'global-style',
-    reason: 'M3: overrides .dialog-content/.dialog-close/.dialog-overlay; replaced by the variant props',
-  },
-  {
     file: 'src/lib/components/ui/FilterDrawer/FilterDrawer.svelte',
     rule: 'global-style',
     reason: 'M3: the fourth drawer (glass rail); moves to variant="drawer" floating sheet + Footer align="between"',
