@@ -422,3 +422,67 @@ describe('a won chargeback’s pay-back (late-win studio/payouts.html P1)', () =
     ).toBe('Creator pool');
   });
 });
+
+describe('a share Stripe took back (late-win studio/payouts.html P0, P1)', () => {
+  // The owner chose "Add the line": every taken-back row of the
+  // organisation's own share says when and why, as Earnings does.
+  const ctx = {
+    connectState: 'enabled' as const,
+    balance: { negative: null },
+    now: new Date('2026-12-15T10:00:00.000Z'),
+  };
+  const reversed = (
+    payoutType: string,
+    takenBack: { causeType: 'refund' | 'dispute'; on: string },
+    paidBack: { on: string } | null = null
+  ) => ({
+    id: 'reversed-1',
+    payoutType,
+    status: 'reversed',
+    reason: null,
+    amountCents: 720,
+    bankOn: '2026-09-17',
+    takenBack,
+    paidBack,
+    paysBack: null,
+  });
+  const chargeback = { causeType: 'dispute' as const, on: '2026-10-26' };
+
+  test('a chargeback: when it was taken back, and why (P0)', () => {
+    expect(ownerLines(reversed('organization_fee', chargeback), ctx)).toEqual([
+      'Taken back for a chargeback on 26 Oct',
+    ]);
+  });
+
+  test('a late win: then paid back on its day (P1)', () => {
+    expect(
+      ownerLines(
+        reversed('organization_fee', chargeback, { on: '2026-12-14' }),
+        ctx
+      )
+    ).toEqual([
+      'Taken back for a chargeback on 26 Oct, then paid back on 14 Dec',
+    ]);
+  });
+
+  test('a refund: Earnings’ wording for it', () => {
+    expect(
+      ownerLines(
+        reversed('creator_payout_to_owner', {
+          causeType: 'refund',
+          on: '2026-10-14',
+        }),
+        ctx
+      )
+    ).toEqual(['Taken back for a refund on 14 Oct']);
+  });
+
+  test("a creator's taken-back row has no line: their money is in their own account", () => {
+    expect(
+      ownerLines(
+        reversed('creator_payout', chargeback, { on: '2026-12-14' }),
+        ctx
+      )
+    ).toEqual([]);
+  });
+});

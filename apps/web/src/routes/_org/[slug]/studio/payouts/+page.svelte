@@ -547,10 +547,11 @@
   </Table.Cell>
 
   <Table.Cell>
-    {#if payout.status === 'resolved' && payout.stripeTransferId}
+    {#if (payout.status === 'resolved' || payout.status === 'reversed') && payout.stripeTransferId}
       <!-- The organisation's share reaches the owner's bank on its date
-           (Codex-2hxff.29). A creator's share is in the creator's own
-           account, whose balance the owner can't see, so it gets no date. -->
+           (Codex-2hxff.29), or says when Stripe took it back (late-win P0,
+           P1). A creator's share is in the creator's own account, whose
+           balance the owner can't see, so it gets no line. -->
       {@const lines = ownerLines(payout, {
         connectState: ownerConnectState ?? 'enabled',
         // Until the owner's status is known, no line: see `ownerBalance`.

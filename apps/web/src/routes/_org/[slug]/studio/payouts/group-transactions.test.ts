@@ -37,6 +37,7 @@ function row(overrides: Partial<PayoutWithCreator>): PayoutWithCreator {
     subscriptionId: null,
     stripeChargeId: null,
     bankOn: null,
+    takenBack: null,
     paidBack: null,
     paysBack: null,
     ...overrides,

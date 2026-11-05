@@ -4,6 +4,8 @@
  * `paysBack` on the re-pay row, `paidBack` on the share it pays back,
  * `cancelledFor` on a share the loss cancelled, and the re-pay row a refund
  * cancelled before it was paid left out of the rows and the total alike.
+ * Org Payouts' `takenBack` (P0, owner "Add the line") too: every reversed
+ * row's, scoped to the organisation.
  *
  * Real database: the lines are read from the chargeback's steps, and the
  * omission is a predicate in SQL.
@@ -465,5 +467,84 @@ describe('the payout lists after a won chargeback', () => {
     const own = await reader.disputeLinesFor({ userId: hannah }, theirs);
     expect(own.paysBack.size).toBe(1);
     expect(own.paidBack.size).toBe(1);
+  });
+
+  it('Org Payouts: a reversed row says when it was taken back and why, refund or chargeback, late win or not (P0, P1)', async () => {
+    const orgId = await organisation();
+    const hannah = await person();
+    const sale = await wonLateSale(orgId, hannah, 'Winter Light');
+    const feeValues = reversedShare(orgId, hannah, sale, {
+      amountCents: 720,
+      payoutType: 'organization_fee',
+    });
+    const chargedBack = await row(feeValues);
+    const repay = await repayOf(feeValues);
+    await step(chargedBack, sale.disputeId, {
+      amountCents: 720,
+      repaidByPayoutId: repay,
+    });
+    const refunded = await row(
+      reversedShare(
+        orgId,
+        hannah,
+        await wonLateSale(orgId, hannah, 'Night Ferry'),
+        {
+          amountCents: 600,
+          payoutType: 'organization_fee',
+        }
+      )
+    );
+    await step(refunded, `re_late_${crypto.randomUUID().slice(0, 12)}`, {
+      causeType: 'refund',
+      amountCents: 600,
+      resolvedAt: new Date('2026-10-14T10:00:00Z'),
+    });
+
+    const { items } = await service().listPayoutsByOrg(orgId, {
+      page: 1,
+      limit: 50,
+    });
+    const of = (id: string) => items.find((item) => item.id === id);
+
+    expect(of(chargedBack)).toMatchObject({
+      takenBack: { causeType: 'dispute', on: '2026-10-26' },
+      paidBack: { on: '2026-12-14' },
+    });
+    expect(of(refunded)).toMatchObject({
+      takenBack: { causeType: 'refund', on: '2026-10-14' },
+      paidBack: null,
+    });
+    // Only a reversed row has one.
+    expect(of(repay)?.takenBack).toBeNull();
+  });
+
+  it('the organisation’s take-backs never read another organisation’s rows', async () => {
+    const orgId = await organisation();
+    const hannah = await person();
+    const sale = await wonLateSale(orgId, hannah, 'Winter Light');
+    const theirs = await row(
+      reversedShare(orgId, hannah, sale, {
+        amountCents: 720,
+        payoutType: 'organization_fee',
+      })
+    );
+    await step(theirs, sale.disputeId, { amountCents: 720 });
+    const reader = service() as unknown as {
+      takenBackFor(
+        scope: { organizationId: string },
+        ids: string[]
+      ): Promise<Map<string, unknown>>;
+    };
+
+    expect(
+      (
+        await reader.takenBackFor({ organizationId: await organisation() }, [
+          theirs,
+        ])
+      ).size
+    ).toBe(0);
+    expect(
+      (await reader.takenBackFor({ organizationId: orgId }, [theirs])).size
+    ).toBe(1);
   });
 });
