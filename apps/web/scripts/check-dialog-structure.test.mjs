@@ -280,37 +280,90 @@ test('CATCHES :global() styling of the Dialog outside ui/Dialog/, in every form'
   );
 });
 
-test('a page may give its Dialog.Form class spacing, never layout', () => {
+test('ALLOWS spacing on .dialog-form plus the page\'s own class', () => {
   writeFixture(
     'src/routes/tier/+page.svelte',
     `<p>x</p>
 
 <style>
   :global(.dialog-form.tier-form) { gap: var(--space-4); padding: var(--space-4); }
-  :global(.dialog-form.tier-form .field) { display: grid; }
-  :global(.dialog-form.tier-form) { display: block; gap: 0; }
-  :global(.page .dialog-form) { overflow-y: auto; min-height: 0; }
-  :global(.dialog-form.tier-form) { flex: 1; }
+  :global(.tier-form.dialog-form) { row-gap: 0; padding-inline: 0; margin-block-end: var(--space-2); }
+  :global(.dialog-form.tier-form), :global(.dialog-form.faq-form) { column-gap: 0; margin: 0; }
+  .field { display: grid; }
 </style>
 `
   );
+  writeFixture('src/lib/styles/forms.css', '.dialog-form.x { padding: 0; }\n');
+
+  assert.deepEqual(scan().violations, []);
+});
+
+test('CATCHES any property on .dialog-form.<own-class> other than gap, padding and margin', () => {
   writeFixture(
-    'src/lib/styles/forms.css',
-    '.dialog-form.x { padding: 0; }\n.dialog-form.y { max-height: 10rem; }\n'
+    'src/routes/tier/+page.svelte',
+    `<p>x</p>
+
+<style>
+  :global(.dialog-form.tier-form) { display: block; gap: 0; }
+  :global(.dialog-form.tier-form) { overflow-y: auto; min-height: 0; }
+  :global(.dialog-form.tier-form) { flex: 1; }
+  :global(.dialog-form.tier-form) { position: relative; max-height: 10rem; height: 100%; }
+  :global(.dialog-form.tier-form) { color: red; }
+</style>
+`
   );
+  writeFixture('src/lib/styles/forms.css', '.dialog-form.y { flex-direction: row; }\n');
 
   const result = scan();
   assert.deepEqual(
     result.violations.map((v) => `${v.file} ${v.rule}@${v.line}`),
     [
-      'src/lib/styles/forms.css global-style@2',
+      'src/lib/styles/forms.css global-style@1',
+      'src/routes/tier/+page.svelte global-style@4',
+      'src/routes/tier/+page.svelte global-style@5',
       'src/routes/tier/+page.svelte global-style@6',
       'src/routes/tier/+page.svelte global-style@7',
       'src/routes/tier/+page.svelte global-style@8',
     ]
   );
-  assert.match(result.violations[1].detail, /sets display on \.dialog-form; only spacing may change/);
-  assert.match(result.violations[2].detail, /sets overflow-y, min-height/);
+  assert.match(result.violations[1].detail, /sets display on \.dialog-form; only gap, padding and margin may change/);
+  assert.match(result.violations[2].detail, /sets overflow-y, min-height on/);
+  assert.match(result.violations[4].detail, /sets position, max-height, height on/);
+});
+
+test('CATCHES .dialog-form styled bare, inside a combinator, or around a descendant', () => {
+  writeFixture(
+    'src/routes/tier/+page.svelte',
+    `<p>x</p>
+
+<style>
+  :global(.dialog-form) { gap: 0; }
+  :global(.page .dialog-form.tier-form) { padding: 0; }
+  :global(.dialog-form.tier-form .field) { margin: 0; }
+  :global(.dialog-form.tier-form), :global(.dialog-form) { gap: 0; }
+  :global(form.dialog-form.tier-form) { gap: 0; }
+  :global(.dialog-form.tier-form:focus-within) { padding: 0; }
+</style>
+`
+  );
+  writeFixture('src/lib/styles/forms.css', '.dialog-form { padding: 0; }\n');
+
+  const result = scan();
+  assert.deepEqual(
+    result.violations.map((v) => `${v.file} ${v.rule}@${v.line}`),
+    [
+      'src/lib/styles/forms.css global-style@1',
+      'src/routes/tier/+page.svelte global-style@4',
+      'src/routes/tier/+page.svelte global-style@5',
+      'src/routes/tier/+page.svelte global-style@6',
+      'src/routes/tier/+page.svelte global-style@7',
+      'src/routes/tier/+page.svelte global-style@8',
+      'src/routes/tier/+page.svelte global-style@9',
+    ]
+  );
+  for (const v of result.violations) {
+    assert.match(v.detail, /style a Dialog\.Form only as \.dialog-form\.<your-class>/);
+  }
 });
 
 test('does NOT flag the Dialog styling itself inside ui/Dialog/', () => {
