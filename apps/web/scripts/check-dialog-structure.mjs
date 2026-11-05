@@ -32,8 +32,9 @@
  *                  `.wrap :global(.x)`. It reaches the part's element as
  *                  `.dialog-body` would; the drawers used it to fork the
  *                  panel. The `.dialog-form.<own>` spacing case above is
- *                  allowed. Title and Description are text in a part, so
- *                  their classes may be styled.
+ *                  allowed. Title and Description are exempt: they are
+ *                  text inside a part, not a box in the scroll chain, so
+ *                  restyling them cannot clip the panel.
  *   own-dialog     Outside lib/components/ui/, no element sets
  *                  role="dialog"/"alertdialog" or aria-modal: a modal is
  *                  built from the shared parts, not by hand.
