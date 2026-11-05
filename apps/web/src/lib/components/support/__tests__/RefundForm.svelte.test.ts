@@ -33,6 +33,7 @@ vi.mock(
 import {
   CHARGE_ID,
   chargeDetail,
+  lateWonChargeback,
   preview,
 } from '../__fixtures__/support-fixtures';
 import {
@@ -765,6 +766,24 @@ describe('a blocked charge', () => {
     const alert = document.querySelector('[data-testid="refund-blocked"]');
     expect(alert?.getAttribute('data-reason')).toBe(blocked);
     expect(alert?.textContent).toContain(text);
+    expect(review()).toBeNull();
+  });
+
+  test('a won chargeback still paying the creators back: the form waits, in the design’s words (late-win §6)', () => {
+    mountForm({
+      detail: chargeDetail({
+        refundable: { maxCents: 2400, blocked: 'chargeback_settling' },
+        chargebacks: [lateWonChargeback({ settling: true })],
+      }),
+    });
+    const alert = document.querySelector('[data-testid="refund-blocked"]');
+    expect(alert?.getAttribute('data-reason')).toBe('chargeback_settling');
+    expect(alert?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
+      "This payment's chargeback was just decided for us, and the creators are being paid back. Try the refund again in an hour."
+    );
+    expect(alert?.closest('[data-variant]')?.getAttribute('data-variant')).toBe(
+      'info'
+    );
     expect(review()).toBeNull();
   });
 

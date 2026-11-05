@@ -12,7 +12,9 @@
   went and Stripe refused, so the run asks Stripe again and sends no second
   email (owner decision Q5). Close… takes a row off without a retry. A row
   Retry queued shows "Queued for 11:00" until the run takes it (M2). A row
-  the run held again after a retry suggests Close… first (M4).
+  the run held again after a retry suggests Close… first (M4). A member with
+  an open chargeback waits for it to end (owner D1), and the row says so in
+  place of a time that keeps moving (Codex-2hxff.70 D1-a).
 
   @prop {HeldPriceMove[]} items
   @prop {(item: HeldPriceMove) => void} onRetry
@@ -29,6 +31,7 @@
     closeComesFirst,
     moveAddress,
     moveAmounts,
+    disputeWaitLine,
     movePlace,
     queuedLine,
     whyHeld,
@@ -55,6 +58,7 @@
 
 {#snippet actions(item: HeldPriceMove)}
   {@const queued = queuedLine(item)}
+  {@const waits = disputeWaitLine(item)}
   {@const busy = busyId === item.moveId}
   {@const closeFirst = closeComesFirst(item)}
   {#if queued}
@@ -62,6 +66,11 @@
       <ClockIcon size={14} aria-hidden="true" />{queued}
     </span>
   {:else}
+    {#if waits}
+      <span class="row-queued" data-testid="price-move-waits-dispute">
+        <ClockIcon size={14} aria-hidden="true" />{waits}
+      </span>
+    {/if}
     {#if item.action && !closeFirst}
       <Button
         variant="secondary"

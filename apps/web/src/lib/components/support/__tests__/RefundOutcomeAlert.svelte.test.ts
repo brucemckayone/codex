@@ -170,6 +170,11 @@ describe('the other answers', () => {
     ],
     [{ kind: 'nothing_left' }, 'info', m.support_blocked_nothing()],
     [
+      { kind: 'chargeback_settling' },
+      'info',
+      "This payment's chargeback was just decided for us, and the creators are being paid back. Try the refund again in an hour.",
+    ],
+    [
       { kind: 'too_large', maxCents: 1500 },
       'warning',
       m.support_outcome_too_large_body({ max: '£15.00' }),
