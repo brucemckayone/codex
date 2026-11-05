@@ -74,11 +74,6 @@ const WEB_ROOT = fileURLToPath(new URL('..', import.meta.url));
  */
 export const ALLOWLIST = [
   {
-    file: 'src/lib/components/studio/media-library/MediaPickerDialog.svelte',
-    rule: 'part-class',
-    reason: "M2: :global(.media-picker .picker-list) sets its Body's gap and overscroll; overscroll is now Body's own, the gap goes on a wrapper of its own",
-  },
-  {
     file: 'src/lib/components/command-palette/CommandPalette.svelte',
     rule: 'own-dialog',
     reason: 'M4: hand-built overlay; moves to the shared Dialog',
