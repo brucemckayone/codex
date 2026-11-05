@@ -1225,13 +1225,17 @@ export class PurchaseService extends BaseService {
    * first payment for an item they bought again (late-win data design §4.5,
    * §7): the date of the purchase they keep it through, for the refund
    * email's note. Null for any other refund, or once no other purchase
-   * grants the item.
+   * grants the item. Null for a late-won duplicate payment too: what it
+   * refunds is the second payment, and `duplicatePayment` says so.
    */
   private async lateWinKeptThrough(
-    purchase: Pick<Purchase, 'id' | 'customerId' | 'contentId' | 'courseId'>,
+    purchase: Pick<
+      Purchase,
+      'id' | 'customerId' | 'contentId' | 'courseId' | 'duplicateOfPurchaseId'
+    >,
     refundId: string | undefined
   ): Promise<{ purchasedAt: string } | null> {
-    if (!refundId) return null;
+    if (!refundId || isDuplicatePayment(purchase)) return null;
     const [lateWin] = await this.db
       .select({ id: disputes.id })
       .from(disputes)
@@ -4205,13 +4209,22 @@ export class PurchaseService extends BaseService {
    * through). `charge.refunded` then finds all of that done, and only emails.
    *
    * - `none`: nothing to refund. It is not a late win being undone, it has
-   *   no purchase, or the buyer holds no other completed purchase of the
-   *   item;
+   *   no purchase, or the loss did not refund the payment
+   *   (`refundedByTheLoss`): the buyer holds no other completed purchase of
+   *   the item, or the payment was refunded some other way;
    * - `pending`: Stripe has not settled the refund. Do not mark the outcome:
    *   the re-pay rows stay held, and the next delivery or hourly run finishes
    *   it (owner decision Q1 for refunds);
    * - `done`: refunded and clawed back, or the charge was already refunded
    *   in full. A refund that fails later is support's, as any failed refund.
+   *   One Stripe canceled is done too, but alerted at error: the buyer got
+   *   nothing, and support settles it by hand.
+   *
+   * A late-won duplicate payment is refunded the same way when its loss ran
+   * (owner decision 2026-11-05): the loss left it refunded, and the buyer
+   * holds the purchase it repeats. It pays no one, so nothing is clawed back.
+   * One the loss never got to is the duplicate sweep's, before and after the
+   * sweep refunds it: exactly one refund either way.
    *
    * @throws {LateWinRefundRefusedError} Stripe refused the refund. It is
    *   retried, and the caller alerts with `stripeCode`.
@@ -4228,12 +4241,7 @@ export class PurchaseService extends BaseService {
 
       const made = dispute.lateWinRefundId
         ? { refundId: dispute.lateWinRefundId, status: null }
-        : await this.issueLateWinRefund(
-            stripeDisputeId,
-            purchase,
-            charge,
-            environment
-          );
+        : await this.issueLateWinRefund(dispute, purchase, charge, environment);
       if (!made) return 'none';
       const { refundId } = made;
 
@@ -4244,7 +4252,7 @@ export class PurchaseService extends BaseService {
       await this.restateLateWonRefunds(stripeDisputeId, purchase.id, charge.id);
       const status = lateWinRefundStatus(listed, made);
       if (!isSettledRefundStatus(status)) {
-        this.obs.info("Late win: the first payment's refund is pending", {
+        this.obs.info("Late win: the payment's refund is pending", {
           disputeId: stripeDisputeId,
           purchaseId: purchase.id,
           refundId,
@@ -4257,7 +4265,23 @@ export class PurchaseService extends BaseService {
         charge,
         { settlingDisputeId: stripeDisputeId }
       );
-      this.obs.info("Late win: the first payment's refund is clawed back", {
+      if (status === 'canceled') {
+        // Settled, as a failed refund is, but the Failed refunds queue reads
+        // `failed` only: this alert is how support finds it (owner decision
+        // 2026-11-05). Stripe documents no way to cancel a card refund.
+        this.obs.error(
+          'Late win: Stripe canceled the refund of the payment, so the buyer was not refunded. Support must settle it by hand',
+          {
+            errorId: crypto.randomUUID(),
+            disputeId: stripeDisputeId,
+            purchaseId: purchase.id,
+            refundId,
+            status,
+          }
+        );
+        return 'done';
+      }
+      this.obs.info("Late win: the payment's refund is clawed back", {
         disputeId: stripeDisputeId,
         purchaseId: purchase.id,
         refundId,
@@ -4293,23 +4317,21 @@ export class PurchaseService extends BaseService {
   }
 
   /**
-   * Ask Stripe for the late win's refund of the first payment, and write its
-   * id once (`late_win_refund_id IS NULL`). Undefined, and no refund, unless
-   * the purchase is refunded and the buyer holds another completed purchase
-   * of the item. A refusal is a `LateWinRefundRefusedError`.
+   * Ask Stripe for the late win's refund of the payment, and write its id
+   * once (`late_win_refund_id IS NULL`). Undefined, and no refund, unless
+   * the loss refunded the payment (`refundedByTheLoss`). A refusal is a
+   * `LateWinRefundRefusedError`.
    */
   private async issueLateWinRefund(
-    stripeDisputeId: string,
+    dispute: Dispute,
     purchase: Purchase,
     charge: ClawbackCharge,
     environment: string
   ): Promise<Pick<IssueRefundResult, 'refundId' | 'status'> | undefined> {
-    if (
-      purchase.status !== PURCHASE_STATUS.REFUNDED ||
-      !(await this.keepsItemElsewhere(this.db, purchase))
-    ) {
+    if (!(await this.refundedByTheLoss(dispute, purchase, charge.id))) {
       return undefined;
     }
+    const { stripeDisputeId } = dispute;
     let issued: IssueRefundResult;
     try {
       issued = await issueRefund(this.stripe, {
@@ -4341,6 +4363,43 @@ export class PurchaseService extends BaseService {
         );
     }
     return issued;
+  }
+
+  /**
+   * Did the LOSS refund this payment? Only then does the late win owe it back:
+   * one refunded any other way already has its money (B's review of
+   * Codex-2hxff.70). All of:
+   *
+   * - it is refunded, and the buyer holds the item through another completed
+   *   purchase: one they bought since, or the one a duplicate repeats;
+   * - the loss ran: `lost_applied_at` is set. A duplicate the loss never got
+   *   to is still pending at the late win, and the hourly duplicate sweep
+   *   refunds it; once it has, it is refunded here too, before its
+   *   `charge.refunded` is recorded, and only this tells the two apart;
+   * - the refunds that stand on the charge do not cover what was paid. A
+   *   payment refunded in full before the chargeback was lost (the loss found
+   *   it refunded, and wrote nothing) has its money back already. One refunded
+   *   in part is owed what the loss took: the remainder, which is what the
+   *   refund asks for.
+   */
+  private async refundedByTheLoss(
+    dispute: Pick<Dispute, 'lostAppliedAt'>,
+    purchase: Purchase,
+    chargeId: string
+  ): Promise<boolean> {
+    if (
+      purchase.status !== PURCHASE_STATUS.REFUNDED ||
+      dispute.lostAppliedAt === null
+    ) {
+      return false;
+    }
+    const { refundAmountCents } = await this.standingRefundFields(
+      this.db,
+      purchase.id,
+      chargeId
+    );
+    if ((refundAmountCents ?? 0) >= purchase.amountPaidCents) return false;
+    return this.keepsItemElsewhere(this.db, purchase);
   }
 
   /**
