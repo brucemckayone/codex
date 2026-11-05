@@ -700,9 +700,11 @@
     </Dialog.Header>
     <Dialog.Form onsubmit={attach}>
       {@render tools()}
-      <Dialog.Body class="picker-list" aria-busy={!answered && !listFailed}>
-        {#if allowProcessing}{@render uploadRow()}{/if}
-        {@render listBody()}
+      <Dialog.Body aria-busy={!answered && !listFailed}>
+        <div class="picker-list">
+          {#if allowProcessing}{@render uploadRow()}{/if}
+          {@render listBody()}
+        </div>
       </Dialog.Body>
       <Dialog.Footer>
         <p class="picker-selected" aria-live="polite">
@@ -919,10 +921,11 @@
     font-size: var(--text-sm);
   }
 
-  /* A flick past the list's end stays in the list (ui Dialog.Body scrolls). */
-  :global(.media-picker .picker-list) {
+  /* Rows sit closer than Body's own gap; Body scrolls and contains overscroll. */
+  .picker-list {
+    display: flex;
+    flex-direction: column;
     gap: var(--space-2);
-    overscroll-behavior: contain;
   }
 
   .picker-rows {
