@@ -35,11 +35,9 @@
       </Dialog.Header>
       <form class="legacy-form" onsubmit={(e) => e.preventDefault()}>
         <Dialog.Body>
+          <!-- Only the height matters here: 18 rows outgrow a short screen. -->
           {#each rows as row (row)}
-            <label class="field">
-              <span>Field {row}</span>
-              <input class="input" name="field-{row}" value="Value {row}" />
-            </label>
+            <p>Row {row}: enough copy to take a line or two, so the body outgrows a short screen.</p>
           {/each}
         </Dialog.Body>
         <Dialog.Footer>
@@ -58,27 +56,5 @@
     flex-direction: column;
     gap: var(--space-4);
     padding: var(--space-4);
-  }
-
-  .field {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-    font-size: var(--text-sm);
-    color: var(--color-text);
-  }
-
-  .input {
-    padding: var(--space-2) var(--space-3);
-    border: var(--border-width) var(--border-style) var(--color-border);
-    border-radius: var(--radius-input);
-    background: var(--color-background);
-    color: var(--color-text);
-    font: inherit;
-  }
-
-  .input:focus-visible {
-    outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: var(--space-0-5);
   }
 </style>
