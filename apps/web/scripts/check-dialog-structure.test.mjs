@@ -81,8 +81,10 @@ test('PASSES the shared shapes: Header/Body/Footer, Dialog.Form, a drawer, block
   <Dialog.Content>
     <!-- a comment is fine -->
     <Dialog.Header><Dialog.Title>t</Dialog.Title></Dialog.Header>
+    <Dialog.Toolbar direction="column"><input type="search" /></Dialog.Toolbar>
     {#if open}
       <Dialog.Form onsubmit={(e) => e.preventDefault()}>
+        <Dialog.Toolbar><input type="search" /></Dialog.Toolbar>
         {#each [1] as i (i)}<Dialog.Body><input /></Dialog.Body>{/each}
         <Dialog.Footer><button type="submit">Save</button></Dialog.Footer>
       </Dialog.Form>
@@ -276,6 +278,39 @@ test('CATCHES :global() styling of the Dialog outside ui/Dialog/, in every form'
       'src/lib/styles/app.css global-style@2',
     ]
   );
+});
+
+test('a page may give its Dialog.Form class spacing, never layout', () => {
+  writeFixture(
+    'src/routes/tier/+page.svelte',
+    `<p>x</p>
+
+<style>
+  :global(.dialog-form.tier-form) { gap: var(--space-4); padding: var(--space-4); }
+  :global(.dialog-form.tier-form .field) { display: grid; }
+  :global(.dialog-form.tier-form) { display: block; gap: 0; }
+  :global(.page .dialog-form) { overflow-y: auto; min-height: 0; }
+  :global(.dialog-form.tier-form) { flex: 1; }
+</style>
+`
+  );
+  writeFixture(
+    'src/lib/styles/forms.css',
+    '.dialog-form.x { padding: 0; }\n.dialog-form.y { max-height: 10rem; }\n'
+  );
+
+  const result = scan();
+  assert.deepEqual(
+    result.violations.map((v) => `${v.file} ${v.rule}@${v.line}`),
+    [
+      'src/lib/styles/forms.css global-style@2',
+      'src/routes/tier/+page.svelte global-style@6',
+      'src/routes/tier/+page.svelte global-style@7',
+      'src/routes/tier/+page.svelte global-style@8',
+    ]
+  );
+  assert.match(result.violations[1].detail, /sets display on \.dialog-form; only spacing may change/);
+  assert.match(result.violations[2].detail, /sets overflow-y, min-height/);
 });
 
 test('does NOT flag the Dialog styling itself inside ui/Dialog/', () => {
