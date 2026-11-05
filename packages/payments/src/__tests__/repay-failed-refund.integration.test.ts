@@ -420,6 +420,12 @@ describe('repayFailedRefund (creators_repaid)', () => {
       .set({ status: 'won' })
       .where(eq(disputes.stripeDisputeId, disputeId));
     await repayDispute(deps, { disputeId });
+    // Applied, as `settleWonDispute` applies it: until then a refund's
+    // clawback waits for the win (Codex-2hxff.70).
+    await db
+      .update(disputes)
+      .set({ outcomeAppliedAt: new Date() })
+      .where(eq(disputes.stripeDisputeId, disputeId));
     const refund = await failedRefund(charge, 300);
     const [onRepay] = await stepsOf(refund.id);
     const disputeRepay = await readRow(onRepay?.payoutId ?? '');

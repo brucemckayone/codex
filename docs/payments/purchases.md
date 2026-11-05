@@ -605,7 +605,8 @@ Stripe sends `charge.dispute.created`, `.updated` and `.closed` to
 |---|---|---|
 | **Opened** | Paused: the purchase is marked disputed and the streaming block is written. The library hides the item. | Paid creator and organisation slices are reversed in proportion to the disputed amount. Pending slices are held and not drained. |
 | **Won** | Restored: the disputed mark is cleared. | The reversed slices are paid again; held slices are released. |
-| **Lost** | Ends for good. | The reversals stand; held slices are cancelled. |
+| **Lost** | Ends. | The reversals stand; held slices are cancelled. |
+| **Won late** (lost, then won) | Restored, unless the buyer bought the item again, or something else keeps it ended. | Paid back as a win. A buyer who bought it again has the first payment refunded, and a duplicate payment is refunded. |
 
 The platform pays Stripe's dispute fee.
 
@@ -638,6 +639,35 @@ dispute event records it, then acts on the status the record has.
   access the chargeback paused is restored and its streaming block lifted.
 - **Lost.** The purchase becomes `refunded` and held slices
   `cancelled_by_dispute` (Q3).
+- **Won late.** Stripe can turn a lost dispute into a won one, weeks or months
+  later (Codex-2hxff.70; [design](dispute-record.md#10-a-late-win-codex-2hxff70)).
+  The row moves `lost` → `won` once, with `late_won_at`, and the loss is
+  undone as a win:
+  - the purchase is decided by support's failed-refund rule: `completed`
+    again with its access and entitlement back, its refund fields restated
+    from the refunds that still stand, never the disputed amount the loss
+    added. It stays as it is when the buyer bought the item again, when it was
+    a duplicate payment, when refunds still cover what was paid, or when
+    another chargeback holds it;
+  - the creators are paid back by the dispute's re-pay, held until the
+    outcome is applied;
+  - a buyer who bought it again has the first payment refunded (owner
+    decision Q1), after the re-pay, so each share comes off its held re-pay
+    row and the creators net nothing for that payment. The refund email says
+    they keep the item through their later purchase;
+  - a duplicate payment whose loss ran is refunded the same way, on its own
+    disputed charge (owner decision 2026-11-05). Its refund email is the
+    duplicate one ("a second payment"). One the loss never got to is still
+    pending, and the hourly duplicate sweep refunds it;
+  - a refund Stripe cancels counts as settled, but the buyer got nothing:
+    it is alerted at error for support to settle by hand (owner decision
+    2026-11-05);
+  - a restored buyer is emailed once that their access is back (Q5).
+
+  A re-run of the unfinished loss reads the dispute under a share lock first
+  and refunds nothing once it is won. A refund's clawback waits while a won
+  chargeback on its charge is not yet applied, so it is never shared against
+  the loss's steps.
 - **Prevented.** Stripe defines `prevented` as a dispute "prevented from
   becoming a formal chargeback", so it closes like an inquiry: nothing to
   restore or re-pay, and its held slices are released. One that has a

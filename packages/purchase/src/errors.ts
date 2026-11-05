@@ -11,6 +11,7 @@ import {
   InternalServiceError,
   NotFoundError,
   ServiceError,
+  ServiceUnavailableError,
 } from '@codex/service-errors';
 
 // Re-export base error classes for convenience
@@ -184,6 +185,32 @@ export class CheckoutNotRecordedError extends ServiceError {
       context,
       // The page shows the buyer the errorId as their support reference.
       { ...options, publicContext: true }
+    );
+  }
+}
+
+/**
+ * Stripe refused the late win's refund of a payment the loss refunded (a
+ * re-bought buyer's first payment, or a duplicate) (Codex-2hxff.70; late-win data design §4.5, §11). The outcome stays
+ * unapplied and the re-pay rows held, so it is retried: a 503, transient, so
+ * the webhook answers 500 and the hourly reconcile tries again (owner
+ * decision 2026-10-23, "Retry hourly, alert"). Nothing logs it here: the
+ * caller alerts each time, with `stripeCode`. Its context is ids and Stripe's
+ * code only; the Stripe error stays on `cause`.
+ */
+export class LateWinRefundRefusedError extends ServiceUnavailableError {
+  constructor(
+    context: {
+      disputeId: string;
+      purchaseId: string;
+      stripeCode: string | null;
+    },
+    options?: ErrorOptions
+  ) {
+    super(
+      "The late win's refund of the payment was refused; it is retried",
+      context,
+      options
     );
   }
 }
