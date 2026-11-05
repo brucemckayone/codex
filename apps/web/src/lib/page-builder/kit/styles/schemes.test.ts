@@ -2865,11 +2865,16 @@ describe('the org is the source — its tokens, drawn exactly unless a floor fai
       dark: ".lp:not([data-lp-theme='light']) )",
       light: "[data-editing-theme='dark'] .lp[data-lp-theme='light'] )",
     };
+    // The re-statement is the fallback's. The exact path re-runs the focus
+    // nudge on the same selectors, so a branded head is written there too
+    // (ground-nudge-css.test.ts pins that copy).
+    const fallback = CODE.slice(0, CODE.indexOf(SUPPORTS_HEAD));
     const body = (head: string) => {
-      expect(CODE.split(head).length - 1, head).toBe(1);
+      expect(fallback.split(head).length - 1, head).toBe(1);
       return (
-        CODE.slice(CODE.indexOf(head) + head.length).match(/^([^}]*)\}/)?.[1] ??
-        ''
+        fallback
+          .slice(fallback.indexOf(head) + head.length)
+          .match(/^([^}]*)\}/)?.[1] ?? ''
       );
     };
     const decls = (text: string) =>
@@ -4898,9 +4903,17 @@ describe('schemes.css ↔ fallback model parity (engines without pow(), Codex-61
       '--_panel-i',
       '--_scrim',
     ]);
+    // One exception, and only one: a scoped preview's focus, which the exact
+    // path nudges against the previewed theme's ground, as org-brand.css's
+    // exact path nudges `--color-focus` (Codex-mik4h). Once per previewed
+    // theme; ground-nudge-css.test.ts holds both to the fallback's selectors.
     expect(
-      declared.filter((n) => SURFACES.has(n) || n.startsWith('--_org-'))
+      declared.filter(
+        (n) =>
+          SURFACES.has(n) || (n.startsWith('--_org-') && n !== '--_org-focus')
+      )
     ).toEqual([]);
+    expect(declared.filter((n) => n === '--_org-focus')).toHaveLength(2);
   });
 });
 

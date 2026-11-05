@@ -27,13 +27,20 @@ const count = (css: string, text: string) => css.split(text).length - 1;
  * `--_gy`. Darkened (`-dk`, a scale down) on a light ground, lightened on a
  * dark one (`-s` scales up, each channel capped at 1; `-k` mixes toward white
  * for what the cap left short); `--_gw` picks the side. ground-nudge.ts does
- * the same arithmetic.
+ * the same arithmetic. `ground` names the ground and side properties: the
+ * org's, or a scoped kit preview's own (schemes.css).
  */
-function nudgeFragments(x: string, floor: number): string[] {
+function nudgeFragments(
+  x: string,
+  floor: number,
+  ground = { y: '--_gy', w: '--_gw' }
+): string[] {
   const lin = (c: string) => `var(--_lin-${c})`;
   const t = `var(--_${x}-t)`;
+  const gy = `var(${ground.y})`;
+  const gw = `var(${ground.w})`;
   return [
-    `--_${x}-t: calc(var(--_gw) * min(1, ${floor} * (var(--_gy) + 0.05) - 0.05) + (1 - var(--_gw)) * max(0, (var(--_gy) + 0.05) / ${floor} - 0.05));`,
+    `--_${x}-t: calc(${gw} * min(1, ${floor} * (${gy} + 0.05) - 0.05) + (1 - ${gw}) * max(0, (${gy} + 0.05) / ${floor} - 0.05));`,
     `--_${x}-dk: min(1, ${t} / max(var(--_lum), 1e-6));`,
     `--_${x}-s: max(1, ${t} / max(var(--_lum), 1e-6));`,
     ...['r', 'g', 'b'].map(
@@ -43,7 +50,7 @@ function nudgeFragments(x: string, floor: number): string[] {
     `--_${x}-k: max(0, (${t} - var(--_${x}-y1)) / max(1 - var(--_${x}-y1), 1e-6));`,
     ...['r', 'g', 'b'].map(
       (c) =>
-        `--_${x}-${c}: max(0, 255 * (1.055 * pow(var(--_gw) * (var(--_${x}-1${c}) + var(--_${x}-k) * (1 - var(--_${x}-1${c}))) + (1 - var(--_gw)) * ${lin(c)} * var(--_${x}-dk), 1 / 2.4) - 0.055));`
+        `--_${x}-${c}: max(0, 255 * (1.055 * pow(${gw} * (var(--_${x}-1${c}) + var(--_${x}-k) * (1 - var(--_${x}-1${c}))) + (1 - ${gw}) * ${lin(c)} * var(--_${x}-dk), 1 / 2.4) - 0.055));`
     ),
   ];
 }
@@ -115,5 +122,69 @@ describe('the ground nudge org-brand.css paints', () => {
       count(fallback, '--color-brand-text: var(--color-brand-primary);')
     ).toBe(1);
     expect(count(fallback, '--color-focus: var(--_focus-src);')).toBe(2);
+  });
+});
+
+// A scoped kit preview re-states the org's colours for the theme it previews,
+// and cannot inherit the nudge: its fragments substitute the ground where they
+// are declared, the viewer's. So schemes.css re-runs the focus nudge on the
+// preview, from these fragments, under names of its own (owner: "Preview
+// re-runs the nudge (Recommended)").
+const SCHEMES = readFileSync(
+  join(here, '../../page-builder/kit/styles/schemes.css'),
+  'utf8'
+).replace(/\/\*[\s\S]*?\*\//g, '');
+const squash = (s: string) => s.replace(/\s+/g, ' ').trim();
+/** Every innermost rule as `{ selector, body }`, squashed. */
+const rulesOf = (css: string) =>
+  [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({
+    selector: squash(m[1] ?? ''),
+    body: squash(m[2] ?? ''),
+  }));
+
+describe('the focus nudge a scoped kit preview re-runs (schemes.css)', () => {
+  const at = SCHEMES.indexOf(GUARD);
+  const exact = rulesOf(SCHEMES.slice(at));
+  const fallback = rulesOf(SCHEMES.slice(0, at));
+  // org-brand.css's focus sources: the light rule's first, the dark twin's next.
+  const [lightSource, darkSource] = [
+    ...ORG_BRAND.matchAll(/--_focus-src: (var\(--brand-focus, [^;]+);/g),
+  ].map((m) => m[1]);
+
+  test('its fragments are the generated ones, under the preview’s own names, written once', () => {
+    // Calibration: the guard is found, after the fallback it overrides.
+    expect(at).toBeGreaterThan(0);
+    const guarded = exact.map((r) => r.body).join(' ');
+    for (const line of [
+      `--_pvw: clamp(0, (${TEXT_ON_BRAND_LUMINANCE_PIVOT} - var(--_pvy)) * 1e12, 1);`,
+      ...nudgeFragments('pvm', MARK_FLOOR, { y: '--_pvy', w: '--_pvw' }),
+    ])
+      expect(count(guarded, line), line).toBe(1);
+  });
+
+  test.each([
+    [
+      'dark',
+      `--_pvy: var(--brand-ground-dark-y, ${PLATFORM_GROUND_LUMINANCE.dark});`,
+      () => darkSource,
+    ],
+    [
+      'light',
+      `--_pvy: var(--brand-ground-y, ${PLATFORM_GROUND_LUMINANCE.light});`,
+      () => lightSource,
+    ],
+  ] as const)('a %s preview reads that theme’s ground and nudges the org’s focus source for it, on the fallback rule’s own selector', (_theme, ground, source) => {
+    expect(source()).toBeDefined();
+    const nudged = exact.filter((r) => r.body.includes(ground));
+    expect(nudged).toHaveLength(1);
+    expect(nudged[0]?.body).toContain(
+      `--_org-focus: rgb(from ${source()} ${channels('pvm')}`
+    );
+    // It overrides the fallback's re-statement, the org's focus source as is.
+    const overridden = fallback.filter(
+      (r) => r.selector === nudged[0]?.selector
+    );
+    expect(overridden).toHaveLength(1);
+    expect(overridden[0]?.body).toContain(`--_org-focus: ${source()};`);
   });
 });

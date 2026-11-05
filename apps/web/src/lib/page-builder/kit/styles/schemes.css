@@ -882,6 +882,57 @@
     --lp-button-ink: rgb(from var(--lp-button-bg) var(--_ink-r) var(--_ink-g) var(--_ink-b));
   }
 
+  /* A SCOPED PREVIEW'S FOCUS, NUDGED AS THE PREVIEWED THEME NUDGES IT
+     (Codex-mik4h; owner: "Preview re-runs the nudge (Recommended)"). On a
+     page the org's focus colour arrives already nudged against the hardest
+     surface of its ground (org-brand.css), and the rule below moves it again
+     only for the band. A scoped preview re-states the org's colours for the
+     theme it previews (above), and the nudge cannot be inherited: its
+     fragments substitute the ground on the element where they are DECLARED,
+     the org's carrier, which reads the VIEWER's. So the preview re-runs it
+     here, on the ground number the writers emit for the previewed theme,
+     under names of its own so a page carrier's own links and chips keep the
+     viewer's. ground-nudge-css.test.ts generates these fragments from the
+     same function as org-brand.css's and fails if this text drifts. Links
+     are not re-run (Codex-2y1xp). */
+  :is(
+    :root:not(.dark, [data-theme='dark']) .lp[data-lp-theme='dark'],
+    :root:not(.dark, [data-theme='dark']) [data-editing-theme='dark'] .lp:not([data-lp-theme='light']),
+    :is(.dark, [data-theme='dark']) .lp[data-lp-theme='light'],
+    :is(.dark, [data-theme='dark']) [data-editing-theme='light'] .lp:not([data-lp-theme='dark']),
+    [data-editing-theme='dark'] .lp[data-lp-theme='light']
+  ):is([data-org-brand] .lp, [data-org-brand]) {
+    --_pvw: clamp(0, (0.1791 - var(--_pvy)) * 1e12, 1);
+    --_pvm-t: calc(var(--_pvw) * min(1, 3.06 * (var(--_pvy) + 0.05) - 0.05) + (1 - var(--_pvw)) * max(0, (var(--_pvy) + 0.05) / 3.06 - 0.05));
+    --_pvm-dk: min(1, var(--_pvm-t) / max(var(--_lum), 1e-6));
+    --_pvm-s: max(1, var(--_pvm-t) / max(var(--_lum), 1e-6));
+    --_pvm-1r: min(1, var(--_lin-r) * var(--_pvm-s));
+    --_pvm-1g: min(1, var(--_lin-g) * var(--_pvm-s));
+    --_pvm-1b: min(1, var(--_lin-b) * var(--_pvm-s));
+    --_pvm-y1: (0.2126 * var(--_pvm-1r) + 0.7152 * var(--_pvm-1g) + 0.0722 * var(--_pvm-1b));
+    --_pvm-k: max(0, (var(--_pvm-t) - var(--_pvm-y1)) / max(1 - var(--_pvm-y1), 1e-6));
+    --_pvm-r: max(0, 255 * (1.055 * pow(var(--_pvw) * (var(--_pvm-1r) + var(--_pvm-k) * (1 - var(--_pvm-1r))) + (1 - var(--_pvw)) * var(--_lin-r) * var(--_pvm-dk), 1 / 2.4) - 0.055));
+    --_pvm-g: max(0, 255 * (1.055 * pow(var(--_pvw) * (var(--_pvm-1g) + var(--_pvm-k) * (1 - var(--_pvm-1g))) + (1 - var(--_pvw)) * var(--_lin-g) * var(--_pvm-dk), 1 / 2.4) - 0.055));
+    --_pvm-b: max(0, 255 * (1.055 * pow(var(--_pvw) * (var(--_pvm-1b) + var(--_pvm-k) * (1 - var(--_pvm-1b))) + (1 - var(--_pvw)) * var(--_lin-b) * var(--_pvm-dk), 1 / 2.4) - 0.055));
+  }
+
+  :is(
+    :root:not(.dark, [data-theme='dark']) .lp[data-lp-theme='dark'],
+    :root:not(.dark, [data-theme='dark']) [data-editing-theme='dark'] .lp:not([data-lp-theme='light'])
+  ):is([data-org-brand] .lp, [data-org-brand]) {
+    --_pvy: var(--brand-ground-dark-y, 0.0844);
+    --_org-focus: rgb(from var(--brand-focus, var(--brand-color-dark, var(--brand-color, var(--color-primary-400)))) var(--_pvm-r) var(--_pvm-g) var(--_pvm-b));
+  }
+
+  :is(
+    :is(.dark, [data-theme='dark']) .lp[data-lp-theme='light'],
+    :is(.dark, [data-theme='dark']) [data-editing-theme='light'] .lp:not([data-lp-theme='dark']),
+    [data-editing-theme='dark'] .lp[data-lp-theme='light']
+  ):is([data-org-brand] .lp, [data-org-brand]) {
+    --_pvy: var(--brand-ground-y, 0.7835);
+    --_org-focus: rgb(from var(--brand-focus, var(--brand-color, var(--color-primary-500))) var(--_pvm-r) var(--_pvm-g) var(--_pvm-b));
+  }
+
   /* The org's inks, each moved only where it would fail on the worst
      surface of the band (a no-op for a colour that holds). The button's
      label is `org-brand.css`'s rule for `--color-on-interactive` — white
