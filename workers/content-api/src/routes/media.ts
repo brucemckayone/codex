@@ -9,10 +9,13 @@
  * - GET    /api/media/:id    - Get by ID
  * - PATCH  /api/media/:id    - Update media
  * - GET    /api/media        - List with filters (each item's usage counts)
+ * - GET    /api/media/summary - The whole library: count, size, needs attention
  * - GET    /api/media/:id/usage - Where the item is used
+ * - GET    /api/media/:id/preview - The owner's own media, signed to play (15 min)
  * - DELETE /api/media/:id    - Soft delete, refused while anything live uses it
  */
 
+import { type MediaPreviewResponse, publicUrl } from '@codex/access';
 import {
   AUTH_ROLES,
   FILE_SIZES,
@@ -36,7 +39,7 @@ import {
 import { messageForLog } from '@codex/database';
 import { workerFetch } from '@codex/security';
 import { ConflictError, InternalServiceError } from '@codex/service-errors';
-import type { HonoEnv } from '@codex/shared-types';
+import type { HonoEnv, MediaLibrarySummary } from '@codex/shared-types';
 import { createIdParamsSchema, uploadCompleteSchema } from '@codex/validation';
 import {
   binaryUploadProcedure,
@@ -73,6 +76,27 @@ app.post(
 );
 
 /**
+ * GET /api/media/summary
+ * The creator's whole library in four numbers (Codex-a6ofh.1.6): the library
+ * header ("12 items · 6.4 GB", "5 of 12") and its needs-attention line, which
+ * the paged list cannot give because its total is its filter's.
+ *
+ * Registered ABOVE `/:id`: Hono matches in order, and `/:id` would read
+ * "summary" as an id and refuse it as a 400.
+ *
+ * Returns: MediaLibrarySummary (200)
+ * Security: Authenticated users, own media only, API rate limit (100 req/min)
+ */
+app.get(
+  '/summary',
+  procedure({
+    policy: { auth: 'required' },
+    handler: async (ctx): Promise<MediaLibrarySummary> =>
+      ctx.services.media.summary(ctx.user.id),
+  })
+);
+
+/**
  * GET /api/media/:id
  * Get media item by ID
  *
@@ -93,7 +117,12 @@ app.get(
       if (!media) {
         throw new MediaNotFoundError(ctx.input.params.id);
       }
-      return media;
+      // The picker shows the chosen item from this read alone (Codex-a6ofh.1.8):
+      // its poster resolves as the list rows' do (`publicUrl`, @codex/access).
+      return {
+        ...media,
+        thumbnailUrl: publicUrl(ctx.env.R2_PUBLIC_URL_BASE, media.thumbnailKey),
+      };
     },
   })
 );
@@ -119,6 +148,35 @@ app.get(
         ctx.user.id
       );
     },
+  })
+);
+
+/**
+ * GET /api/media/:id/preview
+ * The creator's OWN media, signed for the studio's player (Codex-a6ofh.1.5):
+ * the library drawer's and the editor's media card's preview, whatever uses
+ * the media, paid content included. The read is creator-scoped, and that is
+ * the gate; another creator's item is the same 404 as an unknown id.
+ *
+ * The URL opens the preview proxies (`/api/access/media/:id/hls/...`) with a
+ * 15-minute preview token, which no content or film proxy accepts. `fresh`
+ * (`private, no-store`): the body is a credential. Default `api` limit
+ * (data-design §1.2).
+ *
+ * Returns: MediaPreviewResponse (200); 404 not found; 422 not ready
+ * Security: Authenticated users, own media only, API rate limit (100 req/min)
+ * @returns {MediaPreviewResponse}
+ */
+app.get(
+  '/:id/preview',
+  procedure({
+    policy: { auth: 'required', cache: 'fresh' },
+    input: { params: createIdParamsSchema() },
+    handler: async (ctx): Promise<MediaPreviewResponse> =>
+      ctx.services.access.getMediaPreviewStream(
+        ctx.user.id,
+        ctx.input.params.id
+      ),
   })
 );
 
@@ -175,13 +233,9 @@ app.get(
         page,
         limit,
       });
-      const cdnBase = ctx.env.R2_PUBLIC_URL_BASE;
       const items = result.items.map((item) => ({
         ...item,
-        thumbnailUrl:
-          item.thumbnailKey && cdnBase
-            ? `${cdnBase}/${item.thumbnailKey}`
-            : null,
+        thumbnailUrl: publicUrl(ctx.env.R2_PUBLIC_URL_BASE, item.thumbnailKey),
       }));
       return new PaginatedResult(items, result.pagination);
     },

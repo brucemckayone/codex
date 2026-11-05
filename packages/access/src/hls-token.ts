@@ -116,6 +116,20 @@ async function hmacSha256Base64Url(
   return base64UrlFromBytes(new Uint8Array(signature));
 }
 
+/** Sign `payload` over `${domain}${encodedPayload}`: each token kind its own domain. */
+async function signForDomain(
+  payload: object,
+  secret: string,
+  domain: string
+): Promise<string> {
+  const encodedPayload = base64UrlEncodeString(JSON.stringify(payload));
+  const signature = await hmacSha256Base64Url(
+    `${domain}${encodedPayload}`,
+    secret
+  );
+  return `${encodedPayload}.${signature}`;
+}
+
 /**
  * Mint a short-lived HLS proxy token bound to a single media item.
  *
@@ -127,9 +141,8 @@ export async function signHlsToken(
   payload: HlsTokenPayload,
   secret: string
 ): Promise<string> {
-  const encodedPayload = base64UrlEncodeString(JSON.stringify(payload));
-  const signature = await hmacSha256Base64Url(encodedPayload, secret);
-  return `${encodedPayload}.${signature}`;
+  // No domain: a content token signs the bare payload, as it always has.
+  return signForDomain(payload, secret, '');
 }
 
 /** Why a token was refused, as the film proxies log it. */
@@ -179,6 +192,26 @@ async function decodeSignedPayload(
 }
 
 /**
+ * The three fields every token kind carries, or `null` when one is missing or
+ * mistyped. Each kind adds its own (a film's course or org) and its own
+ * expiry verdict.
+ */
+function mediaFields(payload: Record<string, unknown>): HlsTokenPayload | null {
+  if (
+    typeof payload.creatorId !== 'string' ||
+    typeof payload.mediaId !== 'string' ||
+    typeof payload.exp !== 'number'
+  ) {
+    return null;
+  }
+  return {
+    creatorId: payload.creatorId,
+    mediaId: payload.mediaId,
+    exp: payload.exp,
+  };
+}
+
+/**
  * Verify an HLS proxy token and return its payload, or `null` when the token
  * is malformed, tampered (signature mismatch), or expired.
  *
@@ -195,24 +228,11 @@ export async function verifyHlsToken(
 ): Promise<HlsTokenPayload | null> {
   // No domain: a content token signs the bare payload, as it always has.
   const decoded = await decodeSignedPayload(token, secret, '');
-  const payload = decoded.ok ? decoded.payload : null;
-  if (
-    typeof payload?.creatorId !== 'string' ||
-    typeof payload?.mediaId !== 'string' ||
-    typeof payload?.exp !== 'number'
-  ) {
+  const fields = decoded.ok ? mediaFields(decoded.payload) : null;
+  if (!fields || nowSeconds >= fields.exp) {
     return null;
   }
-
-  if (nowSeconds >= payload.exp) {
-    return null;
-  }
-
-  return {
-    creatorId: payload.creatorId,
-    mediaId: payload.mediaId,
-    exp: payload.exp,
-  };
+  return fields;
 }
 
 /**
@@ -245,12 +265,7 @@ export async function signFilmToken(
   payload: FilmTokenPayload,
   secret: string
 ): Promise<string> {
-  const encodedPayload = base64UrlEncodeString(JSON.stringify(payload));
-  const signature = await hmacSha256Base64Url(
-    `${FILM_TOKEN_DOMAIN}${encodedPayload}`,
-    secret
-  );
-  return `${encodedPayload}.${signature}`;
+  return signForDomain(payload, secret, FILM_TOKEN_DOMAIN);
 }
 
 /**
@@ -323,12 +338,7 @@ export async function signOrgFilmToken(
   payload: OrgFilmTokenPayload,
   secret: string
 ): Promise<string> {
-  const encodedPayload = base64UrlEncodeString(JSON.stringify(payload));
-  const signature = await hmacSha256Base64Url(
-    `${ORG_FILM_TOKEN_DOMAIN}${encodedPayload}`,
-    secret
-  );
-  return `${encodedPayload}.${signature}`;
+  return signForDomain(payload, secret, ORG_FILM_TOKEN_DOMAIN);
 }
 
 /** An org film token's verdict, as {@link FilmTokenCheck} is a course film's. */
@@ -372,4 +382,61 @@ export async function verifyOrgFilmToken(
       exp: payload.exp,
     },
   };
+}
+
+/**
+ * A media preview token (Codex-a6ofh.1.5): a creator playing their OWN media
+ * in the studio library, whatever uses it, paid content included. Minted only
+ * after a creator-scoped read of the media (`getMediaPreviewStream`), so it is
+ * the owner's, and bound to that media: the preview proxies refuse it under
+ * another media item's path.
+ */
+export type MediaPreviewTokenPayload = HlsTokenPayload;
+
+/**
+ * Its own domain, beside the content token's bare payload and the two films':
+ * a preview opens no content or film route, and none of their tokens opens a
+ * preview route. A content token is minted after a viewer's access decision;
+ * this one after an ownership check, so neither may stand in for the other.
+ */
+const MEDIA_PREVIEW_TOKEN_DOMAIN = 'media-preview.';
+
+/**
+ * Mint a short-lived media preview token. The caller has read the media as its
+ * creator's; this only signs.
+ */
+export async function signMediaPreviewToken(
+  payload: MediaPreviewTokenPayload,
+  secret: string
+): Promise<string> {
+  return signForDomain(payload, secret, MEDIA_PREVIEW_TOKEN_DOMAIN);
+}
+
+/** A media preview token's verdict, as {@link FilmTokenCheck} is a film's. */
+export type MediaPreviewTokenCheck =
+  | { ok: true; payload: MediaPreviewTokenPayload }
+  | { ok: false; reason: TokenRefusal };
+
+/**
+ * Verify a media preview token. Never throws for a bad token. An UNBOUND
+ * secret rejects (Web Crypto refuses an empty HMAC key), as for every kind: a
+ * misconfigured worker answers 500, loudly, never a 403 that reads like a
+ * forged link.
+ */
+export async function verifyMediaPreviewToken(
+  token: string,
+  secret: string,
+  nowSeconds: number = Math.floor(Date.now() / 1000)
+): Promise<MediaPreviewTokenCheck> {
+  const decoded = await decodeSignedPayload(
+    token,
+    secret,
+    MEDIA_PREVIEW_TOKEN_DOMAIN
+  );
+  if (!decoded.ok) return decoded;
+
+  const fields = mediaFields(decoded.payload);
+  if (!fields) return { ok: false, reason: 'malformed' };
+  if (nowSeconds >= fields.exp) return { ok: false, reason: 'expired' };
+  return { ok: true, payload: fields };
 }

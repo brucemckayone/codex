@@ -1,7 +1,8 @@
 /**
  * Creator Studio Content Edit - server load
  *
- * Loads content by ID and available media items for the edit form.
+ * Loads content by ID for the edit form. The media picker reads the
+ * creator's library itself, on open (Codex-a6ofh.1.8).
  * Auth is handled by the parent studio layout.
  */
 import { error } from '@sveltejs/kit';
@@ -17,20 +18,10 @@ export const load: PageServerLoad = async ({ params, platform, cookies }) => {
       error(404, 'Content not found');
     }
 
-    // Load ready media items for the media picker
-    const mediaParams = new URLSearchParams();
-    mediaParams.set('status', 'ready');
-    mediaParams.set('limit', '50');
-    mediaParams.set('sortBy', 'createdAt');
-    mediaParams.set('sortOrder', 'desc');
-
-    const mediaResult = await api.media.list(mediaParams).catch(() => null);
-
     return {
       content: result,
       organizationId: null,
       orgSlug: null,
-      mediaItems: mediaResult?.items ?? [],
     };
   } catch (err) {
     if (err && typeof err === 'object' && 'status' in err) {

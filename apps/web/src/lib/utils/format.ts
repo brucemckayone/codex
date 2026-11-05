@@ -29,7 +29,10 @@ export function formatDuration(seconds: number | null | undefined): string {
 export function formatFileSize(bytes: number | null | undefined): string {
   if (!bytes) return '';
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  // GB past 1024 MB (Codex-a6ofh.1.6): a library total, or one long film,
+  // read "6553.6 MB" where the creator thinks in gigabytes.
+  if (bytes < 1024 ** 3) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
 }
 
 /** Format seconds as human-readable `3s`, `5m`, `1h 5m`. Returns empty string for falsy input. */

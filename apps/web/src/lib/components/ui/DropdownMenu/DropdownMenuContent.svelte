@@ -2,6 +2,7 @@
 	import { browser } from '$app/environment';
 	import type { Snippet } from 'svelte';
 	import type { HTMLAttributes } from 'svelte/elements';
+	import { prefersReducedMotion } from 'svelte/motion';
 	import { type FlyParams, fly } from 'svelte/transition';
 	import { getCtx } from './ctx.js';
 
@@ -16,6 +17,14 @@
 		elements: { menu },
 		states: { open }
 	} = getCtx();
+
+	/**
+	 * A Svelte transition is timed in JS, so no CSS reduced-motion rule reaches
+	 * it (Codex-71rf3): the menu appears in place for a reduced-motion user.
+	 */
+	const motion = $derived(
+		prefersReducedMotion.current ? { ...transitionConfig, y: 0, duration: 0 } : transitionConfig
+	);
 
 	/**
 	 * Melt portals the menu to <body>, escaping `.org-layout` which carries
@@ -54,7 +63,7 @@
 		use:menu
 		use:forwardBrandTokens
 		class="dropdown-content {className ?? ''}"
-		transition:fly={transitionConfig}
+		transition:fly={motion}
 		{...rest}
 	>
 		{@render children?.()}

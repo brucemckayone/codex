@@ -1,198 +1,75 @@
 <!--
   @component MediaLibraryCommandBar
 
-  Sticky editorial command bar for the Studio media library. Mirrors
-  ContentListCommandBar vocabulary: backdrop-blur, breadcrumb eyebrow,
-  mono ordinal meter, dual segmented filter (type + status), search field,
-  primary upload CTA that triggers the parent's hidden file input.
-
-  Layout (desktop):
-    Left   — breadcrumb (Studio / Media) + 3-digit count chip
-    Mid    — type segment (All / Video / Audio)
-    Mid-R  — status segment (All / Ready / Processing / Failed)
-    Right  — search + Upload action
-
-  Stacked on below-lg: identity + actions row, then filters row, then search.
-
-  All state lives in URL query params in the parent — this is purely
-  presentational plus parent-owned search debounce.
+  Sticky command bar for the Studio media library: the breadcrumb (Studio /
+  Media), the live status chip, and the Upload action that triggers the
+  parent's hidden file input. Search, filters, sort and view live in
+  MediaLibraryToolbar below the page header (Codex-a6ofh.1.6).
 -->
 <script lang="ts">
+  import { tick } from 'svelte';
   import * as m from '$paraglide/messages';
-  import { UploadIcon, SearchIcon, XIcon } from '$lib/components/ui/Icon';
+  import { UploadIcon } from '$lib/components/ui/Icon';
   import Badge from '$lib/components/ui/Badge/Badge.svelte';
   import type { MediaStatusConnection } from '$lib/client/media-status.svelte';
 
-  type MediaTypeFilter = 'all' | 'video' | 'audio';
-  type StatusFilter = 'all' | 'ready' | 'transcoding' | 'failed';
-
   interface Props {
-    /** Total items matching current server filter (for the ordinal meter) */
-    total: number;
-    /** Whether the list is currently loading (dims the count) */
-    loading?: boolean;
     /**
      * The live status socket (Codex-l2c48.7). Shown while it is live, or
-     * while the tiles may lag (reconnecting, polling); hidden otherwise.
+     * while the tiles may lag (reconnecting, polling, paused); hidden otherwise.
      */
     live?: MediaStatusConnection;
-    /** Active media-type filter */
-    mediaType: MediaTypeFilter;
-    /** Active status filter */
-    status: StatusFilter;
-    /** Current search input value (parent-controlled) */
-    searchValue: string;
+    /** Refresh, offered once the fallback has paused (Codex-a6ofh.1.3). */
+    onLiveResume?: () => void;
     /** Upload button click — parent should trigger hidden file input */
     onUploadClick: () => void;
-    /** Search input handler — parent owns debounce */
-    onSearchInput: (e: Event) => void;
-    /** Search clear handler */
-    onSearchClear: () => void;
-    /** Media-type segmented control handler */
-    onMediaTypeChange: (value: MediaTypeFilter) => void;
-    /** Status segmented control handler */
-    onStatusChange: (value: StatusFilter) => void;
   }
 
-  const {
-    total,
-    loading = false,
-    live = 'idle',
-    mediaType,
-    status,
-    searchValue,
-    onUploadClick,
-    onSearchInput,
-    onSearchClear,
-    onMediaTypeChange,
-    onStatusChange,
-  }: Props = $props();
+  const { live = 'idle', onUploadClick, onLiveResume }: Props = $props();
 
-  // TODO i18n — "studio_media_eyebrow" = "Studio"
-  const eyebrow = 'Studio';
-  const leaf = m.media_title();
-
-  // TODO i18n — segmented labels
-  //   studio_media_filter_all_types, studio_media_filter_video, studio_media_filter_audio
-  //   studio_media_filter_all_status, studio_media_filter_ready, studio_media_filter_processing, studio_media_filter_failed
-  const mediaTypeOptions: Array<{ value: MediaTypeFilter; label: string }> = [
-    { value: 'all', label: m.media_filter_all_types() },
-    { value: 'video', label: m.media_type_video() },
-    { value: 'audio', label: m.media_type_audio() },
-  ];
-
-  const statusOptions: Array<{ value: StatusFilter; label: string }> = [
-    { value: 'all', label: m.media_filter_all_status() },
-    { value: 'ready', label: m.media_status_ready() },
-    { value: 'transcoding', label: m.media_status_processing() },
-    { value: 'failed', label: m.media_status_failed() },
-  ];
-
-  const ordinalText = $derived(
-    Math.max(0, Math.min(total, 999)).toString().padStart(3, '0')
-  );
   const LIVE_LABELS: Partial<Record<MediaStatusConnection, () => string>> = {
     live: () => m.media_live_live(),
     reconnecting: () => m.media_live_reconnecting(),
     polling: () => m.media_live_polling(),
+    // The fallback spent its few refetches: nothing runs until Refresh.
+    paused: () => m.media_live_paused(),
     // The session ended, or the ticket was refused twice in a row: nothing
     // reconnects until the page loads again.
     stopped: () => m.media_live_stopped(),
   };
   const liveLabel = $derived(LIVE_LABELS[live]);
 
-  // TODO i18n — studio_media_count_label = "items"
-  const countLabel = 'items';
-  // TODO i18n — studio_media_search_placeholder = "Search library..."
-  const searchPlaceholder = 'Search library...';
-  // TODO i18n — studio_media_search_clear = "Clear search"
-  const searchClearLabel = 'Clear search';
+  let liveStatus = $state<HTMLElement | null>(null);
+
+  async function resumeLive() {
+    onLiveResume?.();
+    // Refresh goes once the store leaves 'paused': keep focus on the status
+    // it changed, never <body> (WCAG 2.4.3).
+    await tick();
+    liveStatus?.focus();
+  }
 </script>
 
-<div class="command-bar" role="toolbar" aria-label="Media library actions">
+<div class="command-bar" role="toolbar" aria-label={m.media_command_bar_label()}>
   <div class="bar-identity">
     <a href="/studio" class="breadcrumb">
-      <span class="breadcrumb-root">{eyebrow}</span>
+      <span class="breadcrumb-root">{m.media_breadcrumb_root()}</span>
       <span class="breadcrumb-sep" aria-hidden="true">/</span>
-      <span class="breadcrumb-leaf">{leaf}</span>
+      <span class="breadcrumb-leaf">{m.media_title()}</span>
     </a>
-    <span
-      class="count-chip"
-      data-loading={loading || undefined}
-      aria-label="{total} items total"
-    >
-      <span class="count-num">{ordinalText}</span>
-      <span class="count-label">{countLabel}</span>
-    </span>
     {#if liveLabel}
-      <Badge class="live-chip" variant={live === 'live' ? 'success' : 'warning'} data-state={live}>
-        {liveLabel()}
-      </Badge>
-    {/if}
-  </div>
-
-  <div class="bar-filters" aria-label="Filter media">
-    <div class="filter-segment" role="tablist" aria-label="Filter by type">
-      {#each mediaTypeOptions as opt (opt.value)}
-        <button
-          type="button"
-          role="tab"
-          aria-selected={mediaType === opt.value}
-          class="filter-tab"
-          data-active={mediaType === opt.value || undefined}
-          data-kind="type"
-          onclick={() => onMediaTypeChange(opt.value)}
-        >
-          {opt.label}
-        </button>
-      {/each}
-    </div>
-
-    <div class="filter-segment" role="tablist" aria-label="Filter by status">
-      {#each statusOptions as opt (opt.value)}
-        <button
-          type="button"
-          role="tab"
-          aria-selected={status === opt.value}
-          class="filter-tab"
-          data-active={status === opt.value || undefined}
-          data-kind="status"
-          data-status={opt.value}
-          onclick={() => onStatusChange(opt.value)}
-        >
-          {opt.label}
-        </button>
-      {/each}
-    </div>
-  </div>
-
-  <div class="bar-search">
-    <div class="search-input-wrapper">
-      <span class="search-icon-slot" aria-hidden="true">
-        <SearchIcon size={16} />
-      </span>
-      <input
-        type="search"
-        id="media-library-search"
-        name="q"
-        autocomplete="off"
-        class="search-input"
-        placeholder={searchPlaceholder}
-        value={searchValue}
-        oninput={onSearchInput}
-        aria-label={searchPlaceholder}
-      />
-      {#if searchValue}
-        <button
-          type="button"
-          class="search-clear"
-          onclick={onSearchClear}
-          aria-label={searchClearLabel}
-        >
-          <XIcon size={14} />
+      <!-- A status region: a screen reader hears it pause, reconnect, recover. -->
+      <div class="live-status" role="status" tabindex="-1" bind:this={liveStatus}>
+        <Badge class="live-chip" variant={live === 'live' ? 'success' : 'warning'} data-state={live}>
+          {liveLabel()}
+        </Badge>
+      </div>
+      {#if live === 'paused' && onLiveResume}
+        <button type="button" class="live-resume" onclick={resumeLive}>
+          {m.media_live_resume()}
         </button>
       {/if}
-    </div>
+    {/if}
   </div>
 
   <div class="bar-actions">
@@ -208,9 +85,9 @@
     position: sticky;
     top: 0;
     z-index: var(--z-sticky);
-    display: grid;
-    grid-template-columns: minmax(0, auto) minmax(0, 1fr) minmax(0, auto) auto;
+    display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: var(--space-4);
     padding: var(--space-3) var(--space-5);
     background-color: color-mix(in srgb, var(--color-surface) 88%, transparent);
@@ -224,30 +101,11 @@
 
   @media (--below-lg) {
     .command-bar {
-      grid-template-columns: minmax(0, 1fr) auto;
-      grid-template-areas:
-        'identity actions'
-        'filters  filters'
-        'search   search';
-      row-gap: var(--space-3);
       padding: var(--space-3) var(--space-4);
     }
-    .bar-identity { grid-area: identity; }
-    /* max-width is what actually constrains this row. The element is a
-       scroll container, so its automatic minimum size is already 0 and
-       `min-width: 0` is a no-op here — measured at 390px, computed
-       min-width was already 0px while the box sat at 631px. Without an
-       UPPER bound the row sizes to its content, grows past the bar, and
-       an ancestor clips it: the filters are cut off and unreachable
-       rather than scrollable, which is the reported mobile header bug.
-       With max-width the row clamps to the bar (326px) and scrolls
-       inside itself, which is what overflow-x: auto was written to do. */
-    .bar-filters  { grid-area: filters; overflow-x: auto; flex-wrap: nowrap; max-width: 100%; }
-    .bar-search   { grid-area: search; }
-    .bar-actions  { grid-area: actions; }
   }
 
-  /* ── Identity (breadcrumb + count) ──────────────────────── */
+  /* ── Identity (breadcrumb + live status) ──────────────────────── */
   /* Wraps rather than overflows: at 390px a longer live chip ("Updates every
      minute", "Reload for live updates") squeezed the breadcrumb to 0 and ran
      under the upload button. Lines break on natural widths, so the chip
@@ -302,34 +160,6 @@
     min-width: 0;
   }
 
-  .count-chip {
-    display: inline-flex;
-    align-items: baseline;
-    gap: var(--space-1);
-    padding: var(--space-1) var(--space-3);
-    font-family: var(--font-mono);
-    font-feature-settings: 'tnum', 'zero';
-    font-variant-numeric: tabular-nums slashed-zero;
-    font-size: var(--text-xs);
-    color: var(--color-text-muted);
-    border: var(--border-width) var(--border-style) var(--color-border);
-    border-radius: var(--radius-full, 9999px);
-    background: var(--color-surface);
-    transition:
-      color var(--duration-normal) var(--ease-out),
-      opacity var(--duration-normal) var(--ease-out);
-  }
-
-  .count-chip[data-loading] { opacity: var(--opacity-60, 0.6); }
-
-  .count-num { font-weight: var(--font-semibold); color: var(--color-text-secondary); }
-  .count-label {
-    margin-left: var(--space-1);
-    font-family: var(--font-sans);
-    text-transform: uppercase;
-    letter-spacing: var(--tracking-wider);
-  }
-
   /* The live chip is a Badge (its colours); this adds the dot and the blink. */
   .bar-identity :global(.live-chip)::before {
     content: '';
@@ -350,142 +180,38 @@
     50% { opacity: 0.2; }
   }
 
-  /* ── Dual segmented filters ─────────────────────────────── */
-  .bar-filters {
+  .live-status {
     display: inline-flex;
-    align-items: center;
-    gap: var(--space-2);
-    justify-self: center;
-    min-width: 0;
+    border-radius: var(--radius-sm);
   }
 
-  @media (--below-lg) {
-    .bar-filters { justify-self: start; }
+  .live-status:focus {
+    outline: none;
   }
 
-  .filter-segment {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-0-5);
-    padding: var(--space-0-5);
-    border-radius: var(--radius-full, 9999px);
-    border: var(--border-width) var(--border-style) var(--color-border);
-    background: color-mix(in srgb, var(--color-surface-secondary) 60%, var(--color-surface));
-  }
-
-  .filter-tab {
-    appearance: none;
-    border: 0;
-    background: transparent;
-    color: var(--color-text-muted);
-    font-family: var(--font-sans);
-    font-size: var(--text-xs);
-    font-weight: var(--font-semibold);
-    text-transform: uppercase;
-    letter-spacing: var(--tracking-wider);
-    padding: var(--space-1) var(--space-3);
-    border-radius: var(--radius-full, 9999px);
-    cursor: pointer;
-    white-space: nowrap;
-    transition:
-      background-color var(--duration-fast) var(--ease-out),
-      color var(--duration-fast) var(--ease-out);
-  }
-
-  .filter-tab:hover { color: var(--color-text-secondary); }
-
-  .filter-tab[data-active] {
-    background: var(--color-surface);
-    color: var(--color-text);
-    box-shadow:
-      0 1px 0 color-mix(in srgb, var(--color-text) 6%, transparent),
-      0 1px 2px color-mix(in srgb, var(--color-text) 8%, transparent);
-  }
-
-  /* Status-segment active colour hints — keep subtle, inherit text mostly */
-  .filter-tab[data-kind='status'][data-active][data-status='ready'] {
-    color: var(--color-success-700);
-  }
-  .filter-tab[data-kind='status'][data-active][data-status='transcoding'] {
-    color: var(--color-warning-700);
-  }
-  .filter-tab[data-kind='status'][data-active][data-status='failed'] {
-    color: var(--color-error-700);
-  }
-
-  .filter-tab:focus-visible {
+  .live-status:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: var(--space-0-5);
   }
 
-  /* ── Search ─────────────────────────────────────────────── */
-  .bar-search {
-    display: flex;
-    justify-content: flex-end;
-    min-width: 0;
-  }
-
-  .search-input-wrapper {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-1-5) var(--space-3);
-    border: var(--border-width) var(--border-style) var(--color-border);
-    border-radius: var(--radius-full, 9999px);
-    background-color: var(--color-surface);
-    transition:
-      border-color var(--duration-fast) var(--ease-out),
-      box-shadow var(--duration-fast) var(--ease-out);
-    width: 100%;
-    max-width: 16rem;
-  }
-
-  .search-input-wrapper:focus-within {
-    border-color: var(--color-interactive);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-interactive) 15%, transparent);
-  }
-
-  .search-icon-slot {
-    display: inline-flex;
-    color: var(--color-text-muted);
-    flex-shrink: 0;
-  }
-
-  .search-input {
-    flex: 1;
-    min-width: 0;
-    border: none;
-    outline: none;
+  .live-resume {
+    appearance: none;
+    border: 0;
     background: transparent;
-    font-size: var(--text-sm);
-    color: var(--color-text);
-    font-family: var(--font-sans);
-  }
-
-  .search-input::placeholder { color: var(--color-text-muted); }
-  .search-input::-webkit-search-cancel-button { display: none; }
-
-  .search-clear {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: var(--space-0-5);
-    border: none;
-    background: none;
-    color: var(--color-text-muted);
-    border-radius: var(--radius-full, 9999px);
+    padding: var(--space-0-5) var(--space-1);
+    font: inherit;
+    font-size: var(--text-xs);
+    font-weight: var(--font-medium);
+    color: var(--color-interactive);
+    text-decoration: underline;
+    text-underline-offset: var(--space-0-5);
+    border-radius: var(--radius-sm);
     cursor: pointer;
-    transition: var(--transition-colors);
   }
 
-  .search-clear:hover {
-    color: var(--color-text);
-    background-color: var(--color-surface-secondary);
-  }
-
-  .search-clear:focus-visible {
+  .live-resume:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: var(--focus-offset);
+    outline-offset: var(--space-0-5);
   }
 
   /* ── Actions ────────────────────────────────────────────── */

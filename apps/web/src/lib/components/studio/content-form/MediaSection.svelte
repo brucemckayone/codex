@@ -1,55 +1,46 @@
 <!--
   @component MediaSection
 
-  Media picker with selected media preview. When a ready media item is
-  selected AND we have a published content context, renders the
-  VideoPlayer / AudioPlayer inline so the creator can sanity-check the
-  actual file before publishing. Otherwise falls back to a metadata-only
-  preview card.
+  The content's media, chosen with the shared `MediaPickerDialog`
+  (Codex-a6ofh.1.8). The chosen item is read BY ID, so a saved item past the
+  library's first page is never shown as empty, and a draft may hold an item
+  still processing: publishing waits for it. Live content may not: the
+  service refuses a non-ready item for it, so its picker offers ready only. When the content is published
+  and its media ready, the VideoPlayer / AudioPlayer play it inline so the
+  creator can sanity-check the actual file.
 
   Streaming-URL caveat: @codex/access' `getStreamingUrl` only resolves for
-  **published** content — it treats drafts as NotFound. That means the
-  full inline player is available in edit mode once the content has been
-  published at least once. For unpublished / new-mode content we intentionally
-  fall back to the metadata card rather than bolting on a creator-preview
-  endpoint in this iteration. See follow-up note in the iter-11 report.
+  **published** content — it treats drafts as NotFound — so the inline player
+  appears once the content has been published at least once.
 
   @prop {ContentForm} form - The active form instance
-  @prop {MediaItemOption[]} mediaItems - Available media items
-  @prop {string | null} orgSlug - Org slug for media library link (null for personal content)
+  @prop {'video' | 'audio'} mediaType - The content's type: what the picker offers
+  @prop {boolean} [live] - Published, or ever released: the picker offers ready media only
   @prop {string | null} [contentId] - Content UUID (edit mode only)
   @prop {string | null} [contentStatus] - Content status — preview is only available when 'published'
   @prop {object | null} [deletedMedia] - The picked media, when it was deleted from the library: the section says "media missing"
 -->
 <script lang="ts">
   import * as m from '$paraglide/messages';
-  import MediaPicker from '../MediaPicker.svelte';
+  import MediaPickerDialog from '../media-library/MediaPickerDialog.svelte';
   import DeletedVideoNotice from './DeletedVideoNotice.svelte';
-  import { Badge } from '$lib/components/ui';
-  import { VideoIcon, MusicIcon } from '$lib/components/ui/Icon';
-  import { formatDuration, formatFileSize } from '$lib/utils/format';
   import { getStreamingUrl } from '$lib/remote/library.remote';
+  import { getMediaItem } from '$lib/remote/media.remote';
   import { VideoPlayer } from '$lib/components/VideoPlayer';
   import { AudioPlayer } from '$lib/components/AudioPlayer';
   import type { createContentForm, updateContentForm } from '$lib/remote/content.remote';
 
   type ContentForm = typeof createContentForm | typeof updateContentForm;
 
-  interface MediaItemOption {
-    id: string;
-    title: string;
-    mediaType: string;
-    durationSeconds?: number | null;
-    fileSizeBytes?: number | null;
-    status?: string;
-    thumbnailKey?: string | null;
-    thumbnailUrl?: string | null;
-  }
-
   interface Props {
     form: ContentForm;
-    mediaItems: MediaItemOption[];
-    orgSlug: string | null;
+    /** The content's type: the picker offers only this. */
+    mediaType: 'video' | 'audio';
+    /**
+     * Live, or ever released: its media must be ready (the service refuses a
+     * processing item), so the picker offers ready only and no upload.
+     */
+    live?: boolean;
     contentId?: string | null;
     contentStatus?: string | null;
     /**
@@ -64,19 +55,19 @@
 
   const {
     form,
-    mediaItems,
-    orgSlug,
+    mediaType,
+    live = false,
     contentId = null,
     contentStatus = null,
     deletedMedia = null,
     class: className = '',
   }: Props = $props();
 
-  const selectedMediaId = $derived<string | null>(form.fields.mediaItemId?.value() ?? null);
+  // The form holds '' for no media.
+  const selectedMediaId = $derived<string | null>(form.fields.mediaItemId?.value() || null);
 
-  const selectedMedia = $derived(
-    selectedMediaId ? mediaItems.find((m) => m.id === selectedMediaId) : null
-  );
+  /** The chosen item, read by id: the same query the picker's field reads. */
+  const selectedMedia = $derived(selectedMediaId ? (getMediaItem(selectedMediaId).current ?? null) : null);
 
   const mediaItemIssues = $derived(form.fields.mediaItemId.issues() ?? []);
   const mediaItemErrorText = $derived(
@@ -111,45 +102,21 @@
     {/if}
 
     <div class="form-field">
-      <MediaPicker
-        {mediaItems}
+      <MediaPickerDialog
         value={selectedMediaId}
         onchange={handleMediaChange}
+        mediaTypes={[mediaType]}
+        allowProcessing={!live}
         name="mediaItemId"
-        showLibraryLink={!!orgSlug}
+        ariaLabel={m.studio_content_form_section_media()}
       />
       {#if mediaItemIssues.length > 0}
         <p class="field-error">{mediaItemErrorText}</p>
       {/if}
     </div>
 
-    <!-- Selected media preview -->
+    <!-- The picker's field shows the chosen item; this plays it. -->
     {#if selectedMedia}
-      <div class="media-preview">
-        <div class="media-preview-icon">
-          {#if selectedMedia.mediaType === 'video'}
-            <VideoIcon size={32} />
-          {:else}
-            <MusicIcon size={32} />
-          {/if}
-        </div>
-        <div class="media-preview-info">
-          <span class="media-preview-title">{selectedMedia.title}</span>
-          <div class="media-preview-meta">
-            <Badge>{selectedMedia.mediaType}</Badge>
-            {#if selectedMedia.durationSeconds}
-              <span class="meta-item">{formatDuration(selectedMedia.durationSeconds)}</span>
-            {/if}
-            {#if selectedMedia.fileSizeBytes}
-              <span class="meta-item">{formatFileSize(selectedMedia.fileSizeBytes)}</span>
-            {/if}
-            {#if selectedMedia.status && selectedMedia.status !== 'ready'}
-              <Badge variant="warning">Processing</Badge>
-            {/if}
-          </div>
-        </div>
-      </div>
-
       <!-- Inline player: only available once content is published.
            Wrapped in an aria-live="polite" region so state transitions
            (loading → error / ready) are announced to screen-reader users
@@ -233,64 +200,6 @@
     font-size: var(--text-xs);
     color: var(--color-error-600);
     margin: 0;
-  }
-
-  .media-preview {
-    display: flex;
-    gap: var(--space-3);
-    padding: var(--space-3);
-    border: var(--border-width) var(--border-style) var(--color-border);
-    border-radius: var(--radius-md);
-    background-color: var(--color-surface-secondary, var(--color-surface));
-  }
-
-  .media-preview-icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: var(--space-12);
-    height: var(--space-12);
-    border-radius: var(--radius-md);
-    background-color: var(--color-interactive-subtle);
-    color: var(--color-interactive-hover);
-    flex-shrink: 0;
-  }
-
-  .media-preview-info {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-    min-width: 0;
-  }
-
-  .media-preview-title {
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
-    color: var(--color-text);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .media-preview-meta {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--space-2);
-  }
-
-  .meta-item {
-    font-size: var(--text-xs);
-    color: var(--color-text-muted);
-  }
-
-  /* Dark-mode dim of the interactive colour for the icon chip. The 15% mix is
-     intentionally inline: this pattern only appears once in this file and a
-     bespoke --color-interactive-hover-surface token is not justified until we
-     see the same tint ≥3 times in the repo. */
-  :global([data-theme='dark']) .media-preview-icon {
-    background-color: color-mix(in srgb, var(--color-interactive) 15%, var(--color-surface));
-    color: var(--color-interactive);
   }
 
   /* ── Inline player ───────────────────────────────────────────────

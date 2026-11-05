@@ -39,7 +39,7 @@ const ORG_ID = '6e555555-5555-4555-8555-555555555555';
 const CDN = 'http://localhost:4100/creator-1';
 
 let film = fakeQuery<StudioIntroFilm | null>(null);
-let library = fakeQuery<{ items: unknown[] }>({ items: [] });
+let library = fakeQuery<MediaPage>(page([]));
 const linkIntroVideo = vi.fn();
 const unlinkIntroVideo = vi.fn();
 const listMedia = vi.fn();
@@ -51,6 +51,7 @@ vi.mock('$lib/remote/branding.remote', () => ({
 }));
 vi.mock('$lib/remote/media.remote', () => ({
   listMedia: (input: unknown) => listMedia(input),
+  getMediaItem: vi.fn(),
 }));
 
 const { brandEditor } = await import('$lib/brand-editor');
@@ -71,6 +72,7 @@ const ROWS = [
     id: VIDEO,
     title: 'Why we teach',
     mediaType: 'video',
+    status: 'ready',
     durationSeconds: 134,
     fileSizeBytes: 1_000_000,
     thumbnailUrl: `${CDN}/media-thumbnails/${VIDEO}/md.webp`,
@@ -79,11 +81,27 @@ const ROWS = [
     id: OTHER,
     title: 'Studio tour',
     mediaType: 'video',
+    status: 'ready',
     durationSeconds: 91,
     fileSizeBytes: 900_000,
     thumbnailUrl: null,
   },
 ];
+
+interface MediaPage {
+  items: unknown[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
+/** A `listMedia` page as the worker sends it. */
+function page(items: unknown[], total = items.length): MediaPage {
+  return { items, pagination: { page: 1, limit: 24, total, totalPages: 1 } };
+}
 
 /** Layout-free jsdom: floating-ui's autoUpdate needs an observer to exist. */
 class NoopResizeObserver {
@@ -100,7 +118,7 @@ beforeEach(() => {
   globalThis.ResizeObserver =
     NoopResizeObserver as unknown as typeof ResizeObserver;
   film = fakeQuery<StudioIntroFilm | null>(null);
-  library = fakeQuery<{ items: unknown[] }>({ items: ROWS });
+  library = fakeQuery<MediaPage>(page(ROWS));
   listMedia.mockImplementation(() => library);
   linkIntroVideo.mockResolvedValue({});
   unlinkIntroVideo.mockResolvedValue({});
@@ -140,21 +158,26 @@ function render() {
 
 const text = () => document.body.textContent ?? '';
 
+/** Open the picker dialog from its own button (Codex-a6ofh.1.8). */
 function openPicker() {
-  const trigger = document.querySelector<HTMLElement>(
-    'input.picker-input, button.trigger-preview'
-  );
-  if (!trigger) throw new Error('no picker');
-  trigger.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  button(m.media_picker_title_video()).click();
   flushSync();
 }
 
-function option(title: string): HTMLElement {
+function row(title: string): HTMLElement {
   const found = [
-    ...document.querySelectorAll<HTMLElement>('[role="option"]'),
+    ...document.querySelectorAll<HTMLElement>('label.picker-row'),
   ].find((el) => el.textContent?.includes(title));
-  if (!found) throw new Error(`no option ${title}`);
+  if (!found) throw new Error(`no row ${title}`);
   return found;
+}
+
+/** Mark a row, then Attach: the picker reports only that. */
+function choose(title: string) {
+  row(title).querySelector('input')?.click();
+  flushSync();
+  button(m.media_picker_attach()).click();
+  flushSync();
 }
 
 function button(label: string): HTMLButtonElement {
@@ -169,18 +192,22 @@ describe('the Film control', () => {
   test('no film yet: says so, and offers your finished videos with their posters', () => {
     render();
     expect(text()).toContain(m.branding_film_empty());
-    expect(listMedia).toHaveBeenCalledWith({
-      status: 'ready',
-      mediaType: 'video',
-      limit: 100,
-    });
+    // Nothing is read until the creator opens the picker.
+    expect(listMedia).not.toHaveBeenCalled();
 
     openPicker();
-    expect(
-      option('Why we teach').querySelector('img')?.getAttribute('src')
-    ).toBe(`${CDN}/media-thumbnails/${VIDEO}/sm.webp`);
+    expect(listMedia).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'ready',
+        mediaType: 'video',
+        limit: 24,
+      })
+    );
+    expect(row('Why we teach').querySelector('img')?.getAttribute('src')).toBe(
+      ROWS[0]?.thumbnailUrl
+    );
     // A video with no poster keeps its icon.
-    expect(option('Studio tour').querySelector('img')).toBeNull();
+    expect(row('Studio tour').querySelector('img')).toBeNull();
   });
 
   test('says nothing about the film until the studio knows its org', () => {
@@ -189,17 +216,14 @@ describe('the Film control', () => {
     brandEditor.close();
     render();
     expect(text()).not.toContain(m.branding_film_empty());
-    expect(document.querySelector('.media-picker')).toBeNull();
+    expect(text()).not.toContain(m.media_picker_title_video());
     expect(listMedia).not.toHaveBeenCalled();
   });
 
   test('choosing a video links it, re-reads the film, and reloads the preview', async () => {
     render();
     openPicker();
-    option('Studio tour').dispatchEvent(
-      new MouseEvent('click', { bubbles: true })
-    );
-    flushSync();
+    choose('Studio tour');
 
     await vi.waitFor(() => expect(onsaved).toHaveBeenCalledTimes(1));
     expect(linkIntroVideo).toHaveBeenCalledWith({
@@ -210,24 +234,24 @@ describe('the Film control', () => {
     expect(film.refresh).toHaveBeenCalledTimes(1);
   });
 
-  test('while the library loads, it shows no empty picker', () => {
-    library = fakeQuery<{ items: unknown[] }>(undefined);
+  test('while the library loads, the picker never says there are no videos', () => {
+    library = fakeQuery<MediaPage>(undefined);
     listMedia.mockImplementation(() => library);
     render();
-    expect(
-      document.querySelector('input.picker-input, button.trigger-preview')
-    ).toBeNull();
+    openPicker();
+    expect(document.querySelector('label.picker-row')).toBeNull();
+    expect(text()).not.toContain(m.media_picker_empty_title());
   });
 
-  test('says when it shows only the first of many videos', () => {
-    library = fakeQuery<{ items: unknown[]; pagination: { total: number } }>({
-      items: ROWS,
-      pagination: { total: 140 },
-    });
+  // The old picker read the first 100 and said how many it was showing:
+  // the dialog pages the whole library instead.
+  test('pages a library past the first page, rather than cutting it off', () => {
+    library = fakeQuery<MediaPage>(page(ROWS, 140));
     listMedia.mockImplementation(() => library);
     render();
+    openPicker();
     expect(text()).toContain(
-      m.branding_film_library_capped({ shown: ROWS.length, total: 140 })
+      m.media_library_show_more({ left: 140 - ROWS.length, total: 140 })
     );
   });
 
@@ -273,17 +297,18 @@ describe('the Film control', () => {
     }
   });
 
-  test('Change film opens the picker; Keep this film puts it away', () => {
+  test('Change film offers the picker; Keep this film puts it away', () => {
     film = fakeQuery<StudioIntroFilm | null>(CHOSEN);
     render();
     button(m.branding_film_change()).click();
     flushSync();
-    expect(listMedia).toHaveBeenCalledTimes(1);
-    expect(document.querySelector('.media-picker')).not.toBeNull();
+    expect(text()).toContain(m.media_picker_title_video());
+    // Still nothing read: the library is asked for when the dialog opens.
+    expect(listMedia).not.toHaveBeenCalled();
 
     button(m.branding_film_keep()).click();
     flushSync();
-    expect(document.querySelector('.media-picker')).toBeNull();
+    expect(text()).not.toContain(m.media_picker_title_video());
   });
 
   test('Remove takes the film off the landing, and says the video stays', async () => {
@@ -305,9 +330,7 @@ describe('the Film control', () => {
     });
     render();
     openPicker();
-    option('Studio tour').dispatchEvent(
-      new MouseEvent('click', { bubbles: true })
-    );
+    choose('Studio tour');
 
     await vi.waitFor(() =>
       expect(text()).toContain('This video is still processing.')
@@ -356,7 +379,8 @@ describe('the Film control', () => {
  * media" answer is `pick(null)`, which UNLINKS, so a picker that echoed an
  * outside value it could not find as `onchange(null)` took a saved film off
  * the landing with nobody asking: a film past the list's first 100, or one
- * another tab linked while this picker was up.
+ * another tab linked while this picker was up. The dialog (Codex-a6ofh.1.8)
+ * reports only Attach, Remove, or its own upload's id.
  */
 describe('the Film control never unlinks on its own', () => {
   const PAST_LIMIT = '9b888888-8888-4888-8888-888888888888';
@@ -370,11 +394,12 @@ describe('the Film control never unlinks on its own', () => {
     render();
     button(m.branding_film_change()).click();
     flushSync();
+    openPicker();
     expect(document.querySelector('.media-picker')).not.toBeNull();
 
-    library.current = { items: ROWS.slice(1) };
+    library.current = page(ROWS.slice(1));
     flushSync();
-    library.current = { items: ROWS };
+    library.current = page(ROWS);
     flushSync();
     // Another tab linked a film this list does not have.
     film.current = { ...CHOSEN, mediaItemId: LINKED_ELSEWHERE };
@@ -383,6 +408,10 @@ describe('the Film control never unlinks on its own', () => {
 
     expect(unlinkIntroVideo).not.toHaveBeenCalled();
     expect(linkIntroVideo).not.toHaveBeenCalled();
-    expect(document.querySelector('.media-picker')).not.toBeNull();
+    // Cancel closes the dialog and reports nothing either.
+    button(m.common_cancel()).click();
+    flushSync();
+    expect(unlinkIntroVideo).not.toHaveBeenCalled();
+    expect(linkIntroVideo).not.toHaveBeenCalled();
   });
 });

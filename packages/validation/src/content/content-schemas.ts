@@ -3,8 +3,11 @@ import {
   CONTENT_STATUS,
   CONTENT_TYPES,
   isReservedSubdomain,
+  MEDIA_LIBRARY_PAGE_SIZE,
   MEDIA_STATUS,
+  MEDIA_STATUS_GROUPS,
   MEDIA_TYPES,
+  type MediaStatusGroup,
   VISIBILITY,
 } from '@codex/constants';
 import { z } from 'zod';
@@ -195,7 +198,9 @@ export type CreateMediaItemInput = z.infer<typeof createMediaItemSchema>;
 export const updateMediaItemSchema = z
   .object({
     title: z.string().min(1).max(255).optional(),
-    description: z.string().max(2000).optional().nullable(),
+    // As create allows (data-design §1.2): it was 2,000 here, so a long
+    // description saved on upload could not be edited and saved back.
+    description: z.string().max(5000).optional().nullable(),
   })
   .strict();
 
@@ -865,14 +870,37 @@ export const contentBrowseQuerySchema = contentQuerySchema.refine(
 
 export type ContentBrowseQueryInput = z.infer<typeof contentBrowseQuerySchema>;
 
+/** Which items a library list keeps by what uses them (Codex-a6ofh.1.4). */
+export const MEDIA_USAGE_FILTERS = ['any', 'used', 'unused'] as const;
+
 /**
- * Media item query schema
- * Extends pagination with media-specific filters and sorting
+ * `GET /api/media` (data-design §1.1), the media item query: search inside
+ * the creator's own items, a raw status or one of `MEDIA_STATUS_GROUPS`, a
+ * usage filter, and {@link MEDIA_LIBRARY_PAGE_SIZE} a page.
+ *
+ * `status` is ONE enum of both, never a union: a union's refusal reads only
+ * "Invalid input", where an enum's lists every value it takes.
  */
 export const mediaQuerySchema = paginationSchema.extend({
-  status: mediaStatusEnum.optional(),
+  limit: paginationSchema.shape.limit.unwrap().default(MEDIA_LIBRARY_PAGE_SIZE),
+  search: createSearchQuerySchema(255),
+  status: z
+    .enum([
+      ...mediaStatusEnum.options,
+      ...(Object.keys(MEDIA_STATUS_GROUPS) as MediaStatusGroup[]),
+    ])
+    .optional(),
   mediaType: mediaTypeEnum.optional(),
-  sortBy: z.enum(['createdAt', 'uploadedAt', 'title']).default('createdAt'),
+  usage: z.enum(MEDIA_USAGE_FILTERS).default('any'),
+  sortBy: z
+    .enum([
+      'createdAt',
+      'uploadedAt',
+      'title',
+      'durationSeconds',
+      'fileSizeBytes',
+    ])
+    .default('createdAt'),
   sortOrder: sortOrderEnum.default('desc'),
 });
 

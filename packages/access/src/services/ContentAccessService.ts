@@ -11,9 +11,10 @@ import {
 import {
   createPerRequestDbClient,
   MEDIA_ITEM_RESPONSE_COLUMNS,
+  scopedNotDeleted,
   toIso,
 } from '@codex/database';
-import { content } from '@codex/database/schema';
+import { content, mediaItems } from '@codex/database/schema';
 import { verifyPurchase } from '@codex/purchase';
 import {
   BaseService,
@@ -32,13 +33,18 @@ import type {
 } from '@codex/validation';
 import { and, eq, isNotNull, isNull, ne } from 'drizzle-orm';
 import { LOG_EVENTS, LOG_SEVERITY } from '../constants';
-import { AccessDeniedError, ContentNotFoundError } from '../errors';
+import {
+  AccessDeniedError,
+  ContentNotFoundError,
+  MediaNotFoundError,
+} from '../errors';
 import type {
   ContentBodySource,
   ContentHeld,
   ContentHeldBy,
   CourseEntryResponse,
   CourseFilmStreamResponse,
+  MediaPreviewResponse,
   OrgFilmStreamResponse,
   WithdrawnContent,
 } from '../types';
@@ -72,9 +78,12 @@ import {
   buildFilmStreamResponse,
   getHlsMasterPlaylist as buildHlsMasterPlaylist,
   getHlsVariantPlaylist as buildHlsVariantPlaylist,
+  getMediaPreviewHlsMasterPlaylist as buildMediaPreviewMasterPlaylist,
+  buildMediaPreviewResponse,
   buildStreamingResponse,
   filmStreamFailure,
   resolveStreamableMedia,
+  resolveStreamableMediaItem,
 } from './content-access/streaming';
 import { toStudioIntroFilm } from './intro-film-views';
 import { resolveCourseFilm, resolveIntroFilm } from './sales-films';
@@ -100,6 +109,13 @@ import { resolveCourseFilm, resolveIntroFilm } from './sales-films';
  * See docs/payments/access.md — "Streaming revocation".
  */
 export const DEFAULT_STREAMING_URL_TTL_SECONDS = 600;
+
+/**
+ * A creator's preview of their own media (Codex-a6ofh.1.5) lives 15 minutes
+ * (data-design §1.2): longer than a viewer's stream, since no access decision
+ * can lapse under the owner, and enough to watch a long take through.
+ */
+export const MEDIA_PREVIEW_TTL_SECONDS = 15 * 60;
 
 export interface ContentAccessServiceConfig extends ServiceConfig {
   r2: R2Signer;
@@ -931,6 +947,102 @@ export class ContentAccessService
     return buildFilmMasterPlaylist(
       { r2: this.r2, contentApiBaseUrl: this.contentApiBaseUrl },
       { scope: { kind: 'org', organizationId }, ...film }
+    );
+  }
+
+  /**
+   * A creator's preview of their OWN media in the studio (Codex-a6ofh.1.5),
+   * whatever uses it, paid content included: a signed HLS stream under the
+   * preview proxies, for {@link MEDIA_PREVIEW_TTL_SECONDS}.
+   *
+   * The read is creator-scoped, and that is the whole gate: media is personal
+   * (no org column), so its creator is its only owner. Another creator's
+   * item, a deleted one and an unknown id are the same 404, so an id probe
+   * learns nothing.
+   *
+   * Called at workers/content-api/src/routes/media.ts as
+   * `ctx.services.access.getMediaPreviewStream`, a lazy registry getter that
+   * dead-code detection cannot resolve to this class.
+   *
+   * @throws {MediaNotFoundError} not this creator's media, deleted, or unknown
+   * @throws {MediaNotReadyForStreamingError} not transcoded (yet), or failed
+   * @throws {R2SigningError} proxy misconfigured, signing failed, or a ready
+   *   row with no HLS master (a data fault, logged at error)
+   */
+  // fallow-ignore-next-line unused-class-member
+  async getMediaPreviewStream(
+    creatorId: string,
+    mediaId: string
+  ): Promise<MediaPreviewResponse> {
+    try {
+      const media = await this.db.query.mediaItems.findFirst({
+        where: and(
+          eq(mediaItems.id, mediaId),
+          scopedNotDeleted(mediaItems, creatorId)
+        ),
+        columns: {
+          id: true,
+          creatorId: true,
+          mediaType: true,
+          status: true,
+          hlsMasterPlaylistKey: true,
+          waveformKey: true,
+          readyVariants: true,
+        },
+      });
+      if (!media) {
+        // A 4xx reaches no log by itself (mapErrorToResponse), and this read
+        // is the feature's only gate: an id probe must leave a line.
+        this.obs.info('Media preview refused', {
+          creatorId,
+          mediaItemId: mediaId,
+          reason: 'not-found',
+        });
+        throw new MediaNotFoundError(mediaId);
+      }
+      // The content stream's own checks, each logged: not ready (warn), a
+      // ready row with no HLS master (error), a type that is not video or
+      // audio (error).
+      const streamable = resolveStreamableMediaItem(this.obs, media, {
+        creatorId,
+      });
+
+      const preview = await buildMediaPreviewResponse(
+        streamable,
+        {
+          r2: this.r2,
+          contentApiBaseUrl: this.contentApiBaseUrl,
+          hlsTokenSecret: this.hlsTokenSecret,
+          obs: this.obs,
+        },
+        MEDIA_PREVIEW_TTL_SECONDS
+      );
+      this.obs.info('Media preview minted', {
+        creatorId,
+        mediaItemId: mediaId,
+      });
+      return preview;
+    } catch (error) {
+      this.handleError(error, 'getMediaPreviewStream');
+    }
+  }
+
+  /**
+   * {@link getHlsMasterPlaylist} for a media preview: the variants point at
+   * the preview variant proxy. Auth is the preview token the route verified.
+   *
+   * Called from content-access.ts on the destructured-factory receiver, as
+   * `getFilmMasterPlaylist` is, which dead-code detection cannot resolve.
+   */
+  // fallow-ignore-next-line unused-class-member
+  async getMediaPreviewMasterPlaylist(input: {
+    creatorId: string;
+    mediaId: string;
+    token: string;
+  }): Promise<string | null> {
+    return buildMediaPreviewMasterPlaylist(
+      { r2: this.r2, contentApiBaseUrl: this.contentApiBaseUrl },
+      input
     );
   }
 

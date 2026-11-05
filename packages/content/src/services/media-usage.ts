@@ -22,6 +22,7 @@
  * delete through.
  */
 
+import { scopedNotDeleted } from '@codex/database';
 import {
   brandingSettings,
   content,
@@ -40,7 +41,7 @@ import type {
   MediaUseSlot,
 } from '@codex/shared-types';
 import { holdsPosterFolderOf } from '@codex/transcoding';
-import { inArray, type SQL, sql } from 'drizzle-orm';
+import { inArray, SQL, sql } from 'drizzle-orm';
 import {
   MediaInUseError,
   MediaUsageChangedError,
@@ -125,9 +126,12 @@ export interface SqlExecutor {
  * could otherwise publish one of this creator's poster URLs and make the
  * video impossible to delete. Their thumbnail breaks after the purge instead:
  * it was never theirs.
+ *
+ * `mediaIds` is a list, or a subquery of ids (the library's usage filter
+ * passes every id a creator owns): each branch matches it with `inArray`.
  */
-function usesQuery(mediaIds: readonly string[]): SQL {
-  const ids = [...mediaIds];
+function usesQuery(mediaIds: readonly string[] | SQL): SQL {
+  const ids = mediaIds instanceof SQL ? mediaIds : [...mediaIds];
   return sql`
     SELECT ${content.mediaItemId} AS media_id, 'content'::text AS source,
            'media'::text AS slot, ${content.id} AS owner_id, ${content.title}::text AS title,
@@ -214,6 +218,27 @@ export async function readMediaUses(
        AND m.user_id = ${callerId}
        AND m.status = 'active'`);
   return result.rows as MediaUseRow[];
+}
+
+/**
+ * Which of `creatorId`'s media anything uses: the library's usage filter
+ * (Codex-a6ofh.1.4). The chip's own reference set, fed every id the creator
+ * owns, so a new media reference reaches the filter with no change here.
+ *
+ * Its own statement, never a subquery of the list's `where`: the relational
+ * `findMany` re-aliases every column in a `where` to the listed table, which
+ * would point this query's content and course columns at media_items.
+ */
+export async function listUsedMediaIds(
+  db: SqlExecutor,
+  creatorId: string
+): Promise<string[]> {
+  const owned = sql`(SELECT ${mediaItems.id} FROM ${mediaItems}
+     WHERE ${scopedNotDeleted(mediaItems, creatorId)})`;
+  const result = await db.execute(
+    sql`SELECT DISTINCT u.media_id FROM (${usesQuery(owned)}) u`
+  );
+  return (result.rows as { media_id: string }[]).map((row) => row.media_id);
 }
 
 /**

@@ -52,6 +52,24 @@ vi.mock('$lib/remote/library.remote', () => ({
   getStreamingUrl: () => ({ current: undefined, loading: false }),
 }));
 
+// The by-id read the media picker and the media section share
+// (Codex-a6ofh.1.8): what `library.items` holds reads back; anything else
+// is a 404, as a deleted item is.
+const library = vi.hoisted(() => ({ items: [] as { id: string }[] }));
+vi.mock('$lib/remote/media.remote', () => ({
+  getMediaItem: (id: string) => {
+    const item = library.items.find((entry) => entry.id === id);
+    return item
+      ? { current: item, error: undefined, refresh: async () => {} }
+      : { current: undefined, error: { status: 404 }, refresh: async () => {} };
+  },
+  listMedia: () => ({
+    current: undefined,
+    error: undefined,
+    refresh: async () => {},
+  }),
+}));
+
 vi.mock('$lib/remote/categories.remote', () => ({
   getCategories: () => ({ current: [], loading: false }),
   createCategoryInline: vi.fn(),
@@ -119,6 +137,8 @@ describe('ContentForm · a draft whose media was deleted', () => {
 
   function render(deletedAt: string | null) {
     const mediaItem = { ...MEDIA_ITEM, deletedAt };
+    // The single read refuses a deleted item (404), as content-api's does.
+    library.items = deletedAt ? [] : [mediaItem];
     component = mount(ContentForm, {
       target: document.body,
       props: {
@@ -126,8 +146,6 @@ describe('ContentForm · a draft whose media was deleted', () => {
         content: { ...DRAFT, mediaItem } as any,
         organizationId: '22222222-2222-4222-8222-222222222222',
         orgSlug: 'studio-alpha',
-        // The library list leaves a deleted item out, as the edit route's read does.
-        mediaItems: deletedAt ? [] : [mediaItem],
       },
     });
     flushSync();
@@ -147,5 +165,80 @@ describe('ContentForm · a draft whose media was deleted', () => {
     render(null);
     expect(document.body.textContent).not.toContain('the last one was deleted');
     expect(publishButton()?.disabled).toBe(false);
+  });
+});
+
+// `ContentService.update` refuses a non-ready media item for content that is
+// live or was ever released (buyers keep it after it goes off sale), so the
+// picker must offer ready only there (review, Codex-a6ofh.1.8).
+describe('ContentForm · the media picker offers processing media to drafts only', () => {
+  // biome-ignore lint/suspicious/noExplicitAny: mount()'s component handle
+  let component: any;
+
+  afterEach(() => {
+    if (component) unmount(component);
+    component = undefined;
+    document.body.innerHTML = '';
+  });
+
+  function render(publishedAt: string | null) {
+    library.items = [MEDIA_ITEM];
+    component = mount(ContentForm, {
+      target: document.body,
+      props: {
+        // biome-ignore lint/suspicious/noExplicitAny: trimmed ContentWithRelations
+        content: { ...DRAFT, publishedAt, mediaItem: MEDIA_ITEM } as any,
+        organizationId: '22222222-2222-4222-8222-222222222222',
+        orgSlug: 'studio-alpha',
+      },
+    });
+    flushSync();
+  }
+
+  /** Open the picker and say whether it offers an upload (processing media). */
+  function offersUpload(): boolean {
+    const trigger = [...document.querySelectorAll('button')].find((el) =>
+      el.getAttribute('aria-label')?.startsWith('Change')
+    );
+    if (!trigger) throw new Error('no picker trigger');
+    trigger.click();
+    flushSync();
+    const offered = (document.body.textContent ?? '').includes(
+      'Upload a new video'
+    );
+    const cancel = [...document.querySelectorAll('button')].find(
+      (b) => b.textContent?.trim() === 'Cancel'
+    );
+    cancel?.click();
+    flushSync();
+    return offered;
+  }
+
+  it('a draft never released: processing media and an upload are offered', () => {
+    render(null);
+    expect(offersUpload()).toBe(true);
+  });
+
+  it('a draft that was released before (taken off sale): ready only', () => {
+    render('2026-09-01T09:00:00.000Z');
+    expect(offersUpload()).toBe(false);
+  });
+
+  it('published in this session, then unpublished: ready only', async () => {
+    render(null);
+    publishButton()?.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    flushSync();
+    const unpublish = [
+      ...document.querySelectorAll<HTMLButtonElement>('button'),
+    ].find((b) => b.textContent?.trim() === 'Unpublish');
+    // Must run: without it, 'published' alone would make this pass.
+    expect(unpublish).toBeDefined();
+    unpublish?.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    flushSync();
+    // Back to a draft: only `releasedHere` can keep it ready-only now.
+    expect(publishButton()).toBeDefined();
+    expect(offersUpload()).toBe(false);
   });
 });

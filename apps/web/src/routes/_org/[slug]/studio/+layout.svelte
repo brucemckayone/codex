@@ -14,6 +14,7 @@
   import { page } from '$app/state';
   import StudioSidebar from '$lib/components/layout/StudioSidebar/StudioSidebar.svelte';
   import CommandPalette from '$lib/components/command-palette/CommandPalette.svelte';
+  import UploadTray from '$lib/components/studio/media-library/UploadTray.svelte';
   import OwnershipOfferBanner from '$lib/components/studio/ownership/OwnershipOfferBanner.svelte';
   import type { LayoutData } from './$types';
   import { MenuIcon, XIcon } from '$lib/components/ui/Icon';
@@ -132,6 +133,9 @@
 <!-- CommandPalette lives at layout root, independent of the chrome it used
      to live next to. Cmd/Ctrl-K hotkey is self-wired inside the component. -->
 <CommandPalette />
+<!-- The upload tray lives here, not on the media page, so moving between
+     studio pages never unmounts a running upload (Codex-a6ofh.1.2). -->
+<UploadTray />
 
 <style>
   .studio-layout {

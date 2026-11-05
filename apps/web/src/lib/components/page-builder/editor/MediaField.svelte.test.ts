@@ -35,6 +35,12 @@ vi.mock('$lib/remote/journeys.remote', () => ({
 }));
 // The library holds both films, so the picker knows every value a test sets.
 vi.mock('$lib/remote/media.remote', () => ({
+  // The picker reads its chosen item by id (Codex-a6ofh.1.8); never loaded here.
+  getMediaItem: () => ({
+    current: undefined,
+    error: undefined,
+    refresh: async () => {},
+  }),
   listMedia: vi.fn(async () => ({
     items: [
       { id: PAID, title: 'Paid lesson', mediaType: 'video' },

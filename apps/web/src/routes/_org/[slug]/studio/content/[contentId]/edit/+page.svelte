@@ -2,13 +2,13 @@
   @component Studio Content Edit Page
 
   Renders the content form in edit mode with existing content data.
-  Fetches content and media items client-side to avoid __data.json round-trips.
+  Fetches content client-side to avoid __data.json round-trips. The media
+  picker reads the library itself, on open (Codex-a6ofh.1.8).
 -->
 <script lang="ts">
   import * as m from '$paraglide/messages';
   import { page } from '$app/state';
   import { getContent } from '$lib/remote/content.remote';
-  import { listMedia } from '$lib/remote/media.remote';
   import { ErrorBoundary } from '$lib/components/ui';
   import { Breadcrumb } from '$lib/components/ui/Breadcrumb';
   import ContentForm from '$lib/components/studio/ContentForm.svelte';
@@ -20,15 +20,7 @@
   const contentId = $derived(page.params.contentId);
 
   const contentQuery = $derived(getContent(contentId));
-  const mediaQuery = $derived(listMedia({
-    organizationId: data.org.id,
-    status: 'ready',
-    limit: 50,
-    sortBy: 'createdAt',
-    sortOrder: 'desc',
-  }));
-
-  const loading = $derived(contentQuery.loading || mediaQuery.loading);
+  const loading = $derived(contentQuery.loading);
   const content = $derived(contentQuery.current ?? null);
   const error = $derived(contentQuery.error ? 'Content not found' : null);
 
@@ -71,7 +63,6 @@
         {content}
         organizationId={data.org.id}
         orgSlug={data.org.slug}
-        mediaItems={mediaQuery.current?.items ?? []}
       />
     </ErrorBoundary>
   {/if}

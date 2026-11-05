@@ -2,6 +2,8 @@
  * Every tile of the approved mockup (docs/handover/live-media-status/
  * index.html), from the list row and the live state that produce it.
  */
+
+import { MEDIA_UPLOAD_STALLED_AFTER_MS } from '@codex/constants';
 import type { MediaItemState } from '@codex/validation';
 import { describe, expect, it } from 'vitest';
 import { describeTile, type TileMedia, tilePill } from './tile-state';
@@ -82,6 +84,50 @@ describe('describeTile', () => {
       );
       expect(view).toEqual({ kind: 'stopped' });
       expect(tilePill(view)).toBe('stopped');
+    });
+
+    // The attention filter and the header count an upload past its stall
+    // line as stopped (Codex-a6ofh.1.4); the tile said "Uploading" for it
+    // until no one reported it (found on the rebased tree, 2026-11-04).
+    describe('the stall line, when no tab reports the upload', () => {
+      const past = new Date(NOW - MEDIA_UPLOAD_STALLED_AFTER_MS - 1);
+      const within = new Date(NOW - MEDIA_UPLOAD_STALLED_AFTER_MS + 60_000);
+
+      it('past it: stopped, as the attention filter counts it', () => {
+        expect(
+          describeTile(
+            row({ status: 'uploading', createdAt: past }),
+            undefined,
+            0,
+            NOW
+          )
+        ).toEqual({ kind: 'stopped' });
+      });
+
+      it('within it: still uploading', () => {
+        expect(
+          describeTile(
+            row({ status: 'uploading', createdAt: within }),
+            undefined,
+            0,
+            NOW
+          ).kind
+        ).toBe('uploading');
+      });
+
+      it('a live report wins: an old row a tab is still sending is uploading', () => {
+        expect(
+          describeTile(
+            row({ status: 'uploading', createdAt: past }),
+            live({
+              lifecycle: 'uploading',
+              upload: { pct: 80, here: true, stopped: false },
+            }),
+            0,
+            NOW
+          )
+        ).toEqual({ kind: 'uploading', pct: 80, elsewhere: false });
+      });
     });
   });
 

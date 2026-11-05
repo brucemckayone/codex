@@ -44,6 +44,45 @@ async function walk(dir: string): Promise<string[]> {
   return out;
 }
 
+/**
+ * A `q` / `search` key inside a patch object handed to the shared filter-url
+ * helpers: `filterHref(page.url, { q: … })`, the shorthand `{ q }`, or a
+ * multi-line `applyFilterPatch(url, { sort, search: … })`.
+ */
+const HELPER_PATCH_KEY =
+  /\b(?:filterHref|applyFilterPatch)\([^;]*?\{[^}]*?\b(?:q|search)\b\s*[:,}]/;
+
+/**
+ * A `q` / `search` key in a patch handed to a page's own batching writer:
+ * the media library's `setParams({ q: … })`, which applies it with
+ * applyFilterPatch out of this regex's sight (Codex-a6ofh.1.7).
+ */
+const SET_PARAMS_KEY = /\bsetParams\(\s*\{[^}]*?\b(?:q|search)\b\s*[:,}]/;
+
+/**
+ * Does this source put a `q` / `search` param on a URL it navigates to? The
+ * shapes apps/web uses: a template `?q=${…}`; `params.set('q', …)`; a helper
+ * patch object (HELPER_PATCH_KEY; the studio list pages since Codex-a6ofh.1.1);
+ * a page's own `setUrlParam('q', …)` wrapper called with a literal key; and a
+ * `setParams({ q })` patch (SET_PARAMS_KEY). A detector blind to a shape passes
+ * by seeing nothing, so the calibration tests below pin each one, and the
+ * setParams writer against a REAL source file too.
+ *
+ * KNOWN GAPS, so a pass is never read as proof: a computed key
+ * (`{ [key]: value }`, `params.set(key, …)`), a patch built elsewhere and
+ * passed by name (explore's `applyFilterPatch(url, patch)`), and a patch value
+ * holding a `}` before the key (a template literal) are all invisible.
+ */
+function writesSearchParam(src: string): boolean {
+  return (
+    /\?q=\$\{/.test(src) ||
+    /(?:searchParams|params)\.set\(\s*['"](?:q|search)['"]/.test(src) ||
+    HELPER_PATCH_KEY.test(src) ||
+    SET_PARAMS_KEY.test(src) ||
+    /\bsetUrlParam\(\s*['"](?:q|search)['"]/.test(src)
+  );
+}
+
 describe('no hand-rolled search declaration survives in apps/web', () => {
   it('declares no `search:` field with a raw Zod chain', async () => {
     const offenders: string[] = [];
@@ -123,6 +162,12 @@ describe('every landed client gate is still wired', () => {
       file: 'routes/_org/[slug]/studio/monetisation/tiers/[tierId]/+page.svelte',
       shape: 'hold',
     },
+    // The studio media library (Codex-a6ofh.1.6): both studios' one
+    // component, which issues `listMedia` from the client.
+    {
+      file: 'lib/components/studio/media-library/StudioMediaLibrary.svelte',
+      shape: 'arg',
+    },
   ];
 
   for (const { file, shape } of GATED_SURFACES) {
@@ -162,9 +207,6 @@ describe('every landed client gate is still wired', () => {
    * wrong if the surface starts hitting the API.
    */
   const CLIENT_ONLY_SEARCH = [
-    // Filters the CURRENT page's media items in memory (`filteredItems`);
-    // `mediaQuerySchema` has no `search` field, so nothing is sent.
-    'lib/components/studio/StudioMediaPage.svelte',
     // Filters the hydrated TanStack DB library collection in memory; the web
     // client never sends `search` to `getUserLibrary`.
     'routes/(platform)/library/+page.svelte',
@@ -186,16 +228,59 @@ describe('every landed client gate is still wired', () => {
       if (gated.has(rel) || clientOnly.has(rel)) continue;
 
       const src = await readFile(file, 'utf8');
-      const writesParam =
-        /\?q=\$\{/.test(src) ||
-        /(?:searchParams|params)\.set\(\s*['"](?:q|search)['"]/.test(src);
-      if (!writesParam) continue;
+      if (!writesSearchParam(src)) continue;
       if (!/gateSearchQuery\(|isSearchQueryBelowFloor\(/.test(src)) {
         bypasses.push(rel);
       }
     }
 
     expect(bypasses).toEqual([]);
+  });
+
+  it('the param-writer detector sees every shape apps/web uses (calibration)', () => {
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: a SOURCE sample that contains a template literal
+    expect(writesSearchParam('goto(`/discover?q=${term}`)')).toBe(true);
+    expect(writesSearchParam("params.set('search', term)")).toBe(true);
+    expect(writesSearchParam('goto(filterHref(page.url, { q: term }))')).toBe(
+      true
+    );
+    expect(
+      writesSearchParam('applyFilterPatch(url, {\n  sort,\n  search: term,\n})')
+    ).toBe(true);
+    expect(writesSearchParam('goto(filterHref(page.url, { q }))')).toBe(true);
+    expect(writesSearchParam("setUrlParam('search', term)")).toBe(true);
+    expect(
+      writesSearchParam('setParams({ q: value.trim() ? value : null })')
+    ).toBe(true);
+    expect(writesSearchParam('setParams({ q: null, status: null })')).toBe(
+      true
+    );
+    // Negatives: other params.
+    expect(writesSearchParam("params.set('status', s)")).toBe(false);
+    expect(writesSearchParam('goto(filterHref(page.url, { status: s }))')).toBe(
+      false
+    );
+    expect(writesSearchParam("setParams({ status: 'attention' })")).toBe(false);
+    // Not asserted either way: a computed key (`{ [key]: value }`), which the
+    // studio pages use inside setUrlParam. It is a KNOWN GAP (see
+    // writesSearchParam), not correct behaviour; the literal-key call above is
+    // what catches a `setUrlParam('search', …)` added to one of those pages.
+  });
+
+  it('the patch detector sees the REAL setParams writer (calibration on source)', async () => {
+    // Strings alone prove the regex, not that it meets the code: the media
+    // library writes `q` through setParams, so the detector must see it. If
+    // it stops writing `q` that way, point this at a file that does.
+    // HELPER_PATCH_KEY has no real writer left since Codex-a6ofh.1.7 (the
+    // library moved off filterHref); the strings above still pin it.
+    const src = await readFile(
+      join(
+        SRC_ROOT,
+        'lib/components/studio/media-library/StudioMediaLibrary.svelte'
+      ),
+      'utf8'
+    );
+    expect(SET_PARAMS_KEY.test(src)).toBe(true);
   });
 
   for (const rel of CLIENT_ONLY_SEARCH) {
@@ -211,6 +296,11 @@ describe('every landed client gate is still wired', () => {
       expect(src).toMatch(/\.filter\(/);
       expect(src).not.toMatch(
         /(?:searchParams|params)\.set\(\s*['"]search['"]/
+      );
+      // The same check for the helper-patch shape: `filterHref(…, { search })`
+      // must not slip past the `params.set` form above.
+      expect(src).not.toMatch(
+        /\b(?:filterHref|applyFilterPatch)\([^;]*?\{[^}]*?\bsearch\b\s*[:,}]/
       );
     });
   }
