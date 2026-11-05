@@ -9,6 +9,8 @@ import { describe, expect, test } from 'vitest';
  * CSS-only animations are gated by @media (prefers-reduced-motion: reduce).
  * Svelte JS transitions (fly/fade) bypass CSS media queries, so they must
  * gate their option object via a matchMedia-driven prefersReducedMotion state.
+ * A surface that is a shared Dialog.Content panel moves only by its `motion`
+ * prop, which Dialog.Content gates once for all of them (Codex-vlphc.4).
  *
  * JSDOM does not evaluate CSS media queries against computed styles, so a
  * runtime getComputedStyle assertion is unreliable. A source-text assertion
@@ -30,10 +32,10 @@ const CSS_GATED = [
   'command-palette/CommandPalette.svelte',
 ];
 
-const JS_TRANSITION_GATED = [
-  'layout/MobileNav/MobileBottomSheet.svelte',
-  'search/CommandPaletteSearch.svelte',
-];
+const JS_TRANSITION_GATED = ['layout/MobileNav/MobileBottomSheet.svelte'];
+
+// Each surface and the Dialog.Content `motion` it moves by.
+const DIALOG_MOTION = [['search/CommandPaletteSearch.svelte', 'drop']];
 
 describe('Codex-rf1l9 — nav redesign honours prefers-reduced-motion', () => {
   test.each(
@@ -74,9 +76,23 @@ describe('Codex-rf1l9 — nav redesign honours prefers-reduced-motion', () => {
     expect(src).toMatch(/duration:\s*prefersReducedMotion\s*\?\s*0\s*:/);
   });
 
-  test('CommandPaletteSearch fly transition zeroes y-translate under reduced-motion', () => {
-    const src = readSource('search/CommandPaletteSearch.svelte');
-    expect(src).toMatch(/y:\s*prefersReducedMotion\s*\?\s*0\s*:/);
-    expect(src).toMatch(/duration:\s*prefersReducedMotion\s*\?\s*0\s*:/);
+  test.each(
+    DIALOG_MOTION
+  )('%s moves only by Dialog.Content motion="%s"', (rel, motion) => {
+    const src = readSource(rel);
+    expect(src).toContain(`motion="${motion}"`);
+    // A transition of its own would run past the shared gate.
+    expect(src).not.toMatch(/from\s*['"]svelte\/transition['"]/);
+    expect(src).not.toMatch(/\s(transition|in|out):[a-z]/);
+  });
+
+  test('Dialog.Content plays drop and rise only when motion is allowed', () => {
+    const src = readSource('ui/Dialog/DialogContent.svelte');
+    expect(src).toMatch(
+      /import\s*\{\s*prefersReducedMotion\s*\}\s*from\s*['"]svelte\/motion['"]/
+    );
+    expect(src).toMatch(
+      /\(motion === 'drop' \|\| motion === 'rise'\)\s*&&\s*!prefersReducedMotion\.current/
+    );
   });
 });

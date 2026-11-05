@@ -41,6 +41,11 @@ test.describe('Mobile bottom nav (platform)', () => {
 
     const palette = page.getByRole('dialog', { name: 'Search' });
     await expect(palette).toBeVisible();
+
+    // Closing gives focus back to the button that opened it (Codex-vlphc.4).
+    await page.keyboard.press('Escape');
+    await expect(palette).toBeHidden();
+    await expect(searchBtn).toBeFocused();
   });
 
   test('More button opens bottom sheet, backdrop click closes it', async ({

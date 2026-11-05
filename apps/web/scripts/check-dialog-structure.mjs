@@ -129,11 +129,6 @@ export const ALLOWLIST = [
     reason: 'M4: hand-built overlay; moves to the shared Dialog',
   },
   {
-    file: 'src/lib/components/search/CommandPaletteSearch.svelte',
-    rule: 'own-dialog',
-    reason: 'M4: hand-built overlay; moves to the shared Dialog',
-  },
-  {
     file: 'src/lib/components/layout/MobileNav/MobileBottomSheet.svelte',
     rule: 'own-dialog',
     reason: 'M4: hand-built bottom sheet; moves to variant="drawer" sheet or keeps a reason',
