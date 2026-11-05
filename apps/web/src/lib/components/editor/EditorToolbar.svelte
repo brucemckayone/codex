@@ -208,7 +208,8 @@
         <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
       </svg>
     </Popover.Trigger>
-    <Popover.Content aria-label="Insert link">
+    <!-- A fade, no travel: the motion the owner approved for this popup. -->
+    <Popover.Content aria-label="Insert link" transitionConfig={{ y: 0, duration: 150 }}>
       <div class="link-row">
         <input
           bind:this={linkInput}
@@ -388,7 +389,12 @@
     white-space: nowrap;
   }
 
+  /* The box takes what the row has left: 240px beside Apply alone, less
+     when Remove joins it (the shared popover caps the row at 286px), and
+     the square buttons never give way. */
   .link-input {
+    flex: 1;
+    min-width: 0;
     width: 240px;
     padding: var(--space-1) var(--space-2);
     font-size: var(--text-sm);
@@ -406,6 +412,7 @@
   }
 
   .link-action-btn {
+    flex: none;
     display: inline-flex;
     align-items: center;
     justify-content: center;
