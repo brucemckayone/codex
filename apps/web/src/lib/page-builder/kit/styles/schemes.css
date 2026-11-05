@@ -887,9 +887,11 @@
      page the org's focus colour arrives already nudged against the hardest
      surface of its ground (org-brand.css), and the rule below moves it again
      only for the band. A scoped preview re-states the org's colours for the
-     theme it previews (above), and the nudge cannot be inherited: its
-     fragments substitute the ground on the element where they are DECLARED,
-     the org's carrier, which reads the VIEWER's. So the preview re-runs it
+     theme it previews (above), which replaces any focus colour it inherits,
+     and the right one could not be inherited anyway: the nudge's fragments
+     substitute the ground on the element where they are DECLARED, the org's
+     carrier, which reads the VIEWER's ground (only the brand editor's own
+     dark carrier reads the dark one). So every preview shape re-runs it
      here, on the ground number the writers emit for the previewed theme,
      under names of its own so a page carrier's own links and chips keep the
      viewer's. ground-nudge-css.test.ts generates these fragments from the

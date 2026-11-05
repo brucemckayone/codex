@@ -4875,7 +4875,7 @@ describe('schemes.css ↔ fallback model parity (engines without pow(), Codex-61
     expect(org).not.toContain('--lp-button-line');
   });
 
-  it('draws the exact path’s surfaces: the @supports block declares none of them', () => {
+  it('draws the exact path’s surfaces: the @supports block declares none of them, and of the org’s colours only a scoped preview’s focus', () => {
     const declared = [...exactPath().matchAll(/(--[\w-]+):/g)].map(
       (m) => m[1] ?? ''
     );

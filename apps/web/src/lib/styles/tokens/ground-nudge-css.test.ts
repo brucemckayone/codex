@@ -187,4 +187,26 @@ describe('the focus nudge a scoped kit preview re-runs (schemes.css)', () => {
     expect(overridden).toHaveLength(1);
     expect(overridden[0]?.body).toContain(`--_org-focus: ${source()};`);
   });
+
+  test('the fragments sit on every preview either rule nudges: the union of the fallback’s two lists', () => {
+    // A preview missing from it leaves `--_pvm-*` undefined there, and its
+    // `--_org-focus` invalid at computed-value time: no brand focus at all.
+    const BRANDED = ':is([data-org-brand] .lp, [data-org-brand])';
+    /** The previews a fallback rule lists, from its `:is( … )` head. */
+    const previews = (source: string | undefined) => {
+      const rule = fallback.filter((r) =>
+        r.body.includes(`--_org-focus: ${source};`)
+      );
+      expect(rule).toHaveLength(1);
+      const selector = rule[0]?.selector ?? '';
+      expect(selector.startsWith(':is('), selector).toBe(true);
+      expect(selector.endsWith(`)${BRANDED}`), selector).toBe(true);
+      return selector.slice(':is('.length, -`)${BRANDED}`.length).trim();
+    };
+    const fragments = exact.filter((r) => r.body.includes('--_pvw:'));
+    expect(fragments).toHaveLength(1);
+    expect(fragments[0]?.selector).toBe(
+      `:is( ${previews(darkSource)}, ${previews(lightSource)} )${BRANDED}`
+    );
+  });
 });
