@@ -74,11 +74,6 @@ export const ALLOWLIST = [
     reason: 'M2: the FAQ dialog has a raw .faq-edit-form and no Body; it moves to Dialog.Form',
   },
   {
-    file: 'src/lib/components/ui/FilterDrawer/FilterDrawer.svelte',
-    rule: 'global-style',
-    reason: 'M3: the fourth drawer (glass rail); moves to variant="drawer" floating sheet + Footer align="between"',
-  },
-  {
     file: 'src/lib/components/studio/media-library/MediaPickerDialog.svelte',
     rule: 'content-child',
     reason: 'M2: a working hand-written .picker-form + .picker-tools; moves to Dialog.Form + Dialog.Toolbar, Header outside',
