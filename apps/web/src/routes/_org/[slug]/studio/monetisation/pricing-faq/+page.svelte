@@ -277,43 +277,45 @@
       </Dialog.Title>
     </Dialog.Header>
 
-    <div class="faq-edit-form">
-      <div class="field">
-        <Label for="faq-question">{m.monetisation_faq_question()}</Label>
-        <Input
-          id="faq-question"
-          bind:value={editQuestion}
-          placeholder={m.monetisation_faq_question_placeholder()}
-          maxlength={200}
-          required
-        />
-        <span class="char-count">{editQuestion.length}/200</span>
-      </div>
+    <Dialog.Form onsubmit={(e) => { e.preventDefault(); saveEdit(); }}>
+      <Dialog.Body>
+        <div class="field">
+          <Label for="faq-question">{m.monetisation_faq_question()}</Label>
+          <Input
+            id="faq-question"
+            bind:value={editQuestion}
+            placeholder={m.monetisation_faq_question_placeholder()}
+            maxlength={200}
+            required
+          />
+          <span class="char-count">{editQuestion.length}/200</span>
+        </div>
 
-      <div class="field">
-        <Label for="faq-answer">{m.monetisation_faq_answer()}</Label>
-        <TextArea
-          id="faq-answer"
-          bind:value={editAnswer}
-          placeholder={m.monetisation_faq_answer_placeholder()}
-          rows={4}
-          maxlength={2000}
-        />
-        <span class="char-count">{editAnswer.length}/2000</span>
-      </div>
-    </div>
+        <div class="field">
+          <Label for="faq-answer">{m.monetisation_faq_answer()}</Label>
+          <TextArea
+            id="faq-answer"
+            bind:value={editAnswer}
+            placeholder={m.monetisation_faq_answer_placeholder()}
+            rows={4}
+            maxlength={2000}
+          />
+          <span class="char-count">{editAnswer.length}/2000</span>
+        </div>
+      </Dialog.Body>
 
-    <Dialog.Footer>
-      <Button variant="secondary" onclick={() => { editOpen = false; }}>
-        {m.monetisation_faq_cancel()}
-      </Button>
-      <Button
-        onclick={saveEdit}
-        disabled={!editQuestion.trim() || !editAnswer.trim()}
-      >
-        {editItem ? m.monetisation_faq_update() : m.monetisation_faq_add()}
-      </Button>
-    </Dialog.Footer>
+      <Dialog.Footer>
+        <Button variant="secondary" type="button" onclick={() => { editOpen = false; }}>
+          {m.monetisation_faq_cancel()}
+        </Button>
+        <Button
+          type="submit"
+          disabled={!editQuestion.trim() || !editAnswer.trim()}
+        >
+          {editItem ? m.monetisation_faq_update() : m.monetisation_faq_add()}
+        </Button>
+      </Dialog.Footer>
+    </Dialog.Form>
   </Dialog.Content>
 </Dialog.Root>
 
@@ -486,13 +488,6 @@
   .icon-btn--danger:hover:not(:disabled) {
     color: var(--color-status-error-text);
     background-color: var(--color-status-error-surface);
-  }
-
-  .faq-edit-form {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-    padding: var(--space-4) 0;
   }
 
   .field {

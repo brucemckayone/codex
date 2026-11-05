@@ -62,16 +62,6 @@ const WEB_ROOT = fileURLToPath(new URL('..', import.meta.url));
  */
 export const ALLOWLIST = [
   {
-    file: 'src/routes/_org/[slug]/studio/monetisation/+page.svelte',
-    rule: 'content-child',
-    reason: 'M2: the tier dialog wraps Body in a raw .tier-form; it moves to Dialog.Form',
-  },
-  {
-    file: 'src/routes/_org/[slug]/studio/monetisation/pricing-faq/+page.svelte',
-    rule: 'content-child',
-    reason: 'M2: the FAQ dialog has a raw .faq-edit-form and no Body; it moves to Dialog.Form',
-  },
-  {
     file: 'src/lib/components/studio/CustomerDetailDrawer.svelte',
     rule: 'content-child',
     reason: 'M3: hand-built drawer, sections straight in Content; moves to variant="drawer"',
@@ -110,11 +100,6 @@ export const ALLOWLIST = [
     file: 'src/lib/components/studio/media-library/MediaPickerDialog.svelte',
     rule: 'content-child',
     reason: 'M2: a working hand-written .picker-form + .picker-tools; moves to Dialog.Form + Dialog.Toolbar, Header outside',
-  },
-  {
-    file: 'src/lib/components/studio/ownership/OwnershipOfferDialog.svelte',
-    rule: 'content-child',
-    reason: 'M2: a working display:contents form (Header inside it); moves to Dialog.Form, Header outside',
   },
   {
     file: 'src/routes/_org/[slug]/studio/journeys/[id]/curriculum/+page.svelte',
