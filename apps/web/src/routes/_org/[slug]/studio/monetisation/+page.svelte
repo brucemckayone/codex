@@ -1917,7 +1917,7 @@
       </Dialog.Title>
     </Dialog.Header>
 
-    <form class="tier-form" onsubmit={(e) => { e.preventDefault(); handleTierSubmit(); }}>
+    <Dialog.Form class="tier-form" onsubmit={(e) => { e.preventDefault(); handleTierSubmit(); }}>
       <Dialog.Body>
         <div class="form-field">
           <Label for="tier-name">{m.monetisation_tier_name()}</Label>
@@ -2101,7 +2101,7 @@
           {m.monetisation_save()}
         </Button>
       </Dialog.Footer>
-    </form>
+    </Dialog.Form>
   </Dialog.Content>
 </Dialog.Root>
 
@@ -2776,10 +2776,8 @@
     flex-shrink: 0;
   }
 
-  /* Tier form */
-  .tier-form {
-    display: flex;
-    flex-direction: column;
+  /* Tier form: Dialog.Form renders the <form>, so only :global reaches it. Spacing only. */
+  :global(.dialog-form.tier-form) {
     gap: var(--space-4);
     padding: var(--space-4);
   }

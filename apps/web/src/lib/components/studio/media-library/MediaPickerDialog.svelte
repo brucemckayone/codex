@@ -550,7 +550,7 @@
 {/snippet}
 
 {#snippet tools()}
-  <div class="picker-tools">
+  <Dialog.Toolbar>
     <label class="picker-search">
       <SearchIcon size={16} />
       <span class="sr-only">{m.media_picker_search()}</span>
@@ -578,7 +578,7 @@
         {/each}
       </select>
     </label>
-  </div>
+  </Dialog.Toolbar>
 {/snippet}
 
 {#snippet uploadRow()}
@@ -692,13 +692,13 @@
 
 <Dialog.Root bind:open closeFocus={() => document.getElementById(triggerId)}>
   <Dialog.Content size="md" class="media-picker">
-    <form class="picker-form" onsubmit={attach}>
-      <Dialog.Header>
-        <Dialog.Title>{TITLE[kind]()}</Dialog.Title>
-        <Dialog.Description>
-          {allowProcessing ? LEAD[kind]() : `${LEAD[kind]()} ${m.media_picker_lead_ready()}`}
-        </Dialog.Description>
-      </Dialog.Header>
+    <Dialog.Header>
+      <Dialog.Title>{TITLE[kind]()}</Dialog.Title>
+      <Dialog.Description>
+        {allowProcessing ? LEAD[kind]() : `${LEAD[kind]()} ${m.media_picker_lead_ready()}`}
+      </Dialog.Description>
+    </Dialog.Header>
+    <Dialog.Form onsubmit={attach}>
       {@render tools()}
       <Dialog.Body class="picker-list" aria-busy={!answered && !listFailed}>
         {#if allowProcessing}{@render uploadRow()}{/if}
@@ -722,7 +722,7 @@
         <Button type="button" variant="ghost" onclick={() => (open = false)}>{m.common_cancel()}</Button>
         <Button type="submit" disabled={marked === null}>{m.media_picker_attach()}</Button>
       </Dialog.Footer>
-    </form>
+    </Dialog.Form>
   </Dialog.Content>
 </Dialog.Root>
 
@@ -847,23 +847,6 @@
     margin: 0;
     font-size: var(--text-xs);
     color: var(--color-text-secondary);
-  }
-
-  /* The panel is a capped flex column: the form carries it on, so the
-     list (Dialog.Body) is what scrolls, with the tools and footer pinned. */
-  .picker-form {
-    display: flex;
-    flex: 1;
-    flex-direction: column;
-    min-height: 0;
-  }
-
-  .picker-tools {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--space-2);
-    padding: 0 var(--space-6) var(--space-2);
   }
 
   .picker-search {
