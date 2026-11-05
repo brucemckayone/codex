@@ -122,7 +122,8 @@
   function handleGlobalKeydown(e: KeyboardEvent) {
     if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
       // Don't hijack TipTap editor's Cmd+K (link shortcut)
-      if (document.activeElement?.isContentEditable) return;
+      const at = document.activeElement;
+      if (at instanceof HTMLElement && at.isContentEditable) return;
       e.preventDefault();
       if (isOpen) {
         close();
