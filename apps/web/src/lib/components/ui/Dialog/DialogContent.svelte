@@ -67,6 +67,8 @@
   /** Dialog.Root's `dismissible`: false while a request it started runs. */
   const dismissible = getContext<{ current: boolean } | undefined>('DIALOG_DISMISSIBLE');
   const drawer = $derived(variant === 'drawer');
+  /** A drawer-only prop as a data attribute: present, or absent. */
+  const drawerFlag = (on: boolean) => (drawer && on ? '' : undefined);
   /**
    * What scrolls: `dialog` and `floating` scroll Body, `drawer` the whole
    * panel. Body, Form and Footer read it; in `drawer` Body and Form stop
@@ -121,7 +123,7 @@
       use:melt={$overlay}
       class="dialog-overlay"
       data-variant={variant}
-      data-floating={drawer && floating ? '' : undefined}
+      data-floating={drawerFlag(floating)}
     ></div>
     <div class="dialog-content-wrapper">
       <div
@@ -129,9 +131,9 @@
         class="dialog-content {className ?? ''}"
         data-size={size}
         data-variant={variant}
-        data-sheet={drawer && sheet ? '' : undefined}
-        data-flush={drawer && flush ? '' : undefined}
-        data-floating={drawer && floating ? '' : undefined}
+        data-sheet={drawerFlag(sheet)}
+        data-flush={drawerFlag(flush)}
+        data-floating={drawerFlag(floating)}
         {...restProps}
       >
         {@render children()}
