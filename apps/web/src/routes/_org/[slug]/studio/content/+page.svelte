@@ -324,7 +324,7 @@
     padding: var(--space-2) var(--space-4);
     font-size: var(--text-sm);
     font-weight: var(--font-semibold);
-    color: var(--color-interactive);
+    color: var(--color-link);
     background: transparent;
     text-decoration: none;
     border: var(--border-width) var(--border-style) transparent;
@@ -335,7 +335,7 @@
 
   .empty-cta:hover {
     background-color: var(--color-interactive-subtle);
-    color: var(--color-interactive-hover);
+    color: var(--color-link-hover);
   }
 
   .empty-cta:focus-visible {

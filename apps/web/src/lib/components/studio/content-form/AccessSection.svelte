@@ -446,7 +446,7 @@
   }
 
   .payouts-link {
-    color: var(--color-interactive);
+    color: var(--color-link);
     font-weight: var(--font-medium);
     text-decoration: underline;
   }
@@ -465,7 +465,7 @@
 
   .access-card[data-selected] .access-icon {
     background-color: color-mix(in srgb, var(--color-interactive) 15%, transparent);
-    color: var(--color-interactive);
+    color: var(--color-link);
   }
 
   .access-text {

@@ -325,7 +325,7 @@
     font-weight: var(--font-semibold);
     text-transform: uppercase;
     letter-spacing: var(--tracking-wider);
-    color: var(--color-brand-primary, var(--color-interactive));
+    color: var(--color-brand-text);
   }
 
   .slab-status-pill {
@@ -389,7 +389,7 @@
 
   .slab-title-link:hover {
     background-size: 100% var(--border-width);
-    color: var(--color-interactive);
+    color: var(--color-link);
   }
 
   .slab-title-link:focus-visible {
@@ -448,8 +448,8 @@
     text-transform: capitalize;
   }
 
-  .meta-access[data-access='paid'] { color: var(--color-brand-primary, var(--color-interactive)); }
-  .meta-access[data-access='subscribers'] { color: var(--color-brand-primary, var(--color-interactive)); }
+  .meta-access[data-access='paid'] { color: var(--color-brand-text); }
+  .meta-access[data-access='subscribers'] { color: var(--color-brand-text); }
 
   /* ── Actions ────────────────────────────────────────────── */
   .slab-actions {
@@ -518,7 +518,7 @@
     font-family: var(--font-sans);
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
-    color: var(--color-interactive);
+    color: var(--color-link);
     text-decoration: none;
     border-radius: var(--radius-full, 9999px);
     transition: background-color var(--duration-fast) var(--ease-out);

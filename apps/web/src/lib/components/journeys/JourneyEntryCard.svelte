@@ -977,12 +977,11 @@
     color: var(--jec-ink-quiet);
   }
 
-  /* `--color-interactive-active`, not `--color-interactive`. The raw brand
-     (#EA580C) on the cream page measured 3.43:1 — a sub-AA pair for a 15px CTA.
-     `-active` is the same hue at `calc(l - 0.15)` on light and `calc(l + 0.15)`
-     on dark, so it moves AWAY from the page in BOTH themes: 6.39:1 on cream, and
-     it stays unmistakably brand rather than going neutral. That two-directional
-     behaviour is why it is the right token here and `--color-text` is not —
+  /* The pressed brand colour, `calc(l ∓ 0.15)` from the brand, nudged against
+     the hardest surface the org paints (`--color-link-active`, Codex-mik4h): it
+     stays unmistakably brand, and holds AA on the org's page surfaces. The raw
+     brand (#EA580C) on the cream page measured 3.43:1, a sub-AA pair for a
+     15px CTA.
      `--color-text` would pass at 20:1 and stop reading as a CTA. */
   .jec__go {
     display: inline-flex;
@@ -990,7 +989,7 @@
     gap: var(--space-1);
     font-size: var(--text-sm);
     font-weight: var(--font-semibold);
-    color: var(--color-interactive-active);
+    color: var(--color-link-active);
   }
 
   .jec__arrow {

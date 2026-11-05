@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { orgShader } from './org-grounds';
+import { orgGrounds, orgShader } from './org-grounds';
 
 describe('orgShader — the org has a moving background (03 X50)', () => {
   const saved = (tokenOverrides: string | null) => ({
@@ -25,5 +25,28 @@ describe('orgShader — the org has a moving background (03 X50)', () => {
       orgShader(saved(null), { tokenOverrides: { 'shader-preset': 'nebula' } })
     ).toBe(true);
     expect(orgShader(org, { tokenOverrides: {} })).toBe(false);
+  });
+});
+
+// Owner, Codex-mik4h: "Ignore it, like On Brand". The kit reads the grounds
+// the org layout paints: a background it cannot measure is not one.
+describe('orgGrounds — the backgrounds the org layout paints', () => {
+  it('passes a measurable hex as painted, and drops any other form', () => {
+    const org = {
+      brandColors: { background: ' #F5F0E8 ' },
+      brandFineTune: {
+        darkModeOverrides: JSON.stringify({ backgroundColor: 'rgb(20,20,20)' }),
+      },
+    };
+    expect(orgGrounds(org, null)).toEqual({
+      light: '#F5F0E8',
+      dark: undefined,
+    });
+    expect(
+      orgGrounds(org, {
+        backgroundColor: 'navy',
+        darkOverrides: { backgroundColor: '#101418' },
+      })
+    ).toEqual({ light: undefined, dark: '#101418' });
   });
 });

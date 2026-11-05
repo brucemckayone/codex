@@ -1332,7 +1332,7 @@
   }
 
   .revenue-share-page__empty a {
-    color: var(--color-interactive);
+    color: var(--color-link);
     text-decoration: underline;
   }
 

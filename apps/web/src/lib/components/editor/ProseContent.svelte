@@ -106,7 +106,7 @@
   }
 
   .prose-content :global(a) {
-    color: var(--color-interactive);
+    color: var(--color-link);
     text-decoration: underline;
     text-underline-offset: 0.15em;
     text-decoration-thickness: 0.075em;
@@ -114,7 +114,7 @@
   }
 
   .prose-content :global(a:hover) {
-    color: var(--color-interactive-hover);
+    color: var(--color-link-hover);
     text-decoration-thickness: 0.125em;
   }
 

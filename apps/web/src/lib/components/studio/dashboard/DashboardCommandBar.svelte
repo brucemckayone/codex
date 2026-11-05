@@ -157,7 +157,7 @@
     font-size: var(--text-sm);
     font-weight: var(--font-bold);
     letter-spacing: var(--tracking-tight);
-    color: var(--color-brand-primary, var(--color-interactive));
+    color: var(--color-brand-text);
   }
 
   .identity-text {
@@ -250,7 +250,7 @@
 
   .action--secondary:hover {
     border-color: var(--color-interactive);
-    color: var(--color-interactive);
+    color: var(--color-link);
   }
 
   .action--primary {

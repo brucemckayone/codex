@@ -43,7 +43,7 @@
     font-weight: var(--font-medium);
     text-transform: uppercase;
     letter-spacing: var(--tracking-wide);
-    color: var(--color-brand-primary, var(--color-interactive));
+    color: var(--color-brand-text);
     margin: 0 0 var(--space-3) 0;
   }
 
@@ -120,12 +120,12 @@
   }
 
   :global(.auth-link) {
-    color: var(--color-brand-primary, var(--color-interactive));
+    color: var(--color-brand-text);
     font-weight: var(--font-medium);
   }
 
   :global(.auth-link):hover {
-    color: var(--color-brand-primary-hover, var(--color-interactive-hover));
+    color: var(--color-brand-text-hover);
   }
 
   :global(.auth-hint) {
@@ -141,6 +141,6 @@
   }
 
   :global(.auth-back-link):hover {
-    color: var(--color-brand-primary, var(--color-interactive));
+    color: var(--color-brand-text);
   }
 </style>

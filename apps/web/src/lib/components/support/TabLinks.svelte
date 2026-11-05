@@ -94,7 +94,7 @@
   }
 
   .tab-links__link[aria-current] {
-    color: var(--color-interactive);
+    color: var(--color-link);
     border-bottom-color: var(--color-interactive);
   }
 

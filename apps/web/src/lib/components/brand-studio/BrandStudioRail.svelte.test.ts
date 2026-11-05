@@ -19,7 +19,10 @@ import {
 } from '$tests/utils/component-test-utils.svelte';
 
 // Paraglide messages — deterministic strings, no generated-module dependency.
-vi.mock('$paraglide/messages', () => ({
+// The rail's own strings are stubbed; every other message (the contrast
+// pill's legibility list) is the real one.
+vi.mock('$paraglide/messages', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('$paraglide/messages')>()),
   branding_title: () => 'Branding',
   branding_description: () => 'Theme your whole space.',
   branding_save: () => 'Save changes',

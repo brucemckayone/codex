@@ -132,18 +132,18 @@ em, i {
  * LINKS
  * ======================================== */
 a {
-  color: var(--color-interactive);
+  color: var(--color-link);
   text-decoration: underline;
   text-underline-offset: 2px;
   transition: var(--transition-colors);
 }
 
 a:hover {
-  color: var(--color-interactive-hover);
+  color: var(--color-link-hover);
 }
 
 a:active {
-  color: var(--color-interactive-active);
+  color: var(--color-link-active);
 }
 
 /* Links without underline (navigation, buttons) */

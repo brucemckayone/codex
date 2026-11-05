@@ -193,7 +193,7 @@
   }
 
   .url-slug {
-    color: var(--color-interactive-hover);
+    color: var(--color-link-hover);
     font-weight: var(--font-medium);
   }
 

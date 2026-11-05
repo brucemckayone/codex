@@ -977,7 +977,7 @@
     padding: var(--space-2) var(--space-4);
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
-    color: var(--color-interactive);
+    color: var(--color-link);
     background: transparent;
     border: var(--border-width) var(--border-style) var(--color-interactive);
     border-radius: var(--radius-md);

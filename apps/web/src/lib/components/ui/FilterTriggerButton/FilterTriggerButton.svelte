@@ -116,12 +116,12 @@
   }
 
   .filter-trigger--active {
-    color: var(--color-interactive);
+    color: var(--color-link);
     border-color: var(--color-interactive);
   }
 
   .filter-trigger--active:hover {
-    color: var(--color-interactive-hover);
+    color: var(--color-link-hover);
     border-color: var(--color-interactive-hover);
   }
 

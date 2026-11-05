@@ -34,6 +34,17 @@
   --color-interactive-hover: var(--color-primary-600);
   --color-interactive-active: var(--color-primary-700);
   --color-interactive-subtle: var(--color-primary-50);
+  /* The interactive colour as TEXT on the page. The platform's already reads
+     on its own grounds; an org's is nudged against its hardest surface
+     (org-brand.css). */
+  --color-link: var(--color-interactive);
+  --color-link-hover: var(--color-interactive-hover);
+  --color-link-active: var(--color-interactive-active);
+  /* The brand colour as a LABEL on the page or a faint tint (badges, icons):
+     nudged like the link, from the brand colour rather than the interactive
+     one, so an interactive override never moves it. */
+  --color-brand-text: var(--color-brand-primary);
+  --color-brand-text-hover: var(--color-brand-primary-hover);
 
   /* Ink for text sitting ON --color-interactive (filled primary controls).
      Derived FROM the fill, not from the page: --color-text-inverse inverts the
@@ -110,9 +121,15 @@
      S = `calc(255 * var(--_on-fill-step))`, and so is the label of a fill no
      token names, in the components that paint one (grep `--_on-fill-step`).
      The derivation, the knee and why the ramp is `* 1e12` are in
-     org-brand.css's foot. */
+     org-brand.css's foot. `--_lin-*` and `--_lum` are its terms, a
+     colour's linear channels and relative luminance, unresolved the same
+     way; org-brand.css's ground nudge reads them too. */
   :root {
-    --_on-fill-step: clamp(0, (0.1791 - (0.2126 * pow((clamp(0, r, 255) / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((clamp(0, g, 255) / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((clamp(0, b, 255) / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1);
+    --_lin-r: pow((clamp(0, r, 255) / 255 + 0.055) / 1.055, 2.4);
+    --_lin-g: pow((clamp(0, g, 255) / 255 + 0.055) / 1.055, 2.4);
+    --_lin-b: pow((clamp(0, b, 255) / 255 + 0.055) / 1.055, 2.4);
+    --_lum: (0.2126 * var(--_lin-r) + 0.7152 * var(--_lin-g) + 0.0722 * var(--_lin-b));
+    --_on-fill-step: clamp(0, (0.1791 - var(--_lum)) * 1e12, 1);
   }
 
   :root, [data-theme="light"] {

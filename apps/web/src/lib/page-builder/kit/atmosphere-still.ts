@@ -8,18 +8,23 @@
  * band is in. Anywhere else, and until the frame is copied, the glow.
  */
 
+import { paintableColour } from '$lib/brand-editor/ground';
 import { shaderStill } from '$lib/components/ui/ShaderHero/shader-still.svelte';
 import type { BrandTokenOverrides } from '$lib/page-builder';
 
 /**
  * The page sets its own colours. The org's shader draws in the ORG's, so
  * such a page shows the glow, which follows the page's, rather than clash
- * (03 X11). Fonts alone leave the shader's colours as they are.
+ * (03 X11). Fonts alone leave the shader's colours as they are, and so does a
+ * colour the page does not paint (`paintableColour`).
  */
 export function ownsColours(
   overrides: BrandTokenOverrides | null | undefined
 ): boolean {
-  return Boolean(overrides?.primaryColor || overrides?.secondaryColor);
+  return Boolean(
+    paintableColour(overrides?.primaryColor) ||
+      paintableColour(overrides?.secondaryColor)
+  );
 }
 
 /**

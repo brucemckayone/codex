@@ -311,7 +311,7 @@
     z-index: 1;
   }
 
-  .row-title-link:hover { color: var(--color-interactive); }
+  .row-title-link:hover { color: var(--color-link); }
 
   .row-title-link:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
@@ -354,7 +354,7 @@
 
   .meta-chip--access[data-access='paid'],
   .meta-chip--access[data-access='subscribers'] {
-    color: var(--color-brand-primary, var(--color-interactive));
+    color: var(--color-brand-text);
     background: color-mix(in srgb, var(--color-brand-primary, var(--color-interactive)) 10%, var(--color-surface));
   }
 
@@ -476,7 +476,7 @@
     font-weight: var(--font-semibold);
     text-transform: uppercase;
     letter-spacing: var(--tracking-wider);
-    color: var(--color-interactive);
+    color: var(--color-link);
     text-decoration: none;
     transition: background-color var(--duration-fast) var(--ease-out);
   }

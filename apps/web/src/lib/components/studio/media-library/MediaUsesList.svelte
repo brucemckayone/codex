@@ -180,7 +180,7 @@
 
   .use[data-live] .use__icon {
     background: color-mix(in oklab, var(--color-interactive) 10%, var(--color-surface));
-    color: var(--color-interactive);
+    color: var(--color-link);
   }
 
   .use__text {
@@ -213,7 +213,7 @@
     gap: var(--space-1);
     font-size: var(--text-xs);
     font-weight: var(--font-semibold);
-    color: var(--color-interactive);
+    color: var(--color-link);
     text-decoration: none;
     white-space: nowrap;
     border-radius: var(--radius-sm);

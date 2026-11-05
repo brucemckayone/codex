@@ -124,7 +124,7 @@
 	}
 
 	.bottom-nav__tab--active {
-		color: var(--color-interactive);
+		color: var(--color-link);
 	}
 
 	.bottom-nav__label {

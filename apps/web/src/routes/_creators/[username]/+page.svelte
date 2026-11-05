@@ -444,13 +444,13 @@
   .org-card__link {
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
-    color: var(--color-interactive);
+    color: var(--color-link);
     text-decoration: none;
     transition: var(--transition-colors);
   }
 
   .org-card__link:hover {
-    color: var(--color-interactive-hover);
+    color: var(--color-link-hover);
   }
 
   /* ── Content Section ── */

@@ -303,7 +303,7 @@
     font-variant-numeric: tabular-nums slashed-zero;
   }
 
-  .dock-stat[data-kind='active'] { color: var(--color-interactive); }
+  .dock-stat[data-kind='active'] { color: var(--color-link); }
   .dock-stat[data-kind='error'] { color: var(--color-error-700); }
 
   .dock-clear {
@@ -454,7 +454,7 @@
 
   .queue-item[data-status='uploading'] .queue-item-status,
   .queue-item[data-status='completing'] .queue-item-status {
-    color: var(--color-interactive);
+    color: var(--color-link);
   }
 
   .queue-item[data-status='done'] .queue-item-status { color: var(--color-success-700); }
@@ -487,7 +487,7 @@
   }
 
   .queue-item-next a {
-    color: var(--color-interactive);
+    color: var(--color-link);
     text-decoration: underline;
     text-underline-offset: var(--space-0-5);
     border-radius: var(--radius-sm);

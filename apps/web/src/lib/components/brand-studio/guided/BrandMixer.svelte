@@ -384,7 +384,7 @@
   .mixer__chip-shader {
     font-family: var(--font-mono);
     font-size: calc(var(--text-xs) * 0.85);
-    color: var(--color-interactive);
+    color: var(--color-link);
     background: var(--color-interactive-subtle);
     padding: 0 var(--space-1);
     border-radius: var(--radius-full);

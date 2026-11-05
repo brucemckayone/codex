@@ -77,7 +77,7 @@
   }
 
   .breadcrumb__link:hover {
-    color: var(--color-interactive);
+    color: var(--color-link);
   }
 
   .breadcrumb__link:focus-visible {
