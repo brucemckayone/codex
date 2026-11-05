@@ -4,6 +4,7 @@
   import Button from '../Button/Button.svelte';
   import { DialogForm } from '../DialogForm';
   import { XIcon } from '../Icon';
+  import Skeleton from '../Skeleton/Skeleton.svelte';
   import * as Dialog from './index';
 
   /**
@@ -30,6 +31,9 @@
   const toolbarOpen = writable(false);
   const formToolbarOpen = writable(false);
   const floatingOpen = writable(false);
+  const squashOpen = writable(false);
+  const drawerSquashOpen = writable(false);
+  const innerOpen = writable(false);
 </script>
 
 {#snippet tallText(label: string)}
@@ -246,6 +250,77 @@
   </Dialog.Root>
 </Story>
 
+<!-- MediaPickerDialog's list tail: a fixed-height Button and Skeleton last in a
+     Body that overflows. Each must keep its own height. -->
+{#snippet squashTail()}
+  {@render tallText('Media')}
+  <Button size="sm" variant="ghost" type="button" data-testid="squash-button">Show more</Button>
+  <Skeleton height="var(--space-14)" data-testid="squash-skeleton" aria-hidden="true" />
+{/snippet}
+
+<Story name="Squash Tall">
+  <Button onclick={() => ($squashOpen = true)}>Open tall squash dialog</Button>
+  <Dialog.Root bind:open={$squashOpen}>
+    <Dialog.Content>
+      <Dialog.Header>
+        <Dialog.Title>Squash</Dialog.Title>
+        <Dialog.Description>A Button and a Skeleton at the end of a tall Body.</Dialog.Description>
+      </Dialog.Header>
+      <Dialog.Body>
+        {@render squashTail()}
+      </Dialog.Body>
+      <Dialog.Footer>
+        <Button variant="secondary" onclick={() => ($squashOpen = false)}>Cancel</Button>
+        <Button variant="primary" data-testid="scroll-target" onclick={() => ($squashOpen = false)}>
+          Attach
+        </Button>
+      </Dialog.Footer>
+    </Dialog.Content>
+  </Dialog.Root>
+</Story>
+
+<!-- The same tail in a drawer, whose panel is the flex column that overflows. -->
+<Story name="Drawer Squash Tall">
+  <Button onclick={() => ($drawerSquashOpen = true)}>Open tall squash drawer</Button>
+  <Dialog.Root bind:open={$drawerSquashOpen}>
+    <Dialog.Content variant="drawer">
+      <Dialog.Header>
+        <Dialog.Title>Squash drawer</Dialog.Title>
+      </Dialog.Header>
+      <Dialog.Body>
+        {@render squashTail()}
+        <Button variant="primary" data-testid="scroll-target">Done</Button>
+      </Dialog.Body>
+    </Dialog.Content>
+  </Dialog.Root>
+</Story>
+
+<!-- A Body whose child is the scroller: its own `flex: 1; min-height: 0`
+     still shrinks it to the panel, and it scrolls while Body does not. -->
+<Story name="Inner Scroller Tall">
+  <Button onclick={() => ($innerOpen = true)}>Open inner scroller</Button>
+  <Dialog.Root bind:open={$innerOpen}>
+    <Dialog.Content>
+      <Dialog.Header>
+        <Dialog.Title>Inner scroller</Dialog.Title>
+        <Dialog.Description>The list scrolls inside a Body that does not.</Dialog.Description>
+      </Dialog.Header>
+      <Dialog.Body>
+        <p class="row">This line stays above the list.</p>
+        <div class="inner-scroller" data-testid="inner-scroller" role="region" aria-label="Rows">
+          {@render tallText('Row')}
+        </div>
+      </Dialog.Body>
+      <Dialog.Footer>
+        <Button variant="secondary" onclick={() => ($innerOpen = false)}>Cancel</Button>
+        <Button variant="primary" data-testid="scroll-target" onclick={() => ($innerOpen = false)}>
+          Confirm
+        </Button>
+      </Dialog.Footer>
+    </Dialog.Content>
+  </Dialog.Root>
+</Story>
+
 <style>
   .row {
     margin: 0;
@@ -355,6 +430,14 @@
 
   .profile-link {
     color: var(--color-link);
+  }
+
+  .inner-scroller {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: grid;
+    row-gap: var(--space-2);
   }
 
   .profile-link:focus-visible {

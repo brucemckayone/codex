@@ -1,9 +1,9 @@
 <script lang="ts">
-	import { browser } from '$app/environment';
 	import type { Snippet } from 'svelte';
 	import type { HTMLAttributes } from 'svelte/elements';
 	import { prefersReducedMotion } from 'svelte/motion';
 	import { type FlyParams, fly } from 'svelte/transition';
+	import { forwardBrandTokens } from '$lib/utils/portal-brand';
 	import { getCtx } from './ctx.js';
 
 	const {
@@ -25,36 +25,6 @@
 	const motion = $derived(
 		prefersReducedMotion.current ? { ...transitionConfig, y: 0, duration: 0 } : transitionConfig
 	);
-
-	/**
-	 * Melt portals the menu to <body>, escaping `.org-layout` which carries
-	 * `[data-org-brand]`, `[data-org-bg]` and `--brand-*` inline styles that
-	 * `org-brand.css` keys off. Copy those onto the portalled node so the org
-	 * branding cascade still resolves inside the menu. Matches DialogContent.
-	 */
-	function forwardBrandTokens(node: HTMLElement) {
-		if (!browser) return;
-
-		const orgLayout = document.querySelector<HTMLElement>('.org-layout');
-		if (!orgLayout) return;
-
-		if (orgLayout.hasAttribute('data-org-brand')) {
-			node.setAttribute('data-org-brand', '');
-		}
-		if (orgLayout.hasAttribute('data-org-bg')) {
-			node.setAttribute('data-org-bg', '');
-		}
-
-		const style = orgLayout.style;
-		for (let i = 0; i < style.length; i++) {
-			const prop = style[i];
-			if (prop.startsWith('--brand-')) {
-				node.style.setProperty(prop, style.getPropertyValue(prop));
-			}
-		}
-
-		node.style.fontFamily = 'inherit';
-	}
 </script>
 
 {#if $open}
