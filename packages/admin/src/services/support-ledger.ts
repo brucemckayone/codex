@@ -141,7 +141,7 @@ export function creditAction(
 }
 
 /** A chargeback that took the money and was not won: it blocks a refund. */
-export const BLOCKING_DISPUTE_STATUSES: readonly string[] = [
+const BLOCKING_DISPUTE_STATUSES: readonly string[] = [
   ...DISPUTE_CHARGEBACK_OPEN_STATUSES,
   'lost',
 ];
