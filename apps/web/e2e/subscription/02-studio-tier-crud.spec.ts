@@ -166,6 +166,10 @@ test.describe('Studio Tier CRUD', () => {
     // Count existing tiers (rows with .tier-item class) to baseline.
     const initialTierCount = await page.locator('.tier-item').count();
 
+    // A short screen, so the dialog's body is taller than its panel (85vh)
+    // and Save is only reachable by scrolling the body (Codex-2yvc8).
+    await page.setViewportSize({ width: 1280, height: 600 });
+
     for (const tier of TEST_TIERS) {
       // Open create dialog
       await page
@@ -178,8 +182,30 @@ test.describe('Studio Tier CRUD', () => {
       const descInput = page.locator('textarea#tier-description');
       const priceMonthlyInput = page.locator('input#tier-price-monthly');
       const priceAnnualInput = page.locator('input#tier-price-annual');
+      // The "Save" button INSIDE the dialog footer — disambiguate from any
+      // other Save buttons on the page.
+      const saveBtn = page
+        .locator('[role="dialog"]')
+        .getByRole('button', { name: /^Save$/i });
 
       await expect(nameInput).toBeVisible({ timeout: 5000 });
+
+      if (tier === TEST_TIERS[0]) {
+        // Reach Save the way a person does: the wheel over the body. click()
+        // and fill() scroll in code, which gets through the panel's
+        // overflow: hidden, so they never saw a clipped footer (Codex-2yvc8).
+        // This runs before any of them can scroll the dialog for us.
+        await expect(
+          page.locator('[data-testid="tier-copy-from"]')
+        ).toBeVisible();
+        const body = await page
+          .locator('[role="dialog"] .dialog-body')
+          .boundingBox();
+        expect(body).not.toBeNull();
+        await page.mouse.move(body!.x + body!.width / 2, body!.y + 40);
+        await page.mouse.wheel(0, 2000);
+        await expect(saveBtn).toBeInViewport();
+      }
 
       await nameInput.fill(tier.name);
       await descInput.fill(tier.description);
@@ -211,11 +237,6 @@ test.describe('Studio Tier CRUD', () => {
 
       // Submit (form posts to createTier remote function → TierService →
       // Stripe products.create + 2x prices.create + DB insert).
-      // Click the "Save" button INSIDE the dialog footer — disambiguate
-      // from any other Save buttons on the page.
-      const saveBtn = page
-        .locator('[role="dialog"]')
-        .getByRole('button', { name: /^Save$/i });
       await saveBtn.click();
 
       // The dialog closes on success; assert the new tier name appears in

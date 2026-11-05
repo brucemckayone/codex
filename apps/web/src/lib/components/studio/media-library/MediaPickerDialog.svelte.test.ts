@@ -1513,16 +1513,15 @@ describe('MediaPickerDialog: the list scrolls in place', () => {
     'utf8'
   );
 
-  test('the list is the dialog body, which scrolls, and contains its overscroll', () => {
-    expect(source).toMatch(/<Dialog\.Body class="picker-list"/);
+  test('the list sits in the dialog body, which scrolls and contains its overscroll', () => {
     expect(source).toMatch(
-      /:global\(\.media-picker \.picker-list\)\s*\{[^}]*overscroll-behavior:\s*contain/
+      /<Dialog\.Body aria-busy=[^>]*>\s*<div class="picker-list">/
     );
+    expect(source).not.toMatch(/:global\([^)]*picker-list/);
   });
 
-  test('the form carries the panel’s capped column, so only the list scrolls', () => {
-    expect(source).toMatch(
-      /\.picker-form\s*\{[^}]*flex:\s*1;[^}]*min-height:\s*0/
-    );
+  test('the form is Dialog.Form, which carries the panel’s capped column, so only the list scrolls', () => {
+    expect(source).toMatch(/<Dialog\.Form onsubmit=\{attach\}>/);
+    expect(source).not.toMatch(/<form\b/);
   });
 });

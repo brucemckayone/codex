@@ -24,6 +24,16 @@
  *                  (gap, padding*, margin*) and nothing else. Bare
  *                  `.dialog-form`, a combinator, or any other property
  *                  (display, flex*, overflow*, height, position…) fails.
+ *   part-class     The same restyle through the page's own name: a class a
+ *                  file hands Dialog.Content, Header, Toolbar, Body, Footer
+ *                  or Form (`<Dialog.Body class="x">`, string literals in a
+ *                  `class={…}` included) may not be the subject of a
+ *                  `:global` rule in that file, as `:global(.x)` or
+ *                  `.wrap :global(.x)`. It reaches the part's element as
+ *                  `.dialog-body` would; the drawers used it to fork the
+ *                  panel. The `.dialog-form.<own>` spacing case above is
+ *                  allowed. Title and Description are text in a part, so
+ *                  their classes may be styled.
  *   own-dialog     Outside lib/components/ui/, no element sets
  *                  role="dialog"/"alertdialog" or aria-modal: a modal is
  *                  built from the shared parts, not by hand.
@@ -64,66 +74,6 @@ const WEB_ROOT = fileURLToPath(new URL('..', import.meta.url));
  */
 export const ALLOWLIST = [
   {
-    file: 'src/routes/_org/[slug]/studio/monetisation/+page.svelte',
-    rule: 'content-child',
-    reason: 'M2: the tier dialog wraps Body in a raw .tier-form; it moves to Dialog.Form',
-  },
-  {
-    file: 'src/routes/_org/[slug]/studio/monetisation/pricing-faq/+page.svelte',
-    rule: 'content-child',
-    reason: 'M2: the FAQ dialog has a raw .faq-edit-form and no Body; it moves to Dialog.Form',
-  },
-  {
-    file: 'src/lib/components/studio/CustomerDetailDrawer.svelte',
-    rule: 'content-child',
-    reason: 'M3: hand-built drawer, sections straight in Content; moves to variant="drawer"',
-  },
-  {
-    file: 'src/lib/components/studio/CustomerDetailDrawer.svelte',
-    rule: 'global-style',
-    reason: 'M3: overrides .dialog-content/.dialog-footer; replaced by variant="drawer"',
-  },
-  {
-    file: 'src/lib/components/studio/media-library/MediaDrawer.svelte',
-    rule: 'content-child',
-    reason: 'M3: hand-built drawer, sections straight in Content; moves to variant="drawer" sheet',
-  },
-  {
-    file: 'src/lib/components/studio/media-library/MediaDrawer.svelte',
-    rule: 'global-style',
-    reason: 'M3: overrides .dialog-content; replaced by variant="drawer" sheet',
-  },
-  {
-    file: 'src/lib/components/ui/CreatorCard/CreatorProfileDrawer.svelte',
-    rule: 'content-child',
-    reason: 'M3: hand-built drawer, sections straight in Content; moves to variant="drawer"',
-  },
-  {
-    file: 'src/lib/components/ui/CreatorCard/CreatorProfileDrawer.svelte',
-    rule: 'global-style',
-    reason: 'M3: overrides .dialog-content/.dialog-close/.dialog-overlay; replaced by the variant props',
-  },
-  {
-    file: 'src/lib/components/ui/FilterDrawer/FilterDrawer.svelte',
-    rule: 'global-style',
-    reason: 'M3: the fourth drawer (glass rail); moves to variant="drawer" floating sheet + Footer align="between"',
-  },
-  {
-    file: 'src/lib/components/studio/media-library/MediaPickerDialog.svelte',
-    rule: 'content-child',
-    reason: 'M2: a working hand-written .picker-form + .picker-tools; moves to Dialog.Form + Dialog.Toolbar, Header outside',
-  },
-  {
-    file: 'src/lib/components/studio/ownership/OwnershipOfferDialog.svelte',
-    rule: 'content-child',
-    reason: 'M2: a working display:contents form (Header inside it); moves to Dialog.Form, Header outside',
-  },
-  {
-    file: 'src/routes/_org/[slug]/studio/journeys/[id]/curriculum/+page.svelte',
-    rule: 'content-child',
-    reason: 'M2: the picker search bar sits between Header and Body; moves to Dialog.Toolbar direction="column"',
-  },
-  {
     file: 'src/lib/components/ui/Dialog/DialogScrollControl.stories.svelte',
     rule: 'content-child',
     reason: 'Permanent: the calibration control, the raw wrapper this gate bans; the scroll proof must read it CLIPPED',
@@ -153,6 +103,11 @@ const DIALOG_CLASS_RE = new RegExp(`\\.(${DIALOG_CLASSES.join('|')})(?![\\w-])`,
 const SPACING_PROP = /^(gap|row-gap|column-gap|padding(-[a-z]+)*|margin(-[a-z]+)*)$/;
 // Two or more classes and nothing else: `.dialog-form` plus the page's own.
 const OWN_FORM_COMPOUND = /^(?:\.[\w-]+){2,}$/;
+
+// The parts that draw the panel, and so may not be restyled through the
+// page's own class on them either (part-class). Title and Description are
+// text inside a part: their type cannot break the panel.
+const BOX_PARTS = new Set(['Content', 'Header', 'Toolbar', 'Body', 'Footer', 'Form']);
 
 /** The parts each container part may hold directly, and the rule's name. */
 const CHILD_RULES = {
@@ -420,7 +375,72 @@ function restyleDetail(prelude, properties) {
   return `${text} sets ${notSpacing.join(', ')} on .dialog-form; only gap, padding and margin may change`;
 }
 
-function checkSvelteCss(css, source, report) {
+/** Each class a `class` value can hold: its text, and its string literals. */
+function classNames(attr) {
+  const names = [];
+  const add = (text) => names.push(...text.split(/\s+/).filter(Boolean));
+  for (const part of Array.isArray(attr.value) ? attr.value : [attr.value]) {
+    if (part === true) continue;
+    if (part.type === 'Text') add(part.data);
+    walk(part.expression, (node) => {
+      if (node.type === 'Literal' && typeof node.value === 'string') add(node.value);
+      if (node.type === 'TemplateElement') add(node.value.cooked ?? '');
+    });
+  }
+  return names;
+}
+
+/** class -> part, for every class this file hands a part that draws the panel. */
+function partClasses(ast, bindings) {
+  const owned = new Map();
+  walk(ast.fragment, (node) => {
+    if (!BOX_PARTS.has(partOf(node, bindings))) return;
+    for (const attr of node.attributes) {
+      if (attr.type !== 'Attribute' || attr.name !== 'class') continue;
+      for (const name of classNames(attr)) owned.set(name, partOf(node, bindings));
+    }
+  });
+  return owned;
+}
+
+/** A selector's last compound: what it styles. Parentheses are not split. */
+function subject(selector) {
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < selector.length; i++) {
+    if (selector[i] === '(') depth++;
+    else if (selector[i] === ')') depth--;
+    else if (depth === 0 && /[\s>+~]/.test(selector[i])) start = i + 1;
+  }
+  return selector.slice(start);
+}
+
+/**
+ * Why a global rule restyles a part through the page's own class on it, or
+ * null. `:not()` and `:has()` only qualify the subject, and a
+ * `.dialog-form.<own>` compound is restyleDetail's to judge.
+ */
+function partClassDetail(prelude, owned) {
+  for (const selector of selectors(prelude)) {
+    const compound = subject(selector).replace(/:(?:not|has)\((?:[^()]|\([^()]*\))*\)/g, '');
+    if (/\.dialog-form(?![\w-])/.test(compound)) continue;
+    for (const [, name] of compound.matchAll(/\.([\w-]+)/g)) {
+      const part = owned.get(name);
+      if (part) return `${prelude.replace(/\s+/g, ' ').trim()} restyles Dialog.${part} through its class .${name}`;
+    }
+  }
+  return null;
+}
+
+/** global-style, then part-class, for one global rule. */
+function globalRuleViolation(prelude, properties, owned) {
+  const restyle = restyleDetail(prelude, properties);
+  if (restyle) return ['global-style', restyle];
+  const own = partClassDetail(prelude, owned);
+  return own ? ['part-class', own] : null;
+}
+
+function checkSvelteCss(css, source, owned, report) {
   const visit = (node, inGlobal) => {
     if (node.type === 'Atrule') {
       for (const child of node.block?.children ?? []) visit(child, inGlobal);
@@ -430,8 +450,8 @@ function checkSvelteCss(css, source, report) {
     const prelude = source.slice(node.prelude.start, node.prelude.end);
     const global = inGlobal || prelude.includes(':global');
     const properties = node.block.children.filter((c) => c.type === 'Declaration').map((c) => c.property);
-    const detail = global && restyleDetail(prelude, properties);
-    if (detail) report(node.start, 'global-style', detail);
+    const found = global && globalRuleViolation(prelude, properties, owned);
+    if (found) report(node.start, ...found);
     for (const child of node.block.children) visit(child, global);
   };
   for (const node of css.children) visit(node, false);
@@ -466,7 +486,7 @@ function checkSvelteFile(file, source, ctx, report) {
   const bindings = collectBindings(file, programs, ctx, report);
   checkScriptReferences(programs, bindings, report);
   checkMarkup(ast, bindings, report);
-  if (ast.css && !isInside(ctx.dialogDir, file)) checkSvelteCss(ast.css, source, report);
+  if (ast.css && !isInside(ctx.dialogDir, file)) checkSvelteCss(ast.css, source, partClasses(ast, bindings), report);
   if (!isInside(ctx.uiDir, file)) checkOwnDialog(ast, report);
 }
 
