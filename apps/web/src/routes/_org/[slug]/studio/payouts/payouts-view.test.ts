@@ -14,6 +14,8 @@ import {
   orgCauseLine,
   ownerBalanceOf,
   ownerBankLine,
+  ownerLines,
+  typeLabel,
 } from './payouts-view';
 
 // Wednesday 28 Oct 2026, 09:00 London (GMT since 25 Oct).
@@ -359,5 +361,64 @@ describe('the bank line', () => {
         connectState: 'pending_verification',
       })
     ).toBe(m.earnings_bank_paused());
+  });
+});
+
+describe('a won chargeback’s pay-back (late-win studio/payouts.html P1)', () => {
+  // Tuesday 15 December 2026, 10:00 London: paid at 17:00 on 14 Dec.
+  const now = new Date('2026-12-15T10:00:00.000Z');
+  const ctx = {
+    connectState: 'enabled' as const,
+    balance: { negative: null },
+    now,
+  };
+  const paysBack = {
+    causeType: 'dispute' as const,
+    title: 'Winter Light',
+    wonOn: '2026-12-14',
+  };
+  const paidPayBack = (payoutType: string) => ({
+    id: 'payback-1',
+    payoutType,
+    status: 'resolved',
+    reason: null,
+    amountCents: 720,
+    bankOn: '2026-12-15',
+    paysBack,
+  });
+
+  test("the organisation's pay-back says what it is above its bank line, without the sale's name", () => {
+    expect(ownerLines(paidPayBack('organization_fee'), ctx)).toEqual([
+      'Paid back: the chargeback was decided for us',
+      'Sent to your bank on 15 Dec',
+    ]);
+  });
+
+  test("a creator's pay-back has no line here: its Type cell names it", () => {
+    expect(ownerLines(paidPayBack('creator_payout'), ctx)).toEqual([]);
+  });
+
+  test('any other owner row keeps its bank line alone', () => {
+    expect(
+      ownerLines({ ...paidPayBack('organization_fee'), paysBack: null }, ctx)
+    ).toEqual(['Sent to your bank on 15 Dec']);
+  });
+
+  test('the Type cell: "Org fee · paid back", "Creator share · paid back"', () => {
+    expect(typeLabel({ payoutType: 'organization_fee', paysBack })).toBe(
+      'Org fee · paid back'
+    );
+    expect(typeLabel({ payoutType: 'creator_payout', paysBack })).toBe(
+      'Creator share · paid back'
+    );
+    expect(typeLabel({ payoutType: 'organization_fee', paysBack: null })).toBe(
+      'Org fee'
+    );
+    expect(typeLabel({ payoutType: 'platform_fee', paysBack: null })).toBe(
+      'Platform fee'
+    );
+    expect(
+      typeLabel({ payoutType: 'creator_payout_to_owner', paysBack: null })
+    ).toBe('Creator pool');
   });
 });
