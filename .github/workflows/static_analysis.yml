@@ -89,6 +89,22 @@ jobs:
       - name: Public-bundle editor import boundary check
         run: pnpm --filter web run check:brand-boundary
 
+      # Codex-vlphc.1 (epic Codex-2yvc8): every modal is built from the
+      # shared Dialog parts. Dialog.Content clips at 85vh and only
+      # Dialog.Body scrolls, so a page's own wrapper between the two hid the
+      # tier and FAQ dialogs' buttons on a short screen, and e2e could not
+      # see it (Playwright scrolls in code). The gate parses every .svelte
+      # file and fails on a non-part child of Content or Form, a :global()
+      # restyle of the Dialog, or a hand-rolled role="dialog". Its allowlist
+      # empties as the epic lands. See
+      # apps/web/scripts/check-dialog-structure.mjs for the full rule.
+      # Self-test first, as for the boundary gate above.
+      - name: Dialog structure gate self-test
+        run: pnpm --filter web run check:dialog-structure:test
+
+      - name: Dialog structure gate (shared Dialog parts only)
+        run: pnpm --filter web run check:dialog-structure
+
       # Codex-ea1hd WP9: the data-access contract drift gate.
       #
       # Two grep-based rules over packages/*/src, workers/*/src and apps/*/src:

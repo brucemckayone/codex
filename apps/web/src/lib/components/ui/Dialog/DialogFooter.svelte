@@ -1,15 +1,35 @@
+<!--
+  @component Dialog.Footer
+
+  The action row, last in the panel (or in its Dialog.Form).
+
+  @prop {'end' | 'between'} [align='end'] - `end`: actions stacked on a
+    phone, right-aligned in a row from sm. `between`: one row at every width,
+    the first action at the start and the last at the end (a Clear beside an
+    Apply).
+-->
 <script lang="ts">
-  import type { Snippet } from 'svelte';
+  import { getContext, type Snippet } from 'svelte';
   import type { HTMLAttributes } from 'svelte/elements';
 
   interface Props extends HTMLAttributes<HTMLDivElement> {
     children: Snippet;
+    align?: 'end' | 'between';
   }
 
-  const { children, class: className, ...restProps }: Props = $props();
+  const { children, align = 'end', class: className, ...restProps }: Props = $props();
+  // Set by Dialog.Content; absent when Footer is mounted on its own.
+  const layout = getContext<{ current: 'dialog' | 'drawer' | 'floating' } | undefined>(
+    'DIALOG_LAYOUT'
+  );
 </script>
 
-<div class="dialog-footer {className ?? ''}" {...restProps}>
+<div
+  class="dialog-footer {className ?? ''}"
+  data-layout={layout?.current}
+  data-align={align}
+  {...restProps}
+>
   {@render children()}
 </div>
 
@@ -25,10 +45,37 @@
     margin-top: auto;
   }
 
+  /* A drawer's footer is ruled off like its panel edge. */
+  .dialog-footer[data-layout='drawer'],
+  .dialog-footer[data-layout='floating'] {
+    border-top-color: var(--color-border);
+  }
+
+  /* On glass the footer is part of the panel, not a tray. */
+  .dialog-footer[data-layout='floating'] {
+    padding: var(--space-3) var(--space-5);
+    background: transparent;
+  }
+
+  .dialog-footer[data-align='between'] {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+  }
+
   @media (--breakpoint-sm) {
     .dialog-footer {
       flex-direction: row;
       justify-content: flex-end;
+    }
+  }
+
+  /* Clear of the home indicator on a phone. */
+  @media (--below-sm) {
+    .dialog-footer[data-layout='floating'] {
+      padding-inline: var(--space-4);
+      padding-block-end: max(var(--space-3), env(safe-area-inset-bottom, 0));
     }
   }
 </style>

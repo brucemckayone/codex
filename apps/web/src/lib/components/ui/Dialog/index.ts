@@ -6,5 +6,16 @@ import Footer from './DialogFooter.svelte';
 import Form from './DialogFormElement.svelte';
 import Header from './DialogHeader.svelte';
 import Title from './DialogTitle.svelte';
+import Toolbar from './DialogToolbar.svelte';
 
-export { Root, Content, Title, Description, Footer, Header, Body, Form };
+export {
+  Root,
+  Content,
+  Title,
+  Description,
+  Footer,
+  Header,
+  Body,
+  Form,
+  Toolbar,
+};

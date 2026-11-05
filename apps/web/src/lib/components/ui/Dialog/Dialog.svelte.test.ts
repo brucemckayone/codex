@@ -255,6 +255,112 @@ describe('DialogContent', () => {
     const content = document.querySelector('.dialog-content');
     expect(content?.getAttribute('data-size')).toBe('lg');
   });
+
+  test('defaults to the dialog variant, and Body learns its layout from Content', () => {
+    component = mount(DialogHarness, {
+      target: document.body,
+      props: { open: true, sheet: true, flush: true, floating: true },
+    });
+
+    flushSync();
+
+    const content = document.querySelector('.dialog-content');
+    expect(content?.getAttribute('data-variant')).toBe('dialog');
+    // sheet, flush and floating are drawer-only: a dialog ignores them.
+    expect(content?.hasAttribute('data-sheet')).toBe(false);
+    expect(content?.hasAttribute('data-flush')).toBe(false);
+    expect(content?.hasAttribute('data-floating')).toBe(false);
+    expect(
+      document.querySelector('.dialog-body')?.getAttribute('data-layout')
+    ).toBe('dialog');
+    expect(
+      document.querySelector('.dialog-footer')?.getAttribute('data-align')
+    ).toBe('end');
+  });
+
+  test('a drawer marks the panel, the overlay, its Body and its Footer', () => {
+    component = mount(DialogHarness, {
+      target: document.body,
+      props: {
+        open: true,
+        variant: 'drawer',
+        sheet: true,
+        flush: true,
+        size: 'sm',
+      },
+    });
+
+    flushSync();
+
+    const content = document.querySelector('.dialog-content');
+    expect(content?.getAttribute('data-variant')).toBe('drawer');
+    expect(content?.getAttribute('data-size')).toBe('sm');
+    expect(content?.hasAttribute('data-sheet')).toBe(true);
+    expect(content?.hasAttribute('data-flush')).toBe(true);
+    expect(
+      document.querySelector('.dialog-overlay')?.getAttribute('data-variant')
+    ).toBe('drawer');
+    expect(
+      document.querySelector('.dialog-body')?.getAttribute('data-layout')
+    ).toBe('drawer');
+    expect(
+      document.querySelector('.dialog-footer')?.getAttribute('data-layout')
+    ).toBe('drawer');
+  });
+
+  test('a drawer marks a Dialog.Form too', () => {
+    component = mount(DialogHarness, {
+      target: document.body,
+      props: { open: true, variant: 'drawer', withForm: true },
+    });
+
+    flushSync();
+
+    const form = document.querySelector('.dialog-content > form.dialog-form');
+    expect(form?.getAttribute('data-layout')).toBe('drawer');
+    expect(form?.querySelector('.dialog-body')).toBeTruthy();
+  });
+
+  test('a floating drawer scrolls Body, so its parts read the floating layout', () => {
+    component = mount(DialogHarness, {
+      target: document.body,
+      props: {
+        open: true,
+        variant: 'drawer',
+        floating: true,
+        sheet: true,
+        footerAlign: 'between',
+      },
+    });
+
+    flushSync();
+
+    const content = document.querySelector('.dialog-content');
+    expect(content?.getAttribute('data-variant')).toBe('drawer');
+    expect(content?.hasAttribute('data-floating')).toBe(true);
+    expect(content?.hasAttribute('data-sheet')).toBe(true);
+    expect(
+      document.querySelector('.dialog-overlay')?.hasAttribute('data-floating')
+    ).toBe(true);
+    expect(
+      document.querySelector('.dialog-body')?.getAttribute('data-layout')
+    ).toBe('floating');
+    const footer = document.querySelector('.dialog-footer');
+    expect(footer?.getAttribute('data-layout')).toBe('floating');
+    expect(footer?.getAttribute('data-align')).toBe('between');
+  });
+
+  test('closeButton={false} drops the built-in close button', () => {
+    component = mount(DialogHarness, {
+      target: document.body,
+      props: { open: true, variant: 'drawer', closeButton: false },
+    });
+
+    flushSync();
+
+    expect(document.querySelector('.dialog-content')).toBeTruthy();
+    expect(document.querySelector('.dialog-close')).toBeNull();
+  });
 });
 
 describe('DialogTitle', () => {
@@ -356,5 +462,7 @@ describe('Dialog compound component integration', () => {
     expect(exports.Header).toBeDefined();
     expect(exports.Footer).toBeDefined();
     expect(exports.Body).toBeDefined();
+    expect(exports.Form).toBeDefined();
+    expect(exports.Toolbar).toBeDefined();
   });
 });
