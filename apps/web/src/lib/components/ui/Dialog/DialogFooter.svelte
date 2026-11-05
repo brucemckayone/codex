@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Snippet } from 'svelte';
+  import { getContext, type Snippet } from 'svelte';
   import type { HTMLAttributes } from 'svelte/elements';
 
   interface Props extends HTMLAttributes<HTMLDivElement> {
@@ -7,9 +7,11 @@
   }
 
   const { children, class: className, ...restProps }: Props = $props();
+  // Set by Dialog.Content; absent when Footer is mounted on its own.
+  const variant = getContext<{ current: 'dialog' | 'drawer' } | undefined>('DIALOG_VARIANT');
 </script>
 
-<div class="dialog-footer {className ?? ''}" {...restProps}>
+<div class="dialog-footer {className ?? ''}" data-variant={variant?.current} {...restProps}>
   {@render children()}
 </div>
 
@@ -23,6 +25,11 @@
     background: var(--color-surface-secondary);
     border-radius: 0 0 var(--radius-modal) var(--radius-modal);
     margin-top: auto;
+  }
+
+  /* A drawer's footer is ruled off like its panel edge. */
+  .dialog-footer[data-variant='drawer'] {
+    border-top-color: var(--color-border);
   }
 
   @media (--breakpoint-sm) {
