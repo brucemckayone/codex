@@ -269,15 +269,17 @@ function purchaseNote(
   const contentTitle =
     purchase?.itemTitle || charge.metadata?.contentTitle || 'Content';
   // A second payment for an item the buyer owned was refunded automatically
-  // (Codex-2hxff.14): say why, and that the first purchase stands. A late
-  // win refunds the FIRST payment of a buyer who bought it again
-  // (Codex-2hxff.70, Q1): the purchase they made since stands.
+  // (Codex-2hxff.14): say why, and that the first purchase stands. First, so
+  // a late-won duplicate's refund reads it too: it refunds the second
+  // payment, never the first. A late win refunds the FIRST payment of a
+  // buyer who bought it again (Codex-2hxff.70, Q1): the purchase they made
+  // since stands.
   const accessNote = !purchase
     ? ''
-    : purchase.lateWinKeptThrough
-      ? `You still have ${contentTitle} through your purchase on ${londonShortDate(purchase.lateWinKeptThrough.purchasedAt)}. This refunds your first payment for it.`
-      : purchase.duplicatePayment
-        ? `You still have ${contentTitle}. This refunds a second payment for it.`
+    : purchase.duplicatePayment
+      ? `You still have ${contentTitle}. This refunds a second payment for it.`
+      : purchase.lateWinKeptThrough
+        ? `You still have ${contentTitle} through your purchase on ${londonShortDate(purchase.lateWinKeptThrough.purchasedAt)}. This refunds your first payment for it.`
         : purchase.accessEnded
           ? `Your access to ${contentTitle} has ended.`
           : `You keep access to ${contentTitle}.`;

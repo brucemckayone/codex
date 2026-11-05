@@ -653,6 +653,23 @@ describe('handlePaymentWebhook — charge.refunded', () => {
     ]);
   });
 
+  it('a late-won duplicate’s refund reads the duplicate line, not the first-payment one: it refunds the second payment (Codex-2hxff.70)', async () => {
+    mockProcessRefund.mockResolvedValueOnce({
+      userId: 'u',
+      accessEnded: false,
+      itemTitle: 'Winter Light',
+      duplicatePayment: true,
+      lateWinKeptThrough: { purchasedAt: '2026-09-03T10:15:00.000Z' },
+    });
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(createRefundEvent(), mockStripe, bundle.context);
+
+    expect(emails()[0]?.accessNote).toBe(
+      'You still have Winter Light. This refunds a second payment for it.'
+    );
+  });
+
   it('the late-win note dates the purchase as a London day, with a three-letter month', async () => {
     mockProcessRefund.mockResolvedValueOnce({
       userId: 'u',
