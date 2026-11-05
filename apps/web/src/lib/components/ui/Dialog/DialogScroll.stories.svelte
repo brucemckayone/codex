@@ -27,6 +27,9 @@
   const drawerOpen = writable(false);
   const sheetOpen = writable(false);
   const flushOpen = writable(false);
+  const toolbarOpen = writable(false);
+  const formToolbarOpen = writable(false);
+  const floatingOpen = writable(false);
 </script>
 
 {#snippet tallText(label: string)}
@@ -167,6 +170,82 @@
   </Dialog.Root>
 </Story>
 
+<!-- The curriculum picker's shape: a stacked search + type bar that stays put. -->
+<Story name="Toolbar Tall">
+  <Button onclick={() => ($toolbarOpen = true)}>Open tall toolbar dialog</Button>
+  <Dialog.Root bind:open={$toolbarOpen}>
+    <Dialog.Content>
+      <Dialog.Header>
+        <Dialog.Title>Tall toolbar</Dialog.Title>
+      </Dialog.Header>
+      <Dialog.Toolbar direction="column">
+        <input class="input" type="search" aria-label="Search" placeholder="Search…" />
+        <div class="chips">
+          <Button size="sm" variant="secondary">All</Button>
+          <Button size="sm" variant="secondary">Video</Button>
+          <Button size="sm" variant="secondary">Audio</Button>
+        </div>
+      </Dialog.Toolbar>
+      <Dialog.Body>
+        {@render tallText('Item')}
+      </Dialog.Body>
+      <Dialog.Footer>
+        <Button variant="secondary" onclick={() => ($toolbarOpen = false)}>Cancel</Button>
+        <Button variant="primary" data-testid="scroll-target">Add</Button>
+      </Dialog.Footer>
+    </Dialog.Content>
+  </Dialog.Root>
+</Story>
+
+<!-- MediaPickerDialog's shape: a Form around a one-line toolbar, the list and the footer. -->
+<Story name="Form Toolbar Tall">
+  <Button onclick={() => ($formToolbarOpen = true)}>Open tall form toolbar</Button>
+  <Dialog.Root bind:open={$formToolbarOpen}>
+    <Dialog.Content>
+      <Dialog.Header>
+        <Dialog.Title>Tall form toolbar</Dialog.Title>
+      </Dialog.Header>
+      <Dialog.Form onsubmit={(e) => e.preventDefault()}>
+        <Dialog.Toolbar>
+          <input class="input toolbar-search" type="search" aria-label="Search" placeholder="Search…" />
+          <Button size="sm" variant="secondary" type="button">Newest</Button>
+        </Dialog.Toolbar>
+        <Dialog.Body>
+          {@render tallText('Media')}
+        </Dialog.Body>
+        <Dialog.Footer>
+          <Button type="button" variant="secondary" onclick={() => ($formToolbarOpen = false)}>Cancel</Button>
+          <Button type="submit" variant="primary" data-testid="scroll-target">Attach</Button>
+        </Dialog.Footer>
+      </Dialog.Form>
+    </Dialog.Content>
+  </Dialog.Root>
+</Story>
+
+<!-- FilterDrawer's shape: a floating glass rail; Body scrolls between a pinned Header and Footer. -->
+<Story name="Drawer Floating Tall">
+  <Button onclick={() => ($floatingOpen = true)}>Open tall floating drawer</Button>
+  <Dialog.Root bind:open={$floatingOpen}>
+    <Dialog.Content variant="drawer" floating sheet>
+      <Dialog.Header>
+        <Dialog.Title>Filters</Dialog.Title>
+      </Dialog.Header>
+      <Dialog.Body>
+        {#each [1, 2, 3] as section (section)}
+          <section class="section">
+            <h3 class="section-heading">Facet {section}</h3>
+            {@render tallText(`Option ${section}.`)}
+          </section>
+        {/each}
+      </Dialog.Body>
+      <Dialog.Footer align="between">
+        <Button variant="ghost">Clear all</Button>
+        <Button variant="primary" data-testid="scroll-target">Show results</Button>
+      </Dialog.Footer>
+    </Dialog.Content>
+  </Dialog.Root>
+</Story>
+
 <style>
   .row {
     margin: 0;
@@ -206,6 +285,16 @@
     margin: 0;
     font-size: var(--text-base);
     color: var(--color-text);
+  }
+
+  .chips {
+    display: flex;
+    gap: var(--space-1);
+  }
+
+  .toolbar-search {
+    flex: 1;
+    min-width: 12rem;
   }
 
   .preview {
