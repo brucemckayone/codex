@@ -185,6 +185,103 @@ describe('PopoverContent', () => {
   });
 });
 
+describe('Popover focus on close', () => {
+  let component: ReturnType<typeof mount> | null = null;
+
+  afterEach(() => {
+    if (component) {
+      unmount(component);
+      component = null;
+    }
+    document.body.innerHTML = '';
+  });
+
+  // Melt sets the panel up a tick after it opens, and moves focus a moment
+  // after it closes (a 1ms sleep, then a tick): each is let settle, as a
+  // person's open and close are never in the same microtask.
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+  function close() {
+    document
+      .querySelector<HTMLButtonElement>('[data-testid="popover-close"]')
+      ?.click();
+    flushSync();
+  }
+
+  test('goes back to the trigger by default', async () => {
+    component = mount(PopoverHarness, {
+      target: document.body,
+      props: { open: true },
+    });
+    flushSync();
+    await settle();
+    close();
+    await settle();
+    expect(document.activeElement).toBe(
+      document.querySelector('[data-testid="popover-trigger"]')
+    );
+  });
+
+  test('goes where closeFocus says', async () => {
+    const editor = document.createElement('div');
+    editor.tabIndex = -1;
+    document.body.appendChild(editor);
+    component = mount(PopoverHarness, {
+      target: document.body,
+      props: { open: true, closeFocus: () => editor },
+    });
+    flushSync();
+    await settle();
+    close();
+    await settle();
+    expect(document.activeElement).toBe(editor);
+  });
+});
+
+describe('Popover motion', () => {
+  let component: ReturnType<typeof mount> | null = null;
+  const realMatchMedia = window.matchMedia;
+
+  afterEach(() => {
+    if (component) {
+      unmount(component);
+      component = null;
+    }
+    window.matchMedia = realMatchMedia;
+    document.body.innerHTML = '';
+  });
+
+  function openThenClose() {
+    component = mount(PopoverHarness, {
+      target: document.body,
+      props: { open: true },
+    });
+    flushSync();
+    document
+      .querySelector<HTMLButtonElement>('[data-testid="popover-close"]')
+      ?.click();
+    flushSync();
+    return document.querySelector<HTMLElement>(
+      '[data-testid="popover-content"]'
+    );
+  }
+
+  // The control: with motion, the panel is still flying out (jsdom never
+  // ends a transition, and Svelte makes a leaving panel inert).
+  test('with motion, the panel flies out', () => {
+    const panel = openThenClose();
+    expect(panel?.inert).toBe(true);
+  });
+
+  test('under reduced motion, the panel goes at once', () => {
+    window.matchMedia = ((query: string) => ({
+      ...realMatchMedia(query),
+      matches: query.includes('prefers-reduced-motion: reduce'),
+    })) as typeof window.matchMedia;
+    expect(openThenClose()).toBeNull();
+  });
+});
+
 describe('PopoverClose', () => {
   let component: ReturnType<typeof mount> | null = null;
 

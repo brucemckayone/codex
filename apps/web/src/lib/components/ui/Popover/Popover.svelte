@@ -1,3 +1,17 @@
+<!--
+  @component Popover.Root
+
+  Melt's createPopover: a non-modal dialog under its trigger. While open it
+  keeps Tab inside, and Escape, a press outside or its Close shut it.
+
+  @prop {CreatePopoverProps['openFocus']} [openFocus] - Where focus goes as it
+    opens: an element, a selector, or a function returning either. Omitted,
+    Melt's own default.
+  @prop {CreatePopoverProps['closeFocus']} [closeFocus] - Where focus goes as
+    it closes, in the same shapes. Omitted, back to the trigger, as always. A
+    function runs a moment after the close and may return nothing, which
+    leaves focus where it is (a press outside that landed on a field).
+-->
 <script lang="ts">
 	import { type CreatePopoverProps, createPopover } from '@melt-ui/svelte';
 	import type { Snippet } from 'svelte';
