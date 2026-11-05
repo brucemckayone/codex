@@ -296,6 +296,10 @@
 	function handleGlobalKeydown(e: KeyboardEvent) {
 		if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
 			e.preventDefault();
+			// A held Cmd+K repeats every 30-80ms. Toggling on each repeat
+			// reopened the palette as it was still dropping away, which left the
+			// page locked for good (review c1, H1); one press, one toggle.
+			if (e.repeat) return;
 			open = !open;
 			return;
 		}
@@ -321,6 +325,13 @@
 			activeIndex = -1;
 			resetSearch();
 		}
+	});
+
+	// The highlighted row comes into view as the arrows move it: focus stays
+	// in the box, so the browser never scrolls the results for it.
+	$effect(() => {
+		if (activeIndex < 0) return;
+		document.getElementById(`palette-item-${activeIndex}`)?.scrollIntoView({ block: 'nearest' });
 	});
 
 	// Flat index offsets for grouped results

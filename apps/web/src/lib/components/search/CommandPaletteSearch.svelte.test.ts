@@ -383,3 +383,75 @@ describe('recent searches it cannot read or save', () => {
     });
   });
 });
+
+// Review cycle 1 (Codex-vlphc.4): H1's half and L6.
+describe('keys the palette answers', () => {
+  const RECENT_KEY = 'codex-recent-searches';
+  const realScrollIntoView = Element.prototype.scrollIntoView;
+
+  afterEach(() => {
+    localStorage.clear();
+    Element.prototype.scrollIntoView = realScrollIntoView;
+  });
+
+  const cmdK = (repeat = false) => {
+    document.body.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'k',
+        ctrlKey: true,
+        repeat,
+        bubbles: true,
+        cancelable: true,
+      })
+    );
+    flushSync();
+  };
+
+  // Read from the bound prop: a closing panel stays in the DOM while it
+  // drops away, and jsdom never ends that.
+  test('a held Cmd+K opens it once, whatever the key repeats', () => {
+    let open = $state(false);
+    component = mount(CommandPaletteSearch, {
+      target: document.body,
+      props: {
+        scope: 'org',
+        orgSlug: 'studio-alpha',
+        get open() {
+          return open;
+        },
+        set open(next: boolean) {
+          open = next;
+        },
+      },
+    });
+    flushSync();
+
+    cmdK();
+    for (let i = 0; i < 3; i++) cmdK(true);
+
+    expect(open).toBe(true);
+  });
+
+  test('the highlighted row is scrolled into view as the arrows move it', () => {
+    const scrolled = vi.fn();
+    Element.prototype.scrollIntoView = scrolled;
+    localStorage.setItem(RECENT_KEY, JSON.stringify(['yoga', 'pilates']));
+    openPalette();
+
+    const el = input();
+    if (!el) throw new Error('palette input not rendered');
+    el.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })
+    );
+    flushSync();
+    el.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })
+    );
+    flushSync();
+
+    expect(scrolled).toHaveBeenLastCalledWith({ block: 'nearest' });
+    expect(scrolled.mock.contexts.at(-1)).toBe(
+      document.getElementById('palette-item-1')
+    );
+  });
+});
