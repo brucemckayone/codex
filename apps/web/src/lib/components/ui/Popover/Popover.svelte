@@ -1,8 +1,17 @@
 <!--
   @component Popover.Root
 
-  Melt's createPopover: a non-modal dialog under its trigger. While open it
-  keeps Tab inside, and Escape, a press outside or its Close shut it.
+  Melt's createPopover: a dialog under its trigger. While open it keeps Tab
+  inside, so Popover.Content says aria-modal; Escape, a press outside or its
+  Close shut it. Popover.Content needs a name: `aria-label`, or
+  `aria-labelledby` pointing at its heading.
+
+  @prop {CreatePopoverProps['positioning']} [positioning] - Where it opens.
+    Omitted, below the trigger (Melt's default), flipping above only where
+    there is no room below.
+  @prop {boolean} [disableFocusTrap] - Lets Tab leave it, for a popover whose
+    work goes on outside it (the editor's link popup): it is then a non-modal
+    dialog, and says so.
 
   @prop {CreatePopoverProps['openFocus']} [openFocus] - Where focus goes as it
     opens: an element, a selector, or a function returning either. Omitted,
@@ -25,7 +34,10 @@
 	};
 
 	let {
-		positioning,
+		// Melt's own default. Left `undefined`, it replaced Melt's
+		// `{ placement: 'bottom' }`, and floating-ui fell back to its own
+		// 'top', so a popover opened above its trigger wherever that fitted.
+		positioning = { placement: 'bottom' },
 		disableFocusTrap,
 		arrowSize,
 		// Melt's default too, for the same reason as `closeOnOutsideClick`: its

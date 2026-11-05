@@ -11,6 +11,7 @@
     onOpenChange?: (open: boolean) => void;
     closeFocus?: CreatePopoverProps['closeFocus'];
     forceVisible?: boolean;
+    disableFocusTrap?: boolean;
   }
 
   let {
@@ -19,13 +20,16 @@
     defaultOpen,
     onOpenChange,
     closeFocus,
-    forceVisible = false,
+    // Unset unless a test sets it, so the tests run at Root's own default
+    // (true), as every page does.
+    forceVisible,
+    disableFocusTrap,
   }: Props = $props();
 </script>
 
-<Popover bind:open {defaultOpen} {onOpenChange} {closeFocus} {forceVisible}>
+<Popover bind:open {defaultOpen} {onOpenChange} {closeFocus} {forceVisible} {disableFocusTrap}>
   <PopoverTrigger data-testid="popover-trigger">Open popover</PopoverTrigger>
-  <PopoverContent data-testid="popover-content">
+  <PopoverContent data-testid="popover-content" aria-label="Test popover">
     <p>Popover body text</p>
     <PopoverClose data-testid="popover-close">Close</PopoverClose>
   </PopoverContent>
