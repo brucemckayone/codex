@@ -7,6 +7,7 @@
   import DialogFormElement from './DialogFormElement.svelte';
   import DialogHeader from './DialogHeader.svelte';
   import DialogTitle from './DialogTitle.svelte';
+  import DialogToolbar from './DialogToolbar.svelte';
 
   interface Props {
     open?: boolean;
@@ -19,8 +20,17 @@
     floating?: boolean;
     closeButton?: boolean;
     footerAlign?: 'end' | 'between';
+    placement?: 'center' | 'top' | 'bottom';
+    maxWidth?: string;
+    maxHeight?: string;
+    radius?: 'modal' | 'lg';
+    surface?: 'elevated' | 'base' | 'glass';
+    overlay?: 'blur' | 'dim' | 'dark';
+    motion?: 'auto' | 'drop' | 'rise' | 'none';
     /** Wrap the Body in Dialog.Form. */
     withForm?: boolean;
+    /** A Dialog.Toolbar between Header and Body. */
+    withToolbar?: boolean;
   }
 
   let {
@@ -34,7 +44,15 @@
     floating,
     closeButton,
     footerAlign,
+    placement,
+    maxWidth,
+    maxHeight,
+    radius,
+    surface,
+    overlay,
+    motion,
     withForm = false,
+    withToolbar = false,
   }: Props = $props();
 </script>
 
@@ -46,11 +64,28 @@
 {/snippet}
 
 <Dialog bind:open {onOpenChange} {dismissible}>
-  <DialogContent {size} {variant} {sheet} {flush} {floating} {closeButton}>
+  <DialogContent
+    {size}
+    {variant}
+    {sheet}
+    {flush}
+    {floating}
+    {closeButton}
+    {placement}
+    {maxWidth}
+    {maxHeight}
+    {radius}
+    {surface}
+    {overlay}
+    {motion}
+  >
     <DialogHeader>
       <DialogTitle>Dialog Title</DialogTitle>
       <DialogDescription>Dialog description text</DialogDescription>
     </DialogHeader>
+    {#if withToolbar}
+      <DialogToolbar><span>Toolbar</span></DialogToolbar>
+    {/if}
     {#if withForm}
       <DialogFormElement>{@render body()}</DialogFormElement>
     {:else}

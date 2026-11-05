@@ -19,15 +19,16 @@
 
   const { children, align = 'end', class: className, ...restProps }: Props = $props();
   // Set by Dialog.Content; absent when Footer is mounted on its own.
-  const layout = getContext<{ current: 'dialog' | 'drawer' | 'floating' } | undefined>(
-    'DIALOG_LAYOUT'
-  );
+  const layout = getContext<
+    { current: 'dialog' | 'drawer' | 'floating'; flush: boolean } | undefined
+  >('DIALOG_LAYOUT');
 </script>
 
 <div
   class="dialog-footer {className ?? ''}"
   data-layout={layout?.current}
   data-align={align}
+  data-flush={layout?.flush ? '' : undefined}
   {...restProps}
 >
   {@render children()}
@@ -77,5 +78,15 @@
       padding-inline: var(--space-4);
       padding-block-end: max(var(--space-3), env(safe-area-inset-bottom, 0));
     }
+  }
+
+  /* Flush: a bare box; the row inside draws its own rule and tray. Last, so
+     it wins over every layout and align rule above. */
+  .dialog-footer[data-flush] {
+    display: block;
+    padding: 0;
+    border-top: none;
+    background: none;
+    border-radius: 0;
   }
 </style>
