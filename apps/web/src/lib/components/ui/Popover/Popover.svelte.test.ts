@@ -130,8 +130,9 @@ describe('PopoverTrigger', () => {
     expect(trigger?.getAttribute('data-state')).toBe('open');
   });
 
-  // Popover.Root's default. Melt derives its own aria-expanded from
-  // visibility there, which is always on, so a closed popover said "true".
+  // Popover.Root's default. Melt derives its own aria-expanded and
+  // data-state from visibility there, which is always on, so a closed
+  // popover said "true" and "open".
   test('under forceVisible, a closed popover says aria-expanded="false"', () => {
     component = mount(PopoverHarness, {
       target: document.body,
@@ -140,6 +141,17 @@ describe('PopoverTrigger', () => {
     flushSync();
     const trigger = document.querySelector('[data-testid="popover-trigger"]');
     expect(trigger?.getAttribute('aria-expanded')).toBe('false');
+    expect(trigger?.getAttribute('data-state')).toBe('closed');
+  });
+
+  test('under forceVisible, an open popover says data-state="open"', () => {
+    component = mount(PopoverHarness, {
+      target: document.body,
+      props: { open: true, forceVisible: true },
+    });
+    flushSync();
+    const trigger = document.querySelector('[data-testid="popover-trigger"]');
+    expect(trigger?.getAttribute('data-state')).toBe('open');
   });
 
   test('aria-controls references the popover content id when open', () => {
