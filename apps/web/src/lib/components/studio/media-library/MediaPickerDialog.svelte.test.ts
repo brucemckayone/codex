@@ -1520,9 +1520,8 @@ describe('MediaPickerDialog: the list scrolls in place', () => {
     );
   });
 
-  test('the form carries the panel’s capped column, so only the list scrolls', () => {
-    expect(source).toMatch(
-      /\.picker-form\s*\{[^}]*flex:\s*1;[^}]*min-height:\s*0/
-    );
+  test('the form is Dialog.Form, which carries the panel’s capped column, so only the list scrolls', () => {
+    expect(source).toMatch(/<Dialog\.Form onsubmit=\{attach\}>/);
+    expect(source).not.toMatch(/<form\b/);
   });
 });

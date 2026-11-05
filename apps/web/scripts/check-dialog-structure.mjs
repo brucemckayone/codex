@@ -97,16 +97,6 @@ export const ALLOWLIST = [
     reason: 'M3: the fourth drawer (glass rail); moves to variant="drawer" floating sheet + Footer align="between"',
   },
   {
-    file: 'src/lib/components/studio/media-library/MediaPickerDialog.svelte',
-    rule: 'content-child',
-    reason: 'M2: a working hand-written .picker-form + .picker-tools; moves to Dialog.Form + Dialog.Toolbar, Header outside',
-  },
-  {
-    file: 'src/routes/_org/[slug]/studio/journeys/[id]/curriculum/+page.svelte',
-    rule: 'content-child',
-    reason: 'M2: the picker search bar sits between Header and Body; moves to Dialog.Toolbar direction="column"',
-  },
-  {
     file: 'src/lib/components/command-palette/CommandPalette.svelte',
     rule: 'own-dialog',
     reason: 'M4: hand-built overlay; moves to the shared Dialog',
