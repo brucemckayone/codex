@@ -213,6 +213,14 @@
             mono: null,
             reload: false,
           };
+        case 'chargeback_settling':
+          return {
+            variant: 'info',
+            lead: m.support_blocked_chargeback_settling_lead(),
+            body: m.support_blocked_chargeback_settling_body(),
+            mono: null,
+            reload: false,
+          };
         case 'nothing_left':
           return {
             variant: 'info',

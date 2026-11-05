@@ -67,6 +67,11 @@ describe('refundOutcomeOf', () => {
       { disputeStatus: 'needs_response' },
       { kind: 'chargeback', disputeStatus: 'needs_response' },
     ],
+    [
+      'CHARGEBACK_SETTLING',
+      { code: 'BUSINESS_LOGIC_ERROR' },
+      { kind: 'chargeback_settling' },
+    ],
     ['NOTHING_LEFT_TO_REFUND', {}, { kind: 'nothing_left' }],
     [
       'REFUND_AMOUNT_TOO_LARGE',

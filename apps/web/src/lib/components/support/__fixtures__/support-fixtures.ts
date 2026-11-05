@@ -6,6 +6,7 @@
  */
 
 import type {
+  ChargebackRow,
   ChargeDetail,
   ChargeSummary,
   CreatorDebtItem,
@@ -126,7 +127,11 @@ export function chargeDetail(
       slug: 'studio-alpha',
       deleted: false,
     },
-    window: { closesAt: '2026-11-01T14:32:00.000Z', isOpen: true },
+    window: {
+      closesAt: '2026-11-01T14:32:00.000Z',
+      isOpen: true,
+      liftedByLateWin: false,
+    },
     refundable: { maxCents: 2000, blocked: null },
     refundCount: 1,
     slices: SLICES,
@@ -202,7 +207,11 @@ export function chargeSummary(
     refundedCents: 400,
     paidAt: '2026-10-18T13:32:00.000Z',
     chargeback: null,
-    window: { closesAt: '2026-11-01T14:32:00.000Z', isOpen: true },
+    window: {
+      closesAt: '2026-11-01T14:32:00.000Z',
+      isOpen: true,
+      liftedByLateWin: false,
+    },
     ...overrides,
   };
 }
@@ -253,6 +262,71 @@ export function historyLine(overrides: Partial<HistoryLine> = {}): HistoryLine {
     credit: null,
     ...overrides,
   };
+}
+
+/**
+ * A window a late-won chargeback lifted (owner Q7, Codex-2hxff.70): open, its
+ * 14-day date (17 Sep, 20:14 London) long past, so no page may print it.
+ */
+export const LIFTED_WINDOW = {
+  closesAt: '2026-09-17T19:14:00.000Z',
+  isOpen: true,
+  liftedByLateWin: true,
+};
+
+/** A chargeback on the charge, as `ChargebacksCard` lists it: open, by default. */
+export function chargebackRow(
+  overrides: Partial<ChargebackRow> = {}
+): ChargebackRow {
+  return {
+    id: 'du_1QmD2rLk2vSb91tU',
+    amountCents: 2400,
+    status: 'needs_response',
+    reason: 'unrecognized',
+    createdAt: '2026-10-26T09:00:00.000Z',
+    respondBy: '2026-11-05T09:00:00.000Z',
+    lostOn: null,
+    lateWonOn: null,
+    settling: false,
+    ...overrides,
+  };
+}
+
+/**
+ * The late-win mockup's chargeback (Codex-2hxff.70, support/charge-page.html
+ * S1-S2): Ellen Marsh's £24.00 'Winter Light', opened 26 Oct, lost 20 Nov,
+ * won late 14 Dec. `settling` while the creators are being paid back (S1).
+ */
+export function lateWonChargeback(
+  overrides: Partial<ChargebackRow> = {}
+): ChargebackRow {
+  return chargebackRow({
+    status: 'won',
+    respondBy: null,
+    lostOn: '2026-11-20T10:00:00.000Z',
+    lateWonOn: '2026-12-14T16:20:00.000Z',
+    settling: false,
+    ...overrides,
+  });
+}
+
+/** The late win's history line on Maya's share, once paid back (S2). */
+export function lateWonHistoryLine(
+  overrides: Partial<HistoryLine> = {}
+): HistoryLine {
+  return historyLine({
+    causeType: 'dispute',
+    causeId: 'du_1QmD2rLk2vSb91tU',
+    causeAmountCents: 2400,
+    amountCents: 1440,
+    outcome: 'paid_back',
+    repayPayoutId: 'payout-repay',
+    disputeOpenedAt: '2026-10-26T09:00:00.000Z',
+    disputeWonAt: '2026-12-14T16:22:00.000Z',
+    lostOn: '2026-11-20T10:00:00.000Z',
+    stepKind: 'transfer_reversal',
+    ...overrides,
+  });
 }
 
 export function creatorDebt(

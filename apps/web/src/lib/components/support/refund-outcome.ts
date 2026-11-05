@@ -30,6 +30,8 @@ export type RefundOutcome =
   | { kind: 'refused'; stripeCode: string }
   | { kind: 'window_closed'; closesAt: string | null }
   | { kind: 'chargeback'; disputeStatus: string | null }
+  /** A won chargeback is still paying the creators back (Codex-2hxff.70). */
+  | { kind: 'chargeback_settling' }
   | { kind: 'nothing_left' }
   | { kind: 'too_large'; maxCents: number | null }
   /**
@@ -77,6 +79,8 @@ export function refundOutcomeOf(
       return { kind: 'window_closed', closesAt: answer.closesAt };
     case 'CHARGE_HAS_CHARGEBACK':
       return { kind: 'chargeback', disputeStatus: answer.disputeStatus };
+    case 'CHARGEBACK_SETTLING':
+      return { kind: 'chargeback_settling' };
     case 'NOTHING_LEFT_TO_REFUND':
       return { kind: 'nothing_left' };
     case 'REFUND_AMOUNT_TOO_LARGE':

@@ -48,13 +48,16 @@
     });
   });
 
+  // A late win lifted the window (owner Q7): its date has passed, so none shows.
   const windowLine = $derived(
-    detail.window.isOpen
-      ? m.support_window_open_until({
-          date: formatDayTime(detail.window.closesAt),
-          left: daysLeftText(detail.window.closesAt, now),
-        })
-      : m.support_window_closed_at({ date: formatDayTime(detail.window.closesAt) })
+    detail.window.liftedByLateWin
+      ? m.support_window_lifted_long()
+      : detail.window.isOpen
+        ? m.support_window_open_until({
+            date: formatDayTime(detail.window.closesAt),
+            left: daysLeftText(detail.window.closesAt, now),
+          })
+        : m.support_window_closed_at({ date: formatDayTime(detail.window.closesAt) })
   );
 
   const orgName = $derived(detail.organization?.name ?? null);

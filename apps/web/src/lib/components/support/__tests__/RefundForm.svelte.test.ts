@@ -33,6 +33,8 @@ vi.mock(
 import {
   CHARGE_ID,
   chargeDetail,
+  LIFTED_WINDOW,
+  lateWonChargeback,
   preview,
 } from '../__fixtures__/support-fixtures';
 import {
@@ -759,6 +761,7 @@ describe('a blocked charge', () => {
         window: {
           closesAt: '2026-10-17T07:15:00.000Z',
           isOpen: blocked !== 'window_closed',
+          liftedByLateWin: false,
         },
       }),
     });
@@ -766,6 +769,41 @@ describe('a blocked charge', () => {
     expect(alert?.getAttribute('data-reason')).toBe(blocked);
     expect(alert?.textContent).toContain(text);
     expect(review()).toBeNull();
+  });
+
+  test('a won chargeback still paying the creators back: the form waits, in the design’s words (late-win §6)', () => {
+    mountForm({
+      detail: chargeDetail({
+        refundable: { maxCents: 2400, blocked: 'chargeback_settling' },
+        chargebacks: [lateWonChargeback({ settling: true })],
+      }),
+    });
+    const alert = document.querySelector('[data-testid="refund-blocked"]');
+    expect(alert?.getAttribute('data-reason')).toBe('chargeback_settling');
+    expect(alert?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
+      "This payment's chargeback was just decided for us, and the creators are being paid back. Try the refund again in an hour."
+    );
+    expect(alert?.closest('[data-variant]')?.getAttribute('data-variant')).toBe(
+      'info'
+    );
+    expect(review()).toBeNull();
+  });
+
+  test('a window a late win lifted (Q7): the form is open, says there is no time limit, and never prints the passed date', () => {
+    mountForm({
+      detail: chargeDetail({
+        window: LIFTED_WINDOW,
+        chargebacks: [lateWonChargeback()],
+      }),
+    });
+    const text = document.body.textContent?.replace(/\s+/g, ' ') ?? '';
+    // £4.00 was refunded before, so £20.00 is left.
+    expect(text).toContain(
+      '£20.00 is left to refund. No time limit: the chargeback was won late.'
+    );
+    expect(text).not.toContain('17 Sep');
+    expect(text).not.toContain('The window closes');
+    expect(review()).not.toBeNull();
   });
 
   test('an inquiry does not block, and the form says what a full refund does to it', () => {

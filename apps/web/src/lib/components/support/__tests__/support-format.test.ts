@@ -5,7 +5,7 @@
 
 import { describe, expect, test } from 'vitest';
 import * as m from '$paraglide/messages';
-import { NOW, slice } from '../__fixtures__/support-fixtures';
+import { LIFTED_WINDOW, NOW, slice } from '../__fixtures__/support-fixtures';
 import {
   chargeTitle,
   daysLeftText,
@@ -46,7 +46,14 @@ describe('dates', () => {
 
   test('the results window cell: open with days left, or closed with its date', () => {
     expect(
-      windowCell({ closesAt: '2026-11-01T14:32:00.000Z', isOpen: true }, NOW)
+      windowCell(
+        {
+          closesAt: '2026-11-01T14:32:00.000Z',
+          isOpen: true,
+          liftedByLateWin: false,
+        },
+        NOW
+      )
     ).toEqual({
       badge: { label: m.support_window_open(), variant: 'success' },
       detail: m.support_window_closes({
@@ -55,10 +62,24 @@ describe('dates', () => {
       }),
     });
     expect(
-      windowCell({ closesAt: '2026-10-17T07:15:00.000Z', isOpen: false }, NOW)
+      windowCell(
+        {
+          closesAt: '2026-10-17T07:15:00.000Z',
+          isOpen: false,
+          liftedByLateWin: false,
+        },
+        NOW
+      )
     ).toEqual({
       badge: { label: m.support_window_closed(), variant: 'neutral' },
       detail: m.support_window_closed_on({ date: '17 Oct' }),
+    });
+  });
+
+  test('a window a late win lifted (Q7): no time limit, and never its passed date', () => {
+    expect(windowCell(LIFTED_WINDOW, NOW)).toEqual({
+      badge: { label: 'No time limit', variant: 'success' },
+      detail: 'The chargeback was won late',
     });
   });
 });

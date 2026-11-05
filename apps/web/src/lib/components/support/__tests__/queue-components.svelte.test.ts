@@ -24,6 +24,7 @@ import {
   creatorDebt,
   debtPerson,
   failedRefund,
+  LIFTED_WINDOW,
   NOW,
   owedItem,
   refusedDebtPerson,
@@ -1136,6 +1137,26 @@ describe('The charges found', () => {
     const row = document.querySelector('[data-testid="charge-row"]');
     expect(row?.textContent).toContain(m.support_deleted());
     expect(row?.textContent).toContain(m.support_chargeback_lost());
+  });
+
+  test('a window a late win lifted (Q7): no time limit, on the table and the narrow list, and never its passed date', () => {
+    render(ChargeResults, {
+      items: [chargeSummary({ window: LIFTED_WINDOW })],
+      now: NOW,
+    });
+    const tableRow =
+      document
+        .querySelector('[data-testid="charge-row"]')
+        ?.textContent?.replace(/\s+/g, ' ') ?? '';
+    const listRow =
+      document.querySelector('.row-item')?.textContent?.replace(/\s+/g, ' ') ??
+      '';
+    for (const shown of [tableRow, listRow]) {
+      expect(shown).toContain('No time limit');
+      expect(shown).toContain('The chargeback was won late');
+    }
+    expect(text()).not.toContain('17 Sep');
+    expect(text()).not.toMatch(/days? left/);
   });
 });
 

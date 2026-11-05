@@ -19,6 +19,7 @@ import {
   formatDay,
   formatPence,
   moreTakeBacks,
+  paysBackLine,
   towardsOf,
 } from '$lib/utils/bank-payouts';
 import * as m from '$paraglide/messages';
@@ -235,4 +236,46 @@ export function ownerBankLine(
 ): string | null {
   if (!isOwnerShare(row.payoutType)) return null;
   return bankLineFor(row, ctx);
+}
+
+/**
+ * The lines under an owner-share row's transfer: a won chargeback's pay-back
+ * says what it is above its bank line (late-win P1). A creator's pay-back
+ * has none here, as a creator's row has no bank line: its Type cell names it,
+ * and the creator's own Earnings page explains it.
+ */
+export function ownerLines(
+  row: BankLineRow & {
+    payoutType: string;
+    paysBack: { title: string | null } | null;
+  },
+  ctx: Parameters<typeof ownerBankLine>[1]
+): string[] {
+  if (!isOwnerShare(row.payoutType)) return [];
+  return [
+    paysBackLine(row.paysBack, { named: false }),
+    ownerBankLine(row, ctx),
+  ].filter((line): line is string => line !== null);
+}
+
+/**
+ * Human-readable label for `payouts.payoutType` enum; any other type reads
+ * as "Creator share":
+ *   - platform_fee → "Platform fee" (Codex-h69cg tri-party row)
+ *   - organization_fee → "Org fee"
+ *   - creator_payout_to_owner → "Creator pool"
+ */
+const TYPE_LABELS: Readonly<Record<string, string>> = {
+  platform_fee: 'Platform fee',
+  organization_fee: 'Org fee',
+  creator_payout_to_owner: 'Creator pool',
+};
+
+/** The Type cell; a won chargeback's pay-back says so (late-win P1). */
+export function typeLabel(row: {
+  payoutType: string;
+  paysBack: unknown | null;
+}): string {
+  const type = TYPE_LABELS[row.payoutType] ?? 'Creator share';
+  return row.paysBack ? m.payouts_type_paid_back({ type }) : type;
 }
