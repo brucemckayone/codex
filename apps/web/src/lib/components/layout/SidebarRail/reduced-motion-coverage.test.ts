@@ -29,13 +29,15 @@ const CSS_GATED = [
   'layout/SidebarRail/SidebarRailItem.svelte',
   'layout/SidebarRail/SidebarRailUserSection.svelte',
   'layout/MobileNav/MobileBottomNav.svelte',
-  'command-palette/CommandPalette.svelte',
 ];
 
 const JS_TRANSITION_GATED = ['layout/MobileNav/MobileBottomSheet.svelte'];
 
 // Each surface and the Dialog.Content `motion` it moves by.
-const DIALOG_MOTION = [['search/CommandPaletteSearch.svelte', 'drop']];
+const DIALOG_MOTION = [
+  ['search/CommandPaletteSearch.svelte', 'drop'],
+  ['command-palette/CommandPalette.svelte', 'none'],
+];
 
 describe('Codex-rf1l9 — nav redesign honours prefers-reduced-motion', () => {
   test.each(
