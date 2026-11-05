@@ -75,8 +75,16 @@ export interface ChargeSummary {
   window: SupportRefundWindow;
 }
 
-/** Why the form cannot refund this charge now. */
-export type RefundBlock = 'window_closed' | 'chargeback' | 'nothing_left';
+/**
+ * Why the form cannot refund this charge now. `chargeback_settling`: a
+ * chargeback on it was won and the creators' pay-back is not yet applied
+ * (Codex-2hxff.70), so a refund would race it.
+ */
+export type RefundBlock =
+  | 'window_closed'
+  | 'chargeback'
+  | 'chargeback_settling'
+  | 'nothing_left';
 
 /** What the charge paid for. */
 export type ChargeDetailSource =
@@ -315,6 +323,18 @@ export interface HistoryLine {
   systemDecision: SystemDecision | null;
   /** A late take-back's credit on this step, in any state; null for none. */
   credit: HistoryCredit | null;
+  /**
+   * A late-won dispute line's loss: when it was applied (Codex-2hxff.70),
+   * for "Cancelled when the chargeback was lost, then paid back by a new
+   * payout." Absent or null otherwise.
+   */
+  lostOn?: string | null;
+  /** The step's kind, so a cancellation or a reduction is worded as one. */
+  stepKind?:
+    | 'transfer_reversal'
+    | 'pending_reduction'
+    | 'retained_fee'
+    | 'cancellation';
 }
 
 /** Whoever issued a refund: support, the Stripe Dashboard, or the platform (null). */
@@ -348,6 +368,12 @@ export interface ChargebackRow {
   createdAt: string;
   /** Stripe's evidence deadline, while a response is due. */
   respondBy: string | null;
+  /** A late win's loss: when it was applied (`lost_applied_at`). */
+  lostOn: string | null;
+  /** When a lost chargeback was won after all (`late_won_at`). */
+  lateWonOn: string | null;
+  /** Won, and the creators' pay-back not yet applied: refunds wait for it. */
+  settling: boolean;
 }
 
 /** How the preview says a line of the clawback is taken (`planClawback`). */

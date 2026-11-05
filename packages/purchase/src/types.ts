@@ -288,3 +288,24 @@ export interface CheckoutSessionVerifyResult {
    */
   duplicatePayment?: true;
 }
+
+/**
+ * What the late-win undo did for the buyer of a purchase or a course
+ * (Codex-2hxff.70; late-win data design §4.2). `restored` is the only
+ * outcome that emails the buyer; the others say why access needed nothing:
+ * they bought it again, the payment was a duplicate, a refund still stands,
+ * or another dispute still holds the purchase.
+ */
+export type LateWinRestoreOutcome =
+  | 'restored'
+  | 'rebought'
+  | 'duplicate'
+  | 'still_refunded'
+  | 'dispute_holds';
+
+/**
+ * The late win's refund of a buyer's first payment, when they had bought
+ * the item again (Q1; design §4.5): none needed, made and waiting for
+ * Stripe, or done.
+ */
+export type LateWinRefundStep = 'none' | 'pending' | 'done';

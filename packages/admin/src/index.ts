@@ -158,6 +158,7 @@ export {
   AdminServiceError,
   AlreadySettledError,
   BusinessLogicError,
+  ChargebackSettlingError,
   ChargeChangedError,
   ChargeHasChargebackError,
   ConflictError,

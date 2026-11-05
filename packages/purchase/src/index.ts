@@ -158,6 +158,8 @@ export type {
   CheckoutSessionVerifyResult,
   CompleteCoursePurchaseMetadata,
   CompletePurchaseMetadata,
+  LateWinRefundStep,
+  LateWinRestoreOutcome,
   NewPurchaseInput,
   PaymentIntentCharge,
   Purchase,

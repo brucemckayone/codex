@@ -555,6 +555,20 @@ export interface PayoutWithCreator {
    * payee's account.
    */
   bankOn: string | null;
+  /**
+   * A share a won chargeback paid back: when the pay-back went (London
+   * `YYYY-MM-DD`). Null otherwise (Codex-2hxff.70, late-win design §6).
+   */
+  paidBack: { on: string } | null;
+  /**
+   * On the re-pay row itself: whose chargeback it pays back, and when it was
+   * won. Null on every other row (Codex-2hxff.70).
+   */
+  paysBack: {
+    causeType: 'dispute';
+    title: string | null;
+    wonOn: string;
+  } | null;
 }
 
 /**
@@ -672,6 +686,20 @@ export interface CreatorPayoutRow {
    * otherwise.
    */
   takenBack: { causeType: 'refund' | 'dispute'; on: string } | null;
+  /** As on {@link PayoutWithCreator}: a share a won chargeback paid back. */
+  paidBack: { on: string } | null;
+  /** As on {@link PayoutWithCreator}: the re-pay row's chargeback. */
+  paysBack: {
+    causeType: 'dispute';
+    title: string | null;
+    wonOn: string;
+  } | null;
+  /**
+   * A share cancelled while held for a chargeback that was lost: "Held for
+   * a chargeback, cancelled when it was lost on …". Null otherwise
+   * (Codex-2hxff.70).
+   */
+  cancelledFor: { causeType: 'dispute'; on: string } | null;
 }
 
 /**
@@ -6520,6 +6548,9 @@ export class SubscriptionService extends BaseService {
           datesOf(row.creatorId)?.manualSince ?? null,
           datesOf(row.creatorId)?.cleared ?? null
         ),
+        // Filled by the late-win undo (Codex-2hxff.70).
+        paidBack: null,
+        paysBack: null,
       })),
       pagination: {
         page,
@@ -6735,6 +6766,10 @@ export class SubscriptionService extends BaseService {
           bankDates?.cleared ?? null
         ),
         takenBack: takenBack.get(row.id) ?? null,
+        // Filled by the late-win undo (Codex-2hxff.70).
+        paidBack: null,
+        paysBack: null,
+        cancelledFor: null,
       })),
       pagination: {
         page,

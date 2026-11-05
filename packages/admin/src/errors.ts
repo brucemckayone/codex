@@ -144,6 +144,20 @@ export class ChargeHasChargebackError extends BusinessLogicError {
   }
 }
 
+/**
+ * A chargeback on this charge was won and the creators' pay-back is not yet
+ * applied (Codex-2hxff.70; late-win data design §4.7, §6): a refund now
+ * would race it. The hourly reconcile applies it, so this clears by itself.
+ */
+export class ChargebackSettlingError extends BusinessLogicError {
+  constructor() {
+    super(
+      "This payment's chargeback was just decided for us, and the creators are being paid back. Try the refund again in an hour.",
+      { code: 'CHARGEBACK_SETTLING' }
+    );
+  }
+}
+
 /** The charge's standing refunds already cover all of it. */
 export class NothingLeftToRefundError extends BusinessLogicError {
   constructor() {

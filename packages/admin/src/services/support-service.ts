@@ -1124,6 +1124,10 @@ export class SupportService extends BaseService {
         reason: row.reason,
         createdAt: row.stripeCreatedAt.toISOString(),
         respondBy,
+        // Filled by the late-win undo (Codex-2hxff.70).
+        lostOn: null,
+        lateWonOn: null,
+        settling: false,
       });
     }
     return result;

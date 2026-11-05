@@ -283,6 +283,9 @@ describe('Chargebacks', () => {
           reason: 'product_not_received',
           createdAt: '2026-10-22T09:00:00.000Z',
           respondBy: '2026-11-01T09:00:00.000Z',
+          lostOn: null,
+          lateWonOn: null,
+          settling: false,
         },
       ],
     });
