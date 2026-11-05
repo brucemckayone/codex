@@ -633,6 +633,60 @@ describe('handlePaymentWebhook — charge.refunded', () => {
     ]);
   });
 
+  it('the late win’s refund of a first payment says the buyer keeps the item through the purchase made since (Codex-2hxff.70, Q1)', async () => {
+    mockProcessRefund.mockResolvedValueOnce({
+      userId: 'u',
+      accessEnded: false,
+      itemTitle: 'The Making of Hollow Oak',
+      lateWinKeptThrough: { purchasedAt: '2026-11-22T18:40:00.000Z' },
+    });
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(createRefundEvent(), mockStripe, bundle.context);
+
+    expect(emails()).toEqual([
+      expect.objectContaining({
+        contentTitle: 'The Making of Hollow Oak',
+        accessNote:
+          'You still have The Making of Hollow Oak through your purchase on 22 Nov 2026. This refunds your first payment for it.',
+      }),
+    ]);
+  });
+
+  it('a late-won duplicate’s refund reads the duplicate line, not the first-payment one: it refunds the second payment (Codex-2hxff.70)', async () => {
+    mockProcessRefund.mockResolvedValueOnce({
+      userId: 'u',
+      accessEnded: false,
+      itemTitle: 'Winter Light',
+      duplicatePayment: true,
+      lateWinKeptThrough: { purchasedAt: '2026-09-03T10:15:00.000Z' },
+    });
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(createRefundEvent(), mockStripe, bundle.context);
+
+    expect(emails()[0]?.accessNote).toBe(
+      'You still have Winter Light. This refunds a second payment for it.'
+    );
+  });
+
+  it('the late-win note dates the purchase as a London day, with a three-letter month', async () => {
+    mockProcessRefund.mockResolvedValueOnce({
+      userId: 'u',
+      accessEnded: false,
+      itemTitle: 'Winter Light',
+      // 23:30 UTC in summer is the next day in London.
+      lateWinKeptThrough: { purchasedAt: '2026-09-21T23:30:00.000Z' },
+    });
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(createRefundEvent(), mockStripe, bundle.context);
+
+    expect(emails()[0]?.accessNote).toBe(
+      'You still have Winter Light through your purchase on 22 Sep 2026. This refunds your first payment for it.'
+    );
+  });
+
   it("a subscription charge's refund email says nothing about access", async () => {
     // No purchase: processRefund finds none for the PaymentIntent.
     mockProcessRefund.mockResolvedValueOnce(undefined);

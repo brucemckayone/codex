@@ -141,10 +141,50 @@ export function creditAction(
 }
 
 /** A chargeback that took the money and was not won: it blocks a refund. */
-export const BLOCKING_DISPUTE_STATUSES: readonly string[] = [
+const BLOCKING_DISPUTE_STATUSES: readonly string[] = [
   ...DISPUTE_CHARGEBACK_OPEN_STATUSES,
   'lost',
 ];
+
+/**
+ * A chargeback won and its outcome not yet applied: the creators' pay-back
+ * is still being written, so a refund now would race it (late-win data
+ * design §4.7). A normal win's moments before its re-pay, and a late win's
+ * undo, alike; the hourly reconcile retries one that failed.
+ */
+export function isSettlingDispute(dispute: {
+  status: string;
+  outcomeAppliedAt: Date | null;
+}): boolean {
+  return dispute.status === 'won' && dispute.outcomeAppliedAt === null;
+}
+
+/**
+ * What a charge's disputes say about refunding it now. The detail, the
+ * preview and the refund route all read it, so the page and the route
+ * never disagree:
+ *
+ * - `blocking`: an open or lost chargeback's status (`CHARGE_HAS_CHARGEBACK`);
+ * - `settling`: a won one not yet applied (`CHARGEBACK_SETTLING`);
+ * - `lateWon`: one won after it was lost (`late_won_at`). Owner Q7 ("Lift
+ *   the limit for it", Codex-2hxff.70): such a payment stays refundable
+ *   past the 14-day window, taken back from the creators like any refund.
+ */
+export function refundHolds(
+  rows: ReadonlyArray<{
+    status: string;
+    outcomeAppliedAt: Date | null;
+    lateWonAt: Date | null;
+  }>
+): { blocking: string | null; settling: boolean; lateWon: boolean } {
+  return {
+    blocking:
+      rows.find((row) => BLOCKING_DISPUTE_STATUSES.includes(row.status))
+        ?.status ?? null,
+    settling: rows.some(isSettlingDispute),
+    lateWon: rows.some((row) => row.lateWonAt !== null),
+  };
+}
 
 /** A dispute's Stripe status, as the screen groups it; null for a closed inquiry. */
 export function chargebackState(status: string): ChargebackState | null {
@@ -175,6 +215,12 @@ export interface HistoryContext {
   debtResolutions: ReadonlyMap<string, string | null>;
   /** A dispute's dates, by dispute id: opened, and won (null unless won). */
   disputeDates: ReadonlyMap<string, { openedAt: string; wonAt: string | null }>;
+  /**
+   * Disputes won after they were lost (`late_won_at`, Codex-2hxff.70), by
+   * id, with when the loss was applied (null if it never finished). Their
+   * lines carry that date and the step's kind, for S3's wording.
+   */
+  lateWins: ReadonlyMap<string, { lostOn: string | null }>;
   /**
    * A late take-back's credit, by step id, with its one action worked out
    * (`creditAction`; Codex-2hxff.73).
@@ -237,9 +283,18 @@ export function sliceHistory(
     const outcome = credit
       ? creditOutcome(step, credit, baseOutcome)
       : baseOutcome;
+    const lateWin =
+      step.causeType === 'dispute'
+        ? context.lateWins.get(step.causeId)
+        : undefined;
+    const kind = isStepKind(step.kind) ? step.kind : undefined;
     placed.push({
       step,
       line: {
+        // A late win's line says when it was lost, and a cancellation or a
+        // reduction is worded as one (S3); other lines leave both out.
+        ...(lateWin && { lostOn: lateWin.lostOn }),
+        ...(lateWin && kind && { stepKind: kind }),
         causeType: step.causeType === 'dispute' ? 'dispute' : 'refund',
         causeId: step.causeId,
         causeAmountCents:
@@ -307,6 +362,20 @@ export function sliceHistory(
     )
     .reduce((sum, { line }) => sum + line.amountCents, 0);
   return { history, takenCents, owedCents, owedToPayeeCents };
+}
+
+type StepKind = NonNullable<HistoryLine['stepKind']>;
+
+/** `check_payout_reversals_kind`'s values, as a history line names them. */
+const STEP_KINDS: Readonly<Record<StepKind, true>> = {
+  transfer_reversal: true,
+  pending_reduction: true,
+  retained_fee: true,
+  cancellation: true,
+};
+
+function isStepKind(kind: string): kind is StepKind {
+  return Object.hasOwn(STEP_KINDS, kind);
 }
 
 /**

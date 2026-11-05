@@ -13,6 +13,9 @@
 // The Q4 rule on a balance below zero, as `MyStripeBalance.negative.rule`
 // carries it (Codex-2hxff.30); apps/web reads it from here, not @codex/payments
 export type { DebtRule } from '@codex/payments';
+// The 08:00 London run, for ecom-api's dispute reconcile, which does no
+// late-win work on it (Codex-2hxff.70); ecom-api reads it from here.
+export { isBankPayoutRun } from '@codex/payments';
 // Re-export validation schemas for convenience
 export {
   type BillingInterval,

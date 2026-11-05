@@ -31,6 +31,11 @@ export type ChargebackState = 'inquiry' | 'open' | 'won' | 'lost';
 export interface SupportRefundWindow {
   closesAt: string;
   isOpen: boolean;
+  /**
+   * A late-won chargeback lifted the window (owner Q7, Codex-2hxff.70):
+   * `isOpen` is true and `closesAt` keeps the 14-day date, which has passed.
+   */
+  liftedByLateWin: boolean;
 }
 
 /** A person named on a record: a payee, or whoever issued a refund. */
@@ -998,7 +1003,9 @@ export interface HeldPriceMove {
   /**
    * The member has an open chargeback, so the run waits for it to end
    * (owner D1, "Wait while disputed") and moves `queuedFor` a day on each
-   * time. Filled by the late-win undo (Codex-2hxff.70, D1-a).
+   * time. It mirrors the price-moves sweep, in the sweep's own order: true
+   * only for a row not closed, on a subscription that hasn't ended, whose
+   * tier or course subscription has `disputed_at` set (Codex-2hxff.70, D1-a).
    */
   waitsForDispute: boolean;
   /** Close's record. Null in the list. */

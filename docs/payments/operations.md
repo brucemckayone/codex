@@ -329,6 +329,64 @@ count, so press it again. A change that isn't stopped answers 409
 restarted. A Retry or a Restart takes its row off the badge at once; the list
 keeps it, queued, until the run takes it.
 
+**Waiting for a chargeback** (owner D1, `Codex-2hxff.70`). A queued row whose
+member has an open chargeback on that subscription (`disputed_at`) waits for it:
+the run moves it a day on each time, sends no email and writes nothing at
+Stripe, so a queued time that keeps moving is expected. A held one would wait
+the same way once retried. Both say so (`waitsForDispute`); an ended
+subscription's or a closed row doesn't. Nothing needs doing: once the
+chargeback ends, the next run treats them as anyone else.
+
+## Late wins
+
+A chargeback lost and then decided for us after all (a "late win",
+`Codex-2hxff.70`) is undone automatically: the buyer gets the item back (unless
+they bought it again, the payment was a duplicate, refunds still cover it, or
+another chargeback holds it), the creators are paid back by new payouts, a
+buyer who bought it again has their first payment refunded, a duplicate
+payment is refunded (owner, "Refund it"), and a buyer whose access came back
+is emailed once. A subscription the loss cancelled stays ended
+and its subscriber isn't emailed. The webhook does it when Stripe's event
+arrives; the hourly reconcile catches one whose events were missed, from
+Stripe's events of the last 4 days and, on every run but the 08:00 London one,
+by re-checking our lost chargebacks of the last 12 months
+([dispute record](dispute-record.md)).
+
+**On the charge page.** The chargeback row says when it was lost and when it
+was won (`lostOn`, `lateWonOn`), and its history lines say the loss date and
+each step's kind. While the creators are being paid back (`settling`: won, its
+outcome not yet applied, a normal win's included), refunds are refused with 422
+`CHARGEBACK_SETTLING`, "This payment's chargeback was just decided for us, and
+the creators are being paid back. Try the refund again in an hour.", on the
+form, the preview and the route alike. It usually lasts seconds; at most an hour
+while a step is retried.
+
+**No 14-day limit** (owner Q7, "Lift the limit for it"). A late-won payment
+stays refundable from the charge page whenever the buyer asks, and the refund
+is taken back from the creators like any other. Nothing about it is automatic.
+The charge's refund window says so with `liftedByLateWin`: `isOpen` is true,
+and `closesAt` keeps the 14-day date, which has passed. Anything that reads
+`isOpen` or `closesAt` must allow for it.
+
+**Alerts** (ids, codes and counts only; Q6). A late win that works logs
+"Late win: loss undone" at info and alerts nobody. Each of these is an error
+with an `errorId`, unless it says otherwise:
+
+| Alert | What it means | What to do |
+|---|---|---|
+| Late win: Stripe refused the refund of a payment the buyer made twice… | The refund for a buyer who bought it again, or of a duplicate payment, was refused (`stripeCode`). Nothing is marked, the creators' pay-back stays held, and it is retried hourly, alerting each time | Look the charge up in Stripe; if it can't be refunded, refund the buyer another way |
+| A won dispute was reported lost: nothing changed, check it in Stripe | Stripe now says lost a dispute we hold as won. Nothing was changed | Check the dispute in Stripe's Dashboard |
+| The hourly late-win check read its page limit of Stripe's disputes | More than 300 disputes since our oldest lost one: the older ones weren't re-checked this run | None by itself; if it repeats, the check needs a wider limit |
+| The hourly late-win check could not read a page of Stripe's disputes / could not re-check lost disputes for a late win | A Stripe or database read failed; the next run retries | None unless it repeats |
+| WEB_APP_URL is not set: the late win's access-restored email… | The buyer's email had no working link, so it wasn't sent | Set `WEB_APP_URL` on ecom-api |
+| Late win: the buyer's access-restored email could not be claimed (warning) | The email wasn't sent and won't be retried; their access is back | None |
+
+A late-win step that fails otherwise raises the reconcile's existing "A dispute
+could not be settled by the hourly reconcile", and is retried every hour. A
+late win settled by hand before the release is recorded as applied by
+[release step R18](release-checklist.md#r18--before-the-deploy-lost-chargebacks-already-settled-by-hand),
+so nothing runs again for it.
+
 ## Payout schedule backfill
 
 `packages/database/scripts/backfill-payout-schedule.ts` moves Connect accounts
