@@ -36,6 +36,17 @@
     min-height: 0;
   }
 
+  /* A child keeps its own height and Body scrolls instead. A flex column
+     that overflows shrinks a child to its automatic minimum: below the
+     height of a fixed-height Button, and zero for anything that clips, as a
+     Skeleton does (MediaPicker's "Show more" drew 21px of 32). Zero
+     specificity, so a child that means to flex (an inner scroller's
+     `flex: 1; min-height: 0`) wins with any rule of its own. In a drawer the
+     children are the panel's flex items, and this holds there too. */
+  :where(.dialog-body) > :global(*) {
+    flex-shrink: 0;
+  }
+
   /* Flush: a bare box that still takes the rest of the panel and scrolls.
      Before the drawer rule, which outranks it at the same specificity. */
   .dialog-body[data-flush] {
