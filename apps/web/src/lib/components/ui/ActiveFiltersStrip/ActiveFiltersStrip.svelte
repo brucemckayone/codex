@@ -94,7 +94,7 @@
     padding: var(--space-1) var(--space-2);
     background: transparent;
     border: 0;
-    color: var(--color-interactive);
+    color: var(--color-link);
     font-family: var(--font-sans);
     font-size: var(--text-xs);
     font-weight: var(--font-medium);
@@ -105,7 +105,7 @@
   }
 
   .active-filters__clear:hover {
-    color: var(--color-interactive-hover);
+    color: var(--color-link-hover);
   }
 
   .active-filters__clear:focus-visible {

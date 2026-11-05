@@ -17,6 +17,56 @@ export const MEDIA_STATUS = {
   FAILED: 'failed',
 } as const;
 
+/**
+ * How long a presigned upload URL lives (`MediaItemService.create`). An S3 PUT
+ * checks it only when the PUT STARTS, so an upload can still be landing after.
+ */
+export const MEDIA_UPLOAD_URL_TTL_SECONDS = 60 * 60;
+
+/**
+ * An `uploading` row created this long ago has stalled (Codex-a6ofh.1.4): its
+ * URL died an hour before, which leaves time for even a multi-GB transfer that
+ * started just inside it. Counted from creation, when the URL was minted, not
+ * the last update: renaming an upload in flight moves `updatedAt`. Not the
+ * hourly cron's 24 h `STALLED_UPLOAD_MS` (@codex/transcoding), which is when
+ * R2 is asked whether the file landed: a different question.
+ */
+export const MEDIA_UPLOAD_STALLED_AFTER_MS =
+  (MEDIA_UPLOAD_URL_TTL_SECONDS + 60 * 60) * 1000;
+
+/**
+ * The media library's status groups (Codex-a6ofh.1.4, data-design §1.1),
+ * defined once so the worker's `status` filter and the web's tiles cannot
+ * drift. `attention` is also every upload stalled past
+ * {@link MEDIA_UPLOAD_STALLED_AFTER_MS}: a rule on time, not a status, so the
+ * reader applies it beside these.
+ *
+ * Coupled: `MediaItemService.summary()` counts `failed` (eq FAILED) and
+ * `stopped` (the stall) so the header's "N need attention" equals what the
+ * `attention` filter lists. A status added to `attention` must be counted
+ * there too (the media-list-filters integration test pins the equality).
+ */
+export const MEDIA_STATUS_GROUPS = {
+  processing: [MEDIA_STATUS.UPLOADED, MEDIA_STATUS.TRANSCODING],
+  attention: [MEDIA_STATUS.FAILED],
+  /**
+   * What the media picker OFFERS a draft (Codex-a6ofh.1.8, its "All"):
+   * ready, and processing on its way to ready; never a failed or stopped
+   * item. An offer, not the attach rule: `ContentService.validateMediaItem`
+   * is that, and it asks for ready once content is live.
+   */
+  attachable: [
+    MEDIA_STATUS.READY,
+    MEDIA_STATUS.UPLOADED,
+    MEDIA_STATUS.TRANSCODING,
+  ],
+} as const;
+
+export type MediaStatusGroup = keyof typeof MEDIA_STATUS_GROUPS;
+
+/** A library page: divides into 4, 3 and 2 columns (data-design §1.1). */
+export const MEDIA_LIBRARY_PAGE_SIZE = 24;
+
 export const CONTENT_TYPES = {
   VIDEO: 'video',
   AUDIO: 'audio',

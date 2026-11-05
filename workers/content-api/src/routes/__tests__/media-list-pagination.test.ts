@@ -28,7 +28,7 @@ const USER = {
   role: 'creator',
 };
 
-const mediaSpies = { list: vi.fn() };
+const mediaSpies = { list: vi.fn(), summary: vi.fn(), get: vi.fn() };
 
 vi.mock('@codex/content', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@codex/content')>();
@@ -48,19 +48,21 @@ const testEnv = {
   ENVIRONMENT: 'development',
 } as unknown as typeof env;
 
-function buildApp() {
+function buildApp(signedIn = true) {
   const app = new Hono<{ Variables: Record<string, unknown> }>();
   app.use('*', async (c, next) => {
-    c.set('user', USER);
-    c.set('session', { id: 'sess_test', userId: USER.id });
+    if (signedIn) {
+      c.set('user', USER);
+      c.set('session', { id: 'sess_test', userId: USER.id });
+    }
     await next();
   });
   app.route('/api/media', media);
   return app;
 }
 
-async function get(query: string): Promise<Response> {
-  return buildApp().fetch(
+async function get(query: string, signedIn = true): Promise<Response> {
+  return buildApp(signedIn).fetch(
     new Request(`http://content-api.test/api/media${query}`),
     testEnv,
     createExecutionContext()
@@ -107,7 +109,7 @@ describe('GET /api/media pages by the requested page and limit', () => {
     const res = await get('');
 
     expect(res.status).toBe(200);
-    expect(listCall().pagination).toEqual({ page: 1, limit: 20 });
+    expect(listCall().pagination).toEqual({ page: 1, limit: 24 });
   });
 
   it('passes a limit of 100 through (the page builder film slots)', async () => {
@@ -124,5 +126,99 @@ describe('GET /api/media pages by the requested page and limit', () => {
     const { filters, pagination } = listCall();
     expect(pagination).toEqual({ page: 3, limit: 7 });
     expect(filters).toMatchObject({ status: 'ready', mediaType: 'video' });
+  });
+
+  it('passes the search, a status group, the usage filter and a new sort to the service (Codex-a6ofh.1.4)', async () => {
+    const res = await get(
+      '?search=%2050%25%20&status=attention&usage=unused&sortBy=durationSeconds'
+    );
+
+    expect(res.status).toBe(200);
+    expect(listCall().filters).toMatchObject({
+      search: '50%',
+      status: 'attention',
+      usage: 'unused',
+      sortBy: 'durationSeconds',
+    });
+  });
+
+  it('refuses a usage or status the API does not know, before the service runs, naming what it takes', async () => {
+    expect((await get('?usage=some')).status).toBe(400);
+    const res = await get('?status=stalled');
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as {
+      error: { code: string; details?: unknown };
+    };
+    expect(body.error.code).toBe('VALIDATION_ERROR');
+    // One enum, so the refusal lists the groups beside the raw statuses.
+    expect(JSON.stringify(body.error.details)).toContain('attention');
+    expect(mediaSpies.list).not.toHaveBeenCalled();
+  });
+});
+
+describe('GET /api/media/summary (Codex-a6ofh.1.6)', () => {
+  beforeEach(() => {
+    mediaSpies.summary.mockReset();
+    mediaSpies.summary.mockResolvedValue({
+      total: 12,
+      totalBytes: 6_871_947_673,
+      failed: 1,
+      stopped: 1,
+    });
+  });
+
+  // Registered above `/:id`, which would read "summary" as an id and 400.
+  it("answers the caller's own summary, never reading 'summary' as an id", async () => {
+    const res = await get('/summary');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      data: { total: 12, totalBytes: 6_871_947_673, failed: 1, stopped: 1 },
+    });
+    expect(mediaSpies.summary).toHaveBeenCalledWith(USER.id);
+  });
+
+  it('needs a session', async () => {
+    expect((await get('/summary', false)).status).toBe(401);
+    expect(mediaSpies.summary).not.toHaveBeenCalled();
+  });
+});
+
+// The picker shows the chosen item from the single read alone
+// (Codex-a6ofh.1.8), so it resolves the poster as the list rows do.
+describe('GET /api/media/:id sends its poster', () => {
+  const ID = '6b000000-0000-4000-8000-000000000001';
+  const KEY = `creator-1/media-thumbnails/${ID}/md.webp`;
+
+  beforeEach(() => mediaSpies.get.mockReset());
+
+  async function read(cdnBase: string | undefined) {
+    mediaSpies.get.mockResolvedValue({
+      id: ID,
+      title: 'Tour',
+      thumbnailKey: KEY,
+    });
+    return buildApp().fetch(
+      new Request(`http://content-api.test/api/media/${ID}`),
+      { ...testEnv, R2_PUBLIC_URL_BASE: cdnBase } as typeof env,
+      createExecutionContext()
+    );
+  }
+
+  it("as the CDN URL the list rows send, for the caller's own item", async () => {
+    const res = await read('https://cdn.test');
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: { thumbnailUrl: string | null };
+    };
+    expect(body.data.thumbnailUrl).toBe(`https://cdn.test/${KEY}`);
+    expect(mediaSpies.get).toHaveBeenCalledWith(ID, USER.id);
+  });
+
+  it('as null when no CDN base is configured, never a relative key', async () => {
+    const res = await read(undefined);
+    const body = (await res.json()) as {
+      data: { thumbnailUrl: string | null };
+    };
+    expect(body.data.thumbnailUrl).toBeNull();
   });
 });

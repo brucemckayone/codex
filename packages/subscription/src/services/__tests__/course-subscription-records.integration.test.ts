@@ -276,6 +276,91 @@ describe('course subscription records, currency and errors', () => {
     expect(slice?.creatorOrgAgreementId).toBeNull();
   });
 
+  // Codex-2hxff.97: a member's credit from another subscription paid this
+  // bill, so its creator is paid nothing; support is told once.
+  it('a bill the credit paid in full: one support alert, the invoice marked, no payouts', async () => {
+    const { sub, row } = await subscribed(creatorId);
+    const update = vi.fn().mockResolvedValue({});
+    Object.assign(stripe.invoices, { update });
+    const error = vi.spyOn(
+      (service as unknown as { obs: { error: (...a: unknown[]) => void } }).obs,
+      'error'
+    );
+    const invoice = createMockStripeInvoice({
+      amount_paid: 0,
+      total: 5000,
+      starting_balance: -6493,
+      payments: { data: [] },
+      currency: 'gbp',
+      parent: {
+        subscription_details: {
+          subscription: sub.id,
+          metadata: { type: COURSE_SUBSCRIPTION_METADATA_TYPE },
+        },
+      },
+    }) as unknown as Stripe.Invoice;
+
+    await service.handleCourseInvoicePaymentSucceeded(invoice, sub);
+
+    const alerts = error.mock.calls.filter(([message]) =>
+      String(message).startsWith('Customer credit paid')
+    );
+    expect(alerts).toEqual([
+      [
+        expect.any(String),
+        expect.objectContaining({
+          invoiceId: invoice.id,
+          stripeSubscriptionId: sub.id,
+          subscriptionId: row.id,
+          organizationId: orgId,
+          kind: 'course',
+          creditCoveredCents: 5000,
+          amountPaidCents: 0,
+        }),
+      ],
+    ]);
+    expect(update).toHaveBeenCalledWith(invoice.id, {
+      metadata: { codex_credit_alerted: expect.any(String) },
+    });
+    expect(await creatorSliceOf(row.id)).toBeUndefined();
+    error.mockRestore();
+  });
+
+  // Codex-2hxff.33 (data design §1.4): the fee in force at the invoice's own
+  // time, like the agreement, never the fee when its webhook lands.
+  it("resolves the creator's fees at the invoice's own time", async () => {
+    const { sub } = await subscribed(creatorId);
+    const getFeesForCreator = vi.fn(async () => ({
+      platformFeePercent: 1000,
+      orgFeePercent: 1000,
+      minPlatformFeeCents: 0,
+      minTransferCents: 0,
+    }));
+    const atService = new CourseSubscriptionService(
+      {
+        db,
+        environment: 'test',
+        ...createTestMoneyDeps(),
+        feeConfig: { getFeesForCreator } as unknown as FeeConfigService,
+      },
+      stripe
+    );
+    const created = Math.floor(Date.now() / 1000) - 3 * 86_400;
+
+    await atService.handleCourseInvoicePaymentSucceeded(
+      { ...invoiceFor(sub, 'gbp'), created } as Stripe.Invoice,
+      sub
+    );
+
+    expect(getFeesForCreator).toHaveBeenCalledTimes(1);
+    expect(getFeesForCreator).toHaveBeenCalledWith(
+      orgId,
+      creatorId,
+      'subscription',
+      new Date(created * 1000)
+    );
+  });
+
   // Owner decision 2026-10-23, "Keep recorded fee" (Codex-2hxff.49): a replay
   // keeps the first split, and the platform fee recorded, so a fee change
   // between deliveries can neither re-size a slice nor leave the slices short

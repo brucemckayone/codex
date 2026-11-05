@@ -23,6 +23,7 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
+  import { filterHref } from '$lib/utils/filter-url';
   import * as m from '$paraglide/messages';
   import { Alert, Badge, EmptyState, PageHeader, Skeleton } from '$lib/components/ui';
   import * as Card from '$lib/components/ui/Card';
@@ -40,6 +41,7 @@
   import AvatarFallback from '$lib/components/ui/Avatar/AvatarFallback.svelte';
   import KPICard from '$lib/components/studio/analytics/KPICard.svelte';
   import CreatorBreakdownRail from '$lib/components/studio/payouts/CreatorBreakdownRail.svelte';
+  import UpcomingFeeNote from '$lib/components/studio/UpcomingFeeNote.svelte';
   import {
     getMyConnectStatus,
     getMyStripeBalance,
@@ -341,12 +343,7 @@
   };
 
   function setUrlParam(key: string, value: string | null) {
-    const params = new URLSearchParams(page.url.searchParams);
-    if (value && value !== URL_DEFAULTS[key]) params.set(key, value);
-    else params.delete(key);
-    if (key !== 'page') params.delete('page');
-    const qs = params.toString();
-    goto(`/studio/payouts${qs ? `?${qs}` : ''}`, {
+    goto(filterHref(page.url, { [key]: value }, URL_DEFAULTS), {
       replaceState: true,
       keepFocus: true,
     });
@@ -629,6 +626,10 @@
       title={m.payouts_title()}
       description={m.payouts_description()}
     />
+
+    <!-- A fee rise that hasn't started (Codex-2hxff.33 F5, N3): the same
+         note and read as Billing, above the bank payouts and money held. -->
+    {#if orgId}<UpcomingFeeNote organizationId={orgId} />{/if}
 
     <div class="payouts-grid">
     <div class="payouts-main">

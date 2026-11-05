@@ -341,7 +341,7 @@
 
   .toolbar-btn[data-active] {
     background-color: var(--color-brand-primary-subtle);
-    color: var(--color-interactive-active);
+    color: var(--color-link-active);
   }
 
   .toolbar-btn:disabled {
@@ -417,11 +417,12 @@
 
   .link-action-btn--apply {
     background-color: var(--color-interactive);
-    color: var(--color-text-on-brand);
+    color: var(--color-on-interactive);
   }
 
   .link-action-btn--apply:hover {
     background-color: var(--color-interactive-hover);
+    color: var(--color-on-interactive-hover);
   }
 
   .link-action-btn--remove {

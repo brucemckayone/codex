@@ -77,6 +77,7 @@ import {
 } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
+  assertYearlyNotBelowMonthly,
   ConnectAccountNotReadyError,
   TierHasOnlyItemsError,
   TierHasSubscribersError,
@@ -87,6 +88,14 @@ import {
   createKeyRefusal,
   stripeRefusalDetail,
 } from './create-key-refusal';
+import {
+  platformWriteMetadata,
+  recordTierPriceChange,
+} from './pending-price-change';
+import {
+  type PriceChangeProgress,
+  readPriceChangeProgress,
+} from './price-moves-sweep';
 
 type SubscriptionTier = typeof subscriptionTiers.$inferSelect;
 
@@ -139,42 +148,7 @@ const TIER_CREATE_KEY: CreateKeySubject = {
 };
 
 /**
- * Fan out a tier's new canonical Stripe Price id to every active /
- * cancelling subscription on that tier. Injected into TierService so
- * the tier package can trigger propagation without reaching into
- * `SubscriptionService` directly (keeps the service separation — tiers
- * own tier records, subscriptions own subscription mutations).
- *
- * Implemented by
- * `SubscriptionService.propagateTierPriceToActiveSubscriptions`. Its one
- * call site, the Studio `updateTier` flow, invokes this hook AFTER the tier
- * DB persist commits — a propagation failure therefore does not roll back
- * the price change on the tier itself. `interval` is load-bearing: only that
- * interval's subscribers move (Codex-2hxff.3). A Dashboard-created Price is
- * never propagated (`recordStripePriceDrift`).
- *
- * Fire-and-forget is the caller's responsibility: if an
- * `ExecutionContext` is available, wrap the call in `waitUntil(...)`
- * before handing the thunk to TierService. TierService awaits the
- * returned promise only to keep the service layer synchronous for
- * tests — the awaited promise will typically already be wrapped in
- * `waitUntil` by the factory that constructed the propagator, so the
- * await resolves quickly and the heavy work (potentially thousands of
- * Stripe calls) lives on the execution context.
- */
-export type TierPricePropagator = (args: {
-  tierId: string;
-  newStripePriceId: string;
-  organizationId: string;
-  interval: 'month' | 'year';
-}) => Promise<void> | void;
-
-/**
  * Optional extras on `TierService` beyond the base `ServiceConfig`.
- * `propagator` — see `TierPricePropagator`. When absent, TierService
- * skips propagation (sync-back + UI price changes still succeed; only
- * the fan-out to existing subscriptions is no-op'd). Narrow unit tests
- * that do not exercise propagation can omit this injection entirely.
  */
 interface TierServiceConfig extends ServiceConfig {
   /**
@@ -187,57 +161,16 @@ interface TierServiceConfig extends ServiceConfig {
    * unchecked `as typeof dbWs` cast.
    */
   dbWs: DatabaseWs;
-  propagator?: TierPricePropagator;
 }
 
 export class TierService extends BaseService {
   private readonly stripe: Stripe;
   private readonly dbWs: DatabaseWs;
-  private readonly propagator: TierPricePropagator | undefined;
 
   constructor(config: TierServiceConfig, stripe: Stripe) {
     super(config);
     this.stripe = stripe;
     this.dbWs = config.dbWs;
-    this.propagator = config.propagator;
-  }
-
-  /**
-   * Fire the injected tier-price propagator if wired, swallowing any
-   * synchronous or asynchronous failure. Propagation is strictly
-   * best-effort — the tier DB state (new canonical Price id) is
-   * already authoritative by the time this runs; failing to swap
-   * existing Stripe subscription items is a recoverable operator
-   * concern logged by `SubscriptionService.propagateTierPriceToActiveSubscriptions`
-   * itself, not a reason to reject the tier update.
-   *
-   * Tests call this directly via the injected propagator to assert
-   * the propagator was invoked with the right args; production wiring
-   * passes a thunk that itself wraps the work in
-   * `ctx.executionCtx.waitUntil(...)` so the slow path never blocks
-   * the webhook response.
-   */
-  private async firePropagation(args: {
-    tierId: string;
-    newStripePriceId: string;
-    organizationId: string;
-    interval: 'month' | 'year';
-  }): Promise<void> {
-    if (!this.propagator) return;
-    try {
-      await this.propagator(args);
-    } catch (error) {
-      this.obs.warn(
-        'TierService: tier price propagator threw — continuing (DB is already updated)',
-        {
-          tierId: args.tierId,
-          organizationId: args.organizationId,
-          newStripePriceId: args.newStripePriceId,
-          interval: args.interval,
-          error: error instanceof Error ? error.message : String(error),
-        }
-      );
-    }
   }
 
   /**
@@ -318,6 +251,7 @@ export class TierService extends BaseService {
     orgId: string,
     input: CreateTierInput
   ): Promise<SubscriptionTier> {
+    assertYearlyNotBelowMonthly(input);
     // Validate Connect account is ready
     await this.requireActiveConnect(orgId);
 
@@ -594,11 +528,22 @@ export class TierService extends BaseService {
    *
    * If the DB update fails after Stripe state has changed, new Prices are
    * archived and old Prices are restored to prevent Stripe/DB divergence.
+   *
+   * A changed price reaches existing subscribers through a durable record
+   * (Codex-2hxff.85, .86; data design §2.3): in the SAME transaction as the
+   * tier's new price ids, each changed interval gets a `price_changes` row
+   * (latest wins over a change still going out) and one `due` row per
+   * subscriber it has to tell (`recordTierPriceChange`). ecom-api's hourly
+   * step then emails each of them and moves them, 30 days from their own
+   * email. A failure here fails the save and rolls back the Stripe Prices, so
+   * nobody is lost between the save and the step. `actorUserId` is the owner
+   * who saved, recorded on the change.
    */
   async updateTier(
     tierId: string,
     orgId: string,
-    input: UpdateTierInput
+    input: UpdateTierInput,
+    actorUserId: string | null = null
   ): Promise<SubscriptionTier> {
     try {
       const existing = await this.getTierOrThrow(tierId, orgId);
@@ -610,6 +555,17 @@ export class TierService extends BaseService {
       const annualChanged =
         input.priceAnnual !== undefined &&
         input.priceAnnual !== existing.priceAnnual;
+
+      // A changed price is checked, either alone against the stored other
+      // one. An edit that changes no price (a rename, which Edit Tier sends
+      // with both prices as they stand) passes even on a tier saved before
+      // the rule (review C1 cycle 3 and 4, N3).
+      if (monthlyChanged || annualChanged) {
+        assertYearlyNotBelowMonthly({
+          priceMonthly: input.priceMonthly ?? existing.priceMonthly,
+          priceAnnual: input.priceAnnual ?? existing.priceAnnual,
+        });
+      }
 
       let newMonthlyPriceId = existing.stripePriceMonthlyId;
       let newAnnualPriceId = existing.stripePriceAnnualId;
@@ -648,6 +604,7 @@ export class TierService extends BaseService {
           if (existing.stripePriceMonthlyId) {
             await this.stripe.prices.update(existing.stripePriceMonthlyId, {
               active: false,
+              metadata: platformWriteMetadata(),
             });
             archivedOldMonthlyId = existing.stripePriceMonthlyId;
           }
@@ -674,6 +631,7 @@ export class TierService extends BaseService {
           if (existing.stripePriceAnnualId) {
             await this.stripe.prices.update(existing.stripePriceAnnualId, {
               active: false,
+              metadata: platformWriteMetadata(),
             });
             archivedOldAnnualId = existing.stripePriceAnnualId;
           }
@@ -719,22 +677,69 @@ export class TierService extends BaseService {
         isNull(subscriptionTiers.deletedAt)
       );
 
+      // Each interval whose Price this save minted, as its change records it.
+      const changedPrices: Array<{
+        interval: 'month' | 'year';
+        newStripePriceId: string;
+        fromAmountCents: number;
+        newAmountCents: number;
+      }> = [];
+      if (createdNewMonthlyId && input.priceMonthly !== undefined) {
+        changedPrices.push({
+          interval: 'month',
+          newStripePriceId: createdNewMonthlyId,
+          fromAmountCents: existing.priceMonthly,
+          newAmountCents: input.priceMonthly,
+        });
+      }
+      if (createdNewAnnualId && input.priceAnnual !== undefined) {
+        changedPrices.push({
+          interval: 'year',
+          newStripePriceId: createdNewAnnualId,
+          fromAmountCents: existing.priceAnnual,
+          newAmountCents: input.priceAnnual,
+        });
+      }
+
       try {
-        if (input.isRecommended === true) {
-          // Atomically clear other recommended flags + update this tier. The
-          // flag moves between two tier rows, so every live tier is locked
-          // first, in id order (lock order, file header): taking the old
-          // recommended row and then this one could cycle with a reorder or
-          // a delete that holds this one and waits for the other.
+        if (input.isRecommended === true || changedPrices.length > 0) {
           await this.dbWs.transaction(async (tx) => {
-            await this.lockOrgTiers(tx, orgId);
-            await this.ensureSingleRecommended(tx, orgId, tierId);
+            if (input.isRecommended === true) {
+              // Atomically clear other recommended flags + update this tier.
+              // The flag moves between two tier rows, so every live tier is
+              // locked first, in id order (lock order, file header): taking
+              // the old recommended row and then this one could cycle with a
+              // reorder or a delete that holds this one and waits for the
+              // other.
+              await this.lockOrgTiers(tx, orgId);
+              await this.ensureSingleRecommended(tx, orgId, tierId);
+            }
+            // The tier row first: it serialises two saves of one tier, so
+            // the second's latest-wins sees the first's committed change.
             const [result] = await tx
               .update(subscriptionTiers)
               .set(updateSet)
               .where(updateWhere)
               .returning();
             updated = result;
+            if (!result) return;
+            const now = new Date();
+            for (const change of changedPrices) {
+              const recorded = await recordTierPriceChange(tx, tierId, {
+                organizationId: orgId,
+                ...change,
+                createdByUserId: actorUserId,
+                now,
+              });
+              this.obs.info('Tier price change recorded', {
+                tierId,
+                organizationId: orgId,
+                interval: change.interval,
+                priceChangeId: recorded.changeId,
+                supersededId: recorded.supersededId,
+                total: recorded.total,
+              });
+            }
           });
         } else {
           const [result] = await this.db
@@ -777,32 +782,6 @@ export class TierService extends BaseService {
         organizationId: orgId,
         priceChanged: monthlyChanged || annualChanged,
       });
-
-      // Q1.2 (Codex-3xyyb): if either interval's canonical Price
-      // changed, fan the new id(s) out to existing active/cancelling
-      // subscriptions. Runs AFTER the DB commit — the tier is
-      // authoritative and a propagation failure is best-effort. Fires
-      // once per changed interval because Stripe tracks billing
-      // interval per subscription item, and a single tier can have
-      // both monthly and annual subscribers that each need their own
-      // Price id swapped. `createdNewMonthlyId` / `createdNewAnnualId`
-      // are the freshly-minted ids from earlier in this method.
-      if (createdNewMonthlyId) {
-        await this.firePropagation({
-          tierId,
-          newStripePriceId: createdNewMonthlyId,
-          organizationId: orgId,
-          interval: 'month',
-        });
-      }
-      if (createdNewAnnualId) {
-        await this.firePropagation({
-          tierId,
-          newStripePriceId: createdNewAnnualId,
-          organizationId: orgId,
-          interval: 'year',
-        });
-      }
 
       return updated;
     } catch (error) {
@@ -935,19 +914,34 @@ export class TierService extends BaseService {
     try {
       const existing = await this.getTierOrThrow(tierId, orgId);
 
-      // Check for active subscribers
-      const [subCount] = await this.db
-        .select({ count: sql<number>`count(*)::int` })
+      // Anyone on the tier, and anyone waiting to move to it at their renewal
+      // (Codex-2hxff.16, T5): they would land on a deleted tier. A cancelled
+      // mover who could still reactivate counts too, since the move comes
+      // back with them (T4). A change of billing alone keeps them on the tier
+      // (`pending_tier_id` is the tier itself, Codex-2hxff.97): a subscriber,
+      // never a mover too. The same rows `PlanAccessService.getDeleteImpact`
+      // counts for the dialog.
+      const [counts] = await this.db
+        .select({
+          subscribers: sql<number>`count(*) FILTER (WHERE ${subscriptions.tierId} = ${tierId})::int`,
+          movingIn: sql<number>`count(*) FILTER (WHERE ${subscriptions.pendingTierId} = ${tierId} AND ${subscriptions.tierId} <> ${tierId})::int`,
+        })
         .from(subscriptions)
         .where(
           and(
-            eq(subscriptions.tierId, tierId),
+            sql`(${subscriptions.tierId} = ${tierId} OR ${subscriptions.pendingTierId} = ${tierId})`,
             sql`${subscriptions.status} NOT IN ('cancelled')`
           )
         );
 
-      if (subCount && subCount.count > 0) {
-        throw new TierHasSubscribersError(tierId, subCount.count);
+      const subscriberCount = counts?.subscribers ?? 0;
+      const movingInCount = counts?.movingIn ?? 0;
+      if (subscriberCount > 0 || movingInCount > 0) {
+        throw new TierHasSubscribersError(
+          tierId,
+          subscriberCount,
+          movingInCount
+        );
       }
 
       const moveTo =
@@ -1192,6 +1186,24 @@ export class TierService extends BaseService {
         )
       )
       .orderBy(subscriptionTiers.sortOrder);
+  }
+
+  /**
+   * How the org's tier price changes are going, for the Studio note
+   * (Codex-2hxff.86, data design §2.6): its live tiers' changes that are
+   * running or stopped, or finished in the last 14 days, newest first. One
+   * read, uncached, and never on the public tier list: the counts change
+   * only when the hourly step runs.
+   */
+  async listPriceChangeProgress(orgId: string): Promise<PriceChangeProgress[]> {
+    try {
+      return await readPriceChangeProgress(this.db, {
+        kind: 'tier',
+        organizationId: orgId,
+      });
+    } catch (error) {
+      this.handleError(error, 'listPriceChangeProgress');
+    }
   }
 
   /**
@@ -1592,7 +1604,10 @@ export class TierService extends BaseService {
     // Archive newly created prices
     if (createdNewMonthlyId) {
       try {
-        await this.stripe.prices.update(createdNewMonthlyId, { active: false });
+        await this.stripe.prices.update(createdNewMonthlyId, {
+          active: false,
+          metadata: platformWriteMetadata(),
+        });
         this.obs.info('New monthly price archived after DB failure', {
           stripePriceId: createdNewMonthlyId,
           tierId,
@@ -1613,7 +1628,10 @@ export class TierService extends BaseService {
 
     if (createdNewAnnualId) {
       try {
-        await this.stripe.prices.update(createdNewAnnualId, { active: false });
+        await this.stripe.prices.update(createdNewAnnualId, {
+          active: false,
+          metadata: platformWriteMetadata(),
+        });
         this.obs.info('New annual price archived after DB failure', {
           stripePriceId: createdNewAnnualId,
           tierId,
@@ -1635,7 +1653,10 @@ export class TierService extends BaseService {
     // Restore old prices that were archived
     if (archivedOldMonthlyId) {
       try {
-        await this.stripe.prices.update(archivedOldMonthlyId, { active: true });
+        await this.stripe.prices.update(archivedOldMonthlyId, {
+          active: true,
+          metadata: platformWriteMetadata(),
+        });
         this.obs.info('Old monthly price restored after DB failure', {
           stripePriceId: archivedOldMonthlyId,
           tierId,
@@ -1656,7 +1677,10 @@ export class TierService extends BaseService {
 
     if (archivedOldAnnualId) {
       try {
-        await this.stripe.prices.update(archivedOldAnnualId, { active: true });
+        await this.stripe.prices.update(archivedOldAnnualId, {
+          active: true,
+          metadata: platformWriteMetadata(),
+        });
         this.obs.info('Old annual price restored after DB failure', {
           stripePriceId: archivedOldAnnualId,
           tierId,

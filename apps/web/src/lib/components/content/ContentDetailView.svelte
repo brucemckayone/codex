@@ -40,7 +40,11 @@
   // import boundary (Expected to find metadata for remote file).
   // VideoPlayer and AudioPlayer are heavy but don't touch remote
   // files, so they're dynamically loaded further down.
-  import { PreviewPlayer, deriveAccessState } from '$lib/components/player';
+  import {
+    PreviewPlayer,
+    deriveAccessState,
+    describePreviewEnd,
+  } from '$lib/components/player';
   import SubscribeButton from '$lib/components/subscription/SubscribeButton.svelte';
   import {
     formatPrice,
@@ -75,6 +79,7 @@
   import {
     describePlanPaywall,
     planPaywallCopy,
+    type PendingPlan,
     type PlanListStatus,
     type PlanOption,
     type ViewerPlan,
@@ -171,6 +176,11 @@
       status: PlanListStatus;
       currentPlan: ViewerPlan | null;
       currentPeriodEnd: string | null;
+      /**
+       * Where the viewer's waiting move to a cheaper plan goes
+       * (Codex-2hxff.16): the paywall says when an item in it opens.
+       */
+      pendingPlan?: PendingPlan | null;
     };
     /** True while the access check is still resolving (skeleton state) */
     accessLoading?: boolean;
@@ -414,6 +424,7 @@
       tiersStatus: plans.status,
       currentPlan: hasSubscription ? plans.currentPlan : null,
       currentPeriodEnd: plans.currentPeriodEnd,
+      pendingPlan: hasSubscription ? (plans.pendingPlan ?? null) : null,
     })
   );
   const planCopy = $derived(planPaywallCopy(planPaywall, formatSentenceDate));
@@ -581,6 +592,33 @@
     if (needsPurchase) return m.content_detail_purchase_cta_description();
     return m.content_detail_locked_cta_description();
   });
+
+  /**
+   * The preview's end screen (Codex-2hxff.99): the lock's own line and the
+   * paywall's first action, in this view's gate-chain order, so the two
+   * can't drift. Plan links mark the item (U10).
+   */
+  const previewEnd = $derived(
+    describePreviewEnd({
+      line: lockCtaSubtext,
+      isAuthenticated: !!isAuthenticated,
+      organizationId: content.organizationId ?? null,
+      hasSubscription: !!hasSubscription,
+      upgradeOnly: planPaywall.kind === 'upgrade',
+      accessCheckFailed,
+      isTeamOnly,
+      isCourseOnly,
+      isFollowersOnly,
+      isClosed,
+      needsSubscription,
+      needsPurchase,
+      isFree,
+      isAudio,
+      pricingHref,
+      signInHref: `/login?redirect=${encodeURIComponent(page.url.pathname)}`,
+      purchaseLabel: m.checkout_purchase_button({ price: displayPrice(priceCents) }),
+    })
+  );
 
   /**
    * Access passed but there is nothing to play: the media is still
@@ -1000,8 +1038,13 @@
           poster={largestThumbnailUrl}
           contentId={content.id}
           contentTitle={content.title}
-          {accessState}
-          canPurchase={isSellable}
+          end={previewEnd}
+          audio={isAudio}
+          follow={{
+            following: isAlreadyFollowing,
+            busy: followInFlight,
+            onfollow: handleFollow,
+          }}
           autoplay={true}
         />
         {#snippet failed(_error, _reset)}
@@ -1553,14 +1596,14 @@
   }
 
   .content-detail__breadcrumb-link {
-    color: var(--color-interactive);
+    color: var(--color-link);
     text-decoration: none;
     font-weight: var(--font-medium);
     transition: var(--transition-colors);
   }
 
   .content-detail__breadcrumb-link:hover {
-    color: var(--color-interactive-hover);
+    color: var(--color-link-hover);
   }
 
   .content-detail__breadcrumb-link:focus-visible {
@@ -1806,7 +1849,7 @@
     font-weight: var(--font-medium);
     border-radius: var(--radius-sm);
     background: var(--color-brand-primary-subtle);
-    color: var(--color-interactive-active);
+    color: var(--color-link-active);
     text-transform: var(--text-transform-label, uppercase);
     letter-spacing: var(--tracking-wider);
   }
@@ -1838,7 +1881,7 @@
   }
 
   :global(.content-detail__creator-link:hover) {
-    color: var(--color-interactive);
+    color: var(--color-link);
   }
 
   .content-detail__completed-badge {
@@ -2058,6 +2101,7 @@
 
   :global(.content-detail__purchase-btn:hover:not(:disabled)) {
     background: var(--color-brand-accent-hover);
+    color: var(--color-text-on-accent-hover);
   }
 
   :global(.content-detail__purchase-btn:disabled) {
@@ -2140,7 +2184,7 @@
     font-weight: var(--font-semibold);
     text-transform: var(--text-transform-label, uppercase);
     letter-spacing: var(--tracking-wider);
-    color: var(--color-interactive-active);
+    color: var(--color-link-active);
     margin: 0;
   }
 
@@ -2166,7 +2210,7 @@
     padding: var(--space-2) var(--space-4);
     font-size: var(--text-sm);
     font-weight: var(--font-semibold);
-    color: var(--color-interactive);
+    color: var(--color-link);
     text-decoration: none;
     border: var(--border-width) var(--border-style) var(--color-border);
     border-radius: var(--radius-md);
@@ -2174,7 +2218,7 @@
   }
 
   .content-detail__journey-cta:hover {
-    color: var(--color-interactive-hover);
+    color: var(--color-link-hover);
     background: var(--color-surface-secondary);
   }
 
@@ -2192,7 +2236,7 @@
 
   .content-detail__journey--free .content-detail__journey-cta:hover {
     background: var(--color-brand-accent-hover);
-    color: var(--color-text-on-accent);
+    color: var(--color-text-on-accent-hover);
   }
 
   .content-detail__journey-arrow {

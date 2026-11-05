@@ -129,7 +129,7 @@
 
   .studio-rail__item--active {
     background-color: color-mix(in oklch, var(--color-interactive) 15%, transparent);
-    color: var(--color-interactive);
+    color: var(--color-link);
   }
 
   .studio-rail__item--loading {
@@ -206,7 +206,7 @@
     padding: 0 var(--space-1);
     border-radius: var(--radius-full);
     background-color: var(--color-interactive);
-    color: var(--color-text-on-brand);
+    color: var(--color-on-interactive);
     font-size: var(--text-xs);
     font-weight: var(--font-semibold);
   }

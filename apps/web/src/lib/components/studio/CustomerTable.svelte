@@ -135,7 +135,7 @@
   }
 
   .customer-name-btn:hover {
-    color: var(--color-interactive);
+    color: var(--color-link);
   }
 
   .customer-name-btn:focus-visible {
@@ -152,7 +152,7 @@
     height: var(--space-7);
     border-radius: var(--radius-full, 9999px);
     background-color: var(--color-interactive-subtle);
-    color: var(--color-interactive);
+    color: var(--color-link);
     font-weight: var(--font-bold);
     font-size: var(--text-xs);
     flex-shrink: 0;
@@ -201,7 +201,7 @@
   }
 
   .row-action-btn:hover {
-    color: var(--color-interactive);
+    color: var(--color-link);
     background-color: var(--color-interactive-subtle);
   }
 

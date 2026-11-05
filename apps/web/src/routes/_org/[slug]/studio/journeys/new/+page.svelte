@@ -285,11 +285,12 @@
   .new-journey__btn--primary {
     border: var(--border-width) var(--border-style) transparent;
     background-color: var(--color-interactive);
-    color: var(--color-text-on-brand, var(--color-background));
+    color: var(--color-on-interactive);
   }
 
   .new-journey__btn--primary:hover:not(:disabled) {
     background-color: var(--color-interactive-hover);
+    color: var(--color-on-interactive-hover);
   }
 
   .new-journey__btn--primary:disabled {

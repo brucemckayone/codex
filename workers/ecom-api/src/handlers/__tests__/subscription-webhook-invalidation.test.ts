@@ -61,6 +61,8 @@ vi.mock('@codex/subscription', () => ({
   // The renewal-time price swap (Codex-2hxff.3) — nothing pending here.
   applyDuePendingPriceChange: vi.fn().mockResolvedValue(false),
   PENDING_PRICE_ID_KEY: 'codex_pending_price_id',
+  // The renewal flip of a waiting tier move (Codex-2hxff.16) reads it.
+  MOVE_TIER_ID_KEY: 'codex_move_tier_id',
   // `invalidateForUser` is a named export from `@codex/subscription` that
   // both webhook handlers import. We spy on it to assert the contract.
   invalidateForUser: vi.fn(),
@@ -80,6 +82,7 @@ vi.mock('@codex/subscription', () => ({
       handleCourseSubscriptionUpdated: vi.fn().mockResolvedValue(undefined),
       handleCourseSubscriptionDeleted: vi.fn().mockResolvedValue(undefined),
       handleCourseInvoicePaymentSucceeded: vi.fn().mockResolvedValue(undefined),
+      handleCourseInvoicePaymentFailed: vi.fn().mockResolvedValue(undefined),
     })),
     {
       // MIRRORS the real predicate rather than hardcoding `false`
@@ -239,6 +242,8 @@ describe('handleSubscriptionWebhook — cache invalidation', () => {
       handleSubscriptionDeleted: mockHandleDeleted,
       handleInvoicePaymentSucceeded: mockHandleInvoiceSuccess,
       handleInvoicePaymentFailed: mockHandleInvoiceFailed,
+      // The renewal flip of a waiting tier move (Codex-2hxff.16): none here.
+      applyDueTierMove: vi.fn().mockResolvedValue('none'),
       // charge.refunded clawback (Codex-13v21) — handlePaymentWebhook calls this.
       reverseSubscriptionPayoutsForCharge: vi.fn(),
       // ...and, last, the full-refund cancel (Codex-2hxff.10): nothing here.

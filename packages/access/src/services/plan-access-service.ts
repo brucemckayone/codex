@@ -84,6 +84,14 @@ type ItemStatus = 'draft' | 'published' | 'archived';
 
 export interface TierDeleteImpact {
   liveSubscriberCount: number;
+  /**
+   * Subscriptions waiting to move to this tier at their renewal, not
+   * cancelled (Codex-2hxff.16, T5). > 0 → the delete is refused, as for
+   * `liveSubscriberCount`.
+   */
+  movingInCount: number;
+  /** ISO: the latest of those renewals, so the creator knows how long; null with none. */
+  lastMoveAt: string | null;
   onlyHere: {
     films: {
       total: number;
@@ -418,12 +426,22 @@ export class PlanAccessService extends BaseService {
               WHERE o.course_id = ${courses.id} AND o.tier_id <> ${tierId})`;
 
       const [subs, films, courseRows] = await Promise.all([
+        // The same rows `TierService.deleteTier` refuses on: on the tier, and
+        // waiting to move to it (Codex-2hxff.16), neither cancelled. A change
+        // of billing alone names the tier it is on: a subscriber, not a mover.
         this.db
-          .select({ count: sql<number>`count(*)::int` })
+          .select({
+            count: sql<number>`count(*) FILTER (WHERE ${subscriptions.tierId} = ${tierId})::int`,
+            movingIn: sql<number>`count(*) FILTER (WHERE ${subscriptions.pendingTierId} = ${tierId} AND ${subscriptions.tierId} <> ${tierId})::int`,
+            lastMoveAt:
+              sql<Date | null>`max(${subscriptions.pendingTierFrom}) FILTER (WHERE ${subscriptions.pendingTierId} = ${tierId} AND ${subscriptions.tierId} <> ${tierId})`.mapWith(
+                subscriptions.pendingTierFrom
+              ),
+          })
           .from(subscriptions)
           .where(
             and(
-              eq(subscriptions.tierId, tierId),
+              sql`(${subscriptions.tierId} = ${tierId} OR ${subscriptions.pendingTierId} = ${tierId})`,
               sql`${subscriptions.status} NOT IN ('cancelled')`
             )
           ),
@@ -468,8 +486,11 @@ export class PlanAccessService extends BaseService {
       const onlyFilms = films.filter((f) => !f.elsewhere);
       const onlyCourses = courseRows.filter((c) => !c.elsewhere);
       const staysForSale = onlyFilms.filter((f) => f.staysForSale).length;
+      const lastMoveAt = subs[0]?.lastMoveAt;
       return {
         liveSubscriberCount: Number(subs[0]?.count ?? 0),
+        movingInCount: Number(subs[0]?.movingIn ?? 0),
+        lastMoveAt: lastMoveAt ? lastMoveAt.toISOString() : null,
         onlyHere: {
           films: {
             total: onlyFilms.length,

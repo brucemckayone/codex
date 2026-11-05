@@ -568,7 +568,7 @@
   }
 
   .brand-rail__back:hover {
-    color: var(--color-interactive);
+    color: var(--color-link);
   }
 
   .brand-rail__back:focus-visible {

@@ -101,12 +101,12 @@
   .legal-nav a {
     font-size: var(--text-base);
     font-weight: var(--font-semibold);
-    color: var(--color-interactive);
+    color: var(--color-link);
     text-decoration: none;
     transition: var(--transition-colors);
   }
 
   .legal-nav a:hover {
-    color: var(--color-interactive-hover);
+    color: var(--color-link-hover);
   }
 </style>

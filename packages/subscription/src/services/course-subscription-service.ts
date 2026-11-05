@@ -35,6 +35,7 @@
  * keys, mirroring `PurchaseService.writePurchasePayouts`.
  */
 
+import { isEnvName } from '@codex/agreements';
 import {
   ACCESS_GRANTING_SUBSCRIPTION_STATUSES,
   BILLING_INTERVAL,
@@ -47,7 +48,7 @@ import {
   stripeEnvMetadata,
   subscriptionStatusGrantsAccess,
 } from '@codex/constants';
-import type { DatabaseClient } from '@codex/database';
+import { type DatabaseClient, toIso, withPagination } from '@codex/database';
 import {
   type CourseSubscription,
   courseSubscriptionPlans,
@@ -88,23 +89,29 @@ import {
   type ServiceConfig,
   ServiceUnavailableError,
 } from '@codex/service-errors';
+import type { PaginatedListResponse } from '@codex/shared-types';
+import { buildOrgUrlFromEnv } from '@codex/urls';
 import type { CreateCourseSubscriptionCheckoutInput } from '@codex/validation';
 import {
   and,
   asc,
   count,
+  desc,
   eq,
   inArray,
   isNotNull,
   isNull,
   lt,
   ne,
+  type SQL,
   sql,
 } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
   AlreadyCourseSubscribedError,
+  assertYearlyNotBelowMonthly,
   ConnectAccountNotReadyError,
+  CourseNotOnSaleError,
   CourseSubscriptionPlanExistsError,
   CourseSubscriptionPlanNotFoundError,
   CreatorConnectRequiredError,
@@ -116,21 +123,21 @@ import {
   createKeyRefusal,
   stripeRefusalDetail,
 } from './create-key-refusal';
+import { alertIfCreditPaid } from './credit-paid-invoice';
 import {
-  alertFanOutOutOfTime,
-  moveFailureAlert,
-  noticeFailureAlert,
-  PRICE_FAN_OUT_BUDGET_MS,
-  type PriceChangeNotice,
-  type PriceChangeNoticeMailer,
-  schedulePriceChange,
-  sendPriceChangeNotice,
+  platformWriteMetadata,
+  recordPlanPriceChange,
 } from './pending-price-change';
+import {
+  type PriceChangeProgress,
+  readPriceChangeProgress,
+} from './price-moves-sweep';
 import { resolveStatus } from './stripe-status-mapper';
 import {
   cancelAndRefundDuplicate,
   isDuplicateSubscription,
 } from './subscription-duplicates';
+import type { WebhookEmailPayload } from './subscription-service';
 
 /** Marks a Stripe subscription as a course sub (vs. an org tier sub). */
 export const COURSE_SUBSCRIPTION_METADATA_TYPE = 'course_subscription';
@@ -166,39 +173,147 @@ export type CourseOffSaleMailer = (params: {
 interface CourseSubscriptionServiceConfig extends ServiceConfig {
   /** Invoice payouts resolve fees via the 3-tier fallback chain. */
   feeConfig: FeeResolver;
-  /**
-   * Price-change notices (`subscription-tier-price-change`), awaited: a
-   * subscriber moves only once theirs is accepted (D-P3, Codex-2hxff.43).
-   */
-  mailer: PriceChangeNoticeMailer;
   /** Off-sale notices (`course-no-longer-offered`). */
   offSaleMailer: CourseOffSaleMailer;
-  /** Base for the notice's manage-subscription link. */
+  /** Base for the emails' manage-subscription links. */
   webAppUrl?: string;
-  /**
-   * Runs a plan's subscriber fan-out after the response. Absent (tests) → the
-   * fan-out is awaited inline.
-   */
-  waitUntil?: (promise: Promise<unknown>) => void;
 }
 
-/** One interval of a plan whose Price changed. */
-interface PlanPriceMove {
-  interval: 'month' | 'year';
-  newPriceId: string;
-  /**
-   * The plan's previous LIST price. Not what a subscriber pays: the notice
-   * quotes their live item (`PriceChangeOutcome.currentAmountCents`), and
-   * this is only the fallback when that has no unit amount (Codex-2hxff.40).
-   */
-  oldAmountCents: number;
-  newAmountCents: number;
-}
-
-/** Minimal per-event result so the webhook can bump the buyer's caches. */
+/**
+ * Per-event result: the ids let the webhook bump the buyer's caches, and
+ * `email` is the lifecycle email to send (Codex-2hxff.52, C2 and C4), as the
+ * membership handlers return theirs.
+ */
 export interface CourseSubscriptionWebhookResult {
   userId: string;
   organizationId: string;
+  email?: WebhookEmailPayload;
+}
+
+/** The course subscription statuses Account › Subscriptions lists. */
+const LISTED_COURSE_SUBSCRIPTION_STATUSES = [
+  SUBSCRIPTION_STATUS.ACTIVE,
+  SUBSCRIPTION_STATUS.PAST_DUE,
+  SUBSCRIPTION_STATUS.CANCELLING,
+  SUBSCRIPTION_STATUS.PAUSED,
+];
+
+/**
+ * A course subscription as its subscriber reads it on Account ›
+ * Subscriptions (Codex-2hxff.52, C1; data design §6.3). Dates are ISO.
+ */
+export interface UserCourseSubscription {
+  id: string;
+  status: string;
+  billingInterval: 'month' | 'year';
+  /** What it bills each period; null until a webhook or the backfill wrote it. */
+  amountCents: number | null;
+  currentPeriodEnd: string;
+  cancelAtPeriodEnd: boolean;
+  disputedAt: string | null;
+  /**
+   * Set to cancel, and the course is still offered: Reactivate is offered. A
+   * plan that only stopped taking new subscribers may be reactivated (Q6).
+   */
+  canReactivate: boolean;
+  course: {
+    id: string;
+    title: string;
+    slug: string;
+    /** No longer offered: off sale (Codex-2hxff.64) or deleted. */
+    offSale: boolean;
+  };
+  organization: {
+    id: string;
+    name: string;
+    slug: string;
+    logoUrl: string | null;
+  } | null;
+}
+
+/** Pence as the emails print them (GBP). */
+function formatPounds(pence: number): string {
+  return `£${(pence / 100).toFixed(2)}`;
+}
+
+/** A filter built from defined parts, narrowed rather than asserted. */
+function definedFilter(filter: SQL | undefined): SQL {
+  if (!filter) {
+    throw new InternalServiceError(
+      'A course subscription filter could not be built'
+    );
+  }
+  return filter;
+}
+
+/** Not the caller's, or not one the list shows: the same answer either way. */
+function courseSubscriptionNotFound(courseSubscriptionId: string) {
+  return new NotFoundError('Course subscription not found', {
+    code: 'COURSE_SUBSCRIPTION_NOT_FOUND',
+    courseSubscriptionId,
+  });
+}
+
+/**
+ * The Stripe key of a cancel or a reactivate. Per period and per row
+ * version: cancel, reactivate, then cancel again inside Stripe's 24 hours
+ * makes a new write instead of replaying the first and doing nothing (the
+ * bug a per-subscription resume key had, SUB-13).
+ */
+function courseToggleKey(
+  action: 'course-cancel' | 'course-reactivate',
+  row: { id: string; currentPeriodEnd: Date; updatedAt: Date }
+): string {
+  return `${action}:${row.id}:${Math.floor(row.currentPeriodEnd.getTime() / 1000)}:${row.updatedAt.getTime()}`;
+}
+
+function toUserCourseSubscription(row: {
+  id: string;
+  status: string;
+  billingInterval: string;
+  amountCents: number | null;
+  currentPeriodEnd: Date;
+  cancelAtPeriodEnd: boolean;
+  disputedAt: Date | null;
+  courseId: string;
+  courseTitle: string;
+  courseSlug: string;
+  courseOffSaleAt: Date | null;
+  courseDeletedAt: Date | null;
+  orgId: string | null;
+  orgName: string | null;
+  orgSlug: string | null;
+  orgLogoUrl: string | null;
+}): UserCourseSubscription {
+  const offSale = row.courseOffSaleAt !== null || row.courseDeletedAt !== null;
+  return {
+    id: row.id,
+    status: row.status,
+    billingInterval:
+      row.billingInterval === BILLING_INTERVAL.YEAR
+        ? BILLING_INTERVAL.YEAR
+        : BILLING_INTERVAL.MONTH,
+    amountCents: row.amountCents,
+    currentPeriodEnd: row.currentPeriodEnd.toISOString(),
+    cancelAtPeriodEnd: row.cancelAtPeriodEnd,
+    disputedAt: toIso(row.disputedAt),
+    canReactivate: row.cancelAtPeriodEnd && !offSale,
+    course: {
+      id: row.courseId,
+      title: row.courseTitle,
+      slug: row.courseSlug,
+      offSale,
+    },
+    organization:
+      row.orgId && row.orgName && row.orgSlug
+        ? {
+            id: row.orgId,
+            name: row.orgName,
+            slug: row.orgSlug,
+            logoUrl: row.orgLogoUrl,
+          }
+        : null,
+  };
 }
 
 /**
@@ -224,20 +339,16 @@ export interface CourseSubscriptionCheckoutVerifyResult {
 export class CourseSubscriptionService extends BaseService {
   private readonly stripe: Stripe;
   private readonly feeConfig: FeeResolver;
-  private readonly mailer: PriceChangeNoticeMailer;
   private readonly offSaleMailer: CourseOffSaleMailer;
   private readonly webAppUrl: string | undefined;
-  private readonly waitUntil: ((promise: Promise<unknown>) => void) | undefined;
   private readonly checkoutReservations: CheckoutReservations;
 
   constructor(config: CourseSubscriptionServiceConfig, stripe: Stripe) {
     super(config);
     this.stripe = stripe;
     this.feeConfig = config.feeConfig;
-    this.mailer = config.mailer;
     this.offSaleMailer = config.offSaleMailer;
     this.webAppUrl = config.webAppUrl;
-    this.waitUntil = config.waitUntil;
     this.checkoutReservations = new CheckoutReservations(
       this.db,
       stripe,
@@ -328,6 +439,7 @@ export class CourseSubscriptionService extends BaseService {
     courseId: string,
     input: { priceMonthly: number; priceAnnual: number }
   ): Promise<typeof courseSubscriptionPlans.$inferSelect> {
+    assertYearlyNotBelowMonthly(input);
     // Read once: the keys' UTC hour, and a refusal's retryAfter, both come
     // from this instant.
     const keyedAt = Date.now();
@@ -646,14 +758,19 @@ export class CourseSubscriptionService extends BaseService {
    * row, so routing that case to `createPlan` would raise
    * `CourseSubscriptionPlanExistsError` and leave the creator permanently unable
    * to put the subscription back on sale.
+   *
+   * `actorUserId` is the owner who saved: a price change records it.
    */
   async upsertPlan(
     organizationId: string,
     courseId: string,
-    input: { priceMonthly: number; priceAnnual: number }
+    input: { priceMonthly: number; priceAnnual: number },
+    actorUserId: string | null = null
   ): Promise<typeof courseSubscriptionPlans.$inferSelect> {
     const existing = await this.findPlanRow(courseId);
-    if (existing) return this.savePlanPrices(organizationId, courseId, input);
+    if (existing) {
+      return this.savePlanPrices(organizationId, courseId, input, actorUserId);
+    }
     try {
       return await this.createPlan(organizationId, courseId, input);
     } catch (error) {
@@ -662,7 +779,12 @@ export class CourseSubscriptionService extends BaseService {
       // hour's keys. Save onto it, as a repeat of the save that made it
       // (Codex-2hxff.66). A race inside one hour returns the plan already.
       if (error instanceof CourseSubscriptionPlanExistsError) {
-        return this.savePlanPrices(organizationId, courseId, input);
+        return this.savePlanPrices(
+          organizationId,
+          courseId,
+          input,
+          actorUserId
+        );
       }
       throw error;
     }
@@ -681,9 +803,10 @@ export class CourseSubscriptionService extends BaseService {
    *
    * Existing subscribers on a changed interval move to its new Price under the
    * same rule as org tiers (owner decision P-6, "Same rule as tiers"): at their
-   * first renewal at least 30 days after they are emailed, no proration — see
-   * `movePlanSubscribers` (Codex-2hxff.3). New checkouts pay the new amount at
-   * once.
+   * first renewal at least 30 days after they are emailed, no proration
+   * (Codex-2hxff.3). The save records who is due in its own transaction
+   * (`recordPlanPriceChange`, Codex-2hxff.86), and ecom-api's hourly step
+   * emails and moves them. New checkouts pay the new amount at once.
    *
    * RE-LISTS a withdrawn plan (`isActive` back to true, Stripe Product
    * un-archived). Saving an offer is the creator asserting "this is what I sell",
@@ -697,8 +820,10 @@ export class CourseSubscriptionService extends BaseService {
   async savePlanPrices(
     organizationId: string,
     courseId: string,
-    input: { priceMonthly: number; priceAnnual: number }
+    input: { priceMonthly: number; priceAnnual: number },
+    actorUserId: string | null = null
   ): Promise<typeof courseSubscriptionPlans.$inferSelect> {
+    assertYearlyNotBelowMonthly(input);
     try {
       const course = await this.getCourseInOrgOrThrow(organizationId, courseId);
 
@@ -771,6 +896,7 @@ export class CourseSubscriptionService extends BaseService {
         createdPriceIds.push(price.id);
         await this.stripe.prices.update(stripePriceMonthlyId, {
           active: false,
+          metadata: platformWriteMetadata(),
         });
         archivedPriceIds.push(stripePriceMonthlyId);
       }
@@ -794,76 +920,82 @@ export class CourseSubscriptionService extends BaseService {
         createdPriceIds.push(price.id);
         await this.stripe.prices.update(stripePriceAnnualId, {
           active: false,
+          metadata: platformWriteMetadata(),
         });
         archivedPriceIds.push(stripePriceAnnualId);
       }
 
-      try {
-        const [updated] = await this.db
-          .update(courseSubscriptionPlans)
-          .set({
-            priceMonthly: input.priceMonthly,
-            priceAnnual: input.priceAnnual,
-            stripePriceMonthlyId: newMonthlyPriceId,
-            stripePriceAnnualId: newAnnualPriceId,
-            // Saving an offer puts it on sale — this is what re-lists a plan the
-            // creator had withdrawn.
-            isActive: true,
-            updatedAt: new Date(),
-          })
-          .where(eq(courseSubscriptionPlans.id, existing.id))
-          .returning();
-        if (!updated) {
-          throw new InternalServiceError(
-            'Failed to update course plan prices',
-            {
-              courseId,
-              planId: existing.id,
-            }
-          );
-        }
+      // Each interval whose Price this save minted, as its change records it.
+      const changedPrices: Array<{
+        interval: 'month' | 'year';
+        newStripePriceId: string;
+        fromAmountCents: number;
+        newAmountCents: number;
+      }> = [];
+      if (monthlyChanged && newMonthlyPriceId) {
+        changedPrices.push({
+          interval: 'month',
+          newStripePriceId: newMonthlyPriceId,
+          fromAmountCents: existing.priceMonthly,
+          newAmountCents: input.priceMonthly,
+        });
+      }
+      if (annualChanged && newAnnualPriceId) {
+        changedPrices.push({
+          interval: 'year',
+          newStripePriceId: newAnnualPriceId,
+          fromAmountCents: existing.priceAnnual,
+          newAmountCents: input.priceAnnual,
+        });
+      }
 
-        const moves: PlanPriceMove[] = [];
-        if (monthlyChanged && newMonthlyPriceId) {
-          moves.push({
-            interval: 'month',
-            newPriceId: newMonthlyPriceId,
-            oldAmountCents: existing.priceMonthly,
-            newAmountCents: input.priceMonthly,
-          });
-        }
-        if (annualChanged && newAnnualPriceId) {
-          moves.push({
-            interval: 'year',
-            newPriceId: newAnnualPriceId,
-            oldAmountCents: existing.priceAnnual,
-            newAmountCents: input.priceAnnual,
-          });
-        }
-        if (moves.length > 0) {
-          // After the commit, so the plan row already points at the new Prices.
-          const fanOut = this.movePlanSubscribers(existing.id, moves).catch(
-            (error) => {
-              // Before or outside the per-subscriber handling (reading the
-              // subscribers, say): who was reached is unknown (silent #10).
-              this.obs.error(
-                'Course plan price fan-out failed; its subscribers may not have been notified or moved (support: check the start line and retry)',
-                {
-                  errorId: crypto.randomUUID(),
-                  planId: existing.id,
-                  courseId,
-                  moves: moves.map((move) => ({
-                    interval: move.interval,
-                    newPriceId: move.newPriceId,
-                  })),
-                  error: error instanceof Error ? error.message : String(error),
-                }
-              );
-            }
-          );
-          if (this.waitUntil) this.waitUntil(fanOut);
-          else await fanOut;
-        }
+      try {
+        // One transaction: the plan's new Prices and who is due to be told
+        // about them (data design §2.3), so a failure loses nobody.
+        const updated = await this.db.transaction(async (tx) => {
+          const [row] = await tx
+            .update(courseSubscriptionPlans)
+            .set({
+              priceMonthly: input.priceMonthly,
+              priceAnnual: input.priceAnnual,
+              stripePriceMonthlyId: newMonthlyPriceId,
+              stripePriceAnnualId: newAnnualPriceId,
+              // Saving an offer puts it on sale — this is what re-lists a plan
+              // the creator had withdrawn.
+              isActive: true,
+              updatedAt: new Date(),
+            })
+            .where(eq(courseSubscriptionPlans.id, existing.id))
+            .returning();
+          if (!row) {
+            throw new InternalServiceError(
+              'Failed to update course plan prices',
+              {
+                courseId,
+                planId: existing.id,
+              }
+            );
+          }
+          const now = new Date();
+          for (const change of changedPrices) {
+            const recorded = await recordPlanPriceChange(tx, existing.id, {
+              organizationId,
+              ...change,
+              createdByUserId: actorUserId,
+              now,
+            });
+            this.obs.info('Course plan price change recorded', {
+              planId: existing.id,
+              courseId,
+              organizationId,
+              interval: change.interval,
+              priceChangeId: recorded.changeId,
+              supersededId: recorded.supersededId,
+              total: recorded.total,
+            });
+          }
+          return row;
+        });
         return updated;
       } catch (dbError) {
         this.obs.warn(
@@ -889,263 +1021,6 @@ export class CourseSubscriptionService extends BaseService {
   }
 
   /**
-   * Move a plan's existing subscribers on each changed interval to its new
-   * Price — at their first renewal at least 30 days after this notice, with no
-   * proration (`schedulePriceChange`). Notice first, then move (D-P3,
-   * Codex-2hxff.43): each subscriber is emailed, and moved only once
-   * notifications-api accepts the email. A notice not accepted, or a move that
-   * fails, is alerted (errorId and ids) for support to retry. Past-due and
-   * paused subscribers get the pending marker and move once active again. One
-   * failed subscriber never stops the rest.
-   *
-   * It runs on `waitUntil`, which the runtime cancels 30 s after the response,
-   * so no batch starts after `PRICE_FAN_OUT_BUDGET_MS` (17 s), across both
-   * intervals, and every Stripe call gives up after 3 s. Both intervals'
-   * subscribers are read first, so every one not reached, on either interval,
-   * is reported in one alert after the end summary (`alertFanOutOutOfTime`).
-   * A start line opens the run.
-   */
-  private async movePlanSubscribers(
-    planId: string,
-    moves: PlanPriceMove[]
-  ): Promise<void> {
-    const noticeAt = new Date();
-    const startedAt = Date.now();
-    const prefix = 'Course plan price fan-out: ';
-    const planned = [];
-    for (const move of moves) {
-      const rows = await this.db
-        .select({
-          id: courseSubscriptions.id,
-          stripeSubscriptionId: courseSubscriptions.stripeSubscriptionId,
-          organizationId: courseSubscriptions.organizationId,
-          userId: courseSubscriptions.userId,
-          userEmail: users.email,
-          userName: users.name,
-          courseTitle: courses.title,
-        })
-        .from(courseSubscriptions)
-        .leftJoin(users, eq(users.id, courseSubscriptions.userId))
-        .leftJoin(courses, eq(courses.id, courseSubscriptions.courseId))
-        .where(
-          and(
-            eq(courseSubscriptions.planId, planId),
-            eq(courseSubscriptions.billingInterval, move.interval),
-            inArray(courseSubscriptions.status, [
-              'active',
-              'cancelling',
-              'past_due',
-              'paused',
-            ])
-          )
-        );
-      planned.push({ move, rows });
-    }
-
-    const counts = {
-      total: planned.reduce((sum, { rows }) => sum + rows.length, 0),
-      updated: 0,
-      unnotified: 0,
-      unhandled: 0,
-      failed: 0,
-    };
-    const summary = {
-      planId,
-      noticeAt: noticeAt.toISOString(),
-      moves: planned.map(({ move, rows }) => ({
-        interval: move.interval,
-        newPriceId: move.newPriceId,
-        total: rows.length,
-      })),
-    };
-    this.obs.info('Course plan price fan-out: starting', {
-      ...summary,
-      total: counts.total,
-    });
-
-    // Everyone the deadline leaves out, on either interval: one alert,
-    // after the end summary.
-    const unreached: Array<Record<string, unknown>> = [];
-    const batchSize = 8;
-    for (const { move, rows } of planned) {
-      for (let i = 0; i < rows.length; i += batchSize) {
-        // The runtime cancels everything 30 s after the response: start no
-        // batch it could cut off, and name every subscriber left (silent #1).
-        if (
-          unreached.length > 0 ||
-          Date.now() - startedAt >= PRICE_FAN_OUT_BUDGET_MS
-        ) {
-          const left = rows.slice(i);
-          counts.unhandled += left.length;
-          unreached.push(
-            ...left.map((row) => ({
-              courseSubscriptionId: row.id,
-              stripeSubscriptionId: row.stripeSubscriptionId,
-              userId: row.userId,
-              organizationId: row.organizationId,
-              interval: move.interval,
-            }))
-          );
-          break;
-        }
-        const batch = rows.slice(i, i + batchSize);
-        // Each accepted notice, so a failure after it can say what was sent.
-        const notified = new Map<string, PriceChangeNotice>();
-        const results = await Promise.allSettled(
-          batch.map((row) =>
-            schedulePriceChange(
-              this.stripe,
-              {
-                stripeSubscriptionId: row.stripeSubscriptionId,
-                newPriceId: move.newPriceId,
-                newAmountCents: move.newAmountCents,
-                interval: move.interval,
-                noticeAt,
-              },
-              async (notice) => {
-                const accepted = await this.sendPlanPriceChangeNotice(
-                  planId,
-                  move,
-                  row,
-                  notice
-                );
-                if (accepted) notified.set(row.id, notice);
-                return accepted;
-              }
-            )
-          )
-        );
-        for (const [idx, result] of results.entries()) {
-          const row = batch[idx];
-          if (!row) continue;
-          if (result.status === 'fulfilled') {
-            const { kind } = result.value;
-            if (kind === 'applied' || kind === 'pending') counts.updated++;
-            // Alerted by sendPlanPriceChangeNotice.
-            else if (kind === 'unnotified') counts.unnotified++;
-            continue;
-          }
-          counts.failed++;
-          const alert = moveFailureAlert(
-            prefix,
-            result.reason,
-            notified.get(row.id),
-            noticeAt
-          );
-          this.obs.error(alert.message, {
-            errorId: crypto.randomUUID(),
-            ...alert.data,
-            planId,
-            interval: move.interval,
-            newPriceId: move.newPriceId,
-            courseSubscriptionId: row.id,
-            stripeSubscriptionId: row.stripeSubscriptionId,
-            userId: row.userId,
-            organizationId: row.organizationId,
-          });
-        }
-      }
-    }
-
-    if (counts.failed > 0 || counts.unnotified > 0 || counts.unhandled > 0) {
-      this.obs.error(
-        'Course plan price fan-out completed with failures (operator review required)',
-        { errorId: crypto.randomUUID(), ...summary, ...counts }
-      );
-    } else {
-      this.obs.info('Course plan price fan-out complete', {
-        ...summary,
-        ...counts,
-      });
-    }
-    // After the summary, and count first: the per-invocation log cap drops
-    // whatever comes last (review A round 2, silent R1).
-    alertFanOutOutOfTime((message, data) => this.obs.error(message, data), {
-      errorId: crypto.randomUUID(),
-      context: summary,
-      subscribers: unreached,
-    });
-  }
-
-  /**
-   * Send one course subscriber the notice of a plan price change and resolve
-   * whether notifications-api accepted it: their move is scheduled only then
-   * (D-P3, Codex-2hxff.43). A notice not accepted (no address, refused,
-   * skipped, or an unknown outcome) is alerted at error with an errorId and
-   * the ids support needs to retry (`noticeFailureAlert`). Never throws.
-   */
-  private async sendPlanPriceChangeNotice(
-    planId: string,
-    move: PlanPriceMove,
-    row: {
-      id: string;
-      stripeSubscriptionId: string;
-      organizationId: string | null;
-      userId: string;
-      userEmail: string | null;
-      userName: string | null;
-      courseTitle: string | null;
-    },
-    notice: PriceChangeNotice
-  ): Promise<boolean> {
-    // The "from" figure is what this subscriber is billed today, read off
-    // their live item: subscribers grandfathered before #589 pay something
-    // other than the plan's previous list price (Codex-2hxff.40).
-    let currentAmountCents = notice.currentAmountCents;
-    if (currentAmountCents === null) {
-      // An error: the email may quote a figure this subscriber is not
-      // billed, and PriceChangeNotice says this never happens.
-      this.obs.error(
-        'Course plan price notice: live price has no unit amount; quoting the plan list price',
-        {
-          errorId: crypto.randomUUID(),
-          planId,
-          courseSubscriptionId: row.id,
-        }
-      );
-      currentAmountCents = move.oldAmountCents;
-    }
-    const failure = await sendPriceChangeNotice(this.mailer, {
-      to: row.userEmail,
-      toName: row.userName || undefined,
-      templateName: 'subscription-tier-price-change',
-      category: 'transactional',
-      userId: row.userId,
-      organizationId: row.organizationId,
-      data: {
-        userName: row.userName || 'there',
-        planName: row.courseTitle || 'your subscription',
-        oldPriceFormatted: `£${(currentAmountCents / 100).toFixed(2)}`,
-        newPriceFormatted: `£${(move.newAmountCents / 100).toFixed(2)}`,
-        billingInterval: move.interval,
-        effectiveDate: notice.effectiveAt.toLocaleDateString('en-GB', {
-          timeZone: 'UTC',
-        }),
-        manageUrl: `${this.webAppUrl ?? ''}/account/subscriptions`,
-      },
-    });
-    if (!failure) return true;
-
-    const alert = noticeFailureAlert(
-      'Course plan price fan-out: ',
-      failure,
-      notice
-    );
-    this.obs.error(alert.message, {
-      errorId: crypto.randomUUID(),
-      ...alert.data,
-      planId,
-      interval: move.interval,
-      newPriceId: move.newPriceId,
-      courseSubscriptionId: row.id,
-      stripeSubscriptionId: row.stripeSubscriptionId,
-      userId: row.userId,
-      organizationId: row.organizationId,
-    });
-    return false;
-  }
-
-  /**
    * Best-effort undo of a Stripe price swap after the DB write failed: archive
    * what we created, un-archive what we archived.
    *
@@ -1161,27 +1036,59 @@ export class CourseSubscriptionService extends BaseService {
   ): Promise<void> {
     await Promise.all([
       ...createdPriceIds.map((id) =>
-        this.stripe.prices.update(id, { active: false }).catch((err) =>
-          this.obs.error('Failed to archive new course price during rollback', {
-            courseId,
-            stripePriceId: id,
-            error: err instanceof Error ? err.message : String(err),
+        this.stripe.prices
+          .update(id, {
+            active: false,
+            metadata: platformWriteMetadata(),
           })
-        )
+          .catch((err) =>
+            this.obs.error(
+              'Failed to archive new course price during rollback',
+              {
+                courseId,
+                stripePriceId: id,
+                error: err instanceof Error ? err.message : String(err),
+              }
+            )
+          )
       ),
       ...archivedPriceIds.map((id) =>
-        this.stripe.prices.update(id, { active: true }).catch((err) =>
-          this.obs.error(
-            'Failed to restore archived course price during rollback',
-            {
-              courseId,
-              stripePriceId: id,
-              error: err instanceof Error ? err.message : String(err),
-            }
+        this.stripe.prices
+          .update(id, { active: true, metadata: platformWriteMetadata() })
+          .catch((err) =>
+            this.obs.error(
+              'Failed to restore archived course price during rollback',
+              {
+                courseId,
+                stripePriceId: id,
+                error: err instanceof Error ? err.message : String(err),
+              }
+            )
           )
-        )
       ),
     ]);
+  }
+
+  /**
+   * How the course plan's price changes are going, for the Studio note
+   * (Codex-2hxff.86, data design §2.6): running or stopped, or finished in
+   * the last 14 days, newest first. Scoped by the organisation AND the
+   * course, so another organisation's course id reads as nothing. One read,
+   * uncached: the counts change only when the hourly step runs.
+   */
+  async listPlanPriceChangeProgress(
+    organizationId: string,
+    courseId: string
+  ): Promise<PriceChangeProgress[]> {
+    try {
+      return await readPriceChangeProgress(this.db, {
+        kind: 'course_plan',
+        organizationId,
+        courseId,
+      });
+    } catch (error) {
+      this.handleError(error, 'listPlanPriceChangeProgress');
+    }
   }
 
   /**
@@ -1391,6 +1298,242 @@ export class CourseSubscriptionService extends BaseService {
         error: error instanceof Error ? error.message : String(error),
       });
     }
+  }
+
+  // ─── The subscriber's own course subscriptions (Codex-2hxff.52, C1) ─────────
+  //
+  // Account › Subscriptions lists them beside memberships, with Cancel at
+  // period end, Reactivate and Update card (the billing portal). Every read
+  // and write is scoped to the caller: another user's id is a NotFoundError.
+
+  /**
+   * The caller's live course subscriptions, newest first: active, past due,
+   * cancelling or paused, not ended and not a duplicate (data design §6.3).
+   */
+  async listForUser(
+    userId: string,
+    pagination: { page: number; limit: number }
+  ): Promise<PaginatedListResponse<UserCourseSubscription>> {
+    try {
+      const { page, limit } = pagination;
+      const { offset } = withPagination({ page, limit });
+      const where = this.userListedWhere(userId);
+      const [rows, totals] = await Promise.all([
+        this.userCourseSubscriptionRows(where)
+          .orderBy(
+            desc(courseSubscriptions.createdAt),
+            desc(courseSubscriptions.id)
+          )
+          .limit(limit)
+          .offset(offset),
+        this.db
+          .select({ total: count() })
+          .from(courseSubscriptions)
+          .where(where),
+      ]);
+      const total = Number(totals[0]?.total ?? 0);
+      return {
+        items: rows.map(toUserCourseSubscription),
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+        },
+      };
+    } catch (error) {
+      this.handleError(error, 'listForUser');
+    }
+  }
+
+  /**
+   * Cancel at the end of the paid period, as for a membership: the buyer
+   * keeps the course until then and is not charged again. The row moves at
+   * once (`active` becomes `cancelling`; a past-due or paused one keeps its
+   * status, as `resolveStatus` maps it), and the webhook mirrors Stripe's
+   * answer. Already set to cancel: unchanged.
+   */
+  async cancelForUser(
+    userId: string,
+    courseSubscriptionId: string
+  ): Promise<UserCourseSubscription> {
+    try {
+      const row = await this.ownedListedRow(userId, courseSubscriptionId);
+      if (!row.cancelAtPeriodEnd) {
+        await this.stripe.subscriptions.update(
+          row.stripeSubscriptionId,
+          { cancel_at_period_end: true },
+          { idempotencyKey: courseToggleKey('course-cancel', row) }
+        );
+        await this.db
+          .update(courseSubscriptions)
+          .set({
+            cancelAtPeriodEnd: true,
+            ...(row.status === SUBSCRIPTION_STATUS.ACTIVE && {
+              status: SUBSCRIPTION_STATUS.CANCELLING,
+            }),
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(courseSubscriptions.id, row.id),
+              isNull(courseSubscriptions.endedAt)
+            )
+          );
+        this.obs.info('course_subscription.cancelled_by_user', {
+          courseSubscriptionId: row.id,
+          courseId: row.courseId,
+          userId,
+        });
+      }
+      return await this.getForUser(userId, courseSubscriptionId);
+    } catch (error) {
+      this.handleError(error, 'cancelForUser');
+    }
+  }
+
+  /**
+   * Undo a cancel before the period ends. Refused with `CourseNotOnSaleError`
+   * (409) when the course is no longer offered: the off-sale sweep cancelled
+   * it (Codex-2hxff.64), and reactivating would undo that. A plan that only
+   * stopped taking new subscribers, its course still on sale, is allowed:
+   * they keep a subscription they already have (owner Q6). Not set to cancel:
+   * unchanged.
+   */
+  async reactivateForUser(
+    userId: string,
+    courseSubscriptionId: string
+  ): Promise<UserCourseSubscription> {
+    try {
+      const row = await this.ownedListedRow(userId, courseSubscriptionId);
+      if (row.cancelAtPeriodEnd) {
+        if (row.courseOffSale) {
+          throw new CourseNotOnSaleError(row.id);
+        }
+        await this.stripe.subscriptions.update(
+          row.stripeSubscriptionId,
+          { cancel_at_period_end: false },
+          { idempotencyKey: courseToggleKey('course-reactivate', row) }
+        );
+        await this.db
+          .update(courseSubscriptions)
+          .set({
+            cancelAtPeriodEnd: false,
+            ...(row.status === SUBSCRIPTION_STATUS.CANCELLING && {
+              status: SUBSCRIPTION_STATUS.ACTIVE,
+            }),
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(courseSubscriptions.id, row.id),
+              isNull(courseSubscriptions.endedAt)
+            )
+          );
+        this.obs.info('course_subscription.reactivated', {
+          courseSubscriptionId: row.id,
+          courseId: row.courseId,
+          userId,
+        });
+      }
+      return await this.getForUser(userId, courseSubscriptionId);
+    } catch (error) {
+      this.handleError(error, 'reactivateForUser');
+    }
+  }
+
+  /** The rows Account › Subscriptions lists for `userId`. */
+  private userListedWhere(userId: string): SQL {
+    return definedFilter(
+      and(
+        eq(courseSubscriptions.userId, userId),
+        inArray(
+          courseSubscriptions.status,
+          LISTED_COURSE_SUBSCRIPTION_STATUSES
+        ),
+        isNull(courseSubscriptions.endedAt),
+        isNull(courseSubscriptions.duplicateOfCourseSubscriptionId)
+      )
+    );
+  }
+
+  /** The list's select, with the course and its organisation. */
+  private userCourseSubscriptionRows(where: SQL) {
+    return this.db
+      .select({
+        id: courseSubscriptions.id,
+        status: courseSubscriptions.status,
+        billingInterval: courseSubscriptions.billingInterval,
+        amountCents: courseSubscriptions.amountCents,
+        currentPeriodEnd: courseSubscriptions.currentPeriodEnd,
+        cancelAtPeriodEnd: courseSubscriptions.cancelAtPeriodEnd,
+        disputedAt: courseSubscriptions.disputedAt,
+        courseId: courses.id,
+        courseTitle: courses.title,
+        courseSlug: courses.slug,
+        courseOffSaleAt: courses.offSaleAt,
+        courseDeletedAt: courses.deletedAt,
+        orgId: organizations.id,
+        orgName: organizations.name,
+        orgSlug: organizations.slug,
+        orgLogoUrl: organizations.logoUrl,
+      })
+      .from(courseSubscriptions)
+      .innerJoin(courses, eq(courses.id, courseSubscriptions.courseId))
+      .leftJoin(organizations, eq(organizations.id, courses.organizationId))
+      .where(where)
+      .$dynamic();
+  }
+
+  /** One of the caller's listed course subscriptions, as the card reads it. */
+  private async getForUser(
+    userId: string,
+    courseSubscriptionId: string
+  ): Promise<UserCourseSubscription> {
+    const [row] = await this.userCourseSubscriptionRows(
+      definedFilter(
+        and(
+          eq(courseSubscriptions.id, courseSubscriptionId),
+          eq(courseSubscriptions.userId, userId)
+        )
+      )
+    ).limit(1);
+    if (!row) throw courseSubscriptionNotFound(courseSubscriptionId);
+    return toUserCourseSubscription(row);
+  }
+
+  /**
+   * The caller's course subscription that Cancel or Reactivate acts on: one
+   * the list shows. Anything else, another user's included, is not found.
+   */
+  private async ownedListedRow(userId: string, courseSubscriptionId: string) {
+    const [row] = await this.db
+      .select({
+        id: courseSubscriptions.id,
+        courseId: courseSubscriptions.courseId,
+        stripeSubscriptionId: courseSubscriptions.stripeSubscriptionId,
+        status: courseSubscriptions.status,
+        cancelAtPeriodEnd: courseSubscriptions.cancelAtPeriodEnd,
+        currentPeriodEnd: courseSubscriptions.currentPeriodEnd,
+        updatedAt: courseSubscriptions.updatedAt,
+        courseOffSaleAt: courses.offSaleAt,
+        courseDeletedAt: courses.deletedAt,
+      })
+      .from(courseSubscriptions)
+      .innerJoin(courses, eq(courses.id, courseSubscriptions.courseId))
+      .where(
+        and(
+          eq(courseSubscriptions.id, courseSubscriptionId),
+          this.userListedWhere(userId)
+        )
+      )
+      .limit(1);
+    if (!row) throw courseSubscriptionNotFound(courseSubscriptionId);
+    return {
+      ...row,
+      courseOffSale:
+        row.courseOffSaleAt !== null || row.courseDeletedAt !== null,
+    };
   }
 
   // ─── Checkout ────────────────────────────────────────────────────────────────
@@ -1694,6 +1837,8 @@ export class CourseSubscriptionService extends BaseService {
       currentPeriodStart: new Date(periodStart * 1000),
       currentPeriodEnd: new Date(periodEnd * 1000),
       cancelAtPeriodEnd: stripeSub.cancel_at_period_end ?? false,
+      // What it bills each period, for the account card (Codex-2hxff.52).
+      amountCents: item?.price?.unit_amount ?? null,
     };
   }
 
@@ -2010,10 +2155,16 @@ export class CourseSubscriptionService extends BaseService {
    * changes, and its own grant revoked, under the lock. Safe to repeat.
    */
   private async endCourseSubscription(
-    row: CourseSubscription
+    row: CourseSubscription,
+    stripeSub: Stripe.Subscription
   ): Promise<CourseSubscriptionWebhookResult> {
     const at = new Date();
-    await this.withCourseLock(row, async (tx) => {
+    const firstEnd = await this.withCourseLock(row, async (tx) => {
+      const [before] = await tx
+        .select({ endedAt: courseSubscriptions.endedAt })
+        .from(courseSubscriptions)
+        .where(eq(courseSubscriptions.id, row.id))
+        .for('update');
       await tx
         .update(courseSubscriptions)
         .set({
@@ -2026,14 +2177,25 @@ export class CourseSubscriptionService extends BaseService {
       await revokeCourseSubscriptionEntitlement(tx, {
         courseSubscriptionId: row.id,
       });
+      return before !== undefined && before.endedAt === null;
     });
 
     this.obs.info('Course subscription cancelled', {
       courseSubscriptionId: row.id,
       courseId: row.courseId,
       userId: row.userId,
+      firstEnd,
     });
-    return { userId: row.userId, organizationId: row.organizationId ?? '' };
+    const result = {
+      userId: row.userId,
+      organizationId: row.organizationId ?? '',
+    };
+    // The cancellation email follows the first end only (C4), as for
+    // members; a redelivery, or an end the refund path made first, sends
+    // nothing.
+    if (!firstEnd) return result;
+    const email = await this.buildCourseCancelledEmail(row, stripeSub);
+    return email ? { ...result, email } : result;
   }
 
   /**
@@ -2195,7 +2357,13 @@ export class CourseSubscriptionService extends BaseService {
       courseId: row.courseId,
       userId: row.userId,
     });
-    return { userId: row.userId, organizationId: row.organizationId ?? '' };
+    // The welcome email (C4), naming the course, as members get theirs.
+    const email = await this.buildCourseCreatedEmail(row, stripeSub);
+    return {
+      userId: row.userId,
+      organizationId: row.organizationId ?? '',
+      ...(email && { email }),
+    };
   }
 
   /**
@@ -2226,13 +2394,28 @@ export class CourseSubscriptionService extends BaseService {
     const presence = await this.ensureDataPresent(stripeSub);
     if (!presence) return;
     const { row } = presence;
+    // Customer credit paid some or all of this bill: the course's payouts are
+    // made on what the card paid, nothing when the credit covered it all, so
+    // support is told once per invoice (Codex-2hxff.97). Before the
+    // duplicate check, so a duplicate's bill is covered too. It never
+    // throws, and changes nothing here.
+    await alertIfCreditPaid(
+      { stripe: this.stripe, obs: this.obs },
+      stripeInvoice,
+      {
+        stripeSubscriptionId: stripeSub.id,
+        subscriptionId: row.id,
+        organizationId: row.organizationId,
+        kind: 'course',
+      }
+    );
     if (isDuplicateSubscription(row)) {
       await this.settleDuplicate(row);
       await this.refundDuplicateInvoice(row, stripeInvoice);
       return;
     }
 
-    const result = {
+    let result: CourseSubscriptionWebhookResult = {
       userId: row.userId,
       organizationId: row.organizationId ?? '',
     };
@@ -2251,34 +2434,52 @@ export class CourseSubscriptionService extends BaseService {
       const periodStart = item?.current_period_start ?? 0;
       const periodEnd = item?.current_period_end ?? 0;
       const newPeriodEnd = new Date(periodEnd * 1000);
+      const amountCents = item?.price?.unit_amount ?? null;
 
       // Under the lock, and only while the row has not ended: a deletion that
       // won the lock leaves it as it is. Then extend the stored grant to the
       // new period end (fail-closed between renewals), or write it afresh
       // when `unpaid` had revoked it. A revival next to a newer live
       // subscription writes nothing here.
-      const supersededBy = await this.withCourseLock(row, async (tx) => {
-        const newer = subscriptionStatusGrantsAccess(status)
-          ? await this.liveRow(tx, row, row.id)
-          : undefined;
-        if (newer) return newer.id;
-        await tx
-          .update(courseSubscriptions)
-          .set({
-            currentPeriodStart: new Date(periodStart * 1000),
-            currentPeriodEnd: newPeriodEnd,
-            status,
-            updatedAt: new Date(),
-          })
-          .where(
-            and(
-              eq(courseSubscriptions.id, row.id),
-              isNull(courseSubscriptions.endedAt)
+      const { supersededBy, renewed } = await this.withCourseLock(
+        row,
+        async (tx) => {
+          const newer = subscriptionStatusGrantsAccess(status)
+            ? await this.liveRow(tx, row, row.id)
+            : undefined;
+          if (newer) return { supersededBy: newer.id, renewed: false };
+          const written = await tx
+            .update(courseSubscriptions)
+            .set({
+              currentPeriodStart: new Date(periodStart * 1000),
+              currentPeriodEnd: newPeriodEnd,
+              status,
+              // What it bills each period, for the account card (.52).
+              ...(amountCents !== null && { amountCents }),
+              updatedAt: new Date(),
+            })
+            .where(
+              and(
+                eq(courseSubscriptions.id, row.id),
+                isNull(courseSubscriptions.endedAt)
+              )
             )
-          );
-        await this.grantIfLive(tx, row.id, newPeriodEnd);
-        return null;
-      });
+            .returning();
+          await this.grantIfLive(tx, row.id, newPeriodEnd);
+          return { supersededBy: null, renewed: written.length > 0 };
+        }
+      );
+      // The renewal receipt (C4), on a cycle renewal of a live row only. It
+      // rides the result, so it goes even when the payouts below are refused
+      // (a non-GBP invoice, PAY-25): the subscriber paid and was renewed.
+      if (renewed && stripeInvoice.billing_reason === 'subscription_cycle') {
+        const email = await this.buildCourseRenewedEmail(
+          row,
+          stripeInvoice,
+          newPeriodEnd
+        );
+        if (email) result = { ...result, email };
+      }
       if (supersededBy) {
         const latest = stripeSub.latest_invoice;
         const latestId = typeof latest === 'string' ? latest : latest?.id;
@@ -2416,7 +2617,7 @@ export class CourseSubscriptionService extends BaseService {
       current.status === 'canceled' ||
       current.status === 'incomplete_expired'
     ) {
-      return this.endCourseSubscription(row);
+      return this.endCourseSubscription(row, current);
     }
 
     const item = current.items.data[0];
@@ -2428,6 +2629,7 @@ export class CourseSubscriptionService extends BaseService {
     const currentPeriodEnd = item?.current_period_end
       ? new Date(item.current_period_end * 1000)
       : row.currentPeriodEnd;
+    const amountCents = item?.price?.unit_amount ?? null;
     // Under the lock, and only while the row has not ended, as for invoices.
     const supersededBy = await this.withCourseLock(row, async (tx) => {
       const newer = subscriptionStatusGrantsAccess(status)
@@ -2440,6 +2642,8 @@ export class CourseSubscriptionService extends BaseService {
           status,
           cancelAtPeriodEnd: current.cancel_at_period_end ?? false,
           currentPeriodEnd,
+          // What it bills each period, for the account card (.52).
+          ...(amountCents !== null && { amountCents }),
           updatedAt: new Date(),
         })
         .where(
@@ -2500,7 +2704,235 @@ export class CourseSubscriptionService extends BaseService {
       await this.settleDuplicate(row);
       return;
     }
-    return this.endCourseSubscription(row);
+    return this.endCourseSubscription(row, stripeSub);
+  }
+
+  /**
+   * invoice.payment_failed (course sub, Codex-2hxff.52 C2): the members'
+   * payment-failed email, naming the course and linking to Account ›
+   * Subscriptions, which lists it. Never for a duplicate being refunded or an
+   * ended subscription (the course version of the member path's `isInert`,
+   * on this row), and not after Stripe's last retry: with no next attempt
+   * there is nothing to retry, and the cancellation email follows when
+   * Stripe ends it (owner Q5). Status moves to past due through the
+   * `customer.subscription.updated` Stripe sends with it; access continues
+   * while Stripe retries (P-3).
+   */
+  async handleCourseInvoicePaymentFailed(
+    stripeInvoice: Stripe.Invoice,
+    stripeSubscriptionId: string
+  ): Promise<CourseSubscriptionWebhookResult | undefined> {
+    const row = await this.findByStripeId(stripeSubscriptionId);
+    if (!row) {
+      this.obs.info('course_subscription.payment_failed_email_skipped', {
+        reason: 'not_recorded',
+        stripeSubscriptionId,
+        invoiceId: stripeInvoice.id,
+      });
+      return;
+    }
+    const skipped = (reason: string) => {
+      this.obs.info('course_subscription.payment_failed_email_skipped', {
+        reason,
+        courseSubscriptionId: row.id,
+        invoiceId: stripeInvoice.id,
+      });
+      return { userId: row.userId, organizationId: row.organizationId ?? '' };
+    };
+    if (isDuplicateSubscription(row)) {
+      await this.settleDuplicate(row);
+      return skipped('duplicate');
+    }
+    if (row.endedAt) return skipped('ended');
+    const nextAttempt = stripeInvoice.next_payment_attempt;
+    if (!nextAttempt) return skipped('no_retry_left');
+
+    const context = await this.courseEmailContext(row.id);
+    if (!context) return skipped('no_address');
+    return {
+      userId: row.userId,
+      organizationId: row.organizationId ?? '',
+      email: {
+        to: context.to,
+        toName: context.toName,
+        templateName: 'payment-failed',
+        category: 'transactional',
+        userId: row.userId,
+        data: {
+          userName: context.userName,
+          planName: context.courseTitle,
+          priceFormatted: formatPounds(stripeInvoice.amount_due ?? 0),
+          retryDate: new Date(nextAttempt * 1000).toLocaleDateString('en-GB'),
+          updatePaymentUrl: this.accountSubscriptionsUrl(),
+        },
+      },
+    };
+  }
+
+  // ─── Lifecycle emails (Codex-2hxff.52, C4) ──────────────────────────────────
+  //
+  // The members' templates, unchanged, with the course as the plan. The
+  // webhook sends them through `sendEmailToWorker`, as for members.
+
+  /** `subscription-created`: the welcome, once the course is granted. */
+  private async buildCourseCreatedEmail(
+    row: CourseSubscription,
+    stripeSub: Stripe.Subscription
+  ): Promise<WebhookEmailPayload | null> {
+    const context = await this.courseEmailContext(row.id);
+    if (!context) return null;
+    const item = stripeSub.items.data[0];
+    return {
+      to: context.to,
+      toName: context.toName,
+      templateName: 'subscription-created',
+      category: 'transactional',
+      userId: row.userId,
+      data: {
+        userName: context.userName,
+        planName: context.courseTitle,
+        priceFormatted: formatPounds(item?.price?.unit_amount ?? 0),
+        billingInterval:
+          item?.price?.recurring?.interval ?? row.billingInterval,
+        nextBillingDate: item?.current_period_end
+          ? new Date(item.current_period_end * 1000).toLocaleDateString('en-GB')
+          : 'See account page',
+        manageUrl: this.accountSubscriptionsUrl(),
+      },
+    };
+  }
+
+  /** `subscription-renewed`: the receipt for a cycle renewal. */
+  private async buildCourseRenewedEmail(
+    row: CourseSubscription,
+    stripeInvoice: Stripe.Invoice,
+    nextPeriodEnd: Date
+  ): Promise<WebhookEmailPayload | null> {
+    const context = await this.courseEmailContext(row.id);
+    if (!context) return null;
+    return {
+      to: context.to,
+      toName: context.toName,
+      templateName: 'subscription-renewed',
+      category: 'transactional',
+      userId: row.userId,
+      data: {
+        userName: context.userName,
+        planName: context.courseTitle,
+        // The bill, not what the card paid: credit may have paid some or all
+        // of it (review C1 cycle 2, L5). `amount_paid` stays the payouts'.
+        priceFormatted: formatPounds(
+          stripeInvoice.total ?? stripeInvoice.amount_paid ?? 0
+        ),
+        billingDate: new Date().toLocaleDateString('en-GB'),
+        nextBillingDate: nextPeriodEnd.toLocaleDateString('en-GB'),
+        manageUrl: this.accountSubscriptionsUrl(),
+      },
+    };
+  }
+
+  /**
+   * `subscription-cancelled`, on the subscription's first end. Not when the
+   * course is off sale: the off-sale sweep already sent
+   * `course-no-longer-offered`, so nobody is told twice. Resubscribe goes to
+   * the course's own page, where its plan is sold, or the organisation's
+   * home when the course is gone.
+   */
+  private async buildCourseCancelledEmail(
+    row: CourseSubscription,
+    stripeSub: Stripe.Subscription
+  ): Promise<WebhookEmailPayload | null> {
+    const context = await this.courseEmailContext(row.id);
+    if (!context) return null;
+    if (context.offSale) {
+      this.obs.info(
+        'Course subscription ended off sale: no cancellation email',
+        {
+          courseSubscriptionId: row.id,
+          courseId: row.courseId,
+        }
+      );
+      return null;
+    }
+    return {
+      to: context.to,
+      toName: context.toName,
+      templateName: 'subscription-cancelled',
+      category: 'transactional',
+      userId: row.userId,
+      data: {
+        userName: context.userName,
+        planName: context.courseTitle,
+        accessEndDate: stripeSub.cancel_at
+          ? new Date(stripeSub.cancel_at * 1000).toLocaleDateString('en-GB')
+          : 'Immediately',
+        resubscribeUrl: this.coursePageUrl(context),
+      },
+    };
+  }
+
+  /**
+   * Who a course subscription's email goes to and what it names, or null
+   * with no address. Ids in, never an address out to a log.
+   */
+  private async courseEmailContext(courseSubscriptionId: string): Promise<{
+    to: string;
+    toName?: string;
+    userName: string;
+    courseTitle: string;
+    courseSlug: string;
+    courseGone: boolean;
+    offSale: boolean;
+    orgSlug: string | null;
+  } | null> {
+    const [found] = await this.db
+      .select({
+        email: users.email,
+        name: users.name,
+        courseTitle: courses.title,
+        courseSlug: courses.slug,
+        offSaleAt: courses.offSaleAt,
+        deletedAt: courses.deletedAt,
+        orgSlug: organizations.slug,
+      })
+      .from(courseSubscriptions)
+      .innerJoin(users, eq(users.id, courseSubscriptions.userId))
+      .innerJoin(courses, eq(courses.id, courseSubscriptions.courseId))
+      .leftJoin(organizations, eq(organizations.id, courses.organizationId))
+      .where(eq(courseSubscriptions.id, courseSubscriptionId))
+      .limit(1);
+    if (!found?.email) return null;
+    return {
+      to: found.email,
+      toName: found.name || undefined,
+      userName: found.name || 'there',
+      courseTitle: found.courseTitle,
+      courseSlug: found.courseSlug,
+      courseGone: found.deletedAt !== null,
+      offSale: found.offSaleAt !== null,
+      orgSlug: found.orgSlug,
+    };
+  }
+
+  /** Account › Subscriptions, which now lists course subscriptions. */
+  private accountSubscriptionsUrl(): string {
+    return `${this.webAppUrl ?? ''}/account/subscriptions`;
+  }
+
+  /** The course's page on its organisation, or the organisation's home. */
+  private coursePageUrl(context: {
+    courseSlug: string;
+    courseGone: boolean;
+    orgSlug: string | null;
+  }): string {
+    if (!context.orgSlug || !isEnvName(this.environment)) {
+      return this.accountSubscriptionsUrl();
+    }
+    return buildOrgUrlFromEnv(
+      this.environment,
+      context.orgSlug,
+      context.courseGone ? '/' : `/journeys/${context.courseSlug}`
+    );
   }
 
   // ─── Payout fan-out (Option B platform charge — mirrors writePurchasePayouts) ─
@@ -2546,10 +2978,13 @@ export class CourseSubscriptionService extends BaseService {
     // the platform fee, or between the slices (the per-slice writer before
     // this), is completed by the redelivery from what the charge has left.
 
+    // The fee in force at the invoice's own time (Codex-2hxff.33, data design
+    // §1.4), like the agreement below.
     const fees = await this.feeConfig.getFeesForCreator(
       organizationId,
       creatorId,
-      'subscription'
+      'subscription',
+      invoiceCreatedAt
     );
 
     const agreement = await findActiveCreatorAgreementShare(this.db, {

@@ -41,12 +41,24 @@
     PlusIcon,
     CheckCircleIcon,
     ChevronRightIcon,
+    MailIcon,
+    AlertTriangleIcon,
     UsersIcon,
   } from '$lib/components/ui/Icon';
   import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
   import { toast } from '$lib/components/ui/Toast/toast-store';
   import PlanPicker from '$lib/components/studio/plan-picker/PlanPicker.svelte';
   import PlanGuidanceNote from '$lib/components/studio/plan-picker/PlanGuidanceNote.svelte';
+  import PriceChangeNote from '$lib/components/studio/PriceChangeNote.svelte';
+  import {
+    dismissalKey,
+    editTierHint,
+    type PriceNoteCheck,
+    type PriceNoteView,
+    priceChangeNotes,
+    stillGoingOutHint,
+  } from '$lib/components/studio/price-note-view';
+  import { dismiss, isDismissed } from '$lib/collections/dismissals';
   import {
     countsAnd,
     countsDot,
@@ -60,6 +72,7 @@
     toggleTierId,
   } from '$lib/components/studio/plan-picker/select-from-tier';
   import { onMount, tick } from 'svelte';
+  import type { Attachment } from 'svelte/attachments';
   import {
     listTiers,
     getMyConnectStatus,
@@ -73,9 +86,10 @@
     getMyConnectDashboard,
     updateSubscriptionFeature,
     syncMyConnect,
+    getTierPriceChanges,
   } from '$lib/remote/subscription.remote';
   import { getOrgSettings } from '$lib/remote/org.remote';
-  import { formatDate, formatPrice } from '$lib/utils/format';
+  import { formatDate, formatPrice, formatSentenceDate } from '$lib/utils/format';
   import { randomUuid } from '$lib/utils/random-uuid';
   import { humanizeRequirement } from '$lib/utils/connect-requirement-humanization';
   import {
@@ -119,6 +133,10 @@
   const connectQuery = $derived(getMyConnectStatus());
   const settingsQuery = $derived(orgId ? getOrgSettings(orgId) : null);
   const statsQuery = $derived(orgId ? getSubscriptionStats(orgId) : null);
+  // How each tier's price change is going (Codex-2hxff.86). Beside the tier
+  // list, not before it: the note slot stays empty until it lands. A save's
+  // `invalidateAll()` re-reads it once; otherwise only Check again does.
+  const priceChangesQuery = $derived(orgId ? getTierPriceChanges(orgId) : null);
 
   // Derived data from queries (with safe defaults)
   const tiers = $derived(
@@ -381,6 +399,69 @@
     return map;
   });
 
+  // ─── Price-change notes (Codex-2hxff.85 M3, .86) ───────────────────────
+  // What Check again saw, so a read that found the same run can say so (P6).
+  let priceCheck = $state<PriceNoteCheck | null>(null);
+  let priceReading = $state(false);
+  // Dismissals live in localStorage, which nothing here tracks: bumped on
+  // each, so the notes re-derive.
+  let priceDismissTick = $state(0);
+  const priceChangesFailed = $derived(Boolean(priceChangesQuery?.error));
+
+  const priceNotesByTier = $derived.by(() => {
+    void priceDismissTick;
+    const all = priceChangesQuery?.current ?? [];
+    const now = new Date();
+    const map = new Map<string, PriceNoteView[]>();
+    for (const tier of tiers) {
+      const notes = priceChangeNotes({
+        all,
+        changes: all.filter((change) => change.tierId === tier.id),
+        subject: { kind: 'tier', name: tier.name },
+        now,
+        check: priceCheck,
+        // Q8: a finished note stays until dismissed or 14 days pass.
+        isDismissed: (key) => isDismissed(key, 14),
+      });
+      if (notes.length > 0) map.set(tier.id, notes);
+    }
+    return map;
+  });
+
+  /**
+   * Check again (one note) or Try again (the failed read): one read per
+   * press, never two at once (the cost rule).
+   */
+  async function readPriceChanges(note?: PriceNoteView) {
+    const query = priceChangesQuery;
+    if (!query || priceReading) return;
+    priceReading = true;
+    const at = new Date().toISOString();
+    try {
+      await query.refresh();
+      priceCheck =
+        note && !query.error
+          ? { key: note.key, at, lastRunAt: note.lastRunAt }
+          : null;
+    } catch {
+      // The query keeps the error, and the failed line says so (P10).
+      priceCheck = null;
+    } finally {
+      priceReading = false;
+    }
+  }
+
+  function dismissPriceNote(note: PriceNoteView, tierId: string) {
+    for (const id of note.ids) dismiss(dismissalKey(id));
+    priceDismissTick += 1;
+    // The button leaves with the note: focus goes to its tier's Edit.
+    void tick().then(() =>
+      document
+        .querySelector<HTMLElement>(`[data-tier-edit="${tierId}"]`)
+        ?.focus()
+    );
+  }
+
   const statBand = $derived<MoneyStat[]>([
     {
       label: m.monetisation_stats_total(),
@@ -417,6 +498,17 @@
   let tierPriceAnnual = $state(4990);
   let tierFormError = $state('');
   let tierFormLoading = $state(false);
+  /**
+   * The prices a save was refused for as a yearly price below the monthly
+   * one (YEARLY_PRICE_BELOW_MONTHLY; owner: "Refuse yearly below monthly").
+   * The yearly price says so while those prices stand.
+   */
+  let tierYearlyRefused = $state<{ monthly: number; annual: number } | null>(null);
+  const tierYearlyBelow = $derived(
+    tierYearlyRefused !== null &&
+      tierYearlyRefused.monthly === tierPriceMonthly &&
+      tierYearlyRefused.annual === tierPriceAnnual
+  );
   /**
    * "Include everything from…" (Codex-2hxff.91): the tier whose films and
    * courses the new tier starts with, or `null` for Nothing. It starts on the
@@ -597,9 +689,19 @@
   const moveGaps = $derived(
     deleteChoice === 'move' ? itemGaps(deleteMoveTo, moveOptions) : []
   );
+  /**
+   * Refused up front (mockups D6, and C1 M1-M2): someone is on the tier, or
+   * waiting to move to it at their renewal (Codex-2hxff.16, T5). Both come
+   * from the same read as the worker's refusal, so they can't disagree. An
+   * older worker without `movingInCount` counts none.
+   */
+  const deleteRefused = $derived(
+    impact !== null &&
+      (impact.liveSubscriberCount > 0 || impact.movingInCount > 0)
+  );
   const deleteReady = $derived(
     impact !== null &&
-      impact.liveSubscriberCount === 0 &&
+      !deleteRefused &&
       (onlyHereTotal === 0 ||
         deleteChoice === 'keep' ||
         (deleteChoice === 'move' && deleteMoveTo.length > 0))
@@ -814,6 +916,7 @@
     if (!connectReady || tiersFailed) return;
     editingTier = null;
     tierFormError = '';
+    tierYearlyRefused = null;
     if (unsettledCreate && !resumable(unsettledCreate)) unsettledCreate = null;
     if (unsettledCreate) {
       // Resume the unsettled attempt: its values and its id are kept, so an
@@ -839,6 +942,36 @@
     tierDialogOpen = true;
   }
 
+  /**
+   * The Edit Tier dialog's one quiet line before saving new prices
+   * (Codex-2hxff.85, owner decision Q7): who will be emailed, when it starts,
+   * and the 30-day rule (P1). Only when a price differs from the saved one
+   * and the tier has subscribers; the count is the tier row's. When that
+   * price's emails are still going out, it warns that the save replaces
+   * them (P8). A failed progress read can't know, so it says P1.
+   */
+  const tierPriceHint = $derived.by(() => {
+    const tier = editingTier;
+    if (!tier) return null;
+    const saved = { monthly: tier.priceMonthly, annual: tier.priceAnnual };
+    const next = { monthly: tierPriceMonthly, annual: tierPriceAnnual };
+    return (
+      stillGoingOutHint({
+        changes: (priceChangesQuery?.current ?? []).filter(
+          (change) => change.tierId === tier.id
+        ),
+        saved,
+        next,
+      }) ??
+      editTierHint({
+        name: tier.name,
+        subscribers: subscribersByTier.get(tier.id)?.count ?? 0,
+        saved,
+        next,
+      })
+    );
+  });
+
   function openEditTier(tier: SubscriptionTier) {
     editingTier = tier;
     tierName = tier.name;
@@ -846,6 +979,7 @@
     tierPriceMonthly = tier.priceMonthly;
     tierPriceAnnual = tier.priceAnnual;
     tierFormError = '';
+    tierYearlyRefused = null;
     // A create still in flight does not hold up this dialog's Save.
     tierFormLoading = false;
     tierDialogOpen = true;
@@ -869,15 +1003,34 @@
     }
     tierFormLoading = true;
     tierFormError = '';
+    tierYearlyRefused = null;
+    const tierId = editingTier.id;
+    const sent = { monthly: tierPriceMonthly, annual: tierPriceAnnual };
     try {
-      await updateTier({
+      const result = await updateTier({
         orgId,
-        tierId: editingTier.id,
+        tierId,
         name: tierName,
         description: tierDescription || undefined,
-        priceMonthly: tierPriceMonthly,
-        priceAnnual: tierPriceAnnual,
+        priceMonthly: sent.monthly,
+        priceAnnual: sent.annual,
       });
+      // `in`, not `result.success`: see `submitCreate`.
+      if (!('tier' in result)) {
+        if (result.detailsCode === 'YEARLY_PRICE_BELOW_MONTHLY') {
+          // Only while the dialog still edits this tier: a late answer
+          // must not mark another tier's prices.
+          if (tierDialogOpen && editingTier?.id === tierId) showYearlyRefusal(sent);
+        } else {
+          tierFormError = m.monetisation_tier_save_error();
+        }
+        logRawError(
+          'tier save refused',
+          `${result.status} ${result.detailsCode ?? result.code ?? 'unknown'}`,
+          result.status >= 500 ? 'error' : 'warn'
+        );
+        return;
+      }
       tierDialogOpen = false;
       await invalidateAll();
     } catch (error) {
@@ -893,6 +1046,29 @@
       tierFormLoading = false;
     }
   }
+
+  /**
+   * A yearly price below the monthly one, refused on save: said at the
+   * yearly price (`aria-describedby`), which takes focus. The server refuses
+   * before Stripe is asked, so nothing was saved.
+   */
+  function showYearlyRefusal(sent: { monthly: number; annual: number }) {
+    tierYearlyRefused = sent;
+  }
+
+  /**
+   * The yearly price takes focus once for each refusal, as the line appears.
+   * Typing back to the refused prices shows the line again without moving
+   * focus.
+   */
+  let focusedYearlyRefusal: object | null = null;
+  const focusOnYearlyRefusal: Attachment<HTMLInputElement> = (node) => {
+    const refusal = tierYearlyRefused;
+    if (refusal && refusal !== focusedYearlyRefusal) {
+      focusedYearlyRefusal = refusal;
+      node.focus();
+    }
+  };
 
   /**
    * Send a create, and act on its answer.
@@ -951,7 +1127,7 @@
     } else if (!('tier' in result)) {
       // `in`, not `result.success`: a boolean discriminant does not narrow
       // with strictNullChecks off.
-      refuseCreate(result, attemptId, shown);
+      refuseCreate(result, attemptId, shown, values);
     } else {
       if (tierSubmissionId === attemptId) unsettledCreate = null;
       if (shown) tierDialogOpen = false;
@@ -968,6 +1144,9 @@
    *   (only a retry from elsewhere can do that). Mint a new one.
    * - `SUBMISSION_IN_PROGRESS` (409): the first is still at Stripe. Keep the
    *   id; a retry in a moment returns its tier.
+   * - `YEARLY_PRICE_BELOW_MONTHLY` (400, owner: "Refuse yearly below
+   *   monthly"): refused before Stripe, so nothing was made. Said at the
+   *   yearly price, not in the dialog's error line.
    * - Anything else keeps the id. A 500 repeat reuses the first attempt's
    *   Stripe objects, and our own 400/403/404/422 gates run before any Stripe
    *   call.
@@ -989,9 +1168,17 @@
       detailsCode: string | undefined;
     },
     attemptId: string,
-    shown: boolean
+    shown: boolean,
+    values: TierCreateValues
   ) {
     const code = failure.detailsCode;
+    if (code === 'YEARLY_PRICE_BELOW_MONTHLY') {
+      if (shown) {
+        showYearlyRefusal({ monthly: values.priceMonthly, annual: values.priceAnnual });
+      }
+      logRawError('tier create refused', `${failure.status} ${code}`, 'warn');
+      return;
+    }
     // Only while the refused id is still the dialog's: a reopen since may
     // have minted a new one, which this refusal says nothing about.
     if (
@@ -1113,11 +1300,21 @@
 
   async function handleToggleRecommended(tier: SubscriptionTier) {
     try {
-      await updateTier({
+      const result = await updateTier({
         orgId,
         tierId: tier.id,
         isRecommended: !tier.isRecommended,
       });
+      // A refusal is returned, never thrown (see `updateTier`).
+      if (!('tier' in result)) {
+        toast.error(m.monetisation_tier_update_error());
+        logRawError(
+          'recommended toggle refused',
+          `${result.status} ${result.detailsCode ?? result.code ?? 'unknown'}`,
+          result.status >= 500 ? 'error' : 'warn'
+        );
+        return;
+      }
       await invalidateAll();
       toast.success(
         tier.isRecommended
@@ -1545,9 +1742,22 @@
              `.tier-info { flex: 1 }` absorbed every pixel of an 1808px column.
              Now the meaning-bearing clusters pack together on the left and only
              the row ACTIONS take the conventional right edge. -->
+        {#if priceChangesFailed}
+          <!-- P10: which tier changed is in the read that failed, so the
+               line sits once above the list, never as "no change". -->
+          <div class="tier-price-failed">
+            <PriceChangeNote
+              failed
+              busy={priceReading}
+              onTryAgain={() => readPriceChanges()}
+              data-testid="price-change-note-failed"
+            />
+          </div>
+        {/if}
         <div class="tier-list">
           {#each tiers as tier, i (tier.id)}
             {@const tierStats = subscribersByTier.get(tier.id)}
+            {@const priceNotes = priceNotesByTier.get(tier.id) ?? []}
             {@const saving = annualSavingPercent(tier)}
             {@const access = summaryByTier.get(tier.id)}
             {@const rowGaps = (access?.missingFromCheaper ?? []).filter((gap) =>
@@ -1625,6 +1835,7 @@
                   size="sm"
                   onclick={() => openEditTier(tier)}
                   aria-label={m.monetisation_tiers_edit_aria({ name: tier.name })}
+                  data-tier-edit={tier.id}
                 >
                   <EditIcon size={14} />
                 </Button>
@@ -1664,6 +1875,21 @@
                             })}
                       </b>
                     </PlanGuidanceNote>
+                  {/each}
+                </div>
+              {/if}
+              <!-- How a saved price change is going (M3, .86), in the
+                   guidance note's slot. Newest first, one per save. -->
+              {#if priceNotes.length > 0}
+                <div class="tier-price-notes">
+                  {#each priceNotes as note (note.key)}
+                    <PriceChangeNote
+                      view={note}
+                      name={tier.name}
+                      busy={priceReading}
+                      onCheckAgain={() => readPriceChanges(note)}
+                      onDismiss={() => dismissPriceNote(note, tier.id)}
+                    />
                   {/each}
                 </div>
               {/if}
@@ -1725,6 +1951,7 @@
               min={100}
               step={1}
               required
+              aria-describedby={tierPriceHint ? 'tier-price-hint' : undefined}
             />
             <span class="form-hint">{formatPrice(tierPriceMonthly)}</span>
           </div>
@@ -1737,10 +1964,43 @@
               min={100}
               step={1}
               required
+              aria-invalid={tierYearlyBelow || undefined}
+              {@attach focusOnYearlyRefusal}
+              aria-describedby={[
+                tierYearlyBelow && 'tier-price-annual-refusal',
+                tierPriceHint && 'tier-price-hint',
+              ]
+                .filter(Boolean)
+                .join(' ') || undefined}
             />
             <span class="form-hint">{formatPrice(tierPriceAnnual)}</span>
+            {#if tierYearlyBelow}
+              <p
+                class="form-refusal"
+                id="tier-price-annual-refusal"
+                data-testid="tier-yearly-refusal"
+              >
+                <AlertTriangleIcon size={14} aria-hidden="true" class="form-refusal__icon" />
+                <span>{m.price_refusal_yearly_below_monthly()}</span>
+              </p>
+            {/if}
           </div>
         </div>
+        {#if tierPriceHint}
+          <p
+            class="price-hint"
+            id="tier-price-hint"
+            data-testid="tier-price-hint"
+            data-kind={tierPriceHint.kind}
+          >
+            {#if tierPriceHint.kind === 'going_out'}
+              <AlertTriangleIcon size={14} aria-hidden="true" class="price-hint__icon" />
+            {:else}
+              <MailIcon size={14} aria-hidden="true" class="price-hint__icon" />
+            {/if}
+            <span><b>{tierPriceHint.lead}</b> {tierPriceHint.body}</span>
+          </p>
+        {/if}
 
         <!-- "Include everything from…" (Codex-2hxff.91): copies a tier's films
              and courses in the same server command as the create. Create only,
@@ -1852,26 +2112,59 @@
       <Dialog.Title>{m.monetisation_tiers_delete()}</Dialog.Title>
     </Dialog.Header>
     <Dialog.Body>
-      {#if impact && impact.liveSubscriberCount > 0 && deletingTier}
+      {#if impact && deleteRefused && deletingTier}
         <!-- Refused, said up front (mockup D6): the worker refuses a tier with
-             any subscription that isn't cancelled, and this count comes from
-             the same read, so the dialog and the refusal can't disagree. -->
+             any subscription that isn't cancelled, or anyone waiting to move
+             to it at their renewal (C1 M1-M2), and these counts come from the
+             same read, so the dialog and the refusal can't disagree. Movers
+             who cancelled still count: reactivating brings the move back. -->
+        {@const name = deletingTier.name}
+        {@const subs = impact.liveSubscriberCount}
+        {@const movers = impact.movingInCount}
         <Alert variant="warning" data-testid="tier-delete-refused">
           <span class="alert-icon-row">
             <UsersIcon size={16} aria-hidden="true" />
             <span class="alert-copy">
-              <span>
-                <b>{m.monetisation_tier_delete_refused_title({ name: deletingTier.name })}</b>
-                {impact.liveSubscriberCount === 1
-                  ? m.monetisation_tier_delete_refused_body_one({ name: deletingTier.name })
-                  : m.monetisation_tier_delete_refused_body_other({
-                      count: impact.liveSubscriberCount,
-                      name: deletingTier.name,
-                    })}
-              </span>
-              <a class="alert-link" href="/studio/subscribers?tierId={deletingTier.id}">
-                {m.monetisation_tier_delete_refused_view({ name: deletingTier.name })}
-              </a>
+              {#if subs === 0}
+                <!-- Only movers (M1): they are still on their own tiers until
+                     their date, so this tier's subscriber list is empty and
+                     there is nothing to link to. -->
+                {@const date = impact.lastMoveAt ? formatSentenceDate(impact.lastMoveAt) : null}
+                <span>
+                  <b>{m.monetisation_tier_delete_moving_title({ name })}</b>
+                  {movers === 1
+                    ? date
+                      ? m.monetisation_tier_delete_moving_body_one({ date })
+                      : m.monetisation_tier_delete_moving_body_undated_one()
+                    : date
+                      ? m.monetisation_tier_delete_moving_body_other({ count: movers, date })
+                      : m.monetisation_tier_delete_moving_body_undated_other({ count: movers })}
+                </span>
+              {:else}
+                <span>
+                  <b>{m.monetisation_tier_delete_refused_title({ name })}</b>
+                  {#if movers === 0}
+                    {subs === 1
+                      ? m.monetisation_tier_delete_refused_body_one({ name })
+                      : m.monetisation_tier_delete_refused_body_other({ count: subs, name })}
+                  {:else if subs === 1}
+                    {movers === 1
+                      ? m.monetisation_tier_delete_refused_moving_body_one_one({ name })
+                      : m.monetisation_tier_delete_refused_moving_body_one_other({ name, movers })}
+                  {:else}
+                    {movers === 1
+                      ? m.monetisation_tier_delete_refused_moving_body_other_one({ count: subs, name })
+                      : m.monetisation_tier_delete_refused_moving_body_other_other({
+                          count: subs,
+                          name,
+                          movers,
+                        })}
+                  {/if}
+                </span>
+                <a class="alert-link" href="/studio/subscribers?tierId={deletingTier.id}">
+                  {m.monetisation_tier_delete_refused_view({ name })}
+                </a>
+              {/if}
             </span>
           </span>
         </Alert>
@@ -2076,7 +2369,7 @@
       {/if}
     </Dialog.Body>
     <Dialog.Footer>
-      {#if impact && impact.liveSubscriberCount > 0}
+      {#if deleteRefused}
         <Button variant="ghost" onclick={() => { deleteDialogOpen = false; deletingTier = null; }}>
           {m.monetisation_tier_delete_close()}
         </Button>
@@ -2510,9 +2803,47 @@
     }
   }
 
+  /* A save refused at its field (a yearly price below the monthly one): the
+     words and an icon, never the colour alone. */
+  .form-refusal {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: var(--space-2);
+    align-items: start;
+    margin: 0;
+    font-size: var(--text-xs);
+    line-height: var(--leading-normal);
+    color: var(--color-error);
+  }
+
+  .form-refusal :global(.form-refusal__icon) {
+    margin-top: var(--space-0-5);
+  }
+
   .form-hint {
     font-size: var(--text-xs);
     color: var(--color-text-muted);
+  }
+
+  /* Edit Tier's quiet line about existing subscribers (Codex-2hxff.85 P1). */
+  .price-hint {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: var(--space-2);
+    align-items: start;
+    margin: 0;
+    font-size: var(--text-xs);
+    line-height: var(--leading-normal);
+    color: var(--color-text-secondary);
+  }
+
+  .price-hint :global(.price-hint__icon) {
+    margin-top: var(--space-0-5);
+  }
+
+  .price-hint b {
+    color: var(--color-text);
+    font-weight: var(--font-semibold);
   }
 
   /* Delete confirm */
@@ -2532,7 +2863,8 @@
   }
 
   /* The guidance notes span the row under its clusters. */
-  .tier-gaps {
+  .tier-gaps,
+  .tier-price-notes {
     grid-column: 1 / -1;
     display: flex;
     flex-direction: column;
@@ -2540,9 +2872,14 @@
   }
 
   @media (--breakpoint-sm) {
-    .tier-gaps {
+    .tier-gaps,
+    .tier-price-notes {
       grid-column: 2 / -1;
     }
+  }
+
+  .tier-price-failed {
+    margin-bottom: var(--space-3);
   }
 
   /* A radio group in the content editor's access-card look: the create
@@ -2619,10 +2956,11 @@
     background: var(--color-surface);
   }
 
+  /* The gap ring takes the fill's ink, as AccessSection's does (Codex-mik4h). */
   .choice-card[data-selected] .choice-check {
     border-color: var(--color-interactive);
     background-color: var(--color-interactive);
-    box-shadow: inset 0 0 0 var(--space-1) var(--color-surface);
+    box-shadow: inset 0 0 0 var(--space-1) var(--color-on-interactive);
   }
 
   .choice-detail {

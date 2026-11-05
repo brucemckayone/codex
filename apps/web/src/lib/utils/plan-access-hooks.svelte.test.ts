@@ -147,6 +147,130 @@ describe('useSubscriptionContext: covered by set membership', () => {
     expect(read().subCtx.currentPlan).toEqual({ id: BASIC.id, name: 'Basic' });
   });
 
+  it('carries a waiting move from the live entry, and from the stream (Codex-2hxff.16)', async () => {
+    const moving = {
+      tierId: BASIC.id,
+      tierName: 'Basic',
+      effectiveAt: '2026-11-12T09:00:00.000Z',
+    };
+    collectionState.set(ORG, {
+      organizationId: ORG,
+      tier: { id: PRO.id, name: PRO.name, sortOrder: PRO.sortOrder },
+      status: 'active',
+      currentPeriodEnd: '2026-11-12T09:00:00.000Z',
+      cancelAtPeriodEnd: false,
+      pendingTierChange: moving,
+    });
+    const live = subContext({
+      isTierGated: true,
+      includedInTierIds: [BASIC.id],
+    });
+    expect(live().subCtx.pendingPlan).toEqual({
+      id: BASIC.id,
+      name: 'Basic',
+      effectiveAt: '2026-11-12T09:00:00.000Z',
+    });
+    cleanup?.();
+    collectionState.clear();
+
+    const streamed = subContext(
+      { isTierGated: true, includedInTierIds: [BASIC.id] },
+      Promise.resolve({
+        requiresSubscription: true,
+        hasSubscription: true,
+        subscriptionCoversContent: false,
+        tiers: TIERS,
+        tiersFailed: false,
+        currentSubscription: {
+          tier: { id: PRO.id, name: 'Pro' },
+          status: 'active',
+          cancelAtPeriodEnd: false,
+          currentPeriodEnd: '2026-11-12T09:00:00.000Z',
+          pendingTierChange: {
+            ...moving,
+            kind: 'plan',
+            amountCents: 500,
+            billingInterval: 'month',
+            laterPrice: null,
+          },
+        },
+      })
+    );
+    await settle();
+    expect(streamed().subCtx.pendingPlan).toEqual({
+      id: BASIC.id,
+      name: 'Basic',
+      effectiveAt: '2026-11-12T09:00:00.000Z',
+    });
+  });
+
+  // waiting-move.html state 6: a cancelling plan ends at the renewal the
+  // move would land on, and the move goes with it. The server still sends
+  // the move for a cancelling or past-due row, so the hook drops it.
+  describe('a plan that is not carrying on drops its waiting move', () => {
+    const moving = {
+      tierId: BASIC.id,
+      tierName: 'Basic',
+      effectiveAt: '2026-11-12T09:00:00.000Z',
+    };
+    const item = { isTierGated: true, includedInTierIds: [BASIC.id] };
+
+    it.each([
+      ['cancelling', { status: 'cancelling', cancelAtPeriodEnd: true }],
+      ['past due', { status: 'past_due', cancelAtPeriodEnd: false }],
+    ])('the live entry, %s: nothing waits', (_label, state) => {
+      collectionState.set(ORG, {
+        organizationId: ORG,
+        tier: { id: PRO.id, name: PRO.name, sortOrder: PRO.sortOrder },
+        currentPeriodEnd: '2026-11-12T09:00:00.000Z',
+        pendingTierChange: moving,
+        ...state,
+      });
+      expect(subContext(item)().subCtx.pendingPlan).toBeNull();
+    });
+
+    it.each([
+      ['set to cancel', { status: 'active', cancelAtPeriodEnd: true }],
+      ['cancelling', { status: 'cancelling', cancelAtPeriodEnd: true }],
+      ['past due', { status: 'past_due', cancelAtPeriodEnd: false }],
+    ])('the streamed row, %s: nothing waits', async (_label, state) => {
+      const read = subContext(
+        item,
+        Promise.resolve({
+          requiresSubscription: true,
+          hasSubscription: true,
+          subscriptionCoversContent: false,
+          tiers: TIERS,
+          tiersFailed: false,
+          currentSubscription: {
+            tier: { id: PRO.id, name: 'Pro' },
+            currentPeriodEnd: '2026-11-12T09:00:00.000Z',
+            pendingTierChange: {
+              ...moving,
+              kind: 'plan',
+              amountCents: 500,
+              billingInterval: 'month',
+              laterPrice: null,
+            },
+            ...state,
+          },
+        })
+      );
+      await settle();
+      expect(read().subCtx.hasSubscription).toBe(true);
+      expect(read().subCtx.pendingPlan).toBeNull();
+    });
+  });
+
+  it('an entry written before the field existed reads as nothing waiting', () => {
+    liveSub(PRO);
+    const read = subContext({
+      isTierGated: true,
+      includedInTierIds: [BASIC.id],
+    });
+    expect(read().subCtx.pendingPlan).toBeNull();
+  });
+
   it('a failed plan list is "failed", never an empty "ready"', async () => {
     const read = subContext(
       { isTierGated: true, includedInTierIds: [PRO.id] },

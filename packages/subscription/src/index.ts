@@ -57,19 +57,28 @@ export {
   AlreadySubscribedError,
   ConnectAccountNotFoundError,
   ConnectAccountNotReadyError,
+  CourseNotOnSaleError,
   CourseSubscriptionPlanExistsError,
   CourseSubscriptionPlanNotFoundError,
   CreatorConnectRequiredError,
   isSubscriptionServiceError,
+  // Tier change refusals and Keep current plan (Codex-2hxff.16)
+  MoveAlreadyLandedError,
+  PendingMoveKeepFirstError,
   SubscriptionCheckoutError,
   SubscriptionNotFoundError,
+  SubscriptionScheduledElsewhereError,
   type SubscriptionServiceError,
+  TierChangeCancellingError,
+  TierChangeIntervalWhileMovingError,
   TierChangePreviewExpiredError,
+  TierChangeTwoStepsError,
   TierHasOnlyItemsError,
   TierHasSubscribersError,
   TierNotFoundError,
   TierSortOrderConflictError,
   wrapError,
+  YearlyPriceBelowMonthlyError,
 } from './errors';
 
 // Services
@@ -85,13 +94,24 @@ export {
   type CourseSubscriptionCheckoutVerifyResult,
   CourseSubscriptionService,
   type CourseSubscriptionWebhookResult,
+  // Account › Subscriptions' course cards (Codex-2hxff.52)
+  type UserCourseSubscription,
 } from './services/course-subscription-service';
 export {
   applyDuePendingPriceChange,
+  // price.updated skips the platform's own Price updates (no false alert).
+  isPlatformPriceWrite,
   PENDING_PRICE_FROM_KEY,
   PENDING_PRICE_ID_KEY,
   PRICE_NOTICE_TIMEOUT_MS,
 } from './services/pending-price-change';
+// The hourly step that tells and moves people after a price change
+// (Codex-2hxff.86)
+export {
+  PRICE_MOVES_PER_RUN,
+  type PriceChangeProgress,
+  type PriceMoveStepResult,
+} from './services/price-moves-sweep';
 export {
   calculateRevenueSplit,
   type RevenueSplit,
@@ -120,11 +140,13 @@ export type {
   PayoutDisplayStatus,
   PayoutSummary,
   PayoutWithCreator,
-  PropagateTierPriceOptions,
-  PropagateTierPriceResult,
+  // A move to a cheaper plan waiting for the renewal (Codex-2hxff.16)
+  PendingTierChange,
   SubscriberListItem,
   SubscriberSubscription,
   SubscriptionCheckoutVerifyResult,
+  SubscriptionWithOrg,
+  SubscriptionWithTier,
   TierChangePreview,
   WebhookEmailPayload,
   WebhookHandlerResult,
@@ -134,7 +156,5 @@ export {
   SUBSCRIBER_HIDDEN_COLUMNS,
   SubscriptionService,
 } from './services/subscription-service';
-export {
-  type TierPricePropagator,
-  TierService,
-} from './services/tier-service';
+export { MOVE_TIER_ID_KEY } from './services/tier-move';
+export { TierService } from './services/tier-service';

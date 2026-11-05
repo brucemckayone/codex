@@ -3,7 +3,7 @@
  *
  * Every state of the approved mockups (delete-blocked, delete-drafts,
  * delete-unused, failures) is decided here, so a unit test pins them rather
- * than the eye. StudioMediaPage words and draws the result.
+ * than the eye. StudioMediaLibrary words and draws the result.
  *
  * The rules it keeps:
  * - Delete is enabled ONLY on a usage read that answered and found nothing

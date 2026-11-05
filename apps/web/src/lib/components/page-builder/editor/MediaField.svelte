@@ -1,18 +1,18 @@
 <!--
   @component MediaField
 
-  A `media` field: the journey's sell-media slot the field names, picked from
-  the org library with the same `MediaPicker` the legacy inspector and the
-  Settings tab use. It writes the SLOT (`sellMedia.setSlot`), never the
+  A `media` field: the journey's sell-media slot the field names, picked with
+  the same `MediaPickerDialog` the Media panel and the brand studio use
+  (Codex-a6ofh.1.8). It writes the SLOT (`sellMedia.setSlot`), never the
   section's props — one slot feeds every section that shows it, which is why
   the hint says where else it is set.
 
-  `optionsFor(slot)`, not the raw options, so a still-only slot is never
-  offered audio. A failed read is said out loud: an empty picker would
-  otherwise read as "you have no media".
+  `acceptsFor(slot)` limits the picker, so a still-only slot is never offered
+  audio. A failed read of the attached media is said out loud; the picker
+  says its own list's failure.
 -->
 <script lang="ts">
-  import MediaPicker from '$lib/components/studio/MediaPicker.svelte';
+  import MediaPickerDialog from '$lib/components/studio/media-library/MediaPickerDialog.svelte';
   import type { BlockField } from '$lib/page-builder/kit';
   import { sellMedia } from '$lib/page-builder/sell-media-store.svelte';
   import * as m from '$paraglide/messages';
@@ -35,12 +35,10 @@
     {:else if sellMedia.loading}
       <p class="media__hint" role="status">{m.studio_builder_media_loading()}</p>
     {/if}
-    <MediaPicker
-      mediaItems={sellMedia.optionsFor(slot)}
+    <MediaPickerDialog
+      mediaTypes={sellMedia.acceptsFor(slot)}
       value={sellMedia.slot(slot)}
-      name="section-media-{slot}"
       ariaLabel={field.label}
-      showLibraryLink
       onchange={(mediaItemId) => sellMedia.setSlot(slot, mediaItemId)}
     />
     <p class="media__hint">{field.hint ?? m.studio_page_editor_media_shared()}</p>

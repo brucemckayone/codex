@@ -1,6 +1,11 @@
 import { FILE_SIZES, SUPPORTED_MEDIA_MIME_TYPES } from '@codex/constants';
 import { describe, expect, it } from 'vitest';
-import { checkMediaFile, resolveMediaMimeType } from './media-upload-file';
+import {
+  checkMediaFile,
+  MEDIA_FILE_ACCEPT,
+  mediaFileAccept,
+  resolveMediaMimeType,
+} from './media-upload-file';
 
 const file = (name: string, type: string, size = 10_000) => ({
   name,
@@ -85,5 +90,26 @@ describe('checkMediaFile', () => {
       ok: false,
       reason: 'type',
     });
+  });
+});
+
+describe('mediaFileAccept (Codex-a6ofh.1.8)', () => {
+  it('offers only the kinds a field holds, types and extensions both', () => {
+    const video = mediaFileAccept(['video']).split(',');
+    expect(video).toContain('video/mp4');
+    expect(video).toContain('.mov');
+    expect(video.some((entry) => entry.startsWith('audio/'))).toBe(false);
+    expect(video).not.toContain('.mp3');
+
+    const audio = mediaFileAccept(['audio']).split(',');
+    expect(audio).toContain('audio/mpeg');
+    expect(audio).toContain('.mp3');
+    expect(audio.some((entry) => entry.startsWith('video/'))).toBe(false);
+  });
+
+  it('offers everything the library takes when a field holds both', () => {
+    expect(new Set(mediaFileAccept(['video', 'audio']).split(','))).toEqual(
+      new Set(MEDIA_FILE_ACCEPT.split(','))
+    );
   });
 });

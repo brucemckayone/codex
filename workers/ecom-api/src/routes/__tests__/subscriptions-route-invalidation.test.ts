@@ -467,6 +467,50 @@ describe.each(CASES)('$label — route → service contract', ({
   });
 });
 
+// ─── POST /subscriptions/change-tier — what the dialog showed ───────────────
+//
+// The preview's date, quote and amount all reach `changeTier()`, which
+// re-checks each against Stripe and the tier (Codex-2hxff.96; review C1
+// cycle 2, L4). A route that dropped one would skip its re-check silently.
+
+describe('POST /subscriptions/change-tier — the preview echo', () => {
+  it('forwards prorationDate, quote and newRecurringAmountCents to changeTier', async () => {
+    const changeTier = vi.fn().mockResolvedValue(undefined);
+    const services: Record<string, unknown> = {
+      subscription: {
+        changeTier,
+        getSubscription: vi
+          .fn()
+          .mockResolvedValue({ id: 'sub_stub', status: 'active' }),
+      },
+    };
+    const bundle = buildApp({ user: { id: 'user_echo' }, services });
+    const quote = 'due:1500|lines:-8767,10267|next:2027-11-03';
+
+    const res = await bundle.app.request(
+      postJson('/subscriptions/change-tier', {
+        organizationId: VALID_ORG_ID,
+        newTierId: VALID_TIER_ID,
+        billingInterval: 'month',
+        prorationDate: 1793750400,
+        quote,
+        newRecurringAmountCents: 1200,
+      })
+    );
+
+    expect(res.status).toBe(200);
+    expect(changeTier).toHaveBeenCalledWith(
+      'user_echo',
+      VALID_ORG_ID,
+      VALID_TIER_ID,
+      'month',
+      1793750400,
+      quote,
+      1200
+    );
+  });
+});
+
 // ─── POST /subscriptions/reactivate — access clearing (Codex-13ml3) ──────────
 //
 // Complements the cache-invalidation matrix above with a per-route assertion

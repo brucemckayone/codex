@@ -28,6 +28,7 @@
   import * as m from '$paraglide/messages';
   import type { AccessRevocationReason } from '$lib/server/content-detail';
   import { supportMailto } from '$lib/utils/support-mailto';
+  import { scheduledElsewhereLine } from '$lib/utils/scheduled-elsewhere';
   import type { Component } from 'svelte';
 
   interface Props {
@@ -155,7 +156,11 @@
       try {
         const result = await reactivateSubscription({ organizationId });
         if (!result.success) {
-          toast.error('Reactivate failed', result.message || undefined);
+          toast.error(
+            'Reactivate failed',
+            scheduledElsewhereLine('code' in result ? result : {}) ??
+              (result.message || undefined)
+          );
         } else {
           onreactivated?.();
         }
@@ -336,6 +341,7 @@
 
   .access-revoked__btn--primary:hover:not(:disabled) {
     background: var(--color-brand-accent-hover, var(--color-primary-600));
+    color: var(--color-text-on-accent-hover);
   }
 
   .access-revoked__btn--secondary {

@@ -864,12 +864,16 @@
     transition: var(--transition-colors);
     white-space: nowrap;
   }
-  .chip:hover {
+  /* Hover never repaints an active chip: its fill does not change, so neither
+     does its ink. */
+  .chip:not(.chip--on):hover {
     color: var(--color-text);
     border-color: var(--lib-hair-strong);
   }
+  /* The active chip and group button take their fill's ink: the surface
+     colour they had fell to 1:1 on a white brand (Codex-mik4h). */
   .chip--on {
-    color: var(--lib-ink);
+    color: var(--color-on-interactive);
     background: var(--lib-accent);
     border-color: var(--lib-accent);
     font-weight: var(--font-semibold);
@@ -1034,7 +1038,7 @@
   }
   .seg__btn--on {
     background: var(--lib-accent);
-    color: var(--lib-ink);
+    color: var(--color-on-interactive);
     font-weight: var(--font-semibold);
   }
 

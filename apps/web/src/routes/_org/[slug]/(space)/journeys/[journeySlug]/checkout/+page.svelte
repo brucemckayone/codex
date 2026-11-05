@@ -379,7 +379,7 @@
     font-weight: var(--font-semibold);
     letter-spacing: 0.22em;
     text-transform: uppercase;
-    color: var(--color-brand-primary);
+    color: var(--color-brand-text);
   }
 
   .co-head__title {
@@ -480,7 +480,7 @@
   .summary__mark {
     flex-shrink: 0;
     display: inline-flex;
-    color: var(--color-brand-primary);
+    color: var(--color-brand-text);
   }
 
   .summary__taste {
@@ -500,7 +500,7 @@
   }
 
   .summary__taste a {
-    color: var(--color-brand-primary);
+    color: var(--color-brand-text);
     text-decoration: none;
     white-space: nowrap;
   }
@@ -605,7 +605,7 @@
     margin: 0;
     font-size: var(--text-xs);
     letter-spacing: 0.04em;
-    color: var(--color-brand-primary);
+    color: var(--color-brand-text);
   }
 
   .offer__blurb {
@@ -633,7 +633,7 @@
 
   .offer__bullets li::before {
     content: '·';
-    color: var(--color-brand-primary);
+    color: var(--color-brand-text);
   }
 
   .offer__price {
@@ -713,6 +713,7 @@
 
   .co-cta:hover {
     background: var(--color-brand-primary-hover);
+    color: var(--color-text-on-brand-hover);
   }
 
   .co-cta:active {
@@ -766,7 +767,7 @@
   }
 
   .co-note a {
-    color: var(--color-brand-primary);
+    color: var(--color-brand-text);
     text-decoration: none;
   }
 

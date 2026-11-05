@@ -855,6 +855,34 @@
       "when": 1793302560542,
       "tag": "0121_media_files_purge",
       "breakpoints": true
+    },
+    {
+      "idx": 122,
+      "version": "7",
+      "when": 1793458651261,
+      "tag": "0122_waiting_tier_moves",
+      "breakpoints": true
+    },
+    {
+      "idx": 123,
+      "version": "7",
+      "when": 1793461521338,
+      "tag": "0123_fee_versions_and_notices",
+      "breakpoints": true
+    },
+    {
+      "idx": 124,
+      "version": "7",
+      "when": 1793489263995,
+      "tag": "0124_price_moves",
+      "breakpoints": true
+    },
+    {
+      "idx": 125,
+      "version": "7",
+      "when": 1793633806542,
+      "tag": "0125_waiting_billing_changes",
+      "breakpoints": true
     }
   ]
 }

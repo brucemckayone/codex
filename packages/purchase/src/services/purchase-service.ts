@@ -1707,9 +1707,9 @@ export class PurchaseService extends BaseService {
    *   the content row; it is legitimately null for orgless creator-direct
    *   (bi-party) content (Codex-69t7c WP5). A course's is always the course
    *   row's: courses are org-owned.
-   * - **Fees** (Codex-m644n) come from `FeeConfigService` when injected,
-   *   else the legacy constants. Org-scoped sales read the platform leg PLUS
-   *   the org's per-creator override (`getFeesForCreator`); orgless ones read
+   * - **Fees** (Codex-m644n) come from `FeeConfigService`, in force at `at`
+   *   (Codex-2hxff.33). Org-scoped sales read the platform leg PLUS the
+   *   org's per-creator override (`getFeesForCreator`); orgless ones read
    *   platform-only fees.
    * - **The agreement** (Codex-rzfjw, Decisions Q1–Q3): the uploader's
    *   `content_purchase` agreement, which course purchases reuse too
@@ -1781,13 +1781,17 @@ export class PurchaseService extends BaseService {
       organizationId = row.organizationId;
     }
 
+    // The fee in force at the sale's own time, as for the agreement below:
+    // a late webhook or a self-heal splits with its checkout's fee
+    // (Codex-2hxff.33).
     const fees = organizationId
       ? await this.feeConfig.getFeesForCreator(
           organizationId,
           creatorId,
-          'one_off'
+          'one_off',
+          params.at
         )
-      : await this.feeConfig.getFeesPlatform('one_off');
+      : await this.feeConfig.getFeesPlatform('one_off', params.at);
 
     const agreement = organizationId
       ? await findActiveCreatorAgreementShare(tx, {

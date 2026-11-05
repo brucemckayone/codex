@@ -40,6 +40,11 @@ export {
 // GBP in, GBP out: the guard every path runs before it records a split
 // (Codex-2hxff.23 PAY-25)
 export { assertGbpOnly, isGbpOrUnset } from './currency';
+// Who a fee rise waits for, and when it starts (Codex-2hxff.33)
+export * from './fee-notices';
+// The fee in force at a sale's own time: dated versions, the write's
+// classification, the start date and the email's example (Codex-2hxff.33)
+export * from './fee-versions';
 // The charge an invoice payment settled on: the key every invoice payout
 // uses (Codex-2hxff.50)
 export { resolveInvoiceCharge } from './invoice-charge';

@@ -18,7 +18,9 @@
   --color-text-muted: var(--color-neutral-500);
   --color-text-disabled: var(--color-neutral-600);
   --color-text-inverse: var(--color-neutral-900);
-  --color-text-on-brand: #ffffff;
+  /* Chosen from the fill (see light.css): the fixed white painted white on
+     this theme's salmon primary, #f47d67, at 2.6:1. */
+  --color-text-on-brand: oklch(from var(--color-brand-primary) clamp(0, (0.62 - l) * 1000, 1) 0 0);
 
   /* Borders */
   --color-border: var(--color-neutral-700);
@@ -32,15 +34,27 @@
   --color-interactive-hover: var(--color-primary-300);
   --color-interactive-active: var(--color-primary-200);
   --color-interactive-subtle: var(--color-primary-900);
+  --color-link: var(--color-interactive);
+  --color-link-hover: var(--color-interactive-hover);
+  --color-link-active: var(--color-interactive-active);
+  /* The brand colour as a LABEL on the page or a faint tint (badges, icons):
+     nudged like the link, from the brand colour rather than the interactive
+     one, so an interactive override never moves it. */
+  --color-brand-text: var(--color-brand-primary);
+  --color-brand-text-hover: var(--color-brand-primary-hover);
 
   /* See light.css for the derivation and why it is repeated in every scope that
      declares --color-interactive. Note the dark platform fill is
      --color-primary-400 (#f47d67, L 0.72) — LIGHTER than the 0.62 threshold, so
-     this hands back dark ink, where the hardcoded `--color-text-on-brand:
-     #ffffff` one rule up would have painted white on salmon. This OKLCH step
-     is the fallback; the luminance step at the foot of this file is the live
-     rule, and picks the same dark ink here. */
+     this hands back dark ink, where a fixed white would have painted white on
+     salmon (which is why --color-text-on-brand is derived too). This OKLCH
+     step is the fallback; the luminance inks at the foot of this file are the
+     live rule, and pick the same dark ink here. */
   --color-on-interactive: oklch(from var(--color-interactive) clamp(0, (0.62 - l) * 1000, 1) 0 0);
+  /* Re-declared because the hovered and pressed fills are (see light.css). */
+  --color-on-interactive-hover: oklch(from var(--color-interactive-hover) clamp(0, (0.62 - l) * 1000, 1) 0 0);
+  --color-on-interactive-active: oklch(from var(--color-interactive-active) clamp(0, (0.62 - l) * 1000, 1) 0 0);
+  --color-text-on-brand-hover: oklch(from var(--color-brand-primary-hover) clamp(0, (0.62 - l) * 1000, 1) 0 0);
 
   /* Focus */
   --color-focus: var(--color-primary-400);
@@ -62,6 +76,7 @@
   --color-brand-accent-subtle: var(--color-warning-700);
   /* See light.css — re-declared here because --color-brand-accent is. */
   --color-text-on-accent: oklch(from var(--color-brand-accent) clamp(0, (0.62 - l) * 1000, 1) 0 0);
+  --color-text-on-accent-hover: oklch(from var(--color-brand-accent-hover) clamp(0, (0.62 - l) * 1000, 1) 0 0);
 
   /* Media cover treatments (ContentCard shape system) — see light.css for
      the rationale. Same derivation; the dark --color-background makes the
@@ -79,18 +94,14 @@
    pick the same ink either way; a fill in the band the step misjudged, such
    as a saturated green, no longer gets the weaker one. */
 @supports (color: rgb(from red calc(255 * pow(r / 255, 2)) 0 0)) {
+  /* `--_on-fill-step` is defined once, on :root, at light.css's foot. */
   [data-theme="dark"] {
-    --color-on-interactive: rgb(
-      from var(--color-interactive)
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
-    );
-    --color-text-on-accent: rgb(
-      from var(--color-brand-accent)
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
-      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e12, 1))
-    );
+    --color-text-on-brand: rgb(from var(--color-brand-primary) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
+    --color-text-on-brand-hover: rgb(from var(--color-brand-primary-hover) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
+    --color-on-interactive: rgb(from var(--color-interactive) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
+    --color-on-interactive-hover: rgb(from var(--color-interactive-hover) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
+    --color-on-interactive-active: rgb(from var(--color-interactive-active) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
+    --color-text-on-accent: rgb(from var(--color-brand-accent) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
+    --color-text-on-accent-hover: rgb(from var(--color-brand-accent-hover) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)) calc(255 * var(--_on-fill-step)));
   }
 }

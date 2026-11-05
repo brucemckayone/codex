@@ -1,5 +1,10 @@
 import { browser } from '$app/environment';
 import { withFallback } from './font-fallbacks';
+import {
+  GROUND_VAR_PROPS,
+  groundLuminanceVars,
+  paintableColour,
+} from './ground';
 import type { BrandEditorState, CssVarMapping } from './types';
 
 /**
@@ -29,6 +34,11 @@ export const BRAND_PREFIX_KEYS = new Set([
   'shadow-color',
   // Heading color — consumed by org-brand.css heading selector
   'heading-color',
+  // Focus colours — INPUTS to org-brand.css, which nudges them against the
+  // page ground; as an inline --color-focus* they would beat that rule and
+  // paint as picked (Codex-mik4h)
+  'focus',
+  'focus-ring',
   // Hero layout — logo scale consumed by hero CSS via var()
   'hero-logo-scale',
   // Hero text and color tokens (WP-02)
@@ -373,7 +383,7 @@ const CSS_VAR_MAPPINGS: CssVarMapping[] = [
   },
   {
     property: '--brand-bg',
-    getValue: (s) => s.backgroundColor ?? undefined,
+    getValue: (s) => paintableColour(s.backgroundColor),
   },
   {
     property: '--brand-radius',
@@ -397,6 +407,24 @@ const CSS_VAR_MAPPINGS: CssVarMapping[] = [
     getValue: (s) => (s.fontHeading ? quoteFamily(s.fontHeading) : undefined),
   },
 ];
+
+/**
+ * Override keys that are stored but no longer painted. `text-on-brand` ("On
+ * Brand") is retired (owner, Codex-mik4h): every label is chosen from the
+ * fill under it, at rest and on hover, and no one saved colour is sure to
+ * read on both for every brand, so a saved value is ignored rather than
+ * half-applied.
+ */
+const RETIRED_OVERRIDE_KEYS = new Set(['text-on-brand']);
+
+/**
+ * Whether an override key becomes a CSS custom property: not an
+ * attribute-only key (`hero-hide-*` drive data-* attributes, set by the org
+ * layout) and not a retired one.
+ */
+function emitsCssVar(key: string): boolean {
+  return !key.startsWith('hero-hide-') && !RETIRED_OVERRIDE_KEYS.has(key);
+}
 
 /** CSS properties set by the base CSS_VAR_MAPPINGS (not token overrides). */
 const BASE_VAR_PROPS = new Set(CSS_VAR_MAPPINGS.map((m) => m.property));
@@ -501,8 +529,9 @@ export function injectBrandVars(state: BrandEditorState): void {
     }
   }
 
-  // Handle background attribute separately
-  if (state.backgroundColor) {
+  // Handle background attribute separately. A background the nudge cannot
+  // measure is not painted (`paintableColour`, Codex-mik4h).
+  if (paintableColour(state.backgroundColor)) {
     if (!el.hasAttribute('data-org-bg')) {
       el.setAttribute('data-org-bg', '');
     }
@@ -525,12 +554,9 @@ export function injectBrandVars(state: BrandEditorState): void {
   const overrides = state.tokenOverrides ?? {};
   for (const [key, value] of Object.entries(overrides)) {
     if (value == null) continue;
-    // Skip keys that drive attribute-only behaviour (e.g. hero-hide-* are
-    // applied as data-hero-hide-* attributes by the org layout, NOT as CSS
-    // custom properties — emitting --color-hero-hide-* would just pollute
-    // the inline style for no consumer). Future attribute-only key families
-    // (e.g. data-layout-*) should be added here.
-    if (key.startsWith('hero-hide-')) continue;
+    // Skip attribute-only and retired keys (emitsCssVar). Future
+    // attribute-only key families (e.g. data-layout-*) belong there.
+    if (!emitsCssVar(key)) continue;
     const prop = BRAND_PREFIX_KEYS.has(key)
       ? `--brand-${key}`
       : `--color-${key}`;
@@ -544,7 +570,7 @@ export function injectBrandVars(state: BrandEditorState): void {
   const darkOverrides = state.darkTokenOverrides ?? {};
   for (const [key, value] of Object.entries(darkOverrides)) {
     if (value == null) continue;
-    if (key.startsWith('hero-hide-')) continue;
+    if (!emitsCssVar(key)) continue;
     const baseProp = BRAND_PREFIX_KEYS.has(key)
       ? `--brand-${key}`
       : `--color-${key}`;
@@ -561,10 +587,28 @@ export function injectBrandVars(state: BrandEditorState): void {
     backgroundColor: '--brand-bg-dark',
   };
   for (const [field, prop] of Object.entries(darkVarMap)) {
-    const darkVal =
-      state.darkOverrides?.[field as keyof typeof state.darkOverrides];
+    // Painted only as a hex, as the page's layouts do (`paintableColour`).
+    const darkVal = paintableColour(
+      state.darkOverrides?.[field as keyof typeof state.darkOverrides]
+    );
     if (darkVal) {
       el.style.setProperty(prop, darkVal);
+    } else {
+      el.style.removeProperty(prop);
+    }
+  }
+
+  // The binding ground's luminance (Codex-mik4h): org-brand.css nudges the
+  // link and focus colours against it. Written last, so the stale-override sweep
+  // above never clears it.
+  const ground = groundLuminanceVars({
+    background: paintableColour(state.backgroundColor),
+    backgroundDark: paintableColour(state.darkOverrides?.backgroundColor),
+  });
+  for (const prop of GROUND_VAR_PROPS) {
+    const value = ground[prop];
+    if (value) {
+      el.style.setProperty(prop, value);
     } else {
       el.style.removeProperty(prop);
     }
@@ -594,9 +638,8 @@ export function tokenOverridesToCssVars(
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(overrides)) {
     if (value == null) continue;
-    // Skip attribute-only keys — these are consumed via data-* attributes,
-    // not CSS custom properties (see injectBrandVars for the same filter).
-    if (key.startsWith('hero-hide-')) continue;
+    // Skip attribute-only and retired keys (emitsCssVar).
+    if (!emitsCssVar(key)) continue;
     const prop = BRAND_PREFIX_KEYS.has(key)
       ? `--brand-${key}`
       : `--color-${key}`;
@@ -644,7 +687,7 @@ export function darkTokenOverridesToCssVars(
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(overrides)) {
     if (value == null) continue;
-    if (key.startsWith('hero-hide-')) continue;
+    if (!emitsCssVar(key)) continue;
     const baseProp = BRAND_PREFIX_KEYS.has(key)
       ? `--brand-${key}`
       : `--color-${key}`;
@@ -672,9 +715,24 @@ export function injectDarkTokenOverrides(
 /**
  * Remove all previously injected token override CSS properties from an element.
  * Call before re-injecting to ensure removed overrides don't linger.
+ *
+ * Keeps every input the org layout binds with `style:`, the ground numbers
+ * and the shader's logo among them: Svelte re-sets a `style:` property only
+ * when its value changes, so one cleared here stays gone until reload. The
+ * layout calls this right after hydration (Codex-mik4h). ShaderHero reads the
+ * logo as `--brand-${key}` (shader-config.ts `readBrandVar`); cleared, the
+ * pulse preset lost the org's logo.
  */
 export function clearTokenOverrides(el: HTMLElement): void {
-  removeOverrideVars(el, new Set([...BASE_VAR_PROPS, ...DARK_VAR_PROPS]));
+  removeOverrideVars(
+    el,
+    new Set([
+      ...BASE_VAR_PROPS,
+      ...DARK_VAR_PROPS,
+      ...GROUND_VAR_PROPS,
+      '--brand-shader-logo-url',
+    ])
+  );
 }
 
 /**

@@ -653,7 +653,7 @@
   }
 
   .negotiations-page__item-org:hover {
-    color: var(--color-interactive);
+    color: var(--color-link);
     text-decoration: underline;
   }
 
@@ -737,11 +737,12 @@
 
   .negotiations-page__btn--primary {
     background: var(--color-interactive);
-    color: var(--color-text-on-brand);
+    color: var(--color-on-interactive);
   }
 
   .negotiations-page__btn--primary:hover {
     background: var(--color-interactive-hover);
+    color: var(--color-on-interactive-hover);
   }
 
   .negotiations-page__btn--secondary {

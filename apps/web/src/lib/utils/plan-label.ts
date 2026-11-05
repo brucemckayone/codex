@@ -37,6 +37,17 @@ export interface ViewerPlan {
 }
 
 /**
+ * The plan a move to a cheaper plan goes to, waiting for the renewal
+ * (Codex-2hxff.16). The viewer keeps {@link ViewerPlan} until then.
+ */
+export interface PendingPlan {
+  id: string;
+  name: string;
+  /** ISO: the renewal the move lands on. */
+  effectiveAt: string;
+}
+
+/**
  * The active plans that include the item, cheapest first. `[]` when it is in
  * no plan, or only in plans nobody can join.
  */
@@ -143,8 +154,13 @@ export interface PlanPaywallInput {
   tiersStatus: PlanListStatus;
   /** The viewer's access-granting plan; null for anyone without one. */
   currentPlan: ViewerPlan | null;
-  /** The viewer's period end (ISO), which a downgrade's credit runs to. */
+  /** The viewer's period end (ISO), when a move to a cheaper plan starts. */
   currentPeriodEnd: string | null;
+  /**
+   * Where the viewer's waiting move goes, if anywhere. When that plan
+   * includes the item, the paywall says when it opens (`moving`).
+   */
+  pendingPlan?: PendingPlan | null;
 }
 
 /**
@@ -154,7 +170,10 @@ export interface PlanPaywallInput {
  *   plan is named.
  * - `subscribe`: no plan yet. `upgrade`: every plan that includes it costs
  *   more than the viewer's. `change`: a cheaper (or same-price) plan includes
- *   it, so the copy says how the move is billed (see `changeTiming`).
+ *   it, so the copy says when the move starts (see `changeTiming`).
+ * - `moving`: the plan the viewer is already moving to includes it
+ *   (Codex-2hxff.16), so the copy says when it opens, and names any dearer
+ *   plan that opens it now.
  */
 export type PlanPaywall =
   | { kind: 'closed' }
@@ -170,9 +189,22 @@ export type PlanPaywall =
       plansWithPrices: string;
       /** "Premium": dearer plans, which start straight away. */
       upgradePlans: string | null;
-      /** "Basic": the rest, which credit the difference to the next bill. */
+      /** "Basic": cheaper plans, which start when the period ends. */
       downgradePlans: string | null;
+      /** Plans at the viewer's price, which switch now (owner Q4). */
+      samePricePlans: string | null;
       periodEnd: string | null;
+    }
+  | {
+      kind: 'moving';
+      currentPlan: string;
+      targetPlan: string;
+      /** ISO: when the move lands. */
+      date: string;
+      /** "Premium": dearer plans that include it now. */
+      upgradePlans: string | null;
+      /** The cheapest of those, a month. */
+      upgradeFromPrice: string | null;
     };
 
 /** Decide the paywall's case. Pure; the copy is {@link planPaywallCopy}. */
@@ -195,6 +227,30 @@ export function describePlanPaywall(input: PlanPaywallInput): PlanPaywall {
 
   const others = including.filter((tier) => tier.id !== currentPlan.id);
   const current = input.tiers.find((tier) => tier.id === currentPlan.id);
+  const pending = input.pendingPlan;
+  if (pending && input.includedInTierIds.includes(pending.id)) {
+    // Already chosen: only a dearer plan opens it sooner.
+    const sooner = current
+      ? others.filter((tier) => isDearer(current, tier))
+      : [];
+    const [cheapestSooner] = sooner;
+    return {
+      kind: 'moving',
+      currentPlan: currentPlan.name,
+      targetPlan: pending.name,
+      date: pending.effectiveAt,
+      upgradePlans:
+        sooner.length > 0
+          ? joinNames(
+              sooner.map((tier) => tier.name),
+              'or'
+            )
+          : null,
+      upgradeFromPrice: cheapestSooner
+        ? formatPrice(cheapestSooner.priceMonthly)
+        : null,
+    };
+  }
   const plansWithPrices = joinNames(
     others.map((tier) =>
       m.change_plan_cta_plan_with_price({
@@ -213,12 +269,16 @@ export function describePlanPaywall(input: PlanPaywallInput): PlanPaywall {
       plansWithPrices,
       upgradePlans: null,
       downgradePlans: null,
+      samePricePlans: null,
       periodEnd: input.currentPeriodEnd,
     };
   }
   const upgrades = others.filter((tier) => isDearer(current, tier));
-  const downgrades = others.filter((tier) => !isDearer(current, tier));
-  if (downgrades.length === 0) {
+  const downgrades = others.filter((tier) => isDearer(tier, current));
+  const samePrice = others.filter(
+    (tier) => !isDearer(current, tier) && !isDearer(tier, current)
+  );
+  if (downgrades.length === 0 && samePrice.length === 0) {
     return { kind: 'upgrade', currentPlan: currentPlan.name, plans, fromPrice };
   }
   return {
@@ -233,10 +293,20 @@ export function describePlanPaywall(input: PlanPaywallInput): PlanPaywall {
             'or'
           )
         : null,
-    downgradePlans: joinNames(
-      downgrades.map((tier) => tier.name),
-      'or'
-    ),
+    downgradePlans:
+      downgrades.length > 0
+        ? joinNames(
+            downgrades.map((tier) => tier.name),
+            'or'
+          )
+        : null,
+    samePricePlans:
+      samePrice.length > 0
+        ? joinNames(
+            samePrice.map((tier) => tier.name),
+            'or'
+          )
+        : null,
     periodEnd: input.currentPeriodEnd,
   };
 }
@@ -328,40 +398,226 @@ export function planPaywallCopy(
         }),
         timing: changeTiming(paywall, formatDate),
       };
+    case 'moving': {
+      const date = formatDate(paywall.date);
+      return {
+        title: m.change_plan_cta_title(),
+        short: m.plan_cta_moving_short({
+          currentPlan: paywall.currentPlan,
+          date,
+        }),
+        full: m.change_plan_cta_moving({
+          targetPlan: paywall.targetPlan,
+          date,
+        }),
+        timing:
+          paywall.upgradePlans && paywall.upgradeFromPrice
+            ? m.change_plan_cta_moving_now({
+                upgradePlans: paywall.upgradePlans,
+                price: paywall.upgradeFromPrice,
+              })
+            : null,
+      };
+    }
   }
 }
 
 /**
  * When a change of plan starts, as `SubscriptionService.changeTier` does it
- * TODAY (owner decision U12): a dearer plan is invoiced for the difference
- * and starts at once; a cheaper or same-price one also starts at once, and
- * Stripe puts the difference for the rest of the period on the next bill as
- * a credit (`proration_behavior: 'create_prorations'`). U9 wants a cheaper
- * plan to start at the period end instead: Codex-2hxff.16 flips this line
- * (the three `change_plan_cta_timing*` messages) in the same PR that changes
- * the behaviour.
+ * (Codex-2hxff.16, owner U9; it flipped U12's "starts straight away, with
+ * credit" in the same PR): a dearer plan is invoiced for the difference and
+ * starts at once; a cheaper one waits for the end of the period the viewer
+ * has paid for, which they keep until then; a same-price one switches now
+ * with nothing charged (owner Q4), in its own sentence.
  */
 function changeTiming(
   paywall: Extract<PlanPaywall, { kind: 'change' }>,
   formatDate: (iso: string) => string
 ): string | null {
-  const { downgradePlans, upgradePlans, currentPlan, periodEnd } = paywall;
-  if (!downgradePlans) return null;
-  if (!periodEnd) {
-    return m.change_plan_cta_timing_downgrade_undated({
-      downgradePlans,
-      currentPlan,
-    });
-  }
-  const date = formatDate(periodEnd);
-  return upgradePlans
-    ? m.change_plan_cta_timing({
-        upgradePlans,
+  const {
+    downgradePlans,
+    upgradePlans,
+    samePricePlans,
+    currentPlan,
+    periodEnd,
+  } = paywall;
+  const lines: string[] = [];
+  if (downgradePlans && !periodEnd) {
+    lines.push(
+      m.change_plan_cta_timing_downgrade_undated({
         downgradePlans,
         currentPlan,
-        date,
       })
-    : m.change_plan_cta_timing_downgrade({ downgradePlans, currentPlan, date });
+    );
+  } else if (downgradePlans && periodEnd) {
+    const date = formatDate(periodEnd);
+    lines.push(
+      upgradePlans
+        ? m.change_plan_cta_timing({
+            upgradePlans,
+            downgradePlans,
+            currentPlan,
+            date,
+          })
+        : m.change_plan_cta_timing_downgrade({
+            downgradePlans,
+            currentPlan,
+            date,
+          })
+    );
+  }
+  if (samePricePlans) {
+    lines.push(m.change_plan_cta_timing_same_price({ samePricePlans }));
+  }
+  return lines.length > 0 ? lines.join(' ') : null;
+}
+
+/** What the notice of a waiting move needs (`PendingTierChange`'s fields). */
+export interface WaitingMove {
+  /**
+   * What waits (Codex-2hxff.97): a cheaper plan on the same billing, a
+   * switch to monthly billing on the same plan, or both. Only yearly
+   * billing waits to become monthly, so the billing kinds word it monthly.
+   */
+  kind: 'plan' | 'billing' | 'plan_and_billing';
+  tierName: string;
+  /** The next bill, at the target's price. */
+  amountCents: number;
+  billingInterval: 'month' | 'year';
+  /** A price change on the target after the move (T6); null until .86 fills it. */
+  laterPrice: null | { amountCents: number; effectiveAt: string };
+}
+
+/** The notice's title: "Moving to Basic on 12 November". */
+export function waitingMoveTitle(
+  move: Pick<WaitingMove, 'kind' | 'tierName'> & { effectiveAt: string },
+  formatDate: (iso: string) => string
+): string {
+  const date = formatDate(move.effectiveAt);
+  switch (move.kind) {
+    case 'billing':
+      return m.pricing_billing_notice_title_month({ date });
+    case 'plan_and_billing':
+      return m.pricing_move_notice_title_billing_month({
+        plan: move.tierName,
+        date,
+      });
+    default:
+      return m.pricing_move_notice_title({ plan: move.tierName, date });
+  }
+}
+
+/**
+ * The notice's button. One Keep undoes the whole change (Q4); it is "Keep
+ * yearly billing" when the plan stays the same.
+ */
+export function waitingMoveKeepLabel(move: Pick<WaitingMove, 'kind'>): string {
+  return move.kind === 'billing'
+    ? m.pricing_billing_keep()
+    : m.pricing_move_keep();
+}
+
+/**
+ * The second line of the waiting-move notice on the pricing and account
+ * pages (Codex-2hxff.16, T3): "You keep Pro until then. Basic is £5.00 a
+ * month after that." When the target's price changes after the move (T6),
+ * it names the later price too, so the page and the 30-day email agree.
+ */
+export function waitingMoveBody(
+  move: WaitingMove,
+  currentPlan: string,
+  formatDate: (iso: string) => string
+): string {
+  const params = {
+    currentPlan,
+    plan: move.tierName,
+    price: formatPrice(move.amountCents),
+  };
+  const later = move.laterPrice;
+  if (move.kind === 'billing') {
+    const billing = { plan: move.tierName, price: params.price };
+    return later
+      ? m.pricing_billing_notice_body_later_month({
+          ...billing,
+          laterPrice: formatPrice(later.amountCents),
+          laterDate: formatDate(later.effectiveAt),
+        })
+      : m.pricing_billing_notice_body_month(billing);
+  }
+  if (move.kind === 'plan_and_billing') {
+    return later
+      ? m.pricing_move_notice_body_billing_later_month({
+          ...params,
+          laterPrice: formatPrice(later.amountCents),
+          laterDate: formatDate(later.effectiveAt),
+        })
+      : m.pricing_move_notice_body_billing_month(params);
+  }
+  if (later) {
+    const withLater = {
+      ...params,
+      laterPrice: formatPrice(later.amountCents),
+      laterDate: formatDate(later.effectiveAt),
+    };
+    return move.billingInterval === 'year'
+      ? m.pricing_move_notice_body_later_year(withLater)
+      : m.pricing_move_notice_body_later_month(withLater);
+  }
+  return move.billingInterval === 'year'
+    ? m.pricing_move_notice_body_year(params)
+    : m.pricing_move_notice_body_month(params);
+}
+
+/**
+ * What Keep came to (page 2 states 3-4; year-to-month-waits A2). `date` and
+ * `price` are formatted already; without either the line names no payment.
+ */
+export function waitingMoveKeptLine(
+  move: Pick<WaitingMove, 'kind'> | null,
+  plan: string,
+  date: string | null,
+  price: string | null
+): string {
+  if (move?.kind === 'billing') {
+    return date && price
+      ? m.pricing_move_kept_billing({ date, price })
+      : m.pricing_move_kept_billing_undated();
+  }
+  return date && price
+    ? m.pricing_move_kept({ plan, date, price })
+    : m.pricing_move_kept_undated({ plan });
+}
+
+/** A refused Keep: what waits is still set. */
+export function waitingMoveKeepFailedLine(
+  move: Pick<WaitingMove, 'kind' | 'tierName'> & { effectiveAt: string },
+  plan: string,
+  formatDate: (iso: string) => string
+): string {
+  const date = formatDate(move.effectiveAt);
+  return move.kind === 'billing'
+    ? m.pricing_move_keep_failed_billing({ date })
+    : m.pricing_move_keep_failed({ plan, movingTo: move.tierName, date });
+}
+
+/** Keep pressed after the renewal it waited for: the change has happened. */
+export function waitingMoveLandedLine(
+  move: Pick<WaitingMove, 'kind' | 'tierName'>
+): string {
+  return move.kind === 'billing'
+    ? m.pricing_move_landed_billing()
+    : m.pricing_move_landed({ plan: move.tierName });
+}
+
+/** Set to cancel: reactivating brings what waits back (T4). */
+export function waitingMoveSurvivesCancelLine(
+  move: Pick<WaitingMove, 'kind' | 'tierName'> & { effectiveAt: string },
+  formatDate: (iso: string) => string
+): string {
+  const date = formatDate(move.effectiveAt);
+  return move.kind === 'billing'
+    ? m.account_billing_change_survives_cancel({ date })
+    : m.subscription_move_survives_cancel({ plan: move.tierName, date });
 }
 
 /** The pricing page's words when it is opened from an item (U10). */

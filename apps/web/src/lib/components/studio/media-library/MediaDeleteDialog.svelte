@@ -432,7 +432,7 @@
     background: none;
     font: inherit;
     font-weight: var(--font-semibold);
-    color: var(--color-interactive);
+    color: var(--color-link);
     cursor: pointer;
     border-radius: var(--radius-sm);
   }

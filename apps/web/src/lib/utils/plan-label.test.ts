@@ -147,7 +147,7 @@ describe('describePlanPaywall + planPaywallCopy (U9, U11)', () => {
     });
   });
 
-  it('a cheaper plan includes it: Change plan, naming each with its price and how it is billed', () => {
+  it('a cheaper plan includes it: Change plan, naming each with its price and when it starts', () => {
     expect(
       copy({
         includedInTierIds: [BASIC.id, PREMIUM.id],
@@ -159,13 +159,13 @@ describe('describePlanPaywall + planPaywallCopy (U9, U11)', () => {
       short: 'Not in your Pro plan. Included with Basic and Premium.',
       full: "Your Pro plan doesn't include this. It's included with Basic (£5.00 a month) and Premium (£20.00 a month).",
       timing:
-        'Premium starts straight away, and so does a move to Basic, with credit on your next bill for the difference until your Pro period ends on <2026-11-12>.',
+        'Premium starts straight away; a move to Basic starts when your Pro period ends on <2026-11-12>.',
     });
   });
 
-  // Today's changeTier (owner U12): a cheaper plan starts NOW, with the
-  // difference credited (create_prorations). Codex-2hxff.16 flips these.
-  it('only cheaper plans include it: the move starts now, the difference credited to the next bill', () => {
+  // Codex-2hxff.16 flipped U12's "starts straight away, with credit": a
+  // cheaper plan now waits for the end of the period the viewer paid for.
+  it('only cheaper plans include it: the move starts at the period end, and the plan is kept until then', () => {
     const result = copy({
       includedInTierIds: [BASIC.id],
       currentPlan: { id: PREMIUM.id, name: 'Premium' },
@@ -173,7 +173,7 @@ describe('describePlanPaywall + planPaywallCopy (U9, U11)', () => {
     });
     expect(result.title).toBe('Change plan to watch');
     expect(result.timing).toBe(
-      'A move to Basic starts straight away, with credit on your next bill for the difference until your Premium period ends on <2026-11-12>.'
+      'A move to Basic starts when your Premium period ends on <2026-11-12>, and you keep Premium until then.'
     );
   });
 
@@ -183,23 +183,92 @@ describe('describePlanPaywall + planPaywallCopy (U9, U11)', () => {
       currentPlan: { id: PREMIUM.id, name: 'Premium' },
     });
     expect(result.timing).toBe(
-      'A move to Basic or Pro starts straight away, with credit on your next bill for the difference until your current Premium period ends.'
+      'A move to Basic or Pro starts when your current Premium period ends, and you keep Premium until then.'
     );
   });
 
-  it('a same-price plan is a change, never an upgrade', () => {
+  it('a same-price plan is a change, never an upgrade, and switches now (Q4)', () => {
     const TWIN = { id: 'twin', name: 'Twin', priceMonthly: 1200, sortOrder: 4 };
     const paywall = describePlanPaywall(
       input({
         includedInTierIds: [TWIN.id],
         tiers: [...TIERS, TWIN],
         currentPlan: { id: PRO.id, name: 'Pro' },
+        currentPeriodEnd: '2026-11-12T09:00:00.000Z',
       })
     );
     expect(paywall).toMatchObject({
       kind: 'change',
       upgradePlans: null,
-      downgradePlans: 'Twin',
+      downgradePlans: null,
+      samePricePlans: 'Twin',
+    });
+    expect(planPaywallCopy(paywall, formatDate).timing).toBe(
+      'A switch to Twin starts straight away.'
+    );
+  });
+
+  it('a same-price plan beside a cheaper one: each says when it starts', () => {
+    const TWIN = { id: 'twin', name: 'Twin', priceMonthly: 1200, sortOrder: 4 };
+    const result = planPaywallCopy(
+      describePlanPaywall(
+        input({
+          includedInTierIds: [BASIC.id, TWIN.id],
+          tiers: [...TIERS, TWIN],
+          currentPlan: { id: PRO.id, name: 'Pro' },
+          currentPeriodEnd: '2026-11-12T09:00:00.000Z',
+        })
+      ),
+      formatDate
+    );
+    expect(result.timing).toBe(
+      'A move to Basic starts when your Pro period ends on <2026-11-12>, and you keep Pro until then. A switch to Twin starts straight away.'
+    );
+  });
+
+  describe('already moving to a plan that includes it (Codex-2hxff.16)', () => {
+    const MOVING = {
+      id: BASIC.id,
+      name: 'Basic',
+      effectiveAt: '2026-11-12T00:00:00.000Z',
+    };
+
+    it('says when it opens, and names the dearer plan that opens it now', () => {
+      expect(
+        copy({
+          includedInTierIds: [BASIC.id, PREMIUM.id],
+          currentPlan: { id: PRO.id, name: 'Pro' },
+          currentPeriodEnd: '2026-11-12T00:00:00.000Z',
+          pendingPlan: MOVING,
+        })
+      ).toEqual({
+        title: 'Change plan to watch',
+        short: 'Not in your Pro plan. Yours from <2026-11-12>.',
+        full: "You're moving to Basic on <2026-11-12>, so you can watch this from then.",
+        timing: 'Premium includes it now, from £20.00 a month.',
+      });
+    });
+
+    it('with no dearer plan that includes it, says only when it opens', () => {
+      expect(
+        copy({
+          includedInTierIds: [BASIC.id],
+          currentPlan: { id: PRO.id, name: 'Pro' },
+          pendingPlan: MOVING,
+        }).timing
+      ).toBeNull();
+    });
+
+    it('a move to a plan that does not include it: the usual lines', () => {
+      expect(
+        describePlanPaywall(
+          input({
+            includedInTierIds: [PREMIUM.id],
+            currentPlan: { id: PRO.id, name: 'Pro' },
+            pendingPlan: MOVING,
+          })
+        ).kind
+      ).toBe('upgrade');
     });
   });
 

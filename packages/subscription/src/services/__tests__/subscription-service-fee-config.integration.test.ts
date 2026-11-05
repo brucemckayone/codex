@@ -718,10 +718,13 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
 
     const result = await service.resolvePendingPayouts(org.id, stripeAccountId);
 
+    // No time: the drain resolves fees now. Only an invoice's own split
+    // passes its `invoice.created` (Codex-2hxff.33).
     expect(feeConfig.getFeesForCreator).toHaveBeenCalledWith(
       org.id,
       payoutUserId,
-      'one_off'
+      'one_off',
+      undefined
     );
     expect(result).toEqual({ resolved: 1, failed: 0 });
     expect(transferSpy).toHaveBeenCalledTimes(1);
@@ -776,10 +779,13 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
 
     await service.resolvePendingPayouts(org.id, stripeAccountId);
 
+    // No time: the drain resolves fees now. Only an invoice's own split
+    // passes its `invoice.created` (Codex-2hxff.33).
     expect(feeConfig.getFeesForCreator).toHaveBeenCalledWith(
       org.id,
       payoutUserId,
-      'subscription'
+      'subscription',
+      undefined
     );
   });
 });

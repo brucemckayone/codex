@@ -8,11 +8,18 @@
  * column becomes NULL, the audit row says old → NULL, and a repeat writes
  * nothing.
  *
+ * Since Codex-2hxff.33 each clear here is a CUT (the inherited value is
+ * lower than the cleared one), so it applies at once. Clearing a value below
+ * the inherited one (losing a waiver) is a rise and waits: that case is in
+ * fee-config-classify.integration.test.ts. Each starts from an in-force
+ * value seeded with `seedFeeLevel`.
+ *
  * The local test DB is shared with other sessions, so this file never calls
  * `cleanupDatabase`: it deletes only the users, org and fee rows it made.
  */
 
 import {
+  feeChanges,
   feeConfigAuditLog,
   feeConfigOrg,
   feeConfigOrgCreator,
@@ -22,6 +29,7 @@ import {
 import {
   createUniqueSlug,
   type Database,
+  seedFeeLevel,
   seedTestUsers,
   setupTestDatabase,
   teardownTestDatabase,
@@ -74,6 +82,9 @@ describe('FeeConfigService — null clears back to inherit (real DB)', () => {
       .delete(feeConfigAuditLog)
       .where(eq(feeConfigAuditLog.scopeOrgId, organizationId));
     await db
+      .delete(feeChanges)
+      .where(eq(feeChanges.organizationId, organizationId));
+    await db
       .delete(feeConfigOrgCreator)
       .where(eq(feeConfigOrgCreator.organizationId, organizationId));
     await db
@@ -85,27 +96,22 @@ describe('FeeConfigService — null clears back to inherit (real DB)', () => {
   });
 
   it('org: {orgFeePercent: null} stores NULL, audits old → NULL once, and a repeat writes nothing', async () => {
-    await service.updateOrgFees(
-      organizationId,
-      { orgFeePercent: 1800 },
-      adminId
+    await seedFeeLevel(
+      db,
+      { scope: 'org', organizationId },
+      { orgFeePercent: 1800 }
     );
-    await service.updateOrgFees(
+    const cleared = await service.updateOrgFees(
       organizationId,
       { orgFeePercent: null },
       adminId
     );
+    expect(cleared.outcome).toBe('cut');
 
     const row = await service.getOrgRow(organizationId);
     expect(row?.orgFeePercent).toBeNull();
     const audited = await auditRows('orgFeePercent', 'org');
-    expect(audited).toHaveLength(2); // the set, then the clear
-    expect(audited).toEqual(
-      expect.arrayContaining([
-        { oldValue: null, newValue: '1800' },
-        { oldValue: '1800', newValue: null },
-      ])
-    );
+    expect(audited).toEqual([{ oldValue: '1800', newValue: null }]);
 
     // Inherits again: the org's one-off fee is the platform's.
     const [orgFees, platformFees] = await Promise.all([
@@ -114,40 +120,36 @@ describe('FeeConfigService — null clears back to inherit (real DB)', () => {
     ]);
     expect(orgFees.orgFeePercent).toBe(platformFees.orgFeePercent);
 
-    await service.updateOrgFees(
+    const repeat = await service.updateOrgFees(
       organizationId,
       { orgFeePercent: null },
       adminId
     );
-    expect(await auditRows('orgFeePercent', 'org')).toHaveLength(2);
+    expect(repeat.outcome).toBe('unchanged');
+    expect(await auditRows('orgFeePercent', 'org')).toHaveLength(1);
   });
 
   it('override: {platformFeePercent: null} stores NULL, audits old → NULL once, and a repeat writes nothing', async () => {
-    await service.upsertCreatorOverride(
-      organizationId,
-      creatorId,
-      { platformFeePercent: 700, notes: 'launch deal' },
-      adminId
+    await seedFeeLevel(
+      db,
+      { scope: 'creator', organizationId, creatorId },
+      { platformFeePercent: 1500, notes: 'launch deal' }
     );
-    await service.upsertCreatorOverride(
+    const cleared = await service.upsertCreatorOverride(
       organizationId,
       creatorId,
       { platformFeePercent: null },
       adminId
     );
+    expect(cleared.outcome).toBe('cut');
 
     const row = await service.getCreatorOverrideRow(organizationId, creatorId);
     expect(row?.platformFeePercent).toBeNull();
     // A column the update does not name is left alone.
     expect(row?.notes).toBe('launch deal');
-    const audited = await auditRows('platformFeePercent', 'override');
-    expect(audited).toHaveLength(2); // the set, then the clear
-    expect(audited).toEqual(
-      expect.arrayContaining([
-        { oldValue: null, newValue: '700' },
-        { oldValue: '700', newValue: null },
-      ])
-    );
+    expect(await auditRows('platformFeePercent', 'override')).toEqual([
+      { oldValue: '1500', newValue: null },
+    ]);
 
     await service.upsertCreatorOverride(
       organizationId,
@@ -155,6 +157,6 @@ describe('FeeConfigService — null clears back to inherit (real DB)', () => {
       { platformFeePercent: null },
       adminId
     );
-    expect(await auditRows('platformFeePercent', 'override')).toHaveLength(2);
+    expect(await auditRows('platformFeePercent', 'override')).toHaveLength(1);
   });
 });

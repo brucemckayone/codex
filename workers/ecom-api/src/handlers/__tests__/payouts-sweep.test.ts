@@ -46,7 +46,9 @@ import {
   PAYOUTS_SWEEP_PAYEE_LIMIT,
   runOwedDuplicatesSweep,
   runPayoutsSweep,
+  runPriceMovesSweep,
   runScheduledPayoutsSweep,
+  runTierMoveBackstopSweep,
 } from '../payouts-sweep';
 
 /** A real instance whose sweep each test stubs on the prototype. */
@@ -116,7 +118,38 @@ describe('ecom-api payouts-sweep handler', () => {
   let disputeRows: MockInstance<PurchaseService['findDisputesToReconcile']>;
   // And the daily bank payout (Codex-2hxff.29), pinned in its own tests.
   let bankPayouts: MockInstance<SubscriptionService['runBankPayouts']>;
+  // And the waiting tier moves' backstop (Codex-2hxff.16): nothing due.
+  let tierBackstop: MockInstance<SubscriptionService['runTierMoveBackstop']>;
+  // And the price moves (Codex-2hxff.86): nothing claimed.
+  let priceMoves: MockInstance<SubscriptionService['runPriceMoves']>;
   beforeEach(() => {
+    priceMoves = vi
+      .spyOn(SubscriptionService.prototype, 'runPriceMoves')
+      .mockResolvedValue({
+        ran: true,
+        restarted: 0,
+        reopened: 0,
+        claimed: 0,
+        scheduled: 0,
+        unchanged: 0,
+        skipped: 0,
+        retrying: 0,
+        deferred: 0,
+        held: 0,
+        stopped: 0,
+        givenBack: 0,
+        done: 0,
+      });
+    tierBackstop = vi
+      .spyOn(SubscriptionService.prototype, 'runTierMoveBackstop')
+      .mockResolvedValue({
+        checked: 0,
+        applied: 0,
+        left: 0,
+        blocked: 0,
+        billingChecked: 0,
+        rescheduled: 0,
+      });
     bankPayouts = vi
       .spyOn(SubscriptionService.prototype, 'runBankPayouts')
       .mockResolvedValue(null);
@@ -139,6 +172,7 @@ describe('ecom-api payouts-sweep handler', () => {
     offSaleCancel.mockRestore();
     disputeRows.mockRestore();
     bankPayouts.mockRestore();
+    tierBackstop.mockRestore();
   });
 
   it('runPayoutsSweep delegates to SubscriptionService.sweepUnresolvedPayouts and logs the result', async () => {
@@ -421,9 +455,28 @@ describe('ecom-api payouts-sweep handler', () => {
       const order = (mock: { mock: { invocationCallOrder: number[] } }) =>
         mock.mock.invocationCallOrder[0] ?? 0;
       const bank = order(bankPayouts);
-      for (const before of [drain, clawbackRetry, offSaleCancel, owed]) {
+      for (const before of [
+        drain,
+        clawbackRetry,
+        offSaleCancel,
+        owed,
+        tierBackstop,
+        priceMoves,
+      ]) {
         expect(order(before)).toBeLessThan(bank);
       }
+      // The price moves (Codex-2hxff.86) read a move the backstop just
+      // landed as landed, on the cron's scheduled time: the service skips
+      // the 08:00 London run itself.
+      expect(order(tierBackstop)).toBeLessThan(order(priceMoves));
+      expect(priceMoves).toHaveBeenCalledExactlyOnceWith(
+        new Date(LONDON_EIGHT)
+      );
+      // The tier move backstop runs once a wake (Codex-2hxff.16), on the
+      // cron's scheduled time: its once-a-day alert counts hours from it.
+      expect(tierBackstop).toHaveBeenCalledExactlyOnceWith({
+        now: new Date(LONDON_EIGHT),
+      });
       expect(bank).toBeLessThan(order(ctx.waitUntil));
       expect(obs.error).not.toHaveBeenCalled();
       drain.mockRestore();
@@ -873,5 +926,118 @@ describe('runOwedDuplicatesSweep', () => {
 
     expect(obs.info).not.toHaveBeenCalled();
     expect(obs.error).not.toHaveBeenCalled();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// runTierMoveBackstopSweep (Codex-2hxff.16, data design §5.2): the hourly
+// backstop for a waiting tier move the renewal webhook did not flip. The
+// service alerts what is left; the sweep only reports and isolates.
+// ─────────────────────────────────────────────────────────────────────────
+
+describe('runTierMoveBackstopSweep', () => {
+  it('reports a run that checked something', async () => {
+    const runTierMoveBackstop = vi
+      .fn()
+      .mockResolvedValue({ checked: 4, applied: 2, left: 1, blocked: 1 });
+    const { obs } = makeObs();
+    const at = new Date(Date.UTC(2027, 0, 14, 9));
+
+    await runTierMoveBackstopSweep({ runTierMoveBackstop }, at, obs);
+
+    expect(runTierMoveBackstop).toHaveBeenCalledExactlyOnceWith({ now: at });
+    expect(obs.info).toHaveBeenCalledWith('tier move backstop ran', {
+      checked: 4,
+      applied: 2,
+      left: 1,
+      blocked: 1,
+    });
+    expect(obs.error).not.toHaveBeenCalled();
+  });
+
+  it('says nothing when nothing was due', async () => {
+    const { obs } = makeObs();
+
+    await runTierMoveBackstopSweep(
+      {
+        runTierMoveBackstop: vi
+          .fn()
+          .mockResolvedValue({ checked: 0, applied: 0, left: 0, blocked: 0 }),
+      },
+      new Date(),
+      obs
+    );
+
+    expect(obs.info).not.toHaveBeenCalled();
+  });
+
+  it('a backstop that throws is one alert with an errorId, never the cron’s failure', async () => {
+    const { obs } = makeObs();
+
+    await expect(
+      runTierMoveBackstopSweep(
+        {
+          runTierMoveBackstop: vi
+            .fn()
+            .mockRejectedValue(new Error('database unavailable (test)')),
+        },
+        new Date(),
+        obs
+      )
+    ).resolves.toBeUndefined();
+
+    expect(obs.error).toHaveBeenCalledExactlyOnceWith(
+      'tier_move.apply_failed',
+      {
+        errorId: expect.any(String),
+        stage: 'backstop',
+        error: 'database unavailable (test)',
+      }
+    );
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// runPriceMovesSweep (Codex-2hxff.86, data design §2.4): the hourly step that
+// tells and moves the people a price change recorded. The service records
+// and alerts; the sweep only hands over the scheduled time and isolates.
+// ─────────────────────────────────────────────────────────────────────────
+
+describe('runPriceMovesSweep', () => {
+  it("hands the service the cron's scheduled time", async () => {
+    const runPriceMoves = vi.fn().mockResolvedValue({ ran: true });
+    const { obs } = makeObs();
+    const at = new Date(Date.UTC(2027, 0, 14, 9));
+
+    await runPriceMovesSweep({ runPriceMoves }, at, obs);
+
+    expect(runPriceMoves).toHaveBeenCalledExactlyOnceWith(at);
+    expect(obs.error).not.toHaveBeenCalled();
+  });
+
+  it('a run that throws is one alert with an errorId, never the cron’s failure', async () => {
+    const { obs } = makeObs();
+    const at = new Date(Date.UTC(2027, 0, 14, 9));
+
+    await expect(
+      runPriceMovesSweep(
+        {
+          runPriceMoves: vi
+            .fn()
+            .mockRejectedValue(new Error('database unavailable (test)')),
+        },
+        at,
+        obs
+      )
+    ).resolves.toBeUndefined();
+
+    expect(obs.error).toHaveBeenCalledExactlyOnceWith(
+      'payouts-sweep cron could not run the price moves',
+      {
+        errorId: expect.any(String),
+        scheduledTime: at.toISOString(),
+        error: 'database unavailable (test)',
+      }
+    );
   });
 });

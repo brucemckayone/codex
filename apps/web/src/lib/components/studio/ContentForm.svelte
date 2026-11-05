@@ -14,7 +14,7 @@
   @prop {ContentWithRelations} [content] - Existing content (edit mode) or undefined (create mode)
   @prop {string} organizationId - Organization UUID
   @prop {string} orgSlug - Organization slug for URL preview
-  @prop {MediaItemOption[]} [mediaItems] - Available media items for picker
+  @prop {NewContentMedia | null} [initialMedia] - A new piece's media, from "Create content from this" (`?media=&type=`)
 -->
 <script lang="ts">
   import { PRICE_LIMITS } from '@codex/constants';
@@ -45,6 +45,8 @@
   import ContentTypeSelector from './content-form/ContentTypeSelector.svelte';
   import ContentDetails from './content-form/ContentDetails.svelte';
   import MediaSection from './content-form/MediaSection.svelte';
+  import type { NewContentMedia } from './media-library/library-url';
+  import { getMediaItem } from '$lib/remote/media.remote';
   import WrittenContentEditor from './content-form/WrittenContentEditor.svelte';
   import ThumbnailUpload from './content-form/ThumbnailUpload.svelte';
   import ShaderPicker from './content-form/ShaderPicker.svelte';
@@ -57,23 +59,13 @@
   import ReadinessPanel from './content-form/ReadinessPanel.svelte';
   import DangerZone from './content-form/DangerZone.svelte';
 
-  interface MediaItemOption {
-    id: string;
-    title: string;
-    mediaType: string;
-    durationSeconds?: number | null;
-    fileSizeBytes?: number | null;
-    status?: string;
-    thumbnailKey?: string | null;
-    thumbnailUrl?: string | null;
-  }
-
   interface Props {
     content?: ContentWithRelations;
     organizationId: string | null;
     orgSlug: string | null;
     creatorUsername?: string | null;
-    mediaItems?: MediaItemOption[];
+    /** Create mode: start from this media, as its type (Codex-a6ofh.1.8). */
+    initialMedia?: NewContentMedia | null;
     onSuccess?: () => void;
   }
 
@@ -82,7 +74,7 @@
     organizationId,
     orgSlug,
     creatorUsername,
-    mediaItems = [],
+    initialMedia = null,
     onSuccess,
   }: Props = $props();
 
@@ -134,6 +126,14 @@
   $effect(() => {
     contentStatus = content?.status ?? 'draft';
   });
+  /** Published in this session: the loaded `publishedAt` predates it. */
+  let releasedHere = $state(false);
+  /**
+   * Live as `ContentService.update` counts it (published now, or ever
+   * released: buyers keep it after it goes off sale). Its media must be
+   * ready, so the picker offers no processing media for it.
+   */
+  const live = $derived(contentStatus === 'published' || content?.publishedAt != null || releasedHere);
 
   // Shader preset for immersive audio mode
   let shaderPreset = $state<string | null>(content?.shaderPreset ?? null);
@@ -288,8 +288,8 @@
           title: '',
           slug: '',
           description: '',
-          contentType: 'video',
-          mediaItemId: '',
+          contentType: initialMedia?.mediaType ?? 'video',
+          mediaItemId: initialMedia?.id ?? '',
           contentBody: '',
           accessType: 'free',
           visibility: 'public',
@@ -406,6 +406,7 @@
       const optimistic = contentStatus === 'published' ? 'draft' : 'published';
       contentStatus = optimistic;
       await togglePublishStatus(content.id, previousStatus as ContentStatus);
+      if (optimistic === 'published') releasedHere = true;
     } catch {
       contentStatus = previousStatus;
     } finally {
@@ -433,9 +434,9 @@
 
   // Selected media thumbnail (for ThumbnailUpload auto-extract)
   const selectedMediaId = $derived(form.fields.mediaItemId?.value() ?? '');
-  const selectedMedia = $derived(
-    selectedMediaId ? mediaItems.find((mi) => mi.id === selectedMediaId) : null
-  );
+  // Read by id, the query the media section shares: a saved item past the
+  // library's first page still offers its frame.
+  const selectedMedia = $derived(selectedMediaId ? (getMediaItem(selectedMediaId).current ?? null) : null);
   const mediaThumbnailUrl = $derived(selectedMedia?.thumbnailUrl ?? null);
 
   /**
@@ -698,8 +699,8 @@
         >
           <MediaSection
             {form}
-            mediaItems={mediaItems.filter((mi) => mi.mediaType === contentTypeVal)}
-            {orgSlug}
+            mediaType={contentTypeVal}
+            {live}
             contentId={content?.id ?? null}
             contentStatus={contentStatus ?? null}
             {deletedMedia}

@@ -856,7 +856,7 @@
     border: var(--border-width) var(--border-style) transparent;
     border-radius: var(--radius-md);
     background-color: var(--color-interactive);
-    color: var(--color-text-on-brand, var(--color-background));
+    color: var(--color-on-interactive);
     font-size: var(--text-sm);
     font-weight: var(--font-semibold);
     cursor: pointer;
@@ -864,6 +864,7 @@
   }
   .ce__save:hover:not(:disabled) {
     background-color: var(--color-interactive-hover);
+    color: var(--color-on-interactive-hover);
   }
   .ce__save:disabled {
     opacity: var(--opacity-40);

@@ -354,7 +354,7 @@
 
   .event[data-tone='publish'] .event-dot {
     background-color: color-mix(in srgb, var(--color-brand-primary, var(--color-interactive)) 14%, var(--color-surface));
-    color: var(--color-brand-primary, var(--color-interactive));
+    color: var(--color-brand-text);
     box-shadow: 0 0 0 var(--border-width)
       color-mix(in srgb, var(--color-brand-primary, var(--color-interactive)) 35%, transparent);
   }
@@ -386,7 +386,7 @@
   }
 
   .event[data-tone='purchase'] .event-verb { color: var(--color-success-700); }
-  .event[data-tone='publish'] .event-verb { color: var(--color-brand-primary, var(--color-interactive)); }
+  .event[data-tone='publish'] .event-verb { color: var(--color-brand-text); }
 
   .event-title {
     font-size: var(--text-sm);

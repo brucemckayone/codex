@@ -476,7 +476,7 @@
   }
 
   :global(.font-picker__check) {
-    color: var(--color-interactive);
+    color: var(--color-link);
     flex-shrink: 0;
   }
 

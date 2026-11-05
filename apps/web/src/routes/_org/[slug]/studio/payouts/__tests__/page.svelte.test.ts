@@ -38,6 +38,7 @@ const slots = vi.hoisted(() => {
     held: slot(),
     summary: slot(),
     breakdown: slot(),
+    fees: slot(),
   };
 });
 
@@ -59,7 +60,12 @@ vi.mock('$lib/remote/subscription.remote', () => ({
   getPayoutSummary: vi.fn(() => slots.summary),
   getPayoutsByCreatorBreakdown: vi.fn(() => slots.breakdown),
 }));
+// The fee note under the header (Codex-2hxff.33 F5) makes its own read.
+vi.mock('$lib/remote/billing.remote', () => ({
+  getUpcomingFees: vi.fn(() => slots.fees),
+}));
 
+import { getUpcomingFees } from '$lib/remote/billing.remote';
 import {
   getMyStripeBalance,
   listPayouts,
@@ -156,6 +162,7 @@ beforeEach(() => {
     'held',
     'summary',
     'breakdown',
+    'fees',
   ] as const) {
     Object.assign(slots[key], slots.slot());
   }
@@ -171,12 +178,52 @@ beforeEach(() => {
   slots.breakdown.current = [];
   vi.mocked(getMyStripeBalance).mockClear();
   vi.mocked(listPayouts).mockClear();
+  vi.mocked(getUpcomingFees).mockClear();
 });
 
 afterEach(() => {
   if (component) unmount(component);
   component = null;
   document.body.innerHTML = '';
+});
+
+describe('the fee note (Codex-2hxff.33 N3)', () => {
+  test("it reads this organisation's owner rows and sits under the header", () => {
+    slots.fees.current = [
+      {
+        changeId: 'c1',
+        kind: 'announce',
+        scope: 'platform',
+        effectiveFrom: '2026-12-05T00:00:00.000Z',
+        earliestFrom: '2026-12-05T00:00:00.000Z',
+        announcedAt: '2026-11-03T08:00:12.000Z',
+        smallerToldAt: null,
+        replaces: null,
+        lines: [
+          {
+            organizationId: ORG,
+            organizationName: 'Hollow Oak Films',
+            as: 'owner',
+            value: 'platformFeePercent',
+            context: 'both',
+            from: 1000,
+            to: 1200,
+            replaced: null,
+            replacesFigure: null,
+          },
+        ],
+      },
+    ];
+    mountPage();
+    expect(getUpcomingFees).toHaveBeenCalledWith({ organizationId: ORG });
+    const note = document.querySelector('[data-testid="upcoming-fee-note"]');
+    expect(note?.textContent).toContain(
+      "From 5 December 2026, Codex's fee rises from 10% to 12% of each sale."
+    );
+    expect(note?.previousElementSibling?.matches('header, .page-header')).toBe(
+      true
+    );
+  });
 });
 
 describe("the owner's balance below zero (P2)", () => {

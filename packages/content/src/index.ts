@@ -125,6 +125,7 @@ export type {
   PublicMediaItem,
   PublicMediaItemSource,
   PublishContentResponse,
+  ServedMedia,
   ServedMediaItem,
   SortOrder,
   UnpublishContentResponse,

@@ -871,6 +871,23 @@ export const getCourseMonetisation = query(
   }
 );
 
+/**
+ * How the course plan's price changes are going (Codex-2hxff.86), for the
+ * Offer panel's note. Throws rather than answering `[]` off an org host: an
+ * empty list would read as "nothing is going out".
+ */
+export const getCoursePlanPriceChanges = query(
+  monetisationSchema,
+  async ({ courseId }) => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) error(400, 'Price changes are read within an organization');
+    const page = await withServiceErrors(() =>
+      ctx.api.courses.planPriceChanges(ctx.orgId, courseId)
+    );
+    return page.items;
+  }
+);
+
 const courseOfferSchema = z.object({ courseId: z.string().uuid() });
 
 /**
@@ -919,14 +936,17 @@ export const getCourseOffer = query(
 );
 
 /**
- * The course plan's typed Stripe refusals (`course-subscription-service.ts`,
- * Codex-2hxff.66): a 503 when Stripe failed, a 409 when the plan's key was
- * reused with other values or is still in flight.
+ * The course plan's typed refusals (`course-subscription-service.ts`): a 503
+ * when Stripe failed, a 409 when the plan's key was reused with other values
+ * or is still in flight (Codex-2hxff.66), and a 400 for a yearly price below
+ * the monthly one, which the builder words from en.json at the yearly price
+ * (owner: "Refuse yearly below monthly").
  */
 const COURSE_PLAN_REFUSAL_CODES = new Set([
   'STRIPE_UNAVAILABLE',
   'COURSE_PLAN_KEY_REUSED',
   'COURSE_PLAN_IN_PROGRESS',
+  'YEARLY_PRICE_BELOW_MONTHLY',
 ]);
 
 /**

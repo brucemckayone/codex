@@ -937,33 +937,30 @@
   }
 
   /* Active state uses the drawer's own recipe — `--color-interactive` fill with
-     `--color-text-on-brand` — for two reasons.
+     `--color-on-interactive` — for two reasons.
      WCAG 1.4.11: the previous `--color-surface-elevated` fill is derived as
      `calc(l + 0.02)` from the page background, so on any `[data-org-bg]` org it
      is ~1:1 against the page BY CONSTRUCTION (measured 1.06:1 light, 1.12:1
      dark), and `--color-border-strong` gave the outline only 1.49:1. A state
      indicator needs 3:1, so the selected pill was effectively invisible — and
      with `category` now a server facet, discovering that state costs a
-     navigation. The brand fill measures 4.90:1 for its text.
+     navigation. Its label is derived from that fill by luminance, >= 4.57:1
+     for every brand.
      And the semibold step means state is not signalled by colour ALONE, which
      the old rule's text-colour-only cue was. */
   .explore__category-pill--active {
-    color: var(--color-text-on-brand);
+    color: var(--color-on-interactive);
     font-weight: var(--font-semibold);
     background: var(--color-interactive);
     border-color: var(--color-interactive);
   }
 
-  /* The ACTIVE pill deliberately does NOT lighten on hover. `--color-text-on-brand`
-     is derived from `--color-interactive`, not from `--color-interactive-hover`
-     (dark theme lightens by `calc(l + 0.08)`), so hovering pushed the fill past
-     the point where white text still clears AA while the text colour stayed put:
-     measured 4.67:1 resting → 3.36:1 hovered on of-blood-and-bones dark. There
-     is also nothing for hover to communicate here — the pill is already
-     selected — so it holds its state instead. Mirrors the previous rule, which
-     likewise pinned the active background against hover. */
+  /* The ACTIVE pill deliberately does NOT lighten on hover: there is nothing for
+     hover to communicate — the pill is already selected — so it holds its
+     state. Mirrors the previous rule, which likewise pinned the active
+     background against hover. */
   .explore__category-pill--active:hover {
-    color: var(--color-text-on-brand);
+    color: var(--color-on-interactive);
     background: var(--color-interactive);
     border-color: var(--color-interactive);
   }
@@ -980,7 +977,7 @@
     padding: var(--space-2) var(--space-4);
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
-    color: var(--color-interactive);
+    color: var(--color-link);
     background: transparent;
     border: var(--border-width) var(--border-style) var(--color-interactive);
     border-radius: var(--radius-md);
@@ -991,7 +988,7 @@
 
   .explore__clear-btn:hover {
     background: var(--color-interactive);
-    color: var(--color-text-on-brand);
+    color: var(--color-on-interactive);
   }
 
   /* R14 — this was the only interactive element on the page with no

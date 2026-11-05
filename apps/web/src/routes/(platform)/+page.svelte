@@ -103,11 +103,12 @@
 
   .cta-primary {
     background-color: var(--color-interactive);
-    color: var(--color-text-on-brand);
+    color: var(--color-on-interactive);
   }
 
   .cta-primary:hover {
     background-color: var(--color-interactive-hover);
+    color: var(--color-on-interactive-hover);
   }
 
   .cta-secondary {
@@ -157,7 +158,7 @@
     width: var(--space-12);
     height: var(--space-12);
     margin: 0 auto var(--space-4);
-    color: var(--color-interactive);
+    color: var(--color-link);
   }
 
 

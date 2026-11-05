@@ -414,7 +414,7 @@
     transition: var(--transition-colors);
   }
 
-  .breadcrumb:hover { color: var(--color-interactive); }
+  .breadcrumb:hover { color: var(--color-link); }
 
   .breadcrumb:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
@@ -554,14 +554,14 @@
     font-weight: var(--font-semibold);
     text-transform: uppercase;
     letter-spacing: var(--tracking-wider);
-    color: var(--color-interactive);
+    color: var(--color-link);
     border-radius: var(--radius-sm);
     cursor: pointer;
     transition: var(--transition-colors);
   }
 
   .bar-actions :global(.compare-custom-link):hover {
-    color: var(--color-interactive-hover);
+    color: var(--color-link-hover);
   }
 
   .bar-actions :global(.compare-custom-link):focus-visible {
@@ -628,7 +628,7 @@
     font-family: inherit;
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
-    color: var(--color-text-on-brand);
+    color: var(--color-on-interactive);
     background-color: var(--color-interactive);
     border: var(--border-width) var(--border-style) var(--color-interactive);
     border-radius: var(--radius-md);
@@ -639,6 +639,7 @@
   .apply-btn:hover:not(:disabled) {
     background-color: var(--color-interactive-hover);
     border-color: var(--color-interactive-hover);
+    color: var(--color-on-interactive-hover);
   }
 
   .apply-btn:focus-visible {

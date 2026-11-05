@@ -89,7 +89,7 @@
 
   .typography-level__drill {
     font-size: var(--text-sm);
-    color: var(--color-interactive);
+    color: var(--color-link);
     background: none;
     border: none;
     cursor: pointer;
@@ -98,7 +98,7 @@
   }
 
   .typography-level__drill:hover {
-    color: var(--color-interactive-hover);
+    color: var(--color-link-hover);
   }
 
   .typography-level__drill:focus-visible {

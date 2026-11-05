@@ -1,11 +1,16 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  clearTokenOverrides,
   darkTokenOverridesToCssVars,
   injectBrandVars,
   previewFont,
   revertFontPreview,
   tokenOverridesToCssVars,
 } from './css-injection';
+import { groundLuminance } from './ground';
 import type { BrandEditorState } from './types';
 
 /**
@@ -36,6 +41,20 @@ describe('tokenOverridesToCssVars', () => {
     });
 
     expect(result['--color-surface-secondary']).toBe('#fafafa');
+  });
+
+  // The retired 'On Brand' key (Codex-mik4h): every label is chosen from its
+  // own fill, so a saved value must not repaint them inline.
+  it('ignores a saved text-on-brand, light and dark', () => {
+    expect(
+      tokenOverridesToCssVars({
+        'text-on-brand': '#ffd700',
+        'text-secondary': '#555555',
+      })
+    ).toEqual({ '--color-text-secondary': '#555555' });
+    expect(darkTokenOverridesToCssVars({ 'text-on-brand': '#ffd700' })).toEqual(
+      {}
+    );
   });
 
   it('skips hero-hide-* keys (attribute-only, no CSS consumer)', () => {
@@ -266,6 +285,158 @@ describe('brand fonts do not self-reference --font-sans (no CSS var cycle)', () 
     );
     expect(el.style.getPropertyValue('--brand-font-heading')).not.toContain(
       'var(--font-sans)'
+    );
+  });
+});
+
+/**
+ * The org layout binds its brand inputs with `style:`, which Svelte re-sets
+ * only when a value changes, and clears the token overrides right after
+ * hydration. An input the clear removes stays gone until reload: the ground
+ * numbers did, so every org page nudged against the platform's (Codex-mik4h).
+ */
+describe('clearTokenOverrides keeps what the org layout binds', () => {
+  const layout = readFileSync(
+    join(
+      dirname(fileURLToPath(import.meta.url)),
+      '../../routes/_org/[slug]/+layout.svelte'
+    ),
+    'utf8'
+  );
+  const bound = [...layout.matchAll(/style:(--[\w-]+)=/g)].map(
+    ([, prop]) => prop
+  );
+
+  it('keeps every bound input, the ground numbers among them, and clears the overrides', () => {
+    expect(bound).toEqual(
+      expect.arrayContaining([
+        '--brand-bg',
+        '--brand-bg-dark',
+        '--brand-ground-y',
+        '--brand-ground-dark-y',
+        '--brand-shader-logo-url',
+      ])
+    );
+    const el = document.createElement('div');
+    for (const prop of bound) el.style.setProperty(prop, '1');
+    el.style.setProperty('--color-interactive', '#2563eb');
+    el.style.setProperty('--brand-glass-tint', '#abc');
+
+    clearTokenOverrides(el);
+
+    expect(bound.filter((prop) => !el.style.getPropertyValue(prop))).toEqual(
+      []
+    );
+    expect(el.style.getPropertyValue('--color-interactive')).toBe('');
+    expect(el.style.getPropertyValue('--brand-glass-tint')).toBe('');
+  });
+});
+
+// Owner, Codex-mik4h: "Ignore it, like On Brand". The editor paints only a
+// background the nudge can measure, as the layouts do.
+describe('injectBrandVars paints only a background it can measure', () => {
+  const state: BrandEditorState = {
+    primaryColor: '#3355ff',
+    secondaryColor: null,
+    accentColor: null,
+    backgroundColor: null,
+    fontBody: null,
+    fontHeading: null,
+    radius: 0.5,
+    density: 1,
+    logoUrl: null,
+    tokenOverrides: {},
+    darkOverrides: null,
+    darkTokenOverrides: null,
+    heroLayout: 'default',
+  };
+
+  afterEach(() => {
+    for (const el of document.querySelectorAll('.org-layout')) el.remove();
+  });
+
+  function layout(): HTMLElement {
+    const el = document.createElement('div');
+    el.className = 'org-layout';
+    document.body.appendChild(el);
+    return el;
+  }
+
+  it('ignores a light background in a form it cannot measure', () => {
+    const el = layout();
+    injectBrandVars({ ...state, backgroundColor: 'rgb(30 30 46)' });
+
+    expect(el.hasAttribute('data-org-bg')).toBe(false);
+    expect(el.style.getPropertyValue('--brand-bg')).toBe('');
+    expect(el.style.getPropertyValue('--brand-ground-y')).toBe('');
+    expect(el.style.getPropertyValue('--brand-color')).toBe('#3355ff');
+  });
+
+  it('drops a dark background it cannot measure, so dark reads the light one', () => {
+    const el = layout();
+    injectBrandVars({
+      ...state,
+      backgroundColor: '#ffffff',
+      darkOverrides: { backgroundColor: 'rgb(20 20 20)' },
+    });
+
+    expect(el.hasAttribute('data-org-bg')).toBe(true);
+    expect(el.style.getPropertyValue('--brand-bg')).toBe('#ffffff');
+    expect(el.style.getPropertyValue('--brand-bg-dark')).toBe('');
+    // In dark, white binds at the sticky glass over dark content (ground.test.ts).
+    expect(el.style.getPropertyValue('--brand-ground-dark-y')).toBe(
+      groundLuminance('#ffffff', 'dark')
+    );
+  });
+
+  // Owner, Codex-mik4h: "Same rule as backgrounds". A dark brand colour the
+  // chip bound cannot hold is not painted, so dark reads the light brand.
+  it('drops a dark brand colour that is not a hex, so dark reads the light one', () => {
+    const el = layout();
+    injectBrandVars({
+      ...state,
+      darkOverrides: {
+        primaryColor: 'oklch(0.6 0.4 0)',
+        secondaryColor: 'color(display-p3 1 0 0.4)',
+        accentColor: ' #aabbcc ',
+      },
+    });
+
+    expect(el.style.getPropertyValue('--brand-color-dark')).toBe('');
+    expect(el.style.getPropertyValue('--brand-secondary-dark')).toBe('');
+    expect(el.style.getPropertyValue('--brand-accent-dark')).toBe('#aabbcc');
+  });
+});
+
+describe('injectBrandVars paints the canonical hex', () => {
+  afterEach(() => {
+    for (const el of document.querySelectorAll('.org-layout')) el.remove();
+  });
+
+  it('trims a padded background and measures the ground from what it paints', () => {
+    const el = document.createElement('div');
+    el.className = 'org-layout';
+    document.body.appendChild(el);
+    injectBrandVars({
+      primaryColor: '#3355ff',
+      secondaryColor: null,
+      accentColor: null,
+      backgroundColor: '#ffffff',
+      fontBody: null,
+      fontHeading: null,
+      radius: 0.5,
+      density: 1,
+      logoUrl: null,
+      tokenOverrides: {},
+      darkOverrides: { backgroundColor: ' #000000 ' },
+      darkTokenOverrides: null,
+      heroLayout: 'default',
+    });
+
+    expect(el.style.getPropertyValue('--brand-bg-dark')).toBe('#000000');
+    // Measured from the trimmed black, not borrowed from the light white.
+    expect(el.style.getPropertyValue('--brand-ground-dark-y')).toBe(
+      groundLuminance('#000000', 'dark')
     );
   });
 });

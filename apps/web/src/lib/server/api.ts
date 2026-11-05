@@ -13,6 +13,7 @@ import type {
   ContentHeld,
   CourseEntryResponse,
   CourseFilmStreamResponse,
+  MediaPreviewResponse,
   OrgFilmStreamResponse,
   PlaybackProgressResponse,
   StreamingUrlResponse,
@@ -31,16 +32,23 @@ import type {
   CustomerListItem,
   DashboardStats,
   FailedRefundItem,
+  FeeChangeCard,
+  FeeNoticeItem,
   FollowerStats,
+  HeldPriceMove,
   OwedToCreatorItem,
+  PriceChangeRestarted,
+  PriceMoveRetried,
   RefundPreview,
   ResolvedCreatorDebt,
   ResolvedFailedRefund,
   ResolvedOwedToCreator,
   RevenueStats,
+  StoppedPriceChange,
   SubscriberStats,
   SupportQueueCounts,
   SupportRefundResult,
+  ToldAnotherWayResult,
   TopContentItem,
 } from '@codex/admin';
 import type {
@@ -60,6 +68,7 @@ import type {
   CheckoutSessionVerifyResult,
   SaleListItem,
   SalesStats,
+  UpcomingFeeChange,
 } from '@codex/purchase';
 // `import type` from @codex/shared-types is sanctioned for apps/web — it pulls
 // no runtime value, so the vite server-only module guard is not tripped.
@@ -70,6 +79,7 @@ import type {
   ContactSettingsResponse,
   CourseOffer,
   FeatureSettingsResponse,
+  MediaLibrarySummary,
   MediaUsage,
   OrganizationPublicStatsResponse,
   OrganizationWithRole,
@@ -92,8 +102,10 @@ import type {
   CreatorPayoutRow,
   PayoutSummary,
   PayoutWithCreator,
+  PriceChangeProgress,
   SubscriberListItem,
   SubscriptionCheckoutVerifyResult,
+  UserCourseSubscription,
 } from '@codex/subscription';
 import {
   buildServiceUrl as getServiceUrl,
@@ -115,11 +127,13 @@ import type {
   ResumeSubscriptionInput,
   SalesFilm,
   SupportChargeSearchQuery,
+  SupportClosePriceMoveInput,
   SupportIssueRefundInput,
   SupportQueueQuery,
   SupportResolveCreatorDebtInput,
   SupportResolveCreditInput,
   SupportResolveFailedRefundInput,
+  SupportToldAnotherWayInput,
   UpdateBrandingInput,
   UpdateCategoryInput,
   UpdateContactInput,
@@ -333,6 +347,13 @@ export interface TierDeleteImpactCourse {
 export interface TierDeleteImpact {
   /** Every subscription on the tier that isn't cancelled. > 0 → the delete is refused (`TIER_HAS_SUBSCRIBERS`). */
   liveSubscriberCount: number;
+  /**
+   * Subscriptions waiting to move to the tier at their renewal, not cancelled
+   * (Codex-2hxff.16, T5). > 0 → refused too, as for `liveSubscriberCount`.
+   */
+  movingInCount: number;
+  /** ISO: the latest of those renewals; null with none. */
+  lastMoveAt: string | null;
   onlyHere: {
     films: {
       total: number;
@@ -2720,6 +2741,21 @@ export function createServerApi(
           )}/tier-access?organizationId=${encodeURIComponent(organizationId)}`,
           { method: 'PUT', body: JSON.stringify({ tierIds }) }
         ),
+
+      /**
+       * How the course plan's price changes are going (Codex-2hxff.86), for
+       * the Offer panel's note. As `tiers.priceChanges`, scoped to the
+       * organisation and the course.
+       */
+      planPriceChanges: (organizationId: string, courseId: string) =>
+        request<PaginatedListResponse<PriceChangeProgress>>(
+          'ecom',
+          `/studio/courses/${encodeURIComponent(
+            courseId
+          )}/subscription-plan/price-changes?organizationId=${encodeURIComponent(
+            organizationId
+          )}`
+        ),
     },
 
     /**
@@ -2872,12 +2908,16 @@ export function createServerApi(
       /**
        * List media items with filters and pagination
        *
-       * Query parameters (from MediaQueryInput):
+       * Query parameters (from MediaQueryInput, Codex-a6ofh.1.4):
        * - page: number (default: 1)
-       * - limit: number (1-100, default: 20)
-       * - status: 'uploading' | 'uploaded' | 'transcoding' | 'ready' | 'failed' (optional)
+       * - limit: number (1-100, default: 24)
+       * - search: title or description, ≤255 (optional; gate it, Codex-k618q)
+       * - status: 'uploading' | 'uploaded' | 'transcoding' | 'ready' | 'failed',
+       *   or a group: 'processing' | 'attention' | 'attachable' (MEDIA_STATUS_GROUPS) (optional)
        * - mediaType: 'video' | 'audio' (optional)
-       * - sortBy: 'createdAt' | 'uploadedAt' | 'title' (optional)
+       * - usage: 'any' | 'used' | 'unused' (default: 'any')
+       * - sortBy: 'createdAt' | 'uploadedAt' | 'title' | 'durationSeconds' |
+       *   'fileSizeBytes' (optional)
        * - sortOrder: 'asc' | 'desc' (optional)
        *
        * Each row also carries its poster's CDN URL, or null with none: the
@@ -2891,6 +2931,13 @@ export function createServerApi(
             MediaItemWithRelations & { thumbnailUrl: string | null }
           >
         >('content', `/api/media${params ? `?${params}` : ''}`),
+
+      /**
+       * The whole library in four numbers (Codex-a6ofh.1.6): the library
+       * header ("12 items · 6.4 GB") and its needs-attention line.
+       */
+      summary: () =>
+        request<MediaLibrarySummary>('content', '/api/media/summary'),
 
       /**
        * Get a single media item by ID
@@ -2914,6 +2961,13 @@ export function createServerApi(
        */
       usage: (id: string) =>
         request<MediaUsage>('content', `/api/media/${id}/usage`),
+
+      /**
+       * The owner's own media, signed to play for 15 minutes (Codex-a6ofh.1.5):
+       * the media drawer's preview. Never cached; a 422 means not ready yet.
+       */
+      preview: (id: string) =>
+        request<MediaPreviewResponse>('content', `/api/media/${id}/preview`),
 
       /**
        * Soft delete a media item. `usage` is the fingerprint of the uses the
@@ -3261,6 +3315,105 @@ export function createServerApi(
           `/api/admin/support/owed-to-creators/${encodeURIComponent(creditId)}/check`,
           { method: 'POST' }
         ),
+
+      /**
+       * Fee rises that haven't started, oldest first, with how many are told
+       * (Codex-2hxff.33). Each stays until its date.
+       */
+      listFeeChanges: ({ page, limit }: SupportQueueQuery) =>
+        request<PaginatedListResponse<FeeChangeCard>>(
+          'admin',
+          `/api/admin/support/queue/fee-changes?${new URLSearchParams({
+            page: String(page),
+            limit: String(limit),
+          })}`
+        ),
+
+      /** The people a fee rise is waiting for: their email failed or may not have gone. */
+      listFeeNotices: ({ page, limit }: SupportQueueQuery) =>
+        request<PaginatedListResponse<FeeNoticeItem>>(
+          'admin',
+          `/api/admin/support/queue/fee-notices?${new URLSearchParams({
+            page: String(page),
+            limit: String(limit),
+          })}`
+        ),
+
+      /** Support told them another way (a note is required); may date the rise. */
+      markToldAnotherWay: (
+        noticeId: string,
+        body: SupportToldAnotherWayInput
+      ) =>
+        request<ToldAnotherWayResult>(
+          'admin',
+          `/api/admin/support/fee-notices/${encodeURIComponent(noticeId)}/told-another-way`,
+          { method: 'POST', body: JSON.stringify(body) }
+        ),
+
+      /**
+       * Subscribers held from a new price, and those Retry queued, oldest
+       * first (Codex-2hxff.85, .86).
+       */
+      listHeldPriceMoves: ({ page, limit }: SupportQueueQuery) =>
+        request<PaginatedListResponse<HeldPriceMove>>(
+          'admin',
+          `/api/admin/support/queue/price-moves?${new URLSearchParams({
+            page: String(page),
+            limit: String(limit),
+          })}`
+        ),
+
+      /** Price changes the run stopped: every first email was refused. */
+      listStoppedPriceChanges: ({ page, limit }: SupportQueueQuery) =>
+        request<PaginatedListResponse<StoppedPriceChange>>(
+          'admin',
+          `/api/admin/support/queue/price-changes-stopped?${new URLSearchParams(
+            { page: String(page), limit: String(limit) }
+          )}`
+        ),
+
+      /** Queue a held move for the next run. The route takes no body. */
+      retryPriceMove: (moveId: string) =>
+        request<PriceMoveRetried>(
+          'admin',
+          `/api/admin/support/price-moves/${encodeURIComponent(moveId)}/retry`,
+          { method: 'POST' }
+        ),
+
+      /** Take a held move off the list without a retry. It moves nobody. */
+      closePriceMove: (moveId: string, body: SupportClosePriceMoveInput) =>
+        request<HeldPriceMove>(
+          'admin',
+          `/api/admin/support/price-moves/${encodeURIComponent(moveId)}/close`,
+          { method: 'POST', body: JSON.stringify(body) }
+        ),
+
+      /** After the cause is fixed, the next run restarts it. No body. */
+      restartPriceChange: (changeId: string) =>
+        request<PriceChangeRestarted>(
+          'admin',
+          `/api/admin/support/price-changes/${encodeURIComponent(changeId)}/restart`,
+          { method: 'POST' }
+        ),
+    },
+
+    /**
+     * The caller's own fee notices (ecom-api, Codex-2hxff.33): the Studio note
+     * about a fee rise that hasn't started.
+     */
+    fees: {
+      /**
+       * With `organizationId`, the owner's rows for that organisation
+       * (Billing, Payouts); without, the caller's creator rows everywhere
+       * (Earnings).
+       */
+      upcoming: (organizationId?: string) =>
+        request<PaginatedListResponse<UpcomingFeeChange>>(
+          'ecom',
+          organizationId
+            ? `/fees/upcoming?${new URLSearchParams({ organizationId })}`
+            : '/fees/upcoming'
+        ),
     },
 
     /**
@@ -3374,6 +3527,18 @@ export function createServerApi(
           'org',
           `/api/organizations/${orgId}/tiers/${tierId}/items`,
           { method: 'POST', body: JSON.stringify(delta) }
+        ),
+
+      /**
+       * How the tiers' price changes are going (Codex-2hxff.86): who has been
+       * emailed, moved and held, per change and interval. Owner/admin only,
+       * uncached. Running and stopped changes, and those done or replaced in
+       * the last 14 days, newest first, one page.
+       */
+      priceChanges: (orgId: string) =>
+        request<PaginatedListResponse<PriceChangeProgress>>(
+          'org',
+          `/api/organizations/${orgId}/tiers/price-changes`
         ),
 
       /**
@@ -3616,6 +3781,53 @@ export function createServerApi(
         request<CreatorEarningsSummary>(
           'ecom',
           `/subscriptions/me/earnings-summary${params?.toString() ? `?${params.toString()}` : ''}`
+        ),
+
+      // ── Waiting moves and course subscriptions (Codex-2hxff.16, .52) ────
+
+      /**
+       * Undo a move to a cheaper plan before the renewal it lands on: the
+       * member stays on their plan and nothing is charged. With nothing
+       * waiting it changes nothing. After that renewal: 409
+       * `MOVE_ALREADY_LANDED` in `details.code`.
+       */
+      keepCurrentPlan: (data: { organizationId: string }) =>
+        request<CurrentSubscription>(
+          'ecom',
+          '/subscriptions/keep-current-plan',
+          {
+            method: 'POST',
+            body: JSON.stringify(data),
+          }
+        ),
+
+      /**
+       * The user's own course subscriptions for Account › Subscriptions:
+       * live, not ended, not a duplicate, newest first. Paginated.
+       */
+      listMyCourseSubscriptions: (params?: URLSearchParams) =>
+        request<PaginatedListResponse<UserCourseSubscription>>(
+          'ecom',
+          `/subscriptions/courses/mine${params?.toString() ? `?${params.toString()}` : ''}`
+        ),
+
+      /** Cancel one of the user's course subscriptions at period end. No body. */
+      cancelCourseSubscription: (courseSubscriptionId: string) =>
+        request<UserCourseSubscription>(
+          'ecom',
+          `/subscriptions/courses/${encodeURIComponent(courseSubscriptionId)}/cancel`,
+          { method: 'POST' }
+        ),
+
+      /**
+       * Undo a course subscription's cancel before the period ends. No body.
+       * 409 `COURSE_NOT_ON_SALE` when the course is no longer offered.
+       */
+      reactivateCourseSubscription: (courseSubscriptionId: string) =>
+        request<UserCourseSubscription>(
+          'ecom',
+          `/subscriptions/courses/${encodeURIComponent(courseSubscriptionId)}/reactivate`,
+          { method: 'POST' }
         ),
     },
 

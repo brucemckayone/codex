@@ -130,6 +130,21 @@ export function isBankPayoutRun(scheduledTime: Date | number): boolean {
   return londonParts(new Date(scheduledTime)).hour === BANK_PAYOUT_LONDON_HOUR;
 }
 
+const HOUR_MS = 60 * 60 * 1000;
+
+/**
+ * The next hourly run that works price moves, strictly after `at`: the next
+ * top of the hour, skipping the payout run, whose subrequests belong to the
+ * bank payout (Codex-2hxff.86, C1 Part B data design §2.4). London is a whole
+ * number of hours off UTC, so a UTC hour boundary is a London one. Support's
+ * "Queued for 11:00" and Studio's next-run and finish estimates read this.
+ */
+export function nextPriceMovesRunAfter(at: Date): Date {
+  let next = Math.floor(at.getTime() / HOUR_MS) * HOUR_MS + HOUR_MS;
+  if (isBankPayoutRun(next)) next += HOUR_MS;
+  return new Date(next);
+}
+
 /** 08:00 London on a London calendar date (month 1-12; day may overflow). */
 function london0800On(year: number, month: number, day: number): Date {
   const guess = Date.UTC(year, month - 1, day, BANK_PAYOUT_LONDON_HOUR);

@@ -177,14 +177,14 @@
   .carousel__view-all {
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
-    color: var(--color-interactive);
+    color: var(--color-link);
     text-decoration: none;
     white-space: nowrap;
     transition: color var(--duration-fast) var(--ease-default);
   }
 
   .carousel__view-all:hover {
-    color: var(--color-interactive-hover);
+    color: var(--color-link-hover);
   }
 
   .carousel__wrapper {

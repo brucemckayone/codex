@@ -24,63 +24,128 @@ A **gap** marker means the code does not behave this way yet; see
 ## Fee configuration
 
 Every sale path resolves its fees through `FeeConfigService`
-(`packages/purchase`): one-off purchases, course purchases, organisation
+(`packages/purchase`), over `resolveFeesAt` (`packages/payments`
+`fee-versions.ts`): one-off purchases, course purchases, organisation
 subscription invoices and course subscription invoices, whether reached from a
-route, a webhook or the payouts cron — **gap**: `Codex-2hxff.7` (webhook and
-cron paths build their services without it, so only the constants apply to real
-sales).
+route, a webhook or the payouts cron.
+
+**Fees are dated.** Each change is a row in `fee_changes` (a `cut` or a
+`rise`, with the date it applies from, `effective_from`) and the level's full
+values from then on are a row in `fee_config_versions`. Versions are
+insert-only: a removal is a `removed` version, never a deleted row. A sale is
+split by the fees **in force when it was made**: the newest version at each
+level whose date is no later than the sale's time `at`. A one-off purchase
+passes the time its offer was made (else its purchase time). A subscription
+invoice should pass the time its invoice was raised — **gap**: the
+subscription paths (`packages/subscription`) don't pass `at` yet, so an
+invoice is split by the fees in force when it is processed (Codex-2hxff.33,
+the subscription half).
 
 Each value is looked up in this order; the first one set wins, column by column:
 
-1. **Creator override** — `fee_config_org_creator` (organisation + creator)
-2. **Organisation** — `fee_config_org`
-3. **Platform** — `fee_config_platform` (a single row)
+1. **Creator override** — scope `creator` (organisation + creator)
+2. **Organisation** — scope `org`
+3. **Platform** — scope `platform` (one level)
 4. **Code constants** — `FEES` in `packages/constants/src/commerce.ts`
 
 | Value | Meaning | Constant default |
 |---|---|---|
 | `platformFeePercent` | Platform's cut of gross | 1000 (10%) |
-| `oneOffOrgFeePercent` (platform row) | Organisation's cut of the post-platform pool on one-off sales | 1000 (10%) |
-| `subscriptionOrgFeePercent` (platform row) | Organisation's cut of the post-platform pool on subscriptions | 1500 (15%) |
-| `orgFeePercent` (organisation and override rows) | One organisation fee that replaces both platform values above | — |
+| `oneOffOrgFeePercent` (platform level) | Organisation's cut of the post-platform pool on one-off sales | 1000 (10%) |
+| `subscriptionOrgFeePercent` (platform level) | Organisation's cut of the post-platform pool on subscriptions | 1500 (15%) |
+| `orgFeePercent` (organisation and override levels) | One organisation fee that replaces both platform values above | — |
 | `minPlatformFeeCents` | [Minimum platform fee](#minimum-platform-fee) | 25 (25p) |
 | `minTransferCents` | [Minimum transfer](#minimum-transfer) | 0 |
 
-**Notice.** A fee **increase**, at any level, is emailed to every affected
-creator and organisation owner and applies only to sales made 30 or more days
-later. A **decrease** applies to the next sale (owner decision 2026-10-13,
-"Rises 30 days, cuts now (Recommended)") — **gap**: `Codex-2hxff.33` (today
-every change applies to the next sale and nobody is told).
+The old "current row" tables (`fee_config_platform`, `fee_config_org`,
+`fee_config_org_creator`) are still written, with the values **in force now**
+(never a waiting rise), so code rolled back to before migration `0123` reads
+the right fee. Every admin save writes its level's row, and notifications-api's
+08:00 fee step writes a dated rise into it on the morning the rise starts.
+Nothing new reads them; a later release stops writing them.
 
-**Changing fees.** Only the platform owner can, through admin-api
-(`/api/admin/fees/*`, `auth: 'platform_owner'`):
+### Notice of a change
+
+Owner decision 2026-10-13 ("Rises 30 days, cuts now (Recommended)"), with
+batch C1's decisions F1–F9 and Q1–Q5 (2026-10-30):
+
+- A **cut** applies to the next sale. A **rise**, at any level, waits until
+  everyone it pays less has been told, then 30 days: it starts at the first
+  UK midnight at least 30 days after the **last** person on the list was told
+  (F4). Told means their email was accepted, or support marked them told
+  another way.
+- A change that is a rise anywhere waits as a whole, even if it also cuts
+  something (F1). To get the cut sooner, save it on its own first.
+- A higher minimum transfer counts as a rise (F9), and so does clearing a
+  value back to a higher inherited one (an organisation losing its own lower
+  fee).
+- Who is told (F3): every active creator, admin and owner whose take falls,
+  worked out with the same layering a sale uses. Anyone shielded by their
+  own setting is not told, and an organisation's owner isn't told about a
+  rise in the organisation fee (it raises their share).
+- At most one pending rise per level: waiting for its emails, or dated and
+  not yet started. A unique index allows one **waiting** rise per level (a
+  started one must not block the next), and every write first takes a
+  transaction lock on its level (`pg_advisory_xact_lock`), under which a
+  dated rise that hasn't started counts as pending too. Saving again while one
+  is pending: back to today
+  cancels it (everyone told is emailed that it's off); below today cancels it
+  and the cut applies at once; a **smaller** rise keeps its date and sends one
+  short email to everyone already told (Q2); a **bigger** one replaces it, says
+  so, and its 30 days start again (F2).
+- Someone who joins while a rise waits is told the same date, and never holds
+  it (F8). Their failed email is still listed for support (Q4).
+- Each email names a date: the change's, or the earliest it can be, with a
+  line that it can only move later (Q1). No email goes when a rise starts
+  (F6), and nobody gets a second notice of the same rise (Q5).
+- Studio shows the change before it starts: Billing and Payouts to an owner,
+  Earnings to a creator (Q3), from `GET /fees/upcoming` (ecom-api).
+
+notifications-api's daily fee step (`0 8 * * *`, after the agreement and money
+sweeps) makes each new rise's list, sends the emails, adds joiners, retries
+failures every morning and sets the date once nobody on the list is waiting.
+Support works the people it can't reach in Admin › Queue › Fee notices
+([operations](operations.md#changing-fees)).
+
+### Changing fees
+
+Only the platform owner can, through admin-api (`/api/admin/fees/*`,
+`auth: 'platform_owner'`). **Never edit the fee tables with SQL**: a SQL edit
+skips the notice a rise needs, and the dated history every sale is split by.
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` / `PATCH` | `/api/admin/fees/platform` | Read / update the platform row |
+| `GET` / `PATCH` | `/api/admin/fees/platform` | Read / change the platform level |
 | `GET` / `PATCH` / `DELETE` | `/api/admin/fees/org/:orgId` | Read / set / remove an organisation's values |
 | `GET` | `/api/admin/fees/org/:orgId/creators` | List an organisation's creator overrides |
 | `GET` / `PUT` / `DELETE` | `/api/admin/fees/org/:orgId/creator/:creatorId` | Read / set / remove a creator override |
+| `POST` | `/api/admin/fees/changes/:changeId/cancel` | Cancel a rise that hasn't started (409 `FEE_CHANGE_NOT_WAITING` otherwise) |
 | `GET` | `/api/admin/fees/audit-log` | Paginated change history |
 
 There is no web screen; a local desktop admin app is planned (`Codex-xyb7v`).
 On an organisation or override write, a value left out is kept, and `null`
-clears it back to inheriting the level above. Every write bumps the row's
-`version`, writes one `fee_config_audit_log` row per column that **actually
-changed** (a clear is recorded as old value → `NULL`, and so is each set
-value when an organisation's values or an override are removed; setting a
-value it already has, or clearing one already clear, records nothing and
-writes nothing), and invalidates the cache. In the log, `NULL` on either side
-means unset, inheriting the level above. Rows written before migration 0112
-hold the string `'null'` instead: from an update, that was a clear that never
-took effect (the old merge kept the value, `Codex-2hxff.23`); from removing an
-organisation's values or an override, the removal did happen. The current fee
-row tells the two apart. Writes are atomic —
-**gap**: `Codex-rtwpv`. Fee values are cached in KV with no TTL: a write
-invalidates them, and they change too rarely for a TTL to be worth the misses.
-A fee is read when each sale is processed; it is never snapshotted on an
-agreement. A replayed invoice keeps the platform fee its first delivery
-recorded ([below](#a-replayed-invoice)).
+clears it back to inheriting the level above. Every write answers with the
+values in force now and the `change` it made (`null` when nothing changed),
+including a removal, which answers 200, not 204. Each write is classified,
+versioned, audited and mirrored to the old table in **one transaction**,
+under a lock on its level, so two saves at once can't both make a rise
+(the race `Codex-rtwpv` tracked). The audit log has one row per column that
+**actually changed** (a clear is recorded as old value → `NULL`, and so is
+each set value when an organisation's values or an override are removed),
+each with the change it belongs to and the date it applies from (`NULL`
+while a rise waits). In the log, `NULL` on either side means unset,
+inheriting the level above. Rows written before migration 0112 hold the
+string `'null'` instead: from an update, that was a clear that never took
+effect (the old merge kept the value, `Codex-2hxff.23`); from removing an
+organisation's values or an override, the removal did happen.
+
+Fee versions are cached in KV per level (`fee-versions:*`), for a day, or an
+hour while the level has a rise waiting: notifications-api dates the rise and
+has no cache binding, so readers see the date within the hour (it is at least
+30 days off). Every write and support's mark invalidates the level. A fee is
+read when each sale is processed; it is never snapshotted on an agreement. A
+replayed invoice keeps the platform fee its first delivery recorded
+([below](#a-replayed-invoice)).
 
 ## Minimum platform fee
 
@@ -113,7 +178,8 @@ Off: `minTransferCents = 0`, so every slice is transferred as it is earned
 (owner decision 2026-10-13, "Keep it off (Recommended)"). Stripe charges nothing
 per transfer, and bank payouts already wait out the 14-day refund window (the
 daily bank payout, `Codex-2hxff.29`: [Payout timing](connect-and-payouts.md#payout-timing)).
-If it is ever turned on, the creator payout terms must say so.
+If it is ever turned on, the creator payout terms must say so. Raising it is
+a rise like any other (F9): it waits for the notice and its 30 days.
 
 A creator slice smaller than `minTransferCents` is not transferred on its own.
 It is recorded as a pending row (reason `min_transfer_floor`) and paid together

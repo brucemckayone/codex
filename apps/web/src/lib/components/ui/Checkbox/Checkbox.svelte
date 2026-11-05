@@ -101,7 +101,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    color: var(--color-text-on-brand);
+    color: var(--color-on-interactive);
     width: 100%;
     height: 100%;
   }

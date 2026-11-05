@@ -1,12 +1,12 @@
 <!--
   @component MediaTile
 
-  Editorial media tile for the Studio media library grid. 16:9 thumbnail
-  (or branded placeholder when thumbnailUrl is absent) with duration
-  overlay bottom-right, mono ordinal top-left, status pill inline,
-  inline media-type chip. Upload and transcode progress render as an
-  overlaid bar on the thumbnail with a step label. Hover reveals edit/delete
-  overlay actions.
+  Media tile for the Studio media library grid. 16:9 thumbnail (or branded
+  placeholder when thumbnailUrl is absent) with the media-type chip top-left
+  and the duration bottom-right. Upload and transcode progress render as an
+  overlaid bar on the thumbnail with a step label. Its actions sit in an
+  always-visible ⋯ menu named with the title (Codex-a6ofh.1.6, mockup M1
+  note 7); below `sm` the tile lays out as a row (M7a).
 
   Live (Codex-l2c48.7): the tile reads its item's state from the studio's one
   status socket (`$lib/client/media-status`) instead of polling, and
@@ -18,20 +18,13 @@
 -->
 <script lang="ts">
   import { mediaStatus } from '$lib/client/media-status.svelte';
-  import { describeThrown } from '$lib/client-log';
-  import { retryTranscoding } from '$lib/remote/media.remote';
-  import { logger } from '$lib/observability';
   import type { MediaItemWithRelations } from '$lib/types';
   import { Button } from '$lib/components/ui';
-  import { toast } from '$lib/components/ui/Toast/toast-store';
   import {
     FilmIcon,
     MusicIcon,
-    EditIcon,
-    TrashIcon,
     PlayIcon,
     AlertTriangleIcon,
-    CheckIcon,
     ClockIcon,
     RefreshCwIcon,
     UploadIcon,
@@ -39,34 +32,32 @@
   import { formatDuration, formatFileSize, formatRelativeTime } from '$lib/utils/format';
   import { getThumbnailSrcset } from '$lib/utils/image';
   import * as m from '$paraglide/messages';
-  import { MAX_TRANSCODING_ATTEMPTS } from '@codex/constants';
-  import { remoteErrorStatus } from '$lib/remote/query-result';
+  import MediaActionsMenu from './MediaActionsMenu.svelte';
+  import { retryMediaTranscoding } from './media-retry';
+  import { tileReason } from './tile-copy';
+  import MediaStatusPill from './MediaStatusPill.svelte';
   import MediaUseChip from './MediaUseChip.svelte';
   import {
     describeTile,
     tilePill,
-    type TileFailure,
-    type TilePill,
     type TileView,
   } from './tile-state';
 
-  // MediaItemWithRelations doesn't declare thumbnailUrl on the base schema
-  // (only thumbnailKey) — but the public content API resolves keys to CDN
-  // URLs elsewhere; support it optionally for forward-compat.
-  type MediaTileItem = MediaItemWithRelations & { thumbnailUrl?: string | null };
+  // The row as content-api serves it, its poster (`thumbnailUrl`) resolved.
+  type MediaTileItem = MediaItemWithRelations;
 
   interface Props {
-    /** Two-digit zero-padded tile index ("01", "02"..) — editorial ordinal */
-    ordinal: string;
     /** Media item to render */
     media: MediaTileItem;
-    /** Edit action callback — parent opens EditMediaDialog */
+    /** The whole tile opens the detail drawer (mockup M1 note 8). */
+    onOpen?: (id: string) => void;
+    /** Edit action callback — the library opens the media drawer */
     onEdit?: (id: string) => void;
     /** Delete action callback — parent opens confirm Dialog */
     onDelete?: (id: string) => void;
   }
 
-  const { ordinal, media, onEdit, onDelete }: Props = $props();
+  const { media, onOpen, onEdit, onDelete }: Props = $props();
 
   // ── Live state ──────────────────────────────────────────────────────────
   const live = $derived(mediaStatus.items.get(media.id));
@@ -90,15 +81,6 @@
       ? { label: m.media_type_video(), icon: FilmIcon }
       : { label: m.media_type_audio(), icon: MusicIcon }
   );
-
-  const PILL_LABELS: Record<TilePill, () => string> = {
-    uploading: () => m.media_status_uploading(),
-    stopped: () => m.media_status_stopped(),
-    processing: () => m.media_status_processing(),
-    waiting: () => m.media_status_waiting(),
-    ready: () => m.media_status_ready(),
-    failed: () => m.media_status_failed(),
-  };
 
   type WaitingCause = Extract<TileView, { kind: 'waiting' }>['cause'];
 
@@ -137,32 +119,7 @@
   });
 
   /** The sentence under the title: why it waits, stopped or failed. */
-  const reason = $derived.by((): string | null => {
-    switch (view.kind) {
-      case 'stopped':
-        return m.media_tile_stopped();
-      case 'waiting':
-        if (view.cause === 'config') return m.media_tile_waiting_config();
-        if (view.cause === 'transcoder') {
-          return view.overdue ? m.media_tile_queued_overdue() : m.media_tile_queued();
-        }
-        return view.retryInSeconds
-          ? m.media_tile_waiting_service({ time: formatDuration(view.retryInSeconds) })
-          : m.media_tile_waiting_service_later();
-      case 'failed':
-        return FAILURE_TEXT[view.reason]();
-      default:
-        return null;
-    }
-  });
-
-  const FAILURE_TEXT: Record<TileFailure, () => string> = {
-    file: () => m.media_tile_failed_file(),
-    upload: () => m.media_tile_stopped(),
-    exhausted: () => m.media_tile_failed_exhausted({ count: MAX_TRANSCODING_ATTEMPTS }),
-    timeout: () => m.media_tile_failed_timeout(),
-    internal: () => m.media_tile_failed_internal(),
-  };
+  const reason = $derived(tileReason(view));
 
   // ── Try again ───────────────────────────────────────────────────────────
   let retrying = $state(false);
@@ -171,24 +128,7 @@
     if (retrying) return;
     retrying = true;
     try {
-      await retryTranscoding(media.id);
-      // What happens next arrives over the socket; without one, the list
-      // (and its refetch drops the held `failed` this tile still shows).
-      if (mediaStatus.connection !== 'live') mediaStatus.refreshList();
-    } catch (error) {
-      const status = remoteErrorStatus(error);
-      // A 4xx refused this retry (the state moved, no tries left); anything
-      // else is an outage, or a network that never answered.
-      if (status === undefined || status >= 500) {
-        logger.error('media_tile.retry_failed', { mediaId: media.id, ...describeThrown(error) });
-      } else if (status !== 429) {
-        logger.warn('media_tile.retry_refused', { mediaId: media.id, ...describeThrown(error) });
-      }
-      toast.error(
-        status === 429 ? m.media_tile_retry_rate_limited() : m.media_tile_retry_failed()
-      );
-      // A refusal means the tile is out of date (another tab, or no tries left).
-      mediaStatus.refreshList();
+      await retryMediaTranscoding(media.id);
     } finally {
       retrying = false;
     }
@@ -232,10 +172,7 @@
       </span>
     {/if}
 
-    <!-- Top-left ordinal -->
-    <span class="thumb-ordinal" aria-hidden="true">{ordinal}</span>
-
-    <!-- Top-right type chip -->
+    <!-- Top-left type chip -->
     <span class="thumb-type-chip" aria-hidden="true">
       <typeMeta.icon size={12} />
       <span>{typeMeta.label}</span>
@@ -294,49 +231,34 @@
       </div>
     {/if}
 
-    <!-- Hover actions -->
-    <div class="thumb-actions">
-      {#if onEdit}
-        <button
-          type="button"
-          class="tile-action"
-          aria-label={m.media_edit_title()}
-          onclick={() => onEdit(media.id)}
-        >
-          <EditIcon size={14} />
-        </button>
-      {/if}
-      {#if onDelete}
-        <button
-          type="button"
-          class="tile-action tile-action--danger"
-          aria-label={m.media_delete_title()}
-          onclick={() => onDelete(media.id)}
-        >
-          <TrashIcon size={14} />
-        </button>
-      {/if}
-    </div>
   </div>
 
   <div class="tile-body">
     <div class="tile-header">
-      <h3 class="tile-title" title={media.title}>{media.title}</h3>
-      <span class="tile-status-pill" data-status={pill}>
-        <span class="tile-status-dot" aria-hidden="true">
-          {#if pill === 'ready'}
-            <CheckIcon size={8} />
-          {/if}
-        </span>
-        {PILL_LABELS[pill]()}
-      </span>
+      <h3 class="tile-title" title={media.title}>
+        {#if onOpen}
+          <!-- Stretched over the tile: the whole tile opens it, and the
+               tile's own buttons sit above the stretch. -->
+          <button type="button" class="tile-open" onclick={() => onOpen(media.id)}>{media.title}</button>
+        {:else}
+          {media.title}
+        {/if}
+      </h3>
+      <MediaActionsMenu
+        title={media.title}
+        onEdit={onEdit && (() => onEdit(media.id))}
+        onDelete={onDelete && (() => onDelete(media.id))}
+      />
+    </div>
+
+    <div class="tile-status">
+      <MediaStatusPill {pill} />
+      <MediaUseChip mediaId={media.id} usage={media.usage} />
     </div>
 
     {#if reason}
       <p class="tile-reason">{reason}</p>
     {/if}
-
-    <MediaUseChip mediaId={media.id} usage={media.usage} />
 
     {#if view.kind === 'failed' && view.canRetry}
       <div class="tile-cta">
@@ -377,6 +299,7 @@
 
 <style>
   .tile {
+    position: relative;
     display: flex;
     flex-direction: column;
     gap: var(--space-3);
@@ -433,7 +356,6 @@
   }
 
   /* Overlays share chip styling */
-  .thumb-ordinal,
   .thumb-type-chip,
   .thumb-duration {
     position: absolute;
@@ -455,17 +377,9 @@
     pointer-events: none;
   }
 
-  .thumb-ordinal {
-    top: var(--space-2);
-    left: var(--space-2);
-    padding: 2px var(--space-2);
-    letter-spacing: var(--tracking-wider);
-    font-size: 0.625rem; /* slightly tighter than --text-xs for ordinal presence */
-  }
-
   .thumb-type-chip {
     top: var(--space-2);
-    right: var(--space-2);
+    left: var(--space-2);
     padding: 2px var(--space-2);
     font-family: var(--font-sans);
     font-feature-settings: normal;
@@ -584,71 +498,40 @@
     background: color-mix(in srgb, var(--color-status-error-surface) 80%, transparent);
   }
 
-  /* Hover action bar */
-  .thumb-actions {
-    position: absolute;
-    top: var(--space-2);
-    right: var(--space-2);
-    display: inline-flex;
-    gap: var(--space-1);
-    opacity: 0;
-    transform: translateY(calc(-1 * var(--space-1)));
-    transition:
-      opacity var(--duration-fast) var(--ease-out),
-      transform var(--duration-fast) var(--ease-out);
-    pointer-events: none;
-  }
-
-  .tile:hover .thumb-actions,
-  .tile:focus-within .thumb-actions {
-    opacity: 1;
-    transform: translateY(0);
-    pointer-events: auto;
-  }
-
-  /* If the type chip sits at top-right, hover-actions override it — hide the
-     chip on hover so they don't stack. */
-  .tile:hover .thumb-type-chip,
-  .tile:focus-within .thumb-type-chip {
-    opacity: 0;
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .thumb-actions { transform: none; transition: opacity var(--duration-fast) linear; }
-  }
-
-  .tile-action {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: var(--space-8);
-    height: var(--space-8);
-    border: var(--border-width) var(--border-style)
-      color-mix(in srgb, var(--color-border) 60%, transparent);
-    background: color-mix(in srgb, var(--color-surface) 88%, transparent);
-    backdrop-filter: blur(var(--blur-lg));
-    -webkit-backdrop-filter: blur(var(--blur-lg));
-    color: var(--color-text);
-    border-radius: var(--radius-full);
+  /* ── Open (the whole tile) ────────────────────────────── */
+  .tile-open {
+    display: inline;
+    padding: 0;
+    border: none;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
     cursor: pointer;
-    transition:
-      background-color var(--duration-fast) var(--ease-out),
-      color var(--duration-fast) var(--ease-out);
   }
 
-  .tile-action:hover {
-    background: var(--color-surface);
-    color: var(--color-interactive);
+  .tile-open::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: var(--radius-lg);
   }
 
-  .tile-action--danger:hover {
-    color: var(--color-error-700);
-    background: var(--color-error-50);
+  .tile-open:focus-visible {
+    outline: none;
   }
 
-  .tile-action:focus-visible {
+  .tile-open:focus-visible::after {
     outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: var(--space-0-5);
+  }
+
+  /* The tile's own controls stay above the stretched open button. */
+  .tile :global(.media-actions-trigger),
+  .tile :global(.use-chip),
+  .tile-cta {
+    position: relative;
+    z-index: 1;
   }
 
   /* ── Body (title + meta) ──────────────────────────────── */
@@ -665,6 +548,12 @@
     align-items: start;
     justify-content: space-between;
     gap: var(--space-2);
+    /* The ⋯ button is 2rem; pull it up so the title's first line centres on it. */
+    margin-top: calc(-1 * var(--space-1));
+  }
+
+  .tile-header .tile-title {
+    padding-top: var(--space-1);
   }
 
   .tile-title {
@@ -684,61 +573,11 @@
     min-width: 0;
   }
 
-  .tile-status-pill {
-    display: inline-flex;
+  .tile-status {
+    display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: var(--space-1);
-    padding: 2px var(--space-2);
-    font-size: var(--text-xs);
-    font-weight: var(--font-semibold);
-    text-transform: uppercase;
-    letter-spacing: var(--tracking-wider);
-    border-radius: var(--radius-full);
-    border: var(--border-width) var(--border-style) var(--color-border);
-    background: var(--color-surface);
-    color: var(--color-text-secondary);
-    flex-shrink: 0;
-    line-height: var(--leading-none);
-  }
-
-  .tile-status-dot {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: var(--space-1-5);
-    height: var(--space-1-5);
-    border-radius: var(--radius-full);
-    background-color: currentColor;
-  }
-
-  .tile-status-pill[data-status='ready'] {
-    color: var(--color-status-success-text);
-    background: var(--color-status-success-surface);
-    border-color: var(--color-status-success-border);
-  }
-
-  .tile-status-pill[data-status='processing'],
-  .tile-status-pill[data-status='stopped'] {
-    color: var(--color-status-warning-text);
-    background: var(--color-status-warning-surface);
-    border-color: var(--color-status-warning-border);
-  }
-
-  .tile-status-pill[data-status='failed'] {
-    color: var(--color-status-error-text);
-    background: var(--color-status-error-surface);
-    border-color: var(--color-status-error-border);
-  }
-
-  .tile-status-pill[data-status='waiting'] {
-    color: var(--color-status-info-text);
-    background: var(--color-status-info-surface);
-    border-color: var(--color-status-info-border);
-  }
-
-  /* Neutral: the base pill's text-secondary ink (muted read 2.3:1 here). */
-  .tile-status-pill[data-status='uploading'] {
-    background: var(--color-surface-secondary);
+    gap: var(--space-2);
   }
 
   /* ── Reason + Try again ───────────────────────────────── */
@@ -801,5 +640,33 @@
     font-family: var(--font-mono);
     font-feature-settings: 'tnum', 'zero';
     font-variant-numeric: tabular-nums slashed-zero;
+  }
+
+  /* ── Phone (mockup M7a): a row with a large thumbnail ─────── */
+  @media (--below-sm) {
+    .tile {
+      display: grid;
+      grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+      align-items: start;
+      gap: var(--space-3);
+    }
+
+    .tile-meta,
+    .thumb-type-chip {
+      display: none;
+    }
+
+    /* The row's thumbnail is narrow: the desktop inset and tracking cut a
+       one-word step short. Same as MediaTileGrid's upload ghost. */
+    .thumb-progress {
+      left: var(--space-1);
+      right: var(--space-1);
+      bottom: var(--space-1);
+      padding: var(--space-1) var(--space-1-5);
+    }
+
+    .thumb-progress-step {
+      letter-spacing: var(--tracking-normal);
+    }
   }
 </style>

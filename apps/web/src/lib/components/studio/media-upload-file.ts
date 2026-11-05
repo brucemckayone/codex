@@ -56,6 +56,22 @@ export const MEDIA_FILE_ACCEPT = [
   ...Object.keys(EXTENSION_TO_MIME).map((extension) => `.${extension}`),
 ].join(',');
 
+/**
+ * The `accept` for a field that holds only some media types (the picker,
+ * Codex-a6ofh.1.8): each type and extension of those kinds. Advisory, as
+ * every `accept` is: the picker checks the queued row's type itself.
+ */
+export function mediaFileAccept(types: readonly ('video' | 'audio')[]): string {
+  const ofKind = (mime: string) =>
+    types.some((type) => mime.startsWith(`${type}/`));
+  return [
+    ...[...SUPPORTED_MEDIA_MIME_TYPES].filter(ofKind),
+    ...Object.entries(EXTENSION_TO_MIME)
+      .filter(([, mime]) => ofKind(mime))
+      .map(([extension]) => `.${extension}`),
+  ].join(',');
+}
+
 export type MediaFileCheck =
   | { ok: true; mimeType: string; mediaType: 'video' | 'audio' }
   | { ok: false; reason: 'type' | 'empty' | 'too_large' };

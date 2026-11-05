@@ -299,11 +299,12 @@
 
   .filter-bar__pill[data-active='true'] {
     background: var(--color-interactive);
-    color: var(--color-text-on-brand);
+    color: var(--color-on-interactive);
   }
 
   .filter-bar__pill[data-active='true']:hover {
     background: var(--color-interactive-hover);
+    color: var(--color-on-interactive-hover);
   }
 
   .filter-bar__pill:focus-visible {
@@ -404,7 +405,7 @@
     padding: var(--space-1) var(--space-3);
     font-size: var(--text-xs);
     font-weight: var(--font-medium);
-    color: var(--color-interactive);
+    color: var(--color-link);
     background: var(--color-surface-secondary);
     border: var(--border-width) var(--border-style) var(--color-interactive);
     border-radius: var(--radius-full);

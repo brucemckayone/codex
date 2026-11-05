@@ -17,12 +17,16 @@
   const { children }: { children: Snippet } = $props();
 
   const countsQuery = provideQueueCounts();
-  // All three tabs: nothing owed to a creator waits on someone seeing an alert (Q8).
+  // Every tab: nothing owed to a creator waits on someone seeing an alert (Q8),
+  // and neither does a held price move or an untold fee notice, joiners
+  // included (Codex-2hxff.85, .33; owner decision Q4).
   const waiting = $derived(
     countsQuery.current
       ? countsQuery.current.failedRefunds +
           countsQuery.current.creatorDebts +
-          countsQuery.current.owedToCreators
+          countsQuery.current.owedToCreators +
+          countsQuery.current.priceMoves +
+          countsQuery.current.feeNotices
       : null
   );
 

@@ -173,7 +173,7 @@
   }
 
   .logo:hover {
-    color: var(--color-interactive);
+    color: var(--color-link);
   }
 
   .desktop-nav {

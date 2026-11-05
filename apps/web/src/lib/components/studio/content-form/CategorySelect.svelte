@@ -174,7 +174,7 @@
   .option-chip[data-selected] {
     border-color: var(--color-interactive);
     background-color: var(--color-interactive-subtle);
-    color: var(--color-interactive-active);
+    color: var(--color-link-active);
   }
 
   .option-chip:disabled {
@@ -222,7 +222,7 @@
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
     font-family: inherit;
-    color: var(--color-interactive-active);
+    color: var(--color-link-active);
     background-color: var(--color-interactive-subtle);
     border: var(--border-width) var(--border-style) var(--color-border);
     border-radius: var(--radius-md);
@@ -257,6 +257,6 @@
       var(--color-interactive) 20%,
       var(--color-surface)
     );
-    color: var(--color-brand-primary-subtle);
+    color: var(--color-text);
   }
 </style>

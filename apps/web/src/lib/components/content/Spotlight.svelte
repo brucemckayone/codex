@@ -1079,13 +1079,11 @@
     padding: 0 var(--space-6);
     height: var(--space-12);
     font-family: var(--font-sans);
-    /* Bumped to semibold + text-lg so text-on-brand reaches WCAG AA
-       large-text threshold (3:1). `--color-text-on-brand` is the
-       luminance-clamped token that auto-inverts against --brand-color —
-       it already accounts for dark vs light brand palettes. */
+    /* `--color-on-interactive` is the luminance-chosen ink derived from this
+       exact fill, so it clears AA on dark and light brand palettes alike. */
     font-size: var(--text-lg);
     font-weight: var(--font-semibold);
-    color: var(--color-text-on-brand);
+    color: var(--color-on-interactive);
     background: var(--color-interactive);
     border: var(--border-width) var(--border-style) transparent;
     border-radius: var(--radius-md);
@@ -1100,6 +1098,7 @@
 
   .spotlight__cta:hover {
     background: var(--color-interactive-hover);
+    color: var(--color-on-interactive-hover);
     transform: translateY(calc(-1 * var(--space-0-5)));
     box-shadow: var(--shadow-lg);
   }

@@ -9,9 +9,9 @@
   large on wide screens and reflow gracefully on narrow ones without a
   hardcoded column count.
 
-  @prop items             Ready items from the server (ordinal ordering preserved)
+  @prop items             Items from the server, in the list's order
   @prop ghosts            Optional in-flight upload ghosts (0..MAX_CONCURRENT+)
-  @prop startOrdinal      Base for ordinal numbering (1 on page 1, >1 later)
+  @prop onCancelUpload    A ghost's Cancel (mockup M1 note 9): one tile per upload
   @prop onEdit / onDelete Tile-level callbacks
 -->
 <script lang="ts">
@@ -20,7 +20,7 @@
   import { FilmIcon, MusicIcon } from '$lib/components/ui/Icon';
   import * as m from '$paraglide/messages';
 
-  type MediaTileItem = MediaItemWithRelations & { thumbnailUrl?: string | null };
+  type MediaTileItem = MediaItemWithRelations;
 
   export type UploadGhost = {
     /** Stable key for {#each} — parent owns (e.g. file.name + index) */
@@ -38,12 +38,13 @@
   interface Props {
     items: MediaTileItem[];
     ghosts?: UploadGhost[];
-    startOrdinal?: number;
+    onCancelUpload?: (key: string) => void;
+    onOpen?: (id: string) => void;
     onEdit?: (id: string) => void;
     onDelete?: (id: string) => void;
   }
 
-  const { items, ghosts = [], startOrdinal = 1, onEdit, onDelete }: Props = $props();
+  const { items, ghosts = [], onCancelUpload, onOpen, onEdit, onDelete }: Props = $props();
 
   const activeGhosts = $derived(ghosts.filter((g) => g.status !== 'done'));
 </script>
@@ -59,7 +60,6 @@
             <MusicIcon size={36} />
           {/if}
         </span>
-        <span class="ghost-ordinal" aria-hidden="true">···</span>
         <div class="ghost-progress" role="progressbar"
           aria-valuenow={ghost.progress}
           aria-valuemin={0}
@@ -88,15 +88,26 @@
       </div>
       <div class="ghost-body">
         <p class="ghost-name" title={ghost.name}>{ghost.name}</p>
+        <!-- Not while completing: completeUpload is already under way. -->
+        {#if onCancelUpload && ghost.status === 'uploading'}
+          <button
+            type="button"
+            class="ghost-cancel"
+            aria-label={m.media_tray_cancel_named({ name: ghost.name })}
+            onclick={() => onCancelUpload(ghost.key)}
+          >
+            {m.media_tray_cancel()}
+          </button>
+        {/if}
       </div>
     </div>
   {/each}
 
-  {#each items as media, index (media.id)}
+  {#each items as media (media.id)}
     <div role="listitem">
       <MediaTile
-        ordinal={String(startOrdinal + index).padStart(2, '0')}
         {media}
+        {onOpen}
         {onEdit}
         {onDelete}
       />
@@ -162,23 +173,6 @@
     opacity: var(--opacity-60, 0.6);
   }
 
-  .ghost-ordinal {
-    position: absolute;
-    top: var(--space-2);
-    left: var(--space-2);
-    display: inline-flex;
-    padding: 2px var(--space-2);
-    font-family: var(--font-mono);
-    font-size: 0.625rem;
-    font-weight: var(--font-semibold);
-    letter-spacing: var(--tracking-wider);
-    color: var(--color-text-muted);
-    background: color-mix(in srgb, var(--color-surface) 82%, transparent);
-    border: var(--border-width) var(--border-style)
-      color-mix(in srgb, var(--color-border) 60%, transparent);
-    border-radius: var(--radius-full, 9999px);
-  }
-
   .ghost-progress {
     position: absolute;
     left: var(--space-2);
@@ -208,7 +202,7 @@
     text-transform: uppercase;
     letter-spacing: var(--tracking-wider);
     font-weight: var(--font-semibold);
-    color: var(--color-interactive);
+    color: var(--color-link);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -247,7 +241,61 @@
   }
 
   .ghost-body {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
     padding: 0 var(--space-1);
+    min-width: 0;
+  }
+
+  .ghost-cancel {
+    flex-shrink: 0;
+    padding: var(--space-1) var(--space-2);
+    border: var(--border-width) var(--border-style) var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+    color: var(--color-text);
+    font-size: var(--text-xs);
+    font-weight: var(--font-medium);
+    cursor: pointer;
+    transition: var(--transition-colors);
+  }
+
+  .ghost-cancel:hover {
+    background: var(--color-surface-secondary);
+  }
+
+  .ghost-cancel:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-0-5);
+  }
+
+  /* Phone (mockup M7a): a row, like the tiles beside it. */
+  @media (--below-sm) {
+    .ghost-tile {
+      display: grid;
+      grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+      align-items: start;
+    }
+
+    .ghost-body {
+      flex-direction: column;
+      align-items: start;
+    }
+
+    /* The row's thumbnail is narrow: the desktop inset and tracking cut
+       "Uploading" to "Uploadi…". Same as MediaTile's overlay. */
+    .ghost-progress {
+      left: var(--space-1);
+      right: var(--space-1);
+      bottom: var(--space-1);
+      padding: var(--space-1) var(--space-1-5);
+    }
+
+    .ghost-progress-step {
+      letter-spacing: var(--tracking-normal);
+    }
   }
 
   .ghost-name {

@@ -446,7 +446,7 @@
   }
 
   .payouts-link {
-    color: var(--color-interactive);
+    color: var(--color-link);
     font-weight: var(--font-medium);
     text-decoration: underline;
   }
@@ -465,7 +465,7 @@
 
   .access-card[data-selected] .access-icon {
     background-color: color-mix(in srgb, var(--color-interactive) 15%, transparent);
-    color: var(--color-interactive);
+    color: var(--color-link);
   }
 
   .access-text {
@@ -499,10 +499,13 @@
                 background-color var(--duration-fast) var(--ease-out);
   }
 
+  /* The gap ring around the selected dot takes the fill's ink: the surface
+     colour fell to 1:1 on a white brand, hiding the checked state
+     (Codex-mik4h). */
   .access-card[data-selected] .access-check {
     border-color: var(--color-interactive);
     background-color: var(--color-interactive);
-    box-shadow: inset 0 0 0 var(--space-1) var(--color-surface);
+    box-shadow: inset 0 0 0 var(--space-1) var(--color-on-interactive);
   }
 
   /* ── Conditional row ─────────────────────────────────────────── */

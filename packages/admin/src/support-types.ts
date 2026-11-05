@@ -413,6 +413,18 @@ export interface SupportQueueCounts {
   creatorDebts: number;
   /** Open payee credits: owed back, or waiting for a check (Codex-2hxff.73). */
   owedToCreators: number;
+  /**
+   * People not yet told about a fee rise that hasn't started: their email
+   * failed or may not have gone (Codex-2hxff.33). Joiners count too (Q4):
+   * they don't hold the date, but they still need telling.
+   */
+  feeNotices: number;
+  /**
+   * Held price moves not closed, plus stopped price changes not yet asked to
+   * restart (Codex-2hxff.85, .86). A Retry or a Restart takes its row off the
+   * badge at once; the list keeps it, queued, until the run takes it.
+   */
+  priceMoves: number;
 }
 
 /** A failed refund waiting for support (`refunds`, status failed, unresolved). */
@@ -746,4 +758,294 @@ export interface ResolvedCreatorDebt {
   reviewId: string;
   resolution: CreatorDebtResolution;
   resolvedAt: string;
+}
+
+// ─── Fee notices (Codex-2hxff.33; batch C1 Part B data design §1.6) ─────────
+
+/**
+ * One value a fee change moves, at the level it was saved on, layered over
+ * the levels in force now (what that level's sales pay).
+ */
+export interface FeeChangeLine {
+  value:
+    | 'platformFeePercent'
+    | 'orgFeePercent'
+    | 'minPlatformFeeCents'
+    | 'minTransferCents';
+  /** `both` when one-off sales and subscriptions move alike. */
+  context: 'both' | 'one_off' | 'subscription';
+  from: number;
+  to: number;
+}
+
+/** One London calendar day's told counts on a fee rise's first list. */
+export interface FeeToldOnDay {
+  /** `YYYY-MM-DD`, in Europe/London. */
+  londonDate: string;
+  byEmail: number;
+  anotherWay: number;
+}
+
+/** Someone support marked as told another way, and who marked them. */
+export interface FeeToldAnotherWay {
+  person: SupportPerson;
+  by: SupportPerson | null;
+  at: string;
+  note: string;
+}
+
+/**
+ * A fee rise that hasn't started: waiting for its emails, or dated. The card
+ * stays until the date, so the date is always visible somewhere.
+ */
+export interface FeeChangeCard {
+  changeId: string;
+  scope: 'platform' | 'org' | 'creator';
+  organization: { id: string; name: string; deleted: boolean } | null;
+  creator: SupportPerson | null;
+  lines: FeeChangeLine[];
+  /** An override taken away: the level inherits again. */
+  removed: boolean;
+  /** A bigger rise replacing an earlier one (its 30 days start again). */
+  replacesChangeId: string | null;
+  savedAt: string;
+  savedBy: SupportPerson | null;
+  /** The first 08:00 run made the list; null until then. */
+  firstRunAt: string | null;
+  /** That first run, while it is still to come. */
+  firstEmailsAt: string | null;
+  /** The people on the first list. Null until it is made. */
+  listed: number | null;
+  /** On the first list and told: by an accepted email, or another way. */
+  told: { byEmail: number; anotherWay: number };
+  /**
+   * The same counts by London calendar day ("410 by email on 3 Nov, 1 by
+   * email on 4 Nov"), oldest first: the day each email was accepted, or each
+   * person was marked. Joiners are under `joiners`, not here.
+   */
+  toldByDay: FeeToldOnDay[];
+  /** On the first list and not told yet: the rise waits for them. */
+  waitingFor: number;
+  /** Joined since the list (F8): told the same date, never holding it. */
+  joiners: { total: number; told: number; waiting: number };
+  /** The most recent people marked told another way (at most 20). */
+  toldAnotherWay: FeeToldAnotherWay[];
+  /** When the last person on the list was told; null while any waits. */
+  lastToldAt: string | null;
+  /** Null until everyone on the list is told. */
+  effectiveFrom: string | null;
+  /** The date, or the earliest it can be if the last person is told today. */
+  earliestFrom: string;
+}
+
+/** One person a fee rise's email hasn't reached. */
+export interface FeeNoticeItem {
+  noticeId: string;
+  changeId: string;
+  person: SupportBuyer;
+  /** Where the rise lowers their take: as a creator, or as an owner. */
+  roles: Array<{
+    organizationId: string | null;
+    organizationName: string | null;
+    as: 'creator' | 'owner';
+  }>;
+  /** False for someone who joined after the list was made: no hold (F8). */
+  onList: boolean;
+  /**
+   * A joiner (`onList: false`): when the daily step added them to the
+   * change's list. Null for someone on the first list.
+   */
+  joinedAt: string | null;
+  /** `failed`: it certainly didn't go. `unknown`: it may have. */
+  state: 'failed' | 'unknown';
+  reason: 'refused' | 'skipped' | 'no_address' | 'unknown' | null;
+  /** What the mail service answered, in short ("HTTP 400"). */
+  error: string | null;
+  attempts: number;
+  waitingSince: string;
+  lastTriedAt: string | null;
+  /** The next 08:00 run, which tries again. */
+  nextTryAt: string;
+  changeSavedAt: string;
+  changeEffectiveFrom: string | null;
+}
+
+/** What marking someone told another way did. */
+export interface ToldAnotherWayResult {
+  notice: {
+    noticeId: string;
+    state: 'told_another_way';
+    toldAt: string;
+    toldBy: string;
+    note: string;
+  };
+  change: {
+    changeId: string;
+    /** Set when this mark was the last one the rise waited for. */
+    effectiveFrom: string | null;
+    waitingFor: number;
+  };
+}
+
+// ─── Price moves (Codex-2hxff.85, .86; batch C1 Part B data design §2.5) ────
+
+/** What a price change repriced: an organisation's tier, or a course's plan. */
+export interface PriceMovePlan {
+  kind: 'tier' | 'course_plan';
+  /** The tier's id, or the course plan's. */
+  id: string;
+  /** The tier's name, or the course's title. */
+  name: string;
+  interval: 'month' | 'year';
+}
+
+/**
+ * Why a move is held, as the hourly run recorded it:
+ *
+ * - the email never went: `no_address`, `notice_refused`, `notice_skipped`,
+ *   or `notice_unknown` (it may have gone, and neither our email log nor
+ *   Stripe shows it did);
+ * - the email went, then Stripe refused the move (`move_refused`) or never
+ *   answered (`move_unknown`);
+ * - `read_failed`: Stripe couldn't be read; `same_amount_write_failed`: a
+ *   price of the same amount, which needs no email, couldn't be written.
+ */
+export type PriceMoveHeldReason =
+  | 'no_address'
+  | 'notice_refused'
+  | 'notice_skipped'
+  | 'notice_unknown'
+  | 'move_refused'
+  | 'move_unknown'
+  | 'read_failed'
+  | 'same_amount_write_failed';
+
+/**
+ * One subscriber on Queue › Price moves: held after their automatic tries, or
+ * queued again by Retry until the run takes them. They stay on their old price
+ * meanwhile: nobody moves without an accepted email.
+ */
+export interface HeldPriceMove {
+  moveId: string;
+  priceChangeId: string;
+  /**
+   * `held`: waiting for support. `queued`: Retry was pressed and the run
+   * hasn't finished with it; it is off the badge. `closed`: support closed it
+   * (only in Close's answer: the list never holds one).
+   */
+  status: 'held' | 'queued' | 'closed';
+  /**
+   * The row's button while it is held. `retry`: no email was accepted, so
+   * the run emails them again, and their 30 days count from the new email.
+   * `retry_move`: the email went, so the run asks Stripe again for the date
+   * they were told, or the next renewal if that has passed, and sends no
+   * second email (Q5). Null once queued or closed.
+   */
+  action: 'retry' | 'retry_move' | null;
+  subscriber: SupportBuyer;
+  organization: { id: string; name: string; deleted: boolean };
+  plan: PriceMovePlan;
+  fromAmountCents: number;
+  newAmountCents: number;
+  /** Kept while a retry is queued, so the page can say what is being retried. */
+  heldReason: PriceMoveHeldReason | null;
+  /** The last failure's short code (`invalid_request_error`, `HTTP 400`). */
+  lastError: string | null;
+  /** Joins the run's alert line. */
+  alertErrorId: string | null;
+  /** Tries in this round: a Retry starts a fresh three. */
+  attempts: number;
+  lastTriedAt: string | null;
+  /** Their accepted email; null if none went. */
+  noticeAt: string | null;
+  /** The date that email named. */
+  effectiveAt: string | null;
+  /**
+   * The subscription has ended, so there is nothing to move: Retry is
+   * refused, and support closes it as not needed.
+   */
+  subscriptionEnded: boolean;
+  /** Who last pressed Retry; kept after the run holds it again (M4). */
+  retry: { requestedAt: string; by: SupportPerson | null } | null;
+  /** The run a queued row waits for; null otherwise. */
+  queuedFor: string | null;
+  /** Close's record. Null in the list. */
+  resolution: {
+    kind: 'moved_by_hand' | 'not_needed';
+    note: string;
+    resolvedAt: string;
+    by: SupportPerson | null;
+  } | null;
+  /** When the move was recorded: its price change's save. */
+  createdAt: string;
+}
+
+/**
+ * A price change the run stopped: every email in its first batch was refused
+ * (a missing template, a bad worker secret), so nobody was told and nobody
+ * moved. One card for the whole change, not a row per person.
+ */
+export interface StoppedPriceChange {
+  changeId: string;
+  organization: { id: string; name: string; deleted: boolean };
+  plan: PriceMovePlan;
+  fromAmountCents: number;
+  newAmountCents: number;
+  savedAt: string;
+  /** Null when the system wrote it (Keep current plan). */
+  savedBy: SupportPerson | null;
+  stoppedAt: string;
+  /**
+   * The run's code for the cause, as it wrote it: `template_missing` (a 404
+   * or 422 from notifications-api), `worker_auth` (a 401) or
+   * `notice_refused` (any other 4xx). The page says it in words.
+   */
+  stoppedReason: string;
+  /** Joins the run's alert line. */
+  stoppedErrorId: string;
+  /** People still to tell, or told with their move still to write. */
+  waiting: number;
+  /** Everyone the change was written for, Keep current plan rows included. */
+  total: number;
+  /**
+   * Support pressed Restart after this stop. `at` is the run that restarts
+   * it; until then the card stays, off the badge.
+   */
+  restart: { requestedAt: string; by: SupportPerson | null; at: string } | null;
+}
+
+/**
+ * Why Retry or Close found nothing to do (409 `PRICE_MOVE_NOT_HELD`,
+ * `details.reason`):
+ *
+ * - `superseded`: a newer price for the plan replaced this one, so they are
+ *   emailed about that instead ("latest wins");
+ * - `moved`: the run got there first: scheduled, or already on the price;
+ * - `skipped`: the run set it aside (they are moving to another plan, or the
+ *   price no longer fits their subscription);
+ * - `subscription_ended`: they cancelled, so there is nothing to move;
+ * - `resolved`: support already closed it;
+ * - `queued`: Retry was already pressed, and the next run takes it (a second
+ *   press after a lost answer reads as done);
+ * - `in_progress`: the run is still working on it; it was never held.
+ */
+export type PriceMoveNotHeldReason =
+  | 'superseded'
+  | 'moved'
+  | 'skipped'
+  | 'subscription_ended'
+  | 'resolved'
+  | 'queued'
+  | 'in_progress';
+
+/** What Retry queued, and the run that takes it. */
+export interface PriceMoveRetried {
+  move: HeldPriceMove;
+  nextRunAt: string;
+}
+
+/** What Restart asked for, and the run that restarts it. */
+export interface PriceChangeRestarted {
+  change: StoppedPriceChange;
+  nextRunAt: string;
 }

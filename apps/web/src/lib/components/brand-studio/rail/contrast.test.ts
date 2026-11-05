@@ -122,37 +122,98 @@ describe('the rule the stylesheets paint', () => {
   // The step's steepness as the stylesheets write it (a string: `${1e12}`
   // would print 1000000000000).
   const RAMP = '1e12';
-  // One channel of an ink, built from the pivot the readout uses.
-  const CHANNEL = `calc(255 * clamp(0, (${TEXT_ON_BRAND_LUMINANCE_PIVOT} - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * ${RAMP}, 1))`;
+  // The step, written once at themes/light.css's foot, built from the pivot
+  // the readout uses, over the luminance terms written beside it. Each channel
+  // is clamped to the gamut first, so a hovered fill pushed past black or
+  // white still has a luminance (unclamped, 1 605 of the lattice's 8 192
+  // hovered fills took a NaN and black ink, 878 of them where white was
+  // needed, as low as 1.11:1; 15 dark ones lightened past 255 took the wrong
+  // ink, as low as 4.21:1).
+  const linear = (c: string) =>
+    `--_lin-${c}: pow((clamp(0, ${c}, 255) / 255 + 0.055) / 1.055, 2.4);`;
+  const STEP = [
+    linear('r'),
+    linear('g'),
+    linear('b'),
+    '--_lum: (0.2126 * var(--_lin-r) + 0.7152 * var(--_lin-g) + 0.0722 * var(--_lin-b));',
+    `--_on-fill-step: clamp(0, (${TEXT_ON_BRAND_LUMINANCE_PIVOT} - var(--_lum)) * ${RAMP}, 1);`,
+  ];
+  // Colours nudged against the page (Codex-mik4h) are declared in the same
+  // guarded blocks but are not inks; ground-nudge-css.test.ts pins them.
+  const NUDGED = [
+    '--color-link',
+    '--color-link-hover',
+    '--color-link-active',
+    '--color-brand-text',
+    '--color-brand-text-hover',
+    '--color-focus',
+    '--color-focus-ring',
+    '--color-border-focus',
+  ];
+  const S = 'calc(255 * var(--_on-fill-step))';
   const GUARD =
     '@supports (color: rgb(from red calc(255 * pow(r / 255, 2)) 0 0))';
+  // Every ink chosen from a fill, in every scope that declares the fills.
+  const INKS = [
+    '--color-text-on-brand',
+    '--color-text-on-brand-hover',
+    '--color-on-interactive',
+    '--color-on-interactive-hover',
+    '--color-on-interactive-active',
+    '--color-text-on-accent',
+    '--color-text-on-accent-hover',
+  ];
   const count = (css: string, text: string) => css.split(text).length - 1;
 
-  // The step is written out once per channel, many times a file, so every
-  // copy is checked: one drifted copy would hide behind any intact one.
-  function expectEveryChannelIsTheStep(css: string, label: string) {
-    const channels = count(css, 'calc(255 * clamp(0, ');
-    expect(channels, label).toBeGreaterThan(0);
-    expect(count(css, CHANNEL), label).toBe(channels);
+  function guarded(file: string): string {
+    const css = readFileSync(join(styles, file), 'utf8');
+    const start = css.indexOf(GUARD);
+    expect(start, file).toBeGreaterThan(-1);
+    return css.slice(start);
   }
 
-  test('org-brand.css chooses the org’s inks by the same luminance step', () => {
-    const css = readFileSync(join(styles, 'tokens/org-brand.css'), 'utf8');
-    expectEveryChannelIsTheStep(css, 'org-brand.css');
-    expect(css).toContain('--color-text-on-brand: rgb(');
+  // Each ink must be `rgb(from FILL S S S)`: the step on all three channels,
+  // and nothing else.
+  function expectEveryInkIsTheStep(
+    block: string,
+    file: string,
+    scopes: number
+  ) {
+    const declared: string[] =
+      block.match(/--color-[a-z-]+: rgb\(from [^;]+\);/g) ?? [];
+    const inks = declared.filter(
+      (declaration) =>
+        !NUDGED.some((name) => declaration.startsWith(`${name}:`))
+    );
+    for (const ink of inks) expect(ink, file).toMatch(`${S} ${S} ${S});`);
+    for (const name of INKS)
+      expect(count(block, `${name}: rgb(from `), `${file} ${name}`).toBe(
+        scopes
+      );
+    expect(inks.length, file).toBe(INKS.length * scopes);
+    // No written-out copy of the step is left to drift.
+    expect(count(block, 'calc(255 * clamp(0, '), file).toBe(0);
+  }
+
+  test('the step is written once, at light.css’s foot, from the readout’s pivot', () => {
+    for (const line of STEP)
+      expect(count(guarded('themes/light.css'), line), line).toBe(1);
+    for (const file of ['themes/dark.css', 'tokens/org-brand.css'])
+      for (const name of ['--_on-fill-step:', '--_lum:', '--_lin-r:'])
+        expect(count(guarded(file), name), `${file} ${name}`).toBe(0);
+  });
+
+  test('org-brand.css chooses the org’s inks by it, light and dark', () => {
+    expectEveryInkIsTheStep(
+      guarded('tokens/org-brand.css'),
+      'org-brand.css',
+      2
+    );
   });
 
   test('the platform themes choose theirs by it too, under the same guard', () => {
-    for (const theme of ['light', 'dark']) {
-      const css = readFileSync(join(styles, `themes/${theme}.css`), 'utf8');
-      const start = css.indexOf(GUARD);
-      expect(start, theme).toBeGreaterThan(-1);
-      const guarded = css.slice(start);
-      expectEveryChannelIsTheStep(guarded, theme);
-      expect(count(guarded, CHANNEL), theme).toBe(6);
-      expect(guarded, theme).toContain('--color-on-interactive: rgb(');
-      expect(guarded, theme).toContain('--color-text-on-accent: rgb(');
-    }
+    expectEveryInkIsTheStep(guarded('themes/light.css'), 'light.css', 1);
+    expectEveryInkIsTheStep(guarded('themes/dark.css'), 'dark.css', 1);
   });
 
   // `clamp(0, (pivot - Y) * m, 1)` is a ramp 1/m wide, and a fill inside it

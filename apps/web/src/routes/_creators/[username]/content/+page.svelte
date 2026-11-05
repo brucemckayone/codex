@@ -229,7 +229,7 @@
   }
 
   .back-link:hover {
-    color: var(--color-interactive);
+    color: var(--color-link);
   }
 
   /* ── Filters ── */
@@ -299,7 +299,7 @@
 
   .type-btn.active {
     background: var(--color-interactive);
-    color: var(--color-text-on-brand);
+    color: var(--color-on-interactive);
     border-color: var(--color-interactive);
   }
 
@@ -314,13 +314,13 @@
   /* ── Empty State ── */
   .empty-state__clear {
     font-size: var(--text-sm);
-    color: var(--color-interactive);
+    color: var(--color-link);
     text-decoration: none;
     transition: var(--transition-colors);
   }
 
   .empty-state__clear:hover {
-    color: var(--color-interactive-hover);
+    color: var(--color-link-hover);
   }
 
   /* ── Responsive ── */

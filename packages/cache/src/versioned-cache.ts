@@ -540,6 +540,14 @@ export class VersionedCache {
    * the runtime holds the isolate open until it settles even when nobody awaits
    * the returned promise — see {@link startVersionWrite}.
    *
+   * ## A failure the caller must hear of: `onError`
+   *
+   * A failed write is logged here and never rejects: for most callers the
+   * old data serving until its TTL is acceptable. A caller for whom it is not
+   * (the fee cache: a cut would bill the old fee for up to a day) passes
+   * `onError`, called once with the error after the log line. The promise
+   * still resolves, and a hook that throws is logged, not passed on.
+   *
    * @param id - Entity identifier to invalidate
    *
    * @example
@@ -547,7 +555,10 @@ export class VersionedCache {
    * await cache.invalidate('user-123'); // All user-123 cache is now stale
    * ```
    */
-  async invalidate(id: string): Promise<void> {
+  async invalidate(
+    id: string,
+    options?: { onError?: (error: unknown) => void }
+  ): Promise<void> {
     const versionKey = buildVersionKey(id);
     const newVersion = String(Date.now());
 
@@ -568,6 +579,15 @@ export class VersionedCache {
       });
       // Don't throw - invalidation failures are not critical
       // The old data will just serve until TTL expires
+      try {
+        options?.onError?.(error);
+      } catch (hookError) {
+        this.obs?.warn('Cache invalidation error hook threw', {
+          id,
+          error:
+            hookError instanceof Error ? hookError.message : String(hookError),
+        });
+      }
     }
   }
 

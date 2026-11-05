@@ -282,7 +282,7 @@
   }
 
   .rail-link[data-tone='action'] .rail-eyebrow-small {
-    color: var(--color-interactive);
+    color: var(--color-link);
   }
 
   .rail-item-title {
@@ -317,7 +317,7 @@
   }
 
   .rail-link:hover .rail-chev {
-    color: var(--color-interactive);
+    color: var(--color-link);
     transform: translateX(var(--space-0-5));
   }
 

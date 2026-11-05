@@ -20,7 +20,7 @@
     z-index: var(--z-modal);
     padding: var(--space-2) var(--space-4);
     background-color: var(--color-interactive);
-    color: var(--color-text-on-brand);
+    color: var(--color-on-interactive);
     font-family: var(--font-sans);
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
