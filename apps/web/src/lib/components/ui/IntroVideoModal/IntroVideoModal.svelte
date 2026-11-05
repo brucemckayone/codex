@@ -11,8 +11,9 @@
   A dark room over the page, a row with the film's name and a close button,
   and the film at 16:9 as large as the window allows. Escape, the close
   button or a click on the room outside the film dismiss it; Tab stays
-  inside, and focus goes back to what had it before it opened. When the film
-  ends, its poster returns with "Watch again".
+  inside, the page behind holds still, and focus goes back to what had it
+  before it opened. When the film ends, its poster returns with "Watch
+  again".
 
   The player's code loads on demand (`components/player/load-core.ts`).
   When it has loaded — a kit play button fetches it ahead — the theatre
@@ -73,6 +74,9 @@
   // viewport: the browser picks its file from the srcset (Codex-kk9nv.1).
   const stillSrcset = $derived(poster ? getThumbnailSrcset(poster) : '');
 
+  /** The root attribute that holds the page still behind it. */
+  const LOCK = 'data-intro-theatre';
+
   let dialogEl = $state<HTMLDivElement | undefined>(undefined);
   let Player = $state.raw<PlayerCore | null>(loadedPlayerCore());
   let failed = $state(false);
@@ -109,6 +113,15 @@
       dialogEl?.focus({ preventScroll: true });
     }
     return () => opener?.focus({ preventScroll: true });
+  });
+
+  // The page behind holds still while the theatre is open: a wheel or a
+  // swipe over the room scrolled it, unseen, under the film (Codex-vlphc.4).
+  $effect(() => {
+    if (!open) return;
+    const root = document.documentElement;
+    root.setAttribute(LOCK, '');
+    return () => root.removeAttribute(LOCK);
   });
 
   // ── Click outside ──
@@ -259,6 +272,13 @@
 {/if}
 
 <style>
+  /* The page behind holds still while it is open; the gutter keeps its
+     place, so nothing shifts as the scrollbar goes (as GalleryLightbox). */
+  :global(html[data-intro-theatre]) {
+    overflow: hidden;
+    scrollbar-gutter: stable;
+  }
+
   .intro-modal {
     position: fixed;
     inset: 0;

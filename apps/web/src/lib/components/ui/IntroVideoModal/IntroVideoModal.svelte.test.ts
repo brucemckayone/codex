@@ -181,6 +181,19 @@ describe('the theatre', () => {
     expect(document.activeElement).toBe(opener);
   });
 
+  test('the page behind holds still while it is open, and is let go as it closes', () => {
+    const root = document.documentElement;
+    openFrom();
+    expect(root.hasAttribute('data-intro-theatre')).toBe(true);
+    if (app) unmount(app);
+    app = mount(IntroVideoModal, {
+      target: document.body,
+      props: { open: false, src: SRC, onclose: vi.fn() },
+    });
+    flushSync();
+    expect(root.hasAttribute('data-intro-theatre')).toBe(false);
+  });
+
   test('Tab stays inside, from the last control to the first and back', () => {
     const { dialog } = openFrom();
     const stops = [

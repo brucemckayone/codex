@@ -15,14 +15,33 @@
 		elements: { content },
 		states: { open }
 	} = getCtx();
+
+	// Svelte's fly takes raw numbers, which the motion tokens' reduced-motion
+	// collapse never reaches (design-system ref 03 §4): under reduce the panel
+	// simply appears and goes. Read as it is made, so the first open is right.
+	const query = '(prefers-reduced-motion: reduce)';
+	let reduceMotion = $state(typeof window !== 'undefined' && window.matchMedia(query).matches);
+	$effect(() => {
+		const list = window.matchMedia(query);
+		const onChange = (e: MediaQueryListEvent) => {
+			reduceMotion = e.matches;
+		};
+		list.addEventListener('change', onChange);
+		return () => list.removeEventListener('change', onChange);
+	});
+	const motion = $derived(reduceMotion ? { ...transitionConfig, y: 0, duration: 0 } : transitionConfig);
 </script>
 
 {#if $open}
+	<!-- Melt's content carries no role, while its trigger says
+	     `aria-haspopup="dialog"`: the panel is that non-modal dialog, so its
+	     `aria-label` names something. A consumer's own `role` (in `rest`) wins. -->
 	<div
 		{...$content}
 		use:content
 		class="popover-content {className ?? ''}"
-		transition:fly={transitionConfig}
+		role="dialog"
+		transition:fly={motion}
 		{...rest}
 	>
 		{@render children?.()}
