@@ -171,6 +171,7 @@ import { alias } from 'drizzle-orm/pg-core';
 import type Stripe from 'stripe';
 import {
   AlreadySettledError,
+  ChargebackSettlingError,
   ChargeChangedError,
   ChargeHasChargebackError,
   NothingLeftToRefundError,
@@ -222,7 +223,6 @@ import type {
   ToldAnotherWayResult,
 } from '../support-types';
 import {
-  BLOCKING_DISPUTE_STATUSES,
   causeKey,
   chargebackState,
   creditAction,
@@ -230,8 +230,10 @@ import {
   debtErrorLabel,
   debtStanding,
   type HistoryContext,
+  isSettlingDispute,
   previewLabel,
   refundFailureLabel,
+  refundHolds,
   type SliceHistory,
   sliceHistory,
 } from './support-ledger';
@@ -591,7 +593,11 @@ export class SupportService extends BaseService {
           chargeback: row.disputeStatus
             ? chargebackState(row.disputeStatus)
             : null,
-          window: this.windowView(Math.floor(paidAt.getTime() / 1000), now),
+          window: this.windowView(
+            Math.floor(paidAt.getTime() / 1000),
+            now,
+            row.lateWon
+          ),
         });
       }
       return pageOf(items, totals?.total ?? 0, page, limit);
@@ -754,6 +760,11 @@ export class SupportService extends BaseService {
           >`(SELECT ${disputes.status} FROM ${disputes} WHERE ${disputes.purchaseId} = ${purchases.id} ORDER BY ${disputes.stripeCreatedAt} DESC LIMIT 1)`.as(
             'dispute_status'
           ),
+          // Owner Q7: a late-won payment has no 14-day window.
+          lateWon:
+            sql<boolean>`EXISTS (SELECT 1 FROM ${disputes} WHERE ${disputes.purchaseId} = ${purchases.id} AND ${disputes.lateWonAt} IS NOT NULL)`.as(
+              'late_won'
+            ),
         })
         .from(purchases)
         .innerJoin(users, eq(users.id, purchases.customerId))
@@ -821,6 +832,10 @@ export class SupportService extends BaseService {
         >`(SELECT ${disputes.status} FROM ${disputes} WHERE ${disputes.stripeChargeId} = ${payouts.stripeChargeId} ORDER BY ${disputes.stripeCreatedAt} DESC LIMIT 1)`.as(
           'dispute_status'
         ),
+        lateWon:
+          sql<boolean>`EXISTS (SELECT 1 FROM ${disputes} WHERE ${disputes.stripeChargeId} = ${payouts.stripeChargeId} AND ${disputes.lateWonAt} IS NOT NULL)`.as(
+            'late_won'
+          ),
       })
       .from(payouts)
       .leftJoin(subscriptions, eq(subscriptions.id, payouts.subscriptionId))
@@ -907,10 +922,8 @@ export class SupportService extends BaseService {
 
       const refundedCents = standingCents(listed);
       const maxCents = Math.max(0, charge.amount - refundedCents);
-      const window = this.windowView(charge.created, now);
-      const blocking = disputeRows.find((row) =>
-        BLOCKING_DISPUTE_STATUSES.includes(row.status)
-      );
+      const holds = refundHolds(disputeRows);
+      const window = this.windowView(charge.created, now, holds.lateWon);
       const sourceDetail: ChargeDetailSource =
         view.source.type === 'purchase'
           ? view.source
@@ -939,13 +952,16 @@ export class SupportService extends BaseService {
         window,
         refundable: {
           maxCents,
+          // The refund route's order, so the form and the route agree.
           blocked: !window.isOpen
             ? 'window_closed'
-            : blocking
+            : holds.blocking
               ? 'chargeback'
-              : maxCents === 0
-                ? 'nothing_left'
-                : null,
+              : holds.settling
+                ? 'chargeback_settling'
+                : maxCents === 0
+                  ? 'nothing_left'
+                  : null,
         },
         refundCount: listed.length,
         slices,
@@ -971,9 +987,13 @@ export class SupportService extends BaseService {
     return balance && typeof balance !== 'string' ? balance.fee : null;
   }
 
-  private windowView(createdSeconds: number, now: Date) {
+  /** The 14-day window; a late-won payment's stays open (owner Q7). */
+  private windowView(createdSeconds: number, now: Date, lateWon: boolean) {
     const window = refundWindow(createdSeconds, now);
-    return { closesAt: window.closesAt.toISOString(), isOpen: window.isOpen };
+    return {
+      closesAt: window.closesAt.toISOString(),
+      isOpen: window.isOpen || lateWon,
+    };
   }
 
   /** The charge's slices, payees first, each with its history. */
@@ -1124,10 +1144,9 @@ export class SupportService extends BaseService {
         reason: row.reason,
         createdAt: row.stripeCreatedAt.toISOString(),
         respondBy,
-        // Filled by the late-win undo (Codex-2hxff.70).
-        lostOn: null,
-        lateWonOn: null,
-        settling: false,
+        lostOn: toIso(row.lostAppliedAt),
+        lateWonOn: toIso(row.lateWonAt),
+        settling: isSettlingDispute(row),
       });
     }
     return result;
@@ -1150,7 +1169,12 @@ export class SupportService extends BaseService {
       const readCharge = this.chargeReader(chargeId, true);
       const source = await this.sourceOfCharge(chargeId, readCharge);
       const charge = await readCharge();
-      const listed = await listChargeRefunds(this.stripe, chargeId);
+      const [listed, holds] = await Promise.all([
+        listChargeRefunds(this.stripe, chargeId),
+        this.refundHoldsOf(chargeId),
+      ]);
+      // As the detail's block reads, before the amount it would refuse.
+      if (holds.settling) throw new ChargebackSettlingError();
       const refunded = standingCents(listed);
       this.assertAmountFits(amountCents, charge.amount - refunded);
 
@@ -1217,6 +1241,21 @@ export class SupportService extends BaseService {
     if (amountCents > leftCents) throw new RefundAmountTooLargeError(leftCents);
   }
 
+  /** `refundHolds` over the charge's disputes as they stand now. */
+  private async refundHoldsOf(chargeId: string) {
+    return refundHolds(
+      await this.db
+        .select({
+          status: disputes.status,
+          outcomeAppliedAt: disputes.outcomeAppliedAt,
+          lateWonAt: disputes.lateWonAt,
+        })
+        .from(disputes)
+        .where(eq(disputes.stripeChargeId, chargeId))
+        .orderBy(asc(disputes.stripeCreatedAt), asc(disputes.stripeDisputeId))
+    );
+  }
+
   // ==========================================================================
   // Issue a refund (route 4)
   // ==========================================================================
@@ -1227,8 +1266,9 @@ export class SupportService extends BaseService {
    * 1. list the charge's refunds;
    * 2. one already carrying this decision's key is returned, `replayed`;
    * 3. a count that moved since the page loaded stops it (`CHARGE_CHANGED`);
-   * 4. the window (server clock, Stripe's `charge.created`), the chargeback
-   *    block (the dispute's CURRENT status) and the amount cap;
+   * 4. the window (server clock, Stripe's `charge.created`; a late-won
+   *    payment has none, owner Q7), the chargeback block (the dispute's
+   *    CURRENT status), a won chargeback still settling, and the amount cap;
    * 5. `refunds.create`, with the key and who asked; when Stripe does not
    *    make it, `refundNotMade` says why.
    *
@@ -1258,19 +1298,13 @@ export class SupportService extends BaseService {
       }
 
       const charge = await readCharge();
+      const holds = await this.refundHoldsOf(chargeId);
       const window = refundWindow(charge.created, new Date());
-      if (!window.isOpen) throw new RefundWindowClosedError(window.closesAt);
-      const [blocking] = await this.db
-        .select({ status: disputes.status })
-        .from(disputes)
-        .where(
-          and(
-            eq(disputes.stripeChargeId, chargeId),
-            inArray(disputes.status, [...BLOCKING_DISPUTE_STATUSES])
-          )
-        )
-        .limit(1);
-      if (blocking) throw new ChargeHasChargebackError(blocking.status);
+      if (!window.isOpen && !holds.lateWon) {
+        throw new RefundWindowClosedError(window.closesAt);
+      }
+      if (holds.blocking) throw new ChargeHasChargebackError(holds.blocking);
+      if (holds.settling) throw new ChargebackSettlingError();
       this.assertAmountFits(
         input.amountCents,
         charge.amount - standingCents(listed)
@@ -3826,6 +3860,8 @@ export class SupportService extends BaseService {
         subscriptionStatus: sql<
           string | null
         >`COALESCE(${subscriptions.status}, ${courseSubscriptions.status})`,
+        // The price-moves sweep's own read (`sub_disputed_at`, owner D1).
+        subscriptionDisputed: sql<boolean>`(COALESCE(${subscriptions.disputedAt}, ${courseSubscriptions.disputedAt}) IS NOT NULL)`,
       })
       .from(m)
       .innerJoin(c, eq(c.id, m.priceChangeId))
@@ -4540,6 +4576,11 @@ export class SupportService extends BaseService {
               ]
         )
       ),
+      lateWins: new Map(
+        [...causes.values()].flatMap((cause) =>
+          cause.lateWin ? [[cause.id, cause.lateWin]] : []
+        )
+      ),
       debtResolutions: new Map(
         reviews.flatMap((review) =>
           review.payoutReversalId
@@ -4565,6 +4606,8 @@ export class SupportService extends BaseService {
         disputeStatus: string | null;
         openedAt: string | null;
         wonAt: string | null;
+        /** A late win's loss date (Codex-2hxff.70); null for any other cause. */
+        lateWin: { lostOn: string | null } | null;
       }
     >
   > {
@@ -4595,6 +4638,8 @@ export class SupportService extends BaseService {
               status: disputes.status,
               openedAt: disputes.stripeCreatedAt,
               outcomeAppliedAt: disputes.outcomeAppliedAt,
+              lateWonAt: disputes.lateWonAt,
+              lostAppliedAt: disputes.lostAppliedAt,
             })
             .from(disputes)
             .where(inArray(disputes.stripeDisputeId, disputeIds)),
@@ -4607,6 +4652,8 @@ export class SupportService extends BaseService {
         disputeStatus: string | null;
         openedAt: string | null;
         wonAt: string | null;
+        /** A late win's loss date (Codex-2hxff.70); null for any other cause. */
+        lateWin: { lostOn: string | null } | null;
       }
     >();
     for (const row of refundRows) {
@@ -4616,6 +4663,7 @@ export class SupportService extends BaseService {
         disputeStatus: null,
         openedAt: null,
         wonAt: null,
+        lateWin: null,
       });
     }
     for (const row of disputeRows) {
@@ -4625,6 +4673,7 @@ export class SupportService extends BaseService {
         disputeStatus: row.status,
         openedAt: row.openedAt.toISOString(),
         wonAt: toIso(row.outcomeAppliedAt),
+        lateWin: row.lateWonAt ? { lostOn: toIso(row.lostAppliedAt) } : null,
       });
     }
     return facts;
@@ -4751,6 +4800,8 @@ interface PriceMoveRead {
   planName: string | null;
   /** The subscription's status now, either kind. */
   subscriptionStatus: string | null;
+  /** It has an open chargeback (`disputed_at`), either kind. */
+  subscriptionDisputed: boolean;
 }
 
 /** A stopped change as its card reads it. */
@@ -5043,8 +5094,10 @@ function heldPriceMoveOf(
       status === 'queued'
         ? queuedRunFor(now, move.nextAttemptAt).toISOString()
         : null,
-    // Filled by the late-win undo (Codex-2hxff.70, D1-a).
-    waitsForDispute: false,
+    // Owner D1, "Wait while disputed": the run defers a live member with an
+    // open chargeback by a day, after its ended check, so a row nothing
+    // will run (closed, or the subscription ended) is not waiting for it.
+    waitsForDispute: status !== 'closed' && !ended && row.subscriptionDisputed,
     resolution:
       move.resolvedAt &&
       (closedBy === 'moved_by_hand' || closedBy === 'not_needed')
