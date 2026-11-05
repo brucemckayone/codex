@@ -419,6 +419,36 @@ describe('A chargeback won after it was lost (late-win S1-S3)', () => {
     expect(line).toContain('Chargeback · opened 26 Oct, won 14 Dec');
     expect(line).toContain('Taken back, then paid back by a new payout.');
   });
+
+  test('a settled late win’s lines keep the loss date but never say "Being paid back." (S2)', () => {
+    // After the undo, the lines still carry `lostOn` (WP-B): only settling
+    // is "being paid back", and a line whose win is applied is not settling.
+    const lines = history([
+      lateWonHistoryLine(),
+      lateWonHistoryLine({ stepKind: 'cancellation' }),
+      lateWonHistoryLine({ outcome: 'taken', repayPayoutId: null }),
+    ]);
+    expect(lines).toHaveLength(3);
+    for (const line of lines) {
+      expect(line).toContain('lost 20 Nov, won 14 Dec');
+      expect(line).not.toContain('Being paid back');
+    }
+  });
+
+  test('a late win whose loss never finished: no loss date, and nothing reads "null"', () => {
+    // `lostOn` is present but null when the loss was never applied (WP-B).
+    const [line] = history([
+      lateWonHistoryLine({
+        outcome: 'taken',
+        repayPayoutId: null,
+        disputeWonAt: null,
+        lostOn: null,
+      }),
+    ]);
+    expect(line).toContain('Chargeback · opened 26 Oct');
+    expect(line).not.toContain('lost');
+    expect(line).not.toContain('null');
+  });
 });
 
 describe('A slice’s history', () => {
