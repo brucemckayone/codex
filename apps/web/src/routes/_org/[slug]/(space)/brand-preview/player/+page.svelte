@@ -278,7 +278,7 @@
     font-weight: var(--font-semibold);
     letter-spacing: var(--tracking-wide);
     text-transform: uppercase;
-    color: var(--color-brand-primary);
+    color: var(--color-brand-text);
     background: var(--color-brand-primary-subtle);
     border-radius: var(--radius-full);
   }

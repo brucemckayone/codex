@@ -158,7 +158,7 @@
     width: var(--space-12);
     height: var(--space-12);
     margin: 0 auto var(--space-4);
-    color: var(--color-interactive);
+    color: var(--color-link);
   }
 
 

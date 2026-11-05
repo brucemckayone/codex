@@ -270,13 +270,13 @@
 
   /* The studio's link colour, underlined, closing the note's sentence. */
   .swatches__link {
-    color: var(--color-interactive);
+    color: var(--color-link);
     text-decoration: underline;
     text-underline-offset: var(--space-0-5);
   }
 
   .swatches__link:hover {
-    color: var(--color-interactive-hover);
+    color: var(--color-link-hover);
   }
 
   .swatches__link:focus-visible {

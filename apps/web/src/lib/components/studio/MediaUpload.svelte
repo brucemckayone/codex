@@ -189,7 +189,7 @@
     height: var(--space-16);
     border-radius: var(--radius-full, 9999px);
     background: var(--color-interactive-subtle);
-    color: var(--color-interactive);
+    color: var(--color-link);
   }
 
   .drop-overlay-hero {

@@ -197,7 +197,7 @@
 
   .playlist__stage--current .playlist__rn {
     border-color: var(--color-brand-primary);
-    color: var(--color-brand-primary);
+    color: var(--color-brand-text);
     box-shadow: 0 0 var(--space-2) 0
       color-mix(in oklab, var(--color-brand-primary) 32%, transparent);
   }
@@ -205,7 +205,11 @@
   .playlist__stage--done .playlist__rn {
     border-color: transparent;
     background: color-mix(in oklab, var(--color-brand-primary) 20%, transparent);
-    color: var(--color-brand-primary);
+    /* The tint carries the brand; the numeral takes the page's text colour
+       (owner, Codex-mik4h: "Neutral text on tints"). On a light page the
+       brand colour on its own 20% tint failed AA for 3 180 of 4 101 brands,
+       and 1 034 even nudged. */
+    color: var(--color-text);
   }
 
   .playlist__name {
@@ -287,7 +291,7 @@
 
   .playlist__lic--cur {
     border-color: var(--color-brand-primary);
-    color: var(--color-brand-primary);
+    color: var(--color-brand-text);
     box-shadow: 0 0 var(--space-2) 0
       color-mix(in oklab, var(--color-brand-primary) 40%, transparent);
   }
@@ -329,7 +333,7 @@
   .playlist__go {
     flex: none;
     font-size: var(--text-xs);
-    color: var(--color-brand-primary);
+    color: var(--color-brand-text);
     opacity: 0;
     transition: opacity var(--duration-fast) var(--ease-out);
   }

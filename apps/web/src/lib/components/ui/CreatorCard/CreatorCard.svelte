@@ -456,7 +456,7 @@
   }
 
   .creator-card__name a:hover {
-    color: var(--color-interactive);
+    color: var(--color-link);
   }
 
   .creator-card__bio {

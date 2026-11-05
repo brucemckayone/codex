@@ -349,7 +349,7 @@
   }
 
   .url-slug {
-    color: var(--color-interactive-hover);
+    color: var(--color-link-hover);
     font-weight: var(--font-medium);
   }
 
@@ -362,7 +362,7 @@
     padding: 0;
     border: none;
     background: none;
-    color: var(--color-interactive);
+    color: var(--color-link);
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
     cursor: pointer;
@@ -370,7 +370,7 @@
   }
 
   .add-description-btn:hover {
-    color: var(--color-interactive-hover);
+    color: var(--color-link-hover);
   }
 
   .add-description-btn:disabled {

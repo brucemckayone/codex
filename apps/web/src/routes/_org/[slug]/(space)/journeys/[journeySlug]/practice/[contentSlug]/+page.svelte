@@ -236,7 +236,7 @@
   }
 
   .practice__back:hover {
-    color: var(--color-brand-primary);
+    color: var(--color-brand-text);
   }
 
   .practice__back:focus-visible {
@@ -309,7 +309,7 @@
   }
 
   .practice__gate b {
-    color: var(--color-brand-primary);
+    color: var(--color-brand-text);
     font-weight: var(--font-semibold);
   }
 

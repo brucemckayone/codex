@@ -653,7 +653,7 @@
   }
 
   .negotiations-page__item-org:hover {
-    color: var(--color-interactive);
+    color: var(--color-link);
     text-decoration: underline;
   }
 

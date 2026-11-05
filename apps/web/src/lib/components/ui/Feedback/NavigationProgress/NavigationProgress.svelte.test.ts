@@ -256,6 +256,23 @@ function remapOf(token: string, selector: string): string | undefined {
     .at(-1);
 }
 
+/**
+ * `remapOf`, following a private source the remap reads whole: org-brand.css
+ * gives `--color-focus` its brand chain through `--_focus-src`, the value its
+ * nudge starts from (Codex-mik4h; ground-nudge-css.test.ts pins the nudge).
+ */
+function resolvedRemapOf(token: string, selector: string): string | undefined {
+  const value = remapOf(token, selector);
+  const source = value?.match(/^var\((--_[\w-]+)\)$/)?.[1];
+  return source ? remapOf(source, selector) : value;
+}
+
+/** A brand chain, behind a fine-tune override when the token has one. */
+function chainPattern(chain: string, override: string): RegExp {
+  const behind = override ? `var\\(${override}, ${chain}\\)` : chain;
+  return new RegExp(`^${behind}$`);
+}
+
 describe('NavigationProgress: paints tokens the brand remaps in both themes', () => {
   const bar = componentRules().get('.bar');
   /** Every custom property the bar's fill and glow read. */
@@ -270,25 +287,38 @@ describe('NavigationProgress: paints tokens the brand remaps in both themes', ()
     expect(painted).toEqual(['--color-interactive', '--color-focus']);
   });
 
-  test.each([
-    '--color-interactive',
-    '--color-focus',
-  ])('light: [data-org-brand] remaps %s to --brand-color', (token) => {
+  // The focus colour has a fine-tune override of its own (`--brand-focus`),
+  // read before the brand colour.
+  const OVERRIDES = [
+    ['--color-interactive', ''],
+    ['--color-focus', '--brand-focus'],
+  ];
+
+  test.each(
+    OVERRIDES
+  )('light: [data-org-brand] remaps %s to --brand-color', (token, override) => {
     expect(painted).toContain(token);
-    expect(remapOf(token, '[data-org-brand]')).toMatch(
-      /^var\(--brand-color, var\(--color-primary-\d+\)\)$/
+    expect(resolvedRemapOf(token, '[data-org-brand]')).toMatch(
+      chainPattern(
+        'var\\(--brand-color, var\\(--color-primary-\\d+\\)\\)',
+        override
+      )
     );
   });
 
-  test.each([
-    '--color-interactive',
-    '--color-focus',
-  ])('dark: [data-theme=dark] [data-org-brand] remaps %s to --brand-color-dark first', (token) => {
+  test.each(
+    OVERRIDES
+  )('dark: [data-theme=dark] [data-org-brand] remaps %s to --brand-color-dark first', (token, override) => {
     expect(painted).toContain(token);
     // The dark slot first, the light brand next, a dark platform step last:
     // the same chain every other branded control in dark mode reads.
-    expect(remapOf(token, "[data-theme='dark'] [data-org-brand]")).toMatch(
-      /^var\(--brand-color-dark, var\(--brand-color, var\(--color-primary-\d+\)\)\)$/
+    expect(
+      resolvedRemapOf(token, "[data-theme='dark'] [data-org-brand]")
+    ).toMatch(
+      chainPattern(
+        'var\\(--brand-color-dark, var\\(--brand-color, var\\(--color-primary-\\d+\\)\\)\\)',
+        override
+      )
     );
   });
 });

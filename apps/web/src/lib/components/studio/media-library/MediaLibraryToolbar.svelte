@@ -450,7 +450,7 @@
   :global(.toolbar-menu-list .toolbar-menu-check) {
     display: inline-flex;
     width: var(--space-4);
-    color: var(--color-interactive);
+    color: var(--color-link);
   }
 
   .toolbar-sep {

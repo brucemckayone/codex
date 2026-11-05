@@ -685,7 +685,7 @@
   }
 
   .way__note a {
-    color: var(--color-interactive);
+    color: var(--color-link);
   }
 
   .way__fields {

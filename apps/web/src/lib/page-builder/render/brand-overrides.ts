@@ -26,6 +26,7 @@ import {
   tokenOverridesToCssVars,
 } from '$lib/brand-editor';
 import { withFallback } from '$lib/brand-editor/font-fallbacks';
+import { groundLuminance, paintableColour } from '$lib/brand-editor/ground';
 import type { BrandTokenOverrides } from '$lib/page-builder';
 
 /**
@@ -103,7 +104,10 @@ export function brandOverridesToCssVars(
   for (const [field, prop] of Object.entries(CORE_LIGHT)) {
     const value = (overrides as Record<string, unknown>)[field];
     if (typeof value !== 'string' || value.trim().length === 0) continue;
-    out[prop] = FONT_FIELDS.has(field) ? quoteFamily(value) : value;
+    // A colour is painted only as the canonical hex the nudge measures.
+    const painted = FONT_FIELDS.has(field) ? value : paintableColour(value);
+    if (!painted) continue;
+    out[prop] = FONT_FIELDS.has(field) ? quoteFamily(painted) : painted;
   }
 
   // ── Numeric inputs: radius + density feed the radius/spacing scales ──
@@ -120,8 +124,9 @@ export function brandOverridesToCssVars(
   if (overrides.darkOverrides) {
     for (const [field, prop] of Object.entries(CORE_DARK)) {
       const value = (overrides.darkOverrides as Record<string, unknown>)[field];
-      if (typeof value !== 'string' || value.trim().length === 0) continue;
-      out[prop] = value;
+      const painted = paintableColour(value);
+      if (!painted) continue;
+      out[prop] = painted;
     }
   }
 
@@ -136,6 +141,14 @@ export function brandOverridesToCssVars(
     const darkProp = CORE_DARK[field];
     if (light && !(darkProp in out)) out[darkProp] = light;
   }
+
+  // Each background the page sets brings its binding ground, so the links and
+  // focus colours org-brand.css nudges read this page's surfaces (Codex-mik4h).
+  // Per theme, as the backgrounds are: the other theme inherits the org's number.
+  const groundLight = groundLuminance(out['--brand-bg'], 'light');
+  if (groundLight) out['--brand-ground-y'] = groundLight;
+  const groundDark = groundLuminance(out['--brand-bg-dark'], 'dark');
+  if (groundDark) out['--brand-ground-dark-y'] = groundDark;
 
   // ── Fine-tune token overrides (canonical prefix split + null-skip) ──
   if (overrides.tokenOverrides) {

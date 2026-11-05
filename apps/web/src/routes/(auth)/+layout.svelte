@@ -15,6 +15,7 @@
   import { setContext } from 'svelte';
   import AuthShaderPane from '$lib/components/auth/AuthShaderPane.svelte';
   import { NavigationProgress } from '$lib/components/ui/Feedback/NavigationProgress';
+  import { groundLuminanceVars, paintableColour } from '$lib/brand-editor/ground';
   import {
     darkTokenOverridesToCssVars,
     parseDarkColorOverrides,
@@ -35,7 +36,8 @@
   const brandPrimary = $derived(branding?.brandColors?.primary ?? undefined);
   const brandSecondary = $derived(branding?.brandColors?.secondary ?? undefined);
   const brandAccent = $derived(branding?.brandColors?.accent ?? undefined);
-  const brandBackground = $derived(branding?.brandColors?.background ?? undefined);
+  // A background the nudge cannot measure is not painted (`paintableColour`).
+  const brandBackground = $derived(paintableColour(branding?.brandColors?.background));
   // Dark-mode colour overrides. org-brand.css gates its dark tokens on
   // `var(--brand-bg-dark, var(--brand-bg, …))`, so WITHOUT these the dark rules
   // still match but fall straight back to the LIGHT brand colours. That is what
@@ -48,13 +50,18 @@
   const darkColorOverrides = $derived(
     parseDarkColorOverrides(branding?.brandFineTune?.darkModeOverrides)
   );
-  const brandPrimaryDark = $derived(darkColorOverrides?.primaryColor ?? undefined);
+  // Painted only as a hex, as the org layout does (`paintableColour`).
+  const brandPrimaryDark = $derived(paintableColour(darkColorOverrides?.primaryColor));
   const brandSecondaryDark = $derived(
-    darkColorOverrides?.secondaryColor ?? undefined
+    paintableColour(darkColorOverrides?.secondaryColor)
   );
-  const brandAccentDark = $derived(darkColorOverrides?.accentColor ?? undefined);
+  const brandAccentDark = $derived(paintableColour(darkColorOverrides?.accentColor));
   const brandBackgroundDark = $derived(
-    darkColorOverrides?.backgroundColor ?? undefined
+    paintableColour(darkColorOverrides?.backgroundColor)
+  );
+  // The binding ground's luminance, as the org layout writes it (Codex-mik4h).
+  const groundVars = $derived(
+    groundLuminanceVars({ background: brandBackground, backgroundDark: brandBackgroundDark })
   );
 
   const brandFontBody = $derived(branding?.brandFonts?.body ?? undefined);
@@ -128,6 +135,8 @@
   style:--brand-secondary-dark={brandSecondaryDark}
   style:--brand-accent-dark={brandAccentDark}
   style:--brand-bg-dark={brandBackgroundDark}
+  style:--brand-ground-y={groundVars['--brand-ground-y']}
+  style:--brand-ground-dark-y={groundVars['--brand-ground-dark-y']}
   style:--brand-density={brandDensity}
   style:--brand-radius={brandRadius}
   style:--brand-font-body={brandFontBody ? `'${brandFontBody}'` : undefined}

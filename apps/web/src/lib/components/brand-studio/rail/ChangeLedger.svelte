@@ -111,7 +111,7 @@
     margin-left: auto;
     font-size: var(--text-xs);
     font-weight: var(--font-semibold);
-    color: var(--color-interactive);
+    color: var(--color-link);
   }
 
   .ledger__list {
@@ -145,7 +145,7 @@
   .ledger__reset {
     font-size: var(--text-xs);
     font-weight: var(--font-medium);
-    color: var(--color-interactive);
+    color: var(--color-link);
     background: none;
     border: none;
     cursor: pointer;
@@ -154,7 +154,7 @@
   }
 
   .ledger__reset:hover {
-    color: var(--color-interactive-hover);
+    color: var(--color-link-hover);
     text-decoration: underline;
   }
 

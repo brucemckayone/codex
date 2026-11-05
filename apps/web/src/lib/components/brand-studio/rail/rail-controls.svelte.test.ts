@@ -202,4 +202,107 @@ describe('EditingThemeContrast', () => {
 
     expect(brandEditor.editingTheme).toBe('dark');
   });
+
+  // The pill says what the page nudged (owner, Codex-mik4h: "Adjust it, say so").
+  const rows = () =>
+    Array.from(document.querySelectorAll<HTMLElement>('.legibility__row'));
+  const detailOf = (row: HTMLElement | undefined) =>
+    row?.querySelector('.legibility__detail')?.textContent?.trim() ?? '';
+
+  test('lists links, focus and halo with what moved, and counts the moves', () => {
+    brandEditor.close();
+    // Pale amber on the platform's #e5e5e5 panel is about 1:1: far under the floor.
+    brandEditor.open(ORG_ID, makeSaved({ primaryColor: '#FDE68A' }));
+
+    component = mount(EditingThemeContrast, { target: document.body });
+    flushSync();
+
+    const listed = rows();
+    // Links, hovered and pressed links (they move too), focus outline, focus
+    // halo, hovered buttons.
+    expect(listed).toHaveLength(5);
+    expect(listed[0].dataset.moved).toBe('true');
+    expect(detailOf(listed[0])).toMatch(
+      /^Darkened a lot to read on light pages/
+    );
+    const moved = listed.filter((row) => row.dataset.moved === 'true').length;
+    expect(moved).toBeGreaterThan(0);
+    expect(
+      document.querySelector('.contrast__adjusted')?.textContent?.trim()
+    ).toBe(`${moved} adjusted`);
+  });
+
+  test('an interactive override lists the labels in the brand colour, and counts them', () => {
+    brandEditor.close();
+    brandEditor.open(
+      ORG_ID,
+      makeSaved({
+        primaryColor: '#FDE68A',
+        tokenOverrides: { interactive: '#1D4ED8' },
+      })
+    );
+
+    component = mount(EditingThemeContrast, { target: document.body });
+    flushSync();
+
+    const labels = rows().find((row) =>
+      row.textContent?.includes('Labels in your brand colour')
+    );
+    expect(labels?.dataset.moved).toBe('true');
+    const moved = rows().filter((row) => row.dataset.moved === 'true').length;
+    expect(
+      document.querySelector('.contrast__adjusted')?.textContent?.trim()
+    ).toBe(`${moved} adjusted`);
+  });
+
+  test('a link that already reads is painted as picked, with its ratio', () => {
+    brandEditor.close();
+    brandEditor.open(ORG_ID, makeSaved({ primaryColor: '#1D4ED8' }));
+
+    component = mount(EditingThemeContrast, { target: document.body });
+    flushSync();
+
+    const [links] = rows();
+    expect(links.dataset.moved).toBe('false');
+    expect(detailOf(links)).toMatch(/^As you picked it · \d+\.\d{2}:1$/);
+  });
+
+  test('in dark, says dark pages use the light brand until a dark one is picked', () => {
+    brandEditor.close();
+    brandEditor.open(ORG_ID, makeSaved({ primaryColor: '#2563EB' }));
+    brandEditor.setEditingTheme('dark');
+
+    component = mount(EditingThemeContrast, { target: document.body });
+    flushSync();
+
+    // Studio-beta's blue on the platform's dark panel is lightened.
+    expect(detailOf(rows()[0])).toMatch(/^Lightened .* to read on dark pages/);
+    expect(document.querySelector('.legibility__hint')).not.toBeNull();
+
+    unmount(component);
+    brandEditor.close();
+    brandEditor.open(
+      ORG_ID,
+      makeSaved({
+        primaryColor: '#2563EB',
+        darkOverrides: { primaryColor: '#93C5FD' },
+      })
+    );
+    brandEditor.setEditingTheme('dark');
+    component = mount(EditingThemeContrast, { target: document.body });
+    flushSync();
+
+    expect(document.querySelector('.legibility__hint')).toBeNull();
+  });
+
+  test('lists nothing for a colour that cannot be read', () => {
+    brandEditor.close();
+    brandEditor.open(ORG_ID, makeSaved({ primaryColor: 'not-a-colour' }));
+
+    component = mount(EditingThemeContrast, { target: document.body });
+    flushSync();
+
+    expect(document.querySelector('.legibility')).toBeNull();
+    expect(document.querySelector('.contrast__adjusted')).toBeNull();
+  });
 });

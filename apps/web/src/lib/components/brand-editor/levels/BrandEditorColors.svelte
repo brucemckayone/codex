@@ -229,7 +229,7 @@
 
   .colours-focus__bg-clear {
     font-size: var(--text-sm);
-    color: var(--color-interactive);
+    color: var(--color-link);
     background: none;
     border: none;
     cursor: pointer;
@@ -237,7 +237,7 @@
   }
 
   .colours-focus__bg-clear:hover {
-    color: var(--color-interactive-hover);
+    color: var(--color-link-hover);
   }
 
   .colours-focus__bg-clear:focus-visible {
@@ -251,7 +251,7 @@
     flex-shrink: 0;
     align-self: flex-start;
     font-size: var(--text-sm);
-    color: var(--color-interactive);
+    color: var(--color-link);
     background: none;
     border: none;
     cursor: pointer;
@@ -260,7 +260,7 @@
   }
 
   .colours-focus__finetune:hover {
-    color: var(--color-interactive-hover);
+    color: var(--color-link-hover);
   }
 
   .colours-focus__finetune:focus-visible {

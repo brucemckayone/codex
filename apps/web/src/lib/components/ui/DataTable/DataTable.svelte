@@ -272,7 +272,7 @@
   .data-table__bulk-count {
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
-    color: var(--color-interactive);
+    color: var(--color-link);
   }
 
   /* Checkbox styling */

@@ -483,7 +483,7 @@
     height: var(--space-12);
     border-radius: var(--radius-full, 9999px);
     background-color: var(--color-interactive-subtle);
-    color: var(--color-interactive);
+    color: var(--color-link);
     font-weight: var(--font-bold);
     font-size: var(--text-lg);
     flex-shrink: 0;
@@ -540,7 +540,7 @@
   }
 
   .copy-email-btn:hover {
-    color: var(--color-interactive);
+    color: var(--color-link);
   }
 
   /* Stats Section */
@@ -625,7 +625,7 @@
   }
 
   .content-link {
-    color: var(--color-interactive);
+    color: var(--color-link);
     text-decoration: none;
     transition: var(--transition-colors);
   }

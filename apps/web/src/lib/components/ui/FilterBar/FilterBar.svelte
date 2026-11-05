@@ -405,7 +405,7 @@
     padding: var(--space-1) var(--space-3);
     font-size: var(--text-xs);
     font-weight: var(--font-medium);
-    color: var(--color-interactive);
+    color: var(--color-link);
     background: var(--color-surface-secondary);
     border: var(--border-width) var(--border-style) var(--color-interactive);
     border-radius: var(--radius-full);
