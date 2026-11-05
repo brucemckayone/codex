@@ -57,6 +57,7 @@ vi.mock('@codex/access', () => ({
 }));
 
 import { AccessRevocation } from '@codex/access';
+import { LateWinRefundRefusedError } from '@codex/purchase';
 import { BusinessLogicError } from '@codex/service-errors';
 import { invalidateForUser } from '@codex/subscription';
 import { createWebhookServices, sendEmailToWorker } from '@codex/worker-utils';
@@ -1178,7 +1179,9 @@ describe('handlePaymentWebhook — disputes', () => {
       for (let attempt = 0; attempt < 2; attempt++) {
         recordedLateWin();
         restoredAs('rebought');
-        const refusal = new BusinessLogicError('refused (test)', {
+        const refusal = new LateWinRefundRefusedError({
+          disputeId: 'dp_test_dispute',
+          purchaseId: 'purchase_late',
           stripeCode: 'charge_disputed',
         });
         purchase.refundFirstPaymentAfterLateWin?.mockRejectedValueOnce(refusal);
@@ -1198,6 +1201,51 @@ describe('handlePaymentWebhook — disputes', () => {
           }
         );
       }
+      expect(purchase.markDisputeOutcomeApplied).not.toHaveBeenCalled();
+    });
+
+    it('a refusal Stripe gave no code for is still alerted, with stripeCode null', async () => {
+      recordedLateWin();
+      restoredAs('rebought');
+      const refusal = new LateWinRefundRefusedError({
+        disputeId: 'dp_test_dispute',
+        purchaseId: 'purchase_late',
+        stripeCode: null,
+      });
+      purchase.refundFirstPaymentAfterLateWin?.mockRejectedValueOnce(refusal);
+      const bundle = buildContext({ WEB_APP_URL: WEB });
+
+      await expect(
+        handlePaymentWebhook(wonEvent(), mockStripe, bundle.context)
+      ).rejects.toBe(refusal);
+
+      expect(bundle.mock._obs.error).toHaveBeenCalledWith(
+        expect.stringContaining('Stripe refused the refund'),
+        expect.objectContaining({
+          disputeId: 'dp_test_dispute',
+          stripeCode: null,
+        })
+      );
+      expect(purchase.markDisputeOutcomeApplied).not.toHaveBeenCalled();
+    });
+
+    it('another error from the refund step is rethrown without the refusal alert, even one carrying a stripeCode', async () => {
+      recordedLateWin();
+      restoredAs('rebought');
+      const other = new BusinessLogicError('not a refusal (test)', {
+        stripeCode: 'charge_disputed',
+      });
+      purchase.refundFirstPaymentAfterLateWin?.mockRejectedValueOnce(other);
+      const bundle = buildContext({ WEB_APP_URL: WEB });
+
+      await expect(
+        handlePaymentWebhook(wonEvent(), mockStripe, bundle.context)
+      ).rejects.toBe(other);
+
+      expect(bundle.mock._obs.error).not.toHaveBeenCalledWith(
+        expect.stringContaining('Stripe refused the refund'),
+        expect.anything()
+      );
       expect(purchase.markDisputeOutcomeApplied).not.toHaveBeenCalled();
     });
 

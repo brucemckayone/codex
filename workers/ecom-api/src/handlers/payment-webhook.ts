@@ -35,12 +35,12 @@ import {
 } from '@codex/constants';
 import type { ObservabilityClient } from '@codex/observability';
 import {
+  LateWinRefundRefusedError,
   type LateWinRefundStep,
   type PurchaseService,
   STANDING_REFUND_STATUSES,
   supportRequesterOf,
 } from '@codex/purchase';
-import { isServiceError } from '@codex/service-errors';
 import type { Bindings } from '@codex/shared-types';
 import {
   type CourseSubscriptionService,
@@ -1073,10 +1073,11 @@ async function restoreSubscriptionAfterWin(
 /**
  * The late win's refund of a payment the buyer made twice: the first payment
  * of a buyer who bought the item again (Q1; design §4.5), or a duplicate
- * payment (owner, "Refund it"). A refusal is alerted at error with Stripe's code
- * on every try (owner decision 2026-10-23, "Retry hourly, alert"), then
- * rethrown: nothing is marked, so its re-pay rows stay held and the
- * reconcile tries it again.
+ * payment (owner, "Refund it"). A refusal is alerted at error on every try,
+ * with Stripe's code or null when Stripe gave none (owner decision 2026-10-23,
+ * "Retry hourly, alert"), then rethrown: nothing is marked, so its re-pay rows
+ * stay held and the reconcile tries it again. Any other error is rethrown
+ * without this alert.
  */
 async function refundFirstPayment(
   deps: DisputeDeps,
@@ -1091,22 +1092,19 @@ async function refundFirstPayment(
       deps.environment
     );
   } catch (error) {
-    const stripeCode = stripeCodeOf(error);
-    if (stripeCode) {
+    if (error instanceof LateWinRefundRefusedError) {
       deps.obs?.error(
         'Late win: Stripe refused the refund of a payment the buyer made twice (bought again, or a duplicate). Nothing is marked; it is retried hourly',
-        { errorId: crypto.randomUUID(), disputeId, purchaseId, stripeCode }
+        {
+          errorId: crypto.randomUUID(),
+          disputeId,
+          purchaseId,
+          stripeCode: error.context?.stripeCode ?? null,
+        }
       );
     }
     throw error;
   }
-}
-
-/** Stripe's code on a refusal the late win's refund throws; null otherwise. */
-function stripeCodeOf(error: unknown): string | null {
-  if (!isServiceError(error)) return null;
-  const code = error.context?.stripeCode;
-  return typeof code === 'string' && code.length > 0 ? code : null;
 }
 
 /**
