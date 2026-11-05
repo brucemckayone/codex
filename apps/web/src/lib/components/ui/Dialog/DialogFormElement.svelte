@@ -26,10 +26,12 @@
 
   const { children, class: className, ...restProps }: Props = $props();
   // Set by Dialog.Content; absent when Form is mounted on its own.
-  const variant = getContext<{ current: 'dialog' | 'drawer' } | undefined>('DIALOG_VARIANT');
+  const layout = getContext<{ current: 'dialog' | 'drawer' | 'floating' } | undefined>(
+    'DIALOG_LAYOUT'
+  );
 </script>
 
-<form class="dialog-form {className ?? ''}" data-variant={variant?.current} {...restProps}>
+<form class="dialog-form {className ?? ''}" data-layout={layout?.current} {...restProps}>
   {@render children()}
 </form>
 
@@ -41,7 +43,7 @@
     min-height: 0;
   }
 
-  .dialog-form[data-variant='drawer'] {
+  .dialog-form[data-layout='drawer'] {
     display: contents;
   }
 </style>

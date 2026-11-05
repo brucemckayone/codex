@@ -23,6 +23,11 @@
     padded `--space-5 --space-4`.
   @prop {boolean} [flush=false] - drawer only: no padding and no gap, for a
     panel whose first child runs edge to edge (a hero photo).
+  @prop {boolean} [floating=false] - drawer only: a glass panel that floats
+    `--space-3` in from the edge, `--container-drawer` wide, rounded and
+    shadowed. Only Dialog.Body scrolls, as in a dialog, so Header and Footer
+    stay pinned (FilterDrawer). With `sheet`, below sm it floats
+    `--space-2` above the bottom edge, at most 85dvh.
   @prop {boolean} [closeButton=true] - false drops the built-in close button,
     for a panel that renders its own. It must then render a visible one:
     Escape and a press outside are not enough on a touch screen.
@@ -40,6 +45,7 @@
     variant?: 'dialog' | 'drawer';
     sheet?: boolean;
     flush?: boolean;
+    floating?: boolean;
     closeButton?: boolean;
   }
 
@@ -49,6 +55,7 @@
     variant = 'dialog',
     sheet = false,
     flush = false,
+    floating = false,
     closeButton = true,
     class: className,
     ...restProps
@@ -59,13 +66,18 @@
   } = getContext<ReturnType<typeof createDialog>>('DIALOG');
   /** Dialog.Root's `dismissible`: false while a request it started runs. */
   const dismissible = getContext<{ current: boolean } | undefined>('DIALOG_DISMISSIBLE');
-  // Dialog.Body and Dialog.Form read it: in a drawer they stop being a box.
-  setContext('DIALOG_VARIANT', {
+  const drawer = $derived(variant === 'drawer');
+  /**
+   * What scrolls: `dialog` and `floating` scroll Body, `drawer` the whole
+   * panel. Body, Form and Footer read it; in `drawer` Body and Form stop
+   * being a box.
+   */
+  const layout = $derived(!drawer ? 'dialog' : floating ? 'floating' : 'drawer');
+  setContext('DIALOG_LAYOUT', {
     get current() {
-      return variant;
+      return layout;
     },
   });
-  const drawer = $derived(variant === 'drawer');
 
   /**
    * Forward org brand tokens into the portalled dialog.
@@ -105,7 +117,12 @@
 
 {#if $open}
   <div use:melt={$portalled} use:forwardBrandTokens>
-    <div use:melt={$overlay} class="dialog-overlay" data-variant={variant}></div>
+    <div
+      use:melt={$overlay}
+      class="dialog-overlay"
+      data-variant={variant}
+      data-floating={drawer && floating ? '' : undefined}
+    ></div>
     <div class="dialog-content-wrapper">
       <div
         use:melt={$content}
@@ -114,6 +131,7 @@
         data-variant={variant}
         data-sheet={drawer && sheet ? '' : undefined}
         data-flush={drawer && flush ? '' : undefined}
+        data-floating={drawer && floating ? '' : undefined}
         {...restProps}
       >
         {@render children()}
@@ -205,12 +223,35 @@
   }
 
   .dialog-content[data-variant='drawer'][data-flush] {
-    gap: 0;
+    gap: normal;
     padding: 0;
   }
 
-  .dialog-overlay[data-variant='drawer'] {
+  .dialog-overlay[data-variant='drawer']:not([data-floating]) {
     animation-duration: var(--duration-slow);
+  }
+
+  /* Floating: FilterDrawer's glass rail. It clips like a dialog, so only
+     Body scrolls. 0,4,0 beats data-size, so the rail is
+     --container-drawer wide whatever `size` says. */
+  .dialog-content[data-variant='drawer'][data-floating] {
+    top: var(--space-3);
+    right: var(--space-3);
+    bottom: var(--space-3);
+    width: calc(100% - var(--space-6));
+    max-width: var(--container-drawer);
+    height: auto;
+    max-height: calc(100dvh - var(--space-6));
+    gap: normal;
+    padding: 0;
+    overflow: hidden;
+    background: var(--material-glass);
+    backdrop-filter: blur(var(--blur-xl));
+    -webkit-backdrop-filter: blur(var(--blur-xl));
+    border: var(--border-width) var(--border-style) var(--material-glass-border);
+    border-radius: var(--radius-xl);
+    animation-duration: var(--duration-slow);
+    animation-timing-function: var(--ease-smooth);
   }
 
   /* Phone: a bottom sheet. `max-width: none` wins over data-size here
@@ -231,6 +272,21 @@
 
     .dialog-content[data-variant='drawer'][data-sheet][data-flush] {
       padding: 0;
+    }
+
+    /* The floating sheet keeps its glass edge and round corners, inset
+       --space-2 from three sides, and rises on a spring. */
+    .dialog-content[data-variant='drawer'][data-sheet][data-floating] {
+      left: var(--space-2);
+      right: var(--space-2);
+      bottom: var(--space-2);
+      width: auto;
+      max-height: 85dvh;
+      padding: 0;
+      border: var(--border-width) var(--border-style) var(--material-glass-border);
+      border-radius: var(--radius-xl);
+      animation-name: drawer-rise;
+      animation-timing-function: var(--ease-spring);
     }
   }
 
@@ -303,6 +359,21 @@
     100% {
       opacity: 1;
       transform: translateX(0);
+    }
+  }
+
+  /* The spring easing supplies the floating sheet's overshoot. */
+  @keyframes drawer-rise {
+    0% {
+      opacity: 0;
+      transform: translateY(100%);
+    }
+    60% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0);
     }
   }
 
