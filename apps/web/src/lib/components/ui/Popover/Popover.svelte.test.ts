@@ -275,6 +275,31 @@ describe('Popover focus on close', () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
+  // A popover that mounts closed has not closed: focus stays where it is.
+  test('mounting closed moves no focus', async () => {
+    const field = document.createElement('input');
+    document.body.appendChild(field);
+    field.focus();
+    component = mount(PopoverHarness, {
+      target: document.body,
+      props: { open: false },
+    });
+    flushSync();
+    await settle();
+    expect(document.activeElement).toBe(field);
+  });
+
+  test('mounting closed never asks closeFocus', async () => {
+    const closeFocus = vi.fn(() => null);
+    component = mount(PopoverHarness, {
+      target: document.body,
+      props: { open: false, closeFocus },
+    });
+    flushSync();
+    await settle();
+    expect(closeFocus).not.toHaveBeenCalled();
+  });
+
   test('goes where closeFocus says', async () => {
     const editor = document.createElement('div');
     editor.tabIndex = -1;
