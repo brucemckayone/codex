@@ -116,9 +116,13 @@
  *   popover-name   Outside ui/Popover/, a Popover.Content has aria-label or
  *                  aria-labelledby on its tag that names it: text, a call or
  *                  a member (`m.x()`), not an undefined, null or '' it can
- *                  result in, nor a prop with no default (a wrapper's
- *                  `label?: string`, which a parent may leave unset). Its
- *                  Name type requires one, but CI type-checks no .svelte.
+ *                  result in, nor a prop with no default or an empty one
+ *                  (a wrapper's `label?: string`, or `title = ''`, which a
+ *                  parent may leave unset). Its Name type requires one, but
+ *                  CI type-checks no .svelte. Not followed, so counted as
+ *                  names: a member of a rest prop (`rest.label`), a
+ *                  $derived alias, an optional call (`label?.trim()`), and
+ *                  `void 0`.
  *   own-dialog     Outside ui/Dialog/ and ui/Popover/, nothing builds a modal
  *                  by hand: no role="dialog"/"alertdialog" (a conditional,
  *                  logical or template result included; the shared Dialog
@@ -565,51 +569,63 @@ function isPopoverContent(node, popover) {
   return name !== null && (node.name.includes('.') ? POPOVER_CONTENT.has(name) : popover.contents.has(name));
 }
 
-/** The names a component's `$props()` destructuring binds with no default: a parent may leave them unset. */
-function propsWithoutDefault(programs) {
+const NAME_RANK = { named: 0, unproven: 1, none: 2 };
+const worstName = (verdicts) => verdicts.reduce((a, b) => (NAME_RANK[b] > NAME_RANK[a] ? b : a), 'named');
+
+/**
+ * What a name expression names: 'named', 'none' (an undefined, null or ''
+ * it can result in) or 'unproven' (a prop in `unsetProps`). A call or a
+ * member (paraglide's `m.x()`) names it.
+ */
+function judgeName(expr, unsetProps) {
+  const judge = (e) => judgeName(e, unsetProps);
+  switch (expr?.type) {
+    case 'Literal':
+      return expr.value === null || (typeof expr.value === 'string' && !expr.value.trim()) ? 'none' : 'named';
+    case 'Identifier':
+      if (expr.name === 'undefined') return 'none';
+      return unsetProps.has(expr.name) ? 'unproven' : 'named';
+    case 'TemplateLiteral':
+      return expr.quasis.some((q) => (q.value.cooked ?? q.value.raw).trim()) ? 'named' : worstName(expr.expressions.map(judge));
+    case 'ConditionalExpression':
+      return worstName([judge(expr.consequent), judge(expr.alternate)]);
+    case 'LogicalExpression':
+      // `label ?? 'Info'` names it whenever label doesn't; `label && 'Info'` can give back label.
+      return expr.operator === '&&' ? worstName([judge(expr.left), judge(expr.right)]) : judge(expr.right);
+    default:
+      return TS_VALUE_HOLDERS.has(expr?.type) ? judge(expr.expression) : 'named';
+  }
+}
+
+/**
+ * The names a component's `$props()` destructuring binds that a parent may
+ * leave unset or empty: no default, or a default that names nothing
+ * (`title = ''`, `= undefined`, `= null`).
+ */
+function unsetPropNames(programs) {
   const names = new Set();
   walk(programs, (node) => {
     const init = node.type === 'VariableDeclarator' ? node.init : null;
     if (init?.type !== 'CallExpression' || init.callee.type !== 'Identifier' || init.callee.name !== '$props') return;
     if (node.id.type !== 'ObjectPattern') return;
-    for (const p of node.id.properties) if (p.type === 'Property' && p.value.type === 'Identifier') names.add(p.value.name);
+    for (const p of node.id.properties) {
+      if (p.type !== 'Property') continue;
+      if (p.value.type === 'Identifier') names.add(p.value.name);
+      else if (p.value.type === 'AssignmentPattern' && p.value.left.type === 'Identifier' && judgeName(p.value.right, new Set()) === 'none') {
+        names.add(p.value.left.name);
+      }
+    }
   });
   return names;
 }
 
-const NAME_RANK = { named: 0, unproven: 1, none: 2 };
-const worstName = (verdicts) => verdicts.reduce((a, b) => (NAME_RANK[b] > NAME_RANK[a] ? b : a), 'named');
-
-/**
- * What an aria-label / aria-labelledby value names: 'named', 'none' (empty
- * text, or an undefined, null or '' it can result in) or 'unproven' (a
- * prop with no default, which a parent may leave unset). A call or a member
- * (paraglide's `m.x()`) names it.
- */
+/** What an aria-label / aria-labelledby value names: its text, or what its expressions judge. */
 function nameVerdict(attr, unsetProps) {
   const text = staticValue(attr);
   if (text !== null) return text.trim() ? 'named' : 'none';
   const parts = Array.isArray(attr.value) ? attr.value : [attr.value];
   if (parts.some((p) => p.type === 'Text' && p.data.trim())) return 'named';
-  const judge = (expr) => {
-    switch (expr?.type) {
-      case 'Literal':
-        return expr.value === null || (typeof expr.value === 'string' && !expr.value.trim()) ? 'none' : 'named';
-      case 'Identifier':
-        if (expr.name === 'undefined') return 'none';
-        return unsetProps.has(expr.name) ? 'unproven' : 'named';
-      case 'TemplateLiteral':
-        return expr.quasis.some((q) => (q.value.cooked ?? q.value.raw).trim()) ? 'named' : worstName(expr.expressions.map(judge));
-      case 'ConditionalExpression':
-        return worstName([judge(expr.consequent), judge(expr.alternate)]);
-      case 'LogicalExpression':
-        // `label ?? 'Info'` names it whenever label doesn't.
-        return judge(expr.right);
-      default:
-        return TS_VALUE_HOLDERS.has(expr?.type) ? judge(expr.expression) : 'named';
-    }
-  };
-  return worstName(parts.filter((p) => p.type !== 'Text').map((p) => judge(p.expression)));
+  return worstName(parts.filter((p) => p.type !== 'Text').map((p) => judgeName(p.expression, unsetProps)));
 }
 
 /**
@@ -617,10 +633,11 @@ function nameVerdict(attr, unsetProps) {
  * aria-labelledby on its tag. Its Name type requires one, but no CI job
  * type-checks a .svelte file. A literal, a call or a member names it; an
  * empty text, an undefined, null or '' literal, or a {...spread} does not,
- * and a prop with no default (a wrapper's `label?: string`) is unproven.
+ * and a prop with no default or an empty one (a wrapper's `label?: string`,
+ * `title = ''`) is unproven.
  */
 function checkPopoverNames(fragment, programs, popover, report) {
-  const unsetProps = propsWithoutDefault(programs);
+  const unsetProps = unsetPropNames(programs);
   walk(fragment, (node) => {
     if (!isPopoverContent(node, popover)) return;
     const names = node.attributes.filter((a) => a.type === 'Attribute' && (a.name === 'aria-label' || a.name === 'aria-labelledby'));
@@ -630,7 +647,7 @@ function checkPopoverNames(fragment, programs, popover, report) {
       report(
         node.start,
         'popover-name',
-        `<${node.name}>'s name comes from a prop with no default, so a parent can leave the panel unnamed (a dialog needs a name); give the prop a default, or write the name on the tag`
+        `<${node.name}>'s name comes from a prop with no default or an empty one, so a parent can leave the panel unnamed (a dialog needs a name); give the prop a non-empty default, or write the name on the tag`
       );
       return;
     }

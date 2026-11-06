@@ -2124,7 +2124,7 @@ test("CATCHES a Popover.Content whose name can be unset: a prop with no default,
     `<script lang="ts">
   import * as Popover from '$lib/components/ui/Popover';
   import * as UI from '$lib/components/ui';
-  let { label, labelledby, wide }: { label?: string; labelledby?: string; wide?: boolean } = $props();
+  let { label, labelledby, wide, title = '', heading = undefined, hint = null }: Props = $props();
   const Alias = Popover.Content;
   const Panel = UI.Popover;
 </script>
@@ -2136,29 +2136,30 @@ test("CATCHES a Popover.Content whose name can be unset: a prop with no default,
 <Popover.Content aria-label={''}>f</Popover.Content>
 <Popover.Content aria-label={wide ? 'Info' : undefined}>g</Popover.Content>
 <UI.Popover.Content>h</UI.Popover.Content>
+<Popover.Content aria-label={title}>i</Popover.Content>
+<Popover.Content aria-label={heading}>j</Popover.Content>
+<Popover.Content aria-label={hint}>k</Popover.Content>
+<Popover.Content aria-label={label && 'Info'}>l</Popover.Content>
+<Popover.Content aria-label={label ?? ''}>m</Popover.Content>
+<Popover.Content aria-label={\`\${label}\`}>n</Popover.Content>
+<Popover.Content aria-label={label as string}>o</Popover.Content>
 `
   );
 
   const result = scan();
+  // @16-18: an empty default is no name either (review c6, G6-G-L1).
   // @5-6: the alias rule, so a panel can't leave the tags popover-name reads.
   assert.deepEqual(summary(result), [
-    'popover-name@8',
-    'popover-name@9',
-    'popover-name@10',
-    'popover-name@11',
-    'popover-name@12',
-    'popover-name@13',
-    'popover-name@14',
-    'popover-name@15',
+    ...[8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22].map((line) => `popover-name@${line}`),
     'alias@5',
     'alias@6',
   ]);
   assert.match(
     result.violations[0].detail,
-    /^<Popover\.Content>'s name comes from a prop with no default, .*; give the prop a default, or write the name on the tag$/
+    /^<Popover\.Content>'s name comes from a prop with no default or an empty one, .*; give the prop a non-empty default, or write the name on the tag$/
   );
   assert.match(result.violations[3].detail, /^<Popover\.Content> has no name/);
-  assert.match(result.violations[9].detail, /'UI\.Popover' is read as a value; use the Popover's parts as tags only/);
+  assert.match(result.violations[16].detail, /'UI\.Popover' is read as a value; use the Popover's parts as tags only/);
 });
 
 test("ALLOWS a named Popover.Content (text, a call, a member, a prop with a default), the other Popover parts, another Content, and ui/Popover's own files", () => {
@@ -2170,7 +2171,8 @@ test("ALLOWS a named Popover.Content (text, a call, a member, a prop with a defa
   import * as Dialog from '$lib/components/ui/Dialog';
   import * as UI from '$lib/components/ui';
   import { m } from '$lib/paraglide/messages';
-  let { label = 'Details', copy, wide, title } = $props();
+  let { label = 'Details', copy, wide, title, empty = '' } = $props();
+  let open = $state(true);
   const Btn = UI.Button;
 </script>
 <Popover.Root>
@@ -2185,6 +2187,8 @@ test("ALLOWS a named Popover.Content (text, a call, a member, a prop with a defa
 <Popover.Content aria-label="Uses of {title}">g</Popover.Content>
 <Popover.Content aria-label={title ?? 'Info'}>h</Popover.Content>
 <Popover.Content aria-label={\`Uses of \${title}\`}>h2</Popover.Content>
+<Popover.Content aria-label={empty || 'Info'}>h3</Popover.Content>
+<Popover.Content aria-label={open && 'Info'}>h4</Popover.Content>
 <UI.Popover.Content aria-label="Pick">i</UI.Popover.Content>
 <UI.Button>j</UI.Button>
 <UI.Card.Content>j2</UI.Card.Content>
