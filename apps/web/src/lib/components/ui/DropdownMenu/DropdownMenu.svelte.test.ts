@@ -163,6 +163,54 @@ describe('DropdownMenu', () => {
       expect(scrollTop).toBe(0);
     });
 
+    const mouse = (type: string) => {
+      const event = new MouseEvent(type);
+      Object.defineProperty(event, 'pointerType', { value: 'mouse' });
+      return event;
+    };
+
+    // In Chromium the overlay covering the pressed item fires a pointerleave
+    // on it. Melt's roving answered a millisecond later by taking tabindex 0
+    // from whatever had focus by then: the dialog's buttons (review c5).
+    test('the pointer leaving the pressed item takes no tab stop from the dialog', async () => {
+      pressItem('opens-dialog');
+      const item = document.querySelector('[data-testid="opens-dialog"]');
+      item?.dispatchEvent(mouse('pointerleave'));
+      await settle();
+      // The menu has closed: a pointer still over what is left of it.
+      item?.dispatchEvent(mouse('pointermove'));
+      await settle();
+
+      const panel = document.querySelector('.dialog-content');
+      expect(
+        document.querySelector<HTMLElement>('[data-testid="cancel"]')?.tabIndex
+      ).toBe(0);
+      expect(panel?.contains(document.activeElement)).toBe(true);
+      // Nothing behind the dialog took focus, even for a moment.
+      expect(visits.filter((el) => el.closest('[role="menu"]'))).toEqual([]);
+    });
+
+    // Melt deferred it by a millisecond, which a dialog's render can stretch
+    // past the press: so it happens at once, and only while the menu is open.
+    test('the pointer moves focus through the menu at once', async () => {
+      component = mount(DropdownMenuDialogHarness, { target: document.body });
+      flushSync();
+      const item = document.querySelector<HTMLElement>('[data-testid="plain"]');
+
+      item?.dispatchEvent(mouse('pointermove'));
+      expect(document.activeElement).toBe(item);
+      expect(item?.tabIndex).toBe(0);
+
+      item?.dispatchEvent(mouse('pointerleave'));
+      expect(document.activeElement?.getAttribute('role')).toBe('menu');
+      expect(item?.tabIndex).toBe(-1);
+
+      // Closed before the unmount: a menu unmounted open closes late, in
+      // the next test.
+      item?.click();
+      await settle();
+    });
+
     test('an item that opens nothing gives focus back to the trigger', async () => {
       pressItem('plain');
       await settle();
