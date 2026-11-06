@@ -5,7 +5,7 @@
   Dialog.Content > Dialog.Header, Dialog.Form > (Dialog.Toolbar optional,
   Dialog.Body, Dialog.Footer).
 
-  Dialog.Content is a flex column capped at 85vh with `overflow: hidden`, and
+  Dialog.Content is a flex column capped at 85dvh with `overflow: hidden`, and
   only Dialog.Body scrolls. Any element between the two must pass the column
   down (`flex: 1; min-height: 0`), or the panel clips the footer on a short
   screen. This is that element, so a page never hand-writes the wrapper. In a

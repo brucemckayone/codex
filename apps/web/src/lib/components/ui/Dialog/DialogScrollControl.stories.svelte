@@ -10,7 +10,7 @@
    * "calibration control", and nothing else may live here.
    *
    * Raw Sibling Control: a raw element between Header and a Body, the shape
-   * the gate bans. It never shrinks, Dialog.Content clips at 85vh around a
+   * the gate bans. It never shrinks, Dialog.Content clips at 85dvh around a
    * Body, so on a short screen its footer is cut off and nothing scrolls to
    * it. The scroll proof (DialogScroll.stories.svelte) must read it CLIPPED
    * and every shared story REACHABLE; a probe that calls both reachable is
