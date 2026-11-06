@@ -7,9 +7,9 @@
 
   /**
    * What the shared Dialog does around its panel (Codex-vlphc review c1):
-   * the page's scroll lock while dialogs stack, and where focus goes back
-   * to at the close. Driven in real Chromium and WebKit. No autodocs: a
-   * docs page would open every dialog at once.
+   * the page's scroll lock while dialogs stack, where focus goes back to at
+   * the close, and a panel with no Body. Driven in real Chromium and WebKit.
+   * No autodocs: a docs page would open every dialog at once.
    */
   const { Story } = defineMeta({
     title: 'UI/Dialog/Behaviour',
@@ -17,6 +17,12 @@
 
   const outerOpen = writable(false);
   const confirmOpen = writable(false);
+  const longConfirmOpen = writable(false);
+  const longDescription = Array.from(
+    { length: 9 },
+    (_, i) =>
+      `Point ${i + 1}: the price change reaches every subscriber at their next renewal, and nobody is charged twice for the same period.`
+  ).join(' ');
   const tierOpen = writable(false);
   const tierName = writable('');
   const tiers = ['Basic', 'Pro', 'Team'];
@@ -53,6 +59,18 @@
     description="It goes from every page that uses it."
     confirmText="Delete"
     variant="destructive"
+  />
+</Story>
+
+<!-- A ConfirmDialog has no Body: Header and Footer only. With a long description
+     the panel scrolls as a whole, so Confirm stays reachable on a short screen. -->
+<Story name="Long Confirm">
+  <Button onclick={() => ($longConfirmOpen = true)}>Open long confirm</Button>
+  <ConfirmDialog
+    bind:open={$longConfirmOpen}
+    title="Change the price?"
+    description={longDescription}
+    confirmText="Change price"
   />
 </Story>
 

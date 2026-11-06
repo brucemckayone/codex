@@ -271,6 +271,16 @@
     animation: content-in var(--duration-slow) var(--ease-out) both;
   }
 
+  /* A clipping panel with no Body (a ConfirmDialog: Header and Footer only)
+     scrolls as a whole instead, so a long Description cannot push the
+     Footer out of reach on a short screen: in a panel that clips, only
+     Body shrinks. A drawer that scrolls as a whole already does. */
+  .dialog-content:is([data-variant='dialog'], [data-floating]):not(
+      :has(> :global(.dialog-body), > :global(.dialog-form) > :global(.dialog-body))
+    ) {
+    overflow-y: auto;
+  }
+
   /* Size variants */
   .dialog-content[data-size='sm'] {
     max-width: 28rem;
