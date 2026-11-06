@@ -1387,7 +1387,50 @@ test('ALLOWS an id test that leading text can never meet, and another id', () =>
   assert.deepEqual(summary(scan()), []);
 });
 
-test('ALLOWS an id that starts with its expression: unknown, so not a handle', () => {
+test('CATCHES an id known by its trailing text, and an id of literals or same-file consts', () => {
+  writeFixture(
+    'src/routes/palette/+page.svelte',
+    `<script lang="ts">
+  import * as Dialog from '$lib/components/ui/Dialog';
+  const uid = $props.id();
+  const BODY_ID = 'tier-body';
+  const HEAD = 'x';
+  const NESTED_ID = \`\${HEAD}-body\`;
+</script>
+<Dialog.Root><Dialog.Content><Dialog.Body id="{uid}-results" role="listbox">a</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content><Dialog.Body id={BODY_ID}>b</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content><Dialog.Body id={'lit-body'}>c</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content><Dialog.Body id={\`tpl-body\`}>d</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content><Dialog.Body id={NESTED_ID}>e</Dialog.Body></Dialog.Content></Dialog.Root>
+`
+  );
+  // Review c5 (G5-G-L1): the c4 fix dropped these with the empty prefix.
+  writeFixture(
+    'src/lib/styles/layout.css',
+    [
+      "[id$='-results'] { overflow: visible; }",
+      "[id$='results'] { overflow: visible; }",
+      "[id$='x-results'] { overflow: visible; }",
+      "[id*='result'] { flex: none; }",
+      '#palette-results { flex: none; }',
+      "[id='a-results'] { flex: none; }",
+      '#tier-body { overflow: visible; }',
+      '#lit-body { overflow: visible; }',
+      '#tpl-body { overflow: visible; }',
+      '#x-body { overflow: visible; }',
+      '',
+    ].join('\n')
+  );
+
+  const result = scan();
+  assert.deepEqual(
+    result.violations.filter((v) => v.file.endsWith('layout.css')).map((v) => `${v.rule}@${v.line}`),
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((line) => `part-class@${line}`)
+  );
+  assert.match(result.violations[0].detail, /restyles Dialog\.Body through its id …-results/);
+});
+
+test('ALLOWS an id known by its trailing text under a test of its head, and an id that is all expression', () => {
   writeFixture(
     'src/routes/palette/+page.svelte',
     `<script lang="ts">
@@ -1413,7 +1456,15 @@ test('ALLOWS an id that starts with its expression: unknown, so not a handle', (
   // Review c4 (G4-L7): an empty leading text matched EVERY id.
   writeFixture(
     'src/lib/styles/layout.css',
-    ['#main-content { scroll-margin-top: var(--space-16); }', "[id$='-results'] { min-height: 0; }", "[id^='x'] { flex: none; }", ''].join('\n')
+    [
+      '#main-content { scroll-margin-top: var(--space-16); }',
+      "[id^='x'] { flex: none; }",
+      "[id|='x'] { flex: none; }",
+      '#x-result { flex: none; }',
+      "[id*='zz'] { flex: none; }",
+      "[id$=''] { flex: none; }",
+      '',
+    ].join('\n')
   );
 
   assert.deepEqual(summary(scan()), []);

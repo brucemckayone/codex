@@ -52,9 +52,10 @@
  *                  Every class, id and attribute ANY file hands Dialog.Content,
  *                  Header, Toolbar, Body, Footer or Form is collected first
  *                  (a class: only what its value can produce; an attribute
- *                  an expression decides: any value; an id an expression
- *                  builds: its leading text, and nothing when it starts
- *                  with the expression). A global rule in any .svelte
+ *                  an expression decides: any value; an id of literals or
+ *                  same-file consts: that id; one an expression builds: the
+ *                  text before it, or, when it starts with the expression,
+ *                  the text after it). A global rule in any .svelte
  *                  or .css file then fails when its selector names one of
  *                  those handles and its subject could be that part. The
  *                  subject can't be when it carries a class or id no part
@@ -1506,10 +1507,35 @@ function staticValue(attr) {
   return parts.every((p) => p.type === 'Text') ? parts.map((p) => p.data).join('') : null;
 }
 
-/** An attribute's text before its first expression: all an `id="x-{n}"` is known by. */
-function leadingText(attr) {
+/**
+ * What an `id` value is known by: `{ id }` when every piece is text or a
+ * constant, else the text before its first unknown piece (`prefix`) and
+ * after its last (`suffix`). `id="x-{n}"` is known by `x-`, and
+ * `id="{uid}-results"` by `-results`.
+ */
+function idShape(attr, consts) {
   const parts = Array.isArray(attr.value) ? attr.value : [attr.value];
-  return parts[0]?.type === 'Text' ? parts[0].data : '';
+  const pieces = parts.map((p) => (p.type === 'Text' ? p.data : constantString(p.expression, consts)));
+  if (!pieces.includes(null)) return { id: pieces.join('') };
+  return { prefix: pieces.slice(0, pieces.indexOf(null)).join(''), suffix: pieces.slice(pieces.lastIndexOf(null) + 1).join('') };
+}
+
+/** The string an expression always is, as far as literals and same-file consts show, or null. */
+function constantString(expr, consts, seen = new Set()) {
+  switch (expr?.type) {
+    case 'Literal':
+      return typeof expr.value === 'string' || typeof expr.value === 'number' ? String(expr.value) : null;
+    case 'TemplateLiteral': {
+      const values = expr.expressions.map((e) => constantString(e, consts, seen));
+      if (values.includes(null)) return null;
+      return expr.quasis.map((q, i) => (q.value.cooked ?? q.value.raw) + (values[i] ?? '')).join('');
+    }
+    case 'Identifier':
+      if (!consts.has(expr.name) || seen.has(expr.name)) return null;
+      return constantString(consts.get(expr.name), consts, new Set([...seen, expr.name]));
+    default:
+      return TS_VALUE_HOLDERS.has(expr?.type) ? constantString(expr.expression, consts, seen) : null;
+  }
 }
 
 /** An attribute that lands on a part's element as written (not a part prop, not a handler). */
@@ -1517,13 +1543,15 @@ const landsOnElement = (name) => name.includes('-') || HTML_GLOBAL_ATTRS.has(nam
 
 /**
  * Pass one of part-class: every handle this file hands a part that draws
- * the panel, added to `handles`: class or static id -> owner; an id an
- * expression builds -> its leading text (`idPrefixes`); attribute name ->
- * [{value, …owner}], value null when an expression decides it, which then
- * matches any value a selector tests (the conservative reading). An owner
- * is {part, file, line}.
+ * the panel, added to `handles`: class or id -> owner (an id of literals or
+ * same-file consts is static); an id an expression builds -> its leading
+ * text (`idPrefixes`), or, when it starts with the expression, its trailing
+ * text (`idSuffixes`); attribute name -> [{value, …owner}], value null when
+ * an expression decides it, which then matches any value a selector tests
+ * (the conservative reading). An owner is {part, file, line}.
  */
 function collectHandles(ast, bindings, file, handles, source) {
+  const consts = constInits([ast.module?.content, ast.instance?.content].filter(Boolean));
   walk(ast.fragment, (node) => {
     const part = partOf(node, bindings);
     if (!BOX_PARTS.has(part)) return;
@@ -1534,10 +1562,12 @@ function collectHandles(ast, bindings, file, handles, source) {
       if (attr.name === 'class') {
         for (const name of classNames(attr)) handles.classes.set(name, owner);
       } else if (attr.name === 'id') {
-        const id = staticValue(attr);
+        if (attr.value === true) continue;
+        const { id, prefix, suffix } = idShape(attr, consts);
         if (id) handles.ids.set(id, owner);
-        // An id that starts with its expression (`{uid}-results`) is unknown, not a handle.
-        else if (id === null && leadingText(attr)) (handles.idPrefixes ??= []).push({ prefix: leadingText(attr), ...owner });
+        else if (prefix) (handles.idPrefixes ??= []).push({ prefix, ...owner });
+        // An id that is all expression (`{listId}`) is known by nothing.
+        else if (suffix) (handles.idSuffixes ??= []).push({ suffix, ...owner });
       } else if (landsOnElement(attr.name)) {
         const list = handles.attrs.get(attr.name) ?? [];
         list.push({ value: staticValue(attr), ...owner });
@@ -1558,16 +1588,32 @@ function idPrefixMatches({ op, value }, prefix) {
   return op === '^=' || op === '|=' ? v.startsWith(p) || p.startsWith(v) : v.startsWith(p);
 }
 
+/**
+ * Whether an `[id OP v]` test can match an id known only by its trailing
+ * text. A test of the unknown head (`^=`, `|=`) can't be judged, so it
+ * counts as no match; `$=` matches where v and the suffix overlap at the end.
+ */
+function idSuffixMatches({ op, value }, suffix) {
+  if (op === null) return true;
+  const v = value.toLowerCase();
+  const s = suffix.toLowerCase();
+  if (op === '$=') return v !== '' && (v.endsWith(s) || s.endsWith(v));
+  if (op === '*=') return v !== '' && s.includes(v);
+  return op === '=' || op === '~=' ? v.endsWith(s) : false;
+}
+
 /** The first handle a part took that this selector text names, or null. */
 function namedHandle(text, handles) {
   const { classes, ids, attrs } = selectorNames(text);
   const prefixes = handles.idPrefixes ?? [];
+  const suffixes = handles.idSuffixes ?? [];
   for (const name of classes) {
     const owner = handles.classes.get(name);
     if (owner) return { ...owner, shown: `its class .${name}` };
   }
   for (const id of ids) {
-    const owner = handles.ids.get(id) ?? prefixes.find((p) => id.startsWith(p.prefix));
+    const owner =
+      handles.ids.get(id) ?? prefixes.find((p) => id.startsWith(p.prefix)) ?? suffixes.find((p) => id.endsWith(p.suffix));
     if (owner) return { ...owner, shown: `its id #${id}` };
   }
   for (const test of attrs) {
@@ -1581,6 +1627,8 @@ function namedHandle(text, handles) {
       }
       const owner = prefixes.find((p) => idPrefixMatches(test, p.prefix));
       if (owner) return { ...owner, shown: `its id ${owner.prefix}…` };
+      const tail = suffixes.find((p) => idSuffixMatches(test, p.suffix));
+      if (tail) return { ...tail, shown: `its id …${tail.suffix}` };
     } else {
       const owner = (handles.attrs.get(test.name) ?? []).find((h) => attrTestMatches(test, h.value));
       if (owner) return { ...owner, shown: `its attribute [${test.name}]` };
@@ -1601,9 +1649,12 @@ function isOwnElement(compound, handles) {
   if (type && type !== 'div' && type !== 'form' && type !== '*') return true;
   const { classes, ids } = selectorNames(bare);
   const prefixes = handles.idPrefixes ?? [];
+  const suffixes = handles.idSuffixes ?? [];
   return (
     classes.some((name) => !handles.classes.has(name)) ||
-    ids.some((id) => !handles.ids.has(id) && !prefixes.some((p) => id.startsWith(p.prefix)))
+    ids.some(
+      (id) => !handles.ids.has(id) && !prefixes.some((p) => id.startsWith(p.prefix)) && !suffixes.some((p) => id.endsWith(p.suffix))
+    )
   );
 }
 
@@ -2050,7 +2101,7 @@ export function collectViolations({ srcRoot = join(WEB_ROOT, 'src'), cwd = WEB_R
     ownDialogExempt: (file) => isInside(dialogDir, file) || isInside(popoverDir, file),
     // Test helpers and stories find parts to drive them, and never ship.
     scriptSelectExempt: (file) => isInside(join(srcRoot, 'tests'), file) || STORY_FILE.test(file),
-    handles: { classes: new Map(), ids: new Map(), idPrefixes: [], attrs: new Map() },
+    handles: { classes: new Map(), ids: new Map(), idPrefixes: [], idSuffixes: [], attrs: new Map() },
     nameOf: (file) => relative(cwd, file).split(sep).join('/'),
   };
   const { nameOf } = ctx;
