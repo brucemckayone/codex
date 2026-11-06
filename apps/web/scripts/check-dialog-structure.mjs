@@ -52,8 +52,10 @@
  *                  Every class, id and attribute ANY file hands Dialog.Content,
  *                  Header, Toolbar, Body, Footer or Form is collected first
  *                  (a class: only what its value can produce; an attribute
- *                  an expression decides: any value; an id an expression
- *                  builds: its leading text). A global rule in any .svelte
+ *                  an expression decides: any value; an id of literals or
+ *                  same-file consts: that id; one an expression builds: the
+ *                  text before it, or, when it starts with the expression,
+ *                  the text after it). A global rule in any .svelte
  *                  or .css file then fails when its selector names one of
  *                  those handles and its subject could be that part. The
  *                  subject can't be when it carries a class or id no part
@@ -80,19 +82,28 @@
  *                  markup expressions, or in a .ts/.js file, names a Dialog
  *                  class as a selector (`querySelector('.dialog-body')`,
  *                  `closest('.dialog-content')`): script that finds a part
- *                  can restyle it inline.
+ *                  can restyle it inline. src/tests/ and *.stories.svelte
+ *                  drive the parts and never ship, so they may.
  *   part-style     Outside ui/Dialog/, no part that draws the panel takes an
  *                  inline `style=` or `style:` directive: it beats every
  *                  scoped rule the part keeps its scroll chain with.
  *                  Dialog.Content's maxWidth / maxHeight props are the
- *                  sanctioned size hatches, and they take a CSS length:
- *                  `none`, `auto` or a unitless number would remove the cap.
+ *                  sanctioned size hatches, and they take a CSS length as
+ *                  the CssLength type spells one (its units, a math
+ *                  function, a token): `none`, `auto` or a unitless number
+ *                  would remove the cap. Each whole value is judged; a
+ *                  template is tested with a number for each `${}`, and
+ *                  each `${}` must be a literal or a choice of literals.
  *   part-dynamic   Outside ui/Dialog/, a part that draws the panel takes no
  *                  {...spread} and no {@attach}, and its class is literal
  *                  (text, string literals, a conditional or template of them,
  *                  an object's keys). A class held in a variable or a prop
  *                  can't be checked against part-class, which is how a
  *                  wrapper component would bring the forked drawer back.
+ *                  So with Content's maxWidth / maxHeight: a value with no
+ *                  literal (a wrapper forwarding its `maxHeight?: string`)
+ *                  can't be seen to be a length, and no CI job type-checks
+ *                  a .svelte file, so it fails.
  *   part-attr      Outside ui/Dialog/, no page sets a part's own attributes:
  *                  the data attributes the parts set themselves (their CSS
  *                  reads them: `data-layout="drawer"` on Body is
@@ -102,6 +113,12 @@
  *                  (`<svelte:head><style>`) and no {@html} writes one (its
  *                  own literals, or a same-file const's): their rules are
  *                  global and never reach this check.
+ *   popover-name   Outside ui/Popover/, a Popover.Content has aria-label or
+ *                  aria-labelledby on its tag that names it: text, a call or
+ *                  a member (`m.x()`), not an undefined, null or '' it can
+ *                  result in, nor a prop with no default (a wrapper's
+ *                  `label?: string`, which a parent may leave unset). Its
+ *                  Name type requires one, but CI type-checks no .svelte.
  *   own-dialog     Outside ui/Dialog/ and ui/Popover/, nothing builds a modal
  *                  by hand: no role="dialog"/"alertdialog" (a conditional,
  *                  logical or template result included; the shared Dialog
@@ -121,7 +138,9 @@
  *                  and any .ts or .js file outside ui/Dialog/ (ui/ included)
  *                  that imports it: a barrel one step away would hand its
  *                  pages an alias this check can't resolve. Type-only imports
- *                  read no value and pass.
+ *                  read no value and pass. Outside ui/Popover/, the
+ *                  Popover's parts are tags only too (`UI.Popover` of the ui
+ *                  barrel included), so popover-name sees every panel.
  *   parse          A .svelte or .css file that does not parse fails loudly.
  *
  * "Direct child" looks THROUGH {#if}/{#each}/{#key}/{#await}/{#snippet}
@@ -288,11 +307,18 @@ const DATA_ATTR_PROP = { 'data-direction': PART_PROPS.Toolbar, 'data-align': PAR
 // Another component's scoping class: `.svelte-1vhe744` is a part's own.
 const SVELTE_HASH_RE = /\.svelte-[a-z0-9]+(?![\w-])/;
 
-// A CSS length for maxHeight / maxWidth: a number with a unit, a percentage,
-// or a function that computes one. `none`, `auto` and a bare number are not,
-// and an invalid value inside the part's min() drops the cap altogether.
-const CSS_LENGTH =
-  /^\s*(?:-?(?:\d+\.?\d*|\.\d+)(?:px|r?em|r?lh|ch|ex|cap|[dsl]?v(?:h|w|i|b|min|max)|vmin|vmax|cq(?:w|h|i|b|min|max)|pt|pc|in|cm|mm|q|%)|(?:calc|min|max|clamp|var)\(.*\))\s*$/i;
+// The units and math functions Dialog.Content's CssLength type takes
+// (ui/Dialog/css-length.ts). A test pins that these lists equal the type's,
+// so the gate and svelte-check agree on which units a length may take.
+export const LENGTH_UNITS = ['px', 'rem', 'em', 'ch', '%', 'vw', 'vh', 'dvw', 'dvh', 'svw', 'svh', 'lvw', 'lvh', 'vmin', 'vmax', 'cqw', 'cqh', 'cqi', 'cqb'];
+export const MATH_FUNCTIONS = ['calc', 'min', 'max', 'clamp'];
+
+// A CSS length for maxHeight / maxWidth, as CssLength spells one: a number
+// with a unit, a math function, or a token. `none`, `auto` and a bare number
+// are not, and an invalid value inside the part's min() drops the cap.
+const CSS_LENGTH = new RegExp(
+  `^\\s*(?:-?(?:\\d+\\.?\\d*|\\.\\d+)(?:${LENGTH_UNITS.join('|')})|(?:${MATH_FUNCTIONS.join('|')})\\(.*\\)|var\\(--.*\\))\\s*$`
+);
 
 // All a page may set on its own Dialog.Form class. Anything else could
 // decide whether the form passes the panel's column down to Body.
@@ -354,6 +380,7 @@ const SCANNED_EXTS = ['.svelte', '.css', '.ts', '.js', '.mts', '.mjs', '.cts', '
 
 // Tests are not shipped: what they import reaches no page.
 const TEST_FILE = /\.(?:test|spec)\.[cm]?[jt]s$/;
+const STORY_FILE = /\.stories\.svelte$/;
 
 // Nodes that render no element of their own: look through to their children.
 const TRANSPARENT_BLOCKS = {
@@ -488,9 +515,17 @@ function collectBindings(file, programs, ctx, report) {
   return bindings;
 }
 
-/** The local names a file binds to the shared Popover: namespaces and parts. */
+// The names ui/Popover/index.ts exports its panel under.
+const POPOVER_CONTENT = new Set(['Content', 'PopoverContent']);
+
+/**
+ * The local names a file binds to the shared Popover: namespaces, parts,
+ * which of the parts is the panel (`contents`), and the ui barrel's own
+ * namespaces (`uiNamespaces`: `UI` of `import * as UI from '$lib/components/ui'`,
+ * whose `UI.Popover` is the module).
+ */
 function collectPopoverNames(file, programs, ctx) {
-  const names = { namespaces: new Set(), parts: new Set() };
+  const names = { namespaces: new Set(), parts: new Set(), contents: new Set(), uiNamespaces: new Set() };
   for (const stmt of programs.flatMap((program) => program.body)) {
     if (stmt.type !== 'ImportDeclaration') continue;
     const target = specifierTarget(file, stmt.source.value, ctx);
@@ -499,17 +534,113 @@ function collectPopoverNames(file, programs, ctx) {
     for (const s of stmt.specifiers) {
       const imported = s.imported?.name ?? s.imported?.value;
       if (popover) (s.type === 'ImportNamespaceSpecifier' ? names.namespaces : names.parts).add(s.local.name);
+      else if (target === ctx.uiDir && s.type === 'ImportNamespaceSpecifier') names.uiNamespaces.add(s.local.name);
       // The ui barrel re-exports the module as `Popover`.
       else if (target === ctx.uiDir && imported === 'Popover') names.namespaces.add(s.local.name);
+      const isContent =
+        target === ctx.popoverDir
+          ? POPOVER_CONTENT.has(imported)
+          : target === join(ctx.popoverDir, 'PopoverContent.svelte') && (s.type === 'ImportDefaultSpecifier' || imported === 'default');
+      if (isContent) names.contents.add(s.local.name);
     }
   }
   return names;
 }
 
+/** A Popover tag's part name: `Content` of `Popover.Content` or `UI.Popover.Content`, the local name of a part, or null. */
+function popoverPartName(node, popover) {
+  if (node.type !== 'Component') return null;
+  const path = node.name.split('.');
+  if (path.length === 1) return popover.parts.has(node.name) ? node.name : null;
+  if (path.length === 2) return popover.namespaces.has(path[0]) ? path[1] : null;
+  return path.length === 3 && popover.uiNamespaces.has(path[0]) && path[1] === 'Popover' ? path[2] : null;
+}
+
 function isPopoverPart(node, popover) {
-  if (node.type !== 'Component') return false;
-  const dot = node.name.indexOf('.');
-  return dot === -1 ? popover.parts.has(node.name) : popover.namespaces.has(node.name.slice(0, dot));
+  return popoverPartName(node, popover) !== null;
+}
+
+function isPopoverContent(node, popover) {
+  const name = popoverPartName(node, popover);
+  return name !== null && (node.name.includes('.') ? POPOVER_CONTENT.has(name) : popover.contents.has(name));
+}
+
+/** The names a component's `$props()` destructuring binds with no default: a parent may leave them unset. */
+function propsWithoutDefault(programs) {
+  const names = new Set();
+  walk(programs, (node) => {
+    const init = node.type === 'VariableDeclarator' ? node.init : null;
+    if (init?.type !== 'CallExpression' || init.callee.type !== 'Identifier' || init.callee.name !== '$props') return;
+    if (node.id.type !== 'ObjectPattern') return;
+    for (const p of node.id.properties) if (p.type === 'Property' && p.value.type === 'Identifier') names.add(p.value.name);
+  });
+  return names;
+}
+
+const NAME_RANK = { named: 0, unproven: 1, none: 2 };
+const worstName = (verdicts) => verdicts.reduce((a, b) => (NAME_RANK[b] > NAME_RANK[a] ? b : a), 'named');
+
+/**
+ * What an aria-label / aria-labelledby value names: 'named', 'none' (empty
+ * text, or an undefined, null or '' it can result in) or 'unproven' (a
+ * prop with no default, which a parent may leave unset). A call or a member
+ * (paraglide's `m.x()`) names it.
+ */
+function nameVerdict(attr, unsetProps) {
+  const text = staticValue(attr);
+  if (text !== null) return text.trim() ? 'named' : 'none';
+  const parts = Array.isArray(attr.value) ? attr.value : [attr.value];
+  if (parts.some((p) => p.type === 'Text' && p.data.trim())) return 'named';
+  const judge = (expr) => {
+    switch (expr?.type) {
+      case 'Literal':
+        return expr.value === null || (typeof expr.value === 'string' && !expr.value.trim()) ? 'none' : 'named';
+      case 'Identifier':
+        if (expr.name === 'undefined') return 'none';
+        return unsetProps.has(expr.name) ? 'unproven' : 'named';
+      case 'TemplateLiteral':
+        return expr.quasis.some((q) => (q.value.cooked ?? q.value.raw).trim()) ? 'named' : worstName(expr.expressions.map(judge));
+      case 'ConditionalExpression':
+        return worstName([judge(expr.consequent), judge(expr.alternate)]);
+      case 'LogicalExpression':
+        // `label ?? 'Info'` names it whenever label doesn't.
+        return judge(expr.right);
+      default:
+        return TS_VALUE_HOLDERS.has(expr?.type) ? judge(expr.expression) : 'named';
+    }
+  };
+  return worstName(parts.filter((p) => p.type !== 'Text').map((p) => judge(p.expression)));
+}
+
+/**
+ * popover-name: a Popover panel outside ui/Popover/ carries aria-label or
+ * aria-labelledby on its tag. Its Name type requires one, but no CI job
+ * type-checks a .svelte file. A literal, a call or a member names it; an
+ * empty text, an undefined, null or '' literal, or a {...spread} does not,
+ * and a prop with no default (a wrapper's `label?: string`) is unproven.
+ */
+function checkPopoverNames(fragment, programs, popover, report) {
+  const unsetProps = propsWithoutDefault(programs);
+  walk(fragment, (node) => {
+    if (!isPopoverContent(node, popover)) return;
+    const names = node.attributes.filter((a) => a.type === 'Attribute' && (a.name === 'aria-label' || a.name === 'aria-labelledby'));
+    const verdicts = names.map((a) => nameVerdict(a, unsetProps));
+    if (verdicts.includes('named')) return;
+    if (verdicts.includes('unproven')) {
+      report(
+        node.start,
+        'popover-name',
+        `<${node.name}>'s name comes from a prop with no default, so a parent can leave the panel unnamed (a dialog needs a name); give the prop a default, or write the name on the tag`
+      );
+      return;
+    }
+    const spread = node.attributes.some((a) => a.type === 'SpreadAttribute') ? '; a {...spread} cannot be read, so write it on the tag' : '';
+    report(
+      node.start,
+      'popover-name',
+      `<${node.name}> has no name: the panel is a dialog, and a dialog needs one; give it aria-label, or aria-labelledby pointing at its heading${spread}`
+    );
+  });
 }
 
 /** Whether an Identifier under `parent[key]` names something, rather than reads it. */
@@ -525,8 +656,12 @@ function isNameOnly(parent, key) {
  * expression, can hand a part to something this check cannot see. Type
  * positions read no value; tag names are not expressions.
  */
-function checkValueReads(roots, bindings, report) {
-  if (bindings.size === 0) return;
+function checkValueReads(roots, bindings, report, what = 'Dialog', uiNamespaces = new Set()) {
+  if (bindings.size === 0 && uiNamespaces.size === 0) return;
+  const detail = (name) =>
+    what === 'Dialog'
+      ? `'${name}' is read as a value; use the Dialog's parts as tags only`
+      : `'${name}' is read as a value; use the ${what}'s parts as tags only, so each panel stays where popover-name can see it`;
   const visit = (node, parent, key) => {
     if (Array.isArray(node)) {
       for (const item of node) visit(item, parent, key);
@@ -537,9 +672,15 @@ function checkValueReads(roots, bindings, report) {
       if (TS_VALUE_HOLDERS.has(node.type)) visit(node.expression, node, 'expression');
       return;
     }
-    if (node.type === 'Identifier' && bindings.has(node.name) && !isNameOnly(parent, key)) {
-      report(node.start, 'alias', `'${node.name}' is read as a value; use the Dialog's parts as tags only`);
-    }
+    if (node.type === 'Identifier' && bindings.has(node.name) && !isNameOnly(parent, key)) report(node.start, 'alias', detail(node.name));
+    // The module read through the ui barrel's namespace: `UI.Popover`.
+    const viaUi =
+      node.type === 'MemberExpression' &&
+      !node.computed &&
+      node.object.type === 'Identifier' &&
+      uiNamespaces.has(node.object.name) &&
+      node.property.name === what;
+    if (viaUi) report(node.start, 'alias', detail(`${node.object.name}.${what}`));
     for (const [k, value] of Object.entries(node)) {
       if (k !== 'metadata' && value && typeof value === 'object') visit(value, node, k);
     }
@@ -997,18 +1138,24 @@ function checkPartAttributes(fragment, bindings, report) {
         );
       }
       if (!BOX_PARTS.has(part)) continue;
-      const badSize = part === 'Content' && attr.type === 'Attribute' && /^max(Height|Width)$/.test(attr.name) ? notALength(attr) : null;
+      const size = part === 'Content' && attr.type === 'Attribute' && /^max(Height|Width)$/.test(attr.name) ? sizeVerdict(attr) : null;
       if (attr.type === 'Attribute' && PART_DATA_ATTRS.has(attr.name)) {
         report(
           attr.start,
           'part-attr',
           `${describe(node)} sets ${attr.name}, which the part sets itself and its CSS reads; use ${DATA_ATTR_PROP[attr.name] ?? CONTENT_PROPS} instead`
         );
-      } else if (badSize !== null) {
+      } else if (size?.bad !== undefined) {
         report(
           attr.start,
           'part-style',
-          `${describe(node)} ${attr.name}="${badSize}" is not a CSS length, so the panel loses its cap and clips its Footer; give a length (40rem, 60dvh) or a calc()/min()/max()/clamp() of one`
+          `${describe(node)} ${attr.name}="${size.bad}" is not a CSS length, so the panel loses its cap and clips its Footer; give a length (40rem, 60dvh) or a calc()/min()/max()/clamp() of one`
+        );
+      } else if (size?.opaque) {
+        report(
+          attr.start,
+          'part-dynamic',
+          `${describe(node)}'s ${attr.name} is not a literal, so nothing in CI can see it is a CSS length (a wrapper's string prop brings back ${attr.name}="none"); write a literal length, or a conditional of literal lengths`
         );
       } else if ((attr.type === 'Attribute' && attr.name === 'style') || attr.type === 'StyleDirective') {
         report(
@@ -1040,18 +1187,82 @@ function checkPartAttributes(fragment, bindings, report) {
 }
 
 /**
- * The first value a maxHeight / maxWidth can take that is not a CSS length,
- * or null: its text, and each literal its expression can result in. An
- * expression with no literal (a prop, a variable) is the page's to type.
+ * What a maxHeight / maxWidth tells a source check, or null when every value
+ * it can take is a CSS length: `{ bad }`, the first whole value that is not
+ * one, as written; or `{ opaque: true }` when a value it can take has no
+ * literal at all (a prop, a variable, a call), which no CI job checks: tsc
+ * never reads a .svelte file. Each whole value is judged on its own: a
+ * conditional's branches, `&&`'s right side, both sides of `||` and `??`. A
+ * template is one value, tested with a number in place of each `${}`
+ * (`${tall ? 48 : 32}rem` as 0rem), and each `${}` must itself be literal:
+ * `${rows * 3}rem` is "NaNrem" while rows is unset, and min(NaNrem, …)
+ * drops the cap just as `none` does.
  */
-function notALength(attr) {
-  if (attr.value === true) return 'true';
+function sizeVerdict(attr) {
+  if (attr.value === true) return { bad: 'true' };
   const parts = Array.isArray(attr.value) ? attr.value : [attr.value];
-  const text = parts.every((p) => p.type === 'Text') ? [parts.map((p) => p.data).join('')] : [];
-  const results = (expr) =>
-    expr?.type === 'Literal' && typeof expr.value === 'number' ? [String(expr.value)] : resultStrings(expr);
-  const values = [...text, ...parts.filter((p) => p.type !== 'Text').flatMap((p) => results(p.expression))];
-  return values.find((v) => !CSS_LENGTH.test(v)) ?? null;
+  const values = [];
+  let opaque = false;
+  const whole = (pieces) => {
+    values.push({
+      test: pieces.map((p) => (typeof p === 'string' ? p : '0')).join(''),
+      shown: pieces.map((p) => (typeof p === 'string' ? p : '{…}')).join(''),
+    });
+  };
+  // A template's `${}` holds a fragment: a literal, or a choice of literals.
+  const fragment = (expr) => {
+    if (!isLiteralFragment(expr)) opaque = true;
+  };
+  const visit = (expr) => {
+    switch (expr?.type) {
+      case 'Literal':
+        // null leaves the prop unset; true, false or a regex is no length.
+        if (expr.value !== null) whole([String(expr.value)]);
+        return;
+      case 'TemplateLiteral':
+        expr.expressions.forEach(fragment);
+        whole(expr.quasis.flatMap((q, i) => (i < expr.expressions.length ? [q.value.cooked ?? q.value.raw, null] : [q.value.cooked ?? q.value.raw])));
+        return;
+      case 'ConditionalExpression':
+        visit(expr.consequent);
+        visit(expr.alternate);
+        return;
+      case 'LogicalExpression':
+        if (expr.operator !== '&&') visit(expr.left);
+        visit(expr.right);
+        return;
+      case 'Identifier':
+        if (expr.name !== 'undefined') opaque = true;
+        return;
+      default:
+        if (TS_VALUE_HOLDERS.has(expr?.type)) visit(expr.expression);
+        else opaque = true;
+    }
+  };
+  // `maxHeight="{rows * 2}rem"` is a template too; a lone `{…}` is its expression.
+  if (parts.length === 1 && parts[0].type === 'ExpressionTag') visit(parts[0].expression);
+  else {
+    for (const p of parts) if (p.type !== 'Text') fragment(p.expression);
+    whole(parts.map((p) => (p.type === 'Text' ? p.data : null)));
+  }
+  const bad = values.find((v) => !CSS_LENGTH.test(v.test));
+  if (bad) return { bad: bad.shown };
+  return opaque ? { opaque: true } : null;
+}
+
+/** A number or string literal, or a conditional or logical of them, under any TS wrapper. */
+function isLiteralFragment(expr) {
+  switch (expr?.type) {
+    case 'Literal':
+      return typeof expr.value === 'string' || typeof expr.value === 'number';
+    case 'ConditionalExpression':
+      return isLiteralFragment(expr.consequent) && isLiteralFragment(expr.alternate);
+    case 'LogicalExpression':
+      // Of two literals, any operator gives back one of them.
+      return isLiteralFragment(expr.left) && isLiteralFragment(expr.right);
+    default:
+      return TS_VALUE_HOLDERS.has(expr?.type) && isLiteralFragment(expr.expression);
+  }
 }
 
 function isLiteralClass(attr) {
@@ -1099,7 +1310,7 @@ function checkMarkupStyle(fragment, consts, report) {
 // A Dialog class written as a selector token, in a string.
 const DIALOG_SELECTOR_RE = new RegExp(DIALOG_CLASS_RE.source);
 const scriptSelectDetail = (name) =>
-  `a string names the Dialog's ${name} as a selector, so script can find the part and restyle it inline; style your own element inside the part`;
+  `a string names the Dialog's ${name} as a selector, so script can find the part and restyle it inline; style your own element inside the part (to bring something into view, call scrollIntoView() on your own element)`;
 
 /** script-select: a selector string naming a Dialog class, in script or a markup expression. */
 function checkScriptSelectors(roots, report) {
@@ -1373,10 +1584,35 @@ function staticValue(attr) {
   return parts.every((p) => p.type === 'Text') ? parts.map((p) => p.data).join('') : null;
 }
 
-/** An attribute's text before its first expression: all an `id="x-{n}"` is known by. */
-function leadingText(attr) {
+/**
+ * What an `id` value is known by: `{ id }` when every piece is text or a
+ * constant, else the text before its first unknown piece (`prefix`) and
+ * after its last (`suffix`). `id="x-{n}"` is known by `x-`, and
+ * `id="{uid}-results"` by `-results`.
+ */
+function idShape(attr, consts) {
   const parts = Array.isArray(attr.value) ? attr.value : [attr.value];
-  return parts[0]?.type === 'Text' ? parts[0].data : '';
+  const pieces = parts.map((p) => (p.type === 'Text' ? p.data : constantString(p.expression, consts)));
+  if (!pieces.includes(null)) return { id: pieces.join('') };
+  return { prefix: pieces.slice(0, pieces.indexOf(null)).join(''), suffix: pieces.slice(pieces.lastIndexOf(null) + 1).join('') };
+}
+
+/** The string an expression always is, as far as literals and same-file consts show, or null. */
+function constantString(expr, consts, seen = new Set()) {
+  switch (expr?.type) {
+    case 'Literal':
+      return typeof expr.value === 'string' || typeof expr.value === 'number' ? String(expr.value) : null;
+    case 'TemplateLiteral': {
+      const values = expr.expressions.map((e) => constantString(e, consts, seen));
+      if (values.includes(null)) return null;
+      return expr.quasis.map((q, i) => (q.value.cooked ?? q.value.raw) + (values[i] ?? '')).join('');
+    }
+    case 'Identifier':
+      if (!consts.has(expr.name) || seen.has(expr.name)) return null;
+      return constantString(consts.get(expr.name), consts, new Set([...seen, expr.name]));
+    default:
+      return TS_VALUE_HOLDERS.has(expr?.type) ? constantString(expr.expression, consts, seen) : null;
+  }
 }
 
 /** An attribute that lands on a part's element as written (not a part prop, not a handler). */
@@ -1384,13 +1620,15 @@ const landsOnElement = (name) => name.includes('-') || HTML_GLOBAL_ATTRS.has(nam
 
 /**
  * Pass one of part-class: every handle this file hands a part that draws
- * the panel, added to `handles`: class or static id -> owner; an id an
- * expression builds -> its leading text (`idPrefixes`); attribute name ->
- * [{value, …owner}], value null when an expression decides it, which then
- * matches any value a selector tests (the conservative reading). An owner
- * is {part, file, line}.
+ * the panel, added to `handles`: class or id -> owner (an id of literals or
+ * same-file consts is static); an id an expression builds -> its leading
+ * text (`idPrefixes`), or, when it starts with the expression, its trailing
+ * text (`idSuffixes`); attribute name -> [{value, …owner}], value null when
+ * an expression decides it, which then matches any value a selector tests
+ * (the conservative reading). An owner is {part, file, line}.
  */
 function collectHandles(ast, bindings, file, handles, source) {
+  const consts = constInits([ast.module?.content, ast.instance?.content].filter(Boolean));
   walk(ast.fragment, (node) => {
     const part = partOf(node, bindings);
     if (!BOX_PARTS.has(part)) return;
@@ -1401,9 +1639,12 @@ function collectHandles(ast, bindings, file, handles, source) {
       if (attr.name === 'class') {
         for (const name of classNames(attr)) handles.classes.set(name, owner);
       } else if (attr.name === 'id') {
-        const id = staticValue(attr);
+        if (attr.value === true) continue;
+        const { id, prefix, suffix } = idShape(attr, consts);
         if (id) handles.ids.set(id, owner);
-        else if (id === null) (handles.idPrefixes ??= []).push({ prefix: leadingText(attr), ...owner });
+        else if (prefix) (handles.idPrefixes ??= []).push({ prefix, ...owner });
+        // An id that is all expression (`{listId}`) is known by nothing.
+        else if (suffix) (handles.idSuffixes ??= []).push({ suffix, ...owner });
       } else if (landsOnElement(attr.name)) {
         const list = handles.attrs.get(attr.name) ?? [];
         list.push({ value: staticValue(attr), ...owner });
@@ -1424,16 +1665,32 @@ function idPrefixMatches({ op, value }, prefix) {
   return op === '^=' || op === '|=' ? v.startsWith(p) || p.startsWith(v) : v.startsWith(p);
 }
 
+/**
+ * Whether an `[id OP v]` test can match an id known only by its trailing
+ * text. A test of the unknown head (`^=`, `|=`) can't be judged, so it
+ * counts as no match; `$=` matches where v and the suffix overlap at the end.
+ */
+function idSuffixMatches({ op, value }, suffix) {
+  if (op === null) return true;
+  const v = value.toLowerCase();
+  const s = suffix.toLowerCase();
+  if (op === '$=') return v !== '' && (v.endsWith(s) || s.endsWith(v));
+  if (op === '*=') return v !== '' && s.includes(v);
+  return op === '=' || op === '~=' ? v.endsWith(s) : false;
+}
+
 /** The first handle a part took that this selector text names, or null. */
 function namedHandle(text, handles) {
   const { classes, ids, attrs } = selectorNames(text);
   const prefixes = handles.idPrefixes ?? [];
+  const suffixes = handles.idSuffixes ?? [];
   for (const name of classes) {
     const owner = handles.classes.get(name);
     if (owner) return { ...owner, shown: `its class .${name}` };
   }
   for (const id of ids) {
-    const owner = handles.ids.get(id) ?? prefixes.find((p) => id.startsWith(p.prefix));
+    const owner =
+      handles.ids.get(id) ?? prefixes.find((p) => id.startsWith(p.prefix)) ?? suffixes.find((p) => id.endsWith(p.suffix));
     if (owner) return { ...owner, shown: `its id #${id}` };
   }
   for (const test of attrs) {
@@ -1447,6 +1704,8 @@ function namedHandle(text, handles) {
       }
       const owner = prefixes.find((p) => idPrefixMatches(test, p.prefix));
       if (owner) return { ...owner, shown: `its id ${owner.prefix}…` };
+      const tail = suffixes.find((p) => idSuffixMatches(test, p.suffix));
+      if (tail) return { ...tail, shown: `its id …${tail.suffix}` };
     } else {
       const owner = (handles.attrs.get(test.name) ?? []).find((h) => attrTestMatches(test, h.value));
       if (owner) return { ...owner, shown: `its attribute [${test.name}]` };
@@ -1467,9 +1726,12 @@ function isOwnElement(compound, handles) {
   if (type && type !== 'div' && type !== 'form' && type !== '*') return true;
   const { classes, ids } = selectorNames(bare);
   const prefixes = handles.idPrefixes ?? [];
+  const suffixes = handles.idSuffixes ?? [];
   return (
     classes.some((name) => !handles.classes.has(name)) ||
-    ids.some((id) => !handles.ids.has(id) && !prefixes.some((p) => id.startsWith(p.prefix)))
+    ids.some(
+      (id) => !handles.ids.has(id) && !prefixes.some((p) => id.startsWith(p.prefix)) && !suffixes.some((p) => id.endsWith(p.suffix))
+    )
   );
 }
 
@@ -1802,7 +2064,9 @@ function checkScriptFile(file, source, ctx, report) {
         : `a .ts/.js file imports the Dialog module ('${spec}'), which can hand its parts on as values this check can't follow; import the parts in the .svelte that renders them`
     );
   }
-  for (const m of code.matchAll(DIALOG_CLASS_RE)) report(m.index, 'script-select', scriptSelectDetail(m[0]));
+  if (!ctx.scriptSelectExempt(file)) {
+    for (const m of code.matchAll(DIALOG_CLASS_RE)) report(m.index, 'script-select', scriptSelectDetail(m[0]));
+  }
   if (ctx.ownDialogExempt(file)) return;
   for (const m of code.matchAll(/(?:\?\.|\.)\s*showModal\b|\[\s*(['"`])showModal\1\s*\]/g)) {
     const line = code.slice(code.lastIndexOf('\n', m.index) + 1, m.index);
@@ -1849,15 +2113,18 @@ function checkSvelteFile(file, source, unit, ctx, report) {
   checkDynamicImports([...programs, ast.fragment], file, ctx, report);
   checkValueReads([...programs, ast.fragment], bindings, report);
   checkMarkup(ast, programs, bindings, report);
+  const popover = collectPopoverNames(file, programs, ctx);
   if (!isInside(ctx.dialogDir, file)) {
     checkPartAttributes(ast.fragment, bindings, report);
     checkMarkupStyle(ast.fragment, constInits(programs), report);
-    checkScriptSelectors([...programs, ast.fragment], report);
+    if (!ctx.scriptSelectExempt(file)) checkScriptSelectors([...programs, ast.fragment], report);
     if (ast.css) checkSvelteCss(ast.css, source, ctx.handles, ctx.nameOf(file), report);
   }
-  if (!ctx.ownDialogExempt(file)) {
-    checkOwnDialog(ast, programs, bindings, collectPopoverNames(file, programs, ctx), report);
+  if (!isInside(ctx.popoverDir, file)) {
+    checkPopoverNames(ast.fragment, programs, popover, report);
+    checkValueReads([...programs, ast.fragment], new Set([...popover.namespaces, ...popover.parts]), report, 'Popover', popover.uiNamespaces);
   }
+  if (!ctx.ownDialogExempt(file)) checkOwnDialog(ast, programs, bindings, popover, report);
 }
 
 /** Every rule that applies to one file, by its kind and where it lives. */
@@ -1912,7 +2179,9 @@ export function collectViolations({ srcRoot = join(WEB_ROOT, 'src'), cwd = WEB_R
     partFiles: readPartFiles(dialogDir),
     // The shared Dialog and Popover are the only modals built by hand.
     ownDialogExempt: (file) => isInside(dialogDir, file) || isInside(popoverDir, file),
-    handles: { classes: new Map(), ids: new Map(), idPrefixes: [], attrs: new Map() },
+    // Test helpers and stories find parts to drive them, and never ship.
+    scriptSelectExempt: (file) => isInside(join(srcRoot, 'tests'), file) || STORY_FILE.test(file),
+    handles: { classes: new Map(), ids: new Map(), idPrefixes: [], idSuffixes: [], attrs: new Map() },
     nameOf: (file) => relative(cwd, file).split(sep).join('/'),
   };
   const { nameOf } = ctx;
