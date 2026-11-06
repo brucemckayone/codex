@@ -11,6 +11,8 @@
  */
 
 import {
+  CONTENT_THUMBNAIL_MAX_BYTES,
+  CONTENT_THUMBNAIL_MIME_TYPES,
   checkContentSlugSchema,
   contentDraftSchema,
   contentQuerySchema,
@@ -21,6 +23,9 @@ import {
 } from '@codex/validation';
 import { z } from 'zod';
 import { command, form, getRequestEvent, query } from '$app/server';
+import { describeThrown } from '$lib/client-log';
+import { logger } from '$lib/observability';
+import { isReadOutage, remoteErrorStatus } from '$lib/remote/query-result';
 import { createServerApi } from '$lib/server/api';
 import { ApiError } from '$lib/server/errors';
 import { forwardClientErrors } from '$lib/server/forward-client-errors';
@@ -125,7 +130,9 @@ export const browseContent = query(
 export const getContent = query(z.string().uuid(), async (id) => {
   const { platform, cookies } = getRequestEvent();
   const api = createServerApi(platform, cookies);
-  return api.content.get(id);
+  // A 4xx keeps its status (a piece deleted, or not theirs), so the studio
+  // can tell it from an outage (Codex-a6ofh.2.3); a 5xx stays kit's 500.
+  return forwardClientErrors(() => api.content.get(id));
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -702,19 +709,25 @@ export const createContentForm = form(
 // Content Thumbnail Upload (file upload via form)
 // ─────────────────────────────────────────────────────────────────────────────
 
+const isThumbnailType = (type: string) =>
+  CONTENT_THUMBNAIL_MIME_TYPES.some((allowed) => allowed === type);
+
 const uploadThumbnailSchema = z.object({
   contentId: z.string().uuid(),
   thumbnail: z
     .instanceof(File)
     .refine(
-      (file) => ['image/png', 'image/jpeg', 'image/webp'].includes(file.type),
+      (file) => isThumbnailType(file.type),
       'Thumbnail must be PNG, JPEG, or WebP'
     )
     .refine(
-      (file) => file.size <= 10 * 1024 * 1024,
+      (file) => file.size <= CONTENT_THUMBNAIL_MAX_BYTES,
       'File must be less than 10MB'
     ),
 });
+
+/** How long the piece's read after a cover upload may take (`sendPieceBack`). */
+const PIECE_REREAD_TIMEOUT_MS = 5000;
 
 /**
  * Upload content thumbnail
@@ -737,19 +750,67 @@ export const uploadThumbnailForm = form(
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
 
+    // The piece's own read goes back with the answer, success or failure
+    // (`refreshes`), so kit never falls back to re-running every load on the
+    // page, whose failure would swap the editor for the error page mid-edit
+    // (Codex-a6ofh.2.3). It is read here and `set`, never `refresh()`ed: kit
+    // keeps a refresh's own promise and awaits it again for the response, so
+    // a failed one would fail an upload already saved. If the read fails,
+    // nothing is recorded and kit re-runs the loads, as it did before. The
+    // creator's answer waits on it, so it gets less time than a page read.
+    const sendPieceBack = async () => {
+      try {
+        // Read, THEN call the query: kit starts a query's own read a beat
+        // after it is called unless a `set` came first, so calling it before
+        // this await would read the piece twice.
+        const piece = await api.content.get(contentId, {
+          timeoutMs: PIECE_REREAD_TIMEOUT_MS,
+        });
+        getContent(contentId).set(piece);
+      } catch (error) {
+        const fields = {
+          contentId,
+          status: remoteErrorStatus(error),
+          ...describeThrown(error),
+        };
+        // An outage here is the warning that kit re-runs the page's loads.
+        if (isReadOutage(error)) {
+          logger.error('content.thumbnail_reread_failed', fields);
+        } else {
+          logger.warn('content.thumbnail_reread_failed', fields);
+        }
+      }
+    };
+
+    let thumbnailUrl: string;
     try {
-      const result = await api.content.uploadThumbnail(contentId, thumbnail);
-      return {
-        success: true as const,
-        thumbnailUrl: result.thumbnailUrl,
-      };
+      ({ thumbnailUrl } = await api.content.uploadThumbnail(
+        contentId,
+        thumbnail
+      ));
     } catch (error) {
+      // A refusal is written for the creator; anything else is an outage
+      // (the studio's one rule counts a timeout and a rate limit as one),
+      // whose message (a fetch error, a stack) never reaches them, so it is
+      // logged here. The status lets the studio log it as one too.
+      const status = ApiError.isApiError(error) ? error.status : 500;
+      const refused = ApiError.isApiError(error) && !isReadOutage(error);
+      if (!refused) {
+        logger.error('content.thumbnail_upload_failed', {
+          contentId,
+          status,
+          ...describeThrown(error),
+        });
+      }
+      await sendPieceBack();
       return {
         success: false as const,
-        error:
-          error instanceof Error ? error.message : 'Failed to upload thumbnail',
+        status,
+        error: refused ? error.message : 'Failed to upload thumbnail',
       };
     }
+    await sendPieceBack();
+    return { success: true as const, thumbnailUrl };
   }
 );
 

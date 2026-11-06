@@ -1,0 +1,258 @@
+<!--
+  @component CoverLine
+
+  The Write canvas's cover (Codex-a6ofh.2.3, mockup W6): an article's image
+  in lists, or what an audio piece's listeners see in place of the waveform.
+  It needs the row to upload to, so until the draft exists it says what to do
+  first. The upload writes the row itself, which only a draft may take here:
+  a piece that has been live keeps its cover for Update (Codex-a6ofh.2.5).
+
+  @prop {string | null} contentId - The draft's row; null until its first save
+  @prop {'audio' | 'written'} contentType - Which copy it says
+  @prop {string | null} thumbnailUrl - The saved cover
+  @prop {(busy: boolean, failed: boolean) => void} [onbusy] - A cover is being readied, sent or removed, from the moment one is picked; failed once that ended in a problem, said here
+-->
+<script lang="ts">
+  import { CONTENT_THUMBNAIL_MAX_BYTES, CONTENT_THUMBNAIL_MIME_TYPES } from '@codex/validation';
+  import { tick } from 'svelte';
+  import { Button } from '$lib/components/ui';
+  import { ImageIcon, PlusIcon } from '$lib/components/ui/Icon';
+  import { deleteThumbnailCommand, uploadThumbnailForm } from '$lib/remote/content.remote';
+  import { isReadOutage } from '$lib/remote/query-result';
+  import { getThumbnailSrcset } from '$lib/utils/image';
+  import { shrinkPhotoInput } from '$lib/utils/shrink-photo';
+  import { logger } from '$lib/observability';
+  import { describeThrown } from '$lib/client-log';
+  import * as m from '$paraglide/messages';
+
+  interface Props {
+    contentId: string | null;
+    contentType: 'audio' | 'written';
+    thumbnailUrl: string | null;
+    onbusy?: (busy: boolean, failed: boolean) => void;
+  }
+
+  const { contentId, contentType, thumbnailUrl, onbusy }: Props = $props();
+
+  /** What the upload takes (`uploadThumbnailSchema`). */
+  const COVER_TYPES: readonly string[] = CONTENT_THUMBNAIL_MIME_TYPES;
+
+  const ADD = { audio: m.studio_editor_cover_add_audio, written: m.studio_editor_cover_add_article };
+  const HINT = { audio: m.studio_editor_cover_hint_audio, written: m.studio_editor_cover_hint_article };
+
+  /** A cover set or removed here; undefined until then, so the saved one shows. */
+  let changed = $state<string | null | undefined>(undefined);
+  const cover = $derived(changed === undefined ? thumbnailUrl : changed);
+  /** A picked photo being made smaller before it goes. */
+  let preparing = $state(false);
+  let uploading = $state(false);
+  let removing = $state(false);
+  const busy = $derived(preparing || uploading || removing);
+  let problem = $state<string | null>(null);
+  $effect(() => onbusy?.(busy, !busy && problem !== null));
+  let fileInput = $state<HTMLInputElement | null>(null);
+  let coverEl = $state<HTMLElement | null>(null);
+  /** Focus was on the cover when the creator started this change. */
+  let focusWasHere = false;
+
+  function noteFocus() {
+    focusWasHere = coverEl?.contains(document.activeElement) ?? false;
+  }
+
+  /**
+   * A change disables or swaps the focused button: focus goes to the one
+   * there now. Only when it was dropped: a creator who went on writing
+   * meanwhile keeps their place (the picker's `handsFocusOn` rule).
+   */
+  async function keepFocus() {
+    if (!focusWasHere) return;
+    await tick();
+    const active = document.activeElement;
+    if (active === null || active === document.body) {
+      coverEl?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+    }
+  }
+
+  /**
+   * One upload form per piece (`.for`), never the module-wide one, whose last
+   * result outlives the page. Each submission is read in its own callback, so
+   * no earlier result replays here.
+   */
+  const coverForm = $derived(contentId ? uploadThumbnailForm.for(contentId) : null);
+  const coverAttrs = $derived(
+    coverForm?.enhance(async ({ form, submit }) => {
+      uploading = true;
+      preparing = false;
+      problem = null;
+      try {
+        await submit();
+        const result = coverForm.result;
+        if (result?.success && result.thumbnailUrl) {
+          changed = result.thumbnailUrl;
+        } else {
+          // A refusal's reason is written for the creator (the remote sends
+          // one only for a 4xx); an outage is logged as one. No result is a
+          // submission kit refused.
+          const status = result && !result.success ? result.status : undefined;
+          // No result: kit refused the submission itself (its schema), a
+          // refusal. Otherwise the media surfaces' one rule: a timeout or a
+          // rate limit is an outage too.
+          const refused = result === undefined || !isReadOutage({ status });
+          const fields = { contentId, status, answered: result !== undefined };
+          if (refused) logger.warn('studio_editor.cover_upload_refused', fields);
+          else logger.error('studio_editor.cover_upload_failed', fields);
+          // `||`: an empty reason would drop a held move with nothing said.
+          problem = (refused && result && !result.success ? result.error : null) || m.studio_editor_cover_failed();
+        }
+      } catch (err) {
+        logger.error('studio_editor.cover_upload_failed', { contentId, ...describeThrown(err) });
+        problem = m.studio_editor_cover_failed();
+      } finally {
+        uploading = false;
+        form.reset();
+        void keepFocus();
+      }
+    })
+  );
+
+  async function picked(event: Event & { currentTarget: HTMLInputElement }) {
+    const input = event.currentTarget;
+    noteFocus();
+    preparing = true;
+    /** Handed on: `uploading` takes over from `preparing` as kit starts the submission, a tick on. */
+    let sent = false;
+    try {
+      const file = await shrinkPhotoInput(input);
+      if (!file) return;
+      if (!COVER_TYPES.includes(file.type)) {
+        problem = m.studio_editor_cover_type();
+        input.value = '';
+        return;
+      }
+      if (file.size > CONTENT_THUMBNAIL_MAX_BYTES) {
+        problem = m.studio_editor_cover_too_big();
+        input.value = '';
+        return;
+      }
+      if (!input.form) return;
+      sent = true;
+      input.form.requestSubmit();
+    } finally {
+      if (!sent) preparing = false;
+    }
+  }
+
+  async function removeCover() {
+    if (!contentId) return;
+    noteFocus();
+    removing = true;
+    problem = null;
+    try {
+      await deleteThumbnailCommand(contentId);
+      changed = null;
+    } catch (err) {
+      logger.error('studio_editor.cover_remove_failed', { contentId, ...describeThrown(err) });
+      problem = m.studio_editor_cover_remove_failed();
+    } finally {
+      removing = false;
+      void keepFocus();
+    }
+  }
+
+  const hintId = $props.id();
+  const whyId = `${hintId}-why`;
+</script>
+
+<div class="cover" bind:this={coverEl}>
+  {#if cover}
+    <img
+      class="cover-image"
+      src={cover}
+      srcset={getThumbnailSrcset(cover) || undefined}
+      sizes="10rem"
+      alt={m.studio_editor_cover_alt()}
+    />
+    <div class="cover-actions">
+      <Button type="button" size="sm" variant="secondary" disabled={busy} onclick={() => fileInput?.click()}>
+        {m.studio_editor_cover_change()}
+      </Button>
+      <Button type="button" size="sm" variant="ghost" disabled={busy} onclick={removeCover}>
+        {m.studio_editor_cover_remove()}
+      </Button>
+    </div>
+  {:else}
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      class="cover-add"
+      disabled={!contentId || busy}
+      aria-describedby={contentId ? whyId : `${whyId} ${hintId}`}
+      onclick={() => fileInput?.click()}
+    >
+      {#if contentId}<PlusIcon size={16} />{:else}<ImageIcon size={16} />{/if}
+      {ADD[contentType]()}
+    </Button>
+    <!-- Beside the button, not in it: a long hint wraps under it on a phone. -->
+    <span id={whyId} class="cover-hint">{HINT[contentType]()}</span>
+    {#if !contentId}
+      <span id={hintId} class="cover-hint">{m.studio_editor_cover_needs_draft()}</span>
+    {/if}
+  {/if}
+
+  <span class="cover-hint" role="status">{uploading ? m.studio_editor_cover_uploading() : ''}</span>
+  {#if problem}<p class="cover-problem" role="alert">{problem}</p>{/if}
+
+  {#if coverForm && coverAttrs && contentId}
+    <form class="sr-only" {...coverAttrs} enctype="multipart/form-data" aria-hidden="true">
+      <input type="hidden" name="contentId" value={contentId} />
+      <input
+        bind:this={fileInput}
+        type="file"
+        name="thumbnail"
+        tabindex="-1"
+        accept={COVER_TYPES.join(',')}
+        onchange={picked}
+      />
+    </form>
+  {/if}
+</div>
+
+<style>
+  .cover {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2) var(--space-3);
+  }
+
+  .cover-image {
+    inline-size: var(--space-32);
+    aspect-ratio: 16 / 9;
+    object-fit: cover;
+    border-radius: var(--radius-md);
+    background: var(--color-surface-secondary);
+  }
+
+  .cover-actions {
+    display: flex;
+    gap: var(--space-2);
+  }
+
+  /* Its words in line with the canvas column's, as the fields' are. */
+  .cover :global(.cover-add) {
+    margin-inline-start: calc(-1 * var(--space-3));
+  }
+
+  .cover-hint {
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+  }
+
+  .cover-problem {
+    flex-basis: 100%;
+    margin: 0;
+    font-size: var(--text-sm);
+    color: var(--color-error-700);
+  }
+</style>

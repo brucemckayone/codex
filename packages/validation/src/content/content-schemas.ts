@@ -8,6 +8,7 @@ import {
   MEDIA_STATUS_GROUPS,
   MEDIA_TYPES,
   type MediaStatusGroup,
+  MIME_TYPES,
   VISIBILITY,
 } from '@codex/constants';
 import { z } from 'zod';
@@ -356,14 +357,32 @@ const mixesLegacyTierInput = (data: {
   data.includedInTierId !== undefined &&
   (data.isTierGated !== undefined || data.includedInTierIds !== undefined);
 
+/** A content title's limit: the editor's field stops where a save would be refused. */
+export const CONTENT_TITLE_MAX = 500;
+
+/** A content description's limit. */
+export const CONTENT_DESCRIPTION_MAX = 10_000;
+
+/**
+ * What a content thumbnail (its cover) may be: the upload's own check and
+ * every field that takes one, so a field never offers what the upload refuses.
+ */
+export const CONTENT_THUMBNAIL_MIME_TYPES = [
+  MIME_TYPES.IMAGE.PNG,
+  MIME_TYPES.IMAGE.JPEG,
+  MIME_TYPES.IMAGE.WEBP,
+] as const;
+
+export const CONTENT_THUMBNAIL_MAX_BYTES = 10 * 1024 * 1024;
+
 /**
  * Base content schema (without refinements)
  * Used for both create and update schemas
  */
 const baseContentSchema = z.object({
-  title: sanitizedStringSchema(1, 500, 'Title'),
+  title: sanitizedStringSchema(1, CONTENT_TITLE_MAX, 'Title'),
   slug: slugSchema,
-  description: optionalTextSchema(10000, 'Description'),
+  description: optionalTextSchema(CONTENT_DESCRIPTION_MAX, 'Description'),
   contentType: contentTypeEnum,
 
   // Media reference. A video or audio draft may have none yet; it needs one

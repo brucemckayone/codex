@@ -1054,10 +1054,13 @@ export function createServerApi(
        * Get content by ID
        *
        * @param id - Content UUID
+       * @param options.timeoutMs - For a caller that gives up sooner than the default
        * @returns Single content item with relations (media, organization, etc.)
        */
-      get: (id: string) =>
-        request<ContentWithRelations>('content', `/api/content/${id}`),
+      get: (id: string, { timeoutMs }: { timeoutMs?: number } = {}) =>
+        request<ContentWithRelations>('content', `/api/content/${id}`, {
+          timeoutMs,
+        }),
 
       /**
        * List content with pagination and filtering

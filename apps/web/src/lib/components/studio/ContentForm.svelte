@@ -306,7 +306,8 @@
   });
 
   // ── Unsaved changes guard ─────────────────────────────────────────────
-  let pendingNavigation: { url: URL; cancel: () => void } | null = null;
+  /** The move the dialog holds. `delta` is a Back or Forward's, to replay as one. */
+  let pendingNavigation: { url: URL; delta: number | null } | null = null;
 
   beforeNavigate((navigation) => {
     if (formPending || confirmLeave) return;
@@ -316,7 +317,7 @@
     navigation.cancel();
     pendingNavigation = {
       url: navigation.to?.url ?? new URL('/studio/content', window.location.origin),
-      cancel: () => {},
+      delta: navigation.type === 'popstate' ? (navigation.delta ?? null) : null,
     };
     showUnsavedDialog = true;
   });
@@ -324,9 +325,12 @@
   function handleConfirmLeave() {
     confirmLeave = true;
     showUnsavedDialog = false;
-    if (pendingNavigation) {
-      goto(pendingNavigation.url.pathname + pendingNavigation.url.search);
-    }
+    if (!pendingNavigation) return;
+    // A Back or Forward goes on as one, so the entry it reaches keeps its
+    // saved state (a new piece's entry holds its draft's id, Codex-a6ofh.2.3);
+    // a `goto` would push its address afresh, without it.
+    if (pendingNavigation.delta !== null) history.go(pendingNavigation.delta);
+    else goto(pendingNavigation.url.pathname + pendingNavigation.url.search);
   }
 
   // Browser close/refresh guard

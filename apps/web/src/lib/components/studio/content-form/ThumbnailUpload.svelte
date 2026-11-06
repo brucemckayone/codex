@@ -19,6 +19,7 @@
     saved thumbnail is a frame of (Codex-tqvmx): warned about until another is chosen
 -->
 <script lang="ts">
+  import { CONTENT_THUMBNAIL_MAX_BYTES, CONTENT_THUMBNAIL_MIME_TYPES } from '@codex/validation';
   import { untrack } from 'svelte';
   import * as m from '$paraglide/messages';
   import { ImageIcon, UploadIcon } from '$lib/components/ui/Icon';
@@ -65,8 +66,9 @@
     '(min-width: 124rem) calc(124rem - 32.5rem), (min-width: 80rem) calc(100vw - 32.5rem), (min-width: 64rem) calc(100vw - 30rem), (min-width: 48rem) calc(100vw - 9rem), calc(100vw - 8rem)';
   const canUploadFile = $derived(!!contentId);
 
-  const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
-  const MAX_SIZE_BYTES = 10 * 1024 * 1024;
+  /** The upload's own limits (`uploadThumbnailSchema`). */
+  const ALLOWED_TYPES: readonly string[] = CONTENT_THUMBNAIL_MIME_TYPES;
+  const MAX_SIZE_BYTES = CONTENT_THUMBNAIL_MAX_BYTES;
 
   const dropZone = useDropZone({
     onDrop: (files) => {

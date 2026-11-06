@@ -9,7 +9,17 @@ import { error } from '@sveltejs/kit';
 import { createServerApi } from '$lib/server/api';
 import type { PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({ params, platform, cookies }) => {
+export const load: PageServerLoad = async ({
+  params,
+  url,
+  platform,
+  cookies,
+}) => {
+  // Read, so SvelteKit runs this again whenever the step changes (Next, Back,
+  // Forward, a held move sent on): step 2's form seeds itself once and saves
+  // every field it holds, so it must have the piece as the Write step left
+  // it (Codex-a6ofh.2.3).
+  url.searchParams.get('step');
   try {
     const api = createServerApi(platform, cookies);
     const result = await api.content.get(params.contentId);

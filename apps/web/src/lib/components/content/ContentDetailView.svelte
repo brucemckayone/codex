@@ -50,6 +50,7 @@
     formatPrice,
     formatDurationHuman,
     formatSentenceDate,
+    readingSeconds,
   } from '$lib/utils/format';
   import { supportMailto } from '$lib/utils/support-mailto';
   import { PriceBadge } from '$lib/components/ui/PriceBadge';
@@ -736,12 +737,8 @@
     // Prefer editor-authored duration when present
     const authored = content.mediaItem?.durationSeconds ?? null;
     if (authored && authored > 0) return Math.round(authored);
-    // Fallback: 250 wpm over the body plaintext
-    const plain = extractPlainText(contentBodyHtml);
-    if (!plain) return 0;
-    const words = plain.split(/\s+/).filter(Boolean).length;
-    const seconds = Math.max(60, Math.round((words / 250) * 60));
-    return seconds;
+    // Fallback: the shared reading rate over the body plaintext
+    return readingSeconds(extractPlainText(contentBodyHtml));
   });
 
   $effect(() => {

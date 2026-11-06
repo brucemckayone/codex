@@ -6,18 +6,22 @@
  * `listRefused` reads them: they pass, and a Try again can help.
  */
 import { logger } from '$lib/observability';
-import { queryErrorMessage, remoteErrorStatus } from '$lib/remote/query-result';
+import {
+  isReadOutage,
+  queryErrorMessage,
+  remoteErrorStatus,
+} from '$lib/remote/query-result';
 
 export function logReadFailure(
   event: string,
   error: unknown,
   extra: Record<string, unknown> = {}
 ): void {
-  const status = remoteErrorStatus(error);
-  const fields = { ...extra, status, error: queryErrorMessage(error) };
-  // No status: it never reached the worker, which is an outage too.
-  const outage =
-    status === undefined || status >= 500 || status === 408 || status === 429;
-  if (outage) logger.error(event, fields);
+  const fields = {
+    ...extra,
+    status: remoteErrorStatus(error),
+    error: queryErrorMessage(error),
+  };
+  if (isReadOutage(error)) logger.error(event, fields);
   else logger.warn(event, fields);
 }

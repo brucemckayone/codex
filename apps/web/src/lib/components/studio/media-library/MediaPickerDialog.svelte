@@ -13,10 +13,13 @@
   `onchange` fires only on the creator's own act: Attach, Remove, or an
   upload started here getting its id. A value set from outside is shown and
   never echoed back, so a caller's saved value is never cleared by a read.
+
+  A caller can draw the field itself (`field`, given a `PickerField`); the
+  content editor's media slot does (Codex-a6ofh.2.3). The rules stay here.
 -->
 <script lang="ts">
   import { boundSearchParam, gateSearchQuery, SEARCH_MAX_QUERY_LENGTH } from '@codex/validation';
-  import { untrack } from 'svelte';
+  import { type Snippet, untrack } from 'svelte';
   import { type MediaStatusConnection, mediaStatus } from '$lib/client/media-status.svelte';
   import { type UploadItem, uploadQueue } from '$lib/client/upload-queue.svelte';
   import { Button } from '$lib/components/ui';
@@ -34,7 +37,7 @@
   import type { LibrarySort } from './library-url';
   import { logReadFailure } from './log-read-failure';
   import { type PickerSegment, pickerListArgs } from './picker-args';
-  import { chosenView, type Following, followUpload } from './picker-state';
+  import { chosenView, type Following, followUpload, type PickerField } from './picker-state';
   import { rejectionReason, tileReason } from './tile-copy';
   import { stallsAt, tilePill } from './tile-state';
 
@@ -60,6 +63,8 @@
     disabled?: boolean;
     /** The media library, opened in a new tab so the draft isn't left. Both studios serve it. */
     libraryHref?: string | null;
+    /** Draws the field in place of the picker's own card and buttons. */
+    field?: Snippet<[PickerField]>;
   }
 
   const {
@@ -71,6 +76,7 @@
     name,
     disabled = false,
     libraryHref = '/studio/media',
+    field,
   }: Props = $props();
 
   const kind = $derived<MediaKind | 'any'>(mediaTypes.length === 1 ? (mediaTypes[0] ?? 'any') : 'any');
@@ -381,7 +387,16 @@
     const files = event.currentTarget.files;
     const file = files?.[0];
     event.currentTarget.value = '';
-    if (!file) return;
+    if (file) uploadFile(file);
+  }
+
+  /**
+   * Upload a file into this field: the dialog's Upload row, or a field drawn
+   * by the caller (a drop). Only where an item still processing may go.
+   */
+  function uploadFile(file: File) {
+    if (!allowProcessing || disabled) return;
+    uploadNote = null;
     const [key] = uploadQueue.add([file]);
     const row = key ? uploadQueue.items.find((item) => item.key === key) : undefined;
     if (!row) {
@@ -407,6 +422,54 @@
     { value: 'processing', label: () => m.media_status_processing() },
     { value: 'all', label: () => m.media_picker_segment_all() },
   ];
+
+  /** The field drawn by a caller reads all of this live: each getter reads the state it names. */
+  const fieldApi: PickerField = {
+    triggerId,
+    get uploading() {
+      return uploading;
+    },
+    get chosen() {
+      return chosen?.current ?? null;
+    },
+    get chosenFailed() {
+      return chosen?.error != null;
+    },
+    get chosenGone() {
+      return chosenGone;
+    },
+    get view() {
+      const item = chosen?.current;
+      return item ? chosenView(item, mediaStatus.items.get(item.id), clock) : null;
+    },
+    get uploadNote() {
+      return uploadNote;
+    },
+    get watchWords() {
+      return watchWords;
+    },
+    get readyWords() {
+      return readyWords;
+    },
+    get watchPaused() {
+      return watchPaused;
+    },
+    open: openDialog,
+    remove,
+    upload: uploadFile,
+    chooseFile: () => fileInput?.click(),
+    reread: rereadChosen,
+    resumeWatch,
+    statusNote: (node) => {
+      watchNote = node;
+      const release = handsFocusOn(node);
+      return () => {
+        release();
+        if (watchNote === node) watchNote = null;
+      };
+    },
+    keepsFocus: handsFocusOn,
+  };
 
   function useLine(usage: { total: number } | undefined): string | null {
     if (!usage) return null;
@@ -589,14 +652,6 @@
       <span class="field-meta">{m.media_picker_upload_hint()}</span>
     </span>
   </button>
-  <input
-    bind:this={fileInput}
-    type="file"
-    class="sr-only"
-    tabindex="-1"
-    accept={mediaFileAccept(mediaTypes)}
-    onchange={startUpload}
-  />
   {#if uploadNote}
     <p class="picker-note" role="alert">{uploadNote}</p>
   {/if}
@@ -661,34 +716,50 @@
   {/if}
 {/snippet}
 
-<div class="picker">
-  {#if name}<input type="hidden" {name} value={value ?? ''} />{/if}
-  {#if uploading}{@render uploadField(uploading)}{/if}
-  <!-- In flight, the upload is the field; once it failed, what the field
-       kept shows under it, so Remove below acts on something visible. -->
-  {#if value !== null && (!uploading || uploading.status === 'error')}
-    {@render chosenField()}
-  {/if}
-  <div class="picker-actions">
-    <Button
-      id={triggerId}
-      type="button"
-      size="sm"
-      variant="secondary"
-      aria-label={value === null ? ariaLabel : m.media_picker_change_named({ name: ariaLabel })}
-      {disabled}
-      onclick={openDialog}
-    >
-      {value === null ? TITLE[kind]() : m.media_picker_change()}
-    </Button>
-    <!-- Not while an upload is in flight: its own Cancel is what stops it. -->
+{#if name}<input type="hidden" {name} value={value ?? ''} />{/if}
+<!-- Outside the dialog, so a field drawn by the caller opens it too. -->
+{#if allowProcessing}
+  <input
+    bind:this={fileInput}
+    type="file"
+    class="sr-only"
+    tabindex="-1"
+    aria-hidden="true"
+    accept={mediaFileAccept(mediaTypes)}
+    onchange={startUpload}
+  />
+{/if}
+{#if field}
+  {@render field(fieldApi)}
+{:else}
+  <div class="picker">
+    {#if uploading}{@render uploadField(uploading)}{/if}
+    <!-- In flight, the upload is the field; once it failed, what the field
+         kept shows under it, so Remove below acts on something visible. -->
     {#if value !== null && (!uploading || uploading.status === 'error')}
-      <Button type="button" size="sm" variant="ghost" {disabled} onclick={remove} {@attach handsFocusOn}
-        >{m.media_picker_clear()}</Button
-      >
+      {@render chosenField()}
     {/if}
+    <div class="picker-actions">
+      <Button
+        id={triggerId}
+        type="button"
+        size="sm"
+        variant="secondary"
+        aria-label={value === null ? ariaLabel : m.media_picker_change_named({ name: ariaLabel })}
+        {disabled}
+        onclick={openDialog}
+      >
+        {value === null ? TITLE[kind]() : m.media_picker_change()}
+      </Button>
+      <!-- Not while an upload is in flight: its own Cancel is what stops it. -->
+      {#if value !== null && (!uploading || uploading.status === 'error')}
+        <Button type="button" size="sm" variant="ghost" {disabled} onclick={remove} {@attach handsFocusOn}
+          >{m.media_picker_clear()}</Button
+        >
+      {/if}
+    </div>
   </div>
-</div>
+{/if}
 
 <Dialog.Root bind:open closeFocus={() => document.getElementById(triggerId)}>
   <Dialog.Content size="md" class="media-picker">
