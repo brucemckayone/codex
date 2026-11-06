@@ -1,5 +1,5 @@
 import type { Component, Snippet } from 'svelte';
-import { afterEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, describe, expect, expectTypeOf, test, vi } from 'vitest';
 import {
   createRawSnippet,
   flushSync,
@@ -8,7 +8,7 @@ import {
 } from '$tests/utils/component-test-utils.svelte';
 import Dialog from './Dialog.svelte';
 import DialogBody from './DialogBody.svelte';
-import DialogContent from './DialogContent.svelte';
+import DialogContent, { type CssLength } from './DialogContent.svelte';
 import DialogDescription from './DialogDescription.svelte';
 import DialogFooter from './DialogFooter.svelte';
 import DialogFormElement from './DialogFormElement.svelte';
@@ -810,6 +810,19 @@ describe('DialogContent', () => {
     const content = document.querySelector<HTMLElement>('.dialog-content');
     expect(content?.style.maxWidth).toBe('35rem');
     expect(content?.style.getPropertyValue('--dialog-max-height')).toBe('60vh');
+  });
+
+  // Checked by svelte-check, not at run time: a keyword or a bare number
+  // inside the panel's min() made the whole height invalid, and the panel
+  // lost its cap (review G3-M1).
+  test('maxWidth and maxHeight take CSS lengths, never a keyword or a bare number', () => {
+    expectTypeOf<'48rem'>().toMatchTypeOf<CssLength>();
+    expectTypeOf<'60vh'>().toMatchTypeOf<CssLength>();
+    expectTypeOf<'min(35rem, 90vw)'>().toMatchTypeOf<CssLength>();
+    expectTypeOf<'var(--container-sm)'>().toMatchTypeOf<CssLength>();
+    expectTypeOf<'none'>().not.toMatchTypeOf<CssLength>();
+    expectTypeOf<'auto'>().not.toMatchTypeOf<CssLength>();
+    expectTypeOf<'90'>().not.toMatchTypeOf<CssLength>();
   });
 
   // A rem value taller than the screen put the Footer out of reach: the

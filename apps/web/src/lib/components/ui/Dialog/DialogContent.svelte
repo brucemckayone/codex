@@ -49,11 +49,11 @@
     at most 70dvh, at every viewport width; a `maxWidth` still narrows it.
     A right-hand rail that becomes a sheet only below sm is
     `variant="drawer" sheet` instead (FilterDrawer).
-  @prop {string} [maxWidth] - the panel's max-width as a CSS length, over
+  @prop {CssLength} [maxWidth] - the panel's max-width as a CSS length, over
     `size`, for a width off the 28 / 42 / 56rem scale. The `--space-4`
     gutter (`--space-2` at the bottom) still applies, so `40rem` is
     min(40rem, 100vw − 2rem). Use tokens where one exists.
-  @prop {string} [maxHeight] - the panel's max-height as a CSS length, over
+  @prop {CssLength} [maxHeight] - the panel's max-height as a CSS length, over
     the 85dvh (70dvh at top and bottom) default. It never runs past the room
     its placement leaves, the screen less the wrapper's gutter, so `48rem`
     on a 600px-tall screen still keeps the Footer in view.
@@ -77,6 +77,41 @@
     goes at once. Under reduced motion `drop` and `rise` are instant, as the
     duration tokens make `auto`.
 -->
+<script module lang="ts">
+  type LengthUnit =
+    | 'px'
+    | 'rem'
+    | 'em'
+    | 'ch'
+    | '%'
+    | 'vw'
+    | 'vh'
+    | 'dvw'
+    | 'dvh'
+    | 'svw'
+    | 'svh'
+    | 'lvw'
+    | 'lvh'
+    | 'vmin'
+    | 'vmax'
+    | 'cqw'
+    | 'cqh'
+    | 'cqi'
+    | 'cqb';
+
+  /**
+   * What `maxWidth` and `maxHeight` take: a number with its unit, a math
+   * function or a token, never a keyword or a bare number. The panel clamps
+   * `maxHeight` inside `min()`, where `none`, `auto` or `90` is invalid: the
+   * whole value fell away, the panel lost its cap and the Footer went off
+   * screen (Codex-vlphc review G3-M1). `maxWidth` takes the same, so
+   * neither can drop its cap.
+   */
+  type MathFunction = 'calc' | 'min' | 'max' | 'clamp';
+
+  export type CssLength = `${number}${LengthUnit}` | `${MathFunction}(${string})` | `var(--${string})`;
+</script>
+
 <script lang="ts">
   import { type createDialog, melt } from '@melt-ui/svelte';
   import { getContext, setContext, type Snippet } from 'svelte';
@@ -95,8 +130,8 @@
     floating?: boolean;
     closeButton?: boolean;
     placement?: 'center' | 'top' | 'bottom';
-    maxWidth?: string;
-    maxHeight?: string;
+    maxWidth?: CssLength;
+    maxHeight?: CssLength;
     radius?: 'modal' | 'lg';
     surface?: 'elevated' | 'base' | 'glass';
     overlay?: 'blur' | 'dim' | 'dark';

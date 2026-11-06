@@ -1,7 +1,7 @@
 <script lang="ts">
   import Dialog from './Dialog.svelte';
   import DialogBody from './DialogBody.svelte';
-  import DialogContent from './DialogContent.svelte';
+  import DialogContent, { type CssLength } from './DialogContent.svelte';
   import DialogDescription from './DialogDescription.svelte';
   import DialogFooter from './DialogFooter.svelte';
   import DialogFormElement from './DialogFormElement.svelte';
@@ -22,8 +22,8 @@
     closeButton?: boolean;
     footerAlign?: 'end' | 'between';
     placement?: 'center' | 'top' | 'bottom';
-    maxWidth?: string;
-    maxHeight?: string;
+    maxWidth?: CssLength;
+    maxHeight?: CssLength;
     radius?: 'modal' | 'lg';
     surface?: 'elevated' | 'base' | 'glass';
     overlay?: 'blur' | 'dim' | 'dark';

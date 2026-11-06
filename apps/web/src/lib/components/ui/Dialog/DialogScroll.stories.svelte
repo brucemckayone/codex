@@ -30,6 +30,8 @@
   const flushOpen = writable(false);
   const toolbarOpen = writable(false);
   const columnToolbarOpen = writable(false);
+  const rowToolbarOpen = writable(false);
+  const chips = Array.from({ length: 40 }, (_, i) => i + 1);
   const formToolbarOpen = writable(false);
   const floatingOpen = writable(false);
   const squashOpen = writable(false);
@@ -223,6 +225,30 @@
       </Dialog.Body>
       <Dialog.Footer>
         <Button variant="secondary" onclick={() => ($columnToolbarOpen = false)}>Cancel</Button>
+        <Button variant="primary" data-testid="scroll-target">Apply</Button>
+      </Dialog.Footer>
+    </Dialog.Content>
+  </Dialog.Root>
+</Story>
+
+<!-- A row bar of 40 chips that wraps onto many lines, beside a token Body (review G3-L7). -->
+<Story name="Row Toolbar Tall">
+  <Button onclick={() => ($rowToolbarOpen = true)}>Open tall row toolbar</Button>
+  <Dialog.Root bind:open={$rowToolbarOpen}>
+    <Dialog.Content>
+      <Dialog.Header>
+        <Dialog.Title>Tall row toolbar</Dialog.Title>
+      </Dialog.Header>
+      <Dialog.Toolbar>
+        {#each chips as n (n)}
+          <Button size="sm" variant="secondary">Tag {n}</Button>
+        {/each}
+      </Dialog.Toolbar>
+      <Dialog.Body>
+        <p class="row">One result.</p>
+      </Dialog.Body>
+      <Dialog.Footer>
+        <Button variant="secondary" onclick={() => ($rowToolbarOpen = false)}>Cancel</Button>
         <Button variant="primary" data-testid="scroll-target">Apply</Button>
       </Dialog.Footer>
     </Dialog.Content>
