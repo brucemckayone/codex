@@ -6,9 +6,13 @@
  * the brand or the editor's pending colour changed, never on a theme
  * toggle, which flips `--color-background` under the same brand: the strip
  * beside every dialog showed the previous theme (Codex-vlphc review G4-U5).
+ * The brand editor's preview theme is a second writer: `data-editing-theme`
+ * on .org-layout flips the same background (org-brand.css), and nothing the
+ * effect read changed with it (review G5-C-L2).
  *
  * A SOURCE test, the weaker instrument (this layout has no render harness):
- * the effect that writes <html>'s background reads `themeState.theme`. The
+ * the effect that writes <html>'s background reads `themeState.theme` and
+ * `brandEditor.editingTheme`. The
  * paint was measured in Chromium with a classic scrollbar on a verbatim copy
  * of the effect: after a toggle to dark the strip stayed rgb(250, 250, 250)
  * without the read and turned rgb(23, 23, 23) with it. Read with svelte's own
@@ -67,10 +71,16 @@ describe("the org layout's <html> background", () => {
     expect(writer).toBeDefined();
   });
 
-  it('re-runs on a theme toggle: that effect reads themeState.theme', () => {
-    const reads = [...walk(writer)].some(
-      (n) => n.type === 'MemberExpression' && chain(n) === 'themeState.theme'
+  const reads = (member: string) =>
+    [...walk(writer)].some(
+      (n) => n.type === 'MemberExpression' && chain(n) === member
     );
-    expect(reads).toBe(true);
+
+  it('re-runs on a theme toggle: that effect reads themeState.theme', () => {
+    expect(reads('themeState.theme')).toBe(true);
+  });
+
+  it("re-runs on the brand editor's preview theme: it reads brandEditor.editingTheme", () => {
+    expect(reads('brandEditor.editingTheme')).toBe(true);
   });
 });

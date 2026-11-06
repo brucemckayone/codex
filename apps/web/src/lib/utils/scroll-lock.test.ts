@@ -193,22 +193,58 @@ describe('lockScroll', () => {
     expect(scrollTo).toHaveBeenLastCalledWith(0, 600);
   });
 
-  // Left on <body>, the mark reads as another lock's: no hold() after it
-  // would ever hold the page again.
-  it('a release that throws still takes the mark off, so the next hold holds', () => {
+  // One restore that throws skips no other. `overflow` is put back last:
+  // left `hidden`, the next hold takes it for the page's own and puts it
+  // back at its release. Left on <body>, the mark reads as another lock's:
+  // no hold() after it holds the page. Either way the page stays locked.
+  it('a release that throws still puts every style back and takes the mark off', () => {
     const hold = lockScroll();
-    vi.spyOn(html.style, 'removeProperty').mockImplementationOnce(() => {
-      throw new Error('restore failed');
-    });
+    // The first restore (the gutter) does its work, then throws.
+    const remove = html.style.removeProperty.bind(html.style);
+    vi.spyOn(html.style, 'removeProperty').mockImplementationOnce(
+      (property) => {
+        remove(property);
+        throw new Error('restore failed');
+      }
+    );
 
     expect(() => hold()).toThrow('restore failed');
     expect(locked()).toBe(false);
+    expect(html.style.cssText).toBe('');
 
     vi.restoreAllMocks();
-    html.style.cssText = '';
     const again = lockScroll();
     expect(html.style.overflow).toBe('hidden');
     again();
+    expect(html.style.cssText).toBe('');
+  });
+
+  it('on iOS a <body> restore that throws still puts the rest back, and the scroll', () => {
+    platform.ios = true;
+    Object.defineProperty(window, 'scrollY', {
+      configurable: true,
+      value: 600,
+    });
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
+    const hold = lockScroll();
+    // The first <body> restore (`right`) does its work, then throws.
+    const remove = body.style.removeProperty.bind(body.style);
+    vi.spyOn(body.style, 'removeProperty').mockImplementationOnce(
+      (property) => {
+        remove(property);
+        throw new Error('restore failed');
+      }
+    );
+
+    expect(() => hold()).toThrow('restore failed');
+    expect(locked()).toBe(false);
+    expect(body.style.cssText).toBe('');
+    expect(html.style.cssText).toBe('');
+    expect(scrollTo).toHaveBeenCalledWith({
+      left: 0,
+      top: 600,
+      behavior: 'instant',
+    });
   });
 
   it('counts a holder once, however often it lets go', () => {
