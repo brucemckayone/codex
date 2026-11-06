@@ -1513,7 +1513,8 @@ describe('MediaPickerDialog: the list scrolls in place', () => {
     'utf8'
   );
 
-  test('the list sits in the dialog body, which scrolls and contains its overscroll', () => {
+  // Body's own scroll and overscroll containment are pinned in DialogBody's test.
+  test('the list sits in the dialog body, the part that scrolls', () => {
     expect(source).toMatch(
       /<Dialog\.Body aria-busy=[^>]*>\s*<div class="picker-list">/
     );

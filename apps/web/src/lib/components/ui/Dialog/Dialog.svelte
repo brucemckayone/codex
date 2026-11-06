@@ -6,13 +6,26 @@
    * open dialog, the panel itself (it takes focus from any click on it). A
    * key pressed since forgets it: that open came from the keyboard, and the
    * keyboard leaves focus on what opened it.
+   *
+   * A press names only the open that follows it at once. A dialog a timer,
+   * a response or a load opens later must not send focus back to a press
+   * minutes old, and scroll the page to it: Melt's focus() does.
    */
   let pressed: Element | null = null;
+  let pressedAt = 0;
+  const PRESS_OPENS_WITHIN_MS = 500;
   if (typeof document !== 'undefined') {
+    const press = (event: Event) => {
+      pressed = event.target instanceof Element ? event.target : null;
+      pressedAt = performance.now();
+    };
+    document.addEventListener('pointerdown', press, true);
+    // A long press opens on its release: a real click (detail > 0, which a
+    // key's synthetic click is not) counts from there.
     document.addEventListener(
-      'pointerdown',
+      'click',
       (event) => {
-        pressed = event.target instanceof Element ? event.target : null;
+        if (event.detail > 0) press(event);
       },
       true
     );
@@ -28,10 +41,11 @@
   const FOCUSABLE =
     'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, [tabindex], [contenteditable]:not([contenteditable="false"])';
 
-  /** The element opening a dialog now: what was pressed, unless a key came since, else what has focus. */
+  /** The element opening a dialog now: what was just pressed, unless a key came since, else what has focus. */
   function currentOpener(): HTMLElement | null {
-    const target = pressed?.closest(FOCUSABLE);
-    if (target instanceof HTMLElement) return target;
+    const recent = performance.now() - pressedAt <= PRESS_OPENS_WITHIN_MS;
+    const target = recent ? pressed?.closest(FOCUSABLE) : null;
+    if (target instanceof HTMLElement && target.isConnected) return target;
     const active = document.activeElement;
     return active instanceof HTMLElement && active !== document.body ? active : null;
   }
@@ -39,7 +53,7 @@
 
 <script lang="ts">
   import { type CreateDialogProps, createDialog } from '@melt-ui/svelte';
-  import { type Snippet, setContext } from 'svelte';
+  import { type Snippet, setContext, untrack } from 'svelte';
   import { lockScroll } from '$lib/utils/scroll-lock';
 
   interface Props {
@@ -71,6 +85,13 @@
      * Defaults to true, so every existing dialog is unchanged.
      */
     dismissible?: boolean;
+    /**
+     * The panel's role. `alertdialog` is for a dialog that interrupts to ask
+     * for an answer at once; a screen reader announces its message as it
+     * opens. Melt puts the role on the panel, so it is set here and never as
+     * an attribute on Dialog.Content. Defaults to `dialog`.
+     */
+    role?: 'dialog' | 'alertdialog';
     children: Snippet;
   }
 
@@ -79,6 +100,7 @@
     onOpenChange,
     closeFocus,
     dismissible = true,
+    role = 'dialog',
     children
   }: Props = $props();
 
@@ -123,6 +145,9 @@
     // during its close animation lost the release and the page stayed
     // locked (Codex-vlphc review H1).
     preventScroll: false,
+    // Always a value: an unset option here would replace Melt's default
+    // with undefined and leave the panel with no role. Synced below.
+    role: untrack(() => role),
     forceVisible: true
   });
 
@@ -132,6 +157,12 @@
 
   /** Where focus goes back to at the close, when no `closeFocus` says. */
   let opener: HTMLElement | null = null;
+
+  // Before the open below: Melt reads the role only as the panel's open
+  // state changes, so a role set after an open waits for the next one.
+  $effect(() => {
+    dialog.options.role.set(role);
+  });
 
   // Sync prop to melt state. The opener is read first, while focus is still
   // where the open came from: Melt moves it into the panel after a tick.
