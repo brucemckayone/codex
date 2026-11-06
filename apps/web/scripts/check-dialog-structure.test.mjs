@@ -2263,6 +2263,85 @@ test("ALLOWS a named Popover.Content (text, a call, a member, a prop with a defa
   assert.deepEqual(summary(scan()), []);
 });
 
+test("CATCHES the Popover handed on: the ui barrel's namespace destructured, indexed or passed on, and a .ts/.js that imports or re-exports it", () => {
+  writeFixture(
+    'src/lib/components/Aliased.svelte',
+    `<script lang="ts">
+  import * as UI from '$lib/components/ui';
+  import { wrap } from './wrap';
+  const { Popover: Pop } = UI;
+  const Comp = UI['Popover'];
+  const Kit = wrap(UI);
+</script>
+<Pop.Content>a</Pop.Content>
+<Comp.Content>b</Comp.Content>
+`
+  );
+  writeFixture(
+    'src/lib/components/menus/index.ts',
+    `export * as Popover from '$lib/components/ui/Popover';
+export { default as Tip } from '$lib/components/ui/Popover/PopoverContent.svelte';
+import { Content } from '../ui/Popover/index.js';
+export * from '$lib/components/ui';
+export { Popover as P, Button } from '$lib/components/ui';
+export const load = () => import('$lib/components/ui');
+`
+  );
+  // ui/ is no exemption: only the ui barrel and ui/Popover/ may hand it on.
+  writeFixture('src/lib/components/ui/Menu/parts.ts', "export { Content as MenuPanel } from '../Popover';\n");
+
+  const result = scan();
+  // @menus:4-6: the ui barrel hands on its Popover too (review c6, G6-G-L4).
+  assert.deepEqual(result.violations.map((v) => `${v.file} ${v.rule}@${v.line}`).sort(), [
+    'src/lib/components/Aliased.svelte alias@4',
+    'src/lib/components/Aliased.svelte alias@5',
+    'src/lib/components/Aliased.svelte alias@6',
+    'src/lib/components/menus/index.ts alias@1',
+    'src/lib/components/menus/index.ts alias@2',
+    'src/lib/components/menus/index.ts alias@3',
+    'src/lib/components/menus/index.ts alias@4',
+    'src/lib/components/menus/index.ts alias@5',
+    'src/lib/components/menus/index.ts alias@6',
+    'src/lib/components/ui/Menu/parts.ts alias@1',
+  ]);
+  const at = (file, line) => result.violations.find((v) => v.file === file && v.line === line).detail;
+  assert.match(at('src/lib/components/Aliased.svelte', 4), /^'UI' is read as a value; use the Popover's parts as tags only/);
+  assert.match(at('src/lib/components/menus/index.ts', 1), /^a \.ts\/\.js file re-exports the Popover \('\$lib\/components\/ui\/Popover'\), .*popover-name can't follow/);
+  assert.match(at('src/lib/components/menus/index.ts', 3), /^a \.ts\/\.js file imports the Popover \('\.\.\/ui\/Popover\/index\.js'\)/);
+});
+
+test("ALLOWS what hands on no panel: the Popover's ctx.ts, type-only imports, a plain UI.Member, the ui barrel's other names, and the ui barrel itself", () => {
+  writeFixture(
+    'src/lib/components/tips/TipClose.svelte',
+    `<script lang="ts">
+  import { getCtx } from '$lib/components/ui/Popover/ctx';
+  import type { PopoverProps } from '$lib/components/ui/Popover';
+  import { type Content as Panel } from '$lib/components/ui/Popover';
+  import * as UI from '$lib/components/ui';
+  const ctx = getCtx();
+  const Btn = UI.Button;
+  let { side }: PopoverProps & { panel?: typeof Panel } = $props();
+</script>
+<UI.Button onclick={() => ctx.close()}>{side}</UI.Button>
+`
+  );
+  writeFixture(
+    'src/lib/tips.ts',
+    `import { getCtx } from '$lib/components/ui/Popover/ctx';
+import type { PopoverProps } from '$lib/components/ui/Popover';
+import { type Content } from '$lib/components/ui/Popover';
+import { Button, toast } from '$lib/components/ui';
+import '$lib/components/ui';
+export const tip = (p: PopoverProps, c: typeof Content) => [getCtx(), Button, toast, p, c];
+export type Load = typeof import('$lib/components/ui/Popover');
+`
+  );
+  writeFixture('src/lib/components/ui/index.ts', "export * as Popover from './Popover/index';\nexport { default as Button } from './Button.svelte';\n");
+  writeFixture('src/lib/components/ui/Popover/ctx.ts', "export * from './index';\n");
+
+  assert.deepEqual(summary(scan()), []);
+});
+
 // --- own-dialog ----------------------------------------------------------
 
 test('CATCHES role="dialog" and aria-modal outside ui/Dialog/ and ui/Popover/, and only there', () => {

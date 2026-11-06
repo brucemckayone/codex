@@ -144,9 +144,18 @@
  *                  and any .ts or .js file outside ui/Dialog/ (ui/ included)
  *                  that imports it: a barrel one step away would hand its
  *                  pages an alias this check can't resolve. Type-only imports
- *                  read no value and pass. Outside ui/Popover/, the
- *                  Popover's parts are tags only too (`UI.Popover` of the ui
- *                  barrel included), so popover-name sees every panel.
+ *                  read no value and pass. The Popover's parts are tags
+ *                  only too: outside ui/Popover/ a .svelte reads no Popover
+ *                  binding as a value, nor the ui barrel's namespace other
+ *                  than as a plain member of another name (`UI.Button`, not
+ *                  `UI.Popover`, `UI['Popover']` or `const { Popover } =
+ *                  UI`); and no .ts/.js but the ui barrel and
+ *                  ui/Popover's own imports or re-exports the Popover (its
+ *                  module, a part file, or the ui barrel's `Popover`, named
+ *                  or under a `*`). So popover-name sees each panel a
+ *                  .svelte renders from its own imports. Not followed: a
+ *                  .svelte `<script module>` re-export of the Popover, and
+ *                  an import() of the Popover or the ui barrel in a .svelte.
  *   parse          A .svelte or .css file that does not parse fails loudly.
  *
  * "Direct child" looks THROUGH {#if}/{#each}/{#key}/{#await}/{#snippet}
@@ -533,11 +542,12 @@ const POPOVER_CONTENT = new Set(['Content', 'PopoverContent']);
 function collectPopoverNames(file, programs, ctx) {
   const names = { namespaces: new Set(), parts: new Set(), contents: new Set(), uiNamespaces: new Set() };
   for (const stmt of programs.flatMap((program) => program.body)) {
-    if (stmt.type !== 'ImportDeclaration') continue;
+    if (stmt.type !== 'ImportDeclaration' || stmt.importKind === 'type') continue;
     const target = specifierTarget(file, stmt.source.value, ctx);
     if (!target) continue;
-    const popover = target === ctx.popoverDir || dirname(target) === ctx.popoverDir;
+    const popover = isPopoverTarget(target, ctx);
     for (const s of stmt.specifiers) {
+      if (s.importKind === 'type') continue;
       const imported = s.imported?.name ?? s.imported?.value;
       if (popover) (s.type === 'ImportNamespaceSpecifier' ? names.namespaces : names.parts).add(s.local.name);
       else if (target === ctx.uiDir && s.type === 'ImportNamespaceSpecifier') names.uiNamespaces.add(s.local.name);
@@ -551,6 +561,15 @@ function collectPopoverNames(file, programs, ctx) {
     }
   }
   return names;
+}
+
+/**
+ * The Popover module itself, or one of its part files; `ctx.ts` beside them
+ * hands on no panel. A `.svelte.ts` there would count as a part, which fails
+ * closed.
+ */
+function isPopoverTarget(target, ctx) {
+  return target === ctx.popoverDir || (dirname(target) === ctx.popoverDir && target.endsWith('.svelte'));
 }
 
 /** A Popover tag's part name: `Content` of `Popover.Content` or `UI.Popover.Content`, the local name of a part, or null. */
@@ -692,14 +711,14 @@ function checkValueReads(roots, bindings, report, what = 'Dialog', uiNamespaces 
       return;
     }
     if (node.type === 'Identifier' && bindings.has(node.name) && !isNameOnly(parent, key)) report(node.start, 'alias', detail(node.name));
-    // The module read through the ui barrel's namespace: `UI.Popover`.
-    const viaUi =
-      node.type === 'MemberExpression' &&
-      !node.computed &&
-      node.object.type === 'Identifier' &&
-      uiNamespaces.has(node.object.name) &&
-      node.property.name === what;
-    if (viaUi) report(node.start, 'alias', detail(`${node.object.name}.${what}`));
+    // The ui barrel's namespace hands on its Popover through anything but a
+    // plain member of another name (`UI.Button`): `UI.Popover`, `UI['Popover']`,
+    // `const { Popover } = UI`, or UI itself passed on.
+    if (node.type === 'Identifier' && uiNamespaces.has(node.name) && !isNameOnly(parent, key)) {
+      const member = parent?.type === 'MemberExpression' && key === 'object' && !parent.computed ? parent.property.name : null;
+      if (member !== null && member !== what) return;
+      report(node.start, 'alias', detail(member ? `${node.name}.${member}` : node.name));
+    }
     for (const [k, value] of Object.entries(node)) {
       if (k !== 'metadata' && value && typeof value === 'object') visit(value, node, k);
     }
@@ -2088,18 +2107,20 @@ function namesOnlyTypes(clause) {
 /**
  * Each module specifier a script names: static imports and exports, side
  * effects, import(). `typeOnly` marks `import type`, `export type`, an
- * all-`type` clause and `typeof import()`, which read no value.
+ * all-`type` clause and `typeof import()`, which read no value. `clause` is
+ * what it binds: the text before `from`, '' for a side effect, '*' for an
+ * import(), which hands back the whole module.
  */
 function* moduleSpecifiers(code) {
   for (const m of code.matchAll(/\b(import|export)\b(\s+type\b)?([^;'"`]*?)\bfrom\s*(['"])([^'"]+)\4/g)) {
-    yield { kind: m[1], spec: m[5], index: m.index, typeOnly: Boolean(m[2]) || namesOnlyTypes(m[3]) };
+    yield { kind: m[1], spec: m[5], index: m.index, typeOnly: Boolean(m[2]) || namesOnlyTypes(m[3]), clause: m[3] };
   }
   for (const m of code.matchAll(/\bimport\s*(['"])([^'"]+)\1/g)) {
-    yield { kind: 'import', spec: m[2], index: m.index, typeOnly: false };
+    yield { kind: 'import', spec: m[2], index: m.index, typeOnly: false, clause: '' };
   }
   for (const m of code.matchAll(/\bimport\s*\(\s*(['"`])([^'"`]+)\1\s*\)/g)) {
     const typeOnly = /\btypeof\s*$/.test(code.slice(Math.max(0, m.index - 40), m.index));
-    yield { kind: 'import', spec: m[2], index: m.index, typeOnly };
+    yield { kind: 'import', spec: m[2], index: m.index, typeOnly, clause: '*' };
   }
 }
 
@@ -2107,21 +2128,34 @@ const escapeRegExp = (text) => text.replace(/[$.*+?^()[\]{}|\\]/g, '\\$&');
 
 /**
  * .ts/.js outside ui/Dialog/. Any import of the Dialog module is an alias
- * a page could take one step away; a type-only one reads no value. Outside
+ * a page could take one step away; a type-only one reads no value. So is
+ * one of the Popover, outside ui/Popover/ and the ui barrel: its module, a
+ * part file, or the ui barrel's `Popover` (named, or under a `*`). Outside
  * ui/Popover/ too: a read of showModal, a Melt modal builder, or an object
  * literal claiming a dialog role is own-dialog.
  */
 function checkScriptFile(file, source, ctx, report) {
   const code = blankComments(source);
-  for (const { kind, spec, index, typeOnly } of moduleSpecifiers(code)) {
-    if (typeOnly || !resolveSpecifier(file, spec, ctx)) continue;
-    report(
-      index,
-      'alias',
-      kind === 'export'
-        ? reexportDetail(spec)
-        : `a .ts/.js file imports the Dialog module ('${spec}'), which can hand its parts on as values this check can't follow; import the parts in the .svelte that renders them`
-    );
+  const popoverHome = isInside(ctx.popoverDir, file) || (dirname(file) === ctx.uiDir && /\/index\.[cm]?[jt]s$/.test(file));
+  for (const { kind, spec, index, typeOnly, clause } of moduleSpecifiers(code)) {
+    if (typeOnly) continue;
+    const target = specifierTarget(file, spec, ctx);
+    const popover = target !== null && (isPopoverTarget(target, ctx) || (target === ctx.uiDir && /\*|\bPopover\b/.test(clause)));
+    if (resolveSpecifier(file, spec, ctx)) {
+      report(
+        index,
+        'alias',
+        kind === 'export'
+          ? reexportDetail(spec)
+          : `a .ts/.js file imports the Dialog module ('${spec}'), which can hand its parts on as values this check can't follow; import the parts in the .svelte that renders them`
+      );
+    } else if (popover && !popoverHome) {
+      report(
+        index,
+        'alias',
+        `a .ts/.js file ${kind === 'export' ? 're-exports' : 'imports'} the Popover ('${spec}'), which can hand its panel on under a name popover-name can't follow; import the parts in the .svelte that renders them`
+      );
+    }
   }
   if (!ctx.scriptSelectExempt(file)) {
     for (const m of code.matchAll(DIALOG_CLASS_RE)) report(m.index, 'script-select', scriptSelectDetail(m[0]));
