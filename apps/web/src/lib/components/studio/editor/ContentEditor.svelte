@@ -3,7 +3,8 @@
 
   The content editor (Codex-a6ofh.2.3): one shared page for both studios, the
   org's and the personal one. Each route keeps its own read and hands this the
-  piece, or null for a new one. Step 1, Write, is `WriteStep`.
+  piece, or null for a new one. Step 1, Write, is `WriteStep`; step 2,
+  Publish, is `PublishStep` (Codex-a6ofh.2.4), for a draft already saved.
 
   Each visit gets its own draft session. SvelteKit keeps a route's component
   across a move inside the route (/new to /new, one piece's edit to
@@ -15,6 +16,9 @@
   @prop {string | null} organizationId - The org it is filed in; null in the personal studio
   @prop {string | null} [initialMediaId] - A new piece's media, from "Create content from this"
   @prop {string} authorName - Who it is by, on the meta line
+  @prop {'write' | 'publish'} [step] - The step the address asks for (`editorView`)
+  @prop {string | null} [orgSlug] - The org's slug, for the Publish step's address
+  @prop {string | null} [creatorUsername] - A personal piece's address, on the Publish step
 -->
 <script lang="ts">
   import { type ComponentProps, untrack } from 'svelte';
@@ -24,9 +28,16 @@
   import * as m from '$paraglide/messages';
   import { editHref } from './editor-url';
   import { editorVisit } from './editor-visit.svelte';
+  import PublishStep from './PublishStep.svelte';
   import WriteStep from './WriteStep.svelte';
 
-  const props: ComponentProps<typeof WriteStep> = $props();
+  interface Props extends ComponentProps<typeof WriteStep> {
+    step?: 'write' | 'publish';
+    orgSlug?: string | null;
+    creatorUsername?: string | null;
+  }
+
+  const { step = 'write', orgSlug = null, creatorUsername = null, ...props }: Props = $props();
 
   const visit = editorVisit();
 
@@ -45,12 +56,33 @@
   $effect(() => {
     if (restoredDraft) void goto(editHref(restoredDraft), { replaceState: true });
   });
+
+  /**
+   * The step, read once per visit. A move between steps sets the new props
+   * before the visit turns over, so a step read live would build the next
+   * step, then build it again for its visit.
+   */
+  const visitStep = $derived.by(() => {
+    visit.key;
+    return untrack(() => step);
+  });
 </script>
 
 {#if !restoredDraft}
   {#key visit.key}
     <ErrorBoundary>
-      <WriteStep {...props} />
+      {#if visitStep === 'publish' && props.content}
+        <PublishStep
+          content={props.content}
+          contentType={props.contentType}
+          organizationId={props.organizationId}
+          {orgSlug}
+          {creatorUsername}
+          authorName={props.authorName}
+        />
+      {:else}
+        <WriteStep {...props} />
+      {/if}
       <!-- A reload, never a reset in place: the step would start again from
            this visit's first props, older than what it has saved. -->
       {#snippet fallback()}

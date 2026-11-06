@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { contentSlugFromTitle } from './content-slug';
+import {
+  contentSlugFromTitle,
+  freeSlugCandidates,
+  isTitleSlug,
+} from './content-slug';
 
 describe('contentSlugFromTitle', () => {
   it.each([
@@ -20,5 +24,35 @@ describe('contentSlugFromTitle', () => {
     const slug = contentSlugFromTitle(`${'a'.repeat(79)} b c`, 'video');
     expect(slug).toBe('a'.repeat(79));
     expect(contentSlugFromTitle('word '.repeat(40), 'video').length).toBe(79);
+  });
+});
+
+describe('isTitleSlug', () => {
+  it("is the title's own slug, or that one numbered free", () => {
+    expect(isTitleSlug('report', 'Report', 'video')).toBe(true);
+    expect(isTitleSlug('report-2', 'Report', 'video')).toBe(true);
+    expect(isTitleSlug('report-5', 'Report', 'video')).toBe(true);
+  });
+
+  it('is not a slug a creator typed, even one ending like a free one', () => {
+    expect(isTitleSlug('report-202411', 'Report', 'video')).toBe(false);
+    expect(isTitleSlug('report-6', 'Report', 'video')).toBe(false);
+    expect(isTitleSlug('monthly-report', 'Report', 'video')).toBe(false);
+    expect(isTitleSlug('reports', 'Report', 'video')).toBe(false);
+  });
+});
+
+describe('freeSlugCandidates', () => {
+  it('tries the slug, -2 to -5, then once with a random suffix', () => {
+    const tries = freeSlugCandidates('report');
+    expect(tries.slice(0, 5)).toEqual([
+      'report',
+      'report-2',
+      'report-3',
+      'report-4',
+      'report-5',
+    ]);
+    expect(tries).toHaveLength(6);
+    expect(tries[5]).toMatch(/^report-[0-9a-f]{6}$/);
   });
 });

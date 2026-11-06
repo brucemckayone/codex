@@ -29,7 +29,7 @@
   import * as m from '$paraglide/messages';
   import { logReadFailure } from '../media-library/log-read-failure';
   import { savedDraftValues } from './canvas-text';
-  import { createDraftSession } from './draft-session.svelte';
+  import { createDraftSession, settleWithin } from './draft-session.svelte';
   import {
     CONTENT_LIST_HREF,
     type EditorContentType,
@@ -191,9 +191,11 @@
     advancing = true;
     let refused = false;
     try {
-      const saved = await session.flush();
+      // Bounded, as a move is: a save with no answer stops Next after 10 s,
+      // and the bar still says "Saving…" (it is), so nothing moves.
+      const saved = await settleWithin(session.flush());
       if (saved.ok) await goto(publishStepHref(id));
-      else refused = true;
+      else refused = saved.code !== 'SAVE_SLOW';
     } finally {
       advancing = false;
     }

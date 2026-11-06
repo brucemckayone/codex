@@ -5,7 +5,8 @@
  *
  * `saveContent` PATCHes exactly the fields it is given and lets a refusal
  * reach the browser with its code. `createContentDraft` makes the slug from
- * the title and tries the next one while the worker says it is taken.
+ * the title and tries the next one while the worker says it is taken, and so
+ * does `saveContent` for a slug that follows the title (Codex-a6ofh.2.4).
  *
  * From the REAL envelope, as in agreements-refusal-forwarding.test.ts: only
  * `fetch` is stubbed, so `createServerApi` parses each response and
@@ -96,14 +97,14 @@ const rejection = (attempt: Promise<unknown>) =>
 afterEach(() => vi.unstubAllGlobals());
 
 describe('saveContent', () => {
-  // Nothing comes back: the row would carry the whole body on every save.
-  it('PATCHes exactly the fields it is given, and returns nothing', async () => {
+  // No row comes back: it would carry the whole body on every save.
+  it('PATCHes exactly the fields it is given, and returns no row', async () => {
     const api = worker(
       json(200, { data: { id: ID, title: 'New title', contentBody: 'Long' } })
     );
     await expect(
       remote.saveContent({ id: ID, patch: { title: 'New title' } })
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({});
 
     const [request] = api.sent();
     expect(request?.method).toBe('PATCH');
@@ -132,6 +133,47 @@ describe('saveContent', () => {
   });
 });
 
+describe('saveContent with a slug the title gives', () => {
+  const taken = () =>
+    refused(409, 'CONFLICT', 'Content with this slug already exists');
+
+  it('a taken slug that follows the title tries -2, and says which took', async () => {
+    const api = worker(taken(), json(200, { data: { id: ID } }));
+    await expect(
+      remote.saveContent({
+        id: ID,
+        patch: { title: 'Winter light', slug: 'winter-light' },
+        slugFollowsTitle: true,
+      })
+    ).resolves.toEqual({ slug: 'winter-light-2' });
+    expect(api.sent().map((request) => request.body)).toEqual([
+      { title: 'Winter light', slug: 'winter-light' },
+      { title: 'Winter light', slug: 'winter-light-2' },
+    ]);
+  });
+
+  it('a free one goes once and says so', async () => {
+    const api = worker(json(200, { data: { id: ID } }));
+    await expect(
+      remote.saveContent({
+        id: ID,
+        patch: { slug: 'winter-light' },
+        slugFollowsTitle: true,
+      })
+    ).resolves.toEqual({ slug: 'winter-light' });
+    expect(api.sent()).toHaveLength(1);
+  });
+
+  it('a slug the creator typed is theirs: taken, it is refused at once', async () => {
+    const api = worker(taken());
+    const err = await rejection(
+      remote.saveContent({ id: ID, patch: { slug: 'winter-light' } })
+    );
+    expect(err).toMatchObject({ status: 409, body: { code: 'CONFLICT' } });
+    expect(api.sent()).toHaveLength(1);
+  });
+});
+
 describe('createContentDraft', () => {
   const draft = {
     contentType: 'video',
@@ -139,11 +181,14 @@ describe('createContentDraft', () => {
     title: 'Café notes: part 1',
   };
 
-  it('makes the slug from the title, accents folded, and returns only the id', async () => {
+  it('makes the slug from the title, accents folded, and returns the id and slug', async () => {
     const api = worker(
       json(200, { data: { id: ID, title: draft.title, contentBody: 'Long' } })
     );
-    await expect(remote.createContentDraft(draft)).resolves.toEqual({ id: ID });
+    await expect(remote.createContentDraft(draft)).resolves.toEqual({
+      id: ID,
+      slug: 'cafe-notes-part-1',
+    });
     expect(api.sent()[0]?.body).toEqual({
       ...draft,
       slug: 'cafe-notes-part-1',
@@ -160,7 +205,10 @@ describe('createContentDraft', () => {
     const taken = () =>
       refused(409, 'CONFLICT', 'Content with this slug already exists');
     const api = worker(taken(), taken(), json(200, { data: { id: ID } }));
-    await expect(remote.createContentDraft(draft)).resolves.toEqual({ id: ID });
+    await expect(remote.createContentDraft(draft)).resolves.toEqual({
+      id: ID,
+      slug: 'cafe-notes-part-1-3',
+    });
     expect(api.sent().map((request) => request.body.slug)).toEqual([
       'cafe-notes-part-1',
       'cafe-notes-part-1-2',

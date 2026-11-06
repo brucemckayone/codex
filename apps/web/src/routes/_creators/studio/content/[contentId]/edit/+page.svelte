@@ -1,10 +1,10 @@
 <!--
   @component Creator Studio Content Edit Page
 
-  A draft opens in the shared content editor's Write step (Codex-a6ofh.2.3).
-  Step 2 (`?step=publish`) is today's form until the Publish step replaces it
-  (Codex-a6ofh.2.4), and so is a piece that has been live, whose changes wait
-  for Update (Codex-a6ofh.2.5).
+  A draft opens in the shared content editor: Write (Codex-a6ofh.2.3), or
+  Publish at `?step=publish` (Codex-a6ofh.2.4). A piece that has been live
+  keeps today's form, its changes waiting for Update, until its Page and
+  Settings tabs (Codex-a6ofh.2.5).
 -->
 <script lang="ts">
   import { page } from '$app/state';
@@ -13,13 +13,13 @@
   import { ErrorBoundary } from '$lib/components/ui';
   import ContentForm from '$lib/components/studio/ContentForm.svelte';
   import ContentEditor from '$lib/components/studio/editor/ContentEditor.svelte';
-  import { writingType } from '$lib/components/studio/editor/editor-url';
+  import { editorView } from '$lib/components/studio/editor/editor-url';
 
   let { data }: { data: PageData } = $props();
 
-  // The load runs again on each change of step (it reads `?step`), so step
-  // 2's form seeds itself from the piece as the Write step left it.
-  const writeType = $derived(writingType(data.content, page.url));
+  // The load runs again on each change of step (it reads `?step`), so each
+  // step starts from the piece as the other left it.
+  const view = $derived(editorView(data.content, page.url));
 </script>
 
 <svelte:head>
@@ -27,11 +27,14 @@
   <meta name="robots" content="noindex" />
 </svelte:head>
 
-{#if writeType}
+{#if view}
   <ContentEditor
     content={data.content}
-    contentType={writeType}
+    step={view.step}
+    contentType={view.contentType}
     organizationId={data.organizationId}
+    orgSlug={data.orgSlug}
+    creatorUsername={data.creator?.username}
     authorName={data.content.creator?.name ?? data.creator?.name ?? data.studioUser.name}
   />
 {:else}

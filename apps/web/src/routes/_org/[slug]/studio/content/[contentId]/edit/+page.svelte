@@ -1,10 +1,10 @@
 <!--
   @component Studio Content Edit Page
 
-  A draft opens in the shared content editor's Write step (Codex-a6ofh.2.3).
-  Step 2 (`?step=publish`) is today's form until the Publish step replaces it
-  (Codex-a6ofh.2.4), and so is a piece that has been live, whose changes wait
-  for Update (Codex-a6ofh.2.5). Fetches content client-side to avoid
+  A draft opens in the shared content editor: Write (Codex-a6ofh.2.3), or
+  Publish at `?step=publish` (Codex-a6ofh.2.4). A piece that has been live
+  keeps today's form, its changes waiting for Update, until its Page and
+  Settings tabs (Codex-a6ofh.2.5). Fetches content client-side to avoid
   __data.json round-trips.
 -->
 <script lang="ts">
@@ -18,7 +18,7 @@
   import { Breadcrumb } from '$lib/components/ui/Breadcrumb';
   import ContentForm from '$lib/components/studio/ContentForm.svelte';
   import ContentEditor from '$lib/components/studio/editor/ContentEditor.svelte';
-  import { readEditorStep, writingType } from '$lib/components/studio/editor/editor-url';
+  import { editorView, readEditorStep } from '$lib/components/studio/editor/editor-url';
   import { logReadFailure } from '$lib/components/studio/media-library/log-read-failure';
   import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
 
@@ -40,13 +40,13 @@
   /** Refused (deleted, not theirs, a bad link): final. Only an outage offers Try again. */
   const gone = $derived(error != null && !signedOut && !isReadOutage(error));
 
-  const writeType = $derived(content ? writingType(content, page.url) : null);
+  const view = $derived(content ? editorView(content, page.url) : null);
 
   /**
    * Each step mounts only on a read made for this arrival at it, by any path
-   * (Next, Back, Forward, a held move sent on). The form seeds itself once
-   * and saves every field it holds, and the Write step's session starts from
-   * its read, whose status decides autosave or Update: a read from before
+   * (Next, Back, Forward, a held move sent on). Each step's session starts
+   * from its read, and the form seeds itself once and saves every field it
+   * holds; the read's status decides autosave or Update: a read from before
    * the other step's saves would put them back, or autosave a piece since
    * published. Every arrival, and every Try again, is its own read; only
    * the latest one's answer counts, and only for the arrival it was made
@@ -137,11 +137,13 @@
   <meta name="robots" content="noindex" />
 </svelte:head>
 
-{#if ready && writeType && content}
+{#if ready && view && content}
   <ContentEditor
     {content}
-    contentType={writeType}
+    step={view.step}
+    contentType={view.contentType}
     organizationId={data.org.id}
+    orgSlug={data.org.slug}
     authorName={content.creator?.name ?? data.studioUser.name}
   />
 {:else}

@@ -22,6 +22,11 @@ export const ERROR_CODES = {
   BODY_REQUIRED: 'BODY_REQUIRED',
   PRICE_REQUIRED: 'PRICE_REQUIRED',
   NOT_ON_ORG_TEAM: 'NOT_ON_ORG_TEAM',
+  // A subscriber piece published with no plan ticked, and a paid or
+  // subscriber piece whose creator can't be paid yet (`@codex/content` and
+  // `@codex/subscription` share the second, so the studio says one thing).
+  TIER_REQUIRED_TO_PUBLISH: 'TIER_REQUIRED_TO_PUBLISH',
+  CREATOR_CONNECT_REQUIRED: 'CREATOR_CONNECT_REQUIRED',
   CONTENT_NOT_FOUND: 'CONTENT_NOT_FOUND',
   VALIDATION_ERROR: 'VALIDATION_ERROR',
   INTERNAL_ERROR: 'INTERNAL_ERROR',
@@ -32,6 +37,26 @@ export const ERROR_CODES = {
   BUSINESS_LOGIC_ERROR: 'BUSINESS_LOGIC_ERROR',
   RATE_LIMIT_EXCEEDED: 'RATE_LIMIT_EXCEEDED',
 } as const;
+
+/**
+ * Every `details.code` a publish can be refused with (`@codex/content`'s
+ * publish gate). The top-level code is only the class (`BUSINESS_LOGIC_ERROR`,
+ * `FORBIDDEN`), so the studio forwards these (`forwardClientErrors`) and its
+ * publish checklist maps each to its row (Codex-a6ofh.2.4).
+ */
+export const PUBLISH_REFUSAL_CODES = [
+  ERROR_CODES.MEDIA_REQUIRED,
+  ERROR_CODES.MEDIA_NOT_READY,
+  ERROR_CODES.MEDIA_DELETED,
+  ERROR_CODES.BODY_REQUIRED,
+  ERROR_CODES.PRICE_REQUIRED,
+  ERROR_CODES.NOT_ON_ORG_TEAM,
+  ERROR_CODES.THUMBNAIL_MEDIA_DELETED,
+  ERROR_CODES.TIER_REQUIRED_TO_PUBLISH,
+  ERROR_CODES.CREATOR_CONNECT_REQUIRED,
+] as const;
+
+export type PublishRefusalCode = (typeof PUBLISH_REFUSAL_CODES)[number];
 
 export const STATUS_CODES = {
   BAD_REQUEST: 400,

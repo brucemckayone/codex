@@ -20,7 +20,17 @@
   decides when the input is rendered at all (`sendTierIds`, owner decision
   U4); this component never sends a set it was not given.
 
-  @prop form               Active form instance
+  OUTSIDE A FORM (Codex-a6ofh.2.4). The Publish step uses it with no `form`:
+  it renders no hidden inputs, takes the org from `organizationId` and the
+  price through `onPriceChange`, and its host saves the choice itself. The
+  rules above are the same either way. `layout="row"` lays the options out
+  as one short row (mockup w4) instead of tall cards, each with a few words
+  under its name instead of a sentence.
+
+  @prop form               Active form instance; absent on the Publish step
+  @prop organizationId     The piece's org; null for personal content (without a form)
+  @prop onPriceChange      The price as typed, in pounds (without a form)
+  @prop layout             `cards` (default) or `row`
   @prop tiers              The org's ACTIVE tiers (the options); `[]` until loaded
   @prop tiersState         Whether the options AND the item's ticks are loaded
   @prop selectedTierIds    The item's whole set, inactive tiers included
@@ -37,11 +47,15 @@
   import PlanPicker from '$lib/components/studio/plan-picker/PlanPicker.svelte';
   import PlanGuidanceNote from '$lib/components/studio/plan-picker/PlanGuidanceNote.svelte';
   import { itemGaps, joinNames } from '$lib/components/studio/plan-picker/select-from-tier';
+  import { payoutSetupHref } from '$lib/utils/connect-readiness';
 
   type ContentForm = typeof createContentForm | typeof updateContentForm;
 
   interface Props {
-    form: ContentForm;
+    form?: ContentForm;
+    organizationId?: string | null;
+    onPriceChange?: (text: string) => void;
+    layout?: 'cards' | 'row';
     tiers: SubscriptionTier[];
     /**
      * `loaded` only when the org's tier list AND the item's own ticks are
@@ -55,9 +69,10 @@
     accessTypeVal: string;
     priceVal: string;
     selectedTierIds: readonly string[];
-    /** Render the hidden `includedTierIds` input (the full set). */
-    sendTierIds: boolean;
-    derivedVisibility: string;
+    /** Render the hidden `includedTierIds` input (the full set). With a form only. */
+    sendTierIds?: boolean;
+    /** The hidden `visibility` input's value. With a form only. */
+    derivedVisibility?: string;
     onAccessChange: (value: string) => void;
     onTierToggle: (tierId: string) => void;
     onSelectFromTier: (tierId: string) => void;
@@ -74,6 +89,9 @@
 
   const {
     form,
+    organizationId,
+    onPriceChange,
+    layout = 'cards',
     tiers,
     tiersState,
     onRetryTiers,
@@ -81,8 +99,8 @@
     accessTypeVal,
     priceVal,
     selectedTierIds,
-    sendTierIds,
-    derivedVisibility,
+    sendTierIds = false,
+    derivedVisibility = '',
     onAccessChange,
     onTierToggle,
     onSelectFromTier,
@@ -93,7 +111,9 @@
   const priceNum = $derived(parseFloat(priceVal || '0') || 0);
   const belowMinimum = $derived(Math.round(priceNum * 100) < PRICE_LIMITS.MIN_CENTS);
 
-  const hasOrg = $derived(!!form.fields.organizationId?.value());
+  const hasOrg = $derived(
+    organizationId !== undefined ? organizationId !== null : !!form?.fields.organizationId?.value()
+  );
   const tiersLoaded = $derived(tiersState === 'loaded');
   const hasTiers = $derived(tiersLoaded && tiers.length > 0);
   const isSubscribers = $derived(accessTypeVal === 'subscribers');
@@ -109,17 +129,15 @@
   );
   const subscribersUnavailable = $derived(!tiersLoaded && !isSubscribers);
 
-  // Org content routes payout setup to the monetisation hub; personal creator
-  // content routes to the creator earnings page. Both are root-relative studio
-  // paths (slug is in the subdomain).
-  const payoutSetupHref = $derived(
-    hasOrg ? '/studio/monetisation' : '/studio/earnings'
-  );
+  const payoutsHref = $derived(payoutSetupHref(hasOrg));
 
   interface AccessOption {
     value: string;
     label: string;
     description: string;
+    /** The row layout's: its name and a few words. */
+    rowLabel?: string;
+    short: string;
     icon: typeof GlobeIcon;
     disabled?: boolean;
   }
@@ -130,12 +148,15 @@
         value: 'free',
         label: m.studio_content_form_access_free(),
         description: m.studio_content_form_access_free_desc(),
+        short: m.studio_content_form_access_free_short(),
         icon: GlobeIcon,
       },
       {
         value: 'paid',
         label: m.studio_content_form_access_paid(),
         description: m.studio_content_form_access_paid_desc(),
+        rowLabel: m.studio_content_form_access_paid_row(),
+        short: m.studio_content_form_access_paid_short(),
         icon: CreditCardIcon,
         // Monetised — requires a payout-ready Connect account.
         disabled: !connectReady,
@@ -146,6 +167,7 @@
         value: 'followers',
         label: m.studio_content_form_access_followers(),
         description: m.studio_content_form_access_followers_desc(),
+        short: m.studio_content_form_access_followers_short(),
         icon: UsersIcon,
       });
     }
@@ -154,6 +176,7 @@
         value: 'subscribers',
         label: m.studio_content_form_access_subscribers(),
         description: m.studio_content_form_access_subscribers_desc(),
+        short: m.studio_content_form_access_subscribers_short(),
         icon: CoinsIcon,
         // Monetised — requires a payout-ready Connect account. And it can't
         // be newly picked over a tier list that didn't load.
@@ -165,6 +188,7 @@
         value: 'team',
         label: m.studio_content_form_access_team(),
         description: m.studio_content_form_access_team_desc(),
+        short: m.studio_content_form_access_team_short(),
         icon: LockIcon,
       });
     }
@@ -199,19 +223,21 @@
   const tierIdsValue = $derived(JSON.stringify([...selectedTierIds]));
 </script>
 
-<!-- Hidden inputs mirrored for form submit -->
-<input type="hidden" name="accessType" value={accessTypeVal} />
-<input type="hidden" name="visibility" value={derivedVisibility} />
-<!-- Only when the host says the set may be sent (touched this session, and
-     loaded): an absent field leaves the stored ticks alone. -->
-{#if sendTierIds && tiersLoaded && showPrice}
-  <input type="hidden" name="includedTierIds" value={tierIdsValue} />
-{/if}
-{#if !showPrice}
-  <input type="hidden" name="price" value={priceVal} />
+{#if form}
+  <!-- Hidden inputs mirrored for form submit -->
+  <input type="hidden" name="accessType" value={accessTypeVal} />
+  <input type="hidden" name="visibility" value={derivedVisibility} />
+  <!-- Only when the host says the set may be sent (touched this session, and
+       loaded): an absent field leaves the stored ticks alone. -->
+  {#if sendTierIds && tiersLoaded && showPrice}
+    <input type="hidden" name="includedTierIds" value={tierIdsValue} />
+  {/if}
+  {#if !showPrice}
+    <input type="hidden" name="price" value={priceVal} />
+  {/if}
 {/if}
 
-<div class="access-root">
+<div class="access-root" data-layout={layout}>
   <div
     class="access-grid"
     role="radiogroup"
@@ -237,8 +263,8 @@
           <Icon size={18} />
         </span>
         <span class="access-text">
-          <span class="access-label">{option.label}</span>
-          <span class="access-desc">{option.description}</span>
+          <span class="access-label">{layout === 'row' ? (option.rowLabel ?? option.label) : option.label}</span>
+          <span class="access-desc">{layout === 'row' ? option.short : option.description}</span>
         </span>
         <span class="access-check" aria-hidden="true"></span>
       </label>
@@ -248,7 +274,7 @@
   {#if showPayoutsHint}
     <p class="payouts-hint">
       {m.studio_content_form_access_payouts_hint()}
-      <a href={payoutSetupHref} class="payouts-link">
+      <a href={payoutsHref} class="payouts-link">
         {m.studio_content_form_access_payouts_link()}
       </a>
     </p>
@@ -278,14 +304,26 @@
         </label>
         <div class="price-wrapper">
           <span class="price-prefix" aria-hidden="true">&pound;</span>
-          <input
-            {...form.fields.price.as('text')}
-            id="price"
-            class="field-input price-input"
-            min="0"
-            step="0.01"
-            placeholder={m.studio_content_form_price_placeholder()}
-          />
+          {#if form}
+            <input
+              {...form.fields.price.as('text')}
+              id="price"
+              class="field-input price-input"
+              min="0"
+              step="0.01"
+              placeholder={m.studio_content_form_price_placeholder()}
+            />
+          {:else}
+            <input
+              id="price"
+              type="text"
+              inputmode="decimal"
+              class="field-input price-input"
+              value={priceVal}
+              oninput={(event) => onPriceChange?.(event.currentTarget.value)}
+              placeholder={m.studio_content_form_price_placeholder()}
+            />
+          {/if}
         </div>
         {#if accessTypeVal === 'paid' && belowMinimum}
           <span class="field-warning">Paid content requires a price of at least &pound;1.00</span>
@@ -391,6 +429,49 @@
   }
   @media (--breakpoint-xl) {
     .access-grid { grid-template-columns: repeat(3, 1fr); }
+  }
+
+  /* One short row (mockup w4): every option side by side, its line under it. */
+  @media (--breakpoint-sm) {
+    .access-root[data-layout='row'] .access-grid {
+      grid-template-columns: none;
+      grid-auto-flow: column;
+      grid-auto-columns: minmax(0, 1fr);
+    }
+  }
+
+  .access-root[data-layout='row'] .access-card {
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding: var(--space-3);
+  }
+
+  .access-root[data-layout='row'] .access-icon {
+    display: none;
+  }
+
+  /* A phone (mockup w8b): the options wrap as chips, each its name alone (its words still heard). */
+  @media (--below-sm) {
+    .access-root[data-layout='row'] .access-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--space-2);
+    }
+
+    .access-root[data-layout='row'] .access-card {
+      align-items: center;
+      gap: var(--space-2);
+      padding: var(--space-2) var(--space-3);
+      border-radius: var(--radius-full);
+    }
+
+    .access-root[data-layout='row'] .access-desc {
+      position: absolute;
+      inline-size: 1px;
+      block-size: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
   }
 
   .access-card {

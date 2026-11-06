@@ -29,6 +29,11 @@
  * drafting, because nothing can be lost"). Closing the editor in place saves what is
  * left, and says so if that fails.
  *
+ * THE SLUG. Until the piece goes live, its slug follows its title, as long as
+ * it is the title's own (or that one made free by a save, `-2`): the first
+ * save makes it from the title, and a slug the creator types stops it. Once
+ * live, it never moves under its links (Codex-a6ofh.2.4).
+ *
  * Call it during a component's initialisation: it registers a navigation
  * guard and its own teardown.
  */
@@ -48,18 +53,48 @@ import {
 } from '$lib/page-builder/autosave.svelte';
 import { createContentDraft, saveContent } from '$lib/remote/content.remote';
 import {
+  isReadOutage,
   queryErrorMessage,
   remoteErrorCode,
   remoteErrorStatus,
 } from '$lib/remote/query-result';
+import {
+  accessGroupToFlags,
+  type ContentAccessKind,
+} from '$lib/utils/content-access';
+import { contentSlugFromTitle, isTitleSlug } from '$lib/utils/content-slug';
 import * as m from '$paraglide/messages';
 
-/** The fields a session edits. Each is compared by value, so keep them flat. */
+/**
+ * Who can watch, and at what price: one value, sent as one group, as the
+ * schema checks the flags together (`accessGroupToFlags`).
+ */
+export interface DraftAccess {
+  kind: ContentAccessKind;
+  /** In pence; 0 when not for sale. */
+  priceCents: number;
+  /**
+   * The plans ticked; null when never read (the row did not say), so the
+   * set is left out and the server keeps its ticks.
+   */
+  tierIds: string[] | null;
+}
+
+/**
+ * The fields a session edits: the Write step's and the Publish step's
+ * (Codex-a6ofh.2.4). Each is compared by value, a list or the access group by
+ * what it holds, so set a new one rather than changing one in place.
+ */
 export interface DraftValues {
   title: string;
   description: string | null;
   contentBody: string | null;
   mediaItemId: string | null;
+  slug: string;
+  categoryIds: string[];
+  tags: string[];
+  featured: boolean;
+  access: DraftAccess;
 }
 
 export interface DraftSessionOptions {
@@ -88,6 +123,11 @@ export interface DraftSessionOptions {
   onCreated?: (id: string, context: { editorOpen: boolean }) => void;
 }
 
+/** What Publish came to. `unsent`: it stopped at its save, and nothing was sent to publish. */
+export interface PublishResult extends AutosaveSaveResult {
+  unsent?: boolean;
+}
+
 export interface DraftSession {
   /** Read here; change through {@link DraftSession.set}, which saves. */
   readonly values: Readonly<DraftValues>;
@@ -105,6 +145,23 @@ export interface DraftSession {
   set<K extends keyof DraftValues>(key: K, value: DraftValues[K]): void;
   /** Save now: Update, or Publish's save before it publishes. */
   flush(): Promise<AutosaveSaveResult>;
+  /**
+   * Put the piece live (owner, 2026-11-05: the session owns it). It reads as
+   * live from this moment, so a save armed before is dropped, never sent to
+   * a piece going live; then it saves what is on screen, riding any save
+   * already out, and calls `send`. If either fails it is a draft again, and
+   * what was typed meanwhile saves as a draft's does. A second call while
+   * one runs joins it.
+   */
+  publish(send: (id: string) => Promise<unknown>): Promise<PublishResult>;
+  /**
+   * Where a move asked for while Publish was out was going: it waits for the
+   * publish, and the caller sends it on (or not) once that settles. Taken
+   * once; null when none was asked.
+   */
+  takeHeldMove(): URL | null;
+  /** A move is waiting for Publish (`takeHeldMove`). */
+  readonly holdingMove: boolean;
   retry(): void;
 }
 
@@ -113,7 +170,30 @@ const EMPTY: DraftValues = {
   description: null,
   contentBody: null,
   mediaItemId: null,
+  slug: '',
+  categoryIds: [],
+  tags: [],
+  featured: false,
+  access: { kind: 'free', priceCents: 0, tierIds: null },
 };
+
+/** Two values of a field are the same: a list or a group by what it holds. */
+function same(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every((item, i) => same(item, b[i]));
+  }
+  if (a && b && typeof a === 'object' && typeof b === 'object') {
+    const left = a as Record<string, unknown>;
+    const right = b as Record<string, unknown>;
+    const keys = Object.keys(left);
+    return (
+      keys.length === Object.keys(right).length &&
+      keys.every((key) => same(left[key], right[key]))
+    );
+  }
+  return false;
+}
 
 /** How long a move waits for a save before asking instead. */
 const LEAVE_WAIT_MS = 10_000;
@@ -128,8 +208,11 @@ function firstWords(text: string): string {
   return flat.slice(0, cut > 0 ? cut : WORKING_TITLE_LENGTH);
 }
 
-/** A save that has not settled by then reads as failed: links never go dead. */
-function settleWithin(
+/**
+ * A save that has not settled by then reads as failed: links never go dead,
+ * and Next and Publish never wait without an end (Codex-a6ofh.2.4).
+ */
+export function settleWithin(
   save: Promise<AutosaveSaveResult>
 ): Promise<AutosaveSaveResult> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -168,11 +251,39 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
   }
   /** As last seen while mounted. After a move, the page's state is the next route's. */
   let lastLive = readLive();
-  const isLive = (): boolean => (unmounted ? lastLive : readLive());
+  /** This session's own Publish is out, or it put the piece live. */
+  let publishing = false;
+  let wentLive = false;
+  const isLive = (): boolean =>
+    publishing || wentLive || (unmounted ? lastLive : readLive());
   const initial = options.saved?.values ?? EMPTY;
-  const values = $state<DraftValues>({ ...initial });
+  // A copy: the baseline must never share a list the screen changes.
+  const values = $state<DraftValues>(structuredClone(initial));
   let baseline = $state.raw<DraftValues>(initial);
   let contentId = $state<string | null>(options.saved?.id ?? null);
+
+  /** The slug still follows the title: it is the title's own, and the piece has never been live. */
+  let slugFollows =
+    !lastLive &&
+    (initial.slug === '' ||
+      isTitleSlug(initial.slug, initial.title, contentType));
+  /**
+   * The title changed from `from`: a slug that follows it moves with it. A
+   * new piece's waits for its first save, which makes it; a title that gives
+   * no slug (an emptied one), or the same one (a capital, a "!"), leaves it
+   * where it is, so a slug the server made free is not tried again.
+   */
+  function followTitle(from: string): void {
+    if (!slugFollows || contentId === null || isLive()) return;
+    const next = contentSlugFromTitle(values.title, '');
+    if (
+      next &&
+      next !== contentSlugFromTitle(from, '') &&
+      !isTitleSlug(values.slug, values.title, contentType)
+    ) {
+      values.slug = next;
+    }
+  }
   /** The save that is out, until it settles. */
   let sending = $state.raw<Partial<DraftValues> | null>(null);
   /** That save is an Update (the piece read as live when it went). */
@@ -186,6 +297,8 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
   let abandoned = false;
   /** Where a move that is waiting for the save goes; a second click moves it. */
   let pendingLeave: URL | null = null;
+  /** Where a move asked for while Publish was out goes, once its caller says. */
+  let heldMove = $state.raw<URL | null>(null);
   let unmounted = false;
   /** Unmounted and its last save done: the controller is disposed. */
   let closed = false;
@@ -203,7 +316,7 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
   const sendableKeys = (): (keyof DraftValues)[] => {
     const held = landing();
     return (Object.keys(values) as (keyof DraftValues)[]).filter(
-      (key) => values[key] !== held[key] && !(key === 'title' && needsTitle)
+      (key) => !same(values[key], held[key]) && !(key === 'title' && needsTitle)
     );
   };
   const isDirty = $derived(sendableKeys().length > 0);
@@ -233,16 +346,30 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
    * except a lapsed sign-in, which says what to do; an outage, a 5xx or
    * anything else reads as the plain sentence, never as "Failed to fetch".
    */
-  function failure(err: unknown): AutosaveSaveResult {
+  function failure(
+    err: unknown,
+    action: 'save' | 'publish' = 'save'
+  ): AutosaveSaveResult {
     const status = remoteErrorStatus(err);
     const refused = status !== undefined && status >= 400 && status < 500;
-    // The creator's own network: theirs to fix, not a platform fault.
-    const offline = status === undefined && err instanceof TypeError;
-    const context = { contentId, ...describeThrown(err) };
-    if (refused) logger.warn('studio_editor.save_refused', context);
-    else if (offline) logger.warn('studio_editor.save_offline', context);
-    else logger.error('studio_editor.save_failed', context);
-    const failed = m.studio_content_draft_save_failed();
+    // The creator's own network, when the browser says so: theirs to fix,
+    // not a platform fault. Anything else takes the studio's one outage
+    // rule, so a timeout or a rate limit alerts as it does elsewhere.
+    const offline =
+      typeof navigator !== 'undefined' && navigator.onLine === false;
+    const context = {
+      contentId,
+      code: remoteErrorCode(err),
+      ...describeThrown(err),
+    };
+    if (offline) logger.warn(`studio_editor.${action}_offline`, context);
+    else if (isReadOutage(err)) {
+      logger.error(`studio_editor.${action}_failed`, context);
+    } else logger.warn(`studio_editor.${action}_refused`, context);
+    const failed =
+      action === 'publish'
+        ? m.studio_editor_publish_failed()
+        : m.studio_content_draft_save_failed();
     let message = failed;
     if (status === 401) message = m.studio_content_draft_signed_out();
     else if (refused) message = queryErrorMessage(err, failed) ?? failed;
@@ -261,6 +388,12 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
     }
   }
 
+  /** The PATCH a set of changes is: the access group as the flags the API reads. */
+  function toPatch({ access, ...rest }: Partial<DraftValues>) {
+    if (!access) return rest;
+    return { ...rest, ...accessGroupToFlags(access, organizationId) };
+  }
+
   async function save(): Promise<AutosaveSaveResult> {
     const keys = sendableKeys();
     if (keys.length === 0) return { ok: true };
@@ -269,12 +402,14 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
     // Taken before the first await: whatever is typed from here on is the
     // next save's.
     const sent: Partial<DraftValues> = Object.fromEntries(
-      keys.map((key) => [key, values[key]])
+      keys.map((key) => [key, $state.snapshot(values[key])])
     );
     const title =
       contentId === null ? values.title.trim() || workingTitle() : '';
     if (contentId === null && !title) return titleNeeded();
     let createdId: string | null = null;
+    // Made free if another piece holds it: no one chose it.
+    const slugFollowsTitle = sent.slug !== undefined && slugFollows;
     sending = sent;
     sendingUpdate = isLive();
     try {
@@ -290,10 +425,19 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
         // The working title shows in the field, unless the creator has
         // started typing one meanwhile, which the next save then sends.
         if (!values.title.trim()) values.title = title;
-        baseline = { ...baseline, ...sent, title };
+        baseline = { ...baseline, ...sent, title, slug: created.slug };
+        if (values.slug === '') values.slug = created.slug;
+        followTitle(title);
       } else {
-        await saveContent({ id: contentId, patch: sent });
-        baseline = { ...baseline, ...sent };
+        const saved = await saveContent({
+          id: contentId,
+          patch: toPatch(sent),
+          ...(slugFollowsTitle && { slugFollowsTitle }),
+        });
+        // The slug the save made free, in place of the one sent.
+        const freed = saved?.slug;
+        baseline = { ...baseline, ...sent, ...(freed && { slug: freed }) };
+        if (freed && values.slug === sent.slug) values.slug = freed;
       }
     } catch (err) {
       return failure(err);
@@ -313,6 +457,14 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
   beforeNavigate((navigation) => {
     // Closing the tab is the unload guard's.
     if (leaving || navigation.willUnload) return;
+    // Publish holds the screen still: a move asked meanwhile waits for it,
+    // or the next page could read the piece as a draft and autosave into it
+    // once it is live. Its caller sends the move on (`takeHeldMove`).
+    if (publishRun !== null) {
+      navigation.cancel();
+      heldMove = navigation.to?.url ?? heldMove;
+      return;
+    }
     // Its unsent changes are Update's to keep, so ask before dropping them,
     // as the page builder does (Codex-a6ofh.2.5 brings the editor's own
     // dialog). An Update still on the wire is waited for, like a save.
@@ -335,6 +487,12 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
         pendingLeave = null;
         // Closed in place while the save was out: no move to make.
         if (unmounted || !to) return;
+        // Publish started while this save was out: the move waits for it
+        // too, or the next page could read the piece as a draft.
+        if (publishRun !== null) {
+          heldMove ??= to;
+          return;
+        }
         // Saved, but still dirty: the piece went live while the save was out,
         // and what was queued behind it waits for Update.
         // A slow Update is still going, but what was typed during it is not.
@@ -372,7 +530,11 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
         logger.error('studio_editor.leave_save_failed', describeThrown(err));
       });
   });
-  const stopUnloadGuard = guardUnload(() => unsaved() && !abandoned);
+  // Closing the tab while Publish is out asks too: a reload could read the
+  // piece as a draft before the publish lands.
+  const stopUnloadGuard = guardUnload(
+    () => (unsaved() && !abandoned) || publishRun !== null
+  );
 
   // Publish failed and the page reports a draft again. What was typed during
   // it waited (a live piece schedules nothing), so schedule it now: on that
@@ -424,6 +586,50 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
   function tellClosedUnsaved(): void {
     // "Leave anyway" was the creator's own choice.
     if (!abandoned) toastClosedUnsaved();
+  }
+
+  let publishRun: Promise<PublishResult> | null = null;
+  async function runPublish(
+    send: (id: string) => Promise<unknown>
+  ): Promise<PublishResult> {
+    const id = contentId;
+    if (id === null) {
+      return {
+        ok: false,
+        message: m.studio_editor_next_needs_draft(),
+        unsent: true,
+      };
+    }
+    publishing = true;
+    try {
+      // What is on screen: the save that is out, then what its follow-up
+      // left (that stops once the piece reads as live). Bounded, as a move is.
+      let saved = await settleWithin(autosave.flush());
+      for (let round = 0; saved.ok && round < 2 && unsaved(); round += 1) {
+        saved = await settleWithin(autosave.flush());
+      }
+      if (saved.ok && needsTitle) saved = titleNeeded();
+      if (saved.code === 'SAVE_SLOW') {
+        // Still out, not refused: the bar says "Saving…" meanwhile.
+        logger.warn('studio_editor.publish_save_slow', { contentId: id });
+        return {
+          ...saved,
+          message: m.studio_editor_publish_save_slow(),
+          unsent: true,
+        };
+      }
+      if (!saved.ok) return { ...saved, unsent: true };
+      await send(id);
+      wentLive = true;
+      lastLive = true;
+      return { ok: true };
+    } catch (err) {
+      return failure(err, 'publish');
+    } finally {
+      publishing = false;
+      // A draft again: what was typed meanwhile saves as a draft's does.
+      if (!wentLive && isDirty) autosave.notifyChange();
+    }
   }
 
   /** Every chain still to settle, a joined flush's second one included. */
@@ -530,7 +736,7 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
         return;
       }
       if (closed || (unmounted && isLive())) {
-        const fresh = value !== values[key] && value !== landing()[key];
+        const fresh = !same(value, values[key]) && !same(value, landing()[key]);
         values[key] = value;
         if (fresh) {
           logger.error('studio_editor.set_after_close_dropped', {
@@ -542,7 +748,10 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
         }
         return;
       }
+      const before = values.title;
       values[key] = value;
+      if (key === 'slug') slugFollows = false;
+      else if (key === 'title') followTitle(before);
       autosave.notifyChange();
     },
     async flush() {
@@ -559,6 +768,26 @@ export function createDraftSession(options: DraftSessionOptions): DraftSession {
       // Publish and Update are told the field is empty; the save itself has
       // kept the saved title and sent the rest.
       return result.ok && needsTitle ? titleNeeded() : result;
+    },
+    publish(send) {
+      if (publishRun) return publishRun;
+      heldMove = null;
+      const run = runPublish(send);
+      publishRun = run;
+      // Cleared once it settles, never before it is set: a run with no draft
+      // settles before its first await.
+      void run.finally(() => {
+        if (publishRun === run) publishRun = null;
+      });
+      return run;
+    },
+    takeHeldMove() {
+      const to = heldMove;
+      heldMove = null;
+      return to;
+    },
+    get holdingMove() {
+      return heldMove !== null;
     },
     retry: autosave.retry,
   };

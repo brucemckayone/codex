@@ -111,6 +111,11 @@ vi.mock('$app/server', () => ({
 const { logger } = await import('$lib/observability');
 const remote = (await import('./content.remote')) as unknown as {
   getContent: (id: string) => Promise<unknown>;
+  publishContent: (id: string) => Promise<unknown>;
+  saveContent: (input: {
+    id: string;
+    patch: Record<string, unknown>;
+  }) => Promise<unknown>;
   uploadThumbnailForm: (input: {
     contentId: string;
     thumbnail: File;
@@ -367,5 +372,72 @@ describe('uploadThumbnailForm · what goes back with the answer', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+/**
+ * The worker refuses as the publish gate does: the class code on top, the
+ * refusal's own in `details`, beside context that must not reach the page.
+ */
+function refusesWith(code: string, top = 'BUSINESS_LOGIC_ERROR', status = 422) {
+  const body = {
+    error: {
+      code: top,
+      message: 'Refused.',
+      details: { code, contentId: CONTENT_ID, accessType: 'paid' },
+    },
+  };
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(
+      async () =>
+        new Response(JSON.stringify(body), {
+          status,
+          headers: { 'Content-Type': 'application/json' },
+        })
+    )
+  );
+}
+
+// The checklist names its row by the refusal's own code (Codex-a6ofh.2.4):
+// the class alone could not tell "no media" from "no plan ticked".
+describe('a publish refusal keeps its own code', () => {
+  it.each([
+    'MEDIA_REQUIRED',
+    'MEDIA_NOT_READY',
+    'TIER_REQUIRED_TO_PUBLISH',
+    'CREATOR_CONNECT_REQUIRED',
+  ])('publishContent forwards %s', async (code) => {
+    refusesWith(code);
+    const err = await rejection(remote.publishContent(CONTENT_ID));
+    expect(err).toMatchObject({
+      status: 422,
+      body: { code, message: 'Refused.' },
+    });
+  });
+
+  it('a creator off the org’s team keeps the 403', async () => {
+    refusesWith('NOT_ON_ORG_TEAM', 'FORBIDDEN', 403);
+    const err = await rejection(remote.publishContent(CONTENT_ID));
+    expect(err).toMatchObject({
+      status: 403,
+      body: { code: 'NOT_ON_ORG_TEAM' },
+    });
+  });
+
+  it('a code it does not expect stays the class, and the rest of details stays behind', async () => {
+    refusesWith('SOMETHING_ELSE');
+    const err = await rejection(remote.publishContent(CONTENT_ID));
+    expect(err).toMatchObject({ body: { code: 'BUSINESS_LOGIC_ERROR' } });
+    expect((err as { body: object }).body).not.toHaveProperty('contentId');
+    expect((err as { body: object }).body).not.toHaveProperty('accessType');
+  });
+
+  it('a save to live content carries the rule’s code too', async () => {
+    refusesWith('THUMBNAIL_MEDIA_DELETED');
+    const err = await rejection(
+      remote.saveContent({ id: CONTENT_ID, patch: { title: 'Winter light' } })
+    );
+    expect(err).toMatchObject({ body: { code: 'THUMBNAIL_MEDIA_DELETED' } });
   });
 });

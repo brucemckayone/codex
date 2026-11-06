@@ -40,6 +40,7 @@
   import { chosenView, type Following, followUpload, type PickerField } from './picker-state';
   import { rejectionReason, tileReason } from './tile-copy';
   import { stallsAt, tilePill } from './tile-state';
+  import { watchMediaItem } from './watch-media-item.svelte';
 
   type MediaKind = 'video' | 'audio';
 
@@ -98,31 +99,10 @@
   }
 
   // A chosen item still on its way to ready or failed is watched on the
-  // studio's status socket (data-design §1.5: the editor's media card
-  // subscribes to its one id), so a transcode that fails later says so
-  // here. The store bounds its own fallback (no open-ended polling).
-  /** The chosen item's id while it is still on its way: a primitive, so a re-read that changes nothing re-subscribes nothing. */
-  const watchedId = $derived.by(() => {
-    const item = chosen?.current;
-    return item && item.status !== 'ready' && item.status !== 'failed' ? item.id : null;
-  });
-  $effect(() => {
-    const id = watchedId;
-    if (!id) return;
-    // UNTRACKED, as the library registers in onMount: register() reads the
-    // store's own `connection`, and an effect tracking it would re-subscribe
-    // on every pause or stop, and each re-subscribe restarts the bounded
-    // fallback, which is open-ended polling (owner rule).
-    return untrack(() =>
-      mediaStatus.register({
-        listed: () => new Map([[id, chosen?.current?.status ?? 'uploading']]),
-        refresh: () => chosen?.refresh(),
-        settled: (mediaId) => {
-          if (mediaId === id) rereadChosen();
-        },
-      })
-    );
-  });
+  // studio's status socket, so a transcode that fails later says so here.
+  const watch = watchMediaItem(() => chosen);
+  /** The chosen item's id while it is still on its way. */
+  const watchedId = $derived(watch.id);
   /**
    * What the card says about its watch, in the library's words: nothing
    * while it is live or starting; how it falls back; that it paused (with

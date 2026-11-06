@@ -10471,6 +10471,54 @@ export const studio_content_form_access_payouts_link = () => `Set up payouts`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_content_form_access_free_short = () => `Anyone`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_form_access_paid_row = () => `Buy once`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_form_access_paid_short = () => `One price`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_form_access_subscribers_short = () => `Your tiers`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_form_access_followers_short = () => `Free to follow`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_form_access_team_short = () => `Your team`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const studio_content_form_access_members = () => `Members only`
 
 
@@ -11464,6 +11512,390 @@ export const studio_editor_next_needs_upload = () => `Wait for the upload to sta
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_editor_failed = () => `Something went wrong in the editor. Reload the page to carry on: what was saved is kept.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_editor_publish_failed = () => `Couldn’t publish it. Try again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_editor_back_to_writing = () => `Back to writing`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_editor_step_done = () => `done`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_editor_cover_add_video = () => `Upload an image`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_editor_cover_hint_video = () => `people see the video’s poster until you choose one`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_editor_cover_use_poster = () => `Use the video’s poster`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_form_slug_shape = () => `Use lowercase letters and numbers, with a single hyphen between words.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_intro = () => `Choose who can watch it and where it shows up. Changes save as you go.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_who = () => `Who can watch`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_card = () => `How it looks in lists`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_card_hint = () => `This is the card people see on your homepage, in search and in their library.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_where = () => `Where it appears`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_optional = () => `optional`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_where_no_categories = () => `No categories`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_where_featured = () => `on the homepage`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_where_not_featured = () => `not on the homepage`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_gaps = () => `Before this can go live`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_gaps_none = () => `Nothing is missing. It’s ready to go live.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_gap_title = () => `Give it a title.`
+
+
+/**
+ * @param {{ type: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_gap_media = (params) => `Add the ${params.type}.`
+
+
+/**
+ * @param {{ type: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_gap_uploading = (params) => `The ${params.type} is still uploading. You can publish it once it’s ready.`
+
+
+/**
+ * @param {{ type: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_gap_preparing = (params) => `The ${params.type} is still being prepared. You can publish it once it’s ready.`
+
+
+/**
+ * @param {{ type: NonNullable<unknown>, pct: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_gap_preparing_pct = (params) => `The ${params.type} is still being prepared (${params.pct}%). You can publish it once it’s ready.`
+
+
+/**
+ * @param {{ type: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_gap_media_failed = (params) => `The ${params.type} couldn’t be prepared. Choose another, or try it again.`
+
+
+/**
+ * @param {{ type: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_gap_media_deleted = (params) => `The ${params.type} was deleted. Choose another.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_gap_body = () => `Write something for people to read.`
+
+
+/**
+ * @param {{ price: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_gap_price = (params) => `Set a price of at least ${params.price}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_gap_tier = () => `Choose at least one plan that includes it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_gap_payouts = () => `Set up payouts to sell it or include it in a plan.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_gap_cover_deleted = () => `The cover is a frame of a video that was deleted. Choose another image.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_gap_team = () => `You’re no longer on this organisation’s team, so you can’t publish here.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_gap_fix_on_write = () => `Go to writing`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_button = () => `Publish`
+
+
+/**
+ * @param {{ price: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_button_price = (params) => `Publish for ${params.price}`
+
+
+/**
+ * @param {{ title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_live = (params) => `“${params.title}” is live.`
+
+
+/**
+ * @param {{ type: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_media_unread = (params) => `Couldn’t check the ${params.type}. Publishing checks it again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_connect_unread = () => `Couldn’t check your payout setup. Publishing checks it again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_where_categories_unread = () => `Couldn’t load categories`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_gap_slug = () => `Fix the slug: use lowercase letters and numbers, with a single hyphen between words.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_gap_fix_here = () => `Fix it`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_gaps_left = (params) => `${params.count} left to do before it can go live.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_wait_category = () => `Wait for the new category to be added`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_saved_press_again = () => `Your changes are saved. Press Publish to put it live.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_publishing = () => `Publishing…`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_publishing_then_move = () => `Publishing. You’ll go on once it’s done.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_editor_publish_save_slow = () => `Still saving your changes. Try Publish again in a moment.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_form_slug_check_failed = () => `Couldn’t check whether this slug is free.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_form_categories_failed = () => `Couldn’t load the categories.`
 
 
 /**

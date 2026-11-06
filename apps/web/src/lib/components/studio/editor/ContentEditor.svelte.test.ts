@@ -5,6 +5,7 @@
  */
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { ContentWithRelations } from '$lib/types';
+import { contentSlugFromTitle } from '$lib/utils/content-slug';
 import {
   flushSync,
   mount,
@@ -164,13 +165,15 @@ const nav = vi.hoisted(() => ({
   replaceState: vi.fn(),
   goto: vi.fn(),
   guards: [] as ((move: Move) => void)[],
+  /** What runs once a move lands: the visit turns over. */
+  arrived: [] as (() => void)[],
 }));
 // Shallow-routing state: what Back restores to a history entry.
 const pageState = vi.hoisted(() => ({ state: {} as Record<string, unknown> }));
 vi.mock('$app/state', () => ({ page: pageState }));
 vi.mock('$app/navigation', () => ({
   beforeNavigate: (guard: (move: Move) => void) => nav.guards.push(guard),
-  afterNavigate: () => {},
+  afterNavigate: (then: () => void) => nav.arrived.push(then),
   replaceState: (...args: unknown[]) => nav.replaceState(...args),
   goto: (...args: unknown[]) => nav.goto(...args),
 }));
@@ -185,6 +188,11 @@ vi.mock('$lib/observability', () => ({
 // ProseMirror can't be typed into in jsdom: a textarea reports the body.
 vi.mock('$lib/components/editor/RichTextEditor.svelte', async () => ({
   default: (await import('./__fixtures__/RichTextEditorStub.svelte')).default,
+}));
+
+// Step 2 has its own suite (PublishStep.svelte.test.ts): here, only which step mounts.
+vi.mock('./PublishStep.svelte', async () => ({
+  default: (await import('./__fixtures__/PublishStepProbe.svelte')).default,
 }));
 
 const ContentEditor = (await import('./ContentEditor.svelte')).default;
@@ -244,7 +252,13 @@ function type(label: string, value: string) {
 
 beforeEach(() => {
   vi.useFakeTimers();
-  remotes.createContentDraft.mockResolvedValue({ id: 'c-new' });
+  // As the command does: the slug from the title it was sent.
+  remotes.createContentDraft.mockImplementation(
+    async (draft: { title: string; contentType: string }) => ({
+      id: 'c-new',
+      slug: contentSlugFromTitle(draft.title, draft.contentType),
+    })
+  );
   remotes.saveContent.mockResolvedValue({});
 });
 
@@ -258,6 +272,7 @@ afterEach(() => {
   library.down.clear();
   pageState.state = {};
   nav.guards.length = 0;
+  nav.arrived.length = 0;
   queue.items = [];
   coverForm.result = undefined;
   coverForm.send = null;
@@ -735,9 +750,11 @@ describe('ContentEditor · a saved draft', () => {
     type('Title', 'Runes, properly');
     nextButton()?.click();
     await vi.advanceTimersByTimeAsync(0);
+    // The slug is still its title's: it follows (Codex-a6ofh.2.4).
     expect(remotes.saveContent).toHaveBeenCalledWith({
       id: 'c1',
-      patch: { title: 'Runes, properly' },
+      patch: { title: 'Runes, properly', slug: 'runes-properly' },
+      slugFollowsTitle: true,
     });
     // Each edit route reads the piece again on arriving at step 2.
     expect(nav.goto).toHaveBeenCalledWith(
@@ -754,5 +771,62 @@ describe('ContentEditor · a saved draft', () => {
     flushSync();
     expect(nav.goto).not.toHaveBeenCalled();
     expect(document.querySelector('[role="alert"]')).not.toBeNull();
+  });
+
+  test('Next waits 10 s at most for a save that never answers, then stays put and keeps focus', async () => {
+    remotes.saveContent.mockReturnValue(new Promise(() => {}));
+    render({ content: draft({}) });
+    type('Title', 'Runes, properly');
+    const next = nextButton();
+    next?.focus();
+    next?.click();
+    await vi.advanceTimersByTimeAsync(10_000);
+    flushSync();
+    expect(nav.goto).not.toHaveBeenCalled();
+    // Still saving, not refused: the canvas is live again, and nothing moved.
+    expect(
+      document.querySelector('.editor-canvas')?.hasAttribute('inert')
+    ).toBe(false);
+    expect(document.activeElement).toBe(next);
+  });
+});
+
+describe('ContentEditor · which step', () => {
+  test('a saved draft at step 2 opens the Publish step', () => {
+    render({ content: draft({}), step: 'publish' });
+    expect(
+      document.querySelector('[data-probe="publish-step"]')?.textContent
+    ).toBe('c1');
+    expect(field('Title')).toBeNull();
+  });
+
+  test('Write is the step otherwise, and for a piece not yet saved', () => {
+    render({ content: null, step: 'publish' });
+    expect(document.querySelector('[data-probe="publish-step"]')).toBeNull();
+    expect(field('Title')).not.toBeNull();
+  });
+
+  test('the next step is built as the visit turns over, never as its props move', async () => {
+    const Host = (await import('./__fixtures__/ContentEditorStepHost.svelte'))
+      .default;
+    component = mount(Host, {
+      target: document.body,
+      props: { content: draft({}) },
+    });
+    flushSync();
+    const arrive = () => {
+      for (const then of [...nav.arrived]) then();
+      flushSync();
+    };
+    arrive(); // The move that mounted it.
+    const probe = () => document.querySelector('[data-probe="publish-step"]');
+
+    document.querySelector<HTMLButtonElement>('[data-next-step]')?.click();
+    flushSync();
+    expect(probe()).toBeNull();
+    expect(field('Title')).not.toBeNull();
+
+    arrive();
+    expect(probe()?.textContent).toBe('c1');
   });
 });

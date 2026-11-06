@@ -177,3 +177,12 @@ export function moneyReadiness(
   if (!hasSubscribers) return of('no_subscribers', 'info');
   return of('ready', 'success');
 }
+
+/**
+ * Where payouts are set up: an org's content in its monetisation hub, a
+ * personal piece on the creator's earnings page. Root-relative studio paths
+ * (the org is in the subdomain).
+ */
+export function payoutSetupHref(inOrg: boolean): string {
+  return inOrg ? '/studio/monetisation' : '/studio/earnings';
+}

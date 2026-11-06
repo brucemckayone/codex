@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   editHref,
   editorContentType,
+  editorView,
   publishStepHref,
   readEditorStep,
   readNewContent,
-  writingType,
 } from './editor-url';
 
 const MEDIA = '6b000000-0000-4000-8000-000000000001';
@@ -70,29 +70,42 @@ describe('editorContentType', () => {
   });
 });
 
-describe('writingType', () => {
+describe('editorView', () => {
   const edit = (search = '') =>
     new URL(`https://studio.test/studio/content/c1/edit${search}`);
   const draft = { status: 'draft', publishedAt: null, contentType: 'audio' };
 
-  it('opens a draft on the canvas, as its type', () => {
-    expect(writingType(draft, edit())).toBe('audio');
+  it('opens a draft on Write, as its type', () => {
+    expect(editorView(draft, edit())).toEqual({
+      step: 'write',
+      contentType: 'audio',
+    });
   });
 
-  it('keeps step 2 on the form until the Publish step lands', () => {
-    expect(writingType(draft, edit('?step=publish'))).toBeNull();
+  it('opens step 2 on the Publish step', () => {
+    expect(editorView(draft, edit('?step=publish'))).toEqual({
+      step: 'publish',
+      contentType: 'audio',
+    });
   });
 
-  it('keeps a piece that has been live on the form, unpublished or not', () => {
-    expect(writingType({ ...draft, status: 'published' }, edit())).toBeNull();
+  it('keeps a piece that has been live on the form, unpublished or not, at either step', () => {
+    for (const search of ['', '?step=publish']) {
+      expect(
+        editorView({ ...draft, status: 'published' }, edit(search))
+      ).toBeNull();
+      expect(
+        editorView(
+          { ...draft, publishedAt: '2026-10-01T00:00:00Z' },
+          edit(search)
+        )
+      ).toBeNull();
+    }
+  });
+
+  it('keeps a type the editor does not know on the form', () => {
     expect(
-      writingType({ ...draft, publishedAt: '2026-10-01T00:00:00Z' }, edit())
-    ).toBeNull();
-  });
-
-  it('keeps a type the canvas does not know on the form', () => {
-    expect(
-      writingType({ ...draft, contentType: 'podcast' }, edit())
+      editorView({ ...draft, contentType: 'podcast' }, edit('?step=publish'))
     ).toBeNull();
   });
 });

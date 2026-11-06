@@ -26,7 +26,7 @@ export function editHref(contentId: string): string {
   return `${CONTENT_LIST_HREF}/${contentId}/edit`;
 }
 
-/** Step 2. Until the Publish step lands (Codex-a6ofh.2.4) it is the old form. */
+/** Step 2, Publish (Codex-a6ofh.2.4). */
 export function publishStepHref(contentId: string): string {
   return `${editHref(contentId)}?step=publish`;
 }
@@ -36,18 +36,25 @@ export function readEditorStep(url: URL): 'write' | 'publish' {
   return url.searchParams.get('step') === 'publish' ? 'publish' : 'write';
 }
 
+/** What an edit address opens in the editor: its step, and the piece's type. */
+export interface EditorView {
+  step: 'write' | 'publish';
+  contentType: EditorContentType;
+}
+
 /**
- * The type an edit address opens on the Write canvas, or null for the old
- * form: step 2 is the form until the Publish step (Codex-a6ofh.2.4), and so
- * is a piece that has been live, whose changes wait for Update
- * (Codex-a6ofh.2.5). Both studios' edit routes ask here.
+ * The editor step an edit address opens, or null for the old form: a piece
+ * that has been live keeps it until its Page and Settings tabs
+ * (Codex-a6ofh.2.5), its changes waiting for Update, and so does a type the
+ * editor does not know. Both studios' edit routes ask here.
  */
-export function writingType(
+export function editorView(
   piece: PublicationState & { contentType: string },
   url: URL
-): EditorContentType | null {
-  if (readEditorStep(url) !== 'write' || hasBeenLive(piece)) return null;
-  return editorContentType(piece.contentType);
+): EditorView | null {
+  if (hasBeenLive(piece)) return null;
+  const contentType = editorContentType(piece.contentType);
+  return contentType ? { step: readEditorStep(url), contentType } : null;
 }
 
 /**

@@ -927,6 +927,70 @@ describe('ContentService', () => {
   });
 
   describe('update', () => {
+    it('refuses a slug another piece holds as a conflict, as create does', async () => {
+      const first = await service.create(
+        {
+          title: 'First draft',
+          slug: createUniqueSlug('held'),
+          contentType: 'written',
+          priceCents: 0,
+          tags: [],
+        },
+        creatorId
+      );
+      const second = await service.create(
+        {
+          title: 'Second draft',
+          slug: createUniqueSlug('mover'),
+          contentType: 'written',
+          priceCents: 0,
+          tags: [],
+        },
+        creatorId
+      );
+
+      await expect(
+        service.update(second.id, { slug: first.slug }, creatorId)
+      ).rejects.toThrow(SlugConflictError);
+    });
+
+    it('refuses a move into an org where its slug is taken, naming that slug', async () => {
+      const org = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
+      await joinTeam(db, org.id, creatorId);
+      const slug = createUniqueSlug('org-held');
+      await service.create(
+        {
+          title: 'In the org',
+          slug,
+          contentType: 'written',
+          organizationId: org.id,
+          priceCents: 0,
+          tags: [],
+        },
+        creatorId
+      );
+      // The same slug, personal: the personal index lets it be.
+      const personal = await service.create(
+        {
+          title: 'Personal',
+          slug,
+          contentType: 'written',
+          priceCents: 0,
+          tags: [],
+        },
+        creatorId
+      );
+
+      await expect(
+        service.update(personal.id, { organizationId: org.id }, creatorId)
+      ).rejects.toMatchObject({ code: 'CONFLICT', context: { slug } });
+    });
+
     it('should update content title', async () => {
       // Arrange
       const media = takeFirst(

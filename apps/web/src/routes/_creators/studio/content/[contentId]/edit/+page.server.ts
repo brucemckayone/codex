@@ -16,9 +16,8 @@ export const load: PageServerLoad = async ({
   cookies,
 }) => {
   // Read, so SvelteKit runs this again whenever the step changes (Next, Back,
-  // Forward, a held move sent on): step 2's form seeds itself once and saves
-  // every field it holds, so it must have the piece as the Write step left
-  // it (Codex-a6ofh.2.3).
+  // Forward, a held move sent on): each step's session starts from the piece
+  // as the other step left it (Codex-a6ofh.2.3, .2.4).
   url.searchParams.get('step');
   try {
     const api = createServerApi(platform, cookies);

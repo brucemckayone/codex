@@ -128,12 +128,30 @@ export function isNotNullViolation(error: unknown): boolean {
 
 /**
  * Get constraint name from Postgres error
+ *
+ * From the error itself or its cause, as {@link isUniqueViolation} reads it
+ * (Drizzle wraps Postgres errors).
  */
 export function getConstraintName(error: unknown): string | null {
-  if (isPostgresError(error)) {
-    return error.constraint || null;
+  if (isPostgresError(error) && error.constraint) return error.constraint;
+  if (error instanceof Error && 'cause' in error) {
+    const cause = (error as { cause: unknown }).cause;
+    if (isPostgresError(cause)) return cause.constraint || null;
   }
   return null;
+}
+
+/**
+ * A unique violation on one of `constraints`: the clash a caller can name
+ * (a slug taken, say), so any other unique index it trips stays unexpected.
+ */
+export function isUniqueViolationOf(
+  error: unknown,
+  constraints: ReadonlySet<string>
+): boolean {
+  return (
+    isUniqueViolation(error) && constraints.has(getConstraintName(error) ?? '')
+  );
 }
 
 /**

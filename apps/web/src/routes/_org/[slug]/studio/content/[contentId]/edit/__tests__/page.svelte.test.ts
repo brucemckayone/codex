@@ -173,7 +173,7 @@ describe('the org edit page · a read per arrival', () => {
 
     go('publish');
     await settle();
-    expect(probe('form')).toBeNull();
+    expect(probe('publish')).toBeNull();
     fail(1, new TypeError('Failed to fetch'));
     await settle();
     expect(text()).toContain('Couldn’t load this piece.');
@@ -204,7 +204,7 @@ describe('the org edit page · a read per arrival', () => {
     reads[1]?.resolve();
     await settle();
     expect(probe('editor')).toBe('R3');
-    expect(probe('form')).toBeNull();
+    expect(probe('publish')).toBeNull();
   });
 
   test('a step never mounts on the last read, not even for the flush the address changes in', async () => {
@@ -219,7 +219,7 @@ describe('the org edit page · a read per arrival', () => {
     await settle();
     answer(2, piece('R3'));
     await settle();
-    expect(mounts).toEqual(['editor:R1', 'form:R2', 'editor:R3']);
+    expect(mounts).toEqual(['editor:R1', 'publish:R2', 'editor:R3']);
   });
 
   test('a read kit answers only because a later one failed counts as that failure', async () => {
@@ -234,11 +234,11 @@ describe('the org edit page · a read per arrival', () => {
     q.loading = false;
     reads[1]?.resolve();
     await settle();
-    expect(probe('form')).toBeNull();
+    expect(probe('publish')).toBeNull();
     expect(text()).toContain('Couldn’t load this piece.');
   });
 
-  test('step 2 mounts its form on the read made as it arrived', async () => {
+  test('step 2 mounts the Publish step on the read made as it arrived', async () => {
     render();
     answer(0, piece('R1'));
     await settle();
@@ -247,7 +247,28 @@ describe('the org edit page · a read per arrival', () => {
     expect(refresh).toHaveBeenCalledOnce();
     answer(1, piece('R2'));
     await settle();
-    expect(probe('form')).toBe('R2');
+    expect(probe('publish')).toBe('R2');
+  });
+
+  test('a piece that has been live keeps the form at either step, until its tabs', async () => {
+    render();
+    answer(0, {
+      ...piece('L1'),
+      status: 'published',
+      publishedAt: '2026-11-01T09:00:00Z',
+    });
+    await settle();
+    expect(probe('form')).toBe('L1');
+    go('publish');
+    await settle();
+    answer(1, {
+      ...piece('L2'),
+      status: 'published',
+      publishedAt: '2026-11-01T09:00:00Z',
+    });
+    await settle();
+    expect(probe('form')).toBe('L2');
+    expect(mounts).toEqual(['form:L1', 'form:L2']);
   });
 });
 

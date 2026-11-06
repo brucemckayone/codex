@@ -154,8 +154,9 @@ describe('ContentForm (edit mode)', () => {
     const { form, title, slug } = render();
 
     type(title, 'Breathwork for everyone');
-    // SlugField re-derives the slug from the title until the slug is edited by
-    // hand (SlugField.svelte:41-49), so the slug follows — in edit mode too.
+    // A live piece's address never follows its title (Codex-a6ofh.2.4): its
+    // links are out in the world, and this form only edits a piece that has
+    // been live (`editorView`). This test once asserted the opposite.
     flushSync();
 
     submit(form);
@@ -163,13 +164,13 @@ describe('ContentForm (edit mode)', () => {
 
     expect(fake.submissions).toHaveLength(1);
     expect(fake.submissions[0].title).toBe('Breathwork for everyone');
-    expect(fake.submissions[0].slug).toBe('breathwork-for-everyone');
+    expect(fake.submissions[0].slug).toBe('breathwork-for-beginners');
 
     // The regression: kit's default attachment would have reset the <form>
     // here, blanking every control and the field state derived from it.
     expect(fake.resetCount).toBe(0);
     expect(title.value).toBe('Breathwork for everyone');
-    expect(slug.value).toBe('breathwork-for-everyone');
+    expect(slug.value).toBe('breathwork-for-beginners');
   });
 
   it('a second save carries title and slug, not the empties the server rejected', async () => {

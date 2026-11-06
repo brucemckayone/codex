@@ -5,6 +5,7 @@
 
 import { extractPlainText } from '@codex/validation';
 import type { ContentWithRelations } from '$lib/types';
+import { deriveContentAccessKind } from '$lib/utils/content-access';
 import { readingSeconds } from '$lib/utils/format';
 import * as m from '$paraglide/messages';
 import type { DraftValues } from './draft-session.svelte';
@@ -43,5 +44,15 @@ export function savedDraftValues(content: ContentWithRelations): DraftValues {
       ? JSON.stringify(content.contentBodyJson)
       : (content.contentBody ?? null),
     mediaItemId: content.mediaItemId ?? null,
+    slug: content.slug ?? '',
+    categoryIds: content.categoryIds ?? [],
+    tags: content.tags ?? [],
+    featured: content.featured ?? false,
+    access: {
+      kind: deriveContentAccessKind(content),
+      priceCents: content.priceCents ?? 0,
+      // Absent is "not read", never "in no plan" (`includedInTierIds`).
+      tierIds: content.includedInTierIds ?? null,
+    },
   };
 }

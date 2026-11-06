@@ -10,6 +10,7 @@
  * - Typed error handling
  */
 
+import { PUBLISH_REFUSAL_CODES } from '@codex/constants';
 import {
   CONTENT_THUMBNAIL_MAX_BYTES,
   CONTENT_THUMBNAIL_MIME_TYPES,
@@ -29,7 +30,11 @@ import { isReadOutage, remoteErrorStatus } from '$lib/remote/query-result';
 import { createServerApi } from '$lib/server/api';
 import { ApiError } from '$lib/server/errors';
 import { forwardClientErrors } from '$lib/server/forward-client-errors';
-import { contentSlugFromTitle } from '$lib/utils/content-slug';
+import { accessSelectionToFlags } from '$lib/utils/content-access';
+import {
+  contentSlugFromTitle,
+  freeSlugCandidates,
+} from '$lib/utils/content-slug';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Content List Query
@@ -339,12 +344,16 @@ export const deleteContent = command(z.string().uuid(), async (id) => {
  *
  * A refusal the creator can act on keeps its message, such as "Set up payouts
  * before publishing…" (Codex-2hxff.14): a bare `ApiError` would read "An
- * unexpected error occurred" in production. A 5xx stays sanitised.
+ * unexpected error occurred" in production. A 5xx stays sanitised. Its code
+ * is the refusal's own (`PUBLISH_REFUSAL_CODES`), never just the class, so
+ * the publish checklist can name the row (Codex-a6ofh.2.4).
  */
 export const publishContent = command(z.string().uuid(), async (id) => {
   const { platform, cookies } = getRequestEvent();
   const api = createServerApi(platform, cookies);
-  return forwardClientErrors(() => api.content.publish(id));
+  return forwardClientErrors(() => api.content.publish(id), {
+    detailCodes: PUBLISH_REFUSAL_CODES,
+  });
 });
 
 /**
@@ -362,60 +371,89 @@ export const unpublishContent = command(z.string().uuid(), async (id) => {
 // Draft saving (Codex-a6ofh.2.2)
 // ─────────────────────────────────────────────────────────────────────────────
 
+const isSlugTaken = (err: unknown) =>
+  ApiError.isApiError(err) && err.status === 409;
+
+/**
+ * A slug the title gives, made free: each of {@link freeSlugCandidates} in
+ * turn, tried by `write`, which another piece's slug refuses with a 409. The
+ * last refusal is the creator's. Returns the slug that took and what `write`
+ * answered.
+ */
+async function withFreeSlug<T>(
+  base: string,
+  write: (slug: string) => Promise<T>
+): Promise<{ slug: string; result: T }> {
+  const tries = freeSlugCandidates(base);
+  for (let i = 0; ; i += 1) {
+    const slug = tries[i] ?? base;
+    try {
+      return { slug, result: await write(slug) };
+    } catch (err) {
+      if (i >= tries.length - 1 || !isSlugTaken(err)) throw err;
+    }
+  }
+}
+
 /**
  * Save the fields the editor changed, and only those, as a PATCH.
  *
  * A command, not {@link updateContentForm}: drafts autosave a moment after the
  * creator stops typing, and the form refreshes `listContent` on every save.
- * This refreshes nothing, and sends nothing back: the editor already holds
- * what it saved, and the row would carry the whole body again. A refusal
- * keeps its message and code through {@link forwardClientErrors}. A live
- * piece's Update sends its changes the same way.
+ * This refreshes nothing, and sends back only a slug it chose: the editor
+ * already holds what it saved, and the row would carry the whole body again.
+ * A refusal keeps its message and code through {@link forwardClientErrors},
+ * a publish rule's own code too: a save to live content refuses a new gap as
+ * a publish would. A live piece's Update sends its changes the same way.
+ *
+ * `slugFollowsTitle`: the slug is the one the title gives, not one the
+ * creator typed, so another piece holding it is made free as the first save
+ * does ({@link createContentDraft}), never a refusal that stops every save.
  */
 export const saveContent = command(
-  z.object({ id: z.string().uuid(), patch: updateContentSchema }),
-  async ({ id, patch }) => {
+  z.object({
+    id: z.string().uuid(),
+    patch: updateContentSchema,
+    slugFollowsTitle: z.boolean().optional(),
+  }),
+  async ({ id, patch, slugFollowsTitle }) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
-    await forwardClientErrors(() => api.content.update(id, patch));
+    return forwardClientErrors(
+      async (): Promise<{ slug?: string }> => {
+        const { slug } = patch;
+        if (!slugFollowsTitle || !slug) {
+          await api.content.update(id, patch);
+          return {};
+        }
+        const saved = await withFreeSlug(slug, (free) =>
+          api.content.update(id, { ...patch, slug: free })
+        );
+        return { slug: saved.slug };
+      },
+      { detailCodes: PUBLISH_REFUSAL_CODES }
+    );
   }
 );
 
-const isSlugTaken = (err: unknown) =>
-  ApiError.isApiError(err) && err.status === 409;
-
 /**
  * Create a draft from the first thing the creator adds (owner 4A): its type,
- * a title and whatever else they have added so far. Returns only the new id.
+ * a title and whatever else they have added so far. Returns the new id and
+ * the slug it took.
  *
- * The slug comes from the title. A create refuses a taken slug with a 409, so
- * a taken one is tried again as `-2` to `-5`, then once with a random suffix,
- * and that last refusal is the creator's. Refreshes no list, like
+ * The slug comes from the title, made free ({@link withFreeSlug}): a create
+ * refuses a taken slug with a 409. Refreshes no list, like
  * {@link saveContent}.
  */
 export const createContentDraft = command(contentDraftSchema, async (draft) => {
   const { platform, cookies } = getRequestEvent();
   const api = createServerApi(platform, cookies);
   const base = contentSlugFromTitle(draft.title, draft.contentType);
-  const create = async (slug: string) => {
-    const created = await api.content.create({ ...draft, slug });
-    return { id: created.id };
-  };
   return forwardClientErrors(async () => {
-    for (const slug of [
-      base,
-      `${base}-2`,
-      `${base}-3`,
-      `${base}-4`,
-      `${base}-5`,
-    ]) {
-      try {
-        return await create(slug);
-      } catch (err) {
-        if (!isSlugTaken(err)) throw err;
-      }
-    }
-    return create(`${base}-${crypto.randomUUID().slice(0, 6)}`);
+    const { slug, result } = await withFreeSlug(base, (free) =>
+      api.content.create({ ...draft, slug: free })
+    );
+    return { id: result.id, slug };
   });
 });
 
@@ -535,105 +573,6 @@ const contentBaseFormSchema = z.object({
   shaderPreset: optionalString,
   featured: formBoolean,
 });
-
-/**
- * Translate the studio access-editor's single-select `accessType` (+ price +
- * the tiers ticked) into the SPEC §6.1 policy flags the content API expects.
- * The write-boundary inverse of `deriveContentAccessKind`.
- *
- * Plan access (Codex-2hxff.91): `isTierGated` is the subscribers-only switch
- * and `includedInTierIds` the exact set of tiers. Gated with no tier is
- * CLOSED (only buyers, granted users and the team get in), never free, so an
- * empty set is a legal save: the editor shows the "Closed to subscribers"
- * warning instead of refusing (owner decision U2).
- *
- * `includedTierIds` is `undefined` when the editor did not send the field
- * (untouched this session, or the tier list failed to load): the set is then
- * left out of the payload and the server keeps the ticks. For a paid item the
- * switch follows the set, so it is left out too: guessing it would either
- * clear real ticks (`false`) or gate an item the creator never put in a tier
- * (`true`). The new web never sends the legacy `includedInTierId`: the
- * schema refuses it beside the new fields.
- *
- * Orgless (personal) content has no tiers; the picker never renders for it.
- * A subscribers selection there still sends the switch, which the server
- * refuses ("orgless content cannot be tier-gated"): refused, never free.
- */
-function accessSelectionToFlags(
-  accessType: 'free' | 'paid' | 'followers' | 'subscribers' | 'team',
-  priceCents: number,
-  includedTierIds: string[] | undefined,
-  organizationId: string | null | undefined
-): {
-  isFree: boolean;
-  isPurchasable: boolean;
-  priceCents: number | null;
-  isTierGated?: boolean;
-  includedInTierIds?: string[];
-  isFollowerGated: boolean;
-  isTeamOnly: boolean;
-} {
-  const ids = organizationId ? includedTierIds : undefined;
-  switch (accessType) {
-    case 'paid':
-      // Purchasable; may also be included in tiers (hybrid). In no tier it is
-      // simply for sale, not closed.
-      return {
-        isFree: false,
-        isPurchasable: true,
-        priceCents,
-        ...(ids === undefined
-          ? {}
-          : ids.length > 0
-            ? { isTierGated: true, includedInTierIds: ids }
-            : { isTierGated: false }),
-        isFollowerGated: false,
-        isTeamOnly: false,
-      };
-    case 'subscribers':
-      // The subscribers-only switch. The optional price makes it ALSO
-      // purchasable (only with a real price, so pure subscription content
-      // keeps its 'subscribers' display kind).
-      return {
-        isFree: false,
-        isPurchasable: priceCents > 0,
-        priceCents: priceCents > 0 ? priceCents : null,
-        isTierGated: true,
-        ...(ids === undefined ? {} : { includedInTierIds: ids }),
-        isFollowerGated: false,
-        isTeamOnly: false,
-      };
-    // Every other kind turns the switch off; the server then clears the ticks
-    // in the same transaction, so no set is sent.
-    case 'followers':
-      return {
-        isFree: false,
-        isPurchasable: false,
-        priceCents: null,
-        isTierGated: false,
-        isFollowerGated: true,
-        isTeamOnly: false,
-      };
-    case 'team':
-      return {
-        isFree: false,
-        isPurchasable: false,
-        priceCents: null,
-        isTierGated: false,
-        isFollowerGated: false,
-        isTeamOnly: true,
-      };
-    default:
-      return {
-        isFree: true,
-        isPurchasable: false,
-        priceCents: null,
-        isTierGated: false,
-        isFollowerGated: false,
-        isTeamOnly: false,
-      };
-  }
-}
 
 const createContentFormSchema = contentBaseFormSchema;
 

@@ -26,7 +26,7 @@ import {
   PAGINATION,
 } from '@codex/constants';
 import {
-  isUniqueViolation,
+  isUniqueViolationOf,
   MEDIA_ITEM_RESPONSE_COLUMNS,
   paginatedQuery,
   scopedNotDeleted,
@@ -232,6 +232,12 @@ async function assertOwnPosterFolders(
     );
   }
 }
+
+/** The partial unique indexes that keep a slug to one piece (schema/content.ts). */
+const CONTENT_SLUG_INDEXES = new Set([
+  'idx_unique_content_slug_per_org',
+  'idx_unique_content_slug_personal',
+]);
 
 export class ContentService extends BaseService {
   private cache?: VersionedCache;
@@ -595,8 +601,8 @@ export class ContentService extends BaseService {
         wired ?? { ...result, includedInTierIds: [], includedInTierId: null }
       );
     } catch (error) {
-      // Handle unique constraint violations (slug conflicts)
-      if (isUniqueViolation(error)) {
+      // A slug another piece holds; any other clash stays unexpected.
+      if (isUniqueViolationOf(error, CONTENT_SLUG_INDEXES)) {
         throw new SlugConflictError(validated.slug);
       }
       this.handleError(error, 'create');
@@ -752,6 +758,7 @@ export class ContentService extends BaseService {
 
     // Read inside the transaction; only meaningful once it has committed.
     let previousThumbnailUrl: string | null = null;
+    let previousSlug: string | null = null;
     let wasLive = false;
 
     try {
@@ -831,6 +838,7 @@ export class ContentService extends BaseService {
           _rawBody !== undefined ? this.parseContentBody(_rawBody) : undefined;
         const bodyFields = sentBody ?? {};
         previousThumbnailUrl = existing.thumbnailUrl;
+        previousSlug = existing.slug;
         wasLive = hasBeenLive(existing);
 
         // A URL in this content's own thumbnail folders is written only by an
@@ -1239,6 +1247,13 @@ export class ContentService extends BaseService {
     } catch (error) {
       if (error instanceof ContentNotFoundError) {
         throw error;
+      }
+      // A slug another piece holds, a 409 as create() reports it: the
+      // creator's to change, never an unexpected error (Codex-a6ofh.2.4).
+      // Only the slug's own indexes: any other clash stays unexpected. A move
+      // to an org where its slug is taken sends none: the clash is its own.
+      if (isUniqueViolationOf(error, CONTENT_SLUG_INDEXES)) {
+        throw new SlugConflictError(validated.slug ?? previousSlug ?? '');
       }
       this.handleError(error, 'update');
     }

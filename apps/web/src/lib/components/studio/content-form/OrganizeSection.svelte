@@ -11,7 +11,9 @@
   and the create-on-the-fly mutation, and delegates the pure picker UI to
   CategorySelect (which also renders the hidden `categoryIds` form field).
 
-  @prop form                 Active form instance
+  @prop form                 Active form instance; absent where the values are
+                             saved without one (the editor's Publish step), so
+                             no hidden inputs render
   @prop organizationId       Org space UUID, or null for personal content
   @prop tags                 Tag array (uplifted so it survives in hidden input)
   @prop featured             Feature flag (uplifted)
@@ -19,10 +21,13 @@
   @prop onTagsChange
   @prop onFeaturedChange
   @prop onCategoryChange
+  @prop onbusy               A category is being created: the host waits for it
+                             before it saves the whole set (Publish)
 -->
 <script lang="ts">
   import TagsInput from './TagsInput.svelte';
   import CategorySelect from './CategorySelect.svelte';
+  import { Button } from '$lib/components/ui';
   import Switch from '$lib/components/ui/Switch/Switch.svelte';
   import { toast } from '$lib/components/ui/Toast/toast-store';
   import {
@@ -33,11 +38,14 @@
     createContentForm,
     updateContentForm,
   } from '$lib/remote/content.remote';
+  import { logger } from '$lib/observability';
+  import * as m from '$paraglide/messages';
+  import { logReadFailure } from '../media-library/log-read-failure';
 
   type ContentForm = typeof createContentForm | typeof updateContentForm;
 
   interface Props {
-    form: ContentForm;
+    form?: ContentForm;
     organizationId: string | null;
     tags: string[];
     featured: boolean;
@@ -45,6 +53,7 @@
     onTagsChange: (tags: string[]) => void;
     onFeaturedChange: (featured: boolean) => void;
     onCategoryChange: (ids: string[]) => void;
+    onbusy?: (busy: boolean) => void;
   }
 
   const {
@@ -56,6 +65,7 @@
     onTagsChange,
     onFeaturedChange,
     onCategoryChange,
+    onbusy,
   }: Props = $props();
 
   // Category taxonomy is org-scoped (WP-4 management + api client are org-only),
@@ -66,6 +76,21 @@
   const categoryOptions = $derived(
     (categoriesQuery?.current ?? []).map((c) => ({ id: c.id, name: c.name }))
   );
+  /** Never read: said so, never shown as an org with no categories. */
+  const categoriesFailed = $derived(
+    categoriesQuery?.current === undefined && categoriesQuery?.error != null
+  );
+  $effect(() => {
+    if (categoriesQuery?.error == null) return;
+    logReadFailure('studio_content.categories_unread', categoriesQuery.error, {
+      organizationId,
+    });
+  });
+
+  /** A failure shows through the query's `.error`, logged above. */
+  function rereadCategories() {
+    categoriesQuery?.refresh().catch(() => undefined);
+  }
 
   let creatingCategory = $state(false);
 
@@ -80,6 +105,7 @@
   async function createCategory(name: string) {
     if (!organizationId) return;
     creatingCategory = true;
+    onbusy?.(true);
     try {
       const result = await createCategoryInline({ organizationId, name });
       if (result.success) {
@@ -87,14 +113,18 @@
         // refreshed by the command so it also appears as a selectable option.
         onCategoryChange([...selectedCategoryIds, result.category.id]);
       } else {
+        // Never the name: it is what the creator typed.
+        logger.warn('studio_content.category_create_refused', { organizationId });
         toast.error(result.error);
       }
     } catch (error) {
+      logReadFailure('studio_content.category_create_failed', error, { organizationId });
       toast.error(
         error instanceof Error ? error.message : 'Failed to create topic'
       );
     } finally {
       creatingCategory = false;
+      onbusy?.(false);
     }
   }
 </script>
@@ -103,20 +133,31 @@
      by CategorySelect; `category` is legacy — echoed back unchanged so existing
      values round-trip while the taxonomy (categoryIds) becomes the source of
      truth. -->
-<input type="hidden" name="tags" value={JSON.stringify(tags)} />
-<input type="hidden" name="featured" value={featured ? 'true' : ''} />
-<input type="hidden" name="category" value={form.fields.category?.value() ?? ''} />
+{#if form}
+  <input type="hidden" name="tags" value={JSON.stringify(tags)} />
+  <input type="hidden" name="featured" value={featured ? 'true' : ''} />
+  <input type="hidden" name="category" value={form.fields.category?.value() ?? ''} />
+{/if}
 
 <div class="organize-grid" class:single={!organizationId}>
   {#if organizationId}
     <div class="organize-field">
-      <CategorySelect
-        options={categoryOptions}
-        selected={selectedCategoryIds}
-        onToggle={toggleCategory}
-        onCreate={createCategory}
-        creating={creatingCategory}
-      />
+      {#if categoriesFailed}
+        <div class="organize-failed" role="alert">
+          <p>{m.studio_content_form_categories_failed()}</p>
+          <Button type="button" size="sm" variant="ghost" onclick={rereadCategories}>
+            {m.common_try_again()}
+          </Button>
+        </div>
+      {:else}
+        <CategorySelect
+          options={categoryOptions}
+          selected={selectedCategoryIds}
+          onToggle={toggleCategory}
+          onCreate={createCategory}
+          creating={creatingCategory}
+        />
+      {/if}
     </div>
   {/if}
 
@@ -158,6 +199,19 @@
     flex-direction: column;
     gap: var(--space-2);
     min-width: 0;
+  }
+
+  .organize-failed {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2) var(--space-3);
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+  }
+
+  .organize-failed p {
+    margin: 0;
   }
 
   .organize-rule {

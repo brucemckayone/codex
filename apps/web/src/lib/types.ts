@@ -62,6 +62,11 @@ export interface ContentWithRelations
    * never saves an empty set it did not read.
    */
   includedInTierIds?: string[];
+  /**
+   * The categories it is filed under (WP-5): `ContentWithRelations` in
+   * `@codex/content` sends them; current memberships only.
+   */
+  categoryIds?: string[];
 }
 
 /** As content-api serves it: never the transcoder's raw detail. */

@@ -3,13 +3,18 @@
 
   The Write canvas's cover (Codex-a6ofh.2.3, mockup W6): an article's image
   in lists, or what an audio piece's listeners see in place of the waveform.
-  It needs the row to upload to, so until the draft exists it says what to do
-  first. The upload writes the row itself, which only a draft may take here:
-  a piece that has been live keeps its cover for Update (Codex-a6ofh.2.5).
+  On the Publish step it is any piece's, a video's too (mockup W4), whose
+  card shows the video's own poster until an image is chosen, so removing
+  one there reads "Use the video's poster". It needs the row to upload to, so
+  until the draft exists it says what to do first. The upload writes the row
+  itself, which only a draft may take here: a piece that has been live keeps
+  its cover for Update (Codex-a6ofh.2.5).
 
   @prop {string | null} contentId - The draft's row; null until its first save
-  @prop {'audio' | 'written'} contentType - Which copy it says
+  @prop {EditorContentType} contentType - Which copy it says
   @prop {string | null} thumbnailUrl - The saved cover
+  @prop {boolean} [image] - Show the cover here; false where the host shows it (the Publish step's card)
+  @prop {string | null | undefined} [changed] - Bindable: a cover set (its URL) or removed (null) here; undefined until then
   @prop {(busy: boolean, failed: boolean) => void} [onbusy] - A cover is being readied, sent or removed, from the moment one is picked; failed once that ended in a problem, said here
 -->
 <script lang="ts">
@@ -24,24 +29,47 @@
   import { logger } from '$lib/observability';
   import { describeThrown } from '$lib/client-log';
   import * as m from '$paraglide/messages';
+  import type { EditorContentType } from './editor-url';
 
   interface Props {
     contentId: string | null;
-    contentType: 'audio' | 'written';
+    contentType: EditorContentType;
     thumbnailUrl: string | null;
+    image?: boolean;
+    changed?: string | null | undefined;
     onbusy?: (busy: boolean, failed: boolean) => void;
   }
 
-  const { contentId, contentType, thumbnailUrl, onbusy }: Props = $props();
+  let {
+    contentId,
+    contentType,
+    thumbnailUrl,
+    image = true,
+    changed = $bindable(undefined),
+    onbusy,
+  }: Props = $props();
 
   /** What the upload takes (`uploadThumbnailSchema`). */
   const COVER_TYPES: readonly string[] = CONTENT_THUMBNAIL_MIME_TYPES;
 
-  const ADD = { audio: m.studio_editor_cover_add_audio, written: m.studio_editor_cover_add_article };
-  const HINT = { audio: m.studio_editor_cover_hint_audio, written: m.studio_editor_cover_hint_article };
+  const ADD = {
+    video: m.studio_editor_cover_add_video,
+    audio: m.studio_editor_cover_add_audio,
+    written: m.studio_editor_cover_add_article,
+  };
+  const HINT = {
+    video: m.studio_editor_cover_hint_video,
+    audio: m.studio_editor_cover_hint_audio,
+    written: m.studio_editor_cover_hint_article,
+  };
+  /** A video's card falls back to its poster, so that is what removing one gives. */
+  const REMOVE = {
+    video: m.studio_editor_cover_use_poster,
+    audio: m.studio_editor_cover_remove,
+    written: m.studio_editor_cover_remove,
+  };
 
-  /** A cover set or removed here; undefined until then, so the saved one shows. */
-  let changed = $state<string | null | undefined>(undefined);
+  /** The saved one until a cover is set or removed here. */
   const cover = $derived(changed === undefined ? thumbnailUrl : changed);
   /** A picked photo being made smaller before it goes. */
   let preparing = $state(false);
@@ -165,19 +193,21 @@
 
 <div class="cover" bind:this={coverEl}>
   {#if cover}
-    <img
-      class="cover-image"
-      src={cover}
-      srcset={getThumbnailSrcset(cover) || undefined}
-      sizes="10rem"
-      alt={m.studio_editor_cover_alt()}
-    />
+    {#if image}
+      <img
+        class="cover-image"
+        src={cover}
+        srcset={getThumbnailSrcset(cover) || undefined}
+        sizes="10rem"
+        alt={m.studio_editor_cover_alt()}
+      />
+    {/if}
     <div class="cover-actions">
       <Button type="button" size="sm" variant="secondary" disabled={busy} onclick={() => fileInput?.click()}>
         {m.studio_editor_cover_change()}
       </Button>
       <Button type="button" size="sm" variant="ghost" disabled={busy} onclick={removeCover}>
-        {m.studio_editor_cover_remove()}
+        {REMOVE[contentType]()}
       </Button>
     </div>
   {:else}

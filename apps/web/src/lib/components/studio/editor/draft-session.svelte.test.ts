@@ -6,7 +6,9 @@
 import type { PublicationState } from '@codex/constants';
 import { flushSync } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { contentSlugFromTitle } from '$lib/utils/content-slug';
 import * as m from '$paraglide/messages';
+import type { DraftValues } from './draft-session.svelte';
 
 const remotes = vi.hoisted(() => ({
   saveContent: vi.fn(),
@@ -42,11 +44,17 @@ type Session = ReturnType<typeof createDraftSession>;
 
 const ID = '5e000000-0000-4000-8000-000000000001';
 const ORG = '6e000000-0000-4000-8000-000000000002';
-const SAVED_VALUES = {
+const SAVED_VALUES: DraftValues = {
   title: 'Runes deep dive',
   description: 'All three runes.',
   contentBody: null,
   mediaItemId: '7e000000-0000-4000-8000-000000000003',
+  // Typed by the creator, not the title's: it never follows it.
+  slug: 'runes-explained',
+  categoryIds: ['8e000000-0000-4000-8000-000000000004'],
+  tags: ['svelte'],
+  featured: false,
+  access: { kind: 'free', priceCents: 0, tierIds: [] },
 };
 const DRAFT: PublicationState = { status: 'draft', publishedAt: null };
 const LIVE: PublicationState = {
@@ -120,7 +128,15 @@ beforeEach(() => {
   nav.guards.length = 0;
   nav.goto.mockReset().mockResolvedValue(undefined);
   remotes.saveContent.mockReset().mockResolvedValue(undefined);
-  remotes.createContentDraft.mockReset().mockResolvedValue({ id: ID });
+  // As the command does: the slug from the title it was sent.
+  remotes.createContentDraft
+    .mockReset()
+    .mockImplementation(
+      async (draft: { title: string; contentType: string }) => ({
+        id: ID,
+        slug: contentSlugFromTitle(draft.title, draft.contentType),
+      })
+    );
   for (const spy of Object.values(told)) spy.mockReset();
 });
 
@@ -213,14 +229,30 @@ describe('what a save sends, and when', () => {
   });
 
   // What the remote client really throws: never its transport words. The
-  // creator's own network is a warning; the platform's failures are errors.
+  // creator's own network (the browser says it is offline) is a warning;
+  // anything else that never answered is an outage, an error, as the
+  // studio's one rule has it, a TypeError from our own code included.
   it.each([
-    ['the network is gone', offline(), 'logWarn', 'studio_editor.save_offline'],
+    [
+      'the network is gone',
+      offline(),
+      'logWarn',
+      'studio_editor.save_offline',
+      false,
+    ],
+    [
+      'a fetch failed while the browser is online',
+      offline(),
+      'logError',
+      'studio_editor.save_failed',
+      true,
+    ],
     [
       'the response was not one',
       new Error('Failed to execute remote function'),
       'logError',
       'studio_editor.save_failed',
+      true,
     ],
     [
       'the worker failed',
@@ -233,8 +265,10 @@ describe('what a save sends, and when', () => {
       },
       'logError',
       'studio_editor.save_failed',
+      true,
     ],
-  ] as const)('when %s, the bar says it plainly and the log keeps it', async (_label, thrown, log, event) => {
+  ] as const)('when %s, the bar says it plainly and the log keeps it', async (_label, thrown, log, event, online) => {
+    vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(online);
     remotes.saveContent.mockRejectedValueOnce(thrown);
     const session = start();
     session.set('title', 'Offline');
@@ -245,6 +279,24 @@ describe('what a save sends, and when', () => {
     expect(told[log]).toHaveBeenCalledWith(
       event,
       expect.objectContaining({ contentId: ID })
+    );
+  });
+
+  it('a rate-limited save is an outage in the log, as the studio counts one', async () => {
+    remotes.saveContent.mockRejectedValueOnce({
+      status: 429,
+      body: { message: 'Too many requests', code: 'RATE_LIMITED' },
+    });
+    const session = start();
+    session.set('title', 'Too fast');
+    await session.flush();
+    expect(told.logError).toHaveBeenCalledWith(
+      'studio_editor.save_failed',
+      expect.objectContaining({ contentId: ID, status: 429 })
+    );
+    expect(told.logWarn).not.toHaveBeenCalledWith(
+      'studio_editor.save_refused',
+      expect.anything()
     );
   });
 
@@ -1210,5 +1262,399 @@ describe('closing the editor in place', () => {
     second.reject(offline());
     await settle();
     expect(told.toastAdd).toHaveBeenCalledTimes(1);
+  });
+});
+
+// The Publish step's fields (Codex-a6ofh.2.4): lists and the access group are
+// compared by what they hold, and the group goes as the flags the API reads.
+describe('the Publish step’s fields', () => {
+  it('a list or the access group set again with the same contents is no change', async () => {
+    const session = start();
+    session.set('tags', ['svelte']);
+    session.set('access', { kind: 'free', priceCents: 0, tierIds: [] });
+    await afterDebounce();
+    expect(session.isDirty).toBe(false);
+    expect(remotes.saveContent).not.toHaveBeenCalled();
+  });
+
+  it('the access group goes as the flags the API reads', async () => {
+    const session = start();
+    session.set('access', { kind: 'paid', priceCents: 1200, tierIds: [] });
+    await afterDebounce();
+    expect(remotes.saveContent).toHaveBeenCalledWith({
+      id: ID,
+      patch: {
+        isFree: false,
+        isPurchasable: true,
+        priceCents: 1200,
+        isTierGated: false,
+        isFollowerGated: false,
+        isTeamOnly: false,
+      },
+    });
+  });
+
+  it('a list changed in place after its save is still seen as a change', async () => {
+    const session = start();
+    session.set('tags', ['svelte', 'runes']);
+    await afterDebounce();
+    // What the server holds is a copy, never the list on screen.
+    (session.values.tags as string[]).push('state');
+    session.set('tags', [...session.values.tags]);
+    await afterDebounce();
+    expect(remotes.saveContent).toHaveBeenLastCalledWith({
+      id: ID,
+      patch: { tags: ['svelte', 'runes', 'state'] },
+    });
+  });
+});
+
+// The slug follows the title until the piece goes live (Codex-a6ofh.2.4).
+describe('the slug', () => {
+  /** A draft whose slug is the one its title gave. */
+  const TITLED = { ...SAVED_VALUES, slug: 'runes-deep-dive' };
+
+  it('a slug that is the title’s own follows it, and is made free if taken', async () => {
+    const session = start({ saved: { id: ID, values: TITLED } });
+    session.set('title', 'Runes, all three');
+    await afterDebounce();
+    expect(remotes.saveContent).toHaveBeenCalledWith({
+      id: ID,
+      patch: { title: 'Runes, all three', slug: 'runes-all-three' },
+      slugFollowsTitle: true,
+    });
+  });
+
+  it('a slug the save made free is the one held, and still follows', async () => {
+    remotes.saveContent.mockResolvedValueOnce({ slug: 'runes-all-three-2' });
+    const session = start({ saved: { id: ID, values: TITLED } });
+    session.set('title', 'Runes, all three');
+    await afterDebounce();
+    expect(session.values.slug).toBe('runes-all-three-2');
+    expect(session.isDirty).toBe(false);
+
+    session.set('title', 'Runes');
+    await afterDebounce();
+    expect(remotes.saveContent).toHaveBeenLastCalledWith({
+      id: ID,
+      patch: { title: 'Runes', slug: 'runes' },
+      slugFollowsTitle: true,
+    });
+  });
+
+  it('a title that gives the same slug (a capital, a "!") leaves a freed slug where it is', async () => {
+    remotes.saveContent.mockResolvedValueOnce({
+      slug: 'runes-all-three-a1b2c3',
+    });
+    const session = start({ saved: { id: ID, values: TITLED } });
+    session.set('title', 'Runes, all three');
+    await afterDebounce();
+    expect(session.values.slug).toBe('runes-all-three-a1b2c3');
+
+    session.set('title', 'Runes, ALL three!');
+    await afterDebounce();
+    expect(remotes.saveContent).toHaveBeenLastCalledWith({
+      id: ID,
+      patch: { title: 'Runes, ALL three!' },
+    });
+  });
+
+  it('a slug a save made free (`-2`) still follows when the draft is opened again', async () => {
+    const session = start({
+      saved: { id: ID, values: { ...TITLED, slug: 'runes-deep-dive-2' } },
+    });
+    session.set('title', 'Runes, all three');
+    await afterDebounce();
+    expect(remotes.saveContent).toHaveBeenCalledWith({
+      id: ID,
+      patch: { title: 'Runes, all three', slug: 'runes-all-three' },
+      slugFollowsTitle: true,
+    });
+  });
+
+  it('a slug the creator typed stays, and goes as theirs', async () => {
+    const session = start({ saved: { id: ID, values: TITLED } });
+    session.set('slug', 'my-runes');
+    session.set('title', 'Runes, all three');
+    await afterDebounce();
+    expect(remotes.saveContent).toHaveBeenCalledWith({
+      id: ID,
+      patch: { title: 'Runes, all three', slug: 'my-runes' },
+    });
+  });
+
+  it('one that is not the title’s, from an earlier visit, stays too', async () => {
+    const session = start();
+    session.set('title', 'Runes, all three');
+    expect(session.values.slug).toBe(SAVED_VALUES.slug);
+  });
+
+  it('an emptied title leaves it; the next one moves it', () => {
+    const session = start({ saved: { id: ID, values: TITLED } });
+    session.set('title', '');
+    expect(session.values.slug).toBe('runes-deep-dive');
+    session.set('title', 'Winter');
+    expect(session.values.slug).toBe('winter');
+  });
+
+  it('never moves on a piece that has been live', () => {
+    publication = LIVE;
+    const session = start({ saved: { id: ID, values: TITLED } });
+    session.set('title', 'Runes, all three');
+    expect(session.values.slug).toBe('runes-deep-dive');
+  });
+
+  it('nor while its Publish is out', async () => {
+    const send = Promise.withResolvers<unknown>();
+    const session = start({ saved: { id: ID, values: TITLED } });
+    const run = session.publish(() => send.promise);
+    session.set('title', 'Runes, all three');
+    expect(session.values.slug).toBe('runes-deep-dive');
+    send.resolve({});
+    await run;
+  });
+
+  it('a new piece’s first save makes it; it follows from then on', async () => {
+    const session = start({ saved: null });
+    session.set('title', 'Runes');
+    await afterDebounce();
+    expect(session.values.slug).toBe('runes');
+    expect(session.isDirty).toBe(false);
+
+    session.set('title', 'Runes, all three');
+    await afterDebounce();
+    expect(remotes.saveContent).toHaveBeenLastCalledWith({
+      id: ID,
+      patch: { title: 'Runes, all three', slug: 'runes-all-three' },
+      slugFollowsTitle: true,
+    });
+  });
+
+  it('a title typed while the first save is out moves the slug it made', async () => {
+    const created = Promise.withResolvers<{ id: string; slug: string }>();
+    remotes.createContentDraft.mockReturnValueOnce(created.promise);
+    const session = start({ saved: null });
+    session.set('title', 'Runes');
+    await afterDebounce();
+    session.set('title', 'Runes, all three');
+    created.resolve({ id: ID, slug: 'runes' });
+    await settle();
+    expect(session.values.slug).toBe('runes-all-three');
+  });
+});
+
+// The session owns Publish (owner, 2026-11-05).
+describe('publish', () => {
+  /** A publish call that answers when the test says. */
+  function pendingSend() {
+    const answer = {
+      ok: () => {},
+      fail: (_reason: unknown) => {},
+    };
+    const send = vi.fn(
+      () =>
+        new Promise((resolve, reject) => {
+          answer.ok = () => resolve({});
+          answer.fail = reject;
+        })
+    );
+    return { send, answer };
+  }
+
+  it('saves what is on screen, then publishes', async () => {
+    const session = start();
+    session.set('title', 'Runes, all three');
+    const send = vi.fn().mockResolvedValue({});
+    const result = await session.publish(send);
+    expect(result).toEqual({ ok: true });
+    expect(remotes.saveContent).toHaveBeenCalledWith({
+      id: ID,
+      patch: { title: 'Runes, all three' },
+    });
+    expect(send).toHaveBeenCalledWith(ID);
+    expect(remotes.saveContent.mock.invocationCallOrder[0]).toBeLessThan(
+      send.mock.invocationCallOrder[0] ?? 0
+    );
+  });
+
+  it('a timer that fires while Publish is out sends nothing to the piece going live', async () => {
+    const session = start();
+    const { send, answer } = pendingSend();
+    const run = session.publish(send);
+    await settle();
+    session.set('tags', ['half-typ']);
+    await afterDebounce();
+    expect(remotes.saveContent).not.toHaveBeenCalled();
+    answer.ok();
+    await expect(run).resolves.toEqual({ ok: true });
+    await afterDebounce();
+    expect(remotes.saveContent).not.toHaveBeenCalled();
+    // Live now: the words wait for Update.
+    expect(session.hasUnpublishedChanges).toBe(true);
+  });
+
+  it('a refusal is a draft again: it keeps its code, and what was typed meanwhile saves', async () => {
+    const session = start();
+    const { send, answer } = pendingSend();
+    const run = session.publish(send);
+    await settle();
+    session.set('tags', ['late']);
+    answer.fail({
+      status: 422,
+      body: { code: 'MEDIA_REQUIRED', message: 'Add the video first.' },
+    });
+    await expect(run).resolves.toMatchObject({
+      ok: false,
+      code: 'MEDIA_REQUIRED',
+      message: 'Add the video first.',
+    });
+    await afterDebounce();
+    expect(remotes.saveContent).toHaveBeenCalledWith({
+      id: ID,
+      patch: { tags: ['late'] },
+    });
+    expect(told.logWarn).toHaveBeenCalledWith(
+      'studio_editor.publish_refused',
+      expect.objectContaining({ code: 'MEDIA_REQUIRED' })
+    );
+  });
+
+  it('a second Publish while one runs joins it', async () => {
+    const session = start();
+    const { send, answer } = pendingSend();
+    const first = session.publish(send);
+    const second = session.publish(send);
+    expect(second).toBe(first);
+    await settle();
+    answer.ok();
+    await first;
+    expect(send).toHaveBeenCalledOnce();
+  });
+
+  it('a save that fails never publishes', async () => {
+    const session = start();
+    session.set('title', 'Runes, all three');
+    remotes.saveContent.mockRejectedValueOnce(offline());
+    const send = vi.fn();
+    const result = await session.publish(send);
+    expect(result.ok).toBe(false);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('a save that never answers stops Publish after 10 s, never publishing', async () => {
+    const session = start();
+    session.set('title', 'Runes, all three');
+    remotes.saveContent.mockReturnValueOnce(new Promise(() => {}));
+    const send = vi.fn();
+    const run = session.publish(send);
+    await vi.advanceTimersByTimeAsync(10_000);
+    await expect(run).resolves.toMatchObject({
+      ok: false,
+      code: 'SAVE_SLOW',
+      message: m.studio_editor_publish_save_slow(),
+    });
+    expect(send).not.toHaveBeenCalled();
+    expect(told.logWarn).toHaveBeenCalledWith(
+      'studio_editor.publish_save_slow',
+      {
+        contentId: ID,
+      }
+    );
+  });
+
+  it('a move asked for while Publish is out waits, and its caller takes it once', async () => {
+    const session = start();
+    const { send, answer } = pendingSend();
+    const run = session.publish(send);
+    await settle();
+    const { to, cancel } = navigate();
+    expect(cancel).toHaveBeenCalled();
+    expect(nav.goto).not.toHaveBeenCalled();
+
+    answer.ok();
+    await expect(run).resolves.toEqual({ ok: true });
+    expect(session.takeHeldMove()).toEqual(to);
+    expect(session.takeHeldMove()).toBeNull();
+    expect(nav.goto).not.toHaveBeenCalled();
+  });
+
+  it('a move waiting for a save when Publish starts waits for Publish too', async () => {
+    const saved = Promise.withResolvers<unknown>();
+    remotes.saveContent.mockReturnValueOnce(saved.promise);
+    const session = start();
+    session.set('tags', ['moving']);
+    await afterDebounce(); // The save is out.
+    const { to, cancel } = navigate();
+    expect(cancel).toHaveBeenCalled();
+    const { send, answer } = pendingSend();
+    const run = session.publish(send);
+
+    saved.resolve({});
+    await settle();
+    expect(nav.goto).not.toHaveBeenCalled();
+    expect(session.holdingMove).toBe(true);
+    expect(send).toHaveBeenCalled();
+
+    answer.ok();
+    await expect(run).resolves.toEqual({ ok: true });
+    expect(session.takeHeldMove()).toEqual(to);
+    expect(nav.goto).not.toHaveBeenCalled();
+  });
+
+  it('closing the tab while Publish is out asks first', async () => {
+    // This session's own guard: a save left hanging by another test keeps
+    // its listener on the window.
+    const added = vi.spyOn(window, 'addEventListener');
+    const session = start();
+    const guard = added.mock.calls.find(
+      ([type]) => String(type) === 'beforeunload'
+    )?.[1];
+    if (typeof guard !== 'function') throw new Error('no unload guard');
+    const asks = () => {
+      const event = new Event('beforeunload', { cancelable: true });
+      guard(event);
+      return event.defaultPrevented;
+    };
+    expect(asks()).toBe(false);
+
+    const { send, answer } = pendingSend();
+    const run = session.publish(send);
+    await settle();
+    expect(asks()).toBe(true);
+    answer.ok();
+    await run;
+    expect(asks()).toBe(false);
+  });
+
+  it('a Publish that stops at its save says so: nothing was sent', async () => {
+    remotes.saveContent.mockRejectedValueOnce({
+      status: 503,
+      body: { message: 'Service unavailable' },
+    });
+    const session = start();
+    session.set('tags', ['unsaved']);
+    const send = vi.fn();
+    await expect(session.publish(send)).resolves.toMatchObject({
+      ok: false,
+      unsent: true,
+    });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('a move held by one Publish is not left for the next', async () => {
+    const session = start();
+    const first = pendingSend();
+    const run = session.publish(first.send);
+    await settle();
+    navigate();
+    first.answer.fail({ status: 422, body: { code: 'MEDIA_REQUIRED' } });
+    await run;
+
+    const second = pendingSend();
+    const again = session.publish(second.send);
+    await settle();
+    second.answer.ok();
+    await again;
+    expect(session.takeHeldMove()).toBeNull();
   });
 });

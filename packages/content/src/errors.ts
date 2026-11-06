@@ -281,7 +281,7 @@ export class CreatorPayoutsRequiredError extends BusinessLogicError {
       {
         accessType,
         ...items,
-        code: 'CREATOR_CONNECT_REQUIRED',
+        code: ERROR_CODES.CREATOR_CONNECT_REQUIRED,
       }
     );
   }
@@ -302,7 +302,7 @@ export class TierRequiredToPublishError extends BusinessLogicError {
   constructor(contentId: string) {
     super('Tick at least one plan before publishing subscriber content.', {
       contentId,
-      code: 'TIER_REQUIRED_TO_PUBLISH',
+      code: ERROR_CODES.TIER_REQUIRED_TO_PUBLISH,
     });
   }
 }

@@ -1,16 +1,18 @@
 <!--
   @component WriteBar
 
-  The Write step's top bar (Codex-a6ofh.2.3, mockups W2/W3/W8a): back to the
-  content list, the draft's save state, the two steps, and Next. The save
-  state is the only save UI: a draft saves itself, so there is no Save button.
-  On a phone the steps shrink to numbers and Next moves to the foot of the
-  page (the editor's own).
+  The editor's top bar (Codex-a6ofh.2.3, mockups W2/W3/W8a): back, the
+  draft's save state, the two steps, and on Write, Next. The save state is
+  the only save UI: a draft saves itself, so there is no Save button. On a
+  phone the steps shrink to numbers and Next moves to the foot of the page
+  (the editor's own). On Publish (Codex-a6ofh.2.4, mockup W4) it goes back to
+  writing, Write reads as done, and the step's own button publishes.
 
   @prop {DraftSession} session - The editor's draft session
   @prop {EditorContentType} contentType - Names a piece not yet saved
-  @prop {string} backHref - The content list
-  @prop {() => void} onnext - Go on to Publish: offered once the draft exists
+  @prop {'write' | 'publish'} [step] - The step it is on
+  @prop {string} backHref - The content list from Write; the Write step from Publish
+  @prop {() => void} [onnext] - Go on to Publish: offered on Write once the draft exists
   @prop {boolean} [advancing] - Next was pressed and is saving first
   @prop {string | null} [nextHint] - Why Next can't go yet, for a screen reader; null when it can
   @prop {boolean} [holding] - A move to step 2 is waiting for the same thing: the reason is said aloud and shown
@@ -18,7 +20,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { Badge, Button } from '$lib/components/ui';
-  import { ArrowLeftIcon, ChevronRightIcon } from '$lib/components/ui/Icon';
+  import { ArrowLeftIcon, CheckIcon, ChevronRightIcon } from '$lib/components/ui/Icon';
   import * as m from '$paraglide/messages';
   import { TYPE_WORD } from './canvas-text';
   import type { DraftSession } from './draft-session.svelte';
@@ -27,15 +29,24 @@
   interface Props {
     session: DraftSession;
     contentType: EditorContentType;
+    step?: 'write' | 'publish';
     backHref: string;
-    onnext: () => void;
+    onnext?: () => void;
     advancing?: boolean;
     nextHint?: string | null;
     holding?: boolean;
   }
 
-  const { session, contentType, backHref, onnext, advancing = false, nextHint = null, holding = false }: Props =
-    $props();
+  const {
+    session,
+    contentType,
+    step = 'write',
+    backHref,
+    onnext,
+    advancing = false,
+    nextHint = null,
+    holding = false,
+  }: Props = $props();
 
   /** How long a save reads as "just now". */
   const JUST_NOW_MS = 60_000;
@@ -75,7 +86,9 @@
 <header class="write-bar">
   <a class="write-back" href={backHref}>
     <ArrowLeftIcon size={16} />
-    <span class="write-back-label">{m.studio_editor_back()}</span>
+    <span class="write-back-label">
+      {step === 'publish' ? m.studio_editor_back_to_writing() : m.studio_editor_back()}
+    </span>
   </a>
 
   <div class="write-state">
@@ -98,33 +111,42 @@
   </div>
 
   <ol class="write-steps" aria-label={m.studio_editor_steps()}>
-    <li class="write-step" aria-current="step">
-      <span class="write-step-number">1</span>
+    <li class="write-step" aria-current={step === 'write' ? 'step' : undefined}>
+      {#if step === 'publish'}
+        <span class="write-step-number" data-done>
+          <CheckIcon size={12} />
+          <span class="sr-only">{m.studio_editor_step_done()}</span>
+        </span>
+      {:else}
+        <span class="write-step-number">1</span>
+      {/if}
       <span class="write-step-label">{m.studio_editor_step_write()}</span>
     </li>
     <li class="write-step-rule" aria-hidden="true"></li>
-    <li class="write-step">
+    <li class="write-step" aria-current={step === 'publish' ? 'step' : undefined}>
       <span class="write-step-number">2</span>
       <span class="write-step-label">{m.studio_editor_step_publish()}</span>
     </li>
   </ol>
 
-  <div class="write-next">
-    <Button
-      type="button"
-      size="sm"
-      disabled={nextHint !== null}
-      loading={advancing}
-      aria-describedby={nextHint === null ? undefined : nextHintId}
-      onclick={onnext}
-    >
-      {m.studio_editor_next()}
-      <ChevronRightIcon size={16} />
-    </Button>
-    {#if nextHint !== null}
-      <span id={nextHintId} class="sr-only">{nextHint}</span>
-    {/if}
-  </div>
+  {#if step === 'write'}
+    <div class="write-next">
+      <Button
+        type="button"
+        size="sm"
+        disabled={nextHint !== null}
+        loading={advancing}
+        aria-describedby={nextHint === null ? undefined : nextHintId}
+        onclick={onnext}
+      >
+        {m.studio_editor_next()}
+        <ChevronRightIcon size={16} />
+      </Button>
+      {#if nextHint !== null}
+        <span id={nextHintId} class="sr-only">{nextHint}</span>
+      {/if}
+    </div>
+  {/if}
 </header>
 
 <style>
@@ -233,6 +255,11 @@
   .write-step[aria-current='step'] .write-step-number {
     background: var(--color-interactive);
     color: var(--color-on-interactive);
+  }
+
+  .write-step-number[data-done] {
+    background: var(--color-status-success-surface);
+    color: var(--color-status-success-text);
   }
 
   .write-step-rule {
