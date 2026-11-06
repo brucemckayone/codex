@@ -451,6 +451,19 @@ describe('DialogContent', () => {
     expect(content?.getAttribute('aria-modal')).toBe('true');
   });
 
+  test('a role set on Dialog.Root reaches the panel', () => {
+    component = mount(DialogHarness, {
+      target: document.body,
+      props: { open: true, role: 'alertdialog' },
+    });
+
+    flushSync();
+
+    expect(
+      document.querySelector('.dialog-content')?.getAttribute('role')
+    ).toBe('alertdialog');
+  });
+
   test('close button has accessible label', () => {
     component = mount(DialogHarness, {
       target: document.body,

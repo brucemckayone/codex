@@ -14,6 +14,7 @@
     onOpenChange?: (open: boolean) => void;
     size?: 'sm' | 'md' | 'lg';
     dismissible?: boolean;
+    role?: 'dialog' | 'alertdialog';
     variant?: 'dialog' | 'drawer';
     sheet?: boolean;
     flush?: boolean;
@@ -41,6 +42,7 @@
     onOpenChange,
     size = 'md',
     dismissible = true,
+    role,
     variant,
     sheet,
     flush,
@@ -68,7 +70,7 @@
   </DialogBody>
 {/snippet}
 
-<Dialog bind:open {onOpenChange} {dismissible}>
+<Dialog bind:open {onOpenChange} {dismissible} {role}>
   <DialogContent
     {...contentProps}
     {size}

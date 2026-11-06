@@ -53,7 +53,7 @@
 
 <script lang="ts">
   import { type CreateDialogProps, createDialog } from '@melt-ui/svelte';
-  import { type Snippet, setContext } from 'svelte';
+  import { type Snippet, setContext, untrack } from 'svelte';
   import { lockScroll } from '$lib/utils/scroll-lock';
 
   interface Props {
@@ -85,6 +85,13 @@
      * Defaults to true, so every existing dialog is unchanged.
      */
     dismissible?: boolean;
+    /**
+     * The panel's role. `alertdialog` is for a dialog that interrupts to ask
+     * for an answer at once; a screen reader announces its message as it
+     * opens. Melt puts the role on the panel, so it is set here and never as
+     * an attribute on Dialog.Content. Defaults to `dialog`.
+     */
+    role?: 'dialog' | 'alertdialog';
     children: Snippet;
   }
 
@@ -93,6 +100,7 @@
     onOpenChange,
     closeFocus,
     dismissible = true,
+    role = 'dialog',
     children
   }: Props = $props();
 
@@ -137,6 +145,9 @@
     // during its close animation lost the release and the page stayed
     // locked (Codex-vlphc review H1).
     preventScroll: false,
+    // Always a value: an unset option here would replace Melt's default
+    // with undefined and leave the panel with no role. Synced below.
+    role: untrack(() => role),
     forceVisible: true
   });
 
@@ -146,6 +157,12 @@
 
   /** Where focus goes back to at the close, when no `closeFocus` says. */
   let opener: HTMLElement | null = null;
+
+  // Before the open below: Melt reads the role only as the panel's open
+  // state changes, so a role set after an open waits for the next one.
+  $effect(() => {
+    dialog.options.role.set(role);
+  });
 
   // Sync prop to melt state. The opener is read first, while focus is still
   // where the open came from: Melt moves it into the panel after a tick.
