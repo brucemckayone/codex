@@ -1430,6 +1430,44 @@ test('CATCHES an id known by its trailing text, and an id of literals or same-fi
   assert.match(result.violations[0].detail, /restyles Dialog\.Body through its id …-results/);
 });
 
+test('CATCHES an id built inside one expression: a template, a string +, a const of either, its prefix side', () => {
+  // Review c6 (G6-G-L2): an id built inside ONE expression, or a const of one.
+  writeFixture(
+    'src/routes/built/+page.svelte',
+    `<script lang="ts">
+  import * as Dialog from '$lib/components/ui/Dialog';
+  let { kind, tier }: { kind: string; tier: { id: string } } = $props();
+  const uid = $props.id();
+  const KILO_ID = \`\${uid}-kilo\`;
+</script>
+<Dialog.Root><Dialog.Content><Dialog.Body id={\`\${uid}-alpha\`}>a</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content><Dialog.Body id={uid + '-bravo'}>b</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content><Dialog.Body id={KILO_ID}>c</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content><Dialog.Body id={\`india-\${tier.id}\`}>d</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content><Dialog.Body id="{kind}-delta">e</Dialog.Body></Dialog.Content></Dialog.Root>
+`
+  );
+  writeFixture(
+    'src/lib/styles/built.css',
+    [
+      "[id$='-alpha'] { overflow: visible; }",
+      '#tier-bravo { flex: none; }',
+      '#a-kilo { flex: none; }',
+      '#india-1 { flex: none; }',
+      // `*=` across the unknown head (G6-G-N5): `{kind}-delta` can hold both.
+      "[id*='tier-delta'] { flex: none; }",
+      "[id*='r-del'] { flex: none; }",
+      '',
+    ].join('\n')
+  );
+
+  const result = scan();
+  assert.deepEqual(
+    result.violations.filter((v) => v.file.endsWith('built.css')).map((v) => `${v.rule}@${v.line}`),
+    [1, 2, 3, 4, 5, 6].map((line) => `part-class@${line}`)
+  );
+});
+
 test('ALLOWS an id known by its trailing text under a test of its head, and an id that is all expression', () => {
   writeFixture(
     'src/routes/palette/+page.svelte',

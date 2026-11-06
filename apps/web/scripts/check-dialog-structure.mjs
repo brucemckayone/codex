@@ -1604,31 +1604,39 @@ function staticValue(attr) {
 /**
  * What an `id` value is known by: `{ id }` when every piece is text or a
  * constant, else the text before its first unknown piece (`prefix`) and
- * after its last (`suffix`). `id="x-{n}"` is known by `x-`, and
- * `id="{uid}-results"` by `-results`.
+ * after its last (`suffix`). Each expression is flattened first, so
+ * `id="x-{n}"`, `` id={`x-${n}`} `` and a same-file const of either are
+ * known by `x-`, and `id="{uid}-results"` or `id={uid + '-results'}` by
+ * `-results`.
  */
 function idShape(attr, consts) {
   const parts = Array.isArray(attr.value) ? attr.value : [attr.value];
-  const pieces = parts.map((p) => (p.type === 'Text' ? p.data : constantString(p.expression, consts)));
+  const pieces = parts.flatMap((p) => (p.type === 'Text' ? [p.data] : stringPieces(p.expression, consts)));
   if (!pieces.includes(null)) return { id: pieces.join('') };
   return { prefix: pieces.slice(0, pieces.indexOf(null)).join(''), suffix: pieces.slice(pieces.lastIndexOf(null) + 1).join('') };
 }
 
-/** The string an expression always is, as far as literals and same-file consts show, or null. */
-function constantString(expr, consts, seen = new Set()) {
+/**
+ * An expression's string, as pieces: known text, or null for each part no
+ * literal or same-file const shows. A template gives its text and its
+ * expressions' pieces, and so does a `+` with a string literal or template
+ * on either side.
+ */
+function stringPieces(expr, consts, seen = new Set()) {
+  const of = (e) => stringPieces(e, consts, seen);
+  const isString = (e) => (e.type === 'Literal' && typeof e.value === 'string') || e.type === 'TemplateLiteral';
   switch (expr?.type) {
     case 'Literal':
-      return typeof expr.value === 'string' || typeof expr.value === 'number' ? String(expr.value) : null;
-    case 'TemplateLiteral': {
-      const values = expr.expressions.map((e) => constantString(e, consts, seen));
-      if (values.includes(null)) return null;
-      return expr.quasis.map((q, i) => (q.value.cooked ?? q.value.raw) + (values[i] ?? '')).join('');
-    }
+      return typeof expr.value === 'string' || typeof expr.value === 'number' ? [String(expr.value)] : [null];
+    case 'TemplateLiteral':
+      return expr.quasis.flatMap((q, i) => [q.value.cooked ?? q.value.raw, ...(i < expr.expressions.length ? of(expr.expressions[i]) : [])]);
+    case 'BinaryExpression':
+      return expr.operator === '+' && (isString(expr.left) || isString(expr.right)) ? [...of(expr.left), ...of(expr.right)] : [null];
     case 'Identifier':
-      if (!consts.has(expr.name) || seen.has(expr.name)) return null;
-      return constantString(consts.get(expr.name), consts, new Set([...seen, expr.name]));
+      if (!consts.has(expr.name) || seen.has(expr.name)) return [null];
+      return stringPieces(consts.get(expr.name), consts, new Set([...seen, expr.name]));
     default:
-      return TS_VALUE_HOLDERS.has(expr?.type) ? constantString(expr.expression, consts, seen) : null;
+      return TS_VALUE_HOLDERS.has(expr?.type) ? of(expr.expression) : [null];
   }
 }
 
@@ -1692,7 +1700,8 @@ function idSuffixMatches({ op, value }, suffix) {
   const v = value.toLowerCase();
   const s = suffix.toLowerCase();
   if (op === '$=') return v !== '' && (v.endsWith(s) || s.endsWith(v));
-  if (op === '*=') return v !== '' && s.includes(v);
+  // `*=` also matches across the unknown head: `tier-delta` in `{kind}-delta`.
+  if (op === '*=') return v !== '' && (s.includes(v) || [...s].some((_, k) => v.endsWith(s.slice(0, k + 1))));
   return op === '=' || op === '~=' ? v.endsWith(s) : false;
 }
 
