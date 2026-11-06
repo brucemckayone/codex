@@ -1,3 +1,4 @@
+import type { Component, Snippet } from 'svelte';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
   createRawSnippet,
@@ -309,7 +310,13 @@ describe('Dialog parts own their attributes', () => {
 
   const children = createRawSnippet(() => ({ render: () => '<span>x</span>' }));
   // Each part's own attributes, as it sets them outside a dialog (null: absent).
-  test.each([
+  // One component type for every row: mount() takes no union of components.
+  const parts: [
+    string,
+    Component<{ children: Snippet }>,
+    string,
+    Record<string, string | null>,
+  ][] = [
     ['Header', DialogHeader, '.dialog-header', { 'data-flush': null }],
     [
       'Toolbar',
@@ -330,7 +337,10 @@ describe('Dialog parts own their attributes', () => {
       '.dialog-body',
       { 'data-layout': null, 'data-flush': null },
     ],
-  ] as const)('%s keeps its own data-* over a page’s', (_name, Part, selector, own) => {
+  ];
+  test.each(
+    parts
+  )('%s keeps its own data-* over a page’s', (_name, Part, selector, own) => {
     component = mount(Part, {
       target: document.body,
       props: { children, ...PAGE },

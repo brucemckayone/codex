@@ -12,8 +12,8 @@
    * taller than a short screen, and its last action carries
    * `data-testid="scroll-target"`. Driven in a real browser at 1280×600 and
    * 390×700: wheel over the body, then the target must sit inside the panel
-   * AND the viewport. The calibration control, the hand-written wrapper these
-   * parts replace, is in DialogScrollControl.stories.svelte and must read
+   * AND the viewport. The calibration controls, the raw shapes these parts
+   * replace, are in DialogScrollControl.stories.svelte and must read
    * clipped. No autodocs: a docs page would open every dialog at once.
    */
   const { Story } = defineMeta({
