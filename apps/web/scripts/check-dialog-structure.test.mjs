@@ -1566,8 +1566,9 @@ test("ALLOWS Content's size props, a styled Title, a styled page element, and th
 </Dialog.Root>
 <Dialog.Root><Dialog.Content maxWidth="min(35rem, 90vw)" maxHeight="var(--container-sm)"><Dialog.Body>b</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content maxWidth={wide && '60rem'} maxHeight={wide ? '80dvh' : 'calc(100dvh - 4rem)'}><Dialog.Body>c</Dialog.Body></Dialog.Content></Dialog.Root>
-<Dialog.Root><Dialog.Content maxWidth={\`\${cols * 18}rem\`} maxHeight="{rows * 2}rem"><Dialog.Body>d</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxWidth={\`\${wide ? 60 : 40}rem\`} maxHeight="{tall ? '80dvh' : '60dvh'}"><Dialog.Body>d</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content maxHeight={\`\${tall ? 48 : 32}rem\`} maxWidth={undefined}><Dialog.Body>e</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={\`calc(100dvh - \${(tall ? '4rem' : '2rem') as string})\`} maxWidth={null}><Dialog.Body>f</Dialog.Body></Dialog.Content></Dialog.Root>
 `
   );
   // A wrapper inside ui/Dialog/ may forward the props: its own file is the part's.
@@ -1599,6 +1600,7 @@ test("CATCHES a maxHeight or maxWidth on Content that is not a CSS length: a key
 <Dialog.Root><Dialog.Content maxWidth={\`\${cols}\`}><Dialog.Body>g</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content maxHeight="{rows} none"><Dialog.Body>h</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content maxWidth={wide ? 'none' : width}><Dialog.Body>i</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={true}><Dialog.Body>j</Dialog.Body></Dialog.Content></Dialog.Root>
 `
   );
 
@@ -1614,7 +1616,9 @@ test("CATCHES a maxHeight or maxWidth on Content that is not a CSS length: a key
     'part-style@11',
     'part-style@12',
     'part-style@13',
+    'part-style@14',
   ]);
+  assert.match(result.violations[9].detail, /maxHeight="true" is not a CSS length/);
   assert.match(result.violations[0].detail, /<Dialog\.Content> maxHeight="none" is not a CSS length, so the panel loses its cap/);
   assert.match(result.violations[3].detail, /maxHeight="90" is not a CSS length/);
   assert.match(result.violations[4].detail, /maxWidth="none" is not a CSS length/);
@@ -1629,7 +1633,7 @@ test("CATCHES a maxHeight or maxWidth on Content with no literal: a wrapper's fo
     'src/lib/components/BigDialog.svelte',
     `<script lang="ts">
   import * as Dialog from '$lib/components/ui/Dialog';
-  let { maxHeight, size, wide } = $props();
+  let { maxHeight, size, wide, rows, offset } = $props();
   const width = '40rem';
 </script>
 <Dialog.Root><Dialog.Content {maxHeight}><Dialog.Body>a</Dialog.Body></Dialog.Content></Dialog.Root>
@@ -1638,12 +1642,21 @@ test("CATCHES a maxHeight or maxWidth on Content with no literal: a wrapper's fo
 <Dialog.Root><Dialog.Content maxHeight={pick(size)}><Dialog.Body>d</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content maxWidth={wide ? '60rem' : size.w}><Dialog.Body>e</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content maxHeight={size.h ?? '60dvh'}><Dialog.Body>f</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={\`\${rows * 3}rem\`}><Dialog.Body>g</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight="{rows * 3}rem"><Dialog.Body>h</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={\`calc(100dvh - \${offset})\`}><Dialog.Body>i</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxWidth={\`\${size.w}rem\`}><Dialog.Body>j</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxWidth={\`\${wide && 60}rem\`}><Dialog.Body>k</Dialog.Body></Dialog.Content></Dialog.Root>
 `
   );
   writeFixture('src/routes/big/+page.svelte', `<script lang="ts">\n  import BigDialog from '$lib/components/BigDialog.svelte';\n</script>\n<BigDialog maxHeight="none" />\n`);
 
   const result = scan();
-  assert.deepEqual(summary(result), ['part-dynamic@6', 'part-dynamic@7', 'part-dynamic@8', 'part-dynamic@9', 'part-dynamic@10', 'part-dynamic@11']);
+  // @12-16: a template whose `${}` is no literal is "NaNrem" while its prop is unset (review c5).
+  assert.deepEqual(
+    summary(result),
+    [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16].map((line) => `part-dynamic@${line}`)
+  );
   assert.match(
     result.violations[0].detail,
     /<Dialog\.Content>'s maxHeight is not a literal, so nothing in CI can see it is a CSS length .*; write a literal length, or a conditional of literal lengths$/

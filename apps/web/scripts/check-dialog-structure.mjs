@@ -91,7 +91,8 @@
  *                  the CssLength type spells one (its units, a math
  *                  function, a token): `none`, `auto` or a unitless number
  *                  would remove the cap. Each whole value is judged; a
- *                  template is tested with a number for each `${}`.
+ *                  template is tested with a number for each `${}`, and
+ *                  each `${}` must be a literal or a choice of literals.
  *   part-dynamic   Outside ui/Dialog/, a part that draws the panel takes no
  *                  {...spread} and no {@attach}, and its class is literal
  *                  (text, string literals, a conditional or template of them,
@@ -1116,7 +1117,9 @@ function checkPartAttributes(fragment, bindings, report) {
  * never reads a .svelte file. Each whole value is judged on its own: a
  * conditional's branches, `&&`'s right side, both sides of `||` and `??`. A
  * template is one value, tested with a number in place of each `${}`
- * (`${cols * 18}rem` as 0rem); the literals inside it are fragments.
+ * (`${tall ? 48 : 32}rem` as 0rem), and each `${}` must itself be literal:
+ * `${rows * 3}rem` is "NaNrem" while rows is unset, and min(NaNrem, …)
+ * drops the cap just as `none` does.
  */
 function sizeVerdict(attr) {
   if (attr.value === true) return { bad: 'true' };
@@ -1129,12 +1132,18 @@ function sizeVerdict(attr) {
       shown: pieces.map((p) => (typeof p === 'string' ? p : '{…}')).join(''),
     });
   };
+  // A template's `${}` holds a fragment: a literal, or a choice of literals.
+  const fragment = (expr) => {
+    if (!isLiteralFragment(expr)) opaque = true;
+  };
   const visit = (expr) => {
     switch (expr?.type) {
       case 'Literal':
-        if (typeof expr.value === 'string' || typeof expr.value === 'number') whole([String(expr.value)]);
+        // null leaves the prop unset; true, false or a regex is no length.
+        if (expr.value !== null) whole([String(expr.value)]);
         return;
       case 'TemplateLiteral':
+        expr.expressions.forEach(fragment);
         whole(expr.quasis.flatMap((q, i) => (i < expr.expressions.length ? [q.value.cooked ?? q.value.raw, null] : [q.value.cooked ?? q.value.raw])));
         return;
       case 'ConditionalExpression':
@@ -1155,10 +1164,27 @@ function sizeVerdict(attr) {
   };
   // `maxHeight="{rows * 2}rem"` is a template too; a lone `{…}` is its expression.
   if (parts.length === 1 && parts[0].type === 'ExpressionTag') visit(parts[0].expression);
-  else whole(parts.map((p) => (p.type === 'Text' ? p.data : null)));
+  else {
+    for (const p of parts) if (p.type !== 'Text') fragment(p.expression);
+    whole(parts.map((p) => (p.type === 'Text' ? p.data : null)));
+  }
   const bad = values.find((v) => !CSS_LENGTH.test(v.test));
   if (bad) return { bad: bad.shown };
   return opaque ? { opaque: true } : null;
+}
+
+/** A number or string literal, or a conditional or `??` / `||` of them, under any TS wrapper. */
+function isLiteralFragment(expr) {
+  switch (expr?.type) {
+    case 'Literal':
+      return typeof expr.value === 'string' || typeof expr.value === 'number';
+    case 'ConditionalExpression':
+      return isLiteralFragment(expr.consequent) && isLiteralFragment(expr.alternate);
+    case 'LogicalExpression':
+      return expr.operator !== '&&' && isLiteralFragment(expr.left) && isLiteralFragment(expr.right);
+    default:
+      return TS_VALUE_HOLDERS.has(expr?.type) && isLiteralFragment(expr.expression);
+  }
 }
 
 function isLiteralClass(attr) {
