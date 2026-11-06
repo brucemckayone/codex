@@ -377,6 +377,7 @@
 				{#if query}
 					<button
 						class="palette__clear"
+						aria-label={m.search_clear()}
 						onclick={() => {
 							query = '';
 							inputEl?.focus();
@@ -391,6 +392,8 @@
 		</Dialog.Toolbar>
 
 		<Dialog.Body>
+			<!-- Its rows are not Tab stops: focus stays in the box and the arrows
+			     move the highlight, so Enter opens the row that is highlighted. -->
 			<div class="palette__results" id="palette-results" role="listbox">
 				{#if !query.trim() && recentSearches.length > 0}
 					<div class="palette__group">
@@ -405,6 +408,7 @@
 								class="palette__item"
 								class:palette__item--active={activeIndex === i}
 								role="option"
+								tabindex="-1"
 								id="palette-item-{i}"
 								aria-selected={activeIndex === i}
 								onclick={() => selectItem({ type: 'recent', term, index: i })}
@@ -434,6 +438,7 @@
 									class="palette__item palette__item--content"
 									class:palette__item--active={activeIndex === flatIdx}
 									role="option"
+									tabindex="-1"
 									id="palette-item-{flatIdx}"
 									aria-selected={activeIndex === flatIdx}
 									onclick={() => selectItem({ type: 'content', item, index: i })}
@@ -463,6 +468,7 @@
 									class="palette__item palette__item--creator"
 									class:palette__item--active={activeIndex === flatIdx}
 									role="option"
+									tabindex="-1"
 									id="palette-item-{flatIdx}"
 									aria-selected={activeIndex === flatIdx}
 									onclick={() => selectItem({ type: 'creator', item: creator, index: i })}
