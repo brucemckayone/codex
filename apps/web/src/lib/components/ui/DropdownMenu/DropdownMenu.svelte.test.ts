@@ -7,6 +7,7 @@ import {
 } from '$tests/utils/component-test-utils.svelte';
 import DropdownMenu from './DropdownMenu.svelte';
 import DropdownMenuContent from './DropdownMenuContent.svelte';
+import DropdownMenuDialogHarness from './DropdownMenuDialogHarness.test.svelte';
 import DropdownMenuHarness from './DropdownMenuHarness.test.svelte';
 import DropdownMenuItem from './DropdownMenuItem.svelte';
 import DropdownMenuSeparator from './DropdownMenuSeparator.svelte';
@@ -113,6 +114,61 @@ describe('DropdownMenu', () => {
       expect(trigger?.getAttribute('aria-expanded')).toBe('false')
     );
     expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  // Melt's own close put focus back on the trigger, whatever had it by
+  // then. An item that opens a dialog had already handed focus to the
+  // dialog: the trigger, behind the overlay, took it, focus-trap pulled it
+  // back without preventScroll, and a Body-less panel scrolled down to its
+  // Footer again (Codex-vlphc review G5-C-L1).
+  describe('an item that opens a dialog', () => {
+    const visits: Element[] = [];
+    const record = (event: FocusEvent) => {
+      if (event.target instanceof Element) visits.push(event.target);
+    };
+
+    afterEach(() => {
+      window.removeEventListener('focusin', record, true);
+      visits.length = 0;
+    });
+
+    // Window, capturing: focus-trap stops a stray focusin at the document.
+    function pressItem(testId: string) {
+      component = mount(DropdownMenuDialogHarness, { target: document.body });
+      flushSync();
+      window.addEventListener('focusin', record, true);
+      document.querySelector<HTMLElement>(`[data-testid="${testId}"]`)?.click();
+      flushSync();
+    }
+    const trigger = () => document.querySelector('[data-testid="trigger"]');
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
+
+    test('leaves focus in the dialog: the trigger never takes it', async () => {
+      pressItem('opens-dialog');
+      // A panel that scrolls as a whole, scrolled down as focus-trap left it.
+      const panel = document.querySelector<HTMLElement>('.dialog-content');
+      let scrollTop = 166;
+      if (panel)
+        Object.defineProperty(panel, 'scrollTop', {
+          configurable: true,
+          get: () => scrollTop,
+          set: (value: number) => {
+            scrollTop = value;
+          },
+        });
+      await settle();
+
+      expect(panel?.contains(document.activeElement)).toBe(true);
+      expect(visits).not.toContain(trigger());
+      expect(scrollTop).toBe(0);
+    });
+
+    test('an item that opens nothing gives focus back to the trigger', async () => {
+      pressItem('plain');
+      await settle();
+
+      expect(document.activeElement).toBe(trigger());
+    });
   });
 
   test('accepts an onOpenChange callback without throwing', () => {
