@@ -629,6 +629,42 @@ describe('AudioPlayer — immersive mode', () => {
     return button;
   };
 
+  // iPhone Safari has no Fullscreen API for a page.
+  test('opens where there is no full screen, and the press throws nothing', async () => {
+    Reflect.deleteProperty(document.documentElement, 'requestFullscreen');
+    expect(document.documentElement.requestFullscreen).toBeUndefined();
+    const { component } = await mountPlayer();
+    const thrown: unknown[] = [];
+    const onError = (event: ErrorEvent) => {
+      thrown.push(event.error);
+      event.preventDefault();
+    };
+    window.addEventListener('error', onError);
+
+    immersiveButton().click();
+    flushSync();
+    window.removeEventListener('error', onError);
+
+    expect(thrown).toEqual([]);
+    expect(document.querySelector('dialog.immersive[open]')).not.toBeNull();
+    unmount(component);
+  });
+
+  // A browser may refuse full screen: the player opens all the same.
+  test('opens when full screen is refused', async () => {
+    document.documentElement.requestFullscreen = vi.fn(() =>
+      Promise.reject(new TypeError('Permissions check failed'))
+    );
+    const { component } = await mountPlayer();
+
+    immersiveButton().click();
+    flushSync();
+    await Promise.resolve();
+
+    expect(document.querySelector('dialog.immersive[open]')).not.toBeNull();
+    unmount(component);
+  });
+
   test('a player that failed to open takes the page back out of full screen', async () => {
     proto.showModal = () => {
       throw new DOMException('The dialog is already open', 'InvalidStateError');
