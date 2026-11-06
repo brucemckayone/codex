@@ -12,9 +12,9 @@
 </script>
 
 <div
+  {...restProps}
   class="dialog-header {className ?? ''}"
   data-flush={layout?.flush ? '' : undefined}
-  {...restProps}
 >
   {@render children()}
 </div>

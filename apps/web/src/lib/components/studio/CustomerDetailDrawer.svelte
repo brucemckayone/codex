@@ -195,6 +195,8 @@
     {#if loading}
       <Dialog.Body>
         <div class="drawer-loading">
+          <!-- The drawer is named in every state, as MediaDrawer is. -->
+          <Dialog.Title class="sr-only">{m.studio_customers_drawer_title()}</Dialog.Title>
           <Skeleton width="100%" height="3rem" />
           <Skeleton width="60%" height="1rem" />
           <Skeleton width="80%" height="1rem" />
@@ -205,6 +207,7 @@
     {:else if error}
       <Dialog.Body>
         <div class="drawer-error">
+          <Dialog.Title class="sr-only">{m.studio_customers_drawer_title()}</Dialog.Title>
           <p class="error-text">{error}</p>
           <Button variant="secondary" onclick={() => handleOpenChange(false)}>
             {m.common_go_back()}

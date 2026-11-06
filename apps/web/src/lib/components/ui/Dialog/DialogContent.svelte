@@ -10,7 +10,7 @@
   @prop {'sm' | 'md' | 'lg'} [size='md'] - max-width: 28 / 42 / 56rem. A
     drawer keeps it as its width, so a drawer is 42rem unless it says `sm`.
   @prop {'dialog' | 'drawer'} [variant='dialog'] -
-    `dialog`: centred, at most 85vh; the panel clips and only Dialog.Body
+    `dialog`: centred, at most 85dvh; the panel clips and only Dialog.Body
     scrolls, so Header and Footer stay in view.
     `drawer`: a full-height panel on the right edge that slides in, padded
     `--space-6` with a `--space-5` gap. The WHOLE panel scrolls, as the
@@ -20,8 +20,9 @@
     child. The built-in close button stays pinned at the top right while it
     scrolls. Below the sm breakpoint it fills the screen.
   @prop {boolean} [sheet=false] - drawer only: below the sm breakpoint, a
-    bottom sheet instead (full width, at most 90vh, rounded top, slides up),
-    padded `--space-5 --space-4`.
+    bottom sheet instead (full width, at most 90dvh, rounded top, slides up),
+    padded `--space-5 --space-4`. A sheet at every width, not only on a
+    phone, is `placement="bottom"` (MobileBottomSheet).
   @prop {boolean} [flush=false] - nothing is padded or spaced. A drawer's
     panel drops its padding and gap (a hero photo runs edge to edge). Header,
     Toolbar, Body and Footer become bare block boxes, with no padding, gap,
@@ -43,15 +44,19 @@
 
   @prop {'center' | 'top' | 'bottom'} [placement='center'] - dialog only.
     `top`: the panel's top edge is 15vh down, centred across (a command
-    palette), at most 70vh. `bottom`: a sheet that floats `--space-2` above
+    palette), at most 70dvh. `bottom`: a sheet that floats `--space-2` above
     the bottom edge and in from each side, full width whatever `size` says,
-    at most 70vh, at every viewport width.
+    at most 70dvh, at every viewport width; a `maxWidth` still narrows it.
+    A right-hand rail that becomes a sheet only below sm is
+    `variant="drawer" sheet` instead (FilterDrawer).
   @prop {string} [maxWidth] - the panel's max-width as a CSS length, over
     `size`, for a width off the 28 / 42 / 56rem scale. The `--space-4`
     gutter (`--space-2` at the bottom) still applies, so `40rem` is
     min(40rem, 100vw − 2rem). Use tokens where one exists.
   @prop {string} [maxHeight] - the panel's max-height as a CSS length, over
-    the 85vh (70vh at top and bottom) default.
+    the 85dvh (70dvh at top and bottom) default. It never runs past the room
+    its placement leaves, the screen less the wrapper's gutter, so `48rem`
+    on a 600px-tall screen still keeps the Footer in view.
   @prop {'modal' | 'lg'} [radius='modal'] - dialog only: the corner,
     `--radius-modal` or the smaller `--radius-lg`.
   @prop {'elevated' | 'base' | 'glass'} [surface] - the panel's fill.
@@ -130,9 +135,9 @@
     !drawer && value !== fallback ? value : undefined;
   /**
    * What scrolls: `dialog` and `floating` scroll Body, `drawer` the whole
-   * panel. Body, Form and Footer read it; in `drawer` Body and Form stop
-   * being a box, and the close button turns sticky. The parts read `flush`
-   * from here too.
+   * panel. Body, Form, Toolbar and Footer read it; in `drawer` Body and
+   * Form stop being a box, a stacked Toolbar stops scrolling on its own, and
+   * the close button turns sticky. The parts read `flush` from here too.
    */
   const layout = $derived(!drawer ? 'dialog' : floating ? 'floating' : 'drawer');
   setContext('DIALOG_LAYOUT', {
@@ -145,7 +150,13 @@
   });
   const fill = $derived(surface ?? (drawer && floating ? 'glass' : 'elevated'));
 
-  /** `drop` and `rise`: the panel's fly and the overlay's fade, both ways. */
+  /**
+   * `drop` and `rise`: the panel's fly and the overlay's fade, both ways, in
+   * ms as Svelte's transitions take them. 200 is --duration-normal and 300
+   * --duration-slow; 150, between --duration-fast and --duration-normal, is
+   * the search palette's fade as it was measured. A token change does not
+   * reach them.
+   */
   const TRAVEL = {
     drop: { y: -20, duration: 200, overlay: 150 },
     rise: { y: 400, duration: 300, overlay: 200 },
@@ -177,6 +188,7 @@
     <div class="dialog-content-wrapper" data-placement={dialogValue(placement, 'center')}>
       <div
         use:melt={$content}
+        {...restProps}
         class="dialog-content {className ?? ''}"
         data-size={size}
         data-variant={variant}
@@ -188,9 +200,9 @@
         data-surface={fill}
         data-motion={dialogValue(motion, 'auto')}
         style:max-width={maxWidth}
-        style:max-height={maxHeight}
+        style:--dialog-max-height={maxHeight}
+        style:max-height={maxHeight ? 'var(--dialog-max)' : undefined}
         transition:panelMotion
-        {...restProps}
       >
         {@render children()}
         {#if closeButton}
@@ -264,11 +276,25 @@
     box-shadow: var(--shadow-xl);
     border: var(--border-width) var(--border-style) var(--color-border);
     width: 100%;
-    max-height: 85vh;
+    max-height: 85dvh;
     overflow: hidden;
     display: flex;
     flex-direction: column;
     animation: content-in var(--duration-slow) var(--ease-out) both;
+    /* The room the wrapper leaves the panel, which a `maxHeight` never
+       runs past: the screen less the wrapper's gutter, per placement. */
+    --dialog-room: calc(100dvh - 2 * var(--space-4));
+    --dialog-max: min(var(--dialog-max-height), var(--dialog-room));
+  }
+
+  /* A clipping panel with no Body (a ConfirmDialog: Header and Footer only)
+     scrolls as a whole instead, so a long Description cannot push the
+     Footer out of reach on a short screen: in a panel that clips, only
+     Body shrinks. A drawer that scrolls as a whole already does. */
+  .dialog-content:is([data-variant='dialog'], [data-floating]):not(
+      :has(> :global(.dialog-body), > :global(.dialog-form) > :global(.dialog-body))
+    ) {
+    overflow-y: auto;
   }
 
   /* Size variants */
@@ -284,12 +310,17 @@
 
   .dialog-content[data-placement='top'],
   .dialog-content[data-placement='bottom'] {
-    max-height: 70vh;
+    max-height: 70dvh;
+  }
+
+  .dialog-content[data-placement='top'] {
+    --dialog-room: calc(100dvh - 15vh - var(--space-4));
   }
 
   /* A sheet is full width (0,2,0, after data-size). */
   .dialog-content[data-placement='bottom'] {
     max-width: none;
+    --dialog-room: calc(100dvh - 2 * var(--space-2));
   }
 
   .dialog-content[data-radius='lg'] {
@@ -319,7 +350,8 @@
     bottom: 0;
     left: auto;
     height: 100%;
-    max-height: 100vh;
+    max-height: 100dvh;
+    --dialog-room: 100dvh;
     gap: var(--drawer-gap);
     padding: var(--drawer-pad-block) var(--drawer-pad-inline);
     overflow-x: hidden;
@@ -353,6 +385,7 @@
     max-width: var(--container-drawer);
     height: auto;
     max-height: calc(100dvh - var(--space-6));
+    --dialog-room: calc(100dvh - var(--space-6));
     gap: normal;
     padding: 0;
     overflow: hidden;
@@ -370,7 +403,7 @@
       left: 0;
       max-width: none;
       height: auto;
-      max-height: 90vh;
+      max-height: 90dvh;
       --drawer-pad-block: var(--space-5);
       --drawer-pad-inline: var(--space-4);
       border-left: none;
@@ -392,6 +425,7 @@
       bottom: var(--space-2);
       width: auto;
       max-height: 85dvh;
+      --dialog-room: calc(100dvh - var(--space-2));
       padding: 0;
       border: var(--border-width) var(--border-style) var(--material-glass-border);
       border-radius: var(--radius-xl);

@@ -14,6 +14,7 @@
     onOpenChange?: (open: boolean) => void;
     size?: 'sm' | 'md' | 'lg';
     dismissible?: boolean;
+    role?: 'dialog' | 'alertdialog';
     variant?: 'dialog' | 'drawer';
     sheet?: boolean;
     flush?: boolean;
@@ -31,6 +32,9 @@
     withForm?: boolean;
     /** A Dialog.Toolbar between Header and Body. */
     withToolbar?: boolean;
+    /** Attributes a page hands Content and Body, beyond their props. */
+    contentProps?: Record<string, unknown>;
+    bodyProps?: Record<string, unknown>;
   }
 
   let {
@@ -38,6 +42,7 @@
     onOpenChange,
     size = 'md',
     dismissible = true,
+    role,
     variant,
     sheet,
     flush,
@@ -53,18 +58,21 @@
     motion,
     withForm = false,
     withToolbar = false,
+    contentProps = {},
+    bodyProps = {},
   }: Props = $props();
 </script>
 
 {#snippet body()}
-  <DialogBody>
+  <DialogBody {...bodyProps}>
     <button type="button" data-testid="first-focusable">First focusable</button>
     <button type="button" data-testid="second-focusable">Second focusable</button>
   </DialogBody>
 {/snippet}
 
-<Dialog bind:open {onOpenChange} {dismissible}>
+<Dialog bind:open {onOpenChange} {dismissible} {role}>
   <DialogContent
+    {...contentProps}
     {size}
     {variant}
     {sheet}

@@ -3,31 +3,148 @@
  * let go only by the last holder, and only once per holder, so a release
  * that runs twice (an effect's cleanup and an unmount) cannot free a page a
  * second dialog still holds.
+ *
+ * The lock holds the viewport, on <html>: base.css clips <html>'s
+ * overflow-x, so a <body> `overflow: hidden` never reaches it. Whether the
+ * viewport really holds is a layout question jsdom cannot answer; the
+ * browser proof wheels the page in the app's layout. Here: which styles go
+ * on, and that each comes back exactly.
  */
-import { afterEach, describe, expect, it } from 'vitest';
-import { lockScroll } from './scroll-lock';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const platform = vi.hoisted(() => ({ ios: false }));
+vi.mock('@melt-ui/svelte/internal/helpers', () => ({
+  isIos: () => platform.ios,
+}));
+
+// A fresh module per test: a failing test cannot leave a holder behind.
+let lockScroll: typeof import('./scroll-lock').lockScroll;
 
 const LOCKED = 'data-melt-scroll-lock';
-const locked = () => document.body.hasAttribute(LOCKED);
+const html = document.documentElement;
+const body = document.body;
+const locked = () => body.hasAttribute(LOCKED);
+
+/** A classic scrollbar `width` px wide: innerWidth less the root's clientWidth. */
+function scrollbar(width: number) {
+  Object.defineProperty(html, 'clientWidth', {
+    configurable: true,
+    get: () => window.innerWidth - width,
+  });
+}
+
+/** Body's box before and after the lock goes on, as the browser would report it. */
+function bodyWidths(...widths: number[]) {
+  const spy = vi.spyOn(body, 'getBoundingClientRect');
+  for (const width of widths)
+    spy.mockReturnValueOnce(new DOMRect(0, 0, width, 100));
+  return spy;
+}
 
 describe('lockScroll', () => {
-  afterEach(() => {
-    document.body.removeAttribute(LOCKED);
-    document.body.style.cssText = '';
+  beforeEach(async () => {
+    vi.resetModules();
+    ({ lockScroll } = await import('./scroll-lock'));
+    scrollbar(15);
   });
 
-  it('locks the page on the first hold and lets go on the last', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    platform.ios = false;
+    body.removeAttribute(LOCKED);
+    html.style.cssText = '';
+    body.style.cssText = '';
+    Reflect.deleteProperty(html, 'clientWidth');
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 0 });
+  });
+
+  it('holds the viewport on the first hold and lets go on the last', () => {
     const first = lockScroll();
     expect(locked()).toBe(true);
-    expect(document.body.style.overflow).toBe('hidden');
+    expect(html.style.overflow).toBe('hidden');
 
     const second = lockScroll();
     first();
     expect(locked()).toBe(true);
+    expect(html.style.overflow).toBe('hidden');
 
     second();
     expect(locked()).toBe(false);
-    expect(document.body.style.overflow).toBe('');
+    expect(html.style.cssText).toBe('');
+  });
+
+  it('touches nothing on <body> off iOS: no overflow, no padding', () => {
+    const hold = lockScroll();
+    expect(body.style.cssText).toBe('');
+    hold();
+  });
+
+  it('keeps a classic scrollbar’s gutter, and adds none to a page without one', () => {
+    const hold = lockScroll();
+    expect(html.style.scrollbarGutter).toBe('stable');
+    hold();
+    expect(html.style.scrollbarGutter).toBe('');
+
+    scrollbar(0);
+    const again = lockScroll();
+    expect(html.style.scrollbarGutter).toBe('');
+    again();
+  });
+
+  // WebKit drops the gutter of an `overflow: hidden` root: the page widens.
+  it('pads the scrollbar’s side when the page widens anyway', () => {
+    bodyWidths(1265, 1280);
+    const hold = lockScroll();
+    expect(html.style.paddingRight).toBe('15px');
+    hold();
+    expect(html.style.paddingRight).toBe('');
+  });
+
+  it('pads nothing when the gutter holds', () => {
+    bodyWidths(1265, 1265);
+    const hold = lockScroll();
+    expect(html.style.paddingRight).toBe('');
+    hold();
+  });
+
+  it('puts back exactly the inline styles the page had', () => {
+    html.style.setProperty('overflow', 'auto');
+    html.style.setProperty('scrollbar-gutter', 'auto');
+    html.style.setProperty('padding-right', '3px', 'important');
+    bodyWidths(1265, 1280);
+
+    const hold = lockScroll();
+    expect(html.style.overflow).toBe('hidden');
+    expect(html.style.paddingRight).toBe('18px');
+    hold();
+
+    expect(html.style.overflow).toBe('auto');
+    expect(html.style.scrollbarGutter).toBe('auto');
+    expect(html.style.getPropertyValue('padding-right')).toBe('3px');
+    expect(html.style.getPropertyPriority('padding-right')).toBe('important');
+  });
+
+  it('on iOS fixes <body> at the scroll position and scrolls back there at once', () => {
+    platform.ios = true;
+    Object.defineProperty(window, 'scrollY', {
+      configurable: true,
+      value: 600,
+    });
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
+    // jsdom's style parser drops a negative `top`: the call is what is checked.
+    const set = vi.spyOn(body.style, 'setProperty');
+
+    const hold = lockScroll();
+    expect(body.style.position).toBe('fixed');
+    expect(set).toHaveBeenCalledWith('top', '-600px');
+    hold();
+
+    expect(body.style.cssText).toBe('');
+    expect(scrollTo).toHaveBeenCalledWith({
+      left: 0,
+      top: 600,
+      behavior: 'instant',
+    });
   });
 
   it('counts a holder once, however often it lets go', () => {
@@ -42,13 +159,14 @@ describe('lockScroll', () => {
   });
 
   it('leaves alone a page another lock already holds', () => {
-    document.body.setAttribute(LOCKED, '');
-    document.body.style.overflow = 'hidden';
+    body.setAttribute(LOCKED, '');
+    body.style.overflow = 'hidden';
 
     const hold = lockScroll();
     hold();
 
     expect(locked()).toBe(true);
-    expect(document.body.style.overflow).toBe('hidden');
+    expect(body.style.overflow).toBe('hidden');
+    expect(html.style.cssText).toBe('');
   });
 });
