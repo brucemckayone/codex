@@ -79,11 +79,14 @@ function hold(): () => void {
   }
   if (isIos()) undo.push(fixBody(body));
   return () => {
-    // The mark goes whatever happens. Left behind, it reads as another
-    // lock's, and every hold() after it would leave the page alone: locked
-    // for the rest of the session.
+    // Every restore runs, and the mark goes, whatever throws. A skipped
+    // restore leaves its style on: `overflow`, set first and so put back
+    // last, stays `hidden`, and the next hold() takes that for the page's
+    // own. A mark left behind reads as another lock's, and every hold()
+    // after it leaves the page alone. Either way the page stays locked for
+    // the rest of the session (Codex-vlphc review G5-C-L3).
     try {
-      for (const restore of undo.reverse()) restore();
+      restoreAll(undo);
     } finally {
       body.removeAttribute(MARK);
     }
@@ -108,16 +111,34 @@ function fixBody(body: HTMLElement): () => void {
     setStyle(body, 'right', '0'),
   ];
   return () => {
-    for (const restore of undo.reverse()) restore();
-    // Instant: base.css makes <html> scroll smoothly, and the page would
-    // glide back down from the top. An engine whose ScrollBehavior has no
-    // 'instant' throws a TypeError at it; the page still goes back, gliding.
     try {
-      window.scrollTo({ left: scrollX, top: scrollY, behavior: 'instant' });
-    } catch {
-      window.scrollTo(scrollX, scrollY);
+      restoreAll(undo);
+    } finally {
+      // Instant: base.css makes <html> scroll smoothly, and the page would
+      // glide back down from the top. An engine whose ScrollBehavior has no
+      // 'instant' throws a TypeError at it; the page still goes back, gliding.
+      try {
+        window.scrollTo({ left: scrollX, top: scrollY, behavior: 'instant' });
+      } catch {
+        window.scrollTo(scrollX, scrollY);
+      }
     }
   };
+}
+
+/** Run every restore, the last style set first; one that throws is rethrown once the rest have run. */
+function restoreAll(undo: (() => void)[]): void {
+  let failed = false;
+  let failure: unknown;
+  for (const restore of undo.reverse()) {
+    try {
+      restore();
+    } catch (error) {
+      if (!failed) failure = error;
+      failed = true;
+    }
+  }
+  if (failed) throw failure;
 }
 
 /** Set one inline style; what it returns puts back exactly what was there. */
