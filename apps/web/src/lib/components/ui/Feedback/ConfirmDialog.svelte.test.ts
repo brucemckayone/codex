@@ -104,3 +104,27 @@ describe('awaitConfirm', () => {
     await vi.waitFor(() => expect(isOpen()).toBe(false));
   });
 });
+
+// Dialog.Root's focus return can't help a confirm whose action removes what
+// opened it (a tier or an FAQ deleted, an invite revoked): the caller names
+// where focus goes instead (Codex-vlphc review G4-U2).
+describe('forwarded to Dialog.Root', () => {
+  test('closeFocus says where focus goes at the close', async () => {
+    const target = document.createElement('button');
+    document.body.appendChild(target);
+    open({ closeFocus: () => target });
+
+    button('Cancel')?.click();
+    flushSync();
+
+    await vi.waitFor(() => expect(document.activeElement).toBe(target));
+  });
+
+  test('role reaches the panel', () => {
+    open({ role: 'alertdialog' });
+
+    expect(
+      document.querySelector('.dialog-content')?.getAttribute('role')
+    ).toBe('alertdialog');
+  });
+});
