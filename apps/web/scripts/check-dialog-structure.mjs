@@ -53,7 +53,8 @@
  *                  Header, Toolbar, Body, Footer or Form is collected first
  *                  (a class: only what its value can produce; an attribute
  *                  an expression decides: any value; an id an expression
- *                  builds: its leading text). A global rule in any .svelte
+ *                  builds: its leading text, and nothing when it starts
+ *                  with the expression). A global rule in any .svelte
  *                  or .css file then fails when its selector names one of
  *                  those handles and its subject could be that part. The
  *                  subject can't be when it carries a class or id no part
@@ -80,19 +81,27 @@
  *                  markup expressions, or in a .ts/.js file, names a Dialog
  *                  class as a selector (`querySelector('.dialog-body')`,
  *                  `closest('.dialog-content')`): script that finds a part
- *                  can restyle it inline.
+ *                  can restyle it inline. src/tests/ and *.stories.svelte
+ *                  drive the parts and never ship, so they may.
  *   part-style     Outside ui/Dialog/, no part that draws the panel takes an
  *                  inline `style=` or `style:` directive: it beats every
  *                  scoped rule the part keeps its scroll chain with.
  *                  Dialog.Content's maxWidth / maxHeight props are the
- *                  sanctioned size hatches, and they take a CSS length:
- *                  `none`, `auto` or a unitless number would remove the cap.
+ *                  sanctioned size hatches, and they take a CSS length as
+ *                  the CssLength type spells one (its units, a math
+ *                  function, a token): `none`, `auto` or a unitless number
+ *                  would remove the cap. Each whole value is judged; a
+ *                  template is tested with a number for each `${}`.
  *   part-dynamic   Outside ui/Dialog/, a part that draws the panel takes no
  *                  {...spread} and no {@attach}, and its class is literal
  *                  (text, string literals, a conditional or template of them,
  *                  an object's keys). A class held in a variable or a prop
  *                  can't be checked against part-class, which is how a
  *                  wrapper component would bring the forked drawer back.
+ *                  So with Content's maxWidth / maxHeight: a value with no
+ *                  literal (a wrapper forwarding its `maxHeight?: string`)
+ *                  can't be seen to be a length, and no CI job type-checks
+ *                  a .svelte file, so it fails.
  *   part-attr      Outside ui/Dialog/, no page sets a part's own attributes:
  *                  the data attributes the parts set themselves (their CSS
  *                  reads them: `data-layout="drawer"` on Body is
@@ -102,6 +111,9 @@
  *                  (`<svelte:head><style>`) and no {@html} writes one (its
  *                  own literals, or a same-file const's): their rules are
  *                  global and never reach this check.
+ *   popover-name   Outside ui/Popover/, a Popover.Content has aria-label or
+ *                  aria-labelledby on its tag (an {expression} counts). Its
+ *                  Name type requires one, but CI type-checks no .svelte.
  *   own-dialog     Outside ui/Dialog/ and ui/Popover/, nothing builds a modal
  *                  by hand: no role="dialog"/"alertdialog" (a conditional,
  *                  logical or template result included; the shared Dialog
@@ -288,11 +300,18 @@ const DATA_ATTR_PROP = { 'data-direction': PART_PROPS.Toolbar, 'data-align': PAR
 // Another component's scoping class: `.svelte-1vhe744` is a part's own.
 const SVELTE_HASH_RE = /\.svelte-[a-z0-9]+(?![\w-])/;
 
-// A CSS length for maxHeight / maxWidth: a number with a unit, a percentage,
-// or a function that computes one. `none`, `auto` and a bare number are not,
-// and an invalid value inside the part's min() drops the cap altogether.
-const CSS_LENGTH =
-  /^\s*(?:-?(?:\d+\.?\d*|\.\d+)(?:px|r?em|r?lh|ch|ex|cap|[dsl]?v(?:h|w|i|b|min|max)|vmin|vmax|cq(?:w|h|i|b|min|max)|pt|pc|in|cm|mm|q|%)|(?:calc|min|max|clamp|var)\(.*\))\s*$/i;
+// The units and math functions Dialog.Content's CssLength type takes
+// (ui/Dialog/css-length.ts). A test pins that these lists equal the type's,
+// so the gate and svelte-check agree on which units a length may take.
+export const LENGTH_UNITS = ['px', 'rem', 'em', 'ch', '%', 'vw', 'vh', 'dvw', 'dvh', 'svw', 'svh', 'lvw', 'lvh', 'vmin', 'vmax', 'cqw', 'cqh', 'cqi', 'cqb'];
+export const MATH_FUNCTIONS = ['calc', 'min', 'max', 'clamp'];
+
+// A CSS length for maxHeight / maxWidth, as CssLength spells one: a number
+// with a unit, a math function, or a token. `none`, `auto` and a bare number
+// are not, and an invalid value inside the part's min() drops the cap.
+const CSS_LENGTH = new RegExp(
+  `^\\s*(?:-?(?:\\d+\\.?\\d*|\\.\\d+)(?:${LENGTH_UNITS.join('|')})|(?:${MATH_FUNCTIONS.join('|')})\\(.*\\)|var\\(--.*\\))\\s*$`
+);
 
 // All a page may set on its own Dialog.Form class. Anything else could
 // decide whether the form passes the panel's column down to Body.
@@ -354,6 +373,7 @@ const SCANNED_EXTS = ['.svelte', '.css', '.ts', '.js', '.mts', '.mjs', '.cts', '
 
 // Tests are not shipped: what they import reaches no page.
 const TEST_FILE = /\.(?:test|spec)\.[cm]?[jt]s$/;
+const STORY_FILE = /\.stories\.svelte$/;
 
 // Nodes that render no element of their own: look through to their children.
 const TRANSPARENT_BLOCKS = {
@@ -488,9 +508,15 @@ function collectBindings(file, programs, ctx, report) {
   return bindings;
 }
 
-/** The local names a file binds to the shared Popover: namespaces and parts. */
+// The names ui/Popover/index.ts exports its panel under.
+const POPOVER_CONTENT = new Set(['Content', 'PopoverContent']);
+
+/**
+ * The local names a file binds to the shared Popover: namespaces, parts,
+ * and which of the parts is the panel (`contents`).
+ */
 function collectPopoverNames(file, programs, ctx) {
-  const names = { namespaces: new Set(), parts: new Set() };
+  const names = { namespaces: new Set(), parts: new Set(), contents: new Set() };
   for (const stmt of programs.flatMap((program) => program.body)) {
     if (stmt.type !== 'ImportDeclaration') continue;
     const target = specifierTarget(file, stmt.source.value, ctx);
@@ -501,6 +527,11 @@ function collectPopoverNames(file, programs, ctx) {
       if (popover) (s.type === 'ImportNamespaceSpecifier' ? names.namespaces : names.parts).add(s.local.name);
       // The ui barrel re-exports the module as `Popover`.
       else if (target === ctx.uiDir && imported === 'Popover') names.namespaces.add(s.local.name);
+      const isContent =
+        target === ctx.popoverDir
+          ? POPOVER_CONTENT.has(imported)
+          : target === join(ctx.popoverDir, 'PopoverContent.svelte') && (s.type === 'ImportDefaultSpecifier' || imported === 'default');
+      if (isContent) names.contents.add(s.local.name);
     }
   }
   return names;
@@ -510,6 +541,38 @@ function isPopoverPart(node, popover) {
   if (node.type !== 'Component') return false;
   const dot = node.name.indexOf('.');
   return dot === -1 ? popover.parts.has(node.name) : popover.namespaces.has(node.name.slice(0, dot));
+}
+
+function isPopoverContent(node, popover) {
+  if (node.type !== 'Component') return false;
+  const dot = node.name.indexOf('.');
+  if (dot === -1) return popover.contents.has(node.name);
+  return popover.namespaces.has(node.name.slice(0, dot)) && POPOVER_CONTENT.has(node.name.slice(dot + 1));
+}
+
+/**
+ * popover-name: a Popover panel outside ui/Popover/ carries aria-label or
+ * aria-labelledby on its tag. Its Name type requires one, but no CI job
+ * type-checks a .svelte file. An {expression} counts as a name; an empty
+ * text or a {...spread} does not, since nothing here can read either.
+ */
+function checkPopoverNames(fragment, popover, report) {
+  walk(fragment, (node) => {
+    if (!isPopoverContent(node, popover)) return;
+    const named = node.attributes.some(
+      (a) =>
+        a.type === 'Attribute' &&
+        (a.name === 'aria-label' || a.name === 'aria-labelledby') &&
+        (staticValue(a) === null || staticValue(a).trim() !== '')
+    );
+    if (named) return;
+    const spread = node.attributes.some((a) => a.type === 'SpreadAttribute') ? '; a {...spread} cannot be read, so write it on the tag' : '';
+    report(
+      node.start,
+      'popover-name',
+      `<${node.name}> has no name: the panel is a dialog, and a dialog needs one; give it aria-label, or aria-labelledby pointing at its heading${spread}`
+    );
+  });
 }
 
 /** Whether an Identifier under `parent[key]` names something, rather than reads it. */
@@ -997,18 +1060,24 @@ function checkPartAttributes(fragment, bindings, report) {
         );
       }
       if (!BOX_PARTS.has(part)) continue;
-      const badSize = part === 'Content' && attr.type === 'Attribute' && /^max(Height|Width)$/.test(attr.name) ? notALength(attr) : null;
+      const size = part === 'Content' && attr.type === 'Attribute' && /^max(Height|Width)$/.test(attr.name) ? sizeVerdict(attr) : null;
       if (attr.type === 'Attribute' && PART_DATA_ATTRS.has(attr.name)) {
         report(
           attr.start,
           'part-attr',
           `${describe(node)} sets ${attr.name}, which the part sets itself and its CSS reads; use ${DATA_ATTR_PROP[attr.name] ?? CONTENT_PROPS} instead`
         );
-      } else if (badSize !== null) {
+      } else if (size?.bad !== undefined) {
         report(
           attr.start,
           'part-style',
-          `${describe(node)} ${attr.name}="${badSize}" is not a CSS length, so the panel loses its cap and clips its Footer; give a length (40rem, 60dvh) or a calc()/min()/max()/clamp() of one`
+          `${describe(node)} ${attr.name}="${size.bad}" is not a CSS length, so the panel loses its cap and clips its Footer; give a length (40rem, 60dvh) or a calc()/min()/max()/clamp() of one`
+        );
+      } else if (size?.opaque) {
+        report(
+          attr.start,
+          'part-dynamic',
+          `${describe(node)}'s ${attr.name} is not a literal, so nothing in CI can see it is a CSS length (a wrapper's string prop brings back ${attr.name}="none"); write a literal length, or a conditional of literal lengths`
         );
       } else if ((attr.type === 'Attribute' && attr.name === 'style') || attr.type === 'StyleDirective') {
         report(
@@ -1040,18 +1109,56 @@ function checkPartAttributes(fragment, bindings, report) {
 }
 
 /**
- * The first value a maxHeight / maxWidth can take that is not a CSS length,
- * or null: its text, and each literal its expression can result in. An
- * expression with no literal (a prop, a variable) is the page's to type.
+ * What a maxHeight / maxWidth tells a source check, or null when every value
+ * it can take is a CSS length: `{ bad }`, the first whole value that is not
+ * one, as written; or `{ opaque: true }` when a value it can take has no
+ * literal at all (a prop, a variable, a call), which no CI job checks: tsc
+ * never reads a .svelte file. Each whole value is judged on its own: a
+ * conditional's branches, `&&`'s right side, both sides of `||` and `??`. A
+ * template is one value, tested with a number in place of each `${}`
+ * (`${cols * 18}rem` as 0rem); the literals inside it are fragments.
  */
-function notALength(attr) {
-  if (attr.value === true) return 'true';
+function sizeVerdict(attr) {
+  if (attr.value === true) return { bad: 'true' };
   const parts = Array.isArray(attr.value) ? attr.value : [attr.value];
-  const text = parts.every((p) => p.type === 'Text') ? [parts.map((p) => p.data).join('')] : [];
-  const results = (expr) =>
-    expr?.type === 'Literal' && typeof expr.value === 'number' ? [String(expr.value)] : resultStrings(expr);
-  const values = [...text, ...parts.filter((p) => p.type !== 'Text').flatMap((p) => results(p.expression))];
-  return values.find((v) => !CSS_LENGTH.test(v)) ?? null;
+  const values = [];
+  let opaque = false;
+  const whole = (pieces) => {
+    values.push({
+      test: pieces.map((p) => (typeof p === 'string' ? p : '0')).join(''),
+      shown: pieces.map((p) => (typeof p === 'string' ? p : '{…}')).join(''),
+    });
+  };
+  const visit = (expr) => {
+    switch (expr?.type) {
+      case 'Literal':
+        if (typeof expr.value === 'string' || typeof expr.value === 'number') whole([String(expr.value)]);
+        return;
+      case 'TemplateLiteral':
+        whole(expr.quasis.flatMap((q, i) => (i < expr.expressions.length ? [q.value.cooked ?? q.value.raw, null] : [q.value.cooked ?? q.value.raw])));
+        return;
+      case 'ConditionalExpression':
+        visit(expr.consequent);
+        visit(expr.alternate);
+        return;
+      case 'LogicalExpression':
+        if (expr.operator !== '&&') visit(expr.left);
+        visit(expr.right);
+        return;
+      case 'Identifier':
+        if (expr.name !== 'undefined') opaque = true;
+        return;
+      default:
+        if (TS_VALUE_HOLDERS.has(expr?.type)) visit(expr.expression);
+        else opaque = true;
+    }
+  };
+  // `maxHeight="{rows * 2}rem"` is a template too; a lone `{…}` is its expression.
+  if (parts.length === 1 && parts[0].type === 'ExpressionTag') visit(parts[0].expression);
+  else whole(parts.map((p) => (p.type === 'Text' ? p.data : null)));
+  const bad = values.find((v) => !CSS_LENGTH.test(v.test));
+  if (bad) return { bad: bad.shown };
+  return opaque ? { opaque: true } : null;
 }
 
 function isLiteralClass(attr) {
@@ -1099,7 +1206,7 @@ function checkMarkupStyle(fragment, consts, report) {
 // A Dialog class written as a selector token, in a string.
 const DIALOG_SELECTOR_RE = new RegExp(DIALOG_CLASS_RE.source);
 const scriptSelectDetail = (name) =>
-  `a string names the Dialog's ${name} as a selector, so script can find the part and restyle it inline; style your own element inside the part`;
+  `a string names the Dialog's ${name} as a selector, so script can find the part and restyle it inline; style your own element inside the part (to bring something into view, call scrollIntoView() on your own element)`;
 
 /** script-select: a selector string naming a Dialog class, in script or a markup expression. */
 function checkScriptSelectors(roots, report) {
@@ -1403,7 +1510,8 @@ function collectHandles(ast, bindings, file, handles, source) {
       } else if (attr.name === 'id') {
         const id = staticValue(attr);
         if (id) handles.ids.set(id, owner);
-        else if (id === null) (handles.idPrefixes ??= []).push({ prefix: leadingText(attr), ...owner });
+        // An id that starts with its expression (`{uid}-results`) is unknown, not a handle.
+        else if (id === null && leadingText(attr)) (handles.idPrefixes ??= []).push({ prefix: leadingText(attr), ...owner });
       } else if (landsOnElement(attr.name)) {
         const list = handles.attrs.get(attr.name) ?? [];
         list.push({ value: staticValue(attr), ...owner });
@@ -1802,7 +1910,9 @@ function checkScriptFile(file, source, ctx, report) {
         : `a .ts/.js file imports the Dialog module ('${spec}'), which can hand its parts on as values this check can't follow; import the parts in the .svelte that renders them`
     );
   }
-  for (const m of code.matchAll(DIALOG_CLASS_RE)) report(m.index, 'script-select', scriptSelectDetail(m[0]));
+  if (!ctx.scriptSelectExempt(file)) {
+    for (const m of code.matchAll(DIALOG_CLASS_RE)) report(m.index, 'script-select', scriptSelectDetail(m[0]));
+  }
   if (ctx.ownDialogExempt(file)) return;
   for (const m of code.matchAll(/(?:\?\.|\.)\s*showModal\b|\[\s*(['"`])showModal\1\s*\]/g)) {
     const line = code.slice(code.lastIndexOf('\n', m.index) + 1, m.index);
@@ -1849,15 +1959,15 @@ function checkSvelteFile(file, source, unit, ctx, report) {
   checkDynamicImports([...programs, ast.fragment], file, ctx, report);
   checkValueReads([...programs, ast.fragment], bindings, report);
   checkMarkup(ast, programs, bindings, report);
+  const popover = collectPopoverNames(file, programs, ctx);
   if (!isInside(ctx.dialogDir, file)) {
     checkPartAttributes(ast.fragment, bindings, report);
     checkMarkupStyle(ast.fragment, constInits(programs), report);
-    checkScriptSelectors([...programs, ast.fragment], report);
+    if (!ctx.scriptSelectExempt(file)) checkScriptSelectors([...programs, ast.fragment], report);
     if (ast.css) checkSvelteCss(ast.css, source, ctx.handles, ctx.nameOf(file), report);
   }
-  if (!ctx.ownDialogExempt(file)) {
-    checkOwnDialog(ast, programs, bindings, collectPopoverNames(file, programs, ctx), report);
-  }
+  if (!isInside(ctx.popoverDir, file)) checkPopoverNames(ast.fragment, popover, report);
+  if (!ctx.ownDialogExempt(file)) checkOwnDialog(ast, programs, bindings, popover, report);
 }
 
 /** Every rule that applies to one file, by its kind and where it lives. */
@@ -1912,6 +2022,8 @@ export function collectViolations({ srcRoot = join(WEB_ROOT, 'src'), cwd = WEB_R
     partFiles: readPartFiles(dialogDir),
     // The shared Dialog and Popover are the only modals built by hand.
     ownDialogExempt: (file) => isInside(dialogDir, file) || isInside(popoverDir, file),
+    // Test helpers and stories find parts to drive them, and never ship.
+    scriptSelectExempt: (file) => isInside(join(srcRoot, 'tests'), file) || STORY_FILE.test(file),
     handles: { classes: new Map(), ids: new Map(), idPrefixes: [], attrs: new Map() },
     nameOf: (file) => relative(cwd, file).split(sep).join('/'),
   };

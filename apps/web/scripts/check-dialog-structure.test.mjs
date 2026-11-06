@@ -18,9 +18,11 @@ import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { ALLOWLIST, collectViolations, PART_DATA_ATTRS } from './check-dialog-structure.mjs';
+import { ALLOWLIST, collectViolations, LENGTH_UNITS, MATH_FUNCTIONS, PART_DATA_ATTRS } from './check-dialog-structure.mjs';
 
 const GATE = fileURLToPath(new URL('./check-dialog-structure.mjs', import.meta.url));
+// The real parts, for the tests that pin the gate's tables to them.
+const REAL_DIALOG_DIR = fileURLToPath(new URL('../src/lib/components/ui/Dialog/', import.meta.url));
 
 const DIALOG_INDEX = `import Root from './Dialog.svelte';
 import Body from './DialogBody.svelte';
@@ -1385,6 +1387,38 @@ test('ALLOWS an id test that leading text can never meet, and another id', () =>
   assert.deepEqual(summary(scan()), []);
 });
 
+test('ALLOWS an id that starts with its expression: unknown, so not a handle', () => {
+  writeFixture(
+    'src/routes/palette/+page.svelte',
+    `<script lang="ts">
+  import * as Dialog from '$lib/components/ui/Dialog';
+  const uid = $props.id();
+</script>
+<Dialog.Root>
+  <Dialog.Content><Dialog.Body id="{uid}-results" role="listbox">b</Dialog.Body></Dialog.Content>
+</Dialog.Root>
+`
+  );
+  writeFixture(
+    'src/routes/list/+page.svelte',
+    `<script lang="ts">
+  import * as Dialog from '$lib/components/ui/Dialog';
+  let { listId } = $props();
+</script>
+<Dialog.Root>
+  <Dialog.Content><Dialog.Body id={listId}>c</Dialog.Body></Dialog.Content>
+</Dialog.Root>
+`
+  );
+  // Review c4 (G4-L7): an empty leading text matched EVERY id.
+  writeFixture(
+    'src/lib/styles/layout.css',
+    ['#main-content { scroll-margin-top: var(--space-16); }', "[id$='-results'] { min-height: 0; }", "[id^='x'] { flex: none; }", ''].join('\n')
+  );
+
+  assert.deepEqual(summary(scan()), []);
+});
+
 test("CATCHES an @scope in a .svelte whose root is a part's handle, through a global rule inside it", () => {
   writeFixture(
     'src/routes/scope/+page.svelte',
@@ -1531,8 +1565,15 @@ test("ALLOWS Content's size props, a styled Title, a styled page element, and th
   </Dialog.Content>
 </Dialog.Root>
 <Dialog.Root><Dialog.Content maxWidth="min(35rem, 90vw)" maxHeight="var(--container-sm)"><Dialog.Body>b</Dialog.Body></Dialog.Content></Dialog.Root>
-<Dialog.Root><Dialog.Content maxWidth={width} maxHeight={wide ? '80dvh' : 'calc(100dvh - 4rem)'}><Dialog.Body>c</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxWidth={wide && '60rem'} maxHeight={wide ? '80dvh' : 'calc(100dvh - 4rem)'}><Dialog.Body>c</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxWidth={\`\${cols * 18}rem\`} maxHeight="{rows * 2}rem"><Dialog.Body>d</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={\`\${tall ? 48 : 32}rem\`} maxWidth={undefined}><Dialog.Body>e</Dialog.Body></Dialog.Content></Dialog.Root>
 `
+  );
+  // A wrapper inside ui/Dialog/ may forward the props: its own file is the part's.
+  writeFixture(
+    'src/lib/components/ui/Dialog/DialogHarness.svelte',
+    "<script lang=\"ts\">\n  import * as Dialog from './index';\n  let { maxHeight, maxWidth } = $props();\n</script>\n<Dialog.Root><Dialog.Content {maxHeight} {maxWidth}><Dialog.Body>h</Dialog.Body></Dialog.Content></Dialog.Root>\n"
   );
   writeFixture(
     'src/lib/components/ui/Dialog/Dialog.stories.svelte',
@@ -1555,14 +1596,58 @@ test("CATCHES a maxHeight or maxWidth on Content that is not a CSS length: a key
 <Dialog.Root><Dialog.Content maxHeight={90}><Dialog.Body>d</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content maxWidth={wide ? 'none' : '40rem'}><Dialog.Body>e</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content maxHeight><Dialog.Body>f</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxWidth={\`\${cols}\`}><Dialog.Body>g</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight="{rows} none"><Dialog.Body>h</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxWidth={wide ? 'none' : width}><Dialog.Body>i</Dialog.Body></Dialog.Content></Dialog.Root>
 `
   );
 
   const result = scan();
-  assert.deepEqual(summary(result), ['part-style@5', 'part-style@6', 'part-style@7', 'part-style@8', 'part-style@9', 'part-style@10']);
+  // @13: a known bad branch is reported as the bad value, before the unknown one.
+  assert.deepEqual(summary(result), [
+    'part-style@5',
+    'part-style@6',
+    'part-style@7',
+    'part-style@8',
+    'part-style@9',
+    'part-style@10',
+    'part-style@11',
+    'part-style@12',
+    'part-style@13',
+  ]);
   assert.match(result.violations[0].detail, /<Dialog\.Content> maxHeight="none" is not a CSS length, so the panel loses its cap/);
   assert.match(result.violations[3].detail, /maxHeight="90" is not a CSS length/);
   assert.match(result.violations[4].detail, /maxWidth="none" is not a CSS length/);
+  // A template is shown as written, its expressions as {…}.
+  assert.match(result.violations[6].detail, /maxWidth="\{…\}" is not a CSS length/);
+  assert.match(result.violations[7].detail, /maxHeight="\{…\} none" is not a CSS length/);
+});
+
+test("CATCHES a maxHeight or maxWidth on Content with no literal: a wrapper's forwarded prop, a variable, a member, a call", () => {
+  // The review c4 case: a wrapper typed `maxHeight?: string`, used as maxHeight="none".
+  writeFixture(
+    'src/lib/components/BigDialog.svelte',
+    `<script lang="ts">
+  import * as Dialog from '$lib/components/ui/Dialog';
+  let { maxHeight, size, wide } = $props();
+  const width = '40rem';
+</script>
+<Dialog.Root><Dialog.Content {maxHeight}><Dialog.Body>a</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxWidth={width}><Dialog.Body>b</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={size.h}><Dialog.Body>c</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={pick(size)}><Dialog.Body>d</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxWidth={wide ? '60rem' : size.w}><Dialog.Body>e</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={size.h ?? '60dvh'}><Dialog.Body>f</Dialog.Body></Dialog.Content></Dialog.Root>
+`
+  );
+  writeFixture('src/routes/big/+page.svelte', `<script lang="ts">\n  import BigDialog from '$lib/components/BigDialog.svelte';\n</script>\n<BigDialog maxHeight="none" />\n`);
+
+  const result = scan();
+  assert.deepEqual(summary(result), ['part-dynamic@6', 'part-dynamic@7', 'part-dynamic@8', 'part-dynamic@9', 'part-dynamic@10', 'part-dynamic@11']);
+  assert.match(
+    result.violations[0].detail,
+    /<Dialog\.Content>'s maxHeight is not a literal, so nothing in CI can see it is a CSS length .*; write a literal length, or a conditional of literal lengths$/
+  );
 });
 
 test('CATCHES a spread, or a class held in a variable, a prop or an interpolation, on a part', () => {
@@ -1719,6 +1804,45 @@ test("ALLOWS a Dialog class name without its dot, a longer class, a comment, pag
   assert.deepEqual(summary(scan()), []);
 });
 
+test("CATCHES a selector string in a tests folder other than src/tests/, and a page's scroll through a part", () => {
+  writeFixture('src/lib/tests/find.ts', "export const body = () => document.querySelector('.dialog-body');\n");
+  writeFixture(
+    'src/routes/err/+page.svelte',
+    `<script lang="ts">
+  let errorEl = $state();
+  const showError = () => errorEl?.closest('.dialog-body')?.scrollTo({ top: 0 });
+</script>
+<div bind:this={errorEl}>x</div>
+`
+  );
+
+  const result = scan();
+  assert.deepEqual(
+    result.violations.map((v) => `${v.file} ${v.rule}@${v.line}`),
+    ['src/lib/tests/find.ts script-select@1', 'src/routes/err/+page.svelte script-select@3']
+  );
+  assert.match(result.violations[1].detail, /\(to bring something into view, call scrollIntoView\(\) on your own element\)$/);
+});
+
+test('ALLOWS a selector string in src/tests/ and in a story, which drive the parts and never ship', () => {
+  writeFixture('src/tests/utils/dialog.ts', "export const dialogBody = () => document.querySelector<HTMLElement>('.dialog-body');\n");
+  writeFixture(
+    'src/tests/fixtures/Dialogs.svelte',
+    "<script lang=\"ts\">\n  const body = () => document.querySelector('.dialog-body');\n</script>\n<p>x</p>\n"
+  );
+  writeFixture(
+    'src/lib/components/studio/Thing.stories.svelte',
+    `<script module lang="ts">
+  import { defineMeta } from '@storybook/addon-svelte-csf';
+  const { Story } = defineMeta({ title: 'x' });
+</script>
+<Story name="a" play={async ({ canvasElement }) => { canvasElement.ownerDocument.querySelector('.dialog-footer button')?.click(); }} />
+`
+  );
+
+  assert.deepEqual(summary(scan()), []);
+});
+
 test('CATCHES a class conditional or fallback that can hand a part a variable', () => {
   writeFixture(
     'src/routes/cond/+page.svelte',
@@ -1835,8 +1959,8 @@ test("ALLOWS Root's role, a test id and other roles on a part, a page element's 
     <Dialog.Body id="palette-results" role="listbox" data-state="x"><div data-layout="drawer">a page element</div></Dialog.Body>
   </Dialog.Content>
 </Dialog.Root>
-<Popover.Content role="dialog" aria-modal="true">p</Popover.Content>
-<P.Content role="dialog">q</P.Content>
+<Popover.Content role="dialog" aria-modal="true" aria-label="Pick">p</Popover.Content>
+<P.Content role="dialog" aria-label="Pick">q</P.Content>
 `
   );
 
@@ -1844,13 +1968,113 @@ test("ALLOWS Root's role, a test id and other roles on a part, a page element's 
 });
 
 test('PART_DATA_ATTRS holds every data attribute the real parts set', () => {
-  const dir = fileURLToPath(new URL('../src/lib/components/ui/Dialog/', import.meta.url));
+  const dir = REAL_DIALOG_DIR;
   const set = new Set();
   for (const file of readdirSync(dir).filter((name) => /^Dialog\w*\.svelte$/.test(name))) {
     for (const m of readFileSync(join(dir, file), 'utf8').matchAll(/\s(data-[a-z-]+)=/g)) set.add(m[1]);
   }
   assert.ok(set.size >= 10, `read only ${set.size} data attributes from the parts`);
   assert.deepEqual([...set].filter((name) => !PART_DATA_ATTRS.has(name)), [], 'a part sets a data attribute part-attr does not know');
+});
+
+test("LENGTH_UNITS and MATH_FUNCTIONS are the CssLength type's own lists (ui/Dialog/css-length.ts)", () => {
+  const source = readFileSync(join(REAL_DIALOG_DIR, 'css-length.ts'), 'utf8');
+  const union = (name) => {
+    const body = source.match(new RegExp(`type ${name} =([^;]*);`))?.[1];
+    assert.ok(body, `css-length.ts has no type ${name}`);
+    return [...body.matchAll(/'([^']+)'/g)].map((m) => m[1]).sort();
+  };
+  assert.deepEqual([...LENGTH_UNITS].sort(), union('LengthUnit'));
+  assert.deepEqual([...MATH_FUNCTIONS].sort(), union('MathFunction'));
+  // The token form the gate takes is the type's: var(--…), never var(x).
+  assert.match(source, /`var\(--\$\{string\}\)`/);
+});
+
+/** One Dialog per maxHeight value, a line each from line 5. */
+const sizesPage = (values) =>
+  `${IMPORT}\n${values.map((v) => `<Dialog.Root><Dialog.Content maxHeight="${v}"><Dialog.Body>x</Dialog.Body></Dialog.Content></Dialog.Root>`).join('\n')}\n`;
+
+test('ALLOWS every unit and math function the CssLength type takes, and a token', () => {
+  writeFixture(
+    'src/routes/units/+page.svelte',
+    sizesPage([...LENGTH_UNITS.map((u) => `12${u}`), '0.5rem', ...MATH_FUNCTIONS.map((f) => `${f}(100dvh - 2rem)`), 'var(--container-sm)'])
+  );
+
+  assert.deepEqual(summary(scan()), []);
+});
+
+test('CATCHES a unit, a spelling or a function the CssLength type does not take', () => {
+  writeFixture('src/routes/units/+page.svelte', sizesPage(['30lh', '2in', '10PX', 'var(x)', 'fit-content(20rem)', 'attr(data-h)']));
+
+  assert.deepEqual(summary(scan()), ['part-style@5', 'part-style@6', 'part-style@7', 'part-style@8', 'part-style@9', 'part-style@10']);
+});
+
+// --- popover-name --------------------------------------------------------
+
+test('CATCHES a Popover.Content with no name: bare, an empty label, through the ui barrel, a named or default import, a spread', () => {
+  writeFixture(
+    'src/lib/components/Picker.svelte',
+    `<script lang="ts">
+  import * as Popover from '$lib/components/ui/Popover';
+  import { Popover as P } from '$lib/components/ui';
+  import { Content as PC, PopoverContent } from '$lib/components/ui/Popover';
+  import Panel from '$lib/components/ui/Popover/PopoverContent.svelte';
+  let { rest } = $props();
+</script>
+<Popover.Root>
+  <Popover.Trigger>Open</Popover.Trigger>
+  <Popover.Content><p>Pick a range</p></Popover.Content>
+</Popover.Root>
+<Popover.Content aria-label="">a</Popover.Content>
+<Popover.Content aria-labelledby>b</Popover.Content>
+<P.Content>c</P.Content>
+<PC>d</PC>
+<PopoverContent>e</PopoverContent>
+<Panel>f</Panel>
+<Popover.Content {...rest}>g</Popover.Content>
+`
+  );
+
+  const result = scan();
+  assert.deepEqual(summary(result), [
+    'popover-name@10',
+    'popover-name@12',
+    'popover-name@13',
+    'popover-name@14',
+    'popover-name@15',
+    'popover-name@16',
+    'popover-name@17',
+    'popover-name@18',
+  ]);
+  assert.match(result.violations[0].detail, /^<Popover\.Content> has no name: .*; give it aria-label, or aria-labelledby pointing at its heading$/);
+  assert.match(result.violations[7].detail, /; a \{\.\.\.spread\} cannot be read, so write it on the tag$/);
+});
+
+test("ALLOWS a named Popover.Content (text or {expression}), the other Popover parts, another Content, and ui/Popover's own files", () => {
+  writeFixture(
+    'src/lib/components/Picker.svelte',
+    `<script lang="ts">
+  import * as Popover from '$lib/components/ui/Popover';
+  import * as Card from '$lib/components/ui/Card';
+  import * as Dialog from '$lib/components/ui/Dialog';
+  let { label } = $props();
+</script>
+<Popover.Root>
+  <Popover.Trigger>Open</Popover.Trigger>
+  <Popover.Content aria-label="Pick a range"><Popover.Arrow /><Popover.Close>x</Popover.Close></Popover.Content>
+</Popover.Root>
+<Popover.Content aria-labelledby="range-heading"><h3 id="range-heading">Range</h3></Popover.Content>
+<Popover.Content aria-label={label}>c</Popover.Content>
+<Card.Content>d</Card.Content>
+<Dialog.Root><Dialog.Content><Dialog.Body>e</Dialog.Body></Dialog.Content></Dialog.Root>
+`
+  );
+  writeFixture(
+    'src/lib/components/ui/Popover/Popover.stories.svelte',
+    "<script lang=\"ts\">\n  import * as Popover from './index';\n</script>\n<Popover.Content>story</Popover.Content>\n"
+  );
+
+  assert.deepEqual(summary(scan()), []);
 });
 
 // --- own-dialog ----------------------------------------------------------
