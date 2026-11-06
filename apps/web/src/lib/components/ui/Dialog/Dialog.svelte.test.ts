@@ -196,12 +196,13 @@ describe('Dialog focus return', () => {
     return button;
   }
 
-  async function openAndClose() {
+  async function openAndClose(whileOpen?: () => void) {
     const props = $state({ open: false });
     mounted.push(mount(DialogHarness, { target: document.body, props }));
     flushSync();
     props.open = true;
     flushSync();
+    whileOpen?.();
     await settle();
     props.open = false;
     flushSync();
@@ -254,6 +255,40 @@ describe('Dialog focus return', () => {
     await openAndClose();
 
     expect(document.activeElement).not.toBe(button);
+  });
+
+  /** A menu's button and an item in its menu, as Melt's DropdownMenu renders them. */
+  function menu() {
+    const trigger = opener();
+    trigger.setAttribute('aria-controls', 'menu-1');
+    const list = document.createElement('div');
+    list.id = 'menu-1';
+    list.setAttribute('role', 'menu');
+    list.innerHTML =
+      '<div role="menuitem" tabindex="-1"><span>Delete</span></div>';
+    document.body.appendChild(list);
+    const item = list.querySelector<HTMLElement>('[role="menuitem"]');
+    item
+      ?.querySelector('span')
+      ?.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    return { trigger, list, item };
+  }
+
+  // A menu closes as its item is chosen and takes the item with it.
+  test("opened from a menu item, focus goes back to the menu's button once the menu has gone", async () => {
+    const { trigger, list } = menu();
+
+    await openAndClose(() => list.remove());
+
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  test('a menu item still on the page takes the focus back itself', async () => {
+    const { item } = menu();
+
+    await openAndClose();
+
+    expect(document.activeElement).toBe(item);
   });
 
   // A dialog a timer or a response opens long after the last press must not

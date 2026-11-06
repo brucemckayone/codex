@@ -49,6 +49,18 @@
     const active = document.activeElement;
     return active instanceof HTMLElement && active !== document.body ? active : null;
   }
+
+  /**
+   * The button that opened the menu `el` sits in. A menu closes as its item
+   * is chosen and takes the item with it, so a dialog that item opened goes
+   * back to this instead.
+   */
+  function menuTrigger(el: HTMLElement): HTMLElement | null {
+    const menu = el.closest('[role="menu"]');
+    if (!menu?.id) return null;
+    const trigger = document.querySelector(`[aria-controls="${CSS.escape(menu.id)}"]`);
+    return trigger instanceof HTMLElement ? trigger : null;
+  }
 </script>
 
 <script lang="ts">
@@ -64,7 +76,8 @@
      *
      * The default is the element that opened it: the focusable element a
      * press landed on (a click or a tap in WebKit focuses no button), or,
-     * when a key opened it, what had focus. A dialog opened from the
+     * when a key opened it, what had focus. A menu item that has closed with
+     * its menu hands over to the menu's button. A dialog opened from the
      * keyboard with nothing focused, or whose opener has left the page,
      * leaves focus where Melt does. Melt's own `activeTrigger` would win, but
      * nothing here renders Melt's trigger, so every dialog is opened from
@@ -135,10 +148,12 @@
     //
     // With no prop, Melt's own default comes first: `defaultEl` is its
     // `activeTrigger`, which it would focus itself. Never undefined over it.
-    // Then the opener recorded as the dialog opened, while it is on the page.
+    // Then the opener recorded as the dialog opened, while it is on the page,
+    // else the button of the menu it was an item in.
     closeFocus: (defaultEl) => {
       const target = closeFocus;
-      if (target === undefined) return defaultEl ?? (opener?.isConnected ? opener : null);
+      if (target === undefined)
+        return defaultEl ?? [opener, openerMenu].find((el) => el?.isConnected) ?? null;
       return typeof target === 'function' ? target(defaultEl) : target;
     },
     // The page's scroll lock is ours, below, not Melt's: under forceVisible
@@ -158,6 +173,8 @@
 
   /** Where focus goes back to at the close, when no `closeFocus` says. */
   let opener: HTMLElement | null = null;
+  /** The opener's menu button, for when the menu has closed and taken it. */
+  let openerMenu: HTMLElement | null = null;
 
   // Before the open below: Melt reads the role only as the panel's open
   // state changes, so a role set after an open waits for the next one.
@@ -190,7 +207,10 @@
   // Sync prop to melt state. The opener is read first, while focus is still
   // where the open came from: Melt moves it into the panel after a tick.
   $effect(() => {
-    if (open) opener = currentOpener();
+    if (open) {
+      opener = currentOpener();
+      openerMenu = opener && menuTrigger(opener);
+    }
     meltOpen.set(open);
   });
 
