@@ -147,6 +147,46 @@ describe('lockScroll', () => {
     });
   });
 
+  it('on iOS a scrollTo that rejects `instant` still lets the page go, and back to its place', () => {
+    platform.ios = true;
+    Object.defineProperty(window, 'scrollY', {
+      configurable: true,
+      value: 600,
+    });
+    const scrollTo = vi
+      .spyOn(window, 'scrollTo')
+      .mockImplementationOnce(() => {
+        throw new TypeError("'instant' is not a valid ScrollBehavior");
+      })
+      .mockImplementation(() => {});
+
+    const hold = lockScroll();
+    hold();
+
+    expect(locked()).toBe(false);
+    expect(html.style.cssText).toBe('');
+    expect(body.style.cssText).toBe('');
+    expect(scrollTo).toHaveBeenLastCalledWith(0, 600);
+  });
+
+  // Left on <body>, the mark reads as another lock's: no hold() after it
+  // would ever hold the page again.
+  it('a release that throws still takes the mark off, so the next hold holds', () => {
+    const hold = lockScroll();
+    vi.spyOn(html.style, 'removeProperty').mockImplementationOnce(() => {
+      throw new Error('restore failed');
+    });
+
+    expect(() => hold()).toThrow('restore failed');
+    expect(locked()).toBe(false);
+
+    vi.restoreAllMocks();
+    html.style.cssText = '';
+    const again = lockScroll();
+    expect(html.style.overflow).toBe('hidden');
+    again();
+  });
+
   it('counts a holder once, however often it lets go', () => {
     const first = lockScroll();
     const second = lockScroll();

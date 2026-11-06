@@ -70,8 +70,14 @@ function hold(): () => void {
   }
   if (isIos()) undo.push(fixBody(body));
   return () => {
-    for (const restore of undo.reverse()) restore();
-    body.removeAttribute(MARK);
+    // The mark goes whatever happens. Left behind, it reads as another
+    // lock's, and every hold() after it would leave the page alone: locked
+    // for the rest of the session.
+    try {
+      for (const restore of undo.reverse()) restore();
+    } finally {
+      body.removeAttribute(MARK);
+    }
   };
 }
 
@@ -95,8 +101,13 @@ function fixBody(body: HTMLElement): () => void {
   return () => {
     for (const restore of undo.reverse()) restore();
     // Instant: base.css makes <html> scroll smoothly, and the page would
-    // glide back down from the top.
-    window.scrollTo({ left: scrollX, top: scrollY, behavior: 'instant' });
+    // glide back down from the top. An engine whose ScrollBehavior has no
+    // 'instant' throws a TypeError at it; the page still goes back, gliding.
+    try {
+      window.scrollTo({ left: scrollX, top: scrollY, behavior: 'instant' });
+    } catch {
+      window.scrollTo(scrollX, scrollY);
+    }
   };
 }
 
