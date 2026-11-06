@@ -77,41 +77,6 @@
     goes at once. Under reduced motion `drop` and `rise` are instant, as the
     duration tokens make `auto`.
 -->
-<script module lang="ts">
-  type LengthUnit =
-    | 'px'
-    | 'rem'
-    | 'em'
-    | 'ch'
-    | '%'
-    | 'vw'
-    | 'vh'
-    | 'dvw'
-    | 'dvh'
-    | 'svw'
-    | 'svh'
-    | 'lvw'
-    | 'lvh'
-    | 'vmin'
-    | 'vmax'
-    | 'cqw'
-    | 'cqh'
-    | 'cqi'
-    | 'cqb';
-
-  /**
-   * What `maxWidth` and `maxHeight` take: a number with its unit, a math
-   * function or a token, never a keyword or a bare number. The panel clamps
-   * `maxHeight` inside `min()`, where `none`, `auto` or `90` is invalid: the
-   * whole value fell away, the panel lost its cap and the Footer went off
-   * screen (Codex-vlphc review G3-M1). `maxWidth` takes the same, so
-   * neither can drop its cap.
-   */
-  type MathFunction = 'calc' | 'min' | 'max' | 'clamp';
-
-  export type CssLength = `${number}${LengthUnit}` | `${MathFunction}(${string})` | `var(--${string})`;
-</script>
-
 <script lang="ts">
   import { type createDialog, melt } from '@melt-ui/svelte';
   import { getContext, setContext, type Snippet } from 'svelte';
@@ -120,6 +85,7 @@
   import { fade, fly } from 'svelte/transition';
   import { XIcon } from '$lib/components/ui/Icon';
   import { forwardBrandTokens } from '$lib/utils/portal-brand';
+  import type { CssLength } from './css-length';
 
   interface Props extends HTMLAttributes<HTMLDivElement> {
     children: Snippet;

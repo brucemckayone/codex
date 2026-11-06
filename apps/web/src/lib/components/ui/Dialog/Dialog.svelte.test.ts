@@ -6,9 +6,10 @@ import {
   mount,
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
+import type { CssLength } from './css-length';
 import Dialog from './Dialog.svelte';
 import DialogBody from './DialogBody.svelte';
-import DialogContent, { type CssLength } from './DialogContent.svelte';
+import DialogContent from './DialogContent.svelte';
 import DialogDescription from './DialogDescription.svelte';
 import DialogFooter from './DialogFooter.svelte';
 import DialogFormElement from './DialogFormElement.svelte';
