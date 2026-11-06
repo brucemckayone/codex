@@ -29,6 +29,7 @@
   const sheetOpen = writable(false);
   const flushOpen = writable(false);
   const toolbarOpen = writable(false);
+  const columnToolbarOpen = writable(false);
   const formToolbarOpen = writable(false);
   const floatingOpen = writable(false);
   const squashOpen = writable(false);
@@ -196,6 +197,33 @@
       <Dialog.Footer>
         <Button variant="secondary" onclick={() => ($toolbarOpen = false)}>Cancel</Button>
         <Button variant="primary" data-testid="scroll-target">Add</Button>
+      </Dialog.Footer>
+    </Dialog.Content>
+  </Dialog.Root>
+</Story>
+
+<!-- A stacked bar full of fields beside a token Body (review G2-L7): the bar scrolls, the Footer stays. -->
+<Story name="Column Toolbar Tall">
+  <Button onclick={() => ($columnToolbarOpen = true)}>Open tall column toolbar</Button>
+  <Dialog.Root bind:open={$columnToolbarOpen}>
+    <Dialog.Content>
+      <Dialog.Header>
+        <Dialog.Title>Tall column toolbar</Dialog.Title>
+      </Dialog.Header>
+      <Dialog.Toolbar direction="column">
+        {#each [1, 2, 3, 4, 5, 6] as n (n)}
+          <label class="field">
+            <span>Filter {n}</span>
+            <input class="input" name="filter-{n}" value="Value {n}" />
+          </label>
+        {/each}
+      </Dialog.Toolbar>
+      <Dialog.Body>
+        <p class="row">One result.</p>
+      </Dialog.Body>
+      <Dialog.Footer>
+        <Button variant="secondary" onclick={() => ($columnToolbarOpen = false)}>Cancel</Button>
+        <Button variant="primary" data-testid="scroll-target">Apply</Button>
       </Dialog.Footer>
     </Dialog.Content>
   </Dialog.Root>

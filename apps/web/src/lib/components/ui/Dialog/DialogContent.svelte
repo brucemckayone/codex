@@ -135,9 +135,9 @@
     !drawer && value !== fallback ? value : undefined;
   /**
    * What scrolls: `dialog` and `floating` scroll Body, `drawer` the whole
-   * panel. Body, Form and Footer read it; in `drawer` Body and Form stop
-   * being a box, and the close button turns sticky. The parts read `flush`
-   * from here too.
+   * panel. Body, Form, Toolbar and Footer read it; in `drawer` Body and
+   * Form stop being a box, a stacked Toolbar stops scrolling on its own, and
+   * the close button turns sticky. The parts read `flush` from here too.
    */
   const layout = $derived(!drawer ? 'dialog' : floating ? 'floating' : 'drawer');
   setContext('DIALOG_LAYOUT', {

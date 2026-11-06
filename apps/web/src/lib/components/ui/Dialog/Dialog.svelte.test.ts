@@ -315,7 +315,7 @@ describe('Dialog parts own their attributes', () => {
       'Toolbar',
       DialogToolbar,
       '.dialog-toolbar',
-      { 'data-direction': 'row', 'data-flush': null },
+      { 'data-direction': 'row', 'data-layout': null, 'data-flush': null },
     ],
     [
       'Footer',
