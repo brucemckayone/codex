@@ -257,6 +257,42 @@ describe('Dialog focus return', () => {
     expect(document.activeElement).not.toBe(button);
   });
 
+  // A long press opens on its release, past the press window: the click
+  // that ends it names the opener again (review G4-L5). WebKit focuses
+  // nothing, so without it focus went back to what had it before.
+  test('a long press: the click at its release names the opener', async () => {
+    const button = opener();
+    const field = opener();
+    field.focus();
+    const now = vi.spyOn(performance, 'now').mockReturnValue(1_000);
+    press(button);
+    now.mockReturnValue(1_800);
+    button
+      .querySelector('span')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+
+    await openAndClose();
+    now.mockRestore();
+
+    expect(document.activeElement).toBe(button);
+  });
+
+  // Enter in a field submits its form with a click of detail 0 on the
+  // submit button. That is the keyboard, and the field had focus.
+  test("a key's click names nothing: focus goes back to the field", async () => {
+    const submit = opener();
+    const field = opener();
+    field.focus();
+    key();
+    submit
+      .querySelector('span')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));
+
+    await openAndClose();
+
+    expect(document.activeElement).toBe(field);
+  });
+
   /** A menu's button and an item in its menu, as Melt's DropdownMenu renders them. */
   function menu() {
     const trigger = opener();
@@ -727,6 +763,25 @@ describe('DialogContent', () => {
     const content = document.querySelector('.dialog-content');
     expect(content?.getAttribute('role')).toBe('dialog');
     expect(content?.getAttribute('aria-modal')).toBe('true');
+  });
+
+  // Melt reads the role only as the panel's open state changes, so the role
+  // must be in Melt's store before the open: set with the open, in one
+  // flush, on a dialog mounted closed (review G4-N1).
+  test('a role set while closed reaches the panel when it opens', () => {
+    const props = $state<{ open: boolean; role?: 'dialog' | 'alertdialog' }>({
+      open: false,
+    });
+    component = mount(DialogHarness, { target: document.body, props });
+    flushSync();
+
+    props.role = 'alertdialog';
+    props.open = true;
+    flushSync();
+
+    expect(
+      document.querySelector('.dialog-content')?.getAttribute('role')
+    ).toBe('alertdialog');
   });
 
   test('a role set on Dialog.Root reaches the panel', () => {

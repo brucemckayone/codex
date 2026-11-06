@@ -148,7 +148,12 @@ describe('lockScroll', () => {
       configurable: true,
       value: 600,
     });
-    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
+    // The scroll back comes after <body> is back in flow: a still-fixed
+    // body has nothing to scroll, and the browser clamps it to 0.
+    const positionAtScroll: string[] = [];
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {
+      positionAtScroll.push(body.style.position);
+    });
     // jsdom's style parser drops a negative `top`: the call is what is checked.
     const set = vi.spyOn(body.style, 'setProperty');
 
@@ -157,6 +162,7 @@ describe('lockScroll', () => {
     expect(set).toHaveBeenCalledWith('top', '-600px');
     hold();
 
+    expect(positionAtScroll).toEqual(['']);
     expect(body.style.cssText).toBe('');
     expect(scrollTo).toHaveBeenCalledWith({
       left: 0,

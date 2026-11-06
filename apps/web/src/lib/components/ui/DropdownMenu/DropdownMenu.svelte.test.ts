@@ -74,6 +74,9 @@ describe('DropdownMenu', () => {
     expect(content?.getAttribute('role')).toBe('menu');
   });
 
+  // A guard against `preventScroll = true`, Melt's default, coming back.
+  // It cannot tell `false` from unset: Melt's effect reads an undefined
+  // preventScroll as falsy too (review G4-N4).
   test('a menu never locks the page', () => {
     component = mount(DropdownMenuHarness, {
       target: document.body,
