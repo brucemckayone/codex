@@ -1387,7 +1387,50 @@ test('ALLOWS an id test that leading text can never meet, and another id', () =>
   assert.deepEqual(summary(scan()), []);
 });
 
-test('ALLOWS an id that starts with its expression: unknown, so not a handle', () => {
+test('CATCHES an id known by its trailing text, and an id of literals or same-file consts', () => {
+  writeFixture(
+    'src/routes/palette/+page.svelte',
+    `<script lang="ts">
+  import * as Dialog from '$lib/components/ui/Dialog';
+  const uid = $props.id();
+  const BODY_ID = 'tier-body';
+  const HEAD = 'x';
+  const NESTED_ID = \`\${HEAD}-body\`;
+</script>
+<Dialog.Root><Dialog.Content><Dialog.Body id="{uid}-results" role="listbox">a</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content><Dialog.Body id={BODY_ID}>b</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content><Dialog.Body id={'lit-body'}>c</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content><Dialog.Body id={\`tpl-body\`}>d</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content><Dialog.Body id={NESTED_ID}>e</Dialog.Body></Dialog.Content></Dialog.Root>
+`
+  );
+  // Review c5 (G5-G-L1): the c4 fix dropped these with the empty prefix.
+  writeFixture(
+    'src/lib/styles/layout.css',
+    [
+      "[id$='-results'] { overflow: visible; }",
+      "[id$='results'] { overflow: visible; }",
+      "[id$='x-results'] { overflow: visible; }",
+      "[id*='result'] { flex: none; }",
+      '#palette-results { flex: none; }',
+      "[id='a-results'] { flex: none; }",
+      '#tier-body { overflow: visible; }',
+      '#lit-body { overflow: visible; }',
+      '#tpl-body { overflow: visible; }',
+      '#x-body { overflow: visible; }',
+      '',
+    ].join('\n')
+  );
+
+  const result = scan();
+  assert.deepEqual(
+    result.violations.filter((v) => v.file.endsWith('layout.css')).map((v) => `${v.rule}@${v.line}`),
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((line) => `part-class@${line}`)
+  );
+  assert.match(result.violations[0].detail, /restyles Dialog\.Body through its id …-results/);
+});
+
+test('ALLOWS an id known by its trailing text under a test of its head, and an id that is all expression', () => {
   writeFixture(
     'src/routes/palette/+page.svelte',
     `<script lang="ts">
@@ -1413,7 +1456,15 @@ test('ALLOWS an id that starts with its expression: unknown, so not a handle', (
   // Review c4 (G4-L7): an empty leading text matched EVERY id.
   writeFixture(
     'src/lib/styles/layout.css',
-    ['#main-content { scroll-margin-top: var(--space-16); }', "[id$='-results'] { min-height: 0; }", "[id^='x'] { flex: none; }", ''].join('\n')
+    [
+      '#main-content { scroll-margin-top: var(--space-16); }',
+      "[id^='x'] { flex: none; }",
+      "[id|='x'] { flex: none; }",
+      '#x-result { flex: none; }',
+      "[id*='zz'] { flex: none; }",
+      "[id$=''] { flex: none; }",
+      '',
+    ].join('\n')
   );
 
   assert.deepEqual(summary(scan()), []);
@@ -1566,8 +1617,10 @@ test("ALLOWS Content's size props, a styled Title, a styled page element, and th
 </Dialog.Root>
 <Dialog.Root><Dialog.Content maxWidth="min(35rem, 90vw)" maxHeight="var(--container-sm)"><Dialog.Body>b</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content maxWidth={wide && '60rem'} maxHeight={wide ? '80dvh' : 'calc(100dvh - 4rem)'}><Dialog.Body>c</Dialog.Body></Dialog.Content></Dialog.Root>
-<Dialog.Root><Dialog.Content maxWidth={\`\${cols * 18}rem\`} maxHeight="{rows * 2}rem"><Dialog.Body>d</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxWidth={\`\${wide ? 60 : 40}rem\`} maxHeight="{tall ? '80dvh' : '60dvh'}"><Dialog.Body>d</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content maxHeight={\`\${tall ? 48 : 32}rem\`} maxWidth={undefined}><Dialog.Body>e</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={\`calc(100dvh - \${(tall ? '4rem' : '2rem') as string})\`} maxWidth={null}><Dialog.Body>f</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight="{tall ? 48 : 32}rem"><Dialog.Body>g</Dialog.Body></Dialog.Content></Dialog.Root>
 `
   );
   // A wrapper inside ui/Dialog/ may forward the props: its own file is the part's.
@@ -1599,6 +1652,7 @@ test("CATCHES a maxHeight or maxWidth on Content that is not a CSS length: a key
 <Dialog.Root><Dialog.Content maxWidth={\`\${cols}\`}><Dialog.Body>g</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content maxHeight="{rows} none"><Dialog.Body>h</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content maxWidth={wide ? 'none' : width}><Dialog.Body>i</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={true}><Dialog.Body>j</Dialog.Body></Dialog.Content></Dialog.Root>
 `
   );
 
@@ -1614,7 +1668,9 @@ test("CATCHES a maxHeight or maxWidth on Content that is not a CSS length: a key
     'part-style@11',
     'part-style@12',
     'part-style@13',
+    'part-style@14',
   ]);
+  assert.match(result.violations[9].detail, /maxHeight="true" is not a CSS length/);
   assert.match(result.violations[0].detail, /<Dialog\.Content> maxHeight="none" is not a CSS length, so the panel loses its cap/);
   assert.match(result.violations[3].detail, /maxHeight="90" is not a CSS length/);
   assert.match(result.violations[4].detail, /maxWidth="none" is not a CSS length/);
@@ -1629,7 +1685,7 @@ test("CATCHES a maxHeight or maxWidth on Content with no literal: a wrapper's fo
     'src/lib/components/BigDialog.svelte',
     `<script lang="ts">
   import * as Dialog from '$lib/components/ui/Dialog';
-  let { maxHeight, size, wide } = $props();
+  let { maxHeight, size, wide, rows, offset } = $props();
   const width = '40rem';
 </script>
 <Dialog.Root><Dialog.Content {maxHeight}><Dialog.Body>a</Dialog.Body></Dialog.Content></Dialog.Root>
@@ -1638,12 +1694,21 @@ test("CATCHES a maxHeight or maxWidth on Content with no literal: a wrapper's fo
 <Dialog.Root><Dialog.Content maxHeight={pick(size)}><Dialog.Body>d</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content maxWidth={wide ? '60rem' : size.w}><Dialog.Body>e</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content maxHeight={size.h ?? '60dvh'}><Dialog.Body>f</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={\`\${rows * 3}rem\`}><Dialog.Body>g</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight="{rows * 3}rem"><Dialog.Body>h</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={\`calc(100dvh - \${offset})\`}><Dialog.Body>i</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxWidth={\`\${size.w}rem\`}><Dialog.Body>j</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxWidth={\`\${wide && 60}rem\`}><Dialog.Body>k</Dialog.Body></Dialog.Content></Dialog.Root>
 `
   );
   writeFixture('src/routes/big/+page.svelte', `<script lang="ts">\n  import BigDialog from '$lib/components/BigDialog.svelte';\n</script>\n<BigDialog maxHeight="none" />\n`);
 
   const result = scan();
-  assert.deepEqual(summary(result), ['part-dynamic@6', 'part-dynamic@7', 'part-dynamic@8', 'part-dynamic@9', 'part-dynamic@10', 'part-dynamic@11']);
+  // @12-16: a template whose `${}` is no literal is "NaNrem" while its prop is unset (review c5).
+  assert.deepEqual(
+    summary(result),
+    [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16].map((line) => `part-dynamic@${line}`)
+  );
   assert.match(
     result.violations[0].detail,
     /<Dialog\.Content>'s maxHeight is not a literal, so nothing in CI can see it is a CSS length .*; write a literal length, or a conditional of literal lengths$/
@@ -1986,7 +2051,10 @@ test("LENGTH_UNITS and MATH_FUNCTIONS are the CssLength type's own lists (ui/Dia
   };
   assert.deepEqual([...LENGTH_UNITS].sort(), union('LengthUnit'));
   assert.deepEqual([...MATH_FUNCTIONS].sort(), union('MathFunction'));
-  // The token form the gate takes is the type's: var(--…), never var(x).
+  // And CssLength is built from those lists, in the forms CSS_LENGTH takes:
+  // a number with a unit, a math function, and a token (var(--…), never var(x)).
+  assert.match(source, /`\$\{number\}\$\{LengthUnit\}`/);
+  assert.match(source, /`\$\{MathFunction\}\(\$\{string\}\)`/);
   assert.match(source, /`var\(--\$\{string\}\)`/);
 });
 
@@ -2050,14 +2118,60 @@ test('CATCHES a Popover.Content with no name: bare, an empty label, through the 
   assert.match(result.violations[7].detail, /; a \{\.\.\.spread\} cannot be read, so write it on the tag$/);
 });
 
-test("ALLOWS a named Popover.Content (text or {expression}), the other Popover parts, another Content, and ui/Popover's own files", () => {
+test("CATCHES a Popover.Content whose name can be unset: a prop with no default, undefined, null or '', and the panel through UI.Popover or an alias", () => {
+  writeFixture(
+    'src/lib/components/InfoPopover.svelte',
+    `<script lang="ts">
+  import * as Popover from '$lib/components/ui/Popover';
+  import * as UI from '$lib/components/ui';
+  let { label, labelledby, wide }: { label?: string; labelledby?: string; wide?: boolean } = $props();
+  const Alias = Popover.Content;
+  const Panel = UI.Popover;
+</script>
+<Popover.Content aria-label={label}>a</Popover.Content>
+<Popover.Content aria-labelledby={labelledby}>b</Popover.Content>
+<Popover.Content aria-label={wide ? label : 'Info'}>c</Popover.Content>
+<Popover.Content aria-label={undefined}>d</Popover.Content>
+<Popover.Content aria-label={null}>e</Popover.Content>
+<Popover.Content aria-label={''}>f</Popover.Content>
+<Popover.Content aria-label={wide ? 'Info' : undefined}>g</Popover.Content>
+<UI.Popover.Content>h</UI.Popover.Content>
+`
+  );
+
+  const result = scan();
+  // @5-6: the alias rule, so a panel can't leave the tags popover-name reads.
+  assert.deepEqual(summary(result), [
+    'popover-name@8',
+    'popover-name@9',
+    'popover-name@10',
+    'popover-name@11',
+    'popover-name@12',
+    'popover-name@13',
+    'popover-name@14',
+    'popover-name@15',
+    'alias@5',
+    'alias@6',
+  ]);
+  assert.match(
+    result.violations[0].detail,
+    /^<Popover\.Content>'s name comes from a prop with no default, .*; give the prop a default, or write the name on the tag$/
+  );
+  assert.match(result.violations[3].detail, /^<Popover\.Content> has no name/);
+  assert.match(result.violations[9].detail, /'UI\.Popover' is read as a value; use the Popover's parts as tags only/);
+});
+
+test("ALLOWS a named Popover.Content (text, a call, a member, a prop with a default), the other Popover parts, another Content, and ui/Popover's own files", () => {
   writeFixture(
     'src/lib/components/Picker.svelte',
     `<script lang="ts">
   import * as Popover from '$lib/components/ui/Popover';
   import * as Card from '$lib/components/ui/Card';
   import * as Dialog from '$lib/components/ui/Dialog';
-  let { label } = $props();
+  import * as UI from '$lib/components/ui';
+  import { m } from '$lib/paraglide/messages';
+  let { label = 'Details', copy, wide, title } = $props();
+  const Btn = UI.Button;
 </script>
 <Popover.Root>
   <Popover.Trigger>Open</Popover.Trigger>
@@ -2065,8 +2179,17 @@ test("ALLOWS a named Popover.Content (text or {expression}), the other Popover p
 </Popover.Root>
 <Popover.Content aria-labelledby="range-heading"><h3 id="range-heading">Range</h3></Popover.Content>
 <Popover.Content aria-label={label}>c</Popover.Content>
-<Card.Content>d</Card.Content>
-<Dialog.Root><Dialog.Content><Dialog.Body>e</Dialog.Body></Dialog.Content></Dialog.Root>
+<Popover.Content aria-label={m.media_uses_where_title()}>d</Popover.Content>
+<Popover.Content aria-label={copy.title}>e</Popover.Content>
+<Popover.Content aria-label={wide ? 'Wide' : 'Narrow'}>f</Popover.Content>
+<Popover.Content aria-label="Uses of {title}">g</Popover.Content>
+<Popover.Content aria-label={title ?? 'Info'}>h</Popover.Content>
+<Popover.Content aria-label={\`Uses of \${title}\`}>h2</Popover.Content>
+<UI.Popover.Content aria-label="Pick">i</UI.Popover.Content>
+<UI.Button>j</UI.Button>
+<UI.Card.Content>j2</UI.Card.Content>
+<Card.Content>k</Card.Content>
+<Dialog.Root><Dialog.Content><Dialog.Body>l</Dialog.Body></Dialog.Content></Dialog.Root>
 `
   );
   writeFixture(
