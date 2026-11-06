@@ -91,9 +91,11 @@
  *                  sanctioned size hatches, and they take a CSS length as
  *                  the CssLength type spells one (its units, a math
  *                  function, a token): `none`, `auto` or a unitless number
- *                  would remove the cap. Each whole value is judged; a
- *                  template is tested with a number for each `${}`, and
- *                  each `${}` must be a literal or a choice of literals.
+ *                  would remove the cap. Each whole value is judged (null
+ *                  and false leave the prop off); a template is tested in
+ *                  every combination of its `${}`s' literal values (more
+ *                  than 16 counts as unknown), and each `${}` must be a
+ *                  literal or a choice of literals.
  *   part-dynamic   Outside ui/Dialog/, a part that draws the panel takes no
  *                  {...spread} and no {@attach}, and its class is literal
  *                  (text, string literals, a conditional or template of them,
@@ -116,9 +118,13 @@
  *   popover-name   Outside ui/Popover/, a Popover.Content has aria-label or
  *                  aria-labelledby on its tag that names it: text, a call or
  *                  a member (`m.x()`), not an undefined, null or '' it can
- *                  result in, nor a prop with no default (a wrapper's
- *                  `label?: string`, which a parent may leave unset). Its
- *                  Name type requires one, but CI type-checks no .svelte.
+ *                  result in, nor a prop with no default or an empty one
+ *                  (a wrapper's `label?: string`, or `title = ''`, which a
+ *                  parent may leave unset). Its Name type requires one, but
+ *                  CI type-checks no .svelte. Not followed, so counted as
+ *                  names: a member of a rest prop (`rest.label`), a
+ *                  $derived alias, an optional call (`label?.trim()`), and
+ *                  `void 0`.
  *   own-dialog     Outside ui/Dialog/ and ui/Popover/, nothing builds a modal
  *                  by hand: no role="dialog"/"alertdialog" (a conditional,
  *                  logical or template result included; the shared Dialog
@@ -138,9 +144,18 @@
  *                  and any .ts or .js file outside ui/Dialog/ (ui/ included)
  *                  that imports it: a barrel one step away would hand its
  *                  pages an alias this check can't resolve. Type-only imports
- *                  read no value and pass. Outside ui/Popover/, the
- *                  Popover's parts are tags only too (`UI.Popover` of the ui
- *                  barrel included), so popover-name sees every panel.
+ *                  read no value and pass. The Popover's parts are tags
+ *                  only too: outside ui/Popover/ a .svelte reads no Popover
+ *                  binding as a value, nor the ui barrel's namespace other
+ *                  than as a plain member of another name (`UI.Button`, not
+ *                  `UI.Popover`, `UI['Popover']` or `const { Popover } =
+ *                  UI`); and no .ts/.js but the ui barrel and
+ *                  ui/Popover's own imports or re-exports the Popover (its
+ *                  module, a part file, or the ui barrel's `Popover`, named
+ *                  or under a `*`). So popover-name sees each panel a
+ *                  .svelte renders from its own imports. Not followed: a
+ *                  .svelte `<script module>` re-export of the Popover, and
+ *                  an import() of the Popover or the ui barrel in a .svelte.
  *   parse          A .svelte or .css file that does not parse fails loudly.
  *
  * "Direct child" looks THROUGH {#if}/{#each}/{#key}/{#await}/{#snippet}
@@ -527,11 +542,12 @@ const POPOVER_CONTENT = new Set(['Content', 'PopoverContent']);
 function collectPopoverNames(file, programs, ctx) {
   const names = { namespaces: new Set(), parts: new Set(), contents: new Set(), uiNamespaces: new Set() };
   for (const stmt of programs.flatMap((program) => program.body)) {
-    if (stmt.type !== 'ImportDeclaration') continue;
+    if (stmt.type !== 'ImportDeclaration' || stmt.importKind === 'type') continue;
     const target = specifierTarget(file, stmt.source.value, ctx);
     if (!target) continue;
-    const popover = target === ctx.popoverDir || dirname(target) === ctx.popoverDir;
+    const popover = isPopoverTarget(target, ctx);
     for (const s of stmt.specifiers) {
+      if (s.importKind === 'type') continue;
       const imported = s.imported?.name ?? s.imported?.value;
       if (popover) (s.type === 'ImportNamespaceSpecifier' ? names.namespaces : names.parts).add(s.local.name);
       else if (target === ctx.uiDir && s.type === 'ImportNamespaceSpecifier') names.uiNamespaces.add(s.local.name);
@@ -545,6 +561,15 @@ function collectPopoverNames(file, programs, ctx) {
     }
   }
   return names;
+}
+
+/**
+ * The Popover module itself, or one of its part files; `ctx.ts` beside them
+ * hands on no panel. A `.svelte.ts` there would count as a part, which fails
+ * closed.
+ */
+function isPopoverTarget(target, ctx) {
+  return target === ctx.popoverDir || (dirname(target) === ctx.popoverDir && target.endsWith('.svelte'));
 }
 
 /** A Popover tag's part name: `Content` of `Popover.Content` or `UI.Popover.Content`, the local name of a part, or null. */
@@ -565,51 +590,63 @@ function isPopoverContent(node, popover) {
   return name !== null && (node.name.includes('.') ? POPOVER_CONTENT.has(name) : popover.contents.has(name));
 }
 
-/** The names a component's `$props()` destructuring binds with no default: a parent may leave them unset. */
-function propsWithoutDefault(programs) {
+const NAME_RANK = { named: 0, unproven: 1, none: 2 };
+const worstName = (verdicts) => verdicts.reduce((a, b) => (NAME_RANK[b] > NAME_RANK[a] ? b : a), 'named');
+
+/**
+ * What a name expression names: 'named', 'none' (an undefined, null or ''
+ * it can result in) or 'unproven' (a prop in `unsetProps`). A call or a
+ * member (paraglide's `m.x()`) names it.
+ */
+function judgeName(expr, unsetProps) {
+  const judge = (e) => judgeName(e, unsetProps);
+  switch (expr?.type) {
+    case 'Literal':
+      return expr.value === null || (typeof expr.value === 'string' && !expr.value.trim()) ? 'none' : 'named';
+    case 'Identifier':
+      if (expr.name === 'undefined') return 'none';
+      return unsetProps.has(expr.name) ? 'unproven' : 'named';
+    case 'TemplateLiteral':
+      return expr.quasis.some((q) => (q.value.cooked ?? q.value.raw).trim()) ? 'named' : worstName(expr.expressions.map(judge));
+    case 'ConditionalExpression':
+      return worstName([judge(expr.consequent), judge(expr.alternate)]);
+    case 'LogicalExpression':
+      // `label ?? 'Info'` names it whenever label doesn't; `label && 'Info'` can give back label.
+      return expr.operator === '&&' ? worstName([judge(expr.left), judge(expr.right)]) : judge(expr.right);
+    default:
+      return TS_VALUE_HOLDERS.has(expr?.type) ? judge(expr.expression) : 'named';
+  }
+}
+
+/**
+ * The names a component's `$props()` destructuring binds that a parent may
+ * leave unset or empty: no default, or a default that names nothing
+ * (`title = ''`, `= undefined`, `= null`).
+ */
+function unsetPropNames(programs) {
   const names = new Set();
   walk(programs, (node) => {
     const init = node.type === 'VariableDeclarator' ? node.init : null;
     if (init?.type !== 'CallExpression' || init.callee.type !== 'Identifier' || init.callee.name !== '$props') return;
     if (node.id.type !== 'ObjectPattern') return;
-    for (const p of node.id.properties) if (p.type === 'Property' && p.value.type === 'Identifier') names.add(p.value.name);
+    for (const p of node.id.properties) {
+      if (p.type !== 'Property') continue;
+      if (p.value.type === 'Identifier') names.add(p.value.name);
+      else if (p.value.type === 'AssignmentPattern' && p.value.left.type === 'Identifier' && judgeName(p.value.right, new Set()) === 'none') {
+        names.add(p.value.left.name);
+      }
+    }
   });
   return names;
 }
 
-const NAME_RANK = { named: 0, unproven: 1, none: 2 };
-const worstName = (verdicts) => verdicts.reduce((a, b) => (NAME_RANK[b] > NAME_RANK[a] ? b : a), 'named');
-
-/**
- * What an aria-label / aria-labelledby value names: 'named', 'none' (empty
- * text, or an undefined, null or '' it can result in) or 'unproven' (a
- * prop with no default, which a parent may leave unset). A call or a member
- * (paraglide's `m.x()`) names it.
- */
+/** What an aria-label / aria-labelledby value names: its text, or what its expressions judge. */
 function nameVerdict(attr, unsetProps) {
   const text = staticValue(attr);
   if (text !== null) return text.trim() ? 'named' : 'none';
   const parts = Array.isArray(attr.value) ? attr.value : [attr.value];
   if (parts.some((p) => p.type === 'Text' && p.data.trim())) return 'named';
-  const judge = (expr) => {
-    switch (expr?.type) {
-      case 'Literal':
-        return expr.value === null || (typeof expr.value === 'string' && !expr.value.trim()) ? 'none' : 'named';
-      case 'Identifier':
-        if (expr.name === 'undefined') return 'none';
-        return unsetProps.has(expr.name) ? 'unproven' : 'named';
-      case 'TemplateLiteral':
-        return expr.quasis.some((q) => (q.value.cooked ?? q.value.raw).trim()) ? 'named' : worstName(expr.expressions.map(judge));
-      case 'ConditionalExpression':
-        return worstName([judge(expr.consequent), judge(expr.alternate)]);
-      case 'LogicalExpression':
-        // `label ?? 'Info'` names it whenever label doesn't.
-        return judge(expr.right);
-      default:
-        return TS_VALUE_HOLDERS.has(expr?.type) ? judge(expr.expression) : 'named';
-    }
-  };
-  return worstName(parts.filter((p) => p.type !== 'Text').map((p) => judge(p.expression)));
+  return worstName(parts.filter((p) => p.type !== 'Text').map((p) => judgeName(p.expression, unsetProps)));
 }
 
 /**
@@ -617,10 +654,11 @@ function nameVerdict(attr, unsetProps) {
  * aria-labelledby on its tag. Its Name type requires one, but no CI job
  * type-checks a .svelte file. A literal, a call or a member names it; an
  * empty text, an undefined, null or '' literal, or a {...spread} does not,
- * and a prop with no default (a wrapper's `label?: string`) is unproven.
+ * and a prop with no default or an empty one (a wrapper's `label?: string`,
+ * `title = ''`) is unproven.
  */
 function checkPopoverNames(fragment, programs, popover, report) {
-  const unsetProps = propsWithoutDefault(programs);
+  const unsetProps = unsetPropNames(programs);
   walk(fragment, (node) => {
     if (!isPopoverContent(node, popover)) return;
     const names = node.attributes.filter((a) => a.type === 'Attribute' && (a.name === 'aria-label' || a.name === 'aria-labelledby'));
@@ -630,7 +668,7 @@ function checkPopoverNames(fragment, programs, popover, report) {
       report(
         node.start,
         'popover-name',
-        `<${node.name}>'s name comes from a prop with no default, so a parent can leave the panel unnamed (a dialog needs a name); give the prop a default, or write the name on the tag`
+        `<${node.name}>'s name comes from a prop with no default or an empty one, so a parent can leave the panel unnamed (a dialog needs a name); give the prop a non-empty default, or write the name on the tag`
       );
       return;
     }
@@ -673,14 +711,14 @@ function checkValueReads(roots, bindings, report, what = 'Dialog', uiNamespaces 
       return;
     }
     if (node.type === 'Identifier' && bindings.has(node.name) && !isNameOnly(parent, key)) report(node.start, 'alias', detail(node.name));
-    // The module read through the ui barrel's namespace: `UI.Popover`.
-    const viaUi =
-      node.type === 'MemberExpression' &&
-      !node.computed &&
-      node.object.type === 'Identifier' &&
-      uiNamespaces.has(node.object.name) &&
-      node.property.name === what;
-    if (viaUi) report(node.start, 'alias', detail(`${node.object.name}.${what}`));
+    // The ui barrel's namespace hands on its Popover through anything but a
+    // plain member of another name (`UI.Button`): `UI.Popover`, `UI['Popover']`,
+    // `const { Popover } = UI`, or UI itself passed on.
+    if (node.type === 'Identifier' && uiNamespaces.has(node.name) && !isNameOnly(parent, key)) {
+      const member = parent?.type === 'MemberExpression' && key === 'object' && !parent.computed ? parent.property.name : null;
+      if (member !== null && member !== what) return;
+      report(node.start, 'alias', detail(member ? `${node.name}.${member}` : node.name));
+    }
     for (const [k, value] of Object.entries(node)) {
       if (k !== 'metadata' && value && typeof value === 'object') visit(value, node, k);
     }
@@ -1186,42 +1224,54 @@ function checkPartAttributes(fragment, bindings, report) {
   });
 }
 
+// Past this many combinations of a template's literal choices, it counts as unknown.
+const MAX_SIZE_COMBINATIONS = 16;
+
 /**
  * What a maxHeight / maxWidth tells a source check, or null when every value
  * it can take is a CSS length: `{ bad }`, the first whole value that is not
  * one, as written; or `{ opaque: true }` when a value it can take has no
  * literal at all (a prop, a variable, a call), which no CI job checks: tsc
  * never reads a .svelte file. Each whole value is judged on its own: a
- * conditional's branches, `&&`'s right side, both sides of `||` and `??`. A
- * template is one value, tested with a number in place of each `${}`
- * (`${tall ? 48 : 32}rem` as 0rem), and each `${}` must itself be literal:
- * `${rows * 3}rem` is "NaNrem" while rows is unset, and min(NaNrem, …)
- * drops the cap just as `none` does.
+ * conditional's branches, `&&`'s right side, both sides of `||` and `??`.
+ * null and false leave the prop off (the part caps only on a truthy value).
+ * A template is tested in every combination of its `${}`s' literal values
+ * (`${tall ? 'none' : 40}rem` as both nonerem and 40rem), so each `${}` must
+ * be a literal or a choice of literals: `${rows * 3}rem` is "NaNrem" while
+ * rows is unset, and min(NaNrem, …) drops the cap just as `none` does.
  */
 function sizeVerdict(attr) {
   if (attr.value === true) return { bad: 'true' };
   const parts = Array.isArray(attr.value) ? attr.value : [attr.value];
   const values = [];
   let opaque = false;
-  const whole = (pieces) => {
-    values.push({
-      test: pieces.map((p) => (typeof p === 'string' ? p : '0')).join(''),
-      shown: pieces.map((p) => (typeof p === 'string' ? p : '{…}')).join(''),
-    });
+  // A template's text, or one `${}`: the values it can take. An unknown one
+  // is tested as a number, so the unit is still checked, and shown as {…}.
+  const text = (t) => [{ test: t, shown: t }];
+  const slot = (expr) => {
+    const literals = fragmentValues(expr);
+    if (literals) return literals.flatMap(text);
+    opaque = true;
+    return [{ test: '0', shown: '{…}' }];
   };
-  // A template's `${}` holds a fragment: a literal, or a choice of literals.
-  const fragment = (expr) => {
-    if (!isLiteralFragment(expr)) opaque = true;
+  const whole = (slots) => {
+    if (slots.reduce((n, s) => n * s.length, 1) > MAX_SIZE_COMBINATIONS) {
+      opaque = true;
+      return;
+    }
+    const combos = slots.reduce((acc, s) => acc.flatMap((a) => s.map((v) => ({ test: a.test + v.test, shown: a.shown + v.shown }))), [
+      { test: '', shown: '' },
+    ]);
+    values.push(...combos);
   };
   const visit = (expr) => {
     switch (expr?.type) {
       case 'Literal':
-        // null leaves the prop unset; true, false or a regex is no length.
-        if (expr.value !== null) whole([String(expr.value)]);
+        // true or a regex is no length.
+        if (expr.value !== null && expr.value !== false) whole([text(String(expr.value))]);
         return;
       case 'TemplateLiteral':
-        expr.expressions.forEach(fragment);
-        whole(expr.quasis.flatMap((q, i) => (i < expr.expressions.length ? [q.value.cooked ?? q.value.raw, null] : [q.value.cooked ?? q.value.raw])));
+        whole(expr.quasis.flatMap((q, i) => [text(q.value.cooked ?? q.value.raw), ...(i < expr.expressions.length ? [slot(expr.expressions[i])] : [])]));
         return;
       case 'ConditionalExpression':
         visit(expr.consequent);
@@ -1241,27 +1291,46 @@ function sizeVerdict(attr) {
   };
   // `maxHeight="{rows * 2}rem"` is a template too; a lone `{…}` is its expression.
   if (parts.length === 1 && parts[0].type === 'ExpressionTag') visit(parts[0].expression);
-  else {
-    for (const p of parts) if (p.type !== 'Text') fragment(p.expression);
-    whole(parts.map((p) => (p.type === 'Text' ? p.data : null)));
-  }
+  else whole(parts.map((p) => (p.type === 'Text' ? text(p.data) : slot(p.expression))));
   const bad = values.find((v) => !CSS_LENGTH.test(v.test));
   if (bad) return { bad: bad.shown };
   return opaque ? { opaque: true } : null;
 }
 
-/** A number or string literal, or a conditional or logical of them, under any TS wrapper. */
-function isLiteralFragment(expr) {
+/**
+ * The strings a template's `${}` can give, or null when one of them isn't a
+ * literal: a number or string literal, a signed number, a template of them,
+ * or a conditional or logical of them (both sides, for a logical gives back
+ * either), under any TS wrapper. sizeVerdict bounds how many it tests.
+ */
+function fragmentValues(expr) {
   switch (expr?.type) {
     case 'Literal':
-      return typeof expr.value === 'string' || typeof expr.value === 'number';
+      return typeof expr.value === 'string' || typeof expr.value === 'number' ? [String(expr.value)] : null;
+    case 'UnaryExpression':
+      return (expr.operator === '-' || expr.operator === '+') && expr.argument.type === 'Literal' && typeof expr.argument.value === 'number'
+        ? [String(expr.operator === '-' ? -expr.argument.value : expr.argument.value)]
+        : null;
+    case 'TemplateLiteral': {
+      let out = [''];
+      for (const [i, q] of expr.quasis.entries()) {
+        out = out.map((o) => o + (q.value.cooked ?? q.value.raw));
+        if (i === expr.expressions.length) break;
+        const inner = fragmentValues(expr.expressions[i]);
+        if (!inner) return null;
+        out = out.flatMap((o) => inner.map((v) => o + v));
+      }
+      return out;
+    }
     case 'ConditionalExpression':
-      return isLiteralFragment(expr.consequent) && isLiteralFragment(expr.alternate);
-    case 'LogicalExpression':
-      // Of two literals, any operator gives back one of them.
-      return isLiteralFragment(expr.left) && isLiteralFragment(expr.right);
+    case 'LogicalExpression': {
+      const [x, y] = expr.type === 'ConditionalExpression' ? [expr.consequent, expr.alternate] : [expr.left, expr.right];
+      const a = fragmentValues(x);
+      const b = fragmentValues(y);
+      return a && b ? [...a, ...b] : null;
+    }
     default:
-      return TS_VALUE_HOLDERS.has(expr?.type) && isLiteralFragment(expr.expression);
+      return TS_VALUE_HOLDERS.has(expr?.type) ? fragmentValues(expr.expression) : null;
   }
 }
 
@@ -1587,31 +1656,39 @@ function staticValue(attr) {
 /**
  * What an `id` value is known by: `{ id }` when every piece is text or a
  * constant, else the text before its first unknown piece (`prefix`) and
- * after its last (`suffix`). `id="x-{n}"` is known by `x-`, and
- * `id="{uid}-results"` by `-results`.
+ * after its last (`suffix`). Each expression is flattened first, so
+ * `id="x-{n}"`, `` id={`x-${n}`} `` and a same-file const of either are
+ * known by `x-`, and `id="{uid}-results"` or `id={uid + '-results'}` by
+ * `-results`.
  */
 function idShape(attr, consts) {
   const parts = Array.isArray(attr.value) ? attr.value : [attr.value];
-  const pieces = parts.map((p) => (p.type === 'Text' ? p.data : constantString(p.expression, consts)));
+  const pieces = parts.flatMap((p) => (p.type === 'Text' ? [p.data] : stringPieces(p.expression, consts)));
   if (!pieces.includes(null)) return { id: pieces.join('') };
   return { prefix: pieces.slice(0, pieces.indexOf(null)).join(''), suffix: pieces.slice(pieces.lastIndexOf(null) + 1).join('') };
 }
 
-/** The string an expression always is, as far as literals and same-file consts show, or null. */
-function constantString(expr, consts, seen = new Set()) {
+/**
+ * An expression's string, as pieces: known text, or null for each part no
+ * literal or same-file const shows. A template gives its text and its
+ * expressions' pieces, and so does a `+` with a string literal or template
+ * on either side.
+ */
+function stringPieces(expr, consts, seen = new Set()) {
+  const of = (e) => stringPieces(e, consts, seen);
+  const isString = (e) => (e.type === 'Literal' && typeof e.value === 'string') || e.type === 'TemplateLiteral';
   switch (expr?.type) {
     case 'Literal':
-      return typeof expr.value === 'string' || typeof expr.value === 'number' ? String(expr.value) : null;
-    case 'TemplateLiteral': {
-      const values = expr.expressions.map((e) => constantString(e, consts, seen));
-      if (values.includes(null)) return null;
-      return expr.quasis.map((q, i) => (q.value.cooked ?? q.value.raw) + (values[i] ?? '')).join('');
-    }
+      return typeof expr.value === 'string' || typeof expr.value === 'number' ? [String(expr.value)] : [null];
+    case 'TemplateLiteral':
+      return expr.quasis.flatMap((q, i) => [q.value.cooked ?? q.value.raw, ...(i < expr.expressions.length ? of(expr.expressions[i]) : [])]);
+    case 'BinaryExpression':
+      return expr.operator === '+' && (isString(expr.left) || isString(expr.right)) ? [...of(expr.left), ...of(expr.right)] : [null];
     case 'Identifier':
-      if (!consts.has(expr.name) || seen.has(expr.name)) return null;
-      return constantString(consts.get(expr.name), consts, new Set([...seen, expr.name]));
+      if (!consts.has(expr.name) || seen.has(expr.name)) return [null];
+      return stringPieces(consts.get(expr.name), consts, new Set([...seen, expr.name]));
     default:
-      return TS_VALUE_HOLDERS.has(expr?.type) ? constantString(expr.expression, consts, seen) : null;
+      return TS_VALUE_HOLDERS.has(expr?.type) ? of(expr.expression) : [null];
   }
 }
 
@@ -1675,7 +1752,8 @@ function idSuffixMatches({ op, value }, suffix) {
   const v = value.toLowerCase();
   const s = suffix.toLowerCase();
   if (op === '$=') return v !== '' && (v.endsWith(s) || s.endsWith(v));
-  if (op === '*=') return v !== '' && s.includes(v);
+  // `*=` also matches across the unknown head: `tier-delta` in `{kind}-delta`.
+  if (op === '*=') return v !== '' && (s.includes(v) || [...s].some((_, k) => v.endsWith(s.slice(0, k + 1))));
   return op === '=' || op === '~=' ? v.endsWith(s) : false;
 }
 
@@ -2029,18 +2107,20 @@ function namesOnlyTypes(clause) {
 /**
  * Each module specifier a script names: static imports and exports, side
  * effects, import(). `typeOnly` marks `import type`, `export type`, an
- * all-`type` clause and `typeof import()`, which read no value.
+ * all-`type` clause and `typeof import()`, which read no value. `clause` is
+ * what it binds: the text before `from`, '' for a side effect, '*' for an
+ * import(), which hands back the whole module.
  */
 function* moduleSpecifiers(code) {
   for (const m of code.matchAll(/\b(import|export)\b(\s+type\b)?([^;'"`]*?)\bfrom\s*(['"])([^'"]+)\4/g)) {
-    yield { kind: m[1], spec: m[5], index: m.index, typeOnly: Boolean(m[2]) || namesOnlyTypes(m[3]) };
+    yield { kind: m[1], spec: m[5], index: m.index, typeOnly: Boolean(m[2]) || namesOnlyTypes(m[3]), clause: m[3] };
   }
   for (const m of code.matchAll(/\bimport\s*(['"])([^'"]+)\1/g)) {
-    yield { kind: 'import', spec: m[2], index: m.index, typeOnly: false };
+    yield { kind: 'import', spec: m[2], index: m.index, typeOnly: false, clause: '' };
   }
   for (const m of code.matchAll(/\bimport\s*\(\s*(['"`])([^'"`]+)\1\s*\)/g)) {
     const typeOnly = /\btypeof\s*$/.test(code.slice(Math.max(0, m.index - 40), m.index));
-    yield { kind: 'import', spec: m[2], index: m.index, typeOnly };
+    yield { kind: 'import', spec: m[2], index: m.index, typeOnly, clause: '*' };
   }
 }
 
@@ -2048,21 +2128,34 @@ const escapeRegExp = (text) => text.replace(/[$.*+?^()[\]{}|\\]/g, '\\$&');
 
 /**
  * .ts/.js outside ui/Dialog/. Any import of the Dialog module is an alias
- * a page could take one step away; a type-only one reads no value. Outside
+ * a page could take one step away; a type-only one reads no value. So is
+ * one of the Popover, outside ui/Popover/ and the ui barrel: its module, a
+ * part file, or the ui barrel's `Popover` (named, or under a `*`). Outside
  * ui/Popover/ too: a read of showModal, a Melt modal builder, or an object
  * literal claiming a dialog role is own-dialog.
  */
 function checkScriptFile(file, source, ctx, report) {
   const code = blankComments(source);
-  for (const { kind, spec, index, typeOnly } of moduleSpecifiers(code)) {
-    if (typeOnly || !resolveSpecifier(file, spec, ctx)) continue;
-    report(
-      index,
-      'alias',
-      kind === 'export'
-        ? reexportDetail(spec)
-        : `a .ts/.js file imports the Dialog module ('${spec}'), which can hand its parts on as values this check can't follow; import the parts in the .svelte that renders them`
-    );
+  const popoverHome = isInside(ctx.popoverDir, file) || (dirname(file) === ctx.uiDir && /\/index\.[cm]?[jt]s$/.test(file));
+  for (const { kind, spec, index, typeOnly, clause } of moduleSpecifiers(code)) {
+    if (typeOnly) continue;
+    const target = specifierTarget(file, spec, ctx);
+    const popover = target !== null && (isPopoverTarget(target, ctx) || (target === ctx.uiDir && /\*|\bPopover\b/.test(clause)));
+    if (resolveSpecifier(file, spec, ctx)) {
+      report(
+        index,
+        'alias',
+        kind === 'export'
+          ? reexportDetail(spec)
+          : `a .ts/.js file imports the Dialog module ('${spec}'), which can hand its parts on as values this check can't follow; import the parts in the .svelte that renders them`
+      );
+    } else if (popover && !popoverHome) {
+      report(
+        index,
+        'alias',
+        `a .ts/.js file ${kind === 'export' ? 're-exports' : 'imports'} the Popover ('${spec}'), which can hand its panel on under a name popover-name can't follow; import the parts in the .svelte that renders them`
+      );
+    }
   }
   if (!ctx.scriptSelectExempt(file)) {
     for (const m of code.matchAll(DIALOG_CLASS_RE)) report(m.index, 'script-select', scriptSelectDetail(m[0]));

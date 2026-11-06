@@ -1392,19 +1392,22 @@ test('CATCHES an id known by its trailing text, and an id of literals or same-fi
     'src/routes/palette/+page.svelte',
     `<script lang="ts">
   import * as Dialog from '$lib/components/ui/Dialog';
+  let { kind }: { kind: string } = $props();
   const uid = $props.id();
   const BODY_ID = 'tier-body';
   const HEAD = 'x';
-  const NESTED_ID = \`\${HEAD}-body\`;
+  const NESTED_ID = \`\${HEAD}-nest\`;
 </script>
 <Dialog.Root><Dialog.Content><Dialog.Body id="{uid}-results" role="listbox">a</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content><Dialog.Body id={BODY_ID}>b</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content><Dialog.Body id={'lit-body'}>c</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content><Dialog.Body id={\`tpl-body\`}>d</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content><Dialog.Body id={NESTED_ID}>e</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content><Dialog.Body id="{kind}-delta">f</Dialog.Body></Dialog.Content></Dialog.Root>
 `
   );
   // Review c5 (G5-G-L1): the c4 fix dropped these with the empty prefix.
+  // No id here has a known head, so a prefix can't answer for a suffix's test.
   writeFixture(
     'src/lib/styles/layout.css',
     [
@@ -1417,7 +1420,10 @@ test('CATCHES an id known by its trailing text, and an id of literals or same-fi
       '#tier-body { overflow: visible; }',
       '#lit-body { overflow: visible; }',
       '#tpl-body { overflow: visible; }',
-      '#x-body { overflow: visible; }',
+      '#x-nest { overflow: visible; }',
+      // `*=` across the unknown head (review c6, G6-G-N5): `{kind}-delta` can hold both.
+      "[id*='tier-delta'] { flex: none; }",
+      "[id*='r-del'] { flex: none; }",
       '',
     ].join('\n')
   );
@@ -1425,9 +1431,45 @@ test('CATCHES an id known by its trailing text, and an id of literals or same-fi
   const result = scan();
   assert.deepEqual(
     result.violations.filter((v) => v.file.endsWith('layout.css')).map((v) => `${v.rule}@${v.line}`),
-    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((line) => `part-class@${line}`)
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((line) => `part-class@${line}`)
   );
   assert.match(result.violations[0].detail, /restyles Dialog\.Body through its id …-results/);
+});
+
+test('CATCHES an id built inside one expression: a template, a string +, a const of either, its prefix side, under as', () => {
+  // Review c6 (G6-G-L2): an id built inside ONE expression, or a const of one.
+  writeFixture(
+    'src/routes/built/+page.svelte',
+    `<script lang="ts">
+  import * as Dialog from '$lib/components/ui/Dialog';
+  let { tier }: { tier: { id: string } } = $props();
+  const uid = $props.id();
+  const KILO_ID = \`\${uid}-kilo\`;
+</script>
+<Dialog.Root><Dialog.Content><Dialog.Body id={\`\${uid}-alpha\`}>a</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content><Dialog.Body id={uid + '-bravo'}>b</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content><Dialog.Body id={KILO_ID}>c</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content><Dialog.Body id={\`india-\${tier.id}\`}>d</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content><Dialog.Body id={\`\${uid}-juliet\` as string}>e</Dialog.Body></Dialog.Content></Dialog.Root>
+`
+  );
+  writeFixture(
+    'src/lib/styles/built.css',
+    [
+      "[id$='-alpha'] { overflow: visible; }",
+      '#tier-bravo { flex: none; }',
+      '#a-kilo { flex: none; }',
+      '#india-1 { flex: none; }',
+      '#a-juliet { flex: none; }',
+      '',
+    ].join('\n')
+  );
+
+  const result = scan();
+  assert.deepEqual(
+    result.violations.filter((v) => v.file.endsWith('built.css')).map((v) => `${v.rule}@${v.line}`),
+    [1, 2, 3, 4, 5].map((line) => `part-class@${line}`)
+  );
 });
 
 test('ALLOWS an id known by its trailing text under a test of its head, and an id that is all expression', () => {
@@ -1621,6 +1663,10 @@ test("ALLOWS Content's size props, a styled Title, a styled page element, and th
 <Dialog.Root><Dialog.Content maxHeight={\`\${tall ? 48 : 32}rem\`} maxWidth={undefined}><Dialog.Body>e</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content maxHeight={\`calc(100dvh - \${(tall ? '4rem' : '2rem') as string})\`} maxWidth={null}><Dialog.Body>f</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content maxHeight="{tall ? 48 : 32}rem"><Dialog.Body>g</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={\`85\${tall ? 'dvh' : 'vh'}\`} maxWidth={\`\${wide ? '48rem' : '32rem'}\`}><Dialog.Body>h</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={\`\${\`40\`}rem\`} maxWidth={\`\${-48}rem\`}><Dialog.Body>i</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={false} maxWidth={\`min(\${tall ? 90 : 60}dvw, 40rem)\`}><Dialog.Body>j</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={\`\${a ? (b ? 1 : 2) : c ? 3 : 4}\${d ? (e ? 5 : 6) : f ? 7 : 8}rem\`}><Dialog.Body>k</Dialog.Body></Dialog.Content></Dialog.Root>
 `
   );
   // A wrapper inside ui/Dialog/ may forward the props: its own file is the part's.
@@ -1653,6 +1699,10 @@ test("CATCHES a maxHeight or maxWidth on Content that is not a CSS length: a key
 <Dialog.Root><Dialog.Content maxHeight="{rows} none"><Dialog.Body>h</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content maxWidth={wide ? 'none' : width}><Dialog.Body>i</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content maxHeight={true}><Dialog.Body>j</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={\`\${tall ? 'none' : 40}rem\`}><Dialog.Body>k</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={\`\${tall ? '' : 40}rem\`}><Dialog.Body>l</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight="{tall ? 'auto' : 40}rem"><Dialog.Body>m</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={\`\${'' && 48}rem\`}><Dialog.Body>n</Dialog.Body></Dialog.Content></Dialog.Root>
 `
   );
 
@@ -1669,8 +1719,15 @@ test("CATCHES a maxHeight or maxWidth on Content that is not a CSS length: a key
     'part-style@12',
     'part-style@13',
     'part-style@14',
+    'part-style@15',
+    'part-style@16',
+    'part-style@17',
+    'part-style@18',
   ]);
   assert.match(result.violations[9].detail, /maxHeight="true" is not a CSS length/);
+  // A template's literal choices are each tested, as rendered (review c6, G6-G-L3).
+  assert.match(result.violations[10].detail, /maxHeight="nonerem" is not a CSS length/);
+  assert.match(result.violations[12].detail, /maxHeight="autorem" is not a CSS length/);
   assert.match(result.violations[0].detail, /<Dialog\.Content> maxHeight="none" is not a CSS length, so the panel loses its cap/);
   assert.match(result.violations[3].detail, /maxHeight="90" is not a CSS length/);
   assert.match(result.violations[4].detail, /maxWidth="none" is not a CSS length/);
@@ -1699,6 +1756,11 @@ test("CATCHES a maxHeight or maxWidth on Content with no literal: a wrapper's fo
 <Dialog.Root><Dialog.Content maxHeight={\`calc(100dvh - \${offset})\`}><Dialog.Body>i</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content maxWidth={\`\${size.w}rem\`}><Dialog.Body>j</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content maxWidth={\`\${wide && 60}rem\`}><Dialog.Body>k</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={\`\${wide ? rows : '40'}rem\`}><Dialog.Body>l</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={\`\${rows as number}rem\`}><Dialog.Body>m</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={\`\${-rows}rem\`}><Dialog.Body>n</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={\`\${\`\${rows}\`}rem\`}><Dialog.Body>o</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={\`\${a ? (b ? 1 : 2) : c ? 3 : 4}\${d ? (e ? 5 : 6) : f ? 7 : 8}\${g ? 1 : 2}rem\`}><Dialog.Body>p</Dialog.Body></Dialog.Content></Dialog.Root>
 `
   );
   writeFixture('src/routes/big/+page.svelte', `<script lang="ts">\n  import BigDialog from '$lib/components/BigDialog.svelte';\n</script>\n<BigDialog maxHeight="none" />\n`);
@@ -1707,7 +1769,8 @@ test("CATCHES a maxHeight or maxWidth on Content with no literal: a wrapper's fo
   // @12-16: a template whose `${}` is no literal is "NaNrem" while its prop is unset (review c5).
   assert.deepEqual(
     summary(result),
-    [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16].map((line) => `part-dynamic@${line}`)
+    // @21: more than 16 combinations of literal choices counts as unknown.
+    [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21].map((line) => `part-dynamic@${line}`)
   );
   assert.match(
     result.violations[0].detail,
@@ -2124,7 +2187,7 @@ test("CATCHES a Popover.Content whose name can be unset: a prop with no default,
     `<script lang="ts">
   import * as Popover from '$lib/components/ui/Popover';
   import * as UI from '$lib/components/ui';
-  let { label, labelledby, wide }: { label?: string; labelledby?: string; wide?: boolean } = $props();
+  let { label, labelledby, wide, title = '', heading = undefined, hint = null }: Props = $props();
   const Alias = Popover.Content;
   const Panel = UI.Popover;
 </script>
@@ -2136,29 +2199,30 @@ test("CATCHES a Popover.Content whose name can be unset: a prop with no default,
 <Popover.Content aria-label={''}>f</Popover.Content>
 <Popover.Content aria-label={wide ? 'Info' : undefined}>g</Popover.Content>
 <UI.Popover.Content>h</UI.Popover.Content>
+<Popover.Content aria-label={title}>i</Popover.Content>
+<Popover.Content aria-label={heading}>j</Popover.Content>
+<Popover.Content aria-label={hint}>k</Popover.Content>
+<Popover.Content aria-label={label && 'Info'}>l</Popover.Content>
+<Popover.Content aria-label={label ?? ''}>m</Popover.Content>
+<Popover.Content aria-label={\`\${label}\`}>n</Popover.Content>
+<Popover.Content aria-label={label as string}>o</Popover.Content>
 `
   );
 
   const result = scan();
+  // @16-18: an empty default is no name either (review c6, G6-G-L1).
   // @5-6: the alias rule, so a panel can't leave the tags popover-name reads.
   assert.deepEqual(summary(result), [
-    'popover-name@8',
-    'popover-name@9',
-    'popover-name@10',
-    'popover-name@11',
-    'popover-name@12',
-    'popover-name@13',
-    'popover-name@14',
-    'popover-name@15',
+    ...[8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22].map((line) => `popover-name@${line}`),
     'alias@5',
     'alias@6',
   ]);
   assert.match(
     result.violations[0].detail,
-    /^<Popover\.Content>'s name comes from a prop with no default, .*; give the prop a default, or write the name on the tag$/
+    /^<Popover\.Content>'s name comes from a prop with no default or an empty one, .*; give the prop a non-empty default, or write the name on the tag$/
   );
   assert.match(result.violations[3].detail, /^<Popover\.Content> has no name/);
-  assert.match(result.violations[9].detail, /'UI\.Popover' is read as a value; use the Popover's parts as tags only/);
+  assert.match(result.violations[16].detail, /'UI\.Popover' is read as a value; use the Popover's parts as tags only/);
 });
 
 test("ALLOWS a named Popover.Content (text, a call, a member, a prop with a default), the other Popover parts, another Content, and ui/Popover's own files", () => {
@@ -2170,7 +2234,8 @@ test("ALLOWS a named Popover.Content (text, a call, a member, a prop with a defa
   import * as Dialog from '$lib/components/ui/Dialog';
   import * as UI from '$lib/components/ui';
   import { m } from '$lib/paraglide/messages';
-  let { label = 'Details', copy, wide, title } = $props();
+  let { label = 'Details', copy, wide, title, empty = '' } = $props();
+  let open = $state(true);
   const Btn = UI.Button;
 </script>
 <Popover.Root>
@@ -2185,6 +2250,8 @@ test("ALLOWS a named Popover.Content (text, a call, a member, a prop with a defa
 <Popover.Content aria-label="Uses of {title}">g</Popover.Content>
 <Popover.Content aria-label={title ?? 'Info'}>h</Popover.Content>
 <Popover.Content aria-label={\`Uses of \${title}\`}>h2</Popover.Content>
+<Popover.Content aria-label={empty || 'Info'}>h3</Popover.Content>
+<Popover.Content aria-label={open && 'Info'}>h4</Popover.Content>
 <UI.Popover.Content aria-label="Pick">i</UI.Popover.Content>
 <UI.Button>j</UI.Button>
 <UI.Card.Content>j2</UI.Card.Content>
@@ -2196,6 +2263,85 @@ test("ALLOWS a named Popover.Content (text, a call, a member, a prop with a defa
     'src/lib/components/ui/Popover/Popover.stories.svelte',
     "<script lang=\"ts\">\n  import * as Popover from './index';\n</script>\n<Popover.Content>story</Popover.Content>\n"
   );
+
+  assert.deepEqual(summary(scan()), []);
+});
+
+test("CATCHES the Popover handed on: the ui barrel's namespace destructured, indexed or passed on, and a .ts/.js that imports or re-exports it", () => {
+  writeFixture(
+    'src/lib/components/Aliased.svelte',
+    `<script lang="ts">
+  import * as UI from '$lib/components/ui';
+  import { wrap } from './wrap';
+  const { Popover: Pop } = UI;
+  const Comp = UI['Popover'];
+  const Kit = wrap(UI);
+</script>
+<Pop.Content>a</Pop.Content>
+<Comp.Content>b</Comp.Content>
+`
+  );
+  writeFixture(
+    'src/lib/components/menus/index.ts',
+    `export * as Popover from '$lib/components/ui/Popover';
+export { default as Tip } from '$lib/components/ui/Popover/PopoverContent.svelte';
+import { Content } from '../ui/Popover/index.js';
+export * from '$lib/components/ui';
+export { Popover as P, Button } from '$lib/components/ui';
+export const load = () => import('$lib/components/ui');
+`
+  );
+  // ui/ is no exemption: only the ui barrel and ui/Popover/ may hand it on.
+  writeFixture('src/lib/components/ui/Menu/parts.ts', "export { Content as MenuPanel } from '../Popover';\n");
+
+  const result = scan();
+  // @menus:4-6: the ui barrel hands on its Popover too (review c6, G6-G-L4).
+  assert.deepEqual(result.violations.map((v) => `${v.file} ${v.rule}@${v.line}`).sort(), [
+    'src/lib/components/Aliased.svelte alias@4',
+    'src/lib/components/Aliased.svelte alias@5',
+    'src/lib/components/Aliased.svelte alias@6',
+    'src/lib/components/menus/index.ts alias@1',
+    'src/lib/components/menus/index.ts alias@2',
+    'src/lib/components/menus/index.ts alias@3',
+    'src/lib/components/menus/index.ts alias@4',
+    'src/lib/components/menus/index.ts alias@5',
+    'src/lib/components/menus/index.ts alias@6',
+    'src/lib/components/ui/Menu/parts.ts alias@1',
+  ]);
+  const at = (file, line) => result.violations.find((v) => v.file === file && v.line === line).detail;
+  assert.match(at('src/lib/components/Aliased.svelte', 4), /^'UI' is read as a value; use the Popover's parts as tags only/);
+  assert.match(at('src/lib/components/menus/index.ts', 1), /^a \.ts\/\.js file re-exports the Popover \('\$lib\/components\/ui\/Popover'\), .*popover-name can't follow/);
+  assert.match(at('src/lib/components/menus/index.ts', 3), /^a \.ts\/\.js file imports the Popover \('\.\.\/ui\/Popover\/index\.js'\)/);
+});
+
+test("ALLOWS what hands on no panel: the Popover's ctx.ts, type-only imports, a plain UI.Member, the ui barrel's other names, and the ui barrel itself", () => {
+  writeFixture(
+    'src/lib/components/tips/TipClose.svelte',
+    `<script lang="ts">
+  import { getCtx } from '$lib/components/ui/Popover/ctx';
+  import type { PopoverProps } from '$lib/components/ui/Popover';
+  import { type Content as Panel } from '$lib/components/ui/Popover';
+  import * as UI from '$lib/components/ui';
+  const ctx = getCtx();
+  const Btn = UI.Button;
+  let { side }: PopoverProps & { panel?: typeof Panel } = $props();
+</script>
+<UI.Button onclick={() => ctx.close()}>{side}</UI.Button>
+`
+  );
+  writeFixture(
+    'src/lib/tips.ts',
+    `import { getCtx } from '$lib/components/ui/Popover/ctx';
+import type { PopoverProps } from '$lib/components/ui/Popover';
+import { type Content } from '$lib/components/ui/Popover';
+import { Button, toast } from '$lib/components/ui';
+import '$lib/components/ui';
+export const tip = (p: PopoverProps, c: typeof Content) => [getCtx(), Button, toast, p, c];
+export type Load = typeof import('$lib/components/ui/Popover');
+`
+  );
+  writeFixture('src/lib/components/ui/index.ts', "export * as Popover from './Popover/index';\nexport { default as Button } from './Button.svelte';\n");
+  writeFixture('src/lib/components/ui/Popover/ctx.ts', "export * from './index';\n");
 
   assert.deepEqual(summary(scan()), []);
 });
