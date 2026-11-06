@@ -120,7 +120,7 @@ export const ALLOWLIST = [
     file: 'src/lib/page-builder/kit/blocks/gallery/GalleryLightbox.svelte',
     rule: 'own-dialog',
     expect: 2,
-    reason: "Permanent: a full-screen lightbox, outside the Dialog by the owner's decision",
+    reason: 'Permanent: a full-screen lightbox, a native modal that is correct as built (the model the immersive player follows)',
   },
   {
     file: 'src/lib/components/AudioPlayer/ImmersiveShaderPlayer.svelte',
