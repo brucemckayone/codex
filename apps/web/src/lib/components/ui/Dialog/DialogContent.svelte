@@ -56,7 +56,9 @@
   @prop {CssLength} [maxHeight] - the panel's max-height as a CSS length, over
     the 85dvh (70dvh at top and bottom) default. It never runs past the room
     its placement leaves, the screen less the wrapper's gutter, so `48rem`
-    on a 600px-tall screen still keeps the Footer in view.
+    on a 600px-tall screen still keeps the Footer in view. One that can't
+    resolve (an undefined `var()`, or a token set on a page container,
+    which the portal under <body> doesn't inherit) keeps the default.
   @prop {'modal' | 'lg'} [radius='modal'] - dialog only: the corner,
     `--radius-modal` or the smaller `--radius-lg`.
   @prop {'elevated' | 'base' | 'glass'} [surface] - the panel's fill.
@@ -277,15 +279,20 @@
     box-shadow: var(--shadow-xl);
     border: var(--border-width) var(--border-style) var(--color-border);
     width: 100%;
-    max-height: 85dvh;
+    max-height: var(--dialog-default-max);
     overflow: hidden;
     display: flex;
     flex-direction: column;
     animation: content-in var(--duration-slow) var(--ease-out) both;
-    /* The room the wrapper leaves the panel, which a `maxHeight` never
-       runs past: the screen less the wrapper's gutter, per placement. */
+    /* Per placement: the default cap, and the room the wrapper leaves the
+       panel (the screen less the wrapper's gutter), which a `maxHeight`
+       never runs past. A `maxHeight` that can't resolve makes
+       --dialog-max-height invalid, so the fallback takes the default cap:
+       without it --dialog-max would be invalid too, and the inline
+       max-height would compute to none. */
+    --dialog-default-max: 85dvh;
     --dialog-room: calc(100dvh - 2 * var(--space-4));
-    --dialog-max: min(var(--dialog-max-height), var(--dialog-room));
+    --dialog-max: min(var(--dialog-max-height, var(--dialog-default-max)), var(--dialog-room));
   }
 
   /* A clipping panel with no Body (a ConfirmDialog: Header and Footer only)
@@ -311,7 +318,7 @@
 
   .dialog-content[data-placement='top'],
   .dialog-content[data-placement='bottom'] {
-    max-height: 70dvh;
+    --dialog-default-max: 70dvh;
   }
 
   .dialog-content[data-placement='top'] {
@@ -351,7 +358,7 @@
     bottom: 0;
     left: auto;
     height: 100%;
-    max-height: 100dvh;
+    --dialog-default-max: 100dvh;
     --dialog-room: 100dvh;
     gap: var(--drawer-gap);
     padding: var(--drawer-pad-block) var(--drawer-pad-inline);
@@ -385,7 +392,7 @@
     width: calc(100% - var(--space-6));
     max-width: var(--container-drawer);
     height: auto;
-    max-height: calc(100dvh - var(--space-6));
+    --dialog-default-max: calc(100dvh - var(--space-6));
     --dialog-room: calc(100dvh - var(--space-6));
     gap: normal;
     padding: 0;
@@ -404,7 +411,7 @@
       left: 0;
       max-width: none;
       height: auto;
-      max-height: 90dvh;
+      --dialog-default-max: 90dvh;
       --drawer-pad-block: var(--space-5);
       --drawer-pad-inline: var(--space-4);
       border-left: none;
@@ -425,7 +432,7 @@
       right: var(--space-2);
       bottom: var(--space-2);
       width: auto;
-      max-height: 85dvh;
+      --dialog-default-max: 85dvh;
       --dialog-room: calc(100dvh - var(--space-2));
       padding: 0;
       border: var(--border-width) var(--border-style) var(--material-glass-border);
