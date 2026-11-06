@@ -640,7 +640,33 @@ describe('DialogContent', () => {
     // A plain length: jsdom's CSSOM drops min(). The browser proof covers it.
     const content = document.querySelector<HTMLElement>('.dialog-content');
     expect(content?.style.maxWidth).toBe('35rem');
-    expect(content?.style.maxHeight).toBe('60vh');
+    expect(content?.style.getPropertyValue('--dialog-max-height')).toBe('60vh');
+  });
+
+  // A rem value taller than the screen put the Footer out of reach: the
+  // height goes through `--dialog-max`, which the CSS clamps to the room
+  // the placement leaves (the browser proof measures it).
+  test('maxHeight reaches the panel clamped, never as written', () => {
+    component = mount(DialogHarness, {
+      target: document.body,
+      props: { open: true, maxHeight: '48rem' },
+    });
+    flushSync();
+
+    const content = document.querySelector<HTMLElement>('.dialog-content');
+    expect(content?.style.maxHeight).toBe('var(--dialog-max)');
+  });
+
+  test('without maxHeight the panel keeps its default cap', () => {
+    component = mount(DialogHarness, {
+      target: document.body,
+      props: { open: true },
+    });
+    flushSync();
+
+    const content = document.querySelector<HTMLElement>('.dialog-content');
+    expect(content?.style.maxHeight).toBe('');
+    expect(content?.style.getPropertyValue('--dialog-max-height')).toBe('');
   });
 
   // The motion transitions return no config for every other panel, and

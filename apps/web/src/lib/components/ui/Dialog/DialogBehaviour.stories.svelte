@@ -8,8 +8,9 @@
   /**
    * What the shared Dialog does around its panel (Codex-vlphc review c1):
    * the page's scroll lock while dialogs stack, where focus goes back to at
-   * the close, and a panel with no Body. Driven in real Chromium and WebKit.
-   * No autodocs: a docs page would open every dialog at once.
+   * the close, a panel with no Body, and a `maxHeight` taller than the
+   * screen. Driven in real Chromium and WebKit. No autodocs: a docs page
+   * would open every dialog at once.
    */
   const { Story } = defineMeta({
     title: 'UI/Dialog/Behaviour',
@@ -23,6 +24,8 @@
     (_, i) =>
       `Point ${i + 1}: the price change reaches every subscriber at their next renewal, and nobody is charged twice for the same period.`
   ).join(' ');
+  const tallOpen = writable<'center' | 'top' | 'bottom' | null>(null);
+  const rows = Array.from({ length: 30 }, (_, i) => i + 1);
   const tierOpen = writable(false);
   const tierName = writable('');
   const tiers = ['Basic', 'Pro', 'Team'];
@@ -74,6 +77,31 @@
   />
 </Story>
 
+<!-- maxHeight="48rem" is 768px: taller than a 600px screen. The panel stops at
+     the room its placement leaves, so Body scrolls and Done stays in view. -->
+{#snippet tallPanel(placement: 'center' | 'top' | 'bottom')}
+  <Button onclick={() => ($tallOpen = placement)}>Open 48rem {placement}</Button>
+  <Dialog.Root open={$tallOpen === placement} onOpenChange={(open) => !open && tallOpen.set(null)}>
+    <Dialog.Content maxHeight="48rem" {placement}>
+      <Dialog.Header>
+        <Dialog.Title>A tall panel</Dialog.Title>
+      </Dialog.Header>
+      <Dialog.Body>
+        {#each rows as row (row)}
+          <p class="tall-row">Row {row} of a list longer than the screen.</p>
+        {/each}
+      </Dialog.Body>
+      <Dialog.Footer>
+        <Button data-testid="scroll-target" onclick={() => tallOpen.set(null)}>Done</Button>
+      </Dialog.Footer>
+    </Dialog.Content>
+  </Dialog.Root>
+{/snippet}
+
+<Story name="Max Height">{@render tallPanel('center')}</Story>
+<Story name="Max Height Top">{@render tallPanel('top')}</Story>
+<Story name="Max Height Bottom">{@render tallPanel('bottom')}</Story>
+
 <!-- The studio tier dialog's wiring: one dialog, opened from several buttons,
      no closeFocus; Escape or Cancel must hand focus back to the one pressed. -->
 <Story name="Tier Shape">
@@ -111,6 +139,11 @@
     display: flex;
     flex-wrap: wrap;
     gap: var(--space-2);
+  }
+
+  .tall-row {
+    margin: 0;
+    color: var(--color-text);
   }
 
   .tier-field {

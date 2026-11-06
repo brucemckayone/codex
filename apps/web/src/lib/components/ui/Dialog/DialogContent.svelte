@@ -51,7 +51,9 @@
     gutter (`--space-2` at the bottom) still applies, so `40rem` is
     min(40rem, 100vw − 2rem). Use tokens where one exists.
   @prop {string} [maxHeight] - the panel's max-height as a CSS length, over
-    the 85vh (70vh at top and bottom) default.
+    the 85vh (70vh at top and bottom) default. It never runs past the room
+    its placement leaves, the screen less the wrapper's gutter, so `48rem`
+    on a 600px-tall screen still keeps the Footer in view.
   @prop {'modal' | 'lg'} [radius='modal'] - dialog only: the corner,
     `--radius-modal` or the smaller `--radius-lg`.
   @prop {'elevated' | 'base' | 'glass'} [surface] - the panel's fill.
@@ -188,7 +190,8 @@
         data-surface={fill}
         data-motion={dialogValue(motion, 'auto')}
         style:max-width={maxWidth}
-        style:max-height={maxHeight}
+        style:--dialog-max-height={maxHeight}
+        style:max-height={maxHeight ? 'var(--dialog-max)' : undefined}
         transition:panelMotion
         {...restProps}
       >
@@ -269,6 +272,10 @@
     display: flex;
     flex-direction: column;
     animation: content-in var(--duration-slow) var(--ease-out) both;
+    /* The room the wrapper leaves the panel, which a `maxHeight` never
+       runs past: the screen less the wrapper's gutter, per placement. */
+    --dialog-room: calc(100dvh - 2 * var(--space-4));
+    --dialog-max: min(var(--dialog-max-height), var(--dialog-room));
   }
 
   /* A clipping panel with no Body (a ConfirmDialog: Header and Footer only)
@@ -297,9 +304,14 @@
     max-height: 70vh;
   }
 
+  .dialog-content[data-placement='top'] {
+    --dialog-room: calc(100dvh - 15vh - var(--space-4));
+  }
+
   /* A sheet is full width (0,2,0, after data-size). */
   .dialog-content[data-placement='bottom'] {
     max-width: none;
+    --dialog-room: calc(100dvh - 2 * var(--space-2));
   }
 
   .dialog-content[data-radius='lg'] {
@@ -330,6 +342,7 @@
     left: auto;
     height: 100%;
     max-height: 100vh;
+    --dialog-room: 100dvh;
     gap: var(--drawer-gap);
     padding: var(--drawer-pad-block) var(--drawer-pad-inline);
     overflow-x: hidden;
@@ -363,6 +376,7 @@
     max-width: var(--container-drawer);
     height: auto;
     max-height: calc(100dvh - var(--space-6));
+    --dialog-room: calc(100dvh - var(--space-6));
     gap: normal;
     padding: 0;
     overflow: hidden;
@@ -402,6 +416,7 @@
       bottom: var(--space-2);
       width: auto;
       max-height: 85dvh;
+      --dialog-room: calc(100dvh - var(--space-2));
       padding: 0;
       border: var(--border-width) var(--border-style) var(--material-glass-border);
       border-radius: var(--radius-xl);
