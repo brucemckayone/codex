@@ -340,6 +340,28 @@ describe('Dialog focus at the open', () => {
     );
   });
 
+  test('a page id on Content changes nothing about the reopen', async () => {
+    const props = $state({
+      open: true,
+      motion: 'drop' as const,
+      contentProps: { id: 'page-panel' },
+    });
+    mounted.push(mount(DialogHarness, { target: document.body, props }));
+    flushSync();
+    await settle();
+    props.open = false;
+    flushSync();
+    expect(document.querySelector('.dialog-content')?.id).toBe('page-panel');
+
+    props.open = true;
+    flushSync();
+    await settle();
+
+    expect(document.activeElement).toBe(
+      document.querySelector('[data-testid="first-focusable"]')
+    );
+  });
+
   // focus-trap focused a ConfirmDialog's Cancel without preventScroll, and
   // a panel that scrolls as a whole opened scrolled down to its Footer, its
   // title out of sight (review G4-U3). jsdom lays nothing out, so the
@@ -411,8 +433,8 @@ describe('Dialog caret at the close', () => {
     document.body.innerHTML = '';
   });
 
-  function openDialog() {
-    const props = $state({ open: true, withField: true });
+  function openDialog(contentProps: Record<string, unknown> = {}) {
+    const props = $state({ open: true, withField: true, contentProps });
     mounted.push(mount(DialogHarness, { target: document.body, props }));
     flushSync();
     return props;
@@ -424,6 +446,26 @@ describe('Dialog caret at the close', () => {
   // the panel does not contain: a detached one stands in for it.
   test('a field focused in the panel loses its caret as the dialog closes', () => {
     const props = openDialog();
+    document.querySelector<HTMLInputElement>('[data-testid="field"]')?.focus();
+    const caret = {
+      anchorNode: document.createElement('div'),
+      removeAllRanges: vi.fn(),
+    };
+    vi.spyOn(window, 'getSelection').mockReturnValue(
+      caret as unknown as Selection
+    );
+
+    props.open = false;
+    flushSync();
+
+    expect(caret.removeAllRanges).toHaveBeenCalled();
+  });
+
+  // A page's `id` on Content replaces Melt's, so a lookup by Melt's id
+  // found no panel (review G4-L9). Dialog.Root holds the node instead.
+  test('a page id on Content still finds the panel at the close', () => {
+    const props = openDialog({ id: 'page-panel' });
+    expect(document.querySelector('.dialog-content')?.id).toBe('page-panel');
     document.querySelector<HTMLInputElement>('[data-testid="field"]')?.focus();
     const caret = {
       anchorNode: document.createElement('div'),

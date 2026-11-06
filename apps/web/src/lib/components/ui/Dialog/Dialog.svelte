@@ -176,24 +176,26 @@
         return defaultEl ?? [opener, openerMenu].find((el) => el?.isConnected) ?? null;
       return typeof target === 'function' ? target(defaultEl) : target;
     },
-    // Where focus goes as the panel opens. Melt hands over the panel only
-    // when it is in the DOM already: a reopen during the close's outro.
-    // Melt then focused the panel itself, so a palette's search box or a
-    // sheet's first link never had focus (Codex-vlphc review G4-U1); its
-    // first tabbable gets it now. On a first open Melt hands over null and
-    // focus-trap's own first focus stands, except in a panel that scrolls as
-    // a whole: focus-trap focuses a ConfirmDialog's Cancel without
-    // preventScroll, and the panel opened scrolled down to its Footer, its
-    // title out of sight (G4-U3). focus-trap leaves alone an element that
-    // already has focus, whichever of the two runs first.
-    openFocus: (defaultEl) => {
-      const node = defaultEl ?? panel();
-      if (node && scrollsWhole(node)) {
+    // Where focus goes as the panel opens. A reopen during the close's
+    // outro finds the panel still there, and Melt focused the panel itself,
+    // so a palette's search box or a sheet's first link never had focus
+    // (Codex-vlphc review G4-U1); its first tabbable gets it now. On a first
+    // open focus-trap's own first focus stands, except in a panel that
+    // scrolls as a whole: focus-trap focuses a ConfirmDialog's Cancel
+    // without preventScroll, and the panel opened scrolled down to its
+    // Footer, its title out of sight (G4-U3). focus-trap leaves alone an
+    // element that already has focus, whichever of the two runs first.
+    // Melt's own `defaultEl` is not read: it finds the panel by Melt's id,
+    // which a page's `id` on Content replaces (G4-L9).
+    openFocus: () => {
+      const node = panel();
+      if (!node) return null;
+      if (scrollsWhole(node)) {
         firstTabbable(node)?.focus({ preventScroll: true });
         node.scrollTop = 0;
         return null;
       }
-      return defaultEl ? (firstTabbable(defaultEl) ?? defaultEl) : null;
+      return reopened ? (firstTabbable(node) ?? node) : null;
     },
     // The page's scroll lock is ours, below, not Melt's: under forceVisible
     // Melt let go only when the panel left the DOM, so a dialog reopened
@@ -210,10 +212,17 @@
     states: { open: meltOpen }
   } = dialog;
 
-  /** The panel, while it is in the DOM. */
+  /**
+   * The panel, while it is in the DOM. Dialog.Content registers it here:
+   * found by Melt's id instead, a page's `id` on Content replaced that id
+   * and no panel was found (Codex-vlphc review G4-L9).
+   */
+  const panelNode: { current: HTMLElement | null } = { current: null };
   function panel(): HTMLElement | null {
-    return document.getElementById(dialog.ids.content.get());
+    return panelNode.current?.isConnected ? panelNode.current : null;
   }
+  /** This open resumed a panel that was still closing. */
+  let reopened = false;
 
   /** Where focus goes back to at the close, when no `closeFocus` says. */
   let opener: HTMLElement | null = null;
@@ -252,6 +261,7 @@
   // where the open came from: Melt moves it into the panel after a tick.
   $effect(() => {
     if (open) {
+      reopened = panel() !== null;
       opener = currentOpener();
       openerMenu = opener && menuTrigger(opener);
     }
@@ -272,6 +282,7 @@
   });
 
   setContext('DIALOG', dialog);
+  setContext('DIALOG_PANEL', panelNode);
   // DialogContent disables its close button with it.
   setContext('DIALOG_DISMISSIBLE', {
     get current() {

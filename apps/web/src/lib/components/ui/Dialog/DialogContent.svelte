@@ -130,6 +130,16 @@
   } = getContext<ReturnType<typeof createDialog>>('DIALOG');
   /** Dialog.Root's `dismissible`: false while a request it started runs. */
   const dismissible = getContext<{ current: boolean } | undefined>('DIALOG_DISMISSIBLE');
+  /** Where Dialog.Root finds the panel: by node, since a page's `id` replaces Melt's. */
+  const panelNode = getContext<{ current: HTMLElement | null } | undefined>('DIALOG_PANEL');
+  function registerPanel(node: HTMLElement) {
+    if (panelNode) panelNode.current = node;
+    return {
+      destroy() {
+        if (panelNode?.current === node) panelNode.current = null;
+      },
+    };
+  }
   const drawer = $derived(variant === 'drawer');
   /** A drawer-only prop as a data attribute: present, or absent. */
   const drawerFlag = (on: boolean) => (drawer && on ? '' : undefined);
@@ -191,6 +201,7 @@
     <div class="dialog-content-wrapper" data-placement={dialogValue(placement, 'center')}>
       <div
         use:melt={$content}
+        use:registerPanel
         {...restProps}
         class={['dialog-content', className]}
         data-size={size}
