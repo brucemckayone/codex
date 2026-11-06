@@ -1047,8 +1047,10 @@
                 // by then (its showModal() threw, Escape came first, or this
                 // whole player left the page, as a Back does) takes it back
                 // out, or the page stays full screen with no player.
-                // iPhone Safari has no Fullscreen API for a page: there the
-                // player opens in the window, and nothing here may throw.
+                // Where the page has no unprefixed Fullscreen API (iPhone
+                // Safari; Safari 15.4–16.3 on macOS and iPadOS, which has
+                // showModal but only webkitRequestFullscreen) the player
+                // opens in the window, and nothing here may throw.
                 document.documentElement.requestFullscreen?.().then(
                   () => {
                     if ((!showImmersive || destroyed) && document.fullscreenElement) {
