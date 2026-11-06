@@ -211,6 +211,31 @@ describe('DropdownMenu', () => {
       await settle();
     });
 
+    // A press that leaves the menu open: in the app, a menu reopened during
+    // its closing animation keeps its items, pressed one and all. A move
+    // onto the item shows nothing covers it, and its leave counts again.
+    test('a pressed item still open under the pointer gives focus back to the menu', async () => {
+      component = mount(DropdownMenuDialogHarness, {
+        target: document.body,
+        props: { closeOnItemClick: false },
+      });
+      flushSync();
+      const item = document.querySelector<HTMLElement>('[data-testid="plain"]');
+      item?.click();
+      await settle();
+
+      item?.dispatchEvent(mouse('pointermove'));
+      item?.dispatchEvent(mouse('pointerleave'));
+      expect(document.activeElement?.getAttribute('role')).toBe('menu');
+
+      // Closed before the unmount, as above.
+      document.activeElement?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })
+      );
+      await settle();
+      expect(trigger()?.getAttribute('aria-expanded')).toBe('false');
+    });
+
     test('an item that opens nothing gives focus back to the trigger', async () => {
       pressItem('plain');
       await settle();

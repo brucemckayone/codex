@@ -27,7 +27,10 @@
 	 * (Codex-vlphc review c5, found with G5-C-L1). Here focus moves only
 	 * while the menu is open, and tabindex only between the menu's own
 	 * elements. A pressed item's leave moves nothing: it is what covered
-	 * the item that the pointer entered.
+	 * the item that the pointer entered. A move onto the item proves
+	 * nothing covers it, and ends that: a press that left the menu open
+	 * (one reopened during its closing animation keeps its items) leaves
+	 * no item that never gives focus back to the menu.
 	 */
 	function rove(node: HTMLElement) {
 		let pressed = false;
@@ -46,7 +49,9 @@
 		};
 		// Onto an item: the item. Off it: the menu, so no item stays lit.
 		const onMove = (event: Event) => {
-			if (fromMouse(event)) moveTo(node);
+			if (!fromMouse(event)) return;
+			pressed = false;
+			moveTo(node);
 		};
 		const onLeave = (event: Event) => {
 			if (fromMouse(event) && !pressed) moveTo(node.closest<HTMLElement>('[role="menu"]'));

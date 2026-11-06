@@ -8,11 +8,12 @@
   // A menu whose first item opens a dialog at once, as TopBar's Unpublish
   // opens its confirm; the second opens nothing. The dialog has no Body,
   // so its panel scrolls as a whole, as a ConfirmDialog's does.
+  const { closeOnItemClick = true }: { closeOnItemClick?: boolean } = $props();
   let menuOpen = $state(true);
   let dialogOpen = $state(false);
 </script>
 
-<DropdownMenu bind:open={menuOpen} forceVisible={false}>
+<DropdownMenu bind:open={menuOpen} {closeOnItemClick} forceVisible={false}>
   <DropdownMenuTrigger data-testid="trigger">Actions</DropdownMenuTrigger>
   <DropdownMenuContent>
     <DropdownMenuItem data-testid="opens-dialog" onclick={() => (dialogOpen = true)}>
