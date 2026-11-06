@@ -74,6 +74,9 @@ describe('DropdownMenu', () => {
     expect(content?.getAttribute('role')).toBe('menu');
   });
 
+  // A guard against `preventScroll = true`, Melt's default, coming back.
+  // It cannot tell `false` from unset: Melt's effect reads an undefined
+  // preventScroll as falsy too (review G4-N4).
   test('a menu never locks the page', () => {
     component = mount(DropdownMenuHarness, {
       target: document.body,
@@ -89,10 +92,30 @@ describe('DropdownMenu', () => {
     expect(document.body.style.overflow).toBe('');
   });
 
+  test('an item press closes the menu', async () => {
+    // closeOnItemClick at Melt's default. Left unset, it was set to
+    // undefined over that default, and no item press closed the menu: an
+    // item that opens a dialog left the menu open under it.
+    const onOpenChange = vi.fn();
+    component = mount(DropdownMenuHarness, {
+      target: document.body,
+      props: { open: true, onOpenChange },
+    });
+    flushSync();
+
+    document.querySelector<HTMLElement>('[data-testid="item-1"]')?.click();
+
+    // Melt closes a millisecond later, so a form can submit first. Read
+    // the trigger, not the panel: whether the panel's outro ends under the
+    // stubbed animate() depends on which tests ran before this one.
+    const trigger = document.querySelector('[data-testid="dropdown-trigger"]');
+    await vi.waitFor(() =>
+      expect(trigger?.getAttribute('aria-expanded')).toBe('false')
+    );
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
   test('accepts an onOpenChange callback without throwing', () => {
-    // Full close-on-item-click behaviour needs Melt UI pointer event handling
-    // which JSDOM does not fully simulate. We verify callback wiring here and
-    // cover the end-to-end close flow in E2E tests.
     const onOpenChange = vi.fn();
     component = mount(DropdownMenuHarness, {
       target: document.body,

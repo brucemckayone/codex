@@ -19,23 +19,24 @@
       pressed = event.target instanceof Element ? event.target : null;
       pressedAt = performance.now();
     };
-    document.addEventListener('pointerdown', press, true);
     // A long press opens on its release: a real click (detail > 0, which a
     // key's synthetic click is not) counts from there.
-    document.addEventListener(
-      'click',
-      (event) => {
-        if (event.detail > 0) press(event);
-      },
-      true
-    );
-    document.addEventListener(
-      'keydown',
-      () => {
-        pressed = null;
-      },
-      true
-    );
+    const click = (event: MouseEvent) => {
+      if (event.detail > 0) press(event);
+    };
+    const key = () => {
+      pressed = null;
+    };
+    document.addEventListener('pointerdown', press, true);
+    document.addEventListener('click', click, true);
+    document.addEventListener('keydown', key, true);
+    // In dev a hot update runs this module again: its listeners go first,
+    // or every edit to this file added three more.
+    import.meta.hot?.dispose(() => {
+      document.removeEventListener('pointerdown', press, true);
+      document.removeEventListener('click', click, true);
+      document.removeEventListener('keydown', key, true);
+    });
   }
 
   const FOCUSABLE =
@@ -48,6 +49,38 @@
     if (target instanceof HTMLElement && target.isConnected) return target;
     const active = document.activeElement;
     return active instanceof HTMLElement && active !== document.body ? active : null;
+  }
+
+  /** The panel's first element that Tab reaches, in document order. */
+  function firstTabbable(panel: HTMLElement): HTMLElement | null {
+    for (const el of panel.querySelectorAll<HTMLElement>(FOCUSABLE)) {
+      if (el.tabIndex >= 0 && (el.checkVisibility?.() ?? true)) return el;
+    }
+    return null;
+  }
+
+  /**
+   * A clipping panel (a dialog, or a floating drawer) with no Body scrolls
+   * as a whole: DialogContent's rule for a ConfirmDialog's Header and
+   * Footer, read here from the same parts.
+   */
+  function scrollsWhole(panel: HTMLElement): boolean {
+    const clips = panel.dataset.variant === 'dialog' || panel.hasAttribute('data-floating');
+    return (
+      clips && !panel.querySelector(':scope > .dialog-body, :scope > .dialog-form > .dialog-body')
+    );
+  }
+
+  /**
+   * The button that opened the menu `el` sits in. A menu closes as its item
+   * is chosen and takes the item with it, so a dialog that item opened goes
+   * back to this instead.
+   */
+  function menuTrigger(el: HTMLElement): HTMLElement | null {
+    const menu = el.closest('[role="menu"]');
+    if (!menu?.id) return null;
+    const trigger = document.querySelector(`[aria-controls="${CSS.escape(menu.id)}"]`);
+    return trigger instanceof HTMLElement ? trigger : null;
   }
 </script>
 
@@ -64,7 +97,8 @@
      *
      * The default is the element that opened it: the focusable element a
      * press landed on (a click or a tap in WebKit focuses no button), or,
-     * when a key opened it, what had focus. A dialog opened from the
+     * when a key opened it, what had focus. A menu item that has closed with
+     * its menu hands over to the menu's button. A dialog opened from the
      * keyboard with nothing focused, or whose opener has left the page,
      * leaves focus where Melt does. Melt's own `activeTrigger` would win, but
      * nothing here renders Melt's trigger, so every dialog is opened from
@@ -135,11 +169,38 @@
     //
     // With no prop, Melt's own default comes first: `defaultEl` is its
     // `activeTrigger`, which it would focus itself. Never undefined over it.
-    // Then the opener recorded as the dialog opened, while it is on the page.
+    // Then the opener recorded as the dialog opened, while it is on the page,
+    // else the button of the menu it was an item in. Both are let go once
+    // read: a node held here kept a page left behind alive until the next
+    // open (Codex-vlphc review G4-N5).
     closeFocus: (defaultEl) => {
       const target = closeFocus;
-      if (target === undefined) return defaultEl ?? (opener?.isConnected ? opener : null);
+      const recorded = [opener, openerMenu].find((el) => el?.isConnected) ?? null;
+      opener = null;
+      openerMenu = null;
+      if (target === undefined) return defaultEl ?? recorded;
       return typeof target === 'function' ? target(defaultEl) : target;
+    },
+    // Where focus goes as the panel opens. A reopen during the close's
+    // outro finds the panel still there, and Melt focused the panel itself,
+    // so a palette's search box or a sheet's first link never had focus
+    // (Codex-vlphc review G4-U1); its first tabbable gets it now. On a first
+    // open focus-trap's own first focus stands, except in a panel that
+    // scrolls as a whole: focus-trap focuses a ConfirmDialog's Cancel
+    // without preventScroll, and the panel opened scrolled down to its
+    // Footer, its title out of sight (G4-U3). focus-trap leaves alone an
+    // element that already has focus, whichever of the two runs first.
+    // Melt's own `defaultEl` is not read: it finds the panel by Melt's id,
+    // which a page's `id` on Content replaces (G4-L9).
+    openFocus: () => {
+      const node = panel();
+      if (!node) return null;
+      if (scrollsWhole(node)) {
+        firstTabbable(node)?.focus({ preventScroll: true });
+        node.scrollTop = 0;
+        return null;
+      }
+      return reopened ? (firstTabbable(node) ?? node) : null;
     },
     // The page's scroll lock is ours, below, not Melt's: under forceVisible
     // Melt let go only when the panel left the DOM, so a dialog reopened
@@ -156,8 +217,22 @@
     states: { open: meltOpen }
   } = dialog;
 
+  /**
+   * The panel, while it is in the DOM. Dialog.Content registers it here:
+   * found by Melt's id instead, a page's `id` on Content replaced that id
+   * and no panel was found (Codex-vlphc review G4-L9).
+   */
+  const panelNode: { current: HTMLElement | null } = { current: null };
+  function panel(): HTMLElement | null {
+    return panelNode.current?.isConnected ? panelNode.current : null;
+  }
+  /** This open resumed a panel that was still closing. */
+  let reopened = false;
+
   /** Where focus goes back to at the close, when no `closeFocus` says. */
   let opener: HTMLElement | null = null;
+  /** The opener's menu button, for when the menu has closed and taken it. */
+  let openerMenu: HTMLElement | null = null;
 
   // Before the open below: Melt reads the role only as the panel's open
   // state changes, so a role set after an open waits for the next one.
@@ -174,23 +249,27 @@
    * any effect runs. A selection on the page behind is left alone.
    */
   function dropCaret() {
-    const panel = document.getElementById(dialog.ids.content.get());
+    const node = panel();
     const focused = document.activeElement;
     const selection = window.getSelection();
-    if (!panel || !selection || !panel.contains(focused)) return;
+    if (!node || !selection || !node.contains(focused)) return;
     // A field's caret sits in the field's own inner tree, not among the
     // panel's nodes, so the focused field names it.
     const field =
       focused instanceof HTMLInputElement ||
       focused instanceof HTMLTextAreaElement ||
       (focused instanceof HTMLElement && focused.isContentEditable);
-    if (field || panel.contains(selection.anchorNode)) selection.removeAllRanges();
+    if (field || node.contains(selection.anchorNode)) selection.removeAllRanges();
   }
 
   // Sync prop to melt state. The opener is read first, while focus is still
   // where the open came from: Melt moves it into the panel after a tick.
   $effect(() => {
-    if (open) opener = currentOpener();
+    if (open) {
+      reopened = panel() !== null;
+      opener = currentOpener();
+      openerMenu = opener && menuTrigger(opener);
+    }
     meltOpen.set(open);
   });
 
@@ -208,6 +287,7 @@
   });
 
   setContext('DIALOG', dialog);
+  setContext('DIALOG_PANEL', panelNode);
   // DialogContent disables its close button with it.
   setContext('DIALOG_DISMISSIBLE', {
     get current() {

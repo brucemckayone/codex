@@ -572,6 +572,7 @@ describe('AudioPlayer — immersive mode', () => {
   const realShowModal = proto.showModal;
   const realClose = proto.close;
   const realFullscreen = document.documentElement.requestFullscreen;
+  const realExitFullscreen = document.exitFullscreen;
 
   beforeEach(() => {
     // jsdom has neither a modal <dialog> nor the Fullscreen API.
@@ -588,6 +589,128 @@ describe('AudioPlayer — immersive mode', () => {
     proto.showModal = realShowModal;
     proto.close = realClose;
     document.documentElement.requestFullscreen = realFullscreen;
+    document.exitFullscreen = realExitFullscreen;
+    Reflect.deleteProperty(document, 'fullscreenElement');
+  });
+
+  /**
+   * Fullscreen as a browser grants it: later, once the press's request
+   * resolves. `enter()` grants it; `exit` is the page's way back out.
+   */
+  function fakeFullscreen() {
+    let fullscreen: Element | null = null;
+    let enter = () => {};
+    Object.defineProperty(document, 'fullscreenElement', {
+      configurable: true,
+      get: () => fullscreen,
+    });
+    const exit = vi.fn(() => {
+      fullscreen = null;
+      return Promise.resolve();
+    });
+    document.exitFullscreen = exit;
+    document.documentElement.requestFullscreen = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          enter = () => {
+            fullscreen = document.documentElement;
+            resolve();
+          };
+        })
+    );
+    return { enter: () => enter(), exit };
+  }
+
+  const immersiveButton = () => {
+    const button = document.querySelector<HTMLButtonElement>(
+      'button[aria-label="Enter immersive mode"]'
+    );
+    if (!button) throw new Error('no immersive button');
+    return button;
+  };
+
+  // iPhone Safari has no Fullscreen API for a page.
+  test('opens where there is no full screen, and the press throws nothing', async () => {
+    Reflect.deleteProperty(document.documentElement, 'requestFullscreen');
+    expect(document.documentElement.requestFullscreen).toBeUndefined();
+    const { component } = await mountPlayer();
+    const thrown: unknown[] = [];
+    const onError = (event: ErrorEvent) => {
+      thrown.push(event.error);
+      event.preventDefault();
+    };
+    window.addEventListener('error', onError);
+
+    immersiveButton().click();
+    flushSync();
+    window.removeEventListener('error', onError);
+
+    expect(thrown).toEqual([]);
+    expect(document.querySelector('dialog.immersive[open]')).not.toBeNull();
+    unmount(component);
+  });
+
+  // A browser may refuse full screen: the player opens all the same.
+  test('opens when full screen is refused', async () => {
+    document.documentElement.requestFullscreen = vi.fn(() =>
+      Promise.reject(new TypeError('Permissions check failed'))
+    );
+    const { component } = await mountPlayer();
+
+    immersiveButton().click();
+    flushSync();
+    await Promise.resolve();
+
+    expect(document.querySelector('dialog.immersive[open]')).not.toBeNull();
+    unmount(component);
+  });
+
+  test('a player that failed to open takes the page back out of full screen', async () => {
+    proto.showModal = () => {
+      throw new DOMException('The dialog is already open', 'InvalidStateError');
+    };
+    const fullscreen = fakeFullscreen();
+    const { component } = await mountPlayer();
+
+    immersiveButton().click();
+    flushSync();
+    expect(document.querySelector('dialog.immersive')).toBeNull();
+    fullscreen.enter();
+
+    await vi.waitFor(() => expect(fullscreen.exit).toHaveBeenCalledTimes(1));
+    expect(document.fullscreenElement).toBeNull();
+    unmount(component);
+  });
+
+  // A same-document Back takes the whole AudioPlayer away mid-request.
+  test('a player gone from the page by the grant takes it back out of full screen', async () => {
+    const fullscreen = fakeFullscreen();
+    const { component } = await mountPlayer();
+
+    immersiveButton().click();
+    flushSync();
+    expect(document.querySelector('dialog.immersive[open]')).not.toBeNull();
+    unmount(component);
+    fullscreen.enter();
+
+    await vi.waitFor(() => expect(fullscreen.exit).toHaveBeenCalledTimes(1));
+    expect(document.fullscreenElement).toBeNull();
+  });
+
+  test('an open player keeps the page full screen', async () => {
+    const fullscreen = fakeFullscreen();
+    const { component } = await mountPlayer();
+
+    immersiveButton().click();
+    flushSync();
+    fullscreen.enter();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(document.querySelector('dialog.immersive[open]')).not.toBeNull();
+    expect(fullscreen.exit).not.toHaveBeenCalled();
+    expect(document.fullscreenElement).toBe(document.documentElement);
+    unmount(component);
   });
 
   test('gives focus back to its button, which the press never focused', async () => {

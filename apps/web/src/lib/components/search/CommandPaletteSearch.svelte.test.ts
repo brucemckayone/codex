@@ -46,6 +46,7 @@ vi.mock('svelte/motion', async (importOriginal) => ({
   },
 }));
 
+import * as m from '$paraglide/messages';
 import CommandPaletteSearch from './CommandPaletteSearch.svelte';
 
 type Results = {
@@ -443,6 +444,34 @@ describe('keys the palette answers', () => {
     for (let i = 0; i < 3; i++) cmdK(true);
 
     expect(open).toBe(true);
+  });
+
+  // Focus stays in the box: Tab past it reaches only real buttons, never a
+  // row, so Enter opens the highlighted row and nothing else.
+  test('its rows are not Tab stops, and its clear button has a name', async () => {
+    localStorage.setItem(RECENT_KEY, JSON.stringify(['yoga', 'pilates']));
+    fetchMock.mockResolvedValueOnce(
+      answer({
+        content: [item('a')],
+        creators: [
+          { name: 'Ana', username: 'ana', organizationSlug: 'studio-alpha' },
+        ],
+      })
+    );
+    openPalette();
+    const rows = () => [...document.querySelectorAll('[role="option"]')];
+    expect(rows()).toHaveLength(2);
+    const recent = rows();
+
+    await search('yoga');
+
+    expect(rows()).toHaveLength(2);
+    for (const row of [...recent, ...rows()]) {
+      expect(row.getAttribute('tabindex')).toBe('-1');
+    }
+    expect(
+      document.querySelector('.palette__clear')?.getAttribute('aria-label')
+    ).toBe(m.search_clear());
   });
 
   // WebKit focuses no button on a click or a tap: <body> keeps focus.

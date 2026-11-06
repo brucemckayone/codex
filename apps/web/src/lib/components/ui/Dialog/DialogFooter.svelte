@@ -26,7 +26,7 @@
 
 <div
   {...restProps}
-  class="dialog-footer {className ?? ''}"
+  class={['dialog-footer', className]}
   data-layout={layout?.current}
   data-align={align}
   data-flush={layout?.flush ? '' : undefined}

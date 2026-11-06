@@ -35,6 +35,7 @@
   import { followingStore } from '$lib/client/following.svelte';
   import { getFollowingStatus } from '$lib/remote/org.remote';
   import * as m from '$paraglide/messages';
+  import { themeState } from '$lib/theme.svelte';
 
   interface Props {
     data: LayoutData;
@@ -296,13 +297,15 @@
 
   // Sync org background to html element so scrollbar gutter area matches.
   // Without this, the scrollbar track shows the root light background on dark org brands.
-  // Tracks brandBackground (from server data) and brandEditor.pending?.backgroundColor
-  // (live editor changes) so it re-runs when either changes.
+  // Tracks brandBackground (from server data), brandEditor.pending?.backgroundColor
+  // (live editor changes) and the theme (a toggle flips --color-background under the
+  // same brand) so it re-runs when any of them changes.
   $effect(() => {
     if (!browser) return;
-    // Track reactive deps: server brand bg + editor pending bg
+    // Track reactive deps: server brand bg + editor pending bg + theme
     const serverBg = brandBackground;
     const editorBg = brandEditor.pending?.backgroundColor;
+    void themeState.theme;
     // Read the actual computed color after CSS derivation
     const layout = document.querySelector('.org-layout');
     if (!layout) return;

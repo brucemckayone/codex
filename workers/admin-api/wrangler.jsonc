@@ -258,6 +258,6 @@
   //     take (configured above; no new binding for support refunds)
   //   - STRIPE_SECRET_KEY: admin-api's OWN restricted key for support refunds
   //     (Codex-2hxff.28, owner decision Q4; Codex-5vvwj.2), never ecom-api's.
-  //     Read charges, refunds, disputes, invoices, payment intents; write
-  //     refunds. Test mode for development and test, live for production.
+  //     Its permissions: docs/payments/release-checklist.md R8. In the same
+  //     mode as the platform's STRIPE_SECRET_KEY.
 }
