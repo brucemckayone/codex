@@ -248,6 +248,22 @@ describe('Dialog focus return', () => {
 
     expect(document.activeElement).not.toBe(button);
   });
+
+  // A dialog a timer or a response opens long after the last press must not
+  // send focus, and the page's scroll, back to wherever that press was.
+  test('a press long before the open is not the opener', async () => {
+    const button = opener();
+    const field = opener();
+    field.focus();
+    const now = vi.spyOn(performance, 'now').mockReturnValue(1_000);
+    press(button);
+    now.mockReturnValue(61_000);
+
+    await openAndClose();
+    now.mockRestore();
+
+    expect(document.activeElement).toBe(field);
+  });
 });
 
 describe('Dialog dismissible', () => {
