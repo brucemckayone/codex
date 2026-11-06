@@ -37,35 +37,56 @@
  *                  its classes (a `[class~=…]` / `[class*=…]` test that can
  *                  match a part's class counts, and CSS escapes are read
  *                  through), Melt's `data-melt-dialog-*`, `[role=dialog]`,
- *                  `[aria-modal]` and the parts' own data attributes with the
- *                  values the parts give them. Restyling the primitive from
- *                  outside is how the four hand-built drawers forked it.
+ *                  `[aria-modal]`, the parts' own data attributes with the
+ *                  values the parts give them, and any component's
+ *                  `.svelte-<hash>` scoping class. Restyling the primitive
+ *                  from outside is how the four hand-built drawers forked it.
  *                  One exception: a rule whose selector is exactly
  *                  `.dialog-form` plus the page's own class
  *                  (`:global(.dialog-form.tier-form)`) may set spacing (gap,
- *                  padding*, margin*) and nothing else. Bare `.dialog-form`,
- *                  a combinator, or any other property (display, flex*,
- *                  overflow*, height, position…) fails.
+ *                  padding*, margin*, to 0, var(--space-*) or a calc() of
+ *                  those) and nothing else. Bare `.dialog-form`, a
+ *                  combinator, any other property (display, flex*,
+ *                  overflow*, height, position…) or value fails.
  *   part-class     The same restyle through a page's own handle on a part.
  *                  Every class, id and attribute ANY file hands Dialog.Content,
- *                  Header, Toolbar, Body, Footer or Form is collected first.
- *                  A global rule in any .svelte or .css file then fails when
- *                  its selector names one of those handles anywhere (inside
- *                  `:has()`, `:is()` and `:not()` too) and its subject could
- *                  be that part: the subject carries no class or id that no
- *                  part takes. So `:global(.my-body)`, `:global(#tier-body)`
- *                  and `:global(.panel > div)` fail; `:global(.panel .row)`
- *                  does not. The `.dialog-form.<own>` spacing case above is
- *                  allowed. Title and Description are exempt: their type is
- *                  the page's choice. (They are NOT harmless: they sit in
- *                  Header, which doesn't scroll, so a Header taller than the
- *                  panel still clips. That is the panel's to absorb, not a
- *                  rule a source check can state.)
+ *                  Header, Toolbar, Body, Footer or Form is collected first
+ *                  (a class: only what its value can produce; an attribute
+ *                  an expression decides: any value; an id an expression
+ *                  builds: its leading text). A global rule in any .svelte
+ *                  or .css file then fails when its selector names one of
+ *                  those handles and its subject could be that part. The
+ *                  subject can't be when it carries a class or id no part
+ *                  takes, or an element type other than div, form or * (the
+ *                  parts render only those). Nor when the selector has a
+ *                  compound outside :global: that is this file's own
+ *                  element, and the Dialog renders in a portal under <body>,
+ *                  outside every page element. A handle in the subject (or
+ *                  in its :has()/:not()) fails; a handle further left fails
+ *                  only where a part can follow it: a child or descendant of
+ *                  a Content or Form handle, or a sibling (+/~) of any. So
+ *                  `:global(.my-body)`, `:global(#tier-body)` and
+ *                  `:global(.panel > div)` fail; `:global(.panel .row)`,
+ *                  `:global(.my-body > div)` and `.wrap :global(.my-body)` do
+ *                  not. A cross-file hit is reported twice: at the rule, and
+ *                  at the file that handed the part its handle. The
+ *                  `.dialog-form.<own>` spacing case above is allowed. Title
+ *                  and Description are exempt: their type is the page's
+ *                  choice. (They are NOT harmless: they sit in Header, which
+ *                  doesn't scroll, so a Header taller than the panel still
+ *                  clips. That is the panel's to absorb, not a rule a source
+ *                  check can state.)
+ *   script-select  Outside ui/Dialog/, no string in a .svelte's script or
+ *                  markup expressions, or in a .ts/.js file, names a Dialog
+ *                  class as a selector (`querySelector('.dialog-body')`,
+ *                  `closest('.dialog-content')`): script that finds a part
+ *                  can restyle it inline.
  *   part-style     Outside ui/Dialog/, no part that draws the panel takes an
  *                  inline `style=` or `style:` directive: it beats every
  *                  scoped rule the part keeps its scroll chain with.
  *                  Dialog.Content's maxWidth / maxHeight props are the
- *                  sanctioned size hatches.
+ *                  sanctioned size hatches, and they take a CSS length:
+ *                  `none`, `auto` or a unitless number would remove the cap.
  *   part-dynamic   Outside ui/Dialog/, a part that draws the panel takes no
  *                  {...spread} and no {@attach}, and its class is literal
  *                  (text, string literals, a conditional or template of them,
@@ -78,8 +99,9 @@
  *                  `display: contents`), nor role="dialog"/"alertdialog" or
  *                  aria-modal on a part (Dialog.Root's role does that).
  *   markup-style   Outside ui/Dialog/, no `<style>` element sits in markup
- *                  (`<svelte:head><style>`) and no {@html} writes one: their
- *                  rules are global and never reach this check.
+ *                  (`<svelte:head><style>`) and no {@html} writes one (its
+ *                  own literals, or a same-file const's): their rules are
+ *                  global and never reach this check.
  *   own-dialog     Outside ui/Dialog/ and ui/Popover/, nothing builds a modal
  *                  by hand: no role="dialog"/"alertdialog" (a conditional,
  *                  logical or template result included; the shared Dialog
@@ -117,6 +139,12 @@
  * ui/Dialog/index.ts itself. Tests (*.test.ts, *.spec.ts) are not shipped
  * and are not scanned.
  *
+ * Beyond a source check, and so not checked: script that reaches a part
+ * from the page's own element (`el.parentElement.style…`), and a global
+ * rule written against the attributes Melt sets on the panel
+ * (`[data-state]`, `[tabindex]`, `[aria-labelledby]`), which a dozen
+ * unrelated global rules already test.
+ *
  * ALLOWLIST holds the exceptions, each with its one-line, owner-visible
  * reason and the exact number of violations it waives (`expect`). An entry
  * whose count differs FAILS the gate: a new violation can't hide behind a
@@ -124,8 +152,9 @@
  *
  * Exported (`collectViolations`) so the node:test suite can point the same
  * scan at fixture trees; `main()` runs only as the CLI entrypoint.
- * `--root <dir>` scans `<dir>/src` instead of apps/web/src, without the
- * real tree's ALLOWLIST (the tests pin the exit status that way).
+ * `--root <dir>` (or `--root=<dir>`) scans `<dir>/src` instead of
+ * apps/web/src, without the real tree's ALLOWLIST (the tests pin the exit
+ * status that way). Any other argument exits 2.
  */
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -244,13 +273,33 @@ export const PART_DATA_ATTRS = new Set([
 ]);
 
 // What a page writes instead of restyling a part from outside.
-const INSTEAD =
-  "style your own element inside the part, or use Content's props " +
-  '(size, variant, placement, surface, radius, flush, maxWidth, maxHeight)';
+const CONTENT_PROPS = "Content's props (size, variant, placement, surface, radius, flush, maxWidth, maxHeight)";
+const INSTEAD = `style your own element inside the part, or use ${CONTENT_PROPS}`;
+
+// The part's own prop, where one replaces what a page reached for.
+const PART_PROPS = {
+  Content: CONTENT_PROPS,
+  Toolbar: 'Toolbar\'s direction="row" | "column"',
+  Footer: 'Footer\'s align="end" | "between"',
+};
+// Each part data attribute's prop: a page sets the prop, the part the attribute.
+const DATA_ATTR_PROP = { 'data-direction': PART_PROPS.Toolbar, 'data-align': PART_PROPS.Footer };
+
+// Another component's scoping class: `.svelte-1vhe744` is a part's own.
+const SVELTE_HASH_RE = /\.svelte-[a-z0-9]+(?![\w-])/;
+
+// A CSS length for maxHeight / maxWidth: a number with a unit, a percentage,
+// or a function that computes one. `none`, `auto` and a bare number are not,
+// and an invalid value inside the part's min() drops the cap altogether.
+const CSS_LENGTH =
+  /^\s*(?:-?(?:\d+\.?\d*|\.\d+)(?:px|r?em|r?lh|ch|ex|cap|[dsl]?v(?:h|w|i|b|min|max)|vmin|vmax|cq(?:w|h|i|b|min|max)|pt|pc|in|cm|mm|q|%)|(?:calc|min|max|clamp|var)\(.*\))\s*$/i;
 
 // All a page may set on its own Dialog.Form class. Anything else could
 // decide whether the form passes the panel's column down to Body.
 const SPACING_PROP = /^(gap|row-gap|column-gap|padding(-[a-z]+)*|margin(-[a-z]+)*)$/;
+// And the values it may set them to: 0, the spacing tokens, or calc() of those.
+const SPACING_TOKEN = /^(?:0|var\(--space-[\w-]+\))$/;
+const SPACING_CALC = /^calc\((?:\s*(?:var\(--space-[\w-]+\)|-?\d*\.?\d+|[-+*/()])\s*)+\)$/;
 // Two or more classes and nothing else: `.dialog-form` plus the page's own.
 const OWN_FORM_COMPOUND = /^(?:\.[\w-]+){2,}$/;
 
@@ -795,6 +844,23 @@ function literalStrings(expr) {
   return out;
 }
 
+/** A file's top-level `const x = …` initialisers, by name. */
+function constInits(programs) {
+  const inits = new Map();
+  for (const stmt of programs.flatMap((program) => program.body)) {
+    const decl = stmt.type === 'ExportNamedDeclaration' ? stmt.declaration : stmt;
+    if (decl?.type !== 'VariableDeclaration' || decl.kind !== 'const') continue;
+    for (const d of decl.declarations) if (d.id.type === 'Identifier' && d.init) inits.set(d.id.name, d.init);
+  }
+  return inits;
+}
+
+/** What an {@html} can write, as far as literals show: its own, and a same-file const's. */
+function htmlStrings(expr, consts) {
+  const held = expr?.type === 'Identifier' && consts.has(expr.name) ? literalStrings(consts.get(expr.name)) : [];
+  return [...literalStrings(expr), ...held];
+}
+
 /**
  * The strings an expression can evaluate to, as far as its literals show:
  * a conditional's branches and a logical's operands, never a test or an
@@ -860,6 +926,7 @@ const SHOW_MODAL_DETAIL =
 const meltDetail = (name) => `uses Melt's ${name}, a modal of its own; build it from the shared Dialog or Popover`;
 
 function checkOwnDialog(ast, programs, bindings, popover, report) {
+  const consts = constInits(programs);
   walk(ast.fragment, (node) => {
     if (node.type === 'RegularElement' && node.name === 'dialog') {
       report(node.start, 'own-dialog', '<dialog> is a hand-built modal; build the modal from Dialog.Root/Content');
@@ -867,7 +934,7 @@ function checkOwnDialog(ast, programs, bindings, popover, report) {
     if (node.type === 'SvelteElement' && resultStrings(node.tag).some((s) => s.trim() === 'dialog')) {
       report(node.start, 'own-dialog', '<svelte:element this="dialog"> is a hand-built modal; build the modal from Dialog.Root/Content');
     }
-    if (node.type === 'HtmlTag' && literalStrings(node.expression).some((s) => /<dialog\b/i.test(s))) {
+    if (node.type === 'HtmlTag' && htmlStrings(node.expression, consts).some((s) => /<dialog\b/i.test(s))) {
       report(node.start, 'own-dialog', '{@html} writes a <dialog>, a hand-built modal; build the modal from Dialog.Root/Content');
     }
     // The shared parts are part-attr's to judge.
@@ -930,11 +997,18 @@ function checkPartAttributes(fragment, bindings, report) {
         );
       }
       if (!BOX_PARTS.has(part)) continue;
+      const badSize = part === 'Content' && attr.type === 'Attribute' && /^max(Height|Width)$/.test(attr.name) ? notALength(attr) : null;
       if (attr.type === 'Attribute' && PART_DATA_ATTRS.has(attr.name)) {
         report(
           attr.start,
           'part-attr',
-          `${describe(node)} sets ${attr.name}, which the part sets itself and its CSS reads; use Content's props (variant, flush, placement…) instead`
+          `${describe(node)} sets ${attr.name}, which the part sets itself and its CSS reads; use ${DATA_ATTR_PROP[attr.name] ?? CONTENT_PROPS} instead`
+        );
+      } else if (badSize !== null) {
+        report(
+          attr.start,
+          'part-style',
+          `${describe(node)} ${attr.name}="${badSize}" is not a CSS length, so the panel loses its cap and clips its Footer; give a length (40rem, 60dvh) or a calc()/min()/max()/clamp() of one`
         );
       } else if ((attr.type === 'Attribute' && attr.name === 'style') || attr.type === 'StyleDirective') {
         report(
@@ -963,6 +1037,21 @@ function checkPartAttributes(fragment, bindings, report) {
       }
     }
   });
+}
+
+/**
+ * The first value a maxHeight / maxWidth can take that is not a CSS length,
+ * or null: its text, and each literal its expression can result in. An
+ * expression with no literal (a prop, a variable) is the page's to type.
+ */
+function notALength(attr) {
+  if (attr.value === true) return 'true';
+  const parts = Array.isArray(attr.value) ? attr.value : [attr.value];
+  const text = parts.every((p) => p.type === 'Text') ? [parts.map((p) => p.data).join('')] : [];
+  const results = (expr) =>
+    expr?.type === 'Literal' && typeof expr.value === 'number' ? [String(expr.value)] : resultStrings(expr);
+  const values = [...text, ...parts.filter((p) => p.type !== 'Text').flatMap((p) => results(p.expression))];
+  return values.find((v) => !CSS_LENGTH.test(v)) ?? null;
 }
 
 function isLiteralClass(attr) {
@@ -994,16 +1083,37 @@ function literalClassValue(expr) {
 }
 
 /** markup-style: global CSS written where this check never parses it. */
-function checkMarkupStyle(fragment, report) {
+function checkMarkupStyle(fragment, consts, report) {
   walk(fragment, (node) => {
     const isStyle =
       (node.type === 'RegularElement' && node.name === 'style') ||
       (node.type === 'SvelteElement' && resultStrings(node.tag).some((s) => s.trim() === 'style'));
     if (isStyle) {
       report(node.start, 'markup-style', "<style> in markup is global CSS this check never parses; use the component's own <style>");
-    } else if (node.type === 'HtmlTag' && literalStrings(node.expression).some((s) => /<style\b/i.test(s))) {
+    } else if (node.type === 'HtmlTag' && htmlStrings(node.expression, consts).some((s) => /<style\b/i.test(s))) {
       report(node.start, 'markup-style', "{@html} writes a <style> element, global CSS this check never parses; use the component's own <style>");
     }
+  });
+}
+
+// A Dialog class written as a selector token, in a string.
+const DIALOG_SELECTOR_RE = new RegExp(DIALOG_CLASS_RE.source);
+const scriptSelectDetail = (name) =>
+  `a string names the Dialog's ${name} as a selector, so script can find the part and restyle it inline; style your own element inside the part`;
+
+/** script-select: a selector string naming a Dialog class, in script or a markup expression. */
+function checkScriptSelectors(roots, report) {
+  walk(roots, (node) => {
+    // {@html} strings are markup-style's.
+    if (node.type === 'HtmlTag') return false;
+    const text =
+      node.type === 'Literal' && typeof node.value === 'string'
+        ? node.value
+        : node.type === 'TemplateElement'
+          ? (node.value.cooked ?? node.value.raw)
+          : null;
+    const m = text?.match(DIALOG_SELECTOR_RE);
+    if (m) report(node.start, 'script-select', scriptSelectDetail(m[0]));
   });
 }
 
@@ -1180,11 +1290,15 @@ function classTestBoxClass(prelude) {
  * attribute is a restyle, except `.dialog-form.<own-class>` on its own,
  * with spacing only.
  */
-function restyleDetail(prelude, properties) {
+function restyleDetail(prelude, decls) {
   const classes = [...prelude.matchAll(DIALOG_CLASS_RE)].map((m) => m[1]);
   const text = squash(prelude);
   const other = classes.find((c) => c !== 'dialog-form') ?? classTestBoxClass(prelude);
   if (other) return `${text} restyles the Dialog's .${other}; ${INSTEAD}`;
+  const hash = prelude.match(SVELTE_HASH_RE);
+  if (hash) {
+    return `${text} names ${hash[0]}, another component's scoping class, which reaches that component's elements (a part's among them); ${INSTEAD}`;
+  }
   const attr = prelude.match(DIALOG_ATTR_RE);
   if (attr) {
     const shown = prelude.slice(attr.index, prelude.indexOf(']', attr.index) + 1 || undefined);
@@ -1193,23 +1307,61 @@ function restyleDetail(prelude, properties) {
   if (classes.length === 0) return null;
   const loose = selectors(prelude).find((s) => /\.dialog-form(?![\w-])/.test(s) && !OWN_FORM_COMPOUND.test(s));
   if (loose !== undefined) return `${text}: style a Dialog.Form only as .dialog-form.<your-class>, with nothing around it`;
-  const notSpacing = properties.filter((p) => !SPACING_PROP.test(p));
-  if (notSpacing.length === 0) return null;
-  return `${text} sets ${notSpacing.join(', ')} on .dialog-form; only gap, padding and margin may change`;
+  const notSpacing = decls.filter((d) => !SPACING_PROP.test(d.property)).map((d) => d.property);
+  if (notSpacing.length > 0) return `${text} sets ${notSpacing.join(', ')} on .dialog-form; only gap, padding and margin may change`;
+  const off = decls.find((d) => !isSpacingValue(d.value));
+  if (!off) return null;
+  return `${text} sets ${off.property}: ${squash(off.value)} on .dialog-form; spacing takes 0, var(--space-*) or a calc() of those`;
 }
 
-/** Each class a `class` value can hold: its text, its string literals, an object's keys. */
+/** A spacing declaration's value: each of its words 0, a space token, or a calc() of them. */
+function isSpacingValue(value) {
+  const words = splitTop(String(value).replace(/!important\s*$/, ''), (c) => /\s/.test(c));
+  return words.length > 0 && words.every((w) => SPACING_TOKEN.test(w) || SPACING_CALC.test(w));
+}
+
+/**
+ * Each class a `class` value can produce: its text, and what each
+ * expression can result in (a conditional's branches, `&&`'s right side,
+ * both sides of `||` and `??`, an array's items, an object's KEYS). A
+ * conditional's test and an object's values are never classes.
+ */
 function classNames(attr) {
   const names = [];
-  const add = (text) => names.push(...text.split(/\s+/).filter(Boolean));
+  const add = (text) => names.push(...String(text).split(/\s+/).filter(Boolean));
+  const results = (expr) => {
+    switch (expr?.type) {
+      case 'Literal':
+        if (typeof expr.value === 'string') add(expr.value);
+        return;
+      case 'TemplateLiteral':
+        for (const q of expr.quasis) add(q.value.cooked ?? q.value.raw);
+        expr.expressions.forEach(results);
+        return;
+      case 'ConditionalExpression':
+        results(expr.consequent);
+        results(expr.alternate);
+        return;
+      case 'LogicalExpression':
+        if (expr.operator !== '&&') results(expr.left);
+        results(expr.right);
+        return;
+      case 'ArrayExpression':
+        expr.elements.forEach(results);
+        return;
+      case 'ObjectExpression':
+        for (const p of expr.properties) {
+          if (p.type === 'Property' && !p.computed) add(p.key.type === 'Identifier' ? p.key.name : p.key.value);
+        }
+        return;
+      default:
+        if (TS_VALUE_HOLDERS.has(expr?.type)) results(expr.expression);
+    }
+  };
   for (const part of Array.isArray(attr.value) ? attr.value : [attr.value]) {
     if (part === true) continue;
     if (part.type === 'Text') add(part.data);
-    walk(part.expression, (node) => {
-      if (node.type === 'Literal' && typeof node.value === 'string') add(node.value);
-      if (node.type === 'TemplateElement') add(node.value.cooked ?? '');
-      if (node.type === 'Property' && !node.computed && node.key.type === 'Identifier') add(node.key.name);
-    });
+    else results(part.expression);
   }
   return names;
 }
@@ -1221,28 +1373,37 @@ function staticValue(attr) {
   return parts.every((p) => p.type === 'Text') ? parts.map((p) => p.data).join('') : null;
 }
 
+/** An attribute's text before its first expression: all an `id="x-{n}"` is known by. */
+function leadingText(attr) {
+  const parts = Array.isArray(attr.value) ? attr.value : [attr.value];
+  return parts[0]?.type === 'Text' ? parts[0].data : '';
+}
+
 /** An attribute that lands on a part's element as written (not a part prop, not a handler). */
 const landsOnElement = (name) => name.includes('-') || HTML_GLOBAL_ATTRS.has(name);
 
 /**
  * Pass one of part-class: every handle this file hands a part that draws
- * the panel, added to `handles` (class/id -> {part, file}; attribute name ->
- * [{value, part, file}]).
+ * the panel, added to `handles`: class or static id -> owner; an id an
+ * expression builds -> its leading text (`idPrefixes`); attribute name ->
+ * [{value, …owner}], value null when an expression decides it, which then
+ * matches any value a selector tests (the conservative reading). An owner
+ * is {part, file, line}.
  */
-function collectHandles(ast, bindings, file, handles) {
+function collectHandles(ast, bindings, file, handles, source) {
   walk(ast.fragment, (node) => {
     const part = partOf(node, bindings);
     if (!BOX_PARTS.has(part)) return;
-    const owner = { part, file };
     for (const attr of node.attributes ?? []) {
+      const owner = { part, file, line: lineOf(source, attr.start) };
       if (attr.type === 'ClassDirective') handles.classes.set(attr.name, owner);
       if (attr.type !== 'Attribute') continue;
       if (attr.name === 'class') {
         for (const name of classNames(attr)) handles.classes.set(name, owner);
       } else if (attr.name === 'id') {
-        // An id an expression decides can't be matched by name; part-dynamic is classes' only.
         const id = staticValue(attr);
         if (id) handles.ids.set(id, owner);
+        else if (id === null) (handles.idPrefixes ??= []).push({ prefix: leadingText(attr), ...owner });
       } else if (landsOnElement(attr.name)) {
         const list = handles.attrs.get(attr.name) ?? [];
         list.push({ value: staticValue(attr), ...owner });
@@ -1252,15 +1413,27 @@ function collectHandles(ast, bindings, file, handles) {
   });
 }
 
+/**
+ * Whether an `[id OP v]` test can match an id known only by its leading
+ * text: what follows the prefix is unknown, so anything it could be counts.
+ */
+function idPrefixMatches({ op, value }, prefix) {
+  if (op === null || op === '$=' || op === '*=') return true;
+  const v = value.toLowerCase();
+  const p = prefix.toLowerCase();
+  return op === '^=' || op === '|=' ? v.startsWith(p) || p.startsWith(v) : v.startsWith(p);
+}
+
 /** The first handle a part took that this selector text names, or null. */
 function namedHandle(text, handles) {
   const { classes, ids, attrs } = selectorNames(text);
+  const prefixes = handles.idPrefixes ?? [];
   for (const name of classes) {
     const owner = handles.classes.get(name);
     if (owner) return { ...owner, shown: `its class .${name}` };
   }
   for (const id of ids) {
-    const owner = handles.ids.get(id);
+    const owner = handles.ids.get(id) ?? prefixes.find((p) => id.startsWith(p.prefix));
     if (owner) return { ...owner, shown: `its id #${id}` };
   }
   for (const test of attrs) {
@@ -1272,6 +1445,8 @@ function namedHandle(text, handles) {
       for (const [id, owner] of handles.ids) {
         if (attrTestMatches(test, id)) return { ...owner, shown: `its id #${id}` };
       }
+      const owner = prefixes.find((p) => idPrefixMatches(test, p.prefix));
+      if (owner) return { ...owner, shown: `its id ${owner.prefix}…` };
     } else {
       const owner = (handles.attrs.get(test.name) ?? []).find((h) => attrTestMatches(test, h.value));
       if (owner) return { ...owner, shown: `its attribute [${test.name}]` };
@@ -1281,73 +1456,160 @@ function namedHandle(text, handles) {
 }
 
 /**
- * Whether a subject compound is the page's own element: it carries a class
- * or id that no part takes (nor the Dialog's own), so no part can match it.
+ * Whether a subject compound is the page's own element, so no part can be
+ * it: an element type the parts never render (they render div and form), or
+ * a class or id no part takes. A Dialog class or a svelte-<hash> never gets
+ * here: restyleDetail reports a rule naming one first.
  */
 function isOwnElement(compound, handles) {
-  const { classes, ids } = selectorNames(withoutFunctional(compound));
+  const bare = withoutFunctional(compound);
+  const type = bare.match(/^(?:[\w-]*\|)?([a-zA-Z][\w-]*|\*)/)?.[1]?.toLowerCase();
+  if (type && type !== 'div' && type !== 'form' && type !== '*') return true;
+  const { classes, ids } = selectorNames(bare);
+  const prefixes = handles.idPrefixes ?? [];
   return (
-    classes.some((name) => !handles.classes.has(name) && !DIALOG_CLASSES.includes(name)) ||
-    ids.some((id) => !handles.ids.has(id))
+    classes.some((name) => !handles.classes.has(name)) ||
+    ids.some((id) => !handles.ids.has(id) && !prefixes.some((p) => id.startsWith(p.prefix)))
   );
 }
 
+/** A selector's compounds, each with the combinator before it (' ', '>', '+', '~'; null first). */
+function selectorSteps(selector) {
+  const steps = [];
+  let depth = 0;
+  let quote = null;
+  let buf = '';
+  let combinator = null;
+  const flush = () => {
+    if (buf.trim()) {
+      steps.push({ compound: buf.trim(), combinator: steps.length ? (combinator ?? ' ') : null });
+      combinator = null;
+    }
+    buf = '';
+  };
+  for (let i = 0; i < selector.length; i++) {
+    const c = selector[i];
+    if (quote) {
+      buf += c;
+      if (c === '\\') buf += selector[++i] ?? '';
+      else if (c === quote) quote = null;
+      continue;
+    }
+    if (c === '"' || c === "'") quote = c;
+    else if (c === '(' || c === '[') depth++;
+    else if (c === ')' || c === ']') depth--;
+    if (depth === 0 && /[\s>+~]/.test(c)) {
+      flush();
+      if (!/\s/.test(c)) combinator = c;
+      continue;
+    }
+    buf += c;
+  }
+  flush();
+  return steps;
+}
+
 /**
- * The part of a selector that reaches outside its file, unwrapped, or null
- * when its subject is scoped. A compound outside `:global` carries the
- * file's scoping class, so it matches only the file's own elements, never
- * a part's (a part's element is another component's): a handle named there
- * is the page's own element. In a .css file or a `:global {}` block,
- * everything reaches.
+ * The part of a selector that reaches outside its file, unwrapped with its
+ * combinators, or null when any compound is scoped. A compound outside
+ * `:global` carries the file's scoping class, so it is the file's own
+ * element; the Dialog renders in a portal under <body>, outside every page
+ * element, so nothing beside or below one is a part. In a .css file or a
+ * `:global {}` block, everything reaches.
  */
 function globalReach(selector, inGlobalBlock) {
-  const tokens = compounds(selector);
-  const isGlobal = (token, i) => inGlobalBlock || token.startsWith(':global') || tokens.slice(0, i).includes(':global');
-  if (!isGlobal(tokens.at(-1) ?? '', tokens.length - 1)) return null;
-  return tokens
-    .filter((token, i) => token !== ':global' && isGlobal(token, i))
-    .map(unwrapGlobal)
-    .join(' ');
+  const steps = selectorSteps(selector);
+  const isGlobal = (i) =>
+    inGlobalBlock || steps[i].compound.startsWith(':global') || steps.slice(0, i).some((s) => s.compound === ':global');
+  if (!steps.every((s, i) => s.compound === ':global' || isGlobal(i))) return null;
+  let out = '';
+  for (const step of steps) {
+    if (step.compound === ':global') continue;
+    const join = !out ? '' : step.combinator && step.combinator !== ' ' ? ` ${step.combinator} ` : ' ';
+    out += join + unwrapGlobal(step.compound);
+  }
+  return out;
+}
+
+/**
+ * A handle left of the subject that a part can follow: a sibling (+/~) of
+ * any handle, a child or descendant of a Content or Form handle, or a handle
+ * inside a functional pseudo-class (`div:has(.my-body) > div`). Nothing sits
+ * below a Body, Header, Footer or Toolbar but the page's own elements:
+ * body-place and form-place keep the parts out of them.
+ */
+function reachingHandle(steps, handles) {
+  for (const [i, { compound }] of steps.slice(0, -1).entries()) {
+    const direct = namedHandle(withoutFunctional(compound), handles);
+    const inner = direct ? null : namedHandle(compound, handles);
+    const hit = direct ?? inner;
+    if (!hit) continue;
+    const sibling = steps.slice(i + 1).some((s) => s.combinator === '+' || s.combinator === '~');
+    if (inner || sibling || hit.part === 'Content' || hit.part === 'Form') return hit;
+  }
+  return null;
 }
 
 /**
  * part-class: why a global rule reaches a part through a handle a page gave
- * it, or null. It does when the selector's global reach names that handle
- * anywhere and its subject could be the part. A `.dialog-form.<own>`
- * compound is restyleDetail's to judge.
+ * it, or null: `{ detail, echo }`. When the handle came from another file,
+ * the fix is that file's author's, so `echo` reports it there too. A
+ * `.dialog-form.<own>` compound is restyleDetail's to judge.
  */
 function partHandleDetail(prelude, handles, inGlobalBlock, file) {
   const text = squash(prelude);
-  // Another file's handle names that file: the rule and the part are apart.
-  const via = (hit) => (hit.file !== file ? ` (${hit.file} hands it to Dialog.${hit.part})` : '');
   for (const outer of selectorList(prelude).flatMap((s) => alternatives(s))) {
     const reach = globalReach(outer, inGlobalBlock);
     if (reach === null) continue;
     for (const selector of alternatives(reach)) {
-      const subject = compounds(selector).at(-1) ?? '';
+      const steps = selectorSteps(selector);
+      const subject = steps.at(-1)?.compound ?? '';
       if (/\.dialog-form(?![\w-])/.test(subject) || isOwnElement(subject, handles)) continue;
       const inSubject = namedHandle(withoutFunctional(subject), handles);
-      if (inSubject) return `${text} restyles Dialog.${inSubject.part} through ${inSubject.shown}${via(inSubject)}; ${INSTEAD}`;
-      const walked = namedHandle(selector, handles);
-      if (walked) {
-        return (
-          `${text} walks from Dialog.${walked.part}'s ${walked.shown.replace(/^its /, '')}${via(walked)} to an element ` +
-          'no class names, which may be a part; give that element a class of its own'
-        );
-      }
+      if (inSubject) return handleMessage(text, inSubject, file, false);
+      const walked = namedHandle(subject, handles) ?? reachingHandle(steps, handles);
+      if (walked) return handleMessage(text, walked, file, true);
     }
   }
   return null;
 }
 
-/** global-style, then part-class, for one global rule. */
+/**
+ * part-class's message, and its echo at the handing file when that is
+ * another one. Two fixes: the handle off the part, or a class that makes
+ * the rule's subject (`walk`: the element it walks to) the page's own.
+ */
+function handleMessage(text, hit, file, walk) {
+  const from = hit.file === file ? '' : ` (${hit.file}:${hit.line} hands it to Dialog.${hit.part})`;
+  const what = walk
+    ? `walks from Dialog.${hit.part}'s ${hit.shown.replace(/^its /, '')}${from} to an element no class names, which may be a part`
+    : `restyles Dialog.${hit.part} through ${hit.shown}${from}`;
+  const mark = walk ? 'give that element a class of its own' : "give this selector's subject a class of its own";
+  const props = PART_PROPS[hit.part] ? `; ${PART_PROPS[hit.part]}` : '';
+  const isAttr = hit.shown.startsWith('its attribute');
+  const not = hit.shown.startsWith('its class') ? 'utility classes' : 'hooks for page CSS';
+  const own = `put it on your own element inside Dialog.${hit.part} (a part takes props, not ${not}${props})`;
+  if (hit.file === file) return { detail: `${text} ${what}; ${own}, or ${mark}` };
+  return {
+    detail: `${text} ${what}; in ${hit.file}, ${own}, or here ${mark}`,
+    // An attribute keeps its name wherever it goes; a class or id can take another.
+    echo: {
+      file: hit.file,
+      line: hit.line,
+      detail: (at) =>
+        `Dialog.${hit.part}'s ${hit.shown.replace(/^its /, '')} is restyled from ${at} (${text}); ${own}${isAttr ? '' : ', or rename it'}`,
+    },
+  };
+}
+
+/** global-style, then part-class, for one global rule: [rule, detail, echo?] or null. */
 function globalRuleViolation(rule, handles, file) {
   const prelude = cssUnescape(rule.prelude);
-  const restyle = restyleDetail(prelude, rule.properties);
+  const restyle = restyleDetail(prelude, rule.decls ?? rule.properties.map((property) => ({ property, value: '0' })));
   if (restyle) return ['global-style', restyle];
   if (rule.preludeOnly) return null;
   const own = partHandleDetail(prelude, handles, rule.block, file);
-  return own ? ['part-class', own] : null;
+  return own ? ['part-class', own.detail, own.echo] : null;
 }
 
 /** Selector lists `parent` and `child` as one: `&` takes the parent's place, or the child descends from it. */
@@ -1374,34 +1636,47 @@ function scopePrelude(text) {
   return { root: root?.selector || null, limit: limit?.selector || null };
 }
 
+/** A rule's declarations, by property and value. */
+const declarationsOf = (children) =>
+  children.filter((c) => c.type === 'Declaration').map((c) => ({ property: c.property, value: c.value ?? '' }));
+
 /**
  * Every rule of a style sheet, nesting resolved: a nested rule takes its
  * parent's selector (`&` included), and a nested at-rule's declarations are
  * its parent rule's. `global` is whether the rule reaches outside this file;
  * `block` whether everything in it does (a .css file). A `:global { … }`
  * block needs no flag of its own: its `:global` stays in each nested selector.
- * An `@scope (X) to (Y)` prelude is emitted as written, so it is a global
- * rule of its own (`preludeOnly`: only the Dialog's names count there), and
- * its rules are nested in X, `:scope` standing for it.
+ * An `@scope (X) to (Y)` prelude is emitted as written (a .svelte's too, so
+ * it is read as `:global(X)` there), so it is a global rule of its own
+ * (`preludeOnly`: only the Dialog's names count there), and its rules are
+ * nested in X, `:scope` standing for it.
  */
 function cssRules(stylesheet, source, inFile) {
   const rules = [];
+  const asWritten = (selector) =>
+    inFile || !selector ? selector : selectorList(selector).map((s) => `:global(${s})`).join(', ');
   const visit = (node, ctx) => {
     if (node.type === 'Atrule') {
       const children = node.block?.children ?? [];
       if (node.name === 'scope') {
-        const { root, limit } = scopePrelude(node.prelude ?? '');
+        const prelude = scopePrelude(node.prelude ?? '');
+        const root = asWritten(prelude.root);
+        const limit = asWritten(prelude.limit);
         const scope = root ? (ctx.prelude ? nestSelectors(ctx.prelude, root) : root) : ctx.prelude;
         const named = [scope, limit].filter(Boolean).join(', ');
-        if (named) rules.push({ prelude: named, global: true, block: ctx.block, preludeOnly: true, properties: [], start: node.start });
+        if (named) {
+          rules.push({ prelude: named, global: true, block: ctx.block, preludeOnly: true, properties: [], decls: [], start: node.start });
+        }
         // Declarations straight in @scope style the root itself.
-        const properties = children.filter((c) => c.type === 'Declaration').map((c) => c.property);
-        if (scope && properties.length) rules.push({ prelude: scope, global: true, block: ctx.block, properties, start: node.start });
+        const decls = declarationsOf(children);
+        if (scope && decls.length) {
+          rules.push({ prelude: scope, global: true, block: ctx.block, properties: decls.map((d) => d.property), decls, start: node.start });
+        }
         for (const child of children) visit(child, { ...ctx, prelude: scope, scope, scopeDirect: true });
         return;
       }
-      const properties = children.filter((c) => c.type === 'Declaration').map((c) => c.property);
-      if (ctx.prelude && properties.length) rules.push({ ...ctx, properties, start: node.start });
+      const decls = declarationsOf(children);
+      if (ctx.prelude && decls.length) rules.push({ ...ctx, properties: decls.map((d) => d.property), decls, start: node.start });
       for (const child of children) if (child.type !== 'Declaration') visit(child, ctx);
       return;
     }
@@ -1412,8 +1687,8 @@ function cssRules(stylesheet, source, inFile) {
     const children = node.block.children;
     const prelude = ctx.prelude ? nestSelectors(ctx.prelude, own) : own;
     const next = { prelude, global: ctx.global || own.includes(':global'), block: ctx.block, scope: ctx.scope };
-    const properties = children.filter((c) => c.type === 'Declaration').map((c) => c.property);
-    rules.push({ ...next, properties, start: node.start });
+    const decls = declarationsOf(children);
+    rules.push({ ...next, properties: decls.map((d) => d.property), decls, start: node.start });
     for (const child of children) if (child.type !== 'Declaration') visit(child, next);
   };
   for (const node of stylesheet.children) visit(node, { prelude: null, global: inFile, block: inFile });
@@ -1527,6 +1802,7 @@ function checkScriptFile(file, source, ctx, report) {
         : `a .ts/.js file imports the Dialog module ('${spec}'), which can hand its parts on as values this check can't follow; import the parts in the .svelte that renders them`
     );
   }
+  for (const m of code.matchAll(DIALOG_CLASS_RE)) report(m.index, 'script-select', scriptSelectDetail(m[0]));
   if (ctx.ownDialogExempt(file)) return;
   for (const m of code.matchAll(/(?:\?\.|\.)\s*showModal\b|\[\s*(['"`])showModal\1\s*\]/g)) {
     const line = code.slice(code.lastIndexOf('\n', m.index) + 1, m.index);
@@ -1575,7 +1851,8 @@ function checkSvelteFile(file, source, unit, ctx, report) {
   checkMarkup(ast, programs, bindings, report);
   if (!isInside(ctx.dialogDir, file)) {
     checkPartAttributes(ast.fragment, bindings, report);
-    checkMarkupStyle(ast.fragment, report);
+    checkMarkupStyle(ast.fragment, constInits(programs), report);
+    checkScriptSelectors([...programs, ast.fragment], report);
     if (ast.css) checkSvelteCss(ast.css, source, ctx.handles, ctx.nameOf(file), report);
   }
   if (!ctx.ownDialogExempt(file)) {
@@ -1635,7 +1912,7 @@ export function collectViolations({ srcRoot = join(WEB_ROOT, 'src'), cwd = WEB_R
     partFiles: readPartFiles(dialogDir),
     // The shared Dialog and Popover are the only modals built by hand.
     ownDialogExempt: (file) => isInside(dialogDir, file) || isInside(popoverDir, file),
-    handles: { classes: new Map(), ids: new Map(), attrs: new Map() },
+    handles: { classes: new Map(), ids: new Map(), idPrefixes: [], attrs: new Map() },
     nameOf: (file) => relative(cwd, file).split(sep).join('/'),
   };
   const { nameOf } = ctx;
@@ -1650,7 +1927,7 @@ export function collectViolations({ srcRoot = join(WEB_ROOT, 'src'), cwd = WEB_R
     const unit = parseSvelte(file, source);
     units.set(file, unit);
     if (unit.ast && !isInside(dialogDir, file)) {
-      collectHandles(unit.ast, collectBindings(file, unit.programs, ctx, () => {}), nameOf(file), ctx.handles);
+      collectHandles(unit.ast, collectBindings(file, unit.programs, ctx, () => {}), nameOf(file), ctx.handles, source);
     }
   }
 
@@ -1658,23 +1935,34 @@ export function collectViolations({ srcRoot = join(WEB_ROOT, 'src'), cwd = WEB_R
   for (const file of files) {
     const source = sources.get(file);
     const name = nameOf(file);
-    scanFile(file, source, units.get(file), ctx, (offset, rule, detail) =>
-      found.push({ file: name, line: lineOf(source, offset), rule, detail })
-    );
+    // `echo`: the same violation, told to the file that handed the part its handle.
+    scanFile(file, source, units.get(file), ctx, (offset, rule, detail, echo) => {
+      const line = lineOf(source, offset);
+      found.push({ file: name, line, rule, detail });
+      if (echo) found.push({ file: echo.file, line: echo.line, rule, detail: echo.detail(`${name}:${line}`) });
+    });
   }
   return { ...applyAllowlist(found, allowlist), filesScanned: files.length };
 }
 
-/** `--root <dir>`: the tree to scan instead of apps/web, with no allowlist. */
+function usage(why) {
+  console.error(`Dialog structure gate: ${why} Usage: check-dialog-structure.mjs [--root <dir>]`);
+  process.exit(2);
+}
+
+/** `--root <dir>` / `--root=<dir>`: the tree to scan instead of apps/web, with no allowlist. */
 function optionsFrom(argv) {
-  const at = argv.indexOf('--root');
-  if (at === -1) return { allowlist: ALLOWLIST };
-  if (!argv[at + 1]) {
-    console.error('Dialog structure gate: --root needs a directory.');
-    process.exit(2);
+  let root = null;
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === '--root') root = argv[++i] ?? '';
+    else if (arg.startsWith('--root=')) root = arg.slice('--root='.length);
+    else usage(`unknown argument '${arg}'.`);
+    if (!root) usage('--root needs a directory.');
   }
-  const root = resolve(argv[at + 1]);
-  return { srcRoot: join(root, 'src'), cwd: root, allowlist: [] };
+  if (root === null) return { allowlist: ALLOWLIST };
+  const dir = resolve(root);
+  return { srcRoot: join(dir, 'src'), cwd: dir, allowlist: [] };
 }
 
 function main(argv = process.argv.slice(2)) {

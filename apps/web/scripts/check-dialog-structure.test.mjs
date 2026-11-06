@@ -670,6 +670,7 @@ test('ALLOWS spacing on .dialog-form plus the page\'s own class', () => {
   :global(.dialog-form.tier-form) { gap: var(--space-4); padding: var(--space-4); }
   :global(.tier-form.dialog-form) { row-gap: 0; padding-inline: 0; margin-block-end: var(--space-2); }
   :global(.dialog-form.tier-form), :global(.dialog-form.faq-form) { column-gap: 0; margin: 0; }
+  :global(.dialog-form.faq-form) { padding-block: calc(var(--space-4) * 2) 0; margin-top: calc(-1 * var(--space-2)); gap: var(--space-2) !important; }
   .field { display: grid; }
 </style>
 `
@@ -710,6 +711,38 @@ test('CATCHES any property on .dialog-form.<own-class> other than gap, padding a
   assert.match(result.violations[1].detail, /sets display on \.dialog-form; only gap, padding and margin may change/);
   assert.match(result.violations[2].detail, /sets overflow-y, min-height on/);
   assert.match(result.violations[4].detail, /sets position, max-height, height on/);
+});
+
+test('CATCHES a spacing value on .dialog-form.<own-class> other than 0, a space token or a calc() of those', () => {
+  writeFixture(
+    'src/routes/tier/+page.svelte',
+    `<p>x</p>
+
+<style>
+  :global(.dialog-form.tier-form) { margin-block-end: -100dvh; }
+  :global(.dialog-form.tier-form) { margin: auto; }
+  :global(.dialog-form.tier-form) { padding: 10px var(--space-2); }
+  :global(.dialog-form.tier-form) { gap: calc(100% - var(--space-2)); }
+</style>
+`
+  );
+  writeFixture('src/lib/styles/forms.css', '.dialog-form.x { margin-top: var(--other-token); }\n');
+
+  const result = scan();
+  assert.deepEqual(
+    result.violations.map((v) => `${v.file} ${v.rule}@${v.line}`),
+    [
+      'src/lib/styles/forms.css global-style@1',
+      'src/routes/tier/+page.svelte global-style@4',
+      'src/routes/tier/+page.svelte global-style@5',
+      'src/routes/tier/+page.svelte global-style@6',
+      'src/routes/tier/+page.svelte global-style@7',
+    ]
+  );
+  assert.match(
+    result.violations[1].detail,
+    /sets margin-block-end: -100dvh on \.dialog-form; spacing takes 0, var\(--space-\*\) or a calc\(\) of those/
+  );
 });
 
 test('CATCHES .dialog-form styled bare, inside a combinator, or around a descendant', () => {
@@ -905,6 +938,41 @@ test("ALLOWS org-brand's [class*='-title'], other escapes, another @scope, and g
   assert.deepEqual(summary(scan()), []);
 });
 
+test("CATCHES a component's svelte-<hash> scoping class in a global selector, in a .svelte and a .css", () => {
+  writeFixture(
+    'src/routes/hash/+page.svelte',
+    `<div class="x">x</div>
+<style>
+  :global(div.svelte-1vhe744.svelte-1vhe744) { flex: none; }
+  .x :global(.svelte-abcdef) { color: red; }
+</style>
+`
+  );
+  writeFixture('src/lib/styles/hash.css', '.svelte-1vhe744 > div { overflow: visible; }\n');
+
+  const result = scan();
+  assert.deepEqual(
+    result.violations.map((v) => `${v.file} ${v.rule}@${v.line}`),
+    ['src/lib/styles/hash.css global-style@1', 'src/routes/hash/+page.svelte global-style@3', 'src/routes/hash/+page.svelte global-style@4']
+  );
+  assert.match(result.violations[1].detail, /names \.svelte-1vhe744, another component's scoping class/);
+});
+
+test('ALLOWS a class that only contains svelte-, a hyphenated svelte- name, and the hash inside ui/Dialog/', () => {
+  writeFixture(
+    'src/routes/hash/+page.svelte',
+    `<div class="x">x</div>
+<style>
+  :global(.my-svelte-1vhe744) { color: red; }
+  :global(.svelte-virtual-list) { height: 100%; }
+</style>
+`
+  );
+  writeFixture('src/lib/components/ui/Dialog/DialogBody.svelte', '<div class="dialog-body"><slot /></div>\n<style>\n  :global(.svelte-1vhe744) { flex: none; }\n</style>\n');
+
+  assert.deepEqual(summary(scan()), []);
+});
+
 test('CATCHES a class a page hands a Dialog part, restyled through :global', () => {
   writeFixture(
     'src/routes/drawer/+page.svelte',
@@ -919,13 +987,13 @@ test('CATCHES a class a page hands a Dialog part, restyled through :global', () 
 
 <style>
   :global(.my-drawer) { position: fixed; }
-  .wrap :global(.my-head) { padding: 0; }
+  :global(.wrap .my-head) { padding: 0; }
   :global(.is-narrow:hover) { overflow: hidden; }
   :global(.my-foot) { border: none; }
   :global {
     .my-body { gap: 0; }
   }
-  .page {
+  :global(.page) {
     :global(.my-drawer > .my-body) { display: block; }
   }
 </style>
@@ -945,7 +1013,11 @@ test('CATCHES a class a page hands a Dialog part, restyled through :global', () 
   ]);
   assert.match(result.violations[1].detail, /restyles Dialog\.Content through its class \.my-drawer/);
   assert.match(result.violations[3].detail, /Dialog\.Body through its class \.is-narrow/);
-  assert.match(result.violations[4].detail, /Dialog\.Footer through its class \.my-foot/);
+  // A same-file hit names the page's own fix, and Footer's own prop.
+  assert.match(
+    result.violations[4].detail,
+    /Dialog\.Footer through its class \.my-foot; put it on your own element inside Dialog\.Footer \(a part takes props, not utility classes; Footer's align="end" \| "between"\)/
+  );
 });
 
 test('ALLOWS a part class as an ancestor, a Title class, scoped CSS and the Form spacing case', () => {
@@ -966,6 +1038,12 @@ test('ALLOWS a part class as an ancestor, a Title class, scoped CSS and the Form
   :global(.dialog-form.my-form) { gap: var(--space-4); }
   :global(.other:not(.my-drawer)) { color: red; }
   .my-drawer { color: red; }
+  /* A scoped ancestor is this file's own element; the Dialog renders in a
+     portal under <body>, never inside it. */
+  .wrap :global(.my-drawer) { position: fixed; }
+  .page {
+    :global(.my-drawer > div) { flex: none; }
+  }
 </style>
 `
   );
@@ -997,6 +1075,7 @@ test('CATCHES a walk from a part class to an element no class names, and class:/
   const result = scan();
   assert.deepEqual(summary(result), ['part-class@13', 'part-class@14', 'part-class@15', 'part-class@16', 'part-class@17']);
   assert.match(result.violations[0].detail, /walks from Dialog\.Content's class \.panel to an element no class names/);
+  assert.match(result.violations[1].detail, /inside Dialog\.Toolbar \(a part takes props, not utility classes; Toolbar's direction="row" \| "column"\)/);
   assert.match(result.violations[3].detail, /Dialog\.Body through its class \.tall/);
 });
 
@@ -1016,6 +1095,128 @@ test('ALLOWS a walk from a part class to a classed element, a scoped subject, an
   .panel > div { color: red; }
 </style>
 `
+  );
+
+  assert.deepEqual(summary(scan()), []);
+});
+
+test("CATCHES an expression-valued handle under ANY value test, a div/form/* subject, and a sibling walk from any part", () => {
+  writeFixture(
+    'src/routes/state/+page.svelte',
+    `${IMPORT}
+<Dialog.Root>
+  <Dialog.Content class="panel">
+    <Dialog.Header class="my-head"><Dialog.Title>T</Dialog.Title></Dialog.Header>
+    <Dialog.Form class="my-form">
+      <Dialog.Body data-x={view} data-state={status}>b</Dialog.Body>
+      <Dialog.Footer hidden={!dirty}>f</Dialog.Footer>
+    </Dialog.Form>
+  </Dialog.Content>
+</Dialog.Root>
+
+<style>
+  :global([data-x='a']) { flex: none; }
+  :global(div[data-state='open']) { overflow: visible; }
+  :global(div[hidden]) { display: flex; }
+  :global(.my-head + div) { flex: none; }
+  :global(.my-head ~ *) { flex: none; }
+  :global(form.my-form) { display: block; }
+  :global(.my-form > div) { flex: none; }
+  :global(div:has(> .my-head) > div) { flex: none; }
+</style>
+`
+  );
+
+  const result = scan();
+  // An {expression} value is unknown, so it may be whatever a rule tests: 'a', 'open'.
+  // @23: the parent of a Header is Content, whatever part names it.
+  assert.deepEqual(summary(result), [
+    'part-class@16',
+    'part-class@17',
+    'part-class@18',
+    'part-class@19',
+    'part-class@20',
+    'part-class@21',
+    'part-class@22',
+    'part-class@23',
+  ]);
+  assert.match(result.violations[0].detail, /restyles Dialog\.Body through its attribute \[data-x\]/);
+  assert.match(result.violations[3].detail, /walks from Dialog\.Header's class \.my-head to an element no class names/);
+  assert.match(result.violations[6].detail, /walks from Dialog\.Form's class \.my-form/);
+});
+
+test('ALLOWS a subject of an element type no part renders, and a child or descendant walk from a Body, Header, Footer or Toolbar', () => {
+  writeFixture(
+    'src/routes/palette/+page.svelte',
+    `${IMPORT}
+<Dialog.Root>
+  <Dialog.Content aria-label={label}>
+    <Dialog.Header class="my-head"><Dialog.Title>T</Dialog.Title></Dialog.Header>
+    <Dialog.Toolbar class="tools"><input /></Dialog.Toolbar>
+    <Dialog.Body class="gallery picker" role="listbox" data-state={status}>b</Dialog.Body>
+    <Dialog.Footer class="my-foot" hidden={!dirty}>f</Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>
+
+<style>
+  :global(.gallery > div) { display: grid; }
+</style>
+`
+  );
+  // Today's rules elsewhere, each beside a plausible handle (review c3, G3-L1).
+  // Below a Body, Header, Footer or Toolbar sit only the page's own elements.
+  writeFixture(
+    'src/lib/styles/app.css',
+    [
+      'media-controller[hidden] { display: none; }',
+      "button[data-state='open'] { color: red; }",
+      'nav[aria-label] ol { display: flex; }',
+      'button[aria-label] svg { width: 1rem; }',
+      '.gallery img { width: 100%; }',
+      '.picker li + li { margin-top: 0; }',
+      "[role='listbox'] [role='option'] { padding: 0; }",
+      '.my-head > div { display: flex; }',
+      '.tools div { gap: 0; }',
+      '.my-foot > * { margin: 0; }',
+      'section.my-foot { display: none; }',
+      '',
+    ].join('\n')
+  );
+
+  assert.deepEqual(summary(scan()), []);
+});
+
+/** A page whose part classes are decided by expressions with literals in every position. */
+const CLASS_EXPR_PAGE = (rules) => `<script lang="ts">
+  import * as Dialog from '$lib/components/ui/Dialog';
+  let { mode, layout, tone } = $props();
+</script>
+
+<Dialog.Root>
+  <Dialog.Content class={mode === 'grid' ? 'is-grid' : 'is-list'}>
+    <Dialog.Body class={{ roomy: layout === 'flex' }}>b</Dialog.Body>
+    <Dialog.Footer class={['foot', tone === 'warm' && 'toned']}>f</Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>
+
+<style>
+${rules}
+</style>
+`;
+
+test("CATCHES a class a part's class expression can result in: a branch, an object's key, &&'s right side", () => {
+  writeFixture(
+    'src/routes/classes/+page.svelte',
+    CLASS_EXPR_PAGE(['  :global(.is-list) { flex: none; }', '  :global(.roomy) { flex: none; }', '  :global(.toned) { flex: none; }'].join('\n'))
+  );
+
+  assert.deepEqual(summary(scan()), ['part-class@14', 'part-class@15', 'part-class@16']);
+});
+
+test("ALLOWS a literal no part's class can result in: a conditional's test, an object's value, &&'s left side", () => {
+  writeFixture(
+    'src/routes/classes/+page.svelte',
+    CLASS_EXPR_PAGE(['  :global(.grid) { display: grid; }', '  :global(.flex) { display: flex; }', '  :global(.warm) { color: red; }'].join('\n'))
   );
 
   assert.deepEqual(summary(scan()), []);
@@ -1054,14 +1255,18 @@ test("CATCHES a part's class, id or attribute restyled from ANOTHER file, and na
 <style>
   :global(div.tier-panel.tier-panel) { max-height: none; }
   :is(:global(.studio-drawer__body.studio-drawer__body)) { flex: none; }
-  .wrap :is(:global(#tier-body)) { flex: none; }
+  :global(.wrap) :is(:global(#tier-body)) { flex: none; }
 </style>
 `
   );
 
   const result = scan();
+  const tier = 'src/routes/tier/+page.svelte';
   assert.deepEqual(
-    result.violations.map((v) => `${v.file} ${v.rule}@${v.line}`).sort(),
+    result.violations
+      .filter((v) => v.file !== tier)
+      .map((v) => `${v.file} ${v.rule}@${v.line}`)
+      .sort(),
     [
       'src/lib/styles/studio.css part-class@1',
       'src/lib/styles/studio.css part-class@2',
@@ -1078,8 +1283,26 @@ test("CATCHES a part's class, id or attribute restyled from ANOTHER file, and na
       'src/routes/+layout.svelte part-class@6',
     ]
   );
+  // Each cross-file hit is told to the page that handed the part its handle, at that line.
+  const echoes = result.violations.filter((v) => v.file === tier);
+  assert.deepEqual(echoes.map((v) => `${v.rule}@${v.line}`).sort(), [
+    ...Array(3).fill('part-class@6'),
+    ...Array(9).fill('part-class@7'),
+  ]);
+  assert.match(
+    echoes.find((v) => v.detail.includes('studio.css:1 ')).detail,
+    /^Dialog\.Body's class \.studio-drawer__body is restyled from src\/lib\/styles\/studio\.css:1 \(.*\); put it on your own element inside Dialog\.Body .*, or rename it$/
+  );
+  // An attribute can't be renamed out of the rule's way; an id can.
+  const attrEcho = echoes.find((v) => v.detail.includes('studio.css:3 ')).detail;
+  assert.match(attrEcho, /\(a part takes props, not hooks for page CSS; Content's props/);
+  assert.doesNotMatch(attrEcho, /rename/);
+  assert.match(echoes.find((v) => v.detail.includes('studio.css:2 ')).detail, /not hooks for page CSS\), or rename it$/);
   const at = (file, line) => result.violations.find((v) => v.file.endsWith(file) && v.line === line).detail;
-  assert.match(at('studio.css', 1), /restyles Dialog\.Body through its class \.studio-drawer__body \(src\/routes\/tier\/\+page\.svelte hands it to Dialog\.Body\)/);
+  assert.match(
+    at('studio.css', 1),
+    /restyles Dialog\.Body through its class \.studio-drawer__body \(src\/routes\/tier\/\+page\.svelte:7 hands it to Dialog\.Body\); in src\/routes\/tier\/\+page\.svelte, put it on your own element inside Dialog\.Body .*, or here give this selector's subject a class of its own$/
+  );
   assert.match(at('studio.css', 2), /through its id #tier-body/);
   assert.match(at('studio.css', 3), /Dialog\.Content through its attribute \[data-testid\]/);
   assert.match(at('studio.css', 5), /walks from Dialog\.Content's class \.tier-panel .* to an element no class names/);
@@ -1098,6 +1321,8 @@ test("ALLOWS a part's handle as an ancestor of a classed element, another value,
       "[data-testid='other'] { flex: none; }",
       '.other:not(.tier-panel) { flex: none; }',
       ':is(.mine, .other) { flex: none; }',
+      // An id no part takes makes the subject the page's own, whatever else it tests.
+      "#hero[data-testid='tier-dialog'] { flex: none; }",
       '',
     ].join('\n')
   );
@@ -1111,6 +1336,93 @@ test("ALLOWS a part's handle as an ancestor of a classed element, another value,
   div:has(:global(.studio-drawer__body)) { color: red; }
   /* Inside :global too, each :is() alternative is the page's own element. */
   :global(.tier-panel > :is(.row, .cell)) { gap: 0; }
+</style>
+`
+  );
+
+  assert.deepEqual(summary(scan()), []);
+});
+
+/** A page whose Body's id is built by an expression: known only by its leading text. */
+const BUILT_ID_PAGE = `<script lang="ts">
+  import * as Dialog from '$lib/components/ui/Dialog';
+  let { tier } = $props();
+</script>
+<Dialog.Root>
+  <Dialog.Content><Dialog.Body id="tier-body-{tier.id}">b</Dialog.Body></Dialog.Content>
+</Dialog.Root>
+`;
+
+test('CATCHES an id an expression builds, under any test its leading text can meet', () => {
+  writeFixture('src/routes/tier/+page.svelte', BUILT_ID_PAGE);
+  writeFixture(
+    'src/lib/styles/tier.css',
+    [
+      "[id^='tier-body-'] { flex: none; }",
+      '#tier-body-3 { flex: none; }',
+      "[id^='tier'] { flex: none; }",
+      "[id$='-3'] { flex: none; }",
+      "[id*='body'] { flex: none; }",
+      '',
+    ].join('\n')
+  );
+
+  const result = scan();
+  assert.deepEqual(
+    result.violations.filter((v) => v.file.endsWith('tier.css')).map((v) => `${v.rule}@${v.line}`),
+    ['part-class@1', 'part-class@2', 'part-class@3', 'part-class@4', 'part-class@5']
+  );
+  assert.match(result.violations[0].detail, /restyles Dialog\.Body through its id tier-body-…/);
+});
+
+test('ALLOWS an id test that leading text can never meet, and another id', () => {
+  writeFixture('src/routes/tier/+page.svelte', BUILT_ID_PAGE);
+  writeFixture(
+    'src/lib/styles/tier.css',
+    ["[id^='tier-head-'] { flex: none; }", '#tier-head-3 { flex: none; }', "[id='tier-body'] { flex: none; }", ''].join('\n')
+  );
+
+  assert.deepEqual(summary(scan()), []);
+});
+
+test("CATCHES an @scope in a .svelte whose root is a part's handle, through a global rule inside it", () => {
+  writeFixture(
+    'src/routes/scope/+page.svelte',
+    `${IMPORT}
+<Dialog.Root>
+  <Dialog.Content class="tier-panel"><Dialog.Body>b</Dialog.Body></Dialog.Content>
+</Dialog.Root>
+
+<style>
+  @scope (.tier-panel) {
+    :global(div:not(#_)) { flex: none; }
+  }
+</style>
+`
+  );
+
+  const result = scan();
+  // Svelte emits an @scope prelude as written, unscoped: its root is global.
+  assert.deepEqual(summary(result), ['part-class@11']);
+  assert.match(result.violations[0].detail, /walks from Dialog\.Content's class \.tier-panel to an element no class names/);
+});
+
+test("ALLOWS a scoped rule inside a part's @scope, and a global rule inside a page's", () => {
+  writeFixture(
+    'src/routes/scope/+page.svelte',
+    `${IMPORT}
+<Dialog.Root>
+  <Dialog.Content class="tier-panel"><Dialog.Body><p class="row">b</p></Dialog.Body></Dialog.Content>
+</Dialog.Root>
+
+<style>
+  @scope (.tier-panel) {
+    .row { gap: 0; }
+    div { color: red; }
+  }
+  @scope (.page) {
+    :global(div) { flex: none; }
+  }
 </style>
 `
   );
@@ -1218,6 +1530,8 @@ test("ALLOWS Content's size props, a styled Title, a styled page element, and th
     <Dialog.Body><p style="height: 100vh">a page element may</p></Dialog.Body>
   </Dialog.Content>
 </Dialog.Root>
+<Dialog.Root><Dialog.Content maxWidth="min(35rem, 90vw)" maxHeight="var(--container-sm)"><Dialog.Body>b</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxWidth={width} maxHeight={wide ? '80dvh' : 'calc(100dvh - 4rem)'}><Dialog.Body>c</Dialog.Body></Dialog.Content></Dialog.Root>
 `
   );
   writeFixture(
@@ -1226,6 +1540,29 @@ test("ALLOWS Content's size props, a styled Title, a styled page element, and th
   );
 
   assert.deepEqual(summary(scan()), []);
+});
+
+test("CATCHES a maxHeight or maxWidth on Content that is not a CSS length: a keyword, a unitless number, a bare prop", () => {
+  writeFixture(
+    'src/routes/size/+page.svelte',
+    `<script lang="ts">
+  import * as Dialog from '$lib/components/ui/Dialog';
+  let { wide } = $props();
+</script>
+<Dialog.Root><Dialog.Content maxHeight="none"><Dialog.Body>a</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxWidth="auto"><Dialog.Body>b</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight="90"><Dialog.Body>c</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={90}><Dialog.Body>d</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxWidth={wide ? 'none' : '40rem'}><Dialog.Body>e</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight><Dialog.Body>f</Dialog.Body></Dialog.Content></Dialog.Root>
+`
+  );
+
+  const result = scan();
+  assert.deepEqual(summary(result), ['part-style@5', 'part-style@6', 'part-style@7', 'part-style@8', 'part-style@9', 'part-style@10']);
+  assert.match(result.violations[0].detail, /<Dialog\.Content> maxHeight="none" is not a CSS length, so the panel loses its cap/);
+  assert.match(result.violations[3].detail, /maxHeight="90" is not a CSS length/);
+  assert.match(result.violations[4].detail, /maxWidth="none" is not a CSS length/);
 });
 
 test('CATCHES a spread, or a class held in a variable, a prop or an interpolation, on a part', () => {
@@ -1303,6 +1640,80 @@ test("ALLOWS the component's own <style>, other head tags, and {@html} without a
   .x { color: red; }
 </style>
 `
+  );
+
+  assert.deepEqual(summary(scan()), []);
+});
+
+test("CATCHES an {@html} of a same-file const that holds a <style> or a <dialog>", () => {
+  writeFixture(
+    'src/routes/markup/+page.svelte',
+    `<script lang="ts">
+  const css = '<style>p { color: red; }</style>';
+  const modal = \`<dialog open>x</dialog>\`;
+</script>
+
+<div>{@html css}</div>
+<div>{@html modal}</div>
+`
+  );
+
+  assert.deepEqual(summary(scan()), ['markup-style@6', 'own-dialog@7']);
+});
+
+test('ALLOWS an {@html} of a same-file const with neither, and a const <style> never written', () => {
+  writeFixture(
+    'src/routes/markup/+page.svelte',
+    `<script lang="ts">
+  const note = '<p>style</p>';
+  const unused = '<style>p { color: red; }</style>';
+</script>
+
+<div>{@html note}</div>
+`
+  );
+
+  assert.deepEqual(summary(scan()), []);
+});
+
+test('CATCHES a string naming a Dialog class as a selector: in script, a markup expression, a template, a .ts', () => {
+  writeFixture(
+    'src/routes/script/+page.svelte',
+    `<script lang="ts">
+  const body = document.querySelector('.dialog-body');
+  const foot = () => document.querySelector(\`.dialog-footer > button\`);
+</script>
+
+<div {@attach (node) => { node.closest('.dialog-content').style.maxHeight = 'none'; }}>x</div>
+`
+  );
+  writeFixture('src/lib/dom/find.ts', "export const findBody = () => document.querySelector('.dialog-body');\n");
+
+  const result = scan();
+  assert.deepEqual(
+    result.violations.map((v) => `${v.file} ${v.rule}@${v.line}`),
+    ['src/lib/dom/find.ts script-select@1', 'src/routes/script/+page.svelte script-select@2', 'src/routes/script/+page.svelte script-select@3', 'src/routes/script/+page.svelte script-select@6']
+  );
+  assert.match(result.violations[3].detail, /a string names the Dialog's \.dialog-content as a selector, so script can find the part/);
+});
+
+test("ALLOWS a Dialog class name without its dot, a longer class, a comment, page text, and the parts' own files", () => {
+  writeFixture(
+    'src/routes/script/+page.svelte',
+    `<script lang="ts">
+  // document.querySelector('.dialog-body') would find the part
+  const name = 'dialog-body';
+  const mine = '.my-dialog-body, .dialog-body-wrapper';
+</script>
+
+<p>Style .dialog-body only in ui/Dialog.</p>
+`
+  );
+  writeFixture('src/lib/dom/find.ts', "/* querySelector('.dialog-body') */\nexport const cls = 'dialog-body';\n");
+  writeFixture('src/lib/components/ui/Dialog/scroll-lock.ts', "export const find = (n: Element) => n.closest('.dialog-body');\n");
+  writeFixture(
+    'src/lib/components/ui/Dialog/DialogBody.svelte',
+    "<script lang=\"ts\">\n  const sel = '.dialog-footer';\n</script>\n<div class=\"dialog-body\"><slot /></div>\n"
   );
 
   assert.deepEqual(summary(scan()), []);
@@ -1405,6 +1816,9 @@ test("CATCHES a page setting a part's own data attributes, or a dialog role / ar
   assert.deepEqual(summary(result), ['part-attr@6', 'part-attr@6', 'part-attr@7', 'part-attr@8', 'part-attr@9', 'part-attr@10']);
   assert.match(result.violations[0].detail, /sets role="alertdialog"; .*for an alert dialog, use Dialog\.Root's role="alertdialog"/);
   assert.match(result.violations[4].detail, /<Dialog\.Body> sets data-layout, which the part sets itself and its CSS reads/);
+  // Each names the prop that replaces it.
+  assert.match(result.violations[3].detail, /data-direction, .*Toolbar's direction="row" \| "column"/);
+  assert.match(result.violations[5].detail, /data-align, .*Footer's align="end" \| "between"/);
 });
 
 test("ALLOWS Root's role, a test id and other roles on a part, a page element's data attributes, and Popover roles", () => {
@@ -1680,6 +2094,21 @@ test('the CLI exits 1 on a tree with a violation and 0 on a clean one (--root)',
 
   const missing = runGate(GATE, '--root');
   assert.equal(missing.status, 2, missing.stderr);
+});
+
+test('the CLI takes --root=<dir>, and exits 2 on an empty --root= or any unknown argument', () => {
+  writeFixture('src/routes/bad/+page.svelte', `${IMPORT}<Dialog.Root><Dialog.Content><div><Dialog.Body>x</Dialog.Body></div></Dialog.Content></Dialog.Root>\n`);
+  const bad = runGate(GATE, `--root=${root}`);
+  assert.equal(bad.status, 1, bad.stderr);
+  assert.match(bad.stderr, /src\/routes\/bad\/\+page\.svelte:4 content-child/);
+
+  // A mistyped flag must not fall back to scanning the real tree.
+  const typo = runGate(GATE, '--rot', root);
+  assert.equal(typo.status, 2, typo.stderr);
+  assert.match(typo.stderr, /unknown argument '--rot'/);
+  const empty = runGate(GATE, '--root=');
+  assert.equal(empty.status, 2, empty.stderr);
+  assert.match(empty.stderr, /--root needs a directory/);
 });
 
 test('runs main() when started through a symlinked path', () => {
