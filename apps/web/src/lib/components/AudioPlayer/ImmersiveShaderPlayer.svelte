@@ -12,20 +12,6 @@
   @prop {() => void} onclose - Called when user exits immersive mode
   @prop {HTMLElement | null} opener - What opened it; focus goes back there as it closes
 -->
-<script module lang="ts">
-  /**
-   * Whether this browser can show the player: a modal `<dialog>`. Safari
-   * before 15.4 has none, so AudioPlayer offers no immersive mode there, as
-   * GalleryBlock offers no lightbox.
-   */
-  export function canShowImmersive(): boolean {
-    return (
-      typeof HTMLDialogElement === 'function' &&
-      typeof HTMLDialogElement.prototype.showModal === 'function'
-    );
-  }
-</script>
-
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import type { Attachment } from 'svelte/attachments';
@@ -324,7 +310,7 @@
    * app's one counted scroll lock, which a dialog holds too.
    *
    * A `showModal()` that throws (an `InvalidStateError`; no `showModal` at
-   * all is never offered, see `canShowImmersive`) takes the player away and
+   * all is never offered, see `immersive-support.ts`) takes the player away and
    * says it has closed, or it would stay mounted over a page it never
    * covered; the page was never held. Thrown from here, with no boundary
    * above, it would halt the page's updates, so it is logged, never rethrown.
