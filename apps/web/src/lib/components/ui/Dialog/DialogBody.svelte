@@ -15,7 +15,7 @@
 
 <div
   {...restProps}
-  class="dialog-body {className ?? ''}"
+  class={['dialog-body', className]}
   data-layout={layout?.current}
   data-flush={layout?.flush ? '' : undefined}
 >

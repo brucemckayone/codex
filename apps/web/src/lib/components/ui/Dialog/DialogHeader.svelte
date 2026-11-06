@@ -13,7 +13,7 @@
 
 <div
   {...restProps}
-  class="dialog-header {className ?? ''}"
+  class={['dialog-header', className]}
   data-flush={layout?.flush ? '' : undefined}
 >
   {@render children()}

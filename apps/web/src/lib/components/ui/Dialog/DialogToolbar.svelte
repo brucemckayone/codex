@@ -32,7 +32,7 @@
 
 <div
   {...restProps}
-  class="dialog-toolbar {className ?? ''}"
+  class={['dialog-toolbar', className]}
   data-direction={direction}
   data-layout={layout?.current}
   data-flush={layout?.flush ? '' : undefined}

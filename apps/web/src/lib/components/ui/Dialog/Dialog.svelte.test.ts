@@ -546,6 +546,38 @@ describe('Dialog parts own their attributes', () => {
       expect(root?.getAttribute(name)).toBe(value);
     }
   });
+
+  // A class may be an object or an array, as on any element (Svelte's
+  // clsx). Interpolated into the part's own class string, it rendered as
+  // "[object Object]" (review G4-L8).
+  const PAGE_CLASS = { class: ['page', { active: true, off: false }] };
+  test.each(
+    parts
+  )('%s takes a class object or array, as an element does', (_name, Part, selector) => {
+    component = mount(Part, {
+      target: document.body,
+      props: { children, ...PAGE_CLASS },
+    });
+    flushSync();
+
+    const root = document.querySelector(selector);
+    expect(root?.getAttribute('class')).not.toContain('[object');
+    expect(root?.classList.contains('page')).toBe(true);
+    expect(root?.classList.contains('active')).toBe(true);
+    expect(root?.classList.contains('off')).toBe(false);
+  });
+
+  test('Content takes a class object too', () => {
+    component = mount(DialogHarness, {
+      target: document.body,
+      props: { open: true, contentProps: { class: { 'page-panel': true } } },
+    });
+    flushSync();
+
+    const panel = document.querySelector('.dialog-content');
+    expect(panel?.getAttribute('class')).not.toContain('[object');
+    expect(panel?.classList.contains('page-panel')).toBe(true);
+  });
 });
 
 describe('Dialog dismissible', () => {

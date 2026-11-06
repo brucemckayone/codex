@@ -192,7 +192,7 @@
       <div
         use:melt={$content}
         {...restProps}
-        class="dialog-content {className ?? ''}"
+        class={['dialog-content', className]}
         data-size={size}
         data-variant={variant}
         data-sheet={drawerFlag(sheet)}
