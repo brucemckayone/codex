@@ -1392,19 +1392,22 @@ test('CATCHES an id known by its trailing text, and an id of literals or same-fi
     'src/routes/palette/+page.svelte',
     `<script lang="ts">
   import * as Dialog from '$lib/components/ui/Dialog';
+  let { kind }: { kind: string } = $props();
   const uid = $props.id();
   const BODY_ID = 'tier-body';
   const HEAD = 'x';
-  const NESTED_ID = \`\${HEAD}-body\`;
+  const NESTED_ID = \`\${HEAD}-nest\`;
 </script>
 <Dialog.Root><Dialog.Content><Dialog.Body id="{uid}-results" role="listbox">a</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content><Dialog.Body id={BODY_ID}>b</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content><Dialog.Body id={'lit-body'}>c</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content><Dialog.Body id={\`tpl-body\`}>d</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content><Dialog.Body id={NESTED_ID}>e</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content><Dialog.Body id="{kind}-delta">f</Dialog.Body></Dialog.Content></Dialog.Root>
 `
   );
   // Review c5 (G5-G-L1): the c4 fix dropped these with the empty prefix.
+  // No id here has a known head, so a prefix can't answer for a suffix's test.
   writeFixture(
     'src/lib/styles/layout.css',
     [
@@ -1417,7 +1420,10 @@ test('CATCHES an id known by its trailing text, and an id of literals or same-fi
       '#tier-body { overflow: visible; }',
       '#lit-body { overflow: visible; }',
       '#tpl-body { overflow: visible; }',
-      '#x-body { overflow: visible; }',
+      '#x-nest { overflow: visible; }',
+      // `*=` across the unknown head (review c6, G6-G-N5): `{kind}-delta` can hold both.
+      "[id*='tier-delta'] { flex: none; }",
+      "[id*='r-del'] { flex: none; }",
       '',
     ].join('\n')
   );
@@ -1425,18 +1431,18 @@ test('CATCHES an id known by its trailing text, and an id of literals or same-fi
   const result = scan();
   assert.deepEqual(
     result.violations.filter((v) => v.file.endsWith('layout.css')).map((v) => `${v.rule}@${v.line}`),
-    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((line) => `part-class@${line}`)
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((line) => `part-class@${line}`)
   );
   assert.match(result.violations[0].detail, /restyles Dialog\.Body through its id …-results/);
 });
 
-test('CATCHES an id built inside one expression: a template, a string +, a const of either, its prefix side', () => {
+test('CATCHES an id built inside one expression: a template, a string +, a const of either, its prefix side, under as', () => {
   // Review c6 (G6-G-L2): an id built inside ONE expression, or a const of one.
   writeFixture(
     'src/routes/built/+page.svelte',
     `<script lang="ts">
   import * as Dialog from '$lib/components/ui/Dialog';
-  let { kind, tier }: { kind: string; tier: { id: string } } = $props();
+  let { tier }: { tier: { id: string } } = $props();
   const uid = $props.id();
   const KILO_ID = \`\${uid}-kilo\`;
 </script>
@@ -1444,7 +1450,7 @@ test('CATCHES an id built inside one expression: a template, a string +, a const
 <Dialog.Root><Dialog.Content><Dialog.Body id={uid + '-bravo'}>b</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content><Dialog.Body id={KILO_ID}>c</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content><Dialog.Body id={\`india-\${tier.id}\`}>d</Dialog.Body></Dialog.Content></Dialog.Root>
-<Dialog.Root><Dialog.Content><Dialog.Body id="{kind}-delta">e</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content><Dialog.Body id={\`\${uid}-juliet\` as string}>e</Dialog.Body></Dialog.Content></Dialog.Root>
 `
   );
   writeFixture(
@@ -1454,9 +1460,7 @@ test('CATCHES an id built inside one expression: a template, a string +, a const
       '#tier-bravo { flex: none; }',
       '#a-kilo { flex: none; }',
       '#india-1 { flex: none; }',
-      // `*=` across the unknown head (G6-G-N5): `{kind}-delta` can hold both.
-      "[id*='tier-delta'] { flex: none; }",
-      "[id*='r-del'] { flex: none; }",
+      '#a-juliet { flex: none; }',
       '',
     ].join('\n')
   );
@@ -1464,7 +1468,7 @@ test('CATCHES an id built inside one expression: a template, a string +, a const
   const result = scan();
   assert.deepEqual(
     result.violations.filter((v) => v.file.endsWith('built.css')).map((v) => `${v.rule}@${v.line}`),
-    [1, 2, 3, 4, 5, 6].map((line) => `part-class@${line}`)
+    [1, 2, 3, 4, 5].map((line) => `part-class@${line}`)
   );
 });
 
