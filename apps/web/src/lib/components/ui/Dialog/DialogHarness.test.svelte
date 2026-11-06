@@ -32,6 +32,8 @@
     withForm?: boolean;
     /** A Dialog.Toolbar between Header and Body. */
     withToolbar?: boolean;
+    /** A text field at the end of the Body. */
+    withField?: boolean;
     /** Attributes a page hands Content and Body, beyond their props. */
     contentProps?: Record<string, unknown>;
     bodyProps?: Record<string, unknown>;
@@ -58,6 +60,7 @@
     motion,
     withForm = false,
     withToolbar = false,
+    withField = false,
     contentProps = {},
     bodyProps = {},
   }: Props = $props();
@@ -67,6 +70,9 @@
   <DialogBody {...bodyProps}>
     <button type="button" data-testid="first-focusable">First focusable</button>
     <button type="button" data-testid="second-focusable">Second focusable</button>
+    {#if withField}
+      <input aria-label="Field" data-testid="field" value="Typed" />
+    {/if}
   </DialogBody>
 {/snippet}
 

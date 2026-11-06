@@ -272,6 +272,74 @@ describe('Dialog focus return', () => {
   });
 });
 
+// WebKit kept the caret of a field focused in the closing panel, and when
+// the panel left the DOM it scrolled the page to the caret's new place at
+// the top (review N7). The caret goes with the close.
+describe('Dialog caret at the close', () => {
+  const mounted: ReturnType<typeof mount>[] = [];
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    for (const component of mounted.splice(0)) unmount(component);
+    window.getSelection()?.removeAllRanges();
+    document.body.innerHTML = '';
+  });
+
+  function openDialog() {
+    const props = $state({ open: true, withField: true });
+    mounted.push(mount(DialogHarness, { target: document.body, props }));
+    flushSync();
+    return props;
+  }
+  const panelButton = () =>
+    document.querySelector<HTMLElement>('[data-testid="first-focusable"]');
+
+  // WebKit anchors a field's caret in the field's own inner tree, a node
+  // the panel does not contain: a detached one stands in for it.
+  test('a field focused in the panel loses its caret as the dialog closes', () => {
+    const props = openDialog();
+    document.querySelector<HTMLInputElement>('[data-testid="field"]')?.focus();
+    const caret = {
+      anchorNode: document.createElement('div'),
+      removeAllRanges: vi.fn(),
+    };
+    vi.spyOn(window, 'getSelection').mockReturnValue(
+      caret as unknown as Selection
+    );
+
+    props.open = false;
+    flushSync();
+
+    expect(caret.removeAllRanges).toHaveBeenCalled();
+  });
+
+  test('a selection in the panel goes as the dialog closes', () => {
+    const props = openDialog();
+    const button = panelButton();
+    button?.focus();
+    if (button) window.getSelection()?.selectAllChildren(button);
+
+    props.open = false;
+    flushSync();
+
+    expect(window.getSelection()?.rangeCount).toBe(0);
+  });
+
+  test('a selection on the page behind stays', () => {
+    const text = document.createElement('p');
+    text.textContent = 'On the page';
+    document.body.appendChild(text);
+    const props = openDialog();
+    panelButton()?.focus();
+    window.getSelection()?.selectAllChildren(text);
+
+    props.open = false;
+    flushSync();
+
+    expect(window.getSelection()?.rangeCount).toBe(1);
+  });
+});
+
 // A page's attributes go on before a part's own, so a page can never switch
 // on another layout: `data-layout="drawer"` on a centred dialog's Body turned
 // on its `display: contents` and clipped the Footer (review c2, G2-M2).
