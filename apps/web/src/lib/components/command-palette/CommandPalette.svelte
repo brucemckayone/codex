@@ -97,17 +97,26 @@
     }
   }
 
+  // The arrows bring the row they highlight into view: focus stays in the
+  // box, so the browser never scrolls the list for it. Not an effect on
+  // activeIndex, which a hover moves too, and a hover must not scroll.
+  function highlight(index: number) {
+    activeIndex = index;
+    const item = flatItems[index];
+    if (item) document.getElementById(`cmd-${item.id}`)?.scrollIntoView({ block: 'nearest' });
+  }
+
   function handleKeydown(e: KeyboardEvent) {
     if (!isOpen) return;
 
     switch (e.key) {
       case 'ArrowDown':
         e.preventDefault();
-        activeIndex = (activeIndex + 1) % flatItems.length;
+        highlight((activeIndex + 1) % flatItems.length);
         break;
       case 'ArrowUp':
         e.preventDefault();
-        activeIndex = (activeIndex - 1 + flatItems.length) % flatItems.length;
+        highlight((activeIndex - 1 + flatItems.length) % flatItems.length);
         break;
       case 'Enter':
         e.preventDefault();
@@ -125,6 +134,8 @@
       const at = document.activeElement;
       if (at instanceof HTMLElement && at.isContentEditable) return;
       e.preventDefault();
+      // A held Cmd+K repeats: one press, one toggle.
+      if (e.repeat) return;
       if (isOpen) {
         close();
       } else {
@@ -185,8 +196,11 @@
             <div class="palette__group-label">{group}</div>
             {#each items as item (item.id)}
               {@const globalIndex = flatItems.indexOf(item)}
+              <!-- Not a Tab stop: focus stays in the box and the arrows move
+                   the highlight, so Enter opens the row that is highlighted. -->
               <button
                 id="cmd-{item.id}"
+                tabindex="-1"
                 class="palette__item"
                 class:palette__item--active={globalIndex === activeIndex}
                 role="option"
