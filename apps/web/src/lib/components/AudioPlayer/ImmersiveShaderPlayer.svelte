@@ -434,6 +434,10 @@
   dialog itself, which takes focus as it opens, so the keyboard shortcuts are
   reachable. `showModal()` gives it the dialog role and makes it modal: the
   page behind is inert, so focus cannot leave, and Escape closes it.
+
+  `tabindex="-1"` and its `focus()` are deliberate, not `autofocus`: Chromium
+  focuses no dialog that has autofocus itself, so the Exit button would take
+  focus and Enter would exit at once.
 -->
 <!--
   a11y_no_noninteractive_element_interactions is intentional: the overlay gets
