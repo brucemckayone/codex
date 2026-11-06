@@ -1039,8 +1039,20 @@
                 showImmersive = true;
                 // Fullscreen API requires fresh transient activation — must be
                 // requested synchronously from a user gesture, not from the
-                // overlay's onMount (which runs after several awaits).
-                document.documentElement.requestFullscreen().catch(() => {});
+                // overlay's onMount (which runs after several awaits). The
+                // page goes full screen a moment later: a player already gone
+                // by then (its showModal() threw, or Escape came first) takes
+                // it back out, or the page stays full screen with no player.
+                // iPhone Safari has no Fullscreen API for a page: there the
+                // player opens in the window, and nothing here may throw.
+                document.documentElement.requestFullscreen?.().then(
+                  () => {
+                    if (!showImmersive && document.fullscreenElement) {
+                      document.exitFullscreen().catch(() => {});
+                    }
+                  },
+                  () => {}
+                );
               }}
               aria-label="Enter immersive mode"
               title="Immersive shader mode"
