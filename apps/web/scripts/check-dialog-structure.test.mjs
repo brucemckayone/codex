@@ -1659,6 +1659,10 @@ test("ALLOWS Content's size props, a styled Title, a styled page element, and th
 <Dialog.Root><Dialog.Content maxHeight={\`\${tall ? 48 : 32}rem\`} maxWidth={undefined}><Dialog.Body>e</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content maxHeight={\`calc(100dvh - \${(tall ? '4rem' : '2rem') as string})\`} maxWidth={null}><Dialog.Body>f</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content maxHeight="{tall ? 48 : 32}rem"><Dialog.Body>g</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={\`85\${tall ? 'dvh' : 'vh'}\`} maxWidth={\`\${wide ? '48rem' : '32rem'}\`}><Dialog.Body>h</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={\`\${\`40\`}rem\`} maxWidth={\`\${-48}rem\`}><Dialog.Body>i</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={false} maxWidth={\`min(\${tall ? 90 : 60}dvw, 40rem)\`}><Dialog.Body>j</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={\`\${a ? (b ? 1 : 2) : c ? 3 : 4}\${d ? (e ? 5 : 6) : f ? 7 : 8}rem\`}><Dialog.Body>k</Dialog.Body></Dialog.Content></Dialog.Root>
 `
   );
   // A wrapper inside ui/Dialog/ may forward the props: its own file is the part's.
@@ -1691,6 +1695,10 @@ test("CATCHES a maxHeight or maxWidth on Content that is not a CSS length: a key
 <Dialog.Root><Dialog.Content maxHeight="{rows} none"><Dialog.Body>h</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content maxWidth={wide ? 'none' : width}><Dialog.Body>i</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content maxHeight={true}><Dialog.Body>j</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={\`\${tall ? 'none' : 40}rem\`}><Dialog.Body>k</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={\`\${tall ? '' : 40}rem\`}><Dialog.Body>l</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight="{tall ? 'auto' : 40}rem"><Dialog.Body>m</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={\`\${'' && 48}rem\`}><Dialog.Body>n</Dialog.Body></Dialog.Content></Dialog.Root>
 `
   );
 
@@ -1707,8 +1715,15 @@ test("CATCHES a maxHeight or maxWidth on Content that is not a CSS length: a key
     'part-style@12',
     'part-style@13',
     'part-style@14',
+    'part-style@15',
+    'part-style@16',
+    'part-style@17',
+    'part-style@18',
   ]);
   assert.match(result.violations[9].detail, /maxHeight="true" is not a CSS length/);
+  // A template's literal choices are each tested, as rendered (review c6, G6-G-L3).
+  assert.match(result.violations[10].detail, /maxHeight="nonerem" is not a CSS length/);
+  assert.match(result.violations[12].detail, /maxHeight="autorem" is not a CSS length/);
   assert.match(result.violations[0].detail, /<Dialog\.Content> maxHeight="none" is not a CSS length, so the panel loses its cap/);
   assert.match(result.violations[3].detail, /maxHeight="90" is not a CSS length/);
   assert.match(result.violations[4].detail, /maxWidth="none" is not a CSS length/);
@@ -1737,6 +1752,11 @@ test("CATCHES a maxHeight or maxWidth on Content with no literal: a wrapper's fo
 <Dialog.Root><Dialog.Content maxHeight={\`calc(100dvh - \${offset})\`}><Dialog.Body>i</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content maxWidth={\`\${size.w}rem\`}><Dialog.Body>j</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content maxWidth={\`\${wide && 60}rem\`}><Dialog.Body>k</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={\`\${wide ? rows : '40'}rem\`}><Dialog.Body>l</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={\`\${rows as number}rem\`}><Dialog.Body>m</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={\`\${-rows}rem\`}><Dialog.Body>n</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={\`\${\`\${rows}\`}rem\`}><Dialog.Body>o</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight={\`\${a ? (b ? 1 : 2) : c ? 3 : 4}\${d ? (e ? 5 : 6) : f ? 7 : 8}\${g ? 1 : 2}rem\`}><Dialog.Body>p</Dialog.Body></Dialog.Content></Dialog.Root>
 `
   );
   writeFixture('src/routes/big/+page.svelte', `<script lang="ts">\n  import BigDialog from '$lib/components/BigDialog.svelte';\n</script>\n<BigDialog maxHeight="none" />\n`);
@@ -1745,7 +1765,8 @@ test("CATCHES a maxHeight or maxWidth on Content with no literal: a wrapper's fo
   // @12-16: a template whose `${}` is no literal is "NaNrem" while its prop is unset (review c5).
   assert.deepEqual(
     summary(result),
-    [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16].map((line) => `part-dynamic@${line}`)
+    // @21: more than 16 combinations of literal choices counts as unknown.
+    [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21].map((line) => `part-dynamic@${line}`)
   );
   assert.match(
     result.violations[0].detail,
