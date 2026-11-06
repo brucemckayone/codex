@@ -188,6 +188,7 @@
     <div class="dialog-content-wrapper" data-placement={dialogValue(placement, 'center')}>
       <div
         use:melt={$content}
+        {...restProps}
         class="dialog-content {className ?? ''}"
         data-size={size}
         data-variant={variant}
@@ -202,7 +203,6 @@
         style:--dialog-max-height={maxHeight}
         style:max-height={maxHeight ? 'var(--dialog-max)' : undefined}
         transition:panelMotion
-        {...restProps}
       >
         {@render children()}
         {#if closeButton}

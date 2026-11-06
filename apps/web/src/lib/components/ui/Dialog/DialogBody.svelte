@@ -14,10 +14,10 @@
 </script>
 
 <div
+  {...restProps}
   class="dialog-body {className ?? ''}"
   data-layout={layout?.current}
   data-flush={layout?.flush ? '' : undefined}
-  {...restProps}
 >
   {@render children()}
 </div>

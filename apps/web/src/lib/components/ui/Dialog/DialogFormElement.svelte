@@ -31,7 +31,7 @@
   );
 </script>
 
-<form class="dialog-form {className ?? ''}" data-layout={layout?.current} {...restProps}>
+<form {...restProps} class="dialog-form {className ?? ''}" data-layout={layout?.current}>
   {@render children()}
 </form>
 

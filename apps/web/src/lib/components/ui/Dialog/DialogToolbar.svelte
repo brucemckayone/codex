@@ -27,10 +27,10 @@
 </script>
 
 <div
+  {...restProps}
   class="dialog-toolbar {className ?? ''}"
   data-direction={direction}
   data-flush={layout?.flush ? '' : undefined}
-  {...restProps}
 >
   {@render children()}
 </div>

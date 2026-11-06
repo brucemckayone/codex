@@ -31,6 +31,9 @@
     withForm?: boolean;
     /** A Dialog.Toolbar between Header and Body. */
     withToolbar?: boolean;
+    /** Attributes a page hands Content and Body, beyond their props. */
+    contentProps?: Record<string, unknown>;
+    bodyProps?: Record<string, unknown>;
   }
 
   let {
@@ -53,11 +56,13 @@
     motion,
     withForm = false,
     withToolbar = false,
+    contentProps = {},
+    bodyProps = {},
   }: Props = $props();
 </script>
 
 {#snippet body()}
-  <DialogBody>
+  <DialogBody {...bodyProps}>
     <button type="button" data-testid="first-focusable">First focusable</button>
     <button type="button" data-testid="second-focusable">Second focusable</button>
   </DialogBody>
@@ -65,6 +70,7 @@
 
 <Dialog bind:open {onOpenChange} {dismissible}>
   <DialogContent
+    {...contentProps}
     {size}
     {variant}
     {sheet}

@@ -6,10 +6,15 @@ import {
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
 import Dialog from './Dialog.svelte';
+import DialogBody from './DialogBody.svelte';
 import DialogContent from './DialogContent.svelte';
 import DialogDescription from './DialogDescription.svelte';
+import DialogFooter from './DialogFooter.svelte';
+import DialogFormElement from './DialogFormElement.svelte';
 import DialogHarness from './DialogHarness.test.svelte';
+import DialogHeader from './DialogHeader.svelte';
 import DialogTitle from './DialogTitle.svelte';
+import DialogToolbar from './DialogToolbar.svelte';
 
 /**
  * Dialog component unit tests.
@@ -263,6 +268,79 @@ describe('Dialog focus return', () => {
     now.mockRestore();
 
     expect(document.activeElement).toBe(field);
+  });
+});
+
+// A page's attributes go on before a part's own, so a page can never switch
+// on another layout: `data-layout="drawer"` on a centred dialog's Body turned
+// on its `display: contents` and clipped the Footer (review c2, G2-M2).
+describe('Dialog parts own their attributes', () => {
+  const PAGE = {
+    'data-layout': 'drawer',
+    'data-flush': '',
+    'data-variant': 'drawer',
+    'data-size': 'lg',
+    'data-direction': 'column',
+    'data-align': 'between',
+  };
+  let component: ReturnType<typeof mount> | null = null;
+
+  afterEach(() => {
+    if (component) unmount(component);
+    component = null;
+    document.body.innerHTML = '';
+  });
+
+  test("a centred dialog's Body and panel keep their own layout", () => {
+    component = mount(DialogHarness, {
+      target: document.body,
+      props: { open: true, contentProps: PAGE, bodyProps: PAGE },
+    });
+    flushSync();
+
+    const content = document.querySelector('.dialog-content');
+    const body = document.querySelector('.dialog-body');
+    expect(content?.getAttribute('data-variant')).toBe('dialog');
+    expect(content?.getAttribute('data-size')).toBe('md');
+    expect(content?.hasAttribute('data-flush')).toBe(false);
+    expect(body?.getAttribute('data-layout')).toBe('dialog');
+    expect(body?.hasAttribute('data-flush')).toBe(false);
+  });
+
+  const children = createRawSnippet(() => ({ render: () => '<span>x</span>' }));
+  // Each part's own attributes, as it sets them outside a dialog (null: absent).
+  test.each([
+    ['Header', DialogHeader, '.dialog-header', { 'data-flush': null }],
+    [
+      'Toolbar',
+      DialogToolbar,
+      '.dialog-toolbar',
+      { 'data-direction': 'row', 'data-flush': null },
+    ],
+    [
+      'Footer',
+      DialogFooter,
+      '.dialog-footer',
+      { 'data-align': 'end', 'data-layout': null, 'data-flush': null },
+    ],
+    ['Form', DialogFormElement, '.dialog-form', { 'data-layout': null }],
+    [
+      'Body',
+      DialogBody,
+      '.dialog-body',
+      { 'data-layout': null, 'data-flush': null },
+    ],
+  ] as const)('%s keeps its own data-* over a page’s', (_name, Part, selector, own) => {
+    component = mount(Part, {
+      target: document.body,
+      props: { children, ...PAGE },
+    });
+    flushSync();
+
+    const root = document.querySelector(selector);
+    for (const [name, value] of Object.entries(own)) {
+      expect(root?.getAttribute(name)).toBe(value);
+    }
   });
 });
 
