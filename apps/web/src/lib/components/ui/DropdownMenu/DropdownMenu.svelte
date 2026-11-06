@@ -13,7 +13,8 @@
 	let {
 		positioning,
 		arrowSize,
-		preventScroll,
+		// A menu deliberately leaves the page free to scroll; Melt's default locks it.
+		preventScroll = false,
 		loop,
 		closeOnItemClick,
 		// Default to Melt's own default (true). Destructuring with no default

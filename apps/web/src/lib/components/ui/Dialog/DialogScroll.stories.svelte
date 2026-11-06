@@ -12,8 +12,8 @@
    * taller than a short screen, and its last action carries
    * `data-testid="scroll-target"`. Driven in a real browser at 1280×600 and
    * 390×700: wheel over the body, then the target must sit inside the panel
-   * AND the viewport. The calibration control, the hand-written wrapper these
-   * parts replace, is in DialogScrollControl.stories.svelte and must read
+   * AND the viewport. The calibration controls, the raw shapes these parts
+   * replace, are in DialogScrollControl.stories.svelte and must read
    * clipped. No autodocs: a docs page would open every dialog at once.
    */
   const { Story } = defineMeta({
@@ -29,6 +29,7 @@
   const sheetOpen = writable(false);
   const flushOpen = writable(false);
   const toolbarOpen = writable(false);
+  const columnToolbarOpen = writable(false);
   const formToolbarOpen = writable(false);
   const floatingOpen = writable(false);
   const squashOpen = writable(false);
@@ -196,6 +197,33 @@
       <Dialog.Footer>
         <Button variant="secondary" onclick={() => ($toolbarOpen = false)}>Cancel</Button>
         <Button variant="primary" data-testid="scroll-target">Add</Button>
+      </Dialog.Footer>
+    </Dialog.Content>
+  </Dialog.Root>
+</Story>
+
+<!-- A stacked bar full of fields beside a token Body (review G2-L7): the bar scrolls, the Footer stays. -->
+<Story name="Column Toolbar Tall">
+  <Button onclick={() => ($columnToolbarOpen = true)}>Open tall column toolbar</Button>
+  <Dialog.Root bind:open={$columnToolbarOpen}>
+    <Dialog.Content>
+      <Dialog.Header>
+        <Dialog.Title>Tall column toolbar</Dialog.Title>
+      </Dialog.Header>
+      <Dialog.Toolbar direction="column">
+        {#each [1, 2, 3, 4, 5, 6] as n (n)}
+          <label class="field">
+            <span>Filter {n}</span>
+            <input class="input" name="filter-{n}" value="Value {n}" />
+          </label>
+        {/each}
+      </Dialog.Toolbar>
+      <Dialog.Body>
+        <p class="row">One result.</p>
+      </Dialog.Body>
+      <Dialog.Footer>
+        <Button variant="secondary" onclick={() => ($columnToolbarOpen = false)}>Cancel</Button>
+        <Button variant="primary" data-testid="scroll-target">Apply</Button>
       </Dialog.Footer>
     </Dialog.Content>
   </Dialog.Root>

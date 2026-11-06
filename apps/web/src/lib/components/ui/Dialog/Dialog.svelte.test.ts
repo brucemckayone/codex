@@ -1,3 +1,4 @@
+import type { Component, Snippet } from 'svelte';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
   createRawSnippet,
@@ -6,10 +7,15 @@ import {
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
 import Dialog from './Dialog.svelte';
+import DialogBody from './DialogBody.svelte';
 import DialogContent from './DialogContent.svelte';
 import DialogDescription from './DialogDescription.svelte';
+import DialogFooter from './DialogFooter.svelte';
+import DialogFormElement from './DialogFormElement.svelte';
 import DialogHarness from './DialogHarness.test.svelte';
+import DialogHeader from './DialogHeader.svelte';
 import DialogTitle from './DialogTitle.svelte';
+import DialogToolbar from './DialogToolbar.svelte';
 
 /**
  * Dialog component unit tests.
@@ -248,6 +254,104 @@ describe('Dialog focus return', () => {
 
     expect(document.activeElement).not.toBe(button);
   });
+
+  // A dialog a timer or a response opens long after the last press must not
+  // send focus, and the page's scroll, back to wherever that press was.
+  test('a press long before the open is not the opener', async () => {
+    const button = opener();
+    const field = opener();
+    field.focus();
+    const now = vi.spyOn(performance, 'now').mockReturnValue(1_000);
+    press(button);
+    now.mockReturnValue(61_000);
+
+    await openAndClose();
+    now.mockRestore();
+
+    expect(document.activeElement).toBe(field);
+  });
+});
+
+// A page's attributes go on before a part's own, so a page can never switch
+// on another layout: `data-layout="drawer"` on a centred dialog's Body turned
+// on its `display: contents` and clipped the Footer (review c2, G2-M2).
+describe('Dialog parts own their attributes', () => {
+  const PAGE = {
+    'data-layout': 'drawer',
+    'data-flush': '',
+    'data-variant': 'drawer',
+    'data-size': 'lg',
+    'data-direction': 'column',
+    'data-align': 'between',
+  };
+  let component: ReturnType<typeof mount> | null = null;
+
+  afterEach(() => {
+    if (component) unmount(component);
+    component = null;
+    document.body.innerHTML = '';
+  });
+
+  test("a centred dialog's Body and panel keep their own layout", () => {
+    component = mount(DialogHarness, {
+      target: document.body,
+      props: { open: true, contentProps: PAGE, bodyProps: PAGE },
+    });
+    flushSync();
+
+    const content = document.querySelector('.dialog-content');
+    const body = document.querySelector('.dialog-body');
+    expect(content?.getAttribute('data-variant')).toBe('dialog');
+    expect(content?.getAttribute('data-size')).toBe('md');
+    expect(content?.hasAttribute('data-flush')).toBe(false);
+    expect(body?.getAttribute('data-layout')).toBe('dialog');
+    expect(body?.hasAttribute('data-flush')).toBe(false);
+  });
+
+  const children = createRawSnippet(() => ({ render: () => '<span>x</span>' }));
+  // Each part's own attributes, as it sets them outside a dialog (null: absent).
+  // One component type for every row: mount() takes no union of components.
+  const parts: [
+    string,
+    Component<{ children: Snippet }>,
+    string,
+    Record<string, string | null>,
+  ][] = [
+    ['Header', DialogHeader, '.dialog-header', { 'data-flush': null }],
+    [
+      'Toolbar',
+      DialogToolbar,
+      '.dialog-toolbar',
+      { 'data-direction': 'row', 'data-layout': null, 'data-flush': null },
+    ],
+    [
+      'Footer',
+      DialogFooter,
+      '.dialog-footer',
+      { 'data-align': 'end', 'data-layout': null, 'data-flush': null },
+    ],
+    ['Form', DialogFormElement, '.dialog-form', { 'data-layout': null }],
+    [
+      'Body',
+      DialogBody,
+      '.dialog-body',
+      { 'data-layout': null, 'data-flush': null },
+    ],
+  ];
+  test.each(
+    parts
+  )('%s keeps its own data-* over a page’s', (_name, Part, selector, own) => {
+    component = mount(Part, {
+      target: document.body,
+      props: { children, ...PAGE },
+    });
+    flushSync();
+
+    const root = document.querySelector(selector);
+    for (const [name, value] of Object.entries(own)) {
+      expect(root?.getAttribute(name)).toBe(value);
+    }
+  });
 });
 
 describe('Dialog dismissible', () => {
@@ -355,6 +459,19 @@ describe('DialogContent', () => {
     const content = document.querySelector('.dialog-content');
     expect(content?.getAttribute('role')).toBe('dialog');
     expect(content?.getAttribute('aria-modal')).toBe('true');
+  });
+
+  test('a role set on Dialog.Root reaches the panel', () => {
+    component = mount(DialogHarness, {
+      target: document.body,
+      props: { open: true, role: 'alertdialog' },
+    });
+
+    flushSync();
+
+    expect(
+      document.querySelector('.dialog-content')?.getAttribute('role')
+    ).toBe('alertdialog');
   });
 
   test('close button has accessible label', () => {
@@ -624,7 +741,33 @@ describe('DialogContent', () => {
     // A plain length: jsdom's CSSOM drops min(). The browser proof covers it.
     const content = document.querySelector<HTMLElement>('.dialog-content');
     expect(content?.style.maxWidth).toBe('35rem');
-    expect(content?.style.maxHeight).toBe('60vh');
+    expect(content?.style.getPropertyValue('--dialog-max-height')).toBe('60vh');
+  });
+
+  // A rem value taller than the screen put the Footer out of reach: the
+  // height goes through `--dialog-max`, which the CSS clamps to the room
+  // the placement leaves (the browser proof measures it).
+  test('maxHeight reaches the panel clamped, never as written', () => {
+    component = mount(DialogHarness, {
+      target: document.body,
+      props: { open: true, maxHeight: '48rem' },
+    });
+    flushSync();
+
+    const content = document.querySelector<HTMLElement>('.dialog-content');
+    expect(content?.style.maxHeight).toBe('var(--dialog-max)');
+  });
+
+  test('without maxHeight the panel keeps its default cap', () => {
+    component = mount(DialogHarness, {
+      target: document.body,
+      props: { open: true },
+    });
+    flushSync();
+
+    const content = document.querySelector<HTMLElement>('.dialog-content');
+    expect(content?.style.maxHeight).toBe('');
+    expect(content?.style.getPropertyValue('--dialog-max-height')).toBe('');
   });
 
   // The motion transitions return no config for every other panel, and

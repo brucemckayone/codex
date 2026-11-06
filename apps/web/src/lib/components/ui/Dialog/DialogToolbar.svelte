@@ -1,9 +1,11 @@
 <!--
   @component Dialog.Toolbar
 
-  A fixed control bar between Header and Body that never scrolls: a search
-  box, type filters. It is `flex: none`, so Dialog.Body still takes the rest
-  of the panel and scrolls on its own; a page never hand-writes this bar.
+  A fixed control bar between Header and Body: a search box, type filters.
+  It is `flex: none`, so Dialog.Body still takes the rest of the panel and
+  scrolls on its own; a page never hand-writes this bar. A stacked bar stops
+  at a third of the screen and scrolls past that, so it can never push the
+  Footer out.
 
   Part order: Dialog.Header, Dialog.Toolbar (optional), Dialog.Body,
   Dialog.Footer. A Dialog.Form wraps the Toolbar / Body / Footer run.
@@ -23,14 +25,17 @@
 
   const { children, direction = 'row', class: className, ...restProps }: Props = $props();
   // Set by Dialog.Content; absent when Toolbar is mounted on its own.
-  const layout = getContext<{ flush: boolean } | undefined>('DIALOG_LAYOUT');
+  const layout = getContext<{ current: 'dialog' | 'drawer' | 'floating'; flush: boolean } | undefined>(
+    'DIALOG_LAYOUT'
+  );
 </script>
 
 <div
+  {...restProps}
   class="dialog-toolbar {className ?? ''}"
   data-direction={direction}
+  data-layout={layout?.current}
   data-flush={layout?.flush ? '' : undefined}
-  {...restProps}
 >
   {@render children()}
 </div>
@@ -50,6 +55,21 @@
     flex-direction: column;
     flex-wrap: nowrap;
     align-items: stretch;
+  }
+
+  /* Stacked fields can outgrow a short screen, and the Footer below went
+     out of reach (Codex-vlphc review G2-L7). The bar stops at a third of
+     the screen and scrolls, so Body and Footer keep the rest. A drawer
+     scrolls as a whole and needs no second scroller. A scroller clips at its
+     padding box, so the bar is pulled up into a top padding of the same
+     size: a field's focus ring at the top edge still shows, and nothing
+     moves. */
+  .dialog-toolbar[data-direction='column']:not([data-flush], [data-layout='drawer']) {
+    max-height: 33dvh;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    margin-top: calc(-1 * var(--space-1));
+    padding-top: var(--space-1);
   }
 
   /* Flush: a bare box around the page's own row (a palette's search row). */

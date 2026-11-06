@@ -74,6 +74,21 @@ describe('DropdownMenu', () => {
     expect(content?.getAttribute('role')).toBe('menu');
   });
 
+  test('a menu never locks the page', () => {
+    component = mount(DropdownMenuHarness, {
+      target: document.body,
+      props: { open: true },
+    });
+
+    flushSync();
+
+    expect(
+      document.querySelector('[data-testid="dropdown-content"]')
+    ).toBeTruthy();
+    expect(document.body.hasAttribute('data-melt-scroll-lock')).toBe(false);
+    expect(document.body.style.overflow).toBe('');
+  });
+
   test('accepts an onOpenChange callback without throwing', () => {
     // Full close-on-item-click behaviour needs Melt UI pointer event handling
     // which JSDOM does not fully simulate. We verify callback wiring here and
