@@ -289,10 +289,22 @@
        never runs past. A `maxHeight` that can't resolve makes
        --dialog-max-height invalid, so the fallback takes the default cap:
        without it --dialog-max would be invalid too, and the inline
-       max-height would compute to none. */
-    --dialog-default-max: 85dvh;
-    --dialog-room: calc(100dvh - 2 * var(--space-4));
+       max-height would compute to none. Both are in --dialog-dvh, below. */
+    --dialog-dvh: 1dvh;
+    --dialog-default-max: calc(85 * var(--dialog-dvh));
+    --dialog-room: calc(100 * var(--dialog-dvh) - 2 * var(--space-4));
     --dialog-max: min(var(--dialog-max-height, var(--dialog-default-max)), var(--dialog-room));
+  }
+
+  /* An engine without dvh (Safari < 15.4, Chrome < 108, Firefox < 101)
+     drops a dvh value, so every cap would be gone. A `max-height: 85vh`
+     written before each one can't help: these are read through custom
+     properties, and a var() always parses, so the dvh one would still win.
+     The caps and rooms take their unit from here instead. */
+  @supports not (height: 1dvh) {
+    .dialog-content {
+      --dialog-dvh: 1vh;
+    }
   }
 
   /* A clipping panel with no Body (a ConfirmDialog: Header and Footer only)
@@ -318,17 +330,17 @@
 
   .dialog-content[data-placement='top'],
   .dialog-content[data-placement='bottom'] {
-    --dialog-default-max: 70dvh;
+    --dialog-default-max: calc(70 * var(--dialog-dvh));
   }
 
   .dialog-content[data-placement='top'] {
-    --dialog-room: calc(100dvh - 15vh - var(--space-4));
+    --dialog-room: calc(100 * var(--dialog-dvh) - 15vh - var(--space-4));
   }
 
   /* A sheet is full width (0,2,0, after data-size). */
   .dialog-content[data-placement='bottom'] {
     max-width: none;
-    --dialog-room: calc(100dvh - 2 * var(--space-2));
+    --dialog-room: calc(100 * var(--dialog-dvh) - 2 * var(--space-2));
   }
 
   .dialog-content[data-radius='lg'] {
@@ -358,8 +370,8 @@
     bottom: 0;
     left: auto;
     height: 100%;
-    --dialog-default-max: 100dvh;
-    --dialog-room: 100dvh;
+    --dialog-default-max: calc(100 * var(--dialog-dvh));
+    --dialog-room: calc(100 * var(--dialog-dvh));
     gap: var(--drawer-gap);
     padding: var(--drawer-pad-block) var(--drawer-pad-inline);
     overflow-x: hidden;
@@ -392,8 +404,8 @@
     width: calc(100% - var(--space-6));
     max-width: var(--container-drawer);
     height: auto;
-    --dialog-default-max: calc(100dvh - var(--space-6));
-    --dialog-room: calc(100dvh - var(--space-6));
+    --dialog-default-max: calc(100 * var(--dialog-dvh) - var(--space-6));
+    --dialog-room: calc(100 * var(--dialog-dvh) - var(--space-6));
     gap: normal;
     padding: 0;
     overflow: hidden;
@@ -411,7 +423,7 @@
       left: 0;
       max-width: none;
       height: auto;
-      --dialog-default-max: 90dvh;
+      --dialog-default-max: calc(90 * var(--dialog-dvh));
       --drawer-pad-block: var(--space-5);
       --drawer-pad-inline: var(--space-4);
       border-left: none;
@@ -432,8 +444,8 @@
       right: var(--space-2);
       bottom: var(--space-2);
       width: auto;
-      --dialog-default-max: 85dvh;
-      --dialog-room: calc(100dvh - var(--space-2));
+      --dialog-default-max: calc(85 * var(--dialog-dvh));
+      --dialog-room: calc(100 * var(--dialog-dvh) - var(--space-2));
       padding: 0;
       border: var(--border-width) var(--border-style) var(--material-glass-border);
       border-radius: var(--radius-xl);

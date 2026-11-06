@@ -64,8 +64,10 @@
      as a whole and needs no second scroller. A scroller clips at its
      padding box, so the bar is pulled up into a top padding of the same
      size: a field's focus ring at the top edge still shows, and nothing
-     moves. */
+     moves. The vh line is for an engine without dvh, which drops the dvh
+     one (Safari < 15.4, Chrome < 108, Firefox < 101). */
   .dialog-toolbar:not([data-flush], [data-layout='drawer']) {
+    max-height: 33vh;
     max-height: 33dvh;
     overflow-y: auto;
     overscroll-behavior-y: contain;
