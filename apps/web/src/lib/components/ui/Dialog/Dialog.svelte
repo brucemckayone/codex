@@ -123,6 +123,7 @@
       // tabbable element and off the answer the dialog had just shown
       // (Codex-2hxff.28, R2-L3).
       if (!next && open && !dismissible) return true;
+      if (!next) dropCaret();
       open = next;
       onOpenChange?.(next);
       return next;
@@ -163,6 +164,28 @@
   $effect(() => {
     dialog.options.role.set(role);
   });
+
+  /**
+   * WebKit keeps the caret of a field focused in the panel after the closing
+   * panel turns inert and takes the focus away. When the panel leaves the
+   * DOM, the caret falls to <body> and WebKit scrolls the page to it: to the
+   * top (Codex-vlphc review N7). So the caret goes as the close is decided,
+   * while focus is still in the panel: a panel with no outro is gone before
+   * any effect runs. A selection on the page behind is left alone.
+   */
+  function dropCaret() {
+    const panel = document.getElementById(dialog.ids.content.get());
+    const focused = document.activeElement;
+    const selection = window.getSelection();
+    if (!panel || !selection || !panel.contains(focused)) return;
+    // A field's caret sits in the field's own inner tree, not among the
+    // panel's nodes, so the focused field names it.
+    const field =
+      focused instanceof HTMLInputElement ||
+      focused instanceof HTMLTextAreaElement ||
+      (focused instanceof HTMLElement && focused.isContentEditable);
+    if (field || panel.contains(selection.anchorNode)) selection.removeAllRanges();
+  }
 
   // Sync prop to melt state. The opener is read first, while focus is still
   // where the open came from: Melt moves it into the panel after a tick.
