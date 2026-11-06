@@ -682,6 +682,21 @@ describe('AudioPlayer — immersive mode', () => {
     unmount(component);
   });
 
+  // A same-document Back takes the whole AudioPlayer away mid-request.
+  test('a player gone from the page by the grant takes it back out of full screen', async () => {
+    const fullscreen = fakeFullscreen();
+    const { component } = await mountPlayer();
+
+    immersiveButton().click();
+    flushSync();
+    expect(document.querySelector('dialog.immersive[open]')).not.toBeNull();
+    unmount(component);
+    fullscreen.enter();
+
+    await vi.waitFor(() => expect(fullscreen.exit).toHaveBeenCalledTimes(1));
+    expect(document.fullscreenElement).toBeNull();
+  });
+
   test('an open player keeps the page full screen', async () => {
     const fullscreen = fakeFullscreen();
     const { component } = await mountPlayer();

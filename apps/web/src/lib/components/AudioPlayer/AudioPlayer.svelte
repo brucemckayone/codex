@@ -168,6 +168,8 @@
   let showImmersive = $state(false);
   // The button that opened it, from the press: it gets focus back.
   let immersiveOpener = $state.raw<HTMLElement | null>(null);
+  // Gone from the page: a full screen granted after this takes the page back out.
+  let destroyed = false;
   // Offered only where it can open: the player is a modal `<dialog>`, which
   // Safari before 15.4 cannot show. True until hydrated, so the server's
   // markup and every browser that can show it never change.
@@ -839,6 +841,7 @@
   });
 
   onDestroy(() => {
+    destroyed = true;
     // Flush against the id the element's media actually belongs to, not
     // whatever the props answer with at teardown time.
     tracker.detach(initializedContentId);
@@ -1041,13 +1044,14 @@
                 // requested synchronously from a user gesture, not from the
                 // overlay's onMount (which runs after several awaits). The
                 // page goes full screen a moment later: a player already gone
-                // by then (its showModal() threw, or Escape came first) takes
-                // it back out, or the page stays full screen with no player.
+                // by then (its showModal() threw, Escape came first, or this
+                // whole player left the page, as a Back does) takes it back
+                // out, or the page stays full screen with no player.
                 // iPhone Safari has no Fullscreen API for a page: there the
                 // player opens in the window, and nothing here may throw.
                 document.documentElement.requestFullscreen?.().then(
                   () => {
-                    if (!showImmersive && document.fullscreenElement) {
+                    if ((!showImmersive || destroyed) && document.fullscreenElement) {
                       document.exitFullscreen().catch(() => {});
                     }
                   },
