@@ -1250,7 +1250,7 @@ function sizeVerdict(attr) {
   return opaque ? { opaque: true } : null;
 }
 
-/** A number or string literal, or a conditional or `??` / `||` of them, under any TS wrapper. */
+/** A number or string literal, or a conditional or logical of them, under any TS wrapper. */
 function isLiteralFragment(expr) {
   switch (expr?.type) {
     case 'Literal':
@@ -1258,7 +1258,8 @@ function isLiteralFragment(expr) {
     case 'ConditionalExpression':
       return isLiteralFragment(expr.consequent) && isLiteralFragment(expr.alternate);
     case 'LogicalExpression':
-      return expr.operator !== '&&' && isLiteralFragment(expr.left) && isLiteralFragment(expr.right);
+      // Of two literals, any operator gives back one of them.
+      return isLiteralFragment(expr.left) && isLiteralFragment(expr.right);
     default:
       return TS_VALUE_HOLDERS.has(expr?.type) && isLiteralFragment(expr.expression);
   }

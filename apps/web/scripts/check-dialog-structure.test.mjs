@@ -1620,6 +1620,7 @@ test("ALLOWS Content's size props, a styled Title, a styled page element, and th
 <Dialog.Root><Dialog.Content maxWidth={\`\${wide ? 60 : 40}rem\`} maxHeight="{tall ? '80dvh' : '60dvh'}"><Dialog.Body>d</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content maxHeight={\`\${tall ? 48 : 32}rem\`} maxWidth={undefined}><Dialog.Body>e</Dialog.Body></Dialog.Content></Dialog.Root>
 <Dialog.Root><Dialog.Content maxHeight={\`calc(100dvh - \${(tall ? '4rem' : '2rem') as string})\`} maxWidth={null}><Dialog.Body>f</Dialog.Body></Dialog.Content></Dialog.Root>
+<Dialog.Root><Dialog.Content maxHeight="{tall ? 48 : 32}rem"><Dialog.Body>g</Dialog.Body></Dialog.Content></Dialog.Root>
 `
   );
   // A wrapper inside ui/Dialog/ may forward the props: its own file is the part's.
@@ -2169,7 +2170,8 @@ test("ALLOWS a named Popover.Content (text, a call, a member, a prop with a defa
   import * as Dialog from '$lib/components/ui/Dialog';
   import * as UI from '$lib/components/ui';
   import { m } from '$lib/paraglide/messages';
-  let { label = 'Details', copy, wide } = $props();
+  let { label = 'Details', copy, wide, title } = $props();
+  const Btn = UI.Button;
 </script>
 <Popover.Root>
   <Popover.Trigger>Open</Popover.Trigger>
@@ -2180,10 +2182,12 @@ test("ALLOWS a named Popover.Content (text, a call, a member, a prop with a defa
 <Popover.Content aria-label={m.media_uses_where_title()}>d</Popover.Content>
 <Popover.Content aria-label={copy.title}>e</Popover.Content>
 <Popover.Content aria-label={wide ? 'Wide' : 'Narrow'}>f</Popover.Content>
-<Popover.Content aria-label="Uses of {copy.name}">g</Popover.Content>
-<Popover.Content aria-label={copy.label ?? 'Info'}>h</Popover.Content>
+<Popover.Content aria-label="Uses of {title}">g</Popover.Content>
+<Popover.Content aria-label={title ?? 'Info'}>h</Popover.Content>
+<Popover.Content aria-label={\`Uses of \${title}\`}>h2</Popover.Content>
 <UI.Popover.Content aria-label="Pick">i</UI.Popover.Content>
 <UI.Button>j</UI.Button>
+<UI.Card.Content>j2</UI.Card.Content>
 <Card.Content>k</Card.Content>
 <Dialog.Root><Dialog.Content><Dialog.Body>l</Dialog.Body></Dialog.Content></Dialog.Root>
 `
