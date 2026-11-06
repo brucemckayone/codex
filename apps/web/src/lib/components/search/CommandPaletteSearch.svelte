@@ -296,6 +296,10 @@
 	function handleGlobalKeydown(e: KeyboardEvent) {
 		if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
 			e.preventDefault();
+			// A held Cmd+K repeats every 30-80ms. Toggling on each repeat
+			// reopened the palette as it was still dropping away, which left the
+			// page locked for good (review c1, H1); one press, one toggle.
+			if (e.repeat) return;
 			open = !open;
 			return;
 		}
@@ -310,17 +314,21 @@
 
 	// ── Focus management ──────────────────────────────────────
 	// The dialog moves focus to the search box (its first tabbable) and, on
-	// close, back to whatever held it when the palette opened: the button that
-	// opened it, or the field Cmd+K was pressed in. It is read here, before
-	// the panel mounts and takes focus.
-	let opener: HTMLElement | null = null;
+	// close, back to what opened it: the button pressed, or the field Cmd+K
+	// was pressed in. Each open starts from an empty search.
 	$effect(() => {
 		if (open) {
-			opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 			query = '';
 			activeIndex = -1;
 			resetSearch();
 		}
+	});
+
+	// The highlighted row comes into view as the arrows move it: focus stays
+	// in the box, so the browser never scrolls the results for it.
+	$effect(() => {
+		if (activeIndex < 0) return;
+		document.getElementById(`palette-item-${activeIndex}`)?.scrollIntoView({ block: 'nearest' });
 	});
 
 	// Flat index offsets for grouped results
@@ -335,7 +343,7 @@
 
 <svelte:window onkeydown={handleGlobalKeydown} />
 
-<Dialog.Root bind:open closeFocus={() => opener}>
+<Dialog.Root bind:open>
 	<Dialog.Content
 		placement="top"
 		maxWidth="var(--container-sm)"

@@ -22,6 +22,18 @@ vi.mock(
   () => import('$lib/components/support/__fixtures__/app-state.mock.svelte')
 );
 
+// The reduced-motion gate the dialog's panel reads, set per test. Off by
+// default: jsdom never ends the sheet's rise, so a closing sheet stays.
+const motion = vi.hoisted(() => ({ reduce: false }));
+vi.mock('svelte/motion', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('svelte/motion')>()),
+  prefersReducedMotion: {
+    get current() {
+      return motion.reduce;
+    },
+  },
+}));
+
 import { setPage } from '$lib/components/support/__fixtures__/app-state.mock.svelte';
 import MobileBottomSheet from './MobileBottomSheet.svelte';
 
@@ -32,11 +44,10 @@ afterEach(() => {
   if (component) unmount(component);
   component = null;
   document.body.innerHTML = '';
+  motion.reduce = false;
 });
 
-function openSheet() {
-  setPage('/');
-  open = true;
+function mountSheet() {
   component = mount(MobileBottomSheet, {
     target: document.body,
     props: {
@@ -55,6 +66,12 @@ function openSheet() {
     },
   });
   flushSync();
+}
+
+function openSheet() {
+  setPage('/');
+  open = true;
+  mountSheet();
 }
 
 const panel = () => {
@@ -77,7 +94,7 @@ function scrollListTo(top: number) {
 
 // A touch on the first link; `clientY` is where the finger is.
 function touch(
-  type: 'touchstart' | 'touchmove' | 'touchend',
+  type: 'touchstart' | 'touchmove' | 'touchend' | 'touchcancel',
   clientY?: number
 ) {
   const target = panel().querySelector('a') ?? panel();
@@ -138,5 +155,68 @@ describe('pulling the More sheet down', () => {
     touch('touchend');
 
     expect(open).toBe(true);
+  });
+
+  // Review cycle 1 (Codex-vlphc.4): N2 and L2.
+  test('a pull that closes it keeps its offset as the sheet drops away', () => {
+    openSheet();
+    scrollListTo(0);
+
+    pull(160, 460);
+
+    expect(open).toBe(false);
+    expect(panel().style.transform).toBe('translateY(300px)');
+  });
+
+  test('reopened before it has dropped away, the panel loses that offset', () => {
+    openSheet();
+    scrollListTo(0);
+    pull(160, 460);
+
+    open = true;
+    flushSync();
+
+    expect(panel().style.transform).toBe('');
+  });
+
+  test('a pull the system cancels puts the sheet back and leaves it open', () => {
+    openSheet();
+    scrollListTo(0);
+
+    touch('touchstart', 160);
+    touch('touchmove', 400);
+    expect(panel().style.transform).toBe('translateY(240px)');
+    touch('touchcancel');
+
+    expect(panel().style.transform).toBe('');
+    // The touch it cancelled never ends, and a stray end closes nothing.
+    touch('touchend');
+    expect(open).toBe(true);
+  });
+});
+
+describe('closing the More sheet', () => {
+  // WebKit focuses no button on a click or a tap: <body> keeps focus.
+  test('gives focus back to the button a press opened it from', async () => {
+    // A closing sheet that jsdom never takes away would keep focus in it.
+    motion.reduce = true;
+    setPage('/');
+    open = false;
+    const more = document.createElement('button');
+    document.body.appendChild(more);
+    more.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    mountSheet();
+    // Melt moves focus a tick after the open and after the close.
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+
+    open = true;
+    flushSync();
+    await settle();
+    expect(panel().contains(document.activeElement)).toBe(true);
+    open = false;
+    flushSync();
+    await settle();
+
+    expect(document.activeElement).toBe(more);
   });
 });

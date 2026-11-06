@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import {
   createRawSnippet,
   flushSync,
@@ -11,6 +11,17 @@ import PopoverClose from './PopoverClose.svelte';
 import PopoverContent from './PopoverContent.svelte';
 import PopoverHarness from './PopoverHarness.test.svelte';
 import PopoverTrigger from './PopoverTrigger.svelte';
+
+// The reduced-motion gate PopoverContent reads, set per test. Off by default.
+const motion = vi.hoisted(() => ({ reduce: false }));
+vi.mock('svelte/motion', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('svelte/motion')>()),
+  prefersReducedMotion: {
+    get current() {
+      return motion.reduce;
+    },
+  },
+}));
 
 /**
  * Popover component unit tests.
@@ -144,6 +155,30 @@ describe('PopoverTrigger', () => {
     expect(trigger?.getAttribute('data-state')).toBe('closed');
   });
 
+  // Melt's focus trap is on unless the root turns it off, and the panel's
+  // semantics follow it.
+  test('while it traps Tab, the panel is a modal dialog', () => {
+    component = mount(PopoverHarness, {
+      target: document.body,
+      props: { open: true },
+    });
+    flushSync();
+    const panel = document.querySelector('[data-testid="popover-content"]');
+    expect(panel?.getAttribute('role')).toBe('dialog');
+    expect(panel?.getAttribute('aria-modal')).toBe('true');
+  });
+
+  test('with disableFocusTrap, it is a non-modal dialog', () => {
+    component = mount(PopoverHarness, {
+      target: document.body,
+      props: { open: true, disableFocusTrap: true },
+    });
+    flushSync();
+    const panel = document.querySelector('[data-testid="popover-content"]');
+    expect(panel?.getAttribute('role')).toBe('dialog');
+    expect(panel?.hasAttribute('aria-modal')).toBe(false);
+  });
+
   test('under forceVisible, an open popover says data-state="open"', () => {
     component = mount(PopoverHarness, {
       target: document.body,
@@ -222,11 +257,21 @@ describe('PopoverContent', () => {
 describe('Popover focus on close', () => {
   let component: ReturnType<typeof mount> | null = null;
 
+  // Without motion, so the panel is gone once it closes. With it, jsdom never
+  // ends the fly-out and ignores `inert`, so the leaving panel (still mounted
+  // under forceVisible, Root's default) keeps Melt's trap and takes focus
+  // back. A browser makes it inert and removes it 150ms later: Escape gives
+  // the trigger focus there in Chromium and WebKit alike.
+  beforeEach(() => {
+    motion.reduce = true;
+  });
+
   afterEach(() => {
     if (component) {
       unmount(component);
       component = null;
     }
+    motion.reduce = false;
     document.body.innerHTML = '';
   });
 
@@ -318,14 +363,13 @@ describe('Popover focus on close', () => {
 
 describe('Popover motion', () => {
   let component: ReturnType<typeof mount> | null = null;
-  const realMatchMedia = window.matchMedia;
 
   afterEach(() => {
     if (component) {
       unmount(component);
       component = null;
     }
-    window.matchMedia = realMatchMedia;
+    motion.reduce = false;
     document.body.innerHTML = '';
   });
 
@@ -351,11 +395,9 @@ describe('Popover motion', () => {
     expect(panel?.inert).toBe(true);
   });
 
+  // The gate is svelte/motion's, as Dialog.Content's is.
   test('under reduced motion, the panel goes at once', () => {
-    window.matchMedia = ((query: string) => ({
-      ...realMatchMedia(query),
-      matches: query.includes('prefers-reduced-motion: reduce'),
-    })) as typeof window.matchMedia;
+    motion.reduce = true;
     expect(openThenClose()).toBeNull();
   });
 });

@@ -182,16 +182,17 @@ describe('the theatre', () => {
   });
 
   test('the page behind holds still while it is open, and is let go as it closes', () => {
-    const root = document.documentElement;
+    // The app's one counted scroll lock marks <body> while it holds.
+    const held = () => document.body.hasAttribute('data-melt-scroll-lock');
     openFrom();
-    expect(root.hasAttribute('data-intro-theatre')).toBe(true);
+    expect(held()).toBe(true);
     if (app) unmount(app);
     app = mount(IntroVideoModal, {
       target: document.body,
       props: { open: false, src: SRC, onclose: vi.fn() },
     });
     flushSync();
-    expect(root.hasAttribute('data-intro-theatre')).toBe(false);
+    expect(held()).toBe(false);
   });
 
   test('Tab stays inside, from the last control to the first and back', () => {

@@ -42,6 +42,7 @@
   } from '$lib/components/player/load-core';
   import { RefreshCwIcon, XIcon } from '$lib/components/ui/Icon';
   import { getThumbnailSrcset, getThumbnailUrl } from '$lib/utils/image';
+  import { lockScroll } from '$lib/utils/scroll-lock';
   import * as m from '$paraglide/messages';
 
   interface CaptionTrack {
@@ -73,9 +74,6 @@
   // The ended still is contained in the theatre, so never wider than the
   // viewport: the browser picks its file from the srcset (Codex-kk9nv.1).
   const stillSrcset = $derived(poster ? getThumbnailSrcset(poster) : '');
-
-  /** The root attribute that holds the page still behind it. */
-  const LOCK = 'data-intro-theatre';
 
   let dialogEl = $state<HTMLDivElement | undefined>(undefined);
   let Player = $state.raw<PlayerCore | null>(loadedPlayerCore());
@@ -117,11 +115,10 @@
 
   // The page behind holds still while the theatre is open: a wheel or a
   // swipe over the room scrolled it, unseen, under the film (Codex-vlphc.4).
+  // It is the app's one counted lock, which a dialog holds too.
   $effect(() => {
     if (!open) return;
-    const root = document.documentElement;
-    root.setAttribute(LOCK, '');
-    return () => root.removeAttribute(LOCK);
+    return lockScroll();
   });
 
   // ── Click outside ──
@@ -272,13 +269,6 @@
 {/if}
 
 <style>
-  /* The page behind holds still while it is open; the gutter keeps its
-     place, so nothing shifts as the scrollbar goes (as GalleryLightbox). */
-  :global(html[data-intro-theatre]) {
-    overflow: hidden;
-    scrollbar-gutter: stable;
-  }
-
   .intro-modal {
     position: fixed;
     inset: 0;

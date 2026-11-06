@@ -10,7 +10,22 @@
   @prop {HTMLAudioElement} audioElement - The audio element to analyse
   @prop {string} shaderPreset - Shader preset ID to render
   @prop {() => void} onclose - Called when user exits immersive mode
+  @prop {HTMLElement | null} opener - What opened it; focus goes back there as it closes
 -->
+<script module lang="ts">
+  /**
+   * Whether this browser can show the player: a modal `<dialog>`. Safari
+   * before 15.4 has none, so AudioPlayer offers no immersive mode there, as
+   * GalleryBlock offers no lightbox.
+   */
+  export function canShowImmersive(): boolean {
+    return (
+      typeof HTMLDialogElement === 'function' &&
+      typeof HTMLDialogElement.prototype.showModal === 'function'
+    );
+  }
+</script>
+
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import type { Attachment } from 'svelte/attachments';
@@ -24,6 +39,9 @@
     createMediaKeyboardHandler,
     MediaLiveRegion,
   } from '$lib/components/media-a11y';
+  import { describeThrown } from '$lib/client-log';
+  import { logger } from '$lib/observability';
+  import { lockScroll } from '$lib/utils/scroll-lock';
 
   interface Props {
     audioElement: HTMLAudioElement;
@@ -31,9 +49,15 @@
     onclose: () => void;
     /** Content title — threads through to `aria-label` on the overlay landmark. */
     title?: string;
+    /**
+     * What opened it, from the open event, so focus goes back there as it
+     * closes. Never `activeElement`: a click or a tap in WebKit (Safari,
+     * every iOS browser) focuses no button, so that is <body>.
+     */
+    opener?: HTMLElement | null;
   }
 
-  const { audioElement, shaderPreset, onclose, title = '' }: Props = $props();
+  const { audioElement, shaderPreset, onclose, title = '', opener = null }: Props = $props();
 
   // Renderer/analyser failures currently exit via `onclose()`. Track a surfaced
   // error so the live region can announce it before the overlay unmounts.
@@ -288,9 +312,6 @@
 
   const seekProgress = $derived(duration > 0 ? (currentTime / duration) * 100 : 0);
 
-  /** The root attribute that holds the page still behind it. */
-  const LOCK = 'data-immersive-player';
-
   /**
    * Opens as a native modal `<dialog>`, as GalleryLightbox does: the top
    * layer lifts it over the org-main stacking context (view-transition-name),
@@ -299,20 +320,33 @@
    * Moved to <body> first, as the portal it replaces did, so it inherits
    * exactly what it always has. The root (focusable, `tabindex="-1"`) takes
    * focus, so the overlay's keyboard shortcuts are heard at once (ref 05
-   * §"Media elements" §9), and the page holds still until it goes.
+   * §"Media elements" §9), and the page holds still until it goes: the
+   * app's one counted scroll lock, which a dialog holds too.
    *
-   * Going, it closes BEFORE focus returns to what had it: an element behind an
+   * A `showModal()` that throws (an `InvalidStateError`; no `showModal` at
+   * all is never offered, see `canShowImmersive`) takes the player away and
+   * says it has closed, or it would stay mounted over a page it never
+   * covered; the page was never held. Thrown from here, with no boundary
+   * above, it would halt the page's updates, so it is logged, never rethrown.
+   *
+   * Going, it closes BEFORE focus returns to its opener: an element behind an
    * open modal cannot take focus.
    */
   const modal: Attachment<HTMLDialogElement> = (node) => {
-    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const root = document.documentElement;
     document.body.appendChild(node);
-    node.showModal();
-    root.setAttribute(LOCK, '');
+    try {
+      node.showModal();
+    } catch (error) {
+      if (node.open) node.close();
+      node.remove();
+      logger.warn('immersive.open_failed', describeThrown(error));
+      onclose();
+      return;
+    }
+    const unlock = lockScroll();
     node.focus();
     return () => {
-      root.removeAttribute(LOCK);
+      unlock();
       if (node.open) node.close();
       node.remove();
       opener?.focus({ preventScroll: true });
@@ -400,6 +434,10 @@
   dialog itself, which takes focus as it opens, so the keyboard shortcuts are
   reachable. `showModal()` gives it the dialog role and makes it modal: the
   page behind is inert, so focus cannot leave, and Escape closes it.
+
+  `tabindex="-1"` and its `focus()` are deliberate, not `autofocus`: Chromium
+  focuses no dialog that has autofocus itself, so the Exit button would take
+  focus and Enter would exit at once.
 -->
 <!--
   a11y_no_noninteractive_element_interactions is intentional: the overlay gets
@@ -490,13 +528,6 @@
 </dialog>
 
 <style>
-  /* The page behind holds still while it is open; the gutter keeps its
-     place, so nothing shifts as the scrollbar goes (as GalleryLightbox). */
-  :global(html[data-immersive-player]) {
-    overflow: hidden;
-    scrollbar-gutter: stable;
-  }
-
   /* The whole screen. The top layer stacks it, so it needs no z-index; the
      resets undo the dialog's own box (border, padding, centred, capped). */
   .immersive {
