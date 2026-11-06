@@ -308,6 +308,96 @@ describe('Dialog focus return', () => {
   });
 });
 
+describe('Dialog focus at the open', () => {
+  const mounted: ReturnType<typeof mount>[] = [];
+  // Melt moves focus a tick after open.
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+
+  afterEach(() => {
+    for (const component of mounted.splice(0)) unmount(component);
+    vi.restoreAllMocks();
+    document.body.innerHTML = '';
+  });
+
+  // `drop` keeps the panel while it animates out (jsdom never finishes the
+  // animation). Melt focused that panel itself on the reopen, so a
+  // palette's search box never had focus (review G4-U1).
+  test('a dialog reopened during its outro focuses its first tabbable, not the panel', async () => {
+    const props = $state({ open: true, motion: 'drop' as const });
+    mounted.push(mount(DialogHarness, { target: document.body, props }));
+    flushSync();
+    await settle();
+    props.open = false;
+    flushSync();
+    expect(document.querySelector('.dialog-content')).toBeTruthy();
+
+    props.open = true;
+    flushSync();
+    await settle();
+
+    expect(document.activeElement).toBe(
+      document.querySelector('[data-testid="first-focusable"]')
+    );
+  });
+
+  // focus-trap focused a ConfirmDialog's Cancel without preventScroll, and
+  // a panel that scrolls as a whole opened scrolled down to its Footer, its
+  // title out of sight (review G4-U3). jsdom lays nothing out, so the
+  // scroll is stood in for: 166px down, as Chromium measured it.
+  test('a panel with no Body opens at its top, with its first tabbable focused in place', async () => {
+    const focus = vi.spyOn(HTMLElement.prototype, 'focus');
+    mounted.push(
+      mount(DialogHarness, {
+        target: document.body,
+        props: { open: true, withoutBody: true },
+      })
+    );
+    flushSync();
+    const panel = document.querySelector<HTMLElement>('.dialog-content');
+    let scrollTop = 166;
+    if (panel)
+      Object.defineProperty(panel, 'scrollTop', {
+        configurable: true,
+        get: () => scrollTop,
+        set: (value: number) => {
+          scrollTop = value;
+        },
+      });
+    await settle();
+
+    const button = document.querySelector('[data-testid="footer-button"]');
+    expect(document.activeElement).toBe(button);
+    expect(
+      focus.mock.contexts.some(
+        (el, i) =>
+          el === button &&
+          (focus.mock.calls[i]?.[0] as FocusOptions | undefined)?.preventScroll
+      )
+    ).toBe(true);
+    expect(scrollTop).toBe(0);
+  });
+
+  test('a panel with a Body keeps the scroll it opened with', async () => {
+    mounted.push(
+      mount(DialogHarness, { target: document.body, props: { open: true } })
+    );
+    flushSync();
+    const panel = document.querySelector<HTMLElement>('.dialog-content');
+    let scrollTop = 40;
+    if (panel)
+      Object.defineProperty(panel, 'scrollTop', {
+        configurable: true,
+        get: () => scrollTop,
+        set: (value: number) => {
+          scrollTop = value;
+        },
+      });
+    await settle();
+
+    expect(scrollTop).toBe(40);
+  });
+});
+
 // WebKit kept the caret of a field focused in the closing panel, and when
 // the panel left the DOM it scrolled the page to the caret's new place at
 // the top (review N7). The caret goes with the close.

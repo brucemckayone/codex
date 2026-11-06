@@ -50,6 +50,26 @@
     return active instanceof HTMLElement && active !== document.body ? active : null;
   }
 
+  /** The panel's first element that Tab reaches, in document order. */
+  function firstTabbable(panel: HTMLElement): HTMLElement | null {
+    for (const el of panel.querySelectorAll<HTMLElement>(FOCUSABLE)) {
+      if (el.tabIndex >= 0 && (el.checkVisibility?.() ?? true)) return el;
+    }
+    return null;
+  }
+
+  /**
+   * A clipping panel (a dialog, or a floating drawer) with no Body scrolls
+   * as a whole: DialogContent's rule for a ConfirmDialog's Header and
+   * Footer, read here from the same parts.
+   */
+  function scrollsWhole(panel: HTMLElement): boolean {
+    const clips = panel.dataset.variant === 'dialog' || panel.hasAttribute('data-floating');
+    return (
+      clips && !panel.querySelector(':scope > .dialog-body, :scope > .dialog-form > .dialog-body')
+    );
+  }
+
   /**
    * The button that opened the menu `el` sits in. A menu closes as its item
    * is chosen and takes the item with it, so a dialog that item opened goes
@@ -156,6 +176,25 @@
         return defaultEl ?? [opener, openerMenu].find((el) => el?.isConnected) ?? null;
       return typeof target === 'function' ? target(defaultEl) : target;
     },
+    // Where focus goes as the panel opens. Melt hands over the panel only
+    // when it is in the DOM already: a reopen during the close's outro.
+    // Melt then focused the panel itself, so a palette's search box or a
+    // sheet's first link never had focus (Codex-vlphc review G4-U1); its
+    // first tabbable gets it now. On a first open Melt hands over null and
+    // focus-trap's own first focus stands, except in a panel that scrolls as
+    // a whole: focus-trap focuses a ConfirmDialog's Cancel without
+    // preventScroll, and the panel opened scrolled down to its Footer, its
+    // title out of sight (G4-U3). focus-trap leaves alone an element that
+    // already has focus, whichever of the two runs first.
+    openFocus: (defaultEl) => {
+      const node = defaultEl ?? panel();
+      if (node && scrollsWhole(node)) {
+        firstTabbable(node)?.focus({ preventScroll: true });
+        node.scrollTop = 0;
+        return null;
+      }
+      return defaultEl ? (firstTabbable(defaultEl) ?? defaultEl) : null;
+    },
     // The page's scroll lock is ours, below, not Melt's: under forceVisible
     // Melt let go only when the panel left the DOM, so a dialog reopened
     // during its close animation lost the release and the page stayed
@@ -170,6 +209,11 @@
   const {
     states: { open: meltOpen }
   } = dialog;
+
+  /** The panel, while it is in the DOM. */
+  function panel(): HTMLElement | null {
+    return document.getElementById(dialog.ids.content.get());
+  }
 
   /** Where focus goes back to at the close, when no `closeFocus` says. */
   let opener: HTMLElement | null = null;
@@ -191,17 +235,17 @@
    * any effect runs. A selection on the page behind is left alone.
    */
   function dropCaret() {
-    const panel = document.getElementById(dialog.ids.content.get());
+    const node = panel();
     const focused = document.activeElement;
     const selection = window.getSelection();
-    if (!panel || !selection || !panel.contains(focused)) return;
+    if (!node || !selection || !node.contains(focused)) return;
     // A field's caret sits in the field's own inner tree, not among the
     // panel's nodes, so the focused field names it.
     const field =
       focused instanceof HTMLInputElement ||
       focused instanceof HTMLTextAreaElement ||
       (focused instanceof HTMLElement && focused.isContentEditable);
-    if (field || panel.contains(selection.anchorNode)) selection.removeAllRanges();
+    if (field || node.contains(selection.anchorNode)) selection.removeAllRanges();
   }
 
   // Sync prop to melt state. The opener is read first, while focus is still

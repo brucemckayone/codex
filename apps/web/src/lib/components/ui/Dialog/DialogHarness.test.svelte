@@ -35,6 +35,8 @@
     withToolbar?: boolean;
     /** A text field at the end of the Body. */
     withField?: boolean;
+    /** No Body: Header and a Footer with a button, as a ConfirmDialog has. */
+    withoutBody?: boolean;
     /** Attributes a page hands Content and Body, beyond their props. */
     contentProps?: Record<string, unknown>;
     bodyProps?: Record<string, unknown>;
@@ -62,6 +64,7 @@
     withForm = false,
     withToolbar = false,
     withField = false,
+    withoutBody = false,
     contentProps = {},
     bodyProps = {},
   }: Props = $props();
@@ -103,9 +106,14 @@
     {/if}
     {#if withForm}
       <DialogFormElement>{@render body()}</DialogFormElement>
-    {:else}
+    {:else if !withoutBody}
       {@render body()}
     {/if}
-    <DialogFooter align={footerAlign}><span>Footer</span></DialogFooter>
+    <DialogFooter align={footerAlign}>
+      <span>Footer</span>
+      {#if withoutBody}
+        <button type="button" data-testid="footer-button">Cancel</button>
+      {/if}
+    </DialogFooter>
   </DialogContent>
 </Dialog>
