@@ -92,18 +92,36 @@ describe('lockScroll', () => {
   });
 
   // WebKit drops the gutter of an `overflow: hidden` root: the page widens.
-  it('pads the scrollbar’s side when the page widens anyway', () => {
+  // A fixed element on the right (the Toaster) reads the pad to stay put.
+  it('pads the scrollbar’s side when the page widens anyway, and publishes it', () => {
     bodyWidths(1265, 1280);
     const hold = lockScroll();
     expect(html.style.paddingRight).toBe('15px');
+    expect(html.style.getPropertyValue('--scroll-lock-pad')).toBe('15px');
     hold();
     expect(html.style.paddingRight).toBe('');
+    expect(html.style.getPropertyValue('--scroll-lock-pad')).toBe('');
+  });
+
+  // A scrollbar on the left (an RTL page): the page widens leftwards, and
+  // a fixed element on the right does not move, so nothing is published.
+  it('pads the left when the scrollbar is on the left', () => {
+    vi.spyOn(body, 'getBoundingClientRect')
+      .mockReturnValueOnce(new DOMRect(15, 0, 1265, 100))
+      .mockReturnValueOnce(new DOMRect(0, 0, 1280, 100));
+    const hold = lockScroll();
+    expect(html.style.paddingLeft).toBe('15px');
+    expect(html.style.paddingRight).toBe('');
+    expect(html.style.getPropertyValue('--scroll-lock-pad')).toBe('');
+    hold();
+    expect(html.style.cssText).toBe('');
   });
 
   it('pads nothing when the gutter holds', () => {
     bodyWidths(1265, 1265);
     const hold = lockScroll();
     expect(html.style.paddingRight).toBe('');
+    expect(html.style.getPropertyValue('--scroll-lock-pad')).toBe('');
     hold();
   });
 
