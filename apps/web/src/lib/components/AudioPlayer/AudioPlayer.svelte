@@ -26,7 +26,7 @@
   import Waveform from './Waveform.svelte';
   import WaveformShader from './WaveformShader.svelte';
   import { getThumbnailUrl } from '$lib/utils/image';
-  import ImmersiveShaderPlayer from './ImmersiveShaderPlayer.svelte';
+  import ImmersiveShaderPlayer, { canShowImmersive } from './ImmersiveShaderPlayer.svelte';
 
   import type Hls from 'hls.js';
   import type { AudioAnalysis, AudioAnalyserHandle } from './audio-analyser';
@@ -165,6 +165,13 @@
   // fall back to 'nebula' so every audio piece is immersive-capable — all 25
   // presets are audio-reactive, so there's no UX reason to hide the entry.
   let showImmersive = $state(false);
+  // Offered only where it can open: the player is a modal `<dialog>`, which
+  // Safari before 15.4 cannot show. True until hydrated, so the server's
+  // markup and every browser that can show it never change.
+  let immersiveOffered = $state(true);
+  $effect(() => {
+    immersiveOffered = canShowImmersive();
+  });
   const resolvedShaderPreset = $derived(
     shaderPreset && shaderPreset !== 'none' ? shaderPreset : 'nebula'
   );
@@ -1018,23 +1025,25 @@
             </div>
           </div>
 
-          <!-- Immersive mode — always available; falls back to 'nebula' when
-               content has no preset assigned. -->
-          <button
-            type="button"
-            class="audio-player__btn audio-player__btn--immersive"
-            onclick={() => {
-              showImmersive = true;
-              // Fullscreen API requires fresh transient activation — must be
-              // requested synchronously from a user gesture, not from the
-              // overlay's onMount (which runs after several awaits).
-              document.documentElement.requestFullscreen().catch(() => {});
-            }}
-            aria-label="Enter immersive mode"
-            title="Immersive shader mode"
-          >
-            <MaximizeIcon size={18} />
-          </button>
+          <!-- Immersive mode — wherever it can open; falls back to 'nebula'
+               when content has no preset assigned. -->
+          {#if immersiveOffered}
+            <button
+              type="button"
+              class="audio-player__btn audio-player__btn--immersive"
+              onclick={() => {
+                showImmersive = true;
+                // Fullscreen API requires fresh transient activation — must be
+                // requested synchronously from a user gesture, not from the
+                // overlay's onMount (which runs after several awaits).
+                document.documentElement.requestFullscreen().catch(() => {});
+              }}
+              aria-label="Enter immersive mode"
+              title="Immersive shader mode"
+            >
+              <MaximizeIcon size={18} />
+            </button>
+          {/if}
         </div>
       </div>
     </WaveformShader>

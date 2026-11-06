@@ -11,6 +11,20 @@
   @prop {string} shaderPreset - Shader preset ID to render
   @prop {() => void} onclose - Called when user exits immersive mode
 -->
+<script module lang="ts">
+  /**
+   * Whether this browser can show the player: a modal `<dialog>`. Safari
+   * before 15.4 has none, so AudioPlayer offers no immersive mode there, as
+   * GalleryBlock offers no lightbox.
+   */
+  export function canShowImmersive(): boolean {
+    return (
+      typeof HTMLDialogElement === 'function' &&
+      typeof HTMLDialogElement.prototype.showModal === 'function'
+    );
+  }
+</script>
+
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import type { Attachment } from 'svelte/attachments';
@@ -24,6 +38,8 @@
     createMediaKeyboardHandler,
     MediaLiveRegion,
   } from '$lib/components/media-a11y';
+  import { describeThrown } from '$lib/client-log';
+  import { logger } from '$lib/observability';
 
   interface Props {
     audioElement: HTMLAudioElement;
@@ -301,6 +317,12 @@
    * focus, so the overlay's keyboard shortcuts are heard at once (ref 05
    * §"Media elements" §9), and the page holds still until it goes.
    *
+   * A `showModal()` that throws (an `InvalidStateError`; no `showModal` at
+   * all is never offered, see `canShowImmersive`) lets go and says it has
+   * closed, or the player would stay mounted over a page it never covered.
+   * Thrown from here, with no boundary above, it would halt the page's
+   * updates, so it is logged, never rethrown.
+   *
    * Going, it closes BEFORE focus returns to what had it: an element behind an
    * open modal cannot take focus.
    */
@@ -308,9 +330,18 @@
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const root = document.documentElement;
     document.body.appendChild(node);
-    node.showModal();
-    root.setAttribute(LOCK, '');
-    node.focus();
+    try {
+      node.showModal();
+      root.setAttribute(LOCK, '');
+      node.focus();
+    } catch (error) {
+      root.removeAttribute(LOCK);
+      if (node.open) node.close();
+      node.remove();
+      logger.warn('immersive.open_failed', describeThrown(error));
+      onclose();
+      return;
+    }
     return () => {
       root.removeAttribute(LOCK);
       if (node.open) node.close();
