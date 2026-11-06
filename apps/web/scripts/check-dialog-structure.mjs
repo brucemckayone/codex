@@ -114,7 +114,10 @@
  *                  own literals, or a same-file const's): their rules are
  *                  global and never reach this check.
  *   popover-name   Outside ui/Popover/, a Popover.Content has aria-label or
- *                  aria-labelledby on its tag (an {expression} counts). Its
+ *                  aria-labelledby on its tag that names it: text, a call or
+ *                  a member (`m.x()`), not an undefined, null or '' it can
+ *                  result in, nor a prop with no default (a wrapper's
+ *                  `label?: string`, which a parent may leave unset). Its
  *                  Name type requires one, but CI type-checks no .svelte.
  *   own-dialog     Outside ui/Dialog/ and ui/Popover/, nothing builds a modal
  *                  by hand: no role="dialog"/"alertdialog" (a conditional,
@@ -135,7 +138,9 @@
  *                  and any .ts or .js file outside ui/Dialog/ (ui/ included)
  *                  that imports it: a barrel one step away would hand its
  *                  pages an alias this check can't resolve. Type-only imports
- *                  read no value and pass.
+ *                  read no value and pass. Outside ui/Popover/, the
+ *                  Popover's parts are tags only too (`UI.Popover` of the ui
+ *                  barrel included), so popover-name sees every panel.
  *   parse          A .svelte or .css file that does not parse fails loudly.
  *
  * "Direct child" looks THROUGH {#if}/{#each}/{#key}/{#await}/{#snippet}
@@ -515,10 +520,12 @@ const POPOVER_CONTENT = new Set(['Content', 'PopoverContent']);
 
 /**
  * The local names a file binds to the shared Popover: namespaces, parts,
- * and which of the parts is the panel (`contents`).
+ * which of the parts is the panel (`contents`), and the ui barrel's own
+ * namespaces (`uiNamespaces`: `UI` of `import * as UI from '$lib/components/ui'`,
+ * whose `UI.Popover` is the module).
  */
 function collectPopoverNames(file, programs, ctx) {
-  const names = { namespaces: new Set(), parts: new Set(), contents: new Set() };
+  const names = { namespaces: new Set(), parts: new Set(), contents: new Set(), uiNamespaces: new Set() };
   for (const stmt of programs.flatMap((program) => program.body)) {
     if (stmt.type !== 'ImportDeclaration') continue;
     const target = specifierTarget(file, stmt.source.value, ctx);
@@ -527,6 +534,7 @@ function collectPopoverNames(file, programs, ctx) {
     for (const s of stmt.specifiers) {
       const imported = s.imported?.name ?? s.imported?.value;
       if (popover) (s.type === 'ImportNamespaceSpecifier' ? names.namespaces : names.parts).add(s.local.name);
+      else if (target === ctx.uiDir && s.type === 'ImportNamespaceSpecifier') names.uiNamespaces.add(s.local.name);
       // The ui barrel re-exports the module as `Popover`.
       else if (target === ctx.uiDir && imported === 'Popover') names.namespaces.add(s.local.name);
       const isContent =
@@ -539,35 +547,93 @@ function collectPopoverNames(file, programs, ctx) {
   return names;
 }
 
+/** A Popover tag's part name: `Content` of `Popover.Content` or `UI.Popover.Content`, the local name of a part, or null. */
+function popoverPartName(node, popover) {
+  if (node.type !== 'Component') return null;
+  const path = node.name.split('.');
+  if (path.length === 1) return popover.parts.has(node.name) ? node.name : null;
+  if (path.length === 2) return popover.namespaces.has(path[0]) ? path[1] : null;
+  return path.length === 3 && popover.uiNamespaces.has(path[0]) && path[1] === 'Popover' ? path[2] : null;
+}
+
 function isPopoverPart(node, popover) {
-  if (node.type !== 'Component') return false;
-  const dot = node.name.indexOf('.');
-  return dot === -1 ? popover.parts.has(node.name) : popover.namespaces.has(node.name.slice(0, dot));
+  return popoverPartName(node, popover) !== null;
 }
 
 function isPopoverContent(node, popover) {
-  if (node.type !== 'Component') return false;
-  const dot = node.name.indexOf('.');
-  if (dot === -1) return popover.contents.has(node.name);
-  return popover.namespaces.has(node.name.slice(0, dot)) && POPOVER_CONTENT.has(node.name.slice(dot + 1));
+  const name = popoverPartName(node, popover);
+  return name !== null && (node.name.includes('.') ? POPOVER_CONTENT.has(name) : popover.contents.has(name));
+}
+
+/** The names a component's `$props()` destructuring binds with no default: a parent may leave them unset. */
+function propsWithoutDefault(programs) {
+  const names = new Set();
+  walk(programs, (node) => {
+    const init = node.type === 'VariableDeclarator' ? node.init : null;
+    if (init?.type !== 'CallExpression' || init.callee.type !== 'Identifier' || init.callee.name !== '$props') return;
+    if (node.id.type !== 'ObjectPattern') return;
+    for (const p of node.id.properties) if (p.type === 'Property' && p.value.type === 'Identifier') names.add(p.value.name);
+  });
+  return names;
+}
+
+const NAME_RANK = { named: 0, unproven: 1, none: 2 };
+const worstName = (verdicts) => verdicts.reduce((a, b) => (NAME_RANK[b] > NAME_RANK[a] ? b : a), 'named');
+
+/**
+ * What an aria-label / aria-labelledby value names: 'named', 'none' (empty
+ * text, or an undefined, null or '' it can result in) or 'unproven' (a
+ * prop with no default, which a parent may leave unset). A call or a member
+ * (paraglide's `m.x()`) names it.
+ */
+function nameVerdict(attr, unsetProps) {
+  const text = staticValue(attr);
+  if (text !== null) return text.trim() ? 'named' : 'none';
+  const parts = Array.isArray(attr.value) ? attr.value : [attr.value];
+  if (parts.some((p) => p.type === 'Text' && p.data.trim())) return 'named';
+  const judge = (expr) => {
+    switch (expr?.type) {
+      case 'Literal':
+        return expr.value === null || (typeof expr.value === 'string' && !expr.value.trim()) ? 'none' : 'named';
+      case 'Identifier':
+        if (expr.name === 'undefined') return 'none';
+        return unsetProps.has(expr.name) ? 'unproven' : 'named';
+      case 'TemplateLiteral':
+        return expr.quasis.some((q) => (q.value.cooked ?? q.value.raw).trim()) ? 'named' : worstName(expr.expressions.map(judge));
+      case 'ConditionalExpression':
+        return worstName([judge(expr.consequent), judge(expr.alternate)]);
+      case 'LogicalExpression':
+        // `label ?? 'Info'` names it whenever label doesn't.
+        return judge(expr.right);
+      default:
+        return TS_VALUE_HOLDERS.has(expr?.type) ? judge(expr.expression) : 'named';
+    }
+  };
+  return worstName(parts.filter((p) => p.type !== 'Text').map((p) => judge(p.expression)));
 }
 
 /**
  * popover-name: a Popover panel outside ui/Popover/ carries aria-label or
  * aria-labelledby on its tag. Its Name type requires one, but no CI job
- * type-checks a .svelte file. An {expression} counts as a name; an empty
- * text or a {...spread} does not, since nothing here can read either.
+ * type-checks a .svelte file. A literal, a call or a member names it; an
+ * empty text, an undefined, null or '' literal, or a {...spread} does not,
+ * and a prop with no default (a wrapper's `label?: string`) is unproven.
  */
-function checkPopoverNames(fragment, popover, report) {
+function checkPopoverNames(fragment, programs, popover, report) {
+  const unsetProps = propsWithoutDefault(programs);
   walk(fragment, (node) => {
     if (!isPopoverContent(node, popover)) return;
-    const named = node.attributes.some(
-      (a) =>
-        a.type === 'Attribute' &&
-        (a.name === 'aria-label' || a.name === 'aria-labelledby') &&
-        (staticValue(a) === null || staticValue(a).trim() !== '')
-    );
-    if (named) return;
+    const names = node.attributes.filter((a) => a.type === 'Attribute' && (a.name === 'aria-label' || a.name === 'aria-labelledby'));
+    const verdicts = names.map((a) => nameVerdict(a, unsetProps));
+    if (verdicts.includes('named')) return;
+    if (verdicts.includes('unproven')) {
+      report(
+        node.start,
+        'popover-name',
+        `<${node.name}>'s name comes from a prop with no default, so a parent can leave the panel unnamed (a dialog needs a name); give the prop a default, or write the name on the tag`
+      );
+      return;
+    }
     const spread = node.attributes.some((a) => a.type === 'SpreadAttribute') ? '; a {...spread} cannot be read, so write it on the tag' : '';
     report(
       node.start,
@@ -590,8 +656,12 @@ function isNameOnly(parent, key) {
  * expression, can hand a part to something this check cannot see. Type
  * positions read no value; tag names are not expressions.
  */
-function checkValueReads(roots, bindings, report) {
-  if (bindings.size === 0) return;
+function checkValueReads(roots, bindings, report, what = 'Dialog', uiNamespaces = new Set()) {
+  if (bindings.size === 0 && uiNamespaces.size === 0) return;
+  const detail = (name) =>
+    what === 'Dialog'
+      ? `'${name}' is read as a value; use the Dialog's parts as tags only`
+      : `'${name}' is read as a value; use the ${what}'s parts as tags only, so each panel stays where popover-name can see it`;
   const visit = (node, parent, key) => {
     if (Array.isArray(node)) {
       for (const item of node) visit(item, parent, key);
@@ -602,9 +672,15 @@ function checkValueReads(roots, bindings, report) {
       if (TS_VALUE_HOLDERS.has(node.type)) visit(node.expression, node, 'expression');
       return;
     }
-    if (node.type === 'Identifier' && bindings.has(node.name) && !isNameOnly(parent, key)) {
-      report(node.start, 'alias', `'${node.name}' is read as a value; use the Dialog's parts as tags only`);
-    }
+    if (node.type === 'Identifier' && bindings.has(node.name) && !isNameOnly(parent, key)) report(node.start, 'alias', detail(node.name));
+    // The module read through the ui barrel's namespace: `UI.Popover`.
+    const viaUi =
+      node.type === 'MemberExpression' &&
+      !node.computed &&
+      node.object.type === 'Identifier' &&
+      uiNamespaces.has(node.object.name) &&
+      node.property.name === what;
+    if (viaUi) report(node.start, 'alias', detail(`${node.object.name}.${what}`));
     for (const [k, value] of Object.entries(node)) {
       if (k !== 'metadata' && value && typeof value === 'object') visit(value, node, k);
     }
@@ -2043,7 +2119,10 @@ function checkSvelteFile(file, source, unit, ctx, report) {
     if (!ctx.scriptSelectExempt(file)) checkScriptSelectors([...programs, ast.fragment], report);
     if (ast.css) checkSvelteCss(ast.css, source, ctx.handles, ctx.nameOf(file), report);
   }
-  if (!isInside(ctx.popoverDir, file)) checkPopoverNames(ast.fragment, popover, report);
+  if (!isInside(ctx.popoverDir, file)) {
+    checkPopoverNames(ast.fragment, programs, popover, report);
+    checkValueReads([...programs, ast.fragment], new Set([...popover.namespaces, ...popover.parts]), report, 'Popover', popover.uiNamespaces);
+  }
   if (!ctx.ownDialogExempt(file)) checkOwnDialog(ast, programs, bindings, popover, report);
 }
 

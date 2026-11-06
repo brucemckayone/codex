@@ -2114,14 +2114,59 @@ test('CATCHES a Popover.Content with no name: bare, an empty label, through the 
   assert.match(result.violations[7].detail, /; a \{\.\.\.spread\} cannot be read, so write it on the tag$/);
 });
 
-test("ALLOWS a named Popover.Content (text or {expression}), the other Popover parts, another Content, and ui/Popover's own files", () => {
+test("CATCHES a Popover.Content whose name can be unset: a prop with no default, undefined, null or '', and the panel through UI.Popover or an alias", () => {
+  writeFixture(
+    'src/lib/components/InfoPopover.svelte',
+    `<script lang="ts">
+  import * as Popover from '$lib/components/ui/Popover';
+  import * as UI from '$lib/components/ui';
+  let { label, labelledby, wide }: { label?: string; labelledby?: string; wide?: boolean } = $props();
+  const Alias = Popover.Content;
+  const Panel = UI.Popover;
+</script>
+<Popover.Content aria-label={label}>a</Popover.Content>
+<Popover.Content aria-labelledby={labelledby}>b</Popover.Content>
+<Popover.Content aria-label={wide ? label : 'Info'}>c</Popover.Content>
+<Popover.Content aria-label={undefined}>d</Popover.Content>
+<Popover.Content aria-label={null}>e</Popover.Content>
+<Popover.Content aria-label={''}>f</Popover.Content>
+<Popover.Content aria-label={wide ? 'Info' : undefined}>g</Popover.Content>
+<UI.Popover.Content>h</UI.Popover.Content>
+`
+  );
+
+  const result = scan();
+  // @5-6: the alias rule, so a panel can't leave the tags popover-name reads.
+  assert.deepEqual(summary(result), [
+    'popover-name@8',
+    'popover-name@9',
+    'popover-name@10',
+    'popover-name@11',
+    'popover-name@12',
+    'popover-name@13',
+    'popover-name@14',
+    'popover-name@15',
+    'alias@5',
+    'alias@6',
+  ]);
+  assert.match(
+    result.violations[0].detail,
+    /^<Popover\.Content>'s name comes from a prop with no default, .*; give the prop a default, or write the name on the tag$/
+  );
+  assert.match(result.violations[3].detail, /^<Popover\.Content> has no name/);
+  assert.match(result.violations[9].detail, /'UI\.Popover' is read as a value; use the Popover's parts as tags only/);
+});
+
+test("ALLOWS a named Popover.Content (text, a call, a member, a prop with a default), the other Popover parts, another Content, and ui/Popover's own files", () => {
   writeFixture(
     'src/lib/components/Picker.svelte',
     `<script lang="ts">
   import * as Popover from '$lib/components/ui/Popover';
   import * as Card from '$lib/components/ui/Card';
   import * as Dialog from '$lib/components/ui/Dialog';
-  let { label } = $props();
+  import * as UI from '$lib/components/ui';
+  import { m } from '$lib/paraglide/messages';
+  let { label = 'Details', copy, wide } = $props();
 </script>
 <Popover.Root>
   <Popover.Trigger>Open</Popover.Trigger>
@@ -2129,8 +2174,15 @@ test("ALLOWS a named Popover.Content (text or {expression}), the other Popover p
 </Popover.Root>
 <Popover.Content aria-labelledby="range-heading"><h3 id="range-heading">Range</h3></Popover.Content>
 <Popover.Content aria-label={label}>c</Popover.Content>
-<Card.Content>d</Card.Content>
-<Dialog.Root><Dialog.Content><Dialog.Body>e</Dialog.Body></Dialog.Content></Dialog.Root>
+<Popover.Content aria-label={m.media_uses_where_title()}>d</Popover.Content>
+<Popover.Content aria-label={copy.title}>e</Popover.Content>
+<Popover.Content aria-label={wide ? 'Wide' : 'Narrow'}>f</Popover.Content>
+<Popover.Content aria-label="Uses of {copy.name}">g</Popover.Content>
+<Popover.Content aria-label={copy.label ?? 'Info'}>h</Popover.Content>
+<UI.Popover.Content aria-label="Pick">i</UI.Popover.Content>
+<UI.Button>j</UI.Button>
+<Card.Content>k</Card.Content>
+<Dialog.Root><Dialog.Content><Dialog.Body>l</Dialog.Body></Dialog.Content></Dialog.Root>
 `
   );
   writeFixture(
