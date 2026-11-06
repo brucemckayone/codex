@@ -19,23 +19,24 @@
       pressed = event.target instanceof Element ? event.target : null;
       pressedAt = performance.now();
     };
-    document.addEventListener('pointerdown', press, true);
     // A long press opens on its release: a real click (detail > 0, which a
     // key's synthetic click is not) counts from there.
-    document.addEventListener(
-      'click',
-      (event) => {
-        if (event.detail > 0) press(event);
-      },
-      true
-    );
-    document.addEventListener(
-      'keydown',
-      () => {
-        pressed = null;
-      },
-      true
-    );
+    const click = (event: MouseEvent) => {
+      if (event.detail > 0) press(event);
+    };
+    const key = () => {
+      pressed = null;
+    };
+    document.addEventListener('pointerdown', press, true);
+    document.addEventListener('click', click, true);
+    document.addEventListener('keydown', key, true);
+    // In dev a hot update runs this module again: its listeners go first,
+    // or every edit to this file added three more.
+    import.meta.hot?.dispose(() => {
+      document.removeEventListener('pointerdown', press, true);
+      document.removeEventListener('click', click, true);
+      document.removeEventListener('keydown', key, true);
+    });
   }
 
   const FOCUSABLE =
@@ -169,11 +170,15 @@
     // With no prop, Melt's own default comes first: `defaultEl` is its
     // `activeTrigger`, which it would focus itself. Never undefined over it.
     // Then the opener recorded as the dialog opened, while it is on the page,
-    // else the button of the menu it was an item in.
+    // else the button of the menu it was an item in. Both are let go once
+    // read: a node held here kept a page left behind alive until the next
+    // open (Codex-vlphc review G4-N5).
     closeFocus: (defaultEl) => {
       const target = closeFocus;
-      if (target === undefined)
-        return defaultEl ?? [opener, openerMenu].find((el) => el?.isConnected) ?? null;
+      const recorded = [opener, openerMenu].find((el) => el?.isConnected) ?? null;
+      opener = null;
+      openerMenu = null;
+      if (target === undefined) return defaultEl ?? recorded;
       return typeof target === 'function' ? target(defaultEl) : target;
     },
     // Where focus goes as the panel opens. A reopen during the close's
