@@ -3,8 +3,8 @@
 
   A fixed control bar between Header and Body: a search box, type filters.
   It is `flex: none`, so Dialog.Body still takes the rest of the panel and
-  scrolls on its own; a page never hand-writes this bar. A stacked bar stops
-  at a third of the screen and scrolls past that, so it can never push the
+  scrolls on its own; a page never hand-writes this bar. The bar stops at a
+  third of the screen and scrolls past that, so it can never push the
   Footer out.
 
   Part order: Dialog.Header, Dialog.Toolbar (optional), Dialog.Body,
@@ -57,14 +57,15 @@
     align-items: stretch;
   }
 
-  /* Stacked fields can outgrow a short screen, and the Footer below went
-     out of reach (Codex-vlphc review G2-L7). The bar stops at a third of
-     the screen and scrolls, so Body and Footer keep the rest. A drawer
-     scrolls as a whole and needs no second scroller. A scroller clips at its
+  /* A bar can outgrow a short screen, with stacked fields or a row of chips
+     wrapped onto many lines, and the Footer below went out of reach
+     (Codex-vlphc review G2-L7, G3-L7). The bar stops at a third of the
+     screen and scrolls, so Body and Footer keep the rest. A drawer scrolls
+     as a whole and needs no second scroller. A scroller clips at its
      padding box, so the bar is pulled up into a top padding of the same
      size: a field's focus ring at the top edge still shows, and nothing
      moves. */
-  .dialog-toolbar[data-direction='column']:not([data-flush], [data-layout='drawer']) {
+  .dialog-toolbar:not([data-flush], [data-layout='drawer']) {
     max-height: 33dvh;
     overflow-y: auto;
     overscroll-behavior-y: contain;
