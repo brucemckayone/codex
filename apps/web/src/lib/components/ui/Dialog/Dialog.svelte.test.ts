@@ -319,6 +319,16 @@ describe('Dialog focus return', () => {
     expect(document.activeElement).toBe(trigger);
   });
 
+  // Svelte makes a leaving node inert: through its menu's closing animation
+  // the item is still on the page, but focus() on it does nothing.
+  test("an item in its menu's closing animation sends focus to the menu's button", async () => {
+    const { trigger, list } = menu();
+
+    await openAndClose(() => list.setAttribute('inert', ''));
+
+    expect(document.activeElement).toBe(trigger);
+  });
+
   test('a menu item still on the page takes the focus back itself', async () => {
     const { item } = menu();
 

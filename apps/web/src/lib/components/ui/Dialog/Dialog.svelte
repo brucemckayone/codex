@@ -169,13 +169,16 @@
     //
     // With no prop, Melt's own default comes first: `defaultEl` is its
     // `activeTrigger`, which it would focus itself. Never undefined over it.
-    // Then the opener recorded as the dialog opened, while it is on the page,
-    // else the button of the menu it was an item in. Both are let go once
-    // read: a node held here kept a page left behind alive until the next
-    // open (Codex-vlphc review G4-N5).
+    // Then the opener recorded as the dialog opened, while it can take focus
+    // back, else the button of the menu it was an item in. An item through
+    // its menu's closing animation is still on the page, but Svelte makes a
+    // leaving node inert and focus() on it does nothing: focus fell to the
+    // body (Codex-vlphc review G5-C-L5). Both are let go once read: a node
+    // held here kept a page left behind alive until the next open (G4-N5).
     closeFocus: (defaultEl) => {
       const target = closeFocus;
-      const recorded = [opener, openerMenu].find((el) => el?.isConnected) ?? null;
+      const recorded =
+        [opener, openerMenu].find((el) => el?.isConnected && !el.closest('[inert]')) ?? null;
       opener = null;
       openerMenu = null;
       if (target === undefined) return defaultEl ?? recorded;
