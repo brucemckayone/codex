@@ -87,11 +87,33 @@
 		}
 	}
 
+	// A sheet closed by a pull, reopened before it has dropped away: Svelte
+	// resumes that same panel, which would still carry the pull's offset.
+	let released: HTMLElement | null = null;
+	$effect(() => {
+		if (!open || !released) return;
+		released.style.transform = '';
+		released = null;
+	});
+
+	// Past 100px the sheet closes from where the finger let go: it keeps the
+	// pull's offset, and the rise runs on down from there (Svelte's fly adds
+	// to the transform it finds). Cleared at once, it jumped back up first.
 	function handleTouchEnd() {
 		if (!dragged) return;
 		if (currentY - startY > 100) {
+			released = dragged;
 			open = false;
+		} else {
+			dragged.style.transform = '';
 		}
+		dragged = null;
+	}
+
+	// The system took the touch (an iOS gesture, an alert): the pull is
+	// abandoned, so the sheet goes back where it was and stays open.
+	function handleTouchCancel() {
+		if (!dragged) return;
 		dragged.style.transform = '';
 		dragged = null;
 	}
@@ -109,6 +131,7 @@
 		ontouchstart={handleTouchStart}
 		ontouchmove={handleTouchMove}
 		ontouchend={handleTouchEnd}
+		ontouchcancel={handleTouchCancel}
 	>
 		<Dialog.Body>
 			<div class="sheet__content">
