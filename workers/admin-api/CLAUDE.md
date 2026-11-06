@@ -106,7 +106,7 @@ Platform support's refund screen and queue (the `/admin` pages in apps/web). Des
 | `CACHE_KV` | Yes | Library version bumps and the streaming block a settlement clears |
 | `RATE_LIMIT_API` | Yes | Native rate-limit binding the `/api/*` limiter counts in — `RATE_LIMIT_KV` was removed (Codex-kgrdp.17) |
 | `RATE_LIMIT_STRICT` | Yes | The `strict` preset the platform support writes take (namespaces 1051/2051/3051) |
-| `STRIPE_SECRET_KEY` | For support refunds | admin-api's OWN restricted key (owner decision Q4, Codex-5vvwj.2), never ecom-api's: read charges, refunds, disputes, invoices and payment intents; write refunds. Test mode for dev and test, live for production. The registry resolves it lazily, so only a Stripe call needs it |
+| `STRIPE_SECRET_KEY` | For support refunds | admin-api's OWN restricted key (owner decision Q4, Codex-5vvwj.2), never ecom-api's. Its permissions are listed once, in docs/payments/release-checklist.md R8. In the same mode as the platform's `STRIPE_SECRET_KEY` (test while production runs on test keys). The registry resolves it lazily, so only a Stripe call needs it |
 | `ENVIRONMENT` | No | `development` / `test` / `production` (dev-webhook + guards; tags every refund with `codex_env`) |
 
 ## Strict Rules
