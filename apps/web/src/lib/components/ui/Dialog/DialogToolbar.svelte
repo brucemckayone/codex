@@ -63,16 +63,18 @@
      screen and scrolls, so Body and Footer keep the rest. A drawer scrolls
      as a whole and needs no second scroller. A scroller clips at its
      padding box, so the bar is pulled up into a top padding of the same
-     size: a field's focus ring at the top edge still shows, and nothing
-     moves. The vh line is for an engine without dvh, which drops the dvh
-     one (Safari < 15.4, Chrome < 108, Firefox < 101). */
+     size, the focus ring's reach (its width and its offset): a field's
+     ring at the top edge still shows, and nothing moves. The vh line is
+     for an engine without dvh, which drops the dvh one (Safari < 15.4,
+     Chrome < 108, Firefox < 101). */
   .dialog-toolbar:not([data-flush], [data-layout='drawer']) {
+    --toolbar-ring: calc(var(--border-width-thick) + var(--space-0-5));
     max-height: 33vh;
     max-height: 33dvh;
     overflow-y: auto;
     overscroll-behavior-y: contain;
-    margin-top: calc(-1 * var(--space-1));
-    padding-top: var(--space-1);
+    margin-top: calc(-1 * var(--toolbar-ring));
+    padding-top: var(--toolbar-ring);
   }
 
   /* Flush: a bare box around the page's own row (a palette's search row). */

@@ -203,6 +203,19 @@ describe("DialogToolbar's cap", () => {
     expect(rule?.decls.get('overscroll-behavior-y')).toEqual(['contain']);
   });
 
+  // A scroller clips at its padding box: the band it is pulled up into is
+  // exactly a focus ring's reach, so a field's ring at the top still shows
+  // (review G4-U-N1).
+  it('pulls the bar up into a band the focus ring fits', () => {
+    expect(rule?.decls.get('--toolbar-ring')).toEqual([
+      'calc(var(--border-width-thick) + var(--space-0-5))',
+    ]);
+    expect(rule?.decls.get('margin-top')).toEqual([
+      'calc(-1 * var(--toolbar-ring))',
+    ]);
+    expect(rule?.decls.get('padding-top')).toEqual(['var(--toolbar-ring)']);
+  });
+
   it('is the only rule that caps the bar', () => {
     const capped = toolbar.filter((r) => r.decls.has('max-height'));
     expect(capped.map((r) => r.selector)).toEqual([bare(CAPPED)]);
