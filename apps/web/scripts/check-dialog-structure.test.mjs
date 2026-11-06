@@ -2050,7 +2050,10 @@ test("LENGTH_UNITS and MATH_FUNCTIONS are the CssLength type's own lists (ui/Dia
   };
   assert.deepEqual([...LENGTH_UNITS].sort(), union('LengthUnit'));
   assert.deepEqual([...MATH_FUNCTIONS].sort(), union('MathFunction'));
-  // The token form the gate takes is the type's: var(--…), never var(x).
+  // And CssLength is built from those lists, in the forms CSS_LENGTH takes:
+  // a number with a unit, a math function, and a token (var(--…), never var(x)).
+  assert.match(source, /`\$\{number\}\$\{LengthUnit\}`/);
+  assert.match(source, /`\$\{MathFunction\}\(\$\{string\}\)`/);
   assert.match(source, /`var\(--\$\{string\}\)`/);
 });
 
