@@ -125,6 +125,53 @@ describe('Dialog', () => {
   });
 });
 
+describe('Dialog scroll lock', () => {
+  const mounted: ReturnType<typeof mount>[] = [];
+  const locked = () => document.body.hasAttribute('data-melt-scroll-lock');
+
+  afterEach(() => {
+    for (const component of mounted.splice(0)) unmount(component);
+    document.body.innerHTML = '';
+  });
+
+  // `drop` keeps the panel while it animates out (jsdom never finishes the
+  // animation): the window in which a reopen lost Melt's release for good.
+  test('the page is let go at the close, also after a reopen during the outro', () => {
+    const props = $state({ open: true, motion: 'drop' as const });
+    mounted.push(mount(DialogHarness, { target: document.body, props }));
+    flushSync();
+    expect(locked()).toBe(true);
+
+    props.open = false;
+    flushSync();
+    expect(document.querySelector('.dialog-content')).toBeTruthy();
+    expect(locked()).toBe(false);
+
+    props.open = true;
+    flushSync();
+    expect(locked()).toBe(true);
+    props.open = false;
+    flushSync();
+    expect(locked()).toBe(false);
+  });
+
+  test('a dialog over a dialog keeps the page locked until the last one closes', () => {
+    const outer = $state({ open: true });
+    const inner = $state({ open: true });
+    mounted.push(mount(DialogHarness, { target: document.body, props: outer }));
+    mounted.push(mount(DialogHarness, { target: document.body, props: inner }));
+    flushSync();
+
+    inner.open = false;
+    flushSync();
+    expect(locked()).toBe(true);
+
+    outer.open = false;
+    flushSync();
+    expect(locked()).toBe(false);
+  });
+});
+
 describe('Dialog dismissible', () => {
   let component: ReturnType<typeof mount> | null = null;
 

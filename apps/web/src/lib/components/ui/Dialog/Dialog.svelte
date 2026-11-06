@@ -1,6 +1,7 @@
 <script lang="ts">
   import { type CreateDialogProps, createDialog } from '@melt-ui/svelte';
   import { type Snippet, setContext } from 'svelte';
+  import { lockScroll } from '$lib/utils/scroll-lock';
 
   interface Props {
     open?: boolean;
@@ -87,6 +88,11 @@
       if (target === undefined) return defaultEl ?? null;
       return typeof target === 'function' ? target(defaultEl) : target;
     },
+    // The page's scroll lock is ours, below, not Melt's: under forceVisible
+    // Melt let go only when the panel left the DOM, so a dialog reopened
+    // during its close animation lost the release and the page stayed
+    // locked (Codex-vlphc review H1).
+    preventScroll: false,
     forceVisible: true
   });
 
@@ -97,6 +103,13 @@
   // Sync prop to melt state
   $effect(() => {
     meltOpen.set(open);
+  });
+
+  // The page holds still from open to close, and is let go at the close
+  // even while the panel animates out. Counted, so a dialog over a dialog
+  // keeps it until the last one closes.
+  $effect(() => {
+    if (open) return lockScroll();
   });
 
   // Escape is ignored outright too. Its behaviour is a store the key handler
