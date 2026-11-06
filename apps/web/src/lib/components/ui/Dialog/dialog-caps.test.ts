@@ -73,17 +73,20 @@ function rulesOf(file: string): Rule[] {
 const content = rulesOf('DialogContent.svelte');
 const toolbar = rulesOf('DialogToolbar.svelte');
 
-/** The one value `property` takes in the rule for `selector` (inside `within`). */
+/** The one value `property` takes in the one rule for `selector` (inside `within`). */
 function value(
   rules: Rule[],
   selector: string,
   property: string,
   within: string[] = []
 ): string | undefined {
-  const rule = rules.find(
+  const matching = rules.filter(
     (r) => r.selector === bare(selector) && r.within.join() === within.join()
   );
-  const values = rule?.decls.get(property);
+  // Of two rules with one selector the later wins the cascade: reading
+  // the first would pass over what the browser applies.
+  expect(matching.length, `rules for ${selector}`).toBeLessThanOrEqual(1);
+  const values = matching[0]?.decls.get(property);
   return values?.length === 1 ? values[0] : undefined;
 }
 
@@ -162,13 +165,46 @@ describe("DialogContent's caps", () => {
     expect(value(content, selector, '--dialog-room', within)).toBe(room);
   });
 
-  it('sets no max-height a placement could leave without the clamp', () => {
-    const others = content.filter(
-      (r) =>
-        r.selector.startsWith('.dialog-content') &&
-        r.selector !== '.dialog-content'
-    );
-    expect(others.filter((r) => r.decls.has('max-height'))).toEqual([]);
+  // A cap property set anywhere else overrides a row above with every row
+  // still green: a later `.dialog-content { max-height: none }`, or
+  // `--dialog-default-max: none` on a size (review G5-C-L4). So the rules
+  // that set one are exactly these, each setting exactly these.
+  it('sets a cap only in the rules above, each once', () => {
+    const CAPS = [
+      'max-height',
+      '--dialog-max',
+      '--dialog-default-max',
+      '--dialog-room',
+      '--dialog-dvh',
+    ];
+    const key = (selector: string, within: string[]) =>
+      [bare(selector), ...within].join(' ');
+    const found = content
+      .map((r) => ({
+        rule: key(r.selector, r.within),
+        sets: CAPS.filter((p) => r.decls.has(p)),
+      }))
+      .filter((r) => r.sets.length > 0);
+    const expected = [
+      { rule: key('.dialog-content', []), sets: CAPS },
+      {
+        rule: key('.dialog-content', ['@supportsnot(height:1dvh)']),
+        sets: ['--dialog-dvh'],
+      },
+      ...placements
+        .filter(([selector]) => selector !== '.dialog-content')
+        .map(([selector, within, cap, room]) => ({
+          rule: key(selector, within),
+          sets: CAPS.filter(
+            (p) =>
+              (p === '--dialog-default-max' && cap) ||
+              (p === '--dialog-room' && room)
+          ),
+        })),
+    ];
+    const order = (a: { rule: string }, b: { rule: string }) =>
+      a.rule.localeCompare(b.rule);
+    expect(found.sort(order)).toEqual(expected.sort(order));
   });
 
   it('takes vh where an engine has no dvh', () => {
