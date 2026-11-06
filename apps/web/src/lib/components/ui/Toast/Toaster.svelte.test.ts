@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
 import {
   flushSync,
@@ -365,5 +367,22 @@ describe('Toaster · action', () => {
     const [plain, withAction] = entries();
     expect(plain.closeDelay).toBe(5000);
     expect(withAction.closeDelay).toBe(0);
+  });
+});
+
+// jsdom applies no component CSS, so the rule is read from the source. In
+// WebKit a dialog's scroll lock widens the viewport by the scrollbar, and
+// the toasts moved 15px right while it was open (Codex-vlphc review G4-U4).
+describe('Toaster · scroll lock', () => {
+  test('the toasts’ right edge adds the padding the scroll lock publishes', () => {
+    const source = readFileSync(
+      join(import.meta.dirname, 'Toaster.svelte'),
+      'utf8'
+    );
+    const rule = /\.toaster \{([^}]*)\}/.exec(source)?.[1] ?? '';
+
+    expect(rule).toMatch(
+      /right: calc\(var\(--space-4\) \+ var\(--scroll-lock-pad, 0px\)\);/
+    );
   });
 });

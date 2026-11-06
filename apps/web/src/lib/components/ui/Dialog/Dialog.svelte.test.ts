@@ -196,12 +196,13 @@ describe('Dialog focus return', () => {
     return button;
   }
 
-  async function openAndClose() {
+  async function openAndClose(whileOpen?: () => void) {
     const props = $state({ open: false });
     mounted.push(mount(DialogHarness, { target: document.body, props }));
     flushSync();
     props.open = true;
     flushSync();
+    whileOpen?.();
     await settle();
     props.open = false;
     flushSync();
@@ -256,6 +257,76 @@ describe('Dialog focus return', () => {
     expect(document.activeElement).not.toBe(button);
   });
 
+  // A long press opens on its release, past the press window: the click
+  // that ends it names the opener again (review G4-L5). WebKit focuses
+  // nothing, so without it focus went back to what had it before.
+  test('a long press: the click at its release names the opener', async () => {
+    const button = opener();
+    const field = opener();
+    field.focus();
+    const now = vi.spyOn(performance, 'now').mockReturnValue(1_000);
+    press(button);
+    now.mockReturnValue(1_800);
+    button
+      .querySelector('span')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+
+    await openAndClose();
+    now.mockRestore();
+
+    expect(document.activeElement).toBe(button);
+  });
+
+  // Enter in a field submits its form with a click of detail 0 on the
+  // submit button. That is the keyboard, and the field had focus.
+  test("a key's click names nothing: focus goes back to the field", async () => {
+    const submit = opener();
+    const field = opener();
+    field.focus();
+    key();
+    submit
+      .querySelector('span')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));
+
+    await openAndClose();
+
+    expect(document.activeElement).toBe(field);
+  });
+
+  /** A menu's button and an item in its menu, as Melt's DropdownMenu renders them. */
+  function menu() {
+    const trigger = opener();
+    trigger.setAttribute('aria-controls', 'menu-1');
+    const list = document.createElement('div');
+    list.id = 'menu-1';
+    list.setAttribute('role', 'menu');
+    list.innerHTML =
+      '<div role="menuitem" tabindex="-1"><span>Delete</span></div>';
+    document.body.appendChild(list);
+    const item = list.querySelector<HTMLElement>('[role="menuitem"]');
+    item
+      ?.querySelector('span')
+      ?.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    return { trigger, list, item };
+  }
+
+  // A menu closes as its item is chosen and takes the item with it.
+  test("opened from a menu item, focus goes back to the menu's button once the menu has gone", async () => {
+    const { trigger, list } = menu();
+
+    await openAndClose(() => list.remove());
+
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  test('a menu item still on the page takes the focus back itself', async () => {
+    const { item } = menu();
+
+    await openAndClose();
+
+    expect(document.activeElement).toBe(item);
+  });
+
   // A dialog a timer or a response opens long after the last press must not
   // send focus, and the page's scroll, back to wherever that press was.
   test('a press long before the open is not the opener', async () => {
@@ -273,6 +344,118 @@ describe('Dialog focus return', () => {
   });
 });
 
+describe('Dialog focus at the open', () => {
+  const mounted: ReturnType<typeof mount>[] = [];
+  // Melt moves focus a tick after open.
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+
+  afterEach(() => {
+    for (const component of mounted.splice(0)) unmount(component);
+    vi.restoreAllMocks();
+    document.body.innerHTML = '';
+  });
+
+  // `drop` keeps the panel while it animates out (jsdom never finishes the
+  // animation). Melt focused that panel itself on the reopen, so a
+  // palette's search box never had focus (review G4-U1).
+  test('a dialog reopened during its outro focuses its first tabbable, not the panel', async () => {
+    const props = $state({ open: true, motion: 'drop' as const });
+    mounted.push(mount(DialogHarness, { target: document.body, props }));
+    flushSync();
+    await settle();
+    props.open = false;
+    flushSync();
+    expect(document.querySelector('.dialog-content')).toBeTruthy();
+
+    props.open = true;
+    flushSync();
+    await settle();
+
+    expect(document.activeElement).toBe(
+      document.querySelector('[data-testid="first-focusable"]')
+    );
+  });
+
+  test('a page id on Content changes nothing about the reopen', async () => {
+    const props = $state({
+      open: true,
+      motion: 'drop' as const,
+      contentProps: { id: 'page-panel' },
+    });
+    mounted.push(mount(DialogHarness, { target: document.body, props }));
+    flushSync();
+    await settle();
+    props.open = false;
+    flushSync();
+    expect(document.querySelector('.dialog-content')?.id).toBe('page-panel');
+
+    props.open = true;
+    flushSync();
+    await settle();
+
+    expect(document.activeElement).toBe(
+      document.querySelector('[data-testid="first-focusable"]')
+    );
+  });
+
+  // focus-trap focused a ConfirmDialog's Cancel without preventScroll, and
+  // a panel that scrolls as a whole opened scrolled down to its Footer, its
+  // title out of sight (review G4-U3). jsdom lays nothing out, so the
+  // scroll is stood in for: 166px down, as Chromium measured it.
+  test('a panel with no Body opens at its top, with its first tabbable focused in place', async () => {
+    const focus = vi.spyOn(HTMLElement.prototype, 'focus');
+    mounted.push(
+      mount(DialogHarness, {
+        target: document.body,
+        props: { open: true, withoutBody: true },
+      })
+    );
+    flushSync();
+    const panel = document.querySelector<HTMLElement>('.dialog-content');
+    let scrollTop = 166;
+    if (panel)
+      Object.defineProperty(panel, 'scrollTop', {
+        configurable: true,
+        get: () => scrollTop,
+        set: (value: number) => {
+          scrollTop = value;
+        },
+      });
+    await settle();
+
+    const button = document.querySelector('[data-testid="footer-button"]');
+    expect(document.activeElement).toBe(button);
+    expect(
+      focus.mock.contexts.some(
+        (el, i) =>
+          el === button &&
+          (focus.mock.calls[i]?.[0] as FocusOptions | undefined)?.preventScroll
+      )
+    ).toBe(true);
+    expect(scrollTop).toBe(0);
+  });
+
+  test('a panel with a Body keeps the scroll it opened with', async () => {
+    mounted.push(
+      mount(DialogHarness, { target: document.body, props: { open: true } })
+    );
+    flushSync();
+    const panel = document.querySelector<HTMLElement>('.dialog-content');
+    let scrollTop = 40;
+    if (panel)
+      Object.defineProperty(panel, 'scrollTop', {
+        configurable: true,
+        get: () => scrollTop,
+        set: (value: number) => {
+          scrollTop = value;
+        },
+      });
+    await settle();
+
+    expect(scrollTop).toBe(40);
+  });
+});
+
 // WebKit kept the caret of a field focused in the closing panel, and when
 // the panel left the DOM it scrolled the page to the caret's new place at
 // the top (review N7). The caret goes with the close.
@@ -286,8 +469,8 @@ describe('Dialog caret at the close', () => {
     document.body.innerHTML = '';
   });
 
-  function openDialog() {
-    const props = $state({ open: true, withField: true });
+  function openDialog(contentProps: Record<string, unknown> = {}) {
+    const props = $state({ open: true, withField: true, contentProps });
     mounted.push(mount(DialogHarness, { target: document.body, props }));
     flushSync();
     return props;
@@ -299,6 +482,26 @@ describe('Dialog caret at the close', () => {
   // the panel does not contain: a detached one stands in for it.
   test('a field focused in the panel loses its caret as the dialog closes', () => {
     const props = openDialog();
+    document.querySelector<HTMLInputElement>('[data-testid="field"]')?.focus();
+    const caret = {
+      anchorNode: document.createElement('div'),
+      removeAllRanges: vi.fn(),
+    };
+    vi.spyOn(window, 'getSelection').mockReturnValue(
+      caret as unknown as Selection
+    );
+
+    props.open = false;
+    flushSync();
+
+    expect(caret.removeAllRanges).toHaveBeenCalled();
+  });
+
+  // A page's `id` on Content replaces Melt's, so a lookup by Melt's id
+  // found no panel (review G4-L9). Dialog.Root holds the node instead.
+  test('a page id on Content still finds the panel at the close', () => {
+    const props = openDialog({ id: 'page-panel' });
+    expect(document.querySelector('.dialog-content')?.id).toBe('page-panel');
     document.querySelector<HTMLInputElement>('[data-testid="field"]')?.focus();
     const caret = {
       anchorNode: document.createElement('div'),
@@ -421,6 +624,38 @@ describe('Dialog parts own their attributes', () => {
       expect(root?.getAttribute(name)).toBe(value);
     }
   });
+
+  // A class may be an object or an array, as on any element (Svelte's
+  // clsx). Interpolated into the part's own class string, it rendered as
+  // "[object Object]" (review G4-L8).
+  const PAGE_CLASS = { class: ['page', { active: true, off: false }] };
+  test.each(
+    parts
+  )('%s takes a class object or array, as an element does', (_name, Part, selector) => {
+    component = mount(Part, {
+      target: document.body,
+      props: { children, ...PAGE_CLASS },
+    });
+    flushSync();
+
+    const root = document.querySelector(selector);
+    expect(root?.getAttribute('class')).not.toContain('[object');
+    expect(root?.classList.contains('page')).toBe(true);
+    expect(root?.classList.contains('active')).toBe(true);
+    expect(root?.classList.contains('off')).toBe(false);
+  });
+
+  test('Content takes a class object too', () => {
+    component = mount(DialogHarness, {
+      target: document.body,
+      props: { open: true, contentProps: { class: { 'page-panel': true } } },
+    });
+    flushSync();
+
+    const panel = document.querySelector('.dialog-content');
+    expect(panel?.getAttribute('class')).not.toContain('[object');
+    expect(panel?.classList.contains('page-panel')).toBe(true);
+  });
 });
 
 describe('Dialog dismissible', () => {
@@ -528,6 +763,25 @@ describe('DialogContent', () => {
     const content = document.querySelector('.dialog-content');
     expect(content?.getAttribute('role')).toBe('dialog');
     expect(content?.getAttribute('aria-modal')).toBe('true');
+  });
+
+  // Melt reads the role only as the panel's open state changes, so the role
+  // must be in Melt's store before the open: set with the open, in one
+  // flush, on a dialog mounted closed (review G4-N1).
+  test('a role set while closed reaches the panel when it opens', () => {
+    const props = $state<{ open: boolean; role?: 'dialog' | 'alertdialog' }>({
+      open: false,
+    });
+    component = mount(DialogHarness, { target: document.body, props });
+    flushSync();
+
+    props.role = 'alertdialog';
+    props.open = true;
+    flushSync();
+
+    expect(
+      document.querySelector('.dialog-content')?.getAttribute('role')
+    ).toBe('alertdialog');
   });
 
   test('a role set on Dialog.Root reaches the panel', () => {

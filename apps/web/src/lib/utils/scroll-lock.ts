@@ -23,6 +23,12 @@ import { isIos } from '@melt-ui/svelte/internal/helpers';
  * page that `overflow: hidden` does not hold, so there <body> is also fixed
  * in place at its scroll position, which is restored at the release.
  *
+ * WebKit keeps no gutter there, so the lock pads <html> instead, and the
+ * padding it adds on the right is published as `--scroll-lock-pad` on
+ * <html> (absent otherwise). A fixed element anchored to the right edge
+ * adds it to its `right`: the viewport it is placed in has widened by that
+ * much (the Toaster).
+ *
  * Every style is put back exactly at the last release. The lock keeps
  * Melt's `data-melt-scroll-lock` mark: a Melt builder that locks on its own
  * (a Select open inside a dialog) finds the page held and stacks nothing on
@@ -58,7 +64,8 @@ function hold(): () => void {
     undo.push(setStyle(html, 'scrollbar-gutter', 'stable'));
     // WebKit keeps no gutter on a root that is `overflow: hidden`: the page
     // widens by the scrollbar. Padding on that side takes it back, so
-    // in-flow content still keeps its width (a fixed bar there still widens).
+    // in-flow content still keeps its width; a fixed element sees the wider
+    // viewport, so the right-hand padding is published for it.
     const after = body.getBoundingClientRect();
     const grown = after.width - before.width;
     if (grown > 0.5) {
@@ -66,12 +73,20 @@ function hold(): () => void {
       const padding =
         Number.parseFloat(getComputedStyle(html).getPropertyValue(side)) || 0;
       undo.push(setStyle(html, side, `${padding + grown}px`));
+      if (side === 'padding-right')
+        undo.push(setStyle(html, '--scroll-lock-pad', `${grown}px`));
     }
   }
   if (isIos()) undo.push(fixBody(body));
   return () => {
-    for (const restore of undo.reverse()) restore();
-    body.removeAttribute(MARK);
+    // The mark goes whatever happens. Left behind, it reads as another
+    // lock's, and every hold() after it would leave the page alone: locked
+    // for the rest of the session.
+    try {
+      for (const restore of undo.reverse()) restore();
+    } finally {
+      body.removeAttribute(MARK);
+    }
   };
 }
 
@@ -95,8 +110,13 @@ function fixBody(body: HTMLElement): () => void {
   return () => {
     for (const restore of undo.reverse()) restore();
     // Instant: base.css makes <html> scroll smoothly, and the page would
-    // glide back down from the top.
-    window.scrollTo({ left: scrollX, top: scrollY, behavior: 'instant' });
+    // glide back down from the top. An engine whose ScrollBehavior has no
+    // 'instant' throws a TypeError at it; the page still goes back, gliding.
+    try {
+      window.scrollTo({ left: scrollX, top: scrollY, behavior: 'instant' });
+    } catch {
+      window.scrollTo(scrollX, scrollY);
+    }
   };
 }
 

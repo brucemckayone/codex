@@ -92,18 +92,36 @@ describe('lockScroll', () => {
   });
 
   // WebKit drops the gutter of an `overflow: hidden` root: the page widens.
-  it('pads the scrollbar’s side when the page widens anyway', () => {
+  // A fixed element on the right (the Toaster) reads the pad to stay put.
+  it('pads the scrollbar’s side when the page widens anyway, and publishes it', () => {
     bodyWidths(1265, 1280);
     const hold = lockScroll();
     expect(html.style.paddingRight).toBe('15px');
+    expect(html.style.getPropertyValue('--scroll-lock-pad')).toBe('15px');
     hold();
     expect(html.style.paddingRight).toBe('');
+    expect(html.style.getPropertyValue('--scroll-lock-pad')).toBe('');
+  });
+
+  // A scrollbar on the left (an RTL page): the page widens leftwards, and
+  // a fixed element on the right does not move, so nothing is published.
+  it('pads the left when the scrollbar is on the left', () => {
+    vi.spyOn(body, 'getBoundingClientRect')
+      .mockReturnValueOnce(new DOMRect(15, 0, 1265, 100))
+      .mockReturnValueOnce(new DOMRect(0, 0, 1280, 100));
+    const hold = lockScroll();
+    expect(html.style.paddingLeft).toBe('15px');
+    expect(html.style.paddingRight).toBe('');
+    expect(html.style.getPropertyValue('--scroll-lock-pad')).toBe('');
+    hold();
+    expect(html.style.cssText).toBe('');
   });
 
   it('pads nothing when the gutter holds', () => {
     bodyWidths(1265, 1265);
     const hold = lockScroll();
     expect(html.style.paddingRight).toBe('');
+    expect(html.style.getPropertyValue('--scroll-lock-pad')).toBe('');
     hold();
   });
 
@@ -130,7 +148,12 @@ describe('lockScroll', () => {
       configurable: true,
       value: 600,
     });
-    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
+    // The scroll back comes after <body> is back in flow: a still-fixed
+    // body has nothing to scroll, and the browser clamps it to 0.
+    const positionAtScroll: string[] = [];
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {
+      positionAtScroll.push(body.style.position);
+    });
     // jsdom's style parser drops a negative `top`: the call is what is checked.
     const set = vi.spyOn(body.style, 'setProperty');
 
@@ -139,12 +162,53 @@ describe('lockScroll', () => {
     expect(set).toHaveBeenCalledWith('top', '-600px');
     hold();
 
+    expect(positionAtScroll).toEqual(['']);
     expect(body.style.cssText).toBe('');
     expect(scrollTo).toHaveBeenCalledWith({
       left: 0,
       top: 600,
       behavior: 'instant',
     });
+  });
+
+  it('on iOS a scrollTo that rejects `instant` still lets the page go, and back to its place', () => {
+    platform.ios = true;
+    Object.defineProperty(window, 'scrollY', {
+      configurable: true,
+      value: 600,
+    });
+    const scrollTo = vi
+      .spyOn(window, 'scrollTo')
+      .mockImplementationOnce(() => {
+        throw new TypeError("'instant' is not a valid ScrollBehavior");
+      })
+      .mockImplementation(() => {});
+
+    const hold = lockScroll();
+    hold();
+
+    expect(locked()).toBe(false);
+    expect(html.style.cssText).toBe('');
+    expect(body.style.cssText).toBe('');
+    expect(scrollTo).toHaveBeenLastCalledWith(0, 600);
+  });
+
+  // Left on <body>, the mark reads as another lock's: no hold() after it
+  // would ever hold the page again.
+  it('a release that throws still takes the mark off, so the next hold holds', () => {
+    const hold = lockScroll();
+    vi.spyOn(html.style, 'removeProperty').mockImplementationOnce(() => {
+      throw new Error('restore failed');
+    });
+
+    expect(() => hold()).toThrow('restore failed');
+    expect(locked()).toBe(false);
+
+    vi.restoreAllMocks();
+    html.style.cssText = '';
+    const again = lockScroll();
+    expect(html.style.overflow).toBe('hidden');
+    again();
   });
 
   it('counts a holder once, however often it lets go', () => {

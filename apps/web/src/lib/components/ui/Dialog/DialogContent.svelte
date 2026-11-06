@@ -56,7 +56,9 @@
   @prop {CssLength} [maxHeight] - the panel's max-height as a CSS length, over
     the 85dvh (70dvh at top and bottom) default. It never runs past the room
     its placement leaves, the screen less the wrapper's gutter, so `48rem`
-    on a 600px-tall screen still keeps the Footer in view.
+    on a 600px-tall screen still keeps the Footer in view. One that can't
+    resolve (an undefined `var()`, or a token set on a page container,
+    which the portal under <body> doesn't inherit) keeps the default.
   @prop {'modal' | 'lg'} [radius='modal'] - dialog only: the corner,
     `--radius-modal` or the smaller `--radius-lg`.
   @prop {'elevated' | 'base' | 'glass'} [surface] - the panel's fill.
@@ -128,6 +130,16 @@
   } = getContext<ReturnType<typeof createDialog>>('DIALOG');
   /** Dialog.Root's `dismissible`: false while a request it started runs. */
   const dismissible = getContext<{ current: boolean } | undefined>('DIALOG_DISMISSIBLE');
+  /** Where Dialog.Root finds the panel: by node, since a page's `id` replaces Melt's. */
+  const panelNode = getContext<{ current: HTMLElement | null } | undefined>('DIALOG_PANEL');
+  function registerPanel(node: HTMLElement) {
+    if (panelNode) panelNode.current = node;
+    return {
+      destroy() {
+        if (panelNode?.current === node) panelNode.current = null;
+      },
+    };
+  }
   const drawer = $derived(variant === 'drawer');
   /** A drawer-only prop as a data attribute: present, or absent. */
   const drawerFlag = (on: boolean) => (drawer && on ? '' : undefined);
@@ -189,8 +201,9 @@
     <div class="dialog-content-wrapper" data-placement={dialogValue(placement, 'center')}>
       <div
         use:melt={$content}
+        use:registerPanel
         {...restProps}
-        class="dialog-content {className ?? ''}"
+        class={['dialog-content', className]}
         data-size={size}
         data-variant={variant}
         data-sheet={drawerFlag(sheet)}
@@ -277,15 +290,32 @@
     box-shadow: var(--shadow-xl);
     border: var(--border-width) var(--border-style) var(--color-border);
     width: 100%;
-    max-height: 85dvh;
+    max-height: var(--dialog-default-max);
     overflow: hidden;
     display: flex;
     flex-direction: column;
     animation: content-in var(--duration-slow) var(--ease-out) both;
-    /* The room the wrapper leaves the panel, which a `maxHeight` never
-       runs past: the screen less the wrapper's gutter, per placement. */
-    --dialog-room: calc(100dvh - 2 * var(--space-4));
-    --dialog-max: min(var(--dialog-max-height), var(--dialog-room));
+    /* Per placement: the default cap, and the room the wrapper leaves the
+       panel (the screen less the wrapper's gutter), which a `maxHeight`
+       never runs past. A `maxHeight` that can't resolve makes
+       --dialog-max-height invalid, so the fallback takes the default cap:
+       without it --dialog-max would be invalid too, and the inline
+       max-height would compute to none. Both are in --dialog-dvh, below. */
+    --dialog-dvh: 1dvh;
+    --dialog-default-max: calc(85 * var(--dialog-dvh));
+    --dialog-room: calc(100 * var(--dialog-dvh) - 2 * var(--space-4));
+    --dialog-max: min(var(--dialog-max-height, var(--dialog-default-max)), var(--dialog-room));
+  }
+
+  /* An engine without dvh (Safari < 15.4, Chrome < 108, Firefox < 101)
+     drops a dvh value, so every cap would be gone. A `max-height: 85vh`
+     written before each one can't help: these are read through custom
+     properties, and a var() always parses, so the dvh one would still win.
+     The caps and rooms take their unit from here instead. */
+  @supports not (height: 1dvh) {
+    .dialog-content {
+      --dialog-dvh: 1vh;
+    }
   }
 
   /* A clipping panel with no Body (a ConfirmDialog: Header and Footer only)
@@ -311,17 +341,17 @@
 
   .dialog-content[data-placement='top'],
   .dialog-content[data-placement='bottom'] {
-    max-height: 70dvh;
+    --dialog-default-max: calc(70 * var(--dialog-dvh));
   }
 
   .dialog-content[data-placement='top'] {
-    --dialog-room: calc(100dvh - 15vh - var(--space-4));
+    --dialog-room: calc(100 * var(--dialog-dvh) - 15vh - var(--space-4));
   }
 
   /* A sheet is full width (0,2,0, after data-size). */
   .dialog-content[data-placement='bottom'] {
     max-width: none;
-    --dialog-room: calc(100dvh - 2 * var(--space-2));
+    --dialog-room: calc(100 * var(--dialog-dvh) - 2 * var(--space-2));
   }
 
   .dialog-content[data-radius='lg'] {
@@ -351,8 +381,8 @@
     bottom: 0;
     left: auto;
     height: 100%;
-    max-height: 100dvh;
-    --dialog-room: 100dvh;
+    --dialog-default-max: calc(100 * var(--dialog-dvh));
+    --dialog-room: calc(100 * var(--dialog-dvh));
     gap: var(--drawer-gap);
     padding: var(--drawer-pad-block) var(--drawer-pad-inline);
     overflow-x: hidden;
@@ -385,8 +415,8 @@
     width: calc(100% - var(--space-6));
     max-width: var(--container-drawer);
     height: auto;
-    max-height: calc(100dvh - var(--space-6));
-    --dialog-room: calc(100dvh - var(--space-6));
+    --dialog-default-max: calc(100 * var(--dialog-dvh) - var(--space-6));
+    --dialog-room: calc(100 * var(--dialog-dvh) - var(--space-6));
     gap: normal;
     padding: 0;
     overflow: hidden;
@@ -404,7 +434,7 @@
       left: 0;
       max-width: none;
       height: auto;
-      max-height: 90dvh;
+      --dialog-default-max: calc(90 * var(--dialog-dvh));
       --drawer-pad-block: var(--space-5);
       --drawer-pad-inline: var(--space-4);
       border-left: none;
@@ -425,8 +455,8 @@
       right: var(--space-2);
       bottom: var(--space-2);
       width: auto;
-      max-height: 85dvh;
-      --dialog-room: calc(100dvh - var(--space-2));
+      --dialog-default-max: calc(85 * var(--dialog-dvh));
+      --dialog-room: calc(100 * var(--dialog-dvh) - var(--space-2));
       padding: 0;
       border: var(--border-width) var(--border-style) var(--material-glass-border);
       border-radius: var(--radius-xl);
