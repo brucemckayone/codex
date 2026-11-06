@@ -26,7 +26,8 @@
   import Waveform from './Waveform.svelte';
   import WaveformShader from './WaveformShader.svelte';
   import { getThumbnailUrl } from '$lib/utils/image';
-  import ImmersiveShaderPlayer, { canShowImmersive } from './ImmersiveShaderPlayer.svelte';
+  import ImmersiveShaderPlayer from './ImmersiveShaderPlayer.svelte';
+  import { canShowImmersive } from './immersive-support';
 
   import type Hls from 'hls.js';
   import type { AudioAnalysis, AudioAnalyserHandle } from './audio-analyser';

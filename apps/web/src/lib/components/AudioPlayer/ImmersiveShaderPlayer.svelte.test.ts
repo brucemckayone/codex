@@ -18,9 +18,8 @@ const { logger } = vi.hoisted(() => ({
 vi.mock('$lib/observability', () => ({ logger }));
 
 import { lockScroll } from '$lib/utils/scroll-lock';
-import ImmersiveShaderPlayer, {
-  canShowImmersive,
-} from './ImmersiveShaderPlayer.svelte';
+import ImmersiveShaderPlayer from './ImmersiveShaderPlayer.svelte';
+import { canShowImmersive } from './immersive-support';
 
 /** The app's one page scroll lock marks <body> while it holds. */
 const held = () => document.body.hasAttribute('data-melt-scroll-lock');
