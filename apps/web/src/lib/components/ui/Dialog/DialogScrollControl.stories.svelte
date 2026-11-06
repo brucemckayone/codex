@@ -10,17 +10,20 @@
    * "calibration control", and nothing else may live here.
    *
    * Raw Sibling Control: a raw element between Header and a Body, the shape
-   * the gate bans. It never shrinks, Dialog.Content clips at 85dvh around a
-   * Body, so on a short screen its footer is cut off and nothing scrolls to
-   * it. The scroll proof (DialogScroll.stories.svelte) must read it CLIPPED
-   * and every shared story REACHABLE; a probe that calls both reachable is
-   * broken.
+   * the gate bans. It never shrinks, and a panel with a Body clips at
+   * 85dvh, so on a short screen its footer is cut off and nothing scrolls to
+   * it, in either engine, from anywhere. The scroll proof
+   * (DialogScroll.stories.svelte) must read it CLIPPED and every shared
+   * story REACHABLE; a probe that calls both reachable is broken.
    *
    * Legacy Wrapper Control: the hand-written wrapper the shared Dialog.Form
    * replaces, studio/monetisation's `.tier-form`, byte for byte in its CSS,
-   * a flex column WITHOUT `flex: 1; min-height: 0`. It clipped the same way
-   * until a panel with no Body where the parts put it scrolled as a whole
-   * (Codex-vlphc review H3). It now reads REACHABLE, by the panel's scroll.
+   * a flex column WITHOUT `flex: 1; min-height: 0`. Since a panel with no
+   * Body where the parts put it scrolls as a whole (Codex-vlphc review H3),
+   * it is half a control. A wheel outside its Body scrolls the panel, and in
+   * WebKit so does one over the Body. Chromium ends the scroll chain at the
+   * Body, which cannot scroll but contains its overscroll, so the proof
+   * still reads it CLIPPED there.
    */
   const { Story } = defineMeta({
     title: 'UI/Dialog/Scroll Control',
