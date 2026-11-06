@@ -7,8 +7,9 @@
 
   /**
    * What the shared Dialog does around its panel (Codex-vlphc review c1):
-   * the page's scroll lock while dialogs stack. Driven in real Chromium and
-   * WebKit. No autodocs: a docs page would open every dialog at once.
+   * the page's scroll lock while dialogs stack, and where focus goes back
+   * to at the close. Driven in real Chromium and WebKit. No autodocs: a
+   * docs page would open every dialog at once.
    */
   const { Story } = defineMeta({
     title: 'UI/Dialog/Behaviour',
@@ -16,6 +17,14 @@
 
   const outerOpen = writable(false);
   const confirmOpen = writable(false);
+  const tierOpen = writable(false);
+  const tierName = writable('');
+  const tiers = ['Basic', 'Pro', 'Team'];
+
+  function openTier(name: string) {
+    tierName.set(name);
+    tierOpen.set(true);
+  }
 </script>
 
 <!-- A ConfirmDialog over a Dialog: the page stays locked until both close. -->
@@ -46,3 +55,60 @@
     variant="destructive"
   />
 </Story>
+
+<!-- The studio tier dialog's wiring: one dialog, opened from several buttons,
+     no closeFocus; Escape or Cancel must hand focus back to the one pressed. -->
+<Story name="Tier Shape">
+  <div class="tier-list">
+    <Button data-testid="add-tier" onclick={() => openTier('')}>Add tier</Button>
+    {#each tiers as tier (tier)}
+      <Button variant="secondary" data-testid="edit-{tier}" onclick={() => openTier(tier)}>Edit {tier}</Button>
+    {/each}
+  </div>
+  <Dialog.Root bind:open={$tierOpen}>
+    <Dialog.Content>
+      <Dialog.Header>
+        <Dialog.Title>{$tierName ? `Edit ${$tierName}` : 'New tier'}</Dialog.Title>
+      </Dialog.Header>
+      <Dialog.Form onsubmit={(e) => e.preventDefault()}>
+        <Dialog.Body>
+          <label class="tier-field">
+            <span>Name</span>
+            <input class="tier-input" name="name" value={$tierName} />
+          </label>
+        </Dialog.Body>
+        <Dialog.Footer>
+          <Button variant="ghost" type="button" data-testid="tier-cancel" onclick={() => ($tierOpen = false)}>
+            Cancel
+          </Button>
+          <Button type="submit">Save</Button>
+        </Dialog.Footer>
+      </Dialog.Form>
+    </Dialog.Content>
+  </Dialog.Root>
+</Story>
+
+<style>
+  .tier-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .tier-field {
+    display: grid;
+    row-gap: var(--space-1);
+    color: var(--color-text);
+    font-size: var(--text-sm);
+  }
+
+  .tier-input {
+    padding-block: var(--space-2);
+    padding-inline: var(--space-3);
+    border: var(--border-width) var(--border-style) var(--color-border);
+    border-radius: var(--radius-input);
+    background: var(--color-background);
+    color: var(--color-text);
+    font: inherit;
+  }
+</style>

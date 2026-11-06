@@ -1,3 +1,42 @@
+<script module lang="ts">
+  /**
+   * What a press last landed on, page-wide. WebKit (Safari, every iOS
+   * browser) focuses no button on a click or a tap: `activeElement` is
+   * <body> as the dialog that press opens records its opener, or, inside an
+   * open dialog, the panel itself (it takes focus from any click on it). A
+   * key pressed since forgets it: that open came from the keyboard, and the
+   * keyboard leaves focus on what opened it.
+   */
+  let pressed: Element | null = null;
+  if (typeof document !== 'undefined') {
+    document.addEventListener(
+      'pointerdown',
+      (event) => {
+        pressed = event.target instanceof Element ? event.target : null;
+      },
+      true
+    );
+    document.addEventListener(
+      'keydown',
+      () => {
+        pressed = null;
+      },
+      true
+    );
+  }
+
+  const FOCUSABLE =
+    'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, [tabindex], [contenteditable]:not([contenteditable="false"])';
+
+  /** The element opening a dialog now: what was pressed, unless a key came since, else what has focus. */
+  function currentOpener(): HTMLElement | null {
+    const target = pressed?.closest(FOCUSABLE);
+    if (target instanceof HTMLElement) return target;
+    const active = document.activeElement;
+    return active instanceof HTMLElement && active !== document.body ? active : null;
+  }
+</script>
+
 <script lang="ts">
   import { type CreateDialogProps, createDialog } from '@melt-ui/svelte';
   import { type Snippet, setContext } from 'svelte';
@@ -7,28 +46,22 @@
     open?: boolean;
     onOpenChange?: (open: boolean) => void;
     /**
-     * Where focus goes when the dialog closes.
+     * Where focus goes when the dialog closes, over the default.
      *
-     * Melt restores focus to the element it recorded as `activeTrigger`, and it
-     * records that ONLY inside its own trigger element's click handler. This
-     * wrapper never renders that element — there is no `Dialog.Trigger` in the
-     * barrel and no `DialogTrigger.svelte` in this directory — so every dialog
-     * in the app is opened programmatically (`open = true` from a list row, a
-     * toolbar button, a menu item) and `activeTrigger` is permanently null.
+     * The default is the element that opened it: the focusable element a
+     * press landed on (a click or a tap in WebKit focuses no button), or,
+     * when a key opened it, what had focus. A dialog opened from the
+     * keyboard with nothing focused, or whose opener has left the page,
+     * leaves focus where Melt does. Melt's own `activeTrigger` would win, but
+     * nothing here renders Melt's trigger, so every dialog is opened from
+     * code (`open = true`) and that is always null.
      *
-     * The consequence is uniform: on close Melt calls
-     * `handleFocus({ prop: undefined, defaultEl: null })`, which is a no-op, the
-     * panel unmounts, and `document.activeElement` falls back to `<body>` — so a
-     * keyboard user is dumped to the top of the tab order (WCAG 2.4.3). Passing
-     * `closeFocus` is currently the ONLY way a dialog here restores focus.
-     *
-     * Pass an element, a selector, or a function returning either. Prefer the
-     * function form whenever one dialog instance serves many rows: it is
-     * evaluated at close time, whereas an element passed here is read once per
-     * close against whatever the prop holds then.
-     *
-     * Omitting it is byte-for-byte the current behaviour — see the resolver
-     * below, which reproduces Melt's own default branch.
+     * Pass an element, a selector, or a function returning either, for a
+     * dialog whose focus belongs elsewhere: a row that the action removed, a
+     * control that is re-rendered. Prefer the function form whenever one
+     * dialog instance serves many rows: it is evaluated at close time,
+     * whereas an element passed here is read once per close against
+     * whatever the prop holds then.
      */
     closeFocus?: CreateDialogProps['closeFocus'];
     /**
@@ -77,15 +110,12 @@
     // `closeFocus` held at construction. Resolving inside the closure makes the
     // prop live, which is what one drawer serving many rows needs.
     //
-    // The `undefined` branch reproduces Melt's own default branch exactly: its
-    // `handleFocus` does `defaultEl?.focus()` when no prop is given, and returning
-    // `defaultEl` here routes into `isHTMLElement(returned) && returned.focus()`,
-    // which is the same call. Since nothing in this app renders Melt's trigger,
-    // `defaultEl` is in practice always null and both spellings are a no-op — so
-    // omitting the prop cannot regress an existing consumer.
+    // With no prop, Melt's own default comes first: `defaultEl` is its
+    // `activeTrigger`, which it would focus itself. Never undefined over it.
+    // Then the opener recorded as the dialog opened, while it is on the page.
     closeFocus: (defaultEl) => {
       const target = closeFocus;
-      if (target === undefined) return defaultEl ?? null;
+      if (target === undefined) return defaultEl ?? (opener?.isConnected ? opener : null);
       return typeof target === 'function' ? target(defaultEl) : target;
     },
     // The page's scroll lock is ours, below, not Melt's: under forceVisible
@@ -100,8 +130,13 @@
     states: { open: meltOpen }
   } = dialog;
 
-  // Sync prop to melt state
+  /** Where focus goes back to at the close, when no `closeFocus` says. */
+  let opener: HTMLElement | null = null;
+
+  // Sync prop to melt state. The opener is read first, while focus is still
+  // where the open came from: Melt moves it into the panel after a tick.
   $effect(() => {
+    if (open) opener = currentOpener();
     meltOpen.set(open);
   });
 

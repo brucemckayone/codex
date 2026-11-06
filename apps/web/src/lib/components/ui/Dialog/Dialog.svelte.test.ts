@@ -172,6 +172,84 @@ describe('Dialog scroll lock', () => {
   });
 });
 
+describe('Dialog focus return', () => {
+  const mounted: ReturnType<typeof mount>[] = [];
+  // Melt moves focus a tick after open and after close.
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+
+  afterEach(() => {
+    for (const component of mounted.splice(0)) unmount(component);
+    document.body.innerHTML = '';
+  });
+
+  function opener(): HTMLButtonElement {
+    const button = document.createElement('button');
+    button.innerHTML = '<span>Edit tier</span>';
+    document.body.appendChild(button);
+    return button;
+  }
+
+  async function openAndClose() {
+    const props = $state({ open: false });
+    mounted.push(mount(DialogHarness, { target: document.body, props }));
+    flushSync();
+    props.open = true;
+    flushSync();
+    await settle();
+    props.open = false;
+    flushSync();
+    await settle();
+  }
+
+  const press = (button: HTMLButtonElement) =>
+    button
+      .querySelector('span')
+      ?.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+  const key = () =>
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+
+  test('opened from the keyboard, focus goes back to what had it', async () => {
+    const button = opener();
+    button.focus();
+    key();
+
+    await openAndClose();
+
+    expect(document.activeElement).toBe(button);
+  });
+
+  // WebKit focuses no button on a click or a tap: focus is still on <body>.
+  test('a press that focused nothing still names the opener', async () => {
+    const button = opener();
+    press(button);
+
+    await openAndClose();
+
+    expect(document.activeElement).toBe(button);
+  });
+
+  // In WebKit a press inside an open dialog focuses its panel, not the button.
+  test('a press beats a focus left on something else', async () => {
+    const button = opener();
+    opener().focus();
+    press(button);
+
+    await openAndClose();
+
+    expect(document.activeElement).toBe(button);
+  });
+
+  test('a key pressed after the press forgets it', async () => {
+    const button = opener();
+    press(button);
+    key();
+
+    await openAndClose();
+
+    expect(document.activeElement).not.toBe(button);
+  });
+});
+
 describe('Dialog dismissible', () => {
   let component: ReturnType<typeof mount> | null = null;
 
