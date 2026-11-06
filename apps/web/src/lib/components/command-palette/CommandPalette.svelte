@@ -32,8 +32,6 @@
   let isOpen = $state(false);
   let query = $state('');
   let activeIndex = $state(0);
-  // What held focus when Cmd+K opened the palette; it gets focus back.
-  let opener: HTMLElement | null = null;
 
   // Static page items — use $derived so paraglide messages resolve at render time
   const pageItems: CommandItem[] = $derived([
@@ -75,9 +73,9 @@
 
   const flatItems = $derived(filteredItems);
 
-  // The dialog moves focus to the box, its first tabbable.
+  // The dialog moves focus to the box, its first tabbable, and back to what
+  // held it when Cmd+K opened the palette.
   function open() {
-    opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     isOpen = true;
     query = '';
     activeIndex = 0;
@@ -153,7 +151,7 @@
 
 <svelte:window onkeydown={handleGlobalKeydown} />
 
-<Dialog.Root bind:open={isOpen} closeFocus={() => opener}>
+<Dialog.Root bind:open={isOpen}>
   <Dialog.Content
     placement="top"
     maxWidth="min(35rem, 90vw)"

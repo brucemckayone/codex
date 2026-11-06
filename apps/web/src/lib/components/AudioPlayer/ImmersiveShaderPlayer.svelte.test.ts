@@ -38,13 +38,14 @@ afterEach(() => {
   logger.warn.mockClear();
 });
 
-function mountPlayer(onclose: () => void) {
+function mountPlayer(onclose: () => void, opener: HTMLElement | null = null) {
   component = mount(ImmersiveShaderPlayer, {
     target: document.body,
     props: {
       audioElement: document.createElement('audio'),
       shaderPreset: 'nebula',
       onclose,
+      opener,
     },
   });
   flushSync();
@@ -100,6 +101,30 @@ describe('opening the immersive player', () => {
       'immersive.open_failed',
       expect.anything()
     );
+  });
+});
+
+describe('closing the immersive player', () => {
+  test('gives focus back to its opener, though the press never focused it', () => {
+    proto.showModal = function (this: HTMLDialogElement) {
+      this.setAttribute('open', '');
+    };
+    proto.close = function (this: HTMLDialogElement) {
+      this.removeAttribute('open');
+    };
+    // A click or a tap in WebKit focuses no button: <body> has focus.
+    const opener = document.createElement('button');
+    document.body.appendChild(opener);
+    expect(document.activeElement).toBe(document.body);
+
+    mountPlayer(vi.fn(), opener);
+    expect(document.activeElement).toBe(
+      document.querySelector('dialog.immersive')
+    );
+    if (component) unmount(component);
+    component = null;
+
+    expect(document.activeElement).toBe(opener);
   });
 });
 

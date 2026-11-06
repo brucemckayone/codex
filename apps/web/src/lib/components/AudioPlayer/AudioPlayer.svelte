@@ -165,6 +165,8 @@
   // fall back to 'nebula' so every audio piece is immersive-capable — all 25
   // presets are audio-reactive, so there's no UX reason to hide the entry.
   let showImmersive = $state(false);
+  // The button that opened it, from the press: it gets focus back.
+  let immersiveOpener = $state.raw<HTMLElement | null>(null);
   // Offered only where it can open: the player is a modal `<dialog>`, which
   // Safari before 15.4 cannot show. True until hydrated, so the server's
   // markup and every browser that can show it never change.
@@ -1031,7 +1033,8 @@
             <button
               type="button"
               class="audio-player__btn audio-player__btn--immersive"
-              onclick={() => {
+              onclick={(e) => {
+                immersiveOpener = e.currentTarget;
                 showImmersive = true;
                 // Fullscreen API requires fresh transient activation — must be
                 // requested synchronously from a user gesture, not from the
@@ -1114,6 +1117,7 @@
     audioElement={audioEl}
     shaderPreset={resolvedShaderPreset}
     {title}
+    opener={immersiveOpener}
     onclose={() => { showImmersive = false; }}
   />
 {/if}

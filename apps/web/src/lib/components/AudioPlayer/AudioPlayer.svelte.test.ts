@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import {
   flushSync,
   mount,
@@ -564,5 +564,52 @@ describe('AudioPlayer — unmount', () => {
 
     expect(el.getAttribute('src')).toBeNull();
     expect(pauseSpy).toHaveBeenCalled();
+  });
+});
+
+describe('AudioPlayer — immersive mode', () => {
+  const proto = HTMLDialogElement.prototype as Partial<HTMLDialogElement>;
+  const realShowModal = proto.showModal;
+  const realClose = proto.close;
+  const realFullscreen = document.documentElement.requestFullscreen;
+
+  beforeEach(() => {
+    // jsdom has neither a modal <dialog> nor the Fullscreen API.
+    proto.showModal = function (this: HTMLDialogElement) {
+      this.setAttribute('open', '');
+    };
+    proto.close = function (this: HTMLDialogElement) {
+      this.removeAttribute('open');
+    };
+    document.documentElement.requestFullscreen = vi.fn(() => Promise.resolve());
+  });
+
+  afterEach(() => {
+    proto.showModal = realShowModal;
+    proto.close = realClose;
+    document.documentElement.requestFullscreen = realFullscreen;
+  });
+
+  test('gives focus back to its button, which the press never focused', async () => {
+    const { component } = await mountPlayer();
+    const button = document.querySelector<HTMLButtonElement>(
+      'button[aria-label="Enter immersive mode"]'
+    );
+    if (!button) throw new Error('no immersive button');
+
+    // A click or a tap in WebKit focuses no button: <body> keeps focus.
+    button.click();
+    flushSync();
+    expect(document.activeElement).not.toBe(button);
+    document
+      .querySelector<HTMLButtonElement>(
+        'dialog.immersive button[aria-label="Exit immersive mode"]'
+      )
+      ?.click();
+    flushSync();
+
+    expect(document.querySelector('dialog.immersive')).toBeNull();
+    expect(document.activeElement).toBe(button);
+    unmount(component);
   });
 });

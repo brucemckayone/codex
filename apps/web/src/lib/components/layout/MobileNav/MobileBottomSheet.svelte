@@ -46,15 +46,6 @@
 		}
 	});
 
-	// ── Focus ─────────────────────────────────────────────────
-	// The dialog moves focus into the sheet as it opens and, as it closes,
-	// back to what opened it: the bottom bar's More button. It is read here,
-	// before the sheet mounts and takes focus.
-	let opener: HTMLElement | null = null;
-	$effect(() => {
-		if (open) opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-	});
-
 	// ── Drag-to-dismiss ───────────────────────────────────────
 	// A pull down closes the sheet, but only a pull that starts with the
 	// sheet at its top. Scrolled down, the same finger movement scrolls the
@@ -119,7 +110,7 @@
 	}
 </script>
 
-<Dialog.Root bind:open closeFocus={() => opener}>
+<Dialog.Root bind:open>
 	<Dialog.Content
 		placement="bottom"
 		surface="glass"

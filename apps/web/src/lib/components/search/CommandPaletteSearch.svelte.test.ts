@@ -34,6 +34,18 @@ vi.mock('$app/navigation', () => ({ goto }));
 vi.mock('$app/state', () => ({ page }));
 vi.mock('$lib/observability', () => ({ logger }));
 
+// The reduced-motion gate the dialog's panel reads, set per test. Off by
+// default: jsdom never ends the panel's fly, so a closing panel stays.
+const motion = vi.hoisted(() => ({ reduce: false }));
+vi.mock('svelte/motion', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('svelte/motion')>()),
+  prefersReducedMotion: {
+    get current() {
+      return motion.reduce;
+    },
+  },
+}));
+
 import CommandPaletteSearch from './CommandPaletteSearch.svelte';
 
 type Results = {
@@ -392,6 +404,7 @@ describe('keys the palette answers', () => {
   afterEach(() => {
     localStorage.clear();
     Element.prototype.scrollIntoView = realScrollIntoView;
+    motion.reduce = false;
   });
 
   const cmdK = (repeat = false) => {
@@ -430,6 +443,38 @@ describe('keys the palette answers', () => {
     for (let i = 0; i < 3; i++) cmdK(true);
 
     expect(open).toBe(true);
+  });
+
+  // WebKit focuses no button on a click or a tap: <body> keeps focus.
+  test('closed, it gives focus back to the button a press opened it from', async () => {
+    // A closing panel that jsdom never takes away would keep focus in it.
+    motion.reduce = true;
+    const button = document.createElement('button');
+    document.body.appendChild(button);
+    button.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    const props = $state({
+      scope: 'org' as const,
+      orgSlug: 'studio-alpha',
+      open: false,
+    });
+    component = mount(CommandPaletteSearch, { target: document.body, props });
+    flushSync();
+    // Melt moves focus a tick after the open and after the close.
+    const settle = () => vi.advanceTimersByTimeAsync(30);
+
+    props.open = true;
+    flushSync();
+    await settle();
+    expect(
+      document
+        .querySelector('[role="dialog"]')
+        ?.contains(document.activeElement)
+    ).toBe(true);
+    props.open = false;
+    flushSync();
+    await settle();
+
+    expect(document.activeElement).toBe(button);
   });
 
   test('the highlighted row is scrolled into view as the arrows move it', () => {

@@ -10,6 +10,7 @@
   @prop {HTMLAudioElement} audioElement - The audio element to analyse
   @prop {string} shaderPreset - Shader preset ID to render
   @prop {() => void} onclose - Called when user exits immersive mode
+  @prop {HTMLElement | null} opener - What opened it; focus goes back there as it closes
 -->
 <script module lang="ts">
   /**
@@ -48,9 +49,15 @@
     onclose: () => void;
     /** Content title — threads through to `aria-label` on the overlay landmark. */
     title?: string;
+    /**
+     * What opened it, from the open event, so focus goes back there as it
+     * closes. Never `activeElement`: a click or a tap in WebKit (Safari,
+     * every iOS browser) focuses no button, so that is <body>.
+     */
+    opener?: HTMLElement | null;
   }
 
-  const { audioElement, shaderPreset, onclose, title = '' }: Props = $props();
+  const { audioElement, shaderPreset, onclose, title = '', opener = null }: Props = $props();
 
   // Renderer/analyser failures currently exit via `onclose()`. Track a surfaced
   // error so the live region can announce it before the overlay unmounts.
@@ -322,11 +329,10 @@
    * covered; the page was never held. Thrown from here, with no boundary
    * above, it would halt the page's updates, so it is logged, never rethrown.
    *
-   * Going, it closes BEFORE focus returns to what had it: an element behind an
+   * Going, it closes BEFORE focus returns to its opener: an element behind an
    * open modal cannot take focus.
    */
   const modal: Attachment<HTMLDialogElement> = (node) => {
-    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     document.body.appendChild(node);
     try {
       node.showModal();

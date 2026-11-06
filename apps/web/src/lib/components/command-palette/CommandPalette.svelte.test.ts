@@ -83,4 +83,26 @@ describe('the studio palette', () => {
       document.getElementById('cmd-content')
     );
   });
+
+  test('closed, it gives focus back to the field Cmd+K was pressed in', async () => {
+    component = mount(CommandPalette, { target: document.body });
+    flushSync();
+    const field = document.createElement('input');
+    document.body.appendChild(field);
+    field.focus();
+    // Melt moves focus a tick after the open and after the close.
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+
+    cmdK();
+    await settle();
+    expect(document.activeElement).not.toBe(field);
+    input()?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })
+    );
+    flushSync();
+    await settle();
+
+    expect(input()).toBeNull();
+    expect(document.activeElement).toBe(field);
+  });
 });

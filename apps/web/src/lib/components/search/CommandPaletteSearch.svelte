@@ -314,13 +314,10 @@
 
 	// ── Focus management ──────────────────────────────────────
 	// The dialog moves focus to the search box (its first tabbable) and, on
-	// close, back to whatever held it when the palette opened: the button that
-	// opened it, or the field Cmd+K was pressed in. It is read here, before
-	// the panel mounts and takes focus.
-	let opener: HTMLElement | null = null;
+	// close, back to what opened it: the button pressed, or the field Cmd+K
+	// was pressed in. Each open starts from an empty search.
 	$effect(() => {
 		if (open) {
-			opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 			query = '';
 			activeIndex = -1;
 			resetSearch();
@@ -346,7 +343,7 @@
 
 <svelte:window onkeydown={handleGlobalKeydown} />
 
-<Dialog.Root bind:open closeFocus={() => opener}>
+<Dialog.Root bind:open>
 	<Dialog.Content
 		placement="top"
 		maxWidth="var(--container-sm)"
