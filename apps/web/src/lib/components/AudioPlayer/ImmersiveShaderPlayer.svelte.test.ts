@@ -17,11 +17,13 @@ const { logger } = vi.hoisted(() => ({
 }));
 vi.mock('$lib/observability', () => ({ logger }));
 
+import { lockScroll } from '$lib/utils/scroll-lock';
 import ImmersiveShaderPlayer, {
   canShowImmersive,
 } from './ImmersiveShaderPlayer.svelte';
 
-const LOCK = 'data-immersive-player';
+/** The app's one page scroll lock marks <body> while it holds. */
+const held = () => document.body.hasAttribute('data-melt-scroll-lock');
 const proto = HTMLDialogElement.prototype as Partial<HTMLDialogElement>;
 const realShowModal = proto.showModal;
 const realClose = proto.close;
@@ -32,7 +34,6 @@ afterEach(() => {
   component = null;
   proto.showModal = realShowModal;
   proto.close = realClose;
-  document.documentElement.removeAttribute(LOCK);
   document.body.innerHTML = '';
   logger.warn.mockClear();
 });
@@ -62,8 +63,26 @@ describe('opening the immersive player', () => {
     mountPlayer(onclose);
 
     expect(document.querySelector('dialog.immersive[open]')).not.toBeNull();
-    expect(document.documentElement.hasAttribute(LOCK)).toBe(true);
+    expect(held()).toBe(true);
     expect(onclose).not.toHaveBeenCalled();
+  });
+
+  test('shares the counted lock: closing never lets go of a dialog opened over it', () => {
+    proto.showModal = function (this: HTMLDialogElement) {
+      this.setAttribute('open', '');
+    };
+    proto.close = function (this: HTMLDialogElement) {
+      this.removeAttribute('open');
+    };
+    mountPlayer(vi.fn());
+    const dialog = lockScroll();
+
+    if (component) unmount(component);
+    component = null;
+    expect(held()).toBe(true);
+
+    dialog();
+    expect(held()).toBe(false);
   });
 
   test('a showModal that throws lets go, removes it and says it has closed', () => {
@@ -76,7 +95,7 @@ describe('opening the immersive player', () => {
 
     expect(onclose).toHaveBeenCalledTimes(1);
     expect(document.querySelector('dialog.immersive')).toBeNull();
-    expect(document.documentElement.hasAttribute(LOCK)).toBe(false);
+    expect(held()).toBe(false);
     expect(logger.warn).toHaveBeenCalledWith(
       'immersive.open_failed',
       expect.anything()

@@ -40,6 +40,7 @@
   } from '$lib/components/media-a11y';
   import { describeThrown } from '$lib/client-log';
   import { logger } from '$lib/observability';
+  import { lockScroll } from '$lib/utils/scroll-lock';
 
   interface Props {
     audioElement: HTMLAudioElement;
@@ -304,9 +305,6 @@
 
   const seekProgress = $derived(duration > 0 ? (currentTime / duration) * 100 : 0);
 
-  /** The root attribute that holds the page still behind it. */
-  const LOCK = 'data-immersive-player';
-
   /**
    * Opens as a native modal `<dialog>`, as GalleryLightbox does: the top
    * layer lifts it over the org-main stacking context (view-transition-name),
@@ -315,35 +313,34 @@
    * Moved to <body> first, as the portal it replaces did, so it inherits
    * exactly what it always has. The root (focusable, `tabindex="-1"`) takes
    * focus, so the overlay's keyboard shortcuts are heard at once (ref 05
-   * §"Media elements" §9), and the page holds still until it goes.
+   * §"Media elements" §9), and the page holds still until it goes: the
+   * app's one counted scroll lock, which a dialog holds too.
    *
    * A `showModal()` that throws (an `InvalidStateError`; no `showModal` at
-   * all is never offered, see `canShowImmersive`) lets go and says it has
-   * closed, or the player would stay mounted over a page it never covered.
-   * Thrown from here, with no boundary above, it would halt the page's
-   * updates, so it is logged, never rethrown.
+   * all is never offered, see `canShowImmersive`) takes the player away and
+   * says it has closed, or it would stay mounted over a page it never
+   * covered; the page was never held. Thrown from here, with no boundary
+   * above, it would halt the page's updates, so it is logged, never rethrown.
    *
    * Going, it closes BEFORE focus returns to what had it: an element behind an
    * open modal cannot take focus.
    */
   const modal: Attachment<HTMLDialogElement> = (node) => {
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const root = document.documentElement;
     document.body.appendChild(node);
     try {
       node.showModal();
-      root.setAttribute(LOCK, '');
-      node.focus();
     } catch (error) {
-      root.removeAttribute(LOCK);
       if (node.open) node.close();
       node.remove();
       logger.warn('immersive.open_failed', describeThrown(error));
       onclose();
       return;
     }
+    const unlock = lockScroll();
+    node.focus();
     return () => {
-      root.removeAttribute(LOCK);
+      unlock();
       if (node.open) node.close();
       node.remove();
       opener?.focus({ preventScroll: true });
@@ -521,13 +518,6 @@
 </dialog>
 
 <style>
-  /* The page behind holds still while it is open; the gutter keeps its
-     place, so nothing shifts as the scrollbar goes (as GalleryLightbox). */
-  :global(html[data-immersive-player]) {
-    overflow: hidden;
-    scrollbar-gutter: stable;
-  }
-
   /* The whole screen. The top layer stacks it, so it needs no z-index; the
      resets undo the dialog's own box (border, padding, centred, capped). */
   .immersive {
