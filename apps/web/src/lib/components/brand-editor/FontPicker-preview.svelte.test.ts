@@ -10,8 +10,11 @@
  * in the preview's own spelling, so a preview still open then would put the
  * old font back over it. Which runs first, the picker's close or the store's
  * write, is not the picker's to know, so the owner here writes at once, the
- * worst case; the brand editor's own store is checked as well. Opened from the keyboard and closed by a second click: the test
- * DOM cannot drive Melt's pointerdown path, and its Escape does not reach Melt.
+ * worst case. The brand editor's own store is checked too, as integration
+ * only: there the close ran before the store's write, so that case passes
+ * even without the pick-time end. Opened from the keyboard and closed by a
+ * second click: the test DOM cannot drive Melt's pointerdown path, and its
+ * Escape does not reach Melt.
  */
 
 import { afterEach, describe, expect, test, vi } from 'vitest';
@@ -173,6 +176,7 @@ describe('the font picker leaves the organisation font as it found it', () => {
     expect(font()).toBe(withFallback(picked, `'${picked}'`));
   });
 
+  // Integration only: it passes without the pick-time end (see the header).
   test("picking with the brand editor's store as owner: the pick lands", () => {
     const layout = orgLayout();
     const saved: BrandEditorState = {

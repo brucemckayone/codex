@@ -6,9 +6,10 @@
  * `.org-layout` binds with `style:` and flips its two brand attributes, and
  * `clearBrandVars` removes every bound property when it closes. Svelte re-sets
  * either only when its own value changes, so the layout puts them back itself
- * whenever the editor is closed, through `writeBackLayoutBrandInputs`. This file pins the call site: every input the
- * element binds comes from the one record the write-back reads, under its own
- * name, and the layout registers the write-back.
+ * whenever the editor is closed, through `writeBackLayoutBrandInputs`. This
+ * file pins the call site: every input the element binds comes from the one
+ * record the write-back reads, under its own name, and the layout registers
+ * the write-back.
  *
  * A SOURCE test, the weaker instrument: the layout has no render harness (see
  * `navigation-progress-brand-scope.test.ts`); the write-back itself runs in

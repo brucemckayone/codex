@@ -1,5 +1,5 @@
 import { browser } from '$app/environment';
-import { withFallback } from './font-fallbacks';
+import { brandFontProperty, withFallback } from './font-fallbacks';
 import {
   GROUND_VAR_PROPS,
   groundLuminanceVars,
@@ -442,8 +442,10 @@ const DARK_VAR_PROPS = new Set([
  * dark twins, the ground numbers and the shader's logo. A LIGHT override
  * never writes one. `font-body`/`font-heading` are dark-only override keys
  * (the light font is the fontBody/fontHeading field), and a second writer made
- * the winner whichever ran last (Codex-q01h8). The sweeps keep them all:
- * Svelte re-sets one only when its value changes.
+ * the winner whichever ran last (Codex-q01h8). injectBrandVars' and
+ * clearTokenOverrides' sweeps keep them all, since Svelte re-sets one only
+ * when its value changes; clearBrandVars strips them on close and the layout
+ * writes them back.
  */
 const LAYOUT_OWNED_PROPS = new Set([
   ...BASE_VAR_PROPS,
@@ -482,10 +484,6 @@ const fontPreviews = new Map<
   { el: HTMLElement; original: string; previewed: string }
 >();
 
-function fontProperty(mode: 'body' | 'heading'): string {
-  return mode === 'heading' ? '--brand-font-heading' : '--brand-font-body';
-}
-
 /**
  * Temporarily preview a font on the live page.
  * Bypasses the brand editor store (no isDirty, no sessionStorage write).
@@ -494,7 +492,7 @@ function fontProperty(mode: 'body' | 'heading'): string {
 export function previewFont(mode: 'body' | 'heading', family: string): void {
   const el = getOrgLayoutElement();
   if (!el) return;
-  const prop = fontProperty(mode);
+  const prop = brandFontProperty(mode);
   const session = fontPreviews.get(prop);
   const current = el.style.getPropertyValue(prop);
   // Carry the original over only while the last preview is what is there: a
@@ -523,7 +521,7 @@ export function previewFont(mode: 'body' | 'heading', family: string): void {
  * Ending no preview does nothing.
  */
 export function endFontPreview(mode: 'body' | 'heading'): void {
-  const prop = fontProperty(mode);
+  const prop = brandFontProperty(mode);
   const session = fontPreviews.get(prop);
   if (!session) return;
   fontPreviews.delete(prop);
@@ -631,8 +629,8 @@ export function injectBrandVars(state: BrandEditorState): void {
   }
 
   // The binding ground's luminance (Codex-mik4h): org-brand.css nudges the
-  // link and focus colours against it. Written last, so the stale-override sweep
-  // above never clears it.
+  // link and focus colours against it, written here from the pending
+  // background (the sweep above keeps it: LAYOUT_OWNED_PROPS).
   const ground = groundLuminanceVars({
     background: paintableColour(state.backgroundColor),
     backgroundDark: paintableColour(state.darkOverrides?.backgroundColor),

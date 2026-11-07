@@ -10,6 +10,7 @@
   page font lives on the page's own brand wrapper.
 -->
 <script lang="ts">
+  import { onMount } from 'svelte';
   import FontPicker from '$lib/components/brand-editor/FontPicker.svelte';
   import * as m from '$paraglide/messages';
   import { orgFontFamily } from './org-fonts';
@@ -28,9 +29,9 @@
   // none. Read on mount, before the picker can preview over it.
   let orgFamily = $state('');
 
-  function readOrgFamily() {
+  onMount(() => {
     orgFamily = orgFontFamily(mode);
-  }
+  });
 
   function choose(family: string): void {
     // The picker echoes the family it shows; the org's own is not an override.
@@ -39,7 +40,7 @@
   }
 </script>
 
-<div class="brand-font" data-overridden={value ? '' : undefined} {@attach readOrgFamily}>
+<div class="brand-font" data-overridden={value ? '' : undefined}>
   <FontPicker {mode} {label} value={value || orgFamily} onValueChange={choose} />
   <div class="brand-font__meta">
     <span class="brand-font__source">
