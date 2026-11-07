@@ -37,10 +37,10 @@ import { test } from 'node:test';
 
 import {
   collectSetupOrderViolations,
-  parseWorkflowJobs,
-  workflowFiles,
   PNPM_SETUP,
+  parseWorkflowJobs,
   SETUP_NODE,
+  workflowFiles,
 } from './check-workflow-setup-order.mjs';
 
 /** The shape of deploy-production.yml immediately before PR #510 fixed it. */
@@ -80,7 +80,10 @@ jobs:
 `;
 
 test('CATCHES the historical break: pnpm/action-setup after setup-node', () => {
-  const v = collectSetupOrderViolations(HISTORICAL_BREAK, 'deploy-production.yml');
+  const v = collectSetupOrderViolations(
+    HISTORICAL_BREAK,
+    'deploy-production.yml'
+  );
   assert.equal(v.length, 1);
   assert.equal(v[0].job, 'deploy-production');
   assert.equal(v[0].line, 11);
@@ -190,7 +193,11 @@ jobs:
           # uses: pnpm/action-setup@v5
           echo "done"
 `;
-  assert.deepEqual(collectSetupOrderViolations(src), [], 'shell text must not raise');
+  assert.deepEqual(
+    collectSetupOrderViolations(src),
+    [],
+    'shell text must not raise'
+  );
   const jobs = parseWorkflowJobs(src);
   assert.equal(jobs.length, 1);
   assert.equal(jobs[0].steps.length, 3, 'only the three real `uses:` steps');
@@ -249,7 +256,11 @@ jobs:
         uses: pnpm/action-setup@v5
 `;
   const v = collectSetupOrderViolations(src);
-  assert.equal(v.length, 1, 'name-first steps must be parsed, and this order is wrong');
+  assert.equal(
+    v.length,
+    1,
+    'name-first steps must be parsed, and this order is wrong'
+  );
   assert.match(v[0].reason, /runs AFTER/);
 });
 
@@ -296,7 +307,11 @@ jobs:
     ['call', 'build'],
     'the snippet body must not open a job'
   );
-  assert.equal(jobs[0].steps.length, 0, 'a job-level `with:` snippet holds no steps');
+  assert.equal(
+    jobs[0].steps.length,
+    0,
+    'a job-level `with:` snippet holds no steps'
+  );
 
   const v = collectSetupOrderViolations(src);
   assert.equal(v.length, 1, 'the phantom pnpm step must not satisfy the rule');
@@ -306,7 +321,10 @@ jobs:
 
 test('the REAL workflow tree parses — "OK" cannot mean "parsed nothing"', () => {
   const files = workflowFiles();
-  assert.ok(files.length >= 10, `expected the real workflow dir, saw ${files.length} files`);
+  assert.ok(
+    files.length >= 10,
+    `expected the real workflow dir, saw ${files.length} files`
+  );
 
   let setupNode = 0;
   let pnpm = 0;
@@ -318,14 +336,21 @@ test('the REAL workflow tree parses — "OK" cannot mean "parsed nothing"', () =
     const parsed = parseWorkflowJobs(src);
     jobs += parsed.length;
     for (const job of parsed) {
-      const n = job.steps.filter((s) => s.uses.startsWith(`${SETUP_NODE}@`)).length;
+      const n = job.steps.filter((s) =>
+        s.uses.startsWith(`${SETUP_NODE}@`)
+      ).length;
       setupNode += n;
-      pnpm += job.steps.filter((s) => s.uses.startsWith(`${PNPM_SETUP}@`)).length;
+      pnpm += job.steps.filter((s) =>
+        s.uses.startsWith(`${PNPM_SETUP}@`)
+      ).length;
       if (n > 0 && file.endsWith('testing.yml')) testingYmlSetupNodeJobs += 1;
     }
   }
 
-  assert.ok(setupNode >= 10, `parser saw only ${setupNode} ${SETUP_NODE} steps`);
+  assert.ok(
+    setupNode >= 10,
+    `parser saw only ${setupNode} ${SETUP_NODE} steps`
+  );
   assert.ok(pnpm >= 10, `parser saw only ${pnpm} ${PNPM_SETUP} steps`);
   assert.ok(jobs >= 20, `parser saw only ${jobs} jobs`);
   assert.ok(

@@ -76,7 +76,7 @@
  * Reusable-workflow jobs (`uses:` at JOB level, no `steps:`) are not steps
  * either; testing.yml calls static_analysis.yml that way.
  */
-import { readFileSync, readdirSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -123,7 +123,8 @@ function scalarValue(raw) {
   const hash = v.indexOf(' #');
   if (hash !== -1) v = v.slice(0, hash).trim();
   if (v.startsWith("'") && v.endsWith("'") && v.length > 1) v = v.slice(1, -1);
-  else if (v.startsWith('"') && v.endsWith('"') && v.length > 1) v = v.slice(1, -1);
+  else if (v.startsWith('"') && v.endsWith('"') && v.length > 1)
+    v = v.slice(1, -1);
   return v.trim();
 }
 
@@ -166,7 +167,11 @@ export function parseWorkflowJobs(source) {
     // A key at the job-name level opens a new job. The first such key fixes the
     // level; anything shallower ends the `jobs:` block entirely.
     const jobKey = /^([A-Za-z0-9_][\w.-]*):\s*(#.*)?$/.exec(trimmed);
-    if (jobKey && indent > jobsIndent && (jobNameIndent === null || indent === jobNameIndent)) {
+    if (
+      jobKey &&
+      indent > jobsIndent &&
+      (jobNameIndent === null || indent === jobNameIndent)
+    ) {
       jobNameIndent = indent;
       current = { name: jobKey[1], line: i + 1, steps: [] };
       jobs.push(current);
@@ -187,7 +192,15 @@ export function parseWorkflowJobs(source) {
       const stepUses = /^-\s+uses:\s*(.+)$/.exec(trimmed);
       const stepOther = /^-\s+/.test(trimmed);
       if (stepUses) {
-        current.steps.push(readStepInputs(lines, i, indentOf(line), scalarValue(stepUses[1]), i + 1));
+        current.steps.push(
+          readStepInputs(
+            lines,
+            i,
+            indentOf(line),
+            scalarValue(stepUses[1]),
+            i + 1
+          )
+        );
         i = advancePastStep(lines, i, indentOf(line));
         continue;
       }
@@ -206,7 +219,9 @@ export function parseWorkflowJobs(source) {
           }
         }
         if (uses !== null) {
-          current.steps.push(readStepInputs(lines, i, stepIndent, uses, usesLine));
+          current.steps.push(
+            readStepInputs(lines, i, stepIndent, uses, usesLine)
+          );
         }
         i = end;
         continue;
@@ -280,7 +295,8 @@ export function collectSetupOrderViolations(source, file = '<source>') {
     if (!hasCheckout) continue; // exemption 2 — nothing to detect
     job.steps.forEach((step, index) => {
       if (!usesAction(step, SETUP_NODE)) return;
-      const optedOut = String(step.inputs[PM_CACHE_INPUT] ?? '').toLowerCase() === 'false';
+      const optedOut =
+        String(step.inputs[PM_CACHE_INPUT] ?? '').toLowerCase() === 'false';
       if (optedOut) return; // exemption 1 — auto-detection switched off
       const pnpmBefore = job.steps
         .slice(0, index)
@@ -340,7 +356,9 @@ function main() {
     const jobs = parseWorkflowJobs(source);
     jobsScanned += jobs.length;
     for (const job of jobs) {
-      setupNodeSteps += job.steps.filter((s) => usesAction(s, SETUP_NODE)).length;
+      setupNodeSteps += job.steps.filter((s) =>
+        usesAction(s, SETUP_NODE)
+      ).length;
     }
     violations.push(...collectSetupOrderViolations(source, rel));
   }
@@ -368,6 +386,9 @@ function main() {
   );
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
   main();
 }

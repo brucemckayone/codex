@@ -165,6 +165,13 @@ comments. The reasoning for its settings lives here.
   `SQL | undefined`, it hides a scoping hole, because `and()` drops an
   `undefined` argument **without complaining**. Narrow the value, or guard and
   throw; never assert.
+- **biome checks `.mjs`, `.mts`, `.cjs` and `.cts` too** (Codex-k9aap). Until
+  2026-11-07 every include glob listed only `*.{ts,js,json}`, so the CI gate
+  scripts (`apps/web/scripts/check-*.mjs`, `scripts/checks/*.mjs`) and the
+  docs checkers were never linted or format-checked, and `check:ci` passed
+  without reading them. The extra extensions sit in the SAME globs with the
+  same excludes, and get no rule of their own: no wider `lineWidth`, because
+  that would be the only file-type exception in biome.json.
 - **`pnpm typecheck` runs `--continue=dependencies-successful`.** Turbo's
   default (`never`) CANCELS sibling tasks on the first failure, so a red
   typecheck reported one package while tearing down others mid-run — they print
@@ -177,6 +184,13 @@ comments. The reasoning for its settings lives here.
   never excluded them). `noUncheckedIndexedAccess` is on there too, so a
   test-only edit needs `pnpm typecheck` like any other: `keys[0]` is
   `string | undefined` (it failed PR #574's static-analysis).
+- **svelte-check runs in CI against a baseline.** tsc never reads a `.svelte`
+  file, so `check:svelte-baseline` counts svelte-check's errors per (file,
+  code) and fails on a NEW one and on a STALE entry in
+  `apps/web/scripts/svelte-check-baseline.json`: the baseline only shrinks. To
+  shrink it, fix the error and run
+  `pnpm --filter web run check:svelte-baseline --prune`. Never add an entry to
+  get past a new error.
 - **`.fallowrc.json` is also comment-free strict JSON**, so its reasoning lives
   here too.
   - **Never suppress a class member by name in `usedClassMembers`.** A name
