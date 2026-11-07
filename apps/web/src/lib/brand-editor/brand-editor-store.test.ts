@@ -9,6 +9,7 @@
  * The store is a Svelte 5 module-level $state singleton, so each test resets
  * via close() then re-opens with a known saved state.
  */
+import { flushSync } from 'svelte';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { brandEditor } from './brand-editor-store.svelte';
 import type { BrandEditorState } from './types';
@@ -167,5 +168,42 @@ describe('brandEditor.getThemeTokenOverride (Codex-wwedk)', () => {
     expect(
       brandEditor.getThemeTokenOverride('nonexistent-key')
     ).toBeUndefined();
+  });
+});
+
+// Codex-q01h8: close() skips only the preview strip for an editor that never
+// opened. The crash-recovery draft is cleared on every close, as before.
+describe('brandEditor.close and the crash-recovery draft', () => {
+  const DRAFT_KEY = 'codex:brand-editor';
+
+  beforeEach(() => {
+    brandEditor.close();
+    sessionStorage.clear();
+  });
+
+  it('clears the draft an edit wrote', () => {
+    brandEditor.open(ORG_ID, makeSaved());
+    brandEditor.updateField('primaryColor', '#111111');
+    flushSync();
+    expect(sessionStorage.getItem(DRAFT_KEY)).not.toBeNull();
+
+    brandEditor.close();
+
+    expect(sessionStorage.getItem(DRAFT_KEY)).toBeNull();
+  });
+
+  it('clears it even when the editor never opened', () => {
+    sessionStorage.setItem(
+      DRAFT_KEY,
+      JSON.stringify({
+        orgId: ORG_ID,
+        pending: makeSaved({ primaryColor: '#111111' }),
+        level: 'home',
+      })
+    );
+
+    brandEditor.close();
+
+    expect(sessionStorage.getItem(DRAFT_KEY)).toBeNull();
   });
 });
