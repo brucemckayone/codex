@@ -257,6 +257,34 @@ describe('DropdownMenu', () => {
       );
     });
 
+    // The usual close in the app: focus on the item, where the menu's own
+    // focus trap keeps it. With forceVisible the leaving menu stays in the
+    // DOM, item focused, when closeFocus asks where focus is (review c6,
+    // Codex-q6qjb). The trap, live in jsdom, then pulls focus back onto
+    // the item, so the trigger's focus() is what is checked.
+    test('an item chosen by keyboard gives focus back to the trigger', async () => {
+      component = mount(DropdownMenuDialogHarness, {
+        target: document.body,
+        props: { forceVisible: true },
+      });
+      flushSync();
+      // Melt's own focus on open, a few timers later: into the menu.
+      await happens(() =>
+        expect(document.activeElement?.closest('[role="menu"]')).not.toBeNull()
+      );
+      const item = document.querySelector<HTMLElement>('[data-testid="plain"]');
+      const button = trigger();
+      const focus =
+        button instanceof HTMLElement ? vi.spyOn(button, 'focus') : null;
+      item?.focus();
+      item?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })
+      );
+
+      await happens(() => expect(focus).toHaveBeenCalled());
+      expect(item?.isConnected).toBe(true);
+    });
+
     test('an item that opens nothing gives focus back to the trigger', async () => {
       pressItem('plain');
 
