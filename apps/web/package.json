@@ -23,6 +23,8 @@
     "check:brand-boundary:test": "node --test scripts/check-brand-editor-boundary.test.mjs",
     "check:dialog-structure": "node scripts/check-dialog-structure.mjs",
     "check:dialog-structure:test": "node --test scripts/check-dialog-structure.test.mjs",
+    "check:svelte-baseline": "svelte-kit sync && node scripts/check-svelte-baseline.mjs",
+    "check:svelte-baseline:test": "node --test scripts/check-svelte-baseline.test.mjs",
     "lint": "biome lint --write .",
     "format": "biome format --write .",
     "typecheck": "svelte-kit sync && tsc --noEmit",

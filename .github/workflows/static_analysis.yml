@@ -144,3 +144,27 @@ jobs:
         env:
           TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
           TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+
+      # Codex-3ckzk: svelte-check against a committed baseline.
+      #
+      # The typecheck above is tsc, which never reads a .svelte file, so a type
+      # error inside a component, or a type-level guard written for its
+      # consumers (Dialog.Content's CssLength-typed maxHeight), failed no job.
+      # svelte-check reads them, but the tree carries a standing set of errors.
+      # So the gate counts svelte-check's errors per (file, code) and compares
+      # them with apps/web/scripts/svelte-check-baseline.json: a NEW error
+      # fails, and so does a STALE entry (an error fixed but still listed), so
+      # the baseline only shrinks. The script's header says how to shrink it.
+      #
+      # After the typecheck on purpose: svelte-check resolves the workspace
+      # packages through their dist/ types, which turbo's ^build has just
+      # written, and reads the paraglide output compiled above. The gate's own
+      # `svelte-kit sync` writes the route types.
+      #
+      # Self-test first, as for the gates above.
+      - name: svelte-check baseline gate self-test
+        run: pnpm --filter web run check:svelte-baseline:test
+
+      - name: svelte-check (no error beyond the baseline)
+        run: pnpm --filter web run check:svelte-baseline
+        timeout-minutes: 10

@@ -177,6 +177,13 @@ comments. The reasoning for its settings lives here.
   never excluded them). `noUncheckedIndexedAccess` is on there too, so a
   test-only edit needs `pnpm typecheck` like any other: `keys[0]` is
   `string | undefined` (it failed PR #574's static-analysis).
+- **svelte-check runs in CI against a baseline.** tsc never reads a `.svelte`
+  file, so `check:svelte-baseline` counts svelte-check's errors per (file,
+  code) and fails on a NEW one and on a STALE entry in
+  `apps/web/scripts/svelte-check-baseline.json`: the baseline only shrinks. To
+  shrink it, fix the error and run
+  `pnpm --filter web run check:svelte-baseline --prune`. Never add an entry to
+  get past a new error.
 - **`.fallowrc.json` is also comment-free strict JSON**, so its reasoning lives
   here too.
   - **Never suppress a class member by name in `usedClassMembers`.** A name
