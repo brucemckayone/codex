@@ -17,6 +17,7 @@
   @prop {(open: boolean) => void} [onOpenChange] - Callback when open state changes
 -->
 <script lang="ts">
+  import { untrack } from 'svelte';
   import type { CustomerDetails } from '@codex/admin';
   import * as Dialog from '$lib/components/ui/Dialog';
   import { Button, Skeleton } from '$lib/components/ui';
@@ -80,11 +81,20 @@
     );
   }
 
+  // Loads once per open, customer and org, and reads nothing else. Run
+  // tracked, the loads made this effect depend on the queries' own state
+  // (making or awaiting one reads its promise), so the grants refresh
+  // after a revoke re-ran it: the drawer fell back to its loading state at
+  // the top of its scroll, and the revoke's confirm was rebuilt
+  // mid-request, its focus gone and its buttons live again (Codex-p10nx).
   $effect(() => {
-    if (open && customerId) {
-      loadCustomer(customerId);
-      grantsQuery = getCustomerGrants({ customerId, organizationId: orgId });
-    }
+    if (!open || !customerId) return;
+    const id = customerId;
+    const organizationId = orgId;
+    untrack(() => {
+      loadCustomer(id);
+      grantsQuery = getCustomerGrants({ customerId: id, organizationId });
+    });
   });
 
   async function loadCustomer(id: string) {

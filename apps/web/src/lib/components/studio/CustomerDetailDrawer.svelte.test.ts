@@ -499,4 +499,16 @@ describe('focus after a revoke', () => {
       expect(document.activeElement).toBe(revokeButton(YOGA))
     );
   });
+
+  // The refresh after a revoke re-ran the drawer's load: its details went
+  // back to loading, at the top of its scroll, and the confirm was rebuilt
+  // while the request ran.
+  test('the refresh after a revoke loads nothing else', async () => {
+    setGrants(grantsPage([SLEEP, MOBILITY]));
+    await revoke(SLEEP, [MOBILITY, gone(SLEEP)]);
+
+    expect(refreshGrants).toHaveBeenCalledTimes(1);
+    expect(getCustomerDetail).toHaveBeenCalledTimes(1);
+    expect(getCustomerGrants).toHaveBeenCalledTimes(1);
+  });
 });
