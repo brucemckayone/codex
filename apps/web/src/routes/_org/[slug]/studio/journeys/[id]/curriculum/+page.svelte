@@ -716,7 +716,7 @@
       <Dialog.Title>Choose from your library</Dialog.Title>
     </Dialog.Header>
     <Dialog.Toolbar direction="column">
-      <div class="picker__search">
+      <div class="picker__search" data-field-box>
         <SearchIcon size={16} />
         <input
           type="search"

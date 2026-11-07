@@ -222,7 +222,7 @@
       onpointerleave={handleDropdownLeave}
     >
       <!-- Search input -->
-      <div class="font-picker__search" role="none">
+      <div class="font-picker__search" role="none" data-field-box>
         <SearchIcon size={14} />
         <input
           bind:this={searchInputEl}

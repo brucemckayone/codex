@@ -288,6 +288,22 @@ select:focus {
   box-shadow: 0 0 0 3px var(--color-focus-ring);
 }
 
+/* A field drawn without a border of its own sits in a box that draws its
+   border or line: a search row, a pill, a picker's search box. That box
+   carries `data-field-box` and takes the cue a bordered input takes above,
+   its border in --color-border-focus. Without it the field keeps only the
+   halo, which the platform's tokens leave at 1.46:1 in light and 1.92:1 in
+   dark, under the 3:1 a focus indicator needs (Codex-c5prp).
+
+   `:has(… :focus)` rather than `:focus-within`: the box's resting border is
+   a component's scoped class (0,2,0), which `:focus-within` would only tie,
+   and a tie goes to whichever stylesheet loads last. Naming the field adds
+   the element that outranks it. A component's own `:focus-within` rule
+   (0,3,0) still outranks this one. */
+[data-field-box]:has(:is(input, textarea, select):focus) {
+  border-color: var(--color-border-focus);
+}
+
 input:disabled,
 textarea:disabled,
 select:disabled {
