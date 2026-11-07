@@ -10,6 +10,8 @@
  * browser proof wheels the page in the app's layout. Here: which styles go
  * on, and that each comes back exactly.
  */
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const platform = vi.hoisted(() => ({ ios: false }));
@@ -56,6 +58,7 @@ describe('lockScroll', () => {
     body.style.cssText = '';
     Reflect.deleteProperty(html, 'clientWidth');
     Object.defineProperty(window, 'scrollY', { configurable: true, value: 0 });
+    Object.defineProperty(window, 'scrollX', { configurable: true, value: 0 });
   });
 
   it('holds the viewport on the first hold and lets go on the last', () => {
@@ -169,6 +172,50 @@ describe('lockScroll', () => {
       top: 600,
       behavior: 'instant',
     });
+  });
+
+  // SvelteKit saves a page's place from pageXOffset/pageYOffset: on a
+  // back-swipe before the new page tears the dialog down, and on an app
+  // switch. With <body> fixed they read 0, and the page came back at its
+  // top (Codex-8v12c). Read bare here, as SvelteKit reads them.
+  it('on iOS, while held, pageXOffset and pageYOffset read the place the page is held at', () => {
+    platform.ios = true;
+    Object.defineProperty(window, 'scrollY', {
+      configurable: true,
+      value: 600,
+    });
+    Object.defineProperty(window, 'scrollX', { configurable: true, value: 40 });
+    vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
+    const own = Object.getOwnPropertyDescriptor(window, 'pageYOffset');
+
+    const hold = lockScroll();
+    expect({ x: pageXOffset, y: pageYOffset }).toEqual({ x: 40, y: 600 });
+    hold();
+
+    expect(Object.getOwnPropertyDescriptor(window, 'pageYOffset')).toEqual(own);
+  });
+
+  it('off iOS the page offsets are left as they are', () => {
+    const own = Object.getOwnPropertyDescriptor(window, 'pageYOffset');
+    const hold = lockScroll();
+    expect(Object.getOwnPropertyDescriptor(window, 'pageYOffset')).toEqual(own);
+    hold();
+  });
+
+  // The fix above rests on this: if SvelteKit ever saves from something
+  // else (scrollY), the held offsets stop reaching it.
+  it('SvelteKit still saves a page’s place from pageXOffset and pageYOffset', () => {
+    // vitest runs from apps/web.
+    const utils = readFileSync(
+      resolve(
+        process.cwd(),
+        'node_modules/@sveltejs/kit/src/runtime/client/utils.js'
+      ),
+      'utf8'
+    );
+    expect(utils).toMatch(
+      /function scroll_state\(\) \{\s*return \{\s*x: pageXOffset,\s*y: pageYOffset\s*\};/
+    );
   });
 
   it('on iOS a scrollTo that rejects `instant` still lets the page go, and back to its place', () => {
