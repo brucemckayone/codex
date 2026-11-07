@@ -171,7 +171,10 @@ comments. The reasoning for its settings lives here.
   docs checkers were never linted or format-checked, and `check:ci` passed
   without reading them. The extra extensions sit in the SAME globs with the
   same excludes, and get no rule of their own: no wider `lineWidth`, because
-  that would be the only file-type exception in biome.json.
+  that would be the only formatter exception in biome.json. The pre-commit
+  hook covers them too: the root package.json's lint-staged glob is
+  `*.{js,mjs,cjs,ts,mts,cts,json,svelte}`, so a staged gate script gets
+  `biome check --write` before it reaches `check:ci`.
 - **`pnpm typecheck` runs `--continue=dependencies-successful`.** Turbo's
   default (`never`) CANCELS sibling tasks on the first failure, so a red
   typecheck reported one package while tearing down others mid-run — they print
