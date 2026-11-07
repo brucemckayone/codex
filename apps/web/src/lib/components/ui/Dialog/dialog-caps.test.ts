@@ -169,14 +169,17 @@ describe("DialogContent's caps", () => {
   // still green: a later `.dialog-content { max-height: none }`, or
   // `--dialog-default-max: none` on a size (review G5-C-L4). So the rules
   // that set one are exactly these, each setting exactly these.
+  // `max-block-size` is max-height's logical twin and `all` resets both:
+  // either one set later wins the same cascade slot (review c6).
   it('sets a cap only in the rules above, each once', () => {
-    const CAPS = [
+    const OWN = [
       'max-height',
       '--dialog-max',
       '--dialog-default-max',
       '--dialog-room',
       '--dialog-dvh',
     ];
+    const CAPS = [...OWN, 'max-block-size', 'all'];
     const key = (selector: string, within: string[]) =>
       [bare(selector), ...within].join(' ');
     const found = content
@@ -186,7 +189,7 @@ describe("DialogContent's caps", () => {
       }))
       .filter((r) => r.sets.length > 0);
     const expected = [
-      { rule: key('.dialog-content', []), sets: CAPS },
+      { rule: key('.dialog-content', []), sets: OWN },
       {
         rule: key('.dialog-content', ['@supportsnot(height:1dvh)']),
         sets: ['--dialog-dvh'],
@@ -229,11 +232,15 @@ describe("DialogContent's caps", () => {
 
 describe("DialogToolbar's cap", () => {
   const CAPPED = ".dialog-toolbar:not([data-flush], [data-layout='drawer'])";
-  const rule = toolbar.find((r) => r.selector === bare(CAPPED));
+  // The one rule for CAPPED: of two, the later wins the cascade (review c6).
+  const capped = toolbar.filter(
+    (r) => r.selector === bare(CAPPED) && r.within.length === 0
+  );
+  const rule = capped.length === 1 ? capped[0] : undefined;
 
   // Row and column both: the rule names no direction.
   it('caps a stacked and a wrapped bar alike, at a third of the screen', () => {
-    expect(rule?.within).toEqual([]);
+    expect(capped).toHaveLength(1);
     expect(rule?.decls.get('max-height')).toEqual(['33vh', '33dvh']);
     expect(rule?.decls.get('overflow-y')).toEqual(['auto']);
     expect(rule?.decls.get('overscroll-behavior-y')).toEqual(['contain']);
@@ -252,8 +259,51 @@ describe("DialogToolbar's cap", () => {
     expect(rule?.decls.get('padding-top')).toEqual(['var(--toolbar-ring)']);
   });
 
-  it('is the only rule that caps the bar', () => {
-    const capped = toolbar.filter((r) => r.decls.has('max-height'));
-    expect(capped.map((r) => r.selector)).toEqual([bare(CAPPED)]);
+  // A later rule of the same weight (a `[data-direction='column']` one,
+  // say) setting any of these, or a shorthand of one, would undo the cap
+  // or the band with every test above green (review c6). So the rules that
+  // set one are exactly these, each setting exactly these.
+  it('sets the cap and the band only in that rule', () => {
+    const BAND = [
+      '--toolbar-ring',
+      'max-height',
+      'max-block-size',
+      'overflow',
+      'overflow-y',
+      'overscroll-behavior',
+      'overscroll-behavior-y',
+      'margin',
+      'margin-block',
+      'margin-block-start',
+      'margin-top',
+      'padding',
+      'padding-block',
+      'padding-block-start',
+      'padding-top',
+      'all',
+    ];
+    const found = toolbar
+      .map((r) => ({
+        rule: [r.selector, ...r.within].join(' '),
+        sets: BAND.filter((p) => r.decls.has(p)),
+      }))
+      .filter((r) => r.sets.length > 0);
+    expect(found).toEqual([
+      // The base inset, which CAPPED's padding-top outweighs.
+      { rule: '.dialog-toolbar', sets: ['padding'] },
+      {
+        rule: bare(CAPPED),
+        sets: [
+          '--toolbar-ring',
+          'max-height',
+          'overflow-y',
+          'overscroll-behavior-y',
+          'margin-top',
+          'padding-top',
+        ],
+      },
+      // Flush: outside CAPPED, its own bare box.
+      { rule: '.dialog-toolbar[data-flush]', sets: ['padding'] },
+    ]);
   });
 });
