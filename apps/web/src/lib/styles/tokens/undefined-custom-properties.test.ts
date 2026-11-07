@@ -17,15 +17,19 @@
  *
  * Defined means one of: a custom-property declaration (but not
  * `--x: initial`, which is the invalid value) in CSS or an inline `style`,
- * `@property --x`, a Svelte `style:--x` directive or `--x=` component prop,
+ * `@property --x`, a Svelte `style:--x` directive or `--x=` component prop
+ * (whose text value, like any attribute's, is read for bare references too),
  * an object key `'--x': …`, `setProperty('--x', …)`, or `--x:` written into a
  * string or template (an inline style built in script).
  *
- * The brand editor's runtime inputs (`--brand-{key}` and `--brand-{key}-dark`
- * for BRAND_PREFIX_KEYS) exist only on an org that saved that override, so
- * they are OPTIONAL: read bare, outside a custom property, one fails. A custom
+ * A brand INPUT is a `--brand-*` name that no stylesheet or markup writes as
+ * text, only script: the brand editor's runtime overrides (`--brand-{key}`
+ * and `-dark` for BRAND_PREFIX_KEYS, written by built name) and the org
+ * layout's inputs, which it sets only when the org has that setting. Inputs
+ * are OPTIONAL: read bare, outside a custom property, one fails. A custom
  * property whose every definition reads an optional name bare is optional in
- * turn, and so on.
+ * turn, so the rule follows an input through `style:` directives, `--x=`
+ * props and declarations alike.
  *
  * Out of scope: WHERE a name is defined. A name declared only under
  * `[data-org-brand]` counts as defined even where a component reads it on a
@@ -59,7 +63,7 @@ function sourceFiles(dir: string): string[] {
 }
 
 interface Scan {
-  /** A null value: defined outside a CSS declaration, unconditionally. */
+  /** A null value: set from script, at runtime; a string: written as text. */
   definitions: { name: string; value: string | null }[];
   /** Bare reads, and the custom property whose value holds each, if any. */
   reads: { name: string; line: number; into: string | null }[];
@@ -73,8 +77,9 @@ function bareVars(text: string): string[] {
 }
 
 /** A declaration of `name` with `value`, and the bare reads in that value. */
-function declare(name: string, value: string, line: number, out: Scan) {
+function declare(name: string, raw: string, line: number, out: Scan) {
   const custom = name.startsWith('--');
+  const value = raw.replace(/\/\*[\s\S]*?\*\//g, '');
   if (custom && value.trim() !== 'initial')
     out.definitions.push({ name, value });
   for (const read of bareVars(value))
@@ -119,11 +124,15 @@ function scanScriptText(text: string, line: number, out: Scan) {
 }
 
 type Node = { type: string; start: number } & Record<string, unknown>;
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
 const isNode = (value: unknown): value is Node =>
   typeof value === 'object' &&
   value !== null &&
   'type' in value &&
-  typeof value.type === 'string';
+  typeof value.type === 'string' &&
+  'start' in value &&
+  typeof value.start === 'number';
 const stringOf = (value: unknown) =>
   isNode(value) && value.type === 'Literal' && typeof value.value === 'string'
     ? value.value
@@ -136,17 +145,24 @@ function cookedOf(quasi: unknown): string {
     return '';
   return typeof value.cooked === 'string' ? value.cooked : '';
 }
-/** Markup attribute parts as text, interpolations as `0`. */
-const textOf = (parts: unknown) =>
-  Array.isArray(parts)
-    ? parts
-        .map((p) =>
-          isNode(p) && p.type === 'Text' && typeof p.data === 'string'
-            ? p.data
-            : '0'
-        )
-        .join('')
-    : '';
+/** Markup parts as text, interpolations as `0`; null for a lone expression. */
+function textOf(parts: unknown): string | null {
+  if (!Array.isArray(parts)) return null;
+  return parts
+    .map((p) =>
+      isNode(p) && p.type === 'Text' && typeof p.data === 'string'
+        ? p.data
+        : '0'
+    )
+    .join('');
+}
+
+/** A markup attribute or directive: a property written as text, or set from script. */
+function scanAttribute(name: string, value: unknown, line: number, out: Scan) {
+  const text = textOf(value);
+  if (text !== null) declare(name, text, line, out);
+  else if (name.startsWith('--')) out.definitions.push({ name, value: null });
+}
 
 /** Svelte markup and its scripts (ESTree), at any depth. */
 function scanTree(
@@ -169,18 +185,27 @@ function visit(node: Node, lineAt: (offset: number) => number, out: Scan) {
   const name = typeof node.name === 'string' ? node.name : '';
   switch (node.type) {
     case 'Attribute':
-      if (name.startsWith('--')) out.definitions.push({ name, value: null });
-      if (name === 'style') scanInlineStyle(textOf(node.value), line, out);
+      if (name === 'style')
+        scanInlineStyle(textOf(node.value) ?? '', line, out);
+      else scanAttribute(name, node.value, line, out);
       break;
     case 'StyleDirective':
-      if (name.startsWith('--')) out.definitions.push({ name, value: null });
-      for (const read of bareVars(textOf(node.value)))
-        out.reads.push({
-          name: read,
-          line,
-          into: name.startsWith('--') ? name : null,
-        });
+      scanAttribute(name, node.value, line, out);
       break;
+    case 'RegularElement': {
+      // A `<style>` inside markup (`<svelte:head>`, `<svg>`, `{#if}`).
+      const nodes = isRecord(node.fragment) ? node.fragment.nodes : null;
+      const first = Array.isArray(nodes) ? nodes[0] : null;
+      if (name === 'style' && isNode(first)) {
+        const base = first.start;
+        scanCss(
+          parseCss(textOf(nodes) ?? '').children,
+          (offset) => lineAt(base + offset),
+          out
+        );
+      }
+      break;
+    }
     case 'Literal':
       if (typeof node.value === 'string') scanScriptText(node.value, line, out);
       break;
@@ -291,7 +316,15 @@ function violations(files: Record<string, string>): string[] {
   for (const [, scan] of scans)
     for (const { name, value } of scan.definitions)
       definitions.set(name, [...(definitions.get(name) ?? []), value]);
-  const optional = new Set(RUNTIME_INPUTS.filter((n) => !definitions.has(n)));
+  // An input: a `--brand-*` name nothing writes as text, only script (or the
+  // brand editor, by built name). Each is set only when the org has it.
+  const written = (name: string) =>
+    (definitions.get(name) ?? []).some((value) => value !== null);
+  const optional = new Set(
+    [...RUNTIME_INPUTS, ...definitions.keys()].filter(
+      (name) => name.startsWith('--brand-') && !written(name)
+    )
+  );
   for (let grew = true; grew; ) {
     grew = false;
     for (const [name, values] of definitions)
@@ -393,6 +426,47 @@ type T = { '--n': string };`,
       `a.css:2 --brand-${KEY} is optional: read it with a fallback`,
       'a.css:4 --w is optional: read it with a fallback',
     ]);
+  });
+
+  test('an attribute’s text is read, and an input stays optional through a prop or directive', () => {
+    const files = {
+      'a.svelte': `<Icon height="var(--missing-attr)" />
+<Child --y="var(--brand-${KEY})" />
+<div style:--z="var(--brand-${KEY})"></div>
+<style>a { width: var(--y); height: var(--z); }</style>`,
+    };
+    expect(violations(files).sort()).toEqual(
+      [
+        'a.svelte:1 --missing-attr',
+        'a.svelte:4 --y is optional: read it with a fallback',
+        'a.svelte:4 --z is optional: read it with a fallback',
+      ].sort()
+    );
+  });
+
+  test('a brand input the layout sets only from script is optional', () => {
+    const files = {
+      'a.svelte': `<script>const vars = { '--brand-from-script': v };</script>
+<div style:--brand-from-directive={v}></div>
+<style>a { color: var(--brand-from-script); top: var(--brand-from-directive); }</style>`,
+    };
+    expect(violations(files).sort()).toEqual(
+      [
+        'a.svelte:3 --brand-from-directive is optional: read it with a fallback',
+        'a.svelte:3 --brand-from-script is optional: read it with a fallback',
+      ].sort()
+    );
+  });
+
+  test('a <style> inside markup is read, and a comment inside var() hides nothing', () => {
+    const files = {
+      'a.svelte':
+        '<svelte:head><style>a { width: var(--in-head); }</style></svelte:head>',
+      'b.css': 'a { width: var(--commented /* why */); }',
+    };
+    expect(violations(files).sort()).toEqual(
+      ['a.svelte:1 --in-head', 'b.css:1 --commented'].sort()
+    );
   });
 
   test('none is undefined, and no optional input is read bare, anywhere under src', () => {

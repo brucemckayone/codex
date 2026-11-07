@@ -2,7 +2,10 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { type AST, parse } from 'svelte/compiler';
 import { describe, expect, test } from 'vitest';
-import { type CssRule, readRules } from './page-css';
+import {
+  type CssRule,
+  componentRules,
+} from '$lib/page-builder/kit/blocks/testing';
 
 /**
  * The org home hero logo keeps its own shape, and the logo-hero layout sizes
@@ -15,31 +18,78 @@ import { type CssRule, readRules } from './page-css';
  * undefined `--space-48`, so on desktop it was a fixed 26px, and once
  * defined, Scale 4 made it 768px tall, off the first screen. Measured in a
  * browser at 1440×900 and 390×844; this pins the CSS that measurement
- * depends on, across every rule that reaches the logo (nested, in @media,
- * or under a parent rule). Svelte's own parser drops comments, so prose
- * cannot satisfy it.
+ * depends on.
+ *
+ * A source test cannot run the cascade, so it holds the rules that can reach
+ * the logo image to an allowlist: any selector that targets it (its class, or
+ * an `img` inside its wrap) may set only its base, the dial's height, `width:
+ * auto`, `object-fit: contain` and the one cap. Svelte's own parser drops
+ * comments, so prose cannot satisfy it.
  */
 
-const source = readFileSync(
-  join(import.meta.dirname, '..', '+page.svelte'),
-  'utf8'
-);
-const rules = readRules(source);
+const PAGE = join(import.meta.dirname, '..', '+page.svelte');
+const rules = componentRules(PAGE, { nested: true });
 
 const LOGO_HERO = '[data-hero-layout="logo-hero"]';
-const LOGO = /\.hero__logo(?![\w-])/;
-const TITLE = /\.hero__title(?![\w-])/;
+const HEIGHT = 'calc(var(--_logo-base) * var(--brand-hero-logo-scale, 1))';
 
-/** The rule's own selector and every rule and at-rule around it. */
-const chain = (rule: CssRule) => [...rule.within, rule.selector];
-const reaches = (rule: CssRule, target: RegExp) =>
-  chain(rule).some((s) => target.test(s));
-const inLogoHero = (rule: CssRule) =>
-  chain(rule).some((s) => s.includes(LOGO_HERO));
-const top = (selector: string) =>
-  rules.filter((r) => r.within.length === 0 && r.selector === selector);
+/** A selector list's members, split on top-level commas only. */
+function members(list: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let current = '';
+  for (const char of list) {
+    if (char === '(' || char === '[') depth++;
+    if (char === ')' || char === ']') depth--;
+    if (char === ',' && depth === 0) {
+      out.push(current.trim());
+      current = '';
+    } else current += char;
+  }
+  return [...out, current.trim()];
+}
 
-const logoRules = rules.filter((r) => reaches(r, LOGO));
+/** A nested selector inside its parent: `&` is the parent, or it descends. */
+const nest = (outer: string, inner: string) =>
+  inner.includes('&') ? inner.replaceAll('&', outer) : `${outer} ${inner}`;
+
+/** The full selectors a rule matches with, its parents' selectors resolved. */
+function resolved(rule: CssRule): string[] {
+  const [first, ...rest] = [...rule.parents, rule.selector];
+  let full = members(first);
+  for (const list of rest)
+    full = full.flatMap((outer) => members(list).map((i) => nest(outer, i)));
+  return full;
+}
+
+/** The compound a selector's subject is: what follows its last combinator. */
+function subject(selector: string): string {
+  let depth = 0;
+  let last = 0;
+  for (let i = 0; i < selector.length; i++) {
+    const char = selector[i];
+    if (char === '(' || char === '[') depth++;
+    if (char === ')' || char === ']') depth--;
+    if (depth === 0 && /[\s>+~]/.test(char)) last = i + 1;
+  }
+  return selector.slice(last);
+}
+
+/** A selector as it matches: Svelte compiles `:global(x)` to plain `x`. */
+const unwrapped = (selector: string) =>
+  selector.replace(/:global\(([^()]*)\)/g, '$1');
+
+const targetsLogo = (selector: string) => {
+  const full = unwrapped(selector);
+  const own = subject(full);
+  if (/\.hero__logo(?![\w-])/.test(own)) return true;
+  return /^img(?![\w-])/.test(own) && /\.hero__(logo-wrap|content)/.test(full);
+};
+const targetsTitle = (selector: string) =>
+  /\.hero__title(?![\w-])/.test(subject(unwrapped(selector)));
+
+const logoRules = rules.filter((r) => resolved(r).some(targetsLogo));
+const where = (r: CssRule) => [...r.within, r.selector].join(' ');
 
 /** Every element in the page's markup, at any depth. */
 function elements(node: unknown): AST.RegularElement[] {
@@ -58,21 +108,56 @@ function elements(node: unknown): AST.RegularElement[] {
 }
 
 describe('the hero logo', () => {
-  test('is sized by height and drawn at its own shape by every rule that reaches it', () => {
-    const base = top('.hero__logo');
+  test('every rule that reaches the image sizes it by the dial, at its own shape', () => {
+    const allowed = new Map<string, string | null>([
+      ['--_logo-base', null],
+      ['max-height', null],
+      ['height', HEIGHT],
+      ['width', 'auto'],
+      ['object-fit', 'contain'],
+    ]);
+    const stray = logoRules.flatMap((r) =>
+      [...r.decls].flatMap(([property, value]) => {
+        if (!allowed.has(property)) return [`${where(r)} ${property}`];
+        const only = allowed.get(property);
+        return only === null || value === only
+          ? []
+          : [`${where(r)} ${property}: ${value}`];
+      })
+    );
+    expect(stray).toEqual([]);
+    const base = logoRules.filter((r) => where(r) === '.hero__logo');
     expect(base).toHaveLength(1);
-    expect(base[0].decls.get('height')).toBe(
-      'calc(var(--_logo-base) * var(--brand-hero-logo-scale, 1))'
-    );
+    expect(base[0].decls.get('height')).toBe(HEIGHT);
     expect(base[0].decls.get('object-fit')).toBe('contain');
-    const fits = logoRules.flatMap((r) =>
-      r.decls.has('object-fit') ? [r.decls.get('object-fit')] : []
+  });
+
+  test('takes its base from the spacing scale, 192px × density in logo-hero from md up', () => {
+    const bases = Object.fromEntries(
+      logoRules
+        .filter((r) => r.decls.has('--_logo-base'))
+        .map((r) => [where(r), r.decls.get('--_logo-base')])
     );
-    expect(new Set(fits)).toEqual(new Set(['contain']));
+    expect(bases).toEqual({
+      '.hero__logo': 'var(--space-14)',
+      '@media (--below-sm) .hero__logo': 'var(--space-11)',
+      [`:global(${LOGO_HERO}) .hero__logo`]: 'var(--space-48)',
+      [`@media (--below-md) :global(${LOGO_HERO}) .hero__logo`]:
+        'var(--space-32)',
+    });
+  });
+
+  test('is capped once, in logo-hero, at 45% of the screen height', () => {
+    const caps = logoRules
+      .filter((r) => r.decls.has('max-height'))
+      .map((r) => [where(r), r.decls.get('max-height')]);
+    expect(caps).toEqual([[`:global(${LOGO_HERO}) .hero__logo`, '45svh']]);
   });
 
   test('carries no inline style that could outrank its rules', () => {
-    const logos = elements(parse(source, { modern: true }).fragment).filter(
+    const logos = elements(
+      parse(readFileSync(PAGE, 'utf8'), { modern: true }).fragment
+    ).filter(
       (el) =>
         el.name === 'img' &&
         el.attributes.some(
@@ -95,21 +180,18 @@ describe('the hero logo', () => {
     expect(styling).toEqual([]);
   });
 
-  test('in logo-hero is 192px × density from md up, capped at 45% of the screen height', () => {
-    const own = top(`:global(${LOGO_HERO}) .hero__logo`);
-    expect(own).toHaveLength(1);
-    expect(own[0].decls.get('--_logo-base')).toBe('var(--space-48)');
-    expect(own[0].decls.get('max-height')).toBe('45svh');
-    // No other rule lifts, moves or adds a cap.
-    expect(logoRules.filter((r) => r.decls.has('max-height'))).toEqual(own);
-  });
-
-  test('in logo-hero sits under a centred title', () => {
-    const aligns = rules
-      .filter((r) => inLogoHero(r) && reaches(r, TITLE))
-      .flatMap((r) =>
-        r.decls.has('text-align') ? [r.decls.get('text-align')] : []
-      );
-    expect(aligns).toEqual(['center']);
+  test('in logo-hero sits under a centred title, which no unscoped rule realigns', () => {
+    const aligns = rules.filter(
+      (r) => resolved(r).some(targetsTitle) && r.decls.has('text-align')
+    );
+    // Each layout aligns its own title; a rule for every layout would beat one.
+    const unscoped = aligns.filter(
+      (r) => !resolved(r).every((s) => s.includes('[data-hero-layout='))
+    );
+    expect(unscoped.map(where)).toEqual([]);
+    const logoHero = aligns.filter((r) =>
+      resolved(r).some((s) => s.includes(LOGO_HERO))
+    );
+    expect(logoHero.map((r) => r.decls.get('text-align'))).toEqual(['center']);
   });
 });

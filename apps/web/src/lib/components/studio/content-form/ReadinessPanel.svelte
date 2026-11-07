@@ -152,7 +152,7 @@
   }
 
   .check-row[data-met] {
-    color: var(--color-success-700);
+    color: var(--color-status-success-text);
     background-color: color-mix(in srgb, var(--color-success) 8%, var(--color-surface-secondary));
   }
 

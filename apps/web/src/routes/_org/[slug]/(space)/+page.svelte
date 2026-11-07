@@ -1680,7 +1680,6 @@
      and stats below the first screen. */
   :global([data-hero-layout="logo-hero"]) .hero__logo {
     --_logo-base: var(--space-48);
-    max-height: 45vh;
     max-height: 45svh;
   }
 

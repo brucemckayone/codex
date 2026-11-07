@@ -11,7 +11,9 @@
  *
  * Each sheet is read by Svelte's CSS parser, and every `--space-*` rung must
  * sit in that sheet's one scale block, declared once: a twin under another
- * selector or in a media query would not be the declaration in force.
+ * selector or in a media query would not be the declaration in force. The org
+ * block's own `--space-unit` is pinned to the org's density too: without it,
+ * every twin multiplies the unit `:root` resolved at density 1.
  */
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -34,8 +36,16 @@ interface Rung {
   where: string;
 }
 
-/** Every `--space-*` rung in a sheet but the unit itself, wherever it sits. */
-function rungs(file: keyof typeof SCALE_BLOCK): Rung[] {
+/** A rung is the unit, or a multiple of it; nothing else follows density. */
+const RUNG =
+  /^(?:calc\(var\(--space-unit\) \* \d+(?:\.\d+)?\)|var\(--space-unit\))$/;
+const UNIT = ['--space-unit', '--brand-density-scale'];
+
+/**
+ * Every `--space-*` declaration in a sheet, and the density scale, wherever it
+ * sits, its formula without comments.
+ */
+function scale(file: keyof typeof SCALE_BLOCK): Rung[] {
   const css = readFileSync(join(here, file), 'utf8');
   const found: Rung[] = [];
   const walk = (
@@ -56,12 +66,12 @@ function rungs(file: keyof typeof SCALE_BLOCK): Rung[] {
           .trim();
         walk(node.block.children, [...where, selector]);
       } else if (
-        node.property.startsWith('--space-') &&
-        node.property !== '--space-unit'
+        node.property.startsWith('--space-') ||
+        UNIT.includes(node.property)
       ) {
         found.push({
           name: node.property,
-          formula: node.value.trim(),
+          formula: node.value.replace(/\/\*[\s\S]*?\*\//g, '').trim(),
           where: where.join(' > '),
         });
       }
@@ -75,20 +85,40 @@ describe('spacing scale', () => {
   test.each(
     Object.entries(SCALE_BLOCK) as [keyof typeof SCALE_BLOCK, string][]
   )('%s declares every rung once, in its one scale block', (file, block) => {
-    const all = rungs(file);
+    const all = scale(file);
     expect(all.length).toBeGreaterThan(20);
     expect(all.filter((r) => r.where !== block)).toEqual([]);
     const names = all.map((r) => r.name);
     expect(names.filter((n, i) => names.indexOf(n) !== i)).toEqual([]);
   });
 
+  test('the org scope derives its own unit from the org’s density', () => {
+    const formula = (file: keyof typeof SCALE_BLOCK, name: string) =>
+      scale(file).find((r) => r.name === name)?.formula;
+    expect(formula('spacing.css', '--space-unit')).toBe(
+      'calc(0.25rem * var(--brand-density-scale, 1))'
+    );
+    expect(formula('org-brand.css', '--brand-density-scale')).toBe(
+      'var(--brand-density, 1)'
+    );
+    expect(formula('org-brand.css', '--space-unit')).toBe(
+      'calc(0.25rem * var(--brand-density-scale))'
+    );
+  });
+
   test('the org scope re-declares every :root rung, formula for formula', () => {
-    const root = new Map(rungs('spacing.css').map((r) => [r.name, r.formula]));
-    const org = new Map(rungs('org-brand.css').map((r) => [r.name, r.formula]));
-    // A rung not built on the unit cannot follow density, so only zero may be one.
-    const constant = [...root].filter(([, f]) => !f.includes('--space-unit'));
-    expect(constant).toEqual([['--space-0', '0px']]);
+    const rungs = (file: keyof typeof SCALE_BLOCK) =>
+      new Map(
+        scale(file)
+          .filter((r) => !UNIT.includes(r.name))
+          .map((r) => [r.name, r.formula])
+      );
+    const root = rungs('spacing.css');
+    const org = rungs('org-brand.css');
+    // Zero needs no density; every other rung is a multiple of the unit.
+    expect(root.get('--space-0')).toBe('0px');
     root.delete('--space-0');
+    expect([...root].filter(([, f]) => !RUNG.test(f))).toEqual([]);
     expect(Object.fromEntries(org)).toEqual(Object.fromEntries(root));
   });
 });
