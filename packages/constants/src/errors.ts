@@ -28,6 +28,9 @@ export const ERROR_CODES = {
   TIER_REQUIRED_TO_PUBLISH: 'TIER_REQUIRED_TO_PUBLISH',
   CREATOR_CONNECT_REQUIRED: 'CREATOR_CONNECT_REQUIRED',
   CONTENT_NOT_FOUND: 'CONTENT_NOT_FOUND',
+  // A cancel of a publish-when-ready schedule that came too late: the piece
+  // went live first (Codex-a6ofh.2.7), so the editor says that, not "cancelled".
+  CONTENT_ALREADY_LIVE: 'CONTENT_ALREADY_LIVE',
   VALIDATION_ERROR: 'VALIDATION_ERROR',
   INTERNAL_ERROR: 'INTERNAL_ERROR',
   NOT_FOUND: 'NOT_FOUND',

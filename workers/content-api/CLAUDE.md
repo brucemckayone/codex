@@ -13,7 +13,8 @@ Content CRUD, media lifecycle, access control, and streaming. The largest worker
 | GET | `/api/content/:id` | `auth: 'required'` | any | Get own content by ID |
 | PATCH | `/api/content/:id` | `auth: 'required'` | creator, admin | Update content |
 | GET | `/api/content` | `auth: 'required'` | any | List own content (paginated) |
-| POST | `/api/content/:id/publish` | `auth: 'required'` | creator, admin | Publish; bumps org cache |
+| POST | `/api/content/:id/publish` | `auth: 'required'` | creator, admin | Publish; bumps org cache. `?whenReady=true` (`publishContentQuerySchema`, Codex-a6ofh.2.7): media still on its way SCHEDULES it instead (returns the draft with `publishRequestedAt` set) and bumps nothing |
+| DELETE | `/api/content/:id/publish-request` | `auth: 'required'` | creator, admin | Cancel a publish-when-ready schedule; the draft stays a draft; bumps nothing. 409 `CONTENT_ALREADY_LIVE` if it went live first |
 | POST | `/api/content/:id/unpublish` | `auth: 'required'` | creator, admin | Unpublish; bumps org cache |
 | DELETE | `/api/content/:id` | `auth: 'required'` | creator, admin | Soft delete; `strict` rate limit; 204 |
 | POST | `/api/content/:id/thumbnail` | `auth: 'required'` | creator, admin | Upload thumbnail (multipart) |
@@ -99,6 +100,8 @@ fetcher. All three log `r2_public_base.missing` on every request with no base
    → workerFetch (HMAC) to media-api /internal/media/:id/transcode (via waitUntil)
 4. RunPod transcodes → media-api webhook → status: ready
 5. POST /api/content/:id/publish  (requires all media ready)
+   or ?whenReady=true while it is on its way: scheduled (Codex-a6ofh.2.7);
+   the media-ready trigger publishes it later (Codex-a6ofh.2.8)
 ```
 
 ### Streaming URL Generation

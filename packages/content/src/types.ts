@@ -213,7 +213,8 @@ export type PublicMediaItemSource = Pick<
 
 /**
  * A catalogue row any viewer may read: the content row without its sales count
- * (`CATALOGUE_CONTENT_COLUMNS`), its creator without an email, and the
+ * or a draft's publish-when-ready state (`CATALOGUE_CONTENT_COLUMNS`; the two
+ * lists must match), its creator without an email, and the
  * projected org and media item. `list({ scope: 'browse' })` returns these
  * (Codex-1bdx0); `listPublic` adds the topic slugs. The org and creator are
  * already their wire shapes (`@codex/shared-types`); the media item still holds
@@ -221,7 +222,12 @@ export type PublicMediaItemSource = Pick<
  */
 export type CatalogueContentRow = Omit<
   ContentWithRelations,
-  'mediaItem' | 'organization' | 'creator' | 'purchaseCount'
+  | 'mediaItem'
+  | 'organization'
+  | 'creator'
+  | 'purchaseCount'
+  | 'publishRequestedAt'
+  | 'publishBlockedReason'
 > & {
   mediaItem: PublicMediaItemSource | null;
   organization: PublicContentOrganization | null;
@@ -274,6 +280,8 @@ export type UpdateContentResponse = SingleItemResponse<Content>;
  * Returns published content item
  */
 export type PublishContentResponse = SingleItemResponse<Content>;
+/** DELETE /api/content/:id/publish-request (Codex-a6ofh.2.7). */
+export type CancelPublishRequestResponse = SingleItemResponse<Content>;
 
 /**
  * Response for POST /api/content/:id/unpublish

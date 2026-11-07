@@ -76,7 +76,7 @@
   import { extractPlainText } from '@codex/validation';
   import { canBeSold } from '@codex/constants';
   import { updateLocalProgress } from '$lib/collections/progress';
-  import type { ContentWithRelations } from '$lib/types';
+  import type { CatalogueHiddenField, ContentWithRelations } from '$lib/types';
   import {
     describePlanPaywall,
     planPaywallCopy,
@@ -109,10 +109,10 @@
   };
   // No `organization`: this view never reads it, and the public API sends
   // only four of its fields (Codex-567de).
-  // No `purchaseCount`: the public and browse lists never send it.
+  // No `CatalogueHiddenField`: the public and browse lists never send them.
   type ContentDetail = Omit<
     ContentWithRelations,
-    'mediaItem' | 'organization' | 'purchaseCount'
+    'mediaItem' | 'organization' | CatalogueHiddenField
   > & {
     mediaItem?: ContentDetailMedia | null;
   };

@@ -18,6 +18,7 @@ import {
   createSanitizedStringSchema,
   createSlugSchema,
   priceCentsSchema,
+  queryFlagSchema,
   urlSchema,
   userIdSchema,
   uuidSchema,
@@ -808,6 +809,15 @@ export const sortOrderEnum = z.enum(['asc', 'desc']);
 export const TOPIC_SLUG_MAX = 120;
 
 /**
+ * POST /api/content/:id/publish's query (Codex-a6ofh.2.7, Publish when
+ * ready). `whenReady=true` schedules the publish while its media is still on
+ * its way; absent or `false` publishes now.
+ */
+export const publishContentQuerySchema = z.object({
+  whenReady: queryFlagSchema.optional().transform((value) => value === true),
+});
+
+/**
  * Content query/filter schema
  * Used for listing and searching content
  * Extends pagination with content-specific filters and sorting
@@ -1010,12 +1020,7 @@ export const publicContentQuerySchema = paginationSchema
     // Creator-flagged featured filter — true returns only featured items,
     // false excludes them. Undefined (default) returns all published items.
     // Accepts boolean or stringified boolean (URL query strings).
-    featured: z
-      .union([
-        z.boolean(),
-        z.enum(['true', 'false']).transform((v) => v === 'true'),
-      ])
-      .optional(),
+    featured: z.union([z.boolean(), queryFlagSchema]).optional(),
   })
   .refine((data) => data.orgId || data.creatorId || data.slug, {
     message: 'One of orgId, creatorId or slug must be provided',

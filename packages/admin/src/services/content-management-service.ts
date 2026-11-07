@@ -12,7 +12,11 @@
 
 import { CacheType, type VersionedCache } from '@codex/cache';
 import { CONTENT_STATUS, PAGINATION } from '@codex/constants';
-import { assertPublishable, type DatabaseTransaction } from '@codex/content';
+import {
+  assertPublishable,
+  type DatabaseTransaction,
+  goLiveColumns,
+} from '@codex/content';
 import {
   MEDIA_ITEM_RESPONSE_COLUMNS,
   schema,
@@ -183,13 +187,9 @@ export class AdminContentManagementService extends BaseService {
         // Publish content
         await tx
           .update(schema.content)
-          .set({
-            status: CONTENT_STATUS.PUBLISHED,
-            publishedAt: new Date(),
-            // Back on sale: clears the departure stamp (Codex-2hxff.64).
-            offSaleAt: null,
-            updatedAt: new Date(),
-          })
+          // The creator's own go-live columns, from the gate's module, so
+          // the two publishes can't drift (Codex-a6ofh.2.7).
+          .set(goLiveColumns())
           .where(inThisOrg);
 
         // Re-fetch with relations for response

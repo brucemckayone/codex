@@ -10,7 +10,9 @@
  */
 
 import {
+  CONTENT_STATUS,
   CONTENT_TYPES,
+  isMediaOnItsWay,
   MEDIA_STATUS,
   ORGANIZATION_STATUS,
   ORGANIZATION_TEAM_ROLES,
@@ -60,7 +62,59 @@ type PublishableRow = Pick<
   | 'isPurchasable'
   | 'isTierGated'
   | 'priceCents'
-> & { mediaItem: Pick<MediaItem, 'id' | 'status'> | null };
+> & { mediaItem: Pick<MediaItem, 'id'> | null };
+
+/**
+ * No publish-when-ready schedule, and no reason the last one didn't go live
+ * (Codex-a6ofh.2.7): written by a cancel, by a save that leaves nothing to
+ * wait for (`dropsSchedule` in `ContentService.update`), and with every
+ * go-live (`goLiveColumns`).
+ */
+export const NO_PUBLISH_REQUEST = {
+  publishRequestedAt: null,
+  publishBlockedReason: null,
+} as const;
+
+/**
+ * The columns a publish writes as the piece goes live, for a creator's
+ * publish and the platform owner's alike (`ContentService.publish`,
+ * `publishContent` in @codex/admin), so the two can't drift: live now, back
+ * on sale (no departure stamp, Codex-2hxff.64) and no schedule left.
+ */
+export function goLiveColumns(now = new Date()) {
+  return {
+    status: CONTENT_STATUS.PUBLISHED,
+    publishedAt: now,
+    offSaleAt: null,
+    ...NO_PUBLISH_REQUEST,
+    updatedAt: now,
+  };
+}
+
+/** How a publish treats media still on its way to ready. */
+export interface PublishOptions {
+  /**
+   * Publish when ready (Codex-a6ofh.2.7, data-design §3.7): media on its way
+   * (`isMediaOnItsWay`) doesn't refuse, and every other rule still does.
+   */
+  whenReady?: boolean;
+  /**
+   * The media-ready trigger's publish (Codex-a6ofh.2.8): `ContentService.publish`
+   * goes live only if the row is, under its lock, still scheduled on this
+   * media item. A cancel, a removal or a swap that committed after the
+   * trigger found the row wins, and the row comes back unchanged. A row
+   * already live comes back `published`, as for any publish, the same as
+   * one this call put live: a caller acting once per go-live must tell the
+   * two apart itself.
+   */
+  fromSchedule?: { mediaItemId: string };
+}
+
+/**
+ * What the gate found: the piece may go live `now`, or (only with
+ * `whenReady`) passes every rule but waits on its media.
+ */
+export type PublishReadiness = 'now' | 'when-media-ready';
 
 /** What a piece must hold to be live: the row's own fields, no reads. */
 type FilledRow = Pick<
@@ -154,9 +208,14 @@ export function assertSaveKeepsContentFilled(
 
 /**
  * Refuse unless the row may go live. Call it inside the publish transaction,
- * after locking the row FOR NO KEY UPDATE: its media and frame reads lock FOR
- * KEY SHARE, the order update() takes them in. Each refusal carries a
- * `details.code` the editor's checklist maps to a row.
+ * after locking the row FOR NO KEY UPDATE: its media read locks FOR KEY SHARE
+ * (FOR SHARE with `whenReady`, which a media status UPDATE waits on) and its
+ * frame read FOR KEY SHARE, the order update() takes them in. Never run a
+ * publish while a transaction that wrote the media row is still open (the
+ * media-ready trigger, E2.8): with `whenReady` it waits on that write's lock
+ * for good; without, it reads the status from before the write and refuses
+ * `MEDIA_NOT_READY`. Each refusal carries a `details.code` the editor's
+ * checklist maps to a row.
  *
  * In order: the creator is on the org's team (when the row has an org), then
  * what the row holds (`assertContentFilled`: media attached, an article's
@@ -170,7 +229,8 @@ export function assertSaveKeepsContentFilled(
  * @throws {MediaNotFoundError} Its media item is another creator's
  *   (Codex-vmi6m)
  * @throws {MediaDeletedError} Its media item was deleted (Codex-6sbn1)
- * @throws {MediaNotReadyError} Its media is still processing, or failed
+ * @throws {MediaNotReadyError} Its media is still processing, or failed.
+ *   With `whenReady`, only media not on its way: failed, or a stalled upload
  * @throws {ContentBodyRequiredError} An article with nothing to read
  * @throws {PriceRequiredToPublishError} For sale with no price, or under £1
  * @throws {ThumbnailMediaDeletedError} Its thumbnail is a frame of a deleted
@@ -178,11 +238,14 @@ export function assertSaveKeepsContentFilled(
  * @throws {TierRequiredToPublishError} Subscriber content in no tier
  * @throws {CreatorPayoutsRequiredError} It earns money and its creator's
  *   Connect account can't take payouts
+ * @returns `'when-media-ready'` when, with `whenReady`, the media is still on
+ *   its way and nothing else refused; `'now'` otherwise
  */
 export async function assertPublishable(
   tx: DatabaseTransaction,
-  row: PublishableRow
-): Promise<void> {
+  row: PublishableRow,
+  options: PublishOptions = {}
+): Promise<PublishReadiness> {
   // First, so a creator who has left the org learns nothing else about the
   // row's state from the refusal.
   if (row.organizationId) {
@@ -190,42 +253,7 @@ export async function assertPublishable(
   }
 
   assertContentFilled(row);
-
-  if (
-    row.contentType === CONTENT_TYPES.VIDEO ||
-    row.contentType === CONTENT_TYPES.AUDIO
-  ) {
-    // assertContentFilled saw a media id, and its foreign key means the join
-    // is there; this narrows it.
-    if (!row.mediaItem) {
-      throw new MediaRequiredToPublishError(row.id, row.contentType);
-    }
-    // A draft keeps its link to a deleted item (Codex-6sbn1), and must not
-    // go live on it. A locking read, so a delete running now is ordered
-    // against this publish: one that committed first is seen here; one that
-    // waits on this lock then sees a published use, and refuses. Scoped to
-    // the content's creator: a row that took another creator's item through
-    // the old PATCH hole (Codex-vmi6m) must not go live streaming their file.
-    const [media] = await tx
-      .select({ deletedAt: mediaItems.deletedAt })
-      .from(mediaItems)
-      .where(
-        and(
-          eq(mediaItems.id, row.mediaItem.id),
-          eq(mediaItems.creatorId, row.creatorId)
-        )
-      )
-      .for('key share');
-    if (!media) {
-      throw new MediaNotFoundError(row.mediaItem.id);
-    }
-    if (media.deletedAt) {
-      throw new MediaDeletedError(row.id);
-    }
-    if (row.mediaItem.status !== MEDIA_STATUS.READY) {
-      throw new MediaNotReadyError(row.mediaItem.id, row.mediaItem.status);
-    }
-  }
+  const readiness = await mediaReadiness(tx, row, options);
 
   // Any type: written content can show a video's frame too, and one of the
   // video it links but doesn't play, which nothing above checks.
@@ -257,6 +285,76 @@ export async function assertPublishable(
   // or not (Codex-2hxff.14 — the old gate only saw a price on a row marked
   // purchasable).
   await assertCreatorCanBePaid(tx, row.creatorId, row);
+  return readiness;
+}
+
+/**
+ * A video or audio piece's media: the creator's own, not deleted, and ready,
+ * or with `whenReady` on its way (`'when-media-ready'`). Other types play no
+ * media, so `'now'`.
+ */
+async function mediaReadiness(
+  tx: DatabaseTransaction,
+  row: PublishableRow,
+  options: PublishOptions
+): Promise<PublishReadiness> {
+  if (
+    row.contentType !== CONTENT_TYPES.VIDEO &&
+    row.contentType !== CONTENT_TYPES.AUDIO
+  ) {
+    return 'now';
+  }
+  // assertContentFilled saw a media id, and its foreign key means the join is
+  // there; this narrows it.
+  if (!row.mediaItem) {
+    throw new MediaRequiredToPublishError(row.id, row.contentType);
+  }
+  // A draft keeps its link to a deleted item (Codex-6sbn1), and must not
+  // go live on it. A locking read, so a delete running now is ordered
+  // against this publish: one that committed first is seen here; one that
+  // waits on this lock then sees a published use, and refuses. Scoped to
+  // the content's creator: a row that took another creator's item through
+  // the old PATCH hole (Codex-vmi6m) must not go live streaming their file.
+  // Publish when ready takes FOR SHARE, which a status UPDATE waits on: a
+  // transcode that finishes now either commits first and is read as ready
+  // (live at once), or waits for the schedule to commit, so the media-ready
+  // trigger it fires finds it. Under KEY SHARE the two cross unseen, and
+  // the schedule waits on media already ready (review, Codex-a6ofh.2.7).
+  const [media] = await tx
+    .select({
+      deletedAt: mediaItems.deletedAt,
+      status: mediaItems.status,
+      createdAt: mediaItems.createdAt,
+    })
+    .from(mediaItems)
+    .where(
+      and(
+        eq(mediaItems.id, row.mediaItem.id),
+        eq(mediaItems.creatorId, row.creatorId)
+      )
+    )
+    .for(options.whenReady ? 'share' : 'key share');
+  if (!media) {
+    throw new MediaNotFoundError(row.mediaItem.id);
+  }
+  if (media.deletedAt) {
+    throw new MediaDeletedError(row.id);
+  }
+  if (media.status === MEDIA_STATUS.READY) {
+    return 'now';
+  }
+  // Publish when ready waits only for media that will get there on its own;
+  // the caller's later rules still run, so a schedule is never a refusal
+  // postponed.
+  const onItsWay = isMediaOnItsWay(media);
+  if (!options.whenReady || !onItsWay) {
+    throw new MediaNotReadyError(
+      row.mediaItem.id,
+      media.status,
+      media.status === MEDIA_STATUS.UPLOADING && !onItsWay
+    );
+  }
+  return 'when-media-ready';
 }
 
 /**

@@ -293,4 +293,30 @@ describe('AdminContentManagementService.publishContent media gate', () => {
     await service.publishContent(orgId, draft);
     expect(await statusOf(draft)).toBe(CONTENT_STATUS.PUBLISHED);
   });
+
+  // Codex-a6ofh.2.7: a creator's publish-when-ready schedule ends when the
+  // piece goes live, whichever path publishes it.
+  it("an admin publish clears a scheduled draft's schedule and blocked reason", async () => {
+    const draft = await seedContent({
+      mediaItemId: await seedMedia(creatorId),
+      publishRequestedAt: new Date('2026-11-01T00:00:00Z'),
+      publishBlockedReason: 'CREATOR_CONNECT_REQUIRED',
+    });
+
+    await service.publishContent(orgId, draft);
+
+    const [row] = await db
+      .select({
+        status: contentTable.status,
+        publishRequestedAt: contentTable.publishRequestedAt,
+        publishBlockedReason: contentTable.publishBlockedReason,
+      })
+      .from(contentTable)
+      .where(eq(contentTable.id, draft));
+    expect(row).toEqual({
+      status: CONTENT_STATUS.PUBLISHED,
+      publishRequestedAt: null,
+      publishBlockedReason: null,
+    });
+  });
 });

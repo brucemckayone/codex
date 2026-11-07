@@ -326,6 +326,8 @@ export function createTestContent(overrides: Partial<Content> = {}): Content {
     status: CONTENT_STATUS.DRAFT,
     publishedAt: null,
     offSaleAt: null,
+    publishRequestedAt: null,
+    publishBlockedReason: null,
     viewCount: 0,
     purchaseCount: 0,
     shaderPreset: null,

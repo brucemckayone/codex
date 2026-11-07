@@ -17,8 +17,9 @@
  */
 
 import { CacheType, VersionedCache } from '@codex/cache';
-import { AUTH_ROLES } from '@codex/constants';
+import { AUTH_ROLES, CONTENT_STATUS } from '@codex/constants';
 import type {
+  CancelPublishRequestResponse,
   ContentInvalidationReason,
   ContentResponse,
   CreateContentResponse,
@@ -47,7 +48,10 @@ import type {
   ContentPortalUses,
   HonoEnv,
 } from '@codex/shared-types';
-import { createIdParamsSchema } from '@codex/validation';
+import {
+  createIdParamsSchema,
+  publishContentQuerySchema,
+} from '@codex/validation';
 import {
   invalidateOrgSlugCache,
   multipartProcedure,
@@ -425,10 +429,12 @@ app.get(
 
 /**
  * POST /api/content/:id/publish
- * Publish content
+ * Publish content, or with `?whenReady=true` (Codex-a6ofh.2.7) schedule it to go
+ * live once its media, still on its way, is ready
  *
  * Security: Creator/Admin only, API rate limit (100 req/min)
- * @returns {PublishContentResponse}
+ * @returns {PublishContentResponse} The published content, or the scheduled
+ *   draft (status `draft`, `publishRequestedAt` set)
  */
 app.post(
   '/:id/publish',
@@ -437,12 +443,16 @@ app.post(
       auth: 'required',
       roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN],
     },
-    input: { params: createIdParamsSchema() },
+    input: { params: createIdParamsSchema(), query: publishContentQuerySchema },
     handler: async (ctx): Promise<PublishContentResponse['data']> => {
       const result = await ctx.services.content.publish(
         ctx.input.params.id,
-        ctx.user.id
+        ctx.user.id,
+        { whenReady: ctx.input.query.whenReady }
       );
+      // A schedule changed nothing public: no version to bump, no library
+      // to fan out to.
+      if (result.status !== CONTENT_STATUS.PUBLISHED) return result;
       bumpOrgContentVersion(
         ctx.env,
         ctx.executionCtx,
@@ -467,6 +477,32 @@ app.post(
 
       return result;
     },
+  })
+);
+
+/**
+ * DELETE /api/content/:id/publish-request
+ * Cancel a publish-when-ready schedule (Codex-a6ofh.2.7): the draft stays a
+ * draft. One with neither a schedule nor a blocked reason comes back as it
+ * is; one that went live first is a 409 (`CONTENT_ALREADY_LIVE`), never a
+ * "cancelled".
+ *
+ * Security: Creator/Admin only, API rate limit (100 req/min)
+ * @returns {CancelPublishRequestResponse}
+ */
+app.delete(
+  '/:id/publish-request',
+  procedure({
+    policy: {
+      auth: 'required',
+      roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN],
+    },
+    input: { params: createIdParamsSchema() },
+    handler: async (ctx): Promise<CancelPublishRequestResponse['data']> =>
+      ctx.services.content.cancelPublishRequest(
+        ctx.input.params.id,
+        ctx.user.id
+      ),
   })
 );
 

@@ -69,6 +69,18 @@ export interface ContentWithRelations
   categoryIds?: string[];
 }
 
+/**
+ * The content columns the public catalogue never sends: the sales count
+ * (owner, 2026-10-26) and the publish-when-ready schedule (Codex-a6ofh.2.7).
+ * content-api leaves them out with `CATALOGUE_CONTENT_COLUMNS`
+ * (@codex/content). Every type for a public or browse row omits this set, so
+ * a newly hidden column is one edit here.
+ */
+export type CatalogueHiddenField =
+  | 'purchaseCount'
+  | 'publishRequestedAt'
+  | 'publishBlockedReason';
+
 /** As content-api serves it: never the transcoder's raw detail. */
 export interface MediaItemWithRelations extends ServedMediaItem {
   /** Its poster on the CDN: content-api resolves it on the list and the single read. */

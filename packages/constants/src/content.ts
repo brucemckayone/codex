@@ -70,6 +70,16 @@ export const MEDIA_UPLOAD_STALLED_AFTER_MS =
   (MEDIA_UPLOAD_URL_TTL_SECONDS + 60 * 60) * 1000;
 
 /**
+ * When an upload begun at `createdAt` reads as stopped (epoch ms): the one
+ * JS form of {@link MEDIA_UPLOAD_STALLED_AFTER_MS}'s line, for the studio's
+ * tiles and picker and the publish gate alike. The SQL form is
+ * `stalledUpload` in @codex/content's media service.
+ */
+export function uploadStallsAt(createdAt: Date | string): number {
+  return new Date(createdAt).getTime() + MEDIA_UPLOAD_STALLED_AFTER_MS;
+}
+
+/**
  * The media library's status groups (Codex-a6ofh.1.4, data-design §1.1),
  * defined once so the worker's `status` filter and the web's tiles cannot
  * drift. `attention` is also every upload stalled past
@@ -98,6 +108,29 @@ export const MEDIA_STATUS_GROUPS = {
 } as const;
 
 export type MediaStatusGroup = keyof typeof MEDIA_STATUS_GROUPS;
+
+/**
+ * Media on its way to ready (Codex-a6ofh.2.7, Publish when ready): an upload
+ * not yet stalled ({@link MEDIA_UPLOAD_STALLED_AFTER_MS} from creation, the
+ * line the media library's `attention` filter draws), or `processing`. A
+ * publish asked for "when ready" waits for it; a `failed` item or a stalled
+ * upload refuses as before, because nothing makes either ready on its own
+ * and a schedule on one would wait for ever (owner, 2026-11-07).
+ */
+export function isMediaOnItsWay(
+  media: { status: string; createdAt: Date | string },
+  now: Date = new Date()
+): boolean {
+  if (
+    (MEDIA_STATUS_GROUPS.processing as readonly string[]).includes(media.status)
+  ) {
+    return true;
+  }
+  return (
+    media.status === MEDIA_STATUS.UPLOADING &&
+    uploadStallsAt(media.createdAt) >= now.getTime()
+  );
+}
 
 /** A library page: divides into 4, 3 and 2 columns (data-design §1.1). */
 export const MEDIA_LIBRARY_PAGE_SIZE = 24;

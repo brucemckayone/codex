@@ -54,13 +54,17 @@ export class MediaNotFoundError extends NotFoundError {
 
 /**
  * Media that isn't ready to play: still processing, or failed. `mediaStatus`
- * tells the two apart, since one will finish and the other never will.
+ * tells the two apart, since one will finish and the other never will, and
+ * `stalled` marks an upload that stopped (`uploading` past its stall line),
+ * which won't either: the editor asks for the file again rather than to wait
+ * (Codex-a6ofh.2.7).
  */
 export class MediaNotReadyError extends BusinessLogicError {
-  constructor(mediaItemId: string, mediaStatus?: string) {
+  constructor(mediaItemId: string, mediaStatus?: string, stalled = false) {
     super('Media item not ready for publishing', {
       mediaItemId,
       ...(mediaStatus ? { mediaStatus } : {}),
+      ...(stalled ? { stalled: true } : {}),
       code: ERROR_CODES.MEDIA_NOT_READY,
     });
   }
@@ -211,6 +215,21 @@ export class ContentTypeMismatchError extends BusinessLogicError {
     super('Content type does not match media type', {
       expectedType,
       actualType,
+    });
+  }
+}
+
+/**
+ * A cancel of a publish-when-ready schedule that came too late: the piece
+ * went live first, by the media-ready trigger or another tab (Codex-a6ofh.2.7).
+ * 409 with `details.code: 'CONTENT_ALREADY_LIVE'`, never a 200 that reads as
+ * "cancelled".
+ */
+export class ContentAlreadyLiveError extends ConflictError {
+  constructor(contentId: string) {
+    super('This is already live, so there is no publish to cancel.', {
+      contentId,
+      code: ERROR_CODES.CONTENT_ALREADY_LIVE,
     });
   }
 }

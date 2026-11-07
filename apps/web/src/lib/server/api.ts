@@ -189,6 +189,7 @@ import type { SellPreview } from '$lib/page-builder/render';
 // OrgMemberItem is in $lib/types (not here) so components can import it
 // without triggering the vite server-only module guard.
 import type {
+  CatalogueHiddenField,
   CheckoutResponse,
   ConnectAccountStatusResponse,
   ConnectDashboardResponse,
@@ -231,8 +232,8 @@ export type MyStripeBalance = Awaited<
  * is four fields, never the organizations row (Codex-567de), and the creator
  * is its id and name. All three are the `@codex/shared-types` contract the
  * worker's mapper is typed against; reading anything else off them needs a
- * worker change. The row carries no sales count (`purchaseCount`): the lists
- * leave it out (owner, 2026-10-26). `listPublic` attaches
+ * worker change. The row carries none of the `CatalogueHiddenField` columns
+ * (the sales count, the publish schedule). `listPublic` attaches
  * `categorySlugs`; `content_type` is a `varchar`
  * column (so `ContentWithRelations` widens it to `string`) but is constrained
  * to its enum, so we narrow it here. The SPEC §6.1 access-policy flags
@@ -251,7 +252,11 @@ export type MyStripeBalance = Awaited<
  */
 export type PublicContentListItem = Omit<
   ContentWithRelations,
-  'mediaItem' | 'organization' | 'creator' | 'contentType' | 'purchaseCount'
+  | 'mediaItem'
+  | 'organization'
+  | 'creator'
+  | 'contentType'
+  | CatalogueHiddenField
 > & {
   mediaItem: PublicMediaItem | null;
   organization: PublicContentOrganization | null;

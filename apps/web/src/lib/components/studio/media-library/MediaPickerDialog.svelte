@@ -39,7 +39,8 @@
   import { type PickerSegment, pickerListArgs } from './picker-args';
   import { chosenView, type Following, followUpload, type PickerField } from './picker-state';
   import { rejectionReason, tileReason } from './tile-copy';
-  import { stallsAt, tilePill } from './tile-state';
+  import { uploadStallsAt } from '@codex/constants';
+  import { tilePill } from './tile-state';
   import { watchMediaItem } from './watch-media-item.svelte';
 
   type MediaKind = 'video' | 'audio';
@@ -187,7 +188,7 @@
   $effect(() => {
     const item = chosen?.current;
     if (item?.status !== 'uploading' || !item.createdAt) return;
-    const at = stallsAt(item.createdAt);
+    const at = uploadStallsAt(item.createdAt);
     const wait = at - Date.now();
     // Past setTimeout's limit a browser fires at once, which the clamp would
     // turn into a false "stopped": arm nothing; the next re-read checks again.

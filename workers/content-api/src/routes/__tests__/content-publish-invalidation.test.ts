@@ -63,6 +63,7 @@ function freshIds() {
 
 const contentSpies = {
   publish: vi.fn(),
+  cancelPublishRequest: vi.fn(),
   unpublish: vi.fn(),
   updateReportingDroppedThumbnail: vi.fn(),
   // The registry calls setCache() on the constructed instance whenever CACHE_KV
@@ -124,13 +125,14 @@ function buildApp() {
   return app;
 }
 
-async function publish(contentId: string): Promise<Response> {
+async function publish(contentId: string, query = ''): Promise<Response> {
   const app = buildApp();
   const ec = createExecutionContext();
   const res = await app.fetch(
-    new Request(`http://content-api.test/api/content/${contentId}/publish`, {
-      method: 'POST',
-    }),
+    new Request(
+      `http://content-api.test/api/content/${contentId}/publish${query}`,
+      { method: 'POST' }
+    ),
     testEnv,
     ec
   );
@@ -156,6 +158,20 @@ async function save(contentId: string): Promise<Response> {
 
 const versionKey = (id: string) => `cache:version:${id}`;
 
+async function cancel(contentId: string): Promise<Response> {
+  const ec = createExecutionContext();
+  const res = await buildApp().fetch(
+    new Request(
+      `http://content-api.test/api/content/${contentId}/publish-request`,
+      { method: 'DELETE' }
+    ),
+    testEnv,
+    ec
+  );
+  await waitOnExecutionContext(ec);
+  return res;
+}
+
 /**
  * `CACHE_KV` is optional on `HonoEnv` but IS bound in `env=test`. Narrowed here
  * with a THROW rather than `!` or `?.` on purpose: `bumpOrgContentVersion`
@@ -176,6 +192,19 @@ function cacheKv(): NonNullable<typeof env.CACHE_KV> {
   return kv;
 }
 
+/** Nothing was staled: none of the four keys `bumpOrgContentVersion` names, no library fan-out. */
+async function untouched(ids: { orgId: string; slug: string }) {
+  for (const key of [
+    `org:${ids.orgId}:content`,
+    ids.slug,
+    `categories:org:${ids.orgId}`,
+    `org:${ids.orgId}:journeys`,
+  ]) {
+    expect(await cacheKv().get(versionKey(key))).toBeNull();
+  }
+  expect(invalidateContentAccess).not.toHaveBeenCalled();
+}
+
 describe('POST /:id/publish fans the version bump out', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -185,6 +214,7 @@ describe('POST /:id/publish fans the version bump out', () => {
     const { contentId, orgId, slug } = freshIds();
     resolvedSlug = slug;
     contentSpies.publish.mockResolvedValue({
+      status: 'published',
       id: contentId,
       organizationId: orgId,
     });
@@ -207,6 +237,7 @@ describe('POST /:id/publish fans the version bump out', () => {
     const { contentId, orgId, slug } = freshIds();
     resolvedSlug = slug;
     contentSpies.publish.mockResolvedValue({
+      status: 'published',
       id: contentId,
       organizationId: orgId,
     });
@@ -235,6 +266,7 @@ describe('POST /:id/publish fans the version bump out', () => {
     const b = freshIds();
     resolvedSlug = a.slug;
     contentSpies.publish.mockResolvedValue({
+      status: 'published',
       id: a.contentId,
       organizationId: a.orgId,
     });
@@ -254,6 +286,7 @@ describe('POST /:id/publish fans the version bump out', () => {
     const { contentId } = freshIds();
     resolvedSlug = '';
     contentSpies.publish.mockResolvedValue({
+      status: 'published',
       id: contentId,
       organizationId: null,
     });
@@ -290,15 +323,7 @@ describe('PATCH /:id fans out only for a piece that has been live', () => {
 
     expect((await save(ids.contentId)).status).toBe(200);
 
-    for (const key of [
-      `org:${ids.orgId}:content`,
-      ids.slug,
-      `categories:org:${ids.orgId}`,
-      `org:${ids.orgId}:journeys`,
-    ]) {
-      expect(await cacheKv().get(versionKey(key))).toBeNull();
-    }
-    expect(invalidateContentAccess).not.toHaveBeenCalled();
+    await untouched(ids);
   });
 
   // Read from the service, not the returned row: moving a piece out of its
@@ -318,5 +343,80 @@ describe('PATCH /:id fans out only for a piece that has been live', () => {
         reason: 'content_updated',
       })
     );
+  });
+});
+
+// Publish when ready (Codex-a6ofh.2.7): a schedule changes nothing public, so
+// the route must not stale a single cache or library for it.
+describe('Publish when ready on the routes', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('a scheduled publish asks with whenReady, then bumps no key and fans out nothing', async () => {
+    const ids = freshIds();
+    resolvedSlug = ids.slug;
+    contentSpies.publish.mockResolvedValue({
+      id: ids.contentId,
+      organizationId: ids.orgId,
+      status: 'draft',
+      publishRequestedAt: new Date().toISOString(),
+    });
+
+    const res = await publish(ids.contentId, '?whenReady=true');
+
+    expect(res.status).toBe(200);
+    expect(contentSpies.publish).toHaveBeenCalledWith(ids.contentId, USER.id, {
+      whenReady: true,
+    });
+    await untouched(ids);
+  });
+
+  it('a plain publish asks for no schedule', async () => {
+    const ids = freshIds();
+    resolvedSlug = ids.slug;
+    contentSpies.publish.mockResolvedValue({
+      id: ids.contentId,
+      organizationId: ids.orgId,
+      status: 'published',
+    });
+
+    await publish(ids.contentId);
+
+    expect(contentSpies.publish).toHaveBeenCalledWith(ids.contentId, USER.id, {
+      whenReady: false,
+    });
+  });
+
+  it('a mistyped flag is refused before the service is asked', async () => {
+    const { contentId } = freshIds();
+
+    const res = await publish(contentId, '?whenReady=yes');
+
+    expect(res.status).toBe(400);
+    expect(contentSpies.publish).not.toHaveBeenCalled();
+  });
+
+  it('DELETE /:id/publish-request cancels it, and bumps nothing', async () => {
+    const ids = freshIds();
+    resolvedSlug = ids.slug;
+    contentSpies.cancelPublishRequest.mockResolvedValue({
+      id: ids.contentId,
+      organizationId: ids.orgId,
+      status: 'draft',
+      publishRequestedAt: null,
+    });
+
+    const res = await cancel(ids.contentId);
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      data: { id: ids.contentId, publishRequestedAt: null },
+    });
+    expect(contentSpies.cancelPublishRequest).toHaveBeenCalledWith(
+      ids.contentId,
+      USER.id
+    );
+    await untouched(ids);
   });
 });

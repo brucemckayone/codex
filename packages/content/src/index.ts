@@ -78,6 +78,7 @@ export {
   ContentService,
   type ContentServiceConfig,
   DEFAULT_MAX_LIBRARY_FANOUT,
+  goLiveColumns,
   invalidateContentAccess,
   invalidateOrgMembership,
   invalidatePlanSubscriberLibraries,
@@ -97,6 +98,7 @@ export {
 
 export type { ServiceConfig } from '@codex/service-errors';
 export type {
+  CancelPublishRequestResponse,
   Content,
   ContentFilters,
   ContentListResponse,
@@ -143,6 +145,7 @@ export {
   CategoryNotFoundError,
   CategorySlugConflictError,
   ConflictError,
+  ContentAlreadyLiveError,
   ContentBodyRequiredError,
   ContentNotFoundError,
   ContentServiceError,

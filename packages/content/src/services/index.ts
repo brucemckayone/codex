@@ -42,4 +42,4 @@ export {
 // Media Item Service
 export { MediaItemService } from './media-service';
 // Publish gate (Codex-a6ofh.2.1): shared with @codex/admin's publish
-export { assertPublishable } from './publish-gate';
+export { assertPublishable, goLiveColumns } from './publish-gate';
