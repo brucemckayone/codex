@@ -5,21 +5,29 @@
  * builder renders it over an organisation whose font the layout owns. A
  * picker with no font of its own "reverted" to nothing when its dropdown
  * closed, and stripped the organisation's font until a reload. Each preview
- * now puts back what it found. Nothing here owns the font, so a pick leaves
- * the organisation's: the owner (the editor's preview, the page) writes it.
- * Opened from the keyboard and closed by a second click: the test DOM
- * cannot drive Melt's pointerdown path, and its Escape does not reach Melt.
+ * now puts back what it found, however it ends. A pick is the owner's to
+ * write, and the preview ends before the pick reaches it: an owner writes it
+ * in the preview's own spelling, so a preview still open then would put the
+ * old font back over it. Which runs first, the picker's close or the store's
+ * write, is not the picker's to know, so the owner here writes at once, the
+ * worst case; the brand editor's own store is checked as well. Opened from the keyboard and closed by a second click: the test
+ * DOM cannot drive Melt's pointerdown path, and its Escape does not reach Melt.
  */
 
 import { afterEach, describe, expect, test, vi } from 'vitest';
+import type { BrandEditorState } from '$lib/brand-editor';
+import { brandEditor } from '$lib/brand-editor';
+import { withFallback } from '$lib/brand-editor/font-fallbacks';
 import {
   flushSync,
   mount,
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
 import FontPicker from './FontPicker.svelte';
+import BrandEditorTypography from './levels/BrandEditorTypography.svelte';
 
 const ORG_FONT = "'Lobster', 'Lobster-fallback'";
+const ORG_ID = '00000000-0000-4000-8000-000000000000';
 
 describe('the font picker leaves the organisation font as it found it', () => {
   let component: ReturnType<typeof mount> | null = null;
@@ -29,21 +37,36 @@ describe('the font picker leaves the organisation font as it found it', () => {
       unmount(component);
       component = null;
     }
+    brandEditor.close();
     document.body.innerHTML = '';
   });
 
-  function mountOverOrg(onValueChange = vi.fn()) {
+  function orgLayout(): HTMLElement {
     const layout = document.createElement('div');
     layout.className = 'org-layout';
     layout.style.setProperty('--brand-font-body', ORG_FONT);
     document.body.appendChild(layout);
+    return layout;
+  }
+
+  function mountOverOrg() {
+    const layout = orgLayout();
     component = mount(FontPicker, {
       target: layout,
-      props: { mode: 'body', label: 'Body font', value: '', onValueChange },
+      props: {
+        mode: 'body',
+        label: 'Body font',
+        value: '',
+        onValueChange: vi.fn(),
+      },
     });
     flushSync();
+    return pickerIn(layout);
+  }
+
+  function pickerIn(layout: HTMLElement) {
     const trigger = layout.querySelector<HTMLElement>('[role="combobox"]');
-    if (!trigger) throw new Error('FontPicker rendered no trigger');
+    if (!trigger) throw new Error('rendered no font picker');
     const font = () => layout.style.getPropertyValue('--brand-font-body');
     return { trigger, font };
   }
@@ -66,8 +89,11 @@ describe('the font picker leaves the organisation font as it found it', () => {
     expect(trigger.getAttribute('aria-expanded'), 'closed').toBe('false');
   }
 
-  function hoverFirstFont(): HTMLElement {
-    const option = document.querySelector<HTMLElement>('[data-font-family]');
+  /** Hover the first listed font that is none of `except`. */
+  function hoverFont(...except: string[]): HTMLElement {
+    const option = [
+      ...document.querySelectorAll<HTMLElement>('[data-font-family]'),
+    ].find((o) => !except.includes(o.dataset.fontFamily ?? ''));
     if (!option) throw new Error('the open dropdown listed no font');
     option.dispatchEvent(new PointerEvent('pointerenter'));
     flushSync();
@@ -87,23 +113,97 @@ describe('the font picker leaves the organisation font as it found it', () => {
     const { trigger, font } = mountOverOrg();
 
     open(trigger);
-    hoverFirstFont();
+    hoverFont();
     expect(font(), 'previewing').not.toBe(ORG_FONT);
     close(trigger);
 
     expect(font()).toBe(ORG_FONT);
   });
 
-  test('picking the font it previews', () => {
-    const onValueChange = vi.fn();
-    const { trigger, font } = mountOverOrg(onValueChange);
+  test('leaving the list mid-preview, still open', () => {
+    const { trigger, font } = mountOverOrg();
 
     open(trigger);
-    const option = hoverFirstFont();
+    hoverFont();
+    const list = document.querySelector('.font-picker__dropdown');
+    if (!list) throw new Error('the open dropdown rendered no list');
+    list.dispatchEvent(new PointerEvent('pointerleave'));
+    flushSync();
+
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+    expect(font()).toBe(ORG_FONT);
+  });
+
+  test('going away mid-preview, as when its panel closes', () => {
+    const { trigger, font } = mountOverOrg();
+
+    open(trigger);
+    hoverFont();
+    if (component) unmount(component);
+    component = null;
+    flushSync();
+
+    expect(font()).toBe(ORG_FONT);
+  });
+
+  test('picking the font it previews, with an owner that writes it at once', () => {
+    const layout = orgLayout();
+    const props = $state({
+      mode: 'body' as const,
+      label: 'Body font',
+      value: '',
+      onValueChange: (family: string) => {
+        props.value = family;
+        layout.style.setProperty(
+          '--brand-font-body',
+          withFallback(family, `'${family}'`)
+        );
+      },
+    });
+    component = mount(FontPicker, { target: layout, props });
+    flushSync();
+    const { trigger, font } = pickerIn(layout);
+
+    open(trigger);
+    const option = hoverFont('Inter');
+    const picked = option.dataset.fontFamily ?? '';
     option.click();
     flushSync();
 
-    expect(onValueChange).toHaveBeenCalledWith(option.dataset.fontFamily);
-    expect(font()).toBe(ORG_FONT);
+    expect(font()).toBe(withFallback(picked, `'${picked}'`));
+  });
+
+  test("picking with the brand editor's store as owner: the pick lands", () => {
+    const layout = orgLayout();
+    const saved: BrandEditorState = {
+      primaryColor: '#2563EB',
+      secondaryColor: null,
+      accentColor: null,
+      backgroundColor: null,
+      fontBody: 'Lora',
+      fontHeading: null,
+      radius: 0.5,
+      density: 1,
+      logoUrl: null,
+      tokenOverrides: {},
+      darkOverrides: null,
+      darkTokenOverrides: null,
+      heroLayout: 'default',
+    };
+    brandEditor.open(ORG_ID, saved);
+    component = mount(BrandEditorTypography, { target: layout });
+    flushSync();
+    const { trigger, font } = pickerIn(layout);
+    expect(font(), 'the editor previews its pending font').toContain("'Lora'");
+
+    open(trigger);
+    const option = hoverFont('Lora');
+    const picked = option.dataset.fontFamily;
+    option.click();
+    flushSync();
+
+    expect(brandEditor.pending?.fontBody).toBe(picked);
+    expect(font()).toContain(`'${picked}'`);
+    expect(font()).not.toContain('Lora');
   });
 });

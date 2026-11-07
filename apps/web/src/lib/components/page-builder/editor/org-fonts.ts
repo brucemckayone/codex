@@ -24,14 +24,24 @@ function familyOf(layout: HTMLElement | null, property: string): string {
   return firstFamily(layout?.style.getPropertyValue(property) ?? '');
 }
 
+function orgLayout(): HTMLElement | null {
+  return typeof document === 'undefined'
+    ? null
+    : document.querySelector<HTMLElement>('.org-layout');
+}
+
+/** One of the organisation's families, or '' when it chose none. */
+export function orgFontFamily(which: keyof FontPair): string {
+  return familyOf(
+    orgLayout(),
+    which === 'heading' ? '--brand-font-heading' : '--brand-font-body'
+  );
+}
+
 /** The organisation's two families, each falling back to the platform's. */
 export function orgFonts(): FontPair {
-  const layout =
-    typeof document === 'undefined'
-      ? null
-      : document.querySelector<HTMLElement>('.org-layout');
   return {
-    heading: familyOf(layout, '--brand-font-heading') || PLATFORM_FONT,
-    body: familyOf(layout, '--brand-font-body') || PLATFORM_FONT,
+    heading: orgFontFamily('heading') || PLATFORM_FONT,
+    body: orgFontFamily('body') || PLATFORM_FONT,
   };
 }

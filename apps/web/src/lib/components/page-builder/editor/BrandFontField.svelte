@@ -10,9 +10,9 @@
   page font lives on the page's own brand wrapper.
 -->
 <script lang="ts">
-  import { firstFamily } from '$lib/brand-editor/font-fallbacks';
   import FontPicker from '$lib/components/brand-editor/FontPicker.svelte';
   import * as m from '$paraglide/messages';
+  import { orgFontFamily } from './org-fonts';
 
   interface Props {
     mode: 'heading' | 'body';
@@ -25,15 +25,11 @@
   const { mode, label, value, onChange }: Props = $props();
 
   // The organisation's own family, which the picker shows when the page has
-  // none: the first family of what the layout writes, ahead of its metric
-  // fallback.
+  // none. Read on mount, before the picker can preview over it.
   let orgFamily = $state('');
 
   function readOrgFamily() {
-    const layout = document.querySelector<HTMLElement>('.org-layout');
-    if (!layout) return;
-    const property = mode === 'heading' ? '--brand-font-heading' : '--brand-font-body';
-    orgFamily = firstFamily(layout.style.getPropertyValue(property));
+    orgFamily = orgFontFamily(mode);
   }
 
   function choose(family: string): void {

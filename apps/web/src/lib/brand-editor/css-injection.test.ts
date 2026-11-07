@@ -314,6 +314,17 @@ describe('brand fonts do not self-reference --font-sans (no CSS var cycle)', () 
 
     expect(el.style.getPropertyValue('--brand-font-body')).toBe("'Pacifico'");
   });
+
+  it('endFontPreview keeps a family written between two hovers', () => {
+    const el = makeOrgLayout();
+    el.style.setProperty('--brand-font-body', "'Lobster'");
+    previewFont('body', 'Syne');
+    el.style.setProperty('--brand-font-body', "'Pacifico'");
+    previewFont('body', 'Space Grotesk');
+    endFontPreview('body');
+
+    expect(el.style.getPropertyValue('--brand-font-body')).toBe("'Pacifico'");
+  });
 });
 
 /**

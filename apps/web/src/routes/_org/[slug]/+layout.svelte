@@ -131,9 +131,9 @@
   // Every input this element binds with `style:`, and its two brand
   // attributes, each in one place (Codex-q01h8). The markup renders them, and
   // the write-back after the token overrides restores them whenever the brand
-  // editor is closed: its preview overwrote the properties and flipped the
-  // attributes, clearBrandVars then removed the properties, and Svelte re-sets
-  // one only when its own value changes.
+  // editor is closed: its preview overwrote most of the properties and flipped
+  // the attributes, clearBrandVars then removed every property, and Svelte
+  // re-sets one only when its own value changes.
   const brandInputVars = $derived({
     '--brand-color': brandPrimary,
     '--brand-secondary': brandSecondary,

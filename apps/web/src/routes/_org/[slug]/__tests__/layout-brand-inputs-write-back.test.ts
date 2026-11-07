@@ -2,11 +2,11 @@
 /**
  * The org layout writes back every brand input it binds (Codex-q01h8).
  *
- * The brand editor's preview overwrites the `--brand-*` properties
+ * The brand editor's preview overwrites most of the `--brand-*` properties
  * `.org-layout` binds with `style:` and flips its two brand attributes, and
- * Svelte re-sets either only when its own value changes. So the layout puts
- * them back itself whenever the editor is closed, through
- * `writeBackLayoutBrandInputs`. This file pins the call site: every input the
+ * `clearBrandVars` removes every bound property when it closes. Svelte re-sets
+ * either only when its own value changes, so the layout puts them back itself
+ * whenever the editor is closed, through `writeBackLayoutBrandInputs`. This file pins the call site: every input the
  * element binds comes from the one record the write-back reads, under its own
  * name, and the layout registers the write-back.
  *

@@ -438,13 +438,17 @@ const DARK_VAR_PROPS = new Set([
 ]);
 
 /**
- * Properties a base field or the org layout owns, so a LIGHT override never
- * writes one. `font-body`/`font-heading` are dark-only override keys (the
- * light font is the fontBody/fontHeading field), and the layout binds the
- * logo. A second writer made the winner whichever ran last (Codex-q01h8).
+ * Every property the org layout binds with `style:`: its base fields, their
+ * dark twins, the ground numbers and the shader's logo. A LIGHT override
+ * never writes one. `font-body`/`font-heading` are dark-only override keys
+ * (the light font is the fontBody/fontHeading field), and a second writer made
+ * the winner whichever ran last (Codex-q01h8). The sweeps keep them all:
+ * Svelte re-sets one only when its value changes.
  */
-const FIELD_OWNED_PROPS = new Set([
+const LAYOUT_OWNED_PROPS = new Set([
   ...BASE_VAR_PROPS,
+  ...DARK_VAR_PROPS,
+  ...GROUND_VAR_PROPS,
   '--brand-shader-logo-url',
 ]);
 
@@ -452,7 +456,7 @@ const FIELD_OWNED_PROPS = new Set([
 function lightOverrideProp(key: string): string | null {
   if (!emitsCssVar(key)) return null;
   const prop = BRAND_PREFIX_KEYS.has(key) ? `--brand-${key}` : `--color-${key}`;
-  return FIELD_OWNED_PROPS.has(prop) ? null : prop;
+  return LAYOUT_OWNED_PROPS.has(prop) ? null : prop;
 }
 
 /**
@@ -492,8 +496,13 @@ export function previewFont(mode: 'body' | 'heading', family: string): void {
   if (!el) return;
   const prop = fontProperty(mode);
   const session = fontPreviews.get(prop);
+  const current = el.style.getPropertyValue(prop);
+  // Carry the original over only while the last preview is what is there: a
+  // value written between two hovers is the newer one to put back.
   const original =
-    session?.el === el ? session.original : el.style.getPropertyValue(prop);
+    session?.el === el && current === session.previewed
+      ? session.original
+      : current;
   // Bare family name only — appending var(--font-sans) creates a cycle with
   // org-brand.css's --font-sans redeclaration and drops the font (Codex-eb00a.7).
   el.style.setProperty(prop, quoteFamily(family));
@@ -582,38 +591,24 @@ export function injectBrandVars(state: BrandEditorState): void {
 
   // Clear any stale token override CSS properties from previous injection passes.
   // This ensures removed overrides don't linger on the inline style.
-  // Exclude base brand vars and dark mode vars — they were just set above —
-  // and the logo the org layout binds: Svelte re-sets it only when it changes,
-  // so swept here the shader lost the org's logo for the whole edit.
-  const preservedProps = new Set([...FIELD_OWNED_PROPS, ...DARK_VAR_PROPS]);
-  removeOverrideVars(el, preservedProps);
+  // Exclude what the org layout binds: the base vars just set above, the dark
+  // and ground vars written below, and the logo, which nothing here writes and
+  // Svelte re-sets only when it changes (swept, the shader lost the org's logo
+  // for the whole edit).
+  removeOverrideVars(el, LAYOUT_OWNED_PROPS);
 
-  // Inject token overrides from fine-tune panels. A key a base field owns,
-  // e.g. the dark-only `font-body`, writes nothing (lightOverrideProp).
-  const overrides = state.tokenOverrides ?? {};
-  for (const [key, value] of Object.entries(overrides)) {
-    if (value == null) continue;
-    // Skip attribute-only, retired and field-owned keys. Future
-    // attribute-only key families (e.g. data-layout-*) belong in emitsCssVar.
-    const prop = lightOverrideProp(key);
-    if (!prop) continue;
-    el.style.setProperty(prop, value);
-  }
-
-  // Codex-wwedk: dark-theme tokenOverrides emit alongside their light
-  // counterparts as `${prop}-dark`. CSS gates in org-brand.css read them
-  // via `var(--brand-foo-dark, var(--brand-foo))` so an absent dark value
+  // Inject token overrides from fine-tune panels, as the org layout's own SSR
+  // path emits them: a key the layout owns, e.g. the dark-only `font-body`,
+  // writes nothing (lightOverrideProp). Codex-wwedk: dark ones emit as
+  // `${prop}-dark`, which org-brand.css reads via
+  // `var(--brand-foo-dark, var(--brand-foo))`, so an absent dark value
   // gracefully inherits the light value.
-  const darkOverrides = state.darkTokenOverrides ?? {};
-  for (const [key, value] of Object.entries(darkOverrides)) {
-    if (value == null) continue;
-    if (!emitsCssVar(key)) continue;
-    const baseProp = BRAND_PREFIX_KEYS.has(key)
-      ? `--brand-${key}`
-      : `--color-${key}`;
-    // Font families must be quoted (see quoteFamily); everything else stays raw.
-    const emitted = FONT_OVERRIDE_KEYS.has(key) ? quoteFamily(value) : value;
-    el.style.setProperty(`${baseProp}${DARK_TOKEN_SUFFIX}`, emitted);
+  const tokenVars = {
+    ...tokenOverridesToCssVars(state.tokenOverrides ?? {}),
+    ...darkTokenOverridesToCssVars(state.darkTokenOverrides ?? {}),
+  };
+  for (const [prop, value] of Object.entries(tokenVars)) {
+    el.style.setProperty(prop, value);
   }
 
   // Inject dark mode overrides (consumed by dark-mode rules in org-brand.css)
@@ -759,16 +754,13 @@ export function injectDarkTokenOverrides(
  * pulse preset lost the org's logo.
  */
 export function clearTokenOverrides(el: HTMLElement): void {
-  removeOverrideVars(
-    el,
-    new Set([...FIELD_OWNED_PROPS, ...DARK_VAR_PROPS, ...GROUND_VAR_PROPS])
-  );
+  removeOverrideVars(el, LAYOUT_OWNED_PROPS);
 }
 
 /**
- * Remove all brand editor CSS overrides from the org layout, the layout's own
- * bound properties among them: the preview wrote those same properties. It
- * leaves the brand attributes the preview flipped. Called when an open editor
+ * Remove all brand editor CSS overrides from the org layout, and with them
+ * every property the layout binds, most of which the preview wrote. It leaves
+ * the brand attributes the preview flipped. Called when an open editor
  * closes. The org layout then writes its inputs back
  * (`writeBackLayoutBrandInputs`, Codex-q01h8).
  */
@@ -787,9 +779,9 @@ export function clearBrandVars(): void {
 /**
  * Write the org layout's own brand inputs back onto its element (Codex-q01h8).
  *
- * The editor previews by setting the same inline properties the layout binds
- * and flipping its two brand attributes. `clearBrandVars` removes the
- * properties when it closes, and nothing undid the attributes. Svelte re-sets
+ * The editor previews by setting most of the inline properties the layout
+ * binds and flipping its two brand attributes. `clearBrandVars` removes every
+ * bound property when it closes, and nothing undid the attributes. Svelte re-sets
  * a `style:` directive or an attribute only when its VALUE changes, so an
  * input whose value had not changed stayed wrong until a reload: the org lost
  * its brand on every page after the studio. An org with fine-tune overrides
