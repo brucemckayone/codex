@@ -110,6 +110,20 @@ describe('brandOverridesToCssVars', () => {
     expect(vars).not.toHaveProperty('--brand-text-scale');
   });
 
+  // Codex-q01h8: a light override never writes a property a field owns, so a
+  // page's own font field wins over a `font-body` token (once the token won).
+  it("keeps the page's font field over a light font token", () => {
+    const vars = brandOverridesToCssVars({
+      fontBody: 'Bitter',
+      tokenOverrides: {
+        'font-body': 'Comic Sans MS',
+        'font-heading': 'Lobster',
+      },
+    });
+    expect(vars['--brand-font-body']).toBe(`"Bitter", 'Bitter-fallback'`);
+    expect(vars).not.toHaveProperty('--brand-font-heading');
+  });
+
   it('suffixes darkTokenOverrides with -dark', () => {
     const vars = brandOverridesToCssVars({
       darkTokenOverrides: { 'heading-color': '#ffffff' },

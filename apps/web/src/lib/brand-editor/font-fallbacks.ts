@@ -537,6 +537,11 @@ export function firstFamily(value: string): string {
   return (value.split(',')[0] ?? '').trim().replace(/^['"]|['"]$/g, '');
 }
 
+/** The `--brand-font-*` property the org layout binds for a face's role. */
+export function brandFontProperty(which: 'heading' | 'body'): string {
+  return which === 'heading' ? '--brand-font-heading' : '--brand-font-body';
+}
+
 function rule(
   face: string,
   weight: number,

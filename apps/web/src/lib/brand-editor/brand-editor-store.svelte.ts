@@ -189,7 +189,11 @@ function close(): void {
       .querySelector('.org-layout')
       ?.removeAttribute('data-editing-theme');
   }
-  clearBrandVars();
+  // An editor that never opened previewed nothing, so it strips nothing. The
+  // brand page closes on destroy even when it left before its query let it
+  // open, and clearBrandVars would then strip the org layout's own brand with
+  // `isClosed` unchanged, so nothing writes it back (Codex-q01h8).
+  if (state.panel !== 'closed') clearBrandVars();
   clearStorage();
   state.panel = 'closed';
   state.pending = null;
