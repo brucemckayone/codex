@@ -438,6 +438,24 @@ const DARK_VAR_PROPS = new Set([
 ]);
 
 /**
+ * Properties a base field or the org layout owns, so a LIGHT override never
+ * writes one. `font-body`/`font-heading` are dark-only override keys (the
+ * light font is the fontBody/fontHeading field), and the layout binds the
+ * logo. A second writer made the winner whichever ran last (Codex-q01h8).
+ */
+const FIELD_OWNED_PROPS = new Set([
+  ...BASE_VAR_PROPS,
+  '--brand-shader-logo-url',
+]);
+
+/** The property a LIGHT override key writes, or null when it writes none. */
+function lightOverrideProp(key: string): string | null {
+  if (!emitsCssVar(key)) return null;
+  const prop = BRAND_PREFIX_KEYS.has(key) ? `--brand-${key}` : `--color-${key}`;
+  return FIELD_OWNED_PROPS.has(prop) ? null : prop;
+}
+
+/**
  * Codex-wwedk: dark-mode tokenOverride suffix. When darkTokenOverrides[key]
  * is set, we emit `${prefix}{key}-dark` alongside the base `${prefix}{key}`
  * so org-brand.css can pick the correct value via CSS fallback chains
@@ -452,35 +470,58 @@ function getOrgLayoutElement(): HTMLElement | null {
 }
 
 /**
+ * The font previews in progress, by property: the element written, what the
+ * property held before the first preview, and what the preview last wrote.
+ */
+const fontPreviews = new Map<
+  string,
+  { el: HTMLElement; original: string; previewed: string }
+>();
+
+function fontProperty(mode: 'body' | 'heading'): string {
+  return mode === 'heading' ? '--brand-font-heading' : '--brand-font-body';
+}
+
+/**
  * Temporarily preview a font on the live page.
  * Bypasses the brand editor store (no isDirty, no sessionStorage write).
+ * The first preview remembers what the property held, for `endFontPreview`.
  */
 export function previewFont(mode: 'body' | 'heading', family: string): void {
   const el = getOrgLayoutElement();
   if (!el) return;
-  const prop =
-    mode === 'heading' ? '--brand-font-heading' : '--brand-font-body';
+  const prop = fontProperty(mode);
+  const session = fontPreviews.get(prop);
+  const original =
+    session?.el === el ? session.original : el.style.getPropertyValue(prop);
   // Bare family name only — appending var(--font-sans) creates a cycle with
   // org-brand.css's --font-sans redeclaration and drops the font (Codex-eb00a.7).
   el.style.setProperty(prop, quoteFamily(family));
+  fontPreviews.set(prop, {
+    el,
+    original,
+    previewed: el.style.getPropertyValue(prop),
+  });
   loadGoogleFont(family);
 }
 
 /**
- * Revert a transient font preview to the store's current value.
- * Call on dropdown close or mouse leave.
+ * End a font preview: put back exactly what the property held before it.
+ * Whoever owns the font on `.org-layout` (the org layout, the brand editor's
+ * preview, or nobody) still does. Reverting to the picker's own value instead
+ * stripped the org's font whenever the picker had none, while the editor was
+ * closed (Codex-q01h8). A value written since the preview is newer and stays.
+ * Ending no preview does nothing.
  */
-export function revertFontPreview(
-  mode: 'body' | 'heading',
-  currentValue: string | null
-): void {
-  const el = getOrgLayoutElement();
-  if (!el) return;
-  const prop =
-    mode === 'heading' ? '--brand-font-heading' : '--brand-font-body';
-  if (currentValue) {
-    // Bare family name only (see previewFont) — no var(--font-sans) cycle.
-    el.style.setProperty(prop, quoteFamily(currentValue));
+export function endFontPreview(mode: 'body' | 'heading'): void {
+  const prop = fontProperty(mode);
+  const session = fontPreviews.get(prop);
+  if (!session) return;
+  fontPreviews.delete(prop);
+  const { el, original, previewed } = session;
+  if (el.style.getPropertyValue(prop) !== previewed) return;
+  if (original) {
+    el.style.setProperty(prop, original);
   } else {
     el.style.removeProperty(prop);
   }
@@ -541,25 +582,21 @@ export function injectBrandVars(state: BrandEditorState): void {
 
   // Clear any stale token override CSS properties from previous injection passes.
   // This ensures removed overrides don't linger on the inline style.
-  // Exclude base brand vars and dark mode vars — they were just set above.
-  const preservedProps = new Set([...BASE_VAR_PROPS, ...DARK_VAR_PROPS]);
+  // Exclude base brand vars and dark mode vars — they were just set above —
+  // and the logo the org layout binds: Svelte re-sets it only when it changes,
+  // so swept here the shader lost the org's logo for the whole edit.
+  const preservedProps = new Set([...FIELD_OWNED_PROPS, ...DARK_VAR_PROPS]);
   removeOverrideVars(el, preservedProps);
 
-  // Inject token overrides from fine-tune panels.
-  // NOTE: `font-body`/`font-heading` are DARK-only override keys — the LIGHT
-  // font is field-derived via CSS_VAR_MAPPINGS (fontBody/fontHeading). They
-  // must never appear in this LIGHT tokenOverrides map or the font would be
-  // double-emitted (once quoted by CSS_VAR_MAPPINGS, once raw here) now that
-  // those keys live in BRAND_PREFIX_KEYS.
+  // Inject token overrides from fine-tune panels. A key a base field owns,
+  // e.g. the dark-only `font-body`, writes nothing (lightOverrideProp).
   const overrides = state.tokenOverrides ?? {};
   for (const [key, value] of Object.entries(overrides)) {
     if (value == null) continue;
-    // Skip attribute-only and retired keys (emitsCssVar). Future
-    // attribute-only key families (e.g. data-layout-*) belong there.
-    if (!emitsCssVar(key)) continue;
-    const prop = BRAND_PREFIX_KEYS.has(key)
-      ? `--brand-${key}`
-      : `--color-${key}`;
+    // Skip attribute-only, retired and field-owned keys. Future
+    // attribute-only key families (e.g. data-layout-*) belong in emitsCssVar.
+    const prop = lightOverrideProp(key);
+    if (!prop) continue;
     el.style.setProperty(prop, value);
   }
 
@@ -638,11 +675,9 @@ export function tokenOverridesToCssVars(
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(overrides)) {
     if (value == null) continue;
-    // Skip attribute-only and retired keys (emitsCssVar).
-    if (!emitsCssVar(key)) continue;
-    const prop = BRAND_PREFIX_KEYS.has(key)
-      ? `--brand-${key}`
-      : `--color-${key}`;
+    // Skip attribute-only, retired and field-owned keys (lightOverrideProp).
+    const prop = lightOverrideProp(key);
+    if (!prop) continue;
     out[prop] = value;
   }
   return out;
@@ -726,12 +761,7 @@ export function injectDarkTokenOverrides(
 export function clearTokenOverrides(el: HTMLElement): void {
   removeOverrideVars(
     el,
-    new Set([
-      ...BASE_VAR_PROPS,
-      ...DARK_VAR_PROPS,
-      ...GROUND_VAR_PROPS,
-      '--brand-shader-logo-url',
-    ])
+    new Set([...FIELD_OWNED_PROPS, ...DARK_VAR_PROPS, ...GROUND_VAR_PROPS])
   );
 }
 

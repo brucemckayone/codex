@@ -11,7 +11,7 @@
 <script lang="ts">
   import { writeBackLayoutBrandInputs } from '$lib/brand-editor';
 
-  const props: { writeBack: boolean } = $props();
+  const { writeBack }: { writeBack: boolean } = $props();
 
   const brandInputVars = $derived({
     '--brand-color': '#2563EB',
@@ -25,7 +25,7 @@
 
   // Read once: the layout registers its write-back once, at mount.
   // svelte-ignore state_referenced_locally
-  if (props.writeBack) {
+  if (writeBack) {
     writeBackLayoutBrandInputs(() => brandInputVars, () => brandInputAttributes);
   }
 </script>

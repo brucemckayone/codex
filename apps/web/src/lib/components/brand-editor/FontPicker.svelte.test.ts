@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 // Mock the css-injection module BEFORE importing the component.
-// FontPicker imports `loadGoogleFont`, `previewFont`, `revertFontPreview` from
+// FontPicker imports `endFontPreview`, `loadGoogleFont`, `previewFont` from
 // this module — we replace them with spies so we can assert lazy-load
 // behaviour and avoid actually injecting <link> tags into the test DOM.
 vi.mock('$lib/brand-editor/css-injection', () => ({
+  endFontPreview: vi.fn(),
   loadGoogleFont: vi.fn(),
   previewFont: vi.fn(),
-  revertFontPreview: vi.fn(),
 }));
 
 import { loadGoogleFont, previewFont } from '$lib/brand-editor/css-injection';

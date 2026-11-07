@@ -1,12 +1,13 @@
 /**
  * Codex-q01h8 under the real Svelte runtime: leaving the brand studio closes
- * the editor, and `clearBrandVars` strips the org layout's brand inputs. Svelte
- * re-sets a `style:` directive or an attribute only when its value changes, so
- * nothing puts them back: the org lost its brand until a reload. The harness
- * registers the layout's own write-back, `writeBackLayoutBrandInputs`, which
- * restores them after the close. Without it the harness shows the bug, so the
- * test cannot pass for the wrong reason. That the layout registers it is held
- * by css-injection.test.ts.
+ * the editor. Its preview flipped the org layout's brand attributes, and
+ * `clearBrandVars` strips its brand properties. Svelte re-sets a `style:`
+ * directive or an attribute only when its value changes, so nothing put them
+ * back: the org lost its brand until a reload. The harness registers the
+ * layout's own write-back, `writeBackLayoutBrandInputs`, which restores them
+ * after the close. Without it the harness shows the bug, so the test cannot
+ * pass for the wrong reason. That the layout registers it is held by
+ * routes/_org/[slug]/__tests__/layout-brand-inputs-write-back.test.ts.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
@@ -70,7 +71,7 @@ describe('the org layout after the brand editor closes', () => {
     return el;
   }
 
-  test('without the write-back, the layout keeps none of its brand (the bug)', () => {
+  test('without the write-back, the layout loses its brand properties and data-org-bg (the bug)', () => {
     const el = openAndLeave(false);
 
     expect(el.style.getPropertyValue('--brand-color')).toBe('');

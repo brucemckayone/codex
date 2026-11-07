@@ -6,7 +6,9 @@
 
   Built on Melt UI's createSelect for ARIA listbox semantics and keyboard nav.
   Hover preview uses direct DOM CSS injection (bypasses the store to avoid
-  marking dirty or writing sessionStorage on transient hovers).
+  marking dirty or writing sessionStorage on transient hovers). Each preview
+  ends by putting back what it found, on leave, close, pick and unmount:
+  whoever owns the font on the page writes the pick itself.
 
   @prop {'body' | 'heading'} mode - Controls which fonts are shown and which CSS var is previewed
   @prop {string} label - Label text above the trigger
@@ -16,7 +18,7 @@
 <script lang="ts">
   import { browser } from '$app/environment';
   import { createSelect } from '@melt-ui/svelte';
-  import { untrack } from 'svelte';
+  import { onDestroy, untrack } from 'svelte';
   import { Label } from '$lib/components/ui';
   import {
     CheckIcon,
@@ -34,9 +36,9 @@
     getHeadingFonts,
   } from '$lib/brand-editor/font-catalog';
   import {
+    endFontPreview,
     loadGoogleFont,
     previewFont,
-    revertFontPreview,
   } from '$lib/brand-editor/css-injection';
 
   interface Props {
@@ -94,6 +96,8 @@
       value ? { value, label: value } : undefined
     ),
     onSelectedChange: ({ next }) => {
+      // Before the pick reaches its owner, which then writes it.
+      endFontPreview(mode);
       onValueChange(next?.value ?? '');
       searchQuery = '';
       return next;
@@ -167,18 +171,21 @@
   }
 
   function handleDropdownLeave() {
-    revertFontPreview(mode, value || null);
+    endFontPreview(mode);
   }
 
-  // Revert on dropdown close (escape, click outside)
+  // End the preview on dropdown close (escape, click outside)
   let prevOpen = $state(false);
   $effect(() => {
     const isOpen = $open;
     if (prevOpen && !isOpen && browser) {
-      revertFontPreview(mode, value || null);
+      endFontPreview(mode);
     }
     prevOpen = isOpen;
   });
+
+  // And when the picker goes mid-preview, e.g. its panel closes.
+  onDestroy(() => endFontPreview(mode));
 </script>
 
 <div class="font-picker {className ?? ''}">

@@ -114,7 +114,8 @@ describe('the face lookup', () => {
 
   it('is right about how the org layout and the live preview quote a face', () => {
     // The layout's `style:` directives read these from its brandInputVars
-    // record (Codex-q01h8), which css-injection.test.ts holds them to.
+    // record (Codex-q01h8), which layout-brand-inputs-write-back.test.ts
+    // holds them to.
     const layout = read('../../../../routes/_org/[slug]/+layout.svelte');
     expect(layout).toContain(
       // biome-ignore lint/suspicious/noTemplateCurlyInString: asserts source text that contains a template literal

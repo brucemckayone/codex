@@ -3,16 +3,14 @@
 
   One page-brand font, through the brand editor's `FontPicker`.
 
-  THE PICKER PREVIEWS ON THE ORGANISATION, and this field undoes that. Its
-  hover preview writes `--brand-font-*` onto `.org-layout` (right for the org
-  brand editor, which it was built for), and on close it "reverts" to ITS
-  value — here the page's font, or nothing — so left alone it would re-font
-  the whole studio, or strip the organisation's font until a reload. The org
-  layout's own value is captured on mount and put back each time the picker
-  closes, and on unmount. The canvas is unaffected: a page font lives on the
-  page's own brand wrapper.
+  THE PICKER PREVIEWS ON THE ORGANISATION: its hover preview writes
+  `--brand-font-*` onto `.org-layout` (right for the org brand editor, which
+  it was built for). Each preview puts back what it found when it ends, so the
+  organisation's font survives it (Codex-q01h8). The canvas is unaffected: a
+  page font lives on the page's own brand wrapper.
 -->
 <script lang="ts">
+  import { firstFamily } from '$lib/brand-editor/font-fallbacks';
   import FontPicker from '$lib/components/brand-editor/FontPicker.svelte';
   import * as m from '$paraglide/messages';
 
@@ -26,31 +24,16 @@
 
   const { mode, label, value, onChange }: Props = $props();
 
+  // The organisation's own family, which the picker shows when the page has
+  // none: the first family of what the layout writes, ahead of its metric
+  // fallback.
   let orgFamily = $state('');
 
-  function guardOrgFont(root: HTMLElement) {
+  function readOrgFamily() {
     const layout = document.querySelector<HTMLElement>('.org-layout');
     if (!layout) return;
     const property = mode === 'heading' ? '--brand-font-heading' : '--brand-font-body';
-    const original = layout.style.getPropertyValue(property);
-    orgFamily = original.trim().replace(/^['"]|['"]$/g, '');
-    const restore = () => {
-      if (layout.style.getPropertyValue(property) === original) return;
-      if (original) layout.style.setProperty(property, original);
-      else layout.style.removeProperty(property);
-    };
-    const observer = new MutationObserver((records) => {
-      const closed = records.some(
-        (record) =>
-          record.target instanceof Element && record.target.getAttribute('aria-expanded') === 'false'
-      );
-      if (closed) requestAnimationFrame(restore);
-    });
-    observer.observe(root, { subtree: true, attributeFilter: ['aria-expanded'] });
-    return () => {
-      observer.disconnect();
-      restore();
-    };
+    orgFamily = firstFamily(layout.style.getPropertyValue(property));
   }
 
   function choose(family: string): void {
@@ -60,7 +43,7 @@
   }
 </script>
 
-<div class="brand-font" data-overridden={value ? '' : undefined} {@attach guardOrgFont}>
+<div class="brand-font" data-overridden={value ? '' : undefined} {@attach readOrgFamily}>
   <FontPicker {mode} {label} value={value || orgFamily} onValueChange={choose} />
   <div class="brand-font__meta">
     <span class="brand-font__source">

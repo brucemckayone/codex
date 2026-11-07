@@ -1,16 +1,15 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { type AST, parse } from 'svelte/compiler';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   applyLayoutBrandInputs,
   clearBrandVars,
   clearTokenOverrides,
   darkTokenOverridesToCssVars,
+  endFontPreview,
   injectBrandVars,
   previewFont,
-  revertFontPreview,
   tokenOverridesToCssVars,
 } from './css-injection';
 import { groundLuminance } from './ground';
@@ -279,16 +278,41 @@ describe('brand fonts do not self-reference --font-sans (no CSS var cycle)', () 
     );
   });
 
-  it('revertFontPreview restores a bare family name', () => {
+  // Codex-q01h8: a preview puts back what it found, never the picker's value.
+  it('endFontPreview puts back the family the layout had, after several hovers', () => {
     const el = makeOrgLayout();
-    revertFontPreview('heading', 'Space Grotesk');
+    el.style.setProperty('--brand-font-heading', "'Lobster'");
+    previewFont('heading', 'Space Grotesk');
+    previewFont('heading', 'Syne');
+    endFontPreview('heading');
 
-    expect(el.style.getPropertyValue('--brand-font-heading')).toBe(
-      "'Space Grotesk', 'Space Grotesk-fallback'"
-    );
-    expect(el.style.getPropertyValue('--brand-font-heading')).not.toContain(
-      'var(--font-sans)'
-    );
+    expect(el.style.getPropertyValue('--brand-font-heading')).toBe("'Lobster'");
+  });
+
+  it('endFontPreview removes a preview the layout had no family under', () => {
+    const el = makeOrgLayout();
+    previewFont('body', 'Syne');
+    endFontPreview('body');
+
+    expect(el.style.getPropertyValue('--brand-font-body')).toBe('');
+  });
+
+  it('endFontPreview with no preview leaves the layout font alone', () => {
+    const el = makeOrgLayout();
+    el.style.setProperty('--brand-font-body', "'Lobster'");
+    endFontPreview('body');
+
+    expect(el.style.getPropertyValue('--brand-font-body')).toBe("'Lobster'");
+  });
+
+  it('endFontPreview keeps a family written since the preview, e.g. the pick', () => {
+    const el = makeOrgLayout();
+    el.style.setProperty('--brand-font-body', "'Lobster'");
+    previewFont('body', 'Syne');
+    el.style.setProperty('--brand-font-body', "'Pacifico'");
+    endFontPreview('body');
+
+    expect(el.style.getPropertyValue('--brand-font-body')).toBe("'Pacifico'");
   });
 });
 
@@ -298,7 +322,35 @@ describe('brand fonts do not self-reference --font-sans (no CSS var cycle)', () 
  * hydration. An input the clear removes stays gone until reload: the ground
  * numbers did, so every org page nudged against the platform's (Codex-mik4h).
  */
-describe('clearTokenOverrides keeps what the org layout binds', () => {
+describe('the token overrides and the preview keep what the org layout binds', () => {
+  const previewState: BrandEditorState = {
+    primaryColor: '#3355ff',
+    secondaryColor: null,
+    accentColor: null,
+    backgroundColor: null,
+    fontBody: null,
+    fontHeading: null,
+    radius: 0.5,
+    density: 1,
+    logoUrl: null,
+    tokenOverrides: {},
+    darkOverrides: null,
+    darkTokenOverrides: null,
+    heroLayout: 'default',
+  };
+
+  afterEach(() => {
+    for (const el of document.querySelectorAll('.org-layout')) el.remove();
+  });
+
+  function orgLayout(): HTMLElement {
+    const el = document.createElement('div');
+    el.className = 'org-layout';
+    el.style.setProperty('--brand-shader-logo-url', 'url(logo.svg)');
+    document.body.appendChild(el);
+    return el;
+  }
+
   const layout = readFileSync(
     join(
       dirname(fileURLToPath(import.meta.url)),
@@ -332,6 +384,46 @@ describe('clearTokenOverrides keeps what the org layout binds', () => {
     );
     expect(el.style.getPropertyValue('--color-interactive')).toBe('');
     expect(el.style.getPropertyValue('--brand-glass-tint')).toBe('');
+  });
+
+  // Codex-q01h8: the preview's sweep, and a light override, wrote them too.
+  it('injectBrandVars keeps the logo, which it never writes', () => {
+    const el = orgLayout();
+    injectBrandVars(previewState);
+
+    expect(el.style.getPropertyValue('--brand-shader-logo-url')).toBe(
+      'url(logo.svg)'
+    );
+  });
+
+  it('a light override writes no bound input, while other keys still emit', () => {
+    const overrides = Object.fromEntries(
+      bound.map((prop) => [prop.replace(/^--brand-/, ''), 'override'])
+    );
+    const emitted = tokenOverridesToCssVars({
+      ...overrides,
+      'shadow-scale': '2',
+    });
+
+    expect(bound.filter((prop) => prop in emitted)).toEqual([]);
+    expect(emitted['--brand-shadow-scale']).toBe('2');
+  });
+
+  it('nor does one in the preview: the field and the layout keep theirs', () => {
+    const el = orgLayout();
+    injectBrandVars({
+      ...previewState,
+      fontBody: 'Lobster',
+      tokenOverrides: {
+        'font-body': 'Pacifico',
+        'shader-logo-url': 'url(other.svg)',
+      },
+    });
+
+    expect(el.style.getPropertyValue('--brand-font-body')).toContain('Lobster');
+    expect(el.style.getPropertyValue('--brand-shader-logo-url')).toBe(
+      'url(logo.svg)'
+    );
   });
 });
 
@@ -412,116 +504,6 @@ describe('applyLayoutBrandInputs writes the layout back after the editor', () =>
 
     expect(el.style.getPropertyValue('--brand-secondary')).toBe('');
     expect(el.hasAttribute('data-org-bg')).toBe(false);
-  });
-});
-
-// Read with svelte's own parser, so a comment is not code, and only a
-// top-level statement of the script runs once at mount: never one inside
-// onMount, untrack or a branch. layout-brand-inputs.svelte.test.ts runs the
-// write-back itself.
-describe('the org layout writes back every input it binds', () => {
-  const source = readFileSync(
-    join(
-      dirname(fileURLToPath(import.meta.url)),
-      '../../routes/_org/[slug]/+layout.svelte'
-    ),
-    'utf8'
-  );
-  const ast = parse(source, { modern: true });
-  const script = ast.instance?.content.body ?? [];
-  const carrier = ast.fragment.nodes.find(
-    (node): node is AST.RegularElement =>
-      node.type === 'RegularElement' &&
-      node.attributes.some(
-        (a) =>
-          a.type === 'Attribute' &&
-          a.name === 'class' &&
-          Array.isArray(a.value) &&
-          a.value.some(
-            (v) =>
-              v.type === 'Text' && v.data.split(/\s+/).includes('org-layout')
-          )
-      )
-  );
-  /** An attribute's or directive's `{…}` exactly as written, braces included. */
-  const written = (value: AST.Attribute['value']) =>
-    value !== true && !Array.isArray(value)
-      ? source.slice(value.start, value.end)
-      : undefined;
-
-  /** The keys of a top-level `const <name> = $derived({ … })` record. */
-  function recordKeys(name: string): string[] {
-    for (const statement of script) {
-      if (statement.type !== 'VariableDeclaration') continue;
-      for (const { id, init } of statement.declarations) {
-        if (id.type !== 'Identifier' || id.name !== name) continue;
-        if (
-          init?.type !== 'CallExpression' ||
-          init.callee.type !== 'Identifier' ||
-          init.callee.name !== '$derived'
-        )
-          return [];
-        const [record] = init.arguments;
-        if (record?.type !== 'ObjectExpression') return [];
-        return record.properties.flatMap((p) =>
-          p.type === 'Property' &&
-          p.key.type === 'Literal' &&
-          typeof p.key.value === 'string'
-            ? [p.key.value]
-            : []
-        );
-      }
-    }
-    return [];
-  }
-
-  it('binds each style input on .org-layout from the one record, under its own name', () => {
-    expect(carrier, '.org-layout').toBeDefined();
-    const directives = (carrier?.attributes ?? []).filter(
-      (a) => a.type === 'StyleDirective'
-    );
-    expect(directives.length).toBeGreaterThan(0);
-    expect(
-      directives.filter(
-        (d) => written(d.value) !== `{brandInputVars['${d.name}']}`
-      )
-    ).toEqual([]);
-    expect(recordKeys('brandInputVars').sort()).toEqual(
-      directives.map((d) => d.name).sort()
-    );
-  });
-
-  it('binds both brand attributes from the record it writes back', () => {
-    const names = recordKeys('brandInputAttributes');
-    expect(names.sort()).toEqual(['data-org-bg', 'data-org-brand']);
-    for (const name of names) {
-      const attribute = carrier?.attributes.find(
-        (a) => a.type === 'Attribute' && a.name === name
-      );
-      expect(
-        attribute?.type === 'Attribute' ? written(attribute.value) : undefined,
-        name
-      ).toBe(`{brandInputAttributes['${name}'] ? '' : undefined}`);
-    }
-  });
-
-  it('registers the write-back once, at the top level, reading both records', () => {
-    const calls = script.flatMap((s) =>
-      s.type === 'ExpressionStatement' &&
-      s.expression.type === 'CallExpression' &&
-      s.expression.callee.type === 'Identifier' &&
-      s.expression.callee.name === 'writeBackLayoutBrandInputs'
-        ? [s.expression]
-        : []
-    );
-    expect(calls).toHaveLength(1);
-    expect(
-      calls[0]?.arguments.map((arg) =>
-        arg.type === 'ArrowFunctionExpression' && arg.body.type === 'Identifier'
-          ? arg.body.name
-          : undefined
-      )
-    ).toEqual(['brandInputVars', 'brandInputAttributes']);
   });
 });
 
