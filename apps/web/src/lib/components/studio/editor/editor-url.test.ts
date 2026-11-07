@@ -3,6 +3,7 @@ import {
   editHref,
   editorContentType,
   editorView,
+  newContentHref,
   publishStepHref,
   readEditorStep,
   readLiveTab,
@@ -35,6 +36,14 @@ describe('readNewContent', () => {
       contentType: 'audio',
       mediaId: MEDIA,
     });
+  });
+
+  it('starts what the New menu links to, each kind as itself', () => {
+    for (const type of ['video', 'audio', 'written'] as const) {
+      const url = new URL(newContentHref(type), 'https://studio.test');
+      expect(url.pathname).toBe('/studio/content/new');
+      expect(readNewContent(url)).toEqual({ contentType: type, mediaId: null });
+    }
   });
 
   it('a hand-edited media link starts a blank piece, never a broken one', () => {

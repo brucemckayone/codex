@@ -38,6 +38,7 @@
   import { getCategories } from '$lib/remote/categories.remote';
   import type { ContentWithRelations } from '$lib/types';
   import { accessGroupToFlags, type ContentAccessKind } from '$lib/utils/content-access';
+  import { focusIfLost } from '$lib/utils/focus-if-lost';
   import { getDisplayThumbnail } from '$lib/utils/thumbnail';
   import * as m from '$paraglide/messages';
   import AccessSection from '../content-form/AccessSection.svelte';
@@ -168,6 +169,32 @@
     await tick();
     document.getElementById('slug')?.focus();
   }
+
+  let payoutsChecked = $state(false);
+  let payoutsCheckedEl = $state<HTMLElement | null>(null);
+  /** The unread alert's words: trying, failed again, or not read. */
+  const connectAlertWords = $derived(
+    reads.connectRetrying
+      ? m.studio_publish_connect_retrying()
+      : reads.connectFailedAgain
+        ? m.studio_live_connect_unread_again()
+        : m.studio_live_connect_unread()
+  );
+  /** What a Try again found: not set up turns the paid options off, and says why. */
+  const payoutsCheckedWords = $derived(
+    !payoutsChecked
+      ? ''
+      : reads.connectReady
+        ? m.studio_live_connect_checked()
+        : m.studio_content_form_access_payouts_hint()
+  );
+  async function retryPayouts() {
+    await reads.rereadConnect();
+    if (reads.connectUnread) return;
+    payoutsChecked = true;
+    await tick();
+    focusIfLost(payoutsCheckedEl);
+  }
 </script>
 
 <EditorSection headingId="{ids}-who" ordinal={1} title={m.studio_publish_who()}>
@@ -189,10 +216,16 @@
   <!-- The Publish step says this in its checklist; a live piece has none, so here, by the options it affects. -->
   {#if live && reads.connectUnread}
     <Alert variant="warning">
-      {m.studio_live_connect_unread()}
-      <Button type="button" size="sm" variant="ghost" onclick={reads.rereadConnect}>{m.common_try_again()}</Button>
+      {connectAlertWords}
+      <Button type="button" size="sm" variant="ghost" aria-busy={reads.connectRetrying} onclick={retryPayouts}>
+        {m.common_try_again()}
+      </Button>
     </Alert>
   {/if}
+  <!-- The alert goes with its focused button once it reads them: focus and the news land here. -->
+  <p class="sr-only" role="status" tabindex="-1" bind:this={payoutsCheckedEl}>
+    {payoutsCheckedWords}
+  </p>
 </EditorSection>
 
 <EditorSection headingId="{ids}-card" ordinal={2} title={m.studio_publish_card()}>

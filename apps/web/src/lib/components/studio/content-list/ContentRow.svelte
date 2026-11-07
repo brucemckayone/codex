@@ -12,6 +12,11 @@
   @prop item     The content item
   @prop publishing  Whether this item's publish toggle is in flight
   @prop onPublishToggle  Handler for publish toggle
+  @prop payouts  The page's one payouts read, for a draft's progress
+
+  A draft shows how far it has got (Codex-a6ofh.2.6, mockup W7) and offers
+  Continue, at the step still to do, where a published piece offers its
+  toggle: the Publish step is where a draft goes live, with its checks.
 -->
 <script lang="ts">
   import { coverCropSizes, getThumbnailSrcset } from '$lib/utils/image';
@@ -27,15 +32,23 @@
   import { formatRelativeTime } from '$lib/utils/format';
   import { deriveContentAccessKind } from '$lib/utils/content-access';
   import * as m from '$paraglide/messages';
+  import { editHref } from '../editor/editor-url';
+  import DraftProgress from './DraftProgress.svelte';
+  import type { PayoutsRead } from '$lib/utils/connect-readiness';
+  import { draftProgress } from './draft-progress';
 
   interface Props {
     ordinal: string;
     item: ContentWithRelations;
     publishing?: boolean;
     onPublishToggle: () => void;
+    payouts: PayoutsRead;
   }
 
-  const { ordinal, item, publishing = false, onPublishToggle }: Props = $props();
+  const { ordinal, item, publishing = false, onPublishToggle, payouts }: Props = $props();
+
+  const progress = $derived(item.status === 'draft' ? draftProgress(item, payouts) : null);
+  const href = $derived(progress?.href ?? editHref(item.id));
 
   // Collapse the SPEC §6.1 policy flags to the single display kind used for
   // the meta-chip label + its `data-access` CSS selector (WP-1).
@@ -105,7 +118,7 @@
 
   <div class="row-body">
     <h3 class="row-title">
-      <a href="/studio/content/{item.id}/edit" class="row-title-link">
+      <a {href} class="row-title-link">
         {item.title}
       </a>
     </h3>
@@ -124,6 +137,9 @@
         <span>{accessKind}</span>
       </li>
     </ul>
+    {#if progress}
+      <DraftProgress {progress} />
+    {/if}
   </div>
 
   <div class="row-status">
@@ -137,25 +153,32 @@
   </div>
 
   <div class="row-actions">
-    <button
-      type="button"
-      class="row-toggle"
-      data-action={statusVariant === 'published' ? 'unpublish' : 'publish'}
-      disabled={publishing}
-      onclick={onPublishToggle}
-    >
-      {#if publishing}
-        <Spinner size="sm" />
-      {:else if statusVariant === 'published'}
-        {m.studio_content_form_unpublish()}
-      {:else}
-        {m.studio_content_form_publish()}
-      {/if}
-    </button>
-    <a href="/studio/content/{item.id}/edit" class="row-edit" aria-label="Edit {item.title}">
-      <EditIcon size={14} />
-      <span class="row-edit-label">{m.studio_content_edit()}</span>
-    </a>
+    {#if progress}
+      <a {href} class="row-edit" aria-label={m.studio_drafts_continue_label({ title: item.title })}>
+        <EditIcon size={14} />
+        <span class="row-edit-label">{m.studio_drafts_continue()}</span>
+      </a>
+    {:else}
+      <button
+        type="button"
+        class="row-toggle"
+        data-action={statusVariant === 'published' ? 'unpublish' : 'publish'}
+        disabled={publishing}
+        onclick={onPublishToggle}
+      >
+        {#if publishing}
+          <Spinner size="sm" />
+        {:else if statusVariant === 'published'}
+          {m.studio_content_form_unpublish()}
+        {:else}
+          {m.studio_content_form_publish()}
+        {/if}
+      </button>
+      <a {href} class="row-edit" aria-label="Edit {item.title}">
+        <EditIcon size={14} />
+        <span class="row-edit-label">{m.studio_content_edit()}</span>
+      </a>
+    {/if}
   </div>
 </article>
 

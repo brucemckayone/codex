@@ -31,6 +31,7 @@
   import { Alert, Button } from '$lib/components/ui';
   import type { QueryResult } from '$lib/remote/query-result';
   import { connectQueryState } from '$lib/utils/connect-readiness';
+  import { focusIfLost } from '$lib/utils/focus-if-lost';
 
   interface Props {
     /** The list's remote query. `null` while it isn't being made. */
@@ -76,7 +77,8 @@
     outcome = failed ? 'failed' : 'ok';
     retrying = false;
     await tick();
-    (outcome === 'ok' ? statusNode : alertNode)?.focus();
+    // Not if they moved on during it: a read can take seconds.
+    focusIfLost(outcome === 'ok' ? statusNode : alertNode, alertNode);
   }
 </script>
 

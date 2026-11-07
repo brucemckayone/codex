@@ -12,15 +12,15 @@
 import { mediaStatus } from '$lib/client/media-status.svelte';
 import { getMediaItem } from '$lib/remote/media.remote';
 import { type QueryResult, remoteErrorStatus } from '$lib/remote/query-result';
-import { getMyConnectStatus, listTiers } from '$lib/remote/subscription.remote';
+import { listTiers } from '$lib/remote/subscription.remote';
 import type { ContentWithRelations, SubscriptionTier } from '$lib/types';
-import { deriveConnectState } from '$lib/utils/bank-payouts';
 import {
   connectQueryState,
   payoutSetupHref,
 } from '$lib/utils/connect-readiness';
 import { logReadFailure } from '../media-library/log-read-failure';
 import { watchMediaItem } from '../media-library/watch-media-item.svelte';
+import { createPayoutsRead } from '../payouts-read.svelte';
 import type { DraftValues } from './draft-session.svelte';
 
 export interface PublishReadsOptions {
@@ -44,22 +44,14 @@ export function createPublishReads(options: PublishReadsOptions) {
   const { values } = options;
 
   // ── Payouts ─────────────────────────────────────────────────────────────
-  // They gate the kinds that earn (`deriveConnectState` reads the two flags
-  // the server checks). Ready until known, as the old form assumed, so a
-  // set-up creator never sees those kinds flash off; the server judges. A
-  // read that failed is never "ready".
-  const connectStatus = getMyConnectStatus();
-  const connectRead = $derived(connectQueryState(connectStatus));
-  const connectReady = $derived(
-    connectRead.kind === 'ok'
-      ? deriveConnectState(connectRead.status) === 'enabled'
-      : true
-  );
-  $effect(() => {
-    if (connectStatus.error != null) {
-      logReadFailure('studio_publish.connect_unread', connectStatus.error);
-    }
-  });
+  // They gate the kinds that earn, by the rule the content lists' draft
+  // progress uses too (`readPayouts`). Offered while still loading, so a
+  // set-up creator never sees them flash off (the server judges). A read
+  // that failed is not "not set up": the host says it is unread, with Try
+  // again.
+  const payouts = createPayoutsRead('studio_publish.connect_unread', () => ({
+    organizationId: options.organizationId(),
+  }));
 
   // ── The org's active plans (the options) ────────────────────────────────
   // Plans never read are not "none": the picker is disabled and no set is
@@ -126,17 +118,28 @@ export function createPublishReads(options: PublishReadsOptions) {
 
   return {
     get connectReady() {
-      return connectReady;
+      return payouts.current !== 'missing';
     },
     get connectUnread() {
-      return connectRead.kind === 'failed';
+      return payouts.current === 'unread';
+    },
+    /** Not read yet: offered meanwhile, but never announced ready (Codex-a6ofh.2.6). */
+    get connectLoading() {
+      return payouts.current === 'loading';
+    },
+    get connectRetrying() {
+      return payouts.retrying;
+    },
+    get connectFailedAgain() {
+      return payouts.failedAgain;
     },
     get payoutsHref() {
       return payoutSetupHref(options.organizationId() !== null);
     },
-    /** A failure shows through the query's `.error`, logged above. */
-    rereadConnect() {
-      connectStatus.refresh().catch(() => undefined);
+    /** A failure shows through `connectUnread`, and the read logs it. */
+    /** Resolves once the re-read settles; never rejects. */
+    rereadConnect(): Promise<void> {
+      return payouts.refresh();
     },
     get orgTiers(): SubscriptionTier[] {
       return tiersRead.kind === 'ok' ? tiersRead.status : [];

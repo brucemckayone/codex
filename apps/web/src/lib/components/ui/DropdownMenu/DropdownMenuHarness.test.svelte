@@ -9,12 +9,14 @@
     open?: boolean;
     defaultOpen?: boolean;
     onOpenChange?: (open: boolean) => void;
+    onKeep?: () => void;
   }
 
   let {
     open = $bindable(false),
     defaultOpen = false,
     onOpenChange,
+    onKeep,
   }: Props = $props();
 </script>
 
@@ -25,5 +27,7 @@
     <DropdownMenuItem data-testid="item-2">Item Two</DropdownMenuItem>
     <DropdownMenuSeparator data-testid="separator" />
     <DropdownMenuItem data-testid="item-3" disabled>Disabled Item</DropdownMenuItem>
+    <DropdownMenuItem data-testid="item-keep" keepOpen onclick={onKeep}>Try again</DropdownMenuItem>
+    <DropdownMenuItem data-testid="item-link" href="#drafts">All drafts</DropdownMenuItem>
   </DropdownMenuContent>
 </DropdownMenu>

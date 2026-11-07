@@ -13,6 +13,7 @@
  * stays consistent with the backend.
  */
 import { type QueryResult, queryErrorMessage } from '$lib/remote/query-result';
+import { deriveConnectState } from './bank-payouts';
 
 export interface ConnectReadinessStatus {
   isConnected: boolean;
@@ -71,6 +72,35 @@ export function connectQueryState<T>(
   if (query?.current != null) return { kind: 'ok', status: query.current };
   if (queryErrorMessage(query?.error) !== null) return { kind: 'failed' };
   return { kind: 'loading' };
+}
+
+/**
+ * Whether a piece that earns can be published, from the payouts read
+ * (`getMyConnectStatus`): set up, not set up, not read, or not read yet.
+ * The Publish step and the content lists (Codex-a6ofh.2.6) both judge by
+ * it, so a draft's progress never disagrees with its checklist.
+ *
+ * Each caller decides what not read yet means: the Publish step offers the
+ * kinds that earn meanwhile (the server judges), so a set-up creator never
+ * sees them flash off; a list never calls a draft that earns ready before
+ * it knows. A read that failed is never set up: it is said, with Try again.
+ * Set up is `deriveConnectState`'s `enabled`: the two flags the publish
+ * gate checks (`assertCreatorCanBePaid`), not the account's `status`.
+ */
+export type PayoutsRead = 'ready' | 'missing' | 'unread' | 'loading';
+
+export function readPayouts(
+  query:
+    | QueryResult<Parameters<typeof deriveConnectState>[0]>
+    | null
+    | undefined
+): PayoutsRead {
+  const read = connectQueryState(query);
+  if (read.kind === 'loading') return 'loading';
+  if (read.kind === 'failed') return 'unread';
+  const state = deriveConnectState(read.status);
+  if (state === 'enabled') return 'ready';
+  return state === 'fetch_failed' ? 'unread' : 'missing';
 }
 
 /**

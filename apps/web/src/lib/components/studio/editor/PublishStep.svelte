@@ -38,13 +38,21 @@
   import { logger } from '$lib/observability';
   import type { ContentWithRelations } from '$lib/types';
   import { accessGroupToFlags } from '$lib/utils/content-access';
+  import { focusIfLost } from '$lib/utils/focus-if-lost';
   import { formatPrice } from '$lib/utils/format';
   import * as m from '$paraglide/messages';
   import { savedDraftValues, TYPE_WORD } from './canvas-text';
   import { createDraftSession, type DraftValues } from './draft-session.svelte';
   import EditorSection from './EditorSection.svelte';
   import { CONTENT_LIST_HREF, type EditorContentType, editHref } from './editor-url';
-  import { asPublishGap, gapRow, type PublishGap, publishGaps, refusalPutRightBy } from './publish-gaps';
+  import {
+    asPublishGap,
+    earnsByFlags,
+    gapRow,
+    type PublishGap,
+    publishGaps,
+    refusalPutRightBy,
+  } from './publish-gaps';
   import { createPublishReads } from './publish-reads.svelte';
   import PublishSettings from './PublishSettings.svelte';
   import WriteBar from './WriteBar.svelte';
@@ -152,8 +160,45 @@
     coverBusy ? m.studio_editor_next_needs_cover() : categoryBusy ? m.studio_publish_wait_category() : null
   );
   const blocked = $derived(gaps.length > 0 || coverBusy || categoryBusy || slugInvalid);
-  /** Nothing is missing, and nothing it checks by went unread. */
-  const ready = $derived(rows.length === 0 && !slugInvalid && !reads.mediaUnread && !reads.connectUnread);
+  /**
+   * Payouts, for a piece that earns: a free piece does not wait on them, as
+   * the server's gate does not look (`assertCreatorCanBePaid`). Not read yet,
+   * the kinds that earn are still offered, but it is never announced ready.
+   */
+  const earns = $derived(earnsByFlags(flags));
+  const payoutsUnread = $derived(reads.connectUnread && earns);
+  const payoutsPending = $derived(reads.connectLoading && earns);
+  /** Nothing is missing, and nothing it checks by went unread or is unread yet. */
+  const ready = $derived(
+    rows.length === 0 && !slugInvalid && !reads.mediaUnread && !payoutsUnread && !payoutsPending
+  );
+  /**
+   * A payouts Try again's outcome, said on its own line whatever else is
+   * left: the checklist's status line leads with how much is left.
+   */
+  const payoutsRetryNote = $derived(
+    reads.connectRetrying
+      ? m.studio_publish_connect_retrying()
+      : reads.connectFailedAgain && payoutsUnread
+        ? m.studio_publish_connect_unread_again()
+        : ''
+  );
+
+  /** A Try again that reads them: focus stays in the checklist, whose status says what is left. */
+  async function retryPayouts() {
+    await reads.rereadConnect();
+    if (reads.connectUnread) return;
+    await tick();
+    focusIfLost(gapsEl);
+  }
+  /** The unread row's words: a Try again says it is trying, and that it failed again. */
+  const payoutsUnreadWords = $derived(
+    reads.connectRetrying
+      ? m.studio_publish_connect_retrying()
+      : reads.connectFailedAgain
+        ? m.studio_publish_connect_unread_again()
+        : m.studio_publish_connect_unread()
+  );
   /**
    * The checklist's one live region: the wait, the all-clear, or (heard
    * only) how much is left, so a row going (the media ready) is told.
@@ -164,7 +209,8 @@
     if (ready) return m.studio_publish_gaps_none();
     if (left > 0) return m.studio_publish_gaps_left({ count: left });
     if (reads.mediaUnread) return m.studio_publish_media_unread({ type: TYPE_WORD[contentType]() });
-    return reads.connectUnread ? m.studio_publish_connect_unread() : '';
+    if (payoutsUnread) return m.studio_publish_connect_unread();
+    return payoutsPending ? m.studio_publish_connect_checking() : '';
   });
   /** What Publish is doing, outside what it holds still, so it is heard and keeps focus. */
   const progressWords = $derived.by(() => {
@@ -294,16 +340,27 @@
                   <button type="button" class="publish-gap-fix" onclick={reads.rereadMedia}>{m.common_try_again()}</button>
                 </li>
               {/if}
-              {#if reads.connectUnread}
+              {#if payoutsPending}
                 <li class="publish-gap publish-gap--unread">
-                  <span>{m.studio_publish_connect_unread()}</span>
-                  <button type="button" class="publish-gap-fix" onclick={reads.rereadConnect}>
+                  <span>{m.studio_publish_connect_checking()}</span>
+                </li>
+              {/if}
+              {#if payoutsUnread}
+                <li class="publish-gap publish-gap--unread">
+                  <span>{payoutsUnreadWords}</span>
+                  <button
+                    type="button"
+                    class="publish-gap-fix"
+                    aria-busy={reads.connectRetrying}
+                    onclick={retryPayouts}
+                  >
                     {m.common_try_again()}
                   </button>
                 </li>
               {/if}
             </ul>
           {/if}
+          <p class="sr-only" role="status">{payoutsRetryNote}</p>
           <p
             class={[
               'publish-status',

@@ -13,6 +13,7 @@ import {
   remoteErrorStatus,
 } from '$lib/remote/query-result';
 
+/** `extra` adds context; `status` (the HTTP status) and `error` are the helper's own. */
 export function logReadFailure(
   event: string,
   error: unknown,

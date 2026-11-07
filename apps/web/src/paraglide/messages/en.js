@@ -11999,6 +11999,22 @@ export const studio_live_connect_unread = () => `Couldn’t check your payout se
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_live_connect_unread_again = () => `Still couldn’t check your payout setup. Update checks it again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_live_connect_checked = () => `Payout setup checked.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const studio_live_portal_in = () => `Also in the portal`
 
 
@@ -12175,6 +12191,30 @@ export const studio_publish_connect_unread = () => `Couldn’t check your payout
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_connect_unread_again = () => `Still couldn’t check your payout setup. Publishing checks it again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_connect_retrying = () => `Checking your payout setup again…`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_publish_connect_checking = () => `Checking your payout setup…`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const studio_publish_where_categories_unread = () => `Couldn’t load categories`
 
 
@@ -12192,6 +12232,238 @@ export const studio_publish_gap_slug = () => `Fix the slug: use lowercase letter
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_publish_gap_fix_here = () => `Fix it`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_drafts_step_write = () => `Step 1 of 2`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_drafts_step_publish_one = () => `Step 2 of 2 · 1 thing left`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_drafts_step_publish = (params) => `Step 2 of 2 · ${params.count} things left`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_drafts_ready = () => `Ready to publish`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_drafts_payouts_unread = () => `Couldn’t check your payout setup. Open it to check again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_drafts_payouts_checking = () => `Checking your payout setup…`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_drafts_continue = () => `Continue`
+
+
+/**
+ * @param {{ title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_drafts_continue_label = (params) => `Continue ${params.title}`
+
+
+/**
+ * @param {{ when: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_drafts_edited = (params) => `edited ${params.when}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_new_menu = () => `New`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_new_menu_drafts = () => `Continue a draft`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_new_menu_start = () => `Start something new`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_new_menu_video_hint = () => `a film or lesson`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_new_menu_audio_hint = () => `a podcast or track`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_new_menu_article_hint = () => `written, no media`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_new_menu_all_drafts = (params) => `All drafts (${params.count})`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_new_menu_drafts_loading = () => `Finding your drafts…`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_new_menu_drafts_failed = () => `Couldn’t load your drafts.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_new_menu_drafts_failed_again = () => `Still couldn’t load your drafts.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_new_menu_drafts_retrying = () => `Trying again…`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_filter_label = () => `Filter by status`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_filter_all = () => `All`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_filter_draft = () => `Drafts`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_filter_published = () => `Published`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_filter_archived = () => `Archived`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_filter_show_all = () => `Show all content`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_load_failed = () => `We couldn't load your content.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_load_failed_again = () => `We still couldn't load your content.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_load_retry_ok = () => `Your content loaded.`
 
 
 /**

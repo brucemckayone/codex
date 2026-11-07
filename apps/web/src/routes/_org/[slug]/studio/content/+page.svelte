@@ -8,16 +8,18 @@
 
   Layout (top to bottom):
     · ContentListCommandBar  — sticky: breadcrumb + count, status segmented
-                               filter, search, Create CTA
+                               filter, search, the New menu (drafts first)
     · ContentFeatureSlab     — page 1, no search: the most-recent item as
                                a 16:9 hero with narrative strap + actions
     · ContentRow[]           — numbered rows ("02"..) with real thumbnails,
-                               type + category + access chips, status pill,
-                               publish toggle, edit action
+                               type + category + access chips, status pill;
+                               a draft's progress + Continue, a live piece's
+                               publish toggle + edit action
     · Pagination             — when totalPages > 1
 
   URL state: `search`, `page`, `limit`, `status` — all preserved. Empty
-  states split by origin (no content at all vs. no matching content).
+  states split by origin (no content at all vs. no matching content); a
+  read that failed says so with Retry, never "no content".
 -->
 <script lang="ts">
   import * as m from '$paraglide/messages';
@@ -29,13 +31,20 @@
   import Pagination from '$lib/components/ui/Pagination/Pagination.svelte';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import { FileIcon, SearchIcon } from '$lib/components/ui/Icon';
+  import LoadFailedAlert from '$lib/components/studio/LoadFailedAlert.svelte';
+  import { logReadFailure } from '$lib/components/studio/media-library/log-read-failure';
   import ContentListCommandBar from '$lib/components/studio/content-list/ContentListCommandBar.svelte';
   import ContentFeatureSlab from '$lib/components/studio/content-list/ContentFeatureSlab.svelte';
   import ContentRow from '$lib/components/studio/content-list/ContentRow.svelte';
   import ContentListSkeleton from '$lib/components/studio/content-list/ContentListSkeleton.svelte';
+  import NewContentMenu from '$lib/components/studio/content-list/NewContentMenu.svelte';
+  import {
+    readStatusFilter,
+    type ContentStatusFilter,
+  } from '$lib/components/studio/content-list/content-status';
+  import { createPayoutsRead } from '$lib/components/studio/payouts-read.svelte';
+  import { connectQueryState } from '$lib/utils/connect-readiness';
   import { togglePublishStatus, type ContentStatus } from '$lib/components/studio/publish-toggle';
-
-  type StatusFilter = 'all' | 'draft' | 'published' | 'archived';
 
   let { data } = $props();
 
@@ -64,11 +73,7 @@
   const urlSearch = $derived(
     gateSearchQuery(page.url.searchParams.get('search')) ?? undefined
   );
-  const urlStatus = $derived.by<StatusFilter>(() => {
-    const raw = page.url.searchParams.get('status');
-    if (raw === 'draft' || raw === 'published' || raw === 'archived') return raw;
-    return 'all';
-  });
+  const urlStatus = $derived(readStatusFilter(page.url));
 
   // Reactive query — re-runs when any URL param changes
   const contentQuery = $derived(
@@ -79,9 +84,27 @@
       sortBy: 'updatedAt',
       sortOrder: 'desc',
       ...(urlSearch && { search: urlSearch }),
-      ...(urlStatus !== 'all' && { status: urlStatus as 'draft' | 'published' | 'archived' }),
+      ...(urlStatus !== 'all' && { status: urlStatus }),
     })
   );
+  // Never read is not "no content": the alert stands in for the list.
+  const listFailed = $derived(connectQueryState(contentQuery).kind === 'failed');
+  $effect(() => {
+    if (contentQuery.error != null) {
+      logReadFailure('studio_content.list_unread', contentQuery.error, {
+        studio: 'org',
+        organizationId: data.org.id,
+        statusFilter: urlStatus,
+      });
+    }
+  });
+
+  // The page's one payouts read, for every draft's step (Codex-a6ofh.2.6):
+  // the rows', the slab's and the New menu's.
+  const payouts = createPayoutsRead('studio_content.connect_unread', () => ({
+    studio: 'org',
+    organizationId: data.org.id,
+  }));
 
   const items = $derived<ContentWithRelations[]>(contentQuery.current?.items ?? []);
   const pagination = $derived(contentQuery.current?.pagination ?? fallbackPagination);
@@ -122,11 +145,11 @@
     navigateWith({ search: '' });
   }
 
-  function setStatus(next: StatusFilter) {
+  function setStatus(next: ContentStatusFilter) {
     navigateWith({ status: next });
   }
 
-  function navigateWith(changes: { search?: string; status?: StatusFilter }) {
+  function navigateWith(changes: { search?: string; status?: ContentStatusFilter }) {
     const params = new URLSearchParams(page.url.searchParams);
 
     if ('search' in changes) {
@@ -195,23 +218,37 @@
 
 <div class="content-page">
   <ContentListCommandBar
-    {total}
+    total={listFailed ? null : total}
     loading={contentQuery.loading}
     selectedStatus={urlStatus}
     searchValue={searchQuery}
-    createHref="/studio/content/new"
     onSearchInput={handleSearchInput}
     onSearchClear={clearSearch}
     onStatusChange={setStatus}
-  />
+  >
+    {#snippet actions()}
+      <NewContentMenu organizationId={data.org.id} payouts={payouts.current} />
+    {/snippet}
+  </ContentListCommandBar>
 
   <div class="content-body">
-    {#if contentQuery.loading}
+    <!-- Mounted unconditionally: it renders nothing until the read fails. -->
+    <LoadFailedAlert
+      query={contentQuery}
+      message={m.studio_content_load_failed()}
+      againMessage={m.studio_content_load_failed_again()}
+      loadedMessage={m.studio_content_load_retry_ok()}
+      data-testid="content-list-load-error"
+    />
+    {#if listFailed}
+      <!-- The alert above stands in for the list. -->
+    {:else if contentQuery.loading}
       <ContentListSkeleton showSlab={!hasFilter} rowCount={5} />
     {:else if hasAny}
       {#if featureItemView}
         <ContentFeatureSlab
           item={featureItemView}
+          payouts={payouts.current}
           publishing={togglingId === featureItemView.id}
           onPublishToggle={() => handlePublishToggle(featureItemView)}
         />
@@ -224,6 +261,7 @@
               <ContentRow
                 ordinal={ordinalFor(i)}
                 item={row}
+                payouts={payouts.current}
                 publishing={togglingId === row.id}
                 onPublishToggle={() => handlePublishToggle(row)}
               />

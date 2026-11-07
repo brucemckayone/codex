@@ -116,6 +116,65 @@ describe('DropdownMenu', () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
+  // A Try again that reloads what the menu shows (Codex-a6ofh.2.6, the New
+  // menu's drafts): the menu stays open, and the item's own press still runs.
+  test('a keepOpen item runs its press and leaves the menu open', async () => {
+    const onOpenChange = vi.fn();
+    const onKeep = vi.fn();
+    component = mount(DropdownMenuHarness, {
+      target: document.body,
+      props: { open: true, onOpenChange, onKeep },
+    });
+    flushSync();
+
+    document.querySelector<HTMLElement>('[data-testid="item-keep"]')?.click();
+    // Past Melt's millisecond, when a press that closes has closed.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    flushSync();
+
+    expect(onKeep).toHaveBeenCalledOnce();
+    const trigger = document.querySelector('[data-testid="dropdown-trigger"]');
+    expect(trigger?.getAttribute('aria-expanded')).toBe('true');
+    expect(onOpenChange).not.toHaveBeenCalledWith(false);
+
+    // Closed before the unmount: a menu unmounted open closes late, in the next test.
+    document.activeElement?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })
+    );
+    await vi.waitFor(() =>
+      expect(trigger?.getAttribute('aria-expanded')).toBe('false')
+    );
+  });
+
+  // A link item is the link (Codex-a6ofh.2.6): one menu item, one tab
+  // stop, and a press follows it and closes the menu.
+  test('an href item is a link menu item that closes the menu', async () => {
+    const onOpenChange = vi.fn();
+    component = mount(DropdownMenuHarness, {
+      target: document.body,
+      props: { open: true, onOpenChange },
+    });
+    flushSync();
+
+    const link = document.querySelector<HTMLElement>(
+      '[data-testid="item-link"]'
+    );
+    expect(link?.tagName).toBe('A');
+    expect(link?.getAttribute('role')).toBe('menuitem');
+    expect(link?.getAttribute('href')).toBe('#drafts');
+    expect(document.querySelector('[data-testid="item-1"]')?.tagName).toBe(
+      'DIV'
+    );
+
+    link?.click();
+
+    const trigger = document.querySelector('[data-testid="dropdown-trigger"]');
+    await vi.waitFor(() =>
+      expect(trigger?.getAttribute('aria-expanded')).toBe('false')
+    );
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
   // Melt's own close put focus back on the trigger, whatever had it by
   // then. An item that opens a dialog had already handed focus to the
   // dialog: the trigger, behind the overlay, took it, focus-trap pulled it

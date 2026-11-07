@@ -5,6 +5,12 @@
  * portals it is in, and what only a live piece has on Settings.
  */
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import {
+  ACTIVE_ACCOUNT,
+  land,
+  myConnectSlot,
+  reset as resetSubscriptionRemote,
+} from '$lib/components/studio/__fixtures__/subscription-remote.mock.svelte';
 import type { ContentWithRelations } from '$lib/types';
 import * as m from '$paraglide/messages';
 import {
@@ -124,17 +130,27 @@ const connect = vi.hoisted(() => ({
   failure: null as unknown,
   refresh: vi.fn(async () => {}),
 }));
-vi.mock('$lib/remote/subscription.remote', () => ({
-  getMyConnectStatus: () =>
-    connect.failure
-      ? { current: undefined, error: connect.failure, refresh: connect.refresh }
-      : {
-          current: { chargesEnabled: true, payoutsEnabled: true },
-          error: undefined,
-          refresh: connect.refresh,
-        },
-  listTiers: () => ({ current: [], error: undefined, refresh: async () => {} }),
-}));
+vi.mock('$lib/remote/subscription.remote', async () => {
+  const kit = await import(
+    '$lib/components/studio/__fixtures__/subscription-remote.mock.svelte'
+  );
+  return {
+    // A kit-shaped slot set from `connect` when it is read, so a Try again
+    // can land its answer and the page follows.
+    getMyConnectStatus: () => {
+      const slot = kit.myConnectSlot();
+      slot.refresh = connect.refresh;
+      if (connect.failure) kit.fail(slot, connect.failure);
+      else kit.land(slot, kit.ACTIVE_ACCOUNT);
+      return slot;
+    },
+    listTiers: () => ({
+      current: [],
+      error: undefined,
+      refresh: async () => {},
+    }),
+  };
+});
 vi.mock('$lib/remote/categories.remote', () => ({
   getCategories: () => ({
     current: [],
@@ -306,6 +322,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   portals.uses = [];
   portals.failure = null;
+  resetSubscriptionRemote();
   connect.failure = null;
   stage.submitted = 0;
   nav.goto.mockResolvedValue(undefined);
@@ -563,6 +580,31 @@ describe('LiveEditor · Settings', () => {
     connect.refresh.mockClear();
     click(m.common_try_again());
     expect(connect.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  // The alert goes with its focused button: the news, and focus, land on a
+  // line that says what was found (Codex-a6ofh.2.6 review R4).
+  test.each([
+    ['set up', ACTIVE_ACCOUNT, () => m.studio_live_connect_checked()],
+    [
+      'not set up',
+      { ...ACTIVE_ACCOUNT, chargesEnabled: false, payoutsEnabled: false },
+      () => m.studio_content_form_access_payouts_hint(),
+    ],
+  ] as const)('a Try again that finds payouts %s says so, with focus', async (_found, account, words) => {
+    connect.failure = new Error('fetch failed');
+    connect.refresh.mockImplementationOnce(async () => {
+      land(myConnectSlot(), account);
+    });
+    render();
+    openTab(m.studio_live_tab_settings());
+    button(m.common_try_again())?.focus();
+    click(m.common_try_again());
+
+    await vi.waitFor(() =>
+      expect(document.activeElement?.getAttribute('role')).toBe('status')
+    );
+    expect(document.activeElement?.textContent?.trim()).toBe(words());
   });
 
   test('the link is locked: Change warns that old links stop working, then opens it', async () => {

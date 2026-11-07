@@ -5,6 +5,12 @@
  * sends anyway is listed by its code, or said in its own words.
  */
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import {
+  ACTIVE_ACCOUNT,
+  land,
+  myConnectSlot,
+  reset as resetSubscriptionRemote,
+} from '$lib/components/studio/__fixtures__/subscription-remote.mock.svelte';
 import type { ContentWithRelations } from '$lib/types';
 import * as m from '$paraglide/messages';
 import {
@@ -66,23 +72,40 @@ vi.mock('$lib/client/media-status.svelte', () => ({
 
 const connect = vi.hoisted(() => ({
   ready: true,
+  /** Not answered yet: no value, no failure. */
+  loading: false,
   failure: null as unknown,
   refresh: vi.fn(async () => {}),
 }));
-vi.mock('$lib/remote/subscription.remote', () => ({
-  getMyConnectStatus: () =>
-    connect.failure
-      ? { current: undefined, error: connect.failure, refresh: connect.refresh }
-      : {
-          current: {
-            chargesEnabled: connect.ready,
-            payoutsEnabled: connect.ready,
-          },
-          error: undefined,
-          refresh: connect.refresh,
-        },
-  listTiers: () => ({ current: [], error: undefined, refresh: async () => {} }),
-}));
+vi.mock('$lib/remote/subscription.remote', async () => {
+  const kit = await import(
+    '$lib/components/studio/__fixtures__/subscription-remote.mock.svelte'
+  );
+  return {
+    // A kit-shaped slot set from `connect` when it is read, so a Try again
+    // can land its answer and the step follows. The whole account shape
+    // `deriveConnectState` reads: without `isConnected` every read was "not
+    // set up" (Codex-a6ofh.2.6).
+    getMyConnectStatus: () => {
+      const slot = kit.myConnectSlot();
+      slot.refresh = connect.refresh;
+      if (connect.loading) return slot;
+      if (connect.failure) kit.fail(slot, connect.failure);
+      else
+        kit.land(slot, {
+          ...kit.ACTIVE_ACCOUNT,
+          chargesEnabled: connect.ready,
+          payoutsEnabled: connect.ready,
+        });
+      return slot;
+    },
+    listTiers: () => ({
+      current: [],
+      error: undefined,
+      refresh: async () => {},
+    }),
+  };
+});
 const categories = vi.hoisted(() => ({
   failure: null as unknown,
   create: vi.fn(),
@@ -207,6 +230,9 @@ function choose(kind: string) {
     `input[type="radio"][value="${kind}"]`
   );
   if (!radio) throw new Error(`no ${kind} option`);
+  // A choice the creator cannot make is never made for them (a disabled
+  // option hid the payouts mock's missing `isConnected`, Codex-a6ofh.2.6).
+  if (radio.disabled) throw new Error(`${kind} is not offered`);
   radio.checked = true;
   radio.dispatchEvent(new Event('change', { bubbles: true }));
   flushSync();
@@ -227,8 +253,12 @@ beforeEach(() => {
     title: 'Winter Light',
     durationSeconds: 1660,
   };
+  resetSubscriptionRemote();
   connect.ready = true;
+  connect.loading = false;
   connect.failure = null;
+  connect.refresh.mockReset();
+  connect.refresh.mockResolvedValue(undefined);
   media.failure = null;
   categories.failure = null;
   moving.to = null;
@@ -357,6 +387,10 @@ describe('PublishStep · who can watch', () => {
     expect(fix.map((link) => link.getAttribute('href'))).toEqual([
       '/studio/monetisation',
     ]);
+    expect(
+      document.querySelector<HTMLInputElement>('input[value="paid"]')?.disabled
+    ).toBe(true);
+    expect(publishButton()?.disabled).toBe(true);
   });
 
   test('going back to free clears the price', async () => {
@@ -565,7 +599,7 @@ describe('PublishStep · a read it checks by fails', () => {
 
   test('payouts, unread, are said and logged, never "nothing missing"', () => {
     connect.failure = outage;
-    render();
+    render(draft({ isFree: false, isPurchasable: true, priceCents: 1200 }));
     expect(text()).toContain(m.studio_publish_connect_unread());
     expect(text()).not.toContain(m.studio_publish_gaps_none());
     expect(told.error).toHaveBeenCalledWith(
@@ -579,6 +613,139 @@ describe('PublishStep · a read it checks by fails', () => {
       ?.querySelector('button');
     retry?.click();
     expect(connect.refresh).toHaveBeenCalled();
+  });
+
+  // The server's gate does not look for a free piece (`assertCreatorCanBePaid`).
+  test('a free piece does not wait on payouts never read', () => {
+    connect.failure = outage;
+    render();
+    expect(text()).not.toContain(m.studio_publish_connect_unread());
+    expect(text()).toContain(m.studio_publish_gaps_none());
+  });
+
+  // The status line leads with the count: the retry is said on its own line.
+  test("payouts' Try again is heard even with something else left", () => {
+    connect.failure = outage;
+    connect.refresh.mockImplementationOnce(() => new Promise<void>(() => {}));
+    render(draft({ isFree: false, isPurchasable: true, priceCents: 50 }));
+    [...document.querySelectorAll('.publish-gap--unread')][0]
+      ?.querySelector('button')
+      ?.click();
+    flushSync();
+
+    const heard = [...document.querySelectorAll('[role="status"]')].map(
+      (line) => line.textContent?.trim()
+    );
+    expect(heard).toContain(m.studio_publish_connect_retrying());
+    expect(
+      document.querySelector('.publish-status')?.textContent?.trim()
+    ).not.toBe(m.studio_publish_connect_retrying());
+  });
+
+  test('a piece that earns, with payouts set up, is ready', () => {
+    render(draft({ isFree: false, isPurchasable: true, priceCents: 1200 }));
+    expect(text()).toContain(m.studio_publish_gaps_none());
+    expect(text()).not.toContain(m.studio_publish_gap_payouts());
+    expect(
+      document.querySelector<HTMLInputElement>('input[value="paid"]')?.disabled
+    ).toBe(false);
+    expect(publishButton()?.disabled).toBe(false);
+  });
+
+  // The list says "Checking…" meanwhile; the checklist never says ready first.
+  test('payouts not read yet are said on screen, not only heard', () => {
+    connect.loading = true;
+    render(draft({ isFree: false, isPurchasable: true, priceCents: 1200 }));
+    const rows = [...document.querySelectorAll('.publish-gap--unread')].map(
+      (row) => row.textContent?.trim()
+    );
+    expect(rows).toEqual([m.studio_publish_connect_checking()]);
+  });
+
+  test('a piece that earns is never announced ready before payouts are read', () => {
+    connect.loading = true;
+    render(draft({ isFree: false, isPurchasable: true, priceCents: 1200 }));
+    expect(text()).not.toContain(m.studio_publish_gaps_none());
+    expect(document.querySelector('.publish-status')?.textContent?.trim()).toBe(
+      m.studio_publish_connect_checking()
+    );
+  });
+
+  test('a free piece does not wait for payouts to be read', () => {
+    connect.loading = true;
+    render();
+    expect(text()).toContain(m.studio_publish_gaps_none());
+  });
+
+  test("payouts' Try again says it is trying, then that it failed again", async () => {
+    connect.failure = outage;
+    let settle: () => void = () => {};
+    connect.refresh.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          settle = resolve;
+        })
+    );
+    render(draft({ isFree: false, isPurchasable: true, priceCents: 1200 }));
+    const retry = () =>
+      [...document.querySelectorAll('.publish-gap')]
+        .find((row) => row.classList.contains('publish-gap--unread'))
+        ?.querySelector('button');
+
+    retry()?.click();
+    flushSync();
+    expect(text()).toContain(m.studio_publish_connect_retrying());
+    expect(retry()?.getAttribute('aria-busy')).toBe('true');
+
+    settle();
+    await Promise.resolve();
+    await Promise.resolve();
+    flushSync();
+    expect(text()).toContain(m.studio_publish_connect_unread_again());
+  });
+
+  // The pressed row goes with what it read: focus goes to the checklist,
+  // whose status says what is left, unless the creator moved it meanwhile.
+  const unreadRetry = () =>
+    document
+      .querySelector('.publish-gap--unread')
+      ?.querySelector<HTMLButtonElement>('button');
+  // `tick()` waits a frame in async mode: the fake clock has to move.
+  const settled = async () => {
+    for (let turn = 0; turn < 5; turn++) await vi.advanceTimersByTimeAsync(20);
+  };
+
+  test("payouts' Try again that reads them puts focus on the checklist", async () => {
+    connect.failure = outage;
+    connect.refresh.mockImplementationOnce(async () => {
+      land(myConnectSlot(), ACTIVE_ACCOUNT);
+    });
+    render(draft({ isFree: false, isPurchasable: true, priceCents: 1200 }));
+    unreadRetry()?.focus();
+    unreadRetry()?.click();
+    await settled();
+
+    expect(text()).toContain(m.studio_publish_gaps_none());
+    expect(document.activeElement).toBe(
+      document.querySelector('.publish-gaps')
+    );
+  });
+
+  test("payouts' Try again leaves focus the creator moved meanwhile", async () => {
+    connect.failure = outage;
+    const field = () =>
+      document.querySelector<HTMLInputElement>('input[value="free"]');
+    connect.refresh.mockImplementationOnce(async () => {
+      field()?.focus();
+      land(myConnectSlot(), ACTIVE_ACCOUNT);
+    });
+    render(draft({ isFree: false, isPurchasable: true, priceCents: 1200 }));
+    unreadRetry()?.focus();
+    unreadRetry()?.click();
+    await settled();
+
+    expect(text()).toContain(m.studio_publish_gaps_none());
+    expect(document.activeElement).toBe(field());
   });
 
   test("categories, unread, are said in the fold's summary and logged", () => {

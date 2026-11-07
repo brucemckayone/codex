@@ -3,8 +3,11 @@
 
   Displays a compact data table of content items for studio content management.
   Shows title (linked to edit), type badge, status badge, created date, and actions.
+  A draft shows how far it has got and Continue, which opens the step still
+  to do (Codex-a6ofh.2.6); a live piece keeps its publish toggle and Edit.
 
   @prop {ContentWithRelations[]} items - Array of content items to display
+  @prop {PayoutsRead} payouts - The page's one payouts read, for each draft's step
 -->
 <script lang="ts">
   import type { ContentWithRelations } from '$lib/types';
@@ -14,12 +17,17 @@
   import { formatDate } from '$lib/utils/format';
   import { togglePublishStatus, type ContentStatus } from './publish-toggle';
   import Spinner from '$lib/components/ui/Feedback/Spinner/Spinner.svelte';
+  import DraftProgress from './content-list/DraftProgress.svelte';
+  import type { PayoutsRead } from '$lib/utils/connect-readiness';
+  import { draftProgress } from './content-list/draft-progress';
+  import { editHref } from './editor/editor-url';
 
   interface Props {
     items: ContentWithRelations[];
+    payouts: PayoutsRead;
   }
 
-  const { items }: Props = $props();
+  const { items, payouts }: Props = $props();
 
   let togglingId = $state<string | null>(null);
   let statusOverrides = $state<Record<string, string>>({});
@@ -93,11 +101,16 @@
       <tbody>
         {#each items as item (item.id)}
           {@const status = getItemStatus(item)}
+          {@const progress = status === 'draft' ? draftProgress(item, payouts) : null}
+          {@const href = progress?.href ?? editHref(item.id)}
           <tr class="row">
             <td class="cell-title">
-              <a href="/studio/content/{item.id}/edit" class="title-link">
+              <a {href} class="title-link">
                 {item.title}
               </a>
+              {#if progress}
+                <DraftProgress {progress} />
+              {/if}
             </td>
             <td>
               <span class="type-badge">{getTypeText(item.contentType)}</span>
@@ -110,24 +123,34 @@
             </td>
             <td class="cell-date">{formatDate(item.createdAt)}</td>
             <td class="cell-actions">
-              <button
-                type="button"
-                class="action-btn"
-                data-action={status === 'published' ? 'unpublish' : 'publish'}
-                disabled={togglingId === item.id}
-                onclick={() => handlePublishToggle(item)}
-              >
-                {#if togglingId === item.id}
-                  <Spinner size="sm" />
-                {:else if status === 'published'}
-                  {m.studio_content_form_unpublish()}
-                {:else}
-                  {m.studio_content_form_publish()}
-                {/if}
-              </button>
-              <a href="/studio/content/{item.id}/edit" class="action-edit">
-                {m.studio_content_edit()}
-              </a>
+              {#if progress}
+                <a
+                  {href}
+                  class="action-edit"
+                  aria-label={m.studio_drafts_continue_label({ title: item.title })}
+                >
+                  {m.studio_drafts_continue()}
+                </a>
+              {:else}
+                <button
+                  type="button"
+                  class="action-btn"
+                  data-action={status === 'published' ? 'unpublish' : 'publish'}
+                  disabled={togglingId === item.id}
+                  onclick={() => handlePublishToggle(item)}
+                >
+                  {#if togglingId === item.id}
+                    <Spinner size="sm" />
+                  {:else if status === 'published'}
+                    {m.studio_content_form_unpublish()}
+                  {:else}
+                    {m.studio_content_form_publish()}
+                  {/if}
+                </button>
+                <a {href} class="action-edit">
+                  {m.studio_content_edit()}
+                </a>
+              {/if}
             </td>
           </tr>
         {/each}
@@ -146,6 +169,12 @@
 
   .content-table {
     width: 100%;
+    /*
+     * The fixed columns alone are wider than a phone: below this the title,
+     * and a draft's progress under it, were crushed and clipped. Narrower,
+     * the table scrolls in its wrap.
+     */
+    min-inline-size: calc(var(--space-24) * 8);
     border-collapse: collapse;
     font-size: var(--text-sm);
   }
@@ -203,6 +232,10 @@
     max-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .cell-title :global(.draft-progress) {
+    margin-block-start: var(--space-1);
   }
 
   .title-link {

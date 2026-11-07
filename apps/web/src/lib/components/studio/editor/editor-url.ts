@@ -75,6 +75,11 @@ export function editorView(
   return { contentType, step: readEditorStep(url), liveTab: null };
 }
 
+/** A new piece of `type`, on the Write step: its row is made on the first thing added. */
+export function newContentHref(type: EditorContentType): string {
+  return `${CONTENT_LIST_HREF}/new?type=${type}`;
+}
+
 /**
  * What `/studio/content/new` starts: `?type=` (video when absent or not a
  * type), or the media from "Create content from this" (`?media=&type=`),

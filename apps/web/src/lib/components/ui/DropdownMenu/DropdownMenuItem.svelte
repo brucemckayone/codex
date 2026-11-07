@@ -7,8 +7,23 @@
 		children,
 		class: className,
 		disabled = false,
+		href,
+		keepOpen = false,
 		...rest
-	}: { children?: Snippet; class?: string; disabled?: boolean } & HTMLAttributes<HTMLDivElement> = $props();
+	}: {
+		children?: Snippet;
+		class?: string;
+		disabled?: boolean;
+		/**
+		 * A link item: the item is the link, so a press or Enter follows it
+		 * and the menu closes. Never wrap an item in `<a>`: the link, not the
+		 * item, then takes the menu's first focus, and Enter on it leaves
+		 * the menu open (Codex-a6ofh.2.6).
+		 */
+		href?: string;
+		/** A press leaves the menu open, as a Try again that reloads what it shows. */
+		keepOpen?: boolean;
+	} & HTMLAttributes<HTMLDivElement> = $props();
 
 	const {
 		elements: { item },
@@ -70,19 +85,40 @@
 			}
 		};
 	}
+
+	/**
+	 * A `keepOpen` press, by Melt's own rule: a click already prevented
+	 * moves the roving focus to the item and closes nothing, whatever
+	 * `closeOnItemClick` says. So the item keeps focus, and its `onclick`
+	 * still runs. Not for a link item: a prevented click is not followed.
+	 */
+	function holdOpen(node: HTMLElement) {
+		const onClick = (event: Event) => {
+			if (keepOpen) (event as CustomEvent<{ originalEvent: Event }>).detail?.originalEvent.preventDefault();
+		};
+		node.addEventListener('m-click', onClick);
+		return {
+			destroy() {
+				node.removeEventListener('m-click', onClick);
+			}
+		};
+	}
 </script>
 
-<div
+<svelte:element
+	this={href ? 'a' : 'div'}
+	{href}
 	{...$item}
 	use:item
 	use:rove
+	use:holdOpen
 	class="dropdown-item {className ?? ''}"
 	{...rest}
 	aria-disabled={disabled}
 	data-disabled={disabled ? '' : undefined}
 >
 	{@render children?.()}
-</div>
+</svelte:element>
 
 <style>
 	.dropdown-item {

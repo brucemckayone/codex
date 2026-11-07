@@ -83,16 +83,24 @@ export function publishGaps(facts: PublishFacts): PublishGap[] {
   ) {
     gaps.push('TIER_REQUIRED_TO_PUBLISH');
   }
-  if (
-    !facts.connectReady &&
-    requiresPayoutsToPublish({
-      priceCents: flags.priceCents,
-      isTierGated: flags.isTierGated ?? false,
-    })
-  ) {
+  if (!facts.connectReady && earnsByFlags(flags)) {
     gaps.push('CREATOR_CONNECT_REQUIRED');
   }
   return gaps;
+}
+
+/**
+ * Whether the flags a save sends earn, so the piece needs payouts to go live
+ * (the server's `requiresPayoutsToPublish`). Plans never read leave
+ * `isTierGated` out: not gated, here as on the server, which keeps its ticks.
+ */
+export function earnsByFlags(
+  flags: ReturnType<typeof accessGroupToFlags>
+): boolean {
+  return requiresPayoutsToPublish({
+    priceCents: flags.priceCents,
+    isTierGated: flags.isTierGated ?? false,
+  });
 }
 
 /** The field a change to which can put a refused gap right on the Publish step. */
