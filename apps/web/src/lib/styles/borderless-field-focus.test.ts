@@ -265,6 +265,18 @@ const OWN_CUE = (d: Declared): boolean =>
     (/^border(-[a-z]+)?(-color)?$/.test(d.property) &&
       FOCUS_TOKEN.test(d.value)));
 
+/**
+ * A rule that draws a border on the element it styles, on some side: what
+ * base.css's `[data-field-box]` rule can colour. A border set to none, 0,
+ * hidden or transparent draws nothing to colour.
+ */
+const DRAWS_BORDER = (d: Declared): boolean =>
+  /^border(-(top|right|bottom|left)|-(block|inline)(-(start|end))?)?$/.test(
+    d.property
+  ) &&
+  !/^(none|0(px)?|hidden)(\s|$)/.test(d.value) &&
+  !/\btransparent\b/.test(d.value);
+
 type Cue = 'box' | 'own' | 'none';
 
 /** Every borderless text field in one component, and the cue it keeps. */
@@ -283,9 +295,17 @@ function census(source: string): { field: string; cue: Cue }[] {
     const chain = [...around, field];
     if (!css.some((d) => BORDERLESS(d) && styles(d, chain))) continue;
     const boxes = chain.map((_, i) => chain.slice(0, i + 1));
+    // base.css's rule is `[data-field-box]:has(… :focus)`: it reaches a box
+    // AROUND the field, never the field itself, and only colours a border
+    // that box draws.
+    const box = around.some(
+      (el, i) =>
+        el.attrs.has('data-field-box') &&
+        css.some((d) => DRAWS_BORDER(d) && styles(d, around.slice(0, i + 1)))
+    );
     out.push({
       field: `<${field.name} class="${[...field.classes].join(' ')}">`,
-      cue: chain.some((el) => el.attrs.has('data-field-box'))
+      cue: box
         ? 'box'
         : css.some((d) => OWN_CUE(d) && boxes.some((c) => styles(d, c)))
           ? 'own'
@@ -332,6 +352,27 @@ describe('the gate reads a component as the browser draws it', () => {
         `<div class="row" data-field-box><input class="field" /></div>${style}`
       )
     ).toEqual([]);
+  });
+
+  it('does not pass a mark the base.css rule cannot reach or colour', () => {
+    // On the field itself: `:has()` only matches a box around it.
+    expect(
+      uncued(
+        `<div class="row"><input class="field" data-field-box /></div>${style}`
+      )
+    ).toEqual(['<input class="field">']);
+    // On a box around it that draws no border.
+    expect(
+      uncued(
+        `<section data-field-box><div class="row"><input class="field" /></div></section>${style}`
+      )
+    ).toEqual(['<input class="field">']);
+    // On a box whose border is turned off.
+    expect(
+      uncued(
+        `<div class="row" data-field-box><input class="field" /></div>${style.replace('.row { border-bottom: 1px solid var(--color-border); }', '.row { border: none; }')}`
+      )
+    ).toEqual(['<input class="field">']);
   });
 
   it('follows a snippet to where it is rendered', () => {
