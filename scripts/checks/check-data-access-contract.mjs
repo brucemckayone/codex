@@ -1,7 +1,4 @@
 #!/usr/bin/env node
-// This file's guidance text quotes source code that holds `${…}` (an sql``
-// template, a cookie string), so those plain strings are meant literally.
-// biome-ignore-all lint/suspicious/noTemplateCurlyInString: the strings quote source code
 /**
  * Data-access contract drift gate (Codex-ea1hd, WP9).
  *
@@ -483,9 +480,15 @@
  * The five collectors are exported so the accompanying `node --test` suite can
  * point them at fixture trees; `main()` runs only as the CLI entrypoint.
  */
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+} from 'node:fs';
 import { join, relative, sep } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 
@@ -1415,6 +1418,7 @@ export function formatNonDeterministicSqlGuidance() {
     '  query text is identical on every request and Hyperdrive can cache it:',
     '',
     '    const asOf = new Date();',
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the guidance quotes an sql`` template as text
     '    sql`... AND ${table.periodEnd} > ${asOf}`',
     '',
     '  WHY A PARAMETER AND NOT NOW(): Hyperdrive decides cacheability by TEXT-MATCHING',
@@ -1788,9 +1792,23 @@ function main() {
   );
 }
 
-if (
-  process.argv[1] &&
-  import.meta.url === pathToFileURL(process.argv[1]).href
-) {
-  main();
+/**
+ * Whether this file is the process's entry, so the self-test can import it
+ * without running main(). Compared as real paths: Node resolves
+ * import.meta.url through symlinks but not argv[1], so a plain comparison
+ * skipped main() under a symlinked path and exited 0 having checked nothing
+ * (Codex-noyrq).
+ */
+function isEntrypoint() {
+  if (!process.argv[1]) return false;
+  try {
+    return (
+      realpathSync(process.argv[1]) ===
+      realpathSync(fileURLToPath(import.meta.url))
+    );
+  } catch {
+    return false;
+  }
 }
+
+if (isEntrypoint()) main();
