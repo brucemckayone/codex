@@ -15,6 +15,7 @@ export {
 } from './brand-preview-bridge';
 // Brand Editor - CSS Injection
 export {
+  applyLayoutBrandInputs,
   clearTokenOverrides,
   // Codex-wwedk: per-theme dark tokenOverrides helpers (parallel to the
   // light versions). Used by the org layout SSR injection path.

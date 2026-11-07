@@ -3,6 +3,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  applyLayoutBrandInputs,
+  clearBrandVars,
   clearTokenOverrides,
   darkTokenOverridesToCssVars,
   injectBrandVars,
@@ -329,6 +331,130 @@ describe('clearTokenOverrides keeps what the org layout binds', () => {
     );
     expect(el.style.getPropertyValue('--color-interactive')).toBe('');
     expect(el.style.getPropertyValue('--brand-glass-tint')).toBe('');
+  });
+});
+
+// Codex-q01h8: leaving the brand studio stripped the org layout's brand vars
+// until a reload. Svelte re-sets a `style:` directive only when its value
+// changes, so the layout writes its inputs back itself when the editor closes.
+describe('applyLayoutBrandInputs writes the layout back after the editor', () => {
+  const saved: BrandEditorState = {
+    primaryColor: '#2563EB',
+    secondaryColor: null,
+    accentColor: null,
+    backgroundColor: null,
+    fontBody: null,
+    fontHeading: null,
+    radius: 0.5,
+    density: 1,
+    logoUrl: null,
+    tokenOverrides: {},
+    darkOverrides: null,
+    darkTokenOverrides: null,
+    heroLayout: 'default',
+  };
+  // What the layout binds for an org with a background and no fine-tune
+  // overrides: the case that lost its brand.
+  const inputs = {
+    '--brand-color': '#2563EB',
+    '--brand-bg': '#F5F0E8',
+    '--brand-density': '1',
+    '--brand-radius': '0.5rem',
+    '--brand-secondary': undefined,
+  };
+  const attributes = { 'data-org-brand': true, 'data-org-bg': true };
+
+  afterEach(() => {
+    for (const el of document.querySelectorAll('.org-layout')) el.remove();
+  });
+
+  function renderedLayout(): HTMLElement {
+    const el = document.createElement('div');
+    el.className = 'org-layout';
+    for (const [prop, value] of Object.entries(inputs)) {
+      if (value !== undefined) el.style.setProperty(prop, value);
+    }
+    el.setAttribute('data-org-brand', '');
+    el.setAttribute('data-org-bg', '');
+    document.body.appendChild(el);
+    return el;
+  }
+
+  it('restores every input and attribute the preview and the close took away', () => {
+    const el = renderedLayout();
+    // A preview with a background the nudge cannot measure drops data-org-bg.
+    injectBrandVars({
+      ...saved,
+      backgroundColor: 'rgb(30 30 46)',
+      secondaryColor: '#123456',
+    });
+    expect(el.hasAttribute('data-org-bg')).toBe(false);
+    clearBrandVars();
+    expect(el.style.getPropertyValue('--brand-color')).toBe('');
+    expect(el.style.getPropertyValue('--brand-radius')).toBe('');
+
+    applyLayoutBrandInputs(el, inputs, attributes);
+
+    expect(el.style.getPropertyValue('--brand-color')).toBe('#2563EB');
+    expect(el.style.getPropertyValue('--brand-bg')).toBe('#F5F0E8');
+    expect(el.style.getPropertyValue('--brand-density')).toBe('1');
+    expect(el.style.getPropertyValue('--brand-radius')).toBe('0.5rem');
+    expect(el.hasAttribute('data-org-brand')).toBe(true);
+    expect(el.hasAttribute('data-org-bg')).toBe(true);
+  });
+
+  it('removes an input the layout no longer binds, and an attribute it turns off', () => {
+    const el = renderedLayout();
+    el.style.setProperty('--brand-secondary', '#123456');
+
+    applyLayoutBrandInputs(el, inputs, { ...attributes, 'data-org-bg': false });
+
+    expect(el.style.getPropertyValue('--brand-secondary')).toBe('');
+    expect(el.hasAttribute('data-org-bg')).toBe(false);
+  });
+});
+
+describe('the org layout writes back every input it binds', () => {
+  const layout = readFileSync(
+    join(
+      dirname(fileURLToPath(import.meta.url)),
+      '../../routes/_org/[slug]/+layout.svelte'
+    ),
+    'utf8'
+  );
+  const directives = [...layout.matchAll(/style:(--[\w-]+)=\{([^}]*)\}/g)];
+  const record = layout.match(
+    /const brandInputVars = \$derived\(\{([\s\S]*?)\n {2}\}\);/
+  );
+  const recordKeys = [
+    ...(record?.[1] ?? '').matchAll(/^\s*'(--[\w-]+)':/gm),
+  ].map(([, key]) => key);
+
+  it('binds each style input from the one record, under its own name', () => {
+    expect(directives.length).toBeGreaterThan(0);
+    expect(
+      directives.filter(
+        ([, prop, value]) => value !== `brandInputVars['${prop}']`
+      )
+    ).toEqual([]);
+    expect([...recordKeys].sort()).toEqual(
+      directives.map(([, prop]) => prop).sort()
+    );
+  });
+
+  it('binds both brand attributes from the record it writes back', () => {
+    expect(layout).toContain(
+      "data-org-brand={brandInputAttributes['data-org-brand'] ? '' : undefined}"
+    );
+    expect(layout).toContain(
+      "data-org-bg={brandInputAttributes['data-org-bg'] ? '' : undefined}"
+    );
+  });
+
+  it('writes the record back whenever the editor is closed', () => {
+    expect(layout).toMatch(
+      /if \(!browser \|\| !brandEditor\.isClosed\) return;[\s\S]{0,200}applyLayoutBrandInputs\(el, brandInputVars, brandInputAttributes\)/
+    );
   });
 });
 

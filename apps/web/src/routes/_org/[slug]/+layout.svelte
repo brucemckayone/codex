@@ -28,7 +28,7 @@
   import '$lib/styles/tokens/font-fallbacks.css';
   import { withFallback } from '$lib/brand-editor/font-fallbacks';
   import { groundLuminanceVars, paintableColour } from '$lib/brand-editor/ground';
-  import { brandEditor, initBrandPreviewBridge, injectTokenOverrides, injectDarkTokenOverrides, clearTokenOverrides, parseDarkColorOverrides, tokenOverridesToCssVars, darkTokenOverridesToCssVars } from '$lib/brand-editor';
+  import { applyLayoutBrandInputs, brandEditor, initBrandPreviewBridge, injectTokenOverrides, injectDarkTokenOverrides, clearTokenOverrides, parseDarkColorOverrides, tokenOverridesToCssVars, darkTokenOverridesToCssVars } from '$lib/brand-editor';
   import { getStaleKeys, resolveStaleCacheTargets, updateStoredVersions } from '$lib/client/version-manifest';
   import { invalidateCollection, loadSubscriptionFromServer, subscriptionCollection } from '$lib/collections';
   import { initProgressSync, cleanupProgressSync, forceSync } from '$lib/collections/progress-sync';
@@ -127,6 +127,33 @@
     data.org ? { ...data.org, logoUrl: brandLogoUrl } : data.org
   );
   const hasBranding = $derived(!!brandPrimary);
+
+  // Every input this element binds with `style:`, and its two brand
+  // attributes, each in one place (Codex-q01h8). The markup renders them, and
+  // the effect after the token overrides writes them back whenever the brand
+  // editor is closed: its preview overwrote them, clearBrandVars removed them,
+  // and Svelte re-sets one only when its value changes.
+  const brandInputVars = $derived({
+    '--brand-color': brandPrimary,
+    '--brand-secondary': brandSecondary,
+    '--brand-accent': brandAccent,
+    '--brand-bg': brandBackground,
+    '--brand-color-dark': brandPrimaryDark,
+    '--brand-secondary-dark': brandSecondaryDark,
+    '--brand-accent-dark': brandAccentDark,
+    '--brand-bg-dark': brandBackgroundDark,
+    '--brand-ground-y': groundVars['--brand-ground-y'],
+    '--brand-ground-dark-y': groundVars['--brand-ground-dark-y'],
+    '--brand-density': brandDensity,
+    '--brand-radius': brandRadius,
+    '--brand-font-body': brandFontBody ? withFallback(brandFontBody, `'${brandFontBody}'`) : undefined,
+    '--brand-font-heading': brandFontHeading ? withFallback(brandFontHeading, `'${brandFontHeading}'`) : undefined,
+    '--brand-shader-logo-url': brandLogoUrl,
+  });
+  const brandInputAttributes = $derived({
+    'data-org-brand': hasBranding,
+    'data-org-bg': !!brandBackground,
+  });
 
   // Hero element visibility — reads from brand editor when open, server tokenOverrides otherwise.
   // Stored as tokenOverrides keys: 'hero-hide-stats', 'hero-hide-pills', etc.
@@ -249,6 +276,16 @@
     clearTokenOverrides(el);
     if (overrides) injectTokenOverrides(el, overrides);
     if (darkOverrides) injectDarkTokenOverrides(el, darkOverrides);
+  });
+
+  // Write this element's brand inputs back whenever the brand editor is
+  // closed (Codex-q01h8, see brandInputVars). Otherwise it repeats what the
+  // markup already set.
+  $effect(() => {
+    if (!browser || !brandEditor.isClosed) return;
+    const el = document.querySelector('.org-layout') as HTMLElement | null;
+    if (!el) return;
+    applyLayoutBrandInputs(el, brandInputVars, brandInputAttributes);
   });
 
   // Build Google Fonts URL from the brand's font families. An org that never
@@ -469,8 +506,8 @@
   class:org-layout--studio={isStudio}
   class:org-layout--kit-gallery={isKitGallery}
   class:org-layout--landing={isLanding}
-  data-org-brand={hasBranding ? '' : undefined}
-  data-org-bg={brandBackground ? '' : undefined}
+  data-org-brand={brandInputAttributes['data-org-brand'] ? '' : undefined}
+  data-org-bg={brandInputAttributes['data-org-bg'] ? '' : undefined}
   data-hero-layout={brandEditor.isOpen
     ? (brandEditor.pending?.heroLayout ?? 'default')
     : (data.org?.heroLayout ?? 'default')}
@@ -480,21 +517,21 @@
   data-hero-hide-logo={heroHideFlags.logo ? '' : undefined}
   data-hero-hide-title={heroHideFlags.title ? '' : undefined}
   data-hero-shader-active={hasShaderPreset ? '' : undefined}
-  style:--brand-color={brandPrimary}
-  style:--brand-secondary={brandSecondary}
-  style:--brand-accent={brandAccent}
-  style:--brand-bg={brandBackground}
-  style:--brand-color-dark={brandPrimaryDark}
-  style:--brand-secondary-dark={brandSecondaryDark}
-  style:--brand-accent-dark={brandAccentDark}
-  style:--brand-bg-dark={brandBackgroundDark}
-  style:--brand-ground-y={groundVars['--brand-ground-y']}
-  style:--brand-ground-dark-y={groundVars['--brand-ground-dark-y']}
-  style:--brand-density={brandDensity}
-  style:--brand-radius={brandRadius}
-  style:--brand-font-body={brandFontBody ? withFallback(brandFontBody, `'${brandFontBody}'`) : undefined}
-  style:--brand-font-heading={brandFontHeading ? withFallback(brandFontHeading, `'${brandFontHeading}'`) : undefined}
-  style:--brand-shader-logo-url={brandLogoUrl}
+  style:--brand-color={brandInputVars['--brand-color']}
+  style:--brand-secondary={brandInputVars['--brand-secondary']}
+  style:--brand-accent={brandInputVars['--brand-accent']}
+  style:--brand-bg={brandInputVars['--brand-bg']}
+  style:--brand-color-dark={brandInputVars['--brand-color-dark']}
+  style:--brand-secondary-dark={brandInputVars['--brand-secondary-dark']}
+  style:--brand-accent-dark={brandInputVars['--brand-accent-dark']}
+  style:--brand-bg-dark={brandInputVars['--brand-bg-dark']}
+  style:--brand-ground-y={brandInputVars['--brand-ground-y']}
+  style:--brand-ground-dark-y={brandInputVars['--brand-ground-dark-y']}
+  style:--brand-density={brandInputVars['--brand-density']}
+  style:--brand-radius={brandInputVars['--brand-radius']}
+  style:--brand-font-body={brandInputVars['--brand-font-body']}
+  style:--brand-font-heading={brandInputVars['--brand-font-heading']}
+  style:--brand-shader-logo-url={brandInputVars['--brand-shader-logo-url']}
   style={serverTokenOverrideStyle}
 >
   <!-- The page-load bar, mounted HERE so it inherits this element's brand remap

@@ -736,8 +736,10 @@ export function clearTokenOverrides(el: HTMLElement): void {
 }
 
 /**
- * Remove all brand editor CSS overrides, reverting to server-loaded values.
- * Called when the editor closes without saving.
+ * Remove all brand editor CSS overrides from the org layout, the layout's own
+ * bound inputs among them: the preview wrote those same properties. Called
+ * whenever the editor closes. The org layout then writes its inputs back
+ * (`applyLayoutBrandInputs`, Codex-q01h8).
  */
 export function clearBrandVars(): void {
   const el = getOrgLayoutElement();
@@ -749,6 +751,40 @@ export function clearBrandVars(): void {
 
   // Remove all token override CSS vars previously set (no exclusions — clear everything)
   removeOverrideVars(el);
+}
+
+/**
+ * Write the org layout's own brand inputs back onto its element (Codex-q01h8).
+ *
+ * The editor previews by setting the same inline properties and attributes
+ * the layout binds, and `clearBrandVars` removes them when it closes. Svelte
+ * re-sets a `style:` directive or an attribute only when its VALUE changes, so
+ * an input whose value had not changed stayed removed until a reload: the org
+ * lost its brand on every page after the studio. Only an org with fine-tune
+ * overrides escaped, because its `style` attribute changes on close and Svelte
+ * then rewrites the whole style. The layout calls this whenever the editor is
+ * closed, with every input it binds. An absent value is removed, as Svelte
+ * removes it.
+ */
+export function applyLayoutBrandInputs(
+  el: HTMLElement,
+  vars: Readonly<Record<string, string | undefined>>,
+  attributes: Readonly<Record<string, boolean>>
+): void {
+  for (const [prop, value] of Object.entries(vars)) {
+    if (value === undefined) {
+      el.style.removeProperty(prop);
+    } else {
+      el.style.setProperty(prop, value);
+    }
+  }
+  for (const [name, on] of Object.entries(attributes)) {
+    if (on) {
+      el.setAttribute(name, '');
+    } else {
+      el.removeAttribute(name);
+    }
+  }
 }
 
 /**
