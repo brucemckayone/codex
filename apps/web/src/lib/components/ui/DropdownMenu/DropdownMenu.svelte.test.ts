@@ -130,11 +130,15 @@ describe('DropdownMenu', () => {
     afterEach(() => {
       window.removeEventListener('focusin', record, true);
       visits.length = 0;
+      vi.restoreAllMocks();
     });
 
     // Window, capturing: focus-trap stops a stray focusin at the document.
-    function pressItem(testId: string) {
-      component = mount(DropdownMenuDialogHarness, { target: document.body });
+    function pressItem(testId: string, props: { forceVisible?: boolean } = {}) {
+      component = mount(DropdownMenuDialogHarness, {
+        target: document.body,
+        props,
+      });
       flushSync();
       window.addEventListener('focusin', record, true);
       document.querySelector<HTMLElement>(`[data-testid="${testId}"]`)?.click();
@@ -171,6 +175,9 @@ describe('DropdownMenu', () => {
 
       expect(dialog?.contains(document.activeElement)).toBe(true);
       expect(visits).not.toContain(trigger());
+      // Pins openFocus (G4-U3), its one write to the stand-in. jsdom's
+      // focus() never scrolls, so a closeFocus regression fails `visits`
+      // above, not this (review c6).
       expect(scrollTop).toBe(0);
     });
 
@@ -184,17 +191,32 @@ describe('DropdownMenu', () => {
     // on it. Melt's roving answered a millisecond later by taking tabindex 0
     // from whatever had focus by then: the dialog's buttons (review c5).
     test('the pointer leaving the pressed item takes no tab stop from the dialog', async () => {
-      pressItem('opens-dialog');
+      // forceVisible, as in the app: the menu stays through its outro, inert,
+      // and a browser's focus() refuses an inert node. jsdom keeps Svelte's
+      // `inert` as a plain property and focuses anything, so here focus()
+      // refuses a node under one, as a browser does.
+      const focus = HTMLElement.prototype.focus;
+      const inert = (el: HTMLElement | null): boolean =>
+        !!el && (el.inert || inert(el.parentElement));
+      vi.spyOn(HTMLElement.prototype, 'focus').mockImplementation(function (
+        this: HTMLElement,
+        options?: FocusOptions
+      ) {
+        if (!inert(this)) focus.call(this, options);
+      });
+      pressItem('opens-dialog', { forceVisible: true });
       const item = document.querySelector('[data-testid="opens-dialog"]');
       item?.dispatchEvent(mouse('pointerleave'));
       await happens(() =>
         expect(panel()?.contains(document.activeElement)).toBe(true)
       );
       await lingers();
-      // The menu has closed: a pointer still over what is left of it.
+      // The menu has closed: a pointer still over what is left of it,
+      // which its outro keeps in the DOM.
       await happens(() =>
         expect(trigger()?.getAttribute('aria-expanded')).toBe('false')
       );
+      expect(item?.isConnected).toBe(true);
       item?.dispatchEvent(mouse('pointermove'));
       await lingers();
 
